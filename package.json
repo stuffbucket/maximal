@@ -26,6 +26,7 @@
   ],
   "scripts": {
     "build": "tsdown",
+    "build:desktop": "tsdown --config tsdown.desktop.config.ts",
     "dev": "bun run --watch ./src/main.ts",
     "knip": "knip-bun",
     "lint": "eslint --cache",

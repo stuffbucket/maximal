@@ -11,6 +11,8 @@ export default defineConfig({
   clean: true,
   removeNodeProtocol: false,
 
+  noExternal: () => true,
+
   env: {
     NODE_ENV: "production",
   },

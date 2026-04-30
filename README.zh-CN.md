@@ -167,6 +167,16 @@ npx @jeffreycao/copilot-api@latest start --port 8080
 npx @jeffreycao/copilot-api@latest auth
 ```
 
+## Electron 桌面应用
+
+如果你更喜欢图形界面，仓库里还提供了位于 `desktop/` 的 Electron 桌面应用。它支持 GitHub Copilot 登录或手动填入 token，可以一键启动或停止本地代理，并在界面里直接查看本地端点、鉴权 Header、可用模型、额度和日志。
+
+设置页还可以配置 `OAuth App`、`API Home`、`Enterprise URL`、详细日志以及最小化到托盘。桌面安装包发布在 GitHub Releases：
+
+https://github.com/caozhiyuan/copilot-api/releases
+
+下载对应平台的安装包后，在应用内登录、选择端口并启动服务，再把你的客户端指向应用里显示的本地端点即可。
+
 ## 配合 Docker 使用
 
 构建镜像：

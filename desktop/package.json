@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "build:server": "npm --prefix .. run build",
+    "build:server": "npm --prefix .. run build:desktop",
     "preview": "electron-vite preview",
     "gen-icons": "rsvg-convert -w 1024 -h 1024 assets/tray-icon-colored.svg -o assets/icon.png",
     "package": "npm run build:server && electron-vite build && electron-builder",
