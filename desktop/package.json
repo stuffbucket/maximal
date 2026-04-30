@@ -60,6 +60,10 @@
       {
         "from": "assets/tray-iconTemplate@2x.png",
         "to": "tray-iconTemplate@2x.png"
+      },
+      {
+        "from": "assets/icon.png",
+        "to": "icon.png"
       }
     ],
     "mac": {
@@ -71,7 +75,12 @@
       "format": "ULFO"
     },
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico"
     },
     "linux": {
       "target": "AppImage"

@@ -117,6 +117,12 @@ function createTrayNativeImage(): Electron.NativeImage {
   return image
 }
 
+function getWindowIconPath(): string {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'icon.png')
+    : path.join(app.getAppPath(), 'assets', 'icon.png')
+}
+
 function showWindow(win: BrowserWindow): void {
   // Restore the Dock icon before showing the window on macOS.
   if (process.platform === 'darwin') {
@@ -191,6 +197,7 @@ function createWindow(): BrowserWindow {
       nodeIntegration: false
     },
     titleBarStyle: 'hiddenInset',
+    icon: process.platform === 'darwin' ? undefined : getWindowIconPath(),
     show: false
   })
 
