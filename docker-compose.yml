@@ -1,0 +1,53 @@
+# Two services:
+#   proxy  — caozhiyuan/copilot-api, talking to GHC Enterprise
+#   claude — Claude Code in a clean container, env-only auth, talks to proxy
+#
+# One-time setup:
+#   1. Run device flow once on the host:
+#        cd vendor/copilot-api && bun run ./src/main.ts auth --verbose
+#   2. Export the cached token for compose:
+#        export GH_TOKEN="$(cat ~/.local/share/copilot-api/github_token)"
+#      Or write it into a .env file next to this compose file.
+#
+# Bring up the proxy:
+#   docker compose up -d proxy
+#
+# Run Claude Code interactively against the proxy (mounts $PWD as /work):
+#   docker compose run --rm claude
+
+services:
+  proxy:
+    build: ./vendor/copilot-api
+    image: maximal-proxy:dev
+    container_name: maximal-proxy
+    restart: unless-stopped
+    ports:
+      - "4141:4141"
+    environment:
+      GH_TOKEN: ${GH_TOKEN:?set GH_TOKEN — see header of this file}
+      NODE_ENV: production
+    command: ["--account-type", "enterprise", "--port", "4141"]
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4141/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  claude:
+    build:
+      context: .
+      dockerfile: Dockerfile.claude
+    image: maximal-claude:dev
+    profiles: ["interactive"]
+    depends_on:
+      proxy:
+        condition: service_healthy
+    environment:
+      ANTHROPIC_BASE_URL: http://proxy:4141
+      ANTHROPIC_AUTH_TOKEN: anything
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4.5}
+    volumes:
+      - ${PWD}:/work
+    working_dir: /work
+    stdin_open: true
+    tty: true

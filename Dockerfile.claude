@@ -1,0 +1,13 @@
+# Minimal container that runs Claude Code with no /login state, so the
+# only auth path is whatever ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN /
+# ANTHROPIC_MODEL the caller injects. Pairs with docker-compose.yml.
+
+FROM node:20-slim
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git ca-certificates \
+ && rm -rf /var/lib/apt/lists/* \
+ && npm install -g @anthropic-ai/claude-code
+
+WORKDIR /work
+ENTRYPOINT ["claude"]
