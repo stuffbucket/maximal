@@ -29,7 +29,7 @@ import {
   translateToOpenAI,
 } from "./non-stream-translation"
 import { runAgentLoop } from "./web-tools-agent"
-import { defaultExecutor } from "./web-tools-executor"
+import { selectExecutor } from "./web-tools-executor"
 import { attachClientShims, type WebToolPolicy } from "./web-tools-rewriter"
 import { runStreamingAgent } from "./web-tools-stream"
 
@@ -68,11 +68,13 @@ export async function handleWithWebToolsAgent(args: WebToolsFlowArgs) {
     return translateToAnthropic(response)
   }
 
+  const executor = selectExecutor()
+
   if (!wantsStream) {
     const finalResponse = await runAgentLoop({
       initialPayload: payload,
       policy,
-      executor: defaultExecutor,
+      executor,
       callOnce,
     })
     return c.json(finalResponse)
@@ -87,6 +89,7 @@ export async function handleWithWebToolsAgent(args: WebToolsFlowArgs) {
       policy,
       stream,
       options,
+      executor,
     })
   })
 }

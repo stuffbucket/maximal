@@ -45,7 +45,7 @@ import {
   executeToolUse,
   type ExecOutcome,
 } from "./web-tools-exec"
-import { defaultExecutor, type Executor } from "./web-tools-executor"
+import { type Executor } from "./web-tools-executor"
 import { isWebToolName, type WebToolPolicy } from "./web-tools-rewriter"
 import { newRequestState, type RequestState } from "./web-tools-state"
 import { BLOCK_KIND, MAX_AGENT_TURNS, type ToolName } from "./web-tools-vocab"
@@ -54,6 +54,7 @@ interface StreamingAgentArgs {
   initialPayload: AnthropicMessagesPayload
   policy: WebToolPolicy
   stream: SSEStreamingApi
+  executor: Executor
   options: {
     requestId: string
     sessionId?: string
@@ -66,7 +67,7 @@ interface StreamingAgentArgs {
 export async function runStreamingAgent(
   args: StreamingAgentArgs,
 ): Promise<void> {
-  const executor = defaultExecutor
+  const { executor } = args
   const state = newRequestState(args.policy.declarations)
   const messages: Array<AnthropicMessage> = [...args.initialPayload.messages]
 
