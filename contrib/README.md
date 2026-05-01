@@ -13,18 +13,12 @@ secondary implementations to diff against:
 
 - **Different translation of the same Anthropic surface** (ollama)
 - **Different Copilot auth implementation** (opencode)
-- **The fork lineage** caozhiyuan came from (ericc-ch)
+
+If we need to inspect the fork lineage caozhiyuan came from, clone
+[ericc-ch/copilot-api](https://github.com/ericc-ch/copilot-api) on
+demand — it's a public MIT repo, ~6 months stale.
 
 ## Directory map
-
-### copilot-api-ericc/
-
-[ericc-ch/copilot-api](https://github.com/ericc-ch/copilot-api) (MIT,
-last push 2025-11-10, ~6 months stale). The original fork that
-caozhiyuan continued. Smaller surface area than caozhiyuan; useful for
-seeing which features are upstream-original vs. caozhiyuan additions.
-Reach for this when isolating which behavior to attribute to which
-maintainer.
 
 ### opencode-copilot/
 
