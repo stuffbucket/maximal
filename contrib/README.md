@@ -1,26 +1,10 @@
 # contrib/
 
-Read-only reference snapshots from related upstream projects. **Nothing in
-this directory is built or shipped** — it's documentation that informed
-the architecture. The live code lives in `vendor/copilot-api/`.
+Read-only reference snapshot. **Nothing in this directory is built or
+shipped** — it's documentation that informed the architecture. The live
+code lives in `vendor/copilot-api/`.
 
-## Why these are kept
-
-The proxy in `vendor/copilot-api/` is vendored from
-[caozhiyuan/copilot-api](https://github.com/caozhiyuan/copilot-api). When
-Copilot's API changes or quirks emerge, these references give us
-secondary implementations to diff against:
-
-- **Different translation of the same Anthropic surface** (ollama)
-- **Different Copilot auth implementation** (opencode)
-
-If we need to inspect the fork lineage caozhiyuan came from, clone
-[ericc-ch/copilot-api](https://github.com/ericc-ch/copilot-api) on
-demand — it's a public MIT repo, ~6 months stale.
-
-## Directory map
-
-### opencode-copilot/
+## opencode-copilot/
 
 How [sst/opencode](https://github.com/sst/opencode) does Copilot auth.
 
@@ -38,25 +22,6 @@ opencode is officially blessed by GitHub for Copilot integration
 (GitHub Changelog 2026-01-16), so its auth flow is the most-validated
 public reference. Use this as the **bug-fix oracle** when caozhiyuan's
 auth misbehaves: diff against this and bring fixes back across.
-
-### ollama-anthropic/
-
-Salient parts of [ollama/ollama](https://github.com/ollama/ollama)
-(MIT) showing how Ollama exposes an Anthropic-compatible endpoint.
-
-- `anthropic/anthropic.go`, `anthropic/trace.go` — Anthropic types and
-  translation to ollama's internal chat format.
-- `middleware/anthropic.go` — `/v1/messages` route, SSE, tool use,
-  stop reasons.
-- `docs/anthropic-compatibility.mdx` — what Anthropic surface is
-  supported.
-- `docs/claude-code.mdx` — how to point Claude Code at an
-  Anthropic-compatible server.
-
-Translation logic targets ollama's chat format (not OpenAI), so it's
-not directly portable. Keep it as a **wire-format spec** — when there's
-ambiguity about what Claude Code expects on the wire, this is a second
-implementation we can cross-check against.
 
 ## Refresh procedure
 
