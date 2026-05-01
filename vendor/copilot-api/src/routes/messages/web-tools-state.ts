@@ -8,6 +8,12 @@
  * Spec: docs/spec/web-tools.md, section "Implementation outline".
  */
 
+import type {
+  WebSearchToolDecl,
+  WebFetchToolDecl,
+  WebToolDecl,
+} from "./web-tools-types"
+
 import {
   TOOL_NAME,
   MAX_URL_LENGTH,
@@ -16,11 +22,6 @@ import {
   type WebSearchErrorCode,
   type WebFetchErrorCode,
 } from "./web-tools-vocab"
-import type {
-  WebSearchToolDecl,
-  WebFetchToolDecl,
-  WebToolDecl,
-} from "./web-tools-types"
 
 // ────────────────────────────────────────────────────────────────────
 // Per-request state.
@@ -43,11 +44,13 @@ export interface RequestState {
   }
 }
 
-export function newRequestState(declared: ReadonlyArray<WebToolDecl>): RequestState {
+export function newRequestState(
+  declared: ReadonlyArray<WebToolDecl>,
+): RequestState {
   const active: RequestState["active"] = {}
   for (const decl of declared) {
     if (decl.name === TOOL_NAME.webSearch) active[TOOL_NAME.webSearch] = decl
-    else if (decl.name === TOOL_NAME.webFetch) active[TOOL_NAME.webFetch] = decl
+    else active[TOOL_NAME.webFetch] = decl
   }
   return {
     active,
@@ -78,10 +81,7 @@ export type InterceptorState =
 
 export const IDLE: InterceptorState = { kind: "idle" }
 
-export function startBuffering(
-  id: string,
-  name: ToolName,
-): InterceptorState {
+export function startBuffering(id: string, name: ToolName): InterceptorState {
   return { kind: "buffering", tool: { id, name, partialJson: "" } }
 }
 
@@ -126,9 +126,9 @@ export function checkSearchPolicy(
   if (!decl) return { ok: false, code: "unavailable" }
 
   if (
-    typeof input !== "object" ||
-    input === null ||
-    typeof (input as { query?: unknown }).query !== "string"
+    typeof input !== "object"
+    || input === null
+    || typeof (input as { query?: unknown }).query !== "string"
   ) {
     return { ok: false, code: "invalid_input" }
   }
@@ -147,24 +147,20 @@ export function checkSearchPolicy(
   return { ok: true }
 }
 
-export function checkFetchPolicy(
-  state: RequestState,
+function parseFetchUrl(
   input: unknown,
-): PolicyResult<WebFetchErrorCode> {
-  const decl = state.active[TOOL_NAME.webFetch]
-  if (!decl) return { ok: false, code: "unavailable" }
-
+):
+  | { ok: true; url: string; parsed: URL }
+  | { ok: false; code: WebFetchErrorCode } {
   if (
-    typeof input !== "object" ||
-    input === null ||
-    typeof (input as { url?: unknown }).url !== "string"
+    typeof input !== "object"
+    || input === null
+    || typeof (input as { url?: unknown }).url !== "string"
   ) {
     return { ok: false, code: "invalid_input" }
   }
   const url = (input as { url: string }).url
-
   if (url.length > MAX_URL_LENGTH) return { ok: false, code: "url_too_long" }
-
   let parsed: URL
   try {
     parsed = new URL(url)
@@ -174,20 +170,41 @@ export function checkFetchPolicy(
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     return { ok: false, code: "invalid_input" }
   }
+  return { ok: true, url, parsed }
+}
+
+function checkDomainPolicy(
+  host: string,
+  decl: WebFetchToolDecl,
+): PolicyResult<WebFetchErrorCode> {
+  if (decl.blocked_domains?.length && hostMatches(host, decl.blocked_domains)) {
+    return { ok: false, code: "url_not_allowed" }
+  }
+  if (
+    decl.allowed_domains?.length
+    && !hostMatches(host, decl.allowed_domains)
+  ) {
+    return { ok: false, code: "url_not_allowed" }
+  }
+  return { ok: true }
+}
+
+export function checkFetchPolicy(
+  state: RequestState,
+  input: unknown,
+): PolicyResult<WebFetchErrorCode> {
+  const decl = state.active[TOOL_NAME.webFetch]
+  if (!decl) return { ok: false, code: "unavailable" }
+
+  const parsed = parseFetchUrl(input)
+  if (!parsed.ok) return parsed
 
   const maxUses = decl.max_uses ?? DEFAULT_MAX_USES.webFetch
   if (state.uses[TOOL_NAME.webFetch] >= maxUses) {
     return { ok: false, code: "max_uses_exceeded" }
   }
 
-  if (decl.blocked_domains?.length && hostMatches(parsed.hostname, decl.blocked_domains)) {
-    return { ok: false, code: "url_not_allowed" }
-  }
-  if (decl.allowed_domains?.length && !hostMatches(parsed.hostname, decl.allowed_domains)) {
-    return { ok: false, code: "url_not_allowed" }
-  }
-
-  return { ok: true }
+  return checkDomainPolicy(parsed.parsed.hostname, decl)
 }
 
 export function recordUse(state: RequestState, name: ToolName): void {

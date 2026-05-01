@@ -73,7 +73,9 @@ export type WebFetchServerToolUse = ServerToolUseBase<
   { url: string }
 >
 
-export type WebToolServerToolUse = WebSearchServerToolUse | WebFetchServerToolUse
+export type WebToolServerToolUse =
+  | WebSearchServerToolUse
+  | WebFetchServerToolUse
 
 // ────────────────────────────────────────────────────────────────────
 // Result blocks — what the proxy synthesizes and emits back into the
@@ -158,11 +160,11 @@ export type WebFetchToolResultBlock = WebFetchSuccessBlock | WebFetchErrorBlock
 // Combined unions for code that must dispatch on every web-tool block.
 // ────────────────────────────────────────────────────────────────────
 
-export type WebToolResultBlock = WebSearchToolResultBlock | WebFetchToolResultBlock
+export type WebToolResultBlock =
+  | WebSearchToolResultBlock
+  | WebFetchToolResultBlock
 
 // Compile-time exhaustiveness helper: assert all cases handled.
 export function assertExhaustive(value: never): never {
-  throw new Error(
-    `assertExhaustive: unhandled case ${JSON.stringify(value)}`,
-  )
+  throw new Error(`assertExhaustive: unhandled case ${JSON.stringify(value)}`)
 }
