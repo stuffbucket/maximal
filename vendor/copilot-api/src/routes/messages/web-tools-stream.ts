@@ -22,6 +22,7 @@ import type { SSEStreamingApi } from "hono/streaming"
 import type { CompactType } from "~/lib/compact"
 import type { SubagentMarker } from "~/lib/subagent"
 
+import { debugLazy } from "~/lib/logger"
 import {
   createChatCompletions,
   type ChatCompletionChunk,
@@ -68,6 +69,7 @@ export async function runStreamingAgent(
   args: StreamingAgentArgs,
 ): Promise<void> {
   const { executor } = args
+  const { logger } = args.options
   const state = newRequestState(args.policy.declarations)
   const messages: Array<AnthropicMessage> = [...args.initialPayload.messages]
 
@@ -76,7 +78,19 @@ export async function runStreamingAgent(
   let messageStartEmitted = false
   let bufferedFinalEvents: Array<AnthropicStreamEventData> = []
 
+  debugLazy(logger, () => [
+    "web-tools stream start",
+    JSON.stringify({
+      decls: args.policy.declarations.map((d) => d.name),
+      max_turns: MAX_AGENT_TURNS,
+    }),
+  ])
+
   for (let turn = 0; turn < MAX_AGENT_TURNS; turn++) {
+    debugLazy(logger, () => [
+      "web-tools stream turn",
+      JSON.stringify({ turn, msgs: messages.length }),
+    ])
     const turnPayload: AnthropicMessagesPayload = {
       ...args.initialPayload,
       messages,
@@ -108,6 +122,10 @@ export async function runStreamingAgent(
       )
       continue
     }
+    debugLazy(logger, () => [
+      "web-tools stream done",
+      JSON.stringify({ turns: turn + 1, stop_reason: turnResult.stopReason }),
+    ])
     break
   }
 
@@ -216,6 +234,7 @@ async function runOneStreamingTurn(args: TurnArgs): Promise<TurnResult> {
         outcomes,
         assistantContent,
         bufferedFinal,
+        logger: args.options.logger,
       })
       if (dispatched.stopReason !== undefined)
         stopReason = dispatched.stopReason
@@ -247,6 +266,7 @@ interface DispatchArgs {
   outcomes: Array<{ toolUse: AnthropicToolUseBlock; outcome: ExecOutcome }>
   assistantContent: Array<AnthropicAssistantContentBlock>
   bufferedFinal: Array<AnthropicStreamEventData>
+  logger: ConsolaInstance
 }
 
 async function dispatchEvent(
@@ -415,7 +435,19 @@ async function handleBlockStop(
       const narrowed = toolUseBlock as AnthropicToolUseBlock & {
         name: ToolName
       }
+      const t0 = Date.now()
       const outcome = await executeToolUse(narrowed, d.executor, d.state)
+      const ms = Date.now() - t0
+      debugLazy(d.logger, () => [
+        "web-tools outcome",
+        JSON.stringify({
+          tool: toolUseBlock.name,
+          id: toolUseBlock.id,
+          ok: outcome.ok,
+          ...(outcome.ok ? {} : { code: outcome.code }),
+          ms,
+        }),
+      ])
       d.outcomes.push({ toolUse: toolUseBlock, outcome })
 
       const resultIndex = d.cursor.next++

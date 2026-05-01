@@ -9,6 +9,10 @@
  * Spec: docs/spec/web-tools.md
  */
 
+import type { ConsolaInstance } from "consola"
+
+import { debugLazy } from "~/lib/logger"
+
 import type {
   AnthropicAssistantContentBlock,
   AnthropicMessage,
@@ -45,22 +49,42 @@ export interface AgentLoopArgs {
   policy: WebToolPolicy
   executor: Executor
   callOnce: (payload: AnthropicMessagesPayload) => Promise<AnthropicResponse>
+  /** Optional — when present, the loop emits debug-level traces matching
+   *  the cadence of api-flows.ts. Tests pass `undefined` to keep output
+   *  quiet. */
+  logger?: ConsolaInstance
 }
 
 export async function runAgentLoop(
   args: AgentLoopArgs,
 ): Promise<AnthropicResponse> {
-  const { initialPayload, policy, executor, callOnce } = args
+  const { initialPayload, policy, executor, callOnce, logger } = args
   const state = newRequestState(policy.declarations)
   const messages: Array<AnthropicMessage> = [...initialPayload.messages]
   const turns: Array<Turn> = []
 
   let last: AnthropicResponse | null = null
 
+  if (logger) {
+    debugLazy(logger, () => [
+      "web-tools agent start",
+      JSON.stringify({
+        decls: policy.declarations.map((d) => d.name),
+        max_turns: MAX_AGENT_TURNS,
+      }),
+    ])
+  }
+
   for (let i = 0; i < MAX_AGENT_TURNS; i++) {
     const turnPayload: AnthropicMessagesPayload = {
       ...initialPayload,
       messages,
+    }
+    if (logger) {
+      debugLazy(logger, () => [
+        "web-tools agent turn",
+        JSON.stringify({ turn: i, msgs: messages.length }),
+      ])
     }
     last = await callOnce(turnPayload)
 
@@ -68,6 +92,12 @@ export async function runAgentLoop(
     const ours = content.filter((block) => isOurToolUse(block))
 
     if (ours.length === 0 || last.stop_reason !== "tool_use") {
+      if (logger) {
+        debugLazy(logger, () => [
+          "web-tools agent done",
+          JSON.stringify({ turns: i + 1, stop_reason: last?.stop_reason }),
+        ])
+      }
       turns.push({ assistant: content, trips: [] })
       break
     }
@@ -76,7 +106,21 @@ export async function runAgentLoop(
     const toolResults: Array<AnthropicToolResultBlock> = []
     for (const block of content) {
       if (!isOurToolUse(block)) continue
+      const t0 = Date.now()
       const outcome = await executeToolUse(block, executor, state)
+      const ms = Date.now() - t0
+      if (logger) {
+        debugLazy(logger, () => [
+          "web-tools outcome",
+          JSON.stringify({
+            tool: block.name,
+            id: block.id,
+            ok: outcome.ok,
+            ...(outcome.ok ? {} : { code: outcome.code }),
+            ms,
+          }),
+        ])
+      }
       trips.push({ toolUseId: block.id, outcome })
       toolResults.push(buildToolResultMessage(block.id, outcome))
     }
@@ -87,6 +131,16 @@ export async function runAgentLoop(
       { role: "assistant", content },
       { role: "user", content: toolResults },
     )
+  }
+
+  if (logger && turns.length === MAX_AGENT_TURNS) {
+    const lastTurn = turns.at(-1)
+    if (lastTurn && lastTurn.trips.length > 0) {
+      debugLazy(logger, () => [
+        "web-tools agent ceiling",
+        JSON.stringify({ max: MAX_AGENT_TURNS }),
+      ])
+    }
   }
 
   return synthesizeFinalResponse(last as AnthropicResponse, turns)

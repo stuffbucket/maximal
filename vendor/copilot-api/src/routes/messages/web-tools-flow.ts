@@ -76,6 +76,7 @@ export async function handleWithWebToolsAgent(args: WebToolsFlowArgs) {
       policy,
       executor,
       callOnce,
+      logger: options.logger,
     })
     return c.json(finalResponse)
   }
