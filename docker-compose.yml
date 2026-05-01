@@ -2,12 +2,17 @@
 #   proxy  — caozhiyuan/copilot-api, talking to GHC Enterprise
 #   claude — Claude Code in a clean container, env-only auth, talks to proxy
 #
-# One-time setup:
-#   1. Run device flow once on the host:
-#        cd vendor/copilot-api && bun run ./src/main.ts auth --verbose
-#   2. Export the cached token for compose:
-#        export GH_TOKEN="$(cat ~/.local/share/copilot-api/github_token)"
-#      Or write it into a .env file next to this compose file.
+# One-time setup — run device flow once on the host, OR inside the
+# container with the auth volume mounted:
+#
+#   # On the host (fastest):
+#   cd vendor/copilot-api && bun install && bun run ./src/main.ts auth --verbose
+#
+#   # Or, in the container — no host bun needed:
+#   docker compose run --rm --entrypoint "bun run dist/main.js auth --verbose" proxy
+#
+# Either way the token lands at ~/.local/share/copilot-api/github_token on
+# the host, which the compose mounts read-only into the proxy container.
 #
 # Bring up the proxy:
 #   docker compose up -d proxy
@@ -24,9 +29,13 @@ services:
     ports:
       - "4141:4141"
     environment:
-      GH_TOKEN: ${GH_TOKEN:?set GH_TOKEN — see header of this file}
       NODE_ENV: production
-    command: ["--account-type", "enterprise", "--port", "4141"]
+    # Override caozhiyuan's entrypoint so it reads the cached token from
+    # disk (mounted below) instead of taking it via -g $GH_TOKEN.
+    entrypoint: ["bun", "run", "dist/main.js"]
+    command: ["start", "--account-type", "enterprise", "--port", "4141"]
+    volumes:
+      - ${HOME}/.local/share/copilot-api:/root/.local/share/copilot-api
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4141/"]
       interval: 30s
