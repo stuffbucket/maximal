@@ -2,6 +2,7 @@ import type { Context } from "hono"
 
 import type { Model } from "~/services/copilot/get-models"
 
+import { reverseId } from "~/lib/anthropic-id-rewrite"
 import { awaitApproval } from "~/lib/approval"
 import { COMPACT_REQUEST } from "~/lib/compact"
 import { getSmallModel, isMessagesApiEnabled } from "~/lib/config"
@@ -34,6 +35,11 @@ export async function handleCompletion(c: Context) {
 
   const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
   debugJson(logger, "Anthropic request payload:", anthropicPayload)
+
+  // Reverse the dash-date sentinel form (added by /v1/models for Claude
+  // Desktop's normalizer) back to Copilot's original dot-form before any
+  // model lookup happens.
+  anthropicPayload.model = reverseId(anthropicPayload.model)
 
   sanitizeIdeTools(anthropicPayload)
 

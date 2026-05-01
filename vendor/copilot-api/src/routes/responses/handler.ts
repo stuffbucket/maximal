@@ -2,6 +2,7 @@ import type { Context } from "hono"
 
 import { streamSSE } from "hono/streaming"
 
+import { reverseId } from "~/lib/anthropic-id-rewrite"
 import { awaitApproval } from "~/lib/approval"
 import { getConfig, isResponsesApiWebSearchEnabled } from "~/lib/config"
 import { createHandlerLogger, debugJson, debugJsonTail } from "~/lib/logger"
@@ -30,6 +31,10 @@ export const handleResponses = async (c: Context) => {
 
   const payload = await c.req.json<ResponsesPayload>()
   debugJson(logger, "Responses request payload:", payload)
+
+  // Reverse the dash-date sentinel form (added by /v1/models for Claude
+  // Desktop's normalizer) back to Copilot's original dot-form before lookup.
+  payload.model = reverseId(payload.model)
 
   // not support subagent marker for now , set sessionId = getUUID(requestId)
   const requestId = generateRequestIdFromPayload({ messages: payload.input })

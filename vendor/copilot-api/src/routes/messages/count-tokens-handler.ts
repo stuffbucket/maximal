@@ -2,6 +2,7 @@ import type { Context } from "hono"
 
 import consola from "consola"
 
+import { reverseId } from "~/lib/anthropic-id-rewrite"
 import { getAnthropicApiKey, getClaudeTokenMultiplier } from "~/lib/config"
 import { getTokenCount } from "~/lib/tokenizer"
 
@@ -64,6 +65,11 @@ async function countTokensViaAnthropic(
 export async function handleCountTokens(c: Context) {
   try {
     const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
+
+    // Reverse the dash-date sentinel form (added by /v1/models for Claude
+    // Desktop's normalizer) back to Copilot's original dot-form before any
+    // model lookup happens.
+    anthropicPayload.model = reverseId(anthropicPayload.model)
 
     // Try Anthropic's real endpoint first (Claude models only)
     const anthropicResult = await countTokensViaAnthropic(c, anthropicPayload)
