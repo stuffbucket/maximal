@@ -24,6 +24,8 @@ import {
   stripToolReferenceTurnBoundary,
 } from "./preprocess"
 import { parseSubagentMarkerFromFirstUser } from "./subagent-marker"
+import { handleWithWebToolsAgent } from "./web-tools-flow"
+import { splitWebTools } from "./web-tools-rewriter"
 
 const logger = createHandlerLogger("messages-handler")
 
@@ -34,6 +36,14 @@ export async function handleCompletion(c: Context) {
   debugJson(logger, "Anthropic request payload:", anthropicPayload)
 
   sanitizeIdeTools(anthropicPayload)
+
+  // Detect Anthropic-server-side web tools (web_search_20250305,
+  // web_fetch_20250910). Copilot rejects these tool types; the agent
+  // flow strips them, substitutes client-side shims, and drives a
+  // multi-turn loop synthesizing the server-side result blocks back to
+  // the client. Splitting before the rest of preprocessing means later
+  // steps see only the cleaned tools list.
+  const webToolPolicy = splitWebTools(anthropicPayload)
 
   const subagentMarker = parseSubagentMarkerFromFirstUser(anthropicPayload)
   if (subagentMarker) {
@@ -79,6 +89,15 @@ export async function handleCompletion(c: Context) {
 
   const selectedModel = findEndpointModel(anthropicPayload.model)
   anthropicPayload.model = selectedModel?.id ?? anthropicPayload.model
+
+  if (webToolPolicy.declarations.length > 0) {
+    return await handleWithWebToolsAgent({
+      c,
+      payload: anthropicPayload,
+      options: { subagentMarker, requestId, sessionId, compactType, logger },
+      policy: webToolPolicy,
+    })
+  }
 
   if (shouldUseMessagesApi(selectedModel)) {
     return await handleWithMessagesApi(c, anthropicPayload, {
