@@ -12,6 +12,13 @@ import type {
 import { getProviderConfig, type ResolvedProviderConfig } from "~/lib/config"
 import { HTTPError } from "~/lib/error"
 import { createHandlerLogger, debugJson } from "~/lib/logger"
+import {
+  createProviderTokenUsageRecorder,
+  mergeAnthropicUsage,
+  normalizeAnthropicUsage,
+  type UsageTokens,
+} from "~/lib/token-usage"
+import { parseUserIdMetadata } from "~/lib/utils"
 import { forwardProviderMessages } from "~/services/providers/anthropic-proxy"
 
 const logger = createHandlerLogger("provider-messages-handler")
@@ -57,53 +64,22 @@ export async function handleProviderMessages(c: Context): Promise<Response> {
       Boolean(payload.stream) && contentType.includes("text/event-stream")
 
     if (isStreamingResponse) {
-      logger.debug("provider.messages.streaming")
-      return streamSSE(c, async (stream) => {
-        for await (const chunk of events(upstreamResponse)) {
-          logger.debug("provider.messages.raw_stream_event:", chunk.data)
-          const eventName = chunk.event
-          if (eventName === "ping") {
-            await stream.writeSSE({ event: "ping", data: '{"type":"ping"}' })
-            continue
-          }
-
-          let data = chunk.data
-          if (!data) {
-            continue
-          }
-
-          if (chunk.data === "[DONE]") {
-            break
-          }
-
-          try {
-            const parsed = JSON.parse(data) as AnthropicStreamEventData
-            if (parsed.type === "message_start") {
-              adjustInputTokens(providerConfig, parsed.message.usage)
-            } else if (parsed.type === "message_delta") {
-              adjustInputTokens(providerConfig, parsed.usage)
-            }
-            data = JSON.stringify(parsed)
-          } catch (error) {
-            logger.error("provider.messages.streaming.adjust_tokens_error", {
-              error,
-              originalData: data,
-            })
-          }
-          await stream.writeSSE({
-            event: eventName,
-            data,
-          })
-        }
+      return streamProviderMessages({
+        c,
+        payload,
+        provider,
+        providerConfig,
+        upstreamResponse,
       })
     }
 
     const jsonBody = (await upstreamResponse.json()) as AnthropicResponse
-
-    adjustInputTokens(providerConfig, jsonBody.usage)
-
-    debugJson(logger, "provider.messages.no_stream result:", jsonBody)
-    return c.json(jsonBody)
+    return respondProviderMessagesJson(c, {
+      body: jsonBody,
+      payload,
+      provider,
+      providerConfig,
+    })
   } catch (error) {
     logger.error("provider.messages.error", {
       provider,
@@ -112,6 +88,117 @@ export async function handleProviderMessages(c: Context): Promise<Response> {
     throw error
   }
 }
+
+const streamProviderMessages = ({
+  c,
+  payload,
+  provider,
+  providerConfig,
+  upstreamResponse,
+}: {
+  c: Context
+  payload: AnthropicMessagesPayload
+  provider: string
+  providerConfig: ResolvedProviderConfig
+  upstreamResponse: Response
+}): Response => {
+  logger.debug("provider.messages.streaming")
+  const recordUsage = createProviderMessagesUsageRecorder(payload, provider)
+  return streamSSE(c, async (stream) => {
+    let usage: UsageTokens = {}
+
+    for await (const chunk of events(upstreamResponse)) {
+      logger.debug("provider.messages.raw_stream_event:", chunk.data)
+      const eventName = chunk.event
+      if (eventName === "ping") {
+        await stream.writeSSE({ event: "ping", data: '{"type":"ping"}' })
+        continue
+      }
+
+      let data = chunk.data
+      if (!data) {
+        continue
+      }
+
+      if (chunk.data === "[DONE]") {
+        break
+      }
+
+      const parsed = parseProviderStreamEvent(data, providerConfig)
+      if (parsed) {
+        usage = mergeAnthropicUsage(usage, parsed.usage)
+        data = parsed.data
+      }
+
+      await stream.writeSSE({
+        event: eventName,
+        data,
+      })
+    }
+
+    recordUsage(usage)
+  })
+}
+
+const parseProviderStreamEvent = (
+  data: string,
+  providerConfig: ResolvedProviderConfig,
+): { data: string; model?: string; usage: UsageTokens } | null => {
+  try {
+    const parsed = JSON.parse(data) as AnthropicStreamEventData
+    if (parsed.type === "message_start") {
+      adjustInputTokens(providerConfig, parsed.message.usage)
+      return {
+        data: JSON.stringify(parsed),
+        model: parsed.message.model,
+        usage: normalizeAnthropicUsage(parsed.message.usage),
+      }
+    }
+    if (parsed.type === "message_delta") {
+      adjustInputTokens(providerConfig, parsed.usage)
+      return {
+        data: JSON.stringify(parsed),
+        usage: normalizeAnthropicUsage(parsed.usage),
+      }
+    }
+    return { data: JSON.stringify(parsed), usage: {} }
+  } catch (error) {
+    logger.error("provider.messages.streaming.adjust_tokens_error", {
+      error,
+      originalData: data,
+    })
+    return null
+  }
+}
+
+const respondProviderMessagesJson = (
+  c: Context,
+  options: {
+    body: AnthropicResponse
+    payload: AnthropicMessagesPayload
+    provider: string
+    providerConfig: ResolvedProviderConfig
+  },
+): Response => {
+  const { body, payload, provider, providerConfig } = options
+  const recordUsage = createProviderMessagesUsageRecorder(payload, provider)
+  adjustInputTokens(providerConfig, body.usage)
+  recordUsage(normalizeAnthropicUsage(body.usage))
+
+  debugJson(logger, "provider.messages.no_stream result:", body)
+  return c.json(body)
+}
+
+const createProviderMessagesUsageRecorder = (
+  payload: AnthropicMessagesPayload,
+  provider: string,
+) =>
+  createProviderTokenUsageRecorder({
+    endpoint: "provider_messages",
+    model: payload.model,
+    providerName: provider,
+    sessionId: parseUserIdMetadata(payload.metadata?.user_id).sessionId,
+  })
 
 const adjustInputTokens = (
   providerConfig: ResolvedProviderConfig,

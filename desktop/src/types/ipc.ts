@@ -26,6 +26,66 @@ export interface ServerAuthInfo {
   headerValue?: string
 }
 
+export type TokenUsagePeriod = 'day' | 'week' | 'month'
+
+export interface TokenUsageTotals {
+  request_count: number
+  input_tokens: number
+  output_tokens: number
+  cache_read_input_tokens: number
+  cache_creation_input_tokens: number
+  total_tokens: number
+}
+
+export interface TokenUsageModelSummary extends TokenUsageTotals {
+  model: string
+}
+
+export interface TokenUsageSummary {
+  period: TokenUsagePeriod
+  range: {
+    start_ms: number
+    end_ms: number
+    start_utc: string
+    end_utc: string
+  }
+  totals: TokenUsageTotals
+  byModel: TokenUsageModelSummary[]
+}
+
+export interface TokenUsageEventRecord {
+  id: number
+  created_at_ms: number
+  created_at_utc: string
+  trace_id: string
+  session_id: string
+  user_id: string
+  source: 'copilot' | 'provider'
+  endpoint: string
+  provider_name: string | null
+  model: string
+  input_tokens: number
+  output_tokens: number
+  cache_read_input_tokens: number
+  cache_creation_input_tokens: number
+  total_tokens: number
+}
+
+export interface TokenUsageEventsPage {
+  items: TokenUsageEventRecord[]
+  page: number
+  page_size: number
+  period: TokenUsagePeriod
+  range: {
+    start_ms: number
+    end_ms: number
+    start_utc: string
+    end_utc: string
+  }
+  total: number
+  total_pages: number
+}
+
 export interface DesktopSettings {
   apiHome: string
   oauthApp: 'default' | 'opencode'
@@ -53,6 +113,8 @@ declare global {
       openUrl: (url: string) => Promise<void>
       fetchUsage: () => Promise<unknown>
       fetchModels: () => Promise<unknown>
+      fetchTokenUsage: (period: TokenUsagePeriod) => Promise<unknown>
+      fetchTokenUsageEvents: (period: TokenUsagePeriod, page: number, pageSize: number) => Promise<unknown>
       getServerAuthInfo: () => Promise<ServerAuthInfo>
       getLogs: () => Promise<string[]>
       onAuthSuccess: (callback: (result: AuthResult) => void) => () => void

@@ -2,7 +2,15 @@ import { useState, useEffect, useRef } from 'react'
 
 import Header from '../components/Header'
 import { useLanguage } from '../contexts/LanguageContext'
-import type { ServerAuthInfo } from '../types/ipc'
+import type {
+  ServerAuthInfo,
+  TokenUsageEventRecord,
+  TokenUsageEventsPage,
+  TokenUsageModelSummary,
+  TokenUsagePeriod,
+  TokenUsageSummary,
+  TokenUsageTotals
+} from '../types/ipc'
 
 interface DashboardPageProps {
   username: string
@@ -32,6 +40,19 @@ interface Model {
   [key: string]: unknown
 }
 
+type TranslateFn = ReturnType<typeof useLanguage>['t']
+type DashboardTab = 'dashboard' | 'tokenUsage' | 'logs'
+
+const numberFormatter = new Intl.NumberFormat()
+const eventTimeFormatter = new Intl.DateTimeFormat(undefined, {
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  month: '2-digit',
+  second: '2-digit'
+})
+const TOKEN_USAGE_EVENTS_PAGE_SIZE = 10
+
 function calcUsedPct(q: QuotaDetail): number {
   if (q.unlimited || q.entitlement === 0) return 0
   const used = q.entitlement - q.quota_remaining
@@ -59,6 +80,24 @@ function maskSecret(value: string): string {
   return `${value.slice(0, 4)}********${value.slice(-4)}`
 }
 
+function formatTokenCount(value: number): string {
+  return numberFormatter.format(Math.max(0, Math.floor(value)))
+}
+
+function calcTokenTotal(tokens: TokenUsageTotals): number {
+  return tokens.total_tokens
+}
+
+function formatEventTime(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '—'
+  return eventTimeFormatter.format(new Date(value))
+}
+
+function formatCellText(value: string | null | undefined): string {
+  const text = value?.trim()
+  return text ? text : '—'
+}
+
 export default function DashboardPage({ username, defaultPort, onLogout }: DashboardPageProps) {
   const { t } = useLanguage()
   const [started, setStarted] = useState(false)
@@ -67,17 +106,25 @@ export default function DashboardPage({ username, defaultPort, onLogout }: Dashb
   const [startError, setStartError] = useState('')
   const [stopping, setStopping] = useState(false)
 
-  const [tab, setTab] = useState<'dashboard' | 'logs'>('dashboard')
+  const [tab, setTab] = useState<DashboardTab>('dashboard')
   const [usage, setUsage] = useState<UsageInfo | null>(null)
+  const [tokenUsage, setTokenUsage] = useState<TokenUsageSummary | null>(null)
+  const [tokenUsageEvents, setTokenUsageEvents] = useState<TokenUsageEventsPage | null>(null)
+  const [tokenUsageEventsPage, setTokenUsageEventsPage] = useState(1)
+  const [tokenUsagePeriod, setTokenUsagePeriod] = useState<TokenUsagePeriod>('day')
   const [models, setModels] = useState<Model[]>([])
   const [serverAuthInfo, setServerAuthInfo] = useState<ServerAuthInfo>({ enabled: false })
   const [loading, setLoading] = useState(false)
+  const [tokenUsageLoading, setTokenUsageLoading] = useState(false)
+  const [tokenUsageEventsLoading, setTokenUsageEventsLoading] = useState(false)
   const [serverError, setServerError] = useState('')
   const [copied, setCopied] = useState<string>('')
 
   const [logs, setLogs] = useState<string[]>([])
   const logEndRef = useRef<HTMLDivElement>(null)
   const intentionalStop = useRef(false)
+  const tokenUsageRequestId = useRef(0)
+  const tokenUsageEventsRequestId = useRef(0)
 
   const portNum = parseInt(port, 10)
   const openaiUrl = `http://localhost:${portNum}/v1`
@@ -117,9 +164,12 @@ export default function DashboardPage({ username, defaultPort, onLogout }: Dashb
     }
   }, [logs, tab, started, startError, serverError])
 
-  // Fetch data after the server starts.
+  // Fetch dashboard and token usage data after the server starts.
   useEffect(() => {
-    if (started) fetchData()
+    if (started) {
+      void fetchData()
+      void fetchTokenUsageData(tokenUsagePeriod, tokenUsageEventsPage)
+    }
   }, [started])
 
   useEffect(() => {
@@ -165,6 +215,11 @@ export default function DashboardPage({ username, defaultPort, onLogout }: Dashb
     setStopping(false)
     setStarted(false)
     setUsage(null)
+    setTokenUsage(null)
+    setTokenUsageEvents(null)
+    setTokenUsageEventsPage(1)
+    setTokenUsageLoading(false)
+    setTokenUsageEventsLoading(false)
     setModels([])
     setServerError('')
   }
@@ -195,6 +250,69 @@ export default function DashboardPage({ username, defaultPort, onLogout }: Dashb
     }
   }
 
+  const fetchTokenUsageEvents = async (period: TokenUsagePeriod, page: number) => {
+    const requestId = ++tokenUsageEventsRequestId.current
+    setTokenUsageEventsLoading(true)
+    try {
+      const tokenUsageEventsData = await window.electronAPI.fetchTokenUsageEvents(
+        period,
+        page,
+        TOKEN_USAGE_EVENTS_PAGE_SIZE
+      )
+      if (requestId === tokenUsageEventsRequestId.current && tokenUsageEventsData) {
+        setTokenUsageEvents(tokenUsageEventsData as TokenUsageEventsPage)
+      }
+    } catch {
+      // The server may still be initializing.
+    } finally {
+      if (requestId === tokenUsageEventsRequestId.current) {
+        setTokenUsageEventsLoading(false)
+      }
+    }
+  }
+
+  const fetchTokenUsageData = async (
+    period: TokenUsagePeriod = tokenUsagePeriod,
+    page: number = tokenUsageEventsPage
+  ) => {
+    const requestId = ++tokenUsageRequestId.current
+    const eventsRequestId = ++tokenUsageEventsRequestId.current
+    setTokenUsageLoading(true)
+    setTokenUsageEventsLoading(true)
+    try {
+      const [tokenUsageData, tokenUsageEventsData] = await Promise.all([
+        window.electronAPI.fetchTokenUsage(period),
+        window.electronAPI.fetchTokenUsageEvents(period, page, TOKEN_USAGE_EVENTS_PAGE_SIZE)
+      ])
+      if (requestId === tokenUsageRequestId.current && tokenUsageData) {
+        setTokenUsage(tokenUsageData as TokenUsageSummary)
+      }
+      if (eventsRequestId === tokenUsageEventsRequestId.current && tokenUsageEventsData) {
+        setTokenUsageEvents(tokenUsageEventsData as TokenUsageEventsPage)
+      }
+    } catch {
+      // The server may still be initializing.
+    } finally {
+      if (requestId === tokenUsageRequestId.current) {
+        setTokenUsageLoading(false)
+      }
+      if (eventsRequestId === tokenUsageEventsRequestId.current) {
+        setTokenUsageEventsLoading(false)
+      }
+    }
+  }
+
+  const handleTokenUsagePeriodChange = (nextPeriod: TokenUsagePeriod) => {
+    setTokenUsagePeriod(nextPeriod)
+    setTokenUsageEventsPage(1)
+    if (started) void fetchTokenUsageData(nextPeriod, 1)
+  }
+
+  const handleTokenUsageEventsPageChange = (nextPage: number) => {
+    setTokenUsageEventsPage(nextPage)
+    if (started) void fetchTokenUsageEvents(tokenUsagePeriod, nextPage)
+  }
+
   const handleCopy = (text: string, key: string) => {
     navigator.clipboard.writeText(text).then(() => {
       setCopied(key)
@@ -220,6 +338,11 @@ export default function DashboardPage({ username, defaultPort, onLogout }: Dashb
       ? '∞'
       : `${Math.floor(premiumQ.entitlement - premiumQ.quota_remaining)} / ${Math.floor(premiumQ.entitlement)}`
     : '—'
+  const dashboardTabs: Array<{ key: DashboardTab; label: string }> = [
+    { key: 'dashboard', label: t('dashboard.tabDashboard') },
+    { key: 'tokenUsage', label: t('dashboard.tabTokenUsage') },
+    { key: 'logs', label: t('dashboard.tabLogs') }
+  ]
 
   return (
     <div className="flex flex-col h-screen bg-white">
@@ -240,17 +363,17 @@ export default function DashboardPage({ username, defaultPort, onLogout }: Dashb
       {/* Tabs shown only while the server is running */}
       {started && (
         <div className="flex px-4 bg-white border-b border-slate-100 shrink-0">
-          {(['dashboard', 'logs'] as const).map(tabKey => (
+          {dashboardTabs.map(tabItem => (
             <button
-              key={tabKey}
-              onClick={() => setTab(tabKey)}
+              key={tabItem.key}
+              onClick={() => setTab(tabItem.key)}
               className={`px-3 py-2 text-[13px] border-b-2 transition-colors ${
-                tab === tabKey
+                tab === tabItem.key
                   ? 'font-semibold text-[#0f172a] border-[#0f172a]'
                   : 'text-slate-400 border-transparent hover:text-slate-600'
               }`}
             >
-              {tabKey === 'dashboard' ? t('dashboard.tabDashboard') : t('dashboard.tabLogs')}
+              {tabItem.label}
             </button>
           ))}
         </div>
@@ -425,6 +548,25 @@ export default function DashboardPage({ username, defaultPort, onLogout }: Dashb
           </div>
         )}
 
+        {/* Token usage tab */}
+        {started && tab === 'tokenUsage' && (
+          <div className="p-4">
+            <TokenUsagePanel
+              eventsPage={tokenUsageEvents}
+              eventsLoading={tokenUsageEventsLoading}
+              loading={tokenUsageLoading}
+              onEventsPageChange={handleTokenUsageEventsPageChange}
+              period={tokenUsagePeriod}
+              tokenUsage={tokenUsage}
+              onPeriodChange={handleTokenUsagePeriodChange}
+              onRefresh={() => {
+                void fetchTokenUsageData()
+              }}
+              t={t}
+            />
+          </div>
+        )}
+
         {/* Logs tab */}
         {started && tab === 'logs' && (
           <div className="p-4 h-full flex flex-col">
@@ -495,5 +637,261 @@ function QuotaBar({ label, quota, loading, mode }: {
         }
       </div>
     </div>
+  )
+}
+
+function TokenUsagePanel({
+  eventsPage,
+  eventsLoading,
+  loading,
+  onEventsPageChange,
+  onPeriodChange,
+  onRefresh,
+  period,
+  t,
+  tokenUsage
+}: {
+  eventsPage: TokenUsageEventsPage | null
+  eventsLoading: boolean
+  loading: boolean
+  onEventsPageChange: (page: number) => void
+  onPeriodChange: (period: TokenUsagePeriod) => void
+  onRefresh: () => void
+  period: TokenUsagePeriod
+  t: TranslateFn
+  tokenUsage: TokenUsageSummary | null
+}) {
+  const emptyTotals: TokenUsageTotals = {
+    cache_creation_input_tokens: 0,
+    cache_read_input_tokens: 0,
+    input_tokens: 0,
+    output_tokens: 0,
+    request_count: 0,
+    total_tokens: 0
+  }
+  const totals = tokenUsage?.totals ?? emptyTotals
+  const periods: Array<{ key: TokenUsagePeriod; label: string }> = [
+    { key: 'day', label: t('dashboard.tokenUsagePeriodDay') },
+    { key: 'week', label: t('dashboard.tokenUsagePeriodWeek') },
+    { key: 'month', label: t('dashboard.tokenUsagePeriodMonth') }
+  ]
+  const hasModelRows = Boolean(tokenUsage && tokenUsage.byModel.length > 0)
+  const hasEventRows = Boolean(eventsPage && eventsPage.items.length > 0)
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-3">
+      <div className="flex flex-col gap-2 mb-3 sm:flex-row sm:items-center sm:justify-between">
+        <h3 className="text-[13px] font-semibold text-slate-400 uppercase tracking-wide">{t('dashboard.tokenUsage')}</h3>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={onRefresh}
+            disabled={loading}
+            className="h-8 rounded-md border border-slate-200 bg-white px-2.5 text-[13px] text-slate-600 transition-colors hover:bg-slate-50 disabled:opacity-40"
+          >
+            {loading ? t('dashboard.refreshing') : t('dashboard.refresh')}
+          </button>
+          <div className="grid grid-cols-3 rounded-lg border border-slate-200 bg-slate-50 p-0.5">
+            {periods.map(item => (
+              <button
+                key={item.key}
+                onClick={() => onPeriodChange(item.key)}
+                className={`px-2.5 py-1 text-[13px] rounded-md transition-colors ${
+                  period === item.key
+                    ? 'bg-white text-[#0f172a] shadow-sm font-semibold'
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 lg:grid-cols-6">
+        <TokenUsageMetric label={t('dashboard.tokenUsageTotal')} value={calcTokenTotal(totals)} loading={loading} tone="slate" />
+        <TokenUsageMetric label={t('dashboard.tokenUsageInput')} value={totals.input_tokens} loading={loading} tone="blue" />
+        <TokenUsageMetric label={t('dashboard.tokenUsageOutput')} value={totals.output_tokens} loading={loading} tone="green" />
+        <TokenUsageMetric label={t('dashboard.tokenUsageCacheRead')} value={totals.cache_read_input_tokens} loading={loading} tone="cyan" />
+        <TokenUsageMetric label={t('dashboard.tokenUsageCacheWrite')} value={totals.cache_creation_input_tokens} loading={loading} tone="amber" />
+        <TokenUsageMetric label={t('dashboard.tokenUsageRequests')} value={totals.request_count} loading={loading} tone="violet" />
+      </div>
+
+      <div className="mt-3 overflow-hidden rounded-lg border border-slate-100">
+        <div className="flex items-center justify-between bg-slate-50 px-2.5 py-1.5">
+          <span className="text-[13px] font-semibold text-slate-500">{t('dashboard.tokenUsageModelBreakdown')}</span>
+          {tokenUsage && (
+            <div className="flex items-center gap-2 text-[13px] text-slate-400">
+              <span>{t('dashboard.modelsCount', { n: tokenUsage.byModel.length })}</span>
+              {loading && <span className="text-slate-300">{t('dashboard.loading')}</span>}
+            </div>
+          )}
+        </div>
+        <div className="min-h-56">
+          {loading && !tokenUsage ? (
+            <div className="flex h-56 items-start px-2.5 py-2 text-[13px] text-slate-400 animate-pulse">
+              {t('dashboard.loading')}
+            </div>
+          ) : hasModelRows && tokenUsage ? (
+            <div className={`h-56 overflow-auto ${loading ? 'opacity-60' : ''}`}>
+              <table className="w-full min-w-[760px] text-left text-[13px]">
+                <thead className="sticky top-0 bg-white text-slate-400">
+                  <tr className="border-b border-slate-100">
+                    <th className="px-2.5 py-1.5 font-semibold">{t('dashboard.tokenUsageModel')}</th>
+                    <th className="px-2.5 py-1.5 text-right font-semibold">{t('dashboard.tokenUsageRequests')}</th>
+                    <th className="px-2.5 py-1.5 text-right font-semibold">{t('dashboard.tokenUsageInput')}</th>
+                    <th className="px-2.5 py-1.5 text-right font-semibold">{t('dashboard.tokenUsageOutput')}</th>
+                    <th className="px-2.5 py-1.5 text-right font-semibold">{t('dashboard.tokenUsageCacheRead')}</th>
+                    <th className="px-2.5 py-1.5 text-right font-semibold">{t('dashboard.tokenUsageCacheWrite')}</th>
+                    <th className="px-2.5 py-1.5 text-right font-semibold">{t('dashboard.tokenUsageTotal')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tokenUsage.byModel.map(model => (
+                    <TokenUsageModelRow key={model.model} model={model} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="px-2.5 py-2 text-[13px] text-slate-400">{t('dashboard.noTokenUsage')}</div>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-3 overflow-hidden rounded-lg border border-slate-100">
+        <div className="flex flex-col gap-1.5 bg-slate-50 px-2.5 py-1.5 sm:flex-row sm:items-center sm:justify-between">
+          <span className="text-[13px] font-semibold text-slate-500">{t('dashboard.tokenUsageEvents')}</span>
+          {eventsPage && (
+            <div className="flex items-center gap-2 text-[13px] text-slate-400">
+              <span>
+                {t('dashboard.tokenUsagePage', {
+                  page: eventsPage.page,
+                  total: eventsPage.total_pages
+                })}
+              </span>
+              {eventsLoading && <span className="text-slate-300">{t('dashboard.loading')}</span>}
+              <button
+                onClick={() => onEventsPageChange(Math.max(1, eventsPage.page - 1))}
+                disabled={eventsLoading || eventsPage.page <= 1}
+                className="h-7 rounded-md border border-slate-200 bg-white px-2 text-[13px] text-slate-600 disabled:opacity-40"
+              >
+                {t('dashboard.previous')}
+              </button>
+              <button
+                onClick={() => onEventsPageChange(Math.min(eventsPage.total_pages, eventsPage.page + 1))}
+                disabled={eventsLoading || eventsPage.page >= eventsPage.total_pages}
+                className="h-7 rounded-md border border-slate-200 bg-white px-2 text-[13px] text-slate-600 disabled:opacity-40"
+              >
+                {t('dashboard.next')}
+              </button>
+            </div>
+          )}
+        </div>
+        <div className="min-h-64">
+          {eventsLoading && !eventsPage ? (
+            <div className="flex h-64 items-start px-2.5 py-2 text-[13px] text-slate-400 animate-pulse">
+              {t('dashboard.loading')}
+            </div>
+          ) : hasEventRows && eventsPage ? (
+            <div className={`h-64 overflow-auto ${eventsLoading ? 'opacity-60' : ''}`}>
+              <table className="w-full min-w-[1040px] text-left text-[13px]">
+                <thead className="sticky top-0 bg-white text-slate-400">
+                  <tr className="border-b border-slate-100">
+                    <th className="px-2.5 py-1.5 font-semibold">{t('dashboard.tokenUsageTime')}</th>
+                    <th className="px-2.5 py-1.5 font-semibold">{t('dashboard.tokenUsageUser')}</th>
+                    <th className="px-2.5 py-1.5 font-semibold">{t('dashboard.tokenUsageEndpoint')}</th>
+                    <th className="px-2.5 py-1.5 font-semibold">{t('dashboard.tokenUsageModel')}</th>
+                    <th className="px-2.5 py-1.5 font-semibold">{t('dashboard.tokenUsageSession')}</th>
+                    <th className="px-2.5 py-1.5 font-semibold">{t('dashboard.tokenUsageTrace')}</th>
+                    <th className="px-2.5 py-1.5 text-right font-semibold">{t('dashboard.tokenUsageInput')}</th>
+                    <th className="px-2.5 py-1.5 text-right font-semibold">{t('dashboard.tokenUsageOutput')}</th>
+                    <th className="px-2.5 py-1.5 text-right font-semibold">{t('dashboard.tokenUsageCacheRead')}</th>
+                    <th className="px-2.5 py-1.5 text-right font-semibold">{t('dashboard.tokenUsageCacheWrite')}</th>
+                    <th className="px-2.5 py-1.5 text-right font-semibold">{t('dashboard.tokenUsageTotal')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {eventsPage.items.map(event => (
+                    <TokenUsageEventRow key={event.id} event={event} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="px-2.5 py-2 text-[13px] text-slate-400">{t('dashboard.noTokenUsage')}</div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function TokenUsageMetric({ label, loading, tone, value }: {
+  label: string
+  loading: boolean
+  tone: 'amber' | 'blue' | 'cyan' | 'green' | 'slate' | 'violet'
+  value: number
+}) {
+  const toneClasses = {
+    amber: 'bg-amber-50 border-amber-200 text-amber-700',
+    blue: 'bg-blue-50 border-blue-200 text-blue-700',
+    cyan: 'bg-cyan-50 border-cyan-200 text-cyan-700',
+    green: 'bg-green-50 border-green-200 text-green-700',
+    slate: 'bg-slate-50 border-slate-200 text-[#0f172a]',
+    violet: 'bg-violet-50 border-violet-200 text-violet-700'
+  }[tone]
+
+  return (
+    <div className={`rounded-lg border px-2.5 py-2 ${toneClasses}`}>
+      <div className={`text-[13px] font-bold ${loading ? 'animate-pulse opacity-40' : ''}`}>
+        {loading ? '…' : formatTokenCount(value)}
+      </div>
+      <div className="mt-0.5 text-[13px] opacity-70">{label}</div>
+    </div>
+  )
+}
+
+function TokenUsageModelRow({ model }: { model: TokenUsageModelSummary }) {
+  return (
+    <tr className="border-b border-slate-50 last:border-b-0">
+      <td className="max-w-[260px] truncate px-2.5 py-1.5 text-slate-700" title={model.model}>{model.model}</td>
+      <td className="px-2.5 py-1.5 text-right text-slate-500">{formatTokenCount(model.request_count)}</td>
+      <td className="px-2.5 py-1.5 text-right text-slate-500">{formatTokenCount(model.input_tokens)}</td>
+      <td className="px-2.5 py-1.5 text-right text-slate-500">{formatTokenCount(model.output_tokens)}</td>
+      <td className="px-2.5 py-1.5 text-right text-slate-500">{formatTokenCount(model.cache_read_input_tokens)}</td>
+      <td className="px-2.5 py-1.5 text-right text-slate-500">{formatTokenCount(model.cache_creation_input_tokens)}</td>
+      <td className="px-2.5 py-1.5 text-right font-semibold text-[#0f172a]">{formatTokenCount(calcTokenTotal(model))}</td>
+    </tr>
+  )
+}
+
+function TokenUsageEventRow({ event }: { event: TokenUsageEventRecord }) {
+  return (
+    <tr className="border-b border-slate-50 last:border-b-0">
+      <td className="whitespace-nowrap px-2.5 py-1.5 text-slate-500" title={event.created_at_utc}>
+        {formatEventTime(event.created_at_ms)}
+      </td>
+      <td className="max-w-[140px] truncate px-2.5 py-1.5 text-slate-700" title={formatCellText(event.user_id)}>
+        {formatCellText(event.user_id)}
+      </td>
+      <td className="px-2.5 py-1.5 text-slate-500">{event.endpoint}</td>
+      <td className="max-w-[180px] truncate px-2.5 py-1.5 text-slate-700" title={event.model}>
+        {event.model}
+      </td>
+      <td className="max-w-[160px] truncate px-2.5 py-1.5 font-mono text-slate-500" title={formatCellText(event.session_id)}>
+        {formatCellText(event.session_id)}
+      </td>
+      <td className="max-w-[160px] truncate px-2.5 py-1.5 font-mono text-slate-500" title={event.trace_id}>
+        {event.trace_id}
+      </td>
+      <td className="px-2.5 py-1.5 text-right text-slate-500">{formatTokenCount(event.input_tokens)}</td>
+      <td className="px-2.5 py-1.5 text-right text-slate-500">{formatTokenCount(event.output_tokens)}</td>
+      <td className="px-2.5 py-1.5 text-right text-slate-500">{formatTokenCount(event.cache_read_input_tokens)}</td>
+      <td className="px-2.5 py-1.5 text-right text-slate-500">{formatTokenCount(event.cache_creation_input_tokens)}</td>
+      <td className="px-2.5 py-1.5 text-right font-semibold text-[#0f172a]">
+        {formatTokenCount(event.total_tokens)}
+      </td>
+    </tr>
   )
 }

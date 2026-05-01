@@ -29,6 +29,7 @@ export interface Locale {
     starting: string
     startServer: string
     tabDashboard: string
+    tabTokenUsage: string
     tabLogs: string
     premiumUsed: string
     quotaReset: string
@@ -38,10 +39,35 @@ export interface Locale {
     quotaUsage: string
     refreshing: string
     refresh: string
+    tokenUsage: string
+    tokenUsageCache: string
+    tokenUsageCacheRead: string
+    tokenUsageCacheWrite: string
+    tokenUsageEndpoint: string
+    tokenUsageEvents: string
+    tokenUsageInput: string
+    tokenUsageModel: string
+    tokenUsageModelBreakdown: string
+    tokenUsageOutput: string
+    tokenUsagePage: string
+    tokenUsagePeriodDay: string
+    tokenUsagePeriodMonth: string
+    tokenUsagePeriodWeek: string
+    tokenUsageProvider: string
+    tokenUsageRequests: string
+    tokenUsageSession: string
+    tokenUsageSource: string
+    tokenUsageTime: string
+    tokenUsageTotal: string
+    tokenUsageTrace: string
+    tokenUsageUser: string
     availableModels: string
     modelsCount: string
+    next: string
     loading: string
     noModels: string
+    noTokenUsage: string
+    previous: string
     serverLog: string
     clear: string
     noLogs: string

@@ -12,6 +12,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.13.0"
+
+      - name: Verify Node sqlite support
+        run: node -e "import('node:sqlite').then(() => console.log('node:sqlite ok')).catch((error) => { console.error(error); process.exit(1) })"
+
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest

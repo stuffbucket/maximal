@@ -21,11 +21,6 @@
 
 ---
 
-> [!NOTE]
-> [opencode](https://github.com/sst/opencode) 已经内置 GitHub Copilot provider，因此在基础使用场景下你未必需要本项目。如果你希望 OpenCode 通过 `@ai-sdk/anthropic` 接入 Copilot、保留 Anthropic Messages 的工具调用语义、对 Claude 系模型优先走原生 Messages API 而不是 Chat Completions API、使用带阶段提示的 gpt commentary，或者优化 premium request 的消耗，这个代理仍然很有价值。
-
----
-
 ## 重要说明
 
 > [!IMPORTANT]
@@ -131,6 +126,7 @@
 ## 前置要求
 
 - Bun（>= 1.2.x）
+- 如果要通过 `npx` 运行已发布 CLI，需要 Node.js
 - 已订阅 Copilot 的 GitHub 账号（个人版、Business 或 Enterprise）
 
 ## 安装
@@ -150,6 +146,11 @@ bun run start start
 ## 通过 npx 使用
 
 你可以直接用 npx 运行本项目：
+
+> [!IMPORTANT]
+> 通过 `npx` 运行时，token usage 存储会使用 Node 内置的 `node:sqlite` 模块。该能力会在 Node.js >= 22.13.0 时启用；Node.js < 22.13.0 时 CLI 仍可启动，但会禁用 token usage 存储。
+>
+> 如果不升级 Node.js 但仍需要 token usage 存储，可以改用 Bun 运行已发布 CLI：`bunx --bun @jeffreycao/copilot-api@latest start`。
 
 ```sh
 npx @jeffreycao/copilot-api@latest start
@@ -175,7 +176,7 @@ npx @jeffreycao/copilot-api@latest auth
 
 https://github.com/caozhiyuan/copilot-api/releases
 
-下载对应平台的安装包后，在应用内登录、选择端口并启动服务，再把你的客户端指向应用里显示的本地端点即可。
+下载对应平台的安装包后，在应用内登录、选择端口并启动服务，再把你的客户端指向应用里显示的本地端点即可。发布版桌面应用使用随包内置的 Electron 运行时，正常使用不需要额外安装 Node.js；token usage 历史记录会在该内置运行时支持 SQLite 时启用。
 
 ## 配合 Docker 使用
 
@@ -469,6 +470,9 @@ npx @jeffreycao/copilot-api@latest --oauth-app=opencode start
 
 # 组合多个全局选项
 npx @jeffreycao/copilot-api@latest --api-home=/custom/path --oauth-app=opencode --enterprise-url=company.ghe.com start
+
+# 用 Bun 而不是 Node.js 运行已发布 CLI
+bunx --bun @jeffreycao/copilot-api@latest start
 ```
 
 ## 与 OpenCode 一起使用
@@ -574,6 +578,8 @@ npx @jeffreycao/copilot-api@latest --oauth-app=opencode start
    - 如果你在 Windows 上使用 `start.bat` 脚本，这个页面会自动打开。
 
 看板提供了更易读的 Copilot 用量视图：
+
+> token usage 历史记录需要 Bun 或 Node.js >= 22.13.0。Node.js < 22.13.0 时服务会正常运行，但 token usage 存储会被禁用。
 
 - **API Endpoint URL**：看板会通过 URL 查询参数，默认从本地服务端点拉取数据。你也可以把这个 URL 改成任意其他兼容 API 端点。
 - **Fetch Data**：点击 “Fetch” 按钮即可加载或刷新使用数据。页面首次加载时也会自动拉取。

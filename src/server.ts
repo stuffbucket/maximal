@@ -12,6 +12,7 @@ import { modelRoutes } from "./routes/models/route"
 import { providerMessageRoutes } from "./routes/provider/messages/route"
 import { providerModelRoutes } from "./routes/provider/models/route"
 import { responsesRoutes } from "./routes/responses/route"
+import { tokenUsageRoute } from "./routes/token-usage/route"
 import { tokenRoute } from "./routes/token/route"
 import { usageRoute } from "./routes/usage/route"
 
@@ -38,6 +39,7 @@ server.route("/chat/completions", completionRoutes)
 server.route("/models", modelRoutes)
 server.route("/embeddings", embeddingRoutes)
 server.route("/usage", usageRoute)
+server.route("/token-usage", tokenUsageRoute)
 server.route("/token", tokenRoute)
 server.route("/responses", responsesRoutes)
 

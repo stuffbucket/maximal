@@ -21,11 +21,6 @@ English | [简体中文](./README.zh-CN.md)
 
 ---
 
-> [!NOTE]
-> [opencode](https://github.com/sst/opencode) already ships with a built-in GitHub Copilot provider, so you may not need this project for basic usage. This proxy is still useful if you want OpenCode to talk to Copilot through `@ai-sdk/anthropic`, preserve Anthropic Messages semantics for tool use, prefer the native Messages API over Chat Completions API for Claude-family models, use gpt phase-aware commentary, or optimize premium requests.
-
----
-
 ## Important Notes
 
 > [!IMPORTANT]
@@ -129,6 +124,7 @@ When an Anthropic API key is configured, the proxy forwards Claude model token c
 ## Prerequisites
 
 - Bun (>= 1.2.x)
+- Node.js if you plan to run the published CLI with `npx`
 - GitHub account with Copilot subscription (individual, business, or enterprise)
 
 ## Installation
@@ -148,6 +144,11 @@ bun run start start
 ## Using with npx
 
 You can run the project directly using npx:
+
+> [!IMPORTANT]
+> Token usage storage uses Node's built-in `node:sqlite` module when running with `npx`. It is enabled on Node.js >= 22.13.0. On Node.js < 22.13.0, the CLI still starts, but token usage storage is disabled.
+>
+> If you want token usage storage without upgrading Node.js, run the published CLI with Bun instead: `bunx --bun @jeffreycao/copilot-api@latest start`.
 
 ```sh
 npx @jeffreycao/copilot-api@latest start
@@ -173,7 +174,7 @@ The settings screen also exposes `OAuth App`, `API Home`, `Enterprise URL`, verb
 
 https://github.com/caozhiyuan/copilot-api/releases
 
-Download the installer for your platform, sign in inside the app, choose a port, start the server, then point your client at the local endpoint shown in the app.
+Download the installer for your platform, sign in inside the app, choose a port, start the server, then point your client at the local endpoint shown in the app. Packaged desktop builds use the bundled Electron runtime, so normal desktop usage does not require installing Node.js separately. Token usage history is enabled when that bundled runtime supports SQLite.
 
 ## Using with Docker
 
@@ -465,6 +466,9 @@ npx @jeffreycao/copilot-api@latest --oauth-app=opencode start
 
 # Combine multiple global options
 npx @jeffreycao/copilot-api@latest --api-home=/custom/path --oauth-app=opencode --enterprise-url=company.ghe.com start
+
+# Run the published CLI with Bun instead of Node.js
+bunx --bun @jeffreycao/copilot-api@latest start
 ```
 
 ## Using with OpenCode
@@ -570,6 +574,8 @@ After starting the server, a URL to the Copilot Usage Dashboard will be displaye
     - If you use the `start.bat` script on Windows, this page will open automatically.
 
 The dashboard provides a user-friendly interface to view your Copilot usage data:
+
+> Token usage history requires Bun or Node.js >= 22.13.0. On Node.js < 22.13.0, the server runs normally but token usage storage is disabled.
 
 - **API Endpoint URL**: The dashboard is pre-configured to fetch data from your local server endpoint via the URL query parameter. You can change this URL to point to any other compatible API endpoint.
 - **Fetch Data**: Click the "Fetch" button to load or refresh the usage data. The dashboard will automatically fetch data on load.

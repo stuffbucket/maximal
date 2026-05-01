@@ -185,6 +185,45 @@ export function registerIpcHandlers(
     }
   })
 
+  ipcMain.handle('server:fetch-token-usage', async (_event, period: string) => {
+    const port = getPort()
+    const normalizedPeriod = period === 'week' || period === 'month' ? period : 'day'
+    try {
+      const headers = await getServerRequestHeaders()
+      const res = await fetch(`http://localhost:${port}/token-usage?period=${normalizedPeriod}`, {
+        headers,
+        signal: AbortSignal.timeout(5000)
+      })
+      if (!res.ok) return null
+      return res.json()
+    } catch {
+      return null
+    }
+  })
+
+  ipcMain.handle('server:fetch-token-usage-events', async (_event, period: string, page: number, pageSize: number) => {
+    const port = getPort()
+    const normalizedPeriod = period === 'week' || period === 'month' ? period : 'day'
+    const normalizedPage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1
+    const normalizedPageSize = Number.isFinite(pageSize) && pageSize > 0 ? Math.floor(pageSize) : 20
+    const params = new URLSearchParams({
+      page: String(normalizedPage),
+      page_size: String(normalizedPageSize),
+      period: normalizedPeriod
+    })
+    try {
+      const headers = await getServerRequestHeaders()
+      const res = await fetch(`http://localhost:${port}/token-usage/events?${params.toString()}`, {
+        headers,
+        signal: AbortSignal.timeout(5000)
+      })
+      if (!res.ok) return null
+      return res.json()
+    } catch {
+      return null
+    }
+  })
+
   ipcMain.handle('server:get-auth-info', async () => getServerAuthInfo())
 
   // Server: Return the in-memory log buffer

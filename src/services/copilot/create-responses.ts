@@ -27,6 +27,7 @@ export interface ResponsesPayload {
   stream?: boolean | null
   safety_identifier?: string | null
   prompt_cache_key?: string | null
+  prompt_cache_retention?: "in_memory" | "24h" | null
   parallel_tool_calls?: boolean | null
   store?: boolean | null
   reasoning?: Reasoning | null
