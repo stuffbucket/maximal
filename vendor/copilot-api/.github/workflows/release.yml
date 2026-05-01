@@ -1,0 +1,77 @@
+name: Release
+
+permissions:
+  id-token: write
+  contents: write
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Run linter
+        run: bun run lint:all
+
+      - name: Run type check
+        run: bun run typecheck
+
+      - name: Run tests
+        run: bun test
+
+      - name: Build
+        run: bun run build
+
+      - name: Setup Node for npm publish
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Detect pre-release
+        id: prerelease
+        run: |
+          TAG="${{ github.ref_name }}"
+          if [[ "$TAG" == *"-"* ]]; then
+            PRERELEASE_PART="${TAG#*-}"
+            PRERELEASE_PART="${PRERELEASE_PART%%+*}"
+            NPM_TAG="${PRERELEASE_PART%%.*}"
+
+            if [[ ! "$NPM_TAG" =~ ^[A-Za-z][A-Za-z0-9._-]*$ ]]; then
+              echo "Unsupported prerelease channel in tag: $TAG"
+              exit 1
+            fi
+
+            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "npm_tag=${NPM_TAG}" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "npm_tag=latest" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate GitHub Release notes
+        run: |
+          if [[ "${{ steps.prerelease.outputs.is_prerelease }}" == "true" ]]; then
+            bunx changelogithub --prerelease
+          else
+            bunx changelogithub
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish to npm (Trusted Publisher / OIDC)
+        run: npm publish --access public --tag ${{ steps.prerelease.outputs.npm_tag }}
