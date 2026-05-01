@@ -29,7 +29,7 @@ import {
   translateToOpenAI,
 } from "./non-stream-translation"
 import { runAgentLoop } from "./web-tools-agent"
-import { InProcessFetchExecutor } from "./web-tools-executor"
+import { defaultExecutor } from "./web-tools-executor"
 import { attachClientShims, type WebToolPolicy } from "./web-tools-rewriter"
 import { runStreamingAgent } from "./web-tools-stream"
 
@@ -47,7 +47,6 @@ export interface WebToolsFlowArgs {
 export async function handleWithWebToolsAgent(args: WebToolsFlowArgs) {
   const { c, payload, options, policy } = args
   attachClientShims(payload, policy)
-  const executor = new InProcessFetchExecutor()
   const wantsStream = payload.stream === true
 
   const callOnce = async (
@@ -73,7 +72,7 @@ export async function handleWithWebToolsAgent(args: WebToolsFlowArgs) {
     const finalResponse = await runAgentLoop({
       initialPayload: payload,
       policy,
-      executor,
+      executor: defaultExecutor,
       callOnce,
     })
     return c.json(finalResponse)

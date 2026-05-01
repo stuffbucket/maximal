@@ -16,36 +16,18 @@ import type { WebToolDecl } from "./web-tools-types"
 
 import { TOOL_NAME, TOOL_TYPE, type ToolName } from "./web-tools-vocab"
 
-// Anthropic's request-side tool declarations carry an optional `type`
-// field for server-side variants. caozhiyuan's `AnthropicTool` doesn't
-// model this; we read it as `Record<string, unknown>` to access it
-// safely.
+// Anthropic's request-side tool declarations may carry a `type` field
+// for server-side variants; caozhiyuan's `AnthropicTool` doesn't model
+// it, so we read through this widened alias.
 type RawTool = AnthropicTool & { type?: unknown }
 
-function isServerToolType(t: unknown): t is string {
-  return t === TOOL_TYPE.webSearch || t === TOOL_TYPE.webFetch
-}
-
+// type/name pair must match exactly. Mismatches pass through unchanged
+// so Copilot rejects and the client sees the underlying error.
 function isWebToolDecl(tool: RawTool): tool is RawTool & { type: string } {
-  if (!isServerToolType(tool.type)) return false
-  if (tool.name !== TOOL_NAME.webSearch && tool.name !== TOOL_NAME.webFetch) {
-    return false
-  }
-  // Pair must match: web_search_* with name web_search, web_fetch_* with
-  // name web_fetch. Mismatch — pass through unchanged so Copilot rejects
-  // it and the client sees the underlying error.
-  if (tool.type === TOOL_TYPE.webSearch && tool.name !== TOOL_NAME.webSearch) {
-    return false
-  }
-  if (tool.type === TOOL_TYPE.webFetch && tool.name !== TOOL_NAME.webFetch) {
-    return false
-  }
-  return true
-}
-
-function asWebDecl(tool: RawTool & { type: string }): WebToolDecl {
-  // Cast is justified: isWebToolDecl pinned the discriminators.
-  return tool as unknown as WebToolDecl
+  return (
+    (tool.type === TOOL_TYPE.webSearch && tool.name === TOOL_NAME.webSearch)
+    || (tool.type === TOOL_TYPE.webFetch && tool.name === TOOL_NAME.webFetch)
+  )
 }
 
 export interface WebToolPolicy {
@@ -67,10 +49,8 @@ export function splitWebTools(
 
   for (const t of tools) {
     if (isWebToolDecl(t)) {
-      declarations.push(asWebDecl(t))
+      declarations.push(t as unknown as WebToolDecl)
     } else {
-      // Strip the rogue `type` field if present; downstream sees a
-      // canonical client-side AnthropicTool.
       const clean = { ...t }
       delete (clean as { type?: unknown }).type
       remaining.push(clean)

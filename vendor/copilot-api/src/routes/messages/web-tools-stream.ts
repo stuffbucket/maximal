@@ -45,12 +45,10 @@ import {
   executeToolUse,
   type ExecOutcome,
 } from "./web-tools-exec"
-import { InProcessFetchExecutor } from "./web-tools-executor"
+import { defaultExecutor, type Executor } from "./web-tools-executor"
 import { isWebToolName, type WebToolPolicy } from "./web-tools-rewriter"
 import { newRequestState, type RequestState } from "./web-tools-state"
-import { BLOCK_KIND, type ToolName } from "./web-tools-vocab"
-
-const MAX_AGENT_TURNS = 10
+import { BLOCK_KIND, MAX_AGENT_TURNS, type ToolName } from "./web-tools-vocab"
 
 interface StreamingAgentArgs {
   initialPayload: AnthropicMessagesPayload
@@ -68,7 +66,7 @@ interface StreamingAgentArgs {
 export async function runStreamingAgent(
   args: StreamingAgentArgs,
 ): Promise<void> {
-  const executor = new InProcessFetchExecutor()
+  const executor = defaultExecutor
   const state = newRequestState(args.policy.declarations)
   const messages: Array<AnthropicMessage> = [...args.initialPayload.messages]
 
@@ -141,7 +139,7 @@ interface TurnArgs {
   stream: SSEStreamingApi
   cursor: { next: number }
   messageStartEmitted: boolean
-  executor: InProcessFetchExecutor
+  executor: Executor
   state: RequestState
 }
 
@@ -243,7 +241,7 @@ interface DispatchArgs {
   cursor: { next: number }
   messageStartEmitted: boolean
   stream: SSEStreamingApi
-  executor: InProcessFetchExecutor
+  executor: Executor
   state: RequestState
   outcomes: Array<{ toolUse: AnthropicToolUseBlock; outcome: ExecOutcome }>
   assistantContent: Array<AnthropicAssistantContentBlock>
@@ -461,5 +459,3 @@ async function writeEvent(
 }
 
 // Re-exports for the flow integration site.
-
-export { TOOL_NAME } from "./web-tools-vocab"

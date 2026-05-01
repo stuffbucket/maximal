@@ -64,10 +64,13 @@ const turndown = new TurndownService({
   emDelimiter: "*",
 })
 
+const TITLE_RE = /<title[^>]*>([\s\S]*?)<\/title>/iu
+const WHITESPACE_RE = /\s+/gu
+
 function extractTitle(html: string): string | undefined {
-  const m = html.match(/<title[^>]*>([\s\S]*?)<\/title>/iu)
+  const m = html.match(TITLE_RE)
   if (!m) return undefined
-  return m[1].replaceAll(/\s+/gu, " ").trim() || undefined
+  return m[1].replaceAll(WHITESPACE_RE, " ").trim() || undefined
 }
 
 function isTextual(mediaType: string): boolean {
@@ -135,11 +138,10 @@ export class InProcessFetchExecutor implements Executor {
     return { ok: true, markdown: trimmed, title }
   }
 
-  // v1: no search backend wired. Returns `unavailable` so the
-  // interceptor synthesizes a typed error block. Wire a backend
-  // (Brave, Tavily, etc.) by subclassing or composing a different
-  // Executor implementation.
+  // No search backend wired; configure a different Executor to enable.
   search(_query: string, _opts?: SearchOpts): Promise<SearchResult> {
     return Promise.resolve({ ok: false, code: "unavailable" })
   }
 }
+
+export const defaultExecutor: Executor = new InProcessFetchExecutor()

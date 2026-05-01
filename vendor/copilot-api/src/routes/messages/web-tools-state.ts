@@ -58,48 +58,6 @@ export function newRequestState(
   }
 }
 
-export function isToolActive(state: RequestState, name: ToolName): boolean {
-  return state.active[name] !== undefined
-}
-
-// ────────────────────────────────────────────────────────────────────
-// Interceptor state machine.
-// ────────────────────────────────────────────────────────────────────
-
-interface BufferedToolUse {
-  id: string
-  name: ToolName
-  /** Anthropic streams `input_json_delta` events; we accumulate the
-   *  partial JSON here and `JSON.parse` once `content_block_stop`
-   *  arrives. */
-  partialJson: string
-}
-
-export type InterceptorState =
-  | { kind: "idle" }
-  | { kind: "buffering"; tool: BufferedToolUse }
-
-export const IDLE: InterceptorState = { kind: "idle" }
-
-export function startBuffering(id: string, name: ToolName): InterceptorState {
-  return { kind: "buffering", tool: { id, name, partialJson: "" } }
-}
-
-export function appendDelta(
-  state: InterceptorState,
-  jsonDelta: string,
-): InterceptorState {
-  if (state.kind !== "buffering") {
-    throw new Error(
-      "appendDelta: not in buffering state — caller must guard with state.kind",
-    )
-  }
-  return {
-    kind: "buffering",
-    tool: { ...state.tool, partialJson: state.tool.partialJson + jsonDelta },
-  }
-}
-
 // ────────────────────────────────────────────────────────────────────
 // Policy checks. Run BEFORE invoking the executor. On `ok: false`, the
 // caller emits a `*_error` block (counter does NOT increment).

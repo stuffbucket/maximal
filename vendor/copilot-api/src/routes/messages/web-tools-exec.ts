@@ -11,7 +11,12 @@ import type {
   AnthropicToolResultBlock,
   AnthropicToolUseBlock,
 } from "./anthropic-types"
-import type { Executor, FetchResult, SearchResult } from "./web-tools-executor"
+import type {
+  Executor,
+  FetchResult,
+  SearchHit,
+  SearchResult,
+} from "./web-tools-executor"
 
 import {
   checkFetchPolicy,
@@ -44,7 +49,7 @@ export type ExecOutcome =
       tool: typeof TOOL_NAME.webSearch
       ok: true
       query: string
-      items: SearchResult & { ok: true } extends { items: infer I } ? I : never
+      items: Array<SearchHit>
     }
   | { tool: typeof TOOL_NAME.webSearch; ok: false; code: WebSearchErrorCode }
 

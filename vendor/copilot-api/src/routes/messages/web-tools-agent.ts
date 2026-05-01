@@ -14,7 +14,6 @@ import type {
   AnthropicMessage,
   AnthropicMessagesPayload,
   AnthropicResponse,
-  AnthropicTextBlock,
   AnthropicToolResultBlock,
   AnthropicToolUseBlock,
 } from "./anthropic-types"
@@ -29,9 +28,7 @@ import {
 } from "./web-tools-exec"
 import { isWebToolName, type WebToolPolicy } from "./web-tools-rewriter"
 import { newRequestState } from "./web-tools-state"
-import { BLOCK_KIND, type ToolName } from "./web-tools-vocab"
-
-const MAX_AGENT_TURNS = 10
+import { BLOCK_KIND, MAX_AGENT_TURNS, type ToolName } from "./web-tools-vocab"
 
 interface RoundTrip {
   toolUseId: string
@@ -160,9 +157,4 @@ function synthesizeFinalResponse(
     ...last,
     content: synthesized as Array<AnthropicAssistantContentBlock>,
   }
-}
-
-// Helper kept for completeness; useful in tests.
-export function isTextBlock(b: SynthesizedBlock): b is AnthropicTextBlock {
-  return b.type === "text"
 }
