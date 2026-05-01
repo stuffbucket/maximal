@@ -11,7 +11,7 @@
 
 import type { Context } from "hono"
 
-import { streamSSE, type SSEStreamingApi } from "hono/streaming"
+import { streamSSE } from "hono/streaming"
 
 import {
   createChatCompletions,
@@ -31,6 +31,7 @@ import {
 import { runAgentLoop } from "./web-tools-agent"
 import { InProcessFetchExecutor } from "./web-tools-executor"
 import { attachClientShims, type WebToolPolicy } from "./web-tools-rewriter"
+import { runStreamingAgent } from "./web-tools-stream"
 
 const isNonStreaming = (
   response: Awaited<ReturnType<typeof createChatCompletions>>,
@@ -68,88 +69,25 @@ export async function handleWithWebToolsAgent(args: WebToolsFlowArgs) {
     return translateToAnthropic(response)
   }
 
-  const finalResponse = await runAgentLoop({
-    initialPayload: payload,
-    policy,
-    executor,
-    callOnce,
-  })
-
   if (!wantsStream) {
+    const finalResponse = await runAgentLoop({
+      initialPayload: payload,
+      policy,
+      executor,
+      callOnce,
+    })
     return c.json(finalResponse)
   }
+
+  // Streaming path — true streaming during agent execution. Each
+  // Copilot inner call streams; client sees text + server_tool_use +
+  // result blocks as they happen, not buffered to the end.
   return streamSSE(c, async (stream) => {
-    await emitSynthesizedStream(stream, finalResponse)
+    await runStreamingAgent({
+      initialPayload: payload,
+      policy,
+      stream,
+      options,
+    })
   })
-}
-
-// ────────────────────────────────────────────────────────────────────
-// Stream emitter — turns a finalized AnthropicResponse into the SSE
-// event sequence Anthropic clients expect. Text blocks are emitted as
-// one big text_delta; tool_use / server_tool_use / web_*_tool_result
-// blocks are emitted whole inside content_block_start (no deltas).
-// ────────────────────────────────────────────────────────────────────
-
-async function writeEvent(
-  stream: SSEStreamingApi,
-  type: string,
-  data: object,
-): Promise<void> {
-  await stream.writeSSE({
-    event: type,
-    data: JSON.stringify({ type, ...data }),
-  })
-}
-
-async function emitSynthesizedStream(
-  stream: SSEStreamingApi,
-  response: AnthropicResponse,
-): Promise<void> {
-  const { content, ...shell } = response
-
-  await writeEvent(stream, "message_start", {
-    message: {
-      ...shell,
-      content: [],
-      stop_reason: null,
-      stop_sequence: null,
-    },
-  })
-
-  const blocks = Array.isArray(content) ? content : []
-  for (const [i, block] of blocks.entries()) {
-    if (block.type === "text") {
-      await writeEvent(stream, "content_block_start", {
-        index: i,
-        content_block: { type: "text", text: "" },
-      })
-      if (block.text) {
-        await writeEvent(stream, "content_block_delta", {
-          index: i,
-          delta: { type: "text_delta", text: block.text },
-        })
-      }
-    } else {
-      // Everything else is emitted whole inside content_block_start.
-      // Anthropic server-side tool blocks (server_tool_use,
-      // web_*_tool_result) follow this pattern; tool_use we emit whole
-      // for simplicity since the model never streams partial input back
-      // to itself in this synthesized path.
-      await writeEvent(stream, "content_block_start", {
-        index: i,
-        content_block: block,
-      })
-    }
-    await writeEvent(stream, "content_block_stop", { index: i })
-  }
-
-  await writeEvent(stream, "message_delta", {
-    delta: {
-      stop_reason: response.stop_reason,
-      stop_sequence: response.stop_sequence,
-    },
-    usage: { output_tokens: response.usage.output_tokens },
-  })
-
-  await writeEvent(stream, "message_stop", {})
 }
