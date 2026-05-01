@@ -2,7 +2,7 @@ import type { Context } from "hono"
 
 import type { Model } from "~/services/copilot/get-models"
 
-import { reverseId } from "~/lib/anthropic-id-rewrite"
+import { pickCopilotVariantId, reverseId } from "~/lib/anthropic-id-rewrite"
 import { awaitApproval } from "~/lib/approval"
 import { COMPACT_REQUEST } from "~/lib/compact"
 import { getSmallModel, isMessagesApiEnabled } from "~/lib/config"
@@ -30,16 +30,31 @@ import { splitWebTools } from "./web-tools-rewriter"
 
 const logger = createHandlerLogger("messages-handler")
 
+// Reverse the dash-date sentinel form (added by /v1/models for Claude
+// Desktop's normalizer) back to Copilot's original dot-form, then route
+// to the variant SKU when the inbound request set effort or requested
+// the 1M-context beta.
+function resolveCopilotModel(
+  c: Context,
+  payload: AnthropicMessagesPayload,
+): string {
+  const reversed = reverseId(payload.model)
+  const longContext =
+    c.req.header("anthropic-beta")?.includes("context-1m-2025-08-07") ?? false
+  return pickCopilotVariantId(
+    reversed,
+    { effort: payload.output_config?.effort, longContext },
+    state.models?.data.map((m) => m.id) ?? [],
+  )
+}
+
 export async function handleCompletion(c: Context) {
   await checkRateLimit(state)
 
   const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
   debugJson(logger, "Anthropic request payload:", anthropicPayload)
 
-  // Reverse the dash-date sentinel form (added by /v1/models for Claude
-  // Desktop's normalizer) back to Copilot's original dot-form before any
-  // model lookup happens.
-  anthropicPayload.model = reverseId(anthropicPayload.model)
+  anthropicPayload.model = resolveCopilotModel(c, anthropicPayload)
 
   sanitizeIdeTools(anthropicPayload)
 

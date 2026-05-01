@@ -57,3 +57,47 @@ export function reverseId(anthropicId: string): string {
   const suffixPart = suffix ? `-${suffix}` : ""
   return `claude-${family}-${major}.${minor}${suffixPart}`
 }
+
+// Copilot encodes effort/context variants as id suffixes (`-high`,
+// `-xhigh`, `-1m`, `-1m-internal`). Anthropic exposes the same as
+// request-time parameters (`output_config.effort`, the
+// `anthropic-beta: context-1m-...` header). The proxy hides variant
+// ids from /v1/models and routes the request to the right upstream
+// variant when those parameters are set on the inbound request.
+const VARIANT_RE = /-(?:low|medium|high|xhigh|max|1m)(?:-internal)?$/
+
+export function isVariantId(copilotId: string): boolean {
+  if (!FORWARD_RE.test(copilotId)) return false
+  return VARIANT_RE.test(copilotId)
+}
+
+export interface VariantOpts {
+  effort?: "low" | "medium" | "high" | "xhigh" | "max"
+  longContext?: boolean
+}
+
+/**
+ * Given a base Copilot id (`claude-opus-4.7`) plus request-time variant
+ * parameters, return the most specific upstream id that exists in the
+ * known list. Falls back to the base id when no variant matches.
+ */
+export function pickCopilotVariantId(
+  baseId: string,
+  opts: VariantOpts,
+  knownIds: ReadonlyArray<string>,
+): string {
+  if (isVariantId(baseId)) return baseId
+  if (!FORWARD_RE.test(baseId)) return baseId
+
+  const candidates: Array<string> = []
+  if (opts.effort && opts.effort !== "low" && opts.effort !== "medium") {
+    candidates.push(`${baseId}-${opts.effort}`)
+  }
+  if (opts.longContext) {
+    candidates.push(`${baseId}-1m-internal`, `${baseId}-1m`)
+  }
+  for (const candidate of candidates) {
+    if (knownIds.includes(candidate)) return candidate
+  }
+  return baseId
+}
