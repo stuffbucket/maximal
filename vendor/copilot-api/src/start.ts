@@ -84,6 +84,10 @@ export async function runServer(options: RunServerOptions): Promise<void> {
     `Available models: \n${state.models?.data.map((model) => `- ${model.id}`).join("\n")}`,
   )
 
+  consola.info(
+    `Web-tools executor: ${process.env.OLLAMA_API_KEY ? "OllamaWebExecutor" : "InProcessFetchExecutor (search disabled; set OLLAMA_API_KEY)"}`,
+  )
+
   const serverUrl = `http://localhost:${options.port}`
 
   if (options.claudeCode) {
