@@ -57,7 +57,22 @@ This is a reverse-engineered proxy that exposes the GitHub Copilot API as both a
 ### Config and state
 
 - `src/lib/config.ts` — `AppConfig` shape, disk read/write from `~/.local/share/copilot-api/config.json` (Linux/macOS) or `%USERPROFILE%\.local\share\copilot-api\config.json` (Windows). Also respects `COPILOT_API_HOME` env var.
+- `src/lib/config-schema.ts` — zod runtime validation. Bad config → exit non-zero with key path. Unknown keys → warning, kept via `.loose()`.
 - `src/lib/state.ts` — singleton mutable state: tokens, accountType, rate-limit, models cache.
+- `src/lib/secrets.ts` — file-based provider keys at `~/.local/share/copilot-api/secrets/<name>` (mode 0600). Env wins; file fills in unset values.
+- `src/lib/cache.ts` — `Cache<K,V>` LRU wrapper with hit/miss/eviction metrics. Wrapped instances register globally for `/_debug/state`.
+
+### Diagnostic surfaces
+
+- **`copilot-api debug`** (and `--json`) — effective config, executor selection (which `Executor` `selectExecutor()` would pick), secret sources (env/file/config/unset, never values), paths.
+- **`GET /_debug/state`** — live equivalent on a running proxy. 404 by default; gated on `state.verbose`. Useful when restart isn't an option.
+- **Daily log** at `~/.local/share/copilot-api/logs/messages-handler-<date>.log` — request payloads, translated SSE events, web-tools agent traces. 7-day retention.
+
+### Parallel-agent convention
+
+This repo can collide on a shared working tree (lint-staged stash + concurrent merge ate a turn already). For parallel agents:
+- **Spawned subagents:** pass `isolation: "worktree"` to the Agent tool.
+- **Sessions:** create a worktree manually with `git worktree add ../maximal-<task> -b agent/<task>`; clean up with `git worktree remove ../maximal-<task>` after merging back.
 
 ### Token counting
 
