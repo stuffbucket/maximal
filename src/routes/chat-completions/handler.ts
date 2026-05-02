@@ -2,6 +2,7 @@ import type { Context } from "hono"
 
 import { streamSSE, type SSEMessage } from "hono/streaming"
 
+import { reverseId } from "~/lib/anthropic-id-rewrite"
 import { awaitApproval } from "~/lib/approval"
 import { createHandlerLogger, debugJson, debugJsonTail } from "~/lib/logger"
 import { checkRateLimit } from "~/lib/rate-limit"
@@ -25,6 +26,7 @@ export async function handleCompletion(c: Context) {
   await checkRateLimit(state)
 
   let payload = await c.req.json<ChatCompletionsPayload>()
+  payload.model = reverseId(payload.model)
   debugJsonTail(logger, "Request payload:", { value: payload, tailLength: 400 })
 
   // Find the selected model

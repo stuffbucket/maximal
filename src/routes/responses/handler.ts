@@ -2,6 +2,7 @@ import type { Context } from "hono"
 
 import { streamSSE } from "hono/streaming"
 
+import { reverseId } from "~/lib/anthropic-id-rewrite"
 import { awaitApproval } from "~/lib/approval"
 import { getConfig, isResponsesApiWebSearchEnabled } from "~/lib/config"
 import { createHandlerLogger, debugJson, debugJsonTail } from "~/lib/logger"
@@ -35,6 +36,7 @@ export const handleResponses = async (c: Context) => {
   await checkRateLimit(state)
 
   const payload = await c.req.json<ResponsesPayload>()
+  payload.model = reverseId(payload.model)
   debugJson(logger, "Responses request payload:", payload)
 
   // not support subagent marker for now , set sessionId = getUUID(requestId)

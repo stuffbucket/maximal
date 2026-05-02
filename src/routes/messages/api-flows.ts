@@ -327,7 +327,7 @@ export const handleWithMessagesApi = async (
   return c.json(response)
 }
 
-const isNonStreaming = (
+export const isNonStreaming = (
   response: Awaited<ReturnType<typeof createChatCompletions>>,
 ): response is ChatCompletionResponse => Object.hasOwn(response, "choices")
 
