@@ -1,6 +1,11 @@
 import consola from "consola"
 import fs from "node:fs"
 
+import {
+  ConfigValidationError,
+  detectUnknownKeys,
+  validateAppConfig,
+} from "./config-schema"
 import { PATHS } from "./paths"
 
 export interface AppConfig {
@@ -125,6 +130,7 @@ function ensureConfigFile(): void {
 
 function readConfigFromDisk(): AppConfig {
   ensureConfigFile()
+  let parsed: unknown
   try {
     const raw = fs.readFileSync(PATHS.CONFIG_PATH, "utf8")
     if (!raw.trim()) {
@@ -135,11 +141,43 @@ function readConfigFromDisk(): AppConfig {
       )
       return defaultConfig
     }
-    return JSON.parse(raw) as AppConfig
+    parsed = JSON.parse(raw)
   } catch (error) {
     consola.error("Failed to read config file, using default config", error)
     return defaultConfig
   }
+
+  // Schema-validate before returning. A bad value (e.g. typo'd
+  // authType) is fatal — the proxy should not boot with an invalid
+  // config because the failures show up later as confusing runtime
+  // errors. Unknown top-level keys are warnings: forward-compat hedge
+  // for configs written by newer versions.
+  let config: AppConfig
+  try {
+    config = validateAppConfig(parsed)
+  } catch (error) {
+    if (error instanceof ConfigValidationError) {
+      consola.error(
+        `Invalid ${PATHS.CONFIG_PATH}:\n${error.issues
+          .map((i) => `  ${i.path || "<root>"}: ${i.message}`)
+          .join("\n")}`,
+      )
+      // Exit non-zero so process supervisors / shells see the failure.
+      // Do NOT silently fall back to defaultConfig — that hides the
+      // problem and the user keeps wondering why settings don't apply.
+      process.exit(1)
+    }
+    throw error
+  }
+
+  const unknown = detectUnknownKeys(parsed)
+  if (unknown.length > 0) {
+    consola.warn(
+      `Config has unknown keys (ignored, may be deprecated): ${unknown.join(", ")}`,
+    )
+  }
+
+  return config
 }
 
 function mergeDefaultConfig(config: AppConfig): {
