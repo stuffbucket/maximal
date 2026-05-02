@@ -12,6 +12,7 @@
 
 import { Hono } from "hono"
 
+import { allCacheMetrics } from "~/lib/cache"
 import { getConfig } from "~/lib/config"
 import { state } from "~/lib/state"
 
@@ -55,6 +56,7 @@ debugRoutes.get("/state", (c) => {
       providers_declared: Object.keys(config.providers ?? {}),
     },
     executor: describeExecutor(),
+    caches: allCacheMetrics(),
     secrets: [
       secretStatus({
         name: "ollama_api_key",

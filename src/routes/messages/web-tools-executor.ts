@@ -8,6 +8,8 @@
 
 import TurndownService from "turndown"
 
+import { Cache } from "~/lib/cache"
+
 import type { WebFetchErrorCode, WebSearchErrorCode } from "./web-tools-vocab"
 
 // ────────────────────────────────────────────────────────────────────
@@ -182,10 +184,18 @@ export class OllamaWebExecutor implements Executor {
   private readonly apiKey: string
   private readonly base: string
   private readonly timeoutMs: number
-  private readonly prefetch = new Map<
+  /** Per-request prefetch cache. Bounded at 50 entries — well above
+   *  the worst-case turn × max_results product (10 × 5 = 50) so the
+   *  cap is effectively a runaway guard, not a steady-state limiter.
+   *  Marked transient so the global registry stays clean. */
+  private readonly prefetch = new Cache<
     string,
     { markdown: string; title?: string }
-  >()
+  >({
+    name: "web-tools.prefetch",
+    max: 50,
+    transient: true,
+  })
 
   constructor(opts: OllamaWebExecutorOpts) {
     this.apiKey = opts.apiKey
