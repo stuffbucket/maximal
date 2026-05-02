@@ -404,7 +404,7 @@ Default: `InProcessExecutor` for `web_fetch` (no extra deps), unset for
    Implementing real char-offset citations requires keeping the
    markdown anchored to the fetched bytes — meaningful work.
 7. **Where in the codebase.** New file
-   `vendor/copilot-api/src/routes/messages/web-tools-interceptor.ts`
+   `src/routes/messages/web-tools-interceptor.ts`
    imported by `stream-translation.ts`. State (use counters) lives in
    the existing per-request context.
 
@@ -437,4 +437,4 @@ Default: `InProcessExecutor` for `web_fetch` (no extra deps), unset for
 - MCP fetch reference server:
   https://github.com/modelcontextprotocol/servers/tree/main/src/fetch
 - caozhiyuan/copilot-api streaming translation:
-  `vendor/copilot-api/src/routes/messages/stream-translation.ts`
+  `src/routes/messages/stream-translation.ts`

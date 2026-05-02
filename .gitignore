@@ -14,3 +14,15 @@ build/
 .vscode/
 .idea/
 *.swp
+
+# from upstream caozhiyuan/copilot-api
+# local env
+*.local
+# aider
+.aider*
+# eslint cache
+.eslintcache
+.opencode/plans
+.opencode/package-lock.json
+*.vsix
+.claude

@@ -6,7 +6,7 @@ Source: `ollama/ollama` `middleware/anthropic.go` (commit pinned in
 
 Goal: read Ollama's reference implementation of Anthropic-server-side
 `web_search` resolution and decide what to adopt, what to diverge from,
-and what's still missing in our `vendor/copilot-api/src/routes/messages/web-tools-*.ts`.
+and what's still missing in our `src/routes/messages/web-tools-*.ts`.
 
 ## TL;DR
 
@@ -191,7 +191,7 @@ the ceiling in `checkSearchPolicy` / `checkFetchPolicy`.
 
 ## Gap in our current implementation
 
-Files present in `vendor/copilot-api/src/routes/messages/`:
+Files present in `src/routes/messages/`:
 - ✅ `web-tools-vocab.ts` (D1)
 - ✅ `web-tools-types.ts` (D3)
 - ✅ `web-tools-state.ts` (D4 state + policy)

@@ -7,7 +7,7 @@ interceptor. Vendored copy of `ollama/ollama` `middleware/anthropic.go`
 - `anthropic.go` — the `WebSearchAnthropicWriter` middleware
 - `anthropic_test.go` — tests (3000 LOC; useful for porting later)
 - `NOTES.md` — side-by-side mapping vs our
-  `vendor/copilot-api/src/routes/messages/web-tools-*.ts` and
+  `src/routes/messages/web-tools-*.ts` and
   recommendations for the missing D6 (`web-tools-agent.ts`)
 
 This directory is scratch — not built, not linted. Delete after the

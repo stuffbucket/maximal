@@ -314,7 +314,7 @@ to a hardcoded interceptor. A user who configures *just* a custom
 MCP server (e.g. swap Brave for Tavily) only writes the
 `mcp_servers` block; `bridge_entries` are inherited from the default.
 
-The `vendor/copilot-api/src/routes/messages/web-tools-interceptor.ts`
+The `src/routes/messages/web-tools-interceptor.ts`
 referenced in `web-tools.md` becomes a thin adapter that loads the
 YAML and instantiates the generic interceptor.
 
@@ -417,4 +417,4 @@ Per-request lifecycle:
 - Anthropic web tool docs:
   https://platform.claude.com/docs/en/agents-and-tools/tool-use/
 - caozhiyuan/copilot-api streaming translation:
-  `vendor/copilot-api/src/routes/messages/stream-translation.ts`
+  `src/routes/messages/stream-translation.ts`

@@ -2,7 +2,7 @@
 
 Read-only reference snapshot. **Nothing in this directory is built or
 shipped** — it's documentation that informed the architecture. The live
-code lives in `vendor/copilot-api/`.
+code lives at the repo root (`src/`, `tests/`).
 
 ## opencode-copilot/
 

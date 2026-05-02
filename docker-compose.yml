@@ -6,7 +6,7 @@
 # container with the auth volume mounted:
 #
 #   # On the host (fastest):
-#   cd vendor/copilot-api && bun install && bun run ./src/main.ts auth --verbose
+#   bun install && bun run ./src/main.ts auth --verbose
 #
 #   # Or, in the container — no host bun needed:
 #   docker compose run --rm --entrypoint "bun run dist/main.js auth --verbose" proxy
@@ -22,7 +22,7 @@
 
 services:
   proxy:
-    build: ./vendor/copilot-api
+    build: .
     image: maximal-proxy:dev
     container_name: maximal-proxy
     restart: unless-stopped
