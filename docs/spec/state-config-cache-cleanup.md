@@ -69,8 +69,21 @@ The cumulative effect: failures are debuggable only by reading source.
 
 ## Scope: in this milestone
 
-Six commits. Each is independently mergeable, ordered by debugging
-dividend per LOC.
+Six additive commits + a pre-cleanup deletion pass. Each is
+independently mergeable, ordered by debugging dividend per LOC.
+
+### M0. Pre-cleanup deletion pass (status: complete)
+
+Three deletion candidates landed before M1 to keep subsequent diffs
+clean. Result:
+
+| Sub-milestone | Outcome |
+|---|---|
+| **M0a.** Remove `contrib/ollama-anthropic-spike/` after lifting the index-bookkeeping discipline into a permanent comment in `web-tools-stream.ts` | Done in `e4e109a`. −4,342 / +11. |
+| **M0b.** Drop unused `defaultExecutor` export | No-op — constant was already removed in an earlier `simplify pass` commit. Audit confirmed via `grep -rn defaultExecutor src/ tests/` returning empty. |
+| **M0c.** Consolidate `DEFAULT_TIMEOUT_MS` / `DEFAULT_MAX_CHARS` into `web-tools-vocab.ts` | Skipped — audit found these constants live only in their single user (`web-tools-executor.ts`), so this would be stylistic re-shuffling rather than deduplication. Net-neutral on LOC. Filed as deferred. |
+
+Net M0 reduction: ~4,330 LOC.
 
 ### M1. `feat(debug): print effective config + cache sizes + executor selection`
 
@@ -236,6 +249,7 @@ fires.
 | Log retention configurability | Hardcoded 7 days is fine for current use; M2's typed config makes adding the knob a one-liner later | Container deployments where logs need 0-day retention to avoid noise, or compliance asks for >7 days |
 | Per-instance prefetch cache → shared/configurable | Per-request scope is the right primitive; promotion to shared is a foot-gun | Cross-request cache hit-rate becomes a measurable win, which it isn't with our request shapes today |
 | `--print-config` flag (separate from `debug` subcommand) | M1 covers it via `debug`; one entry point is enough | If `debug` grows enough to be unwieldy and config-only printing becomes a separate ask |
+| Stylistic consolidation of executor-local constants in vocab (was M0c) | Audit showed they're not actually duplicated; moving them is style not dedup | If a third executor adds its own copy of timeout/max-chars defaults |
 
 ## Risks
 

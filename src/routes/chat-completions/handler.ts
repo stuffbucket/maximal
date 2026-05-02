@@ -2,14 +2,19 @@ import type { Context } from "hono"
 
 import { streamSSE, type SSEMessage } from "hono/streaming"
 
-import { reverseId } from "~/lib/anthropic-id-rewrite"
 import { awaitApproval } from "~/lib/approval"
 import { createHandlerLogger, debugJson, debugJsonTail } from "~/lib/logger"
 import { checkRateLimit } from "~/lib/rate-limit"
 import { state } from "~/lib/state"
+import {
+  createCopilotTokenUsageRecorder,
+  normalizeOpenAIUsage,
+  type UsageTokens,
+} from "~/lib/token-usage"
 import { generateRequestIdFromPayload, getUUID, isNullish } from "~/lib/utils"
 import {
   createChatCompletions,
+  type ChatCompletionChunk,
   type ChatCompletionResponse,
   type ChatCompletionsPayload,
 } from "~/services/copilot/create-chat-completions"
@@ -21,10 +26,6 @@ export async function handleCompletion(c: Context) {
 
   let payload = await c.req.json<ChatCompletionsPayload>()
   debugJsonTail(logger, "Request payload:", { value: payload, tailLength: 400 })
-
-  // Reverse the dash-date sentinel form (added by /v1/models for Claude
-  // Desktop's normalizer) back to Copilot's original dot-form before lookup.
-  payload.model = reverseId(payload.model)
 
   // Find the selected model
   const selectedModel = state.models?.data.find(
@@ -59,6 +60,11 @@ export async function handleCompletion(c: Context) {
 
   const sessionId = getUUID(requestId)
   logger.debug("Extracted session ID:", sessionId)
+  const recordUsage = createCopilotTokenUsageRecorder({
+    endpoint: "chat_completions",
+    fallbackSessionId: sessionId,
+    model: payload.model,
+  })
 
   const response = await createChatCompletions(payload, {
     requestId,
@@ -67,18 +73,42 @@ export async function handleCompletion(c: Context) {
 
   if (isNonStreaming(response)) {
     debugJson(logger, "Non-streaming response:", response)
+    recordUsage(normalizeOpenAIUsage(response.usage))
     return c.json(response)
   }
 
   logger.debug("Streaming response")
   return streamSSE(c, async (stream) => {
+    let usage: UsageTokens = {}
+
     for await (const chunk of response) {
       debugJson(logger, "Streaming chunk:", chunk)
+      const parsedChunk = parseChatCompletionChunk(chunk)
+      if (parsedChunk?.usage) {
+        usage = normalizeOpenAIUsage(parsedChunk.usage)
+      }
       await stream.writeSSE(chunk as SSEMessage)
     }
+
+    recordUsage(usage)
   })
 }
 
 const isNonStreaming = (
   response: Awaited<ReturnType<typeof createChatCompletions>>,
 ): response is ChatCompletionResponse => Object.hasOwn(response, "choices")
+
+const parseChatCompletionChunk = (
+  chunk: unknown,
+): ChatCompletionChunk | null => {
+  const data = (chunk as { data?: string }).data
+  if (!data || data === "[DONE]") {
+    return null
+  }
+
+  try {
+    return JSON.parse(data) as ChatCompletionChunk
+  } catch {
+    return null
+  }
+}

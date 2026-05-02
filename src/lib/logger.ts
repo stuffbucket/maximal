@@ -4,6 +4,7 @@ import path from "node:path"
 import util from "node:util"
 
 import { PATHS } from "./paths"
+import { registerProcessCleanup } from "./process-cleanup"
 import { requestContext } from "./request-context"
 import { state } from "./state"
 
@@ -137,15 +138,7 @@ const initializeLoggerRuntime = () => {
   cleanupInterval = setInterval(cleanupOldLogs, CLEANUP_INTERVAL_MS)
   maybeUnref(cleanupInterval)
 
-  process.once("exit", cleanup)
-  process.once("SIGINT", () => {
-    cleanup()
-    process.exit(0)
-  })
-  process.once("SIGTERM", () => {
-    cleanup()
-    process.exit(0)
-  })
+  registerProcessCleanup(cleanup)
 }
 
 const getLogStream = (filePath: string): fs.WriteStream => {

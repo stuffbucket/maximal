@@ -2,17 +2,22 @@ import type { Context } from "hono"
 
 import { streamSSE } from "hono/streaming"
 
-import { reverseId } from "~/lib/anthropic-id-rewrite"
 import { awaitApproval } from "~/lib/approval"
 import { getConfig, isResponsesApiWebSearchEnabled } from "~/lib/config"
 import { createHandlerLogger, debugJson, debugJsonTail } from "~/lib/logger"
 import { checkRateLimit } from "~/lib/rate-limit"
 import { state } from "~/lib/state"
+import {
+  createCopilotTokenUsageRecorder,
+  normalizeResponsesUsage,
+  type UsageTokens,
+} from "~/lib/token-usage"
 import { generateRequestIdFromPayload, getUUID } from "~/lib/utils"
 import {
   createResponses,
   type ResponsesPayload,
   type ResponsesResult,
+  type ResponseStreamEvent,
 } from "~/services/copilot/create-responses"
 
 import { createStreamIdTracker, fixStreamIds } from "./stream-id-sync"
@@ -32,16 +37,17 @@ export const handleResponses = async (c: Context) => {
   const payload = await c.req.json<ResponsesPayload>()
   debugJson(logger, "Responses request payload:", payload)
 
-  // Reverse the dash-date sentinel form (added by /v1/models for Claude
-  // Desktop's normalizer) back to Copilot's original dot-form before lookup.
-  payload.model = reverseId(payload.model)
-
   // not support subagent marker for now , set sessionId = getUUID(requestId)
   const requestId = generateRequestIdFromPayload({ messages: payload.input })
   logger.debug("Generated request ID:", requestId)
 
   const sessionId = getUUID(requestId)
   logger.debug("Extracted session ID:", sessionId)
+  const recordUsage = createCopilotTokenUsageRecorder({
+    endpoint: "responses",
+    fallbackSessionId: sessionId,
+    model: payload.model,
+  })
 
   useFunctionApplyPatch(payload)
 
@@ -96,9 +102,18 @@ export const handleResponses = async (c: Context) => {
     logger.debug("Forwarding native Responses stream")
     return streamSSE(c, async (stream) => {
       const idTracker = createStreamIdTracker()
+      let usage: UsageTokens = {}
 
       for await (const chunk of response) {
         debugJson(logger, "Responses stream chunk:", chunk)
+        const parsedEvent = parseResponsesStreamEvent(chunk)
+        if (
+          parsedEvent?.type === "response.completed"
+          || parsedEvent?.type === "response.failed"
+          || parsedEvent?.type === "response.incomplete"
+        ) {
+          usage = normalizeResponsesUsage(parsedEvent.response.usage)
+        }
 
         const processedData = fixStreamIds(
           (chunk as { data?: string }).data ?? "",
@@ -112,6 +127,8 @@ export const handleResponses = async (c: Context) => {
           data: processedData,
         })
       }
+
+      recordUsage(usage)
     })
   }
 
@@ -119,6 +136,7 @@ export const handleResponses = async (c: Context) => {
     value: response,
     tailLength: 400,
   })
+  recordUsage(normalizeResponsesUsage((response as ResponsesResult).usage))
   return c.json(response as ResponsesResult)
 }
 
@@ -128,6 +146,21 @@ const isAsyncIterable = <T>(value: unknown): value is AsyncIterable<T> =>
 
 const isStreamingRequested = (payload: ResponsesPayload): boolean =>
   Boolean(payload.stream)
+
+const parseResponsesStreamEvent = (
+  chunk: unknown,
+): ResponseStreamEvent | null => {
+  const data = (chunk as { data?: string }).data
+  if (!data || data === "[DONE]") {
+    return null
+  }
+
+  try {
+    return JSON.parse(data) as ResponseStreamEvent
+  } catch {
+    return null
+  }
+}
 
 const useFunctionApplyPatch = (payload: ResponsesPayload): void => {
   const config = getConfig()
