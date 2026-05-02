@@ -5,9 +5,15 @@ import consola from "consola"
 import fs from "node:fs/promises"
 import os from "node:os"
 
+import { getConfig } from "./lib/config"
 import { PATHS } from "./lib/paths"
 
-interface DebugInfo {
+interface SecretStatus {
+  name: string
+  source: "env" | "config" | "unset"
+}
+
+export interface DebugInfo {
   version: string
   runtime: {
     name: string
@@ -18,8 +24,25 @@ interface DebugInfo {
   paths: {
     APP_DIR: string
     GITHUB_TOKEN_PATH: string
+    CONFIG_PATH: string
+    LOG_DIR: string
   }
   tokenExists: boolean
+  config: {
+    use_messages_api?: boolean
+    use_function_apply_patch?: boolean
+    use_responses_api_web_search?: boolean
+    small_model?: string
+    claude_token_multiplier?: number
+    api_keys_configured: boolean
+    providers_declared: Array<string>
+  }
+  executor: {
+    web_tools: string
+    base?: string
+    notes?: string
+  }
+  secrets: Array<SecretStatus>
 }
 
 interface RunDebugOptions {
@@ -63,11 +86,65 @@ async function checkTokenExists(): Promise<boolean> {
   }
 }
 
+/** Status of a sensitive value: env wins, config-file fallback, else
+ *  unset. We never read the value here — only the source.
+ *
+ *  Exported and env-injected for testability — the actual debug
+ *  subcommand passes process.env. */
+export interface SecretStatusInput {
+  name: string
+  envVar: string
+  configValue: string | undefined
+}
+
+export function secretStatus(
+  input: SecretStatusInput,
+  env: NodeJS.ProcessEnv = process.env,
+): SecretStatus {
+  const value = env[input.envVar]
+  if (value !== undefined && value.length > 0) {
+    return { name: input.name, source: "env" }
+  }
+  if (input.configValue !== undefined && input.configValue.length > 0) {
+    return { name: input.name, source: "config" }
+  }
+  return { name: input.name, source: "unset" }
+}
+
+/** Mirrors selectExecutor() from web-tools-executor.ts but without
+ *  importing the runtime path (debug subcommand should not boot the
+ *  HTTP stack). Keep both in sync — the env-var precedence is the
+ *  contract under test. Env-injected for testability. */
+export function describeExecutor(
+  env: NodeJS.ProcessEnv = process.env,
+): DebugInfo["executor"] {
+  const apiKey = env.OLLAMA_API_KEY
+  if (apiKey !== undefined && apiKey.length > 0) {
+    return {
+      web_tools: "OllamaWebExecutor",
+      base: "https://ollama.com/api",
+    }
+  }
+  return {
+    web_tools: "InProcessFetchExecutor",
+    notes: "search disabled; set OLLAMA_API_KEY to enable hosted search/fetch",
+  }
+}
+
 async function getDebugInfo(): Promise<DebugInfo> {
   const [version, tokenExists] = await Promise.all([
     getPackageVersion(),
     checkTokenExists(),
   ])
+
+  // Config read can throw if the file is malformed; surface as empty
+  // rather than crashing — the user is debugging.
+  let config: ReturnType<typeof getConfig>
+  try {
+    config = getConfig()
+  } catch {
+    config = {}
+  }
 
   return {
     version,
@@ -75,22 +152,86 @@ async function getDebugInfo(): Promise<DebugInfo> {
     paths: {
       APP_DIR: PATHS.APP_DIR,
       GITHUB_TOKEN_PATH: PATHS.GITHUB_TOKEN_PATH,
+      CONFIG_PATH: PATHS.CONFIG_PATH,
+      LOG_DIR: `${PATHS.APP_DIR}/logs`,
     },
     tokenExists,
+    config: {
+      use_messages_api: config.useMessagesApi,
+      use_function_apply_patch: config.useFunctionApplyPatch,
+      use_responses_api_web_search: config.useResponsesApiWebSearch,
+      small_model: config.smallModel,
+      claude_token_multiplier: config.claudeTokenMultiplier,
+      api_keys_configured: (config.auth?.apiKeys?.length ?? 0) > 0,
+      providers_declared: Object.keys(config.providers ?? {}),
+    },
+    executor: describeExecutor(),
+    secrets: [
+      secretStatus({
+        name: "ollama_api_key",
+        envVar: "OLLAMA_API_KEY",
+        configValue: undefined,
+      }),
+      secretStatus({
+        name: "anthropic_api_key",
+        envVar: "ANTHROPIC_API_KEY",
+        configValue: config.anthropicApiKey,
+      }),
+    ],
   }
 }
 
+type Stringy = string | number | boolean | undefined
+
+function formatField(name: string, value: Stringy): string {
+  const v = value === undefined ? "<unset>" : String(value)
+  return `  ${name}: ${v}`
+}
+
 function printDebugInfoPlain(info: DebugInfo): void {
-  consola.info(`copilot-api debug
+  const lines = [
+    `copilot-api debug`,
+    ``,
+    `Version: ${info.version}`,
+    `Runtime: ${info.runtime.name} ${info.runtime.version} (${info.runtime.platform} ${info.runtime.arch})`,
+    ``,
+    `Paths:`,
+    `  APP_DIR: ${info.paths.APP_DIR}`,
+    `  CONFIG_PATH: ${info.paths.CONFIG_PATH}`,
+    `  GITHUB_TOKEN_PATH: ${info.paths.GITHUB_TOKEN_PATH}`,
+    `  LOG_DIR: ${info.paths.LOG_DIR}`,
+    ``,
+    `GitHub token: ${info.tokenExists ? "<set>" : "<unset>"}`,
+    ``,
+    `Config:`,
+    formatField("use_messages_api", info.config.use_messages_api),
+    formatField(
+      "use_function_apply_patch",
+      info.config.use_function_apply_patch,
+    ),
+    formatField(
+      "use_responses_api_web_search",
+      info.config.use_responses_api_web_search,
+    ),
+    formatField("small_model", info.config.small_model),
+    formatField("claude_token_multiplier", info.config.claude_token_multiplier),
+    formatField("api_keys_configured", info.config.api_keys_configured),
+    formatField(
+      "providers_declared",
+      info.config.providers_declared.length > 0 ?
+        info.config.providers_declared.join(", ")
+      : "<none>",
+    ),
+    ``,
+    `Web-tools executor: ${info.executor.web_tools}`,
+    ...(info.executor.base ? [`  base: ${info.executor.base}`] : []),
+    ...(info.executor.notes ? [`  ${info.executor.notes}`] : []),
+    ``,
+    `Secrets:`,
+    ...info.secrets.map((s) => `  ${s.name}: <${s.source}>`),
+  ]
 
-Version: ${info.version}
-Runtime: ${info.runtime.name} ${info.runtime.version} (${info.runtime.platform} ${info.runtime.arch})
-
-Paths:
-- APP_DIR: ${info.paths.APP_DIR}
-- GITHUB_TOKEN_PATH: ${info.paths.GITHUB_TOKEN_PATH}
-
-Token exists: ${info.tokenExists ? "Yes" : "No"}`)
+  consola.info(lines.join("\n"))
 }
 
 function printDebugInfoJson(info: DebugInfo): void {
