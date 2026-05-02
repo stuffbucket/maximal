@@ -8,6 +8,7 @@ import os from "node:os"
 import { type AppConfig, getConfig } from "./lib/config"
 import { PATHS } from "./lib/paths"
 import { SECRET_DEFS, secretIsFromFile } from "./lib/secrets"
+import { getGitVersion, shortSha } from "./lib/version"
 import { chooseExecutor } from "./routes/messages/web-tools-executor"
 
 interface SecretStatus {
@@ -17,6 +18,10 @@ interface SecretStatus {
 
 export interface DebugInfo {
   version: string
+  git: {
+    sha: string | undefined
+    branch: string | undefined
+  }
   runtime: {
     name: string
     version: string
@@ -196,6 +201,7 @@ async function getDebugInfo(): Promise<DebugInfo> {
 
   return {
     version,
+    git: getGitVersion(),
     runtime: getRuntimeInfo(),
     paths: {
       APP_DIR: PATHS.APP_DIR,
@@ -222,6 +228,7 @@ function printDebugInfoPlain(info: DebugInfo): void {
     `copilot-api debug`,
     ``,
     `Version: ${info.version}`,
+    `Git: ${shortSha(info.git.sha)}${info.git.branch ? ` (${info.git.branch})` : ""}`,
     `Runtime: ${info.runtime.name} ${info.runtime.version} (${info.runtime.platform} ${info.runtime.arch})`,
     ``,
     `Paths:`,

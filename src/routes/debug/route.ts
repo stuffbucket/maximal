@@ -12,6 +12,7 @@ import { Hono } from "hono"
 import { allCacheMetrics } from "~/lib/cache"
 import { getConfig } from "~/lib/config"
 import { state } from "~/lib/state"
+import { getGitVersion } from "~/lib/version"
 
 import {
   collectSecretStatuses,
@@ -36,6 +37,7 @@ debugRoutes.get("/state", (c) => {
   }
 
   return c.json({
+    git: getGitVersion(),
     runtime: {
       account_type: state.accountType,
       verbose: state.verbose,

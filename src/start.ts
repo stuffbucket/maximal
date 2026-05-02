@@ -21,6 +21,7 @@ import {
   cacheVsCodeSessionId,
   cacheVsCodeDeviceId,
 } from "./lib/utils"
+import { getGitVersion, shortSha } from "./lib/version"
 
 interface RunServerOptions {
   port: number
@@ -42,6 +43,11 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   // Ensure config is merged with defaults at startup
   mergeConfigWithDefaults()
 
+  const git = getGitVersion()
+  consola.info(
+    `Source revision: ${shortSha(git.sha)}${git.branch ? ` (${git.branch})` : ""}`,
+  )
+
   await initOpencodeVersion()
 
   if (options.proxyEnv) {
@@ -50,6 +56,9 @@ export async function runServer(options: RunServerOptions): Promise<void> {
 
   state.verbose = options.verbose
   if (options.verbose) {
+    // Module-scope mutation, but runServer runs once at startup —
+    // no concurrent caller exists.
+    // eslint-disable-next-line require-atomic-updates
     consola.level = 5
     consola.info("Verbose logging enabled")
   }
