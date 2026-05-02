@@ -68,6 +68,10 @@ interface StreamingAgentArgs {
     subagentMarker?: SubagentMarker | null
     logger: ConsolaInstance
   }
+  /** Upstream-call dependency injection for tests. Defaults to the
+   *  real createChatCompletions; pass a stub to drive synthetic
+   *  chunk streams without mock.module side effects. */
+  upstreamCall?: typeof createChatCompletions
 }
 
 export async function runStreamingAgent(
@@ -110,6 +114,7 @@ export async function runStreamingAgent(
       messageStartEmitted,
       executor,
       state,
+      upstreamCall: args.upstreamCall ?? createChatCompletions,
     })
     messageStartEmitted = turnResult.messageStartEmitted
     bufferedFinalEvents = turnResult.bufferedFinal
@@ -165,6 +170,7 @@ interface TurnArgs {
   messageStartEmitted: boolean
   executor: Executor
   state: RequestState
+  upstreamCall: typeof createChatCompletions
 }
 
 interface OpenBlock {
@@ -186,7 +192,7 @@ async function runOneStreamingTurn(args: TurnArgs): Promise<TurnResult> {
   const openAIPayload = translateToOpenAI(args.payload)
   openAIPayload.stream = true
 
-  const response = await createChatCompletions(openAIPayload, {
+  const response = await args.upstreamCall(openAIPayload, {
     requestId: args.options.requestId,
     sessionId: args.options.sessionId,
     compactType: args.options.compactType,
