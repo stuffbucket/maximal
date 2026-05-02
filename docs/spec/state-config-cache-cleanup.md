@@ -269,7 +269,7 @@ should I work on" question is answerable from `git log -- docs/spec/`.
 | Streaming agent test coverage | ✅ landed `bd662d0` |
 | Reuse `trimTo` for HTML input cap | ✅ landed `37a0513` (surfaced by simplify pass) |
 | Six findings from simplify review (SECRET_DEFS, summarizeConfig, FakeExecutor, ExecutorChoice, etc.) | ✅ landed `52837ff` |
-| Wrap `state.models` / `state.copilotToken` with metrics — needs a `SingletonCache` shape | 🚧 in-flight on `agent3/singleton-cache` |
+| Wrap `state.models` / `state.copilotToken` with metrics — needed a `SingletonCache` shape | ✅ landed `47bffbe` (primitive) + `3c1f749` (setters via `state.ts`) |
 
 ### Documentation
 
