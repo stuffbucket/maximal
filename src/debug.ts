@@ -2,15 +2,17 @@
 
 import { defineCommand } from "citty"
 import consola from "consola"
+import fsSync from "node:fs"
 import fs from "node:fs/promises"
 import os from "node:os"
+import path from "node:path"
 
 import { getConfig } from "./lib/config"
 import { PATHS } from "./lib/paths"
 
 interface SecretStatus {
   name: string
-  source: "env" | "config" | "unset"
+  source: "env" | "file" | "config" | "unset"
 }
 
 export interface DebugInfo {
@@ -95,6 +97,10 @@ export interface SecretStatusInput {
   name: string
   envVar: string
   configValue: string | undefined
+  /** Optional fileName under the secrets/ dir — if present and the
+   *  file exists with safe mode, source is "file". Used by M5 to
+   *  distinguish env-from-file vs env-from-shell. */
+  fileName?: string
 }
 
 export function secretStatus(
@@ -103,12 +109,34 @@ export function secretStatus(
 ): SecretStatus {
   const value = env[input.envVar]
   if (value !== undefined && value.length > 0) {
+    // In the file-loaded case the value is in env at this point
+    // (loadSecretIntoEnv ran at boot). To distinguish, peek at the
+    // file: if it exists with safe mode and matches the env value,
+    // report "file". Otherwise "env". Read is best-effort —
+    // diagnostics, not authoritative.
+    if (input.fileName !== undefined && fileMatches(input.fileName, value)) {
+      return { name: input.name, source: "file" }
+    }
     return { name: input.name, source: "env" }
   }
   if (input.configValue !== undefined && input.configValue.length > 0) {
     return { name: input.name, source: "config" }
   }
   return { name: input.name, source: "unset" }
+}
+
+function fileMatches(fileName: string, value: string): boolean {
+  // Best-effort — any error means "couldn't verify, assume not from
+  // file."
+  try {
+    const filePath = path.join(PATHS.APP_DIR, "secrets", fileName)
+    const stats = fsSync.statSync(filePath)
+    if (!stats.isFile()) return false
+    if ((stats.mode & 0o777) !== 0o600) return false
+    return fsSync.readFileSync(filePath, "utf8").trim() === value
+  } catch {
+    return false
+  }
 }
 
 /** Mirrors selectExecutor() from web-tools-executor.ts but without
@@ -171,11 +199,13 @@ async function getDebugInfo(): Promise<DebugInfo> {
         name: "ollama_api_key",
         envVar: "OLLAMA_API_KEY",
         configValue: undefined,
+        fileName: "ollama",
       }),
       secretStatus({
         name: "anthropic_api_key",
         envVar: "ANTHROPIC_API_KEY",
         configValue: config.anthropicApiKey,
+        fileName: "anthropic",
       }),
     ],
   }

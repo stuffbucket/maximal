@@ -10,6 +10,7 @@ import { mergeConfigWithDefaults } from "./lib/config"
 import { initOpencodeVersion } from "./lib/opencode"
 import { ensurePaths } from "./lib/paths"
 import { initProxyFromEnv } from "./lib/proxy"
+import { ensureSecretsDir, loadSecretIntoEnv } from "./lib/secrets"
 import { generateEnvScript } from "./lib/shell"
 import { state } from "./lib/state"
 import { logUser, setupCopilotToken, setupGitHubToken } from "./lib/token"
@@ -64,6 +65,7 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   state.showToken = options.showToken
 
   await ensurePaths()
+  bootSecrets()
   await cacheVSCodeVersion()
   cacheMacMachineId()
   cacheVsCodeSessionId()
@@ -84,63 +86,16 @@ export async function runServer(options: RunServerOptions): Promise<void> {
     `Available models: \n${state.models?.data.map((model) => `- ${model.id}`).join("\n")}`,
   )
 
-  consola.info(
-    `Web-tools executor: ${process.env.OLLAMA_API_KEY ? "OllamaWebExecutor" : "InProcessFetchExecutor (search disabled; set OLLAMA_API_KEY)"}`,
-  )
+  const executorName =
+    process.env.OLLAMA_API_KEY ?
+      "OllamaWebExecutor"
+    : "InProcessFetchExecutor (search disabled; set OLLAMA_API_KEY)"
+  consola.info(`Web-tools executor: ${executorName}`)
 
   const serverUrl = `http://localhost:${options.port}`
 
   if (options.claudeCode) {
-    consola.log(
-      "\n💡 Tip: The --claude-code flag simply generates a clipboard command for launching Claude Code. \n"
-        + "All models remain fully accessible without this flag, just configure the model ID directly in your settings.json file.",
-    )
-
-    invariant(state.models, "Models should be loaded by now")
-
-    const selectedModel = await consola.prompt(
-      "Select a model to use with Claude Code",
-      {
-        type: "select",
-        options: state.models.data.map((model) => model.id),
-      },
-    )
-
-    const selectedSmallModel = await consola.prompt(
-      "Select a small model to use with Claude Code",
-      {
-        type: "select",
-        options: state.models.data.map((model) => model.id),
-      },
-    )
-
-    const command = generateEnvScript(
-      {
-        ANTHROPIC_BASE_URL: serverUrl,
-        ANTHROPIC_AUTH_TOKEN: "dummy",
-        ANTHROPIC_MODEL: selectedModel,
-        ANTHROPIC_DEFAULT_SONNET_MODEL: selectedModel,
-        ANTHROPIC_DEFAULT_HAIKU_MODEL: selectedSmallModel,
-        DISABLE_NON_ESSENTIAL_MODEL_CALLS: "1",
-        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
-        CLAUDE_CODE_ATTRIBUTION_HEADER: "0",
-        CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION: "false",
-        CLAUDE_CODE_DISABLE_TERMINAL_TITLE: "true",
-        CLAUDE_CODE_ENABLE_AWAY_SUMMARY: "0",
-        CLAUDE_PLUGIN_ENABLE_QUESTION_RULES: "true",
-      },
-      "claude",
-    )
-
-    try {
-      clipboard.writeSync(command)
-      consola.success("Copied Claude Code command to clipboard!")
-    } catch {
-      consola.warn(
-        "Failed to copy to clipboard. Here is the Claude Code command:",
-      )
-      consola.log(command)
-    }
+    await runClaudeCodeFlow(serverUrl)
   }
 
   consola.box(
@@ -156,6 +111,77 @@ export async function runServer(options: RunServerOptions): Promise<void> {
       idleTimeout: 0,
     },
   })
+}
+
+/** Interactive Claude Code helper: prompt for primary + small model,
+ *  generate a clipboard-ready env script, and copy it. Factored out
+ *  to keep runServer() under the lint line cap. */
+async function runClaudeCodeFlow(serverUrl: string): Promise<void> {
+  consola.log(
+    "\n💡 Tip: The --claude-code flag simply generates a clipboard command for launching Claude Code. \n"
+      + "All models remain fully accessible without this flag, just configure the model ID directly in your settings.json file.",
+  )
+
+  invariant(state.models, "Models should be loaded by now")
+
+  const selectedModel = await consola.prompt(
+    "Select a model to use with Claude Code",
+    { type: "select", options: state.models.data.map((m) => m.id) },
+  )
+
+  const selectedSmallModel = await consola.prompt(
+    "Select a small model to use with Claude Code",
+    { type: "select", options: state.models.data.map((m) => m.id) },
+  )
+
+  const command = generateEnvScript(
+    {
+      ANTHROPIC_BASE_URL: serverUrl,
+      ANTHROPIC_AUTH_TOKEN: "dummy",
+      ANTHROPIC_MODEL: selectedModel,
+      ANTHROPIC_DEFAULT_SONNET_MODEL: selectedModel,
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: selectedSmallModel,
+      DISABLE_NON_ESSENTIAL_MODEL_CALLS: "1",
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+      CLAUDE_CODE_ATTRIBUTION_HEADER: "0",
+      CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION: "false",
+      CLAUDE_CODE_DISABLE_TERMINAL_TITLE: "true",
+      CLAUDE_CODE_ENABLE_AWAY_SUMMARY: "0",
+      CLAUDE_PLUGIN_ENABLE_QUESTION_RULES: "true",
+    },
+    "claude",
+  )
+
+  try {
+    clipboard.writeSync(command)
+    consola.success("Copied Claude Code command to clipboard!")
+  } catch {
+    consola.warn(
+      "Failed to copy to clipboard. Here is the Claude Code command:",
+    )
+    consola.log(command)
+  }
+}
+
+/** Load file-based provider secrets into process.env. Env still wins;
+ *  this only populates unset values from ~/.local/share/copilot-api/
+ *  secrets/<provider>. Called from runServer() boot. */
+function bootSecrets(): void {
+  ensureSecretsDir()
+  const ollama = loadSecretIntoEnv({
+    envVar: "OLLAMA_API_KEY",
+    fileName: "ollama",
+  })
+  if (ollama.source === "file") {
+    consola.info("Loaded OLLAMA_API_KEY from secrets/ollama")
+  }
+  const anthropic = loadSecretIntoEnv({
+    envVar: "ANTHROPIC_API_KEY",
+    fileName: "anthropic",
+  })
+  if (anthropic.source === "file") {
+    consola.info("Loaded ANTHROPIC_API_KEY from secrets/anthropic")
+  }
 }
 
 export const start = defineCommand({

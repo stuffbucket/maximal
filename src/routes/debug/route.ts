@@ -62,11 +62,13 @@ debugRoutes.get("/state", (c) => {
         name: "ollama_api_key",
         envVar: "OLLAMA_API_KEY",
         configValue: undefined,
+        fileName: "ollama",
       }),
       secretStatus({
         name: "anthropic_api_key",
         envVar: "ANTHROPIC_API_KEY",
         configValue: config.anthropicApiKey,
+        fileName: "anthropic",
       }),
     ],
   })
