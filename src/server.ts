@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs"
 import { createAuthMiddleware } from "./lib/request-auth"
 import { traceIdMiddleware } from "./lib/trace"
 import { completionRoutes } from "./routes/chat-completions/route"
+import { debugRoutes } from "./routes/debug/route"
 import { embeddingRoutes } from "./routes/embeddings/route"
 import { messageRoutes } from "./routes/messages/route"
 import { modelRoutes } from "./routes/models/route"
@@ -24,7 +25,12 @@ server.use(cors())
 server.use(
   "*",
   createAuthMiddleware({
-    allowUnauthenticatedPaths: ["/", "/usage-viewer", "/usage-viewer/"],
+    allowUnauthenticatedPaths: [
+      "/",
+      "/usage-viewer",
+      "/usage-viewer/",
+      "/_debug/state",
+    ],
   }),
 )
 
@@ -35,6 +41,7 @@ server.get("/usage-viewer", (c) => {
 })
 server.get("/usage-viewer/", (c) => c.redirect("/usage-viewer", 301))
 
+server.route("/_debug", debugRoutes)
 server.route("/chat/completions", completionRoutes)
 server.route("/models", modelRoutes)
 server.route("/embeddings", embeddingRoutes)
