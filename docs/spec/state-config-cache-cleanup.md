@@ -251,6 +251,39 @@ fires.
 | `--print-config` flag (separate from `debug` subcommand) | M1 covers it via `debug`; one entry point is enough | If `debug` grows enough to be unwieldy and config-only printing becomes a separate ask |
 | Stylistic consolidation of executor-local constants in vocab (was M0c) | Audit showed they're not actually duplicated; moving them is style not dedup | If a third executor adds its own copy of timeout/max-chars defaults |
 
+## Follow-ups surfaced during implementation
+
+Items not in the original M0–M6 scope but identified while landing
+them. Each is a small win on its own; ranked by likelihood of earning
+back the time. Listed here rather than discarded so the next "what
+should I work on" question is answerable from `git log -- docs/spec/`.
+
+### Code
+
+| Item | Estimate | Why it matters |
+|---|---|---|
+| **DRY `describeExecutor` against `selectExecutor`.** Today the executor-selection logic is in two places (`web-tools-executor.ts` and `debug.ts`) with a TODO comment calling out the duplication. Lift to one source. | ~30 LOC | Drift hazard. Adding a third executor will silently disagree with the debug output until both sites are updated. |
+| **Streaming agent test coverage.** `web-tools-stream.ts` was instrumented during M3 logging but has no unit tests. The non-streaming path (`web-tools-agent.ts`) has six. Streaming is the path real clients hit. | ~150 LOC | Highest real-world coverage gap in the web-tools subsystem. |
+| **Wrap `state.models` / `state.copilotToken` with metrics.** The new `caches:` array in `/_debug/state` is empty because the only wrapped cache is per-request transient. Note: the `Cache<K,V>` LRU shape is a mismatch for these single-entry caches — this needs a `SingletonCache` or similar. | ~50 LOC + small new shape | Makes `/_debug/state` immediately useful instead of structurally complete-but-empty. |
+| **HMAC-signed `encrypted_content`.** Currently base64-JSON unsigned; tampering would be undetectable. | ~30 LOC | Low priority unless an extension-injection attack vector materializes. |
+| **E2E test harness against live Copilot.** Today's web-tools verification was a one-off manual probe. | ~200 LOC, gated behind a flag | Catches regressions the unit tests can't (real upstream wire shapes, real auth, real streaming). |
+
+### Documentation
+
+| Item | Estimate | Why it matters |
+|---|---|---|
+| **Update `docs/spec/web-tools.md`** — D6 is done, not "missing." | 1-line change | Misleads anyone reading the spec. |
+| **Update `CLAUDE.md`** — mention `copilot-api debug` and `/_debug/state` as the diagnostic surfaces. | ~10 lines | First thing a contributor would want to know. |
+| **Document the worktree convention for parallel agents.** Today's merge collision was avoidable — `git worktree add ../maximal-<task>` per agent, or `isolation: 'worktree'` for spawned subagents. | ~15 lines | Prevents repeat collisions. |
+| **PRD completion stamps with commit hashes.** Adding "Status: complete (b4297c0)" to each milestone makes this PRD a deliverable artifact. | minor edit | Closes the loop. Lets a future reader skim and know what landed when. |
+
+### Hygiene
+
+| Item | Estimate | Why it matters |
+|---|---|---|
+| `npm i baseline-browser-mapping@latest -D` | one-liner | Removes a noisy lint warning that appears on every run. |
+| Verify upstream-merged `.github/workflows/` actually runs our tests | audit only | We didn't initiate the merge; haven't confirmed CI behavior matches expectations. |
+
 ## Risks
 
 - **zod adds runtime weight.** Mitigation: `zod` is ~50KB minified
