@@ -78,11 +78,7 @@ function extractTitle(html: string): string | undefined {
 }
 
 function htmlToMarkdown(body: string): string {
-  const input =
-    body.length > MAX_HTML_INPUT_CHARS ?
-      body.slice(0, MAX_HTML_INPUT_CHARS)
-    : body
-  return turndown.turndown(input)
+  return turndown.turndown(trimTo(body, MAX_HTML_INPUT_CHARS))
 }
 
 function isTextual(mediaType: string): boolean {
@@ -144,10 +140,7 @@ export class InProcessFetchExecutor implements Executor {
     const title = isHtml ? extractTitle(body) : undefined
     const markdown = isHtml ? htmlToMarkdown(body) : body
 
-    const trimmed =
-      markdown.length > maxChars ? markdown.slice(0, maxChars) : markdown
-
-    return { ok: true, markdown: trimmed, title }
+    return { ok: true, markdown: trimTo(markdown, maxChars), title }
   }
 
   // No search backend wired; configure a different Executor to enable.
