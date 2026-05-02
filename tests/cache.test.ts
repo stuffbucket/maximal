@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 
-import { allCacheMetrics, Cache } from "~/lib/cache"
+import { allCacheMetrics, Cache, SingletonCache } from "~/lib/cache"
 
 describe("Cache", () => {
   it("get returns undefined and increments misses for absent keys", () => {
@@ -79,5 +79,70 @@ describe("Cache", () => {
     const found = allCacheMetrics().find((m) => m.name === "registered-1")
     expect(found?.size).toBe(1)
     c.unregister()
+  })
+
+  it("Cache.metrics() reports kind: 'lru'", () => {
+    const c = new Cache<string, number>({ name: "kind-1", max: 1 })
+    expect(c.metrics().kind).toBe("lru")
+    c.unregister()
+  })
+})
+
+describe("SingletonCache", () => {
+  it("starts empty: get() undefined, size 0, refreshes 0, loaded_at_ms null", () => {
+    const s = new SingletonCache<number>({ name: "s-empty" })
+    expect(s.get()).toBeUndefined()
+    expect(s.has()).toBe(false)
+    const m = s.metrics()
+    expect(m.kind).toBe("singleton")
+    expect(m.size).toBe(0)
+    expect(m.refreshes).toBe(0)
+    expect(m.loaded_at_ms).toBeNull()
+    s.unregister()
+  })
+
+  it("set stores value, increments refreshes, stamps loaded_at_ms", () => {
+    let now = 1_000_000
+    const s = new SingletonCache<number>({
+      name: "s-set",
+      now: () => now,
+    })
+    s.set(42)
+    expect(s.get()).toBe(42)
+    expect(s.has()).toBe(true)
+    let m = s.metrics()
+    expect(m.size).toBe(1)
+    expect(m.refreshes).toBe(1)
+    expect(m.loaded_at_ms).toBe(1_000_000)
+
+    now = 2_000_000
+    s.set(99)
+    m = s.metrics()
+    expect(s.get()).toBe(99)
+    expect(m.refreshes).toBe(2)
+    expect(m.loaded_at_ms).toBe(2_000_000)
+    s.unregister()
+  })
+
+  it("clear empties the value and resets loaded_at_ms but keeps refresh counter", () => {
+    const s = new SingletonCache<number>({ name: "s-clear" })
+    s.set(1)
+    s.clear()
+    const m = s.metrics()
+    expect(s.get()).toBeUndefined()
+    expect(m.size).toBe(0)
+    expect(m.loaded_at_ms).toBeNull()
+    expect(m.refreshes).toBe(1)
+    s.unregister()
+  })
+
+  it("registers in allCacheMetrics() and is removable via unregister()", () => {
+    const s = new SingletonCache<number>({ name: "s-registered" })
+    s.set(1)
+    const found = allCacheMetrics().find((m) => m.name === "s-registered")
+    expect(found?.kind).toBe("singleton")
+    s.unregister()
+    const after = allCacheMetrics().find((m) => m.name === "s-registered")
+    expect(after).toBeUndefined()
   })
 })
