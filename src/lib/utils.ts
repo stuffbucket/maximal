@@ -10,7 +10,7 @@ import { getModels } from "~/services/copilot/get-models"
 import { getVSCodeVersion } from "~/services/get-vscode-version"
 
 import { getVSCodeDeviceId } from "./deviceid"
-import { state } from "./state"
+import { setModels, state } from "./state"
 
 export const sleep = (ms: number) =>
   new Promise((resolve) => {
@@ -22,13 +22,13 @@ export const isNullish = (value: unknown): value is null | undefined =>
 
 export async function cacheModels(): Promise<void> {
   const models = await getModels()
-  state.models = {
+  setModels({
     ...models,
     data: models.data.filter(
       (model) =>
         model.model_picker_enabled || model.capabilities.type === "embeddings",
     ),
-  }
+  })
 }
 
 export const cacheVSCodeVersion = async () => {

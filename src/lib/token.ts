@@ -11,7 +11,7 @@ import { getGitHubUser } from "~/services/github/get-user"
 import { pollAccessToken } from "~/services/github/poll-access-token"
 
 import { HTTPError } from "./error"
-import { state } from "./state"
+import { setCopilotToken, state } from "./state"
 
 let copilotRefreshLoopController: AbortController | null = null
 
@@ -33,7 +33,7 @@ export const setupCopilotToken = async () => {
   if (isOpencodeOauthApp()) {
     if (!state.githubToken) throw new Error(`opencode token not found`)
 
-    state.copilotToken = state.githubToken
+    setCopilotToken(state.githubToken)
 
     consola.debug("GitHub Copilot token set from opencode auth token")
     if (state.showToken) {
@@ -45,7 +45,7 @@ export const setupCopilotToken = async () => {
   }
 
   const { token, refresh_in } = await getCopilotToken()
-  state.copilotToken = token
+  setCopilotToken(token)
 
   // Display the Copilot token to the screen
   consola.debug("GitHub Copilot Token fetched successfully!")
@@ -105,7 +105,7 @@ const runCopilotRefreshLoop = async (
 
     try {
       const { token, refresh_in } = await getCopilotToken()
-      state.copilotToken = token
+      setCopilotToken(token)
       refreshAtMs = getRefreshDeadlineMs(refresh_in)
       consola.debug("Copilot token refreshed")
       if (state.showToken) {
