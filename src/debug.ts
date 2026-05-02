@@ -9,6 +9,7 @@ import path from "node:path"
 
 import { getConfig } from "./lib/config"
 import { PATHS } from "./lib/paths"
+import { chooseExecutor } from "./routes/messages/web-tools-executor"
 
 interface SecretStatus {
   name: string
@@ -139,23 +140,17 @@ function fileMatches(fileName: string, value: string): boolean {
   }
 }
 
-/** Mirrors selectExecutor() from web-tools-executor.ts but without
- *  importing the runtime path (debug subcommand should not boot the
- *  HTTP stack). Keep both in sync — the env-var precedence is the
- *  contract under test. Env-injected for testability. */
+/** Diagnostic shape of the executor `selectExecutor()` would pick.
+ *  Delegates to `chooseExecutor()` so debug output and runtime
+ *  selection share one source of truth. */
 export function describeExecutor(
   env: NodeJS.ProcessEnv = process.env,
 ): DebugInfo["executor"] {
-  const apiKey = env.OLLAMA_API_KEY
-  if (apiKey !== undefined && apiKey.length > 0) {
-    return {
-      web_tools: "OllamaWebExecutor",
-      base: "https://ollama.com/api",
-    }
-  }
+  const choice = chooseExecutor(env)
   return {
-    web_tools: "InProcessFetchExecutor",
-    notes: "search disabled; set OLLAMA_API_KEY to enable hosted search/fetch",
+    web_tools: choice.kind,
+    ...(choice.base === undefined ? {} : { base: choice.base }),
+    ...(choice.notes === undefined ? {} : { notes: choice.notes }),
   }
 }
 

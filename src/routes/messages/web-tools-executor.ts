@@ -354,6 +354,34 @@ function fetchErrorFromPost(err: PostErr): WebFetchErrorCode {
 }
 
 /**
+ * Description of which executor `selectExecutor()` would return for
+ * a given env, with the diagnostic shape used by `copilot-api debug`
+ * and `/_debug/state`. Pure — no side effects, no instantiation.
+ *
+ * Single source of truth for the executor-selection contract. Both
+ * `selectExecutor` (which builds the instance) and the debug
+ * surfaces (which describe it) consult this.
+ */
+export interface ExecutorChoice {
+  kind: "OllamaWebExecutor" | "InProcessFetchExecutor"
+  base?: string
+  notes?: string
+}
+
+export function chooseExecutor(
+  env: NodeJS.ProcessEnv = process.env,
+): ExecutorChoice {
+  const apiKey = env.OLLAMA_API_KEY
+  if (apiKey !== undefined && apiKey.length > 0) {
+    return { kind: "OllamaWebExecutor", base: OLLAMA_DEFAULT_BASE }
+  }
+  return {
+    kind: "InProcessFetchExecutor",
+    notes: "search disabled; set OLLAMA_API_KEY to enable hosted search/fetch",
+  }
+}
+
+/**
  * Select the executor based on environment.
  *
  * - `OLLAMA_API_KEY` set → `OllamaWebExecutor` (covers both search and
@@ -366,9 +394,12 @@ function fetchErrorFromPost(err: PostErr): WebFetchErrorCode {
  * the prefetch cache scope matches request lifetime.
  */
 export function selectExecutor(): Executor {
-  const apiKey = process.env.OLLAMA_API_KEY
-  if (apiKey !== undefined && apiKey.length > 0) {
-    return new OllamaWebExecutor({ apiKey })
+  const choice = chooseExecutor()
+  if (choice.kind === "OllamaWebExecutor") {
+    // We re-read the env here intentionally — chooseExecutor already
+    // proved the key is present, but TS doesn't carry that across the
+    // function boundary. Cheap and obvious.
+    return new OllamaWebExecutor({ apiKey: process.env.OLLAMA_API_KEY ?? "" })
   }
   return new InProcessFetchExecutor()
 }
