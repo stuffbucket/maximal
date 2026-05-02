@@ -58,15 +58,6 @@ docker compose up -d proxy
 docker compose run --rm claude    # Claude Code in a clean container
 ```
 
-Key env vars (full list in `src/lib/api-config.ts` and the upstream
-README under `docs/upstream/`):
-
-| Var | Purpose |
-|---|---|
-| `OLLAMA_API_KEY` | Enable hosted search + fetch via ollama.com |
-| `COPILOT_API_ENTERPRISE_URL` | Route OAuth + Copilot calls to a GHE host |
-| `COPILOT_API_OAUTH_APP=opencode` | Use opencode's OAuth client ID |
-
 Then point Claude Code at the proxy:
 
 ```sh
@@ -75,6 +66,49 @@ ANTHROPIC_AUTH_TOKEN=anything \
 ANTHROPIC_MODEL=claude-sonnet-4-6-20260301 \
 claude
 ```
+
+## Configuration
+
+Settings can be supplied through five sources. Higher in the list
+wins:
+
+| # | Source | Lifetime | Notes |
+|---|---|---|---|
+| 1 | **CLI flags** | per-invocation | `--port`, `--account-type`, `--verbose`, etc. See `copilot-api start --help`. |
+| 2 | **Environment variables** | shell scope | `OLLAMA_API_KEY`, `ANTHROPIC_API_KEY`, `COPILOT_API_HOME`, `COPILOT_API_ENTERPRISE_URL`, `COPILOT_API_OAUTH_APP`. Bun also auto-loads `.env`. |
+| 3 | **Secrets files** | persistent, mode 0600 | `~/.local/share/copilot-api/secrets/<provider>` (e.g. `secrets/ollama`). Refused if mode is broader than 0600. |
+| 4 | **Config file** | persistent | `~/.local/share/copilot-api/config.json`. Schema-validated at boot; bad keys fail with a key path. Unknown keys warn but pass through. |
+| 5 | **Built-in defaults** | always | `src/lib/config.ts`. |
+
+### Knob reference
+
+| Knob | CLI | Env | File | Default |
+|---|---|---|---|---|
+| Listen port | `--port` | — | — | `4141` |
+| Account type | `--account-type` | — | — | `individual` |
+| Verbose logging | `--verbose` | — | — | off |
+| Manual approval | `--manual` | — | — | off |
+| Rate limit (s) | `--rate-limit` | — | — | unset |
+| Ollama API key | — | `OLLAMA_API_KEY` | `secrets/ollama` | unset |
+| Anthropic API key | — | `ANTHROPIC_API_KEY` | `secrets/anthropic` | `config.anthropicApiKey` |
+| GitHub token | `--github-token` | — | `app/github_token` | from `auth` flow |
+| App home dir | — | `COPILOT_API_HOME` | — | `~/.local/share/copilot-api` |
+| Enterprise URL | — | `COPILOT_API_ENTERPRISE_URL` | — | unset |
+| OAuth app ID | — | `COPILOT_API_OAUTH_APP` | — | upstream default |
+| Use Messages API | — | — | `useMessagesApi` | `true` |
+| Use Apply Patch | — | — | `useFunctionApplyPatch` | `true` |
+| Small model alias | — | — | `smallModel` | `gpt-5-mini` |
+
+To inspect what the proxy actually thinks its config is:
+
+```sh
+copilot-api debug                    # human-readable
+copilot-api debug --json             # machine-readable
+curl http://localhost:4141/_debug/state | jq    # only when running with --verbose
+```
+
+Secrets are masked everywhere — the debug output reports `<env>` /
+`<file>` / `<config>` / `<unset>`, never the value.
 
 ## Status
 
