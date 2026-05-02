@@ -56,6 +56,12 @@ export interface Executor {
 const DEFAULT_TIMEOUT_MS = 15_000
 const DEFAULT_MAX_CHARS = 400_000
 
+// Cap raw HTML before handing it to Turndown. Turndown walks the DOM
+// synchronously on the event loop, so a pathological multi-MB page stalls
+// every other in-flight request. Output is still bounded by maxChars
+// after conversion; this guard protects the conversion step itself.
+const MAX_HTML_INPUT_CHARS = 2_000_000
+
 const turndown = new TurndownService({
   headingStyle: "atx",
   codeBlockStyle: "fenced",
@@ -69,6 +75,14 @@ function extractTitle(html: string): string | undefined {
   const m = html.match(TITLE_RE)
   if (!m) return undefined
   return m[1].replaceAll(WHITESPACE_RE, " ").trim() || undefined
+}
+
+function htmlToMarkdown(body: string): string {
+  const input =
+    body.length > MAX_HTML_INPUT_CHARS ?
+      body.slice(0, MAX_HTML_INPUT_CHARS)
+    : body
+  return turndown.turndown(input)
 }
 
 function isTextual(mediaType: string): boolean {
@@ -128,7 +142,7 @@ export class InProcessFetchExecutor implements Executor {
     const isHtml =
       mediaType === "text/html" || mediaType === "application/xhtml+xml"
     const title = isHtml ? extractTitle(body) : undefined
-    const markdown = isHtml ? turndown.turndown(body) : body
+    const markdown = isHtml ? htmlToMarkdown(body) : body
 
     const trimmed =
       markdown.length > maxChars ? markdown.slice(0, maxChars) : markdown

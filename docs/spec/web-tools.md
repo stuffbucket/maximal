@@ -379,6 +379,13 @@ Implementations to ship:
 - `McpExecutor` — spawn a stdio MCP server, JSON-RPC the calls
   (lazy-launched on first need)
 
+`InProcessExecutor` runs Turndown synchronously on the event loop. To
+keep one pathological page from stalling concurrent requests, the raw
+HTML body is capped at `MAX_HTML_INPUT_CHARS` (2 MB) before conversion;
+the resulting Markdown is independently capped by `maxChars` (default
+400 KB). Non-HTML responses bypass Turndown and are returned verbatim
+within the same output cap.
+
 Default: `InProcessExecutor` for `web_fetch` (no extra deps), unset for
 `web_search` (must configure or 503 with `unavailable`).
 
