@@ -8,6 +8,17 @@
  *
  * Block indices remap from per-turn (0..n) to a monotonic client-facing
  * cursor that crosses turn boundaries.
+ *
+ * Index-bookkeeping discipline (cribbed from ollama/ollama
+ * middleware/anthropic.go's WebSearchAnthropicWriter):
+ *   - Track open block via (clientIndex, isWebTool) per upstream index
+ *   - Synthesized result blocks emit at the next free client cursor,
+ *     start-then-stop with the full block as the start payload
+ *     (no input_json_delta — Anthropic SSE emits these whole)
+ *   - On followup turns, the per-turn upstream index resets to 0 but
+ *     the client cursor must keep climbing
+ *   - message_delta / message_stop on intermediate turns are swallowed;
+ *     only the final turn's terminals reach the client
  */
 
 import type { ConsolaInstance } from "consola"
