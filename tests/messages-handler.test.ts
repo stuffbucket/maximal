@@ -77,6 +77,8 @@ await mock.module("~/routes/messages/api-flows", () => ({
   handleWithMessagesApi,
   handleWithResponsesApi,
   handleWithChatCompletions,
+  isNonStreaming: (response: unknown) =>
+    Object.hasOwn(response as object, "choices"),
 }))
 
 const { handleCompletion } = await import("../src/routes/messages/handler")

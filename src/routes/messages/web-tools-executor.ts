@@ -1,13 +1,9 @@
 /**
- * Executor interface + InProcessFetchExecutor implementation.
- *
- * Closes domain D5. The interceptor calls Executor; Executor does the
- * actual side effects (HTTPS GET, future MCP-stdio call, future search
- * API). v1 ships an in-process fetch implementation only; search
- * returns `unavailable` until a backend is wired.
- *
- * Spec: docs/spec/web-tools.md, sections "Implementation outline" and
- * "Out of scope".
+ * Executor interface and implementations. The agent loop calls these to
+ * resolve `web_search` / `web_fetch` tool calls; the in-process variant
+ * handles fetch (search returns `unavailable`); OllamaWebExecutor
+ * covers both via ollama.com hosted endpoints when OLLAMA_API_KEY is
+ * set.
  */
 
 import TurndownService from "turndown"
@@ -366,5 +362,3 @@ export function selectExecutor(): Executor {
   }
   return new InProcessFetchExecutor()
 }
-
-export const defaultExecutor: Executor = new InProcessFetchExecutor()

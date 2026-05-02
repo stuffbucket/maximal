@@ -1,11 +1,7 @@
 /**
- * Interceptor state machine + per-request state for web-tools.
- *
- * Closes domain D4. Transitions are exhaustive over the input alphabet
- * (upstream SSE events). Per-request `RequestState` holds use counters
- * and the resolved active tool decls so policy checks are O(1).
- *
- * Spec: docs/spec/web-tools.md, section "Implementation outline".
+ * Per-request use counters + policy checks for the web-tools agent loop.
+ * `RequestState` carries the resolved active tool declarations so policy
+ * checks are O(1).
  */
 
 import type {

@@ -1,12 +1,11 @@
 /**
- * Multi-turn agent loop for Anthropic-server-side web tools impersonated
- * via client-side tool round-trips with Copilot.
+ * Non-streaming agent loop. Drives multi-turn Copilot calls,
+ * substituting client-side tool round-trips for Anthropic's
+ * server-side web_search / web_fetch tools, and synthesizes the
+ * server-side result blocks the client expects.
  *
- * Closes domain D6a (non-streaming). The streaming variant lives in
- * web-tools-stream.ts; both share executor / result-building primitives
- * via web-tools-exec.ts.
- *
- * Spec: docs/spec/web-tools.md
+ * Streaming variant lives in web-tools-stream.ts; shared primitives
+ * (executor, result-block builders) are in web-tools-exec.ts.
  */
 
 import type { ConsolaInstance } from "consola"

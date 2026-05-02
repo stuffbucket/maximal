@@ -1,29 +1,20 @@
 /**
- * Hono integration for the web-tools agent loop.
- *
- * Bridges between caozhiyuan's existing handler dispatch and the
- * agent-loop core in web-tools-agent.ts. Provides one entry point
- * (handleWithWebToolsAgent) that handler.ts calls when the incoming
- * payload declares any Anthropic-server-side web tools.
- *
- * Spec: docs/spec/web-tools.md
+ * Hono entry point that routes a web-tools-bearing /v1/messages
+ * request through the agent loop (streaming or non-streaming).
  */
 
 import type { Context } from "hono"
 
 import { streamSSE } from "hono/streaming"
 
-import {
-  createChatCompletions,
-  type ChatCompletionResponse,
-} from "~/services/copilot/create-chat-completions"
+import { createChatCompletions } from "~/services/copilot/create-chat-completions"
 
 import type {
   AnthropicMessagesPayload,
   AnthropicResponse,
 } from "./anthropic-types"
-import type { FlowBaseOptions } from "./api-flows"
 
+import { isNonStreaming, type FlowBaseOptions } from "./api-flows"
 import {
   translateToAnthropic,
   translateToOpenAI,
@@ -32,10 +23,6 @@ import { runAgentLoop } from "./web-tools-agent"
 import { selectExecutor } from "./web-tools-executor"
 import { attachClientShims, type WebToolPolicy } from "./web-tools-rewriter"
 import { runStreamingAgent } from "./web-tools-stream"
-
-const isNonStreaming = (
-  response: Awaited<ReturnType<typeof createChatCompletions>>,
-): response is ChatCompletionResponse => Object.hasOwn(response, "choices")
 
 export interface WebToolsFlowArgs {
   c: Context

@@ -1,19 +1,13 @@
 /**
- * Streaming agent loop for web-tools (D6b).
+ * Streaming agent loop for web-tools.
  *
- * The non-streaming variant in web-tools-agent.ts buffers each Copilot
- * turn into a complete AnthropicResponse, runs the loop, then synthesizes
- * a single final response. This module instead streams each turn's
- * events to the client in real time, transforming the wire format on
- * the fly:
- *   - tool_use{name in web_*}  →  server_tool_use (type rewrite)
- *   - after that block ends    →  synthesized web_*_tool_result block
- *   - message_delta/stop are buffered until the loop terminates
+ * Each Copilot inner call streams; events transform on the fly:
+ *   tool_use{name in web_*}  →  server_tool_use (type rewrite)
+ *   after that block ends    →  synthesized web_*_tool_result
+ *   message_delta/stop       →  buffered until the loop terminates
  *
- * Block indices are remapped from per-turn (0..n) to a monotonic
- * client-facing cursor that crosses turn boundaries.
- *
- * Spec: docs/spec/web-tools.md, section "SSE event sequence".
+ * Block indices remap from per-turn (0..n) to a monotonic client-facing
+ * cursor that crosses turn boundaries.
  */
 
 import type { ConsolaInstance } from "consola"
@@ -34,10 +28,10 @@ import type {
   AnthropicMessagesPayload,
   AnthropicStreamEventData,
   AnthropicStreamState,
-  AnthropicToolResultBlock,
   AnthropicToolUseBlock,
 } from "./anthropic-types"
 
+import { isNonStreaming } from "./api-flows"
 import { translateToOpenAI } from "./non-stream-translation"
 import { translateChunkToAnthropicEvents } from "./stream-translation"
 import {
@@ -113,12 +107,12 @@ export async function runStreamingAgent(
       turnResult.stopReason === "tool_use"
       && turnResult.outcomes.length > 0
     ) {
+      const toolResults = turnResult.outcomes.map(({ toolUse, outcome }) =>
+        buildToolResultMessage(toolUse.id, outcome),
+      )
       messages.push(
         { role: "assistant", content: turnResult.assistantContent },
-        {
-          role: "user",
-          content: buildToolResultsMessageContent(turnResult.outcomes),
-        },
+        { role: "user", content: toolResults },
       )
       continue
     }
@@ -188,10 +182,7 @@ async function runOneStreamingTurn(args: TurnArgs): Promise<TurnResult> {
     subagentMarker: args.options.subagentMarker,
   })
 
-  // Defensive: createChatCompletions might return non-streaming if
-  // upstream ignores stream=true. We'd need to handle that; for now
-  // throw so we notice.
-  if (Object.hasOwn(response, "choices")) {
+  if (isNonStreaming(response)) {
     throw new Error(
       "web-tools stream: upstream returned non-streaming response despite stream=true",
     )
@@ -467,18 +458,6 @@ async function handleBlockStop(
       })
     }
   }
-}
-
-// ────────────────────────────────────────────────────────────────────
-// Helpers shared with web-tools-agent.ts.
-// ────────────────────────────────────────────────────────────────────
-
-function buildToolResultsMessageContent(
-  outcomes: Array<{ toolUse: AnthropicToolUseBlock; outcome: ExecOutcome }>,
-): Array<AnthropicToolResultBlock> {
-  return outcomes.map(({ toolUse, outcome }) =>
-    buildToolResultMessage(toolUse.id, outcome),
-  )
 }
 
 async function writeEvent(

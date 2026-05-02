@@ -1,14 +1,8 @@
 /**
- * Request-layer rewriter for Anthropic-server-side web tools.
- *
- * Copilot's /v1/messages rejects Anthropic's server-side tool types
- * (web_search_20250305, web_fetch_20250910). This module strips those
- * declarations from outgoing requests and substitutes equivalent
- * client-side tool declarations the model will treat as ordinary tools.
- * The agent loop (web-tools-agent.ts) executes them and synthesizes the
- * server-side result blocks the client expects.
- *
- * Spec: docs/spec/web-tools.md
+ * Strips Anthropic-server-side web tool declarations
+ * (`web_search_20250305`, `web_fetch_20250910`) — which Copilot rejects
+ * — and substitutes client-side shims. The agent loop executes the
+ * shims and synthesizes the server-side result blocks on the wire.
  */
 
 import type { AnthropicMessagesPayload, AnthropicTool } from "./anthropic-types"
@@ -16,10 +10,15 @@ import type { WebToolDecl } from "./web-tools-types"
 
 import { TOOL_NAME, TOOL_TYPE, type ToolName } from "./web-tools-vocab"
 
-// Anthropic's request-side tool declarations may carry a `type` field
-// for server-side variants; caozhiyuan's `AnthropicTool` doesn't model
-// it, so we read through this widened alias.
+// Tool declarations may carry a `type` field for server-side variants
+// that the inherited AnthropicTool type doesn't model; widen for read.
 type RawTool = AnthropicTool & { type?: unknown }
+
+const EMPTY_POLICY: WebToolPolicy = {
+  declarations: [],
+  hasSearch: false,
+  hasFetch: false,
+}
 
 // type/name pair must match exactly. Mismatches pass through unchanged
 // so Copilot rejects and the client sees the underlying error.
@@ -37,16 +36,17 @@ export interface WebToolPolicy {
 }
 
 /** Remove Anthropic-server-side web tools from `payload.tools` and
- *  return the parsed declarations. Mutates `payload.tools` in place to
- *  match caozhiyuan's existing preprocessing style. */
+ *  return the parsed declarations. No-ops (and avoids array allocation)
+ *  when the request declares no web tools. */
 export function splitWebTools(
   payload: AnthropicMessagesPayload,
 ): WebToolPolicy {
-  const tools: Array<RawTool> =
-    (payload.tools as Array<RawTool> | undefined) ?? []
+  const tools = payload.tools as Array<RawTool> | undefined
+  if (!tools || tools.length === 0) return EMPTY_POLICY
+  if (!tools.some((t) => isWebToolDecl(t))) return EMPTY_POLICY
+
   const declarations: Array<WebToolDecl> = []
   const remaining: Array<AnthropicTool> = []
-
   for (const t of tools) {
     if (isWebToolDecl(t)) {
       declarations.push(t as unknown as WebToolDecl)
@@ -56,14 +56,13 @@ export function splitWebTools(
       remaining.push(clean)
     }
   }
+  payload.tools = remaining
 
-  if (declarations.length > 0) payload.tools = remaining
-  // Keep payload.tools exactly as-was when nothing matched, including
-  // when `tools` was undefined.
-
-  const hasSearch = declarations.some((d) => d.name === TOOL_NAME.webSearch)
-  const hasFetch = declarations.some((d) => d.name === TOOL_NAME.webFetch)
-  return { declarations, hasSearch, hasFetch }
+  return {
+    declarations,
+    hasSearch: declarations.some((d) => d.name === TOOL_NAME.webSearch),
+    hasFetch: declarations.some((d) => d.name === TOOL_NAME.webFetch),
+  }
 }
 
 // ────────────────────────────────────────────────────────────────────
