@@ -85,7 +85,7 @@ clean. Result:
 
 Net M0 reduction: ~4,330 LOC.
 
-### M1. `feat(debug): print effective config + cache sizes + executor selection`
+### M1. `feat(debug): print effective config + cache sizes + executor selection` (status: complete — `b4297c0`)
 
 **Change:** expand `copilot-api debug` to emit:
 
@@ -121,7 +121,7 @@ when env is populated.
 
 **Estimate:** ~80 LOC across `src/debug.ts`, one helper.
 
-### M2. `feat(config): zod-validate AppConfig at boot`
+### M2. `feat(config): zod-validate AppConfig at boot` (status: complete — `a9475eb`)
 
 **Change:** add `zod` (or `valibot` — pick whichever has lighter
 runtime). Define `AppConfigSchema` mirroring the existing
@@ -138,7 +138,7 @@ on failure with the offending key path.
 
 **Estimate:** ~120 LOC including schema. ~40 LOC test coverage.
 
-### M3. `feat(observability): /_debug/state route (verbose-gated)`
+### M3. `feat(observability): /_debug/state route (verbose-gated)` (status: complete — `7b0a65b`)
 
 **Change:** add a `GET /_debug/state` Hono route returning the same
 JSON shape as M1's `debug` subcommand. Gated on `state.verbose ===
@@ -152,7 +152,7 @@ true` OR a new `--debug-routes` CLI flag (off by default).
 
 **Estimate:** ~50 LOC + integration test.
 
-### M4. `refactor(cache): introduce Cache<K,V> wrapper + metrics`
+### M4. `refactor(cache): introduce Cache<K,V> wrapper + metrics` (status: complete — `f8e45bd`)
 
 **Change:** new `src/lib/cache.ts` ~50 LOC:
 
@@ -189,7 +189,7 @@ a module-level `cacheRegistry` so M1/M3 can iterate them.
 
 **Estimate:** ~100 LOC + tests.
 
-### M5. `feat(secrets): read provider keys from ~/.local/share/copilot-api/secrets/`
+### M5. `feat(secrets): read provider keys from ~/.local/share/copilot-api/secrets/` (status: complete — `84d45e8`)
 
 **Change:** loader checks for `~/.local/share/copilot-api/secrets/<provider>`
 files at startup. Reads any present, validates `chmod 600`, refuses
@@ -208,7 +208,7 @@ file > absent).
 **Estimate:** ~80 LOC + tests. Touches `src/lib/config.ts` and
 `src/start.ts`.
 
-### M6. `docs: precedence + env var reference in README`
+### M6. `docs: precedence + env var reference in README` (status: complete — `3e06609`)
 
 **Change:** one section in the project README:
 
@@ -250,6 +250,9 @@ fires.
 | Per-instance prefetch cache → shared/configurable | Per-request scope is the right primitive; promotion to shared is a foot-gun | Cross-request cache hit-rate becomes a measurable win, which it isn't with our request shapes today |
 | `--print-config` flag (separate from `debug` subcommand) | M1 covers it via `debug`; one entry point is enough | If `debug` grows enough to be unwieldy and config-only printing becomes a separate ask |
 | Stylistic consolidation of executor-local constants in vocab (was M0c) | Audit showed they're not actually duplicated; moving them is style not dedup | If a third executor adds its own copy of timeout/max-chars defaults |
+| HMAC-signed `encrypted_content` (~30 LOC) | Tampering would be undetectable, but extension-injection is not a current attack surface; client tolerates whatever we emit | A user-installed extension is observed mutating round-tripped blobs |
+| E2E test harness against live Copilot (~200 LOC, network + auth gated) | Unit tests cover wire-shape synthesis; E2E catches integration drift but is expensive to run and maintain | A regression slips through unit tests because of upstream wire-shape change |
+| Silence `baseline-browser-mapping` lint warning | The package's age-of-data heuristic fires even at the literal latest version (2.10.25, published 2026-05-01). Bumping doesn't help; suppression would require patching the upstream eslint plugin | A clean-lint requirement (e.g., CI step that fails on any warning) is added |
 
 ## Follow-ups surfaced during implementation
 
@@ -260,29 +263,29 @@ should I work on" question is answerable from `git log -- docs/spec/`.
 
 ### Code
 
-| Item | Estimate | Why it matters |
-|---|---|---|
-| **DRY `describeExecutor` against `selectExecutor`.** Today the executor-selection logic is in two places (`web-tools-executor.ts` and `debug.ts`) with a TODO comment calling out the duplication. Lift to one source. | ~30 LOC | Drift hazard. Adding a third executor will silently disagree with the debug output until both sites are updated. |
-| **Streaming agent test coverage.** `web-tools-stream.ts` was instrumented during M3 logging but has no unit tests. The non-streaming path (`web-tools-agent.ts`) has six. Streaming is the path real clients hit. | ~150 LOC | Highest real-world coverage gap in the web-tools subsystem. |
-| **Wrap `state.models` / `state.copilotToken` with metrics.** The new `caches:` array in `/_debug/state` is empty because the only wrapped cache is per-request transient. Note: the `Cache<K,V>` LRU shape is a mismatch for these single-entry caches — this needs a `SingletonCache` or similar. | ~50 LOC + small new shape | Makes `/_debug/state` immediately useful instead of structurally complete-but-empty. |
-| **HMAC-signed `encrypted_content`.** Currently base64-JSON unsigned; tampering would be undetectable. | ~30 LOC | Low priority unless an extension-injection attack vector materializes. |
-| **E2E test harness against live Copilot.** Today's web-tools verification was a one-off manual probe. | ~200 LOC, gated behind a flag | Catches regressions the unit tests can't (real upstream wire shapes, real auth, real streaming). |
+| Item | Status |
+|---|---|
+| DRY `describeExecutor` against `selectExecutor` | ✅ landed `f21204b` |
+| Streaming agent test coverage | ✅ landed `bd662d0` |
+| Reuse `trimTo` for HTML input cap | ✅ landed `37a0513` (surfaced by simplify pass) |
+| Six findings from simplify review (SECRET_DEFS, summarizeConfig, FakeExecutor, ExecutorChoice, etc.) | ✅ landed `52837ff` |
+| Wrap `state.models` / `state.copilotToken` with metrics — needs a `SingletonCache` shape | 🚧 in-flight on `agent3/singleton-cache` |
 
 ### Documentation
 
-| Item | Estimate | Why it matters |
-|---|---|---|
-| **Update `docs/spec/web-tools.md`** — D6 is done, not "missing." | 1-line change | Misleads anyone reading the spec. |
-| **Update `CLAUDE.md`** — mention `copilot-api debug` and `/_debug/state` as the diagnostic surfaces. | ~10 lines | First thing a contributor would want to know. |
-| **Document the worktree convention for parallel agents.** Today's merge collision was avoidable — `git worktree add ../maximal-<task>` per agent, or `isolation: 'worktree'` for spawned subagents. | ~15 lines | Prevents repeat collisions. |
-| **PRD completion stamps with commit hashes.** Adding "Status: complete (b4297c0)" to each milestone makes this PRD a deliverable artifact. | minor edit | Closes the loop. Lets a future reader skim and know what landed when. |
+| Item | Status |
+|---|---|
+| `docs/spec/web-tools.md` D6 status | ✅ confirmed not actually broken on review |
+| `CLAUDE.md` debug surfaces + worktree convention | ✅ landed `53259d1` |
+| Worktree convention for parallel agents | ✅ landed `53259d1` |
+| PRD completion stamps | ✅ this commit |
 
 ### Hygiene
 
-| Item | Estimate | Why it matters |
-|---|---|---|
-| `npm i baseline-browser-mapping@latest -D` | one-liner | Removes a noisy lint warning that appears on every run. |
-| Verify upstream-merged `.github/workflows/` actually runs our tests | audit only | We didn't initiate the merge; haven't confirmed CI behavior matches expectations. |
+| Item | Status |
+|---|---|
+| `baseline-browser-mapping` lint warning | ❌ won't fix at this layer — moved to deferred above; latest version still triggers the heuristic |
+| `.github/workflows/` audit | ✅ confirmed `ci.yml` runs lint + typecheck + tests + build on push and PR; nothing to change |
 
 ## Risks
 
