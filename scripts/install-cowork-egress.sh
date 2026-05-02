@@ -168,6 +168,44 @@ DOMAINS=(
   "*.cloudflare.com"
   jetbrains.com
 
+  # ─────────────────────────────────────────────────────────────────
+  # Consumer Cowork defaults — the hosts a stock Claude Desktop install
+  # already permits before any user customization. Cataloged from
+  # Anthropic's "Telemetry and egress" doc (claude.com/docs/cowork/3p/
+  # telemetry). Listed explicitly here so admins running this script on
+  # a hardened install (where the defaults may have been wiped) get
+  # back to a working baseline. Group is safe to delete if you want to
+  # block telemetry / non-essential services.
+  # ─────────────────────────────────────────────────────────────────
+
+  # Anthropic infra (auto-update, downloads, model traffic)
+  api.anthropic.com
+  downloads.claude.ai
+  claude.ai
+  a-cdn.anthropic.com
+  a-api.anthropic.com
+  www.claudeusercontent.com
+
+  # Telemetry — essential (errors, perf)
+  "*.sentry.io"
+  "*.ingest.us.sentry.io"
+  browser-intake-us5-datadoghq.com
+
+  # Non-essential services Cowork loads on common pages
+  cdnjs.cloudflare.com
+  cdn.jsdelivr.net
+  fonts.googleapis.com
+  fonts.gstatic.com
+  "*.gstatic.com"
+  www.google.com
+
+  # Inference-provider auth/control plane (only relevant if you've
+  # configured a third-party inference provider; harmless otherwise)
+  oauth2.googleapis.com
+  sts.googleapis.com
+  accounts.google.com
+  iamcredentials.googleapis.com
+
   # Testing
   example.com
   example.org
