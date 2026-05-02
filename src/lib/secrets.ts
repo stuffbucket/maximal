@@ -1,5 +1,5 @@
 /**
- * File-based secrets loader (PRD M5).
+ * File-based secrets loader.
  *
  * Reads provider keys from `~/.local/share/copilot-api/secrets/<name>`.
  * Env vars still win — this is a fallback for "I don't want my API
@@ -10,6 +10,10 @@
  * (the proxy refuses to read a key that any other user can read).
  *
  * The directory is created on first read with mode 0700 if absent.
+ *
+ * `SECRET_DEFS` is the canonical list of known secrets — boot
+ * loader, debug subcommand, and `/_debug/state` all iterate this
+ * table so adding a third provider is a one-line change.
  */
 
 import consola from "consola"
@@ -124,4 +128,40 @@ export function ensureSecretsDir(dir: string = SECRETS_DIR): void {
 
 export const SECRETS_PATHS = {
   DIR: SECRETS_DIR,
+}
+
+/** Canonical list of known secrets. Extend here, not at call sites. */
+export interface SecretDef {
+  /** Display name for diagnostic output (`debug`, `/_debug/state`). */
+  name: string
+  envVar: string
+  fileName: string
+  /** Optional read-back of the value from AppConfig — only some
+   *  secrets (e.g. `anthropicApiKey`) have a config-tier fallback. */
+  readConfig?: (config: { anthropicApiKey?: string }) => string | undefined
+}
+
+export const SECRET_DEFS: ReadonlyArray<SecretDef> = [
+  { name: "ollama_api_key", envVar: "OLLAMA_API_KEY", fileName: "ollama" },
+  {
+    name: "anthropic_api_key",
+    envVar: "ANTHROPIC_API_KEY",
+    fileName: "anthropic",
+    readConfig: (c) => c.anthropicApiKey,
+  },
+]
+
+/** Returns true if the on-disk secrets file matches `value` and is
+ *  mode 0600. Used by debug surfaces to distinguish env-from-file
+ *  from env-from-shell. Best-effort — any I/O error → false. */
+export function secretIsFromFile(fileName: string, value: string): boolean {
+  try {
+    const filePath = path.join(SECRETS_DIR, fileName)
+    const stats = fs.statSync(filePath)
+    if (!stats.isFile()) return false
+    if ((stats.mode & 0o777) !== SAFE_FILE_MODE) return false
+    return fs.readFileSync(filePath, "utf8").trim() === value
+  } catch {
+    return false
+  }
 }

@@ -1,13 +1,14 @@
 /**
  * Tiny LRU-ish cache with named registration + hit/miss metrics.
  *
- * PRD M4. Every cache in the proxy should declare scope, bound, and
- * be observable. This is the wrapper that makes that uniform.
+ * Every cache in the proxy should declare scope, bound, and be
+ * observable. This is the wrapper that makes that uniform.
  *
  * Eviction strategy: insertion-order (Map iteration). On set, if the
  * cache is at capacity, the oldest entry is evicted first. Touching
  * an existing key (set or get) refreshes its position so it becomes
- * the most-recently-used.
+ * the most-recently-used. `delete`/`set` to refresh and `keys().next()`
+ * to evict are both O(1) on V8's Map.
  *
  * Not designed for high concurrency — there's no locking. Single
  * event-loop access only, which fits the proxy's threading model.

@@ -1,5 +1,5 @@
 /**
- * Runtime validation for AppConfig (PRD M2).
+ * Runtime validation for AppConfig.
  *
  * The config interface in config.ts is the type-level contract; this
  * file is the runtime contract — what the on-disk JSON has to look

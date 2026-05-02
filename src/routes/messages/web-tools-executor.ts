@@ -358,22 +358,25 @@ function fetchErrorFromPost(err: PostErr): WebFetchErrorCode {
  * a given env, with the diagnostic shape used by `copilot-api debug`
  * and `/_debug/state`. Pure — no side effects, no instantiation.
  *
- * Single source of truth for the executor-selection contract. Both
- * `selectExecutor` (which builds the instance) and the debug
- * surfaces (which describe it) consult this.
+ * Discriminated on `kind`. The Ollama variant carries the resolved
+ * apiKey so `selectExecutor` can construct without re-reading env.
+ *
+ * Single source of truth for the executor-selection contract.
  */
-export interface ExecutorChoice {
-  kind: "OllamaWebExecutor" | "InProcessFetchExecutor"
-  base?: string
-  notes?: string
-}
+export type ExecutorChoice =
+  | { kind: "OllamaWebExecutor"; base: string; apiKey: string }
+  | { kind: "InProcessFetchExecutor"; notes: string }
 
 export function chooseExecutor(
   env: NodeJS.ProcessEnv = process.env,
 ): ExecutorChoice {
   const apiKey = env.OLLAMA_API_KEY
   if (apiKey !== undefined && apiKey.length > 0) {
-    return { kind: "OllamaWebExecutor", base: OLLAMA_DEFAULT_BASE }
+    return {
+      kind: "OllamaWebExecutor",
+      base: OLLAMA_DEFAULT_BASE,
+      apiKey,
+    }
   }
   return {
     kind: "InProcessFetchExecutor",
@@ -382,24 +385,22 @@ export function chooseExecutor(
 }
 
 /**
- * Select the executor based on environment.
- *
- * - `OLLAMA_API_KEY` set → `OllamaWebExecutor` (covers both search and
- *   fetch via ollama.com hosted endpoints; per-request prefetch cache
- *   short-circuits search→fetch on the same URL).
- * - Otherwise → `InProcessFetchExecutor` (fetch works, search returns
- *   `unavailable`).
- *
- * Constructed per-request rather than as a module-level singleton so
- * the prefetch cache scope matches request lifetime.
+ * Select the executor based on environment. Per-request to keep the
+ * Ollama prefetch cache scoped to one request.
  */
 export function selectExecutor(): Executor {
   const choice = chooseExecutor()
-  if (choice.kind === "OllamaWebExecutor") {
-    // We re-read the env here intentionally — chooseExecutor already
-    // proved the key is present, but TS doesn't carry that across the
-    // function boundary. Cheap and obvious.
-    return new OllamaWebExecutor({ apiKey: process.env.OLLAMA_API_KEY ?? "" })
+  switch (choice.kind) {
+    case "OllamaWebExecutor": {
+      return new OllamaWebExecutor({ apiKey: choice.apiKey })
+    }
+    case "InProcessFetchExecutor": {
+      return new InProcessFetchExecutor()
+    }
+    default: {
+      throw new Error(
+        `unhandled executor kind: ${(choice as { kind: string }).kind}`,
+      )
+    }
   }
-  return new InProcessFetchExecutor()
 }

@@ -2,13 +2,12 @@
 
 import { defineCommand } from "citty"
 import consola from "consola"
-import fsSync from "node:fs"
 import fs from "node:fs/promises"
 import os from "node:os"
-import path from "node:path"
 
-import { getConfig } from "./lib/config"
+import { type AppConfig, getConfig } from "./lib/config"
 import { PATHS } from "./lib/paths"
+import { SECRET_DEFS, secretIsFromFile } from "./lib/secrets"
 import { chooseExecutor } from "./routes/messages/web-tools-executor"
 
 interface SecretStatus {
@@ -89,18 +88,14 @@ async function checkTokenExists(): Promise<boolean> {
   }
 }
 
-/** Status of a sensitive value: env wins, config-file fallback, else
- *  unset. We never read the value here — only the source.
- *
- *  Exported and env-injected for testability — the actual debug
- *  subcommand passes process.env. */
+/** Status of a sensitive value: env wins, file fallback, then config,
+ *  else unset. We never read the value here — only the source. */
 export interface SecretStatusInput {
   name: string
   envVar: string
   configValue: string | undefined
   /** Optional fileName under the secrets/ dir — if present and the
-   *  file exists with safe mode, source is "file". Used by M5 to
-   *  distinguish env-from-file vs env-from-shell. */
+   *  file exists with safe mode, source is "file". */
   fileName?: string
 }
 
@@ -110,12 +105,13 @@ export function secretStatus(
 ): SecretStatus {
   const value = env[input.envVar]
   if (value !== undefined && value.length > 0) {
-    // In the file-loaded case the value is in env at this point
-    // (loadSecretIntoEnv ran at boot). To distinguish, peek at the
-    // file: if it exists with safe mode and matches the env value,
-    // report "file". Otherwise "env". Read is best-effort —
-    // diagnostics, not authoritative.
-    if (input.fileName !== undefined && fileMatches(input.fileName, value)) {
+    // The value is in env either because the user set it or because
+    // loadSecretIntoEnv copied it from a file at boot. To distinguish,
+    // peek at the file. Best-effort — diagnostics, not authoritative.
+    if (
+      input.fileName !== undefined
+      && secretIsFromFile(input.fileName, value)
+    ) {
       return { name: input.name, source: "file" }
     }
     return { name: input.name, source: "env" }
@@ -126,32 +122,61 @@ export function secretStatus(
   return { name: input.name, source: "unset" }
 }
 
-function fileMatches(fileName: string, value: string): boolean {
-  // Best-effort — any error means "couldn't verify, assume not from
-  // file."
-  try {
-    const filePath = path.join(PATHS.APP_DIR, "secrets", fileName)
-    const stats = fsSync.statSync(filePath)
-    if (!stats.isFile()) return false
-    if ((stats.mode & 0o777) !== 0o600) return false
-    return fsSync.readFileSync(filePath, "utf8").trim() === value
-  } catch {
-    return false
-  }
-}
-
 /** Diagnostic shape of the executor `selectExecutor()` would pick.
- *  Delegates to `chooseExecutor()` so debug output and runtime
- *  selection share one source of truth. */
+ *  Strips the apiKey from the Ollama variant so it never reaches
+ *  diagnostic output. */
 export function describeExecutor(
   env: NodeJS.ProcessEnv = process.env,
 ): DebugInfo["executor"] {
   const choice = chooseExecutor(env)
-  return {
-    web_tools: choice.kind,
-    ...(choice.base === undefined ? {} : { base: choice.base }),
-    ...(choice.notes === undefined ? {} : { notes: choice.notes }),
+  switch (choice.kind) {
+    case "OllamaWebExecutor": {
+      return { web_tools: choice.kind, base: choice.base }
+    }
+    case "InProcessFetchExecutor": {
+      return { web_tools: choice.kind, notes: choice.notes }
+    }
+    default: {
+      throw new Error(
+        `unhandled executor kind: ${(choice as { kind: string }).kind}`,
+      )
+    }
   }
+}
+
+/** Project AppConfig down to the diagnostic subset displayed by both
+ *  `copilot-api debug` and `/_debug/state`. Adding a field updates
+ *  one place. */
+export function summarizeConfig(config: AppConfig): DebugInfo["config"] {
+  return {
+    use_messages_api: config.useMessagesApi,
+    use_function_apply_patch: config.useFunctionApplyPatch,
+    use_responses_api_web_search: config.useResponsesApiWebSearch,
+    small_model: config.smallModel,
+    claude_token_multiplier: config.claudeTokenMultiplier,
+    api_keys_configured: (config.auth?.apiKeys?.length ?? 0) > 0,
+    providers_declared: Object.keys(config.providers ?? {}),
+  }
+}
+
+/** Resolve every known secret's source for diagnostic output. Iterates
+ *  SECRET_DEFS so adding a provider in one place updates both
+ *  `debug` and `/_debug/state`. */
+export function collectSecretStatuses(
+  config: AppConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): Array<SecretStatus> {
+  return SECRET_DEFS.map((def) =>
+    secretStatus(
+      {
+        name: def.name,
+        envVar: def.envVar,
+        configValue: def.readConfig?.(config),
+        fileName: def.fileName,
+      },
+      env,
+    ),
+  )
 }
 
 async function getDebugInfo(): Promise<DebugInfo> {
@@ -179,30 +204,9 @@ async function getDebugInfo(): Promise<DebugInfo> {
       LOG_DIR: `${PATHS.APP_DIR}/logs`,
     },
     tokenExists,
-    config: {
-      use_messages_api: config.useMessagesApi,
-      use_function_apply_patch: config.useFunctionApplyPatch,
-      use_responses_api_web_search: config.useResponsesApiWebSearch,
-      small_model: config.smallModel,
-      claude_token_multiplier: config.claudeTokenMultiplier,
-      api_keys_configured: (config.auth?.apiKeys?.length ?? 0) > 0,
-      providers_declared: Object.keys(config.providers ?? {}),
-    },
+    config: summarizeConfig(config),
     executor: describeExecutor(),
-    secrets: [
-      secretStatus({
-        name: "ollama_api_key",
-        envVar: "OLLAMA_API_KEY",
-        configValue: undefined,
-        fileName: "ollama",
-      }),
-      secretStatus({
-        name: "anthropic_api_key",
-        envVar: "ANTHROPIC_API_KEY",
-        configValue: config.anthropicApiKey,
-        fileName: "anthropic",
-      }),
-    ],
+    secrets: collectSecretStatuses(config),
   }
 }
 

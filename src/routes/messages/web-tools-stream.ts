@@ -56,6 +56,10 @@ import { isWebToolName, type WebToolPolicy } from "./web-tools-rewriter"
 import { newRequestState, type RequestState } from "./web-tools-state"
 import { BLOCK_KIND, MAX_AGENT_TURNS, type ToolName } from "./web-tools-vocab"
 
+/** The upstream chat-completions function. Exported so tests can
+ *  type their stub without `as unknown as ...` casts. */
+export type UpstreamCall = typeof createChatCompletions
+
 interface StreamingAgentArgs {
   initialPayload: AnthropicMessagesPayload
   policy: WebToolPolicy
@@ -70,8 +74,8 @@ interface StreamingAgentArgs {
   }
   /** Upstream-call dependency injection for tests. Defaults to the
    *  real createChatCompletions; pass a stub to drive synthetic
-   *  chunk streams without mock.module side effects. */
-  upstreamCall?: typeof createChatCompletions
+   *  chunk streams. */
+  upstreamCall?: UpstreamCall
 }
 
 export async function runStreamingAgent(
@@ -170,7 +174,7 @@ interface TurnArgs {
   messageStartEmitted: boolean
   executor: Executor
   state: RequestState
-  upstreamCall: typeof createChatCompletions
+  upstreamCall: UpstreamCall
 }
 
 interface OpenBlock {

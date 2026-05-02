@@ -7,14 +7,14 @@ import type {
   AnthropicMessagesPayload,
   AnthropicTool,
 } from "~/routes/messages/anthropic-types"
-import type {
-  Executor,
-  FetchResult,
-  SearchResult,
-} from "~/routes/messages/web-tools-executor"
 import type { WebToolPolicy } from "~/routes/messages/web-tools-rewriter"
 
-import { runStreamingAgent } from "~/routes/messages/web-tools-stream"
+import {
+  runStreamingAgent,
+  type UpstreamCall,
+} from "~/routes/messages/web-tools-stream"
+
+import { FakeExecutor } from "./helpers/fake-executor"
 
 // Per-test queue of synthetic upstream chunk arrays. The injected
 // upstreamCall pops one array per Copilot turn and yields its chunks.
@@ -28,32 +28,11 @@ const upstreamCall = mock((_payload: unknown) => {
       for (const c of chunks) yield c
     },
   })
-}) as unknown as Parameters<typeof runStreamingAgent>[0]["upstreamCall"]
+}) as unknown as UpstreamCall
 
 // ────────────────────────────────────────────────────────────────────
 // Test fixtures
 // ────────────────────────────────────────────────────────────────────
-
-class FakeExecutor implements Executor {
-  searchCalls: Array<string> = []
-  fetchCalls: Array<string> = []
-
-  search(query: string): Promise<SearchResult> {
-    this.searchCalls.push(query)
-    return Promise.resolve({
-      ok: true,
-      items: [
-        { url: "https://example.com/a", title: "A", page_age: null },
-        { url: "https://example.com/b", title: "B", page_age: null },
-      ],
-    })
-  }
-
-  fetch(url: string): Promise<FetchResult> {
-    this.fetchCalls.push(url)
-    return Promise.resolve({ ok: true, markdown: `body of ${url}` })
-  }
-}
 
 interface CapturedEvent {
   event: string

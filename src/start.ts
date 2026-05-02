@@ -10,7 +10,7 @@ import { mergeConfigWithDefaults } from "./lib/config"
 import { initOpencodeVersion } from "./lib/opencode"
 import { ensurePaths } from "./lib/paths"
 import { initProxyFromEnv } from "./lib/proxy"
-import { ensureSecretsDir, loadSecretIntoEnv } from "./lib/secrets"
+import { ensureSecretsDir, loadSecretIntoEnv, SECRET_DEFS } from "./lib/secrets"
 import { generateEnvScript } from "./lib/shell"
 import { state } from "./lib/state"
 import { logUser, setupCopilotToken, setupGitHubToken } from "./lib/token"
@@ -165,22 +165,18 @@ async function runClaudeCodeFlow(serverUrl: string): Promise<void> {
 
 /** Load file-based provider secrets into process.env. Env still wins;
  *  this only populates unset values from ~/.local/share/copilot-api/
- *  secrets/<provider>. Called from runServer() boot. */
+ *  secrets/<provider>. Iterates SECRET_DEFS so adding a provider is
+ *  a one-line change in secrets.ts. */
 function bootSecrets(): void {
   ensureSecretsDir()
-  const ollama = loadSecretIntoEnv({
-    envVar: "OLLAMA_API_KEY",
-    fileName: "ollama",
-  })
-  if (ollama.source === "file") {
-    consola.info("Loaded OLLAMA_API_KEY from secrets/ollama")
-  }
-  const anthropic = loadSecretIntoEnv({
-    envVar: "ANTHROPIC_API_KEY",
-    fileName: "anthropic",
-  })
-  if (anthropic.source === "file") {
-    consola.info("Loaded ANTHROPIC_API_KEY from secrets/anthropic")
+  for (const def of SECRET_DEFS) {
+    const result = loadSecretIntoEnv({
+      envVar: def.envVar,
+      fileName: def.fileName,
+    })
+    if (result.source === "file") {
+      consola.info(`Loaded ${def.envVar} from secrets/${def.fileName}`)
+    }
   }
 }
 
