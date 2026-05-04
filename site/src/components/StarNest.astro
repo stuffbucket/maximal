@@ -139,15 +139,14 @@
       "(prefers-reduced-motion: reduce)",
     ).matches
 
-    // Freeze the virtual mouse at a static angle. The shader's natural
-    // forward motion through the kaliset volume is enough; adding
-    // auto-rotation on top compounded into a "warp speed" feel.
-    uniforms.iMouse.value.set(
-      window.innerWidth * 0.5,
-      window.innerHeight * 0.4,
-      0,
-      0,
-    )
+    // Freeze iMouse at Shadertoy's default (0,0,0,0). The shader's
+    // built-in `from += vec3(time*2., time, -2.)` already drifts the
+    // camera up-and-right in world space, which projects as a SW flow
+    // on screen — same direction as the Flying Toasters sprites.
+    // Adding our own auto-rotation on top broke that alignment and
+    // also compounded the perceived speed; static iMouse lets the
+    // natural motion through.
+    uniforms.iMouse.value.set(0, 0, 0, 0)
 
     const start = performance.now()
     function frame(now: number): void {
