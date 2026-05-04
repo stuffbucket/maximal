@@ -324,9 +324,17 @@ is documented on the Pages site.
 See `internal-distribution-stream-b.md` §7 for the full `.app`
 template, first-launch script, and zip pipeline.
 
-**Deliverable:** `copilot-api-v<v>-darwin-arm64.app.zip`. Three mouse
-clicks (extract → drag → right-click-Open) plus one terminal command
-(`copilot-api setup` for GitHub auth) → working setup.
+**Deliverable:** `copilot-api-v<v>-darwin-arm64.app.zip` from CI on
+every tag, plus an optional `copilot-api-v<v>-darwin-arm64.dmg` built
+post-tag via `bun run package-dmg --tag v<v> --upload` from any
+Apple Silicon developer Mac (`scripts/package-dmg.ts`). The `.app.zip`
+is the always-on CI default; the `.dmg` is a manual release-engineer
+step when the polished mounted-installer view is wanted. Both attach
+to the same GitHub release.
+
+End-to-end UX: three mouse clicks (extract → drag → right-click-Open)
+plus one terminal command (`copilot-api setup` for GitHub auth) →
+working setup.
 
 **Estimate:** ~2 days. The DMG generator integration + .app template
 + first-launch shim is the bulk; signing is deferred (A4).

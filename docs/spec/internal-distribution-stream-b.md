@@ -33,7 +33,7 @@ A bootstraps its CI.
 | **B5** First-run `setup` subcommand | nothing — pure CLI | ✅ landed (`7c7621c`) |
 | **B6** Uninstall paths | B5 (reverse of `setup`) | ✅ landed (`1752104` + `f1f6dd1`) |
 | **B1** Homebrew formula | Stream A's first `.tar.gz` release | ✅ formula skeleton + sync script landed (agent-A). Real SHAs filled by `bun run render-formula --org … --version …` once the first release publishes. PR to `x3-design/homebrew-tap` is the remaining step (cross-repo coordination). |
-| **B2** macOS `.app.zip` (drag-to-Applications after Finder extract) | Stream A3 (`.tar.gz` binary; unsigned in v1) | ✅ landed (`29d182f` + `0ea4bdb`); **revised** to ship a zipped `.app` instead of a `.app.zip` — public-repo policy rules out macOS runners, and `hdiutil` (DMG mastering) is Mac-only. |
+| **B2** macOS `.app.zip` (CI) + `.dmg` (local helper) | Stream A3 (`.tar.gz` binary; unsigned in v1) | ✅ landed. CI publishes `.app.zip` on every tag from `ubuntu-latest`. A polished `.dmg` is built via `bun run package-dmg --tag v<x.y.z> [--upload]` from a developer Mac post-tag (`scripts/package-dmg.ts`). Both artifacts attach to the same release. |
 | **B3a** Windows PowerShell installer | Stream A3 (unsigned in v1) | ✅ landed (`cbbd796`) |
 | **B3b** Windows MSI (WiX) | B3a learnings | ✅ landed (agent-A). Minimal per-user MSI: binary + PATH + Start Menu shortcut to `copilot-api setup`. Built via `dotnet tool install --global wix` on windows-2022 — no third-party action. v1 doesn't auto-register the scheduled task from inside the MSI; users run `copilot-api setup` once. |
 | **B4** GitHub Pages landing site | first published release URL | ✅ landed on `agent/stream-b` (fetches release URL at runtime — ships before first publish) |
@@ -391,10 +391,32 @@ On a clean macOS Sonoma+ Apple Silicon machine:
 Steps 1-4 are mouse-only; step 5 is the one terminal step (auth flow
 is interactive by nature). Acceptable for v1.
 
+### Optional: polished `.dmg` via local helper
+
+`scripts/package-dmg.ts` (also exposed as `bun run package-dmg`) lets
+a developer on a Mac produce the polished mounted-DMG view post-tag:
+
+```sh
+bun run package-dmg --tag v0.1.0          # build only
+bun run package-dmg --tag v0.1.0 --upload # build + attach to release
+```
+
+Run from any developer macOS (Apple Silicon) checkout. It downloads
+the published `.tar.gz` for the tag, verifies the SHA, assembles the
+same `.app` bundle the CI workflow builds, then runs `npx create-dmg`
+locally (which needs `hdiutil`, hence Mac-only). Output lands in
+`dist-release/copilot-api-v<v>-darwin-arm64.dmg` with a sidecar
+`.sha256`.
+
+This keeps both artifacts available without adding macOS runners to
+CI: `.app.zip` is the always-on CI default; the `.dmg` is a manual
+release-engineer step when a polished mounted view is wanted.
+
 ### Estimate
 
-~2 days. The `.app` template + first-launch script
-is the bulk; signing / notarization stays deferred per the parent PRD.
+~2 days. The `.app` template + first-launch script is the bulk;
+signing / notarization stays deferred per the parent PRD. The local
+`package-dmg` helper is ~250 LOC of Bun + shell-out.
 
 ## 8. B3 — Windows installer
 
