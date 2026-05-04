@@ -75,3 +75,149 @@ jobs:
 
       - name: Publish to npm (Trusted Publisher / OIDC)
         run: npm publish --access public --tag ${{ steps.prerelease.outputs.npm_tag }}
+
+  # Per-arch single-file binaries via `bun build --compile`. Attached
+  # to the same GitHub Release as the npm publish above. Stream B's
+  # installer workflows consume these by URL + SHA-256.
+  #
+  # Codesigning / notarization are A4. Stubs marked TODO; gated on
+  # secrets existing so the workflow stays green pre-A4.
+  #
+  # Contract (do not change without coordinating with Stream B):
+  #   <release>/copilot-api-v<version>-darwin-arm64.tar.gz
+  #   <release>/copilot-api-v<version>-darwin-x64.tar.gz
+  #   <release>/copilot-api-v<version>-windows-x64.zip
+  #   <each>.sha256
+  #   SHA256SUMS (aggregated, attached separately)
+  binaries:
+    needs: release
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-14,     target: bun-darwin-arm64, artifact: darwin-arm64, ext: tar.gz }
+          - { os: macos-13,     target: bun-darwin-x64,   artifact: darwin-x64,   ext: tar.gz }
+          - { os: windows-2022, target: bun-windows-x64,  artifact: windows-x64,  ext: zip    }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Compile binary
+        shell: bash
+        run: |
+          mkdir -p dist-bin
+          OUT="dist-bin/copilot-api"
+          if [[ "${{ matrix.artifact }}" == windows-* ]]; then OUT="${OUT}.exe"; fi
+          bun build --compile --minify --sourcemap --target=${{ matrix.target }} src/main.ts --outfile "$OUT"
+
+      # macOS signing + notarization. Gated on creds existing — the
+      # workflow stays green pre-A4 when the secrets aren't populated.
+      # Replace the `if: false` with a real condition once Stream A4
+      # lands the cred set.
+      - name: Codesign (macOS) [TODO A4]
+        if: false
+        env:
+          MACOS_DEVELOPER_ID: ${{ secrets.MACOS_DEVELOPER_ID }}
+        run: |
+          codesign --force --options runtime --timestamp \
+            --sign "$MACOS_DEVELOPER_ID" dist-bin/copilot-api
+
+      - name: Notarize (macOS) [TODO A4]
+        if: false
+        env:
+          AC_USERNAME: ${{ secrets.AC_USERNAME }}
+          AC_PASSWORD: ${{ secrets.AC_PASSWORD }}
+          AC_TEAM_ID:  ${{ secrets.AC_TEAM_ID }}
+        run: |
+          ditto -c -k --keepParent dist-bin/copilot-api dist-bin/copilot-api.zip
+          xcrun notarytool submit dist-bin/copilot-api.zip \
+            --apple-id "$AC_USERNAME" --password "$AC_PASSWORD" --team-id "$AC_TEAM_ID" \
+            --wait
+          rm -f dist-bin/copilot-api.zip
+
+      # Windows Authenticode signing. Same gating as macOS.
+      - name: Sign (Windows) [TODO A4]
+        if: false
+        shell: pwsh
+        run: |
+          # Replace with internal signing-service invocation once A4 is wired.
+          # Example using signtool with a cert file (cert handling TBD):
+          # signtool sign /tr http://timestamp.digicert.com /td sha256 /fd sha256 /a dist-bin\copilot-api.exe
+          Write-Host "Signing stub — replace with internal signing service"
+
+      - name: Package
+        shell: bash
+        run: |
+          VERSION="${{ steps.ver.outputs.version }}"
+          BASE="copilot-api-v${VERSION}-${{ matrix.artifact }}"
+          mkdir -p dist-release
+          cd dist-bin
+          if [[ "${{ matrix.ext }}" == "zip" ]]; then
+            7z a "../dist-release/${BASE}.zip" copilot-api.exe
+          else
+            tar -czf "../dist-release/${BASE}.tar.gz" copilot-api
+          fi
+          cd ../dist-release
+          if command -v shasum >/dev/null 2>&1; then
+            shasum -a 256 "${BASE}.${{ matrix.ext }}" > "${BASE}.${{ matrix.ext }}.sha256"
+          else
+            sha256sum "${BASE}.${{ matrix.ext }}" > "${BASE}.${{ matrix.ext }}.sha256"
+          fi
+
+      - name: Attach to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: |
+            dist-release/copilot-api-v${{ steps.ver.outputs.version }}-${{ matrix.artifact }}.${{ matrix.ext }}
+            dist-release/copilot-api-v${{ steps.ver.outputs.version }}-${{ matrix.artifact }}.${{ matrix.ext }}.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Aggregate SHA256SUMS file (single source of truth for installers
+  # that want one round-trip rather than three .sha256 fetches).
+  checksums:
+    needs: binaries
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Resolve version
+        id: ver
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch per-arch sha256 files
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p sums && cd sums
+          gh release download "${{ github.ref_name }}" \
+            --repo "${{ github.repository }}" \
+            --pattern '*.sha256'
+
+      - name: Concatenate into SHA256SUMS
+        run: |
+          cat sums/*.sha256 | sort > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Upload SHA256SUMS to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: SHA256SUMS
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
