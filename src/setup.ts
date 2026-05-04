@@ -84,7 +84,7 @@ export async function runSetup(opts: RunSetupOptions): Promise<void> {
 
   // 3. Cowork egress allowlist --------------------------------------
   consola.info("Step 3/5: Cowork egress allowlist")
-  await configureCoworkEgress(opts)
+  configureCoworkEgress(opts)
 
   // 4. Diagnostic ----------------------------------------------------
   consola.info("Step 4/5: Effective config")
@@ -105,65 +105,33 @@ export async function runSetup(opts: RunSetupOptions): Promise<void> {
 // Step 3: Cowork egress.
 // ────────────────────────────────────────────────────────────────────
 
-async function configureCoworkEgress(opts: RunSetupOptions): Promise<void> {
+function configureCoworkEgress(_opts: RunSetupOptions): void {
   if (process.platform !== "darwin") {
     consola.info("  Cowork egress is macOS-only; skipping (Windows / Linux).")
     return
   }
 
+  // The file-tier `coworkEgressAllowedHosts: ["*"]` from step 2 is the
+  // only egress knob the wizard owns. MDM-tier (defaults DB) takes
+  // precedence over the file tier, so any value sitting in the
+  // `com.anthropic.claudefordesktop` domain — typically left there by
+  // Claude Desktop's installer — would silently shadow our `["*"]`.
+  // Clear it so the file-tier wins.
   const existing = readCoworkAllowedHosts()
-  if (existing !== null) {
+  if (existing === null) {
+    consola.success('  MDM-tier allowlist absent — file-tier `["*"]` wins')
+    return
+  }
+  const r = deleteMdmAllowedHosts()
+  if (r.ok) {
     consola.success(
-      `  Already configured (${existing.length} host${existing.length === 1 ? "" : "s"})`,
+      `  Cleared MDM-tier allowlist (${existing.length} host${existing.length === 1 ? "" : "s"} removed); file-tier \`["*"]\` now wins`,
     )
-    return
-  }
-
-  if (opts.unattended) {
-    // Default to the curated list in unattended mode — the B2/B3a
-    // post-install path. The user can opt out of telemetry hosts
-    // later by re-running scripts/install-cowork-egress.sh.
-    const r = runCuratedEgressInstall()
-    if (r.ok) {
-      consola.success("  Wrote curated allowlist (unattended default)")
-    } else {
-      consola.warn("  Could not run curated installer; skipped", r.error)
-    }
-    return
-  }
-
-  const choice = await consola.prompt(
-    "Cowork sandbox needs an egress allowlist. Choose:",
-    {
-      type: "select",
-      options: [
-        { value: "curated", label: "Curated list (recommended; ~140 hosts)" },
-        { value: "all", label: 'Allow all ("*"; least restrictive)' },
-        { value: "skip", label: "Skip (configure later)" },
-      ],
-    },
-  )
-
-  switch (choice) {
-    case "curated": {
-      const r = runCuratedEgressInstall()
-      if (r.ok) consola.success("  Wrote curated allowlist")
-      else consola.warn("  Curated installer failed", r.error)
-      break
-    }
-    case "all": {
-      const r = writeAllowAll()
-      if (r.ok) consola.success('  Wrote allowlist ["*"]')
-      else consola.warn("  Could not write allowlist", r.error)
-      break
-    }
-    case "skip": {
-      consola.info("  Skipped — re-run `copilot-api setup` to revisit")
-      break
-    }
-    default: {
-      consola.info("  Skipped (no choice)")
-    }
+  } else {
+    consola.warn(
+      `  Could not delete MDM-tier allowlist (${existing.length} host${existing.length === 1 ? "" : "s"} present); MDM may shadow file-tier`,
+      r.error,
+    )
   }
 }
 
@@ -188,39 +156,14 @@ function readCoworkAllowedHosts(): Array<string> | null {
   return items
 }
 
-function writeAllowAll(): { ok: true } | { ok: false; error: unknown } {
+function deleteMdmAllowedHosts(): { ok: true } | { ok: false; error: unknown } {
   const r = spawnSync(
     "defaults",
-    [
-      "write",
-      "com.anthropic.claudefordesktop",
-      "coworkEgressAllowedHosts",
-      "-array",
-      "*",
-    ],
+    ["delete", "com.anthropic.claudefordesktop", "coworkEgressAllowedHosts"],
     { encoding: "utf8" },
   )
   if (r.status !== 0) return { ok: false, error: r.stderr || r.error }
   return { ok: true }
-}
-
-function runCuratedEgressInstall():
-  | { ok: true }
-  | { ok: false; error: unknown } {
-  // The script lives in the source tree; for an installed binary we
-  // assume the script is bundled alongside (B2 puts it in
-  // /usr/local/share/copilot-api/scripts). Fall back to running
-  // `defaults` ourselves with the bundled host list when the script
-  // isn't reachable — one-shot install scripts shouldn't depend on a
-  // separate file at runtime.
-  const r = spawnSync(
-    "bash",
-    ["-c", "command -v install-cowork-egress.sh && install-cowork-egress.sh"],
-    { encoding: "utf8" },
-  )
-  if (r.status === 0) return { ok: true }
-  // Soft fail — the user can run the script manually.
-  return { ok: false, error: "install-cowork-egress.sh not on PATH" }
 }
 
 // ────────────────────────────────────────────────────────────────────

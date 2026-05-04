@@ -58,6 +58,18 @@ gateway-wiring keys. The complete set:
 allowlist-only — keys outside this set are preserved verbatim, and
 `copilot-api uninstall --revert-claude` removes exactly these keys.
 
+### MDM-tier interaction
+
+The wizard owns one egress knob: file-tier `coworkEgressAllowedHosts:
+["*"]`. Because MDM-tier defaults take precedence over the file, the
+wizard reads `defaults read com.anthropic.claudefordesktop
+coworkEgressAllowedHosts` and **deletes the MDM key if present** — most
+commonly populated by Claude Desktop's own installer — so the
+file-tier `["*"]` becomes the effective value. Uninstall does not
+re-create the MDM key; users who want it back run `defaults write`
+manually or re-run `scripts/install-cowork-egress.sh` for the curated
+list.
+
 ## Key reference (subset relevant to this proxy)
 
 | Key | Type | Default | Controls |
