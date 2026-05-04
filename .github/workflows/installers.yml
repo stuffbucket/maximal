@@ -62,15 +62,30 @@ jobs:
             exit 0
           fi
 
-          # Tag may already exist on the remote (created by a prior
-          # dispatch). Only create + push a new one if not.
+          # No release exists yet → the tag (if any) is orphaned and
+          # may point at a stale commit whose workflow files don't
+          # match what `gh workflow run` needs. Force-recreate the tag
+          # at the current ref so release.yml at the tag is the same
+          # version that includes `workflow_dispatch`. Once a release
+          # exists, this branch is skipped entirely (early-exit above)
+          # and the tag is treated as immutable.
           git fetch --tags origin
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name  "github-actions[bot]"
           if git rev-parse --verify "refs/tags/$TAG" >/dev/null 2>&1; then
-            echo "Tag $TAG already exists; skipping create"
+            EXISTING="$(git rev-parse "refs/tags/$TAG")"
+            HEAD_SHA="$(git rev-parse HEAD)"
+            if [ "$EXISTING" = "$HEAD_SHA" ]; then
+              echo "Tag $TAG already at HEAD ($HEAD_SHA); skipping retag"
+            else
+              echo "Tag $TAG points at $EXISTING but no release exists — retagging at HEAD ($HEAD_SHA)"
+              git tag -d "$TAG"
+              git push --delete origin "$TAG"
+              git tag -a "$TAG" -m "Release $TAG (auto-tagged by installers.yml)"
+              git push origin "$TAG"
+            fi
           else
             echo "Tag $TAG does not exist — creating from $(git rev-parse --short HEAD)"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git config user.name  "github-actions[bot]"
             git tag -a "$TAG" -m "Release $TAG (auto-tagged by installers.yml)"
             git push origin "$TAG"
           fi
