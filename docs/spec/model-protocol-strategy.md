@@ -128,21 +128,83 @@ understand" is one file lookup.
 
 ### Layer 1 — Detection (upstream)
 
-Notice when something has changed before users hit it.
+Notice when something has changed before users hit it. Two tiers,
+the in-proxy one is primary.
+
+#### L1a. Lazy refresh on activity (in-proxy, primary)
+
+The `SingletonCache` wrapping `state.models` already tracks
+`loaded_at_ms`. Add a tiny middleware that runs at request entry:
+
+```ts
+// pseudocode
+const STALE_AFTER_MS = 6 * 60 * 60 * 1000          // 6 hours
+const JITTER_MS      = 30 * 60 * 1000              // ±30 minutes
+
+function isStale(): boolean {
+  const loaded = modelsCache.metrics().loaded_at_ms
+  if (loaded === null) return false                // not yet primed by startup
+  const jitter = (hash(state.macMachineId) % JITTER_MS) - JITTER_MS / 2
+  return Date.now() > loaded + STALE_AFTER_MS + jitter
+}
+
+function refreshIfStale(): void {
+  if (!isStale() || refreshInFlight) return
+  refreshInFlight = true                            // prevents thundering herd
+  void cacheModels().finally(() => { refreshInFlight = false })
+}
+```
+
+Properties:
+
+- **Activity-driven.** No timer; nothing fires when the proxy is
+  idle. A proxy left running over the weekend stays on its
+  Friday-afternoon cache until Monday's first request.
+- **Stale-while-revalidate.** The triggering request gets the
+  current (slightly stale) cache; the next request gets the
+  refreshed one. ~zero added latency for the user who tripped the
+  refresh.
+- **Avalanche jitter** keyed on `state.macMachineId` so multiple
+  proxies on different machines don't all refresh at the same wall
+  clock minute. Single-user has only one proxy so this is good
+  hygiene rather than necessity.
+- **Single-flight guard** (`refreshInFlight`) prevents two
+  concurrent triggering requests from each firing a refresh. Cheap
+  module-level boolean.
+- **Failure handling**: if `cacheModels()` throws, log warn and let
+  `loaded_at_ms` stay where it was. Next request (or next 5min, if
+  we add a short retry-after) tries again. Stale > unavailable.
+- **Diff against registry** as part of `cacheModels`: anything
+  in the fresh fetch that isn't in the registry emits the L3
+  `unknown_protocol_string` warning (or metric, post-observability).
+
+Estimated cost: ~30 LOC + a small test that fast-forwards the clock
+via the existing `now` injection on `SingletonCache`.
+
+#### L1b. External fetch + diff (CI, secondary)
+
+Catches changes that happen during long idle periods. Less critical
+once L1a is in place.
 
 - **Daily fetch + diff** of `api.anthropic.com/v1/models` and
-  `api.openai.com/v1/models` against our registry. Output: a
-  structured diff (added / removed / unchanged). Hosted in a CI
+  `api.openai.com/v1/models` against our registry. Hosted in a CI
   cron (`.github/workflows/audit-models.yml`). On diff, opens an
-  issue or PR — both are tractable for a single-maintainer fork.
+  issue or PR.
 - **Scrape upstream changelogs** weekly: Anthropic's release notes,
   OpenAI's models page, GitHub Copilot changelog. Lightweight
   WebFetch + regex extraction is enough; we don't need NLP.
 - **Track `caozhiyuan/copilot-api`** (our upstream fork source) for
-  related fixes. We already merge from it occasionally; making the
-  audit run check for new commits touching `models.ts`, anything
-  under `src/services/copilot/`, or anything mentioning `web_search`
-  / `web_fetch` would surface relevant upstream patches.
+  related fixes. The audit run can check for new commits touching
+  `models.ts`, anything under `src/services/copilot/`, or anything
+  mentioning `web_search` / `web_fetch` would surface relevant
+  upstream patches.
+
+Useful in two scenarios L1a doesn't cover:
+- Proxy is idle for a week, but you still want an inbox notification
+  when a new model lands
+- A protocol change shows up in upstream docs/changelog *before* it
+  appears in `/v1/models` (e.g. Anthropic announces a new tool
+  version with a future activation date)
 
 ### Layer 2 — Registry (single source of truth)
 
@@ -237,13 +299,18 @@ Make the registry the test surface.
 | `src/lib/parse-model-id.ts` | ~80 | Replaces the 5 regexes in `models.ts`. |
 | `src/routes/messages/web-tools-vocab.ts` refactor | net 0 | Reads from registry instead of hardcoding. |
 | Validation hook in `handler.ts` | ~40 | Walk payload, emit `unknown_protocol_string` warnings. |
-| `scripts/audit-models.ts` | ~150 | Daily/weekly fetch + diff. |
-| `.github/workflows/audit-models.yml` | ~40 | Cron job that opens an issue on diff. |
-| `scripts/audit-protocol.ts` | ~120 | Log ETL → observed-protocols report. |
+| **L1a lazy refresh middleware** in `src/lib/refresh-models.ts` + Hono middleware | ~30 | Activity-driven `cacheModels()` re-trigger when `loaded_at_ms` is older than 6h ± jitter. Single-flight guard. |
+| L1a refresh test (clock-injected `SingletonCache`) | ~50 | Asserts staleness check, single-flight, jitter bounds, failure-keeps-stale. |
+| `scripts/audit-models.ts` (L1b) | ~150 | Daily fetch + diff for the idle-proxy case. |
+| `.github/workflows/audit-models.yml` (L1b) | ~40 | Cron job that opens an issue on diff. |
+| `scripts/audit-protocol.ts` (L4) | ~120 | Log ETL → observed-protocols report. Replaceable by SigNoz query once observability lands. |
 | Tests: registry, parser, validation | ~300 | Snapshot of the registry, round-trip parser tests, validation behavior. |
-| `docs/admin/protocol-updates.md` | ~80 | Maintainer playbook: how to add a model, how to read the audit reports. |
+| `docs/admin/protocol-updates.md` | ~80 | Maintainer playbook: how to add a model, how to read the audit reports, how to tune the refresh interval. |
 
-Total: ~1,200 LOC, ~3 days when scheduled.
+Total: ~1,290 LOC, ~3 days when scheduled. The L1a refresh is an
+~80-LOC slice that can ship independently of the rest — useful even
+without the registry, since it gets `state.models` actually fresh
+within 6h of activity.
 
 ## What this strategy is *not*
 
@@ -329,10 +396,14 @@ When scheduled, the milestone delivers if:
 2. Adding a new tool version (e.g. `web_search_20260209`) updates
    one row and a test; the rewriter accepts both old and new
    without code changes.
-3. The audit cron has run for one week with at least one diff
+3. **A proxy that ran continuously for >6h reflects a fresh
+   upstream model list within one request after the staleness
+   window passes.** No timer, no daemon — the SingletonCache's
+   `loaded_at_ms` plus a request-time check is sufficient.
+4. The audit cron has run for one week with at least one diff
    surfaced; reviewing the diff and merging is under 10 minutes
    maintainer time.
-4. A user reports an unrecognized model ID and the diagnostic path
+5. A user reports an unrecognized model ID and the diagnostic path
    is `audit log → registry diff → one-line PR → ship` — under an
    hour from report to fix.
 
