@@ -34,9 +34,9 @@ A bootstraps its CI.
 | **B6** Uninstall paths | B5 (reverse of `setup`) | ✅ landed (`1752104` + `f1f6dd1`) |
 | **B1** Homebrew formula | Stream A's first `.tar.gz` release | ✅ formula skeleton + sync script landed (agent-A). Real SHAs filled by `bun run render-formula --org … --version …` once the first release publishes. PR to `x3-design/homebrew-tap` is the remaining step (cross-repo coordination). |
 | **B2** macOS `.dmg` (drag-to-Applications) | Stream A3 (`.tar.gz` binary; unsigned in v1) | ✅ landed (`29d182f` + `0ea4bdb`) |
-| **B3a** Windows PowerShell installer | Stream A3 (unsigned in v1) | 🚧 in progress on `agent/stream-b` |
+| **B3a** Windows PowerShell installer | Stream A3 (unsigned in v1) | ✅ landed (`cbbd796`) |
 | **B3b** Windows MSI (WiX) | B3a learnings | ⏳ after B3a |
-| **B4** GitHub Pages landing site | first published release URL | 🚧 in progress on `agent/stream-b` (fetches release URL at runtime — ships before first publish) |
+| **B4** GitHub Pages landing site | first published release URL | ✅ landed on `agent/stream-b` (fetches release URL at runtime — ships before first publish) |
 
 You can ship B3a alone in v1 if WiX (B3b) takes too long — acceptable
 fallback per the parent PRD's risk section.

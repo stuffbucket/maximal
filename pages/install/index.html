@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Install copilot-api</title>
+    <meta
+      name="description"
+      content="Install the local copilot-api proxy on macOS or Windows."
+    />
+    <style>
+      :root {
+        --bg: #1d2021;
+        --bg-soft: #282828;
+        --bg-light: #3c3836;
+        --border: #504945;
+        --fg: #ebdbb2;
+        --fg-dim: #a89984;
+        --fg-bright: #fbf1c7;
+        --accent: #83a598;
+        --accent-bright: #8ec07c;
+        --warn: #fabd2f;
+        --warn-bg: rgba(250, 189, 47, 0.12);
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; padding: 0; }
+      body {
+        background: var(--bg);
+        color: var(--fg);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+        line-height: 1.5;
+      }
+      main {
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 32px 20px 48px;
+      }
+      h1 {
+        color: var(--fg-bright);
+        font-size: 1.75rem;
+        margin: 0 0 0.25rem;
+      }
+      h2 {
+        color: var(--fg-bright);
+        font-size: 1.1rem;
+        margin: 1.5rem 0 0.5rem;
+      }
+      p { margin: 0.5rem 0; }
+      a { color: var(--accent); }
+      a:hover { color: var(--accent-bright); }
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        background: var(--bg-light);
+        padding: 1px 6px;
+        font-size: 0.9em;
+      }
+      pre {
+        background: var(--bg-soft);
+        border: 1px solid var(--border);
+        padding: 12px 14px;
+        overflow-x: auto;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.85rem;
+        margin: 0.5rem 0;
+      }
+      .lede { color: var(--fg-dim); }
+      .primary {
+        display: inline-block;
+        padding: 12px 22px;
+        background: var(--accent);
+        color: var(--bg);
+        font-weight: 600;
+        text-decoration: none;
+        border: 0;
+        margin-top: 8px;
+      }
+      .primary:hover { background: var(--accent-bright); color: var(--bg); }
+      .primary[aria-disabled="true"] {
+        background: var(--bg-light);
+        color: var(--fg-dim);
+        cursor: not-allowed;
+        pointer-events: none;
+      }
+      .secondaries {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 12px;
+      }
+      .secondaries a {
+        display: inline-block;
+        padding: 6px 12px;
+        border: 1px solid var(--border);
+        background: var(--bg-soft);
+        color: var(--fg);
+        text-decoration: none;
+        font-size: 0.85rem;
+      }
+      .secondaries a:hover { border-color: var(--accent); color: var(--fg-bright); }
+      .callout {
+        background: var(--warn-bg);
+        border-left: 3px solid var(--warn);
+        padding: 12px 16px;
+        margin: 16px 0;
+      }
+      .callout strong { color: var(--warn); }
+      .meta { color: var(--fg-dim); font-size: 0.85rem; }
+      footer {
+        margin-top: 32px;
+        padding-top: 16px;
+        border-top: 1px solid var(--border);
+        color: var(--fg-dim);
+        font-size: 0.8rem;
+      }
+      .hidden { display: none; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>copilot-api</h1>
+      <p class="lede">
+        A local proxy that exposes GitHub Copilot as OpenAI- and
+        Anthropic-compatible HTTP endpoints. Run it once, point Claude
+        Desktop and other tools at <code>http://localhost:4141</code>.
+      </p>
+      <p class="lede">
+        Internal preview — binaries are unsigned for v1. The first-launch
+        steps below are load-bearing; please follow them.
+      </p>
+
+      <section id="primary-section">
+        <h2>Download</h2>
+        <p id="release-meta" class="meta">Resolving latest release…</p>
+        <a id="primary-button" class="primary" aria-disabled="true" href="#"
+          >Loading…</a
+        >
+        <div id="secondaries" class="secondaries"></div>
+      </section>
+
+      <section id="first-launch">
+        <h2>First launch</h2>
+        <div id="warn-mac" class="callout hidden">
+          <strong>macOS:</strong> Gatekeeper will say
+          <em>"copilot-api can't be opened because it is from an
+          unidentified developer."</em> Right-click
+          <code>copilot-api.app</code> in <code>/Applications</code> →
+          <strong>Open</strong> → confirm <strong>Open</strong> in the
+          dialog. After the first launch, double-click works normally.
+        </div>
+        <div id="warn-windows" class="callout hidden">
+          <strong>Windows:</strong> SmartScreen will say <em>"Windows
+          protected your PC."</em> Click <strong>More info</strong> →
+          <strong>Run anyway</strong>. The installer registers an
+          at-logon scheduled task; the proxy starts on next sign-in.
+        </div>
+        <div id="warn-brew" class="callout hidden">
+          <strong>Homebrew:</strong> Unaffected — <code>brew</code>
+          bypasses Gatekeeper.
+        </div>
+      </section>
+
+      <section>
+        <h2>Verify it's running</h2>
+        <p>From a new terminal:</p>
+        <pre>copilot-api debug</pre>
+        <p class="meta">
+          Should print the resolved port, auth state, and Claude Desktop
+          config status. If the wizard didn't run during install, run
+          <code>copilot-api setup</code> once interactively to finish the
+          GitHub device-code flow.
+        </p>
+      </section>
+
+      <section>
+        <h2>Uninstall</h2>
+        <pre>copilot-api uninstall</pre>
+        <p class="meta">
+          Add <code>--purge</code> to also remove the on-disk database
+          and config; <code>--revert-claude</code> to strip the keys
+          this installer added to <code>claude_desktop_config.json</code>.
+        </p>
+      </section>
+
+      <footer>
+        <p>
+          Source:
+          <a id="repo-link" href="#" target="_blank" rel="noopener"
+            >github.com/&lt;repo&gt;</a
+          >
+          · Spec:
+          <code>docs/spec/internal-distribution-stream-b.md</code>
+        </p>
+      </footer>
+    </main>
+
+    <script>
+      // Detect repo from the gh-pages host when possible: stuffbucket.github.io/maximal/install/
+      // falls back to the constant below for local previews.
+      const FALLBACK_REPO = "stuffbucket/maximal";
+
+      function detectRepo() {
+        const host = window.location.hostname;
+        const parts = window.location.pathname.split("/").filter(Boolean);
+        const m = host.match(/^([^.]+)\.github\.io$/);
+        if (m && parts.length > 0) {
+          return `${m[1]}/${parts[0]}`;
+        }
+        return FALLBACK_REPO;
+      }
+
+      function detectOs() {
+        const ua = navigator.userAgent;
+        const platform = navigator.platform || "";
+        if (/Win/i.test(platform) || /Windows/i.test(ua)) return "windows";
+        if (/Mac/i.test(platform) || /Mac OS X/i.test(ua)) {
+          // Apple Silicon vs Intel: navigator.userAgent doesn't carry
+          // the arch on Safari. Best-effort: assume arm64 for recent
+          // Safari/Chrome (the installer link 404s gracefully if wrong;
+          // user can fall back via secondaries).
+          const arch =
+            /OS X 10_15_/.test(ua) || /Intel/.test(ua) ? "x64" : "arm64";
+          return `mac-${arch}`;
+        }
+        return "other";
+      }
+
+      function findAsset(assets, suffix) {
+        return assets.find((a) => a.name.endsWith(suffix)) || null;
+      }
+
+      function setPrimary(href, label) {
+        const btn = document.getElementById("primary-button");
+        btn.href = href;
+        btn.textContent = label;
+        btn.removeAttribute("aria-disabled");
+      }
+
+      function addSecondary(href, label) {
+        const a = document.createElement("a");
+        a.href = href;
+        a.textContent = label;
+        a.target = "_blank";
+        a.rel = "noopener";
+        document.getElementById("secondaries").appendChild(a);
+      }
+
+      function showWarning(os) {
+        if (os.startsWith("mac")) {
+          document.getElementById("warn-mac").classList.remove("hidden");
+        } else if (os === "windows") {
+          document.getElementById("warn-windows").classList.remove("hidden");
+        }
+        // Brew is always shown as the unaffected path.
+        document.getElementById("warn-brew").classList.remove("hidden");
+      }
+
+      async function main() {
+        const repo = detectRepo();
+        const repoLink = document.getElementById("repo-link");
+        repoLink.href = `https://github.com/${repo}`;
+        repoLink.textContent = `github.com/${repo}`;
+
+        const os = detectOs();
+        showWarning(os);
+
+        let release;
+        try {
+          const r = await fetch(
+            `https://api.github.com/repos/${repo}/releases/latest`,
+            { headers: { Accept: "application/vnd.github+json" } },
+          );
+          if (!r.ok) throw new Error(`GitHub API ${r.status}`);
+          release = await r.json();
+        } catch (e) {
+          document.getElementById("release-meta").textContent =
+            "Could not resolve the latest release. Check the Releases page directly.";
+          addSecondary(`https://github.com/${repo}/releases`, "Releases →");
+          return;
+        }
+
+        const tag = release.tag_name;
+        const assets = release.assets || [];
+        document.getElementById("release-meta").textContent =
+          `Latest: ${tag} (${new Date(release.published_at).toLocaleDateString()})`;
+
+        const dmgArm = findAsset(assets, "darwin-arm64.dmg");
+        const dmgX64 = findAsset(assets, "darwin-x64.dmg");
+        const winZip = findAsset(assets, "windows-x64.zip");
+        const winPs1 = findAsset(assets, "install.ps1");
+        const tarArm = findAsset(assets, "darwin-arm64.tar.gz");
+        const tarX64 = findAsset(assets, "darwin-x64.tar.gz");
+
+        if (os === "mac-arm64" && dmgArm) {
+          setPrimary(dmgArm.browser_download_url, `Download ${dmgArm.name}`);
+        } else if (os === "mac-x64" && dmgX64) {
+          setPrimary(dmgX64.browser_download_url, `Download ${dmgX64.name}`);
+        } else if (os === "windows" && winPs1) {
+          // Per B3a: the .ps1 is the recommended install path. Show the
+          // canonical irm | iex one-liner as the primary action — link
+          // points to the script for manual review.
+          setPrimary(winPs1.browser_download_url, "Download install.ps1");
+        } else {
+          setPrimary(`https://github.com/${repo}/releases/tag/${tag}`, "Open release page");
+        }
+
+        // Secondaries: every shape we shipped, regardless of OS, so the
+        // user can pivot if detection got it wrong.
+        if (dmgArm) addSecondary(dmgArm.browser_download_url, "macOS arm64 .dmg");
+        if (dmgX64) addSecondary(dmgX64.browser_download_url, "macOS x64 .dmg");
+        if (winPs1) addSecondary(winPs1.browser_download_url, "Windows install.ps1");
+        if (winZip) addSecondary(winZip.browser_download_url, "Windows .zip");
+        if (tarArm) addSecondary(tarArm.browser_download_url, "macOS arm64 .tar.gz");
+        if (tarX64) addSecondary(tarX64.browser_download_url, "macOS x64 .tar.gz");
+        addSecondary(
+          `https://github.com/${repo}/releases/tag/${tag}`,
+          `All assets for ${tag}`,
+        );
+
+        if (os === "windows" && winPs1) {
+          // Show the irm|iex one-liner alongside the download.
+          const pre = document.createElement("pre");
+          pre.textContent = `iex (irm ${winPs1.browser_download_url})`;
+          document.getElementById("primary-section").appendChild(pre);
+        }
+      }
+
+      main();
+    </script>
+  </body>
+</html>
