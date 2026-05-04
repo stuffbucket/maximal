@@ -1,0 +1,63 @@
+#!/bin/bash
+# Self-installer for copilot-api.app. Runs every time the user
+# double-clicks the .app from /Applications.
+#
+# Behavior is idempotent — re-launches just refresh the binary and
+# the launchd agent. The .app stays in /Applications; this shim
+# copies the binary out to ~/.local/bin/copilot-api and registers
+# the launchd plist so the proxy starts on login.
+#
+# Spec: docs/spec/internal-distribution-stream-b.md §7.
+
+set -euo pipefail
+
+APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+BIN_SRC="$APP_DIR/MacOS/copilot-api"
+PLIST_SRC="$APP_DIR/Resources/com.microsoft.copilot-api.plist"
+
+INSTALL_BIN="$HOME/.local/bin/copilot-api"
+INSTALL_PLIST="$HOME/Library/LaunchAgents/com.microsoft.copilot-api.plist"
+
+LABEL="com.microsoft.copilot-api"
+DOMAIN="gui/$(id -u)"
+
+if [ ! -x "$BIN_SRC" ]; then
+  /usr/bin/osascript -e \
+    "display alert \"copilot-api install failed\" message \"Bundled binary missing at $BIN_SRC. Reinstall the .app from the DMG.\""
+  exit 1
+fi
+
+# Install binary + plist (idempotent — overwrite any older install).
+mkdir -p "$(dirname "$INSTALL_BIN")" "$(dirname "$INSTALL_PLIST")"
+cp -f "$BIN_SRC" "$INSTALL_BIN"
+chmod 755 "$INSTALL_BIN"
+
+# The plist template carries __HOME__ and __INSTALL_BIN__ sentinels —
+# substitute them with the resolved paths so launchd reads absolute
+# strings. Using a temp file + mv keeps the rewrite atomic.
+TMP_PLIST="$(mktemp)"
+sed \
+  -e "s|__HOME__|$HOME|g" \
+  -e "s|__INSTALL_BIN__|$INSTALL_BIN|g" \
+  "$PLIST_SRC" > "$TMP_PLIST"
+mv -f "$TMP_PLIST" "$INSTALL_PLIST"
+
+# Make sure the log dir referenced in the plist exists, otherwise
+# launchd will refuse to bootstrap.
+mkdir -p "$HOME/Library/Logs/copilot-api"
+
+# (Re)load the launch agent. bootout fails if the agent isn't loaded;
+# swallow that case — the goal is "loaded with current plist."
+launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
+launchctl bootstrap "$DOMAIN" "$INSTALL_PLIST"
+
+# Run B5 in unattended mode for the Claude Desktop config touches.
+# --skip-auth: the device-code flow needs an interactive shell, which
+# we don't have here. The user runs `copilot-api setup` from a
+# terminal once after install.
+"$INSTALL_BIN" setup --unattended --skip-auth || true
+
+# Notify and exit. The launchd agent is now running the actual proxy.
+/usr/bin/osascript -e \
+  "display notification \"Run \\\"copilot-api setup\\\" once from Terminal to authenticate with GitHub.\" with title \"copilot-api installed\""
+exit 0

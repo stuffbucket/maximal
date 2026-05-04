@@ -1,0 +1,9 @@
+# Placeholder.
+#
+# The CI installer workflow replaces this file with the real
+# `copilot-api` binary (downloaded from Stream A's tarball) before
+# wrapping the .app in a DMG. See ../../README.md for the full build
+# flow.
+#
+# A working .app needs the binary at `Contents/MacOS/copilot-api`
+# alongside `first-launch` (which references it as $BIN_SRC).

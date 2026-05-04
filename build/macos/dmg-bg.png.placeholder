@@ -1,0 +1,13 @@
+# Placeholder for the DMG background image.
+#
+# Replace with a 540x400 PNG (matches `--window-size 540,400` in
+# installers.yml's create-dmg invocation) carrying:
+#
+#   - "Drag copilot-api to Applications →" arrow overlay
+#   - Microsoft branding (subtle)
+#   - "First launch: right-click → Open" warning footer (load-bearing
+#     for v1 since we ship unsigned)
+#
+# When the placeholder is still in place, installers.yml falls back
+# to create-dmg's default "drag to Applications" template, which is
+# functional but unbranded.
