@@ -477,6 +477,39 @@ artifacts, the brew command line works after copy/paste.
   needs at least one test. The Claude Desktop config helper needs
   edge-case coverage (file absent, file with conflicting keys, etc.).
 
+### CI / actions policy
+
+Internal MS GitHub Actions environments **reject non-MS/GitHub-sourced
+actions** for supply-chain reasons. Vendored replacements live under
+`.github/actions/` and are referenced via local paths
+(`uses: ./.github/actions/<name>`).
+
+Already vendored (use these in `installers.yml`):
+- `./.github/actions/setup-bun` — replaces `oven-sh/setup-bun`
+
+Allowed without vendoring (first-party):
+- `actions/checkout`
+- `actions/setup-node`
+- `actions/configure-pages`, `actions/upload-pages-artifact`,
+  `actions/deploy-pages` (B4 only)
+
+Don't introduce these in B2/B3/B4 workflows (vendor first):
+- `softprops/action-gh-release` — slot reserved at
+  `.github/actions/upload-release-asset/`; Stream A is on the hook
+  for filling it. Until then, use `gh release upload` via the
+  GitHub CLI which is preinstalled on GitHub-hosted runners.
+- Any `docker/*` action — the existing `release-docker.yml` uses
+  several of these and is owned by Stream A; B2/B3 don't need any
+  Docker actions.
+- Any third-party tool wrapped as a GHA — prefer the underlying CLI
+  via the runner's preinstalled tooling, or vendor the action under
+  `.github/actions/<name>/action.yml` as a composite first.
+
+For B2 specifically: `npx create-dmg` is an npm package, not a GHA,
+and is fine to run via `npx` in a step. Same logic for B3a's
+`signtool.exe` (preinstalled on `windows-2022` runners) and any
+PowerShell signing utility — those are CLI tools, not actions.
+
 ## 11. Files you'll create / modify
 
 ```
