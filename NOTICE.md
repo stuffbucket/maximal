@@ -1,18 +1,10 @@
 # Notice
 
-## Project lineage
+This file documents what's net-new on top of the upstream baseline
+and how to keep merging from upstream cleanly. For project lineage
+and license attribution, see `THIRD-PARTY-LICENSE`.
 
-Forked from [caozhiyuan/copilot-api](https://github.com/caozhiyuan/copilot-api)
-on 2026-05-01 at commit `6db9538` (version 1.9.2, branch `dev`).
-caozhiyuan's project was itself a continuation of
-[ericc-ch/copilot-api](https://github.com/ericc-ch/copilot-api) after
-the original went unmaintained.
-
-Inherited code is © Erick Christian Purwanto, Cao Zhiyuan, and the
-contributors listed in upstream's git history. Our additions are
-released under the same MIT license — see `LICENSE`.
-
-## Our additions on top of caozhiyuan
+## Our additions on top of upstream
 
 - `src/routes/messages/web-tools-*.ts` — server-side `web_search` /
   `web_fetch` agent loop that strips Anthropic's server-side tool
@@ -30,16 +22,25 @@ released under the same MIT license — see `LICENSE`.
   reverse-id and web-tools-flow dispatch into the request pipeline.
 - `src/start.ts` — log the selected web-tools executor at startup.
 - `docs/`, `scripts/`, `contrib/` — operator and reference content.
+- `src/lib/cache.ts`, `src/lib/secrets.ts`, `src/lib/config-schema.ts`,
+  `src/lib/version.ts`, `src/routes/debug/route.ts` — observability
+  layer (zod-validated config, secrets file loader, cache + singleton
+  metrics, /_debug/state route, source-revision exposure). Drove the
+  `state-config-cache-cleanup` PRD.
 
 Specs that drove these additions: `docs/spec/web-tools.md`,
-`docs/spec/tool-bridge.md`.
+`docs/spec/tool-bridge.md`, `docs/spec/state-config-cache-cleanup.md`,
+`docs/spec/internal-distribution.md`.
 
 ## Pulling from upstream
 
+The upstream remote is set in your local clone, not in this repo's
+config. See `THIRD-PARTY-LICENSE` for upstream identity and lineage.
+
 ```sh
-git remote add upstream https://github.com/caozhiyuan/copilot-api    # one-time
+git remote add upstream <upstream-url>    # one-time
 git fetch upstream
-git merge upstream/dev    # or: git merge v1.9.4 (pin to a tag)
+git merge upstream/dev                    # or: git merge <tag>
 ```
 
 Conflicts most likely surface in `src/routes/messages/handler.ts`

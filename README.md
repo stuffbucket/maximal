@@ -32,14 +32,13 @@ src/                       Proxy source (request handlers, web-tools agent,
 tests/                     bun-test suites.
 docs/admin/                MDM reference, Cowork client config notes.
 docs/spec/                 Architecture specs (web-tools, tool-bridge).
-docs/upstream/             Snapshots of caozhiyuan's README/CLAUDE.md/AGENTS.md
-                           for context when reading the inherited code.
 scripts/                   Operator helpers (e.g. install-cowork-egress.sh).
 contrib/                   Read-only reference (opencode-copilot auth pattern,
                            Ollama anthropic spike).
-LICENSE                    MIT, original copyright Erick Christian Purwanto,
-                           Cao Zhiyuan, and contributors. Our additions are
-                           under the same license.
+LICENSE                    MIT.
+THIRD-PARTY-LICENSE        Upstream attribution (caozhiyuan/copilot-api,
+                           ericc-ch/copilot-api lineage) and dependency
+                           licenses.
 NOTICE.md                  Fork lineage + how to pull from upstream.
 ```
 
