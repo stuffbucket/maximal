@@ -139,7 +139,7 @@ The `SingletonCache` wrapping `state.models` already tracks
 ```ts
 // pseudocode
 const STALE_AFTER_MS = 6 * 60 * 60 * 1000          // 6 hours
-const JITTER_MS      = 30 * 60 * 1000              // ±30 minutes
+const JITTER_MS      = 2  * 60 * 60 * 1000         // ±1 hour (2h total spread)
 
 function isStale(): boolean {
   const loaded = modelsCache.metrics().loaded_at_ms
