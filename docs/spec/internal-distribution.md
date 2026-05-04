@@ -112,10 +112,10 @@ location**:
   copilot-api-v<version>-darwin-x64.tar.gz.sha256
   copilot-api-v<version>-windows-x64.zip           # Stream A
   copilot-api-v<version>-windows-x64.zip.sha256
-  copilot-api-v<version>-darwin-arm64.pkg          # Stream B
-  copilot-api-v<version>-darwin-x64.pkg            # Stream B
+  copilot-api-v<version>-darwin-arm64.dmg          # Stream B
+  copilot-api-v<version>-darwin-x64.dmg            # Stream B
   copilot-api-v<version>-windows-x64.msi           # Stream B
-  install.ps1                                      # Stream B (signed)
+  install.ps1                                      # Stream B
   SHA256SUMS                                       # Stream A (binaries)
   SBOM.spdx.json                                   # Stream A
 ```
@@ -169,20 +169,38 @@ files attached, executable on a clean VM of the target platform.
 **Estimate:** ~150 LOC of GH Actions YAML; half a day to debug matrix
 issues.
 
-### A4. Code signing + notarization
+### A4. Code signing + notarization — **DEFERRED for v1**
+
+Cred-set wiring (Apple Developer notarization + Microsoft Authenticode
+signing service) deferred until after the unsigned-binary v1 lands and
+we have evidence on whether the user-facing prompts are tolerable for
+the internal audience. Stubs are left in `release.yml` as
+`if: false`-gated `[DEFERRED A4]` steps so the wiring is in place when
+the cred set is ready.
+
+**v1 implications:**
+- macOS: first launch shows a Gatekeeper "unidentified developer"
+  prompt; right-click → Open bypasses (one-time per binary).
+- Windows: SmartScreen "unrecognized app" warning on the `.ps1` /
+  `.msi`; "More info → Run anyway" bypasses.
+- Homebrew install path (B1) is unaffected.
+
+When A4 unblocks:
 
 - **macOS:** `codesign --deep --options=runtime` against the binary,
   then `xcrun notarytool submit` with Microsoft's Apple Developer
-  credentials, then `xcrun stapler staple`. Cert + creds live in the
-  internal CI's secret store; reuse existing internal-tool plumbing.
+  credentials, then `xcrun stapler staple`. Reuse the internal CI's
+  secret store / cert plumbing.
 - **Windows:** `signtool sign` with the Microsoft Authenticode cert
   (HSM-backed; CI uses the existing internal signing service).
 
-**Deliverable:** published artifacts unpack to binaries that pass
-Gatekeeper / SmartScreen on a clean managed device with no prompts.
+**Trigger to flip from deferred to active:** v1 user feedback indicates
+the bypass UX is unacceptable, OR a compliance ask requires signed
+artifacts.
 
-**Estimate:** ~half a day on macOS (well-trodden path); ~1 day on
-Windows (signing-service integration is the long pole).
+**Estimate when re-activated:** ~half a day on macOS (well-trodden
+path); ~1 day on Windows (signing-service integration is the long
+pole).
 
 ### A5. SBOM + license scan + provenance
 
@@ -256,33 +274,39 @@ copilot-api` works.
 
 **Estimate:** ~half a day plus tap-owner coordination.
 
-### B2. macOS `.pkg` installer
+### B2. macOS `.dmg` (drag-to-Applications)
 
-`pkgbuild` + `productbuild` workflow. The `.pkg`:
+A `.dmg` mounted from Finder shows a custom-background drag-target
+view: `copilot-api.app` on the left, `Applications` symlink on the
+right. User drags the app to Applications, double-clicks once to
+self-install (registers launchd agent, runs `setup --unattended`),
+sees a Notification Center toast, and is done.
 
-- Drops the binary at `/usr/local/bin/copilot-api` (system) or
-  `~/.local/bin/copilot-api` (per-user; preferred — no admin).
-- Drops a launchd plist at `~/Library/LaunchAgents/
-  com.microsoft.copilot-api.plist`.
-- Runs a post-install script that:
-  - Loads the launch agent (`launchctl bootstrap`).
-  - Rewrites `~/Library/Application Support/Claude/
-    claude_desktop_config.json` to set `inferenceProvider` and
-    `inferenceGatewayBaseUrl` (deep-merge, never overwrite).
-  - Surfaces a Notification Center hint to run `copilot-api setup`
-    once for the auth flow (B5).
+Built with **`create-dmg`**
+([sindresorhus/create-dmg](https://github.com/sindresorhus/create-dmg)) —
+Node CLI, actively maintained, produces the canonical macOS UX. The
+`.app` bundle wraps Stream A's compiled binary (`Contents/MacOS/
+copilot-api`) plus a small `first-launch` shell shim that does the
+self-install. Idempotent — re-launching from /Applications re-runs
+the install.
 
-The `.pkg` itself is signed with the Microsoft Apple Developer cert
-and notarized as a separate artifact (different cert path than binary
-notarization, reuses the cred set from A4).
+`Info.plist` sets `LSUIElement = true` so the .app doesn't show in the
+Dock or open a window when launched.
 
-**Deliverable:** double-clickable `.pkg` that asks for password once,
-finishes in <30 s, leaves a running proxy and a Claude Desktop pointing
-at it.
+v1 ships unsigned per A4's deferral. The DMG background art and Pages
+site (B4) surface the right-click → Open Gatekeeper bypass
+instructions.
 
-**Estimate:** ~2 days. The post-install script is the long pole — must
-handle the case where Claude Desktop isn't installed (no-op) and where
-`claude_desktop_config.json` has user-set keys (deep-merge).
+See `internal-distribution-stream-b.md` §7 for the full `.app`
+template, first-launch script, and `create-dmg` invocation.
+
+**Deliverable:** double-clickable `.dmg` that mounts the standard
+macOS install view; one drag + one right-click-Open + one
+`copilot-api setup` from terminal (for GitHub auth) leaves a working
+setup. Steps 1-4 are mouse-only.
+
+**Estimate:** ~2 days. The DMG generator integration + .app template
++ first-launch shim is the bulk; signing is deferred (A4).
 
 ### B3. Windows `.msi` (with PowerShell fallback)
 
@@ -381,23 +405,28 @@ agents or service registrations.
 ## Sequencing
 
 ```
-A1 → A2 → A3 ─┬─→ A4 ─┬─→ A5 → A6 ─→ first signed release
-              │       │
-              │       └─→ B1 (Homebrew)
-              │           B2 (.pkg)
-              │           B3a (.ps1) → B3b (.msi)
+A1 → A2 → A3 ─┬─→ A5 → A6 ─→ first unsigned release
               │
-              └────→ B5 (setup; pure CLI, no signing dep)
+              ├─→ B1 (Homebrew — unaffected by signing)
+              ├─→ B2 (.pkg — unsigned in v1, Gatekeeper bypass)
+              ├─→ B3a (.ps1) → B3b (.msi) (unsigned, SmartScreen bypass)
+              │
+              └────→ B5 (setup; pure CLI)
                      B6 (uninstall)
                      B4 (Pages — last; needs final release URLs)
+
+A4 (signing + notarization) deferred — flip on after v1 if user
+feedback or compliance requires it.
 ```
 
 Constraints:
 
 - A1, A2 are foundation; nothing else starts until A2 is green on the
   internal repo.
-- A3 unblocks B1 (Homebrew needs a URL + SHA).
-- A4 unblocks B2 and B3 (signed binary required by signed installer).
+- A3 unblocks B1 (Homebrew needs a URL + SHA), B2, and B3 (the
+  unsigned binaries are sufficient for v1).
+- A4 (signing) is deferred; B2/B3 still ship in v1 with Gatekeeper /
+  SmartScreen bypass UX.
 - B5 has zero Stream A dependencies — Agent B starts here while Agent
   A is bootstrapping.
 - B4 lands last because it references final artifact URLs.
@@ -483,20 +512,23 @@ without help in under 10 minutes, this PRD delivered.
 2. **A2** — verify CI on internal org.
 3. **A3** — matrix release workflow producing unsigned per-arch
    tarballs.
-4. **A4** — codesign + notarize macOS; signtool Windows.
-5. **A5** — SBOM + license scan + provenance.
-6. **A6** — smoke test on clean image.
+4. **A5** — SBOM + license scan + provenance.
+5. **A6** — smoke test on clean image.
+6. **A4** — codesign + notarize macOS; signtool Windows. **Deferred
+   for v1**; flip on after v1 feedback.
 
 **Agent B** owns Stream B. Deliverables in order:
 
 1. **B5** — `setup` subcommand. Pure CLI, no Stream A dependency;
    start here while A is bootstrapping.
 2. **B1** — Homebrew formula. Depends on A3.
-3. **B2** — macOS `.pkg`. Depends on A4.
-4. **B3a** — Windows PowerShell installer. Depends on A4.
+3. **B2** — macOS `.pkg`. Depends on A3; ships unsigned in v1
+   (Gatekeeper bypass), re-signed automatically when A4 lands.
+4. **B3a** — Windows PowerShell installer. Depends on A3; same
+   unsigned/signed transition.
 5. **B6** — uninstall paths.
-6. **B3b** — WiX MSI. Depends on A4 + B3a learnings.
-7. **B4** — Pages site. Depends on first signed release URL existing.
+6. **B3b** — WiX MSI. Depends on A3 + B3a learnings.
+7. **B4** — Pages site. Depends on first release URL existing.
 
 The contract is the artifact location and naming convention in the
 "Inter-stream contract" subsection. Both agents read that as truth.

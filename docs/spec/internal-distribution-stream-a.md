@@ -11,7 +11,7 @@ Working notes for the agent (me) owning Stream A. Symmetric to
 | **A1** Internal repo migration | open — coordination, not code | Block on first internal release |
 | **A2** CI on push/PR | ✅ already exists at `.github/workflows/ci.yml` | Verify after A1 — secrets/cache may need rename |
 | **A3** Per-arch `bun --compile` | ✅ scaffolded — added `binaries` + `checksums` jobs to `release.yml` (this commit) | Codesign/notarize gated `if: false` until A4 |
-| **A4** Signing + notarization | open | Mac: cred set + notarytool flip. Win: signing-service runner |
+| **A4** Signing + notarization | **deferred for v1** | Stubs left as `if: false`-gated `[DEFERRED A4]` steps. Flip after v1 if user feedback / compliance demands it |
 | **A5** SBOM + license scan | open | `bun pm ls --json` → SPDX, `license-checker` |
 | **A6** Smoke test on clean image | open | Download artifact, run `copilot-api debug --json`, assert shape |
 

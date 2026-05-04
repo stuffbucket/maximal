@@ -80,8 +80,13 @@ jobs:
   # to the same GitHub Release as the npm publish above. Stream B's
   # installer workflows consume these by URL + SHA-256.
   #
-  # Codesigning / notarization are A4. Stubs marked TODO; gated on
-  # secrets existing so the workflow stays green pre-A4.
+  # Codesigning / notarization (A4) is DEFERRED for v1. Stubs are
+  # left below as `if: false`-gated reminders so the wiring is in
+  # place when the cred set lands. v1 ships unsigned binaries —
+  # macOS users will see a Gatekeeper "unidentified developer"
+  # prompt on first launch (right-click → Open bypasses), Windows
+  # users will see SmartScreen. Acceptable for the internal-MS
+  # rollout; flip the gate when notarization is unblocked.
   #
   # Contract (do not change without coordinating with Stream B):
   #   <release>/copilot-api-v<version>-darwin-arm64.tar.gz
@@ -124,11 +129,10 @@ jobs:
           if [[ "${{ matrix.artifact }}" == windows-* ]]; then OUT="${OUT}.exe"; fi
           bun build --compile --minify --sourcemap --target=${{ matrix.target }} src/main.ts --outfile "$OUT"
 
-      # macOS signing + notarization. Gated on creds existing — the
-      # workflow stays green pre-A4 when the secrets aren't populated.
-      # Replace the `if: false` with a real condition once Stream A4
-      # lands the cred set.
-      - name: Codesign (macOS) [TODO A4]
+      # macOS signing + notarization — DEFERRED. v1 ships unsigned.
+      # Flip the `if: false` to a real condition once A4 unblocks
+      # the cred set.
+      - name: Codesign (macOS) [DEFERRED A4]
         if: false
         env:
           MACOS_DEVELOPER_ID: ${{ secrets.MACOS_DEVELOPER_ID }}
@@ -136,7 +140,7 @@ jobs:
           codesign --force --options runtime --timestamp \
             --sign "$MACOS_DEVELOPER_ID" dist-bin/copilot-api
 
-      - name: Notarize (macOS) [TODO A4]
+      - name: Notarize (macOS) [DEFERRED A4]
         if: false
         env:
           AC_USERNAME: ${{ secrets.AC_USERNAME }}
@@ -149,8 +153,8 @@ jobs:
             --wait
           rm -f dist-bin/copilot-api.zip
 
-      # Windows Authenticode signing. Same gating as macOS.
-      - name: Sign (Windows) [TODO A4]
+      # Windows Authenticode signing — DEFERRED. v1 ships unsigned.
+      - name: Sign (Windows) [DEFERRED A4]
         if: false
         shell: pwsh
         run: |

@@ -209,68 +209,162 @@ and have a working setup.
 
 ~half a day plus tap-owner coordination time.
 
-## 7. B2 — macOS `.pkg` (waits on Stream A4)
+## 7. B2 — macOS `.dmg` (waits on Stream A3)
 
 ### Goal
 
-Double-clickable `.pkg` that installs the binary, registers the
-launchd agent, runs B5 in unattended mode for the Claude Desktop
-config touches (NOT the auth flow — that happens on first run), and
-finishes in <30s.
+A `.dmg` that mounts to a familiar drag-to-Applications view with
+custom background, branded icon, and an `Applications` symlink. User
+drags `copilot-api.app` to Applications, double-clicks to launch
+once, and the app self-installs as a launchd agent then exits. v1
+ships unsigned — the Pages site (B4) and DMG background art surface
+the right-click → Open Gatekeeper bypass instructions.
 
-### Implementation outline
+A4 (signing/notarization) is deferred per the parent PRD; the build
+pipeline produces an unsigned `.app` and `.dmg` for v1, ready to be
+re-signed automatically when A4 unblocks.
+
+### Why DMG over PKG
+
+- DMG with custom background art is the iconic "drag into Applications"
+  UX; non-engineers recognize it instantly.
+- PKG triggers a system Installer flow that asks for a password — fine
+  for engineers, friction for everyone else.
+- DMG handles the .app gracefully; .app is a single drag-target.
+- The first-launch self-install pattern means the .app *is* the
+  installer — no separate post-install scripts to maintain.
+
+### `.app` bundle structure
 
 ```
-build/macos/
-  copilot-api.pkgproj         # productbuild project descriptor
-  scripts/postinstall         # bash script run after files land
-  Resources/                  # license text, welcome screen
-LaunchAgents/
-  com.microsoft.copilot-api.plist
+copilot-api.app/
+  Contents/
+    Info.plist                          # LSUIElement=1 (no Dock icon),
+                                        # CFBundleIdentifier =
+                                        #   com.microsoft.copilot-api,
+                                        # CFBundleVersion from CI
+    MacOS/
+      copilot-api                       # the bun --compile binary
+      first-launch                      # tiny shell launcher (see below)
+    Resources/
+      com.microsoft.copilot-api.plist   # launchd plist template
+      AppIcon.icns
 ```
 
-`scripts/postinstall`:
+`Info.plist` essentials:
+
+- `CFBundleExecutable` = `first-launch` (not the binary directly — the
+  shim handles install-vs-already-installed).
+- `LSUIElement` = `<true/>` so the .app doesn't appear in the Dock or
+  show a window when launched.
+- `CFBundleIdentifier` = `com.microsoft.copilot-api`.
+
+`Contents/MacOS/first-launch` (~30 lines of bash):
 
 ```bash
 #!/bin/bash
 set -e
-# Install binary location: $2 = install root, $3 = volume
-INSTALL_DIR="${HOME}/.local/bin"
-mkdir -p "$INSTALL_DIR"
-cp -f "${2}/copilot-api" "$INSTALL_DIR/copilot-api"
-chmod 755 "$INSTALL_DIR/copilot-api"
+APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+BIN_SRC="$APP_DIR/MacOS/copilot-api"
+PLIST_SRC="$APP_DIR/Resources/com.microsoft.copilot-api.plist"
 
-# Launch agent
-PLIST="${HOME}/Library/LaunchAgents/com.microsoft.copilot-api.plist"
-mkdir -p "$(dirname "$PLIST")"
-cp "${2}/com.microsoft.copilot-api.plist" "$PLIST"
-launchctl bootstrap "gui/$(id -u)" "$PLIST" || true
+INSTALL_BIN="$HOME/.local/bin/copilot-api"
+INSTALL_PLIST="$HOME/Library/LaunchAgents/com.microsoft.copilot-api.plist"
 
-# Claude Desktop config (B5 in unattended mode)
-"$INSTALL_DIR/copilot-api" setup --unattended --skip-auth || true
+# Install binary + plist (idempotent — overwrite any older install).
+mkdir -p "$(dirname "$INSTALL_BIN")" "$(dirname "$INSTALL_PLIST")"
+cp -f "$BIN_SRC"    "$INSTALL_BIN"
+cp -f "$PLIST_SRC"  "$INSTALL_PLIST"
+chmod 755 "$INSTALL_BIN"
 
+# (Re)load the launch agent.
+launchctl bootout  "gui/$(id -u)" "$INSTALL_PLIST" 2>/dev/null || true
+launchctl bootstrap "gui/$(id -u)" "$INSTALL_PLIST"
+
+# Claude Desktop config in unattended mode (B5; skip GitHub auth here).
+"$INSTALL_BIN" setup --unattended --skip-auth || true
+
+# Notify and exit. No long-lived process from the .app itself.
+osascript -e 'display notification "copilot-api installed. Run `copilot-api setup` once from a terminal to authenticate." with title "copilot-api"'
 exit 0
 ```
 
-Build this in CI on a macOS-14 runner using `pkgbuild` +
-`productbuild`. Sign the resulting `.pkg` with the Microsoft Apple
-Developer cert and notarize with `xcrun notarytool` (creds from Stream
-A4). Re-attach to the same GitHub release.
+The `.app` is therefore a one-shot self-installer. Future launches
+re-run `first-launch` (idempotent), so users can re-install just by
+double-clicking the .app from /Applications.
+
+### DMG generator
+
+Use **`create-dmg`**
+([sindresorhus/create-dmg](https://github.com/sindresorhus/create-dmg))
+— Node CLI, actively maintained, produces the canonical macOS install
+UX (custom background, drag-to-Applications symlink, no terminal).
+Alternatives considered:
+
+- `appdmg` — older, JSON-spec; less polished defaults than create-dmg.
+- `dmgbuild` (Python) — full programmatic control; overkill for our
+  shape and adds a Python toolchain dep.
+
+`create-dmg` accepts a built `.app` and emits a `.dmg`:
+
+```sh
+npx create-dmg copilot-api.app dist-release/ \
+  --dmg-title "copilot-api ${VERSION}" \
+  --background build/macos/dmg-bg.png \
+  --window-size 540,400 \
+  --icon-size 128 \
+  --app-drop-link 380 200
+```
+
+### Build pipeline
+
+CI workflow `installers.yml` runs after `binaries`:
+
+```
+needs: binaries
+runs-on: macos-14
+steps:
+  - download copilot-api-v<v>-darwin-arm64.tar.gz from release
+  - assemble copilot-api.app from build/macos/app-template/
+  - copy unpacked binary into Contents/MacOS/copilot-api
+  - npx create-dmg ...
+  - upload .dmg to the same GitHub release
+  - matrix x2 for arm64 + x64
+```
+
+Same pattern repeated for darwin-x64 — two .dmg artifacts per release
+(`copilot-api-v<v>-darwin-arm64.dmg`, `copilot-api-v<v>-darwin-x64.dmg`).
+
+### DMG background art
+
+`build/macos/dmg-bg.png` — 540×400 image with:
+
+- "Drag copilot-api to Applications →" arrow overlay.
+- Microsoft branding (subtle).
+- A "First launch: right-click → Open" footer line in small text,
+  since the v1 binaries are unsigned. Treat this as a load-bearing
+  UX detail; it's the most asked-about gotcha.
 
 ### Acceptance
 
 On a clean macOS Sonoma+ machine:
 
-1. Open `.pkg` from Finder.
-2. Click through (1 password prompt).
-3. Open Terminal: `copilot-api setup` (handles GitHub auth).
-4. Open Claude Desktop, switch to Cowork, ask Claude something.
+1. Download `copilot-api-v<v>-darwin-arm64.dmg` from the Pages site.
+2. Double-click → DMG mounts, drag-to-Applications view opens.
+3. Drag `copilot-api.app` onto the Applications symlink.
+4. Open `/Applications/copilot-api.app` once (right-click → Open
+   first time to bypass Gatekeeper); a notification confirms install.
+5. Run `copilot-api setup` from a Terminal once to handle GitHub
+   auth (B5).
+6. Open Claude Desktop, switch to Cowork, ask Claude something.
 
-No editor opened, no terminal commands beyond `setup`.
+Steps 1-4 are mouse-only; step 5 is the one terminal step (auth flow
+is interactive by nature). Acceptable for v1.
 
 ### Estimate
 
-~2 days.
+~2 days. The DMG generator + `.app` template + first-launch script
+is the bulk; signing / notarization stays deferred per the parent PRD.
 
 ## 8. B3 — Windows installer
 
@@ -335,16 +429,24 @@ no SPA framework.
    parse the version + asset URLs.
 2. UA-detect the OS (`navigator.platform` / `navigator.userAgent`).
 3. Show one big primary button matching the detected OS:
-   - macOS Apple Silicon: `.pkg` (arm64)
-   - macOS Intel: `.pkg` (x64)
+   - macOS Apple Silicon: `.dmg` (arm64)
+   - macOS Intel: `.dmg` (x64)
    - Windows: `.msi` (or `.ps1` instructions block)
 4. Below the primary button: secondary buttons for the other shapes
-   (`brew` install command, `.tar.gz` direct download, signed
+   (`brew` install command, `.tar.gz` direct download,
    `install.ps1` link).
 5. A 2-paragraph "what is this" section above the buttons.
-6. A screenshot of `copilot-api debug` output (saved as static asset
+6. **First-launch warning callout** — load-bearing UX detail. v1
+   binaries are unsigned, so macOS users see Gatekeeper's
+   "unidentified developer" prompt and Windows users see
+   SmartScreen. Render an explicit instruction block:
+   - *macOS:* "First launch: right-click `copilot-api.app` in
+     Applications → Open → confirm Open in the dialog."
+   - *Windows:* "First launch: SmartScreen → More info → Run anyway."
+   - *Brew install:* unaffected — `brew` bypasses Gatekeeper.
+7. A screenshot of `copilot-api debug` output (saved as static asset
    in `docs/`) so admins can sanity-check the install.
-7. A link to the internal wiki page (URL TBD by team).
+8. A link to the internal wiki page (URL TBD by team).
 
 Vanilla HTML + CSS. One `fetch` call, one `if` ladder for OS
 detection. <300 LOC total.
@@ -385,10 +487,11 @@ src/main.ts                             # B5/B6 — register subcommands
 tests/setup.test.ts                     # B5 (new)
 tests/uninstall.test.ts                 # B6 (new)
 tests/claude-desktop-config.test.ts     # B5 helper (new)
-build/macos/copilot-api.pkgproj         # B2 (new)
-build/macos/scripts/postinstall         # B2 (new)
-build/macos/Resources/                  # B2 (new)
-build/macos/com.microsoft.copilot-api.plist  # B2 (new)
+build/macos/app-template/Info.plist     # B2 — .app metadata (LSUIElement)
+build/macos/app-template/MacOS/first-launch  # B2 — self-install shim (~30 LOC bash)
+build/macos/com.microsoft.copilot-api.plist  # B2 — launchd plist template
+build/macos/dmg-bg.png                  # B2 — DMG background w/ "drag to /Applications"
+build/macos/AppIcon.icns                # B2 — app icon
 build/windows/install.ps1               # B3a (new)
 build/windows/copilot-api.wxs           # B3b (new)
 .github/workflows/installers.yml        # B2 + B3 — runs after Stream A's release
