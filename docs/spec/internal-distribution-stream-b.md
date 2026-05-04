@@ -32,7 +32,7 @@ A bootstraps its CI.
 |---|---|---|
 | **B5** First-run `setup` subcommand | nothing — pure CLI | ✅ landed (`7c7621c`) |
 | **B6** Uninstall paths | B5 (reverse of `setup`) | ✅ landed (`1752104` + `f1f6dd1`) |
-| **B1** Homebrew formula | Stream A's first `.tar.gz` release | ⏳ wait (need real `sha256`) |
+| **B1** Homebrew formula | Stream A's first `.tar.gz` release | 🚧 in progress (agent-A; Stream A complete, picking up here). Skeleton + sync script land now with placeholder SHAs; the script computes real SHAs from a published release. |
 | **B2** macOS `.dmg` (drag-to-Applications) | Stream A3 (`.tar.gz` binary; unsigned in v1) | ✅ landed (`29d182f` + `0ea4bdb`) |
 | **B3a** Windows PowerShell installer | Stream A3 (unsigned in v1) | 🚧 in progress on `agent/stream-b` |
 | **B3b** Windows MSI (WiX) | B3a learnings | ⏳ after B3a |
