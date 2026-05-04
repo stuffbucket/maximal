@@ -19,7 +19,7 @@ jobs:
       - name: Verify Node sqlite support
         run: node -e "import('node:sqlite').then(() => console.log('node:sqlite ok')).catch((error) => { console.error(error); process.exit(1) })"
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: ./.github/actions/setup-bun
         with:
           bun-version: latest
 

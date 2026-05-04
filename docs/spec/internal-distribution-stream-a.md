@@ -15,6 +15,28 @@ Working notes for the agent (me) owning Stream A. Symmetric to
 | **A5** SBOM + license scan | open | `bun pm ls --json` → SPDX, `license-checker` |
 | **A6** Smoke test on clean image | open | Download artifact, run `copilot-api debug --json`, assert shape |
 
+## Vendored actions policy
+
+Internal MS GitHub Actions environments reject non-MS/GitHub-sourced
+actions. This repo follows a strict allowlist: any `uses:` reference
+must resolve to either an `actions/*`-namespaced GitHub-published
+action or a path-prefixed local composite under `.github/actions/`.
+
+Currently vendored as local composites:
+
+| Replaces | Local path | Notes |
+|---|---|---|
+| `oven-sh/setup-bun@v2` | `./.github/actions/setup-bun` | Composite; runs the official bun.sh install script. Swap to an internal mirror if supply-chain policy tightens |
+| `softprops/action-gh-release@v2` | `./.github/actions/upload-release-asset` | Composite; shells to `gh release upload` (preinstalled on runners) |
+
+**Disabled** (would otherwise pull non-MS/GitHub actions):
+
+- `release-docker.yml` — depends on `docker/*` + `sigstore/cosign-installer`; trigger removed (manual `workflow_dispatch` only). v1 ships binaries + DMG/MSI, not Docker images.
+
+**Adding a new third-party action is not allowed.** Either:
+1. Replace with shell + `gh` CLI inside an existing step.
+2. Vendor as a new composite under `.github/actions/<name>/`.
+
 ## A3 — what's wired now
 
 `.github/workflows/release.yml` was extended with two new jobs that

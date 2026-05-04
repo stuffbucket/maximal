@@ -1,0 +1,43 @@
+# Vendored replacement for oven-sh/setup-bun@v2.
+#
+# Internal MS GitHub Actions environments reject non-MS/GitHub-sourced
+# actions, so we install Bun via its official install script directly
+# from a composite action under our own repo. Functional surface is
+# the subset of oven-sh/setup-bun we actually use:
+#   - `bun-version` input (default `latest`)
+#   - PATH wired so subsequent `bun ...` steps resolve
+#
+# When a tighter supply-chain posture is required (e.g. a CI policy
+# that disallows pulls from bun.sh), point `BUN_INSTALL_MIRROR` at
+# an internal mirror of the install script + tarballs.
+
+name: Setup Bun
+description: Install Bun and add it to PATH
+
+inputs:
+  bun-version:
+    description: Bun version to install (e.g. `latest`, `1.3.11`).
+    required: false
+    default: latest
+
+runs:
+  using: composite
+  steps:
+    - name: Install Bun
+      shell: bash
+      env:
+        BUN_VERSION: ${{ inputs.bun-version }}
+      run: |
+        set -euo pipefail
+        if [ "$BUN_VERSION" = "latest" ]; then
+          curl -fsSL https://bun.sh/install | bash
+        else
+          curl -fsSL https://bun.sh/install | bash -s "bun-v${BUN_VERSION}"
+        fi
+        echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
+
+    - name: Verify Bun
+      shell: bash
+      run: |
+        export PATH="$HOME/.bun/bin:$PATH"
+        bun --version

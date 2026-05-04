@@ -2,7 +2,7 @@
 
 This doc is the self-contained brief for the agent picking up Stream B
 of `internal-distribution.md`. Read this end-to-end before opening any
-file. Stream A (CI/CD + signed binaries) is owned by a parallel agent;
+file. Stream A (CI/CD + per-arch binaries) is owned by a parallel agent;
 the contract between you is in §4 below.
 
 ## 1. 30-second context
@@ -32,9 +32,9 @@ A bootstraps its CI.
 |---|---|---|
 | **B5** First-run `setup` subcommand | nothing — pure CLI | start here |
 | **B6** Uninstall paths | B5 (reverse of `setup`) | start with B5 |
-| **B1** Homebrew formula | Stream A's first signed `.tar.gz` release | wait |
-| **B2** macOS `.pkg` | Stream A4 (signed/notarized binary) | wait |
-| **B3a** Windows PowerShell installer | Stream A4 | wait |
+| **B1** Homebrew formula | Stream A's first `.tar.gz` release | wait |
+| **B2** macOS `.dmg` (drag-to-Applications) | Stream A3 (`.tar.gz` binary; unsigned in v1) | wait |
+| **B3a** Windows PowerShell installer | Stream A3 (unsigned in v1) | wait |
 | **B3b** Windows MSI (WiX) | B3a learnings | last in your queue |
 | **B4** GitHub Pages landing site | first published release URL | last |
 
@@ -43,8 +43,9 @@ fallback per the parent PRD's risk section.
 
 ## 3. The contract with Stream A
 
-Stream A produces signed, per-arch binaries on every `v*` tag and
-attaches them to the GitHub release at:
+Stream A produces per-arch binaries on every `v*` tag (unsigned in
+v1; A4 will sign+notarize them once unblocked) and attaches them to
+the GitHub release at:
 
 ```
 <repo-url>/releases/download/v<version>/
@@ -59,7 +60,7 @@ attaches them to the GitHub release at:
 ```
 
 Your installers consume those URLs + SHAs and **re-attach** their own
-outputs (`.pkg`, `.msi`, `install.ps1`) to the same release.
+outputs (`.dmg`, `.msi`, `install.ps1`) to the same release.
 
 Don't change this contract without coordinating with Stream A. The
 artifact names are baked into the Homebrew formula, the Pages site,
@@ -388,7 +389,8 @@ Self-contained signed `install.ps1` that:
 6. Runs `copilot-api setup --unattended --skip-auth` for Claude
    Desktop config.
 
-Sign with Authenticode (cert from Stream A4). User install command:
+v1 ships unsigned (A4 deferred); SmartScreen surfaces "More info →
+Run anyway" on first run. User install command:
 
 ```powershell
 iex (irm https://<internal>/copilot-api/install.ps1)
@@ -485,7 +487,12 @@ actions** for supply-chain reasons. Vendored replacements live under
 (`uses: ./.github/actions/<name>`).
 
 Already vendored (use these in `installers.yml`):
-- `./.github/actions/setup-bun` — replaces `oven-sh/setup-bun`
+- `./.github/actions/setup-bun` — replaces `oven-sh/setup-bun`.
+- `./.github/actions/upload-release-asset` — replaces
+  `softprops/action-gh-release`. Inputs: `tag`, `files` (newline-
+  separated paths). Shells to `gh release upload --clobber` so
+  re-runs are idempotent. See its `action.yml` for the full
+  surface.
 
 Allowed without vendoring (first-party):
 - `actions/checkout`
@@ -494,13 +501,11 @@ Allowed without vendoring (first-party):
   `actions/deploy-pages` (B4 only)
 
 Don't introduce these in B2/B3/B4 workflows (vendor first):
-- `softprops/action-gh-release` — slot reserved at
-  `.github/actions/upload-release-asset/`; Stream A is on the hook
-  for filling it. Until then, use `gh release upload` via the
-  GitHub CLI which is preinstalled on GitHub-hosted runners.
 - Any `docker/*` action — the existing `release-docker.yml` uses
-  several of these and is owned by Stream A; B2/B3 don't need any
-  Docker actions.
+  several of these and has been disabled (manual `workflow_dispatch`
+  only). B2/B3 don't need any Docker actions.
+- `sigstore/cosign-installer` — same posture as `docker/*`.
+- Anything else not on the GitHub-published list above.
 - Any third-party tool wrapped as a GHA — prefer the underlying CLI
   via the runner's preinstalled tooling, or vendor the action under
   `.github/actions/<name>/action.yml` as a composite first.

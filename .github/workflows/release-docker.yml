@@ -1,17 +1,31 @@
 name: Docker Build and Push
 
+# DISABLED for internal MS distribution.
+#
+# This workflow depends on six third-party actions (docker/login-action,
+# docker/setup-qemu-action, docker/setup-buildx-action, docker/metadata-
+# action, docker/build-push-action, sigstore/cosign-installer) which the
+# internal MS GitHub Actions environment rejects. v1 internal
+# distribution ships per-arch binaries + DMG + MSI, not Docker images
+# (see docs/spec/internal-distribution.md).
+#
+# Re-enable only if (a) the internal action allowlist gains the
+# docker/* + sigstore set, OR (b) we vendor those actions as composite
+# replacements (substantially more effort than for setup-bun /
+# action-gh-release; the docker/* actions wrap docker buildx invocations
+# that are themselves non-trivial to reproduce in shell).
+#
 # This workflow uses actions that are not certified by GitHub.
 # They are provided by a third-party and are governed by
 # separate terms of service, privacy policy, and support
 # documentation.
 
 on:
-  push:
-    # branches: [ "main" ]
-    # Publish semver tags as releases.
-    tags: [ 'v*.*.*' ]
-    paths-ignore:
-      - 'docs/**'
+  workflow_dispatch:    # manual-only; tag trigger removed for internal use
+  # push:
+  #   tags: [ 'v*.*.*' ]
+  #   paths-ignore:
+  #     - 'docs/**'
 
 env:
   # Use docker.io for Docker Hub if empty

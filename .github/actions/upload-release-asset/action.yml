@@ -1,0 +1,62 @@
+# Vendored replacement for softprops/action-gh-release@v2.
+#
+# Internal MS GitHub Actions environments reject non-MS/GitHub-sourced
+# actions. The `gh` CLI is preinstalled on every GitHub-hosted runner
+# (and in MS-managed runner images), so a thin composite that shells
+# out to `gh release upload` covers our use case without external deps.
+#
+# Functional surface is the subset of softprops/action-gh-release we
+# actually use:
+#   - attach files to an existing release identified by a tag
+#   - clobber existing assets with the same name (re-runs of a release)
+#
+# This action does NOT create the release itself — `bunx changelogithub`
+# in release.yml does that. Run this only after the release exists.
+
+name: Upload Release Asset
+description: Attach files to an existing GitHub Release via the gh CLI
+
+inputs:
+  tag:
+    description: Tag name of the existing release (e.g. `v1.9.4` or `${{ github.ref_name }}`).
+    required: true
+  files:
+    description: |
+      Newline-separated list of file paths to upload. Each path is
+      shell-globbed; missing paths fail the step.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Upload assets
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+        TAG: ${{ inputs.tag }}
+        FILES: ${{ inputs.files }}
+      run: |
+        set -euo pipefail
+        if [ -z "$FILES" ]; then
+          echo "::error::No files provided to upload-release-asset"
+          exit 1
+        fi
+        # Expand each line, glob, and pass everything to a single
+        # gh release upload invocation so re-runs are atomic.
+        mapfile -t LINES <<<"$FILES"
+        ASSETS=()
+        for line in "${LINES[@]}"; do
+          [ -z "$line" ] && continue
+          # shellcheck disable=SC2206 -- intentional glob expansion
+          expanded=( $line )
+          for f in "${expanded[@]}"; do
+            if [ ! -f "$f" ]; then
+              echo "::error::File not found: $f"
+              exit 1
+            fi
+            ASSETS+=("$f")
+          done
+        done
+        echo "Uploading ${#ASSETS[@]} asset(s) to release $TAG"
+        gh release upload "$TAG" "${ASSETS[@]}" --repo "$GH_REPO" --clobber
