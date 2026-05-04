@@ -57,7 +57,7 @@
       #define stepsize 0.1
       #define zoom   0.800
       #define tile   0.850
-      #define speed  0.010
+      #define speed  0.0035
       #define brightness 0.0015
       #define darkmatter 0.300
       #define distfading 0.730
@@ -147,8 +147,8 @@
       // input. Independent low-frequency sines on x and y for a
       // figure-eight feel.
       uniforms.iMouse.value.set(
-        (Math.sin(t * 0.05) * 0.5 + 0.5) * window.innerWidth,
-        (Math.sin(t * 0.07 + 1.5) * 0.5 + 0.5) * window.innerHeight,
+        (Math.sin(t * 0.015) * 0.5 + 0.5) * window.innerWidth,
+        (Math.sin(t * 0.022 + 1.5) * 0.5 + 0.5) * window.innerHeight,
         0,
         0,
       )
