@@ -17,48 +17,52 @@
     <script src="https://unpkg.com/lucide-react@0.378.0/dist/umd/lucide.min.js"></script>
 
     <style>
-      /* Gruvbox-themed color palette */
+      /* Neutral palette in Ollama's design language: black-first,
+         high-contrast monochrome with restrained accents reserved for
+         status (red = bad, green = good, blue = links/actions). */
       :root {
-        /* Main Color Palette */
-        --color-red: #cc241d;
-        --color-green: #98971a;
-        --color-yellow: #d79921;
-        --color-blue: #458588;
-        --color-purple: #b16286;
-        --color-aqua: #689d6a;
-        --color-orange: #d65d0e;
-        --color-gray: #a89984;
+        /* Status accents (only used when meaning matters) */
+        --color-red: #ef4444;
+        --color-green: #22c55e;
+        --color-yellow: #eab308;
+        --color-blue: #3b82f6;
+        --color-purple: #a855f7;
+        --color-aqua: #06b6d4;
+        --color-orange: #f97316;
+        --color-gray: #71717a;
 
-        /* Accent/Lighter/Darker Shades of Main Colors */
-        --color-red-accent: #fb4934;
-        --color-green-accent: #b8bb26;
-        --color-yellow-accent: #fabd2f;
-        --color-blue-accent: #83a598;
-        --color-purple-accent: #d3869b;
-        --color-aqua-accent: #8ec07c;
-        --color-orange-accent: #fe8019;
-        --color-gray-accent: #928374;
+        --color-red-accent: #f87171;
+        --color-green-accent: #4ade80;
+        --color-yellow-accent: #facc15;
+        --color-blue-accent: #60a5fa;
+        --color-purple-accent: #c084fc;
+        --color-aqua-accent: #22d3ee;
+        --color-orange-accent: #fb923c;
+        --color-gray-accent: #a1a1aa;
 
-        /* Background Colors */
-        --color-bg-darkest: #1d2021; /* bg0_h */
-        --color-bg: #282828; /* bg and bg0 */
-        --color-bg-light-1: #3c3836; /* bg1 */
-        --color-bg-light-2: #504945; /* bg2 */
-        --color-bg-light-3: #665c54; /* bg3 */
-        --color-bg-light-4: #7c6f64; /* bg4 */
-        --color-bg-soft: #32302f; /* bg0_s */
+        /* Backgrounds — nearly-black neutrals, no warm tint */
+        --color-bg-darkest: #09090b;
+        --color-bg: #18181b;
+        --color-bg-light-1: #27272a;
+        --color-bg-light-2: #3f3f46;
+        --color-bg-light-3: #52525b;
+        --color-bg-light-4: #71717a;
+        --color-bg-soft: #18181b;
 
-        /* Foreground Colors */
-        --color-fg-darker: #a89984; /* fg4 - duplicate of gray */
-        --color-fg-dark: #bdae93; /* fg3 */
-        --color-fg-medium: #d5c4a1; /* fg2 */
-        --color-fg-light: #ebdbb2; /* fg and fg1 */
-        --color-fg-lightest: #fbf1c7; /* fg0 */
+        /* Foregrounds — neutral grays, no warm cream */
+        --color-fg-darker: #71717a;
+        --color-fg-dark: #a1a1aa;
+        --color-fg-medium: #d4d4d8;
+        --color-fg-light: #e4e4e7;
+        --color-fg-lightest: #fafafa;
       }
 
-      /* Custom styles using the new palette */
+      /* System font stack — matches the utilitarian feel of ollama's
+         CLI / web surfaces. No web-font dependency. */
       body {
-        font-family: "Inter", sans-serif;
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          "Helvetica Neue", Arial, sans-serif;
         background-color: var(--color-bg-darkest);
         color: var(--color-fg-light);
       }
@@ -107,33 +111,11 @@
         <!-- Header Section -->
         <header class="mb-6">
           <h1
-            class="text-2xl font-bold flex items-center gap-2"
+            class="text-2xl font-bold"
             style="color: var(--color-fg-lightest)"
           >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="24"
-              height="24"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              class="lucide lucide-gauge-circle h-7 w-7"
-              style="color: var(--color-aqua-accent)"
-            >
-              <path d="M15.6 3.3a10 10 0 1 0 5.1 5.1" />
-              <path
-                d="M12 12a1 1 0 0 0-1-1v4a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1h-3z"
-              />
-              <path d="M12 6.8a10 10 0 0 0 -3.2 7.2" />
-            </svg>
-            <span>Copilot API Usage Dashboard</span>
+            Copilot API Usage Dashboard
           </h1>
-          <p class="mt-1 text-sm" style="color: var(--color-gray)">
-            Should be the same as the one in VSCode
-          </p>
         </header>
 
         <!-- Form Section -->
