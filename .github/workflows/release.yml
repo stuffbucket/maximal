@@ -53,12 +53,6 @@ jobs:
       - name: Generate SBOM and run license scan
         run: bun scripts/sbom.ts --output SBOM.cdx.json
 
-      - name: Setup Node for npm publish
-        uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-          registry-url: "https://registry.npmjs.org"
-
       - name: Detect pre-release
         id: prerelease
         run: |
@@ -112,9 +106,6 @@ jobs:
         with:
           tag: ${{ github.ref_name }}
           files: SBOM.cdx.json
-
-      - name: Publish to npm (Trusted Publisher / OIDC)
-        run: npm publish --access public --tag ${{ steps.prerelease.outputs.npm_tag }}
 
   # Per-arch single-file binaries via `bun build --compile`. Attached
   # to the same GitHub Release as the npm publish above. Stream B's
