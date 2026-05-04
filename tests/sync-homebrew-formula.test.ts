@@ -7,7 +7,6 @@ import {
 } from "../scripts/sync-homebrew-formula"
 
 const ARM_SHA = "a".repeat(64)
-const X64_SHA = "b".repeat(64)
 
 describe("parseSha256File", () => {
   it("parses the canonical `<sha>  <name>` line", () => {
@@ -52,15 +51,12 @@ describe("renderFormula", () => {
       org: "microsoft-internal",
       version: "1.9.4",
       armSha: ARM_SHA,
-      x64Sha: X64_SHA,
     })
     expect(out).not.toContain("PLACEHOLDER_ORG")
     expect(out).not.toContain("PLACEHOLDER_VERSION")
     expect(out).not.toContain("PLACEHOLDER_SHA256_DARWIN_ARM64")
-    expect(out).not.toContain("PLACEHOLDER_SHA256_DARWIN_X64")
     expect(out).toContain('version "1.9.4"')
     expect(out).toContain(`sha256 "${ARM_SHA}"`)
-    expect(out).toContain(`sha256 "${X64_SHA}"`)
     expect(out).toContain("microsoft-internal/copilot-api")
   })
 
@@ -69,7 +65,6 @@ describe("renderFormula", () => {
       org: "x",
       version: "0.0.0",
       armSha: ARM_SHA,
-      x64Sha: X64_SHA,
     })
     // Sanity checks for the structural pieces a Homebrew core
     // formula MUST have.

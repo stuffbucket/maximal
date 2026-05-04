@@ -1,16 +1,21 @@
 # Stream B installer assembly. Runs after Stream A's release workflow
 # has published the per-arch tarballs; downloads them, wraps each in a
-# .app + .dmg, re-attaches the .dmg to the same release.
+# .app, zips it, re-attaches the .zip to the same release.
+#
+# Public-repo policy: no macOS runners. The macOS install path is a
+# zipped .app (drag-to-Applications after Finder extract) instead of
+# the original .dmg plan. Building a real .dmg needs `hdiutil` which
+# is Mac-only; the .app bundle itself is just a directory tree and
+# assembles fine on Linux.
 #
 # Actions policy: first-party `actions/*` only, plus the vendored
 # composites under `./.github/actions/`:
 #   - setup-bun           (replaces oven-sh/setup-bun)
 #   - upload-release-asset (replaces softprops/action-gh-release;
 #                           wraps `gh release upload --clobber`)
-# No third-party `uses:` references. `npx create-dmg` is an npm
-# package, not a GHA, and is fine.
+# No third-party `uses:` references.
 #
-# Spec: docs/spec/internal-distribution-stream-b.md §7 (B2 macOS DMG).
+# Spec: docs/spec/internal-distribution-stream-b.md §7 (B2 macOS .app).
 
 name: installers
 
@@ -27,27 +32,25 @@ permissions:
   contents: write
 
 jobs:
-  macos-dmg:
-    name: macOS DMG (${{ matrix.arch }})
-    runs-on: macos-14
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [arm64, x64]
+  # Public-repo policy: no macOS runners. Building a real `.dmg`
+  # requires `hdiutil` which is Mac-only, so we ship a zipped `.app`
+  # bundle instead — same drag-to-Applications UX after one Finder
+  # extract step. The `.app` is just a directory tree with specific
+  # structure; it assembles fine on Linux.
+  macos-app-zip:
+    name: macOS .app.zip (arm64)
+    runs-on: ubuntu-latest
     env:
       TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      ARCH: arm64
     steps:
       - uses: actions/checkout@v4
-
-      # We do not run bun in this job (no JS/TS execution), but
-      # leave the vendored composite registered as a comment for
-      # the Windows installer job below — same pattern.
 
       - name: Resolve release artifact URLs
         run: |
           set -euo pipefail
           VERSION="${TAG#v}"
-          TARBALL="copilot-api-${TAG}-darwin-${{ matrix.arch }}.tar.gz"
+          TARBALL="copilot-api-${TAG}-darwin-${{ env.ARCH }}.tar.gz"
           SHA="${TARBALL}.sha256"
           echo "VERSION=${VERSION}"   >> "$GITHUB_ENV"
           echo "TARBALL=${TARBALL}"   >> "$GITHUB_ENV"
@@ -64,7 +67,7 @@ jobs:
             --pattern "$TARBALL" \
             --pattern "$SHA" \
             --dir dist-input
-          (cd dist-input && shasum -a 256 -c "$SHA")
+          (cd dist-input && sha256sum -c "$SHA")
           mkdir -p dist-input/unpacked
           tar -xzf "dist-input/$TARBALL" -C dist-input/unpacked
 
@@ -77,13 +80,10 @@ jobs:
           mkdir -p "$BUILD_DIR"
           cp -R build/macos/app-template "$APP"
 
-          # Sentinel substitution in Info.plist.
-          sed -i '' -e "s/__VERSION__/${VERSION}/g" \
+          # Sentinel substitution in Info.plist (GNU sed).
+          sed -i -e "s/__VERSION__/${VERSION}/g" \
             "$APP/Contents/Info.plist"
 
-          # Replace the binary placeholder with the real one. The
-          # tarball layout from Stream A is a single binary at the
-          # root after extraction.
           BIN_SRC="$(find dist-input/unpacked -maxdepth 2 -type f -name copilot-api -perm -u+x | head -1)"
           if [ -z "$BIN_SRC" ]; then
             echo "::error::no executable copilot-api binary found in unpacked tarball"
@@ -93,67 +93,41 @@ jobs:
           cp -f "$BIN_SRC" "$APP/Contents/MacOS/copilot-api"
           chmod 755 "$APP/Contents/MacOS/copilot-api"
 
-          # Real icon if a designer has dropped it in alongside the
-          # placeholder. The placeholder file is never copied into
-          # the shipped .app.
           rm -f "$APP/Contents/Resources/AppIcon.icns.placeholder"
           if [ -f build/macos/app-template/Contents/Resources/AppIcon.icns ]; then
             cp -f build/macos/app-template/Contents/Resources/AppIcon.icns \
                   "$APP/Contents/Resources/AppIcon.icns"
           fi
 
-          # Touch every nested file so tar/zip preserves mtimes
-          # consistently across runners.
+          # Stable mtimes so the same source produces a byte-identical zip.
           find "$APP" -exec touch -d '2026-01-01T00:00:00Z' {} +
 
           ls -la "$APP/Contents/MacOS"
           ls -la "$APP/Contents/Resources"
 
-      - name: Build DMG
+      - name: Build .app.zip
         run: |
           set -euo pipefail
           OUT_DIR="dist-release"
           mkdir -p "$OUT_DIR"
+          ZIP="${OUT_DIR}/copilot-api-${TAG}-darwin-${{ env.ARCH }}.app.zip"
 
-          # Use the real DMG background if a designer has dropped it
-          # in; otherwise fall back to create-dmg's default template.
-          BG_ARG=""
-          if [ -f build/macos/dmg-bg.png ]; then
-            BG_ARG="--background=build/macos/dmg-bg.png"
-          fi
-
-          # create-dmg is npm-installed and run via npx — not a GHA,
-          # so the actions policy doesn't apply.
-          npx --yes create-dmg \
-            "dist-build/copilot-api.app" \
-            "$OUT_DIR" \
-            ${BG_ARG} \
-            --dmg-title="copilot-api ${VERSION}" \
-            --identity="" \
-            || true
-
-          # create-dmg names the file `copilot-api ${VERSION}.dmg`
-          # (with a space). Rename to our canonical artifact name.
-          ORIG="$(ls "$OUT_DIR"/*.dmg | head -1)"
-          if [ -z "$ORIG" ]; then
-            echo "::error::create-dmg did not produce a .dmg in $OUT_DIR"
-            exit 1
-          fi
-          DEST="$OUT_DIR/copilot-api-${TAG}-darwin-${{ matrix.arch }}.dmg"
-          mv -f "$ORIG" "$DEST"
-
-          # SHA-256 alongside the .dmg, matching Stream A's tarball
-          # SHA convention so the Pages site can verify either.
-          (cd "$OUT_DIR" && shasum -a 256 "$(basename "$DEST")" > "$(basename "$DEST").sha256")
+          # `zip -y` preserves symlinks; `-X` strips extra OS metadata
+          # so the archive is reproducible across runners. Macs accept
+          # the resulting .app after Archive Utility extraction —
+          # there's no Mac-specific resource fork at the bundle level
+          # for our binary-only app.
+          (cd dist-build && zip -ryX "../${ZIP}" copilot-api.app)
+          (cd "$OUT_DIR" && sha256sum "$(basename "$ZIP")" > "$(basename "$ZIP").sha256")
           ls -la "$OUT_DIR"
 
-      - name: Attach DMG to release
+      - name: Attach .app.zip to release
         uses: ./.github/actions/upload-release-asset
         with:
           tag: ${{ env.TAG }}
           files: |
-            dist-release/copilot-api-${{ env.TAG }}-darwin-${{ matrix.arch }}.dmg
-            dist-release/copilot-api-${{ env.TAG }}-darwin-${{ matrix.arch }}.dmg.sha256
+            dist-release/copilot-api-${{ env.TAG }}-darwin-${{ env.ARCH }}.app.zip
+            dist-release/copilot-api-${{ env.TAG }}-darwin-${{ env.ARCH }}.app.zip.sha256
 
   windows-installer:
     name: Windows installer (PowerShell)

@@ -13,7 +13,7 @@ Working notes for the agent (me) owning Stream A. Symmetric to
 | **A3** Per-arch `bun --compile` | ✅ scaffolded — added `binaries` + `checksums` jobs to `release.yml` (this commit) | Codesign/notarize gated `if: false` until A4 |
 | **A4** Signing + notarization | **deferred for v1** | Stubs left as `if: false`-gated `[DEFERRED A4]` steps. Flip after v1 if user feedback / compliance demands it |
 | **A5** SBOM + license scan | ✅ wired | `scripts/sbom.ts` (pure Bun, no new deps) — emits CycloneDX 1.4 SBOM, fails build on disallowed license. Attached to release as `SBOM.cdx.json` |
-| **A6** Smoke test on clean image | ✅ wired | New `smoke` matrix job in `release.yml`; downloads each per-arch artifact, unpacks, runs `copilot-api debug --json`, asserts top-level keys |
+| **A6** Smoke test on clean image | ✅ wired (Windows only) | `smoke` job runs on `windows-2022`; downloads the windows-x64 zip, unpacks, asserts `copilot-api debug --json` schema. No darwin smoke (public-repo: no macOS runners; manual mitigation via Homebrew install on a developer Mac pre-tag) |
 
 ## Vendored actions policy
 
@@ -42,8 +42,10 @@ Currently vendored as local composites:
 `.github/workflows/release.yml` was extended with two new jobs that
 run after the existing `release` job (npm publish):
 
-- **`binaries`** — matrix `(macos-14, macos-13, windows-2022)` ×
-  `(bun-darwin-arm64, bun-darwin-x64, bun-windows-x64)`. Builds via
+- **`binaries`** — single-runner (`ubuntu-latest`) matrix over the
+  Bun cross-compile targets `(bun-darwin-arm64, bun-windows-x64)`.
+  Public-repo policy: no macOS runners, and Intel macOS is not a
+  supported target. Builds via
   `bun build --compile --minify --sourcemap --target=…`. Packages
   as `tar.gz` (mac) or `zip` (win). Generates per-file SHA-256.
   Attaches both to the GitHub release using
@@ -102,20 +104,31 @@ Wired into `release.yml` between `Build` and `Generate GitHub Release
 notes`. SBOM uploads to the release via the vendored
 `upload-release-asset` action.
 
-## A6 — smoke test (landed)
+## A6 — smoke test (landed; Windows only)
 
-`smoke` matrix job in `release.yml` runs after `binaries`. For each
-arch (mac-arm64, mac-x64, win-x64) it downloads the just-published
-artifact, unpacks (`tar -xzf` / `7z x`), and runs the binary with
-`debug --json`. Schema assertion uses `jq -e '.version and .git and …'`
-on macOS / Linux and a PowerShell `ConvertFrom-Json` loop on Windows
-(the runner doesn't ship `jq` for Windows by default).
+`smoke` job in `release.yml` runs on `windows-2022` after `binaries`.
+Downloads the windows-x64 zip, unpacks via `Expand-Archive`, runs
+`copilot-api.exe debug --json`, parses with `ConvertFrom-Json` and
+asserts each top-level key.
+
+**Darwin smoke is not in CI** — public-repo policy excludes macOS
+runners and we cannot exec a Mach-O on `ubuntu-latest`. Mitigations:
+
+- The `binaries` job cross-compiles all targets from one Linux host
+  with the same Bun version + flags, so the windows smoke is decent
+  transitive evidence the darwin build also produced a valid binary.
+- Pre-tag, run `copilot-api debug --json` once on a developer Mac
+  before pushing.
+- Post-tag, the first user via Homebrew exercises the binary and
+  fails fast (B1's `service do` block surfaces a startup error
+  immediately).
 
 Asserted top-level keys: `version`, `git`, `runtime`, `config`,
 `secrets`, `executor`. Mirrors the `DebugInfo` interface in
 `src/debug.ts` — keep them in sync if the schema gains a key.
 
-Catches static-link / missing-dep bugs the build alone misses.
+Catches static-link / missing-dep bugs the build alone misses, for
+the windows target.
 
 ## Open questions for the team
 

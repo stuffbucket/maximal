@@ -15,13 +15,18 @@ contract between them so the work can be picked up by separate agents.
   with its built-in Copilot provider, and the same pattern endorsed
   for Copilot extensions. No public redistribution in v1.
 - Distribution shape: per-arch single-file binaries published to
-  GitHub Releases on the internal repo; Homebrew formula at
-  `x3-design/homebrew-tap` for CLI users; **`.dmg`** with a
-  drag-to-Applications `.app` bundle for macOS (built via
-  [`create-dmg`](https://github.com/sindresorhus/create-dmg));
-  `.msi` for Windows with a PowerShell installer fallback; static
-  GitHub Pages landing site that auto-detects OS and links to the
-  right artifact.
+  GitHub Releases (Apple Silicon macOS + Windows x64; **no Intel
+  macOS**); Homebrew formula at `x3-design/homebrew-tap` for CLI
+  users; **`.app.zip`** with a drag-to-Applications `.app` bundle
+  for macOS (extracted by Finder on double-click); `.msi` + signed
+  PowerShell `install.ps1` for Windows; static GitHub Pages landing
+  site that auto-detects OS and links to the right artifact.
+- **No macOS runners.** Public-repo policy rules them out. Bun
+  cross-compiles the darwin-arm64 binary from `ubuntu-latest`; the
+  `.app.zip` is assembled on Linux too. Tradeoff: the polished
+  mounted-DMG view is replaced by a one-step Finder extract, and
+  there is no CI smoke test for the Mach-O binary (manual via
+  Homebrew install on a real Mac before tagging).
 - **v1 ships unsigned.** Codesigning and notarization (A4) are
   deferred until after we have v1 user feedback; first-launch
   Gatekeeper / SmartScreen prompts are surfaced explicitly in the
@@ -54,7 +59,7 @@ writing their own launchd plist.
 
 | Goal | Acceptance signal |
 |---|---|
-| Drag-to-install on macOS | User downloads a `.dmg`, mounts it, drags `copilot-api.app` to Applications, opens it once (right-click → Open the first time to clear Gatekeeper), proxy registers itself under launchd |
+| Drag-to-install on macOS (Apple Silicon) | User downloads a `.app.zip`, double-clicks to extract via Finder, drags `copilot-api.app` to Applications, opens it once (right-click → Open the first time to clear Gatekeeper), proxy registers itself under launchd |
 | One-click install on Windows | User downloads an `.msi`, double-clicks, accepts UAC + SmartScreen, proxy registers as a Windows Service. PowerShell installer acceptable fallback |
 | CLI-friendly install on macOS | `brew install x3-design/x3-design/copilot-api` installs and registers the service via `brew services` |
 | Static landing page | An internal Pages URL shows version, OS-detecting download buttons, and an explicit first-launch warning callout for the unsigned binaries |
@@ -98,7 +103,7 @@ writing their own launchd plist.
                     │  Stream B: Installers + UX   │
                     │                              │
                     │  - Homebrew formula          │
-                    │  - .dmg (.app + create-dmg)  │
+                    │  - .app.zip (drag-to-/Apps)  │
                     │  - .msi / .ps1               │
                     │  - GH Pages landing site     │
                     │  - setup / uninstall (CLI)   │
@@ -113,24 +118,29 @@ location**:
 
 ```
 <repo>/releases/download/v<version>/
-  copilot-api-v<version>-darwin-arm64.tar.gz       # Stream A
+  copilot-api-v<version>-darwin-arm64.tar.gz       # Stream A (Apple Silicon)
   copilot-api-v<version>-darwin-arm64.tar.gz.sha256
-  copilot-api-v<version>-darwin-x64.tar.gz         # Stream A
-  copilot-api-v<version>-darwin-x64.tar.gz.sha256
   copilot-api-v<version>-windows-x64.zip           # Stream A
   copilot-api-v<version>-windows-x64.zip.sha256
-  copilot-api-v<version>-darwin-arm64.dmg          # Stream B
-  copilot-api-v<version>-darwin-x64.dmg            # Stream B
+  copilot-api-v<version>-darwin-arm64.app.zip      # Stream B (zipped .app)
+  copilot-api-v<version>-darwin-arm64.app.zip.sha256
   copilot-api-v<version>-windows-x64.msi           # Stream B
+  copilot-api-v<version>-windows-x64.msi.sha256
   install.ps1                                      # Stream B
+  install.ps1.sha256
   SHA256SUMS                                       # Stream A (binaries)
-  SBOM.spdx.json                                   # Stream A
+  SBOM.cdx.json                                    # Stream A
 ```
 
-Stream A publishes the `.tar.gz`/`.zip` + checksums + SBOM. Stream B
-consumes them, builds the `.pkg`/`.msi`/`.ps1` in a separate workflow
-that runs after Stream A's release succeeds, and re-attaches its
-outputs to the same GitHub release.
+**Targets shipped:** Apple Silicon macOS, Windows x64. Intel macOS is
+not supported.
+
+Stream A publishes the `.tar.gz`/`.zip` + checksums + SBOM on a
+`ubuntu-latest` runner (Bun cross-compiles). Stream B consumes those,
+builds the `.app.zip`/`.msi`/`.ps1` in a separate workflow that runs
+after Stream A's release succeeds, and re-attaches its outputs to the
+same GitHub release. **No macOS runners are used by either stream**
+(public-repo policy).
 
 ## Stream A — CI/CD + release artifacts
 
@@ -281,36 +291,42 @@ copilot-api` works.
 
 **Estimate:** ~half a day plus tap-owner coordination.
 
-### B2. macOS `.dmg` (drag-to-Applications)
+### B2. macOS `.app.zip` (Apple Silicon, drag-to-Applications)
 
-A `.dmg` mounted from Finder shows a custom-background drag-target
-view: `copilot-api.app` on the left, `Applications` symlink on the
-right. User drags the app to Applications, double-clicks once to
-self-install (registers launchd agent, runs `setup --unattended`),
-sees a Notification Center toast, and is done.
+A `.zip` containing `copilot-api.app`. User double-clicks the zip to
+extract via Finder, drags `copilot-api.app` to /Applications, opens
+it once (right-click → Open the first time for the Gatekeeper
+bypass). The `.app` is a one-shot self-installer that registers a
+launchd agent on first launch.
 
-Built with **`create-dmg`**
-([sindresorhus/create-dmg](https://github.com/sindresorhus/create-dmg)) —
-Node CLI, actively maintained, produces the canonical macOS UX. The
-`.app` bundle wraps Stream A's compiled binary (`Contents/MacOS/
-copilot-api`) plus a small `first-launch` shell shim that does the
-self-install. Idempotent — re-launching from /Applications re-runs
-the install.
+**Apple Silicon only.** Intel macOS is not a supported target — there
+is no `darwin-x64` artifact in any release.
 
-`Info.plist` sets `LSUIElement = true` so the .app doesn't show in the
-Dock or open a window when launched.
+The original PRD called for a `.dmg`. We switched to `.app.zip`
+because:
 
-v1 ships unsigned per A4's deferral. The DMG background art and Pages
-site (B4) surface the right-click → Open Gatekeeper bypass
-instructions.
+- **Public-repo policy rules out macOS runners.** Building a real
+  `.dmg` requires `hdiutil`, which is Mac-only. The `.app` bundle
+  itself is just a directory tree and assembles fine on
+  `ubuntu-latest`.
+- One extra Finder-extract step replaces the mounted-DMG view; the
+  Pages site (B4) surfaces both that step and the Gatekeeper bypass.
+
+`Info.plist` sets `LSUIElement = true` so the .app doesn't show in
+the Dock when launched. The `Contents/MacOS/first-launch` shim
+copies the binary to `~/.local/bin`, registers the launchd plist,
+and runs `copilot-api setup --unattended --skip-auth`. Idempotent —
+re-launching the .app re-runs the install.
+
+v1 ships unsigned per A4's deferral; first-launch right-click → Open
+is documented on the Pages site.
 
 See `internal-distribution-stream-b.md` §7 for the full `.app`
-template, first-launch script, and `create-dmg` invocation.
+template, first-launch script, and zip pipeline.
 
-**Deliverable:** double-clickable `.dmg` that mounts the standard
-macOS install view; one drag + one right-click-Open + one
-`copilot-api setup` from terminal (for GitHub auth) leaves a working
-setup. Steps 1-4 are mouse-only.
+**Deliverable:** `copilot-api-v<v>-darwin-arm64.app.zip`. Three mouse
+clicks (extract → drag → right-click-Open) plus one terminal command
+(`copilot-api setup` for GitHub auth) → working setup.
 
 **Estimate:** ~2 days. The DMG generator integration + .app template
 + first-launch shim is the bulk; signing is deferred (A4).

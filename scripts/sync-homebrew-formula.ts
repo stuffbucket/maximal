@@ -9,7 +9,8 @@
  *   PLACEHOLDER_VERSION              ← --version (without leading `v`)
  *   PLACEHOLDER_SHA256_DARWIN_ARM64  ← from the release's
  *                                       <name>-darwin-arm64.tar.gz.sha256
- *   PLACEHOLDER_SHA256_DARWIN_X64    ← from the corresponding -x64 file
+ *
+ * Apple Silicon only — no Intel macOS target.
  *
  * Output goes to stdout by default, or to --output if provided.
  *
@@ -120,25 +121,21 @@ export function renderFormula(
     org: string
     version: string
     armSha: string
-    x64Sha: string
   },
 ): string {
   return template
     .replaceAll("PLACEHOLDER_ORG", values.org)
     .replaceAll("PLACEHOLDER_VERSION", values.version)
     .replaceAll("PLACEHOLDER_SHA256_DARWIN_ARM64", values.armSha)
-    .replaceAll("PLACEHOLDER_SHA256_DARWIN_X64", values.x64Sha)
 }
 
 async function main(): Promise<number> {
   const args = parseArgs(process.argv.slice(2))
 
   const armAsset = `copilot-api-v${args.version}-darwin-arm64.tar.gz`
-  const x64Asset = `copilot-api-v${args.version}-darwin-x64.tar.gz`
 
-  const [armSha, x64Sha, template] = await Promise.all([
+  const [armSha, template] = await Promise.all([
     fetchSha256(args, armAsset),
-    fetchSha256(args, x64Asset),
     fs.readFile(args.template, "utf8"),
   ])
 
@@ -146,7 +143,6 @@ async function main(): Promise<number> {
     org: args.org,
     version: args.version,
     armSha,
-    x64Sha,
   })
 
   if (args.output) {

@@ -19,14 +19,15 @@ class CopilotApi < Formula
   version "PLACEHOLDER_VERSION"
   license "MIT"
 
+  # Apple Silicon only. Intel Macs are not a supported target —
+  # there's no darwin-x64 artifact in the release.
+  depends_on arch: :arm64
+  depends_on :macos
+
   on_macos do
     on_arm do
       url "https://github.com/PLACEHOLDER_ORG/copilot-api/releases/download/v#{version}/copilot-api-v#{version}-darwin-arm64.tar.gz"
       sha256 "PLACEHOLDER_SHA256_DARWIN_ARM64"
-    end
-    on_intel do
-      url "https://github.com/PLACEHOLDER_ORG/copilot-api/releases/download/v#{version}/copilot-api-v#{version}-darwin-x64.tar.gz"
-      sha256 "PLACEHOLDER_SHA256_DARWIN_X64"
     end
   end
 

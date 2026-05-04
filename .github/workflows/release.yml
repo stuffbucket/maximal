@@ -103,23 +103,28 @@ jobs:
   # rollout; flip the gate when notarization is unblocked.
   #
   # Contract (do not change without coordinating with Stream B):
-  #   <release>/copilot-api-v<version>-darwin-arm64.tar.gz
-  #   <release>/copilot-api-v<version>-darwin-x64.tar.gz
+  #   <release>/copilot-api-v<version>-darwin-arm64.tar.gz   # Apple Silicon
   #   <release>/copilot-api-v<version>-windows-x64.zip
   #   <each>.sha256
   #   SHA256SUMS (aggregated, attached separately)
+  #
+  # Apple Silicon is the only macOS target. Intel is not supported.
   binaries:
     needs: release
     permissions:
       contents: write
+    # Public repo policy: no macOS runners. Bun's `--compile` cross-
+    # compiles to all three targets from a Linux host, so we run the
+    # whole matrix on ubuntu-latest. Windows binaries also cross-compile
+    # cleanly from Linux (the resulting .exe is identical to one built
+    # on a Windows runner).
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { os: macos-14,     target: bun-darwin-arm64, artifact: darwin-arm64, ext: tar.gz }
-          - { os: macos-13,     target: bun-darwin-x64,   artifact: darwin-x64,   ext: tar.gz }
-          - { os: windows-2022, target: bun-windows-x64,  artifact: windows-x64,  ext: zip    }
-    runs-on: ${{ matrix.os }}
+          - { target: bun-darwin-arm64, artifact: darwin-arm64, ext: tar.gz }
+          - { target: bun-windows-x64,  artifact: windows-x64,  ext: zip    }
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -236,23 +241,25 @@ jobs:
           tag: ${{ github.ref_name }}
           files: SHA256SUMS
 
-  # A6: smoke test on a clean image. Downloads each per-arch artifact
-  # we just published, unpacks it, and confirms the binary actually
-  # runs by invoking `copilot-api debug --json` and asserting the
-  # expected top-level keys. Catches static-link / missing-dep bugs
-  # the build alone misses.
+  # A6: smoke test on a clean image. Downloads the windows-x64 artifact,
+  # unpacks, runs `copilot-api debug --json`, asserts the schema keys.
+  # Catches static-link / missing-dep bugs the build alone misses.
+  #
+  # Public-repo policy: no macOS runners. We cross-compile darwin
+  # binaries from Linux but can't exec Mach-O on ubuntu-latest, so
+  # there's no CI smoke for darwin. Manual mitigations:
+  #   - First user of each release validates via Homebrew install on
+  #     a real Mac; B1's `service do` block fails fast on a broken
+  #     binary.
+  #   - Pre-tag, run `copilot-api debug --json` once on a developer
+  #     Mac.
+  # Same source tree + same Bun toolchain produces all three targets,
+  # so a successful Windows smoke is decent transitive evidence.
   smoke:
     needs: binaries
     permissions:
       contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { os: macos-14,     artifact: darwin-arm64, ext: tar.gz, bin: copilot-api      }
-          - { os: macos-13,     artifact: darwin-x64,   ext: tar.gz, bin: copilot-api      }
-          - { os: windows-2022, artifact: windows-x64,  ext: zip,    bin: copilot-api.exe  }
-    runs-on: ${{ matrix.os }}
+    runs-on: windows-2022
     steps:
       - name: Resolve version
         id: ver
@@ -266,34 +273,18 @@ jobs:
         run: |
           gh release download "${{ github.ref_name }}" \
             --repo "${{ github.repository }}" \
-            --pattern "copilot-api-v${{ steps.ver.outputs.version }}-${{ matrix.artifact }}.${{ matrix.ext }}"
+            --pattern "copilot-api-v${{ steps.ver.outputs.version }}-windows-x64.zip"
 
       - name: Unpack
-        shell: bash
-        run: |
-          if [[ "${{ matrix.ext }}" == "zip" ]]; then
-            7z x ./*.zip -y
-          else
-            tar -xzf ./*.tar.gz
-          fi
-          chmod +x "${{ matrix.bin }}" 2>/dev/null || true
-
-      # Run debug --json and assert the schema. jq is preinstalled on
-      # ubuntu-latest and macos-* runners; on windows-2022 we lean on
-      # PowerShell's built-in JSON support instead.
-      - name: Smoke check (Unix)
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          ./${{ matrix.bin }} debug --json > debug.json
-          cat debug.json
-          jq -e '.version and .git and .runtime and .config and .secrets and .executor' debug.json
-
-      - name: Smoke check (Windows)
-        if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          .\${{ matrix.bin }} debug --json | Out-File -FilePath debug.json -Encoding utf8
+          $zip = Get-ChildItem -Filter '*.zip' | Select-Object -First 1
+          Expand-Archive -Path $zip.FullName -DestinationPath . -Force
+
+      - name: Smoke check
+        shell: pwsh
+        run: |
+          .\copilot-api.exe debug --json | Out-File -FilePath debug.json -Encoding utf8
           Get-Content debug.json
           $j = Get-Content debug.json | ConvertFrom-Json
           foreach ($k in @('version','git','runtime','config','secrets','executor')) {

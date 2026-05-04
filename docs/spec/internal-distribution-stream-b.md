@@ -33,7 +33,7 @@ A bootstraps its CI.
 | **B5** First-run `setup` subcommand | nothing — pure CLI | ✅ landed (`7c7621c`) |
 | **B6** Uninstall paths | B5 (reverse of `setup`) | ✅ landed (`1752104` + `f1f6dd1`) |
 | **B1** Homebrew formula | Stream A's first `.tar.gz` release | ✅ formula skeleton + sync script landed (agent-A). Real SHAs filled by `bun run render-formula --org … --version …` once the first release publishes. PR to `x3-design/homebrew-tap` is the remaining step (cross-repo coordination). |
-| **B2** macOS `.dmg` (drag-to-Applications) | Stream A3 (`.tar.gz` binary; unsigned in v1) | ✅ landed (`29d182f` + `0ea4bdb`) |
+| **B2** macOS `.app.zip` (drag-to-Applications after Finder extract) | Stream A3 (`.tar.gz` binary; unsigned in v1) | ✅ landed (`29d182f` + `0ea4bdb`); **revised** to ship a zipped `.app` instead of a `.app.zip` — public-repo policy rules out macOS runners, and `hdiutil` (DMG mastering) is Mac-only. |
 | **B3a** Windows PowerShell installer | Stream A3 (unsigned in v1) | ✅ landed (`cbbd796`) |
 | **B3b** Windows MSI (WiX) | B3a learnings | ✅ landed (agent-A). Minimal per-user MSI: binary + PATH + Start Menu shortcut to `copilot-api setup`. Built via `dotnet tool install --global wix` on windows-2022 — no third-party action. v1 doesn't auto-register the scheduled task from inside the MSI; users run `copilot-api setup` once. |
 | **B4** GitHub Pages landing site | first published release URL | ✅ landed on `agent/stream-b` (fetches release URL at runtime — ships before first publish) |
@@ -60,7 +60,7 @@ the GitHub release at:
 ```
 
 Your installers consume those URLs + SHAs and **re-attach** their own
-outputs (`.dmg`, `.msi`, `install.ps1`) to the same release.
+outputs (`.app.zip`, `.msi`, `install.ps1`) to the same release.
 
 Don't change this contract without coordinating with Stream A. The
 artifact names are baked into the Homebrew formula, the Pages site,
@@ -232,30 +232,43 @@ and have a working setup.
 
 ~half a day plus tap-owner coordination time.
 
-## 7. B2 — macOS `.dmg` (waits on Stream A3)
+## 7. B2 — macOS `.app.zip` (drag-to-Applications after Finder extract)
 
 ### Goal
 
-A `.dmg` that mounts to a familiar drag-to-Applications view with
-custom background, branded icon, and an `Applications` symlink. User
-drags `copilot-api.app` to Applications, double-clicks to launch
-once, and the app self-installs as a launchd agent then exits. v1
-ships unsigned — the Pages site (B4) and DMG background art surface
-the right-click → Open Gatekeeper bypass instructions.
+A `.zip` containing a fully-formed `copilot-api.app` bundle. User
+extracts it from Finder (default Archive Utility behavior on
+double-click), drags `copilot-api.app` to /Applications, opens it
+once (right-click → Open the first time to clear Gatekeeper). The
+.app is a one-shot self-installer that registers a launchd agent
+and exits. v1 ships unsigned — the Pages site (B4) surfaces the
+right-click → Open bypass instructions.
 
 A4 (signing/notarization) is deferred per the parent PRD; the build
-pipeline produces an unsigned `.app` and `.dmg` for v1, ready to be
-re-signed automatically when A4 unblocks.
+pipeline produces an unsigned `.app.zip` for v1, ready to be re-signed
+automatically when A4 unblocks.
 
-### Why DMG over PKG
+### Why `.app.zip` instead of `.dmg`
 
-- DMG with custom background art is the iconic "drag into Applications"
-  UX; non-engineers recognize it instantly.
-- PKG triggers a system Installer flow that asks for a password — fine
-  for engineers, friction for everyone else.
-- DMG handles the .app gracefully; .app is a single drag-target.
-- The first-launch self-install pattern means the .app *is* the
-  installer — no separate post-install scripts to maintain.
+The original PRD specified a `.dmg` mounted via Finder showing a
+custom-background drag-to-Applications view (`create-dmg`). That
+plan required a macOS runner — `hdiutil` (the only path to a real
+`.dmg`) is Mac-only. **Public-repo policy rules out macOS runners**,
+so the build pipeline now produces a zipped `.app` instead. Trade-off:
+
+- ✅ Builds on `ubuntu-latest` — `.app` bundle is just a directory
+  tree, `zip` is universal.
+- ✅ Same drag-to-Applications endpoint UX after one Finder extract
+  step (Archive Utility extracts on double-click, no terminal).
+- ✅ Same `.app` self-install / launchd-registration on first launch.
+- ❌ Loses the polished mounted-DMG view with custom background art
+  and "drag here ↓" arrow. Users do `Downloads → double-click .zip
+  → drag the resulting .app to Applications` instead of `Downloads
+  → double-click .dmg → drag in mounted view`.
+- ❌ One extra user step (the Finder extract).
+
+The Pages site (B4) compensates for the lost UX cue with a clear
+two-step instruction block.
 
 ### `.app` bundle structure
 
@@ -328,7 +341,7 @@ Alternatives considered:
 - `dmgbuild` (Python) — full programmatic control; overkill for our
   shape and adds a Python toolchain dep.
 
-`create-dmg` accepts a built `.app` and emits a `.dmg`:
+`create-dmg` accepts a built `.app` and emits a `.app.zip`:
 
 ```sh
 npx create-dmg copilot-api.app dist-release/ \
@@ -341,42 +354,36 @@ npx create-dmg copilot-api.app dist-release/ \
 
 ### Build pipeline
 
-CI workflow `installers.yml` runs after `binaries`:
+CI workflow `installers.yml` `macos-app-zip` job runs after Stream A's
+`binaries`:
 
 ```
-needs: binaries
-runs-on: macos-14
+needs: binaries (release published)
+runs-on: ubuntu-latest                  # public-repo: no macOS runners
 steps:
-  - download copilot-api-v<v>-darwin-arm64.tar.gz from release
+  - download copilot-api-v<v>-darwin-arm64.tar.gz + .sha256
+  - verify sha256
   - assemble copilot-api.app from build/macos/app-template/
-  - copy unpacked binary into Contents/MacOS/copilot-api
-  - npx create-dmg ...
-  - upload .dmg to the same GitHub release
-  - matrix x2 for arm64 + x64
+    - copy unpacked binary into Contents/MacOS/copilot-api
+    - sed Info.plist version placeholder
+  - zip -ryX dist-build copilot-api.app → copilot-api-v<v>-darwin-arm64.app.zip
+  - sha256sum
+  - upload-release-asset (vendored composite)
 ```
 
-Same pattern repeated for darwin-x64 — two .dmg artifacts per release
-(`copilot-api-v<v>-darwin-arm64.dmg`, `copilot-api-v<v>-darwin-x64.dmg`).
-
-### DMG background art
-
-`build/macos/dmg-bg.png` — 540×400 image with:
-
-- "Drag copilot-api to Applications →" arrow overlay.
-- Microsoft branding (subtle).
-- A "First launch: right-click → Open" footer line in small text,
-  since the v1 binaries are unsigned. Treat this as a load-bearing
-  UX detail; it's the most asked-about gotcha.
+Single artifact per release — `copilot-api-v<v>-darwin-arm64.app.zip`.
+**Apple Silicon only**; Intel macOS is not a supported target.
 
 ### Acceptance
 
-On a clean macOS Sonoma+ machine:
+On a clean macOS Sonoma+ Apple Silicon machine:
 
-1. Download `copilot-api-v<v>-darwin-arm64.dmg` from the Pages site.
-2. Double-click → DMG mounts, drag-to-Applications view opens.
-3. Drag `copilot-api.app` onto the Applications symlink.
-4. Open `/Applications/copilot-api.app` once (right-click → Open
-   first time to bypass Gatekeeper); a notification confirms install.
+1. Download `copilot-api-v<v>-darwin-arm64.app.zip` from the Pages site.
+2. Double-click the .zip → Finder extracts to `copilot-api.app`.
+3. Drag `copilot-api.app` to `/Applications`.
+4. Right-click `copilot-api.app` → Open → confirm Open in the dialog
+   (one-time Gatekeeper bypass for unsigned binary). A notification
+   confirms install.
 5. Run `copilot-api setup` from a Terminal once to handle GitHub
    auth (B5).
 6. Open Claude Desktop, switch to Cowork, ask Claude something.
@@ -386,7 +393,7 @@ is interactive by nature). Acceptable for v1.
 
 ### Estimate
 
-~2 days. The DMG generator + `.app` template + first-launch script
+~2 days. The `.app` template + first-launch script
 is the bulk; signing / notarization stays deferred per the parent PRD.
 
 ## 8. B3 — Windows installer
@@ -487,8 +494,8 @@ no SPA framework.
    parse the version + asset URLs.
 2. UA-detect the OS (`navigator.platform` / `navigator.userAgent`).
 3. Show one big primary button matching the detected OS:
-   - macOS Apple Silicon: `.dmg` (arm64)
-   - macOS Intel: `.dmg` (x64)
+   - macOS Apple Silicon: `.app.zip` (arm64)
+   - macOS Intel: `.app.zip` (x64)
    - Windows: `.msi` (or `.ps1` instructions block)
 4. Below the primary button: secondary buttons for the other shapes
    (`brew` install command, `.tar.gz` direct download,
