@@ -30,6 +30,9 @@ on:
 
 permissions:
   contents: write
+  # Needed by `ensure-release` so it can `gh workflow run release.yml`.
+  # Without `actions: write`, the workflow-dispatch API returns 403.
+  actions: write
 
 jobs:
   # On `release: published`, the release exists by definition and
