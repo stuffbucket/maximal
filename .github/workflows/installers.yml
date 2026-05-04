@@ -100,15 +100,36 @@ jobs:
             --ref "refs/tags/$TAG" \
             --field "tag=$TAG"
 
-          echo "Waiting up to 20 minutes for release.yml to publish $TAG ..."
-          for i in $(seq 1 40); do
+          # Wait for the release record AND the per-arch binaries.
+          # release.yml's `release` job creates the shell record, then
+          # the dependent `binaries` job uploads the tarballs/zips
+          # several minutes later. The matrix jobs below need the
+          # binaries, not just the shell.
+          echo "Waiting up to 30 minutes for $TAG release + binaries ..."
+          REQUIRED=(
+            "copilot-api-${TAG}-darwin-arm64.tar.gz"
+            "copilot-api-${TAG}-darwin-arm64.tar.gz.sha256"
+            "copilot-api-${TAG}-windows-x64.zip"
+            "copilot-api-${TAG}-windows-x64.zip.sha256"
+          )
+          for i in $(seq 1 60); do
             if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-              echo "Release $TAG is now published"
-              exit 0
+              ASSETS="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null || echo '')"
+              MISSING=0
+              for f in "${REQUIRED[@]}"; do
+                if ! grep -Fxq "$f" <<<"$ASSETS"; then
+                  MISSING=1
+                  break
+                fi
+              done
+              if [ "$MISSING" = 0 ]; then
+                echo "Release $TAG is published with all required binaries"
+                exit 0
+              fi
             fi
             sleep 30
           done
-          echo "::error::Release $TAG was not published within 20 minutes"
+          echo "::error::Release $TAG did not get its binaries within 30 minutes"
           exit 1
 
   # Public-repo policy: no macOS runners. Building a real `.dmg`
