@@ -55,9 +55,9 @@
       #define formuparam 0.53
       #define volsteps 20
       #define stepsize 0.1
-      #define zoom   0.800
+      #define zoom   0.400
       #define tile   0.850
-      #define speed  0.0035
+      #define speed  0.0015
       #define brightness 0.0015
       #define darkmatter 0.300
       #define distfading 0.730
@@ -139,19 +139,19 @@
       "(prefers-reduced-motion: reduce)",
     ).matches
 
+    // Freeze the virtual mouse at a static angle. The shader's natural
+    // forward motion through the kaliset volume is enough; adding
+    // auto-rotation on top compounded into a "warp speed" feel.
+    uniforms.iMouse.value.set(
+      window.innerWidth * 0.5,
+      window.innerHeight * 0.4,
+      0,
+      0,
+    )
+
     const start = performance.now()
     function frame(now: number): void {
-      const t = (now - start) / 1000
-      uniforms.iTime.value = t
-      // Auto-drift the virtual "mouse" so the camera rotates without
-      // input. Independent low-frequency sines on x and y for a
-      // figure-eight feel.
-      uniforms.iMouse.value.set(
-        (Math.sin(t * 0.015) * 0.5 + 0.5) * window.innerWidth,
-        (Math.sin(t * 0.022 + 1.5) * 0.5 + 0.5) * window.innerHeight,
-        0,
-        0,
-      )
+      uniforms.iTime.value = (now - start) / 1000
       renderer.render(scene, camera)
       if (running) rafId = requestAnimationFrame(frame)
     }
