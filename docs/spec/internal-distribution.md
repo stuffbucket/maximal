@@ -14,17 +14,23 @@ contract between them so the work can be picked up by separate agents.
   with their own Copilot Enterprise seat — same pattern Opencode uses
   with its built-in Copilot provider, and the same pattern endorsed
   for Copilot extensions. No public redistribution in v1.
-- Distribution shape: signed per-arch single-file binaries published
-  to GitHub Releases on the internal repo; Homebrew formula at
-  `x3-design/homebrew-tap` for CLI users; `.pkg` for macOS drag-drop;
-  `.msi` for Windows (with a signed PowerShell installer as fallback);
-  static GitHub Pages landing site that auto-detects OS and links to
-  the right artifact.
-- Two agents, two streams. Stream A produces signed artifacts that
+- Distribution shape: per-arch single-file binaries published to
+  GitHub Releases on the internal repo; Homebrew formula at
+  `x3-design/homebrew-tap` for CLI users; **`.dmg`** with a
+  drag-to-Applications `.app` bundle for macOS (built via
+  [`create-dmg`](https://github.com/sindresorhus/create-dmg));
+  `.msi` for Windows with a PowerShell installer fallback; static
+  GitHub Pages landing site that auto-detects OS and links to the
+  right artifact.
+- **v1 ships unsigned.** Codesigning and notarization (A4) are
+  deferred until after we have v1 user feedback; first-launch
+  Gatekeeper / SmartScreen prompts are surfaced explicitly in the
+  DMG background art and the Pages landing site.
+- Two agents, two streams. Stream A produces the per-arch binaries
   Stream B consumes; the contract is the artifact naming convention
-  and checksum publication location.
-- Reuses existing infra: `x3-design/homebrew-tap`, the proxy's own
-  config/state machinery, Cowork's MDM keys.
+  and checksum publication location (§"Inter-stream contract" below).
+- Reuses existing infra: `x3-design/homebrew-tap`, the existing
+  `release.yml` (extended for binaries), Cowork's MDM keys.
 
 ## Problem
 
@@ -48,12 +54,12 @@ writing their own launchd plist.
 
 | Goal | Acceptance signal |
 |---|---|
-| One-click install on macOS | User downloads a `.pkg` from an internal page, double-clicks, enters password once, proxy is running and registered under launchd |
-| One-click install on Windows | User downloads an `.msi`, double-clicks, accepts UAC, proxy is running as a Windows Service. Signed PowerShell installer acceptable fallback |
-| CLI-friendly install on macOS | `brew install x3-design/x3-design/copilot-api` (or similar) installs and registers the service |
-| Static landing page | An internal Pages URL shows version, OS-detecting download buttons, install instructions for both shapes |
+| Drag-to-install on macOS | User downloads a `.dmg`, mounts it, drags `copilot-api.app` to Applications, opens it once (right-click → Open the first time to clear Gatekeeper), proxy registers itself under launchd |
+| One-click install on Windows | User downloads an `.msi`, double-clicks, accepts UAC + SmartScreen, proxy registers as a Windows Service. PowerShell installer acceptable fallback |
+| CLI-friendly install on macOS | `brew install x3-design/x3-design/copilot-api` installs and registers the service via `brew services` |
+| Static landing page | An internal Pages URL shows version, OS-detecting download buttons, and an explicit first-launch warning callout for the unsigned binaries |
 | Claude Desktop configured automatically | Post-install hook updates `claude_desktop_config.json` to point at `localhost:4141` with a stub API key, preserving existing keys |
-| Reproducible signed artifacts | Every release has a CI run, SBOM, SHA-256 checksums, macOS notarization ticket, Windows Authenticode signature |
+| Reproducible artifacts | Every release has a CI run, SBOM, SHA-256 checksums. Signing/notarization tickets land later when A4 unblocks |
 | Diagnostic posture survives the install | After install, `copilot-api debug` from a terminal still produces the existing diagnostic output, including git SHA so support can confirm running version |
 | Auto-update story documented | At minimum a runbook for "bump the formula / re-publish / Pages site picks up new release". Auto-update software optional |
 
@@ -78,10 +84,12 @@ writing their own launchd plist.
                     │                              │
    git tag v* ────► │  - lint/typecheck/test       │
                     │  - bun build --compile       │
-                    │  - codesign + notarize (mac) │
-                    │  - signtool (win)            │
                     │  - SBOM + checksums          │
                     │  - publish to GH Releases    │
+                    │                              │
+                    │  - codesign / notarize       │
+                    │    (DEFERRED — A4)           │
+                    │  - signtool (DEFERRED — A4)  │
                     └──────────────┬───────────────┘
                                    │ artifact URLs +
                                    │ SHA-256 checksums
@@ -90,12 +98,11 @@ writing their own launchd plist.
                     │  Stream B: Installers + UX   │
                     │                              │
                     │  - Homebrew formula          │
-                    │  - .pkg                      │
+                    │  - .dmg (.app + create-dmg)  │
                     │  - .msi / .ps1               │
                     │  - GH Pages landing site     │
-                    │  - Post-install setup hook   │
+                    │  - setup / uninstall (CLI)   │
                     │  - launchd / Windows Service │
-                    │  - Uninstall path            │
                     └──────────────────────────────┘
 ```
 
