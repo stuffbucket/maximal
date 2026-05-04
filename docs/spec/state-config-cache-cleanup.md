@@ -246,7 +246,7 @@ fires.
 | Trace-ID propagation to Copilot upstream (`x-request-id`) | Useful for support cases that involve correlating with Copilot side, but no current incident demands it | A user reports an upstream-attributed bug we can't correlate |
 | Models-list refresh strategy (timer or stale-while-revalidate) | Restart picks up changes; daily restart cadence is acceptable for a dev proxy | A user reports a missing newly-released model that requires same-day visibility |
 | Cache-clear admin command (`copilot-api cache clear`) | Process restart suffices today | Someone needs to clear without restarting (e.g., long-lived production deployment) |
-| Log retention configurability | Hardcoded 7 days is fine for current use; M2's typed config makes adding the knob a one-liner later | Container deployments where logs need 0-day retention to avoid noise, or compliance asks for >7 days |
+| ~~Log retention configurability~~ | ✅ landed — `logRetentionDays` config knob (default 7, `0` deletes on every cleanup tick); zod-validated, surfaced in `copilot-api debug` | n/a |
 | Per-instance prefetch cache → shared/configurable | Per-request scope is the right primitive; promotion to shared is a foot-gun | Cross-request cache hit-rate becomes a measurable win, which it isn't with our request shapes today |
 | `--print-config` flag (separate from `debug` subcommand) | M1 covers it via `debug`; one entry point is enough | If `debug` grows enough to be unwieldy and config-only printing becomes a separate ask |
 | Stylistic consolidation of executor-local constants in vocab (was M0c) | Audit showed they're not actually duplicated; moving them is style not dedup | If a third executor adds its own copy of timeout/max-chars defaults |

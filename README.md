@@ -98,6 +98,7 @@ wins:
 | Use Messages API | — | — | `useMessagesApi` | `true` |
 | Use Apply Patch | — | — | `useFunctionApplyPatch` | `true` |
 | Small model alias | — | — | `smallModel` | `gpt-5-mini` |
+| Log retention (days) | — | — | `logRetentionDays` | `7` (`0` = delete on cleanup tick) |
 
 To inspect what the proxy actually thinks its config is:
 

@@ -5,7 +5,11 @@ import consola from "consola"
 import fs from "node:fs/promises"
 import os from "node:os"
 
-import { type AppConfig, getConfig } from "./lib/config"
+import {
+  type AppConfig,
+  DEFAULT_LOG_RETENTION_DAYS,
+  getConfig,
+} from "./lib/config"
 import { PATHS } from "./lib/paths"
 import { SECRET_DEFS, secretIsFromFile } from "./lib/secrets"
 import { getGitVersion, shortSha } from "./lib/version"
@@ -41,6 +45,7 @@ export interface DebugInfo {
     use_responses_api_web_search?: boolean
     small_model?: string
     claude_token_multiplier?: number
+    log_retention_days: number
     api_keys_configured: boolean
     providers_declared: Array<string>
   }
@@ -159,6 +164,7 @@ export function summarizeConfig(config: AppConfig): DebugInfo["config"] {
     use_responses_api_web_search: config.useResponsesApiWebSearch,
     small_model: config.smallModel,
     claude_token_multiplier: config.claudeTokenMultiplier,
+    log_retention_days: config.logRetentionDays ?? DEFAULT_LOG_RETENTION_DAYS,
     api_keys_configured: (config.auth?.apiKeys?.length ?? 0) > 0,
     providers_declared: Object.keys(config.providers ?? {}),
   }
@@ -251,6 +257,7 @@ function printDebugInfoPlain(info: DebugInfo): void {
     ),
     formatField("small_model", info.config.small_model),
     formatField("claude_token_multiplier", info.config.claude_token_multiplier),
+    formatField("log_retention_days", info.config.log_retention_days),
     formatField("api_keys_configured", info.config.api_keys_configured),
     formatField(
       "providers_declared",

@@ -25,6 +25,7 @@ export interface AppConfig {
   anthropicApiKey?: string
   useResponsesApiWebSearch?: boolean
   claudeTokenMultiplier?: number
+  logRetentionDays?: number
 }
 
 export interface ModelConfig {
@@ -369,4 +370,11 @@ export function isResponsesApiWebSearchEnabled(): boolean {
 export function getClaudeTokenMultiplier(): number {
   const config = getConfig()
   return config.claudeTokenMultiplier ?? 1.15
+}
+
+export const DEFAULT_LOG_RETENTION_DAYS = 7
+
+export function getLogRetentionDays(): number {
+  const config = getConfig()
+  return config.logRetentionDays ?? DEFAULT_LOG_RETENTION_DAYS
 }

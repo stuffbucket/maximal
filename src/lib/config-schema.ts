@@ -62,6 +62,7 @@ export const AppConfigSchema = z
     anthropicApiKey: z.string().optional(),
     useResponsesApiWebSearch: z.boolean().optional(),
     claudeTokenMultiplier: z.number().optional(),
+    logRetentionDays: z.number().int().min(0).max(3650).optional(),
   })
   // passthrough: keep unknown keys in the parsed output. Lets older
   // proxies tolerate config files written by newer ones.

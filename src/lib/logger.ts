@@ -3,14 +3,14 @@ import fs from "node:fs"
 import path from "node:path"
 import util from "node:util"
 
+import { getLogRetentionDays } from "./config"
 import { PATHS } from "./paths"
 import { registerProcessCleanup } from "./process-cleanup"
 import { requestContext } from "./request-context"
 import { state } from "./state"
 
-const LOG_RETENTION_DAYS = 7
-const LOG_RETENTION_MS = LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000
-const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000
+const ONE_DAY_MS = 24 * 60 * 60 * 1000
+const CLEANUP_INTERVAL_MS = ONE_DAY_MS
 const LOG_DIR = path.join(PATHS.APP_DIR, "logs")
 const FLUSH_INTERVAL_MS = 1000
 const MAX_BUFFER_SIZE = 100
@@ -33,6 +33,7 @@ const cleanupOldLogs = () => {
     return
   }
 
+  const retentionMs = getLogRetentionDays() * ONE_DAY_MS
   const now = Date.now()
 
   for (const entry of fs.readdirSync(LOG_DIR)) {
@@ -49,7 +50,9 @@ const cleanupOldLogs = () => {
       continue
     }
 
-    if (now - stats.mtimeMs > LOG_RETENTION_MS) {
+    // retentionMs === 0 → delete every file unconditionally
+    // (ephemeral / container deployments).
+    if (retentionMs === 0 || now - stats.mtimeMs > retentionMs) {
       try {
         fs.rmSync(filePath)
       } catch {
