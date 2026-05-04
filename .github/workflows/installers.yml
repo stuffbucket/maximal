@@ -59,8 +59,11 @@ jobs:
             exit 0
           fi
 
+          # Tag may already exist on the remote (created by a prior
+          # dispatch). Only create + push a new one if not.
+          git fetch --tags origin
           if git rev-parse --verify "refs/tags/$TAG" >/dev/null 2>&1; then
-            echo "Tag $TAG exists locally but no release found — re-fetching to confirm"
+            echo "Tag $TAG already exists; skipping create"
           else
             echo "Tag $TAG does not exist — creating from $(git rev-parse --short HEAD)"
             git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -68,6 +71,16 @@ jobs:
             git tag -a "$TAG" -m "Release $TAG (auto-tagged by installers.yml)"
             git push origin "$TAG"
           fi
+
+          # GitHub's anti-loop guard suppresses `push: tags` triggers
+          # when the push uses the default GITHUB_TOKEN, so we have to
+          # fire release.yml explicitly. The tag ref must already
+          # exist on the remote at this point.
+          echo "Dispatching release.yml on refs/tags/$TAG ..."
+          gh workflow run release.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref "refs/tags/$TAG" \
+            --field "tag=$TAG"
 
           echo "Waiting up to 20 minutes for release.yml to publish $TAG ..."
           for i in $(seq 1 40); do
