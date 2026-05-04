@@ -57,3 +57,11 @@ export function setModels(models: ModelsResponse): void {
   state.models = models
   modelsCache.set(models)
 }
+
+/** When the models cache was last populated, in epoch ms. `null`
+ *  before the first successful `setModels`. Exported as an accessor
+ *  rather than the cache itself so the staleness checker can't poke
+ *  at the cache's other internals. */
+export function getModelsLoadedAtMs(): number | null {
+  return modelsCache.metrics().loaded_at_ms
+}

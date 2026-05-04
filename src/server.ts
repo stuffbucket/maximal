@@ -1,10 +1,14 @@
+import consola from "consola"
 import { Hono } from "hono"
 import { cors } from "hono/cors"
 import { logger } from "hono/logger"
 import { readFileSync } from "node:fs"
 
+import { staleRefreshMiddleware } from "./lib/refresh-models"
 import { createAuthMiddleware } from "./lib/request-auth"
+import { getModelsLoadedAtMs } from "./lib/state"
 import { traceIdMiddleware } from "./lib/trace"
+import { cacheModels } from "./lib/utils"
 import { completionRoutes } from "./routes/chat-completions/route"
 import { debugRoutes } from "./routes/debug/route"
 import { embeddingRoutes } from "./routes/embeddings/route"
@@ -31,6 +35,23 @@ server.use(
       "/usage-viewer/",
       "/_debug/state",
     ],
+  }),
+)
+
+// L1a model-cache lazy refresh. Runs after auth so unauthenticated
+// probes ("/", "/usage-viewer") don't count as activity. Fire-and-
+// forget; the triggering request continues with the slightly stale
+// cache. See docs/spec/model-protocol-strategy.md.
+server.use(
+  "*",
+  staleRefreshMiddleware({
+    getLoadedAtMs: getModelsLoadedAtMs,
+    refresh: cacheModels,
+    onError: (err) =>
+      consola.warn(
+        "Background models refresh failed; keeping stale cache",
+        err,
+      ),
   }),
 )
 
