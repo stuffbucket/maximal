@@ -53,133 +53,106 @@ const sprites: Array<{
         {kind === "toaster" ? (
           <svg
             class="toasters__svg toasters__svg--toaster"
-            viewBox="0 0 170 140"
+            viewBox="0 0 200 140"
             xmlns="http://www.w3.org/2000/svg"
           >
-            <defs>
-              <linearGradient id="chrome" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0" stop-color="#fdf6e0" />
-                <stop offset="0.4" stop-color="#e6dcc2" />
-                <stop offset="0.5" stop-color="#9c8e72" />
-                <stop offset="0.6" stop-color="#e6dcc2" />
-                <stop offset="1" stop-color="#7a6e58" />
-              </linearGradient>
-              <linearGradient id="slot" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0" stop-color="#1a0a08" />
-                <stop offset="0.5" stop-color="#3a1a08" />
-                <stop offset="1" stop-color="#5a3010" />
-              </linearGradient>
-              <linearGradient id="toast-pop" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0" stop-color="#f4cb6a" />
-                <stop offset="0.5" stop-color="#d8923a" />
-                <stop offset="1" stop-color="#a85f1a" />
-              </linearGradient>
-            </defs>
-
-            {/* Wings — bird-style, outstretched from the body's shoulders */}
+            {/* Wings: simple silhouettes, no inner detail — read at any size. */}
             <g class="toasters__wing toasters__wing--left">
               <path
-                d="M 56 70
-                   Q 30 38, 0 50
-                   Q 6 60, 22 66
-                   Q 8 72, 2 80
-                   Q 28 78, 56 84 Z"
+                d="M 60 78
+                   C 28 50, 8 56, 0 70
+                   C 18 72, 28 78, 30 84
+                   C 14 86, 6 92, 4 100
+                   C 30 96, 50 92, 60 92 Z"
                 fill="#f4ead4"
-                opacity="0.95"
-              />
-              <path
-                d="M 28 56 L 32 72 M 16 60 L 26 76 M 8 66 L 22 80"
-                stroke="#0f2e3d"
-                stroke-width="1"
-                stroke-linecap="round"
-                opacity="0.4"
               />
             </g>
             <g class="toasters__wing toasters__wing--right">
               <path
-                d="M 114 70
-                   Q 140 38, 170 50
-                   Q 164 60, 148 66
-                   Q 162 72, 168 80
-                   Q 142 78, 114 84 Z"
+                d="M 140 78
+                   C 172 50, 192 56, 200 70
+                   C 182 72, 172 78, 170 84
+                   C 186 86, 194 92, 196 100
+                   C 170 96, 150 92, 140 92 Z"
                 fill="#f4ead4"
-                opacity="0.95"
-              />
-              <path
-                d="M 142 56 L 138 72 M 154 60 L 144 76 M 162 66 L 148 80"
-                stroke="#0f2e3d"
-                stroke-width="1"
-                stroke-linecap="round"
-                opacity="0.4"
               />
             </g>
 
-            {/* Toaster body — taller-than-wide-ish proportion */}
+            {/* Toaster body — 80×70 with strong silhouette. Single fill,
+                no busy gradient. */}
             <rect
-              x="50"
+              x="60"
+              y="56"
+              width="80"
+              height="70"
+              rx="8"
+              fill="#e8dcc2"
+              stroke="#0f2e3d"
+              stroke-width="2.5"
+            />
+            {/* Subtle highlight on body to suggest chrome without a
+                multi-stop gradient. */}
+            <rect
+              x="64"
+              y="60"
+              width="72"
+              height="6"
+              rx="3"
+              fill="#fdf6e0"
+              opacity="0.7"
+            />
+
+            {/* Single wide bread slot across the top */}
+            <rect
+              x="68"
               y="50"
-              width="70"
-              height="74"
-              rx="6"
-              fill="url(#chrome)"
+              width="64"
+              height="8"
+              rx="2"
+              fill="#1a0a08"
+              stroke="#0f2e3d"
+              stroke-width="1.5"
+            />
+            {/* slot divider — splits it visually into two bays */}
+            <rect x="98" y="50" width="4" height="8" fill="#0f2e3d" />
+
+            {/* Two toast slices popping up at staggered heights */}
+            <rect
+              x="71"
+              y="26"
+              width="24"
+              height="26"
+              rx="2"
+              fill="#d8923a"
+              stroke="#0f2e3d"
+              stroke-width="2"
+            />
+            <rect
+              x="105"
+              y="34"
+              width="24"
+              height="18"
+              rx="2"
+              fill="#d8923a"
+              stroke="#0f2e3d"
+              stroke-width="2"
+            />
+            {/* Toasted-top stripes */}
+            <rect x="74" y="29" width="18" height="3" rx="1" fill="#a85f1a" opacity="0.6" />
+            <rect x="108" y="37" width="18" height="3" rx="1" fill="#a85f1a" opacity="0.6" />
+
+            {/* Front: just a single gold lever knob, no extra noise */}
+            <circle
+              cx="125"
+              cy="100"
+              r="5"
+              fill="#d4a843"
               stroke="#0f2e3d"
               stroke-width="1.5"
             />
 
-            {/* Two slots side by side on top */}
-            <rect x="58" y="46" width="22" height="6" rx="1.5" fill="url(#slot)" />
-            <rect x="90" y="46" width="22" height="6" rx="1.5" fill="url(#slot)" />
-
-            {/* Two toast slices popping up at different heights */}
-            <rect
-              x="59"
-              y="20"
-              width="20"
-              height="28"
-              rx="2"
-              fill="url(#toast-pop)"
-              stroke="#0f2e3d"
-              stroke-width="1"
-            />
-            {/* crust shading on left slice */}
-            <path
-              d="M 61 22 L 77 22"
-              stroke="#a85f1a"
-              stroke-width="1"
-              opacity="0.6"
-            />
-            <rect
-              x="91"
-              y="28"
-              width="20"
-              height="20"
-              rx="2"
-              fill="url(#toast-pop)"
-              stroke="#0f2e3d"
-              stroke-width="1"
-            />
-            <path
-              d="M 93 30 L 109 30"
-              stroke="#a85f1a"
-              stroke-width="1"
-              opacity="0.6"
-            />
-
-            {/* Front control panel: lever + indicator dot */}
-            <rect
-              x="58"
-              y="100"
-              width="44"
-              height="3"
-              rx="1.5"
-              fill="#0f2e3d"
-              opacity="0.4"
-            />
-            <circle cx="98" cy="101.5" r="3.5" fill="#d4a843" stroke="#0f2e3d" stroke-width="0.8" />
-            <circle cx="62" cy="113" r="2" fill="#0f2e3d" opacity="0.4" />
-
-            {/* Bottom feet shadow */}
-            <ellipse cx="85" cy="130" rx="34" ry="3" fill="#0f2e3d" opacity="0.45" />
+            {/* Bottom shadow */}
+            <ellipse cx="100" cy="132" rx="40" ry="3" fill="#0f2e3d" opacity="0.4" />
           </svg>
         ) : (
           <svg
@@ -187,63 +160,32 @@ const sprites: Array<{
             viewBox="0 0 100 100"
             xmlns="http://www.w3.org/2000/svg"
           >
-            <defs>
-              <linearGradient id="bread" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0" stop-color="#f6d27b" />
-                <stop offset="0.5" stop-color="#dc923a" />
-                <stop offset="1" stop-color="#9a5418" />
-              </linearGradient>
-            </defs>
-
-            {/* Loaf-bread slice silhouette: domed top, straight sides + bottom */}
+            {/* Bread silhouette — single shape, single fill, strong outline.
+                The dome-on-rectangle reads as a slice at any size. */}
             <path
-              d="M 14 32
-                 Q 14 8, 50 8
-                 Q 86 8, 86 32
-                 L 86 86
-                 Q 86 90, 82 90
-                 L 18 90
-                 Q 14 90, 14 86 Z"
-              fill="url(#bread)"
+              d="M 18 36
+                 Q 18 14, 50 14
+                 Q 82 14, 82 36
+                 L 82 84
+                 Q 82 88, 78 88
+                 L 22 88
+                 Q 18 88, 18 84 Z"
+              fill="#dc923a"
               stroke="#0f2e3d"
-              stroke-width="1.5"
+              stroke-width="2.5"
             />
-
-            {/* Crust shading — slightly inset darker line following the silhouette */}
+            {/* Crust line inset along the dome — gives the slice depth
+                without a second fill. */}
             <path
-              d="M 19 32
-                 Q 19 13, 50 13
-                 Q 81 13, 81 32"
+              d="M 24 36 Q 24 20, 50 20 Q 76 20, 76 36"
               fill="none"
               stroke="#7a3a10"
-              stroke-width="1.2"
+              stroke-width="2"
               opacity="0.55"
             />
-
-            {/* Butter pat — square with melt-line */}
-            <rect
-              x="38"
-              y="38"
-              width="14"
-              height="11"
-              rx="1.5"
-              fill="#fff5cc"
-              stroke="#0f2e3d"
-              stroke-width="0.8"
-            />
-            <path
-              d="M 40 49 Q 45 53, 50 49 L 50 47 L 40 47 Z"
-              fill="#ffe898"
-              opacity="0.85"
-            />
-
-            {/* Toast pores */}
-            <circle cx="28" cy="60" r="1.5" fill="#7a3a10" opacity="0.6" />
-            <circle cx="62" cy="58" r="1.3" fill="#7a3a10" opacity="0.6" />
-            <circle cx="36" cy="74" r="1.5" fill="#7a3a10" opacity="0.6" />
-            <circle cx="58" cy="78" r="1.2" fill="#7a3a10" opacity="0.6" />
-            <circle cx="72" cy="68" r="1" fill="#7a3a10" opacity="0.6" />
-            <circle cx="22" cy="78" r="1.2" fill="#7a3a10" opacity="0.6" />
+            {/* Two minimalist toast pores — enough to read as toasted bread. */}
+            <circle cx="40" cy="58" r="2.5" fill="#7a3a10" opacity="0.5" />
+            <circle cx="62" cy="68" r="2" fill="#7a3a10" opacity="0.5" />
           </svg>
         )}
       </span>

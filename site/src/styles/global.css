@@ -114,13 +114,13 @@ body {
 
 .toasters__svg {
   display: block;
-  width: 120px;
+  width: 150px;
   height: auto;
   filter: drop-shadow(0 6px 12px rgba(0, 0, 0, 0.35));
 }
 
 .toasters__svg--toast {
-  width: 70px;
+  width: 64px;
 }
 
 @keyframes toasters-fly-ne-sw {
@@ -161,15 +161,17 @@ body {
   }
 }
 
-/* Wing flap: each wing scales rapidly. Staggered between left + right
-   so they don't beat in unison — feels more alive. */
+/* Wing flap: each wing scales rapidly around its shoulder. Staggered
+   between left + right so they don't beat in unison. Pivot points
+   match the new toaster viewBox (200×140) where wings attach to the
+   body at x=60/140, y=85. */
 .toasters__wing {
-  transform-origin: 22px 50px;
+  transform-origin: 60px 85px;
   animation: toasters-wing 320ms ease-in-out infinite;
 }
 
 .toasters__wing--right {
-  transform-origin: 118px 50px;
+  transform-origin: 140px 85px;
   animation-delay: 80ms;
 }
 
