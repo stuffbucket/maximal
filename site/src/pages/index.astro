@@ -1,5 +1,6 @@
 ---
 import "../styles/global.css";
+import FlyingToasters from "../components/FlyingToasters.astro";
 
 const REPO = "stuffbucket/maximal";
 const REPO_URL = `https://github.com/${REPO}`;
@@ -75,53 +76,8 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
   <body>
     <a href="#main" class="skip-link">Skip to content</a>
 
-    <!-- Background layer -->
-    <div class="bg-mesh" aria-hidden="true"></div>
-
-    <svg
-      class="bg-ornament bg-ornament--tl"
-      viewBox="0 0 200 200"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="1.2"
-      aria-hidden="true"
-    >
-      <circle cx="100" cy="100" r="60" />
-      <circle cx="100" cy="100" r="40" />
-      <path d="M100 20 L110 90 L180 100 L110 110 L100 180 L90 110 L20 100 L90 90 Z" />
-      <path d="M100 60 C 130 80, 130 120, 100 140 C 70 120, 70 80, 100 60 Z" />
-    </svg>
-
-    <svg
-      class="bg-ornament bg-ornament--br"
-      viewBox="0 0 200 200"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="1.2"
-      aria-hidden="true"
-    >
-      <path d="M40 100 Q 100 20, 160 100 Q 100 180, 40 100 Z" />
-      <path d="M70 100 Q 100 50, 130 100 Q 100 150, 70 100 Z" />
-      <circle cx="100" cy="100" r="6" fill="currentColor" />
-      <path d="M100 30 L100 170 M30 100 L170 100" />
-    </svg>
-
-    <svg
-      class="bg-ornament bg-ornament--ml"
-      viewBox="0 0 200 200"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="1"
-      aria-hidden="true"
-    >
-      <g>
-        <path d="M100 40 C 130 70, 140 110, 110 150 M100 40 C 70 70, 60 110, 90 150" />
-        <ellipse cx="100" cy="60" rx="14" ry="22" />
-        <ellipse cx="80" cy="100" rx="10" ry="18" transform="rotate(-30 80 100)" />
-        <ellipse cx="120" cy="100" rx="10" ry="18" transform="rotate(30 120 100)" />
-        <circle cx="100" cy="140" r="8" />
-      </g>
-    </svg>
+    <!-- Background layer: Flying Toasters -->
+    <FlyingToasters />
 
     <main id="main">
       <!-- HERO — scarlet -->
@@ -380,19 +336,6 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
     </nav>
 
     <script is:inline>
-      // Reduced-motion guard: disable mesh animation if user prefers.
-      (function () {
-        try {
-          if (
-            window.matchMedia &&
-            window.matchMedia("(prefers-reduced-motion: reduce)").matches
-          ) {
-            var mesh = document.querySelector(".bg-mesh");
-            if (mesh) mesh.style.animation = "none";
-          }
-        } catch (e) {}
-      })();
-
       // OS detection — promote the matching button to primary.
       (function () {
         var ua = navigator.userAgent || "";

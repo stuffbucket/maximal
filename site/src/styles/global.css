@@ -8,9 +8,6 @@
 :root {
   /* Page background — deep teal "wall" */
   --bg-deep: #0f2e3d;
-  --bg-mesh-1: #d83a4f;
-  --bg-mesh-2: #3ab5c4;
-  --bg-mesh-3: #e89944;
 
   /* Jewel-tone "objects" — section card backgrounds */
   --card-scarlet: #c8334a;
@@ -75,82 +72,103 @@ body {
   overflow-x: hidden;
 }
 
-/* ===== Background layer ===== */
+/* ===== Background layer: Flying Toasters ========================
+   Homage to After Dark's screensaver. Sprites drift diagonally from
+   upper-right to lower-left at staggered durations and delays so the
+   field never repeats. Toasters flap their wings via a separate
+   keyframe. Pure CSS — no JS, no canvas.
+   ============================================================== */
 
-.bg-mesh {
+.toasters {
   position: fixed;
-  inset: -10%;
+  inset: 0;
   z-index: 0;
   pointer-events: none;
-  background:
-    radial-gradient(
-      circle at 20% 30%,
-      rgba(216, 58, 79, 0.35) 0%,
-      transparent 40%
-    ),
-    radial-gradient(
-      circle at 80% 20%,
-      rgba(58, 181, 196, 0.3) 0%,
-      transparent 45%
-    ),
-    radial-gradient(
-      circle at 60% 80%,
-      rgba(232, 153, 68, 0.28) 0%,
-      transparent 45%
-    ),
-    radial-gradient(
-      circle at 15% 85%,
-      rgba(184, 64, 122, 0.25) 0%,
-      transparent 40%
-    );
-  filter: blur(40px);
-  animation: mesh-drift 48s ease-in-out infinite alternate;
+  overflow: hidden;
 }
 
-@keyframes mesh-drift {
+.toasters__sprite {
+  position: absolute;
+  /* Start off-screen to the upper-right; end off-screen to the
+     lower-left. Each sprite fixes its own --duration / --delay /
+     --scale via inline style. */
+  left: 100vw;
+  transform: translate3d(0, 0, 0) scale(var(--scale, 1));
+  animation:
+    toasters-fly var(--duration, 22s) linear var(--delay, 0s) infinite;
+  will-change: transform;
+}
+
+.toasters__svg {
+  display: block;
+  width: 120px;
+  height: auto;
+  filter: drop-shadow(0 6px 12px rgba(0, 0, 0, 0.35));
+}
+
+.toasters__svg--toast {
+  width: 70px;
+}
+
+@keyframes toasters-fly {
+  /* Diagonal flight: enter top-right, exit bottom-left. Translate
+     uses a calc so the sprite always clears the viewport regardless
+     of width. */
   0% {
-    transform: translate(0, 0) scale(1);
+    transform: translate3d(120px, -10vh, 0) scale(var(--scale, 1));
+    opacity: 0;
   }
-  50% {
-    transform: translate(4%, -3%) scale(1.05);
+  6% {
+    opacity: 1;
+  }
+  94% {
+    opacity: 1;
   }
   100% {
-    transform: translate(-3%, 5%) scale(1.02);
+    transform: translate3d(-110vw, 60vh, 0) scale(var(--scale, 1));
+    opacity: 0;
   }
 }
 
-.bg-ornament {
-  position: fixed;
-  z-index: 0;
-  pointer-events: none;
-  opacity: 0.12;
-  color: var(--ink-cream);
+/* Wing flap: each wing scales rapidly. Staggered between left + right
+   so they don't beat in unison — feels more alive. */
+.toasters__wing {
+  transform-origin: 22px 50px;
+  animation: toasters-wing 320ms ease-in-out infinite;
 }
 
-.bg-ornament--tl {
-  top: -60px;
-  left: -60px;
-  width: 320px;
-  height: 320px;
+.toasters__wing--right {
+  transform-origin: 118px 50px;
+  animation-delay: 80ms;
 }
 
-.bg-ornament--br {
-  bottom: 80px;
-  right: -80px;
-  width: 360px;
-  height: 360px;
-  color: var(--ink-gold);
-  opacity: 0.14;
+@keyframes toasters-wing {
+  0%,
+  100% {
+    transform: scaleX(1) translateY(0);
+  }
+  45% {
+    transform: scaleX(0.55) translateY(-2px);
+  }
+  55% {
+    transform: scaleX(0.55) translateY(-2px);
+  }
 }
 
-.bg-ornament--ml {
-  top: 50%;
-  left: -100px;
-  width: 280px;
-  height: 280px;
-  color: var(--ink-gold);
-  opacity: 0.1;
-  transform: translateY(-50%);
+/* Reduced-motion: freeze the field. Sprites scatter at their starting
+   positions — visible but still. */
+@media (prefers-reduced-motion: reduce) {
+  .toasters__sprite {
+    animation: none;
+    /* Pin to a calculated mid-flight pose so the field still reads. */
+    left: auto;
+    right: 10vw;
+    transform: scale(var(--scale, 1));
+  }
+  .toasters__wing,
+  .toasters__wing--right {
+    animation: none;
+  }
 }
 
 /* ===== Layout ===== */
@@ -339,7 +357,7 @@ h2 {
   margin-bottom: 0;
 }
 
-.card a {
+.card a:not(.btn) {
   color: var(--ink-cream);
   text-decoration: underline;
   text-underline-offset: 3px;
@@ -347,11 +365,11 @@ h2 {
   text-decoration-thickness: 1.5px;
 }
 
-.card--ochre a {
+.card--ochre a:not(.btn) {
   text-decoration-color: var(--ink-deep);
 }
 
-.card a:hover {
+.card a:not(.btn):hover {
   text-decoration-thickness: 2.5px;
 }
 
@@ -480,10 +498,14 @@ pre code {
   opacity: 0.7;
 }
 
-.btn--primary .btn-spark {
+.btn-spark {
   flex: 0 0 auto;
   width: 22px;
   height: 22px;
+  color: var(--ink-cream);
+}
+
+.btn--primary .btn-spark {
   color: var(--ink-gold);
 }
 
@@ -687,8 +709,5 @@ ol.steps li strong {
     animation-iteration-count: 1 !important;
     transition-duration: 0ms !important;
     scroll-behavior: auto !important;
-  }
-  .bg-mesh {
-    animation: none !important;
   }
 }

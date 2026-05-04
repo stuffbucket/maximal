@@ -1,0 +1,187 @@
+---
+// Flying Toasters background — homage to After Dark's screensaver,
+// re-implemented as fixed-position SVG sprites with CSS keyframes.
+// Each sprite drifts diagonally from upper-right to lower-left at
+// its own duration/delay so the field never repeats. Wings flap on
+// the toasters via a separate keyframe.
+//
+// Pure CSS animation — no JS, no canvas, no ThreeJS. Toasters are
+// styled in the page palette (cream/gold) so they belong with the
+// cards instead of competing with them.
+//
+// Reduced-motion: animations stop, sprites freeze in place — the
+// field still reads as decorative without movement.
+
+const sprites: Array<{
+  kind: "toaster" | "toast"
+  top: string
+  duration: string
+  delay: string
+  scale: string
+}> = [
+  { kind: "toaster", top: "6%",  duration: "22s", delay: "0s",  scale: "1.0" },
+  { kind: "toast",   top: "14%", duration: "17s", delay: "4s",  scale: "0.7" },
+  { kind: "toaster", top: "24%", duration: "26s", delay: "9s",  scale: "0.85" },
+  { kind: "toast",   top: "34%", duration: "19s", delay: "13s", scale: "0.6" },
+  { kind: "toaster", top: "44%", duration: "24s", delay: "2s",  scale: "1.1" },
+  { kind: "toast",   top: "54%", duration: "20s", delay: "8s",  scale: "0.7" },
+  { kind: "toaster", top: "64%", duration: "21s", delay: "5s",  scale: "0.95" },
+  { kind: "toast",   top: "72%", duration: "16s", delay: "11s", scale: "0.65" },
+  { kind: "toaster", top: "82%", duration: "23s", delay: "15s", scale: "0.8" },
+  { kind: "toast",   top: "90%", duration: "18s", delay: "7s",  scale: "0.6" },
+]
+---
+
+<div class="toasters" aria-hidden="true">
+  {
+    sprites.map(({ kind, top, duration, delay, scale }) => (
+      <span
+        class={`toasters__sprite toasters__sprite--${kind}`}
+        style={`top:${top}; --duration:${duration}; --delay:${delay}; --scale:${scale};`}
+      >
+        {kind === "toaster" ? (
+          <svg
+            class="toasters__svg toasters__svg--toaster"
+            viewBox="0 0 140 100"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            {/* Wings — animated independently */}
+            <g class="toasters__wing toasters__wing--left">
+              <path
+                d="M 32 38 Q 6 28, -2 50 Q 10 58, 32 50 Z"
+                fill="var(--ink-cream)"
+                opacity="0.92"
+              />
+              <path
+                d="M 18 44 Q 8 40, 4 50"
+                fill="none"
+                stroke="var(--bg-deep)"
+                stroke-width="1.2"
+                opacity="0.5"
+              />
+            </g>
+            <g class="toasters__wing toasters__wing--right">
+              <path
+                d="M 108 38 Q 134 28, 142 50 Q 130 58, 108 50 Z"
+                fill="var(--ink-cream)"
+                opacity="0.92"
+              />
+              <path
+                d="M 122 44 Q 132 40, 136 50"
+                fill="none"
+                stroke="var(--bg-deep)"
+                stroke-width="1.2"
+                opacity="0.5"
+              />
+            </g>
+
+            {/* Body — chrome look via stacked gradients */}
+            <defs>
+              <linearGradient id="chrome" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stop-color="#f4ead4" />
+                <stop offset="0.45" stop-color="#d4cab4" />
+                <stop offset="0.5" stop-color="#a89c80" />
+                <stop offset="0.55" stop-color="#d4cab4" />
+                <stop offset="1" stop-color="#8a7e64" />
+              </linearGradient>
+              <linearGradient id="slot" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stop-color="#1a0a0a" />
+                <stop offset="0.6" stop-color="#3a1a0a" />
+                <stop offset="1" stop-color="#5a3010" />
+              </linearGradient>
+              <linearGradient id="bread" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stop-color="#e89944" />
+                <stop offset="1" stop-color="#c87024" />
+              </linearGradient>
+            </defs>
+
+            {/* Toaster body */}
+            <rect
+              x="32"
+              y="34"
+              width="76"
+              height="56"
+              rx="6"
+              fill="url(#chrome)"
+              stroke="var(--bg-deep)"
+              stroke-width="1.5"
+            />
+            {/* Bread slot */}
+            <rect
+              x="40"
+              y="30"
+              width="60"
+              height="8"
+              rx="2"
+              fill="url(#slot)"
+            />
+            {/* Bread popped up */}
+            <rect
+              x="48"
+              y="18"
+              width="44"
+              height="14"
+              rx="2"
+              fill="url(#bread)"
+              stroke="var(--bg-deep)"
+              stroke-width="1"
+              opacity="0.95"
+            />
+            {/* Lever */}
+            <circle cx="98" cy="62" r="3" fill="var(--ink-gold)" />
+            {/* Bottom shadow */}
+            <ellipse
+              cx="70"
+              cy="92"
+              rx="32"
+              ry="3"
+              fill="var(--bg-deep)"
+              opacity="0.5"
+            />
+          </svg>
+        ) : (
+          <svg
+            class="toasters__svg toasters__svg--toast"
+            viewBox="0 0 80 80"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <defs>
+              <linearGradient id="toast-grad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stop-color="#f4cb6a" />
+                <stop offset="0.5" stop-color="#e89944" />
+                <stop offset="1" stop-color="#a85f1a" />
+              </linearGradient>
+            </defs>
+            {/* Toast slice — rounded top, flat-ish bottom */}
+            <path
+              d="M 14 28
+                 Q 14 10, 40 10
+                 Q 66 10, 66 28
+                 L 66 66
+                 Q 66 70, 62 70
+                 L 18 70
+                 Q 14 70, 14 66 Z"
+              fill="url(#toast-grad)"
+              stroke="var(--bg-deep)"
+              stroke-width="1.5"
+            />
+            {/* Crust shading */}
+            <path
+              d="M 18 28 Q 18 14, 40 14 Q 62 14, 62 28"
+              fill="none"
+              stroke="#a85f1a"
+              stroke-width="1"
+              opacity="0.7"
+            />
+            {/* Toast pores */}
+            <circle cx="30" cy="34" r="1.5" fill="#a85f1a" opacity="0.55" />
+            <circle cx="50" cy="40" r="1.2" fill="#a85f1a" opacity="0.55" />
+            <circle cx="38" cy="50" r="1.5" fill="#a85f1a" opacity="0.55" />
+            <circle cx="54" cy="56" r="1" fill="#a85f1a" opacity="0.55" />
+            <circle cx="26" cy="58" r="1.2" fill="#a85f1a" opacity="0.55" />
+          </svg>
+        )}
+      </span>
+    ))
+  }
+</div>
