@@ -30,13 +30,13 @@ A bootstraps its CI.
 
 | Item | Depends on | Status |
 |---|---|---|
-| **B5** First-run `setup` subcommand | nothing — pure CLI | start here |
-| **B6** Uninstall paths | B5 (reverse of `setup`) | start with B5 |
-| **B1** Homebrew formula | Stream A's first `.tar.gz` release | wait |
-| **B2** macOS `.dmg` (drag-to-Applications) | Stream A3 (`.tar.gz` binary; unsigned in v1) | wait |
-| **B3a** Windows PowerShell installer | Stream A3 (unsigned in v1) | wait |
-| **B3b** Windows MSI (WiX) | B3a learnings | last in your queue |
-| **B4** GitHub Pages landing site | first published release URL | last |
+| **B5** First-run `setup` subcommand | nothing — pure CLI | ✅ landed (`7c7621c`) |
+| **B6** Uninstall paths | B5 (reverse of `setup`) | ✅ landed (`1752104` + `f1f6dd1`) |
+| **B1** Homebrew formula | Stream A's first `.tar.gz` release | ⏳ wait (need real `sha256`) |
+| **B2** macOS `.dmg` (drag-to-Applications) | Stream A3 (`.tar.gz` binary; unsigned in v1) | ✅ landed (`29d182f` + `0ea4bdb`) |
+| **B3a** Windows PowerShell installer | Stream A3 (unsigned in v1) | 🚧 in progress on `agent/stream-b` |
+| **B3b** Windows MSI (WiX) | B3a learnings | ⏳ after B3a |
+| **B4** GitHub Pages landing site | first published release URL | 🚧 in progress on `agent/stream-b` (fetches release URL at runtime — ships before first publish) |
 
 You can ship B3a alone in v1 if WiX (B3b) takes too long — acceptable
 fallback per the parent PRD's risk section.
