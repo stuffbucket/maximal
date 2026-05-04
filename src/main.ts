@@ -40,6 +40,7 @@ const { checkUsage } = await import("./check-usage")
 const { debug } = await import("./debug")
 const { setup } = await import("./setup")
 const { start } = await import("./start")
+const { uninstall } = await import("./uninstall")
 
 const main = defineCommand({
   meta: {
@@ -47,7 +48,14 @@ const main = defineCommand({
     description:
       "A wrapper around GitHub Copilot API to make it OpenAI compatible, making it usable for other tools.",
   },
-  subCommands: { auth, start, setup, "check-usage": checkUsage, debug },
+  subCommands: {
+    auth,
+    start,
+    setup,
+    uninstall,
+    "check-usage": checkUsage,
+    debug,
+  },
   args: cliArgs,
 })
 
