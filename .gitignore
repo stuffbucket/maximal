@@ -1,6 +1,7 @@
 node_modules/
 dist/
 build/
+SBOM.cdx.json
 *.log
 .DS_Store
 .env

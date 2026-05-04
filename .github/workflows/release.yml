@@ -36,6 +36,14 @@ jobs:
       - name: Build
         run: bun run build
 
+      # A5: SBOM + license scan. Pure Bun script; no third-party
+      # action / npm dep introduced. Fails the job on a disallowed
+      # license — the policy is in `scripts/sbom.ts`. Attached to
+      # the release later in this job, after `changelogithub` creates
+      # the release record.
+      - name: Generate SBOM and run license scan
+        run: bun scripts/sbom.ts --output SBOM.cdx.json
+
       - name: Setup Node for npm publish
         uses: actions/setup-node@v4
         with:
@@ -72,6 +80,12 @@ jobs:
           fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Attach SBOM to release
+        uses: ./.github/actions/upload-release-asset
+        with:
+          tag: ${{ github.ref_name }}
+          files: SBOM.cdx.json
 
       - name: Publish to npm (Trusted Publisher / OIDC)
         run: npm publish --access public --tag ${{ steps.prerelease.outputs.npm_tag }}
@@ -221,3 +235,70 @@ jobs:
         with:
           tag: ${{ github.ref_name }}
           files: SHA256SUMS
+
+  # A6: smoke test on a clean image. Downloads each per-arch artifact
+  # we just published, unpacks it, and confirms the binary actually
+  # runs by invoking `copilot-api debug --json` and asserting the
+  # expected top-level keys. Catches static-link / missing-dep bugs
+  # the build alone misses.
+  smoke:
+    needs: binaries
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-14,     artifact: darwin-arm64, ext: tar.gz, bin: copilot-api      }
+          - { os: macos-13,     artifact: darwin-x64,   ext: tar.gz, bin: copilot-api      }
+          - { os: windows-2022, artifact: windows-x64,  ext: zip,    bin: copilot-api.exe  }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Download artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release download "${{ github.ref_name }}" \
+            --repo "${{ github.repository }}" \
+            --pattern "copilot-api-v${{ steps.ver.outputs.version }}-${{ matrix.artifact }}.${{ matrix.ext }}"
+
+      - name: Unpack
+        shell: bash
+        run: |
+          if [[ "${{ matrix.ext }}" == "zip" ]]; then
+            7z x ./*.zip -y
+          else
+            tar -xzf ./*.tar.gz
+          fi
+          chmod +x "${{ matrix.bin }}" 2>/dev/null || true
+
+      # Run debug --json and assert the schema. jq is preinstalled on
+      # ubuntu-latest and macos-* runners; on windows-2022 we lean on
+      # PowerShell's built-in JSON support instead.
+      - name: Smoke check (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          ./${{ matrix.bin }} debug --json > debug.json
+          cat debug.json
+          jq -e '.version and .git and .runtime and .config and .secrets and .executor' debug.json
+
+      - name: Smoke check (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          .\${{ matrix.bin }} debug --json | Out-File -FilePath debug.json -Encoding utf8
+          Get-Content debug.json
+          $j = Get-Content debug.json | ConvertFrom-Json
+          foreach ($k in @('version','git','runtime','config','secrets','executor')) {
+            if ($null -eq $j.$k) {
+              Write-Error "Missing top-level key: $k"
+              exit 1
+            }
+          }

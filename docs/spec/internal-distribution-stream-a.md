@@ -12,8 +12,8 @@ Working notes for the agent (me) owning Stream A. Symmetric to
 | **A2** CI on push/PR | ✅ already exists at `.github/workflows/ci.yml` | Verify after A1 — secrets/cache may need rename |
 | **A3** Per-arch `bun --compile` | ✅ scaffolded — added `binaries` + `checksums` jobs to `release.yml` (this commit) | Codesign/notarize gated `if: false` until A4 |
 | **A4** Signing + notarization | **deferred for v1** | Stubs left as `if: false`-gated `[DEFERRED A4]` steps. Flip after v1 if user feedback / compliance demands it |
-| **A5** SBOM + license scan | open | `bun pm ls --json` → SPDX, `license-checker` |
-| **A6** Smoke test on clean image | open | Download artifact, run `copilot-api debug --json`, assert shape |
+| **A5** SBOM + license scan | ✅ wired | `scripts/sbom.ts` (pure Bun, no new deps) — emits CycloneDX 1.4 SBOM, fails build on disallowed license. Attached to release as `SBOM.cdx.json` |
+| **A6** Smoke test on clean image | ✅ wired | New `smoke` matrix job in `release.yml`; downloads each per-arch artifact, unpacks, runs `copilot-api debug --json`, asserts top-level keys |
 
 ## Vendored actions policy
 
@@ -79,58 +79,43 @@ Need three credential sets:
 After A4 lands, repeat the smoke test (A6) on a clean managed device
 and confirm Gatekeeper / SmartScreen don't prompt.
 
-## A5 — SBOM + license scan
+## A5 — SBOM + license scan (landed)
 
-Two pieces:
+`scripts/sbom.ts` (~180 LOC pure Bun, zero new deps) walks the
+production dependency graph from `package.json` + `node_modules/<dep>/
+package.json`, emits a CycloneDX 1.4 SBOM, and asserts every license
+is in an allowlist:
 
-```yaml
-- name: Generate SBOM
-  run: |
-    npx @cyclonedx/cyclonedx-npm --output-format JSON --output-file SBOM.cdx.json
-    # or: bun x @cyclonedx/cyclonedx-npm ...
-    # SPDX variant: npx spdx-sbom-generator -o ./
-
-- name: License scan
-  run: npx license-checker --production --onlyAllow 'MIT;Apache-2.0;BSD-2-Clause;BSD-3-Clause;ISC;Unlicense;CC0-1.0' --excludePrivatePackages
+```
+MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, BSD, ISC, Unlicense,
+CC0-1.0, 0BSD, BlueOak-1.0.0, Python-2.0, WTFPL
 ```
 
-Both attach to the release via `softprops/action-gh-release@v2`. Pick
-SPDX over CycloneDX if internal compliance prefers it (TBD; ask).
+Composite expressions (`(MIT OR Apache-2.0)`, `BSD-3-Clause AND MIT`)
+are split on AND/OR and every leaf must be in the allowlist.
 
-License threshold list above is conservative. Loosen only if a
-specific dep needs an exception, and document it.
+Loosen only with a documented justification in the commit message that
+adds the new license. Switch to SPDX format if compliance prefers —
+the script's `buildBom` is the single edit point.
 
-## A6 — smoke test
+Wired into `release.yml` between `Build` and `Generate GitHub Release
+notes`. SBOM uploads to the release via the vendored
+`upload-release-asset` action.
 
-Add a `smoke` job dependent on `binaries`:
+## A6 — smoke test (landed)
 
-```yaml
-smoke:
-  needs: binaries
-  strategy:
-    matrix:
-      include:
-        - { os: macos-14, artifact: darwin-arm64, ext: tar.gz }
-        - { os: windows-2022, artifact: windows-x64, ext: zip }
-  runs-on: ${{ matrix.os }}
-  steps:
-    - name: Download artifact
-      run: gh release download "${{ github.ref_name }}" --pattern "copilot-api-v*-${{ matrix.artifact }}.${{ matrix.ext }}"
-    - name: Unpack
-      shell: bash
-      run: |
-        if [[ "${{ matrix.ext }}" == "zip" ]]; then 7z x ./*.zip; else tar -xzf ./*.tar.gz; fi
-    - name: Run debug --json
-      shell: bash
-      run: |
-        BIN=copilot-api
-        if [[ "${{ matrix.artifact }}" == windows-* ]]; then BIN="copilot-api.exe"; fi
-        ./$BIN debug --json | tee debug.json
-        # Assert shape: top-level keys exist
-        jq -e '.version and .git and .runtime and .config and .secrets and .executor' debug.json
-```
+`smoke` matrix job in `release.yml` runs after `binaries`. For each
+arch (mac-arm64, mac-x64, win-x64) it downloads the just-published
+artifact, unpacks (`tar -xzf` / `7z x`), and runs the binary with
+`debug --json`. Schema assertion uses `jq -e '.version and .git and …'`
+on macOS / Linux and a PowerShell `ConvertFrom-Json` loop on Windows
+(the runner doesn't ship `jq` for Windows by default).
 
-Catches static-link / missing-dep bugs the build itself misses.
+Asserted top-level keys: `version`, `git`, `runtime`, `config`,
+`secrets`, `executor`. Mirrors the `DebugInfo` interface in
+`src/debug.ts` — keep them in sync if the schema gains a key.
+
+Catches static-link / missing-dep bugs the build alone misses.
 
 ## Open questions for the team
 
