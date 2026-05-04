@@ -1,7 +1,17 @@
 # macOS installer assets — `build/macos/`
 
-Inputs to the `installers.yml` workflow that produces the
-`copilot-api-v<version>-darwin-{arm64,x64}.dmg` artifacts.
+Inputs to two consumers:
+
+1. The `installers.yml` `macos-app-zip` job (CI on `ubuntu-latest`),
+   which produces `copilot-api-v<version>-darwin-arm64.app.zip` on
+   every tag.
+2. The `scripts/package-dmg.ts` local helper (Apple Silicon Mac
+   only), which produces a polished `copilot-api-v<version>-darwin-
+   arm64.dmg` post-tag via `npx create-dmg`.
+
+Apple Silicon only — Intel macOS is not a supported target. v1 ships
+unsigned (A4 deferred); first-launch right-click → Open is documented
+on the Pages site.
 
 ## Layout
 
@@ -20,25 +30,35 @@ build/macos/
   dmg-bg.png.placeholder                               # designer asset; replace before v1
 ```
 
-## Build flow (per `.github/workflows/installers.yml`)
+## Build flow
 
-For each `(arch ∈ {arm64, x64})`:
+### CI path — `.app.zip` (`installers.yml` `macos-app-zip` job)
 
-1. Download the matching `copilot-api-v<v>-darwin-<arch>.tar.gz`
-   artifact from the GitHub release.
-2. Verify the `.sha256`.
-3. Copy `app-template/` to `dist-build/copilot-api.app/`.
-4. Substitute `__VERSION__` in `Contents/Info.plist`.
-5. Replace `Contents/MacOS/copilot-api.placeholder` with the unpacked
+Runs on `ubuntu-latest` for `arch=arm64` only:
+
+1. Download `copilot-api-v<v>-darwin-arm64.tar.gz` + `.sha256` from
+   the release; verify SHA.
+2. Copy `app-template/` to `dist-build/copilot-api.app/`.
+3. Substitute `__VERSION__` in `Contents/Info.plist`.
+4. Replace `Contents/MacOS/copilot-api.placeholder` with the unpacked
    binary (preserve `+x` mode).
-6. Replace `Contents/Resources/AppIcon.icns.placeholder` with the
-   real icon (when available — until then, the .app launches fine
-   with no icon, just a generic Finder placeholder).
-7. Run `npx create-dmg` against `copilot-api.app` with the dmg
-   background image — falls back to the create-dmg default when
-   `dmg-bg.png` is still a placeholder.
-8. Upload the resulting `.dmg` to the same release as the source
-   tarball.
+5. Replace `Contents/Resources/AppIcon.icns.placeholder` with the
+   real icon when available; the placeholder is removed regardless.
+6. `zip -ryX` the `.app` into `copilot-api-v<v>-darwin-arm64.app.zip`
+   (reproducible byte output via `-X` and pinned mtimes).
+7. Upload to the release.
+
+### Local path — `.dmg` (`scripts/package-dmg.ts`)
+
+Runs on a developer Mac post-tag:
+
+1. Same download / verify / unpack as the CI path.
+2. Same `.app` assembly.
+3. `npx create-dmg --identity= …` (Mac-only; `hdiutil` under the hood).
+4. Sidecar `.sha256`. Optional `--upload` attaches both to the release.
+
+Both paths consume the same `app-template/` so substitutions stay in
+sync.
 
 ## Asset replacements before v1 ship
 
