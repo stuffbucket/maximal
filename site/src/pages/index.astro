@@ -259,7 +259,23 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
               <p class="section-note">
                 Or install via PowerShell directly:
               </p>
-              <code class="ps-cmd">iex (irm {winPs1})</code>
+              <div class="copyable">
+                <code class="ps-cmd">iex (irm {winPs1})</code>
+                <button class="copy-btn" type="button" aria-label="Copy command">
+                  <svg
+                    class="copy-btn__icon"
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    aria-hidden="true"
+                  >
+                    <rect x="5" y="5" width="9" height="9" rx="1.5" />
+                    <path d="M11 5 V3 a1 1 0 0 0 -1 -1 H3 a1 1 0 0 0 -1 1 v7 a1 1 0 0 0 1 1 h2" />
+                  </svg>
+                  <span class="copy-btn__label">Copy</span>
+                </button>
+              </div>
             </div>
           )
         }
@@ -320,7 +336,23 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
             <strong>Authenticate.</strong> Open a terminal and run the
             one-time GitHub device-code flow. This is the only required
             terminal step.
-            <pre><code>copilot-api setup</code></pre>
+            <div class="copyable copyable--block">
+              <pre><code>copilot-api setup</code></pre>
+              <button class="copy-btn" type="button" aria-label="Copy command">
+                <svg
+                  class="copy-btn__icon"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  aria-hidden="true"
+                >
+                  <rect x="5" y="5" width="9" height="9" rx="1.5" />
+                  <path d="M11 5 V3 a1 1 0 0 0 -1 -1 H3 a1 1 0 0 0 -1 1 v7 a1 1 0 0 0 1 1 h2" />
+                </svg>
+                <span class="copy-btn__label">Copy</span>
+              </button>
+            </div>
           </li>
           <li>
             <strong>Point your client at it.</strong> The proxy listens on
@@ -400,6 +432,46 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
           '[data-os-hint="' + primaryKey + '"]',
         );
         if (hint) hint.hidden = false;
+      })();
+
+      // Copy-to-clipboard for .copyable blocks.
+      (function () {
+        var blocks = document.querySelectorAll(".copyable");
+        blocks.forEach(function (block) {
+          var btn = block.querySelector(".copy-btn");
+          var src = block.querySelector("code");
+          if (!btn || !src) return;
+          var label = btn.querySelector(".copy-btn__label");
+          var resetTimer = 0;
+          btn.addEventListener("click", function () {
+            var text = (src.textContent || "").trim();
+            var done = function () {
+              btn.classList.add("copy-btn--copied");
+              if (label) label.textContent = "Copied";
+              if (resetTimer) clearTimeout(resetTimer);
+              resetTimer = window.setTimeout(function () {
+                btn.classList.remove("copy-btn--copied");
+                if (label) label.textContent = "Copy";
+              }, 1500);
+            };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(text).then(done, function () {});
+            } else {
+              var ta = document.createElement("textarea");
+              ta.value = text;
+              ta.setAttribute("readonly", "");
+              ta.style.position = "fixed";
+              ta.style.opacity = "0";
+              document.body.appendChild(ta);
+              ta.select();
+              try {
+                document.execCommand("copy");
+                done();
+              } catch (e) {}
+              document.body.removeChild(ta);
+            }
+          });
+        });
       })();
 
       // aria-current on dock links based on viewport scroll position.

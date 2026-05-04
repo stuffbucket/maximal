@@ -442,9 +442,72 @@ pre code {
   border-radius: var(--radius-sm);
   padding: 0.85rem 1rem;
   overflow-x: auto;
-  margin: 0.5rem 0 0;
+  margin: 0;
   white-space: pre;
   color: var(--ink-cream);
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* ===== Copy-to-clipboard ===== */
+
+.copyable {
+  display: flex;
+  align-items: stretch;
+  gap: 0.5rem;
+  margin: 0.5rem 0 0;
+}
+
+.copyable--block {
+  margin-top: 0.6rem;
+}
+
+.copyable pre {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+}
+
+.copy-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.55rem 0.7rem;
+  font: inherit;
+  font-size: 0.82rem;
+  font-family: var(--sans);
+  color: var(--ink-cream);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(244, 234, 212, 0.25);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.copy-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(244, 234, 212, 0.45);
+}
+
+.copy-btn:focus-visible {
+  outline: 2px solid var(--ink-cream);
+  outline-offset: 2px;
+}
+
+.copy-btn__icon {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.copy-btn--copied {
+  background: rgba(120, 200, 140, 0.18);
+  border-color: rgba(120, 200, 140, 0.55);
+  color: #d8f3df;
 }
 
 /* ===== Callout (ochre) ===== */
