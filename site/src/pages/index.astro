@@ -167,8 +167,7 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
         </svg>
         <h2 id="download-h">Download</h2>
         <p class="section-note" id="os-hint">
-          Choose the build for your platform. We will highlight the right
-          one once the page loads.
+          Click the installer for you, or download a copy for a friend.
         </p>
 
         <div class="downloads" role="group" aria-label="Downloads by platform">
@@ -226,16 +225,42 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
             <span class="btn-label"><span>Homebrew — coming soon</span></span>
             <span class="btn-meta">brew install</span>
           </span>
+          <a
+            class="btn btn--read-my-mind"
+            data-read-my-mind
+            href={macAppZip}
+            rel="noopener"
+          >
+            <span class="btn-label">
+              <svg
+                class="btn-spark"
+                viewBox="0 0 22 22"
+                fill="currentColor"
+                aria-hidden="true"
+              >
+                <path d="M11 1 L13 9 L21 11 L13 13 L11 21 L9 13 L1 11 L9 9 Z" />
+              </svg>
+              <span>Read my mind</span>
+            </span>
+            <span class="btn-meta" data-read-my-mind-meta>we'll guess</span>
+          </a>
         </div>
 
+        <div class="install-hint" data-os-hint="mac" hidden>
+          <p class="section-note">
+            Once downloaded: drag <code>copilot-api.app</code> into
+            <code>/Applications</code>, then read the first-launch
+            warning below before opening it.
+          </p>
+        </div>
         {
           hasRelease && (
-            <>
-              <p class="section-note" id="ps-hint">
-                To install via PowerShell, run:
+            <div class="install-hint" data-os-hint="windows" hidden>
+              <p class="section-note">
+                Or install via PowerShell directly:
               </p>
               <code class="ps-cmd">iex (irm {winPs1})</code>
-            </>
+            </div>
           )
         }
       </section>
@@ -338,7 +363,10 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
     </nav>
 
     <script is:inline>
-      // OS detection — promote the matching button to primary.
+      // OS detection — wire the "Read my mind" button to the matching
+      // installer URL, and reveal the OS-specific install hint.
+      // The list itself stays in stable order so users can reliably
+      // grab a different OS's installer for a friend.
       (function () {
         var ua = navigator.userAgent || "";
         var platform = navigator.platform || "";
@@ -351,23 +379,27 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
 
         if (!primaryKey) return;
 
-        var buttons = document.querySelectorAll(".btn[data-os]");
-        for (var i = 0; i < buttons.length; i++) {
-          var btn = buttons[i];
-          if (btn.getAttribute("data-os") === primaryKey) {
-            btn.classList.add("btn--primary");
-            var parent = btn.parentNode;
-            if (parent && parent.firstChild !== btn) {
-              parent.insertBefore(btn, parent.firstChild);
-            }
+        // Subtle highlight on the matching button (no reorder).
+        var match = document.querySelector(
+          '.btn[data-os="' + primaryKey + '"]',
+        );
+        if (match) match.classList.add("btn--primary");
+
+        // "Read my mind" — copy href + meta from the detected primary.
+        var rmm = document.querySelector("[data-read-my-mind]");
+        var rmmMeta = document.querySelector("[data-read-my-mind-meta]");
+        if (rmm && match) {
+          rmm.href = match.getAttribute("href");
+          if (rmmMeta) {
+            rmmMeta.textContent = primaryKey === "mac" ? "macOS" : "Windows";
           }
         }
 
-        var hint = document.getElementById("os-hint");
-        if (hint) {
-          var label = isMac ? "macOS" : "Windows";
-          hint.textContent = "Detected " + label + ". Other platforms below.";
-        }
+        // Reveal the install hint that matches detected OS.
+        var hint = document.querySelector(
+          '[data-os-hint="' + primaryKey + '"]',
+        );
+        if (hint) hint.hidden = false;
       })();
 
       // aria-current on dock links based on viewport scroll position.
