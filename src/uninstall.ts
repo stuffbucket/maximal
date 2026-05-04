@@ -128,35 +128,58 @@ function removeStartupIntegration(): void {
 // Step 3: remove the binary.
 // ────────────────────────────────────────────────────────────────────
 
+interface InstallTarget {
+  path: string
+  /** Directory targets (the macOS .app bundle is one) need recursive
+   *  removal; single-file binaries don't. */
+  recursive?: boolean
+}
+
 /** Candidate install locations, in order of likelihood. We delete
  *  every one we find; users may have copies in multiple places (e.g.
- *  `brew install` plus a manual `.pkg`). */
-function binaryCandidates(): Array<string> {
+ *  `brew install` + a `.dmg` install both leave a binary on disk).
+ *
+ *  macOS .dmg install path: `/Applications/copilot-api.app` (the
+ *  bundle) plus `~/.local/bin/copilot-api` (copy made by the
+ *  bundle's first-launch shim). Brew installs at
+ *  `/opt/homebrew/bin/copilot-api`. */
+function installTargets(): Array<InstallTarget> {
   const home = os.homedir()
   if (process.platform === "win32") {
     const localAppData =
       process.env.LOCALAPPDATA ?? path.join(home, "AppData", "Local")
     return [
-      path.join(localAppData, "Programs", "copilot-api", "copilot-api.exe"),
+      {
+        path: path.join(
+          localAppData,
+          "Programs",
+          "copilot-api",
+          "copilot-api.exe",
+        ),
+      },
+      // The PowerShell installer's parent dir gets removed when it
+      // becomes empty; we don't recurse into it ourselves to avoid
+      // nuking unrelated files.
     ]
   }
   return [
-    path.join(home, ".local", "bin", "copilot-api"),
-    "/usr/local/bin/copilot-api",
-    "/opt/homebrew/bin/copilot-api",
+    { path: path.join(home, ".local", "bin", "copilot-api") },
+    { path: "/usr/local/bin/copilot-api" },
+    { path: "/opt/homebrew/bin/copilot-api" },
+    { path: "/Applications/copilot-api.app", recursive: true },
   ]
 }
 
 function removeBinary(): void {
   let removed = 0
-  for (const candidate of binaryCandidates()) {
-    if (!fs.existsSync(candidate)) continue
+  for (const target of installTargets()) {
+    if (!fs.existsSync(target.path)) continue
     try {
-      fs.rmSync(candidate)
-      consola.success(`  removed ${candidate}`)
+      fs.rmSync(target.path, target.recursive ? { recursive: true } : undefined)
+      consola.success(`  removed ${target.path}`)
       removed++
     } catch (err) {
-      consola.warn(`  could not remove ${candidate}`, err)
+      consola.warn(`  could not remove ${target.path}`, err)
     }
   }
   if (removed === 0) {
