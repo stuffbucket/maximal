@@ -18,7 +18,7 @@ description: Attach files to an existing GitHub Release via the gh CLI
 
 inputs:
   tag:
-    description: Tag name of the existing release (e.g. `v1.9.4` or `${{ github.ref_name }}`).
+    description: Tag name of the existing release (e.g. `v1.9.4`, or pass github.ref_name from the caller workflow).
     required: true
   files:
     description: |
