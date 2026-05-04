@@ -10,9 +10,10 @@ contract between them so the work can be picked up by separate agents.
 
 ## TL;DR
 
-- Audience is **internal Microsoft only** — Microsoft owns GitHub,
-  users have their own Copilot Enterprise seats, no public
-  redistribution. ToS/legal posture is therefore narrow.
+- Audience is **internal Microsoft only**. Each user authenticates
+  with their own Copilot Enterprise seat — same pattern Opencode uses
+  with its built-in Copilot provider, and the same pattern endorsed
+  for Copilot extensions. No public redistribution in v1.
 - Distribution shape: signed per-arch single-file binaries published
   to GitHub Releases on the internal repo; Homebrew formula at
   `x3-design/homebrew-tap` for CLI users; `.pkg` for macOS drag-drop;
@@ -58,8 +59,8 @@ writing their own launchd plist.
 
 ## Non-goals
 
-- **Public distribution.** External users not in scope. Legal/ToS work
-  is not part of this PRD.
+- **Public distribution.** External users not in scope for v1; deferred
+  pending a separate decision on rollout scope.
 - **Telemetry / phoning home.** Internal dev tool; users opt out by
   default. Not in scope.
 - **Rebranding, GUI app, tray icon.** This is a background daemon plus
@@ -471,7 +472,8 @@ without help in under 10 minutes, this PRD delivered.
 - Telemetry / error reporting.
 - Cross-organization sharing inside MS — assumes one repo, one tap.
 - Linux distribution (no audience yet).
-- The legal/ToS analysis that gates external distribution.
+- The decision on whether and when to broaden distribution beyond
+  internal use.
 
 ## Agent split
 
