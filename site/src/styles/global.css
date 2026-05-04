@@ -89,14 +89,27 @@ body {
 
 .toasters__sprite {
   position: absolute;
-  /* Start off-screen to the upper-right; end off-screen to the
-     lower-left. Each sprite fixes its own --duration / --delay /
-     --scale via inline style. */
-  left: 100vw;
+  /* Each sprite fixes its own --duration / --delay / --scale via
+     inline style. Direction (.toasters__sprite--ne-sw or --nw-se)
+     picks which keyframe runs. */
   transform: translate3d(0, 0, 0) scale(var(--scale, 1));
-  animation:
-    toasters-fly var(--duration, 22s) linear var(--delay, 0s) infinite;
+  animation-duration: var(--duration, 22s);
+  animation-delay: var(--delay, 0s);
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
   will-change: transform;
+}
+
+.toasters__sprite--ne-sw {
+  /* Anchor to the right edge; the keyframe sweeps it to the left. */
+  left: 100vw;
+  animation-name: toasters-fly-ne-sw;
+}
+
+.toasters__sprite--nw-se {
+  /* Anchor to the left edge; the keyframe sweeps it to the right. */
+  left: 0;
+  animation-name: toasters-fly-nw-se;
 }
 
 .toasters__svg {
@@ -110,10 +123,9 @@ body {
   width: 70px;
 }
 
-@keyframes toasters-fly {
-  /* Diagonal flight: enter top-right, exit bottom-left. Translate
-     uses a calc so the sprite always clears the viewport regardless
-     of width. */
+@keyframes toasters-fly-ne-sw {
+  /* Enter upper-right, exit lower-left. Sprite is anchored at
+     left:100vw so we translate it leftward + slightly down. */
   0% {
     transform: translate3d(120px, -10vh, 0) scale(var(--scale, 1));
     opacity: 0;
@@ -125,7 +137,26 @@ body {
     opacity: 1;
   }
   100% {
-    transform: translate3d(-110vw, 60vh, 0) scale(var(--scale, 1));
+    transform: translate3d(-115vw, 60vh, 0) scale(var(--scale, 1));
+    opacity: 0;
+  }
+}
+
+@keyframes toasters-fly-nw-se {
+  /* Enter upper-left, exit lower-right. Sprite is anchored at
+     left:0 so we translate it rightward + slightly down. */
+  0% {
+    transform: translate3d(-220px, -10vh, 0) scale(var(--scale, 1));
+    opacity: 0;
+  }
+  6% {
+    opacity: 1;
+  }
+  94% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate3d(115vw, 60vh, 0) scale(var(--scale, 1));
     opacity: 0;
   }
 }
@@ -155,15 +186,19 @@ body {
   }
 }
 
-/* Reduced-motion: freeze the field. Sprites scatter at their starting
-   positions — visible but still. */
+/* Reduced-motion: freeze the field. Sprites scatter at static
+   positions on opposite sides so the field still reads as decorative. */
 @media (prefers-reduced-motion: reduce) {
   .toasters__sprite {
     animation: none;
-    /* Pin to a calculated mid-flight pose so the field still reads. */
-    left: auto;
-    right: 10vw;
     transform: scale(var(--scale, 1));
+  }
+  .toasters__sprite--ne-sw {
+    left: auto;
+    right: 8vw;
+  }
+  .toasters__sprite--nw-se {
+    left: 8vw;
   }
   .toasters__wing,
   .toasters__wing--right {
@@ -632,11 +667,18 @@ ol.steps li strong {
   right: 0;
   bottom: 0;
   z-index: 10;
-  background: rgba(8, 24, 32, 0.72);
+  /* Lighter than the page deep-teal so the dock reads as foreground.
+     Slight saturation lift to feel "in front" without losing
+     transparency. */
+  background: rgba(34, 62, 84, 0.78);
   backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
+  /* Stronger gold border + a thin cream highlight on top for
+     edge separation without going opaque. */
   border-top: 1px solid var(--ink-gold);
-  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.3);
+  box-shadow:
+    inset 0 1px 0 rgba(244, 234, 212, 0.12),
+    0 -8px 24px rgba(0, 0, 0, 0.35);
 }
 
 .dock-inner {
@@ -646,7 +688,10 @@ ol.steps li strong {
   padding: 0 1rem;
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  /* Center the items horizontally; on narrow viewports flex-start
+     lets the dock-inner scroll horizontally instead of cramming. */
+  justify-content: center;
+  gap: 0.85rem;
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -659,43 +704,54 @@ ol.steps li strong {
   flex: 0 0 auto;
   font-family: var(--serif);
   font-weight: 600;
-  font-size: 0.95rem;
+  font-size: 1.075rem;
+  line-height: 1;
   color: var(--ink-cream);
   text-decoration: none;
-  padding: 0.5rem 0.9rem;
+  padding: 0.55rem 0.95rem;
   border-radius: var(--radius-sm);
   border: 1px solid transparent;
   transition: background 150ms ease, border-color 150ms ease;
   white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
 }
 
 .dock a:hover {
-  background: rgba(212, 168, 67, 0.12);
-  border-color: rgba(212, 168, 67, 0.4);
+  background: rgba(212, 168, 67, 0.14);
+  border-color: rgba(212, 168, 67, 0.45);
 }
 
 .dock a[aria-current="page"] {
   color: var(--ink-gold);
-  border-color: rgba(212, 168, 67, 0.5);
+  border-color: rgba(212, 168, 67, 0.55);
 }
 
 .dock-brand {
   font-family: var(--serif);
   font-weight: 800;
-  font-size: 1rem;
+  font-size: 1.125rem;
+  line-height: 1;
   color: var(--ink-gold);
   margin-right: 0.5rem;
   flex: 0 0 auto;
   letter-spacing: -0.01em;
+  display: inline-flex;
+  align-items: center;
 }
 
 @media (max-width: 540px) {
+  /* Tighten on narrow viewports while keeping the bumped baseline. */
+  .dock-inner {
+    justify-content: flex-start;
+    gap: 0.55rem;
+  }
   .dock a {
-    font-size: 0.88rem;
-    padding: 0.45rem 0.7rem;
+    font-size: 0.95rem;
+    padding: 0.5rem 0.75rem;
   }
   .dock-brand {
-    font-size: 0.95rem;
+    font-size: 1rem;
   }
 }
 
