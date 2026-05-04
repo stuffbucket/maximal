@@ -35,7 +35,7 @@ A bootstraps its CI.
 | **B1** Homebrew formula | Stream A's first `.tar.gz` release | ✅ formula skeleton + sync script landed (agent-A). Real SHAs filled by `bun run render-formula --org … --version …` once the first release publishes. PR to `x3-design/homebrew-tap` is the remaining step (cross-repo coordination). |
 | **B2** macOS `.dmg` (drag-to-Applications) | Stream A3 (`.tar.gz` binary; unsigned in v1) | ✅ landed (`29d182f` + `0ea4bdb`) |
 | **B3a** Windows PowerShell installer | Stream A3 (unsigned in v1) | ✅ landed (`cbbd796`) |
-| **B3b** Windows MSI (WiX) | B3a learnings | ⏳ after B3a |
+| **B3b** Windows MSI (WiX) | B3a learnings | ✅ landed (agent-A). Minimal per-user MSI: binary + PATH + Start Menu shortcut to `copilot-api setup`. Built via `dotnet tool install --global wix` on windows-2022 — no third-party action. v1 doesn't auto-register the scheduled task from inside the MSI; users run `copilot-api setup` once. |
 | **B4** GitHub Pages landing site | first published release URL | ✅ landed on `agent/stream-b` (fetches release URL at runtime — ships before first publish) |
 
 You can ship B3a alone in v1 if WiX (B3b) takes too long — acceptable
@@ -418,17 +418,51 @@ Run anyway" on first run. User install command:
 iex (irm https://<internal>/copilot-api/install.ps1)
 ```
 
-### B3b — WiX MSI (later)
+### B3b — WiX MSI (landed; minimal v1)
 
-WiX `.wxs` defining:
+`build/windows/copilot-api.wxs` (~110 lines, WiX 4/5 syntax). What
+the v1 MSI does:
 
-- File component for `copilot-api.exe` in `%LocalAppData%\Programs\copilot-api\`.
-- Service install via `ServiceInstall` element.
-- Custom action calling `copilot-api setup --unattended` post-install.
+- Per-user install (`Scope="perUser"`, no admin needed) at
+  `%LocalAppData%\Programs\copilot-api\`.
+- Adds the install dir to the user's `PATH`.
+- Drops a Start Menu shortcut titled "copilot-api setup" that runs
+  `copilot-api.exe setup` — the user's discoverable post-install
+  step.
+- Standard `MajorUpgrade` + Add/Remove Programs entry for clean
+  reinstall and uninstall.
 
-Built in CI on a `windows-2022` runner. Signed with Authenticode.
+What the v1 MSI explicitly does **not** do (kept simple to ship):
 
-WiX has a learning curve. **Ship B3a first**; B3b can come in v2.
+- No scheduled-task registration from inside the MSI. The
+  PowerShell installer (B3a) does this; the MSI delegates to
+  `copilot-api setup`. Future iteration: extend `setup` itself to
+  register the task on Windows so both installers behave identically
+  by calling the same code path.
+- No post-install custom action calling `copilot-api setup
+  --unattended`. Same rationale — keep custom actions out of the MSI
+  for v1; surface the manual step via Start Menu shortcut.
+
+CI build path (`installers.yml` `windows-msi` job):
+
+```
+windows-2022 runner
+  ↓
+gh release download <zip> + .sha256 → verify
+  ↓
+Expand-Archive → staging/copilot-api.exe
+  ↓
+dotnet tool install --global wix --version 5.*    # no third-party action
+  ↓
+wix build build\windows\copilot-api.wxs \
+  -d Version=<x.y.z> -arch x64 -bindpath staging \
+  -out copilot-api-v<x.y.z>-windows-x64.msi
+  ↓
+sha256sum + upload-release-asset (vendored composite)
+```
+
+v1 ships unsigned; SmartScreen "More info → Run anyway" is the
+first-launch UX (documented on the Pages landing site).
 
 ### Acceptance
 

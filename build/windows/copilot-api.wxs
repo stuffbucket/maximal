@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Per-user MSI for copilot-api.
+
+  WiX 4 / 5 syntax. Built in CI on windows-2022 via:
+
+    dotnet tool install --global wix
+    wix build build/windows/copilot-api.wxs \
+        -d Version=<x.y.z> \
+        -arch x64 \
+        -o copilot-api-v<x.y.z>-windows-x64.msi
+
+  No third-party GitHub Action involved — `dotnet` is preinstalled on
+  the runner image, and WiX is a dotnet tool. The minted MSI:
+
+    - Installs to %LocalAppData%\Programs\copilot-api (per-user; no
+      UAC prompt, no admin needed).
+    - Adds the install dir to the user's PATH.
+    - Drops a Start Menu shortcut to `copilot-api setup` so the user
+      has a discoverable post-install step.
+    - Registers an Add/Remove Programs entry with proper version /
+      manufacturer / upgrade-code so MajorUpgrade re-installs work.
+
+  v1 explicitly does NOT register the scheduled task or run
+  `copilot-api setup --unattended` from inside the MSI — those touch
+  per-user state and are awkward in WiX custom actions. Users run
+  `copilot-api setup` once after install (the Start Menu shortcut
+  surfaces this). Parity with B3a's PowerShell installer can be added
+  later by extending `setup` itself to also register the scheduled
+  task on Windows.
+
+  v1 ships unsigned (A4 deferred). SmartScreen prompts on first run;
+  the Pages landing site (B4) documents the bypass.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+  <Package
+      Name="copilot-api"
+      Manufacturer="Microsoft"
+      Version="$(var.Version)"
+      UpgradeCode="C9E7F4A1-2B3D-4E5F-9A8B-7C6D5E4F3A2B"
+      Scope="perUser"
+      InstallerVersion="500"
+      Compressed="yes">
+
+    <SummaryInformation
+        Description="Local proxy that exposes GitHub Copilot as the Anthropic / OpenAI API"
+        Manufacturer="Microsoft" />
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <Feature Id="Main" Title="copilot-api" Level="1">
+      <ComponentGroupRef Id="ProductComponents" />
+      <ComponentGroupRef Id="StartMenuComponents" />
+    </Feature>
+
+  </Package>
+
+  <Fragment>
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="ProgramsFolder" Name="Programs">
+        <Directory Id="INSTALLFOLDER" Name="copilot-api" />
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="copilot-api" />
+    </StandardDirectory>
+  </Fragment>
+
+  <Fragment>
+    <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
+      <Component Id="MainExe" Bitness="always64">
+        <File
+            Id="copilot_api_exe"
+            Source="copilot-api.exe"
+            KeyPath="yes" />
+        <Environment
+            Id="UpdatePath"
+            Name="PATH"
+            Value="[INSTALLFOLDER]"
+            Permanent="no"
+            Part="last"
+            Action="set"
+            System="no" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+
+  <Fragment>
+    <ComponentGroup Id="StartMenuComponents" Directory="ApplicationProgramsFolder">
+      <Component Id="StartMenuShortcut" Guid="*">
+        <Shortcut
+            Id="SetupShortcut"
+            Name="copilot-api setup"
+            Description="Run first-time setup (GitHub auth + Claude Desktop config)"
+            Target="[INSTALLFOLDER]copilot-api.exe"
+            Arguments="setup"
+            WorkingDirectory="INSTALLFOLDER" />
+        <RemoveFolder Id="RemoveAppMenuFolder" On="uninstall" />
+        <RegistryValue
+            Root="HKCU"
+            Key="Software\Microsoft\copilot-api"
+            Name="installed"
+            Type="integer"
+            Value="1"
+            KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+
+</Wix>

@@ -181,3 +181,93 @@ jobs:
           files: |
             dist-release/install.ps1
             dist-release/install.ps1.sha256
+
+  # B3b — Windows MSI built with WiX. Per-user install, no admin
+  # required. Same release-attachment contract as the rest of Stream B.
+  #
+  # WiX is a `dotnet` tool — installed via `dotnet tool install --global
+  # wix`. No third-party `uses:` action involved; `dotnet` is
+  # preinstalled on the windows-2022 runner image.
+  windows-msi:
+    name: Windows MSI (WiX)
+    runs-on: windows-2022
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Download windows-x64 zip + sha256
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist-bin
+          ZIP="copilot-api-${TAG}-windows-x64.zip"
+          gh release download "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "$ZIP" \
+            --pattern "$ZIP.sha256" \
+            --dir dist-bin
+          echo "Verifying SHA-256"
+          ( cd dist-bin && sha256sum -c "$ZIP.sha256" )
+
+      - name: Unpack zip
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = Get-ChildItem -Path dist-bin -Filter '*.zip' | Select-Object -First 1
+          Expand-Archive -Path $zip.FullName -DestinationPath staging -Force
+          # Sanity: the zip should contain copilot-api.exe at its root.
+          if (-not (Test-Path 'staging\copilot-api.exe')) {
+            Write-Error "copilot-api.exe missing from $($zip.Name)"
+            exit 1
+          }
+          Get-ChildItem staging
+
+      - name: Install WiX
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.*
+          # Make the wix tool available on PATH for the next step.
+          $userBin = Join-Path $env:USERPROFILE '.dotnet\tools'
+          echo $userBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          & "$userBin\wix.exe" --version
+
+      - name: Build MSI
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = '${{ steps.ver.outputs.version }}'
+          $out = "dist-release\copilot-api-${env:TAG}-windows-x64.msi"
+          New-Item -ItemType Directory -Path dist-release -Force | Out-Null
+          # WiX expects the source files referenced by the .wxs (in
+          # this case copilot-api.exe) to be discoverable relative to
+          # the working directory or via -bindpath. We stage in
+          # `staging/` and pass -bindpath staging.
+          wix build build\windows\copilot-api.wxs `
+            -d "Version=$version" `
+            -arch x64 `
+            -bindpath staging `
+            -out $out
+
+      - name: SHA-256
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist-release
+          sha256sum "copilot-api-${TAG}-windows-x64.msi" > "copilot-api-${TAG}-windows-x64.msi.sha256"
+          cat "copilot-api-${TAG}-windows-x64.msi.sha256"
+
+      - name: Attach MSI to release
+        uses: ./.github/actions/upload-release-asset
+        with:
+          tag: ${{ env.TAG }}
+          files: |
+            dist-release/copilot-api-${{ env.TAG }}-windows-x64.msi
+            dist-release/copilot-api-${{ env.TAG }}-windows-x64.msi.sha256
