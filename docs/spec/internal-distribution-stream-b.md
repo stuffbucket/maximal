@@ -32,7 +32,7 @@ A bootstraps its CI.
 |---|---|---|
 | **B5** First-run `setup` subcommand | nothing — pure CLI | ✅ landed (`7c7621c`) |
 | **B6** Uninstall paths | B5 (reverse of `setup`) | ✅ landed (`1752104` + `f1f6dd1`) |
-| **B1** Homebrew formula | Stream A's first `.tar.gz` release | 🚧 in progress (agent-A; Stream A complete, picking up here). Skeleton + sync script land now with placeholder SHAs; the script computes real SHAs from a published release. |
+| **B1** Homebrew formula | Stream A's first `.tar.gz` release | ✅ formula skeleton + sync script landed (agent-A). Real SHAs filled by `bun run render-formula --org … --version …` once the first release publishes. PR to `x3-design/homebrew-tap` is the remaining step (cross-repo coordination). |
 | **B2** macOS `.dmg` (drag-to-Applications) | Stream A3 (`.tar.gz` binary; unsigned in v1) | ✅ landed (`29d182f` + `0ea4bdb`) |
 | **B3a** Windows PowerShell installer | Stream A3 (unsigned in v1) | 🚧 in progress on `agent/stream-b` |
 | **B3b** Windows MSI (WiX) | B3a learnings | ⏳ after B3a |
@@ -182,17 +182,39 @@ $ copilot-api uninstall
 
 ~1 day.
 
-## 6. B1 — Homebrew formula (waits on Stream A)
+## 6. B1 — Homebrew formula (landed)
 
-Once Stream A publishes its first signed release, open a PR to
-`x3-design/homebrew-tap` adding `copilot-api.rb`. Skeleton in the
-parent PRD §"B1". Get the `sha256` from
-`<release-url>/copilot-api-v<version>-darwin-{arm64,x64}.tar.gz.sha256`.
+Source-of-truth template: `build/homebrew/copilot-api.rb`, with
+`PLACEHOLDER_*` tokens for `ORG`, `VERSION`, `SHA256_DARWIN_ARM64`,
+`SHA256_DARWIN_X64`. The placeholders stay in the template — they're
+substituted on render, not committed.
 
-The formula's `service do` block automatically registers the proxy
-under `brew services`, replacing the launchd plist work for Homebrew
-users. Confirm it picks up environment variables (specifically
-`OLLAMA_API_KEY` if set in the user shell).
+Renderer: `scripts/sync-homebrew-formula.ts` (also exposed as
+`bun run render-formula`). Fetches the per-arch `.sha256` files from a
+published release and writes a fully-resolved formula:
+
+```sh
+# Render to stdout for inspection:
+bun run render-formula --org <internal-org> --version 1.9.4
+
+# Render into a checkout of the tap repo:
+bun run render-formula --org <internal-org> --version 1.9.4 \
+  --output ../homebrew-tap/Formula/copilot-api.rb
+```
+
+The formula's `service do` block registers the proxy under
+`brew services`, replacing the launchd plist for Homebrew users.
+`environment_variables` propagates `HOME` + `OLLAMA_API_KEY` from
+the calling shell.
+
+Tests: `tests/sync-homebrew-formula.test.ts` covers the .sha256
+parser (canonical/whitespace/malformed/wrong-name/path-prefix cases)
+and the placeholder substitution against the shipped template.
+
+**Cross-repo step still owed (coordination, not code):** open a PR to
+`x3-design/homebrew-tap` placing the rendered `copilot-api.rb` under
+`Formula/`. After the first internal release publishes, run the
+renderer and stage the output in a tap-repo PR.
 
 ### Acceptance
 

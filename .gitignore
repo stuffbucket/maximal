@@ -2,10 +2,11 @@ node_modules/
 dist/
 # build/ holds two flavors: compiled output (bun-build artifacts —
 # ignore) and source-controlled installer templates under
-# build/macos/. The pattern below ignores everything in build/ except
-# the macos source tree.
+# build/macos/ and build/homebrew/. The pattern below ignores
+# everything in build/ except those source trees.
 build/*
 !build/macos/
+!build/homebrew/
 SBOM.cdx.json
 *.log
 .DS_Store

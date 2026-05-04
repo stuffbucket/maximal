@@ -33,6 +33,8 @@
     "prepack": "bun run build",
     "prepare": "simple-git-hooks",
     "release": "bumpp && bun publish --access public",
+    "render-formula": "bun scripts/sync-homebrew-formula.ts",
+    "sbom": "bun scripts/sbom.ts",
     "start": "NODE_ENV=production bun run ./src/main.ts",
     "typecheck": "tsc"
   },
