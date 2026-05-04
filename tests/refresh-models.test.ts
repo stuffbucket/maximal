@@ -195,6 +195,6 @@ describe("refreshIfStale", () => {
 describe("JITTER_MS / STALE_AFTER_MS constants", () => {
   it("has sane defaults", () => {
     expect(STALE_AFTER_MS).toBe(6 * 60 * 60 * 1000)
-    expect(JITTER_MS).toBe(30 * 60 * 1000)
+    expect(JITTER_MS).toBe(2 * 60 * 60 * 1000)
   })
 })

@@ -24,10 +24,12 @@ import { createHash } from "node:crypto"
 import { state } from "./state"
 
 export const STALE_AFTER_MS = 6 * 60 * 60 * 1000 // 6 hours
-export const JITTER_MS = 30 * 60 * 1000 // ±30 min total spread
+export const JITTER_MS = 2 * 60 * 60 * 1000 // 2 hour total spread (±1 hour)
 
-/** Per-process jitter offset in `[-JITTER_MS/2, +JITTER_MS/2)`. Keyed
- *  on macMachineId so two proxies on different machines drift to
+/** Per-process jitter offset in `[-JITTER_MS/2, +JITTER_MS/2)` —
+ *  i.e. ±1 hour around the 6-hour staleness baseline, so the
+ *  effective refresh window is roughly [5h, 7h]. Keyed on
+ *  macMachineId so two proxies on different machines drift to
  *  different refresh minutes deterministically; same machine, same
  *  proxy invocation gets the same jitter every time (good — staleness
  *  is monotonically predictable). Falls back to 0 when macMachineId
