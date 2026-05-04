@@ -62,21 +62,19 @@ The **artifact-naming contract** with Stream B is documented in a
 comment block at the top of the `binaries` job. Don't change it
 without coordinating.
 
-## A4 — what's still needed
+## A4 — what's still needed (deferred)
 
-Need three credential sets:
+Three credential sets gate the flip from `[DEFERRED A4]` `if: false`
+to `if: <cred env present>`:
 
-1. **Apple Developer notarization** — Apple ID, app-specific password,
-   Team ID. Existing internal MS tooling has these; ask the parent
-   issue for the secret names to use. Then flip the `if: false` on
-   the macOS `Codesign` and `Notarize` steps.
-2. **Microsoft Apple Developer ID Application cert** — for `codesign`.
-   Stored in the GitHub Actions secret store (or a managed cert
-   keychain on a self-hosted runner; check what the rest of the org's
-   Mac tools use).
-3. **Authenticode / Microsoft signing service** — Windows. Usually
-   HSM-backed and requires a specific runner pool. The
-   `Sign (Windows)` step is currently a `Write-Host` stub.
+1. **Apple Developer notarization** — Apple ID, app-specific
+   password, Team ID. Then enable the `Codesign` and `Notarize`
+   steps in `release.yml`.
+2. **Apple Developer ID Application cert** — for `codesign`. How
+   it's plumbed into the runner (hosted vs self-hosted vs imported
+   keychain) is a v2 decision; v1 ships unsigned.
+3. **Authenticode signing service** — Windows. HSM-backed; runner-
+   pool integration TBD. The `Sign (Windows)` step is a stub.
 
 After A4 lands, repeat the smoke test (A6) on a clean managed device
 and confirm Gatekeeper / SmartScreen don't prompt.

@@ -3,7 +3,7 @@
 # Homebrew formula for copilot-api.
 #
 # Source-controlled here so changes flow through code review; the
-# tap repo (x3-design/homebrew-tap) receives a copy via
+# tap repo (stuffbucket/homebrew-tap) receives a copy via
 # `bun scripts/sync-homebrew-formula.ts` after each release.
 #
 # The placeholder SHAs below (PLACEHOLDER_SHA256_*) are written by

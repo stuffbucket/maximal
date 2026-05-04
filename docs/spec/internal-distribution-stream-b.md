@@ -32,7 +32,7 @@ A bootstraps its CI.
 |---|---|---|
 | **B5** First-run `setup` subcommand | nothing — pure CLI | ✅ landed (`7c7621c`) |
 | **B6** Uninstall paths | B5 (reverse of `setup`) | ✅ landed (`1752104` + `f1f6dd1`) |
-| **B1** Homebrew formula | Stream A's first `.tar.gz` release | ✅ formula skeleton + sync script landed (agent-A). Real SHAs filled by `bun run render-formula --org … --version …` once the first release publishes. PR to `x3-design/homebrew-tap` is the remaining step (cross-repo coordination). |
+| **B1** Homebrew formula | Stream A's first `.tar.gz` release | ✅ formula skeleton + sync script landed (agent-A). Real SHAs filled by `bun run render-formula --org … --version …` once the first release publishes. PR to `stuffbucket/homebrew-tap` is the remaining step (cross-repo coordination). |
 | **B2** macOS `.app.zip` (CI) + `.dmg` (local helper) | Stream A3 (`.tar.gz` binary; unsigned in v1) | ✅ landed. CI publishes `.app.zip` on every tag from `ubuntu-latest`. A polished `.dmg` is built via `bun run package-dmg --tag v<x.y.z> [--upload]` from a developer Mac post-tag (`scripts/package-dmg.ts`). Both artifacts attach to the same release. |
 | **B3a** Windows PowerShell installer | Stream A3 (unsigned in v1) | ✅ landed (`cbbd796`) |
 | **B3b** Windows MSI (WiX) | B3a learnings | ✅ landed (agent-A). Minimal per-user MSI: binary + PATH + Start Menu shortcut to `copilot-api setup`. Built via `dotnet tool install --global wix` on windows-2022 — no third-party action. v1 doesn't auto-register the scheduled task from inside the MSI; users run `copilot-api setup` once. |
@@ -212,7 +212,7 @@ parser (canonical/whitespace/malformed/wrong-name/path-prefix cases)
 and the placeholder substitution against the shipped template.
 
 **Cross-repo step still owed (coordination, not code):** open a PR to
-`x3-design/homebrew-tap` placing the rendered `copilot-api.rb` under
+`stuffbucket/homebrew-tap` placing the rendered `copilot-api.rb` under
 `Formula/`. After the first internal release publishes, run the
 renderer and stage the output in a tap-repo PR.
 
@@ -221,7 +221,7 @@ renderer and stage the output in a tap-repo PR.
 A teammate with the tap added can run:
 
 ```
-brew install x3-design/x3-design/copilot-api
+brew install stuffbucket/copilot-api
 brew services start copilot-api
 copilot-api setup
 ```

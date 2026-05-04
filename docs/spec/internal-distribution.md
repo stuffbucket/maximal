@@ -16,7 +16,7 @@ contract between them so the work can be picked up by separate agents.
   for Copilot extensions. No public redistribution in v1.
 - Distribution shape: per-arch single-file binaries published to
   GitHub Releases (Apple Silicon macOS + Windows x64; **no Intel
-  macOS**); Homebrew formula at `x3-design/homebrew-tap` for CLI
+  macOS**); Homebrew formula at `stuffbucket/homebrew-tap` for CLI
   users; **`.app.zip`** with a drag-to-Applications `.app` bundle
   for macOS (extracted by Finder on double-click); `.msi` + signed
   PowerShell `install.ps1` for Windows; static GitHub Pages landing
@@ -34,7 +34,7 @@ contract between them so the work can be picked up by separate agents.
 - Two agents, two streams. Stream A produces the per-arch binaries
   Stream B consumes; the contract is the artifact naming convention
   and checksum publication location (§"Inter-stream contract" below).
-- Reuses existing infra: `x3-design/homebrew-tap`, the existing
+- Reuses existing infra: `stuffbucket/homebrew-tap`, the existing
   `release.yml` (extended for binaries), Cowork's MDM keys.
 
 ## Problem
@@ -61,7 +61,7 @@ writing their own launchd plist.
 |---|---|
 | Drag-to-install on macOS (Apple Silicon) | User downloads a `.app.zip`, double-clicks to extract via Finder, drags `copilot-api.app` to Applications, opens it once (right-click → Open the first time to clear Gatekeeper), proxy registers itself under launchd |
 | One-click install on Windows | User downloads an `.msi`, double-clicks, accepts UAC + SmartScreen, proxy registers as a Windows Service. PowerShell installer acceptable fallback |
-| CLI-friendly install on macOS | `brew install x3-design/x3-design/copilot-api` installs and registers the service via `brew services` |
+| CLI-friendly install on macOS | `brew install stuffbucket/copilot-api` installs and registers the service via `brew services` |
 | Static landing page | An internal Pages URL shows version, OS-detecting download buttons, and an explicit first-launch warning callout for the unsigned binaries |
 | Claude Desktop configured automatically | Post-install hook updates `claude_desktop_config.json` to point at `localhost:4141` with a stub API key, preserving existing keys |
 | Reproducible artifacts | Every release has a CI run, SBOM, SHA-256 checksums. Signing/notarization tickets land later when A4 unblocks |
@@ -244,7 +244,7 @@ Catches static-link or missing-dep bugs the build step alone misses.
 
 ## Stream B — Installers + UX
 
-### B1. Homebrew formula on `x3-design/homebrew-tap`
+### B1. Homebrew formula on `stuffbucket/homebrew-tap`
 
 `copilot-api.rb`:
 
@@ -285,8 +285,8 @@ end
 Updates land via PRs to the existing tap. Auto-update is `brew
 upgrade`.
 
-**Deliverable:** one PR to `x3-design/homebrew-tap`. After merge,
-`brew install x3-design/x3-design/copilot-api && brew services start
+**Deliverable:** one PR to `stuffbucket/homebrew-tap`. After merge,
+`brew install stuffbucket/copilot-api && brew services start
 copilot-api` works.
 
 **Estimate:** ~half a day plus tap-owner coordination.
