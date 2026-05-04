@@ -2,29 +2,31 @@
 /**
  * `copilot-api setup` — first-run wizard.
  *
- * Takes a freshly-installed binary from "just unpacked" to "Claude
- * Desktop is talking to me." Five steps:
+ * Client-neutral by design: takes a freshly-installed binary from
+ * "just unpacked" to "the proxy is reachable and authenticated."
+ * Three steps:
  *
  *   1. GitHub auth (device-code flow if no token)
- *   2. Claude Desktop config — point at localhost:4141
- *   3. Cowork egress allowlist — prompt with three choices
- *   4. Diagnostic — render `copilot-api debug` so the user sees the
+ *   2. Diagnostic — render `copilot-api debug` so the user sees the
  *      effective config
- *   5. Smoke test — one /v1/messages request to confirm reachability
+ *   3. Smoke test — one /v1/messages request to confirm reachability
+ *
+ * Pairing the proxy with a specific client (Claude Desktop, Claude
+ * Code, opencode, the AI SDK, custom apps) is a deliberate follow-up
+ * step. For Claude Desktop specifically, run
+ * `copilot-api configure-claude-desktop` after this.
  *
  * Runs in two modes: interactive (default) and unattended (used by
  * post-install scripts in B2/B3a). Unattended skips prompts and the
- * smoke test, and assumes default values for the egress allowlist.
+ * smoke test.
  *
  * Spec: docs/spec/internal-distribution-stream-b.md §B5.
  */
 
 import { defineCommand } from "citty"
 import consola from "consola"
-import { spawnSync } from "node:child_process"
 
 import { runDebug } from "./debug"
-import { applyProxyConfig } from "./lib/claude-desktop-config"
 import { ensurePaths } from "./lib/paths"
 import { state } from "./lib/state"
 import { setupGitHubToken } from "./lib/token"
@@ -43,7 +45,7 @@ export async function runSetup(opts: RunSetupOptions): Promise<void> {
 
   // 1. GitHub auth ---------------------------------------------------
   if (!opts.skipAuth) {
-    consola.info("Step 1/5: GitHub authentication")
+    consola.info("Step 1/3: GitHub authentication")
     try {
       // setupGitHubToken is idempotent — won't re-prompt if a valid
       // token already exists on disk.
@@ -56,118 +58,30 @@ export async function runSetup(opts: RunSetupOptions): Promise<void> {
       if (!opts.unattended) throw err
     }
   } else {
-    consola.info("Step 1/5: GitHub authentication (skipped)")
+    consola.info("Step 1/3: GitHub authentication (skipped)")
   }
 
-  // 2. Claude Desktop config ----------------------------------------
-  consola.info("Step 2/5: Claude Desktop config")
-  try {
-    const result = applyProxyConfig()
-    if (result.wrote) {
-      consola.success(`Claude Desktop config updated at ${result.path}`)
-      if (result.preservedKeys.length > 0) {
-        consola.info(
-          `  preserved existing keys: ${result.preservedKeys.join(", ")}`,
-        )
-      }
-    } else {
-      consola.success(`Claude Desktop config already configured`)
-    }
-    if (result.ensuredWorkspaceFolders.length > 0) {
-      consola.info(
-        `  workspace folders: ${result.ensuredWorkspaceFolders.join(", ")}`,
-      )
-    }
-  } catch (err) {
-    consola.warn("Could not update Claude Desktop config", err)
-  }
-
-  // 3. Cowork egress allowlist --------------------------------------
-  consola.info("Step 3/5: Cowork egress allowlist")
-  configureCoworkEgress(opts)
-
-  // 4. Diagnostic ----------------------------------------------------
-  consola.info("Step 4/5: Effective config")
+  // 2. Diagnostic ----------------------------------------------------
+  consola.info("Step 2/3: Effective config")
   await runDebug({ json: false })
 
-  // 5. Smoke test ----------------------------------------------------
+  // 3. Smoke test ----------------------------------------------------
   if (!opts.skipSmoke && !opts.unattended) {
-    consola.info("Step 5/5: Smoke test")
+    consola.info("Step 3/3: Smoke test")
     await smokeTest(opts.port)
   } else {
-    consola.info("Step 5/5: Smoke test (skipped)")
+    consola.info("Step 3/3: Smoke test (skipped)")
   }
 
   consola.box("Setup complete.")
-}
-
-// ────────────────────────────────────────────────────────────────────
-// Step 3: Cowork egress.
-// ────────────────────────────────────────────────────────────────────
-
-function configureCoworkEgress(_opts: RunSetupOptions): void {
-  if (process.platform !== "darwin") {
-    consola.info("  Cowork egress is macOS-only; skipping (Windows / Linux).")
-    return
-  }
-
-  // The file-tier `coworkEgressAllowedHosts: ["*"]` from step 2 is the
-  // only egress knob the wizard owns. MDM-tier (defaults DB) takes
-  // precedence over the file tier, so any value sitting in the
-  // `com.anthropic.claudefordesktop` domain — typically left there by
-  // Claude Desktop's installer — would silently shadow our `["*"]`.
-  // Clear it so the file-tier wins.
-  const existing = readCoworkAllowedHosts()
-  if (existing === null) {
-    consola.success('  MDM-tier allowlist absent — file-tier `["*"]` wins')
-    return
-  }
-  const r = deleteMdmAllowedHosts()
-  if (r.ok) {
-    consola.success(
-      `  Cleared MDM-tier allowlist (${existing.length} host${existing.length === 1 ? "" : "s"} removed); file-tier \`["*"]\` now wins`,
-    )
-  } else {
-    consola.warn(
-      `  Could not delete MDM-tier allowlist (${existing.length} host${existing.length === 1 ? "" : "s"} present); MDM may shadow file-tier`,
-      r.error,
-    )
-  }
-}
-
-function readCoworkAllowedHosts(): Array<string> | null {
-  const r = spawnSync(
-    "defaults",
-    ["read", "com.anthropic.claudefordesktop", "coworkEgressAllowedHosts"],
-    { encoding: "utf8" },
+  consola.info(
+    "To pair Claude Desktop with this proxy, run:\n"
+      + "  copilot-api configure-claude-desktop",
   )
-  if (r.status !== 0) return null
-  // `defaults read` outputs a parenthesized list; "I don't care about
-  // exact parsing — we just need to know it's been set." Count
-  // commas+1 as a rough length proxy.
-  const out = r.stdout.trim()
-  if (!out || out === "()") return null
-  const items = out
-    .replace(/^\(\s*/, "")
-    .replace(/\s*\)$/, "")
-    .split(",")
-    .map((s) => s.trim().replace(/^"/, "").replace(/"$/, ""))
-    .filter((s) => s.length > 0)
-  return items
-}
-
-function deleteMdmAllowedHosts(): { ok: true } | { ok: false; error: unknown } {
-  const r = spawnSync(
-    "defaults",
-    ["delete", "com.anthropic.claudefordesktop", "coworkEgressAllowedHosts"],
-    { encoding: "utf8" },
-  )
-  if (r.status !== 0) return { ok: false, error: r.stderr || r.error }
-  return { ok: true }
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Step 5: Smoke test.
+// Step 3: Smoke test.
 // ────────────────────────────────────────────────────────────────────
 
 async function smokeTest(port: number): Promise<void> {
@@ -210,14 +124,13 @@ export const setup = defineCommand({
   meta: {
     name: "setup",
     description:
-      "First-run wizard: GitHub auth, Claude Desktop config, Cowork egress, smoke test",
+      "First-run wizard: GitHub auth + smoke test. Client wiring (Claude Desktop, etc.) is opt-in via separate subcommands.",
   },
   args: {
     unattended: {
       type: "boolean",
       default: false,
-      description:
-        "Run without prompts. Default values for egress (curated). No smoke test.",
+      description: "Run without prompts. No smoke test.",
     },
     "skip-auth": {
       type: "boolean",

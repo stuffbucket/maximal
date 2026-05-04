@@ -37,6 +37,7 @@ bindElectronFetch()
 // Dynamically import other modules to ensure environment variables are set
 const { auth } = await import("./auth")
 const { checkUsage } = await import("./check-usage")
+const { configureClaudeDesktop } = await import("./configure-claude-desktop")
 const { debug } = await import("./debug")
 const { setup } = await import("./setup")
 const { start } = await import("./start")
@@ -52,6 +53,7 @@ const main = defineCommand({
     auth,
     start,
     setup,
+    "configure-claude-desktop": configureClaudeDesktop,
     uninstall,
     "check-usage": checkUsage,
     debug,

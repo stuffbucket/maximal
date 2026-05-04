@@ -26,9 +26,19 @@ with `defaults write` (no MDM needed) and Claude Desktop respects them.
 file-based managed-settings > Windows registry. The
 `claude_desktop_config.json` UI preferences sit below the managed tier.
 
-## Default profile written by `copilot-api setup`
+## Default profile written by `copilot-api configure-claude-desktop`
 
-The wizard now writes the full "Default" profile that Claude Desktop's
+`copilot-api setup` is client-neutral and **does not configure Claude
+Desktop**. To pair Claude Desktop with the proxy, run the opt-in
+subcommand:
+
+```sh
+copilot-api configure-claude-desktop          # write the profile
+copilot-api configure-claude-desktop --revert # remove our keys
+copilot-api configure-claude-desktop --force  # write even if Claude Desktop isn't installed yet
+```
+
+The command writes the full "Default" profile that Claude Desktop's
 **Configure third-party inference** panel surfaces, not just the three
 gateway-wiring keys. The complete set:
 
