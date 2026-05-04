@@ -47,10 +47,14 @@ header passthrough. Manual, reactive, error-prone.
 
 The state today (evidence base for the strategy):
 
-- **`src/lib/models.ts`** has 5 regex patterns plus a no-comment
-  comment ("Claude model ID parser") covering the dot/dash/dash-date
-  forms. Adding a 6th form requires editing the parser and hoping no
-  test breaks.
+- **`src/lib/models.ts`** has 5 regex patterns covering the
+  dot/dash/dash-date forms. Adding a 6th form requires editing the
+  parser and hoping no test breaks.
+- **`src/lib/anthropic-id-rewrite.ts`** has its own three regexes
+  (`FORWARD_RE`, `REVERSE_RE`, `VARIANT_RE`) plus a hardcoded
+  `SENTINEL_DATE = "20260301"`. This file does the actual
+  request-time rewriting — the `models.ts` parser is a parallel,
+  unrelated code path that isn't called from this rewrite layer.
 - **`src/routes/messages/web-tools-vocab.ts`** hardcodes
   `web_search_20250305` and `web_fetch_20250910`. The rewriter
   matches these literally; Anthropic's `web_search_20260209` would
@@ -64,6 +68,61 @@ The state today (evidence base for the strategy):
 - **The daily log captures every payload** — it has the data we'd
   want to mine for unrecognized strings, but no one reads it
   systematically.
+
+### How the model cache is built today
+
+Walking the actual flow makes the consolidation target concrete:
+
+1. **Fetch.** `src/services/copilot/get-models.ts:7` issues a single
+   `GET ${copilotBaseUrl(state)}/models` with `copilotModelsHeaders`.
+   Base URL depends on account type — individual / business /
+   enterprise / opencode-OAuth — five branches in
+   `src/lib/api-config.ts:156`.
+2. **Filter + cache.** `src/lib/utils.ts:23 cacheModels()` keeps only
+   `model_picker_enabled || capabilities.type === "embeddings"` and
+   writes via `setModels()` into both legacy `state.models` and the
+   new `SingletonCache` (post-`3c1f749` so `/_debug/state` shows
+   refresh time + count).
+3. **When.** Once at startup (`runServer()` in `start.ts`), with a
+   lazy fallback in `routes/models/route.ts:12-15` if `state.models`
+   is unset on a `GET /v1/models`. **No refresh after that** — stale
+   until process restart. (Tracked as deferred item "Models-list
+   refresh strategy" in the cleanup PRD.)
+4. **Outbound `/v1/models`.** `routes/models/route.ts` filters
+   variant IDs (`isVariantId`), rewrites Anthropic IDs via
+   `forwardId` (`claude-opus-4.6` → `claude-opus-4-6-20260301`), and
+   reshapes each entry. Hides Copilot's effort/context-window
+   suffixes from the picker.
+5. **Inbound routing.** When a request arrives, `reverseId` undoes
+   the forward rewrite, then `pickCopilotVariantId` consults the
+   `state.models` ID list as the routing oracle: `effort: "high"`
+   → tries `<base>-high`, `longContext: true` → tries
+   `<base>-1m-internal` then `<base>-1m`, falls back to base if
+   neither is in the cached list.
+
+So `state.models` is doing two jobs: powering the public listing
+*and* validating variant routing. Both jobs share the same
+hand-written regexes plus a hardcoded sentinel date plus a hardcoded
+variant suffix list (`low|medium|high|xhigh|max|1m` with optional
+`-internal`).
+
+### Where today's code maps to the proposed registry
+
+Concrete migration targets when L2 is built:
+
+| Today | Registry replacement |
+|---|---|
+| `src/lib/models.ts` 5-regex `parseClaudeId` | `parseModelId(input)` reads from `models[]` table; new model = one row |
+| `anthropic-id-rewrite.ts` `FORWARD_RE` / `REVERSE_RE` | Derived from registry's family + version + dash-date convention; round-trip is a registry method, not a hand-written regex pair |
+| `anthropic-id-rewrite.ts` `SENTINEL_DATE = "20260301"` | Registry constant; can be a per-model field if Anthropic ever varies it |
+| `anthropic-id-rewrite.ts` `VARIANT_RE` (`low|medium|high|xhigh|max|1m`) | Registry's `variantSuffixes[]` table; routing logic walks the table |
+| `pickCopilotVariantId` candidate-building (`-high`, `-1m-internal`, `-1m`) | Registry's variant-priority table per family |
+| `web-tools-vocab.ts` `TOOL_TYPE.webSearch = "web_search_20250305"` | Registry's `toolVersions[].latest` per tool name; rewriter accepts any in `supported[]` |
+| `state.models` as routing oracle | Stays — but its values are validated against the registry at refresh time, surfacing diffs through L1 |
+
+Net effect: ~150 LOC of regex deletion + ~250 LOC of registry table.
+Code is more, total complexity is less, and "what does this proxy
+understand" is one file lookup.
 
 ## Strategy: five layers
 
@@ -289,16 +348,34 @@ When scheduled, the milestone delivers if:
 
 ## References
 
-- Current regex sprawl: `src/lib/models.ts:45-71` (five `pattern{1..5}` matches)
-- Hardcoded tool versions: `src/routes/messages/web-tools-vocab.ts:9-12`
-- Files referencing protocol literals (9 today):
-  `anthropic-id-rewrite.ts`, `web-tools-types.ts`,
-  `count-tokens-handler.ts`, `responses/handler.ts`,
-  `web-tools-rewriter.ts`, `web-tools-vocab.ts`, `messages/handler.ts`,
-  `services/copilot/create-messages.ts`, `services/providers/anthropic-proxy.ts`
-- Anthropic models endpoint:
-  https://docs.anthropic.com/en/api/models-list
-- OpenAI models endpoint:
-  https://platform.openai.com/docs/models
-- Copilot models endpoint (our existing fetch):
-  see `src/lib/utils.ts:cacheModels`
+Code surface to consolidate:
+
+- `src/lib/models.ts:45-71` — five-pattern Claude ID parser (parallel
+  to the rewrite layer; not actually called from rewriting today)
+- `src/lib/anthropic-id-rewrite.ts` — the actual rewrite layer:
+  `forwardId` (line 31), `reverseId` (line 51), `isVariantId` (line
+  69), `pickCopilotVariantId` (line 84). Hardcodes `SENTINEL_DATE =
+  "20260301"` (line 15), the family list (`opus|sonnet|haiku`), and
+  the variant suffix regex (`low|medium|high|xhigh|max|1m` optional
+  `-internal`)
+- `src/routes/messages/web-tools-vocab.ts:9-12` — hardcoded
+  `web_search_20250305`, `web_fetch_20250910`
+- `src/services/copilot/get-models.ts` — the fetch
+- `src/lib/utils.ts:23 cacheModels()` — the filter + cache step
+- `src/routes/models/route.ts` — the outbound listing transform
+- `src/lib/api-config.ts:156 copilotBaseUrl()` — five-branch base-URL
+  selection (account type, enterprise, opencode-OAuth, override,
+  default)
+
+Files referencing protocol literals today (9):
+`anthropic-id-rewrite.ts`, `web-tools-types.ts`,
+`count-tokens-handler.ts`, `responses/handler.ts`,
+`web-tools-rewriter.ts`, `web-tools-vocab.ts`, `messages/handler.ts`,
+`services/copilot/create-messages.ts`,
+`services/providers/anthropic-proxy.ts`.
+
+Upstream model-list sources (L1 detection targets):
+
+- Anthropic: https://docs.anthropic.com/en/api/models-list
+- OpenAI: https://platform.openai.com/docs/models
+- Copilot: our existing `getModels()` (single source per fetch)
