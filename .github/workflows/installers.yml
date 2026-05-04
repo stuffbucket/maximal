@@ -17,7 +17,7 @@
 #
 # Spec: docs/spec/internal-distribution-stream-b.md §7 (B2 macOS .app).
 
-name: installers
+name: Installers
 
 on:
   release:
