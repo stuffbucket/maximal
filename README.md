@@ -110,8 +110,16 @@ curl http://localhost:4141/_debug/state | jq    # only when running with --verbo
 Secrets are masked everywhere — the debug output reports `<env>` /
 `<file>` / `<config>` / `<unset>`, never the value.
 
+## Releasing
+
+`docs/release-runbook.md` is the canonical checklist for cutting a
+`v*` tag. The fast path: `bun run release` (tag + push + npm publish
+via `bumpp`) → wait for CI → `bun run release:dmg` from a developer
+Mac to add the polished `.dmg` to the release.
+
 ## Status
 
 Pre-alpha. Functional end-to-end against x3-design enterprise. See
-`docs/spec/web-tools.md` for the agent-loop spec and
-`docs/admin/claude-desktop-mdm.md` for Cowork-side configuration.
+`docs/spec/web-tools.md` for the agent-loop spec,
+`docs/admin/claude-desktop-mdm.md` for Cowork-side configuration, and
+`docs/spec/internal-distribution.md` for the v1 distribution plan.

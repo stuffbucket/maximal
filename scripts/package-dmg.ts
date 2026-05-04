@@ -53,13 +53,26 @@ function parseArgs(argv: Array<string>): Args {
     else if (a === "--keep-work") keepWork = true
     else if (a === "--help" || a === "-h") {
       console.log(
-        "usage: bun run package-dmg --tag v<x.y.z> [--repo owner/name] [--upload] [--keep-work]",
+        "usage: bun run package-dmg [--tag v<x.y.z>] [--repo owner/name] [--upload] [--keep-work]\n\n" +
+          "  --tag       defaults to `git describe --tags --abbrev=0`\n" +
+          "  --repo      defaults to the GitHub remote of `origin`\n" +
+          "  --upload    attach the .dmg + .sha256 to the GitHub release\n" +
+          "  --keep-work leave the staging dirs in dist-build/ for inspection",
       )
       process.exit(0)
     }
   }
   if (!tag) {
-    throw new Error("--tag is required (e.g. v0.1.0)")
+    // Default to the most recent annotated/lightweight tag in the
+    // working tree. Helpful when a release engineer just tagged + pushed
+    // and wants to immediately produce the DMG without retyping the tag.
+    try {
+      tag = runCapture("git", ["describe", "--tags", "--abbrev=0"])
+    } catch {
+      throw new Error(
+        "--tag not provided and no tags found in this checkout (run `git fetch --tags` first, or pass --tag v<x.y.z>)",
+      )
+    }
   }
   return { tag, repo, upload, keepWork }
 }
