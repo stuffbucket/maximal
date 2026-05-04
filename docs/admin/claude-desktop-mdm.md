@@ -26,6 +26,38 @@ with `defaults write` (no MDM needed) and Claude Desktop respects them.
 file-based managed-settings > Windows registry. The
 `claude_desktop_config.json` UI preferences sit below the managed tier.
 
+## Default profile written by `copilot-api setup`
+
+The wizard now writes the full "Default" profile that Claude Desktop's
+**Configure third-party inference** panel surfaces, not just the three
+gateway-wiring keys. The complete set:
+
+```json
+{
+  "inferenceProvider": "gateway",
+  "inferenceGatewayBaseUrl": "http://127.0.0.1:4141",
+  "inferenceGatewayApiKey": "anything",
+  "inferenceGatewayAuthScheme": "bearer",
+  "disableDeploymentModeChooser": true,
+  "isClaudeCodeForDesktopEnabled": true,
+  "coworkEgressAllowedHosts": ["*"],
+  "allowedWorkspaceFolders": ["$HOME/Claude"],
+  "isDesktopExtensionEnabled": true,
+  "isDesktopExtensionDirectoryEnabled": true,
+  "isDesktopExtensionSignatureRequired": false,
+  "isLocalDevMcpEnabled": true,
+  "disableAutoUpdates": false,
+  "disableEssentialTelemetry": true,
+  "disableNonessentialTelemetry": true,
+  "disableNonessentialServices": false
+}
+```
+
+`allowedWorkspaceFolders` is parameterized to the running user's
+`$HOME` and the directory is created on disk if missing. The merge is
+allowlist-only — keys outside this set are preserved verbatim, and
+`copilot-api uninstall --revert-claude` removes exactly these keys.
+
 ## Key reference (subset relevant to this proxy)
 
 | Key | Type | Default | Controls |

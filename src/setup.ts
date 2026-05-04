@@ -73,6 +73,11 @@ export async function runSetup(opts: RunSetupOptions): Promise<void> {
     } else {
       consola.success(`Claude Desktop config already configured`)
     }
+    if (result.ensuredWorkspaceFolders.length > 0) {
+      consola.info(
+        `  workspace folders: ${result.ensuredWorkspaceFolders.join(", ")}`,
+      )
+    }
   } catch (err) {
     consola.warn("Could not update Claude Desktop config", err)
   }
