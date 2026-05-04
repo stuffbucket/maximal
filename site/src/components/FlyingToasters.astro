@@ -1,194 +1,338 @@
 ---
-// Flying Toasters background — homage to After Dark's screensaver,
-// re-implemented as fixed-position SVG sprites with CSS keyframes.
+// Flying Toasters — original After Dark sprite art, layered above
+// the Star Nest shader background.
 //
-// Two trajectories so the field covers all four corners over a cycle:
-//   - .--ne-sw : enters upper-right, exits lower-left (the classic).
-//   - .--nw-se : enters upper-left, exits lower-right (fills the
-//                otherwise-empty top-left and bottom-right bands).
+// Sprite GIFs (toaster-sprite.gif, toast.gif): © Berkeley Systems Inc.,
+// 1989. Vendored at site/public/sprites/ from
+// https://github.com/bryanbraun/after-dark-css (gh-pages/img/).
 //
-// Each sprite has a randomized scale + duration + delay; many delays
-// are NEGATIVE so on first paint sprites are scattered mid-flight
-// instead of all queued off-screen.
+// Animation recipe (steps()-flicker for wing flap composed with a
+// translate keyframe for diagonal flight; "speed" classes t1..t9 +
+// tst1..tst4 and "position" classes p6..p33): adapted verbatim from
+// bryanbraun/after-dark-css's flying-toasters.html, MIT-licensed for
+// HTML/CSS. See https://bryanbraun.github.io/after-dark-css/.
 //
-// Pure CSS animation — no JS, no canvas, no ThreeJS. Toasters in
-// page palette (cream chrome, golden bread, deep-teal outlines) so
-// they belong with the cards.
+// Reduced-motion: animations stop entirely. Sprites stay scattered
+// at their starting positions so the field still reads as
+// decorative.
 
-const sprites: Array<{
-  kind: "toaster" | "toast"
-  dir: "ne-sw" | "nw-se"
-  top: string
-  duration: string
-  delay: string
-  scale: string
-}> = [
-  // UR -> LL diagonal (classic). Negative delays so sprites are
-  // already mid-flight on first paint.
-  { kind: "toaster", dir: "ne-sw", top: "8%",  duration: "22s", delay: "-2s",  scale: "1.0"  },
-  { kind: "toast",   dir: "ne-sw", top: "18%", duration: "17s", delay: "-13s", scale: "0.7"  },
-  { kind: "toaster", dir: "ne-sw", top: "32%", duration: "26s", delay: "-9s",  scale: "0.85" },
-  { kind: "toast",   dir: "ne-sw", top: "44%", duration: "19s", delay: "-3s",  scale: "0.6"  },
-  { kind: "toaster", dir: "ne-sw", top: "58%", duration: "24s", delay: "-19s", scale: "1.05" },
-  { kind: "toast",   dir: "ne-sw", top: "70%", duration: "20s", delay: "-7s",  scale: "0.75" },
-  { kind: "toaster", dir: "ne-sw", top: "82%", duration: "21s", delay: "-15s", scale: "0.95" },
-
-  // UL -> LR diagonal (fills the corners the classic path skips).
-  { kind: "toast",   dir: "nw-se", top: "5%",  duration: "23s", delay: "-6s",  scale: "0.65" },
-  { kind: "toaster", dir: "nw-se", top: "22%", duration: "27s", delay: "-12s", scale: "0.9"  },
-  { kind: "toast",   dir: "nw-se", top: "40%", duration: "18s", delay: "-2s",  scale: "0.7"  },
-  { kind: "toaster", dir: "nw-se", top: "62%", duration: "25s", delay: "-17s", scale: "0.85" },
-  { kind: "toast",   dir: "nw-se", top: "78%", duration: "16s", delay: "-9s",  scale: "0.6"  },
-  { kind: "toaster", dir: "nw-se", top: "92%", duration: "29s", delay: "-22s", scale: "0.8"  },
-]
+const base = import.meta.env.BASE_URL.replace(/\/$/, "")
+const toasterSrc = `${base}/sprites/toaster-sprite.gif`
+const toastSrc = `${base}/sprites/toast.gif`
 ---
 
-<div class="toasters" aria-hidden="true">
-  {
-    sprites.map(({ kind, dir, top, duration, delay, scale }) => (
-      <span
-        class={`toasters__sprite toasters__sprite--${dir}`}
-        style={`top:${top}; --duration:${duration}; --delay:${delay}; --scale:${scale};`}
-      >
-        {kind === "toaster" ? (
-          <svg
-            class="toasters__svg toasters__svg--toaster"
-            viewBox="0 0 200 140"
-            xmlns="http://www.w3.org/2000/svg"
-          >
-            {/* Wings: simple silhouettes, no inner detail — read at any size. */}
-            <g class="toasters__wing toasters__wing--left">
-              <path
-                d="M 60 78
-                   C 28 50, 8 56, 0 70
-                   C 18 72, 28 78, 30 84
-                   C 14 86, 6 92, 4 100
-                   C 30 96, 50 92, 60 92 Z"
-                fill="#f4ead4"
-              />
-            </g>
-            <g class="toasters__wing toasters__wing--right">
-              <path
-                d="M 140 78
-                   C 172 50, 192 56, 200 70
-                   C 182 72, 172 78, 170 84
-                   C 186 86, 194 92, 196 100
-                   C 170 96, 150 92, 140 92 Z"
-                fill="#f4ead4"
-              />
-            </g>
+<div
+  class="toasters"
+  aria-hidden="true"
+  style={`--toaster-src: url(${toasterSrc}); --toast-src: url(${toastSrc});`}
+>
+  {/* First group of objects */}
+  <div class="toaster t1 p6"></div>
+  <div class="toaster t3 p7"></div>
+  <div class="toast tst1 p8"></div>
+  <div class="toaster t3 p9"></div>
+  <div class="toaster t1 p11"></div>
+  <div class="toaster t3 p12"></div>
+  <div class="toaster t2 p13"></div>
+  <div class="toast tst3 p14"></div>
+  <div class="toast tst2 p16"></div>
+  <div class="toaster t1 p17"></div>
+  <div class="toast tst2 p19"></div>
+  <div class="toast tst3 p20"></div>
+  <div class="toaster t2 p21"></div>
+  <div class="toast tst1 p24"></div>
+  <div class="toaster t1 p22"></div>
+  <div class="toast tst2 p26"></div>
+  <div class="toaster t1 p28"></div>
+  <div class="toast tst2 p30"></div>
+  <div class="toaster t2 p31"></div>
+  <div class="toaster t1 p32"></div>
+  <div class="toast tst3 p33"></div>
 
-            {/* Toaster body — 80×70 with strong silhouette. Single fill,
-                no busy gradient. */}
-            <rect
-              x="60"
-              y="56"
-              width="80"
-              height="70"
-              rx="8"
-              fill="#e8dcc2"
-              stroke="#0f2e3d"
-              stroke-width="2.5"
-            />
-            {/* Subtle highlight on body to suggest chrome without a
-                multi-stop gradient. */}
-            <rect
-              x="64"
-              y="60"
-              width="72"
-              height="6"
-              rx="3"
-              fill="#fdf6e0"
-              opacity="0.7"
-            />
+  {/* Wave 1 — fast delayed */}
+  <div class="toaster t4 p27"></div>
+  <div class="toaster t4 p10"></div>
+  <div class="toaster t4 p25"></div>
+  <div class="toaster t4 p29"></div>
 
-            {/* Single wide bread slot across the top */}
-            <rect
-              x="68"
-              y="50"
-              width="64"
-              height="8"
-              rx="2"
-              fill="#1a0a08"
-              stroke="#0f2e3d"
-              stroke-width="1.5"
-            />
-            {/* slot divider — splits it visually into two bays */}
-            <rect x="98" y="50" width="4" height="8" fill="#0f2e3d" />
+  {/* Wave 2 — common-speed delayed */}
+  <div class="toaster t5 p15"></div>
+  <div class="toaster t5 p18"></div>
+  <div class="toaster t5 p22"></div>
 
-            {/* Two toast slices popping up at staggered heights */}
-            <rect
-              x="71"
-              y="26"
-              width="24"
-              height="26"
-              rx="2"
-              fill="#d8923a"
-              stroke="#0f2e3d"
-              stroke-width="2"
-            />
-            <rect
-              x="105"
-              y="34"
-              width="24"
-              height="18"
-              rx="2"
-              fill="#d8923a"
-              stroke="#0f2e3d"
-              stroke-width="2"
-            />
-            {/* Toasted-top stripes */}
-            <rect x="74" y="29" width="18" height="3" rx="1" fill="#a85f1a" opacity="0.6" />
-            <rect x="108" y="37" width="18" height="3" rx="1" fill="#a85f1a" opacity="0.6" />
+  {/* Wave 3 */}
+  <div class="toaster t6 p6"></div>
+  <div class="toaster t6 p11"></div>
+  <div class="toaster t6 p15"></div>
+  <div class="toaster t6 p19"></div>
+  <div class="toaster t6 p23"></div>
 
-            {/* Front: just a single gold lever knob, no extra noise */}
-            <circle
-              cx="125"
-              cy="100"
-              r="5"
-              fill="#d4a843"
-              stroke="#0f2e3d"
-              stroke-width="1.5"
-            />
+  {/* Wave 4 */}
+  <div class="toast tst4 p10"></div>
+  <div class="toast tst4 p23"></div>
+  <div class="toast tst4 p15"></div>
+  <div class="toaster t7 p7"></div>
+  <div class="toaster t7 p12"></div>
+  <div class="toaster t7 p16"></div>
+  <div class="toaster t7 p20"></div>
+  <div class="toaster t7 p24"></div>
 
-            {/* Bottom shadow */}
-            <ellipse cx="100" cy="132" rx="40" ry="3" fill="#0f2e3d" opacity="0.4" />
-          </svg>
-        ) : (
-          <svg
-            class="toasters__svg toasters__svg--toast"
-            viewBox="0 0 100 100"
-            xmlns="http://www.w3.org/2000/svg"
-          >
-            {/* Bread silhouette — single shape, single fill, strong outline.
-                The dome-on-rectangle reads as a slice at any size. */}
-            <path
-              d="M 18 36
-                 Q 18 14, 50 14
-                 Q 82 14, 82 36
-                 L 82 84
-                 Q 82 88, 78 88
-                 L 22 88
-                 Q 18 88, 18 84 Z"
-              fill="#dc923a"
-              stroke="#0f2e3d"
-              stroke-width="2.5"
-            />
-            {/* Crust line inset along the dome — gives the slice depth
-                without a second fill. */}
-            <path
-              d="M 24 36 Q 24 20, 50 20 Q 76 20, 76 36"
-              fill="none"
-              stroke="#7a3a10"
-              stroke-width="2"
-              opacity="0.55"
-            />
-            {/* Two minimalist toast pores — enough to read as toasted bread. */}
-            <circle cx="40" cy="58" r="2.5" fill="#7a3a10" opacity="0.5" />
-            <circle cx="62" cy="68" r="2" fill="#7a3a10" opacity="0.5" />
-          </svg>
-        )}
-      </span>
-    ))
-  }
+  {/* Wave 5 */}
+  <div class="toaster t8 p8"></div>
+  <div class="toaster t8 p13"></div>
+  <div class="toaster t8 p17"></div>
+  <div class="toaster t8 p25"></div>
+
+  {/* Wave 6 */}
+  <div class="toaster t9 p14"></div>
+  <div class="toaster t9 p18"></div>
+  <div class="toaster t9 p21"></div>
+  <div class="toaster t9 p26"></div>
 </div>
+
+<style>
+  .toasters {
+    position: fixed;
+    inset: 0;
+    /* Above the Star Nest canvas (z-index 0), below main (z-index 1+
+       set in global.css for skip-link/main). */
+    z-index: 1;
+    pointer-events: none;
+    overflow: hidden;
+  }
+
+  .toaster,
+  .toast {
+    position: absolute;
+    width: 64px;
+    height: 64px;
+    image-rendering: pixelated;
+  }
+
+  .toaster {
+    background-image: var(--toaster-src);
+  }
+
+  .toast {
+    background-image: var(--toast-src);
+  }
+
+  /* Speed / flap-direction classes. The 4-frame wing-flap sprite is
+     256 px wide; steps(4) cycles through it in increments of 64 px. */
+  .t1 {
+    animation:
+      flap 0.2s steps(4) infinite alternate,
+      fly 10s linear infinite;
+  }
+  .t2 {
+    animation:
+      flap 0.2s steps(4) infinite alternate-reverse,
+      fly 16s linear infinite;
+  }
+  .t3 {
+    animation:
+      flap 0.2s steps(4) infinite alternate,
+      fly 24s linear infinite;
+  }
+  .t4 {
+    animation:
+      flap 0.2s steps(4) infinite alternate,
+      fly 10s 5s linear infinite;
+  }
+  .t5 {
+    animation:
+      flap 0.2s steps(4) infinite alternate-reverse,
+      fly 24s 4s linear infinite;
+  }
+  .t6 {
+    animation:
+      flap 0.2s steps(4) infinite alternate,
+      fly 24s 8s linear infinite;
+  }
+  .t7 {
+    animation:
+      flap 0.2s steps(4) infinite alternate-reverse,
+      fly 24s 12s linear infinite;
+  }
+  .t8 {
+    animation:
+      flap 0.2s steps(4) infinite alternate,
+      fly 24s 16s linear infinite;
+  }
+  .t9 {
+    animation:
+      flap 0.2s steps(4) infinite alternate-reverse,
+      fly 24s 20s linear infinite;
+  }
+
+  /* Toast: fly only; no wings to flap. */
+  .tst1 {
+    animation: fly 10s linear infinite;
+  }
+  .tst2 {
+    animation: fly 16s linear infinite;
+  }
+  .tst3 {
+    animation: fly 24s linear infinite;
+  }
+  .tst4 {
+    animation: fly 24s 12s linear infinite;
+  }
+
+  /*
+   * Starting positions — sprites enter from the top edge and right
+   * edge, organized into reverse-L batches so something is entering
+   * the viewport at every moment of every cycle. Using percentages
+   * so the field self-scales to viewport dimensions.
+   */
+
+  /* Batch 1 — top edge, right to left */
+  .p6 {
+    right: -2%;
+    top: -17%;
+  }
+  .p7 {
+    right: 10%;
+    top: -19%;
+  }
+  .p8 {
+    right: 20%;
+    top: -18%;
+  }
+  .p9 {
+    right: 30%;
+    top: -20%;
+  }
+  .p10 {
+    right: 40%;
+    top: -21%;
+  }
+  .p11 {
+    right: 50%;
+    top: -18%;
+  }
+  .p12 {
+    right: 60%;
+    top: -20%;
+  }
+  /* Right edge, top to bottom */
+  .p13 {
+    right: -17%;
+    top: 10%;
+  }
+  .p14 {
+    right: -19%;
+    top: 20%;
+  }
+  .p15 {
+    right: -21%;
+    top: 30%;
+  }
+  .p16 {
+    right: -23%;
+    top: 50%;
+  }
+  .p17 {
+    right: -25%;
+    top: 70%;
+  }
+
+  /* Batch 2 — further off-screen */
+  .p18 {
+    right: 0%;
+    top: -26%;
+  }
+  .p19 {
+    right: 10%;
+    top: -20%;
+  }
+  .p20 {
+    right: 20%;
+    top: -36%;
+  }
+  .p21 {
+    right: 30%;
+    top: -24%;
+  }
+  .p22 {
+    right: 40%;
+    top: -33%;
+  }
+  .p23 {
+    right: 60%;
+    top: -40%;
+  }
+  .p24 {
+    right: -26%;
+    top: 10%;
+  }
+  .p25 {
+    right: -36%;
+    top: 30%;
+  }
+  .p26 {
+    right: -29%;
+    top: 50%;
+  }
+
+  /* Batch 3 — deepest offset */
+  .p27 {
+    right: 0;
+    top: -46%;
+  }
+  .p28 {
+    right: 10%;
+    top: -56%;
+  }
+  .p29 {
+    right: 20%;
+    top: -49%;
+  }
+  .p30 {
+    right: 30%;
+    top: -60%;
+  }
+  .p31 {
+    right: -46%;
+    top: 10%;
+  }
+  .p32 {
+    right: -56%;
+    top: 20%;
+  }
+  .p33 {
+    right: -49%;
+    top: 30%;
+  }
+
+  /* Wing flap — cycles through the 4 frames of the 256 px sprite. */
+  @keyframes flap {
+    from {
+      background-position: 0px;
+    }
+    to {
+      background-position: -256px;
+    }
+  }
+
+  /*
+   * Diagonal glide. 1600 px translation handles the largest
+   * reasonable viewport diagonals; sprites that exit early just
+   * keep translating off-screen until the cycle restarts.
+   */
+  @keyframes fly {
+    from {
+      transform: translate(0, 0);
+    }
+    to {
+      transform: translate(-1600px, 1600px);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .toaster,
+    .toast {
+      animation: none !important;
+    }
+  }
+</style>

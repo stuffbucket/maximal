@@ -46,3 +46,26 @@ Runtime / build dependencies
 A complete enumeration of npm-resolved runtime and build dependencies,
 with their licenses, is generated as `SBOM.spdx.json` per release. See
 the GitHub Releases page for the SBOM associated with each version.
+
+================================================================================
+Static landing-page assets (under site/)
+================================================================================
+
+The GitHub Pages landing site at `site/` bundles a few third-party
+assets:
+
+- **Star Nest fragment shader** — `site/src/components/StarNest.astro`
+  embeds the GLSL "Star Nest" 3D-kaliset shader by Pablo Roman
+  Andrioli. Original at https://www.shadertoy.com/view/XlfGRj,
+  released under the MIT License.
+
+- **Flying Toasters animation recipe** — `site/src/components/
+  FlyingToasters.astro` adapts the CSS keyframe + step()-flicker
+  technique from Bryan Braun's `bryanbraun/after-dark-css` project
+  (https://github.com/bryanbraun/after-dark-css), MIT-licensed for
+  the HTML/CSS portion.
+
+- **After Dark sprite GIFs** — `site/public/sprites/toaster-sprite.gif`
+  and `site/public/sprites/toast.gif` originate from After Dark™
+  (1989), © Berkeley Systems, Inc. Re-distributed here for
+  nostalgic homage; copyright remains with the original rightsholder.

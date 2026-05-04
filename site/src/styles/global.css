@@ -72,141 +72,13 @@ body {
   overflow-x: hidden;
 }
 
-/* ===== Background layer: Flying Toasters ========================
-   Homage to After Dark's screensaver. Sprites drift diagonally from
-   upper-right to lower-left at staggered durations and delays so the
-   field never repeats. Toasters flap their wings via a separate
-   keyframe. Pure CSS — no JS, no canvas.
+/* ===== Background layers =====
+   The Star Nest shader (canvas.starnest, z-index 0) and Flying
+   Toasters sprites (.toasters, z-index 1) are owned by their
+   respective components. See:
+   - site/src/components/StarNest.astro
+   - site/src/components/FlyingToasters.astro
    ============================================================== */
-
-.toasters {
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  overflow: hidden;
-}
-
-.toasters__sprite {
-  position: absolute;
-  /* Each sprite fixes its own --duration / --delay / --scale via
-     inline style. Direction (.toasters__sprite--ne-sw or --nw-se)
-     picks which keyframe runs. */
-  transform: translate3d(0, 0, 0) scale(var(--scale, 1));
-  animation-duration: var(--duration, 22s);
-  animation-delay: var(--delay, 0s);
-  animation-timing-function: linear;
-  animation-iteration-count: infinite;
-  will-change: transform;
-}
-
-.toasters__sprite--ne-sw {
-  /* Anchor to the right edge; the keyframe sweeps it to the left. */
-  left: 100vw;
-  animation-name: toasters-fly-ne-sw;
-}
-
-.toasters__sprite--nw-se {
-  /* Anchor to the left edge; the keyframe sweeps it to the right. */
-  left: 0;
-  animation-name: toasters-fly-nw-se;
-}
-
-.toasters__svg {
-  display: block;
-  width: 150px;
-  height: auto;
-  filter: drop-shadow(0 6px 12px rgba(0, 0, 0, 0.35));
-}
-
-.toasters__svg--toast {
-  width: 64px;
-}
-
-@keyframes toasters-fly-ne-sw {
-  /* Enter upper-right, exit lower-left. Sprite is anchored at
-     left:100vw so we translate it leftward + slightly down. */
-  0% {
-    transform: translate3d(120px, -10vh, 0) scale(var(--scale, 1));
-    opacity: 0;
-  }
-  6% {
-    opacity: 1;
-  }
-  94% {
-    opacity: 1;
-  }
-  100% {
-    transform: translate3d(-115vw, 60vh, 0) scale(var(--scale, 1));
-    opacity: 0;
-  }
-}
-
-@keyframes toasters-fly-nw-se {
-  /* Enter upper-left, exit lower-right. Sprite is anchored at
-     left:0 so we translate it rightward + slightly down. */
-  0% {
-    transform: translate3d(-220px, -10vh, 0) scale(var(--scale, 1));
-    opacity: 0;
-  }
-  6% {
-    opacity: 1;
-  }
-  94% {
-    opacity: 1;
-  }
-  100% {
-    transform: translate3d(115vw, 60vh, 0) scale(var(--scale, 1));
-    opacity: 0;
-  }
-}
-
-/* Wing flap: each wing scales rapidly around its shoulder. Staggered
-   between left + right so they don't beat in unison. Pivot points
-   match the new toaster viewBox (200×140) where wings attach to the
-   body at x=60/140, y=85. */
-.toasters__wing {
-  transform-origin: 60px 85px;
-  animation: toasters-wing 320ms ease-in-out infinite;
-}
-
-.toasters__wing--right {
-  transform-origin: 140px 85px;
-  animation-delay: 80ms;
-}
-
-@keyframes toasters-wing {
-  0%,
-  100% {
-    transform: scaleX(1) translateY(0);
-  }
-  45% {
-    transform: scaleX(0.55) translateY(-2px);
-  }
-  55% {
-    transform: scaleX(0.55) translateY(-2px);
-  }
-}
-
-/* Reduced-motion: freeze the field. Sprites scatter at static
-   positions on opposite sides so the field still reads as decorative. */
-@media (prefers-reduced-motion: reduce) {
-  .toasters__sprite {
-    animation: none;
-    transform: scale(var(--scale, 1));
-  }
-  .toasters__sprite--ne-sw {
-    left: auto;
-    right: 8vw;
-  }
-  .toasters__sprite--nw-se {
-    left: 8vw;
-  }
-  .toasters__wing,
-  .toasters__wing--right {
-    animation: none;
-  }
-}
 
 /* ===== Layout ===== */
 
@@ -228,7 +100,8 @@ body {
 
 main {
   position: relative;
-  z-index: 1;
+  /* Above the Star Nest canvas (z:0) and Flying Toasters layer (z:1). */
+  z-index: 2;
   max-width: var(--max-width);
   margin: 0 auto;
   padding: 2.5rem 1rem calc(var(--nav-height) + 3rem);

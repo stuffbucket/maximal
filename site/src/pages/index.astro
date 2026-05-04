@@ -1,5 +1,6 @@
 ---
 import "../styles/global.css";
+import StarNest from "../components/StarNest.astro";
 import FlyingToasters from "../components/FlyingToasters.astro";
 
 const REPO = "stuffbucket/maximal";
@@ -76,7 +77,9 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
   <body>
     <a href="#main" class="skip-link">Skip to content</a>
 
-    <!-- Background layer: Flying Toasters -->
+    <!-- Background: Star Nest fragment shader (deepest layer) -->
+    <StarNest />
+    <!-- Mid layer: After Dark Flying Toasters sprites -->
     <FlyingToasters />
 
     <main id="main">
@@ -132,20 +135,17 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
         </svg>
         <h2 id="what-h">What is this</h2>
         <p>
-          A local proxy that lets Anthropic-API and OpenAI-API clients —
-          Claude Code, Claude Desktop in Cowork mode, Codex, and others —
-          talk to GitHub Copilot's backend, including GitHub Enterprise
-          deployments. Run it locally, point your client at it, and
-          Copilot serves the model. Claude Code thinks it is talking to
-          <code>api.anthropic.com</code>; Codex thinks it is talking to
-          <code>api.openai.com</code>; both are actually hitting GHC.
+          Maximal is a friendly liar. Claude Code swears it is chatting
+          with <code>api.anthropic.com</code>. Codex is convinced it has
+          dialed <code>api.openai.com</code>. Both are wrong, and happily
+          so — every token is actually flowing through GitHub Copilot,
+          your enterprise tenant included.
         </p>
         <p>
-          Server-side web tools that Copilot rejects natively are resolved
-          by an internal agent loop: the proxy strips the server-side
-          declaration, substitutes a client-side shim, drives the model
-          through tool round-trips, and synthesizes the Anthropic-shaped
-          result blocks back to the client.
+          When the model reaches for a tool Copilot will not hand over,
+          Maximal palms it a convincing replacement, runs the errand,
+          and slides the answer back in the shape it expected. The model
+          never notices. You get the result. Everyone wins.
         </p>
       </section>
 

@@ -1,0 +1,196 @@
+---
+// Star Nest — volumetric kaliset fractal background.
+// Shader by Pablo Roman Andrioli, MIT-licensed.
+// https://www.shadertoy.com/view/XlfGRj
+//
+// Embedded as a Three.js full-screen ShaderMaterial. Renders to a
+// fixed-position canvas at 65% of viewport (the shader is
+// computationally expensive — 17 inner × 20 volsteps per pixel —
+// and full-DPR rendering tanks frame rate on integrated GPUs).
+//
+// Reduced-motion users get a single still frame instead of the
+// drifting animation. Tab-hidden visibility pauses the render loop.
+---
+
+<canvas class="starnest" aria-hidden="true"></canvas>
+
+<script>
+  import * as THREE from "three"
+
+  const canvas = document.querySelector<HTMLCanvasElement>("canvas.starnest")
+  if (canvas) initStarNest(canvas)
+
+  function initStarNest(canvas: HTMLCanvasElement): void {
+    const renderer = new THREE.WebGLRenderer({
+      canvas,
+      antialias: false,
+      powerPreference: "low-power",
+    })
+
+    const scene = new THREE.Scene()
+    const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
+
+    const uniforms = {
+      iTime: { value: 0.0 },
+      iResolution: { value: new THREE.Vector3(1, 1, 1) },
+      iMouse: { value: new THREE.Vector4(0, 0, 0, 0) },
+    }
+
+    const vertexShader = /* glsl */ `
+      void main() {
+        gl_Position = vec4(position.xy, 0.0, 1.0);
+      }
+    `
+
+    const fragmentShader = /* glsl */ `
+      precision highp float;
+
+      uniform float iTime;
+      uniform vec3 iResolution;
+      uniform vec4 iMouse;
+
+      // Star Nest by Pablo Roman Andrioli, MIT.
+      // 3D kaliset fractal — volumetric rendering.
+      #define iterations 17
+      #define formuparam 0.53
+      #define volsteps 20
+      #define stepsize 0.1
+      #define zoom   0.800
+      #define tile   0.850
+      #define speed  0.010
+      #define brightness 0.0015
+      #define darkmatter 0.300
+      #define distfading 0.730
+      #define saturation 0.850
+
+      void mainImage(out vec4 fragColor, in vec2 fragCoord) {
+        vec2 uv = fragCoord.xy / iResolution.xy - 0.5;
+        uv.y *= iResolution.y / iResolution.x;
+        vec3 dir = vec3(uv * zoom, 1.0);
+        float time = iTime * speed + 0.25;
+
+        float a1 = 0.5 + iMouse.x / iResolution.x * 2.0;
+        float a2 = 0.8 + iMouse.y / iResolution.y * 2.0;
+        mat2 rot1 = mat2(cos(a1), sin(a1), -sin(a1), cos(a1));
+        mat2 rot2 = mat2(cos(a2), sin(a2), -sin(a2), cos(a2));
+        dir.xz *= rot1;
+        dir.xy *= rot2;
+        vec3 from = vec3(1.0, 0.5, 0.5);
+        from += vec3(time * 2.0, time, -2.0);
+        from.xz *= rot1;
+        from.xy *= rot2;
+
+        float s = 0.1, fade = 1.0;
+        vec3 v = vec3(0.0);
+        for (int r = 0; r < volsteps; r++) {
+          vec3 p = from + s * dir * 0.5;
+          p = abs(vec3(tile) - mod(p, vec3(tile * 2.0)));
+          float pa, a = pa = 0.0;
+          for (int i = 0; i < iterations; i++) {
+            p = abs(p) / dot(p, p) - formuparam;
+            a += abs(length(p) - pa);
+            pa = length(p);
+          }
+          float dm = max(0.0, darkmatter - a * a * 0.001);
+          a *= a * a;
+          if (r > 6) fade *= 1.0 - dm;
+          v += fade;
+          v += vec3(s, s * s, s * s * s * s) * a * brightness * fade;
+          fade *= distfading;
+          s += stepsize;
+        }
+        v = mix(vec3(length(v)), v, saturation);
+        fragColor = vec4(v * 0.01, 1.0);
+      }
+
+      void main() {
+        mainImage(gl_FragColor, gl_FragCoord.xy);
+      }
+    `
+
+    const material = new THREE.ShaderMaterial({
+      vertexShader,
+      fragmentShader,
+      uniforms,
+      depthTest: false,
+      depthWrite: false,
+    })
+
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material)
+    scene.add(mesh)
+
+    function resize(): void {
+      const dpr = Math.min(window.devicePixelRatio, 1)
+      const w = window.innerWidth
+      const h = window.innerHeight
+      // Render at 65 % of viewport then CSS-stretch — the shader is
+      // expensive enough that full-DPR rendering tanks frame rate on
+      // integrated GPUs. The output is abstract enough that the
+      // upscaling doesn't show.
+      const scale = 0.65
+      renderer.setPixelRatio(dpr)
+      renderer.setSize(Math.round(w * scale), Math.round(h * scale), false)
+      canvas.style.width = w + "px"
+      canvas.style.height = h + "px"
+      uniforms.iResolution.value.set(w * scale, h * scale, 1)
+    }
+
+    const reducedMotion = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches
+
+    const start = performance.now()
+    function frame(now: number): void {
+      const t = (now - start) / 1000
+      uniforms.iTime.value = t
+      // Auto-drift the virtual "mouse" so the camera rotates without
+      // input. Independent low-frequency sines on x and y for a
+      // figure-eight feel.
+      uniforms.iMouse.value.set(
+        (Math.sin(t * 0.05) * 0.5 + 0.5) * window.innerWidth,
+        (Math.sin(t * 0.07 + 1.5) * 0.5 + 0.5) * window.innerHeight,
+        0,
+        0,
+      )
+      renderer.render(scene, camera)
+      if (running) rafId = requestAnimationFrame(frame)
+    }
+
+    let running = false
+    let rafId = 0
+
+    function play(): void {
+      if (running) return
+      running = true
+      rafId = requestAnimationFrame(frame)
+    }
+    function pause(): void {
+      running = false
+      if (rafId) cancelAnimationFrame(rafId)
+    }
+
+    resize()
+    window.addEventListener("resize", resize, { passive: true })
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible" && !reducedMotion) play()
+      else pause()
+    })
+
+    if (reducedMotion) {
+      // Render one frame and stop.
+      frame(performance.now())
+    } else {
+      play()
+    }
+  }
+</script>
+
+<style>
+  canvas.starnest {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    display: block;
+  }
+</style>
