@@ -154,3 +154,30 @@ jobs:
           files: |
             dist-release/copilot-api-${{ env.TAG }}-darwin-${{ matrix.arch }}.dmg
             dist-release/copilot-api-${{ env.TAG }}-darwin-${{ matrix.arch }}.dmg.sha256
+
+  windows-installer:
+    name: Windows installer (PowerShell)
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # B3a ships install.ps1 verbatim — no compilation, no signing for
+      # v1 (A4 deferred). Sidecar a SHA-256 so the Pages site (B4) can
+      # tell users how to verify before piping into PowerShell.
+      - name: Stage installer + sha256
+        run: |
+          set -euo pipefail
+          mkdir -p dist-release
+          cp build/windows/install.ps1 dist-release/install.ps1
+          (cd dist-release && shasum -a 256 install.ps1 > install.ps1.sha256)
+          ls -la dist-release
+
+      - name: Attach installer to release
+        uses: ./.github/actions/upload-release-asset
+        with:
+          tag: ${{ env.TAG }}
+          files: |
+            dist-release/install.ps1
+            dist-release/install.ps1.sha256
