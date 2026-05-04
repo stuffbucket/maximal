@@ -4,13 +4,13 @@
 
   WiX 4 / 5 syntax. Built in CI on windows-2022 via:
 
-    dotnet tool install --global wix
-    wix build build/windows/copilot-api.wxs \
-        -d Version=<x.y.z> \
-        -arch x64 \
-        -o copilot-api-v<x.y.z>-windows-x64.msi
+    dotnet tool install (global) wix
+    wix build build/windows/copilot-api.wxs (with) -d Version=x.y.z -arch x64 -o output.msi
 
-  No third-party GitHub Action involved — `dotnet` is preinstalled on
+  XML comments can't contain consecutive dashes, so flag prose is
+  paraphrased; see installers.yml for the real invocation.
+
+  No third-party GitHub Action involved: `dotnet` is preinstalled on
   the runner image, and WiX is a dotnet tool. The minted MSI:
 
     - Installs to %LocalAppData%\Programs\copilot-api (per-user; no
@@ -22,7 +22,7 @@
       manufacturer / upgrade-code so MajorUpgrade re-installs work.
 
   v1 explicitly does NOT register the scheduled task or run
-  `copilot-api setup --unattended` from inside the MSI — those touch
+  `copilot-api setup` (unattended) from inside the MSI — those touch
   per-user state and are awkward in WiX custom actions. Users run
   `copilot-api setup` once after install (the Start Menu shortcut
   surfaces this). Parity with B3a's PowerShell installer can be added
