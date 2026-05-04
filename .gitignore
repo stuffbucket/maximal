@@ -35,9 +35,3 @@ SBOM.cdx.json
 *.vsix
 .claude
 
-# Stray runtime config dir created by accidentally running the proxy
-# with COPILOT_API_HOME pointing at a relative path. Keep it ignored
-# at the repo level so an errant misconfig can't slip into a commit
-# (it lives outside the repo on a correctly configured host).
-/foo/
-
