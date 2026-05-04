@@ -1,0 +1,336 @@
+/* maximal landing — neutral monochrome palette echoing the usage
+   dashboard at pages/index.html. Black-first, single restrained accent
+   on links and the primary CTA. */
+
+:root {
+  --bg: #fafafa;
+  --bg-soft: #f4f4f5;
+  --bg-sunken: #e4e4e7;
+  --fg: #18181b;
+  --fg-muted: #52525b;
+  --fg-subtle: #71717a;
+  --border: #d4d4d8;
+  --border-strong: #a1a1aa;
+  --accent: #18181b;
+  --accent-fg: #fafafa;
+  --link: #2563eb;
+  --warn-bg: #fef3c7;
+  --warn-border: #fcd34d;
+  --warn-fg: #78350f;
+
+  --max-width: 720px;
+  --radius: 4px;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #09090b;
+    --bg-soft: #18181b;
+    --bg-sunken: #27272a;
+    --fg: #fafafa;
+    --fg-muted: #a1a1aa;
+    --fg-subtle: #71717a;
+    --border: #27272a;
+    --border-strong: #3f3f46;
+    --accent: #fafafa;
+    --accent-fg: #09090b;
+    --link: #60a5fa;
+    --warn-bg: #2a1f05;
+    --warn-border: #78350f;
+    --warn-fg: #fcd34d;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--fg);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+main {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: 3rem 1.25rem 4rem;
+}
+
+@media (min-width: 640px) {
+  main {
+    padding: 4.5rem 2rem 5rem;
+  }
+}
+
+header.site-header {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 1.75rem;
+  margin-bottom: 2.5rem;
+}
+
+h1 {
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0 0 0.5rem;
+}
+
+h2 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 2.5rem 0 0.75rem;
+  color: var(--fg);
+}
+
+p {
+  margin: 0 0 1rem;
+  color: var(--fg-muted);
+}
+
+a {
+  color: var(--link);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
+}
+
+a:hover {
+  text-decoration-thickness: 2px;
+}
+
+code {
+  font-family: var(--mono);
+  font-size: 0.875em;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.05em 0.35em;
+}
+
+pre {
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.75rem 1rem;
+  overflow-x: auto;
+  margin: 0 0 1rem;
+  line-height: 1.5;
+}
+
+pre code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+}
+
+.tagline {
+  color: var(--fg-muted);
+  font-size: 1rem;
+  margin: 0 0 1rem;
+}
+
+.header-meta {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  font-size: 0.875rem;
+}
+
+.header-meta a {
+  color: var(--fg-muted);
+  text-decoration: none;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 1px;
+}
+
+.header-meta a:hover {
+  color: var(--fg);
+  border-bottom-color: var(--fg);
+}
+
+/* Download buttons */
+.downloads {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  margin: 0 0 1.25rem;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.7rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 0.95rem;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.btn:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-soft);
+  text-decoration: none;
+}
+
+.btn .btn-meta {
+  color: var(--fg-subtle);
+  font-size: 0.8rem;
+  font-family: var(--mono);
+  font-weight: 400;
+}
+
+.btn--primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+
+.btn--primary:hover {
+  background: var(--accent);
+  opacity: 0.9;
+  border-color: var(--accent);
+}
+
+.btn--primary .btn-meta {
+  color: var(--accent-fg);
+  opacity: 0.7;
+}
+
+.btn[hidden] {
+  display: none;
+}
+
+.btn--disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.section-note {
+  color: var(--fg-subtle);
+  font-size: 0.85rem;
+  margin: 0.25rem 0 1.25rem;
+}
+
+/* Callout */
+.callout {
+  border: 1px solid var(--warn-border);
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+  border-radius: var(--radius);
+  padding: 1rem 1.1rem;
+  margin: 1rem 0 1.25rem;
+}
+
+.callout p {
+  color: inherit;
+  margin: 0 0 0.5rem;
+  font-size: 0.92rem;
+}
+
+.callout p:last-child {
+  margin-bottom: 0;
+}
+
+.callout strong {
+  font-weight: 600;
+}
+
+/* Steps */
+ol.steps {
+  margin: 0;
+  padding: 0 0 0 1.25rem;
+  color: var(--fg-muted);
+}
+
+ol.steps li {
+  margin: 0 0 1rem;
+  padding-left: 0.25rem;
+}
+
+ol.steps li::marker {
+  color: var(--fg-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+ol.steps li strong {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+/* Footer */
+footer.site-footer {
+  border-top: 1px solid var(--border);
+  margin-top: 3rem;
+  padding-top: 1.5rem;
+  font-size: 0.85rem;
+  color: var(--fg-subtle);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+  justify-content: space-between;
+}
+
+footer.site-footer a {
+  color: var(--fg-muted);
+  text-decoration: none;
+  border-bottom: 1px solid var(--border);
+}
+
+footer.site-footer a:hover {
+  color: var(--fg);
+  border-bottom-color: var(--fg);
+}
+
+/* Inline command in a powershell block */
+.ps-cmd {
+  display: block;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.75rem 1rem;
+  overflow-x: auto;
+  margin: 0 0 1rem;
+  white-space: pre;
+}
+
+/* Skip-link for keyboard users */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+}
+.skip-link:focus {
+  position: static;
+  display: inline-block;
+  margin: 0.5rem;
+}

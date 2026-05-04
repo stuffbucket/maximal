@@ -1,0 +1,273 @@
+---
+import "../styles/global.css";
+
+const REPO = "stuffbucket/maximal";
+const REPO_URL = `https://github.com/${REPO}`;
+const RELEASES_URL = `${REPO_URL}/releases`;
+const LATEST_RELEASE_PAGE = `${RELEASES_URL}/latest`;
+
+interface ReleaseInfo {
+  tag: string | null;
+  hasRelease: boolean;
+}
+
+async function fetchLatestTag(): Promise<ReleaseInfo> {
+  try {
+    const res = await fetch(
+      `https://api.github.com/repos/${REPO}/releases/latest`,
+      {
+        headers: {
+          Accept: "application/vnd.github+json",
+          "User-Agent": "maximal-site-build",
+        },
+      },
+    );
+    if (res.status === 404) return { tag: null, hasRelease: false };
+    if (!res.ok) return { tag: null, hasRelease: false };
+    const body = (await res.json()) as { tag_name?: string };
+    if (typeof body.tag_name === "string" && body.tag_name.length > 0) {
+      return { tag: body.tag_name, hasRelease: true };
+    }
+    return { tag: null, hasRelease: false };
+  } catch {
+    return { tag: null, hasRelease: false };
+  }
+}
+
+const { tag, hasRelease } = await fetchLatestTag();
+
+const assetUrl = (filename: string): string =>
+  hasRelease && tag
+    ? `${REPO_URL}/releases/download/${tag}/${filename}`
+    : RELEASES_URL;
+
+const versionForAsset = tag ?? "latest";
+const macAppZip = assetUrl(
+  `copilot-api-${versionForAsset}-darwin-arm64.app.zip`,
+);
+const winMsi = assetUrl(`copilot-api-${versionForAsset}-windows-x64.msi`);
+const winPs1 = assetUrl(`install.ps1`);
+const sourceTarGz = assetUrl(
+  `copilot-api-${versionForAsset}-darwin-arm64.tar.gz`,
+);
+const sourceZip = assetUrl(`copilot-api-${versionForAsset}-windows-x64.zip`);
+
+const versionLabel = hasRelease && tag ? tag : "see /releases";
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>maximal — Local Copilot proxy</title>
+    <meta
+      name="description"
+      content="Local Copilot proxy that speaks Anthropic & OpenAI. Run Claude Code, Codex, and other clients against GitHub Copilot."
+    />
+    <link rel="icon" type="image/svg+xml" href={`${import.meta.env.BASE_URL.replace(/\/$/, "")}/favicon.svg`} />
+    <meta name="color-scheme" content="light dark" />
+  </head>
+  <body>
+    <a href="#main" class="skip-link">Skip to content</a>
+    <main id="main">
+      <header class="site-header">
+        <h1>maximal</h1>
+        <p class="tagline">
+          Local Copilot proxy that speaks Anthropic &amp; OpenAI.
+        </p>
+        <div class="header-meta">
+          <a href={REPO_URL} rel="noopener">github.com/{REPO}</a>
+          <span aria-hidden="true">·</span>
+          <a href={RELEASES_URL} rel="noopener">latest: {versionLabel}</a>
+        </div>
+      </header>
+
+      <section aria-labelledby="what">
+        <h2 id="what">What is this</h2>
+        <p>
+          A local proxy that lets Anthropic-API and OpenAI-API clients —
+          Claude Code, Claude Desktop in Cowork mode, Codex, and others —
+          talk to GitHub Copilot's backend, including GitHub Enterprise
+          deployments. Run it locally, point your client at it, and
+          Copilot serves the model. Claude Code thinks it is talking to
+          <code>api.anthropic.com</code>; Codex thinks it is talking to
+          <code>api.openai.com</code>; both are actually hitting GHC.
+        </p>
+        <p>
+          Server-side web tools that Copilot rejects natively are resolved
+          by an internal agent loop: the proxy strips the server-side
+          declaration, substitutes a client-side shim, drives the model
+          through tool round-trips, and synthesizes the Anthropic-shaped
+          result blocks back to the client.
+        </p>
+      </section>
+
+      <section aria-labelledby="download">
+        <h2 id="download">Download</h2>
+        <p class="section-note" id="os-hint">
+          Choose the build for your platform. We will highlight the right
+          one once the page loads.
+        </p>
+
+        <div class="downloads" role="group" aria-label="Downloads by platform">
+          <a
+            class="btn"
+            data-os="mac"
+            href={macAppZip}
+            rel="noopener"
+          >
+            <span>macOS — Apple Silicon (.app.zip)</span>
+            <span class="btn-meta">{versionLabel}</span>
+          </a>
+          <a
+            class="btn"
+            data-os="windows"
+            href={winMsi}
+            rel="noopener"
+          >
+            <span>Windows — installer (.msi)</span>
+            <span class="btn-meta">{versionLabel}</span>
+          </a>
+          <a
+            class="btn"
+            data-os="windows-ps"
+            href={winPs1}
+            rel="noopener"
+          >
+            <span>Windows — PowerShell installer</span>
+            <span class="btn-meta">install.ps1</span>
+          </a>
+          <a
+            class="btn"
+            data-os="source-mac"
+            href={sourceTarGz}
+            rel="noopener"
+          >
+            <span>CLI — macOS arm64 (.tar.gz)</span>
+            <span class="btn-meta">{versionLabel}</span>
+          </a>
+          <a
+            class="btn"
+            data-os="source-win"
+            href={sourceZip}
+            rel="noopener"
+          >
+            <span>CLI — Windows x64 (.zip)</span>
+            <span class="btn-meta">{versionLabel}</span>
+          </a>
+          <span
+            class="btn btn--disabled"
+            aria-disabled="true"
+            title="Homebrew tap coming soon"
+          >
+            <span>Homebrew — coming soon</span>
+            <span class="btn-meta">brew install</span>
+          </span>
+        </div>
+
+        {hasRelease && (
+          <>
+            <p class="section-note" id="ps-hint">
+              To install via PowerShell, run:
+            </p>
+            <code class="ps-cmd">iex (irm {winPs1})</code>
+          </>
+        )}
+      </section>
+
+      <section aria-labelledby="warn">
+        <h2 id="warn">First-launch warning</h2>
+        <div class="callout" role="note">
+          <p>
+            <strong>v1 binaries are unsigned.</strong> Your OS will warn
+            you the first time you open them.
+          </p>
+          <p>
+            <strong>macOS:</strong> right-click <code>copilot-api.app</code>
+            and choose <strong>Open</strong>, then confirm the Gatekeeper
+            prompt. One time per install.
+          </p>
+          <p>
+            <strong>Windows:</strong> SmartScreen will say "Windows
+            protected your PC". Click <strong>More info</strong>, then
+            <strong>Run anyway</strong>.
+          </p>
+        </div>
+      </section>
+
+      <section aria-labelledby="setup">
+        <h2 id="setup">Setup</h2>
+        <ol class="steps">
+          <li>
+            <strong>Install.</strong> Download the build for your
+            platform above and run the installer (or unzip + drag to
+            Applications on macOS).
+          </li>
+          <li>
+            <strong>Authenticate.</strong> Open a terminal and run the
+            one-time GitHub device-code flow. This is the only required
+            terminal step.
+            <pre><code>copilot-api setup</code></pre>
+          </li>
+          <li>
+            <strong>Point your client at it.</strong> The proxy listens on
+            <code>localhost:4141</code>. Configure Claude Code or Codex
+            with that base URL — see the
+            <a href={`${REPO_URL}#run`} rel="noopener">README</a> for
+            client snippets.
+          </li>
+        </ol>
+      </section>
+
+      <footer class="site-footer">
+        <span>
+          MIT license ·
+          <a href={`${REPO_URL}/blob/main/LICENSE`} rel="noopener">LICENSE</a>
+          ·
+          <a
+            href={`${REPO_URL}/blob/main/THIRD-PARTY-LICENSE`}
+            rel="noopener">third-party</a
+          >
+        </span>
+        <a href={REPO_URL} rel="noopener">github.com/{REPO}</a>
+      </footer>
+    </main>
+
+    <script is:inline>
+      // OS detection — highlight the matching button as primary.
+      (function () {
+        var ua = navigator.userAgent || "";
+        var platform = navigator.platform || "";
+        var isMac = /Mac|iPhone|iPad|iPod/.test(ua) || /Mac/.test(platform);
+        var isWindows = /Windows/.test(ua) || /Win/.test(platform);
+
+        var primaryKey = null;
+        if (isMac) primaryKey = "mac";
+        else if (isWindows) primaryKey = "windows";
+
+        if (!primaryKey) return;
+
+        var buttons = document.querySelectorAll(".btn[data-os]");
+        for (var i = 0; i < buttons.length; i++) {
+          var btn = buttons[i];
+          if (btn.getAttribute("data-os") === primaryKey) {
+            btn.classList.add("btn--primary");
+            // move it to the top of the .downloads container
+            var parent = btn.parentNode;
+            if (parent && parent.firstChild !== btn) {
+              parent.insertBefore(btn, parent.firstChild);
+            }
+          }
+        }
+
+        var hint = document.getElementById("os-hint");
+        if (hint) {
+          var label = isMac ? "macOS" : "Windows";
+          hint.textContent =
+            "Detected " + label + ". Other platforms below.";
+        }
+      })();
+    </script>
+  </body>
+</html>

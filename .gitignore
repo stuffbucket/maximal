@@ -1,5 +1,7 @@
 node_modules/
 dist/
+# Astro per-project cache (regenerated on build)
+.astro/
 # build/ holds two flavors: compiled output (bun-build artifacts —
 # ignore) and source-controlled installer templates under
 # build/macos/ and build/homebrew/. The pattern below ignores
