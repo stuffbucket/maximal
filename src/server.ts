@@ -57,7 +57,13 @@ server.use(
 
 server.get("/", (c) => c.text("Server running"))
 server.get("/usage-viewer", (c) => {
-  const usageViewerFileUrl = new URL("../pages/index.html", import.meta.url)
+  // Resolves to `src/pages/usage-viewer.html` in dev (Bun running TS
+  // source) and to `dist/pages/usage-viewer.html` in the bundled
+  // build (tsdown copies `src/pages` to `dist/pages`).
+  const usageViewerFileUrl = new URL(
+    "./pages/usage-viewer.html",
+    import.meta.url,
+  )
   return c.html(readFileSync(usageViewerFileUrl, "utf8"))
 })
 server.get("/usage-viewer/", (c) => c.redirect("/usage-viewer", 301))

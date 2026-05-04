@@ -12,7 +12,7 @@ import fs from "node:fs"
 import path from "node:path"
 
 const ROOT = path.resolve(import.meta.dir, "..")
-const PAGE = path.join(ROOT, "pages/install/index.html")
+const PAGE = path.join(ROOT, "pages/index.html")
 
 const html = fs.readFileSync(PAGE, "utf8")
 

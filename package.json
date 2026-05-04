@@ -21,8 +21,7 @@
     "copilot-api": "./dist/main.js"
   },
   "files": [
-    "dist",
-    "pages"
+    "dist"
   ],
   "scripts": {
     "build": "tsdown",
