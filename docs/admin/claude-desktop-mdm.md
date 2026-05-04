@@ -4,7 +4,7 @@ What managed-preferences keys Claude Desktop reads, where they live,
 and which ones matter for using this proxy as a third-party inference
 gateway.
 
-Last verified: 2026-05-01.
+Last verified: 2026-05-04.
 
 ## Why this matters here
 
@@ -34,7 +34,7 @@ file-based managed-settings > Windows registry. The
 | `inferenceGatewayBaseUrl` | string | unset | Gateway endpoint URL (e.g. `http://localhost:4141`). |
 | `inferenceGatewayApiKey` | string | unset | Bearer credential. We accept literal `anything`. |
 | `inferenceModels` | JSON array (as string) | unset | Allowlist of model IDs / aliases. Useful to hide variants if our `/v1/models` listing changes. |
-| `coworkEgressAllowedHosts` | JSON array | unset (= deny most) | **The egress allowlist that gates Cowork's bundled WebSearch / fetch connectors.** Without this, the connectors block on most domains in dev mode. |
+| `coworkEgressAllowedHosts` | JSON array | unset (= deny most) | **The egress allowlist that gates Cowork's bundled tool-call traffic.** Accepts exact hostnames (`api.github.com`), single-level wildcards (`*.corp.com`), and the bare sentinel `*` for allow-all. Wildcards don't cover the apex — `*.corp.com` matches `docs.corp.com` but not `corp.com` itself. Scope is **tool calls only** — inference and MCP traffic have their own allowlists. IP literals and `localhost` always resolve regardless of this list. Surfaced in the desktop UI under **Configure third-party inference → Sandbox & workspace → Allowed egress hosts** (with an `* Allow all` button). |
 | `coworkWebSearchEnabled` | bool | `true` | (UI-tier preference, not MDM.) Enables Cowork's bundled WebSearch connector. |
 | `isLocalDevMcpEnabled` | bool | `true` | Allow user-added local stdio MCP servers via Developer settings. |
 | `managedMcpServers` | JSON array | unset | Org-pushed remote MCP servers (HTTP/SSE) — e.g. GitHub MCP, Atlassian MCP. |
@@ -64,18 +64,34 @@ Restart Claude Desktop after any change (`Cmd+Q`, then relaunch).
 ### Allow Cowork's connectors to navigate to common trustworthy hosts
 
 `coworkEgressAllowedHosts` is the knob that controls Cowork's bundled
-WebSearch / fetch egress filter. With our proxy doing the actual web
-fetching via `OllamaWebExecutor` on the proxy side, you can leave
-this empty — Cowork's connectors aren't on the path. But populating
-the list lets the bundled connectors continue to work for sites where
-the model would naturally reach for them, without relying on the
-proxy.
+WebSearch / fetch egress filter. Three useful shapes:
 
-The list we're shipping by default is in
-`scripts/install-cowork-egress.sh`, ~100 entries spanning code
-hosting, package registries, language docs, standards bodies, major
-news outlets, search engines, AI labs, cloud provider docs, and
-testing domains.
+```sh
+# Curated allowlist (what scripts/install-cowork-egress.sh writes —
+# ~120 entries spanning code hosting, package registries, language
+# docs, standards bodies, news outlets, search engines, AI labs,
+# cloud provider docs, and testing domains).
+bash scripts/install-cowork-egress.sh
+
+# Allow-all (single sentinel — Cowork's matcher honors bare "*").
+defaults write com.anthropic.claudefordesktop coworkEgressAllowedHosts -array "*"
+
+# Remove the key entirely (defaults to "deny most" again).
+defaults delete com.anthropic.claudefordesktop coworkEgressAllowedHosts
+```
+
+Empty (or unset) is **not** the same as `*` — it's an allowlist, so
+"unset" denies most hosts. `*` is the only way to switch off host
+gating without disabling the connector. Cowork's UI surfaces this as
+the `* Allow all` button under **Configure third-party inference →
+Sandbox & workspace → Allowed egress hosts**.
+
+With our proxy doing the actual web fetching via `OllamaWebExecutor`
+on the proxy side, the curated allowlist is optional — Cowork's
+bundled connectors aren't on the proxy's path for `web_search` (the
+model emits a server-tool block, our proxy intercepts, Ollama
+executes). But for `web_fetch` and other URL-grabbing connectors that
+run inside the desktop process, the allowlist still gates them.
 
 ### Hide variant model IDs from the picker
 
@@ -109,6 +125,7 @@ cat ~/Library/Application\ Support/Claude/claude_desktop_config.json
 | Point at the local proxy | UI: Configure third-party inference | already done |
 | Skip the login chooser | UI: same panel | already done |
 | Cowork bundled connectors reach common trustworthy hosts | `coworkEgressAllowedHosts` | see `scripts/install-cowork-egress.sh` |
+| Cowork bundled connectors reach **any** host (turn host gating off) | `coworkEgressAllowedHosts` | `["*"]` (bare `*` is the allow-all sentinel) |
 | Avoid duplicate variant ids in picker | proxy-side, already shipped | n/a |
 | Local stdio MCP servers visible | `isLocalDevMcpEnabled = true` | usually default |
 
