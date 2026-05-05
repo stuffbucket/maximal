@@ -78,11 +78,25 @@ describe("macos installer templates", () => {
   it("placeholder files exist where the README claims", () => {
     const placeholders = [
       path.join(TPL, "Contents/MacOS/maximal.placeholder"),
-      path.join(TPL, "Contents/Resources/AppIcon.icns.placeholder"),
       path.join(ROOT, "build/macos/dmg-bg.png.placeholder"),
     ]
     for (const p of placeholders) {
       expect(fs.existsSync(p)).toBe(true)
     }
+  })
+
+  it("real AppIcon.icns ships in the template (no longer a placeholder)", () => {
+    // The icon was promoted from placeholder to a real .icns file
+    // generated from build/macos/app-icon.svg. The workflow still
+    // does `rm -f AppIcon.icns.placeholder` defensively, but the
+    // copy step now finds a real icon and copies it in.
+    expect(
+      fs.existsSync(path.join(TPL, "Contents/Resources/AppIcon.icns")),
+    ).toBe(true)
+    expect(
+      fs.existsSync(
+        path.join(TPL, "Contents/Resources/AppIcon.icns.placeholder"),
+      ),
+    ).toBe(false)
   })
 })
