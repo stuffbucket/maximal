@@ -43,15 +43,15 @@ const assetUrl = (filename: string): string =>
     : RELEASES_URL;
 
 const versionForAsset = tag ?? "latest";
-const macAppZip = assetUrl(
-  `copilot-api-${versionForAsset}-darwin-arm64.app.zip`,
-);
-const winMsi = assetUrl(`copilot-api-${versionForAsset}-windows-x64.msi`);
+const macAppFile = `copilot-api-${versionForAsset}-darwin-arm64.app.zip`;
+const winMsiFile = `copilot-api-${versionForAsset}-windows-x64.msi`;
+const sourceTarFile = `copilot-api-${versionForAsset}-darwin-arm64.tar.gz`;
+const sourceZipFile = `copilot-api-${versionForAsset}-windows-x64.zip`;
+const macAppZip = assetUrl(macAppFile);
+const winMsi = assetUrl(winMsiFile);
 const winPs1 = assetUrl(`install.ps1`);
-const sourceTarGz = assetUrl(
-  `copilot-api-${versionForAsset}-darwin-arm64.tar.gz`,
-);
-const sourceZip = assetUrl(`copilot-api-${versionForAsset}-windows-x64.zip`);
+const sourceTarGz = assetUrl(sourceTarFile);
+const sourceZip = assetUrl(sourceZipFile);
 
 const versionLabel = hasRelease && tag ? tag : "see /releases";
 ---
@@ -166,12 +166,20 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
           <path d="M24 4 L27 21 L44 24 L27 27 L24 44 L21 27 L4 24 L21 21 Z" />
         </svg>
         <h2 id="download-h">Download</h2>
-        <p class="section-note" id="os-hint">
+        <p class="section-note" id="download-note">
           Click the installer for you, or download a copy for a friend.
+          We'll show you what to do with it before the download starts —
+          click again to confirm.
         </p>
 
         <div class="downloads" role="group" aria-label="Downloads by platform">
-          <a class="btn" data-os="mac" href={macAppZip} rel="noopener">
+          <a
+            class="btn"
+            data-os="mac"
+            data-installer="mac-app"
+            href={macAppZip}
+            rel="noopener"
+          >
             <span class="btn-label">
               <svg
                 class="btn-spark"
@@ -185,7 +193,13 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
             </span>
             <span class="btn-meta">{versionLabel}</span>
           </a>
-          <a class="btn" data-os="windows" href={winMsi} rel="noopener">
+          <a
+            class="btn"
+            data-os="windows"
+            data-installer="windows-msi"
+            href={winMsi}
+            rel="noopener"
+          >
             <span class="btn-label">
               <svg
                 class="btn-spark"
@@ -199,19 +213,37 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
             </span>
             <span class="btn-meta">{versionLabel}</span>
           </a>
-          <a class="btn" data-os="windows-ps" href={winPs1} rel="noopener">
+          <a
+            class="btn"
+            data-os="windows"
+            data-installer="windows-ps1"
+            href={winPs1}
+            rel="noopener"
+          >
             <span class="btn-label"
               ><span>Windows — PowerShell installer</span></span
             >
             <span class="btn-meta">install.ps1</span>
           </a>
-          <a class="btn" data-os="source-mac" href={sourceTarGz} rel="noopener">
+          <a
+            class="btn"
+            data-os="mac"
+            data-installer="source-mac"
+            href={sourceTarGz}
+            rel="noopener"
+          >
             <span class="btn-label"
               ><span>CLI — macOS arm64 (.tar.gz)</span></span
             >
             <span class="btn-meta">{versionLabel}</span>
           </a>
-          <a class="btn" data-os="source-win" href={sourceZip} rel="noopener">
+          <a
+            class="btn"
+            data-os="windows"
+            data-installer="source-win"
+            href={sourceZip}
+            rel="noopener"
+          >
             <span class="btn-label"
               ><span>CLI — Windows x64 (.zip)</span></span
             >
@@ -246,22 +278,36 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
           </a>
         </div>
 
-        <div class="install-hint" data-os-hint="mac" hidden>
+        <div class="install-hint" data-installer-hint="mac-app" hidden>
           <p class="section-note">
-            Once downloaded: drag <code>copilot-api.app</code> into
-            <code>/Applications</code>, then read the first-launch
-            warning below before opening it.
+            <strong>What to do with it:</strong> unzip if your browser
+            didn't, then drag <code>copilot-api.app</code> into
+            <code>/Applications</code>. Read the first-launch warning
+            below before opening it.
+          </p>
+        </div>
+        <div class="install-hint" data-installer-hint="windows-msi" hidden>
+          <p class="section-note">
+            <strong>What to do with it:</strong> double-click the
+            <code>.msi</code> to install. SmartScreen will warn you the
+            first time — see the warning below.
           </p>
         </div>
         {
           hasRelease && (
-            <div class="install-hint" data-os-hint="windows" hidden>
+            <div class="install-hint" data-installer-hint="windows-ps1" hidden>
               <p class="section-note">
-                Or install via PowerShell directly:
+                <strong>What to do with it:</strong> right-click and{" "}
+                <em>Run with PowerShell</em>, or run this one-liner from
+                an elevated PowerShell prompt instead of downloading:
               </p>
               <div class="copyable">
                 <code class="ps-cmd">iex (irm {winPs1})</code>
-                <button class="copy-btn" type="button" aria-label="Copy command">
+                <button
+                  class="copy-btn"
+                  type="button"
+                  aria-label="Copy command"
+                >
                   <svg
                     class="copy-btn__icon"
                     viewBox="0 0 16 16"
@@ -279,6 +325,36 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
             </div>
           )
         }
+        <div class="install-hint" data-installer-hint="source-mac" hidden>
+          <p class="section-note">
+            <strong>What to do with it:</strong> extract the tarball and
+            run the binary directly — no installer, no app bundle.
+          </p>
+          <div class="copyable">
+            <code class="ps-cmd">tar -xzf {sourceTarFile} && ./copilot-api/copilot-api --help</code>
+            <button class="copy-btn" type="button" aria-label="Copy command">
+              <svg
+                class="copy-btn__icon"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                aria-hidden="true"
+              >
+                <rect x="5" y="5" width="9" height="9" rx="1.5" />
+                <path d="M11 5 V3 a1 1 0 0 0 -1 -1 H3 a1 1 0 0 0 -1 1 v7 a1 1 0 0 0 1 1 h2" />
+              </svg>
+              <span class="copy-btn__label">Copy</span>
+            </button>
+          </div>
+        </div>
+        <div class="install-hint" data-installer-hint="source-win" hidden>
+          <p class="section-note">
+            <strong>What to do with it:</strong> extract the
+            <code>.zip</code> and run <code>copilot-api.exe</code> from
+            a PowerShell prompt in the extracted folder. No installer.
+          </p>
+        </div>
       </section>
 
       <!-- WARN — ochre callout -->
@@ -325,17 +401,42 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
           <rect x="8" y="8" width="32" height="32" />
           <rect x="16" y="16" width="16" height="16" transform="rotate(45 24 24)" />
         </svg>
-        <h2 id="setup-h">Setup</h2>
+        <div class="setup-head">
+          <h2 id="setup-h">Setup</h2>
+          <div class="setup-picker">
+            <label for="setup-platform">Setting up on</label>
+            <select id="setup-platform" data-setup-platform>
+              <option value="mac">macOS</option>
+              <option value="windows">Windows</option>
+            </select>
+          </div>
+        </div>
         <ol class="steps">
           <li>
-            <strong>Install.</strong> Download the build for your platform
-            above and run the installer (or unzip + drag to Applications on
-            macOS).
+            <strong>Install.</strong>
+            <span data-platform="mac">
+              Open the <code>.app.zip</code> from your Downloads folder
+              and drag <code>copilot-api.app</code> into
+              <code>/Applications</code>. (For the CLI tarball: extract
+              and run the binary in place.)
+            </span>
+            <span data-platform="windows" hidden>
+              Double-click the <code>.msi</code> and step through the
+              installer. (For the PowerShell or <code>.zip</code>
+              variants: see the install hints in the Download section.)
+            </span>
           </li>
           <li>
-            <strong>Authenticate.</strong> Open a terminal and run the
-            one-time GitHub device-code flow. This is the only required
-            terminal step.
+            <strong>Authenticate.</strong>
+            <span data-platform="mac">
+              Open <strong>Terminal</strong> and run the one-time GitHub
+              device-code flow. This is the only required terminal step.
+            </span>
+            <span data-platform="windows" hidden>
+              Open <strong>PowerShell</strong> and run the one-time
+              GitHub device-code flow. This is the only required
+              terminal step.
+            </span>
             <div class="copyable copyable--block">
               <pre><code>copilot-api setup</code></pre>
               <button class="copy-btn" type="button" aria-label="Copy command">
@@ -395,43 +496,111 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
     </nav>
 
     <script is:inline>
-      // OS detection — wire the "Read my mind" button to the matching
-      // installer URL, and reveal the OS-specific install hint.
-      // The list itself stays in stable order so users can reliably
-      // grab a different OS's installer for a friend.
+      // OS detection + two-click download UX. First click on a download
+      // button arms it: the matching install hint reveals, the Setup
+      // section's platform picker switches to that platform, and the
+      // button label flips to "Click again to download". Second click
+      // proceeds with the navigation. Clicking a different button
+      // re-arms there instead.
       (function () {
         var ua = navigator.userAgent || "";
         var platform = navigator.platform || "";
         var isMac = /Mac|iPhone|iPad|iPod/.test(ua) || /Mac/.test(platform);
         var isWindows = /Windows/.test(ua) || /Win/.test(platform);
 
-        var primaryKey = null;
-        if (isMac) primaryKey = "mac";
-        else if (isWindows) primaryKey = "windows";
+        var defaultPlatform = isWindows ? "windows" : "mac";
+        var defaultInstaller =
+          defaultPlatform === "windows" ? "windows-msi" : "mac-app";
 
-        if (!primaryKey) return;
-
-        // Subtle highlight on the matching button (no reorder).
-        var match = document.querySelector(
-          '.btn[data-os="' + primaryKey + '"]',
-        );
-        if (match) match.classList.add("btn--primary");
-
-        // "Read my mind" — copy href + meta from the detected primary.
-        var rmm = document.querySelector("[data-read-my-mind]");
-        var rmmMeta = document.querySelector("[data-read-my-mind-meta]");
-        if (rmm && match) {
-          rmm.href = match.getAttribute("href");
-          if (rmmMeta) {
-            rmmMeta.textContent = primaryKey === "mac" ? "macOS" : "Windows";
-          }
+        function installerToPlatform(key) {
+          if (!key) return defaultPlatform;
+          return key.indexOf("mac") !== -1 ? "mac" : "windows";
         }
 
-        // Reveal the install hint that matches detected OS.
-        var hint = document.querySelector(
-          '[data-os-hint="' + primaryKey + '"]',
+        // Wire "Read my mind" to the detected primary installer.
+        var rmm = document.querySelector("[data-read-my-mind]");
+        var rmmMeta = document.querySelector("[data-read-my-mind-meta]");
+        var primary = document.querySelector(
+          '.btn[data-installer="' + defaultInstaller + '"]',
         );
-        if (hint) hint.hidden = false;
+        if (rmm && primary) {
+          rmm.href = primary.getAttribute("href");
+          rmm.setAttribute("data-installer", defaultInstaller);
+          if (rmmMeta) {
+            rmmMeta.textContent =
+              defaultPlatform === "windows" ? "Windows" : "macOS";
+          }
+        }
+        // Subtle highlight on the OS-detected primary (does not arm).
+        if (primary) primary.classList.add("btn--primary");
+
+        // Reveal the install hint matching the detected OS so the
+        // first thing the user sees already explains what they're
+        // about to download.
+        function showHint(key) {
+          var hints = document.querySelectorAll("[data-installer-hint]");
+          hints.forEach(function (h) {
+            h.hidden = h.getAttribute("data-installer-hint") !== key;
+          });
+        }
+        showHint(defaultInstaller);
+
+        // Setup-section platform sync.
+        var setupSelect = document.querySelector("[data-setup-platform]");
+        function setSetupPlatform(plat) {
+          if (setupSelect && setupSelect.value !== plat)
+            setupSelect.value = plat;
+          var els = document.querySelectorAll("#setup [data-platform]");
+          els.forEach(function (el) {
+            el.hidden = el.getAttribute("data-platform") !== plat;
+          });
+        }
+        setSetupPlatform(defaultPlatform);
+        if (setupSelect) {
+          setupSelect.addEventListener("change", function () {
+            setSetupPlatform(setupSelect.value);
+          });
+        }
+
+        // Two-click arming.
+        var armed = null;
+        function disarm(btn) {
+          if (!btn) return;
+          btn.classList.remove("btn--armed");
+          var meta = btn.querySelector(".btn-meta");
+          if (meta && meta.dataset.original) {
+            meta.textContent = meta.dataset.original;
+            delete meta.dataset.original;
+          }
+        }
+        function arm(btn) {
+          if (armed && armed !== btn) disarm(armed);
+          btn.classList.add("btn--armed");
+          var meta = btn.querySelector(".btn-meta");
+          if (meta && !meta.dataset.original) {
+            meta.dataset.original = meta.textContent || "";
+            meta.textContent = "click again to download";
+          }
+          armed = btn;
+        }
+
+        var btns = document.querySelectorAll(
+          ".btn[data-installer], [data-read-my-mind]",
+        );
+        btns.forEach(function (btn) {
+          btn.addEventListener("click", function (e) {
+            var key = btn.getAttribute("data-installer");
+            if (!key) return;
+            if (armed === btn) {
+              // Already armed — let the navigation proceed.
+              return;
+            }
+            e.preventDefault();
+            arm(btn);
+            showHint(key);
+            setSetupPlatform(installerToPlatform(key));
+          });
+        });
       })();
 
       // Copy-to-clipboard for .copyable blocks.
