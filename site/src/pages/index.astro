@@ -43,10 +43,10 @@ const assetUrl = (filename: string): string =>
     : RELEASES_URL;
 
 const versionForAsset = tag ?? "latest";
-const macAppFile = `copilot-api-${versionForAsset}-darwin-arm64.app.zip`;
-const winMsiFile = `copilot-api-${versionForAsset}-windows-x64.msi`;
-const sourceTarFile = `copilot-api-${versionForAsset}-darwin-arm64.tar.gz`;
-const sourceZipFile = `copilot-api-${versionForAsset}-windows-x64.zip`;
+const macAppFile = `maximal-${versionForAsset}-darwin-arm64.app.zip`;
+const winMsiFile = `maximal-${versionForAsset}-windows-x64.msi`;
+const sourceTarFile = `maximal-${versionForAsset}-darwin-arm64.tar.gz`;
+const sourceZipFile = `maximal-${versionForAsset}-windows-x64.zip`;
 const macAppZip = assetUrl(macAppFile);
 const winMsi = assetUrl(winMsiFile);
 const winPs1 = assetUrl(`install.ps1`);
@@ -244,14 +244,16 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
             >
             <span class="btn-meta">{versionLabel}</span>
           </a>
-          <span
-            class="btn btn--disabled"
-            aria-disabled="true"
-            title="Homebrew tap coming soon"
+          <a
+            class="btn"
+            data-os="mac"
+            data-installer="homebrew"
+            href="https://github.com/stuffbucket/homebrew-tap"
+            rel="noopener"
           >
-            <span class="btn-label"><span>Homebrew — coming soon</span></span>
+            <span class="btn-label"><span>Homebrew — macOS / Linux</span></span>
             <span class="btn-meta">brew install</span>
-          </span>
+          </a>
           <a
             class="btn btn--read-my-mind"
             data-read-my-mind
@@ -276,7 +278,7 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
         <div class="install-hint" data-installer-hint="mac-app" hidden>
           <p class="section-note">
             <strong>What to do with it:</strong> unzip if your browser
-            didn't, then drag <code>copilot-api.app</code> into
+            didn't, then drag <code>maximal.app</code> into
             <code>/Applications</code>. Read the first-launch warning
             below before opening it.
           </p>
@@ -326,7 +328,7 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
             run the binary directly — no installer, no app bundle.
           </p>
           <div class="copyable">
-            <code class="ps-cmd">tar -xzf {sourceTarFile} && ./copilot-api/copilot-api --help</code>
+            <code class="ps-cmd">tar -xzf {sourceTarFile} && ./maximal --help</code>
             <button class="copy-btn" type="button" aria-label="Copy command">
               <svg
                 class="copy-btn__icon"
@@ -343,10 +345,40 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
             </button>
           </div>
         </div>
+        <div class="install-hint" data-installer-hint="homebrew" hidden>
+          <p class="section-note">
+            <strong>What to do with it:</strong> add the tap, then
+            install. Homebrew handles signing &amp; updates for you.
+          </p>
+          <div class="copyable">
+            <code class="ps-cmd">brew install stuffbucket/tap/maximal</code>
+            <button class="copy-btn" type="button" aria-label="Copy command">
+              <svg
+                class="copy-btn__icon"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                aria-hidden="true"
+              >
+                <rect x="5" y="5" width="9" height="9" rx="1.5" />
+                <path d="M11 5 V3 a1 1 0 0 0 -1 -1 H3 a1 1 0 0 0 -1 1 v7 a1 1 0 0 0 1 1 h2" />
+              </svg>
+              <span class="copy-btn__label">Copy</span>
+            </button>
+          </div>
+          <p class="section-note">
+            That one-liner shorthand expands to
+            <code>brew tap stuffbucket/tap</code> + <code
+              >brew install maximal</code
+            >. After that, <code>brew upgrade maximal</code> keeps you
+            on the latest.
+          </p>
+        </div>
         <div class="install-hint" data-installer-hint="source-win" hidden>
           <p class="section-note">
             <strong>What to do with it:</strong> extract the
-            <code>.zip</code> and run <code>copilot-api.exe</code> from
+            <code>.zip</code> and run <code>maximal.exe</code> from
             a PowerShell prompt in the extracted folder. No installer.
           </p>
         </div>
@@ -372,7 +404,7 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
               Click through once and you're set.
             </p>
             <p data-installer="mac-app">
-              <strong>macOS:</strong> right-click <code>copilot-api.app</code>
+              <strong>macOS:</strong> right-click <code>maximal.app</code>
               and choose <strong>Open</strong>, then confirm the Gatekeeper
               prompt. One time per install.
             </p>
@@ -381,7 +413,7 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
               binaries. Either approve once in <strong
                 >System Settings → Privacy &amp; Security → Open Anyway</strong
               >, or strip the flag from a Terminal:
-              <code>xattr -dr com.apple.quarantine ./copilot-api</code>.
+              <code>xattr -dr com.apple.quarantine ./maximal</code>.
             </p>
             <p data-installer="windows-msi" hidden>
               <strong>Windows:</strong> SmartScreen will say "Windows
@@ -394,9 +426,14 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
               If PowerShell's execution policy rejects the script, run it
               with <code>powershell -ExecutionPolicy Bypass -File install.ps1</code>.
             </p>
+            <p data-installer="homebrew" hidden>
+              <strong>Homebrew:</strong> nothing to click through.
+              Brew strips the quarantine flag on install, so the binary
+              just runs.
+            </p>
             <p data-installer="source-win" hidden>
               <strong>Windows:</strong> SmartScreen will block the first
-              run of <code>copilot-api.exe</code>. Right-click →
+              run of <code>maximal.exe</code>. Right-click →
               <strong>Properties → Unblock</strong>, or click
               <strong>More info → Run anyway</strong>.
             </p>
@@ -415,6 +452,7 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
             <option value="windows-msi">Windows — installer (.msi)</option>
             <option value="windows-ps1">Windows — PowerShell installer</option>
             <option value="source-win">Windows — CLI zip</option>
+            <option value="homebrew">Homebrew (macOS / Linux)</option>
           </select>
         </div>
         <ol class="steps">
@@ -422,19 +460,19 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
             <strong>Install.</strong>
             <span data-installer="mac-app">
               Open the <code>.app.zip</code> from your Downloads folder
-              and drag <code>copilot-api.app</code> into
+              and drag <code>maximal.app</code> into
               <code>/Applications</code>.
             </span>
             <span data-installer="source-mac" hidden>
               Extract the tarball:
-              <code>tar -xzf {sourceTarFile}</code>. The binary lives at
-              <code>./copilot-api/copilot-api</code> — run it from there
-              or symlink it onto your <code>PATH</code>.
+              <code>tar -xzf {sourceTarFile}</code>. The binary is
+              <code>./maximal</code> — run it from there or symlink it
+              onto your <code>PATH</code>.
             </span>
             <span data-installer="windows-msi" hidden>
               Double-click the <code>.msi</code> and step through the
-              installer. The installer adds <code>copilot-api</code> to
-              your <code>PATH</code>.
+              installer. It puts <code>maximal</code> on your
+              <code>PATH</code>.
             </span>
             <span data-installer="windows-ps1" hidden>
               Right-click <code>install.ps1</code> and choose
@@ -442,10 +480,14 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
               the Download section above to install in one step.
             </span>
             <span data-installer="source-win" hidden>
-              Extract the <code>.zip</code>. The binary is
-              <code>copilot-api.exe</code> inside the extracted folder —
-              run it from there, or add the folder to your
-              <code>PATH</code>.
+              Extract the <code>.zip</code>. <code>maximal.exe</code>
+              is at the root of the extracted folder — run it from
+              there, or add the folder to your <code>PATH</code>.
+            </span>
+            <span data-installer="homebrew" hidden>
+              From any terminal, run
+              <code>brew install stuffbucket/tap/maximal</code>. Brew
+              handles the tap, the binary, and PATH for you.
             </span>
           </li>
           <li>
@@ -460,7 +502,7 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
               terminal step.
             </span>
             <div class="copyable copyable--block">
-              <pre><code data-setup-cmd>copilot-api setup</code></pre>
+              <pre><code data-setup-cmd>maximal setup</code></pre>
               <button class="copy-btn" type="button" aria-label="Copy command">
                 <svg
                   class="copy-btn__icon"
@@ -538,11 +580,12 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
         }
 
         var setupCmds = {
-          "mac-app": "copilot-api setup",
-          "source-mac": "./copilot-api/copilot-api setup",
-          "windows-msi": "copilot-api setup",
-          "windows-ps1": "copilot-api setup",
-          "source-win": ".\\copilot-api.exe setup",
+          "mac-app": "maximal setup",
+          "source-mac": "./maximal setup",
+          "windows-msi": "maximal setup",
+          "windows-ps1": "maximal setup",
+          "source-win": ".\\maximal.exe setup",
+          homebrew: "maximal setup",
         };
 
         // Wire "Read my mind" to the detected primary installer.
@@ -589,7 +632,7 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
           // Authenticate command.
           if (setupCmdEl)
             setupCmdEl.textContent =
-              setupCmds[installer] || "copilot-api setup";
+              setupCmds[installer] || "maximal setup";
           // Sync picker.
           if (setupSelect && setupSelect.value !== installer)
             setupSelect.value = installer;
@@ -607,9 +650,13 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
           ".btn[data-installer], [data-read-my-mind]",
         );
         btns.forEach(function (btn) {
-          btn.addEventListener("click", function () {
+          btn.addEventListener("click", function (e) {
             var key = btn.getAttribute("data-installer");
             if (!key) return;
+            // Homebrew has no file to download — staying on the page
+            // so the user can copy the brew command is more useful
+            // than navigating to the tap README.
+            if (key === "homebrew") e.preventDefault();
             selectVariant(key);
           });
         });
