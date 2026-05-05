@@ -168,7 +168,7 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
         <h2 id="download-h">Download</h2>
         <p class="section-note" id="download-note">
           Click the installer for you, or download a copy for a friend.
-          Hover any option to preview what to do with it.
+          We'll show you what to do with it once the download starts.
         </p>
 
         <div class="downloads" role="group" aria-label="Downloads by platform">
@@ -484,11 +484,11 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
     </nav>
 
     <script is:inline>
-      // OS detection + hover-preview download UX. Each download button
-      // is a regular single-click link. On hover/focus we preview what
-      // that installer would mean: reveal the matching install hint
-      // and switch the Setup section's platform picker to that
-      // platform. Click just downloads.
+      // OS detection + click-to-update UX. Download buttons are plain
+      // single-click links. On click the download fires AND the
+      // matching install hint reveals + the Setup picker syncs to
+      // that installer's platform. No hover behavior — too distracting
+      // when scanning the list.
       (function () {
         var ua = navigator.userAgent || "";
         var platform = navigator.platform || "";
@@ -553,14 +553,12 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
           ".btn[data-installer], [data-read-my-mind]",
         );
         btns.forEach(function (btn) {
-          function preview() {
+          btn.addEventListener("click", function () {
             var key = btn.getAttribute("data-installer");
             if (!key) return;
             showHint(key);
             setSetupPlatform(installerToPlatform(key));
-          }
-          btn.addEventListener("pointerenter", preview);
-          btn.addEventListener("focus", preview);
+          });
         });
       })();
 
