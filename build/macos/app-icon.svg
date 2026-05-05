@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <rect width="1024" height="1024" rx="230" ry="230" fill="#c8334a"/>
+  <text x="512" y="700"
+        font-family="Fraunces"
+        font-weight="900"
+        font-size="760"
+        fill="#f4ead4"
+        text-anchor="middle"
+        font-variation-settings="'SOFT' 30, 'WONK' 1, 'opsz' 144">m</text>
+</svg>

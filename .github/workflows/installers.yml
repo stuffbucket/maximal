@@ -230,23 +230,31 @@ jobs:
             dist-release/maximal-${{ env.TAG }}-darwin-${{ env.ARCH }}.app.zip
             dist-release/maximal-${{ env.TAG }}-darwin-${{ env.ARCH }}.app.zip.sha256
 
-  # Sign + notarize + DMG. Runs on the self-hosted Mac runner that's
-  # already provisioned for stuffbucket/claudeme: a `build.keychain-db`
-  # in the runner user's home with the Developer ID cert imported, and
-  # an inline notarytool flow keyed on APPLE_ID / APPLE_PASSWORD /
-  # APPLE_TEAM_ID secrets.
+  # Sign the .app + build a signed DMG on the self-hosted Mac runner
+  # that's already provisioned for stuffbucket/claudeme: a
+  # `build.keychain-db` in the runner user's home with the Developer ID
+  # cert imported.
+  #
+  # Notarization is intentionally skipped. Without notarization the
+  # first launch still triggers Gatekeeper ("unidentified developer"),
+  # but signing avoids the harsher "app is damaged" message that
+  # quarantined-and-unsigned apps get, and right-click → Open clears
+  # the prompt cleanly. Add notarization later if/when the workflow
+  # needs to skip the Gatekeeper prompt entirely.
   #
   # Required repo secrets (configure once at
   # github.com/stuffbucket/maximal/settings/secrets/actions):
-  #   KEYCHAIN_PASSWORD       — unlocks ~/Library/Keychains/build.keychain-db
+  #   KEYCHAIN_PASSWORD        — unlocks ~/Library/Keychains/build.keychain-db
   #   DEVELOPER_ID_APPLICATION — full identity string, e.g.
   #                              "Developer ID Application: Name (TEAMID)"
-  #   APPLE_ID                — Apple ID email used for notarization
-  #   APPLE_PASSWORD          — app-specific password for that Apple ID
-  #   APPLE_TEAM_ID           — the (TEAMID) part of the identity above
-  macos-dmg:
+  #
+  # Outputs (overwriting the unsigned .app.zip from macos-app-zip):
+  #   maximal-${TAG}-darwin-arm64.app.zip   (signed .app, re-zipped)
+  #   maximal-${TAG}-darwin-arm64.dmg       (signed DMG, drag-to-Applications)
+  #   plus .sha256 sidecars for each
+  macos-signed:
     needs: macos-app-zip
-    name: macOS .dmg (signed + notarized)
+    name: macOS signed .app.zip + .dmg
     runs-on: self-hosted
     env:
       TAG: ${{ github.event.release.tag_name || inputs.tag }}
@@ -271,10 +279,23 @@ jobs:
           set -euo pipefail
           rm -rf dist-input dist-build dist-release
           mkdir -p dist-input dist-build dist-release
-          gh release download "$TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --pattern "$APP_ZIP" \
-            --dir dist-input
+          # Use the REST API + curl rather than `gh` because gh on this
+          # runner may be in use by a different agent. This works with
+          # any tag whose release contains the unsigned .app.zip.
+          ASSET_URL=$(curl -fsSL \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
+            | python3 -c "import sys,json; r=json.load(sys.stdin); a=[x for x in r['assets'] if x['name']==sys.argv[1]]; print(a[0]['url'] if a else '')" "$APP_ZIP")
+          if [ -z "$ASSET_URL" ]; then
+            echo "::error::asset $APP_ZIP not found on release $TAG"
+            exit 1
+          fi
+          curl -fsSL \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/octet-stream" \
+            -o "dist-input/$APP_ZIP" \
+            "$ASSET_URL"
           (cd dist-build && unzip -q "../dist-input/$APP_ZIP")
           ls -la dist-build/maximal.app/Contents/MacOS
 
@@ -298,6 +319,17 @@ jobs:
             dist-build/maximal.app
           codesign --verify --deep --strict --verbose=2 dist-build/maximal.app
 
+      - name: Re-zip signed .app
+        run: |
+          set -euo pipefail
+          # ditto preserves Mac metadata (extended attributes, the
+          # signature blocks inside the .app's _CodeSignature dir,
+          # symlinks). zip -ryX would also work for our binary-only
+          # bundle but ditto is the canonical Apple-blessed path.
+          OUT="dist-release/${APP_ZIP}"
+          (cd dist-build && ditto -c -k --keepParent maximal.app "../${OUT}")
+          (cd dist-release && shasum -a 256 "${APP_ZIP}" > "${APP_ZIP}.sha256")
+
       - name: Stage DMG layout
         run: |
           set -euo pipefail
@@ -320,38 +352,15 @@ jobs:
             "$OUT"
           codesign --force --sign "$SIGN_IDENTITY" "$OUT"
           codesign --verify --verbose=2 "$OUT"
-
-      - name: Notarize DMG
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          set -euo pipefail
-          xcrun notarytool submit "dist-release/${DMG}" \
-            --apple-id "$APPLE_ID" \
-            --password "$APPLE_PASSWORD" \
-            --team-id "$APPLE_TEAM_ID" \
-            --wait
-
-      - name: Staple ticket
-        run: |
-          set -euo pipefail
-          xcrun stapler staple "dist-release/${DMG}"
-          xcrun stapler validate "dist-release/${DMG}"
-          spctl -a -t open --context context:primary-signature -v "dist-release/${DMG}"
-
-      - name: SHA-256 sidecar
-        run: |
-          set -euo pipefail
           (cd dist-release && shasum -a 256 "${DMG}" > "${DMG}.sha256")
-          cat "dist-release/${DMG}.sha256"
 
-      - name: Attach DMG to release
+      - name: Attach signed bundles to release
         uses: ./.github/actions/upload-release-asset
         with:
           tag: ${{ env.TAG }}
           files: |
+            dist-release/${{ env.APP_ZIP }}
+            dist-release/${{ env.APP_ZIP }}.sha256
             dist-release/${{ env.DMG }}
             dist-release/${{ env.DMG }}.sha256
 
