@@ -312,3 +312,69 @@ jobs:
               exit 1
             }
           }
+
+  # Standard Homebrew release mechanic for a private tap: render
+  # the formula with the just-published version + per-arch SHAs and
+  # push it to `stuffbucket/homebrew-tap/Formula/maximal.rb`. Users
+  # then `brew tap stuffbucket/tap` once and `brew upgrade maximal`
+  # picks up subsequent releases automatically.
+  #
+  # Requires the `HOMEBREW_TAP_TOKEN` repo secret: a PAT or fine-
+  # grained token with Contents:write on `stuffbucket/homebrew-tap`.
+  # The job no-ops with a warning if the secret is absent so a
+  # missing token doesn't fail the whole release.
+  homebrew-tap:
+    needs: binaries
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup-bun
+        with:
+          bun-version: latest
+
+      - name: Resolve version
+        id: ver
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Bump formula in stuffbucket/homebrew-tap
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          VERSION: ${{ steps.ver.outputs.version }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ -z "${HOMEBREW_TAP_TOKEN:-}" ]; then
+            echo "::warning::HOMEBREW_TAP_TOKEN not set — skipping tap bump."
+            echo "::warning::Create a fine-grained PAT with Contents:write on stuffbucket/homebrew-tap and add it as a repo secret to enable."
+            exit 0
+          fi
+
+          # Render the formula against the GitHub release we just
+          # cut. The script fetches each per-arch .sha256 over HTTPS.
+          mkdir -p out
+          bun scripts/sync-homebrew-formula.ts \
+            --org stuffbucket \
+            --repo maximal \
+            --version "$VERSION" \
+            --output out/maximal.rb
+
+          # Clone the tap, copy the rendered file in, push.
+          git clone --depth 1 \
+            "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/stuffbucket/homebrew-tap.git" \
+            tap
+          mkdir -p tap/Formula
+          cp out/maximal.rb tap/Formula/maximal.rb
+
+          cd tap
+          if git diff --quiet -- Formula/maximal.rb; then
+            echo "No formula changes for $TAG — already in sync."
+            exit 0
+          fi
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name  "github-actions[bot]"
+          git add Formula/maximal.rb
+          git commit -m "maximal: bump to $TAG"
+          git push origin HEAD:main
