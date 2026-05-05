@@ -168,8 +168,7 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
         <h2 id="download-h">Download</h2>
         <p class="section-note" id="download-note">
           Click the installer for you, or download a copy for a friend.
-          We'll show you what to do with it before the download starts —
-          click again to confirm.
+          Hover any option to preview what to do with it.
         </p>
 
         <div class="downloads" role="group" aria-label="Downloads by platform">
@@ -390,17 +389,6 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
 
       <!-- SETUP — indigo -->
       <section id="setup" class="card card--indigo" aria-labelledby="setup-h">
-        <svg
-          class="section-ornament"
-          viewBox="0 0 48 48"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.5"
-          aria-hidden="true"
-        >
-          <rect x="8" y="8" width="32" height="32" />
-          <rect x="16" y="16" width="16" height="16" transform="rotate(45 24 24)" />
-        </svg>
         <div class="setup-head">
           <h2 id="setup-h">Setup</h2>
           <div class="setup-picker">
@@ -496,12 +484,11 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
     </nav>
 
     <script is:inline>
-      // OS detection + two-click download UX. First click on a download
-      // button arms it: the matching install hint reveals, the Setup
-      // section's platform picker switches to that platform, and the
-      // button label flips to "Click again to download". Second click
-      // proceeds with the navigation. Clicking a different button
-      // re-arms there instead.
+      // OS detection + hover-preview download UX. Each download button
+      // is a regular single-click link. On hover/focus we preview what
+      // that installer would mean: reveal the matching install hint
+      // and switch the Setup section's platform picker to that
+      // platform. Click just downloads.
       (function () {
         var ua = navigator.userAgent || "";
         var platform = navigator.platform || "";
@@ -562,44 +549,18 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
           });
         }
 
-        // Two-click arming.
-        var armed = null;
-        function disarm(btn) {
-          if (!btn) return;
-          btn.classList.remove("btn--armed");
-          var meta = btn.querySelector(".btn-meta");
-          if (meta && meta.dataset.original) {
-            meta.textContent = meta.dataset.original;
-            delete meta.dataset.original;
-          }
-        }
-        function arm(btn) {
-          if (armed && armed !== btn) disarm(armed);
-          btn.classList.add("btn--armed");
-          var meta = btn.querySelector(".btn-meta");
-          if (meta && !meta.dataset.original) {
-            meta.dataset.original = meta.textContent || "";
-            meta.textContent = "click again to download";
-          }
-          armed = btn;
-        }
-
         var btns = document.querySelectorAll(
           ".btn[data-installer], [data-read-my-mind]",
         );
         btns.forEach(function (btn) {
-          btn.addEventListener("click", function (e) {
+          function preview() {
             var key = btn.getAttribute("data-installer");
             if (!key) return;
-            if (armed === btn) {
-              // Already armed — let the navigation proceed.
-              return;
-            }
-            e.preventDefault();
-            arm(btn);
             showHint(key);
             setSetupPlatform(installerToPlatform(key));
-          });
+          }
+          btn.addEventListener("pointerenter", preview);
+          btn.addEventListener("focus", preview);
         });
       })();
 
