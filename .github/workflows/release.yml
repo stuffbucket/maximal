@@ -3,6 +3,11 @@ name: Release
 permissions:
   id-token: write
   contents: write
+  # Needed by `dispatch-installers` so it can fire installers.yml.
+  # GitHub's anti-loop guard suppresses `release: published` triggers
+  # when the release is created via GITHUB_TOKEN, so we have to
+  # dispatch installers.yml explicitly.
+  actions: write
 
 on:
   push:
@@ -381,3 +386,26 @@ jobs:
           fi
           git commit -m "maximal: bump to $TAG"
           git push origin HEAD:main
+
+  # Fire installers.yml to assemble the .app.zip / .msi / install.ps1
+  # and re-attach them to this release. The natural `release: published`
+  # trigger on installers.yml does not fire here because GitHub
+  # suppresses workflow triggers for events created via GITHUB_TOKEN.
+  dispatch-installers:
+    needs: binaries
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Trigger installers.yml
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh workflow run installers.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            --field "tag=$TAG"
+          echo "Dispatched installers.yml for $TAG"
