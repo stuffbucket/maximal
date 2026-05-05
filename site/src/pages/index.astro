@@ -373,15 +373,34 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
               <strong>v1 binaries are unsigned.</strong> Your OS will warn
               you the first time you open them.
             </p>
-            <p>
+            <p data-installer="mac-app">
               <strong>macOS:</strong> right-click <code>copilot-api.app</code>
               and choose <strong>Open</strong>, then confirm the Gatekeeper
               prompt. One time per install.
             </p>
-            <p>
+            <p data-installer="source-mac" hidden>
+              <strong>macOS:</strong> macOS quarantines downloaded
+              binaries. Either approve once in <strong
+                >System Settings → Privacy &amp; Security → Open Anyway</strong
+              >, or strip the flag from a Terminal:
+              <code>xattr -dr com.apple.quarantine ./copilot-api</code>.
+            </p>
+            <p data-installer="windows-msi" hidden>
               <strong>Windows:</strong> SmartScreen will say "Windows
-              protected your PC". Click <strong>More info</strong>, then
-              <strong>Run anyway</strong>.
+              protected your PC" on the <code>.msi</code>. Click
+              <strong>More info</strong>, then <strong>Run anyway</strong>.
+            </p>
+            <p data-installer="windows-ps1" hidden>
+              <strong>Windows:</strong> SmartScreen will flag the
+              <code>.ps1</code>. Click <strong>More info → Run anyway</strong>.
+              If PowerShell's execution policy rejects the script, run it
+              with <code>powershell -ExecutionPolicy Bypass -File install.ps1</code>.
+            </p>
+            <p data-installer="source-win" hidden>
+              <strong>Windows:</strong> SmartScreen will block the first
+              run of <code>copilot-api.exe</code>. Right-click →
+              <strong>Properties → Unblock</strong>, or click
+              <strong>More info → Run anyway</strong>.
             </p>
           </div>
         </div>
@@ -389,29 +408,46 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
 
       <!-- SETUP — indigo -->
       <section id="setup" class="card card--indigo" aria-labelledby="setup-h">
-        <div class="setup-head">
-          <h2 id="setup-h">Setup</h2>
-          <div class="setup-picker">
-            <label for="setup-platform">Setting up on</label>
-            <select id="setup-platform" data-setup-platform>
-              <option value="mac">macOS</option>
-              <option value="windows">Windows</option>
-            </select>
-          </div>
+        <h2 id="setup-h">Setup</h2>
+        <div class="setup-picker">
+          <label for="setup-installer">Setting up on</label>
+          <select id="setup-installer" data-setup-installer>
+            <option value="mac-app">macOS — App bundle (.app.zip)</option>
+            <option value="source-mac">macOS — CLI tarball (.tar.gz)</option>
+            <option value="windows-msi">Windows — installer (.msi)</option>
+            <option value="windows-ps1">Windows — PowerShell installer</option>
+            <option value="source-win">Windows — CLI zip</option>
+          </select>
         </div>
         <ol class="steps">
           <li>
             <strong>Install.</strong>
-            <span data-platform="mac">
+            <span data-installer="mac-app">
               Open the <code>.app.zip</code> from your Downloads folder
               and drag <code>copilot-api.app</code> into
-              <code>/Applications</code>. (For the CLI tarball: extract
-              and run the binary in place.)
+              <code>/Applications</code>.
             </span>
-            <span data-platform="windows" hidden>
+            <span data-installer="source-mac" hidden>
+              Extract the tarball:
+              <code>tar -xzf {sourceTarFile}</code>. The binary lives at
+              <code>./copilot-api/copilot-api</code> — run it from there
+              or symlink it onto your <code>PATH</code>.
+            </span>
+            <span data-installer="windows-msi" hidden>
               Double-click the <code>.msi</code> and step through the
-              installer. (For the PowerShell or <code>.zip</code>
-              variants: see the install hints in the Download section.)
+              installer. The installer adds <code>copilot-api</code> to
+              your <code>PATH</code>.
+            </span>
+            <span data-installer="windows-ps1" hidden>
+              Right-click <code>install.ps1</code> and choose
+              <em>Run with PowerShell</em>, or use the one-liner shown in
+              the Download section above to install in one step.
+            </span>
+            <span data-installer="source-win" hidden>
+              Extract the <code>.zip</code>. The binary is
+              <code>copilot-api.exe</code> inside the extracted folder —
+              run it from there, or add the folder to your
+              <code>PATH</code>.
             </span>
           </li>
           <li>
@@ -426,7 +462,7 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
               terminal step.
             </span>
             <div class="copyable copyable--block">
-              <pre><code>copilot-api setup</code></pre>
+              <pre><code data-setup-cmd>copilot-api setup</code></pre>
               <button class="copy-btn" type="button" aria-label="Copy command">
                 <svg
                   class="copy-btn__icon"
@@ -484,11 +520,10 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
     </nav>
 
     <script is:inline>
-      // OS detection + click-to-update UX. Download buttons are plain
-      // single-click links. On click the download fires AND the
-      // matching install hint reveals + the Setup picker syncs to
-      // that installer's platform. No hover behavior — too distracting
-      // when scanning the list.
+      // OS detection + installer-keyed UX. Download buttons are plain
+      // single-click links. On click, the install hint, Setup picker,
+      // Setup steps, Authenticate command, and First-launch warning
+      // all switch to the variant matching the clicked download.
       (function () {
         var ua = navigator.userAgent || "";
         var platform = navigator.platform || "";
@@ -504,6 +539,14 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
           return key.indexOf("mac") !== -1 ? "mac" : "windows";
         }
 
+        var setupCmds = {
+          "mac-app": "copilot-api setup",
+          "source-mac": "./copilot-api/copilot-api setup",
+          "windows-msi": "copilot-api setup",
+          "windows-ps1": "copilot-api setup",
+          "source-win": ".\\copilot-api.exe setup",
+        };
+
         // Wire "Read my mind" to the detected primary installer.
         var rmm = document.querySelector("[data-read-my-mind]");
         var rmmMeta = document.querySelector("[data-read-my-mind-meta]");
@@ -518,34 +561,47 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
               defaultPlatform === "windows" ? "Windows" : "macOS";
           }
         }
-        // Subtle highlight on the OS-detected primary (does not arm).
+        // Subtle highlight on the OS-detected primary.
         if (primary) primary.classList.add("btn--primary");
 
-        // Reveal the install hint matching the detected OS so the
-        // first thing the user sees already explains what they're
-        // about to download.
-        function showHint(key) {
-          var hints = document.querySelectorAll("[data-installer-hint]");
-          hints.forEach(function (h) {
-            h.hidden = h.getAttribute("data-installer-hint") !== key;
-          });
-        }
-        showHint(defaultInstaller);
+        var setupSelect = document.querySelector("[data-setup-installer]");
+        var setupCmdEl = document.querySelector("[data-setup-cmd]");
 
-        // Setup-section platform sync.
-        var setupSelect = document.querySelector("[data-setup-platform]");
-        function setSetupPlatform(plat) {
-          if (setupSelect && setupSelect.value !== plat)
-            setupSelect.value = plat;
-          var els = document.querySelectorAll("#setup [data-platform]");
-          els.forEach(function (el) {
+        function selectVariant(installer) {
+          if (!installer) return;
+          var plat = installerToPlatform(installer);
+
+          // Per-installer install hints in the Download section.
+          document
+            .querySelectorAll("[data-installer-hint]")
+            .forEach(function (h) {
+              h.hidden = h.getAttribute("data-installer-hint") !== installer;
+            });
+          // Per-installer content (Setup install step + warning text).
+          document.querySelectorAll("[data-installer]").forEach(function (el) {
+            // Don't touch download buttons — they keep their own
+            // installer attr regardless of selection.
+            if (el.classList.contains("btn")) return;
+            el.hidden = el.getAttribute("data-installer") !== installer;
+          });
+          // Per-platform content (Authenticate phrasing).
+          document.querySelectorAll("[data-platform]").forEach(function (el) {
             el.hidden = el.getAttribute("data-platform") !== plat;
           });
+          // Authenticate command.
+          if (setupCmdEl)
+            setupCmdEl.textContent =
+              setupCmds[installer] || "copilot-api setup";
+          // Sync picker.
+          if (setupSelect && setupSelect.value !== installer)
+            setupSelect.value = installer;
         }
-        setSetupPlatform(defaultPlatform);
+
+        selectVariant(defaultInstaller);
+
         if (setupSelect) {
           setupSelect.addEventListener("change", function () {
-            setSetupPlatform(setupSelect.value);
+            selectVariant(setupSelect.value);
           });
         }
 
@@ -556,8 +612,7 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
           btn.addEventListener("click", function () {
             var key = btn.getAttribute("data-installer");
             if (!key) return;
-            showHint(key);
-            setSetupPlatform(installerToPlatform(key));
+            selectVariant(key);
           });
         });
       })();
