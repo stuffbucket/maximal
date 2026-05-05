@@ -230,6 +230,131 @@ jobs:
             dist-release/maximal-${{ env.TAG }}-darwin-${{ env.ARCH }}.app.zip
             dist-release/maximal-${{ env.TAG }}-darwin-${{ env.ARCH }}.app.zip.sha256
 
+  # Sign + notarize + DMG. Runs on the self-hosted Mac runner that's
+  # already provisioned for stuffbucket/claudeme: a `build.keychain-db`
+  # in the runner user's home with the Developer ID cert imported, and
+  # an inline notarytool flow keyed on APPLE_ID / APPLE_PASSWORD /
+  # APPLE_TEAM_ID secrets.
+  #
+  # Required repo secrets (configure once at
+  # github.com/stuffbucket/maximal/settings/secrets/actions):
+  #   KEYCHAIN_PASSWORD       — unlocks ~/Library/Keychains/build.keychain-db
+  #   DEVELOPER_ID_APPLICATION — full identity string, e.g.
+  #                              "Developer ID Application: Name (TEAMID)"
+  #   APPLE_ID                — Apple ID email used for notarization
+  #   APPLE_PASSWORD          — app-specific password for that Apple ID
+  #   APPLE_TEAM_ID           — the (TEAMID) part of the identity above
+  macos-dmg:
+    needs: macos-app-zip
+    name: macOS .dmg (signed + notarized)
+    runs-on: self-hosted
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      ARCH: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve names
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#v}"
+          APP_ZIP="maximal-${TAG}-darwin-${{ env.ARCH }}.app.zip"
+          DMG="maximal-${TAG}-darwin-${{ env.ARCH }}.dmg"
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "APP_ZIP=${APP_ZIP}" >> "$GITHUB_ENV"
+          echo "DMG=${DMG}"         >> "$GITHUB_ENV"
+
+      - name: Download unsigned .app.zip from release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf dist-input dist-build dist-release
+          mkdir -p dist-input dist-build dist-release
+          gh release download "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "$APP_ZIP" \
+            --dir dist-input
+          (cd dist-build && unzip -q "../dist-input/$APP_ZIP")
+          ls -la dist-build/maximal.app/Contents/MacOS
+
+      - name: Unlock signing keychain
+        run: |
+          set -euo pipefail
+          KC="$HOME/Library/Keychains/build.keychain-db"
+          security unlock-keychain -p "${{ secrets.KEYCHAIN_PASSWORD }}" "$KC"
+          security set-key-partition-list -S apple-tool:,apple: \
+            -s -k "${{ secrets.KEYCHAIN_PASSWORD }}" "$KC"
+          security list-keychains -d user -s "$KC"
+
+      - name: Sign .app
+        env:
+          SIGN_IDENTITY: ${{ secrets.DEVELOPER_ID_APPLICATION }}
+        run: |
+          set -euo pipefail
+          codesign --force --deep --options runtime --timestamp \
+            --entitlements build/macos/maximal.entitlements \
+            --sign "$SIGN_IDENTITY" \
+            dist-build/maximal.app
+          codesign --verify --deep --strict --verbose=2 dist-build/maximal.app
+
+      - name: Stage DMG layout
+        run: |
+          set -euo pipefail
+          STAGE="dist-build/dmg-stage"
+          rm -rf "$STAGE"
+          mkdir -p "$STAGE"
+          cp -R dist-build/maximal.app "$STAGE/"
+          ln -s /Applications "$STAGE/Applications"
+
+      - name: Build + sign DMG
+        env:
+          SIGN_IDENTITY: ${{ secrets.DEVELOPER_ID_APPLICATION }}
+        run: |
+          set -euo pipefail
+          OUT="dist-release/${DMG}"
+          hdiutil create \
+            -volname "Maximal" \
+            -srcfolder dist-build/dmg-stage \
+            -ov -format UDZO \
+            "$OUT"
+          codesign --force --sign "$SIGN_IDENTITY" "$OUT"
+          codesign --verify --verbose=2 "$OUT"
+
+      - name: Notarize DMG
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          xcrun notarytool submit "dist-release/${DMG}" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+
+      - name: Staple ticket
+        run: |
+          set -euo pipefail
+          xcrun stapler staple "dist-release/${DMG}"
+          xcrun stapler validate "dist-release/${DMG}"
+          spctl -a -t open --context context:primary-signature -v "dist-release/${DMG}"
+
+      - name: SHA-256 sidecar
+        run: |
+          set -euo pipefail
+          (cd dist-release && shasum -a 256 "${DMG}" > "${DMG}.sha256")
+          cat "dist-release/${DMG}.sha256"
+
+      - name: Attach DMG to release
+        uses: ./.github/actions/upload-release-asset
+        with:
+          tag: ${{ env.TAG }}
+          files: |
+            dist-release/${{ env.DMG }}
+            dist-release/${{ env.DMG }}.sha256
+
   windows-installer:
     needs: ensure-release
     name: Windows installer (PowerShell)
