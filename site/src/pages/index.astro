@@ -294,9 +294,8 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
           hasRelease && (
             <div class="install-hint" data-installer-hint="windows-ps1" hidden>
               <p class="section-note">
-                <strong>What to do with it:</strong> right-click and{" "}
-                <em>Run with PowerShell</em>, or run this one-liner from
-                an elevated PowerShell prompt instead of downloading:
+                <strong>What to do with it:</strong> copy/paste into a
+                terminal, Claude Code CLI, or Copilot CLI.
               </p>
               <div class="copyable">
                 <code class="ps-cmd">iex (irm {winPs1})</code>
@@ -324,8 +323,8 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
         }
         <div class="install-hint" data-installer-hint="source-mac" hidden>
           <p class="section-note">
-            <strong>What to do with it:</strong> extract the tarball and
-            run the binary directly — no installer, no app bundle.
+            <strong>What to do with it:</strong> copy/paste into a
+            terminal, Claude Code CLI, or Copilot CLI.
           </p>
           <div class="copyable">
             <code class="ps-cmd">tar -xzf {sourceTarFile} && ./maximal --help</code>
@@ -347,8 +346,8 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
         </div>
         <div class="install-hint" data-installer-hint="homebrew" hidden>
           <p class="section-note">
-            <strong>What to do with it:</strong> add the tap, then
-            install. Homebrew handles signing &amp; updates for you.
+            <strong>What to do with it:</strong> copy/paste into a
+            terminal, Claude Code CLI, or Copilot CLI.
           </p>
           <div class="copyable">
             <code class="ps-cmd">brew install stuffbucket/tap/maximal</code>
@@ -367,13 +366,6 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
               <span class="copy-btn__label">Copy</span>
             </button>
           </div>
-          <p class="section-note">
-            That one-liner shorthand expands to
-            <code>brew tap stuffbucket/tap</code> + <code
-              >brew install maximal</code
-            >. After that, <code>brew upgrade maximal</code> keeps you
-            on the latest.
-          </p>
         </div>
         <div class="install-hint" data-installer-hint="source-win" hidden>
           <p class="section-note">
