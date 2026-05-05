@@ -45,9 +45,9 @@ const { uninstall } = await import("./uninstall")
 
 const main = defineCommand({
   meta: {
-    name: "copilot-api",
+    name: "maximal",
     description:
-      "A wrapper around GitHub Copilot API to make it OpenAI compatible, making it usable for other tools.",
+      "Local proxy that exposes GitHub Copilot as OpenAI- and Anthropic-compatible HTTP endpoints.",
   },
   subCommands: {
     auth,

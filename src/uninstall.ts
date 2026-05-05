@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * `copilot-api uninstall` — reverse of `setup`.
+ * `maximal uninstall` — reverse of `setup`.
  *
  * Stops the running proxy (launchd / Windows scheduled task), removes
  * the on-disk binary, and *optionally* purges the user's secrets
@@ -29,7 +29,7 @@ interface RunUninstallOptions {
 }
 
 export async function runUninstall(opts: RunUninstallOptions): Promise<void> {
-  consola.box("copilot-api uninstall")
+  consola.box("maximal uninstall")
 
   // 1. Stop the running proxy (best effort) -------------------------
   consola.info("Step 1/4: Stop the running proxy")
@@ -59,7 +59,7 @@ function stopProxy(): void {
   if (process.platform === "darwin") {
     const r = spawnSync(
       "launchctl",
-      ["bootout", `gui/${process.getuid?.() ?? 0}/com.microsoft.copilot-api`],
+      ["bootout", `gui/${process.getuid?.() ?? 0}/co.stuffbucket.maximal`],
       { encoding: "utf8" },
     )
     if (r.status === 0) {
@@ -73,7 +73,7 @@ function stopProxy(): void {
     return
   }
   if (process.platform === "win32") {
-    const r = spawnSync("schtasks", ["/End", "/TN", "copilot-api"], {
+    const r = spawnSync("schtasks", ["/End", "/TN", "maximal"], {
       encoding: "utf8",
     })
     if (r.status === 0) {
@@ -96,7 +96,7 @@ function removeStartupIntegration(): void {
       os.homedir(),
       "Library",
       "LaunchAgents",
-      "com.microsoft.copilot-api.plist",
+      "co.stuffbucket.maximal.plist",
     )
     if (fs.existsSync(plist)) {
       try {
@@ -111,7 +111,7 @@ function removeStartupIntegration(): void {
     return
   }
   if (process.platform === "win32") {
-    const r = spawnSync("schtasks", ["/Delete", "/TN", "copilot-api", "/F"], {
+    const r = spawnSync("schtasks", ["/Delete", "/TN", "maximal", "/F"], {
       encoding: "utf8",
     })
     if (r.status === 0) {
@@ -139,10 +139,10 @@ interface InstallTarget {
  *  every one we find; users may have copies in multiple places (e.g.
  *  `brew install` + a `.dmg` install both leave a binary on disk).
  *
- *  macOS .dmg install path: `/Applications/copilot-api.app` (the
- *  bundle) plus `~/.local/bin/copilot-api` (copy made by the
+ *  macOS .dmg install path: `/Applications/maximal.app` (the
+ *  bundle) plus `~/.local/bin/maximal` (copy made by the
  *  bundle's first-launch shim). Brew installs at
- *  `/opt/homebrew/bin/copilot-api`. */
+ *  `/opt/homebrew/bin/maximal`. */
 function installTargets(): Array<InstallTarget> {
   const home = os.homedir()
   if (process.platform === "win32") {
@@ -150,12 +150,7 @@ function installTargets(): Array<InstallTarget> {
       process.env.LOCALAPPDATA ?? path.join(home, "AppData", "Local")
     return [
       {
-        path: path.join(
-          localAppData,
-          "Programs",
-          "copilot-api",
-          "copilot-api.exe",
-        ),
+        path: path.join(localAppData, "Programs", "maximal", "maximal.exe"),
       },
       // The PowerShell installer's parent dir gets removed when it
       // becomes empty; we don't recurse into it ourselves to avoid
@@ -163,10 +158,10 @@ function installTargets(): Array<InstallTarget> {
     ]
   }
   return [
-    { path: path.join(home, ".local", "bin", "copilot-api") },
-    { path: "/usr/local/bin/copilot-api" },
-    { path: "/opt/homebrew/bin/copilot-api" },
-    { path: "/Applications/copilot-api.app", recursive: true },
+    { path: path.join(home, ".local", "bin", "maximal") },
+    { path: "/usr/local/bin/maximal" },
+    { path: "/opt/homebrew/bin/maximal" },
+    { path: "/Applications/maximal.app", recursive: true },
   ]
 }
 
@@ -285,7 +280,7 @@ export const uninstall = defineCommand({
       type: "boolean",
       default: false,
       description:
-        "Also remove ~/.local/share/copilot-api/secrets and the GitHub token",
+        "Also remove ~/.local/share/maximal/secrets and the GitHub token",
     },
     "revert-claude": {
       type: "boolean",

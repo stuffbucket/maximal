@@ -12,7 +12,7 @@
  * Steps:
  *   1. `gh release download <tag> --pattern '*-darwin-arm64.tar.gz*'`
  *   2. Verify the SHA-256 against the sidecar file.
- *   3. Assemble `copilot-api.app` from build/macos/app-template + the
+ *   3. Assemble `maximal.app` from build/macos/app-template + the
  *      unpacked binary (same logic the `macos-app-zip` CI job runs).
  *   4. `npx create-dmg ...` to build the polished DMG.
  *   5. Sidecar `.sha256`. Optional `--upload` attaches both to the
@@ -138,9 +138,9 @@ function assembleApp(
   run("sed", ["-i", "", "-e", `s/__VERSION__/${version}/g`, plist])
 
   // Drop the placeholder, copy the real binary.
-  rmrf(path.join(outApp, "Contents/MacOS/copilot-api.placeholder"))
-  fs.copyFileSync(binarySrc, path.join(outApp, "Contents/MacOS/copilot-api"))
-  fs.chmodSync(path.join(outApp, "Contents/MacOS/copilot-api"), 0o755)
+  rmrf(path.join(outApp, "Contents/MacOS/maximal.placeholder"))
+  fs.copyFileSync(binarySrc, path.join(outApp, "Contents/MacOS/maximal"))
+  fs.chmodSync(path.join(outApp, "Contents/MacOS/maximal"), 0o755)
 
   // Real icon if a designer dropped one alongside the placeholder.
   rmrf(path.join(outApp, "Contents/Resources/AppIcon.icns.placeholder"))
@@ -156,7 +156,7 @@ async function main(): Promise<number> {
   const repo = args.repo ?? detectRepo()
   const version = args.tag.replace(/^v/, "")
   const arch = "arm64"
-  const tarball = `copilot-api-${args.tag}-darwin-${arch}.tar.gz`
+  const tarball = `maximal-${args.tag}-darwin-${arch}.tar.gz`
   const sha256File = `${tarball}.sha256`
 
   const work = "dist-build/dmg"
@@ -193,12 +193,12 @@ async function main(): Promise<number> {
   let binarySrc: string | undefined
   for (const entry of fs.readdirSync(unpackedRoot, { withFileTypes: true })) {
     const candidate = path.join(unpackedRoot, entry.name)
-    if (entry.isFile() && entry.name === "copilot-api") {
+    if (entry.isFile() && entry.name === "maximal") {
       binarySrc = candidate
       break
     }
     if (entry.isDirectory()) {
-      const inner = path.join(candidate, "copilot-api")
+      const inner = path.join(candidate, "maximal")
       if (fs.existsSync(inner)) {
         binarySrc = inner
         break
@@ -206,11 +206,11 @@ async function main(): Promise<number> {
     }
   }
   if (!binarySrc) {
-    throw new Error(`copilot-api binary not found in ${unpackedRoot}`)
+    throw new Error(`maximal binary not found in ${unpackedRoot}`)
   }
 
-  console.log("==> Assembling copilot-api.app")
-  const appOut = path.join(work, "copilot-api.app")
+  console.log("==> Assembling maximal.app")
+  const appOut = path.join(work, "maximal.app")
   assembleApp(binarySrc, "build/macos/app-template", appOut, version)
 
   console.log("==> Building DMG via create-dmg")
@@ -226,7 +226,7 @@ async function main(): Promise<number> {
   // first open; users follow the right-click → Open instructions on
   // the Pages site.
   createDmgArgs.push("--identity=")
-  createDmgArgs.push(`--dmg-title=copilot-api ${version}`)
+  createDmgArgs.push(`--dmg-title=maximal ${version}`)
   // create-dmg exits non-zero if codesign isn't set up but still
   // produces the .dmg. Tolerate non-zero by checking for output.
   const r = spawnSync("npx", createDmgArgs, { stdio: "inherit" })
@@ -236,9 +236,9 @@ async function main(): Promise<number> {
     )
   }
 
-  // create-dmg names the file `copilot-api ${version}.dmg` (with a
+  // create-dmg names the file `maximal ${version}.dmg` (with a
   // space). Rename to our canonical artifact name.
-  const desired = `copilot-api-${args.tag}-darwin-${arch}.dmg`
+  const desired = `maximal-${args.tag}-darwin-${arch}.dmg`
   const produced = fs
     .readdirSync(release)
     .find((f) => f.endsWith(".dmg") && f !== desired)

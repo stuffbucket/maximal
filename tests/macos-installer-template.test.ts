@@ -27,7 +27,7 @@ const INFO_PLIST = path.join(TPL, "Contents/Info.plist")
 const FIRST_LAUNCH = path.join(TPL, "Contents/MacOS/first-launch")
 const LAUNCHD_PLIST = path.join(
   TPL,
-  "Contents/Resources/com.microsoft.copilot-api.plist",
+  "Contents/Resources/co.stuffbucket.maximal.plist",
 )
 
 function read(p: string): string {
@@ -39,7 +39,7 @@ describe("macos installer templates", () => {
     const xml = read(INFO_PLIST)
     expect(xml).toContain("<?xml")
     expect(xml).toContain("<key>CFBundleIdentifier</key>")
-    expect(xml).toContain("<string>com.microsoft.copilot-api</string>")
+    expect(xml).toContain("<string>co.stuffbucket.maximal</string>")
     expect(xml).toContain("<key>CFBundleExecutable</key>")
     expect(xml).toContain("<string>first-launch</string>")
     expect(xml).toContain("<key>LSUIElement</key>")
@@ -72,12 +72,12 @@ describe("macos installer templates", () => {
     const xml = read(LAUNCHD_PLIST)
     expect(xml).toContain("__HOME__")
     expect(xml).toContain("__INSTALL_BIN__")
-    expect(xml).toContain("<string>com.microsoft.copilot-api</string>")
+    expect(xml).toContain("<string>co.stuffbucket.maximal</string>")
   })
 
   it("placeholder files exist where the README claims", () => {
     const placeholders = [
-      path.join(TPL, "Contents/MacOS/copilot-api.placeholder"),
+      path.join(TPL, "Contents/MacOS/maximal.placeholder"),
       path.join(TPL, "Contents/Resources/AppIcon.icns.placeholder"),
       path.join(ROOT, "build/macos/dmg-bg.png.placeholder"),
     ]

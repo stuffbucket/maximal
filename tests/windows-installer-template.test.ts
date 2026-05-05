@@ -6,13 +6,13 @@
  * convention Stream A produces, plus the contract points the Pages
  * site (B4) and the setup wizard depend on:
  *
- *   - the script downloads `copilot-api-<TAG>-windows-x64.zip` (Stream
+ *   - the script downloads `maximal-<TAG>-windows-x64.zip` (Stream
  *     A's canonical name) and a sidecar `.sha256`
  *   - it verifies the SHA before unpacking
- *   - it installs under %LocalAppData%\Programs\copilot-api
- *   - it invokes `copilot-api setup --unattended --skip-auth` so the
+ *   - it installs under %LocalAppData%\Programs\maximal
+ *   - it invokes `maximal setup --unattended --skip-auth` so the
  *     installer hook from src/setup.ts fires
- *   - the at-logon scheduled task is named `copilot-api`
+ *   - the at-logon scheduled task is named `maximal`
  */
 
 import { describe, expect, it } from "bun:test"
@@ -40,7 +40,7 @@ describe("windows installer template", () => {
 
   it("downloads the canonical Stream A artifact name", () => {
     const ps = read(SCRIPT)
-    expect(ps).toContain("copilot-api-$Version-windows-x64.zip")
+    expect(ps).toContain("maximal-$Version-windows-x64.zip")
     expect(ps).toContain("$zipName.sha256")
   })
 
@@ -53,15 +53,15 @@ describe("windows installer template", () => {
     expect(verifyIdx).toBeLessThan(expandIdx)
   })
 
-  it(String.raw`installs under %LocalAppData%\Programs\copilot-api`, () => {
+  it(String.raw`installs under %LocalAppData%\Programs\maximal`, () => {
     const ps = read(SCRIPT)
     expect(ps).toContain("$env:LOCALAPPDATA")
-    expect(ps).toContain(String.raw`Programs\copilot-api`)
+    expect(ps).toContain(String.raw`Programs\maximal`)
   })
 
-  it("registers an at-logon scheduled task named copilot-api", () => {
+  it("registers an at-logon scheduled task named maximal", () => {
     const ps = read(SCRIPT)
-    expect(ps).toContain("$TaskName     = 'copilot-api'")
+    expect(ps).toContain("$TaskName     = 'maximal'")
     expect(ps).toContain("New-ScheduledTaskTrigger -AtLogOn")
     expect(ps).toContain("Register-ScheduledTask")
   })

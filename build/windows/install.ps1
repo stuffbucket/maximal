@@ -1,10 +1,10 @@
-# copilot-api Windows installer (B3a).
+# maximal Windows installer (B3a).
 #
 # Self-contained PowerShell installer. Downloads the latest signed
 # release zip from GitHub Releases (or a specific tag with -Version),
-# verifies SHA-256, unpacks under %LocalAppData%\Programs\copilot-api,
+# verifies SHA-256, unpacks under %LocalAppData%\Programs\maximal,
 # adds that directory to the user's PATH, registers an at-logon
-# scheduled task that starts the proxy, and runs `copilot-api setup
+# scheduled task that starts the proxy, and runs `maximal setup
 # --unattended --skip-auth` for the Claude Desktop config touches.
 #
 # v1 ships unsigned (A4 deferred per parent PRD). On first launch
@@ -13,11 +13,11 @@
 #
 # Usage:
 #   # Latest:
-#   iex (irm https://<internal>/copilot-api/install.ps1)
+#   iex (irm https://<internal>/maximal/install.ps1)
 #   # Specific version:
 #   $env:COPILOT_API_VERSION = 'v0.2.0'; iex (irm ...)
 #   # Uninstall path (after install):
-#   copilot-api uninstall
+#   maximal uninstall
 #
 # Spec: docs/spec/internal-distribution-stream-b.md §B3a.
 
@@ -39,10 +39,10 @@ if (-not $Repo) {
   $Repo = 'stuffbucket/maximal'
 }
 
-$InstallDir   = Join-Path $env:LOCALAPPDATA 'Programs\copilot-api'
-$BinPath      = Join-Path $InstallDir 'copilot-api.exe'
-$TaskName     = 'copilot-api'
-$DownloadDir  = Join-Path $env:TEMP "copilot-api-install-$(Get-Random)"
+$InstallDir   = Join-Path $env:LOCALAPPDATA 'Programs\maximal'
+$BinPath      = Join-Path $InstallDir 'maximal.exe'
+$TaskName     = 'maximal'
+$DownloadDir  = Join-Path $env:TEMP "maximal-install-$(Get-Random)"
 
 function Resolve-LatestVersion {
   param([string]$Repo)
@@ -109,7 +109,7 @@ function Register-StartupTask {
     -Action $action `
     -Trigger $trigger `
     -Settings $settings `
-    -Description 'Run copilot-api at user logon' `
+    -Description 'Run maximal at user logon' `
     | Out-Null
   Write-Host "  ✓ Registered scheduled task '$TaskName' (triggers at logon)" -ForegroundColor Green
 }
@@ -121,7 +121,7 @@ function Register-StartupTask {
 if (-not $Version) { $Version = Resolve-LatestVersion -Repo $Repo }
 if (-not $Version.StartsWith('v')) { $Version = "v$Version" }
 
-Write-Host "Installing copilot-api $Version from $Repo" -ForegroundColor Cyan
+Write-Host "Installing maximal $Version from $Repo" -ForegroundColor Cyan
 
 if ((Test-Path $BinPath) -and -not $Force) {
   Write-Host "  Note: existing install at $BinPath will be overwritten." -ForegroundColor Yellow
@@ -129,7 +129,7 @@ if ((Test-Path $BinPath) -and -not $Force) {
 
 # 1. Download zip + sha256 ───────────────────────────────────────────
 New-Item -ItemType Directory -Force -Path $DownloadDir | Out-Null
-$zipName = "copilot-api-$Version-windows-x64.zip"
+$zipName = "maximal-$Version-windows-x64.zip"
 $shaName = "$zipName.sha256"
 $zipUrl  = "https://github.com/$Repo/releases/download/$Version/$zipName"
 $shaUrl  = "https://github.com/$Repo/releases/download/$Version/$shaName"
@@ -147,7 +147,7 @@ if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
   Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 }
 # Best-effort process termination if a previous run is still up.
-Get-Process -Name 'copilot-api' -ErrorAction SilentlyContinue | ForEach-Object {
+Get-Process -Name 'maximal' -ErrorAction SilentlyContinue | ForEach-Object {
   $_ | Stop-Process -Force -ErrorAction SilentlyContinue
 }
 
@@ -180,7 +180,7 @@ Remove-Item -LiteralPath $DownloadDir -Recurse -Force -ErrorAction SilentlyConti
 
 Write-Host ''
 Write-Host 'Install complete.' -ForegroundColor Green
-Write-Host '  Run `copilot-api setup` once from a NEW PowerShell window'
+Write-Host '  Run `maximal setup` once from a NEW PowerShell window'
 Write-Host '  to authenticate with GitHub (the device-code flow needs an'
 Write-Host '  interactive shell, which this installer does not provide).'
 Write-Host '  PATH is updated for the next shell; current shell already'

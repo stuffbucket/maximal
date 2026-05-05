@@ -1,10 +1,10 @@
 #!/bin/bash
-# Self-installer for copilot-api.app. Runs every time the user
+# Self-installer for maximal.app. Runs every time the user
 # double-clicks the .app from /Applications.
 #
 # Behavior is idempotent — re-launches just refresh the binary and
 # the launchd agent. The .app stays in /Applications; this shim
-# copies the binary out to ~/.local/bin/copilot-api and registers
+# copies the binary out to ~/.local/bin/maximal and registers
 # the launchd plist so the proxy starts on login.
 #
 # Spec: docs/spec/internal-distribution-stream-b.md §7.
@@ -12,18 +12,18 @@
 set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-BIN_SRC="$APP_DIR/MacOS/copilot-api"
-PLIST_SRC="$APP_DIR/Resources/com.microsoft.copilot-api.plist"
+BIN_SRC="$APP_DIR/MacOS/maximal"
+PLIST_SRC="$APP_DIR/Resources/co.stuffbucket.maximal.plist"
 
-INSTALL_BIN="$HOME/.local/bin/copilot-api"
-INSTALL_PLIST="$HOME/Library/LaunchAgents/com.microsoft.copilot-api.plist"
+INSTALL_BIN="$HOME/.local/bin/maximal"
+INSTALL_PLIST="$HOME/Library/LaunchAgents/co.stuffbucket.maximal.plist"
 
-LABEL="com.microsoft.copilot-api"
+LABEL="co.stuffbucket.maximal"
 DOMAIN="gui/$(id -u)"
 
 if [ ! -x "$BIN_SRC" ]; then
   /usr/bin/osascript -e \
-    "display alert \"copilot-api install failed\" message \"Bundled binary missing at $BIN_SRC. Reinstall the .app from the DMG.\""
+    "display alert \"maximal install failed\" message \"Bundled binary missing at $BIN_SRC. Reinstall the .app from the DMG.\""
   exit 1
 fi
 
@@ -44,20 +44,19 @@ mv -f "$TMP_PLIST" "$INSTALL_PLIST"
 
 # Make sure the log dir referenced in the plist exists, otherwise
 # launchd will refuse to bootstrap.
-mkdir -p "$HOME/Library/Logs/copilot-api"
+mkdir -p "$HOME/Library/Logs/maximal"
 
 # (Re)load the launch agent. bootout fails if the agent isn't loaded;
 # swallow that case — the goal is "loaded with current plist."
 launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
 launchctl bootstrap "$DOMAIN" "$INSTALL_PLIST"
 
-# Run B5 in unattended mode for the Claude Desktop config touches.
-# --skip-auth: the device-code flow needs an interactive shell, which
-# we don't have here. The user runs `copilot-api setup` from a
-# terminal once after install.
+# Run B5 in unattended mode. --skip-auth: the device-code flow needs
+# an interactive shell, which we don't have here. The user runs
+# `maximal setup` from a terminal once after install.
 "$INSTALL_BIN" setup --unattended --skip-auth || true
 
 # Notify and exit. The launchd agent is now running the actual proxy.
 /usr/bin/osascript -e \
-  "display notification \"Run \\\"copilot-api setup\\\" once from Terminal to authenticate with GitHub.\" with title \"copilot-api installed\""
+  "display notification \"Run \\\"maximal setup\\\" once from Terminal to authenticate with GitHub.\" with title \"maximal installed\""
 exit 0

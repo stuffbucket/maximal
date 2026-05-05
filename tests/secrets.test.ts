@@ -5,10 +5,7 @@ import path from "node:path"
 
 import { readSecret } from "~/lib/secrets"
 
-const TMP_ROOT = path.join(
-  os.tmpdir(),
-  `copilot-api-secrets-test-${Date.now()}`,
-)
+const TMP_ROOT = path.join(os.tmpdir(), `maximal-secrets-test-${Date.now()}`)
 let secretsDir: string
 
 beforeEach(() => {

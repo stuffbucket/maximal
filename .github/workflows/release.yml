@@ -120,8 +120,8 @@ jobs:
   # rollout; flip the gate when notarization is unblocked.
   #
   # Contract (do not change without coordinating with Stream B):
-  #   <release>/copilot-api-v<version>-darwin-arm64.tar.gz   # Apple Silicon
-  #   <release>/copilot-api-v<version>-windows-x64.zip
+  #   <release>/maximal-v<version>-darwin-arm64.tar.gz   # Apple Silicon
+  #   <release>/maximal-v<version>-windows-x64.zip
   #   <each>.sha256
   #   SHA256SUMS (aggregated, attached separately)
   #
@@ -161,7 +161,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist-bin
-          OUT="dist-bin/copilot-api"
+          OUT="dist-bin/maximal"
           if [[ "${{ matrix.artifact }}" == windows-* ]]; then OUT="${OUT}.exe"; fi
           bun build --compile --minify --sourcemap --target=${{ matrix.target }} src/main.ts --outfile "$OUT"
 
@@ -174,7 +174,7 @@ jobs:
           MACOS_DEVELOPER_ID: ${{ secrets.MACOS_DEVELOPER_ID }}
         run: |
           codesign --force --options runtime --timestamp \
-            --sign "$MACOS_DEVELOPER_ID" dist-bin/copilot-api
+            --sign "$MACOS_DEVELOPER_ID" dist-bin/maximal
 
       - name: Notarize (macOS) [DEFERRED A4]
         if: false
@@ -183,11 +183,11 @@ jobs:
           AC_PASSWORD: ${{ secrets.AC_PASSWORD }}
           AC_TEAM_ID:  ${{ secrets.AC_TEAM_ID }}
         run: |
-          ditto -c -k --keepParent dist-bin/copilot-api dist-bin/copilot-api.zip
-          xcrun notarytool submit dist-bin/copilot-api.zip \
+          ditto -c -k --keepParent dist-bin/maximal dist-bin/maximal.zip
+          xcrun notarytool submit dist-bin/maximal.zip \
             --apple-id "$AC_USERNAME" --password "$AC_PASSWORD" --team-id "$AC_TEAM_ID" \
             --wait
-          rm -f dist-bin/copilot-api.zip
+          rm -f dist-bin/maximal.zip
 
       # Windows Authenticode signing — DEFERRED. v1 ships unsigned.
       - name: Sign (Windows) [DEFERRED A4]
@@ -196,20 +196,20 @@ jobs:
         run: |
           # Replace with internal signing-service invocation once A4 is wired.
           # Example using signtool with a cert file (cert handling TBD):
-          # signtool sign /tr http://timestamp.digicert.com /td sha256 /fd sha256 /a dist-bin\copilot-api.exe
+          # signtool sign /tr http://timestamp.digicert.com /td sha256 /fd sha256 /a dist-bin\maximal.exe
           Write-Host "Signing stub — replace with internal signing service"
 
       - name: Package
         shell: bash
         run: |
           VERSION="${{ steps.ver.outputs.version }}"
-          BASE="copilot-api-v${VERSION}-${{ matrix.artifact }}"
+          BASE="maximal-v${VERSION}-${{ matrix.artifact }}"
           mkdir -p dist-release
           cd dist-bin
           if [[ "${{ matrix.ext }}" == "zip" ]]; then
-            7z a "../dist-release/${BASE}.zip" copilot-api.exe
+            7z a "../dist-release/${BASE}.zip" maximal.exe
           else
-            tar -czf "../dist-release/${BASE}.tar.gz" copilot-api
+            tar -czf "../dist-release/${BASE}.tar.gz" maximal
           fi
           cd ../dist-release
           if command -v shasum >/dev/null 2>&1; then
@@ -223,8 +223,8 @@ jobs:
         with:
           tag: ${{ github.ref_name }}
           files: |
-            dist-release/copilot-api-v${{ steps.ver.outputs.version }}-${{ matrix.artifact }}.${{ matrix.ext }}
-            dist-release/copilot-api-v${{ steps.ver.outputs.version }}-${{ matrix.artifact }}.${{ matrix.ext }}.sha256
+            dist-release/maximal-v${{ steps.ver.outputs.version }}-${{ matrix.artifact }}.${{ matrix.ext }}
+            dist-release/maximal-v${{ steps.ver.outputs.version }}-${{ matrix.artifact }}.${{ matrix.ext }}.sha256
 
   # Aggregate SHA256SUMS file (single source of truth for installers
   # that want one round-trip rather than three .sha256 fetches).
@@ -261,7 +261,7 @@ jobs:
           files: SHA256SUMS
 
   # A6: smoke test on a clean image. Downloads the windows-x64 artifact,
-  # unpacks, runs `copilot-api debug --json`, asserts the schema keys.
+  # unpacks, runs `maximal debug --json`, asserts the schema keys.
   # Catches static-link / missing-dep bugs the build alone misses.
   #
   # Public-repo policy: no macOS runners. We cross-compile darwin
@@ -270,7 +270,7 @@ jobs:
   #   - First user of each release validates via Homebrew install on
   #     a real Mac; B1's `service do` block fails fast on a broken
   #     binary.
-  #   - Pre-tag, run `copilot-api debug --json` once on a developer
+  #   - Pre-tag, run `maximal debug --json` once on a developer
   #     Mac.
   # Same source tree + same Bun toolchain produces all three targets,
   # so a successful Windows smoke is decent transitive evidence.
@@ -292,7 +292,7 @@ jobs:
         run: |
           gh release download "${{ github.ref_name }}" \
             --repo "${{ github.repository }}" \
-            --pattern "copilot-api-v${{ steps.ver.outputs.version }}-windows-x64.zip"
+            --pattern "maximal-v${{ steps.ver.outputs.version }}-windows-x64.zip"
 
       - name: Unpack
         shell: pwsh
@@ -303,7 +303,7 @@ jobs:
       - name: Smoke check
         shell: pwsh
         run: |
-          .\copilot-api.exe debug --json | Out-File -FilePath debug.json -Encoding utf8
+          .\maximal.exe debug --json | Out-File -FilePath debug.json -Encoding utf8
           Get-Content debug.json
           $j = Get-Content debug.json | ConvertFrom-Json
           foreach ($k in @('version','git','runtime','config','secrets','executor')) {

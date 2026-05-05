@@ -12,16 +12,16 @@
   <string>first-launch</string>
 
   <key>CFBundleIdentifier</key>
-  <string>com.microsoft.copilot-api</string>
+  <string>co.stuffbucket.maximal</string>
 
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
 
   <key>CFBundleName</key>
-  <string>copilot-api</string>
+  <string>maximal</string>
 
   <key>CFBundleDisplayName</key>
-  <string>copilot-api</string>
+  <string>maximal</string>
 
   <key>CFBundlePackageType</key>
   <string>APPL</string>

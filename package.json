@@ -1,24 +1,25 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
-  "name": "@jeffreycao/copilot-api",
-  "version": "1.9.4",
-  "description": "Turn GitHub Copilot into OpenAI/Anthropic API compatible server. Usable with Claude Code Or Codex Or Opencode!",
+  "name": "@stuffbucket/maximal",
+  "version": "0.1.0",
+  "description": "Local proxy that exposes GitHub Copilot as OpenAI- and Anthropic-compatible HTTP endpoints.",
   "keywords": [
     "proxy",
     "github-copilot",
-    "openai-compatible"
+    "openai-compatible",
+    "anthropic-compatible"
   ],
-  "homepage": "https://github.com/caozhiyuan/copilot-api",
-  "bugs": "https://github.com/caozhiyuan/copilot-api/issues",
+  "homepage": "https://github.com/stuffbucket/maximal",
+  "bugs": "https://github.com/stuffbucket/maximal/issues",
   "repository": {
     "type": "git",
-    "url": "https://github.com/caozhiyuan/copilot-api"
+    "url": "https://github.com/stuffbucket/maximal"
   },
   "license": "MIT",
-  "author": "caozhiyuan",
+  "author": "stuffbucket",
   "type": "module",
   "bin": {
-    "copilot-api": "./dist/main.js"
+    "maximal": "./dist/main.js"
   },
   "files": [
     "dist"

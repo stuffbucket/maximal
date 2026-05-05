@@ -1,15 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  launchd agent for copilot-api.
+  launchd agent for maximal.
 
   Loaded by `Contents/MacOS/first-launch` after the .app is dragged
   to /Applications and double-clicked. KeepAlive bounces the proxy
   on crash; RunAtLoad starts it at login.
 
-  Logs go to ~/Library/Logs/copilot-api/. The proxy itself writes
-  structured request logs to ~/.local/share/copilot-api/logs/ — the
-  files here are stdout/stderr capture only.
+  Logs go to ~/Library/Logs/maximal/. The proxy itself writes
+  structured request logs to ~/.local/share/copilot-api/logs/ (the
+  internal config dir name is unchanged); the files here are
+  stdout/stderr capture only.
 
   HOME is substituted at first-launch by sed before the plist is
   copied into ~/Library/LaunchAgents/. The sentinel must match
@@ -18,7 +19,7 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.microsoft.copilot-api</string>
+  <string>co.stuffbucket.maximal</string>
 
   <key>ProgramArguments</key>
   <array>
@@ -38,20 +39,19 @@
   </dict>
 
   <key>StandardOutPath</key>
-  <string>__HOME__/Library/Logs/copilot-api/stdout.log</string>
+  <string>__HOME__/Library/Logs/maximal/stdout.log</string>
 
   <key>StandardErrorPath</key>
-  <string>__HOME__/Library/Logs/copilot-api/stderr.log</string>
+  <string>__HOME__/Library/Logs/maximal/stderr.log</string>
 
   <key>WorkingDirectory</key>
   <string>__HOME__</string>
 
   <key>EnvironmentVariables</key>
   <dict>
-    <!-- The proxy reads OLLAMA_API_KEY from the secrets/ file at
-         ~/.local/share/copilot-api/secrets/ollama if not set in env.
-         Add other env vars here only if there's no file-based
-         fallback. -->
+    <!-- The proxy reads OLLAMA_API_KEY from the secrets/ file under
+         the COPILOT_API_HOME dir if not set in env. Add other env
+         vars here only if there's no file-based fallback. -->
     <key>PATH</key>
     <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
   </dict>

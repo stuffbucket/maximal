@@ -40,7 +40,7 @@ describe("install landing page", () => {
   })
 
   it("documents the verify and uninstall commands", () => {
-    expect(html).toContain("copilot-api debug")
-    expect(html).toContain("copilot-api uninstall")
+    expect(html).toContain("maximal debug")
+    expect(html).toContain("maximal uninstall")
   })
 })

@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * `copilot-api configure-claude-desktop` — opt-in subcommand that
+ * `maximal configure-claude-desktop` — opt-in subcommand that
  * wires Claude Desktop to point at the local proxy.
  *
  * The proxy itself is client-neutral — Claude Code, opencode, the AI
  * SDK, custom apps, and Claude Desktop all work against the same
  * gateway. Configuring Claude Desktop is a deliberate choice the user
- * makes; `copilot-api setup` no longer touches it.
+ * makes; `maximal setup` no longer touches it.
  *
  * What this command does (mac):
  *
@@ -45,8 +45,8 @@ interface ConfigureOptions {
 export function runConfigureClaudeDesktop(opts: ConfigureOptions): void {
   consola.box(
     opts.revert ?
-      "copilot-api configure-claude-desktop --revert"
-    : "copilot-api configure-claude-desktop",
+      "maximal configure-claude-desktop --revert"
+    : "maximal configure-claude-desktop",
   )
 
   if (opts.revert) {

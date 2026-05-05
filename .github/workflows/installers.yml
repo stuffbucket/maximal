@@ -107,10 +107,10 @@ jobs:
           # binaries, not just the shell.
           echo "Waiting up to 30 minutes for $TAG release + binaries ..."
           REQUIRED=(
-            "copilot-api-${TAG}-darwin-arm64.tar.gz"
-            "copilot-api-${TAG}-darwin-arm64.tar.gz.sha256"
-            "copilot-api-${TAG}-windows-x64.zip"
-            "copilot-api-${TAG}-windows-x64.zip.sha256"
+            "maximal-${TAG}-darwin-arm64.tar.gz"
+            "maximal-${TAG}-darwin-arm64.tar.gz.sha256"
+            "maximal-${TAG}-windows-x64.zip"
+            "maximal-${TAG}-windows-x64.zip.sha256"
           )
           for i in $(seq 1 60); do
             if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
@@ -151,7 +151,7 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${TAG#v}"
-          TARBALL="copilot-api-${TAG}-darwin-${{ env.ARCH }}.tar.gz"
+          TARBALL="maximal-${TAG}-darwin-${{ env.ARCH }}.tar.gz"
           SHA="${TARBALL}.sha256"
           echo "VERSION=${VERSION}"   >> "$GITHUB_ENV"
           echo "TARBALL=${TARBALL}"   >> "$GITHUB_ENV"
@@ -172,11 +172,11 @@ jobs:
           mkdir -p dist-input/unpacked
           tar -xzf "dist-input/$TARBALL" -C dist-input/unpacked
 
-      - name: Assemble copilot-api.app
+      - name: Assemble maximal.app
         run: |
           set -euo pipefail
           BUILD_DIR="dist-build"
-          APP="$BUILD_DIR/copilot-api.app"
+          APP="$BUILD_DIR/maximal.app"
 
           mkdir -p "$BUILD_DIR"
           cp -R build/macos/app-template "$APP"
@@ -185,14 +185,14 @@ jobs:
           sed -i -e "s/__VERSION__/${VERSION}/g" \
             "$APP/Contents/Info.plist"
 
-          BIN_SRC="$(find dist-input/unpacked -maxdepth 2 -type f -name copilot-api -perm -u+x | head -1)"
+          BIN_SRC="$(find dist-input/unpacked -maxdepth 2 -type f -name maximal -perm -u+x | head -1)"
           if [ -z "$BIN_SRC" ]; then
-            echo "::error::no executable copilot-api binary found in unpacked tarball"
+            echo "::error::no executable maximal binary found in unpacked tarball"
             exit 1
           fi
-          rm -f "$APP/Contents/MacOS/copilot-api.placeholder"
-          cp -f "$BIN_SRC" "$APP/Contents/MacOS/copilot-api"
-          chmod 755 "$APP/Contents/MacOS/copilot-api"
+          rm -f "$APP/Contents/MacOS/maximal.placeholder"
+          cp -f "$BIN_SRC" "$APP/Contents/MacOS/maximal"
+          chmod 755 "$APP/Contents/MacOS/maximal"
 
           rm -f "$APP/Contents/Resources/AppIcon.icns.placeholder"
           if [ -f build/macos/app-template/Contents/Resources/AppIcon.icns ]; then
@@ -211,14 +211,14 @@ jobs:
           set -euo pipefail
           OUT_DIR="dist-release"
           mkdir -p "$OUT_DIR"
-          ZIP="${OUT_DIR}/copilot-api-${TAG}-darwin-${{ env.ARCH }}.app.zip"
+          ZIP="${OUT_DIR}/maximal-${TAG}-darwin-${{ env.ARCH }}.app.zip"
 
           # `zip -y` preserves symlinks; `-X` strips extra OS metadata
           # so the archive is reproducible across runners. Macs accept
           # the resulting .app after Archive Utility extraction —
           # there's no Mac-specific resource fork at the bundle level
           # for our binary-only app.
-          (cd dist-build && zip -ryX "../${ZIP}" copilot-api.app)
+          (cd dist-build && zip -ryX "../${ZIP}" maximal.app)
           (cd "$OUT_DIR" && sha256sum "$(basename "$ZIP")" > "$(basename "$ZIP").sha256")
           ls -la "$OUT_DIR"
 
@@ -227,8 +227,8 @@ jobs:
         with:
           tag: ${{ env.TAG }}
           files: |
-            dist-release/copilot-api-${{ env.TAG }}-darwin-${{ env.ARCH }}.app.zip
-            dist-release/copilot-api-${{ env.TAG }}-darwin-${{ env.ARCH }}.app.zip.sha256
+            dist-release/maximal-${{ env.TAG }}-darwin-${{ env.ARCH }}.app.zip
+            dist-release/maximal-${{ env.TAG }}-darwin-${{ env.ARCH }}.app.zip.sha256
 
   windows-installer:
     needs: ensure-release
@@ -285,7 +285,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist-bin
-          ZIP="copilot-api-${TAG}-windows-x64.zip"
+          ZIP="maximal-${TAG}-windows-x64.zip"
           gh release download "$TAG" \
             --repo "$GITHUB_REPOSITORY" \
             --pattern "$ZIP" \
@@ -300,9 +300,9 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $zip = Get-ChildItem -Path dist-bin -Filter '*.zip' | Select-Object -First 1
           Expand-Archive -Path $zip.FullName -DestinationPath staging -Force
-          # Sanity: the zip should contain copilot-api.exe at its root.
-          if (-not (Test-Path 'staging\copilot-api.exe')) {
-            Write-Error "copilot-api.exe missing from $($zip.Name)"
+          # Sanity: the zip should contain maximal.exe at its root.
+          if (-not (Test-Path 'staging\maximal.exe')) {
+            Write-Error "maximal.exe missing from $($zip.Name)"
             exit 1
           }
           Get-ChildItem staging
@@ -321,13 +321,13 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $version = '${{ steps.ver.outputs.version }}'
-          $out = "dist-release\copilot-api-${env:TAG}-windows-x64.msi"
+          $out = "dist-release\maximal-${env:TAG}-windows-x64.msi"
           New-Item -ItemType Directory -Path dist-release -Force | Out-Null
           # WiX expects the source files referenced by the .wxs (in
-          # this case copilot-api.exe) to be discoverable relative to
+          # this case maximal.exe) to be discoverable relative to
           # the working directory or via -bindpath. We stage in
           # `staging/` and pass -bindpath staging.
-          wix build build\windows\copilot-api.wxs `
+          wix build build\windows\maximal.wxs `
             -d "Version=$version" `
             -arch x64 `
             -bindpath staging `
@@ -338,13 +338,13 @@ jobs:
         run: |
           set -euo pipefail
           cd dist-release
-          sha256sum "copilot-api-${TAG}-windows-x64.msi" > "copilot-api-${TAG}-windows-x64.msi.sha256"
-          cat "copilot-api-${TAG}-windows-x64.msi.sha256"
+          sha256sum "maximal-${TAG}-windows-x64.msi" > "maximal-${TAG}-windows-x64.msi.sha256"
+          cat "maximal-${TAG}-windows-x64.msi.sha256"
 
       - name: Attach MSI to release
         uses: ./.github/actions/upload-release-asset
         with:
           tag: ${{ env.TAG }}
           files: |
-            dist-release/copilot-api-${{ env.TAG }}-windows-x64.msi
-            dist-release/copilot-api-${{ env.TAG }}-windows-x64.msi.sha256
+            dist-release/maximal-${{ env.TAG }}-windows-x64.msi
+            dist-release/maximal-${{ env.TAG }}-windows-x64.msi.sha256

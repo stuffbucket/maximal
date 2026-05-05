@@ -3,10 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Install copilot-api</title>
+    <title>Install maximal</title>
     <meta
       name="description"
-      content="Install the local copilot-api proxy on macOS or Windows."
+      content="Install the local maximal proxy on macOS or Windows."
     />
     <style>
       :root {
@@ -117,7 +117,7 @@
   </head>
   <body>
     <main>
-      <h1>copilot-api</h1>
+      <h1>maximal</h1>
       <p class="lede">
         A local proxy that exposes GitHub Copilot as OpenAI- and
         Anthropic-compatible HTTP endpoints. Run it once, point Claude
@@ -141,9 +141,9 @@
         <h2>First launch</h2>
         <div id="warn-mac" class="callout hidden">
           <strong>macOS:</strong> Gatekeeper will say
-          <em>"copilot-api can't be opened because it is from an
+          <em>"maximal can't be opened because it is from an
           unidentified developer."</em> Right-click
-          <code>copilot-api.app</code> in <code>/Applications</code> →
+          <code>maximal.app</code> in <code>/Applications</code> →
           <strong>Open</strong> → confirm <strong>Open</strong> in the
           dialog. After the first launch, double-click works normally.
         </div>
@@ -162,18 +162,18 @@
       <section>
         <h2>Verify it's running</h2>
         <p>From a new terminal:</p>
-        <pre>copilot-api debug</pre>
+        <pre>maximal debug</pre>
         <p class="meta">
           Should print the resolved port, auth state, and Claude Desktop
           config status. If the wizard didn't run during install, run
-          <code>copilot-api setup</code> once interactively to finish the
+          <code>maximal setup</code> once interactively to finish the
           GitHub device-code flow.
         </p>
       </section>
 
       <section>
         <h2>Uninstall</h2>
-        <pre>copilot-api uninstall</pre>
+        <pre>maximal uninstall</pre>
         <p class="meta">
           Add <code>--purge</code> to also remove the on-disk database
           and config; <code>--revert-claude</code> to strip the keys

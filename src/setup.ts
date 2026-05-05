@@ -1,20 +1,20 @@
 #!/usr/bin/env node
 /**
- * `copilot-api setup` — first-run wizard.
+ * `maximal setup` — first-run wizard.
  *
  * Client-neutral by design: takes a freshly-installed binary from
  * "just unpacked" to "the proxy is reachable and authenticated."
  * Three steps:
  *
  *   1. GitHub auth (device-code flow if no token)
- *   2. Diagnostic — render `copilot-api debug` so the user sees the
+ *   2. Diagnostic — render `maximal debug` so the user sees the
  *      effective config
  *   3. Smoke test — one /v1/messages request to confirm reachability
  *
  * Pairing the proxy with a specific client (Claude Desktop, Claude
  * Code, opencode, the AI SDK, custom apps) is a deliberate follow-up
  * step. For Claude Desktop specifically, run
- * `copilot-api configure-claude-desktop` after this.
+ * `maximal configure-claude-desktop` after this.
  *
  * Runs in two modes: interactive (default) and unattended (used by
  * post-install scripts in B2/B3a). Unattended skips prompts and the
@@ -39,7 +39,7 @@ interface RunSetupOptions {
 }
 
 export async function runSetup(opts: RunSetupOptions): Promise<void> {
-  consola.box("copilot-api setup")
+  consola.box("maximal setup")
 
   await ensurePaths()
 
@@ -76,7 +76,7 @@ export async function runSetup(opts: RunSetupOptions): Promise<void> {
   consola.box("Setup complete.")
   consola.info(
     "To pair Claude Desktop with this proxy, run:\n"
-      + "  copilot-api configure-claude-desktop",
+      + "  maximal configure-claude-desktop",
   )
 }
 
@@ -104,7 +104,7 @@ async function smokeTest(port: number): Promise<void> {
     })
   } catch (err) {
     consola.warn(
-      `  Could not reach the proxy at ${url}. Start it with \`copilot-api start\` in another terminal, then re-run setup.`,
+      `  Could not reach the proxy at ${url}. Start it with \`maximal start\` in another terminal, then re-run setup.`,
       err,
     )
     return

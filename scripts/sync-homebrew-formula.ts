@@ -2,7 +2,7 @@
 /**
  * Render the Homebrew formula for a specific release.
  *
- * Reads `build/homebrew/copilot-api.rb` (the source-of-truth template
+ * Reads `build/homebrew/maximal.rb` (the source-of-truth template
  * with PLACEHOLDER_* tokens) and substitutes:
  *
  *   PLACEHOLDER_ORG                  ← --org or `repo` env (`<owner>`)
@@ -20,19 +20,19 @@
  *
  * Usage:
  *
- *   # Render for release v1.9.4 of <org>/copilot-api to stdout:
+ *   # Render for release v1.9.4 of <org>/maximal to stdout:
  *   bun scripts/sync-homebrew-formula.ts \
- *     --org microsoft-internal --repo copilot-api --version 1.9.4
+ *     --org microsoft-internal --repo maximal --version 1.9.4
  *
  *   # Write to a path (e.g. into a checkout of the tap repo):
  *   bun scripts/sync-homebrew-formula.ts \
- *     --org microsoft-internal --repo copilot-api --version 1.9.4 \
- *     --output ../homebrew-tap/Formula/copilot-api.rb
+ *     --org microsoft-internal --repo maximal --version 1.9.4 \
+ *     --output ../homebrew-tap/Formula/maximal.rb
  *
  *   # Override the release-asset URL prefix (for testing against a
  *   # private mirror):
  *   bun scripts/sync-homebrew-formula.ts ... \
- *     --asset-base https://internal-mirror.example/copilot-api
+ *     --asset-base https://internal-mirror.example/maximal
  *
  * The tap repo's CI (or a release-time GH Actions step) calls this
  * with the just-published version, drops the rendered file into
@@ -58,10 +58,10 @@ function parseArgs(argv: Array<string>): Args {
     return i >= 0 && i + 1 < argv.length ? argv[i + 1] : undefined
   }
   const org = get("--org") ?? process.env.GITHUB_ORG ?? ""
-  const repo = get("--repo") ?? process.env.GITHUB_REPO ?? "copilot-api"
+  const repo = get("--repo") ?? process.env.GITHUB_REPO ?? "maximal"
   const version = (get("--version") ?? "").replace(/^v/, "")
   const template =
-    get("--template") ?? "build/homebrew/copilot-api.rb"
+    get("--template") ?? "build/homebrew/maximal.rb"
   const output = get("--output")
   const assetBase = get("--asset-base")
 
@@ -132,7 +132,7 @@ export function renderFormula(
 async function main(): Promise<number> {
   const args = parseArgs(process.argv.slice(2))
 
-  const armAsset = `copilot-api-v${args.version}-darwin-arm64.tar.gz`
+  const armAsset = `maximal-v${args.version}-darwin-arm64.tar.gz`
 
   const [armSha, template] = await Promise.all([
     fetchSha256(args, armAsset),

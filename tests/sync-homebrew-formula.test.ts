@@ -10,17 +10,17 @@ const ARM_SHA = "a".repeat(64)
 
 describe("parseSha256File", () => {
   it("parses the canonical `<sha>  <name>` line", () => {
-    const content = `${ARM_SHA}  copilot-api-v1.9.4-darwin-arm64.tar.gz\n`
-    expect(
-      parseSha256File(content, "copilot-api-v1.9.4-darwin-arm64.tar.gz"),
-    ).toBe(ARM_SHA)
+    const content = `${ARM_SHA}  maximal-v1.9.4-darwin-arm64.tar.gz\n`
+    expect(parseSha256File(content, "maximal-v1.9.4-darwin-arm64.tar.gz")).toBe(
+      ARM_SHA,
+    )
   })
 
   it("ignores trailing newlines and whitespace", () => {
-    const content = `${ARM_SHA}  copilot-api-v1.9.4-darwin-arm64.tar.gz   \n\n`
-    expect(
-      parseSha256File(content, "copilot-api-v1.9.4-darwin-arm64.tar.gz"),
-    ).toBe(ARM_SHA)
+    const content = `${ARM_SHA}  maximal-v1.9.4-darwin-arm64.tar.gz   \n\n`
+    expect(parseSha256File(content, "maximal-v1.9.4-darwin-arm64.tar.gz")).toBe(
+      ARM_SHA,
+    )
   })
 
   it("rejects malformed content", () => {
@@ -36,15 +36,15 @@ describe("parseSha256File", () => {
   })
 
   it("matches by basename so absolute or relative paths in the .sha256 are accepted", () => {
-    const content = `${ARM_SHA}  ./dist/copilot-api-v1.0.0-darwin-arm64.tar.gz\n`
-    expect(
-      parseSha256File(content, "copilot-api-v1.0.0-darwin-arm64.tar.gz"),
-    ).toBe(ARM_SHA)
+    const content = `${ARM_SHA}  ./dist/maximal-v1.0.0-darwin-arm64.tar.gz\n`
+    expect(parseSha256File(content, "maximal-v1.0.0-darwin-arm64.tar.gz")).toBe(
+      ARM_SHA,
+    )
   })
 })
 
 describe("renderFormula", () => {
-  const template = fs.readFileSync("build/homebrew/copilot-api.rb", "utf8")
+  const template = fs.readFileSync("build/homebrew/maximal.rb", "utf8")
 
   it("substitutes every placeholder in the shipped template", () => {
     const out = renderFormula(template, {
@@ -57,7 +57,7 @@ describe("renderFormula", () => {
     expect(out).not.toContain("PLACEHOLDER_SHA256_DARWIN_ARM64")
     expect(out).toContain('version "1.9.4"')
     expect(out).toContain(`sha256 "${ARM_SHA}"`)
-    expect(out).toContain("microsoft-internal/copilot-api")
+    expect(out).toContain("microsoft-internal/maximal")
   })
 
   it("renders a syntactically plausible Ruby formula", () => {
@@ -68,7 +68,7 @@ describe("renderFormula", () => {
     })
     // Sanity checks for the structural pieces a Homebrew core
     // formula MUST have.
-    expect(out).toMatch(/^class CopilotApi < Formula$/m)
+    expect(out).toMatch(/^class Maximal < Formula$/m)
     expect(out).toMatch(/^\s*def install$/m)
     expect(out).toMatch(/^\s*service do$/m)
     expect(out).toMatch(/^\s*test do$/m)
