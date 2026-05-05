@@ -184,9 +184,9 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
               >
                 <path d="M11 1 L13 9 L21 11 L13 13 L11 21 L9 13 L1 11 L9 9 Z" />
               </svg>
-              <span>macOS — Apple Silicon (.app.zip)</span>
+              <span>macOS — Apple Silicon</span>
             </span>
-            <span class="btn-meta">{versionLabel}</span>
+            <span class="btn-meta">.app.zip</span>
           </a>
           <a
             class="btn"
@@ -204,9 +204,9 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
               >
                 <path d="M11 1 L13 9 L21 11 L13 13 L11 21 L9 13 L1 11 L9 9 Z" />
               </svg>
-              <span>Windows — installer (.msi)</span>
+              <span>Windows installer</span>
             </span>
-            <span class="btn-meta">{versionLabel}</span>
+            <span class="btn-meta">.msi</span>
           </a>
           <a
             class="btn"
@@ -216,7 +216,7 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
             rel="noopener"
           >
             <span class="btn-label"
-              ><span>Windows — PowerShell installer</span></span
+              ><span>Windows PowerShell installer</span></span
             >
             <span class="btn-meta">install.ps1</span>
           </a>
@@ -227,10 +227,8 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
             href={sourceTarGz}
             rel="noopener"
           >
-            <span class="btn-label"
-              ><span>CLI — macOS arm64 (.tar.gz)</span></span
-            >
-            <span class="btn-meta">{versionLabel}</span>
+            <span class="btn-label"><span>macOS — CLI</span></span>
+            <span class="btn-meta">.tar.gz</span>
           </a>
           <a
             class="btn"
@@ -239,10 +237,8 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
             href={sourceZip}
             rel="noopener"
           >
-            <span class="btn-label"
-              ><span>CLI — Windows x64 (.zip)</span></span
-            >
-            <span class="btn-meta">{versionLabel}</span>
+            <span class="btn-label"><span>Windows — CLI</span></span>
+            <span class="btn-meta">.zip</span>
           </a>
           <a
             class="btn"
