@@ -231,9 +231,10 @@ jobs:
             dist-release/maximal-${{ env.TAG }}-darwin-${{ env.ARCH }}.app.zip.sha256
 
   # Sign the .app + build a signed DMG on the self-hosted Mac runner
-  # that's already provisioned for stuffbucket/claudeme: a
-  # `build.keychain-db` in the runner user's home with the Developer ID
-  # cert imported.
+  # provisioned with a `maximal.keychain-db` in the runner user's home
+  # with the Developer ID cert imported. Sibling project claudeme uses
+  # its own `build.keychain-db` on the same runner — keep them
+  # independent so a password reset on one doesn't break the other.
   #
   # Notarization is intentionally skipped. Without notarization the
   # first launch still triggers Gatekeeper ("unidentified developer"),
@@ -244,7 +245,7 @@ jobs:
   #
   # Required repo secrets (configure once at
   # github.com/stuffbucket/maximal/settings/secrets/actions):
-  #   KEYCHAIN_PASSWORD        — unlocks ~/Library/Keychains/build.keychain-db
+  #   KEYCHAIN_PASSWORD        — unlocks ~/Library/Keychains/maximal.keychain-db
   #   DEVELOPER_ID_APPLICATION — full identity string, e.g.
   #                              "Developer ID Application: Name (TEAMID)"
   #
@@ -302,7 +303,7 @@ jobs:
       - name: Unlock signing keychain
         run: |
           set -euo pipefail
-          KC="$HOME/Library/Keychains/build.keychain-db"
+          KC="$HOME/Library/Keychains/maximal.keychain-db"
           security unlock-keychain -p "${{ secrets.KEYCHAIN_PASSWORD }}" "$KC"
           security set-key-partition-list -S apple-tool:,apple: \
             -s -k "${{ secrets.KEYCHAIN_PASSWORD }}" "$KC"
