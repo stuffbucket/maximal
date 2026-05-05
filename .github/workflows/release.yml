@@ -369,12 +369,15 @@ jobs:
           cp out/maximal.rb tap/Formula/maximal.rb
 
           cd tap
-          if git diff --quiet -- Formula/maximal.rb; then
-            echo "No formula changes for $TAG — already in sync."
-            exit 0
-          fi
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git config user.name  "github-actions[bot]"
           git add Formula/maximal.rb
+          # Use --cached so this also catches the brand-new-file case
+          # (untracked → staged → diff vs HEAD). git diff (no --cached)
+          # was a no-op on a new file and silently skipped the commit.
+          if git diff --cached --quiet -- Formula/maximal.rb; then
+            echo "No formula changes for $TAG — already in sync."
+            exit 0
+          fi
           git commit -m "maximal: bump to $TAG"
           git push origin HEAD:main
