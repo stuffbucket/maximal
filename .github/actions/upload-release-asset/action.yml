@@ -42,11 +42,11 @@ runs:
           echo "::error::No files provided to upload-release-asset"
           exit 1
         fi
-        # Expand each line, glob, and pass everything to a single
-        # gh release upload invocation so re-runs are atomic. Using a
-        # while-read loop instead of mapfile so this works on macOS's
-        # built-in bash 3.2 (the self-hosted Mac runner) — mapfile
-        # is bash 4+ only.
+
+        # Use the REST API directly via curl. Avoids depending on the
+        # `gh` CLI being installed on every runner (the self-hosted
+        # Mac runner doesn't ship it). while-read instead of mapfile
+        # so this works on macOS's bash 3.2.
         ASSETS=()
         while IFS= read -r line; do
           [ -z "$line" ] && continue
@@ -61,4 +61,72 @@ runs:
           done
         done <<<"$FILES"
         echo "Uploading ${#ASSETS[@]} asset(s) to release $TAG"
-        gh release upload "$TAG" "${ASSETS[@]}" --repo "$GH_REPO" --clobber
+
+        # Resolve release id + existing assets (one API call).
+        REL_JSON=$(curl -fsSL \
+          -H "Authorization: Bearer $GH_TOKEN" \
+          -H "Accept: application/vnd.github+json" \
+          "https://api.github.com/repos/${GH_REPO}/releases/tags/${TAG}")
+
+        REL_ID=$(printf '%s' "$REL_JSON" \
+          | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+        if [ -z "$REL_ID" ]; then
+          echo "::error::Could not resolve release id for tag ${TAG}"
+          exit 1
+        fi
+
+        upload_one() {
+          local file="$1"
+          local name
+          name=$(basename "$file")
+          local mime
+          case "$name" in
+            *.zip)    mime="application/zip" ;;
+            *.dmg)    mime="application/x-apple-diskimage" ;;
+            *.msi)    mime="application/x-msi" ;;
+            *.tar.gz) mime="application/gzip" ;;
+            *.sha256) mime="text/plain" ;;
+            *.ps1)    mime="text/plain" ;;
+            *)        mime="application/octet-stream" ;;
+          esac
+
+          # Clobber: if an asset with the same name already exists,
+          # delete it before uploading. ID lives in REL_JSON.
+          local existing_id
+          existing_id=$(printf '%s' "$REL_JSON" | python3 -c "
+import sys, json
+r = json.load(sys.stdin)
+n = sys.argv[1]
+ids = [str(a['id']) for a in r.get('assets', []) if a['name'] == n]
+print(ids[0] if ids else '')
+" "$name")
+
+          if [ -n "$existing_id" ]; then
+            echo "  replacing existing asset id=$existing_id ($name)"
+            curl -fsSL -X DELETE \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${GH_REPO}/releases/assets/${existing_id}"
+          fi
+
+          echo "  uploading $name ($(wc -c < "$file" | tr -d ' ') bytes, $mime)"
+          curl -fsSL -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "Content-Type: $mime" \
+            --data-binary @"$file" \
+            "https://uploads.github.com/repos/${GH_REPO}/releases/${REL_ID}/assets?name=${name}" \
+            > /dev/null
+        }
+
+        for f in "${ASSETS[@]}"; do
+          upload_one "$f"
+          # Re-fetch release JSON after each upload so subsequent
+          # clobber-checks see the latest asset list.
+          REL_JSON=$(curl -fsSL \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GH_REPO}/releases/${REL_ID}")
+        done
+
+        echo "Done."
