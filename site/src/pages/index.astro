@@ -43,11 +43,11 @@ const assetUrl = (filename: string): string =>
     : RELEASES_URL;
 
 const versionForAsset = tag ?? "latest";
-const macAppFile = `maximal-${versionForAsset}-darwin-arm64.app.zip`;
+const macDmgFile = `maximal-${versionForAsset}-darwin-arm64.dmg`;
 const winMsiFile = `maximal-${versionForAsset}-windows-x64.msi`;
 const sourceTarFile = `maximal-${versionForAsset}-darwin-arm64.tar.gz`;
 const sourceZipFile = `maximal-${versionForAsset}-windows-x64.zip`;
-const macAppZip = assetUrl(macAppFile);
+const macDmg = assetUrl(macDmgFile);
 const winMsi = assetUrl(winMsiFile);
 const winPs1 = assetUrl(`install.ps1`);
 const sourceTarGz = assetUrl(sourceTarFile);
@@ -61,10 +61,10 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>maximal — Local Copilot proxy</title>
+    <title>maximal — All your AI coding tools, one Copilot subscription</title>
     <meta
       name="description"
-      content="Local Copilot proxy that speaks Anthropic & OpenAI. Run Claude Code, Codex, and other clients against GitHub Copilot."
+      content="Connect Claude Code, Codex, opencode, and more to your existing GitHub Copilot subscription with maximal."
     />
     <link
       rel="icon"
@@ -107,7 +107,7 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
         </svg>
         <h1 id="title" class="wordmark">maximal</h1>
         <p class="tagline">
-          Local Copilot proxy that speaks Anthropic &amp; OpenAI.
+          Copilot, Claude and Codex walked onto a task bar…
         </p>
         <div class="header-meta">
           <a href={REPO_URL} rel="noopener">github.com/{REPO}</a>
@@ -135,14 +135,16 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
         </svg>
         <h2 id="what-h">What is this</h2>
         <p>
-          You already pay for GitHub Copilot. Maximal lets you use it
-          everywhere — Claude Code, Codex, Copilot Chat, opencode, and
-          whatever the cool kids make today. Everything just works
-          without a million subscriptions.
+          You already have a GitHub Copilot subscription? Of course you
+          do. Connect Claude Code, Codex, opencode, and more to your
+          existing GitHub Copilot subscription with <span class="brand"
+            >maximal</span
+          >.
         </p>
         <p>
-          Pick a favorite, run them all, switch because it's Tuesday —
-          with <em>maximal</em>.
+          Use Claude Code, Codex, Copilot Chat, opencode: or whatever
+          the cool kids make tomorrow. Run them all, or switch to
+          something new with <span class="brand">maximal</span>.
         </p>
       </section>
 
@@ -171,7 +173,7 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
             class="btn"
             data-os="mac"
             data-installer="mac-app"
-            href={macAppZip}
+            href={macDmg}
             rel="noopener"
           >
             <span class="btn-label">
@@ -185,7 +187,7 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
               </svg>
               <span>macOS — Apple Silicon</span>
             </span>
-            <span class="btn-meta">.app.zip</span>
+            <span class="btn-meta">.dmg</span>
           </a>
           <a
             class="btn"
@@ -252,7 +254,7 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
           <a
             class="btn btn--read-my-mind"
             data-read-my-mind
-            href={macAppZip}
+            href={macDmg}
             rel="noopener"
           >
             <span class="btn-label">
@@ -272,10 +274,10 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
 
         <div class="install-hint" data-installer-hint="mac-app" hidden>
           <p class="section-note">
-            <strong>What to do with it:</strong> unzip if your browser
-            didn't, then drag <code>maximal.app</code> into
-            <code>/Applications</code>. Read the first-launch warning
-            below before opening it.
+            <strong>What to do with it:</strong> double-click the
+            <code>.dmg</code> to open it, then drag
+            <code>maximal.app</code> onto the Applications shortcut.
+            Eject the disk image and you're done.
           </p>
         </div>
         <div class="install-hint" data-installer-hint="windows-msi" hidden>
@@ -385,15 +387,17 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
           </svg>
           <div>
             <p>
-              <strong>Our binaries aren't signed yet.</strong> Just like
-              plenty of apps you've already installed, macOS and Windows
-              will throw an "are you sure?" the first time you open it.
-              Click through once and you're set.
+              <strong>macOS bundles are signed and notarized.</strong>
+              Windows builds aren't yet — like plenty of apps you've
+              already installed, SmartScreen will throw an "are you
+              sure?" on first launch. Click through once and you're
+              set.
             </p>
             <p data-installer="mac-app">
-              <strong>macOS:</strong> right-click <code>maximal.app</code>
-              and choose <strong>Open</strong>, then confirm the Gatekeeper
-              prompt. One time per install.
+              <strong>macOS:</strong> nothing to click through. The
+              <code>.dmg</code> is signed and notarized by Apple, so
+              the app launches like any other Mac app — drag, eject,
+              double-click.
             </p>
             <p data-installer="source-mac" hidden>
               <strong>macOS:</strong> macOS quarantines downloaded
@@ -434,7 +438,7 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
         <div class="setup-picker">
           <label for="setup-installer">Setting up on</label>
           <select id="setup-installer" data-setup-installer>
-            <option value="mac-app">macOS — App bundle (.app.zip)</option>
+            <option value="mac-app">macOS — DMG installer (.dmg)</option>
             <option value="source-mac">macOS — CLI tarball (.tar.gz)</option>
             <option value="windows-msi">Windows — installer (.msi)</option>
             <option value="windows-ps1">Windows — PowerShell installer</option>
@@ -446,9 +450,9 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
           <li>
             <strong>Install.</strong>
             <span data-installer="mac-app">
-              Open the <code>.app.zip</code> from your Downloads folder
-              and drag <code>maximal.app</code> into
-              <code>/Applications</code>.
+              Double-click the <code>.dmg</code> to mount it, drag
+              <code>maximal.app</code> onto the Applications shortcut,
+              and eject the disk image.
             </span>
             <span data-installer="source-mac" hidden>
               Extract the tarball:

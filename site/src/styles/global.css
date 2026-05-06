@@ -212,6 +212,18 @@ main {
   color: var(--ink-cream);
 }
 
+/* Inline brand mark — same Fraunces flourish as the hero wordmark
+   but sized to flow with surrounding body copy. Used wherever the
+   word "maximal" appears in a sentence and we want it to read as
+   the product name, not just italics. */
+.brand {
+  font-family: var(--serif);
+  font-weight: 900;
+  font-style: normal;
+  font-variation-settings: "SOFT" 30, "WONK" 1, "opsz" 144;
+  letter-spacing: -0.02em;
+}
+
 .tagline {
   font-family: var(--serif);
   font-weight: 500;
