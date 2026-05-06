@@ -307,6 +307,20 @@ jobs:
           LEN=${#KEYCHAIN_PASSWORD}
           HASH=$(printf '%s' "$KEYCHAIN_PASSWORD" | shasum -a 256 | cut -c1-12)
           echo "secret length=$LEN hash12=$HASH"
+          echo "user=$(id -un) uid=$(id -u)"
+          echo "HOME=$HOME"
+          echo "PWD=$(pwd)"
+          KC="$HOME/Library/Keychains/maximal.keychain-db"
+          echo "KC=$KC"
+          ls -la "$KC" 2>&1 || true
+          if [ -f "$KC" ]; then
+            FILE_HASH=$(shasum -a 256 "$KC" | cut -c1-16)
+            echo "keychain file hash16=$FILE_HASH"
+          fi
+          echo "--- search list (user) ---"
+          security list-keychains -d user
+          echo "--- find-identity in KC ---"
+          security find-identity -v -p codesigning "$KC" 2>&1 | head -10 || true
 
       - name: Unlock signing keychain
         env:
