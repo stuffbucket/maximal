@@ -301,12 +301,17 @@ jobs:
           ls -la dist-build/maximal.app/Contents/MacOS
 
       - name: Unlock signing keychain
+        env:
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
           set -euo pipefail
           KC="$HOME/Library/Keychains/maximal.keychain-db"
-          security unlock-keychain -p "${{ secrets.KEYCHAIN_PASSWORD }}" "$KC"
+          # Pass via env, not ${{ }} text substitution. Inlining a
+          # secret into the shell command lets bash reparse it, which
+          # mangles passwords containing $, ", \, backtick, or !.
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KC"
           security set-key-partition-list -S apple-tool:,apple: \
-            -s -k "${{ secrets.KEYCHAIN_PASSWORD }}" "$KC"
+            -s -k "$KEYCHAIN_PASSWORD" "$KC"
           security list-keychains -d user -s "$KC"
 
       - name: Sign .app
