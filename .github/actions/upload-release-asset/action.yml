@@ -43,10 +43,12 @@ runs:
           exit 1
         fi
         # Expand each line, glob, and pass everything to a single
-        # gh release upload invocation so re-runs are atomic.
-        mapfile -t LINES <<<"$FILES"
+        # gh release upload invocation so re-runs are atomic. Using a
+        # while-read loop instead of mapfile so this works on macOS's
+        # built-in bash 3.2 (the self-hosted Mac runner) — mapfile
+        # is bash 4+ only.
         ASSETS=()
-        for line in "${LINES[@]}"; do
+        while IFS= read -r line; do
           [ -z "$line" ] && continue
           # shellcheck disable=SC2206 -- intentional glob expansion
           expanded=( $line )
@@ -57,6 +59,6 @@ runs:
             fi
             ASSETS+=("$f")
           done
-        done
+        done <<<"$FILES"
         echo "Uploading ${#ASSETS[@]} asset(s) to release $TAG"
         gh release upload "$TAG" "${ASSETS[@]}" --repo "$GH_REPO" --clobber

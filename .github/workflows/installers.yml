@@ -304,52 +304,9 @@ jobs:
         env:
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
-          set -uo pipefail
+          set -euo pipefail
           KC="$HOME/Library/Keychains/maximal.keychain-db"
-
-          # Inline diagnostics so nothing happens between hash-print
-          # and the unlock attempt.
-          LEN=${#KEYCHAIN_PASSWORD}
-          HASH=$(printf '%s' "$KEYCHAIN_PASSWORD" | shasum -a 256 | cut -c1-12)
-          echo "secret length=$LEN hash12=$HASH"
-          echo "user=$(id -un) uid=$(id -u) HOME=$HOME KC=$KC"
-          echo "locale: LC_ALL=${LC_ALL:-unset} LANG=${LANG:-unset}"
-          shasum -a 256 "$KC" | cut -c1-16 | xargs -I{} echo "kc-file-hash16={}"
-          security list-keychains -d user
-
-          # Write the password to a tmpfile + hash it from that file —
-          # that proves the env variable's bytes really are what we
-          # think, no shell munging in argv.
-          UMASK_PRE=$(umask)
-          umask 077
-          PWD_FILE=$(mktemp)
-          printf '%s' "$KEYCHAIN_PASSWORD" > "$PWD_FILE"
-          umask "$UMASK_PRE"
-          FILE_HASH=$(shasum -a 256 "$PWD_FILE" | cut -c1-12)
-          FILE_LEN=$(wc -c < "$PWD_FILE" | tr -d ' ')
-          echo "tmpfile length=$FILE_LEN hash12=$FILE_HASH"
-
-          set +e
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KC"
-          UNLOCK_RC=$?
-          set -e
-          echo "unlock via env exit=$UNLOCK_RC"
-
-          if [ $UNLOCK_RC -ne 0 ]; then
-            # Try unlock using the password read fresh from the tmpfile.
-            # If THIS works, something is happening to the env var
-            # between bash and security's argv. Otherwise, the keychain
-            # genuinely has a different password than we're handing it.
-            set +e
-            security unlock-keychain -p "$(cat "$PWD_FILE")" "$KC"
-            FILE_RC=$?
-            set -e
-            echo "unlock via tmpfile exit=$FILE_RC"
-            rm -f "$PWD_FILE"
-            exit $UNLOCK_RC
-          fi
-          rm -f "$PWD_FILE"
-
           security set-key-partition-list -S apple-tool:,apple: \
             -s -k "$KEYCHAIN_PASSWORD" "$KC"
           security list-keychains -d user -s "$KC"
