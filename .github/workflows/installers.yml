@@ -230,32 +230,30 @@ jobs:
             dist-release/maximal-${{ env.TAG }}-darwin-${{ env.ARCH }}.app.zip
             dist-release/maximal-${{ env.TAG }}-darwin-${{ env.ARCH }}.app.zip.sha256
 
-  # Sign the .app + build a signed DMG on the self-hosted Mac runner
-  # provisioned with a `maximal.keychain-db` in the runner user's home
-  # with the Developer ID cert imported. Sibling project claudeme uses
-  # its own `build.keychain-db` on the same runner — keep them
-  # independent so a password reset on one doesn't break the other.
-  #
-  # Notarization is intentionally skipped. Without notarization the
-  # first launch still triggers Gatekeeper ("unidentified developer"),
-  # but signing avoids the harsher "app is damaged" message that
-  # quarantined-and-unsigned apps get, and right-click → Open clears
-  # the prompt cleanly. Add notarization later if/when the workflow
-  # needs to skip the Gatekeeper prompt entirely.
+  # Sign + notarize the .app + build a signed/notarized DMG on the
+  # self-hosted Mac runner provisioned with a `maximal.keychain-db`
+  # in the runner user's home with the Developer ID cert imported.
+  # Sibling project claudeme uses its own `build.keychain-db` on the
+  # same runner — keep them independent so a password reset on one
+  # doesn't break the other.
   #
   # Required repo secrets (configure once at
   # github.com/stuffbucket/maximal/settings/secrets/actions):
   #   KEYCHAIN_PASSWORD        — unlocks ~/Library/Keychains/maximal.keychain-db
   #   DEVELOPER_ID_APPLICATION — full identity string, e.g.
   #                              "Developer ID Application: Name (TEAMID)"
+  #   APPLE_ID                 — Apple ID email for notarytool
+  #   APPLE_PASSWORD           — app-specific password for that Apple ID
+  #                              (https://appleid.apple.com → App-Specific Passwords)
+  #   APPLE_TEAM_ID            — the (TEAMID) part of the identity above
   #
   # Outputs (overwriting the unsigned .app.zip from macos-app-zip):
-  #   maximal-${TAG}-darwin-arm64.app.zip   (signed .app, re-zipped)
-  #   maximal-${TAG}-darwin-arm64.dmg       (signed DMG, drag-to-Applications)
+  #   maximal-${TAG}-darwin-arm64.app.zip   (signed + notarized + stapled .app, re-zipped)
+  #   maximal-${TAG}-darwin-arm64.dmg       (signed + notarized + stapled DMG)
   #   plus .sha256 sidecars for each
   macos-signed:
     needs: macos-app-zip
-    name: macOS signed .app.zip + .dmg
+    name: macOS signed + notarized .app.zip + .dmg
     runs-on: self-hosted
     env:
       TAG: ${{ github.event.release.tag_name || inputs.tag }}
@@ -322,6 +320,29 @@ jobs:
             dist-build/maximal.app
           codesign --verify --deep --strict --verbose=2 dist-build/maximal.app
 
+      - name: Notarize + staple .app
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          # notarytool can't accept a .app directly — needs a zip/dmg/pkg.
+          # Build a transient zip just for notarization, submit, staple
+          # the ticket back onto the bundle, then discard the zip. The
+          # final upload zips the (now-stapled) .app fresh in the next step.
+          NOTARY_ZIP="dist-build/maximal-notary.zip"
+          ditto -c -k --keepParent dist-build/maximal.app "$NOTARY_ZIP"
+          xcrun notarytool submit "$NOTARY_ZIP" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+          rm -f "$NOTARY_ZIP"
+          xcrun stapler staple dist-build/maximal.app
+          xcrun stapler validate dist-build/maximal.app
+          spctl -a -t exec --context context:primary-signature -v dist-build/maximal.app
+
       - name: Re-zip signed .app
         run: |
           set -euo pipefail
@@ -355,6 +376,23 @@ jobs:
             "$OUT"
           codesign --force --sign "$SIGN_IDENTITY" "$OUT"
           codesign --verify --verbose=2 "$OUT"
+
+      - name: Notarize + staple DMG
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          OUT="dist-release/${DMG}"
+          xcrun notarytool submit "$OUT" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+          xcrun stapler staple "$OUT"
+          xcrun stapler validate "$OUT"
+          spctl -a -t open --context context:primary-signature -v "$OUT"
           (cd dist-release && shasum -a 256 "${DMG}" > "${DMG}.sha256")
 
       - name: Attach signed bundles to release
