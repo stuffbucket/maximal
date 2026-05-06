@@ -300,6 +300,14 @@ jobs:
           (cd dist-build && unzip -q "../dist-input/$APP_ZIP")
           ls -la dist-build/maximal.app/Contents/MacOS
 
+      - name: Diag — secret length + hash (temporary)
+        env:
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          LEN=${#KEYCHAIN_PASSWORD}
+          HASH=$(printf '%s' "$KEYCHAIN_PASSWORD" | shasum -a 256 | cut -c1-12)
+          echo "secret length=$LEN hash12=$HASH"
+
       - name: Unlock signing keychain
         env:
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
