@@ -225,7 +225,7 @@ main {
   /* Fraunces 900 has a smaller x-height than the surrounding sans
      so the lowercase letters read a beat smaller — bump it ~1pt to
      visually match the body copy. */
-  font-size: 1.12em;
+  font-size: 1.19em;
 }
 
 .tagline {
