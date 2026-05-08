@@ -25,8 +25,8 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsdown",
-    "dev": "bun run --watch ./src/main.ts",
+    "build": "bun run scripts/embed-usage-viewer.ts && tsdown",
+    "dev": "bun run scripts/embed-usage-viewer.ts && bun run --watch ./src/main.ts",
     "knip": "knip-bun",
     "lint": "eslint --cache",
     "lint:all": "eslint --cache .",

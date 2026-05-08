@@ -40,6 +40,12 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   // Work around unjs/consola#357 until a release includes PR #359.
   consola.options.throttle = 0
 
+  // Print something immediately so users know `maximal start` is
+  // doing something. The next ~3-5s are spent on Copilot bootstrap
+  // (token exchange, model fetch, machine-id + session-id caching),
+  // and without this line the terminal just sits silent.
+  consola.start("Starting maximal…")
+
   // Ensure config is merged with defaults at startup
   mergeConfigWithDefaults()
 

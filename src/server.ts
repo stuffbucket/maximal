@@ -8,6 +8,13 @@ import { createAuthMiddleware } from "./lib/request-auth"
 import { getModelsLoadedAtMs } from "./lib/state"
 import { traceIdMiddleware } from "./lib/trace"
 import { cacheModels } from "./lib/utils"
+// Generated at build time by scripts/embed-usage-viewer.ts. Bakes
+// src/pages/usage-viewer.html into a TS string so tsdown's bundler
+// + bun --compile can carry the file through to the compiled
+// binary. readFileSync / Bun.file against an import.meta.url path
+// both 500 with ENOENT in --compile output (B:\~BUN\root\... on
+// Windows), so this is the portable path.
+import { usageViewerHtml } from "./pages/usage-viewer.gen"
 import { completionRoutes } from "./routes/chat-completions/route"
 import { debugRoutes } from "./routes/debug/route"
 import { embeddingRoutes } from "./routes/embeddings/route"
@@ -55,19 +62,7 @@ server.use(
 )
 
 server.get("/", (c) => c.text("Server running"))
-server.get("/usage-viewer", async (c) => {
-  // Bun's `--compile` output embeds files referenced via
-  // import.meta.url-relative URLs but only `Bun.file()` knows how to
-  // read them through the virtual filesystem on every platform.
-  // `readFileSync` against the same URL works in dev and on macOS
-  // builds but 500'd on Windows (`B:\~BUN\root\pages\usage-viewer.html`,
-  // ENOENT). Same code path covers both runtimes here.
-  const usageViewerFileUrl = new URL(
-    "./pages/usage-viewer.html",
-    import.meta.url,
-  )
-  return c.html(await Bun.file(usageViewerFileUrl).text())
-})
+server.get("/usage-viewer", (c) => c.html(usageViewerHtml))
 server.get("/usage-viewer/", (c) => c.redirect("/usage-viewer", 301))
 
 server.route("/_debug", debugRoutes)
