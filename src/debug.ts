@@ -62,17 +62,13 @@ interface RunDebugOptions {
 }
 
 async function getPackageVersion(): Promise<string> {
-  try {
-    const packageJsonPath = new URL("../package.json", import.meta.url).pathname
-    // @ts-expect-error https://github.com/sindresorhus/eslint-plugin-unicorn/blob/v59.0.1/docs/rules/prefer-json-parse-buffer.md
-    // JSON.parse() can actually parse buffers
-    const packageJson = JSON.parse(await fs.readFile(packageJsonPath)) as {
-      version: string
-    }
-    return packageJson.version
-  } catch {
-    return "unknown"
-  }
+  // Embedded at build time by scripts/embed-build-info.ts. Reading
+  // package.json from disk via fs.readFile + import.meta.url fails
+  // in `bun --compile` output (the path resolves to a virtual FS
+  // entry the runtime can't open), which historically left every
+  // shipped binary reporting `Version: unknown`.
+  const { BUILD_VERSION } = await import("./lib/build-info.gen")
+  return BUILD_VERSION
 }
 
 function getRuntimeInfo() {

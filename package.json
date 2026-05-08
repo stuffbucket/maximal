@@ -25,9 +25,9 @@
     "dist"
   ],
   "scripts": {
-    "build": "bun run scripts/embed-usage-viewer.ts && tsdown",
-    "dev": "bun run scripts/embed-usage-viewer.ts && bun run --watch ./src/main.ts",
-    "postinstall": "bun run scripts/embed-usage-viewer.ts",
+    "build": "bun run scripts/embed-usage-viewer.ts && bun run scripts/embed-build-info.ts && tsdown",
+    "dev": "bun run scripts/embed-usage-viewer.ts && bun run scripts/embed-build-info.ts && bun run --watch ./src/main.ts",
+    "postinstall": "bun run scripts/embed-usage-viewer.ts && bun run scripts/embed-build-info.ts",
     "knip": "knip-bun",
     "lint": "eslint --cache",
     "lint:all": "eslint --cache .",

@@ -157,21 +157,27 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Generate embedded assets
-        # `postinstall` runs the same script and usually populates
-        # this for us, but Bun's lifecycle-script execution under
-        # `--frozen-lockfile` has been inconsistent across versions.
-        # Re-run explicitly so `bun build --compile` always sees a
-        # fresh src/pages/usage-viewer.gen.ts in its static-import
-        # graph. Without this the compiled binary either fails to
-        # build or carries stale HTML.
-        shell: bash
-        run: bun run scripts/embed-usage-viewer.ts
-
       - name: Resolve version
         id: ver
         shell: bash
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate embedded assets
+        # `postinstall` runs the same scripts and usually populates
+        # them for us, but Bun's lifecycle-script execution under
+        # `--frozen-lockfile` has been inconsistent across versions.
+        # Re-run explicitly so `bun build --compile` always sees
+        # fresh src/pages/usage-viewer.gen.ts AND
+        # src/lib/build-info.gen.ts in its static-import graph.
+        # BUILD_VERSION pins the embedded version to the release
+        # tag (stripped of `v`), so `maximal debug` reports the
+        # release version even if package.json lags behind.
+        shell: bash
+        env:
+          BUILD_VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          bun run scripts/embed-usage-viewer.ts
+          bun run scripts/embed-build-info.ts
 
       - name: Compile binary
         shell: bash
