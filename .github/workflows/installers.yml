@@ -230,6 +230,21 @@ jobs:
             dist-release/maximal-${{ env.TAG }}-darwin-${{ env.ARCH }}.app.zip
             dist-release/maximal-${{ env.TAG }}-darwin-${{ env.ARCH }}.app.zip.sha256
 
+      # Also share the unsigned .app.zip with macos-signed via a
+      # workflow artifact. Going through the release ran into the
+      # GitHub REST API's eventual-consistency window — the asset list
+      # for /releases/tags/{tag} sometimes hasn't caught up by the time
+      # the next job queries it, and the curl 'asset not found' was
+      # racing the upload. Workflow artifacts are immediately
+      # consistent across jobs.
+      - name: Share .app.zip with macos-signed
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-unsigned-app-zip
+          path: dist-release/maximal-${{ env.TAG }}-darwin-${{ env.ARCH }}.app.zip
+          retention-days: 1
+          if-no-files-found: error
+
   # Sign + notarize the .app + build a signed/notarized DMG on the
   # self-hosted Mac runner provisioned with a `maximal.keychain-db`
   # in the runner user's home with the Developer ID cert imported.
@@ -271,30 +286,22 @@ jobs:
           echo "APP_ZIP=${APP_ZIP}" >> "$GITHUB_ENV"
           echo "DMG=${DMG}"         >> "$GITHUB_ENV"
 
-      - name: Download unsigned .app.zip from release
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Prepare working dirs
         run: |
           set -euo pipefail
           rm -rf dist-input dist-build dist-release
           mkdir -p dist-input dist-build dist-release
-          # Use the REST API + curl rather than `gh` because gh on this
-          # runner may be in use by a different agent. This works with
-          # any tag whose release contains the unsigned .app.zip.
-          ASSET_URL=$(curl -fsSL \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
-            | python3 -c "import sys,json; r=json.load(sys.stdin); a=[x for x in r['assets'] if x['name']==sys.argv[1]]; print(a[0]['url'] if a else '')" "$APP_ZIP")
-          if [ -z "$ASSET_URL" ]; then
-            echo "::error::asset $APP_ZIP not found on release $TAG"
-            exit 1
-          fi
-          curl -fsSL \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/octet-stream" \
-            -o "dist-input/$APP_ZIP" \
-            "$ASSET_URL"
+
+      - name: Download unsigned .app.zip artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-unsigned-app-zip
+          path: dist-input
+
+      - name: Unpack .app
+        run: |
+          set -euo pipefail
+          ls -la dist-input
           (cd dist-build && unzip -q "../dist-input/$APP_ZIP")
           ls -la dist-build/maximal.app/Contents/MacOS
 
