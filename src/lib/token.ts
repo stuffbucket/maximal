@@ -1,8 +1,6 @@
 import consola from "consola"
-import fs from "node:fs/promises"
 import { setTimeout as delay } from "node:timers/promises"
 
-import { isOpencodeOauthApp } from "~/lib/api-config"
 import { PATHS } from "~/lib/paths"
 import { getCopilotToken } from "~/services/github/get-copilot-token"
 import { getCopilotUsage } from "~/services/github/get-copilot-usage"
@@ -11,6 +9,13 @@ import { getGitHubUser } from "~/services/github/get-user"
 import { pollAccessToken } from "~/services/github/poll-access-token"
 
 import { HTTPError } from "./error"
+import {
+  inferTokenType,
+  makeRecord,
+  readDefaultRecord,
+  writeDefaultRecord,
+} from "./github-token-store"
+import { isHeadless, openUrl } from "./open-url"
 import { setCopilotToken, state } from "./state"
 
 let copilotRefreshLoopController: AbortController | null = null
@@ -24,18 +29,17 @@ export const stopCopilotRefreshLoop = () => {
   copilotRefreshLoopController = null
 }
 
-const readGithubToken = () => fs.readFile(PATHS.GITHUB_TOKEN_PATH, "utf8")
-
-const writeGithubToken = (token: string) =>
-  fs.writeFile(PATHS.GITHUB_TOKEN_PATH, token)
-
 export const setupCopilotToken = async () => {
-  if (isOpencodeOauthApp()) {
-    if (!state.githubToken) throw new Error(`opencode token not found`)
+  // Runtime token-type detection: `gho_` tokens (OAuth-App user tokens, e.g.
+  // opencode-style or any Ov23li…-prefixed app) are accepted directly by the
+  // Copilot edge, don't expire, and need no refresh loop. `ghu_` tokens
+  // (GitHub-App user-to-server tokens, our default from Iv1.b507a08c87ecfe98)
+  // require the existing /copilot_internal/v2/token exchange + refresh.
+  const githubToken = state.githubToken
+  if (githubToken && inferTokenType(githubToken) === "gho_") {
+    setCopilotToken(githubToken)
 
-    setCopilotToken(state.githubToken)
-
-    consola.debug("GitHub Copilot token set from opencode auth token")
+    consola.debug("Using gho_ token directly as Copilot bearer; no refresh")
     if (state.showToken) {
       consola.info("Copilot token:", state.copilotToken)
     }
@@ -47,7 +51,6 @@ export const setupCopilotToken = async () => {
   const { token, refresh_in } = await getCopilotToken()
   setCopilotToken(token)
 
-  // Display the Copilot token to the screen
   consola.debug("GitHub Copilot Token fetched successfully!")
   if (state.showToken) {
     consola.info("Copilot token:", token)
@@ -123,34 +126,53 @@ const runCopilotRefreshLoop = async (
 
 interface SetupGitHubTokenOptions {
   force?: boolean
+  /** Skip the auto-browser-open step; print the URL/code only. */
+  noBrowser?: boolean
 }
 
 export async function setupGitHubToken(
   options?: SetupGitHubTokenOptions,
 ): Promise<void> {
   try {
-    const githubToken = await readGithubToken()
+    const existing = await readDefaultRecord()
 
-    if (githubToken && !options?.force) {
-      state.githubToken = githubToken
+    if (existing && !options?.force) {
+      state.githubToken = existing.accessToken
       if (state.showToken) {
-        consola.info("GitHub token:", githubToken)
+        consola.info("GitHub token:", existing.accessToken)
       }
       await logUser()
-
       return
     }
 
-    consola.info("Not logged in, getting new access token")
+    consola.info("Not logged in, requesting a new device code")
     const response = await getDeviceCode()
     consola.debug("Device code response:", response)
 
+    // GitHub accepts a `user_code` query parameter on the verification URL
+    // and pre-fills the input field, dropping a copy/paste step. The
+    // `verification_uri_complete` field on RFC 8628 responses provides the
+    // canonical URL when the server supports it; fall back to manual
+    // composition (GitHub's verification_uri is `https://github.com/login/device`).
+    const completeUrl = buildVerificationUrl(response)
+
     consola.info(
-      `Please enter the code "${response.user_code}" in ${response.verification_uri}`,
+      `Open ${completeUrl} in your browser and approve. Code: ${response.user_code}`,
     )
 
+    if (!options?.noBrowser && !isHeadless()) {
+      const opened = openUrl(completeUrl)
+      if (opened.ok) {
+        consola.info("(Opened your default browser.)")
+      } else {
+        consola.info(
+          "(Couldn't open the browser automatically. Visit the URL manually.)",
+        )
+      }
+    }
+
     const token = await pollAccessToken(response)
-    await writeGithubToken(token)
+    await writeDefaultRecord(makeRecord(token))
     state.githubToken = token
 
     if (state.showToken) {
@@ -168,6 +190,19 @@ export async function setupGitHubToken(
   }
 }
 
+function buildVerificationUrl(response: {
+  verification_uri: string
+  verification_uri_complete?: string
+  user_code: string
+}): string {
+  if (response.verification_uri_complete) {
+    return response.verification_uri_complete
+  }
+  const url = new URL(response.verification_uri)
+  url.searchParams.set("user_code", response.user_code)
+  return url.toString()
+}
+
 export async function logUser() {
   const user = await getGitHubUser()
   state.userName = user.login
@@ -176,3 +211,7 @@ export async function logUser() {
   const copilotUser = await getCopilotUsage()
   state.copilotApiUrl = copilotUser.endpoints.api
 }
+
+// Re-export so callers that wrote bare-string tokens via PATHS.GITHUB_TOKEN_PATH
+// continue to work. New code should use readGitHubTokenRecord().
+export const GITHUB_TOKEN_PATH = PATHS.GITHUB_TOKEN_PATH

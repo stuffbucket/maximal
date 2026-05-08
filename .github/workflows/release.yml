@@ -157,6 +157,17 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Generate embedded assets
+        # `postinstall` runs the same script and usually populates
+        # this for us, but Bun's lifecycle-script execution under
+        # `--frozen-lockfile` has been inconsistent across versions.
+        # Re-run explicitly so `bun build --compile` always sees a
+        # fresh src/pages/usage-viewer.gen.ts in its static-import
+        # graph. Without this the compiled binary either fails to
+        # build or carries stale HTML.
+        shell: bash
+        run: bun run scripts/embed-usage-viewer.ts
+
       - name: Resolve version
         id: ver
         shell: bash

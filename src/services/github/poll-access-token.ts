@@ -5,50 +5,111 @@ import { sleep } from "~/lib/utils"
 
 import type { DeviceCodeResponse } from "./get-device-code"
 
+/**
+ * RFC 8628 §3.5 device-code polling.
+ *
+ * GitHub returns auth-flow status with HTTP 200 and an `error` field in the
+ * JSON body, *not* a non-2xx status. Recognised values:
+ *
+ *   - `authorization_pending` → user hasn't approved yet; continue polling.
+ *   - `slow_down` → bump the interval by ≥5 seconds (RFC requirement).
+ *     GitHub may include a fresh `interval` field; honour the larger.
+ *   - `expired_token` / `access_denied` → terminal errors; throw.
+ *
+ * The previous implementation treated non-2xx as "keep waiting" and silently
+ * dropped `slow_down`, which on a heavily-rate-limited account could lead to
+ * GitHub revoking the device-code mid-flow.
+ */
+
+const SLOW_DOWN_BUMP_SECONDS = 5
+
 export async function pollAccessToken(
   deviceCode: DeviceCodeResponse,
 ): Promise<string> {
   const { clientId, headers } = getOauthAppConfig()
   const { accessTokenUrl } = getOauthUrls()
 
-  // Interval is in seconds, we need to multiply by 1000 to get milliseconds
-  // I'm also adding another second, just to be safe
-  const sleepDuration = (deviceCode.interval + 1) * 1000
-  consola.debug(`Polling access token with interval of ${sleepDuration}ms`)
+  // Server-told interval is in seconds. Add a 1s safety buffer (small bump
+  // shields against minor clock skew).
+  let intervalSeconds = deviceCode.interval + 1
+  consola.debug(`Polling access token at ${intervalSeconds}s interval`)
 
   while (true) {
-    const response = await fetch(accessTokenUrl, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        client_id: clientId,
-        device_code: deviceCode.device_code,
-        grant_type: "urn:ietf:params:oauth:grant-type:device_code",
-      }),
-    })
+    await sleep(intervalSeconds * 1000)
 
-    if (!response.ok) {
-      await sleep(sleepDuration)
-      consola.error("Failed to poll access token:", await response.text())
-
+    let response: Response
+    try {
+      response = await fetch(accessTokenUrl, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          client_id: clientId,
+          device_code: deviceCode.device_code,
+          grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+        }),
+      })
+    } catch (err) {
+      consola.warn("Device-code poll: network error, retrying", err)
       continue
     }
 
-    const json = await response.json()
-    consola.debug("Polling access token response:", json)
+    let body: PollResponseBody
+    try {
+      body = (await response.json()) as PollResponseBody
+    } catch {
+      consola.warn(
+        `Device-code poll: non-JSON response (HTTP ${response.status}), retrying`,
+      )
+      continue
+    }
 
-    const { access_token } = json as AccessTokenResponse
+    consola.debug("Device-code poll response:", body)
 
-    if (access_token) {
-      return access_token
-    } else {
-      await sleep(sleepDuration)
+    if (typeof body.access_token === "string" && body.access_token) {
+      return body.access_token
+    }
+
+    switch (body.error) {
+      case "authorization_pending": {
+        continue
+      }
+      case "slow_down": {
+        intervalSeconds =
+          typeof body.interval === "number" && body.interval > intervalSeconds ?
+            body.interval + 1
+          : intervalSeconds + SLOW_DOWN_BUMP_SECONDS
+        consola.debug(`Server asked for slow_down → ${intervalSeconds}s`)
+        continue
+      }
+      case "expired_token": {
+        throw new Error(
+          "Device code expired before authorization. Re-run setup.",
+        )
+      }
+      case "access_denied": {
+        throw new Error("Authorization denied by the user.")
+      }
+      case undefined: {
+        consola.warn("Device-code poll: empty response, retrying")
+        continue
+      }
+      default: {
+        throw new Error(
+          `Device-code poll failed: ${body.error}${
+            body.error_description ? ` — ${body.error_description}` : ""
+          }`,
+        )
+      }
     }
   }
 }
 
-interface AccessTokenResponse {
-  access_token: string
-  token_type: string
-  scope: string
+interface PollResponseBody {
+  access_token?: string
+  token_type?: string
+  scope?: string
+  error?: string
+  error_description?: string
+  error_uri?: string
+  interval?: number
 }

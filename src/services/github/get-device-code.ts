@@ -23,6 +23,10 @@ export interface DeviceCodeResponse {
   device_code: string
   user_code: string
   verification_uri: string
+  /** RFC 8628 pre-filled URL with user_code in the query string. GitHub
+   *  doesn't always populate it; callers should fall back to composing
+   *  the URL from `verification_uri` + `user_code`. */
+  verification_uri_complete?: string
   expires_in: number
   interval: number
 }
