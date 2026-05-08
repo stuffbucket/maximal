@@ -56,6 +56,29 @@
       <ComponentGroupRef Id="StartMenuComponents" />
     </Feature>
 
+    <!--
+      Stop any running copy of maximal.exe before files are touched.
+      Without this, install / upgrade / uninstall hits the MSI
+      "files in use" prompt the moment the running .exe holds the
+      file lock, and a port-bound maximal blocks `maximal start`
+      after install with EADDRINUSE on 4141.
+
+      taskkill returns 128 when the process isn't running; Return
+      "ignore" treats both 0 and 128 as success. SystemFolder
+      resolves to C:\Windows\System32 at runtime so this works on
+      every install path.
+    -->
+    <CustomAction
+        Id="StopRunningMaximal"
+        Directory="SystemFolder"
+        ExeCommand="taskkill.exe /F /IM maximal.exe /T"
+        Execute="immediate"
+        Return="ignore" />
+
+    <InstallExecuteSequence>
+      <Custom Action="StopRunningMaximal" Before="InstallValidate" />
+    </InstallExecuteSequence>
+
   </Package>
 
   <Fragment>
