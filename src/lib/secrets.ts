@@ -78,11 +78,16 @@ export function readSecret(opts: {
   // tolerate 0600 (or stricter — but that's rare). Anything broader
   // means group or world can read; refuse so a drive-by chmod doesn't
   // turn into a credential leak.
-  const mode = stats.mode & 0o777
-  if (mode !== SAFE_FILE_MODE) {
-    const msg = `${file} has insecure mode ${mode.toString(8).padStart(3, "0")} (expected 600); skipped`
-    consola.warn(msg)
-    return { value: undefined, source: "unset", diagnostic: msg }
+  // Windows NTFS doesn't implement POSIX modes — Node always reports
+  // 0o666 there, so the check would unconditionally reject every file.
+  // Skip it on win32 and rely on NTFS ACLs instead.
+  if (process.platform !== "win32") {
+    const mode = stats.mode & 0o777
+    if (mode !== SAFE_FILE_MODE) {
+      const msg = `${file} has insecure mode ${mode.toString(8).padStart(3, "0")} (expected 600); skipped`
+      consola.warn(msg)
+      return { value: undefined, source: "unset", diagnostic: msg }
+    }
   }
 
   let value: string
@@ -159,7 +164,8 @@ export function secretIsFromFile(fileName: string, value: string): boolean {
     const filePath = path.join(SECRETS_DIR, fileName)
     const stats = fs.statSync(filePath)
     if (!stats.isFile()) return false
-    if ((stats.mode & 0o777) !== SAFE_FILE_MODE) return false
+    if (process.platform !== "win32" && (stats.mode & 0o777) !== SAFE_FILE_MODE)
+      return false
     return fs.readFileSync(filePath, "utf8").trim() === value
   } catch {
     return false

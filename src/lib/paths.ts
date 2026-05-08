@@ -5,7 +5,16 @@ import path from "node:path"
 const AUTH_APP = process.env.COPILOT_API_OAUTH_APP?.trim() || ""
 const ENTERPRISE_PREFIX = process.env.COPILOT_API_ENTERPRISE_URL ? "ent_" : ""
 
-const DEFAULT_DIR = path.join(os.homedir(), ".local", "share", "copilot-api")
+function getDefaultAppDir(): string {
+  if (process.platform === "win32") {
+    const appData =
+      process.env.APPDATA ?? path.join(os.homedir(), "AppData", "Roaming")
+    return path.join(appData, "copilot-api")
+  }
+  return path.join(os.homedir(), ".local", "share", "copilot-api")
+}
+
+const DEFAULT_DIR = getDefaultAppDir()
 const APP_DIR = process.env.COPILOT_API_HOME || DEFAULT_DIR
 
 const GITHUB_TOKEN_PATH = path.join(
