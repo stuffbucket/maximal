@@ -27,6 +27,7 @@
   "scripts": {
     "build": "bun run scripts/embed-usage-viewer.ts && tsdown",
     "dev": "bun run scripts/embed-usage-viewer.ts && bun run --watch ./src/main.ts",
+    "postinstall": "bun run scripts/embed-usage-viewer.ts",
     "knip": "knip-bun",
     "lint": "eslint --cache",
     "lint:all": "eslint --cache .",
