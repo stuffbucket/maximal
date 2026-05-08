@@ -75,8 +75,8 @@ wins:
 |---|---|---|---|
 | 1 | **CLI flags** | per-invocation | `--port`, `--account-type`, `--verbose`, etc. See `copilot-api start --help`. |
 | 2 | **Environment variables** | shell scope | `OLLAMA_API_KEY`, `ANTHROPIC_API_KEY`, `COPILOT_API_HOME`, `COPILOT_API_ENTERPRISE_URL`, `COPILOT_API_OAUTH_APP`. Bun also auto-loads `.env`. |
-| 3 | **Secrets files** | persistent, mode 0600 | `~/.local/share/copilot-api/secrets/<provider>` (Linux/macOS) or `%APPDATA%\copilot-api\secrets\<provider>` (Windows). Refused if mode is broader than 0600 (POSIX only; Windows relies on NTFS ACLs). |
-| 4 | **Config file** | persistent | `~/.local/share/copilot-api/config.json` (Linux/macOS) or `%APPDATA%\copilot-api\config.json` (Windows). Schema-validated at boot; bad keys fail with a key path. Unknown keys warn but pass through. |
+| 3 | **Secrets files** | persistent, mode 0600 | `~/.local/share/maximal/secrets/<provider>` (Linux/macOS) or `%APPDATA%\maximal\secrets\<provider>` (Windows). Refused if mode is broader than 0600 (POSIX only; Windows relies on NTFS ACLs). |
+| 4 | **Config file** | persistent | `~/.local/share/maximal/config.json` (Linux/macOS) or `%APPDATA%\maximal\config.json` (Windows). Schema-validated at boot; bad keys fail with a key path. Unknown keys warn but pass through. |
 | 5 | **Built-in defaults** | always | `src/lib/config.ts`. |
 
 ### Knob reference
@@ -91,7 +91,7 @@ wins:
 | Ollama API key | — | `OLLAMA_API_KEY` | `secrets/ollama` | unset |
 | Anthropic API key | — | `ANTHROPIC_API_KEY` | `secrets/anthropic` | `config.anthropicApiKey` |
 | GitHub token | `--github-token` | — | `app/github_token` | from `auth` flow |
-| App home dir | — | `COPILOT_API_HOME` | — | `~/.local/share/copilot-api` (Linux/macOS), `%APPDATA%\copilot-api` (Windows) |
+| App home dir | — | `COPILOT_API_HOME` | — | `~/.local/share/maximal` (Linux/macOS), `%APPDATA%\maximal` (Windows) |
 | Enterprise URL | — | `COPILOT_API_ENTERPRISE_URL` | — | unset |
 | OAuth app ID | — | `COPILOT_API_OAUTH_APP` | — | upstream default |
 | Use Messages API | — | — | `useMessagesApi` | `true` |

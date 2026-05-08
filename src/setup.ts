@@ -35,6 +35,7 @@ interface RunSetupOptions {
   unattended: boolean
   skipAuth: boolean
   skipSmoke: boolean
+  noBrowser: boolean
   port: number
 }
 
@@ -48,8 +49,9 @@ export async function runSetup(opts: RunSetupOptions): Promise<void> {
     consola.info("Step 1/3: GitHub authentication")
     try {
       // setupGitHubToken is idempotent — won't re-prompt if a valid
-      // token already exists on disk.
-      await setupGitHubToken({ force: false })
+      // token already exists on disk. `noBrowser` skips the auto-open
+      // step (still prints the URL+code).
+      await setupGitHubToken({ force: false, noBrowser: opts.noBrowser })
       consola.success("GitHub authenticated")
     } catch (err) {
       consola.error("GitHub auth failed", err)
@@ -143,6 +145,12 @@ export const setup = defineCommand({
       default: false,
       description: "Skip the /v1/messages smoke-test step.",
     },
+    "no-browser": {
+      type: "boolean",
+      default: false,
+      description:
+        "Don't auto-open the device-code verification URL. Print it for manual paste (useful over SSH).",
+    },
     port: {
       alias: "p",
       type: "string",
@@ -156,6 +164,7 @@ export const setup = defineCommand({
       unattended: args.unattended,
       skipAuth: args["skip-auth"],
       skipSmoke: args["skip-smoke"],
+      noBrowser: args["no-browser"],
       port: Number.parseInt(args.port, 10),
     })
   },

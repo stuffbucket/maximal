@@ -1,7 +1,7 @@
 /**
  * File-based secrets loader.
  *
- * Reads provider keys from `~/.local/share/copilot-api/secrets/<name>`.
+ * Reads provider keys from `~/.local/share/maximal/secrets/<name>`.
  * Env vars still win — this is a fallback for "I don't want my API
  * key in shell history."
  *
