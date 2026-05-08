@@ -36,6 +36,29 @@ interface RunServerOptions {
   proxyEnv: boolean
 }
 
+/**
+ * Probe `localhost:port` before we start so we can fail fast with a
+ * useful message instead of spending 5s on Copilot bootstrap and
+ * then dying on EADDRINUSE deep inside srvx. Returns:
+ *
+ *   - "free"     — nothing answered; port is ours to bind.
+ *   - "maximal"  — got the canary "Server running" from `/`,
+ *                  meaning another copy of maximal is already up.
+ *   - "other"    — something answered but it isn't us.
+ */
+async function probePort(port: number): Promise<"free" | "maximal" | "other"> {
+  try {
+    const res = await fetch(`http://localhost:${port}/`, {
+      signal: AbortSignal.timeout(500),
+    })
+    if (!res.ok) return "other"
+    const text = (await res.text()).trim()
+    return text === "Server running" ? "maximal" : "other"
+  } catch {
+    return "free"
+  }
+}
+
 export async function runServer(options: RunServerOptions): Promise<void> {
   // Work around unjs/consola#357 until a release includes PR #359.
   consola.options.throttle = 0
@@ -45,6 +68,44 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   // (token exchange, model fetch, machine-id + session-id caching),
   // and without this line the terminal just sits silent.
   consola.start("Starting maximal…")
+
+  // Bail out early if the port is already taken — much friendlier
+  // than crashing 5s later inside srvx with EADDRINUSE.
+  const portState = await probePort(options.port)
+  if (portState !== "free") {
+    const url = `http://localhost:${options.port}`
+    if (portState === "maximal") {
+      consola.warn(
+        [
+          `Another maximal is already running on port ${options.port}.`,
+          ``,
+          `It's already listening at ${url}. Point your client at`,
+          `that URL — no second instance needed.`,
+          ``,
+          `If you want a separate copy on another port:`,
+          `    maximal start --port ${options.port + 1}`,
+        ].join("\n"),
+      )
+    } else {
+      const lookupHint =
+        process.platform === "win32" ?
+          `netstat -ano | findstr :${options.port}`
+        : `lsof -i :${options.port}`
+      consola.error(
+        [
+          `Port ${options.port} is already in use by another process.`,
+          ``,
+          `Either stop whatever is holding the port, or pick a`,
+          `different one:`,
+          `    maximal start --port ${options.port + 1}`,
+          ``,
+          `Find the offender with:`,
+          `    ${lookupHint}`,
+        ].join("\n"),
+      )
+    }
+    process.exit(1)
+  }
 
   // Ensure config is merged with defaults at startup
   mergeConfigWithDefaults()
