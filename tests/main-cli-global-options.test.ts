@@ -1,4 +1,6 @@
-import { describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
+import fs from "node:fs"
+import os from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -10,6 +12,11 @@ interface DebugInfo {
 }
 
 const cwd = fileURLToPath(new URL("../", import.meta.url))
+const tmpHome = path.join(os.tmpdir(), "maximal-test-foo")
+
+afterAll(() => {
+  fs.rmSync(tmpHome, { recursive: true, force: true })
+})
 const decoder = new TextDecoder()
 const baseEnv = {
   ...process.env,
@@ -38,10 +45,12 @@ const runDebugJson = (...args: Array<string>): DebugInfo => {
 
 describe("root-level global CLI options", () => {
   test("supports --api-home=value before the subcommand", () => {
-    const info = runDebugJson("--api-home=foo")
+    const info = runDebugJson(`--api-home=${tmpHome}`)
 
-    expect(info.paths.APP_DIR).toBe("foo")
-    expect(info.paths.GITHUB_TOKEN_PATH).toBe(path.join("foo", "github_token"))
+    expect(info.paths.APP_DIR).toBe(tmpHome)
+    expect(info.paths.GITHUB_TOKEN_PATH).toBe(
+      path.join(tmpHome, "github_token"),
+    )
   })
 
   test("supports --oauth-app=value before the subcommand", () => {
@@ -61,14 +70,14 @@ describe("root-level global CLI options", () => {
 
   test("supports combining root-level global CLI options", () => {
     const info = runDebugJson(
-      "--api-home=foo",
+      `--api-home=${tmpHome}`,
       "--oauth-app=myapp",
       "--enterprise-url=ghe.example.com",
     )
 
-    expect(info.paths.APP_DIR).toBe("foo")
+    expect(info.paths.APP_DIR).toBe(tmpHome)
     expect(info.paths.GITHUB_TOKEN_PATH).toBe(
-      path.join("foo", "myapp", "ent_github_token"),
+      path.join(tmpHome, "myapp", "ent_github_token"),
     )
   })
 })

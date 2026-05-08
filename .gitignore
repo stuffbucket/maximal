@@ -36,4 +36,5 @@ SBOM.cdx.json
 .opencode/package-lock.json
 *.vsix
 .claude
+contrib/slides/
 
