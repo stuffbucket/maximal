@@ -409,3 +409,27 @@ jobs:
             --ref main \
             --field "tag=$TAG"
           echo "Dispatched installers.yml for $TAG"
+
+  # GitHub suppresses the `release: published` event when a release is
+  # created via GITHUB_TOKEN (the anti-loop guard documented up top),
+  # which means deploy-pages.yml's `release` trigger never fires for
+  # our releases. Explicitly dispatch the site rebuild here so the
+  # landing page's "latest: vX.Y.Z" + download URLs always track the
+  # release that was just published.
+  redeploy-site:
+    needs: binaries
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Trigger deploy-pages.yml
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh workflow run deploy-pages.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main
+          echo "Dispatched deploy-pages.yml after $TAG"
