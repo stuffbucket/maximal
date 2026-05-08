@@ -231,7 +231,7 @@ function formatField(name: string, value: Stringy): string {
 
 function printDebugInfoPlain(info: DebugInfo): void {
   const lines = [
-    `copilot-api debug`,
+    `maximal debug`,
     ``,
     `Version: ${info.version}`,
     `Git: ${shortSha(info.git.sha)}${info.git.branch ? ` (${info.git.branch})` : ""}`,

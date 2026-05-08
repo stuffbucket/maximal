@@ -2,7 +2,6 @@ import consola from "consola"
 import { Hono } from "hono"
 import { cors } from "hono/cors"
 import { logger } from "hono/logger"
-import { readFileSync } from "node:fs"
 
 import { staleRefreshMiddleware } from "./lib/refresh-models"
 import { createAuthMiddleware } from "./lib/request-auth"
@@ -56,15 +55,18 @@ server.use(
 )
 
 server.get("/", (c) => c.text("Server running"))
-server.get("/usage-viewer", (c) => {
-  // Resolves to `src/pages/usage-viewer.html` in dev (Bun running TS
-  // source) and to `dist/pages/usage-viewer.html` in the bundled
-  // build (tsdown copies `src/pages` to `dist/pages`).
+server.get("/usage-viewer", async (c) => {
+  // Bun's `--compile` output embeds files referenced via
+  // import.meta.url-relative URLs but only `Bun.file()` knows how to
+  // read them through the virtual filesystem on every platform.
+  // `readFileSync` against the same URL works in dev and on macOS
+  // builds but 500'd on Windows (`B:\~BUN\root\pages\usage-viewer.html`,
+  // ENOENT). Same code path covers both runtimes here.
   const usageViewerFileUrl = new URL(
     "./pages/usage-viewer.html",
     import.meta.url,
   )
-  return c.html(readFileSync(usageViewerFileUrl, "utf8"))
+  return c.html(await Bun.file(usageViewerFileUrl).text())
 })
 server.get("/usage-viewer/", (c) => c.redirect("/usage-viewer", 301))
 
