@@ -31,35 +31,66 @@ export async function ensurePaths(): Promise<void> {
 }
 
 /**
- * One-time rename of the pre-rename `~/.local/share/copilot-api`
- * directory to the new `~/.local/share/maximal` location, so users
- * upgrading from v0.3.x don't have to re-auth or re-configure.
+ * One-time migration of the pre-rename `~/.local/share/copilot-api`
+ * directory to the new `~/.local/share/maximal` location.
  *
- * Skipped when `COPILOT_API_HOME` is set (the user has explicitly
- * pointed at a custom dir) or when the new dir already exists (we've
- * already migrated, or this is a fresh install).
+ * Cold path (cleanest): the new dir doesn't exist yet. Rename
+ * legacy → new in one fs.rename — atomic, preserves mtimes.
+ *
+ * Warm path: the new dir already exists. An older sibling maximal
+ * (or this binary on a previous start) may have created the dir
+ * with empty `github_token` / `config.json` placeholders that
+ * skipped over the legacy state. Cherry-pick auth + config from the
+ * legacy dir if (and only if) the new dir is missing or has zero-
+ * byte versions of those files. Never clobber a populated file.
+ *
+ * Skipped entirely when COPILOT_API_HOME is set or APP_DIR points
+ * outside DEFAULT_DIR.
  */
 async function migrateLegacyAppDir(): Promise<void> {
   if (process.env.COPILOT_API_HOME) return
   if (APP_DIR !== DEFAULT_DIR) return
-
-  // Already migrated / fresh install with new layout?
-  if (await pathExists(DEFAULT_DIR)) return
-  // No legacy state to migrate?
   if (!(await pathExists(LEGACY_DIR))) return
 
-  try {
-    await fs.rename(LEGACY_DIR, DEFAULT_DIR)
-    consola.info(`Migrated app data: ${LEGACY_DIR} → ${DEFAULT_DIR}`)
-  } catch (err) {
-    // Don't crash on a migration failure — fall through to creating
-    // a fresh directory at the new location. Users keep their old
-    // state at the legacy path and can copy by hand if needed.
-    consola.warn(
-      `Could not move legacy app data from ${LEGACY_DIR} to ${DEFAULT_DIR}; `
-        + `using a fresh directory.`,
-      err,
-    )
+  if (!(await pathExists(DEFAULT_DIR))) {
+    try {
+      await fs.rename(LEGACY_DIR, DEFAULT_DIR)
+      consola.info(`Migrated app data: ${LEGACY_DIR} → ${DEFAULT_DIR}`)
+      return
+    } catch (err) {
+      consola.warn(
+        `Could not move legacy app data from ${LEGACY_DIR} to ${DEFAULT_DIR}; `
+          + `using a fresh directory.`,
+        err,
+      )
+      return
+    }
+  }
+
+  // Warm-migration cherry-pick: pull forward each known stateful
+  // file if (and only if) the new dir's copy is absent or empty.
+  for (const relPath of ["github_token", "config.json"]) {
+    const fromPath = path.join(LEGACY_DIR, relPath)
+    const toPath = path.join(DEFAULT_DIR, relPath)
+    try {
+      const fromStat = await fs.stat(fromPath)
+      if (!fromStat.isFile() || fromStat.size === 0) continue
+    } catch {
+      continue
+    }
+    try {
+      const toStat = await fs.stat(toPath)
+      if (toStat.isFile() && toStat.size > 0) continue
+    } catch {
+      // toPath doesn't exist — fine, copy through
+    }
+    try {
+      await fs.copyFile(fromPath, toPath)
+      await fs.chmod(toPath, 0o600)
+      consola.info(`Carried legacy ${relPath} forward from ${LEGACY_DIR}`)
+    } catch (err) {
+      consola.warn(`Could not carry forward ${fromPath} → ${toPath}`, err)
+    }
   }
 }
 
