@@ -1,0 +1,20 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Tray + dashboard window permissions",
+  "windows": ["dashboard"],
+  "permissions": [
+    "core:default",
+    "opener:default",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "name": "binaries/maximal",
+          "sidecar": true,
+          "args": ["start"]
+        }
+      ]
+    }
+  ]
+}
