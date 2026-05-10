@@ -10,8 +10,6 @@
 
 import type { ConsolaInstance } from "consola"
 
-import { debugLazy } from "~/lib/logger"
-
 import type {
   AnthropicAssistantContentBlock,
   AnthropicMessage,
@@ -19,7 +17,10 @@ import type {
   AnthropicResponse,
   AnthropicToolResultBlock,
   AnthropicToolUseBlock,
-} from "./anthropic-types"
+} from "~/lib/anthropic-types"
+
+import { debugLazy } from "~/lib/logger"
+
 import type { Executor } from "./web-tools-executor"
 
 import {

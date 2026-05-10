@@ -1,12 +1,12 @@
 import consola from "consola"
 import { events } from "fetch-event-stream"
 
-import type { CompactType } from "~/lib/compact"
-import type { SubagentMarker } from "~/lib/subagent"
 import type {
   AnthropicMessagesPayload,
   AnthropicResponse,
-} from "~/routes/messages/anthropic-types"
+} from "~/lib/anthropic-types"
+import type { CompactType } from "~/lib/compact"
+import type { SubagentMarker } from "~/lib/subagent"
 
 import {
   copilotBaseUrl,

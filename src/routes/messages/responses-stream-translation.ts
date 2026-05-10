@@ -1,3 +1,4 @@
+import { type AnthropicStreamEventData } from "~/lib/anthropic-types"
 import {
   type ResponseCompletedEvent,
   type ResponseCreatedEvent,
@@ -16,7 +17,6 @@ import {
   type ResponseTextDoneEvent,
 } from "~/services/copilot/create-responses"
 
-import { type AnthropicStreamEventData } from "./anthropic-types"
 import {
   THINKING_TEXT,
   encodeCompactionCarrierSignature,

@@ -1,3 +1,12 @@
+import type {
+  AnthropicDocumentBlock,
+  AnthropicImageBlock,
+  AnthropicMessage,
+  AnthropicMessagesPayload,
+  AnthropicTextBlock,
+  AnthropicToolResultBlock,
+  AnthropicUserContentBlock,
+} from "~/lib/anthropic-types"
 import type { Model } from "~/services/copilot/get-models"
 
 import {
@@ -11,16 +20,6 @@ import {
   type CompactType,
 } from "~/lib/compact"
 import { getReasoningEffortForModel } from "~/lib/config"
-
-import type {
-  AnthropicDocumentBlock,
-  AnthropicImageBlock,
-  AnthropicMessage,
-  AnthropicMessagesPayload,
-  AnthropicTextBlock,
-  AnthropicToolResultBlock,
-  AnthropicUserContentBlock,
-} from "./anthropic-types"
 
 export const TOOL_REFERENCE_TURN_BOUNDARY = "Tool loaded."
 

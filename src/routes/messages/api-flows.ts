@@ -7,6 +7,11 @@ import type { CompactType } from "~/lib/compact"
 import type { SubagentMarker } from "~/lib/subagent"
 import type { Model } from "~/services/copilot/get-models"
 
+import {
+  type AnthropicMessagesPayload,
+  type AnthropicStreamEventData,
+  type AnthropicStreamState,
+} from "~/lib/anthropic-types"
 import { debugJson, debugJsonTail, debugLazy } from "~/lib/logger"
 import {
   createCopilotTokenUsageRecorder,
@@ -44,11 +49,6 @@ import {
   type ResponseStreamEvent,
 } from "~/services/copilot/create-responses"
 
-import {
-  type AnthropicMessagesPayload,
-  type AnthropicStreamEventData,
-  type AnthropicStreamState,
-} from "./anthropic-types"
 import {
   translateToAnthropic,
   translateToOpenAI,

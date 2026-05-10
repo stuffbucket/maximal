@@ -6,7 +6,7 @@ import consola from "consola"
 import type {
   AnthropicMessagesPayload,
   AnthropicTool,
-} from "~/routes/messages/anthropic-types"
+} from "~/lib/anthropic-types"
 import type { WebToolPolicy } from "~/routes/messages/web-tools-rewriter"
 
 import {

@@ -24,6 +24,14 @@
 import type { ConsolaInstance } from "consola"
 import type { SSEStreamingApi } from "hono/streaming"
 
+import type {
+  AnthropicAssistantContentBlock,
+  AnthropicMessage,
+  AnthropicMessagesPayload,
+  AnthropicStreamEventData,
+  AnthropicStreamState,
+  AnthropicToolUseBlock,
+} from "~/lib/anthropic-types"
 import type { CompactType } from "~/lib/compact"
 import type { SubagentMarker } from "~/lib/subagent"
 
@@ -32,15 +40,6 @@ import {
   createChatCompletions,
   type ChatCompletionChunk,
 } from "~/services/copilot/create-chat-completions"
-
-import type {
-  AnthropicAssistantContentBlock,
-  AnthropicMessage,
-  AnthropicMessagesPayload,
-  AnthropicStreamEventData,
-  AnthropicStreamState,
-  AnthropicToolUseBlock,
-} from "./anthropic-types"
 
 import { isNonStreaming } from "./api-flows"
 import { translateToOpenAI } from "./non-stream-translation"

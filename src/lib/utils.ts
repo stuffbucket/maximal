@@ -4,7 +4,7 @@ import consola from "consola"
 import { createHash, randomUUID } from "node:crypto"
 import { networkInterfaces } from "node:os"
 
-import type { AnthropicMessagesPayload } from "~/routes/messages/anthropic-types"
+import type { AnthropicMessagesPayload } from "~/lib/anthropic-types"
 
 import { getModels } from "~/services/copilot/get-models"
 import { getVSCodeVersion } from "~/services/get-vscode-version"

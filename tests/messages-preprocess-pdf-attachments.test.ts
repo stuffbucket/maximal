@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 
-import type { AnthropicMessagesPayload } from "../src/routes/messages/anthropic-types"
+import type { AnthropicMessagesPayload } from "~/lib/anthropic-types"
 
 import { mergeToolResultForClaude } from "../src/routes/messages/preprocess"
 

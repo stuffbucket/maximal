@@ -3,11 +3,11 @@ import type { Context } from "hono"
 import consola from "consola"
 
 import { reverseId } from "~/lib/anthropic-id-rewrite"
+import { type AnthropicMessagesPayload } from "~/lib/anthropic-types"
 import { getAnthropicApiKey, getClaudeTokenMultiplier } from "~/lib/config"
 import { getTokenCount } from "~/lib/tokenizer"
 
 import { findEndpointModel } from "../../lib/models"
-import { type AnthropicMessagesPayload } from "./anthropic-types"
 import { translateToOpenAI } from "./non-stream-translation"
 
 /**

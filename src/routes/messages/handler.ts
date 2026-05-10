@@ -3,6 +3,7 @@ import type { Context } from "hono"
 import type { Model } from "~/services/copilot/get-models"
 
 import { pickCopilotVariantId, reverseId } from "~/lib/anthropic-id-rewrite"
+import { type AnthropicMessagesPayload } from "~/lib/anthropic-types"
 import { awaitApproval } from "~/lib/approval"
 import { COMPACT_REQUEST } from "~/lib/compact"
 import { getSmallModel, isMessagesApiEnabled } from "~/lib/config"
@@ -12,7 +13,6 @@ import { checkRateLimit } from "~/lib/rate-limit"
 import { state } from "~/lib/state"
 import { generateRequestIdFromPayload, getRootSessionId } from "~/lib/utils"
 
-import { type AnthropicMessagesPayload } from "./anthropic-types"
 import {
   handleWithChatCompletions,
   handleWithMessagesApi,

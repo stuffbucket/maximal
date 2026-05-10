@@ -5,7 +5,7 @@ import type {
   AnthropicMessagesPayload,
   AnthropicResponse,
   AnthropicToolUseBlock,
-} from "~/routes/messages/anthropic-types"
+} from "~/lib/anthropic-types"
 import type { WebToolPolicy } from "~/routes/messages/web-tools-rewriter"
 
 import { runAgentLoop } from "~/routes/messages/web-tools-agent"

@@ -1,5 +1,5 @@
+import type { AnthropicMessagesPayload } from "~/lib/anthropic-types"
 import type { ResolvedProviderConfig } from "~/lib/config"
-import type { AnthropicMessagesPayload } from "~/routes/messages/anthropic-types"
 
 const FORWARDABLE_HEADERS = [
   "anthropic-version",

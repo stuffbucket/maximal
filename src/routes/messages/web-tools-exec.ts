@@ -10,7 +10,8 @@
 import type {
   AnthropicToolResultBlock,
   AnthropicToolUseBlock,
-} from "./anthropic-types"
+} from "~/lib/anthropic-types"
+
 import type {
   Executor,
   FetchResult,

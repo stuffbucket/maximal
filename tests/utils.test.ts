@@ -3,7 +3,7 @@ import type { Context } from "hono"
 import { expect, test } from "bun:test"
 import { createHash, randomUUID } from "node:crypto"
 
-import type { AnthropicMessagesPayload } from "~/routes/messages/anthropic-types"
+import type { AnthropicMessagesPayload } from "~/lib/anthropic-types"
 
 import { getRootSessionId, getUUID } from "../src/lib/utils"
 

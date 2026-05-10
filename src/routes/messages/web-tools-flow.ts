@@ -7,12 +7,12 @@ import type { Context } from "hono"
 
 import { streamSSE } from "hono/streaming"
 
-import { createChatCompletions } from "~/services/copilot/create-chat-completions"
-
 import type {
   AnthropicMessagesPayload,
   AnthropicResponse,
-} from "./anthropic-types"
+} from "~/lib/anthropic-types"
+
+import { createChatCompletions } from "~/services/copilot/create-chat-completions"
 
 import { isNonStreaming, type FlowBaseOptions } from "./api-flows"
 import {

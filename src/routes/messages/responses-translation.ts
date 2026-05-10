@@ -1,6 +1,23 @@
 import consola from "consola"
 
 import {
+  type AnthropicAssistantContentBlock,
+  type AnthropicAssistantMessage,
+  type AnthropicDocumentBlock,
+  type AnthropicResponse,
+  type AnthropicImageBlock,
+  type AnthropicMessage,
+  type AnthropicMessagesPayload,
+  type AnthropicTextBlock,
+  type AnthropicThinkingBlock,
+  type AnthropicTool,
+  type AnthropicToolResultContentBlock,
+  type AnthropicToolResultBlock,
+  type AnthropicToolUseBlock,
+  type AnthropicUserContentBlock,
+  type AnthropicUserMessage,
+} from "~/lib/anthropic-types"
+import {
   getExtraPromptForModel,
   getReasoningEffortForModel,
 } from "~/lib/config"
@@ -31,23 +48,6 @@ import {
   type ToolChoiceOptions,
 } from "~/services/copilot/create-responses"
 
-import {
-  type AnthropicAssistantContentBlock,
-  type AnthropicAssistantMessage,
-  type AnthropicDocumentBlock,
-  type AnthropicResponse,
-  type AnthropicImageBlock,
-  type AnthropicMessage,
-  type AnthropicMessagesPayload,
-  type AnthropicTextBlock,
-  type AnthropicThinkingBlock,
-  type AnthropicTool,
-  type AnthropicToolResultContentBlock,
-  type AnthropicToolResultBlock,
-  type AnthropicToolUseBlock,
-  type AnthropicUserContentBlock,
-  type AnthropicUserMessage,
-} from "./anthropic-types"
 import { normalizeToolSchema } from "./non-stream-translation"
 
 const MESSAGE_TYPE = "message"

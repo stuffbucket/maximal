@@ -5,7 +5,11 @@
  * shims and synthesizes the server-side result blocks on the wire.
  */
 
-import type { AnthropicMessagesPayload, AnthropicTool } from "./anthropic-types"
+import type {
+  AnthropicMessagesPayload,
+  AnthropicTool,
+} from "~/lib/anthropic-types"
+
 import type { WebToolDecl } from "./web-tools-types"
 
 import { TOOL_NAME, TOOL_TYPE, type ToolName } from "./web-tools-vocab"
@@ -41,7 +45,7 @@ export interface WebToolPolicy {
 export function splitWebTools(
   payload: AnthropicMessagesPayload,
 ): WebToolPolicy {
-  const tools = payload.tools as Array<RawTool> | undefined
+  const tools = payload.tools
   if (!tools || tools.length === 0) return EMPTY_POLICY
   if (!tools.some((t) => isWebToolDecl(t))) return EMPTY_POLICY
 

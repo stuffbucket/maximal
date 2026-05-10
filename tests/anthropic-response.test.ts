@@ -6,7 +6,7 @@ import type {
   ChatCompletionResponse,
 } from "~/services/copilot/create-chat-completions"
 
-import { type AnthropicStreamState } from "~/routes/messages/anthropic-types"
+import { type AnthropicStreamState } from "~/lib/anthropic-types"
 import { translateToAnthropic } from "~/routes/messages/non-stream-translation"
 import { translateChunkToAnthropicEvents } from "~/routes/messages/stream-translation"
 

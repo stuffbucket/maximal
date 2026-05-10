@@ -2,10 +2,10 @@ import type { Context } from "hono"
 
 import type { Model } from "~/services/copilot/get-models"
 
+import { type AnthropicMessagesPayload } from "~/lib/anthropic-types"
 import { createHandlerLogger } from "~/lib/logger"
 import { state } from "~/lib/state"
 import { getTokenCount } from "~/lib/tokenizer"
-import { type AnthropicMessagesPayload } from "~/routes/messages/anthropic-types"
 import { translateToOpenAI } from "~/routes/messages/non-stream-translation"
 
 const logger = createHandlerLogger("provider-count-tokens-handler")

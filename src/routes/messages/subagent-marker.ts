@@ -1,6 +1,6 @@
-import { subagentMarkerPrefix, type SubagentMarker } from "~/lib/subagent"
+import type { AnthropicMessagesPayload } from "~/lib/anthropic-types"
 
-import type { AnthropicMessagesPayload } from "./anthropic-types"
+import { subagentMarkerPrefix, type SubagentMarker } from "~/lib/subagent"
 
 export const parseSubagentMarkerFromFirstUser = (
   payload: AnthropicMessagesPayload,

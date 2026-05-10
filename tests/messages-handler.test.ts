@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test"
 import { Hono } from "hono"
 
-import type { AnthropicMessagesPayload } from "../src/routes/messages/anthropic-types"
+import type { AnthropicMessagesPayload } from "~/lib/anthropic-types"
 
 const actualStateModule = await import("../src/lib/state")
 const actualConfigModule = await import("../src/lib/config")

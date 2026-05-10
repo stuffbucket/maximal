@@ -1,16 +1,5 @@
 import type { Model } from "~/services/copilot/get-models"
 
-import { state } from "~/lib/state"
-import {
-  type ChatCompletionResponse,
-  type ChatCompletionsPayload,
-  type ContentPart,
-  type Message,
-  type TextPart,
-  type Tool,
-  type ToolCall,
-} from "~/services/copilot/create-chat-completions"
-
 import {
   type AnthropicAssistantContentBlock,
   type AnthropicAssistantMessage,
@@ -24,7 +13,18 @@ import {
   type AnthropicToolUseBlock,
   type AnthropicUserContentBlock,
   type AnthropicUserMessage,
-} from "./anthropic-types"
+} from "~/lib/anthropic-types"
+import { state } from "~/lib/state"
+import {
+  type ChatCompletionResponse,
+  type ChatCompletionsPayload,
+  type ContentPart,
+  type Message,
+  type TextPart,
+  type Tool,
+  type ToolCall,
+} from "~/services/copilot/create-chat-completions"
+
 import { mapOpenAIStopReasonToAnthropic } from "./utils"
 
 // Compatible with opencode, it will filter out blocks where the thinking text is empty, so we need add a default thinking text
