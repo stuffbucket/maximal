@@ -2,7 +2,7 @@
 //
 // Tauri 2 menu-bar app. On launch we:
 //   1. Spawn the bundled `maximal` binary as a sidecar — it serves
-//      the proxy on http://localhost:4141.
+//      the proxy on http://localhost:4142 (see SIDECAR_PORT below).
 //   2. Show a tray icon with: Open Dashboard, Open Logs Folder, Quit.
 //   3. Hold the sidecar's CommandChild so we can SIGTERM it when the
 //      user picks Quit. Tauri 2 issue #3564 documents the orphan-
@@ -20,14 +20,34 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Manager, RunEvent, WebviewUrl, WebviewWindowBuilder,
 };
-use tauri_plugin_shell::process::CommandChild;
+use tauri_plugin_opener::OpenerExt;
+use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 
-/// Holds the sidecar's CommandChild so the tray can kill it cleanly
-/// at app-exit time. Wrapped in Mutex<Option<...>> because Tauri's
-/// state machine wants Send + Sync, and the child handle is taken
-/// out (option becomes None) once we've issued the kill.
+/// Owns the sidecar's CommandChild for the lifetime of the app.
+///
+/// Wrapped in `Mutex<Option<...>>` because Tauri's managed-state
+/// API requires `Send + Sync`, and the child handle is consumed
+/// (option becomes None) once `kill()` is issued so subsequent
+/// kill calls become harmless no-ops.
 struct Sidecar(Mutex<Option<CommandChild>>);
+
+impl Sidecar {
+    fn new() -> Self {
+        Self(Mutex::new(None))
+    }
+
+    fn set(&self, child: CommandChild) {
+        // Mutex poisoning happens only if a thread panicked while
+        // holding this lock. Nothing fallible runs in the critical
+        // section, so panicking here is fine.
+        *self.0.lock().expect("sidecar mutex poisoned") = Some(child);
+    }
+
+    fn take(&self) -> Option<CommandChild> {
+        self.0.lock().expect("sidecar mutex poisoned").take()
+    }
+}
 
 // The shelled sidecar binds 4142, not the CLI's default 4141. Lets
 // the spike coexist with a hand-installed `maximal start` already
@@ -38,12 +58,20 @@ struct Sidecar(Mutex<Option<CommandChild>>);
 const SIDECAR_PORT: u16 = 4142;
 const DASHBOARD_LABEL: &str = "dashboard";
 
+mod menu_id {
+    pub const OPEN_DASHBOARD: &str = "open_dashboard";
+    pub const OPEN_LOGS: &str = "open_logs";
+    pub const QUIT: &str = "quit";
+}
+
+const TRAY_ID: &str = "main";
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
-        .manage(Sidecar(Mutex::new(None)))
+        .manage(Sidecar::new())
         .setup(|app| {
             spawn_sidecar(app.handle())?;
             install_tray(app.handle())?;
@@ -53,6 +81,8 @@ pub fn run() {
         .expect("error while building tauri application");
 
     app.run(|app_handle, event| {
+        // Sole sidecar-kill site. The tray "Quit" item just calls
+        // `app.exit(0)`, which routes through ExitRequested.
         if let RunEvent::ExitRequested { .. } = event {
             kill_sidecar(app_handle);
         }
@@ -67,21 +97,19 @@ fn spawn_sidecar(app: &tauri::AppHandle) -> tauri::Result<()> {
     let cmd = app
         .shell()
         .sidecar("maximal")
-        .map_err(|e| tauri::Error::Anyhow(anyhow::anyhow!(e)))?
+        .map_err(|e| tauri::Error::Anyhow(e.into()))?
         .args(["start", "--port", port.as_str()]);
 
     let (mut rx, child) = cmd
         .spawn()
-        .map_err(|e| tauri::Error::Anyhow(anyhow::anyhow!(e)))?;
+        .map_err(|e| tauri::Error::Anyhow(e.into()))?;
 
-    let state = app.state::<Sidecar>();
-    *state.0.lock().expect("sidecar mutex poisoned") = Some(child);
+    app.state::<Sidecar>().set(child);
 
     // Drain stdout/stderr so the sidecar's pipes don't fill and
-    // block writes. For the spike we just print; production we'd
-    // forward to a log file.
+    // block writes. TODO(prod): swap to `tracing` + a rolling log
+    // file under the same dir as `open_logs` resolves.
     tauri::async_runtime::spawn(async move {
-        use tauri_plugin_shell::process::CommandEvent;
         while let Some(event) = rx.recv().await {
             match event {
                 CommandEvent::Stdout(line) => {
@@ -92,6 +120,9 @@ fn spawn_sidecar(app: &tauri::AppHandle) -> tauri::Result<()> {
                 }
                 CommandEvent::Terminated(payload) => {
                     eprintln!("[maximal] sidecar exited: {:?}", payload);
+                    // TODO(prod): surface to the tray (greyed-out
+                    // dashboard menu item, error tooltip) instead
+                    // of failing silently.
                     break;
                 }
                 _ => {}
@@ -103,53 +134,48 @@ fn spawn_sidecar(app: &tauri::AppHandle) -> tauri::Result<()> {
 }
 
 fn kill_sidecar(app: &tauri::AppHandle) {
-    if let Some(child) = app
-        .state::<Sidecar>()
-        .0
-        .lock()
-        .expect("sidecar mutex poisoned")
-        .take()
-    {
+    if let Some(child) = app.state::<Sidecar>().take() {
         // CommandChild::kill() sends SIGTERM (POSIX) / TerminateProcess
         // (Windows). The Bun-compiled maximal handles SIGTERM cleanly
         // via the default Bun signal handlers — listening socket gets
-        // released on exit so a fresh launch can rebind 4141 immediately.
+        // released on exit so a fresh launch can rebind the port
+        // immediately.
         let _ = child.kill();
     }
 }
 
 fn install_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
-    let dashboard = MenuItem::with_id(app, "open_dashboard", "Open dashboard", true, None::<&str>)?;
-    let logs = MenuItem::with_id(app, "open_logs", "Open logs folder", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit maximal", true, None::<&str>)?;
+    let dashboard =
+        MenuItem::with_id(app, menu_id::OPEN_DASHBOARD, "Open dashboard", true, None::<&str>)?;
+    let logs =
+        MenuItem::with_id(app, menu_id::OPEN_LOGS, "Open logs folder", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, menu_id::QUIT, "Quit maximal", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&dashboard, &logs, &quit])?;
 
-    TrayIconBuilder::with_id("main")
+    TrayIconBuilder::with_id(TRAY_ID)
         .menu(&menu)
         .show_menu_on_left_click(true)
         .tooltip("maximal")
         .icon(app.default_window_icon().unwrap().clone())
         .on_menu_event(|app, event| match event.id().as_ref() {
-            "open_dashboard" => open_dashboard(app),
-            "open_logs" => open_logs(app),
-            "quit" => {
-                kill_sidecar(app);
-                app.exit(0);
-            }
+            menu_id::OPEN_DASHBOARD => open_dashboard(app),
+            menu_id::OPEN_LOGS => open_logs(app),
+            // app.exit() routes through RunEvent::ExitRequested,
+            // which is where the sidecar gets killed. No need to
+            // call kill_sidecar here directly.
+            menu_id::QUIT => app.exit(0),
             _ => {}
         })
-        .on_tray_icon_event(|tray, event| {
+        .on_tray_icon_event(|_tray, event| {
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Up,
                 ..
             } = event
             {
-                // Left-click already opens the menu (show_menu_on_left_click),
-                // so the click handler is a no-op for now. Wired up so we
-                // can swap to "left-click opens dashboard, right-click opens
-                // menu" if that feels better.
-                let _ = tray;
+                // Reserved for future "left-click opens dashboard"
+                // mode if it feels better than the current
+                // show_menu_on_left_click default.
             }
         })
         .build(app)?;
@@ -164,27 +190,26 @@ fn open_dashboard(app: &tauri::AppHandle) {
     }
     let proxy_url = format!("http://localhost:{SIDECAR_PORT}");
     let url = format!("{proxy_url}/usage-viewer?endpoint={proxy_url}/usage");
-    let _ = WebviewWindowBuilder::new(
-        app,
-        DASHBOARD_LABEL,
-        WebviewUrl::External(url.parse().expect("valid url")),
-    )
-    .title("maximal — dashboard")
-    .inner_size(1100.0, 720.0)
-    .build();
+    // url is synthesized from constants — parse cannot fail.
+    let parsed = url.parse().expect("synthesized localhost URL");
+    let _ = WebviewWindowBuilder::new(app, DASHBOARD_LABEL, WebviewUrl::External(parsed))
+        .title("maximal — dashboard")
+        .inner_size(1100.0, 720.0)
+        .build();
 }
 
 fn open_logs(app: &tauri::AppHandle) {
-    // ~/.local/share/maximal/logs (matches src/lib/paths.ts after
-    // the v0.3.5 rename). Spike implementation: shell out via
-    // tauri-plugin-opener which on macOS will Reveal in Finder.
-    use tauri_plugin_opener::OpenerExt;
-    if let Some(home) = dirs_home_dir() {
-        let logs = home.join(".local").join("share").join("maximal").join("logs");
-        let _ = app.opener().open_path(logs.to_string_lossy(), None::<&str>);
-    }
-}
-
-fn dirs_home_dir() -> Option<std::path::PathBuf> {
-    std::env::var_os("HOME").map(std::path::PathBuf::from)
+    // Resolves to the same path src/lib/paths.ts uses
+    // (~/.local/share/maximal/logs on macOS/Linux,
+    // %USERPROFILE%\.local\share\maximal\logs on Windows). On
+    // macOS, opener::open_path reveals the folder in Finder.
+    let Ok(home) = app.path().home_dir() else {
+        return;
+    };
+    let logs = home
+        .join(".local")
+        .join("share")
+        .join("maximal")
+        .join("logs");
+    let _ = app.opener().open_path(logs.to_string_lossy(), None::<&str>);
 }

@@ -158,16 +158,16 @@ export async function setupGitHubToken(
     // them: copy it to the clipboard automatically so a single
     // Cmd/Ctrl-V completes the flow.
     const verificationUrl =
-      response.verification_uri_complete || response.verification_uri
+      response.verification_uri_complete ?? response.verification_uri
 
     let copiedToClipboard = false
     try {
       clipboard.writeSync(response.user_code)
       copiedToClipboard = true
     } catch {
-      // Headless boxes (Linux without xclip/xsel) or sandboxed
-      // environments may reject clipboard writes; fall back to
-      // showing the code prominently.
+      // Clipboard unavailable (headless Linux without xclip/xsel,
+      // sandboxed environments). Fall through; the next consola.info
+      // line tells the user to enter the code manually.
     }
 
     consola.info(
