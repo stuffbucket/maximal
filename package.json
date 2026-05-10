@@ -25,11 +25,15 @@
     "dist"
   ],
   "scripts": {
+    "analyze": "bun run scripts/gemma-watch.ts",
     "build": "bun build src/main.ts --target=bun --outdir dist",
+    "check:deep": "bun run check:fast && bun test && bun run knip",
+    "check:fast": "bun run lint:fast && bun run typecheck && bun run lint:all",
     "dev": "bun run --watch ./src/main.ts",
     "knip": "knip-bun",
     "lint": "eslint --cache",
     "lint:all": "eslint --cache .",
+    "lint:fast": "oxlint",
     "prepack": "bun run build",
     "package-dmg": "bun scripts/package-dmg.ts",
     "prepare": "simple-git-hooks",
@@ -71,6 +75,7 @@
     "eslint": "^9.37.0",
     "knip": "^5.64.1",
     "lint-staged": "^16.2.3",
+    "oxlint": "^1.63.0",
     "prettier-plugin-packagejson": "^2.5.19",
     "simple-git-hooks": "^2.13.1",
     "typescript": "^5.9.3"
