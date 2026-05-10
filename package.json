@@ -25,9 +25,8 @@
     "dist"
   ],
   "scripts": {
-    "build": "bun run scripts/embed-usage-viewer.ts && bun run scripts/embed-build-info.ts && tsdown",
-    "dev": "bun run scripts/embed-usage-viewer.ts && bun run scripts/embed-build-info.ts && bun run --watch ./src/main.ts",
-    "postinstall": "bun run scripts/embed-usage-viewer.ts && bun run scripts/embed-build-info.ts",
+    "build": "bun build src/main.ts --target=bun --outdir dist",
+    "dev": "bun run --watch ./src/main.ts",
     "knip": "knip-bun",
     "lint": "eslint --cache",
     "lint:all": "eslint --cache .",
@@ -74,7 +73,6 @@
     "lint-staged": "^16.2.3",
     "prettier-plugin-packagejson": "^2.5.19",
     "simple-git-hooks": "^2.13.1",
-    "tsdown": "^0.15.6",
     "typescript": "^5.9.3"
   },
   "engines": {

@@ -8,13 +8,21 @@ import { createAuthMiddleware } from "./lib/request-auth"
 import { getModelsLoadedAtMs } from "./lib/state"
 import { traceIdMiddleware } from "./lib/trace"
 import { cacheModels } from "./lib/utils"
-// Generated at build time by scripts/embed-usage-viewer.ts. Bakes
-// src/pages/usage-viewer.html into a TS string so tsdown's bundler
-// + bun --compile can carry the file through to the compiled
-// binary. readFileSync / Bun.file against an import.meta.url path
-// both 500 with ENOENT in --compile output (B:\~BUN\root\... on
-// Windows), so this is the portable path.
-import { usageViewerHtml } from "./pages/usage-viewer.gen"
+// `with { type: "file" }` is Bun's official asset-embedding path
+// for `--compile` output. The import resolves to a real path in dev
+// (`/abs/.../usage-viewer.html`) and to a virtual `$bunfs/...` path
+// inside the compiled binary; Bun.file() reads both. Survives every
+// platform — including Windows, which broke our previous
+// readFileSync(URL) attempt with `B:\~BUN\root\...` ENOENTs.
+// https://bun.com/docs/bundler/executables
+//
+// The TS cast is needed because Bun's default loader for *.html is
+// `html` (returns an HTMLBundle), and TypeScript's import-attribute
+// support doesn't yet thread through the `type: "file"` override
+// to the resolved module type. The runtime is fine — it honors the
+// attribute regardless.
+import usageViewerImport from "./pages/usage-viewer.html" with { type: "file" }
+const usageViewerPath = usageViewerImport as unknown as string
 import { completionRoutes } from "./routes/chat-completions/route"
 import { debugRoutes } from "./routes/debug/route"
 import { embeddingRoutes } from "./routes/embeddings/route"
@@ -62,7 +70,9 @@ server.use(
 )
 
 server.get("/", (c) => c.text("Server running"))
-server.get("/usage-viewer", (c) => c.html(usageViewerHtml))
+server.get("/usage-viewer", async (c) =>
+  c.html(await Bun.file(usageViewerPath).text()),
+)
 server.get("/usage-viewer/", (c) => c.redirect("/usage-viewer", 301))
 
 server.route("/_debug", debugRoutes)

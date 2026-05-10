@@ -62,12 +62,13 @@ interface RunDebugOptions {
 }
 
 async function getPackageVersion(): Promise<string> {
-  // Embedded at build time by scripts/embed-build-info.ts. Reading
-  // package.json from disk via fs.readFile + import.meta.url fails
-  // in `bun --compile` output (the path resolves to a virtual FS
-  // entry the runtime can't open), which historically left every
+  // Resolved at compile time via `--define __MAXIMAL_VERSION__`
+  // (see release.yml) for release binaries; falls back to
+  // package.json for `bun src/main.ts` / unbundled installs.
+  // Reading package.json from disk via fs.readFile + import.meta.url
+  // fails in `bun --compile` output, which historically left every
   // shipped binary reporting `Version: unknown`.
-  const { BUILD_VERSION } = await import("./lib/build-info.gen")
+  const { BUILD_VERSION } = await import("./lib/build-info")
   return BUILD_VERSION
 }
 

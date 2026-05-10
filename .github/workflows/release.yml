@@ -162,30 +162,30 @@ jobs:
         shell: bash
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Generate embedded assets
-        # `postinstall` runs the same scripts and usually populates
-        # them for us, but Bun's lifecycle-script execution under
-        # `--frozen-lockfile` has been inconsistent across versions.
-        # Re-run explicitly so `bun build --compile` always sees
-        # fresh src/pages/usage-viewer.gen.ts AND
-        # src/lib/build-info.gen.ts in its static-import graph.
-        # BUILD_VERSION pins the embedded version to the release
-        # tag (stripped of `v`), so `maximal debug` reports the
-        # release version even if package.json lags behind.
-        shell: bash
-        env:
-          BUILD_VERSION: ${{ steps.ver.outputs.version }}
-        run: |
-          bun run scripts/embed-usage-viewer.ts
-          bun run scripts/embed-build-info.ts
-
       - name: Compile binary
         shell: bash
+        env:
+          MAXIMAL_VERSION: ${{ steps.ver.outputs.version }}
+          MAXIMAL_GIT_SHA: ${{ github.sha }}
+          MAXIMAL_GIT_BRANCH: ${{ github.ref_name }}
         run: |
+          set -euo pipefail
           mkdir -p dist-bin
           OUT="dist-bin/maximal"
           if [[ "${{ matrix.artifact }}" == windows-* ]]; then OUT="${OUT}.exe"; fi
-          bun build --compile --minify --sourcemap --target=${{ matrix.target }} src/main.ts --outfile "$OUT"
+
+          # --define injects compile-time constants into the binary:
+          #   __MAXIMAL_VERSION__   the stripped tag (e.g. "0.3.4")
+          #   __MAXIMAL_GIT_SHA__   the full sha (40 hex)
+          #   __MAXIMAL_GIT_BRANCH__ the ref name (e.g. "v0.3.4")
+          # src/lib/build-info.ts reads these via globalThis with a
+          # package.json fallback for non-binary execution.
+          bun build --compile --minify --sourcemap \
+            --target=${{ matrix.target }} \
+            --define "__MAXIMAL_VERSION__=\"${MAXIMAL_VERSION}\"" \
+            --define "__MAXIMAL_GIT_SHA__=\"${MAXIMAL_GIT_SHA}\"" \
+            --define "__MAXIMAL_GIT_BRANCH__=\"${MAXIMAL_GIT_BRANCH}\"" \
+            src/main.ts --outfile "$OUT"
 
       # macOS signing + notarization — DEFERRED. v1 ships unsigned.
       # Flip the `if: false` to a real condition once A4 unblocks

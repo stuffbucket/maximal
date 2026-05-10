@@ -150,18 +150,18 @@ function readGitVersion(): GitVersion {
 
 const cached: GitVersion = readGitVersion()
 
-import { BUILD_GIT_BRANCH, BUILD_GIT_SHA } from "./build-info.gen"
+import { BUILD_GIT_BRANCH, BUILD_GIT_SHA } from "./build-info"
 
 /**
  * In a `bun --compile` binary the .git directory we'd normally read
  * is gone, so `readGitVersion()` returns `{ sha: undefined }` and
- * users see `Git: unknown`. Fall back to the build-time snapshot
- * (scripts/embed-build-info.ts captures HEAD + GITHUB_REF_NAME at
- * build) when the live read produces nothing useful.
+ * users see `Git: unknown`. Fall back to the build-time defines
+ * (release.yml passes --define __MAXIMAL_GIT_SHA__ /
+ * __MAXIMAL_GIT_BRANCH__) when the live read produces nothing.
  */
 export function getGitVersion(): GitVersion {
   if (cached.sha) return cached
-  if (BUILD_GIT_SHA && BUILD_GIT_SHA !== "unknown") {
+  if (BUILD_GIT_SHA) {
     return { sha: BUILD_GIT_SHA, branch: BUILD_GIT_BRANCH }
   }
   return cached
