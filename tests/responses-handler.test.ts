@@ -3,14 +3,10 @@ import { Hono } from "hono"
 
 const actualConfigModule = await import("../src/lib/config")
 const actualRateLimitModule = await import("../src/lib/rate-limit")
-const actualResponsesModule = await import(
-  "../src/services/copilot/create-responses"
-)
+const actualResponsesModule =
+  await import("../src/services/copilot/create-responses")
 
-const createResponses = mock((() =>
-  Promise.resolve(
-    streamChunks([]),
-  )) as typeof actualResponsesModule.createResponses)
+const createResponses = mock(() => Promise.resolve(streamChunks([])))
 
 await mock.module("~/lib/config", () => ({
   ...actualConfigModule,
@@ -30,9 +26,8 @@ const { state } = await import("../src/lib/state")
 const { closeUsageStore } = await import("../src/lib/token-usage")
 const { tokenUsageRoute } = await import("../src/routes/token-usage/route")
 const { responsesRoutes } = await import("../src/routes/responses/route")
-const { generateRequestIdFromPayload, getUUID } = await import(
-  "../src/lib/utils"
-)
+const { generateRequestIdFromPayload, getUUID } =
+  await import("../src/lib/utils")
 
 const DB_PATH_ENV = "COPILOT_API_SQLITE_DB_PATH"
 

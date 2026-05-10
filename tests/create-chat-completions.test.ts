@@ -48,9 +48,7 @@ test("sets x-initiator to agent if tool/assistant present", async () => {
   }
   await createChatCompletions(payload, { requestId: "1" })
   expect(fetchMock).toHaveBeenCalledTimes(1)
-  const headers = (
-    fetchMock.mock.calls[0][1] as { headers: Record<string, string> }
-  ).headers
+  const headers = fetchMock.mock.calls[0][1].headers
   expect(headers["x-initiator"]).toBe("agent")
 })
 
@@ -64,8 +62,6 @@ test("sets x-initiator to user if only user present", async () => {
   }
   await createChatCompletions(payload, { requestId: "1" })
   expect(fetchMock).toHaveBeenCalledTimes(1)
-  const headers = (
-    fetchMock.mock.calls[0][1] as { headers: Record<string, string> }
-  ).headers
+  const headers = fetchMock.mock.calls[0][1].headers
   expect(headers["x-initiator"]).toBe("user")
 })

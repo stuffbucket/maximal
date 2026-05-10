@@ -9,18 +9,10 @@
     "scripts/**/*.ts",
     "tests/**/*.ts"
   ],
-  "ignore": [
-    "src/pages/**",
-    "src/lib/build-info.gen.ts",
-    "src/pages/usage-viewer.gen.ts"
-  ],
   "ignoreDependencies": [
     "prettier-plugin-packagejson",
     "electron",
     "undici"
-  ],
-  "ignoreBinaries": [
-    "publish"
   ],
   "ignoreExportsUsedInFile": true
 }

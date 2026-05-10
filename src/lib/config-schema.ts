@@ -99,7 +99,7 @@ export function validateAppConfig(raw: unknown): AppConfig {
     }))
     throw new ConfigValidationError(issues)
   }
-  return result.data as AppConfig
+  return result.data
 }
 
 /** Returns top-level keys present in `raw` that AppConfigSchema does
