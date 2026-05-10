@@ -29,7 +29,13 @@ use tauri_plugin_shell::ShellExt;
 /// out (option becomes None) once we've issued the kill.
 struct Sidecar(Mutex<Option<CommandChild>>);
 
-const PROXY_URL: &str = "http://localhost:4141";
+// The shelled sidecar binds 4142, not the CLI's default 4141. Lets
+// the spike coexist with a hand-installed `maximal start` already
+// listening on 4141 (the friendly EADDRINUSE detection in
+// src/start.ts otherwise kills the sidecar before it can serve).
+// Production Phase E will probably restore 4141 as the canonical
+// port and assume the tray app is the only supervisor.
+const SIDECAR_PORT: u16 = 4142;
 const DASHBOARD_LABEL: &str = "dashboard";
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -57,11 +63,12 @@ fn spawn_sidecar(app: &tauri::AppHandle) -> tauri::Result<()> {
     // sidecar("maximal") looks up `bundle.externalBin[0]` from
     // tauri.conf.json and resolves the arch-suffixed binary
     // (binaries/maximal-aarch64-apple-darwin etc.) at build time.
+    let port = SIDECAR_PORT.to_string();
     let cmd = app
         .shell()
         .sidecar("maximal")
         .map_err(|e| tauri::Error::Anyhow(anyhow::anyhow!(e)))?
-        .args(["start"]);
+        .args(["start", "--port", port.as_str()]);
 
     let (mut rx, child) = cmd
         .spawn()
@@ -155,7 +162,8 @@ fn open_dashboard(app: &tauri::AppHandle) {
         let _ = window.set_focus();
         return;
     }
-    let url = format!("{PROXY_URL}/usage-viewer?endpoint={PROXY_URL}/usage");
+    let proxy_url = format!("http://localhost:{SIDECAR_PORT}");
+    let url = format!("{proxy_url}/usage-viewer?endpoint={proxy_url}/usage");
     let _ = WebviewWindowBuilder::new(
         app,
         DASHBOARD_LABEL,
