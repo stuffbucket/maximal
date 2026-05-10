@@ -126,6 +126,7 @@ export function ensureSecretsDir(dir: string = SECRETS_DIR): void {
   }
 }
 
+/** @public Surfaced in `debug` output and external tooling for the secrets dir path. */
 export const SECRETS_PATHS = {
   DIR: SECRETS_DIR,
 }

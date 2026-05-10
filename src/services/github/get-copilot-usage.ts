@@ -2,8 +2,6 @@ import { getGitHubApiBaseUrl, githubHeaders } from "~/lib/api-config"
 import { HTTPError } from "~/lib/error"
 import { state } from "~/lib/state"
 
-export type CopilotAccountType = "individual" | "business" | "enterprise"
-
 export const getCopilotUsage = async (
   githubToken?: string,
 ): Promise<CopilotUsageResponse> => {
@@ -25,17 +23,6 @@ export const getCopilotUsage = async (
   }
 
   return (await response.json()) as CopilotUsageResponse
-}
-
-export const getCopilotAccountType = async (
-  githubToken?: string,
-): Promise<CopilotAccountType> => {
-  const usage = await getCopilotUsage(githubToken)
-  const plan = (usage.copilot_plan ?? "").toLowerCase()
-
-  if (plan.includes("enterprise")) return "enterprise"
-  if (plan.includes("business")) return "business"
-  return "individual"
 }
 
 export interface QuotaDetail {

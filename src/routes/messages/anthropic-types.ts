@@ -138,8 +138,6 @@ export interface AnthropicResponse {
   }
 }
 
-export type AnthropicResponseContentBlock = AnthropicAssistantContentBlock
-
 // Anthropic Stream Event Types
 export interface AnthropicMessageStartEvent {
   type: "message_start"

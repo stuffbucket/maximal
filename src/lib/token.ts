@@ -212,6 +212,9 @@ export async function logUser() {
   state.copilotApiUrl = copilotUser.endpoints.api
 }
 
-// Re-export so callers that wrote bare-string tokens via PATHS.GITHUB_TOKEN_PATH
-// continue to work. New code should use readGitHubTokenRecord().
+/**
+ * Re-export so callers that wrote bare-string tokens via PATHS.GITHUB_TOKEN_PATH
+ * continue to work. New code should use readGitHubTokenRecord().
+ * @public
+ */
 export const GITHUB_TOKEN_PATH = PATHS.GITHUB_TOKEN_PATH

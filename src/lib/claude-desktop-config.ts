@@ -39,6 +39,7 @@ export const PROXY_KEYS = [
   "disableNonessentialServices",
 ] as const
 
+/** @public Used by external integrations / docs as the canonical key list type. */
 export type ProxyKey = (typeof PROXY_KEYS)[number]
 
 export interface ProxyKeyValues {
@@ -87,8 +88,11 @@ export function defaultProxyValues(
   }
 }
 
-/** Back-compat alias. Older callers imported a constant; the function
- *  form is preferred since the workspace folder depends on `$HOME`. */
+/**
+ * Back-compat alias. Older callers imported a constant; the function
+ * form is preferred since the workspace folder depends on `$HOME`.
+ * @public
+ */
 export const DEFAULT_PROXY_VALUES: ProxyKeyValues = defaultProxyValues()
 
 /** Resolve the platform-specific config path. Linux falls back to

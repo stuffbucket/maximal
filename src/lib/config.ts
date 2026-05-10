@@ -346,12 +346,6 @@ export function getProviderConfig(name: string): ResolvedProviderConfig | null {
   }
 }
 
-export function listEnabledProviders(): Array<string> {
-  const config = getConfig()
-  const providerNames = Object.keys(config.providers ?? {})
-  return providerNames.filter((name) => getProviderConfig(name) !== null)
-}
-
 export function isMessagesApiEnabled(): boolean {
   const config = getConfig()
   return config.useMessagesApi ?? true
