@@ -12,7 +12,8 @@
   "ignoreDependencies": [
     "prettier-plugin-packagejson",
     "electron",
-    "undici"
+    "undici",
+    "@stryker-mutator/command-runner"
   ],
   "ignoreExportsUsedInFile": true
 }
