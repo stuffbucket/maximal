@@ -136,7 +136,7 @@ function buildPrompt(current: Entry, history: Array<Entry>): string {
     .map((e) => {
       const failed = Object.entries(e.results)
         .filter(([, r]) => r.exit !== 0)
-        .map(([k]) => `${k}:${topRule(r.output) ?? "?"}`)
+        .map(([k, r]) => `${k}:${topRule(r.output) ?? "?"}`)
         .join(", ")
       return `${e.ts} ${e.trigger} ${e.file ?? ""} fail=[${failed || "none"}]`
     })
