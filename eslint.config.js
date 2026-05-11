@@ -8,6 +8,7 @@ export default config({
     "scripts/**",
     "shell/**",
     "site/**",
+    "src/pages/vendor/**",
     ".dependency-cruiser.cjs",
   ],
   prettier: {

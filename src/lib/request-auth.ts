@@ -8,6 +8,37 @@ interface AuthMiddlewareOptions {
   getApiKeys?: () => Array<string>
   allowUnauthenticatedPaths?: Array<string>
   allowOptionsBypass?: boolean
+  /**
+   * Paths that should skip auth when the request comes from loopback
+   * (127.0.0.1, ::1, ::ffff:127.0.0.1). Used to exempt the local usage
+   * dashboard from needing an API key while keeping the same endpoints
+   * authenticated for any non-loopback caller.
+   */
+  loopbackOnlyPaths?: Array<string>
+  /**
+   * Resolves the peer IP for the current request. Injectable so tests
+   * can simulate loopback vs. non-loopback requests without spinning up
+   * a real Bun.serve / Node http.Server.
+   */
+  getRequestIp?: (c: Context) => string | null
+}
+
+const LOOPBACK_IPS = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"])
+
+export function isLoopbackAddress(address: string | null | undefined): boolean {
+  if (!address) return false
+  return LOOPBACK_IPS.has(address)
+}
+
+/**
+ * Reads the peer IP off the raw Request object. srvx attaches `ip` to
+ * the request for both its Bun and Node adapters
+ * (Bun: `server.requestIP(req).address`; Node: `req.socket.remoteAddress`),
+ * so the same field works for our deployment paths.
+ */
+export function defaultGetRequestIp(c: Context): string | null {
+  const raw = c.req.raw as Request & { ip?: string | null }
+  return raw.ip ?? null
 }
 
 export function normalizeApiKeys(apiKeys: unknown): Array<string> {
@@ -76,6 +107,8 @@ export function createAuthMiddleware(
   const getApiKeys = options.getApiKeys ?? getConfiguredApiKeys
   const allowUnauthenticatedPaths = options.allowUnauthenticatedPaths ?? ["/"]
   const allowOptionsBypass = options.allowOptionsBypass ?? true
+  const loopbackOnlyPaths = options.loopbackOnlyPaths ?? []
+  const getRequestIp = options.getRequestIp ?? defaultGetRequestIp
 
   return async (c, next) => {
     if (allowOptionsBypass && c.req.method === "OPTIONS") {
@@ -83,6 +116,17 @@ export function createAuthMiddleware(
     }
 
     if (allowUnauthenticatedPaths.includes(c.req.path)) {
+      return next()
+    }
+
+    // Loopback exemption: the local usage dashboard talks to these
+    // endpoints from the same machine and should not have to handle an
+    // API key. Non-loopback callers still go through the normal key
+    // check below.
+    if (
+      loopbackOnlyPaths.includes(c.req.path)
+      && isLoopbackAddress(getRequestIp(c))
+    ) {
       return next()
     }
 

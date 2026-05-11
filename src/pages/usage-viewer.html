@@ -4,17 +4,15 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Copilot API Usage Dashboard</title>
-
-    <script src="https://cdn.tailwindcss.com"></script>
-
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
-      rel="stylesheet"
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%2318181b'/%3E%3Ctext x='50%25' y='50%25' dy='.35em' text-anchor='middle' font-family='system-ui,sans-serif' font-size='40' font-weight='700' fill='%23fafafa'%3EM%3C/text%3E%3C/svg%3E"
     />
 
-    <script src="https://unpkg.com/lucide-react@0.378.0/dist/umd/lucide.min.js"></script>
+    <script src="/vendor/tailwind.min.js"></script>
+
+    <script src="/vendor/lucide.min.js"></script>
 
     <style>
       /* Neutral palette in Ollama's design language: black-first,
@@ -128,48 +126,8 @@
         >
           <form
             id="endpoint-form"
-            class="grid grid-cols-1 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_180px_auto] gap-3 items-end"
+            class="grid grid-cols-1 xl:grid-cols-[180px_auto] gap-3 items-end"
           >
-            <div class="w-full">
-              <label
-                for="endpoint-url"
-                class="mb-1 block font-semibold whitespace-nowrap text-sm"
-                style="color: var(--color-fg-lightest)"
-                >Usage Endpoint URL</label
-              >
-              <input
-                type="text"
-                id="endpoint-url"
-                class="w-full px-3 py-2 border focus:ring-1 transition input-focus text-sm"
-                style="
-                  background-color: var(--color-bg-darkest);
-                  border-color: var(--color-bg-light-3);
-                  color: var(--color-fg-medium);
-                "
-                placeholder="http://localhost:4141/usage"
-              />
-            </div>
-            <div class="w-full">
-              <label
-                for="x-api-key"
-                class="mb-1 block font-semibold whitespace-nowrap text-sm"
-                style="color: var(--color-fg-lightest)"
-                >x-api-key</label
-              >
-              <input
-                type="password"
-                id="x-api-key"
-                class="w-full px-3 py-2 border focus:ring-1 transition input-focus text-sm"
-                style="
-                  background-color: var(--color-bg-darkest);
-                  border-color: var(--color-bg-light-3);
-                  color: var(--color-fg-medium);
-                "
-                placeholder="Optional when auth is enabled"
-                autocomplete="off"
-                spellcheck="false"
-              />
-            </div>
             <div class="w-full">
               <label
                 for="token-usage-period"
@@ -221,9 +179,11 @@
             </button>
           </form>
           <p class="mt-3 text-xs" style="color: var(--color-gray-accent)">
-            The page derives <code>/token-usage</code> and
-            <code>/token-usage/events</code> from the usage endpoint and sends
-            <code>x-api-key</code> to all requests when provided.
+            Shows usage for the proxy serving this page. The dashboard
+            reads <code>/usage</code>, <code>/token-usage</code>, and
+            <code>/token-usage/events</code> from the same origin — the
+            proxy exempts these endpoints from API-key auth on loopback,
+            so no credentials are handled client-side.
           </p>
         </div>
 
@@ -235,8 +195,6 @@
     <script>
       document.addEventListener("DOMContentLoaded", () => {
         const endpointForm = document.getElementById("endpoint-form");
-        const endpointUrlInput = document.getElementById("endpoint-url");
-        const apiKeyInput = document.getElementById("x-api-key");
         const tokenUsagePeriodSelect = document.getElementById(
           "token-usage-period"
         );
@@ -252,10 +210,14 @@
           fetchButton.style.backgroundColor = "var(--color-blue)";
         });
 
-        const DEFAULT_ENDPOINT = "http://localhost:4141/usage";
+        // The dashboard always talks to the proxy that served it — same
+        // origin, no user-typed URL. Each fetch is a relative path; the
+        // browser resolves it against window.location automatically.
+        const USAGE_PATH = "/usage";
+        const TOKEN_USAGE_PATH = "/token-usage";
+        const TOKEN_USAGE_EVENTS_PATH = "/token-usage/events";
         const DEFAULT_TOKEN_USAGE_PERIOD = "day";
         const DEFAULT_TOKEN_USAGE_EVENTS_PAGE_SIZE = 20;
-        const API_KEY_STORAGE_KEY = "maximal.usage-viewer.x-api-key";
         const VALID_PERIODS = new Set(["day", "week", "month"]);
         const EMPTY_TOKEN_USAGE_TOTALS = {
           cache_creation_input_tokens: 0,
@@ -329,64 +291,16 @@
           return normalized;
         }
 
-        function loadStoredApiKey() {
-          try {
-            return localStorage.getItem(API_KEY_STORAGE_KEY) || "";
-          } catch (error) {
-            console.warn("Could not read stored API key:", getErrorMessage(error));
-            return "";
-          }
-        }
-
-        function storeApiKey(value) {
-          try {
-            const trimmed = value.trim();
-            if (trimmed) {
-              localStorage.setItem(API_KEY_STORAGE_KEY, trimmed);
-            } else {
-              localStorage.removeItem(API_KEY_STORAGE_KEY);
-            }
-          } catch (error) {
-            console.warn("Could not store API key:", getErrorMessage(error));
-          }
-        }
-
-        function buildRequestHeaders() {
-          const headers = {};
-          const apiKey = apiKeyInput.value.trim();
-          if (apiKey) {
-            headers["x-api-key"] = apiKey;
-          }
-          return headers;
-        }
-
-        function resolveUsageUrl(endpoint) {
-          return new URL(endpoint, window.location.href).toString();
-        }
-
-        function deriveEndpointUrl(usageEndpoint, targetPath) {
-          const url = new URL(usageEndpoint, window.location.href);
-          const normalizedTargetPath = targetPath.replace(/^\/+/, "");
-          const normalizedPath = url.pathname.replace(/\/+$/, "");
-          const nextPath = normalizedPath.endsWith("/usage")
-            ? normalizedPath.replace(/\/usage$/, `/${normalizedTargetPath}`)
-            : `${normalizedPath || ""}/${normalizedTargetPath}`;
-
-          url.pathname = nextPath.startsWith("/") ? nextPath : `/${nextPath}`;
-          url.search = "";
-          url.hash = "";
-          return url.toString();
-        }
-
-        function buildTokenUsageSummaryUrl(usageEndpoint, period) {
-          const url = new URL(deriveEndpointUrl(usageEndpoint, "token-usage"));
+        function buildTokenUsageSummaryUrl(period) {
+          const url = new URL(TOKEN_USAGE_PATH, window.location.origin);
           url.searchParams.set("period", period);
           return url.toString();
         }
 
-        function buildTokenUsageEventsUrl(usageEndpoint, period, page) {
+        function buildTokenUsageEventsUrl(period, page) {
           const url = new URL(
-            deriveEndpointUrl(usageEndpoint, "token-usage/events")
+            TOKEN_USAGE_EVENTS_PATH,
+            window.location.origin
           );
           url.searchParams.set("period", period);
           url.searchParams.set("page", String(page));
@@ -398,9 +312,10 @@
         }
 
         async function fetchJson(url) {
-          const response = await fetch(url, {
-            headers: buildRequestHeaders(),
-          });
+          // No client-side credentials: the proxy exempts the dashboard
+          // endpoints from API-key auth when the request comes from
+          // loopback. See createAuthMiddleware in src/lib/request-auth.ts.
+          const response = await fetch(url);
 
           if (!response.ok) {
             let message = response.statusText || "Request failed";
@@ -439,16 +354,7 @@
         function syncUrlState() {
           try {
             const currentUrl = new URL(window.location.href);
-            const endpoint = endpointUrlInput.value.trim();
-            const period = getSelectedPeriod();
-
-            if (endpoint) {
-              currentUrl.searchParams.set("endpoint", endpoint);
-            } else {
-              currentUrl.searchParams.delete("endpoint");
-            }
-
-            currentUrl.searchParams.set("period", period);
+            currentUrl.searchParams.set("period", getSelectedPeriod());
             window.history.pushState({}, "", currentUrl);
           } catch (error) {
             console.warn("Could not update URL:", getErrorMessage(error));
@@ -1027,7 +933,7 @@
             <div class="text-center py-16 px-4 border" style="background-color: var(--color-bg-soft); border-color: var(--color-bg-light-2);">
                 <i data-lucide="info" class="mx-auto h-10 w-10" style="color: var(--color-gray-accent);"></i>
                 <h3 class="mt-2 text-lg font-semibold" style="color: var(--color-fg-lightest);">Welcome!</h3>
-                <p class="mt-1 text-sm" style="color: var(--color-gray);">Enter a usage endpoint, optionally provide an x-api-key, and click "Fetch" to load usage and token usage data.</p>
+                <p class="mt-1 text-sm" style="color: var(--color-gray);">Enter a usage endpoint and click "Fetch" to load usage and token usage data.</p>
             </div>
           `;
         }
@@ -1038,19 +944,6 @@
          * Fetches usage data and token usage data from the specified API endpoint.
          */
         async function fetchData(page = 1) {
-          const endpoint = endpointUrlInput.value.trim();
-          if (!endpoint) {
-            state.data = null;
-            state.tokenUsageSummary = null;
-            state.tokenUsageEventsPage = null;
-            state.error = "Endpoint URL cannot be empty.";
-            state.tokenUsageSummaryError =
-              "Token usage requires a valid endpoint URL.";
-            state.tokenUsageEventsError = null;
-            render();
-            return;
-          }
-
           const period = getSelectedPeriod();
           state.isLoading = true;
           state.error = null;
@@ -1059,12 +952,11 @@
           render();
 
           try {
-            const usageUrl = resolveUsageUrl(endpoint);
             const [usageResult, summaryResult, eventsResult] =
               await Promise.allSettled([
-                fetchJson(usageUrl),
-                fetchJson(buildTokenUsageSummaryUrl(usageUrl, period)),
-                fetchJson(buildTokenUsageEventsUrl(usageUrl, period, page)),
+                fetchJson(USAGE_PATH),
+                fetchJson(buildTokenUsageSummaryUrl(period)),
+                fetchJson(buildTokenUsageEventsUrl(period, page)),
               ]);
 
             if (usageResult.status === "fulfilled") {
@@ -1116,17 +1008,6 @@
         }
 
         async function fetchTokenUsageSummaryAndEvents(page = 1) {
-          const endpoint = endpointUrlInput.value.trim();
-          if (!endpoint) {
-            state.tokenUsageSummary = null;
-            state.tokenUsageEventsPage = null;
-            state.tokenUsageSummaryError =
-              "Token usage requires a valid endpoint URL.";
-            state.tokenUsageEventsError = null;
-            render();
-            return;
-          }
-
           const period = getSelectedPeriod();
           state.isTokenUsageLoading = true;
           state.tokenUsageSummary = null;
@@ -1136,10 +1017,9 @@
           render();
 
           try {
-            const usageUrl = resolveUsageUrl(endpoint);
             const [summaryResult, eventsResult] = await Promise.allSettled([
-              fetchJson(buildTokenUsageSummaryUrl(usageUrl, period)),
-              fetchJson(buildTokenUsageEventsUrl(usageUrl, period, page)),
+              fetchJson(buildTokenUsageSummaryUrl(period)),
+              fetchJson(buildTokenUsageEventsUrl(period, page)),
             ]);
 
             if (summaryResult.status === "fulfilled") {
@@ -1182,22 +1062,13 @@
         }
 
         async function fetchTokenUsageEventsPage(page) {
-          const endpoint = endpointUrlInput.value.trim();
-          if (!endpoint) {
-            state.tokenUsageEventsError =
-              "Token usage requires a valid endpoint URL.";
-            render();
-            return;
-          }
-
           state.isEventsLoading = true;
           state.tokenUsageEventsError = null;
           render();
 
           try {
-            const usageUrl = resolveUsageUrl(endpoint);
             state.tokenUsageEventsPage = await fetchJson(
-              buildTokenUsageEventsUrl(usageUrl, getSelectedPeriod(), page)
+              buildTokenUsageEventsUrl(getSelectedPeriod(), page)
             );
           } catch (error) {
             if (isMissingTokenUsageEndpointError(error)) {
@@ -1221,7 +1092,6 @@
          */
         function handleFormSubmit(event) {
           event.preventDefault();
-          storeApiKey(apiKeyInput.value);
           syncUrlState();
           void fetchData();
         }
@@ -1264,27 +1134,17 @@
         function init() {
           endpointForm.addEventListener("submit", handleFormSubmit);
           tokenUsagePeriodSelect.addEventListener("change", handlePeriodChange);
-          apiKeyInput.addEventListener("input", () => {
-            storeApiKey(apiKeyInput.value);
-          });
           contentArea.addEventListener("click", handleContentAreaClick);
-
-          apiKeyInput.value = loadStoredApiKey();
 
           const urlParams = new URLSearchParams(window.location.search);
           const periodFromUrl = normalizePeriod(urlParams.get("period"));
-          const endpointFromUrl = urlParams.get("endpoint");
 
           state.tokenUsagePeriod = periodFromUrl;
           tokenUsagePeriodSelect.value = periodFromUrl;
 
-          if (endpointFromUrl) {
-            endpointUrlInput.value = endpointFromUrl;
-            void fetchData();
-          } else {
-            endpointUrlInput.value = DEFAULT_ENDPOINT;
-            render();
-          }
+          // Auto-fetch on load — the dashboard always targets its own
+          // origin, so there's no user input to wait for.
+          void fetchData();
         }
 
         // Start the app
