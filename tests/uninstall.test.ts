@@ -12,17 +12,15 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-const TMP_ROOT = path.join(os.tmpdir(), `uninstall-test-${Date.now()}`)
 let workDir: string
 
 beforeEach(() => {
-  workDir = path.join(TMP_ROOT, `case-${crypto.randomUUID()}`)
-  fs.mkdirSync(workDir, { recursive: true })
+  workDir = fs.mkdtempSync(path.join(os.tmpdir(), "maximal-uninstall-"))
 })
 
 afterEach(() => {
   try {
-    fs.rmSync(TMP_ROOT, { recursive: true, force: true })
+    fs.rmSync(workDir, { recursive: true, force: true })
   } catch {
     /* best effort */
   }

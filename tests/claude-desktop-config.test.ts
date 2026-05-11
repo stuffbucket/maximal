@@ -15,15 +15,13 @@ import {
   writeClaudeDesktopConfig,
 } from "~/lib/claude-desktop-config"
 
-const TMP_ROOT = path.join(os.tmpdir(), `claude-config-test-${Date.now()}`)
 let dir: string
 let configPath: string
 let fakeHome: string
 let values: ReturnType<typeof defaultProxyValues>
 
 beforeEach(() => {
-  dir = path.join(TMP_ROOT, `case-${crypto.randomUUID()}`)
-  fs.mkdirSync(dir, { recursive: true })
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "maximal-claude-desktop-"))
   configPath = path.join(dir, "claude_desktop_config.json")
   fakeHome = path.join(dir, "home")
   fs.mkdirSync(fakeHome, { recursive: true })
@@ -32,7 +30,7 @@ beforeEach(() => {
 
 afterEach(() => {
   try {
-    fs.rmSync(TMP_ROOT, { recursive: true, force: true })
+    fs.rmSync(dir, { recursive: true, force: true })
   } catch {
     /* best effort */
   }
