@@ -27,6 +27,12 @@ bun run knip         # find unused exports/files
 # Optional: meta-analysis stream
 bun run analyze      # tails .claude/logs/checks.jsonl into a local Ollama model
 
+# Mutation testing (manual only — not wired into check:deep)
+bun run mutate       # Stryker; configure module under test in stryker.conf.*
+
+# Release tooling
+bun run release      # cut a release (publishes artifacts)
+
 # Tauri app (menu-bar shell wrapping the proxy as a sidecar on :4142)
 bun run app:sidecar  # build standalone proxy binary into shell/src-tauri/binaries/
 bun run app:dev      # build sidecar + tauri dev (hot-reload)
@@ -62,6 +68,7 @@ This is a local proxy that exposes the GitHub Copilot API as both an OpenAI-comp
 | `src/routes/` | Route handlers grouped by endpoint family |
 | `src/services/` | Upstream API clients (Copilot, GitHub, providers) |
 | `tests/` | All test files (`*.test.ts`), Bun built-in runner |
+| `shell/` | Tauri menu-bar app (Vite frontend + `src-tauri/` Rust shell) wrapping the proxy as a sidecar |
 
 ### Middleware stack (in order)
 
@@ -90,6 +97,10 @@ This is a local proxy that exposes the GitHub Copilot API as both an OpenAI-comp
 This repo can collide on a shared working tree (lint-staged stash + concurrent merge ate a turn already). For parallel agents:
 - **Spawned subagents:** pass `isolation: "worktree"` to the Agent tool.
 - **Sessions:** create a worktree manually with `git worktree add ../maximal-<task> -b agent/<task>`; clean up with `git worktree remove ../maximal-<task>` after merging back.
+
+### Tauri shell
+
+`shell/` is a Tauri 2 menu-bar app that wraps the proxy for non-CLI users. `bun run app:sidecar` builds the standalone proxy binary into `shell/src-tauri/binaries/`, and Tauri launches it as a sidecar bound to `127.0.0.1:4142`. The Vite frontend in `shell/src/` talks to the local sidecar over HTTP. The proxy itself is unchanged — the shell is purely packaging plus a tray UI for auth/status.
 
 ### Token counting
 
