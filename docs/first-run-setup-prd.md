@@ -337,10 +337,11 @@ A fresh `.dmg` install on a Mac with no `~/.local/share/maximal/` directory:
 
 1. User double-clicks Maximal.app.
 2. Tray icon appears within ~2s; carries a "needs setup" badge.
-3. Clicking the tray icon shows: greyed dashboard item, Settings, "Sign in with GitHub," Quit.
-4. Clicking "Sign in with GitHub" (or the icon) opens the setup window.
-5. The user signs in via the browser, code is pre-pasted.
-6. Within ~10s of approval, the setup window closes and the dashboard opens against a working proxy.
-7. Subsequent launches go straight to the dashboard with no badge, no setup window.
+3. Clicking the tray icon shows: "Open Maximal" subtitled "Set up first," "Settings," "Quit Maximal." No separate "Sign in with GitHub" item.
+4. Clicking "Open Maximal" opens the Setup window in State 1 (Welcome).
+5. The user clicks "Sign in with GitHub." Window transitions to State 2 (Waiting); their browser opens to `github.com/login/device` with the code already pasted in their clipboard.
+6. The user pastes the code, approves. Within ~5s of approval, the window transitions to State 3 (Connected), then auto-bridges to the Dashboard with the Connect section scrolled into view.
+7. The user copies the sample `curl` from the Connect section, runs it in a terminal. Within ~1s, the request appears in the Dashboard's Activity feed via SSE — the aha moment.
+8. Subsequent launches go straight to the Dashboard with no badge, no Setup window.
 
 No terminal touched. No env vars set. The CLI install path remains unchanged.

@@ -171,10 +171,12 @@ If the two-line typographic entry doesn't read as distinctive enough in build (l
 ### Section: Quick actions
 
 Four buttons:
-- **Settings** → opens the Settings window (matches tray-menu item).
+- **Settings** (`⌘,`) → opens the Settings window (matches tray-menu item).
 - **Sign out** → confirmation dialog, then DELETE on the auth token; Dashboard re-renders to the setup-incomplete panel.
 - **Restart proxy** → routes through the same Tauri command described in the Settings PRD (`POST /proxy/restart` semantics). Greyed out while not needed (no stale config).
 - **Help** → opens the project README in the system browser.
+
+Per `.design-context.md` → Keyboard: `⌘R` refreshes the Dashboard (re-fetches `/setup-status`, `/usage`, `/activity`); `⌘W` or `Esc` closes the window. Tooltips on buttons that have a binding show it parenthetically in muted type — quietly.
 
 ## Backend changes
 
