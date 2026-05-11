@@ -1,12 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
   <!--
     macOS app icons follow a "squircle template": visible content occupies
-    the inner ~824×824 of the 1024 canvas, with ~100px transparent padding
-    on every side. Without that padding the icon renders ~20% larger than
-    its neighbors in the Dock / app switcher / Spotlight.
+    a transparent-padded inner area of the 1024 canvas. Apple's published
+    template specifies 824×824 (0.8047) — but most icons shipping in the
+    Dock today push closer to 0.92, which matches our peers visually.
+    Tuned empirically; revisit if the icon looks off relative to a fresh
+    sample of well-known macOS apps.
     https://developer.apple.com/design/human-interface-guidelines/app-icons
   -->
-  <g transform="translate(100,100) scale(0.8047)">
+  <g transform="translate(41,41) scale(0.92)">
     <rect width="1024" height="1024" rx="230" ry="230" fill="#c8334a"/>
     <text x="512" y="700"
           font-family="Fraunces"
