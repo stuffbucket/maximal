@@ -84,10 +84,11 @@ function getRuntimeInfo() {
 }
 
 async function checkTokenExists(): Promise<boolean> {
+  // Avoid a TOCTOU race between stat and readFile: just attempt the
+  // read and treat any I/O error (ENOENT, EISDIR, EACCES, ...) as
+  // "no token", which matches the observable behavior of the old
+  // precheck-then-read flow.
   try {
-    const stats = await fs.stat(PATHS.GITHUB_TOKEN_PATH)
-    if (!stats.isFile()) return false
-
     const content = await fs.readFile(PATHS.GITHUB_TOKEN_PATH, "utf8")
     return content.trim().length > 0
   } catch {

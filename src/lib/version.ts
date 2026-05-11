@@ -36,22 +36,20 @@ interface GitDirs {
 }
 
 function resolveGitFile(candidate: string): GitDirs | undefined {
-  let stat: fs.Stats
-  try {
-    stat = fs.statSync(candidate)
-  } catch {
-    return undefined
-  }
-  if (stat.isDirectory()) {
-    return { worktree: candidate, common: candidate }
-  }
-  // Worktree pointer file: `gitdir: <abs-or-rel path>`
+  // Read first; if the candidate is the .git directory itself, readFileSync
+  // throws EISDIR — that's the directory branch. Any other I/O error → bail.
+  // Operating on the read result (rather than stat-then-read) closes the
+  // TOCTOU window between checking type and consuming contents.
   let pointer: string
   try {
     pointer = fs.readFileSync(candidate, "utf8").trim()
-  } catch {
+  } catch (err) {
+    if (err instanceof Error && "code" in err && err.code === "EISDIR") {
+      return { worktree: candidate, common: candidate }
+    }
     return undefined
   }
+  // Worktree pointer file: `gitdir: <abs-or-rel path>`
   const match = pointer.match(/^gitdir: (\S.*)$/u)
   if (!match) return undefined
   const worktreeDir =

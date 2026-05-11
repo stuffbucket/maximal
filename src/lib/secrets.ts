@@ -59,46 +59,59 @@ export function readSecret(opts: {
   const dir = opts.dir ?? SECRETS_DIR
   const file = path.join(dir, opts.fileName)
 
-  let stats: fs.Stats
+  // Open once and operate on the fd to avoid a TOCTOU race between the
+  // mode check and the read. ENOENT on openSync → "unset"; any other
+  // open failure → "unset" (best effort, treat as unreadable).
+  let fd: number
   try {
-    stats = fs.statSync(file)
+    fd = fs.openSync(file, "r")
   } catch {
     return { value: undefined, source: "unset" }
   }
 
-  if (!stats.isFile()) {
-    return {
-      value: undefined,
-      source: "unset",
-      diagnostic: `${file} is not a regular file; ignored`,
-    }
-  }
-
-  // POSIX file mode lives in the lower 9 bits of stats.mode. We only
-  // tolerate 0600 (or stricter — but that's rare). Anything broader
-  // means group or world can read; refuse so a drive-by chmod doesn't
-  // turn into a credential leak.
-  const mode = stats.mode & 0o777
-  if (mode !== SAFE_FILE_MODE) {
-    const msg = `${file} has insecure mode ${mode.toString(8).padStart(3, "0")} (expected 600); skipped`
-    consola.warn(msg)
-    return { value: undefined, source: "unset", diagnostic: msg }
-  }
-
-  let value: string
   try {
-    value = fs.readFileSync(file, "utf8").trim()
-  } catch {
-    return {
-      value: undefined,
-      source: "unset",
-      diagnostic: `${file} could not be read`,
+    const stats = fs.fstatSync(fd)
+
+    if (!stats.isFile()) {
+      return {
+        value: undefined,
+        source: "unset",
+        diagnostic: `${file} is not a regular file; ignored`,
+      }
+    }
+
+    // POSIX file mode lives in the lower 9 bits of stats.mode. We only
+    // tolerate 0600 (or stricter — but that's rare). Anything broader
+    // means group or world can read; refuse so a drive-by chmod doesn't
+    // turn into a credential leak.
+    const mode = stats.mode & 0o777
+    if (mode !== SAFE_FILE_MODE) {
+      const msg = `${file} has insecure mode ${mode.toString(8).padStart(3, "0")} (expected 600); skipped`
+      consola.warn(msg)
+      return { value: undefined, source: "unset", diagnostic: msg }
+    }
+
+    let value: string
+    try {
+      value = fs.readFileSync(fd, "utf8").trim()
+    } catch {
+      return {
+        value: undefined,
+        source: "unset",
+        diagnostic: `${file} could not be read`,
+      }
+    }
+    if (value.length === 0) {
+      return { value: undefined, source: "unset" }
+    }
+    return { value, source: "file" }
+  } finally {
+    try {
+      fs.closeSync(fd)
+    } catch {
+      /* best effort */
     }
   }
-  if (value.length === 0) {
-    return { value: undefined, source: "unset" }
-  }
-  return { value, source: "file" }
 }
 
 /** Materialize a secret into process.env if not already present.
@@ -156,13 +169,25 @@ export const SECRET_DEFS: ReadonlyArray<SecretDef> = [
  *  mode 0600. Used by debug surfaces to distinguish env-from-file
  *  from env-from-shell. Best-effort — any I/O error → false. */
 export function secretIsFromFile(fileName: string, value: string): boolean {
+  const filePath = path.join(SECRETS_DIR, fileName)
+  let fd: number
   try {
-    const filePath = path.join(SECRETS_DIR, fileName)
-    const stats = fs.statSync(filePath)
-    if (!stats.isFile()) return false
-    if ((stats.mode & 0o777) !== SAFE_FILE_MODE) return false
-    return fs.readFileSync(filePath, "utf8").trim() === value
+    fd = fs.openSync(filePath, "r")
   } catch {
     return false
+  }
+  try {
+    const stats = fs.fstatSync(fd)
+    if (!stats.isFile()) return false
+    if ((stats.mode & 0o777) !== SAFE_FILE_MODE) return false
+    return fs.readFileSync(fd, "utf8").trim() === value
+  } catch {
+    return false
+  } finally {
+    try {
+      fs.closeSync(fd)
+    } catch {
+      /* best effort */
+    }
   }
 }
