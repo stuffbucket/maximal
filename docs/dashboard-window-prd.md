@@ -75,7 +75,7 @@ If `/setup-status` returns `ready: false`, the entire Dashboard window swaps con
 
 ### Section: Copilot
 
-Lift the existing `/usage-viewer` chart + numbers wholesale — same fetch, same chart library. Wrap in a section card. Loading state: skeleton. Error state: "Couldn't reach `/usage` (last attempt 14:32:01)" with a retry button. No polling — Copilot's usage endpoint is itself rate-limited.
+Lift the existing `/usage-viewer` chart + numbers wholesale — same fetch, same chart library. **No card chrome around it** — the chart and its label are their own visual unit; an enclosing card would be decorative (see `.design-context.md` → "When to use a card"). Sections are separated by a strong heading + the spacing scale's `--space-6` (32px) above. Loading state: skeleton. Error state: "Couldn't reach `/usage` (last attempt 14:32:01)" with a retry button. No polling — Copilot's usage endpoint is itself rate-limited.
 
 Stretch goal (out of v1): show the proxy-side request counter as a complement (since the proxy can count requests it served regardless of upstream rate-limit response). Defer until we have a metrics endpoint.
 
