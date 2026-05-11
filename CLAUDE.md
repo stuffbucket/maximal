@@ -119,3 +119,18 @@ This repo can collide on a shared working tree (lint-staged stash + concurrent m
 
 - **Claude Code plugin:** Install from marketplace with `/plugin marketplace add https://github.com/caozhiyuan/copilot-api.git` then `/plugin install claude-plugin@copilot-api-marketplace`. Injects `__SUBAGENT_MARKER__` on subagent starts.
 - **Opencode plugin:** Copy `.opencode/plugins/subagent-marker.js` to `~/.config/opencode/plugins/`.
+
+## Design Context
+
+UI work in this repo follows `.design-context.md` in the repo root. **Read it before touching any HTML/CSS/component code** for the Tauri windows or the proxy-served pages.
+
+**Direction in brief:** humanist-powerful — dense with capability but never overwhelming. Dark-first with light + system override; user-themable accent and surface colors with contrast guardrails (warn at sub-WCAG-AA, never block). Sidebar nav for multi-section windows, scroll-only for single-section. Three surface levels, three elevation levels, fixed spacing scale.
+
+**Five principles override all other guidance in conflicts:**
+1. Speak to the person, not the file
+2. Power lives in depth, not density
+3. Color is the user's, contrast is ours
+4. One humanist accent per window
+5. Reduced motion is a contract, not a hint
+
+The design-* skills (design-frontend, design-onboard, design-critique, design-check, design-typography-rules, etc.) consult this file. If output feels generic, the file needs sharpening — update it, don't override it inline.
