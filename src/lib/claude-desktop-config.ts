@@ -198,7 +198,34 @@ export function writeClaudeDesktopConfig(
   fs.mkdirSync(dir, { recursive: true })
   const tmp = `${filePath}.tmp`
   const json = `${JSON.stringify(config, null, 2)}\n`
-  const fd = fs.openSync(tmp, "w", 0o644)
+  // Opportunistic cleanup of a stale tmp left by a prior crash. The
+  // O_EXCL open below is what actually claims the path; this unlink
+  // does not create a TOCTOU window. Swallow ENOENT only.
+  try {
+    fs.unlinkSync(tmp)
+  } catch (err: unknown) {
+    if (!(err instanceof Error) || !("code" in err) || err.code !== "ENOENT") {
+      throw err
+    }
+  }
+  // O_EXCL ensures we fail rather than follow a symlink an attacker
+  // could have planted at `${filePath}.tmp`. Mode 0o600 because the
+  // Claude Desktop config can carry MCP-server API keys in env blocks.
+  let fd: number
+  try {
+    fd = fs.openSync(
+      tmp,
+      fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL,
+      0o600,
+    )
+  } catch (err: unknown) {
+    if (err instanceof Error && "code" in err && err.code === "EEXIST") {
+      throw new Error(
+        `refusing to write Claude Desktop config: ${tmp} already exists (possible symlink attack); remove it and retry`,
+      )
+    }
+    throw err
+  }
   try {
     fs.writeFileSync(fd, json)
     fs.fsyncSync(fd)
