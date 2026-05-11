@@ -44,3 +44,4 @@ reports/
 .*.bun-build
 
 
+.tmp/

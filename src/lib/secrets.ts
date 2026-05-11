@@ -65,11 +65,7 @@ export function readSecret(opts: {
   let fd: number
   try {
     // O_NOFOLLOW refuses to traverse symlinks so a planted symlink under
-    // any dir (including tmp) can't redirect the read.
-    // lgtm[js/insecure-temporary-file] — false positive: the taint flow
-    // CodeQL sees comes from test fixtures passing os.tmpdir()-derived
-    // paths into opts.dir. Production SECRETS_DIR resolves to
-    // ~/.local/share/copilot-api/secrets/, never to a temp dir.
+    // any dir can't redirect the read.
     fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW)
   } catch {
     return { value: undefined, source: "unset" }

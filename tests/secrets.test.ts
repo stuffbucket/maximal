@@ -1,11 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 import fs from "node:fs"
-import os from "node:os"
 import path from "node:path"
 
 import { readSecret } from "~/lib/secrets"
 
-const TMP_ROOT = path.join(os.tmpdir(), `maximal-secrets-test-${Date.now()}`)
+// Repo-local fixture root (gitignored). Deliberately NOT os.tmpdir():
+// CodeQL's js/insecure-temporary-file rule treats os.tmpdir() as a
+// taint source and would flag the production openSync that consumes
+// opts.dir, even though the production caller never touches tmp.
+const TMP_ROOT = path.join(process.cwd(), ".tmp", "secrets-test")
 let secretsDir: string
 
 beforeEach(() => {
