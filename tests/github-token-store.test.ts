@@ -5,6 +5,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
+import { mkdtempSync } from "node:fs"
 import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
@@ -16,17 +17,16 @@ import {
   writeGitHubTokenRecord,
 } from "~/lib/github-token-store"
 
-const TMP_ROOT = path.join(os.tmpdir(), `gh-token-store-${Date.now()}`)
+let tokenDir: string
 let tokenPath: string
 
-beforeEach(async () => {
-  const dir = path.join(TMP_ROOT, `case-${crypto.randomUUID()}`)
-  await fs.mkdir(dir, { recursive: true })
-  tokenPath = path.join(dir, "github_token")
+beforeEach(() => {
+  tokenDir = mkdtempSync(path.join(os.tmpdir(), "maximal-gh-token-"))
+  tokenPath = path.join(tokenDir, "github_token")
 })
 
 afterEach(async () => {
-  await fs.rm(TMP_ROOT, { recursive: true, force: true }).catch(() => {})
+  await fs.rm(tokenDir, { recursive: true, force: true }).catch(() => {})
 })
 
 describe("inferTokenType", () => {
