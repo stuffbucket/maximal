@@ -1,24 +1,39 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test"
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+} from "bun:test"
 import fs from "node:fs"
+import os from "node:os"
 import path from "node:path"
 
 import { readSecret } from "~/lib/secrets"
 
-// Repo-local fixture root (gitignored). Deliberately NOT os.tmpdir():
-// CodeQL's js/insecure-temporary-file rule treats os.tmpdir() as a
-// taint source and would flag the production openSync that consumes
+// XDG-style fixture root outside the repo so nothing here can be
+// `git add`-ed. Deliberately NOT os.tmpdir(): CodeQL's
+// js/insecure-temporary-file rule treats os.tmpdir() as a taint
+// source and would flag the production openSync that consumes
 // opts.dir, even though the production caller never touches tmp.
-const TMP_ROOT = path.join(process.cwd(), ".tmp", "secrets-test")
+const XDG_DATA =
+  process.env.XDG_DATA_HOME ?? path.join(os.homedir(), ".local", "share")
+const TEST_ROOT = path.join(XDG_DATA, "maximal-test", "secrets-test")
 let secretsDir: string
 
+beforeAll(() => {
+  fs.mkdirSync(TEST_ROOT, { recursive: true })
+})
+
 beforeEach(() => {
-  secretsDir = path.join(TMP_ROOT, `case-${crypto.randomUUID()}`)
+  secretsDir = path.join(TEST_ROOT, `case-${crypto.randomUUID()}`)
   fs.mkdirSync(secretsDir, { recursive: true, mode: 0o700 })
 })
 
 afterEach(() => {
   try {
-    fs.rmSync(TMP_ROOT, { recursive: true, force: true })
+    fs.rmSync(secretsDir, { recursive: true, force: true })
   } catch {
     /* best effort */
   }
