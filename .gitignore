@@ -37,5 +37,8 @@ SBOM.cdx.json
 *.vsix
 .claude
 contrib/slides/
+# Stryker mutation testing
+.stryker-tmp/
+reports/
 
 

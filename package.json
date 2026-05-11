@@ -35,6 +35,7 @@
     "lint": "eslint --cache",
     "lint:all": "eslint --cache .",
     "lint:fast": "oxlint",
+    "mutate": "stryker run",
     "prepack": "bun run build",
     "package-dmg": "bun scripts/package-dmg.ts",
     "prepare": "simple-git-hooks",
@@ -68,6 +69,7 @@
   },
   "devDependencies": {
     "@echristian/eslint-config": "^0.0.54",
+    "@stryker-mutator/core": "^9.6.1",
     "@types/bun": "^1.2.23",
     "@types/proxy-from-env": "^1.0.4",
     "@types/turndown": "^5.0.6",

@@ -1,0 +1,27 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "_comment": "Manual mutation testing. Not wired into check:fast or check:deep. Scope is intentionally narrow — point it at one pure-logic module at a time. Expect ~30s-2min per run depending on the module's mutant count and test runtime.",
+  "packageManager": "npm",
+  "testRunner": "command",
+  "commandRunner": {
+    "command": "bun test tests/refresh-models.test.ts"
+  },
+  "mutate": [
+    "src/lib/refresh-models.ts"
+  ],
+  "reporters": ["progress", "clear-text", "html"],
+  "tempDirName": ".stryker-tmp",
+  "htmlReporter": {
+    "fileName": "reports/mutation/index.html"
+  },
+  "concurrency": 4,
+  "timeoutMS": 30000,
+  "ignorePatterns": [
+    "dist",
+    "build",
+    "node_modules",
+    "shell",
+    ".claude",
+    "reports"
+  ]
+}
