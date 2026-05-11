@@ -26,8 +26,9 @@
   ],
   "scripts": {
     "analyze": "bun run scripts/gemma-watch.ts",
-    "app:build": "bun run app:sidecar && cd shell && bun install && bunx tauri build --bundles app,dmg",
-    "app:dev": "bun run app:sidecar && cd shell && bun install && bunx tauri dev",
+    "app:build": "bun run app:sidecar && cd shell && bun install && bun run tauri build --bundles app,dmg",
+    "app:dev": "bun run app:sidecar && cd shell && bun install && bun run tauri dev",
+    "app:icons": "cd shell && bun install && bun run tauri icon ../build/macos/app-icon.svg --output src-tauri/icons",
     "app:sidecar": "bun run scripts/build-sidecar.ts",
     "build": "bun build src/main.ts --target=bun --outdir dist",
     "check:deep": "bun run check:fast && bun test && bun run knip",
