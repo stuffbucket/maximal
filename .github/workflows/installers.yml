@@ -47,7 +47,7 @@ jobs:
     env:
       TAG: ${{ github.event.release.tag_name || inputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           token: ${{ github.token }}
@@ -145,7 +145,7 @@ jobs:
       TAG: ${{ github.event.release.tag_name || inputs.tag }}
       ARCH: arm64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Resolve release artifact URLs
         run: |
@@ -238,7 +238,7 @@ jobs:
       # racing the upload. Workflow artifacts are immediately
       # consistent across jobs.
       - name: Share .app.zip with macos-signed
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: macos-unsigned-app-zip
           path: dist-release/maximal-${{ env.TAG }}-darwin-${{ env.ARCH }}.app.zip
@@ -274,7 +274,7 @@ jobs:
       TAG: ${{ github.event.release.tag_name || inputs.tag }}
       ARCH: arm64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Resolve names
         run: |
@@ -293,7 +293,7 @@ jobs:
           mkdir -p dist-input dist-build dist-release
 
       - name: Download unsigned .app.zip artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: macos-unsigned-app-zip
           path: dist-input
@@ -419,7 +419,7 @@ jobs:
     env:
       TAG: ${{ github.event.release.tag_name || inputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # B3a ships install.ps1 verbatim — no compilation, no signing for
       # v1 (A4 deferred). Sidecar a SHA-256 so the Pages site (B4) can
@@ -453,7 +453,7 @@ jobs:
     env:
       TAG: ${{ github.event.release.tag_name || inputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Resolve version
         id: ver
