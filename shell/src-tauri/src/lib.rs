@@ -3,22 +3,22 @@
 // Tauri 2 menu-bar app. On launch we:
 //   1. Spawn the bundled `maximal` binary as a sidecar — it serves
 //      the proxy on http://localhost:4142 (see SIDECAR_PORT below).
-//   2. Show a tray icon with: Open Dashboard, Open Logs Folder, Quit.
+//   2. Show a tray icon with: Settings… (⌘,), Quit Maximal (⌘Q).
 //   3. Hold the sidecar's CommandChild so we can SIGTERM it when the
 //      user picks Quit. Tauri 2 issue #3564 documents the orphan-
 //      child pitfall — keeping the handle and explicitly killing on
 //      RunEvent::ExitRequested fixes it.
 //
 // No main window is created at launch (`app.windows = []` in
-// tauri.conf.json). "Open Dashboard" creates a webview window
-// pointing at the proxy's /usage-viewer endpoint on demand.
+// tauri.conf.json); the tray is the only UI surface. The proxy's
+// /usage-viewer endpoint is reachable directly via the browser.
 
 use std::sync::Mutex;
 
 use tauri::{
-    menu::{Menu, MenuItem},
+    menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, RunEvent, WebviewUrl, WebviewWindowBuilder,
+    Manager, RunEvent,
 };
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
@@ -56,11 +56,9 @@ impl Sidecar {
 // Production Phase E will probably restore 4141 as the canonical
 // port and assume the tray app is the only supervisor.
 const SIDECAR_PORT: u16 = 4142;
-const DASHBOARD_LABEL: &str = "dashboard";
 
 mod menu_id {
-    pub const OPEN_DASHBOARD: &str = "open_dashboard";
-    pub const OPEN_LOGS: &str = "open_logs";
+    pub const SETTINGS: &str = "settings";
     pub const QUIT: &str = "quit";
 }
 
@@ -120,9 +118,8 @@ fn spawn_sidecar(app: &tauri::AppHandle) -> tauri::Result<()> {
                 }
                 CommandEvent::Terminated(payload) => {
                     eprintln!("[maximal] sidecar exited: {:?}", payload);
-                    // TODO(prod): surface to the tray (greyed-out
-                    // dashboard menu item, error tooltip) instead
-                    // of failing silently.
+                    // TODO(prod): surface to the tray (error tooltip
+                    // or icon-state change) instead of failing silently.
                     break;
                 }
                 _ => {}
@@ -145,12 +142,22 @@ fn kill_sidecar(app: &tauri::AppHandle) {
 }
 
 fn install_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
-    let dashboard =
-        MenuItem::with_id(app, menu_id::OPEN_DASHBOARD, "Open dashboard", true, None::<&str>)?;
-    let logs =
-        MenuItem::with_id(app, menu_id::OPEN_LOGS, "Open logs folder", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, menu_id::QUIT, "Quit maximal", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&dashboard, &logs, &quit])?;
+    let settings = MenuItem::with_id(
+        app,
+        menu_id::SETTINGS,
+        "Settings…",
+        true,
+        Some("CmdOrCtrl+,"),
+    )?;
+    let separator = PredefinedMenuItem::separator(app)?;
+    let quit = MenuItem::with_id(
+        app,
+        menu_id::QUIT,
+        "Quit Maximal",
+        true,
+        Some("CmdOrCtrl+Q"),
+    )?;
+    let menu = Menu::with_items(app, &[&settings, &separator, &quit])?;
 
     TrayIconBuilder::with_id(TRAY_ID)
         .menu(&menu)
@@ -158,8 +165,7 @@ fn install_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         .tooltip("maximal")
         .icon(app.default_window_icon().unwrap().clone())
         .on_menu_event(|app, event| match event.id().as_ref() {
-            menu_id::OPEN_DASHBOARD => open_dashboard(app),
-            menu_id::OPEN_LOGS => open_logs(app),
+            menu_id::SETTINGS => open_settings(app),
             // app.exit() routes through RunEvent::ExitRequested,
             // which is where the sidecar gets killed. No need to
             // call kill_sidecar here directly.
@@ -173,43 +179,26 @@ fn install_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
                 ..
             } = event
             {
-                // Reserved for future "left-click opens dashboard"
-                // mode if it feels better than the current
-                // show_menu_on_left_click default.
+                // Reserved for future left-click behavior; the
+                // current default is show_menu_on_left_click.
             }
         })
         .build(app)?;
     Ok(())
 }
 
-fn open_dashboard(app: &tauri::AppHandle) {
-    if let Some(window) = app.get_webview_window(DASHBOARD_LABEL) {
-        let _ = window.show();
-        let _ = window.set_focus();
-        return;
-    }
-    let proxy_url = format!("http://localhost:{SIDECAR_PORT}");
-    let url = format!("{proxy_url}/usage-viewer?endpoint={proxy_url}/usage");
-    // url is synthesized from constants — parse cannot fail.
-    let parsed = url.parse().expect("synthesized localhost URL");
-    let _ = WebviewWindowBuilder::new(app, DASHBOARD_LABEL, WebviewUrl::External(parsed))
-        .title("maximal — dashboard")
-        .inner_size(1100.0, 720.0)
-        .build();
-}
-
-fn open_logs(app: &tauri::AppHandle) {
-    // Resolves to the same path src/lib/paths.ts uses
-    // (~/.local/share/maximal/logs on macOS/Linux,
-    // %USERPROFILE%\.local\share\maximal\logs on Windows). On
-    // macOS, opener::open_path reveals the folder in Finder.
+fn open_settings(app: &tauri::AppHandle) {
+    // Opens the maximal app-data directory in the OS file browser.
+    // The user's editable config.json lives at the root; logs/ and
+    // secrets/ are visible as siblings. Resolves to the same path
+    // src/lib/paths.ts uses: ~/.local/share/maximal on macOS/Linux,
+    // %USERPROFILE%\.local\share\maximal on Windows.
     let Ok(home) = app.path().home_dir() else {
         return;
     };
-    let logs = home
+    let dir = home
         .join(".local")
         .join("share")
-        .join("maximal")
-        .join("logs");
-    let _ = app.opener().open_path(logs.to_string_lossy(), None::<&str>);
+        .join("maximal");
+    let _ = app.opener().open_path(dir.to_string_lossy(), None::<&str>);
 }
