@@ -1,14 +1,22 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
   <!--
-    macOS app icons follow a "squircle template": visible content occupies
-    a transparent-padded inner area of the 1024 canvas. Apple's published
-    template specifies 824×824 (0.8047) — but most icons shipping in the
-    Dock today push closer to 0.92, which matches our peers visually.
-    Tuned empirically; revisit if the icon looks off relative to a fresh
-    sample of well-known macOS apps.
+    macOS Big Sur+ app-icon template:
+      front face = 824×824 at (100,100) inside the 1024 canvas
+      → scale 0.8047, the docs-correct value (see Apple HIG link below).
+
+    Apple's template assumes a rendered shadow/glow extending outside the
+    824 body. Our brand is a flat squircle with no shadow, so at exactly
+    0.8047 the icon reads visually small next to peers (Chrome, Slack,
+    etc.) whose shadow fills the surrounding margin. Bumped to 0.842 —
+    a 4.6% optical correction — to land at the same Dock visual size as
+    those peers while staying within the template's tolerance.
+
+    If you ever swap to an icon with its own rendered shadow, drop back
+    to 0.8047.
+
     https://developer.apple.com/design/human-interface-guidelines/app-icons
   -->
-  <g transform="translate(41,41) scale(0.92)">
+  <g transform="translate(81,81) scale(0.842)">
     <rect width="1024" height="1024" rx="230" ry="230" fill="#c8334a"/>
     <text x="512" y="700"
           font-family="Fraunces"
