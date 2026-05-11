@@ -37,7 +37,5 @@ SBOM.cdx.json
 *.vsix
 .claude
 contrib/slides/
-# Tauri shell lives on spike/tauri-shell; ignore on main until that branch merges
-/shell/
 
 

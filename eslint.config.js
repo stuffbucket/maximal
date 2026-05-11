@@ -6,6 +6,7 @@ export default config({
     "contrib/**",
     "docs/**",
     "scripts/**",
+    "shell/**",
     "site/**",
     ".dependency-cruiser.cjs",
   ],

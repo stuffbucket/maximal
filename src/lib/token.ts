@@ -1,3 +1,4 @@
+import clipboard from "clipboardy"
 import consola from "consola"
 import { setTimeout as delay } from "node:timers/promises"
 
@@ -149,26 +150,43 @@ export async function setupGitHubToken(
     const response = await getDeviceCode()
     consola.debug("Device code response:", response)
 
-    // GitHub accepts a `user_code` query parameter on the verification URL
-    // and pre-fills the input field, dropping a copy/paste step. The
-    // `verification_uri_complete` field on RFC 8628 responses provides the
-    // canonical URL when the server supports it; fall back to manual
-    // composition (GitHub's verification_uri is `https://github.com/login/device`).
-    const completeUrl = buildVerificationUrl(response)
+    // RFC 8628's `verification_uri_complete` is the only reliable
+    // prefill mechanism, but GitHub's device-code endpoint doesn't
+    // emit one and their /login/device page doesn't honor a
+    // ?user_code= query param either (verified empirically). The
+    // user has to type the code into the form. Best we can do for
+    // them: copy it to the clipboard automatically so a single
+    // Cmd/Ctrl-V completes the flow.
+    const verificationUrl =
+      response.verification_uri_complete ?? response.verification_uri
+
+    let copiedToClipboard = false
+    try {
+      clipboard.writeSync(response.user_code)
+      copiedToClipboard = true
+    } catch {
+      // Clipboard unavailable (headless Linux without xclip/xsel,
+      // sandboxed environments). Fall through; the next consola.info
+      // line tells the user to enter the code manually.
+    }
 
     consola.info(
-      `Open ${completeUrl} in your browser and approve. Code: ${response.user_code}`,
+      copiedToClipboard ?
+        `Code ${response.user_code} copied to clipboard — paste into the form, then approve.`
+      : `Open the form, then enter code: ${response.user_code}`,
     )
 
     if (!options?.noBrowser && !isHeadless()) {
-      const opened = openUrl(completeUrl)
+      const opened = openUrl(verificationUrl)
       if (opened.ok) {
-        consola.info("(Opened your default browser.)")
+        consola.info(`(Opened ${verificationUrl} in your browser.)`)
       } else {
         consola.info(
-          "(Couldn't open the browser automatically. Visit the URL manually.)",
+          `(Couldn't open the browser automatically. Visit ${verificationUrl} manually.)`,
         )
       }
+    } else {
+      consola.info(`Visit ${verificationUrl} in any browser.`)
     }
 
     const token = await pollAccessToken(response)
@@ -188,19 +206,6 @@ export async function setupGitHubToken(
     consola.error("Failed to get GitHub token:", error)
     throw error
   }
-}
-
-function buildVerificationUrl(response: {
-  verification_uri: string
-  verification_uri_complete?: string
-  user_code: string
-}): string {
-  if (response.verification_uri_complete) {
-    return response.verification_uri_complete
-  }
-  const url = new URL(response.verification_uri)
-  url.searchParams.set("user_code", response.user_code)
-  return url.toString()
 }
 
 export async function logUser() {
