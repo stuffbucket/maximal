@@ -274,6 +274,56 @@ pre-commit:
 
 If all five pass, the loops are wired correctly.
 
+## Dispatch and review loops
+
+The two-tier model above stops at the developer's own keyboard. The moment a developer (or another agent) delegates a whole issue-to-PR cycle to a background subagent, three more loops appear above it. Same framing — hook point, frequency, latency budget — just slower clocks.
+
+| Loop | Hook point | Frequency | Latency budget | Default contents |
+|---|---|---|---|---|
+| Dispatch | Issue claim + worktree spawn | Per delegated issue | minutes | Subagent runs its own inner+outer locally; emits commits + a PR |
+| CI shepherd | GitHub check_run / workflow_run events on the PR | Per pushed commit | minutes | Watch checks; on fixable failure, dispatch one followup agent with the annotation detail |
+| Review / governance | PR review + merge | Per PR | hours–days | Human review; ADR-driven reconciliation for non-code state |
+
+See the live playbook in `.claude/skills/pickup-issue/SKILL.md`.
+
+### Dispatch loop
+
+The loops below this one all assume the human is at the keyboard. The dispatch loop is what fires when they're not. A claim primitive (issue label `in-progress` + worktree branch `agent/issue-<N>`) takes an issue off the queue, spawns an isolated subagent in `../maximal-<task>`, and lets it run its own inner+outer until it pushes a PR. Hook point: the claim itself — without that atomic step two agents grab the same issue and stomp each other's worktrees.
+
+Loop budget: one subagent per dispatch. The subagent is not allowed to dispatch its own subagents on the same issue. If it can't close out in its own turn budget, it surfaces back rather than recurring.
+
+Self-evidencing artifacts: the `agent/issue-<N>` branch, the `in-progress` label on the issue, and the PR's `Closes #<N>` line. Anyone reading the issue queue can reconstruct who is on what without asking.
+
+### CI shepherd loop
+
+Once the subagent has opened a PR, the inner/outer loops it ran locally are no longer the gating signal — GitHub's check runs are. CodeQL, CI tests, and lint can flag things the local outer loop never sees (a new alert on freshly-added code, a flaky test surfacing under CI's runner). Hook point: `gh pr checks` polled after push, or `check_run`/`workflow_run` webhooks if you wire them.
+
+Loop budget: **at most two followup commits per PR before surfacing to the human.** If a single rule re-fires after a fix, the issue's premise is wrong and the next iteration won't save it. The cap is documented in the pickup-issue skill and shows up as concrete behavior in PRs #10–#13.
+
+Self-evidencing artifacts: the check run with its annotation-level detail (file, line, rule id) is what gets handed to the followup agent. The followup commit message references the rule id so the diff explains itself in `git log`.
+
+### Review / governance loop
+
+Human review is where the loop sometimes turns around: the reviewer pushes back on the *issue's premise*, not the diff. The durable artifact of that pushback is an ADR, not a comment. ADR-driven dismissals (introduced in PR #15) are the canonical example: non-code state — CodeQL dismissals, feature flags, policy decisions — is edited as a PR diff against `docs/decisions/<id>-<slug>.md`, and the merge triggers a reconcile workflow that applies the declared state to the live API. The ADR is the source of truth; the API is the reflection.
+
+Hook point: the PR review itself, plus the `on: push` reconcile workflow that watches the ADR path. Loop budget: a normal review cadence; nothing here is auto-retried.
+
+Self-evidencing artifacts: the PR diff (what changed), the ADR file with YAML frontmatter declaring the state (e.g. `codeql_dismissals:`), and the reconcile workflow run that closes the loop by mutating the live API.
+
+### Patterns and anti-patterns
+
+**Pattern — ADR with structured frontmatter + reconcile workflow.** `docs/decisions/0001-codeql-by-design-dismissals.md` declares dismissals under a `codeql_dismissals:` key; `.github/workflows/codeql-reconcile.yml` applies them on merge to main. (Both land in PR #15; cite them as the canonical shape even if not yet on main when you read this.) The diff is the audit trail. The workflow is idempotent. The reviewer is the policy gate.
+
+**Pattern — smoke-test artifacts on PR comments.** Commit screenshots under `.github/pr-artifacts/issue-<N>/` and reference them by raw GitHub URL in the PR description. GitHub's HTML sanitizer strips `<img src="data:...">`, so inline base64 is a dead end; raw URLs work. The reviewer sees the page state without checking out the branch. PR #13 is the example.
+
+**Anti-pattern — claiming `check:deep` green proves a UI change works.** It doesn't. `check:deep` typechecks and tests; it does not load a browser. Only a browser-driven smoke against `bun run --watch ./src/main.ts start --port 4141` exercises the rendered page. (The hardcoded port is correct here — `bun run dev` alone errors with "No command specified" on this repo.) The dispatched agent should attach the smoke artifact, not the check transcript.
+
+**Anti-pattern — looping on the same CI failure more than twice.** If CodeQL re-fires the same rule after one fix, the framing is wrong. Surface "this rule fires because the proxy reads a token to call upstream — that's the product, not a bug" upward instead of editing the same line a third time. Two followups is the cap, not a target.
+
+### How this composes
+
+The dispatch, CI shepherd, and review/governance loops do not replace the inner and outer loops — they wrap them. The subagent runs its own inner+outer locally before it pushes; the dispatcher runs the review; the reviewer runs the governance loop on the ADR diff. Hook points stack: PostToolUse fires inside the subagent's turn, Stop fires at its turn boundary, `gh pr checks` fires at PR push, the reconcile workflow fires at merge. Each clock is slower than the one below it, and each loop's budget is set by what consumes its output. Latency-budgeted feedback all the way up.
+
 ## Open questions
 
 - **Monorepos**: per-package hooks vs. whole-repo. Per-package keeps the budget; whole-repo catches cross-package type breaks. Likely answer: per-package inner, whole-repo outer, but it depends on package boundaries.

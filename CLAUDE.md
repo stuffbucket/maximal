@@ -98,6 +98,8 @@ This repo can collide on a shared working tree (lint-staged stash + concurrent m
 - **Spawned subagents:** pass `isolation: "worktree"` to the Agent tool.
 - **Sessions:** create a worktree manually with `git worktree add ../maximal-<task> -b agent/<task>`; clean up with `git worktree remove ../maximal-<task>` after merging back.
 
+See also: `docs/codegen-feedback-loops-practices.md` → Dispatch and review loops.
+
 ### Tauri shell
 
 `shell/` is a Tauri 2 menu-bar app that wraps the proxy for non-CLI users. `bun run app:sidecar` builds the standalone proxy binary into `shell/src-tauri/binaries/`, and Tauri launches it as a sidecar bound to `127.0.0.1:4142`. The Vite frontend in `shell/src/` talks to the local sidecar over HTTP. The proxy itself is unchanged — the shell is purely packaging plus a tray UI for auth/status.
