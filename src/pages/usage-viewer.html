@@ -146,7 +146,7 @@
                   border-color: var(--color-bg-light-3);
                   color: var(--color-fg-medium);
                 "
-                placeholder="http://localhost:4141/usage"
+                placeholder="/usage (defaults to this page's origin)"
               />
             </div>
             <div class="w-full">
@@ -232,7 +232,11 @@
           fetchButton.style.backgroundColor = "var(--color-blue)";
         });
 
-        const DEFAULT_ENDPOINT = "http://localhost:4141/usage";
+        // Derive from the page's own origin so the default works whether
+        // we're served from the standalone proxy (`:4141`) or the Tauri
+        // sidecar (`:4142`). A hardcoded port left the dashboard hanging
+        // on the OS connect timeout when the ports didn't match.
+        const DEFAULT_ENDPOINT = `${window.location.origin}/usage`;
         const DEFAULT_TOKEN_USAGE_PERIOD = "day";
         const DEFAULT_TOKEN_USAGE_EVENTS_PAGE_SIZE = 20;
         // Allowlist of hostnames the page is permitted to fetch from (in
