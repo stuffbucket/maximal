@@ -106,24 +106,67 @@ Data source: `GET /config` (from the Settings PRD) for the API-keys list — mas
 
 ### Section: Recent activity
 
-A live tail of today's daily log (`~/.local/share/maximal/logs/messages-handler-<date>.log`), filtered to one line per request.
+A live tail of today's daily log (`~/.local/share/maximal/logs/messages-handler-<date>.log`), filtered to one entry per request.
 
-Format: `HH:MM:SS  METHOD PATH  model  status  duration`.
+The section heading "Recent activity" uses `var(--font-display)` (Fraunces) at `--text-xl` — the one humanist accent on this window per the design-context principle. Everything below uses Commissioner.
 
-Last 50 entries by default, scroll for more. Live-updates via Server-Sent Events from a new endpoint:
+#### Entry treatment (Option B — typographic feed)
+
+Each request renders as a **two-line typographic entry**, not a row in a table. The intent is to make the feed feel narrative rather than log-shaped — it's the most-watched section, so it earns the type contrast.
+
+```
+13:42:18  POST /v1/messages                            ⏎
+          claude-sonnet-4-6  ·  1.2s  ·  200
+
+13:41:55  POST /v1/chat/completions                    ⏎
+          gpt-5  ·  0.4s  ·  200
+
+13:41:12  POST /v1/messages                            ⏎
+          claude-haiku-4-5  ·  3.1s  ·  500 upstream
+```
+
+Type assignments:
+
+| Span | Token | Family | Weight | Notes |
+|---|---|---|---|---|
+| `HH:MM:SS` (left rail) | `--text-sm` | `var(--font-mono)` | 400 | Tabular nums; muted color (`--text-muted`). Fixed width keeps the path column flush. |
+| `METHOD PATH` (primary) | `--text-base` | `var(--font-body)` | 500 | The line that matters. Body text strong color. |
+| `model · duration · status` (secondary line) | `--text-sm` | `var(--font-body)` italic | 400 | Indented to align with PATH, not the timestamp. Muted color. Italic gives a touch of editorial character without an extra typeface. |
+| `status` (error class, >=400) | inherits `--text-sm` italic | — | 500 | Status text shifts to a warning color, and the message extends inline: `500 upstream` / `429 rate-limited` / `401 auth`. No icon, no badge. Color + word does the work. |
+
+Spacing:
+- Inter-entry gap: `--space-3` (12px) — tight enough to read as a feed, loose enough that each entry breathes.
+- Indent of secondary line: matches PATH x-position (~80px), not the timestamp's 0px.
+- Section heading to first entry: `--space-4` (16px).
+
+Density target: roughly 8–10 entries visible at the default Dashboard window size. Scroll for more.
+
+#### Filtering and live-update mechanics
+
+Filter chips immediately above the entry list:
+- **All** (default) / **Anthropic** / **OpenAI** / **Errors only**
+- Chips use `--text-sm`, weight 500 when active, weight 400 otherwise. Active chip background is `--surface-control`; inactive is transparent. No pill shape — `--radius-chip` (4px) per the design-context.
+
+"Auto-scroll" toggle pinned to the right of the chip row. Default on. When the user manually scrolls up, auto-scroll silently disables (don't fight the user). A subtle "↓ New activity" banner appears when new entries arrive while auto-scroll is off; clicking it scrolls to bottom and re-enables.
+
+Live-updates via Server-Sent Events from a new endpoint:
 
 ```
 GET /activity/stream    (SSE, unauthenticated, sends one event per logged request)
 GET /activity?limit=50  (snapshot, for initial render and reconnect)
 ```
 
-Filter chips above the list:
-- All / Anthropic / OpenAI / Errors
-- Toggle: "Auto-scroll" (default on)
+Last 50 entries by default; the snapshot endpoint accepts a higher `limit` for the rare deep-scroll case. New entries fade in with a 200ms opacity transition (instant on `prefers-reduced-motion`).
 
-"Open logs folder" button at the bottom of the section — replaces the affordance removed from the tray menu in the earlier menu rename.
+"Open logs folder" button at the bottom of the section — replaces the affordance removed from the tray menu in the earlier menu rename. Ghost button style; doesn't compete with content.
 
-Privacy note: payloads are NOT shown in the Dashboard. Path + model + status + duration only. The daily log file (which contains payloads) is one click away for users who want depth.
+#### Privacy
+
+Payloads are NOT shown in the Dashboard. Path + method + model + status + duration only. The daily log file (which does contain payloads) is one click away via "Open logs folder" for users who want depth.
+
+#### Fallback if Option B underdelivers at implementation time
+
+If the two-line typographic entry doesn't read as distinctive enough in build (looks like a styled log table after all), the fallback is **Option C — editorial feed**: bump PATH to `--text-md` weight 600, double the inter-entry gap to `--space-5`, and drop the timestamp left-rail in favor of a relative time on the secondary line ("12 seconds ago"). That treatment skews more "Pinboard / Things 3" than "admin panel." Cost: 8 visible entries → 5 at default window size. Pick at implementation review.
 
 ### Section: Quick actions
 
