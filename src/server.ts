@@ -23,6 +23,10 @@ import { cacheModels } from "./lib/utils"
 // attribute regardless.
 import usageViewerImport from "./pages/usage-viewer.html" with { type: "file" }
 const usageViewerPath = usageViewerImport as unknown as string
+import lucideVendorImport from "./pages/vendor/lucide.min.js" with { type: "file" }
+const lucideVendorPath = lucideVendorImport as unknown as string
+import tailwindVendorImport from "./pages/vendor/tailwind.min.js" with { type: "file" }
+const tailwindVendorPath = tailwindVendorImport as unknown as string
 import { completionRoutes } from "./routes/chat-completions/route"
 import { debugRoutes } from "./routes/debug/route"
 import { embeddingRoutes } from "./routes/embeddings/route"
@@ -47,6 +51,8 @@ server.use(
       "/",
       "/usage-viewer",
       "/usage-viewer/",
+      "/vendor/lucide.min.js",
+      "/vendor/tailwind.min.js",
       "/_debug/state",
     ],
     // The dashboard at /usage-viewer fetches these endpoints from the
@@ -79,6 +85,21 @@ server.get("/usage-viewer", async (c) =>
   c.html(await Bun.file(usageViewerPath).text()),
 )
 server.get("/usage-viewer/", (c) => c.redirect("/usage-viewer", 301))
+
+// Vendored third-party assets for the dashboard. Inlined as a small
+// allowlist rather than a wildcard static handler to keep the surface
+// area minimal and avoid path-traversal concerns. Both are pinned
+// versions checked into the repo under `src/pages/vendor/`.
+const VENDOR_HEADERS = {
+  "content-type": "application/javascript; charset=utf-8",
+  "cache-control": "public, max-age=86400",
+} as const
+server.get("/vendor/lucide.min.js", async (c) =>
+  c.body(await Bun.file(lucideVendorPath).bytes(), 200, VENDOR_HEADERS),
+)
+server.get("/vendor/tailwind.min.js", async (c) =>
+  c.body(await Bun.file(tailwindVendorPath).bytes(), 200, VENDOR_HEADERS),
+)
 
 server.route("/_debug", debugRoutes)
 server.route("/chat/completions", completionRoutes)
