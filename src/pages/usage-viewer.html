@@ -128,7 +128,7 @@
         >
           <form
             id="endpoint-form"
-            class="grid grid-cols-1 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_180px_auto] gap-3 items-end"
+            class="grid grid-cols-1 xl:grid-cols-[minmax(0,2fr)_180px_auto] gap-3 items-end"
           >
             <div class="w-full">
               <label
@@ -148,39 +148,6 @@
                 "
                 placeholder="http://localhost:4141/usage"
               />
-            </div>
-            <div class="w-full">
-              <label
-                for="x-api-key"
-                class="mb-1 block font-semibold whitespace-nowrap text-sm"
-                style="color: var(--color-fg-lightest)"
-                >x-api-key</label
-              >
-              <input
-                type="password"
-                id="x-api-key"
-                class="w-full px-3 py-2 border focus:ring-1 transition input-focus text-sm"
-                style="
-                  background-color: var(--color-bg-darkest);
-                  border-color: var(--color-bg-light-3);
-                  color: var(--color-fg-medium);
-                "
-                placeholder="Optional when auth is enabled"
-                autocomplete="off"
-                spellcheck="false"
-              />
-              <label
-                for="remember-api-key"
-                class="mt-2 flex items-center gap-2 text-xs cursor-pointer select-none"
-                style="color: var(--color-gray-accent)"
-              >
-                <input
-                  type="checkbox"
-                  id="remember-api-key"
-                  class="cursor-pointer"
-                />
-                <span>Remember on this device</span>
-              </label>
             </div>
             <div class="w-full">
               <label
@@ -234,8 +201,10 @@
           </form>
           <p class="mt-3 text-xs" style="color: var(--color-gray-accent)">
             The page derives <code>/token-usage</code> and
-            <code>/token-usage/events</code> from the usage endpoint and sends
-            <code>x-api-key</code> to all requests when provided.
+            <code>/token-usage/events</code> from the usage endpoint. The
+            proxy exempts these endpoints from API-key auth when the
+            request comes from loopback, so the dashboard never handles
+            credentials.
           </p>
         </div>
 
@@ -248,8 +217,6 @@
       document.addEventListener("DOMContentLoaded", () => {
         const endpointForm = document.getElementById("endpoint-form");
         const endpointUrlInput = document.getElementById("endpoint-url");
-        const apiKeyInput = document.getElementById("x-api-key");
-        const rememberApiKeyCheckbox = document.getElementById("remember-api-key");
         const tokenUsagePeriodSelect = document.getElementById(
           "token-usage-period"
         );
@@ -268,9 +235,6 @@
         const DEFAULT_ENDPOINT = "http://localhost:4141/usage";
         const DEFAULT_TOKEN_USAGE_PERIOD = "day";
         const DEFAULT_TOKEN_USAGE_EVENTS_PAGE_SIZE = 20;
-        const API_KEY_STORAGE_KEY = "maximal.usage-viewer.x-api-key";
-        const REMEMBER_API_KEY_STORAGE_KEY =
-          "maximal.usage-viewer.remember-x-api-key";
         // Allowlist of hostnames the page is permitted to fetch from (in
         // addition to same-origin). Defends against CSRF-style attacks where
         // a user is tricked into pasting a hostile endpoint URL.
@@ -353,99 +317,6 @@
           return normalized;
         }
 
-        function loadRememberApiKeyPreference() {
-          try {
-            return localStorage.getItem(REMEMBER_API_KEY_STORAGE_KEY) === "1";
-          } catch (error) {
-            console.warn(
-              "Could not read remember-api-key preference:",
-              getErrorMessage(error)
-            );
-            return false;
-          }
-        }
-
-        function storeRememberApiKeyPreference(remember) {
-          try {
-            if (remember) {
-              localStorage.setItem(REMEMBER_API_KEY_STORAGE_KEY, "1");
-            } else {
-              localStorage.removeItem(REMEMBER_API_KEY_STORAGE_KEY);
-            }
-          } catch (error) {
-            console.warn(
-              "Could not store remember-api-key preference:",
-              getErrorMessage(error)
-            );
-          }
-        }
-
-        // Prefer sessionStorage (cleared with the tab) for the API key. If the
-        // user has explicitly opted in to "Remember on this device" we also
-        // mirror it into localStorage and fall back to it on load.
-        function loadStoredApiKey() {
-          try {
-            const fromSession = sessionStorage.getItem(API_KEY_STORAGE_KEY);
-            if (fromSession) {
-              return fromSession;
-            }
-          } catch (error) {
-            console.warn(
-              "Could not read session API key:",
-              getErrorMessage(error)
-            );
-          }
-          try {
-            return localStorage.getItem(API_KEY_STORAGE_KEY) || "";
-          } catch (error) {
-            console.warn(
-              "Could not read stored API key:",
-              getErrorMessage(error)
-            );
-            return "";
-          }
-        }
-
-        function storeApiKey(value) {
-          const trimmed = value.trim();
-          const remember = Boolean(
-            rememberApiKeyCheckbox && rememberApiKeyCheckbox.checked
-          );
-          try {
-            if (trimmed) {
-              sessionStorage.setItem(API_KEY_STORAGE_KEY, trimmed);
-            } else {
-              sessionStorage.removeItem(API_KEY_STORAGE_KEY);
-            }
-          } catch (error) {
-            console.warn(
-              "Could not store API key in sessionStorage:",
-              getErrorMessage(error)
-            );
-          }
-          try {
-            if (remember && trimmed) {
-              localStorage.setItem(API_KEY_STORAGE_KEY, trimmed);
-            } else {
-              localStorage.removeItem(API_KEY_STORAGE_KEY);
-            }
-          } catch (error) {
-            console.warn(
-              "Could not update localStorage API key:",
-              getErrorMessage(error)
-            );
-          }
-        }
-
-        function buildRequestHeaders() {
-          const headers = {};
-          const apiKey = apiKeyInput.value.trim();
-          if (apiKey) {
-            headers["x-api-key"] = apiKey;
-          }
-          return headers;
-        }
-
         // Reject endpoints that aren't same-origin or a localhost-family
         // host. This is the defense for the CodeQL client-side request
         // forgery alert: the endpoint comes from a free-form text input and
@@ -522,9 +393,10 @@
         }
 
         async function fetchJson(url) {
-          const response = await fetch(url, {
-            headers: buildRequestHeaders(),
-          });
+          // No client-side credentials: the proxy exempts the dashboard
+          // endpoints from API-key auth when the request comes from
+          // loopback. See createAuthMiddleware in src/lib/request-auth.ts.
+          const response = await fetch(url);
 
           if (!response.ok) {
             let message = response.statusText || "Request failed";
@@ -1151,7 +1023,7 @@
             <div class="text-center py-16 px-4 border" style="background-color: var(--color-bg-soft); border-color: var(--color-bg-light-2);">
                 <i data-lucide="info" class="mx-auto h-10 w-10" style="color: var(--color-gray-accent);"></i>
                 <h3 class="mt-2 text-lg font-semibold" style="color: var(--color-fg-lightest);">Welcome!</h3>
-                <p class="mt-1 text-sm" style="color: var(--color-gray);">Enter a usage endpoint, optionally provide an x-api-key, and click "Fetch" to load usage and token usage data.</p>
+                <p class="mt-1 text-sm" style="color: var(--color-gray);">Enter a usage endpoint and click "Fetch" to load usage and token usage data.</p>
             </div>
           `;
         }
@@ -1345,7 +1217,6 @@
          */
         function handleFormSubmit(event) {
           event.preventDefault();
-          storeApiKey(apiKeyInput.value);
           syncUrlState();
           void fetchData();
         }
@@ -1388,19 +1259,7 @@
         function init() {
           endpointForm.addEventListener("submit", handleFormSubmit);
           tokenUsagePeriodSelect.addEventListener("change", handlePeriodChange);
-          apiKeyInput.addEventListener("input", () => {
-            storeApiKey(apiKeyInput.value);
-          });
-          rememberApiKeyCheckbox.addEventListener("change", () => {
-            storeRememberApiKeyPreference(rememberApiKeyCheckbox.checked);
-            // Re-run storeApiKey so the value mirrors into (or out of)
-            // localStorage to match the new preference.
-            storeApiKey(apiKeyInput.value);
-          });
           contentArea.addEventListener("click", handleContentAreaClick);
-
-          rememberApiKeyCheckbox.checked = loadRememberApiKeyPreference();
-          apiKeyInput.value = loadStoredApiKey();
 
           const urlParams = new URLSearchParams(window.location.search);
           const periodFromUrl = normalizePeriod(urlParams.get("period"));
