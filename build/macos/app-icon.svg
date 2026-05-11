@@ -1,10 +1,19 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
-  <rect width="1024" height="1024" rx="230" ry="230" fill="#c8334a"/>
-  <text x="512" y="700"
-        font-family="Fraunces"
-        font-weight="900"
-        font-size="760"
-        fill="#f4ead4"
-        text-anchor="middle"
-        font-variation-settings="'SOFT' 30, 'WONK' 1, 'opsz' 144">m</text>
+  <!--
+    macOS app icons follow a "squircle template": visible content occupies
+    the inner ~824×824 of the 1024 canvas, with ~100px transparent padding
+    on every side. Without that padding the icon renders ~20% larger than
+    its neighbors in the Dock / app switcher / Spotlight.
+    https://developer.apple.com/design/human-interface-guidelines/app-icons
+  -->
+  <g transform="translate(100,100) scale(0.8047)">
+    <rect width="1024" height="1024" rx="230" ry="230" fill="#c8334a"/>
+    <text x="512" y="700"
+          font-family="Fraunces"
+          font-weight="900"
+          font-size="760"
+          fill="#f4ead4"
+          text-anchor="middle"
+          font-variation-settings="'SOFT' 30, 'WONK' 1, 'opsz' 144">m</text>
+  </g>
 </svg>
