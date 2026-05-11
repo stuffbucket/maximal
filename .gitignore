@@ -42,5 +42,3 @@ contrib/slides/
 reports/
 # bun --compile temp executables (live in cwd, ~60MB each)
 .*.bun-build
-
-
