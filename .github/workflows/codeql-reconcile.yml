@@ -1,0 +1,37 @@
+name: CodeQL Reconcile
+
+# Reconcile live CodeQL alert state against the ADR frontmatter in
+# docs/decisions/*.md. See docs/decisions/0001-codeql-by-design-dismissals.md
+# and scripts/reconcile-codeql.ts.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/decisions/**.md"
+      - ".github/workflows/codeql-reconcile.yml"
+      - "scripts/reconcile-codeql.ts"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  reconcile:
+    name: Reconcile CodeQL dismissals from ADRs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Reconcile
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bun run scripts/reconcile-codeql.ts
