@@ -64,7 +64,8 @@ export function readSecret(opts: {
   // open failure → "unset" (best effort, treat as unreadable).
   let fd: number
   try {
-    fd = fs.openSync(file, "r")
+    // O_NOFOLLOW refuses to traverse symlinks so a planted symlink under any dir (including tmp) can't redirect the read.
+    fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW)
   } catch {
     return { value: undefined, source: "unset" }
   }
@@ -172,7 +173,7 @@ export function secretIsFromFile(fileName: string, value: string): boolean {
   const filePath = path.join(SECRETS_DIR, fileName)
   let fd: number
   try {
-    fd = fs.openSync(filePath, "r")
+    fd = fs.openSync(filePath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW)
   } catch {
     return false
   }
