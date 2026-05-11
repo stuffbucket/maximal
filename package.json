@@ -26,6 +26,9 @@
   ],
   "scripts": {
     "analyze": "bun run scripts/gemma-watch.ts",
+    "app:build": "bun run app:sidecar && cd shell && bun install && bunx tauri build --bundles app,dmg",
+    "app:dev": "bun run app:sidecar && cd shell && bun install && bunx tauri dev",
+    "app:sidecar": "bun run scripts/build-sidecar.ts",
     "build": "bun build src/main.ts --target=bun --outdir dist",
     "check:deep": "bun run check:fast && bun test && bun run knip",
     "check:fast": "bun run lint:fast && bun run typecheck && bun run lint:all",

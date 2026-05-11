@@ -26,6 +26,11 @@ bun run knip         # find unused exports/files
 
 # Optional: meta-analysis stream
 bun run analyze      # tails .claude/logs/checks.jsonl into a local Ollama model
+
+# Tauri app (menu-bar shell wrapping the proxy as a sidecar on :4142)
+bun run app:sidecar  # build standalone proxy binary into shell/src-tauri/binaries/
+bun run app:dev      # build sidecar + tauri dev (hot-reload)
+bun run app:build    # build sidecar + tauri build --bundles app,dmg
 ```
 
 ## Architecture
