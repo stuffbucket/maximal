@@ -49,6 +49,11 @@ server.use(
       "/usage-viewer/",
       "/_debug/state",
     ],
+    // The dashboard at /usage-viewer fetches these endpoints from the
+    // same machine. Trusting loopback lets us drop the client-side API
+    // key UI (and its clear-text storage) without exposing the same
+    // endpoints to remote callers, who still need a valid API key.
+    loopbackOnlyPaths: ["/usage", "/token-usage", "/token-usage/events"],
   }),
 )
 
