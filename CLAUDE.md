@@ -7,13 +7,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```sh
 bun install          # Install dependencies
 bun run dev          # Dev mode with watch
-bun run build        # Build to dist/ via tsdown
+bun run build        # Build to dist/ (native Bun import attributes)
 bun run start        # Production start (NODE_ENV=production)
+
+# Lint / type / test
 bun run lint         # ESLint with cache (auto-fixes staged files pre-commit)
 bun run lint:all     # ESLint on entire project
+bun run lint:fast    # oxlint — mechanical pass, ~10ms full repo
 bun run typecheck    # tsc type check only (no emit)
 bun test             # Run all tests
 bun test tests/foo.test.ts  # Run a single test file
+
+# Aggregates
+bun run check:fast   # lint:fast + typecheck + lint:all (the per-edit inner loop)
+bun run check:deep   # check:fast + bun test + knip (end-of-task gate)
+bun run deps:check   # dependency-cruiser layer rules
+bun run knip         # find unused exports/files
+
+# Optional: meta-analysis stream
+bun run analyze      # tails .claude/logs/checks.jsonl into a local Ollama model
 ```
 
 ## Architecture
