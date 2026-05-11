@@ -1,0 +1,21 @@
+# CodeQL configuration for this repo.
+#
+# By-design dismissals are NOT expressed here. They live as YAML
+# frontmatter in `docs/decisions/*.md` (ADR files), and are reconciled
+# against the live alert state by `scripts/reconcile-codeql.ts`,
+# triggered by `.github/workflows/codeql-reconcile.yml`.
+#
+# Why ADRs and not `query-filters` / `paths-ignore` of the rule? Because
+# "we know this looks like file-to-http, and that's literally the
+# proxy's job" is a *decision* with rationale, not a syntactic ignore.
+# We want the rationale greppable in-repo, surviving UI changes.
+#
+# See `docs/decisions/0001-codeql-by-design-dismissals.md`.
+
+name: "maximal CodeQL config"
+
+paths-ignore:
+  - node_modules
+  - dist
+  - build
+  - src/pages/vendor
