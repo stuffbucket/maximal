@@ -76,55 +76,236 @@ The endpoint is **unauthenticated** — same posture as `/` and `/usage-viewer`.
 
 ## GUI Execution
 
+> **Revised against `.design-context.md` and the design-onboard skill.**
+> The earlier "four cards in canonical order" model leaked the backend
+> mental model into the UI. Only `githubAuth` requires human action;
+> the others self-heal or block as exceptional errors. The flow below
+> is **one primary action, three states**, optimized for time-to-aha.
+
+### What the user is actually trying to do
+
+A developer on macOS installed maximal from a `.dmg` because they
+want to route their AI tooling (Claude Code, Cursor, an SDK script,
+opencode) through their existing GitHub Copilot subscription. The
+**aha moment** is not "I am signed in" — it is **"my client made a
+request and got a response through maximal."** Setup's job is to
+remove the only barrier between launch and that moment, then bridge
+into the surface where it actually happens (the Dashboard's
+Connect + Activity sections).
+
 ### Detection on shell launch
 
-The Tauri shell already spawns the sidecar at launch. After spawn it polls `GET http://localhost:4142/setup-status` with a short timeout, retrying for ~5 seconds while the sidecar binds.
+The Tauri shell spawns the sidecar at launch and polls
+`GET http://localhost:4142/setup-status`, retrying for ~5 seconds
+while the sidecar binds.
 
-- **If `ready: true`:** behave as today. "Open Maximal" opens the dashboard webview.
-- **If `ready: false`:** the tray icon shows a state badge (small dot overlay). Left-click opens a **setup window** instead of the dashboard webview. The dashboard menu item is greyed out with subtitle "Setup required."
+- **`ready: true`** — tray + dashboard behave as normal.
+- **`ready: false` with `nextStep === "githubAuth"`** (the only
+  expected pre-setup state in practice) — tray shows a quiet badge,
+  the dashboard menu item subtitles "Setup required," and any
+  click into the app opens the Setup window.
+- **`ready: false` with `nextStep === "appDir" | "config" | "db"`**
+  — exceptional. The Setup window's normal welcome content swaps
+  for an inline error block (see Failure Modes below). These are
+  blockers, not onboarding steps; treating them as cards in a flow
+  conflates "the proxy can't run" with "you haven't signed in yet."
 
-### Setup window
+### Setup window — three states, one window
 
-A single Tauri webview window (~520×600) loading `/setup` on the sidecar. The page is a static Vite-built HTML+TS bundle from `shell/src/setup/` driven by the same `/setup-status` data.
+A single Tauri webview at `http://localhost:4142/setup`, served from
+`shell/src/setup/` (Vite bundle). 520×620 default. Single column,
+content max 440px, centered vertically. **No sidebar, no card
+nesting, no "step X of N" indicator** — there is one step.
 
-Layout: one card per failing check. Cards render in canonical order; later cards are disabled until earlier ones pass.
+The window has three mutually exclusive states driven by the
+device-code lifecycle plus `/setup-status`. The window does not
+navigate between routes; it swaps content with a 200ms opacity
+crossfade (instant when `prefers-reduced-motion`).
 
-#### `githubAuth` card — the only interactive case for v1
+#### State 1 — Welcome (default for an unauthed first launch)
 
-UI:
-- Heading: "Sign in to GitHub Copilot"
-- Body: "Maximal proxies your existing GitHub Copilot subscription. Sign in once; we'll keep the token in `~/.local/share/maximal/`."
-- Primary button: "Sign in with GitHub"
+```
+                  [brand m]
 
-Flow on click:
-1. Setup page POSTs `/auth/start`. Proxy invokes the existing `setupGitHubToken` initiator (see `src/lib/token.ts`), which calls GitHub's device-code endpoint. Returns `{ verification_uri, verification_uri_complete?, user_code, expires_in, interval }`.
-2. Proxy writes the user-code to the OS clipboard (already done in `src/lib/token.ts:165`). Setup page reflects "Copied to clipboard."
-3. Setup page calls Tauri's `opener::open_url(verification_uri_complete ?? verification_uri)` to launch the default browser. The user pastes the code, approves.
-4. Setup page polls `GET /auth/poll` every `interval` seconds (default 5s, RFC 8628). The proxy threads through the existing polling logic; when the token arrives it persists to `github_token` and returns `{ status: "ready" }`.
-5. Setup page calls `GET /setup-status` once more, animates the card from "Action needed" → "Done," then advances to the next failing card, or — if `ready: true` — closes the setup window and triggers the dashboard.
+           Welcome to Maximal
 
-#### Other cards (`appDir`, `config`, `db`)
+   Route Claude Code, Cursor, or any Anthropic-
+   or OpenAI-compatible client through your
+   GitHub Copilot subscription.
 
-These should self-heal on every boot via existing logic (`ensurePaths`, zod-default-fill, sqlite migrations). If one of them is still failing at `/setup-status` time, the card shows:
+   Two minutes to set up.
 
-- The check name, the reason string, and the resolved path.
-- A "Reveal in Finder" button (already wired via `opener`).
-- A "Retry" button that re-runs boot-path init and re-polls `/setup-status`.
 
-No automatic write/overwrite from the GUI; the user's filesystem state should not be silently mutated past what the proxy already does on its own.
+   ┌──────────────────────────────────┐
+   │   Sign in with GitHub      →     │   ← primary, single CTA
+   └──────────────────────────────────┘
+
+
+   Already signed in via the CLI?
+   Maximal will pick up the existing token —
+   close this window and reopen.
+```
+
+Notes:
+- **Display heading** uses the Fraunces serif (one humanist accent
+  per the design-context). Body is Commissioner (per the typeset
+  pairing).
+- **Honest time estimate** ("two minutes") instead of "Get started"
+  — respects user intelligence per the onboarding skill.
+- **Rescue path for CLI migrants** is the second-most-important
+  thing on the screen, but explicitly secondary type. Someone who
+  installed via Homebrew + CLI auth can close the window and skip
+  setup entirely; we want them to feel they're already done.
+- **No "Skip" button** — there's nothing else to do. Skipping setup
+  is closing the window.
+- **No telemetry copy, no "By signing in you agree to..."** — the
+  agreement is between the user and GitHub, not us.
+
+#### State 2 — Waiting for GitHub approval
+
+Triggered when the user clicks "Sign in with GitHub":
+
+1. Setup page POSTs `/auth/start`. Proxy calls GitHub's device-code
+   endpoint via existing `setupGitHubToken` logic, returns
+   `{ verification_uri, verification_uri_complete?, user_code,
+   expires_in, interval }`.
+2. Proxy writes `user_code` to the OS clipboard (already done in
+   `src/lib/token.ts:165`).
+3. Setup page calls Tauri's `opener::open_url(...)` for
+   `verification_uri_complete ?? verification_uri`.
+4. Setup page transitions to State 2 and starts polling `/auth/poll`
+   every `interval` seconds.
+
+```
+                  [brand m]
+
+              Almost there
+
+   We opened github.com/login/device in your
+   browser. Paste this code and approve:
+
+         ┌────────────────────────┐
+         │       ABCD-EFGH        │   ✓ copied
+         └────────────────────────┘
+
+   We'll pick it up the moment you approve.
+
+   ────────────────────────────────────
+   Code expires in 9:42                ← live mm:ss
+
+   [ Open browser again ]              ← fallback only;
+                                         secondary style
+```
+
+Notes:
+- **Code is the focal point.** Display size, monospace
+  (`--font-mono`), high-contrast text — readable across the room
+  in case the user moved their browser to a second monitor.
+- **"✓ copied"** confirmation appears immediately, fades after 4s.
+  No toast. No modal. The page is the affordance.
+- **Live `mm:ss` countdown** of `expires_in` — concrete, not "a few
+  minutes." On <60s remaining, the countdown switches to red and a
+  subtle "Code expires soon" inline appears (no modal).
+- **"Open browser again"** is the recovery affordance for the user
+  who dismissed the browser tab. Secondary style; not a primary
+  CTA. Does NOT request a new code — same code, same expiry.
+- **No "Cancel" button.** Closing the window via the OS chrome
+  cancels. Tray icon retains the badge so they can return.
+
+#### State 3 — Connected (success bridge)
+
+Triggered by `/auth/poll` returning `{ status: "ready" }`. Brief
+moment (~600ms) for the user to see the success before the bridge.
+
+```
+                  [brand m]
+
+             You're connected
+
+      Signed in as @stuffbucket.
+      Maximal is serving on localhost:4142.
+
+
+      Next: point a client at it.
+
+
+   ┌──────────────────────────────────┐
+   │   Show me how              →     │   ← bridges to Dashboard
+   └──────────────────────────────────┘
+```
+
+Click "Show me how":
+- Setup window closes.
+- Dashboard opens with the **Connect section scrolled into view**
+  (deep-link via `#connect` anchor).
+- The Activity section below is empty, but its empty state teaches
+  the next action (see "Activity empty state" below).
+
+If the user closes State 3 without clicking the bridge, no harm:
+the tray's "Open Maximal" now opens the Dashboard directly.
+
+### Activity empty state — the actual aha moment
+
+Lives in the Dashboard PRD's Recent Activity section. Specified
+here because it's the second beat of the onboarding arc, and the
+Setup → Dashboard bridge depends on it being right.
+
+```
+   Recent activity
+   ────────────────────────────────
+
+         No requests yet.
+
+         Try this from a terminal:
+
+   ┌──────────────────────────────────┐
+   │  curl http://localhost:4142/v1/  │
+   │       chat/completions \         │
+   │    -H "x-api-key: maximal_…"  \  │   ← real key, masked
+   │    -H "content-type: application │
+   │            /json" \              │
+   │    -d '{"model":"gpt-5",         │
+   │         "messages":[{"role":     │
+   │         "user","content":"hi"}]}'│
+   └──────────────────────────────────┘
+              [ Copy ]
+
+   Your first request will appear here
+   when it arrives.
+```
+
+Notes:
+- **Real working command** — pre-populated with the user's actual
+  port, model, and either their first generated API key (if one
+  exists) or a single-line note "Generate a key in Settings →
+  API clients" with a deep-link.
+- **Show, don't tell.** No tutorial popup. No "Click here to
+  continue." The instruction IS the action.
+- **The feed will SSE-update** the moment that curl completes; the
+  user sees their request transcribed in real time in the same
+  window. That's the peak moment.
 
 ### Tray menu while not ready
 
+The earlier PRD spec'd a "Sign in with GitHub" tray-menu item as a
+bypass. Re-evaluating: this duplicates the Setup window's CTA and
+adds a menu item that disappears on first success. Drop it. The
+Setup window is one click away from "Open Maximal" and shows the
+same affordance.
+
+Tray menu while unauthed:
+
 ```
 [badge] maximal
-  • Open Maximal        (greyed: "Setup required")
-    Settings
-    ─────────────
-    Sign in with GitHub
-    Quit Maximal
+   Open Maximal       (subtitled: "Set up first")
+   Settings
+   ──────────
+   Quit Maximal
 ```
 
-The "Sign in with GitHub" item is the same primary action as the setup window's button; one-click bypass for users who close the setup window without finishing.
+The "Set up first" subtitle is the breadcrumb. Clicking the
+greyed item still opens the Setup window — the greying is signal,
+not a block.
 
 ## Failure Modes
 
