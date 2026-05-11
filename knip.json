@@ -13,7 +13,22 @@
     "prettier-plugin-packagejson",
     "electron",
     "undici",
-    "@stryker-mutator/command-runner"
+    "@stryker-mutator/command-runner",
+    "@stryker-mutator/core",
+    "bumpp",
+    "eslint",
+    "lint-staged",
+    "oxlint"
+  ],
+  "ignoreBinaries": [
+    "bumpp",
+    "depcruise",
+    "eslint",
+    "knip-bun",
+    "oxlint",
+    "simple-git-hooks",
+    "stryker",
+    "tsc"
   ],
   "ignoreExportsUsedInFile": true
 }
