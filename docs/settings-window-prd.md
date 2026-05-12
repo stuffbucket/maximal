@@ -53,7 +53,13 @@ Left rail: navigation. Right pane: section content.
 └──────────────┴──────────────────────────────────────────────┘
 ```
 
-Persistent footer: "Reveal config in Finder" (opens the app data dir, preserving the current MVP affordance for power users) + "Restart proxy" (greyed unless a restart-required change is staged).
+Persistent footer (left-to-right):
+
+- **"Reveal config in Finder"** — opens the app data dir (`~/.local/share/maximal/`), preserving the current MVP affordance for power users.
+- **"Reveal logs in Finder"** — opens `~/.local/share/maximal/logs/` directly. Daily log files (`messages-handler-<date>.log`) are the first stop when debugging routing decisions and SSE translation. Surfacing the dir from the window saves a second `cd` for non-CLI users.
+- **"Restart proxy"** — greyed unless a restart-required change is staged.
+
+Both Finder affordances are Tauri commands (`reveal_config_dir`, `reveal_logs_dir`) invoked from JS — they don't navigate the webview, they call into Rust which calls `opener::open_path()` on the target directory.
 
 ### Section: Account
 
