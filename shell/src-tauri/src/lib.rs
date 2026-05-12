@@ -71,6 +71,11 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .manage(Sidecar::new())
         .setup(|app| {
+            // Menu-bar-only app: hide the Dock icon and Cmd-Tab entry.
+            // Also fixes a non-responsive Dock right-click that
+            // happens when a window-less app stays in Regular policy.
+            #[cfg(target_os = "macos")]
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             spawn_sidecar(app.handle())?;
             install_tray(app.handle())?;
             Ok(())
