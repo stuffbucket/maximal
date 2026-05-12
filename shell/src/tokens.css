@@ -1,0 +1,114 @@
+/* Maximal design tokens — see .design-context.md (repo root) for source of truth.
+ *
+ * One token table, one place to look. If you need a new value, add it
+ * here AND justify it in .design-context.md — do not redeclare inline
+ * in components.
+ */
+
+:root {
+  /* ---- Font stacks ---- */
+  --font-display: "Fraunces", Georgia, "Times New Roman", serif;
+  --font-body: "Commissioner", "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+
+  /* ---- Type ramp (16px base, 1.2 ratio) ---- */
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-md: 1.125rem;
+  --text-lg: 1.25rem;
+  --text-xl: 1.5rem;
+  --text-2xl: 2rem;
+  --text-3xl: 2.5rem;
+  --text-4xl: 3rem;
+
+  --weight-base: 400;
+  --weight-md: 500;
+  --weight-lg: 600;
+  --weight-xl: 600;
+  --weight-2xl: 700;
+  --weight-3xl: 700;
+  --weight-4xl: 800;
+
+  --leading-base: 1.6;
+  --leading-lg: 1.4;
+  --leading-xl: 1.3;
+  --leading-2xl: 1.2;
+  --leading-3xl: 1.15;
+  --leading-4xl: 1.1;
+
+  --tracking-base: 0em;
+  --tracking-lg: -0.005em;
+  --tracking-xl: -0.01em;
+  --tracking-2xl: -0.015em;
+  --tracking-3xl: -0.02em;
+  --tracking-4xl: -0.025em;
+
+  /* ---- Spacing scale ---- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  /* ---- Radii ---- */
+  --radius-input: 6px;
+  --radius-card: 8px;
+  --radius-chip: 4px;
+  --radius-pill: 9999px;
+
+  /* ---- Elevation ---- */
+  --elevation-card: 0 1px 2px rgb(0 0 0 / 0.06);
+  --elevation-modal: 0 8px 24px rgb(0 0 0 / 0.18);
+  --elevation-tooltip: 0 2px 6px rgb(0 0 0 / 0.10);
+
+  /* ---- Default accent (brand red) ---- */
+  --accent: #c8334a;
+  --accent-fg: #ffffff;
+  --accent-soft: rgb(200 51 74 / 0.12);
+
+  /* ---- Status / semantic ---- */
+  --danger: #d24a3d;
+  --success: #3a8a4f;
+}
+
+/* Dark is the default. */
+:root,
+[data-theme="dark"] {
+  --surface-base: #0a0a0a;
+  --surface-card: #161616;
+  --surface-control: #1f1f1f;
+  --text-strong: #f3f3f3;
+  --text-base: #d0d0d0;
+  --text-muted: #8a8a8a;
+  --border-subtle: #262626;
+  --border-strong: #353535;
+}
+
+[data-theme="light"] {
+  --surface-base: #fafafa;
+  --surface-card: #ffffff;
+  --surface-control: #f0f0f0;
+  --text-strong: #0f0f0f;
+  --text-base: #2a2a2a;
+  --text-muted: #6a6a6a;
+  --border-subtle: #e8e8e8;
+  --border-strong: #d4d4d4;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --surface-base: #fafafa;
+    --surface-card: #ffffff;
+    --surface-control: #f0f0f0;
+    --text-strong: #0f0f0f;
+    --text-base: #2a2a2a;
+    --text-muted: #6a6a6a;
+    --border-subtle: #e8e8e8;
+    --border-strong: #d4d4d4;
+  }
+}

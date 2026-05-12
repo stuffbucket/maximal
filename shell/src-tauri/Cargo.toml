@@ -22,3 +22,11 @@ tauri-plugin-opener = "2"
 tauri-plugin-shell = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Lightweight HTTP client for the sidecar health/setup-status poll
+# from the Rust side. We don't put the proxy on the public internet,
+# so rustls/tls support isn't needed — disable default features.
+ureq = { version = "2", default-features = false }
+# Pixel-level manipulation for the tray-badge variant of the default
+# icon. We work in raw RGBA — no codec features needed. Disabling
+# default features keeps the binary lean (saves the encoder set).
+image = { version = "0.25", default-features = false }
