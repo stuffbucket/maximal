@@ -110,11 +110,36 @@ fn spawn_sidecar(app: &tauri::AppHandle) -> tauri::Result<()> {
     // tauri.conf.json and resolves the arch-suffixed binary
     // (binaries/maximal-aarch64-apple-darwin etc.) at build time.
     let port = SIDECAR_PORT.to_string();
-    let cmd = app
+    let mut cmd = app
         .shell()
         .sidecar("maximal")
         .map_err(|e| tauri::Error::Anyhow(e.into()))?
         .args(["start", "--port", port.as_str()]);
+
+    // Inside the packaged .app, the sidecar's CWD/import.meta.dir
+    // resolves to Tauri's mounted-resource path — not the original
+    // source tree — so the proxy's filesystem-walk for
+    // `shell/dist/index.html` can't find it. We bundle `shell/dist/`
+    // as a Tauri resource (see tauri.conf.json `bundle.resources` —
+    // mapped to `settings-dist/` to avoid the `_up_` escape Tauri
+    // applies to `..` components in resource source paths) and pass
+    // its absolute path to the sidecar via MAXIMAL_SETTINGS_DIST.
+    // The proxy's `resolveSettingsDistDir()` checks this env var
+    // first; in dev (no env set) it falls back to the walk.
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let settings_dist = resource_dir.join("settings-dist");
+        if settings_dist.exists() {
+            cmd = cmd.env(
+                "MAXIMAL_SETTINGS_DIST",
+                settings_dist.to_string_lossy().to_string(),
+            );
+        } else {
+            eprintln!(
+                "[maximal] settings-dist resource missing at {} — /settings will 503 in production builds",
+                settings_dist.display()
+            );
+        }
+    }
 
     let (mut rx, child) = cmd
         .spawn()
