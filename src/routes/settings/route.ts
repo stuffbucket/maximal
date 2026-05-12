@@ -186,3 +186,6 @@ settingsRoutes.all("/*", (c) => {
   const after = c.req.path.replace(/^\/settings/, "")
   return handle(c.req.raw, after || "/")
 })
+
+// Test-only export. Not part of the public API; subject to change.
+export const __internal = { resolveSettingsDistDir }
