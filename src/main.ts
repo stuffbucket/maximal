@@ -40,6 +40,7 @@ const { checkUsage } = await import("./check-usage")
 const { configureClaudeDesktop } = await import("./configure-claude-desktop")
 const { debug } = await import("./debug")
 const { setup } = await import("./setup")
+const { setupStatus } = await import("./setup-status-cmd")
 const { start } = await import("./start")
 const { uninstall } = await import("./uninstall")
 
@@ -53,6 +54,7 @@ const main = defineCommand({
     auth,
     start,
     setup,
+    "setup-status": setupStatus,
     "configure-claude-desktop": configureClaudeDesktop,
     uninstall,
     "check-usage": checkUsage,

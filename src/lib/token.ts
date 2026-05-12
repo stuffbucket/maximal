@@ -1,14 +1,16 @@
-import clipboard from "clipboardy"
 import consola from "consola"
 import { setTimeout as delay } from "node:timers/promises"
 
 import { PATHS } from "~/lib/paths"
 import { getCopilotToken } from "~/services/github/get-copilot-token"
 import { getCopilotUsage } from "~/services/github/get-copilot-usage"
-import { getDeviceCode } from "~/services/github/get-device-code"
 import { getGitHubUser } from "~/services/github/get-user"
-import { pollAccessToken } from "~/services/github/poll-access-token"
 
+import {
+  clearDeviceAuthSession,
+  pollUntilReady,
+  startDeviceAuth,
+} from "./device-auth"
 import { HTTPError } from "./error"
 import {
   inferTokenType,
@@ -147,8 +149,7 @@ export async function setupGitHubToken(
     }
 
     consola.info("Not logged in, requesting a new device code")
-    const response = await getDeviceCode()
-    consola.debug("Device code response:", response)
+    const session = await startDeviceAuth()
 
     // RFC 8628's `verification_uri_complete` is the only reliable
     // prefill mechanism, but GitHub's device-code endpoint doesn't
@@ -156,24 +157,14 @@ export async function setupGitHubToken(
     // ?user_code= query param either (verified empirically). The
     // user has to type the code into the form. Best we can do for
     // them: copy it to the clipboard automatically so a single
-    // Cmd/Ctrl-V completes the flow.
+    // Cmd/Ctrl-V completes the flow. `startDeviceAuth` does that copy.
     const verificationUrl =
-      response.verification_uri_complete ?? response.verification_uri
-
-    let copiedToClipboard = false
-    try {
-      clipboard.writeSync(response.user_code)
-      copiedToClipboard = true
-    } catch {
-      // Clipboard unavailable (headless Linux without xclip/xsel,
-      // sandboxed environments). Fall through; the next consola.info
-      // line tells the user to enter the code manually.
-    }
+      session.verificationUriComplete ?? session.verificationUri
 
     consola.info(
-      copiedToClipboard ?
-        `Code ${response.user_code} copied to clipboard — paste into the form, then approve.`
-      : `Open the form, then enter code: ${response.user_code}`,
+      session.copiedToClipboard ?
+        `Code ${session.userCode} copied to clipboard — paste into the form, then approve.`
+      : `Open the form, then enter code: ${session.userCode}`,
     )
 
     if (!options?.noBrowser && !isHeadless()) {
@@ -189,7 +180,8 @@ export async function setupGitHubToken(
       consola.info(`Visit ${verificationUrl} in any browser.`)
     }
 
-    const token = await pollAccessToken(response)
+    const token = await pollUntilReady(session)
+    clearDeviceAuthSession()
     await writeDefaultRecord(makeRecord(token))
     state.githubToken = token
 

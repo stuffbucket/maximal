@@ -11,6 +11,7 @@ import { initOpencodeVersion } from "./lib/opencode"
 import { ensurePaths } from "./lib/paths"
 import { initProxyFromEnv } from "./lib/proxy"
 import { ensureSecretsDir, loadSecretIntoEnv, SECRET_DEFS } from "./lib/secrets"
+import { evaluateSetup } from "./lib/setup-status"
 import { generateEnvScript } from "./lib/shell"
 import { state } from "./lib/state"
 import { logUser, setupCopilotToken, setupGitHubToken } from "./lib/token"
@@ -141,6 +142,8 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   state.showToken = options.showToken
 
   await ensurePaths()
+  await logSetupSnapshot()
+
   bootSecrets()
   await cacheVSCodeVersion()
   cacheMacMachineId()
@@ -236,6 +239,22 @@ async function runClaudeCodeFlow(serverUrl: string): Promise<void> {
       "Failed to copy to clipboard. Here is the Claude Code command:",
     )
     consola.log(command)
+  }
+}
+
+/** Per docs/first-run-setup-prd.md §Telemetry: one info-level
+ *  snapshot of evaluateSetup() at boot. The Tauri shell polls
+ *  /setup-status continuously; the boot log is the audit trail for
+ *  "what did we come up with this time." */
+async function logSetupSnapshot(): Promise<void> {
+  try {
+    const snapshot = await evaluateSetup()
+    consola.info(
+      `Setup status: ready=${snapshot.ready}`
+        + (snapshot.nextStep ? ` nextStep=${snapshot.nextStep}` : ""),
+    )
+  } catch (err) {
+    consola.warn("Setup status evaluation failed:", err)
   }
 }
 
