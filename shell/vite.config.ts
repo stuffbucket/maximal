@@ -1,16 +1,28 @@
 import { defineConfig } from "vite";
+import { resolve } from "path";
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
+//
+// Multi-page input: each Tauri window points to its own HTML entry.
+// - index.html : placeholder/legacy entry (no window opens it directly)
+// - setup.html : Setup window (see docs/first-run-setup-prd.md)
+//
+// Tauri picks the page via the URL passed to WebviewWindowBuilder in
+// `src-tauri/src/lib.rs`. In dev, both are served from
+// http://localhost:1420/<name>.html.
 export default defineConfig(async () => ({
-
-  // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
-  //
-  // 1. prevent Vite from obscuring rust errors
   clearScreen: false,
-  // 2. tauri expects a fixed port, fail if that port is not available
+  build: {
+    rollupOptions: {
+      input: {
+        main: resolve(__dirname, "index.html"),
+        setup: resolve(__dirname, "setup.html"),
+      },
+    },
+  },
   server: {
     port: 1420,
     strictPort: true,
@@ -23,7 +35,6 @@ export default defineConfig(async () => ({
         }
       : undefined,
     watch: {
-      // 3. tell Vite to ignore watching `src-tauri`
       ignored: ["**/src-tauri/**"],
     },
   },
