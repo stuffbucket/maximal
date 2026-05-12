@@ -35,6 +35,7 @@ import { modelRoutes } from "./routes/models/route"
 import { providerMessageRoutes } from "./routes/provider/messages/route"
 import { providerModelRoutes } from "./routes/provider/models/route"
 import { responsesRoutes } from "./routes/responses/route"
+import { setupStatusRoute } from "./routes/setup-status"
 import { tokenUsageRoute } from "./routes/token-usage/route"
 import { tokenRoute } from "./routes/token/route"
 import { usageRoute } from "./routes/usage/route"
@@ -54,6 +55,7 @@ server.use(
       "/vendor/lucide.min.js",
       "/vendor/tailwind.min.js",
       "/_debug/state",
+      "/setup-status",
     ],
     // The dashboard at /usage-viewer fetches these endpoints from the
     // same machine. Trusting loopback lets us drop the client-side API
@@ -102,6 +104,7 @@ server.get("/vendor/tailwind.min.js", async (c) =>
 )
 
 server.route("/_debug", debugRoutes)
+server.route("/setup-status", setupStatusRoute)
 server.route("/chat/completions", completionRoutes)
 server.route("/models", modelRoutes)
 server.route("/embeddings", embeddingRoutes)

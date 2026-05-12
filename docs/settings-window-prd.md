@@ -100,36 +100,46 @@ Columns: name (human), source (env / file / config / unset), value tail (last 4 
 - **Clear** removes the file. If env is set, the source flips to "env" with a tooltip explaining; if not, "unset."
 - **Source indicator** is the key UX win — explains why "I set my key but it's not working" (env var hiding the file, or vice versa).
 
+### Label convention (applies to every control below)
+
+Each control has a **human-first label** (what the user sees), an optional **one-line description** below it, and a **tooltip** on a `(?)` chip that includes the underlying `config.json` field name. The field name is *only* in the tooltip — visible to power users translating from docs or hand-edited config, invisible to everyone else.
+
+This honors design principle #1 ("Speak to the person, not the file") while preserving the escape hatch for users who already know what `useMessagesApi` does.
+
 ### Section: Routing
 
-Top-level feature flags with short descriptions:
+Hot-reloadable settings that change how the proxy routes requests upstream. Save → inline checkmark fades in beside the control → values propagate live (no restart).
 
-- `useMessagesApi` — route Claude models through Copilot's native `/v1/messages` (vs. Chat Completions fallback)
-- `useFunctionApplyPatch` — accept the `apply_patch` tool shape
-- `useResponsesApiWebSearch` — route web-search-capable models through `/responses`
-- `smallModel` — model used for warmup/probe (free-text input, validated against the live model list from `/models`)
-- `claudeTokenMultiplier` — number, default 1.15 (the GPT-tokenizer-→-Claude-tokens fudge factor)
-- `logRetentionDays` — number, 0–3650, default 7
-
-All hot-reloadable; save → toast "Saved" → values propagate live.
+| Label | Type | Description | Field name (tooltip) |
+|---|---|---|---|
+| Use Claude's native messages format | toggle | Routes Claude models through Copilot's `/v1/messages` endpoint instead of falling back to Chat Completions. Better streaming and tool-call fidelity. | `useMessagesApi` |
+| Accept the `apply_patch` tool | toggle | Lets clients (like Claude Code) send the `apply_patch` tool shape for surgical file edits. | `useFunctionApplyPatch` |
+| Use Responses API for web search | toggle | Routes models that support live web search through Copilot's `/responses` endpoint, where the search tool is wired up. | `useResponsesApiWebSearch` |
+| Small model for warmups | model picker | The model the proxy uses for tool-less probe/warmup requests. Lighter than your main model — saves your quota. | `smallModel` |
+| Claude token estimate multiplier | number (default 1.15) | Inflates GPT-tokenizer counts by this factor when estimating Claude token usage. Set to 1.0 if you're paired with an Anthropic API key that gives exact counts. | `claudeTokenMultiplier` |
+| Keep logs for | number, suffix "days" (0–3650, default 7) | How long the daily proxy logs stick around before rotation. | `logRetentionDays` |
 
 ### Section: Per-model
 
-Three related tables, one per record-shaped config:
+Per-model overrides, presented as three tables. Each table's first column is a model picker with autocomplete from the live `/models` list; subsequent columns are the override.
 
-- `extraPrompts` — model → extra system prompt text. Add/edit/delete rows.
-- `modelReasoningEfforts` — model → "low" | "medium" | "high" | "minimal". Dropdown per row.
-- `responsesApiContextManagementModels` — string[]. Add/remove model IDs.
+| Table label | What it controls | Field name (tooltip) |
+|---|---|---|
+| Extra system prompt per model | Text appended to the system prompt for a specific model. Useful for nudging tool use or output format on one model without affecting others. | `extraPrompts` |
+| Reasoning effort per model | Sets the effort hint Copilot passes upstream. Options: minimal / low / medium / high. | `modelReasoningEfforts` |
+| Server-side context management | Models that opt into Copilot's `/responses` context management instead of carrying full history on every request. | `responsesApiContextManagementModels` |
 
-Model picker: free-text with autocomplete from the live `/models` list.
+If a per-model table is empty, the section shows the empty-state CTA "Add a model override" — not a blank list with a `+` button. (Design principle #2 — power lives in depth.)
 
 ### Section: Advanced
 
-The Settings the user shouldn't be editing without knowing what they're doing. Default-collapsed.
+Default-collapsed. Heading sub-copy: "These settings rarely need changing. Open if you know what you're doing."
 
-- `anthropicApiKey` — duplicated alias for the `secrets/anthropic` value; show the precedence note explicitly.
-- "Reveal config.json in default editor" — open the file directly via `opener::open_path` (for users who want to hand-edit; this is the escape hatch).
-- "Reset config to defaults" — confirmation dialog with explicit consequences. Writes `{}` to `config.json` after backing up to `config.json.bak-<timestamp>`.
+| Label | What it does | Field name (tooltip) |
+|---|---|---|
+| Anthropic API key (for token counting) | Used only by `/v1/messages/count_tokens` to get exact Claude token counts. Aliased to the `anthropic` secret — env var takes precedence. | `anthropicApiKey` |
+| Reveal `config.json` in editor | Opens the raw config in your default editor for hand-editing. Last resort; everything above should make this unnecessary. | (action, not a field) |
+| Reset settings to defaults | Writes `{}` to `config.json` after backing up the current file to `config.json.bak-<timestamp>`. Confirmation dialog states the consequences explicitly: "This won't sign you out or touch your API keys." | (action, not a field) |
 
 ### Section: Diagnostics
 
@@ -221,10 +231,11 @@ Fresh `.app` install on a Mac with an existing CLI install (so account + config 
 
 1. User clicks the tray icon → Settings.
 2. Settings window opens within ~500ms, populated with their current config.
-3. User switches `useFunctionApplyPatch` to true, hits Save. Toast: "Saved." Next request the proxy serves reflects the new flag (no restart).
+3. User switches "Accept the `apply_patch` tool" to on, hits Save. Inline checkmark beside the toggle fades in for ~2s. The next request the proxy serves reflects the new flag (no restart).
 4. User generates a new API key. Plaintext appears in a copy-once dialog. Closing the dialog re-renders the key as masked tail.
 5. User edits the Anthropic provider's `baseUrl`. Save banner: "Restart proxy to apply." Clicks Restart. Sidecar dies and respawns within ~3s; Settings window reconnects and clears the banner.
-6. User opens Diagnostics, clicks "Copy debug bundle." Clipboard now contains a redacted dump suitable for pasting into a bug report.
-7. User closes the window. Reopening shows the same persistent state (no draft state survives, by design — explicit save model).
+6. User hovers the `(?)` chip beside "Accept the `apply_patch` tool"; tooltip reveals `useFunctionApplyPatch` so they can grep the proxy source if needed.
+7. User opens Diagnostics, clicks "Copy debug bundle." Clipboard now contains a redacted dump suitable for pasting into a bug report.
+8. User closes the window. Reopening shows the same persistent state (no draft state survives, by design — explicit save model).
 
-Throughout: zero terminal use, zero raw JSON editing, every change observable with one click.
+Throughout: zero terminal use, zero raw JSON editing, every change observable with one click. **A user who has never seen `config.json` should be able to operate every setting in this window correctly.**
