@@ -121,7 +121,7 @@ describe("POST /auth/start", () => {
     expect(body.interval).toBe(5)
   })
 
-  test("returns 409 when already authenticated", async () => {
+  test("returns 409 when token on disk validates against /user", async () => {
     fs.writeFileSync(
       PATHS.GITHUB_TOKEN_PATH,
       JSON.stringify({
@@ -132,11 +132,45 @@ describe("POST /auth/start", () => {
         obtainedAt: "2026-05-12T00:00:00.000Z",
       }),
     )
+    scriptedFetch({ user: () => ({ login: "octocat" }) })
 
     const res = await server.request("/auth/start", { method: "POST" })
     expect(res.status).toBe(409)
     const body = (await res.json()) as { error: string }
     expect(body.error).toBe("already_authenticated")
+  })
+
+  test("clears stale token and starts fresh when /user rejects it", async () => {
+    fs.writeFileSync(
+      PATHS.GITHUB_TOKEN_PATH,
+      JSON.stringify({
+        schemaVersion: 1,
+        tokenType: "ghu_",
+        accessToken: "ghu_revoked",
+        refreshToken: null,
+        obtainedAt: "2026-05-12T00:00:00.000Z",
+      }),
+    )
+    // /user returns 401 → stale token; the route should drop it and
+    // proceed with a fresh device-code session.
+    globalThis.fetch = mock((input: string | URL | Request) => {
+      const url = typeof input === "string" ? input : (input as Request).url
+      if (url.endsWith("/user")) {
+        return Promise.resolve(new Response("unauth", { status: 401 }))
+      }
+      if (url.includes("/login/device/code")) {
+        return Promise.resolve(
+          new Response(JSON.stringify(DEVICE_CODE_OK), { status: 200 }),
+        )
+      }
+      return Promise.resolve(new Response("not mocked", { status: 500 }))
+    }) as unknown as typeof fetch
+
+    const res = await server.request("/auth/start", { method: "POST" })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { user_code: string }
+    expect(body.user_code).toBe("ABCD-1234")
+    expect(fs.existsSync(PATHS.GITHUB_TOKEN_PATH)).toBe(false)
   })
 
   test("returns 5xx on upstream failure", async () => {

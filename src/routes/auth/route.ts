@@ -30,22 +30,36 @@ import {
 } from "~/lib/device-auth"
 import { HTTPError } from "~/lib/error"
 import {
+  clearDefaultRecord,
   makeRecord,
   readDefaultRecord,
   writeDefaultRecord,
 } from "~/lib/github-token-store"
 import { state } from "~/lib/state"
+import { getGitHubUser } from "~/services/github/get-user"
 
 export const authRoute = new Hono()
 
 authRoute.post("/start", async (c) => {
-  // "Already authenticated" — the PRD says 409 if a token validates.
-  // We treat file-present + non-empty as the bar here; a live
-  // introspection would force every shell launch through a network
-  // round-trip even when nothing's wrong.
+  // "Already authenticated" — the PRD calls for a 409 when a token
+  // *validates*, not merely when one exists on disk. A stale token
+  // (revoked, scope-changed, copy-pasted nonsense) would otherwise
+  // block the GUI from re-running setup, leaving the user no path
+  // forward. Cost is one /user round-trip on the rare path where
+  // someone clicks "Sign in with GitHub" with a token already on
+  // disk; the common path (no token) skips the network entirely.
   const existing = await readDefaultRecord()
   if (existing && existing.accessToken) {
-    return c.json({ error: "already_authenticated" }, 409)
+    try {
+      await getGitHubUser(existing.accessToken)
+      return c.json({ error: "already_authenticated" }, 409)
+    } catch {
+      // Token didn't validate — drop the stale record so /setup-status
+      // reflects the unauth state mid-flow, then fall through to start
+      // a fresh device-code session.
+      await clearDefaultRecord()
+      state.githubToken = undefined
+    }
   }
 
   try {
