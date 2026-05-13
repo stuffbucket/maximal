@@ -47,6 +47,7 @@
     "release:dmg": "bun scripts/package-dmg.ts --upload",
     "render-formula": "bun scripts/sync-homebrew-formula.ts",
     "sbom": "bun scripts/sbom.ts",
+    "scan:secrets": "trufflehog filesystem . --no-verification --fail --no-update --exclude-paths .trufflehog-exclude",
     "start": "NODE_ENV=production bun run ./src/main.ts",
     "typecheck": "tsc"
   },
@@ -54,7 +55,10 @@
     "pre-commit": "bunx lint-staged"
   },
   "lint-staged": {
-    "*": "bun run lint --fix"
+    "*": [
+      "bun run lint --fix",
+      "bash scripts/secret-scan.sh"
+    ]
   },
   "dependencies": {
     "citty": "^0.1.6",
