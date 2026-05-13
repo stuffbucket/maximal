@@ -120,3 +120,7 @@ export const readDefaultRecord = (): Promise<GitHubTokenRecord | null> =>
 
 export const writeDefaultRecord = (record: GitHubTokenRecord): Promise<void> =>
   writeGitHubTokenRecord(PATHS.GITHUB_TOKEN_PATH, record)
+
+export const clearDefaultRecord = async (): Promise<void> => {
+  await fs.rm(PATHS.GITHUB_TOKEN_PATH, { force: true })
+}

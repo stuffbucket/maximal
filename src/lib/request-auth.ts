@@ -7,6 +7,14 @@ import { getConfig } from "./config"
 interface AuthMiddlewareOptions {
   getApiKeys?: () => Array<string>
   allowUnauthenticatedPaths?: Array<string>
+  /**
+   * Path prefixes that bypass auth. Used for static-asset trees served
+   * under a single mount (e.g. `/settings/*` for the settings webview
+   * bundle). Each entry matches `c.req.path === prefix` or
+   * `c.req.path.startsWith(prefix + "/")`. Keep this list small — every
+   * entry is an auth-bypass surface.
+   */
+  allowUnauthenticatedPrefixes?: Array<string>
   allowOptionsBypass?: boolean
   /**
    * Paths that should skip auth when the request comes from loopback
@@ -106,6 +114,8 @@ export function createAuthMiddleware(
 ): MiddlewareHandler {
   const getApiKeys = options.getApiKeys ?? getConfiguredApiKeys
   const allowUnauthenticatedPaths = options.allowUnauthenticatedPaths ?? ["/"]
+  const allowUnauthenticatedPrefixes =
+    options.allowUnauthenticatedPrefixes ?? []
   const allowOptionsBypass = options.allowOptionsBypass ?? true
   const loopbackOnlyPaths = options.loopbackOnlyPaths ?? []
   const getRequestIp = options.getRequestIp ?? defaultGetRequestIp
@@ -116,6 +126,15 @@ export function createAuthMiddleware(
     }
 
     if (allowUnauthenticatedPaths.includes(c.req.path)) {
+      return next()
+    }
+
+    if (
+      allowUnauthenticatedPrefixes.some(
+        (prefix) =>
+          c.req.path === prefix || c.req.path.startsWith(`${prefix}/`),
+      )
+    ) {
       return next()
     }
 

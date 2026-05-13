@@ -28,6 +28,9 @@
       "icons/icon.ico"
     ],
     "externalBin": ["binaries/maximal"],
+    "resources": {
+      "../dist": "settings-dist"
+    },
     "macOS": {
       "exceptionDomain": "localhost"
     }

@@ -27,6 +27,7 @@ import lucideVendorImport from "./pages/vendor/lucide.min.js" with { type: "file
 const lucideVendorPath = lucideVendorImport as unknown as string
 import tailwindVendorImport from "./pages/vendor/tailwind.min.js" with { type: "file" }
 const tailwindVendorPath = tailwindVendorImport as unknown as string
+import { authRoute } from "./routes/auth/route"
 import { completionRoutes } from "./routes/chat-completions/route"
 import { debugRoutes } from "./routes/debug/route"
 import { embeddingRoutes } from "./routes/embeddings/route"
@@ -35,6 +36,7 @@ import { modelRoutes } from "./routes/models/route"
 import { providerMessageRoutes } from "./routes/provider/messages/route"
 import { providerModelRoutes } from "./routes/provider/models/route"
 import { responsesRoutes } from "./routes/responses/route"
+import { settingsRoutes } from "./routes/settings/route"
 import { setupStatusRoute } from "./routes/setup-status"
 import { tokenUsageRoute } from "./routes/token-usage/route"
 import { tokenRoute } from "./routes/token/route"
@@ -57,6 +59,14 @@ server.use(
       "/_debug/state",
       "/setup-status",
     ],
+    // The settings webview (served at /settings) and its static assets
+    // under /settings/* mirror the /usage-viewer pattern: a local Tauri
+    // window that loads from the proxy. Auth bypass is for the asset
+    // bundle only — future settings *data* endpoints (PATCH /config,
+    // /secrets, etc.) live at their own top-level paths and pick up
+    // auth from the normal middleware (with loopback exemptions if
+    // they need them, same as /usage).
+    allowUnauthenticatedPrefixes: ["/settings", "/auth"],
     // The dashboard at /usage-viewer fetches these endpoints from the
     // same machine. Trusting loopback lets us drop the client-side API
     // key UI (and its clear-text storage) without exposing the same
@@ -105,6 +115,8 @@ server.get("/vendor/tailwind.min.js", async (c) =>
 
 server.route("/_debug", debugRoutes)
 server.route("/setup-status", setupStatusRoute)
+server.route("/auth", authRoute)
+server.route("/settings", settingsRoutes)
 server.route("/chat/completions", completionRoutes)
 server.route("/models", modelRoutes)
 server.route("/embeddings", embeddingRoutes)

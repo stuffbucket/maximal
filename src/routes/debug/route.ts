@@ -11,6 +11,7 @@ import { Hono } from "hono"
 
 import { allCacheMetrics } from "~/lib/cache"
 import { getConfig } from "~/lib/config"
+import { evaluateSetup } from "~/lib/setup-status"
 import { state } from "~/lib/state"
 import { getGitVersion } from "~/lib/version"
 
@@ -22,7 +23,7 @@ import {
 
 export const debugRoutes = new Hono()
 
-debugRoutes.get("/state", (c) => {
+debugRoutes.get("/state", async (c) => {
   if (!state.verbose) {
     return c.notFound()
   }
@@ -36,7 +37,15 @@ debugRoutes.get("/state", (c) => {
     config = {}
   }
 
+  let setup: Awaited<ReturnType<typeof evaluateSetup>> | { error: string }
+  try {
+    setup = await evaluateSetup()
+  } catch (err) {
+    setup = { error: (err as Error).message }
+  }
+
   return c.json({
+    setup,
     git: getGitVersion(),
     runtime: {
       account_type: state.accountType,
