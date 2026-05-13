@@ -34,6 +34,14 @@ The tray menu's "Settings" item now opens this window (replaces the current `ope
 
 Window: `~880×720`, resizable, single window (re-show + focus if already open).
 
+## Asset resolution chain
+
+The proxy serves the Settings UI from `shell/dist/` at `/settings`. Locating that directory on disk works differently across dev, `bun run start`, and the Tauri-packaged `.app`. `src/routes/settings/route.ts` (`resolveSettingsDistDir()`) resolves in this order:
+
+1. **`MAXIMAL_SETTINGS_DIST` env var** (highest priority). Absolute path to the directory containing `index.html`. The Tauri shell sets this when spawning the sidecar — it points at the `settings-dist/` resource inside the `.app` bundle (mapped from `../dist` via `bundle.resources` in `shell/src-tauri/tauri.conf.json`; the `dist/` → `settings-dist/` rename sidesteps Tauri 2's `_up_` escape for `..` path components). This is the only path that works inside a packaged build, where `import.meta.dir` resolves to Tauri's mounted-resource path and the source tree is unreachable.
+2. **Filesystem walk from `import.meta.dir`** (dev fallback). Walks up to 8 levels looking for `shell/dist/index.html`. Covers `bun run dev`, `bun run start`, and `bun run build` → `dist/main.js` run from the repo root.
+3. **Returns `null`** → `/settings` responds with HTTP 503 and a "settings bundle not found" message instructing the user to run `cd shell && bun run build` or set `MAXIMAL_SETTINGS_DIST`. (The dev-mode reverse-proxy path to Vite on :1420 sits in front of this fallback chain in non-production `NODE_ENV`.)
+
 ## Layout
 
 Left rail: navigation. Right pane: section content.
@@ -53,7 +61,13 @@ Left rail: navigation. Right pane: section content.
 └──────────────┴──────────────────────────────────────────────┘
 ```
 
-Persistent footer: "Reveal config in Finder" (opens the app data dir, preserving the current MVP affordance for power users) + "Restart proxy" (greyed unless a restart-required change is staged).
+Persistent footer (left-to-right):
+
+- **"Reveal config in Finder"** — opens the app data dir (`~/.local/share/maximal/`), preserving the current MVP affordance for power users.
+- **"Reveal logs in Finder"** — opens `~/.local/share/maximal/logs/` directly. Daily log files (`messages-handler-<date>.log`) are the first stop when debugging routing decisions and SSE translation. Surfacing the dir from the window saves a second `cd` for non-CLI users.
+- **"Restart proxy"** — greyed unless a restart-required change is staged.
+
+Both Finder affordances are Tauri commands (`reveal_config_dir`, `reveal_logs_dir`) invoked from JS — they don't navigate the webview, they call into Rust which calls `opener::open_path()` on the target directory.
 
 ### Section: Account
 

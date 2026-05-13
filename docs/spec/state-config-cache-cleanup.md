@@ -109,9 +109,9 @@ caches:
   prefetch (per-req)    avg_size=2.3 over last 100 requests
 
 paths:
-  app_dir: /Users/brian/.local/share/copilot-api
-  log_dir: /Users/brian/.local/share/copilot-api/logs
-  secrets_dir: /Users/brian/.local/share/copilot-api/secrets
+  app_dir: $HOME/.local/share/copilot-api
+  log_dir: $HOME/.local/share/copilot-api/logs
+  secrets_dir: $HOME/.local/share/copilot-api/secrets
 ```
 
 **Acceptance:** running `copilot-api debug` matches the shape above

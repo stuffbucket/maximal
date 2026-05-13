@@ -9,6 +9,7 @@ import {
 function buildApp(opts: {
   apiKeys: Array<string>
   loopbackOnlyPaths?: Array<string>
+  allowUnauthenticatedPrefixes?: Array<string>
   ip: string | null
 }) {
   const app = new Hono()
@@ -18,6 +19,7 @@ function buildApp(opts: {
       getApiKeys: () => opts.apiKeys,
       allowUnauthenticatedPaths: ["/"],
       loopbackOnlyPaths: opts.loopbackOnlyPaths,
+      allowUnauthenticatedPrefixes: opts.allowUnauthenticatedPrefixes,
       getRequestIp: () => opts.ip,
     }),
   )
@@ -25,6 +27,9 @@ function buildApp(opts: {
   app.get("/token-usage", (c) => c.text("token-usage-ok"))
   app.get("/token-usage/events", (c) => c.text("events-ok"))
   app.post("/v1/messages", (c) => c.text("messages-ok"))
+  app.get("/settings", (c) => c.text("settings-ok"))
+  app.get("/settings/assets/index.js", (c) => c.text("asset-ok"))
+  app.get("/settings-not-this-one", (c) => c.text("not-prefix"))
   return app
 }
 
@@ -115,6 +120,50 @@ describe("createAuthMiddleware loopback exemption", () => {
     })
 
     const res = await app.request("/usage")
+    expect(res.status).toBe(401)
+  })
+})
+
+describe("createAuthMiddleware allowUnauthenticatedPrefixes", () => {
+  test("exact prefix match bypasses auth", async () => {
+    const app = buildApp({
+      apiKeys: ["secret"],
+      allowUnauthenticatedPrefixes: ["/settings"],
+      ip: "203.0.113.7",
+    })
+    const res = await app.request("/settings")
+    expect(res.status).toBe(200)
+    expect(await res.text()).toBe("settings-ok")
+  })
+
+  test("sub-path under prefix bypasses auth", async () => {
+    const app = buildApp({
+      apiKeys: ["secret"],
+      allowUnauthenticatedPrefixes: ["/settings"],
+      ip: "203.0.113.7",
+    })
+    const res = await app.request("/settings/assets/index.js")
+    expect(res.status).toBe(200)
+    expect(await res.text()).toBe("asset-ok")
+  })
+
+  test("similar-named path does not bypass auth", async () => {
+    const app = buildApp({
+      apiKeys: ["secret"],
+      allowUnauthenticatedPrefixes: ["/settings"],
+      ip: "203.0.113.7",
+    })
+    const res = await app.request("/settings-not-this-one")
+    expect(res.status).toBe(401)
+  })
+
+  test("protected route still requires auth when prefix configured", async () => {
+    const app = buildApp({
+      apiKeys: ["secret"],
+      allowUnauthenticatedPrefixes: ["/settings"],
+      ip: "203.0.113.7",
+    })
+    const res = await app.request("/v1/messages", { method: "POST" })
     expect(res.status).toBe(401)
   })
 })

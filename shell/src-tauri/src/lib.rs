@@ -18,7 +18,7 @@ use std::sync::Mutex;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, RunEvent,
+    AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder,
 };
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
@@ -63,14 +63,32 @@ mod menu_id {
 }
 
 const TRAY_ID: &str = "main";
+const SETTINGS_WINDOW_LABEL: &str = "settings";
+
+fn settings_url() -> String {
+    format!("http://localhost:{}/settings", SIDECAR_PORT)
+}
+
+fn maximal_data_dir(app: &AppHandle) -> Option<std::path::PathBuf> {
+    // Mirrors src/lib/paths.ts: ~/.local/share/maximal on macOS/Linux,
+    // %USERPROFILE%\.local\share\maximal on Windows.
+    let home = app.path().home_dir().ok()?;
+    Some(home.join(".local").join("share").join("maximal"))
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
+        .invoke_handler(tauri::generate_handler![reveal_config_dir, reveal_logs_dir])
         .manage(Sidecar::new())
         .setup(|app| {
+            // Menu-bar-only app: hide the Dock icon and Cmd-Tab entry.
+            // Also fixes a non-responsive Dock right-click that
+            // happens when a window-less app stays in Regular policy.
+            #[cfg(target_os = "macos")]
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             spawn_sidecar(app.handle())?;
             install_tray(app.handle())?;
             Ok(())
@@ -92,11 +110,36 @@ fn spawn_sidecar(app: &tauri::AppHandle) -> tauri::Result<()> {
     // tauri.conf.json and resolves the arch-suffixed binary
     // (binaries/maximal-aarch64-apple-darwin etc.) at build time.
     let port = SIDECAR_PORT.to_string();
-    let cmd = app
+    let mut cmd = app
         .shell()
         .sidecar("maximal")
         .map_err(|e| tauri::Error::Anyhow(e.into()))?
         .args(["start", "--port", port.as_str()]);
+
+    // Inside the packaged .app, the sidecar's CWD/import.meta.dir
+    // resolves to Tauri's mounted-resource path — not the original
+    // source tree — so the proxy's filesystem-walk for
+    // `shell/dist/index.html` can't find it. We bundle `shell/dist/`
+    // as a Tauri resource (see tauri.conf.json `bundle.resources` —
+    // mapped to `settings-dist/` to avoid the `_up_` escape Tauri
+    // applies to `..` components in resource source paths) and pass
+    // its absolute path to the sidecar via MAXIMAL_SETTINGS_DIST.
+    // The proxy's `resolveSettingsDistDir()` checks this env var
+    // first; in dev (no env set) it falls back to the walk.
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let settings_dist = resource_dir.join("settings-dist");
+        if settings_dist.exists() {
+            cmd = cmd.env(
+                "MAXIMAL_SETTINGS_DIST",
+                settings_dist.to_string_lossy().to_string(),
+            );
+        } else {
+            eprintln!(
+                "[maximal] settings-dist resource missing at {} — /settings will 503 in production builds",
+                settings_dist.display()
+            );
+        }
+    }
 
     let (mut rx, child) = cmd
         .spawn()
@@ -188,17 +231,55 @@ fn install_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
 }
 
 fn open_settings(app: &tauri::AppHandle) {
-    // Opens the maximal app-data directory in the OS file browser.
-    // The user's editable config.json lives at the root; logs/ and
-    // secrets/ are visible as siblings. Resolves to the same path
-    // src/lib/paths.ts uses: ~/.local/share/maximal on macOS/Linux,
-    // %USERPROFILE%\.local\share\maximal on Windows.
-    let Ok(home) = app.path().home_dir() else {
+    // Tray "Settings…" entrypoint. Opens a Tauri webview window
+    // pointed at the proxy's /settings route. Single-window: if the
+    // window already exists, re-show + focus rather than creating a
+    // duplicate. Closing the window does NOT quit the app — the
+    // tray "Quit Maximal" item remains the only exit path because
+    // the app runs as ActivationPolicy::Accessory (LSUIElement).
+    if let Some(window) = app.get_webview_window(SETTINGS_WINDOW_LABEL) {
+        let _ = window.show();
+        let _ = window.set_focus();
+        return;
+    }
+
+    let url = match settings_url().parse() {
+        Ok(u) => u,
+        Err(e) => {
+            eprintln!("[maximal] failed to parse settings URL: {e}");
+            return;
+        }
+    };
+
+    let result = WebviewWindowBuilder::new(app, SETTINGS_WINDOW_LABEL, WebviewUrl::External(url))
+        .title("maximal — Settings")
+        .inner_size(880.0, 720.0)
+        .resizable(true)
+        .build();
+
+    if let Err(e) = result {
+        eprintln!("[maximal] failed to open settings window: {e}");
+    }
+}
+
+#[tauri::command]
+fn reveal_config_dir(app: AppHandle) {
+    // Opens ~/.local/share/maximal/ in Finder/Explorer. Surfaced as
+    // a footer button inside the Settings window for power users
+    // who want to hand-edit config.json.
+    let Some(dir) = maximal_data_dir(&app) else {
         return;
     };
-    let dir = home
-        .join(".local")
-        .join("share")
-        .join("maximal");
+    let _ = app.opener().open_path(dir.to_string_lossy(), None::<&str>);
+}
+
+#[tauri::command]
+fn reveal_logs_dir(app: AppHandle) {
+    // Opens ~/.local/share/maximal/logs/ in Finder/Explorer. Daily
+    // log files (messages-handler-<date>.log) live here — first
+    // stop when debugging routing/SSE translation.
+    let Some(dir) = maximal_data_dir(&app).map(|d| d.join("logs")) else {
+        return;
+    };
     let _ = app.opener().open_path(dir.to_string_lossy(), None::<&str>);
 }

@@ -1,43 +1,449 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
-    <link rel="stylesheet" href="/src/styles.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Tauri App</title>
-    <script type="module" src="/src/main.ts" defer></script>
+    <title>maximal — Settings</title>
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300..900&family=Commissioner:wght@200..900&display=swap"
+    />
+    <link rel="stylesheet" href="./src/styles.css" />
+    <script type="module" src="./src/main.ts" defer></script>
   </head>
-
   <body>
-    <main class="container">
-      <h1>Welcome to Tauri</h1>
+    <div class="app">
+      <header class="titlebar">
+        <h1 class="titlebar__heading">maximal &mdash; Settings</h1>
+      </header>
 
-      <div class="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/src/assets/vite.svg" class="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img
-            src="/src/assets/tauri.svg"
-            class="logo tauri"
-            alt="Tauri logo"
-          />
-        </a>
-        <a href="https://www.typescriptlang.org/docs" target="_blank">
-          <img
-            src="/src/assets/typescript.svg"
-            class="logo typescript"
-            alt="typescript logo"
-          />
-        </a>
+      <div class="shell">
+        <nav class="sidebar" aria-label="Settings sections">
+          <ul class="nav">
+            <li>
+              <a class="nav__item" href="#account" data-nav="account">Account</a>
+            </li>
+            <li>
+              <a class="nav__item" href="#api-clients" data-nav="api-clients"
+                >API clients</a
+              >
+            </li>
+            <li>
+              <a class="nav__item" href="#providers" data-nav="providers"
+                >Providers</a
+              >
+            </li>
+            <li>
+              <a class="nav__item" href="#secrets" data-nav="secrets">Secrets</a>
+            </li>
+            <li>
+              <a class="nav__item" href="#routing" data-nav="routing">Routing</a>
+            </li>
+            <li>
+              <a class="nav__item" href="#per-model" data-nav="per-model"
+                >Per-model</a
+              >
+            </li>
+            <li>
+              <a class="nav__item" href="#advanced" data-nav="advanced"
+                >Advanced</a
+              >
+            </li>
+            <li>
+              <a class="nav__item" href="#diagnostics" data-nav="diagnostics"
+                >Diagnostics</a
+              >
+            </li>
+          </ul>
+        </nav>
+
+        <main class="pane" id="pane">
+          <!-- ACCOUNT -->
+          <section class="section" data-section="account">
+            <header class="section__head">
+              <h2 class="section__title">Account</h2>
+              <p class="section__sub">
+                Your connection to GitHub Copilot, the upstream this proxy uses.
+              </p>
+            </header>
+
+            <div class="card">
+              <div class="card__row">
+                <div class="card__main">
+                  <div class="card__title">GitHub Copilot</div>
+                  <div class="card__meta">
+                    <span class="status status--ok" aria-hidden="true"></span>
+                    <span>Signed in</span>
+                    <span class="mono muted">&middot; token ends in <span class="mono">a1b2</span></span>
+                  </div>
+                  <div class="card__hint">Last validated 2 minutes ago.</div>
+                </div>
+                <div class="card__aside">
+                  <button type="button" class="btn btn--destructive">
+                    Sign out
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- API CLIENTS -->
+          <section class="section" data-section="api-clients" hidden>
+            <header class="section__head">
+              <h2 class="section__title">API clients</h2>
+              <p class="section__sub">
+                Keys that local clients use to authenticate against this proxy.
+              </p>
+            </header>
+
+            <div class="empty">
+              <p class="empty__title">No API keys yet</p>
+              <p class="empty__body">
+                The proxy accepts all local requests when this list is empty.
+                Generate a key to require authentication.
+              </p>
+              <button type="button" class="btn btn--primary">
+                Generate new key
+              </button>
+            </div>
+          </section>
+
+          <!-- PROVIDERS -->
+          <section class="section" data-section="providers" hidden>
+            <header class="section__head">
+              <h2 class="section__title">Providers</h2>
+              <p class="section__sub">
+                Upstream model providers and how requests are routed to them.
+              </p>
+            </header>
+
+            <article class="card">
+              <header class="card__head">
+                <div>
+                  <div class="card__title">Anthropic</div>
+                  <div class="card__hint mono">anthropic</div>
+                </div>
+                <label class="switch">
+                  <input type="checkbox" checked disabled />
+                  <span>Enabled</span>
+                </label>
+              </header>
+              <dl class="kv">
+                <div class="kv__row">
+                  <dt>Base URL</dt>
+                  <dd class="mono">https://api.anthropic.com</dd>
+                </div>
+                <div class="kv__row">
+                  <dt>API key</dt>
+                  <dd>
+                    <span class="chip chip--ok">env</span>
+                    <span class="mono muted">ends in 9f3c</span>
+                  </dd>
+                </div>
+                <div class="kv__row">
+                  <dt>Type</dt>
+                  <dd class="mono">anthropic</dd>
+                </div>
+              </dl>
+            </article>
+
+            <article class="card">
+              <header class="card__head">
+                <div>
+                  <div class="card__title">Ollama</div>
+                  <div class="card__hint mono">ollama</div>
+                </div>
+                <label class="switch">
+                  <input type="checkbox" disabled />
+                  <span>Enabled</span>
+                </label>
+              </header>
+              <dl class="kv">
+                <div class="kv__row">
+                  <dt>Base URL</dt>
+                  <dd class="mono">http://localhost:11434</dd>
+                </div>
+                <div class="kv__row">
+                  <dt>API key</dt>
+                  <dd>
+                    <span class="chip">unset</span>
+                  </dd>
+                </div>
+                <div class="kv__row">
+                  <dt>Type</dt>
+                  <dd class="mono">openai-compatible</dd>
+                </div>
+              </dl>
+            </article>
+
+            <button type="button" class="btn btn--secondary">
+              + Add provider
+            </button>
+          </section>
+
+          <!-- SECRETS -->
+          <section class="section" data-section="secrets" hidden>
+            <header class="section__head">
+              <h2 class="section__title">Secrets</h2>
+              <p class="section__sub">
+                Provider credentials. Environment variables always win over
+                saved values.
+              </p>
+            </header>
+
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Source</th>
+                  <th>Value</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Anthropic API key</td>
+                  <td><span class="chip chip--ok">env</span></td>
+                  <td class="mono muted">&mdash;</td>
+                  <td class="row__actions">
+                    <button type="button" class="btn btn--ghost">Edit</button>
+                  </td>
+                </tr>
+                <tr>
+                  <td>Ollama API key</td>
+                  <td><span class="chip">unset</span></td>
+                  <td class="mono muted">&mdash;</td>
+                  <td class="row__actions">
+                    <button type="button" class="btn btn--ghost">Edit</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+
+          <!-- ROUTING -->
+          <section class="section" data-section="routing" hidden>
+            <header class="section__head">
+              <h2 class="section__title">Routing</h2>
+              <p class="section__sub">
+                How requests are mapped to upstream endpoints. Changes here
+                apply live.
+              </p>
+            </header>
+
+            <div class="form">
+              <div class="form__row">
+                <div class="form__label">
+                  <label for="use-messages-api"
+                    >Use Claude's native messages format</label
+                  >
+                  <p class="form__hint">
+                    Routes Claude models through Copilot's native messages
+                    endpoint. Better streaming and tool-call fidelity.
+                  </p>
+                </div>
+                <div class="form__control">
+                  <label class="switch">
+                    <input type="checkbox" id="use-messages-api" checked />
+                    <span class="sr-only">Use messages API</span>
+                  </label>
+                </div>
+              </div>
+
+              <div class="form__row">
+                <div class="form__label">
+                  <label for="apply-patch">Accept the apply_patch tool</label>
+                  <p class="form__hint">
+                    Let clients send the apply_patch tool shape for surgical
+                    file edits.
+                  </p>
+                </div>
+                <div class="form__control">
+                  <label class="switch">
+                    <input type="checkbox" id="apply-patch" />
+                    <span class="sr-only">Accept apply_patch</span>
+                  </label>
+                </div>
+              </div>
+
+              <div class="form__row">
+                <div class="form__label">
+                  <label for="small-model">Small model for warmups</label>
+                  <p class="form__hint">
+                    Used for tool-less probe requests. Lighter than your main
+                    model.
+                  </p>
+                </div>
+                <div class="form__control">
+                  <select id="small-model" class="input">
+                    <option>gpt-4o-mini</option>
+                    <option>claude-haiku-4</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="form__row">
+                <div class="form__label">
+                  <label for="log-retention">Keep logs for</label>
+                  <p class="form__hint">
+                    Daily proxy log files older than this are rotated out.
+                  </p>
+                </div>
+                <div class="form__control form__control--inline">
+                  <input
+                    id="log-retention"
+                    type="number"
+                    class="input input--narrow"
+                    value="7"
+                    min="0"
+                    max="3650"
+                  />
+                  <span class="muted">days</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- PER-MODEL -->
+          <section class="section" data-section="per-model" hidden>
+            <header class="section__head">
+              <h2 class="section__title">Per-model</h2>
+              <p class="section__sub">
+                Overrides scoped to a single model. Empty by default.
+              </p>
+            </header>
+
+            <div class="subsection">
+              <h3 class="subsection__title">Extra system prompt per model</h3>
+              <div class="empty empty--compact">
+                <p class="empty__body">
+                  No overrides yet.
+                  <a class="link" href="#">Add a model override</a>
+                </p>
+              </div>
+            </div>
+
+            <div class="subsection">
+              <h3 class="subsection__title">Reasoning effort per model</h3>
+              <div class="empty empty--compact">
+                <p class="empty__body">
+                  No overrides yet.
+                  <a class="link" href="#">Add a model override</a>
+                </p>
+              </div>
+            </div>
+
+            <div class="subsection">
+              <h3 class="subsection__title">Server-side context management</h3>
+              <div class="empty empty--compact">
+                <p class="empty__body">
+                  No models opted in.
+                  <a class="link" href="#">Add a model</a>
+                </p>
+              </div>
+            </div>
+          </section>
+
+          <!-- ADVANCED -->
+          <section class="section" data-section="advanced" hidden>
+            <header class="section__head">
+              <h2 class="section__title">Advanced</h2>
+              <p class="section__sub">
+                These rarely need changing. Open if you know what you're doing.
+              </p>
+            </header>
+
+            <div class="form">
+              <div class="form__row">
+                <div class="form__label">
+                  <label for="anthropic-key"
+                    >Anthropic API key (for token counting)</label
+                  >
+                  <p class="form__hint">
+                    Used by token-count requests for exact Claude counts.
+                    Aliased to the anthropic secret.
+                  </p>
+                </div>
+                <div class="form__control">
+                  <input
+                    id="anthropic-key"
+                    type="password"
+                    class="input"
+                    placeholder="sk-ant-&hellip;"
+                    disabled
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div class="actions">
+              <button type="button" class="btn btn--secondary">
+                Reveal config.json in editor
+              </button>
+              <button type="button" class="btn btn--destructive">
+                Reset settings to defaults
+              </button>
+            </div>
+          </section>
+
+          <!-- DIAGNOSTICS -->
+          <section class="section" data-section="diagnostics" hidden>
+            <header class="section__head">
+              <h2 class="section__title">Diagnostics</h2>
+              <p class="section__sub">
+                Live state and a one-click bundle for bug reports.
+              </p>
+            </header>
+
+            <dl class="kv kv--bare">
+              <div class="kv__row">
+                <dt>Proxy version</dt>
+                <dd class="mono">0.0.0-dev</dd>
+              </div>
+              <div class="kv__row">
+                <dt>Git SHA</dt>
+                <dd class="mono">unknown</dd>
+              </div>
+              <div class="kv__row">
+                <dt>Sidecar PID</dt>
+                <dd class="mono">&mdash;</dd>
+              </div>
+              <div class="kv__row">
+                <dt>Rate-limit budget</dt>
+                <dd class="mono">unlimited</dd>
+              </div>
+            </dl>
+
+            <div class="actions">
+              <button type="button" class="btn btn--secondary" id="open-logs-2">
+                Open logs folder
+              </button>
+              <button type="button" class="btn btn--primary">
+                Copy debug bundle
+              </button>
+            </div>
+          </section>
+        </main>
       </div>
-      <p>Click on the Tauri logo to learn more about the framework</p>
 
-      <form class="row" id="greet-form">
-        <input id="greet-input" placeholder="Enter a name..." />
-        <button type="submit">Greet</button>
-      </form>
-      <p id="greet-msg"></p>
-    </main>
+      <footer class="footer">
+        <button type="button" class="btn btn--ghost" id="reveal-config">
+          Reveal config in Finder
+        </button>
+        <button type="button" class="btn btn--ghost" id="reveal-logs">
+          Reveal logs in Finder
+        </button>
+        <span class="footer__spacer"></span>
+        <button
+          type="button"
+          class="btn btn--secondary"
+          id="restart-proxy"
+          disabled
+          title="No restart-required change is staged."
+        >
+          Restart proxy
+        </button>
+      </footer>
+    </div>
   </body>
 </html>

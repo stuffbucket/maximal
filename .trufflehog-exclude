@@ -1,0 +1,13 @@
+# Paths excluded from `bun run scan:secrets` (full-repo scan).
+# One glob per line. CI and the pre-commit hook honor the same set.
+node_modules
+dist
+dist-build
+dist-release
+shell/dist
+shell/node_modules
+shell/src-tauri/target
+shell/src-tauri/binaries
+.claude/worktrees
+.claude/logs
+bun.lock
