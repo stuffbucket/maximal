@@ -35,6 +35,7 @@ import { modelRoutes } from "./routes/models/route"
 import { providerMessageRoutes } from "./routes/provider/messages/route"
 import { providerModelRoutes } from "./routes/provider/models/route"
 import { responsesRoutes } from "./routes/responses/route"
+import { settingsApiRoutes } from "./routes/settings/api"
 import { settingsRoutes } from "./routes/settings/route"
 import { setupStatusRoute } from "./routes/setup-status"
 import { tokenUsageRoute } from "./routes/token-usage/route"
@@ -114,6 +115,11 @@ server.get("/vendor/tailwind.min.js", async (c) =>
 
 server.route("/_debug", debugRoutes)
 server.route("/setup-status", setupStatusRoute)
+// `/settings/api/*` is intentionally NOT added to allowUnauthenticatedPaths
+// above — every data endpoint requires the standard auth middleware.
+// The static bundle's `/settings/*` paths can live in the unauth allowlist
+// without weakening `/settings/api/*`.
+server.route("/settings/api", settingsApiRoutes)
 server.route("/settings", settingsRoutes)
 server.route("/chat/completions", completionRoutes)
 server.route("/models", modelRoutes)

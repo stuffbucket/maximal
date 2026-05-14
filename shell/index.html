@@ -395,30 +395,76 @@
               </p>
             </header>
 
-            <dl class="kv kv--bare">
-              <div class="kv__row">
-                <dt>Proxy version</dt>
-                <dd class="mono">0.0.0-dev</dd>
-              </div>
-              <div class="kv__row">
-                <dt>Git SHA</dt>
-                <dd class="mono">unknown</dd>
-              </div>
-              <div class="kv__row">
-                <dt>Sidecar PID</dt>
-                <dd class="mono">&mdash;</dd>
-              </div>
-              <div class="kv__row">
-                <dt>Rate-limit budget</dt>
-                <dd class="mono">unlimited</dd>
-              </div>
-            </dl>
+            <div data-diagnostics-root aria-busy="true">
+              <dl class="kv kv--bare">
+                <div class="kv__row">
+                  <dt>Proxy version</dt>
+                  <dd class="mono" data-field="version">…</dd>
+                </div>
+                <div class="kv__row">
+                  <dt>Git SHA</dt>
+                  <dd class="mono" data-field="source_revision">…</dd>
+                </div>
+                <div class="kv__row">
+                  <dt>Sidecar PID</dt>
+                  <dd class="mono" data-field="pid">…</dd>
+                </div>
+                <div class="kv__row">
+                  <dt>Uptime</dt>
+                  <dd class="mono" data-field="uptime">…</dd>
+                </div>
+                <div class="kv__row">
+                  <dt>Account type</dt>
+                  <dd class="mono" data-field="account_type">…</dd>
+                </div>
+                <div class="kv__row">
+                  <dt>Models cached</dt>
+                  <dd class="mono" data-field="models_cached">…</dd>
+                </div>
+                <div class="kv__row">
+                  <dt>GitHub token</dt>
+                  <dd class="mono" data-field="github_token">…</dd>
+                </div>
+                <div class="kv__row">
+                  <dt>Copilot token</dt>
+                  <dd class="mono" data-field="copilot_token">…</dd>
+                </div>
+                <div class="kv__row">
+                  <dt>Rate limit</dt>
+                  <dd class="mono" data-field="rate_limit">…</dd>
+                </div>
+              </dl>
+            </div>
+
+            <div
+              class="card__hint"
+              data-diagnostics-error
+              hidden
+              role="alert"
+            >
+              <span data-error-message></span>
+              <button
+                type="button"
+                class="btn btn--ghost"
+                data-diagnostics-retry
+              >
+                Retry
+              </button>
+            </div>
 
             <div class="actions">
-              <button type="button" class="btn btn--secondary" id="open-logs-2">
+              <button
+                type="button"
+                class="btn btn--secondary"
+                data-action="open-logs"
+              >
                 Open logs folder
               </button>
-              <button type="button" class="btn btn--primary">
+              <button
+                type="button"
+                class="btn btn--primary"
+                data-action="copy-json"
+              >
                 Copy debug bundle
               </button>
             </div>
