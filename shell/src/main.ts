@@ -38,8 +38,7 @@ function showSection(id: SectionId): void {
     link.setAttribute("aria-current", active ? "page" : "false");
     link.classList.toggle("nav__item--active", active);
   }
-  const pane = document.getElementById("pane");
-  if (pane) pane.scrollTo({ top: 0 });
+  window.scrollTo({ top: 0 });
 }
 
 function readHashSection(): SectionId {

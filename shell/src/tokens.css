@@ -81,6 +81,7 @@
   /* ---- Layout constants ---- */
   --sidebar-width: 200px;
   --content-max: 640px;
+  --footer-height: var(--size-2xl);
 }
 
 [data-theme="dark"] {

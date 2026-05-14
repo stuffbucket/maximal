@@ -31,10 +31,9 @@ body {
 
 /* ---- App skeleton ---- */
 .app {
-  display: grid;
-  grid-template-rows: auto 1fr auto;
-  height: 100vh;
-  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
 }
 
 .titlebar {
@@ -58,6 +57,7 @@ body {
 .shell {
   display: grid;
   grid-template-columns: var(--sidebar-width) 1fr;
+  flex: 1;
   min-height: 0;
 }
 
@@ -66,6 +66,10 @@ body {
   border-inline-end: var(--border-width-hairline) solid var(--border-subtle);
   background: var(--surface-card);
   padding: var(--space-3) var(--space-2);
+  position: sticky;
+  top: 0;
+  align-self: start;
+  max-height: 100vh;
   overflow-y: auto;
 }
 
@@ -109,7 +113,7 @@ body {
 /* ---- Pane ---- */
 .pane {
   padding: var(--space-6);
-  overflow-y: auto;
+  padding-block-end: calc(var(--footer-height) + var(--space-6));
   min-height: 0;
 }
 
@@ -176,6 +180,16 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
+}
+
+.card__head > :first-child {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.card__head > .switch {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .card__row {
@@ -546,6 +560,10 @@ body {
   padding: var(--space-3) var(--space-5);
   border-block-start: var(--border-width-hairline) solid var(--border-subtle);
   background: var(--surface-card);
+  min-height: var(--footer-height);
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
 }
 
 .footer__spacer {
