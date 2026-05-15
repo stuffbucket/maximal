@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 import type { DiagnosticsResponse } from "../../src/lib/settings-types";
+import type { AuthStatus } from "./api";
 import { apiCall } from "./api";
 
 type SectionId =
@@ -186,15 +187,229 @@ function wireDiagnostics(): void {
     });
 }
 
+// ---- Account section -------------------------------------------------------
+
+/**
+ * Polling cleanup contract:
+ *  - Only one poll timer runs at a time (`authPollTimer`).
+ *  - `stopAuthPolling()` clears the timer; called on terminal states
+ *    (authenticated, error, unauthenticated), on sign-out, and on
+ *    navigation away from #account.
+ *  - `renderAccount` is the single source of truth for visibility;
+ *    a non-pending state always stops polling before the next call.
+ */
+type AccountStateKey = "unauthenticated" | "pending" | "authenticated" | "error";
+
+const POLL_INTERVAL_MS = 2000;
+
+let currentAuthStatus: AuthStatus | null = null;
+let authPollTimer: ReturnType<typeof setTimeout> | null = null;
+
+function stopAuthPolling(): void {
+  if (authPollTimer !== null) {
+    clearTimeout(authPollTimer);
+    authPollTimer = null;
+  }
+}
+
+function schedulePoll(): void {
+  stopAuthPolling();
+  authPollTimer = setTimeout(() => {
+    authPollTimer = null;
+    void pollAuthStatus();
+  }, POLL_INTERVAL_MS);
+}
+
+function accountKeyFor(state: AuthStatus["state"]): AccountStateKey {
+  if (state === "device_code_issued" || state === "polling") return "pending";
+  if (state === "authenticated") return "authenticated";
+  if (state === "error") return "error";
+  return "unauthenticated";
+}
+
+function accountSlot(name: string): HTMLElement | null {
+  return document.querySelector<HTMLElement>(
+    `[data-section="account"] [data-field="${name}"]`,
+  );
+}
+
+function setAccountField(name: string, value: string): void {
+  const el = accountSlot(name);
+  if (el) el.textContent = value;
+}
+
+function formatExpiresAt(iso: string | undefined): string {
+  if (!iso) return "soon";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleTimeString();
+}
+
+function renderAccount(status: AuthStatus): void {
+  currentAuthStatus = status;
+  const active = accountKeyFor(status.state);
+
+  for (const card of document.querySelectorAll<HTMLElement>(
+    "[data-state-account]",
+  )) {
+    card.hidden = card.dataset.stateAccount !== active;
+  }
+
+  if (active === "pending") {
+    setAccountField("user_code", status.user_code ?? "…");
+    setAccountField("expires_at", formatExpiresAt(status.expires_at));
+    const link = accountSlot("verification_uri");
+    if (link instanceof HTMLAnchorElement) {
+      const uri = status.verification_uri ?? "https://github.com/login/device";
+      link.href = uri;
+      link.textContent = uri.replace(/^https?:\/\//, "");
+    }
+  } else if (active === "authenticated") {
+    setAccountField("account_login", status.account_login ?? "(unknown)");
+  } else if (active === "error") {
+    setAccountField("error", status.error ?? "Unknown error.");
+  }
+
+  if (active === "pending") {
+    schedulePoll();
+  } else {
+    stopAuthPolling();
+  }
+}
+
+async function loadAuthStatus(): Promise<void> {
+  const result = await apiCall({
+    kind: "auth-status",
+    method: "GET",
+    path: "/settings/api/auth/github/status",
+  });
+  if (!result.ok) {
+    renderAccount({
+      state: "error",
+      error: `Failed to load auth status: ${result.error}`,
+    });
+    return;
+  }
+  renderAccount(result.data);
+}
+
+async function pollAuthStatus(): Promise<void> {
+  // Stop if the user navigated away while a poll was in flight.
+  if (readHashSection() !== "account") {
+    stopAuthPolling();
+    return;
+  }
+  const result = await apiCall({
+    kind: "auth-status",
+    method: "GET",
+    path: "/settings/api/auth/github/status",
+  });
+  if (readHashSection() !== "account") {
+    // Navigated away mid-request; drop the response.
+    stopAuthPolling();
+    return;
+  }
+  if (!result.ok) {
+    renderAccount({
+      state: "error",
+      error: `Polling failed: ${result.error}`,
+    });
+    return;
+  }
+  renderAccount(result.data);
+}
+
+async function startAuth(): Promise<void> {
+  stopAuthPolling();
+  const result = await apiCall({
+    kind: "auth-start",
+    method: "POST",
+    path: "/settings/api/auth/github/start",
+  });
+  if (!result.ok) {
+    renderAccount({
+      state: "error",
+      error: `Couldn't start sign-in: ${result.error}`,
+    });
+    return;
+  }
+  renderAccount(result.data);
+}
+
+async function signOut(): Promise<void> {
+  const confirmed = window.confirm(
+    "Sign out? The proxy will stop forwarding Copilot requests until you sign in again.",
+  );
+  if (!confirmed) return;
+  stopAuthPolling();
+  const result = await apiCall({
+    kind: "auth-sign-out",
+    method: "POST",
+    path: "/settings/api/auth/github/sign-out",
+  });
+  if (!result.ok) {
+    renderAccount({
+      state: "error",
+      error: `Sign-out failed: ${result.error}`,
+    });
+    return;
+  }
+  await loadAuthStatus();
+}
+
+async function copyUserCode(): Promise<void> {
+  const code = currentAuthStatus?.user_code;
+  if (!code) return;
+  try {
+    await navigator.clipboard.writeText(code);
+  } catch (err) {
+    console.error("clipboard write failed", err);
+  }
+}
+
+function wireAccount(): void {
+  const section = document.querySelector('[data-section="account"]');
+  if (!section) return;
+  section.addEventListener("click", (ev) => {
+    const target = ev.target;
+    if (!(target instanceof HTMLElement)) return;
+    const button = target.closest<HTMLElement>("[data-action]");
+    if (!button) return;
+    const action = button.dataset.action;
+    switch (action) {
+      case "auth-start":
+        void startAuth();
+        break;
+      case "sign-out":
+        void signOut();
+        break;
+      case "copy-user-code":
+        void copyUserCode();
+        break;
+      default:
+        break;
+    }
+  });
+}
+
 window.addEventListener("DOMContentLoaded", () => {
   applyTheme();
   wireFooter();
   wireDiagnostics();
+  wireAccount();
   syncFromHash();
   void loadDiagnostics();
+  if (readHashSection() === "account") void loadAuthStatus();
 });
 
 window.addEventListener("hashchange", () => {
   syncFromHash();
-  if (readHashSection() === "diagnostics") void loadDiagnostics();
+  const section = readHashSection();
+  if (section === "diagnostics") void loadDiagnostics();
+  if (section === "account") {
+    void loadAuthStatus();
+  } else {
+    // Leaving the Account section: drop any in-flight polling.
+    stopAuthPolling();
+  }
 });

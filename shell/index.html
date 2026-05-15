@@ -62,27 +62,102 @@
           <section class="section" data-section="account">
             <header class="section__head">
               <h2 class="section__title">Account</h2>
-              <p class="section__sub">
-                Your connection to GitHub Copilot, the upstream this proxy uses.
-              </p>
+              <p class="section__sub">Your connection to GitHub Copilot.</p>
             </header>
 
-            <div class="card">
-              <div class="card__row">
-                <div class="card__main">
-                  <div class="card__title">GitHub Copilot</div>
-                  <div class="card__meta">
-                    <span class="status status--ok" aria-hidden="true"></span>
-                    <span>Signed in</span>
-                    <span class="mono muted">&middot; token ends in <span class="mono">a1b2</span></span>
-                  </div>
-                  <div class="card__hint">Last validated 2 minutes ago.</div>
-                </div>
-                <div class="card__aside">
-                  <button type="button" class="btn btn--destructive">
-                    Sign out
+            <!-- State: unauthenticated -->
+            <div class="card" data-state-account="unauthenticated" hidden>
+              <div class="card__head">
+                <h3 class="card__title">Not signed in</h3>
+              </div>
+              <p class="card__hint">
+                Maximal needs a GitHub account with Copilot to forward requests
+                upstream. Until you sign in, the proxy will accept connections
+                but reject Copilot calls.
+              </p>
+              <div class="actions">
+                <button
+                  type="button"
+                  class="btn btn--primary"
+                  data-action="auth-start"
+                >
+                  Sign in to GitHub
+                </button>
+              </div>
+            </div>
+
+            <!-- State: device_code_issued / polling -->
+            <div class="card" data-state-account="pending" hidden>
+              <div class="card__head">
+                <h3 class="card__title">Almost there</h3>
+              </div>
+              <ol class="card__hint">
+                <li>
+                  Visit
+                  <a
+                    href=""
+                    target="_blank"
+                    rel="noopener"
+                    data-field="verification_uri"
+                    >github.com/login/device</a
+                  >
+                </li>
+                <li>
+                  Enter this code:
+                  <strong class="mono" data-field="user_code">…</strong>
+                  <button
+                    type="button"
+                    class="btn btn--ghost btn--sm"
+                    data-action="copy-user-code"
+                  >
+                    Copy
                   </button>
+                </li>
+                <li>
+                  Approve the request. We're polling — this page will update.
+                </li>
+              </ol>
+              <p class="card__meta">
+                Code expires <span data-field="expires_at">…</span>
+              </p>
+            </div>
+
+            <!-- State: authenticated -->
+            <div class="card" data-state-account="authenticated" hidden>
+              <div class="card__head">
+                <h3 class="card__title">Signed in</h3>
+              </div>
+              <dl class="kv">
+                <div class="kv__row">
+                  <dt>Account</dt>
+                  <dd class="mono" data-field="account_login">…</dd>
                 </div>
+              </dl>
+              <div class="actions">
+                <button
+                  type="button"
+                  class="btn btn--secondary"
+                  data-action="sign-out"
+                >
+                  Sign out
+                </button>
+              </div>
+            </div>
+
+            <!-- State: error -->
+            <div class="card card--error" data-state-account="error" hidden>
+              <div class="card__head">
+                <h3 class="card__title">Sign-in failed</h3>
+              </div>
+              <p class="card__hint" data-field="error">…</p>
+              <div class="actions">
+                <button
+                  type="button"
+                  class="btn btn--primary"
+                  data-action="auth-start"
+                >
+                  Try again
+                </button>
               </div>
             </div>
           </section>

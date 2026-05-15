@@ -26,21 +26,63 @@ import type { DiagnosticsResponse } from "../../src/lib/settings-types"
 
 const TIMEOUT_MS = 5000
 
+/**
+ * GitHub device-flow auth status. Mirrors the contract owned by
+ * the proxy's `/settings/api/auth/github/*` endpoints. Kept in
+ * sync by name — if the backend renames a field, this breaks.
+ */
+export interface AuthStatus {
+  state:
+    | "unauthenticated"
+    | "device_code_issued"
+    | "polling"
+    | "authenticated"
+    | "error"
+  user_code?: string
+  verification_uri?: string
+  expires_at?: string
+  account_login?: string
+  error?: string
+}
+
+export interface AuthSignOutResponse {
+  ok: true
+}
+
 /** Endpoint catalog — adding a new call means adding a member here
  *  plus a `ResponseFor` mapping. Splitting the request shape from
  *  the response type keeps call sites free of an awkward `response`
  *  field while still threading the precise response type through
  *  the generic. Phase 4 (Providers writes) will add `body` here. */
-export type Endpoint = {
-  kind: "diagnostics"
-  method: "GET"
-  path: "/settings/api/diagnostics"
-}
+export type Endpoint =
+  | {
+      kind: "diagnostics"
+      method: "GET"
+      path: "/settings/api/diagnostics"
+    }
+  | {
+      kind: "auth-status"
+      method: "GET"
+      path: "/settings/api/auth/github/status"
+    }
+  | {
+      kind: "auth-start"
+      method: "POST"
+      path: "/settings/api/auth/github/start"
+    }
+  | {
+      kind: "auth-sign-out"
+      method: "POST"
+      path: "/settings/api/auth/github/sign-out"
+    }
 
 export type EndpointKind = Endpoint["kind"]
 
 export interface ResponseFor {
   diagnostics: DiagnosticsResponse
+  "auth-status": AuthStatus
+  "auth-start": AuthStatus
+  "auth-sign-out": AuthSignOutResponse
 }
 
 export interface ApiOptions {
