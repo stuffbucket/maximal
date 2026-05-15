@@ -27,6 +27,8 @@ import {
 import { state } from "~/lib/state"
 import { getGitVersion, shortSha } from "~/lib/version"
 
+import { authRoutes } from "./auth"
+
 /** Captured once at module load. process.uptime() works too, but
  *  this anchors uptime to "when the route module first ran" rather
  *  than "when bun started," which is closer to what users mean by
@@ -80,3 +82,5 @@ settingsApiRoutes.get("/diagnostics", (c) => {
   }
   return c.json(parsed.data)
 })
+
+settingsApiRoutes.route("/auth/github", authRoutes)

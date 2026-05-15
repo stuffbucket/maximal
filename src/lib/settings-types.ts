@@ -60,3 +60,30 @@ export const ApiErrorBody = z.object({
   }),
 })
 export type ApiErrorBody = z.infer<typeof ApiErrorBody>
+
+/** GitHub device-code auth state, exposed by /settings/api/auth/github/*.
+ *
+ *  Lifecycle:
+ *    unauthenticated → device_code_issued → polling → authenticated
+ *                                                   ↘ error
+ *
+ *  Transitions are driven by POST /start (issue), the background
+ *  poller (polling → authenticated|error), and POST /sign-out (reset).
+ *
+ *  The shape mirrors the device-code fields exactly so the shell never
+ *  has to reconstruct the verification URL or guess at expiry. */
+export const AuthStatus = z.object({
+  state: z.enum([
+    "unauthenticated",
+    "device_code_issued",
+    "polling",
+    "authenticated",
+    "error",
+  ]),
+  user_code: z.string().optional(),
+  verification_uri: z.string().optional(),
+  expires_at: z.string().optional(),
+  account_login: z.string().optional(),
+  error: z.string().optional(),
+})
+export type AuthStatus = z.infer<typeof AuthStatus>
