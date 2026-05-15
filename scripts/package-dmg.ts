@@ -91,8 +91,12 @@ function run(
   }
 }
 
-function runCapture(cmd: string, cmdArgs: Array<string>): string {
-  const r = spawnSync(cmd, cmdArgs, { encoding: "utf8" })
+function runCapture(
+  cmd: string,
+  cmdArgs: Array<string>,
+  opts: { cwd?: string } = {},
+): string {
+  const r = spawnSync(cmd, cmdArgs, { encoding: "utf8", cwd: opts.cwd })
   if (r.status !== 0) {
     throw new Error(`${cmd} ${cmdArgs.join(" ")} → exit ${r.status}: ${r.stderr}`)
   }
@@ -100,9 +104,12 @@ function runCapture(cmd: string, cmdArgs: Array<string>): string {
 }
 
 function detectRepo(): string {
-  // git remote get-url origin → https://github.com/<owner>/<name>(.git)
+  // Accepts:
+  //   https://github.com/<owner>/<name>(.git)
+  //   git@github.com:<owner>/<name>(.git)
+  //   git@github.com-<alias>:<owner>/<name>(.git)  ← multi-account SSH aliases
   const url = runCapture("git", ["remote", "get-url", "origin"])
-  const m = url.match(/github\.com[:/]([^/]+\/[^/.]+)/u)
+  const m = url.match(/github\.com(?:-[\w.-]+)?[:/]([^/]+\/[^/.]+)/u)
   if (!m) {
     throw new Error(`could not parse GitHub repo from origin: ${url}`)
   }
@@ -250,8 +257,22 @@ async function main(): Promise<number> {
     fs.renameSync(path.join(release, produced), path.join(release, desired))
   }
 
+  // Belt-and-suspenders: verify the renamed/desired .dmg actually exists
+  // before computing the hash. If create-dmg failed harder than the
+  // codesign warning suggested, surface that explicitly.
+  const dmgPath = path.join(release, desired)
+  if (!fs.existsSync(dmgPath)) {
+    throw new Error(
+      `expected DMG at ${dmgPath} but no file is present. ` +
+        `create-dmg exited ${r.status} earlier — it likely produced nothing usable. ` +
+        `Re-run with --keep-work and inspect dist-build/dmg/.`,
+    )
+  }
+
   console.log("==> Generating SHA-256")
-  const sha = runCapture("shasum", ["-a", "256", desired])
+  // shasum needs to run in `release/` so its output records the bare
+  // filename (matches how `shasum -c` later expects it).
+  const sha = runCapture("shasum", ["-a", "256", desired], { cwd: release })
   fs.writeFileSync(path.join(release, `${desired}.sha256`), sha + "\n")
   console.log(sha)
 

@@ -7,13 +7,14 @@ import { serve } from "srvx"
 import invariant from "tiny-invariant"
 
 import { mergeConfigWithDefaults } from "./lib/config"
+import { readDefaultRecord } from "./lib/github-token-store"
 import { initOpencodeVersion } from "./lib/opencode"
 import { ensurePaths } from "./lib/paths"
 import { initProxyFromEnv } from "./lib/proxy"
 import { ensureSecretsDir, loadSecretIntoEnv, SECRET_DEFS } from "./lib/secrets"
 import { generateEnvScript } from "./lib/shell"
 import { state } from "./lib/state"
-import { logUser, setupCopilotToken, setupGitHubToken } from "./lib/token"
+import { logUser, setupCopilotToken } from "./lib/token"
 import {
   cacheMacMachineId,
   cacheModels,
@@ -147,20 +148,7 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   cacheVsCodeSessionId()
   await cacheVsCodeDeviceId()
 
-  if (options.githubToken) {
-    state.githubToken = options.githubToken
-    consola.info("Using provided GitHub token")
-    await logUser()
-  } else {
-    await setupGitHubToken()
-  }
-
-  await setupCopilotToken()
-  await cacheModels()
-
-  consola.info(
-    `Available models: \n${state.models?.data.map((model) => `- ${model.id}`).join("\n")}`,
-  )
+  await bootstrapUpstream(options.githubToken)
 
   const executorName =
     process.env.OLLAMA_API_KEY ?
@@ -171,7 +159,13 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   const serverUrl = `http://localhost:${options.port}`
 
   if (options.claudeCode) {
-    await runClaudeCodeFlow(serverUrl)
+    if (state.models) {
+      await runClaudeCodeFlow(serverUrl)
+    } else {
+      consola.warn(
+        "--claude-code requires an authenticated session; skipping helper.",
+      )
+    }
   }
 
   consola.box(
@@ -237,6 +231,53 @@ async function runClaudeCodeFlow(serverUrl: string): Promise<void> {
     )
     consola.log(command)
   }
+}
+
+/**
+ * Bring the GitHub Copilot upstream online — but only if we already
+ * have a token. Reads the token from disk (or accepts an explicit
+ * `--github-token` override); never fires the device-code flow on its
+ * own. Errors during Copilot bootstrap are caught: a stale or revoked
+ * token shouldn't keep the HTTP server from binding, since the user
+ * needs the UI up to re-authenticate.
+ */
+async function bootstrapUpstream(
+  githubTokenOverride: string | undefined,
+): Promise<void> {
+  if (githubTokenOverride) {
+    state.githubToken = githubTokenOverride
+    consola.info("Using provided GitHub token")
+  } else {
+    const existing = await readDefaultRecord()
+    if (existing) {
+      state.githubToken = existing.accessToken
+      if (state.showToken) {
+        consola.info("GitHub token:", existing.accessToken)
+      }
+    }
+  }
+
+  if (state.githubToken) {
+    try {
+      await logUser()
+      await setupCopilotToken()
+      await cacheModels()
+      consola.info(
+        `Available models: \n${state.models?.data.map((model) => `- ${model.id}`).join("\n")}`,
+      )
+      return
+    } catch (error) {
+      consola.warn(
+        "GitHub token present but Copilot bootstrap failed; serving in unauthenticated mode.",
+        error,
+      )
+      state.githubToken = undefined
+    }
+  }
+
+  consola.warn(
+    "No GitHub token; proxy is up in unauthenticated mode — sign in via /settings or run `maximal auth`.",
+  )
 }
 
 /** Load file-based provider secrets into process.env. Env still wins;

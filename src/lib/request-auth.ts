@@ -3,16 +3,16 @@ import type { Context, MiddlewareHandler } from "hono"
 import consola from "consola"
 
 import { getConfig } from "./config"
+import { state } from "./state"
 
 interface AuthMiddlewareOptions {
   getApiKeys?: () => Array<string>
   allowUnauthenticatedPaths?: Array<string>
   /**
-   * Path prefixes that bypass auth. Used for static-asset trees served
-   * under a single mount (e.g. `/settings/*` for the settings webview
-   * bundle). Each entry matches `c.req.path === prefix` or
-   * `c.req.path.startsWith(prefix + "/")`. Keep this list small — every
-   * entry is an auth-bypass surface.
+   * Path prefixes that bypass auth. Used by the static settings bundle
+   * at /settings/* (which has many hashed asset URLs). Data endpoints
+   * under /settings/api/* are NOT in this list — they're auth-gated like
+   * everything else.
    */
   allowUnauthenticatedPrefixes?: Array<string>
   allowOptionsBypass?: boolean
@@ -129,10 +129,11 @@ export function createAuthMiddleware(
       return next()
     }
 
+    // Path-boundary aware: prefix "/settings" matches "/settings",
+    // "/settings/" and "/settings/foo", but NOT "/settings-other".
     if (
       allowUnauthenticatedPrefixes.some(
-        (prefix) =>
-          c.req.path === prefix || c.req.path.startsWith(`${prefix}/`),
+        (p) => c.req.path === p || c.req.path.startsWith(p + "/"),
       )
     ) {
       return next()
@@ -161,4 +162,25 @@ export function createAuthMiddleware(
 
     return next()
   }
+}
+
+/**
+ * Gate for routes that forward to the GitHub Copilot upstream. Orthogonal
+ * to {@link createAuthMiddleware} (which validates the *client's* API key);
+ * this one short-circuits when the proxy itself has no GitHub token to
+ * forward with. Lets the HTTP server come up in "unauthenticated mode"
+ * (settings + diagnostics still reachable) without the Tauri shell
+ * needing to handshake the device-code flow before port 4142 listens.
+ */
+export const requireGithubAuth: MiddlewareHandler = async (c, next) => {
+  if (state.githubToken) {
+    return next()
+  }
+  return c.json(
+    {
+      error: "not_authenticated",
+      hint: "Open Settings → Account to sign in, or run `maximal auth`.",
+    },
+    401,
+  )
 }

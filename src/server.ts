@@ -4,7 +4,7 @@ import { cors } from "hono/cors"
 import { logger } from "hono/logger"
 
 import { staleRefreshMiddleware } from "./lib/refresh-models"
-import { createAuthMiddleware } from "./lib/request-auth"
+import { createAuthMiddleware, requireGithubAuth } from "./lib/request-auth"
 import { getModelsLoadedAtMs } from "./lib/state"
 import { traceIdMiddleware } from "./lib/trace"
 import { cacheModels } from "./lib/utils"
@@ -59,14 +59,6 @@ server.use(
       "/_debug/state",
       "/setup-status",
     ],
-    // The settings webview (served at /settings) and its static assets
-    // under /settings/* mirror the /usage-viewer pattern: a local Tauri
-    // window that loads from the proxy. Auth bypass is for the asset
-    // bundle only — future settings *data* endpoints (PATCH /config,
-    // /secrets, etc.) live at their own top-level paths and pick up
-    // auth from the normal middleware (with loopback exemptions if
-    // they need them, same as /usage).
-    allowUnauthenticatedPrefixes: ["/settings"],
     // The dashboard at /usage-viewer fetches these endpoints from the
     // same machine. Trusting loopback lets us drop the client-side API
     // key UI (and its clear-text storage) without exposing the same
@@ -115,12 +107,27 @@ server.get("/vendor/tailwind.min.js", async (c) =>
 
 server.route("/_debug", debugRoutes)
 server.route("/setup-status", setupStatusRoute)
-// `/settings/api/*` is intentionally NOT added to allowUnauthenticatedPaths
-// above — every data endpoint requires the standard auth middleware.
-// The static bundle's `/settings/*` paths can live in the unauth allowlist
-// without weakening `/settings/api/*`.
+// `/settings/api/*` requires API-key auth (covers the new auth endpoints too).
+// `/settings/*` static bundle inherits whatever its route handler enforces.
 server.route("/settings/api", settingsApiRoutes)
 server.route("/settings", settingsRoutes)
+
+// Gate every upstream-touching route on the presence of a GitHub token.
+// When the sidecar boots without one, the HTTP server still listens (so
+// the Tauri shell can load Settings and trigger auth on demand) but the
+// proxy endpoints 401 with `not_authenticated` instead of crashing or
+// firing the device-code flow.
+server.use("/chat/completions", requireGithubAuth)
+server.use("/chat/completions/*", requireGithubAuth)
+server.use("/models", requireGithubAuth)
+server.use("/models/*", requireGithubAuth)
+server.use("/embeddings", requireGithubAuth)
+server.use("/embeddings/*", requireGithubAuth)
+server.use("/responses", requireGithubAuth)
+server.use("/responses/*", requireGithubAuth)
+server.use("/v1/*", requireGithubAuth)
+server.use("/:provider/v1/*", requireGithubAuth)
+
 server.route("/chat/completions", completionRoutes)
 server.route("/models", modelRoutes)
 server.route("/embeddings", embeddingRoutes)
