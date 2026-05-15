@@ -149,7 +149,13 @@ async function reverseProxyToVite(
 
 export const settingsRoutes = new Hono()
 
-const isDev = process.env.NODE_ENV !== "production"
+// Presence of a real bundled dist is the primary signal that we're not
+// in dev mode — more reliable than NODE_ENV, which Tauri-packaged .apps
+// don't set. NODE_ENV is still respected as an explicit override (set it
+// to "production" to force-disable the Vite reverse-proxy fallback).
+const hasBundledDist = SETTINGS_DIST_DIR !== null
+const nodeEnvIsProd = process.env.NODE_ENV === "production"
+const isDev = !nodeEnvIsProd && !hasBundledDist
 
 // Single shared handler — serves `/settings`, `/settings/`, and any
 // asset under `/settings/<rest>`. Hono's `c.req.path` is the full mount

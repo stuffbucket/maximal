@@ -193,11 +193,29 @@ fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
     // tauri.conf.json and resolves the arch-suffixed binary
     // (binaries/maximal-aarch64-apple-darwin etc.) at build time.
     let port = SIDECAR_PORT.to_string();
-    let cmd = app
+    let mut cmd = app
         .shell()
         .sidecar("maximal")
         .map_err(|e| tauri::Error::Anyhow(e.into()))?
         .args(["start", "--port", port.as_str()]);
+
+    // Packaged builds: tell the proxy to skip its dev-mode Vite
+    // reverse-proxy and serve the bundled settings UI from
+    // <resource_dir>/settings-dist (mapped in tauri.conf.json from
+    // ../dist to avoid the `_up_` escape Tauri applies to `..`).
+    // The route also checks for a real dist directory as a backstop,
+    // but setting NODE_ENV=production removes any ambiguity inside
+    // a Tauri-launched sidecar.
+    cmd = cmd.env("NODE_ENV", "production");
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let settings_dist = resource_dir.join("settings-dist");
+        if settings_dist.exists() {
+            cmd = cmd.env(
+                "MAXIMAL_SETTINGS_DIST",
+                settings_dist.to_string_lossy().to_string(),
+            );
+        }
+    }
 
     let (mut rx, child) = cmd
         .spawn()
