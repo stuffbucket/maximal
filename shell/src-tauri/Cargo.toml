@@ -15,10 +15,24 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 # `tray-icon` feature gives us TrayIconBuilder; default features bring
 # in the menu/window APIs we use below.
-tauri = { version = "2", features = ["tray-icon", "macos-private-api"] }
+# `image-png` enables `Image::from_bytes` for the embedded tray-icon
+# PNGs we swap on state transitions.
+tauri = { version = "2", features = ["tray-icon", "macos-private-api", "image-png"] }
 tauri-plugin-opener = "2"
 # `tauri-plugin-shell` provides the sidecar spawn API that uses the
 # arch-suffixed binaries declared in bundle.externalBin.
 tauri-plugin-shell = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Polls the sidecar's /setup-status endpoint to drive tray state.
+# rustls-tls keeps us off OpenSSL; we only talk to 127.0.0.1 but
+# reqwest still wants a TLS backend feature.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# `tokio::time::sleep` for the polling loop. Tauri already pulls
+# tokio in transitively (its `async_runtime` is built on it); the
+# direct dep here is just so we can name `tokio::time` without
+# relying on private re-exports.
+tokio = { version = "1", features = ["time"] }
+# Url parsing for WebviewUrl::External(...) — the settings deep-link
+# url builder.
+url = "2"

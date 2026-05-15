@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!--
+    Tray icon — normal state.
+    Squircle "m" matches the app icon (build/macos/app-icon.svg).
+    Sized for menubar use (renders at ~22pt on macOS). Stays full-color
+    on purpose: macOS template-image behavior is opt-in via a special
+    NSImage name suffix Tauri doesn't expose, so we ship a colored asset
+    and let the OS handle dark/light backgrounds.
+  -->
+  <rect x="6" y="6" width="52" height="52" rx="12" ry="12" fill="#c8334a"/>
+  <text x="32" y="48"
+        font-family="-apple-system, Helvetica, sans-serif"
+        font-weight="900"
+        font-size="44"
+        fill="#f4ead4"
+        text-anchor="middle">m</text>
+</svg>
