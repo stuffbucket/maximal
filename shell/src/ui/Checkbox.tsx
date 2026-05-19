@@ -1,7 +1,7 @@
 // vendored: controlled native checkbox with disabled support.
 import type { InputHTMLAttributes } from "react";
 
-export interface CheckboxProps
+interface CheckboxProps
   extends Omit<InputHTMLAttributes<HTMLInputElement>, "type" | "checked" | "onChange"> {
   checked: boolean;
   onCheckedChange: (next: boolean) => void;

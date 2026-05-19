@@ -5,7 +5,7 @@ import { Td, Tr } from "../../ui/Table";
 import { cx } from "../../ui/cx";
 import type { MutationResult } from "./useApiKeys";
 
-export interface NewKeyRowProps {
+interface NewKeyRowProps {
   selectMode: boolean;
   /** Returns the create result so the parent can decide whether to
    *  remount this row (bump newRowKey) on success. */

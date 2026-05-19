@@ -15,7 +15,7 @@ import { humanize } from "./humanize";
  * successful mutation — there's no optimistic update; the wire is
  * fast enough on loopback that the resulting flicker is negligible.
  */
-export interface UseApiKeys {
+interface UseApiKeys {
   entries: Array<ApiKeyEntry>;
   enforcing: boolean;
   isLoading: boolean;

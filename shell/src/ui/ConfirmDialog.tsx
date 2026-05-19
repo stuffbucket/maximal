@@ -1,6 +1,6 @@
 import { useEffect, useRef, type ReactNode } from "react";
 
-export interface ConfirmDialogProps {
+interface ConfirmDialogProps {
   open: boolean;
   title: string;
   body: ReactNode;

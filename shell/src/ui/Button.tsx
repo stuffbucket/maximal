@@ -2,10 +2,10 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { cx } from "./cx";
 
-export type ButtonVariant = "primary" | "secondary" | "ghost" | "destructive";
-export type ButtonSize = "md" | "sm";
+type ButtonVariant = "primary" | "secondary" | "ghost" | "destructive";
+type ButtonSize = "md" | "sm";
 
-export interface ButtonProps
+interface ButtonProps
   extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "type"> {
   variant?: ButtonVariant;
   size?: ButtonSize;

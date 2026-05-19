@@ -1,7 +1,7 @@
 // vendored: controlled toggle wrapping the .switch checkbox in styles.css.
 import { cx } from "./cx";
 
-export interface SwitchProps {
+interface SwitchProps {
   checked: boolean;
   onCheckedChange: (next: boolean) => void;
   label?: string;

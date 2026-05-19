@@ -4,7 +4,7 @@ import { cx } from "../../ui/cx";
 import type { ApiKeyEntry } from "../../../../src/lib/settings-types";
 import type { MutationResult } from "./useApiKeys";
 
-export interface WildcardRowProps {
+interface WildcardRowProps {
   entry: ApiKeyEntry | null;
   selectMode: boolean;
   create: (input: {

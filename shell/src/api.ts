@@ -65,7 +65,7 @@ export interface ActiveApiClient {
   ageSeconds: number
 }
 
-export interface ActiveApiClientsResponse {
+interface ActiveApiClientsResponse {
   clients: Array<ActiveApiClient>
   total: number
 }

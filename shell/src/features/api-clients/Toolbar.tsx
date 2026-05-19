@@ -1,7 +1,7 @@
 import { Button } from "../../ui/Button";
 import { Switch } from "../../ui/Switch";
 
-export interface ToolbarProps {
+interface ToolbarProps {
   selectMode: boolean;
   selectedCount: number;
   onSelectModeChange: (next: boolean) => void;
