@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Tray + dashboard window permissions",
-  "windows": ["dashboard"],
+  "description": "Tray + settings/dashboard window permissions",
+  "windows": ["settings", "dashboard"],
   "permissions": [
     "core:default",
     "core:webview:allow-create-webview-window",

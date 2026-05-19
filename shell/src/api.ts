@@ -22,7 +22,11 @@
  * so we don't need to refactor call sites then.
  */
 
-import type { DiagnosticsResponse } from "../../src/lib/settings-types"
+import type {
+  ApiKeyEntry,
+  ApiKeysListResponse,
+  DiagnosticsResponse,
+} from "../../src/lib/settings-types"
 
 const TIMEOUT_MS = 5000
 
@@ -45,8 +49,25 @@ export interface AuthStatus {
   error?: string
 }
 
-export interface AuthSignOutResponse {
+interface AuthSignOutResponse {
   ok: true
+}
+
+/**
+ * Active API clients (last-seen within a recency window). Contract is
+ * jointly owned with `/settings/api/clients` on the proxy side; if the
+ * server-side route ships under a different shape, update both ends.
+ */
+export interface ActiveApiClient {
+  key: string
+  label: string
+  userAgent: string
+  ageSeconds: number
+}
+
+export interface ActiveApiClientsResponse {
+  clients: Array<ActiveApiClient>
+  total: number
 }
 
 /** Endpoint catalog — adding a new call means adding a member here
@@ -54,7 +75,7 @@ export interface AuthSignOutResponse {
  *  the response type keeps call sites free of an awkward `response`
  *  field while still threading the precise response type through
  *  the generic. Phase 4 (Providers writes) will add `body` here. */
-export type Endpoint =
+type Endpoint =
   | {
       kind: "diagnostics"
       method: "GET"
@@ -75,24 +96,56 @@ export type Endpoint =
       method: "POST"
       path: "/settings/api/auth/github/sign-out"
     }
+  | {
+      kind: "api-keys-list"
+      method: "GET"
+      path: "/settings/api/api-keys"
+    }
+  | {
+      kind: "api-keys-create"
+      method: "POST"
+      path: "/settings/api/api-keys"
+      body: { label: string; key?: string; enabled?: boolean }
+    }
+  | {
+      kind: "api-keys-update"
+      method: "PATCH"
+      path: `/settings/api/api-keys/${string}`
+      body: { label?: string; key?: string; enabled?: boolean }
+    }
+  | {
+      kind: "api-keys-delete"
+      method: "DELETE"
+      path: `/settings/api/api-keys/${string}`
+    }
+  | {
+      kind: "active-clients"
+      method: "GET"
+      path: `/settings/api/clients?maxAgeSeconds=${number}`
+    }
 
-export type EndpointKind = Endpoint["kind"]
+type EndpointKind = Endpoint["kind"]
 
-export interface ResponseFor {
+interface ResponseFor {
   diagnostics: DiagnosticsResponse
   "auth-status": AuthStatus
   "auth-start": AuthStatus
   "auth-sign-out": AuthSignOutResponse
+  "api-keys-list": ApiKeysListResponse
+  "api-keys-create": ApiKeyEntry
+  "api-keys-update": ApiKeyEntry
+  "api-keys-delete": { ok: true }
+  "active-clients": ActiveApiClientsResponse
 }
 
-export interface ApiOptions {
+interface ApiOptions {
   /** Optional override (tests). Defaults to AbortController + 5s. */
   signal?: AbortSignal
   /** Override the API key resolver (tests). */
   apiKey?: string
 }
 
-export type ApiResult<T> =
+type ApiResult<T> =
   | { ok: true; data: T }
   | { ok: false; status: number; error: string }
 
@@ -129,10 +182,23 @@ export async function apiCall<K extends EndpointKind>(
   const apiKey = resolveApiKey(options.apiKey)
   if (apiKey) headers["x-api-key"] = apiKey
 
+  // Discriminated-union members carry an optional `body` field on
+  // mutating endpoints. JSON-encode it and set the content-type. We
+  // can't widen the function signature to take a `body` second arg
+  // without making non-body endpoints awkward, so the body travels
+  // on the endpoint descriptor itself.
+  let bodyText: string | undefined
+  const maybeBody = (endpoint as { body?: unknown }).body
+  if (maybeBody !== undefined) {
+    bodyText = JSON.stringify(maybeBody)
+    headers["content-type"] = "application/json"
+  }
+
   try {
     const res = await fetch(`${baseUrl()}${endpoint.path}`, {
       method: endpoint.method,
       headers,
+      body: bodyText,
       signal,
     })
     if (!res.ok) {
@@ -142,6 +208,12 @@ export async function apiCall<K extends EndpointKind>(
         status: res.status,
         error: text || `HTTP ${res.status}`,
       }
+    }
+    // 204 No Content (delete) — no JSON to parse. The endpoint catalog
+    // declares its response type as `{ ok: true }` so the call site
+    // can treat success uniformly.
+    if (res.status === 204) {
+      return { ok: true, data: { ok: true } as ResponseFor[K] }
     }
     const data = (await res.json()) as ResponseFor[K]
     return { ok: true, data }

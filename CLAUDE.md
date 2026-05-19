@@ -34,10 +34,36 @@ bun run mutate       # Stryker; configure module under test in stryker.conf.*
 bun run release      # cut a release (publishes artifacts)
 
 # Tauri app (menu-bar shell wrapping the proxy as a sidecar on :4142)
-bun run app:sidecar  # build standalone proxy binary into shell/src-tauri/binaries/
-bun run app:dev      # build sidecar + tauri dev (hot-reload)
-bun run app:build    # build sidecar + tauri build --bundles app,dmg
+bun run app:setup    # one-time: install shell deps + force-build sidecar binary
+bun run app:sidecar  # rebuild standalone proxy binary into shell/src-tauri/binaries/
+                     # (no-op when binary is newer than src/; override with --force
+                     # or MAXIMAL_FORCE_SIDECAR=1 — release pipelines must set it)
+bun run app:dev      # build sidecar (if stale) + tauri dev (hot-reload)
+bun run app:ui       # UI-only iteration: Vite alone at :1420. Run `bun run dev`
+                     # in another terminal so the UI's API calls (which target
+                     # :4142 in DEV mode) hit a live proxy. Far faster than
+                     # spinning the whole Tauri shell for HTML/CSS tweaks.
+bun run app:build    # force-rebuild sidecar + tauri build --bundles app,dmg
 ```
+
+### Fast UI iteration
+
+For HTML/CSS/TS changes under `shell/src/`, **do not** run `app:dev`. The
+sidecar binary is a 66 MB Bun compile (~30–90s) and Vite already does
+HMR for the UI. Instead:
+
+```sh
+# Terminal A — proxy with file watch, bound to :4142 (matches shell/src/api.ts DEV branch).
+bun run dev -- start --port 4142
+
+# Terminal B — Vite for the settings UI.
+bun run app:ui
+# Open http://localhost:1420/settings/
+```
+
+`shell/src/main.ts`'s `safeInvoke()` already swallows Tauri-only `invoke()`
+calls when running in a plain browser, so the "Reveal in Finder" buttons
+no-op gracefully — everything else works.
 
 ## Architecture
 
@@ -97,6 +123,7 @@ This is a local proxy that exposes the GitHub Copilot API as both an OpenAI-comp
 This repo can collide on a shared working tree (lint-staged stash + concurrent merge ate a turn already). For parallel agents:
 - **Spawned subagents:** pass `isolation: "worktree"` to the Agent tool.
 - **Sessions:** create a worktree manually with `git worktree add ../maximal-<task> -b agent/<task>`; clean up with `git worktree remove ../maximal-<task>` after merging back.
+- **Never run `git stash pop` in a shared working tree.** It silently merges another in-flight worker's stash into your tree, and on conflict it leaves an inconsistent state that's easy to "clean up" by `rm`-ing files that aren't yours. We lost a session's worth of React-shell work to this exact path: a subagent ran `git stash pop` to bisect a test failure, hit a conflict, and `rm`'d untracked files it didn't recognize. If you need an isolated bisect, use a worktree (see above). If you must inspect a stash, use `git stash show -p stash@{N}` (read-only) and never `pop` / `apply` outside an isolated tree.
 
 See also: `docs/codegen-feedback-loops-practices.md` → Dispatch and review loops.
 

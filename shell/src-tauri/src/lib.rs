@@ -21,16 +21,44 @@
 // /usage-viewer endpoint is reachable directly via the browser, and
 // the `open_settings_at` Tauri command (or the tray's Settings… item)
 // pops a webview window pointed at the sidecar's settings page.
+//
+// Window lifecycle / activation policy / quit flow
+// -------------------------------------------------
+// This is fundamentally a menu-bar app. The macOS Dock icon comes and
+// goes with window visibility:
+//   * Launch                       → ActivationPolicy::Accessory  (no Dock)
+//   * Any Settings/Dashboard shown → ActivationPolicy::Regular    (Dock on)
+//   * Last one hidden              → ActivationPolicy::Accessory
+// The OS close button (red ✕) HIDES the Settings/Dashboard window rather
+// than closing it — the tray stays alive. `update_activation_policy`
+// is the single point of truth and is called from every show/hide path.
+//
+// Quit flow:
+//   1. Tray "Quit Maximal" fires `menu_id::QUIT`.
+//   2. If a Settings or Dashboard window is visible, we emit
+//      `app://quit-requested` to it. The React UI listens and shows a
+//      QuitConfirmDialog.
+//   3. If neither window is visible, we open the Dashboard, wait for
+//      `tauri://load-end`, then emit `app://quit-requested`.
+//   4. User clicks "Quit Maximal" in the modal → `invoke('confirm_quit')`
+//      → kills the sidecar and exits. Cancel just closes the modal
+//      locally; no IPC needed.
+//
+// Event/command contract for the React side:
+//   Event   : "app://quit-requested"          (Rust → JS)
+//   Command : invoke('confirm_quit')          (JS → Rust)
 
 use std::sync::Mutex;
 use std::time::Duration;
+use std::path::PathBuf;
 
 use serde::Deserialize;
 use tauri::{
     image::Image,
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder,
+    AppHandle, Emitter, Listener, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder,
+    WindowEvent,
 };
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
@@ -45,7 +73,14 @@ use tauri_plugin_shell::ShellExt;
 const SIDECAR_PORT: u16 = 4142;
 
 const TRAY_ID: &str = "main";
-const SETTINGS_WINDOW_LABEL: &str = "dashboard";
+// Two webview windows, both pointed at the sidecar:
+//   settings  — http://localhost:4142/settings (config UI bundled in Tauri)
+//   dashboard — http://localhost:4142/usage-viewer (usage charts; html
+//               embedded directly into the sidecar binary via Bun import
+//               attributes — see src/server.ts).
+// Labels are referenced from capabilities/default.json `windows`.
+const SETTINGS_WINDOW_LABEL: &str = "settings";
+const DASHBOARD_WINDOW_LABEL: &str = "dashboard";
 
 // Tray icon assets — embedded at compile time so we don't have to
 // resolve resource paths at runtime. The PNGs are canonical bytes;
@@ -58,6 +93,7 @@ const TRAY_ICON_ATTENTION: &[u8] = include_bytes!("../icons/tray/icon-attention.
 
 mod menu_id {
     pub const SETTINGS: &str = "settings";
+    pub const DASHBOARD: &str = "dashboard";
     pub const QUIT: &str = "quit";
     pub const SIGN_IN: &str = "sign_in";
     pub const ACCOUNT_INFO: &str = "account_info";
@@ -150,8 +186,22 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .manage(Sidecar::new())
         .manage(AppStatus::new())
-        .invoke_handler(tauri::generate_handler![open_settings_at])
+        .invoke_handler(tauri::generate_handler![
+            open_settings_at,
+            open_dashboard,
+            reveal_config_dir,
+            reveal_logs_dir,
+            confirm_quit,
+        ])
         .setup(|app| {
+            // Menu-bar app: start with no Dock icon. update_activation_policy
+            // will flip to Regular when a Settings/Dashboard window becomes
+            // visible, and back to Accessory when the last one hides.
+            #[cfg(target_os = "macos")]
+            {
+                let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            }
+
             // Install the tray FIRST so the user has a Quit affordance
             // before the sidecar's spawn even returns. Any failure
             // downstream still leaves a clickable menubar.
@@ -188,6 +238,34 @@ pub fn run() {
     });
 }
 
+/// Walk up from the current executable (and the CWD as a backstop)
+/// looking for `shell/dist/index.html`. Used in `tauri dev` where
+/// Tauri does not materialise the `resources` mapping. Returns the
+/// absolute path of the dist directory or None.
+fn locate_dev_settings_dist() -> Option<PathBuf> {
+    let mut roots: Vec<PathBuf> = Vec::new();
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            roots.push(parent.to_path_buf());
+        }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        roots.push(cwd);
+    }
+    for mut dir in roots {
+        for _ in 0..8 {
+            let candidate = dir.join("shell").join("dist");
+            if candidate.join("index.html").exists() {
+                return Some(candidate);
+            }
+            if !dir.pop() {
+                break;
+            }
+        }
+    }
+    None
+}
+
 fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
     // sidecar("maximal") looks up `bundle.externalBin[0]` from
     // tauri.conf.json and resolves the arch-suffixed binary
@@ -207,12 +285,32 @@ fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
     // but setting NODE_ENV=production removes any ambiguity inside
     // a Tauri-launched sidecar.
     cmd = cmd.env("NODE_ENV", "production");
+    let mut dist_set = false;
     if let Ok(resource_dir) = app.path().resource_dir() {
         let settings_dist = resource_dir.join("settings-dist");
         if settings_dist.exists() {
             cmd = cmd.env(
                 "MAXIMAL_SETTINGS_DIST",
                 settings_dist.to_string_lossy().to_string(),
+            );
+            dist_set = true;
+        }
+    }
+    // `tauri dev` doesn't materialise the `resources` mapping from
+    // tauri.conf.json — that's a bundler step. So the resource_dir
+    // lookup above misses, and the Bun-compiled sidecar can't walk
+    // for `shell/dist/` either (its `import.meta.dir` resolves into
+    // the embedded `$bunfs` virtual FS, not the host disk). Without
+    // an explicit pointer, every request to /settings would 503 from
+    // the dev-mode Vite fallback. Walk a few likely dev locations
+    // relative to the current exe and the cwd as a safety net.
+    if !dist_set {
+        if let Some(dir) = locate_dev_settings_dist() {
+            eprintln!("[shell] using dev settings-dist: {}", dir.display());
+            cmd = cmd.env("MAXIMAL_SETTINGS_DIST", dir.to_string_lossy().to_string());
+        } else {
+            eprintln!(
+                "[shell] WARNING: no settings-dist found; sidecar will 503 on /settings"
             );
         }
     }
@@ -416,6 +514,13 @@ fn build_menu(app: &AppHandle, state: SidecarState) -> tauri::Result<Menu<tauri:
         true,
         Some("CmdOrCtrl+,"),
     )?;
+    let dashboard_item = MenuItem::with_id(
+        app,
+        menu_id::DASHBOARD,
+        "Dashboard…",
+        true,
+        Some("CmdOrCtrl+D"),
+    )?;
     let quit_item = MenuItem::with_id(
         app,
         menu_id::QUIT,
@@ -465,6 +570,7 @@ fn build_menu(app: &AppHandle, state: SidecarState) -> tauri::Result<Menu<tauri:
                 &[
                     &sign_in,
                     &sep1,
+                    &dashboard_item,
                     &settings_item,
                     &sep2,
                     &reveal_config,
@@ -507,6 +613,7 @@ fn build_menu(app: &AppHandle, state: SidecarState) -> tauri::Result<Menu<tauri:
                 &[
                     &info,
                     &sep1,
+                    &dashboard_item,
                     &settings_item,
                     &sep2,
                     &reveal_config,
@@ -542,10 +649,11 @@ fn build_menu(app: &AppHandle, state: SidecarState) -> tauri::Result<Menu<tauri:
 fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
     match event.id().as_ref() {
         menu_id::SETTINGS => open_settings_window(app, None),
+        menu_id::DASHBOARD => open_dashboard_window(app),
         menu_id::SIGN_IN => open_settings_window(app, Some("account")),
-        menu_id::REVEAL_CONFIG => reveal_app_dir(app),
-        menu_id::REVEAL_LOGS | menu_id::SHOW_LOGS => reveal_logs_dir(app),
-        menu_id::QUIT => app.exit(0),
+        menu_id::REVEAL_CONFIG => do_reveal_config_dir(app),
+        menu_id::REVEAL_LOGS | menu_id::SHOW_LOGS => do_reveal_logs_dir(app),
+        menu_id::QUIT => request_quit(app),
         _ => {}
     }
 }
@@ -554,9 +662,20 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
 /// settings page. The optional `section` becomes a URL fragment so the
 /// frontend can scroll to / select that section.
 fn open_settings_window(app: &AppHandle, section: Option<&str>) {
+    // In debug builds the `beforeDevCommand` in tauri.conf.json starts
+    // Vite on :1420, so we point the webview directly at it. That
+    // gives us native HMR (no proxy WebSocket gymnastics) and exposes
+    // vite-plugin-inspect at /settings/__inspect/. Release builds use
+    // the sidecar's bundled `/settings` route on :4142, which serves
+    // the pre-built dist statically.
+    let settings_origin = if cfg!(debug_assertions) {
+        "http://localhost:1420".to_string()
+    } else {
+        format!("http://localhost:{SIDECAR_PORT}")
+    };
     let url_string = match section {
-        Some(s) => format!("http://localhost:{SIDECAR_PORT}/settings#{s}"),
-        None => format!("http://localhost:{SIDECAR_PORT}/settings"),
+        Some(s) => format!("{settings_origin}/settings/#{s}"),
+        None => format!("{settings_origin}/settings/"),
     };
     let url = match url::Url::parse(&url_string) {
         Ok(u) => u,
@@ -575,6 +694,7 @@ fn open_settings_window(app: &AppHandle, section: Option<&str>) {
         if let Err(err) = existing.navigate(url) {
             eprintln!("[shell] settings navigate failed: {err}");
         }
+        update_activation_policy(app);
         return;
     }
 
@@ -587,12 +707,18 @@ fn open_settings_window(app: &AppHandle, section: Option<&str>) {
     .inner_size(900.0, 640.0)
     .min_inner_size(600.0, 480.0);
 
-    if let Err(err) = builder.build() {
-        eprintln!("[shell] settings window build failed: {err}");
+    match builder.build() {
+        Ok(window) => {
+            attach_hide_on_close(app, &window);
+            update_activation_policy(app);
+        }
+        Err(err) => {
+            eprintln!("[shell] settings window build failed: {err}");
+        }
     }
 }
 
-fn reveal_app_dir(app: &AppHandle) {
+fn do_reveal_config_dir(app: &AppHandle) {
     let Ok(home) = app.path().home_dir() else {
         return;
     };
@@ -600,7 +726,7 @@ fn reveal_app_dir(app: &AppHandle) {
     let _ = app.opener().open_path(dir.to_string_lossy(), None::<&str>);
 }
 
-fn reveal_logs_dir(app: &AppHandle) {
+fn do_reveal_logs_dir(app: &AppHandle) {
     let Ok(home) = app.path().home_dir() else {
         return;
     };
@@ -609,7 +735,148 @@ fn reveal_logs_dir(app: &AppHandle) {
         .join("share")
         .join("maximal")
         .join("logs");
+    // Sidecar creates this lazily on first request log. Create it
+    // here so the menu item always lands somewhere, even on first
+    // boot before any request has been served.
+    if let Err(err) = std::fs::create_dir_all(&dir) {
+        eprintln!("[shell] could not create logs dir {dir:?}: {err}");
+    }
     let _ = app.opener().open_path(dir.to_string_lossy(), None::<&str>);
+}
+
+/// Opens (or focuses) the usage dashboard webview pointed at the
+/// sidecar's `/usage-viewer` endpoint. The HTML + vendored JS for the
+/// dashboard are embedded directly into the sidecar binary via Bun's
+/// import-attribute file loader (see src/server.ts), so the dashboard
+/// ships inside the Tauri bundle with no extra resource staging.
+fn open_dashboard_window(app: &AppHandle) {
+    let url_string = format!(
+        "http://localhost:{SIDECAR_PORT}/usage-viewer\
+         ?endpoint=http://localhost:{SIDECAR_PORT}/usage",
+    );
+    let url = match url::Url::parse(&url_string) {
+        Ok(u) => u,
+        Err(err) => {
+            eprintln!("[shell] bad dashboard URL: {err}");
+            return;
+        }
+    };
+
+    if let Some(existing) = app.get_webview_window(DASHBOARD_WINDOW_LABEL) {
+        let _ = existing.show();
+        let _ = existing.set_focus();
+        update_activation_policy(app);
+        return;
+    }
+
+    let builder = WebviewWindowBuilder::new(
+        app,
+        DASHBOARD_WINDOW_LABEL,
+        WebviewUrl::External(url),
+    )
+    .title("Maximal — Dashboard")
+    .inner_size(1100.0, 760.0)
+    .min_inner_size(720.0, 520.0);
+
+    match builder.build() {
+        Ok(window) => {
+            attach_hide_on_close(app, &window);
+            update_activation_policy(app);
+        }
+        Err(err) => {
+            eprintln!("[shell] dashboard window build failed: {err}");
+        }
+    }
+}
+
+/// Wires the OS close button (red ✕ on macOS) to HIDE the window
+/// rather than close it. The tray remains the persistent UI surface,
+/// so closing a settings/dashboard window is just a visibility change.
+/// Also drives the Dock icon via `update_activation_policy`.
+fn attach_hide_on_close(app: &AppHandle, window: &tauri::WebviewWindow) {
+    let window_clone = window.clone();
+    let app_clone = app.clone();
+    window.on_window_event(move |event| {
+        if let WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            let _ = window_clone.hide();
+            update_activation_policy(&app_clone);
+        }
+    });
+}
+
+/// macOS-only: flips the activation policy between Regular (Dock icon
+/// visible) and Accessory (menu-bar-only, no Dock) based on whether
+/// any of our managed webview windows are currently visible.
+///
+/// On Windows/Linux this is a no-op — there is no equivalent concept.
+#[cfg(target_os = "macos")]
+fn update_activation_policy(app: &AppHandle) {
+    let labels = [SETTINGS_WINDOW_LABEL, DASHBOARD_WINDOW_LABEL];
+    let any_visible = labels.iter().any(|label| {
+        app.get_webview_window(label)
+            .and_then(|w| w.is_visible().ok())
+            .unwrap_or(false)
+    });
+    let next = if any_visible {
+        tauri::ActivationPolicy::Regular
+    } else {
+        tauri::ActivationPolicy::Accessory
+    };
+    if let Err(err) = app.set_activation_policy(next) {
+        eprintln!("[shell] set_activation_policy failed: {err}");
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn update_activation_policy(_app: &AppHandle) {}
+
+/// Event emitted from Rust to the React UI to ask for a quit
+/// confirmation. The React side listens with
+/// `listen('app://quit-requested', ...)` and pops a QuitConfirmDialog.
+/// User confirmation routes back through the `confirm_quit` command.
+const QUIT_REQUESTED_EVENT: &str = "app://quit-requested";
+
+/// Entry point for the tray's "Quit Maximal" item. Picks a host window
+/// for the confirmation dialog:
+///   * If Settings or Dashboard is currently visible → emit the event
+///     to it directly.
+///   * Otherwise → open the Dashboard, then emit once it has loaded.
+fn request_quit(app: &AppHandle) {
+    // Prefer Settings if it's already visible, then Dashboard.
+    for label in [SETTINGS_WINDOW_LABEL, DASHBOARD_WINDOW_LABEL] {
+        if let Some(win) = app.get_webview_window(label) {
+            if win.is_visible().unwrap_or(false) {
+                if let Err(err) = app.emit_to(label, QUIT_REQUESTED_EVENT, ()) {
+                    eprintln!("[shell] emit quit-requested to {label} failed: {err}");
+                }
+                let _ = win.set_focus();
+                return;
+            }
+        }
+    }
+
+    // No visible host. Open the Dashboard and emit once it signals
+    // load-end. If the UI never loads, the user can re-trigger Quit
+    // from the tray (or kill the process); we don't add a timeout
+    // fallback to silently exit, since that would mask real failures.
+    open_dashboard_window(app);
+    let Some(window) = app.get_webview_window(DASHBOARD_WINDOW_LABEL) else {
+        eprintln!("[shell] could not obtain dashboard window for quit prompt");
+        return;
+    };
+    let _ = window.show();
+    let _ = window.set_focus();
+    update_activation_policy(app);
+
+    let app_clone = app.clone();
+    window.once("tauri://load-end", move |_| {
+        if let Err(err) =
+            app_clone.emit_to(DASHBOARD_WINDOW_LABEL, QUIT_REQUESTED_EVENT, ())
+        {
+            eprintln!("[shell] emit quit-requested (post-load) failed: {err}");
+        }
+    });
 }
 
 /// Tauri command exposed to the frontend.
@@ -626,4 +893,32 @@ fn open_settings_at(app: AppHandle, section: String) {
         Some(section_trimmed)
     };
     open_settings_window(&app, section_opt);
+}
+
+/// Tauri command — open (or focus) the usage dashboard.
+#[tauri::command]
+fn open_dashboard(app: AppHandle) {
+    open_dashboard_window(&app);
+}
+
+/// Tauri command — reveal the maximal config directory in Finder/Explorer.
+/// Wired to the "Reveal config" button in the Settings footer.
+#[tauri::command]
+fn reveal_config_dir(app: AppHandle) {
+    do_reveal_config_dir(&app);
+}
+
+/// Tauri command — reveal the maximal logs directory in Finder/Explorer.
+/// Wired to the "Open logs" buttons in the Settings UI.
+#[tauri::command]
+fn reveal_logs_dir(app: AppHandle) {
+    do_reveal_logs_dir(&app);
+}
+
+/// Tauri command — the QuitConfirmDialog calls this when the user
+/// clicks "Quit Maximal" in the modal. Routes through `app.exit(0)`,
+/// which fires RunEvent::ExitRequested → kill_sidecar → process exit.
+#[tauri::command]
+fn confirm_quit(app: AppHandle) {
+    app.exit(0);
 }

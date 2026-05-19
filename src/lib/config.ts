@@ -8,9 +8,20 @@ import {
 } from "./config-schema"
 import { PATHS } from "./paths"
 
+export interface ApiKeyEntry {
+  id: string
+  label: string
+  key: string
+  enabled: boolean
+  created_at: string
+}
+
 export interface AppConfig {
   auth?: {
+    /** Legacy free-form list of accepted bearer tokens. */
     apiKeys?: Array<string>
+    /** Structured registry managed by Settings → API clients. */
+    apiKeyEntries?: Array<ApiKeyEntry>
   }
   providers?: Record<string, ProviderConfig>
   extraPrompts?: Record<string, string>
@@ -247,6 +258,36 @@ export function mergeConfigWithDefaults(): AppConfig {
 export function getConfig(): AppConfig {
   cachedConfig ??= readConfigFromDisk()
   return cachedConfig
+}
+
+/**
+ * Persist a new config to disk, replacing the in-memory cache.
+ *
+ * Re-validates against `AppConfigSchema` before writing — if the caller
+ * passes a malformed shape, this throws `ConfigValidationError` and
+ * does NOT touch disk. The write is atomic-by-replace (write to a
+ * sibling then rename), so a crash mid-write can't leave a partial
+ * JSON file in place.
+ *
+ * Callers that mutate config (e.g. the Settings API) should always
+ * round-trip through this: read with `getConfig()`, mutate a copy,
+ * call `writeConfig(next)`. The next `getConfiguredApiKeys()` /
+ * `getConfig()` will reflect the write immediately.
+ */
+export function writeConfig(next: AppConfig): AppConfig {
+  const validated = validateAppConfig(next)
+  fs.mkdirSync(PATHS.APP_DIR, { recursive: true })
+  const tmpPath = `${PATHS.CONFIG_PATH}.tmp-${process.pid}`
+  fs.writeFileSync(tmpPath, `${JSON.stringify(validated, null, 2)}\n`, "utf8")
+  try {
+    fs.chmodSync(tmpPath, 0o600)
+  } catch {
+    // chmod failure is non-fatal — Windows and some shared FS don't
+    // honor mode bits. The data write still went through.
+  }
+  fs.renameSync(tmpPath, PATHS.CONFIG_PATH)
+  cachedConfig = validated
+  return validated
 }
 
 export function getExtraPromptForModel(model: string): string {

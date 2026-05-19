@@ -47,9 +47,45 @@ const ReasoningEffortSchema = z.enum([
   "xhigh",
 ])
 
+/**
+ * Validation regex for an API key value. CLI-safe character set so the
+ * key can survive double-quoting / single-quoting in any shell without
+ * escaping headaches: ASCII letters, digits, underscore, hyphen.
+ *
+ * Plus a single special form: the literal "*" wildcard (and only that —
+ * no embedded glob) which the auth middleware honors as "accept any
+ * non-empty bearer." Useful for the default "permit-all" entry the UI
+ * seeds when the user first enables API-key auth.
+ */
+export const API_KEY_VALUE_PATTERN = /^(?:\*|[\w-]{8,128})$/
+
+const ApiKeyEntrySchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1).max(64),
+  key: z.string().regex(API_KEY_VALUE_PATTERN),
+  enabled: z.boolean(),
+  created_at: z.string(),
+})
+
 export const AppConfigSchema = z
   .object({
-    auth: z.object({ apiKeys: z.array(z.string()).optional() }).optional(),
+    auth: z
+      .object({
+        /**
+         * Legacy free-form list of accepted bearer tokens. Kept for
+         * backward compatibility with users who edit config.json by
+         * hand. The Settings UI manages `apiKeyEntries` instead;
+         * `getConfiguredApiKeys()` merges both.
+         */
+        apiKeys: z.array(z.string()).optional(),
+        /**
+         * Structured API-key registry written by the Settings UI.
+         * Each entry has its own enabled flag so a key can be paused
+         * without losing its label/history.
+         */
+        apiKeyEntries: z.array(ApiKeyEntrySchema).optional(),
+      })
+      .optional(),
     providers: z.record(z.string(), ProviderConfigSchema).optional(),
     extraPrompts: z.record(z.string(), z.string()).optional(),
     smallModel: z.string().optional(),

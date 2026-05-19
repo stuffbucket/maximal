@@ -59,6 +59,10 @@ server.use(
       "/_debug/state",
       "/setup-status",
     ],
+    // /settings serves the UI shell + bundled assets (HTML/JS/CSS).
+    // /settings/api/* are data endpoints — gated by requireAuthPrefixes.
+    allowUnauthenticatedPrefixes: ["/settings"],
+    requireAuthPrefixes: ["/settings/api"],
     // The dashboard at /usage-viewer fetches these endpoints from the
     // same machine. Trusting loopback lets us drop the client-side API
     // key UI (and its clear-text storage) without exposing the same

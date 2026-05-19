@@ -2,6 +2,7 @@ import type { Context, MiddlewareHandler } from "hono"
 
 import consola from "consola"
 
+import { recordClient } from "./active-clients"
 import { getConfig } from "./config"
 import { state } from "./state"
 
@@ -15,6 +16,13 @@ interface AuthMiddlewareOptions {
    * everything else.
    */
   allowUnauthenticatedPrefixes?: Array<string>
+  /**
+   * Path prefixes that re-enable auth even when they fall under one of
+   * the prefixes in `allowUnauthenticatedPrefixes`. Lets us say
+   * "/settings/* is open, but /settings/api/* is still auth-gated"
+   * without having to enumerate every static asset path.
+   */
+  requireAuthPrefixes?: Array<string>
   allowOptionsBypass?: boolean
   /**
    * Paths that should skip auth when the request comes from loopback
@@ -73,7 +81,54 @@ export function normalizeApiKeys(apiKeys: unknown): Array<string> {
 
 export function getConfiguredApiKeys(): Array<string> {
   const config = getConfig()
-  return normalizeApiKeys(config.auth?.apiKeys)
+  const legacy = normalizeApiKeys(config.auth?.apiKeys)
+  const entries = config.auth?.apiKeyEntries ?? []
+  // Only enabled entries count; "*" stays in the list and is handled
+  // by `apiKeyAllowed` as a wildcard.
+  const fromEntries = entries
+    .filter((e) => e.enabled)
+    .map((e) => e.key.trim())
+    .filter((k) => k.length > 0)
+  return [...new Set([...legacy, ...fromEntries])]
+}
+
+/**
+ * Match an incoming request key against the configured allow list.
+ *
+ * Honors a single special form: a "*" entry in the allow list accepts
+ * any non-empty key from the client. Useful as a default "permit-all"
+ * row in the Settings → API clients table — visible, toggleable, and
+ * obviously broad, instead of being silently inferred from an empty
+ * allow list (which means "no auth required" — a stronger statement).
+ */
+export function apiKeyAllowed(
+  allowList: Array<string>,
+  requestKey: string,
+): boolean {
+  if (requestKey.length === 0) return false
+  if (allowList.includes("*")) return true
+  return allowList.includes(requestKey)
+}
+
+/**
+ * Locate the configured API-key entry that the incoming request key
+ * resolves to, so the caller can attribute usage to a named client.
+ * Returns null when no entry matches (e.g. legacy `auth.apiKeys` row
+ * matched but isn't in the entry registry).
+ */
+export function findApiKeyEntry(
+  requestKey: string,
+): { id: string; label: string } | null {
+  if (requestKey.length === 0) return null
+  const config = getConfig()
+  const entries = config.auth?.apiKeyEntries ?? []
+  // Exact match first.
+  const exact = entries.find((e) => e.enabled && e.key === requestKey)
+  if (exact) return { id: exact.id, label: exact.label }
+  // Wildcard "*" entry matches any non-empty key.
+  const wildcard = entries.find((e) => e.enabled && e.key === "*")
+  if (wildcard) return { id: wildcard.id, label: wildcard.label }
+  return null
 }
 
 export function extractRequestApiKey(c: Context): string | null {
@@ -116,6 +171,7 @@ export function createAuthMiddleware(
   const allowUnauthenticatedPaths = options.allowUnauthenticatedPaths ?? ["/"]
   const allowUnauthenticatedPrefixes =
     options.allowUnauthenticatedPrefixes ?? []
+  const requireAuthPrefixes = options.requireAuthPrefixes ?? []
   const allowOptionsBypass = options.allowOptionsBypass ?? true
   const loopbackOnlyPaths = options.loopbackOnlyPaths ?? []
   const getRequestIp = options.getRequestIp ?? defaultGetRequestIp
@@ -131,9 +187,15 @@ export function createAuthMiddleware(
 
     // Path-boundary aware: prefix "/settings" matches "/settings",
     // "/settings/" and "/settings/foo", but NOT "/settings-other".
+    // `requireAuthPrefixes` re-enables auth for nested sub-prefixes —
+    // e.g. "/settings" is open but "/settings/api" is still gated.
+    const path = c.req.path
     if (
       allowUnauthenticatedPrefixes.some(
-        (p) => c.req.path === p || c.req.path.startsWith(p + "/"),
+        (p) => path === p || path.startsWith(p + "/"),
+      )
+      && !requireAuthPrefixes.some(
+        (p) => path === p || path.startsWith(p + "/"),
       )
     ) {
       return next()
@@ -151,14 +213,25 @@ export function createAuthMiddleware(
     }
 
     const apiKeys = getApiKeys()
+    const userAgent = c.req.header("user-agent") ?? ""
     if (apiKeys.length === 0) {
+      // Auth not enforced — still record the caller so the menu-bar
+      // shell can show who's connected.
+      recordClient({ apiKeyId: null, apiKeyLabel: null, userAgent })
       return next()
     }
 
     const requestApiKey = extractRequestApiKey(c)
-    if (!requestApiKey || !apiKeys.includes(requestApiKey)) {
+    if (!requestApiKey || !apiKeyAllowed(apiKeys, requestApiKey)) {
       return createUnauthorizedResponse(c)
     }
+
+    const entry = findApiKeyEntry(requestApiKey)
+    recordClient({
+      apiKeyId: entry?.id ?? null,
+      apiKeyLabel: entry?.label ?? null,
+      userAgent,
+    })
 
     return next()
   }

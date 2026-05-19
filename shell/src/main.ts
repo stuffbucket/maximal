@@ -3,25 +3,19 @@ import { invoke } from "@tauri-apps/api/core";
 import type { DiagnosticsResponse } from "../../src/lib/settings-types";
 import type { AuthStatus } from "./api";
 import { apiCall } from "./api";
+import { mountApiClients } from "./api-clients-island";
+import { mountQuitConfirm } from "./quit-island";
 
 type SectionId =
   | "account"
   | "api-clients"
-  | "providers"
-  | "secrets"
-  | "routing"
-  | "per-model"
-  | "advanced"
+  | "logs"
   | "diagnostics";
 
 const SECTIONS: ReadonlyArray<SectionId> = [
   "account",
   "api-clients",
-  "providers",
-  "secrets",
-  "routing",
-  "per-model",
-  "advanced",
+  "logs",
   "diagnostics",
 ];
 
@@ -42,7 +36,9 @@ function showSection(id: SectionId): void {
     link.setAttribute("aria-current", active ? "page" : "false");
     link.classList.toggle("nav__item--active", active);
   }
-  window.scrollTo({ top: 0 });
+  // Pane is the scroll container now; reset *its* scroll, not the window's.
+  const pane = document.getElementById("pane");
+  if (pane) pane.scrollTop = 0;
 }
 
 function readHashSection(): SectionId {
@@ -54,6 +50,33 @@ function syncFromHash(): void {
   showSection(readHashSection());
 }
 
+/**
+ * Bind a direct click handler to nav links in addition to the
+ * hashchange listener. Belt-and-braces: in some webviews (Tauri's
+ * WebKit on macOS in particular) a click on an `<a href="#x">` whose
+ * target equals the current hash doesn't fire `hashchange`. The
+ * direct handler keeps the UI feeling responsive in that case and
+ * also lets us suppress the default anchor navigation so the
+ * embedded webview never tries to treat it as a top-level navigation.
+ */
+function wireNav(): void {
+  for (const link of document.querySelectorAll<HTMLAnchorElement>(
+    "[data-nav]",
+  )) {
+    link.addEventListener("click", (ev) => {
+      const id = link.dataset.nav;
+      if (!id || !isSectionId(id)) return;
+      ev.preventDefault();
+      if (window.location.hash !== `#${id}`) {
+        window.location.hash = id;
+      } else {
+        // Same hash → hashchange won't fire. Drive it manually.
+        showSection(id);
+      }
+    });
+  }
+}
+
 async function safeInvoke(cmd: string): Promise<void> {
   try {
     await invoke(cmd);
@@ -63,21 +86,13 @@ async function safeInvoke(cmd: string): Promise<void> {
   }
 }
 
-function wireFooter(): void {
-  const configBtn = document.getElementById("reveal-config");
-  const logsBtn = document.getElementById("reveal-logs");
-  const logsBtn2 = document.getElementById("open-logs-2");
-
-  configBtn?.addEventListener("click", () => {
-    void safeInvoke("reveal_config_dir");
-  });
+function wireLogs(): void {
   const revealLogs = () => {
     void safeInvoke("reveal_logs_dir");
   };
-  logsBtn?.addEventListener("click", revealLogs);
-  logsBtn2?.addEventListener("click", revealLogs);
-
-  // Restart button is intentionally disabled in v1.
+  document
+    .querySelector('[data-section="logs"] [data-action="reveal-logs"]')
+    ?.addEventListener("click", revealLogs);
 }
 
 function applyTheme(): void {
@@ -179,11 +194,6 @@ function wireDiagnostics(): void {
     .querySelector('[data-action="copy-json"]')
     ?.addEventListener("click", () => {
       void copyDiagnosticsAsJson();
-    });
-  document
-    .querySelector('[data-action="open-logs"]')
-    ?.addEventListener("click", () => {
-      void safeInvoke("reveal_logs_dir");
     });
 }
 
@@ -394,9 +404,12 @@ function wireAccount(): void {
 
 window.addEventListener("DOMContentLoaded", () => {
   applyTheme();
-  wireFooter();
+  wireLogs();
   wireDiagnostics();
   wireAccount();
+  mountApiClients();
+  mountQuitConfirm();
+  wireNav();
   syncFromHash();
   void loadDiagnostics();
   if (readHashSection() === "account") void loadAuthStatus();

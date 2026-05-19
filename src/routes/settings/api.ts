@@ -27,7 +27,9 @@ import {
 import { state } from "~/lib/state"
 import { getGitVersion, shortSha } from "~/lib/version"
 
+import { apiKeysRoutes } from "./api-keys"
 import { authRoutes } from "./auth"
+import { clientsRoutes } from "./clients"
 
 /** Captured once at module load. process.uptime() works too, but
  *  this anchors uptime to "when the route module first ran" rather
@@ -84,3 +86,5 @@ settingsApiRoutes.get("/diagnostics", (c) => {
 })
 
 settingsApiRoutes.route("/auth/github", authRoutes)
+settingsApiRoutes.route("/api-keys", apiKeysRoutes)
+settingsApiRoutes.route("/clients", clientsRoutes)

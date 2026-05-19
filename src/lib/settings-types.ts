@@ -87,3 +87,45 @@ export const AuthStatus = z.object({
   error: z.string().optional(),
 })
 export type AuthStatus = z.infer<typeof AuthStatus>
+
+/**
+ * An API-key entry as managed by Settings → API clients. The key value
+ * is returned in full to the local Settings UI — the endpoint is
+ * already auth-gated and loopback-only in normal operation, and the
+ * "show/hide" affordance lives in the UI, not the wire format.
+ *
+ * Key value charset matches `API_KEY_VALUE_PATTERN` in config-schema.ts:
+ * 8–128 chars of [A-Za-z0-9_-], or the literal "*" wildcard.
+ */
+export const ApiKeyEntry = z.object({
+  id: z.string(),
+  label: z.string(),
+  key: z.string(),
+  enabled: z.boolean(),
+  created_at: z.string(),
+})
+export type ApiKeyEntry = z.infer<typeof ApiKeyEntry>
+
+export const ApiKeysListResponse = z.object({
+  entries: z.array(ApiKeyEntry),
+  /** Whether the proxy is currently enforcing API-key auth. False when
+   *  both `apiKeys` and `apiKeyEntries` are empty (no enabled keys);
+   *  in that mode the proxy accepts all local requests. */
+  enforcing: z.boolean(),
+})
+export type ApiKeysListResponse = z.infer<typeof ApiKeysListResponse>
+
+export const ApiKeyCreateRequest = z.object({
+  label: z.string().min(1).max(64),
+  /** Optional: if omitted, the server generates one. */
+  key: z.string().optional(),
+  enabled: z.boolean().optional(),
+})
+export type ApiKeyCreateRequest = z.infer<typeof ApiKeyCreateRequest>
+
+export const ApiKeyUpdateRequest = z.object({
+  label: z.string().min(1).max(64).optional(),
+  key: z.string().optional(),
+  enabled: z.boolean().optional(),
+})
+export type ApiKeyUpdateRequest = z.infer<typeof ApiKeyUpdateRequest>

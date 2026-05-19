@@ -29,25 +29,7 @@
               >
             </li>
             <li>
-              <a class="nav__item" href="#providers" data-nav="providers"
-                >Providers</a
-              >
-            </li>
-            <li>
-              <a class="nav__item" href="#secrets" data-nav="secrets">Secrets</a>
-            </li>
-            <li>
-              <a class="nav__item" href="#routing" data-nav="routing">Routing</a>
-            </li>
-            <li>
-              <a class="nav__item" href="#per-model" data-nav="per-model"
-                >Per-model</a
-              >
-            </li>
-            <li>
-              <a class="nav__item" href="#advanced" data-nav="advanced"
-                >Advanced</a
-              >
+              <a class="nav__item" href="#logs" data-nav="logs">Logs</a>
             </li>
             <li>
               <a class="nav__item" href="#diagnostics" data-nav="diagnostics"
@@ -66,14 +48,12 @@
             </header>
 
             <!-- State: unauthenticated -->
-            <div class="card" data-state-account="unauthenticated" hidden>
-              <div class="card__head">
-                <h3 class="card__title">Not signed in</h3>
-              </div>
-              <p class="card__hint">
+            <div class="state" data-state-account="unauthenticated" hidden>
+              <h3 class="state__title">Not signed in</h3>
+              <p class="state__body">
                 Maximal needs a GitHub account with Copilot to forward requests
-                upstream. Until you sign in, the proxy will accept connections
-                but reject Copilot calls.
+                upstream. Until you sign in, the proxy accepts connections but
+                rejects Copilot calls.
               </p>
               <div class="actions">
                 <button
@@ -87,11 +67,23 @@
             </div>
 
             <!-- State: device_code_issued / polling -->
-            <div class="card" data-state-account="pending" hidden>
-              <div class="card__head">
-                <h3 class="card__title">Almost there</h3>
+            <div class="state" data-state-account="pending" hidden>
+              <h3 class="state__title">Almost there</h3>
+              <div class="device-code">
+                <span
+                  class="device-code__value mono"
+                  data-field="user_code"
+                  aria-label="Device code"
+                ></span>
+                <button
+                  type="button"
+                  class="btn btn--ghost btn--sm"
+                  data-action="copy-user-code"
+                >
+                  Copy
+                </button>
               </div>
-              <ol class="card__hint">
+              <ol class="state__steps">
                 <li>
                   Visit
                   <a
@@ -102,37 +94,21 @@
                     >github.com/login/device</a
                   >
                 </li>
-                <li>
-                  Enter this code:
-                  <strong class="mono" data-field="user_code">…</strong>
-                  <button
-                    type="button"
-                    class="btn btn--ghost btn--sm"
-                    data-action="copy-user-code"
-                  >
-                    Copy
-                  </button>
-                </li>
-                <li>
-                  Approve the request. We're polling — this page will update.
-                </li>
+                <li>Enter the code above on GitHub.</li>
+                <li>Approve the request — this page will update.</li>
               </ol>
-              <p class="card__meta">
-                Code expires <span data-field="expires_at">…</span>
+              <p class="state__caption">
+                Code expires <span data-field="expires_at"></span>.
               </p>
             </div>
 
             <!-- State: authenticated -->
-            <div class="card" data-state-account="authenticated" hidden>
-              <div class="card__head">
-                <h3 class="card__title">Signed in</h3>
-              </div>
-              <dl class="kv">
-                <div class="kv__row">
-                  <dt>Account</dt>
-                  <dd class="mono" data-field="account_login">…</dd>
-                </div>
-              </dl>
+            <div class="state" data-state-account="authenticated" hidden>
+              <h3 class="state__title">Signed in</h3>
+              <p class="state__body">
+                Signed in as
+                <strong class="mono" data-field="account_login"></strong>.
+              </p>
               <div class="actions">
                 <button
                   type="button"
@@ -145,11 +121,9 @@
             </div>
 
             <!-- State: error -->
-            <div class="card card--error" data-state-account="error" hidden>
-              <div class="card__head">
-                <h3 class="card__title">Sign-in failed</h3>
-              </div>
-              <p class="card__hint" data-field="error">…</p>
+            <div class="state state--error card--error" data-state-account="error" hidden>
+              <h3 class="state__title">Sign-in failed</h3>
+              <p class="state__body" data-field="error"></p>
               <div class="actions">
                 <button
                   type="button"
@@ -167,297 +141,55 @@
             <header class="section__head">
               <h2 class="section__title">API clients</h2>
               <p class="section__sub">
-                Keys that local clients use to authenticate against this proxy.
+                Keys that local clients use to authenticate against this
+                proxy. Changes apply live — no restart needed.
               </p>
             </header>
-
-            <div class="empty">
-              <p class="empty__title">No API keys yet</p>
-              <p class="empty__body">
-                The proxy accepts all local requests when this list is empty.
-                Generate a key to require authentication.
-              </p>
-              <button type="button" class="btn btn--primary">
-                Generate new key
-              </button>
-            </div>
+            <div id="api-clients-root"></div>
           </section>
 
-          <!-- PROVIDERS -->
-          <section class="section" data-section="providers" hidden>
+          <!-- LOGS -->
+          <section class="section" data-section="logs" hidden>
             <header class="section__head">
-              <h2 class="section__title">Providers</h2>
+              <h2 class="section__title">Logs</h2>
               <p class="section__sub">
-                Upstream model providers and how requests are routed to them.
+                Daily-rotated request and handler logs, 7-day retention.
               </p>
             </header>
 
-            <article class="card">
-              <header class="card__head">
-                <div>
-                  <div class="card__title">Anthropic</div>
-                  <div class="card__hint mono">anthropic</div>
-                </div>
-                <label class="switch">
-                  <input type="checkbox" checked disabled />
-                  <span>Enabled</span>
-                </label>
-              </header>
-              <dl class="kv">
+            <div class="card">
+              <div class="card__head">
+                <h3 class="card__title">Where logs live</h3>
+              </div>
+              <p class="card__hint">
+                Each handler writes a per-day file under the maximal
+                state directory. Reveal the folder to inspect them, or
+                tail the active file with
+                <code class="mono">tail&nbsp;-F</code>.
+              </p>
+              <dl class="kv kv--bare">
                 <div class="kv__row">
-                  <dt>Base URL</dt>
-                  <dd class="mono">https://api.anthropic.com</dd>
-                </div>
-                <div class="kv__row">
-                  <dt>API key</dt>
-                  <dd>
-                    <span class="chip chip--ok">env</span>
-                    <span class="mono muted">ends in 9f3c</span>
-                  </dd>
+                  <dt>macOS / Linux</dt>
+                  <dd class="mono">~/.local/share/maximal/logs/</dd>
                 </div>
                 <div class="kv__row">
-                  <dt>Type</dt>
-                  <dd class="mono">anthropic</dd>
+                  <dt>Windows</dt>
+                  <dd class="mono">%USERPROFILE%\.local\share\maximal\logs\</dd>
+                </div>
+                <div class="kv__row">
+                  <dt>Retention</dt>
+                  <dd>7 days, then deleted on next boot</dd>
                 </div>
               </dl>
-            </article>
-
-            <article class="card">
-              <header class="card__head">
-                <div>
-                  <div class="card__title">Ollama</div>
-                  <div class="card__hint mono">ollama</div>
-                </div>
-                <label class="switch">
-                  <input type="checkbox" disabled />
-                  <span>Enabled</span>
-                </label>
-              </header>
-              <dl class="kv">
-                <div class="kv__row">
-                  <dt>Base URL</dt>
-                  <dd class="mono">http://localhost:11434</dd>
-                </div>
-                <div class="kv__row">
-                  <dt>API key</dt>
-                  <dd>
-                    <span class="chip">unset</span>
-                  </dd>
-                </div>
-                <div class="kv__row">
-                  <dt>Type</dt>
-                  <dd class="mono">openai-compatible</dd>
-                </div>
-              </dl>
-            </article>
-
-            <button type="button" class="btn btn--secondary">
-              + Add provider
-            </button>
-          </section>
-
-          <!-- SECRETS -->
-          <section class="section" data-section="secrets" hidden>
-            <header class="section__head">
-              <h2 class="section__title">Secrets</h2>
-              <p class="section__sub">
-                Provider credentials. Environment variables always win over
-                saved values.
-              </p>
-            </header>
-
-            <table class="table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Source</th>
-                  <th>Value</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>Anthropic API key</td>
-                  <td><span class="chip chip--ok">env</span></td>
-                  <td class="mono muted">&mdash;</td>
-                  <td class="row__actions">
-                    <button type="button" class="btn btn--ghost">Edit</button>
-                  </td>
-                </tr>
-                <tr>
-                  <td>Ollama API key</td>
-                  <td><span class="chip">unset</span></td>
-                  <td class="mono muted">&mdash;</td>
-                  <td class="row__actions">
-                    <button type="button" class="btn btn--ghost">Edit</button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </section>
-
-          <!-- ROUTING -->
-          <section class="section" data-section="routing" hidden>
-            <header class="section__head">
-              <h2 class="section__title">Routing</h2>
-              <p class="section__sub">
-                How requests are mapped to upstream endpoints. Changes here
-                apply live.
-              </p>
-            </header>
-
-            <div class="form">
-              <div class="form__row">
-                <div class="form__label">
-                  <label for="use-messages-api"
-                    >Use Claude's native messages format</label
-                  >
-                  <p class="form__hint">
-                    Routes Claude models through Copilot's native messages
-                    endpoint. Better streaming and tool-call fidelity.
-                  </p>
-                </div>
-                <div class="form__control">
-                  <label class="switch">
-                    <input type="checkbox" id="use-messages-api" checked />
-                    <span class="sr-only">Use messages API</span>
-                  </label>
-                </div>
+              <div class="actions">
+                <button
+                  type="button"
+                  class="btn btn--primary"
+                  data-action="reveal-logs"
+                >
+                  Reveal logs in Finder
+                </button>
               </div>
-
-              <div class="form__row">
-                <div class="form__label">
-                  <label for="apply-patch">Accept the apply_patch tool</label>
-                  <p class="form__hint">
-                    Let clients send the apply_patch tool shape for surgical
-                    file edits.
-                  </p>
-                </div>
-                <div class="form__control">
-                  <label class="switch">
-                    <input type="checkbox" id="apply-patch" />
-                    <span class="sr-only">Accept apply_patch</span>
-                  </label>
-                </div>
-              </div>
-
-              <div class="form__row">
-                <div class="form__label">
-                  <label for="small-model">Small model for warmups</label>
-                  <p class="form__hint">
-                    Used for tool-less probe requests. Lighter than your main
-                    model.
-                  </p>
-                </div>
-                <div class="form__control">
-                  <select id="small-model" class="input">
-                    <option>gpt-4o-mini</option>
-                    <option>claude-haiku-4</option>
-                  </select>
-                </div>
-              </div>
-
-              <div class="form__row">
-                <div class="form__label">
-                  <label for="log-retention">Keep logs for</label>
-                  <p class="form__hint">
-                    Daily proxy log files older than this are rotated out.
-                  </p>
-                </div>
-                <div class="form__control form__control--inline">
-                  <input
-                    id="log-retention"
-                    type="number"
-                    class="input input--narrow"
-                    value="7"
-                    min="0"
-                    max="3650"
-                  />
-                  <span class="muted">days</span>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <!-- PER-MODEL -->
-          <section class="section" data-section="per-model" hidden>
-            <header class="section__head">
-              <h2 class="section__title">Per-model</h2>
-              <p class="section__sub">
-                Overrides scoped to a single model. Empty by default.
-              </p>
-            </header>
-
-            <div class="subsection">
-              <h3 class="subsection__title">Extra system prompt per model</h3>
-              <div class="empty empty--compact">
-                <p class="empty__body">
-                  No overrides yet.
-                  <a class="link" href="#">Add a model override</a>
-                </p>
-              </div>
-            </div>
-
-            <div class="subsection">
-              <h3 class="subsection__title">Reasoning effort per model</h3>
-              <div class="empty empty--compact">
-                <p class="empty__body">
-                  No overrides yet.
-                  <a class="link" href="#">Add a model override</a>
-                </p>
-              </div>
-            </div>
-
-            <div class="subsection">
-              <h3 class="subsection__title">Server-side context management</h3>
-              <div class="empty empty--compact">
-                <p class="empty__body">
-                  No models opted in.
-                  <a class="link" href="#">Add a model</a>
-                </p>
-              </div>
-            </div>
-          </section>
-
-          <!-- ADVANCED -->
-          <section class="section" data-section="advanced" hidden>
-            <header class="section__head">
-              <h2 class="section__title">Advanced</h2>
-              <p class="section__sub">
-                These rarely need changing. Open if you know what you're doing.
-              </p>
-            </header>
-
-            <div class="form">
-              <div class="form__row">
-                <div class="form__label">
-                  <label for="anthropic-key"
-                    >Anthropic API key (for token counting)</label
-                  >
-                  <p class="form__hint">
-                    Used by token-count requests for exact Claude counts.
-                    Aliased to the anthropic secret.
-                  </p>
-                </div>
-                <div class="form__control">
-                  <input
-                    id="anthropic-key"
-                    type="password"
-                    class="input"
-                    placeholder="sk-ant-&hellip;"
-                    disabled
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div class="actions">
-              <button type="button" class="btn btn--secondary">
-                Reveal config.json in editor
-              </button>
-              <button type="button" class="btn btn--destructive">
-                Reset settings to defaults
-              </button>
             </div>
           </section>
 
@@ -530,13 +262,6 @@
             <div class="actions">
               <button
                 type="button"
-                class="btn btn--secondary"
-                data-action="open-logs"
-              >
-                Open logs folder
-              </button>
-              <button
-                type="button"
                 class="btn btn--primary"
                 data-action="copy-json"
               >
@@ -547,13 +272,11 @@
         </main>
       </div>
 
+      <!-- Quit-confirm dialog mounts here, outside the section grid so
+           it can open regardless of which settings pane is active. -->
+      <div id="quit-confirm-root"></div>
+
       <footer class="footer">
-        <button type="button" class="btn btn--ghost" id="reveal-config">
-          Reveal config in Finder
-        </button>
-        <button type="button" class="btn btn--ghost" id="reveal-logs">
-          Reveal logs in Finder
-        </button>
         <span class="footer__spacer"></span>
         <button
           type="button"

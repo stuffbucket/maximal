@@ -33,7 +33,8 @@ body {
 .app {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
 }
 
 .titlebar {
@@ -66,11 +67,8 @@ body {
   border-inline-end: var(--border-width-hairline) solid var(--border-subtle);
   background: var(--surface-card);
   padding: var(--space-3) var(--space-2);
-  position: sticky;
-  top: 0;
-  align-self: start;
-  max-height: 100vh;
   overflow-y: auto;
+  min-height: 0;
 }
 
 .nav {
@@ -113,7 +111,8 @@ body {
 /* ---- Pane ---- */
 .pane {
   padding: var(--space-6);
-  padding-block-end: calc(var(--footer-height) + var(--space-6));
+  padding-block-end: var(--space-6);
+  overflow-y: auto;
   min-height: 0;
 }
 
@@ -124,6 +123,13 @@ body {
   gap: var(--space-5);
 }
 
+/* `display: flex` above overrides the UA's `[hidden] { display: none }`,
+   which is what makes JS toggling `sec.hidden` actually hide the panel.
+   Restore the intended behaviour at matching specificity. */
+.section[hidden] {
+  display: none;
+}
+
 .section__head {
   display: flex;
   flex-direction: column;
@@ -131,12 +137,16 @@ body {
 }
 
 .section__title {
+  /* Window-level display heading. Per design-context, Fraunces appears
+     in the brand mark AND "one display heading per window" — this is
+     the one. Body copy + entity titles stay in Commissioner so the
+     humanist accent stays rationed. */
   margin: 0;
-  font-family: var(--font-body);
-  font-size: var(--text-xl);
-  font-weight: var(--weight-xl);
-  line-height: var(--leading-xl);
-  letter-spacing: -0.01em;
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-2xl);
+  line-height: var(--leading-2xl);
+  letter-spacing: -0.015em;
   color: var(--text-strong);
 }
 
@@ -163,6 +173,95 @@ body {
   color: var(--text-strong);
 }
 
+/* ---- State region (chrome-free; for state-machine panels) ----
+   Used by the Account section's four authentication states. Per
+   design-context, cards are reserved for "discrete actionable
+   entities" (an API key, a provider) — NOT for sectioning content
+   within a window. The four auth states are variants of one panel,
+   not four entities, so they get typographic separation instead of
+   card chrome. */
+.state {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.state[hidden] {
+  display: none;
+}
+
+.state__title {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: var(--text-md);
+  font-weight: var(--weight-lg);
+  line-height: var(--leading-lg);
+  color: var(--text-strong);
+}
+
+.state__body {
+  margin: 0;
+  font-size: var(--text-base);
+  line-height: var(--leading-base);
+  color: var(--text-base-color);
+  max-width: 65ch;
+}
+
+.state__caption {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-lg);
+  color: var(--text-muted);
+}
+
+.state__steps {
+  /* Tame the browser-default OL indent so numbers sit close to the
+     left edge of the surrounding type column. */
+  margin: 0;
+  padding-inline-start: var(--space-5);
+  font-size: var(--text-base);
+  line-height: var(--leading-base);
+  color: var(--text-base-color);
+  max-width: 65ch;
+}
+
+.state__steps li + li {
+  margin-block-start: var(--space-1);
+}
+
+.state--error .state__title {
+  color: var(--accent-destructive);
+}
+
+.state__caption--error {
+  color: var(--accent-destructive);
+}
+
+/* ---- Device code (the visual hero during the pending state) ---- */
+.device-code {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding-block: var(--space-2);
+}
+
+.device-code__value {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-md);
+  line-height: var(--leading-2xl);
+  letter-spacing: 0.05em;
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.device-code__value:empty::before {
+  /* Placeholder glyph that vanishes the instant JS sets textContent. */
+  content: "————";
+  color: var(--text-muted);
+  letter-spacing: 0.1em;
+}
+
 /* ---- Cards ---- */
 .card {
   background: var(--surface-card);
@@ -173,6 +272,14 @@ body {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+}
+
+/* Companion to .section[hidden]: `display: flex` on .card overrides
+   the UA's `[hidden] { display: none }`. The API-clients section
+   toggles `.card[hidden]` on its mode banners, so restore the
+   intended behaviour at matching specificity. */
+.card[hidden] {
+  display: none;
 }
 
 .card__head {
@@ -233,6 +340,55 @@ body {
 
 .card--error {
   border-color: var(--accent-destructive);
+}
+
+.card--planned {
+  border-style: dashed;
+  opacity: 0.92;
+}
+
+.card--planned .card__title {
+  color: var(--text-muted);
+  font-weight: var(--weight-md);
+}
+
+/* ---- Info card ---- */
+.card--info {
+  border-color: var(--border-subtle);
+  background: var(--surface-card);
+}
+
+.card--info p {
+  margin: 0;
+}
+
+/* ---- Inline code block ---- */
+.code {
+  margin: var(--space-3) 0 0;
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface-control);
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-input);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--leading-base);
+  color: var(--text-base-color);
+  overflow-x: auto;
+  white-space: pre;
+}
+
+/* ---- Sidebar 'planned' chip ---- */
+.nav__chip {
+  margin-left: var(--space-2);
+  padding: 0 var(--space-1);
+  font-size: 0.65rem;
+  font-weight: var(--weight-md);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  background: transparent;
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-chip);
 }
 
 /* ---- Key/value list ---- */
@@ -621,5 +777,306 @@ body {
   *::after {
     transition-duration: 0.001ms !important;
     animation-duration: 0.001ms !important;
+  }
+}
+
+/* ---- Data-table chrome (Apple Settings pattern) ----
+   A rounded container that groups a table with a footer toolbar.
+   Used for the API-clients list. The toolbar holds + / - / wildcard
+   affordances pinned bottom-right; rows are direct-edit. */
+.data-table {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-card);
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+}
+
+.data-table__empty {
+  margin: 0;
+  padding: var(--space-5) var(--space-4);
+  text-align: center;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.data-table__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-block-start: var(--border-width-hairline) solid var(--border-subtle);
+  background: var(--surface-card);
+}
+
+.btn--icon {
+  width: var(--size-xl);
+  min-width: var(--size-xl);
+  padding: 0;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-md);
+  line-height: 1;
+}
+
+/* Tiny inline keycap, used in the data-table empty-state hint. */
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--size-md);
+  padding: 0 var(--space-1);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  background: var(--surface-control);
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-chip);
+}
+
+/* ---- API keys table ---- */
+.table--api-keys {
+  /* Container provides the border + radius; the table itself sits
+     flush. Cells handle their own row padding. */
+  width: 100%;
+}
+
+.table--api-keys th:first-child,
+.table--api-keys td:first-child {
+  padding-inline-start: var(--space-4);
+}
+
+.table--api-keys th:last-child,
+.table--api-keys td:last-child {
+  padding-inline-end: var(--space-3);
+}
+
+.table--api-keys tbody tr:last-child td {
+  border-block-end: 0;
+}
+
+/* Editable label cell — click to edit in place. */
+.api-keys__label {
+  cursor: text;
+  font-size: var(--text-sm);
+  color: var(--text-strong);
+}
+
+.api-keys__label[data-editing="true"] {
+  padding-block: var(--space-1);
+}
+
+.api-keys__label input {
+  width: 100%;
+  background: var(--surface-control);
+  color: var(--text-strong);
+  border: var(--border-width-hairline) solid var(--border-strong);
+  border-radius: var(--radius-input);
+  padding: var(--space-1) var(--space-2);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  line-height: var(--leading-lg);
+}
+
+.api-keys__label input:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 0;
+  border-color: var(--accent);
+}
+
+/* The "newly added, unsaved" row gets a subtle tint to signal
+   "this isn't real yet." Disappears once the POST resolves. */
+.table--api-keys tr.is-new {
+  background: var(--surface-control);
+}
+
+.table--api-keys tr.is-new td {
+  border-block-end: 0;
+}
+
+.table--api-keys td {
+  vertical-align: middle;
+}
+
+.api-keys__cell-key {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.api-keys__key-text {
+  flex: 1;
+  user-select: all;
+  cursor: pointer;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-input);
+  background: var(--surface-control);
+  border: var(--border-width-hairline) solid transparent;
+  letter-spacing: 0.04em;
+}
+
+.api-keys__key-text:hover {
+  border-color: var(--border-subtle);
+}
+
+.api-keys__key-text[data-copied="true"] {
+  color: var(--accent);
+}
+
+.api-keys__cell-actions {
+  text-align: end;
+  white-space: nowrap;
+}
+
+.api-keys__cell-actions .btn {
+  margin-inline-start: var(--space-2);
+}
+
+.api-keys__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+  font-size: var(--text-sm);
+}
+
+/* React island: Select-column visibility is driven by a class on the
+   <th>/<td> rather than by conditional rendering, so toggling the
+   mode flips visibility without re-keying every row in the diff. */
+.api-keys__select-col {
+  width: var(--size-lg);
+  text-align: center;
+}
+
+.api-keys__select-col--hidden {
+  display: none;
+}
+
+.api-keys__row--selected {
+  background: var(--surface-control);
+}
+
+.api-keys__row--wildcard .api-keys__label {
+  color: var(--text-muted);
+}
+
+.api-keys__row--new {
+  background: var(--surface-control);
+}
+
+.api-keys__row--new td {
+  border-block-end: 0;
+}
+
+/* Inline-edit input variant for the blank row. Minimal chrome so the
+   row reads as data, not a form — focus ring is the only signal. */
+.api-keys__inline-input {
+  width: 100%;
+  background: transparent;
+  color: var(--text-strong);
+  border: var(--border-width-hairline) solid transparent;
+  border-radius: var(--radius-input);
+  padding: var(--space-1) var(--space-2);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  line-height: var(--leading-lg);
+}
+
+.api-keys__inline-input.mono {
+  font-family: var(--font-mono);
+}
+
+.api-keys__inline-input::placeholder {
+  color: var(--text-muted);
+}
+
+.api-keys__inline-input:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 0;
+  border-color: var(--accent);
+  background: var(--surface-base);
+}
+
+.api-keys__key-text--copied {
+  color: var(--accent);
+}
+
+.api-keys__delete-btn {
+  margin-inline-end: var(--space-2);
+}
+
+/* ---- Confirm dialog ----
+   Uses native <dialog>. The element itself sits at the top layer
+   (free, no z-index gymnastics); ::backdrop styles the scrim. */
+.confirm-dialog {
+  padding: 0;
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  background: var(--surface-card);
+  color: var(--text-base-color);
+  max-width: 420px;
+  width: calc(100% - var(--space-6));
+  box-shadow: var(--elevation-modal);
+  font-family: var(--font-body);
+}
+
+.confirm-dialog::backdrop {
+  background: rgb(0 0 0 / 0.5);
+}
+
+.confirm-dialog__panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-5);
+}
+
+.confirm-dialog__title {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: var(--text-md);
+  font-weight: var(--weight-lg);
+  line-height: var(--leading-lg);
+  color: var(--text-strong);
+}
+
+.confirm-dialog__body {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-base);
+  color: var(--text-base-color);
+}
+
+.confirm-dialog__body p {
+  margin: 0 0 var(--space-2) 0;
+}
+
+.confirm-dialog__body p:last-child {
+  margin-bottom: 0;
+}
+
+.confirm-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+/* Default: a subtle fade-in. Respect reduced-motion as a hard contract. */
+@media (prefers-reduced-motion: no-preference) {
+  .confirm-dialog[open] {
+    animation: confirm-dialog-in 120ms ease-out;
+  }
+  .confirm-dialog[open]::backdrop {
+    animation: confirm-backdrop-in 120ms ease-out;
+  }
+  @keyframes confirm-dialog-in {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes confirm-backdrop-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
   }
 }

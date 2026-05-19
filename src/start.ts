@@ -8,6 +8,7 @@ import invariant from "tiny-invariant"
 
 import { mergeConfigWithDefaults } from "./lib/config"
 import { readDefaultRecord } from "./lib/github-token-store"
+import { createHandlerLogger } from "./lib/logger"
 import { initOpencodeVersion } from "./lib/opencode"
 import { ensurePaths } from "./lib/paths"
 import { initProxyFromEnv } from "./lib/proxy"
@@ -22,7 +23,7 @@ import {
   cacheVsCodeSessionId,
   cacheVsCodeDeviceId,
 } from "./lib/utils"
-import { getGitVersion, shortSha } from "./lib/version"
+import { getGitVersion, shortSha, type GitVersion } from "./lib/version"
 
 interface RunServerOptions {
   port: number
@@ -116,6 +117,8 @@ export async function runServer(options: RunServerOptions): Promise<void> {
     `Source revision: ${shortSha(git.sha)}${git.branch ? ` (${git.branch})` : ""}`,
   )
 
+  const bootLogger = initBootLogger(git, options)
+
   await initOpencodeVersion()
 
   if (options.proxyEnv) {
@@ -168,11 +171,15 @@ export async function runServer(options: RunServerOptions): Promise<void> {
     }
   }
 
-  consola.box(
-    `🌐 Usage Viewer: ${serverUrl}/usage-viewer?endpoint=${serverUrl}/usage`,
-  )
+  printReadyBanner(serverUrl)
 
   const { server } = await import("./server")
+
+  bootLogger.info(
+    `listening url=${serverUrl} `
+      + `executor=${executorName.split(" ")[0]} `
+      + `auth=${state.githubToken ? "authenticated" : "unauthenticated"}`,
+  )
 
   serve({
     fetch: server.fetch,
@@ -181,6 +188,40 @@ export async function runServer(options: RunServerOptions): Promise<void> {
       idleTimeout: 0,
     },
   })
+}
+
+/** Boot-event logger. Writes to ~/.local/share/maximal/logs/startup-<date>.log
+ *  via the same handler-logger machinery used by /v1/messages. The first
+ *  write also creates the logs/ directory so "Reveal logs in Finder"
+ *  lands somewhere even on first boot, and the record gives operators a
+ *  per-restart audit trail that stdout alone can't answer. */
+function initBootLogger(
+  git: GitVersion,
+  options: RunServerOptions,
+): ReturnType<typeof createHandlerLogger> {
+  const logger = createHandlerLogger("startup")
+  logger.info(
+    `maximal start pid=${process.pid} `
+      + `version=${git.sha ? shortSha(git.sha) : "unknown"} `
+      + `branch=${git.branch || "unknown"} port=${options.port} `
+      + `account=${options.accountType}`,
+  )
+  return logger
+}
+
+/** Ready banner printed once the proxy is about to start serving.
+ *  Lists the user-facing surfaces and hints at the faster Vite UI
+ *  iteration loop for HTML/CSS/TS work. */
+function printReadyBanner(serverUrl: string): void {
+  consola.box(
+    [
+      `🌐 Settings:     ${serverUrl}/settings/`,
+      `📊 Usage Viewer: ${serverUrl}/usage-viewer?endpoint=${serverUrl}/usage`,
+      ``,
+      `Fast UI iteration: \`bun run app:ui\` serves the Settings`,
+      `bundle at http://localhost:1420/settings/ with HMR.`,
+    ].join("\n"),
+  )
 }
 
 /** Interactive Claude Code helper: prompt for primary + small model,

@@ -1,5 +1,11 @@
 # Design stack — Vite, Chromium, Playwright
 
+> **Status: aspirational / not implemented.** As of 2026-05, the Tauri
+> shell uses vanilla TypeScript + plain CSS in `shell/src/`, not React
+> + Ladle + Playwright. This doc captures the proposed direction we'd
+> move toward if/when the settings UI outgrows hand-rolled DOM. Treat
+> code blocks as sketches, not as descriptions of the current build.
+
 A concrete stack proposal that implements `docs/design-feedback-loops-practices.md` (L1–L5). The companion doc names the *what* and the *latency budgets*; this doc names the *packages*, the *configs*, and the *workflow*. Read both. Where the loops doc and this doc disagree, the loops doc wins.
 
 This doc is opinionated. Every recommendation is a choice, not a survey. The "tools considered and rejected" notes are inline so the next reader doesn't relitigate.

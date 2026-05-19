@@ -1,0 +1,4 @@
+[test]
+# Skill templates under .claude/skills/*/templates/ contain reference *.test.ts
+# snippets that document patterns rather than execute as tests. Exclude them.
+root = "tests"
