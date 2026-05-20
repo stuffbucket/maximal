@@ -66,8 +66,17 @@
   --elevation-modal: 0 8px 24px rgb(0 0 0 / 0.18);
   --elevation-tooltip: 0 2px 6px rgb(0 0 0 / 0.1);
 
-  /* ---- Brand ---- */
-  --accent: #c8334a;
+  /* ---- Brand vs. interaction ----
+     `--brand` is the crimson reserved for true brand elements (mark,
+     hero, badging). `--accent` is the interaction color (primary
+     button fill, focus ring, switch fill, "on" dot). They were the
+     same value historically; splitting them keeps the brand voice
+     present without flooding every interactive surface with it.
+     `--accent-destructive` stays crimson-adjacent because destructive
+     buttons want urgency, not interaction-affordance. */
+  --brand: #c8334a;
+  --brand-fg: #ffffff;
+  --accent: #5198a6;
   --accent-fg: #ffffff;
   --accent-destructive: #b32d3f;
   --accent-destructive-foreground: #ffffff;
@@ -81,7 +90,6 @@
   /* ---- Layout constants ---- */
   --sidebar-width: 200px;
   --content-max: 640px;
-  --footer-height: var(--size-2xl);
 }
 
 [data-theme="dark"] {

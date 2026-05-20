@@ -53,6 +53,9 @@ function buildApp(opts?: { apiKeys?: Array<string> }) {
     "*",
     createAuthMiddleware({
       getApiKeys: () => opts?.apiKeys ?? [],
+      // Tests pre-date the enforce flag; treat "any configured key"
+      // as "enforce on" to preserve the original intent.
+      isEnforcing: () => (opts?.apiKeys?.length ?? 0) > 0,
       allowUnauthenticatedPaths: ["/", "/usage-viewer"],
     }),
   )

@@ -8,6 +8,12 @@ import { state } from "./state"
 
 interface AuthMiddlewareOptions {
   getApiKeys?: () => Array<string>
+  /**
+   * Resolver for the "block unknown connections" flag. When it returns
+   * false (the default), the middleware allows every request and only
+   * uses `getApiKeys()` for attribution. Injectable for tests.
+   */
+  isEnforcing?: () => boolean
   allowUnauthenticatedPaths?: Array<string>
   /**
    * Path prefixes that bypass auth. Used by the static settings bundle
@@ -40,6 +46,10 @@ interface AuthMiddlewareOptions {
 }
 
 const LOOPBACK_IPS = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"])
+
+function pathMatchesPrefix(path: string, prefix: string): boolean {
+  return path === prefix || path.startsWith(prefix + "/")
+}
 
 export function isLoopbackAddress(address: string | null | undefined): boolean {
   if (!address) return false
@@ -83,8 +93,6 @@ export function getConfiguredApiKeys(): Array<string> {
   const config = getConfig()
   const legacy = normalizeApiKeys(config.auth?.apiKeys)
   const entries = config.auth?.apiKeyEntries ?? []
-  // Only enabled entries count; "*" stays in the list and is handled
-  // by `apiKeyAllowed` as a wildcard.
   const fromEntries = entries
     .filter((e) => e.enabled)
     .map((e) => e.key.trim())
@@ -94,27 +102,21 @@ export function getConfiguredApiKeys(): Array<string> {
 
 /**
  * Match an incoming request key against the configured allow list.
- *
- * Honors a single special form: a "*" entry in the allow list accepts
- * any non-empty key from the client. Useful as a default "permit-all"
- * row in the Settings → API clients table — visible, toggleable, and
- * obviously broad, instead of being silently inferred from an empty
- * allow list (which means "no auth required" — a stronger statement).
+ * Only consulted when enforcement is on; the entry list is otherwise
+ * used purely for connection labeling, not for blocking.
  */
 export function apiKeyAllowed(
   allowList: Array<string>,
   requestKey: string,
 ): boolean {
   if (requestKey.length === 0) return false
-  if (allowList.includes("*")) return true
   return allowList.includes(requestKey)
 }
 
 /**
  * Locate the configured API-key entry that the incoming request key
  * resolves to, so the caller can attribute usage to a named client.
- * Returns null when no entry matches (e.g. legacy `auth.apiKeys` row
- * matched but isn't in the entry registry).
+ * Returns null when no entry matches.
  */
 export function findApiKeyEntry(
   requestKey: string,
@@ -122,13 +124,8 @@ export function findApiKeyEntry(
   if (requestKey.length === 0) return null
   const config = getConfig()
   const entries = config.auth?.apiKeyEntries ?? []
-  // Exact match first.
-  const exact = entries.find((e) => e.enabled && e.key === requestKey)
-  if (exact) return { id: exact.id, label: exact.label }
-  // Wildcard "*" entry matches any non-empty key.
-  const wildcard = entries.find((e) => e.enabled && e.key === "*")
-  if (wildcard) return { id: wildcard.id, label: wildcard.label }
-  return null
+  const match = entries.find((e) => e.enabled && e.key === requestKey)
+  return match ? { id: match.id, label: match.label } : null
 }
 
 export function extractRequestApiKey(c: Context): string | null {
@@ -168,6 +165,8 @@ export function createAuthMiddleware(
   options: AuthMiddlewareOptions = {},
 ): MiddlewareHandler {
   const getApiKeys = options.getApiKeys ?? getConfiguredApiKeys
+  const isEnforcing =
+    options.isEnforcing ?? (() => getConfig().auth?.enforce === true)
   const allowUnauthenticatedPaths = options.allowUnauthenticatedPaths ?? ["/"]
   const allowUnauthenticatedPrefixes =
     options.allowUnauthenticatedPrefixes ?? []
@@ -176,66 +175,67 @@ export function createAuthMiddleware(
   const loopbackOnlyPaths = options.loopbackOnlyPaths ?? []
   const getRequestIp = options.getRequestIp ?? defaultGetRequestIp
 
-  return async (c, next) => {
-    if (allowOptionsBypass && c.req.method === "OPTIONS") {
-      return next()
-    }
-
-    if (allowUnauthenticatedPaths.includes(c.req.path)) {
-      return next()
-    }
-
-    // Path-boundary aware: prefix "/settings" matches "/settings",
-    // "/settings/" and "/settings/foo", but NOT "/settings-other".
-    // `requireAuthPrefixes` re-enables auth for nested sub-prefixes —
-    // e.g. "/settings" is open but "/settings/api" is still gated.
+  const shouldBypass = (c: Context): boolean => {
+    if (allowOptionsBypass && c.req.method === "OPTIONS") return true
+    if (allowUnauthenticatedPaths.includes(c.req.path)) return true
     const path = c.req.path
     if (
-      allowUnauthenticatedPrefixes.some(
-        (p) => path === p || path.startsWith(p + "/"),
-      )
-      && !requireAuthPrefixes.some(
-        (p) => path === p || path.startsWith(p + "/"),
-      )
+      allowUnauthenticatedPrefixes.some((p) => pathMatchesPrefix(path, p))
+      && !requireAuthPrefixes.some((p) => pathMatchesPrefix(path, p))
     ) {
-      return next()
+      return true
     }
-
-    // Loopback exemption: the local usage dashboard talks to these
-    // endpoints from the same machine and should not have to handle an
-    // API key. Non-loopback callers still go through the normal key
-    // check below.
+    // Loopback exemption: the local usage dashboard hits these endpoints
+    // same-machine and shouldn't need a key; non-loopback callers still
+    // get gated normally.
     if (
       loopbackOnlyPaths.includes(c.req.path)
       && isLoopbackAddress(getRequestIp(c))
     ) {
-      return next()
+      return true
     }
+    return false
+  }
 
-    const apiKeys = getApiKeys()
-    const userAgent = c.req.header("user-agent") ?? ""
-    if (apiKeys.length === 0) {
-      // Auth not enforced — still record the caller so the menu-bar
-      // shell can show who's connected.
-      recordClient({ apiKeyId: null, apiKeyLabel: null, userAgent })
-      return next()
+  const decideAuth = (requestApiKey: string | null): AuthDecision => {
+    // Shell-internal key: when the Tauri menu-bar app spawns the sidecar
+    // it injects MAXIMAL_SHELL_KEY as env. Requests carrying that key
+    // bypass the enforce flag so a user who turns on "Block unknown
+    // connections" can't lock themselves out of their own Settings UI.
+    if (
+      requestApiKey
+      && state.shellApiKey
+      && requestApiKey === state.shellApiKey
+    ) {
+      return { allow: true, id: null, label: "Maximal Settings" }
     }
-
-    const requestApiKey = extractRequestApiKey(c)
-    if (!requestApiKey || !apiKeyAllowed(apiKeys, requestApiKey)) {
-      return createUnauthorizedResponse(c)
+    if (!isEnforcing()) {
+      const entry = requestApiKey ? findApiKeyEntry(requestApiKey) : null
+      return { allow: true, id: entry?.id ?? null, label: entry?.label ?? null }
     }
-
+    if (!requestApiKey || !apiKeyAllowed(getApiKeys(), requestApiKey)) {
+      return { allow: false }
+    }
     const entry = findApiKeyEntry(requestApiKey)
-    recordClient({
-      apiKeyId: entry?.id ?? null,
-      apiKeyLabel: entry?.label ?? null,
-      userAgent,
-    })
+    return { allow: true, id: entry?.id ?? null, label: entry?.label ?? null }
+  }
 
+  return async (c, next) => {
+    if (shouldBypass(c)) return next()
+    const decision = decideAuth(extractRequestApiKey(c))
+    if (!decision.allow) return createUnauthorizedResponse(c)
+    recordClient({
+      apiKeyId: decision.id,
+      apiKeyLabel: decision.label,
+      userAgent: c.req.header("user-agent") ?? "",
+    })
     return next()
   }
 }
+
+type AuthDecision =
+  | { allow: true; id: string | null; label: string | null }
+  | { allow: false }
 
 /**
  * Gate for routes that forward to the GitHub Copilot upstream. Orthogonal

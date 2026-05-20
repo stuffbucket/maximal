@@ -31,6 +31,7 @@ interface UseApiKeys {
     patch: { label?: string; key?: string; enabled?: boolean },
   ) => Promise<MutationResult>;
   remove: (id: string) => Promise<MutationResult>;
+  setEnforce: (next: boolean) => Promise<MutationResult>;
 }
 
 export interface MutationResult {
@@ -124,6 +125,27 @@ export function useApiKeys(): UseApiKeys {
     [],
   );
 
+  const setEnforce = useCallback<UseApiKeys["setEnforce"]>(
+    async (next) => {
+      const result = await apiCall({
+        kind: "api-keys-enforce",
+        method: "PATCH",
+        path: "/settings/api/api-keys/enforce",
+        body: { enforce: next },
+      });
+      if (!result.ok) {
+        const message = humanize(result.error);
+        setError(message);
+        return { ok: false, error: message };
+      }
+      setEntries(result.data.entries);
+      setEnforcing(result.data.enforcing);
+      setError(null);
+      return { ok: true };
+    },
+    [],
+  );
+
   return {
     entries,
     enforcing,
@@ -133,5 +155,6 @@ export function useApiKeys(): UseApiKeys {
     create,
     update,
     remove,
+    setEnforce,
   };
 }

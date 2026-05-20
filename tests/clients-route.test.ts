@@ -32,6 +32,7 @@ function buildAuthedApp() {
     "*",
     createAuthMiddleware({
       getApiKeys: () => ["secret-key-aaaa"],
+      isEnforcing: () => true,
       allowUnauthenticatedPaths: [],
     }),
   )

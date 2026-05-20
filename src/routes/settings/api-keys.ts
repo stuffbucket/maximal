@@ -51,11 +51,7 @@ function generateKey(): string {
 function buildListResponse(): ApiKeysListResponse {
   const config = getConfig()
   const entries = config.auth?.apiKeyEntries ?? []
-  // Legacy free-form list contributes to "enforcing" even though it's
-  // not editable through the UI — surfacing it in the response would
-  // mix two distinct contracts.
-  const legacyKeys = config.auth?.apiKeys ?? []
-  const enforcing = entries.some((e) => e.enabled) || legacyKeys.length > 0
+  const enforcing = config.auth?.enforce === true
   return { entries, enforcing }
 }
 
@@ -114,6 +110,29 @@ apiKeysRoutes.post("/", async (c) => {
   })
 
   return c.json(entry, 201)
+})
+
+apiKeysRoutes.patch("/enforce", async (c) => {
+  const body = (await c.req.json().catch(() => null)) as {
+    enforce?: unknown
+  } | null
+  if (!body || typeof body.enforce !== "boolean") {
+    return c.json(
+      {
+        error: {
+          message: "Expected { enforce: boolean }",
+          type: "validation_error",
+        },
+      },
+      400,
+    )
+  }
+  const config = getConfig()
+  writeConfig({
+    ...config,
+    auth: { ...config.auth, enforce: body.enforce },
+  })
+  return c.json(buildListResponse())
 })
 
 apiKeysRoutes.patch("/:id", async (c) => {

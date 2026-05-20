@@ -84,6 +84,14 @@ export const AppConfigSchema = z
          * without losing its label/history.
          */
         apiKeyEntries: z.array(ApiKeyEntrySchema).optional(),
+        /**
+         * When false (default), the proxy accepts any request — the
+         * `apiKeyEntries` registry is used purely to attribute traffic
+         * to a named client. When true, requests must present a key
+         * that matches an enabled entry; everything else gets 401.
+         * The Settings UI exposes this as "Block unknown connections."
+         */
+        enforce: z.boolean().optional(),
       })
       .optional(),
     providers: z.record(z.string(), ProviderConfigSchema).optional(),

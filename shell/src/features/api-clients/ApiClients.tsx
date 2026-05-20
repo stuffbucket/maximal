@@ -1,55 +1,30 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useState } from "react";
 
 import { Button } from "../../ui/Button";
 import { ConfirmDialog } from "../../ui/ConfirmDialog";
-import { Table, Tbody, Th, Thead, Tr } from "../../ui/Table";
 import type { ApiKeyEntry } from "../../../../src/lib/settings-types";
 
-import { AddKeyForm } from "./AddKeyForm";
-import { KeyRow } from "./KeyRow";
-import { WildcardSetting } from "./WildcardSetting";
+import { AddConnection } from "./AddConnection";
+import { AdvancedSection } from "./AdvancedSection";
+import { ConnectionCard } from "./ConnectionCard";
 import { useApiKeys } from "./useApiKeys";
 
-const WILDCARD_KEY = "*";
-
-/**
- * Root of the API-clients island. Per ADR-0002 Option C (the decided
- * direction), the UI shape is:
- *
- *   1. Wildcard is a setting (toggle), not a table row. It's a
- *      different shape of entity (one-of-a-kind, undeletable, lazy-
- *      materialized) and forcing it into a table row required three
- *      conditional branches per row component.
- *   2. User-created keys are a plain list. No "select keys" mode.
- *      Per-row delete via a trailing icon button revealed on hover.
- *      Confirmation modal handles the single-row delete case.
- *   3. Add flow is an inline form below the list, surfaced by clicking
- *      "+ Add API key." Replaces the always-present blank row (which
- *      was undiscoverable without explicit chrome).
- *
- * State this component owns:
- *  - `adding`        — whether the AddKeyForm is currently visible
- *  - `pendingDelete` — null or the entry awaiting confirmation
- *
- * Everything else is hook-driven (useApiKeys).
- */
 export function ApiClients(): JSX.Element {
-  const { entries, isLoading, error, reload, create, update, remove } =
-    useApiKeys();
+  const {
+    entries,
+    enforcing,
+    isLoading,
+    error,
+    reload,
+    create,
+    update,
+    remove,
+    setEnforce,
+  } = useApiKeys();
 
   const [adding, setAdding] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<ApiKeyEntry | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
-
-  const { wildcard, userEntries } = useMemo(() => {
-    let wild: ApiKeyEntry | null = null;
-    const users: Array<ApiKeyEntry> = [];
-    for (const entry of entries) {
-      if (entry.key === WILDCARD_KEY && wild === null) wild = entry;
-      else users.push(entry);
-    }
-    return { wildcard: wild, userEntries: users };
-  }, [entries]);
 
   const onConfirmDelete = useCallback(async (): Promise<void> => {
     if (!pendingDelete) return;
@@ -59,6 +34,8 @@ export function ApiClients(): JSX.Element {
     setDeleteBusy(false);
     setPendingDelete(null);
   }, [pendingDelete, remove, reload]);
+
+  const showEmpty = !isLoading && entries.length === 0 && !adding;
 
   return (
     <div className="api-clients">
@@ -71,73 +48,56 @@ export function ApiClients(): JSX.Element {
         </p>
       )}
 
-      <WildcardSetting
-        entry={wildcard}
-        create={create}
-        update={update}
-      />
+      <div className="connection-list">
+        {entries.map((entry) => (
+          <ConnectionCard
+            key={entry.id}
+            entry={entry}
+            update={update}
+            onDelete={() => setPendingDelete(entry)}
+          />
+        ))}
 
-      <div className="data-table">
-        <Table className="table table--api-keys">
-          <Thead>
-            <Tr>
-              <Th scope="col">API Key</Th>
-              <Th scope="col">Purpose</Th>
-              <Th scope="col">Enabled</Th>
-              <Th scope="col" className="sr-only">
-                Actions
-              </Th>
-            </Tr>
-          </Thead>
-          <Tbody>
-            {userEntries.map((entry) => (
-              <KeyRow
-                key={entry.id}
-                entry={entry}
-                update={update}
-                onDelete={() => setPendingDelete(entry)}
-              />
-            ))}
-          </Tbody>
-        </Table>
-
-        {userEntries.length === 0 && !adding && (
-          <p className="data-table__empty">
-            {isLoading
-              ? "Loading…"
-              : "No API keys yet. Add one below."}
+        {showEmpty && (
+          <p className="connection-list__empty">
+            Nothing here yet. Add a connection for each app you want to
+            recognize — Claude Code, Cursor, anything else.
           </p>
         )}
 
-        <div className="data-table__toolbar">
-          {adding ? (
-            <AddKeyForm
-              create={create}
-              onCreated={() => setAdding(false)}
-              onCancel={() => setAdding(false)}
-            />
-          ) : (
+        {adding ? (
+          <AddConnection
+            create={create}
+            onDone={() => setAdding(false)}
+          />
+        ) : (
+          <div className="connection-list__add">
             <Button
-              variant="ghost"
+              variant="primary"
               size="sm"
               onClick={() => setAdding(true)}
             >
-              + Add API key
+              + Add a connection
             </Button>
-          )}
-        </div>
+          </div>
+        )}
       </div>
+
+      <AdvancedSection
+        enforcing={enforcing}
+        setEnforce={setEnforce}
+      />
 
       <ConfirmDialog
         open={pendingDelete !== null}
         tone="danger"
-        title="Delete this API key?"
-        confirmLabel="Delete"
+        title="Remove this connection?"
+        confirmLabel="Remove"
         busy={deleteBusy}
         body={
           <p>
-            Apps using <strong>{pendingDelete?.label}</strong> will
-            lose access immediately. This cannot be undone.
+            <strong>{pendingDelete?.label}</strong> will no longer show up
+            on this list. You can always add it back later.
           </p>
         }
         onConfirm={onConfirmDelete}

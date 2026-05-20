@@ -22,6 +22,8 @@ export interface AppConfig {
     apiKeys?: Array<string>
     /** Structured registry managed by Settings → API clients. */
     apiKeyEntries?: Array<ApiKeyEntry>
+    /** When true, only requests with a known enabled key are accepted. */
+    enforce?: boolean
   }
   providers?: Record<string, ProviderConfig>
   extraPrompts?: Record<string, string>

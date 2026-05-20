@@ -114,6 +114,31 @@ body {
   padding-block-end: var(--space-6);
   overflow-y: auto;
   min-height: 0;
+  /* Always-visible thin scrollbar. macOS hides the overlay scrollbar by
+     default when idle, which left users with no signal that a section
+     scrolls. The standard scrollbar-width + scrollbar-color properties
+     cover Firefox; the WebKit pseudo-element rules below handle
+     Tauri/Safari. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-subtle) transparent;
+}
+
+.pane::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.pane::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.pane::-webkit-scrollbar-thumb {
+  background: var(--border-subtle);
+  border-radius: var(--radius-pill);
+}
+
+.pane::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
 }
 
 .section {
@@ -796,24 +821,6 @@ body {
   gap: var(--space-3);
 }
 
-/* ---- Footer ---- */
-.footer {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-5);
-  border-block-start: var(--border-width-hairline) solid var(--border-subtle);
-  background: var(--surface-card);
-  min-height: var(--footer-height);
-  position: sticky;
-  bottom: 0;
-  z-index: 1;
-}
-
-.footer__spacer {
-  flex: 1;
-}
-
 /* ---- Utilities ---- */
 .mono {
   font-family: var(--font-mono);
@@ -858,241 +865,286 @@ body {
   }
 }
 
-/* ---- Data-table chrome (Apple Settings pattern) ----
-   A rounded container that groups a table with a footer toolbar.
-   Used for the API-clients list. The toolbar holds + / - / wildcard
-   affordances pinned bottom-right; rows are direct-edit. */
-.data-table {
+/* ---- API clients: connection-card pattern ----
+   Designed for non-technical users (e.g. designers). Each app that
+   talks to Maximal is a card; the friendly name leads, the technical
+   key is secondary (masked + show/copy). The wildcard is hidden in
+   an Advanced disclosure below. No tables, no inline cell edits
+   except the connection's display name. */
+.api-clients {
   display: flex;
   flex-direction: column;
-  background: var(--surface-card);
-  border: var(--border-width-hairline) solid var(--border-subtle);
-  border-radius: var(--radius-card);
-  overflow: hidden;
+  gap: var(--space-5);
 }
 
-.data-table__empty {
+.connection-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.connection-list__empty {
   margin: 0;
   padding: var(--space-5) var(--space-4);
   text-align: center;
   font-size: var(--text-sm);
   color: var(--text-muted);
-}
-
-.data-table__toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  border-block-start: var(--border-width-hairline) solid var(--border-subtle);
   background: var(--surface-card);
+  border: var(--border-width-hairline) dashed var(--border-subtle);
+  border-radius: var(--radius-card);
 }
 
-.btn--icon {
-  width: var(--size-xl);
-  min-width: var(--size-xl);
-  padding: 0;
-  font-size: var(--text-lg);
-  font-weight: var(--weight-md);
-  line-height: 1;
+.connection-list__add {
+  display: flex;
+  justify-content: flex-start;
 }
 
-/* Tiny inline keycap, used in the data-table empty-state hint. */
-.kbd {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: var(--size-md);
-  padding: 0 var(--space-1);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  background: var(--surface-control);
+/* One card per connected app. */
+.connection-card {
+  background: var(--surface-card);
   border: var(--border-width-hairline) solid var(--border-subtle);
-  border-radius: var(--radius-chip);
+  border-radius: var(--radius-card);
+  padding: var(--space-4) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
 }
 
-/* ---- API keys table ---- */
-.table--api-keys {
-  /* Container provides the border + radius; the table itself sits
-     flush. Cells handle their own row padding. */
-  width: 100%;
-}
-
-.table--api-keys th:first-child,
-.table--api-keys td:first-child {
-  padding-inline-start: var(--space-4);
-}
-
-.table--api-keys th:last-child,
-.table--api-keys td:last-child {
-  padding-inline-end: var(--space-3);
-}
-
-.table--api-keys tbody tr:last-child td {
-  border-block-end: 0;
-}
-
-/* Editable label cell — click to edit in place. */
-.api-keys__label {
-  cursor: text;
-  font-size: var(--text-sm);
-  color: var(--text-strong);
-}
-
-.api-keys__label[data-editing="true"] {
-  padding-block: var(--space-1);
-}
-
-.api-keys__label input {
-  width: 100%;
-  background: var(--surface-control);
-  color: var(--text-strong);
-  border: var(--border-width-hairline) solid var(--border-strong);
-  border-radius: var(--radius-input);
-  padding: var(--space-1) var(--space-2);
-  font-family: var(--font-body);
-  font-size: var(--text-sm);
-  line-height: var(--leading-lg);
-}
-
-.api-keys__label input:focus-visible {
-  outline: var(--focus-ring);
-  outline-offset: 0;
-  border-color: var(--accent);
-}
-
-/* The "newly added, unsaved" row gets a subtle tint to signal
-   "this isn't real yet." Disappears once the POST resolves. */
-.table--api-keys tr.is-new {
-  background: var(--surface-control);
-}
-
-.table--api-keys tr.is-new td {
-  border-block-end: 0;
-}
-
-.table--api-keys td {
-  vertical-align: middle;
-}
-
-.api-keys__cell-key {
+.connection-card__head {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
+  gap: var(--space-3);
 }
 
-.api-keys__key-text {
-  flex: 1;
-  user-select: all;
-  cursor: pointer;
-  padding: var(--space-1) var(--space-2);
-  border-radius: var(--radius-input);
-  background: var(--surface-control);
+.connection-card__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--border-strong);
+  flex: 0 0 auto;
+}
+
+.connection-card__dot.is-active {
+  background: var(--accent);
+}
+
+.connection-card__name {
+  flex: 1 1 auto;
+  text-align: start;
+  background: transparent;
   border: var(--border-width-hairline) solid transparent;
-  letter-spacing: 0.04em;
+  border-radius: var(--radius-input);
+  padding: var(--space-1) var(--space-2);
+  margin-inline-start: calc(var(--space-2) * -1);
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+  cursor: text;
 }
 
-.api-keys__key-text:hover {
+.connection-card__name:hover {
   border-color: var(--border-subtle);
 }
 
-.api-keys__key-text[data-copied="true"] {
-  color: var(--accent);
-}
-
-.api-keys__cell-actions {
-  text-align: end;
-  white-space: nowrap;
-}
-
-.api-keys__cell-actions .btn {
-  margin-inline-start: var(--space-2);
-}
-
-.api-keys__toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  cursor: pointer;
-  font-size: var(--text-sm);
-}
-
-/* Inline-edit input variant for click-to-edit Purpose cells. */
-.api-keys__inline-input {
-  width: 100%;
-  background: var(--surface-control);
-  color: var(--text-strong);
-  border: var(--border-width-hairline) solid var(--border-strong);
-  border-radius: var(--radius-input);
-  padding: var(--space-1) var(--space-2);
-  font-family: var(--font-body);
-  font-size: var(--text-sm);
-  line-height: var(--leading-lg);
-}
-
-.api-keys__inline-input:focus-visible {
+.connection-card__name:focus-visible {
   outline: var(--focus-ring);
   outline-offset: 0;
-  border-color: var(--accent);
 }
 
-.api-keys__key-text--copied {
-  color: var(--accent);
+.connection-card__name-input {
+  flex: 1 1 auto;
+  background: var(--surface-control);
+  border: var(--border-width-hairline) solid var(--accent);
+  border-radius: var(--radius-input);
+  padding: var(--space-1) var(--space-2);
+  margin-inline-start: calc(var(--space-2) * -1);
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
 }
 
-/* Per-row delete affordance: trailing cell with a small ghost button.
-   Hidden until the row is hovered/focused, so the table reads as
-   data at rest and reveals the delete control on intent (Apple
-   System Settings pattern for Internet Accounts / Wi-Fi). */
-.api-keys__cell-delete {
-  width: var(--size-xl);
-  text-align: end;
-  padding-inline-end: var(--space-2);
+.connection-card__name-input:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 0;
 }
 
-.api-keys__delete-row {
+/* Hover/focus reveals the trash button on the right edge of the
+   header row — same intent pattern as Apple Internet Accounts. */
+.connection-card__delete {
   opacity: 0;
   transition: opacity 120ms ease-out;
-  padding-inline: var(--space-2);
+  flex: 0 0 auto;
 }
 
-.api-keys__row:hover .api-keys__delete-row,
-.api-keys__row:focus-within .api-keys__delete-row,
-.api-keys__delete-row:focus-visible {
+.connection-card:hover .connection-card__delete,
+.connection-card:focus-within .connection-card__delete,
+.connection-card__delete:focus-visible {
   opacity: 1;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .api-keys__delete-row {
+  .connection-card__delete {
     transition: none;
   }
 }
 
-/* ---- Wildcard setting ----
-   The wildcard `*` lives ABOVE the user-keys table as its own
-   labeled toggle (Apple System Settings pattern, cf. "AirDrop"
-   discoverability toggle). It's a different shape of entity from
-   user-created keys — one-of-a-kind, undeletable, lazy-materialized
-   — so it gets its own affordance instead of being row 1 of a
-   table that has to special-case it everywhere. */
-.wildcard-setting {
+.connection-card__body {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.connection-card__field {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.connection-card__field-label {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.connection-card__key {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.connection-card__key-text {
+  flex: 1 1 auto;
+  user-select: all;
+  padding: var(--space-1) var(--space-2);
+  background: var(--surface-control);
+  border-radius: var(--radius-input);
+  font-size: var(--text-sm);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.connection-card__key-text.is-copied {
+  color: var(--accent);
+}
+
+.connection-card__enabled {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  flex: 0 0 auto;
+  padding-block: var(--space-1);
+}
+
+/* ---- Add connection form ----
+   Surfaces inline when the user clicks "+ Add a connection." Single
+   text field — we generate the key. */
+.add-connection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
   background: var(--surface-card);
   border: var(--border-width-hairline) solid var(--border-subtle);
   border-radius: var(--radius-card);
   padding: var(--space-4) var(--space-5);
 }
 
-.wildcard-setting__row {
+.add-connection__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.add-connection__field-label {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+}
+
+.add-connection__hint {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.add-connection__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+/* ---- Advanced disclosure ----
+   Native <details>. Hosts the wildcard "Allow all connections"
+   toggle, hidden from the primary surface so non-technical users
+   don't have to make a security decision they don't understand. */
+.advanced-section {
+  background: var(--surface-card);
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  padding: var(--space-3) var(--space-4);
+}
+
+.advanced-section__summary {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  cursor: pointer;
+  padding: var(--space-1) 0;
+  list-style: none;
+}
+
+.advanced-section__summary::-webkit-details-marker {
+  display: none;
+}
+
+.advanced-section__summary::before {
+  content: "▸";
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  transition: transform 120ms ease-out;
+}
+
+.advanced-section[open] .advanced-section__summary::before {
+  transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .advanced-section__summary::before {
+    transition: none;
+  }
+}
+
+.advanced-section__title {
+  font-size: var(--text-base);
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+}
+
+.advanced-section__hint {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.advanced-section__body {
+  margin-block-start: var(--space-3);
+  padding-block-start: var(--space-3);
+  border-block-start: var(--border-width-hairline) solid var(--border-subtle);
+}
+
+.advanced-section__row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
 }
 
-.wildcard-setting__label {
+.advanced-section__label {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
@@ -1100,40 +1152,15 @@ body {
   min-width: 0;
 }
 
-.wildcard-setting__title {
+.advanced-section__row-title {
   font-size: var(--text-base);
-  font-weight: var(--weight-md);
   color: var(--text-strong);
 }
 
-.wildcard-setting__hint {
+.advanced-section__row-hint {
   font-size: var(--text-sm);
   color: var(--text-muted);
-  max-width: 65ch;
-}
-
-/* ---- Add-key form ----
-   Inline form that replaces the "always-present blank row" pattern.
-   Surfaces only when the user clicks "+ Add API key" so the table
-   reads cleanly at rest. */
-.add-key-form {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  flex: 1 1 auto;
-}
-
-.add-key-form__row {
-  display: grid;
-  grid-template-columns: 1fr 1fr auto;
-  gap: var(--space-3);
-  align-items: center;
-}
-
-.add-key-form__actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--space-2);
+  max-width: 60ch;
 }
 
 /* ---- Confirm dialog ----

@@ -19,12 +19,15 @@ function buildApp(opts: {
   loopbackOnlyPaths?: Array<string>
   allowUnauthenticatedPrefixes?: Array<string>
   ip: string | null
+  /** Defaults to true — pre-enforce-flag tests assume key gating is on. */
+  enforce?: boolean
 }) {
   const app = new Hono()
   app.use(
     "*",
     createAuthMiddleware({
       getApiKeys: () => opts.apiKeys,
+      isEnforcing: () => opts.enforce !== false,
       allowUnauthenticatedPaths: ["/"],
       loopbackOnlyPaths: opts.loopbackOnlyPaths,
       allowUnauthenticatedPrefixes: opts.allowUnauthenticatedPrefixes,
@@ -176,32 +179,8 @@ describe("createAuthMiddleware allowUnauthenticatedPrefixes", () => {
   })
 })
 
-describe("apiKeyAllowed wildcard", () => {
-  test('"*" in allow list accepts any non-empty bearer', async () => {
-    const app = buildApp({ apiKeys: ["*"], ip: "203.0.113.7" })
-    const res = await app.request("/v1/messages", {
-      method: "POST",
-      headers: { "x-api-key": "anything-goes-here" },
-    })
-    expect(res.status).toBe(200)
-  })
-
-  test('"*" still rejects when no bearer is sent', async () => {
-    const app = buildApp({ apiKeys: ["*"], ip: "203.0.113.7" })
-    const res = await app.request("/v1/messages", { method: "POST" })
-    expect(res.status).toBe(401)
-  })
-
-  test('exact match still works alongside "*"', async () => {
-    const app = buildApp({ apiKeys: ["*", "specific"], ip: "203.0.113.7" })
-    const res = await app.request("/v1/messages", {
-      method: "POST",
-      headers: { "x-api-key": "specific" },
-    })
-    expect(res.status).toBe(200)
-  })
-
-  test("no wildcard: unknown key rejected", async () => {
+describe("createAuthMiddleware key matching", () => {
+  test("unknown key rejected when enforcing", async () => {
     const app = buildApp({ apiKeys: ["specific"], ip: "203.0.113.7" })
     const res = await app.request("/v1/messages", {
       method: "POST",
@@ -388,6 +367,7 @@ describe("createAuthMiddleware OPTIONS bypass", () => {
       "*",
       createAuthMiddleware({
         getApiKeys: () => ["secret"],
+        isEnforcing: () => true,
         getRequestIp: () => "203.0.113.7",
       }),
     )
@@ -403,6 +383,7 @@ describe("createAuthMiddleware OPTIONS bypass", () => {
       "*",
       createAuthMiddleware({
         getApiKeys: () => ["secret"],
+        isEnforcing: () => true,
         allowOptionsBypass: false,
         getRequestIp: () => "203.0.113.7",
       }),
@@ -418,6 +399,7 @@ describe("createAuthMiddleware OPTIONS bypass", () => {
       "*",
       createAuthMiddleware({
         getApiKeys: () => ["secret"],
+        isEnforcing: () => true,
         allowOptionsBypass: true,
         getRequestIp: () => "203.0.113.7",
       }),
@@ -435,6 +417,7 @@ describe("createAuthMiddleware default allowUnauthenticatedPaths", () => {
       "*",
       createAuthMiddleware({
         getApiKeys: () => ["secret"],
+        isEnforcing: () => true,
         getRequestIp: () => "203.0.113.7",
       }),
     )
@@ -450,6 +433,7 @@ describe("createAuthMiddleware default allowUnauthenticatedPaths", () => {
       "*",
       createAuthMiddleware({
         getApiKeys: () => ["secret"],
+        isEnforcing: () => true,
         getRequestIp: () => "203.0.113.7",
       }),
     )
@@ -460,8 +444,12 @@ describe("createAuthMiddleware default allowUnauthenticatedPaths", () => {
 })
 
 describe("createAuthMiddleware bypass when no keys configured", () => {
-  test("empty allow list lets everything through", async () => {
-    const app = buildApp({ apiKeys: [], ip: "203.0.113.7" })
+  test("non-enforcing mode lets everything through regardless of key list", async () => {
+    const app = buildApp({
+      apiKeys: [],
+      ip: "203.0.113.7",
+      enforce: false,
+    })
     const res = await app.request("/v1/messages", { method: "POST" })
     expect(res.status).toBe(200)
     expect(await res.text()).toBe("messages-ok")
@@ -475,13 +463,9 @@ describe("createAuthMiddleware bypass when no keys configured", () => {
 })
 
 describe("apiKeyAllowed unit", () => {
-  test("empty request key is never allowed even with wildcard", () => {
-    expect(apiKeyAllowed(["*"], "")).toBe(false)
+  test("empty request key is never allowed", () => {
+    expect(apiKeyAllowed(["abc"], "")).toBe(false)
     expect(apiKeyAllowed([], "")).toBe(false)
-  })
-
-  test("non-empty key matches wildcard", () => {
-    expect(apiKeyAllowed(["*"], "any")).toBe(true)
   })
 
   test("non-empty key matches exact entry", () => {

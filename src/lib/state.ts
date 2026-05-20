@@ -34,6 +34,15 @@ export interface State {
   verbose: boolean
 
   copilotApiUrl?: string
+
+  /**
+   * Set by the Tauri shell at sidecar spawn (env var MAXIMAL_SHELL_KEY).
+   * When a request carries this exact key, auth always succeeds — even
+   * if the user has flipped "Block unknown connections" on. Lets the
+   * shell webview talk to its own backend without locking the user out.
+   * Empty/undefined when the sidecar runs standalone (CLI).
+   */
+  shellApiKey?: string
 }
 
 export const state: State = {
@@ -43,6 +52,7 @@ export const state: State = {
   showToken: false,
   verbose: false,
   vsCodeDeviceId: randomUUID(),
+  shellApiKey: process.env.MAXIMAL_SHELL_KEY?.trim() || undefined,
 }
 
 export function setCopilotToken(token: string): void {

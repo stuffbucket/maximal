@@ -46,8 +46,8 @@ describe("/api-keys GET /", () => {
     expect(body.enforcing).toBe(false)
   })
 
-  test("legacy apiKeys present → enforcing=true even with no entries", async () => {
-    fakeConfig = { auth: { apiKeys: ["legacy-key"] } }
+  test("enforce flag drives the enforcing field", async () => {
+    fakeConfig = { auth: { enforce: true } }
     const res = await buildApp().request("/api-keys")
     const body = (await res.json()) as { enforcing: boolean }
     expect(body.enforcing).toBe(true)

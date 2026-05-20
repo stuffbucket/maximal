@@ -141,8 +141,8 @@
             <header class="section__head">
               <h2 class="section__title">API clients</h2>
               <p class="section__sub">
-                Keys that local clients use to authenticate against this
-                proxy. Changes apply live — no restart needed.
+                Apps that talk to Maximal. Add one for each so you can tell
+                them apart — anything not listed still works by default.
               </p>
             </header>
             <div id="api-clients-root"></div>
@@ -267,6 +267,15 @@
               >
                 Copy debug bundle
               </button>
+              <button
+                type="button"
+                class="btn btn--secondary"
+                id="restart-proxy"
+                disabled
+                title="No restart-required change is staged."
+              >
+                Restart proxy
+              </button>
             </div>
           </section>
         </main>
@@ -275,19 +284,6 @@
       <!-- Quit-confirm dialog mounts here, outside the section grid so
            it can open regardless of which settings pane is active. -->
       <div id="quit-confirm-root"></div>
-
-      <footer class="footer">
-        <span class="footer__spacer"></span>
-        <button
-          type="button"
-          class="btn btn--secondary"
-          id="restart-proxy"
-          disabled
-          title="No restart-required change is staged."
-        >
-          Restart proxy
-        </button>
-      </footer>
     </div>
   </body>
 </html>

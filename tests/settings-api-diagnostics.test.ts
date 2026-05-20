@@ -40,6 +40,7 @@ describe("GET /settings/api/diagnostics", () => {
       "*",
       createAuthMiddleware({
         getApiKeys: () => ["test-key"],
+        isEnforcing: () => true,
         allowUnauthenticatedPaths: ["/", "/usage-viewer"],
       }),
     )

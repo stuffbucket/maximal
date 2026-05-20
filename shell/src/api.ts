@@ -22,6 +22,8 @@
  * so we don't need to refactor call sites then.
  */
 
+import { invoke } from "@tauri-apps/api/core"
+
 import type {
   ApiKeyEntry,
   ApiKeysListResponse,
@@ -119,6 +121,12 @@ type Endpoint =
       path: `/settings/api/api-keys/${string}`
     }
   | {
+      kind: "api-keys-enforce"
+      method: "PATCH"
+      path: "/settings/api/api-keys/enforce"
+      body: { enforce: boolean }
+    }
+  | {
       kind: "active-clients"
       method: "GET"
       path: `/settings/api/clients?maxAgeSeconds=${number}`
@@ -135,6 +143,7 @@ interface ResponseFor {
   "api-keys-create": ApiKeyEntry
   "api-keys-update": ApiKeyEntry
   "api-keys-delete": { ok: true }
+  "api-keys-enforce": ApiKeysListResponse
   "active-clients": ActiveApiClientsResponse
 }
 
@@ -161,18 +170,36 @@ function baseUrl(): string {
   return ""
 }
 
-function resolveApiKey(override?: string): string | undefined {
+// Shell-internal key cache. Populated by the first apiCall and reused
+// for the lifetime of the webview. A reload re-enters this module and
+// re-fetches — that's fine; the Rust shell holds the key in process
+// memory and serves it on demand.
+let shellKeyCache: string | null = null
+let shellKeyFetched = false
+
+async function resolveShellApiKey(): Promise<string | null> {
+  if (shellKeyFetched) return shellKeyCache
+  try {
+    shellKeyCache = await invoke<string>("get_shell_api_key")
+  } catch {
+    // Not running inside Tauri (e.g. `bun run dev` opens the UI in a
+    // plain browser at :1420), or the command isn't registered. Leave
+    // the cache null; downstream falls back to VITE_API_KEY or no key.
+    shellKeyCache = null
+  }
+  shellKeyFetched = true
+  return shellKeyCache
+}
+
+async function resolveApiKey(override?: string): Promise<string | undefined> {
   if (override) return override
-  // Dev: VITE_API_KEY in .env.local. Prod: TODO wire via Tauri.
-  const key = import.meta.env.VITE_API_KEY
-  if (typeof key === "string" && key.length > 0) return key
-  // Dev-mode fallback: send `*` so the React island can talk to the
-  // proxy without manual env-var setup. The proxy accepts this iff
-  // the configured allow-list contains "*" (the wildcard row toggled
-  // on) — see apiKeyAllowed in src/lib/request-auth.ts. Outside dev
-  // mode, return undefined so production never silently auto-auths.
-  if (import.meta.env.DEV) return "*"
-  return undefined
+  // Dev (Vite at :1420 in a plain browser) reads VITE_API_KEY first
+  // so a developer can pin a specific key. Otherwise we ask the Tauri
+  // shell for the per-launch key it injected into the sidecar.
+  const envKey = import.meta.env.VITE_API_KEY
+  if (typeof envKey === "string" && envKey.length > 0) return envKey
+  const shellKey = await resolveShellApiKey()
+  return shellKey ?? undefined
 }
 
 export async function apiCall<K extends EndpointKind>(
@@ -186,7 +213,7 @@ export async function apiCall<K extends EndpointKind>(
   const headers: Record<string, string> = {
     accept: "application/json",
   }
-  const apiKey = resolveApiKey(options.apiKey)
+  const apiKey = await resolveApiKey(options.apiKey)
   if (apiKey) headers["x-api-key"] = apiKey
 
   // Discriminated-union members carry an optional `body` field on
