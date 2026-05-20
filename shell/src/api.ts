@@ -165,7 +165,14 @@ function resolveApiKey(override?: string): string | undefined {
   if (override) return override
   // Dev: VITE_API_KEY in .env.local. Prod: TODO wire via Tauri.
   const key = import.meta.env.VITE_API_KEY
-  return typeof key === "string" && key.length > 0 ? key : undefined
+  if (typeof key === "string" && key.length > 0) return key
+  // Dev-mode fallback: send `*` so the React island can talk to the
+  // proxy without manual env-var setup. The proxy accepts this iff
+  // the configured allow-list contains "*" (the wildcard row toggled
+  // on) — see apiKeyAllowed in src/lib/request-auth.ts. Outside dev
+  // mode, return undefined so production never silently auto-auths.
+  if (import.meta.env.DEV) return "*"
+  return undefined
 }
 
 export async function apiCall<K extends EndpointKind>(
