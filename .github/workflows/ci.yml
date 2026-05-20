@@ -5,6 +5,10 @@ on:
     branches: [ "main", "dev" ]
   pull_request:
     types: [opened, synchronize, reopened]
+  # GitHub merge queue: dispatched against synthetic
+  # gh-readonly-queue/<base>/... refs. Required status checks must run
+  # here too or the queue blocks indefinitely waiting for them.
+  merge_group:
 
 jobs:
   test:

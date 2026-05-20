@@ -5,6 +5,8 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # See ci.yml — required checks must also run on merge_group.
+  merge_group:
   schedule:
     - cron: "27 6 * * 1"
 
