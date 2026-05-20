@@ -1,17 +1,18 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22">
   <!--
     Tray icon — normal state.
-    Squircle "m" matches the app icon (build/macos/app-icon.svg).
-    Sized for menubar use (renders at ~22pt on macOS). Stays full-color
-    on purpose: macOS template-image behavior is opt-in via a special
-    NSImage name suffix Tauri doesn't expose, so we ship a colored asset
-    and let the OS handle dark/light backgrounds.
+    ViewBox sized in points (22×22) to match macOS HIG menu-bar geometry.
+    PNGs are rendered at 22 (1x) and 44 (2x) so AppKit places them at
+    the native menu-bar height without scale-down softening.
+    Stays full-color on purpose: macOS template-image behavior is opt-in
+    via a special NSImage name suffix Tauri doesn't expose, so we ship
+    a colored asset and let the OS handle dark/light backgrounds.
   -->
-  <rect x="6" y="6" width="52" height="52" rx="12" ry="12" fill="#c8334a"/>
-  <text x="32" y="48"
+  <rect x="1" y="1" width="20" height="20" rx="5" ry="5" fill="#c8334a"/>
+  <text x="11" y="16.5"
         font-family="-apple-system, Helvetica, sans-serif"
         font-weight="900"
-        font-size="44"
+        font-size="16"
         fill="#f4ead4"
         text-anchor="middle">m</text>
 </svg>

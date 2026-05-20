@@ -57,7 +57,7 @@ use tauri::{
     image::Image,
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Listener, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder,
+    AppHandle, Emitter, Listener, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder,
     WindowEvent,
 };
 use tauri_plugin_opener::OpenerExt;
@@ -83,13 +83,16 @@ const SETTINGS_WINDOW_LABEL: &str = "settings";
 const DASHBOARD_WINDOW_LABEL: &str = "dashboard";
 
 // Tray icon assets — embedded at compile time so we don't have to
-// resolve resource paths at runtime. The PNGs are canonical bytes;
-// the matching SVGs in icons/tray/ are the editable source kept
-// alongside for future hand-tuning. Tauri's image-png feature decodes
-// these via the `image` crate (see Cargo.toml).
-const TRAY_ICON_NORMAL: &[u8] = include_bytes!("../icons/tray/icon.png");
-const TRAY_ICON_STARTING: &[u8] = include_bytes!("../icons/tray/icon-starting.png");
-const TRAY_ICON_ATTENTION: &[u8] = include_bytes!("../icons/tray/icon-attention.png");
+// resolve resource paths at runtime. The SVG sources live alongside
+// at icons/tray/*.svg; the PNGs are pre-rendered at the @2x retina
+// size (44×44) so AppKit downsamples cleanly to the 22pt menu-bar
+// height that HIG calls for. Loading the 1× 22-pixel PNG instead
+// made the icon visibly smaller than its neighbors on retina because
+// AppKit treats the pixel size as the logical size by default.
+// Tauri's image-png feature decodes these via the `image` crate.
+const TRAY_ICON_NORMAL: &[u8] = include_bytes!("../icons/tray/icon@2x.png");
+const TRAY_ICON_STARTING: &[u8] = include_bytes!("../icons/tray/icon-starting@2x.png");
+const TRAY_ICON_ATTENTION: &[u8] = include_bytes!("../icons/tray/icon-attention@2x.png");
 
 mod menu_id {
     pub const SETTINGS: &str = "settings";
@@ -163,6 +166,46 @@ impl AppStatus {
     }
 }
 
+/// Random per-launch key the shell shares with its sidecar so the
+/// webview can authenticate against /settings/api/* even when the user
+/// has enabled "Block unknown connections." Injected as an env var when
+/// spawning the sidecar; surfaced to the webview through the
+/// `get_shell_api_key` Tauri command.
+///
+/// Lifetime is the shell process — a relaunch picks a fresh value, no
+/// disk persistence. The sidecar dies with us, so there's no orphan key
+/// to clean up.
+struct ShellApiKey(String);
+
+impl ShellApiKey {
+    fn new() -> Self {
+        Self(generate_shell_api_key())
+    }
+
+    fn value(&self) -> &str {
+        &self.0
+    }
+}
+
+/// 16 random bytes from `/dev/urandom`, hex-encoded, with a recognisable
+/// prefix so it's greppable in logs / config diffs. Total length 41
+/// chars — comfortably inside the sidecar's API_KEY_VALUE_PATTERN range
+/// (8–128 chars of [A-Za-z0-9_-]).
+fn generate_shell_api_key() -> String {
+    use std::io::Read;
+    let mut buf = [0u8; 16];
+    std::fs::File::open("/dev/urandom")
+        .and_then(|mut f| f.read_exact(&mut buf))
+        .expect("could not read /dev/urandom for shell api key");
+    let hex: String = buf.iter().map(|b| format!("{:02x}", b)).collect();
+    format!("mxlshell_{}", hex)
+}
+
+#[tauri::command]
+fn get_shell_api_key(state: State<'_, ShellApiKey>) -> String {
+    state.value().to_string()
+}
+
 #[derive(Debug, Deserialize)]
 struct SetupCheckResult {
     ok: bool,
@@ -186,12 +229,14 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .manage(Sidecar::new())
         .manage(AppStatus::new())
+        .manage(ShellApiKey::new())
         .invoke_handler(tauri::generate_handler![
             open_settings_at,
             open_dashboard,
             reveal_config_dir,
             reveal_logs_dir,
             confirm_quit,
+            get_shell_api_key,
         ])
         .setup(|app| {
             // Menu-bar app: start with no Dock icon. update_activation_policy
@@ -200,6 +245,12 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             {
                 let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+                // Dock icon: AppKit normally reads CFBundleIconFile from the
+                // .app's Info.plist, which `cargo run` doesn't produce. Set
+                // the icon explicitly from the embedded PNG so the Dock entry
+                // (visible whenever Settings/Dashboard is up) shows the
+                // Maximal mark in dev too.
+                set_dock_icon();
             }
 
             // Install the tray FIRST so the user has a Quit affordance
@@ -285,6 +336,14 @@ fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
     // but setting NODE_ENV=production removes any ambiguity inside
     // a Tauri-launched sidecar.
     cmd = cmd.env("NODE_ENV", "production");
+    // Shell-internal API key — the webview reads it via the
+    // `get_shell_api_key` Tauri command and sends it on every
+    // /settings/api/* request. Lets the user's own UI keep working
+    // after they flip "Block unknown connections."
+    cmd = cmd.env(
+        "MAXIMAL_SHELL_KEY",
+        app.state::<ShellApiKey>().value().to_string(),
+    );
     let mut dist_set = false;
     if let Ok(resource_dir) = app.path().resource_dir() {
         let settings_dist = resource_dir.join("settings-dist");
@@ -482,6 +541,40 @@ fn refresh_tray(app: &AppHandle, state: SidecarState) -> tauri::Result<()> {
     tray.set_icon(Some(icon_for(state)?))?;
     tray.set_tooltip(Some(tooltip_for(state)))?;
     Ok(())
+}
+
+/// Embedded Dock icon — the same PNG referenced from tauri.conf.json's
+/// `bundle.icon` so the dev-mode Dock matches the packaged build.
+#[cfg(target_os = "macos")]
+const DOCK_ICON_PNG: &[u8] = include_bytes!("../icons/icon.png");
+
+/// Set NSApplication.applicationIconImage from the embedded PNG. Called
+/// once at setup; AppKit holds the reference for the lifetime of the
+/// process. No-op on non-macOS.
+#[cfg(target_os = "macos")]
+fn set_dock_icon() {
+    use objc2::AnyThread;
+    use objc2_app_kit::{NSApplication, NSImage};
+    use objc2_foundation::{MainThreadMarker, NSData};
+
+    let Some(mtm) = MainThreadMarker::new() else {
+        eprintln!("[shell] set_dock_icon: not on main thread, skipping");
+        return;
+    };
+
+    // NSData::with_bytes copies the slice, so the &'static borrow from
+    // include_bytes! is fine. NSImage::initWithData returns None if the
+    // data can't be decoded; we silently skip in that case.
+    let data = NSData::with_bytes(DOCK_ICON_PNG);
+    let alloc = NSImage::alloc();
+    let Some(image) = NSImage::initWithData(alloc, &data) else {
+        eprintln!("[shell] set_dock_icon: NSImage decode failed");
+        return;
+    };
+    let app = NSApplication::sharedApplication(mtm);
+    unsafe {
+        app.setApplicationIconImage(Some(&image));
+    }
 }
 
 fn icon_for(state: SidecarState) -> tauri::Result<Image<'static>> {
@@ -825,6 +918,14 @@ fn update_activation_policy(app: &AppHandle) {
     };
     if let Err(err) = app.set_activation_policy(next) {
         eprintln!("[shell] set_activation_policy failed: {err}");
+    }
+    // Re-apply the Dock icon whenever the Dock entry is (re-)created.
+    // AppKit re-resolves NSApplication.applicationIconImage on Regular →
+    // Accessory → Regular transitions; without this, a `cargo run` dev
+    // binary falls back to the generic "exec" icon because no Info.plist
+    // CFBundleIconFile exists.
+    if any_visible {
+        set_dock_icon();
     }
 }
 

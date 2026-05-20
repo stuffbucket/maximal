@@ -36,3 +36,13 @@ tokio = { version = "1", features = ["time"] }
 # Url parsing for WebviewUrl::External(...) — the settings deep-link
 # url builder.
 url = "2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Set NSApplication.applicationIconImage at startup so the Dock shows
+# the Maximal mark even when running via `cargo run` (which doesn't
+# build a .app bundle and therefore has no Info.plist CFBundleIconFile
+# for AppKit to read). Same crates Tauri's own macOS code uses; the
+# direct dep just lets us name them.
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSImage"] }
+objc2-foundation = { version = "0.3", features = ["NSData"] }

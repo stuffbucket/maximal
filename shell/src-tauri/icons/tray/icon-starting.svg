@@ -1,11 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22">
   <!-- Starting variant: same glyph at ~45% opacity. Reads as "waking up". -->
   <g opacity="0.45">
-    <rect x="6" y="6" width="52" height="52" rx="12" ry="12" fill="#c8334a"/>
-    <text x="32" y="48"
+    <rect x="1" y="1" width="20" height="20" rx="5" ry="5" fill="#c8334a"/>
+    <text x="11" y="16.5"
           font-family="-apple-system, Helvetica, sans-serif"
           font-weight="900"
-          font-size="44"
+          font-size="16"
           fill="#f4ead4"
           text-anchor="middle">m</text>
   </g>
