@@ -4,6 +4,7 @@ import { Checkbox } from "../../ui/Checkbox";
 import { Td, Tr } from "../../ui/Table";
 import { cx } from "../../ui/cx";
 import type { ApiKeyEntry } from "../../../../src/lib/settings-types";
+import { SelectCell } from "./SelectCell";
 import type { MutationResult } from "./useApiKeys";
 
 interface KeyRowProps {
@@ -94,18 +95,13 @@ export function KeyRow({
       className={cx(selected && "api-keys__row--selected")}
       data-key-id={entry.id}
     >
-      <Td
-        className={cx(
-          "api-keys__select-col",
-          !selectMode && "api-keys__select-col--hidden",
-        )}
-      >
-        <Checkbox
-          checked={selected}
-          onCheckedChange={(next) => onToggleSelected(entry.id, next)}
-          aria-label={`Select ${entry.label}`}
-        />
-      </Td>
+      <SelectCell
+        selectMode={selectMode}
+        selectable
+        selected={selected}
+        onToggle={(next) => onToggleSelected(entry.id, next)}
+        ariaLabel={`Select ${entry.label}`}
+      />
       <Td>
         <div className="api-keys__cell-key">
           <span

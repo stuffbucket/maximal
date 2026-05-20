@@ -328,7 +328,7 @@ body {
 }
 
 .card__hint {
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
   color: var(--text-muted);
   line-height: var(--leading-lg);
 }
@@ -370,7 +370,7 @@ body {
   border: var(--border-width-hairline) solid var(--border-subtle);
   border-radius: var(--radius-input);
   font-family: var(--font-mono);
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
   line-height: var(--leading-base);
   color: var(--text-base-color);
   overflow-x: auto;
@@ -460,7 +460,7 @@ body {
 
 .form__hint {
   margin: 0;
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
   color: var(--text-muted);
   line-height: var(--leading-lg);
 }
@@ -557,6 +557,62 @@ body {
   cursor: not-allowed;
 }
 
+/* ---- Checkbox ----
+   Custom-painted native checkbox (parallel to .switch). The bare UA
+   input was nearly invisible on the dark surface, which caused the
+   "disabled wildcard checkbox more visible than active user checkbox"
+   inversion. Treat checked-fill, focus ring, and disabled identically
+   to .switch so the two controls feel related. */
+.checkbox {
+  appearance: none;
+  width: var(--size-md);
+  height: var(--size-md);
+  background: var(--surface-control);
+  border: var(--border-width-hairline) solid var(--border-strong);
+  border-radius: var(--radius-chip);
+  position: relative;
+  margin: 0;
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.checkbox:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.checkbox:checked::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  display: block;
+  margin: auto;
+  width: 6px;
+  height: 10px;
+  border-right: 2px solid var(--accent-fg);
+  border-bottom: 2px solid var(--accent-fg);
+  transform: translate(0, -1px) rotate(45deg);
+}
+
+.checkbox:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.checkbox:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--text-strong);
+  cursor: pointer;
+}
+
 /* ---- Buttons ---- */
 .btn {
   display: inline-flex;
@@ -613,7 +669,7 @@ body {
 }
 
 .btn--sm {
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
   padding: var(--space-1) var(--space-3);
   min-height: var(--size-lg);
 }
@@ -646,7 +702,7 @@ body {
   align-items: center;
   padding: 0 var(--space-2);
   min-height: var(--size-md);
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
   font-weight: var(--weight-md);
   color: var(--text-base-color);
   background: var(--surface-control);
@@ -690,7 +746,7 @@ body {
 .table th {
   font-weight: var(--weight-md);
   color: var(--text-muted);
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
   letter-spacing: 0.02em;
   text-transform: uppercase;
 }
@@ -925,7 +981,7 @@ body {
   align-items: center;
   gap: var(--space-2);
   font-family: var(--font-mono);
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
 }
 
 .api-keys__key-text {
@@ -984,6 +1040,14 @@ body {
   color: var(--text-muted);
 }
 
+/* The wildcard `*` is a literal config value, not a maskable secret.
+   Render it as plain mono — no input-pill chrome, no copy affordance. */
+.api-keys__wildcard-glyph {
+  font-size: var(--text-md);
+  color: var(--text-strong);
+  letter-spacing: 0.05em;
+}
+
 .api-keys__row--new {
   background: var(--surface-control);
 }
@@ -992,18 +1056,21 @@ body {
   border-block-end: 0;
 }
 
-/* Inline-edit input variant for the blank row. Minimal chrome so the
-   row reads as data, not a form — focus ring is the only signal. */
+/* Inline-edit input variant for the blank row. Hairline border at
+   rest so it's discoverable as "you can type here" — without that,
+   the row looked empty and ADR-0002's "type to add a key" UX was
+   undiscoverable. Brighter chrome on focus. */
 .api-keys__inline-input {
   width: 100%;
-  background: transparent;
+  background: var(--surface-base);
   color: var(--text-strong);
-  border: var(--border-width-hairline) solid transparent;
+  border: var(--border-width-hairline) solid var(--border-subtle);
   border-radius: var(--radius-input);
   padding: var(--space-1) var(--space-2);
   font-family: var(--font-body);
   font-size: var(--text-sm);
   line-height: var(--leading-lg);
+  min-height: var(--size-lg);
 }
 
 .api-keys__inline-input.mono {
@@ -1012,13 +1079,14 @@ body {
 
 .api-keys__inline-input::placeholder {
   color: var(--text-muted);
+  font-style: italic;
 }
 
 .api-keys__inline-input:focus-visible {
   outline: var(--focus-ring);
   outline-offset: 0;
   border-color: var(--accent);
-  background: var(--surface-base);
+  background: var(--surface-control);
 }
 
 .api-keys__key-text--copied {

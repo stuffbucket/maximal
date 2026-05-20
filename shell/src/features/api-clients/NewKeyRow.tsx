@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { Checkbox } from "../../ui/Checkbox";
 import { Td, Tr } from "../../ui/Table";
-import { cx } from "../../ui/cx";
+import { SelectCell } from "./SelectCell";
 import type { MutationResult } from "./useApiKeys";
 
 interface NewKeyRowProps {
@@ -84,14 +84,7 @@ export function NewKeyRow({
 
   return (
     <Tr className="api-keys__row--new">
-      <Td
-        className={cx(
-          "api-keys__select-col",
-          !selectMode && "api-keys__select-col--hidden",
-        )}
-      >
-        {/* Nothing to select on the blank row yet. */}
-      </Td>
+      <SelectCell selectMode={selectMode} selectable={false} />
       <Td>
         <input
           ref={keyInputRef}
