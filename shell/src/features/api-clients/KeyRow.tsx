@@ -2,20 +2,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Checkbox } from "../../ui/Checkbox";
 import { Td, Tr } from "../../ui/Table";
-import { cx } from "../../ui/cx";
 import type { ApiKeyEntry } from "../../../../src/lib/settings-types";
-import { SelectCell } from "./SelectCell";
 import type { MutationResult } from "./useApiKeys";
 
 interface KeyRowProps {
   entry: ApiKeyEntry;
-  selectMode: boolean;
-  selected: boolean;
-  onToggleSelected: (id: string, next: boolean) => void;
   update: (
     id: string,
     patch: { label?: string; key?: string; enabled?: boolean },
   ) => Promise<MutationResult>;
+  onDelete: () => void;
 }
 
 const MASK_CAP = 24;
@@ -27,17 +23,21 @@ function mask(value: string): string {
 }
 
 /**
- * One user-created API key row. Owns its own "is editing the label"
- * and "is the key shown / hidden / just copied" UI state; all
- * persistent state (label / enabled / key value) lives in the parent
- * via the entry prop + the `update` callback.
+ * One user-created API key row.
+ *
+ * State this row owns:
+ *  - showKey / copied — Show / Hide affordance + click-to-copy flash
+ *  - editingLabel / labelDraft — click-to-edit Purpose cell
+ *
+ * Selection mode is gone — per Option C, each row owns its own
+ * delete via a trailing icon button revealed on hover. The wildcard
+ * `*` is rendered as a separate WildcardSetting above the table, so
+ * this row doesn't need to special-case the literal `*` either.
  */
 export function KeyRow({
   entry,
-  selectMode,
-  selected,
-  onToggleSelected,
   update,
+  onDelete,
 }: KeyRowProps): JSX.Element {
   const [showKey, setShowKey] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -45,10 +45,6 @@ export function KeyRow({
   const [labelDraft, setLabelDraft] = useState(entry.label);
   const labelInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Resync the draft when the entry's label changes from elsewhere
-  // (e.g. after a successful PATCH triggers a reload). Without this,
-  // a stale draft would clobber the new authoritative value on next
-  // commit.
   useEffect(() => {
     if (!editingLabel) setLabelDraft(entry.label);
   }, [entry.label, editingLabel]);
@@ -84,31 +80,19 @@ export function KeyRow({
       setCopied(true);
       window.setTimeout(() => setCopied(false), COPIED_FLASH_MS);
     } catch {
-      // Clipboard API unavailable (e.g. insecure context). Silent
-      // failure is acceptable — the user can still toggle Show and
-      // select the text manually.
+      // Clipboard API unavailable (e.g. insecure context). Silent.
     }
   };
 
   return (
-    <Tr
-      className={cx(selected && "api-keys__row--selected")}
-      data-key-id={entry.id}
-    >
-      <SelectCell
-        selectMode={selectMode}
-        selectable
-        selected={selected}
-        onToggle={(next) => onToggleSelected(entry.id, next)}
-        ariaLabel={`Select ${entry.label}`}
-      />
+    <Tr className="api-keys__row" data-key-id={entry.id}>
       <Td>
         <div className="api-keys__cell-key">
           <span
-            className={cx(
-              "api-keys__key-text mono",
-              copied && "api-keys__key-text--copied",
-            )}
+            className={
+              "api-keys__key-text mono"
+              + (copied ? " api-keys__key-text--copied" : "")
+            }
             role="button"
             tabIndex={0}
             title="Click to copy"
@@ -142,6 +126,7 @@ export function KeyRow({
           <input
             ref={labelInputRef}
             type="text"
+            className="api-keys__inline-input"
             value={labelDraft}
             onChange={(e) => setLabelDraft(e.target.value)}
             onBlur={commitLabel}
@@ -159,6 +144,18 @@ export function KeyRow({
           }
           aria-label={`Enable ${entry.label}`}
         />
+      </Td>
+      <Td className="api-keys__cell-delete">
+        <button
+          type="button"
+          className="btn btn--ghost btn--sm api-keys__delete-row"
+          onClick={onDelete}
+          aria-label={`Delete ${entry.label}`}
+          title={`Delete ${entry.label}`}
+        >
+          {/* Trailing trash glyph — appears on row hover via CSS. */}
+          ✕
+        </button>
       </Td>
     </Tr>
   );

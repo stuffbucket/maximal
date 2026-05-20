@@ -1020,81 +1020,120 @@ body {
   font-size: var(--text-sm);
 }
 
-/* React island: Select-column visibility is driven by a class on the
-   <th>/<td> rather than by conditional rendering, so toggling the
-   mode flips visibility without re-keying every row in the diff. */
-.api-keys__select-col {
-  width: var(--size-lg);
-  text-align: center;
-}
-
-.api-keys__select-col--hidden {
-  display: none;
-}
-
-.api-keys__row--selected {
-  background: var(--surface-control);
-}
-
-.api-keys__row--wildcard .api-keys__label {
-  color: var(--text-muted);
-}
-
-/* The wildcard `*` is a literal config value, not a maskable secret.
-   Render it as plain mono — no input-pill chrome, no copy affordance. */
-.api-keys__wildcard-glyph {
-  font-size: var(--text-md);
-  color: var(--text-strong);
-  letter-spacing: 0.05em;
-}
-
-.api-keys__row--new {
-  background: var(--surface-control);
-}
-
-.api-keys__row--new td {
-  border-block-end: 0;
-}
-
-/* Inline-edit input variant for the blank row. Hairline border at
-   rest so it's discoverable as "you can type here" — without that,
-   the row looked empty and ADR-0002's "type to add a key" UX was
-   undiscoverable. Brighter chrome on focus. */
+/* Inline-edit input variant for click-to-edit Purpose cells. */
 .api-keys__inline-input {
   width: 100%;
-  background: var(--surface-base);
+  background: var(--surface-control);
   color: var(--text-strong);
-  border: var(--border-width-hairline) solid var(--border-subtle);
+  border: var(--border-width-hairline) solid var(--border-strong);
   border-radius: var(--radius-input);
   padding: var(--space-1) var(--space-2);
   font-family: var(--font-body);
   font-size: var(--text-sm);
   line-height: var(--leading-lg);
-  min-height: var(--size-lg);
-}
-
-.api-keys__inline-input.mono {
-  font-family: var(--font-mono);
-}
-
-.api-keys__inline-input::placeholder {
-  color: var(--text-muted);
-  font-style: italic;
 }
 
 .api-keys__inline-input:focus-visible {
   outline: var(--focus-ring);
   outline-offset: 0;
   border-color: var(--accent);
-  background: var(--surface-control);
 }
 
 .api-keys__key-text--copied {
   color: var(--accent);
 }
 
-.api-keys__delete-btn {
-  margin-inline-end: var(--space-2);
+/* Per-row delete affordance: trailing cell with a small ghost button.
+   Hidden until the row is hovered/focused, so the table reads as
+   data at rest and reveals the delete control on intent (Apple
+   System Settings pattern for Internet Accounts / Wi-Fi). */
+.api-keys__cell-delete {
+  width: var(--size-xl);
+  text-align: end;
+  padding-inline-end: var(--space-2);
+}
+
+.api-keys__delete-row {
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+  padding-inline: var(--space-2);
+}
+
+.api-keys__row:hover .api-keys__delete-row,
+.api-keys__row:focus-within .api-keys__delete-row,
+.api-keys__delete-row:focus-visible {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .api-keys__delete-row {
+    transition: none;
+  }
+}
+
+/* ---- Wildcard setting ----
+   The wildcard `*` lives ABOVE the user-keys table as its own
+   labeled toggle (Apple System Settings pattern, cf. "AirDrop"
+   discoverability toggle). It's a different shape of entity from
+   user-created keys — one-of-a-kind, undeletable, lazy-materialized
+   — so it gets its own affordance instead of being row 1 of a
+   table that has to special-case it everywhere. */
+.wildcard-setting {
+  background: var(--surface-card);
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  padding: var(--space-4) var(--space-5);
+}
+
+.wildcard-setting__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.wildcard-setting__label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.wildcard-setting__title {
+  font-size: var(--text-base);
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+}
+
+.wildcard-setting__hint {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  max-width: 65ch;
+}
+
+/* ---- Add-key form ----
+   Inline form that replaces the "always-present blank row" pattern.
+   Surfaces only when the user clicks "+ Add API key" so the table
+   reads cleanly at rest. */
+.add-key-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  flex: 1 1 auto;
+}
+
+.add-key-form__row {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.add-key-form__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
 }
 
 /* ---- Confirm dialog ----
