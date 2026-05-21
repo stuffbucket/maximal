@@ -103,8 +103,6 @@ mod menu_id {
     pub const STARTING: &str = "starting";
     pub const FAILED: &str = "failed";
     pub const SHOW_LOGS: &str = "show_logs";
-    pub const REVEAL_CONFIG: &str = "reveal_config";
-    pub const REVEAL_LOGS: &str = "reveal_logs";
 }
 
 /// High-level tray state. Each transition rebuilds the menu and swaps
@@ -642,22 +640,7 @@ fn build_menu(app: &AppHandle, state: SidecarState) -> tauri::Result<Menu<tauri:
                 true,
                 None::<&str>,
             )?;
-            let reveal_config = MenuItem::with_id(
-                app,
-                menu_id::REVEAL_CONFIG,
-                "Reveal config in Finder…",
-                true,
-                None::<&str>,
-            )?;
-            let reveal_logs = MenuItem::with_id(
-                app,
-                menu_id::REVEAL_LOGS,
-                "Reveal logs in Finder…",
-                true,
-                None::<&str>,
-            )?;
             let sep2 = PredefinedMenuItem::separator(app)?;
-            let sep3 = PredefinedMenuItem::separator(app)?;
             Menu::with_items(
                 app,
                 &[
@@ -666,9 +649,6 @@ fn build_menu(app: &AppHandle, state: SidecarState) -> tauri::Result<Menu<tauri:
                     &dashboard_item,
                     &settings_item,
                     &sep2,
-                    &reveal_config,
-                    &reveal_logs,
-                    &sep3,
                     &quit_item,
                 ],
             )
@@ -685,22 +665,7 @@ fn build_menu(app: &AppHandle, state: SidecarState) -> tauri::Result<Menu<tauri:
                 false,
                 None::<&str>,
             )?;
-            let reveal_config = MenuItem::with_id(
-                app,
-                menu_id::REVEAL_CONFIG,
-                "Reveal config in Finder…",
-                true,
-                None::<&str>,
-            )?;
-            let reveal_logs = MenuItem::with_id(
-                app,
-                menu_id::REVEAL_LOGS,
-                "Reveal logs in Finder…",
-                true,
-                None::<&str>,
-            )?;
             let sep2 = PredefinedMenuItem::separator(app)?;
-            let sep3 = PredefinedMenuItem::separator(app)?;
             Menu::with_items(
                 app,
                 &[
@@ -709,9 +674,6 @@ fn build_menu(app: &AppHandle, state: SidecarState) -> tauri::Result<Menu<tauri:
                     &dashboard_item,
                     &settings_item,
                     &sep2,
-                    &reveal_config,
-                    &reveal_logs,
-                    &sep3,
                     &quit_item,
                 ],
             )
@@ -744,8 +706,7 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
         menu_id::SETTINGS => open_settings_window(app, None),
         menu_id::DASHBOARD => open_dashboard_window(app),
         menu_id::SIGN_IN => open_settings_window(app, Some("account")),
-        menu_id::REVEAL_CONFIG => do_reveal_config_dir(app),
-        menu_id::REVEAL_LOGS | menu_id::SHOW_LOGS => do_reveal_logs_dir(app),
+        menu_id::SHOW_LOGS => do_reveal_logs_dir(app),
         menu_id::QUIT => request_quit(app),
         _ => {}
     }
@@ -796,7 +757,7 @@ fn open_settings_window(app: &AppHandle, section: Option<&str>) {
         SETTINGS_WINDOW_LABEL,
         WebviewUrl::External(url),
     )
-    .title("Maximal")
+    .title("Maximal — Settings")
     .inner_size(900.0, 640.0)
     .min_inner_size(600.0, 480.0);
 
@@ -940,30 +901,38 @@ const QUIT_REQUESTED_EVENT: &str = "app://quit-requested";
 
 /// Entry point for the tray's "Quit Maximal" item. Picks a host window
 /// for the confirmation dialog:
-///   * If Settings or Dashboard is currently visible → emit the event
-///     to it directly.
-///   * Otherwise → open the Dashboard, then emit once it has loaded.
+///   * If Settings is currently visible → emit the event to it.
+///   * Otherwise → open Settings, then emit once it has loaded.
+/// Dashboard is intentionally NOT a host: only Settings mounts the
+/// QuitConfirmDialog React island. Picking Dashboard previously caused
+/// the tray Quit item to open the usage page with no visible dialog.
 fn request_quit(app: &AppHandle) {
-    // Prefer Settings if it's already visible, then Dashboard.
-    for label in [SETTINGS_WINDOW_LABEL, DASHBOARD_WINDOW_LABEL] {
-        if let Some(win) = app.get_webview_window(label) {
-            if win.is_visible().unwrap_or(false) {
-                if let Err(err) = app.emit_to(label, QUIT_REQUESTED_EVENT, ()) {
-                    eprintln!("[shell] emit quit-requested to {label} failed: {err}");
-                }
-                let _ = win.set_focus();
-                return;
+    // Use Settings if it's already visible (the only window that hosts
+    // the QuitConfirmDialog island). Dashboard is a separate sidecar-
+    // served page and doesn't listen for app://quit-requested.
+    if let Some(win) = app.get_webview_window(SETTINGS_WINDOW_LABEL) {
+        if win.is_visible().unwrap_or(false) {
+            if let Err(err) = app.emit_to(SETTINGS_WINDOW_LABEL, QUIT_REQUESTED_EVENT, ()) {
+                eprintln!("[shell] emit quit-requested to settings failed: {err}");
             }
+            let _ = win.set_focus();
+            return;
         }
     }
 
-    // No visible host. Open the Dashboard and emit once it signals
-    // load-end. If the UI never loads, the user can re-trigger Quit
-    // from the tray (or kill the process); we don't add a timeout
-    // fallback to silently exit, since that would mask real failures.
-    open_dashboard_window(app);
-    let Some(window) = app.get_webview_window(DASHBOARD_WINDOW_LABEL) else {
-        eprintln!("[shell] could not obtain dashboard window for quit prompt");
+    // No visible host. Open Settings (NOT Dashboard) and emit once it
+    // signals load-end. Settings is the only window that mounts the
+    // QuitConfirmDialog React island (see shell/index.html
+    // #quit-confirm-root + shell/src/quit-island.tsx). Dashboard
+    // points at the sidecar's /usage-viewer, a separate page with no
+    // listener for app://quit-requested — so picking it as the host
+    // made the tray's Quit item silently open the wrong window with
+    // no confirm dialog. If the UI never loads, the user can
+    // re-trigger Quit from the tray; we don't add a timeout fallback
+    // to silently exit, since that would mask real failures.
+    open_settings_window(app, None);
+    let Some(window) = app.get_webview_window(SETTINGS_WINDOW_LABEL) else {
+        eprintln!("[shell] could not obtain settings window for quit prompt");
         return;
     };
     let _ = window.show();
@@ -973,7 +942,7 @@ fn request_quit(app: &AppHandle) {
     let app_clone = app.clone();
     window.once("tauri://load-end", move |_| {
         if let Err(err) =
-            app_clone.emit_to(DASHBOARD_WINDOW_LABEL, QUIT_REQUESTED_EVENT, ())
+            app_clone.emit_to(SETTINGS_WINDOW_LABEL, QUIT_REQUESTED_EVENT, ())
         {
             eprintln!("[shell] emit quit-requested (post-load) failed: {err}");
         }

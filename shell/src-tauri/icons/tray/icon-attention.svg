@@ -1,15 +1,23 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22">
   <!--
-    Attention variant: normal glyph + accent-colored dot in the upper-
-    right corner. Mirrors macOS badge conventions.
+    Attention (RunningUnauthenticated) variant: inverted color scheme.
+    White squircle with the "m" punched through to transparency (the
+    menubar shows through the glyph), plus a crimson dot in the upper-
+    right as the "needs your attention" indicator. Mirrors the Adobe
+    Creative Cloud / Microsoft-Outlook style menubar-badge pattern.
   -->
-  <rect x="1" y="1" width="20" height="20" rx="5" ry="5" fill="#c8334a"/>
-  <text x="11" y="16.5"
-        font-family="-apple-system, Helvetica, sans-serif"
-        font-weight="900"
-        font-size="16"
-        fill="#f4ead4"
-        text-anchor="middle">m</text>
-  <circle cx="17" cy="5" r="3.6" fill="#f4ead4"/>
-  <circle cx="17" cy="5" r="2.6" fill="#c8334a"/>
+  <defs>
+    <mask id="m-cutout">
+      <rect x="1" y="1" width="20" height="20" rx="5" ry="5" fill="white"/>
+      <text x="11" y="16.5"
+            font-family="-apple-system, Helvetica, sans-serif"
+            font-weight="900"
+            font-size="16"
+            fill="black"
+            text-anchor="middle">m</text>
+    </mask>
+  </defs>
+  <rect x="1" y="1" width="20" height="20" rx="5" ry="5"
+        fill="#ffffff" mask="url(#m-cutout)"/>
+  <circle cx="17" cy="5" r="3" fill="#c8334a"/>
 </svg>

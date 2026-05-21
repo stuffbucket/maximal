@@ -195,6 +195,11 @@ function wireDiagnostics(): void {
     ?.addEventListener("click", () => {
       void copyDiagnosticsAsJson();
     });
+  document
+    .querySelector('[data-section="diagnostics"] [data-action="reveal-config"]')
+    ?.addEventListener("click", () => {
+      void safeInvoke("reveal_config_dir");
+    });
 }
 
 // ---- Account section -------------------------------------------------------
