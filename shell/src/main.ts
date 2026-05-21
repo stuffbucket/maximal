@@ -4,7 +4,6 @@ import type { DiagnosticsResponse } from "../../src/lib/settings-types";
 import type { AuthStatus } from "./api";
 import { apiCall } from "./api";
 import { mountApiClients } from "./api-clients-island";
-import { mountQuitConfirm } from "./quit-island";
 
 type SectionId =
   | "account"
@@ -520,7 +519,6 @@ window.addEventListener("DOMContentLoaded", () => {
   wireDiagnostics();
   wireAccount();
   mountApiClients();
-  mountQuitConfirm();
   wireNav();
   syncFromHash();
   void loadDiagnostics();

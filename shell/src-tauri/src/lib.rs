@@ -35,18 +35,10 @@
 //
 // Quit flow:
 //   1. Tray "Quit Maximal" fires `menu_id::QUIT`.
-//   2. If a Settings or Dashboard window is visible, we emit
-//      `app://quit-requested` to it. The React UI listens and shows a
-//      QuitConfirmDialog.
-//   3. If neither window is visible, we open the Dashboard, wait for
-//      `tauri://load-end`, then emit `app://quit-requested`.
-//   4. User clicks "Quit Maximal" in the modal → `invoke('confirm_quit')`
-//      → kills the sidecar and exits. Cancel just closes the modal
-//      locally; no IPC needed.
-//
-// Event/command contract for the React side:
-//   Event   : "app://quit-requested"          (Rust → JS)
-//   Command : invoke('confirm_quit')          (JS → Rust)
+//   2. `request_quit` pops a native confirm via tauri-plugin-dialog.
+//      No webview involvement, no JS, no event-emit/listen race.
+//   3. On accept → `app.exit(0)` → RunEvent::ExitRequested →
+//      `kill_sidecar` (SIGTERM + 3s SIGKILL escalation) → process exit.
 
 use std::sync::Mutex;
 use std::time::Duration;
@@ -58,8 +50,7 @@ use tauri::{
     ipc::Channel,
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Listener, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder,
-    WindowEvent,
+    AppHandle, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
@@ -342,6 +333,7 @@ pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(Sidecar::new())
         .manage(AppStatus::new())
         .manage(ShellApiKey::new())
@@ -350,7 +342,6 @@ pub fn run() {
             open_dashboard,
             reveal_config_dir,
             reveal_logs_dir,
-            confirm_quit,
             get_shell_api_key,
             subscribe_token_usage,
         ])
@@ -1082,60 +1073,34 @@ fn update_activation_policy(app: &AppHandle) {
 #[cfg(not(target_os = "macos"))]
 fn update_activation_policy(_app: &AppHandle) {}
 
-/// Event emitted from Rust to the React UI to ask for a quit
-/// confirmation. The React side listens with
-/// `listen('app://quit-requested', ...)` and pops a QuitConfirmDialog.
-/// User confirmation routes back through the `confirm_quit` command.
-const QUIT_REQUESTED_EVENT: &str = "app://quit-requested";
-
-/// Entry point for the tray's "Quit Maximal" item. Picks a host window
-/// for the confirmation dialog:
-///   * If Settings is currently visible → emit the event to it.
-///   * Otherwise → open Settings, then emit once it has loaded.
-/// Dashboard is intentionally NOT a host: only Settings mounts the
-/// QuitConfirmDialog React island. Picking Dashboard previously caused
-/// the tray Quit item to open the usage page with no visible dialog.
+/// Entry point for the tray's "Quit Maximal" item. Pops a native
+/// confirm dialog via `tauri-plugin-dialog`; on accept, calls
+/// `app.exit(0)` which routes through `RunEvent::ExitRequested` →
+/// `kill_sidecar` (graceful SIGTERM + 3s SIGKILL escalation).
+///
+/// Previous implementation opened the Settings webview, emitted an
+/// `app://quit-requested` event, and listened from a React modal
+/// (QuitConfirmDialog island). That fought a `tauri://load-end` race
+/// when Settings was hidden-but-loaded (close-to-tray state) — the
+/// event fired before the modal could re-mount, and the dialog
+/// silently never appeared. The native dialog has no such race: it's
+/// owned by the OS, not by our webview's lifecycle.
 fn request_quit(app: &AppHandle) {
-    // Use Settings if it's already visible (the only window that hosts
-    // the QuitConfirmDialog island). Dashboard is a separate sidecar-
-    // served page and doesn't listen for app://quit-requested.
-    if let Some(win) = app.get_webview_window(SETTINGS_WINDOW_LABEL) {
-        if win.is_visible().unwrap_or(false) {
-            if let Err(err) = app.emit_to(SETTINGS_WINDOW_LABEL, QUIT_REQUESTED_EVENT, ()) {
-                eprintln!("[shell] emit quit-requested to settings failed: {err}");
-            }
-            let _ = win.set_focus();
-            return;
-        }
-    }
-
-    // No visible host. Open Settings (NOT Dashboard) and emit once it
-    // signals load-end. Settings is the only window that mounts the
-    // QuitConfirmDialog React island (see shell/index.html
-    // #quit-confirm-root + shell/src/quit-island.tsx). Dashboard
-    // points at the sidecar's /usage-viewer, a separate page with no
-    // listener for app://quit-requested — so picking it as the host
-    // made the tray's Quit item silently open the wrong window with
-    // no confirm dialog. If the UI never loads, the user can
-    // re-trigger Quit from the tray; we don't add a timeout fallback
-    // to silently exit, since that would mask real failures.
-    open_settings_window(app, None);
-    let Some(window) = app.get_webview_window(SETTINGS_WINDOW_LABEL) else {
-        eprintln!("[shell] could not obtain settings window for quit prompt");
-        return;
-    };
-    let _ = window.show();
-    let _ = window.set_focus();
-    update_activation_policy(app);
-
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
     let app_clone = app.clone();
-    window.once("tauri://load-end", move |_| {
-        if let Err(err) =
-            app_clone.emit_to(SETTINGS_WINDOW_LABEL, QUIT_REQUESTED_EVENT, ())
-        {
-            eprintln!("[shell] emit quit-requested (post-load) failed: {err}");
-        }
-    });
+    app.dialog()
+        .message("Maximal will stop and any open Settings windows will close.")
+        .title("Quit Maximal?")
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            "Quit Maximal".into(),
+            "Cancel".into(),
+        ))
+        .show(move |confirmed| {
+            if confirmed {
+                app_clone.exit(0);
+            }
+        });
 }
 
 /// Tauri command exposed to the frontend.
@@ -1174,10 +1139,3 @@ fn reveal_logs_dir(app: AppHandle) {
     do_reveal_logs_dir(&app);
 }
 
-/// Tauri command — the QuitConfirmDialog calls this when the user
-/// clicks "Quit Maximal" in the modal. Routes through `app.exit(0)`,
-/// which fires RunEvent::ExitRequested → kill_sidecar → process exit.
-#[tauri::command]
-fn confirm_quit(app: AppHandle) {
-    app.exit(0);
-}
