@@ -34,6 +34,7 @@ const tailwindVendorPath = tailwindVendorImport as unknown as string
 import { completionRoutes } from "./routes/chat-completions/route"
 import { debugRoutes } from "./routes/debug/route"
 import { embeddingRoutes } from "./routes/embeddings/route"
+import { internalRoutes } from "./routes/internal/route"
 import { messageRoutes } from "./routes/messages/route"
 import { modelRoutes } from "./routes/models/route"
 import { providerMessageRoutes } from "./routes/provider/messages/route"
@@ -73,7 +74,16 @@ server.use(
     // same machine. Trusting loopback lets us drop the client-side API
     // key UI (and its clear-text storage) without exposing the same
     // endpoints to remote callers, who still need a valid API key.
-    loopbackOnlyPaths: ["/usage", "/token-usage", "/token-usage/events"],
+    loopbackOnlyPaths: [
+      "/usage",
+      "/token-usage",
+      "/token-usage/events",
+      // Shutdown endpoint is loopback-gated. The route handler itself
+      // *also* enforces loopback (a remote caller with a valid API key
+      // must NOT be able to evict the running instance), but listing
+      // it here means we skip the auth dance for the local caller.
+      "/_internal/shutdown",
+    ],
   }),
 )
 
@@ -95,41 +105,47 @@ server.use(
 )
 
 server.get("/", (c) => c.text("Server running"))
+// Our own dashboard assets — `no-store` so the Tauri webview (and any
+// browser tabs) always pull fresh on reload. A previous `max-age=86400`
+// caused WKWebView to serve stale HTML/JS for 24h after every iteration,
+// making it look like our shipped changes never landed.
+const NO_STORE_HTML = {
+  "content-type": "text/html; charset=utf-8",
+  "cache-control": "no-store",
+} as const
+const NO_STORE_CSS = {
+  "content-type": "text/css; charset=utf-8",
+  "cache-control": "no-store",
+} as const
+const NO_STORE_JS = {
+  "content-type": "application/javascript; charset=utf-8",
+  "cache-control": "no-store",
+} as const
+
 server.get("/usage-viewer", async (c) =>
-  c.html(await Bun.file(usageViewerPath).text()),
+  c.body(await Bun.file(usageViewerPath).bytes(), 200, NO_STORE_HTML),
 )
 server.get("/usage-viewer/", (c) => c.redirect("/usage-viewer", 301))
-
-// Sibling assets for the dashboard — extracted from the HTML to keep
-// each file single-concern. Bun's `with { type: "file" }` embeds them
-// in the compiled binary the same way it embeds the vendor scripts.
-const CSS_HEADERS = {
-  "content-type": "text/css; charset=utf-8",
-  "cache-control": "public, max-age=86400",
-} as const
-const JS_HEADERS = {
-  "content-type": "application/javascript; charset=utf-8",
-  "cache-control": "public, max-age=86400",
-} as const
 server.get("/usage-viewer.css", async (c) =>
-  c.body(await Bun.file(usageViewerCssPath).bytes(), 200, CSS_HEADERS),
+  c.body(await Bun.file(usageViewerCssPath).bytes(), 200, NO_STORE_CSS),
 )
 server.get("/usage-viewer.js", async (c) =>
-  c.body(await Bun.file(usageViewerJsPath).bytes(), 200, JS_HEADERS),
+  c.body(await Bun.file(usageViewerJsPath).bytes(), 200, NO_STORE_JS),
 )
 
-// Vendored third-party assets for the dashboard. Inlined as a small
-// allowlist rather than a wildcard static handler to keep the surface
-// area minimal and avoid path-traversal concerns. Both are pinned
-// versions checked into the repo under `src/pages/vendor/`.
+// Vendored third-party assets — also no-store. They're checked into the
+// repo, served over loopback, and load in under a millisecond. There is
+// no scenario where caching them helps; there are several where it hurts
+// (Lucide or Tailwind version bumps not appearing until cache expiry).
 server.get("/vendor/lucide.min.js", async (c) =>
-  c.body(await Bun.file(lucideVendorPath).bytes(), 200, JS_HEADERS),
+  c.body(await Bun.file(lucideVendorPath).bytes(), 200, NO_STORE_JS),
 )
 server.get("/vendor/tailwind.min.js", async (c) =>
-  c.body(await Bun.file(tailwindVendorPath).bytes(), 200, JS_HEADERS),
+  c.body(await Bun.file(tailwindVendorPath).bytes(), 200, NO_STORE_JS),
 )
 
 server.route("/_debug", debugRoutes)
+server.route("/_internal", internalRoutes)
 server.route("/setup-status", setupStatusRoute)
 // `/settings/api/*` requires API-key auth (covers the new auth endpoints too).
 // `/settings/*` static bundle inherits whatever its route handler enforces.

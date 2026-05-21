@@ -50,6 +50,7 @@ describe("start command CLI args — exact key set", () => {
         "port",
         "proxy-env",
         "rate-limit",
+        "replace",
         "show-token",
         "verbose",
         "wait",

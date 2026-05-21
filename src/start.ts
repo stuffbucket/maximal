@@ -12,6 +12,12 @@ import { createHandlerLogger } from "./lib/logger"
 import { initOpencodeVersion } from "./lib/opencode"
 import { ensurePaths } from "./lib/paths"
 import { initProxyFromEnv } from "./lib/proxy"
+import {
+  evictRunning,
+  removePidfile,
+  writePidfile,
+} from "./lib/replace-running"
+import { getConfiguredApiKeys } from "./lib/request-auth"
 import { ensureSecretsDir, loadSecretIntoEnv, SECRET_DEFS } from "./lib/secrets"
 import { generateEnvScript } from "./lib/shell"
 import { state } from "./lib/state"
@@ -36,6 +42,9 @@ interface RunServerOptions {
   claudeCode: boolean
   showToken: boolean
   proxyEnv: boolean
+  /** Evict any running instance on :4142 before binding. Optional —
+   *  test fixtures + non-CLI callers can omit; treated as false. */
+  replace?: boolean
 }
 
 /**
@@ -48,6 +57,60 @@ interface RunServerOptions {
  *                  meaning another copy of maximal is already up.
  *   - "other"    — something answered but it isn't us.
  */
+/** Wrap evictRunning() with the CLI's error-handling. On failure to
+ *  free the port we exit 1 with a readable message rather than dumping
+ *  a stack trace. */
+async function maybeEvictRunning(port: number): Promise<void> {
+  const keys = getConfiguredApiKeys()
+  const apiKey = keys[0] ?? null
+  try {
+    await evictRunning({ apiKey, port })
+  } catch (error) {
+    consola.error(error instanceof Error ? error.message : String(error))
+    process.exit(1)
+  }
+}
+
+/** Print a friendly explanation of why the port is held and exit 1.
+ *  Extracted so `runServer` stays inside the 100-line lint cap. */
+function reportPortBusyAndExit(
+  port: number,
+  portState: "maximal" | "other",
+): never {
+  const url = `http://localhost:${port}`
+  if (portState === "maximal") {
+    consola.warn(
+      [
+        `Another maximal is already running on port ${port}.`,
+        ``,
+        `It's already listening at ${url}. Point your client at`,
+        `that URL — no second instance needed.`,
+        ``,
+        `If you want a separate copy on another port:`,
+        `    maximal start --port ${port + 1}`,
+      ].join("\n"),
+    )
+  } else {
+    const lookupHint =
+      process.platform === "win32" ?
+        `netstat -ano | findstr :${port}`
+      : `lsof -i :${port}`
+    consola.error(
+      [
+        `Port ${port} is already in use by another process.`,
+        ``,
+        `Either stop whatever is holding the port, or pick a`,
+        `different one:`,
+        `    maximal start --port ${port + 1}`,
+        ``,
+        `Find the offender with:`,
+        `    ${lookupHint}`,
+      ].join("\n"),
+    )
+  }
+  process.exit(1)
+}
+
 async function probePort(port: number): Promise<"free" | "maximal" | "other"> {
   try {
     const res = await fetch(`http://localhost:${port}/`, {
@@ -71,43 +134,16 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   // and without this line the terminal just sits silent.
   consola.start("Starting maximal…")
 
+  // If --replace was passed, try to take over the port from a
+  // running instance before the regular probe.
+  if (options.replace) {
+    await maybeEvictRunning(options.port)
+  }
+
   // Bail out early if the port is already taken — much friendlier
   // than crashing 5s later inside srvx with EADDRINUSE.
   const portState = await probePort(options.port)
-  if (portState !== "free") {
-    const url = `http://localhost:${options.port}`
-    if (portState === "maximal") {
-      consola.warn(
-        [
-          `Another maximal is already running on port ${options.port}.`,
-          ``,
-          `It's already listening at ${url}. Point your client at`,
-          `that URL — no second instance needed.`,
-          ``,
-          `If you want a separate copy on another port:`,
-          `    maximal start --port ${options.port + 1}`,
-        ].join("\n"),
-      )
-    } else {
-      const lookupHint =
-        process.platform === "win32" ?
-          `netstat -ano | findstr :${options.port}`
-        : `lsof -i :${options.port}`
-      consola.error(
-        [
-          `Port ${options.port} is already in use by another process.`,
-          ``,
-          `Either stop whatever is holding the port, or pick a`,
-          `different one:`,
-          `    maximal start --port ${options.port + 1}`,
-          ``,
-          `Find the offender with:`,
-          `    ${lookupHint}`,
-        ].join("\n"),
-      )
-    }
-    process.exit(1)
-  }
+  if (portState !== "free") reportPortBusyAndExit(options.port, portState)
 
   // Ensure config is merged with defaults at startup
   mergeConfigWithDefaults()
@@ -189,6 +225,11 @@ export async function runServer(options: RunServerOptions): Promise<void> {
     },
   })
 
+  // Best-effort: record our PID so a future `maximal start --replace`
+  // can fall back to SIGTERM/SIGKILL if the graceful shutdown route
+  // doesn't free the port in time.
+  void writePidfile()
+
   installShutdownHandlers(httpServer)
 }
 
@@ -222,6 +263,9 @@ async function initiateShutdown(
     consola.warn("shutdown: server.close() threw", error)
   }
 
+  // Pidfile is a hint, not a lock — best-effort cleanup.
+  await removePidfile()
+
   clearTimeout(watchdog)
   process.exit(0)
 }
@@ -232,6 +276,9 @@ async function initiateShutdown(
 function installShutdownHandlers(httpServer: ReturnType<typeof serve>): void {
   process.on("SIGTERM", () => {
     void initiateShutdown(httpServer, "received SIGTERM")
+  })
+  process.on("SIGINT", () => {
+    void initiateShutdown(httpServer, "received SIGINT")
   })
 
   const parentPidStr = process.env.MAXIMAL_SIDECAR_PARENT_PID
@@ -466,6 +513,11 @@ export const start = defineCommand({
       default: false,
       description: "Initialize proxy from environment variables",
     },
+    replace: {
+      type: "boolean",
+      default: false,
+      description: "Evict any running instance and take over the port",
+    },
   },
   run({ args }) {
     const rateLimitRaw = args["rate-limit"]
@@ -484,6 +536,7 @@ export const start = defineCommand({
       claudeCode: args["claude-code"],
       showToken: args["show-token"],
       proxyEnv: args["proxy-env"],
+      replace: args.replace,
     })
   },
 })

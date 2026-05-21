@@ -1,0 +1,52 @@
+# App-defined Tauri commands.
+#
+# Tauri 2's ACL doesn't auto-generate permissions for our own
+# `#[tauri::command]` functions — only for plugin commands. So when the
+# Dashboard webview (loaded from http://localhost:4142 — a "remote"
+# origin in Tauri's classification) invokes one of these, the ACL
+# rejects it with "Plugin not found" unless the command is named in a
+# permission file like this one.
+#
+# All commands listed here are referenced by capabilities/default.json
+# and capabilities/loopback.json via the `default` permission set.
+
+[default]
+description = "Permissions for Maximal's own Tauri commands."
+permissions = [
+  "allow-open-settings-at",
+  "allow-open-dashboard",
+  "allow-reveal-config-dir",
+  "allow-reveal-logs-dir",
+  "allow-get-shell-api-key",
+  "allow-subscribe-token-usage",
+]
+
+[[permission]]
+identifier = "allow-open-settings-at"
+description = "Open Settings, optionally scrolled to a section."
+commands.allow = ["open_settings_at"]
+
+[[permission]]
+identifier = "allow-open-dashboard"
+description = "Open the usage Dashboard."
+commands.allow = ["open_dashboard"]
+
+[[permission]]
+identifier = "allow-reveal-config-dir"
+description = "Reveal the maximal config directory in Finder/Explorer."
+commands.allow = ["reveal_config_dir"]
+
+[[permission]]
+identifier = "allow-reveal-logs-dir"
+description = "Reveal the maximal logs directory in Finder/Explorer."
+commands.allow = ["reveal_logs_dir"]
+
+[[permission]]
+identifier = "allow-get-shell-api-key"
+description = "Return the per-launch shell API key so the webview can authenticate against the sidecar even when 'Block unknown connections' is on."
+commands.allow = ["get_shell_api_key"]
+
+[[permission]]
+identifier = "allow-subscribe-token-usage"
+description = "Stream live token-usage updates to the Dashboard via Channel<TokenUsageEvent>."
+commands.allow = ["subscribe_token_usage"]

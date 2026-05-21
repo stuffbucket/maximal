@@ -170,6 +170,7 @@ function baseOptions(over: Partial<Parameters<typeof runServer>[0]> = {}) {
     claudeCode: false,
     showToken: false,
     proxyEnv: false,
+    replace: false,
     ...over,
   }
 }

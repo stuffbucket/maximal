@@ -26,6 +26,12 @@ tauri-plugin-shell = "2"
 # Replaces the previous hand-rolled React modal that fought a
 # `tauri://load-end` race when triggered from a hidden window.
 tauri-plugin-dialog = "2"
+# Enforces a single running Maximal process and routes second-launch
+# argv to the first instance. `--replace` in argv triggers a graceful
+# shutdown of the existing instance so the second can take :4142.
+# `deep-link` feature is opt-in scaffolding for a future deep-link
+# integration; it's cheap (no extra runtime cost) and harmless today.
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Polls the sidecar's /setup-status endpoint to drive tray state.

@@ -331,6 +331,24 @@ struct SetupStatusResponse {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
+        // MUST be the FIRST plugin registered. The single-instance
+        // plugin's callback fires as part of plugin init; registering
+        // it after another plugin lets the second-launch handler race
+        // shell startup. Semantics:
+        //   * argv contains "--replace" → existing instance shuts down
+        //     gracefully (same path as the tray Quit item, minus the
+        //     confirm dialog) so the second process can claim :4142.
+        //   * otherwise → focus the most-likely-visible window
+        //     (Settings preferred, Dashboard fallback, open Settings
+        //     if neither exists yet). The second process exits silently.
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            let wants_replace = argv.iter().any(|a| a == "--replace");
+            if wants_replace {
+                graceful_shutdown(app);
+            } else {
+                focus_or_open_main_window(app);
+            }
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
@@ -352,11 +370,12 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             {
                 let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
-                // Dock icon: AppKit normally reads CFBundleIconFile from the
-                // .app's Info.plist, which `cargo run` doesn't produce. Set
-                // the icon explicitly from the embedded PNG so the Dock entry
-                // (visible whenever Settings/Dashboard is up) shows the
-                // Maximal mark in dev too.
+                // Dock icon: in release the .app bundle's Info.plist
+                // CFBundleIconFile (driven by `bundle.icon` in
+                // tauri.conf.json) handles this. `cargo run` doesn't
+                // produce a bundle, so set the icon explicitly in debug
+                // builds only — release builds skip the FFI dance.
+                #[cfg(debug_assertions)]
                 set_dock_icon();
             }
 
@@ -723,13 +742,15 @@ fn refresh_tray(app: &AppHandle, state: SidecarState) -> tauri::Result<()> {
 
 /// Embedded Dock icon — the same PNG referenced from tauri.conf.json's
 /// `bundle.icon` so the dev-mode Dock matches the packaged build.
-#[cfg(target_os = "macos")]
+/// Debug-only: release builds get the icon from the .app bundle's
+/// Info.plist (CFBundleIconFile), which Tauri populates from `bundle.icon`.
+#[cfg(all(target_os = "macos", debug_assertions))]
 const DOCK_ICON_PNG: &[u8] = include_bytes!("../icons/icon.png");
 
 /// Set NSApplication.applicationIconImage from the embedded PNG. Called
 /// once at setup; AppKit holds the reference for the lifetime of the
-/// process. No-op on non-macOS.
-#[cfg(target_os = "macos")]
+/// process. Debug-only on macOS — release builds rely on the bundle.
+#[cfg(all(target_os = "macos", debug_assertions))]
 fn set_dock_icon() {
     use objc2::AnyThread;
     use objc2_app_kit::{NSApplication, NSImage};
@@ -1060,11 +1081,12 @@ fn update_activation_policy(app: &AppHandle) {
     if let Err(err) = app.set_activation_policy(next) {
         eprintln!("[shell] set_activation_policy failed: {err}");
     }
-    // Re-apply the Dock icon whenever the Dock entry is (re-)created.
-    // AppKit re-resolves NSApplication.applicationIconImage on Regular →
-    // Accessory → Regular transitions; without this, a `cargo run` dev
-    // binary falls back to the generic "exec" icon because no Info.plist
-    // CFBundleIconFile exists.
+    // Re-apply the Dock icon in debug builds only. AppKit re-resolves
+    // NSApplication.applicationIconImage on Accessory → Regular
+    // transitions; without this re-apply, a `cargo run` dev binary
+    // falls back to the generic "exec" icon (no Info.plist
+    // CFBundleIconFile exists). In release the bundle handles this.
+    #[cfg(debug_assertions)]
     if any_visible {
         set_dock_icon();
     }
@@ -1101,6 +1123,44 @@ fn request_quit(app: &AppHandle) {
                 app_clone.exit(0);
             }
         });
+}
+
+/// Graceful shutdown from the single-instance `--replace` path.
+///
+/// Reuses the same teardown path as the tray Quit item, MINUS the
+/// confirm dialog: a second `maximal --replace` invocation is the
+/// user (or a CLI/installer) explicitly asking the running instance
+/// to release :4142, so prompting them would just be in the way.
+///
+/// `app.exit(0)` routes through `RunEvent::ExitRequested` →
+/// `kill_sidecar` (SIGTERM + 3s SIGKILL escalation), which is exactly
+/// the cleanup we need. Kept as its own function so the intent of the
+/// single-instance callback stays legible.
+fn graceful_shutdown(app: &AppHandle) {
+    app.exit(0);
+}
+
+/// Focus an existing main window, or open Settings if none exists.
+///
+/// Called from the single-instance plugin callback when the user
+/// re-launches Maximal without `--replace` — the natural "they double-
+/// clicked the dock icon" case. Settings is the default surface;
+/// Dashboard is the fallback if Settings isn't built yet but
+/// Dashboard is. If neither exists we open Settings fresh, which
+/// also runs `update_activation_policy` to bring the Dock icon back.
+fn focus_or_open_main_window(app: &AppHandle) {
+    for label in [SETTINGS_WINDOW_LABEL, DASHBOARD_WINDOW_LABEL] {
+        if let Some(window) = app.get_webview_window(label) {
+            let _ = window.unminimize();
+            let _ = window.show();
+            let _ = window.set_focus();
+            update_activation_policy(app);
+            return;
+        }
+    }
+    // Nothing built yet — fall through to opening Settings, which
+    // also handles the activation-policy flip.
+    open_settings_window(app, None);
 }
 
 /// Tauri command exposed to the frontend.
