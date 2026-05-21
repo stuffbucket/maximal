@@ -2,7 +2,10 @@
 // Loaded with `defer`, so the DOM is ready by the time this runs.
 
 const endpointForm = document.getElementById("endpoint-form");
-const tokenUsagePeriodSelect = document.getElementById("token-usage-period");
+const tokenUsagePeriodGroup = document.getElementById("token-usage-period");
+const tokenUsagePeriodButtons = Array.from(
+  tokenUsagePeriodGroup.querySelectorAll("[data-period]")
+);
 const contentArea = document.getElementById("content-area");
 const fetchButton = document.getElementById("fetch-button");
 const fetchButtonLabel = fetchButton.querySelector("span");
@@ -50,6 +53,70 @@ const state = {
   tokenUsagePeriod: DEFAULT_TOKEN_USAGE_PERIOD,
 };
 
+// --- Tauri Channel live feed -------------------------------------------
+// When the dashboard runs inside a Tauri webview, token-usage updates
+// arrive on a Channel<TokenUsageEvent> driven by the Rust shell. The
+// shell polls `/token-usage?period=…` every 5s and sends each snapshot
+// down the channel; dropping `activeTokenUsageChannel` (period change,
+// page unload) closes Rust's loop on its next send.
+//
+// In a plain browser (`window.__TAURI__` undefined) this block is a
+// no-op and the manual fetch-on-load + form-submit fallback below
+// remains the source of truth.
+const tauriCore = window.__TAURI__ && window.__TAURI__.core;
+const runningInTauri = Boolean(tauriCore && tauriCore.Channel);
+let activeTokenUsageChannel = null;
+
+function applyTokenUsagePayload(payload) {
+  state.tokenUsageSummary = payload;
+  state.tokenUsageSummaryError = null;
+  state.isTokenUsageLoading = false;
+  render();
+}
+
+function applyTokenUsageError(message) {
+  // Don't clobber a previously good summary — the user keeps seeing
+  // the last known state plus a small error chip.
+  state.tokenUsageSummaryError = message;
+  render();
+}
+
+function subscribeTokenUsage(period) {
+  if (!runningInTauri) return;
+  const channel = new tauriCore.Channel();
+  channel.onmessage = (message) => {
+    // `activeTokenUsageChannel` is the liveness reference — once it's
+    // been replaced (period change) or nulled (page unload), drop any
+    // straggler messages from the previous Rust loop.
+    if (channel !== activeTokenUsageChannel) return;
+    if (message && message.event === "update") {
+      applyTokenUsagePayload(message.data && message.data.payload);
+    } else if (message && message.event === "error") {
+      applyTokenUsageError(
+        (message.data && message.data.message) || "Unknown error",
+      );
+    }
+  };
+  activeTokenUsageChannel = channel;
+  state.isTokenUsageLoading = true;
+  render();
+  tauriCore
+    .invoke("subscribe_token_usage", { period, onEvent: channel })
+    .catch((error) => {
+      // Rust returns Ok(()) on channel-drop, so this catch only fires
+      // on a real invoke failure (e.g. command not registered).
+      if (channel === activeTokenUsageChannel) {
+        applyTokenUsageError(getErrorMessage(error));
+      }
+    });
+}
+
+function unsubscribeTokenUsage() {
+  // Dropping the JS reference is the signal — Rust's `Channel::send`
+  // returns Err on the next tick and the poll loop exits.
+  activeTokenUsageChannel = null;
+}
+
 // --- Rendering Logic ---
 
 /**
@@ -93,10 +160,23 @@ function normalizePeriod(value) {
 }
 
 function getSelectedPeriod() {
-  const normalized = normalizePeriod(tokenUsagePeriodSelect.value);
-  tokenUsagePeriodSelect.value = normalized;
-  state.tokenUsagePeriod = normalized;
+  const pressed = tokenUsagePeriodButtons.find(
+    (button) => button.getAttribute("aria-pressed") === "true"
+  );
+  const normalized = normalizePeriod(
+    pressed ? pressed.getAttribute("data-period") : null
+  );
+  setSelectedPeriod(normalized);
   return normalized;
+}
+
+function setSelectedPeriod(period) {
+  const normalized = normalizePeriod(period);
+  for (const button of tokenUsagePeriodButtons) {
+    const isActive = button.getAttribute("data-period") === normalized;
+    button.setAttribute("aria-pressed", isActive ? "true" : "false");
+  }
+  state.tokenUsagePeriod = normalized;
 }
 
 function buildTokenUsageSummaryUrl(period) {
@@ -172,8 +252,10 @@ function syncUrlState() {
 function updateControls() {
   fetchButton.disabled = state.isLoading;
   fetchButtonLabel.textContent = state.isLoading ? "Fetching..." : "Fetch";
-  tokenUsagePeriodSelect.disabled =
-    state.isLoading || state.isTokenUsageLoading;
+  const periodDisabled = state.isLoading || state.isTokenUsageLoading;
+  for (const button of tokenUsagePeriodButtons) {
+    button.disabled = periodDisabled;
+  }
 }
 
 function formatNumber(value) {
@@ -906,7 +988,45 @@ function handleFormSubmit(event) {
 
 function handlePeriodChange() {
   syncUrlState();
+  if (runningInTauri) {
+    // The Rust loop is bound to the previous period; dropping the
+    // channel here closes it on its next send, and we open a fresh
+    // one with the new period. We still hit the summary/events
+    // endpoints once for an immediate refresh — the Channel will
+    // overwrite the summary on its next tick.
+    subscribeTokenUsage(state.tokenUsagePeriod);
+  }
   void fetchTokenUsageSummaryAndEvents(1);
+}
+
+function handlePeriodButtonClick(event) {
+  const button = event.currentTarget;
+  const period = normalizePeriod(button.getAttribute("data-period"));
+  if (period === state.tokenUsagePeriod) {
+    return;
+  }
+  setSelectedPeriod(period);
+  handlePeriodChange();
+}
+
+function handlePeriodButtonKeydown(event) {
+  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+    return;
+  }
+  event.preventDefault();
+  const currentIndex = tokenUsagePeriodButtons.indexOf(event.currentTarget);
+  if (currentIndex < 0) {
+    return;
+  }
+  const delta = event.key === "ArrowRight" ? 1 : -1;
+  const nextIndex =
+    (currentIndex + delta + tokenUsagePeriodButtons.length)
+    % tokenUsagePeriodButtons.length;
+  const nextButton = tokenUsagePeriodButtons[nextIndex];
+  const period = normalizePeriod(nextButton.getAttribute("data-period"));
+  setSelectedPeriod(period);
+  nextButton.focus();
+  handlePeriodChange();
 }
 
 function handleContentAreaClick(event) {
@@ -941,17 +1061,30 @@ function handleContentAreaClick(event) {
  */
 function init() {
   endpointForm.addEventListener("submit", handleFormSubmit);
-  tokenUsagePeriodSelect.addEventListener("change", handlePeriodChange);
+  for (const button of tokenUsagePeriodButtons) {
+    button.addEventListener("click", handlePeriodButtonClick);
+    button.addEventListener("keydown", handlePeriodButtonKeydown);
+  }
   contentArea.addEventListener("click", handleContentAreaClick);
 
   const urlParams = new URLSearchParams(window.location.search);
   const periodFromUrl = normalizePeriod(urlParams.get("period"));
 
-  state.tokenUsagePeriod = periodFromUrl;
-  tokenUsagePeriodSelect.value = periodFromUrl;
+  setSelectedPeriod(periodFromUrl);
+
+  if (runningInTauri) {
+    // Tauri mode: the Rust shell drives the token-usage feed via
+    // Channel<TokenUsageEvent>. The manual Fetch button is redundant
+    // — hide it. Drop the channel on unload so Rust's loop exits.
+    fetchButton.style.display = "none";
+    subscribeTokenUsage(periodFromUrl);
+    window.addEventListener("beforeunload", unsubscribeTokenUsage);
+  }
 
   // Auto-fetch on load — the dashboard always targets its own
-  // origin, so there's no user input to wait for.
+  // origin, so there's no user input to wait for. Even in Tauri mode
+  // we fetch once so /usage quotas + the events page populate
+  // immediately above the streaming token-usage section.
   void fetchData();
 }
 

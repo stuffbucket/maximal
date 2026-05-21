@@ -10,8 +10,9 @@
    ---------------------------------------------------------------- */
 
 :root {
-  /* Font stacks */
-  --font-display: "Fraunces", Georgia, "Times New Roman", serif;
+  /* Font stacks. No --font-display: the Dashboard has no H1 (the
+     native titlebar reads "Maximal — Dashboard"), so Fraunces is
+     not loaded for this window. */
   --font-body: "Commissioner", "Segoe UI", Helvetica, Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
     "Liberation Mono", monospace;
@@ -140,17 +141,9 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-/* The one Fraunces moment per window: the page heading. */
-h1,
-.h-display {
-  font-family: var(--font-display);
-  font-size: var(--text-2xl);
-  font-weight: var(--weight-2xl);
-  line-height: var(--leading-2xl);
-  letter-spacing: var(--tracking-2xl);
-  color: var(--text-strong);
-}
-
+/* The native titlebar carries "Maximal — Dashboard", so the page has
+   no H1 (and no Fraunces moment). Section headings (h2) and
+   subheadings (h3) stay in Commissioner, matching Settings. */
 h2,
 .h-section {
   font-family: var(--font-body);
@@ -163,7 +156,9 @@ h2,
 
 h3 {
   font-family: var(--font-body);
+  font-size: var(--text-md);
   font-weight: var(--weight-lg);
+  line-height: var(--leading-lg);
   color: var(--text-strong);
 }
 
@@ -269,22 +264,42 @@ main#content-area table {
   overflow: hidden;
 }
 
-/* The brand "m" — one humanist mark per window, sits next to H1. */
-.brand-mark {
+/* Segmented control — period selector. Three pill-grouped buttons,
+   the active one filled with --accent. Mirrors the OS-native pattern
+   without copying any platform's exact metrics. */
+.segmented {
   display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
-  background: var(--brand);
-  color: var(--brand-fg);
-  font-family: var(--font-display);
-  font-style: italic;
-  font-weight: 700;
-  font-size: 24px;
-  line-height: 1;
-  flex-shrink: 0;
+  align-items: stretch;
+  background-color: var(--surface-control);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-input);
+  padding: 2px;
+  gap: 2px;
+}
+.segmented-option {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: var(--text-base-color);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-md);
+  line-height: var(--leading-lg);
+  padding: 6px 14px;
+  border-radius: calc(var(--radius-input) - 2px);
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+.segmented-option:hover {
+  color: var(--text-strong);
+}
+.segmented-option[aria-pressed="true"] {
+  background-color: var(--accent);
+  color: var(--accent-fg);
+}
+.segmented-option:focus-visible {
+  /* Inherits the global focus ring; explicit for clarity. */
+  box-shadow: var(--focus-ring);
 }
 
 /* Reduced motion is a contract, not a hint (principle #5). */
@@ -297,6 +312,9 @@ main#content-area table {
     transition-duration: 0.001ms !important;
   }
   .progress-bar-fg {
+    transition: none !important;
+  }
+  .segmented-option {
     transition: none !important;
   }
 }

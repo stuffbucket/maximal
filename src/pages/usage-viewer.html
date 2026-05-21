@@ -10,13 +10,14 @@
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23c8334a'/%3E%3Ctext x='50%25' y='54%25' dy='.35em' text-anchor='middle' font-family='Georgia,serif' font-style='italic' font-size='42' font-weight='700' fill='%23fafafa'%3Em%3C/text%3E%3C/svg%3E"
     />
 
-    <!-- Humanist editorial pair: Fraunces (display) + Commissioner (body).
-         Matches the Settings window so the dashboard reads as the same
-         app. Production should self-host both faces; the prototype link
-         is acceptable per .design-context.md. -->
+    <!-- Commissioner is the body face, matching the Settings window.
+         The Dashboard has no display heading (the native titlebar
+         carries the page name), so Fraunces is intentionally absent —
+         "Fraunces rationed" per .design-context.md. Production should
+         self-host; the prototype link is acceptable. -->
     <link
       rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300..900&family=Commissioner:wght@200..900&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Commissioner:wght@200..900&display=swap"
     />
 
     <script src="/vendor/tailwind.min.js"></script>
@@ -28,33 +29,47 @@
   <body class="antialiased">
     <div id="app" class="min-h-screen p-4 sm:p-6">
       <div class="max-w-7xl mx-auto">
-        <!-- Header: the one Fraunces moment + the one brand mark. -->
-        <header class="mb-6 flex items-center gap-3">
-          <span class="brand-mark" aria-hidden="true">m</span>
-          <h1>Maximal — Dashboard</h1>
-        </header>
+        <!-- Native macOS titlebar already reads "Maximal — Dashboard";
+             no in-window duplicate. Content starts at the control row. -->
 
         <!-- Period + fetch control row. Card surface to match Settings. -->
         <div class="panel mb-6 p-4">
           <form
             id="endpoint-form"
-            class="grid grid-cols-1 xl:grid-cols-[180px_auto] gap-3 items-end"
+            class="grid grid-cols-1 xl:grid-cols-[auto_auto] gap-3 items-end"
           >
             <div class="w-full">
-              <label
-                for="token-usage-period"
+              <span
+                id="token-usage-period-label"
                 class="mb-1 block text-sm"
                 style="color: var(--text-strong); font-weight: var(--weight-md);"
-                >Token usage period</label
+                >Token usage period</span
               >
-              <select
+              <div
                 id="token-usage-period"
-                class="w-full px-3 py-2 transition input-focus text-sm"
+                class="segmented"
+                role="group"
+                aria-labelledby="token-usage-period-label"
               >
-                <option value="day">Day</option>
-                <option value="week">Week</option>
-                <option value="month">Month</option>
-              </select>
+                <button
+                  type="button"
+                  class="segmented-option"
+                  data-period="day"
+                  aria-pressed="true"
+                >1 day</button>
+                <button
+                  type="button"
+                  class="segmented-option"
+                  data-period="week"
+                  aria-pressed="false"
+                >7 days</button>
+                <button
+                  type="button"
+                  class="segmented-option"
+                  data-period="month"
+                  aria-pressed="false"
+                >30 days</button>
+              </div>
             </div>
             <button
               id="fetch-button"
