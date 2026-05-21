@@ -1,4 +1,12 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from "bun:test"
 import { Hono } from "hono"
 
 const actualConfigModule = await import("../src/lib/config")
@@ -186,4 +194,17 @@ describe("responses handler token usage", () => {
     expect(page.items[0]?.output_tokens).toBe(2)
     expect(page.items[0]?.total_tokens).toBe(7)
   })
+})
+
+afterAll(() => {
+  // Restore real modules so later test files in the same Bun process
+  // don't see this file's `getConfig` stub (which lacks
+  // `modelReasoningEfforts` and silently flips xhigh→high in
+  // tests/messages-preprocess.test.ts).
+  void mock.module("~/lib/config", () => actualConfigModule)
+  void mock.module("~/lib/rate-limit", () => actualRateLimitModule)
+  void mock.module(
+    "~/services/copilot/create-responses",
+    () => actualResponsesModule,
+  )
 })

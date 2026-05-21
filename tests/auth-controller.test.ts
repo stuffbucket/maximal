@@ -82,8 +82,13 @@ void mock.module("~/lib/token", () => ({
   },
 }))
 
+// Spread the real namespace so `readFile` / `writeFile` / etc. survive
+// the override — `tests/github-token-store.test.ts` reads/writes via
+// the same module and gets undefined functions otherwise.
 void mock.module("node:fs/promises", () => ({
+  ...realFsPromisesModule,
   default: {
+    ...(realFsPromisesModule as { default: object }).default,
     unlink: (p: string) => {
       harness.unlinkCalls.push(p)
       return harness.unlinkImpl(p)
