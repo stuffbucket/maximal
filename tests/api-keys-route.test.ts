@@ -14,7 +14,17 @@ import type { AppConfig } from "~/lib/config"
 
 let fakeConfig: AppConfig = {}
 
+// Spread the real module so process-wide `mock.module` doesn't strip
+// unrelated exports (getReasoningEffortForModel, getSmallModel, etc.)
+// from sibling test files that import them. Bun's `mock.module` is
+// shared across the whole `bun test` process; without the spread,
+// tests/messages-preprocess.test.ts saw `getReasoningEffortForModel`
+// as undefined and the default `"high"` fallback fired instead of the
+// configured `"xhigh"`.
+const actualConfigModule = await import("~/lib/config")
+
 void mock.module("~/lib/config", () => ({
+  ...actualConfigModule,
   getConfig: () => fakeConfig,
   writeConfig: (next: AppConfig) => {
     fakeConfig = next
