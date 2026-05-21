@@ -20,8 +20,16 @@
               <a class="nav__item" href="#account" data-nav="account">Account</a>
             </li>
             <li>
+              <a class="nav__item" href="#apps" data-nav="apps">Apps</a>
+            </li>
+            <li>
+              <a class="nav__item" href="#endpoint" data-nav="endpoint"
+                >Endpoint</a
+              >
+            </li>
+            <li>
               <a class="nav__item" href="#api-clients" data-nav="api-clients"
-                >API clients</a
+                >API keys</a
               >
             </li>
             <li>
@@ -135,13 +143,135 @@
             </div>
           </section>
 
-          <!-- API CLIENTS -->
+          <!-- APPS -->
+          <section class="section" data-section="apps" hidden>
+            <header class="section__head">
+              <h2 class="section__title">Apps</h2>
+              <p class="section__sub">
+                One-click setup for tools that talk to Maximal —
+                Claude Desktop, Claude Code, Cursor, and others.
+              </p>
+            </header>
+
+            <div class="card">
+              <div class="card__head">
+                <h3 class="card__title">Coming soon</h3>
+              </div>
+              <p class="card__hint">
+                Per-app integrations are landing in upcoming releases.
+                For now, use the
+                <a href="#endpoint" data-nav="endpoint">Endpoint</a>
+                tab to copy the base URL and a key into your tool of
+                choice.
+              </p>
+            </div>
+          </section>
+
+          <!-- ENDPOINT -->
+          <section class="section" data-section="endpoint" hidden>
+            <header class="section__head">
+              <h2 class="section__title">Endpoint</h2>
+              <p class="section__sub">
+                Where Maximal listens. Use these values when wiring up a
+                tool that isn&rsquo;t in the Apps list.
+              </p>
+            </header>
+
+            <div class="card">
+              <div class="card__head">
+                <h3 class="card__title">Connection</h3>
+              </div>
+              <dl class="kv kv--bare">
+                <div class="kv__row">
+                  <dt>Base URL</dt>
+                  <dd>
+                    <span class="mono" data-field="endpoint-base-url"
+                      >http://127.0.0.1:4141</span
+                    >
+                    <button
+                      type="button"
+                      class="btn btn--ghost btn--sm"
+                      data-action="copy-base-url"
+                    >
+                      Copy
+                    </button>
+                  </dd>
+                </div>
+                <div class="kv__row">
+                  <dt>API key</dt>
+                  <dd>
+                    <span
+                      class="mono"
+                      data-field="endpoint-api-key"
+                      data-revealed="false"
+                      >••••••••••••••••••••••</span
+                    >
+                    <button
+                      type="button"
+                      class="btn btn--ghost btn--sm"
+                      data-action="reveal-api-key"
+                    >
+                      Reveal
+                    </button>
+                    <button
+                      type="button"
+                      class="btn btn--ghost btn--sm"
+                      data-action="copy-api-key"
+                    >
+                      Copy
+                    </button>
+                  </dd>
+                </div>
+              </dl>
+              <p class="card__hint">
+                The key rotates every time Maximal restarts. Use
+                <a href="#api-clients" data-nav="api-clients">API keys</a>
+                to mint a stable, named key for long-running tools.
+              </p>
+            </div>
+
+            <div class="card">
+              <div class="card__head">
+                <h3 class="card__title">Endpoints</h3>
+              </div>
+              <dl class="kv kv--bare">
+                <div class="kv__row">
+                  <dt>Anthropic Messages</dt>
+                  <dd class="mono">POST /v1/messages</dd>
+                </div>
+                <div class="kv__row">
+                  <dt>OpenAI Chat</dt>
+                  <dd class="mono">POST /v1/chat/completions</dd>
+                </div>
+                <div class="kv__row">
+                  <dt>OpenAI Responses</dt>
+                  <dd class="mono">POST /v1/responses</dd>
+                </div>
+                <div class="kv__row">
+                  <dt>Models</dt>
+                  <dd class="mono">GET&nbsp; /v1/models</dd>
+                </div>
+              </dl>
+              <div class="actions">
+                <button
+                  type="button"
+                  class="btn btn--secondary"
+                  data-action="copy-curl-example"
+                >
+                  Copy curl example
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <!-- API KEYS -->
           <section class="section" data-section="api-clients" hidden>
             <header class="section__head">
-              <h2 class="section__title">API clients</h2>
+              <h2 class="section__title">API keys</h2>
               <p class="section__sub">
-                Apps that talk to Maximal. Add one for each so you can tell
-                them apart — anything not listed still works by default.
+                Keys that apps use to call Maximal. Add one per tool so
+                you can tell them apart — anything not listed still works
+                by default.
               </p>
             </header>
             <div id="api-clients-root"></div>
@@ -278,6 +408,47 @@
               >
                 Restart proxy
               </button>
+            </div>
+
+            <div class="card">
+              <div class="card__head">
+                <h3 class="card__title">Uninstall</h3>
+              </div>
+              <p class="card__hint">
+                Trashing
+                <code class="mono">Maximal.app</code>
+                only removes the app bundle. To fully clean up — the
+                launchd agent, the
+                <code class="mono">~/.local/bin/maximal</code>
+                symlink, and (optionally) Claude Desktop&rsquo;s gateway
+                keys — quit Maximal, then run this in Terminal:
+              </p>
+              <dl class="kv kv--bare">
+                <div class="kv__row">
+                  <dt>Command</dt>
+                  <dd>
+                    <span class="mono" data-field="uninstall-cmd"
+                      >maximal uninstall --revert-claude</span
+                    >
+                    <button
+                      type="button"
+                      class="btn btn--ghost btn--sm"
+                      data-action="copy-uninstall-cmd"
+                    >
+                      Copy
+                    </button>
+                  </dd>
+                </div>
+              </dl>
+              <p class="card__hint">
+                Add
+                <code class="mono">--purge</code>
+                to also delete stored secrets and config under
+                <code class="mono">~/.local/share/maximal/</code>.
+                Omit
+                <code class="mono">--revert-claude</code>
+                to leave Claude Desktop&rsquo;s config alone.
+              </p>
             </div>
           </section>
         </main>
