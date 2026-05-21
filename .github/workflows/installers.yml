@@ -132,153 +132,36 @@ jobs:
           echo "::error::Release $TAG did not get its binaries within 30 minutes"
           exit 1
 
-  # Public-repo policy: no macOS runners. Building a real `.dmg`
-  # requires `hdiutil` which is Mac-only, so we ship a zipped `.app`
-  # bundle instead — same drag-to-Applications UX after one Finder
-  # extract step. The `.app` is just a directory tree with specific
-  # structure; it assembles fine on Linux.
-  macos-app-zip:
+  # Build the Tauri menu-bar shell on the self-hosted macOS runner.
+  # Replaces the legacy macos-app-zip (Linux assembly of a CLI-only .app)
+  # + macos-signed (post-hoc sign of that .app) chain.
+  #
+  # The Tauri shell IS the user-facing menubar app; the sidecar inside
+  # is the same proxy users on Linux/Windows run as a CLI binary. Headless
+  # users still get `maximal-<tag>-darwin-arm64.tar.gz` from the binaries
+  # matrix in release.yml — this job is purely about the GUI bundle.
+  #
+  # Required repo secrets (already provisioned for the retired macos-signed):
+  #   KEYCHAIN_PASSWORD, DEVELOPER_ID_APPLICATION,
+  #   APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID
+  tauri-macos:
     needs: ensure-release
-    name: macOS .app.zip (arm64)
-    runs-on: ubuntu-latest
-    env:
-      TAG: ${{ github.event.release.tag_name || inputs.tag }}
-      ARCH: arm64
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Resolve release artifact URLs
-        run: |
-          set -euo pipefail
-          VERSION="${TAG#v}"
-          TARBALL="maximal-${TAG}-darwin-${{ env.ARCH }}.tar.gz"
-          SHA="${TARBALL}.sha256"
-          echo "VERSION=${VERSION}"   >> "$GITHUB_ENV"
-          echo "TARBALL=${TARBALL}"   >> "$GITHUB_ENV"
-          echo "SHA=${SHA}"           >> "$GITHUB_ENV"
-
-      - name: Download tarball + sha256
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          mkdir -p dist-input
-          gh release download "$TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --pattern "$TARBALL" \
-            --pattern "$SHA" \
-            --dir dist-input
-          (cd dist-input && sha256sum -c "$SHA")
-          mkdir -p dist-input/unpacked
-          tar -xzf "dist-input/$TARBALL" -C dist-input/unpacked
-
-      - name: Assemble maximal.app
-        run: |
-          set -euo pipefail
-          BUILD_DIR="dist-build"
-          APP="$BUILD_DIR/maximal.app"
-
-          mkdir -p "$BUILD_DIR"
-          cp -R build/macos/app-template "$APP"
-
-          # Sentinel substitution in Info.plist (GNU sed).
-          sed -i -e "s/__VERSION__/${VERSION}/g" \
-            "$APP/Contents/Info.plist"
-
-          BIN_SRC="$(find dist-input/unpacked -maxdepth 2 -type f -name maximal -perm -u+x | head -1)"
-          if [ -z "$BIN_SRC" ]; then
-            echo "::error::no executable maximal binary found in unpacked tarball"
-            exit 1
-          fi
-          rm -f "$APP/Contents/MacOS/maximal.placeholder"
-          cp -f "$BIN_SRC" "$APP/Contents/MacOS/maximal"
-          chmod 755 "$APP/Contents/MacOS/maximal"
-
-          rm -f "$APP/Contents/Resources/AppIcon.icns.placeholder"
-          if [ -f build/macos/app-template/Contents/Resources/AppIcon.icns ]; then
-            cp -f build/macos/app-template/Contents/Resources/AppIcon.icns \
-                  "$APP/Contents/Resources/AppIcon.icns"
-          fi
-
-          # Stable mtimes so the same source produces a byte-identical zip.
-          find "$APP" -exec touch -d '2026-01-01T00:00:00Z' {} +
-
-          ls -la "$APP/Contents/MacOS"
-          ls -la "$APP/Contents/Resources"
-
-      - name: Build .app.zip
-        run: |
-          set -euo pipefail
-          OUT_DIR="dist-release"
-          mkdir -p "$OUT_DIR"
-          ZIP="${OUT_DIR}/maximal-${TAG}-darwin-${{ env.ARCH }}.app.zip"
-
-          # `zip -y` preserves symlinks; `-X` strips extra OS metadata
-          # so the archive is reproducible across runners. Macs accept
-          # the resulting .app after Archive Utility extraction —
-          # there's no Mac-specific resource fork at the bundle level
-          # for our binary-only app.
-          (cd dist-build && zip -ryX "../${ZIP}" maximal.app)
-          (cd "$OUT_DIR" && sha256sum "$(basename "$ZIP")" > "$(basename "$ZIP").sha256")
-          ls -la "$OUT_DIR"
-
-      - name: Attach .app.zip to release
-        uses: ./.github/actions/upload-release-asset
-        with:
-          tag: ${{ env.TAG }}
-          files: |
-            dist-release/maximal-${{ env.TAG }}-darwin-${{ env.ARCH }}.app.zip
-            dist-release/maximal-${{ env.TAG }}-darwin-${{ env.ARCH }}.app.zip.sha256
-
-      # Also share the unsigned .app.zip with macos-signed via a
-      # workflow artifact. Going through the release ran into the
-      # GitHub REST API's eventual-consistency window — the asset list
-      # for /releases/tags/{tag} sometimes hasn't caught up by the time
-      # the next job queries it, and the curl 'asset not found' was
-      # racing the upload. Workflow artifacts are immediately
-      # consistent across jobs.
-      - name: Share .app.zip with macos-signed
-        uses: actions/upload-artifact@v7
-        with:
-          name: macos-unsigned-app-zip
-          path: dist-release/maximal-${{ env.TAG }}-darwin-${{ env.ARCH }}.app.zip
-          retention-days: 1
-          if-no-files-found: error
-
-  # Sign + notarize the .app + build a signed/notarized DMG on the
-  # self-hosted Mac runner provisioned with a `maximal.keychain-db`
-  # in the runner user's home with the Developer ID cert imported.
-  # Sibling project claudeme uses its own `build.keychain-db` on the
-  # same runner — keep them independent so a password reset on one
-  # doesn't break the other.
-  #
-  # Required repo secrets (configure once at
-  # github.com/stuffbucket/maximal/settings/secrets/actions):
-  #   KEYCHAIN_PASSWORD        — unlocks ~/Library/Keychains/maximal.keychain-db
-  #   DEVELOPER_ID_APPLICATION — full identity string, e.g.
-  #                              "Developer ID Application: Name (TEAMID)"
-  #   APPLE_ID                 — Apple ID email for notarytool
-  #   APPLE_PASSWORD           — app-specific password for that Apple ID
-  #                              (https://appleid.apple.com → App-Specific Passwords)
-  #   APPLE_TEAM_ID            — the (TEAMID) part of the identity above
-  #
-  # Outputs (overwriting the unsigned .app.zip from macos-app-zip):
-  #   maximal-${TAG}-darwin-arm64.app.zip   (signed + notarized + stapled .app, re-zipped)
-  #   maximal-${TAG}-darwin-arm64.dmg       (signed + notarized + stapled DMG)
-  #   plus .sha256 sidecars for each
-  macos-signed:
-    needs: macos-app-zip
-    name: macOS signed + notarized .app.zip + .dmg
+    name: macOS Tauri .app + .dmg (signed, arm64)
     runs-on: self-hosted
     env:
       TAG: ${{ github.event.release.tag_name || inputs.tag }}
       ARCH: arm64
+      # GH Actions on self-hosted runs non-login shells that don't read
+      # ~/.zshrc — make bun + cargo discoverable for every step.
+      BUN_INSTALL: /Users/build/.bun
+      CARGO_HOME: /Users/build/.cargo
     steps:
       - uses: actions/checkout@v6
 
-      - name: Resolve names
+      - name: Resolve names + stamp version into tauri.conf.json
         run: |
           set -euo pipefail
+          export PATH="$BUN_INSTALL/bin:$CARGO_HOME/bin:$PATH"
           VERSION="${TAG#v}"
           APP_ZIP="maximal-${TAG}-darwin-${{ env.ARCH }}.app.zip"
           DMG="maximal-${TAG}-darwin-${{ env.ARCH }}.dmg"
@@ -286,24 +169,34 @@ jobs:
           echo "APP_ZIP=${APP_ZIP}" >> "$GITHUB_ENV"
           echo "DMG=${DMG}"         >> "$GITHUB_ENV"
 
-      - name: Prepare working dirs
+          # Tauri reads version from tauri.conf.json, not git tags. Stamp it.
+          /usr/bin/sed -i '' -e "s/\"version\": \"0\\.0\\.0\"/\"version\": \"${VERSION}\"/" \
+            shell/src-tauri/tauri.conf.json
+          grep '"version"' shell/src-tauri/tauri.conf.json
+
+      - name: Install JS deps
         run: |
           set -euo pipefail
-          rm -rf dist-input dist-build dist-release
-          mkdir -p dist-input dist-build dist-release
+          export PATH="$BUN_INSTALL/bin:$CARGO_HOME/bin:$PATH"
+          bun install
+          bun install --cwd shell
 
-      - name: Download unsigned .app.zip artifact
-        uses: actions/download-artifact@v8
-        with:
-          name: macos-unsigned-app-zip
-          path: dist-input
-
-      - name: Unpack .app
+      - name: Build sidecar (Bun-compiled proxy)
+        env:
+          MAXIMAL_FORCE_SIDECAR: "1"
         run: |
           set -euo pipefail
-          ls -la dist-input
-          (cd dist-build && unzip -q "../dist-input/$APP_ZIP")
-          ls -la dist-build/maximal.app/Contents/MacOS
+          export PATH="$BUN_INSTALL/bin:$CARGO_HOME/bin:$PATH"
+          bun run app:sidecar
+          ls -la shell/src-tauri/binaries/
+
+      - name: Build .app via Tauri
+        run: |
+          set -euo pipefail
+          export PATH="$BUN_INSTALL/bin:$CARGO_HOME/bin:$PATH"
+          cd shell
+          bun run tauri build --bundles app
+          ls -la src-tauri/target/release/bundle/macos/
 
       - name: Unlock signing keychain
         env:
@@ -316,16 +209,18 @@ jobs:
             -s -k "$KEYCHAIN_PASSWORD" "$KC"
           security list-keychains -d user -s "$KC"
 
-      - name: Sign .app
+      - name: Sign .app with Developer ID
         env:
           SIGN_IDENTITY: ${{ secrets.DEVELOPER_ID_APPLICATION }}
         run: |
           set -euo pipefail
+          APP="shell/src-tauri/target/release/bundle/macos/Maximal.app"
           codesign --force --deep --options runtime --timestamp \
+            --identifier co.stuffbucket.maximal \
             --entitlements build/macos/maximal.entitlements \
             --sign "$SIGN_IDENTITY" \
-            dist-build/maximal.app
-          codesign --verify --deep --strict --verbose=2 dist-build/maximal.app
+            "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
 
       - name: Notarize + staple .app
         env:
@@ -334,41 +229,35 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
-          # notarytool can't accept a .app directly — needs a zip/dmg/pkg.
-          # Build a transient zip just for notarization, submit, staple
-          # the ticket back onto the bundle, then discard the zip. The
-          # final upload zips the (now-stapled) .app fresh in the next step.
-          NOTARY_ZIP="dist-build/maximal-notary.zip"
-          ditto -c -k --keepParent dist-build/maximal.app "$NOTARY_ZIP"
+          APP="shell/src-tauri/target/release/bundle/macos/Maximal.app"
+          NOTARY_ZIP="$(mktemp -d)/notary.zip"
+          ditto -c -k --keepParent "$APP" "$NOTARY_ZIP"
           xcrun notarytool submit "$NOTARY_ZIP" \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_PASSWORD" \
             --team-id "$APPLE_TEAM_ID" \
             --wait
-          rm -f "$NOTARY_ZIP"
-          xcrun stapler staple dist-build/maximal.app
-          xcrun stapler validate dist-build/maximal.app
-          spctl -a -t exec --context context:primary-signature -v dist-build/maximal.app
+          xcrun stapler staple "$APP"
+          xcrun stapler validate "$APP"
+          spctl -a -t exec --context context:primary-signature -v "$APP"
 
       - name: Re-zip signed .app
         run: |
           set -euo pipefail
-          # ditto preserves Mac metadata (extended attributes, the
-          # signature blocks inside the .app's _CodeSignature dir,
-          # symlinks). zip -ryX would also work for our binary-only
-          # bundle but ditto is the canonical Apple-blessed path.
+          mkdir -p dist-release
+          APP="shell/src-tauri/target/release/bundle/macos/Maximal.app"
           OUT="dist-release/${APP_ZIP}"
-          (cd dist-build && ditto -c -k --keepParent maximal.app "../${OUT}")
+          ditto -c -k --keepParent "$APP" "$OUT"
           (cd dist-release && shasum -a 256 "${APP_ZIP}" > "${APP_ZIP}.sha256")
 
       - name: Stage DMG layout
         run: |
           set -euo pipefail
-          STAGE="dist-build/dmg-stage"
-          rm -rf "$STAGE"
+          STAGE="$(mktemp -d)/dmg-stage"
           mkdir -p "$STAGE"
-          cp -R dist-build/maximal.app "$STAGE/"
+          cp -R shell/src-tauri/target/release/bundle/macos/Maximal.app "$STAGE/"
           ln -s /Applications "$STAGE/Applications"
+          echo "STAGE=$STAGE" >> "$GITHUB_ENV"
 
       - name: Build + sign DMG
         env:
@@ -378,7 +267,7 @@ jobs:
           OUT="dist-release/${DMG}"
           hdiutil create \
             -volname "Maximal" \
-            -srcfolder dist-build/dmg-stage \
+            -srcfolder "$STAGE" \
             -ov -format UDZO \
             "$OUT"
           codesign --force --sign "$SIGN_IDENTITY" "$OUT"

@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "maximal",
+  "productName": "Maximal",
   "version": "0.0.0",
-  "identifier": "com.stuffbucket.maximal",
+  "identifier": "co.stuffbucket.maximal",
   "build": {
     "beforeDevCommand": "bun run dev",
     "devUrl": "http://localhost:1420",

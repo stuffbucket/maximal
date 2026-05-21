@@ -1,12 +1,12 @@
 [package]
-name = "shell"
+name = "maximal-shell"
 version = "0.1.0"
 description = "Maximal tray + dashboard"
 authors = ["stuffbucket"]
 edition = "2021"
 
 [lib]
-name = "shell_lib"
+name = "maximal_shell_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
