@@ -1,25 +1,11 @@
 // Maximal — Dashboard client script.
 // Loaded with `defer`, so the DOM is ready by the time this runs.
 
-const endpointForm = document.getElementById("endpoint-form");
 const tokenUsagePeriodGroup = document.getElementById("token-usage-period");
 const tokenUsagePeriodButtons = Array.from(
   tokenUsagePeriodGroup.querySelectorAll("[data-period]")
 );
 const contentArea = document.getElementById("content-area");
-const fetchButton = document.getElementById("fetch-button");
-const fetchButtonLabel = fetchButton.querySelector("span");
-
-// Hover state for the fetch button. Inline styles in the HTML win over
-// stylesheet :hover rules, so swapping the inline background-color is
-// the lowest-friction path. The CSS variables resolve to the accent
-// (teal) and its hover variant.
-fetchButton.addEventListener("mouseenter", () => {
-  fetchButton.style.backgroundColor = "var(--accent-hover)";
-});
-fetchButton.addEventListener("mouseleave", () => {
-  fetchButton.style.backgroundColor = "var(--accent)";
-});
 
 // The dashboard always talks to the proxy that served it — same
 // origin, no user-typed URL. Each fetch is a relative path; the
@@ -60,12 +46,19 @@ const state = {
 // down the channel; dropping `activeTokenUsageChannel` (period change,
 // page unload) closes Rust's loop on its next send.
 //
-// In a plain browser (`window.__TAURI__` undefined) this block is a
-// no-op and the manual fetch-on-load + form-submit fallback below
-// remains the source of truth.
-const tauriCore = window.__TAURI__ && window.__TAURI__.core;
-const runningInTauri = Boolean(tauriCore && tauriCore.Channel);
+// In a plain browser (`window.__TAURI__` undefined) we poll the
+// `/token-usage?period=…` endpoint directly every 5s as a fallback —
+// there's no Fetch button, the data refreshes itself.
+//
+// Detection is deferred to init() because `window.__TAURI__` isn't
+// guaranteed to be injected by the time this script's top-level code
+// runs (Tauri injects asynchronously after webview creation). A module-
+// top check returned a false negative, leaving Tauri-mode features off.
+let tauriCore = null;
+let runningInTauri = false;
 let activeTokenUsageChannel = null;
+let browserPollTimer = null;
+const BROWSER_POLL_INTERVAL_MS = 5000;
 
 function applyTokenUsagePayload(payload) {
   state.tokenUsageSummary = payload;
@@ -250,8 +243,6 @@ function syncUrlState() {
 }
 
 function updateControls() {
-  fetchButton.disabled = state.isLoading;
-  fetchButtonLabel.textContent = state.isLoading ? "Fetching..." : "Fetch";
   const periodDisabled = state.isLoading || state.isTokenUsageLoading;
   for (const button of tokenUsagePeriodButtons) {
     button.disabled = periodDisabled;
@@ -976,16 +967,6 @@ async function fetchTokenUsageEventsPage(page) {
 
 // --- Event Handlers & Initialization ---
 
-/**
- * Handles the form submission to trigger a data fetch.
- * @param {Event} event - The form submission event.
- */
-function handleFormSubmit(event) {
-  event.preventDefault();
-  syncUrlState();
-  void fetchData();
-}
-
 function handlePeriodChange() {
   syncUrlState();
   if (runningInTauri) {
@@ -1060,7 +1041,13 @@ function handleContentAreaClick(event) {
  * Initializes the application.
  */
 function init() {
-  endpointForm.addEventListener("submit", handleFormSubmit);
+  // Detect Tauri lazily — `window.__TAURI__` isn't guaranteed to be
+  // injected by the time this script's top-level code parses. By the
+  // time init() runs (DOMContentLoaded via the script's `defer` attr)
+  // it's reliably there if we're inside a Tauri webview.
+  tauriCore = (window.__TAURI__ && window.__TAURI__.core) || null;
+  runningInTauri = Boolean(tauriCore && tauriCore.Channel);
+
   for (const button of tokenUsagePeriodButtons) {
     button.addEventListener("click", handlePeriodButtonClick);
     button.addEventListener("keydown", handlePeriodButtonKeydown);
@@ -1069,23 +1056,32 @@ function init() {
 
   const urlParams = new URLSearchParams(window.location.search);
   const periodFromUrl = normalizePeriod(urlParams.get("period"));
-
   setSelectedPeriod(periodFromUrl);
+
+  // First paint: pull /usage quotas + initial token-usage page so the
+  // page isn't blank for a few seconds while the live feed warms up.
+  void fetchData();
 
   if (runningInTauri) {
     // Tauri mode: the Rust shell drives the token-usage feed via
-    // Channel<TokenUsageEvent>. The manual Fetch button is redundant
-    // — hide it. Drop the channel on unload so Rust's loop exits.
-    fetchButton.style.display = "none";
+    // Channel<TokenUsageEvent>. Drop the channel on unload so Rust's
+    // loop exits cleanly on its next send.
     subscribeTokenUsage(periodFromUrl);
     window.addEventListener("beforeunload", unsubscribeTokenUsage);
+  } else {
+    // Plain-browser mode: no Channel available. Poll the same endpoint
+    // ourselves every 5s. Same cadence the Rust shell uses, so users
+    // see equivalent freshness either way.
+    browserPollTimer = window.setInterval(() => {
+      void fetchTokenUsageSummaryAndEvents(1);
+    }, BROWSER_POLL_INTERVAL_MS);
+    window.addEventListener("beforeunload", () => {
+      if (browserPollTimer !== null) {
+        window.clearInterval(browserPollTimer);
+        browserPollTimer = null;
+      }
+    });
   }
-
-  // Auto-fetch on load — the dashboard always targets its own
-  // origin, so there's no user input to wait for. Even in Tauri mode
-  // we fetch once so /usage quotas + the events page populate
-  // immediately above the streaming token-usage section.
-  void fetchData();
 }
 
 // Start the app

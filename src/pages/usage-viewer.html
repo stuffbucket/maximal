@@ -32,82 +32,42 @@
         <!-- Native macOS titlebar already reads "Maximal — Dashboard";
              no in-window duplicate. Content starts at the control row. -->
 
-        <!-- Period + fetch control row. Card surface to match Settings. -->
-        <div class="panel mb-6 p-4">
-          <form
-            id="endpoint-form"
-            class="grid grid-cols-1 xl:grid-cols-[auto_auto] gap-3 items-end"
+        <!-- Period selector. Data refreshes automatically — Tauri
+             webviews subscribe to a Channel<TokenUsageEvent> driven by
+             the shell; plain-browser viewers poll on a timer. No
+             Fetch button. -->
+        <div class="mb-6 flex items-center gap-3">
+          <span
+            id="token-usage-period-label"
+            class="text-sm"
+            style="color: var(--text-muted); font-weight: var(--weight-md);"
+            >Period</span
           >
-            <div class="w-full">
-              <span
-                id="token-usage-period-label"
-                class="mb-1 block text-sm"
-                style="color: var(--text-strong); font-weight: var(--weight-md);"
-                >Token usage period</span
-              >
-              <div
-                id="token-usage-period"
-                class="segmented"
-                role="group"
-                aria-labelledby="token-usage-period-label"
-              >
-                <button
-                  type="button"
-                  class="segmented-option"
-                  data-period="day"
-                  aria-pressed="true"
-                >1 day</button>
-                <button
-                  type="button"
-                  class="segmented-option"
-                  data-period="week"
-                  aria-pressed="false"
-                >7 days</button>
-                <button
-                  type="button"
-                  class="segmented-option"
-                  data-period="month"
-                  aria-pressed="false"
-                >30 days</button>
-              </div>
-            </div>
+          <div
+            id="token-usage-period"
+            class="segmented"
+            role="group"
+            aria-labelledby="token-usage-period-label"
+          >
             <button
-              id="fetch-button"
-              type="submit"
-              class="w-full xl:w-auto py-2 px-5 transition-colors flex items-center justify-center gap-2 text-sm"
-              style="
-                background-color: var(--accent);
-                color: var(--accent-fg);
-                font-weight: var(--weight-md);
-              "
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="24"
-                height="24"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                class="lucide lucide-refresh-cw h-4 w-4"
-              >
-                <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
-                <path d="M21 3v5h-5" />
-                <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
-                <path d="M3 21v-5h5" />
-              </svg>
-              <span>Fetch</span>
-            </button>
-          </form>
-          <p class="mt-3 text-xs" style="color: var(--text-muted);">
-            Shows usage for the proxy serving this page. The dashboard
-            reads <code>/usage</code>, <code>/token-usage</code>, and
-            <code>/token-usage/events</code> from the same origin — the
-            proxy exempts these endpoints from API-key auth on loopback,
-            so no credentials are handled client-side.
-          </p>
+              type="button"
+              class="segmented-option"
+              data-period="day"
+              aria-pressed="true"
+            >1 day</button>
+            <button
+              type="button"
+              class="segmented-option"
+              data-period="week"
+              aria-pressed="false"
+            >7 days</button>
+            <button
+              type="button"
+              class="segmented-option"
+              data-period="month"
+              aria-pressed="false"
+            >30 days</button>
+          </div>
         </div>
 
         <!-- Content area for dynamically rendered data. -->
