@@ -57,15 +57,13 @@ const harness = {
 // Capture real modules BEFORE mocking so `afterAll` can restore them.
 // Bun's `mock.module` is process-wide and persists across test files;
 // without the restore, a different test file that imports these modules
-// later in the same `bun test` process gets our stubs (e.g.
-// tests/poll-access-token.test.ts saw `harness.pollAccessTokenImpl()`
-// returning "ghu_a" from a deferred this file resolved).
+// later in the same `bun test` process gets our stubs. Some modules
+// (poll-access-token, github-token-store) have their own dedicated test
+// files — those go through __setAuthControllerDepsForTests instead of
+// mock.module so the registry stays clean.
 const realGetDeviceCodeModule =
   await import("~/services/github/get-device-code")
-const realPollAccessTokenModule =
-  await import("~/services/github/poll-access-token")
 const realGetUserModule = await import("~/services/github/get-user")
-const realGithubTokenStoreModule = await import("~/lib/github-token-store")
 const realTokenModule = await import("~/lib/token")
 const realFsPromisesModule = await import("node:fs/promises")
 
@@ -73,31 +71,8 @@ void mock.module("~/services/github/get-device-code", () => ({
   getDeviceCode: () => harness.getDeviceCodeImpl(),
 }))
 
-void mock.module("~/services/github/poll-access-token", () => ({
-  pollAccessToken: (_dc: unknown) => {
-    harness.pollAccessTokenCalls++
-    return harness.pollAccessTokenImpl()
-  },
-}))
-
 void mock.module("~/services/github/get-user", () => ({
   getGitHubUser: (_token?: string) => harness.getGitHubUserImpl(),
-}))
-
-void mock.module("~/lib/github-token-store", () => ({
-  writeDefaultRecord: (rec: unknown) => {
-    harness.writeDefaultRecordCalls.push(rec)
-    return harness.writeDefaultRecordImpl(rec)
-  },
-  readDefaultRecord: () => Promise.resolve(null),
-  makeRecord: (accessToken: string) => ({
-    schemaVersion: 1,
-    tokenType: "ghu_",
-    accessToken,
-    refreshToken: null,
-    obtainedAt: new Date().toISOString(),
-  }),
-  inferTokenType: () => "ghu_",
 }))
 
 void mock.module("~/lib/token", () => ({
@@ -125,12 +100,7 @@ afterAll(() => {
     "~/services/github/get-device-code",
     () => realGetDeviceCodeModule,
   )
-  void mock.module(
-    "~/services/github/poll-access-token",
-    () => realPollAccessTokenModule,
-  )
   void mock.module("~/services/github/get-user", () => realGetUserModule)
-  void mock.module("~/lib/github-token-store", () => realGithubTokenStoreModule)
   void mock.module("~/lib/token", () => realTokenModule)
   void mock.module("node:fs/promises", () => realFsPromisesModule)
 })
@@ -140,6 +110,7 @@ const {
   getAuthStatus,
   signOut,
   __resetAuthControllerForTests,
+  __setAuthControllerDepsForTests,
 } = await import("~/lib/auth-controller")
 const { state } = await import("~/lib/state")
 const { PATHS } = await import("~/lib/paths")
@@ -173,6 +144,23 @@ async function flushMicrotasks(turns = 5): Promise<void> {
 
 beforeEach(() => {
   __resetAuthControllerForTests()
+  __setAuthControllerDepsForTests({
+    pollAccessToken: (_dc: unknown) => {
+      harness.pollAccessTokenCalls++
+      return harness.pollAccessTokenImpl()
+    },
+    writeDefaultRecord: (rec: unknown) => {
+      harness.writeDefaultRecordCalls.push(rec)
+      return harness.writeDefaultRecordImpl(rec)
+    },
+    makeRecord: (accessToken: string) => ({
+      schemaVersion: 1,
+      tokenType: "ghu_",
+      accessToken,
+      refreshToken: null,
+      obtainedAt: new Date().toISOString(),
+    }),
+  })
   state.githubToken = undefined
   state.copilotToken = undefined
   state.userName = undefined

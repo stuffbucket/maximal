@@ -36,15 +36,54 @@ import type { DeviceCodeResponse } from "~/services/github/get-device-code"
 
 import { getDeviceCode } from "~/services/github/get-device-code"
 import { getGitHubUser } from "~/services/github/get-user"
-import { pollAccessToken } from "~/services/github/poll-access-token"
+import { pollAccessToken as defaultPollAccessToken } from "~/services/github/poll-access-token"
 
 import type { AuthStatus } from "./settings-types"
 
-import { makeRecord, writeDefaultRecord } from "./github-token-store"
+import {
+  makeRecord as defaultMakeRecord,
+  writeDefaultRecord as defaultWriteDefaultRecord,
+} from "./github-token-store"
 import { PATHS } from "./paths"
 import { registerProcessCleanup } from "./process-cleanup"
 import { state } from "./state"
 import { setupCopilotToken } from "./token"
+
+// Dependency-injection shim for tests. Process-wide `mock.module` for
+// these modules leaks into sibling test files (poll-access-token.test.ts,
+// github-token-store.test.ts), so the test suite overrides these
+// references via __setAuthControllerDepsForTests instead — keeping the
+// module registry untouched. Production callers don't see this layer.
+let pollAccessToken: typeof defaultPollAccessToken = defaultPollAccessToken
+let writeDefaultRecord: typeof defaultWriteDefaultRecord =
+  defaultWriteDefaultRecord
+let makeRecord: typeof defaultMakeRecord = defaultMakeRecord
+
+export interface AuthControllerTestDeps {
+  pollAccessToken?: typeof defaultPollAccessToken
+  writeDefaultRecord?: typeof defaultWriteDefaultRecord
+  makeRecord?: typeof defaultMakeRecord
+}
+
+export function __setAuthControllerDepsForTests(
+  overrides: AuthControllerTestDeps,
+): void {
+  if (overrides.pollAccessToken !== undefined) {
+    pollAccessToken = overrides.pollAccessToken
+  }
+  if (overrides.writeDefaultRecord !== undefined) {
+    writeDefaultRecord = overrides.writeDefaultRecord
+  }
+  if (overrides.makeRecord !== undefined) {
+    makeRecord = overrides.makeRecord
+  }
+}
+
+function resetAuthControllerDeps(): void {
+  pollAccessToken = defaultPollAccessToken
+  writeDefaultRecord = defaultWriteDefaultRecord
+  makeRecord = defaultMakeRecord
+}
 
 interface ActiveFlow {
   deviceCode: DeviceCodeResponse
@@ -271,6 +310,7 @@ export function __resetAuthControllerForTests(): void {
   controllerState.flow = null
   controllerState.lastError = null
   controllerState.accountLogin = null
+  resetAuthControllerDeps()
   // getAuthStatus falls back to state.userName when accountLogin is
   // null (so cold-boot from a stored token populates the Account UI).
   // Tests reset state.githubToken between cases; reset the cached
