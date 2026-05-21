@@ -7,8 +7,25 @@
  * file when the success path runs.
  */
 
-import { afterEach, beforeEach, describe, expect, test, mock } from "bun:test"
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from "bun:test"
 import { Hono } from "hono"
+
+// Capture real modules so `afterAll` can restore them; otherwise the
+// process-wide `mock.module` leaks to sibling test files (see
+// auth-controller.test.ts for the same pattern).
+const realGetDeviceCodeModule =
+  await import("~/services/github/get-device-code")
+const realPollAccessTokenModule =
+  await import("~/services/github/poll-access-token")
+const realGithubTokenStoreModule = await import("~/lib/github-token-store")
 
 void mock.module("~/services/github/get-device-code", () => ({
   getDeviceCode: () =>
@@ -170,4 +187,16 @@ describe("/settings/api/auth/github", () => {
       expect(parsed.data.user_code).toBe("ABCD-1234")
     }
   })
+})
+
+afterAll(() => {
+  void mock.module(
+    "~/services/github/get-device-code",
+    () => realGetDeviceCodeModule,
+  )
+  void mock.module(
+    "~/services/github/poll-access-token",
+    () => realPollAccessTokenModule,
+  )
+  void mock.module("~/lib/github-token-store", () => realGithubTokenStoreModule)
 })
