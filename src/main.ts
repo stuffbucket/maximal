@@ -2,6 +2,7 @@
 
 import { defineCommand, runMain, parseArgs } from "citty"
 
+import { BUILD_VERSION } from "./lib/build-info"
 import { bindElectronFetch } from "./lib/electron-fetch"
 
 const cliArgs = {
@@ -46,6 +47,7 @@ const { uninstall } = await import("./uninstall")
 const main = defineCommand({
   meta: {
     name: "maximal",
+    version: BUILD_VERSION,
     description:
       "Local proxy that exposes GitHub Copilot as OpenAI- and Anthropic-compatible HTTP endpoints.",
   },

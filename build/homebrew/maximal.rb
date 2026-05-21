@@ -40,7 +40,7 @@ class Maximal < Formula
     keep_alive true
     log_path var/"log/maximal.log"
     error_log_path var/"log/maximal.err.log"
-    environment_variables HOME: Dir.home,
+    environment_variables HOME:           Dir.home,
                           OLLAMA_API_KEY: ENV.fetch("OLLAMA_API_KEY", "")
   end
 
