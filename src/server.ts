@@ -23,6 +23,10 @@ import { cacheModels } from "./lib/utils"
 // attribute regardless.
 import usageViewerImport from "./pages/usage-viewer.html" with { type: "file" }
 const usageViewerPath = usageViewerImport as unknown as string
+import usageViewerCssImport from "./pages/usage-viewer.css" with { type: "file" }
+const usageViewerCssPath = usageViewerCssImport
+import usageViewerJsImport from "./pages/usage-viewer.js" with { type: "file" }
+const usageViewerJsPath = usageViewerJsImport as unknown as string
 import lucideVendorImport from "./pages/vendor/lucide.min.js" with { type: "file" }
 const lucideVendorPath = lucideVendorImport as unknown as string
 import tailwindVendorImport from "./pages/vendor/tailwind.min.js" with { type: "file" }
@@ -54,6 +58,8 @@ server.use(
       "/",
       "/usage-viewer",
       "/usage-viewer/",
+      "/usage-viewer.css",
+      "/usage-viewer.js",
       "/vendor/lucide.min.js",
       "/vendor/tailwind.min.js",
       "/_debug/state",
@@ -94,19 +100,33 @@ server.get("/usage-viewer", async (c) =>
 )
 server.get("/usage-viewer/", (c) => c.redirect("/usage-viewer", 301))
 
+// Sibling assets for the dashboard — extracted from the HTML to keep
+// each file single-concern. Bun's `with { type: "file" }` embeds them
+// in the compiled binary the same way it embeds the vendor scripts.
+const CSS_HEADERS = {
+  "content-type": "text/css; charset=utf-8",
+  "cache-control": "public, max-age=86400",
+} as const
+const JS_HEADERS = {
+  "content-type": "application/javascript; charset=utf-8",
+  "cache-control": "public, max-age=86400",
+} as const
+server.get("/usage-viewer.css", async (c) =>
+  c.body(await Bun.file(usageViewerCssPath).bytes(), 200, CSS_HEADERS),
+)
+server.get("/usage-viewer.js", async (c) =>
+  c.body(await Bun.file(usageViewerJsPath).bytes(), 200, JS_HEADERS),
+)
+
 // Vendored third-party assets for the dashboard. Inlined as a small
 // allowlist rather than a wildcard static handler to keep the surface
 // area minimal and avoid path-traversal concerns. Both are pinned
 // versions checked into the repo under `src/pages/vendor/`.
-const VENDOR_HEADERS = {
-  "content-type": "application/javascript; charset=utf-8",
-  "cache-control": "public, max-age=86400",
-} as const
 server.get("/vendor/lucide.min.js", async (c) =>
-  c.body(await Bun.file(lucideVendorPath).bytes(), 200, VENDOR_HEADERS),
+  c.body(await Bun.file(lucideVendorPath).bytes(), 200, JS_HEADERS),
 )
 server.get("/vendor/tailwind.min.js", async (c) =>
-  c.body(await Bun.file(tailwindVendorPath).bytes(), 200, VENDOR_HEADERS),
+  c.body(await Bun.file(tailwindVendorPath).bytes(), 200, JS_HEADERS),
 )
 
 server.route("/_debug", debugRoutes)

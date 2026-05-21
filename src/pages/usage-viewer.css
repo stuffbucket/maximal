@@ -1,0 +1,302 @@
+/* ----------------------------------------------------------------
+   Maximal — Dashboard styles.
+
+   Design tokens follow the humanist-powerful system documented in
+   .design-context.md and shared with the Settings window. Inline
+   element styles in the rendered HTML reference the legacy
+   `--color-*` names; those are aliased to the new semantic tokens at
+   the bottom of the :root block so a downstream rewrite can drop
+   them without touching the template literals in usage-viewer.js.
+   ---------------------------------------------------------------- */
+
+:root {
+  /* Font stacks */
+  --font-display: "Fraunces", Georgia, "Times New Roman", serif;
+  --font-body: "Commissioner", "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+
+  /* Type ramp (16px base, 1.2 ratio) */
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-md: 1.125rem;
+  --text-lg: 1.25rem;
+  --text-xl: 1.5rem;
+  --text-2xl: 2rem;
+
+  --weight-base: 400;
+  --weight-md: 500;
+  --weight-lg: 600;
+  --weight-xl: 600;
+  --weight-2xl: 700;
+
+  --leading-base: 1.6;
+  --leading-lg: 1.4;
+  --leading-xl: 1.3;
+  --leading-2xl: 1.2;
+
+  --tracking-xl: -0.01em;
+  --tracking-2xl: -0.015em;
+
+  /* Spacing scale */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  /* Radii */
+  --radius-chip: 4px;
+  --radius-input: 6px;
+  --radius-card: 8px;
+  --radius-pill: 9999px;
+
+  /* Elevation */
+  --elevation-card: 0 1px 2px rgb(0 0 0 / 0.06);
+
+  /* Identity — crimson brand mark, used once near the heading. */
+  --brand: #c8334a;
+  --brand-fg: #ffffff;
+
+  /* Surfaces (dark-first defaults) */
+  --surface-base: #0a0a0a;
+  --surface-card: #161616;
+  --surface-control: #1f1f1f;
+
+  /* Text */
+  --text-strong: #f5f5f5;
+  --text-base-color: #d4d4d4;
+  --text-muted: #a1a1a1;
+
+  /* Borders */
+  --border-subtle: rgb(255 255 255 / 0.08);
+  --border-strong: rgb(255 255 255 / 0.18);
+
+  /* One humanist accent per window: teal. Matches Settings. */
+  --accent: #14b8a6;
+  --accent-hover: #2dd4bf;
+  --accent-fg: #0a0a0a;
+
+  --link: var(--accent);
+  --link-hover: var(--accent-hover);
+
+  --focus-ring: 0 0 0 2px var(--surface-base), 0 0 0 4px var(--accent);
+
+  /* Semantic status (meaning only — never decoration) */
+  --status-error: #ef4444;
+  --status-error-fg: #fca5a5;
+  --status-success: #22c55e;
+  --status-success-fg: #4ade80;
+  --status-warning: #eab308;
+  --status-warning-fg: #facc15;
+  --status-info: #38bdf8;
+  --status-info-fg: #7dd3fc;
+
+  /* Legacy aliases — referenced by inline styles inside template
+     literals in usage-viewer.js. Trimmed to the set the script
+     actually emits; new code should consume the semantic tokens
+     above directly. */
+  --color-bg-darkest: var(--surface-base);
+  --color-bg: var(--surface-card);
+  --color-bg-soft: var(--surface-card);
+  --color-bg-light-1: var(--surface-control);
+  --color-bg-light-2: var(--border-subtle);
+
+  --color-fg-dark: var(--text-muted);
+  --color-fg-medium: var(--text-base-color);
+  --color-fg-light: var(--text-base-color);
+  --color-fg-lightest: var(--text-strong);
+
+  --color-blue: var(--accent);
+  --color-blue-accent: var(--accent-hover);
+  --color-red: var(--status-error);
+  --color-red-accent: var(--status-error-fg);
+  --color-green: var(--status-success);
+  --color-green-accent: var(--status-success-fg);
+  --color-yellow: var(--status-warning);
+  --color-yellow-accent: var(--status-warning-fg);
+  --color-aqua-accent: var(--status-info-fg);
+  --color-purple-accent: #c084fc;
+  --color-gray: var(--text-muted);
+  --color-gray-accent: var(--text-muted);
+}
+
+html,
+body {
+  background-color: var(--surface-base);
+  color: var(--text-base-color);
+}
+
+body {
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  font-weight: var(--weight-base);
+  line-height: var(--leading-base);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+/* The one Fraunces moment per window: the page heading. */
+h1,
+.h-display {
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-2xl);
+  line-height: var(--leading-2xl);
+  letter-spacing: var(--tracking-2xl);
+  color: var(--text-strong);
+}
+
+h2,
+.h-section {
+  font-family: var(--font-body);
+  font-size: var(--text-xl);
+  font-weight: var(--weight-xl);
+  line-height: var(--leading-xl);
+  letter-spacing: var(--tracking-xl);
+  color: var(--text-strong);
+}
+
+h3 {
+  font-family: var(--font-body);
+  font-weight: var(--weight-lg);
+  color: var(--text-strong);
+}
+
+code,
+kbd,
+pre,
+.mono,
+.font-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+a {
+  color: var(--link);
+  text-decoration: none;
+}
+a:hover {
+  color: var(--link-hover);
+}
+
+/* Surface helpers. Markup that renders dynamically uses inline
+   styles (background-color: var(--color-bg)), which alias through. */
+.panel {
+  background-color: var(--surface-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  box-shadow: var(--elevation-card);
+}
+
+/* Control surface */
+input,
+select,
+textarea {
+  font-family: inherit;
+  font-size: var(--text-sm);
+  background-color: var(--surface-control);
+  color: var(--text-strong);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-input);
+}
+
+button {
+  font-family: inherit;
+  border-radius: var(--radius-input);
+}
+
+/* Bespoke focus ring (overrides Tailwind ring utilities). */
+:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.input-focus:focus,
+.input-focus:focus-visible {
+  box-shadow: var(--focus-ring) !important;
+  border-color: var(--accent) !important;
+}
+
+/* Progress bar */
+.progress-bar-bg {
+  background-color: var(--surface-control);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+.progress-bar-fg {
+  transition: width 0.5s ease-in-out;
+  border-radius: var(--radius-pill);
+}
+
+/* Raw-data view */
+.code-block {
+  border-radius: var(--radius-card);
+}
+.code-block::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.code-block::-webkit-scrollbar-track {
+  background: var(--surface-card);
+}
+.code-block::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: var(--radius-pill);
+}
+.code-block::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+button:disabled,
+select:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+/* Apply a soft radius to every directly styled "card-ish" element
+   the JS template literals produce (they use `class="p-4 border"`
+   + inline background-color). */
+main#content-area > section,
+main#content-area .border {
+  border-radius: var(--radius-card);
+}
+main#content-area table {
+  border-radius: var(--radius-card);
+  overflow: hidden;
+}
+
+/* The brand "m" — one humanist mark per window, sits next to H1. */
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: var(--brand);
+  color: var(--brand-fg);
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 700;
+  font-size: 24px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+/* Reduced motion is a contract, not a hint (principle #5). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  .progress-bar-fg {
+    transition: none !important;
+  }
+}
