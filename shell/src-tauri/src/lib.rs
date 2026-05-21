@@ -183,6 +183,26 @@ impl AppStatus {
     }
 }
 
+/// One-shot flag for "we've already auto-opened Settings to prompt
+/// sign-in this session." Lets us open Settings → Account on the
+/// first Starting → RunningUnauthenticated transition without
+/// re-opening it every time the user manually quits + signs back in
+/// while still unauthenticated.
+struct SetupPromptShown(std::sync::atomic::AtomicBool);
+
+impl SetupPromptShown {
+    fn new() -> Self {
+        Self(std::sync::atomic::AtomicBool::new(false))
+    }
+
+    /// Returns true the first time it's called; false on subsequent calls.
+    fn claim(&self) -> bool {
+        !self
+            .0
+            .swap(true, std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
 /// Random per-launch key the shell shares with its sidecar so the
 /// webview can authenticate against /settings/api/* even when the user
 /// has enabled "Block unknown connections." Injected as an env var when
@@ -355,6 +375,7 @@ pub fn run() {
         .manage(Sidecar::new())
         .manage(AppStatus::new())
         .manage(ShellApiKey::new())
+        .manage(SetupPromptShown::new())
         .invoke_handler(tauri::generate_handler![
             open_settings_at,
             open_dashboard,
@@ -526,11 +547,25 @@ fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
                 }
                 CommandEvent::Terminated(payload) => {
                     eprintln!("[maximal] sidecar exited: {:?}", payload);
-                    // If the sidecar died, flip to Failed so the user
-                    // sees something actionable in the tray. (We don't
-                    // distinguish clean-exit-during-quit here because
-                    // ExitRequested has already fired the kill path.)
-                    apply_state(&handle, SidecarState::Failed);
+                    // Clean exit signals an intentional shutdown — either
+                    // we just sent SIGTERM via kill_sidecar (Quit flow),
+                    // or an external caller hit /_internal/shutdown
+                    // (a fresh `bun run app:dev` evicting a previous
+                    // session, the `maximal start --replace` CLI flow,
+                    // etc.). In both cases the user wants the WHOLE app
+                    // to come down, not a tray + windows stranded over a
+                    // dead backend. handle.exit(0) is idempotent so
+                    // overlapping with our own ExitRequested path is
+                    // fine.
+                    //
+                    // Non-zero / signal-killed exits indicate a real
+                    // failure: stay alive in Failed state so the user
+                    // can see the tray badge and reach the logs.
+                    if payload.code == Some(0) {
+                        handle.exit(0);
+                    } else {
+                        apply_state(&handle, SidecarState::Failed);
+                    }
                     break;
                 }
                 _ => {}
@@ -694,6 +729,13 @@ fn apply_setup_status(app: &AppHandle, status: &SetupStatusResponse) {
 
 /// Sets the AppStatus and, if it changed, rebuilds the tray icon +
 /// menu. Idempotent — calling with the current state is a no-op.
+///
+/// First-launch sign-in nudge: when the sidecar first reports it's
+/// running but unauthenticated, open Settings → Account so the user
+/// sees the device-flow CTA without having to discover the tray
+/// menu. Guarded by `SetupPromptShown` so it fires at most once per
+/// shell process — if the user explicitly signs out or closes the
+/// Settings window before signing in, we don't keep re-opening it.
 fn apply_state(app: &AppHandle, next: SidecarState) {
     let changed = app.state::<AppStatus>().set(next).is_some();
     if !changed {
@@ -701,6 +743,11 @@ fn apply_state(app: &AppHandle, next: SidecarState) {
     }
     if let Err(err) = refresh_tray(app, next) {
         eprintln!("[shell] tray refresh failed: {err}");
+    }
+    if next == SidecarState::RunningUnauthenticated
+        && app.state::<SetupPromptShown>().claim()
+    {
+        open_settings_window(app, Some("account"));
     }
 }
 
