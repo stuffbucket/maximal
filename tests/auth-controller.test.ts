@@ -42,6 +42,8 @@ const harness = {
   unlinkImpl: (_p: string): Promise<void> => Promise.resolve(),
   unlinkCalls: [] as Array<string>,
   writeDefaultRecordCalls: [] as Array<unknown>,
+  setupCopilotTokenImpl: (): Promise<void> => Promise.resolve(),
+  setupCopilotTokenCalls: 0,
 }
 
 void mock.module("~/services/github/get-device-code", () => ({
@@ -73,6 +75,13 @@ void mock.module("~/lib/github-token-store", () => ({
     obtainedAt: new Date().toISOString(),
   }),
   inferTokenType: () => "ghu_",
+}))
+
+void mock.module("~/lib/token", () => ({
+  setupCopilotToken: () => {
+    harness.setupCopilotTokenCalls++
+    return harness.setupCopilotTokenImpl()
+  },
 }))
 
 void mock.module("node:fs/promises", () => ({
@@ -144,6 +153,8 @@ beforeEach(() => {
   harness.unlinkCalls = []
   harness.writeDefaultRecordCalls = []
   harness.pollAccessTokenCalls = 0
+  harness.setupCopilotTokenImpl = () => Promise.resolve()
+  harness.setupCopilotTokenCalls = 0
 })
 
 afterEach(() => {
@@ -529,6 +540,44 @@ describe("runPoller (driven by startDeviceFlow)", () => {
     // Token was wiped by signOut and the resolved poll did NOT re-set it.
     expect(state.githubToken).toBeUndefined()
     expect(harness.writeDefaultRecordCalls.length).toBe(0)
+  })
+
+  test("proactive mint: calls setupCopilotToken once after a successful poll", async () => {
+    const poll = deferred<string>()
+    harness.pollAccessTokenImpl = () => poll.promise
+
+    await startDeviceFlow()
+    poll.resolve("ghu_success")
+    await flushMicrotasks(20)
+
+    expect(harness.setupCopilotTokenCalls).toBe(1)
+    expect(state.githubToken).toBe("ghu_success")
+  })
+
+  test("proactive mint failure does NOT fail sign-in (token still set, status authenticated)", async () => {
+    const poll = deferred<string>()
+    harness.pollAccessTokenImpl = () => poll.promise
+    harness.setupCopilotTokenImpl = () =>
+      Promise.reject(new Error("no copilot license"))
+    const spy = spyConsola("warn")
+    try {
+      await startDeviceFlow()
+      poll.resolve("ghu_kept_despite_mint_fail")
+      await flushMicrotasks(20)
+
+      // githubToken still set, sign-in still authenticated.
+      expect(state.githubToken).toBe("ghu_kept_despite_mint_fail")
+      expect(getAuthStatus().state).toBe("authenticated")
+      // The warn surfaces the mint failure for diagnostics.
+      const hit = spy.calls.find(
+        (args) =>
+          typeof args[0] === "string"
+          && args[0].includes("failed to mint Copilot token"),
+      )
+      expect(hit).toBeDefined()
+    } finally {
+      spy.restore()
+    }
   })
 
   test("abort before pollAccessToken rejects: lastError NOT recorded", async () => {

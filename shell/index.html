@@ -92,11 +92,22 @@
 
             <!-- State: authenticated -->
             <div class="state" data-state-account="authenticated" hidden>
-              <h3 class="state__title">Signed in</h3>
-              <p class="state__body">
-                Signed in as
-                <strong class="mono" data-field="account_login"></strong>.
-              </p>
+              <div class="signed-in-hero">
+                <div
+                  class="signed-in-hero__avatar"
+                  data-field="account_avatar"
+                  aria-hidden="true"
+                ></div>
+                <div class="signed-in-hero__text">
+                  <p
+                    class="signed-in-hero__name"
+                    data-field="account_login"
+                  ></p>
+                  <p class="signed-in-hero__caption">
+                    Signed in to GitHub Copilot.
+                  </p>
+                </div>
+              </div>
               <div class="actions">
                 <button
                   type="button"
@@ -217,12 +228,8 @@
                   <dd class="mono" data-field="models_cached">…</dd>
                 </div>
                 <div class="kv__row">
-                  <dt>GitHub token</dt>
-                  <dd class="mono" data-field="github_token">…</dd>
-                </div>
-                <div class="kv__row">
-                  <dt>Copilot token</dt>
-                  <dd class="mono" data-field="copilot_token">…</dd>
+                  <dt>GitHub Copilot</dt>
+                  <dd class="mono" data-field="github_copilot_status">…</dd>
                 </div>
                 <div class="kv__row">
                   <dt>Rate limit</dt>

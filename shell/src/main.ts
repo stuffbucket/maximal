@@ -137,9 +137,33 @@ function renderDiagnostics(data: DiagnosticsResponse): void {
   setField("uptime", formatUptime(data.uptime_ms));
   setField("account_type", data.account_type ?? "unknown");
   setField("models_cached", String(data.models_cached));
-  setField("github_token", data.tokens.github_token_present ? "present" : "missing");
-  setField("copilot_token", data.tokens.copilot_token_present ? "present" : "missing");
+  setField("github_copilot_status", deriveGithubCopilotStatus(data.tokens));
   setField("rate_limit", formatRateLimit(data.rate_limit));
+}
+
+/**
+ * Collapse the two underlying booleans into one human-readable status.
+ *
+ *   github | copilot | status
+ *   -------+---------+--------------------------------------------------
+ *   true   | true    | "Signed in, ready"
+ *   true   | false   | "Token will refresh on first request"
+ *   false  | false   | "Not signed in"
+ *   false  | true    | "Inconsistent — try signing in again"
+ *
+ * Wire format keeps both booleans; this derivation is purely a UI
+ * concern. Surfacing the inconsistent state (rather than hiding it)
+ * gives the user an actionable path when something's off.
+ */
+function deriveGithubCopilotStatus(
+  tokens: DiagnosticsResponse["tokens"],
+): string {
+  const gh = tokens.github_token_present;
+  const cop = tokens.copilot_token_present;
+  if (gh && cop) return "Signed in, ready";
+  if (gh && !cop) return "Token will refresh on first request";
+  if (!gh && !cop) return "Not signed in";
+  return "Inconsistent — try signing in again";
 }
 
 function setDiagnosticsError(message: string | null): void {
@@ -253,6 +277,40 @@ function setAccountField(name: string, value: string): void {
   if (el) el.textContent = value;
 }
 
+/**
+ * Render the GitHub avatar for the signed-in user. GitHub serves
+ * a public PNG at https://github.com/<login>.png — no API, no auth.
+ * We swap in an <img>; on load-failure (404, offline) we fall back
+ * to a typographic placeholder showing the user's first initial,
+ * so the layout never collapses.
+ */
+function renderAccountAvatar(login: string): void {
+  const slot = accountSlot("account_avatar");
+  if (!slot) return;
+  const safeLogin = login || "?";
+  const initial = (safeLogin[0] ?? "?").toUpperCase();
+  slot.textContent = "";
+  slot.classList.remove("signed-in-hero__avatar--fallback");
+  if (!login || login === "(unknown)") {
+    slot.textContent = initial;
+    slot.classList.add("signed-in-hero__avatar--fallback");
+    return;
+  }
+  const img = document.createElement("img");
+  img.className = "signed-in-hero__avatar-img";
+  img.src = `https://github.com/${encodeURIComponent(login)}.png?size=128`;
+  img.alt = `${login} GitHub avatar`;
+  img.loading = "lazy";
+  img.decoding = "async";
+  img.width = 56;
+  img.height = 56;
+  img.addEventListener("error", () => {
+    slot.textContent = initial;
+    slot.classList.add("signed-in-hero__avatar--fallback");
+  });
+  slot.appendChild(img);
+}
+
 function formatExpiresAt(iso: string | undefined): string {
   if (!iso) return "soon";
   const date = new Date(iso);
@@ -280,7 +338,9 @@ function renderAccount(status: AuthStatus): void {
       link.textContent = uri.replace(/^https?:\/\//, "");
     }
   } else if (active === "authenticated") {
-    setAccountField("account_login", status.account_login ?? "(unknown)");
+    const login = status.account_login ?? "(unknown)";
+    setAccountField("account_login", login);
+    renderAccountAvatar(login);
   } else if (active === "error") {
     setAccountField("error", status.error ?? "Unknown error.");
   }

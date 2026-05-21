@@ -44,6 +44,7 @@ import { makeRecord, writeDefaultRecord } from "./github-token-store"
 import { PATHS } from "./paths"
 import { registerProcessCleanup } from "./process-cleanup"
 import { state } from "./state"
+import { setupCopilotToken } from "./token"
 
 interface ActiveFlow {
   deviceCode: DeviceCodeResponse
@@ -176,6 +177,20 @@ async function runPoller(flow: ActiveFlow): Promise<void> {
 
     await writeDefaultRecord(makeRecord(token))
     state.githubToken = token
+
+    // Best-effort: proactively mint the Copilot token so Diagnostics
+    // doesn't surface the intermediate "github present, copilot absent"
+    // state. Failure (no Copilot license, network down, upstream 5xx)
+    // must NOT fail sign-in — the lazy path in token.ts retries on the
+    // first /v1/messages request via setupCopilotToken's TTL refresh.
+    try {
+      await setupCopilotToken()
+    } catch (err) {
+      consola.warn(
+        "Auth-controller: failed to mint Copilot token after sign-in:",
+        err,
+      )
+    }
 
     // Best-effort: populate account_login. Failure here doesn't
     // invalidate the token — the user is still authenticated.
