@@ -7,8 +7,25 @@
  * file when the success path runs.
  */
 
-import { afterEach, beforeEach, describe, expect, test, mock } from "bun:test"
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from "bun:test"
 import { Hono } from "hono"
+
+// Capture real get-device-code so afterAll can restore. poll-access-token
+// and github-token-store are NOT mocked via mock.module here — they have
+// their own dedicated test files (poll-access-token.test.ts,
+// github-token-store.test.ts) that conflict with a process-wide mock.
+// Instead we inject stubs via __setAuthControllerDepsForTests so the
+// module registry stays clean.
+const realGetDeviceCodeModule =
+  await import("~/services/github/get-device-code")
 
 void mock.module("~/services/github/get-device-code", () => ({
   getDeviceCode: () =>
@@ -21,28 +38,9 @@ void mock.module("~/services/github/get-device-code", () => ({
     }),
 }))
 
-// Default to a never-resolving poll so tests can inspect the
-// device_code_issued / polling state without races. Individual tests
-// re-mock as needed.
-void mock.module("~/services/github/poll-access-token", () => ({
-  pollAccessToken: () => new Promise<string>(() => {}),
-}))
-
-void mock.module("~/lib/github-token-store", () => ({
-  writeDefaultRecord: () => Promise.resolve(),
-  readDefaultRecord: () => Promise.resolve(null),
-  makeRecord: (accessToken: string) => ({
-    schemaVersion: 1,
-    tokenType: "ghu_",
-    accessToken,
-    refreshToken: null,
-    obtainedAt: new Date().toISOString(),
-  }),
-  inferTokenType: () => "ghu_",
-}))
-
 const { AuthStatus } = await import("~/lib/settings-types")
-const { __resetAuthControllerForTests } = await import("~/lib/auth-controller")
+const { __resetAuthControllerForTests, __setAuthControllerDepsForTests } =
+  await import("~/lib/auth-controller")
 const { createAuthMiddleware } = await import("~/lib/request-auth")
 const { settingsApiRoutes } = await import("~/routes/settings/api")
 const { state } = await import("~/lib/state")
@@ -65,6 +63,20 @@ function buildApp(opts?: { apiKeys?: Array<string> }) {
 
 beforeEach(() => {
   __resetAuthControllerForTests()
+  __setAuthControllerDepsForTests({
+    // Never resolves: tests assert on device_code_issued / polling state
+    // without racing the success path. Tests that need a successful poll
+    // re-inject locally.
+    pollAccessToken: () => new Promise<string>(() => {}),
+    writeDefaultRecord: () => Promise.resolve(),
+    makeRecord: (accessToken: string) => ({
+      schemaVersion: 1,
+      tokenType: "ghu_",
+      accessToken,
+      refreshToken: null,
+      obtainedAt: new Date().toISOString(),
+    }),
+  })
   state.githubToken = undefined
   state.userName = undefined
 })
@@ -170,4 +182,11 @@ describe("/settings/api/auth/github", () => {
       expect(parsed.data.user_code).toBe("ABCD-1234")
     }
   })
+})
+
+afterAll(() => {
+  void mock.module(
+    "~/services/github/get-device-code",
+    () => realGetDeviceCodeModule,
+  )
 })
