@@ -134,6 +134,19 @@ async function copyToClipboard(text: string, btn: Element | null): Promise<void>
   }
 }
 
+function wireUninstall(): void {
+  const section = document.querySelector('[data-section="diagnostics"]');
+  if (!section) return;
+  section
+    .querySelector('[data-action="copy-uninstall-cmd"]')
+    ?.addEventListener("click", (ev) => {
+      void copyToClipboard(
+        "maximal uninstall --revert-claude",
+        ev.currentTarget as Element,
+      );
+    });
+}
+
 function wireEndpoint(): void {
   const section = document.querySelector('[data-section="endpoint"]');
   if (!section) return;
@@ -612,6 +625,7 @@ window.addEventListener("DOMContentLoaded", () => {
   wireDiagnostics();
   wireAccount();
   wireEndpoint();
+  wireUninstall();
   mountApiClients();
   wireNav();
   syncFromHash();
