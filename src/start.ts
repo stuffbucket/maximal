@@ -181,13 +181,77 @@ export async function runServer(options: RunServerOptions): Promise<void> {
       + `auth=${state.githubToken ? "authenticated" : "unauthenticated"}`,
   )
 
-  serve({
+  const httpServer = serve({
     fetch: server.fetch,
     port: options.port,
     bun: {
       idleTimeout: 0,
     },
   })
+
+  installShutdownHandlers(httpServer)
+}
+
+// Idempotency guard so SIGTERM racing with the parent-death watchdog
+// (or being delivered twice) doesn't double-stop the server.
+let shuttingDown = false
+
+/** Stop the HTTP server, then exit 0. Capped at ~2.5s by an unref'd
+ *  watchdog timer so a hung close() can't keep the process alive. */
+async function initiateShutdown(
+  httpServer: ReturnType<typeof serve>,
+  reason: string,
+): Promise<void> {
+  if (shuttingDown) return
+  shuttingDown = true
+
+  consola.info(`shutdown: ${reason}, draining`)
+
+  // Fail-safe: if close() hangs, hard-exit after 2.5s. .unref() so the
+  // timer itself never holds the loop open in the happy path.
+  const watchdog = setTimeout(() => {
+    consola.warn("shutdown: watchdog tripped, forcing exit")
+    process.exit(1)
+  }, 2500)
+  watchdog.unref()
+
+  try {
+    // srvx Server exposes close(); pass true to drop in-flight conns.
+    await httpServer.close(true)
+  } catch (error) {
+    consola.warn("shutdown: server.close() threw", error)
+  }
+
+  clearTimeout(watchdog)
+  process.exit(0)
+}
+
+/** Wire SIGTERM + optional parent-death watchdog. The watchdog only
+ *  runs when MAXIMAL_SIDECAR_PARENT_PID is set (Tauri shell spawn);
+ *  bare CLI users own their own lifecycle. */
+function installShutdownHandlers(httpServer: ReturnType<typeof serve>): void {
+  process.on("SIGTERM", () => {
+    void initiateShutdown(httpServer, "received SIGTERM")
+  })
+
+  const parentPidStr = process.env.MAXIMAL_SIDECAR_PARENT_PID
+  const parentPid = parentPidStr ? Number(parentPidStr) : null
+
+  if (parentPid && Number.isInteger(parentPid) && parentPid > 0) {
+    consola.info(`shutdown: watching parent pid ${parentPid}`)
+    const interval = setInterval(() => {
+      try {
+        // kill(pid, 0) is the POSIX "is this process alive" probe —
+        // sends no signal, throws ESRCH if the parent is gone.
+        process.kill(parentPid, 0)
+      } catch {
+        clearInterval(interval)
+        consola.warn(`shutdown: parent ${parentPid} gone`)
+        void initiateShutdown(httpServer, `parent ${parentPid} exited`)
+      }
+    }, 3000)
+    interval.unref()
+  }
 }
 
 /** Boot-event logger. Writes to ~/.local/share/maximal/logs/startup-<date>.log

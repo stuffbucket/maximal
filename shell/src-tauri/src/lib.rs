@@ -150,6 +150,23 @@ impl Sidecar {
     }
 }
 
+impl Drop for Sidecar {
+    fn drop(&mut self) {
+        // Last-resort cleanup if RunEvent::ExitRequested didn't fire
+        // (e.g. a Rust panic inside `app.run`, or some other abnormal
+        // teardown). We skip the SIGTERM-then-SIGKILL escalation that
+        // `kill_sidecar` does — Drop is the abnormal-exit path, where
+        // graceful shutdown isn't on the table anyway. CommandChild::kill()
+        // is SIGKILL under the hood, which is exactly what we want here:
+        // don't leak a zombie.
+        if let Ok(mut guard) = self.0.lock() {
+            if let Some(child) = guard.take() {
+                let _ = child.kill();
+            }
+        }
+    }
+}
+
 /// Tracks the current SidecarState behind a Mutex so the polling task
 /// (Tokio) and the menu-event callback (main thread) can both touch it.
 struct AppStatus(Mutex<SidecarState>);
@@ -435,6 +452,14 @@ fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
     // but setting NODE_ENV=production removes any ambiguity inside
     // a Tauri-launched sidecar.
     cmd = cmd.env("NODE_ENV", "production");
+    // Hand the shell's PID to the sidecar for its parent-death
+    // watchdog. If the tray app is force-killed (Activity Monitor,
+    // OOM, panic past Drop), the sidecar polls this PID and exits
+    // when it disappears so we don't orphan a proxy on :4142.
+    cmd = cmd.env(
+        "MAXIMAL_SIDECAR_PARENT_PID",
+        std::process::id().to_string(),
+    );
     // Shell-internal API key — the webview reads it via the
     // `get_shell_api_key` Tauri command and sends it on every
     // /settings/api/* request. Lets the user's own UI keep working
@@ -506,10 +531,73 @@ fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Graceful sidecar shutdown.
+///
+/// `CommandChild::kill()` from tauri-plugin-shell-2.3.5 is SIGKILL
+/// under the hood (see process/mod.rs:78 — it calls `libc::kill(pid,
+/// SIGKILL)` directly, not SIGTERM). That gives the Bun-compiled
+/// sidecar no chance to flush logs, close its listening socket, or
+/// shut down its rate-limit/state caches cleanly. We want a real
+/// graceful protocol:
+///
+///   1. Send SIGTERM. The sidecar installs a SIGTERM handler at boot
+///      that runs `server.close(true)` and flushes consola before
+///      exiting 0 — see src/start.ts.
+///   2. Wait up to 3s for the child to exit on its own. We do this on
+///      a background thread so this function can stay synchronous
+///      (called from `RunEvent::ExitRequested`, which doesn't await).
+///   3. If the child is still around (still in our `Sidecar` state)
+///      after 3s, escalate to SIGKILL via `CommandChild::kill()`.
+///
+/// On non-Unix targets, libc::SIGTERM isn't available, so we fall
+/// straight through to `child.kill()`. The tray app is macOS-first;
+/// this just keeps any future Windows builds compiling.
 fn kill_sidecar(app: &AppHandle) {
-    if let Some(child) = app.state::<Sidecar>().take() {
-        // CommandChild::kill() sends SIGTERM (POSIX) / TerminateProcess
-        // (Windows). The Bun-compiled maximal handles SIGTERM cleanly.
+    let Some(child) = app.state::<Sidecar>().take() else {
+        return;
+    };
+
+    #[cfg(unix)]
+    {
+        // Capture the PID before handing the child off to the
+        // escalation task. `CommandChild::pid()` returns u32; libc::kill
+        // wants i32.
+        let pid = child.pid() as i32;
+
+        // SAFETY: `libc::kill` is an FFI call to the POSIX kill(2)
+        // syscall. It's safe for any pid value — if the pid is invalid
+        // or has already exited, kill returns -1 with errno=ESRCH and
+        // does nothing. We deliberately ignore the return: the only
+        // failure mode we care about (child already dead) is fine.
+        unsafe {
+            libc::kill(pid, libc::SIGTERM);
+        }
+
+        // Stash the child back so the escalation task can decide
+        // whether it still needs SIGKILL. If the sidecar exits
+        // cleanly within 3s, the child handle goes out of scope here
+        // and that's fine — killing an already-exited child is a
+        // harmless no-op.
+        app.state::<Sidecar>().set(child);
+
+        // Plain OS thread for the 3s grace timer rather than pulling
+        // a tokio runtime in for this single sleep. AppHandle::clone()
+        // is Arc-cheap.
+        let app_handle = app.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(3));
+            if let Some(child) = app_handle.state::<Sidecar>().take() {
+                // Still alive (or at least, still in our slot) after
+                // the grace period — escalate to SIGKILL.
+                let _ = child.kill();
+            }
+        });
+    }
+
+    #[cfg(not(unix))]
+    {
+        // No SIGTERM equivalent we can send through this API on
+        // Windows; just SIGKILL-equivalent and move on.
         let _ = child.kill();
     }
 }
