@@ -52,7 +52,7 @@ Then `installers.yml` triggers on the published release:
 
 | Job | Runner | Produces |
 |---|---|---|
-| `macos-app-zip` | ubuntu-latest | `*-darwin-arm64.app.zip` (+ `.sha256`) |
+| `tauri-macos` | self-hosted (arm64 mac) | `*-darwin-arm64.app.zip` + `*-darwin-arm64.dmg` (signed + notarized + stapled, with sidecar) |
 | `windows-installer` | ubuntu-latest | `install.ps1` (+ `.sha256`) |
 | `windows-msi` | windows-2022 | `*-windows-x64.msi` (+ `.sha256`) |
 
@@ -60,7 +60,12 @@ If any installer job fails, the release is salvageable — fix forward
 and re-run the failed job from the Actions UI (`workflow_dispatch`
 input `tag` accepts the existing release tag).
 
-## 3. Build and attach the polished `.dmg` (manual, macOS-only)
+## 3. Build and attach the polished `.dmg` (legacy — superseded by `tauri-macos`)
+
+Since v0.4.1, the self-hosted macOS runner produces a signed +
+notarized `.dmg` automatically as part of the `installers.yml`
+`tauri-macos` job. The steps below remain documented for emergency
+re-runs from a developer Mac if the self-hosted runner is offline.
 
 Run from any Apple Silicon developer Mac with this checkout. Auto-
 detects the latest tag from `git describe`:
