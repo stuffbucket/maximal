@@ -7,12 +7,16 @@ import { mountApiClients } from "./api-clients-island";
 
 type SectionId =
   | "account"
+  | "apps"
+  | "endpoint"
   | "api-clients"
   | "logs"
   | "diagnostics";
 
 const SECTIONS: ReadonlyArray<SectionId> = [
   "account",
+  "apps",
+  "endpoint",
   "api-clients",
   "logs",
   "diagnostics",
@@ -92,6 +96,95 @@ function wireLogs(): void {
   document
     .querySelector('[data-section="logs"] [data-action="reveal-logs"]')
     ?.addEventListener("click", revealLogs);
+}
+
+// ---- Endpoint section ------------------------------------------------------
+
+const ENDPOINT_BASE_URL = "http://127.0.0.1:4141";
+let endpointApiKey: string | null = null;
+
+async function loadEndpointApiKey(): Promise<void> {
+  if (endpointApiKey !== null) return;
+  try {
+    endpointApiKey = await invoke<string>("get_shell_api_key");
+  } catch (err) {
+    console.warn("invoke(get_shell_api_key) failed:", err);
+    endpointApiKey = null;
+  }
+}
+
+function getEndpointKeyEl(): HTMLElement | null {
+  return document.querySelector<HTMLElement>(
+    '[data-section="endpoint"] [data-field="endpoint-api-key"]',
+  );
+}
+
+async function copyToClipboard(text: string, btn: Element | null): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text);
+    if (btn instanceof HTMLElement) {
+      const original = btn.textContent;
+      btn.textContent = "Copied";
+      window.setTimeout(() => {
+        btn.textContent = original;
+      }, 1200);
+    }
+  } catch (err) {
+    console.warn("clipboard.writeText failed:", err);
+  }
+}
+
+function wireEndpoint(): void {
+  const section = document.querySelector('[data-section="endpoint"]');
+  if (!section) return;
+
+  section
+    .querySelector('[data-action="copy-base-url"]')
+    ?.addEventListener("click", (ev) => {
+      void copyToClipboard(ENDPOINT_BASE_URL, ev.currentTarget as Element);
+    });
+
+  section
+    .querySelector('[data-action="reveal-api-key"]')
+    ?.addEventListener("click", async (ev) => {
+      await loadEndpointApiKey();
+      const el = getEndpointKeyEl();
+      if (!el) return;
+      const revealed = el.dataset.revealed === "true";
+      if (revealed) {
+        el.dataset.revealed = "false";
+        el.textContent = "••••••••••••••••••••••";
+        (ev.currentTarget as HTMLElement).textContent = "Reveal";
+      } else {
+        el.dataset.revealed = "true";
+        el.textContent = endpointApiKey ?? "(not available)";
+        (ev.currentTarget as HTMLElement).textContent = "Hide";
+      }
+    });
+
+  section
+    .querySelector('[data-action="copy-api-key"]')
+    ?.addEventListener("click", async (ev) => {
+      await loadEndpointApiKey();
+      if (endpointApiKey) {
+        void copyToClipboard(endpointApiKey, ev.currentTarget as Element);
+      }
+    });
+
+  section
+    .querySelector('[data-action="copy-curl-example"]')
+    ?.addEventListener("click", async (ev) => {
+      await loadEndpointApiKey();
+      const key = endpointApiKey ?? "$MAXIMAL_API_KEY";
+      const curl = [
+        `curl ${ENDPOINT_BASE_URL}/v1/messages \\`,
+        `  -H "x-api-key: ${key}" \\`,
+        `  -H "anthropic-version: 2023-06-01" \\`,
+        `  -H "content-type: application/json" \\`,
+        `  -d '{"model":"claude-sonnet-4-5","max_tokens":256,"messages":[{"role":"user","content":"Hello"}]}'`,
+      ].join("\n");
+      void copyToClipboard(curl, ev.currentTarget as Element);
+    });
 }
 
 function applyTheme(): void {
@@ -518,6 +611,7 @@ window.addEventListener("DOMContentLoaded", () => {
   wireLogs();
   wireDiagnostics();
   wireAccount();
+  wireEndpoint();
   mountApiClients();
   wireNav();
   syncFromHash();
