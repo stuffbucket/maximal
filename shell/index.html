@@ -13,10 +13,6 @@
   </head>
   <body>
     <div class="app">
-      <header class="titlebar">
-        <h1 class="titlebar__heading">maximal &mdash; Settings</h1>
-      </header>
-
       <div class="shell">
         <nav class="sidebar" aria-label="Settings sections">
           <ul class="nav">
@@ -69,36 +65,28 @@
             <!-- State: device_code_issued / polling -->
             <div class="state" data-state-account="pending" hidden>
               <h3 class="state__title">Almost there</h3>
-              <div class="device-code">
-                <span
-                  class="device-code__value mono"
-                  data-field="user_code"
-                  aria-label="Device code"
-                ></span>
-                <button
-                  type="button"
-                  class="btn btn--ghost btn--sm"
-                  data-action="copy-user-code"
-                >
+              <p class="state__body">
+                We&rsquo;ll copy your sign-in code and open GitHub for you.
+                Paste the code on the GitHub page to finish.
+              </p>
+              <button
+                type="button"
+                class="device-code-button"
+                data-action="sign-in-with-code"
+              >
+                <span class="device-code-button__label">
                   Copy
-                </button>
-              </div>
-              <ol class="state__steps">
-                <li>
-                  Visit
-                  <a
-                    href=""
-                    target="_blank"
-                    rel="noopener"
-                    data-field="verification_uri"
-                    >github.com/login/device</a
-                  >
-                </li>
-                <li>Enter the code above on GitHub.</li>
-                <li>Approve the request — this page will update.</li>
-              </ol>
+                  <span
+                    class="device-code-button__code mono"
+                    data-field="user_code"
+                    aria-label="Device code"
+                  ></span>
+                  and open GitHub
+                </span>
+              </button>
               <p class="state__caption">
-                Code expires <span data-field="expires_at"></span>.
+                Waiting for authorization &middot; expires
+                <span data-field="expires_at"></span>
               </p>
             </div>
 

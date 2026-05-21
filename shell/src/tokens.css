@@ -81,6 +81,19 @@
   --accent-destructive: #b32d3f;
   --accent-destructive-foreground: #ffffff;
 
+  /* ---- Link colors ----
+     Sister cool tones to --accent (#5198a6 teal), shifted lighter on dark
+     and darker on light so each theme clears WCAG AA (>=4.5:1) against
+     both --surface-base and --surface-card. Distinct from --accent so a
+     primary button (accent-filled) reads differently from inline prose
+     links; same teal family so it still feels native to the palette.
+     Measured (script in shell guidance):
+       dark  #7fc1d2 on #0a0a0a = 9.86, on #161616 = 9.01
+       light #2d6470 on #fafafa = 6.35, on #ffffff = 6.63
+     Defaults below are the dark values; light theme overrides them. */
+  --link: #7fc1d2;
+  --link-hover: #a8d8e3;
+
   /* ---- Focus ring ---- */
   --focus-ring-width: 2px;
   --focus-ring-offset: 2px;
@@ -101,6 +114,8 @@
   --text-muted: #8a8a8a;
   --border-subtle: #2a2a2a;
   --border-strong: #666666;
+  --link: #7fc1d2;
+  --link-hover: #a8d8e3;
 }
 
 [data-theme="light"] {
@@ -112,4 +127,6 @@
   --text-muted: #6a6a6a;
   --border-subtle: #e5e5e5;
   --border-strong: #8a8a8a;
+  --link: #2d6470;
+  --link-hover: #1e5560;
 }

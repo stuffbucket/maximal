@@ -29,30 +29,26 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Global anchor color. The browser default (#0969da-ish blue) is
+   illegible on --surface-base. --link is a sister cool tone to
+   --accent, theme-flipped in tokens.css to clear WCAG AA on both
+   dark and light surfaces. Per-component selectors below (.nav__item
+   etc.) override this with their own color where the link role
+   doesn't apply. */
+a {
+  color: var(--link);
+}
+
+a:hover {
+  color: var(--link-hover);
+}
+
 /* ---- App skeleton ---- */
 .app {
   display: flex;
   flex-direction: column;
   height: 100vh;
   overflow: hidden;
-}
-
-.titlebar {
-  display: flex;
-  align-items: center;
-  padding: var(--space-4) var(--space-6);
-  border-block-end: var(--border-width-hairline) solid var(--border-subtle);
-  background: var(--surface-card);
-}
-
-.titlebar__heading {
-  margin: 0;
-  font-family: var(--font-display);
-  font-size: var(--text-xl);
-  font-weight: var(--weight-2xl);
-  line-height: var(--leading-xl);
-  letter-spacing: -0.01em;
-  color: var(--text-strong);
 }
 
 .shell {
@@ -239,21 +235,6 @@ body {
   color: var(--text-muted);
 }
 
-.state__steps {
-  /* Tame the browser-default OL indent so numbers sit close to the
-     left edge of the surrounding type column. */
-  margin: 0;
-  padding-inline-start: var(--space-5);
-  font-size: var(--text-base);
-  line-height: var(--leading-base);
-  color: var(--text-base-color);
-  max-width: 65ch;
-}
-
-.state__steps li + li {
-  margin-block-start: var(--space-1);
-}
-
 .state--error .state__title {
   color: var(--accent-destructive);
 }
@@ -262,29 +243,62 @@ body {
   color: var(--accent-destructive);
 }
 
-/* ---- Device code (the visual hero during the pending state) ---- */
-.device-code {
-  display: flex;
+/* ---- Device-code sign-in button (the visual hero during the pending
+   state) ---- One single primary action: copy the code, then open the
+   verification URL. The code itself lives inside the label so the user
+   sees exactly what's about to be on their clipboard. */
+.device-code-button {
+  display: inline-flex;
   align-items: center;
-  gap: var(--space-3);
-  padding-block: var(--space-2);
-}
-
-.device-code__value {
-  font-family: var(--font-mono);
-  font-size: var(--text-2xl);
+  justify-content: center;
+  width: 100%;
+  max-width: 28rem;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-5);
+  background: var(--accent);
+  color: var(--accent-fg);
+  border: var(--border-width-hairline) solid transparent;
+  border-radius: var(--radius-card);
+  font-family: var(--font-body);
+  font-size: var(--text-base);
   font-weight: var(--weight-md);
-  line-height: var(--leading-2xl);
-  letter-spacing: 0.05em;
-  color: var(--text-strong);
-  font-variant-numeric: tabular-nums;
+  line-height: var(--leading-lg);
+  cursor: pointer;
+  min-height: var(--size-2xl, var(--size-xl));
+  text-align: center;
 }
 
-.device-code__value:empty::before {
-  /* Placeholder glyph that vanishes the instant JS sets textContent. */
-  content: "————";
-  color: var(--text-muted);
+.device-code-button:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.device-code-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.device-code-button__label {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: center;
+  gap: 0.45em;
+}
+
+.device-code-button__code {
+  font-family: var(--font-mono);
+  font-weight: var(--weight-lg);
   letter-spacing: 0.1em;
+  font-variant-numeric: tabular-nums;
+  /* Wrap defensively if the user_code is unusually long. */
+  word-break: break-all;
+}
+
+.device-code-button__code:empty::before {
+  content: "————";
+  letter-spacing: 0.08em;
+  opacity: 0.7;
 }
 
 /* ---- Cards ---- */
@@ -833,9 +847,13 @@ body {
 }
 
 .link {
-  color: var(--accent);
+  color: var(--link);
   text-decoration: underline;
   text-underline-offset: var(--space-1);
+}
+
+.link:hover {
+  color: var(--link-hover);
 }
 
 .link:focus-visible {

@@ -372,13 +372,60 @@ async function signOut(): Promise<void> {
   await loadAuthStatus();
 }
 
-async function copyUserCode(): Promise<void> {
+// One-shot button: copy code to clipboard, then open verification URL.
+// Brief on-button flash confirms the clipboard write — it's the only
+// feedback the user gets before the system browser takes focus.
+const SIGN_IN_FLASH_MS = 1200;
+
+async function openExternalUrl(url: string): Promise<void> {
+  try {
+    // Tauri v2 opener plugin is registered (opener:default). Call its
+    // `open_url` command directly via invoke so we don't need to add a
+    // new JS dep just for this one site.
+    await invoke("plugin:opener|open_url", { url });
+  } catch (err) {
+    // Plain-browser fallback (e.g. `bun run app:ui` mode) and last resort
+    // if the plugin command is unavailable for any reason.
+    console.warn("opener plugin unavailable, falling back to window.open", err);
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+}
+
+async function signInWithCode(button: HTMLElement): Promise<void> {
   const code = currentAuthStatus?.user_code;
-  if (!code) return;
+  const url = currentAuthStatus?.verification_uri;
+  if (!code || !url) return;
+
+  const label = button.querySelector<HTMLElement>(".device-code-button__label");
+  const original = label?.innerHTML ?? null;
+
+  let copied = false;
   try {
     await navigator.clipboard.writeText(code);
+    copied = true;
   } catch (err) {
+    // Insecure context, denied permission, or no clipboard API. Surface
+    // the code on the button so the user can still copy it manually.
     console.error("clipboard write failed", err);
+    if (label) {
+      label.textContent = `Copy ${code} manually — opening GitHub…`;
+    }
+  }
+
+  if (copied && label) {
+    label.textContent = "Copied · Opening GitHub…";
+  }
+
+  await openExternalUrl(url);
+
+  if (label && original !== null) {
+    window.setTimeout(() => {
+      // Only restore if the pending state is still rendered (label still
+      // in the DOM). Otherwise we'd flash text into a torn-down node.
+      if (document.body.contains(label)) {
+        label.innerHTML = original;
+      }
+    }, SIGN_IN_FLASH_MS);
   }
 }
 
@@ -398,8 +445,8 @@ function wireAccount(): void {
       case "sign-out":
         void signOut();
         break;
-      case "copy-user-code":
-        void copyUserCode();
+      case "sign-in-with-code":
+        void signInWithCode(button);
         break;
       default:
         break;

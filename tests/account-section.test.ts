@@ -45,20 +45,22 @@ describe("Account section markup", () => {
 
   test("data-action buttons are wired", () => {
     const section = accountSection()
-    for (const action of ["auth-start", "sign-out", "copy-user-code"]) {
+    // `sign-in-with-code` is the single-button replacement for the old
+    // `copy-user-code` + separate verification-URL link. It copies the
+    // device code to the clipboard and opens the verification URL in
+    // one click; the controller reads both values from currentAuthStatus.
+    for (const action of ["auth-start", "sign-out", "sign-in-with-code"]) {
       expect(section.includes(`data-action="${action}"`)).toBe(true)
     }
   })
 
   test("data-field slots match the AuthStatus contract", () => {
     const section = accountSection()
-    for (const field of [
-      "verification_uri",
-      "user_code",
-      "expires_at",
-      "account_login",
-      "error",
-    ]) {
+    // verification_uri is no longer rendered as a data-field slot —
+    // the sign-in-with-code button reads it from currentAuthStatus and
+    // hands it to the system opener. The other three pending-state
+    // fields plus the authenticated/error slots remain.
+    for (const field of ["user_code", "expires_at", "account_login", "error"]) {
       expect(section.includes(`data-field="${field}"`)).toBe(true)
     }
   })
