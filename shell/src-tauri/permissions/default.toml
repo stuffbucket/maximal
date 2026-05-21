@@ -2,7 +2,7 @@
 #
 # Tauri 2's ACL doesn't auto-generate permissions for our own
 # `#[tauri::command]` functions — only for plugin commands. So when the
-# Dashboard webview (loaded from http://localhost:4142 — a "remote"
+# Dashboard webview (loaded from http://localhost:4141 — a "remote"
 # origin in Tauri's classification) invokes one of these, the ACL
 # rejects it with "Plugin not found" unless the command is named in a
 # permission file like this one.

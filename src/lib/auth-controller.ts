@@ -79,11 +79,14 @@ function isFlowExpired(flow: ActiveFlow, nowMs: number = Date.now()): boolean {
 
 export function getAuthStatus(): AuthStatus {
   if (state.githubToken) {
+    // On device-flow completion we record the login on controllerState.
+    // On cold boot with a stored token, logUser() in src/lib/token.ts
+    // populated state.userName via the GitHub /user fetch — use that
+    // as the fallback so the Account section doesn't render "(unknown)".
+    const login = controllerState.accountLogin ?? state.userName
     return {
       state: "authenticated",
-      ...(controllerState.accountLogin ?
-        { account_login: controllerState.accountLogin }
-      : {}),
+      ...(login ? { account_login: login } : {}),
     }
   }
 
@@ -268,4 +271,9 @@ export function __resetAuthControllerForTests(): void {
   controllerState.flow = null
   controllerState.lastError = null
   controllerState.accountLogin = null
+  // getAuthStatus falls back to state.userName when accountLogin is
+  // null (so cold-boot from a stored token populates the Account UI).
+  // Tests reset state.githubToken between cases; reset the cached
+  // userName here too so the fallback doesn't leak across them.
+  state.userName = undefined
 }

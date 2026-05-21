@@ -122,9 +122,26 @@ const NO_STORE_JS = {
   "cache-control": "no-store",
 } as const
 
-server.get("/usage-viewer", async (c) =>
-  c.body(await Bun.file(usageViewerPath).bytes(), 200, NO_STORE_HTML),
-)
+// Per-process cache-buster appended to the dashboard's sibling-asset
+// URLs. With Cache-Control: no-store everywhere, this is belt-and-
+// suspenders — but WKWebView's HTTP cache survived our cache-control
+// rollover (entries cached under the old 24h max-age were still served
+// from disk without revalidation). Stamping a fresh `?v=<id>` per
+// sidecar launch sidesteps the cached entries entirely.
+const ASSET_CACHE_BUST = Date.now().toString(36)
+server.get("/usage-viewer", async (c) => {
+  const html = await Bun.file(usageViewerPath).text()
+  const stamped = html
+    .replaceAll(
+      'href="/usage-viewer.css"',
+      `href="/usage-viewer.css?v=${ASSET_CACHE_BUST}"`,
+    )
+    .replaceAll(
+      'src="/usage-viewer.js"',
+      `src="/usage-viewer.js?v=${ASSET_CACHE_BUST}"`,
+    )
+  return c.body(stamped, 200, NO_STORE_HTML)
+})
 server.get("/usage-viewer/", (c) => c.redirect("/usage-viewer", 301))
 server.get("/usage-viewer.css", async (c) =>
   c.body(await Bun.file(usageViewerCssPath).bytes(), 200, NO_STORE_CSS),
