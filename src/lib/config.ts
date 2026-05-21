@@ -319,7 +319,15 @@ export function getReasoningEffortForModel(
   model: string,
 ): "none" | "minimal" | "low" | "medium" | "high" | "xhigh" {
   const config = getConfig()
-  return config.modelReasoningEfforts?.[model] ?? "high"
+  // Fall through to the static default map so a config that
+  // doesn't carry modelReasoningEfforts (e.g. a test stub, or a
+  // user config that pre-dates the field) still gets the curated
+  // per-model effort instead of a global "high" fallback.
+  return (
+    config.modelReasoningEfforts?.[model]
+    ?? defaultConfig.modelReasoningEfforts?.[model]
+    ?? "high"
+  )
 }
 
 export function normalizeProviderBaseUrl(url: string): string {
