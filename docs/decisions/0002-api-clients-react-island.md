@@ -15,7 +15,7 @@ related_files:
   shell/index.html: host markup with the section header + mount point
   shell/src/main.ts: vanilla entrypoint that calls mountApiClients() once
   shell/vite.config.ts: registers @vitejs/plugin-react (after code-inspector-plugin)
-  shell/tsconfig.json: jsx: "react-jsx"
+  shell/tsconfig.json: 'jsx: "react-jsx"'
   shell/package.json: react/react-dom/@types/* / @vitejs/plugin-react
 ---
 
