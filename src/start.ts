@@ -42,7 +42,7 @@ interface RunServerOptions {
   claudeCode: boolean
   showToken: boolean
   proxyEnv: boolean
-  /** Evict any running instance on :4142 before binding. Optional —
+  /** Evict any running instance on :4141 before binding. Optional —
    *  test fixtures + non-CLI callers can omit; treated as false. */
   replace?: boolean
 }

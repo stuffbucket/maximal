@@ -161,11 +161,11 @@ type ApiResult<T> =
 function baseUrl(): string {
   // Vite injects import.meta.env.DEV at build time. In production
   // the shell loads from the proxy's own origin via the Tauri
-  // window URL (http://localhost:4142/...), so a relative path
+  // window URL (http://localhost:4141/...), so a relative path
   // resolves to the same origin. In dev, the Vite server is on a
   // different port, so we have to absolute-prefix.
   if (import.meta.env.DEV) {
-    return "http://localhost:4142"
+    return "http://localhost:4141"
   }
   return ""
 }

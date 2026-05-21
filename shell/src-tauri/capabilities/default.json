@@ -14,7 +14,7 @@
         {
           "name": "binaries/maximal",
           "sidecar": true,
-          "args": ["start", "--port", { "validator": "^\\d{2,5}$" }]
+          "args": ["start", "--replace", "--port", { "validator": "^\\d{2,5}$" }]
         }
       ]
     }

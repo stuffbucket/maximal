@@ -161,7 +161,7 @@ export default defineConfig(async ({ command }) => ({
                   `  →  Source overlay: hold Shift+Opt and hover an element to jump to its file in VS Code.`,
                 );
                 server.config.logger.info(
-                  `  →  API calls hit the proxy on :4142 — run \`bun run dev\` in another terminal.`,
+                  `  →  API calls hit the proxy on :4141 — run \`bun run dev\` in another terminal.`,
                 );
               };
             },

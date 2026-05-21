@@ -11,7 +11,7 @@ export interface EvictOptions {
    *  — the request will still go out (loopback) without auth and the
    *  endpoint may choose to honor it or not. */
   apiKey: string | null
-  /** Port to evict. Defaults to 4142 (the Tauri sidecar's port). */
+  /** Port to evict. Defaults to 4141 (the Tauri sidecar's port). */
   port?: number
   /** Polling deadline after sending shutdown, in ms. Default 3000. */
   drainTimeoutMs?: number
@@ -90,7 +90,7 @@ interface ResolvedEvictDeps {
 
 function resolveDeps(opts: EvictOptions): ResolvedEvictDeps {
   return {
-    port: opts.port ?? 4142,
+    port: opts.port ?? 4141,
     drainTimeoutMs: opts.drainTimeoutMs ?? 3000,
     killEscalationMs: opts.killEscalationMs ?? 1500,
     sleep: opts.sleep ?? defaultSleep,

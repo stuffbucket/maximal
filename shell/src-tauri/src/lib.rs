@@ -5,8 +5,8 @@
 //      menubar must be reachable before the sidecar is ready, so the
 //      user always has a Quit affordance.
 //   2. Spawn the bundled `maximal` binary as a sidecar — it serves
-//      the proxy on http://localhost:4142 (see SIDECAR_PORT below).
-//   3. Poll http://127.0.0.1:4142/setup-status every 300ms until the
+//      the proxy on http://localhost:4141 (see SIDECAR_PORT below).
+//   3. Poll http://127.0.0.1:4141/setup-status every 300ms until the
 //      sidecar answers (or 30s elapses → Failed). The first response
 //      flips state to RunningUnauthenticated / RunningAuthenticated
 //      based on the `githubAuth.ok` check. After that, slower 5s
@@ -56,13 +56,13 @@ use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 
-// The shelled sidecar binds 4142, not the CLI's default 4141. Lets
-// the spike coexist with a hand-installed `maximal start` already
-// listening on 4141 (the friendly EADDRINUSE detection in
-// src/start.ts otherwise kills the sidecar before it can serve).
-// Production Phase E will probably restore 4141 as the canonical
-// port and assume the tray app is the only supervisor.
-const SIDECAR_PORT: u16 = 4142;
+// Canonical Maximal port. Apps integrating with the proxy (Claude
+// Code, Cursor, custom scripts) only need to know this one URL:
+// http://localhost:4141. The Tauri shell and the standalone CLI both
+// bind here; the shell passes `--replace` when spawning so it always
+// wins over a stale CLI instance (graceful eviction via
+// /_internal/shutdown — see src/lib/replace-running.ts).
+const SIDECAR_PORT: u16 = 4141;
 
 /// How often `subscribe_token_usage` GETs `/token-usage` from the
 /// sidecar. Each iteration also probes the `Channel<TokenUsageEvent>`
@@ -76,8 +76,8 @@ const DASHBOARD_PERIODS: &[&str] = &["day", "week", "month"];
 
 const TRAY_ID: &str = "main";
 // Two webview windows, both pointed at the sidecar:
-//   settings  — http://localhost:4142/settings (config UI bundled in Tauri)
-//   dashboard — http://localhost:4142/usage-viewer (usage charts; html
+//   settings  — http://localhost:4141/settings (config UI bundled in Tauri)
+//   dashboard — http://localhost:4141/usage-viewer (usage charts; html
 //               embedded directly into the sidecar binary via Bun import
 //               attributes — see src/server.ts).
 // Labels are referenced from capabilities/default.json `windows`.
@@ -357,7 +357,7 @@ pub fn run() {
         // shell startup. Semantics:
         //   * argv contains "--replace" → existing instance shuts down
         //     gracefully (same path as the tray Quit item, minus the
-        //     confirm dialog) so the second process can claim :4142.
+        //     confirm dialog) so the second process can claim :4141.
         //   * otherwise → focus the most-likely-visible window
         //     (Settings preferred, Dashboard fallback, open Settings
         //     if neither exists yet). The second process exits silently.
@@ -473,7 +473,13 @@ fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
         .shell()
         .sidecar("maximal")
         .map_err(|e| tauri::Error::Anyhow(e.into()))?
-        .args(["start", "--port", port.as_str()]);
+        // `--replace` makes the sidecar evict any existing maximal on
+        // the port (CLI instance, prior dev session) via the proxy's
+        // own graceful /_internal/shutdown protocol. Without this the
+        // Tauri shell would refuse to start when a CLI is already
+        // listening on :4141 — confusing UX for menu-bar users who
+        // shouldn't have to know which copy started first.
+        .args(["start", "--replace", "--port", port.as_str()]);
 
     // Packaged builds: tell the proxy to skip its dev-mode Vite
     // reverse-proxy and serve the bundled settings UI from
@@ -486,7 +492,7 @@ fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
     // Hand the shell's PID to the sidecar for its parent-death
     // watchdog. If the tray app is force-killed (Activity Monitor,
     // OOM, panic past Drop), the sidecar polls this PID and exits
-    // when it disappears so we don't orphan a proxy on :4142.
+    // when it disappears so we don't orphan a proxy on :4141.
     cmd = cmd.env(
         "MAXIMAL_SIDECAR_PARENT_PID",
         std::process::id().to_string(),
@@ -968,7 +974,7 @@ fn open_settings_window(app: &AppHandle, section: Option<&str>) {
     // Vite on :1420, so we point the webview directly at it. That
     // gives us native HMR (no proxy WebSocket gymnastics) and exposes
     // vite-plugin-inspect at /settings/__inspect/. Release builds use
-    // the sidecar's bundled `/settings` route on :4142, which serves
+    // the sidecar's bundled `/settings` route on :4141, which serves
     // the pre-built dist statically.
     let settings_origin = if cfg!(debug_assertions) {
         "http://localhost:1420".to_string()
@@ -1177,7 +1183,7 @@ fn request_quit(app: &AppHandle) {
 /// Reuses the same teardown path as the tray Quit item, MINUS the
 /// confirm dialog: a second `maximal --replace` invocation is the
 /// user (or a CLI/installer) explicitly asking the running instance
-/// to release :4142, so prompting them would just be in the way.
+/// to release :4141, so prompting them would just be in the way.
 ///
 /// `app.exit(0)` routes through `RunEvent::ExitRequested` →
 /// `kill_sidecar` (SIGTERM + 3s SIGKILL escalation), which is exactly

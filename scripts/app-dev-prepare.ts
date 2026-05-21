@@ -11,18 +11,18 @@
  * Rather than hunt PIDs and signal them (which is platform-specific —
  * lsof/pgrep/SIGTERM don't all exist on Windows), we lean on the
  * existing graceful-shutdown contract: `POST /_internal/shutdown` to
- * the sidecar at :4142. The sidecar exits 0; the Tauri shell's
+ * the sidecar at :4141. The sidecar exits 0; the Tauri shell's
  * CommandEvent::Terminated handler treats code-0 as "intentional
  * shutdown" and calls app.exit(0); that exits the shell, which
- * collapses `tauri dev` and Vite with it. Everything tied to :4142
+ * collapses `tauri dev` and Vite with it. Everything tied to :4141
  * comes down through one HTTP call.
  *
  * Exits 0 on success (no holder, or holder evicted). Exits 1 on
- * unrecoverable conflict (e.g. :4142 held by something that isn't
+ * unrecoverable conflict (e.g. :4141 held by something that isn't
  * maximal, or graceful shutdown timed out).
  */
 
-const SIDECAR_PORT = 4142
+const SIDECAR_PORT = 4141
 const VITE_PORT = 1420
 const PORT_RELEASE_TIMEOUT_MS = 8000
 const PORT_POLL_INTERVAL_MS = 100

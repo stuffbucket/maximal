@@ -243,7 +243,7 @@ type AuthDecision =
  * this one short-circuits when the proxy itself has no GitHub token to
  * forward with. Lets the HTTP server come up in "unauthenticated mode"
  * (settings + diagnostics still reachable) without the Tauri shell
- * needing to handshake the device-code flow before port 4142 listens.
+ * needing to handshake the device-code flow before port 4141 listens.
  */
 export const requireGithubAuth: MiddlewareHandler = async (c, next) => {
   if (state.githubToken) {

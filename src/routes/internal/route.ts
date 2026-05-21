@@ -5,7 +5,7 @@
  * Currently this exposes a single endpoint: `POST /_internal/shutdown`.
  * It's the graceful-eviction hook that a *second* `maximal start
  * --replace` invocation calls to ask the running instance to release
- * `:4142` cleanly.
+ * `:4141` cleanly.
  *
  * Loopback enforcement is non-negotiable here. The auth middleware in
  * `server.ts` already exempts loopback callers from API-key checks (via
