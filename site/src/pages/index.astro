@@ -187,7 +187,7 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
               >
                 <path d="M11 1 L13 9 L21 11 L13 13 L11 21 L9 13 L1 11 L9 9 Z" />
               </svg>
-              <span>macOS — Apple Silicon</span>
+              <span>macOS</span>
             </span>
             <span class="btn-meta">.dmg</span>
           </a>
@@ -207,7 +207,7 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
               >
                 <path d="M11 1 L13 9 L21 11 L13 13 L11 21 L9 13 L1 11 L9 9 Z" />
               </svg>
-              <span>Windows installer</span>
+              <span>Windows</span>
             </span>
             <span class="btn-meta">.msi</span>
           </a>
@@ -218,9 +218,7 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
             href={winPs1}
             rel="noopener"
           >
-            <span class="btn-label"
-              ><span>Windows PowerShell installer</span></span
-            >
+            <span class="btn-label"><span>Powershell</span></span>
             <span class="btn-meta">install.ps1</span>
           </a>
           <a
@@ -230,60 +228,16 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
             href="https://github.com/stuffbucket/homebrew-tap"
             rel="noopener"
           >
-            <span class="btn-label"><span>Homebrew — macOS / Linux</span></span>
+            <span class="btn-label"><span>Homebrew</span></span>
             <span class="btn-meta">brew install</span>
           </a>
-
           {/*
             CLI tarballs (.tar.gz / .zip) and the "Read my mind" picker
             are still produced by release.yml and reachable from the GH
-            Release page — but the website hides them so the visible
-            grid stays focused on the four installers most users want.
-            The Setup picker below still exposes the CLI variants for
-            anyone who needs the source instructions.
+            Release page — the Setup picker below still exposes the
+            CLI variants. The downloads grid stays focused on the four
+            primary installers.
           */}
-          <a
-            class="btn"
-            data-os="mac"
-            data-installer="source-mac"
-            href={sourceTarGz}
-            rel="noopener"
-            hidden
-          >
-            <span class="btn-label"><span>macOS — CLI</span></span>
-            <span class="btn-meta">.tar.gz</span>
-          </a>
-          <a
-            class="btn"
-            data-os="windows"
-            data-installer="source-win"
-            href={sourceZip}
-            rel="noopener"
-            hidden
-          >
-            <span class="btn-label"><span>Windows — CLI</span></span>
-            <span class="btn-meta">.zip</span>
-          </a>
-          <a
-            class="btn btn--read-my-mind"
-            data-read-my-mind
-            href={macDmg}
-            rel="noopener"
-            hidden
-          >
-            <span class="btn-label">
-              <svg
-                class="btn-spark"
-                viewBox="0 0 22 22"
-                fill="currentColor"
-                aria-hidden="true"
-              >
-                <path d="M11 1 L13 9 L21 11 L13 13 L11 21 L9 13 L1 11 L9 9 Z" />
-              </svg>
-              <span>Read my mind</span>
-            </span>
-            <span class="btn-meta" data-read-my-mind-meta>we'll guess</span>
-          </a>
         </div>
 
         <div class="install-hint" data-installer-hint="mac-app" hidden>

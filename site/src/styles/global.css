@@ -360,14 +360,22 @@ pre code {
 
 .downloads {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  /* Four installers in one row — DMG · MSI · PS1 · Brew. Stack on
+     narrow viewports where four 24% cells would be cramped. */
+  grid-template-columns: repeat(4, 1fr);
   gap: 0.65rem;
   margin: 0 0 1.25rem;
 }
 
+@media (max-width: 720px) {
+  .downloads {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* `display: inline-flex` on .btn overrides the UA stylesheet's
-   `[hidden] { display: none }`, so the hidden CLI tarballs +
-   read-my-mind button still rendered. Force the kill. */
+   `[hidden] { display: none }`, so any leftover hidden buttons in
+   the future stay actually hidden. */
 .btn[hidden],
 .downloads > [hidden] {
   display: none;
