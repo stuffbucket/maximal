@@ -189,7 +189,6 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
               </svg>
               <span>macOS</span>
             </span>
-            <span class="btn-meta">.dmg</span>
           </a>
           <a
             class="btn"
@@ -209,7 +208,6 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
               </svg>
               <span>Windows</span>
             </span>
-            <span class="btn-meta">.msi</span>
           </a>
           <a
             class="btn"
@@ -219,26 +217,38 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
             rel="noopener"
           >
             <span class="btn-label"><span>Powershell</span></span>
-            <span class="btn-meta">install.ps1</span>
           </a>
-          <a
+          <button
+            type="button"
             class="btn"
             data-os="mac"
             data-installer="homebrew"
-            href="https://github.com/stuffbucket/homebrew-tap"
-            rel="noopener"
+            data-open-homebrew-modal
           >
             <span class="btn-label"><span>Homebrew</span></span>
-            <span class="btn-meta">brew install</span>
-          </a>
-          {/*
-            CLI tarballs (.tar.gz / .zip) and the "Read my mind" picker
-            are still produced by release.yml and reachable from the GH
-            Release page — the Setup picker below still exposes the
-            CLI variants. The downloads grid stays focused on the four
-            primary installers.
-          */}
+          </button>
         </div>
+
+        <dialog class="modal" data-homebrew-modal aria-labelledby="brew-h">
+          <form method="dialog" class="modal-inner">
+            <button
+              type="submit"
+              class="modal-close"
+              aria-label="Close"
+            >×</button>
+            <h3 id="brew-h" class="modal-title">Install with Homebrew</h3>
+            <p class="modal-body">
+              Open Terminal and paste:
+            </p>
+            <pre class="modal-code"><code>brew install stuffbucket/tap/maximal</code></pre>
+            <p class="modal-body">
+              Then run <code>maximal setup</code> to sign in.
+            </p>
+            <p class="modal-footnote">
+              Brew handles the tap, the binary, and PATH for you.
+            </p>
+          </form>
+        </dialog>
 
         <div class="install-hint" data-installer-hint="mac-app" hidden>
           <p class="section-note">
@@ -612,12 +622,34 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
           btn.addEventListener("click", function (e) {
             var key = btn.getAttribute("data-installer");
             if (!key) return;
-            // Homebrew has no file to download — staying on the page
-            // so the user can copy the brew command is more useful
-            // than navigating to the tap README.
+            // Homebrew opens a modal with the brew command instead of
+            // navigating away. The data-open-homebrew-modal attribute
+            // also makes the next block fire.
             if (key === "homebrew") e.preventDefault();
             selectVariant(key);
           });
+        });
+      })();
+
+      // Homebrew install modal — opens on the Homebrew card click.
+      (function () {
+        var modal = document.querySelector("[data-homebrew-modal]");
+        if (!modal) return;
+        document
+          .querySelectorAll("[data-open-homebrew-modal]")
+          .forEach(function (trigger) {
+            trigger.addEventListener("click", function () {
+              if (typeof modal.showModal === "function") {
+                modal.showModal();
+              } else {
+                modal.setAttribute("open", "");
+              }
+            });
+          });
+        // Click on the backdrop closes (the form[method="dialog"]
+        // close button handles its own click).
+        modal.addEventListener("click", function (e) {
+          if (e.target === modal) modal.close();
         });
       })();
 
