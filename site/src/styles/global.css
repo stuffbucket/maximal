@@ -648,12 +648,14 @@ pre code {
   color: var(--ink-cream);
 }
 
-/* Rock / paper / scissors hand icons share a CCW 90° rotation so
-   the hand reads palm-toward-the-viewer instead of pointing up. */
-.btn-rock,
-.btn-paper,
-.btn-scissors {
-  transform: rotate(-90deg);
+/* Per-icon modifier hooks. The base .btn-spark sets size/color;
+   these are style-free today and exist so we can tune per-icon
+   alignment if it drifts (e.g. nudging the beer stein up if its
+   handle throws the optical centre off). */
+.btn-apple,
+.btn-window,
+.btn-beer {
+  /* intentionally empty */
 }
 
 .btn--primary .btn-spark {
