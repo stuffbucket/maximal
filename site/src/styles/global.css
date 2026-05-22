@@ -648,6 +648,14 @@ pre code {
   color: var(--ink-cream);
 }
 
+/* Rock / paper / scissors hand icons share a CCW 90° rotation so
+   the hand reads palm-toward-the-viewer instead of pointing up. */
+.btn-rock,
+.btn-paper,
+.btn-scissors {
+  transform: rotate(-90deg);
+}
+
 .btn--primary .btn-spark {
   color: var(--ink-gold);
 }
