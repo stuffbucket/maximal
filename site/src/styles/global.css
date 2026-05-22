@@ -359,8 +359,8 @@ pre code {
 }
 
 .downloads {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 0.65rem;
   margin: 0 0 1.25rem;
 }

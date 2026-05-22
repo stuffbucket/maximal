@@ -110,7 +110,9 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
           Copilot, Claude and Codex<br />walked into a taskbar…
         </p>
         <div class="header-meta">
-          <a href={REPO_URL} rel="noopener">github.com/{REPO}</a>
+          <a href="https://stuffbucket.co/maximal" rel="noopener"
+            >stuffbucket.co/maximal</a
+          >
           <span aria-hidden="true">·</span>
           <a href={RELEASES_URL} rel="noopener">latest: {versionLabel}</a>
         </div>
@@ -224,9 +226,29 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
           <a
             class="btn"
             data-os="mac"
+            data-installer="homebrew"
+            href="https://github.com/stuffbucket/homebrew-tap"
+            rel="noopener"
+          >
+            <span class="btn-label"><span>Homebrew — macOS / Linux</span></span>
+            <span class="btn-meta">brew install</span>
+          </a>
+
+          {/*
+            CLI tarballs (.tar.gz / .zip) and the "Read my mind" picker
+            are still produced by release.yml and reachable from the GH
+            Release page — but the website hides them so the visible
+            grid stays focused on the four installers most users want.
+            The Setup picker below still exposes the CLI variants for
+            anyone who needs the source instructions.
+          */}
+          <a
+            class="btn"
+            data-os="mac"
             data-installer="source-mac"
             href={sourceTarGz}
             rel="noopener"
+            hidden
           >
             <span class="btn-label"><span>macOS — CLI</span></span>
             <span class="btn-meta">.tar.gz</span>
@@ -237,25 +259,17 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
             data-installer="source-win"
             href={sourceZip}
             rel="noopener"
+            hidden
           >
             <span class="btn-label"><span>Windows — CLI</span></span>
             <span class="btn-meta">.zip</span>
-          </a>
-          <a
-            class="btn"
-            data-os="mac"
-            data-installer="homebrew"
-            href="https://github.com/stuffbucket/homebrew-tap"
-            rel="noopener"
-          >
-            <span class="btn-label"><span>Homebrew — macOS / Linux</span></span>
-            <span class="btn-meta">brew install</span>
           </a>
           <a
             class="btn btn--read-my-mind"
             data-read-my-mind
             href={macDmg}
             rel="noopener"
+            hidden
           >
             <span class="btn-label">
               <svg
