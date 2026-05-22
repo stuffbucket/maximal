@@ -235,6 +235,70 @@ a:hover {
   color: var(--text-muted);
 }
 
+/* ---- Requirement callout ----
+   A first-launch signal that this app needs a GitHub Copilot
+   subscription to function. Sits above the body copy in the
+   unauthenticated state. Brand-tinted so the requirement reads as
+   identity-level (this is what Maximal IS), not as an error or a
+   warning. Restrained: brand stripe + icon + tight copy, on the
+   card surface — not a full brand fill, which would shout. */
+.requirement-callout {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface-card);
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-inline-start: var(--border-width-heavy) solid var(--brand);
+  border-radius: var(--radius-card);
+  box-shadow: var(--elevation-card);
+  max-width: 65ch;
+}
+
+.requirement-callout__icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--size-md);
+  height: var(--size-md);
+  margin-block-start: 2px;
+  color: var(--brand);
+}
+
+.requirement-callout__text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.requirement-callout__title {
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: var(--weight-lg);
+  line-height: var(--leading-lg);
+  color: var(--text-strong);
+}
+
+.requirement-callout__sub {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-lg);
+  color: var(--text-muted);
+}
+
+.requirement-callout__sub a {
+  color: var(--link);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.requirement-callout__sub a:hover,
+.requirement-callout__sub a:focus-visible {
+  color: var(--link-hover);
+}
+
 /* ---- Signed-in hero ----
    The authenticated state's visual focal point: GitHub avatar + the
    user's login set in Fraunces. Per design-context, Fraunces is
