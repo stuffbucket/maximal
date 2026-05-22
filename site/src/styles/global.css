@@ -359,10 +359,26 @@ pre code {
 }
 
 .downloads {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  /* Three installers in one row — macOS · Windows · Homebrew. Stack
+     on narrow viewports where three 33% cells would be cramped. */
+  grid-template-columns: repeat(3, 1fr);
   gap: 0.65rem;
   margin: 0 0 1.25rem;
+}
+
+@media (max-width: 720px) {
+  .downloads {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* `display: inline-flex` on .btn overrides the UA stylesheet's
+   `[hidden] { display: none }`, so any leftover hidden buttons in
+   the future stay actually hidden. */
+.btn[hidden],
+.downloads > [hidden] {
+  display: none;
 }
 
 .btn {
@@ -406,6 +422,207 @@ pre code {
   font-weight: 400;
 }
 
+/* Homebrew install modal — opens on Homebrew card click. */
+.modal {
+  border: none;
+  border-radius: var(--radius-md);
+  padding: 0;
+  background: transparent;
+  color: var(--ink-cream);
+  max-width: 28rem;
+  width: calc(100% - 2rem);
+}
+
+.modal::backdrop {
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+}
+
+.modal-inner {
+  position: relative;
+  background: var(--card-magenta);
+  border-radius: var(--radius-md);
+  padding: 1.75rem 1.5rem 1.4rem;
+  box-shadow: var(--shadow-2), 0 16px 48px rgba(0, 0, 0, 0.4);
+}
+
+.modal-close {
+  position: absolute;
+  top: 0.55rem;
+  right: 0.65rem;
+  background: transparent;
+  border: 0;
+  color: var(--ink-cream);
+  font-size: 1.5rem;
+  line-height: 1;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 120ms ease, background 120ms ease;
+}
+
+.modal-close:hover,
+.modal-close:focus-visible {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.modal-title {
+  font-family: var(--display);
+  font-size: 1.4rem;
+  font-weight: 600;
+  margin: 0 0 0.6rem;
+}
+
+.modal-body {
+  margin: 0.4rem 0;
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
+.modal-body code {
+  font-family: var(--mono);
+  background: rgba(0, 0, 0, 0.2);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  font-size: 0.88em;
+}
+
+/* The brew command — clickable, copies to clipboard, animates a chip
+   into view on copy. A `<button>` rather than a `<pre>` so keyboard
+   activation (Enter / Space) works for free. */
+.modal-code {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  margin: 0.65rem 0;
+  padding: 0.7rem 2.55rem 0.7rem 0.85rem;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(244, 234, 212, 0.12);
+  border-radius: var(--radius-sm);
+  color: var(--ink-cream);
+  font-family: var(--mono);
+  font-size: 0.88rem;
+  text-align: left;
+  cursor: copy;
+  transition:
+    background 150ms ease,
+    border-color 150ms ease,
+    transform 150ms ease;
+}
+
+.modal-code code {
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.modal-code:hover {
+  background: rgba(0, 0, 0, 0.36);
+  border-color: rgba(244, 234, 212, 0.22);
+}
+
+.modal-code:focus-visible {
+  outline: 2px solid var(--ink-cream);
+  outline-offset: 2px;
+}
+
+.modal-code:active {
+  transform: scale(0.985);
+}
+
+.modal-copy-icon {
+  position: absolute;
+  top: 50%;
+  right: 0.7rem;
+  width: 18px;
+  height: 18px;
+  transform: translateY(-50%);
+  color: var(--ink-cream);
+  opacity: 0.55;
+  transition: opacity 150ms ease;
+}
+
+.modal-code:hover .modal-copy-icon {
+  opacity: 0.85;
+}
+
+.modal-copy-icon svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
+}
+
+.modal-copy-icon__check {
+  opacity: 0;
+  transform: scale(0.7);
+}
+
+.modal-code--copied .modal-copy-icon__copy {
+  opacity: 0;
+  transform: scale(0.7);
+}
+
+.modal-code--copied .modal-copy-icon__check {
+  opacity: 1;
+  transform: scale(1);
+  color: #9be8b5;
+}
+
+/* Brief "Copied" toast over the right edge of the code block,
+   fading in/out with the icon swap. */
+.modal-copy-toast {
+  position: absolute;
+  top: -0.6rem;
+  right: 0.6rem;
+  padding: 0.18rem 0.55rem;
+  background: var(--ink-cream);
+  color: var(--card-magenta);
+  font-family: var(--sans);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border-radius: 999px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  opacity: 0;
+  transform: translateY(4px);
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
+  pointer-events: none;
+}
+
+.modal-code--copied .modal-copy-toast {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal-code,
+  .modal-copy-icon svg,
+  .modal-copy-toast {
+    transition: none;
+  }
+}
+
+.modal-footnote {
+  margin: 0.8rem 0 0;
+  font-size: 0.82rem;
+  opacity: 0.75;
+}
+
 .btn--primary {
   background: var(--ink-cream);
   color: var(--ink-deep);
@@ -431,6 +648,7 @@ pre code {
   color: var(--ink-cream);
 }
 
+
 .btn--primary .btn-spark {
   color: var(--ink-gold);
 }
@@ -447,124 +665,6 @@ pre code {
   opacity: 0.55;
   cursor: not-allowed;
   pointer-events: none;
-}
-
-/* ===== Setup platform picker ===== */
-
-.setup-picker {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.6rem 0.75rem;
-  margin: 0 0 1.25rem;
-  padding: 0.6rem 0.85rem;
-  background: rgba(0, 0, 0, 0.18);
-  border: 1px solid rgba(244, 234, 212, 0.18);
-  border-radius: var(--radius-sm);
-  font-size: 0.92rem;
-  color: var(--ink-cream);
-}
-
-.setup-picker label {
-  font-weight: 500;
-}
-
-.setup-picker select {
-  font: inherit;
-  font-size: 0.9rem;
-  font-family: var(--sans);
-  color: var(--ink-cream);
-  background: rgba(0, 0, 0, 0.25);
-  border: 1px solid rgba(244, 234, 212, 0.3);
-  border-radius: var(--radius-sm);
-  padding: 0.4rem 0.75rem;
-  cursor: pointer;
-}
-
-.setup-picker select:hover {
-  border-color: rgba(244, 234, 212, 0.55);
-}
-
-.setup-picker select:focus-visible {
-  outline: 2px solid var(--ink-cream);
-  outline-offset: 3px;
-}
-
-.ps-cmd {
-  display: block;
-  font-family: var(--mono);
-  font-size: 0.85rem;
-  background: rgba(0, 0, 0, 0.3);
-  border: 1px solid rgba(244, 234, 212, 0.2);
-  border-radius: var(--radius-sm);
-  padding: 0.85rem 1rem;
-  overflow-x: auto;
-  margin: 0;
-  white-space: pre;
-  color: var(--ink-cream);
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-/* ===== Copy-to-clipboard ===== */
-
-.copyable {
-  display: flex;
-  align-items: stretch;
-  gap: 0.5rem;
-  margin: 0.5rem 0 0;
-}
-
-.copyable--block {
-  margin-top: 0.6rem;
-}
-
-.copyable pre {
-  flex: 1 1 auto;
-  min-width: 0;
-  margin: 0;
-}
-
-.copy-btn {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.55rem 0.7rem;
-  font: inherit;
-  font-size: 0.82rem;
-  font-family: var(--sans);
-  color: var(--ink-cream);
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(244, 234, 212, 0.25);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition:
-    background 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease;
-}
-
-.copy-btn:hover {
-  background: rgba(255, 255, 255, 0.12);
-  border-color: rgba(244, 234, 212, 0.45);
-}
-
-.copy-btn:focus-visible {
-  outline: 2px solid var(--ink-cream);
-  outline-offset: 2px;
-}
-
-.copy-btn__icon {
-  width: 14px;
-  height: 14px;
-  flex: 0 0 auto;
-}
-
-.copy-btn--copied {
-  background: rgba(120, 200, 140, 0.18);
-  border-color: rgba(120, 200, 140, 0.55);
-  color: #d8f3df;
 }
 
 /* ===== Callout (ochre) ===== */
@@ -593,46 +693,6 @@ pre code {
 }
 
 .callout strong {
-  font-weight: 700;
-}
-
-/* ===== Steps ===== */
-
-ol.steps {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  counter-reset: step;
-  display: flex;
-  flex-direction: column;
-  gap: 1.1rem;
-}
-
-ol.steps li {
-  position: relative;
-  padding-left: 3rem;
-  counter-increment: step;
-}
-
-ol.steps li::before {
-  content: counter(step);
-  position: absolute;
-  left: 0;
-  top: -2px;
-  width: 2rem;
-  height: 2rem;
-  border-radius: 50%;
-  background: var(--ink-cream);
-  color: var(--ink-deep);
-  display: grid;
-  place-items: center;
-  font-family: var(--serif);
-  font-weight: 800;
-  font-size: 1rem;
-  box-shadow: var(--shadow-1);
-}
-
-ol.steps li strong {
   font-weight: 700;
 }
 

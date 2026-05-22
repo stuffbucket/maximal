@@ -45,13 +45,8 @@ const assetUrl = (filename: string): string =>
 const versionForAsset = tag ?? "latest";
 const macDmgFile = `maximal-${versionForAsset}-darwin-arm64.dmg`;
 const winMsiFile = `maximal-${versionForAsset}-windows-x64.msi`;
-const sourceTarFile = `maximal-${versionForAsset}-darwin-arm64.tar.gz`;
-const sourceZipFile = `maximal-${versionForAsset}-windows-x64.zip`;
 const macDmg = assetUrl(macDmgFile);
 const winMsi = assetUrl(winMsiFile);
-const winPs1 = assetUrl(`install.ps1`);
-const sourceTarGz = assetUrl(sourceTarFile);
-const sourceZip = assetUrl(sourceZipFile);
 
 const versionLabel = hasRelease && tag ? tag : "see /releases";
 ---
@@ -110,7 +105,9 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
           Copilot, Claude and Codex<br />walked into a taskbar…
         </p>
         <div class="header-meta">
-          <a href={REPO_URL} rel="noopener">github.com/{REPO}</a>
+          <a href="https://stuffbucket.co/maximal" rel="noopener"
+            >stuffbucket.co/maximal</a
+          >
           <span aria-hidden="true">·</span>
           <a href={RELEASES_URL} rel="noopener">latest: {versionLabel}</a>
         </div>
@@ -185,9 +182,8 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
               >
                 <path d="M11 1 L13 9 L21 11 L13 13 L11 21 L9 13 L1 11 L9 9 Z" />
               </svg>
-              <span>macOS — Apple Silicon</span>
+              <span>macOS</span>
             </span>
-            <span class="btn-meta">.dmg</span>
           </a>
           <a
             class="btn"
@@ -205,57 +201,15 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
               >
                 <path d="M11 1 L13 9 L21 11 L13 13 L11 21 L9 13 L1 11 L9 9 Z" />
               </svg>
-              <span>Windows installer</span>
+              <span>Windows</span>
             </span>
-            <span class="btn-meta">.msi</span>
           </a>
-          <a
-            class="btn"
-            data-os="windows"
-            data-installer="windows-ps1"
-            href={winPs1}
-            rel="noopener"
-          >
-            <span class="btn-label"
-              ><span>Windows PowerShell installer</span></span
-            >
-            <span class="btn-meta">install.ps1</span>
-          </a>
-          <a
-            class="btn"
-            data-os="mac"
-            data-installer="source-mac"
-            href={sourceTarGz}
-            rel="noopener"
-          >
-            <span class="btn-label"><span>macOS — CLI</span></span>
-            <span class="btn-meta">.tar.gz</span>
-          </a>
-          <a
-            class="btn"
-            data-os="windows"
-            data-installer="source-win"
-            href={sourceZip}
-            rel="noopener"
-          >
-            <span class="btn-label"><span>Windows — CLI</span></span>
-            <span class="btn-meta">.zip</span>
-          </a>
-          <a
+          <button
+            type="button"
             class="btn"
             data-os="mac"
             data-installer="homebrew"
-            href="https://github.com/stuffbucket/homebrew-tap"
-            rel="noopener"
-          >
-            <span class="btn-label"><span>Homebrew — macOS / Linux</span></span>
-            <span class="btn-meta">brew install</span>
-          </a>
-          <a
-            class="btn btn--read-my-mind"
-            data-read-my-mind
-            href={macDmg}
-            rel="noopener"
+            data-open-homebrew-modal
           >
             <span class="btn-label">
               <svg
@@ -266,116 +220,65 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
               >
                 <path d="M11 1 L13 9 L21 11 L13 13 L11 21 L9 13 L1 11 L9 9 Z" />
               </svg>
-              <span>Read my mind</span>
+              <span>Homebrew</span>
             </span>
-            <span class="btn-meta" data-read-my-mind-meta>we'll guess</span>
-          </a>
+          </button>
         </div>
 
-        <div class="install-hint" data-installer-hint="mac-app" hidden>
-          <p class="section-note">
-            <strong>What to do with it:</strong> double-click the
-            <code>.dmg</code> to open it, then drag
-            <code>maximal.app</code> onto the Applications shortcut.
-            Eject the disk image and you're done.
-          </p>
-        </div>
-        <div class="install-hint" data-installer-hint="windows-msi" hidden>
-          <p class="section-note">
-            <strong>What to do with it:</strong> double-click the
-            <code>.msi</code> to install. SmartScreen will warn you the
-            first time — see the warning below.
-          </p>
-        </div>
-        {
-          hasRelease && (
-            <div class="install-hint" data-installer-hint="windows-ps1" hidden>
-              <p class="section-note">
-                <strong>What to do with it:</strong> copy/paste into a
-                terminal, Claude Code CLI, or Copilot CLI.
-              </p>
-              <div class="copyable">
-                <code class="ps-cmd">iex (irm {winPs1})</code>
-                <button
-                  class="copy-btn"
-                  type="button"
-                  aria-label="Copy command"
+        <dialog class="modal" data-homebrew-modal aria-labelledby="brew-h">
+          <form method="dialog" class="modal-inner">
+            <button
+              type="submit"
+              class="modal-close"
+              aria-label="Close"
+            >×</button>
+            <h3 id="brew-h" class="modal-title">Install with Homebrew</h3>
+            <p class="modal-body">
+              Open Terminal and paste:
+            </p>
+            <button
+              type="button"
+              class="modal-code"
+              data-copy="brew install stuffbucket/tap/maximal"
+              aria-label="Copy: brew install stuffbucket/tap/maximal"
+            >
+              <code>brew install stuffbucket/tap/maximal</code>
+              <span class="modal-copy-icon" aria-hidden="true">
+                <svg
+                  class="modal-copy-icon__copy"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.5"
                 >
-                  <svg
-                    class="copy-btn__icon"
-                    viewBox="0 0 16 16"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.5"
-                    aria-hidden="true"
-                  >
-                    <rect x="5" y="5" width="9" height="9" rx="1.5" />
-                    <path d="M11 5 V3 a1 1 0 0 0 -1 -1 H3 a1 1 0 0 0 -1 1 v7 a1 1 0 0 0 1 1 h2" />
-                  </svg>
-                  <span class="copy-btn__label">Copy</span>
-                </button>
-              </div>
-            </div>
-          )
-        }
-        <div class="install-hint" data-installer-hint="source-mac" hidden>
-          <p class="section-note">
-            <strong>What to do with it:</strong> copy/paste into a
-            terminal, Claude Code CLI, or Copilot CLI.
-          </p>
-          <div class="copyable">
-            <code class="ps-cmd">tar -xzf {sourceTarFile} && ./maximal --help</code>
-            <button class="copy-btn" type="button" aria-label="Copy command">
-              <svg
-                class="copy-btn__icon"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.5"
-                aria-hidden="true"
-              >
-                <rect x="5" y="5" width="9" height="9" rx="1.5" />
-                <path d="M11 5 V3 a1 1 0 0 0 -1 -1 H3 a1 1 0 0 0 -1 1 v7 a1 1 0 0 0 1 1 h2" />
-              </svg>
-              <span class="copy-btn__label">Copy</span>
+                  <rect x="5" y="5" width="9" height="9" rx="1.5" />
+                  <path d="M11 5 V3 a1 1 0 0 0 -1 -1 H3 a1 1 0 0 0 -1 1 v7 a1 1 0 0 0 1 1 h2" />
+                </svg>
+                <svg
+                  class="modal-copy-icon__check"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.75"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M3 8.5 L7 12 L13 4" />
+                </svg>
+              </span>
+              <span class="modal-copy-toast" aria-hidden="true">Copied</span>
             </button>
-          </div>
-        </div>
-        <div class="install-hint" data-installer-hint="homebrew" hidden>
-          <p class="section-note">
-            <strong>What to do with it:</strong> copy/paste into a
-            terminal, Claude Code CLI, or Copilot CLI.
-          </p>
-          <div class="copyable">
-            <code class="ps-cmd">brew install stuffbucket/tap/maximal</code>
-            <button class="copy-btn" type="button" aria-label="Copy command">
-              <svg
-                class="copy-btn__icon"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.5"
-                aria-hidden="true"
-              >
-                <rect x="5" y="5" width="9" height="9" rx="1.5" />
-                <path d="M11 5 V3 a1 1 0 0 0 -1 -1 H3 a1 1 0 0 0 -1 1 v7 a1 1 0 0 0 1 1 h2" />
-              </svg>
-              <span class="copy-btn__label">Copy</span>
-            </button>
-          </div>
-        </div>
-        <div class="install-hint" data-installer-hint="source-win" hidden>
-          <p class="section-note">
-            <strong>What to do with it:</strong> extract the
-            <code>.zip</code> and run <code>maximal.exe</code> from
-            a PowerShell prompt in the extracted folder. No installer.
-          </p>
-        </div>
+            <p class="modal-body">
+              Then run <code>maximal setup</code> to sign in.
+            </p>
+          </form>
+        </dialog>
+
       </section>
 
-      <!-- WARN — ochre callout -->
-      <section id="warn" class="card card--ochre" aria-labelledby="warn-h">
-        <h2 id="warn-h">First-launch warning</h2>
+      <!-- NOW — ochre callout -->
+      <section id="now" class="card card--ochre" aria-labelledby="now-h">
+        <h2 id="now-h">Now what.</h2>
         <div class="callout" role="note">
           <svg
             class="callout-icon"
@@ -387,137 +290,25 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
           </svg>
           <div>
             <p>
-              <strong>macOS bundles are signed and notarized.</strong>
-              Windows builds aren't yet — like plenty of apps you've
-              already installed, SmartScreen will throw an "are you
-              sure?" on first launch. Click through once and you're
-              set.
+              Point Claude Code at <code>maximal</code>. Or Codex. Or
+              opencode. Or Copilot Chat. Pick one, pick the lot —
+              <code>maximal</code> doesn't care which tool is talking,
+              as long as something is.
             </p>
-            <p data-installer="mac-app">
-              <strong>macOS:</strong> nothing to click through. The
-              <code>.dmg</code> is signed and notarized by Apple, so
-              the app launches like any other Mac app — drag, eject,
-              double-click.
+            <p>
+              Switching tools won't ask you to sign in again. One
+              Copilot subscription, every coding agent you own,
+              no juggling.
             </p>
-            <p data-installer="source-mac" hidden>
-              <strong>macOS:</strong> macOS quarantines downloaded
-              binaries. Either approve once in <strong
-                >System Settings → Privacy &amp; Security → Open Anyway</strong
-              >, or strip the flag from a Terminal:
-              <code>xattr -dr com.apple.quarantine ./maximal</code>.
-            </p>
-            <p data-installer="windows-msi" hidden>
-              <strong>Windows:</strong> SmartScreen will say "Windows
-              protected your PC" on the <code>.msi</code>. Click
-              <strong>More info</strong>, then <strong>Run anyway</strong>.
-            </p>
-            <p data-installer="windows-ps1" hidden>
-              <strong>Windows:</strong> SmartScreen will flag the
-              <code>.ps1</code>. Click <strong>More info → Run anyway</strong>.
-              If PowerShell's execution policy rejects the script, run it
-              with <code>powershell -ExecutionPolicy Bypass -File install.ps1</code>.
-            </p>
-            <p data-installer="homebrew" hidden>
-              <strong>Homebrew:</strong> nothing to click through.
-              Brew strips the quarantine flag on install, so the binary
-              just runs.
-            </p>
-            <p data-installer="source-win" hidden>
-              <strong>Windows:</strong> SmartScreen will block the first
-              run of <code>maximal.exe</code>. Right-click →
-              <strong>Properties → Unblock</strong>, or click
-              <strong>More info → Run anyway</strong>.
+            <p>
+              The menubar app keeps a running tab on which tool is
+              chewing through your premium quota — handy when the
+              shiny new one shows up next month and you want to know
+              if it's worth the swap. Leaving is just as easy as
+              showing up; nobody's locking the door.
             </p>
           </div>
         </div>
-      </section>
-
-      <!-- SETUP — indigo -->
-      <section id="setup" class="card card--indigo" aria-labelledby="setup-h">
-        <h2 id="setup-h">Setup</h2>
-        <div class="setup-picker">
-          <label for="setup-installer">Setting up on</label>
-          <select id="setup-installer" data-setup-installer>
-            <option value="mac-app">macOS — DMG installer (.dmg)</option>
-            <option value="source-mac">macOS — CLI tarball (.tar.gz)</option>
-            <option value="windows-msi">Windows — installer (.msi)</option>
-            <option value="windows-ps1">Windows — PowerShell installer</option>
-            <option value="source-win">Windows — CLI zip</option>
-            <option value="homebrew">Homebrew (macOS / Linux)</option>
-          </select>
-        </div>
-        <ol class="steps">
-          <li>
-            <strong>Install.</strong>
-            <span data-installer="mac-app">
-              Double-click the <code>.dmg</code> to mount it, drag
-              <code>maximal.app</code> onto the Applications shortcut,
-              and eject the disk image.
-            </span>
-            <span data-installer="source-mac" hidden>
-              Extract the tarball:
-              <code>tar -xzf {sourceTarFile}</code>. The binary is
-              <code>./maximal</code> — run it from there or symlink it
-              onto your <code>PATH</code>.
-            </span>
-            <span data-installer="windows-msi" hidden>
-              Double-click the <code>.msi</code> and step through the
-              installer. It puts <code>maximal</code> on your
-              <code>PATH</code>.
-            </span>
-            <span data-installer="windows-ps1" hidden>
-              Right-click <code>install.ps1</code> and choose
-              <em>Run with PowerShell</em>, or use the one-liner shown in
-              the Download section above to install in one step.
-            </span>
-            <span data-installer="source-win" hidden>
-              Extract the <code>.zip</code>. <code>maximal.exe</code>
-              is at the root of the extracted folder — run it from
-              there, or add the folder to your <code>PATH</code>.
-            </span>
-            <span data-installer="homebrew" hidden>
-              From any terminal, run
-              <code>brew install stuffbucket/tap/maximal</code>. Brew
-              handles the tap, the binary, and PATH for you.
-            </span>
-          </li>
-          <li>
-            <strong>Authenticate.</strong>
-            <span data-platform="mac">
-              Open <strong>Terminal</strong> and run the one-time GitHub
-              device-code flow. This is the only required terminal step.
-            </span>
-            <span data-platform="windows" hidden>
-              Open <strong>PowerShell</strong> and run the one-time
-              GitHub device-code flow. This is the only required
-              terminal step.
-            </span>
-            <div class="copyable copyable--block">
-              <pre><code data-setup-cmd>maximal setup</code></pre>
-              <button class="copy-btn" type="button" aria-label="Copy command">
-                <svg
-                  class="copy-btn__icon"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  aria-hidden="true"
-                >
-                  <rect x="5" y="5" width="9" height="9" rx="1.5" />
-                  <path d="M11 5 V3 a1 1 0 0 0 -1 -1 H3 a1 1 0 0 0 -1 1 v7 a1 1 0 0 0 1 1 h2" />
-                </svg>
-                <span class="copy-btn__label">Copy</span>
-              </button>
-            </div>
-          </li>
-          <li>
-            <strong>Point your client at it.</strong> The proxy listens on
-            <code>localhost:4141</code>. Configure Claude Code or Codex with
-            that base URL — see the
-            <a href={`${REPO_URL}#run`} rel="noopener">README</a> for client
-            snippets.
-          </li>
-        </ol>
       </section>
 
       <!-- FOOTER — console -->
@@ -544,21 +335,18 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
         <span class="dock-brand">maximal</span>
         <a href="#what">What</a>
         <a href="#download">Download</a>
-        <a href="#warn">Launch</a>
-        <a href="#setup">Setup</a>
+        <a href="#now">Now</a>
         <a href={REPO_URL} rel="noopener">GitHub</a>
       </div>
     </nav>
 
     <script is:inline>
-      // OS detection + installer-keyed UX. Download buttons are plain
-      // single-click links. On click, the install hint, Setup picker,
-      // Setup steps, Authenticate command, and First-launch warning
-      // all switch to the variant matching the clicked download.
+      // OS detection — highlight the most likely download for the
+      // visitor's platform, and toggle per-installer warning copy in
+      // the First-launch warning section.
       (function () {
         var ua = navigator.userAgent || "";
         var platform = navigator.platform || "";
-        var isMac = /Mac|iPhone|iPad|iPod/.test(ua) || /Mac/.test(platform);
         var isWindows = /Windows/.test(ua) || /Win/.test(platform);
 
         var defaultPlatform = isWindows ? "windows" : "mac";
@@ -570,76 +358,31 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
           return key.indexOf("mac") !== -1 ? "mac" : "windows";
         }
 
-        var setupCmds = {
-          "mac-app": "maximal setup",
-          "source-mac": "./maximal setup",
-          "windows-msi": "maximal setup",
-          "windows-ps1": "maximal setup",
-          "source-win": ".\\maximal.exe setup",
-          homebrew: "maximal setup",
-        };
-
-        // Wire "Read my mind" to the detected primary installer.
-        var rmm = document.querySelector("[data-read-my-mind]");
-        var rmmMeta = document.querySelector("[data-read-my-mind-meta]");
+        // Subtle highlight on the OS-detected primary download.
         var primary = document.querySelector(
           '.btn[data-installer="' + defaultInstaller + '"]',
         );
-        if (rmm && primary) {
-          rmm.href = primary.getAttribute("href");
-          rmm.setAttribute("data-installer", defaultInstaller);
-          if (rmmMeta) {
-            rmmMeta.textContent =
-              defaultPlatform === "windows" ? "Windows" : "macOS";
-          }
-        }
-        // Subtle highlight on the OS-detected primary.
         if (primary) primary.classList.add("btn--primary");
-
-        var setupSelect = document.querySelector("[data-setup-installer]");
-        var setupCmdEl = document.querySelector("[data-setup-cmd]");
 
         function selectVariant(installer) {
           if (!installer) return;
           var plat = installerToPlatform(installer);
-
-          // Per-installer install hints in the Download section.
-          document
-            .querySelectorAll("[data-installer-hint]")
-            .forEach(function (h) {
-              h.hidden = h.getAttribute("data-installer-hint") !== installer;
-            });
-          // Per-installer content (Setup install step + warning text).
+          // Per-installer warning copy in the First-launch section.
           document.querySelectorAll("[data-installer]").forEach(function (el) {
             // Don't touch download buttons — they keep their own
             // installer attr regardless of selection.
             if (el.classList.contains("btn")) return;
             el.hidden = el.getAttribute("data-installer") !== installer;
           });
-          // Per-platform content (Authenticate phrasing).
+          // Per-platform phrasing (none currently, but kept for future use).
           document.querySelectorAll("[data-platform]").forEach(function (el) {
             el.hidden = el.getAttribute("data-platform") !== plat;
           });
-          // Authenticate command.
-          if (setupCmdEl)
-            setupCmdEl.textContent =
-              setupCmds[installer] || "maximal setup";
-          // Sync picker.
-          if (setupSelect && setupSelect.value !== installer)
-            setupSelect.value = installer;
         }
 
         selectVariant(defaultInstaller);
 
-        if (setupSelect) {
-          setupSelect.addEventListener("change", function () {
-            selectVariant(setupSelect.value);
-          });
-        }
-
-        var btns = document.querySelectorAll(
-          ".btn[data-installer], [data-read-my-mind]",
-        );
+        var btns = document.querySelectorAll(".btn[data-installer]");
         btns.forEach(function (btn) {
           btn.addEventListener("click", function (e) {
             var key = btn.getAttribute("data-installer");
@@ -653,44 +396,71 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
         });
       })();
 
-      // Copy-to-clipboard for .copyable blocks.
+      // Homebrew install modal — opens on the Homebrew card click.
       (function () {
-        var blocks = document.querySelectorAll(".copyable");
-        blocks.forEach(function (block) {
-          var btn = block.querySelector(".copy-btn");
-          var src = block.querySelector("code");
-          if (!btn || !src) return;
-          var label = btn.querySelector(".copy-btn__label");
+        var modal = document.querySelector("[data-homebrew-modal]");
+        if (!modal) return;
+        document
+          .querySelectorAll("[data-open-homebrew-modal]")
+          .forEach(function (trigger) {
+            trigger.addEventListener("click", function () {
+              if (typeof modal.showModal === "function") {
+                modal.showModal();
+              } else {
+                modal.setAttribute("open", "");
+              }
+            });
+          });
+        // Click on the backdrop closes (the form[method="dialog"]
+        // close button handles its own click).
+        modal.addEventListener("click", function (e) {
+          if (e.target === modal) modal.close();
+        });
+
+        // Click-to-copy on the brew install command.
+        var copyBtns = modal.querySelectorAll("[data-copy]");
+        copyBtns.forEach(function (btn) {
           var resetTimer = 0;
-          btn.addEventListener("click", function () {
-            var text = (src.textContent || "").trim();
+          btn.addEventListener("click", function (e) {
+            // The button lives inside form[method="dialog"]; without
+            // this the dialog closes on every copy.
+            e.preventDefault();
+            var text = btn.getAttribute("data-copy") || "";
             var done = function () {
-              btn.classList.add("copy-btn--copied");
-              if (label) label.textContent = "Copied";
+              btn.classList.add("modal-code--copied");
               if (resetTimer) clearTimeout(resetTimer);
               resetTimer = window.setTimeout(function () {
-                btn.classList.remove("copy-btn--copied");
-                if (label) label.textContent = "Copy";
-              }, 1500);
+                btn.classList.remove("modal-code--copied");
+              }, 1400);
             };
             if (navigator.clipboard && navigator.clipboard.writeText) {
-              navigator.clipboard.writeText(text).then(done, function () {});
-            } else {
-              var ta = document.createElement("textarea");
-              ta.value = text;
-              ta.setAttribute("readonly", "");
-              ta.style.position = "fixed";
-              ta.style.opacity = "0";
-              document.body.appendChild(ta);
-              ta.select();
-              try {
-                document.execCommand("copy");
+              navigator.clipboard.writeText(text).then(done, function () {
+                // Permission denied or insecure context — fall through
+                // to the textarea trick.
+                fallback(text);
                 done();
-              } catch (e) {}
-              document.body.removeChild(ta);
+              });
+            } else {
+              fallback(text);
+              done();
             }
           });
         });
+
+        function fallback(text) {
+          var ta = document.createElement("textarea");
+          ta.value = text;
+          ta.style.position = "fixed";
+          ta.style.opacity = "0";
+          document.body.appendChild(ta);
+          ta.select();
+          try {
+            document.execCommand("copy");
+          } catch (_e) {
+            /* best effort */
+          }
+          document.body.removeChild(ta);
+        }
       })();
 
       // aria-current on dock links based on viewport scroll position.
