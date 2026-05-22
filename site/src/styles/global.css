@@ -490,15 +490,131 @@ pre code {
   font-size: 0.88em;
 }
 
+/* The brew command — clickable, copies to clipboard, animates a chip
+   into view on copy. A `<button>` rather than a `<pre>` so keyboard
+   activation (Enter / Space) works for free. */
 .modal-code {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
   margin: 0.65rem 0;
-  padding: 0.7rem 0.85rem;
+  padding: 0.7rem 2.55rem 0.7rem 0.85rem;
   background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(244, 234, 212, 0.12);
   border-radius: var(--radius-sm);
+  color: var(--ink-cream);
   font-family: var(--mono);
   font-size: 0.88rem;
+  text-align: left;
+  cursor: copy;
+  transition:
+    background 150ms ease,
+    border-color 150ms ease,
+    transform 150ms ease;
+}
+
+.modal-code code {
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  flex: 1;
+  min-width: 0;
   overflow-x: auto;
-  white-space: pre;
+  white-space: nowrap;
+}
+
+.modal-code:hover {
+  background: rgba(0, 0, 0, 0.36);
+  border-color: rgba(244, 234, 212, 0.22);
+}
+
+.modal-code:focus-visible {
+  outline: 2px solid var(--ink-cream);
+  outline-offset: 2px;
+}
+
+.modal-code:active {
+  transform: scale(0.985);
+}
+
+.modal-copy-icon {
+  position: absolute;
+  top: 50%;
+  right: 0.7rem;
+  width: 18px;
+  height: 18px;
+  transform: translateY(-50%);
+  color: var(--ink-cream);
+  opacity: 0.55;
+  transition: opacity 150ms ease;
+}
+
+.modal-code:hover .modal-copy-icon {
+  opacity: 0.85;
+}
+
+.modal-copy-icon svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
+}
+
+.modal-copy-icon__check {
+  opacity: 0;
+  transform: scale(0.7);
+}
+
+.modal-code--copied .modal-copy-icon__copy {
+  opacity: 0;
+  transform: scale(0.7);
+}
+
+.modal-code--copied .modal-copy-icon__check {
+  opacity: 1;
+  transform: scale(1);
+  color: #9be8b5;
+}
+
+/* Brief "Copied" toast over the right edge of the code block,
+   fading in/out with the icon swap. */
+.modal-copy-toast {
+  position: absolute;
+  top: -0.6rem;
+  right: 0.6rem;
+  padding: 0.18rem 0.55rem;
+  background: var(--ink-cream);
+  color: var(--card-magenta);
+  font-family: var(--sans);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border-radius: 999px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  opacity: 0;
+  transform: translateY(4px);
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
+  pointer-events: none;
+}
+
+.modal-code--copied .modal-copy-toast {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal-code,
+  .modal-copy-icon svg,
+  .modal-copy-toast {
+    transition: none;
+  }
 }
 
 .modal-footnote {

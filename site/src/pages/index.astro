@@ -226,7 +226,38 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
             <p class="modal-body">
               Open Terminal and paste:
             </p>
-            <pre class="modal-code"><code>brew install stuffbucket/tap/maximal</code></pre>
+            <button
+              type="button"
+              class="modal-code"
+              data-copy="brew install stuffbucket/tap/maximal"
+              aria-label="Copy: brew install stuffbucket/tap/maximal"
+            >
+              <code>brew install stuffbucket/tap/maximal</code>
+              <span class="modal-copy-icon" aria-hidden="true">
+                <svg
+                  class="modal-copy-icon__copy"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                >
+                  <rect x="5" y="5" width="9" height="9" rx="1.5" />
+                  <path d="M11 5 V3 a1 1 0 0 0 -1 -1 H3 a1 1 0 0 0 -1 1 v7 a1 1 0 0 0 1 1 h2" />
+                </svg>
+                <svg
+                  class="modal-copy-icon__check"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.75"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M3 8.5 L7 12 L13 4" />
+                </svg>
+              </span>
+              <span class="modal-copy-toast" aria-hidden="true">Copied</span>
+            </button>
             <p class="modal-body">
               Then run <code>maximal setup</code> to sign in.
             </p>
@@ -396,6 +427,51 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
         modal.addEventListener("click", function (e) {
           if (e.target === modal) modal.close();
         });
+
+        // Click-to-copy on the brew install command.
+        var copyBtns = modal.querySelectorAll("[data-copy]");
+        copyBtns.forEach(function (btn) {
+          var resetTimer = 0;
+          btn.addEventListener("click", function (e) {
+            // The button lives inside form[method="dialog"]; without
+            // this the dialog closes on every copy.
+            e.preventDefault();
+            var text = btn.getAttribute("data-copy") || "";
+            var done = function () {
+              btn.classList.add("modal-code--copied");
+              if (resetTimer) clearTimeout(resetTimer);
+              resetTimer = window.setTimeout(function () {
+                btn.classList.remove("modal-code--copied");
+              }, 1400);
+            };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(text).then(done, function () {
+                // Permission denied or insecure context — fall through
+                // to the textarea trick.
+                fallback(text);
+                done();
+              });
+            } else {
+              fallback(text);
+              done();
+            }
+          });
+        });
+
+        function fallback(text) {
+          var ta = document.createElement("textarea");
+          ta.value = text;
+          ta.style.position = "fixed";
+          ta.style.opacity = "0";
+          document.body.appendChild(ta);
+          ta.select();
+          try {
+            document.execCommand("copy");
+          } catch (_e) {
+            /* best effort */
+          }
+          document.body.removeChild(ta);
+        }
       })();
 
       // aria-current on dock links based on viewport scroll position.
