@@ -365,6 +365,14 @@ pre code {
   margin: 0 0 1.25rem;
 }
 
+/* `display: inline-flex` on .btn overrides the UA stylesheet's
+   `[hidden] { display: none }`, so the hidden CLI tarballs +
+   read-my-mind button still rendered. Force the kill. */
+.btn[hidden],
+.downloads > [hidden] {
+  display: none;
+}
+
 .btn {
   display: inline-flex;
   align-items: center;
