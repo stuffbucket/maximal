@@ -648,15 +648,6 @@ pre code {
   color: var(--ink-cream);
 }
 
-/* Per-icon modifier hooks. The base .btn-spark sets size/color;
-   these are style-free today and exist so we can tune per-icon
-   alignment if it drifts (e.g. nudging the beer stein up if its
-   handle throws the optical centre off). */
-.btn-apple,
-.btn-window,
-.btn-beer {
-  /* intentionally empty */
-}
 
 .btn--primary .btn-spark {
   color: var(--ink-gold);
