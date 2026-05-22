@@ -279,9 +279,9 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
 
       </section>
 
-      <!-- WARN — ochre callout -->
-      <section id="warn" class="card card--ochre" aria-labelledby="warn-h">
-        <h2 id="warn-h">First-launch warning</h2>
+      <!-- NOW — ochre callout -->
+      <section id="now" class="card card--ochre" aria-labelledby="now-h">
+        <h2 id="now-h">Now what.</h2>
         <div class="callout" role="note">
           <svg
             class="callout-icon"
@@ -293,40 +293,22 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
           </svg>
           <div>
             <p>
-              <strong>macOS bundles are signed and notarized.</strong>
-              Windows builds aren't yet — like plenty of apps you've
-              already installed, SmartScreen will throw an "are you
-              sure?" on first launch. Click through once and you're
-              set.
+              Point Claude Code at <code>maximal</code>. Or Codex. Or
+              opencode. Or Copilot Chat. Pick one, pick the lot —
+              <code>maximal</code> doesn't care which tool is talking,
+              as long as something is.
             </p>
-            <p data-installer="mac-app">
-              <strong>macOS:</strong> nothing to click through. The
-              <code>.dmg</code> is signed and notarized by Apple, so
-              the app launches like any other Mac app — drag, eject,
-              double-click.
+            <p>
+              Switching tools won't ask you to sign in again. One
+              Copilot subscription, every coding agent you own,
+              no juggling.
             </p>
-            <p data-installer="source-mac" hidden>
-              <strong>macOS:</strong> macOS quarantines downloaded
-              binaries. Either approve once in <strong
-                >System Settings → Privacy &amp; Security → Open Anyway</strong
-              >, or strip the flag from a Terminal:
-              <code>xattr -dr com.apple.quarantine ./maximal</code>.
-            </p>
-            <p data-installer="windows-msi" hidden>
-              <strong>Windows:</strong> SmartScreen will say "Windows
-              protected your PC" on the <code>.msi</code>. Click
-              <strong>More info</strong>, then <strong>Run anyway</strong>.
-            </p>
-            <p data-installer="homebrew" hidden>
-              <strong>Homebrew:</strong> nothing to click through.
-              Brew strips the quarantine flag on install, so the binary
-              just runs.
-            </p>
-            <p data-installer="source-win" hidden>
-              <strong>Windows:</strong> SmartScreen will block the first
-              run of <code>maximal.exe</code>. Right-click →
-              <strong>Properties → Unblock</strong>, or click
-              <strong>More info → Run anyway</strong>.
+            <p>
+              The menubar app keeps a running tab on which tool is
+              chewing through your premium quota — handy when the
+              shiny new one shows up next month and you want to know
+              if it's worth the swap. Leaving is just as easy as
+              showing up; nobody's locking the door.
             </p>
           </div>
         </div>
@@ -356,7 +338,7 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
         <span class="dock-brand">maximal</span>
         <a href="#what">What</a>
         <a href="#download">Download</a>
-        <a href="#warn">Launch</a>
+        <a href="#now">Now</a>
         <a href={REPO_URL} rel="noopener">GitHub</a>
       </div>
     </nav>
