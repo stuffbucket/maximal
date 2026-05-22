@@ -360,9 +360,9 @@ pre code {
 
 .downloads {
   display: grid;
-  /* Four installers in one row — DMG · MSI · PS1 · Brew. Stack on
-     narrow viewports where four 24% cells would be cramped. */
-  grid-template-columns: repeat(4, 1fr);
+  /* Three installers in one row — macOS · Windows · Homebrew. Stack
+     on narrow viewports where three 33% cells would be cramped. */
+  grid-template-columns: repeat(3, 1fr);
   gap: 0.65rem;
   margin: 0 0 1.25rem;
 }
@@ -550,124 +550,6 @@ pre code {
   pointer-events: none;
 }
 
-/* ===== Setup platform picker ===== */
-
-.setup-picker {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.6rem 0.75rem;
-  margin: 0 0 1.25rem;
-  padding: 0.6rem 0.85rem;
-  background: rgba(0, 0, 0, 0.18);
-  border: 1px solid rgba(244, 234, 212, 0.18);
-  border-radius: var(--radius-sm);
-  font-size: 0.92rem;
-  color: var(--ink-cream);
-}
-
-.setup-picker label {
-  font-weight: 500;
-}
-
-.setup-picker select {
-  font: inherit;
-  font-size: 0.9rem;
-  font-family: var(--sans);
-  color: var(--ink-cream);
-  background: rgba(0, 0, 0, 0.25);
-  border: 1px solid rgba(244, 234, 212, 0.3);
-  border-radius: var(--radius-sm);
-  padding: 0.4rem 0.75rem;
-  cursor: pointer;
-}
-
-.setup-picker select:hover {
-  border-color: rgba(244, 234, 212, 0.55);
-}
-
-.setup-picker select:focus-visible {
-  outline: 2px solid var(--ink-cream);
-  outline-offset: 3px;
-}
-
-.ps-cmd {
-  display: block;
-  font-family: var(--mono);
-  font-size: 0.85rem;
-  background: rgba(0, 0, 0, 0.3);
-  border: 1px solid rgba(244, 234, 212, 0.2);
-  border-radius: var(--radius-sm);
-  padding: 0.85rem 1rem;
-  overflow-x: auto;
-  margin: 0;
-  white-space: pre;
-  color: var(--ink-cream);
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-/* ===== Copy-to-clipboard ===== */
-
-.copyable {
-  display: flex;
-  align-items: stretch;
-  gap: 0.5rem;
-  margin: 0.5rem 0 0;
-}
-
-.copyable--block {
-  margin-top: 0.6rem;
-}
-
-.copyable pre {
-  flex: 1 1 auto;
-  min-width: 0;
-  margin: 0;
-}
-
-.copy-btn {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.55rem 0.7rem;
-  font: inherit;
-  font-size: 0.82rem;
-  font-family: var(--sans);
-  color: var(--ink-cream);
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(244, 234, 212, 0.25);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition:
-    background 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease;
-}
-
-.copy-btn:hover {
-  background: rgba(255, 255, 255, 0.12);
-  border-color: rgba(244, 234, 212, 0.45);
-}
-
-.copy-btn:focus-visible {
-  outline: 2px solid var(--ink-cream);
-  outline-offset: 2px;
-}
-
-.copy-btn__icon {
-  width: 14px;
-  height: 14px;
-  flex: 0 0 auto;
-}
-
-.copy-btn--copied {
-  background: rgba(120, 200, 140, 0.18);
-  border-color: rgba(120, 200, 140, 0.55);
-  color: #d8f3df;
-}
-
 /* ===== Callout (ochre) ===== */
 
 .callout {
@@ -694,46 +576,6 @@ pre code {
 }
 
 .callout strong {
-  font-weight: 700;
-}
-
-/* ===== Steps ===== */
-
-ol.steps {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  counter-reset: step;
-  display: flex;
-  flex-direction: column;
-  gap: 1.1rem;
-}
-
-ol.steps li {
-  position: relative;
-  padding-left: 3rem;
-  counter-increment: step;
-}
-
-ol.steps li::before {
-  content: counter(step);
-  position: absolute;
-  left: 0;
-  top: -2px;
-  width: 2rem;
-  height: 2rem;
-  border-radius: 50%;
-  background: var(--ink-cream);
-  color: var(--ink-deep);
-  display: grid;
-  place-items: center;
-  font-family: var(--serif);
-  font-weight: 800;
-  font-size: 1rem;
-  box-shadow: var(--shadow-1);
-}
-
-ol.steps li strong {
   font-weight: 700;
 }
 
