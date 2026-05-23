@@ -54,9 +54,39 @@
             <!-- State: unauthenticated -->
             <div class="state" data-state-account="unauthenticated" hidden>
               <h3 class="state__title">Not signed in</h3>
+              <div class="requirement-callout" role="note">
+                <span class="requirement-callout__icon" aria-hidden="true">
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <path
+                      d="M8 1.5 9.7 6.3 14.5 8l-4.8 1.7L8 14.5 6.3 9.7 1.5 8l4.8-1.7L8 1.5Z"
+                      fill="currentColor"
+                    />
+                  </svg>
+                </span>
+                <div class="requirement-callout__text">
+                  <p class="requirement-callout__title">
+                    Requires a GitHub Copilot subscription
+                  </p>
+                  <p class="requirement-callout__sub">
+                    Maximal forwards requests through your own Copilot license.
+                    <a
+                      href="https://github.com/features/copilot"
+                      target="_blank"
+                      rel="noopener"
+                      >See plans</a
+                    >.
+                  </p>
+                </div>
+              </div>
               <p class="state__body">
-                Maximal needs a GitHub account with Copilot to forward requests
-                upstream. Until you sign in, the proxy accepts connections but
+                Sign in with the GitHub account that holds your Copilot
+                subscription. Until you do, the proxy accepts connections but
                 rejects Copilot calls.
               </p>
               <div class="actions">
