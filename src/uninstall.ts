@@ -9,7 +9,7 @@
  * the user can pass `--purge` and `--revert-claude` to remove them
  * non-interactively, or accept the corresponding prompts.
  *
- * Spec: docs/spec/internal-distribution-stream-b.md §B6.
+ * Spec: docs/spec/archive/internal-distribution-stream-b.md §B6.
  */
 
 import { defineCommand } from "citty"

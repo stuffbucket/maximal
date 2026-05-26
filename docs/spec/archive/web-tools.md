@@ -1,3 +1,5 @@
+> **Status:** archived 2026-05 — work has shipped or been superseded.
+
 # Web tools — Anthropic surface, Copilot surface, mapping
 
 Status: Draft, 2026-05-01.

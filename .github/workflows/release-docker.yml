@@ -7,7 +7,7 @@ name: Docker Build and Push
 # action, docker/build-push-action, sigstore/cosign-installer) which the
 # internal MS GitHub Actions environment rejects. v1 internal
 # distribution ships per-arch binaries + DMG + MSI, not Docker images
-# (see docs/spec/internal-distribution.md).
+# (see docs/spec/archive/internal-distribution.md).
 #
 # Re-enable only if (a) the internal action allowlist gains the
 # docker/* + sigstore set, OR (b) we vendor those actions as composite

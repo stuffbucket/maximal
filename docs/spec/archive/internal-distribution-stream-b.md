@@ -1,3 +1,5 @@
+> **Status:** archived 2026-05 — work has shipped or been superseded.
+
 # Stream B handoff — installers + UX
 
 This doc is the self-contained brief for the agent picking up Stream B

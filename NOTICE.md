@@ -28,9 +28,9 @@ and license attribution, see `THIRD-PARTY-LICENSE`.
   metrics, /_debug/state route, source-revision exposure). Drove the
   `state-config-cache-cleanup` PRD.
 
-Specs that drove these additions: `docs/spec/web-tools.md`,
-`docs/spec/tool-bridge.md`, `docs/spec/state-config-cache-cleanup.md`,
-`docs/spec/internal-distribution.md`.
+Specs that drove these additions: `docs/spec/archive/web-tools.md`,
+`docs/spec/tool-bridge.md`, `docs/spec/archive/state-config-cache-cleanup.md`,
+`docs/spec/archive/internal-distribution.md`.
 
 ## Pulling from upstream
 

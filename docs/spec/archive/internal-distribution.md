@@ -1,3 +1,5 @@
+> **Status:** archived 2026-05 — work has shipped or been superseded.
+
 # Internal distribution and installers — PRD
 
 Status: Draft, 2026-05-04.

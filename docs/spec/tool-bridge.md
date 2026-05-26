@@ -409,7 +409,7 @@ Per-request lifecycle:
 
 ## References
 
-- `docs/spec/web-tools.md` — the surface this spec generalizes
+- `docs/spec/archive/web-tools.md` — the surface this spec generalizes
 - MCP protocol:
   https://modelcontextprotocol.io/specification/draft
 - MCP TypeScript SDK:
