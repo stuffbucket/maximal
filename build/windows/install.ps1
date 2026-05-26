@@ -19,7 +19,7 @@
 #   # Uninstall path (after install):
 #   maximal uninstall
 #
-# Spec: docs/spec/internal-distribution-stream-b.md §B3a.
+# Spec: docs/spec/archive/internal-distribution-stream-b.md §B3a.
 
 #Requires -Version 5.1
 

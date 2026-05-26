@@ -7,7 +7,7 @@
 # copies the binary out to ~/.local/bin/maximal and registers
 # the launchd plist so the proxy starts on login.
 #
-# Spec: docs/spec/internal-distribution-stream-b.md §7.
+# Spec: docs/spec/archive/internal-distribution-stream-b.md §7.
 
 set -euo pipefail
 

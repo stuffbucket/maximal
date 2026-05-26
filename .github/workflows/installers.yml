@@ -15,7 +15,7 @@
 #                           wraps `gh release upload --clobber`)
 # No third-party `uses:` references.
 #
-# Spec: docs/spec/internal-distribution-stream-b.md §7 (B2 macOS .app).
+# Spec: docs/spec/archive/internal-distribution-stream-b.md §7 (B2 macOS .app).
 
 name: Installers
 
