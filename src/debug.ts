@@ -13,7 +13,7 @@ import {
 import { PATHS } from "./lib/paths"
 import { SECRET_DEFS, secretIsFromFile } from "./lib/secrets"
 import { getGitVersion, shortSha } from "./lib/version"
-import { chooseExecutor } from "./routes/messages/web-tools-executor"
+import { chooseExecutor } from "./routes/messages/web-tools/executor"
 
 interface SecretStatus {
   name: string

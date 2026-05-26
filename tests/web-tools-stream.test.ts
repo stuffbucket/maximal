@@ -7,12 +7,12 @@ import type {
   AnthropicMessagesPayload,
   AnthropicTool,
 } from "~/lib/anthropic-types"
-import type { WebToolPolicy } from "~/routes/messages/web-tools-rewriter"
+import type { WebToolPolicy } from "~/routes/messages/web-tools/rewriter"
 
 import {
   runStreamingAgent,
   type UpstreamCall,
-} from "~/routes/messages/web-tools-stream"
+} from "~/routes/messages/web-tools/stream"
 
 import { FakeExecutor } from "./helpers/fake-executor"
 

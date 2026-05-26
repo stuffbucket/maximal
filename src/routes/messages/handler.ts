@@ -25,8 +25,7 @@ import {
   stripToolReferenceTurnBoundary,
 } from "./preprocess"
 import { parseSubagentMarkerFromFirstUser } from "./subagent-marker"
-import { handleWithWebToolsAgent } from "./web-tools-flow"
-import { splitWebTools } from "./web-tools-rewriter"
+import { handleWithWebToolsAgent, splitWebTools } from "./web-tools"
 
 const logger = createHandlerLogger("messages-handler")
 
