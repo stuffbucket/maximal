@@ -42,6 +42,27 @@ sed \
   "$PLIST_SRC" > "$TMP_PLIST"
 mv -f "$TMP_PLIST" "$INSTALL_PLIST"
 
+# Make sure ~/.local/bin is on the user's interactive shell PATH. The
+# binary copy above lands in ~/.local/bin/maximal, but a fresh-account
+# macOS user's zsh has no reason to look there. We append a marker-
+# guarded block to both ~/.zshrc (interactive) and ~/.zprofile (login)
+# so new terminals pick it up. The current dock launch has no shell to
+# source into — that's fine; this is for the *next* terminal window.
+# Bash is intentionally skipped: zsh has been macOS's default since
+# Catalina (2019).
+PATH_MARKER_START="# >>> maximal PATH >>>"
+PATH_MARKER_END="# <<< maximal PATH <<<"
+PATH_BLOCK="$PATH_MARKER_START
+export PATH=\"\$HOME/.local/bin:\$PATH\"
+$PATH_MARKER_END"
+
+for rc in "$HOME/.zshrc" "$HOME/.zprofile"; do
+  touch "$rc"
+  if ! grep -qF "$PATH_MARKER_START" "$rc"; then
+    printf '\n%s\n' "$PATH_BLOCK" >> "$rc"
+  fi
+done
+
 # Make sure the log dir referenced in the plist exists, otherwise
 # launchd will refuse to bootstrap.
 mkdir -p "$HOME/Library/Logs/maximal"
