@@ -10,9 +10,9 @@ import type {
   AnthropicTool,
 } from "~/lib/anthropic-types"
 
-import type { WebToolDecl } from "./web-tools-types"
+import type { WebToolDecl } from "./types"
 
-import { TOOL_NAME, TOOL_TYPE, type ToolName } from "./web-tools-vocab"
+import { TOOL_NAME, TOOL_TYPE, type ToolName } from "./vocab"
 
 // Tool declarations may carry a `type` field for server-side variants
 // that the inherited AnthropicTool type doesn't model; widen for read.

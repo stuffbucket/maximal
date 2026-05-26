@@ -14,15 +14,15 @@ import type {
 
 import { createChatCompletions } from "~/services/copilot/create-chat-completions"
 
-import { isNonStreaming, type FlowBaseOptions } from "./api-flows"
+import { isNonStreaming, type FlowBaseOptions } from "../api-flows"
 import {
   translateToAnthropic,
   translateToOpenAI,
-} from "./non-stream-translation"
-import { runAgentLoop } from "./web-tools-agent"
-import { selectExecutor } from "./web-tools-executor"
-import { attachClientShims, type WebToolPolicy } from "./web-tools-rewriter"
-import { runStreamingAgent } from "./web-tools-stream"
+} from "../non-stream-translation"
+import { runAgentLoop } from "./agent"
+import { selectExecutor } from "./executor"
+import { attachClientShims, type WebToolPolicy } from "./rewriter"
+import { runStreamingAgent } from "./stream"
 
 export interface WebToolsFlowArgs {
   c: Context

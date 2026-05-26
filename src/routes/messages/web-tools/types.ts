@@ -6,7 +6,7 @@
  * live in web-tools-exec.ts where they're constructed.
  */
 
-import { TOOL_TYPE, TOOL_NAME } from "./web-tools-vocab"
+import { TOOL_TYPE, TOOL_NAME } from "./vocab"
 
 interface DomainPolicy {
   max_uses?: number
