@@ -1,3 +1,5 @@
+> **Status:** archived 2026-05 — work has shipped or been superseded.
+
 # Phase 4 — Auth UX (enhanced device-code)
 
 ## 30-second context

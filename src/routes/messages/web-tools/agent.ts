@@ -21,7 +21,7 @@ import type {
 
 import { debugLazy } from "~/lib/logger"
 
-import type { Executor } from "./web-tools-executor"
+import type { Executor } from "./executor"
 
 import {
   buildResultBlockForOutcome,
@@ -29,10 +29,10 @@ import {
   executeToolUse,
   type ExecOutcome,
   type ResultOutBlock,
-} from "./web-tools-exec"
-import { isWebToolName, type WebToolPolicy } from "./web-tools-rewriter"
-import { newRequestState } from "./web-tools-state"
-import { BLOCK_KIND, MAX_AGENT_TURNS, type ToolName } from "./web-tools-vocab"
+} from "./exec"
+import { isWebToolName, type WebToolPolicy } from "./rewriter"
+import { newRequestState } from "./state"
+import { BLOCK_KIND, MAX_AGENT_TURNS, type ToolName } from "./vocab"
 
 interface RoundTrip {
   toolUseId: string

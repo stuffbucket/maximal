@@ -311,10 +311,10 @@ is sufficient.
 
 ## Out of scope (this PRD)
 
-- Web-tools work — covered by `docs/spec/web-tools.md`
+- Web-tools work — covered by `docs/spec/archive/web-tools.md`
 - Tool-bridge work — covered by `docs/spec/tool-bridge.md`
 - State / config / cache cleanup — covered by
-  `docs/spec/state-config-cache-cleanup.md` (now closed)
+  `docs/spec/archive/state-config-cache-cleanup.md` (now closed)
 - MDM / egress — covered by `docs/admin/claude-desktop-mdm.md`
 
 ## References

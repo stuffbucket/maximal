@@ -4,11 +4,7 @@
  * checks are O(1).
  */
 
-import type {
-  WebSearchToolDecl,
-  WebFetchToolDecl,
-  WebToolDecl,
-} from "./web-tools-types"
+import type { WebSearchToolDecl, WebFetchToolDecl, WebToolDecl } from "./types"
 
 import {
   TOOL_NAME,
@@ -17,7 +13,7 @@ import {
   type ToolName,
   type WebSearchErrorCode,
   type WebFetchErrorCode,
-} from "./web-tools-vocab"
+} from "./vocab"
 
 // ────────────────────────────────────────────────────────────────────
 // Per-request state.

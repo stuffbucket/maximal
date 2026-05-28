@@ -1,3 +1,5 @@
+> **Status:** archived 2026-05 — work has shipped or been superseded.
+
 # Phase 3 — macOS test parity via platform adapter
 
 ## 30-second context

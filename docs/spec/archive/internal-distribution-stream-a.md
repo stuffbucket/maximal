@@ -1,3 +1,5 @@
+> **Status:** archived 2026-05 — work has shipped or been superseded.
+
 # Stream A — CI/CD + signed binaries
 
 Working notes for the agent (me) owning Stream A. Symmetric to

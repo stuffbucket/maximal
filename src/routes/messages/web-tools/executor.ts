@@ -10,7 +10,7 @@ import TurndownService from "turndown"
 
 import { Cache } from "~/lib/cache"
 
-import type { WebFetchErrorCode, WebSearchErrorCode } from "./web-tools-vocab"
+import type { WebFetchErrorCode, WebSearchErrorCode } from "./vocab"
 
 // ────────────────────────────────────────────────────────────────────
 // Result shapes — discriminated unions keyed by `ok`. Errors use the

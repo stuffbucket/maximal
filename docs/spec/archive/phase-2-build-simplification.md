@@ -1,3 +1,5 @@
+> **Status:** archived 2026-05 — work has shipped or been superseded.
+
 # Phase 2 — Build simplification
 
 ## 30-second context

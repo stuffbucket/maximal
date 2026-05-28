@@ -20,7 +20,7 @@
  * post-install scripts in B2/B3a). Unattended skips prompts and the
  * smoke test.
  *
- * Spec: docs/spec/internal-distribution-stream-b.md §B5.
+ * Spec: docs/spec/archive/internal-distribution-stream-b.md §B5.
  */
 
 import { defineCommand } from "citty"

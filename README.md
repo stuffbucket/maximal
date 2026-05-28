@@ -120,6 +120,6 @@ Mac to add the polished `.dmg` to the release.
 ## Status
 
 Pre-alpha. Functional end-to-end against x3-design enterprise. See
-`docs/spec/web-tools.md` for the agent-loop spec,
+`docs/spec/archive/web-tools.md` for the agent-loop spec,
 `docs/admin/claude-desktop-mdm.md` for Cowork-side configuration, and
-`docs/spec/internal-distribution.md` for the v1 distribution plan.
+`docs/spec/archive/internal-distribution.md` for the v1 distribution plan.

@@ -12,26 +12,21 @@ import type {
   AnthropicToolUseBlock,
 } from "~/lib/anthropic-types"
 
-import type {
-  Executor,
-  FetchResult,
-  SearchHit,
-  SearchResult,
-} from "./web-tools-executor"
+import type { Executor, FetchResult, SearchHit, SearchResult } from "./executor"
 
 import {
   checkFetchPolicy,
   checkSearchPolicy,
   recordUse,
   type RequestState,
-} from "./web-tools-state"
+} from "./state"
 import {
   TOOL_NAME,
   BLOCK_KIND,
   type ToolName,
   type WebFetchErrorCode,
   type WebSearchErrorCode,
-} from "./web-tools-vocab"
+} from "./vocab"
 
 // ────────────────────────────────────────────────────────────────────
 // Outcome shape — discriminated over (tool, ok).

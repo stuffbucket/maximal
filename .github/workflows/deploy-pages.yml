@@ -23,9 +23,6 @@ concurrency:
 
 jobs:
   # Build the Astro site under ./site and deploy site/dist to Pages.
-  # The static ./pages directory is no longer the deploy target — kept
-  # in-tree as a legacy reference / in-flight design exploration but
-  # not surfaced publicly.
   deploy:
     runs-on: ubuntu-latest
     environment:

@@ -41,19 +41,19 @@ import {
   type ChatCompletionChunk,
 } from "~/services/copilot/create-chat-completions"
 
-import { isNonStreaming } from "./api-flows"
-import { translateToOpenAI } from "./non-stream-translation"
-import { translateChunkToAnthropicEvents } from "./stream-translation"
+import { isNonStreaming } from "../api-flows"
+import { translateToOpenAI } from "../non-stream-translation"
+import { translateChunkToAnthropicEvents } from "../stream-translation"
 import {
   buildResultBlockForOutcome,
   buildToolResultMessage,
   executeToolUse,
   type ExecOutcome,
-} from "./web-tools-exec"
-import { type Executor } from "./web-tools-executor"
-import { isWebToolName, type WebToolPolicy } from "./web-tools-rewriter"
-import { newRequestState, type RequestState } from "./web-tools-state"
-import { BLOCK_KIND, MAX_AGENT_TURNS, type ToolName } from "./web-tools-vocab"
+} from "./exec"
+import { type Executor } from "./executor"
+import { isWebToolName, type WebToolPolicy } from "./rewriter"
+import { newRequestState, type RequestState } from "./state"
+import { BLOCK_KIND, MAX_AGENT_TURNS, type ToolName } from "./vocab"
 
 /** The upstream chat-completions function. Exported so tests can
  *  type their stub without `as unknown as ...` casts. */

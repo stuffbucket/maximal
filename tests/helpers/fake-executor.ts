@@ -2,7 +2,7 @@ import type {
   Executor,
   FetchResult,
   SearchResult,
-} from "~/routes/messages/web-tools-executor"
+} from "~/routes/messages/web-tools/executor"
 
 /** Test fake for the web-tools `Executor` surface. Records every call
  *  and returns deterministic shapes useful for assertion. */

@@ -410,8 +410,8 @@ When scheduled, the milestone delivers if:
 ## Out of scope (this strategy)
 
 - The observability stack itself — `docs/spec/observability.md`
-- The web-tools agent loop — `docs/spec/web-tools.md`
-- The state/config/cache cleanup — `docs/spec/state-config-cache-cleanup.md` (closed)
+- The web-tools agent loop — `docs/spec/archive/web-tools.md`
+- The state/config/cache cleanup — `docs/spec/archive/state-config-cache-cleanup.md` (closed)
 - MDM / Cowork egress — `docs/admin/claude-desktop-mdm.md`
 - Provider expansion (new inference backends beyond Copilot) —
   separate effort; the registry pattern from L2 is the natural

@@ -6,10 +6,10 @@ import type {
   AnthropicResponse,
   AnthropicToolUseBlock,
 } from "~/lib/anthropic-types"
-import type { WebToolPolicy } from "~/routes/messages/web-tools-rewriter"
+import type { WebToolPolicy } from "~/routes/messages/web-tools/rewriter"
 
-import { runAgentLoop } from "~/routes/messages/web-tools-agent"
-import { MAX_AGENT_TURNS } from "~/routes/messages/web-tools-vocab"
+import { runAgentLoop } from "~/routes/messages/web-tools/agent"
+import { MAX_AGENT_TURNS } from "~/routes/messages/web-tools/vocab"
 
 import { FakeExecutor } from "./helpers/fake-executor"
 
