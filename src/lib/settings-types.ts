@@ -85,6 +85,11 @@ export const AuthStatus = z.object({
   expires_at: z.string().optional(),
   account_login: z.string().optional(),
   error: z.string().optional(),
+  /** Optional remediation URL surfaced when GHCP rejects our token at
+   *  the Copilot exchange (e.g. updated TOS, Copilot settings page).
+   *  Present only in the `error` state and only when GHCP returned a
+   *  URL in the rejection body. */
+  remediation_url: z.string().optional(),
 })
 export type AuthStatus = z.infer<typeof AuthStatus>
 

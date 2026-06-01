@@ -416,6 +416,38 @@ function renderAccountAvatar(login: string): void {
   slot.appendChild(img);
 }
 
+/**
+ * Render the "Open GitHub to resolve" link in the error card, or
+ * hide the surrounding paragraph if GHCP didn't give us a URL. The
+ * containing <p> is `hidden` by default in the HTML so the empty
+ * state never shows.
+ */
+function renderRemediationLink(url: string | undefined): void {
+  const wrapper = accountSlot("remediation");
+  const anchor = accountSlot("remediation_uri");
+  if (!wrapper || !(anchor instanceof HTMLAnchorElement)) return;
+  if (!url) {
+    wrapper.hidden = true;
+    anchor.removeAttribute("href");
+    anchor.textContent = "";
+    return;
+  }
+  anchor.href = url;
+  anchor.textContent = labelForRemediationUrl(url);
+  wrapper.hidden = false;
+}
+
+function labelForRemediationUrl(url: string): string {
+  // Most GHCP rejection bodies point at one of a few well-known
+  // GitHub pages. Map them to verbs the user will recognize; fall
+  // back to a generic "Open in GitHub" for everything else so the
+  // link still works when GHCP introduces new endpoints.
+  if (/\/settings\/copilot/i.test(url)) return "Open Copilot settings on GitHub";
+  if (/\/copilot\/signup/i.test(url)) return "Accept updated Copilot terms";
+  if (/\/site\/terms|\/terms-of-service/i.test(url)) return "Review GitHub terms";
+  return "Open in GitHub";
+}
+
 function formatExpiresAt(iso: string | undefined): string {
   if (!iso) return "soon";
   const date = new Date(iso);
@@ -448,6 +480,7 @@ function renderAccount(status: AuthStatus): void {
     renderAccountAvatar(login);
   } else if (active === "error") {
     setAccountField("error", status.error ?? "Unknown error.");
+    renderRemediationLink(status.remediation_url);
   }
 
   if (active === "pending") {
@@ -521,6 +554,17 @@ async function signOut(): Promise<void> {
     "Sign out? The proxy will stop forwarding Copilot requests until you sign in again.",
   );
   if (!confirmed) return;
+  await performSignOut();
+  await loadAuthStatus();
+}
+
+/**
+ * Shared sign-out path used by both the explicit "Sign out" button and
+ * the "Sign in as a different account" affordance. Returns true on
+ * success so the caller can decide whether to continue (e.g. start a
+ * fresh device flow) or surface an error.
+ */
+async function performSignOut(): Promise<boolean> {
   stopAuthPolling();
   const result = await apiCall({
     kind: "auth-sign-out",
@@ -532,9 +576,21 @@ async function signOut(): Promise<void> {
       state: "error",
       error: `Sign-out failed: ${result.error}`,
     });
-    return;
+    return false;
   }
-  await loadAuthStatus();
+  return true;
+}
+
+/**
+ * Sign out + immediately start a fresh device flow. The intent is
+ * "let me re-auth with a different account" — no confirm dialog
+ * (the user picked the action explicitly), no intermediate empty
+ * state (we go straight to the pending code screen).
+ */
+async function switchAccount(): Promise<void> {
+  const ok = await performSignOut();
+  if (!ok) return;
+  await startAuth();
 }
 
 // One-shot button: copy code to clipboard, then open verification URL.
@@ -609,6 +665,9 @@ function wireAccount(): void {
         break;
       case "sign-out":
         void signOut();
+        break;
+      case "switch-account":
+        void switchAccount();
         break;
       case "sign-in-with-code":
         void signInWithCode(button);

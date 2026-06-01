@@ -49,6 +49,10 @@ export interface AuthStatus {
   expires_at?: string
   account_login?: string
   error?: string
+  /** Set on `error` state when GHCP pointed at a recovery page in its
+   *  401/403 body (TOS acceptance, Copilot settings). The UI renders
+   *  it as a clickable link below the error message. */
+  remediation_url?: string
 }
 
 interface AuthSignOutResponse {

@@ -150,6 +150,13 @@
                 <button
                   type="button"
                   class="btn btn--secondary"
+                  data-action="switch-account"
+                >
+                  Sign in as a different account
+                </button>
+                <button
+                  type="button"
+                  class="btn btn--secondary"
                   data-action="sign-out"
                 >
                   Sign out
@@ -161,6 +168,13 @@
             <div class="state state--error card--error" data-state-account="error" hidden>
               <h3 class="state__title">Sign-in failed</h3>
               <p class="state__body" data-field="error"></p>
+              <p class="state__body" data-field="remediation" hidden>
+                <a
+                  data-field="remediation_uri"
+                  target="_blank"
+                  rel="noopener"
+                ></a>
+              </p>
               <div class="actions">
                 <button
                   type="button"

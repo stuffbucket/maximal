@@ -12,6 +12,27 @@ export class HTTPError extends Error {
   }
 }
 
+/**
+ * Thrown when GHCP rejects our GitHub token at the Copilot exchange
+ * (401/403). Carries the upstream message and any remediation URL
+ * (e.g. updated Copilot TOS, license-management page) so the auth
+ * controller can stash both for the Settings UI to render.
+ *
+ * Distinct from HTTPError because the action is fixed: clear the
+ * token, stop the refresh loop, show the user how to recover. The
+ * refresh loop and setup path discriminate on this type.
+ */
+export class CopilotAuthFatalError extends Error {
+  status: number
+  remediationUrl: string | null
+
+  constructor(message: string, status: number, remediationUrl: string | null) {
+    super(message)
+    this.status = status
+    this.remediationUrl = remediationUrl
+  }
+}
+
 export async function forwardError(
   c: Context,
   error: unknown,

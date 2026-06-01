@@ -9,7 +9,8 @@ import { getDeviceCode } from "~/services/github/get-device-code"
 import { getGitHubUser } from "~/services/github/get-user"
 import { pollAccessToken } from "~/services/github/poll-access-token"
 
-import { HTTPError } from "./error"
+import { markAuthFatalAndSignOut } from "./auth-controller"
+import { CopilotAuthFatalError, HTTPError } from "./error"
 import {
   inferTokenType,
   makeRecord,
@@ -49,7 +50,26 @@ export const setupCopilotToken = async () => {
     return
   }
 
-  const { token, refresh_in } = await getCopilotToken()
+  let token: string
+  let refresh_in: number
+  try {
+    const result = await getCopilotToken()
+    token = result.token
+    refresh_in = result.refresh_in
+  } catch (error) {
+    if (error instanceof CopilotAuthFatalError) {
+      // First-mint failure (e.g. user lacks Copilot entitlement, must
+      // accept new TOS). Treat the GitHub token as gone — same
+      // collapse rule as the refresh loop — and surface the reason.
+      consola.warn(
+        "Copilot rejected the GitHub token at first mint:",
+        error.message,
+      )
+      await markAuthFatalAndSignOut(error)
+      throw error
+    }
+    throw error
+  }
   setCopilotToken(token)
 
   consola.debug("GitHub Copilot Token fetched successfully!")
@@ -116,6 +136,20 @@ const runCopilotRefreshLoop = async (
         consola.info("Refreshed Copilot token:", token)
       }
     } catch (error) {
+      if (error instanceof CopilotAuthFatalError) {
+        // GHCP rejected the GitHub token (401/403). No amount of
+        // retrying will fix this; the user has to re-authenticate
+        // (and possibly accept new TOS / re-enable Copilot upstream).
+        // Wipe local auth state, stash the rejection reason for the
+        // Settings UI, and exit the loop. A successful sign-in will
+        // spin up a fresh loop via setupCopilotToken.
+        consola.warn(
+          "Copilot rejected the GitHub token; stopping refresh loop:",
+          error.message,
+        )
+        await markAuthFatalAndSignOut(error)
+        return
+      }
       consola.error("Failed to refresh Copilot token:", error)
       refreshAtMs = Date.now() + RETRY_REFRESH_DELAY_MS
       consola.warn(

@@ -38,6 +38,7 @@ import { getDeviceCode } from "~/services/github/get-device-code"
 import { getGitHubUser } from "~/services/github/get-user"
 import { pollAccessToken as defaultPollAccessToken } from "~/services/github/poll-access-token"
 
+import type { CopilotAuthFatalError } from "./error"
 import type { AuthStatus } from "./settings-types"
 
 import {
@@ -92,11 +93,23 @@ interface ActiveFlow {
   isPolling: boolean
 }
 
+/**
+ * Structured rejection reason surfaced to the Settings UI. `message`
+ * is the human-readable failure (poller error string, or GHCP body
+ * message on a 401/403). `remediationUrl` is populated only when GHCP
+ * pointed at a recovery page (TOS acceptance, Copilot settings).
+ */
+interface LastError {
+  message: string
+  remediationUrl: string | null
+}
+
 interface ControllerState {
   // Active device-code flow (issued or being polled).
   flow: ActiveFlow | null
-  // Last terminal error from a poll attempt, surfaced via getAuthStatus.
-  lastError: string | null
+  // Last terminal error from a poll attempt or Copilot auth-fatal,
+  // surfaced via getAuthStatus.
+  lastError: LastError | null
   // GitHub login of the authenticated account.
   accountLogin: string | null
 }
@@ -130,7 +143,12 @@ export function getAuthStatus(): AuthStatus {
   }
 
   if (controllerState.lastError && !controllerState.flow) {
-    return { state: "error", error: controllerState.lastError }
+    const err = controllerState.lastError
+    return {
+      state: "error",
+      error: err.message,
+      ...(err.remediationUrl ? { remediation_url: err.remediationUrl } : {}),
+    }
   }
 
   const flow = controllerState.flow
@@ -249,7 +267,7 @@ async function runPoller(flow: ActiveFlow): Promise<void> {
   } catch (err) {
     if (flow.abort.signal.aborted) return
     const message = err instanceof Error ? err.message : String(err)
-    controllerState.lastError = message
+    controllerState.lastError = { message, remediationUrl: null }
     controllerState.flow = null
     consola.warn("Auth-controller: device-code poll terminated:", message)
   } finally {
@@ -283,6 +301,24 @@ export async function signOut(): Promise<void> {
     ) {
       consola.warn("Auth-controller: failed to delete token file:", err)
     }
+  }
+}
+
+/**
+ * Treat a CopilotAuthFatalError (GHCP 401/403) identically to a user-
+ * initiated sign-out — clear all token state and the on-disk file —
+ * but preserve the upstream message and remediation URL so the Sign
+ * In screen can render them as a banner. Anything that can throw a
+ * CopilotAuthFatalError (setupCopilotToken, the refresh loop) routes
+ * through here.
+ */
+export async function markAuthFatalAndSignOut(
+  error: CopilotAuthFatalError,
+): Promise<void> {
+  await signOut()
+  controllerState.lastError = {
+    message: error.message,
+    remediationUrl: error.remediationUrl,
   }
 }
 
