@@ -736,6 +736,116 @@ describe("signOut", () => {
   })
 })
 
+// --- markAuthFatalAndSignOut ----------------------------------------------
+
+describe("markAuthFatalAndSignOut", () => {
+  test("clears all token state and restamps lastError with structured payload", async () => {
+    const { markAuthFatalAndSignOut } = await import("~/lib/auth-controller")
+    const { CopilotAuthFatalError } = await import("~/lib/error")
+
+    state.githubToken = "ghu_x"
+    state.copilotToken = "tok"
+    state.userName = "alice"
+
+    await markAuthFatalAndSignOut(
+      new CopilotAuthFatalError(
+        "nope",
+        403,
+        "https://github.com/settings/copilot",
+      ),
+    )
+
+    expect(state.githubToken).toBeUndefined()
+    expect(state.copilotToken).toBeUndefined()
+    expect(state.userName).toBeUndefined()
+    expect(harness.unlinkCalls).toContain(PATHS.GITHUB_TOKEN_PATH)
+    expect(getAuthStatus()).toEqual({
+      state: "error",
+      error: "nope",
+      remediation_url: "https://github.com/settings/copilot",
+    })
+  })
+
+  test("omits remediation_url from status when remediationUrl is null", async () => {
+    const { markAuthFatalAndSignOut } = await import("~/lib/auth-controller")
+    const { CopilotAuthFatalError } = await import("~/lib/error")
+
+    state.githubToken = "ghu_x"
+    state.copilotToken = "tok"
+    state.userName = "alice"
+
+    await markAuthFatalAndSignOut(
+      new CopilotAuthFatalError("revoked", 401, null),
+    )
+
+    const status = getAuthStatus()
+    expect(status).toEqual({ state: "error", error: "revoked" })
+    expect(status).not.toHaveProperty("remediation_url")
+  })
+
+  test("subsequent startDeviceFlow clears the remediation", async () => {
+    const { markAuthFatalAndSignOut } = await import("~/lib/auth-controller")
+    const { CopilotAuthFatalError } = await import("~/lib/error")
+
+    await markAuthFatalAndSignOut(
+      new CopilotAuthFatalError(
+        "nope",
+        403,
+        "https://github.com/settings/copilot",
+      ),
+    )
+    expect(getAuthStatus().state).toBe("error")
+
+    await startDeviceFlow()
+    const status = getAuthStatus()
+    expect(["device_code_issued", "polling"]).toContain(status.state)
+    expect(status).not.toHaveProperty("error")
+    expect(status).not.toHaveProperty("remediation_url")
+  })
+
+  test("tolerates a no-token starting state with ENOENT on unlink", async () => {
+    const { markAuthFatalAndSignOut } = await import("~/lib/auth-controller")
+    const { CopilotAuthFatalError } = await import("~/lib/error")
+
+    // Nothing to clear, file already gone.
+    const enoent: NodeJS.ErrnoException = Object.assign(new Error("missing"), {
+      code: "ENOENT",
+    })
+    harness.unlinkImpl = () => Promise.reject(enoent)
+
+    await markAuthFatalAndSignOut(
+      new CopilotAuthFatalError("tos not accepted", 403, null),
+    )
+
+    const status = getAuthStatus()
+    expect(status.state).toBe("error")
+    expect(status.error).toBe("tos not accepted")
+  })
+
+  test("cancels an in-flight device flow (status becomes error, not device_code_issued)", async () => {
+    const { markAuthFatalAndSignOut } = await import("~/lib/auth-controller")
+    const { CopilotAuthFatalError } = await import("~/lib/error")
+
+    // Active flow with a hanging poll.
+    harness.pollAccessTokenImpl = () => new Promise<string>(() => {})
+
+    await startDeviceFlow()
+    expect(["device_code_issued", "polling"]).toContain(getAuthStatus().state)
+
+    await markAuthFatalAndSignOut(
+      new CopilotAuthFatalError("revoked mid-flow", 401, null),
+    )
+
+    // Mirrors existing signOut tests: post-cancel status must NOT
+    // surface the in-flight flow. Here the auth-fatal restamps
+    // lastError, so we see `error` rather than `unauthenticated`.
+    const status = getAuthStatus()
+    expect(status.state).toBe("error")
+    expect(status.error).toBe("revoked mid-flow")
+    expect(["device_code_issued", "polling"]).not.toContain(status.state)
+  })
+})
+
 // --- __resetAuthControllerForTests behaviour ------------------------------
 
 describe("__resetAuthControllerForTests", () => {
