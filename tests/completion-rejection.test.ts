@@ -67,19 +67,15 @@ const snapshot = {
 function installFetchMock(
   status: number,
   body: string | Record<string, unknown>,
-): ReturnType<typeof mock> {
+): void {
   const text = typeof body === "string" ? body : JSON.stringify(body)
-  const fetchMock = mock(() => {
-    return Promise.resolve(
+  ;(globalThis as unknown as { fetch: typeof fetch }).fetch = (() =>
+    Promise.resolve(
       new Response(text, {
         status,
         headers: { "content-type": "application/json" },
       }),
-    )
-  })
-  ;(globalThis as unknown as { fetch: typeof fetch }).fetch =
-    fetchMock as unknown as typeof fetch
-  return fetchMock
+    )) as unknown as typeof fetch
 }
 
 beforeEach(() => {
