@@ -15,11 +15,30 @@ import {
 } from "~/lib/token-usage"
 import { generateRequestIdFromPayload, getUUID } from "~/lib/utils"
 import {
-  createResponses,
+  createResponses as defaultCreateResponses,
   type ResponsesPayload,
   type ResponsesResult,
   type ResponseStreamEvent,
 } from "~/services/copilot/create-responses"
+
+// Test-only DI shim. Lets tests/responses-handler.test.ts inject a stub
+// for createResponses without using process-wide mock.module on
+// "~/services/copilot/create-responses" — which would leak the stub
+// to every test file that statically imports createResponses later in
+// the same `bun test` process (Bun captures ESM bindings at module
+// load time; later restoration via mock.module doesn't repoint already-
+// resolved bindings). Production callers see defaultCreateResponses.
+let createResponses: typeof defaultCreateResponses = defaultCreateResponses
+
+export function __setCreateResponsesForTests(
+  impl: typeof defaultCreateResponses,
+): void {
+  createResponses = impl
+}
+
+export function __resetCreateResponsesForTests(): void {
+  createResponses = defaultCreateResponses
+}
 
 import { createStreamIdTracker, fixStreamIds } from "./stream-id-sync"
 import {
