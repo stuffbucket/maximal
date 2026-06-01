@@ -4,10 +4,10 @@
   "packageManager": "npm",
   "testRunner": "command",
   "commandRunner": {
-    "command": "bun test tests/refresh-models.test.ts"
+    "command": "bun test tests/find-endpoint-model.test.ts"
   },
   "mutate": [
-    "src/lib/refresh-models.ts"
+    "src/lib/models.ts"
   ],
   "reporters": ["progress", "clear-text", "html"],
   "tempDirName": ".stryker-tmp",

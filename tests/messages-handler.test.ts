@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test"
+import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test"
 import { Hono } from "hono"
 
 import type { AnthropicMessagesPayload } from "~/lib/anthropic-types"
@@ -289,4 +289,14 @@ describe("messages handler orchestration", () => {
     })
     expect(options.anthropicBetaHeader).toBe("warmup-beta")
   })
+})
+
+// Restore real modules so their mocks don't bleed into other test files
+// that share this Bun worker (e.g. find-endpoint-model.test.ts).
+afterAll(() => {
+  void mock.module("~/lib/state", () => actualStateModule)
+  void mock.module("~/lib/models", () => actualModelsModule)
+  void mock.module("~/lib/rate-limit", () => actualRateLimitModule)
+  void mock.module("~/lib/config", () => actualConfigModule)
+  void mock.module("~/lib/utils", () => actualUtilsModule)
 })
