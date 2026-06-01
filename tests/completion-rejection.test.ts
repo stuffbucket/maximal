@@ -245,6 +245,37 @@ describe("createChatCompletions", () => {
 // --- createResponses ---------------------------------------------------------
 
 describe("createResponses", () => {
+  test("DIAG2: what does createResponses return on 4xx", async () => {
+    installFetchMock(403, authFatalBody)
+    const fresh = { ...responsesPayload }
+    const opts = { ...responsesOpts }
+    let result: unknown
+    let thrown: unknown = "NO_THROW"
+    try {
+      result = await createResponses(fresh, opts)
+    } catch (err) {
+      thrown = err
+    }
+    const resultJson = (() => {
+      try {
+        return JSON.stringify(result)
+      } catch {
+        return "<non-serializable>"
+      }
+    })()
+    const thrownLabel = thrown === "NO_THROW" ? "no" : typeof thrown
+    console.log("DIAG2 typeof:", typeof result)
+    console.log("DIAG2 ctor:", Object.prototype.toString.call(result))
+    console.log("DIAG2 json:", resultJson)
+    console.log("DIAG2 thrown:", thrownLabel)
+    console.log("DIAG2 fn.length:", createResponses.length)
+    console.log(
+      "DIAG2 fn source first 240ch:",
+      createResponses.toString().slice(0, 240),
+    )
+    expect(true).toBe(true)
+  })
+
   test("auth-fatal: throws CopilotAuthFatalError without setting sidecar", async () => {
     installFetchMock(403, authFatalBody)
 
