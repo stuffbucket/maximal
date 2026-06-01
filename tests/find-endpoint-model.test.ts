@@ -1,18 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test"
+import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
-// messages-handler.test.ts replaces ~/lib/state and ~/lib/models with mocks at
-// module-evaluation time and does not restore them. When Bun reuses a worker for
-// multiple test files those mocks linger, causing findEndpointModel to read from
-// the wrong state object. Re-import the real modules before registering them as
-// the canonical ~/… aliases so the live ESM bindings inside findEndpointModel
-// point at the real state singleton that our beforeEach will mutate.
-const realState = await import("../src/lib/state")
-const realModels = await import("../src/lib/models")
-await mock.module("~/lib/state", () => realState)
-await mock.module("~/lib/models", () => realModels)
-
-const { state } = realState
-const { findEndpointModel, normalizeSdkModelId } = realModels
+import { findEndpointModel, normalizeSdkModelId } from "../src/lib/models"
+import { state } from "../src/lib/state"
 
 const makeModel = (id: string, version: string, family: string) => ({
   capabilities: {
