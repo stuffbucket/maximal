@@ -281,15 +281,44 @@ describe("createChatCompletions", () => {
 // --- createResponses ---------------------------------------------------------
 
 describe("createResponses", () => {
+  test("DIAG: createResponses is callable and state is set", () => {
+    console.log("DIAG createResponses typeof:", typeof createResponses)
+    console.log("DIAG createResponses name:", createResponses.name)
+    console.log("DIAG state.copilotToken:", state.copilotToken)
+    console.log(
+      "DIAG fetch type:",
+      typeof globalThis.fetch,
+      globalThis.fetch === originalFetch ? "original" : "mocked",
+    )
+    expect(typeof createResponses).toBe("function")
+  })
+
+  test("DIAG: direct fetch returns 403 in this scope", async () => {
+    installFetchMock(403, { message: "diag" })
+    const r = await fetch("http://example.invalid/diag")
+    console.log("DIAG fetch result status/ok:", r.status, r.ok)
+    expect(r.ok).toBe(false)
+    expect(r.status).toBe(403)
+  })
+
   test("auth-fatal: throws CopilotAuthFatalError without setting sidecar", async () => {
     installFetchMock(403, authFatalBody)
 
     let caught: unknown = null
+    let returned: unknown = "NOT_RETURNED"
     try {
-      await createResponses(responsesPayload, responsesOpts)
+      returned = await createResponses(responsesPayload, responsesOpts)
     } catch (err) {
       caught = err
     }
+    console.log(
+      "DIAG auth-fatal caught typeof:",
+      typeof caught,
+      "isNull:",
+      caught === null,
+      "returned:",
+      returned === "NOT_RETURNED" ? "no" : typeof returned,
+    )
 
     expect(caught).toBeInstanceOf(CopilotAuthFatalError)
     expect((caught as CopilotAuthFatalErrorType).status).toBe(403)
