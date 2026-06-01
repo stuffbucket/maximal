@@ -4,23 +4,30 @@ import { state } from "~/lib/state"
 
 export const findEndpointModel = (sdkModelId: string): Model | undefined => {
   const models = state.models?.data ?? []
-  const exactMatch = models.find((m) => m.id === sdkModelId)
-  if (exactMatch) {
-    return exactMatch
-  }
 
-  const normalized = _normalizeSdkModelId(sdkModelId)
-  if (!normalized) {
-    return undefined
-  }
+  const exactMatch = models.find((m) => m.id === sdkModelId)
+  if (exactMatch) return exactMatch
+
+  const normalized = normalizeSdkModelId(sdkModelId)
+  if (!normalized) return undefined
 
   const modelName = `claude-${normalized.family}-${normalized.version}`
-  const model = models.find((m) => m.id === modelName)
-  if (model) {
-    return model
-  }
+  const byName = models.find(
+    (m) => m.id === modelName || m.version === modelName,
+  )
+  if (byName) return byName
 
-  return undefined
+  // Semantic fallback: normalize the candidate's own fields and compare tuples.
+  // Handles future format changes to either the SDK ID or the Copilot model list
+  // (e.g. new date schemes, separator changes) without requiring pattern updates.
+  return models.find((m) => {
+    const c =
+      normalizeSdkModelId(m.version)
+      ?? normalizeSdkModelId(m.capabilities.family)
+      ?? normalizeSdkModelId(m.id)
+    if (!c) return false
+    return c.family === normalized.family && c.version === normalized.version
+  })
 }
 
 /**
@@ -33,7 +40,7 @@ export const findEndpointModel = (sdkModelId: string): Model | undefined => {
  * - "claude-haiku-3-5-20250514" -> { family: "haiku", version: "3.5" }
  * - "claude-haiku-4.5" -> { family: "haiku", version: "4.5" }
  */
-const _normalizeSdkModelId = (
+export const normalizeSdkModelId = (
   sdkModelId: string,
 ): { family: string; version: string } | undefined => {
   const lower = sdkModelId.toLowerCase()
