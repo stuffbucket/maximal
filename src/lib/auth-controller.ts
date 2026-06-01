@@ -38,6 +38,7 @@ import { getDeviceCode } from "~/services/github/get-device-code"
 import { getGitHubUser } from "~/services/github/get-user"
 import { pollAccessToken as defaultPollAccessToken } from "~/services/github/poll-access-token"
 
+import type { CopilotAuthFatalError } from "./error"
 import type { AuthStatus } from "./settings-types"
 
 import {
@@ -46,7 +47,7 @@ import {
 } from "./github-token-store"
 import { PATHS } from "./paths"
 import { registerProcessCleanup } from "./process-cleanup"
-import { state } from "./state"
+import { clearLastUpstreamRejection, state } from "./state"
 import { setupCopilotToken } from "./token"
 
 // Dependency-injection shim for tests. Process-wide `mock.module` for
@@ -92,11 +93,23 @@ interface ActiveFlow {
   isPolling: boolean
 }
 
+/**
+ * Structured rejection reason surfaced to the Settings UI. `message`
+ * is the human-readable failure (poller error string, or GHCP body
+ * message on a 401/403). `remediationUrl` is populated only when GHCP
+ * pointed at a recovery page (TOS acceptance, Copilot settings).
+ */
+interface LastError {
+  message: string
+  remediationUrl: string | null
+}
+
 interface ControllerState {
   // Active device-code flow (issued or being polled).
   flow: ActiveFlow | null
-  // Last terminal error from a poll attempt, surfaced via getAuthStatus.
-  lastError: string | null
+  // Last terminal error from a poll attempt or Copilot auth-fatal,
+  // surfaced via getAuthStatus.
+  lastError: LastError | null
   // GitHub login of the authenticated account.
   accountLogin: string | null
 }
@@ -117,6 +130,25 @@ function isFlowExpired(flow: ActiveFlow, nowMs: number = Date.now()): boolean {
 }
 
 export function getAuthStatus(): AuthStatus {
+  // The upstream-rejection sidecar can ride along on any state — it's
+  // attached to the most recent completion attempt, not to whether a
+  // token is currently present. signOut() and a fresh sign-in both
+  // clear it.
+  const rejection = state.lastUpstreamRejection
+  const rejectionPayload =
+    rejection ?
+      {
+        last_upstream_rejection: {
+          message: rejection.message,
+          status: rejection.status,
+          at: rejection.at,
+          ...(rejection.remediationUrl ?
+            { remediation_url: rejection.remediationUrl }
+          : {}),
+        },
+      }
+    : {}
+
   if (state.githubToken) {
     // On device-flow completion we record the login on controllerState.
     // On cold boot with a stored token, logUser() in src/lib/token.ts
@@ -126,22 +158,29 @@ export function getAuthStatus(): AuthStatus {
     return {
       state: "authenticated",
       ...(login ? { account_login: login } : {}),
+      ...rejectionPayload,
     }
   }
 
   if (controllerState.lastError && !controllerState.flow) {
-    return { state: "error", error: controllerState.lastError }
+    const err = controllerState.lastError
+    return {
+      state: "error",
+      error: err.message,
+      ...(err.remediationUrl ? { remediation_url: err.remediationUrl } : {}),
+      ...rejectionPayload,
+    }
   }
 
   const flow = controllerState.flow
   if (!flow) {
-    return { state: "unauthenticated" }
+    return { state: "unauthenticated", ...rejectionPayload }
   }
 
   if (isFlowExpired(flow)) {
     // Stale flow that the poller hasn't cleared yet (e.g. terminal
     // path lost a race). Treat as unauthenticated for reporting.
-    return { state: "unauthenticated" }
+    return { state: "unauthenticated", ...rejectionPayload }
   }
 
   return {
@@ -149,6 +188,7 @@ export function getAuthStatus(): AuthStatus {
     user_code: flow.deviceCode.user_code,
     verification_uri: flow.deviceCode.verification_uri,
     expires_at: new Date(flow.expiresAt).toISOString(),
+    ...rejectionPayload,
   }
 }
 
@@ -249,7 +289,7 @@ async function runPoller(flow: ActiveFlow): Promise<void> {
   } catch (err) {
     if (flow.abort.signal.aborted) return
     const message = err instanceof Error ? err.message : String(err)
-    controllerState.lastError = message
+    controllerState.lastError = { message, remediationUrl: null }
     controllerState.flow = null
     consola.warn("Auth-controller: device-code poll terminated:", message)
   } finally {
@@ -269,6 +309,10 @@ export async function signOut(): Promise<void> {
   state.githubToken = undefined
   state.copilotToken = undefined
   state.userName = undefined
+  // A signed-out session has no upstream activity to surface a banner
+  // about. Clear here so the sidecar doesn't outlive the token that
+  // produced it.
+  clearLastUpstreamRejection()
 
   // Delete the on-disk token. Tolerant of "already gone".
   try {
@@ -283,6 +327,24 @@ export async function signOut(): Promise<void> {
     ) {
       consola.warn("Auth-controller: failed to delete token file:", err)
     }
+  }
+}
+
+/**
+ * Treat a CopilotAuthFatalError (GHCP 401/403) identically to a user-
+ * initiated sign-out — clear all token state and the on-disk file —
+ * but preserve the upstream message and remediation URL so the Sign
+ * In screen can render them as a banner. Anything that can throw a
+ * CopilotAuthFatalError (setupCopilotToken, the refresh loop) routes
+ * through here.
+ */
+export async function markAuthFatalAndSignOut(
+  error: CopilotAuthFatalError,
+): Promise<void> {
+  await signOut()
+  controllerState.lastError = {
+    message: error.message,
+    remediationUrl: error.remediationUrl,
   }
 }
 

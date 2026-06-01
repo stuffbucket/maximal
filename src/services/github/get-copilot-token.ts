@@ -1,7 +1,8 @@
 import consola from "consola"
 
 import { getGitHubApiBaseUrl, githubHeaders } from "~/lib/api-config"
-import { HTTPError } from "~/lib/error"
+import { parseCopilotErrorBody } from "~/lib/copilot-error-parser"
+import { CopilotAuthFatalError, HTTPError } from "~/lib/error"
 import { state } from "~/lib/state"
 
 export const getCopilotToken = async () => {
@@ -16,10 +17,46 @@ export const getCopilotToken = async () => {
     const errorText = await response.clone().text()
     consola.error("Failed to get Copilot token response body", errorText)
 
+    // /copilot_internal/v2/token never returns "your model isn't allowed"
+    // — every 401/403 from this endpoint means the underlying GitHub
+    // identity can no longer mint a Copilot token. Apply the strict
+    // (legacy) policy: any 401/403 is auth-fatal, regardless of body
+    // markers. Other endpoints (completion services) use the shared
+    // body-marker discriminator via isAuthFatal().
+    if (response.status === 401 || response.status === 403) {
+      const parsed = parseCopilotErrorBody(errorText)
+      throw new CopilotAuthFatalError(
+        parsed.message,
+        response.status,
+        parsed.remediationUrl,
+      )
+    }
+
     throw new HTTPError("Failed to get Copilot token", response)
   }
 
   return (await response.json()) as GetCopilotTokenResponse
+}
+
+/**
+ * Back-compat re-export. Older test files import `parseCopilotAuthFailure`
+ * from this module; the implementation moved to `~/lib/copilot-error-parser`
+ * as `parseCopilotErrorBody`. New callers should import directly from there.
+ *
+ * Preserves the auth-specific default message ("Copilot rejected this
+ * token.") that the shared parser doesn't use — the shared parser's
+ * default is generic ("Copilot returned an error.") so the same module
+ * can serve non-auth completion-endpoint failures.
+ */
+export function parseCopilotAuthFailure(body: string): {
+  message: string
+  remediationUrl: string | null
+} {
+  const parsed = parseCopilotErrorBody(body)
+  if (parsed.message === "Copilot returned an error.") {
+    return { ...parsed, message: "Copilot rejected this token." }
+  }
+  return parsed
 }
 
 // Trimmed for the sake of simplicity

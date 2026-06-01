@@ -529,6 +529,39 @@ a:hover {
   margin: 0;
 }
 
+/* ---- Upstream-rejection banner ----
+ * Shown inside the authenticated account card when the proxy's last
+ * completion attempt was rejected upstream (quota, model-not-on-plan,
+ * etc.). Non-destructive — the GitHub identity is fine, the upstream
+ * told us "no" for a different reason. Borrows card--info styling for
+ * the panel chrome and adds a left-border accent so the user notices
+ * it without it feeling alarming. */
+.upstream-rejection {
+  margin-top: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-left-width: 3px;
+  border-left-color: var(--accent-destructive);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.upstream-rejection__message {
+  color: var(--text-base-color);
+  font-size: var(--text-sm);
+  line-height: var(--leading-base);
+}
+
+.upstream-rejection__link-wrap a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.upstream-rejection__link-wrap a:hover,
+.upstream-rejection__link-wrap a:focus-visible {
+  text-decoration: underline;
+}
+
 /* ---- Inline code block ---- */
 .code {
   margin: var(--space-3) 0 0;

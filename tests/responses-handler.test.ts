@@ -11,8 +11,6 @@ import { Hono } from "hono"
 
 const actualConfigModule = await import("../src/lib/config")
 const actualRateLimitModule = await import("../src/lib/rate-limit")
-const actualResponsesModule =
-  await import("../src/services/copilot/create-responses")
 
 const createResponses = mock(() => Promise.resolve(streamChunks([])))
 
@@ -25,10 +23,6 @@ await mock.module("~/lib/rate-limit", () => ({
   ...actualRateLimitModule,
   checkRateLimit: async () => {},
 }))
-await mock.module("~/services/copilot/create-responses", () => ({
-  ...actualResponsesModule,
-  createResponses,
-}))
 
 const { state } = await import("../src/lib/state")
 const { closeUsageStore } = await import("../src/lib/token-usage")
@@ -36,6 +30,15 @@ const { tokenUsageRoute } = await import("../src/routes/token-usage/route")
 const { responsesRoutes } = await import("../src/routes/responses/route")
 const { generateRequestIdFromPayload, getUUID } =
   await import("../src/lib/utils")
+// DI shim — replaces the previous process-wide
+// mock.module("~/services/copilot/create-responses", ...) which leaked
+// the stub to other test files (notably tests/completion-rejection.test.ts)
+// whose static `import { createResponses }` then captured the AsyncGenerator
+// stub instead of the real function. The DI hook scopes the override to
+// this file's handler-via-route call path only.
+const { __setCreateResponsesForTests, __resetCreateResponsesForTests } =
+  await import("../src/routes/responses/handler")
+__setCreateResponsesForTests(createResponses)
 
 const DB_PATH_ENV = "COPILOT_API_SQLITE_DB_PATH"
 
@@ -203,8 +206,9 @@ afterAll(() => {
   // tests/messages-preprocess.test.ts).
   void mock.module("~/lib/config", () => actualConfigModule)
   void mock.module("~/lib/rate-limit", () => actualRateLimitModule)
-  void mock.module(
-    "~/services/copilot/create-responses",
-    () => actualResponsesModule,
-  )
+  // Release the DI shim for createResponses so the real function is
+  // restored in the handler module (no process-wide mock.module
+  // pollution to clean up here — see comment above the
+  // __setCreateResponsesForTests call at the top of this file).
+  __resetCreateResponsesForTests()
 })

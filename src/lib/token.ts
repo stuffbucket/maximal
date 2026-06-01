@@ -3,13 +3,14 @@ import consola from "consola"
 import { setTimeout as delay } from "node:timers/promises"
 
 import { PATHS } from "~/lib/paths"
-import { getCopilotToken } from "~/services/github/get-copilot-token"
+import { getCopilotToken as defaultGetCopilotToken } from "~/services/github/get-copilot-token"
 import { getCopilotUsage } from "~/services/github/get-copilot-usage"
 import { getDeviceCode } from "~/services/github/get-device-code"
 import { getGitHubUser } from "~/services/github/get-user"
 import { pollAccessToken } from "~/services/github/poll-access-token"
 
-import { HTTPError } from "./error"
+import { markAuthFatalAndSignOut as defaultMarkAuthFatalAndSignOut } from "./auth-controller"
+import { CopilotAuthFatalError, HTTPError } from "./error"
 import {
   inferTokenType,
   makeRecord,
@@ -18,6 +19,38 @@ import {
 } from "./github-token-store"
 import { isHeadless, openUrl } from "./open-url"
 import { setCopilotToken, state } from "./state"
+
+// Dependency-injection shim for tests, mirroring the pattern in
+// `auth-controller.ts`. Process-wide `mock.module` for these symbols
+// leaks across test files (Bun's module registry persists for the
+// duration of `bun test`); the DI shim keeps the registry untouched
+// while still letting `tests/token-auth-fatal.test.ts` observe how
+// the refresh loop reacts to CopilotAuthFatalError. Production
+// callers see the real implementations.
+let getCopilotToken: typeof defaultGetCopilotToken = defaultGetCopilotToken
+let markAuthFatalAndSignOut: typeof defaultMarkAuthFatalAndSignOut =
+  defaultMarkAuthFatalAndSignOut
+
+export interface TokenDepsTestOverrides {
+  getCopilotToken?: typeof defaultGetCopilotToken
+  markAuthFatalAndSignOut?: typeof defaultMarkAuthFatalAndSignOut
+}
+
+export function __setTokenDepsForTests(
+  overrides: TokenDepsTestOverrides,
+): void {
+  if (overrides.getCopilotToken !== undefined) {
+    getCopilotToken = overrides.getCopilotToken
+  }
+  if (overrides.markAuthFatalAndSignOut !== undefined) {
+    markAuthFatalAndSignOut = overrides.markAuthFatalAndSignOut
+  }
+}
+
+export function __resetTokenDepsForTests(): void {
+  getCopilotToken = defaultGetCopilotToken
+  markAuthFatalAndSignOut = defaultMarkAuthFatalAndSignOut
+}
 
 let copilotRefreshLoopController: AbortController | null = null
 
@@ -49,7 +82,26 @@ export const setupCopilotToken = async () => {
     return
   }
 
-  const { token, refresh_in } = await getCopilotToken()
+  let token: string
+  let refresh_in: number
+  try {
+    const result = await getCopilotToken()
+    token = result.token
+    refresh_in = result.refresh_in
+  } catch (error) {
+    if (error instanceof CopilotAuthFatalError) {
+      // First-mint failure (e.g. user lacks Copilot entitlement, must
+      // accept new TOS). Treat the GitHub token as gone — same
+      // collapse rule as the refresh loop — and surface the reason.
+      consola.warn(
+        "Copilot rejected the GitHub token at first mint:",
+        error.message,
+      )
+      await markAuthFatalAndSignOut(error)
+      throw error
+    }
+    throw error
+  }
   setCopilotToken(token)
 
   consola.debug("GitHub Copilot Token fetched successfully!")
@@ -116,6 +168,20 @@ const runCopilotRefreshLoop = async (
         consola.info("Refreshed Copilot token:", token)
       }
     } catch (error) {
+      if (error instanceof CopilotAuthFatalError) {
+        // GHCP rejected the GitHub token (401/403). No amount of
+        // retrying will fix this; the user has to re-authenticate
+        // (and possibly accept new TOS / re-enable Copilot upstream).
+        // Wipe local auth state, stash the rejection reason for the
+        // Settings UI, and exit the loop. A successful sign-in will
+        // spin up a fresh loop via setupCopilotToken.
+        consola.warn(
+          "Copilot rejected the GitHub token; stopping refresh loop:",
+          error.message,
+        )
+        await markAuthFatalAndSignOut(error)
+        return
+      }
       consola.error("Failed to refresh Copilot token:", error)
       refreshAtMs = Date.now() + RETRY_REFRESH_DELAY_MS
       consola.warn(

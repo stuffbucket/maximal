@@ -85,6 +85,26 @@ export const AuthStatus = z.object({
   expires_at: z.string().optional(),
   account_login: z.string().optional(),
   error: z.string().optional(),
+  /** Optional remediation URL surfaced when GHCP rejects our token at
+   *  the Copilot exchange (e.g. updated TOS, Copilot settings page).
+   *  Present only in the `error` state and only when GHCP returned a
+   *  URL in the rejection body. */
+  remediation_url: z.string().optional(),
+  /** Last non-fatal upstream rejection from a Copilot completion
+   *  endpoint (quota exhausted, model not on plan, transient upstream
+   *  error). Distinct from `error`/`remediation_url` (which are about
+   *  the GitHub-token state itself) — `last_upstream_rejection` is a
+   *  sidecar attached to the most recent completion attempt and clears
+   *  on the next successful request. Surfaced as a banner in the
+   *  Settings UI without changing the authenticated state. */
+  last_upstream_rejection: z
+    .object({
+      message: z.string(),
+      status: z.number().int(),
+      at: z.string(),
+      remediation_url: z.string().optional(),
+    })
+    .optional(),
 })
 export type AuthStatus = z.infer<typeof AuthStatus>
 

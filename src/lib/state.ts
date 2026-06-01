@@ -43,6 +43,27 @@ export interface State {
    * Empty/undefined when the sidecar runs standalone (CLI).
    */
   shellApiKey?: string
+
+  /**
+   * Last non-fatal upstream rejection from a Copilot completion endpoint
+   * (/v1/messages, /v1/chat/completions, /responses). Set when a 4xx/5xx
+   * comes back from upstream that ISN'T an auth-fatal (auth-fatal is
+   * routed through `markAuthFatalAndSignOut` and clears the token). Cleared
+   * on the next successful completion. Surfaced to the Settings UI via
+   * `/settings/api/auth/github/status` so the user can see "your quota is
+   * exhausted" / "this model isn't on your plan" without the proxy
+   * pretending the token is dead.
+   *
+   * The shape mirrors what the Settings UI shows — `at` is the wall-clock
+   * timestamp of the rejection so a future request that succeeds (and
+   * clears this) can be distinguished from a stale entry by inspection.
+   */
+  lastUpstreamRejection?: {
+    message: string
+    remediationUrl: string | null
+    status: number
+    at: string
+  }
 }
 
 export const state: State = {
@@ -66,6 +87,39 @@ export function setCopilotToken(token: string): void {
 export function setModels(models: ModelsResponse): void {
   state.models = models
   modelsCache.set(models)
+}
+
+/**
+ * Set the upstream-rejection sidecar after a non-fatal upstream failure.
+ * Called from each create-*.ts service when the response is non-OK and
+ * the body doesn't match auth-fatal markers. Idempotent on same-content
+ * updates (avoids needlessly bumping `at` when the same rejection keeps
+ * arriving, which would re-fire UI transitions).
+ */
+export function setLastUpstreamRejection(rejection: {
+  message: string
+  remediationUrl: string | null
+  status: number
+}): void {
+  const existing = state.lastUpstreamRejection
+  if (
+    existing
+    && existing.message === rejection.message
+    && existing.remediationUrl === rejection.remediationUrl
+    && existing.status === rejection.status
+  ) {
+    return
+  }
+  state.lastUpstreamRejection = {
+    ...rejection,
+    at: new Date().toISOString(),
+  }
+}
+
+/** Clear the upstream-rejection sidecar. Called from each create-*.ts on
+ *  successful upstream response, and via signOut. */
+export function clearLastUpstreamRejection(): void {
+  state.lastUpstreamRejection = undefined
 }
 
 /** When the models cache was last populated, in epoch ms. `null`
