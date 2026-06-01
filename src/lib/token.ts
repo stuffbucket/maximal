@@ -3,13 +3,13 @@ import consola from "consola"
 import { setTimeout as delay } from "node:timers/promises"
 
 import { PATHS } from "~/lib/paths"
-import { getCopilotToken } from "~/services/github/get-copilot-token"
+import { getCopilotToken as defaultGetCopilotToken } from "~/services/github/get-copilot-token"
 import { getCopilotUsage } from "~/services/github/get-copilot-usage"
 import { getDeviceCode } from "~/services/github/get-device-code"
 import { getGitHubUser } from "~/services/github/get-user"
 import { pollAccessToken } from "~/services/github/poll-access-token"
 
-import { markAuthFatalAndSignOut } from "./auth-controller"
+import { markAuthFatalAndSignOut as defaultMarkAuthFatalAndSignOut } from "./auth-controller"
 import { CopilotAuthFatalError, HTTPError } from "./error"
 import {
   inferTokenType,
@@ -19,6 +19,38 @@ import {
 } from "./github-token-store"
 import { isHeadless, openUrl } from "./open-url"
 import { setCopilotToken, state } from "./state"
+
+// Dependency-injection shim for tests, mirroring the pattern in
+// `auth-controller.ts`. Process-wide `mock.module` for these symbols
+// leaks across test files (Bun's module registry persists for the
+// duration of `bun test`); the DI shim keeps the registry untouched
+// while still letting `tests/token-auth-fatal.test.ts` observe how
+// the refresh loop reacts to CopilotAuthFatalError. Production
+// callers see the real implementations.
+let getCopilotToken: typeof defaultGetCopilotToken = defaultGetCopilotToken
+let markAuthFatalAndSignOut: typeof defaultMarkAuthFatalAndSignOut =
+  defaultMarkAuthFatalAndSignOut
+
+export interface TokenDepsTestOverrides {
+  getCopilotToken?: typeof defaultGetCopilotToken
+  markAuthFatalAndSignOut?: typeof defaultMarkAuthFatalAndSignOut
+}
+
+export function __setTokenDepsForTests(
+  overrides: TokenDepsTestOverrides,
+): void {
+  if (overrides.getCopilotToken !== undefined) {
+    getCopilotToken = overrides.getCopilotToken
+  }
+  if (overrides.markAuthFatalAndSignOut !== undefined) {
+    markAuthFatalAndSignOut = overrides.markAuthFatalAndSignOut
+  }
+}
+
+export function __resetTokenDepsForTests(): void {
+  getCopilotToken = defaultGetCopilotToken
+  markAuthFatalAndSignOut = defaultMarkAuthFatalAndSignOut
+}
 
 let copilotRefreshLoopController: AbortController | null = null
 
