@@ -250,7 +250,7 @@ describe("createResponses", () => {
 
     let caught: unknown = null
     try {
-      await createResponses(responsesPayload, responsesOpts)
+      await createResponses({ ...responsesPayload }, { ...responsesOpts })
     } catch (err) {
       caught = err
     }
@@ -265,7 +265,7 @@ describe("createResponses", () => {
 
     let caught: unknown = null
     try {
-      await createResponses(responsesPayload, responsesOpts)
+      await createResponses({ ...responsesPayload }, { ...responsesOpts })
     } catch (err) {
       caught = err
     }
@@ -283,7 +283,7 @@ describe("createResponses", () => {
 
     let caught: unknown = null
     try {
-      await createResponses(responsesPayload, responsesOpts)
+      await createResponses({ ...responsesPayload }, { ...responsesOpts })
     } catch (err) {
       caught = err
     }
