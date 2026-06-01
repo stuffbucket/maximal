@@ -6,17 +6,54 @@
  * route-handler-side forwardError branch.
  */
 
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from "bun:test"
 
 import type { AnthropicMessagesPayload } from "~/lib/anthropic-types"
+import type { CopilotAuthFatalError as CopilotAuthFatalErrorType } from "~/lib/error"
 import type { ChatCompletionsPayload } from "~/services/copilot/create-chat-completions"
 import type { ResponsesPayload } from "~/services/copilot/create-responses"
 
-import { CopilotAuthFatalError, forwardError, HTTPError } from "~/lib/error"
-import { state } from "~/lib/state"
-import { createChatCompletions } from "~/services/copilot/create-chat-completions"
-import { createMessages } from "~/services/copilot/create-messages"
-import { createResponses } from "~/services/copilot/create-responses"
+// Stub fs.unlink at module load BEFORE importing forwardError so the
+// CopilotAuthFatalError test path doesn't reach the real fs.unlink on
+// PATHS.GITHUB_TOKEN_PATH (which would silently delete a signed-in
+// user's actual token on dev machines). The auth-controller's signOut
+// is ENOENT-tolerant, so the no-op satisfies the contract. afterAll
+// restores the real module — Bun's mock.module is process-wide.
+const realFsPromisesModule = await import("node:fs/promises")
+const unlinkCalls: Array<string> = []
+void mock.module("node:fs/promises", () => ({
+  ...realFsPromisesModule,
+  default: {
+    ...(realFsPromisesModule as { default: object }).default,
+    unlink: (p: string) => {
+      unlinkCalls.push(p)
+      return Promise.resolve()
+    },
+  },
+  unlink: (p: string) => {
+    unlinkCalls.push(p)
+    return Promise.resolve()
+  },
+}))
+afterAll(() => {
+  void mock.module("node:fs/promises", () => realFsPromisesModule)
+})
+
+const errorMod = await import("~/lib/error")
+const { CopilotAuthFatalError, forwardError, HTTPError } = errorMod
+const { state } = await import("~/lib/state")
+const chatMod = await import("~/services/copilot/create-chat-completions")
+const { createChatCompletions } = chatMod
+const { createMessages } = await import("~/services/copilot/create-messages")
+const { createResponses } = await import("~/services/copilot/create-responses")
 
 const originalFetch = globalThis.fetch
 const snapshot = {
@@ -142,7 +179,7 @@ describe("createMessages", () => {
     }
 
     expect(caught).toBeInstanceOf(CopilotAuthFatalError)
-    const fatal = caught as CopilotAuthFatalError
+    const fatal = caught as CopilotAuthFatalErrorType
     expect(fatal.status).toBe(403)
     expect(fatal.remediationUrl).toBe("https://github.com/site/terms")
     expect(state.lastUpstreamRejection).toBeUndefined()
@@ -204,7 +241,7 @@ describe("createChatCompletions", () => {
     }
 
     expect(caught).toBeInstanceOf(CopilotAuthFatalError)
-    expect((caught as CopilotAuthFatalError).status).toBe(403)
+    expect((caught as CopilotAuthFatalErrorType).status).toBe(403)
     expect(state.lastUpstreamRejection).toBeUndefined()
   })
 
@@ -259,7 +296,7 @@ describe("createResponses", () => {
     }
 
     expect(caught).toBeInstanceOf(CopilotAuthFatalError)
-    expect((caught as CopilotAuthFatalError).status).toBe(403)
+    expect((caught as CopilotAuthFatalErrorType).status).toBe(403)
     expect(state.lastUpstreamRejection).toBeUndefined()
   })
 
