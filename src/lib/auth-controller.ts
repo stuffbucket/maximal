@@ -47,7 +47,7 @@ import {
 } from "./github-token-store"
 import { PATHS } from "./paths"
 import { registerProcessCleanup } from "./process-cleanup"
-import { state } from "./state"
+import { clearLastUpstreamRejection, state } from "./state"
 import { setupCopilotToken } from "./token"
 
 // Dependency-injection shim for tests. Process-wide `mock.module` for
@@ -130,6 +130,25 @@ function isFlowExpired(flow: ActiveFlow, nowMs: number = Date.now()): boolean {
 }
 
 export function getAuthStatus(): AuthStatus {
+  // The upstream-rejection sidecar can ride along on any state — it's
+  // attached to the most recent completion attempt, not to whether a
+  // token is currently present. signOut() and a fresh sign-in both
+  // clear it.
+  const rejection = state.lastUpstreamRejection
+  const rejectionPayload =
+    rejection ?
+      {
+        last_upstream_rejection: {
+          message: rejection.message,
+          status: rejection.status,
+          at: rejection.at,
+          ...(rejection.remediationUrl ?
+            { remediation_url: rejection.remediationUrl }
+          : {}),
+        },
+      }
+    : {}
+
   if (state.githubToken) {
     // On device-flow completion we record the login on controllerState.
     // On cold boot with a stored token, logUser() in src/lib/token.ts
@@ -139,6 +158,7 @@ export function getAuthStatus(): AuthStatus {
     return {
       state: "authenticated",
       ...(login ? { account_login: login } : {}),
+      ...rejectionPayload,
     }
   }
 
@@ -148,18 +168,19 @@ export function getAuthStatus(): AuthStatus {
       state: "error",
       error: err.message,
       ...(err.remediationUrl ? { remediation_url: err.remediationUrl } : {}),
+      ...rejectionPayload,
     }
   }
 
   const flow = controllerState.flow
   if (!flow) {
-    return { state: "unauthenticated" }
+    return { state: "unauthenticated", ...rejectionPayload }
   }
 
   if (isFlowExpired(flow)) {
     // Stale flow that the poller hasn't cleared yet (e.g. terminal
     // path lost a race). Treat as unauthenticated for reporting.
-    return { state: "unauthenticated" }
+    return { state: "unauthenticated", ...rejectionPayload }
   }
 
   return {
@@ -167,6 +188,7 @@ export function getAuthStatus(): AuthStatus {
     user_code: flow.deviceCode.user_code,
     verification_uri: flow.deviceCode.verification_uri,
     expires_at: new Date(flow.expiresAt).toISOString(),
+    ...rejectionPayload,
   }
 }
 
@@ -287,6 +309,10 @@ export async function signOut(): Promise<void> {
   state.githubToken = undefined
   state.copilotToken = undefined
   state.userName = undefined
+  // A signed-out session has no upstream activity to surface a banner
+  // about. Clear here so the sidecar doesn't outlive the token that
+  // produced it.
+  clearLastUpstreamRejection()
 
   // Delete the on-disk token. Tolerant of "already gone".
   try {

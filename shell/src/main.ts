@@ -437,6 +437,42 @@ function renderRemediationLink(url: string | undefined): void {
   wrapper.hidden = false;
 }
 
+/**
+ * Render the upstream-rejection banner inside the authenticated card.
+ * Shows the upstream message and (when present) a labelled remediation
+ * link. Hidden entirely when `rejection` is undefined — the sidecar
+ * clears on the next successful completion, so the polling cycle
+ * naturally drives the banner away once the user is back to a healthy
+ * state.
+ */
+function renderUpstreamRejection(
+  rejection: AuthStatus["last_upstream_rejection"],
+): void {
+  const wrapper = accountSlot("upstream_rejection");
+  if (!wrapper) return;
+  if (!rejection) {
+    wrapper.hidden = true;
+    return;
+  }
+  const messageEl = accountSlot("upstream_rejection_message");
+  if (messageEl) messageEl.textContent = rejection.message;
+
+  const linkWrap = accountSlot("upstream_rejection_link_wrap");
+  const link = accountSlot("upstream_rejection_link");
+  if (link instanceof HTMLAnchorElement && linkWrap) {
+    if (rejection.remediation_url) {
+      link.href = rejection.remediation_url;
+      link.textContent = labelForRemediationUrl(rejection.remediation_url);
+      linkWrap.hidden = false;
+    } else {
+      link.removeAttribute("href");
+      link.textContent = "";
+      linkWrap.hidden = true;
+    }
+  }
+  wrapper.hidden = false;
+}
+
 function labelForRemediationUrl(url: string): string {
   // Most GHCP rejection bodies point at one of a few well-known
   // GitHub pages. Map them to verbs the user will recognize; fall
@@ -478,6 +514,7 @@ function renderAccount(status: AuthStatus): void {
     const login = status.account_login ?? "(unknown)";
     setAccountField("account_login", login);
     renderAccountAvatar(login);
+    renderUpstreamRejection(status.last_upstream_rejection);
   } else if (active === "error") {
     setAccountField("error", status.error ?? "Unknown error.");
     renderRemediationLink(status.remediation_url);

@@ -53,6 +53,18 @@ export interface AuthStatus {
    *  401/403 body (TOS acceptance, Copilot settings). The UI renders
    *  it as a clickable link below the error message. */
   remediation_url?: string
+  /** Last non-fatal upstream rejection from a completion endpoint
+   *  (quota exhausted, model not on plan, transient upstream error).
+   *  Distinct from `error`/`remediation_url` (which describe the
+   *  GitHub-token state itself) — this rides along on any state and
+   *  clears on the next successful completion. The UI renders it as
+   *  a banner without changing the authenticated indicator. */
+  last_upstream_rejection?: {
+    message: string
+    status: number
+    at: string
+    remediation_url?: string
+  }
 }
 
 interface AuthSignOutResponse {

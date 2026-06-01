@@ -10,9 +10,14 @@ import {
   prepareForCompact,
   prepareInteractionHeaders,
 } from "~/lib/api-config"
+import { isAuthFatal, parseCopilotErrorBody } from "~/lib/copilot-error-parser"
 import { logCopilotRateLimits } from "~/lib/copilot-rate-limit"
-import { HTTPError } from "~/lib/error"
-import { state } from "~/lib/state"
+import { CopilotAuthFatalError, HTTPError } from "~/lib/error"
+import {
+  clearLastUpstreamRejection,
+  setLastUpstreamRejection,
+  state,
+} from "~/lib/state"
 
 export interface ResponsesPayload {
   model: string
@@ -409,8 +414,24 @@ export const createResponses = async (
 
   if (!response.ok) {
     consola.error("Failed to create responses", response)
+    const body = await response.clone().text()
+    const parsed = parseCopilotErrorBody(body)
+    if (isAuthFatal(response.status, parsed)) {
+      throw new CopilotAuthFatalError(
+        parsed.message,
+        response.status,
+        parsed.remediationUrl,
+      )
+    }
+    setLastUpstreamRejection({
+      message: parsed.message,
+      remediationUrl: parsed.remediationUrl,
+      status: response.status,
+    })
     throw new HTTPError("Failed to create responses", response)
   }
+
+  clearLastUpstreamRejection()
 
   if (payload.stream) {
     return events(response)

@@ -158,6 +158,61 @@ impl Drop for Sidecar {
     }
 }
 
+/// Snapshot of the last non-fatal upstream rejection (quota exhausted,
+/// model not on plan, transient upstream error). Pulled from the
+/// sidecar's `/settings/api/auth/github/status` endpoint and used to
+/// drive the ATTENTION tray icon and a one-shot OS notification on
+/// rejection-state entry.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RejectionSnapshot {
+    message: String,
+    status: u16,
+    at: String,
+    remediation_url: Option<String>,
+}
+
+/// Tracks the most recent rejection snapshot the rejection poller has
+/// observed. None = no recent non-fatal rejection (healthy). Wrapped
+/// in Mutex because both the polling task and tray-refresh path read it.
+struct LastRejection(Mutex<Option<RejectionSnapshot>>);
+
+impl LastRejection {
+    fn new() -> Self {
+        Self(Mutex::new(None))
+    }
+
+    fn get(&self) -> Option<RejectionSnapshot> {
+        self.0.lock().expect("rejection mutex poisoned").clone()
+    }
+
+    /// Returns true if the state transitioned from None → Some. Callers
+    /// use that signal to fire the one-shot OS notification.
+    fn set(&self, next: Option<RejectionSnapshot>) -> RejectionTransition {
+        let mut guard = self.0.lock().expect("rejection mutex poisoned");
+        let prev = guard.clone();
+        if prev == next {
+            return RejectionTransition::Unchanged;
+        }
+        *guard = next.clone();
+        match (prev, next) {
+            (None, Some(_)) => RejectionTransition::Entered,
+            (Some(_), None) => RejectionTransition::Cleared,
+            _ => RejectionTransition::Changed,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RejectionTransition {
+    Unchanged,
+    /// None → Some: notification fires here.
+    Entered,
+    /// Some → None: tray icon restores to NORMAL.
+    Cleared,
+    /// Some → Some(different): tray stays in ATTENTION, no re-notify.
+    Changed,
+}
+
 /// Tracks the current SidecarState behind a Mutex so the polling task
 /// (Tokio) and the menu-event callback (main thread) can both touch it.
 struct AppStatus(Mutex<SidecarState>);
@@ -372,10 +427,12 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(Sidecar::new())
         .manage(AppStatus::new())
         .manage(ShellApiKey::new())
         .manage(SetupPromptShown::new())
+        .manage(LastRejection::new())
         .invoke_handler(tauri::generate_handler![
             open_settings_at,
             open_dashboard,
@@ -697,6 +754,11 @@ async fn poll_sidecar_status(app: AppHandle) {
     // Phase 2: slow poll. 5s cadence is plenty to catch the user
     // signing in via Settings — the device-code flow takes 30+ seconds
     // end-to-end, so the tray icon updates well before they look at it.
+    // The same loop also fetches the auth-status sidecar to drive the
+    // upstream-rejection tray badge + OS notification.
+    let auth_status_url = format!(
+        "http://127.0.0.1:{SIDECAR_PORT}/settings/api/auth/github/status",
+    );
     loop {
         tokio::time::sleep(Duration::from_secs(5)).await;
         // Stop polling if we've already concluded the sidecar is gone.
@@ -707,9 +769,102 @@ async fn poll_sidecar_status(app: AppHandle) {
         if let Some(status) = fetch_setup_status(&client, &url).await {
             apply_setup_status(&app, &status);
         }
+        if let Some(rejection) =
+            fetch_rejection(&app, &client, &auth_status_url).await
+        {
+            apply_rejection(&app, rejection);
+        }
         // A single failed poll during phase 2 is ignored — the proxy
         // might be momentarily busy. We only flip to Failed via the
         // sidecar's Terminated event.
+    }
+}
+
+/// One-shot fetch of `/settings/api/auth/github/status` against the
+/// local sidecar, scoped to the rejection sidecar. Returns
+/// `Some(Option<...>)` to distinguish "endpoint replied" (the
+/// sidecar may or may not have a rejection) from "endpoint unreachable"
+/// (silent skip — don't churn the tray icon on a transient).
+async fn fetch_rejection(
+    app: &AppHandle,
+    client: &reqwest::Client,
+    url: &str,
+) -> Option<Option<RejectionSnapshot>> {
+    let key = app.state::<ShellApiKey>().value().to_owned();
+    let resp = client
+        .get(url)
+        .header("x-api-key", key)
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let payload: serde_json::Value = resp.json().await.ok()?;
+    Some(parse_rejection_from_status(&payload))
+}
+
+fn parse_rejection_from_status(
+    payload: &serde_json::Value,
+) -> Option<RejectionSnapshot> {
+    let obj = payload.get("last_upstream_rejection")?.as_object()?;
+    let message = obj.get("message")?.as_str()?.to_owned();
+    let status = obj.get("status")?.as_u64()? as u16;
+    let at = obj.get("at")?.as_str()?.to_owned();
+    let remediation_url = obj
+        .get("remediation_url")
+        .and_then(|v| v.as_str())
+        .map(str::to_owned);
+    Some(RejectionSnapshot {
+        message,
+        status,
+        at,
+        remediation_url,
+    })
+}
+
+/// Applies a fetched rejection snapshot to the LastRejection managed
+/// state. On state-entering transitions, fires a single OS notification.
+/// On any change (entered, cleared, or content change), refreshes the
+/// tray so the icon and tooltip reflect the new condition.
+fn apply_rejection(app: &AppHandle, next: Option<RejectionSnapshot>) {
+    let entered_message =
+        next.as_ref().map(|r| r.message.clone()).unwrap_or_default();
+    let transition = app.state::<LastRejection>().set(next);
+    match transition {
+        RejectionTransition::Unchanged => return,
+        RejectionTransition::Entered => {
+            fire_rejection_notification(app, &entered_message);
+        }
+        RejectionTransition::Cleared | RejectionTransition::Changed => {}
+    }
+    let current_state = app.state::<AppStatus>().get();
+    if let Err(err) = refresh_tray(app, current_state) {
+        eprintln!("[shell] tray refresh after rejection change failed: {err}");
+    }
+}
+
+/// One-shot banner notification on rejection-state entry. Cross-platform
+/// via tauri-plugin-notification (macOS NSUserNotification, Windows toast,
+/// Linux libnotify). Best-effort: a permission denial or backend failure
+/// must not block the poll loop. macOS requires a signed/bundled app for
+/// the first-call permission prompt to succeed — in dev (`cargo run`)
+/// the notification may silently no-op, which is expected.
+fn fire_rejection_notification(app: &AppHandle, message: &str) {
+    use tauri_plugin_notification::NotificationExt;
+    let body = if message.is_empty() {
+        "An upstream Copilot request was rejected. Open Settings for details.".to_owned()
+    } else {
+        format!("{message} — open Settings for details.")
+    };
+    if let Err(err) = app
+        .notification()
+        .builder()
+        .title("Maximal")
+        .body(body)
+        .show()
+    {
+        eprintln!("[shell] rejection notification failed: {err}");
     }
 }
 
@@ -759,7 +914,7 @@ fn apply_state(app: &AppHandle, next: SidecarState) {
 
 fn install_tray(app: &AppHandle) -> tauri::Result<()> {
     let menu = build_menu(app, SidecarState::Starting)?;
-    let icon = icon_for(SidecarState::Starting)?;
+    let icon = icon_for(SidecarState::Starting, false)?;
 
     TrayIconBuilder::with_id(TRAY_ID)
         .menu(&menu)
@@ -786,10 +941,11 @@ fn refresh_tray(app: &AppHandle, state: SidecarState) -> tauri::Result<()> {
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
         return Ok(());
     };
+    let rejection = app.state::<LastRejection>().get();
     let menu = build_menu(app, state)?;
     tray.set_menu(Some(menu))?;
-    tray.set_icon(Some(icon_for(state)?))?;
-    tray.set_tooltip(Some(tooltip_for(state)))?;
+    tray.set_icon(Some(icon_for(state, rejection.is_some())?))?;
+    tray.set_tooltip(Some(tooltip_for(state, rejection.as_ref())))?;
     Ok(())
 }
 
@@ -829,11 +985,25 @@ fn set_dock_icon() {
     }
 }
 
-fn icon_for(state: SidecarState) -> tauri::Result<Image<'static>> {
+fn icon_for(
+    state: SidecarState,
+    has_rejection: bool,
+) -> tauri::Result<Image<'static>> {
+    // A pending upstream rejection while authenticated promotes the
+    // icon to ATTENTION so the user notices without opening Settings.
+    // Other states already drive the icon themselves (Starting,
+    // RunningUnauthenticated also use ATTENTION, etc.); the rejection
+    // override only changes the RunningAuthenticated case.
     let bytes = match state {
         SidecarState::Starting => TRAY_ICON_STARTING,
         SidecarState::RunningUnauthenticated => TRAY_ICON_ATTENTION,
-        SidecarState::RunningAuthenticated => TRAY_ICON_NORMAL,
+        SidecarState::RunningAuthenticated => {
+            if has_rejection {
+                TRAY_ICON_ATTENTION
+            } else {
+                TRAY_ICON_NORMAL
+            }
+        }
         // Failed/Stopped reuse the "starting" dimmed look; the menu
         // text makes the actual problem clear.
         SidecarState::Failed | SidecarState::Stopped => TRAY_ICON_STARTING,
@@ -841,13 +1011,27 @@ fn icon_for(state: SidecarState) -> tauri::Result<Image<'static>> {
     Ok(Image::from_bytes(bytes)?.to_owned())
 }
 
-fn tooltip_for(state: SidecarState) -> &'static str {
+fn tooltip_for(
+    state: SidecarState,
+    rejection: Option<&RejectionSnapshot>,
+) -> String {
+    // Rejection wins over the bare "maximal" idle tooltip when the
+    // user is authenticated — the tray badge is meaningless without
+    // a hint as to why. Other states keep their own tooltip; the
+    // rejection sidecar isn't actionable while signed out anyway.
+    if matches!(state, SidecarState::RunningAuthenticated) {
+        if let Some(r) = rejection {
+            return format!("maximal — {}", r.message);
+        }
+    }
     match state {
-        SidecarState::Starting => "maximal — starting…",
-        SidecarState::RunningUnauthenticated => "maximal — sign in to GitHub",
-        SidecarState::RunningAuthenticated => "maximal",
-        SidecarState::Failed => "maximal — sidecar failed",
-        SidecarState::Stopped => "maximal — stopped",
+        SidecarState::Starting => "maximal — starting…".to_owned(),
+        SidecarState::RunningUnauthenticated => {
+            "maximal — sign in to GitHub".to_owned()
+        }
+        SidecarState::RunningAuthenticated => "maximal".to_owned(),
+        SidecarState::Failed => "maximal — sidecar failed".to_owned(),
+        SidecarState::Stopped => "maximal — stopped".to_owned(),
     }
 }
 

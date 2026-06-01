@@ -146,6 +146,31 @@
                   </p>
                 </div>
               </div>
+              <!-- Upstream-rejection banner. Hidden when no recent
+                   non-fatal rejection. Renders the GHCP message + an
+                   optional remediation link (quota / upgrade page). -->
+              <div
+                class="card--info upstream-rejection"
+                data-field="upstream_rejection"
+                role="status"
+                hidden
+              >
+                <p
+                  class="upstream-rejection__message"
+                  data-field="upstream_rejection_message"
+                ></p>
+                <p
+                  class="upstream-rejection__link-wrap"
+                  data-field="upstream_rejection_link_wrap"
+                  hidden
+                >
+                  <a
+                    data-field="upstream_rejection_link"
+                    target="_blank"
+                    rel="noopener"
+                  ></a>
+                </p>
+              </div>
               <div class="actions">
                 <button
                   type="button"
