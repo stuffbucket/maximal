@@ -2,9 +2,14 @@ import type { Model } from "~/services/copilot/get-models"
 
 import { state } from "~/lib/state"
 
-export const findEndpointModel = (sdkModelId: string): Model | undefined => {
-  const models = state.models?.data ?? []
+export const findEndpointModel = (sdkModelId: string): Model | undefined =>
+  findInModels(sdkModelId, state.models?.data ?? [])
 
+// Pure lookup used by findEndpointModel and directly testable without state.
+export const findInModels = (
+  sdkModelId: string,
+  models: Array<Model>,
+): Model | undefined => {
   const exactMatch = models.find((m) => m.id === sdkModelId)
   if (exactMatch) return exactMatch
 

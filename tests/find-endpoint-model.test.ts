@@ -1,7 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test"
+import { describe, expect, it } from "bun:test"
 
-import { findEndpointModel, normalizeSdkModelId } from "../src/lib/models"
-import { state } from "../src/lib/state"
+import { findInModels, normalizeSdkModelId } from "../src/lib/models"
+
+// findInModels is a pure function (no state), so tests are immune to the
+// mock.module contamination that messages-handler.test.ts applies to
+// ~/lib/models. findEndpointModel is a one-line wrapper around findInModels;
+// its state-reading path is exercised by route integration tests.
 
 const makeModel = (id: string, version: string, family: string) => ({
   capabilities: {
@@ -39,20 +43,10 @@ const CURRENT_MODELS = [
   ),
 ]
 
-const originalModels = state.models
-
-beforeEach(() => {
-  state.models = { object: "list", data: CURRENT_MODELS }
-})
-
-afterEach(() => {
-  state.models = originalModels
-})
-
-describe("findEndpointModel", () => {
+describe("findInModels", () => {
   describe("exact match", () => {
     it("returns the model when the SDK ID matches m.id exactly for a Claude model", () => {
-      const result = findEndpointModel("claude-sonnet-4-6-20260301")
+      const result = findInModels("claude-sonnet-4-6-20260301", CURRENT_MODELS)
       expect(result?.id).toBe("claude-sonnet-4-6-20260301")
     })
 
@@ -62,19 +56,12 @@ describe("findEndpointModel", () => {
     // returns undefined instead of the model.
     it("returns a non-Claude model via exact match only", () => {
       const gptModel = makeModel("gpt-5.4", "1", "gpt")
-      state.models = { object: "list", data: [gptModel] }
-      const result = findEndpointModel("gpt-5.4")
+      const result = findInModels("gpt-5.4", [gptModel])
       expect(result?.id).toBe("gpt-5.4")
     })
 
-    // Guards the state.models?.data optional chain. Without it, accessing
-    // .data on undefined throws; with it, the function returns undefined.
-    // Also kills the ArrayDeclaration mutant ([] → ["Stryker was here"])
-    // because iterating that fake array in the semantic fallback would
-    // call normalizeSdkModelId(undefined) and throw.
-    it("returns undefined without throwing when state.models is undefined", () => {
-      state.models = undefined
-      expect(findEndpointModel("claude-sonnet-4-6")).toBeUndefined()
+    it("returns undefined when models list is empty", () => {
+      expect(findInModels("claude-sonnet-4-6", [])).toBeUndefined()
     })
   })
 
@@ -84,32 +71,29 @@ describe("findEndpointModel", () => {
     // "claude-sonnet-4-6-20260301" so the lookup silently returned undefined
     // and the original model string was forwarded to Copilot → 400.
     it("resolves a dash-separated ID against m.version", () => {
-      const result = findEndpointModel("claude-sonnet-4-6")
+      const result = findInModels("claude-sonnet-4-6", CURRENT_MODELS)
       expect(result?.id).toBe("claude-sonnet-4-6-20260301")
     })
 
     it("resolves a dotted ID (claude-sonnet-4.6) against m.version", () => {
-      const result = findEndpointModel("claude-sonnet-4.6")
+      const result = findInModels("claude-sonnet-4.6", CURRENT_MODELS)
       expect(result?.id).toBe("claude-sonnet-4-6-20260301")
     })
 
     it("resolves an Anthropic date-suffixed SDK ID (claude-sonnet-4-6-20250514)", () => {
-      const result = findEndpointModel("claude-sonnet-4-6-20250514")
+      const result = findInModels("claude-sonnet-4-6-20250514", CURRENT_MODELS)
       expect(result?.id).toBe("claude-sonnet-4-6-20260301")
     })
 
     it("resolves old-style family-last IDs (claude-3-5-sonnet-20241022)", () => {
-      state.models = {
-        object: "list",
-        data: [
-          makeModel(
-            "claude-3-5-sonnet-20241022",
-            "claude-sonnet-3.5",
-            "claude-sonnet-3.5",
-          ),
-        ],
-      }
-      const result = findEndpointModel("claude-3-5-sonnet-20241022")
+      const models = [
+        makeModel(
+          "claude-3-5-sonnet-20241022",
+          "claude-sonnet-3.5",
+          "claude-sonnet-3.5",
+        ),
+      ]
+      const result = findInModels("claude-3-5-sonnet-20241022", models)
       expect(result?.id).toBe("claude-3-5-sonnet-20241022")
     })
   })
@@ -119,35 +103,25 @@ describe("findEndpointModel", () => {
     // semantic fallback normalizes both sides and compares {family, version}
     // tuples — no string format dependency.
     it("matches when m.id changes format but normalizes to the same tuple", () => {
-      state.models = {
-        object: "list",
-        data: [
-          // Hypothetical future format: longer suffix, different separator style.
-          makeModel(
-            "claude-sonnet-4-6-2026-03-01-preview",
-            "some-unrecognised-version-string",
-            "claude-sonnet-4.6",
-          ),
-        ],
-      }
+      const models = [
+        // Hypothetical future format: longer suffix, different separator style.
+        makeModel(
+          "claude-sonnet-4-6-2026-03-01-preview",
+          "some-unrecognised-version-string",
+          "claude-sonnet-4.6",
+        ),
+      ]
       // m.version won't match; semantic fallback normalizes m.capabilities.family
       // "claude-sonnet-4.6" → {family:"sonnet", version:"4.6"} and matches.
-      const result = findEndpointModel("claude-sonnet-4-6")
+      const result = findInModels("claude-sonnet-4-6", models)
       expect(result?.id).toBe("claude-sonnet-4-6-2026-03-01-preview")
     })
 
     it("matches via m.id normalization when version and family are unrecognised", () => {
-      state.models = {
-        object: "list",
-        data: [
-          makeModel(
-            "claude-haiku-4-5-20260301",
-            "unrecognised",
-            "unrecognised",
-          ),
-        ],
-      }
-      const result = findEndpointModel("claude-haiku-4-5")
+      const models = [
+        makeModel("claude-haiku-4-5-20260301", "unrecognised", "unrecognised"),
+      ]
+      const result = findInModels("claude-haiku-4-5", models)
       expect(result?.id).toBe("claude-haiku-4-5-20260301")
     })
 
@@ -166,8 +140,7 @@ describe("findEndpointModel", () => {
         "unrecognised",
         "claude-sonnet-4.6",
       )
-      state.models = { object: "list", data: [opaque, target] }
-      const result = findEndpointModel("claude-sonnet-4-6")
+      const result = findInModels("claude-sonnet-4-6", [opaque, target])
       expect(result?.id).toBe("claude-sonnet-4-6-20260301")
     })
 
@@ -187,24 +160,18 @@ describe("findEndpointModel", () => {
         "unrecognised",
         "claude-sonnet-4.6",
       )
-      state.models = { object: "list", data: [opusFirst, sonnet] }
-      const result = findEndpointModel("claude-sonnet-4-6")
+      const result = findInModels("claude-sonnet-4-6", [opusFirst, sonnet])
       expect(result?.id).toBe("claude-sonnet-4-6-20260301")
     })
   })
 
   describe("no match", () => {
     it("returns undefined for a non-Claude model ID not in the list", () => {
-      expect(findEndpointModel("gpt-5.4")).toBeUndefined()
+      expect(findInModels("gpt-5.4", CURRENT_MODELS)).toBeUndefined()
     })
 
     it("returns undefined when no model in the list matches", () => {
-      expect(findEndpointModel("claude-opus-99-0")).toBeUndefined()
-    })
-
-    it("returns undefined when models list is empty", () => {
-      state.models = { object: "list", data: [] }
-      expect(findEndpointModel("claude-sonnet-4-6")).toBeUndefined()
+      expect(findInModels("claude-opus-99-0", CURRENT_MODELS)).toBeUndefined()
     })
   })
 })
