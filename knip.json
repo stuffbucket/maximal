@@ -31,5 +31,8 @@
     "trufflehog",
     "tsc"
   ],
-  "ignoreExportsUsedInFile": true
+  "ignoreExportsUsedInFile": true,
+  "ignore": [
+    "src/lib/token.ts"
+  ]
 }

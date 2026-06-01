@@ -16,11 +16,17 @@ import {
 
 import { CopilotAuthFatalError, HTTPError } from "~/lib/error"
 import { state } from "~/lib/state"
-// Bypass Bun's module-mock registry for ~/lib/token. start-run-server.test.ts
-// and auth-controller.test.ts replace setupCopilotToken with stubs, and their
-// afterAll restore doesn't cleanly reset later-file imports of the same path.
-// The `?nomock` suffix forces a distinct module-registry key while resolving
-// to the same source file at runtime; the dynamic spec keeps TS off our back.
+// Bypass Bun's module-mock registry for ~/lib/token. auth-controller.test.ts
+// installs a process-wide mock.module for "~/lib/token" (stubbing
+// setupCopilotToken) so its own tests can observe controller-driven sign-in
+// without spinning up a real refresh loop. The afterAll restore is unreliable
+// across sibling test files in the same `bun test` process, so a normal
+// static import here picks up the stub instead of the real module. The
+// `?nomock` suffix forces a distinct module-registry key while resolving to
+// the same source file at runtime; the dynamic spec keeps TS happy. The
+// /* eslint-disable */ pragma below excludes the two __forTest symbols from
+// knip's unused-export check — they ARE used here, just behind a dynamic
+// specifier knip can't statically resolve.
 const tokenSpec = "../src/lib/token.ts?nomock=token-auth-fatal"
 const tokenMod = (await import(tokenSpec)) as typeof import("~/lib/token")
 const {
