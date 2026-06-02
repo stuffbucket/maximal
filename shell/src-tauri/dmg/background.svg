@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Maximal DMG background. 660×420 points = the Finder icon-view content
+  area set by installers.yml (Build + sign DMG → osascript layout).
+
+  Coordinates here MUST stay in sync with the AppleScript icon positions:
+    - Maximal.app icon  centered at (180, 210)
+    - Applications link  centered at (480, 210)
+  Finder overlays the real 128px icons + their labels at those points, so
+  nothing important is drawn under them — branding sits above (y<150),
+  the drag arrow in the gap between them, helper copy below (y>300).
+
+  Regenerate the raster the installer consumes with:
+    shell/src-tauri/dmg/build-background.sh
+-->
+<svg width="660" height="420" viewBox="0 0 660 420"
+     xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f7f4f1"/>
+      <stop offset="1" stop-color="#efe9e4"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Warm canvas -->
+  <rect width="660" height="420" fill="url(#bg)"/>
+  <!-- Thin brand hairline along the top -->
+  <rect x="0" y="0" width="660" height="3" fill="#c8334a"/>
+
+  <!-- Brand lockup, centered above the icons -->
+  <g transform="translate(258, 44)">
+    <!-- Mark: crimson rounded square with a Fraunces "m" -->
+    <rect x="0" y="0" width="40" height="40" rx="10" fill="#c8334a"/>
+    <text x="20" y="31" text-anchor="middle"
+          font-family="Fraunces, Georgia, serif" font-weight="600"
+          font-size="28" fill="#ffffff">m</text>
+    <!-- Wordmark -->
+    <text x="54" y="30" font-family="Fraunces, Georgia, serif"
+          font-weight="600" font-size="26" fill="#1a1413">Maximal</text>
+  </g>
+
+  <!-- Drag arrow in the gap between the two icon zones (icons span
+       x≈116–244 and x≈416–544; arrow lives in 244–416 at icon height). -->
+  <g transform="translate(0, 210)" stroke="#c8334a" fill="none">
+    <line x1="268" y1="0" x2="388" y2="0" stroke-width="4"
+          stroke-linecap="round"/>
+    <polyline points="372,-12 392,0 372,12" stroke-width="4"
+              stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <!-- Helper copy below the icon labels -->
+  <text x="330" y="372" text-anchor="middle"
+        font-family="Commissioner, 'Helvetica Neue', Arial, sans-serif"
+        font-size="15" fill="#6a6a6a">Drag Maximal onto the Applications folder to install</text>
+</svg>

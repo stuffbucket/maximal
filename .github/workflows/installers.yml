@@ -254,9 +254,12 @@ jobs:
         run: |
           set -euo pipefail
           STAGE="$(mktemp -d)/dmg-stage"
-          mkdir -p "$STAGE"
+          mkdir -p "$STAGE/.background"
           cp -R shell/src-tauri/target/release/bundle/macos/Maximal.app "$STAGE/"
           ln -s /Applications "$STAGE/Applications"
+          # Branded Finder background (HiDPI TIFF). Regenerate from the
+          # SVG with shell/src-tauri/dmg/build-background.sh.
+          cp shell/src-tauri/dmg/background.tiff "$STAGE/.background/background.tiff"
           echo "STAGE=$STAGE" >> "$GITHUB_ENV"
 
       - name: Build + sign DMG
@@ -265,11 +268,53 @@ jobs:
         run: |
           set -euo pipefail
           OUT="dist-release/${DMG}"
+
+          # Build a read-WRITE image first so Finder can lay it out
+          # (window size, icon positions, background), then convert to a
+          # compressed read-only DMG. A plain `hdiutil create -format
+          # UDZO` can't be styled — it ships an unproportioned default
+          # window with icons placed wherever Finder feels like.
+          RW="$(mktemp -d)/rw.dmg"
           hdiutil create \
             -volname "Maximal" \
             -srcfolder "$STAGE" \
-            -ov -format UDZO \
-            "$OUT"
+            -fs HFS+ -format UDRW -ov \
+            "$RW"
+
+          DEV="$(hdiutil attach -readwrite -noverify -noautoopen "$RW" \
+            | grep -E '^/dev/' | head -1 | awk '{print $1}')"
+          # Let the volume settle before scripting Finder against it.
+          sleep 2
+
+          # Finder layout — coordinates mirror shell/src-tauri/dmg/
+          # background.svg. Best-effort: AppleScript needs a GUI (window
+          # server) session on the runner. If the runner is headless the
+          # layout no-ops and we ship a functional, unstyled DMG rather
+          # than failing the release.
+          osascript <<'APPLESCRIPT' || echo "::warning::DMG Finder layout failed (headless runner?) — shipping unstyled DMG"
+          tell application "Finder"
+            tell disk "Maximal"
+              open
+              set current view of container window to icon view
+              set toolbar visible of container window to false
+              set statusbar visible of container window to false
+              set the bounds of container window to {400, 120, 1060, 540}
+              set theViewOptions to the icon view options of container window
+              set arrangement of theViewOptions to not arranged
+              set icon size of theViewOptions to 128
+              set background picture of theViewOptions to file ".background:background.tiff"
+              set position of item "Maximal.app" of container window to {180, 210}
+              set position of item "Applications" of container window to {480, 210}
+              update without registering applications
+              delay 1
+              close
+            end tell
+          end tell
+          APPLESCRIPT
+
+          sync
+          hdiutil detach "$DEV"
+          hdiutil convert "$RW" -format UDZO -imagekey zlib-level=9 -ov -o "$OUT"
           codesign --force --sign "$SIGN_IDENTITY" "$OUT"
           codesign --verify --verbose=2 "$OUT"
 
