@@ -30,8 +30,8 @@ bun run analyze      # tails .claude/logs/checks.jsonl into a local Ollama model
 # Mutation testing (manual only — not wired into check:deep)
 bun run mutate       # Stryker; configure module under test in stryker.conf.*
 
-# Release tooling
-bun run release      # cut a release (publishes artifacts)
+# Release: do NOT use `bun run release` (see "Releasing" below).
+# Releases are tag-driven via CI, not `bun publish`.
 
 # Tauri app (menu-bar shell wrapping the proxy as a sidecar on :4142)
 bun run app:setup    # one-time: install shell deps + force-build sidecar binary
@@ -134,6 +134,36 @@ See also: `docs/codegen-feedback-loops-practices.md` → Dispatch and review loo
 ### Token counting
 
 `/v1/messages/count_tokens`: when `anthropicApiKey` is configured, forwards Claude model requests to Anthropic's free `/v1/messages/count_tokens` endpoint for exact counts. Otherwise falls back to GPT `o200k_base` tokenizer with 1.15x multiplier (`src/lib/tokenizer.ts`).
+
+## Releasing
+
+Releases are **tag-driven through CI**, not `bun publish`. Pushing a
+`v*` tag fires `.github/workflows/release.yml`, which builds the
+cross-compiled binaries, generates changelog/release notes, bumps the
+Homebrew formula, assembles installers, and redeploys the site. CI
+never runs `bun publish` — there is no npm publish step.
+
+**Do not run `bun run release`.** Its `bumpp && bun publish` body tries
+to push the package to the npm registry, which (a) isn't how this repo
+ships and (b) will fail locally with `missing authentication (run bunx
+npm login)`. That auth error is the tell that you're on the wrong path.
+
+The correct sequence, every time:
+
+1. Branch from `main`: `git checkout -b release/vX.Y.Z`.
+2. Bump the one `version` line in `package.json` (nothing else — a
+   release commit is *only* the version bump; see the `release: vX.Y.Z`
+   commits in history).
+3. Commit as `release: vX.Y.Z`, push, open a PR, merge it. The version
+   bump landing on `main` via PR is the gate — review happens there.
+4. After merge, pull `main` and push the tag: `git tag vX.Y.Z && git
+   push origin vX.Y.Z`. The tag must point at the merged bump commit so
+   `package.json`'s version matches the tag. Pushing the tag is what
+   actually cuts the release.
+
+A code fix is only "released" once a tag past its merge commit exists —
+landing a fix on `main` does not ship it. If a user on a tagged build
+hits a bug you've already fixed on `main`, they need the next tag.
 
 ## Bun version policy
 
