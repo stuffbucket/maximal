@@ -700,4 +700,70 @@ describe("prepareMessagesApiPayload", () => {
     expect(payload.thinking).toBeUndefined()
     expect(payload.output_config).toBeUndefined()
   })
+
+  test("drops top_p when temperature and top_p are both present on a non-adaptive model", () => {
+    // Reproduces the Claude Code <= 2.1.159 400: clients send both temperature
+    // and top_p, which api.anthropic.com accepts but Copilot's Bedrock-backed
+    // Claude rejects. sonnet-4.5 / opus-4.5 have adaptive_thinking: false, so the
+    // capability-gated strip never fired and both params reached Copilot.
+    const payload: AnthropicMessagesPayload = {
+      model: "claude-sonnet-4.5",
+      max_tokens: 64,
+      temperature: 1,
+      top_p: 0.95,
+      messages: [{ role: "user", content: "hello" }],
+    }
+
+    prepareMessagesApiPayload(payload, {
+      capabilities: {
+        supports: {
+          adaptive_thinking: false,
+        },
+      },
+    } as never)
+
+    // temperature kept, top_p dropped — never both together.
+    expect(payload.temperature).toBe(1)
+    expect(payload.top_p).toBeUndefined()
+  })
+
+  test("keeps temperature alone untouched on a non-adaptive model", () => {
+    const payload: AnthropicMessagesPayload = {
+      model: "claude-sonnet-4.5",
+      max_tokens: 64,
+      temperature: 0.7,
+      messages: [{ role: "user", content: "hello" }],
+    }
+
+    prepareMessagesApiPayload(payload, {
+      capabilities: {
+        supports: {
+          adaptive_thinking: false,
+        },
+      },
+    } as never)
+
+    expect(payload.temperature).toBe(0.7)
+    expect(payload.top_p).toBeUndefined()
+  })
+
+  test("keeps top_p alone untouched on a non-adaptive model", () => {
+    const payload: AnthropicMessagesPayload = {
+      model: "claude-sonnet-4.5",
+      max_tokens: 64,
+      top_p: 0.9,
+      messages: [{ role: "user", content: "hello" }],
+    }
+
+    prepareMessagesApiPayload(payload, {
+      capabilities: {
+        supports: {
+          adaptive_thinking: false,
+        },
+      },
+    } as never)
+
+    expect(payload.top_p).toBe(0.9)
+    expect(payload.temperature).toBeUndefined()
+  })
 })
