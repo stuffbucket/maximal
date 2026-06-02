@@ -482,19 +482,46 @@ const hasToolRef = (block: AnthropicToolResultBlock) => {
   )
 }
 
-// Strip cache_control from system content blocks as the
-// Copilot Messages API does not support them (rejects extra fields like scope).
-// commit by nicktogo
+const stripCacheControlScope = (obj: unknown): void => {
+  if (!obj || typeof obj !== "object") return
+  const record = obj as Record<string, unknown>
+  const cc = record.cache_control
+  if (cc && typeof cc === "object") {
+    const { scope: _scope, ...rest } = cc as Record<string, unknown>
+    record.cache_control = rest
+  }
+}
+
+// Strip scope from cache_control wherever it appears (system blocks, tools,
+// message content) — Copilot's Messages API rejects the scope field.
+// Also strips cache_control entirely from inside tool_result.content[] items,
+// where the API requires it to be on the tool_result block itself.
+// Strips eager_input_streaming from tool definitions — injected by some
+// editors (e.g. Zed) but rejected by Copilot's backend.
 const stripCacheControl = (payload: AnthropicMessagesPayload): void => {
   if (Array.isArray(payload.system)) {
     for (const block of payload.system) {
-      const systemBlock = block as AnthropicTextBlock & {
-        cache_control?: Record<string, unknown>
-      }
-      const cacheControl = systemBlock.cache_control
-      if (cacheControl && typeof cacheControl === "object") {
-        const { scope, ...rest } = cacheControl
-        systemBlock.cache_control = rest
+      stripCacheControlScope(block)
+    }
+  }
+
+  if (payload.tools) {
+    for (const tool of payload.tools) {
+      stripCacheControlScope(tool)
+      delete tool.eager_input_streaming
+    }
+  }
+
+  for (const msg of payload.messages) {
+    if (!Array.isArray(msg.content)) continue
+    for (const block of msg.content) {
+      if (block.type !== "tool_result" || !Array.isArray(block.content))
+        continue
+      for (const inner of block.content) {
+        const b = inner as typeof inner & { cache_control?: unknown }
+        if ("cache_control" in b) {
+          delete b.cache_control
+        }
       }
     }
   }
@@ -533,6 +560,13 @@ export const prepareMessagesApiPayload = (
   // Using tool_choice: {"type": "any"} or tool_choice: {"type": "tool", "name": "..."} will result in an error because these options force tool use, which is incompatible with extended thinking.
   const toolChoice = payload.tool_choice
   const disableThink = toolChoice?.type === "any" || toolChoice?.type === "tool"
+
+  // claude-opus-4.7+ rejects temperature/top_p/top_k with a 400.
+  if (selectedModel?.capabilities.supports.adaptive_thinking) {
+    delete payload.temperature
+    delete payload.top_p
+    delete payload.top_k
+  }
 
   if (selectedModel?.capabilities.supports.adaptive_thinking && !disableThink) {
     payload.thinking = {
