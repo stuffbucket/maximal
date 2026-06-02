@@ -197,4 +197,19 @@ export default defineConfig(async ({ command }) => ({
       ignored: ["**/src-tauri/**"],
     },
   },
+
+  // Multi-page build: the settings UI (index.html) plus the pre-boot
+  // splash (splash.html). The splash is loaded by the Tauri shell via
+  // WebviewUrl::App("splash.html") before the sidecar is up, so it must
+  // be emitted as its own entry at the dist root. It is self-contained
+  // (no asset imports), so the "/settings/" base never rewrites anything
+  // inside it.
+  build: {
+    rollupOptions: {
+      input: {
+        main: "index.html",
+        splash: "splash.html",
+      },
+    },
+  },
 }));

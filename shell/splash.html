@@ -1,0 +1,208 @@
+<!doctype html>
+<!--
+  Pre-boot splash. Shown the instant the tray app launches, before the
+  sidecar proxy is reachable — so clicking the .app gives immediate,
+  visible feedback (the app is otherwise a menu-bar-only utility with no
+  window, which reads as "nothing happened").
+
+  Deliberately SELF-CONTAINED: all CSS/JS is inline and there are no
+  external asset references. The shell bundle is served by the sidecar
+  under base "/settings/" (see shell/vite.config.ts), but this window is
+  loaded via WebviewUrl::App("splash.html") through Tauri's asset
+  protocol before the sidecar exists, so it cannot depend on any
+  bundled/served asset resolving. Google Fonts are linked but render is
+  never blocked on them (font-display: swap → system fallbacks show
+  instantly, matching the --font-* stacks in shell/src/tokens.css).
+
+  Raw color/spacing values are inlined here rather than referencing
+  tokens.css for the same reason (no reliable stylesheet link at boot).
+  They MIRROR shell/src/tokens.css — keep them in sync. tokens.css
+  remains the source of truth for every other surface.
+
+  Lifecycle: Rust (shell/src-tauri/src/lib.rs) creates this window on
+  launch, emits `splash:ready` when the sidecar goes healthy, then closes
+  it shortly after. The script swaps copy + fades on that event, but the
+  window is closed by Rust regardless, so a missed event never strands it.
+-->
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Maximal</title>
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300..900&family=Commissioner:wght@200..900&display=swap"
+    />
+    <style>
+      /* Values mirror shell/src/tokens.css (the source of truth). */
+      :root {
+        --font-display: "Fraunces", Georgia, "Times New Roman", serif;
+        --font-body: "Commissioner", "Segoe UI", Helvetica, Arial, sans-serif;
+        --brand: #c8334a;
+        --brand-fg: #ffffff;
+        --surface-card: #161616;
+        --text-strong: #f5f5f5;
+        --text-muted: #8a8a8a;
+        --border-subtle: #2a2a2a;
+        --elevation-modal: 0 8px 24px rgb(0 0 0 / 0.18);
+      }
+      @media (prefers-color-scheme: light) {
+        :root {
+          --surface-card: #ffffff;
+          --text-strong: #0a0a0a;
+          --text-muted: #6a6a6a;
+          --border-subtle: #e5e5e5;
+        }
+      }
+
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: transparent;
+        /* Don't let a stray drag move/select; this is a passive splash. */
+        user-select: none;
+        cursor: default;
+        overflow: hidden;
+      }
+
+      .splash {
+        box-sizing: border-box;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 16px;
+        padding: 32px;
+        background: var(--surface-card);
+        border: 1px solid var(--border-subtle);
+        border-radius: 14px;
+        box-shadow: var(--elevation-modal);
+        text-align: center;
+        /* Fade the whole card out when dismissed. */
+        opacity: 1;
+        transition: opacity 200ms ease-out;
+      }
+      .splash.is-leaving {
+        opacity: 0;
+      }
+
+      /* Brand mark: rounded crimson square with a Fraunces "m". */
+      .mark {
+        width: 56px;
+        height: 56px;
+        border-radius: 14px;
+        background: var(--brand);
+        color: var(--brand-fg);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: var(--font-display);
+        font-weight: 600;
+        font-size: 38px;
+        line-height: 1;
+        /* Slight optical nudge so the "m" sits centered. */
+        padding-bottom: 4px;
+      }
+
+      .wordmark {
+        font-family: var(--font-display);
+        font-weight: 600;
+        font-size: 24px;
+        color: var(--text-strong);
+        letter-spacing: 0.01em;
+      }
+
+      .status {
+        font-family: var(--font-body);
+        font-weight: 400;
+        font-size: 14px;
+        line-height: 1.4;
+        color: var(--text-muted);
+        min-height: 1.4em;
+      }
+
+      .dots {
+        display: inline-flex;
+        gap: 6px;
+        margin-top: 2px;
+        height: 6px;
+        align-items: center;
+      }
+      .dots span {
+        width: 6px;
+        height: 6px;
+        border-radius: 9999px;
+        background: var(--brand);
+        opacity: 0.35;
+        animation: pulse 1.2s ease-in-out infinite;
+      }
+      .dots span:nth-child(2) {
+        animation-delay: 0.2s;
+      }
+      .dots span:nth-child(3) {
+        animation-delay: 0.4s;
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 0.35;
+        }
+        50% {
+          opacity: 1;
+        }
+      }
+      .dots.is-done span {
+        animation: none;
+        opacity: 1;
+      }
+
+      /* Principle #5: reduced motion is a contract. No pulse, no fade
+         beyond a 60ms crossfade. */
+      @media (prefers-reduced-motion: reduce) {
+        .splash {
+          transition: opacity 60ms linear;
+        }
+        .dots span {
+          animation: none;
+          opacity: 0.7;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="splash" role="status" aria-live="polite">
+      <div class="mark" aria-hidden="true">m</div>
+      <div class="wordmark">Maximal</div>
+      <div class="status" id="status">Starting the proxy…</div>
+      <div class="dots" id="dots" aria-hidden="true">
+        <span></span><span></span><span></span>
+      </div>
+    </main>
+
+    <script>
+      // withGlobalTauri (tauri.conf.json) exposes window.__TAURI__.
+      // Listen for the Rust-side ready signal; gracefully no-op if the
+      // API isn't present (e.g. opened in a plain browser for styling).
+      (function () {
+        const status = document.getElementById("status");
+        const dots = document.getElementById("dots");
+        const splash = document.querySelector(".splash");
+
+        function markReady() {
+          status.textContent = "Running in your menu bar ↑";
+          dots.classList.add("is-done");
+          // Brief beat so the user reads it, then fade. Rust also closes
+          // the window, so this is purely cosmetic.
+          setTimeout(() => splash.classList.add("is-leaving"), 700);
+        }
+
+        const tauri = window.__TAURI__;
+        if (tauri && tauri.event && typeof tauri.event.listen === "function") {
+          tauri.event.listen("splash:ready", markReady);
+        }
+      })();
+    </script>
+  </body>
+</html>

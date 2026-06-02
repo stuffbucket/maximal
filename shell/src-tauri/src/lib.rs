@@ -50,7 +50,8 @@ use tauri::{
     ipc::Channel,
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder, WindowEvent,
+    AppHandle, Emitter, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder,
+    WindowEvent,
 };
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
@@ -258,6 +259,23 @@ impl SetupPromptShown {
     }
 }
 
+/// One-shot flag for "we've already dismissed the splash + fired the
+/// 'we're running' notification this session." The first Starting →
+/// Running transition claims it; later Unauthenticated ⇄ Authenticated
+/// flips must not re-announce.
+struct StartupAnnounced(std::sync::atomic::AtomicBool);
+
+impl StartupAnnounced {
+    fn new() -> Self {
+        Self(std::sync::atomic::AtomicBool::new(false))
+    }
+
+    /// Returns true the first time it's called; false on subsequent calls.
+    fn claim(&self) -> bool {
+        !self.0.swap(true, std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
 /// Random per-launch key the shell shares with its sidecar so the
 /// webview can authenticate against /settings/api/* even when the user
 /// has enabled "Block unknown connections." Injected as an env var when
@@ -432,6 +450,7 @@ pub fn run() {
         .manage(AppStatus::new())
         .manage(ShellApiKey::new())
         .manage(SetupPromptShown::new())
+        .manage(StartupAnnounced::new())
         .manage(LastRejection::new())
         .invoke_handler(tauri::generate_handler![
             open_settings_at,
@@ -462,6 +481,12 @@ pub fn run() {
             // downstream still leaves a clickable menubar.
             install_tray(app.handle())?;
             apply_state(app.handle(), SidecarState::Starting);
+
+            // Immediate visible feedback. This is a menu-bar-only app, so
+            // launching it otherwise just adds a tray icon the user may
+            // not notice ("clicking did nothing"). The splash is closed by
+            // apply_state on the first Running/Failed transition.
+            create_splash(app.handle());
 
             // Spawn sidecar. If this fails synchronously we go straight
             // to Failed — the user still sees the menubar.
@@ -905,10 +930,92 @@ fn apply_state(app: &AppHandle, next: SidecarState) {
     if let Err(err) = refresh_tray(app, next) {
         eprintln!("[shell] tray refresh failed: {err}");
     }
+    // First time we're actually up: retire the splash and tell the user
+    // we're live in the menu bar. Guarded so Unauthenticated ⇄
+    // Authenticated flips don't re-announce.
+    if matches!(
+        next,
+        SidecarState::RunningAuthenticated | SidecarState::RunningUnauthenticated
+    ) && app.state::<StartupAnnounced>().claim()
+    {
+        dismiss_splash(app);
+        fire_startup_notification(app);
+    }
+    // If we never came up, don't strand the splash on its "Starting…"
+    // copy — close it and let the tray's attention icon carry the signal.
+    if next == SidecarState::Failed {
+        if let Some(win) = app.get_webview_window("splash") {
+            let _ = win.close();
+        }
+    }
     if next == SidecarState::RunningUnauthenticated
         && app.state::<SetupPromptShown>().claim()
     {
         open_settings_window(app, Some("account"));
+    }
+}
+
+/// Pre-boot splash window. Created the instant the app launches so the
+/// user gets immediate, visible feedback. This is a menu-bar-only app
+/// (no Dock icon, no window at launch), so without it, double-clicking
+/// the .app just adds a tray icon that's easy to miss. Loaded from the
+/// bundled, self-contained `splash.html` via the Tauri asset protocol —
+/// it can't be sidecar-served like Settings/Dashboard because the
+/// sidecar isn't up yet. Retired by `dismiss_splash`.
+fn create_splash(app: &AppHandle) {
+    if app.get_webview_window("splash").is_some() {
+        return;
+    }
+    let result = WebviewWindowBuilder::new(
+        app,
+        "splash",
+        WebviewUrl::App("splash.html".into()),
+    )
+    .title("Maximal")
+    .inner_size(360.0, 280.0)
+    .resizable(false)
+    .minimizable(false)
+    .maximizable(false)
+    .decorations(false)
+    .transparent(true)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .center()
+    .build();
+    if let Err(err) = result {
+        eprintln!("[shell] splash window failed: {err}");
+    }
+}
+
+/// Signal the splash to show its "ready" copy, then close it after the
+/// fade. Best-effort: a missing window or failed emit is fine. The poll
+/// loop already runs on the tokio runtime; reuse it for the one-shot
+/// close timer.
+fn dismiss_splash(app: &AppHandle) {
+    let _ = app.emit("splash:ready", ());
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(1100)).await;
+        if let Some(win) = handle.get_webview_window("splash") {
+            let _ = win.close();
+        }
+    });
+}
+
+/// One-shot "we're up" notification so users who launched from Finder
+/// know it's running and where to find it (menu bar, not Dock). Same
+/// best-effort caveats as `fire_rejection_notification`: a permission
+/// denial or a dev (`cargo run`) no-op must not matter.
+fn fire_startup_notification(app: &AppHandle) {
+    use tauri_plugin_notification::NotificationExt;
+    if let Err(err) = app
+        .notification()
+        .builder()
+        .title("Maximal is running")
+        .body("Look for the Maximal icon in your menu bar ↑")
+        .show()
+    {
+        eprintln!("[shell] startup notification failed: {err}");
     }
 }
 
