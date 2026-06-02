@@ -116,7 +116,15 @@ export const createMessages = async (
     payload.metadata?.user_id,
   )
   // from claude code
-  if (safetyIdentifier && sessionId) {
+  // claude-opus-4.8 WAF rejects the Claude-Code user-agent unless
+  // copilot-integration-id is also present. prepareMessageProxyHeaders
+  // sets the Claude-Code UA without that header, triggering a 403 on 4.8
+  // but not on 4.7. Skip it for 4.8 until Copilot upstream is fixed.
+  if (
+    safetyIdentifier
+    && sessionId
+    && !payload.model.startsWith("claude-opus-4.8")
+  ) {
     prepareMessageProxyHeaders(headers)
   }
 

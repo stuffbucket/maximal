@@ -10,6 +10,7 @@ export default config({
     "site/**",
     "src/pages/**",
     ".dependency-cruiser.cjs",
+    "landing/**",
   ],
   prettier: {
     plugins: ["prettier-plugin-packagejson"],
