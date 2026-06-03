@@ -972,7 +972,7 @@ fn create_splash(app: &AppHandle) {
         WebviewUrl::App("splash.html".into()),
     )
     .title("Maximal")
-    .inner_size(360.0, 280.0)
+    .inner_size(440.0, 240.0)
     .resizable(false)
     .minimizable(false)
     .maximizable(false)
