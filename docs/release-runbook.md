@@ -48,24 +48,29 @@ Wait for these jobs to all turn green. Each produces release assets:
 | `checksums` | ubuntu-latest | `SHA256SUMS` |
 | `smoke` | windows-2022 | passes/fails — exec validation of the windows-x64 binary |
 
-Then `installers.yml` triggers on the published release:
+The installer jobs are part of the same `release.yml` run (no separate
+`installers.yml` dispatch). `publish` gates on all of them via `needs:`,
+so a slow Apple notarization just delays publish — it can't leave a
+healthy build stuck as a draft on a wall-clock timeout:
 
 | Job | Runner | Produces |
 |---|---|---|
-| `tauri-macos` | self-hosted (arm64 mac) | `*-darwin-arm64.app.zip` + `*-darwin-arm64.dmg` (signed + notarized + stapled, with sidecar) |
+| `tauri-macos` (reusable `tauri-macos.yml`) | self-hosted (arm64 mac) | `*-darwin-arm64.app.zip` + `*-darwin-arm64.dmg` (signed + notarized + stapled, with sidecar) |
 | `windows-installer` | ubuntu-latest | `install.ps1` (+ `.sha256`) |
 | `windows-msi` | windows-2022 | `*-windows-x64.msi` (+ `.sha256`) |
+| `windows-msi-verify` | windows-2022 | gate only — silently installs the MSI, asserts install/registry/PATH, runs the installed binary, uninstalls, asserts clean removal |
 
-If any installer job fails, the release is salvageable — fix forward
-and re-run the failed job from the Actions UI (`workflow_dispatch`
-input `tag` accepts the existing release tag).
+If any job fails, the release stays a draft (never a half-published
+"Latest"). Recover with **Actions → the release run → "Re-run failed
+jobs"**, then re-run `publish`. The macOS bundle alone can also be
+rebuilt from a developer Mac (§3) if the self-hosted runner is offline.
 
 ## 3. Build and attach the polished `.dmg` (legacy — superseded by `tauri-macos`)
 
 Since v0.4.1, the self-hosted macOS runner produces a signed +
-notarized `.dmg` automatically as part of the `installers.yml`
-`tauri-macos` job. The steps below remain documented for emergency
-re-runs from a developer Mac if the self-hosted runner is offline.
+notarized `.dmg` automatically via the reusable `tauri-macos.yml`
+workflow (called by `release.yml`). The steps below remain documented
+for emergency re-runs from a developer Mac if the runner is offline.
 
 Run from any Apple Silicon developer Mac with this checkout. Auto-
 detects the latest tag from `git describe`:
