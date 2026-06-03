@@ -85,11 +85,28 @@ function releaseAssetUrl(args: Args, assetName: string): string {
 }
 
 async function fetchText(url: string): Promise<string> {
-  const r = await fetch(url)
-  if (!r.ok) {
-    throw new Error(`fetch ${url} → ${r.status} ${r.statusText}`)
+  // The homebrew-tap job runs immediately after a release is published,
+  // and the public releases/download/<tag>/<asset> path can briefly 404
+  // during GitHub's post-publish propagation window (likewise a transient
+  // 5xx / network blip). Retry with linear backoff so a healthy release
+  // doesn't fail the tap bump; a hard 4xx (e.g. 403) still fails fast.
+  const attempts = 6
+  let lastErr = ""
+  for (let i = 0; i < attempts; i++) {
+    let status = 0
+    try {
+      const r = await fetch(url)
+      if (r.ok) return r.text()
+      status = r.status
+      lastErr = `${r.status} ${r.statusText}`
+    } catch (e) {
+      lastErr = e instanceof Error ? e.message : String(e)
+    }
+    const retryable = status === 0 || status === 404 || status >= 500
+    if (!retryable || i === attempts - 1) break
+    await new Promise((resolve) => setTimeout(resolve, (i + 1) * 5000))
   }
-  return r.text()
+  throw new Error(`fetch ${url} failed after retries → ${lastErr}`)
 }
 
 /** Each `.sha256` file Stream A publishes contains a single line:
