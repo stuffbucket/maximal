@@ -546,6 +546,15 @@ a:hover {
   gap: var(--space-2);
 }
 
+/* Companion to the `display: flex` above. That author rule outranks the
+   UA's `[hidden] { display: none }`, so without this, renderUpstreamRejection()
+   toggling `hidden` wouldn't hide the banner — the empty, contentless panel
+   would sit as a dark box between the signed-in hero and the account buttons.
+   Mirrors the .card[hidden] / .section[hidden] companions elsewhere. */
+.upstream-rejection[hidden] {
+  display: none;
+}
+
 .upstream-rejection__message {
   color: var(--text-base-color);
   font-size: var(--text-sm);

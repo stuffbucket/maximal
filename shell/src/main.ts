@@ -392,11 +392,15 @@ function setAccountField(name: string, value: string): void {
 function renderAccountAvatar(login: string): void {
   const slot = accountSlot("account_avatar");
   if (!slot) return;
-  const safeLogin = login || "?";
-  const initial = (safeLogin[0] ?? "?").toUpperCase();
+  // "(unknown)" is the sentinel renderAccount() substitutes when the proxy
+  // reports authenticated without a login. Treat it (and an empty string)
+  // as "no real login" so the placeholder shows a neutral "?" rather than
+  // the sentinel's first character "(".
+  const isPlaceholder = !login || login === "(unknown)";
+  const initial = isPlaceholder ? "?" : (login[0] ?? "?").toUpperCase();
   slot.textContent = "";
   slot.classList.remove("signed-in-hero__avatar--fallback");
-  if (!login || login === "(unknown)") {
+  if (isPlaceholder) {
     slot.textContent = initial;
     slot.classList.add("signed-in-hero__avatar--fallback");
     return;
