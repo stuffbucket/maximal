@@ -46,6 +46,20 @@ bun run app:ui       # UI-only iteration: Vite alone at :1420. Run `bun run dev`
 bun run app:build    # force-rebuild sidecar + tauri build --bundles app,dmg
 ```
 
+### Keep local tooling synced to the lockfile
+
+The pre-commit hook runs `bun run lint --fix` on staged files using your
+**locally installed** prettier/eslint, while CI's `lint:all` uses the
+**lockfile-pinned** versions. If `node_modules` drifts from `bun.lock`
+(common right after a `pull`/rebase that bumped a formatter), the hook
+reformats lines one way and CI rejects them — surfacing as
+`prettier/prettier` errors on lines you never hand-edited (often
+`await import(...)` wrapping). After any pull that touches `bun.lock`,
+run `bun install` before committing, and sanity-check with
+`bunx prettier --version` against the `bun.lock` pin. If CI lint fails on
+a formatter rule you didn't author, suspect version skew first: re-install,
+`rm .eslintcache`, re-run `bun run lint:all`.
+
 ### Fast UI iteration
 
 For HTML/CSS/TS changes under `shell/src/`, **do not** run `app:dev`. The

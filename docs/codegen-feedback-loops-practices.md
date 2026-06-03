@@ -256,6 +256,7 @@ pre-commit:
 - **Hooks that write to files or global state.** A hook that auto-formats on save is fine; a hook that writes to a shared cache outside the repo is not. The observability surface must not become a side-effect surface.
 - **Multiple terminals as the unified surface.** One channel back to the agent. The agent reads stderr, not your Vite overlay.
 - **Hooks installed in `~/.claude/settings.json` instead of `.claude/settings.json`.** Project hooks belong with the project; user hooks belong with the user.
+- **Pre-commit `--fix` running a different formatter version than CI.** The hook formats staged files with your local `node_modules`; CI lints with the lockfile-pinned version. Let them drift — a `pull`/rebase that bumped prettier without a re-`install` — and the hook reformats lines CI then rejects: `prettier/prettier` errors on code you never touched (e.g. `await import(...)` line-wrapping). The auto-fix becomes the regression. Re-`install` to the lockfile after any pull that moves it, and pin the same formatter version in `package.json` and `bun.lock` so the inner-loop hook and the outer-loop CI agree. (Real instance: PR #43 — local prettier 3.6.2 vs lockfile 3.8.3.)
 
 ## When NOT to use this
 
