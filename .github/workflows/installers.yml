@@ -158,7 +158,34 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # Idempotency gate. Installers can be dispatched more than once
+      # for the same tag (release.yml's `installers` job, manual
+      # re-runs, retries). The macOS bundle is a 60–200 MB Tauri build
+      # plus Apple notarization — minutes of work we skip entirely when
+      # both signed bundles are already attached to the release. Keyed
+      # off the asset actually being present (not a prior run's exit
+      # status), so a partial upload still rebuilds. Require BOTH the
+      # .app.zip and the .dmg before skipping, since this job produces
+      # both from the same build.
+      - name: Skip if installers already attached
+        id: skip
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          APP_ZIP="maximal-${TAG}-darwin-${ARCH}.app.zip"
+          DMG="maximal-${TAG}-darwin-${ARCH}.dmg"
+          ASSETS="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null || echo '')"
+          if grep -Fxq "$APP_ZIP" <<<"$ASSETS" && grep -Fxq "$DMG" <<<"$ASSETS"; then
+            echo "Assets $APP_ZIP and $DMG already attached to $TAG — skipping build + upload."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "macOS installer bundles not yet present on $TAG — building."
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Resolve names + stamp version into tauri.conf.json
+        if: steps.skip.outputs.skip != 'true'
         run: |
           set -euo pipefail
           export PATH="$BUN_INSTALL/bin:$CARGO_HOME/bin:$PATH"
@@ -175,6 +202,7 @@ jobs:
           grep '"version"' shell/src-tauri/tauri.conf.json
 
       - name: Install JS deps
+        if: steps.skip.outputs.skip != 'true'
         run: |
           set -euo pipefail
           export PATH="$BUN_INSTALL/bin:$CARGO_HOME/bin:$PATH"
@@ -182,6 +210,7 @@ jobs:
           bun install --cwd shell
 
       - name: Build sidecar (Bun-compiled proxy)
+        if: steps.skip.outputs.skip != 'true'
         env:
           MAXIMAL_FORCE_SIDECAR: "1"
         run: |
@@ -191,6 +220,7 @@ jobs:
           ls -la shell/src-tauri/binaries/
 
       - name: Build .app via Tauri
+        if: steps.skip.outputs.skip != 'true'
         run: |
           set -euo pipefail
           export PATH="$BUN_INSTALL/bin:$CARGO_HOME/bin:$PATH"
@@ -199,6 +229,7 @@ jobs:
           ls -la src-tauri/target/release/bundle/macos/
 
       - name: Unlock signing keychain
+        if: steps.skip.outputs.skip != 'true'
         env:
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
@@ -210,6 +241,7 @@ jobs:
           security list-keychains -d user -s "$KC"
 
       - name: Sign .app with Developer ID
+        if: steps.skip.outputs.skip != 'true'
         env:
           SIGN_IDENTITY: ${{ secrets.DEVELOPER_ID_APPLICATION }}
         run: |
@@ -223,6 +255,7 @@ jobs:
           codesign --verify --deep --strict --verbose=2 "$APP"
 
       - name: Notarize + staple .app
+        if: steps.skip.outputs.skip != 'true'
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
@@ -242,6 +275,7 @@ jobs:
           spctl -a -t exec --context context:primary-signature -v "$APP"
 
       - name: Re-zip signed .app
+        if: steps.skip.outputs.skip != 'true'
         run: |
           set -euo pipefail
           mkdir -p dist-release
@@ -251,6 +285,7 @@ jobs:
           (cd dist-release && shasum -a 256 "${APP_ZIP}" > "${APP_ZIP}.sha256")
 
       - name: Stage DMG layout
+        if: steps.skip.outputs.skip != 'true'
         run: |
           set -euo pipefail
           STAGE="$(mktemp -d)/dmg-stage"
@@ -260,6 +295,7 @@ jobs:
           echo "STAGE=$STAGE" >> "$GITHUB_ENV"
 
       - name: Build + sign DMG
+        if: steps.skip.outputs.skip != 'true'
         env:
           SIGN_IDENTITY: ${{ secrets.DEVELOPER_ID_APPLICATION }}
         run: |
@@ -274,6 +310,7 @@ jobs:
           codesign --verify --verbose=2 "$OUT"
 
       - name: Notarize + staple DMG
+        if: steps.skip.outputs.skip != 'true'
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
@@ -292,6 +329,7 @@ jobs:
           (cd dist-release && shasum -a 256 "${DMG}" > "${DMG}.sha256")
 
       - name: Attach signed bundles to release
+        if: steps.skip.outputs.skip != 'true'
         uses: ./.github/actions/upload-release-asset
         with:
           tag: ${{ env.TAG }}
@@ -310,10 +348,29 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # Idempotency gate — see tauri-macos for the full rationale.
+      # Cheap here (install.ps1 is copied verbatim), but skipping still
+      # avoids a redundant --clobber upload on re-runs.
+      - name: Skip if installer already attached
+        id: skip
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ASSETS="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null || echo '')"
+          if grep -Fxq "install.ps1" <<<"$ASSETS"; then
+            echo "Asset install.ps1 already attached to $TAG — skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "install.ps1 not yet present on $TAG — staging."
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       # B3a ships install.ps1 verbatim — no compilation, no signing for
       # v1 (A4 deferred). Sidecar a SHA-256 so the Pages site (B4) can
       # tell users how to verify before piping into PowerShell.
       - name: Stage installer + sha256
+        if: steps.skip.outputs.skip != 'true'
         run: |
           set -euo pipefail
           mkdir -p dist-release
@@ -322,6 +379,7 @@ jobs:
           ls -la dist-release
 
       - name: Attach installer to release
+        if: steps.skip.outputs.skip != 'true'
         uses: ./.github/actions/upload-release-asset
         with:
           tag: ${{ env.TAG }}
@@ -344,12 +402,34 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # Idempotency gate — see tauri-macos for the full rationale. The
+      # MSI requires a WiX toolchain install + WiX build, so skipping a
+      # re-run that already produced the .msi saves real minutes.
+      - name: Skip if MSI already attached
+        id: skip
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          MSI="maximal-${TAG}-windows-x64.msi"
+          ASSETS="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null || echo '')"
+          if grep -Fxq "$MSI" <<<"$ASSETS"; then
+            echo "Asset $MSI already attached to $TAG — skipping build + upload."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "$MSI not yet present on $TAG — building."
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Resolve version
         id: ver
+        if: steps.skip.outputs.skip != 'true'
         shell: bash
         run: echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
       - name: Download windows-x64 zip + sha256
+        if: steps.skip.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -366,6 +446,7 @@ jobs:
           ( cd dist-bin && sha256sum -c "$ZIP.sha256" )
 
       - name: Unpack zip
+        if: steps.skip.outputs.skip != 'true'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -379,6 +460,7 @@ jobs:
           Get-ChildItem staging
 
       - name: Install WiX
+        if: steps.skip.outputs.skip != 'true'
         shell: pwsh
         run: |
           dotnet tool install --global wix --version 5.*
@@ -388,6 +470,7 @@ jobs:
           & "$userBin\wix.exe" --version
 
       - name: Build MSI
+        if: steps.skip.outputs.skip != 'true'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -405,6 +488,7 @@ jobs:
             -out $out
 
       - name: SHA-256
+        if: steps.skip.outputs.skip != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -413,6 +497,7 @@ jobs:
           cat "maximal-${TAG}-windows-x64.msi.sha256"
 
       - name: Attach MSI to release
+        if: steps.skip.outputs.skip != 'true'
         uses: ./.github/actions/upload-release-asset
         with:
           tag: ${{ env.TAG }}
