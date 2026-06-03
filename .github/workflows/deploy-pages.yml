@@ -47,6 +47,13 @@ jobs:
 
       - name: Build Astro
         working-directory: site
+        env:
+          # Optional temporary pin: set the SITE_PIN_VERSION repo variable
+          # (e.g. v0.4.8) to freeze the landing page on that release's
+          # version + download links instead of tracking /releases/latest.
+          # Unset it (gh variable delete SITE_PIN_VERSION) + redeploy to
+          # resume tracking latest. Empty when the variable is absent.
+          VITE_SITE_PIN_VERSION: ${{ vars.SITE_PIN_VERSION }}
         run: bun run build
 
       - name: Setup Pages

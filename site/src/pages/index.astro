@@ -7,6 +7,16 @@ const REPO = "stuffbucket/maximal";
 const REPO_URL = `https://github.com/${REPO}`;
 const RELEASES_URL = `${REPO_URL}/releases`;
 
+// Temporary version pin. When VITE_SITE_PIN_VERSION is set at build time
+// (surfaced from the SITE_PIN_VERSION repo variable by deploy-pages.yml),
+// the site advertises that exact tag + download links instead of GitHub's
+// /releases/latest. This lets us cut and validate a release without the
+// landing page advancing to it. Clear the repo variable and redeploy to
+// resume tracking latest:
+//   gh variable set SITE_PIN_VERSION --body v0.4.8    # pin
+//   gh variable delete SITE_PIN_VERSION               # unpin
+const PINNED_TAG = (import.meta.env.VITE_SITE_PIN_VERSION ?? "").trim();
+
 interface ReleaseInfo {
   tag: string | null;
   hasRelease: boolean;
@@ -35,7 +45,11 @@ async function fetchLatestTag(): Promise<ReleaseInfo> {
   }
 }
 
-const { tag, hasRelease } = await fetchLatestTag();
+// A pin wins over the live lookup; otherwise track GitHub's latest
+// (non-prerelease, non-draft) release as before.
+const { tag, hasRelease } = PINNED_TAG
+  ? { tag: PINNED_TAG, hasRelease: true }
+  : await fetchLatestTag();
 
 const assetUrl = (filename: string): string =>
   hasRelease && tag
