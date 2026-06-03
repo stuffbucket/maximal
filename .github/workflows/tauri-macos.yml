@@ -1,0 +1,216 @@
+# Reusable workflow: build + sign + notarize the macOS Tauri menu-bar
+# bundle and attach it to an existing release. Called by release.yml via
+# `uses: ./.github/workflows/tauri-macos.yml` with `needs: binaries`, so
+# `publish` gates on it through the normal job graph — no cross-workflow
+# dispatch, no asset polling. The self-hosted macOS runner is the reason
+# this is a separate (reusable) workflow rather than a job in release.yml;
+# workflow_call from the same repo can target self-hosted runners.
+#
+# Required repo secrets (passed via `secrets: inherit` from the caller):
+#   KEYCHAIN_PASSWORD, DEVELOPER_ID_APPLICATION,
+#   APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID
+
+name: Tauri macOS bundle
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Release tag the bundle is built for and attached to (e.g. v0.1.0)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  tauri-macos:
+    name: macOS Tauri .app + .dmg (signed, arm64)
+    runs-on: self-hosted
+    env:
+      TAG: ${{ inputs.tag }}
+      ARCH: arm64
+      # GH Actions on self-hosted runs non-login shells that don't read
+      # ~/.zshrc — make bun + cargo discoverable for every step.
+      BUN_INSTALL: /Users/build/.bun
+      CARGO_HOME: /Users/build/.cargo
+    steps:
+      - uses: actions/checkout@v6
+
+      # Idempotency gate. The macOS bundle is a 60–200 MB Tauri build plus
+      # Apple notarization — minutes of work we skip entirely when both
+      # signed bundles are already attached to the release. Keyed off the
+      # asset actually being present (not a prior run's exit status), so a
+      # partial upload still rebuilds. Require BOTH the .app.zip and the
+      # .dmg before skipping, since this job produces both from one build.
+      - name: Skip if installers already attached
+        id: skip
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          APP_ZIP="maximal-${TAG}-darwin-${ARCH}.app.zip"
+          DMG="maximal-${TAG}-darwin-${ARCH}.dmg"
+          ASSETS="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null || echo '')"
+          if grep -Fxq "$APP_ZIP" <<<"$ASSETS" && grep -Fxq "$DMG" <<<"$ASSETS"; then
+            echo "Assets $APP_ZIP and $DMG already attached to $TAG — skipping build + upload."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "macOS installer bundles not yet present on $TAG — building."
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve names + stamp version into tauri.conf.json
+        if: steps.skip.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          export PATH="$BUN_INSTALL/bin:$CARGO_HOME/bin:$PATH"
+          VERSION="${TAG#v}"
+          APP_ZIP="maximal-${TAG}-darwin-${{ env.ARCH }}.app.zip"
+          DMG="maximal-${TAG}-darwin-${{ env.ARCH }}.dmg"
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "APP_ZIP=${APP_ZIP}" >> "$GITHUB_ENV"
+          echo "DMG=${DMG}"         >> "$GITHUB_ENV"
+
+          # Tauri reads version from tauri.conf.json, not git tags. Stamp it.
+          /usr/bin/sed -i '' -e "s/\"version\": \"0\\.0\\.0\"/\"version\": \"${VERSION}\"/" \
+            shell/src-tauri/tauri.conf.json
+          grep '"version"' shell/src-tauri/tauri.conf.json
+
+      - name: Install JS deps
+        if: steps.skip.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          export PATH="$BUN_INSTALL/bin:$CARGO_HOME/bin:$PATH"
+          bun install
+          bun install --cwd shell
+
+      - name: Build sidecar (Bun-compiled proxy)
+        if: steps.skip.outputs.skip != 'true'
+        env:
+          MAXIMAL_FORCE_SIDECAR: "1"
+        run: |
+          set -euo pipefail
+          export PATH="$BUN_INSTALL/bin:$CARGO_HOME/bin:$PATH"
+          bun run app:sidecar
+          ls -la shell/src-tauri/binaries/
+
+      - name: Build .app via Tauri
+        if: steps.skip.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          export PATH="$BUN_INSTALL/bin:$CARGO_HOME/bin:$PATH"
+          cd shell
+          bun run tauri build --bundles app
+          ls -la src-tauri/target/release/bundle/macos/
+
+      - name: Unlock signing keychain
+        if: steps.skip.outputs.skip != 'true'
+        env:
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KC="$HOME/Library/Keychains/maximal.keychain-db"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KC"
+          security set-key-partition-list -S apple-tool:,apple: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KC"
+          security list-keychains -d user -s "$KC"
+
+      - name: Sign .app with Developer ID
+        if: steps.skip.outputs.skip != 'true'
+        env:
+          SIGN_IDENTITY: ${{ secrets.DEVELOPER_ID_APPLICATION }}
+        run: |
+          set -euo pipefail
+          APP="shell/src-tauri/target/release/bundle/macos/Maximal.app"
+          codesign --force --deep --options runtime --timestamp \
+            --identifier co.stuffbucket.maximal \
+            --entitlements build/macos/maximal.entitlements \
+            --sign "$SIGN_IDENTITY" \
+            "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+
+      - name: Notarize + staple .app
+        if: steps.skip.outputs.skip != 'true'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          APP="shell/src-tauri/target/release/bundle/macos/Maximal.app"
+          NOTARY_ZIP="$(mktemp -d)/notary.zip"
+          ditto -c -k --keepParent "$APP" "$NOTARY_ZIP"
+          xcrun notarytool submit "$NOTARY_ZIP" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+          xcrun stapler staple "$APP"
+          xcrun stapler validate "$APP"
+          spctl -a -t exec --context context:primary-signature -v "$APP"
+
+      - name: Re-zip signed .app
+        if: steps.skip.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p dist-release
+          APP="shell/src-tauri/target/release/bundle/macos/Maximal.app"
+          OUT="dist-release/${APP_ZIP}"
+          ditto -c -k --keepParent "$APP" "$OUT"
+          (cd dist-release && shasum -a 256 "${APP_ZIP}" > "${APP_ZIP}.sha256")
+
+      - name: Stage DMG layout
+        if: steps.skip.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          STAGE="$(mktemp -d)/dmg-stage"
+          mkdir -p "$STAGE"
+          cp -R shell/src-tauri/target/release/bundle/macos/Maximal.app "$STAGE/"
+          ln -s /Applications "$STAGE/Applications"
+          echo "STAGE=$STAGE" >> "$GITHUB_ENV"
+
+      - name: Build + sign DMG
+        if: steps.skip.outputs.skip != 'true'
+        env:
+          SIGN_IDENTITY: ${{ secrets.DEVELOPER_ID_APPLICATION }}
+        run: |
+          set -euo pipefail
+          OUT="dist-release/${DMG}"
+          hdiutil create \
+            -volname "Maximal" \
+            -srcfolder "$STAGE" \
+            -ov -format UDZO \
+            "$OUT"
+          codesign --force --sign "$SIGN_IDENTITY" "$OUT"
+          codesign --verify --verbose=2 "$OUT"
+
+      - name: Notarize + staple DMG
+        if: steps.skip.outputs.skip != 'true'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          OUT="dist-release/${DMG}"
+          xcrun notarytool submit "$OUT" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+          xcrun stapler staple "$OUT"
+          xcrun stapler validate "$OUT"
+          spctl -a -t open --context context:primary-signature -v "$OUT"
+          (cd dist-release && shasum -a 256 "${DMG}" > "${DMG}.sha256")
+
+      - name: Attach signed bundles to release
+        if: steps.skip.outputs.skip != 'true'
+        uses: ./.github/actions/upload-release-asset
+        with:
+          tag: ${{ inputs.tag }}
+          files: |
+            dist-release/${{ env.APP_ZIP }}
+            dist-release/${{ env.APP_ZIP }}.sha256
+            dist-release/${{ env.DMG }}
+            dist-release/${{ env.DMG }}.sha256

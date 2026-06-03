@@ -3,20 +3,23 @@ name: Release
 permissions:
   id-token: write
   contents: write
-  # Needed by the `installers` and `redeploy-site` jobs so they can
-  # fire installers.yml / deploy-pages.yml. GitHub's anti-loop guard
-  # suppresses `release: published` triggers when the release is
-  # created via GITHUB_TOKEN, so we dispatch those workflows explicitly.
+  # Needed by the `redeploy-site` job so it can fire deploy-pages.yml.
+  # GitHub's anti-loop guard suppresses `release: published` triggers
+  # when the release is created via GITHUB_TOKEN, so we dispatch the
+  # site rebuild explicitly. (The installer jobs are now part of this
+  # run via `needs:` + the reusable tauri-macos.yml — no dispatch.)
   actions: write
 
 on:
   push:
     tags:
       - "v*"
-  # Manual fallback so installers.yml's `ensure-release` gate can fire
-  # this workflow on a tag that already exists. (When a tag is pushed
-  # via the default GITHUB_TOKEN, downstream `push: tags` triggers do
-  # not fire — anti-loop guard. `gh workflow run` bypasses that.)
+  # Manual re-trigger for a tag that already exists — e.g. a tag pushed
+  # via the default GITHUB_TOKEN (whose `push: tags` event is suppressed
+  # by the anti-loop guard), or to rebuild a release. Select the tag
+  # under "Use workflow from" so github.ref_name is the tag, not a branch
+  # (the Validate step rejects branches). To recover a partially-failed
+  # release, prefer "Re-run failed jobs" on the original run.
   workflow_dispatch:
     inputs:
       tag:
@@ -443,91 +446,322 @@ jobs:
           git commit -m "maximal: bump to $TAG"
           git push origin HEAD:main
 
-  # Fire installers.yml to assemble the .app.zip / .dmg / .msi /
-  # install.ps1 and attach them to this (draft) release, then BLOCK
-  # until they land. The natural `release: published` trigger on
-  # installers.yml does not fire here because (a) the release is still a
-  # draft and (b) GitHub suppresses triggers for events created via
-  # GITHUB_TOKEN — so we dispatch explicitly. Waiting here lets the
-  # `publish` job gate on a complete set of installer assets.
-  installers:
+  # ── Installers ───────────────────────────────────────────────────────
+  # These were a separate installers.yml dispatched + polled for up to an
+  # hour; now they're jobs in this run. `publish` gates on them through
+  # `needs:`, so a slow Apple notarization just delays publish instead of
+  # racing a fixed wall-clock timer that left healthy builds stuck as
+  # drafts. All build from the tag commit (this run's checkout), so the
+  # installers match the binaries. Each keeps an idempotency skip gate so
+  # re-running a partially-failed release rebuilds only what's missing.
+
+  # macOS Tauri bundle (.app.zip + signed/notarized .dmg). A reusable
+  # workflow rather than a job here because it needs the self-hosted macOS
+  # runner; workflow_call from the same repo can target it, and the call
+  # participates in this run's job graph so `needs:`/`publish` gating just
+  # works. Secrets (signing/notarization) flow via `secrets: inherit`.
+  tauri-macos:
+    needs: binaries
+    uses: ./.github/workflows/tauri-macos.yml
+    with:
+      tag: ${{ github.ref_name }}
+    secrets: inherit
+
+  # Windows PowerShell installer — install.ps1 shipped verbatim + sha256.
+  windows-installer:
     needs: binaries
     runs-on: ubuntu-latest
     permissions:
-      actions: write
-      contents: read
+      contents: write
+    env:
+      TAG: ${{ github.ref_name }}
     steps:
-      - name: Dispatch installers.yml and wait for installer assets
+      - uses: actions/checkout@v6
+
+      - name: Skip if installer already attached
+        id: skip
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          # Dispatch installers.yml AT THE TAG, not main. The whole point
-          # of a release is that its installers are built from the exact
-          # source the binaries were built from (the tag commit). Running
-          # installers.yml at `main` meant that once main advanced past the
-          # tag, a single release shipped a .app/.dmg/.msi rebuilt from main
-          # while the headless tarball/zip came from the tag — two source
-          # trees in one release. `refs/tags/$TAG` pins shell/, tauri.conf,
-          # the .wxs, and build/macos/* to the released commit.
-          gh workflow run installers.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref "refs/tags/$TAG" \
-            --field "tag=$TAG"
-          echo "Dispatched installers.yml for $TAG; waiting for installer assets ..."
+          ASSETS="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null || echo '')"
+          if grep -Fxq "install.ps1" <<<"$ASSETS"; then
+            echo "Asset install.ps1 already attached to $TAG — skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "install.ps1 not yet present on $TAG — staging."
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
 
-          # Block until every signed installer is attached to the draft
-          # release. Apple notarization can be slow, so poll for up to
-          # 45 minutes (90 × 30s) before giving up. If they never
-          # arrive, this job fails and `publish` is skipped — the
-          # release stays a draft rather than going out incomplete.
-          #
-          # The list is the publish contract: every installer asset a user
-          # can download must be present before the draft goes "Latest".
-          # install.ps1 (+.sha256) is included so a failed windows-installer
-          # job blocks publish like every other installer (previously it
-          # didn't — a release could go Latest with the PS1 installer
-          # missing). `*.msi.verified` is a sentinel the windows-msi-verify
-          # job uploads ONLY after the MSI installs/runs/uninstalls cleanly
-          # on a Windows runner, so a structurally-broken MSI can no longer
-          # ship just because the .msi file exists.
-          REQUIRED=(
-            "maximal-${TAG}-darwin-arm64.dmg"
-            "maximal-${TAG}-darwin-arm64.app.zip"
-            "maximal-${TAG}-windows-x64.msi"
-            "maximal-${TAG}-windows-x64.msi.verified"
-            "install.ps1"
-            "install.ps1.sha256"
-          )
-          # 60 minutes (120 × 30s). Two sequential `notarytool --wait`
-          # round-trips (.app then .dmg) on a single self-hosted runner
-          # can push a healthy build past the old 45-min cap and leave it
-          # stuck as a draft. (The proper fix — gating on the installers
-          # run's actual completion instead of a fixed wall-clock poll —
-          # comes with the workflow_call consolidation.)
-          for _ in $(seq 1 120); do
-            ASSETS="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null || echo '')"
-            MISSING=0
-            for f in "${REQUIRED[@]}"; do
-              if ! grep -Fxq "$f" <<<"$ASSETS"; then MISSING=1; break; fi
-            done
-            if [ "$MISSING" = 0 ]; then
-              echo "All installer assets present for $TAG."
-              exit 0
-            fi
-            sleep 30
-          done
-          echo "::error::Installer assets for $TAG did not appear within 60 minutes — release left as a draft."
-          exit 1
+      - name: Stage installer + sha256
+        if: steps.skip.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p dist-release
+          cp build/windows/install.ps1 dist-release/install.ps1
+          (cd dist-release && shasum -a 256 install.ps1 > install.ps1.sha256)
+          ls -la dist-release
+
+      - name: Attach installer to release
+        if: steps.skip.outputs.skip != 'true'
+        uses: ./.github/actions/upload-release-asset
+        with:
+          tag: ${{ env.TAG }}
+          files: |
+            dist-release/install.ps1
+            dist-release/install.ps1.sha256
+
+  # Windows MSI (WiX, per-user). Wraps the windows-x64 binary the
+  # `binaries` job attached to this release.
+  windows-msi:
+    needs: binaries
+    runs-on: windows-2022
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Skip if MSI already attached
+        id: skip
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          MSI="maximal-${TAG}-windows-x64.msi"
+          ASSETS="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null || echo '')"
+          if grep -Fxq "$MSI" <<<"$ASSETS"; then
+            echo "Asset $MSI already attached to $TAG — skipping build + upload."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "$MSI not yet present on $TAG — building."
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve version
+        id: ver
+        if: steps.skip.outputs.skip != 'true'
+        shell: bash
+        run: echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Download windows-x64 zip + sha256
+        if: steps.skip.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist-bin
+          ZIP="maximal-${TAG}-windows-x64.zip"
+          gh release download "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "$ZIP" \
+            --pattern "$ZIP.sha256" \
+            --dir dist-bin
+          echo "Verifying SHA-256"
+          ( cd dist-bin && sha256sum -c "$ZIP.sha256" )
+
+      - name: Unpack zip
+        if: steps.skip.outputs.skip != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = Get-ChildItem -Path dist-bin -Filter '*.zip' | Select-Object -First 1
+          Expand-Archive -Path $zip.FullName -DestinationPath staging -Force
+          if (-not (Test-Path 'staging\maximal.exe')) {
+            Write-Error "maximal.exe missing from $($zip.Name)"
+            exit 1
+          }
+          Get-ChildItem staging
+
+      - name: Install WiX
+        if: steps.skip.outputs.skip != 'true'
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.*
+          $userBin = Join-Path $env:USERPROFILE '.dotnet\tools'
+          echo $userBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          & "$userBin\wix.exe" --version
+
+      - name: Build MSI
+        if: steps.skip.outputs.skip != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = '${{ steps.ver.outputs.version }}'
+          $out = "dist-release\maximal-${env:TAG}-windows-x64.msi"
+          New-Item -ItemType Directory -Path dist-release -Force | Out-Null
+          # WiX resolves the .wxs's source files (maximal.exe) via -bindpath.
+          wix build build\windows\maximal.wxs `
+            -d "Version=$version" `
+            -arch x64 `
+            -bindpath staging `
+            -out $out
+
+      - name: SHA-256
+        if: steps.skip.outputs.skip != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist-release
+          sha256sum "maximal-${TAG}-windows-x64.msi" > "maximal-${TAG}-windows-x64.msi.sha256"
+          cat "maximal-${TAG}-windows-x64.msi.sha256"
+
+      - name: Attach MSI to release
+        if: steps.skip.outputs.skip != 'true'
+        uses: ./.github/actions/upload-release-asset
+        with:
+          tag: ${{ env.TAG }}
+          files: |
+            dist-release/maximal-${{ env.TAG }}-windows-x64.msi
+            dist-release/maximal-${{ env.TAG }}-windows-x64.msi.sha256
+
+  # Verify the MSI works end-to-end on a clean Windows image: silent
+  # install → assert registry/files/PATH → run the installed binary →
+  # uninstall → assert clean removal. Gates `publish` directly via the
+  # job graph (no sentinel asset needed now). Assertions track
+  # build/windows/maximal.wxs (per-user install to
+  # %LocalAppData%\Programs\maximal, ARP DisplayName "maximal", HKCU
+  # marker Software\stuffbucket\maximal\installed=1, install dir on PATH).
+  windows-msi-verify:
+    needs: windows-msi
+    runs-on: windows-2022
+    permissions:
+      contents: read
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - name: Resolve asset name
+        id: names
+        shell: bash
+        run: echo "msi=maximal-${TAG}-windows-x64.msi" >> "$GITHUB_OUTPUT"
+
+      - name: Download MSI from release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release download "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "${{ steps.names.outputs.msi }}" \
+            --dir .
+          ls -lh "${{ steps.names.outputs.msi }}"
+
+      - name: Install MSI silently
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $msi = (Resolve-Path "${{ steps.names.outputs.msi }}").Path
+          $log = Join-Path $env:GITHUB_WORKSPACE 'install.log'
+          # msiexec is a GUI-subsystem binary: invoked bare it detaches and
+          # PowerShell returns 0 regardless. -Wait -PassThru blocks and
+          # gives the real exit code. 0 = success; 3010/1641 = restart-related.
+          $p = Start-Process msiexec.exe `
+            -ArgumentList "/i `"$msi`" /qn /norestart /l*v `"$log`"" `
+            -Wait -PassThru
+          Write-Host "msiexec /i exit code: $($p.ExitCode)"
+          if ($p.ExitCode -notin @(0, 1641, 3010)) {
+            throw "MSI install failed (exit $($p.ExitCode))"
+          }
+
+      - name: Upload install log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: msi-install-log-${{ env.TAG }}
+          path: install.log
+          if-no-files-found: ignore
+
+      - name: Verify post-install state
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Join-Path $env:LOCALAPPDATA 'Programs\maximal\maximal.exe'
+          if (-not (Test-Path $exe)) { throw "maximal.exe missing at $exe" }
+          Write-Host "maximal.exe present ($((Get-Item $exe).Length) bytes)"
+
+          $root = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'
+          $entry = Get-ChildItem $root | Get-ItemProperty |
+            Where-Object { $_.DisplayName -eq 'maximal' }
+          if (-not $entry) { throw "No 'maximal' Add/Remove Programs entry under HKCU" }
+          Write-Host "Registered: $($entry.DisplayName) v$($entry.DisplayVersion) [$($entry.PSChildName)]"
+          $entry.PSChildName | Out-File -FilePath (Join-Path $env:GITHUB_WORKSPACE 'productcode.txt') -Encoding ascii -NoNewline
+
+          $marker = Get-ItemPropertyValue 'HKCU:\Software\stuffbucket\maximal' 'installed' -ErrorAction SilentlyContinue
+          if ($marker -ne 1) { throw "HKCU marker Software\stuffbucket\maximal\installed != 1 (got '$marker')" }
+
+          $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
+          if ($userPath -notlike '*Programs\maximal*') { throw "install dir not in user PATH: $userPath" }
+          Write-Host "post-install state OK"
+
+      - name: Smoke-test installed binary
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Run from the INSTALLED location — proves the MSI placed a
+          # working binary. `debug --json` needs no credentials.
+          $exe = Join-Path $env:LOCALAPPDATA 'Programs\maximal\maximal.exe'
+          & $exe debug --json | Out-File -FilePath debug.json -Encoding utf8
+          $j = Get-Content debug.json | ConvertFrom-Json
+          foreach ($k in @('version','git','runtime','config','secrets','executor')) {
+            if ($null -eq $j.$k) { throw "Missing top-level key in debug --json: $k" }
+          }
+          Write-Host "installed binary debug --json OK (version=$($j.version))"
+
+      - name: Uninstall MSI silently
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $code = (Get-Content (Join-Path $env:GITHUB_WORKSPACE 'productcode.txt') -Raw).Trim()
+          $log = Join-Path $env:GITHUB_WORKSPACE 'uninstall.log'
+          $p = Start-Process msiexec.exe `
+            -ArgumentList "/x `"$code`" /qn /norestart /l*v `"$log`"" `
+            -Wait -PassThru
+          Write-Host "msiexec /x exit code: $($p.ExitCode)"
+          if ($p.ExitCode -notin @(0, 1641, 3010)) {
+            throw "MSI uninstall failed (exit $($p.ExitCode))"
+          }
+
+      - name: Upload uninstall log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: msi-uninstall-log-${{ env.TAG }}
+          path: uninstall.log
+          if-no-files-found: ignore
+
+      - name: Verify clean removal
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Join-Path $env:LOCALAPPDATA 'Programs\maximal\maximal.exe'
+          if (Test-Path $exe) { throw "maximal.exe still present after uninstall: $exe" }
+          $root = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'
+          $entry = Get-ChildItem $root | Get-ItemProperty |
+            Where-Object { $_.DisplayName -eq 'maximal' }
+          if ($entry) { throw "Add/Remove Programs entry still present after uninstall" }
+          if (Test-Path 'HKCU:\Software\stuffbucket\maximal') { throw "HKCU marker key still present after uninstall" }
+          Write-Host "clean removal verified"
 
   # Flip the draft release to published + latest, but ONLY after every
   # asset is attached: binaries, checksums, the smoke-tested Windows
-  # build, and the signed installers. If any upstream job fails the
-  # release stays a draft, so users never see an incomplete "Latest".
-  # Recover by re-running the failed job, or publish the draft by hand.
+  # build, and every installer (macOS .app.zip/.dmg, Windows install.ps1
+  # and MSI, with the MSI verified end-to-end). If any upstream job fails
+  # the release stays a draft, so users never see an incomplete "Latest".
+  # Recover by re-running the failed jobs (GitHub "Re-run failed jobs"),
+  # then re-running publish — or publish the draft by hand.
   publish:
-    needs: [release, checksums, smoke, installers]
+    needs:
+      - release
+      - checksums
+      - smoke
+      - tauri-macos
+      - windows-installer
+      - windows-msi
+      - windows-msi-verify
     runs-on: ubuntu-latest
     permissions:
       contents: write
