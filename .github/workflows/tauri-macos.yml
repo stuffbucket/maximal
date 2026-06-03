@@ -68,9 +68,11 @@ jobs:
           VERSION="${TAG#v}"
           APP_ZIP="maximal-${TAG}-darwin-${{ env.ARCH }}.app.zip"
           DMG="maximal-${TAG}-darwin-${{ env.ARCH }}.dmg"
-          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
-          echo "APP_ZIP=${APP_ZIP}" >> "$GITHUB_ENV"
-          echo "DMG=${DMG}"         >> "$GITHUB_ENV"
+          {
+            echo "VERSION=${VERSION}"
+            echo "APP_ZIP=${APP_ZIP}"
+            echo "DMG=${DMG}"
+          } >> "$GITHUB_ENV"
 
           # Tauri reads version from tauri.conf.json, not git tags. Stamp it.
           /usr/bin/sed -i '' -e "s/\"version\": \"0\\.0\\.0\"/\"version\": \"${VERSION}\"/" \

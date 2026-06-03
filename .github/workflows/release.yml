@@ -207,11 +207,16 @@ jobs:
           MAXIMAL_VERSION: ${{ steps.ver.outputs.version }}
           MAXIMAL_GIT_SHA: ${{ github.sha }}
           MAXIMAL_GIT_BRANCH: ${{ github.ref_name }}
+          # Read the matrix value via env rather than inlining the
+          # `${{ }}` expression into the shell condition — avoids a
+          # shellcheck SC2193 false positive (it can't see the templated
+          # value) and keeps workflow expressions out of executed shell.
+          ARTIFACT: ${{ matrix.artifact }}
         run: |
           set -euo pipefail
           mkdir -p dist-bin
           OUT="dist-bin/maximal"
-          if [[ "${{ matrix.artifact }}" == windows-* ]]; then OUT="${OUT}.exe"; fi
+          if [[ "$ARTIFACT" == windows-* ]]; then OUT="${OUT}.exe"; fi
 
           # --define injects compile-time constants into the binary:
           #   __MAXIMAL_VERSION__   the stripped tag (e.g. "0.3.4")
