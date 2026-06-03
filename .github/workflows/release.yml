@@ -35,6 +35,11 @@ concurrency:
   group: release-${{ github.event.inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
+# Asset-reuse toggle (read via ${{ vars.RELEASE_REUSE_EXISTING_ASSETS }},
+# a repo variable so it works for tag-triggered runs): set it to 'true' to
+# let the windows-msi / windows-installer skip gates reuse already-attached
+# assets for faster debug re-runs. Unset or any other value rebuilds
+# everything from the tag commit (the default).
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -486,18 +491,28 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # Asset-reuse gate (OPT-IN): only skip when the repo variable
+      # RELEASE_REUSE_EXISTING_ASSETS is exactly 'true' AND install.ps1 is
+      # already attached. Default (variable unset) => never skips => always
+      # re-stages from the tag commit.
       - name: Skip if installer already attached
         id: skip
         env:
           GH_TOKEN: ${{ github.token }}
+          REUSE: ${{ vars.RELEASE_REUSE_EXISTING_ASSETS }}
         run: |
           set -euo pipefail
+          if [ "${REUSE:-}" != "true" ]; then
+            echo "RELEASE_REUSE_EXISTING_ASSETS not 'true' — staging from tag commit."
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           ASSETS="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null || echo '')"
           if grep -Fxq "install.ps1" <<<"$ASSETS"; then
-            echo "Asset install.ps1 already attached to $TAG — skipping."
+            echo "Reuse enabled and install.ps1 already attached to $TAG — skipping."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
-            echo "install.ps1 not yet present on $TAG — staging."
+            echo "Reuse enabled but install.ps1 not yet present on $TAG — staging."
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -531,20 +546,30 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # Asset-reuse gate (OPT-IN): only skip when the repo variable
+      # RELEASE_REUSE_EXISTING_ASSETS is exactly 'true' AND the MSI is
+      # already attached. Default (variable unset) => never skips => always
+      # rebuilds the MSI from the tag commit.
       - name: Skip if MSI already attached
         id: skip
         env:
           GH_TOKEN: ${{ github.token }}
+          REUSE: ${{ vars.RELEASE_REUSE_EXISTING_ASSETS }}
         shell: bash
         run: |
           set -euo pipefail
           MSI="maximal-${TAG}-windows-x64.msi"
+          if [ "${REUSE:-}" != "true" ]; then
+            echo "RELEASE_REUSE_EXISTING_ASSETS not 'true' — building from tag commit."
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           ASSETS="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null || echo '')"
           if grep -Fxq "$MSI" <<<"$ASSETS"; then
-            echo "Asset $MSI already attached to $TAG — skipping build + upload."
+            echo "Reuse enabled and $MSI already attached to $TAG — skipping build + upload."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
-            echo "$MSI not yet present on $TAG — building."
+            echo "Reuse enabled but $MSI not yet present on $TAG — building."
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
