@@ -151,7 +151,49 @@ If you need to redo a step without re-tagging:
   assets).
 - **Pull a release:** `gh release delete v0.1.0` + `git push --delete
   origin v0.1.0`. Don't do this lightly — anyone who already
-  downloaded gets stale URLs.
+  downloaded gets stale URLs. Note: an **already-published** release is
+  immutable (see below) — the tag is frozen, so re-cutting the same tag
+  won't work; bump to a new patch version instead.
+
+<!-- NOTE: "Immutable releases" section added by the release-immutability
+     task. If another agent is editing this runbook, sequence around this
+     anchor to keep merges clean. -->
+
+## Immutable releases
+
+This repo has **GitHub Immutable Releases enabled** (a repository setting,
+turned on 2026-06). Inspect or toggle it with:
+
+```sh
+gh api repos/stuffbucket/maximal/immutable-releases             # {"enabled":true,...}
+gh api --method PUT  repos/stuffbucket/maximal/immutable-releases    # enable  → 204
+gh api --method DELETE repos/stuffbucket/maximal/immutable-releases  # disable → 204
+```
+
+**What it guarantees:** once a release is *published*, its assets and its
+Git tag are frozen — assets can't be added, replaced, or deleted, and the
+tag can't be moved. This is a supply-chain protection: what you publish is
+exactly what consumers verify against `SHA256SUMS`.
+
+**Why our flow is already compatible:** GitHub's recommended pattern is
+precisely what `release.yml` does — create the release as a **draft**,
+attach *all* assets to the draft, then flip draft→published last.
+Immutability locks at **publish time**, not at creation, so every
+`gh release upload --clobber` in the upstream jobs (`release`, `binaries`,
+`checksums`, `tauri-macos`, `windows-installer`, `windows-msi`) runs while
+the release is still a draft and is unaffected. The `publish` job gates on
+all of them via `needs:`, so no asset write lands after publish in the
+happy path. The post-publish jobs (`homebrew-tap`, `redeploy-site`) only
+*read* the release — they never mutate it.
+
+**The one behavioral change:** you can no longer `--clobber` or otherwise
+patch a release **after** it's published. The "Re-build the DMG" /
+`gh release upload --clobber` recovery above only works while the release
+is still a draft — i.e. before `publish` succeeds, or while a failed-job
+re-run keeps it a draft. If you find a bad asset on an already-published
+release, **do not try to patch it — cut a new patch version instead.**
+Deleting and re-pushing the same tag won't help either, because the tag
+itself is frozen.
 
 ## Open questions
 
