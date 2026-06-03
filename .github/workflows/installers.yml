@@ -1,12 +1,25 @@
-# Stream B installer assembly. Runs after Stream A's release workflow
-# has published the per-arch tarballs; downloads them, wraps each in a
-# .app, zips it, re-attaches the .zip to the same release.
+# Installer assembly. Runs after release.yml has attached the per-arch
+# headless binaries to the (draft) release; builds the platform installers
+# and attaches them to the same release. Gated end-to-end so release.yml's
+# `publish` job only flips the release to "Latest" once these all land.
 #
-# Public-repo policy: no macOS runners. The macOS install path is a
-# zipped .app (drag-to-Applications after Finder extract) instead of
-# the original .dmg plan. Building a real .dmg needs `hdiutil` which
-# is Mac-only; the .app bundle itself is just a directory tree and
-# assembles fine on Linux.
+# Jobs and what they produce (all keyed off the release tag):
+#   - tauri-macos        self-hosted macOS arm64. Natively builds the Tauri
+#                        menu-bar .app, signs it with Developer ID, notarizes
+#                        + staples, then produces BOTH a zipped .app and a
+#                        signed/notarized .dmg (hdiutil). Attaches
+#                        maximal-<tag>-darwin-arm64.{app.zip,dmg}(+.sha256).
+#   - windows-installer  ubuntu. Ships build/windows/install.ps1 verbatim
+#                        (+ .sha256).
+#   - windows-msi        windows-2022. WiX per-user MSI
+#                        (maximal-<tag>-windows-x64.msi + .sha256).
+#   - windows-msi-verify windows-2022. Installs the MSI silently, asserts the
+#                        install (registry/files/PATH), runs the installed
+#                        binary, uninstalls, asserts clean removal — then
+#                        uploads a `<msi>.verified` sentinel that release.yml
+#                        gates publish on. Without it, an MSI that wraps a
+#                        working .exe but installs/uninstalls incorrectly
+#                        could still ship.
 #
 # Actions policy: first-party `actions/*` only, plus the vendored
 # composites under `./.github/actions/`:
@@ -33,6 +46,16 @@ permissions:
   # Needed by `ensure-release` so it can `gh workflow run release.yml`.
   # Without `actions: write`, the workflow-dispatch API returns 403.
   actions: write
+
+# Serialize per-tag. release.yml dispatches this workflow, and it can
+# also be triggered manually for the same tag — without this, two runs
+# fan out onto the SINGLE self-hosted macOS runner and double-build +
+# double-notarize the same bundle, racing `gh release upload --clobber`
+# on identical asset names. Same group as nothing else; different tags
+# still run concurrently. Don't cancel in-flight notarization.
+concurrency:
+  group: installers-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
 
 jobs:
   # On `release: published`, the release exists by definition and
@@ -504,3 +527,180 @@ jobs:
           files: |
             dist-release/maximal-${{ env.TAG }}-windows-x64.msi
             dist-release/maximal-${{ env.TAG }}-windows-x64.msi.sha256
+
+  # Verify the MSI actually works end-to-end on a clean Windows image:
+  # silent install → assert registry/files/PATH → run the installed
+  # binary → uninstall → assert clean removal. Only after all of that
+  # passes does it attach a `<msi>.verified` sentinel asset, which
+  # release.yml's publish gate requires. The pre-existing `smoke` job in
+  # release.yml only execs the raw .exe from the zip — it never touched
+  # the MSI, so a structurally-broken installer (wrong install dir,
+  # missing ARP entry, dirty uninstall) would still ship. This closes
+  # that gap. Assertions track build/windows/maximal.wxs: per-user
+  # install to %LocalAppData%\Programs\maximal, ARP DisplayName
+  # "maximal", HKCU marker Software\stuffbucket\maximal\installed=1, and
+  # the install dir added to (and on uninstall removed from) user PATH.
+  windows-msi-verify:
+    needs: windows-msi
+    name: Verify Windows MSI (install + smoke + uninstall)
+    runs-on: windows-2022
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - name: Resolve asset name + idempotency gate
+        id: skip
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          MSI="maximal-${TAG}-windows-x64.msi"
+          echo "msi=$MSI" >> "$GITHUB_OUTPUT"
+          ASSETS="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null || echo '')"
+          if grep -Fxq "$MSI.verified" <<<"$ASSETS"; then
+            echo "$MSI.verified already attached to $TAG — MSI already verified, skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download MSI from release
+        if: steps.skip.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release download "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "${{ steps.skip.outputs.msi }}" \
+            --dir .
+          ls -lh "${{ steps.skip.outputs.msi }}"
+
+      - name: Install MSI silently
+        if: steps.skip.outputs.skip != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $msi = (Resolve-Path "${{ steps.skip.outputs.msi }}").Path
+          $log = Join-Path $env:GITHUB_WORKSPACE 'install.log'
+          # msiexec is a GUI-subsystem binary: invoked bare it detaches and
+          # PowerShell returns 0 regardless. -Wait -PassThru blocks and
+          # gives the real exit code. 0 = success; 3010/1641 = success,
+          # restart-related (benign under /norestart).
+          $p = Start-Process msiexec.exe `
+            -ArgumentList "/i `"$msi`" /qn /norestart /l*v `"$log`"" `
+            -Wait -PassThru
+          Write-Host "msiexec /i exit code: $($p.ExitCode)"
+          if ($p.ExitCode -notin @(0, 1641, 3010)) {
+            throw "MSI install failed (exit $($p.ExitCode))"
+          }
+
+      - name: Upload install log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: msi-install-log-${{ env.TAG }}
+          path: install.log
+          if-no-files-found: ignore
+
+      - name: Verify post-install state
+        if: steps.skip.outputs.skip != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          # Binary at the per-user install path (build/windows/maximal.wxs:
+          # %LocalAppData%\Programs\maximal\maximal.exe).
+          $exe = Join-Path $env:LOCALAPPDATA 'Programs\maximal\maximal.exe'
+          if (-not (Test-Path $exe)) { throw "maximal.exe missing at $exe" }
+          Write-Host "maximal.exe present ($((Get-Item $exe).Length) bytes)"
+
+          # Add/Remove Programs entry (per-user MSI -> HKCU). Capture the
+          # ProductCode for a precise uninstall (it's generated, not in
+          # the .wxs, so read it back rather than hard-coding).
+          $root = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'
+          $entry = Get-ChildItem $root | Get-ItemProperty |
+            Where-Object { $_.DisplayName -eq 'maximal' }
+          if (-not $entry) { throw "No 'maximal' Add/Remove Programs entry under HKCU" }
+          Write-Host "Registered: $($entry.DisplayName) v$($entry.DisplayVersion) [$($entry.PSChildName)]"
+          $entry.PSChildName | Out-File -FilePath (Join-Path $env:GITHUB_WORKSPACE 'productcode.txt') -Encoding ascii -NoNewline
+
+          # HKCU marker written by the StartMenu component.
+          $marker = Get-ItemPropertyValue 'HKCU:\Software\stuffbucket\maximal' 'installed' -ErrorAction SilentlyContinue
+          if ($marker -ne 1) { throw "HKCU marker Software\stuffbucket\maximal\installed != 1 (got '$marker')" }
+
+          # Install dir added to user PATH (Environment element).
+          $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
+          if ($userPath -notlike '*Programs\maximal*') { throw "install dir not in user PATH: $userPath" }
+          Write-Host "post-install state OK"
+
+      - name: Smoke-test installed binary
+        if: steps.skip.outputs.skip != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Run from the INSTALLED location (not the zip) — proves the MSI
+          # placed a working binary. `debug --json` needs no credentials.
+          $exe = Join-Path $env:LOCALAPPDATA 'Programs\maximal\maximal.exe'
+          & $exe debug --json | Out-File -FilePath debug.json -Encoding utf8
+          $j = Get-Content debug.json | ConvertFrom-Json
+          foreach ($k in @('version','git','runtime','config','secrets','executor')) {
+            if ($null -eq $j.$k) { throw "Missing top-level key in debug --json: $k" }
+          }
+          Write-Host "installed binary debug --json OK (version=$($j.version))"
+
+      - name: Uninstall MSI silently
+        if: steps.skip.outputs.skip != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $code = (Get-Content (Join-Path $env:GITHUB_WORKSPACE 'productcode.txt') -Raw).Trim()
+          $log = Join-Path $env:GITHUB_WORKSPACE 'uninstall.log'
+          $p = Start-Process msiexec.exe `
+            -ArgumentList "/x `"$code`" /qn /norestart /l*v `"$log`"" `
+            -Wait -PassThru
+          Write-Host "msiexec /x exit code: $($p.ExitCode)"
+          if ($p.ExitCode -notin @(0, 1641, 3010)) {
+            throw "MSI uninstall failed (exit $($p.ExitCode))"
+          }
+
+      - name: Upload uninstall log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: msi-uninstall-log-${{ env.TAG }}
+          path: uninstall.log
+          if-no-files-found: ignore
+
+      - name: Verify clean removal
+        if: steps.skip.outputs.skip != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Join-Path $env:LOCALAPPDATA 'Programs\maximal\maximal.exe'
+          if (Test-Path $exe) { throw "maximal.exe still present after uninstall: $exe" }
+          $root = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'
+          $entry = Get-ChildItem $root | Get-ItemProperty |
+            Where-Object { $_.DisplayName -eq 'maximal' }
+          if ($entry) { throw "Add/Remove Programs entry still present after uninstall" }
+          if (Test-Path 'HKCU:\Software\stuffbucket\maximal') { throw "HKCU marker key still present after uninstall" }
+          Write-Host "clean removal verified"
+
+      # Only reached if every step above succeeded (default if: success()).
+      # The sentinel is what release.yml's publish gate waits on.
+      - name: Mark MSI verified
+        if: steps.skip.outputs.skip != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist-release
+          printf 'verified %s on %s\n' "${{ steps.skip.outputs.msi }}" "$RUNNER_OS" \
+            > "dist-release/${{ steps.skip.outputs.msi }}.verified"
+
+      - name: Attach verified sentinel to release
+        if: steps.skip.outputs.skip != 'true'
+        uses: ./.github/actions/upload-release-asset
+        with:
+          tag: ${{ env.TAG }}
+          files: dist-release/${{ steps.skip.outputs.msi }}.verified
