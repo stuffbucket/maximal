@@ -23,6 +23,15 @@ on:
         description: Tag to release (must already exist; e.g. v0.1.0)
         required: true
 
+# Serialize per-tag so a re-run or a double tag-push can't race two
+# release runs against the same draft (the installer jobs would then
+# double-build + clobber the same assets). Different tags still run
+# concurrently. Never cancel in-flight — a release mid-notarization
+# must finish, not be interrupted by a re-trigger.
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -454,9 +463,17 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
+          # Dispatch installers.yml AT THE TAG, not main. The whole point
+          # of a release is that its installers are built from the exact
+          # source the binaries were built from (the tag commit). Running
+          # installers.yml at `main` meant that once main advanced past the
+          # tag, a single release shipped a .app/.dmg/.msi rebuilt from main
+          # while the headless tarball/zip came from the tag — two source
+          # trees in one release. `refs/tags/$TAG` pins shell/, tauri.conf,
+          # the .wxs, and build/macos/* to the released commit.
           gh workflow run installers.yml \
             --repo "$GITHUB_REPOSITORY" \
-            --ref main \
+            --ref "refs/tags/$TAG" \
             --field "tag=$TAG"
           echo "Dispatched installers.yml for $TAG; waiting for installer assets ..."
 
@@ -465,12 +482,31 @@ jobs:
           # 45 minutes (90 × 30s) before giving up. If they never
           # arrive, this job fails and `publish` is skipped — the
           # release stays a draft rather than going out incomplete.
+          #
+          # The list is the publish contract: every installer asset a user
+          # can download must be present before the draft goes "Latest".
+          # install.ps1 (+.sha256) is included so a failed windows-installer
+          # job blocks publish like every other installer (previously it
+          # didn't — a release could go Latest with the PS1 installer
+          # missing). `*.msi.verified` is a sentinel the windows-msi-verify
+          # job uploads ONLY after the MSI installs/runs/uninstalls cleanly
+          # on a Windows runner, so a structurally-broken MSI can no longer
+          # ship just because the .msi file exists.
           REQUIRED=(
             "maximal-${TAG}-darwin-arm64.dmg"
             "maximal-${TAG}-darwin-arm64.app.zip"
             "maximal-${TAG}-windows-x64.msi"
+            "maximal-${TAG}-windows-x64.msi.verified"
+            "install.ps1"
+            "install.ps1.sha256"
           )
-          for _ in $(seq 1 90); do
+          # 60 minutes (120 × 30s). Two sequential `notarytool --wait`
+          # round-trips (.app then .dmg) on a single self-hosted runner
+          # can push a healthy build past the old 45-min cap and leave it
+          # stuck as a draft. (The proper fix — gating on the installers
+          # run's actual completion instead of a fixed wall-clock poll —
+          # comes with the workflow_call consolidation.)
+          for _ in $(seq 1 120); do
             ASSETS="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null || echo '')"
             MISSING=0
             for f in "${REQUIRED[@]}"; do
@@ -482,7 +518,7 @@ jobs:
             fi
             sleep 30
           done
-          echo "::error::Installer assets for $TAG did not appear within 45 minutes — release left as a draft."
+          echo "::error::Installer assets for $TAG did not appear within 60 minutes — release left as a draft."
           exit 1
 
   # Flip the draft release to published + latest, but ONLY after every
@@ -502,6 +538,15 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
+          # Idempotent: if a prior run already flipped this release to
+          # published, a re-run of `publish` (e.g. retrying a later job)
+          # must be a no-op rather than re-running the draft→published
+          # transition on a live release.
+          DRAFT="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft' 2>/dev/null || echo 'true')"
+          if [ "$DRAFT" = "false" ]; then
+            echo "Release $TAG is already published — nothing to do."
+            exit 0
+          fi
           if [[ "${{ needs.release.outputs.is_prerelease }}" == "true" ]]; then
             gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease
           else
