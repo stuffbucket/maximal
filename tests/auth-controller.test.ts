@@ -470,6 +470,33 @@ describe("runPoller (driven by startDeviceFlow)", () => {
     expect(status.account_login).toBe("alice")
   })
 
+  test("never reports 'authenticated' before the login is fetched (no '(unknown)' polling window)", async () => {
+    // The Account UI polls /status every 2s while pending and STOPS the
+    // instant it sees `authenticated`, re-fetching only on re-navigation.
+    // So if the controller flips to authenticated before account_login is
+    // populated, the UI latches "(unknown)" + a placeholder avatar. Guard
+    // the ordering: the login must be resolved before `authenticated`.
+    const poll = deferred<string>()
+    const user = deferred<{ login: string }>()
+    harness.pollAccessTokenImpl = () => poll.promise
+    harness.getGitHubUserImpl = () => user.promise
+
+    await startDeviceFlow()
+    poll.resolve("ghu_ok")
+    await flushMicrotasks(20)
+
+    // Token has been polled + the user fetch is in flight, but the login
+    // hasn't resolved yet. Status must NOT be authenticated here.
+    expect(getAuthStatus().state).not.toBe("authenticated")
+
+    user.resolve({ login: "alice" })
+    await flushMicrotasks(20)
+
+    const finalStatus = getAuthStatus()
+    expect(finalStatus.state).toBe("authenticated")
+    expect(finalStatus.account_login).toBe("alice")
+  })
+
   test("getGitHubUser failure does NOT invalidate the token (best-effort login)", async () => {
     const poll = deferred<string>()
     harness.pollAccessTokenImpl = () => poll.promise

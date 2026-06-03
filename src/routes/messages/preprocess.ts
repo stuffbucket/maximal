@@ -547,6 +547,29 @@ const filterAssistantThinkingBlocks = (
   }
 }
 
+// Copilot's Bedrock-backed Claude rejects sampling params in two ways:
+//   1. claude-opus-4.7+ (adaptive_thinking models) reject temperature/top_p/top_k
+//      outright with a 400.
+//   2. ALL models reject temperature and top_p *together* ("`temperature` and
+//      `top_p` cannot both be specified for this model. Please use only one.").
+// (2) is an API-level constraint, so it is deliberately not gated on model
+// capability. Claude Code <= 2.1.159 sends both; api.anthropic.com accepts it
+// but Copilot does not. Drop top_p (keep temperature) whenever both survive.
+const stripSamplingParams = (
+  payload: AnthropicMessagesPayload,
+  selectedModel?: Model,
+): void => {
+  if (selectedModel?.capabilities.supports.adaptive_thinking) {
+    delete payload.temperature
+    delete payload.top_p
+    delete payload.top_k
+  }
+
+  if (payload.temperature !== undefined && payload.top_p !== undefined) {
+    delete payload.top_p
+  }
+}
+
 export const prepareMessagesApiPayload = (
   payload: AnthropicMessagesPayload,
   selectedModel?: Model,
@@ -562,11 +585,7 @@ export const prepareMessagesApiPayload = (
   const disableThink = toolChoice?.type === "any" || toolChoice?.type === "tool"
 
   // claude-opus-4.7+ rejects temperature/top_p/top_k with a 400.
-  if (selectedModel?.capabilities.supports.adaptive_thinking) {
-    delete payload.temperature
-    delete payload.top_p
-    delete payload.top_k
-  }
+  stripSamplingParams(payload, selectedModel)
 
   if (selectedModel?.capabilities.supports.adaptive_thinking && !disableThink) {
     payload.thinking = {

@@ -3,10 +3,10 @@ name: Release
 permissions:
   id-token: write
   contents: write
-  # Needed by `dispatch-installers` so it can fire installers.yml.
-  # GitHub's anti-loop guard suppresses `release: published` triggers
-  # when the release is created via GITHUB_TOKEN, so we have to
-  # dispatch installers.yml explicitly.
+  # Needed by the `installers` and `redeploy-site` jobs so they can
+  # fire installers.yml / deploy-pages.yml. GitHub's anti-loop guard
+  # suppresses `release: published` triggers when the release is
+  # created via GITHUB_TOKEN, so we dispatch those workflows explicitly.
   actions: write
 
 on:
@@ -26,7 +26,27 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
+    outputs:
+      is_prerelease: ${{ steps.prerelease.outputs.is_prerelease }}
     steps:
+      # Fail fast on a bad trigger. The whole pipeline keys off
+      # github.ref_name, which is only a real version when this runs on
+      # a v* tag (push, or "Run workflow" with the tag selected under
+      # "Use workflow from"). Running it from a branch (e.g. main) makes
+      # ref_name="main", and changelogithub fails ~40s in with the
+      # opaque "ref 'main' is not available as tags". Catch it in ~2s
+      # with an actionable message instead.
+      - name: Validate release ref
+        run: |
+          set -euo pipefail
+          TAG="${{ github.ref_name }}"
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::Release must run on a vX.Y.Z tag, not '$TAG'."
+            echo "::error::Cut a release by pushing a tag:  git tag vX.Y.Z && git push origin vX.Y.Z"
+            echo "::error::(Running this workflow from a branch with no tag will not work — ref_name is the branch.)"
+            exit 1
+          fi
+
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
@@ -79,30 +99,37 @@ jobs:
             echo "npm_tag=latest" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Generate GitHub Release notes
+      - name: Generate GitHub Release notes (draft)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           TAG="${{ github.ref_name }}"
+          # Create the release as a DRAFT. The `publish` job flips it to
+          # published + latest at the very end, once every asset is
+          # attached — binaries, checksums, and the signed installers
+          # (.dmg/.msi/.app.zip). This closes the window where a "Latest"
+          # release was visible without its installers while Apple
+          # notarization was still running.
+          #
           # changelogithub computes notes from the previous v* tag.
           # On the first release no such tag exists and the tool
           # produces a malformed git range. Fall back to gh's built-in
           # auto-generated notes for that bootstrap case.
           PRIOR="$(git tag --list 'v*' --sort=-v:refname | grep -v "^${TAG}$" | head -1 || true)"
           if [ -z "$PRIOR" ]; then
-            echo "No prior v* tag — creating release with --generate-notes"
-            FLAGS=()
+            echo "No prior v* tag — creating draft release with --generate-notes"
+            FLAGS=(--draft)
             if [[ "${{ steps.prerelease.outputs.is_prerelease }}" == "true" ]]; then
               FLAGS+=(--prerelease)
             fi
             gh release create "$TAG" --title "$TAG" --generate-notes "${FLAGS[@]}"
           else
-            echo "Prior tag $PRIOR — running changelogithub"
+            echo "Prior tag $PRIOR — running changelogithub (draft)"
             if [[ "${{ steps.prerelease.outputs.is_prerelease }}" == "true" ]]; then
-              bunx changelogithub --prerelease
+              bunx changelogithub --draft --prerelease
             else
-              bunx changelogithub
+              bunx changelogithub --draft
             fi
           fi
 
@@ -346,7 +373,10 @@ jobs:
   # The job no-ops with a warning if the secret is absent so a
   # missing token doesn't fail the whole release.
   homebrew-tap:
-    needs: binaries
+    # After `publish`: sync-homebrew-formula.ts fetches each per-arch
+    # .sha256 over public HTTPS, which only resolves once the release
+    # is published (draft assets are not publicly downloadable).
+    needs: publish
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -404,18 +434,21 @@ jobs:
           git commit -m "maximal: bump to $TAG"
           git push origin HEAD:main
 
-  # Fire installers.yml to assemble the .app.zip / .msi / install.ps1
-  # and re-attach them to this release. The natural `release: published`
-  # trigger on installers.yml does not fire here because GitHub
-  # suppresses workflow triggers for events created via GITHUB_TOKEN.
-  dispatch-installers:
+  # Fire installers.yml to assemble the .app.zip / .dmg / .msi /
+  # install.ps1 and attach them to this (draft) release, then BLOCK
+  # until they land. The natural `release: published` trigger on
+  # installers.yml does not fire here because (a) the release is still a
+  # draft and (b) GitHub suppresses triggers for events created via
+  # GITHUB_TOKEN — so we dispatch explicitly. Waiting here lets the
+  # `publish` job gate on a complete set of installer assets.
+  installers:
     needs: binaries
     runs-on: ubuntu-latest
     permissions:
       actions: write
       contents: read
     steps:
-      - name: Trigger installers.yml
+      - name: Dispatch installers.yml and wait for installer assets
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
@@ -425,7 +458,56 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --ref main \
             --field "tag=$TAG"
-          echo "Dispatched installers.yml for $TAG"
+          echo "Dispatched installers.yml for $TAG; waiting for installer assets ..."
+
+          # Block until every signed installer is attached to the draft
+          # release. Apple notarization can be slow, so poll for up to
+          # 45 minutes (90 × 30s) before giving up. If they never
+          # arrive, this job fails and `publish` is skipped — the
+          # release stays a draft rather than going out incomplete.
+          REQUIRED=(
+            "maximal-${TAG}-darwin-arm64.dmg"
+            "maximal-${TAG}-darwin-arm64.app.zip"
+            "maximal-${TAG}-windows-x64.msi"
+          )
+          for _ in $(seq 1 90); do
+            ASSETS="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null || echo '')"
+            MISSING=0
+            for f in "${REQUIRED[@]}"; do
+              if ! grep -Fxq "$f" <<<"$ASSETS"; then MISSING=1; break; fi
+            done
+            if [ "$MISSING" = 0 ]; then
+              echo "All installer assets present for $TAG."
+              exit 0
+            fi
+            sleep 30
+          done
+          echo "::error::Installer assets for $TAG did not appear within 45 minutes — release left as a draft."
+          exit 1
+
+  # Flip the draft release to published + latest, but ONLY after every
+  # asset is attached: binaries, checksums, the smoke-tested Windows
+  # build, and the signed installers. If any upstream job fails the
+  # release stays a draft, so users never see an incomplete "Latest".
+  # Recover by re-running the failed job, or publish the draft by hand.
+  publish:
+    needs: [release, checksums, smoke, installers]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ "${{ needs.release.outputs.is_prerelease }}" == "true" ]]; then
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease
+          else
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+          fi
+          echo "Published $TAG"
 
   # GitHub suppresses the `release: published` event when a release is
   # created via GITHUB_TOKEN (the anti-loop guard documented up top),
@@ -434,7 +516,10 @@ jobs:
   # landing page's "latest: vX.Y.Z" + download URLs always track the
   # release that was just published.
   redeploy-site:
-    needs: binaries
+    # After `publish`: the landing page advertises "latest: vX.Y.Z" and
+    # links the release download URLs, so it must rebuild against a
+    # published, fully-assembled release — not the draft.
+    needs: publish
     runs-on: ubuntu-latest
     permissions:
       actions: write
