@@ -149,3 +149,77 @@ export const ApiKeyUpdateRequest = z.object({
   enabled: z.boolean().optional(),
 })
 export type ApiKeyUpdateRequest = z.infer<typeof ApiKeyUpdateRequest>
+
+// ---------------------------------------------------------------------------
+// Apps integration — Settings → Apps.
+//
+// An "app" is a downstream tool we can wire to talk to the proxy. Three
+// kinds, distinguished by `kind`:
+//   - "shimmable": a CLI we route by installing a PATH shim (Claude Code).
+//   - "config":    a desktop app we route by editing its config file
+//                  (Claude Desktop).
+//   - "coming-soon": a placeholder card with no wiring yet.
+// ---------------------------------------------------------------------------
+
+/** One detected install of a shimmable CLI. */
+export const AppInstall = z.object({
+  /** Resolved absolute path of the real binary. */
+  path: z.string(),
+  /** `--version` output, or null when it couldn't be read. */
+  version: z.string().nullable(),
+  /** How it was installed (homebrew / npm-global / local-bin / …). */
+  source: z.enum([
+    "homebrew",
+    "npm-global",
+    "local-bin",
+    "claude-local",
+    "path",
+    "unknown",
+  ]),
+  /** Whether the shim currently points here (or matches selectedPath). */
+  active: z.boolean(),
+})
+export type AppInstall = z.infer<typeof AppInstall>
+
+/** When set, the UI offers a one-line install command for the app. */
+export const AppInstallHint = z.object({
+  method: z.string(),
+  command: z.string(),
+})
+export type AppInstallHint = z.infer<typeof AppInstallHint>
+
+export const AppEntry = z.object({
+  id: z.enum(["claude-code", "claude-desktop", "copilot-cli"]),
+  name: z.string(),
+  kind: z.enum(["shimmable", "config", "coming-soon"]),
+  /** Whether the integration is currently active (shim installed / proxy
+   *  config applied). */
+  enabled: z.boolean(),
+  status: z.enum(["ready", "not-installed", "coming-soon"]),
+  installs: z.array(AppInstall),
+  install: AppInstallHint.nullable(),
+})
+export type AppEntry = z.infer<typeof AppEntry>
+
+export const AppsListResponse = z.object({
+  apps: z.array(AppEntry),
+})
+export type AppsListResponse = z.infer<typeof AppsListResponse>
+
+export const ClaudeCodeToggleRequest = z.object({
+  enabled: z.boolean(),
+  path: z.string().optional(),
+})
+export type ClaudeCodeToggleRequest = z.infer<typeof ClaudeCodeToggleRequest>
+
+export const ClaudeCodeSelectRequest = z.object({
+  path: z.string().min(1),
+})
+export type ClaudeCodeSelectRequest = z.infer<typeof ClaudeCodeSelectRequest>
+
+export const ClaudeDesktopToggleRequest = z.object({
+  enabled: z.boolean(),
+})
+export type ClaudeDesktopToggleRequest = z.infer<
+  typeof ClaudeDesktopToggleRequest
+>

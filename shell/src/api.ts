@@ -88,6 +88,45 @@ interface ActiveApiClientsResponse {
   total: number
 }
 
+/**
+ * Apps integrations (Claude Code, Claude Desktop, Copilot CLI). Contract
+ * is jointly owned with `/settings/api/apps` on the proxy side; if the
+ * server-side route ships under a different shape, update both ends.
+ * Kept LOCAL to this file on purpose — the backend's new `src/`
+ * settings-types are not present in this worktree, so importing them
+ * would break the typecheck. Mirror by name, not by import.
+ */
+export type AppId = "claude-code" | "claude-desktop" | "copilot-cli"
+export type AppKind = "shimmable" | "config" | "coming-soon"
+export type AppStatus = "ready" | "not-installed" | "coming-soon"
+
+export interface AppInstall {
+  path: string
+  version: string | null
+  source: string
+  active: boolean
+}
+
+export interface AppInstallHint {
+  method: "curl"
+  command: string
+}
+
+export interface AppEntry {
+  id: AppId
+  name: string
+  kind: AppKind
+  enabled: boolean
+  status: AppStatus
+  installs: Array<AppInstall>
+  /** Non-null only when claude-code has no installs (offer to install). */
+  install: AppInstallHint | null
+}
+
+interface AppsListResponse {
+  apps: Array<AppEntry>
+}
+
 /** Endpoint catalog — adding a new call means adding a member here
  *  plus a `ResponseFor` mapping. Splitting the request shape from
  *  the response type keeps call sites free of an awkward `response`
@@ -147,6 +186,29 @@ type Endpoint =
       method: "GET"
       path: `/settings/api/clients?maxAgeSeconds=${number}`
     }
+  | {
+      kind: "apps-list"
+      method: "GET"
+      path: "/settings/api/apps"
+    }
+  | {
+      kind: "claude-code-toggle"
+      method: "POST"
+      path: "/settings/api/apps/claude-code/toggle"
+      body: { enabled: boolean; path?: string }
+    }
+  | {
+      kind: "claude-code-select"
+      method: "POST"
+      path: "/settings/api/apps/claude-code/select"
+      body: { path: string }
+    }
+  | {
+      kind: "claude-desktop-toggle"
+      method: "POST"
+      path: "/settings/api/apps/claude-desktop/toggle"
+      body: { enabled: boolean }
+    }
 
 type EndpointKind = Endpoint["kind"]
 
@@ -161,6 +223,10 @@ interface ResponseFor {
   "api-keys-delete": { ok: true }
   "api-keys-enforce": ApiKeysListResponse
   "active-clients": ActiveApiClientsResponse
+  "apps-list": AppsListResponse
+  "claude-code-toggle": AppEntry
+  "claude-code-select": AppEntry
+  "claude-desktop-toggle": AppEntry
 }
 
 interface ApiOptions {

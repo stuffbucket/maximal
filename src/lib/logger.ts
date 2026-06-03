@@ -4,6 +4,7 @@ import path from "node:path"
 import util from "node:util"
 
 import { getLogRetentionDays } from "./config"
+import { redactForLog } from "./log-redact"
 import { PATHS } from "./paths"
 import { registerProcessCleanup } from "./process-cleanup"
 import { requestContext } from "./request-context"
@@ -176,6 +177,23 @@ const appendLine = (filePath: string, line: string) => {
 
 type DebugLogger = Pick<ConsolaInstance, "debug">
 
+/**
+ * Redact every non-string argument before it reaches the log reporter.
+ * String args are treated as caller-supplied labels (e.g. "Request
+ * payload:") and kept; objects/arrays are payloads and run through the
+ * fail-closed redactor so message content never lands on disk. This is
+ * the single chokepoint — all handler payload logging flows through
+ * `debugLazy`, so redaction here covers every current and future call
+ * site without per-handler discipline.
+ */
+const redactArgs = (
+  args: [unknown, ...Array<unknown>],
+): [unknown, ...Array<unknown>] => {
+  return args.map((arg) =>
+    typeof arg === "string" ? arg : redactForLog(arg),
+  ) as [unknown, ...Array<unknown>]
+}
+
 export const debugLazy = (
   logger: DebugLogger,
   factory: () => [unknown, ...Array<unknown>],
@@ -184,7 +202,7 @@ export const debugLazy = (
     return
   }
 
-  logger.debug(...factory())
+  logger.debug(...redactArgs(factory()))
 }
 
 export const debugJson = (
@@ -192,7 +210,7 @@ export const debugJson = (
   label: string,
   value: unknown,
 ): void => {
-  debugLazy(logger, () => [label, JSON.stringify(value)])
+  debugLazy(logger, () => [label, JSON.stringify(redactForLog(value))])
 }
 
 export const debugJsonTail = (
@@ -200,7 +218,10 @@ export const debugJsonTail = (
   label: string,
   { value, tailLength = 400 }: { value: unknown; tailLength?: number },
 ): void => {
-  debugLazy(logger, () => [label, JSON.stringify(value).slice(-tailLength)])
+  debugLazy(logger, () => [
+    label,
+    JSON.stringify(redactForLog(value)).slice(-tailLength),
+  ])
 }
 
 export const createHandlerLogger = (name: string): ConsolaInstance => {

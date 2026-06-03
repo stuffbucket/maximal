@@ -39,6 +39,20 @@ export interface AppConfig {
   useResponsesApiWebSearch?: boolean
   claudeTokenMultiplier?: number
   logRetentionDays?: number
+  apps?: AppsConfig
+}
+
+export interface AppsConfig {
+  claudeCode?: {
+    /** Shim currently installed/active. */
+    enabled?: boolean
+    /** Absolute path of the chosen real claude binary the shim exec's. */
+    selectedPath?: string
+  }
+  claudeDesktop?: {
+    /** Proxy config applied to Claude Desktop. */
+    enabled?: boolean
+  }
 }
 
 export interface ModelConfig {

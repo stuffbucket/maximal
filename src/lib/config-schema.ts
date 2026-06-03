@@ -107,6 +107,21 @@ export const AppConfigSchema = z
     useResponsesApiWebSearch: z.boolean().optional(),
     claudeTokenMultiplier: z.number().optional(),
     logRetentionDays: z.number().int().min(0).max(3650).optional(),
+    apps: z
+      .object({
+        claudeCode: z
+          .object({
+            enabled: z.boolean().optional(),
+            selectedPath: z.string().optional(),
+          })
+          .optional(),
+        claudeDesktop: z
+          .object({
+            enabled: z.boolean().optional(),
+          })
+          .optional(),
+      })
+      .optional(),
   })
   // passthrough: keep unknown keys in the parsed output. Lets older
   // proxies tolerate config files written by newer ones.
