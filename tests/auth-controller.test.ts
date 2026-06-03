@@ -61,9 +61,8 @@ const harness = {
 // (poll-access-token, github-token-store) have their own dedicated test
 // files — those go through __setAuthControllerDepsForTests instead of
 // mock.module so the registry stays clean.
-const realGetDeviceCodeModule = await import(
-  "~/services/github/get-device-code"
-)
+const realGetDeviceCodeModule =
+  await import("~/services/github/get-device-code")
 const realGetUserModule = await import("~/services/github/get-user")
 const realTokenModule = await import("~/lib/token")
 const realFsPromisesModule = await import("node:fs/promises")
