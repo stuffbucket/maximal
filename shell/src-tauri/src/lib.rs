@@ -526,9 +526,26 @@ pub fn run() {
         .expect("error while building tauri application");
 
     app.run(|app_handle, event| {
-        // Sole sidecar-kill site. The tray "Quit" item just calls
-        // `app.exit(0)`, which routes through ExitRequested.
-        if let RunEvent::ExitRequested { .. } = event {
+        if let RunEvent::ExitRequested { code, api, .. } = event {
+            // Tauri exits the process when the last window closes. This is
+            // a menu-bar app: the tray — not any window — is the persistent
+            // surface, and the splash is frequently the ONLY window open
+            // (on an authenticated launch nothing else opens). When the
+            // splash's 3s fade closes it, the open-window count hits zero
+            // and Tauri requests an exit, tearing the whole app — tray
+            // included — down. That's the "tray dies with the splash fade"
+            // bug. `code == None` means this exit was driven by window
+            // interaction (last window closed), not by us; veto it so the
+            // tray-only app keeps running.
+            //
+            // Intentional quits all route through `app.exit(0)` (tray Quit,
+            // clean sidecar exit, single-instance `--replace`), which yields
+            // `code == Some(_)`. Those proceed and reach `kill_sidecar`.
+            if code.is_none() {
+                api.prevent_exit();
+                return;
+            }
+            // Sole sidecar-kill site for a real shutdown.
             kill_sidecar(app_handle);
         }
     });
