@@ -90,16 +90,12 @@
     </main>
     <script>
       (function () {
-        var status = document.getElementById("status");
         var splash = document.querySelector(".splash");
-        // Rust drives the timing (it enforces the minimum on-screen beat);
-        // the page only reacts so the fade and the window close stay in
-        // lockstep. "ready" swaps the copy, "leave" starts the fade.
+        // Rust owns dismissal (3s timeout, or any window opening) and
+        // emits "splash:leave" to start the fade, then closes the window \u2014
+        // the page only reacts so the fade and close stay in lockstep.
         var t = window.__TAURI__;
         if (t && t.event && typeof t.event.listen === "function") {
-          t.event.listen("splash:ready", function () {
-            status.textContent = "Running in your menu bar \u2191";
-          });
           t.event.listen("splash:leave", function () {
             splash.classList.add("is-leaving");
           });

@@ -276,6 +276,21 @@ impl StartupAnnounced {
     }
 }
 
+/// One-shot guard so the splash is dismissed at most once and never
+/// recreated — once it's gone it stays gone for the life of the process.
+struct SplashDismissed(std::sync::atomic::AtomicBool);
+
+impl SplashDismissed {
+    fn new() -> Self {
+        Self(std::sync::atomic::AtomicBool::new(false))
+    }
+
+    /// Returns true the first time it's called; false on subsequent calls.
+    fn claim(&self) -> bool {
+        !self.0.swap(true, std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
 /// Random per-launch key the shell shares with its sidecar so the
 /// webview can authenticate against /settings/api/* even when the user
 /// has enabled "Block unknown connections." Injected as an env var when
@@ -451,6 +466,7 @@ pub fn run() {
         .manage(ShellApiKey::new())
         .manage(SetupPromptShown::new())
         .manage(StartupAnnounced::new())
+        .manage(SplashDismissed::new())
         .manage(LastRejection::new())
         .invoke_handler(tauri::generate_handler![
             open_settings_at,
@@ -930,23 +946,16 @@ fn apply_state(app: &AppHandle, next: SidecarState) {
     if let Err(err) = refresh_tray(app, next) {
         eprintln!("[shell] tray refresh failed: {err}");
     }
-    // First time we're actually up: retire the splash and tell the user
-    // we're live in the menu bar. Guarded so Unauthenticated ⇄
-    // Authenticated flips don't re-announce.
+    // First time we're actually up: tell the user we're live in the menu
+    // bar. Guarded so Unauthenticated ⇄ Authenticated flips don't
+    // re-announce. The splash is independent of this — it dismisses on
+    // its own 3s timeout or when any window opens (see dismiss_splash).
     if matches!(
         next,
         SidecarState::RunningAuthenticated | SidecarState::RunningUnauthenticated
     ) && app.state::<StartupAnnounced>().claim()
     {
-        dismiss_splash(app);
         fire_startup_notification(app);
-    }
-    // If we never came up, don't strand the splash on its "Starting…"
-    // copy — close it and let the tray's attention icon carry the signal.
-    if next == SidecarState::Failed {
-        if let Some(win) = app.get_webview_window("splash") {
-            let _ = win.close();
-        }
     }
     if next == SidecarState::RunningUnauthenticated
         && app.state::<SetupPromptShown>().claim()
@@ -984,48 +993,34 @@ fn create_splash(app: &AppHandle) {
     .build();
     match result {
         Ok(_) => {
-            if let Ok(mut shown) = SPLASH_SHOWN_AT.lock() {
-                *shown = Some(std::time::Instant::now());
-            }
+            // Auto-dismiss after 3s on screen. The menu-bar icon is
+            // already installed (install_tray runs before this), so the
+            // user has their affordance — the splash just clears itself.
+            // dismiss_splash is a one-shot, so this is a no-op if a window
+            // opening dismissed it first.
+            let handle = app.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(3)).await;
+                dismiss_splash(&handle);
+            });
         }
         Err(err) => eprintln!("[shell] splash window failed: {err}"),
     }
 }
 
-/// When the splash was shown — read by `dismiss_splash` to enforce a
-/// minimum on-screen time.
-static SPLASH_SHOWN_AT: Mutex<Option<std::time::Instant>> = Mutex::new(None);
-
-/// Retire the splash with a snappy, deliberate beat:
-///   1. swap to the "ready" copy,
-///   2. hold so the splash has been visible at least `MIN_VISIBLE_MS`
-///      total (the wordmark always lands even if the sidecar came up
-///      instantly) AND the ready copy shows for at least `ACK_HOLD_MS`,
-///   3. fade out (CSS), then close.
-/// The floor never *adds* delay when the sidecar is slow — by then the
-/// splash has already been up well past `MIN_VISIBLE_MS`. Rust drives the
-/// timing and the JS only reacts to events, so the fade and the close
-/// stay in lockstep (no dead, invisible window). Best-effort throughout.
+/// Dismiss the splash for good, on whichever comes first: the 3s timeout
+/// (`create_splash`) or any other window opening (`open_settings_window`
+/// / `open_dashboard_window`). One-shot via `SplashDismissed` — once gone
+/// it never returns for the life of the process. Emits the CSS fade, then
+/// closes the window after it. Best-effort throughout.
 fn dismiss_splash(app: &AppHandle) {
-    // Motion: ~1s total in the fast case — long enough to read as
-    // intentional, short enough to feel snappy.
-    const MIN_VISIBLE_MS: u64 = 800;
-    const ACK_HOLD_MS: u64 = 500;
+    if !app.state::<SplashDismissed>().claim() {
+        return;
+    }
     const FADE_MS: u64 = 240; // ≥ the 200ms CSS fade, + a little slack
-
-    let elapsed = SPLASH_SHOWN_AT
-        .lock()
-        .ok()
-        .and_then(|g| *g)
-        .map(|t| t.elapsed().as_millis() as u64)
-        .unwrap_or(MIN_VISIBLE_MS);
-    let hold = ACK_HOLD_MS.max(MIN_VISIBLE_MS.saturating_sub(elapsed));
-
-    let _ = app.emit("splash:ready", ());
+    let _ = app.emit("splash:leave", ());
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(hold)).await;
-        let _ = handle.emit("splash:leave", ());
         tokio::time::sleep(Duration::from_millis(FADE_MS)).await;
         if let Some(win) = handle.get_webview_window("splash") {
             let _ = win.close();
@@ -1292,6 +1287,10 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
 /// settings page. The optional `section` becomes a URL fragment so the
 /// frontend can scroll to / select that section.
 fn open_settings_window(app: &AppHandle, section: Option<&str>) {
+    // Any window taking the stage retires the splash (it's always-on-top
+    // and would otherwise sit over this one — e.g. the first-launch
+    // sign-in nudge).
+    dismiss_splash(app);
     // In debug builds the `beforeDevCommand` in tauri.conf.json starts
     // Vite on :1420, so we point the webview directly at it. That
     // gives us native HMR (no proxy WebSocket gymnastics) and exposes
@@ -1380,6 +1379,7 @@ fn do_reveal_logs_dir(app: &AppHandle) {
 /// import-attribute file loader (see src/server.ts), so the dashboard
 /// ships inside the Tauri bundle with no extra resource staging.
 fn open_dashboard_window(app: &AppHandle) {
+    dismiss_splash(app);
     let url_string = format!(
         "http://localhost:{SIDECAR_PORT}/usage-viewer\
          ?endpoint=http://localhost:{SIDECAR_PORT}/usage",
