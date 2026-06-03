@@ -92,13 +92,17 @@
       (function () {
         var status = document.getElementById("status");
         var splash = document.querySelector(".splash");
-        function markReady() {
-          status.textContent = "Running in your menu bar \u2191";
-          setTimeout(function () { splash.classList.add("is-leaving"); }, 700);
-        }
+        // Rust drives the timing (it enforces the minimum on-screen beat);
+        // the page only reacts so the fade and the window close stay in
+        // lockstep. "ready" swaps the copy, "leave" starts the fade.
         var t = window.__TAURI__;
         if (t && t.event && typeof t.event.listen === "function") {
-          t.event.listen("splash:ready", markReady);
+          t.event.listen("splash:ready", function () {
+            status.textContent = "Running in your menu bar \u2191";
+          });
+          t.event.listen("splash:leave", function () {
+            splash.classList.add("is-leaving");
+          });
         }
       })();
     </script>

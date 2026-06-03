@@ -982,20 +982,51 @@ fn create_splash(app: &AppHandle) {
     .skip_taskbar(true)
     .center()
     .build();
-    if let Err(err) = result {
-        eprintln!("[shell] splash window failed: {err}");
+    match result {
+        Ok(_) => {
+            if let Ok(mut shown) = SPLASH_SHOWN_AT.lock() {
+                *shown = Some(std::time::Instant::now());
+            }
+        }
+        Err(err) => eprintln!("[shell] splash window failed: {err}"),
     }
 }
 
-/// Signal the splash to show its "ready" copy, then close it after the
-/// fade. Best-effort: a missing window or failed emit is fine. The poll
-/// loop already runs on the tokio runtime; reuse it for the one-shot
-/// close timer.
+/// When the splash was shown — read by `dismiss_splash` to enforce a
+/// minimum on-screen time.
+static SPLASH_SHOWN_AT: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+
+/// Retire the splash with a snappy, deliberate beat:
+///   1. swap to the "ready" copy,
+///   2. hold so the splash has been visible at least `MIN_VISIBLE_MS`
+///      total (the wordmark always lands even if the sidecar came up
+///      instantly) AND the ready copy shows for at least `ACK_HOLD_MS`,
+///   3. fade out (CSS), then close.
+/// The floor never *adds* delay when the sidecar is slow — by then the
+/// splash has already been up well past `MIN_VISIBLE_MS`. Rust drives the
+/// timing and the JS only reacts to events, so the fade and the close
+/// stay in lockstep (no dead, invisible window). Best-effort throughout.
 fn dismiss_splash(app: &AppHandle) {
+    // Motion: ~1s total in the fast case — long enough to read as
+    // intentional, short enough to feel snappy.
+    const MIN_VISIBLE_MS: u64 = 800;
+    const ACK_HOLD_MS: u64 = 500;
+    const FADE_MS: u64 = 240; // ≥ the 200ms CSS fade, + a little slack
+
+    let elapsed = SPLASH_SHOWN_AT
+        .lock()
+        .ok()
+        .and_then(|g| *g)
+        .map(|t| t.elapsed().as_millis() as u64)
+        .unwrap_or(MIN_VISIBLE_MS);
+    let hold = ACK_HOLD_MS.max(MIN_VISIBLE_MS.saturating_sub(elapsed));
+
     let _ = app.emit("splash:ready", ());
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(1100)).await;
+        tokio::time::sleep(Duration::from_millis(hold)).await;
+        let _ = handle.emit("splash:leave", ());
+        tokio::time::sleep(Duration::from_millis(FADE_MS)).await;
         if let Some(win) = handle.get_webview_window("splash") {
             let _ = win.close();
         }
