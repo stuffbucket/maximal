@@ -258,6 +258,29 @@ async function runPoller(flow: ActiveFlow): Promise<void> {
     if (flow.abort.signal.aborted) return
 
     await writeDefaultRecord(makeRecord(token))
+
+    // Populate account_login BEFORE flipping to the authenticated state.
+    // getAuthStatus() reports `authenticated` off state.githubToken, and
+    // the Account UI stops polling the instant it sees that state (it only
+    // re-fetches on re-navigation). If we set the token first, the very
+    // first authenticated status the UI catches carries no login, so it
+    // latches "(unknown)" + a placeholder avatar until the user leaves the
+    // section and returns. Fetching the login first means `authenticated`
+    // never appears login-less. Best-effort: a failure here does NOT
+    // invalidate the token — the user is still authenticated, the avatar
+    // falls back to a neutral placeholder, and cold-boot logUser()
+    // repopulates the login on next start.
+    try {
+      const user = await getGitHubUser(token)
+      controllerState.accountLogin = user.login
+      state.userName = user.login
+    } catch (err) {
+      consola.warn("Auth-controller: failed to fetch GitHub user:", err)
+    }
+
+    // Re-check abort: getGitHubUser is an awaited round-trip during which
+    // signOut() may have fired. Don't expose a token the user just cleared.
+    if (flow.abort.signal.aborted) return
     state.githubToken = token
 
     // Best-effort: proactively mint the Copilot token so Diagnostics
@@ -272,16 +295,6 @@ async function runPoller(flow: ActiveFlow): Promise<void> {
         "Auth-controller: failed to mint Copilot token after sign-in:",
         err,
       )
-    }
-
-    // Best-effort: populate account_login. Failure here doesn't
-    // invalidate the token — the user is still authenticated.
-    try {
-      const user = await getGitHubUser(token)
-      controllerState.accountLogin = user.login
-      state.userName = user.login
-    } catch (err) {
-      consola.warn("Auth-controller: failed to fetch GitHub user:", err)
     }
 
     controllerState.flow = null
