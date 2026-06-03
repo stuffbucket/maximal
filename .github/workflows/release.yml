@@ -343,7 +343,10 @@ jobs:
   smoke:
     needs: binaries
     permissions:
-      contents: read
+      # write, not read: this job `gh release download`s from the release
+      # while it's still a DRAFT, and draft releases are invisible to a
+      # read-only token (the download fails with "release not found").
+      contents: write
     runs-on: windows-2022
     steps:
       - name: Resolve version
@@ -634,7 +637,9 @@ jobs:
     needs: windows-msi
     runs-on: windows-2022
     permissions:
-      contents: read
+      # write, not read: downloads the MSI from the DRAFT release, which a
+      # read-only token can't see ("release not found").
+      contents: write
     env:
       TAG: ${{ github.ref_name }}
     steps:
