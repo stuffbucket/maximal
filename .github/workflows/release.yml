@@ -468,7 +468,7 @@ jobs:
   # installers match the binaries. Each keeps an idempotency skip gate so
   # re-running a partially-failed release rebuilds only what's missing.
 
-  # macOS Tauri bundle (.app.zip + signed/notarized .dmg). A reusable
+  # macOS Tauri bundle (signed + notarized .dmg). A reusable
   # workflow rather than a job here because it needs the self-hosted macOS
   # runner; workflow_call from the same repo can target it, and the call
   # participates in this run's job graph so `needs:`/`publish` gating just
@@ -793,7 +793,7 @@ jobs:
 
   # Flip the draft release to published + latest, but ONLY after every
   # asset is attached: binaries, checksums, the smoke-tested Windows
-  # build, and every installer (macOS .app.zip/.dmg, Windows install.ps1
+  # build, and every installer (macOS .dmg, Windows install.ps1
   # and MSI, with the MSI verified end-to-end). If any upstream job fails
   # the release stays a draft, so users never see an incomplete "Latest".
   # Recover by re-running the failed jobs (GitHub "Re-run failed jobs"),
