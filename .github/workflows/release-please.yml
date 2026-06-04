@@ -1,0 +1,114 @@
+name: Release Please
+
+# Automates the version-bump / changelog / tag dance that used to be a
+# manual `bun run release` (bumpp) + hand-pushed tag. The flow is:
+#
+#   1. Commits land on main (conventional commits).
+#   2. This workflow opens / updates a "release PR" that bumps
+#      package.json `version` and regenerates CHANGELOG.md from those
+#      commits. The PR sits open, accumulating changes, until a
+#      maintainer merges it.
+#   3. On merge of that release PR, this workflow's `github-release`
+#      step creates the git tag `vX.Y.Z` (and a matching GitHub
+#      Release carrying the CHANGELOG notes).
+#   4. The tag push fires release.yml, which builds + signs + verifies
+#      every installer against a DRAFT, then publishes. release.yml's
+#      `release` job ADOPTS the release this workflow created (flips it
+#      back to draft and reuses it) rather than creating a competing
+#      one — see the "Generate GitHub Release notes (draft)" step there.
+#
+# DIVISION OF RESPONSIBILITY
+#   release-please (here):  the release PR (version bump + CHANGELOG),
+#                           and on merge the git TAG + a GitHub Release
+#                           record seeded with CHANGELOG notes.
+#   release.yml:            fires on the tag, builds/signs/verifies all
+#                           assets on the (re-)drafted release, publishes.
+#
+# TRIGGER CHAIN / TOKEN CAVEAT
+#   GitHub suppresses workflow triggers for refs pushed via the default
+#   GITHUB_TOKEN (the anti-loop guard release.yml documents at its top).
+#   So if `github-release` tagged with GITHUB_TOKEN, release.yml's
+#   `on: push: tags: v*` would NOT fire and the release would sit as an
+#   empty draft forever. To make the tag re-trigger release.yml we run
+#   release-please with a PAT (secrets.RELEASE_PLEASE_TOKEN). A tag
+#   pushed by a PAT is a "real" push and does fan out to other
+#   workflows. If that secret is absent we fall back to GITHUB_TOKEN
+#   and emit a warning: the release PR + tag still get created, but a
+#   maintainer must kick release.yml by hand (its workflow_dispatch
+#   with the tag selected under "Use workflow from").
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Default GITHUB_TOKEN scopes needed for the PR + release/tag. When a
+# PAT is supplied it carries its own scopes; these still apply to the
+# fallback path.
+permissions:
+  contents: write
+  pull-requests: write
+
+# One release-please run per branch. Never cancel in-flight: a run that
+# is mid-tag-creation must finish, not be interrupted by the next push
+# to main.
+concurrency:
+  group: release-please-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: ./.github/actions/setup-bun
+        with:
+          bun-version: latest
+
+      # Prefer the PAT so the tag push re-triggers release.yml. Fall
+      # back to GITHUB_TOKEN (PR + tag still created, but release.yml
+      # must be kicked manually — see the header comment).
+      - name: Select token
+        id: token
+        env:
+          PAT: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -n "${PAT:-}" ]; then
+            echo "Using RELEASE_PLEASE_TOKEN — tag push will re-trigger release.yml."
+            echo "has_pat=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::RELEASE_PLEASE_TOKEN not set — falling back to GITHUB_TOKEN."
+            echo "::warning::A tag pushed via GITHUB_TOKEN will NOT fire release.yml (anti-loop guard)."
+            echo "::warning::After the release PR merges, start release.yml manually: Run workflow, selecting the new vX.Y.Z tag under 'Use workflow from'."
+            echo "has_pat=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Open or update the release PR (version bump + CHANGELOG).
+      - name: release-please release-pr
+        env:
+          RP_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          bunx release-please release-pr \
+            --token "$RP_TOKEN" \
+            --repo-url "${{ github.repository }}" \
+            --target-branch "${{ github.ref_name }}" \
+            --config-file release-please-config.json \
+            --manifest-file .release-please-manifest.json
+
+      # On merge of the release PR, create the tag + GitHub Release.
+      # A no-op (exits 0) when the latest commit is not a merged
+      # release PR, so it is safe to run on every push to main.
+      - name: release-please github-release
+        env:
+          RP_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          bunx release-please github-release \
+            --token "$RP_TOKEN" \
+            --repo-url "${{ github.repository }}" \
+            --target-branch "${{ github.ref_name }}" \
+            --config-file release-please-config.json \
+            --manifest-file .release-please-manifest.json

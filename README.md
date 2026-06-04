@@ -112,10 +112,14 @@ Secrets are masked everywhere — the debug output reports `<env>` /
 
 ## Releasing
 
-`docs/release-runbook.md` is the canonical checklist for cutting a
-`v*` tag. The fast path: `bun run release` (tag + push + npm publish
-via `bumpp`) → wait for CI → `bun run release:dmg` from a developer
-Mac to add the polished `.dmg` to the release.
+`docs/release-runbook.md` is the canonical checklist. Releases are
+automated by release-please: conventional commits on `main` accrue
+into an open "release PR" that bumps the version and updates
+`CHANGELOG.md`; merging it tags `vX.Y.Z`, which fires `release.yml` to
+build, sign, verify, and publish every installer. `bun run
+release:manual` (the old `bumpp` + `bun publish` path) remains as a
+local fallback. From a developer Mac, `bun run release:dmg` adds the
+polished `.dmg` to a release.
 
 ## Status
 
