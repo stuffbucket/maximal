@@ -28,6 +28,7 @@ import { state } from "~/lib/state"
 import { getGitVersion, shortSha } from "~/lib/version"
 
 import { apiKeysRoutes } from "./api-keys"
+import { appsRoutes } from "./apps"
 import { authRoutes } from "./auth"
 import { clientsRoutes } from "./clients"
 
@@ -88,3 +89,4 @@ settingsApiRoutes.get("/diagnostics", (c) => {
 settingsApiRoutes.route("/auth/github", authRoutes)
 settingsApiRoutes.route("/api-keys", apiKeysRoutes)
 settingsApiRoutes.route("/clients", clientsRoutes)
+settingsApiRoutes.route("/apps", appsRoutes)

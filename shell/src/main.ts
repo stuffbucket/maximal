@@ -4,6 +4,7 @@ import type { DiagnosticsResponse } from "../../src/lib/settings-types";
 import type { AuthStatus } from "./api";
 import { apiCall } from "./api";
 import { mountApiClients } from "./api-clients-island";
+import { mountApps } from "./apps-island";
 
 type SectionId =
   | "account"
@@ -727,6 +728,7 @@ window.addEventListener("DOMContentLoaded", () => {
   wireEndpoint();
   wireUninstall();
   mountApiClients();
+  mountApps();
   wireNav();
   syncFromHash();
   void loadDiagnostics();
@@ -737,6 +739,9 @@ window.addEventListener("hashchange", () => {
   syncFromHash();
   const section = readHashSection();
   if (section === "diagnostics") void loadDiagnostics();
+  if (section === "apps") {
+    window.dispatchEvent(new CustomEvent("maximal:apps-refresh"));
+  }
   if (section === "account") {
     void loadAuthStatus();
   } else {

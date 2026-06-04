@@ -1424,3 +1424,184 @@ a:hover {
     to   { opacity: 1; }
   }
 }
+
+/* ---- Apps: per-integration cards ----
+   One card per app (Claude Code, Claude Desktop, Copilot CLI) — each
+   is a discrete actionable entity, so a card earns its chrome here.
+   The name leads; the On/Off switch (or install action) anchors the
+   right edge; detected installs live below as a radio list. */
+.apps-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.apps-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.app-card {
+  background: var(--surface-card);
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  box-shadow: var(--elevation-card);
+  padding: var(--space-4) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* Coming-soon apps read as present-but-inert: dashed, dimmed, no
+   interaction. Mirrors .card--planned. */
+.app-card--soon {
+  border-style: dashed;
+  opacity: 0.85;
+}
+
+.app-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.app-card__name {
+  margin: 0;
+  min-width: 0;
+  flex: 1 1 auto;
+  font-size: var(--text-md);
+  font-weight: var(--weight-lg);
+  line-height: var(--leading-lg);
+  color: var(--text-strong);
+}
+
+.app-card--soon .app-card__name {
+  color: var(--text-muted);
+  font-weight: var(--weight-md);
+}
+
+.app-card__control {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+}
+
+.app-card__pill {
+  white-space: nowrap;
+}
+
+.app-card__hint {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-lg);
+  color: var(--text-muted);
+}
+
+/* ---- Install affordance (Claude Code, no install found) ---- */
+.app-card__install {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.app-card__cmd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  background: var(--surface-control);
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  padding: var(--space-3) var(--space-4);
+}
+
+.app-card__cmd-text {
+  flex: 1 1 16ch;
+  min-width: 0;
+  font-size: var(--text-sm);
+  color: var(--text-base-color);
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.app-card__cmd-actions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: var(--space-2);
+}
+
+/* ---- Active-version radio list (Claude Code, installs present) ---- */
+.app-versions {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.app-versions[disabled] {
+  opacity: 0.55;
+}
+
+.app-versions__legend {
+  padding: 0;
+  margin-bottom: var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-md);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.app-version {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-width-hairline) solid transparent;
+  border-radius: var(--radius-input);
+  cursor: pointer;
+}
+
+.app-version:hover {
+  border-color: var(--border-subtle);
+}
+
+.app-version--active {
+  border-color: var(--border-subtle);
+  background: var(--surface-control);
+}
+
+.app-version__radio {
+  margin-top: 0.2em;
+  flex: 0 0 auto;
+  accent-color: var(--accent);
+}
+
+.app-version__radio:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.app-version__detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.app-version__label {
+  font-size: var(--text-base);
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+}
+
+.app-version__path {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}

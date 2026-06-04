@@ -40,8 +40,11 @@ test("debugJsonTail preserves tail truncation behavior", () => {
   const logger = {
     debug: mock(() => {}),
   }
+  // `text` is content → redacted before truncation. The tail is taken
+  // of the redacted JSON, so truncation and redaction compose.
   const payload = { text: "abcdefghijklmnopqrstuvwxyz" }
-  const expected = JSON.stringify(payload).slice(-10)
+  const redacted = { text: `[redacted ${payload.text.length} chars]` }
+  const expected = JSON.stringify(redacted).slice(-10)
 
   debugJsonTail(logger as never, "payload", { value: payload, tailLength: 10 })
 
