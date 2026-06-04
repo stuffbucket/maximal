@@ -115,6 +115,21 @@ describe("redactForLog", () => {
     expect(seqs[0]).toMatch(/^\[redacted \d+ chars\]$/)
   })
 
+  test("redacts a bare top-level string (no key context → not structural)", () => {
+    // A string passed with no parent key has keyContext === undefined,
+    // which must be treated as non-structural and redacted. Pins the
+    // `key !== undefined` half of isStructuralKey.
+    expect(redactForLog("a bare secret string")).toMatch(
+      /^\[redacted \d+ chars\]$/,
+    )
+  })
+
+  test("passes top-level null through unchanged", () => {
+    // null is not an object and not a string — kept verbatim. Pins the
+    // `value === null` short-circuit in redactValue.
+    expect(redactForLog(null)).toBeNull()
+  })
+
   // ---------------------------------------------------------------------
   // Allowlist boundary. Each of these keys is part of the PII boundary:
   // its string value is logged VERBATIM. If any single key is dropped
