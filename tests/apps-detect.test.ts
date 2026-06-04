@@ -137,16 +137,14 @@ describe("detectClaudeInstalls", () => {
 
   test('classifies a binary under `<home>/.claude/...` as "claude-local"', () => {
     // Discover via pathDirs (origin "path") so the ONLY thing that can
-    // produce "claude-local" is the line-120 prefix check — not the
+    // produce "claude-local" is the .claude prefix check — not the
     // pre-set origin of the fixed `~/.claude` probe. A non-canonical
-    // subdir avoids any competing fixed-probe candidate. This kills the
-    // `if (false)` / `endsWith` / `path.join(home,"")` mutants on the
-    // .claude prefix branch.
+    // subdir avoids any competing fixed-probe candidate.
     //
-    // homeDir is realpath-resolved: classifySource compares the
-    // symlink-resolved binary path against homeDir, and on macOS
-    // /tmp → /private/tmp, so an un-resolved home would never match.
-    const home = fs.realpathSync(makeDir(path.join(root, "home")))
+    // homeDir is passed UN-resolved (a /tmp path that the OS resolves to
+    // /private/tmp on macOS): classifySource must realpath the prefix
+    // before comparing, so this also guards that symlinked-home handling.
+    const home = makeDir(path.join(root, "home"))
     const dir = path.join(home, ".claude", "viaPath")
     const file = makeClaude(dir)
     const resolved = fs.realpathSync(file)
@@ -161,9 +159,9 @@ describe("detectClaudeInstalls", () => {
   })
 
   test('classifies `<home>/.local/bin/...` as "local-bin"', () => {
-    // Same technique: reach it via pathDirs so the line-123 prefix check
-    // is the only path to "local-bin".
-    const home = fs.realpathSync(makeDir(path.join(root, "home")))
+    // Same technique: reach it via pathDirs so the .local/bin prefix
+    // check is the only path to "local-bin".
+    const home = makeDir(path.join(root, "home"))
     const dir = path.join(home, ".local", "bin", "viaPath")
     const file = makeClaude(dir)
     const resolved = fs.realpathSync(file)
@@ -178,9 +176,9 @@ describe("detectClaudeInstalls", () => {
   test('does NOT treat `<home>/.local/<other>` as "local-bin"', () => {
     // Negative test: a binary directly under `~/.local` but NOT under
     // `~/.local/bin` must fall through to "path". This kills the
-    // mutant that drops "bin" from the prefix join (line 123), which
-    // would otherwise match everything under `~/.local`.
-    const home = fs.realpathSync(makeDir(path.join(root, "home")))
+    // mutant that drops "bin" from the prefix join, which would
+    // otherwise match everything under `~/.local`.
+    const home = makeDir(path.join(root, "home"))
     const dir = path.join(home, ".local", "share", "viaPath")
     const file = makeClaude(dir)
     const resolved = fs.realpathSync(file)
@@ -193,12 +191,12 @@ describe("detectClaudeInstalls", () => {
   })
 
   test('classifies a binary under the npm prefix `/bin` as "npm-global"', () => {
-    // Reach it via pathDirs (origin "path") so the line-132 npmBin prefix
-    // check does the classifying, NOT the origin shortcut (line 129) of
-    // the fixed npm probe. This separates the two branches that otherwise
-    // mask each other and kills the line-132 mutants.
+    // Reach it via pathDirs (origin "path") so the npmBin prefix check
+    // does the classifying, NOT the origin shortcut of the fixed npm
+    // probe. This separates the two branches that otherwise mask each
+    // other.
     const home = path.join(root, "home")
-    const npmPrefix = fs.realpathSync(makeDir(path.join(root, "npm")))
+    const npmPrefix = makeDir(path.join(root, "npm"))
     const dir = path.join(npmPrefix, "bin", "viaPath")
     const file = makeClaude(dir)
     const resolved = fs.realpathSync(file)
@@ -212,11 +210,10 @@ describe("detectClaudeInstalls", () => {
 
   test("honours the npm/homebrew origin shortcut over a plain PATH dir", () => {
     // The fixed npm probe carries origin "npm-global"; classifySource's
-    // line-129 shortcut returns that origin before the prefix heuristics.
+    // origin shortcut returns that origin before the prefix heuristics.
     // Here the file sits at the CANONICAL npm probe path AND is NOT under
     // any homebrew prefix, so the only way it reads "npm-global" without
-    // the line-132 prefix also matching is the origin shortcut. Pins the
-    // line-129 branch against `if (false)`.
+    // the npmBin prefix also matching is the origin shortcut.
     const home = path.join(root, "home")
     const npmPrefix = path.join(root, "npmroot")
     const file = makeClaude(path.join(npmPrefix, "bin"))

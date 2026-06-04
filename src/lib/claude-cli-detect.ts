@@ -36,7 +36,6 @@ export type ClaudeInstallSource =
   | "local-bin"
   | "claude-local"
   | "path"
-  | "unknown"
 
 export interface ClaudeInstall {
   /** Resolved (symlinks followed) absolute path of the real binary. */
@@ -104,6 +103,17 @@ function fileContains(filePath: string, needle: string): boolean {
   }
 }
 
+/** Symlink-resolve a path, falling back to the input when it can't be
+ *  resolved (e.g. doesn't exist). Used to normalise prefixes before
+ *  comparing them against an already-resolved binary path. */
+function realpathOrSelf(p: string): string {
+  try {
+    return fs.realpathSync(p)
+  } catch {
+    return p
+  }
+}
+
 /** A candidate path plus the origin we discovered it from — used to
  *  classify the source after resolving symlinks. */
 interface Candidate {
@@ -115,8 +125,14 @@ function classifySource(
   resolved: string,
   ctx: { origin: ClaudeInstallSource; home: string; npmBin: string | null },
 ): ClaudeInstallSource {
-  const { origin, home, npmBin } = ctx
+  const { origin } = ctx
   const sep = path.sep
+  // `resolved` is symlink-resolved (fs.realpathSync). Resolve the prefixes
+  // the same way before comparing, otherwise a symlinked home (e.g. macOS
+  // /tmp → /private/tmp, or a home on a symlinked volume) makes every
+  // startsWith() silently miss and the install gets mislabeled "path".
+  const home = realpathOrSelf(ctx.home)
+  const npmBin = ctx.npmBin === null ? null : realpathOrSelf(ctx.npmBin)
   if (resolved.startsWith(path.join(home, ".claude") + sep)) {
     return "claude-local"
   }
@@ -126,7 +142,7 @@ function classifySource(
   // Honour a specific discovery origin (npm/homebrew) before falling
   // back to path-prefix heuristics, since a Homebrew-managed npm bin
   // resolves under the Homebrew prefix and would otherwise mis-classify.
-  if (origin !== "path" && origin !== "unknown") {
+  if (origin !== "path") {
     return origin
   }
   if (npmBin && resolved.startsWith(npmBin + sep)) {
