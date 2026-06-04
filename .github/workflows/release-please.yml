@@ -39,7 +39,7 @@ name: Release Please
 #   One-time setup (maintainer):
 #     1. Install app-repoman on this repo with Contents: Read & write
 #        and Pull requests: Read & write.
-#     2. Repo variable  REPOMAN_APP_ID          = the app's numeric App ID.
+#     2. REPOMAN_APP_ID (repo variable OR secret) = the app's App ID.
 #     3. Repo secret     REPOMAN_APP_PRIVATE_KEY = the app's PEM private key.
 #   If REPOMAN_APP_ID is unset we fall back to GITHUB_TOKEN and warn: the
 #   release PR + tag still get created, but a maintainer must kick
@@ -74,26 +74,41 @@ jobs:
         with:
           bun-version: latest
 
+      # The App ID can live as a repo VARIABLE (idiomatic — it isn't
+      # secret) or a SECRET; support either. The `secrets` context can't
+      # be used in an `if:`, so resolve the id into a step output first
+      # (without echoing it) and gate the mint on that.
+      - name: Resolve app id
+        id: appid
+        env:
+          APP_ID: ${{ vars.REPOMAN_APP_ID || secrets.REPOMAN_APP_ID }}
+        run: |
+          set -euo pipefail
+          if [ -n "${APP_ID:-}" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
       # Mint a short-lived app-repoman installation token so the tag push
-      # re-triggers release.yml. Skipped when REPOMAN_APP_ID is unset →
-      # the steps below fall back to github.token (see the header note).
-      # The action's `token` output is auto-registered as a secret (masked
-      # in logs); we never echo it.
+      # re-triggers release.yml. Skipped when no App ID is set → the steps
+      # below fall back to github.token (see the header note). The action's
+      # `token` output is auto-registered as a secret (masked in logs).
       - name: Mint app-repoman token
         id: app-token
-        if: ${{ vars.REPOMAN_APP_ID != '' }}
+        if: steps.appid.outputs.present == 'true'
         uses: actions/create-github-app-token@v2
         with:
-          app-id: ${{ vars.REPOMAN_APP_ID }}
+          app-id: ${{ vars.REPOMAN_APP_ID || secrets.REPOMAN_APP_ID }}
           private-key: ${{ secrets.REPOMAN_APP_PRIVATE_KEY }}
 
       - name: Note token source
         run: |
           set -euo pipefail
-          if [ -n "${{ vars.REPOMAN_APP_ID }}" ]; then
+          if [ "${{ steps.appid.outputs.present }}" = "true" ]; then
             echo "Using app-repoman token — the tag push will re-trigger release.yml."
           else
-            echo "::warning::REPOMAN_APP_ID not set — falling back to GITHUB_TOKEN."
+            echo "::warning::No REPOMAN_APP_ID (variable or secret) set — falling back to GITHUB_TOKEN."
             echo "::warning::A tag pushed via GITHUB_TOKEN will NOT fire release.yml (anti-loop guard)."
             echo "::warning::After the release PR merges, start release.yml manually: Run workflow, selecting the new vX.Y.Z tag under 'Use workflow from'."
           fi
