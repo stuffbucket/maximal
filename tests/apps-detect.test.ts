@@ -43,6 +43,12 @@ function makeClaude(
   return file
 }
 
+/** mkdir -p, returning the path so it can be realpath-resolved. */
+function makeDir(dir: string): string {
+  fs.mkdirSync(dir, { recursive: true })
+  return dir
+}
+
 describe("detectClaudeInstalls", () => {
   test("dedupes a single real binary reachable via multiple PATH dirs", () => {
     const realDir = path.join(root, "real")
@@ -130,12 +136,23 @@ describe("detectClaudeInstalls", () => {
   })
 
   test('classifies a binary under `<home>/.claude/...` as "claude-local"', () => {
-    const home = path.join(root, "home")
-    const file = makeClaude(path.join(home, ".claude", "local"))
+    // Discover via pathDirs (origin "path") so the ONLY thing that can
+    // produce "claude-local" is the line-120 prefix check — not the
+    // pre-set origin of the fixed `~/.claude` probe. A non-canonical
+    // subdir avoids any competing fixed-probe candidate. This kills the
+    // `if (false)` / `endsWith` / `path.join(home,"")` mutants on the
+    // .claude prefix branch.
+    //
+    // homeDir is realpath-resolved: classifySource compares the
+    // symlink-resolved binary path against homeDir, and on macOS
+    // /tmp → /private/tmp, so an un-resolved home would never match.
+    const home = fs.realpathSync(makeDir(path.join(root, "home")))
+    const dir = path.join(home, ".claude", "viaPath")
+    const file = makeClaude(dir)
     const resolved = fs.realpathSync(file)
     const installs = detectClaudeInstalls({
       homeDir: home,
-      pathDirs: [],
+      pathDirs: [dir],
       npmPrefix: null,
     })
     expect(installs.find((i) => i.path === resolved)?.source).toBe(
@@ -143,21 +160,65 @@ describe("detectClaudeInstalls", () => {
     )
   })
 
-  test('classifies `<home>/.local/bin/claude` as "local-bin"', () => {
-    const home = path.join(root, "home")
-    const file = makeClaude(path.join(home, ".local", "bin"))
+  test('classifies `<home>/.local/bin/...` as "local-bin"', () => {
+    // Same technique: reach it via pathDirs so the line-123 prefix check
+    // is the only path to "local-bin".
+    const home = fs.realpathSync(makeDir(path.join(root, "home")))
+    const dir = path.join(home, ".local", "bin", "viaPath")
+    const file = makeClaude(dir)
     const resolved = fs.realpathSync(file)
     const installs = detectClaudeInstalls({
       homeDir: home,
-      pathDirs: [],
+      pathDirs: [dir],
       npmPrefix: null,
     })
     expect(installs.find((i) => i.path === resolved)?.source).toBe("local-bin")
   })
 
+  test('does NOT treat `<home>/.local/<other>` as "local-bin"', () => {
+    // Negative test: a binary directly under `~/.local` but NOT under
+    // `~/.local/bin` must fall through to "path". This kills the
+    // mutant that drops "bin" from the prefix join (line 123), which
+    // would otherwise match everything under `~/.local`.
+    const home = fs.realpathSync(makeDir(path.join(root, "home")))
+    const dir = path.join(home, ".local", "share", "viaPath")
+    const file = makeClaude(dir)
+    const resolved = fs.realpathSync(file)
+    const installs = detectClaudeInstalls({
+      homeDir: home,
+      pathDirs: [dir],
+      npmPrefix: null,
+    })
+    expect(installs.find((i) => i.path === resolved)?.source).toBe("path")
+  })
+
   test('classifies a binary under the npm prefix `/bin` as "npm-global"', () => {
+    // Reach it via pathDirs (origin "path") so the line-132 npmBin prefix
+    // check does the classifying, NOT the origin shortcut (line 129) of
+    // the fixed npm probe. This separates the two branches that otherwise
+    // mask each other and kills the line-132 mutants.
     const home = path.join(root, "home")
-    const npmPrefix = path.join(root, "npm")
+    const npmPrefix = fs.realpathSync(makeDir(path.join(root, "npm")))
+    const dir = path.join(npmPrefix, "bin", "viaPath")
+    const file = makeClaude(dir)
+    const resolved = fs.realpathSync(file)
+    const installs = detectClaudeInstalls({
+      homeDir: home,
+      pathDirs: [dir],
+      npmPrefix,
+    })
+    expect(installs.find((i) => i.path === resolved)?.source).toBe("npm-global")
+  })
+
+  test("honours the npm/homebrew origin shortcut over a plain PATH dir", () => {
+    // The fixed npm probe carries origin "npm-global"; classifySource's
+    // line-129 shortcut returns that origin before the prefix heuristics.
+    // Here the file sits at the CANONICAL npm probe path AND is NOT under
+    // any homebrew prefix, so the only way it reads "npm-global" without
+    // the line-132 prefix also matching is the origin shortcut. Pins the
+    // line-129 branch against `if (false)`.
+    const home = path.join(root, "home")
+    const npmPrefix = path.join(root, "npmroot")
     const file = makeClaude(path.join(npmPrefix, "bin"))
     const resolved = fs.realpathSync(file)
     const installs = detectClaudeInstalls({
