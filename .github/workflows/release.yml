@@ -122,47 +122,31 @@ jobs:
         run: |
           set -euo pipefail
           TAG="${{ github.ref_name }}"
-          # The release for this tag is normally created by
-          # release-please.yml (which owns the version bump, CHANGELOG,
-          # and tag on merge of the release PR). When that's the case the
-          # release already exists, carries release-please's CHANGELOG
-          # notes, and is published — but this draft-first pipeline needs
-          # it back as a DRAFT until every asset is attached. So ADOPT it:
-          # flip it to draft and reuse its notes. Do NOT re-create or
-          # overwrite the notes — release-please's CHANGELOG is the
-          # canonical source, and double-creating would error ("already
-          # exists").
+          # release.yml owns the GitHub Release end to end: create it as a
+          # DRAFT here, attach every asset across the downstream jobs, and
+          # let `publish` flip draft→published+latest exactly once at the
+          # end. That single publish is required for IMMUTABLE RELEASES —
+          # a release can't be re-drafted to add assets once published.
+          # release-please only creates the TAG (not a release), so there
+          # is never a pre-existing release to adopt here.
           #
-          # The else branch keeps the standalone path working for a tag
-          # pushed by hand (no release-please release): create the DRAFT
-          # here. The `publish` job flips draft→published+latest at the
-          # very end, once binaries, checksums, and the signed installers
-          # (.dmg/.msi/.app.zip) are all attached — closing the window
-          # where a "Latest" release was visible without its installers
-          # while Apple notarization was still running.
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release $TAG already exists (release-please) — adopting it as a draft."
-            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft
+          # changelogithub computes notes from the previous v* tag. On the
+          # first release no such tag exists and the tool produces a
+          # malformed git range, so fall back to gh's auto-generated notes.
+          PRIOR="$(git tag --list 'v*' --sort=-v:refname | grep -v "^${TAG}$" | head -1 || true)"
+          if [ -z "$PRIOR" ]; then
+            echo "No prior v* tag — creating draft release with --generate-notes"
+            FLAGS=(--draft)
+            if [[ "${{ steps.prerelease.outputs.is_prerelease }}" == "true" ]]; then
+              FLAGS+=(--prerelease)
+            fi
+            gh release create "$TAG" --title "$TAG" --generate-notes "${FLAGS[@]}"
           else
-            # changelogithub computes notes from the previous v* tag.
-            # On the first release no such tag exists and the tool
-            # produces a malformed git range. Fall back to gh's built-in
-            # auto-generated notes for that bootstrap case.
-            PRIOR="$(git tag --list 'v*' --sort=-v:refname | grep -v "^${TAG}$" | head -1 || true)"
-            if [ -z "$PRIOR" ]; then
-              echo "No prior v* tag — creating draft release with --generate-notes"
-              FLAGS=(--draft)
-              if [[ "${{ steps.prerelease.outputs.is_prerelease }}" == "true" ]]; then
-                FLAGS+=(--prerelease)
-              fi
-              gh release create "$TAG" --title "$TAG" --generate-notes "${FLAGS[@]}"
+            echo "Prior tag $PRIOR — running changelogithub (draft)"
+            if [[ "${{ steps.prerelease.outputs.is_prerelease }}" == "true" ]]; then
+              bunx changelogithub --draft --prerelease
             else
-              echo "Prior tag $PRIOR — running changelogithub (draft)"
-              if [[ "${{ steps.prerelease.outputs.is_prerelease }}" == "true" ]]; then
-                bunx changelogithub --draft --prerelease
-              else
-                bunx changelogithub --draft
-              fi
+              bunx changelogithub --draft
             fi
           fi
 
