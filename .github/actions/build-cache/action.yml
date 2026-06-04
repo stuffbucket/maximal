@@ -1,0 +1,109 @@
+# Vendored wrapper around actions/cache for Rust/Tauri build caching.
+#
+# Why a composite: the repo policy is first-party `actions/*` (pinned to a
+# commit SHA, never a floating tag) plus vendored composites under
+# `.github/actions/` only — no third-party `uses:` (so NOT
+# `Swatinem/rust-cache`). Wrapping `actions/cache` here keeps the pin and
+# the cache-key policy in exactly one place, so callers can't drift.
+#
+# ── Cache-poisoning posture (read before changing the key logic) ─────────
+# GitHub Actions caches are branch-scoped: a run reads caches written by
+# its own branch first, then FALLS BACK to caches written on the default
+# branch. That fallback is the poisoning vector — a cache written by an
+# untrusted PR or feature branch can be restored by a later main/tag
+# (release) build and inject attacker-controlled bytes into the artifact.
+#
+# Mitigations baked in here:
+#   1. The cache key is fully pinned to `hashFiles` of the dependency
+#      lockfiles (Cargo.lock, bun.lock) plus os/arch. A different
+#      dependency set => a different key => no shared cache. We only ever
+#      cache dependency-derived inputs (Cargo registry/git, and the
+#      Rust target dir whose freshness Cargo re-validates by lockfile),
+#      never first-party source build output that a PR could pre-seed
+#      with malicious content under a key a release would reuse.
+#   2. NO permissive `restore-keys`. A partial-prefix restore-key (e.g.
+#      "build-${name}-${os}-") is exactly what lets a different ref's
+#      cache satisfy a release build. We require an EXACT key hit; on a
+#      lockfile change the build simply starts cold rather than inheriting
+#      a foreign, potentially-poisoned cache. Callers MAY pass a narrow
+#      restore-key via `restore-keys`, but it is empty by default and
+#      should stay that way for release/tag builds.
+#
+# Honest scope of what this speeds up vs not (self-hosted macOS runner):
+#   - CARGO_HOME registry/git (crate source downloads) — cached. Saves the
+#     network fetch + git clone of the crates.io index and git deps.
+#   - The Rust `target/` dir (compiled deps + incremental artifacts) —
+#     cached when `target-path` is provided. With a clean workspace per
+#     run, the target dir is cold, so this is the main win for the
+#     ~30-min Tauri build.
+#   - NOT cached: the Bun/JS toolchain (installed fresh by setup steps),
+#     Apple notarization (network round-trip, uncacheable), or any signing
+#     state. Those are inherently per-run.
+#
+# Self-hosted caveat: GitHub's cache backend works on self-hosted runners,
+# but uploads/downloads the tarball over the network each run. A large
+# Rust target dir can make the cache round-trip non-trivial; it is still a
+# net win over a cold compile, but it is not the same as a warm on-disk
+# target dir that a persistent runner would keep for free.
+
+name: Build cache
+description: >-
+  Cache Rust/Tauri build inputs (Cargo registry/git + target dir) keyed on
+  lockfile hashes and os/arch, with no permissive restore-keys to resist
+  cross-ref cache poisoning.
+
+inputs:
+  cache-name:
+    description: >-
+      Short logical name for this cache (e.g. `tauri-macos`). Becomes part
+      of the cache key so distinct build jobs don't collide.
+    required: true
+  lockfiles:
+    description: >-
+      Newline- or glob-separated lockfile path(s) hashed into the cache
+      key. A change to any of them rotates the key (exact-hit only), so the
+      build never inherits a cache built against different dependencies.
+    required: false
+    default: |
+      **/Cargo.lock
+      bun.lock
+  cargo-home:
+    description: >-
+      CARGO_HOME path whose `registry/` and `git/` subdirs are cached
+      (crate source downloads). Defaults to a workspace-local `.cargo`.
+    required: false
+    default: ${{ github.workspace }}/.cargo
+  target-path:
+    description: >-
+      Rust `target/` dir to cache (compiled deps + incremental output).
+      Leave empty to cache only the Cargo registry/git.
+    required: false
+    default: ""
+  restore-keys:
+    description: >-
+      Optional fallback restore-keys. EMPTY by default on purpose: a
+      partial-prefix restore-key is the cross-ref poisoning vector. Only
+      set this for caches that are safe to share across refs, and never for
+      release/tag builds.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Restore/save build cache
+      # actions/cache pinned to a commit SHA (v4.2.3), not a floating tag,
+      # so a re-tagged action can't change what runs. Update the SHA
+      # deliberately when bumping; never point this at `@v4`.
+      uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684
+      with:
+        # Exact key only (see poisoning notes above). `hashFiles` ignores
+        # paths that don't exist, so a missing Cargo.lock just drops out of
+        # the hash rather than erroring.
+        key: build-${{ inputs.cache-name }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles(inputs.lockfiles) }}
+        restore-keys: ${{ inputs.restore-keys }}
+        path: |
+          ${{ inputs.cargo-home }}/registry/index
+          ${{ inputs.cargo-home }}/registry/cache
+          ${{ inputs.cargo-home }}/git/db
+          ${{ inputs.target-path }}

@@ -9,6 +9,10 @@
 # Required repo secrets (passed via `secrets: inherit` from the caller):
 #   KEYCHAIN_PASSWORD, DEVELOPER_ID_APPLICATION,
 #   APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID
+#
+# Asset-reuse toggle: set the repo variable RELEASE_REUSE_EXISTING_ASSETS=true
+# to reuse already-attached bundles for faster debug re-runs. Unset or any
+# other value rebuilds from the tag commit (the default).
 
 name: Tauri macOS bundle
 
@@ -37,26 +41,36 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      # Idempotency gate. The macOS bundle is a 60–200 MB Tauri build plus
-      # Apple notarization — minutes of work we skip entirely when both
-      # signed bundles are already attached to the release. Keyed off the
-      # asset actually being present (not a prior run's exit status), so a
-      # partial upload still rebuilds. Require BOTH the .app.zip and the
-      # .dmg before skipping, since this job produces both from one build.
+      # Asset-reuse gate (OPT-IN). The macOS bundle is a 60–200 MB Tauri
+      # build plus Apple notarization — minutes of work we can skip when
+      # both signed bundles are already attached. But reuse is opt-in: it
+      # only skips when the repo variable RELEASE_REUSE_EXISTING_ASSETS is
+      # exactly 'true' AND both assets are present. Default (variable
+      # unset) => never skips => always rebuilds from the tag commit, so a
+      # tag re-run never silently ships a stale bundle. Set the variable to
+      # 'true' for fast debug re-runs. Presence is keyed off the asset
+      # itself (not a prior run's exit status), and we require BOTH the
+      # .app.zip and the .dmg, since this job produces both from one build.
       - name: Skip if installers already attached
         id: skip
         env:
           GH_TOKEN: ${{ github.token }}
+          REUSE: ${{ vars.RELEASE_REUSE_EXISTING_ASSETS }}
         run: |
           set -euo pipefail
           APP_ZIP="maximal-${TAG}-darwin-${ARCH}.app.zip"
           DMG="maximal-${TAG}-darwin-${ARCH}.dmg"
+          if [ "${REUSE:-}" != "true" ]; then
+            echo "RELEASE_REUSE_EXISTING_ASSETS not 'true' — building from tag commit."
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           ASSETS="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null || echo '')"
           if grep -Fxq "$APP_ZIP" <<<"$ASSETS" && grep -Fxq "$DMG" <<<"$ASSETS"; then
-            echo "Assets $APP_ZIP and $DMG already attached to $TAG — skipping build + upload."
+            echo "Reuse enabled and $APP_ZIP + $DMG already attached to $TAG — skipping build + upload."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
-            echo "macOS installer bundles not yet present on $TAG — building."
+            echo "Reuse enabled but macOS bundles not both present on $TAG — building."
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -96,6 +110,24 @@ jobs:
           export PATH="$BUN_INSTALL/bin:$CARGO_HOME/bin:$PATH"
           bun run app:sidecar
           ls -la shell/src-tauri/binaries/
+
+      # Restore the Rust build cache before the only cargo-compiling step
+      # (`tauri build`). On a self-hosted runner GH checks out a clean
+      # workspace each run, so the target dir is cold and the long pole.
+      # We cache the Cargo registry/git under CARGO_HOME plus the
+      # shell/src-tauri/target dir, keyed exact-match on the lockfiles +
+      # os/arch (no permissive restore-keys — see the composite for the
+      # cache-poisoning rationale).
+      - name: Cache Rust build artifacts
+        if: steps.skip.outputs.skip != 'true'
+        uses: ./.github/actions/build-cache
+        with:
+          cache-name: tauri-macos
+          cargo-home: ${{ env.CARGO_HOME }}
+          target-path: shell/src-tauri/target
+          lockfiles: |
+            shell/src-tauri/Cargo.lock
+            bun.lock
 
       - name: Build .app via Tauri
         if: steps.skip.outputs.skip != 'true'
