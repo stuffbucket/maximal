@@ -24,27 +24,35 @@ name: Release Please
 #   release.yml:            fires on the tag, builds/signs/verifies all
 #                           assets on the (re-)drafted release, publishes.
 #
-# TRIGGER CHAIN / TOKEN CAVEAT
+# TRIGGER CHAIN / TOKEN
 #   GitHub suppresses workflow triggers for refs pushed via the default
 #   GITHUB_TOKEN (the anti-loop guard release.yml documents at its top).
 #   So if `github-release` tagged with GITHUB_TOKEN, release.yml's
 #   `on: push: tags: v*` would NOT fire and the release would sit as an
-#   empty draft forever. To make the tag re-trigger release.yml we run
-#   release-please with a PAT (secrets.RELEASE_PLEASE_TOKEN). A tag
-#   pushed by a PAT is a "real" push and does fan out to other
-#   workflows. If that secret is absent we fall back to GITHUB_TOKEN
-#   and emit a warning: the release PR + tag still get created, but a
-#   maintainer must kick release.yml by hand (its workflow_dispatch
-#   with the tag selected under "Use workflow from").
+#   empty draft forever. To make the tag re-trigger release.yml we mint a
+#   short-lived installation token from the **app-repoman** GitHub App
+#   (first-party actions/create-github-app-token) and run release-please
+#   with it — a tag pushed by an App token is a "real" push that fans out
+#   to other workflows, same as a PAT but without a long-lived personal
+#   token to manage.
+#
+#   One-time setup (maintainer):
+#     1. Install app-repoman on this repo with Contents: Read & write
+#        and Pull requests: Read & write.
+#     2. Repo variable  REPOMAN_APP_ID          = the app's numeric App ID.
+#     3. Repo secret     REPOMAN_APP_PRIVATE_KEY = the app's PEM private key.
+#   If REPOMAN_APP_ID is unset we fall back to GITHUB_TOKEN and warn: the
+#   release PR + tag still get created, but a maintainer must kick
+#   release.yml by hand (workflow_dispatch with the tag selected under
+#   "Use workflow from").
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
-# Default GITHUB_TOKEN scopes needed for the PR + release/tag. When a
-# PAT is supplied it carries its own scopes; these still apply to the
-# fallback path.
+# GITHUB_TOKEN scopes for the fallback path (no app token). The
+# app-repoman token, when minted, carries its own installation scopes.
 permissions:
   contents: write
   pull-requests: write
@@ -66,29 +74,34 @@ jobs:
         with:
           bun-version: latest
 
-      # Prefer the PAT so the tag push re-triggers release.yml. Fall
-      # back to GITHUB_TOKEN (PR + tag still created, but release.yml
-      # must be kicked manually — see the header comment).
-      - name: Select token
-        id: token
-        env:
-          PAT: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+      # Mint a short-lived app-repoman installation token so the tag push
+      # re-triggers release.yml. Skipped when REPOMAN_APP_ID is unset →
+      # the steps below fall back to github.token (see the header note).
+      # The action's `token` output is auto-registered as a secret (masked
+      # in logs); we never echo it.
+      - name: Mint app-repoman token
+        id: app-token
+        if: ${{ vars.REPOMAN_APP_ID != '' }}
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.REPOMAN_APP_ID }}
+          private-key: ${{ secrets.REPOMAN_APP_PRIVATE_KEY }}
+
+      - name: Note token source
         run: |
           set -euo pipefail
-          if [ -n "${PAT:-}" ]; then
-            echo "Using RELEASE_PLEASE_TOKEN — tag push will re-trigger release.yml."
-            echo "has_pat=true" >> "$GITHUB_OUTPUT"
+          if [ -n "${{ vars.REPOMAN_APP_ID }}" ]; then
+            echo "Using app-repoman token — the tag push will re-trigger release.yml."
           else
-            echo "::warning::RELEASE_PLEASE_TOKEN not set — falling back to GITHUB_TOKEN."
+            echo "::warning::REPOMAN_APP_ID not set — falling back to GITHUB_TOKEN."
             echo "::warning::A tag pushed via GITHUB_TOKEN will NOT fire release.yml (anti-loop guard)."
             echo "::warning::After the release PR merges, start release.yml manually: Run workflow, selecting the new vX.Y.Z tag under 'Use workflow from'."
-            echo "has_pat=false" >> "$GITHUB_OUTPUT"
           fi
 
       # Open or update the release PR (version bump + CHANGELOG).
       - name: release-please release-pr
         env:
-          RP_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+          RP_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
         run: |
           set -euo pipefail
           bunx release-please release-pr \
@@ -103,7 +116,7 @@ jobs:
       # release PR, so it is safe to run on every push to main.
       - name: release-please github-release
         env:
-          RP_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+          RP_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
         run: |
           set -euo pipefail
           bunx release-please github-release \
