@@ -129,6 +129,38 @@ This repo can collide on a shared working tree (lint-staged stash + concurrent m
 
 See also: `docs/codegen-feedback-loops-practices.md` → Dispatch and review loops.
 
+### Testing gotchas
+
+- **`mock.module` persists forward across files in a run.** Bun does not
+  reset module mocks between test files, and CI orders files differently
+  than local. A mock wrapper that drops arguments (e.g. forwards only the
+  first param) will corrupt a *sibling* file's tests that pass the dropped
+  args — and it'll pass locally but fail in CI. Make wrappers behaviorally
+  identical to the real module (forward `...rest`), or prefer injectable
+  function options over `mock.module`. This bit us twice on the apps work.
+- **Green tests can still test nothing.** Mutation testing (`bun run mutate`)
+  caught classification tests that passed without exercising the branch
+  they claimed to cover (the fixture hit a different code path that
+  returned the same value). For security-critical or branchy logic, run
+  Stryker and confirm the targeted mutants actually die — don't trust a
+  passing assertion alone.
+
+### Release & PR conventions
+
+- **Release is driven by Conventional Commit *types*.** release-please
+  scans commits since the last tag; only `feat:` (minor) and `fix:`
+  (patch) cut a release. `test:`/`chore:`/`ci:`/`docs:`/`refactor:` are
+  release-silent. If release-please "isn't doing anything," it almost
+  certainly found no `feat`/`fix` commit — check the `release-pr` step
+  log for `No user facing commits found ... skipping` before assuming
+  it's broken.
+- **Squash-merge uses the PR *title* as the commit subject.** So the PR
+  title must be a single valid Conventional Commit (`fix: …`, not
+  `test+fix: …`). A non-standard type like `test+fix` parses as one
+  unrecognized token and release-please skips it — even if the diff
+  contains a real `fix:`. Title PRs accordingly; the body's individual
+  commit messages don't reach `main` through a squash.
+
 ### Tauri shell
 
 `shell/` is a Tauri 2 menu-bar app that wraps the proxy for non-CLI users. `bun run app:sidecar` builds the standalone proxy binary into `shell/src-tauri/binaries/`, and Tauri launches it as a sidecar bound to `127.0.0.1:4142`. The Vite frontend in `shell/src/` talks to the local sidecar over HTTP. The proxy itself is unchanged — the shell is purely packaging plus a tray UI for auth/status.
