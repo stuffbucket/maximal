@@ -114,4 +114,124 @@ describe("redactForLog", () => {
     const seqs = out.stop_sequences as Array<string>
     expect(seqs[0]).toMatch(/^\[redacted \d+ chars\]$/)
   })
+
+  test("redacts a bare top-level string (no key context → not structural)", () => {
+    // A string passed with no parent key has keyContext === undefined,
+    // which must be treated as non-structural and redacted. Pins the
+    // `key !== undefined` half of isStructuralKey.
+    expect(redactForLog("a bare secret string")).toMatch(
+      /^\[redacted \d+ chars\]$/,
+    )
+  })
+
+  test("passes top-level null through unchanged", () => {
+    // null is not an object and not a string — kept verbatim. Pins the
+    // `value === null` short-circuit in redactValue.
+    expect(redactForLog(null)).toBeNull()
+  })
+
+  // ---------------------------------------------------------------------
+  // Allowlist boundary. Each of these keys is part of the PII boundary:
+  // its string value is logged VERBATIM. If any single key is dropped
+  // from STRUCTURAL_STRING_KEYS in the source, the matching case below
+  // flips to the redacted marker and fails. This pins the entire
+  // allowlist against silent deletion (the mutation-testing gap).
+  // ---------------------------------------------------------------------
+  const ALLOWLISTED_KEYS = [
+    "model",
+    "object",
+    "provider",
+    "kind",
+    "status",
+    "source",
+    "service_tier",
+    "encoding",
+    "role",
+    "type",
+    "name",
+    "tool_name",
+    "function_name",
+    "stop_reason",
+    "finish_reason",
+    "stop",
+    "id",
+    "request_id",
+    "session_id",
+    "trace_id",
+    "tool_use_id",
+    "tool_call_id",
+    "anthropic_version",
+    "anthropic_beta",
+    "version",
+    "schema_version",
+    "media_type",
+    "mime_type",
+    "detail",
+    "reasoning_effort",
+    "effort",
+    "authtype",
+  ] as const
+
+  for (const key of ALLOWLISTED_KEYS) {
+    test(`keeps the structural key "${key}" verbatim`, () => {
+      const value = `sentinel-value-for-${key}`
+      const out = redactForLog({ [key]: value }) as Record<string, unknown>
+      // Verbatim — NOT the "[redacted N chars]" marker.
+      expect(out[key]).toBe(value)
+    })
+  }
+
+  test("the allowlist test set matches the documented PII boundary", () => {
+    // Guards against the test list silently drifting from the spec: every
+    // key must be unique and the count must equal the documented allowlist.
+    expect(new Set(ALLOWLISTED_KEYS).size).toBe(ALLOWLISTED_KEYS.length)
+    expect(ALLOWLISTED_KEYS.length).toBe(32)
+  })
+
+  test("the same string is kept under a structural key, redacted under a non-structural one", () => {
+    const value = "identical-string-payload"
+    // `name` is structural → kept; `description` is not → redacted. This
+    // pins the isStructuralKey branch in redactValue for string leaves.
+    const kept = redactForLog({ name: value }) as Record<string, unknown>
+    const redacted = redactForLog({ description: value }) as Record<
+      string,
+      unknown
+    >
+    expect(kept.name).toBe(value)
+    expect(redacted.description).toBe(`[redacted ${value.length} chars]`)
+  })
+
+  test("keeps strings in an array under a structural key verbatim", () => {
+    // `stop` is allowlisted → array elements inherit the keep decision.
+    const out = redactForLog({ stop: ["END", "STOP"] }) as Record<
+      string,
+      unknown
+    >
+    expect(out.stop).toEqual(["END", "STOP"])
+  })
+
+  test("array keep/redact tracks the parent key, not the element", () => {
+    // Same element strings: kept under structural `stop`, redacted under
+    // non-structural `stop_sequences`. Pins the array-recursion path.
+    const value = "SAME"
+    const kept = redactForLog({ stop: [value] }) as Record<string, unknown>
+    const redacted = redactForLog({ stop_sequences: [value] }) as Record<
+      string,
+      unknown
+    >
+    expect((kept.stop as Array<string>)[0]).toBe(value)
+    expect((redacted.stop_sequences as Array<string>)[0]).toBe(
+      `[redacted ${value.length} chars]`,
+    )
+  })
+
+  test("matches allowlisted keys case-insensitively", () => {
+    // Source lowercases before lookup; an upper/mixed-case key still keeps.
+    const out = redactForLog({
+      Model: "claude-x",
+      Stop_Reason: "end_turn",
+    }) as Record<string, unknown>
+    expect(out.Model).toBe("claude-x")
+    expect(out.Stop_Reason).toBe("end_turn")
+  })
 })
