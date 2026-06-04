@@ -78,13 +78,27 @@ const actualDesktop = await import("~/lib/claude-desktop-config")
 const realApply = actualDesktop.applyProxyConfig
 const realRevert = actualDesktop.revertProxyConfig
 const realReadDesktop = actualDesktop.readClaudeDesktopConfig
+// Wrappers forward ALL args (only defaulting the first to ROUTE_DESKTOP)
+// so this mock stays behaviorally identical to the real module. Bun's
+// `mock.module` persists forward across files in a run, so a wrapper
+// that dropped later args (e.g. applyProxyConfig's `values`) would
+// corrupt sibling tests that pass them.
 void mock.module("~/lib/claude-desktop-config", () => ({
   ...actualDesktop,
   getClaudeDesktopConfigPath: () => ROUTE_DESKTOP,
-  readClaudeDesktopConfig: (filePath: string = ROUTE_DESKTOP) =>
-    realReadDesktop(filePath),
-  applyProxyConfig: (filePath: string = ROUTE_DESKTOP) => realApply(filePath),
-  revertProxyConfig: (filePath: string = ROUTE_DESKTOP) => realRevert(filePath),
+  readClaudeDesktopConfig: (
+    filePath: string = ROUTE_DESKTOP,
+    ...rest: Array<unknown>
+  ) =>
+    (realReadDesktop as (...a: Array<unknown>) => unknown)(filePath, ...rest),
+  applyProxyConfig: (
+    filePath: string = ROUTE_DESKTOP,
+    ...rest: Array<unknown>
+  ) => (realApply as (...a: Array<unknown>) => unknown)(filePath, ...rest),
+  revertProxyConfig: (
+    filePath: string = ROUTE_DESKTOP,
+    ...rest: Array<unknown>
+  ) => (realRevert as (...a: Array<unknown>) => unknown)(filePath, ...rest),
 }))
 
 const { appsRoutes } = await import("~/routes/settings/apps")
