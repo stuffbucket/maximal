@@ -19,7 +19,11 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-import { getShimPath, removeClaudeShim } from "./lib/claude-cli-detect"
+import {
+  getShimPath,
+  removeClaudeShim,
+  removeShimDirFromPath,
+} from "./lib/claude-cli-detect"
 import { revertProxyConfig } from "./lib/claude-desktop-config"
 import { PATHS } from "./lib/paths"
 
@@ -194,9 +198,11 @@ function removeBinary(): void {
 // ────────────────────────────────────────────────────────────────────
 
 /** Remove the transparent `claude` shim the Apps panel installs into
- *  `~/.local/share/maximal/shims/`. `removeClaudeShim` only deletes a
- *  file carrying our marker — it refuses to touch a real binary and
- *  no-ops when the shim is absent — so this is always safe to run. */
+ *  `~/.local/share/maximal/shims/`, plus the PATH block it added to the
+ *  user's zsh rc files. `removeClaudeShim` only deletes a file carrying
+ *  our marker — it refuses to touch a real binary and no-ops when the
+ *  shim is absent — and `removeShimDirFromPath` strips only our
+ *  marker-guarded rc block, so both are always safe to run. */
 function removeShim(): void {
   try {
     const removed = removeClaudeShim()
@@ -208,6 +214,10 @@ function removeShim(): void {
   } catch (err) {
     // Thrown only if a non-marker file sits at the shim path (not ours).
     consola.warn("  could not remove the Claude Code shim", err)
+  }
+  const rcFiles = removeShimDirFromPath()
+  if (rcFiles.length > 0) {
+    consola.success(`  removed shim PATH block from ${rcFiles.join(", ")}`)
   }
 }
 

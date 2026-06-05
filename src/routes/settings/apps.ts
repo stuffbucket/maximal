@@ -20,11 +20,13 @@ import fs from "node:fs"
 import path from "node:path"
 
 import {
+  addShimDirToPath,
   detectClaudeInstalls,
   installClaudeShim,
   isShimInstalled,
   readShimTarget,
   removeClaudeShim,
+  removeShimDirFromPath,
 } from "~/lib/claude-cli-detect"
 import {
   alreadyConfigured,
@@ -225,9 +227,13 @@ appsRoutes.post("/claude-code/toggle", async (c) => {
         )
       }
       installClaudeShim(target, { apiKey: resolveShimApiKey() })
+      // Put our shims dir ahead of the real claude on PATH (next shell).
+      // Writing the shim alone does nothing until this lands.
+      addShimDirToPath()
       persistClaudeCode({ enabled: true, selectedPath: target })
     } else {
       removeClaudeShim()
+      removeShimDirFromPath()
       persistClaudeCode({ enabled: false })
     }
 

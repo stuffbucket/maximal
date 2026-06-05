@@ -38,8 +38,16 @@ export type ClaudeInstallSource =
   | "path"
 
 export interface ClaudeInstall {
-  /** Resolved (symlinks followed) absolute path of the real binary. */
+  /** The stable handle to invoke — the path as discovered (on PATH or a
+   *  known install dir), NOT symlink-resolved. For the native installer
+   *  this is `~/.local/bin/claude`, the symlink the installer repoints on
+   *  every background auto-update. The shim must exec THIS, not a pinned
+   *  version, or it breaks the next time Claude Code updates itself. */
   path: string
+  /** Symlink-resolved real path. Used to de-dupe installs reachable via
+   *  several handles and to recognise (and skip) our own shim. Not what
+   *  we exec — see `path`. */
+  resolvedPath: string
   /** Trimmed `--version` output, or null when it couldn't be read. */
   version: string | null
   /** Best-effort classification of how it was installed. */
@@ -220,12 +228,20 @@ export function detectClaudeInstalls(
       resolved = candidate.raw
     }
     if (fileContains(resolved, SHIM_MARKER)) continue
+    // De-dupe by resolved real path so one binary reachable via several
+    // handles is reported once. Candidate order (PATH dirs first, then
+    // known install dirs) means the FIRST handle wins — for the native
+    // installer that's `~/.local/bin/claude`, the stable auto-updating
+    // symlink we want to exec.
     if (seen.has(resolved)) continue
     seen.add(resolved)
 
     installs.push({
-      path: resolved,
-      version: readVersion(resolved),
+      // `candidate.raw` is the stable handle (symlink/bin entry), NOT the
+      // version-resolved path — exec'ing this follows auto-updates.
+      path: candidate.raw,
+      resolvedPath: resolved,
+      version: readVersion(candidate.raw),
       source: classifySource(resolved, {
         origin: candidate.origin,
         home,
@@ -475,6 +491,118 @@ export function removeClaudeShim(homeDir: string = os.homedir()): boolean {
   }
   fs.rmSync(shimPath, { force: true })
   return true
+}
+
+// ---------------------------------------------------------------------------
+// PATH activation
+// ---------------------------------------------------------------------------
+//
+// Writing the shim isn't enough: the shims dir has to be EARLIER on PATH
+// than the real `claude` for plain `claude` to dispatch to us. The native
+// installer prepends `~/.local/bin` to PATH, so the real claude is
+// typically position 1 — we have to get ahead of even that. We do it the
+// way every version manager (asdf, volta, pyenv) does, and the way our own
+// macOS first-launch already does for `~/.local/bin`: a marker-guarded
+// block appended to the user's zsh rc files that prepends the shims dir.
+// The block is idempotent (keyed on the marker) and fully reversible.
+
+/** Marker lines wrapping the PATH block we manage in the user's rc files.
+ *  Anything between them is ours to add/remove; everything else is left
+ *  untouched. */
+const PATH_MARKER_START = "# >>> maximal claude shim >>>"
+const PATH_MARKER_END = "# <<< maximal claude shim <<<"
+
+/** zsh rc files we manage: `.zshrc` (interactive) and `.zprofile` (login).
+ *  zsh has been macOS's default since Catalina; bash is intentionally
+ *  skipped, matching the first-launch PATH block. */
+function pathRcFiles(homeDir: string): Array<string> {
+  return [path.join(homeDir, ".zshrc"), path.join(homeDir, ".zprofile")]
+}
+
+/** The exact block we write. The shims dir goes FIRST so it beats a
+ *  position-1 `~/.local/bin/claude` from the native installer. */
+function pathBlock(shimDir: string): string {
+  return `${PATH_MARKER_START}\nexport PATH="${shimDir}:$PATH"\n${PATH_MARKER_END}\n`
+}
+
+/** Strip any existing maximal-claude-shim block (and the blank line a
+ *  prior insert added before it) from rc-file content. Idempotent. */
+function stripPathBlock(content: string): string {
+  // Remove from an optional leading newline through the end marker.
+  const re = new RegExp(
+    `\\n?${escapeRegExp(PATH_MARKER_START)}[\\s\\S]*?${escapeRegExp(
+      PATH_MARKER_END,
+    )}\\n?`,
+    "g",
+  )
+  return content.replace(re, "\n")
+}
+
+function escapeRegExp(s: string): string {
+  return s.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`)
+}
+
+/**
+ * Add the shims dir to PATH in the user's zsh rc files (idempotent).
+ * Takes effect in the NEXT terminal — the current process's PATH is not
+ * mutated. Best-effort per file: an unwritable rc is skipped, not fatal.
+ * Returns the rc files actually written.
+ */
+export function addShimDirToPath(
+  homeDir: string = os.homedir(),
+): Array<string> {
+  const shimDir = getShimDir(homeDir)
+  const written: Array<string> = []
+  for (const rc of pathRcFiles(homeDir)) {
+    try {
+      const existing = fs.existsSync(rc) ? fs.readFileSync(rc, "utf8") : ""
+      // Already present and pointing at the right dir → nothing to do.
+      if (existing.includes(`export PATH="${shimDir}:$PATH"`)) continue
+      // Replace any stale block first, then append a fresh one.
+      const base = stripPathBlock(existing).replace(/\n+$/, "\n")
+      const next =
+        (base && !base.endsWith("\n") ? base + "\n" : base)
+        + "\n"
+        + pathBlock(shimDir)
+      fs.writeFileSync(rc, next)
+      written.push(rc)
+    } catch {
+      /* best effort — an unwritable rc shouldn't break the toggle */
+    }
+  }
+  return written
+}
+
+/**
+ * Remove the maximal-claude-shim PATH block from the user's zsh rc files
+ * (idempotent). Returns the rc files actually modified.
+ */
+export function removeShimDirFromPath(
+  homeDir: string = os.homedir(),
+): Array<string> {
+  const modified: Array<string> = []
+  for (const rc of pathRcFiles(homeDir)) {
+    try {
+      if (!fs.existsSync(rc)) continue
+      const existing = fs.readFileSync(rc, "utf8")
+      if (!existing.includes(PATH_MARKER_START)) continue
+      const next = stripPathBlock(existing)
+      fs.writeFileSync(rc, next)
+      modified.push(rc)
+    } catch {
+      /* best effort */
+    }
+  }
+  return modified
+}
+
+/** True when at least one managed rc file currently carries our PATH
+ *  block. Used by the UI to report whether the shim is actually active
+ *  (vs merely written but not yet on PATH). */
+export function isShimDirOnPath(homeDir: string = os.homedir()): boolean {
+  return pathRcFiles(homeDir).some(
+    (rc) => fs.existsSync(rc) && fileContains(rc, PATH_MARKER_START),
+  )
 }
 
 /** True when the shim path exists and carries our marker. */

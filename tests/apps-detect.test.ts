@@ -67,7 +67,7 @@ describe("detectClaudeInstalls", () => {
       pathDirs: [dir1, dir2],
       npmPrefix: null,
     })
-    const mine = installs.filter((i) => i.path === resolved)
+    const mine = installs.filter((i) => i.resolvedPath === resolved)
     expect(mine).toHaveLength(1)
   })
 
@@ -81,7 +81,7 @@ describe("detectClaudeInstalls", () => {
       pathDirs: [dir],
       npmPrefix: null,
     })
-    const mine = installs.find((i) => i.path === resolved)
+    const mine = installs.find((i) => i.resolvedPath === resolved)
     expect(mine?.version).toBe("9.8.7")
   })
 
@@ -95,7 +95,35 @@ describe("detectClaudeInstalls", () => {
       npmPrefix: null,
       readVersion: () => null,
     })
-    expect(installs.find((i) => i.path === resolved)?.version).toBeNull()
+    expect(
+      installs.find((i) => i.resolvedPath === resolved)?.version,
+    ).toBeNull()
+  })
+
+  test("reports the stable symlink as `path`, not the resolved version (native installer shape)", () => {
+    // Mirror the native installer: ~/.local/bin/claude is a symlink to a
+    // versioned binary under ~/.local/share/claude/versions/. The shim
+    // must exec the SYMLINK (which auto-update repoints), so `path` must
+    // be the symlink and `resolvedPath` the version it currently points at.
+    const home = path.join(root, "home")
+    const versioned = makeClaude(
+      path.join(home, ".local", "share", "claude", "versions"),
+    )
+    const binDir = path.join(home, ".local", "bin")
+    fs.mkdirSync(binDir, { recursive: true })
+    const symlink = path.join(binDir, "claude")
+    fs.symlinkSync(versioned, symlink)
+
+    const installs = detectClaudeInstalls({
+      homeDir: home,
+      pathDirs: [binDir],
+      npmPrefix: null,
+    })
+    const mine = installs.find(
+      (i) => i.resolvedPath === fs.realpathSync(symlink),
+    )
+    expect(mine?.path).toBe(symlink) // stable handle, NOT the version
+    expect(mine?.resolvedPath).not.toBe(symlink) // resolved to the version
   })
 
   test("excludes our own shim via the marker line", () => {
@@ -108,7 +136,7 @@ describe("detectClaudeInstalls", () => {
       pathDirs: [dir],
       npmPrefix: null,
     })
-    expect(installs.some((i) => i.path === resolved)).toBe(false)
+    expect(installs.some((i) => i.resolvedPath === resolved)).toBe(false)
   })
 
   test("classifies sources by location", () => {
@@ -134,7 +162,9 @@ describe("detectClaudeInstalls", () => {
     expect(byPath.get(fs.realpathSync(npmFile))).toBe("npm-global")
     expect(byPath.get(fs.realpathSync(pathFile))).toBe("path")
   })
+})
 
+describe("detectClaudeInstalls — source classification", () => {
   test('classifies a binary under `<home>/.claude/...` as "claude-local"', () => {
     // Discover via pathDirs (origin "path") so the ONLY thing that can
     // produce "claude-local" is the .claude prefix check — not the
@@ -153,7 +183,7 @@ describe("detectClaudeInstalls", () => {
       pathDirs: [dir],
       npmPrefix: null,
     })
-    expect(installs.find((i) => i.path === resolved)?.source).toBe(
+    expect(installs.find((i) => i.resolvedPath === resolved)?.source).toBe(
       "claude-local",
     )
   })
@@ -170,7 +200,9 @@ describe("detectClaudeInstalls", () => {
       pathDirs: [dir],
       npmPrefix: null,
     })
-    expect(installs.find((i) => i.path === resolved)?.source).toBe("local-bin")
+    expect(installs.find((i) => i.resolvedPath === resolved)?.source).toBe(
+      "local-bin",
+    )
   })
 
   test('does NOT treat `<home>/.local/<other>` as "local-bin"', () => {
@@ -187,7 +219,9 @@ describe("detectClaudeInstalls", () => {
       pathDirs: [dir],
       npmPrefix: null,
     })
-    expect(installs.find((i) => i.path === resolved)?.source).toBe("path")
+    expect(installs.find((i) => i.resolvedPath === resolved)?.source).toBe(
+      "path",
+    )
   })
 
   test('classifies a binary under the npm prefix `/bin` as "npm-global"', () => {
@@ -205,7 +239,9 @@ describe("detectClaudeInstalls", () => {
       pathDirs: [dir],
       npmPrefix,
     })
-    expect(installs.find((i) => i.path === resolved)?.source).toBe("npm-global")
+    expect(installs.find((i) => i.resolvedPath === resolved)?.source).toBe(
+      "npm-global",
+    )
   })
 
   test("honours the npm/homebrew origin shortcut over a plain PATH dir", () => {
@@ -223,7 +259,9 @@ describe("detectClaudeInstalls", () => {
       pathDirs: [],
       npmPrefix,
     })
-    expect(installs.find((i) => i.path === resolved)?.source).toBe("npm-global")
+    expect(installs.find((i) => i.resolvedPath === resolved)?.source).toBe(
+      "npm-global",
+    )
   })
 
   test('classifies a binary on an ordinary PATH dir as "path"', () => {
@@ -236,7 +274,9 @@ describe("detectClaudeInstalls", () => {
       pathDirs: [pathDir],
       npmPrefix: null,
     })
-    expect(installs.find((i) => i.path === resolved)?.source).toBe("path")
+    expect(installs.find((i) => i.resolvedPath === resolved)?.source).toBe(
+      "path",
+    )
   })
 
   test('classifies a binary resolving under /usr/local (or /opt/homebrew) as "homebrew"', () => {
@@ -269,7 +309,9 @@ describe("detectClaudeInstalls", () => {
         pathDirs: [brewDir],
         npmPrefix: null,
       })
-      expect(installs.find((i) => i.path === resolved)?.source).toBe("homebrew")
+      expect(installs.find((i) => i.resolvedPath === resolved)?.source).toBe(
+        "homebrew",
+      )
     } finally {
       fs.rmSync(brewDir, { recursive: true, force: true })
     }
@@ -288,7 +330,9 @@ describe("detectClaudeInstalls", () => {
       pathDirs: [dir],
       npmPrefix: null,
     })
-    expect(installs.find((i) => i.path === resolved)?.version).toBe("10.20.30")
+    expect(installs.find((i) => i.resolvedPath === resolved)?.version).toBe(
+      "10.20.30",
+    )
   })
 })
 
