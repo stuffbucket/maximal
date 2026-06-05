@@ -170,18 +170,36 @@ describe("detectClaudeInstalls", () => {
     expect(elapsed).toBeLessThan(500)
   })
 
-  test("classifies sources by location", () => {
+  test("returns only the active claude (first on PATH), ignoring others", () => {
+    // A claude on PATH is the active one; copies in other known install
+    // dirs are intentionally ignored. Active-first short-circuits to one.
     const home = path.join(root, "home")
-    const localBin = makeClaude(path.join(home, ".local", "bin"))
-    const claudeLocal = makeClaude(path.join(home, ".claude", "local"))
-    const npmPrefix = path.join(root, "npm")
-    const npmFile = makeClaude(path.join(npmPrefix, "bin"))
+    makeClaude(path.join(home, ".local", "bin")) // exists but not on PATH
     const pathDir = path.join(root, "somewhere")
     const pathFile = makeClaude(pathDir)
 
     const installs = detectClaudeInstalls({
       homeDir: home,
       pathDirs: [pathDir],
+      npmPrefix: null,
+    })
+    expect(installs).toHaveLength(1)
+    expect(installs[0].resolvedPath).toBe(fs.realpathSync(pathFile))
+    expect(installs[0].source).toBe("path")
+  })
+
+  test("falls back to known install dirs when nothing is active on PATH", () => {
+    // No claude on PATH → probe known locations + npm-global so an
+    // installed-but-not-active claude can still be surfaced.
+    const home = path.join(root, "home")
+    const localBin = makeClaude(path.join(home, ".local", "bin"))
+    const claudeLocal = makeClaude(path.join(home, ".claude", "local"))
+    const npmPrefix = path.join(root, "npm")
+    const npmFile = makeClaude(path.join(npmPrefix, "bin"))
+
+    const installs = detectClaudeInstalls({
+      homeDir: home,
+      pathDirs: [], // nothing active
       npmPrefix,
     })
 
@@ -191,7 +209,6 @@ describe("detectClaudeInstalls", () => {
     expect(byPath.get(fs.realpathSync(localBin))).toBe("local-bin")
     expect(byPath.get(fs.realpathSync(claudeLocal))).toBe("claude-local")
     expect(byPath.get(fs.realpathSync(npmFile))).toBe("npm-global")
-    expect(byPath.get(fs.realpathSync(pathFile))).toBe("path")
   })
 })
 

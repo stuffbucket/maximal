@@ -1,11 +1,12 @@
 /**
  * Detection + PATH-shim management for the `claude` CLI (Claude Code).
  *
- * "Detection" finds every real `claude` binary across the install
- * methods we know about (Homebrew, npm global, the official curl
- * installer's `~/.local/bin`, the `~/.claude` local install, anything
- * on PATH), de-duplicating by resolved real path so a single binary
- * reachable via several routes is reported once.
+ * "Detection" finds the `claude` that's actually active — the first real
+ * `claude` on PATH (an in-process PATH walk, no subprocess). Only when
+ * nothing is active on PATH does it fall back to probing known install
+ * dirs and npm-global. An npm- or Homebrew-installed claude that is the
+ * active one is on PATH too, so it's still found; copies that exist but
+ * aren't active are intentionally ignored.
  *
  * "Shim" is a tiny `/bin/sh` wrapper we drop in a dedicated directory
  * (`~/.local/share/maximal/shims/`) as a file named `claude`. It sets
@@ -199,28 +200,96 @@ function classifySource(
 }
 
 /**
- * Find every real `claude` install, de-duped by resolved real path.
- * Our own shim is excluded (identified by its marker line).
+ * Inspect one candidate path. Returns a `ClaudeInstall` when it's a real
+ * (non-shim, not-yet-seen) `claude`, or null otherwise. `seen` is mutated
+ * to de-dupe by resolved real path across candidates.
+ */
+function inspectCandidate(
+  candidate: Candidate,
+  ctx: {
+    home: string
+    npmBin: string | null
+    readVersion: (binPath: string) => string | null
+    seen: Set<string>
+  },
+): ClaudeInstall | null {
+  let stat: fs.Stats
+  try {
+    stat = fs.statSync(candidate.raw)
+  } catch {
+    return null
+  }
+  if (!stat.isFile()) return null
+
+  // Our own shim is not an install. Check before resolving so a shim
+  // symlinked elsewhere still gets excluded.
+  if (fileStartsWithContains(candidate.raw, SHIM_MARKER)) return null
+
+  let resolved: string
+  try {
+    resolved = fs.realpathSync(candidate.raw)
+  } catch {
+    resolved = candidate.raw
+  }
+  if (fileStartsWithContains(resolved, SHIM_MARKER)) return null
+  if (ctx.seen.has(resolved)) return null
+  ctx.seen.add(resolved)
+
+  return {
+    // `candidate.raw` is the stable handle (symlink/bin entry), NOT the
+    // version-resolved path — exec'ing this follows auto-updates.
+    path: candidate.raw,
+    resolvedPath: resolved,
+    version: ctx.readVersion(candidate.raw),
+    source: classifySource(resolved, {
+      origin: candidate.origin,
+      home: ctx.home,
+      npmBin: ctx.npmBin,
+    }),
+  }
+}
+
+/**
+ * Find the `claude` install(s) worth offering.
+ *
+ * Phase 1 — the ACTIVE claude: the first real (non-shim) `claude` on PATH.
+ * That's the binary that runs when the user types `claude`, and the only
+ * one we need to shim. It's an in-process PATH walk (no subprocess), so a
+ * normal setup resolves in well under a millisecond plus one `--version`
+ * on the winner. An npm- or Homebrew-installed claude that is actually
+ * active is on PATH too, so this finds it without probing npm — installs
+ * that exist but aren't active are intentionally ignored.
+ *
+ * Phase 2 — fallback: only when nothing is active on PATH. Probe the known
+ * install dirs (and npm-global, which costs an `npm prefix -g` subprocess)
+ * so we can still surface an installed-but-not-on-PATH claude for the user
+ * to enable. The npm subprocess is thus kept off the common-case hot path.
  */
 export function detectClaudeInstalls(
   options: DetectOptions = {},
 ): Array<ClaudeInstall> {
   const home = options.homeDir ?? os.homedir()
   const pathDirs = options.pathDirs ?? defaultPathDirs()
-  const npmPrefix =
-    options.npmPrefix === undefined ? defaultNpmPrefix() : options.npmPrefix
-  const npmBin = npmPrefix ? path.join(npmPrefix, "bin") : null
   const readVersion = options.readVersion ?? readClaudeVersion
+  const seen = new Set<string>()
 
-  const candidates: Array<Candidate> = []
-
-  // 1. Everything reachable via PATH.
+  // Phase 1: active claude on PATH. Only honour an EXPLICIT npmPrefix for
+  // classification here — never probe (that's the cost we're avoiding).
+  const explicitNpm = options.npmPrefix
+  const phase1NpmBin =
+    typeof explicitNpm === "string" ? path.join(explicitNpm, "bin") : null
   for (const dir of pathDirs) {
-    candidates.push({ raw: path.join(dir, "claude"), origin: "path" })
+    const inst = inspectCandidate(
+      { raw: path.join(dir, "claude"), origin: "path" },
+      { home, npmBin: phase1NpmBin, readVersion, seen },
+    )
+    if (inst) return [inst]
   }
 
-  // 2. Common install locations, on PATH or not.
-  candidates.push(
+  // Phase 2: nothing active on PATH — probe known locations + npm-global.
+  const npmPrefix = explicitNpm === undefined ? defaultNpmPrefix() : explicitNpm
+  const npmBin = npmPrefix ? path.join(npmPrefix, "bin") : null
+  const fallback: Array<Candidate> = [
     { raw: "/opt/homebrew/bin/claude", origin: "homebrew" },
     { raw: "/usr/local/bin/claude", origin: "homebrew" },
     { raw: path.join(home, ".local", "bin", "claude"), origin: "local-bin" },
@@ -233,56 +302,21 @@ export function detectClaudeInstalls(
       origin: "claude-local",
     },
     { raw: path.join(home, ".claude", "claude"), origin: "claude-local" },
-  )
+  ]
   if (npmBin) {
-    candidates.push({ raw: path.join(npmBin, "claude"), origin: "npm-global" })
+    fallback.push({ raw: path.join(npmBin, "claude"), origin: "npm-global" })
   }
 
-  const seen = new Set<string>()
   const installs: Array<ClaudeInstall> = []
-
-  for (const candidate of candidates) {
-    let stat: fs.Stats
-    try {
-      stat = fs.statSync(candidate.raw)
-    } catch {
-      continue
-    }
-    if (!stat.isFile()) continue
-
-    // Our own shim is not an install. Check before resolving so a shim
-    // symlinked elsewhere still gets excluded.
-    if (fileStartsWithContains(candidate.raw, SHIM_MARKER)) continue
-
-    let resolved: string
-    try {
-      resolved = fs.realpathSync(candidate.raw)
-    } catch {
-      resolved = candidate.raw
-    }
-    if (fileStartsWithContains(resolved, SHIM_MARKER)) continue
-    // De-dupe by resolved real path so one binary reachable via several
-    // handles is reported once. Candidate order (PATH dirs first, then
-    // known install dirs) means the FIRST handle wins — for the native
-    // installer that's `~/.local/bin/claude`, the stable auto-updating
-    // symlink we want to exec.
-    if (seen.has(resolved)) continue
-    seen.add(resolved)
-
-    installs.push({
-      // `candidate.raw` is the stable handle (symlink/bin entry), NOT the
-      // version-resolved path — exec'ing this follows auto-updates.
-      path: candidate.raw,
-      resolvedPath: resolved,
-      version: readVersion(candidate.raw),
-      source: classifySource(resolved, {
-        origin: candidate.origin,
-        home,
-        npmBin,
-      }),
+  for (const candidate of fallback) {
+    const inst = inspectCandidate(candidate, {
+      home,
+      npmBin,
+      readVersion,
+      seen,
     })
+    if (inst) installs.push(inst)
   }
-
   return installs
 }
 
