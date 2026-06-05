@@ -145,6 +145,16 @@ function fileContains(filePath: string, needle: string): boolean {
   }
 }
 
+/** Read a (small, text) file, returning "" when it doesn't exist or can't
+ *  be read. Lets callers act without a check-then-use existsSync race. */
+function readFileOrEmpty(filePath: string): string {
+  try {
+    return fs.readFileSync(filePath, "utf8")
+  } catch {
+    return ""
+  }
+}
+
 /** Symlink-resolve a path, falling back to the input when it can't be
  *  resolved (e.g. doesn't exist). Used to normalise prefixes before
  *  comparing them against an already-resolved binary path. */
@@ -625,7 +635,9 @@ export function addShimDirToPath(
   const written: Array<string> = []
   for (const rc of pathRcFiles(homeDir)) {
     try {
-      const existing = fs.existsSync(rc) ? fs.readFileSync(rc, "utf8") : ""
+      // Read without a prior existsSync check (avoids a check-then-use
+      // race): a missing file just reads as empty content.
+      const existing = readFileOrEmpty(rc)
       // Already present and pointing at the right dir → nothing to do.
       if (existing.includes(`export PATH="${shimDir}:$PATH"`)) continue
       // Replace any stale block first, then append a fresh one.
@@ -653,8 +665,9 @@ export function removeShimDirFromPath(
   const modified: Array<string> = []
   for (const rc of pathRcFiles(homeDir)) {
     try {
-      if (!fs.existsSync(rc)) continue
-      const existing = fs.readFileSync(rc, "utf8")
+      // Read without a prior existsSync check (avoids a check-then-use
+      // race). Nothing to strip → skip the write entirely.
+      const existing = readFileOrEmpty(rc)
       if (!existing.includes(PATH_MARKER_START)) continue
       const next = stripPathBlock(existing)
       fs.writeFileSync(rc, next)
@@ -670,17 +683,16 @@ export function removeShimDirFromPath(
  *  block. Used by the UI to report whether the shim is actually active
  *  (vs merely written but not yet on PATH). */
 export function isShimDirOnPath(homeDir: string = os.homedir()): boolean {
-  return pathRcFiles(homeDir).some(
-    (rc) => fs.existsSync(rc) && fileContains(rc, PATH_MARKER_START),
-  )
+  // No existsSync guard: fileContains already returns false for a missing
+  // file, so this is a single read with no check-then-use gap.
+  return pathRcFiles(homeDir).some((rc) => fileContains(rc, PATH_MARKER_START))
 }
 
 /** True when the shim path exists and carries our marker. */
 export function isShimInstalled(homeDir: string = os.homedir()): boolean {
-  const shimPath = getShimPath(homeDir)
-  return (
-    fs.existsSync(shimPath) && fileStartsWithContains(shimPath, SHIM_MARKER)
-  )
+  // fileStartsWithContains returns false for a missing file — no separate
+  // existsSync check (which would introduce a check-then-use race).
+  return fileStartsWithContains(getShimPath(homeDir), SHIM_MARKER)
 }
 
 /** Parse the `REAL_CLAUDE="<path>"` line to report which binary the
