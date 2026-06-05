@@ -1,8 +1,9 @@
 ---
 id: ADR-0003
 title: max wrapper command + per-platform install / uninstall gaps
-status: proposed
+status: superseded
 date: 2026-05-21
+superseded_date: 2026-06-05
 authors:
   - stuffbucket
 supersedes: []
@@ -14,10 +15,26 @@ links:
   legacy_app_template: build/macos/app-template/
   tauri_shell_conf: shell/src-tauri/tauri.conf.json
 related_files:
-  scripts/max: posix shell wrapper that env-injects ANTHROPIC_*/OPENAI_*
-  src/print-shell-key.ts: CLI subcommand the wrapper invokes
-  src/routes/internal/route.ts: hosts the loopback-only /_internal/shell-key endpoint
+  scripts/max: REMOVED — posix shell wrapper that env-injected ANTHROPIC_*/OPENAI_*
+  src/print-shell-key.ts: REMOVED — CLI subcommand the wrapper invoked
+  src/routes/internal/route.ts: still hosts POST /_internal/shutdown; the /_internal/shell-key endpoint was removed with the wrapper
 ---
+
+> **SUPERSEDED (2026-06-05).** The `max` wrapper was removed before it
+> ever shipped via an installer. The transparent Apps-panel shim
+> (`src/lib/claude-cli-detect.ts` → `~/.local/share/maximal/shims/claude`)
+> covers the same "plain `claude` just works against the local proxy"
+> need without a prefix command, and the `maximal` CLI covers direct use.
+> Deleting `scripts/max`, `src/print-shell-key.ts`, and the
+> `/_internal/shell-key` endpoint. The per-launch `state.shellApiKey`
+> itself is **retained** — it's still injected by the Tauri shell
+> (`MAXIMAL_SHELL_KEY`) and used for Settings-UI auth via the
+> `get_shell_api_key` Tauri command (a separate mechanism from the
+> deleted HTTP endpoint). The cleanup-gaps half of this ADR is addressed
+> separately: shim removal is now wired into `maximal uninstall`.
+>
+> This document is kept as a historical record of the decision and is
+> no longer an active design.
 
 # `max` wrapper + per-platform install / uninstall gaps
 
