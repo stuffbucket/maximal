@@ -139,6 +139,37 @@ describe("detectClaudeInstalls", () => {
     expect(installs.some((i) => i.resolvedPath === resolved)).toBe(false)
   })
 
+  test("does not read large candidate binaries in full (perf regression guard)", () => {
+    // The real `claude` is a 200 MB+ binary. Detection must only read a
+    // small prefix to check for the shim marker — reading the whole file
+    // made the Apps toggle lag for seconds. Here a 64 MB fake binary
+    // (marker absent) must still be detected as an install, fast, without
+    // a full read. We assert correctness + a generous time ceiling.
+    const dir = path.join(root, "bin")
+    fs.mkdirSync(dir, { recursive: true })
+    const file = path.join(dir, "claude")
+    // 64 MB of zero bytes — no marker, plenty big to expose a full read.
+    fs.writeFileSync(file, Buffer.alloc(64 * 1024 * 1024))
+    fs.chmodSync(file, 0o755)
+    const resolved = fs.realpathSync(file)
+
+    const start = performance.now()
+    const installs = detectClaudeInstalls({
+      homeDir: path.join(root, "home"),
+      pathDirs: [dir],
+      npmPrefix: null,
+      readVersion: () => "1.0.0", // don't exec the fake binary
+    })
+    const elapsed = performance.now() - start
+
+    // The fake binary is a real install (no marker → not skipped).
+    expect(installs.some((i) => i.resolvedPath === resolved)).toBe(true)
+    // A full 64 MB read would take ~200 ms+; a 4 KB prefix read is sub-ms.
+    // 500 ms is a generous ceiling that still fails a whole-file read of a
+    // 200 MB+ binary (the actual bug was multi-second).
+    expect(elapsed).toBeLessThan(500)
+  })
+
   test("classifies sources by location", () => {
     const home = path.join(root, "home")
     const localBin = makeClaude(path.join(home, ".local", "bin"))

@@ -103,6 +103,39 @@ export function readClaudeVersion(binPath: string): string | null {
   return semver ? semver[0] : trimmed
 }
 
+/**
+ * Does the START of a file contain `needle`? Reads only a bounded prefix
+ * (the first 4 KB) — never the whole file. This matters: our shim marker
+ * always sits on line 2 of a ~1 KB shell script, but a real `claude` is a
+ * 200 MB+ compiled binary. Reading the whole file to look for the marker
+ * cost ~0.7s PER candidate and made detection (and the Apps toggle that
+ * calls it) take many seconds. A prefix read is effectively free and
+ * still catches every shim we write. Use this for shim/binary checks; for
+ * small text files where the needle may be anywhere (rc files), use
+ * `fileContains`.
+ */
+function fileStartsWithContains(filePath: string, needle: string): boolean {
+  let fd: number
+  try {
+    fd = fs.openSync(filePath, "r")
+  } catch {
+    return false
+  }
+  try {
+    const buf = Buffer.alloc(4096)
+    const bytes = fs.readSync(fd, buf, 0, buf.length, 0)
+    return buf.toString("utf8", 0, bytes).includes(needle)
+  } catch {
+    return false
+  } finally {
+    fs.closeSync(fd)
+  }
+}
+
+/** Whole-file substring check. Only for files known to be small (shell rc
+ *  files), where the needle may appear anywhere. Never call this on a
+ *  candidate `claude` path — it could be a 200 MB+ binary; use
+ *  `fileStartsWithContains` there. */
 function fileContains(filePath: string, needle: string): boolean {
   try {
     return fs.readFileSync(filePath, "utf8").includes(needle)
@@ -219,7 +252,7 @@ export function detectClaudeInstalls(
 
     // Our own shim is not an install. Check before resolving so a shim
     // symlinked elsewhere still gets excluded.
-    if (fileContains(candidate.raw, SHIM_MARKER)) continue
+    if (fileStartsWithContains(candidate.raw, SHIM_MARKER)) continue
 
     let resolved: string
     try {
@@ -227,7 +260,7 @@ export function detectClaudeInstalls(
     } catch {
       resolved = candidate.raw
     }
-    if (fileContains(resolved, SHIM_MARKER)) continue
+    if (fileStartsWithContains(resolved, SHIM_MARKER)) continue
     // De-dupe by resolved real path so one binary reachable via several
     // handles is reported once. Candidate order (PATH dirs first, then
     // known install dirs) means the FIRST handle wins — for the native
@@ -441,7 +474,10 @@ export function installClaudeShim(
   const shimPath = getShimPath(home)
   const maximalBinPath = options.maximalBinPath ?? process.execPath
 
-  if (fs.existsSync(shimPath) && !fileContains(shimPath, SHIM_MARKER)) {
+  if (
+    fs.existsSync(shimPath)
+    && !fileStartsWithContains(shimPath, SHIM_MARKER)
+  ) {
     throw new Error(
       `refusing to install shim: ${shimPath} already exists and is not a Maximal shim`,
     )
@@ -486,7 +522,7 @@ export function installClaudeShim(
 export function removeClaudeShim(homeDir: string = os.homedir()): boolean {
   const shimPath = getShimPath(homeDir)
   if (!fs.existsSync(shimPath)) return false
-  if (!fileContains(shimPath, SHIM_MARKER)) {
+  if (!fileStartsWithContains(shimPath, SHIM_MARKER)) {
     throw new Error(`refusing to remove ${shimPath}: it is not a Maximal shim`)
   }
   fs.rmSync(shimPath, { force: true })
@@ -608,7 +644,9 @@ export function isShimDirOnPath(homeDir: string = os.homedir()): boolean {
 /** True when the shim path exists and carries our marker. */
 export function isShimInstalled(homeDir: string = os.homedir()): boolean {
   const shimPath = getShimPath(homeDir)
-  return fs.existsSync(shimPath) && fileContains(shimPath, SHIM_MARKER)
+  return (
+    fs.existsSync(shimPath) && fileStartsWithContains(shimPath, SHIM_MARKER)
+  )
 }
 
 /** Parse the `REAL_CLAUDE="<path>"` line to report which binary the
