@@ -1,11 +1,12 @@
 /**
  * Detection + PATH-shim management for the `claude` CLI (Claude Code).
  *
- * "Detection" finds every real `claude` binary across the install
- * methods we know about (Homebrew, npm global, the official curl
- * installer's `~/.local/bin`, the `~/.claude` local install, anything
- * on PATH), de-duplicating by resolved real path so a single binary
- * reachable via several routes is reported once.
+ * "Detection" finds the `claude` that's actually active — the first real
+ * `claude` on PATH (an in-process PATH walk, no subprocess). Only when
+ * nothing is active on PATH does it fall back to probing known install
+ * dirs and npm-global. An npm- or Homebrew-installed claude that is the
+ * active one is on PATH too, so it's still found; copies that exist but
+ * aren't active are intentionally ignored.
  *
  * "Shim" is a tiny `/bin/sh` wrapper we drop in a dedicated directory
  * (`~/.local/share/maximal/shims/`) as a file named `claude`. It sets
@@ -38,8 +39,16 @@ export type ClaudeInstallSource =
   | "path"
 
 export interface ClaudeInstall {
-  /** Resolved (symlinks followed) absolute path of the real binary. */
+  /** The stable handle to invoke — the path as discovered (on PATH or a
+   *  known install dir), NOT symlink-resolved. For the native installer
+   *  this is `~/.local/bin/claude`, the symlink the installer repoints on
+   *  every background auto-update. The shim must exec THIS, not a pinned
+   *  version, or it breaks the next time Claude Code updates itself. */
   path: string
+  /** Symlink-resolved real path. Used to de-dupe installs reachable via
+   *  several handles and to recognise (and skip) our own shim. Not what
+   *  we exec — see `path`. */
+  resolvedPath: string
   /** Trimmed `--version` output, or null when it couldn't be read. */
   version: string | null
   /** Best-effort classification of how it was installed. */
@@ -95,11 +104,54 @@ export function readClaudeVersion(binPath: string): string | null {
   return semver ? semver[0] : trimmed
 }
 
+/**
+ * Does the START of a file contain `needle`? Reads only a bounded prefix
+ * (the first 4 KB) — never the whole file. This matters: our shim marker
+ * always sits on line 2 of a ~1 KB shell script, but a real `claude` is a
+ * 200 MB+ compiled binary. Reading the whole file to look for the marker
+ * cost ~0.7s PER candidate and made detection (and the Apps toggle that
+ * calls it) take many seconds. A prefix read is effectively free and
+ * still catches every shim we write. Use this for shim/binary checks; for
+ * small text files where the needle may be anywhere (rc files), use
+ * `fileContains`.
+ */
+function fileStartsWithContains(filePath: string, needle: string): boolean {
+  let fd: number
+  try {
+    fd = fs.openSync(filePath, "r")
+  } catch {
+    return false
+  }
+  try {
+    const buf = Buffer.alloc(4096)
+    const bytes = fs.readSync(fd, buf, 0, buf.length, 0)
+    return buf.toString("utf8", 0, bytes).includes(needle)
+  } catch {
+    return false
+  } finally {
+    fs.closeSync(fd)
+  }
+}
+
+/** Whole-file substring check. Only for files known to be small (shell rc
+ *  files), where the needle may appear anywhere. Never call this on a
+ *  candidate `claude` path — it could be a 200 MB+ binary; use
+ *  `fileStartsWithContains` there. */
 function fileContains(filePath: string, needle: string): boolean {
   try {
     return fs.readFileSync(filePath, "utf8").includes(needle)
   } catch {
     return false
+  }
+}
+
+/** Read a (small, text) file, returning "" when it doesn't exist or can't
+ *  be read. Lets callers act without a check-then-use existsSync race. */
+function readFileOrEmpty(filePath: string): string {
+  try {
+    return fs.readFileSync(filePath, "utf8")
+  } catch {
+    return ""
   }
 }
 
@@ -158,28 +210,96 @@ function classifySource(
 }
 
 /**
- * Find every real `claude` install, de-duped by resolved real path.
- * Our own shim is excluded (identified by its marker line).
+ * Inspect one candidate path. Returns a `ClaudeInstall` when it's a real
+ * (non-shim, not-yet-seen) `claude`, or null otherwise. `seen` is mutated
+ * to de-dupe by resolved real path across candidates.
+ */
+function inspectCandidate(
+  candidate: Candidate,
+  ctx: {
+    home: string
+    npmBin: string | null
+    readVersion: (binPath: string) => string | null
+    seen: Set<string>
+  },
+): ClaudeInstall | null {
+  let stat: fs.Stats
+  try {
+    stat = fs.statSync(candidate.raw)
+  } catch {
+    return null
+  }
+  if (!stat.isFile()) return null
+
+  // Our own shim is not an install. Check before resolving so a shim
+  // symlinked elsewhere still gets excluded.
+  if (fileStartsWithContains(candidate.raw, SHIM_MARKER)) return null
+
+  let resolved: string
+  try {
+    resolved = fs.realpathSync(candidate.raw)
+  } catch {
+    resolved = candidate.raw
+  }
+  if (fileStartsWithContains(resolved, SHIM_MARKER)) return null
+  if (ctx.seen.has(resolved)) return null
+  ctx.seen.add(resolved)
+
+  return {
+    // `candidate.raw` is the stable handle (symlink/bin entry), NOT the
+    // version-resolved path — exec'ing this follows auto-updates.
+    path: candidate.raw,
+    resolvedPath: resolved,
+    version: ctx.readVersion(candidate.raw),
+    source: classifySource(resolved, {
+      origin: candidate.origin,
+      home: ctx.home,
+      npmBin: ctx.npmBin,
+    }),
+  }
+}
+
+/**
+ * Find the `claude` install(s) worth offering.
+ *
+ * Phase 1 — the ACTIVE claude: the first real (non-shim) `claude` on PATH.
+ * That's the binary that runs when the user types `claude`, and the only
+ * one we need to shim. It's an in-process PATH walk (no subprocess), so a
+ * normal setup resolves in well under a millisecond plus one `--version`
+ * on the winner. An npm- or Homebrew-installed claude that is actually
+ * active is on PATH too, so this finds it without probing npm — installs
+ * that exist but aren't active are intentionally ignored.
+ *
+ * Phase 2 — fallback: only when nothing is active on PATH. Probe the known
+ * install dirs (and npm-global, which costs an `npm prefix -g` subprocess)
+ * so we can still surface an installed-but-not-on-PATH claude for the user
+ * to enable. The npm subprocess is thus kept off the common-case hot path.
  */
 export function detectClaudeInstalls(
   options: DetectOptions = {},
 ): Array<ClaudeInstall> {
   const home = options.homeDir ?? os.homedir()
   const pathDirs = options.pathDirs ?? defaultPathDirs()
-  const npmPrefix =
-    options.npmPrefix === undefined ? defaultNpmPrefix() : options.npmPrefix
-  const npmBin = npmPrefix ? path.join(npmPrefix, "bin") : null
   const readVersion = options.readVersion ?? readClaudeVersion
+  const seen = new Set<string>()
 
-  const candidates: Array<Candidate> = []
-
-  // 1. Everything reachable via PATH.
+  // Phase 1: active claude on PATH. Only honour an EXPLICIT npmPrefix for
+  // classification here — never probe (that's the cost we're avoiding).
+  const explicitNpm = options.npmPrefix
+  const phase1NpmBin =
+    typeof explicitNpm === "string" ? path.join(explicitNpm, "bin") : null
   for (const dir of pathDirs) {
-    candidates.push({ raw: path.join(dir, "claude"), origin: "path" })
+    const inst = inspectCandidate(
+      { raw: path.join(dir, "claude"), origin: "path" },
+      { home, npmBin: phase1NpmBin, readVersion, seen },
+    )
+    if (inst) return [inst]
   }
 
-  // 2. Common install locations, on PATH or not.
-  candidates.push(
+  // Phase 2: nothing active on PATH — probe known locations + npm-global.
+  const npmPrefix = explicitNpm === undefined ? defaultNpmPrefix() : explicitNpm
+  const npmBin = npmPrefix ? path.join(npmPrefix, "bin") : null
+  const fallback: Array<Candidate> = [
     { raw: "/opt/homebrew/bin/claude", origin: "homebrew" },
     { raw: "/usr/local/bin/claude", origin: "homebrew" },
     { raw: path.join(home, ".local", "bin", "claude"), origin: "local-bin" },
@@ -192,48 +312,21 @@ export function detectClaudeInstalls(
       origin: "claude-local",
     },
     { raw: path.join(home, ".claude", "claude"), origin: "claude-local" },
-  )
+  ]
   if (npmBin) {
-    candidates.push({ raw: path.join(npmBin, "claude"), origin: "npm-global" })
+    fallback.push({ raw: path.join(npmBin, "claude"), origin: "npm-global" })
   }
 
-  const seen = new Set<string>()
   const installs: Array<ClaudeInstall> = []
-
-  for (const candidate of candidates) {
-    let stat: fs.Stats
-    try {
-      stat = fs.statSync(candidate.raw)
-    } catch {
-      continue
-    }
-    if (!stat.isFile()) continue
-
-    // Our own shim is not an install. Check before resolving so a shim
-    // symlinked elsewhere still gets excluded.
-    if (fileContains(candidate.raw, SHIM_MARKER)) continue
-
-    let resolved: string
-    try {
-      resolved = fs.realpathSync(candidate.raw)
-    } catch {
-      resolved = candidate.raw
-    }
-    if (fileContains(resolved, SHIM_MARKER)) continue
-    if (seen.has(resolved)) continue
-    seen.add(resolved)
-
-    installs.push({
-      path: resolved,
-      version: readVersion(resolved),
-      source: classifySource(resolved, {
-        origin: candidate.origin,
-        home,
-        npmBin,
-      }),
+  for (const candidate of fallback) {
+    const inst = inspectCandidate(candidate, {
+      home,
+      npmBin,
+      readVersion,
+      seen,
     })
+    if (inst) installs.push(inst)
   }
-
   return installs
 }
 
@@ -425,7 +518,10 @@ export function installClaudeShim(
   const shimPath = getShimPath(home)
   const maximalBinPath = options.maximalBinPath ?? process.execPath
 
-  if (fs.existsSync(shimPath) && !fileContains(shimPath, SHIM_MARKER)) {
+  if (
+    fs.existsSync(shimPath)
+    && !fileStartsWithContains(shimPath, SHIM_MARKER)
+  ) {
     throw new Error(
       `refusing to install shim: ${shimPath} already exists and is not a Maximal shim`,
     )
@@ -470,17 +566,133 @@ export function installClaudeShim(
 export function removeClaudeShim(homeDir: string = os.homedir()): boolean {
   const shimPath = getShimPath(homeDir)
   if (!fs.existsSync(shimPath)) return false
-  if (!fileContains(shimPath, SHIM_MARKER)) {
+  if (!fileStartsWithContains(shimPath, SHIM_MARKER)) {
     throw new Error(`refusing to remove ${shimPath}: it is not a Maximal shim`)
   }
   fs.rmSync(shimPath, { force: true })
   return true
 }
 
+// ---------------------------------------------------------------------------
+// PATH activation
+// ---------------------------------------------------------------------------
+//
+// Writing the shim isn't enough: the shims dir has to be EARLIER on PATH
+// than the real `claude` for plain `claude` to dispatch to us. The native
+// installer prepends `~/.local/bin` to PATH, so the real claude is
+// typically position 1 — we have to get ahead of even that. We do it the
+// way every version manager (asdf, volta, pyenv) does, and the way our own
+// macOS first-launch already does for `~/.local/bin`: a marker-guarded
+// block appended to the user's zsh rc files that prepends the shims dir.
+// The block is idempotent (keyed on the marker) and fully reversible.
+
+/** Marker lines wrapping the PATH block we manage in the user's rc files.
+ *  Anything between them is ours to add/remove; everything else is left
+ *  untouched. */
+const PATH_MARKER_START = "# >>> maximal claude shim >>>"
+const PATH_MARKER_END = "# <<< maximal claude shim <<<"
+
+/** zsh rc files we manage: `.zshrc` (interactive) and `.zprofile` (login).
+ *  zsh has been macOS's default since Catalina; bash is intentionally
+ *  skipped, matching the first-launch PATH block. */
+function pathRcFiles(homeDir: string): Array<string> {
+  return [path.join(homeDir, ".zshrc"), path.join(homeDir, ".zprofile")]
+}
+
+/** The exact block we write. The shims dir goes FIRST so it beats a
+ *  position-1 `~/.local/bin/claude` from the native installer. */
+function pathBlock(shimDir: string): string {
+  return `${PATH_MARKER_START}\nexport PATH="${shimDir}:$PATH"\n${PATH_MARKER_END}\n`
+}
+
+/** Strip any existing maximal-claude-shim block (and the blank line a
+ *  prior insert added before it) from rc-file content. Idempotent. */
+function stripPathBlock(content: string): string {
+  // Remove from an optional leading newline through the end marker.
+  const re = new RegExp(
+    `\\n?${escapeRegExp(PATH_MARKER_START)}[\\s\\S]*?${escapeRegExp(
+      PATH_MARKER_END,
+    )}\\n?`,
+    "g",
+  )
+  return content.replace(re, "\n")
+}
+
+function escapeRegExp(s: string): string {
+  return s.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`)
+}
+
+/**
+ * Add the shims dir to PATH in the user's zsh rc files (idempotent).
+ * Takes effect in the NEXT terminal — the current process's PATH is not
+ * mutated. Best-effort per file: an unwritable rc is skipped, not fatal.
+ * Returns the rc files actually written.
+ */
+export function addShimDirToPath(
+  homeDir: string = os.homedir(),
+): Array<string> {
+  const shimDir = getShimDir(homeDir)
+  const written: Array<string> = []
+  for (const rc of pathRcFiles(homeDir)) {
+    try {
+      // Read without a prior existsSync check (avoids a check-then-use
+      // race): a missing file just reads as empty content.
+      const existing = readFileOrEmpty(rc)
+      // Already present and pointing at the right dir → nothing to do.
+      if (existing.includes(`export PATH="${shimDir}:$PATH"`)) continue
+      // Replace any stale block first, then append a fresh one.
+      const base = stripPathBlock(existing).replace(/\n+$/, "\n")
+      const next =
+        (base && !base.endsWith("\n") ? base + "\n" : base)
+        + "\n"
+        + pathBlock(shimDir)
+      fs.writeFileSync(rc, next)
+      written.push(rc)
+    } catch {
+      /* best effort — an unwritable rc shouldn't break the toggle */
+    }
+  }
+  return written
+}
+
+/**
+ * Remove the maximal-claude-shim PATH block from the user's zsh rc files
+ * (idempotent). Returns the rc files actually modified.
+ */
+export function removeShimDirFromPath(
+  homeDir: string = os.homedir(),
+): Array<string> {
+  const modified: Array<string> = []
+  for (const rc of pathRcFiles(homeDir)) {
+    try {
+      // Read without a prior existsSync check (avoids a check-then-use
+      // race). Nothing to strip → skip the write entirely.
+      const existing = readFileOrEmpty(rc)
+      if (!existing.includes(PATH_MARKER_START)) continue
+      const next = stripPathBlock(existing)
+      fs.writeFileSync(rc, next)
+      modified.push(rc)
+    } catch {
+      /* best effort */
+    }
+  }
+  return modified
+}
+
+/** True when at least one managed rc file currently carries our PATH
+ *  block. Used by the UI to report whether the shim is actually active
+ *  (vs merely written but not yet on PATH). */
+export function isShimDirOnPath(homeDir: string = os.homedir()): boolean {
+  // No existsSync guard: fileContains already returns false for a missing
+  // file, so this is a single read with no check-then-use gap.
+  return pathRcFiles(homeDir).some((rc) => fileContains(rc, PATH_MARKER_START))
+}
+
 /** True when the shim path exists and carries our marker. */
 export function isShimInstalled(homeDir: string = os.homedir()): boolean {
-  const shimPath = getShimPath(homeDir)
-  return fs.existsSync(shimPath) && fileContains(shimPath, SHIM_MARKER)
+  // fileStartsWithContains returns false for a missing file — no separate
+  // existsSync check (which would introduce a check-then-use race).
+  return fileStartsWithContains(getShimPath(homeDir), SHIM_MARKER)
 }
 
 /** Parse the `REAL_CLAUDE="<path>"` line to report which binary the

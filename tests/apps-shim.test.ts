@@ -9,16 +9,24 @@ import os from "node:os"
 import path from "node:path"
 
 import {
+  addShimDirToPath,
   getShimDir,
   getShimPath,
   installClaudeShim,
+  isShimDirOnPath,
   isShimInstalled,
   readShimTarget,
   removeClaudeShim,
+  removeShimDirFromPath,
   SHIM_MARKER,
 } from "~/lib/claude-cli-detect"
 
 let home: string
+
+/** The zsh rc files the PATH-activation functions manage. */
+function rcFiles(h: string): Array<string> {
+  return [path.join(h, ".zshrc"), path.join(h, ".zprofile")]
+}
 
 beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), "apps-shim-"))
@@ -156,5 +164,58 @@ describe("isShimInstalled / readShimTarget", () => {
     installClaudeShim("/opt/homebrew/bin/claude", { homeDir: home })
     expect(isShimInstalled(home)).toBe(true)
     expect(readShimTarget(home)).toBe("/opt/homebrew/bin/claude")
+  })
+})
+
+describe("PATH activation (addShimDirToPath / removeShimDirFromPath)", () => {
+  test("prepends the shims dir to PATH in both zsh rc files", () => {
+    const written = addShimDirToPath(home)
+    expect(written.sort()).toEqual(rcFiles(home).sort())
+    for (const rc of rcFiles(home)) {
+      const content = fs.readFileSync(rc, "utf8")
+      expect(content).toContain(`export PATH="${getShimDir(home)}:$PATH"`)
+    }
+    expect(isShimDirOnPath(home)).toBe(true)
+  })
+
+  test("prepends ahead of $PATH so it beats a position-1 ~/.local/bin", () => {
+    addShimDirToPath(home)
+    const line = fs
+      .readFileSync(path.join(home, ".zshrc"), "utf8")
+      .split("\n")
+      .find((l) => l.startsWith("export PATH="))
+    // shims dir must come BEFORE $PATH in the prepend.
+    expect(line).toBe(`export PATH="${getShimDir(home)}:$PATH"`)
+  })
+
+  test("is idempotent — a second call doesn't duplicate the block", () => {
+    addShimDirToPath(home)
+    addShimDirToPath(home)
+    const content = fs.readFileSync(path.join(home, ".zshrc"), "utf8")
+    const occurrences =
+      content.split("# >>> maximal claude shim >>>").length - 1
+    expect(occurrences).toBe(1)
+  })
+
+  test("preserves existing rc content when adding and removing", () => {
+    const zshrc = path.join(home, ".zshrc")
+    fs.writeFileSync(zshrc, "# my stuff\nexport FOO=bar\n")
+    addShimDirToPath(home)
+    expect(fs.readFileSync(zshrc, "utf8")).toContain("export FOO=bar")
+
+    removeShimDirFromPath(home)
+    const after = fs.readFileSync(zshrc, "utf8")
+    expect(after).toContain("export FOO=bar")
+    expect(after).not.toContain("maximal claude shim")
+    expect(isShimDirOnPath(home)).toBe(false)
+  })
+
+  test("removeShimDirFromPath is a no-op when the block isn't present", () => {
+    fs.writeFileSync(path.join(home, ".zshrc"), "export FOO=bar\n")
+    expect(removeShimDirFromPath(home)).toEqual([])
+  })
+
+  test("isShimDirOnPath is false before activation", () => {
+    expect(isShimDirOnPath(home)).toBe(false)
   })
 })

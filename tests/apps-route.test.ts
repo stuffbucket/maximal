@@ -111,7 +111,7 @@ function buildApp() {
 }
 
 function fakeInstall(p: string): ClaudeInstall {
-  return { path: p, version: "1.2.3", source: "homebrew" }
+  return { path: p, resolvedPath: p, version: "1.2.3", source: "homebrew" }
 }
 
 beforeEach(() => {

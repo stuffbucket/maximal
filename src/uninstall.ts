@@ -19,6 +19,11 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
+import {
+  getShimPath,
+  removeClaudeShim,
+  removeShimDirFromPath,
+} from "./lib/claude-cli-detect"
 import { revertProxyConfig } from "./lib/claude-desktop-config"
 import { PATHS } from "./lib/paths"
 
@@ -32,19 +37,25 @@ export async function runUninstall(opts: RunUninstallOptions): Promise<void> {
   consola.box("maximal uninstall")
 
   // 1. Stop the running proxy (best effort) -------------------------
-  consola.info("Step 1/4: Stop the running proxy")
+  consola.info("Step 1/5: Stop the running proxy")
   stopProxy()
 
   // 2. Remove launchd plist / Windows scheduled task ----------------
-  consola.info("Step 2/4: Remove startup integration")
+  consola.info("Step 2/5: Remove startup integration")
   removeStartupIntegration()
 
   // 3. Remove the binary --------------------------------------------
-  consola.info("Step 3/4: Remove the binary")
+  consola.info("Step 3/5: Remove the binary")
   removeBinary()
 
-  // 4. Optional: secrets + Claude Desktop config --------------------
-  consola.info("Step 4/4: Optional cleanup")
+  // 4. Remove the Claude Code shim ----------------------------------
+  // Unconditional: the shim is our own marker-guarded file in our own
+  // state dir, so removing it can never touch a real user binary.
+  consola.info("Step 4/5: Remove the Claude Code shim")
+  removeShim()
+
+  // 5. Optional: secrets + Claude Desktop config --------------------
+  consola.info("Step 5/5: Optional cleanup")
   await maybePurgeSecrets(opts)
   await maybeRevertClaude(opts)
 
@@ -179,6 +190,34 @@ function removeBinary(): void {
   }
   if (removed === 0) {
     consola.info("  no installed binary found")
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Step 4: remove the Claude Code shim.
+// ────────────────────────────────────────────────────────────────────
+
+/** Remove the transparent `claude` shim the Apps panel installs into
+ *  `~/.local/share/maximal/shims/`, plus the PATH block it added to the
+ *  user's zsh rc files. `removeClaudeShim` only deletes a file carrying
+ *  our marker — it refuses to touch a real binary and no-ops when the
+ *  shim is absent — and `removeShimDirFromPath` strips only our
+ *  marker-guarded rc block, so both are always safe to run. */
+function removeShim(): void {
+  try {
+    const removed = removeClaudeShim()
+    if (removed) {
+      consola.success(`  removed ${getShimPath()}`)
+    } else {
+      consola.info("  no Claude Code shim found; nothing to remove")
+    }
+  } catch (err) {
+    // Thrown only if a non-marker file sits at the shim path (not ours).
+    consola.warn("  could not remove the Claude Code shim", err)
+  }
+  const rcFiles = removeShimDirFromPath()
+  if (rcFiles.length > 0) {
+    consola.success(`  removed shim PATH block from ${rcFiles.join(", ")}`)
   }
 }
 

@@ -50,3 +50,38 @@ describe("uninstall — Claude Desktop revert integration", () => {
     expect(after.theme).toBe("dark")
   })
 })
+
+describe("uninstall — Claude Code shim removal integration", () => {
+  it("removeClaudeShim deletes a shim the Apps panel installed", async () => {
+    const {
+      installClaudeShim,
+      removeClaudeShim,
+      isShimInstalled,
+      getShimPath,
+    } = await import("~/lib/claude-cli-detect")
+
+    installClaudeShim("/opt/homebrew/bin/claude", { homeDir: workDir })
+    expect(isShimInstalled(workDir)).toBe(true)
+
+    expect(removeClaudeShim(workDir)).toBe(true)
+    expect(fs.existsSync(getShimPath(workDir))).toBe(false)
+    // Second call is a no-op, not an error — uninstall is idempotent.
+    expect(removeClaudeShim(workDir)).toBe(false)
+  })
+
+  it("removeClaudeShim no-ops when there is no shim", async () => {
+    const { removeClaudeShim } = await import("~/lib/claude-cli-detect")
+    expect(removeClaudeShim(workDir)).toBe(false)
+  })
+
+  it("removeClaudeShim refuses to delete a non-marker file at the shim path", async () => {
+    const { removeClaudeShim, getShimPath } =
+      await import("~/lib/claude-cli-detect")
+    const shimPath = getShimPath(workDir)
+    fs.mkdirSync(path.dirname(shimPath), { recursive: true })
+    fs.writeFileSync(shimPath, "#!/bin/sh\necho not ours\n")
+    expect(() => removeClaudeShim(workDir)).toThrow()
+    // The non-marker file is left untouched.
+    expect(fs.existsSync(shimPath)).toBe(true)
+  })
+})

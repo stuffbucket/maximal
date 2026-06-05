@@ -22,7 +22,6 @@ import { Hono } from "hono"
 
 import { defaultGetRequestIp, isLoopbackAddress } from "~/lib/request-auth"
 import { requestContext } from "~/lib/request-context"
-import { state } from "~/lib/state"
 
 interface InternalRoutesOptions {
   /** Injectable for tests so we don't actually exit the runner. */
@@ -38,21 +37,6 @@ export function createInternalRoutes(
   const getRequestIp = options.getRequestIp ?? defaultGetRequestIp
 
   const app = new Hono()
-
-  // Per-launch shell API key for the `max` wrapper script. The key
-  // only exists while the Tauri shell is the parent (it injects
-  // MAXIMAL_SHELL_KEY at sidecar spawn time); standalone `maximal
-  // start` invocations have nothing to return here. Loopback-only —
-  // the key is sensitive and shouldn't leave the local machine.
-  app.get("/shell-key", (c) => {
-    if (!isLoopbackAddress(getRequestIp(c))) {
-      return c.notFound()
-    }
-    if (!state.shellApiKey) {
-      return c.notFound()
-    }
-    return c.text(state.shellApiKey)
-  })
 
   app.post("/shutdown", async (c) => {
     if (!isLoopbackAddress(getRequestIp(c))) {

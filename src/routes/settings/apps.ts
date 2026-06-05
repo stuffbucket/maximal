@@ -20,11 +20,14 @@ import fs from "node:fs"
 import path from "node:path"
 
 import {
+  addShimDirToPath,
+  type ClaudeInstall,
   detectClaudeInstalls,
   installClaudeShim,
   isShimInstalled,
   readShimTarget,
   removeClaudeShim,
+  removeShimDirFromPath,
 } from "~/lib/claude-cli-detect"
 import {
   alreadyConfigured,
@@ -74,8 +77,12 @@ function claudeDesktopInstalled(): boolean {
   return fs.existsSync("/Applications/Claude.app")
 }
 
-function buildClaudeCodeApp(): AppEntryT {
-  const installs = detectClaudeInstalls()
+function buildClaudeCodeApp(
+  precomputedInstalls?: ReadonlyArray<ClaudeInstall>,
+): AppEntryT {
+  // Detection spawns subprocesses (npm prefix, claude --version), so reuse
+  // an already-computed list when the caller has one (the toggle does).
+  const installs = precomputedInstalls ?? detectClaudeInstalls()
   const selectedPath = getConfig().apps?.claudeCode?.selectedPath
   const shimTarget = readShimTarget()
   const shimInstalled = isShimInstalled()
@@ -215,9 +222,9 @@ appsRoutes.post("/claude-code/toggle", async (c) => {
     }
 
     if (parsed.data.enabled) {
+      const installs = detectClaudeInstalls()
       const selectedPath = getConfig().apps?.claudeCode?.selectedPath
-      const firstInstall = detectClaudeInstalls()[0]?.path
-      const target = parsed.data.path ?? selectedPath ?? firstInstall
+      const target = parsed.data.path ?? selectedPath ?? installs[0]?.path
       if (!target) {
         throw httpError(
           "No Claude Code install detected. Install it first, then enable the shim.",
@@ -225,12 +232,16 @@ appsRoutes.post("/claude-code/toggle", async (c) => {
         )
       }
       installClaudeShim(target, { apiKey: resolveShimApiKey() })
+      // Put our shims dir ahead of the real claude on PATH (next shell).
+      // Writing the shim alone does nothing until this lands.
+      addShimDirToPath()
       persistClaudeCode({ enabled: true, selectedPath: target })
-    } else {
-      removeClaudeShim()
-      persistClaudeCode({ enabled: false })
+      return jsonApp(c, buildClaudeCodeApp(installs))
     }
 
+    removeClaudeShim()
+    removeShimDirFromPath()
+    persistClaudeCode({ enabled: false })
     return jsonApp(c, buildClaudeCodeApp())
   } catch (error) {
     return forwardError(c, error)
