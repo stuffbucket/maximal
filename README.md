@@ -33,8 +33,6 @@ tests/                     bun-test suites.
 docs/admin/                MDM reference, Cowork client config notes.
 docs/spec/                 Architecture specs (web-tools, tool-bridge).
 scripts/                   Operator helpers (e.g. install-cowork-egress.sh).
-contrib/                   Read-only reference (opencode-copilot auth pattern,
-                           Ollama anthropic spike).
 LICENSE                    MIT.
 THIRD-PARTY-LICENSE        Upstream attribution (caozhiyuan/copilot-api,
                            ericc-ch/copilot-api lineage) and dependency

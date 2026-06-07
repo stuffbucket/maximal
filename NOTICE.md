@@ -21,7 +21,7 @@ and license attribution, see `THIRD-PARTY-LICENSE`.
 - `src/routes/messages/handler.ts` and sibling handlers — wire the
   reverse-id and web-tools-flow dispatch into the request pipeline.
 - `src/start.ts` — log the selected web-tools executor at startup.
-- `docs/`, `scripts/`, `contrib/` — operator and reference content.
+- `docs/`, `scripts/` — operator and reference content.
 - `src/lib/cache.ts`, `src/lib/secrets.ts`, `src/lib/config-schema.ts`,
   `src/lib/version.ts`, `src/routes/debug/route.ts` — observability
   layer (zod-validated config, secrets file loader, cache + singleton
@@ -55,9 +55,3 @@ Verify after merging:
 bun install
 bun run typecheck && bun run lint && bun test && bun run build
 ```
-
-## Reference sources
-
-`contrib/` holds read-only snapshots that informed the architecture
-(opencode's Copilot auth pattern, an ollama-anthropic translation
-spike). Nothing in `contrib/` is built or shipped.
