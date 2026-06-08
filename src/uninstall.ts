@@ -198,11 +198,11 @@ function removeBinary(): void {
 // ────────────────────────────────────────────────────────────────────
 
 /** Remove the transparent `claude` shim the Apps panel installs into
- *  `~/.local/share/maximal/shims/`, plus the PATH block it added to the
- *  user's zsh rc files. `removeClaudeShim` only deletes a file carrying
- *  our marker — it refuses to touch a real binary and no-ops when the
- *  shim is absent — and `removeShimDirFromPath` strips only our
- *  marker-guarded rc block, so both are always safe to run. */
+ *  `~/.local/share/maximal/shims/`, plus BOTH marker-guarded PATH blocks
+ *  we add to the user's zsh rc files: the shim block
+ *  (`# >>> maximal claude shim >>>`) and the first-launch installer block
+ *  (`# >>> maximal PATH >>>`). Each removal is marker-scoped and no-ops
+ *  when its block is absent, so this is always safe to run. */
 function removeShim(): void {
   try {
     const removed = removeClaudeShim()
@@ -219,6 +219,60 @@ function removeShim(): void {
   if (rcFiles.length > 0) {
     consola.success(`  removed shim PATH block from ${rcFiles.join(", ")}`)
   }
+  const installerRc = removeFirstLaunchPathBlock()
+  if (installerRc.length > 0) {
+    consola.success(
+      `  removed installer PATH block from ${installerRc.join(", ")}`,
+    )
+  }
+}
+
+const FIRST_LAUNCH_PATH_MARKER_START = "# >>> maximal PATH >>>"
+const FIRST_LAUNCH_PATH_MARKER_END = "# <<< maximal PATH <<<"
+
+function escapeRegExp(s: string): string {
+  return s.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`)
+}
+
+/**
+ * Strip the first-launch `# >>> maximal PATH >>>` block from the user's
+ * zsh rc files. Marker-scoped — it touches only the block between our
+ * markers and leaves everything else intact. Best-effort per file (an
+ * unreadable/unwritable rc is skipped). Returns the rc files modified.
+ *
+ * Without this, uninstall used to leave the installer's PATH line orphaned
+ * (pointing at a deleted `~/.local/bin/maximal`).
+ */
+export function removeFirstLaunchPathBlock(
+  homeDir: string = os.homedir(),
+): Array<string> {
+  const rcFiles = [
+    path.join(homeDir, ".zshrc"),
+    path.join(homeDir, ".zprofile"),
+  ]
+  const re = new RegExp(
+    `\\n?${escapeRegExp(FIRST_LAUNCH_PATH_MARKER_START)}[\\s\\S]*?${escapeRegExp(
+      FIRST_LAUNCH_PATH_MARKER_END,
+    )}\\n?`,
+    "g",
+  )
+  const modified: Array<string> = []
+  for (const rc of rcFiles) {
+    let existing: string
+    try {
+      existing = fs.readFileSync(rc, "utf8")
+    } catch {
+      continue
+    }
+    if (!existing.includes(FIRST_LAUNCH_PATH_MARKER_START)) continue
+    try {
+      fs.writeFileSync(rc, existing.replace(re, "\n"))
+      modified.push(rc)
+    } catch {
+      /* best effort */
+    }
+  }
+  return modified
 }
 
 // ────────────────────────────────────────────────────────────────────

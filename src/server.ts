@@ -6,6 +6,7 @@ import { logger } from "hono/logger"
 import { staleRefreshMiddleware } from "./lib/refresh-models"
 import { createAuthMiddleware, requireGithubAuth } from "./lib/request-auth"
 import { getModelsLoadedAtMs } from "./lib/state"
+import { buildStatus } from "./lib/status"
 import { traceIdMiddleware } from "./lib/trace"
 import { cacheModels } from "./lib/utils"
 // `with { type: "file" }` is Bun's official asset-embedding path
@@ -49,6 +50,11 @@ import { usageRoute } from "./routes/usage/route"
 
 export const server = new Hono()
 
+/** Captured at module load — anchors the `/status` uptime to "when the
+ *  server module first ran," which is what callers mean by "how long has
+ *  Maximal been up." */
+const SERVER_START_MS = Date.now()
+
 server.use(traceIdMiddleware)
 server.use(logger())
 server.use(cors())
@@ -57,6 +63,7 @@ server.use(
   createAuthMiddleware({
     allowUnauthenticatedPaths: [
       "/",
+      "/status",
       "/usage-viewer",
       "/usage-viewer/",
       "/usage-viewer.css",
@@ -105,6 +112,16 @@ server.use(
 )
 
 server.get("/", (c) => c.text("Server running"))
+
+// Identity + liveness probe. Unauthenticated and loopback-friendly so a
+// local caller (the Claude Code shim, a health check, a script) can ask
+// "is the thing on :4141 actually Maximal, is it up, and is it ready to
+// serve?" without an API key. The `service: "maximal"` field is the
+// unambiguous identity marker the shim keys off; `subsystems` namespaces
+// per-part health so new subsystems slot in without reshaping the
+// contract. Safe-for-unauth only (booleans/tiers/counts, no secrets);
+// see src/lib/status.ts. Cheap: in-memory state, no upstream calls.
+server.get("/status", (c) => c.json(buildStatus(SERVER_START_MS)))
 // Our own dashboard assets — `no-store` so the Tauri webview (and any
 // browser tabs) always pull fresh on reload. A previous `max-age=86400`
 // caused WKWebView to serve stale HTML/JS for 24h after every iteration,

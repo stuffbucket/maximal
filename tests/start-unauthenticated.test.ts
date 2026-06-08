@@ -97,6 +97,46 @@ describe("start in unauthenticated mode", () => {
     expect((await res.text()).trim()).toBe("Server running")
   })
 
+  test("GET /status returns the maximal identity marker, no auth needed", async () => {
+    // The Claude Code shim probes this to confirm :4141 is really Maximal
+    // (vs some other process that grabbed the port). Must work with no API
+    // key and even with a bogus one.
+    const headerCases: Array<Record<string, string>> = [
+      {},
+      { "x-api-key": "definitely-not-valid" },
+    ]
+    for (const headers of headerCases) {
+      const res = await fetch(`http://127.0.0.1:${port}/status`, { headers })
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as {
+        service: string
+        status: string
+        version: string
+        uptime_ms: number
+        subsystems: {
+          copilot: {
+            authenticated: boolean
+            ready: boolean
+            account_type: string
+          }
+          models: { cached: number }
+        }
+      }
+      // Top level = "Maximal, all up" — the identity + liveness signal.
+      expect(body.service).toBe("maximal")
+      expect(body.status).toBe("ok")
+      expect(typeof body.version).toBe("string")
+      expect(body.uptime_ms).toBeGreaterThanOrEqual(0)
+      // Subsystems namespace per-part health. This server booted with no
+      // GitHub token, so copilot is unauthenticated and not ready —
+      // proving the readiness signal reflects real state.
+      expect(body.subsystems.copilot.authenticated).toBe(false)
+      expect(body.subsystems.copilot.ready).toBe(false)
+      expect(typeof body.subsystems.copilot.account_type).toBe("string")
+      expect(body.subsystems.models.cached).toBeGreaterThanOrEqual(0)
+    }
+  })
+
   test("/_debug/state reports github_token_present: false", async () => {
     const res = await fetch(`http://127.0.0.1:${port}/_debug/state`)
     expect(res.status).toBe(200)
