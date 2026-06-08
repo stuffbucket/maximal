@@ -1024,6 +1024,36 @@ fn apply_state(app: &AppHandle, next: SidecarState) {
     {
         open_settings_window(app, Some("account"));
     }
+
+    // Failure is otherwise silent: the splash auto-dismisses on its 3s timer
+    // regardless of outcome, so on a failed start the user is left with a
+    // vanished splash and only a greyed tray icon — no idea what happened or
+    // what to do. Fire an OS notification that names the failure and points
+    // at the tray's recovery actions (Retry startup / Show logs). The
+    // `changed` guard above makes this one-shot per Failed transition.
+    if next == SidecarState::Failed {
+        fire_failed_notification(app);
+    }
+}
+
+/// One-shot notification when the sidecar fails to start. Mirrors the
+/// rejection/startup notifications' best-effort caveats: if the user denied
+/// notification permission it silently no-ops, but the tray icon + menu
+/// ("Retry startup", "Show logs…") are always there as the durable surface.
+fn fire_failed_notification(app: &AppHandle) {
+    use tauri_plugin_notification::NotificationExt;
+    if let Err(err) = app
+        .notification()
+        .builder()
+        .title("Maximal couldn't start")
+        .body(
+            "The background proxy failed to start. Click the menu-bar icon \
+             to Retry startup or view the logs.",
+        )
+        .show()
+    {
+        eprintln!("[shell] failed-start notification error: {err}");
+    }
 }
 
 /// Pre-boot splash window. Created the instant the app launches so the

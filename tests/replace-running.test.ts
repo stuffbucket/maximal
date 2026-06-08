@@ -136,4 +136,75 @@ describe("evictRunning", () => {
     expect(args.replace).toBeDefined()
     expect(args.replace.type).toBe("boolean")
   })
+
+  test("stale pidfile + live listener → evicts the real port holder", async () => {
+    // Repro of the v0.4.14 "sidecar failed to start" report: the pidfile
+    // names a dead PID (its SIGTERM is a no-op), but a different, live
+    // maximal still holds the port. We must discover and reap THAT pid,
+    // not give up on the stale pidfile.
+    const fetchImpl = mock(() =>
+      Promise.resolve(new Response("{}", { status: 404 })),
+    ) as unknown as typeof fetch
+
+    const killed: Array<{ pid: number; sig: NodeJS.Signals | 0 }> = []
+    const STALE = 55355
+    const LIVE = 57198
+
+    await evictRunning({
+      apiKey: "k",
+      // Held until the LIVE pid gets SIGKILL'd.
+      probePort: () =>
+        Promise.resolve(
+          !killed.some((k) => k.pid === LIVE && k.sig === "SIGKILL"),
+        ),
+      readPidfile: () => Promise.resolve(STALE),
+      // Stale pid is already dead: its liveness probe (signal 0) throws.
+      kill: (pid, sig) => {
+        if (pid === STALE && sig === 0) throw new Error("ESRCH")
+        killed.push({ pid, sig })
+      },
+      listenerPid: () => LIVE,
+      sleep: () => Promise.resolve(),
+      now: (() => {
+        let t = 0
+        return () => (t += 60)
+      })(),
+      drainTimeoutMs: 120,
+      killEscalationMs: 10,
+      fetchImpl,
+    })
+
+    // The real holder was SIGKILL'd; the stale pid got only its no-op SIGTERM.
+    expect(killed.some((k) => k.pid === LIVE && k.sig === "SIGKILL")).toBe(true)
+    expect(killed.some((k) => k.pid === STALE && k.sig === "SIGKILL")).toBe(
+      false,
+    )
+  })
+
+  test("HTTP unreachable but port still held → still proceeds to kill", async () => {
+    // An older instance whose /setup-status 404s on connect-refuse, or one
+    // wedged before it serves: requestShutdown reports unreachable, but the
+    // port is held. We must NOT early-return — that left the holder running.
+    const fetchImpl = mock(() =>
+      Promise.reject(new Error("ECONNREFUSED")),
+    ) as unknown as typeof fetch
+
+    const killed: Array<NodeJS.Signals | 0> = []
+
+    await evictRunning({
+      apiKey: "k",
+      probePort: () => Promise.resolve(!killed.includes("SIGKILL")),
+      readPidfile: () => Promise.resolve(4242),
+      kill: (_pid, sig) => {
+        killed.push(sig)
+      },
+      listenerPid: () => null,
+      sleep: () => Promise.resolve(),
+      killEscalationMs: 10,
+      fetchImpl,
+    })
+
+    expect(killed.includes("SIGTERM")).toBe(true)
+    expect(killed.includes("SIGKILL")).toBe(true)
+  })
 })
