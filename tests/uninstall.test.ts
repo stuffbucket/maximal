@@ -85,3 +85,49 @@ describe("uninstall — Claude Code shim removal integration", () => {
     expect(fs.existsSync(shimPath)).toBe(true)
   })
 })
+
+describe("uninstall — first-launch installer PATH block removal", () => {
+  it("strips the # >>> maximal PATH >>> block, preserving other rc content", async () => {
+    const { removeFirstLaunchPathBlock } = await import("~/uninstall")
+    const zshrc = path.join(workDir, ".zshrc")
+    fs.writeFileSync(
+      zshrc,
+      "# my stuff\nexport FOO=bar\n\n"
+        + "# >>> maximal PATH >>>\n"
+        + 'export PATH="$HOME/.local/bin:$PATH"\n'
+        + "# <<< maximal PATH <<<\n",
+    )
+
+    const modified = removeFirstLaunchPathBlock(workDir)
+    expect(modified).toContain(zshrc)
+
+    const after = fs.readFileSync(zshrc, "utf8")
+    expect(after).toContain("export FOO=bar") // user content preserved
+    expect(after).not.toContain("maximal PATH") // our block gone
+    expect(after).not.toContain(".local/bin")
+  })
+
+  it("no-ops (returns []) when the block isn't present", async () => {
+    const { removeFirstLaunchPathBlock } = await import("~/uninstall")
+    fs.writeFileSync(path.join(workDir, ".zshrc"), "export FOO=bar\n")
+    expect(removeFirstLaunchPathBlock(workDir)).toEqual([])
+  })
+
+  it("does not touch the Claude Code shim block (different marker)", async () => {
+    const { removeFirstLaunchPathBlock } = await import("~/uninstall")
+    const { addShimDirToPath } = await import("~/lib/claude-cli-detect")
+    // Both blocks present in the same rc file.
+    fs.writeFileSync(
+      path.join(workDir, ".zshrc"),
+      "# >>> maximal PATH >>>\n"
+        + 'export PATH="$HOME/.local/bin:$PATH"\n'
+        + "# <<< maximal PATH <<<\n",
+    )
+    addShimDirToPath(workDir)
+
+    removeFirstLaunchPathBlock(workDir)
+    const after = fs.readFileSync(path.join(workDir, ".zshrc"), "utf8")
+    expect(after).not.toContain("maximal PATH") // installer block removed
+    expect(after).toContain("maximal claude shim") // shim block untouched
+  })
+})
