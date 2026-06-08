@@ -1,0 +1,337 @@
+import { afterEach, beforeEach, describe, expect, it } from "bun:test"
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
+
+import {
+  applyProxyBaseUrl,
+  getBaseUrlOwnership,
+  getClaudeCodeSettingsPath,
+  isProxyBaseUrlConfigured,
+  mergeBaseUrl,
+  PROXY_BASE_URL,
+  readClaudeCodeSettings,
+  revertProxyBaseUrl,
+  stripBaseUrl,
+  writeClaudeCodeSettings,
+} from "~/lib/claude-code-settings"
+
+let dir: string
+let settingsPath: string
+
+beforeEach(() => {
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "maximal-claude-code-"))
+  settingsPath = path.join(dir, "settings.json")
+})
+
+afterEach(() => {
+  try {
+    fs.rmSync(dir, { recursive: true, force: true })
+  } catch {
+    /* best effort */
+  }
+})
+
+function writeRaw(value: string): void {
+  fs.writeFileSync(settingsPath, value)
+}
+
+function read(): Record<string, unknown> {
+  return readClaudeCodeSettings(settingsPath)
+}
+
+function envOf(settings: Record<string, unknown>): Record<string, unknown> {
+  return settings.env as Record<string, unknown>
+}
+
+describe("getClaudeCodeSettingsPath", () => {
+  const savedConfigDir = process.env.CLAUDE_CONFIG_DIR
+
+  afterEach(() => {
+    if (savedConfigDir === undefined) {
+      delete process.env.CLAUDE_CONFIG_DIR
+    } else {
+      process.env.CLAUDE_CONFIG_DIR = savedConfigDir
+    }
+  })
+
+  it("defaults to ~/.claude/settings.json", () => {
+    delete process.env.CLAUDE_CONFIG_DIR
+    expect(getClaudeCodeSettingsPath()).toBe(
+      path.join(os.homedir(), ".claude", "settings.json"),
+    )
+  })
+
+  it("honors CLAUDE_CONFIG_DIR override", () => {
+    process.env.CLAUDE_CONFIG_DIR = "/custom/claude/dir"
+    expect(getClaudeCodeSettingsPath()).toBe(
+      path.join("/custom/claude/dir", "settings.json"),
+    )
+  })
+})
+
+describe("readClaudeCodeSettings", () => {
+  it("returns {} when the file is absent", () => {
+    expect(read()).toEqual({})
+  })
+
+  it("returns {} for empty / malformed / non-object JSON", () => {
+    writeRaw("")
+    expect(read()).toEqual({})
+    writeRaw("{ not valid json")
+    expect(read()).toEqual({})
+    writeRaw("[]")
+    expect(read()).toEqual({})
+  })
+
+  it("parses a valid settings object", () => {
+    writeRaw(JSON.stringify({ theme: "dark", env: { FOO: "1" } }))
+    expect(read()).toEqual({ theme: "dark", env: { FOO: "1" } })
+  })
+})
+
+describe("getBaseUrlOwnership", () => {
+  it("absent when no env / no key", () => {
+    expect(getBaseUrlOwnership({})).toBe("absent")
+    expect(getBaseUrlOwnership({ env: {} })).toBe("absent")
+    expect(getBaseUrlOwnership({ env: { FOO: "1" } })).toBe("absent")
+    // non-object env is treated as absent
+    expect(getBaseUrlOwnership({ env: "nope" })).toBe("absent")
+  })
+
+  it("ours when it equals the proxy URL", () => {
+    expect(
+      getBaseUrlOwnership({ env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL } }),
+    ).toBe("ours")
+  })
+
+  it("foreign when it is some other value", () => {
+    expect(
+      getBaseUrlOwnership({
+        env: { ANTHROPIC_BASE_URL: "https://other.example" },
+      }),
+    ).toBe("foreign")
+  })
+})
+
+describe("mergeBaseUrl / stripBaseUrl (pure)", () => {
+  it("merge sets env.ANTHROPIC_BASE_URL, preserves top-level + sibling env", () => {
+    const merged = mergeBaseUrl({
+      theme: "dark",
+      env: { FOO: "1", ANTHROPIC_API_KEY: "sk-secret" },
+    })
+    expect(merged.theme).toBe("dark")
+    expect(envOf(merged)).toEqual({
+      FOO: "1",
+      ANTHROPIC_API_KEY: "sk-secret",
+      ANTHROPIC_BASE_URL: PROXY_BASE_URL,
+    })
+  })
+
+  it("merge creates env when absent", () => {
+    const merged = mergeBaseUrl({ theme: "dark" })
+    expect(merged.theme).toBe("dark")
+    expect(envOf(merged)).toEqual({ ANTHROPIC_BASE_URL: PROXY_BASE_URL })
+  })
+
+  it("merge does not mutate the input", () => {
+    const input = { env: { FOO: "1" } }
+    mergeBaseUrl(input)
+    expect(input).toEqual({ env: { FOO: "1" } })
+  })
+
+  it("strip removes only our key, preserves sibling env + top-level", () => {
+    const stripped = stripBaseUrl({
+      theme: "dark",
+      env: {
+        ANTHROPIC_BASE_URL: PROXY_BASE_URL,
+        ANTHROPIC_API_KEY: "sk-secret",
+      },
+    })
+    expect(stripped).toEqual({
+      theme: "dark",
+      env: { ANTHROPIC_API_KEY: "sk-secret" },
+    })
+  })
+
+  it("strip drops the env key when it becomes empty", () => {
+    const stripped = stripBaseUrl({
+      theme: "dark",
+      env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL },
+    })
+    expect(stripped).toEqual({ theme: "dark" })
+    expect("env" in stripped).toBe(false)
+  })
+})
+
+describe("writeClaudeCodeSettings", () => {
+  it("creates parent directory if missing", () => {
+    const nested = path.join(dir, "a", "b", "settings.json")
+    writeClaudeCodeSettings(nested, { foo: "bar" })
+    // eslint-disable-next-line unicorn/prefer-json-parse-buffer
+    expect(JSON.parse(fs.readFileSync(nested, "utf8"))).toEqual({ foo: "bar" })
+  })
+
+  it("writes JSON with trailing newline and no .tmp leak", () => {
+    writeClaudeCodeSettings(settingsPath, { foo: 1 })
+    const raw = fs.readFileSync(settingsPath, "utf8")
+    expect(raw.endsWith("\n")).toBe(true)
+    expect(JSON.parse(raw)).toEqual({ foo: 1 })
+    expect(fs.existsSync(`${settingsPath}.tmp`)).toBe(false)
+  })
+
+  it("writes with mode 0600", () => {
+    writeClaudeCodeSettings(settingsPath, { foo: 1 })
+    const mode = fs.statSync(settingsPath).mode & 0o777
+    expect(mode).toBe(0o600)
+  })
+})
+
+describe("applyProxyBaseUrl (end-to-end)", () => {
+  it("writes env.ANTHROPIC_BASE_URL into a fresh file", () => {
+    const result = applyProxyBaseUrl(settingsPath)
+    expect(result.wrote).toBe(true)
+    expect(result.skippedReason).toBeUndefined()
+    expect(envOf(read()).ANTHROPIC_BASE_URL).toBe(PROXY_BASE_URL)
+  })
+
+  it("preserves a pre-existing top-level setting and sibling env vars", () => {
+    writeRaw(
+      JSON.stringify({
+        theme: "dark",
+        permissions: { allow: ["Bash"] },
+        env: { FOO: "1", ANTHROPIC_API_KEY: "sk-secret" },
+      }),
+    )
+    const result = applyProxyBaseUrl(settingsPath)
+    expect(result.wrote).toBe(true)
+    const after = read()
+    expect(after.theme).toBe("dark")
+    expect(after.permissions).toEqual({ allow: ["Bash"] })
+    expect(envOf(after)).toEqual({
+      FOO: "1",
+      ANTHROPIC_API_KEY: "sk-secret",
+      ANTHROPIC_BASE_URL: PROXY_BASE_URL,
+    })
+  })
+
+  it("ownership guard: does NOT overwrite a foreign base URL", () => {
+    const original = {
+      env: { ANTHROPIC_BASE_URL: "https://other.example", FOO: "1" },
+    }
+    writeRaw(JSON.stringify(original))
+    const before = fs.statSync(settingsPath).mtimeMs
+    const result = applyProxyBaseUrl(settingsPath)
+    expect(result.wrote).toBe(false)
+    expect(result.skippedReason).toBe("foreign-base-url")
+    // file unchanged
+    expect(read()).toEqual(original)
+    expect(fs.statSync(settingsPath).mtimeMs).toBe(before)
+  })
+
+  it("idempotent: applying twice is a no-op the second time", () => {
+    const first = applyProxyBaseUrl(settingsPath)
+    expect(first.wrote).toBe(true)
+    const before = fs.statSync(settingsPath).mtimeMs
+    const second = applyProxyBaseUrl(settingsPath)
+    expect(second.wrote).toBe(false)
+    expect(second.skippedReason).toBe("already-ours")
+    expect(fs.statSync(settingsPath).mtimeMs).toBe(before)
+    // no duplication
+    expect(envOf(read())).toEqual({ ANTHROPIC_BASE_URL: PROXY_BASE_URL })
+  })
+
+  it("handles an absent file (writes fresh)", () => {
+    expect(fs.existsSync(settingsPath)).toBe(false)
+    const result = applyProxyBaseUrl(settingsPath)
+    expect(result.wrote).toBe(true)
+    expect(read()).toEqual({ env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL } })
+  })
+
+  it("handles an unparseable file (writes fresh)", () => {
+    writeRaw("{ garbage")
+    const result = applyProxyBaseUrl(settingsPath)
+    expect(result.wrote).toBe(true)
+    expect(read()).toEqual({ env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL } })
+  })
+})
+
+describe("revertProxyBaseUrl", () => {
+  it("removes only our key, preserves sibling env + other settings", () => {
+    writeRaw(
+      JSON.stringify({
+        theme: "dark",
+        env: {
+          ANTHROPIC_BASE_URL: PROXY_BASE_URL,
+          ANTHROPIC_API_KEY: "sk-secret",
+        },
+      }),
+    )
+    const result = revertProxyBaseUrl(settingsPath)
+    expect(result.wrote).toBe(true)
+    expect(result.remainingKeys.sort()).toEqual(["env", "theme"])
+    expect(read()).toEqual({
+      theme: "dark",
+      env: { ANTHROPIC_API_KEY: "sk-secret" },
+    })
+  })
+
+  it("drops the empty env key but keeps other settings", () => {
+    writeRaw(
+      JSON.stringify({
+        theme: "dark",
+        env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL },
+      }),
+    )
+    const result = revertProxyBaseUrl(settingsPath)
+    expect(result.wrote).toBe(true)
+    expect(result.remainingKeys).toEqual(["theme"])
+    expect(read()).toEqual({ theme: "dark" })
+  })
+
+  it("deletes the file when it becomes empty", () => {
+    writeRaw(JSON.stringify({ env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL } }))
+    const result = revertProxyBaseUrl(settingsPath)
+    expect(result.wrote).toBe(true)
+    expect(result.remainingKeys).toEqual([])
+    expect(fs.existsSync(settingsPath)).toBe(false)
+  })
+
+  it("leaves a foreign base URL intact", () => {
+    const original = {
+      env: { ANTHROPIC_BASE_URL: "https://other.example" },
+    }
+    writeRaw(JSON.stringify(original))
+    const result = revertProxyBaseUrl(settingsPath)
+    expect(result.wrote).toBe(false)
+    expect(read()).toEqual(original)
+  })
+
+  it("no-op on an absent file", () => {
+    const result = revertProxyBaseUrl(settingsPath)
+    expect(result.wrote).toBe(false)
+    expect(result.remainingKeys).toEqual([])
+  })
+
+  it("no-op when our key isn't present", () => {
+    writeRaw(JSON.stringify({ theme: "dark", env: { FOO: "1" } }))
+    const result = revertProxyBaseUrl(settingsPath)
+    expect(result.wrote).toBe(false)
+    expect(result.remainingKeys.sort()).toEqual(["env", "theme"])
+    expect(read()).toEqual({ theme: "dark", env: { FOO: "1" } })
+  })
+})
+
+describe("isProxyBaseUrlConfigured", () => {
+  it("true only when env.ANTHROPIC_BASE_URL is our proxy URL", () => {
+    expect(isProxyBaseUrlConfigured(settingsPath)).toBe(false)
+    writeRaw(JSON.stringify({ env: { ANTHROPIC_BASE_URL: "https://other" } }))
+    expect(isProxyBaseUrlConfigured(settingsPath)).toBe(false)
+    applyProxyBaseUrl(settingsPath)
+    // foreign URL present, so apply backed off — still not ours
+    expect(isProxyBaseUrlConfigured(settingsPath)).toBe(false)
+    // now make it ours
+    writeRaw(JSON.stringify({ env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL } }))
+    expect(isProxyBaseUrlConfigured(settingsPath)).toBe(true)
+  })
+})

@@ -112,7 +112,6 @@ export const AppConfigSchema = z
         claudeCode: z
           .object({
             enabled: z.boolean().optional(),
-            selectedPath: z.string().optional(),
           })
           .optional(),
         claudeDesktop: z

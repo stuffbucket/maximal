@@ -20,10 +20,9 @@ import os from "node:os"
 import path from "node:path"
 
 import {
-  getShimPath,
-  removeClaudeShim,
-  removeShimDirFromPath,
-} from "./lib/claude-cli-detect"
+  getClaudeCodeSettingsPath,
+  revertProxyBaseUrl,
+} from "./lib/claude-code-settings"
 import { revertProxyConfig } from "./lib/claude-desktop-config"
 import { PATHS } from "./lib/paths"
 
@@ -48,11 +47,10 @@ export async function runUninstall(opts: RunUninstallOptions): Promise<void> {
   consola.info("Step 3/5: Remove the binary")
   removeBinary()
 
-  // 4. Remove the Claude Code shim ----------------------------------
-  // Unconditional: the shim is our own marker-guarded file in our own
-  // state dir, so removing it can never touch a real user binary.
-  consola.info("Step 4/5: Remove the Claude Code shim")
-  removeShim()
+  // 4. Revert Claude Code routing + installer PATH block ------------
+  // Ownership-guarded: only removes the ANTHROPIC_BASE_URL we wrote.
+  consola.info("Step 4/5: Revert Claude Code routing")
+  removeClaudeCodeIntegration()
 
   // 5. Optional: secrets + Claude Desktop config --------------------
   consola.info("Step 5/5: Optional cleanup")
@@ -194,30 +192,24 @@ function removeBinary(): void {
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Step 4: remove the Claude Code shim.
+// Step 4: revert Claude Code routing + remove the installer PATH block.
 // ────────────────────────────────────────────────────────────────────
 
-/** Remove the transparent `claude` shim the Apps panel installs into
- *  `~/.local/share/maximal/shims/`, plus BOTH marker-guarded PATH blocks
- *  we add to the user's zsh rc files: the shim block
- *  (`# >>> maximal claude shim >>>`) and the first-launch installer block
- *  (`# >>> maximal PATH >>>`). Each removal is marker-scoped and no-ops
- *  when its block is absent, so this is always safe to run. */
-function removeShim(): void {
+/** Revert the Claude Code routing we applied (the `ANTHROPIC_BASE_URL`
+ *  block in `~/.claude/settings.json`, ownership-guarded — only removed if
+ *  it's ours), and strip the macOS first-launch installer PATH block
+ *  (`# >>> maximal PATH >>>`) from the user's zsh rc files. Both are
+ *  marker/ownership-scoped and no-op when absent, so this is always safe. */
+function removeClaudeCodeIntegration(): void {
   try {
-    const removed = removeClaudeShim()
-    if (removed) {
-      consola.success(`  removed ${getShimPath()}`)
+    const reverted = revertProxyBaseUrl()
+    if (reverted.wrote) {
+      consola.success(`  reverted ${getClaudeCodeSettingsPath()}`)
     } else {
-      consola.info("  no Claude Code shim found; nothing to remove")
+      consola.info("  Claude Code routing not configured; nothing to revert")
     }
   } catch (err) {
-    // Thrown only if a non-marker file sits at the shim path (not ours).
-    consola.warn("  could not remove the Claude Code shim", err)
-  }
-  const rcFiles = removeShimDirFromPath()
-  if (rcFiles.length > 0) {
-    consola.success(`  removed shim PATH block from ${rcFiles.join(", ")}`)
+    consola.warn("  could not revert Claude Code settings", err)
   }
   const installerRc = removeFirstLaunchPathBlock()
   if (installerRc.length > 0) {

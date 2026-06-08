@@ -10,8 +10,9 @@
  *     and cleared in afterAll so later files see an empty config.
  *   - `~/lib/claude-cli-detect`: `detectClaudeInstalls()` with no args
  *     returns a controllable fixture (the route always calls it with no
- *     args); shim ops default `homeDir` to a tmp dir. Explicit-arg calls
- *     (the detect/shim unit tests) delegate to the real implementation.
+ *     args). Explicit-arg calls delegate to the real implementation.
+ *   - `~/lib/claude-code-settings`: file-path defaults point at a tmp
+ *     settings.json instead of the user's real ~/.claude/settings.json.
  *   - `~/lib/claude-desktop-config`: file-path defaults point at a tmp
  *     file instead of the user's real Claude Desktop config.
  */
@@ -25,10 +26,13 @@ import path from "node:path"
 import type { ClaudeInstall } from "~/lib/claude-cli-detect"
 import type { AppConfig } from "~/lib/config"
 
-const ROUTE_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "apps-route-home-"))
 const ROUTE_DESKTOP = path.join(
   fs.mkdtempSync(path.join(os.tmpdir(), "apps-route-desktop-")),
   "claude_desktop_config.json",
+)
+const ROUTE_CC_SETTINGS = path.join(
+  fs.mkdtempSync(path.join(os.tmpdir(), "apps-route-ccsettings-")),
+  "settings.json",
 )
 
 let fakeConfig: AppConfig = {}
@@ -45,33 +49,34 @@ void mock.module("~/lib/config", () => ({
 }))
 
 const actualDetect = await import("~/lib/claude-cli-detect")
-// Capture real impls into consts BEFORE mocking: `mock.module` updates
-// the captured namespace's live bindings, so calling
-// `actualDetect.installClaudeShim` inside the wrapper would re-enter the
-// wrapper (infinite recursion). Consts pin the original functions.
 const realDetect = actualDetect.detectClaudeInstalls
-const realInstallShim = actualDetect.installClaudeShim
-const realRemoveShim = actualDetect.removeClaudeShim
-const realIsShimInstalled = actualDetect.isShimInstalled
-const realReadShimTarget = actualDetect.readShimTarget
 void mock.module("~/lib/claude-cli-detect", () => ({
   ...actualDetect,
   detectClaudeInstalls: (options?: Record<string, unknown>) =>
     options && Object.keys(options).length > 0 ?
       realDetect(options)
     : installsFixture,
-  installClaudeShim: (
-    target: string,
-    opts: { apiKey?: string; homeDir?: string; maximalBinPath?: string } = {},
-  ) =>
-    realInstallShim(target, {
-      ...opts,
-      homeDir: opts.homeDir ?? ROUTE_HOME,
-    }),
-  removeClaudeShim: (homeDir: string = ROUTE_HOME) => realRemoveShim(homeDir),
-  isShimInstalled: (homeDir: string = ROUTE_HOME) =>
-    realIsShimInstalled(homeDir),
-  readShimTarget: (homeDir: string = ROUTE_HOME) => realReadShimTarget(homeDir),
+}))
+
+const actualCcSettings = await import("~/lib/claude-code-settings")
+const realCcApply = actualCcSettings.applyProxyBaseUrl
+const realCcRevert = actualCcSettings.revertProxyBaseUrl
+const realCcConfigured = actualCcSettings.isProxyBaseUrlConfigured
+const realCcRead = actualCcSettings.readClaudeCodeSettings
+// Forward all args, defaulting only the first to the tmp settings path.
+// We deliberately do NOT override getClaudeCodeSettingsPath — the route
+// never calls it (it passes the path explicitly via these wrappers), and
+// overriding it would bleed into the writer's own path-resolution tests.
+void mock.module("~/lib/claude-code-settings", () => ({
+  ...actualCcSettings,
+  applyProxyBaseUrl: (filePath: string = ROUTE_CC_SETTINGS) =>
+    realCcApply(filePath),
+  revertProxyBaseUrl: (filePath: string = ROUTE_CC_SETTINGS) =>
+    realCcRevert(filePath),
+  isProxyBaseUrlConfigured: (filePath: string = ROUTE_CC_SETTINGS) =>
+    realCcConfigured(filePath),
+  readClaudeCodeSettings: (filePath: string = ROUTE_CC_SETTINGS) =>
+    realCcRead(filePath),
 }))
 
 const actualDesktop = await import("~/lib/claude-desktop-config")
@@ -103,6 +108,7 @@ void mock.module("~/lib/claude-desktop-config", () => ({
 
 const { appsRoutes } = await import("~/routes/settings/apps")
 const { getConfig } = await import("~/lib/config")
+const { isProxyBaseUrlConfigured } = await import("~/lib/claude-code-settings")
 
 function buildApp() {
   const app = new Hono()
@@ -114,18 +120,23 @@ function fakeInstall(p: string): ClaudeInstall {
   return { path: p, resolvedPath: p, version: "1.2.3", source: "homebrew" }
 }
 
+function cleanTmp() {
+  fs.rmSync(path.dirname(ROUTE_DESKTOP), { recursive: true, force: true })
+  fs.mkdirSync(path.dirname(ROUTE_DESKTOP), { recursive: true })
+  fs.rmSync(path.dirname(ROUTE_CC_SETTINGS), { recursive: true, force: true })
+  fs.mkdirSync(path.dirname(ROUTE_CC_SETTINGS), { recursive: true })
+}
+
 beforeEach(() => {
   fakeConfig = {}
   installsFixture = []
-  fs.rmSync(ROUTE_HOME, { recursive: true, force: true })
-  fs.rmSync(path.dirname(ROUTE_DESKTOP), { recursive: true, force: true })
-  fs.mkdirSync(path.dirname(ROUTE_DESKTOP), { recursive: true })
+  cleanTmp()
 })
 
 afterAll(() => {
   fakeConfig = {}
-  fs.rmSync(ROUTE_HOME, { recursive: true, force: true })
   fs.rmSync(path.dirname(ROUTE_DESKTOP), { recursive: true, force: true })
+  fs.rmSync(path.dirname(ROUTE_CC_SETTINGS), { recursive: true, force: true })
 })
 
 describe("GET /apps", () => {
@@ -140,7 +151,7 @@ describe("GET /apps", () => {
       "claude-desktop",
       "copilot-cli",
     ])
-    expect(body.apps[0].kind).toBe("shimmable")
+    expect(body.apps[0].kind).toBe("config")
     expect(body.apps[1].kind).toBe("config")
     expect(body.apps[2].kind).toBe("coming-soon")
     expect(body.apps[2].status).toBe("coming-soon")
@@ -182,7 +193,7 @@ describe("GET /apps", () => {
 })
 
 describe("POST /apps/claude-code/toggle", () => {
-  test("enable installs the shim and persists selectedPath", async () => {
+  test("enable writes ANTHROPIC_BASE_URL and persists enabled=true", async () => {
     installsFixture = [fakeInstall("/opt/homebrew/bin/claude")]
     const res = await buildApp().request("/apps/claude-code/toggle", {
       method: "POST",
@@ -190,21 +201,12 @@ describe("POST /apps/claude-code/toggle", () => {
       body: JSON.stringify({ enabled: true }),
     })
     expect(res.status).toBe(200)
-    const body = (await res.json()) as {
-      enabled: boolean
-      installs: Array<{ active: boolean }>
-    }
+    const body = (await res.json()) as { enabled: boolean; conflict: unknown }
     expect(body.enabled).toBe(true)
-    expect(body.installs[0].active).toBe(true)
-    expect(getConfig().apps?.claudeCode).toEqual({
-      enabled: true,
-      selectedPath: "/opt/homebrew/bin/claude",
-    })
-    // Shim really written into the tmp home.
-    expect(actualDetect.isShimInstalled(ROUTE_HOME)).toBe(true)
-    expect(actualDetect.readShimTarget(ROUTE_HOME)).toBe(
-      "/opt/homebrew/bin/claude",
-    )
+    expect(body.conflict).toBeNull()
+    expect(getConfig().apps?.claudeCode).toEqual({ enabled: true })
+    // The settings.json base URL was actually written.
+    expect(isProxyBaseUrlConfigured(ROUTE_CC_SETTINGS)).toBe(true)
   })
 
   test("enable with no install returns 409", async () => {
@@ -217,7 +219,30 @@ describe("POST /apps/claude-code/toggle", () => {
     expect(res.status).toBe(409)
   })
 
-  test("disable removes the shim and persists enabled=false", async () => {
+  test("enable surfaces a conflict when a foreign base URL is present", async () => {
+    installsFixture = [fakeInstall("/opt/homebrew/bin/claude")]
+    // Pre-seed a non-proxy ANTHROPIC_BASE_URL the user owns.
+    fs.writeFileSync(
+      ROUTE_CC_SETTINGS,
+      JSON.stringify({ env: { ANTHROPIC_BASE_URL: "https://other.example" } }),
+    )
+    const res = await buildApp().request("/apps/claude-code/toggle", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled: true }),
+    })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      enabled: boolean
+      conflict: string | null
+    }
+    expect(body.conflict).toBe("foreign-base-url")
+    // We did NOT overwrite the user's base URL.
+    expect(isProxyBaseUrlConfigured(ROUTE_CC_SETTINGS)).toBe(false)
+    expect(body.enabled).toBe(false)
+  })
+
+  test("disable reverts the base URL and persists enabled=false", async () => {
     installsFixture = [fakeInstall("/opt/homebrew/bin/claude")]
     const app = buildApp()
     await app.request("/apps/claude-code/toggle", {
@@ -234,7 +259,7 @@ describe("POST /apps/claude-code/toggle", () => {
     const body = (await res.json()) as { enabled: boolean }
     expect(body.enabled).toBe(false)
     expect(getConfig().apps?.claudeCode?.enabled).toBe(false)
-    expect(actualDetect.isShimInstalled(ROUTE_HOME)).toBe(false)
+    expect(isProxyBaseUrlConfigured(ROUTE_CC_SETTINGS)).toBe(false)
   })
 
   test("bad body returns 400", async () => {
@@ -244,43 +269,6 @@ describe("POST /apps/claude-code/toggle", () => {
       body: JSON.stringify({ enabled: "yes" }),
     })
     expect(res.status).toBe(400)
-  })
-})
-
-describe("POST /apps/claude-code/select", () => {
-  test("rejects a path that is not a detected install", async () => {
-    installsFixture = [fakeInstall("/opt/homebrew/bin/claude")]
-    const res = await buildApp().request("/apps/claude-code/select", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ path: "/nope/claude" }),
-    })
-    expect(res.status).toBe(400)
-  })
-
-  test("sets selectedPath and rewrites an installed shim", async () => {
-    installsFixture = [
-      fakeInstall("/opt/homebrew/bin/claude"),
-      fakeInstall("/usr/local/bin/claude"),
-    ]
-    const app = buildApp()
-    await app.request("/apps/claude-code/toggle", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ enabled: true, path: "/opt/homebrew/bin/claude" }),
-    })
-    const res = await app.request("/apps/claude-code/select", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ path: "/usr/local/bin/claude" }),
-    })
-    expect(res.status).toBe(200)
-    expect(getConfig().apps?.claudeCode?.selectedPath).toBe(
-      "/usr/local/bin/claude",
-    )
-    expect(actualDetect.readShimTarget(ROUTE_HOME)).toBe(
-      "/usr/local/bin/claude",
-    )
   })
 })
 

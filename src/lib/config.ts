@@ -44,10 +44,9 @@ export interface AppConfig {
 
 export interface AppsConfig {
   claudeCode?: {
-    /** Shim currently installed/active. */
+    /** Proxy routing applied to Claude Code (env.ANTHROPIC_BASE_URL in
+     *  ~/.claude/settings.json). */
     enabled?: boolean
-    /** Absolute path of the chosen real claude binary the shim exec's. */
-    selectedPath?: string
   }
   claudeDesktop?: {
     /** Proxy config applied to Claude Desktop. */
