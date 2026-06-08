@@ -2,20 +2,14 @@
  * Tests for the `configure-claude-code` subcommand — the shared reverter
  * the Tauri shell calls after a sidecar crash.
  *
- * `runConfigureClaudeCode` writes to the real settings path, which honors
- * `CLAUDE_CONFIG_DIR`. We point that at a tmp dir to exercise the actual
- * apply/revert behavior without `mock.module`, then assert through the real
- * reader.
+ * `runConfigureClaudeCode` takes an injectable `filePath`, so we drive it at
+ * a tmp settings file directly — no `mock.module`, no `CLAUDE_CONFIG_DIR`
+ * env reliance (a sibling file's `mock.module` of claude-code-settings would
+ * otherwise defeat env-based path resolution across CI's file ordering;
+ * CLAUDE.md → prefer injectable options).
  */
 
-import {
-  afterAll,
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  test,
-} from "bun:test"
+import { afterAll, beforeEach, describe, expect, test } from "bun:test"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
@@ -32,19 +26,9 @@ import {
 
 const TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "cc-configure-"))
 const SETTINGS = path.join(TMP_DIR, "settings.json")
-const PRIOR_CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR
 
 beforeEach(() => {
-  process.env.CLAUDE_CONFIG_DIR = TMP_DIR
   fs.rmSync(SETTINGS, { force: true })
-})
-
-afterEach(() => {
-  if (PRIOR_CONFIG_DIR === undefined) {
-    delete process.env.CLAUDE_CONFIG_DIR
-  } else {
-    process.env.CLAUDE_CONFIG_DIR = PRIOR_CONFIG_DIR
-  }
 })
 
 afterAll(() => {
@@ -62,14 +46,14 @@ describe("configure-claude-code subcommand", () => {
   })
 
   test("apply writes the proxy base URL", () => {
-    runConfigureClaudeCode({ revert: false })
+    runConfigureClaudeCode({ revert: false, filePath: SETTINGS })
     expect(isProxyBaseUrlConfigured(SETTINGS)).toBe(true)
   })
 
   test("revert removes the proxy base URL we wrote", () => {
-    runConfigureClaudeCode({ revert: false })
+    runConfigureClaudeCode({ revert: false, filePath: SETTINGS })
     expect(isProxyBaseUrlConfigured(SETTINGS)).toBe(true)
-    runConfigureClaudeCode({ revert: true })
+    runConfigureClaudeCode({ revert: true, filePath: SETTINGS })
     expect(isProxyBaseUrlConfigured(SETTINGS)).toBe(false)
   })
 
@@ -78,7 +62,7 @@ describe("configure-claude-code subcommand", () => {
       SETTINGS,
       JSON.stringify({ env: { ANTHROPIC_BASE_URL: "https://other.example" } }),
     )
-    runConfigureClaudeCode({ revert: true })
+    runConfigureClaudeCode({ revert: true, filePath: SETTINGS })
     const env = (readClaudeCodeSettings(SETTINGS).env ?? {}) as Record<
       string,
       unknown
@@ -91,7 +75,7 @@ describe("configure-claude-code subcommand", () => {
       SETTINGS,
       JSON.stringify({ env: { ANTHROPIC_BASE_URL: "https://other.example" } }),
     )
-    runConfigureClaudeCode({ revert: false })
+    runConfigureClaudeCode({ revert: false, filePath: SETTINGS })
     expect(isProxyBaseUrlConfigured(SETTINGS)).toBe(false)
     const env = (readClaudeCodeSettings(SETTINGS).env ?? {}) as Record<
       string,

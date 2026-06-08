@@ -29,14 +29,19 @@ import consola from "consola"
 
 import {
   applyProxyBaseUrl,
+  getClaudeCodeSettingsPath,
   revertProxyBaseUrl,
 } from "./lib/claude-code-settings"
 
 interface ConfigureOptions {
   revert: boolean
+  /** Settings path override. Defaults to the resolved ~/.claude path; tests
+   *  inject a tmp path (avoids `mock.module` cross-file bleed — CLAUDE.md). */
+  filePath?: string
 }
 
 export function runConfigureClaudeCode(opts: ConfigureOptions): void {
+  const filePath = opts.filePath ?? getClaudeCodeSettingsPath()
   consola.box(
     opts.revert ?
       "maximal configure-claude-code --revert"
@@ -44,15 +49,15 @@ export function runConfigureClaudeCode(opts: ConfigureOptions): void {
   )
 
   if (opts.revert) {
-    revert()
+    revert(filePath)
     return
   }
-  apply()
+  apply(filePath)
 }
 
-function apply(): void {
+function apply(filePath: string): void {
   try {
-    const result = applyProxyBaseUrl()
+    const result = applyProxyBaseUrl(filePath)
     if (result.wrote) {
       consola.success(`Pointed Claude Code at the proxy (${result.path})`)
     } else if (result.skippedReason === "foreign-base-url") {
@@ -68,9 +73,9 @@ function apply(): void {
   }
 }
 
-function revert(): void {
+function revert(filePath: string): void {
   try {
-    const result = revertProxyBaseUrl()
+    const result = revertProxyBaseUrl(filePath)
     if (result.wrote) {
       consola.success(`Removed the proxy base URL from ${result.path}`)
     } else {
