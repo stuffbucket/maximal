@@ -6,6 +6,10 @@ import consola from "consola"
 import { serve } from "srvx"
 import invariant from "tiny-invariant"
 
+import {
+  reconcileClaudeCodeOnBoot,
+  reconcileClaudeCodeOnShutdown,
+} from "./lib/claude-code-reconcile"
 import { mergeConfigWithDefaults } from "./lib/config"
 import { readDefaultRecord } from "./lib/github-token-store"
 import { createHandlerLogger } from "./lib/logger"
@@ -230,6 +234,11 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   // doesn't free the port in time.
   void writePidfile()
 
+  // Now that we're actually listening, re-apply the Claude Code base URL
+  // if the user left routing on. Self-heals a URL a prior crash/force-kill
+  // stranded over a dead proxy. Ownership-guarded; no-op when routing is off.
+  reconcileClaudeCodeOnBoot()
+
   installShutdownHandlers(httpServer)
 }
 
@@ -247,6 +256,13 @@ async function initiateShutdown(
   shuttingDown = true
 
   consola.info(`shutdown: ${reason}, draining`)
+
+  // Take Claude Code off the proxy before we stop accepting connections,
+  // so `claude` isn't stranded over a dead base URL. Ownership-guarded and
+  // intent-gated (no-op when routing is off); the intent flag persists, so
+  // the next boot re-applies it. Synchronous + best-effort — a slow/failed
+  // file write must not delay or block the drain.
+  reconcileClaudeCodeOnShutdown()
 
   // Fail-safe: if close() hangs, hard-exit after 2.5s. .unref() so the
   // timer itself never holds the loop open in the happy path.
