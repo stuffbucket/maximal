@@ -3,10 +3,10 @@ import { Hono } from "hono"
 import { cors } from "hono/cors"
 import { logger } from "hono/logger"
 
-import { BUILD_VERSION } from "./lib/build-info"
 import { staleRefreshMiddleware } from "./lib/refresh-models"
 import { createAuthMiddleware, requireGithubAuth } from "./lib/request-auth"
 import { getModelsLoadedAtMs } from "./lib/state"
+import { buildStatus } from "./lib/status"
 import { traceIdMiddleware } from "./lib/trace"
 import { cacheModels } from "./lib/utils"
 // `with { type: "file" }` is Bun's official asset-embedding path
@@ -115,19 +115,13 @@ server.get("/", (c) => c.text("Server running"))
 
 // Identity + liveness probe. Unauthenticated and loopback-friendly so a
 // local caller (the Claude Code shim, a health check, a script) can ask
-// "is the thing on :4141 actually Maximal, and is it up?" without an API
-// key. The `service: "maximal"` field is the unambiguous marker the shim
-// keys off — far more robust than guessing from the listener's process
-// name (which varies: `bun` in dev, a compiled sidecar, the `maximal`
-// CLI). Cheap: no upstream calls, just in-memory state.
-server.get("/status", (c) =>
-  c.json({
-    service: "maximal",
-    status: "ok",
-    version: BUILD_VERSION,
-    uptime_ms: Date.now() - SERVER_START_MS,
-  }),
-)
+// "is the thing on :4141 actually Maximal, is it up, and is it ready to
+// serve?" without an API key. The `service: "maximal"` field is the
+// unambiguous identity marker the shim keys off; `subsystems` namespaces
+// per-part health so new subsystems slot in without reshaping the
+// contract. Safe-for-unauth only (booleans/tiers/counts, no secrets);
+// see src/lib/status.ts. Cheap: in-memory state, no upstream calls.
+server.get("/status", (c) => c.json(buildStatus(SERVER_START_MS)))
 // Our own dashboard assets — `no-store` so the Tauri webview (and any
 // browser tabs) always pull fresh on reload. A previous `max-age=86400`
 // caused WKWebView to serve stale HTML/JS for 24h after every iteration,
