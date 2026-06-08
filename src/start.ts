@@ -86,7 +86,10 @@ function reportPortBusyAndExit(
         `It's already listening at ${url}. Point your client at`,
         `that URL — no second instance needed.`,
         ``,
-        `If you want a separate copy on another port:`,
+        `To restart it (take over this port), run:`,
+        `    maximal start --replace`,
+        ``,
+        `Or run a separate copy on another port:`,
         `    maximal start --port ${port + 1}`,
       ].join("\n"),
     )

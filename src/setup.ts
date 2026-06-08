@@ -68,11 +68,27 @@ export async function runSetup(opts: RunSetupOptions): Promise<void> {
   await runDebug({ json: false })
 
   // 3. Smoke test ----------------------------------------------------
+  let smokePassed: boolean | null = null
   if (!opts.skipSmoke && !opts.unattended) {
     consola.info("Step 3/3: Smoke test")
-    await smokeTest(opts.port)
+    smokePassed = await smokeTest(opts.port)
   } else {
     consola.info("Step 3/3: Smoke test (skipped)")
+  }
+
+  // Be honest about the outcome. A failed smoke test isn't fatal (the proxy
+  // simply wasn't running yet), but saying "Setup complete" over a failed
+  // check would dead-end the user into thinking everything's wired when the
+  // proxy never answered. Tell them the one thing to do next.
+  if (smokePassed === false) {
+    consola.box("Setup finished — but the smoke test didn't pass.")
+    consola.info(
+      "Auth and config are in place. The proxy just wasn't reachable yet.\n"
+        + "  1. Start it:   maximal start\n"
+        + "  2. Re-check:   maximal setup\n"
+        + "Pair Claude Desktop once it's up: maximal configure-claude-desktop",
+    )
+    return
   }
 
   consola.box("Setup complete.")
@@ -86,7 +102,7 @@ export async function runSetup(opts: RunSetupOptions): Promise<void> {
 // Step 3: Smoke test.
 // ────────────────────────────────────────────────────────────────────
 
-async function smokeTest(port: number): Promise<void> {
+async function smokeTest(port: number): Promise<boolean> {
   const url = `http://localhost:${port}/v1/messages`
   let response: Response
   try {
@@ -109,13 +125,14 @@ async function smokeTest(port: number): Promise<void> {
       `  Could not reach the proxy at ${url}. Start it with \`maximal start\` in another terminal, then re-run setup.`,
       err,
     )
-    return
+    return false
   }
   if (!response.ok) {
     consola.warn(`  Proxy responded ${response.status} ${response.statusText}`)
-    return
+    return false
   }
   consola.success(`  Proxy responded 200 from ${url}`)
+  return true
 }
 
 // ────────────────────────────────────────────────────────────────────
