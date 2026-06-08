@@ -106,6 +106,8 @@ mod menu_id {
     pub const STARTING: &str = "starting";
     pub const FAILED: &str = "failed";
     pub const SHOW_LOGS: &str = "show_logs";
+    pub const RETRY: &str = "retry";
+    pub const OPEN_CONFIG: &str = "open_config";
 }
 
 /// High-level tray state. Each transition rebuilds the menu and swaps
@@ -1317,6 +1319,13 @@ fn build_menu(app: &AppHandle, state: SidecarState) -> tauri::Result<Menu<tauri:
                 false,
                 None::<&str>,
             )?;
+            let retry = MenuItem::with_id(
+                app,
+                menu_id::RETRY,
+                "Retry startup",
+                true,
+                None::<&str>,
+            )?;
             let show_logs = MenuItem::with_id(
                 app,
                 menu_id::SHOW_LOGS,
@@ -1324,9 +1333,24 @@ fn build_menu(app: &AppHandle, state: SidecarState) -> tauri::Result<Menu<tauri:
                 true,
                 None::<&str>,
             )?;
+            let open_config = MenuItem::with_id(
+                app,
+                menu_id::OPEN_CONFIG,
+                "Open config folder…",
+                true,
+                None::<&str>,
+            )?;
             Menu::with_items(
                 app,
-                &[&failed, &show_logs, &sep1, &settings_item, &quit_item],
+                &[
+                    &failed,
+                    &retry,
+                    &show_logs,
+                    &open_config,
+                    &sep1,
+                    &settings_item,
+                    &quit_item,
+                ],
             )
         }
     }
@@ -1338,9 +1362,48 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
         menu_id::DASHBOARD => open_dashboard_window(app),
         menu_id::SIGN_IN => open_settings_window(app, Some("account")),
         menu_id::SHOW_LOGS => do_reveal_logs_dir(app),
+        menu_id::OPEN_CONFIG => do_reveal_config_dir(app),
+        menu_id::RETRY => retry_startup(app),
         menu_id::QUIT => request_quit(app),
         _ => {}
     }
+}
+
+/// Re-run the startup sequence from the Failed/Stopped state: clear any
+/// lingering sidecar, flip back to Starting, respawn, and restart polling.
+/// This is the recovery path for a transient startup failure (slow first
+/// boot, a port held by something that has since let go, a one-off crash) —
+/// without it, the only way out of Failed was to quit and relaunch the whole
+/// app, a dead-end for a menu-bar utility the user expects to "just run."
+///
+/// Only acts from Failed/Stopped so a stray click while healthy can't tear
+/// down a working sidecar. Reuses kill_sidecar's SIGTERM→SIGKILL path to
+/// reap any half-dead child before respawning so we don't leak a process or
+/// collide on :4141.
+fn retry_startup(app: &AppHandle) {
+    let current = app.state::<AppStatus>().get();
+    if !matches!(current, SidecarState::Failed | SidecarState::Stopped) {
+        return;
+    }
+    eprintln!("[shell] retry startup requested");
+
+    // Reap any lingering child (a hung-but-alive sidecar that timed out, or
+    // one mid-crash) so the respawn binds cleanly. No-op if already gone.
+    kill_sidecar(app);
+
+    apply_state(app, SidecarState::Starting);
+    create_splash(app);
+
+    if let Err(err) = spawn_sidecar(app) {
+        eprintln!("[shell] retry: sidecar spawn failed: {err}");
+        apply_state(app, SidecarState::Failed);
+        return;
+    }
+
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        poll_sidecar_status(handle).await;
+    });
 }
 
 /// Opens (or focuses) the dashboard webview pointed at the sidecar's

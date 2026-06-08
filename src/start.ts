@@ -6,11 +6,13 @@ import consola from "consola"
 import { serve } from "srvx"
 import invariant from "tiny-invariant"
 
+import { markAuthFatalAndSignOut } from "./lib/auth-controller"
 import {
   reconcileClaudeCodeOnBoot,
   reconcileClaudeCodeOnShutdown,
 } from "./lib/claude-code-reconcile"
 import { mergeConfigWithDefaults } from "./lib/config"
+import { CopilotAuthFatalError } from "./lib/error"
 import { readDefaultRecord } from "./lib/github-token-store"
 import { createHandlerLogger } from "./lib/logger"
 import { initOpencodeVersion } from "./lib/opencode"
@@ -438,6 +440,21 @@ async function bootstrapUpstream(
       )
       return
     } catch (error) {
+      // A *fatal* Copilot error (license revoked, TOS not accepted, not
+      // entitled) is actionable — but only if we preserve its message +
+      // remediation URL. Route it through markAuthFatalAndSignOut so the
+      // Settings "Sign in" screen shows the real reason instead of a generic
+      // "Not signed in" that dead-ends the user. Non-fatal/transient errors
+      // keep the plain warn-and-degrade path (the token may still be good;
+      // the proxy stays up so the user can retry or re-auth).
+      if (error instanceof CopilotAuthFatalError) {
+        consola.warn(
+          "GitHub token present but Copilot rejected it; surfacing the reason in Settings.",
+          error.message,
+        )
+        await markAuthFatalAndSignOut(error)
+        return
+      }
       consola.warn(
         "GitHub token present but Copilot bootstrap failed; serving in unauthenticated mode.",
         error,
