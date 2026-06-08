@@ -578,13 +578,24 @@ export function removeClaudeShim(homeDir: string = os.homedir()): boolean {
 // ---------------------------------------------------------------------------
 //
 // Writing the shim isn't enough: the shims dir has to be EARLIER on PATH
-// than the real `claude` for plain `claude` to dispatch to us. The native
-// installer prepends `~/.local/bin` to PATH, so the real claude is
-// typically position 1 — we have to get ahead of even that. We do it the
-// way every version manager (asdf, volta, pyenv) does, and the way our own
-// macOS first-launch already does for `~/.local/bin`: a marker-guarded
-// block appended to the user's zsh rc files that prepends the shims dir.
-// The block is idempotent (keyed on the marker) and fully reversible.
+// than the real `claude` for plain `claude` to dispatch to us. A plain
+// `export PATH="<shims>:$PATH"` only wins if it's the LAST rc line to run —
+// but the native Claude Code installer appends its own
+// `export PATH="$HOME/.local/bin:$PATH"`, which can run after ours and
+// reclaim position 1. A static prepend is fundamentally beatable by a later
+// static prepend.
+//
+// So we use the technique mise / asdf / conda use to "always win": a
+// `precmd` hook that re-fronts the shims dir before EVERY prompt. No matter
+// what static rc line ran later, the instant before the user types a
+// command our hook has already put the shims dir back at position 1. It's
+// order-independent by construction. The hook is idempotent (a string check
+// + at most one PATH rewrite per prompt — negligible) and registered once.
+// The whole block is marker-guarded and fully reversible.
+//
+// zsh only (the hook uses `precmd_functions`); bash is intentionally
+// skipped, matching the first-launch PATH block. The file shim is still the
+// thing that routes — this just guarantees it's the `claude` that's found.
 
 /** Marker lines wrapping the PATH block we manage in the user's rc files.
  *  Anything between them is ours to add/remove; everything else is left
@@ -599,10 +610,43 @@ function pathRcFiles(homeDir: string): Array<string> {
   return [path.join(homeDir, ".zshrc"), path.join(homeDir, ".zprofile")]
 }
 
-/** The exact block we write. The shims dir goes FIRST so it beats a
- *  position-1 `~/.local/bin/claude` from the native installer. */
+/**
+ * The exact block we write: a `precmd` hook that keeps the shims dir at the
+ * front of PATH before every prompt (the mise/asdf/conda approach), so we
+ * win even when another tool re-prepends its own dir after us. Idempotent —
+ * the hook returns early when already fronted, and re-registration is
+ * guarded so re-sourcing the rc doesn't stack duplicate hooks.
+ *
+ * `shimDir` is interpolated as a POSIX-quoted literal; it's a path under the
+ * user's home with no shell metacharacters in practice, but we quote it so
+ * an unusual home dir can't break the script.
+ */
 function pathBlock(shimDir: string): string {
-  return `${PATH_MARKER_START}\nexport PATH="${shimDir}:$PATH"\n${PATH_MARKER_END}\n`
+  const q = shellDoubleQuote(shimDir)
+  return `${PATH_MARKER_START}
+_maximal_shims_dir="${q}"
+_maximal_front_path() {
+  case ":$PATH:" in
+    ":$_maximal_shims_dir:"*) return ;;
+  esac
+  _maximal_p=":$PATH:"
+  _maximal_p="\${_maximal_p//":$_maximal_shims_dir:"/:}"
+  _maximal_p="\${_maximal_p#:}"
+  _maximal_p="\${_maximal_p%:}"
+  export PATH="$_maximal_shims_dir:$_maximal_p"
+  unset _maximal_p
+}
+if [ -n "\${ZSH_VERSION:-}" ]; then
+  typeset -ag precmd_functions
+  if (( ! \${precmd_functions[(I)_maximal_front_path]} )); then
+    precmd_functions=(_maximal_front_path $precmd_functions)
+  fi
+  _maximal_front_path
+else
+  _maximal_front_path
+fi
+${PATH_MARKER_END}
+`
 }
 
 /** Strip any existing maximal-claude-shim block (and the blank line a
@@ -638,14 +682,16 @@ export function addShimDirToPath(
       // Read without a prior existsSync check (avoids a check-then-use
       // race): a missing file just reads as empty content.
       const existing = readFileOrEmpty(rc)
-      // Already present and pointing at the right dir → nothing to do.
-      if (existing.includes(`export PATH="${shimDir}:$PATH"`)) continue
-      // Replace any stale block first, then append a fresh one.
+      // Strip any prior block (stale or current), then append a fresh one
+      // at the end. Compare against the existing content and skip the write
+      // when nothing changed — keeps the operation idempotent without
+      // depending on the block's exact text.
       const base = stripPathBlock(existing).replace(/\n+$/, "\n")
       const next =
         (base && !base.endsWith("\n") ? base + "\n" : base)
         + "\n"
         + pathBlock(shimDir)
+      if (next === existing) continue
       fs.writeFileSync(rc, next)
       written.push(rc)
     } catch {

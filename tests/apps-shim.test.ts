@@ -4,6 +4,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { spawnSync } from "node:child_process"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
@@ -168,24 +169,26 @@ describe("isShimInstalled / readShimTarget", () => {
 })
 
 describe("PATH activation (addShimDirToPath / removeShimDirFromPath)", () => {
-  test("prepends the shims dir to PATH in both zsh rc files", () => {
+  test("writes a precmd-hook PATH block to both zsh rc files", () => {
     const written = addShimDirToPath(home)
     expect(written.sort()).toEqual(rcFiles(home).sort())
     for (const rc of rcFiles(home)) {
       const content = fs.readFileSync(rc, "utf8")
-      expect(content).toContain(`export PATH="${getShimDir(home)}:$PATH"`)
+      // The block registers a precmd hook that fronts the shims dir, and
+      // names the dir so the hook can re-assert it before every prompt.
+      expect(content).toContain(`_maximal_shims_dir="${getShimDir(home)}"`)
+      expect(content).toContain("precmd_functions=(_maximal_front_path")
     }
     expect(isShimDirOnPath(home)).toBe(true)
   })
 
-  test("prepends ahead of $PATH so it beats a position-1 ~/.local/bin", () => {
+  test("fronts the shims dir (ahead of $PATH), order-independent", () => {
     addShimDirToPath(home)
-    const line = fs
-      .readFileSync(path.join(home, ".zshrc"), "utf8")
-      .split("\n")
-      .find((l) => l.startsWith("export PATH="))
-    // shims dir must come BEFORE $PATH in the prepend.
-    expect(line).toBe(`export PATH="${getShimDir(home)}:$PATH"`)
+    const block = fs.readFileSync(path.join(home, ".zshrc"), "utf8")
+    // The hook exports PATH with the shims dir FIRST.
+    expect(block).toContain('export PATH="$_maximal_shims_dir:$_maximal_p"')
+    // It registers a precmd hook so a later prepend can't permanently win.
+    expect(block).toContain("precmd_functions")
   })
 
   test("is idempotent — a second call doesn't duplicate the block", () => {
@@ -218,4 +221,38 @@ describe("PATH activation (addShimDirToPath / removeShimDirFromPath)", () => {
   test("isShimDirOnPath is false before activation", () => {
     expect(isShimDirOnPath(home)).toBe(false)
   })
+
+  test("zsh precmd hook reclaims front even when something re-prepends after it", () => {
+    // The actual bug: a static `export PATH="<shims>:$PATH"` loses when the
+    // native Claude Code installer appends its own ~/.local/bin prepend
+    // after ours. The precmd hook must put the shims dir back at the front
+    // before the next prompt. Runs real zsh; skips where zsh is absent
+    // (e.g. ubuntu CI), so it guards locally / on macOS without flaking.
+    const zsh = whichZsh()
+    if (!zsh) return // zsh not installed — nothing to assert here
+
+    addShimDirToPath(home)
+    const block = fs.readFileSync(path.join(home, ".zshrc"), "utf8")
+    const shimDir = getShimDir(home)
+
+    // Source our block, simulate a later ~/.local/bin prepend, then fire the
+    // precmd hooks the way zsh does before a prompt, and print PATH[0].
+    const script = [
+      'export PATH="$HOME/.local/bin:/usr/bin:/bin"',
+      block,
+      'export PATH="$HOME/.local/bin:$PATH"', // installer steals front
+      "for f in $precmd_functions; do $f; done", // prompt fires
+      'print -r -- "${PATH%%:*}"',
+    ].join("\n")
+
+    const out = spawnSync(zsh, ["-fc", script], { encoding: "utf8" })
+    expect(out.status).toBe(0)
+    expect(out.stdout.trim()).toBe(shimDir)
+  })
 })
+
+/** Resolve a usable `zsh`, or null when none is on PATH. */
+function whichZsh(): string | null {
+  const r = spawnSync("zsh", ["--version"], { encoding: "utf8" })
+  return r.status === 0 ? "zsh" : null
+}
