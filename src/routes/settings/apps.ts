@@ -1,10 +1,10 @@
 /**
  * /settings/api/apps — wire downstream tools to talk to the proxy.
  *
- * Three app kinds:
- *   - claude-code   (shimmable): detect every `claude` CLI install and
- *                   install/remove a shim (in `~/.local/share/maximal/
- *                   shims/`, named `claude`) that routes plain `claude` through the proxy.
+ * Two active app kinds:
+ *   - claude-code   (config): toggle Claude Code's proxy routing by writing
+ *                   `env.ANTHROPIC_BASE_URL` into `~/.claude/settings.json`
+ *                   (ownership-guarded; only that one key is ever touched).
  *   - claude-desktop (config): toggle Claude Desktop's proxy config via
  *                   the existing `applyProxyConfig`/`revertProxyConfig`.
  *   - copilot-cli   (coming-soon): placeholder card, no wiring yet.
@@ -20,15 +20,14 @@ import fs from "node:fs"
 import path from "node:path"
 
 import {
-  addShimDirToPath,
   type ClaudeInstall,
   detectClaudeInstalls,
-  installClaudeShim,
-  isShimInstalled,
-  readShimTarget,
-  removeClaudeShim,
-  removeShimDirFromPath,
 } from "~/lib/claude-cli-detect"
+import {
+  applyProxyBaseUrl,
+  isProxyBaseUrlConfigured,
+  revertProxyBaseUrl,
+} from "~/lib/claude-code-settings"
 import {
   alreadyConfigured,
   applyProxyConfig,
@@ -38,11 +37,9 @@ import {
 } from "~/lib/claude-desktop-config"
 import { getConfig, writeConfig, type AppConfig } from "~/lib/config"
 import { forwardError, HTTPError } from "~/lib/error"
-import { getConfiguredApiKeys } from "~/lib/request-auth"
 import {
   AppEntry,
   AppsListResponse,
-  ClaudeCodeSelectRequest,
   ClaudeCodeToggleRequest,
   ClaudeDesktopToggleRequest,
   type AppEntry as AppEntryT,
@@ -59,16 +56,6 @@ function httpError(message: string, status: number): HTTPError {
   return new HTTPError(message, new Response(message, { status }))
 }
 
-/**
- * The Maximal API key the shim should inject, or undefined when none is
- * configured. Picks the first enabled key that is not the "*" wildcard
- * (the wildcard accepts any bearer, so there's nothing meaningful to
- * inject for it).
- */
-function resolveShimApiKey(): string | undefined {
-  return getConfiguredApiKeys().find((k) => k !== "*")
-}
-
 /** Is Claude Desktop present? True when its config directory exists or
  *  the macOS app bundle is installed. */
 function claudeDesktopInstalled(): boolean {
@@ -79,30 +66,31 @@ function claudeDesktopInstalled(): boolean {
 
 function buildClaudeCodeApp(
   precomputedInstalls?: ReadonlyArray<ClaudeInstall>,
+  conflict: AppEntryT["conflict"] = null,
 ): AppEntryT {
   // Detection spawns subprocesses (npm prefix, claude --version), so reuse
   // an already-computed list when the caller has one (the toggle does).
+  // Detection is purely for "is claude installed?" (ready vs not-installed
+  // + the install hint) — routing is via the settings.json file now, not a
+  // per-binary shim, so there's no version picker / active flag.
   const installs = precomputedInstalls ?? detectClaudeInstalls()
-  const selectedPath = getConfig().apps?.claudeCode?.selectedPath
-  const shimTarget = readShimTarget()
-  const shimInstalled = isShimInstalled()
 
   return {
     id: "claude-code",
     name: "Claude Code",
-    kind: "shimmable",
-    enabled: shimInstalled,
+    kind: "config",
+    enabled: isProxyBaseUrlConfigured(),
     status: installs.length > 0 ? "ready" : "not-installed",
     installs: installs.map((i) => ({
       path: i.path,
       version: i.version,
       source: i.source,
-      active: i.path === shimTarget || i.path === selectedPath,
     })),
     install:
       installs.length === 0 ?
         { method: "curl", command: CLAUDE_CODE_INSTALL_COMMAND }
       : null,
+    conflict,
   }
 }
 
@@ -117,6 +105,7 @@ function buildClaudeDesktopApp(): AppEntryT {
     status: installed ? "ready" : "not-installed",
     installs: [],
     install: null,
+    conflict: null,
   }
 }
 
@@ -129,6 +118,7 @@ function buildCopilotCliApp(): AppEntryT {
     status: "coming-soon",
     installs: [],
     install: null,
+    conflict: null,
   }
 }
 
@@ -152,10 +142,7 @@ function jsonApp(c: Context, app: AppEntryT) {
 }
 
 /** Merge an `apps.claudeCode` patch into config and persist. */
-function persistClaudeCode(patch: {
-  enabled?: boolean
-  selectedPath?: string
-}): void {
+function persistClaudeCode(patch: { enabled?: boolean }): void {
   const config: AppConfig = getConfig()
   writeConfig({
     ...config,
@@ -218,58 +205,31 @@ appsRoutes.post("/claude-code/toggle", async (c) => {
     const body: unknown = await c.req.json().catch(() => null)
     const parsed = ClaudeCodeToggleRequest.safeParse(body)
     if (!parsed.success) {
-      throw httpError("Expected { enabled: boolean, path?: string }", 400)
+      throw httpError("Expected { enabled: boolean }", 400)
     }
 
     if (parsed.data.enabled) {
+      // Detection only gates "is claude installed?" — routing is via the
+      // settings.json file, not a per-binary shim.
       const installs = detectClaudeInstalls()
-      const selectedPath = getConfig().apps?.claudeCode?.selectedPath
-      const target = parsed.data.path ?? selectedPath ?? installs[0]?.path
-      if (!target) {
+      if (installs.length === 0) {
         throw httpError(
-          "No Claude Code install detected. Install it first, then enable the shim.",
+          "No Claude Code install detected. Install it first, then enable routing.",
           409,
         )
       }
-      installClaudeShim(target, { apiKey: resolveShimApiKey() })
-      // Put our shims dir ahead of the real claude on PATH (next shell).
-      // Writing the shim alone does nothing until this lands.
-      addShimDirToPath()
-      persistClaudeCode({ enabled: true, selectedPath: target })
-      return jsonApp(c, buildClaudeCodeApp(installs))
+      // Ownership-guarded write of env.ANTHROPIC_BASE_URL. If the user (or
+      // another tool) already set a different base URL, applyProxyBaseUrl
+      // backs off and reports it; surface that as a conflict on the card.
+      const result = applyProxyBaseUrl()
+      const conflict =
+        result.skippedReason === "foreign-base-url" ? "foreign-base-url" : null
+      persistClaudeCode({ enabled: true })
+      return jsonApp(c, buildClaudeCodeApp(installs, conflict))
     }
 
-    removeClaudeShim()
-    removeShimDirFromPath()
+    revertProxyBaseUrl()
     persistClaudeCode({ enabled: false })
-    return jsonApp(c, buildClaudeCodeApp())
-  } catch (error) {
-    return forwardError(c, error)
-  }
-})
-
-appsRoutes.post("/claude-code/select", async (c) => {
-  try {
-    const body: unknown = await c.req.json().catch(() => null)
-    const parsed = ClaudeCodeSelectRequest.safeParse(body)
-    if (!parsed.success) {
-      throw httpError("Expected { path: string }", 400)
-    }
-
-    const installs = detectClaudeInstalls()
-    const match = installs.find((i) => i.path === parsed.data.path)
-    if (!match) {
-      throw httpError(
-        "Path is not one of the detected Claude Code installs.",
-        400,
-      )
-    }
-
-    if (isShimInstalled()) {
-      installClaudeShim(match.path, { apiKey: resolveShimApiKey() })
-    }
-    persistClaudeCode({ selectedPath: match.path })
-
     return jsonApp(c, buildClaudeCodeApp())
   } catch (error) {
     return forwardError(c, error)

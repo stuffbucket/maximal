@@ -153,15 +153,15 @@ export type ApiKeyUpdateRequest = z.infer<typeof ApiKeyUpdateRequest>
 // ---------------------------------------------------------------------------
 // Apps integration — Settings → Apps.
 //
-// An "app" is a downstream tool we can wire to talk to the proxy. Three
-// kinds, distinguished by `kind`:
-//   - "shimmable": a CLI we route by installing a PATH shim (Claude Code).
-//   - "config":    a desktop app we route by editing its config file
-//                  (Claude Desktop).
+// An "app" is a downstream tool we can wire to talk to the proxy. Two
+// active kinds, distinguished by `kind`:
+//   - "config":    a tool we route by editing its config file — Claude
+//                  Desktop (claude_desktop_config.json) and Claude Code
+//                  (~/.claude/settings.json env.ANTHROPIC_BASE_URL).
 //   - "coming-soon": a placeholder card with no wiring yet.
 // ---------------------------------------------------------------------------
 
-/** One detected install of a shimmable CLI. */
+/** One detected install of a CLI app (display only). */
 export const AppInstall = z.object({
   /** Resolved absolute path of the real binary. */
   path: z.string(),
@@ -176,8 +176,6 @@ export const AppInstall = z.object({
     "path",
     "unknown",
   ]),
-  /** Whether the shim currently points here (or matches selectedPath). */
-  active: z.boolean(),
 })
 export type AppInstall = z.infer<typeof AppInstall>
 
@@ -191,13 +189,16 @@ export type AppInstallHint = z.infer<typeof AppInstallHint>
 export const AppEntry = z.object({
   id: z.enum(["claude-code", "claude-desktop", "copilot-cli"]),
   name: z.string(),
-  kind: z.enum(["shimmable", "config", "coming-soon"]),
-  /** Whether the integration is currently active (shim installed / proxy
-   *  config applied). */
+  kind: z.enum(["config", "coming-soon"]),
+  /** Whether the integration is currently active (proxy config applied). */
   enabled: z.boolean(),
   status: z.enum(["ready", "not-installed", "coming-soon"]),
   installs: z.array(AppInstall),
   install: AppInstallHint.nullable(),
+  /** Non-null when enabling was refused because the app's config already
+   *  has a setting we don't own (e.g. a user-set ANTHROPIC_BASE_URL). The
+   *  UI surfaces this so the user knows why the toggle didn't take. */
+  conflict: z.enum(["foreign-base-url"]).nullable(),
 })
 export type AppEntry = z.infer<typeof AppEntry>
 
@@ -208,14 +209,8 @@ export type AppsListResponse = z.infer<typeof AppsListResponse>
 
 export const ClaudeCodeToggleRequest = z.object({
   enabled: z.boolean(),
-  path: z.string().optional(),
 })
 export type ClaudeCodeToggleRequest = z.infer<typeof ClaudeCodeToggleRequest>
-
-export const ClaudeCodeSelectRequest = z.object({
-  path: z.string().min(1),
-})
-export type ClaudeCodeSelectRequest = z.infer<typeof ClaudeCodeSelectRequest>
 
 export const ClaudeDesktopToggleRequest = z.object({
   enabled: z.boolean(),

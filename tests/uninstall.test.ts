@@ -51,38 +51,50 @@ describe("uninstall — Claude Desktop revert integration", () => {
   })
 })
 
-describe("uninstall — Claude Code shim removal integration", () => {
-  it("removeClaudeShim deletes a shim the Apps panel installed", async () => {
-    const {
-      installClaudeShim,
-      removeClaudeShim,
-      isShimInstalled,
-      getShimPath,
-    } = await import("~/lib/claude-cli-detect")
+describe("uninstall — Claude Code settings revert integration", () => {
+  it("reverts only the ANTHROPIC_BASE_URL we wrote, preserving other env", async () => {
+    const { applyProxyBaseUrl, revertProxyBaseUrl, isProxyBaseUrlConfigured } =
+      await import("~/lib/claude-code-settings")
+    const settings = path.join(workDir, "settings.json")
+    // Seed a sibling env var we must NOT touch.
+    fs.writeFileSync(
+      settings,
+      JSON.stringify({ env: { ANTHROPIC_API_KEY: "user-key" } }),
+    )
 
-    installClaudeShim("/opt/homebrew/bin/claude", { homeDir: workDir })
-    expect(isShimInstalled(workDir)).toBe(true)
+    applyProxyBaseUrl(settings)
+    expect(isProxyBaseUrlConfigured(settings)).toBe(true)
 
-    expect(removeClaudeShim(workDir)).toBe(true)
-    expect(fs.existsSync(getShimPath(workDir))).toBe(false)
-    // Second call is a no-op, not an error — uninstall is idempotent.
-    expect(removeClaudeShim(workDir)).toBe(false)
+    const reverted = revertProxyBaseUrl(settings)
+    expect(reverted.wrote).toBe(true)
+    expect(isProxyBaseUrlConfigured(settings)).toBe(false)
+    // The user's own key survived.
+    // eslint-disable-next-line unicorn/prefer-json-parse-buffer
+    const after = JSON.parse(fs.readFileSync(settings, "utf8")) as {
+      env?: { ANTHROPIC_API_KEY?: string }
+    }
+    expect(after.env?.ANTHROPIC_API_KEY).toBe("user-key")
   })
 
-  it("removeClaudeShim no-ops when there is no shim", async () => {
-    const { removeClaudeShim } = await import("~/lib/claude-cli-detect")
-    expect(removeClaudeShim(workDir)).toBe(false)
+  it("revert is a no-op when nothing was configured", async () => {
+    const { revertProxyBaseUrl } = await import("~/lib/claude-code-settings")
+    const settings = path.join(workDir, "settings.json")
+    expect(revertProxyBaseUrl(settings).wrote).toBe(false)
   })
 
-  it("removeClaudeShim refuses to delete a non-marker file at the shim path", async () => {
-    const { removeClaudeShim, getShimPath } =
-      await import("~/lib/claude-cli-detect")
-    const shimPath = getShimPath(workDir)
-    fs.mkdirSync(path.dirname(shimPath), { recursive: true })
-    fs.writeFileSync(shimPath, "#!/bin/sh\necho not ours\n")
-    expect(() => removeClaudeShim(workDir)).toThrow()
-    // The non-marker file is left untouched.
-    expect(fs.existsSync(shimPath)).toBe(true)
+  it("does not revert a foreign ANTHROPIC_BASE_URL", async () => {
+    const { revertProxyBaseUrl } = await import("~/lib/claude-code-settings")
+    const settings = path.join(workDir, "settings.json")
+    fs.writeFileSync(
+      settings,
+      JSON.stringify({ env: { ANTHROPIC_BASE_URL: "https://other.example" } }),
+    )
+    revertProxyBaseUrl(settings)
+    // eslint-disable-next-line unicorn/prefer-json-parse-buffer
+    const after = JSON.parse(fs.readFileSync(settings, "utf8")) as {
+      env?: { ANTHROPIC_BASE_URL?: string }
+    }
+    expect(after.env?.ANTHROPIC_BASE_URL).toBe("https://other.example")
   })
 })
 
@@ -113,21 +125,21 @@ describe("uninstall — first-launch installer PATH block removal", () => {
     expect(removeFirstLaunchPathBlock(workDir)).toEqual([])
   })
 
-  it("does not touch the Claude Code shim block (different marker)", async () => {
+  it("touches only the # >>> maximal PATH >>> block, leaving other content", async () => {
     const { removeFirstLaunchPathBlock } = await import("~/uninstall")
-    const { addShimDirToPath } = await import("~/lib/claude-cli-detect")
-    // Both blocks present in the same rc file.
+    const zshrc = path.join(workDir, ".zshrc")
+    // Installer block plus an unrelated user PATH line that must survive.
     fs.writeFileSync(
-      path.join(workDir, ".zshrc"),
+      zshrc,
       "# >>> maximal PATH >>>\n"
         + 'export PATH="$HOME/.local/bin:$PATH"\n'
-        + "# <<< maximal PATH <<<\n",
+        + "# <<< maximal PATH <<<\n"
+        + 'export PATH="$HOME/mytools:$PATH"\n',
     )
-    addShimDirToPath(workDir)
 
     removeFirstLaunchPathBlock(workDir)
-    const after = fs.readFileSync(path.join(workDir, ".zshrc"), "utf8")
+    const after = fs.readFileSync(zshrc, "utf8")
     expect(after).not.toContain("maximal PATH") // installer block removed
-    expect(after).toContain("maximal claude shim") // shim block untouched
+    expect(after).toContain("mytools") // unrelated user line untouched
   })
 })
