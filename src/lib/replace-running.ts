@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process"
 import fs from "node:fs/promises"
 import net from "node:net"
 import path from "node:path"
@@ -28,6 +29,9 @@ export interface EvictOptions {
   probePort?: (port: number) => Promise<boolean>
   /** Injectable for tests. */
   readPidfile?: () => Promise<number | null>
+  /** Injectable for tests. Returns the PID currently listening on `port`,
+   *  or null if none/unknown. Used as a fallback when the pidfile is stale. */
+  listenerPid?: (port: number) => number | null
   /** Injectable for tests. Drop-in replacement for global fetch. */
   fetchImpl?: typeof fetch
 }
@@ -67,6 +71,53 @@ async function defaultReadPidfile(): Promise<number | null> {
   }
 }
 
+/** True if `pid`'s command line looks like a maximal proxy — the guard that
+ *  keeps us from ever signalling an unrelated service that happens to hold
+ *  the port. Reads the process command via `ps`; absence/failure → false. */
+function isMaximalProcess(pid: number): boolean {
+  try {
+    const r = spawnSync("ps", ["-p", String(pid), "-o", "command="], {
+      encoding: "utf8",
+      timeout: 1000,
+    })
+    if (r.status !== 0) return false
+    const cmd = r.stdout.trim().toLowerCase()
+    // The proxy runs as `.../maximal start ...` (CLI) or the Tauri sidecar
+    // `.../maximal-shell`. Match the bare `maximal` binary, not the shell —
+    // we only want to reap a proxy holding the port, never the menu-bar app.
+    return /(?:^|\/)maximal(?:\s|$)/.test(cmd) || cmd.includes("maximal start")
+  } catch {
+    return false
+  }
+}
+
+/** Find the PID listening on `port`, but only return it when it's a maximal
+ *  process (see isMaximalProcess). Unix: `lsof -nP -iTCP:<port> -sTCP:LISTEN`.
+ *  Best-effort — returns null if lsof is missing, the port is free, or the
+ *  holder isn't ours. Windows is handled by the pidfile path only (no lsof);
+ *  returning null there falls back to the existing behavior. */
+function defaultListenerPid(port: number): number | null {
+  if (process.platform === "win32") return null
+  try {
+    const r = spawnSync(
+      "lsof",
+      ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"],
+      { encoding: "utf8", timeout: 1000 },
+    )
+    if (r.status !== 0 || !r.stdout.trim()) return null
+    // `-t` yields bare PIDs, one per line. Take the first that is ours.
+    for (const line of r.stdout.trim().split("\n")) {
+      const pid = Number.parseInt(line.trim(), 10)
+      if (Number.isInteger(pid) && pid > 0 && isMaximalProcess(pid)) {
+        return pid
+      }
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
 /**
  * Cleanly take over the proxy port from a running instance.
  *
@@ -85,6 +136,7 @@ interface ResolvedEvictDeps {
   kill: (pid: number, signal: NodeJS.Signals | 0) => void
   probePort: (port: number) => Promise<boolean>
   readPidfile: () => Promise<number | null>
+  listenerPid: (port: number) => number | null
   fetchImpl: typeof fetch
 }
 
@@ -98,6 +150,7 @@ function resolveDeps(opts: EvictOptions): ResolvedEvictDeps {
     kill: opts.kill ?? ((pid, sig) => process.kill(pid, sig)),
     probePort: opts.probePort ?? defaultProbePort,
     readPidfile: opts.readPidfile ?? defaultReadPidfile,
+    listenerPid: opts.listenerPid ?? defaultListenerPid,
     fetchImpl: opts.fetchImpl ?? fetch,
   }
 }
@@ -150,15 +203,33 @@ export async function evictRunning(opts: EvictOptions): Promise<void> {
   const deps = resolveDeps(opts)
 
   const reachable = await requestShutdown(opts.apiKey, deps)
-  if (!reachable) return
 
-  if (await waitForPortRelease(deps)) return
+  // Even if the HTTP shutdown was unreachable (e.g. an older instance whose
+  // /setup-status 404s, or one wedged before it can serve), the port may
+  // still be held. Fall through to the kill path rather than returning — a
+  // stuck listener is exactly the case --replace exists to clear.
+  if (reachable && (await waitForPortRelease(deps))) return
+  if (!reachable && !(await deps.probePort(deps.port))) return
 
-  const pid = await deps.readPidfile()
-  if (pid !== null) await killEscalate(pid, deps)
+  // First try the pidfile (cheap, no subprocess). Then, if the port is STILL
+  // held — pidfile stale/dead, or a different proxy instance holds it — find
+  // the actual listening maximal PID and evict that. This is what makes
+  // --replace robust against a stale ~/.local/share/maximal/maximal.pid,
+  // which otherwise left the real holder running and failed the takeover.
+  const pidfilePid = await deps.readPidfile()
+  if (pidfilePid !== null) await killEscalate(pidfilePid, deps)
+
+  let lastPid = pidfilePid
+  if (await deps.probePort(deps.port)) {
+    const livePid = deps.listenerPid(deps.port)
+    if (livePid !== null && livePid !== pidfilePid) {
+      lastPid = livePid
+      await killEscalate(livePid, deps)
+    }
+  }
 
   if (await deps.probePort(deps.port)) {
-    const pidHint = pid !== null ? ` (last known pid ${pid})` : ""
+    const pidHint = lastPid !== null ? ` (last known pid ${lastPid})` : ""
     throw new Error(
       `Could not free :${deps.port}${pidHint}. Stop the holding process manually and retry.`,
     )
