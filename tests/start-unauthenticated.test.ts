@@ -97,6 +97,30 @@ describe("start in unauthenticated mode", () => {
     expect((await res.text()).trim()).toBe("Server running")
   })
 
+  test("GET /status returns the maximal identity marker, no auth needed", async () => {
+    // The Claude Code shim probes this to confirm :4141 is really Maximal
+    // (vs some other process that grabbed the port). Must work with no API
+    // key and even with a bogus one.
+    const headerCases: Array<Record<string, string>> = [
+      {},
+      { "x-api-key": "definitely-not-valid" },
+    ]
+    for (const headers of headerCases) {
+      const res = await fetch(`http://127.0.0.1:${port}/status`, { headers })
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as {
+        service: string
+        status: string
+        version: string
+        uptime_ms: number
+      }
+      expect(body.service).toBe("maximal")
+      expect(body.status).toBe("ok")
+      expect(typeof body.version).toBe("string")
+      expect(body.uptime_ms).toBeGreaterThanOrEqual(0)
+    }
+  })
+
   test("/_debug/state reports github_token_present: false", async () => {
     const res = await fetch(`http://127.0.0.1:${port}/_debug/state`)
     expect(res.status).toBe(200)
