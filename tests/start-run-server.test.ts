@@ -134,6 +134,8 @@ globalThis.fetch = (() =>
 
 const { state } = await import("~/lib/state")
 const { runServer, start } = await import("~/start")
+const { getAuthStatus, signOut } = await import("~/lib/auth-controller")
+const { CopilotAuthFatalError } = await import("~/lib/error")
 
 function resetState(): void {
   state.githubToken = undefined
@@ -277,6 +279,41 @@ describe("runServer — GitHub token resolution", () => {
     // bootstrapUpstream catches the error and clears the token so
     // requireGithubAuth treats the proxy as unauthenticated.
     expect(state.githubToken).toBeUndefined()
+  })
+
+  test("a fatal Copilot rejection at boot surfaces its reason (not a generic sign-out)", async () => {
+    // Reproduce the lapsed-license / TOS case: GitHub token is fine, but
+    // Copilot rejects it fatally. The cause + remediation URL must reach the
+    // Settings "Sign in" screen instead of dead-ending as a bare
+    // "Not signed in".
+    storedRecord = { accessToken: "good-token" }
+    const tmpSetup = setupCopilotTokenMock.getMockImplementation()
+    ;(
+      setupCopilotTokenMock as unknown as Mock<() => Promise<void>>
+    ).mockImplementationOnce(() =>
+      Promise.reject(
+        new CopilotAuthFatalError(
+          "Copilot access has been revoked for this account.",
+          403,
+          "https://github.com/settings/copilot",
+        ),
+      ),
+    )
+    try {
+      await runServer(baseOptions({ githubToken: undefined }))
+    } finally {
+      if (tmpSetup) setupCopilotTokenMock.mockImplementation(tmpSetup)
+    }
+
+    const status = getAuthStatus()
+    expect(status.state).toBe("error")
+    expect(status.error).toContain("revoked")
+    expect(status.remediation_url).toBe("https://github.com/settings/copilot")
+    // Token is cleared (signed out) but the reason is preserved.
+    expect(state.githubToken).toBeUndefined()
+
+    // Reset controller state so the error doesn't bleed into sibling tests.
+    await signOut()
   })
 })
 
