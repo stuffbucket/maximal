@@ -1533,75 +1533,49 @@ a:hover {
   gap: var(--space-2);
 }
 
-/* ---- Active-version radio list (Claude Code, installs present) ---- */
-.app-versions {
-  margin: 0;
-  padding: 0;
-  border: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-
-.app-versions[disabled] {
-  opacity: 0.55;
-}
-
-.app-versions__legend {
-  padding: 0;
-  margin-bottom: var(--space-2);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-md);
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-
-.app-version {
+/* ---- Conflict surface (enable refused) ----
+   Shown when toggling on was refused because the app's config already
+   carries a setting we don't own (e.g. a user-set ANTHROPIC_BASE_URL).
+   Honest, not alarming: a destructive-tinted stripe (the toggle snapped
+   back) with a plain-language remedy so the user is never left guessing
+   why the switch didn't take. Mirrors the requirement-callout idiom. */
+.app-card__conflict {
   display: flex;
   align-items: flex-start;
   gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
-  border: var(--border-width-hairline) solid transparent;
-  border-radius: var(--radius-input);
-  cursor: pointer;
-}
-
-.app-version:hover {
-  border-color: var(--border-subtle);
-}
-
-.app-version--active {
-  border-color: var(--border-subtle);
+  padding: var(--space-3) var(--space-4);
   background: var(--surface-control);
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-inline-start: var(--border-width-heavy) solid
+    var(--accent-destructive);
+  border-radius: var(--radius-card);
 }
 
-.app-version__radio {
-  margin-top: 0.2em;
+.app-card__conflict-icon {
   flex: 0 0 auto;
-  accent-color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-block-start: 2px;
+  color: var(--accent-destructive);
 }
 
-.app-version__radio:focus-visible {
-  outline: var(--focus-ring);
-  outline-offset: var(--focus-ring-offset);
-}
-
-.app-version__detail {
+.app-card__conflict-text {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
   min-width: 0;
 }
 
-.app-version__label {
+.app-card__conflict-title {
   font-size: var(--text-base);
   font-weight: var(--weight-md);
+  line-height: var(--leading-lg);
   color: var(--text-strong);
 }
 
-.app-version__path {
+.app-card__conflict-detail {
   font-size: var(--text-sm);
+  line-height: var(--leading-lg);
   color: var(--text-muted);
-  overflow-wrap: anywhere;
 }

@@ -685,6 +685,15 @@ fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
                     if payload.code == Some(0) {
                         handle.exit(0);
                     } else {
+                        // Crash / SIGKILL: the sidecar never reached its
+                        // graceful-shutdown reconciler, so a Claude Code
+                        // base URL it wrote may be stranded over a now-dead
+                        // proxy. We outlive the sidecar, so revert it on its
+                        // behalf via the shared CLI subcommand. Ownership-
+                        // guarded and intent-neutral: it only removes the
+                        // base URL we wrote, and leaves the persisted routing
+                        // intent alone so a future restart re-applies it.
+                        reconcile_claude_code_revert(&handle);
                         apply_state(&handle, SidecarState::Failed);
                     }
                     break;
@@ -695,6 +704,40 @@ fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
     });
 
     Ok(())
+}
+
+/// Run `maximal configure-claude-code --revert` as a one-shot sidecar
+/// command. Called when the proxy sidecar *crashes* (non-zero exit) — it
+/// can't revert its own Claude Code base URL in that path, so the shell
+/// does it. Best-effort: a missing binary or non-zero exit is logged and
+/// swallowed (the worst case is a stranded base URL the next clean boot
+/// re-applies or the user toggles off). Fire-and-forget on a Tokio task so
+/// the Terminated handler stays synchronous.
+fn reconcile_claude_code_revert(app: &AppHandle) {
+    let command = match app.shell().sidecar("maximal") {
+        Ok(c) => c.args(["configure-claude-code", "--revert"]),
+        Err(err) => {
+            eprintln!("[shell] could not build claude-code revert command: {err}");
+            return;
+        }
+    };
+    tauri::async_runtime::spawn(async move {
+        match command.output().await {
+            Ok(out) if out.status.success() => {
+                eprintln!("[shell] reverted Claude Code base URL after sidecar crash");
+            }
+            Ok(out) => {
+                eprintln!(
+                    "[shell] claude-code revert exited {:?}: {}",
+                    out.status.code(),
+                    String::from_utf8_lossy(&out.stderr),
+                );
+            }
+            Err(err) => {
+                eprintln!("[shell] claude-code revert failed to run: {err}");
+            }
+        }
+    });
 }
 
 /// Graceful sidecar shutdown.
