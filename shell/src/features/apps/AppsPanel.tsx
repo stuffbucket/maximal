@@ -8,7 +8,6 @@ export function AppsPanel(): JSX.Element {
     error,
     refresh,
     toggleClaudeCode,
-    selectClaudeCode,
     toggleClaudeDesktop,
   } = useApps();
 
@@ -29,11 +28,10 @@ export function AppsPanel(): JSX.Element {
               key={app.id}
               app={app}
               onRescan={refresh}
-              onSelect={selectClaudeCode}
               onToggle={
                 app.id === "claude-desktop"
                   ? (enabled) => toggleClaudeDesktop(enabled)
-                  : (enabled, path) => toggleClaudeCode(enabled, path)
+                  : (enabled) => toggleClaudeCode(enabled)
               }
             />
           ))}

@@ -6,10 +6,10 @@ import { humanize } from "../api-clients/humanize";
 
 /**
  * Data hook over `/settings/api/apps`. Owns the list of integrations,
- * loading + error state, and the three mutation verbs the Apps screen
- * needs. Each mutation returns a single fresh `AppEntry` (the contract
- * guarantees this), which we splice back into the list in place — no
- * full reload needed, so the rest of the screen doesn't flicker.
+ * loading + error state, and the two mutation verbs the Apps screen needs.
+ * Each mutation returns a single fresh `AppEntry` (the contract guarantees
+ * this), which we splice back into the list in place — no full reload
+ * needed, so the rest of the screen doesn't flicker.
  *
  * `refresh()` re-fetches the whole list and is exposed for the
  * "Re-scan" affordance (after the user installs Claude Code in their
@@ -25,8 +25,7 @@ interface UseApps {
   isLoading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
-  toggleClaudeCode: (enabled: boolean, path?: string) => Promise<MutationResult>;
-  selectClaudeCode: (path: string) => Promise<MutationResult>;
+  toggleClaudeCode: (enabled: boolean) => Promise<MutationResult>;
   toggleClaudeDesktop: (enabled: boolean) => Promise<MutationResult>;
 }
 
@@ -75,32 +74,12 @@ export function useApps(): UseApps {
   }, []);
 
   const toggleClaudeCode = useCallback<UseApps["toggleClaudeCode"]>(
-    async (enabled, path) => {
+    async (enabled) => {
       const result = await apiCall({
         kind: "claude-code-toggle",
         method: "POST",
         path: "/settings/api/apps/claude-code/toggle",
-        body: path === undefined ? { enabled } : { enabled, path },
-      });
-      if (!result.ok) {
-        const message = humanize(result.error);
-        setError(message);
-        return { ok: false, error: message };
-      }
-      setError(null);
-      splice(result.data);
-      return { ok: true };
-    },
-    [splice],
-  );
-
-  const selectClaudeCode = useCallback<UseApps["selectClaudeCode"]>(
-    async (path) => {
-      const result = await apiCall({
-        kind: "claude-code-select",
-        method: "POST",
-        path: "/settings/api/apps/claude-code/select",
-        body: { path },
+        body: { enabled },
       });
       if (!result.ok) {
         const message = humanize(result.error);
@@ -140,7 +119,6 @@ export function useApps(): UseApps {
     error,
     refresh,
     toggleClaudeCode,
-    selectClaudeCode,
     toggleClaudeDesktop,
   };
 }

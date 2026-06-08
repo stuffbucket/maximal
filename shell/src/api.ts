@@ -97,14 +97,18 @@ interface ActiveApiClientsResponse {
  * would break the typecheck. Mirror by name, not by import.
  */
 export type AppId = "claude-code" | "claude-desktop" | "copilot-cli"
-export type AppKind = "shimmable" | "config" | "coming-soon"
+export type AppKind = "config" | "coming-soon"
 export type AppStatus = "ready" | "not-installed" | "coming-soon"
+
+/** Why enabling was refused. `foreign-base-url`: the app's config already
+ *  carries an ANTHROPIC_BASE_URL we don't own, so we backed off rather than
+ *  clobber it. */
+export type AppConflict = "foreign-base-url"
 
 export interface AppInstall {
   path: string
   version: string | null
   source: string
-  active: boolean
 }
 
 export interface AppInstallHint {
@@ -121,6 +125,10 @@ export interface AppEntry {
   installs: Array<AppInstall>
   /** Non-null only when claude-code has no installs (offer to install). */
   install: AppInstallHint | null
+  /** Non-null when the last enable attempt was refused (e.g. a user-set
+   *  ANTHROPIC_BASE_URL). The card surfaces this so the user knows why the
+   *  toggle didn't take and how to resolve it. */
+  conflict: AppConflict | null
 }
 
 interface AppsListResponse {
@@ -195,13 +203,7 @@ type Endpoint =
       kind: "claude-code-toggle"
       method: "POST"
       path: "/settings/api/apps/claude-code/toggle"
-      body: { enabled: boolean; path?: string }
-    }
-  | {
-      kind: "claude-code-select"
-      method: "POST"
-      path: "/settings/api/apps/claude-code/select"
-      body: { path: string }
+      body: { enabled: boolean }
     }
   | {
       kind: "claude-desktop-toggle"
@@ -225,7 +227,6 @@ interface ResponseFor {
   "active-clients": ActiveApiClientsResponse
   "apps-list": AppsListResponse
   "claude-code-toggle": AppEntry
-  "claude-code-select": AppEntry
   "claude-desktop-toggle": AppEntry
 }
 
