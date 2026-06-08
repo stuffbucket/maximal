@@ -40,10 +40,7 @@ afterEach(() => {
 describe("installClaudeShim", () => {
   test("writes a marked, executable shim that exec's the target", () => {
     const target = "/opt/homebrew/bin/claude"
-    const shimPath = installClaudeShim(target, {
-      homeDir: home,
-      maximalBinPath: "/opt/Maximal.app/Contents/MacOS/maximal",
-    })
+    const shimPath = installClaudeShim(target, { homeDir: home })
     expect(shimPath).toBe(getShimPath(home))
 
     const content = fs.readFileSync(shimPath, "utf8")
@@ -86,22 +83,20 @@ describe("installClaudeShim", () => {
     )
   })
 
-  test("bakes in the fail-closed guard chain", () => {
+  test("bakes in the fail-closed /status identity guard", () => {
     const content = fs.readFileSync(
-      installClaudeShim("/opt/homebrew/bin/claude", {
-        homeDir: home,
-        maximalBinPath: "/opt/Maximal.app/Contents/MacOS/maximal",
-      }),
+      installClaudeShim("/opt/homebrew/bin/claude", { homeDir: home }),
       "utf8",
     )
-    // Falls through to the real claude when Maximal is absent/down.
+    // Falls through to the real claude when Maximal isn't answering.
     expect(content).toContain('bare() { exec "$REAL_CLAUDE" "$@"; }')
-    // Verifies the Maximal binary, the listening port, and the owning PID.
-    expect(content).toContain(
-      'MAXIMAL_BIN="/opt/Maximal.app/Contents/MacOS/maximal"',
-    )
-    expect(content).toContain("lsof")
-    expect(content).toContain("ps -p")
+    // Confirms identity by probing GET /status for the maximal marker,
+    // not by guessing the listener's process name (the old lsof/ps logic).
+    expect(content).toContain("/status")
+    expect(content).toContain('"service":"maximal"')
+    expect(content).toContain("--max-time 1") // can't hang the CLI
+    expect(content).not.toContain("lsof")
+    expect(content).not.toContain("MAXIMAL_BIN")
   })
 
   test("omits the API key line when no key is given", () => {
@@ -250,6 +245,91 @@ describe("PATH activation (addShimDirToPath / removeShimDirFromPath)", () => {
     expect(out.stdout.trim()).toBe(shimDir)
   })
 })
+
+describe("shim routing behaviour (/status identity guard)", () => {
+  test("routes (injects env) when /status returns the maximal marker", async () => {
+    const port = 4150 + Math.floor(Math.random() * 40)
+    const srv = Bun.serve({
+      port,
+      fetch(req) {
+        if (new URL(req.url).pathname === "/status") {
+          return Response.json({ service: "maximal", status: "ok" })
+        }
+        return new Response("no", { status: 404 })
+      },
+    })
+    try {
+      // Make sure the listener is actually accepting before the shim probes
+      // (Bun.serve resolves before the socket is ready to connect).
+      await fetch(`http://127.0.0.1:${port}/status`)
+      const out = await runShim(home, port)
+      expect(out).toContain(`BASE=http://127.0.0.1:${port}`)
+      expect(out).toContain("KEY=mxl_testkey")
+    } finally {
+      void srv.stop(true)
+    }
+  })
+
+  test("runs bare (no env) when nothing answers on the port", async () => {
+    const port = 4190 + Math.floor(Math.random() * 40) // assume free
+    const out = await runShim(home, port)
+    expect(out).toContain("BASE=unset")
+    expect(out).toContain("KEY=unset")
+  })
+
+  test("runs bare when a non-maximal server answers (no marker)", async () => {
+    const port = 4150 + Math.floor(Math.random() * 40)
+    const srv = Bun.serve({
+      port,
+      fetch: () => new Response("hello, not maximal"),
+    })
+    try {
+      await fetch(`http://127.0.0.1:${port}/`)
+      const out = await runShim(home, port)
+      expect(out).toContain("BASE=unset")
+      expect(out).toContain("KEY=unset")
+    } finally {
+      void srv.stop(true)
+    }
+  })
+})
+
+/**
+ * Build the shim against a fake "real claude" that prints whether it was
+ * routed, repoint its probe port to `port` (the shim hardcodes 4141), and
+ * run it with the ambient ANTHROPIC_* stripped. Returns the fake claude's
+ * stdout (BASE/KEY lines).
+ *
+ * Async (Bun.spawn, not spawnSync) on purpose: an in-test `Bun.serve`
+ * answers `/status` on the same event loop, and a *blocking* child would
+ * deadlock it (the loop can't serve while spawnSync waits).
+ */
+async function runShim(home: string, port: number): Promise<string> {
+  const fakeClaude = path.join(home, "realclaude")
+  fs.writeFileSync(
+    fakeClaude,
+    '#!/bin/sh\necho "BASE=${ANTHROPIC_BASE_URL:-unset}"\n'
+      + 'echo "KEY=${ANTHROPIC_API_KEY:-unset}"\n',
+  )
+  fs.chmodSync(fakeClaude, 0o755)
+  installClaudeShim(fakeClaude, { homeDir: home, apiKey: "mxl_testkey" })
+
+  const shim = fs.readFileSync(getShimPath(home), "utf8")
+  const probe = path.join(home, "claude-probe")
+  fs.writeFileSync(
+    probe,
+    shim.replace('PROXY_PORT="4141"', `PROXY_PORT="${port}"`),
+  )
+  fs.chmodSync(probe, 0o755)
+
+  const child = Bun.spawn(["sh", probe], {
+    env: { ...process.env, ANTHROPIC_BASE_URL: "", ANTHROPIC_API_KEY: "" },
+    stdout: "pipe",
+  })
+  const out = await new Response(child.stdout).text()
+  await child.exited
+  return out
+}
 
 /** Resolve a usable `zsh`, or null when none is on PATH. */
 function whichZsh(): string | null {

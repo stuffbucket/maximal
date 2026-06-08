@@ -378,40 +378,44 @@ function shellDoubleQuote(value: string): string {
  * The fail-closed guard chain, baked into every shim. Runs on each
  * `claude` invocation. Each guard, on any doubt, `exec`s the real claude
  * with no environment override — routing through the proxy happens ONLY
- * when Maximal itself is the process serving the proxy port.
+ * when Maximal itself is answering on the proxy port.
  *
- *   1. Real claude still present?         no  → can't run; error out.
- *   2. Maximal binary still installed?    no  → run claude bare.
- *   3. Proxy port actually listening?     no  → run claude bare.
- *   4. The PID holding the port is        no  → run claude bare
- *      Maximal (not some other process          (never inject the key
- *      that grabbed the port)?                   toward a hijacked port).
+ *   1. Real claude still present?   no  → can't run; error out.
+ *   2. Is Maximal answering on the  no  → run claude bare (never inject
+ *      proxy port? (GET /status          the key toward a dead port or a
+ *      returns the maximal marker)       foreign process that grabbed it).
  *
- * Only after all four hold do we inject ANTHROPIC_BASE_URL (and the API
+ * Identity is confirmed by probing `GET /status` and checking for the
+ * `"service":"maximal"` marker — a positive identity check that works
+ * regardless of how Maximal was launched (the old approach matched the
+ * listener's process name via lsof/ps, which is `bun` in dev, a compiled
+ * sidecar binary, or the `maximal` CLI, and on macOS `ps -o comm=` returns
+ * a full path — so it never matched and the shim always fell through).
+ *
+ * Only after both guards hold do we inject ANTHROPIC_BASE_URL (and the API
  * key, when configured) and exec.
  */
 function buildShimScript(
   targetBinaryPath: string,
-  opts: { apiKey?: string; maximalBinPath: string },
+  opts: { apiKey?: string },
 ): string {
   const host = "127.0.0.1"
   const port = "4141"
   const apiKeyExport =
     opts.apiKey !== undefined && opts.apiKey.length > 0 ?
-      `  export ANTHROPIC_API_KEY="${shellDoubleQuote(opts.apiKey)}"\n`
+      `export ANTHROPIC_API_KEY="${shellDoubleQuote(opts.apiKey)}"\n`
     : ""
 
   return `#!/bin/sh
 ${SHIM_MARKER}
 # Managed by Maximal — routes \`claude\` through the local proxy, but only
-# when Maximal itself is the process serving the proxy port. Every guard
-# fails closed: on any doubt we run the real claude unchanged, so an
-# orphaned or tampered shim can never break the CLI or misroute the key.
+# when Maximal itself is answering on the proxy port. Fails closed: on any
+# doubt we run the real claude unchanged, so an orphaned or tampered shim
+# can never break the CLI or misroute the key.
 # Do not edit by hand — toggle from Maximal Settings → Apps.
 set -u
 
 REAL_CLAUDE="${shellDoubleQuote(targetBinaryPath)}"
-MAXIMAL_BIN="${shellDoubleQuote(opts.maximalBinPath)}"
 PROXY_HOST="${host}"
 PROXY_PORT="${port}"
 
@@ -425,24 +429,22 @@ if [ ! -x "$REAL_CLAUDE" ]; then
   exit 127
 fi
 
-# Guard 2: Maximal must still be installed.
-[ -n "$MAXIMAL_BIN" ] && [ -x "$MAXIMAL_BIN" ] || bare "$@"
-
-# Guard 3 + 4: the proxy port must be held, and held by Maximal itself.
-# lsof gives the listening PID; ps gives its executable. Missing lsof,
-# closed port, or a non-Maximal listener all fall through to bare.
-PID=$(lsof -nP "-iTCP@\${PROXY_HOST}:\${PROXY_PORT}" -sTCP:LISTEN -t 2>/dev/null | head -n1)
-[ -n "$PID" ] || bare "$@"
-PROC=$(ps -p "$PID" -o comm= 2>/dev/null)
-[ -n "$PROC" ] || bare "$@"
-if [ "$PROC" != "$MAXIMAL_BIN" ]; then
-  case "$PROC" in
-    */maximal | maximal) : ;;
-    *) bare "$@" ;;
-  esac
+# Guard 2: confirm the proxy port is held by Maximal itself. Probe
+# GET /status (unauthenticated) and require the "service":"maximal"
+# identity marker. A closed port, a foreign process, a hang, or a missing
+# curl all fall through to bare — we never inject the key toward anything
+# that isn't provably Maximal. 1s cap so a wedged listener can't hang the CLI.
+if command -v curl >/dev/null 2>&1; then
+  _maximal_status=$(curl -fsS --max-time 1 "http://\${PROXY_HOST}:\${PROXY_PORT}/status" 2>/dev/null)
+else
+  bare "$@"
 fi
+case "$_maximal_status" in
+  *'"service":"maximal"'*) ;;     # confirmed — fall through to routing
+  *) bare "$@" ;;                 # anything else → real claude, unchanged
+esac
 
-# All guards passed: Maximal owns the port. Route through it.
+# Both guards passed: Maximal owns the port. Route through it.
 export ANTHROPIC_BASE_URL="http://\${PROXY_HOST}:\${PROXY_PORT}"
 ${apiKeyExport}exec "$REAL_CLAUDE" "$@"
 `
@@ -498,9 +500,6 @@ function ensureSecureShimDir(dir: string): void {
 export interface InstallShimOptions {
   apiKey?: string
   homeDir?: string
-  /** Absolute path of the Maximal binary the shim verifies is serving
-   *  the proxy port. Defaults to the running executable. */
-  maximalBinPath?: string
 }
 
 /**
@@ -516,7 +515,6 @@ export function installClaudeShim(
   const home = options.homeDir ?? os.homedir()
   const shimDir = getShimDir(home)
   const shimPath = getShimPath(home)
-  const maximalBinPath = options.maximalBinPath ?? process.execPath
 
   if (
     fs.existsSync(shimPath)
@@ -531,7 +529,6 @@ export function installClaudeShim(
 
   const script = buildShimScript(targetBinaryPath, {
     apiKey: options.apiKey,
-    maximalBinPath,
   })
 
   // Atomic, no-symlink-follow write: O_EXCL on a per-pid temp in the
