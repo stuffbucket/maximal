@@ -1,35 +1,30 @@
-# macOS signed build dispatcher (drop-in for any public stuffbucket repo)
+# macOS signed build — MANUAL dispatcher / recovery tool.
 #
 # WHAT THIS DOES
-#   This workflow does NOT build anything itself. On a published release it
-#   triggers the build.yml workflow in the PRIVATE builder repo
+#   Triggers the build.yml workflow in the PRIVATE builder repo
 #   (stuffbucket/macos-builder), which owns the only self-hosted macOS runner
-#   and all Apple signing secrets. The builder checks THIS repo out at the
-#   released tag (using an app-repoman token, not a PAT), runs this repo's
-#   .macos-builder/build.sh, signs + notarizes, and uploads the signed .dmg
-#   (and .dmg.sha256) back onto THIS release.
+#   and all Apple signing secrets. The builder checks THIS repo out at the tag,
+#   runs this repo's .macos-builder/{config,build.sh}, signs + notarizes, and
+#   uploads the signed .dmg (+ .dmg.sha256) onto THIS release.
 #
-#   So: publish a GitHub release here, and a few minutes later the signed dmg
-#   appears as an asset on that same release, built on the private Mac runner.
+# WHY workflow_dispatch ONLY (no `release: published`)
+#   The normal release path builds the macOS .dmg as the `macos-dmg` JOB in
+#   release.yml and gates `publish` on it, so the .dmg is attached while the
+#   release is still a DRAFT (mutable) and lands inside the single
+#   draft→published flip. With GitHub immutable releases ON, attaching an asset
+#   AFTER publish is rejected (HTTP 422) — so an on-`published` trigger would
+#   always fail. This workflow stays only as a manual re-build for a release
+#   that is STILL A DRAFT (or for builder debugging).
 #
 # REQUIREMENTS (one-time, per client repo)
-#   - app-repoman installed on THIS repo with Contents: read+write (lets the
-#     builder check out + upload here without any PAT on this repo).
-#   - Secret  MACOS_BUILDER_PAT  on this repo: a fine-grained PAT scoped to
-#     ONLY stuffbucket/macos-builder with Actions: write — its sole power is to
-#     start the build below. It cannot read this repo's or any other secret.
-#   - An executable build script at  .macos-builder/build.sh  (the builder runs
-#     it on the Mac; it writes *.dmg + *.dmg.sha256 to $OUTPUT_DIR).
-#
-# RE-RUNS
-#   Use the "Run workflow" button (workflow_dispatch) and pass an existing tag
-#   to re-trigger a build for a release that already exists.
+#   - app-repoman installed on THIS repo with Contents: read+write.
+#   - Secret MACOS_BUILDER_PAT — fine-grained PAT, Actions: write on
+#     stuffbucket/macos-builder ONLY (its sole power is to start the build).
+#   - .macos-builder/config (required) + .macos-builder/build.sh (the producer).
 
-name: macOS signed build
+name: macOS signed build (manual)
 
 on:
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       tag:
@@ -48,11 +43,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.MACOS_BUILDER_PAT }}
           REPO: ${{ github.repository }}
-          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
           if [ -z "${TAG}" ]; then
-            echo "::error::No tag resolved from release event or workflow_dispatch input." >&2
+            echo "::error::No tag provided." >&2
             exit 1
           fi
           echo "Triggering macOS build for ${REPO} at ${TAG}"

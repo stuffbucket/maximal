@@ -468,11 +468,55 @@ jobs:
   # installers match the binaries. Each keeps an idempotency skip gate so
   # re-running a partially-failed release rebuilds only what's missing.
 
-  # macOS signed .dmg is now built by the private stuffbucket/macos-builder
-  # (self-hosted runner + Apple signing material), NOT here. It is triggered
-  # out of band by .github/workflows/macos-build.yml on release publish and
-  # uploads the .dmg to the release asynchronously — intentionally not a
-  # release.yml job and not gated by `publish`. See .macos-builder/build.sh.
+  # macOS signed .dmg — built by the private stuffbucket/macos-builder
+  # (self-hosted runner + Apple signing material), so it runs OFF this runner:
+  # we dispatch it and poll. Critically the builder uploads the signed .dmg to
+  # THIS release while it is still a DRAFT (mutable), and `publish` GATES on
+  # this job — so the .dmg is part of the single draft→published flip and lands
+  # INSIDE the immutable release. Attaching it after publish (the old async
+  # model) is rejected with HTTP 422 on an immutable release. If the build
+  # fails/times out, the release stays a draft rather than publishing without a
+  # macOS download. See .macos-builder/{config,build.sh}.
+  macos-dmg:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - name: Build (or reuse) the signed .dmg and ensure it is on the draft
+        env:
+          BUILDER_PAT: ${{ secrets.MACOS_BUILDER_PAT }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          DMG="maximal-${TAG}-darwin-arm64.dmg"
+          present() {
+            gh release view "$TAG" --repo "$REPO" --json assets \
+              --jq '.assets[].name' 2>/dev/null | grep -Fxq "$DMG"
+          }
+          # Idempotent: a re-run after the .dmg already landed is a no-op (no
+          # second 15-minute private build).
+          if present; then
+            echo "$DMG already attached to the draft — skipping rebuild."
+            exit 0
+          fi
+          echo "Dispatching the private macOS builder for ${REPO} at ${TAG}…"
+          GH_TOKEN="$BUILDER_PAT" gh workflow run build.yml \
+            --repo stuffbucket/macos-builder --ref main \
+            -f "repo=${REPO}" -f "ref=${TAG}"
+          echo "Polling the draft for ${DMG} (sign + notarize takes a few min)…"
+          for i in $(seq 1 40); do   # ~30 min cap (45s × 40)
+            sleep 45
+            if present; then
+              echo "${DMG} present after ~$((i * 45))s."
+              exit 0
+            fi
+          done
+          echo "::error::Timed out waiting for ${DMG} on the draft release. See the stuffbucket/macos-builder run; the release stays a draft (not published without a macOS build)." >&2
+          exit 1
 
   # Windows PowerShell installer — install.ps1 shipped verbatim + sha256.
   windows-installer:
@@ -800,6 +844,7 @@ jobs:
       - windows-installer
       - windows-msi
       - windows-msi-verify
+      - macos-dmg
     runs-on: ubuntu-latest
     permissions:
       contents: write
