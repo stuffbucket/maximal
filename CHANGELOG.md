@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.23](https://github.com/stuffbucket/maximal/compare/v0.4.22...v0.4.23) (2026-06-09)
+
+
+### Bug Fixes
+
+* **release:** attach the macOS .dmg before publish (immutable-release safe) ([#96](https://github.com/stuffbucket/maximal/issues/96)) ([54f5e5d](https://github.com/stuffbucket/maximal/commit/54f5e5d0b5f01d8e5981d3e20778aee1a4842d16))
+
 ## [0.4.22](https://github.com/stuffbucket/maximal/compare/v0.4.21...v0.4.22) (2026-06-09)
 
 
