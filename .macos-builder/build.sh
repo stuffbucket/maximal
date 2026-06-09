@@ -33,9 +33,23 @@ ENTITLEMENTS="build/macos/maximal.entitlements"
 echo "Building maximal ${TAG} (version ${VERSION}, ${ARCH}) -> ${DMG}"
 
 # Tauri reads its version from tauri.conf.json, not git tags. Stamp it.
-/usr/bin/sed -i '' -e "s/\"version\": \"0\\.0\\.0\"/\"version\": \"${VERSION}\"/" \
+# Match WHATEVER version is currently there (not just the "0.0.0" placeholder)
+# so a stray committed value can't slip through unstamped, then ASSERT the
+# stamp took — a silent no-op here ships the wrong version in the bundle.
+/usr/bin/sed -i '' -E "s/\"version\": \"[^\"]*\"/\"version\": \"${VERSION}\"/" \
   shell/src-tauri/tauri.conf.json
 grep '"version"' shell/src-tauri/tauri.conf.json
+if ! grep -q "\"version\": \"${VERSION}\"" shell/src-tauri/tauri.conf.json; then
+  echo "::error::Failed to stamp version ${VERSION} into tauri.conf.json" >&2
+  exit 1
+fi
+
+# Self-hosted runner: the target/ dir persists across builds. tauri build does
+# NOT always regenerate the bundle's Info.plist, so a stale Maximal.app from a
+# prior tag (e.g. an onboarding test) can survive and get signed/shipped with
+# the WRONG CFBundleShortVersionString. Nuke the bundle output so every build
+# regenerates it from the freshly-stamped version.
+rm -rf shell/src-tauri/target/release/bundle
 
 # Install JS deps (root + shell).
 bun install
@@ -75,6 +89,17 @@ fi
   bun run tauri build --bundles app
   ls -la src-tauri/target/release/bundle/macos/
 )
+
+# Proactive guard: the built bundle's version MUST match the tag we're
+# releasing. This catches a stale/cached Info.plist (the 0.4.14-in-a-0.4.20-dmg
+# class of bug) at build time instead of in a user's About box.
+BUILT_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
+  "${APP}/Contents/Info.plist" 2>/dev/null || echo '')"
+echo "Built bundle version: ${BUILT_VERSION} (expected ${VERSION})"
+if [ "${BUILT_VERSION}" != "${VERSION}" ]; then
+  echo "::error::Bundle version '${BUILT_VERSION}' != release version '${VERSION}'. Stale build artifact?" >&2
+  exit 1
+fi
 
 # Sign the bundle WITHOUT --deep. The sidecar inside is already signed; signing
 # the bundle top-level seals it without re-signing nested code. (--verify --deep
