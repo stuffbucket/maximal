@@ -468,17 +468,11 @@ jobs:
   # installers match the binaries. Each keeps an idempotency skip gate so
   # re-running a partially-failed release rebuilds only what's missing.
 
-  # macOS Tauri bundle (signed + notarized .dmg). A reusable
-  # workflow rather than a job here because it needs the self-hosted macOS
-  # runner; workflow_call from the same repo can target it, and the call
-  # participates in this run's job graph so `needs:`/`publish` gating just
-  # works. Secrets (signing/notarization) flow via `secrets: inherit`.
-  tauri-macos:
-    needs: binaries
-    uses: ./.github/workflows/tauri-macos.yml
-    with:
-      tag: ${{ github.ref_name }}
-    secrets: inherit
+  # macOS signed .dmg is now built by the private stuffbucket/macos-builder
+  # (self-hosted runner + Apple signing material), NOT here. It is triggered
+  # out of band by .github/workflows/macos-build.yml on release publish and
+  # uploads the .dmg to the release asynchronously — intentionally not a
+  # release.yml job and not gated by `publish`. See .macos-builder/build.sh.
 
   # Windows PowerShell installer — install.ps1 shipped verbatim + sha256.
   windows-installer:
@@ -803,7 +797,6 @@ jobs:
       - release
       - checksums
       - smoke
-      - tauri-macos
       - windows-installer
       - windows-msi
       - windows-msi-verify
