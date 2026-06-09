@@ -44,6 +44,56 @@ describe("parseCopilotErrorBody", () => {
       "Copilot returned an error.",
     )
   })
+
+  // --- remediation URL extraction (feeds both the banner link AND the
+  //     isAuthFatal URL-marker matching, so it's worth pinning) ---
+
+  test("extracts documentation_url as the remediation link", () => {
+    const body = JSON.stringify({
+      message: "Accept the terms",
+      documentation_url: "https://github.com/settings/copilot",
+    })
+    expect(parseCopilotErrorBody(body).remediationUrl).toBe(
+      "https://github.com/settings/copilot",
+    )
+  })
+
+  test("extracts a nested notification.url", () => {
+    const body = JSON.stringify({
+      notification: {
+        message: "heads up",
+        url: "https://github.com/site/terms",
+      },
+    })
+    const result = parseCopilotErrorBody(body)
+    expect(result.message).toBe("heads up")
+    expect(result.remediationUrl).toBe("https://github.com/site/terms")
+  })
+
+  test("ignores a non-http(s) url candidate", () => {
+    const body = JSON.stringify({ message: "x", url: "ftp://example.com/x" })
+    expect(parseCopilotErrorBody(body).remediationUrl).toBeNull()
+  })
+
+  test("pulls a github URL out of a plain-text (non-JSON) body", () => {
+    const body =
+      "Quota exceeded. See https://github.com/settings/copilot for details."
+    const result = parseCopilotErrorBody(body)
+    expect(result.message).toBe(body)
+    expect(result.remediationUrl).toBe("https://github.com/settings/copilot")
+  })
+
+  // --- non-object JSON bodies must degrade to the generic fallback, not
+  //     throw or leak a bogus message ---
+
+  test.each(['"just a string"', "42", "true", "null", "[1,2,3]"])(
+    "non-object JSON %p falls back to generic with no URL",
+    (raw) => {
+      const result = parseCopilotErrorBody(raw)
+      expect(result.message).toBe("Copilot returned an error.")
+      expect(result.remediationUrl).toBeNull()
+    },
+  )
 })
 
 describe("isAuthFatal — 401 always fatal", () => {

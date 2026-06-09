@@ -71,6 +71,22 @@ async function defaultReadPidfile(): Promise<number | null> {
   }
 }
 
+/**
+ * The security-critical half of the eviction guard, as a pure function so it
+ * can be unit/mutation-tested without spawning `ps`. Given a process's command
+ * line, decide whether it's a maximal *proxy* we're allowed to SIGKILL.
+ *
+ * Matches the bare `maximal` binary (CLI: `/…/maximal start …`; the Tauri
+ * sidecar: `/…/Maximal.app/Contents/MacOS/maximal start …`) but deliberately
+ * NOT `maximal-shell` (the menu-bar app — killing it would be wrong) and not
+ * unrelated commands like `maximalist-editor`. A false positive here means we
+ * SIGKILL the wrong process, so the boundary cases are covered by tests.
+ */
+export function looksLikeMaximalCommand(command: string): boolean {
+  const cmd = command.trim().toLowerCase()
+  return /(?:^|\/)maximal(?:\s|$)/.test(cmd) || cmd.includes("maximal start")
+}
+
 /** True if `pid`'s command line looks like a maximal proxy — the guard that
  *  keeps us from ever signalling an unrelated service that happens to hold
  *  the port. Reads the process command via `ps`; absence/failure → false. */
@@ -81,11 +97,7 @@ function isMaximalProcess(pid: number): boolean {
       timeout: 1000,
     })
     if (r.status !== 0) return false
-    const cmd = r.stdout.trim().toLowerCase()
-    // The proxy runs as `.../maximal start ...` (CLI) or the Tauri sidecar
-    // `.../maximal-shell`. Match the bare `maximal` binary, not the shell —
-    // we only want to reap a proxy holding the port, never the menu-bar app.
-    return /(?:^|\/)maximal(?:\s|$)/.test(cmd) || cmd.includes("maximal start")
+    return looksLikeMaximalCommand(r.stdout)
   } catch {
     return false
   }

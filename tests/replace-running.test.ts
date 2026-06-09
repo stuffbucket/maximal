@@ -1,12 +1,45 @@
 import { describe, test, expect, mock } from "bun:test"
 
-import { evictRunning } from "../src/lib/replace-running"
+import {
+  evictRunning,
+  looksLikeMaximalCommand,
+} from "../src/lib/replace-running"
 
 /**
  * Tests for the --replace eviction flow. Everything is driven through
  * the injectable seams on evictRunning() so we never bind real sockets
  * or touch the real filesystem.
  */
+
+describe("looksLikeMaximalCommand (the kill-no-stranger guard)", () => {
+  test.each([
+    ["/Users/brian/.local/bin/maximal start --port 4141", true],
+    [
+      "/Applications/Maximal.app/Contents/MacOS/maximal start --replace --port 4141",
+      true,
+    ],
+    ["/opt/homebrew/bin/maximal", true],
+    ["maximal start", true],
+    ["MAXIMAL START", true], // case-insensitive
+    ["maximal", true], // bare binary name, no args — matches via ^…$
+    ["  maximal  ", true], // bare name + whitespace — needs both trim AND ^…$
+  ])("treats %p as a maximal proxy", (cmd, expected) => {
+    expect(looksLikeMaximalCommand(cmd)).toBe(expected)
+  })
+
+  test.each([
+    // The menu-bar app — killing it would be wrong.
+    ["/Applications/Maximal.app/Contents/MacOS/maximal-shell", false],
+    // Unrelated processes that merely contain the substring.
+    ["/usr/bin/maximalist-editor", false],
+    ["node /some/maximalism/server.js", false],
+    ["python3 -m maximalize", false],
+    ["", false],
+    ["   ", false],
+  ])("refuses to claim %p", (cmd, expected) => {
+    expect(looksLikeMaximalCommand(cmd)).toBe(expected)
+  })
+})
 
 function urlString(input: string | URL | Request): string {
   if (typeof input === "string") return input
