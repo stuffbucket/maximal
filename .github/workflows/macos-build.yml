@@ -1,0 +1,64 @@
+# macOS signed build dispatcher (drop-in for any public stuffbucket repo)
+#
+# WHAT THIS DOES
+#   This workflow does NOT build anything itself. On a published release it
+#   triggers the build.yml workflow in the PRIVATE builder repo
+#   (stuffbucket/macos-builder), which owns the only self-hosted macOS runner
+#   and all Apple signing secrets. The builder checks THIS repo out at the
+#   released tag (using an app-repoman token, not a PAT), runs this repo's
+#   .macos-builder/build.sh, signs + notarizes, and uploads the signed .dmg
+#   (and .dmg.sha256) back onto THIS release.
+#
+#   So: publish a GitHub release here, and a few minutes later the signed dmg
+#   appears as an asset on that same release, built on the private Mac runner.
+#
+# REQUIREMENTS (one-time, per client repo)
+#   - app-repoman installed on THIS repo with Contents: read+write (lets the
+#     builder check out + upload here without any PAT on this repo).
+#   - Secret  MACOS_BUILDER_PAT  on this repo: a fine-grained PAT scoped to
+#     ONLY stuffbucket/macos-builder with Actions: write — its sole power is to
+#     start the build below. It cannot read this repo's or any other secret.
+#   - An executable build script at  .macos-builder/build.sh  (the builder runs
+#     it on the Mac; it writes *.dmg + *.dmg.sha256 to $OUTPUT_DIR).
+#
+# RE-RUNS
+#   Use the "Run workflow" button (workflow_dispatch) and pass an existing tag
+#   to re-trigger a build for a release that already exists.
+
+name: macOS signed build
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to (re)build, e.g. v1.2.3"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger build on stuffbucket/macos-builder
+        env:
+          GH_TOKEN: ${{ secrets.MACOS_BUILDER_PAT }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TAG}" ]; then
+            echo "::error::No tag resolved from release event or workflow_dispatch input." >&2
+            exit 1
+          fi
+          echo "Triggering macOS build for ${REPO} at ${TAG}"
+          gh workflow run build.yml \
+            --repo stuffbucket/macos-builder \
+            --ref main \
+            -f "repo=${REPO}" \
+            -f "ref=${TAG}"
+          echo "Triggered. The signed dmg will appear on the ${TAG} release shortly."
