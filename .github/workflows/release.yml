@@ -492,7 +492,15 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          DMG="maximal-${TAG}-darwin-arm64.dmg"
+          # The builder names the dmg "<volname>.dmg" (lib/package-macos.sh
+          # default, no client override), and our .macos-builder/config pins
+          # volname=Maximal — so the asset that lands on the draft is
+          # "Maximal.dmg" (+ .sha256), NOT a versioned name. The release tag
+          # carries the version (the download URL is .../<tag>/Maximal.dmg).
+          # If you ever change volname in .macos-builder/config, change this to
+          # match or the gate will poll forever and the release will hang as a
+          # draft.
+          DMG="Maximal.dmg"
           present() {
             gh release view "$TAG" --repo "$REPO" --json assets \
               --jq '.assets[].name' 2>/dev/null | grep -Fxq "$DMG"
