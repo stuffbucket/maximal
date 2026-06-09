@@ -492,39 +492,60 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          # The builder names the dmg "<volname>.dmg" (lib/package-macos.sh
-          # default, no client override), and our .macos-builder/config pins
-          # volname=Maximal — so the asset that lands on the draft is
-          # "Maximal.dmg" (+ .sha256), NOT a versioned name. The release tag
-          # carries the version (the download URL is .../<tag>/Maximal.dmg).
-          # If you ever change volname in .macos-builder/config, change this to
-          # match or the gate will poll forever and the release will hang as a
-          # draft.
-          DMG="Maximal.dmg"
-          present() {
+          # The private builder names the dmg "<volname>.dmg" (lib/package-macos.sh
+          # default; build.yml exposes NO client knob for the filename), and our
+          # .macos-builder/config pins volname=Maximal — so what the builder
+          # uploads to the draft is "Maximal.dmg" (+ .sha256). That does NOT match
+          # the versioned convention every other installer in this release uses
+          # (maximal-<tag>-<arch>.<ext>, all named here in release.yml from $TAG).
+          # volname can't carry the version (it's static config and also the
+          # Finder mount name), so we rename the builder's output to the
+          # conforming name on the still-mutable DRAFT — bringing the dmg under
+          # the same naming roof as tar.gz/msi/zip.
+          SRC="Maximal.dmg"                                # what the builder uploads
+          DST="maximal-${TAG}-darwin-arm64.dmg"            # conforming name we ship
+          has() {
             gh release view "$TAG" --repo "$REPO" --json assets \
-              --jq '.assets[].name' 2>/dev/null | grep -Fxq "$DMG"
+              --jq '.assets[].name' 2>/dev/null | grep -Fxq "$1"
           }
-          # Idempotent: a re-run after the .dmg already landed is a no-op (no
-          # second 15-minute private build).
-          if present; then
-            echo "$DMG already attached to the draft — skipping rebuild."
+          # Idempotent: a re-run after we already renamed is a no-op (no second
+          # ~15-minute private build).
+          if has "$DST"; then
+            echo "$DST already on the draft — nothing to do."
             exit 0
           fi
-          echo "Dispatching the private macOS builder for ${REPO} at ${TAG}…"
-          GH_TOKEN="$BUILDER_PAT" gh workflow run build.yml \
-            --repo stuffbucket/macos-builder --ref main \
-            -f "repo=${REPO}" -f "ref=${TAG}"
-          echo "Polling the draft for ${DMG} (sign + notarize takes a few min)…"
-          for i in $(seq 1 40); do   # ~30 min cap (45s × 40)
-            sleep 45
-            if present; then
-              echo "${DMG} present after ~$((i * 45))s."
-              exit 0
+          if ! has "$SRC"; then
+            echo "Dispatching the private macOS builder for ${REPO} at ${TAG}…"
+            GH_TOKEN="$BUILDER_PAT" gh workflow run build.yml \
+              --repo stuffbucket/macos-builder --ref main \
+              -f "repo=${REPO}" -f "ref=${TAG}"
+            echo "Polling the draft for ${SRC} (sign + notarize takes a few min)…"
+            ok=0
+            for i in $(seq 1 40); do   # ~30 min cap (45s × 40)
+              sleep 45
+              if has "$SRC" || has "$DST"; then
+                ok=1; echo "${SRC} present after ~$((i * 45))s."; break
+              fi
+            done
+            if [ "$ok" -ne 1 ]; then
+              echo "::error::Timed out waiting for ${SRC} on the draft release. See the stuffbucket/macos-builder run; the release stays a draft (not published without a macOS build)." >&2
+              exit 1
             fi
-          done
-          echo "::error::Timed out waiting for ${DMG} on the draft release. See the stuffbucket/macos-builder run; the release stays a draft (not published without a macOS build)." >&2
-          exit 1
+          fi
+          # Rename SRC -> DST on the draft: pull the builder's dmg, re-upload it
+          # under the conforming name with a fresh checksum (whose body must name
+          # DST, like every other *.sha256 in the release), then drop the
+          # builder-named originals so only the conforming asset ships. Deleting
+          # is safe — the release is still a DRAFT (mutable); publish (which
+          # gates on this job) seals it immutable afterward.
+          tmp="$(mktemp -d)"
+          gh release download "$TAG" --repo "$REPO" --pattern "$SRC" --dir "$tmp"
+          mv "$tmp/$SRC" "$tmp/$DST"
+          ( cd "$tmp" && shasum -a 256 "$DST" > "$DST.sha256" )
+          gh release upload "$TAG" --repo "$REPO" "$tmp/$DST" "$tmp/$DST.sha256" --clobber
+          gh release delete-asset "$TAG" "$SRC" --repo "$REPO" --yes 2>/dev/null || true
+          gh release delete-asset "$TAG" "$SRC.sha256" --repo "$REPO" --yes 2>/dev/null || true
+          echo "Shipped ${DST} (+ .sha256); removed builder-named ${SRC}."
 
   # Windows PowerShell installer — install.ps1 shipped verbatim + sha256.
   windows-installer:
