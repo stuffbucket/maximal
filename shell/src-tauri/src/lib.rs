@@ -552,8 +552,8 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
-    app.run(|app_handle, event| {
-        if let RunEvent::ExitRequested { code, api, .. } = event {
+    app.run(|app_handle, event| match event {
+        RunEvent::ExitRequested { code, api, .. } => {
             // Tauri exits the process when the last window closes. This is
             // a menu-bar app: the tray — not any window — is the persistent
             // surface, and the splash is frequently the ONLY window open
@@ -575,6 +575,25 @@ pub fn run() {
             // Sole sidecar-kill site for a real shutdown.
             kill_sidecar(app_handle);
         }
+        // macOS delivers Reopen when the app is re-activated — clicking its
+        // notification banner, its Dock icon, etc. Desktop notifications
+        // can't carry a routable button (the plugin's show() is
+        // fire-and-forget), so this is how the sign-in nudge's "click here"
+        // lands somewhere: if we're up but not signed in and nothing's on
+        // screen, bring up Settings → account.
+        #[cfg(target_os = "macos")]
+        RunEvent::Reopen {
+            has_visible_windows,
+            ..
+        } => {
+            if !has_visible_windows
+                && app_handle.state::<AppStatus>().get()
+                    == SidecarState::RunningUnauthenticated
+            {
+                open_settings_window(app_handle, Some("account"));
+            }
+        }
+        _ => {}
     });
 }
 
@@ -1077,28 +1096,40 @@ fn apply_setup_status(app: &AppHandle, status: &SetupStatusResponse) {
 /// shell process — if the user explicitly signs out or closes the
 /// Settings window before signing in, we don't keep re-opening it.
 fn apply_state(app: &AppHandle, next: SidecarState) {
-    let changed = app.state::<AppStatus>().set(next).is_some();
-    if !changed {
-        return;
-    }
+    let Some(prev) = app.state::<AppStatus>().set(next) else {
+        return; // unchanged
+    };
     if let Err(err) = refresh_tray(app, next) {
         eprintln!("[shell] tray refresh failed: {err}");
     }
-    // First time we're actually up: tell the user we're live in the menu
-    // bar. Guarded so Unauthenticated ⇄ Authenticated flips don't
-    // re-announce. The splash is independent of this — it dismisses on
-    // its own 3s timeout or when any window opens (see dismiss_splash).
-    if matches!(
+    // First time we're up this session, announce it in the menu bar — but
+    // tailor the banner: an authenticated start gets "we're running", an
+    // unauthenticated start gets the sign-in nudge below instead, so we never
+    // stack two banners. Claiming StartupAnnounced here (for either Running
+    // state) also means a later Unauthenticated→Authenticated flip won't
+    // re-announce "running".
+    let first_up = matches!(
         next,
         SidecarState::RunningAuthenticated | SidecarState::RunningUnauthenticated
-    ) && app.state::<StartupAnnounced>().claim()
-    {
+    ) && app.state::<StartupAnnounced>().claim();
+
+    if next == SidecarState::RunningUnauthenticated {
+        // Fires on first launch AND on a later drop to unauthenticated
+        // (sign-out / token expiry). apply_state only runs on state CHANGES,
+        // so this is once per entry into the unauthenticated state, not
+        // repeatedly while we sit in it.
+        fire_sign_in_notification(app);
+        // Genuine cold start only (Starting→Unauthenticated): bring Settings
+        // up so a brand-new user lands right on sign-in without hunting. A
+        // mid-session drop (Authenticated→Unauthenticated, e.g. token expiry)
+        // gets the notification only — don't yank a window open over whatever
+        // they're doing; the notification click / tray brings it up on demand.
+        if prev == SidecarState::Starting && app.state::<SetupPromptShown>().claim()
+        {
+            open_settings_window(app, Some("account"));
+        }
+    } else if first_up {
         fire_startup_notification(app);
-    }
-    if next == SidecarState::RunningUnauthenticated
-        && app.state::<SetupPromptShown>().claim()
-    {
-        open_settings_window(app, Some("account"));
     }
 
     // Failure used to be silent: the splash auto-dismissed on a blind timer
@@ -1256,6 +1287,29 @@ fn fire_startup_notification(app: &AppHandle) {
         .show()
     {
         eprintln!("[shell] startup notification failed: {err}");
+    }
+}
+
+/// Nudge the user to sign in when the proxy is up but has no GitHub account.
+/// Fires on *entry* into the unauthenticated state — first launch, or a
+/// mid-session sign-out / token expiry (which otherwise only nudged the tray
+/// icon to ATTENTION, easy to miss). Clicking the notification activates the
+/// app; `RunEvent::Reopen` (macOS) then brings up Settings → account. The
+/// menu-bar "Sign in to GitHub…" item is the always-available fallback.
+fn fire_sign_in_notification(app: &AppHandle) {
+    use tauri_plugin_notification::NotificationExt;
+    if let Err(err) = app
+        .notification()
+        .builder()
+        .title("Sign in to GitHub")
+        .body(
+            "Maximal needs your GitHub Copilot account before it can serve \
+             requests. Click here — or the menu-bar icon — to open Settings \
+             and sign in.",
+        )
+        .show()
+    {
+        eprintln!("[shell] sign-in notification failed: {err}");
     }
 }
 
