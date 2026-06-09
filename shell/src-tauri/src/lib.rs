@@ -65,6 +65,10 @@ use tauri_plugin_shell::ShellExt;
 // /_internal/shutdown — see src/lib/replace-running.ts).
 const SIDECAR_PORT: u16 = 4141;
 
+/// Prefix the sidecar prints (stdout) for structured boot-status lines we
+/// relay to the splash. MUST match `BOOT_STATUS_MARKER` in src/start.ts.
+const BOOT_STATUS_MARKER: &str = "@@MAXIMAL_STATUS@@";
+
 /// How often `subscribe_token_usage` GETs `/token-usage` from the
 /// sidecar. Each iteration also probes the `Channel<TokenUsageEvent>`
 /// — when the JS side drops the channel, the next `send` returns Err
@@ -214,6 +218,26 @@ enum RejectionTransition {
     Cleared,
     /// Some → Some(different): tray stays in ATTENTION, no re-notify.
     Changed,
+}
+
+/// Holds the most recent error-looking line the sidecar printed to stderr,
+/// so a Starting→Failed transition can tell the user *why* it failed (on the
+/// splash and in the OS notification) instead of a generic "couldn't start".
+/// Cleared when a retry begins so a stale reason can't haunt a fresh attempt.
+struct LastSidecarError(Mutex<Option<String>>);
+
+impl LastSidecarError {
+    fn new() -> Self {
+        Self(Mutex::new(None))
+    }
+
+    fn set(&self, reason: Option<String>) {
+        *self.0.lock().expect("sidecar-error mutex poisoned") = reason;
+    }
+
+    fn get(&self) -> Option<String> {
+        self.0.lock().expect("sidecar-error mutex poisoned").clone()
+    }
 }
 
 /// Tracks the current SidecarState behind a Mutex so the polling task
@@ -470,6 +494,7 @@ pub fn run() {
         .manage(StartupAnnounced::new())
         .manage(SplashDismissed::new())
         .manage(LastRejection::new())
+        .manage(LastSidecarError::new())
         .invoke_handler(tauri::generate_handler![
             open_settings_at,
             open_dashboard,
@@ -663,10 +688,32 @@ fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
         while let Some(event) = rx.recv().await {
             match event {
                 CommandEvent::Stdout(line) => {
-                    println!("[maximal] {}", String::from_utf8_lossy(&line));
+                    let text = String::from_utf8_lossy(&line);
+                    // Structured boot-status lines (emitBootStatus in
+                    // src/start.ts) drive the splash's live status. Relay the
+                    // message and don't echo the raw marker to our own stdout.
+                    for raw in text.lines() {
+                        if let Some(msg) = raw.trim().strip_prefix(BOOT_STATUS_MARKER)
+                        {
+                            let _ = handle.emit_to(
+                                "splash",
+                                "splash:status",
+                                msg.trim().to_string(),
+                            );
+                        } else if !raw.is_empty() {
+                            println!("[maximal] {raw}");
+                        }
+                    }
                 }
                 CommandEvent::Stderr(line) => {
-                    eprintln!("[maximal] {}", String::from_utf8_lossy(&line));
+                    let text = String::from_utf8_lossy(&line);
+                    eprintln!("[maximal] {text}");
+                    // Remember the latest error-looking line as the failure
+                    // reason for the splash + notification. Best-effort heuristic
+                    // over consola's output; falls back to a generic message.
+                    if let Some(reason) = extract_error_reason(&text) {
+                        handle.state::<LastSidecarError>().set(Some(reason));
+                    }
                 }
                 CommandEvent::Terminated(payload) => {
                     eprintln!("[maximal] sidecar exited: {:?}", payload);
@@ -740,6 +787,35 @@ fn reconcile_claude_code_revert(app: &AppHandle) {
             }
         }
     });
+}
+
+/// Pull a human-readable failure reason out of a sidecar stderr chunk, or
+/// None if nothing in it looks like an error. consola's fancy reporter prints
+/// errors as ` ERROR  <message>` (and a bracketed `[error] <message>` in
+/// basic mode); we take the text after that tag, first line only, trimmed and
+/// length-capped so a stack trace can't blow up the splash/notification.
+fn extract_error_reason(chunk: &str) -> Option<String> {
+    for raw in chunk.lines() {
+        let line = raw.trim();
+        if line.is_empty() {
+            continue;
+        }
+        // Find the error tag in either consola style; take what follows.
+        let after = line
+            .find("ERROR")
+            .map(|i| &line[i + "ERROR".len()..])
+            .or_else(|| {
+                line.find("[error]").map(|i| &line[i + "[error]".len()..])
+            });
+        if let Some(rest) = after {
+            let msg = rest.trim_start_matches([' ', ':', ']']).trim();
+            if !msg.is_empty() {
+                let capped: String = msg.chars().take(180).collect();
+                return Some(capped);
+            }
+        }
+    }
+    None
 }
 
 /// Graceful sidecar shutdown.
@@ -1025,31 +1101,45 @@ fn apply_state(app: &AppHandle, next: SidecarState) {
         open_settings_window(app, Some("account"));
     }
 
-    // Failure is otherwise silent: the splash auto-dismisses on its 3s timer
-    // regardless of outcome, so on a failed start the user is left with a
-    // vanished splash and only a greyed tray icon — no idea what happened or
-    // what to do. Fire an OS notification that names the failure and points
-    // at the tray's recovery actions (Retry startup / Show logs). The
-    // `changed` guard above makes this one-shot per Failed transition.
+    // Failure used to be silent: the splash auto-dismissed on a blind timer
+    // regardless of outcome, so a failed start left the user with a vanished
+    // splash and a greyed tray icon — no idea what happened or what to do.
+    // Now we surface the captured reason on the splash (held open by its
+    // state-aware dismiss loop) AND in an OS notification, both pointing at
+    // the tray's recovery actions. The `changed` guard makes this one-shot.
     if next == SidecarState::Failed {
-        fire_failed_notification(app);
+        let reason = app.state::<LastSidecarError>().get();
+        let _ = app.emit_to(
+            "splash",
+            "splash:error",
+            reason
+                .clone()
+                .unwrap_or_else(|| "The proxy could not start.".to_string()),
+        );
+        fire_failed_notification(app, reason.as_deref());
     }
 }
 
-/// One-shot notification when the sidecar fails to start. Mirrors the
-/// rejection/startup notifications' best-effort caveats: if the user denied
-/// notification permission it silently no-ops, but the tray icon + menu
-/// ("Retry startup", "Show logs…") are always there as the durable surface.
-fn fire_failed_notification(app: &AppHandle) {
+/// One-shot notification when the sidecar fails to start. Includes the
+/// captured failure reason when we have one. Mirrors the rejection/startup
+/// notifications' best-effort caveats: if the user denied notification
+/// permission it silently no-ops, but the tray icon + menu ("Retry startup",
+/// "Show logs…") are always there as the durable surface.
+fn fire_failed_notification(app: &AppHandle, reason: Option<&str>) {
     use tauri_plugin_notification::NotificationExt;
+    let body = match reason {
+        Some(r) if !r.is_empty() => format!(
+            "{r} — click the menu-bar icon to retry startup or view the logs."
+        ),
+        _ => "The background proxy failed to start. Click the menu-bar icon \
+              to retry startup or view the logs."
+            .to_string(),
+    };
     if let Err(err) = app
         .notification()
         .builder()
         .title("Maximal couldn't start")
-        .body(
-            "The background proxy failed to start. Click the menu-bar icon \
-             to Retry startup or view the logs.",
-        )
+        .body(body)
         .show()
     {
         eprintln!("[shell] failed-start notification error: {err}");
@@ -1085,15 +1175,47 @@ fn create_splash(app: &AppHandle) {
     .build();
     match result {
         Ok(_) => {
-            // Auto-dismiss after 3s on screen. The menu-bar icon is
-            // already installed (install_tray runs before this), so the
-            // user has their affordance — the splash just clears itself.
-            // dismiss_splash is a one-shot, so this is a no-op if a window
-            // opening dismissed it first.
+            // State-aware dismissal — the splash tracks the actual startup
+            // instead of a blind timer, so live status stays visible on a
+            // slow boot and a failure isn't cleared before it's read:
+            //   - Running  → brief brand-minimum, then fade.
+            //   - Failed   → hold so the user reads the reason (apply_state
+            //                puts it on the splash), then fade after a grace
+            //                period so an always-on-top window never strands;
+            //                the notification + tray Retry/Logs persist.
+            //   - Starting → keep waiting, up to a hard cap.
+            // dismiss_splash is a one-shot, so racing the window-open path is
+            // harmless.
             let handle = app.clone();
             tauri::async_runtime::spawn(async move {
-                tokio::time::sleep(Duration::from_secs(3)).await;
-                dismiss_splash(&handle);
+                let start = std::time::Instant::now();
+                let min_display = Duration::from_millis(1600);
+                let hard_cap = Duration::from_secs(35);
+                loop {
+                    tokio::time::sleep(Duration::from_millis(300)).await;
+                    match handle.state::<AppStatus>().get() {
+                        SidecarState::RunningAuthenticated
+                        | SidecarState::RunningUnauthenticated => {
+                            let elapsed = start.elapsed();
+                            if elapsed < min_display {
+                                tokio::time::sleep(min_display - elapsed).await;
+                            }
+                            dismiss_splash(&handle);
+                            break;
+                        }
+                        SidecarState::Failed | SidecarState::Stopped => {
+                            tokio::time::sleep(Duration::from_secs(12)).await;
+                            dismiss_splash(&handle);
+                            break;
+                        }
+                        SidecarState::Starting => {
+                            if start.elapsed() >= hard_cap {
+                                dismiss_splash(&handle);
+                                break;
+                            }
+                        }
+                    }
+                }
             });
         }
         Err(err) => eprintln!("[shell] splash window failed: {err}"),
@@ -1417,12 +1539,19 @@ fn retry_startup(app: &AppHandle) {
     }
     eprintln!("[shell] retry startup requested");
 
+    // Clear the previous failure reason so a stale message can't haunt this
+    // attempt (it would otherwise reappear on the splash/notification if the
+    // retry also fails before printing its own error). Dismiss any lingering
+    // error splash — retry is tray-driven, so the tray's Starting state is the
+    // affordance now; we don't re-raise an always-on-top splash.
+    app.state::<LastSidecarError>().set(None);
+    dismiss_splash(app);
+
     // Reap any lingering child (a hung-but-alive sidecar that timed out, or
     // one mid-crash) so the respawn binds cleanly. No-op if already gone.
     kill_sidecar(app);
 
     apply_state(app, SidecarState::Starting);
-    create_splash(app);
 
     if let Err(err) = spawn_sidecar(app) {
         eprintln!("[shell] retry: sidecar spawn failed: {err}");
@@ -1727,3 +1856,47 @@ fn reveal_logs_dir(app: AppHandle) {
     do_reveal_logs_dir(&app);
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::extract_error_reason;
+
+    #[test]
+    fn extracts_consola_fancy_error() {
+        // consola's fancy reporter (the form the sidecar prints under Tauri).
+        let chunk = " ERROR  Could not free :4141 (last known pid 55355). \
+                     Stop the holding process manually and retry.";
+        let reason = extract_error_reason(chunk).expect("should extract");
+        assert!(reason.starts_with("Could not free :4141"));
+        assert!(!reason.contains("ERROR"));
+    }
+
+    #[test]
+    fn extracts_consola_basic_error() {
+        let chunk = "[error] Port 4141 is already in use by another process.";
+        let reason = extract_error_reason(chunk).expect("should extract");
+        assert_eq!(reason, "Port 4141 is already in use by another process.");
+    }
+
+    #[test]
+    fn picks_the_error_line_out_of_a_multiline_chunk() {
+        let chunk = "ℹ Starting maximal…\n\
+                     ℹ Source revision: abc1234\n\
+                     ERROR: bootstrap failed\n";
+        let reason = extract_error_reason(chunk).expect("should extract");
+        assert_eq!(reason, "bootstrap failed");
+    }
+
+    #[test]
+    fn ignores_non_error_output() {
+        assert_eq!(extract_error_reason("ℹ Web-tools executor: Ollama"), None);
+        assert_eq!(extract_error_reason(""), None);
+    }
+
+    #[test]
+    fn caps_runaway_length() {
+        let long = format!("ERROR {}", "x".repeat(500));
+        let reason = extract_error_reason(&long).expect("should extract");
+        assert!(reason.chars().count() <= 180);
+    }
+}
