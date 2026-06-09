@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.21](https://github.com/stuffbucket/maximal/compare/v0.4.20...v0.4.21) (2026-06-09)
+
+
+### Bug Fixes
+
+* **release:** stamp + verify the macOS bundle version (was shipping stale) ([#92](https://github.com/stuffbucket/maximal/issues/92)) ([2b36018](https://github.com/stuffbucket/maximal/commit/2b36018eae6c43f7e07eec6ed8fea68374f02bb2))
+
 ## [0.4.20](https://github.com/stuffbucket/maximal/compare/v0.4.19...v0.4.20) (2026-06-09)
 
 
