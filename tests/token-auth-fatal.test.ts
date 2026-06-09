@@ -82,6 +82,7 @@ afterEach(() => {
   stopCopilotRefreshLoop()
   state.githubToken = undefined
   state.copilotToken = undefined
+  state.copilotApiUrl = undefined
 })
 
 afterAll(() => {
@@ -207,5 +208,64 @@ describe("runCopilotRefreshLoop — non-fatal during refresh", () => {
 
     expect(harness.markCalls.length).toBe(0)
     expect(harness.getCopilotTokenCalls).toBeGreaterThanOrEqual(2)
+  })
+})
+
+// --- G. completion host resolves from the token's endpoints.api ------------
+// Regression: the bearer minted by /copilot_internal/v2/token is only valid
+// against its own endpoints.api; POSTing it to another GitHub Copilot host is
+// rejected with 421 Misdirected Request. The host must be (re)applied on every
+// mint AND refresh so a server-side account migration self-heals.
+
+const INDIVIDUAL = "https://api.individual.githubcopilot.com"
+const ENTERPRISE = "https://api.enterprise.githubcopilot.com"
+
+const okWithApi = (
+  token: string,
+  refresh_in: number,
+  api: string,
+): TokenResult & { endpoints: { api: string } } => ({
+  ...ok(token, refresh_in),
+  endpoints: { api },
+})
+
+describe("setupCopilotToken — copilotApiUrl endpoint resolution", () => {
+  test("initial mint applies endpoints.api over a stale cached host", async () => {
+    state.copilotApiUrl = INDIVIDUAL // stale value from a prior session
+    harness.getCopilotTokenImpl = () =>
+      Promise.resolve(okWithApi("copilot_xyz", 1800, ENTERPRISE))
+
+    await setupCopilotToken()
+
+    expect(state.copilotApiUrl).toBe(ENTERPRISE)
+  })
+
+  test("a mint without endpoints leaves the existing host untouched", async () => {
+    state.copilotApiUrl = ENTERPRISE
+    harness.getCopilotTokenImpl = () => Promise.resolve(ok("copilot_xyz", 1800))
+
+    await setupCopilotToken()
+
+    expect(state.copilotApiUrl).toBe(ENTERPRISE)
+  })
+
+  test("refresh self-heals the host when the account is migrated mid-session", async () => {
+    state.copilotApiUrl = undefined
+    harness.getCopilotTokenQueue = [
+      () => Promise.resolve(okWithApi("copilot_init", 1, INDIVIDUAL)),
+      () => Promise.resolve(okWithApi("copilot_refreshed", 1800, ENTERPRISE)),
+    ]
+
+    await setupCopilotToken()
+    // Cast: TS narrows the field to `undefined` after the literal reset above;
+    // the refresh loop mutates it through state that TS can't see into.
+    expect(state.copilotApiUrl as string | undefined).toBe(INDIVIDUAL)
+
+    // refresh_in=1 fires the loop within ~1s (see test E timing notes).
+    await new Promise((r) => setTimeout(r, 1500))
+    stopCopilotRefreshLoop()
+
+    expect(state.copilotApiUrl as string | undefined).toBe(ENTERPRISE)
+    expect(state.copilotToken).toBe("copilot_refreshed")
   })
 })

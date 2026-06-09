@@ -64,4 +64,15 @@ interface GetCopilotTokenResponse {
   expires_at: number
   refresh_in: number
   token: string
+  // The authoritative completion host for THIS token. GitHub can migrate an
+  // account between hosts (e.g. individual → enterprise on a plan/billing
+  // change); the bearer minted here is only valid against its own
+  // `endpoints.api`, and POSTing it elsewhere is rejected with 421 Misdirected
+  // Request. We re-read this on every mint/refresh so the host self-heals.
+  endpoints?: {
+    api: string
+    "origin-tracker"?: string
+    proxy?: string
+    telemetry?: string
+  }
 }
