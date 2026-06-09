@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.22](https://github.com/stuffbucket/maximal/compare/v0.4.21...v0.4.22) (2026-06-09)
+
+
+### Bug Fixes
+
+* **release:** onboard to the refreshed macos-builder (producer contract) ([#94](https://github.com/stuffbucket/maximal/issues/94)) ([8707d2a](https://github.com/stuffbucket/maximal/commit/8707d2a2cfe3663f50a503e49b3b0acff4bac3c7))
+
 ## [0.4.21](https://github.com/stuffbucket/maximal/compare/v0.4.20...v0.4.21) (2026-06-09)
 
 
