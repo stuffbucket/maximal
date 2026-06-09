@@ -133,6 +133,18 @@ async function probePort(port: number): Promise<"free" | "maximal" | "other"> {
   }
 }
 
+/** Structured boot-phase line the Tauri shell relays to its splash window as
+ *  live status (so a slow or failed start isn't a blank "Starting…" or a
+ *  silently-cleared splash). No-op for plain CLI users — gated on the
+ *  parent-pid env the shell sets when it spawns the sidecar — so their
+ *  terminal never sees the marker. */
+export const BOOT_STATUS_MARKER = "@@MAXIMAL_STATUS@@"
+
+export function emitBootStatus(message: string): void {
+  if (!process.env.MAXIMAL_SIDECAR_PARENT_PID) return
+  process.stdout.write(`${BOOT_STATUS_MARKER} ${message}\n`)
+}
+
 export async function runServer(options: RunServerOptions): Promise<void> {
   // Work around unjs/consola#357 until a release includes PR #359.
   consola.options.throttle = 0
@@ -146,6 +158,7 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   // If --replace was passed, try to take over the port from a
   // running instance before the regular probe.
   if (options.replace) {
+    emitBootStatus(`Taking over port ${options.port}…`)
     await maybeEvictRunning(options.port)
   }
 
@@ -216,6 +229,7 @@ export async function runServer(options: RunServerOptions): Promise<void> {
     }
   }
 
+  emitBootStatus("Starting the server…")
   printReadyBanner(serverUrl)
 
   const { server } = await import("./server")
@@ -432,6 +446,7 @@ async function bootstrapUpstream(
 
   if (state.githubToken) {
     try {
+      emitBootStatus("Connecting to GitHub Copilot…")
       await logUser()
       await setupCopilotToken()
       await cacheModels()
