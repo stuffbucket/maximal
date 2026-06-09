@@ -450,6 +450,36 @@ function renderRemediationLink(url: string | undefined): void {
  * naturally drives the banner away once the user is back to a healthy
  * state.
  */
+/** A human category for an upstream HTTP status — so even when the upstream
+ *  message is generic, the user can tell a "wait and retry" from a "fix your
+ *  billing" from a "this model isn't allowed". */
+function rejectionTitle(status: number): string {
+  if (status === 402) return "Copilot billing or plan issue";
+  if (status === 403) return "Request blocked by Copilot";
+  if (status === 404) return "Copilot couldn’t find that";
+  if (status === 408 || status === 504) return "Copilot request timed out";
+  if (status === 429) return "Copilot usage limit reached";
+  if (status >= 500) return "GitHub Copilot is having trouble";
+  if (status >= 400) return "Copilot rejected the request";
+  return "Copilot returned an error";
+}
+
+/** Actionable next step keyed off the status, used when the upstream message
+ *  itself is missing or the generic fallback. */
+function rejectionExplanation(status: number): string {
+  if (status === 402)
+    return "Check your Copilot plan or billing on GitHub, then try again.";
+  if (status === 403)
+    return "This model or request isn’t allowed on your current plan.";
+  if (status === 408 || status === 504)
+    return "It took too long to respond. Try again in a moment.";
+  if (status === 429)
+    return "You’ve hit a rate or quota limit. Wait a moment and try again.";
+  if (status >= 500)
+    return "GitHub’s side returned an error. This is usually temporary — try again shortly.";
+  return "Try again, or check your Copilot account on GitHub.";
+}
+
 function renderUpstreamRejection(
   rejection: AuthStatus["last_upstream_rejection"],
 ): void {
@@ -459,8 +489,18 @@ function renderUpstreamRejection(
     wrapper.hidden = true;
     return;
   }
+  const status = rejection.status;
+  const titleEl = accountSlot("upstream_rejection_title");
+  if (titleEl)
+    titleEl.textContent = `${rejectionTitle(status)} · HTTP ${status}`;
+
+  // Show the real upstream message when we have one; otherwise the generic
+  // fallback tells the user nothing, so swap in a status-derived next step.
+  const raw = rejection.message.trim();
+  const useful = raw && raw !== "Copilot returned an error.";
   const messageEl = accountSlot("upstream_rejection_message");
-  if (messageEl) messageEl.textContent = rejection.message;
+  if (messageEl)
+    messageEl.textContent = useful ? raw : rejectionExplanation(status);
 
   const linkWrap = accountSlot("upstream_rejection_link_wrap");
   const link = accountSlot("upstream_rejection_link");
