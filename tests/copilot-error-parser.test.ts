@@ -8,6 +8,42 @@ describe("parseCopilotErrorBody", () => {
     expect(result.message).toBe("Copilot returned an error.")
     expect(result.remediationUrl).toBeNull()
   })
+
+  test("extracts the nested error.message (OpenAI/Copilot completion shape)", () => {
+    // This is the real-world shape that was falling through to the generic
+    // "Copilot returned an error." banner.
+    const body = JSON.stringify({
+      error: {
+        message: "You have exceeded your premium request allowance.",
+        code: "quota_exceeded",
+        type: "insufficient_quota",
+      },
+    })
+    const result = parseCopilotErrorBody(body)
+    expect(result.message).toBe(
+      "You have exceeded your premium request allowance.",
+    )
+  })
+
+  test("prefers a top-level message over a nested error.message", () => {
+    const body = JSON.stringify({
+      message: "top-level wins",
+      error: { message: "nested loses" },
+    })
+    expect(parseCopilotErrorBody(body).message).toBe("top-level wins")
+  })
+
+  test("still handles a flat string error", () => {
+    const body = JSON.stringify({ error: "rate limited" })
+    expect(parseCopilotErrorBody(body).message).toBe("rate limited")
+  })
+
+  test("falls back to generic when nested error has no usable message", () => {
+    const body = JSON.stringify({ error: { code: "oops", message: "  " } })
+    expect(parseCopilotErrorBody(body).message).toBe(
+      "Copilot returned an error.",
+    )
+  })
 })
 
 describe("isAuthFatal — 401 always fatal", () => {

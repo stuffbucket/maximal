@@ -555,6 +555,18 @@ a:hover {
   display: none;
 }
 
+.upstream-rejection__title {
+  color: var(--text-strong);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-lg);
+  line-height: var(--leading-lg);
+}
+
+/* When the title is empty (defensive), don't leave a phantom gap. */
+.upstream-rejection__title:empty {
+  display: none;
+}
+
 .upstream-rejection__message {
   color: var(--text-base-color);
   font-size: var(--text-sm);

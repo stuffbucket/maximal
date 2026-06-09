@@ -83,18 +83,39 @@ export function isAuthFatal(
   return markers.some((m) => text.includes(m))
 }
 
+/** A trimmed non-empty string, or null. */
+function nonEmpty(v: unknown): string | null {
+  return typeof v === "string" && v.trim() ? v : null
+}
+
+/** Read `obj[key].message` when `obj[key]` is a nested object. Covers the
+ *  `{ error: { message } }` (OpenAI/Copilot completion) and
+ *  `{ notification: { message } }` shapes. */
+function nestedMessage(
+  obj: Record<string, unknown>,
+  key: string,
+): string | null {
+  const nested = obj[key]
+  if (typeof nested === "object" && nested !== null) {
+    return nonEmpty((nested as Record<string, unknown>).message)
+  }
+  return null
+}
+
 function extractMessage(parsed: unknown): string | null {
   if (typeof parsed !== "object" || parsed === null) return null
   const obj = parsed as Record<string, unknown>
-  if (typeof obj.message === "string") return obj.message
-  const notif = obj.notification
-  if (typeof notif === "object" && notif !== null) {
-    const m = (notif as Record<string, unknown>).message
-    if (typeof m === "string") return m
-  }
-  if (typeof obj.error === "string") return obj.error
-  if (typeof obj.error_description === "string") return obj.error_description
-  return null
+  // Ordered most- to least-specific. The nested `error.message` shape is the
+  // common one on /responses, /chat/completions, and /v1/messages — dropping
+  // it was the main reason the Settings banner fell back to the useless
+  // "Copilot returned an error."
+  return (
+    nonEmpty(obj.message)
+    ?? nestedMessage(obj, "notification")
+    ?? nestedMessage(obj, "error")
+    ?? nonEmpty(obj.error)
+    ?? nonEmpty(obj.error_description)
+  )
 }
 
 function extractRemediationUrl(parsed: unknown): string | null {
