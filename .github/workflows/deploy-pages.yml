@@ -54,6 +54,10 @@ jobs:
           # Unset it (gh variable delete SITE_PIN_VERSION) + redeploy to
           # resume tracking latest. Empty when the variable is absent.
           VITE_SITE_PIN_VERSION: ${{ vars.SITE_PIN_VERSION }}
+          # Authenticate the releases/latest lookup in index.astro so a busy
+          # release day can't exhaust the anonymous 60-req/hr rate limit and
+          # silently deploy a site with no version label / download links.
+          GITHUB_TOKEN: ${{ github.token }}
         run: bun run build
 
       - name: Setup Pages
