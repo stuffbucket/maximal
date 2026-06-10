@@ -160,7 +160,9 @@ function pickFreePort(): number {
   return 41000 + Math.floor(Math.random() * 1000)
 }
 
-function baseOptions(over: Partial<Parameters<typeof runServer>[0]> = {}) {
+function baseOptions(
+  over: Partial<Parameters<typeof runServer>[0]> = {},
+): Parameters<typeof runServer>[0] {
   return {
     port: pickFreePort(),
     verbose: false,

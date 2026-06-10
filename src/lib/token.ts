@@ -10,6 +10,7 @@ import { getGitHubUser } from "~/services/github/get-user"
 import { pollAccessToken } from "~/services/github/poll-access-token"
 
 import { markAuthFatalAndSignOut as defaultMarkAuthFatalAndSignOut } from "./auth-controller"
+import { toCopilotHost } from "./auth-types"
 import { CopilotAuthFatalError, HTTPError } from "./error"
 import {
   inferTokenType,
@@ -61,11 +62,17 @@ let copilotRefreshLoopController: AbortController | null = null
 // Misdirected Request. Re-applying this on every mint AND refresh lets a
 // long-running session self-heal across a migration without a restart.
 const applyCopilotApiUrl = (api: string | undefined) => {
-  if (!api || api === state.copilotApiUrl) {
+  if (!api) return
+  // Validate + brand at the boundary: only a well-formed https origin reaches
+  // the completion-host slot (boundary D1 — see auth-types.ts).
+  const host = toCopilotHost(api)
+  if (!host) {
+    consola.warn(`Ignoring malformed Copilot API host from discovery: ${api}`)
     return
   }
-  consola.debug(`Copilot API host -> ${api}`)
-  state.copilotApiUrl = api
+  if (host === state.copilotApiUrl) return
+  consola.debug(`Copilot API host -> ${host}`)
+  state.copilotApiUrl = host
 }
 
 export const stopCopilotRefreshLoop = () => {
@@ -296,7 +303,7 @@ export async function logUser() {
   consola.info(`Logged in as ${user.login}`)
 
   const copilotUser = await getCopilotUsage()
-  state.copilotApiUrl = copilotUser.endpoints.api
+  applyCopilotApiUrl(copilotUser.endpoints.api)
 }
 
 /**
