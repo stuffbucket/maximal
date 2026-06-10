@@ -4,7 +4,6 @@ import { setTimeout as delay } from "node:timers/promises"
 
 import { PATHS } from "~/lib/paths"
 import { getCopilotToken as defaultGetCopilotToken } from "~/services/github/get-copilot-token"
-import { getCopilotUsage } from "~/services/github/get-copilot-usage"
 import { getDeviceCode } from "~/services/github/get-device-code"
 import { getGitHubUser } from "~/services/github/get-user"
 import { pollAccessToken } from "~/services/github/poll-access-token"
@@ -301,9 +300,13 @@ export async function logUser() {
   const user = await getGitHubUser()
   state.userName = user.login
   consola.info(`Logged in as ${user.login}`)
-
-  const copilotUser = await getCopilotUsage()
-  applyCopilotApiUrl(copilotUser.endpoints.api)
+  // Host discovery is NOT done here. The completion host comes solely from
+  // setupCopilotToken's /copilot_internal/v2/token mint (the authoritative
+  // endpoints.api the bearer is valid against — see applyCopilotApiUrl), which
+  // runs right after this on every boot/sign-in and self-heals on refresh.
+  // logUser previously also fetched /copilot_internal/user just to re-apply a
+  // second, weaker copy of endpoints.api — a redundant round-trip whose value
+  // was immediately overwritten by the mint. logUser now owns identity only.
 }
 
 /**
