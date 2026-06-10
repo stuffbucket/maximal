@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto"
 
 import type { ModelsResponse } from "~/services/copilot/get-models"
 
+import type { AccountType, CopilotHost } from "./auth-types"
+
 import { SingletonCache } from "./cache"
 
 // Module-private metric mirrors of the matching `state.*` fields.
@@ -16,7 +18,7 @@ export interface State {
   userName?: string
   copilotToken?: string
 
-  accountType: string
+  accountType: AccountType
   models?: ModelsResponse
   vsCodeVersion?: string
 
@@ -33,7 +35,7 @@ export interface State {
   lastRequestTimestamp?: number
   verbose: boolean
 
-  copilotApiUrl?: string
+  copilotApiUrl?: CopilotHost
 
   /**
    * Set by the Tauri shell at sidecar spawn (env var MAXIMAL_SHELL_KEY).

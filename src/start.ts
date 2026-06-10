@@ -7,6 +7,7 @@ import { serve } from "srvx"
 import invariant from "tiny-invariant"
 
 import { markAuthFatalAndSignOut } from "./lib/auth-controller"
+import { type AccountType, parseAccountType } from "./lib/auth-types"
 import {
   reconcileClaudeCodeOnBoot,
   reconcileClaudeCodeOnShutdown,
@@ -40,7 +41,7 @@ import { getGitVersion, shortSha, type GitVersion } from "./lib/version"
 interface RunServerOptions {
   port: number
   verbose: boolean
-  accountType: string
+  accountType: AccountType
   manual: boolean
   rateLimit?: number
   rateLimitWait: boolean
@@ -579,7 +580,9 @@ export const start = defineCommand({
     return runServer({
       port: Number.parseInt(args.port, 10),
       verbose: args.verbose,
-      accountType: args["account-type"],
+      // Fail closed on an invalid account type rather than constructing a
+      // bogus host from a typo (boundary D1).
+      accountType: parseAccountType(args["account-type"]),
       manual: args.manual,
       rateLimit,
       rateLimitWait: args.wait,

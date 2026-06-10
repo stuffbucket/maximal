@@ -14,6 +14,8 @@ import {
   test,
 } from "bun:test"
 
+import type { CopilotHost } from "~/lib/auth-types"
+
 import { CopilotAuthFatalError, HTTPError } from "~/lib/error"
 import { state } from "~/lib/state"
 // Bypass Bun's module-mock registry for ~/lib/token. auth-controller.test.ts
@@ -217,8 +219,8 @@ describe("runCopilotRefreshLoop — non-fatal during refresh", () => {
 // rejected with 421 Misdirected Request. The host must be (re)applied on every
 // mint AND refresh so a server-side account migration self-heals.
 
-const INDIVIDUAL = "https://api.individual.githubcopilot.com"
-const ENTERPRISE = "https://api.enterprise.githubcopilot.com"
+const INDIVIDUAL = "https://api.individual.githubcopilot.com" as CopilotHost
+const ENTERPRISE = "https://api.enterprise.githubcopilot.com" as CopilotHost
 
 const okWithApi = (
   token: string,

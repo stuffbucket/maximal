@@ -4,6 +4,7 @@ import { COMPACT_REQUEST, type CompactType } from "~/lib/compact"
 
 import type { State } from "./state"
 
+import { type CopilotHost, hostForAccountType } from "./auth-types"
 import { getCachedOpencodeVersion } from "./opencode"
 import { requestContext } from "./request-context"
 
@@ -153,23 +154,24 @@ const CLAUDE_AGENT_USER_AGENT =
 
 const API_VERSION = "2025-10-01"
 
-export const copilotBaseUrl = (state: State) => {
+export const copilotBaseUrl = (state: State): CopilotHost => {
   const enterpriseDomain = getEnterpriseDomain()
   if (enterpriseDomain) {
-    return `https://copilot-api.${enterpriseDomain}`
+    // Self-hosted GHES domain, already normalized by getEnterpriseDomain().
+    return `https://copilot-api.${enterpriseDomain}` as CopilotHost
   }
 
   if (isOpencodeOauthApp()) {
-    return "https://api.githubcopilot.com"
+    return "https://api.githubcopilot.com" as CopilotHost
   }
 
+  // Authoritative host from token discovery (already branded), preferred over
+  // the account-type default. See applyCopilotApiUrl in token.ts.
   if (state.copilotApiUrl) {
     return state.copilotApiUrl
   }
 
-  return state.accountType === "individual" ?
-      "https://api.githubcopilot.com"
-    : `https://api.${state.accountType}.githubcopilot.com`
+  return hostForAccountType(state.accountType)
 }
 
 export const prepareMessageProxyHeaders = (headers: Record<string, string>) => {
