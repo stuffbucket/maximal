@@ -6,7 +6,11 @@ import consola from "consola"
 import { serve } from "srvx"
 import invariant from "tiny-invariant"
 
-import { markAuthFatalAndSignOut } from "./lib/auth-controller"
+import {
+  markAuthFatalAndSignOut,
+  markSignedIn,
+  markSignedOut,
+} from "./lib/auth-controller"
 import { type AccountType, parseAccountType } from "./lib/auth-types"
 import {
   reconcileClaudeCodeOnBoot,
@@ -454,6 +458,10 @@ async function bootstrapUpstream(
       consola.info(
         `Available models: \n${state.models?.data.map((model) => `- ${model.id}`).join("\n")}`,
       )
+      // Record the signed-in status so getAuthStatus() reports
+      // `authenticated` after a cold boot (the device-flow controller
+      // wasn't involved here). logUser() populated state.userName.
+      markSignedIn(state.userName ?? null)
       return
     } catch (error) {
       // A *fatal* Copilot error (license revoked, TOS not accepted, not
@@ -475,7 +483,11 @@ async function bootstrapUpstream(
         "GitHub token present but Copilot bootstrap failed; serving in unauthenticated mode.",
         error,
       )
+      // Clear the in-memory token but keep the on-disk record for a
+      // next-restart retry, and set the union explicitly (signed-out) so
+      // every bootstrap exit makes its own auth-status statement.
       state.githubToken = undefined
+      markSignedOut()
     }
   }
 

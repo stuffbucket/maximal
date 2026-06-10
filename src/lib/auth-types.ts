@@ -10,9 +10,11 @@
  *     obtain one is through `toCopilotHost`/`hostForAccountType`, so a raw
  *     unvalidated string can't reach the completion-host slot.
  *
- * Forward note: Phase 2 introduces an `AuthState` discriminated union that
- * embeds these types (`plan: AccountType`, `host: CopilotHost`); they are
- * defined here so both phases share one source of truth.
+ * Forward note: `AccountType` already gates the host fallback (see
+ * `hostForAccountType`) and `CopilotHost` brands `state.copilotApiUrl`. A
+ * later phase folds them into the `signed-in` variant of the auth-controller's
+ * `AuthState` union (`plan: AccountType`, `host: CopilotHost`); they live here
+ * so that phase shares this source of truth rather than redefining them.
  */
 import { z } from "zod"
 

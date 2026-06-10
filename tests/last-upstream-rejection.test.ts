@@ -228,7 +228,7 @@ afterAll(() => {
   void mock.module("node:fs/promises", () => realFsPromisesModule)
 })
 
-const { getAuthStatus, signOut, __resetAuthControllerForTests } =
+const { getAuthStatus, signOut, markSignedIn, __resetAuthControllerForTests } =
   await import("~/lib/auth-controller")
 
 describe("getAuthStatus + lastUpstreamRejection", () => {
@@ -249,7 +249,7 @@ describe("getAuthStatus + lastUpstreamRejection", () => {
   })
 
   test("authenticated state surfaces last_upstream_rejection with remediation_url", () => {
-    state.githubToken = "ghu_abc"
+    markSignedIn(null)
     state.userName = "alice"
     setLastUpstreamRejection({
       message: "quota exhausted",
@@ -291,7 +291,7 @@ describe("getAuthStatus + lastUpstreamRejection", () => {
   })
 
   test("omits remediation_url when remediationUrl is null", () => {
-    state.githubToken = "ghu_abc"
+    markSignedIn(null)
     setLastUpstreamRejection({
       message: "no plan",
       remediationUrl: null,
@@ -304,7 +304,7 @@ describe("getAuthStatus + lastUpstreamRejection", () => {
   })
 
   test("omits last_upstream_rejection entirely when state.lastUpstreamRejection is undefined", () => {
-    state.githubToken = "ghu_abc"
+    markSignedIn(null)
     state.lastUpstreamRejection = undefined
 
     const status = getAuthStatus()
@@ -331,7 +331,7 @@ describe("signOut clears the upstream-rejection sidecar", () => {
   })
 
   test("signOut wipes state.lastUpstreamRejection and getAuthStatus no longer reports it", async () => {
-    state.githubToken = "ghu_abc"
+    markSignedIn(null)
     state.lastUpstreamRejection = {
       message: "x",
       remediationUrl: null,

@@ -114,6 +114,7 @@ const {
   startDeviceFlow,
   getAuthStatus,
   signOut,
+  markSignedIn,
   __resetAuthControllerForTests,
   __setAuthControllerDepsForTests,
 } = await import("~/lib/auth-controller")
@@ -198,8 +199,8 @@ afterEach(() => {
 // --- getAuthStatus branches ------------------------------------------------
 
 describe("getAuthStatus", () => {
-  test("returns { state: 'authenticated' } (literal) when a github token is set and no login known", () => {
-    state.githubToken = "ghu_abc"
+  test("returns { state: 'authenticated' } (literal) when signed-in and no login known", () => {
+    markSignedIn(null)
     const status = getAuthStatus()
     expect(status).toEqual({ state: "authenticated" })
     // Literal string check pins the StringLiteral mutant.
@@ -919,8 +920,8 @@ describe("__resetAuthControllerForTests", () => {
     expect(getAuthStatus().account_login).toBe("alice")
 
     __resetAuthControllerForTests()
-    // Re-seed only the token; account_login should not leak across resets.
-    state.githubToken = "ghu_b"
+    // Re-sign-in without a login; account_login should not leak across resets.
+    markSignedIn(null)
     const status = getAuthStatus()
     expect(status.state).toBe("authenticated")
     expect(status.account_login).toBeUndefined()
