@@ -43,6 +43,7 @@ import { getDeviceCode } from "~/services/github/get-device-code"
 import { getGitHubUser } from "~/services/github/get-user"
 import { pollAccessToken as defaultPollAccessToken } from "~/services/github/poll-access-token"
 
+import type { ParsedCopilotError } from "./copilot-error-parser"
 import type { CopilotAuthFatalError } from "./error"
 import type { AuthStatus } from "./settings-types"
 
@@ -111,7 +112,7 @@ type AuthState =
   | { kind: "device-issued"; flow: ActiveFlow }
   | { kind: "polling"; flow: ActiveFlow }
   | { kind: "signed-in"; login: string | null }
-  | { kind: "error"; message: string; remediationUrl: string | null }
+  | ({ kind: "error" } & ParsedCopilotError)
 
 let authState: AuthState = { kind: "signed-out" }
 
@@ -318,6 +319,19 @@ async function runPoller(flow: ActiveFlow): Promise<void> {
  */
 export function markSignedIn(login: string | null): void {
   authState = { kind: "signed-in", login }
+}
+
+/**
+ * Mark the session signed-out WITHOUT touching the operational token state
+ * or the on-disk record (unlike `signOut`). For the cold-boot degrade path:
+ * Copilot bootstrap failed transiently, the in-memory token was cleared, but
+ * the on-disk token is kept for a next-restart retry. Makes that bootstrap
+ * exit set the union explicitly, like the success (`markSignedIn`) and fatal
+ * (`markAuthFatalAndSignOut`) exits do, rather than relying on the union
+ * still sitting at its initial value.
+ */
+export function markSignedOut(): void {
+  authState = { kind: "signed-out" }
 }
 
 export async function signOut(): Promise<void> {

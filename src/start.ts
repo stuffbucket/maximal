@@ -6,7 +6,11 @@ import consola from "consola"
 import { serve } from "srvx"
 import invariant from "tiny-invariant"
 
-import { markAuthFatalAndSignOut, markSignedIn } from "./lib/auth-controller"
+import {
+  markAuthFatalAndSignOut,
+  markSignedIn,
+  markSignedOut,
+} from "./lib/auth-controller"
 import { type AccountType, parseAccountType } from "./lib/auth-types"
 import {
   reconcileClaudeCodeOnBoot,
@@ -479,7 +483,11 @@ async function bootstrapUpstream(
         "GitHub token present but Copilot bootstrap failed; serving in unauthenticated mode.",
         error,
       )
+      // Clear the in-memory token but keep the on-disk record for a
+      // next-restart retry, and set the union explicitly (signed-out) so
+      // every bootstrap exit makes its own auth-status statement.
       state.githubToken = undefined
+      markSignedOut()
     }
   }
 
