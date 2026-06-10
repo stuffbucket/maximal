@@ -54,6 +54,20 @@ export function __resetTokenDepsForTests(): void {
 
 let copilotRefreshLoopController: AbortController | null = null
 
+// The /copilot_internal/v2/token response carries the authoritative completion
+// host for the bearer it mints (`endpoints.api`). GitHub can migrate an account
+// between hosts (individual → enterprise on a plan/billing change); the token is
+// only valid against its own host, and POSTing it elsewhere is rejected with 421
+// Misdirected Request. Re-applying this on every mint AND refresh lets a
+// long-running session self-heal across a migration without a restart.
+const applyCopilotApiUrl = (api: string | undefined) => {
+  if (!api || api === state.copilotApiUrl) {
+    return
+  }
+  consola.debug(`Copilot API host -> ${api}`)
+  state.copilotApiUrl = api
+}
+
 export const stopCopilotRefreshLoop = () => {
   if (!copilotRefreshLoopController) {
     return
@@ -88,6 +102,7 @@ export const setupCopilotToken = async () => {
     const result = await getCopilotToken()
     token = result.token
     refresh_in = result.refresh_in
+    applyCopilotApiUrl(result.endpoints?.api)
   } catch (error) {
     if (error instanceof CopilotAuthFatalError) {
       // First-mint failure (e.g. user lacks Copilot entitlement, must
@@ -160,8 +175,9 @@ const runCopilotRefreshLoop = async (
     consola.debug("Refreshing Copilot token")
 
     try {
-      const { token, refresh_in } = await getCopilotToken()
+      const { token, refresh_in, endpoints } = await getCopilotToken()
       setCopilotToken(token)
+      applyCopilotApiUrl(endpoints?.api)
       refreshAtMs = getRefreshDeadlineMs(refresh_in)
       consola.debug("Copilot token refreshed")
       if (state.showToken) {
