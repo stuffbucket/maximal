@@ -4,7 +4,10 @@ import { setTimeout as delay } from "node:timers/promises"
 
 import { PATHS } from "~/lib/paths"
 import { getCopilotToken as defaultGetCopilotToken } from "~/services/github/get-copilot-token"
-import { getDeviceCode } from "~/services/github/get-device-code"
+import {
+  type DeviceCodeResponse,
+  getDeviceCode,
+} from "~/services/github/get-device-code"
 import { getGitHubUser } from "~/services/github/get-user"
 import { pollAccessToken } from "~/services/github/poll-access-token"
 
@@ -219,6 +222,54 @@ interface SetupGitHubTokenOptions {
   noBrowser?: boolean
 }
 
+/**
+ * Show the user how to complete a device-code flow: copy the code to the
+ * clipboard (best-effort) and open the verification URL (unless noBrowser /
+ * headless). Pure UX side-effects — no token state — so it stays out of the
+ * token-exchange path in setupGitHubToken.
+ */
+function presentDeviceCode(
+  response: DeviceCodeResponse,
+  options?: SetupGitHubTokenOptions,
+): void {
+  // RFC 8628's `verification_uri_complete` is the only reliable prefill
+  // mechanism, but GitHub's device-code endpoint doesn't emit one and their
+  // /login/device page doesn't honor a ?user_code= query param either
+  // (verified empirically). The user has to type the code into the form. Best
+  // we can do: copy it to the clipboard so a single Cmd/Ctrl-V completes it.
+  const verificationUrl =
+    response.verification_uri_complete ?? response.verification_uri
+
+  let copiedToClipboard = false
+  try {
+    clipboard.writeSync(response.user_code)
+    copiedToClipboard = true
+  } catch {
+    // Clipboard unavailable (headless Linux without xclip/xsel, sandboxed
+    // environments). Fall through; the next consola.info tells the user to
+    // enter the code manually.
+  }
+
+  consola.info(
+    copiedToClipboard ?
+      `Code ${response.user_code} copied to clipboard — paste into the form, then approve.`
+    : `Open the form, then enter code: ${response.user_code}`,
+  )
+
+  if (!options?.noBrowser && !isHeadless()) {
+    const opened = openUrl(verificationUrl)
+    if (opened.ok) {
+      consola.info(`(Opened ${verificationUrl} in your browser.)`)
+    } else {
+      consola.info(
+        `(Couldn't open the browser automatically. Visit ${verificationUrl} manually.)`,
+      )
+    }
+  } else {
+    consola.info(`Visit ${verificationUrl} in any browser.`)
+  }
+}
+
 export async function setupGitHubToken(
   options?: SetupGitHubTokenOptions,
 ): Promise<void> {
@@ -238,44 +289,7 @@ export async function setupGitHubToken(
     const response = await getDeviceCode()
     consola.debug("Device code response:", response)
 
-    // RFC 8628's `verification_uri_complete` is the only reliable
-    // prefill mechanism, but GitHub's device-code endpoint doesn't
-    // emit one and their /login/device page doesn't honor a
-    // ?user_code= query param either (verified empirically). The
-    // user has to type the code into the form. Best we can do for
-    // them: copy it to the clipboard automatically so a single
-    // Cmd/Ctrl-V completes the flow.
-    const verificationUrl =
-      response.verification_uri_complete ?? response.verification_uri
-
-    let copiedToClipboard = false
-    try {
-      clipboard.writeSync(response.user_code)
-      copiedToClipboard = true
-    } catch {
-      // Clipboard unavailable (headless Linux without xclip/xsel,
-      // sandboxed environments). Fall through; the next consola.info
-      // line tells the user to enter the code manually.
-    }
-
-    consola.info(
-      copiedToClipboard ?
-        `Code ${response.user_code} copied to clipboard — paste into the form, then approve.`
-      : `Open the form, then enter code: ${response.user_code}`,
-    )
-
-    if (!options?.noBrowser && !isHeadless()) {
-      const opened = openUrl(verificationUrl)
-      if (opened.ok) {
-        consola.info(`(Opened ${verificationUrl} in your browser.)`)
-      } else {
-        consola.info(
-          `(Couldn't open the browser automatically. Visit ${verificationUrl} manually.)`,
-        )
-      }
-    } else {
-      consola.info(`Visit ${verificationUrl} in any browser.`)
-    }
+    presentDeviceCode(response, options)
 
     const token = await pollAccessToken(response)
     await writeDefaultRecord(makeRecord(token))
