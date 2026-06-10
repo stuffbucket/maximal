@@ -155,22 +155,28 @@ const CLAUDE_AGENT_USER_AGENT =
 const API_VERSION = "2025-10-01"
 
 export const copilotBaseUrl = (state: State): CopilotHost => {
+  // Precedence, highest first. The two config-driven overrides INTENTIONALLY
+  // outrank token discovery: both are explicit operator choices that pin the
+  // edge, so a discovered endpoints.api must not silently redirect them.
+  //   1. Self-hosted GHES domain (COPILOT_API_ENTERPRISE_URL) — a fixed edge.
   const enterpriseDomain = getEnterpriseDomain()
   if (enterpriseDomain) {
-    // Self-hosted GHES domain, already normalized by getEnterpriseDomain().
+    // Already normalized by getEnterpriseDomain().
     return `https://copilot-api.${enterpriseDomain}` as CopilotHost
   }
 
+  //   2. opencode OAuth app — its tokens are only valid against the apex host.
   if (isOpencodeOauthApp()) {
     return "https://api.githubcopilot.com" as CopilotHost
   }
 
-  // Authoritative host from token discovery (already branded), preferred over
-  // the account-type default. See applyCopilotApiUrl in token.ts.
+  //   3. Authoritative host from token discovery (already branded). See
+  //      applyCopilotApiUrl in token.ts — this is the normal path.
   if (state.copilotApiUrl) {
     return state.copilotApiUrl
   }
 
+  //   4. Pre-discovery default for the configured account type.
   return hostForAccountType(state.accountType)
 }
 
