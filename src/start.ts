@@ -6,7 +6,7 @@ import consola from "consola"
 import { serve } from "srvx"
 import invariant from "tiny-invariant"
 
-import { markAuthFatalAndSignOut } from "./lib/auth-controller"
+import { markAuthFatalAndSignOut, markSignedIn } from "./lib/auth-controller"
 import { type AccountType, parseAccountType } from "./lib/auth-types"
 import {
   reconcileClaudeCodeOnBoot,
@@ -454,6 +454,10 @@ async function bootstrapUpstream(
       consola.info(
         `Available models: \n${state.models?.data.map((model) => `- ${model.id}`).join("\n")}`,
       )
+      // Record the signed-in status so getAuthStatus() reports
+      // `authenticated` after a cold boot (the device-flow controller
+      // wasn't involved here). logUser() populated state.userName.
+      markSignedIn(state.userName ?? null)
       return
     } catch (error) {
       // A *fatal* Copilot error (license revoked, TOS not accepted, not

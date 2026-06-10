@@ -10,20 +10,25 @@
  * non-blocking poller in the background. The shell renders whatever
  * UI it likes with that data; nothing here decides for it.
  *
- * State machine (one-line diagram):
+ * State model (boundary D3): the controller holds ONE `AuthState`
+ * discriminated union — the set of representable states equals the set
+ * of valid states. `getAuthStatus()` is an exhaustive switch over it,
+ * not a reconstruction from independent nullables. Phase 3 will add a
+ * single `transition(state, event)` reducer + effect-runner on top of
+ * this; for now the writers below set the union directly.
  *
- *   unauthenticated
+ *   signed-out
  *       │ startDeviceFlow()
  *       ▼
- *   device_code_issued ──poll started──▶ polling
- *                                         │
- *                       ┌─────────────────┼─────────────┐
- *                       ▼                 ▼             ▼
- *                  authenticated        error      (signOut)
- *                       │                 │             │
- *                       └──── signOut ────┴─────────────┘
- *                                  ▼
- *                            unauthenticated
+ *   device-issued ──poll started──▶ polling
+ *                                     │
+ *                   ┌─────────────────┼─────────────┐
+ *                   ▼                 ▼             ▼
+ *               signed-in          error      (signOut)
+ *                   │                 │             │
+ *                   └──── signOut ────┴─────────────┘
+ *                                ▼
+ *                            signed-out
  *
  * Single-flight guarantee: at most one poller runs at any moment.
  * Calling startDeviceFlow() while a non-expired flow is active is
@@ -90,40 +95,32 @@ interface ActiveFlow {
   deviceCode: DeviceCodeResponse
   expiresAt: number
   abort: AbortController
-  isPolling: boolean
 }
 
 /**
- * Structured rejection reason surfaced to the Settings UI. `message`
- * is the human-readable failure (poller error string, or GHCP body
- * message on a 401/403). `remediationUrl` is populated only when GHCP
- * pointed at a recovery page (TOS acceptance, Copilot settings).
+ * The auth lifecycle as a closed set of states (boundary D3). Each
+ * variant carries exactly the data valid in that state, so impossible
+ * combinations (e.g. a user_code while authenticated, or polling with
+ * no flow) are unrepresentable. `device-issued` vs `polling` is the
+ * variant itself — not a boolean on a shared struct. The `error`
+ * variant covers both a terminal poll failure (expired/denied) and a
+ * Copilot auth-fatal rejection; both report as `state: "error"`.
  */
-interface LastError {
-  message: string
-  remediationUrl: string | null
-}
+type AuthState =
+  | { kind: "signed-out" }
+  | { kind: "device-issued"; flow: ActiveFlow }
+  | { kind: "polling"; flow: ActiveFlow }
+  | { kind: "signed-in"; login: string | null }
+  | { kind: "error"; message: string; remediationUrl: string | null }
 
-interface ControllerState {
-  // Active device-code flow (issued or being polled).
-  flow: ActiveFlow | null
-  // Last terminal error from a poll attempt or Copilot auth-fatal,
-  // surfaced via getAuthStatus.
-  lastError: LastError | null
-  // GitHub login of the authenticated account.
-  accountLogin: string | null
-}
+let authState: AuthState = { kind: "signed-out" }
 
-const controllerState: ControllerState = {
-  flow: null,
-  lastError: null,
-  accountLogin: null,
+/** The active device-code flow, if the current state has one. */
+function currentFlow(): ActiveFlow | null {
+  return authState.kind === "device-issued" || authState.kind === "polling" ?
+      authState.flow
+    : null
 }
-
-// Module-load init: if a token is already in state (loaded by boot
-// path or future boot-decouple) and we don't yet know the login, do
-// nothing — the status endpoint reports `authenticated` based on
-// state.githubToken; the login is populated lazily by ensureAccountLogin().
 
 function isFlowExpired(flow: ActiveFlow, nowMs: number = Date.now()): boolean {
   return flow.expiresAt <= nowMs
@@ -149,51 +146,62 @@ export function getAuthStatus(): AuthStatus {
       }
     : {}
 
-  if (state.githubToken) {
-    // On device-flow completion we record the login on controllerState.
-    // On cold boot with a stored token, logUser() in src/lib/token.ts
-    // populated state.userName via the GitHub /user fetch — use that
-    // as the fallback so the Account section doesn't render "(unknown)".
-    const login = controllerState.accountLogin ?? state.userName
-    return {
-      state: "authenticated",
-      ...(login ? { account_login: login } : {}),
-      ...rejectionPayload,
+  switch (authState.kind) {
+    case "signed-in": {
+      // On cold boot logUser() populated state.userName; fall back to it
+      // so the Account section never renders "(unknown)" after a restart.
+      const login = authState.login ?? state.userName
+      return {
+        state: "authenticated",
+        ...(login ? { account_login: login } : {}),
+        ...rejectionPayload,
+      }
     }
-  }
 
-  if (controllerState.lastError && !controllerState.flow) {
-    const err = controllerState.lastError
-    return {
-      state: "error",
-      error: err.message,
-      ...(err.remediationUrl ? { remediation_url: err.remediationUrl } : {}),
-      ...rejectionPayload,
+    case "error": {
+      return {
+        state: "error",
+        error: authState.message,
+        ...(authState.remediationUrl ?
+          { remediation_url: authState.remediationUrl }
+        : {}),
+        ...rejectionPayload,
+      }
     }
-  }
 
-  const flow = controllerState.flow
-  if (!flow) {
-    return { state: "unauthenticated", ...rejectionPayload }
-  }
+    case "device-issued":
+    case "polling": {
+      const flow = authState.flow
+      if (isFlowExpired(flow)) {
+        // Stale flow the poller hasn't cleared yet (terminal path lost a
+        // race). Treat as unauthenticated for reporting.
+        return { state: "unauthenticated", ...rejectionPayload }
+      }
+      return {
+        state: authState.kind === "polling" ? "polling" : "device_code_issued",
+        user_code: flow.deviceCode.user_code,
+        verification_uri: flow.deviceCode.verification_uri,
+        expires_at: new Date(flow.expiresAt).toISOString(),
+        ...rejectionPayload,
+      }
+    }
 
-  if (isFlowExpired(flow)) {
-    // Stale flow that the poller hasn't cleared yet (e.g. terminal
-    // path lost a race). Treat as unauthenticated for reporting.
-    return { state: "unauthenticated", ...rejectionPayload }
-  }
+    case "signed-out": {
+      return { state: "unauthenticated", ...rejectionPayload }
+    }
 
-  return {
-    state: flow.isPolling ? "polling" : "device_code_issued",
-    user_code: flow.deviceCode.user_code,
-    verification_uri: flow.deviceCode.verification_uri,
-    expires_at: new Date(flow.expiresAt).toISOString(),
-    ...rejectionPayload,
+    default: {
+      // Exhaustive: every AuthState.kind is handled above. `satisfies never`
+      // makes a newly-added variant a compile error rather than a silent
+      // fall-through.
+      authState satisfies never
+      return { state: "unauthenticated", ...rejectionPayload }
+    }
   }
 }
 
 export async function startDeviceFlow(): Promise<AuthStatus> {
-  const existing = controllerState.flow
+  const existing = currentFlow()
   if (existing && !isFlowExpired(existing)) {
     // Idempotent: re-return the in-flight code. No new poller — the
     // existing one is still running.
@@ -205,13 +213,12 @@ export async function startDeviceFlow(): Promise<AuthStatus> {
     }
   }
 
-  // Clear any stale flow / error before requesting a fresh code so the
-  // status reporter never sees a half-cleared state.
+  // Cancel any stale flow before requesting a fresh code so the status
+  // reporter never sees a half-cleared state.
   if (existing) {
     existing.abort.abort()
   }
-  controllerState.flow = null
-  controllerState.lastError = null
+  authState = { kind: "signed-out" }
 
   const deviceCode = await getDeviceCode()
   const abort = new AbortController()
@@ -219,13 +226,11 @@ export async function startDeviceFlow(): Promise<AuthStatus> {
     deviceCode,
     expiresAt: Date.now() + deviceCode.expires_in * 1000,
     abort,
-    isPolling: false,
   }
-  // eslint-disable-next-line require-atomic-updates -- single-flight by construction: startDeviceFlow is the only writer.
-  controllerState.flow = flow
+  authState = { kind: "device-issued", flow }
 
-  // Fire-and-forget poller. Errors are captured into controllerState
-  // so the next getAuthStatus call surfaces them; never rethrown.
+  // Fire-and-forget poller. Errors are captured into authState so the
+  // next getAuthStatus call surfaces them; never rethrown.
   runPoller(flow).catch((err: unknown) => {
     consola.error("Auth-controller poller crashed unexpectedly:", err)
   })
@@ -242,12 +247,12 @@ export async function startDeviceFlow(): Promise<AuthStatus> {
 // startDeviceFlow() after a fresh AbortController is installed on a
 // fresh ActiveFlow. The "race condition" the linter flags is the
 // intentional single-flight + cancellation pattern — abort() is the
-// only thing that mutates the flag, and we re-read it after each
+// only thing that signals cancellation, and we re-read it after each
 // await before touching shared state.
-/* eslint-disable require-atomic-updates, @typescript-eslint/no-unnecessary-condition */
+/* eslint-disable @typescript-eslint/no-unnecessary-condition -- TS can't see that abort.signal.aborted may flip during an await. */
 async function runPoller(flow: ActiveFlow): Promise<void> {
   if (flow.abort.signal.aborted) return
-  flow.isPolling = true
+  authState = { kind: "polling", flow }
 
   try {
     // pollAccessToken loops internally with the server-told interval,
@@ -259,20 +264,17 @@ async function runPoller(flow: ActiveFlow): Promise<void> {
 
     await writeDefaultRecord(makeRecord(token))
 
-    // Populate account_login BEFORE flipping to the authenticated state.
-    // getAuthStatus() reports `authenticated` off state.githubToken, and
-    // the Account UI stops polling the instant it sees that state (it only
-    // re-fetches on re-navigation). If we set the token first, the very
-    // first authenticated status the UI catches carries no login, so it
-    // latches "(unknown)" + a placeholder avatar until the user leaves the
-    // section and returns. Fetching the login first means `authenticated`
-    // never appears login-less. Best-effort: a failure here does NOT
-    // invalidate the token — the user is still authenticated, the avatar
-    // falls back to a neutral placeholder, and cold-boot logUser()
-    // repopulates the login on next start.
+    // Populate the login BEFORE flipping to signed-in. The Account UI
+    // stops polling the instant it sees `authenticated` (it only re-fetches
+    // on re-navigation), so if signed-in appeared login-less the UI would
+    // latch "(unknown)" + a placeholder avatar until the user left and
+    // returned. Best-effort: a failure here does NOT invalidate the token —
+    // the user is still authenticated, the avatar falls back to a neutral
+    // placeholder, and cold-boot logUser() repopulates the login next start.
+    let login: string | null = null
     try {
       const user = await getGitHubUser(token)
-      controllerState.accountLogin = user.login
+      login = user.login
       state.userName = user.login
     } catch (err) {
       consola.warn("Auth-controller: failed to fetch GitHub user:", err)
@@ -297,28 +299,34 @@ async function runPoller(flow: ActiveFlow): Promise<void> {
       )
     }
 
-    controllerState.flow = null
-    controllerState.lastError = null
+    authState = { kind: "signed-in", login }
   } catch (err) {
     if (flow.abort.signal.aborted) return
     const message = err instanceof Error ? err.message : String(err)
-    controllerState.lastError = { message, remediationUrl: null }
-    controllerState.flow = null
+    authState = { kind: "error", message, remediationUrl: null }
     consola.warn("Auth-controller: device-code poll terminated:", message)
-  } finally {
-    flow.isPolling = false
   }
 }
-/* eslint-enable require-atomic-updates, @typescript-eslint/no-unnecessary-condition */
+/* eslint-enable @typescript-eslint/no-unnecessary-condition */
+
+/**
+ * Mark the session signed-in from a token resolved OUTSIDE the device
+ * flow (cold boot / `--github-token` / CLI `auth`). The completion host,
+ * Copilot token, and models are populated by the caller (bootstrapUpstream
+ * → logUser/setupCopilotToken/cacheModels); this only records the auth
+ * status so getAuthStatus reports `authenticated` after a restart.
+ */
+export function markSignedIn(login: string | null): void {
+  authState = { kind: "signed-in", login }
+}
 
 export async function signOut(): Promise<void> {
   // Cancel any active poller first so it can't race the token wipe.
-  if (controllerState.flow) {
-    controllerState.flow.abort.abort()
-    controllerState.flow = null
+  const flow = currentFlow()
+  if (flow) {
+    flow.abort.abort()
   }
-  controllerState.lastError = null
-  controllerState.accountLogin = null
+  authState = { kind: "signed-out" }
   state.githubToken = undefined
   state.copilotToken = undefined
   state.userName = undefined
@@ -355,7 +363,8 @@ export async function markAuthFatalAndSignOut(
   error: CopilotAuthFatalError,
 ): Promise<void> {
   await signOut()
-  controllerState.lastError = {
+  authState = {
+    kind: "error",
     message: error.message,
     remediationUrl: error.remediationUrl,
   }
@@ -368,9 +377,9 @@ export async function markAuthFatalAndSignOut(
  *  abort flag prevents the resolved/rejected branch from writing token
  *  state after the process has begun shutting down.) */
 function stopAuthController(): void {
-  if (controllerState.flow) {
-    controllerState.flow.abort.abort()
-    controllerState.flow = null
+  const flow = currentFlow()
+  if (flow) {
+    flow.abort.abort()
   }
 }
 
@@ -379,16 +388,15 @@ registerProcessCleanup(stopAuthController)
 /** Test-only reset. NOT exported from a barrel — keep import paths
  *  long-tail so production code doesn't reach for it. */
 export function __resetAuthControllerForTests(): void {
-  if (controllerState.flow) {
-    controllerState.flow.abort.abort()
+  const flow = currentFlow()
+  if (flow) {
+    flow.abort.abort()
   }
-  controllerState.flow = null
-  controllerState.lastError = null
-  controllerState.accountLogin = null
+  authState = { kind: "signed-out" }
   resetAuthControllerDeps()
-  // getAuthStatus falls back to state.userName when accountLogin is
-  // null (so cold-boot from a stored token populates the Account UI).
-  // Tests reset state.githubToken between cases; reset the cached
-  // userName here too so the fallback doesn't leak across them.
+  // getAuthStatus falls back to state.userName for a signed-in session
+  // (so cold-boot from a stored token populates the Account UI). Tests
+  // reset state.githubToken between cases; reset the cached userName here
+  // too so the fallback doesn't leak across them.
   state.userName = undefined
 }
