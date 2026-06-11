@@ -71,6 +71,25 @@ interface AuthSignOutResponse {
   ok: true
 }
 
+/** Local GitHub CLI status — mirrors GhCliStatus in src/services/gh-cli.ts
+ *  (mirror by name, not import; see the note below). */
+export interface GhCliStatus {
+  installed: boolean
+  version: string | null
+  accounts: Array<{
+    login: string
+    host: string
+    active: boolean
+    scopes: Array<string>
+  }>
+}
+
+interface GhUseResponse {
+  ok: true
+  login: string
+  host: string
+}
+
 /**
  * Active API clients (last-seen within a recency window). Contract is
  * jointly owned with `/settings/api/clients` on the proxy side; if the
@@ -162,6 +181,17 @@ type Endpoint =
       path: "/settings/api/auth/github/sign-out"
     }
   | {
+      kind: "gh-status"
+      method: "GET"
+      path: "/settings/api/gh/status"
+    }
+  | {
+      kind: "gh-use"
+      method: "POST"
+      path: "/settings/api/gh/use"
+      body: { login: string; host: string }
+    }
+  | {
       kind: "api-keys-list"
       method: "GET"
       path: "/settings/api/api-keys"
@@ -219,6 +249,8 @@ interface ResponseFor {
   "auth-status": AuthStatus
   "auth-start": AuthStatus
   "auth-sign-out": AuthSignOutResponse
+  "gh-status": GhCliStatus
+  "gh-use": GhUseResponse
   "api-keys-list": ApiKeysListResponse
   "api-keys-create": ApiKeyEntry
   "api-keys-update": ApiKeyEntry

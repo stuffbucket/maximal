@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test"
 
-import { detectGhCli, type GhRunner } from "~/services/gh-cli"
+import {
+  detectGhCli,
+  getGhAccountToken,
+  type GhRunner,
+} from "~/services/gh-cli"
 
 // Build a runner that returns canned results keyed by the gh subcommand, so
 // the parser is exercised without a real `gh` binary.
@@ -147,5 +151,43 @@ describe("detectGhCli", () => {
     expect(status.accounts).toEqual([
       { login: "carol", host: "github.com", active: false, scopes: [] },
     ])
+  })
+})
+
+describe("getGhAccountToken", () => {
+  test("returns the trimmed token on success", async () => {
+    const token = await getGhAccountToken(
+      "alice",
+      "github.com",
+      runner({ status: { stdout: "gho_abc123\n" } }),
+    )
+    expect(token).toBe("gho_abc123")
+  })
+
+  test("returns null when gh isn't installed", async () => {
+    const token = await getGhAccountToken(
+      "alice",
+      "github.com",
+      runner({ status: { notFound: true } }),
+    )
+    expect(token).toBeNull()
+  })
+
+  test("returns null on non-zero exit (e.g. unknown account / locked keyring)", async () => {
+    const token = await getGhAccountToken(
+      "alice",
+      "github.com",
+      runner({ status: { code: 1, stderr: "no such user" } }),
+    )
+    expect(token).toBeNull()
+  })
+
+  test("returns null on empty output", async () => {
+    const token = await getGhAccountToken(
+      "alice",
+      "github.com",
+      runner({ status: { stdout: "  \n" } }),
+    )
+    expect(token).toBeNull()
   })
 })

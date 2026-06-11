@@ -565,6 +565,14 @@ function renderAccount(status: AuthStatus): void {
     renderRemediationLink(status.remediation_url);
   }
 
+  // The "reuse a GitHub CLI account" list lives inside the unauthenticated
+  // state; (re)populate it whenever we land there (fresh each time, so a
+  // `gh logout` elsewhere can't leave a stale row). Best-effort — gh hinting
+  // never blocks the page.
+  if (active === "unauthenticated") {
+    void loadGhAccounts();
+  }
+
   if (active === "pending") {
     schedulePoll();
   } else {
@@ -586,6 +594,127 @@ async function loadAuthStatus(): Promise<void> {
     return;
   }
   renderAccount(result.data);
+}
+
+function ghErrorEl(): HTMLElement | null {
+  return document.querySelector<HTMLElement>("[data-gh-error]");
+}
+
+function showGhError(message: string): void {
+  const el = ghErrorEl();
+  if (!el) return;
+  el.textContent = message;
+  el.hidden = false;
+}
+
+function hideGhError(): void {
+  const el = ghErrorEl();
+  if (!el) return;
+  el.hidden = true;
+  el.textContent = "";
+}
+
+/**
+ * Populate the "reuse a GitHub CLI account" list from GET /gh/status. The
+ * wrapper stays hidden unless gh is installed AND has ≥1 account — a user
+ * with gh-but-no-login sees nothing (the device flow already covers them).
+ * Best-effort: any failure just hides the section.
+ */
+async function loadGhAccounts(): Promise<void> {
+  const wrapper = document.querySelector<HTMLElement>("[data-gh-reuse]");
+  const list = document.querySelector<HTMLUListElement>("[data-gh-accounts]");
+  const template = document.querySelector<HTMLTemplateElement>(
+    "[data-gh-row-template]",
+  );
+  if (!wrapper || !list || !template) return;
+
+  const result = await apiCall({
+    kind: "gh-status",
+    method: "GET",
+    path: "/settings/api/gh/status",
+  });
+  if (!result.ok || !result.data.installed || result.data.accounts.length === 0) {
+    wrapper.hidden = true;
+    list.replaceChildren();
+    return;
+  }
+
+  list.replaceChildren();
+  hideGhError();
+  for (const account of result.data.accounts) {
+    const seed = template.content.firstElementChild;
+    if (!seed) continue;
+    const row = seed.cloneNode(true) as HTMLElement;
+
+    const loginEl = row.querySelector<HTMLElement>('[data-field="gh_login"]');
+    if (loginEl) loginEl.textContent = account.login;
+    const hostEl = row.querySelector<HTMLElement>('[data-field="gh_host"]');
+    if (hostEl) hostEl.textContent = account.host;
+
+    if (account.active) {
+      row.querySelector(".gh-account__dot")?.classList.add("status--ok");
+      const sr = document.createElement("span");
+      sr.className = "sr-only";
+      sr.textContent = " (currently active)";
+      row.querySelector(".gh-account__id")?.appendChild(sr);
+    }
+
+    const button = row.querySelector<HTMLButtonElement>(
+      '[data-action="gh-use"]',
+    );
+    if (button) {
+      button.dataset.ghLogin = account.login;
+      button.dataset.ghHost = account.host;
+      button.setAttribute("aria-label", `Use this account: ${account.login}`);
+    }
+    list.appendChild(row);
+  }
+  wrapper.hidden = false;
+}
+
+/**
+ * Adopt a gh account: POST /gh/use writes its token to the store, then we
+ * reboot the sidecar so it boots signed-in (the restart re-drives
+ * loadAuthStatus → authenticated). One sign-in at a time: every sign-in
+ * button is disabled while this is in flight.
+ */
+async function useGhAccount(button: HTMLElement): Promise<void> {
+  const login = button.dataset.ghLogin;
+  const host = button.dataset.ghHost;
+  if (!login || !host) return;
+
+  const row = button.closest<HTMLElement>(".gh-account");
+  const signInButtons = document.querySelectorAll<HTMLButtonElement>(
+    '[data-section="account"] [data-action="gh-use"], [data-section="account"] [data-action="auth-start"]',
+  );
+  const buttonEl = button as HTMLButtonElement;
+  const originalLabel = buttonEl.textContent;
+
+  hideGhError();
+  buttonEl.textContent = "Signing in…";
+  row?.setAttribute("aria-busy", "true");
+  for (const b of signInButtons) b.disabled = true;
+
+  const result = await apiCall({
+    kind: "gh-use",
+    method: "POST",
+    path: "/settings/api/gh/use",
+    body: { login, host },
+  });
+
+  if (!result.ok) {
+    for (const b of signInButtons) b.disabled = false;
+    buttonEl.textContent = originalLabel;
+    row?.removeAttribute("aria-busy");
+    showGhError(
+      "Couldn't sign in with that account. Try the code-based sign-in above.",
+    );
+    buttonEl.focus();
+    return;
+  }
+
+  // Token written. Reboot into it; safeInvoke no-ops in plain-browser (app:ui).
+  await safeInvoke("restart_sidecar");
 }
 
 async function pollAuthStatus(): Promise<void> {
@@ -761,6 +890,9 @@ function wireAccount(): void {
         break;
       case "sign-in-with-code":
         void signInWithCode(button);
+        break;
+      case "gh-use":
+        void useGhAccount(button);
         break;
       default:
         break;
