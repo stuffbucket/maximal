@@ -500,6 +500,7 @@ pub fn run() {
             open_dashboard,
             reveal_config_dir,
             reveal_logs_dir,
+            restart_sidecar,
             get_shell_api_key,
             subscribe_token_usage,
         ])
@@ -1592,23 +1593,33 @@ fn retry_startup(app: &AppHandle) {
         return;
     }
     eprintln!("[shell] retry startup requested");
+    respawn_sidecar(app);
+}
 
+/// Tear down the running sidecar and boot a fresh one. The reap→respawn→poll
+/// core shared by the tray-driven `retry_startup` (recovery from Failed) and
+/// the `restart_sidecar` command (a deliberate reboot for account switch /
+/// sign-out — we reconstruct from the on-disk config rather than mutating the
+/// running instance, so no in-process auth state can leak across the change).
+/// Callers gate WHEN this is allowed; this function always reboots.
+fn respawn_sidecar(app: &AppHandle) {
     // Clear the previous failure reason so a stale message can't haunt this
     // attempt (it would otherwise reappear on the splash/notification if the
-    // retry also fails before printing its own error). Dismiss any lingering
-    // error splash — retry is tray-driven, so the tray's Starting state is the
-    // affordance now; we don't re-raise an always-on-top splash.
+    // respawn also fails before printing its own error). Dismiss any lingering
+    // error splash — the tray's Starting state is the affordance now; we don't
+    // re-raise an always-on-top splash.
     app.state::<LastSidecarError>().set(None);
     dismiss_splash(app);
 
-    // Reap any lingering child (a hung-but-alive sidecar that timed out, or
-    // one mid-crash) so the respawn binds cleanly. No-op if already gone.
+    // Reap the current child (healthy, hung, or mid-crash) so the respawn binds
+    // cleanly. No-op if already gone. spawn_sidecar also passes --replace as a
+    // backstop against a not-yet-released port.
     kill_sidecar(app);
 
     apply_state(app, SidecarState::Starting);
 
     if let Err(err) = spawn_sidecar(app) {
-        eprintln!("[shell] retry: sidecar spawn failed: {err}");
+        eprintln!("[shell] sidecar respawn failed: {err}");
         apply_state(app, SidecarState::Failed);
         return;
     }
@@ -1908,6 +1919,20 @@ fn reveal_config_dir(app: AppHandle) {
 #[tauri::command]
 fn reveal_logs_dir(app: AppHandle) {
     do_reveal_logs_dir(&app);
+}
+
+/// Tauri command — deliberately reboot the sidecar. The UI calls this after a
+/// sign-out (the on-disk token is already deleted, so the fresh process boots
+/// unauthenticated) and, in future, after an account switch (boot into the
+/// newly-active account). Rebooting reconstructs all auth/discovery state from
+/// the on-disk config instead of editing the running instance, so the
+/// refresh-loop / cached-model teardown can't be done half-way. Unlike
+/// `retry_startup`, this runs from any state including Ready — the UI gates the
+/// intent (an explicit user action), not this command.
+#[tauri::command]
+fn restart_sidecar(app: AppHandle) {
+    eprintln!("[shell] sidecar restart requested");
+    respawn_sidecar(&app);
 }
 
 
