@@ -1,6 +1,7 @@
 import consola from "consola"
 
 import { getOauthAppConfig, getOauthUrls } from "~/lib/api-config"
+import { DEVICE_POLL_TIMEOUT_MS } from "~/lib/http-timeouts"
 import { sleep } from "~/lib/utils"
 
 import type { DeviceCodeResponse } from "./get-device-code"
@@ -34,7 +35,14 @@ export async function pollAccessToken(
   let intervalSeconds = deviceCode.interval + 1
   consola.debug(`Polling access token at ${intervalSeconds}s interval`)
 
+  // Self-expiry guard: bound the whole poll on the device code's own lifetime
+  // so `polling` always terminates into a terminal error even if GitHub never
+  // returns `expired_token` (a hung/misbehaving upstream can't poll forever).
+  const deadlineMs = Date.now() + deviceCode.expires_in * 1000
+
   while (true) {
+    if (Date.now() >= deadlineMs) throw new Error("expired_token")
+
     await sleep(intervalSeconds * 1000)
 
     let response: Response
@@ -42,6 +50,7 @@ export async function pollAccessToken(
       response = await fetch(accessTokenUrl, {
         method: "POST",
         headers,
+        signal: AbortSignal.timeout(DEVICE_POLL_TIMEOUT_MS),
         body: JSON.stringify({
           client_id: clientId,
           device_code: deviceCode.device_code,

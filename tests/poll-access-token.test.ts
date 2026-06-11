@@ -114,4 +114,16 @@ describe("pollAccessToken (RFC 8628)", () => {
     expect(await pollAccessToken(DEVICE_CODE)).toBe("ghu_late")
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
+
+  it("self-expires once the device code's lifetime has elapsed, without polling", async () => {
+    // A perpetually-pending upstream would loop forever; the deadline guard
+    // (deviceCode.expires_in) must terminate `polling` on its own. With an
+    // already-elapsed lifetime, it throws before the first fetch.
+    const fetchMock = withResponses([{ error: "authorization_pending" }])
+    await expectRejects(
+      () => pollAccessToken({ ...DEVICE_CODE, expires_in: 0 }),
+      /expired_token/,
+    )
+    expect(fetchMock).toHaveBeenCalledTimes(0)
+  })
 })
