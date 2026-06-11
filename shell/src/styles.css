@@ -252,6 +252,14 @@ a:hover {
   display: none;
 }
 
+/* Title + a quiet "Refresh" affordance on one row. */
+.gh-reuse__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
 /* Centered "or" rule between the device-code button and the gh list. */
 .gh-reuse__divider {
   display: flex;

@@ -8,9 +8,39 @@
 
 import { Hono } from "hono"
 
-import { forwardError } from "~/lib/error"
+import { forwardError, HTTPError } from "~/lib/error"
 import { makeRecord, writeDefaultRecord } from "~/lib/github-token-store"
 import { detectGhCli, getGhAccountToken } from "~/services/gh-cli"
+import { getCopilotUsage } from "~/services/github/get-copilot-usage"
+
+/**
+ * Verify a gh account's token actually works for Copilot BEFORE we adopt it.
+ * Mirrors what boot does (the live identity check that was failing silently):
+ * a stale/revoked token → GitHub rejects it; an account with no Copilot →
+ * /copilot_internal/user 403/404. Returns a specific, user-facing message so
+ * the UI can say WHY synchronously, instead of writing the token, rebooting,
+ * and surfacing a generic "came back unauthenticated" 20s later. Returns null
+ * when the token is usable.
+ */
+export async function preflightCopilotError(
+  token: string,
+  login: string,
+  usage: (token: string) => Promise<unknown> = getCopilotUsage,
+): Promise<string | null> {
+  try {
+    await usage(token)
+    return null
+  } catch (error) {
+    const status = error instanceof HTTPError ? error.response.status : 0
+    if (status === 401) {
+      return `GitHub rejected ${login}'s token — it may be expired or revoked. Run \`gh auth login\` and try again, or sign in with a code.`
+    }
+    if (status === 403 || status === 404) {
+      return `${login} doesn't have access to GitHub Copilot. Pick another account, or sign in with a code.`
+    }
+    return `Couldn't verify ${login} with GitHub${status ? ` (HTTP ${status})` : ""}. Check your connection and try again.`
+  }
+}
 
 export const ghRoutes = new Hono()
 
@@ -68,6 +98,14 @@ ghRoutes.post("/use", async (c) => {
         { error: { message: `Could not read the gh token for ${login}.` } },
         502,
       )
+    }
+
+    // Pre-flight: confirm the token works for Copilot BEFORE writing it +
+    // rebooting, so a stale/no-subscription account fails fast with a specific
+    // reason rather than a generic post-reboot "came back unauthenticated".
+    const preflightError = await preflightCopilotError(token, login)
+    if (preflightError) {
+      return c.json({ error: { message: preflightError } }, 422)
     }
 
     await writeDefaultRecord(makeRecord(token))
