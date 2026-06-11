@@ -45,8 +45,33 @@ export type GhRunner = (args: Array<string>) => Promise<GhRunResult>
 // can't hang the settings request.
 const GH_TIMEOUT_MS = 5000
 
-const defaultRunner: GhRunner = (args) =>
-  new Promise((resolve) => {
+/**
+ * The ONLY gh subcommands maximal may run — all strictly read-only.
+ * Enforced in the real runner so a future caller can never invoke a MUTATING
+ * gh command (`auth login`/`logout`/`switch`/`refresh`/`setup-git`,
+ * `config set`, `api -X POST`, …). maximal must never change what gh is signed
+ * into or otherwise touch gh's state; this turns that prose contract into a
+ * gate. `gh auth status` and `gh auth token` only READ; `--version` is inert.
+ */
+export function isReadOnlyGhArgs(args: Array<string>): boolean {
+  if (args.length === 1 && args[0] === "--version") return true
+  if (args[0] === "auth" && (args[1] === "status" || args[1] === "token")) {
+    return true
+  }
+  return false
+}
+
+const defaultRunner: GhRunner = (args) => {
+  if (!isReadOnlyGhArgs(args)) {
+    // Defense-in-depth: never shell out a non-read-only gh command, even if a
+    // future caller passes one. Reject rather than execute.
+    return Promise.reject(
+      new Error(
+        `Refusing to run a non-read-only gh command: gh ${args.join(" ")}`,
+      ),
+    )
+  }
+  return new Promise<GhRunResult>((resolve) => {
     execFile(
       "gh",
       args,
@@ -64,6 +89,7 @@ const defaultRunner: GhRunner = (args) =>
       },
     )
   })
+}
 
 // "gh version 2.92.0 (2026-04-28)\n..." -> "2.92.0"
 function parseVersion(stdout: string): string | null {

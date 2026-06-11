@@ -4,6 +4,7 @@ import {
   detectGhCli,
   getGhAccountToken,
   type GhRunner,
+  isReadOnlyGhArgs,
 } from "~/services/gh-cli"
 
 // Build a runner that returns canned results keyed by the gh subcommand, so
@@ -151,6 +152,40 @@ describe("detectGhCli", () => {
     expect(status.accounts).toEqual([
       { login: "carol", host: "github.com", active: false, scopes: [] },
     ])
+  })
+})
+
+describe("isReadOnlyGhArgs", () => {
+  test("allows the read-only commands maximal uses", () => {
+    expect(isReadOnlyGhArgs(["--version"])).toBe(true)
+    expect(isReadOnlyGhArgs(["auth", "status", "--json", "hosts"])).toBe(true)
+    expect(
+      isReadOnlyGhArgs([
+        "auth",
+        "token",
+        "--hostname",
+        "github.com",
+        "--user",
+        "x",
+      ]),
+    ).toBe(true)
+  })
+
+  test("rejects every mutating / unknown gh command", () => {
+    for (const args of [
+      ["auth", "login"],
+      ["auth", "logout"],
+      ["auth", "switch"],
+      ["auth", "refresh"],
+      ["auth", "setup-git"],
+      ["config", "set", "x", "y"],
+      ["api", "user", "-X", "POST"],
+      ["repo", "delete", "x"],
+      ["version"], // not the "--version" form
+      [],
+    ]) {
+      expect(isReadOnlyGhArgs(args)).toBe(false)
+    }
   })
 })
 
