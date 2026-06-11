@@ -638,6 +638,21 @@ function hideGhError(): void {
   el.textContent = "";
 }
 
+/** apiCall surfaces the raw response body in `error`. Our settings endpoints
+ *  reply `{ error: { message } }`; pull that out so the UI shows the specific
+ *  reason (e.g. the /gh/use pre-flight message) rather than raw JSON. */
+function apiErrorMessage(raw: string): string {
+  try {
+    const parsed = JSON.parse(raw) as { error?: { message?: string } };
+    if (typeof parsed.error?.message === "string" && parsed.error.message) {
+      return parsed.error.message;
+    }
+  } catch {
+    // not JSON — use the raw text
+  }
+  return raw;
+}
+
 /**
  * Populate the "reuse a GitHub CLI account" list from GET /gh/status. The
  * wrapper stays hidden unless gh is installed AND has ≥1 account — a user
@@ -732,8 +747,11 @@ async function useGhAccount(button: HTMLElement): Promise<void> {
     for (const b of signInButtons) b.disabled = false;
     buttonEl.textContent = originalLabel;
     row?.removeAttribute("aria-busy");
+    // The pre-flight (POST /gh/use) returns a specific reason — stale token,
+    // no Copilot subscription, etc. — caught BEFORE any reboot. Show it.
     showGhError(
-      "Couldn't sign in with that account. Try the code-based sign-in above.",
+      apiErrorMessage(result.error) ||
+        "Couldn't sign in with that account. Try the code-based sign-in above.",
     );
     buttonEl.focus();
     return;
@@ -995,6 +1013,9 @@ function wireAccount(): void {
       case "gh-use":
         void useGhAccount(button);
         break;
+      case "gh-refresh":
+        void loadGhAccounts();
+        break;
       default:
         break;
     }
@@ -1029,4 +1050,18 @@ window.addEventListener("hashchange", () => {
     // Leaving the Account section: drop any in-flight polling.
     stopAuthPolling();
   }
+});
+
+// Refresh on returning to the window. The common flow is: open the Account
+// section here, switch to a terminal, `gh auth login` (or out) of an account,
+// then switch back — re-loading auth status on focus re-runs gh discovery so
+// the new account appears without leaving + re-entering the section. We do NOT
+// poll (gh auth status touches the OS keyring); focus/visibility is the right
+// "moment of attention" to refresh.
+function refreshAccountOnAttention(): void {
+  if (readHashSection() === "account") void loadAuthStatus();
+}
+window.addEventListener("focus", refreshAccountOnAttention);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") refreshAccountOnAttention();
 });

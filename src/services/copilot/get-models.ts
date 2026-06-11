@@ -2,12 +2,16 @@ import consola from "consola"
 
 import { copilotBaseUrl, copilotModelsHeaders } from "~/lib/api-config"
 import { HTTPError } from "~/lib/error"
+import { GITHUB_API_TIMEOUT_MS } from "~/lib/http-timeouts"
 import { state } from "~/lib/state"
 
 export const getModels = async () => {
   consola.info(`Fetching models from ${copilotBaseUrl(state)}/models`)
   const response = await fetch(`${copilotBaseUrl(state)}/models`, {
     headers: copilotModelsHeaders(state),
+    // Bounded like the other auth/discovery fetches — cacheModels runs on the
+    // cold-boot critical path, so an unbounded hang here would stall boot.
+    signal: AbortSignal.timeout(GITHUB_API_TIMEOUT_MS),
   })
 
   if (!response.ok) {
