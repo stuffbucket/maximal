@@ -25,6 +25,7 @@
 import { invoke } from "@tauri-apps/api/core"
 
 import type {
+  AccountsListResponse,
   ApiKeyEntry,
   ApiKeysListResponse,
   DiagnosticsResponse,
@@ -88,6 +89,17 @@ interface GhUseResponse {
   ok: true
   login: string
   host: string
+}
+
+interface AccountSwitchResponse {
+  ok: true
+  key: string
+}
+
+interface AccountRemoveResponse {
+  ok: true
+  key: string
+  was_active: boolean
 }
 
 /**
@@ -192,6 +204,23 @@ type Endpoint =
       body: { login: string; host: string }
     }
   | {
+      kind: "accounts-list"
+      method: "GET"
+      path: "/settings/api/accounts"
+    }
+  | {
+      kind: "accounts-switch"
+      method: "POST"
+      path: "/settings/api/accounts/switch"
+      body: { key: string }
+    }
+  | {
+      kind: "accounts-remove"
+      method: "POST"
+      path: "/settings/api/accounts/remove"
+      body: { key: string }
+    }
+  | {
       kind: "api-keys-list"
       method: "GET"
       path: "/settings/api/api-keys"
@@ -251,6 +280,9 @@ interface ResponseFor {
   "auth-sign-out": AuthSignOutResponse
   "gh-status": GhCliStatus
   "gh-use": GhUseResponse
+  "accounts-list": AccountsListResponse
+  "accounts-switch": AccountSwitchResponse
+  "accounts-remove": AccountRemoveResponse
   "api-keys-list": ApiKeysListResponse
   "api-keys-create": ApiKeyEntry
   "api-keys-update": ApiKeyEntry

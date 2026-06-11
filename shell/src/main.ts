@@ -584,6 +584,8 @@ function renderAccount(status: AuthStatus): void {
     setAccountField("account_login", login);
     renderAccountAvatar(login);
     renderUpstreamRejection(status.last_upstream_rejection);
+    // Populate the "Switch to" roster (the other persisted accounts).
+    void loadAccounts("roster");
   } else if (active === "error") {
     setAccountField("error", status.error ?? "Unknown error.");
     renderRemediationLink(status.remediation_url);
@@ -595,6 +597,8 @@ function renderAccount(status: AuthStatus): void {
   // never blocks the page.
   if (active === "unauthenticated") {
     void loadGhAccounts();
+    // Remembered maximal accounts (e.g. signed out of one, others remain).
+    void loadAccounts("remembered");
   }
 
   if (active === "pending") {
@@ -757,15 +761,42 @@ async function useGhAccount(button: HTMLElement): Promise<void> {
     return;
   }
 
-  // Token written. Reboot the sidecar so it boots signed-in to this account.
-  // safeInvoke no-ops in plain-browser (app:ui), in which case the poll below
-  // just times out and recovers.
-  await safeInvoke("restart_sidecar");
+  // Token written. Reboot into it, then report the result (success switches
+  // off the unauthenticated card; failure recovers the row WITHOUT a full
+  // re-render, which would re-fetch the gh list and clear the message).
+  await rebootAndAwaitAuth(
+    (status) => {
+      setBusy(false);
+      renderAccount(status);
+    },
+    (sawDown) => {
+      setBusy(false);
+      for (const b of signInButtons) b.disabled = false;
+      buttonEl.textContent = originalLabel;
+      row?.removeAttribute("aria-busy");
+      showGhError(
+        sawDown ?
+          `Signed in as ${login}, but the proxy came back unauthenticated — that account may not have Copilot access on this host.`
+        : "Sign-in didn't complete — the proxy may not have restarted. Try again, or use the code-based sign-in above.",
+      );
+      buttonEl.focus();
+    },
+  );
+}
 
-  // The reboot kills + respawns the sidecar; nothing else re-drives the UI, so
-  // poll auth-status until it's back and report the result — otherwise the row
-  // stays stuck on "Signing in…". The sidecar is briefly DOWN mid-reboot
-  // (failed polls are expected and tell us a restart actually happened).
+/**
+ * Reboot the sidecar and poll auth-status until it's back, then dispatch to
+ * onSuccess (now authenticated) or onFailure. Shared by every
+ * "write token to disk → reboot into it" flow (gh-reuse, account switch).
+ * The sidecar is briefly DOWN mid-reboot — failed polls are expected and tell
+ * us a restart actually happened (`sawDown`). safeInvoke no-ops in
+ * plain-browser (app:ui), so the loop just times out and onFailure fires.
+ */
+async function rebootAndAwaitAuth(
+  onSuccess: (status: AuthStatus) => void,
+  onFailure: (sawDown: boolean) => void,
+): Promise<void> {
+  await safeInvoke("restart_sidecar");
   const deadlineMs = Date.now() + 20_000;
   let sawDown = false;
   while (Date.now() < deadlineMs) {
@@ -780,31 +811,227 @@ async function useGhAccount(button: HTMLElement): Promise<void> {
       continue;
     }
     if (poll.data.state === "authenticated") {
-      setBusy(false);
-      renderAccount(poll.data); // success — switches off the unauthenticated card
+      onSuccess(poll.data);
       return;
     }
-    if (poll.data.state === "error" || sawDown) {
-      // Rebooted but didn't sign in (e.g. the account lacks Copilot here), or
-      // an explicit error. Stop waiting and recover below.
-      break;
-    }
-    // Still up and unauthenticated, and we never saw it go down — the restart
-    // likely didn't fire yet. Keep polling until the deadline.
+    if (poll.data.state === "error" || sawDown) break;
+    // Still up + unauthenticated and never saw it go down — the restart likely
+    // didn't fire yet. Keep polling until the deadline.
+  }
+  onFailure(sawDown);
+}
+
+// ---- Multi-account roster (quick-switch) ---------------------------------
+
+/** Which roster a row lives in: the authenticated "Switch to" list, or the
+ *  unauthenticated "remembered accounts" list. They share a row template but
+ *  have distinct list/error containers. */
+type AccountRosterMode = "roster" | "remembered";
+
+const ROSTER_SELECTORS: Record<
+  AccountRosterMode,
+  { wrapper: string; list: string; error: string }
+> = {
+  roster: {
+    wrapper: "[data-account-roster]",
+    list: "[data-account-roster-list]",
+    error: "[data-account-roster-error]",
+  },
+  remembered: {
+    wrapper: "[data-account-remembered]",
+    list: "[data-account-remembered-list]",
+    error: "[data-account-remembered-error]",
+  },
+};
+
+function rosterModeFor(el: HTMLElement): AccountRosterMode {
+  return el.closest("[data-account-remembered]") ? "remembered" : "roster";
+}
+
+function showRosterError(mode: AccountRosterMode, message: string): void {
+  const el = document.querySelector<HTMLElement>(ROSTER_SELECTORS[mode].error);
+  if (el) {
+    el.textContent = message;
+    el.hidden = false;
+  }
+}
+
+function hideRosterError(mode: AccountRosterMode): void {
+  const el = document.querySelector<HTMLElement>(ROSTER_SELECTORS[mode].error);
+  if (el) {
+    el.textContent = "";
+    el.hidden = true;
+  }
+}
+
+/**
+ * Populate a roster list from GET /settings/api/accounts. The authenticated
+ * "roster" excludes the active account (it's the hero); the unauthenticated
+ * "remembered" list shows all. Best-effort: any failure / empty list just
+ * hides the section, mirroring loadGhAccounts.
+ */
+async function loadAccounts(mode: AccountRosterMode): Promise<void> {
+  const sel = ROSTER_SELECTORS[mode];
+  const wrapper = document.querySelector<HTMLElement>(sel.wrapper);
+  const list = document.querySelector<HTMLUListElement>(sel.list);
+  const template = document.querySelector<HTMLTemplateElement>(
+    "[data-account-row-template]",
+  );
+  if (!wrapper || !list || !template) return;
+
+  const result = await apiCall({
+    kind: "accounts-list",
+    method: "GET",
+    path: "/settings/api/accounts",
+  });
+  const accounts =
+    result.ok ?
+      mode === "roster" ?
+        result.data.accounts.filter((a) => !a.active)
+      : result.data.accounts
+    : [];
+
+  if (accounts.length === 0) {
+    wrapper.hidden = true;
+    list.replaceChildren();
+    return;
   }
 
-  // Recover the loading row WITHOUT a full re-render (which would re-fetch the
-  // gh list and clear this message), then explain.
-  setBusy(false);
-  for (const b of signInButtons) b.disabled = false;
-  buttonEl.textContent = originalLabel;
-  row?.removeAttribute("aria-busy");
-  showGhError(
-    sawDown ?
-      `Signed in as ${login}, but the proxy came back unauthenticated — that account may not have Copilot access on this host.`
-    : "Sign-in didn't complete — the proxy may not have restarted. Try again, or use the code-based sign-in above.",
+  list.replaceChildren();
+  hideRosterError(mode);
+  for (const account of accounts) {
+    const seed = template.content.firstElementChild;
+    if (!seed) continue;
+    const row = seed.cloneNode(true) as HTMLElement;
+
+    const loginEl = row.querySelector<HTMLElement>('[data-field="acct_login"]');
+    if (loginEl) loginEl.textContent = account.login;
+    const hostEl = row.querySelector<HTMLElement>('[data-field="acct_host"]');
+    if (hostEl) hostEl.textContent = account.host;
+
+    for (const action of ["account-switch", "account-remove"] as const) {
+      const btn = row.querySelector<HTMLButtonElement>(
+        `[data-action="${action}"]`,
+      );
+      if (!btn) continue;
+      btn.dataset.acctKey = account.key;
+      const verb = action === "account-switch" ? "Switch to" : "Remove";
+      btn.setAttribute("aria-label", `${verb} ${account.login}`);
+    }
+    list.appendChild(row);
+  }
+  wrapper.hidden = false;
+}
+
+/**
+ * Switch the active account: POST /accounts/switch sets it, then we reboot the
+ * sidecar so it boots signed-in as that account — the same write-then-reboot
+ * poll loop as useGhAccount. A 422 (token no longer valid) is caught BEFORE
+ * the reboot and shown in the roster's error line.
+ */
+async function switchToAccount(button: HTMLElement): Promise<void> {
+  const key = button.dataset.acctKey;
+  if (!key) return;
+  const mode = rosterModeFor(button);
+  const row = button.closest<HTMLElement>(".gh-account");
+  const buttons = document.querySelectorAll<HTMLButtonElement>(
+    '[data-section="account"] [data-action="account-switch"], [data-section="account"] [data-action="account-remove"]',
   );
-  buttonEl.focus();
+  const buttonEl = button as HTMLButtonElement;
+  const originalLabel = buttonEl.textContent;
+
+  hideRosterError(mode);
+  buttonEl.textContent = "Switching…";
+  row?.setAttribute("aria-busy", "true");
+  for (const b of buttons) b.disabled = true;
+  setBusy(true, "Switching account…");
+
+  const result = await apiCall({
+    kind: "accounts-switch",
+    method: "POST",
+    path: "/settings/api/accounts/switch",
+    body: { key },
+  });
+
+  if (!result.ok) {
+    setBusy(false);
+    for (const b of buttons) b.disabled = false;
+    buttonEl.textContent = originalLabel;
+    row?.removeAttribute("aria-busy");
+    // 422 = the saved token no longer works for Copilot; caught pre-reboot.
+    showRosterError(
+      mode,
+      apiErrorMessage(result.error) || "Couldn't switch to that account.",
+    );
+    buttonEl.focus();
+    return;
+  }
+
+  await rebootAndAwaitAuth(
+    (status) => {
+      setBusy(false);
+      renderAccount(status);
+    },
+    (sawDown) => {
+      setBusy(false);
+      for (const b of buttons) b.disabled = false;
+      buttonEl.textContent = originalLabel;
+      row?.removeAttribute("aria-busy");
+      showRosterError(
+        mode,
+        sawDown ?
+          "Switched, but the proxy came back unauthenticated — that account's token may no longer be valid."
+        : "Switch didn't complete — the proxy may not have restarted. Try again.",
+      );
+      buttonEl.focus();
+    },
+  );
+}
+
+/**
+ * Forget a persisted account: POST /accounts/remove deletes maximal's own copy
+ * of its token (gh is untouched). Removing a non-active account needs no reboot
+ * — just re-render the shorter list.
+ */
+async function forgetAccount(button: HTMLElement): Promise<void> {
+  const key = button.dataset.acctKey;
+  if (!key) return;
+  const mode = rosterModeFor(button);
+  const login =
+    button
+      .closest(".gh-account")
+      ?.querySelector('[data-field="acct_login"]')?.textContent ?? key;
+
+  const confirmed = window.confirm(
+    `Remove ${login}? Maximal forgets its saved sign-in. This doesn't sign you out of gh or GitHub in the browser.`,
+  );
+  if (!confirmed) return;
+
+  const buttons = document.querySelectorAll<HTMLButtonElement>(
+    '[data-section="account"] [data-action="account-switch"], [data-section="account"] [data-action="account-remove"]',
+  );
+  for (const b of buttons) b.disabled = true;
+  setBusy(true, "Removing account…");
+
+  const result = await apiCall({
+    kind: "accounts-remove",
+    method: "POST",
+    path: "/settings/api/accounts/remove",
+    body: { key },
+  });
+
+  setBusy(false);
+  for (const b of buttons) b.disabled = false;
+
+  if (!result.ok) {
+    showRosterError(
+      mode,
+      apiErrorMessage(result.error) || "Couldn't remove that account.",
+    );
+    return;
+  }
+  // Re-render the now-shorter list (hides the section if it's the last one).
+  void loadAccounts(mode);
 }
 
 async function pollAuthStatus(): Promise<void> {
@@ -1036,6 +1263,12 @@ function wireAccount(): void {
         break;
       case "gh-refresh":
         void loadGhAccounts();
+        break;
+      case "account-switch":
+        void switchToAccount(button);
+        break;
+      case "account-remove":
+        void forgetAccount(button);
         break;
       default:
         break;

@@ -303,7 +303,13 @@ a:hover {
 }
 
 .gh-account__id {
-  flex: 1 1 auto;
+  /* flex-basis 0 (not auto): with breakable content + min-width:0, a 0 basis
+     is the correct idiom for a grow-to-fill text column — grow distributes the
+     row's free width here instead of letting the column collapse toward its
+     narrowest token. Defensive: at the window's real widths (>=600px min) the
+     column has ample room either way, but this keeps the two-button roster
+     rows robust if the pane ever narrows. */
+  flex: 1 1 0;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -326,6 +332,40 @@ a:hover {
    omission (reduced-motion contract; do not add a transition here). */
 .gh-account[aria-busy="true"] {
   opacity: 0.7;
+}
+
+/* ---- Account roster (multi-account quick-switch) ----
+   The persisted accounts are alternatives to one another, not independent
+   entities, so they reuse the .gh-account list rows (list, not cards — see
+   .design-context.md "When to use a card"). Only the wrapper spacing, the
+   in-row action cluster, and a destructive-tinted ghost button are new. */
+.account-roster {
+  margin-top: var(--space-4);
+  max-width: 65ch;
+}
+
+.account-roster[hidden] {
+  display: none;
+}
+
+/* Switch + Remove sit together at the row's end. */
+.gh-account__actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Quiet destructive: a ghost button whose label reads destructive, so Remove
+   is visibly the cautionary, secondary action beside Switch. Hover lifts to
+   the destructive fill (mirrors .btn--ghost:hover, destructive token). */
+.btn--ghost-destructive {
+  color: var(--accent-destructive);
+}
+
+.btn--ghost-destructive:hover {
+  background: var(--accent-destructive);
+  color: var(--accent-destructive-foreground);
 }
 
 /* ---- Requirement callout ----
