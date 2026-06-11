@@ -18,10 +18,14 @@ import {
 } from "./lib/claude-code-reconcile"
 import { mergeConfigWithDefaults } from "./lib/config"
 import { CopilotAuthFatalError } from "./lib/error"
-import { readDefaultRecord } from "./lib/github-token-store"
+import { currentGitHubHost } from "./lib/github-host"
+import {
+  migrateLegacyRecord,
+  readDefaultRecord,
+} from "./lib/github-token-store"
 import { createHandlerLogger } from "./lib/logger"
 import { initOpencodeVersion } from "./lib/opencode"
-import { ensurePaths } from "./lib/paths"
+import { ensurePaths, PATHS } from "./lib/paths"
 import { initProxyFromEnv } from "./lib/proxy"
 import {
   evictRunning,
@@ -41,6 +45,7 @@ import {
   cacheVsCodeDeviceId,
 } from "./lib/utils"
 import { getGitVersion, shortSha, type GitVersion } from "./lib/version"
+import { getGitHubUser } from "./services/github/get-user"
 
 interface RunServerOptions {
   port: number
@@ -440,6 +445,24 @@ async function bootstrapUpstream(
     state.githubToken = githubTokenOverride
     consola.info("Using provided GitHub token")
   } else {
+    // One-time: lift a legacy single-record token into the multi-account
+    // registry so a user who signed in before multi-account boots into a
+    // properly-keyed active account. Gated (no-op once the registry has
+    // accounts); leaves the legacy file as a rollback fallback. Failure here
+    // must not block boot — readDefaultRecord still falls back to the legacy
+    // file directly.
+    await migrateLegacyRecord({
+      legacyPath: PATHS.GITHUB_TOKEN_PATH,
+      registryPath: PATHS.ACCOUNTS_PATH,
+      host: currentGitHubHost(),
+      resolveLogin: (token) =>
+        getGitHubUser(token)
+          .then((user) => user.login)
+          .catch(() => null),
+    }).catch((error: unknown) => {
+      consola.warn("Account registry migration failed (continuing):", error)
+      return null
+    })
     const existing = await readDefaultRecord()
     if (existing) {
       state.githubToken = existing.accessToken

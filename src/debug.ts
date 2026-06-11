@@ -2,7 +2,6 @@
 
 import { defineCommand } from "citty"
 import consola from "consola"
-import fs from "node:fs/promises"
 import os from "node:os"
 
 import {
@@ -10,6 +9,7 @@ import {
   DEFAULT_LOG_RETENTION_DAYS,
   getConfig,
 } from "./lib/config"
+import { readDefaultRecord } from "./lib/github-token-store"
 import { PATHS } from "./lib/paths"
 import { SECRET_DEFS, secretIsFromFile } from "./lib/secrets"
 import { getGitVersion, shortSha } from "./lib/version"
@@ -84,16 +84,12 @@ function getRuntimeInfo() {
 }
 
 async function checkTokenExists(): Promise<boolean> {
-  // Avoid a TOCTOU race between stat and readFile: just attempt the
-  // read and treat any I/O error (ENOENT, EISDIR, EACCES, ...) as
-  // "no token", which matches the observable behavior of the old
-  // precheck-then-read flow.
-  try {
-    const content = await fs.readFile(PATHS.GITHUB_TOKEN_PATH, "utf8")
-    return content.trim().length > 0
-  } catch {
-    return false
-  }
+  // "Is there an active account?" — registry-aware. readDefaultRecord reads
+  // the registry's active record (falling back to the legacy single-record
+  // file), so this stays correct now that sign-in writes only the registry.
+  // Any I/O error degrades to "no token".
+  const record = await readDefaultRecord().catch(() => null)
+  return record !== null && record.accessToken.trim().length > 0
 }
 
 /** Status of a sensitive value: env wins, file fallback, then config,

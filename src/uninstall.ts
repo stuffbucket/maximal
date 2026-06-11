@@ -273,11 +273,14 @@ export function removeFirstLaunchPathBlock(
 
 async function maybePurgeSecrets(opts: RunUninstallOptions): Promise<void> {
   const secretsDir = path.join(PATHS.APP_DIR, "secrets")
-  const tokenPath = PATHS.GITHUB_TOKEN_PATH
+  // Both token stores: the legacy single-record file and the multi-account
+  // registry. Purge must take both, or --purge leaves every account's token
+  // on disk in accounts.json.
+  const tokenPaths = [PATHS.GITHUB_TOKEN_PATH, PATHS.ACCOUNTS_PATH]
   const willPurge = opts.purge || (await confirmPurge(opts))
   if (!willPurge) {
     consola.info(`  ℹ secrets dir kept (${secretsDir}); use --purge to remove`)
-    consola.info(`  ℹ github token kept (${tokenPath})`)
+    consola.info(`  ℹ github tokens kept (${tokenPaths.join(", ")})`)
     return
   }
   if (fs.existsSync(secretsDir)) {
@@ -288,7 +291,8 @@ async function maybePurgeSecrets(opts: RunUninstallOptions): Promise<void> {
       consola.warn(`  could not remove ${secretsDir}`, err)
     }
   }
-  if (fs.existsSync(tokenPath)) {
+  for (const tokenPath of tokenPaths) {
+    if (!fs.existsSync(tokenPath)) continue
     try {
       fs.rmSync(tokenPath)
       consola.success(`  removed ${tokenPath}`)

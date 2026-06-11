@@ -15,6 +15,8 @@ import {
   test,
 } from "bun:test"
 
+import type { AccountRecord } from "~/lib/github-token-store"
+
 // --- Mock harness ----------------------------------------------------------
 
 type Deferred<T> = {
@@ -46,10 +48,10 @@ const harness = {
   pollAccessTokenCalls: 0,
   getGitHubUserImpl: (): Promise<{ login: string }> =>
     Promise.resolve({ login: "octocat" }),
-  writeDefaultRecordImpl: (_: unknown): Promise<void> => Promise.resolve(),
+  addAccountImpl: (_: AccountRecord): Promise<void> => Promise.resolve(),
   unlinkImpl: (_p: string): Promise<void> => Promise.resolve(),
   unlinkCalls: [] as Array<string>,
-  writeDefaultRecordCalls: [] as Array<unknown>,
+  addAccountCalls: [] as Array<AccountRecord>,
   setupCopilotTokenImpl: (): Promise<void> => Promise.resolve(),
   setupCopilotTokenCalls: 0,
 }
@@ -157,17 +159,13 @@ beforeEach(() => {
       harness.pollAccessTokenCalls++
       return harness.pollAccessTokenImpl()
     },
-    writeDefaultRecord: (rec: unknown) => {
-      harness.writeDefaultRecordCalls.push(rec)
-      return harness.writeDefaultRecordImpl(rec)
+    addAccount: (rec: AccountRecord) => {
+      harness.addAccountCalls.push(rec)
+      return harness.addAccountImpl(rec)
     },
-    makeRecord: (accessToken: string) => ({
-      schemaVersion: 1,
-      tokenType: "ghu_",
-      accessToken,
-      refreshToken: null,
-      obtainedAt: new Date().toISOString(),
-    }),
+    // No-op so signOut doesn't touch the real on-disk registry in unit tests
+    // (and resolves within the microtask window the assertions flush).
+    removeActiveAccount: () => Promise.resolve(),
   })
   state.githubToken = undefined
   state.copilotToken = undefined
@@ -182,10 +180,10 @@ beforeEach(() => {
     })
   harness.pollAccessTokenImpl = () => new Promise<string>(() => {})
   harness.getGitHubUserImpl = () => Promise.resolve({ login: "octocat" })
-  harness.writeDefaultRecordImpl = () => Promise.resolve()
+  harness.addAccountImpl = () => Promise.resolve()
   harness.unlinkImpl = () => Promise.resolve()
   harness.unlinkCalls = []
-  harness.writeDefaultRecordCalls = []
+  harness.addAccountCalls = []
   harness.pollAccessTokenCalls = 0
   harness.setupCopilotTokenImpl = () => Promise.resolve()
   harness.setupCopilotTokenCalls = 0
@@ -376,7 +374,7 @@ describe("startDeviceFlow", () => {
     await flushMicrotasks(20)
 
     expect(state.githubToken).toBeUndefined()
-    expect(harness.writeDefaultRecordCalls.length).toBe(0)
+    expect(harness.addAccountCalls.length).toBe(0)
     // Second flow still active.
     const status = getAuthStatus()
     expect(status.user_code).toBe("CODE-2")
@@ -463,10 +461,8 @@ describe("runPoller (driven by startDeviceFlow)", () => {
 
     expect(state.githubToken).toBe("ghu_success")
     expect(state.userName).toBe("alice")
-    expect(harness.writeDefaultRecordCalls.length).toBe(1)
-    expect(harness.writeDefaultRecordCalls[0]).toMatchObject({
-      accessToken: "ghu_success",
-    })
+    expect(harness.addAccountCalls.length).toBe(1)
+    expect(harness.addAccountCalls[0]).toMatchObject({ token: "ghu_success" })
     // controllerState.flow cleared.
     const status = getAuthStatus()
     expect(status.state).toBe("authenticated")
@@ -651,7 +647,7 @@ describe("runPoller (driven by startDeviceFlow)", () => {
 
     // Token was wiped by signOut and the resolved poll did NOT re-set it.
     expect(state.githubToken).toBeUndefined()
-    expect(harness.writeDefaultRecordCalls.length).toBe(0)
+    expect(harness.addAccountCalls.length).toBe(0)
   })
 
   test("proactive mint: calls setupCopilotToken once after a successful poll", async () => {

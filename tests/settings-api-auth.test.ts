@@ -68,14 +68,7 @@ beforeEach(() => {
     // without racing the success path. Tests that need a successful poll
     // re-inject locally.
     pollAccessToken: () => new Promise<string>(() => {}),
-    writeDefaultRecord: () => Promise.resolve(),
-    makeRecord: (accessToken: string) => ({
-      schemaVersion: 1,
-      tokenType: "ghu_",
-      accessToken,
-      refreshToken: null,
-      obtainedAt: new Date().toISOString(),
-    }),
+    addAccount: () => Promise.resolve(),
   })
   state.githubToken = undefined
   state.userName = undefined
