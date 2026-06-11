@@ -90,6 +90,30 @@ async function safeInvoke(cmd: string): Promise<void> {
   }
 }
 
+let busyCount = 0;
+
+/**
+ * Toggle the ambient "work in progress" indicator (the accent bar across the
+ * top of the window). Ref-counted so overlapping transient operations compose
+ * correctly — the bar shows while >=1 op is in flight, hides when all settle.
+ * Wrap each transient op in setBusy(true, "…") … setBusy(false) (try/finally)
+ * so an early return/throw can't leak a stuck bar.
+ */
+function setBusy(on: boolean, label = "Working…"): void {
+  busyCount = Math.max(0, busyCount + (on ? 1 : -1));
+  const root = document.documentElement;
+  const labelEl = document.querySelector<HTMLElement>("[data-busybar-label]");
+  if (busyCount > 0) {
+    if (root.getAttribute("data-busy") !== "true") {
+      root.setAttribute("data-busy", "true"); // 0 -> 1: show + announce once
+      if (labelEl) labelEl.textContent = label;
+    }
+  } else {
+    root.removeAttribute("data-busy");
+    if (labelEl) labelEl.textContent = ""; // clear; do not re-announce
+  }
+}
+
 function wireLogs(): void {
   const revealLogs = () => {
     void safeInvoke("reveal_logs_dir");
@@ -694,6 +718,7 @@ async function useGhAccount(button: HTMLElement): Promise<void> {
   buttonEl.textContent = "Signing in…";
   row?.setAttribute("aria-busy", "true");
   for (const b of signInButtons) b.disabled = true;
+  setBusy(true, "Signing in…"); // ambient top-of-window indicator
 
   const result = await apiCall({
     kind: "gh-use",
@@ -703,6 +728,7 @@ async function useGhAccount(button: HTMLElement): Promise<void> {
   });
 
   if (!result.ok) {
+    setBusy(false);
     for (const b of signInButtons) b.disabled = false;
     buttonEl.textContent = originalLabel;
     row?.removeAttribute("aria-busy");
@@ -736,6 +762,7 @@ async function useGhAccount(button: HTMLElement): Promise<void> {
       continue;
     }
     if (poll.data.state === "authenticated") {
+      setBusy(false);
       renderAccount(poll.data); // success — switches off the unauthenticated card
       return;
     }
@@ -750,6 +777,7 @@ async function useGhAccount(button: HTMLElement): Promise<void> {
 
   // Recover the loading row WITHOUT a full re-render (which would re-fetch the
   // gh list and clear this message), then explain.
+  setBusy(false);
   for (const b of signInButtons) b.disabled = false;
   buttonEl.textContent = originalLabel;
   row?.removeAttribute("aria-busy");
@@ -818,7 +846,36 @@ async function signOut(): Promise<void> {
   // — the token is already gone; the shell's Starting→Ready status carries the
   // proxy back up. `safeInvoke` no-ops gracefully in plain-browser (app:ui).
   renderAccount({ state: "unauthenticated" });
-  await safeInvoke("restart_sidecar");
+  setBusy(true, "Signing out…");
+  try {
+    await safeInvoke("restart_sidecar");
+    // Keep the indicator up until the sidecar is back (briefly down mid-reboot)
+    // so the bar reflects the real "restarting" window, not just the IPC call.
+    await waitForSidecarBack(8_000);
+  } finally {
+    setBusy(false);
+  }
+}
+
+/** Poll auth-status until the sidecar responds again (it's down mid-reboot),
+ *  up to `timeoutMs`. Used to keep the busy indicator honest across a restart
+ *  without changing what's rendered. */
+async function waitForSidecarBack(timeoutMs: number): Promise<void> {
+  const deadlineMs = Date.now() + timeoutMs;
+  let sawDown = false;
+  while (Date.now() < deadlineMs) {
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    const poll = await apiCall({
+      kind: "auth-status",
+      method: "GET",
+      path: "/settings/api/auth/github/status",
+    });
+    if (!poll.ok) {
+      sawDown = true; // restarting
+      continue;
+    }
+    if (sawDown) return; // went down and came back → reboot complete
+  }
 }
 
 /**
