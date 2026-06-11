@@ -336,6 +336,16 @@ export const readDefaultRegistry = (): Promise<AccountRegistry> =>
 export const writeDefaultRegistry = (reg: AccountRegistry): Promise<void> =>
   writeRegistry(PATHS.ACCOUNTS_PATH, reg)
 
+// Concurrency: these read-modify-write helpers take no lock. That's safe on a
+// single sidecar — Bun's event loop serializes Hono handlers, so no two writes
+// interleave (the `await`s yield, but the next handler doesn't start mid-write).
+// The only race is the pathological case of running the `maximal auth` CLI (a
+// separate process) WHILE the sidecar is live; a lost write there drops an
+// account entry (not the GitHub credential — re-add via gh-reuse or re-auth),
+// and the atomic temp+rename write rules out a corrupt/torn file regardless.
+// Not a documented workflow; revisit with an OS file-lock if the CLI ever
+// becomes a first-class concurrent auth path.
+
 /** Read-modify-write: add (or replace by `login@host`) an account, make it the
  *  active one, persist. The shared path for every sign-in producer
  *  (device-code, CLI, gh-reuse). */
