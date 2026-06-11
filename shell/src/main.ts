@@ -713,8 +713,52 @@ async function useGhAccount(button: HTMLElement): Promise<void> {
     return;
   }
 
-  // Token written. Reboot into it; safeInvoke no-ops in plain-browser (app:ui).
+  // Token written. Reboot the sidecar so it boots signed-in to this account.
+  // safeInvoke no-ops in plain-browser (app:ui), in which case the poll below
+  // just times out and recovers.
   await safeInvoke("restart_sidecar");
+
+  // The reboot kills + respawns the sidecar; nothing else re-drives the UI, so
+  // poll auth-status until it's back and report the result — otherwise the row
+  // stays stuck on "Signing in…". The sidecar is briefly DOWN mid-reboot
+  // (failed polls are expected and tell us a restart actually happened).
+  const deadlineMs = Date.now() + 20_000;
+  let sawDown = false;
+  while (Date.now() < deadlineMs) {
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    const poll = await apiCall({
+      kind: "auth-status",
+      method: "GET",
+      path: "/settings/api/auth/github/status",
+    });
+    if (!poll.ok) {
+      sawDown = true; // sidecar is restarting
+      continue;
+    }
+    if (poll.data.state === "authenticated") {
+      renderAccount(poll.data); // success — switches off the unauthenticated card
+      return;
+    }
+    if (poll.data.state === "error" || sawDown) {
+      // Rebooted but didn't sign in (e.g. the account lacks Copilot here), or
+      // an explicit error. Stop waiting and recover below.
+      break;
+    }
+    // Still up and unauthenticated, and we never saw it go down — the restart
+    // likely didn't fire yet. Keep polling until the deadline.
+  }
+
+  // Recover the loading row WITHOUT a full re-render (which would re-fetch the
+  // gh list and clear this message), then explain.
+  for (const b of signInButtons) b.disabled = false;
+  buttonEl.textContent = originalLabel;
+  row?.removeAttribute("aria-busy");
+  showGhError(
+    sawDown ?
+      `Signed in as ${login}, but the proxy came back unauthenticated — that account may not have Copilot access on this host.`
+    : "Sign-in didn't complete — the proxy may not have restarted. Try again, or use the code-based sign-in above.",
+  );
+  buttonEl.focus();
 }
 
 async function pollAuthStatus(): Promise<void> {
