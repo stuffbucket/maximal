@@ -1,5 +1,6 @@
 import { getOauthAppConfig, getOauthUrls } from "~/lib/api-config"
 import { HTTPError } from "~/lib/error"
+import { GITHUB_API_TIMEOUT_MS } from "~/lib/http-timeouts"
 
 export async function getDeviceCode(): Promise<DeviceCodeResponse> {
   const { clientId, headers, scope } = getOauthAppConfig()
@@ -12,6 +13,7 @@ export async function getDeviceCode(): Promise<DeviceCodeResponse> {
       client_id: clientId,
       scope,
     }),
+    signal: AbortSignal.timeout(GITHUB_API_TIMEOUT_MS),
   })
 
   if (!response.ok) throw new HTTPError("Failed to get device code", response)

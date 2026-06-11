@@ -1,5 +1,6 @@
 import { getGitHubApiBaseUrl, githubHeaders } from "~/lib/api-config"
 import { HTTPError } from "~/lib/error"
+import { GITHUB_API_TIMEOUT_MS } from "~/lib/http-timeouts"
 import { state } from "~/lib/state"
 
 export const getCopilotUsage = async (
@@ -15,6 +16,7 @@ export const getCopilotUsage = async (
     `${getGitHubApiBaseUrl()}/copilot_internal/user`,
     {
       headers: githubHeaders(authState),
+      signal: AbortSignal.timeout(GITHUB_API_TIMEOUT_MS),
     },
   )
 
