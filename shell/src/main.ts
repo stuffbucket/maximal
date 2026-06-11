@@ -633,11 +633,19 @@ async function startAuth(): Promise<void> {
 
 async function signOut(): Promise<void> {
   const confirmed = window.confirm(
-    "Sign out? The proxy will stop forwarding Copilot requests until you sign in again.",
+    "Sign out? The proxy will restart and stop forwarding Copilot requests until you sign in again.",
   );
   if (!confirmed) return;
-  await performSignOut();
-  await loadAuthStatus();
+  const ok = await performSignOut();
+  if (!ok) return;
+  // The on-disk token is now deleted. Reboot the sidecar rather than editing
+  // the running instance: the fresh process boots unauthenticated with a clean
+  // runtime (no leftover Copilot token-refresh loop, no stale cached model
+  // list from the signed-out account). Optimistically show the signed-out view
+  // — the token is already gone; the shell's Starting→Ready status carries the
+  // proxy back up. `safeInvoke` no-ops gracefully in plain-browser (app:ui).
+  renderAccount({ state: "unauthenticated" });
+  await safeInvoke("restart_sidecar");
 }
 
 /**
