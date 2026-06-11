@@ -12,6 +12,14 @@
     <script type="module" src="./src/main.ts" defer></script>
   </head>
   <body>
+    <!-- Ambient "work in progress" indicator: a thin accent line that chases
+         across the top of the window while a transient operation runs (sign-in
+         polling, gh-reuse, sign-out, sidecar restart). Shown by main.ts via
+         data-busy on <html>. Distinct from the first-boot splash window. -->
+    <div class="busybar" data-busybar aria-hidden="true">
+      <span class="sr-only" data-busybar-label role="status" aria-live="polite"
+      ></span>
+    </div>
     <div class="app">
       <div class="shell">
         <nav class="sidebar" aria-label="Settings sections">
