@@ -13,11 +13,19 @@ const GITHUB_TOKEN_PATH = path.join(
   AUTH_APP,
   ENTERPRISE_PREFIX + "github_token",
 )
+// Multi-account registry (schema v2). Co-located with the legacy single-record
+// token file so it inherits the same oauth-app + enterprise-prefix namespacing.
+const ACCOUNTS_PATH = path.join(
+  APP_DIR,
+  AUTH_APP,
+  ENTERPRISE_PREFIX + "accounts.json",
+)
 const CONFIG_PATH = path.join(APP_DIR, "config.json")
 
 export const PATHS = {
   APP_DIR,
   GITHUB_TOKEN_PATH,
+  ACCOUNTS_PATH,
   CONFIG_PATH,
 }
 

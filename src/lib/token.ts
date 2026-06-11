@@ -14,11 +14,12 @@ import { pollAccessToken } from "~/services/github/poll-access-token"
 import { markAuthFatalAndSignOut as defaultMarkAuthFatalAndSignOut } from "./auth-controller"
 import { toCopilotHost } from "./auth-types"
 import { CopilotAuthFatalError, HTTPError } from "./error"
+import { currentGitHubHost } from "./github-host"
 import {
+  addAccountToDefaultRegistry,
   inferTokenType,
-  makeRecord,
+  makeAccountRecord,
   readDefaultRecord,
-  writeDefaultRecord,
 } from "./github-token-store"
 import { isHeadless, openUrl } from "./open-url"
 import { setCopilotToken, state } from "./state"
@@ -292,13 +293,37 @@ export async function setupGitHubToken(
     presentDeviceCode(response, options)
 
     const token = await pollAccessToken(response)
-    await writeDefaultRecord(makeRecord(token))
     state.githubToken = token
 
     if (state.showToken) {
       consola.info("GitHub token:", token)
     }
-    await logUser()
+
+    // Resolve the login best-effort so the account is keyed by its real
+    // `login@host`, but never lose the freshly-minted token if the lookup
+    // fails — persist regardless (under "unknown" in the worst case).
+    let login: string | null = null
+    try {
+      const user = await getGitHubUser(token)
+      login = user.login
+      // Single-flight CLI auth; `user` is freshly awaited, no interleaving.
+      // eslint-disable-next-line require-atomic-updates
+      state.userName = user.login
+    } catch (error) {
+      consola.warn(
+        "Couldn't fetch GitHub user; saving the account as 'unknown'.",
+        error,
+      )
+    }
+    await addAccountToDefaultRegistry(
+      makeAccountRecord({
+        login: login ?? "unknown",
+        host: currentGitHubHost(),
+        token,
+        addedVia: "device-code",
+      }),
+    )
+    consola.info(`Logged in as ${login ?? "(unknown)"}`)
   } catch (error) {
     if (error instanceof HTTPError) {
       consola.error("Failed to get GitHub token:", await error.response.json())

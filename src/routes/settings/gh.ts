@@ -9,7 +9,10 @@
 import { Hono } from "hono"
 
 import { forwardError, HTTPError } from "~/lib/error"
-import { makeRecord, writeDefaultRecord } from "~/lib/github-token-store"
+import {
+  addAccountToDefaultRegistry,
+  makeAccountRecord,
+} from "~/lib/github-token-store"
 import { detectGhCli, getGhAccountToken } from "~/services/gh-cli"
 import { getCopilotUsage } from "~/services/github/get-copilot-usage"
 
@@ -108,7 +111,11 @@ ghRoutes.post("/use", async (c) => {
       return c.json({ error: { message: preflightError } }, 422)
     }
 
-    await writeDefaultRecord(makeRecord(token))
+    // Persist as the active account (login+host from the validated request).
+    // The shell reboots into this config; we don't mutate running state here.
+    await addAccountToDefaultRegistry(
+      makeAccountRecord({ login, host, token, addedVia: "gh-cli" }),
+    )
     return c.json({ ok: true, login, host })
   } catch (error) {
     return await forwardError(c, error)

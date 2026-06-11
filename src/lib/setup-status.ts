@@ -25,7 +25,12 @@ import {
 import path from "node:path"
 
 import { AppConfigSchema } from "./config-schema"
-import { readGitHubTokenRecord } from "./github-token-store"
+import {
+  getActiveRecord,
+  readGitHubTokenRecord,
+  readRegistry,
+  registryPathFor,
+} from "./github-token-store"
 import { PATHS } from "./paths"
 
 export type SetupCheckName = "appDir" | "config" | "db" | "githubAuth"
@@ -150,14 +155,18 @@ function checkDb(file: string): SetupCheckResult {
 }
 
 async function checkGithubAuth(file: string): Promise<SetupCheckResult> {
-  if (!existsSync(file)) {
+  // Registry-aware: the active account's token, with the legacy single-record
+  // file as a fallback, now that sign-in writes the registry. The registry is
+  // the sibling `*accounts.json` of `file` (keeps the enterprise prefix), so a
+  // test passing a temp `file` stays isolated. `file` is still the reported
+  // path for the diagnostics line.
+  const active = getActiveRecord(await readRegistry(registryPathFor(file)))
+  const token =
+    active?.token ?? (await readGitHubTokenRecord(file))?.accessToken
+  if (!token) {
     return { ok: false, reason: "github_token missing", path: file }
   }
-  const record = await readGitHubTokenRecord(file)
-  if (!record) {
-    return { ok: false, reason: "github_token unreadable", path: file }
-  }
-  if (!record.accessToken || record.accessToken.length === 0) {
+  if (token.length === 0) {
     return { ok: false, reason: "github_token empty", path: file }
   }
   return { ok: true, path: file }

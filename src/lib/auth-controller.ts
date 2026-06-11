@@ -47,9 +47,11 @@ import type { ParsedCopilotError } from "./copilot-error-parser"
 import type { AuthStatus } from "./settings-types"
 
 import { CopilotAuthFatalError } from "./error"
+import { currentGitHubHost } from "./github-host"
 import {
-  makeRecord as defaultMakeRecord,
-  writeDefaultRecord as defaultWriteDefaultRecord,
+  addAccountToDefaultRegistry as defaultAddAccount,
+  makeAccountRecord,
+  removeActiveFromDefaultRegistry as defaultRemoveActiveAccount,
 } from "./github-token-store"
 import { PATHS } from "./paths"
 import { registerProcessCleanup } from "./process-cleanup"
@@ -62,14 +64,14 @@ import { setupCopilotToken } from "./token"
 // references via __setAuthControllerDepsForTests instead — keeping the
 // module registry untouched. Production callers don't see this layer.
 let pollAccessToken: typeof defaultPollAccessToken = defaultPollAccessToken
-let writeDefaultRecord: typeof defaultWriteDefaultRecord =
-  defaultWriteDefaultRecord
-let makeRecord: typeof defaultMakeRecord = defaultMakeRecord
+let addAccount: typeof defaultAddAccount = defaultAddAccount
+let removeActiveAccount: typeof defaultRemoveActiveAccount =
+  defaultRemoveActiveAccount
 
 export interface AuthControllerTestDeps {
   pollAccessToken?: typeof defaultPollAccessToken
-  writeDefaultRecord?: typeof defaultWriteDefaultRecord
-  makeRecord?: typeof defaultMakeRecord
+  addAccount?: typeof defaultAddAccount
+  removeActiveAccount?: typeof defaultRemoveActiveAccount
 }
 
 export function __setAuthControllerDepsForTests(
@@ -78,18 +80,18 @@ export function __setAuthControllerDepsForTests(
   if (overrides.pollAccessToken !== undefined) {
     pollAccessToken = overrides.pollAccessToken
   }
-  if (overrides.writeDefaultRecord !== undefined) {
-    writeDefaultRecord = overrides.writeDefaultRecord
+  if (overrides.addAccount !== undefined) {
+    addAccount = overrides.addAccount
   }
-  if (overrides.makeRecord !== undefined) {
-    makeRecord = overrides.makeRecord
+  if (overrides.removeActiveAccount !== undefined) {
+    removeActiveAccount = overrides.removeActiveAccount
   }
 }
 
 function resetAuthControllerDeps(): void {
   pollAccessToken = defaultPollAccessToken
-  writeDefaultRecord = defaultWriteDefaultRecord
-  makeRecord = defaultMakeRecord
+  addAccount = defaultAddAccount
+  removeActiveAccount = defaultRemoveActiveAccount
 }
 
 interface ActiveFlow {
@@ -263,15 +265,13 @@ async function runPoller(flow: ActiveFlow): Promise<void> {
 
     if (flow.abort.signal.aborted) return
 
-    await writeDefaultRecord(makeRecord(token))
-
-    // Populate the login BEFORE flipping to signed-in. The Account UI
-    // stops polling the instant it sees `authenticated` (it only re-fetches
-    // on re-navigation), so if signed-in appeared login-less the UI would
-    // latch "(unknown)" + a placeholder avatar until the user left and
-    // returned. Best-effort: a failure here does NOT invalidate the token —
-    // the user is still authenticated, the avatar falls back to a neutral
-    // placeholder, and cold-boot logUser() repopulates the login next start.
+    // Resolve the login BEFORE persisting so the account is keyed by its real
+    // `login@host` rather than "unknown". Best-effort: a failure here does NOT
+    // invalidate the token — we still persist (under "unknown"), the avatar
+    // falls back to a neutral placeholder, and cold-boot logUser() repopulates
+    // the login next start. Populating it before flipping to signed-in also
+    // keeps the Account UI from latching "(unknown)" — it stops polling the
+    // instant it sees `authenticated` and only re-fetches on re-navigation.
     let login: string | null = null
     try {
       const user = await getGitHubUser(token)
@@ -282,8 +282,17 @@ async function runPoller(flow: ActiveFlow): Promise<void> {
     }
 
     // Re-check abort: getGitHubUser is an awaited round-trip during which
-    // signOut() may have fired. Don't expose a token the user just cleared.
+    // signOut() may have fired. Don't persist/expose a token the user cleared.
     if (flow.abort.signal.aborted) return
+
+    await addAccount(
+      makeAccountRecord({
+        login: login ?? "unknown",
+        host: currentGitHubHost(),
+        token,
+        addedVia: "device-code",
+      }),
+    )
     state.githubToken = token
 
     // Best-effort: proactively mint the Copilot token so Diagnostics
@@ -363,7 +372,17 @@ export async function signOut(): Promise<void> {
   // produced it.
   clearLastUpstreamRejection()
 
-  // Delete the on-disk token. Tolerant of "already gone".
+  // Drop the active account from the registry (any other persisted accounts
+  // remain available for quick-switch). Behaviour-neutral for the single
+  // account case: the registry empties → next boot is unauthenticated.
+  try {
+    await removeActiveAccount()
+  } catch (err) {
+    consola.warn("Auth-controller: failed to update account registry:", err)
+  }
+
+  // Also delete the legacy single-record file so a slice-2 rollback doesn't
+  // resurrect the signed-out account. Tolerant of "already gone".
   try {
     const fs = await import("node:fs/promises")
     await fs.unlink(PATHS.GITHUB_TOKEN_PATH)

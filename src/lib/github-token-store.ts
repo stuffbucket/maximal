@@ -93,12 +93,29 @@ export async function readGitHubTokenRecord(
   return record
 }
 
+/**
+ * Atomic JSON write: serialize to a sibling temp file, fsync-free rename over
+ * the target. A torn write would otherwise lose every account in the registry
+ * (it's one multi-key blob), so the rename — atomic on POSIX — is the
+ * difference between "old contents intact" and "corrupt/empty file" on a crash
+ * mid-write. Mode 0o600 on the temp file so the secret is never world-readable
+ * even for the instant before the rename.
+ */
+async function writeJsonAtomic(
+  filePath: string,
+  value: unknown,
+): Promise<void> {
+  const json = `${JSON.stringify(value, null, 2)}\n`
+  const tmp = `${filePath}.tmp.${process.pid}`
+  await fs.writeFile(tmp, json, { mode: 0o600 })
+  await fs.rename(tmp, filePath)
+}
+
 export async function writeGitHubTokenRecord(
   filePath: string,
   record: GitHubTokenRecord,
 ): Promise<void> {
-  const json = `${JSON.stringify(record, null, 2)}\n`
-  await fs.writeFile(filePath, json, { mode: 0o600 })
+  await writeJsonAtomic(filePath, record)
 }
 
 export function makeRecord(
@@ -114,9 +131,248 @@ export function makeRecord(
   }
 }
 
-/** Production shorthands using the default path from `PATHS`. */
-export const readDefaultRecord = (): Promise<GitHubTokenRecord | null> =>
-  readGitHubTokenRecord(PATHS.GITHUB_TOKEN_PATH)
+// ---------------------------------------------------------------------------
+// Multi-account registry (schema v2)
+//
+// The single-record file above stores at most one identity. The registry holds
+// N accounts keyed by `login@host` with a pointer at the active one, so the UI
+// can quick-switch between them (set active → reboot into that config). It is
+// the source of truth; the legacy single-record file is kept only as a
+// migration input + read-fallback (see readDefaultRecord). Writes are atomic.
+// ---------------------------------------------------------------------------
 
-export const writeDefaultRecord = (record: GitHubTokenRecord): Promise<void> =>
-  writeGitHubTokenRecord(PATHS.GITHUB_TOKEN_PATH, record)
+export type AddedVia = "device-code" | "gh-cli" | "migration"
+
+/** One stored identity. `login@host` is the dedup key — re-adding the same
+ *  identity replaces the token (latest wins) rather than duplicating. */
+export interface AccountRecord {
+  login: string
+  host: string
+  token: string
+  tokenType: TokenType
+  addedVia: AddedVia
+  obtainedAt: string
+}
+
+/** Stable identity key. Hosts are gh's host format (`github.com` / a GHES
+ *  domain), so a maximal device-code account and the same gh-imported account
+ *  collapse to one entry. */
+export type AccountKey = string
+
+export interface AccountRegistry {
+  schemaVersion: 2
+  activeKey: AccountKey | null
+  accounts: Record<AccountKey, AccountRecord>
+}
+
+export function accountKey(login: string, host: string): AccountKey {
+  return `${login}@${host}`
+}
+
+export function emptyRegistry(): AccountRegistry {
+  return { schemaVersion: 2, activeKey: null, accounts: {} }
+}
+
+export function makeAccountRecord(opts: {
+  login: string
+  host: string
+  token: string
+  addedVia: AddedVia
+}): AccountRecord {
+  return {
+    login: opts.login,
+    host: opts.host,
+    token: opts.token,
+    tokenType: inferTokenType(opts.token),
+    addedVia: opts.addedVia,
+    obtainedAt: new Date().toISOString(),
+  }
+}
+
+/** Insert/replace `rec` by its `login@host` key and make it the active account.
+ *  Pure — returns a new registry; the caller persists it. */
+export function addAndActivate(
+  reg: AccountRegistry,
+  rec: AccountRecord,
+): AccountRegistry {
+  const key = accountKey(rec.login, rec.host)
+  return {
+    schemaVersion: 2,
+    activeKey: key,
+    accounts: { ...reg.accounts, [key]: rec },
+  }
+}
+
+/** Point `activeKey` at an existing account. No-op (returns input) if the key
+ *  isn't present, so a stale switch can't create a dangling pointer. */
+export function setActive(
+  reg: AccountRegistry,
+  key: AccountKey,
+): AccountRegistry {
+  if (!(key in reg.accounts)) return reg
+  return { ...reg, activeKey: key }
+}
+
+/** Drop an account. If it was active, `activeKey` falls back to null (caller
+ *  reboots into unauthenticated). */
+export function removeAccount(
+  reg: AccountRegistry,
+  key: AccountKey,
+): AccountRegistry {
+  if (!(key in reg.accounts)) return reg
+  const accounts = Object.fromEntries(
+    Object.entries(reg.accounts).filter(([k]) => k !== key),
+  )
+  return {
+    schemaVersion: 2,
+    activeKey: reg.activeKey === key ? null : reg.activeKey,
+    accounts,
+  }
+}
+
+export function getActiveRecord(reg: AccountRegistry): AccountRecord | null {
+  if (!reg.activeKey) return null
+  return reg.accounts[reg.activeKey] ?? null
+}
+
+export function listAccounts(
+  reg: AccountRegistry,
+): Array<AccountRecord & { key: AccountKey; active: boolean }> {
+  return Object.entries(reg.accounts).map(([key, rec]) => ({
+    ...rec,
+    key,
+    active: key === reg.activeKey,
+  }))
+}
+
+/** Read the registry, tolerating absence/corruption by returning empty. Never
+ *  throws — a bad registry file degrades to "no accounts", same as the
+ *  single-record reader. */
+export async function readRegistry(filePath: string): Promise<AccountRegistry> {
+  let raw: string
+  try {
+    raw = await fs.readFile(filePath, "utf8")
+  } catch {
+    return emptyRegistry()
+  }
+  const trimmed = raw.trim()
+  if (!trimmed) return emptyRegistry()
+  try {
+    const parsed = JSON.parse(trimmed) as Partial<AccountRegistry>
+    if (
+      parsed.schemaVersion === 2
+      && parsed.accounts
+      && typeof parsed.accounts === "object"
+    ) {
+      return {
+        schemaVersion: 2,
+        activeKey: parsed.activeKey ?? null,
+        accounts: parsed.accounts,
+      }
+    }
+  } catch {
+    /* fall through to empty */
+  }
+  return emptyRegistry()
+}
+
+export async function writeRegistry(
+  filePath: string,
+  reg: AccountRegistry,
+): Promise<void> {
+  await writeJsonAtomic(filePath, reg)
+}
+
+/**
+ * One-time upgrade of a legacy single-record token file into the registry.
+ * Gated: no-op (returns null) when the registry already holds accounts or no
+ * legacy token exists. The legacy file has only a token — no login/host — so
+ * the caller injects `resolveLogin` (a GitHub user lookup) and the `host` it
+ * derives from config. When the lookup fails (offline), the account is still
+ * migrated under `unknown@host` so the token isn't lost; a later sign-in keyed
+ * with a real login supersedes it. The legacy file is left in place as a
+ * rollback fallback — migration won't re-run because the registry is now
+ * non-empty.
+ */
+export async function migrateLegacyRecord(opts: {
+  legacyPath: string
+  registryPath: string
+  host: string
+  resolveLogin: (token: string) => Promise<string | null>
+}): Promise<AccountRegistry | null> {
+  const existing = await readRegistry(opts.registryPath)
+  if (Object.keys(existing.accounts).length > 0) return null
+
+  const legacy = await readGitHubTokenRecord(opts.legacyPath)
+  if (!legacy) return null
+
+  const login = (await opts.resolveLogin(legacy.accessToken)) ?? "unknown"
+  const rec = makeAccountRecord({
+    login,
+    host: opts.host,
+    token: legacy.accessToken,
+    addedVia: "migration",
+  })
+  // Preserve the legacy obtainedAt rather than stamping "now".
+  rec.obtainedAt = legacy.obtainedAt
+  const migrated = addAndActivate(emptyRegistry(), rec)
+  await writeRegistry(opts.registryPath, migrated)
+  return migrated
+}
+
+/** The registry file that sits beside a given legacy token file — same
+ *  directory, same enterprise prefix (`github_token` → `accounts.json`,
+ *  `ent_github_token` → `ent_accounts.json`). Lets a caller holding a token
+ *  path (e.g. setup-status, parameterised for test isolation) find the
+ *  matching registry without hard-coding `PATHS.ACCOUNTS_PATH`. */
+export function registryPathFor(tokenPath: string): string {
+  return tokenPath.replace(/github_token$/, "accounts.json")
+}
+
+/** Production shorthands using the default registry path from `PATHS`. */
+export const readDefaultRegistry = (): Promise<AccountRegistry> =>
+  readRegistry(PATHS.ACCOUNTS_PATH)
+
+export const writeDefaultRegistry = (reg: AccountRegistry): Promise<void> =>
+  writeRegistry(PATHS.ACCOUNTS_PATH, reg)
+
+/** Read-modify-write: add (or replace by `login@host`) an account, make it the
+ *  active one, persist. The shared path for every sign-in producer
+ *  (device-code, CLI, gh-reuse). */
+export async function addAccountToDefaultRegistry(
+  rec: AccountRecord,
+): Promise<void> {
+  const reg = await readDefaultRegistry()
+  await writeDefaultRegistry(addAndActivate(reg, rec))
+}
+
+/** Sign-out helper: drop the active account (keeping any others) and persist.
+ *  No-op when nothing is active. */
+export async function removeActiveFromDefaultRegistry(): Promise<void> {
+  const reg = await readDefaultRegistry()
+  if (!reg.activeKey) return
+  await writeDefaultRegistry(removeAccount(reg, reg.activeKey))
+}
+
+/**
+ * Back-compat read: "the active account's token", in the legacy record shape.
+ * Boot, the CLI auth reuse-check, setup-status, and debug all just want the
+ * active token, so they keep calling this unchanged. Falls back to the legacy
+ * single-record file when the registry is still empty (the pre-migration
+ * window, or a non-boot caller that hasn't migrated) so the token is never
+ * invisible. Read-only — does not migrate.
+ */
+export const readDefaultRecord =
+  async (): Promise<GitHubTokenRecord | null> => {
+    const active = getActiveRecord(await readDefaultRegistry())
+    if (active) {
+      return {
+        schemaVersion: 1,
+        tokenType: active.tokenType,
+        accessToken: active.token,
+        refreshToken: null,
+        obtainedAt: active.obtainedAt,
+      }
+    }
+    return readGitHubTokenRecord(PATHS.GITHUB_TOKEN_PATH)
+  }
