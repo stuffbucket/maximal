@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
+import { preflightCopilotError } from "~/lib/copilot-preflight"
 import { HTTPError } from "~/lib/error"
-import { preflightCopilotError } from "~/routes/settings/gh"
 
 const ok = () => Promise.resolve({ copilot_plan: "enterprise" })
 const throwsHttp = (status: number) => () =>

@@ -27,6 +27,7 @@ import {
 import { state } from "~/lib/state"
 import { getGitVersion, shortSha } from "~/lib/version"
 
+import { accountsRoutes } from "./accounts"
 import { apiKeysRoutes } from "./api-keys"
 import { appsRoutes } from "./apps"
 import { authRoutes } from "./auth"
@@ -89,6 +90,7 @@ settingsApiRoutes.get("/diagnostics", (c) => {
 
 settingsApiRoutes.route("/auth/github", authRoutes)
 settingsApiRoutes.route("/gh", ghRoutes)
+settingsApiRoutes.route("/accounts", accountsRoutes)
 settingsApiRoutes.route("/api-keys", apiKeysRoutes)
 settingsApiRoutes.route("/clients", clientsRoutes)
 settingsApiRoutes.route("/apps", appsRoutes)
