@@ -148,3 +148,30 @@ export async function detectGhCli(
     accounts,
   }
 }
+
+/**
+ * Read the stored token for a specific `gh` account via
+ * `gh auth token --hostname <host> --user <login>`. Returns null if gh can't
+ * produce one (not installed, account unknown to gh, keyring locked). The
+ * caller must have validated (login, host) against `detectGhCli().accounts`
+ * first — this does not gate which account it asks for. Never throws.
+ */
+export async function getGhAccountToken(
+  login: string,
+  host: string,
+  run: GhRunner = defaultRunner,
+): Promise<string | null> {
+  const result = await run([
+    "auth",
+    "token",
+    "--hostname",
+    host,
+    "--user",
+    login,
+  ]).catch(
+    (): GhRunResult => ({ stdout: "", stderr: "", code: 1, notFound: true }),
+  )
+  if (result.notFound || result.code !== 0) return null
+  const token = result.stdout.trim()
+  return token || null
+}
