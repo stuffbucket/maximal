@@ -835,10 +835,15 @@ async function pollAuthStatus(): Promise<void> {
 
 async function startAuth(): Promise<void> {
   stopAuthPolling();
+  // Show the ambient busy bar while the device-code request is in flight —
+  // matches signOut/useGhAccount, so no action fires without feedback.
+  setBusy(true, "Starting sign-in…");
   const result = await apiCall({
     kind: "auth-start",
     method: "POST",
     path: "/settings/api/auth/github/start",
+  }).finally(() => {
+    setBusy(false);
   });
   if (!result.ok) {
     renderAccount({
@@ -848,6 +853,19 @@ async function startAuth(): Promise<void> {
     return;
   }
   renderAccount(result.data);
+}
+
+/**
+ * Bail out of an in-progress device-code flow. Nothing has been minted yet,
+ * so POST /sign-out just aborts the server-side poller (and is a no-op on the
+ * absent token file) — no sidecar reboot needed. Drop straight back to the
+ * sign-in screen so the pending state is never a dead-end before the code
+ * expires.
+ */
+async function cancelAuth(): Promise<void> {
+  const ok = await performSignOut();
+  if (!ok) return;
+  renderAccount({ state: "unauthenticated" });
 }
 
 async function signOut(): Promise<void> {
@@ -1009,6 +1027,9 @@ function wireAccount(): void {
         break;
       case "sign-in-with-code":
         void signInWithCode(button);
+        break;
+      case "cancel-auth":
+        void cancelAuth();
         break;
       case "gh-use":
         void useGhAccount(button);

@@ -115,9 +115,11 @@ const {
   getAuthStatus,
   signOut,
   markSignedIn,
+  markAuthFatalAndSignOut,
   __resetAuthControllerForTests,
   __setAuthControllerDepsForTests,
 } = await import("~/lib/auth-controller")
+const { CopilotAuthFatalError } = await import("~/lib/error")
 const { state } = await import("~/lib/state")
 const { PATHS } = await import("~/lib/paths")
 const consolaMod = await import("consola")
@@ -513,6 +515,57 @@ describe("runPoller (driven by startDeviceFlow)", () => {
     const status = getAuthStatus()
     expect(status.state).toBe("authenticated")
     expect(status.account_login).toBeUndefined()
+  })
+
+  test("fatal Copilot rejection after sign-in surfaces the error, never latches signed-in", async () => {
+    // setupCopilotToken mimics production: a 401/403 from Copilot (license
+    // revoked / TOS unaccepted) routes through markAuthFatalAndSignOut — which
+    // wipes the token AND sets the error state — then rethrows. runPoller must
+    // NOT paper a signed-in UI over that wiped session and bury the reason.
+    const poll = deferred<string>()
+    harness.pollAccessTokenImpl = () => poll.promise
+    harness.getGitHubUserImpl = () => Promise.resolve({ login: "alice" })
+    const fatal = new CopilotAuthFatalError(
+      "Copilot license revoked",
+      403,
+      "https://github.com/settings/copilot",
+    )
+    harness.setupCopilotTokenImpl = async () => {
+      await markAuthFatalAndSignOut(fatal)
+      throw fatal
+    }
+
+    await startDeviceFlow()
+    poll.resolve("ghu_no_copilot")
+    await flushMicrotasks(20)
+
+    const status = getAuthStatus()
+    expect(status.state).toBe("error")
+    expect(status.error).toBe("Copilot license revoked")
+    // The session was wiped by markAuthFatalAndSignOut — never left signed-in.
+    expect(state.githubToken).toBeUndefined()
+  })
+
+  test("signOut during the Copilot-mint await wins — no signed-in over a wiped session", async () => {
+    // Poller resolves the token + login, then parks on setupCopilotToken. The
+    // user signs out during that await; when the mint resolves, the abort
+    // re-check must short-circuit instead of latching signed-in.
+    const poll = deferred<string>()
+    harness.pollAccessTokenImpl = () => poll.promise
+    harness.getGitHubUserImpl = () => Promise.resolve({ login: "alice" })
+    const mint = deferred<undefined>()
+    harness.setupCopilotTokenImpl = () => mint.promise
+
+    await startDeviceFlow()
+    poll.resolve("ghu_tok")
+    await flushMicrotasks(20)
+
+    await signOut()
+    mint.resolve(undefined)
+    await flushMicrotasks(20)
+
+    expect(getAuthStatus().state).toBe("unauthenticated")
+    expect(state.githubToken).toBeUndefined()
   })
 
   test("poll error emits the 'device-code poll terminated' warn with the message", async () => {

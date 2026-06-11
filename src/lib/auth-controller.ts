@@ -44,9 +44,9 @@ import { getGitHubUser } from "~/services/github/get-user"
 import { pollAccessToken as defaultPollAccessToken } from "~/services/github/poll-access-token"
 
 import type { ParsedCopilotError } from "./copilot-error-parser"
-import type { CopilotAuthFatalError } from "./error"
 import type { AuthStatus } from "./settings-types"
 
+import { CopilotAuthFatalError } from "./error"
 import {
   makeRecord as defaultMakeRecord,
   writeDefaultRecord as defaultWriteDefaultRecord,
@@ -294,12 +294,26 @@ async function runPoller(flow: ActiveFlow): Promise<void> {
     try {
       await setupCopilotToken()
     } catch (err) {
+      if (err instanceof CopilotAuthFatalError) {
+        // The account authenticated with GitHub but has no usable Copilot
+        // (license revoked, TOS not accepted, 401/403). setupCopilotToken
+        // already routed this through markAuthFatalAndSignOut, which wiped
+        // the token + on-disk record and set authState to the fatal error
+        // (with its remediation URL). Returning preserves that — falling
+        // through to signed-in would paper a "signed in" UI over a wiped
+        // token and bury the reason the user needs to act on.
+        return
+      }
       consola.warn(
         "Auth-controller: failed to mint Copilot token after sign-in:",
         err,
       )
     }
 
+    // Re-check abort: setupCopilotToken is an awaited round-trip during which
+    // signOut() may have fired and wiped the token. Don't latch signed-in over
+    // a just-cleared session.
+    if (flow.abort.signal.aborted) return
     authState = { kind: "signed-in", login }
   } catch (err) {
     if (flow.abort.signal.aborted) return
