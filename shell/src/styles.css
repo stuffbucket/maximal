@@ -235,6 +235,91 @@ a:hover {
   color: var(--text-muted);
 }
 
+/* ---- gh-reuse: alternate sign-in via an existing GitHub CLI login ----
+   A secondary path inside the unauthenticated account state. Chrome-free
+   like its sibling auth states (see .state); a thin "or" rule separates it
+   from the primary device-code button, and each detected account is a list
+   row (not a card — these are alternatives to one another, not
+   independently-managed entities). All values are tokens. */
+.gh-reuse {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-width: 65ch;
+}
+
+.gh-reuse[hidden] {
+  display: none;
+}
+
+/* Centered "or" rule between the device-code button and the gh list. */
+.gh-reuse__divider {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.gh-reuse__divider::before,
+.gh-reuse__divider::after {
+  content: "";
+  flex: 1 1 auto;
+  height: var(--border-width-hairline);
+  background: var(--border-subtle);
+}
+
+.gh-account-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* One account = one row. Control-surface fill (one step off the pane) so
+   rows read as grouped choices without full card chrome. */
+.gh-account {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-control);
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-input);
+}
+
+.gh-account__dot {
+  flex: 0 0 auto;
+}
+
+.gh-account__id {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.gh-account__login {
+  font-size: var(--text-base);
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+  word-break: break-word;
+}
+
+.gh-account__host {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+/* Static state change, no transition — instant in all motion modes by
+   omission (reduced-motion contract; do not add a transition here). */
+.gh-account[aria-busy="true"] {
+  opacity: 0.7;
+}
+
 /* ---- Requirement callout ----
    A first-launch signal that this app needs a GitHub Copilot
    subscription to function. Sits above the body copy in the
