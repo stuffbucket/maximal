@@ -108,6 +108,33 @@ export const AuthStatus = z.object({
 })
 export type AuthStatus = z.infer<typeof AuthStatus>
 
+// ---------------------------------------------------------------------------
+// Multi-account roster — Settings → Account quick-switch (slice 3).
+//
+// The persisted accounts maximal can switch between. Tokens are NEVER
+// included — only identity + provenance, like the auth status above redacts
+// the credential.
+// ---------------------------------------------------------------------------
+
+export const AccountSummary = z.object({
+  /** Stable identity key, `login@host`. */
+  key: z.string(),
+  login: z.string(),
+  host: z.string(),
+  /** How this account entered the registry. */
+  added_via: z.enum(["device-code", "gh-cli", "migration"]),
+  obtained_at: z.string(),
+  /** Whether this is the account the proxy is (or will boot) signed in as. */
+  active: z.boolean(),
+})
+export type AccountSummary = z.infer<typeof AccountSummary>
+
+export const AccountsListResponse = z.object({
+  accounts: z.array(AccountSummary),
+  active_key: z.string().nullable(),
+})
+export type AccountsListResponse = z.infer<typeof AccountsListResponse>
+
 /**
  * An API-key entry as managed by Settings → API clients. The key value
  * is returned in full to the local Settings UI — the endpoint is
