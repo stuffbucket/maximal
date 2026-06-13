@@ -915,24 +915,19 @@ fn kill_sidecar(app: &AppHandle) {
             libc::kill(pid, libc::SIGTERM);
         }
 
-        // Stash the child back so the escalation task can decide
-        // whether it still needs SIGKILL. If the sidecar exits
-        // cleanly within 3s, the child handle goes out of scope here
-        // and that's fine — killing an already-exited child is a
-        // harmless no-op.
-        app.state::<Sidecar>().set(child);
-
-        // Plain OS thread for the 3s grace timer rather than pulling
-        // a tokio runtime in for this single sleep. AppHandle::clone()
-        // is Arc-cheap.
-        let app_handle = app.clone();
+        // MOVE the old child into the escalation thread — do NOT put it back
+        // in the shared Sidecar slot. respawn_sidecar calls spawn_sidecar
+        // immediately after us, which set()s the REPLACEMENT child into that
+        // slot; if this escalation re-read the slot it would SIGKILL the FRESH
+        // sidecar ~3s after a restart (the proxy would vanish from :4141 and
+        // the whole UI would "Load failed" — the account-switch/sign-in/
+        // sign-out reboot bug). Holding the specific old child here SIGKILLs
+        // only it. Dropping a CommandChild does NOT kill its process, so
+        // leaving the slot empty until spawn_sidecar fills it is safe.
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_secs(3));
-            if let Some(child) = app_handle.state::<Sidecar>().take() {
-                // Still alive (or at least, still in our slot) after
-                // the grace period — escalate to SIGKILL.
-                let _ = child.kill();
-            }
+            // No-op if the SIGTERM above already made it exit.
+            let _ = child.kill();
         });
     }
 
