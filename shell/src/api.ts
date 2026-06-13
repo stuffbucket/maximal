@@ -308,14 +308,18 @@ type ApiResult<T> =
 function baseUrl(): string {
   // Vite injects import.meta.env.DEV at build time. In production the shell
   // loads from the sidecar's own origin via the Tauri window URL, so a
-  // relative path resolves to the same origin — correct regardless of port.
-  // In dev (`app:ui`), Vite serves the UI on its own port while the proxy
-  // runs separately, so we absolute-prefix. Default to :4142 to match
-  // CLAUDE.md's fast-iteration workflow (`bun run dev start --port 4142`,
-  // the sidecar's port); override with VITE_API_BASE to point elsewhere.
+  // relative path resolves to the same origin.
+  //
+  // In dev the webview is the Vite server on its own port, so we must
+  // absolute-prefix the proxy. Default to :4141 — the canonical Maximal /
+  // SIDECAR_PORT (shell/src-tauri/src/lib.rs). `bun run app:dev` runs the real
+  // sidecar there, so the default MUST be :4141 or the whole settings UI hits
+  // a dead port. For `app:ui` against a proxy on a different port (e.g. a
+  // second `bun run dev start --port 4142` alongside a running app:dev), set
+  // VITE_API_BASE to override.
   if (import.meta.env.DEV) {
     const override = import.meta.env.VITE_API_BASE as string | undefined
-    return override ?? "http://localhost:4142"
+    return override ?? "http://localhost:4141"
   }
   return ""
 }
