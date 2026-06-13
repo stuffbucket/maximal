@@ -17,6 +17,7 @@ permissions = [
   "allow-open-dashboard",
   "allow-reveal-config-dir",
   "allow-reveal-logs-dir",
+  "allow-restart-sidecar",
   "allow-get-shell-api-key",
   "allow-subscribe-token-usage",
 ]
@@ -40,6 +41,11 @@ commands.allow = ["reveal_config_dir"]
 identifier = "allow-reveal-logs-dir"
 description = "Reveal the maximal logs directory in Finder/Explorer."
 commands.allow = ["reveal_logs_dir"]
+
+[[permission]]
+identifier = "allow-restart-sidecar"
+description = "Reboot the proxy sidecar into the on-disk config — the final step of an account switch / sign-in / sign-out, invoked from the Settings webview (a 'remote' loopback origin, so it needs an explicit permission)."
+commands.allow = ["restart_sidecar"]
 
 [[permission]]
 identifier = "allow-get-shell-api-key"
