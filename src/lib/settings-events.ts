@@ -26,8 +26,6 @@ export interface SettingsEventMap {
   "auth.changed": AuthStatus
 }
 
-export type SettingsEventName = keyof SettingsEventMap
-
 export const settingsEventBus = new EventBus<SettingsEventMap>()
 
 /**
