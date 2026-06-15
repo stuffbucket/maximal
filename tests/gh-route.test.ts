@@ -2,118 +2,69 @@
  * /settings/api/gh/* — read-only hinting + adopt-a-gh-account flow.
  *
  * Previously uncovered: `src/routes/settings/gh.ts` was at 0% function
- * coverage despite being the route the shell calls every time the user
- * clicks "Use this gh account" in the Account section. The shell-side
- * behaviors (showGhError, useGhAccount in shell/src/main.ts) depend on
- * the specific status codes + error shapes this route emits.
+ * coverage. The shell's "Use this gh account" affordance depends on this
+ * route's specific status codes + error shapes.
  *
- * `gh-cli` (the binary wrapper) is mocked via injectable `__set*ForTests`-
- * style overrides — we mock.module here for the gh-cli service and for
- * the preflight helper so the route can be exercised end-to-end without
- * spawning gh or hitting GitHub.
+ * Implementation uses DI via `createGhRoutes(deps)` (NOT mock.module —
+ * see docs/decisions/0011-mock-module-leakage-discipline.md and
+ * docs/architecture.md § Testing gotchas). Each test constructs its own
+ * routes instance with in-process stubs, so nothing leaks to sibling
+ * test files that import the real ~/services/gh-cli or
+ * ~/lib/copilot-preflight modules.
  */
 
-import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test"
+import { beforeEach, describe, expect, test } from "bun:test"
 import { Hono } from "hono"
 
-// --- Mocks before importing the route ------------------------------------
+import type { GhRoutesDeps } from "~/routes/settings/gh"
+import type { GhCliStatus } from "~/services/gh-cli"
 
-interface GhCliStatus {
-  installed: boolean
-  version: string | null
-  accounts: Array<{
-    login: string
-    host: string
-    active: boolean
-    scopes: Array<string>
-  }>
+import { createGhRoutes } from "~/routes/settings/gh"
+
+interface AddAccountSpy {
+  calls: Array<{ login: string; host: string; token: string }>
 }
 
-const ghMocks = {
-  detectGhCli: (): Promise<GhCliStatus> =>
-    Promise.resolve({ installed: false, version: null, accounts: [] }),
-  getGhAccountToken: (_login: string, _host: string): Promise<string | null> =>
-    Promise.resolve(null),
+function buildDeps(overrides: Partial<GhRoutesDeps> = {}): {
+  deps: Partial<GhRoutesDeps>
+  addAccountSpy: AddAccountSpy
+} {
+  const addAccountSpy: AddAccountSpy = { calls: [] }
+  const deps: Partial<GhRoutesDeps> = {
+    detectGhCli: () =>
+      Promise.resolve({ installed: false, version: null, accounts: [] }),
+    getGhAccountToken: () => Promise.resolve(null),
+    preflightCopilotError: () => Promise.resolve(null),
+    addAccountToDefaultRegistry: (rec) => {
+      addAccountSpy.calls.push({
+        login: rec.login,
+        host: rec.host,
+        token: rec.token,
+      })
+      return Promise.resolve()
+    },
+    ...overrides,
+  }
+  return { deps, addAccountSpy }
 }
-const preflightMock = {
-  preflightCopilotError: (
-    _token: string,
-    _login: string,
-  ): Promise<string | null> => Promise.resolve(null),
-}
-const storeMock = {
-  addAccountCalls: [] as Array<{ login: string; host: string; token: string }>,
-}
 
-const realGhCli = await import("~/services/gh-cli")
-const realPreflight = await import("~/lib/copilot-preflight")
-const realStore = await import("~/lib/github-token-store")
-
-void mock.module("~/services/gh-cli", () => ({
-  ...realGhCli,
-  detectGhCli: () => ghMocks.detectGhCli(),
-  getGhAccountToken: (login: string, host: string) =>
-    ghMocks.getGhAccountToken(login, host),
-}))
-
-void mock.module("~/lib/copilot-preflight", () => ({
-  ...realPreflight,
-  preflightCopilotError: (token: string, login: string) =>
-    preflightMock.preflightCopilotError(token, login),
-}))
-
-void mock.module("~/lib/github-token-store", () => ({
-  ...realStore,
-  addAccountToDefaultRegistry: (rec: {
-    login: string
-    host: string
-    token: string
-  }) => {
-    storeMock.addAccountCalls.push({
-      login: rec.login,
-      host: rec.host,
-      token: rec.token,
-    })
-    return Promise.resolve()
-  },
-}))
-
-afterAll(() => {
-  void mock.module("~/services/gh-cli", () => realGhCli)
-  void mock.module("~/lib/copilot-preflight", () => realPreflight)
-  void mock.module("~/lib/github-token-store", () => realStore)
-})
-
-const { createAuthMiddleware } = await import("~/lib/request-auth")
-const { settingsApiRoutes } = await import("~/routes/settings/api")
-
-function buildApp() {
+function mountAt(deps: Partial<GhRoutesDeps>): Hono {
   const app = new Hono()
-  app.use(
-    "*",
-    createAuthMiddleware({
-      getApiKeys: () => [],
-      isEnforcing: () => false,
-      allowUnauthenticatedPaths: ["/", "/usage-viewer"],
-    }),
-  )
-  app.route("/settings/api", settingsApiRoutes)
+  app.route("/settings/api/gh", createGhRoutes(deps))
   return app
 }
 
+let addAccountSpy: AddAccountSpy
 beforeEach(() => {
-  ghMocks.detectGhCli = () =>
-    Promise.resolve({ installed: false, version: null, accounts: [] })
-  ghMocks.getGhAccountToken = () => Promise.resolve(null)
-  preflightMock.preflightCopilotError = () => Promise.resolve(null)
-  storeMock.addAccountCalls = []
+  addAccountSpy = { calls: [] }
 })
 
 // --- GET /status ---------------------------------------------------------
 
 describe("GET /settings/api/gh/status", () => {
   test("returns gh-not-installed payload as-is", async () => {
-    const app = buildApp()
+    const { deps } = buildDeps()
+    const app = mountAt(deps)
     const res = await app.request("/settings/api/gh/status")
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({
@@ -124,20 +75,20 @@ describe("GET /settings/api/gh/status", () => {
   })
 
   test("returns the detected accounts list", async () => {
-    ghMocks.detectGhCli = () =>
-      Promise.resolve({
-        installed: true,
-        version: "2.50.0",
-        accounts: [
-          {
-            login: "alice",
-            host: "github.com",
-            active: true,
-            scopes: ["repo", "read:org"],
-          },
-        ],
-      })
-    const app = buildApp()
+    const status: GhCliStatus = {
+      installed: true,
+      version: "2.50.0",
+      accounts: [
+        {
+          login: "alice",
+          host: "github.com",
+          active: true,
+          scopes: ["repo", "read:org"],
+        },
+      ],
+    }
+    const { deps } = buildDeps({ detectGhCli: () => Promise.resolve(status) })
+    const app = mountAt(deps)
     const res = await app.request("/settings/api/gh/status")
     expect(res.status).toBe(200)
     const body = (await res.json()) as GhCliStatus
@@ -151,7 +102,8 @@ describe("GET /settings/api/gh/status", () => {
 
 describe("POST /settings/api/gh/use — input validation", () => {
   test("rejects missing body with 400", async () => {
-    const app = buildApp()
+    const { deps } = buildDeps()
+    const app = mountAt(deps)
     const res = await app.request("/settings/api/gh/use", { method: "POST" })
     expect(res.status).toBe(400)
     const body = (await res.json()) as { error: { message: string } }
@@ -159,7 +111,8 @@ describe("POST /settings/api/gh/use — input validation", () => {
   })
 
   test("rejects empty login with 400", async () => {
-    const app = buildApp()
+    const { deps } = buildDeps()
+    const app = mountAt(deps)
     const res = await app.request("/settings/api/gh/use", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -169,7 +122,8 @@ describe("POST /settings/api/gh/use — input validation", () => {
   })
 
   test("rejects empty host with 400", async () => {
-    const app = buildApp()
+    const { deps } = buildDeps()
+    const app = mountAt(deps)
     const res = await app.request("/settings/api/gh/use", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -181,22 +135,23 @@ describe("POST /settings/api/gh/use — input validation", () => {
 
 // --- POST /use security: requested account must be one gh actually reports
 
+function aliceOnGithubCom(): GhCliStatus {
+  return {
+    installed: true,
+    version: "2.50.0",
+    accounts: [
+      { login: "alice", host: "github.com", active: true, scopes: [] },
+    ],
+  }
+}
+
 describe("POST /settings/api/gh/use — must be a known gh account", () => {
   test("returns 404 when login is not in gh's account list", async () => {
-    ghMocks.detectGhCli = () =>
-      Promise.resolve({
-        installed: true,
-        version: "2.50.0",
-        accounts: [
-          {
-            login: "alice",
-            host: "github.com",
-            active: true,
-            scopes: [],
-          },
-        ],
-      })
-    const app = buildApp()
+    const built = buildDeps({
+      detectGhCli: () => Promise.resolve(aliceOnGithubCom()),
+    })
+    addAccountSpy = built.addAccountSpy
+    const app = mountAt(built.deps)
     const res = await app.request("/settings/api/gh/use", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -206,57 +161,45 @@ describe("POST /settings/api/gh/use — must be a known gh account", () => {
     const body = (await res.json()) as { error: { message: string } }
     expect(body.error.message).toMatch(/no account/i)
     // Invariant: a 404 must NOT persist anything to the registry.
-    expect(storeMock.addAccountCalls.length).toBe(0)
+    expect(addAccountSpy.calls.length).toBe(0)
   })
 
   test("returns 404 when host doesn't match", async () => {
-    ghMocks.detectGhCli = () =>
-      Promise.resolve({
-        installed: true,
-        version: "2.50.0",
-        accounts: [
-          {
-            login: "alice",
-            host: "github.com",
-            active: true,
-            scopes: [],
-          },
-        ],
-      })
-    const app = buildApp()
+    const built = buildDeps({
+      detectGhCli: () => Promise.resolve(aliceOnGithubCom()),
+    })
+    addAccountSpy = built.addAccountSpy
+    const app = mountAt(built.deps)
     const res = await app.request("/settings/api/gh/use", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ login: "alice", host: "ghe.example.com" }),
     })
     expect(res.status).toBe(404)
-    expect(storeMock.addAccountCalls.length).toBe(0)
+    expect(addAccountSpy.calls.length).toBe(0)
   })
 })
 
 // --- POST /use failure modes --------------------------------------------
 
-function configureKnownAlice(): void {
-  ghMocks.detectGhCli = () =>
-    Promise.resolve({
-      installed: true,
-      version: "2.50.0",
-      accounts: [
-        {
-          login: "alice",
-          host: "github.com",
-          active: true,
-          scopes: [],
-        },
-      ],
-    })
+function aliceKnown(): GhCliStatus {
+  return {
+    installed: true,
+    version: "2.50.0",
+    accounts: [
+      { login: "alice", host: "github.com", active: true, scopes: [] },
+    ],
+  }
 }
 
 describe("POST /settings/api/gh/use — failure modes", () => {
   test("returns 502 when gh reports the account but the token read fails", async () => {
-    configureKnownAlice()
-    ghMocks.getGhAccountToken = () => Promise.resolve(null)
-    const app = buildApp()
+    const built = buildDeps({
+      detectGhCli: () => Promise.resolve(aliceKnown()),
+      getGhAccountToken: () => Promise.resolve(null),
+    })
+    addAccountSpy = built.addAccountSpy
+    const app = mountAt(built.deps)
     const res = await app.request("/settings/api/gh/use", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -266,15 +209,18 @@ describe("POST /settings/api/gh/use — failure modes", () => {
     const body = (await res.json()) as { error: { message: string } }
     expect(body.error.message).toMatch(/could not read.*token/i)
     // Invariant: a 502 must NOT persist anything.
-    expect(storeMock.addAccountCalls.length).toBe(0)
+    expect(addAccountSpy.calls.length).toBe(0)
   })
 
   test("returns 422 with the specific preflight message when Copilot rejects the gh token", async () => {
-    configureKnownAlice()
-    ghMocks.getGhAccountToken = () => Promise.resolve("gho_stale")
-    preflightMock.preflightCopilotError = () =>
-      Promise.resolve("Token expired or revoked for alice.")
-    const app = buildApp()
+    const built = buildDeps({
+      detectGhCli: () => Promise.resolve(aliceKnown()),
+      getGhAccountToken: () => Promise.resolve("gho_stale"),
+      preflightCopilotError: () =>
+        Promise.resolve("Token expired or revoked for alice."),
+    })
+    addAccountSpy = built.addAccountSpy
+    const app = mountAt(built.deps)
     const res = await app.request("/settings/api/gh/use", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -284,7 +230,7 @@ describe("POST /settings/api/gh/use — failure modes", () => {
     const body = (await res.json()) as { error: { message: string } }
     expect(body.error.message).toBe("Token expired or revoked for alice.")
     // Invariant: a preflight failure must NOT persist a stale token.
-    expect(storeMock.addAccountCalls.length).toBe(0)
+    expect(addAccountSpy.calls.length).toBe(0)
   })
 })
 
@@ -292,23 +238,13 @@ describe("POST /settings/api/gh/use — failure modes", () => {
 
 describe("POST /settings/api/gh/use — success path", () => {
   test("returns { ok: true, login, host } and persists exactly one account", async () => {
-    ghMocks.detectGhCli = () =>
-      Promise.resolve({
-        installed: true,
-        version: "2.50.0",
-        accounts: [
-          {
-            login: "alice",
-            host: "github.com",
-            active: true,
-            scopes: ["repo"],
-          },
-        ],
-      })
-    ghMocks.getGhAccountToken = () => Promise.resolve("gho_real")
-    preflightMock.preflightCopilotError = () => Promise.resolve(null)
-
-    const app = buildApp()
+    const built = buildDeps({
+      detectGhCli: () => Promise.resolve(aliceKnown()),
+      getGhAccountToken: () => Promise.resolve("gho_real"),
+      preflightCopilotError: () => Promise.resolve(null),
+    })
+    addAccountSpy = built.addAccountSpy
+    const app = mountAt(built.deps)
     const res = await app.request("/settings/api/gh/use", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -322,8 +258,8 @@ describe("POST /settings/api/gh/use — success path", () => {
     })
 
     // Invariant: exactly the requested account was persisted, with the
-    // token gh handed us (not the request body, which carries no token).
-    expect(storeMock.addAccountCalls).toEqual([
+    // token gh handed us.
+    expect(addAccountSpy.calls).toEqual([
       { login: "alice", host: "github.com", token: "gho_real" },
     ])
   })
