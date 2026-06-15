@@ -12,6 +12,7 @@ import {
   markSignedOut,
 } from "./lib/auth-controller"
 import { type AccountType, parseAccountType } from "./lib/auth-types"
+import { removeLegacyShimIfPresent } from "./lib/claude-cli-detect"
 import {
   reconcileClaudeCodeOnBoot,
   reconcileClaudeCodeOnShutdown,
@@ -214,6 +215,18 @@ export async function runServer(options: RunServerOptions): Promise<void> {
 
   await ensurePaths()
   bootSecrets()
+
+  // One-shot cleanup of the pre-v0.4.13 ~/.local/share/maximal/shims/claude
+  // wrapper, which is now orphaned (we route via ~/.claude/settings.json
+  // instead). The shim emits 'maximal: the claude binary this shim wrapped
+  // is gone' when its hard-coded versioned target disappears on Claude
+  // auto-update, which breaks `claude` invocations until manually removed.
+  // Idempotent; only deletes a file carrying the SHIM_MARKER.
+  const removedShim = removeLegacyShimIfPresent()
+  if (removedShim) {
+    consola.info(`Removed legacy Claude Code shim at ${removedShim}`)
+  }
+
   await cacheVSCodeVersion()
   cacheMacMachineId()
   cacheVsCodeSessionId()
