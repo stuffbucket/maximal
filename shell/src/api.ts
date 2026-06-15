@@ -28,45 +28,17 @@ import type {
   AccountsListResponse,
   ApiKeyEntry,
   ApiKeysListResponse,
+  AuthStatus,
   DiagnosticsResponse,
+  UpstreamRejection,
 } from "../../src/lib/settings-types"
 
-const TIMEOUT_MS = 5000
+// Re-export so existing shell call sites that pull the type from
+// "./api" keep working. AuthStatus is owned by src/lib/settings-types
+// (ADR-0005/0006) — the shell does NOT redeclare it.
+export type { AuthStatus, UpstreamRejection }
 
-/**
- * GitHub device-flow auth status. Mirrors the contract owned by
- * the proxy's `/settings/api/auth/github/*` endpoints. Kept in
- * sync by name — if the backend renames a field, this breaks.
- */
-export interface AuthStatus {
-  state:
-    | "unauthenticated"
-    | "device_code_issued"
-    | "polling"
-    | "authenticated"
-    | "error"
-  user_code?: string
-  verification_uri?: string
-  expires_at?: string
-  account_login?: string
-  error?: string
-  /** Set on `error` state when GHCP pointed at a recovery page in its
-   *  401/403 body (TOS acceptance, Copilot settings). The UI renders
-   *  it as a clickable link below the error message. */
-  remediation_url?: string
-  /** Last non-fatal upstream rejection from a completion endpoint
-   *  (quota exhausted, model not on plan, transient upstream error).
-   *  Distinct from `error`/`remediation_url` (which describe the
-   *  GitHub-token state itself) — this rides along on any state and
-   *  clears on the next successful completion. The UI renders it as
-   *  a banner without changing the authenticated indicator. */
-  last_upstream_rejection?: {
-    message: string
-    status: number
-    at: string
-    remediation_url?: string
-  }
-}
+const TIMEOUT_MS = 5000
 
 interface AuthSignOutResponse {
   ok: true

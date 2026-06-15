@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 import type { DiagnosticsResponse } from "../../src/lib/settings-types";
-import type { AuthStatus } from "./api";
+import type { AuthStatus, UpstreamRejection } from "./api";
 import { apiCall } from "./api";
 import { mountApiClients } from "./api-clients-island";
 import { mountApps } from "./apps-island";
@@ -395,10 +395,26 @@ function schedulePoll(): void {
 }
 
 function accountKeyFor(state: AuthStatus["state"]): AccountStateKey {
-  if (state === "device_code_issued" || state === "polling") return "pending";
-  if (state === "authenticated") return "authenticated";
-  if (state === "error") return "error";
-  return "unauthenticated";
+  // Exhaustive over AuthStatus["state"] (ADR-0006). A new variant added
+  // to the union surfaces as a `never` compile error here instead of
+  // silently falling through to "unauthenticated" — which is the bug
+  // class that hid the upstream-rejection + gh-reuse state additions.
+  switch (state) {
+    case "device_code_issued":
+    case "polling":
+      return "pending";
+    case "authenticated":
+      return "authenticated";
+    case "error":
+      return "error";
+    case "unauthenticated":
+      return "unauthenticated";
+    default: {
+      const _exhaust: never = state;
+      void _exhaust;
+      return "unauthenticated";
+    }
+  }
 }
 
 function accountSlot(name: string): HTMLElement | null {
@@ -422,11 +438,12 @@ function setAccountField(name: string, value: string): void {
 function renderAccountAvatar(login: string): void {
   const slot = accountSlot("account_avatar");
   if (!slot) return;
-  // "(unknown)" is the sentinel renderAccount() substitutes when the proxy
-  // reports authenticated without a login. Treat it (and an empty string)
-  // as "no real login" so the placeholder shows a neutral "?" rather than
-  // the sentinel's first character "(".
-  const isPlaceholder = !login || login === "(unknown)";
+  // ADR-0006: the controller emits the literal "unknown" string on the
+  // `authenticated` variant when getGitHubUser failed best-effort (the
+  // token works but the login lookup didn't). Treat that — and an empty
+  // string — as a placeholder trigger so the avatar shows a neutral "?"
+  // rather than the letter "u".
+  const isPlaceholder = !login || login === "unknown";
   const initial = isPlaceholder ? "?" : (login[0] ?? "?").toUpperCase();
   slot.textContent = "";
   slot.classList.remove("signed-in-hero__avatar--fallback");
@@ -510,7 +527,7 @@ function rejectionExplanation(status: number): string {
 }
 
 function renderUpstreamRejection(
-  rejection: AuthStatus["last_upstream_rejection"],
+  rejection: UpstreamRejection | undefined,
 ): void {
   const wrapper = accountSlot("upstream_rejection");
   if (!wrapper) return;
@@ -575,35 +592,53 @@ function renderAccount(status: AuthStatus): void {
     card.hidden = card.dataset.stateAccount !== active;
   }
 
-  if (active === "pending") {
-    setAccountField("user_code", status.user_code ?? "…");
-    setAccountField("expires_at", formatExpiresAt(status.expires_at));
-    const link = accountSlot("verification_uri");
-    if (link instanceof HTMLAnchorElement) {
-      const uri = status.verification_uri ?? "https://github.com/login/device";
-      link.href = uri;
-      link.textContent = uri.replace(/^https?:\/\//, "");
+  // ADR-0006: switch on the discriminator so the compiler narrows per
+  // branch. Each variant declares exactly the fields it carries; the
+  // previous `?? "(unknown)"` / `?? "…"` / `?? "https://…"` fallbacks
+  // are gone because the union guarantees presence.
+  switch (status.state) {
+    case "device_code_issued":
+    case "polling": {
+      setAccountField("user_code", status.user_code);
+      setAccountField("expires_at", formatExpiresAt(status.expires_at));
+      const link = accountSlot("verification_uri");
+      if (link instanceof HTMLAnchorElement) {
+        link.href = status.verification_uri;
+        link.textContent = status.verification_uri.replace(/^https?:\/\//, "");
+      }
+      break;
     }
-  } else if (active === "authenticated") {
-    const login = status.account_login ?? "(unknown)";
-    setAccountField("account_login", login);
-    renderAccountAvatar(login);
-    renderUpstreamRejection(status.last_upstream_rejection);
-    // Populate the "Switch to" roster (the other persisted accounts).
-    void loadAccounts("roster");
-  } else if (active === "error") {
-    setAccountField("error", status.error ?? "Unknown error.");
-    renderRemediationLink(status.remediation_url);
-  }
-
-  // The "reuse a GitHub CLI account" list lives inside the unauthenticated
-  // state; (re)populate it whenever we land there (fresh each time, so a
-  // `gh logout` elsewhere can't leave a stale row). Best-effort — gh hinting
-  // never blocks the page.
-  if (active === "unauthenticated") {
-    void loadGhAccounts();
-    // Remembered maximal accounts (e.g. signed out of one, others remain).
-    void loadAccounts("remembered");
+    case "authenticated": {
+      // `account_login` is required on this variant. The controller emits
+      // the literal "unknown" string when getGitHubUser failed best-effort
+      // during the device flow — `renderAccountAvatar` treats "unknown"
+      // as a placeholder trigger.
+      setAccountField("account_login", status.account_login);
+      renderAccountAvatar(status.account_login);
+      renderUpstreamRejection(status.last_upstream_rejection);
+      // Populate the "Switch to" roster (the other persisted accounts).
+      void loadAccounts("roster");
+      break;
+    }
+    case "error": {
+      setAccountField("error", status.error);
+      renderRemediationLink(status.remediation_url);
+      break;
+    }
+    case "unauthenticated": {
+      // The "reuse a GitHub CLI account" list lives inside the
+      // unauthenticated state; (re)populate it whenever we land there
+      // (fresh each time, so a `gh logout` elsewhere can't leave a
+      // stale row). Best-effort — gh hinting never blocks the page.
+      void loadGhAccounts();
+      // Remembered maximal accounts (e.g. signed out of one, others remain).
+      void loadAccounts("remembered");
+      break;
+    }
+    default: {
+      const _exhaust: never = status;
+      void _exhaust;
+    }
   }
 
   if (active === "pending") {
@@ -1235,9 +1270,17 @@ async function openExternalUrl(url: string): Promise<void> {
 }
 
 async function signInWithCode(button: HTMLElement): Promise<void> {
-  const code = currentAuthStatus?.user_code;
-  const url = currentAuthStatus?.verification_uri;
-  if (!code || !url) return;
+  // Narrow to the pending variants — code + url only exist there. If
+  // the button somehow fires from another state, no-op.
+  const status = currentAuthStatus;
+  if (
+    !status
+    || (status.state !== "device_code_issued" && status.state !== "polling")
+  ) {
+    return;
+  }
+  const code = status.user_code;
+  const url = status.verification_uri;
 
   const label = button.querySelector<HTMLElement>(".device-code-button__label");
   const original = label?.innerHTML ?? null;

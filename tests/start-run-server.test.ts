@@ -308,7 +308,9 @@ describe("runServer — GitHub token resolution", () => {
     }
 
     const status = getAuthStatus()
-    expect(status.state).toBe("error")
+    if (status.state !== "error") {
+      throw new Error(`expected error state, got ${status.state}`)
+    }
     expect(status.error).toContain("revoked")
     expect(status.remediation_url).toBe("https://github.com/settings/copilot")
     // Token is cleared (signed out) but the reason is preserved.

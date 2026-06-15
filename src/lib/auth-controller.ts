@@ -130,10 +130,12 @@ function isFlowExpired(flow: ActiveFlow, nowMs: number = Date.now()): boolean {
 }
 
 export function getAuthStatus(): AuthStatus {
-  // The upstream-rejection sidecar can ride along on any state — it's
-  // attached to the most recent completion attempt, not to whether a
-  // token is currently present. signOut() and a fresh sign-in both
-  // clear it.
+  // The upstream-rejection sidecar rides along on the two states where a
+  // completion attempt is meaningful: `unauthenticated` (banner persists
+  // across a stale sign-out so the user can see why) and `authenticated`
+  // (the live banner). The pending and error variants don't carry it —
+  // the token-state issue takes precedence in the UI. signOut() and a
+  // fresh sign-in both clear it.
   const rejection = state.lastUpstreamRejection
   const rejectionPayload =
     rejection ?
@@ -152,11 +154,15 @@ export function getAuthStatus(): AuthStatus {
   switch (authState.kind) {
     case "signed-in": {
       // On cold boot logUser() populated state.userName; fall back to it
-      // so the Account section never renders "(unknown)" after a restart.
-      const login = authState.login ?? state.userName
+      // so the Account section never renders an empty avatar after a
+      // restart. Final fallback to the literal "unknown" preserves the
+      // type contract (account_login is required on the authenticated
+      // variant — see settings-types.ts) when getGitHubUser failed
+      // best-effort during the device flow.
+      const login = authState.login ?? state.userName ?? "unknown"
       return {
         state: "authenticated",
-        ...(login ? { account_login: login } : {}),
+        account_login: login,
         ...rejectionPayload,
       }
     }
@@ -168,7 +174,6 @@ export function getAuthStatus(): AuthStatus {
         ...(authState.remediationUrl ?
           { remediation_url: authState.remediationUrl }
         : {}),
-        ...rejectionPayload,
       }
     }
 
@@ -185,7 +190,6 @@ export function getAuthStatus(): AuthStatus {
         user_code: flow.deviceCode.user_code,
         verification_uri: flow.deviceCode.verification_uri,
         expires_at: new Date(flow.expiresAt).toISOString(),
-        ...rejectionPayload,
       }
     }
 

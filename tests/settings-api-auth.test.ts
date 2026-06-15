@@ -102,15 +102,18 @@ describe("/settings/api/auth/github", () => {
     const body = await res.json()
     const parsed = AuthStatus.safeParse(body)
     expect(parsed.success).toBe(true)
-    if (parsed.success) {
-      expect(parsed.data.state).toBe("device_code_issued")
+    if (parsed.success && parsed.data.state === "device_code_issued") {
       expect(parsed.data.user_code).toBe("ABCD-1234")
       expect(parsed.data.verification_uri).toBe(
         "https://github.com/login/device",
       )
       expect(typeof parsed.data.expires_at).toBe("string")
       // ISO timestamp parseable as a real Date.
-      expect(Number.isNaN(Date.parse(parsed.data.expires_at ?? ""))).toBe(false)
+      expect(Number.isNaN(Date.parse(parsed.data.expires_at))).toBe(false)
+    } else {
+      throw new Error(
+        `expected device_code_issued, got ${parsed.success ? parsed.data.state : "<parse-fail>"}`,
+      )
     }
   })
 
@@ -168,11 +171,18 @@ describe("/settings/api/auth/github", () => {
     const body = await res.json()
     const parsed = AuthStatus.safeParse(body)
     expect(parsed.success).toBe(true)
-    if (parsed.success) {
+    if (
+      parsed.success
+      && (parsed.data.state === "device_code_issued"
+        || parsed.data.state === "polling")
+    ) {
       // Either device_code_issued (just emitted) or polling (poller
       // started flipping the flag) — both are valid mid-flow states.
-      expect(["device_code_issued", "polling"]).toContain(parsed.data.state)
       expect(parsed.data.user_code).toBe("ABCD-1234")
+    } else {
+      throw new Error(
+        `expected pending state, got ${parsed.success ? parsed.data.state : "<parse-fail>"}`,
+      )
     }
   })
 })

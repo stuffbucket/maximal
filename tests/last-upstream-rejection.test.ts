@@ -299,6 +299,9 @@ describe("getAuthStatus + lastUpstreamRejection", () => {
     })
 
     const status = getAuthStatus()
+    if (status.state !== "authenticated") {
+      throw new Error(`expected authenticated, got ${status.state}`)
+    }
     expect(status.last_upstream_rejection).toBeDefined()
     expect(status.last_upstream_rejection).not.toHaveProperty("remediation_url")
   })
@@ -308,7 +311,9 @@ describe("getAuthStatus + lastUpstreamRejection", () => {
     state.lastUpstreamRejection = undefined
 
     const status = getAuthStatus()
-    expect(status).toEqual({ state: "authenticated" })
+    // ADR-0006: account_login is required on `authenticated`; controller
+    // emits "unknown" when markSignedIn(null) was called.
+    expect(status).toEqual({ state: "authenticated", account_login: "unknown" })
     expect(status).not.toHaveProperty("last_upstream_rejection")
   })
 })
