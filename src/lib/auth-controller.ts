@@ -55,6 +55,7 @@ import {
 } from "./github-token-store"
 import { PATHS } from "./paths"
 import { registerProcessCleanup } from "./process-cleanup"
+import { settingsEventBus } from "./settings-events"
 import { clearLastUpstreamRejection, state } from "./state"
 import { setupCopilotToken } from "./token"
 
@@ -117,6 +118,23 @@ type AuthState =
   | ({ kind: "error" } & ParsedCopilotError)
 
 let authState: AuthState = { kind: "signed-out" }
+
+/**
+ * The single writer for `authState`. Assigns the new union value, then
+ * publishes the projected wire status on the settings event bus so the
+ * SSE route (ADR-0007) can push it to the shell the instant it changes —
+ * no poll latency. Every transition routes through here so a new state
+ * can't be added that silently fails to notify the UI; that omission was
+ * the polling era's core fragility. Publishing is synchronous and
+ * best-effort: a bus with no subscriber (cold boot, CLI-only) is a no-op.
+ *
+ * Test reset (`__resetAuthControllerForTests`) assigns directly, on
+ * purpose — resetting fixtures must not fan out to real subscribers.
+ */
+function setAuthState(next: AuthState): void {
+  authState = next
+  settingsEventBus.publish("auth.changed", getAuthStatus())
+}
 
 /** The active device-code flow, if the current state has one. */
 function currentFlow(): ActiveFlow | null {
@@ -238,6 +256,10 @@ export async function startDeviceFlow(): Promise<AuthStatus> {
     consola.error("Auth-controller poller crashed unexpectedly:", err)
   })
 
+  // Emit once the flow is fully installed (code + poller live), so the
+  // first event the shell sees is a complete device_code_issued status.
+  settingsEventBus.publish("auth.changed", getAuthStatus())
+
   return {
     state: "device_code_issued",
     user_code: deviceCode.user_code,
@@ -255,7 +277,7 @@ export async function startDeviceFlow(): Promise<AuthStatus> {
 /* eslint-disable @typescript-eslint/no-unnecessary-condition -- TS can't see that abort.signal.aborted may flip during an await. */
 async function runPoller(flow: ActiveFlow): Promise<void> {
   if (flow.abort.signal.aborted) return
-  authState = { kind: "polling", flow }
+  setAuthState({ kind: "polling", flow })
 
   try {
     // pollAccessToken loops internally with the server-told interval,
@@ -290,11 +312,11 @@ async function runPoller(flow: ActiveFlow): Promise<void> {
         "Auth-controller: failed to verify GitHub account after sign-in:",
         message,
       )
-      authState = {
+      setAuthState({
         kind: "error",
         message: "Couldn't verify your GitHub account. Try signing in again.",
         remediationUrl: null,
-      }
+      })
       return
     }
 
@@ -340,11 +362,11 @@ async function runPoller(flow: ActiveFlow): Promise<void> {
     // signOut() may have fired and wiped the token. Don't latch signed-in over
     // a just-cleared session.
     if (flow.abort.signal.aborted) return
-    authState = { kind: "signed-in", login }
+    setAuthState({ kind: "signed-in", login })
   } catch (err) {
     if (flow.abort.signal.aborted) return
     const message = err instanceof Error ? err.message : String(err)
-    authState = { kind: "error", message, remediationUrl: null }
+    setAuthState({ kind: "error", message, remediationUrl: null })
     consola.warn("Auth-controller: device-code poll terminated:", message)
   }
 }
@@ -361,7 +383,7 @@ async function runPoller(flow: ActiveFlow): Promise<void> {
  * an error state, not an authenticated one.
  */
 export function markSignedIn(login: string): void {
-  authState = { kind: "signed-in", login }
+  setAuthState({ kind: "signed-in", login })
 }
 
 /**
@@ -374,7 +396,7 @@ export function markSignedIn(login: string): void {
  * still sitting at its initial value.
  */
 export function markSignedOut(): void {
-  authState = { kind: "signed-out" }
+  setAuthState({ kind: "signed-out" })
 }
 
 export async function signOut(): Promise<void> {
@@ -383,7 +405,6 @@ export async function signOut(): Promise<void> {
   if (flow) {
     flow.abort.abort()
   }
-  authState = { kind: "signed-out" }
   state.githubToken = undefined
   state.copilotToken = undefined
   state.userName = undefined
@@ -391,6 +412,10 @@ export async function signOut(): Promise<void> {
   // about. Clear here so the sidecar doesn't outlive the token that
   // produced it.
   clearLastUpstreamRejection()
+  // Set the union LAST, after the token + rejection are cleared, so the
+  // auth.changed snapshot the shell receives reflects the fully signed-out
+  // state (no stale rejection riding along on the unauthenticated event).
+  setAuthState({ kind: "signed-out" })
 
   // Drop the active account from the registry (any other persisted accounts
   // remain available for quick-switch). Behaviour-neutral for the single
@@ -430,11 +455,11 @@ export async function markAuthFatalAndSignOut(
   error: CopilotAuthFatalError,
 ): Promise<void> {
   await signOut()
-  authState = {
+  setAuthState({
     kind: "error",
     message: error.message,
     remediationUrl: error.remediationUrl,
-  }
+  })
 }
 
 /** Cancel any active poller. Wired into process-cleanup at module

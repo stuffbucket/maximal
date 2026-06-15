@@ -1,8 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 
 import type { DiagnosticsResponse } from "../../src/lib/settings-types";
-import type { AuthStatus, UpstreamRejection } from "./api";
-import { apiCall } from "./api";
+import type { AuthStatus, EventSubscription, UpstreamRejection } from "./api";
+import { apiCall, subscribeAuthEvents } from "./api";
 import { mountApiClients } from "./api-clients-island";
 import { mountApps } from "./apps-island";
 
@@ -364,11 +364,17 @@ function wireDiagnostics(): void {
 // ---- Account section -------------------------------------------------------
 
 /**
- * Polling cleanup contract:
+ * Account-section update contract (ADR-0007):
+ *  - SSE is the PRIMARY channel. While #account is open we hold one
+ *    `subscribeAuthEvents` subscription; `auth.changed` drives `renderAccount`
+ *    with no poll lag. Opened on section enter, closed on leave.
+ *  - The GET poll is the FALLBACK. `schedulePoll()` is a no-op while the
+ *    stream is connected (`sseConnected`); it only runs when a sign-in is
+ *    pending and SSE is down, so a dropped stream degrades to polling.
  *  - Only one poll timer runs at a time (`authPollTimer`).
  *  - `stopAuthPolling()` clears the timer; called on terminal states
- *    (authenticated, error, unauthenticated), on sign-out, and on
- *    navigation away from #account.
+ *    (authenticated, error, unauthenticated), on sign-out, on SSE connect,
+ *    and on navigation away from #account.
  *  - `renderAccount` is the single source of truth for visibility;
  *    a non-pending state always stops polling before the next call.
  */
@@ -379,6 +385,20 @@ const POLL_INTERVAL_MS = 2000;
 let currentAuthStatus: AuthStatus | null = null;
 let authPollTimer: ReturnType<typeof setTimeout> | null = null;
 
+/**
+ * Live updates (ADR-0007). While the Account section is open we hold one
+ * SSE subscription to the sidecar; `auth.changed` events drive `renderAccount`
+ * the instant the device-code poller resolves — no 2s poll lag. The GET poll
+ * remains as a FALLBACK: it runs only while a sign-in is pending AND the SSE
+ * stream is not connected (`sseConnected`), so a dropped stream degrades to
+ * polling instead of stalling. `subscribeAuthEvents` resolves the API key
+ * asynchronously, so a generation counter discards a subscription that
+ * resolved after the section was already left.
+ */
+let authEvents: EventSubscription | null = null;
+let sseConnected = false;
+let authEventsGen = 0;
+
 function stopAuthPolling(): void {
   if (authPollTimer !== null) {
     clearTimeout(authPollTimer);
@@ -387,11 +407,69 @@ function stopAuthPolling(): void {
 }
 
 function schedulePoll(): void {
+  // SSE is the primary channel; only poll as a fallback when it's down.
+  if (sseConnected) {
+    stopAuthPolling();
+    return;
+  }
   stopAuthPolling();
   authPollTimer = setTimeout(() => {
     authPollTimer = null;
     void pollAuthStatus();
   }, POLL_INTERVAL_MS);
+}
+
+function openAuthEvents(): void {
+  if (authEvents) return;
+  const gen = ++authEventsGen;
+  void subscribeAuthEvents({
+    onOpen: () => {
+      if (gen !== authEventsGen) return;
+      sseConnected = true;
+      // The stream is live; the fallback poll is now redundant.
+      stopAuthPolling();
+    },
+    onAuth: (status) => {
+      if (gen !== authEventsGen) return;
+      // Only paint while the user is actually on the Account section.
+      if (readHashSection() === "account") renderAccount(status);
+    },
+    onError: () => {
+      if (gen !== authEventsGen) return;
+      sseConnected = false;
+      // Stream dropped — fall back to polling if a sign-in is mid-flight.
+      if (
+        readHashSection() === "account" &&
+        currentAuthStatus !== null &&
+        (currentAuthStatus.state === "device_code_issued" ||
+          currentAuthStatus.state === "polling")
+      ) {
+        schedulePoll();
+      }
+    },
+  }).then(
+    (subscription) => {
+      // Section was left (or re-entered) while the key resolved — discard.
+      if (gen !== authEventsGen) {
+        subscription.close();
+        return;
+      }
+      authEvents = subscription;
+    },
+    () => {
+      // Key resolution / EventSource construction failed; polling fallback
+      // stays in force. Nothing to clean up.
+    },
+  );
+}
+
+function closeAuthEvents(): void {
+  authEventsGen++;
+  sseConnected = false;
+  if (authEvents) {
+    authEvents.close();
+    authEvents = null;
+  }
 }
 
 function accountKeyFor(state: AuthStatus["state"]): AccountStateKey {
@@ -1370,7 +1448,10 @@ window.addEventListener("DOMContentLoaded", () => {
   wireNav();
   syncFromHash();
   void loadDiagnostics();
-  if (readHashSection() === "account") void loadAuthStatus();
+  if (readHashSection() === "account") {
+    void loadAuthStatus();
+    openAuthEvents();
+  }
 });
 
 window.addEventListener("hashchange", () => {
@@ -1382,9 +1463,12 @@ window.addEventListener("hashchange", () => {
   }
   if (section === "account") {
     void loadAuthStatus();
+    openAuthEvents();
   } else {
-    // Leaving the Account section: drop any in-flight polling.
+    // Leaving the Account section: drop any in-flight polling and the
+    // live event stream (re-opened on return).
     stopAuthPolling();
+    closeAuthEvents();
   }
 });
 

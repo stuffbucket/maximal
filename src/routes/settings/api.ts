@@ -32,6 +32,7 @@ import { apiKeysRoutes } from "./api-keys"
 import { appsRoutes } from "./apps"
 import { authRoutes } from "./auth"
 import { clientsRoutes } from "./clients"
+import { eventsRoutes } from "./events"
 import { ghRoutes } from "./gh"
 
 /** Captured once at module load. process.uptime() works too, but
@@ -94,3 +95,4 @@ settingsApiRoutes.route("/accounts", accountsRoutes)
 settingsApiRoutes.route("/api-keys", apiKeysRoutes)
 settingsApiRoutes.route("/clients", clientsRoutes)
 settingsApiRoutes.route("/apps", appsRoutes)
+settingsApiRoutes.route("/events", eventsRoutes)
