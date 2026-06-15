@@ -29,3 +29,28 @@ export interface SettingsEventMap {
 export type SettingsEventName = keyof SettingsEventMap
 
 export const settingsEventBus = new EventBus<SettingsEventMap>()
+
+/**
+ * Projector indirection (cycle-breaker). The canonical `AuthStatus` is built
+ * by `auth-controller.getAuthStatus()`, which imports `state`. But `state`
+ * itself needs to emit `auth.changed` when the upstream-rejection sidecar
+ * changes mid-session (that field rides on the auth status). A direct
+ * `state → auth-controller` import would be a cycle, so instead the
+ * controller registers its projector here at module load, and ANY producer
+ * (the controller's own transitions, or state.ts on a rejection change)
+ * calls `emitAuthChanged()` to publish the current snapshot.
+ *
+ * No-op until the projector is registered (e.g. a rejection recorded before
+ * the controller module has loaded) — best-effort, never throws.
+ */
+let authStatusProjector: (() => AuthStatus) | null = null
+
+export function registerAuthStatusProjector(project: () => AuthStatus): void {
+  authStatusProjector = project
+}
+
+export function emitAuthChanged(): void {
+  if (authStatusProjector) {
+    settingsEventBus.publish("auth.changed", authStatusProjector())
+  }
+}

@@ -55,7 +55,7 @@ import {
 } from "./github-token-store"
 import { PATHS } from "./paths"
 import { registerProcessCleanup } from "./process-cleanup"
-import { settingsEventBus } from "./settings-events"
+import { emitAuthChanged, registerAuthStatusProjector } from "./settings-events"
 import { clearLastUpstreamRejection, state } from "./state"
 import { setupCopilotToken } from "./token"
 
@@ -133,7 +133,7 @@ let authState: AuthState = { kind: "signed-out" }
  */
 function setAuthState(next: AuthState): void {
   authState = next
-  settingsEventBus.publish("auth.changed", getAuthStatus())
+  emitAuthChanged()
 }
 
 /** The active device-code flow, if the current state has one. */
@@ -221,6 +221,12 @@ export function getAuthStatus(): AuthStatus {
   }
 }
 
+// Wire the controller's status projection into the settings event bus so any
+// producer — including state.ts, when the upstream-rejection sidecar changes
+// mid-session — can publish the canonical auth.changed snapshot without
+// importing this module (which would form a cycle through `state`).
+registerAuthStatusProjector(getAuthStatus)
+
 export async function startDeviceFlow(): Promise<AuthStatus> {
   const existing = currentFlow()
   if (existing && !isFlowExpired(existing)) {
@@ -258,7 +264,7 @@ export async function startDeviceFlow(): Promise<AuthStatus> {
 
   // Emit once the flow is fully installed (code + poller live), so the
   // first event the shell sees is a complete device_code_issued status.
-  settingsEventBus.publish("auth.changed", getAuthStatus())
+  emitAuthChanged()
 
   return {
     state: "device_code_issued",

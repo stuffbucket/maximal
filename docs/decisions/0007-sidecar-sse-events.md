@@ -31,6 +31,13 @@ links:
 >   a single `setAuthState()` writer that publishes `auth.changed`, so a new
 >   state can't be added that silently fails to notify the UI. `signOut` was
 >   reordered so the emitted snapshot is fully cleared (no stale rejection).
+>   The controller registers its `getAuthStatus` projector on the bus so other
+>   producers can emit the canonical snapshot without an import cycle.
+> - `src/lib/state.ts` — the upstream-rejection sidecar (`setLastUpstreamRejection`
+>   / `clearLastUpstreamRejection`) is part of the auth status, so a mid-session
+>   rejection now emits `auth.changed` too (guarded to fire only on an actual
+>   change, so the hot request path doesn't spam the stream). Without this the
+>   banner wouldn't appear/clear live once polling stopped in the authed state.
 > - `src/lib/request-auth.ts` — `extractRequestApiKey` honours `?key=` **only**
 >   for `SSE_EVENTS_PATH` (EventSource can't send headers); never elsewhere.
 > - `shell/src/api.ts` — `subscribeAuthEvents()` wraps `EventSource`.

@@ -20,6 +20,10 @@ import {
   markSignedOut,
 } from "~/lib/auth-controller"
 import { settingsEventBus } from "~/lib/settings-events"
+import {
+  clearLastUpstreamRejection,
+  setLastUpstreamRejection,
+} from "~/lib/state"
 
 function capture(): { events: Array<AuthStatus>; stop: () => void } {
   const events: Array<AuthStatus> = []
@@ -31,10 +35,12 @@ function capture(): { events: Array<AuthStatus>; stop: () => void } {
 
 beforeEach(() => {
   __resetAuthControllerForTests()
+  clearLastUpstreamRejection()
 })
 
 afterEach(() => {
   __resetAuthControllerForTests()
+  clearLastUpstreamRejection()
 })
 
 describe("auth.changed emission (ADR-0007 producer side)", () => {
@@ -75,5 +81,55 @@ describe("auth.changed emission (ADR-0007 producer side)", () => {
       "authenticated",
       "unauthenticated",
     ])
+  })
+})
+
+describe("upstream-rejection changes emit auth.changed (ADR-0007)", () => {
+  const rejection = {
+    message: "Rate limit exceeded",
+    remediationUrl: null,
+    status: 429,
+  }
+
+  test("setLastUpstreamRejection pushes the rejection on the auth status", () => {
+    const { events, stop } = capture()
+    try {
+      setLastUpstreamRejection(rejection)
+    } finally {
+      stop()
+    }
+    const last = events.at(-1)
+    expect(last?.state).toBe("unauthenticated")
+    expect(
+      last && "last_upstream_rejection" in last ?
+        last.last_upstream_rejection?.message
+      : undefined,
+    ).toBe("Rate limit exceeded")
+  })
+
+  test("a same-content rejection does not re-emit", () => {
+    setLastUpstreamRejection(rejection)
+    const { events, stop } = capture()
+    try {
+      setLastUpstreamRejection(rejection)
+    } finally {
+      stop()
+    }
+    expect(events).toHaveLength(0)
+  })
+
+  test("clearing an existing rejection emits exactly once", () => {
+    setLastUpstreamRejection(rejection)
+    const { events, stop } = capture()
+    try {
+      clearLastUpstreamRejection()
+      // Second clear is a no-op — must not fan out another event (the hot
+      // request path clears on every success).
+      clearLastUpstreamRejection()
+    } finally {
+      stop()
+    }
+    expect(events).toHaveLength(1)
+    expect(events[0]?.state).toBe("unauthenticated")
   })
 })

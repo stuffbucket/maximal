@@ -5,6 +5,7 @@ import type { ModelsResponse } from "~/services/copilot/get-models"
 import type { AccountType, CopilotHost } from "./auth-types"
 
 import { SingletonCache } from "./cache"
+import { emitAuthChanged } from "./settings-events"
 
 // Module-private metric mirrors of the matching `state.*` fields.
 // Surfaced via allCacheMetrics() (registered on construction); writes
@@ -116,12 +117,26 @@ export function setLastUpstreamRejection(rejection: {
     ...rejection,
     at: new Date().toISOString(),
   }
+  // The rejection sidecar rides on the auth status (getAuthStatus folds it
+  // in). Push the change so a shell on the live SSE channel updates the
+  // banner immediately, rather than waiting for the next auth transition or
+  // a focus refresh. Reached only on an actual change (same-content updates
+  // returned above), so the hot request path doesn't spam the stream.
+  emitAuthChanged()
 }
 
 /** Clear the upstream-rejection sidecar. Called from each create-*.ts on
  *  successful upstream response, and via signOut. */
 export function clearLastUpstreamRejection(): void {
+  // Guard the emit on an actual change: clears run on EVERY successful
+  // completion, but only the first one after a rejection should fan out an
+  // auth.changed (the rest are no-ops). Without this the SSE stream would
+  // get an event per successful request.
+  const hadRejection = state.lastUpstreamRejection !== undefined
   state.lastUpstreamRejection = undefined
+  if (hadRejection) {
+    emitAuthChanged()
+  }
 }
 
 /** When the models cache was last populated, in epoch ms. `null`
