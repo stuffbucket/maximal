@@ -1,7 +1,15 @@
 # Components
 
-Reference token names from [`tokens.md`](tokens.md). Never inline raw
-values; if a measurement isn't tokenized, add the token first.
+This file is the single source of truth for component dimensions
+that are **not** yet tokenized (button heights, input heights, sidebar
+widths beyond `--sidebar-width`, etc.). Where a token exists, use it;
+component CSS references the token, not the value. Where one doesn't
+exist, this doc is canon — match the spec exactly rather than
+hand-rolling something nearby.
+
+Token values themselves live in
+[`shell/src/tokens.css`](../../shell/src/tokens.css); token vocabulary
+in [`tokens.md`](tokens.md).
 
 ## Buttons
 

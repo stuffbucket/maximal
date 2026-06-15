@@ -8,9 +8,9 @@ constraint that makes drift between them a permanent risk.
 ## What's shared
 
 - Dark-first with light + system override (`prefers-color-scheme`).
-- Same crimson `--brand` (`#c8334a`) for identity. Same teal
-  `--accent` (`#5198a6`) for interactive surfaces — *in theory.*
-  Currently drifted; see [`failure-modes.md`](failure-modes.md).
+- Same crimson `--brand` for identity. Same teal `--accent` for
+  interactive surfaces — *in theory.* Currently drifted; see
+  [`failure-modes.md`](failure-modes.md).
 - Same Fraunces + Commissioner pairing, with Fraunces rationed to the
   brand mark and **one** display heading per window.
 - Same token vocabulary (see [`tokens.md`](tokens.md)). Same spacing
@@ -21,7 +21,7 @@ constraint that makes drift between them a permanent risk.
 | Concern | Dashboard | Settings |
 |---|---|---|
 | Sections | 1 (scroll-only) | 8 (sidebar nav) |
-| Layout | Single column, 720px max | 200px sidebar + 640px content pane |
+| Layout | Single column, ~720px max (not tokenized) | `--sidebar-width` rail + `--content-max` pane |
 | Bundling | One embedded HTML file, separate `<style>` block | Vite-bundled multi-file (React + vanilla islands) |
 | Tokens live in | `src/pages/usage-viewer.css` (independent declaration) | `shell/src/tokens.css` (imported by all shell CSS) |
 

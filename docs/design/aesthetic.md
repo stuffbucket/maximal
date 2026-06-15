@@ -2,10 +2,11 @@
 
 ## Brand personality
 
-**Warm + crafted + considered.** The brand mark (red rounded square
-in `#c8334a` with a wonky Fraunces "m") sets the tone: a tool made
-by a person, not a corporation. Friendly without being playful-cute.
-Confident without being terminal-stark.
+**Warm + crafted + considered.** The brand mark (a brand-crimson
+rounded square with a wonky Fraunces "m"; the color is the
+`--brand` token) sets the tone: a tool made by a person, not a
+corporation. Friendly without being playful-cute. Confident without
+being terminal-stark.
 
 - **Voice:** clear, direct, second-person. "Sign in with GitHub" not
   "Initiate OAuth flow." "We can't reach the proxy" not "ECONNREFUSED."

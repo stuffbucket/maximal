@@ -1,23 +1,25 @@
 # Color
 
 Four roles, deliberately split to keep each from flooding the surface.
+**Token values live in [`shell/src/tokens.css`](../../shell/src/tokens.css).**
+This file describes role, scope, and the reasoning behind the split.
 
-| Token | Value | Role |
-|---|---|---|
-| `--brand` | `#c8334a` | Crimson. **Identity only.** Mark, hero, badging. |
-| `--accent` | `#5198a6` | Teal. **Interactive surfaces.** Primary buttons, switches, focus rings, active nav. |
-| `--accent-destructive` | `#b32d3f` | Crimson-adjacent. **Destructive actions only.** |
-| `--link` | `#7fc1d2` dark / `#2d6470` light | Sister cool tone. **Prose links.** |
+| Token | Role |
+|---|---|
+| `--brand` | Crimson. **Identity only.** Mark, hero, badging, attention-state tray dot. |
+| `--accent` | Teal. **Interactive surfaces.** Primary buttons, switches, focus rings, active nav. |
+| `--accent-destructive` | Crimson-adjacent. **Destructive actions only.** |
+| `--link` | Sister cool tone to `--accent`. **Prose links only.** |
 
 Foreground pairings: `--brand-fg`, `--accent-fg`,
-`--accent-destructive-foreground` — always `#ffffff`.
+`--accent-destructive-foreground`.
 
 ## Why the split exists
 
 The crimson was historically dual-purposed: brand mark *and* primary
-button fill *and* focus ring. The effect was that every interactive
-surface read as "brand" — so the brand stopped reading as anything
-special, and the UI felt shouty.
+button fill *and* focus ring. Every interactive surface read as
+"brand" — so the brand stopped reading as anything special, and the
+UI felt shouty.
 
 Pulling interactive duty onto teal `--accent` recovered the brand
 voice (it now appears once or twice per window, deliberately) while
@@ -29,27 +31,26 @@ content.
 `--accent-destructive` stays in the crimson family because
 destructive actions want urgency, which is the one place the brand's
 warning-red quality earns its keep. It is **not** the same value as
-`--brand` (`#b32d3f` vs `#c8334a`) — destructive is a hair deeper so
-it reads as "caution" rather than "identity."
+`--brand` — destructive is a hair deeper so it reads as "caution"
+rather than "identity."
 
 ## Link is sister to accent
 
-`--link` is a *sister cool tone* to `--accent`: same teal family,
-shifted lighter on dark / darker on light to clear WCAG AA against
-both surface levels. Distinct enough from `--accent` that a primary
-button (filled with accent) and an inline prose link don't read as
-the same affordance.
+`--link` and `--link-hover` share `--accent`'s teal family but shift
+lighter on dark / darker on light so each theme clears WCAG AA
+against both `--surface-base` and `--surface-card`. Distinct enough
+from `--accent` that a primary button (accent-filled) and an inline
+prose link don't read as the same affordance.
 
-Measured contrast (from `shell/src/tokens.css` notes):
-- Dark `#7fc1d2` on `#0a0a0a` = 9.86, on `#161616` = 9.01
-- Light `#2d6470` on `#fafafa` = 6.35, on `#ffffff` = 6.63
+Measured contrast on the current values is recorded in the comment
+block above `--link` in `tokens.css`. Re-measure if you change either.
 
 ## Contrast contract
 
 - **Target: WCAG AA (4.5:1)** across all colors, contrast, and focus
   rings. AAA where reachable without sacrificing the palette.
 - **User-themable accent and surface colors.** Brand red is default;
-  users can dial in their own UI color and icon color in Settings.
+  users dial in their own UI color and icon color in Settings.
 - **Contrast is ours.** When a user picks a combination whose
   body-text contrast drops below 4.5:1, surface a warning chip near
   the affected control.
@@ -61,22 +62,17 @@ Measured contrast (from `shell/src/tokens.css` notes):
 
 ## Theme override
 
-- **Both light and dark**, with explicit override in Settings
-  (matches Anthropic's monitor / sun / moon toggle). **System**
+- **Both light and dark**, with explicit override in Settings (matches
+  Anthropic's monitor / sun / moon toggle). **System**
   (`prefers-color-scheme`) is the third option and the default.
 - Theme is applied via `[data-theme="light"]` / `[data-theme="dark"]`
-  on the root; only the surface and text keys (and `--link*`)
-  override per theme. Numeric and structural tokens stay constant.
+  on the root; only surface, text, and `--link*` keys override per
+  theme. Numeric and structural tokens stay constant.
 
-## Status colors
+## Status colors (Dashboard only, currently)
 
-Currently declared in `src/pages/usage-viewer.css` only, not in
-`tokens.css`:
-
-- `--status-error` / `--status-error-fg`
-- `--status-success` / `--status-success-fg`
-- `--status-warning` / `--status-warning-fg`
-- `--status-info` / `--status-info-fg`
-
-If you need these in Settings, promote them into `tokens.css` first.
-See [`change-checklists.md`](change-checklists.md).
+`--status-error`, `--status-success`, `--status-warning`,
+`--status-info` (and their `-fg` pairings) are declared in
+`src/pages/usage-viewer.css`. They are **not** in `tokens.css`. If
+you need them in Settings, promote them into `tokens.css` first via
+[`change-checklists.md`](change-checklists.md) → *Adding a new token*.

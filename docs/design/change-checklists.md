@@ -5,6 +5,14 @@ minute; not following one is how the codebase ends up with two
 different teals named `--accent` (see
 [`failure-modes.md`](failure-modes.md) → *Known active drift*).
 
+## Token value hygiene (read first)
+
+- **Values live in `shell/src/tokens.css` only.** Design docs reference
+  tokens by name + purpose, never by value. The only allowed exception
+  is [`failure-modes.md`](failure-modes.md)'s drift audit table.
+- If a doc shows a value, that's a bug — fix the doc.
+- If you change a value, follow *Changing a token value* below.
+
 ## Changing a token value
 
 1. Edit `shell/src/tokens.css` (the declared ground truth).

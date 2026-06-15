@@ -24,9 +24,11 @@ regressing across design iterations.
 
 ## Tokens & drift
 
-- **Inline raw `px`, `rem`, or `#hex` in a component file.** Reference
-  a token. If no suitable token exists, add one to `shell/src/tokens.css`
-  and document it in [`tokens.md`](tokens.md) before using it.
+- **Inline raw `px`, `rem`, or `#hex` in a component file *or in a
+  design doc.*** Reference a token. If no suitable token exists, add
+  one to `shell/src/tokens.css` and document it in
+  [`tokens.md`](tokens.md) before using it. The one allowed exception
+  is the drift table below, where the conflict is the point.
 - **Editing a token value in only one place.** There are currently
   three token-declaration sites; they are not in sync. See
   [`change-checklists.md`](change-checklists.md) → *Changing a token
