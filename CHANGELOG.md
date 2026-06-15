@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.4.24](https://github.com/stuffbucket/maximal/compare/v0.4.23...v0.4.24) (2026-06-15)
+
+
+### Features
+
+* **auth:** /accounts routes — list, switch, remove (slice 3, PR 2/3) ([#116](https://github.com/stuffbucket/maximal/issues/116)) ([547b993](https://github.com/stuffbucket/maximal/commit/547b993cd0aa4ce7516edba25458320afeb4fbf0))
+* **auth:** AuthStatus union, live SSE updates, and sign-in/window fixes (ADR-0006/0007) ([#121](https://github.com/stuffbucket/maximal/issues/121)) ([08de601](https://github.com/stuffbucket/maximal/commit/08de601601f5eb3a9f944b6687b756b47bb5e0ac))
+* **auth:** detect the local gh CLI + its accounts (Phase 4) ([#107](https://github.com/stuffbucket/maximal/issues/107)) ([f25f6fa](https://github.com/stuffbucket/maximal/commit/f25f6fa7e05e49e06d603dca4213b50d533480e8))
+* **auth:** multi-account registry store + migration (slice 3, PR 1/3) ([#115](https://github.com/stuffbucket/maximal/issues/115)) ([2862b3c](https://github.com/stuffbucket/maximal/commit/2862b3c23aa2b9fc4d8e75b936db4ff270d3026d))
+* **auth:** reuse a GitHub CLI account to sign in (Phase 4) ([#108](https://github.com/stuffbucket/maximal/issues/108)) ([6bead6f](https://github.com/stuffbucket/maximal/commit/6bead6fba68123926ba16533c5969ab45822c15b))
+* **shell:** ambient in-progress indicator (accent chase bar) ([#111](https://github.com/stuffbucket/maximal/issues/111)) ([dc0dcf0](https://github.com/stuffbucket/maximal/commit/dc0dcf0371ba417ecc1a9546f20f90307831d20c))
+* **shell:** multi-account quick-switch UI (slice 3, PR 3/3) ([#117](https://github.com/stuffbucket/maximal/issues/117)) ([937818c](https://github.com/stuffbucket/maximal/commit/937818c34a9e4a75fa490d4a213129bfcd22bad1))
+* **shell:** sign out by rebooting the sidecar, not editing it ([#106](https://github.com/stuffbucket/maximal/issues/106)) ([96341ae](https://github.com/stuffbucket/maximal/commit/96341aef686ed8fea85ad09849070ba961710281))
+
+
+### Bug Fixes
+
+* **auth:** allowlist the gh runner to read-only commands (isolation by construction) ([#112](https://github.com/stuffbucket/maximal/issues/112)) ([6294ff7](https://github.com/stuffbucket/maximal/commit/6294ff7a4eb1f3732db916ee56aa3c7fbe26527d))
+* **auth:** gh-reuse — validate before reboot + refresh discovery on focus ([#113](https://github.com/stuffbucket/maximal/issues/113)) ([33ab9e7](https://github.com/stuffbucket/maximal/commit/33ab9e73804a3776e529a1bcceeb53c36a144ec9))
+* **auth:** guard-timer every auth/token fetch (incl. the refresh self-loop) ([#110](https://github.com/stuffbucket/maximal/issues/110)) ([2c74667](https://github.com/stuffbucket/maximal/commit/2c74667f232e6e9478c08a9bb24424176b091370))
+* **auth:** self-heal the Copilot host + clear the deprecation warning ([#101](https://github.com/stuffbucket/maximal/issues/101)) ([3ee2d7e](https://github.com/stuffbucket/maximal/commit/3ee2d7e6d1718c12f40dc9b6a04c8f5191767aae))
+* **auth:** surface fatal Copilot rejection on device-code sign-in; add cancel + busy feedback ([#114](https://github.com/stuffbucket/maximal/issues/114)) ([0041f2e](https://github.com/stuffbucket/maximal/commit/0041f2e25d01c56b10132e9775f0eeff4b1dd879))
+* **release:** poll for the builder's actual dmg name (Maximal.dmg) ([#98](https://github.com/stuffbucket/maximal/issues/98)) ([77bbf2e](https://github.com/stuffbucket/maximal/commit/77bbf2ebaac616d312a79e2441328578344cf93d))
+* **release:** ship the macOS dmg under the versioned name pattern ([#100](https://github.com/stuffbucket/maximal/issues/100)) ([7de0cda](https://github.com/stuffbucket/maximal/commit/7de0cdaf67faae236fa33be12fef1322076e43ce))
+* **shell:** DEV baseUrl must target the sidecar on :4141, not :4142 ([#119](https://github.com/stuffbucket/maximal/issues/119)) ([f699f28](https://github.com/stuffbucket/maximal/commit/f699f2824c3c25d792d2fb9c7f6e7e710d8bb90d))
+* **shell:** poll for the reboot result after 'use a gh account' ([#109](https://github.com/stuffbucket/maximal/issues/109)) ([f96c852](https://github.com/stuffbucket/maximal/commit/f96c8521e2089645369cdf93a883cb84cb76f701))
+
 ## [0.4.23](https://github.com/stuffbucket/maximal/compare/v0.4.22...v0.4.23) (2026-06-09)
 
 
