@@ -33,6 +33,10 @@ import { emitBootStatus } from "./boot-status"
 import { bootSecrets, bootstrapUpstream } from "./bootstrap"
 import { runClaudeCodeFlow } from "./claude-code-flow"
 import { maybeEvictRunning, probePort, reportPortBusyAndExit } from "./port"
+import {
+  markSessionRunning,
+  staleSessionMarkerPresent,
+} from "./session-sentinel"
 import { installShutdownHandlers } from "./shutdown"
 
 export interface RunServerOptions {
@@ -111,6 +115,26 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   await ensurePaths()
   bootSecrets()
 
+  // Crash-detection: did the previous run exit ungracefully (skipped
+  // initiateShutdown AND the `exit` safety net — i.e. SIGKILL, power
+  // loss, OS-level kill)? If so AND the Claude Code base URL is still
+  // ours from before, the user has likely been hitting "connection
+  // refused" in `claude` since then. We can't auto-recover the
+  // inter-session window (an external watchdog would be needed), but
+  // we can at least surface the cause so the symptom isn't mysterious.
+  // The reconcileClaudeCodeOnBoot() call below will re-apply the URL
+  // for the new session; that ends the broken-window.
+  const staleSession = staleSessionMarkerPresent()
+  if (staleSession) {
+    consola.warn(
+      "Previous maximal session ended ungracefully (likely a crash, "
+        + "force-quit, or system shutdown). If `claude` produced "
+        + "connection-refused errors since then, that was why — your "
+        + "Claude Code config still pointed at this proxy. Routing is "
+        + "being re-applied now and will work again.",
+    )
+  }
+
   // One-shot cleanup of the pre-v0.4.13 ~/.local/share/maximal/shims/claude
   // wrapper, which is now orphaned (we route via ~/.claude/settings.json
   // instead). The shim emits 'maximal: the claude binary this shim wrapped
@@ -175,6 +199,13 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   // if the user left routing on. Self-heals a URL a prior crash/force-kill
   // stranded over a dead proxy. Ownership-guarded; no-op when routing is off.
   reconcileClaudeCodeOnBoot()
+
+  // Drop the "session running" sentinel only AFTER reconcileClaudeCodeOnBoot
+  // so the freshly-written URL is in place when we promise the session is
+  // healthy. shutdown clears it; a missing-on-next-boot sentinel means a
+  // clean exit, present-on-next-boot means an ungraceful one (see the
+  // staleSession check above).
+  markSessionRunning()
 
   installShutdownHandlers(httpServer)
 }
