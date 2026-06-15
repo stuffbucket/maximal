@@ -1,228 +1,41 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Index of where to look for what. This file is intentionally short — its
+job is to make sure you know **what kinds of knowledge exist in this
+repo and where to find them**, not to repeat that knowledge inline.
+Always read the linked doc before acting in its area.
 
-## Commands
+## When you're about to…
 
-```sh
-bun install          # Install dependencies
-bun run dev          # Dev mode with watch
-bun run build        # Build to dist/ (native Bun import attributes)
-bun run start        # Production start (NODE_ENV=production)
-
-# Lint / type / test
-bun run lint         # ESLint with cache (auto-fixes staged files pre-commit)
-bun run lint:all     # ESLint on entire project
-bun run lint:fast    # oxlint — mechanical pass, ~10ms full repo
-bun run typecheck    # tsc type check only (no emit)
-bun test             # Run all tests
-bun test tests/foo.test.ts  # Run a single test file
-
-# Aggregates
-bun run check:fast   # lint:fast + typecheck + lint:all (the per-edit inner loop)
-bun run check:deep   # check:fast + bun test + knip (end-of-task gate)
-bun run deps:check   # dependency-cruiser layer rules
-bun run knip         # find unused exports/files
-
-# Optional: meta-analysis stream
-bun run analyze      # tails .claude/logs/checks.jsonl into a local Ollama model
-
-# Mutation testing (manual only — not wired into check:deep)
-bun run mutate       # Stryker; configure module under test in stryker.conf.*
-
-# Release tooling
-bun run release:manual  # local fallback cut (bumpp + bun publish). Primary
-                        # release path is release-please: merge the auto-opened
-                        # release PR → tag → release.yml builds/publishes.
-
-# Tauri app (menu-bar shell wrapping the proxy as a sidecar on :4142)
-bun run app:setup    # one-time: install shell deps + force-build sidecar binary
-bun run app:sidecar  # rebuild standalone proxy binary into shell/src-tauri/binaries/
-                     # (no-op when binary is newer than src/; override with --force
-                     # or MAXIMAL_FORCE_SIDECAR=1 — release pipelines must set it)
-bun run app:dev      # build sidecar (if stale) + tauri dev (hot-reload)
-bun run app:ui       # UI-only iteration: Vite alone at :1420. Run `bun run dev`
-                     # in another terminal so the UI's API calls (which target
-                     # :4142 in DEV mode) hit a live proxy. Far faster than
-                     # spinning the whole Tauri shell for HTML/CSS tweaks.
-bun run app:build    # force-rebuild sidecar + tauri build --bundles app,dmg
-```
-
-### Fast UI iteration
-
-For HTML/CSS/TS changes under `shell/src/`, **do not** run `app:dev`. The
-sidecar binary is a 66 MB Bun compile (~30–90s) and Vite already does
-HMR for the UI. Instead:
-
-```sh
-# Terminal A — proxy with file watch, bound to :4142 (matches shell/src/api.ts DEV branch).
-bun run dev -- start --port 4142
-
-# Terminal B — Vite for the settings UI.
-bun run app:ui
-# Open http://localhost:1420/settings/
-```
-
-`shell/src/main.ts`'s `safeInvoke()` already swallows Tauri-only `invoke()`
-calls when running in a plain browser, so the "Reveal in Finder" buttons
-no-op gracefully — everything else works.
-
-## Architecture
-
-This is a local proxy that exposes the GitHub Copilot API as both an OpenAI-compatible and Anthropic-compatible HTTP service. It uses GitHub Copilot the same way Opencode's built-in Copilot provider does: authenticate with the user's own Copilot license, route requests to the Copilot endpoint, translate the response shape. The entry point is `src/main.ts` (CLI via `citty`), which dispatches to subcommands: `start`, `auth`, `check-usage`, `debug`.
-
-### Request flow for `/v1/messages` (Anthropic path)
-
-`src/routes/messages/handler.ts` is the core dispatch logic:
-
-1. Rate limit check
-2. Parse Anthropic payload
-3. Detect subagent marker (`__SUBAGENT_MARKER__` in `<system-reminder>`) → sets `x-initiator: agent`
-4. Detect compact requests (Claude Code context compaction)
-5. Force `smallModel` for tool-less warmup/probe requests
-6. Merge mixed `tool_result` + text blocks to avoid fresh premium request
-7. Normalize model ID → look up Copilot model
-8. Route to one of three upstream flows:
-   - `handleWithMessagesApi` — Copilot native `/v1/messages` (Claude models, preferred)
-   - `handleWithResponsesApi` — Copilot `/responses` (GPT models)
-   - `handleWithChatCompletions` — fallback for everything else
-
-### Key directories
-
-| Path | Purpose |
+| Do this | Read this first |
 |---|---|
-| `src/server.ts` | Hono app, middleware stack, route registration |
-| `src/lib/` | Shared utilities: config, state, auth, tokens, rate-limit, models, tokenizer, trace |
-| `src/routes/` | Route handlers grouped by endpoint family |
-| `src/services/` | Upstream API clients (Copilot, GitHub, providers) |
-| `tests/` | All test files (`*.test.ts`), Bun built-in runner |
-| `shell/` | Tauri menu-bar app (Vite frontend + `src-tauri/` Rust shell) wrapping the proxy as a sidecar |
+| Run any script (`bun run …`), set up dev, iterate on the Tauri UI | [`docs/commands.md`](docs/commands.md) |
+| Touch routing, middleware, model dispatch, config, token store, diagnostics, or the Tauri sidecar | [`docs/architecture.md`](docs/architecture.md) |
+| Write or modify tests (especially mocks) | [`docs/architecture.md`](docs/architecture.md) → *Testing gotchas* |
+| Open a PR, change commit conventions, cut a release | [`docs/architecture.md`](docs/architecture.md) → *Release & PR conventions* + [`docs/release-runbook.md`](docs/release-runbook.md) |
+| Spawn parallel agents / use git stash | [`docs/architecture.md`](docs/architecture.md) → *Parallel-agent convention* |
+| Change `.bun-version` or CI's Bun pin | [`docs/bun-version-policy.md`](docs/bun-version-policy.md) |
+| Write any code | [`docs/code-style.md`](docs/code-style.md) |
+| Touch any HTML, CSS, or component code (Tauri windows, proxy-served pages) | [`.design-context.md`](.design-context.md) — **mandatory before edits** |
+| Work with the Claude Code or Opencode plugin | [`docs/plugins.md`](docs/plugins.md) |
+| Dispatch or review codegen feedback loops | [`docs/codegen-feedback-loops-practices.md`](docs/codegen-feedback-loops-practices.md) |
 
-### Middleware stack (in order)
+## Other knowledge in this repo
 
-`traceIdMiddleware` → `logger()` → `cors()` → `createAuthMiddleware` (API key validation via `x-api-key` or `Authorization: Bearer`; unauthenticated paths: `/`, `/usage-viewer`)
+- `docs/decisions/` — architecture decision records
+- `docs/spec/` — feature specs
+- `docs/dev/` — developer notes
+- `docs/admin/` — operational docs
+- `docs/*-prd.md` — product requirement docs for individual surfaces
+- `research_log/` — dated investigation notes
 
-### Model routing
+If you don't find what you need in a linked doc, **search `docs/` and
+`research_log/` before asking or inferring**. Earned knowledge lives in
+those files; don't reinvent it.
 
-`src/lib/models.ts` normalizes Claude model IDs via 5 regex patterns (handles variants like `claude-opus-4-6`, `claude-opus-4.6`). The `useMessagesApi` config flag (default `true`) controls whether Claude-family models use the native Messages API or fall back to Chat Completions.
+## House rules (the few that must live here)
 
-### Config and state
-
-- `src/lib/config.ts` — `AppConfig` shape, disk read/write from `~/.local/share/copilot-api/config.json` (Linux/macOS) or `%USERPROFILE%\.local\share\copilot-api\config.json` (Windows). Also respects `COPILOT_API_HOME` env var.
-- `src/lib/config-schema.ts` — zod runtime validation. Bad config → exit non-zero with key path. Unknown keys → warning, kept via `.loose()`.
-- `src/lib/state.ts` — singleton mutable state: tokens, accountType, rate-limit, models cache.
-- `src/lib/github-token-store.ts` — the GitHub identity store. Multi-account registry (schema v2) at `accounts.json` beside the legacy `github_token`: `{ activeKey, accounts: Record<"login@host", AccountRecord> }`, atomic temp+rename writes. Boot reads the active account; the legacy single-record file is migrated in once (gated, offline→`unknown@host`) and kept as a rollback fallback. The three sign-in producers (device-code, CLI, gh-reuse) all persist a typed `AccountRecord`; switch/remove + the `/settings/api/accounts` routes drive quick-switch (set active → reboot the sidecar into it). Sign-out forgets the active account; Remove forgets a specific one; both touch only maximal's own copy — never `gh`. RMW takes no lock (safe on the single Bun sidecar; see the comment above `addAccountToDefaultRegistry`).
-- `src/lib/secrets.ts` — file-based provider keys at `~/.local/share/copilot-api/secrets/<name>` (mode 0600). Env wins; file fills in unset values.
-- `src/lib/cache.ts` — `Cache<K,V>` LRU wrapper with hit/miss/eviction metrics. Wrapped instances register globally for `/_debug/state`.
-
-### Diagnostic surfaces
-
-- **`copilot-api debug`** (and `--json`) — effective config, executor selection (which `Executor` `selectExecutor()` would pick), secret sources (env/file/config/unset, never values), paths.
-- **`GET /_debug/state`** — live equivalent on a running proxy. 404 by default; gated on `state.verbose`. Useful when restart isn't an option.
-- **Daily log** at `~/.local/share/copilot-api/logs/messages-handler-<date>.log` — request payloads, translated SSE events, web-tools agent traces. 7-day retention.
-
-### Parallel-agent convention
-
-This repo can collide on a shared working tree (lint-staged stash + concurrent merge ate a turn already). For parallel agents:
-- **Spawned subagents:** pass `isolation: "worktree"` to the Agent tool.
-- **Sessions:** create a worktree manually with `git worktree add ../maximal-<task> -b agent/<task>`; clean up with `git worktree remove ../maximal-<task>` after merging back.
-- **Never run `git stash pop` in a shared working tree.** It silently merges another in-flight worker's stash into your tree, and on conflict it leaves an inconsistent state that's easy to "clean up" by `rm`-ing files that aren't yours. We lost a session's worth of React-shell work to this exact path: a subagent ran `git stash pop` to bisect a test failure, hit a conflict, and `rm`'d untracked files it didn't recognize. If you need an isolated bisect, use a worktree (see above). If you must inspect a stash, use `git stash show -p stash@{N}` (read-only) and never `pop` / `apply` outside an isolated tree.
-
-See also: `docs/codegen-feedback-loops-practices.md` → Dispatch and review loops.
-
-### Testing gotchas
-
-- **`mock.module` persists forward across files in a run.** Bun does not
-  reset module mocks between test files, and CI orders files differently
-  than local. A mock wrapper that drops arguments (e.g. forwards only the
-  first param) will corrupt a *sibling* file's tests that pass the dropped
-  args — and it'll pass locally but fail in CI. Make wrappers behaviorally
-  identical to the real module (forward `...rest`), or prefer injectable
-  function options over `mock.module`. This bit us twice on the apps work.
-- **Green tests can still test nothing.** Mutation testing (`bun run mutate`)
-  caught classification tests that passed without exercising the branch
-  they claimed to cover (the fixture hit a different code path that
-  returned the same value). For security-critical or branchy logic, run
-  Stryker and confirm the targeted mutants actually die — don't trust a
-  passing assertion alone.
-
-### Release & PR conventions
-
-- **Release is driven by Conventional Commit *types*.** release-please
-  scans commits since the last tag; only `feat:` (minor) and `fix:`
-  (patch) cut a release. `test:`/`chore:`/`ci:`/`docs:`/`refactor:` are
-  release-silent. If release-please "isn't doing anything," it almost
-  certainly found no `feat`/`fix` commit — check the `release-pr` step
-  log for `No user facing commits found ... skipping` before assuming
-  it's broken.
-- **Squash-merge uses the PR *title* as the commit subject.** So the PR
-  title must be a single valid Conventional Commit (`fix: …`, not
-  `test+fix: …`). A non-standard type like `test+fix` parses as one
-  unrecognized token and release-please skips it — even if the diff
-  contains a real `fix:`. Title PRs accordingly; the body's individual
-  commit messages don't reach `main` through a squash.
-
-### Tauri shell
-
-`shell/` is a Tauri 2 menu-bar app that wraps the proxy for non-CLI users. `bun run app:sidecar` builds the standalone proxy binary into `shell/src-tauri/binaries/`, and Tauri launches it as a sidecar bound to `127.0.0.1:4142`. The Vite frontend in `shell/src/` talks to the local sidecar over HTTP. The proxy itself is unchanged — the shell is purely packaging plus a tray UI for auth/status.
-
-### Token counting
-
-`/v1/messages/count_tokens`: when `anthropicApiKey` is configured, forwards Claude model requests to Anthropic's free `/v1/messages/count_tokens` endpoint for exact counts. Otherwise falls back to GPT `o200k_base` tokenizer with 1.15x multiplier (`src/lib/tokenizer.ts`).
-
-## Bun version policy
-
-Pinned in `.bun-version` (read by `bun install` and Bun's own version
-manager) AND in `.github/workflows/ci.yml`. Both must move together —
-dev/CI drift is what got us a 22-test failure on a Bun `latest`
-regression once, and the pin is the antidote.
-
-Bump intentionally:
-
-1. Pick the new Bun version (read its release notes — confirm no
-   open regressions affecting our patterns: parallel test loading,
-   module-export resolution, `with { type: "file" }` import
-   attributes).
-2. Run the whole suite locally on the new version: `bun test`,
-   `bun run check:fast`, `bun run app:dev`.
-3. If green, update **both** `.bun-version` and the `bun-version`
-   field in `.github/workflows/ci.yml` in the same commit.
-4. Watch the next CI run.
-
-Don't float `latest`. Bun ships fast; a release in a single afternoon
-can ship a regression that breaks our test loader, and the difference
-between "we picked this Bun" and "CI happened to pull this Bun" is
-the difference between a one-line fix and an hour of triage.
-
-Cadence: rev every ~4-6 weeks for hygiene, or sooner when a needed
-feature/fix lands upstream. Don't let the pin go stale enough to
-miss security fixes.
-
-## Code Style
-
-- **Imports:** Use `~/` alias for `src/` (e.g., `import { foo } from '~/lib/foo'`)
-- **TypeScript:** Strict mode — no `any`, `noUnusedLocals`, `noUnusedParameters`
-- **Modules:** ESNext only, no CommonJS
-- **Naming:** `camelCase` for functions/variables, `PascalCase` for types/interfaces
-- **Error handling:** Route handlers catch and call `forwardError(c, error)`; use `HTTPError` from `src/lib/error.ts`
-- **Streaming:** All three API flows support both streaming (SSE via `streamSSE`) and non-streaming, switching on `payload.stream`
-
-## Plugin Integrations
-
-- **Claude Code plugin:** Install from marketplace with `/plugin marketplace add https://github.com/caozhiyuan/copilot-api.git` then `/plugin install claude-plugin@copilot-api-marketplace`. Injects `__SUBAGENT_MARKER__` on subagent starts.
-- **Opencode plugin:** Copy `.opencode/plugins/subagent-marker.js` to `~/.config/opencode/plugins/`.
-
-## Design Context
-
-UI work in this repo follows `.design-context.md` in the repo root. **Read it before touching any HTML/CSS/component code** for the Tauri windows or the proxy-served pages.
-
-**Direction in brief:** humanist-powerful — dense with capability but never overwhelming. Dark-first with light + system override; user-themable accent and surface colors with contrast guardrails (warn at sub-WCAG-AA, never block). Sidebar nav for multi-section windows, scroll-only for single-section. Three surface levels, three elevation levels, fixed spacing scale.
-
-**Five principles override all other guidance in conflicts:**
-1. Speak to the person, not the file
-2. Power lives in depth, not density
-3. Color is the user's, contrast is ours
-4. One humanist accent per window
-5. Reduced motion is a contract, not a hint
-
-The design-* skills (design-frontend, design-onboard, design-critique, design-check, design-typography-rules, etc.) consult this file. If output feels generic, the file needs sharpening — update it, don't override it inline.
+- **Never `git stash pop` in a shared working tree.** See architecture doc → *Parallel-agent convention* for why. Use a worktree for any isolated bisect.
+- **PR titles are Conventional Commits** (`feat:` / `fix:` / `chore:` / etc.) — squash-merge uses the title verbatim. See architecture doc → *Release & PR conventions*.
+- **Pin matters.** `.bun-version` and `.github/workflows/ci.yml` move together. See Bun version policy.
+- **Design context overrides this file** for any UI work. Read `.design-context.md`.
