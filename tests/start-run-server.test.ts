@@ -76,7 +76,15 @@ void mock.module("~/lib/utils", () => ({
   cacheVsCodeDeviceId: cacheVsCodeDeviceIdMock,
 }))
 
-const logUserMock = mock(() => Promise.resolve())
+const logUserMock = mock(() => {
+  // The real logUser() populates state.userName as part of its contract.
+  // Mirror that here so the cold-boot path (which now requires a real
+  // login before flipping to authenticated — ADR-0006) sees a populated
+  // userName and reaches markSignedIn("alice"). Tests that need a
+  // different login override this via logUserMock.mockImplementation.
+  state.userName = "alice"
+  return Promise.resolve()
+})
 const setupCopilotTokenMock = mock(() => Promise.resolve())
 const realTokenModule = await import("~/lib/token")
 void mock.module("~/lib/token", () => ({

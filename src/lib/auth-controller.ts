@@ -113,7 +113,7 @@ type AuthState =
   | { kind: "signed-out" }
   | { kind: "device-issued"; flow: ActiveFlow }
   | { kind: "polling"; flow: ActiveFlow }
-  | { kind: "signed-in"; login: string | null }
+  | { kind: "signed-in"; login: string }
   | ({ kind: "error" } & ParsedCopilotError)
 
 let authState: AuthState = { kind: "signed-out" }
@@ -153,16 +153,12 @@ export function getAuthStatus(): AuthStatus {
 
   switch (authState.kind) {
     case "signed-in": {
-      // On cold boot logUser() populated state.userName; fall back to it
-      // so the Account section never renders an empty avatar after a
-      // restart. Final fallback to the literal "unknown" preserves the
-      // type contract (account_login is required on the authenticated
-      // variant — see settings-types.ts) when getGitHubUser failed
-      // best-effort during the device flow.
-      const login = authState.login ?? state.userName ?? "unknown"
+      // `login` is required on the signed-in variant — the only writers
+      // (runPoller and markSignedIn) take a real string. No fallback,
+      // no "unknown" sentinel: by construction we know who the user is.
       return {
         state: "authenticated",
-        account_login: login,
+        account_login: authState.login,
         ...rejectionPayload,
       }
     }
@@ -270,19 +266,36 @@ async function runPoller(flow: ActiveFlow): Promise<void> {
     if (flow.abort.signal.aborted) return
 
     // Resolve the login BEFORE persisting so the account is keyed by its real
-    // `login@host` rather than "unknown". Best-effort: a failure here does NOT
-    // invalidate the token — we still persist (under "unknown"), the avatar
-    // falls back to a neutral placeholder, and cold-boot logUser() repopulates
-    // the login next start. Populating it before flipping to signed-in also
-    // keeps the Account UI from latching "(unknown)" — it stops polling the
-    // instant it sees `authenticated` and only re-fetches on re-navigation.
-    let login: string | null = null
+    // `login@host` and the user sees who they signed in as. A failure here
+    // means we have a working token but can't verify whose token it is —
+    // persisting and claiming `authenticated` under that state is incoherent
+    // (the registry would gain an `unknown@github.com` row, future sign-ins
+    // would duplicate it, and the UI would say "Signed in as ?" forever).
+    //
+    // Surface as an error and let the user retry. The token is dropped from
+    // memory (we never wrote it to state.githubToken or disk); a retry runs
+    // the device flow fresh. UX cost: one repeat of the code-copy step on a
+    // transient github.com blip — recoverable in seconds. The alternative
+    // (a `verifying` state with bounded retries) is the natural extension if
+    // this turns out to fire too often in practice; see ADR-0006 carve-out.
+    let login: string
     try {
       const user = await getGitHubUser(token)
       login = user.login
       state.userName = user.login
     } catch (err) {
-      consola.warn("Auth-controller: failed to fetch GitHub user:", err)
+      if (flow.abort.signal.aborted) return
+      const message = err instanceof Error ? err.message : String(err)
+      consola.warn(
+        "Auth-controller: failed to verify GitHub account after sign-in:",
+        message,
+      )
+      authState = {
+        kind: "error",
+        message: "Couldn't verify your GitHub account. Try signing in again.",
+        remediationUrl: null,
+      }
+      return
     }
 
     // Re-check abort: getGitHubUser is an awaited round-trip during which
@@ -291,7 +304,7 @@ async function runPoller(flow: ActiveFlow): Promise<void> {
 
     await addAccount(
       makeAccountRecord({
-        login: login ?? "unknown",
+        login,
         host: currentGitHubHost(),
         token,
         addedVia: "device-code",
@@ -342,9 +355,12 @@ async function runPoller(flow: ActiveFlow): Promise<void> {
  * flow (cold boot / `--github-token` / CLI `auth`). The completion host,
  * Copilot token, and models are populated by the caller (bootstrapUpstream
  * → logUser/setupCopilotToken/cacheModels); this only records the auth
- * status so getAuthStatus reports `authenticated` after a restart.
+ * status so getAuthStatus reports `authenticated` after a restart. The
+ * caller MUST have already resolved a real GitHub login (e.g. via
+ * logUser()) — there is no "unknown" sentinel; an unknown identity is
+ * an error state, not an authenticated one.
  */
-export function markSignedIn(login: string | null): void {
+export function markSignedIn(login: string): void {
   authState = { kind: "signed-in", login }
 }
 

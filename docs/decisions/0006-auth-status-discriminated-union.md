@@ -105,26 +105,46 @@ Co-requirements:
    a real `account_login`. If GitHub omits one, the controller should
    surface an `error` state instead of a fake login.
 
-## Pragmatic carve-out (implementation note, 2026-06-15)
+## Implementation note (2026-06-15)
 
-The implementation diverges from item 4 above in one place: when
-`getGitHubUser` fails best-effort during the device flow (the token
-works but the user lookup didn't), the controller emits the literal
-string `"unknown"` on `account_login` rather than failing sign-in
-into the `error` state. Failing the whole sign-in on a transient
-GitHub API hiccup is worse for the user than surfacing a placeholder
-avatar — and there is an existing test (`tests/auth-controller.test.ts`
-"getGitHubUser failure does NOT invalidate the token") that enshrines
-this behavior.
+A first pass diverged from item 4 with a "best-effort" carve-out:
+when `getGitHubUser` failed, the controller emitted
+`account_login: "unknown"` and stayed in `state: "authenticated"`.
+On review this was incoherent — the same path persisted an
+`unknown@github.com` row to the account registry, which would
+collide with the user's real account on the next successful
+sign-in, and the UI would claim "Signed in as ?" forever — and
+was reverted.
 
-The type contract stays strict — `account_login: string` is
-required, never `undefined` — and the renderer treats `"unknown"`
-(no parens, distinct from the previous renderer-synthesized
-`"(unknown)"` sentinel) as the placeholder trigger. So the
-"sentinel substituted in the renderer" pattern is gone; the
-substitution lives in the controller where the type is constructed,
-and the avatar renderer detects one well-known string instead of
-defending against missing fields.
+The shipped behavior matches the strict reading of item 4:
+
+- `runPoller` treats a `getGitHubUser` failure as a sign-in failure.
+  The token is dropped from in-memory state (never reaches
+  `state.githubToken`), no row is added to `accounts.json`, and the
+  controller transitions to `state: "error"` with the message
+  "Couldn't verify your GitHub account. Try signing in again."
+- `markSignedIn(login: string)` requires a real string (no `null`,
+  no `"unknown"`). Cold-boot callers in `start.ts` resolve the
+  login via `logUser()` first; if that didn't populate
+  `state.userName`, the cold-boot path degrades to unauthenticated
+  rather than claim signed-in under an unknown identity.
+- The `signed-in` variant of the controller's internal `AuthState`
+  union is `{ kind: "signed-in"; login: string }` — no nullable.
+- The renderer's `login === "unknown"` placeholder branch is gone.
+  The avatar only checks for an empty string (defense in depth for
+  future variants); it never fires in practice.
+
+UX trade-off accepted: a transient github.com hiccup during the
+user-lookup round-trip will require the user to repeat the
+device-code copy step. That's recoverable in seconds and far better
+than the registry pollution + identity confusion the carve-out
+created.
+
+A `verifying` state with bounded retries (hold the token in memory,
+poll `getGitHubUser` a few times before giving up) is the natural
+extension if this turns out to fire often enough in practice to be
+noisy. Defer until there's evidence — not speculation — that it
+matters.
 
 ## Alternatives considered
 

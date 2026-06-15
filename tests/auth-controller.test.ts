@@ -205,19 +205,17 @@ afterEach(() => {
 // --- getAuthStatus branches ------------------------------------------------
 
 describe("getAuthStatus", () => {
-  test("returns { state: 'authenticated' } with account_login='unknown' when signed-in and no login known", () => {
-    markSignedIn(null)
+  test("returns { state: 'authenticated' } with the login passed to markSignedIn", () => {
+    // ADR-0006 (post-carve-out resolution): markSignedIn requires a real
+    // login string — there is no "unknown" sentinel. An unknown identity
+    // is an error state, not an authenticated one. Cold-boot callers
+    // resolve the login via logUser() first.
+    markSignedIn("alice")
     const status = getAuthStatus()
-    // ADR-0006: `authenticated` always carries `account_login` (string).
-    // When the controller has no real login (best-effort getGitHubUser
-    // failure during the device flow), it emits the literal "unknown"
-    // rather than dropping the field — the renderer treats "unknown" as
-    // a placeholder trigger.
-    expect(status).toEqual({ state: "authenticated", account_login: "unknown" })
-    // Literal string check pins the StringLiteral mutant.
+    expect(status).toEqual({ state: "authenticated", account_login: "alice" })
     expect(status.state).toBe("authenticated")
     if (status.state === "authenticated") {
-      expect(status.account_login).toBe("unknown")
+      expect(status.account_login).toBe("alice")
     }
   })
 
@@ -521,25 +519,31 @@ describe("runPoller (driven by startDeviceFlow)", () => {
     expect(finalStatus.account_login).toBe("alice")
   })
 
-  test("getGitHubUser failure does NOT invalidate the token (best-effort login surfaces as account_login='unknown')", async () => {
+  test("getGitHubUser failure surfaces error state, does NOT persist or claim authenticated", async () => {
+    // ADR-0006 (post-carve-out resolution): a token we can't tie to a real
+    // GitHub login is not "authenticated" — it's an unverifiable session.
+    // The controller must surface an error so the user retries the device
+    // flow rather than ending up with an `unknown@github.com` row in the
+    // account registry and a "Signed in as ?" UI forever.
     const poll = deferred<string>()
     harness.pollAccessTokenImpl = () => poll.promise
     harness.getGitHubUserImpl = () => Promise.reject(new Error("403 user"))
 
     await startDeviceFlow()
-    poll.resolve("ghu_token_kept")
+    poll.resolve("ghu_should_not_persist")
     await flushMicrotasks(20)
 
-    expect(state.githubToken).toBe("ghu_token_kept")
-    // accountLogin remained null, userName never set.
+    // Token dropped from in-memory state — never written.
+    expect(state.githubToken).toBeUndefined()
+    // userName was never populated because getGitHubUser threw.
     expect(state.userName).toBeUndefined()
+    // No persistence: addAccount must not have been called.
+    expect(harness.addAccountCalls.length).toBe(0)
+
+    // Status reports the failure with a user-actionable message.
     const status = getAuthStatus()
-    // ADR-0006: authenticated always carries account_login; the controller
-    // emits the literal "unknown" rather than dropping the field when the
-    // best-effort getGitHubUser fetch fails. The renderer detects "unknown"
-    // and shows a placeholder avatar.
-    assertAuthenticated(status)
-    expect(status.account_login).toBe("unknown")
+    assertError(status)
+    expect(status.error).toMatch(/verify your GitHub account/i)
   })
 
   test("fatal Copilot rejection after sign-in surfaces the error, never latches signed-in", async () => {
@@ -613,7 +617,7 @@ describe("runPoller (driven by startDeviceFlow)", () => {
     }
   })
 
-  test("getGitHubUser failure emits the 'failed to fetch GitHub user' warn", async () => {
+  test("getGitHubUser failure emits the 'failed to verify GitHub account' warn", async () => {
     const poll = deferred<string>()
     harness.pollAccessTokenImpl = () => poll.promise
     const userErr = new Error("403 forbidden")
@@ -626,10 +630,13 @@ describe("runPoller (driven by startDeviceFlow)", () => {
       const hit = spy.calls.find(
         (args) =>
           typeof args[0] === "string"
-          && args[0].includes("failed to fetch GitHub user"),
+          && args[0].includes("failed to verify GitHub account"),
       )
       expect(hit).toBeDefined()
-      expect(hit?.[1]).toBe(userErr)
+      // The second argument is now the coerced string message
+      // (the controller wraps the error into a user-facing message
+      // and logs the underlying string), not the raw Error instance.
+      expect(hit?.[1]).toBe(userErr.message)
     } finally {
       spy.restore()
     }
@@ -987,7 +994,7 @@ describe("__resetAuthControllerForTests", () => {
     expect(getAuthStatus()).toEqual({ state: "unauthenticated" })
   })
 
-  test("clears accountLogin so the next authenticated status falls back to 'unknown'", async () => {
+  test("clears accountLogin so the next markSignedIn call sees a fresh slate", async () => {
     const poll = deferred<string>()
     harness.pollAccessTokenImpl = () => poll.promise
     harness.getGitHubUserImpl = () => Promise.resolve({ login: "alice" })
@@ -1000,12 +1007,12 @@ describe("__resetAuthControllerForTests", () => {
     expect(before.account_login).toBe("alice")
 
     __resetAuthControllerForTests()
-    // Re-sign-in without a login; account_login should not leak across resets.
-    // ADR-0006: account_login is required; controller emits "unknown" when
-    // no real login is available.
-    markSignedIn(null)
+    // After reset the controller is signed-out; the next markSignedIn
+    // call writes its own login without inheriting alice. ADR-0006:
+    // markSignedIn requires a real login (no `null`), so we pass one.
+    markSignedIn("bob")
     const status = getAuthStatus()
     assertAuthenticated(status)
-    expect(status.account_login).toBe("unknown")
+    expect(status.account_login).toBe("bob")
   })
 })

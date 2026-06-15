@@ -249,8 +249,7 @@ describe("getAuthStatus + lastUpstreamRejection", () => {
   })
 
   test("authenticated state surfaces last_upstream_rejection with remediation_url", () => {
-    markSignedIn(null)
-    state.userName = "alice"
+    markSignedIn("alice")
     setLastUpstreamRejection({
       message: "quota exhausted",
       remediationUrl: "https://github.com/settings/copilot",
@@ -291,7 +290,7 @@ describe("getAuthStatus + lastUpstreamRejection", () => {
   })
 
   test("omits remediation_url when remediationUrl is null", () => {
-    markSignedIn(null)
+    markSignedIn("alice")
     setLastUpstreamRejection({
       message: "no plan",
       remediationUrl: null,
@@ -307,13 +306,11 @@ describe("getAuthStatus + lastUpstreamRejection", () => {
   })
 
   test("omits last_upstream_rejection entirely when state.lastUpstreamRejection is undefined", () => {
-    markSignedIn(null)
+    markSignedIn("alice")
     state.lastUpstreamRejection = undefined
 
     const status = getAuthStatus()
-    // ADR-0006: account_login is required on `authenticated`; controller
-    // emits "unknown" when markSignedIn(null) was called.
-    expect(status).toEqual({ state: "authenticated", account_login: "unknown" })
+    expect(status).toEqual({ state: "authenticated", account_login: "alice" })
     expect(status).not.toHaveProperty("last_upstream_rejection")
   })
 })
@@ -336,7 +333,7 @@ describe("signOut clears the upstream-rejection sidecar", () => {
   })
 
   test("signOut wipes state.lastUpstreamRejection and getAuthStatus no longer reports it", async () => {
-    markSignedIn(null)
+    markSignedIn("alice")
     state.lastUpstreamRejection = {
       message: "x",
       remediationUrl: null,

@@ -438,12 +438,12 @@ function setAccountField(name: string, value: string): void {
 function renderAccountAvatar(login: string): void {
   const slot = accountSlot("account_avatar");
   if (!slot) return;
-  // ADR-0006: the controller emits the literal "unknown" string on the
-  // `authenticated` variant when getGitHubUser failed best-effort (the
-  // token works but the login lookup didn't). Treat that — and an empty
-  // string — as a placeholder trigger so the avatar shows a neutral "?"
-  // rather than the letter "u".
-  const isPlaceholder = !login || login === "unknown";
+  // ADR-0006: `account_login` is required on the authenticated variant
+  // and the controller only emits a real GitHub login (a failed user
+  // lookup surfaces as `state: "error"` instead — there is no "unknown"
+  // sentinel). The empty-string guard remains as belt-and-braces for
+  // future variants; current backend never emits one.
+  const isPlaceholder = !login;
   const initial = isPlaceholder ? "?" : (login[0] ?? "?").toUpperCase();
   slot.textContent = "";
   slot.classList.remove("signed-in-hero__avatar--fallback");

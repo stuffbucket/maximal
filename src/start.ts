@@ -483,8 +483,20 @@ async function bootstrapUpstream(
       )
       // Record the signed-in status so getAuthStatus() reports
       // `authenticated` after a cold boot (the device-flow controller
-      // wasn't involved here). logUser() populated state.userName.
-      markSignedIn(state.userName ?? null)
+      // wasn't involved here). logUser() populated state.userName on
+      // success above; if it didn't, that's a logUser bug — fall through
+      // to the unauthenticated degrade path rather than claim signed-in
+      // under an unknown identity.
+      if (state.userName) {
+        markSignedIn(state.userName)
+        return
+      }
+      consola.warn(
+        "Bootstrap: logUser succeeded but state.userName is empty; degrading to unauthenticated.",
+      )
+      state.githubToken = undefined
+      state.copilotToken = undefined
+      markSignedOut()
       return
     } catch (error) {
       // A *fatal* Copilot error (license revoked, TOS not accepted, not
