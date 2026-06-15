@@ -61,6 +61,23 @@ export const ApiErrorBody = z.object({
 })
 export type ApiErrorBody = z.infer<typeof ApiErrorBody>
 
+/** Last non-fatal upstream rejection from a Copilot completion
+ *  endpoint (quota exhausted, model not on plan, transient upstream
+ *  error). Distinct from `error`/`remediation_url` on AuthStatus
+ *  (which are about the GitHub-token state itself) —
+ *  `last_upstream_rejection` is a sidecar attached to the most recent
+ *  completion attempt and clears on the next successful request.
+ *  Rides along on `unauthenticated` and `authenticated` states only;
+ *  the pending and error variants don't carry it (a token state issue
+ *  takes precedence over a completion-time rejection in the UI). */
+export const UpstreamRejection = z.object({
+  message: z.string(),
+  status: z.number().int(),
+  at: z.string(),
+  remediation_url: z.string().optional(),
+})
+export type UpstreamRejection = z.infer<typeof UpstreamRejection>
+
 /** GitHub device-code auth state, exposed by /settings/api/auth/github/*.
  *
  *  Lifecycle:
@@ -70,42 +87,51 @@ export type ApiErrorBody = z.infer<typeof ApiErrorBody>
  *  Transitions are driven by POST /start (issue), the background
  *  poller (polling → authenticated|error), and POST /sign-out (reset).
  *
- *  The shape mirrors the device-code fields exactly so the shell never
- *  has to reconstruct the verification URL or guess at expiry. */
-export const AuthStatus = z.object({
-  state: z.enum([
-    "unauthenticated",
-    "device_code_issued",
-    "polling",
-    "authenticated",
-    "error",
-  ]),
-  user_code: z.string().optional(),
-  verification_uri: z.string().optional(),
-  expires_at: z.string().optional(),
-  account_login: z.string().optional(),
-  error: z.string().optional(),
-  /** Optional remediation URL surfaced when GHCP rejects our token at
-   *  the Copilot exchange (e.g. updated TOS, Copilot settings page).
-   *  Present only in the `error` state and only when GHCP returned a
-   *  URL in the rejection body. */
-  remediation_url: z.string().optional(),
-  /** Last non-fatal upstream rejection from a Copilot completion
-   *  endpoint (quota exhausted, model not on plan, transient upstream
-   *  error). Distinct from `error`/`remediation_url` (which are about
-   *  the GitHub-token state itself) — `last_upstream_rejection` is a
-   *  sidecar attached to the most recent completion attempt and clears
-   *  on the next successful request. Surfaced as a banner in the
-   *  Settings UI without changing the authenticated state. */
-  last_upstream_rejection: z
-    .object({
-      message: z.string(),
-      status: z.number().int(),
-      at: z.string(),
-      remediation_url: z.string().optional(),
-    })
-    .optional(),
-})
+ *  Modeled as a discriminated union on `state` (boundary D3, ADR-0006):
+ *  each variant declares exactly the data valid in that state, so the
+ *  shell narrows by `state` and the renderer is exhaustive. Adding a
+ *  new state requires a new variant — the compiler then surfaces every
+ *  renderer + controller site that must handle it.
+ *
+ *  Note on `account_login` for the `authenticated` variant: a real
+ *  GitHub login is required by contract. The controller resolves it
+ *  before flipping to authenticated (see auth-controller.runPoller).
+ *  In the best-effort failure path (sign-in succeeded but
+ *  getGitHubUser threw), the controller emits the literal `"unknown"`
+ *  string rather than dropping the field — the renderer treats
+ *  `"unknown"` as a placeholder trigger. The field is never absent.
+ */
+export const AuthStatus = z.discriminatedUnion("state", [
+  z.object({
+    state: z.literal("unauthenticated"),
+    last_upstream_rejection: UpstreamRejection.optional(),
+  }),
+  z.object({
+    state: z.literal("device_code_issued"),
+    user_code: z.string(),
+    verification_uri: z.string(),
+    expires_at: z.string(),
+  }),
+  z.object({
+    state: z.literal("polling"),
+    user_code: z.string(),
+    verification_uri: z.string(),
+    expires_at: z.string(),
+  }),
+  z.object({
+    state: z.literal("authenticated"),
+    account_login: z.string(),
+    last_upstream_rejection: UpstreamRejection.optional(),
+  }),
+  z.object({
+    state: z.literal("error"),
+    error: z.string(),
+    /** Optional remediation URL surfaced when GHCP rejects our token at
+     *  the Copilot exchange (e.g. updated TOS, Copilot settings page).
+     *  Present only when GHCP returned a URL in the rejection body. */
+    remediation_url: z.string().optional(),
+  }),
+])
 export type AuthStatus = z.infer<typeof AuthStatus>
 
 // ---------------------------------------------------------------------------

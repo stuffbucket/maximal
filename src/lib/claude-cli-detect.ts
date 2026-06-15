@@ -1,5 +1,5 @@
 /**
- * Detection + PATH-shim management for the `claude` CLI (Claude Code).
+ * Detection + (legacy) shim cleanup for the `claude` CLI (Claude Code).
  *
  * "Detection" finds the `claude` that's actually active — the first real
  * `claude` on PATH (an in-process PATH walk, no subprocess). Only when
@@ -8,13 +8,20 @@
  * active one is on PATH too, so it's still found; copies that exist but
  * aren't active are intentionally ignored.
  *
- * "Shim" is a tiny `/bin/sh` wrapper we drop in a dedicated directory
- * (`~/.local/share/maximal/shims/`) as a file named `claude`. It sets
- * `ANTHROPIC_BASE_URL` (and optionally `ANTHROPIC_API_KEY`) and then
- * `exec`s the *real* binary the user picked. It carries a
- * marker comment so we can (a) recognise our own shim and skip it in
- * the install list, and (b) refuse to ever clobber or delete a file
- * that is NOT our shim.
+ * "Shim" history: maximal used to drop a `/bin/sh` wrapper at
+ * `~/.local/share/maximal/shims/claude` that set `ANTHROPIC_BASE_URL`
+ * and exec'd the real binary. **This approach was removed in v0.4.13
+ * (commit cf0f578) in favor of writing `env.ANTHROPIC_BASE_URL` into
+ * `~/.claude/settings.json`** — Claude Code reads that fresh on every
+ * invocation, sidestepping every shim failure mode (version pinning,
+ * PATH ordering, process-name identity guards).
+ *
+ * The detection code still recognises the shim's marker comment so
+ * orphan shims on PATH are excluded from the install list (a user
+ * upgrading from a pre-0.4.13 install still has the file on disk).
+ * `removeLegacyShimIfPresent()` cleans up that orphan: a one-shot
+ * idempotent migration that deletes the shim ONLY when it carries our
+ * marker (never touches a file we don't own).
  *
  * Everything is parameterised by `homeDir` (and, for detection, the
  * PATH directory list / npm prefix / version reader) so the unit tests
@@ -26,10 +33,48 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-/** Marker line embedded in every shim we write. Detection treats any
- *  candidate file containing this as our shim (not a real install), and
- *  the clobber/remove guards key off it. */
+/** Marker line embedded in every shim we used to write. Detection treats
+ *  any candidate file containing this as our shim (not a real install),
+ *  and `removeLegacyShimIfPresent()` keys off it to safely delete the
+ *  orphan. We never write shims any more (v0.4.13 pivot to
+ *  ~/.claude/settings.json); this constant exists for backward-compat
+ *  recognition + cleanup of pre-0.4.13 installs. */
 export const SHIM_MARKER = "# __MAXIMAL_CLAUDE_SHIM__"
+
+/** The path where pre-0.4.13 maximal wrote its `claude` shim. */
+export function legacyShimPath(homeDir: string = os.homedir()): string {
+  return path.join(homeDir, ".local", "share", "maximal", "shims", "claude")
+}
+
+/**
+ * Delete the legacy `~/.local/share/maximal/shims/claude` shim if it's
+ * still on disk. Safe by construction:
+ *
+ *   - No-op if the file doesn't exist (idempotent across restarts).
+ *   - Only deletes when the file's prefix contains `SHIM_MARKER` — never
+ *     touches a file we don't own (e.g. someone manually placed a
+ *     different `claude` here, or a future maximal feature reuses the
+ *     directory).
+ *   - Errors are swallowed: this is a best-effort cleanup, not a
+ *     correctness path. The detect logic still excludes the file from
+ *     the install list either way.
+ *
+ * Returns the path that was deleted, or null if nothing was removed.
+ * Call once on boot; one removal across the user's lifetime is enough.
+ */
+export function removeLegacyShimIfPresent(
+  homeDir: string = os.homedir(),
+): string | null {
+  const shimPath = legacyShimPath(homeDir)
+  try {
+    if (!fs.existsSync(shimPath)) return null
+    if (!fileStartsWithContains(shimPath, SHIM_MARKER)) return null
+    fs.unlinkSync(shimPath)
+    return shimPath
+  } catch {
+    return null
+  }
+}
 
 export type ClaudeInstallSource =
   | "homebrew"

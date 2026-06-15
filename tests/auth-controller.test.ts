@@ -17,6 +17,12 @@ import {
 
 import type { AccountRecord } from "~/lib/github-token-store"
 
+import {
+  assertAuthenticated,
+  assertError,
+  assertPending,
+} from "./helpers/auth-status"
+
 // --- Mock harness ----------------------------------------------------------
 
 type Deferred<T> = {
@@ -199,13 +205,18 @@ afterEach(() => {
 // --- getAuthStatus branches ------------------------------------------------
 
 describe("getAuthStatus", () => {
-  test("returns { state: 'authenticated' } (literal) when signed-in and no login known", () => {
-    markSignedIn(null)
+  test("returns { state: 'authenticated' } with the login passed to markSignedIn", () => {
+    // ADR-0006 (post-carve-out resolution): markSignedIn requires a real
+    // login string — there is no "unknown" sentinel. An unknown identity
+    // is an error state, not an authenticated one. Cold-boot callers
+    // resolve the login via logUser() first.
+    markSignedIn("alice")
     const status = getAuthStatus()
-    expect(status).toEqual({ state: "authenticated" })
-    // Literal string check pins the StringLiteral mutant.
+    expect(status).toEqual({ state: "authenticated", account_login: "alice" })
     expect(status.state).toBe("authenticated")
-    expect("account_login" in status).toBe(false)
+    if (status.state === "authenticated") {
+      expect(status.account_login).toBe("alice")
+    }
   })
 
   test("includes account_login when the controller has fetched it", async () => {
@@ -220,7 +231,9 @@ describe("getAuthStatus", () => {
 
     const status = getAuthStatus()
     expect(status.state).toBe("authenticated")
-    expect(status.account_login).toBe("alice")
+    if (status.state === "authenticated") {
+      expect(status.account_login).toBe("alice")
+    }
   })
 
   test("returns { state: 'unauthenticated' } literal when no token and no flow", () => {
@@ -239,7 +252,9 @@ describe("getAuthStatus", () => {
 
     const status = getAuthStatus()
     expect(status.state).toBe("error")
-    expect(status.error).toBe("access_denied")
+    if (status.state === "error") {
+      expect(status.error).toBe("access_denied")
+    }
   })
 
   test("does NOT return error state when lastError is set but a new flow is active", async () => {
@@ -302,13 +317,13 @@ describe("getAuthStatus", () => {
   test("emits state: 'device_code_issued' literal with the user_code/verification_uri/expires_at fields", async () => {
     await startDeviceFlow()
     const status = getAuthStatus()
-    expect(["device_code_issued", "polling"]).toContain(status.state)
+    assertPending(status)
     expect(status.user_code).toBe("ABCD-1234")
     expect(status.verification_uri).toBe("https://github.com/login/device")
     expect(typeof status.expires_at).toBe("string")
     // expires_at should be ~900s in the future. The * 1000 mutant would
     // produce ~0.9s in the future, falling well below this threshold.
-    const delta = Date.parse(status.expires_at ?? "") - Date.now()
+    const delta = Date.parse(status.expires_at) - Date.now()
     expect(delta).toBeGreaterThan(60_000)
   })
 })
@@ -319,6 +334,7 @@ describe("startDeviceFlow", () => {
   test("returns the literal state: 'device_code_issued' on first issue", async () => {
     const res = await startDeviceFlow()
     expect(res.state).toBe("device_code_issued")
+    assertPending(res)
     expect(res.user_code).toBe("ABCD-1234")
     expect(res.verification_uri).toBe("https://github.com/login/device")
   })
@@ -365,6 +381,7 @@ describe("startDeviceFlow", () => {
     const secondPoll = deferred<string>()
     harness.pollAccessTokenImpl = () => secondPoll.promise
     const second = await startDeviceFlow()
+    assertPending(second)
     expect(second.user_code).toBe("CODE-2")
 
     // Now resolve the FIRST poll. Because its AbortController was
@@ -377,6 +394,7 @@ describe("startDeviceFlow", () => {
     expect(harness.addAccountCalls.length).toBe(0)
     // Second flow still active.
     const status = getAuthStatus()
+    assertPending(status)
     expect(status.user_code).toBe("CODE-2")
   })
 
@@ -395,6 +413,8 @@ describe("startDeviceFlow", () => {
 
     const first = await startDeviceFlow()
     const second = await startDeviceFlow()
+    assertPending(first)
+    assertPending(second)
     expect(second.user_code).toBe(first.user_code)
     expect(second.expires_at).toBe(first.expires_at)
     expect(calls).toBe(1) // existing && !isFlowExpired -> short-circuits
@@ -419,6 +439,8 @@ describe("startDeviceFlow", () => {
 
     const second = await startDeviceFlow()
     expect(calls).toBe(2)
+    assertPending(first)
+    assertPending(second)
     expect(second.user_code).not.toBe(first.user_code)
     expect(second.user_code).toBe("CODE-2")
   })
@@ -435,7 +457,8 @@ describe("startDeviceFlow", () => {
     const before = Date.now()
     const res = await startDeviceFlow()
     const after = Date.now()
-    const expiresAtMs = Date.parse(res.expires_at ?? "")
+    assertPending(res)
+    const expiresAtMs = Date.parse(res.expires_at)
     // *1000 -> +600000ms; /1000 -> +0.6ms. Wide window catches the mutant.
     expect(expiresAtMs - before).toBeGreaterThanOrEqual(599_000)
     expect(expiresAtMs - after).toBeLessThanOrEqual(600_500)
@@ -465,7 +488,7 @@ describe("runPoller (driven by startDeviceFlow)", () => {
     expect(harness.addAccountCalls[0]).toMatchObject({ token: "ghu_success" })
     // controllerState.flow cleared.
     const status = getAuthStatus()
-    expect(status.state).toBe("authenticated")
+    assertAuthenticated(status)
     expect(status.account_login).toBe("alice")
   })
 
@@ -492,25 +515,35 @@ describe("runPoller (driven by startDeviceFlow)", () => {
     await flushMicrotasks(20)
 
     const finalStatus = getAuthStatus()
-    expect(finalStatus.state).toBe("authenticated")
+    assertAuthenticated(finalStatus)
     expect(finalStatus.account_login).toBe("alice")
   })
 
-  test("getGitHubUser failure does NOT invalidate the token (best-effort login)", async () => {
+  test("getGitHubUser failure surfaces error state, does NOT persist or claim authenticated", async () => {
+    // ADR-0006 (post-carve-out resolution): a token we can't tie to a real
+    // GitHub login is not "authenticated" — it's an unverifiable session.
+    // The controller must surface an error so the user retries the device
+    // flow rather than ending up with an `unknown@github.com` row in the
+    // account registry and a "Signed in as ?" UI forever.
     const poll = deferred<string>()
     harness.pollAccessTokenImpl = () => poll.promise
     harness.getGitHubUserImpl = () => Promise.reject(new Error("403 user"))
 
     await startDeviceFlow()
-    poll.resolve("ghu_token_kept")
+    poll.resolve("ghu_should_not_persist")
     await flushMicrotasks(20)
 
-    expect(state.githubToken).toBe("ghu_token_kept")
-    // accountLogin remained null, userName never set.
+    // Token dropped from in-memory state — never written.
+    expect(state.githubToken).toBeUndefined()
+    // userName was never populated because getGitHubUser threw.
     expect(state.userName).toBeUndefined()
+    // No persistence: addAccount must not have been called.
+    expect(harness.addAccountCalls.length).toBe(0)
+
+    // Status reports the failure with a user-actionable message.
     const status = getAuthStatus()
-    expect(status.state).toBe("authenticated")
-    expect(status.account_login).toBeUndefined()
+    assertError(status)
+    expect(status.error).toMatch(/verify your GitHub account/i)
   })
 
   test("fatal Copilot rejection after sign-in surfaces the error, never latches signed-in", async () => {
@@ -536,7 +569,7 @@ describe("runPoller (driven by startDeviceFlow)", () => {
     await flushMicrotasks(20)
 
     const status = getAuthStatus()
-    expect(status.state).toBe("error")
+    assertError(status)
     expect(status.error).toBe("Copilot license revoked")
     // The session was wiped by markAuthFatalAndSignOut — never left signed-in.
     expect(state.githubToken).toBeUndefined()
@@ -584,7 +617,7 @@ describe("runPoller (driven by startDeviceFlow)", () => {
     }
   })
 
-  test("getGitHubUser failure emits the 'failed to fetch GitHub user' warn", async () => {
+  test("getGitHubUser failure emits the 'failed to verify GitHub account' warn", async () => {
     const poll = deferred<string>()
     harness.pollAccessTokenImpl = () => poll.promise
     const userErr = new Error("403 forbidden")
@@ -597,10 +630,13 @@ describe("runPoller (driven by startDeviceFlow)", () => {
       const hit = spy.calls.find(
         (args) =>
           typeof args[0] === "string"
-          && args[0].includes("failed to fetch GitHub user"),
+          && args[0].includes("failed to verify GitHub account"),
       )
       expect(hit).toBeDefined()
-      expect(hit?.[1]).toBe(userErr)
+      // The second argument is now the coerced string message
+      // (the controller wraps the error into a user-facing message
+      // and logs the underlying string), not the raw Error instance.
+      expect(hit?.[1]).toBe(userErr.message)
     } finally {
       spy.restore()
     }
@@ -616,7 +652,7 @@ describe("runPoller (driven by startDeviceFlow)", () => {
 
     expect(state.githubToken).toBeUndefined()
     const status = getAuthStatus()
-    expect(status.state).toBe("error")
+    assertError(status)
     expect(status.error).toBe("expired_token")
   })
 
@@ -629,7 +665,7 @@ describe("runPoller (driven by startDeviceFlow)", () => {
     await flushMicrotasks(10)
 
     const status = getAuthStatus()
-    expect(status.state).toBe("error")
+    assertError(status)
     expect(status.error).toBe("plain-string-rejection")
   })
 
@@ -895,7 +931,7 @@ describe("markAuthFatalAndSignOut", () => {
     )
 
     const status = getAuthStatus()
-    expect(status.state).toBe("error")
+    assertError(status)
     expect(status.error).toBe("tos not accepted")
   })
 
@@ -917,7 +953,7 @@ describe("markAuthFatalAndSignOut", () => {
     // surface the in-flight flow. Here the auth-fatal restamps
     // lastError, so we see `error` rather than `unauthenticated`.
     const status = getAuthStatus()
-    expect(status.state).toBe("error")
+    assertError(status)
     expect(status.error).toBe("revoked mid-flow")
     expect(["device_code_issued", "polling"]).not.toContain(status.state)
   })
@@ -958,7 +994,7 @@ describe("__resetAuthControllerForTests", () => {
     expect(getAuthStatus()).toEqual({ state: "unauthenticated" })
   })
 
-  test("clears accountLogin so the next authenticated status omits account_login", async () => {
+  test("clears accountLogin so the next markSignedIn call sees a fresh slate", async () => {
     const poll = deferred<string>()
     harness.pollAccessTokenImpl = () => poll.promise
     harness.getGitHubUserImpl = () => Promise.resolve({ login: "alice" })
@@ -966,13 +1002,17 @@ describe("__resetAuthControllerForTests", () => {
     await startDeviceFlow()
     poll.resolve("ghu_a")
     await flushMicrotasks(20)
-    expect(getAuthStatus().account_login).toBe("alice")
+    const before = getAuthStatus()
+    assertAuthenticated(before)
+    expect(before.account_login).toBe("alice")
 
     __resetAuthControllerForTests()
-    // Re-sign-in without a login; account_login should not leak across resets.
-    markSignedIn(null)
+    // After reset the controller is signed-out; the next markSignedIn
+    // call writes its own login without inheriting alice. ADR-0006:
+    // markSignedIn requires a real login (no `null`), so we pass one.
+    markSignedIn("bob")
     const status = getAuthStatus()
-    expect(status.state).toBe("authenticated")
-    expect(status.account_login).toBeUndefined()
+    assertAuthenticated(status)
+    expect(status.account_login).toBe("bob")
   })
 })

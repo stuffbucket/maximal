@@ -6,13 +6,23 @@
  * requires x-api-key / Bearer; the prefix is NOT in the unauth allowlist).
  *
  * No browser-opening, no clipboard, no blocking. The shell calls
- * /start, renders the user_code itself, then polls /status until the
- * state flips to authenticated (or error).
+ * /start, renders the user_code itself, then watches /status (live via
+ * SSE, see ADR-0007) until the state flips to authenticated (or error).
+ *
+ * /cancel aborts an in-flight device flow WITHOUT signing out — it returns
+ * to the prior signed-in account if there was one, else signed-out. /start
+ * likewise preserves the current session (issuing a code does not sign you
+ * out); only a successful poll or an explicit /sign-out replaces it.
  */
 
 import { Hono } from "hono"
 
-import { getAuthStatus, signOut, startDeviceFlow } from "~/lib/auth-controller"
+import {
+  cancelDeviceFlow,
+  getAuthStatus,
+  signOut,
+  startDeviceFlow,
+} from "~/lib/auth-controller"
 import { forwardError } from "~/lib/error"
 
 export const authRoutes = new Hono()
@@ -27,6 +37,8 @@ authRoutes.post("/start", async (c) => {
     return await forwardError(c, error)
   }
 })
+
+authRoutes.post("/cancel", (c) => c.json(cancelDeviceFlow()))
 
 authRoutes.post("/sign-out", async (c) => {
   try {

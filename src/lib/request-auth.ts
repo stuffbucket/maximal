@@ -128,6 +128,15 @@ export function findApiKeyEntry(
   return match ? { id: match.id, label: match.label } : null
 }
 
+/**
+ * The ONE endpoint that accepts its API key via query string (`?key=`).
+ * SSE clients (`EventSource`) can't set request headers, so the live-events
+ * stream (ADR-0007) has no other way to authenticate. Honouring a
+ * query-string key only for this exact path keeps keys out of URLs/logs for
+ * every other endpoint. Must equal the mount path in src/routes/settings/api.ts.
+ */
+export const SSE_EVENTS_PATH = "/settings/api/events"
+
 export function extractRequestApiKey(c: Context): string | null {
   const xApiKey = c.req.header("x-api-key")?.trim()
   if (xApiKey) {
@@ -135,17 +144,23 @@ export function extractRequestApiKey(c: Context): string | null {
   }
 
   const authorization = c.req.header("authorization")
-  if (!authorization) {
-    return null
+  if (authorization) {
+    const [scheme, ...rest] = authorization.trim().split(/\s+/)
+    if (scheme.toLowerCase() === "bearer") {
+      const bearerToken = rest.join(" ").trim()
+      if (bearerToken) return bearerToken
+    }
   }
 
-  const [scheme, ...rest] = authorization.trim().split(/\s+/)
-  if (scheme.toLowerCase() !== "bearer") {
-    return null
+  // Query-string key: honoured ONLY for the SSE events endpoint (see
+  // SSE_EVENTS_PATH). EventSource can't send headers; every other path
+  // ignores `?key=` so credentials don't leak into request URLs broadly.
+  if (c.req.path === SSE_EVENTS_PATH) {
+    const queryKey = c.req.query("key")?.trim()
+    if (queryKey) return queryKey
   }
 
-  const bearerToken = rest.join(" ").trim()
-  return bearerToken || null
+  return null
 }
 
 function createUnauthorizedResponse(c: Context): Response {

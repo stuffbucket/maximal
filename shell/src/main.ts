@@ -1,8 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 
 import type { DiagnosticsResponse } from "../../src/lib/settings-types";
-import type { AuthStatus } from "./api";
-import { apiCall } from "./api";
+import type { AuthStatus, EventSubscription, UpstreamRejection } from "./api";
+import { apiCall, subscribeAuthEvents } from "./api";
 import { mountApiClients } from "./api-clients-island";
 import { mountApps } from "./apps-island";
 
@@ -364,11 +364,17 @@ function wireDiagnostics(): void {
 // ---- Account section -------------------------------------------------------
 
 /**
- * Polling cleanup contract:
+ * Account-section update contract (ADR-0007):
+ *  - SSE is the PRIMARY channel. While #account is open we hold one
+ *    `subscribeAuthEvents` subscription; `auth.changed` drives `renderAccount`
+ *    with no poll lag. Opened on section enter, closed on leave.
+ *  - The GET poll is the FALLBACK. `schedulePoll()` is a no-op while the
+ *    stream is connected (`sseConnected`); it only runs when a sign-in is
+ *    pending and SSE is down, so a dropped stream degrades to polling.
  *  - Only one poll timer runs at a time (`authPollTimer`).
  *  - `stopAuthPolling()` clears the timer; called on terminal states
- *    (authenticated, error, unauthenticated), on sign-out, and on
- *    navigation away from #account.
+ *    (authenticated, error, unauthenticated), on sign-out, on SSE connect,
+ *    and on navigation away from #account.
  *  - `renderAccount` is the single source of truth for visibility;
  *    a non-pending state always stops polling before the next call.
  */
@@ -379,6 +385,20 @@ const POLL_INTERVAL_MS = 2000;
 let currentAuthStatus: AuthStatus | null = null;
 let authPollTimer: ReturnType<typeof setTimeout> | null = null;
 
+/**
+ * Live updates (ADR-0007). While the Account section is open we hold one
+ * SSE subscription to the sidecar; `auth.changed` events drive `renderAccount`
+ * the instant the device-code poller resolves — no 2s poll lag. The GET poll
+ * remains as a FALLBACK: it runs only while a sign-in is pending AND the SSE
+ * stream is not connected (`sseConnected`), so a dropped stream degrades to
+ * polling instead of stalling. `subscribeAuthEvents` resolves the API key
+ * asynchronously, so a generation counter discards a subscription that
+ * resolved after the section was already left.
+ */
+let authEvents: EventSubscription | null = null;
+let sseConnected = false;
+let authEventsGen = 0;
+
 function stopAuthPolling(): void {
   if (authPollTimer !== null) {
     clearTimeout(authPollTimer);
@@ -387,6 +407,11 @@ function stopAuthPolling(): void {
 }
 
 function schedulePoll(): void {
+  // SSE is the primary channel; only poll as a fallback when it's down.
+  if (sseConnected) {
+    stopAuthPolling();
+    return;
+  }
   stopAuthPolling();
   authPollTimer = setTimeout(() => {
     authPollTimer = null;
@@ -394,11 +419,80 @@ function schedulePoll(): void {
   }, POLL_INTERVAL_MS);
 }
 
+function openAuthEvents(): void {
+  if (authEvents) return;
+  const gen = ++authEventsGen;
+  void subscribeAuthEvents({
+    onOpen: () => {
+      if (gen !== authEventsGen) return;
+      sseConnected = true;
+      // The stream is live; the fallback poll is now redundant.
+      stopAuthPolling();
+    },
+    onAuth: (status) => {
+      if (gen !== authEventsGen) return;
+      // Only paint while the user is actually on the Account section.
+      if (readHashSection() === "account") renderAccount(status);
+    },
+    onError: () => {
+      if (gen !== authEventsGen) return;
+      sseConnected = false;
+      // Stream dropped — fall back to polling if a sign-in is mid-flight.
+      if (
+        readHashSection() === "account" &&
+        currentAuthStatus !== null &&
+        (currentAuthStatus.state === "device_code_issued" ||
+          currentAuthStatus.state === "polling")
+      ) {
+        schedulePoll();
+      }
+    },
+  }).then(
+    (subscription) => {
+      // Section was left (or re-entered) while the key resolved — discard.
+      if (gen !== authEventsGen) {
+        subscription.close();
+        return;
+      }
+      authEvents = subscription;
+    },
+    () => {
+      // Key resolution / EventSource construction failed; polling fallback
+      // stays in force. Nothing to clean up.
+    },
+  );
+}
+
+function closeAuthEvents(): void {
+  authEventsGen++;
+  sseConnected = false;
+  if (authEvents) {
+    authEvents.close();
+    authEvents = null;
+  }
+}
+
 function accountKeyFor(state: AuthStatus["state"]): AccountStateKey {
-  if (state === "device_code_issued" || state === "polling") return "pending";
-  if (state === "authenticated") return "authenticated";
-  if (state === "error") return "error";
-  return "unauthenticated";
+  // Exhaustive over AuthStatus["state"] (ADR-0006). A new variant added
+  // to the union surfaces as a `never` compile error here instead of
+  // silently falling through to "unauthenticated" — which is the bug
+  // class that hid the upstream-rejection + gh-reuse state additions.
+  switch (state) {
+    case "device_code_issued":
+    case "polling":
+      return "pending";
+    case "authenticated":
+      return "authenticated";
+    case "error":
+      return "error";
+    case "unauthenticated":
+      return "unauthenticated";
+    default: {
+      const _exhaust: never = state;
+      void _exhaust;
+      return "unauthenticated";
+    }
+  }
 }
 
 function accountSlot(name: string): HTMLElement | null {
@@ -422,11 +516,12 @@ function setAccountField(name: string, value: string): void {
 function renderAccountAvatar(login: string): void {
   const slot = accountSlot("account_avatar");
   if (!slot) return;
-  // "(unknown)" is the sentinel renderAccount() substitutes when the proxy
-  // reports authenticated without a login. Treat it (and an empty string)
-  // as "no real login" so the placeholder shows a neutral "?" rather than
-  // the sentinel's first character "(".
-  const isPlaceholder = !login || login === "(unknown)";
+  // ADR-0006: `account_login` is required on the authenticated variant
+  // and the controller only emits a real GitHub login (a failed user
+  // lookup surfaces as `state: "error"` instead — there is no "unknown"
+  // sentinel). The empty-string guard remains as belt-and-braces for
+  // future variants; current backend never emits one.
+  const isPlaceholder = !login;
   const initial = isPlaceholder ? "?" : (login[0] ?? "?").toUpperCase();
   slot.textContent = "";
   slot.classList.remove("signed-in-hero__avatar--fallback");
@@ -510,7 +605,7 @@ function rejectionExplanation(status: number): string {
 }
 
 function renderUpstreamRejection(
-  rejection: AuthStatus["last_upstream_rejection"],
+  rejection: UpstreamRejection | undefined,
 ): void {
   const wrapper = accountSlot("upstream_rejection");
   if (!wrapper) return;
@@ -575,35 +670,53 @@ function renderAccount(status: AuthStatus): void {
     card.hidden = card.dataset.stateAccount !== active;
   }
 
-  if (active === "pending") {
-    setAccountField("user_code", status.user_code ?? "…");
-    setAccountField("expires_at", formatExpiresAt(status.expires_at));
-    const link = accountSlot("verification_uri");
-    if (link instanceof HTMLAnchorElement) {
-      const uri = status.verification_uri ?? "https://github.com/login/device";
-      link.href = uri;
-      link.textContent = uri.replace(/^https?:\/\//, "");
+  // ADR-0006: switch on the discriminator so the compiler narrows per
+  // branch. Each variant declares exactly the fields it carries; the
+  // previous `?? "(unknown)"` / `?? "…"` / `?? "https://…"` fallbacks
+  // are gone because the union guarantees presence.
+  switch (status.state) {
+    case "device_code_issued":
+    case "polling": {
+      setAccountField("user_code", status.user_code);
+      setAccountField("expires_at", formatExpiresAt(status.expires_at));
+      const link = accountSlot("verification_uri");
+      if (link instanceof HTMLAnchorElement) {
+        link.href = status.verification_uri;
+        link.textContent = status.verification_uri.replace(/^https?:\/\//, "");
+      }
+      break;
     }
-  } else if (active === "authenticated") {
-    const login = status.account_login ?? "(unknown)";
-    setAccountField("account_login", login);
-    renderAccountAvatar(login);
-    renderUpstreamRejection(status.last_upstream_rejection);
-    // Populate the "Switch to" roster (the other persisted accounts).
-    void loadAccounts("roster");
-  } else if (active === "error") {
-    setAccountField("error", status.error ?? "Unknown error.");
-    renderRemediationLink(status.remediation_url);
-  }
-
-  // The "reuse a GitHub CLI account" list lives inside the unauthenticated
-  // state; (re)populate it whenever we land there (fresh each time, so a
-  // `gh logout` elsewhere can't leave a stale row). Best-effort — gh hinting
-  // never blocks the page.
-  if (active === "unauthenticated") {
-    void loadGhAccounts();
-    // Remembered maximal accounts (e.g. signed out of one, others remain).
-    void loadAccounts("remembered");
+    case "authenticated": {
+      // `account_login` is required on this variant. The controller emits
+      // the literal "unknown" string when getGitHubUser failed best-effort
+      // during the device flow — `renderAccountAvatar` treats "unknown"
+      // as a placeholder trigger.
+      setAccountField("account_login", status.account_login);
+      renderAccountAvatar(status.account_login);
+      renderUpstreamRejection(status.last_upstream_rejection);
+      // Populate the "Switch to" roster (the other persisted accounts).
+      void loadAccounts("roster");
+      break;
+    }
+    case "error": {
+      setAccountField("error", status.error);
+      renderRemediationLink(status.remediation_url);
+      break;
+    }
+    case "unauthenticated": {
+      // The "reuse a GitHub CLI account" list lives inside the
+      // unauthenticated state; (re)populate it whenever we land there
+      // (fresh each time, so a `gh logout` elsewhere can't leave a
+      // stale row). Best-effort — gh hinting never blocks the page.
+      void loadGhAccounts();
+      // Remembered maximal accounts (e.g. signed out of one, others remain).
+      void loadAccounts("remembered");
+      break;
+    }
+    default: {
+      const _exhaust: never = status;
+      void _exhaust;
+    }
   }
 
   if (active === "pending") {
@@ -1122,16 +1235,27 @@ async function startAuth(): Promise<void> {
 }
 
 /**
- * Bail out of an in-progress device-code flow. Nothing has been minted yet,
- * so POST /sign-out just aborts the server-side poller (and is a no-op on the
- * absent token file) — no sidecar reboot needed. Drop straight back to the
- * sign-in screen so the pending state is never a dead-end before the code
- * expires.
+ * Bail out of an in-progress device-code flow WITHOUT signing out. Issuing a
+ * code never dropped the current session (server-side), so cancelling returns
+ * to whatever was there before: the account you were signed into, or the
+ * sign-in screen on a first-run cancel. POST /cancel aborts the server-side
+ * poller and reports the restored status; we render whatever it returns.
  */
 async function cancelAuth(): Promise<void> {
-  const ok = await performSignOut();
-  if (!ok) return;
-  renderAccount({ state: "unauthenticated" });
+  stopAuthPolling();
+  const result = await apiCall({
+    kind: "auth-cancel",
+    method: "POST",
+    path: "/settings/api/auth/github/cancel",
+  });
+  if (!result.ok) {
+    renderAccount({
+      state: "error",
+      error: `Couldn't cancel: ${result.error}`,
+    });
+    return;
+  }
+  renderAccount(result.data);
 }
 
 async function signOut(): Promise<void> {
@@ -1204,14 +1328,15 @@ async function performSignOut(): Promise<boolean> {
 }
 
 /**
- * Sign out + immediately start a fresh device flow. The intent is
- * "let me re-auth with a different account" — no confirm dialog
- * (the user picked the action explicitly), no intermediate empty
- * state (we go straight to the pending code screen).
+ * Start a fresh device flow to sign in as a different account. The intent is
+ * "let me add/switch to another account" — no confirm dialog (the user picked
+ * the action explicitly), no intermediate empty state (we go straight to the
+ * pending code screen). Crucially we do NOT sign out first: the current
+ * account stays live until the new sign-in SUCCEEDS (→ switches to it) or the
+ * user cancels (→ stays on the current account). Issuing a code is not a
+ * commitment.
  */
 async function switchAccount(): Promise<void> {
-  const ok = await performSignOut();
-  if (!ok) return;
   await startAuth();
 }
 
@@ -1235,9 +1360,17 @@ async function openExternalUrl(url: string): Promise<void> {
 }
 
 async function signInWithCode(button: HTMLElement): Promise<void> {
-  const code = currentAuthStatus?.user_code;
-  const url = currentAuthStatus?.verification_uri;
-  if (!code || !url) return;
+  // Narrow to the pending variants — code + url only exist there. If
+  // the button somehow fires from another state, no-op.
+  const status = currentAuthStatus;
+  if (
+    !status
+    || (status.state !== "device_code_issued" && status.state !== "polling")
+  ) {
+    return;
+  }
+  const code = status.user_code;
+  const url = status.verification_uri;
 
   const label = button.querySelector<HTMLElement>(".device-code-button__label");
   const original = label?.innerHTML ?? null;
@@ -1327,7 +1460,10 @@ window.addEventListener("DOMContentLoaded", () => {
   wireNav();
   syncFromHash();
   void loadDiagnostics();
-  if (readHashSection() === "account") void loadAuthStatus();
+  if (readHashSection() === "account") {
+    void loadAuthStatus();
+    openAuthEvents();
+  }
 });
 
 window.addEventListener("hashchange", () => {
@@ -1339,9 +1475,12 @@ window.addEventListener("hashchange", () => {
   }
   if (section === "account") {
     void loadAuthStatus();
+    openAuthEvents();
   } else {
-    // Leaving the Account section: drop any in-flight polling.
+    // Leaving the Account section: drop any in-flight polling and the
+    // live event stream (re-opened on return).
     stopAuthPolling();
+    closeAuthEvents();
   }
 });
 

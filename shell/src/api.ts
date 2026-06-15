@@ -28,45 +28,17 @@ import type {
   AccountsListResponse,
   ApiKeyEntry,
   ApiKeysListResponse,
+  AuthStatus,
   DiagnosticsResponse,
+  UpstreamRejection,
 } from "../../src/lib/settings-types"
 
-const TIMEOUT_MS = 5000
+// Re-export so existing shell call sites that pull the type from
+// "./api" keep working. AuthStatus is owned by src/lib/settings-types
+// (ADR-0005/0006) — the shell does NOT redeclare it.
+export type { AuthStatus, UpstreamRejection }
 
-/**
- * GitHub device-flow auth status. Mirrors the contract owned by
- * the proxy's `/settings/api/auth/github/*` endpoints. Kept in
- * sync by name — if the backend renames a field, this breaks.
- */
-export interface AuthStatus {
-  state:
-    | "unauthenticated"
-    | "device_code_issued"
-    | "polling"
-    | "authenticated"
-    | "error"
-  user_code?: string
-  verification_uri?: string
-  expires_at?: string
-  account_login?: string
-  error?: string
-  /** Set on `error` state when GHCP pointed at a recovery page in its
-   *  401/403 body (TOS acceptance, Copilot settings). The UI renders
-   *  it as a clickable link below the error message. */
-  remediation_url?: string
-  /** Last non-fatal upstream rejection from a completion endpoint
-   *  (quota exhausted, model not on plan, transient upstream error).
-   *  Distinct from `error`/`remediation_url` (which describe the
-   *  GitHub-token state itself) — this rides along on any state and
-   *  clears on the next successful completion. The UI renders it as
-   *  a banner without changing the authenticated indicator. */
-  last_upstream_rejection?: {
-    message: string
-    status: number
-    at: string
-    remediation_url?: string
-  }
-}
+const TIMEOUT_MS = 5000
 
 interface AuthSignOutResponse {
   ok: true
@@ -193,6 +165,11 @@ type Endpoint =
       path: "/settings/api/auth/github/sign-out"
     }
   | {
+      kind: "auth-cancel"
+      method: "POST"
+      path: "/settings/api/auth/github/cancel"
+    }
+  | {
       kind: "gh-status"
       method: "GET"
       path: "/settings/api/gh/status"
@@ -278,6 +255,7 @@ interface ResponseFor {
   "auth-status": AuthStatus
   "auth-start": AuthStatus
   "auth-sign-out": AuthSignOutResponse
+  "auth-cancel": AuthStatus
   "gh-status": GhCliStatus
   "gh-use": GhUseResponse
   "accounts-list": AccountsListResponse
@@ -416,4 +394,46 @@ export async function apiCall<K extends EndpointKind>(
   } finally {
     clearTimeout(timer)
   }
+}
+
+/** Handle to the live SSE subscription; call `close()` to disconnect. */
+export interface EventSubscription {
+  close: () => void
+}
+
+/**
+ * Subscribe to the sidecar's live event stream (ADR-0007). Opens an
+ * `EventSource` against `/settings/api/events` and dispatches typed events
+ * to the handlers — currently `auth.changed`, carrying the full `AuthStatus`
+ * (same shape as GET /settings/api/auth/github/status).
+ *
+ * EventSource can't send headers, so the API key rides in the query string;
+ * the sidecar honours `?key=` only for this endpoint (see request-auth.ts).
+ * The browser's EventSource auto-reconnects on transient drops; `onError`
+ * fires on each disconnect so the caller can fall back to a GET/poll until
+ * the stream recovers. Never throws — payload parse failures are swallowed
+ * and resynced by the next event or the GET fallback.
+ */
+export async function subscribeAuthEvents(handlers: {
+  onAuth: (status: AuthStatus) => void
+  onOpen?: () => void
+  onError?: () => void
+}): Promise<EventSubscription> {
+  const apiKey = await resolveApiKey()
+  const query = apiKey ? `?key=${encodeURIComponent(apiKey)}` : ""
+  const source = new EventSource(`${baseUrl()}/settings/api/events${query}`)
+
+  source.addEventListener("open", () => handlers.onOpen?.())
+  source.addEventListener("error", () => handlers.onError?.())
+  source.addEventListener("auth.changed", (event) => {
+    const message = event as MessageEvent<string>
+    try {
+      handlers.onAuth(JSON.parse(message.data) as AuthStatus)
+    } catch {
+      // Malformed frame — drop it; the next event (or a GET fallback)
+      // resyncs. An event listener must never throw.
+    }
+  })
+
+  return { close: () => source.close() }
 }

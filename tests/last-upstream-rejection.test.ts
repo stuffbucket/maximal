@@ -249,8 +249,7 @@ describe("getAuthStatus + lastUpstreamRejection", () => {
   })
 
   test("authenticated state surfaces last_upstream_rejection with remediation_url", () => {
-    markSignedIn(null)
-    state.userName = "alice"
+    markSignedIn("alice")
     setLastUpstreamRejection({
       message: "quota exhausted",
       remediationUrl: "https://github.com/settings/copilot",
@@ -291,7 +290,7 @@ describe("getAuthStatus + lastUpstreamRejection", () => {
   })
 
   test("omits remediation_url when remediationUrl is null", () => {
-    markSignedIn(null)
+    markSignedIn("alice")
     setLastUpstreamRejection({
       message: "no plan",
       remediationUrl: null,
@@ -299,16 +298,19 @@ describe("getAuthStatus + lastUpstreamRejection", () => {
     })
 
     const status = getAuthStatus()
+    if (status.state !== "authenticated") {
+      throw new Error(`expected authenticated, got ${status.state}`)
+    }
     expect(status.last_upstream_rejection).toBeDefined()
     expect(status.last_upstream_rejection).not.toHaveProperty("remediation_url")
   })
 
   test("omits last_upstream_rejection entirely when state.lastUpstreamRejection is undefined", () => {
-    markSignedIn(null)
+    markSignedIn("alice")
     state.lastUpstreamRejection = undefined
 
     const status = getAuthStatus()
-    expect(status).toEqual({ state: "authenticated" })
+    expect(status).toEqual({ state: "authenticated", account_login: "alice" })
     expect(status).not.toHaveProperty("last_upstream_rejection")
   })
 })
@@ -331,7 +333,7 @@ describe("signOut clears the upstream-rejection sidecar", () => {
   })
 
   test("signOut wipes state.lastUpstreamRejection and getAuthStatus no longer reports it", async () => {
-    markSignedIn(null)
+    markSignedIn("alice")
     state.lastUpstreamRejection = {
       message: "x",
       remediationUrl: null,

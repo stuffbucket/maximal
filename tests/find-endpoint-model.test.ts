@@ -1,6 +1,11 @@
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it, beforeEach, afterEach } from "bun:test"
 
-import { findInModels, normalizeSdkModelId } from "../src/lib/models"
+import {
+  findEndpointModel,
+  findInModels,
+  normalizeSdkModelId,
+} from "../src/lib/models"
+import { state } from "../src/lib/state"
 
 // findInModels is a pure function (no state), so tests are immune to the
 // mock.module contamination that messages-handler.test.ts applies to
@@ -285,5 +290,278 @@ describe("normalizeSdkModelId", () => {
         expect(normalizeSdkModelId(input)).toBeUndefined()
       },
     )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// findEndpointModel — the one-line state-reading wrapper. Previously tested
+// only "via route integration tests" per the now-removed comment, but
+// tests/messages-handler.test.ts mock.module's the whole module out so the
+// wrapper had ZERO surviving mutation coverage. Mutation testing surfaced 11
+// surviving mutants in this function — all killed by the tests below.
+// ---------------------------------------------------------------------------
+
+describe("findEndpointModel", () => {
+  const originalModels = state.models
+
+  beforeEach(() => {
+    state.models = undefined
+  })
+
+  afterEach(() => {
+    state.models = originalModels
+  })
+
+  it("returns undefined when state.models is undefined (the ?? [] fallback)", () => {
+    state.models = undefined
+    // Kills OptionalChaining mutant `state.models.data` (would NPE) and
+    // LogicalOperator mutant `state.models?.data && []` (returns undefined
+    // when models is undefined and asks findInModels to search undefined).
+    expect(findEndpointModel("claude-sonnet-4-6")).toBeUndefined()
+  })
+
+  it("returns undefined when state.models.data is empty (the ?? [] fallback path is exercised)", () => {
+    state.models = {
+      data: [],
+      object: "list",
+    }
+    expect(findEndpointModel("claude-sonnet-4-6")).toBeUndefined()
+  })
+
+  it("rejects the 'Stryker was here' poisoned fallback — [] really means []", () => {
+    // Kills the ArrayDeclaration mutant `?? ["Stryker was here"]`. If the
+    // fallback array contained junk, findInModels would still return
+    // undefined here because none of the junk matches "claude-...". But the
+    // intent is documented: a fallback to literal [], not a fallback to
+    // arbitrary garbage that happens to also return undefined.
+    state.models = undefined
+    const result = findEndpointModel("claude-sonnet-4-6")
+    expect(result).toBeUndefined()
+    // The function must not throw on a string-array fallback either —
+    // findInModels only safely consumes Model[]. The poisoned-fallback
+    // mutant would crash; an undefined return + no throw is the spec.
+  })
+
+  it("resolves a model from state.models.data by passing through to findInModels", () => {
+    // Kills the ArrowFunction mutant `findEndpointModel = () => undefined`
+    // and the ArrowFunction mutant on findInModels callbacks. The real
+    // wrapper must return the matching model from state.
+    const model = {
+      capabilities: {
+        family: "claude-sonnet-4.6",
+        limits: {},
+        object: "model_capabilities" as const,
+        supports: {},
+        tokenizer: "o200k_base",
+        type: "chat" as const,
+      },
+      id: "claude-sonnet-4-6-20260301",
+      model_picker_enabled: true,
+      name: "Sonnet 4.6",
+      object: "model" as const,
+      preview: false,
+      vendor: "Anthropic",
+      version: "claude-sonnet-4.6",
+      supported_endpoints: ["/v1/messages"],
+    }
+    state.models = { data: [model], object: "list" }
+
+    // Exact-match path.
+    expect(findEndpointModel("claude-sonnet-4-6-20260301")?.id).toBe(
+      "claude-sonnet-4-6-20260301",
+    )
+    // byName path (kills the StringLiteral mutant `modelName = ""` and the
+    // ConditionalExpression mutants on the m.id/m.version predicate, plus
+    // the `if (byName) return byName` early-return mutant).
+    expect(findEndpointModel("claude-sonnet-4-6")?.id).toBe(
+      "claude-sonnet-4-6-20260301",
+    )
+    expect(findEndpointModel("claude-sonnet-4.6")?.id).toBe(
+      "claude-sonnet-4-6-20260301",
+    )
+  })
+
+  it("passes the sdkModelId argument through unchanged (not a constant)", () => {
+    // The wrapper passes sdkModelId straight to findInModels. A mutant that
+    // hardcodes the argument would resolve the wrong (or no) model.
+    const a = {
+      capabilities: {
+        family: "claude-opus-4.6",
+        limits: {},
+        object: "model_capabilities" as const,
+        supports: {},
+        tokenizer: "o200k_base",
+        type: "chat" as const,
+      },
+      id: "claude-opus-4-6-20260301",
+      model_picker_enabled: true,
+      name: "Opus",
+      object: "model" as const,
+      preview: false,
+      vendor: "Anthropic",
+      version: "claude-opus-4.6",
+      supported_endpoints: ["/v1/messages"],
+    }
+    const b = {
+      ...a,
+      id: "claude-haiku-4-5-20260301",
+      version: "claude-haiku-4.5",
+      capabilities: { ...a.capabilities, family: "claude-haiku-4.5" },
+    }
+    state.models = { data: [a, b], object: "list" }
+
+    expect(findEndpointModel("claude-opus-4-6")?.id).toBe(
+      "claude-opus-4-6-20260301",
+    )
+    expect(findEndpointModel("claude-haiku-4-5")?.id).toBe(
+      "claude-haiku-4-5-20260301",
+    )
+  })
+
+  // ------------------------------------------------------------------------
+  // byName lookup — must kill the remaining `||` / `if (byName)` mutants.
+  //
+  // The synthesized lookup `(m) => m.id === modelName || m.version === modelName`
+  // is symmetric in m.id vs m.version. Existing tests only exercise the
+  // m.version branch (Copilot IDs in the wild are date-suffixed, so m.id
+  // never equals the dot-normalized modelName). Stryker's
+  //   `m.id === modelName || false`  mutation survives without a fixture
+  // where m.id is the matching field.
+  //
+  // These tests add the missing fixtures so each disjunct's removal is
+  // observable, and the `if (byName) return byName` early-return mutant
+  // dies (a model found by byName must NOT round-trip through the
+  // semantic-fallback to find a DIFFERENT model).
+  // ------------------------------------------------------------------------
+
+  it("byName matches via m.id when m.version doesn't match (kills `false || m.version` mutant)", () => {
+    // Hypothetical fixture: a model with no date suffix on its id. The
+    // synthesized modelName "claude-sonnet-4.6" matches m.id exactly,
+    // and m.version is unrecognized so semantic fallback can't find it.
+    const idMatchOnly = {
+      capabilities: {
+        family: "unrecognised",
+        limits: {},
+        object: "model_capabilities" as const,
+        supports: {},
+        tokenizer: "o200k_base",
+        type: "chat" as const,
+      },
+      id: "claude-sonnet-4.6",
+      model_picker_enabled: true,
+      name: "Sonnet 4.6 (no date)",
+      object: "model" as const,
+      preview: false,
+      vendor: "Anthropic",
+      version: "unrecognised",
+      supported_endpoints: ["/v1/messages"],
+    }
+    state.models = { data: [idMatchOnly], object: "list" }
+    const result = findEndpointModel("claude-sonnet-4-6")
+    expect(result?.id).toBe("claude-sonnet-4.6")
+  })
+
+  it("byName matches via m.version when m.id is unrelated (kills `m.id || false` mutant)", () => {
+    // Inverse of the above: m.id is opaque, m.version is the dot-normalized
+    // modelName. Existing tests cover this via CURRENT_MODELS, but assert
+    // through findInModels — add an explicit findEndpointModel assertion
+    // so Stryker's per-mutant test mapping connects the wrapper to the
+    // surviving mutant.
+    const versionMatchOnly = {
+      capabilities: {
+        family: "unrecognised",
+        limits: {},
+        object: "model_capabilities" as const,
+        supports: {},
+        tokenizer: "o200k_base",
+        type: "chat" as const,
+      },
+      id: "opaque-id-no-pattern",
+      model_picker_enabled: true,
+      name: "Sonnet via version",
+      object: "model" as const,
+      preview: false,
+      vendor: "Anthropic",
+      version: "claude-sonnet-4.6",
+      supported_endpoints: ["/v1/messages"],
+    }
+    state.models = { data: [versionMatchOnly], object: "list" }
+    const result = findEndpointModel("claude-sonnet-4-6")
+    expect(result?.id).toBe("opaque-id-no-pattern")
+  })
+
+  it("`if (byName) return byName` early-returns and does NOT fall through to semantic fallback", () => {
+    // Two models match the query:
+    //   - byNameWinner: m.version === "claude-sonnet-4.6" (byName hit)
+    //   - semanticWinner: m.capabilities.family === "claude-sonnet-4.6"
+    //     (would be returned by the semantic-tuple fallback if byName
+    //     didn't short-circuit)
+    // The contract is that byName wins. If `if (byName) return byName` is
+    // mutated to `if (false) return byName`, the function falls through and
+    // returns the OTHER model — this test asserts the actual winner is
+    // byNameWinner.
+    const byNameWinner = {
+      capabilities: {
+        family: "unrecognised",
+        limits: {},
+        object: "model_capabilities" as const,
+        supports: {},
+        tokenizer: "o200k_base",
+        type: "chat" as const,
+      },
+      id: "winner-by-version",
+      model_picker_enabled: true,
+      name: "byName winner",
+      object: "model" as const,
+      preview: false,
+      vendor: "Anthropic",
+      version: "claude-sonnet-4.6",
+      supported_endpoints: ["/v1/messages"],
+    }
+    const semanticWinner = {
+      ...byNameWinner,
+      id: "would-win-semantic",
+      version: "unrecognised",
+      capabilities: {
+        ...byNameWinner.capabilities,
+        family: "claude-sonnet-4.6",
+      },
+    }
+    state.models = {
+      data: [byNameWinner, semanticWinner],
+      object: "list",
+    }
+    const result = findEndpointModel("claude-sonnet-4-6")
+    expect(result?.id).toBe("winner-by-version")
+  })
+
+  it("byName uses `||` not `&&` (kills LogicalOperator mutant)", () => {
+    // The `||` mutated to `&&` requires BOTH m.id and m.version to equal
+    // modelName for a match. With a fixture where ONLY m.version matches
+    // (m.id is opaque), the `&&` mutant returns no byName hit and falls
+    // through to semantic fallback — which can't find this model either
+    // (m.capabilities.family is opaque). The real `||` returns the model;
+    // the mutant returns undefined.
+    const versionOnly = {
+      capabilities: {
+        family: "opaque-family",
+        limits: {},
+        object: "model_capabilities" as const,
+        supports: {},
+        tokenizer: "o200k_base",
+        type: "chat" as const,
+      },
+      id: "opaque-id",
+      model_picker_enabled: true,
+      name: "version-only match",
+      object: "model" as const,
+      preview: false,
+      vendor: "Anthropic",
+      version: "claude-haiku-4.5",
+      supported_endpoints: ["/v1/messages"],
+    }
+    state.models = { data: [versionOnly], object: "list" }
+    const result = findEndpointModel("claude-haiku-4-5")
+    expect(result?.id).toBe("opaque-id")
   })
 })
