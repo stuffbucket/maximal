@@ -1,7 +1,7 @@
 ---
 id: ADR-0005
 title: Share settings types between proxy routes and the Tauri shell
-status: proposed
+status: accepted
 date: 2026-06-14
 authors:
   - stuffbucket
@@ -16,6 +16,19 @@ related_files:
   src/routes/settings/gh.ts: GhCliStatus producer
   src/routes/settings/api-keys.ts: ApiKeysListResponse producer
 ---
+
+> **Implementation status (accepted, partially adopted).** The shell now
+> imports the canonical types from `src/lib/settings-types.ts` instead of
+> redeclaring them: `AuthStatus`, `UpstreamRejection`, `DiagnosticsResponse`,
+> `ApiKeyEntry`, `ApiKeysListResponse`, and `AccountsListResponse`
+> (`shell/src/api.ts`, `shell/src/main.ts`). This landed with the ADR-0006
+> auth-status union and the ADR-0007 SSE work, which depend on a single
+> source of truth for the wire shape.
+>
+> Still mirrored by-name in `shell/src/api.ts` pending migration:
+> `GhCliStatus`, `ActiveApiClient` / `ActiveApiClientsResponse`, and
+> `AppEntry` / `AppsListResponse`. These move over as each surface is next
+> touched; the direction is settled.
 
 # Share settings types between proxy routes and the Tauri shell
 

@@ -1,7 +1,7 @@
 ---
 id: ADR-0011
 title: Cross-file module-mock leakage discipline (prefer DI over mock.module)
-status: proposed
+status: accepted
 date: 2026-06-14
 authors:
   - stuffbucket
@@ -12,6 +12,23 @@ related_files:
   tests/: 80+ test files
   tests/helpers/: shared test fixtures
 ---
+
+> **Implementation status (accepted, adopted going forward).** New and
+> refactored code on this branch uses dependency injection instead of
+> `mock.module`:
+> - `src/routes/settings/gh.ts` → `createGhRoutes(deps)` factory; its test
+>   constructs stubs locally (commit 218166e), fixing a real cross-file leak.
+> - `src/lib/auth-controller.ts` exposes `__setAuthControllerDepsForTests`;
+>   `tests/settings-api-auth.test.ts` injects `pollAccessToken` / `addAccount`
+>   rather than mocking those modules process-wide.
+> - New tests added this branch (`events-route.test.ts`,
+>   `auth-controller-events.test.ts`) use DI / direct bus subscription, no
+>   `mock.module`.
+>
+> Remaining `mock.module` sites (e.g. `get-device-code` in
+> `settings-api-auth.test.ts`, restored in `afterAll`) are tolerated where
+> isolated and self-restoring; they migrate to DI opportunistically as those
+> tests are next touched. The discipline is now the default for new tests.
 
 # Cross-file module-mock leakage discipline (prefer DI over `mock.module`)
 
