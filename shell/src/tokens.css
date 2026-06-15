@@ -1,6 +1,16 @@
-/* Tokens — synced from design-tools at 3dc02f371a6955a85a954cccff17c486d3701bac.
-   Mirrors maximal/.design-context.md. This is the ONE file allowed to declare
-   raw values; everything else must reference these tokens. */
+/* Design tokens — declared values for the shell (Settings window).
+ * This is the ONE file allowed to declare raw values within shell/;
+ * everything else must reference these tokens by name.
+ *
+ * Token vocabulary + usage rules: docs/design/tokens.md
+ * Front door: .design-context.md
+ *
+ * NOTE: src/pages/usage-viewer.css is an INDEPENDENT declaration of the
+ * same tokens (the Dashboard is a single embedded HTML file with no CSS
+ * imports — see docs/design/windows.md). Token edits here MUST be mirrored
+ * in usage-viewer.css. See docs/design/change-checklists.md → "Changing a
+ * token value" for the touchpoint list.
+ */
 
 :root {
   /* ---- Font stacks ---- */
