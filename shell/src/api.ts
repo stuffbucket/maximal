@@ -165,6 +165,11 @@ type Endpoint =
       path: "/settings/api/auth/github/sign-out"
     }
   | {
+      kind: "auth-cancel"
+      method: "POST"
+      path: "/settings/api/auth/github/cancel"
+    }
+  | {
       kind: "gh-status"
       method: "GET"
       path: "/settings/api/gh/status"
@@ -250,6 +255,7 @@ interface ResponseFor {
   "auth-status": AuthStatus
   "auth-start": AuthStatus
   "auth-sign-out": AuthSignOutResponse
+  "auth-cancel": AuthStatus
   "gh-status": GhCliStatus
   "gh-use": GhUseResponse
   "accounts-list": AccountsListResponse

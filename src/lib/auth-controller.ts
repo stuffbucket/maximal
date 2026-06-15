@@ -95,10 +95,31 @@ function resetAuthControllerDeps(): void {
   removeActiveAccount = defaultRemoveActiveAccount
 }
 
+/**
+ * The signed-in identity a device flow should fall back to if it is
+ * cancelled or expires WITHOUT completing. Captured when a flow starts
+ * while already authenticated ("sign in as a different account"), so an
+ * abandoned attempt never drops the user from their current account.
+ * `null` when the flow started from a signed-out / error / first-run state.
+ */
+type ResumeTarget = { login: string } | null
+
 interface ActiveFlow {
   deviceCode: DeviceCodeResponse
   expiresAt: number
   abort: AbortController
+  resume: ResumeTarget
+}
+
+/**
+ * The resume identity a newly-started flow should carry. Restarting an
+ * expired flow inherits the prior flow's resume; otherwise we remember the
+ * currently signed-in account (if any). A flow started from signed-out /
+ * error / first-run carries no resume.
+ */
+function captureResumeTarget(existing: ActiveFlow | null): ResumeTarget {
+  if (existing) return existing.resume
+  return authState.kind === "signed-in" ? { login: authState.login } : null
 }
 
 /**
@@ -196,7 +217,16 @@ export function getAuthStatus(): AuthStatus {
       const flow = authState.flow
       if (isFlowExpired(flow)) {
         // Stale flow the poller hasn't cleared yet (terminal path lost a
-        // race). Treat as unauthenticated for reporting.
+        // race). Fall back to the resume identity if this flow was started
+        // over an existing session, so we don't flash "unauthenticated" at a
+        // still-signed-in user; otherwise report unauthenticated.
+        if (flow.resume) {
+          return {
+            state: "authenticated",
+            account_login: flow.resume.login,
+            ...rejectionPayload,
+          }
+        }
         return { state: "unauthenticated", ...rejectionPayload }
       }
       return {
@@ -240,12 +270,21 @@ export async function startDeviceFlow(): Promise<AuthStatus> {
     }
   }
 
+  // Capture the identity to fall back to if this flow is cancelled or
+  // expires. If we're restarting an expired flow, carry its resume forward;
+  // otherwise remember the current signed-in account. Issuing a code must
+  // NOT sign the user out — the existing session (token + on-disk record)
+  // stays intact and keeps serving until this flow SUCCEEDS, the user cancels
+  // (→ resume restored), or they explicitly sign out.
+  const resume = captureResumeTarget(existing)
+
   // Cancel any stale flow before requesting a fresh code so the status
-  // reporter never sees a half-cleared state.
+  // reporter never sees a half-cleared state. Note: we do NOT reset
+  // authState to signed-out here — that was the bug that dropped a
+  // signed-in user the moment they asked for a new code.
   if (existing) {
     existing.abort.abort()
   }
-  authState = { kind: "signed-out" }
 
   const deviceCode = await getDeviceCode()
   const abort = new AbortController()
@@ -253,7 +292,11 @@ export async function startDeviceFlow(): Promise<AuthStatus> {
     deviceCode,
     expiresAt: Date.now() + deviceCode.expires_in * 1000,
     abort,
+    resume,
   }
+  // Single-flight: startDeviceFlow is serialized by the idempotency guard
+  // above; no concurrent caller mutates authState between the await and here.
+
   authState = { kind: "device-issued", flow }
 
   // Fire-and-forget poller. Errors are captured into authState so the
@@ -274,12 +317,50 @@ export async function startDeviceFlow(): Promise<AuthStatus> {
   }
 }
 
+/**
+ * Cancel an in-flight device-code flow WITHOUT signing out. Aborts the
+ * poller and returns to wherever the flow started from: the prior signed-in
+ * account if there was one (so "sign in as a different account" → Cancel
+ * keeps you on your current account), otherwise signed-out (first-run
+ * cancel → the sign-in screen). The existing token/registry were never
+ * touched by starting the flow, so the restored session is fully live.
+ *
+ * No-op (returns the current status) when there is no active flow.
+ */
+export function cancelDeviceFlow(): AuthStatus {
+  const flow = currentFlow()
+  if (!flow) return getAuthStatus()
+  flow.abort.abort()
+  setAuthState(
+    flow.resume ?
+      { kind: "signed-in", login: flow.resume.login }
+    : { kind: "signed-out" },
+  )
+  return getAuthStatus()
+}
+
 // Single-flight by construction: this is only invoked from
 // startDeviceFlow() after a fresh AbortController is installed on a
 // fresh ActiveFlow. The "race condition" the linter flags is the
 // intentional single-flight + cancellation pattern — abort() is the
 // only thing that signals cancellation, and we re-read it after each
 // await before touching shared state.
+
+/**
+ * Where a failed or abandoned flow lands. If the flow was started over an
+ * existing session (resume set), restore that account — an additional
+ * sign-in that didn't pan out must never sign the user out. Otherwise fall
+ * through to the supplied error state (first-run / signed-out origin).
+ */
+function flowFailureState(
+  flow: ActiveFlow,
+  fallbackError: ParsedCopilotError,
+): AuthState {
+  return flow.resume ?
+      { kind: "signed-in", login: flow.resume.login }
+    : { kind: "error", ...fallbackError }
+}
+
 /* eslint-disable @typescript-eslint/no-unnecessary-condition -- TS can't see that abort.signal.aborted may flip during an await. */
 async function runPoller(flow: ActiveFlow): Promise<void> {
   if (flow.abort.signal.aborted) return
@@ -318,11 +399,12 @@ async function runPoller(flow: ActiveFlow): Promise<void> {
         "Auth-controller: failed to verify GitHub account after sign-in:",
         message,
       )
-      setAuthState({
-        kind: "error",
-        message: "Couldn't verify your GitHub account. Try signing in again.",
-        remediationUrl: null,
-      })
+      setAuthState(
+        flowFailureState(flow, {
+          message: "Couldn't verify your GitHub account. Try signing in again.",
+          remediationUrl: null,
+        }),
+      )
       return
     }
 
@@ -372,7 +454,7 @@ async function runPoller(flow: ActiveFlow): Promise<void> {
   } catch (err) {
     if (flow.abort.signal.aborted) return
     const message = err instanceof Error ? err.message : String(err)
-    setAuthState({ kind: "error", message, remediationUrl: null })
+    setAuthState(flowFailureState(flow, { message, remediationUrl: null }))
     consola.warn("Auth-controller: device-code poll terminated:", message)
   }
 }

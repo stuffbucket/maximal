@@ -39,8 +39,11 @@ void mock.module("~/services/github/get-device-code", () => ({
 }))
 
 const { AuthStatus } = await import("~/lib/settings-types")
-const { __resetAuthControllerForTests, __setAuthControllerDepsForTests } =
-  await import("~/lib/auth-controller")
+const {
+  __resetAuthControllerForTests,
+  __setAuthControllerDepsForTests,
+  markSignedIn,
+} = await import("~/lib/auth-controller")
 const { createAuthMiddleware } = await import("~/lib/request-auth")
 const { settingsApiRoutes } = await import("~/routes/settings/api")
 const { state } = await import("~/lib/state")
@@ -184,6 +187,78 @@ describe("/settings/api/auth/github", () => {
         `expected pending state, got ${parsed.success ? parsed.data.state : "<parse-fail>"}`,
       )
     }
+  })
+})
+
+describe("/settings/api/auth/github — cancel keeps you signed in", () => {
+  test("POST /start while signed in does NOT clear the existing session", async () => {
+    const app = buildApp()
+    markSignedIn("alice")
+    state.githubToken = "ghu_alice"
+
+    await app.request("/settings/api/auth/github/start", { method: "POST" })
+
+    // The flow is pending in the UI, but the operational session is intact —
+    // the proxy keeps serving as alice until the new sign-in succeeds.
+    expect(state.githubToken).toBe("ghu_alice")
+  })
+
+  test("POST /cancel restores the prior account (does not sign out)", async () => {
+    const app = buildApp()
+    markSignedIn("alice")
+    state.githubToken = "ghu_alice"
+
+    await app.request("/settings/api/auth/github/start", { method: "POST" })
+    const cancelBody = await (
+      await app.request("/settings/api/auth/github/cancel", { method: "POST" })
+    ).json()
+    const parsed = AuthStatus.safeParse(cancelBody)
+    expect(parsed.success).toBe(true)
+    if (parsed.success && parsed.data.state === "authenticated") {
+      expect(parsed.data.account_login).toBe("alice")
+    } else {
+      throw new Error(
+        `expected authenticated, got ${parsed.success ? parsed.data.state : "<parse-fail>"}`,
+      )
+    }
+    // Token never touched by start/cancel.
+    expect(state.githubToken).toBe("ghu_alice")
+    // And /status agrees.
+    const statusBody = await (
+      await app.request("/settings/api/auth/github/status")
+    ).json()
+    const parsedStatus = AuthStatus.safeParse(statusBody)
+    expect(parsedStatus.success && parsedStatus.data.state).toBe(
+      "authenticated",
+    )
+  })
+
+  test("POST /cancel from a first-run (signed-out) flow returns unauthenticated", async () => {
+    const app = buildApp()
+    await app.request("/settings/api/auth/github/start", { method: "POST" })
+    const cancelBody = await (
+      await app.request("/settings/api/auth/github/cancel", { method: "POST" })
+    ).json()
+    const parsed = AuthStatus.safeParse(cancelBody)
+    expect(parsed.success).toBe(true)
+    if (parsed.success) {
+      expect(parsed.data.state).toBe("unauthenticated")
+    }
+  })
+
+  test("POST /cancel with no active flow is a harmless no-op", async () => {
+    const app = buildApp()
+    markSignedIn("alice")
+    state.githubToken = "ghu_alice"
+    const cancelBody = await (
+      await app.request("/settings/api/auth/github/cancel", { method: "POST" })
+    ).json()
+    const parsed = AuthStatus.safeParse(cancelBody)
+    expect(parsed.success).toBe(true)
+    if (parsed.success) {
+      expect(parsed.data.state).toBe("authenticated")
+    }
+    expect(state.githubToken).toBe("ghu_alice")
   })
 })
 

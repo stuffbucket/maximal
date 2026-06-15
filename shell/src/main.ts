@@ -1235,16 +1235,27 @@ async function startAuth(): Promise<void> {
 }
 
 /**
- * Bail out of an in-progress device-code flow. Nothing has been minted yet,
- * so POST /sign-out just aborts the server-side poller (and is a no-op on the
- * absent token file) — no sidecar reboot needed. Drop straight back to the
- * sign-in screen so the pending state is never a dead-end before the code
- * expires.
+ * Bail out of an in-progress device-code flow WITHOUT signing out. Issuing a
+ * code never dropped the current session (server-side), so cancelling returns
+ * to whatever was there before: the account you were signed into, or the
+ * sign-in screen on a first-run cancel. POST /cancel aborts the server-side
+ * poller and reports the restored status; we render whatever it returns.
  */
 async function cancelAuth(): Promise<void> {
-  const ok = await performSignOut();
-  if (!ok) return;
-  renderAccount({ state: "unauthenticated" });
+  stopAuthPolling();
+  const result = await apiCall({
+    kind: "auth-cancel",
+    method: "POST",
+    path: "/settings/api/auth/github/cancel",
+  });
+  if (!result.ok) {
+    renderAccount({
+      state: "error",
+      error: `Couldn't cancel: ${result.error}`,
+    });
+    return;
+  }
+  renderAccount(result.data);
 }
 
 async function signOut(): Promise<void> {
@@ -1317,14 +1328,15 @@ async function performSignOut(): Promise<boolean> {
 }
 
 /**
- * Sign out + immediately start a fresh device flow. The intent is
- * "let me re-auth with a different account" — no confirm dialog
- * (the user picked the action explicitly), no intermediate empty
- * state (we go straight to the pending code screen).
+ * Start a fresh device flow to sign in as a different account. The intent is
+ * "let me add/switch to another account" — no confirm dialog (the user picked
+ * the action explicitly), no intermediate empty state (we go straight to the
+ * pending code screen). Crucially we do NOT sign out first: the current
+ * account stays live until the new sign-in SUCCEEDS (→ switches to it) or the
+ * user cancels (→ stays on the current account). Issuing a code is not a
+ * commitment.
  */
 async function switchAccount(): Promise<void> {
-  const ok = await performSignOut();
-  if (!ok) return;
   await startAuth();
 }
 
