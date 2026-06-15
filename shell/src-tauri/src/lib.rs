@@ -317,6 +317,30 @@ impl SplashDismissed {
     }
 }
 
+/// Set while `respawn_sidecar` is intentionally cycling the sidecar (the
+/// account-switch / sign-in / sign-out reboot). The old sidecar exits cleanly
+/// from our SIGTERM, which the Terminated handler would otherwise read as a
+/// user-initiated quit and bring the WHOLE app down — stranding the tray and
+/// killing the reboot before the replacement spawns. The handler consumes this
+/// flag and keeps the app alive for the respawn instead.
+struct SidecarRestarting(std::sync::atomic::AtomicBool);
+
+impl SidecarRestarting {
+    fn new() -> Self {
+        Self(std::sync::atomic::AtomicBool::new(false))
+    }
+
+    /// Mark that the next sidecar exit is an intentional restart, not a quit.
+    fn begin(&self) {
+        self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Returns true (and clears the flag) if a restart was in progress.
+    fn consume(&self) -> bool {
+        self.0.swap(false, std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
 /// Random per-launch key the shell shares with its sidecar so the
 /// webview can authenticate against /settings/api/* even when the user
 /// has enabled "Block unknown connections." Injected as an env var when
@@ -493,6 +517,7 @@ pub fn run() {
         .manage(SetupPromptShown::new())
         .manage(StartupAnnounced::new())
         .manage(SplashDismissed::new())
+        .manage(SidecarRestarting::new())
         .manage(LastRejection::new())
         .manage(LastSidecarError::new())
         .invoke_handler(tauri::generate_handler![
@@ -737,6 +762,16 @@ fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
                 }
                 CommandEvent::Terminated(payload) => {
                     eprintln!("[maximal] sidecar exited: {:?}", payload);
+                    // Intentional restart (account switch / sign-in / sign-out
+                    // reboot)? respawn_sidecar set this flag before SIGTERMing
+                    // the old child, and is already spawning the replacement.
+                    // Keep the app alive — DON'T treat this exit as a quit.
+                    if handle.state::<SidecarRestarting>().consume() {
+                        eprintln!(
+                            "[maximal] (intentional restart — keeping app alive for the respawn)"
+                        );
+                        break;
+                    }
                     // Clean exit signals an intentional shutdown — either
                     // we just sent SIGTERM via kill_sidecar (Quit flow),
                     // or an external caller hit /_internal/shutdown
@@ -880,24 +915,19 @@ fn kill_sidecar(app: &AppHandle) {
             libc::kill(pid, libc::SIGTERM);
         }
 
-        // Stash the child back so the escalation task can decide
-        // whether it still needs SIGKILL. If the sidecar exits
-        // cleanly within 3s, the child handle goes out of scope here
-        // and that's fine — killing an already-exited child is a
-        // harmless no-op.
-        app.state::<Sidecar>().set(child);
-
-        // Plain OS thread for the 3s grace timer rather than pulling
-        // a tokio runtime in for this single sleep. AppHandle::clone()
-        // is Arc-cheap.
-        let app_handle = app.clone();
+        // MOVE the old child into the escalation thread — do NOT put it back
+        // in the shared Sidecar slot. respawn_sidecar calls spawn_sidecar
+        // immediately after us, which set()s the REPLACEMENT child into that
+        // slot; if this escalation re-read the slot it would SIGKILL the FRESH
+        // sidecar ~3s after a restart (the proxy would vanish from :4141 and
+        // the whole UI would "Load failed" — the account-switch/sign-in/
+        // sign-out reboot bug). Holding the specific old child here SIGKILLs
+        // only it. Dropping a CommandChild does NOT kill its process, so
+        // leaving the slot empty until spawn_sidecar fills it is safe.
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_secs(3));
-            if let Some(child) = app_handle.state::<Sidecar>().take() {
-                // Still alive (or at least, still in our slot) after
-                // the grace period — escalate to SIGKILL.
-                let _ = child.kill();
-            }
+            // No-op if the SIGTERM above already made it exit.
+            let _ = child.kill();
         });
     }
 
@@ -1610,6 +1640,11 @@ fn respawn_sidecar(app: &AppHandle) {
     // re-raise an always-on-top splash.
     app.state::<LastSidecarError>().set(None);
     dismiss_splash(app);
+
+    // Mark this as an intentional restart BEFORE we SIGTERM the child, so the
+    // old sidecar's clean exit isn't mistaken for a user quit (which would
+    // bring the whole app down — see the Terminated handler in spawn_sidecar).
+    app.state::<SidecarRestarting>().begin();
 
     // Reap the current child (healthy, hung, or mid-crash) so the respawn binds
     // cleanly. No-op if already gone. spawn_sidecar also passes --replace as a

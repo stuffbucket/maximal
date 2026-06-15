@@ -81,12 +81,17 @@ function wireNav(): void {
   }
 }
 
-async function safeInvoke(cmd: string): Promise<void> {
+async function safeInvoke(cmd: string): Promise<boolean> {
   try {
     await invoke(cmd);
+    return true;
   } catch (err) {
-    // Tauri command unavailable (e.g. running in plain browser). Log and continue.
+    // Tauri command unavailable (e.g. plain-browser app:ui) or the IPC
+    // rejected. Returns false so callers that DEPEND on the command (e.g. the
+    // restart_sidecar reboot that completes a sign-in) can surface a visible
+    // error instead of silently stranding the user.
     console.warn(`invoke(${cmd}) failed:`, err);
+    return false;
   }
 }
 
@@ -633,6 +638,9 @@ function showGhError(message: string): void {
   if (!el) return;
   el.textContent = message;
   el.hidden = false;
+  // The account section can be tall (remembered + gh lists), so an error on a
+  // row near the bottom can land off-screen. Bring it into view.
+  el.scrollIntoView({ block: "nearest" });
 }
 
 function hideGhError(): void {
@@ -682,9 +690,31 @@ async function loadGhAccounts(): Promise<void> {
     return;
   }
 
+  // Dedup against the registry: a gh account that's already a remembered
+  // (persisted) account is offered in the "Switch to a remembered account"
+  // list above, so don't ALSO list it here as a fresh sign-in — that
+  // double-listing is what reads as confusing. Best-effort: if the accounts
+  // fetch fails, fall back to showing every gh account.
+  const remembered = await apiCall({
+    kind: "accounts-list",
+    method: "GET",
+    path: "/settings/api/accounts",
+  });
+  const rememberedKeys = new Set(
+    remembered.ok ? remembered.data.accounts.map((a) => a.key) : [],
+  );
+  const ghAccounts = result.data.accounts.filter(
+    (a) => !rememberedKeys.has(`${a.login}@${a.host}`),
+  );
+  if (ghAccounts.length === 0) {
+    wrapper.hidden = true;
+    list.replaceChildren();
+    return;
+  }
+
   list.replaceChildren();
   hideGhError();
-  for (const account of result.data.accounts) {
+  for (const account of ghAccounts) {
     const seed = template.content.firstElementChild;
     if (!seed) continue;
     const row = seed.cloneNode(true) as HTMLElement;
@@ -796,7 +826,15 @@ async function rebootAndAwaitAuth(
   onSuccess: (status: AuthStatus) => void,
   onFailure: (sawDown: boolean) => void,
 ): Promise<void> {
-  await safeInvoke("restart_sidecar");
+  // If the restart IPC itself didn't fire (invoke rejected / unavailable),
+  // the proxy will never reboot — fail fast and visibly rather than polling a
+  // never-changing status for 20s. `sawDown: false` → the "didn't restart"
+  // branch of the caller's message.
+  const restarted = await safeInvoke("restart_sidecar");
+  if (!restarted) {
+    onFailure(false);
+    return;
+  }
   const deadlineMs = Date.now() + 20_000;
   let sawDown = false;
   while (Date.now() < deadlineMs) {
@@ -853,6 +891,7 @@ function showRosterError(mode: AccountRosterMode, message: string): void {
   if (el) {
     el.textContent = message;
     el.hidden = false;
+    el.scrollIntoView({ block: "nearest" });
   }
 }
 
