@@ -1818,29 +1818,56 @@ fn attach_hide_on_close(app: &AppHandle, window: &tauri::WebviewWindow) {
 /// any of our managed webview windows are currently visible.
 ///
 /// On Windows/Linux this is a no-op — there is no equivalent concept.
+/// Tracks the activation policy we last successfully applied, so
+/// `update_activation_policy` can skip a redundant `set_activation_policy`
+/// call. Every call to AppKit's `setActivationPolicy:` makes it re-resolve
+/// NSApplication's icon from the bundle — which, for a dev `cargo run` binary
+/// with no Info.plist icon, is the generic "exec" image; `set_dock_icon`
+/// re-applies our branded icon a frame later. So a *redundant* policy set —
+/// e.g. closing one window while another stays open (Regular→Regular) — still
+/// flashes the Dock icon exec→branded. Skipping no-op transitions removes the
+/// flash. Starts `false` to match the Accessory policy set at startup.
+#[cfg(target_os = "macos")]
+static POLICY_IS_REGULAR: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
 #[cfg(target_os = "macos")]
 fn update_activation_policy(app: &AppHandle) {
+    use std::sync::atomic::Ordering;
+
     let labels = [SETTINGS_WINDOW_LABEL, DASHBOARD_WINDOW_LABEL];
-    let any_visible = labels.iter().any(|label| {
+    let want_regular = labels.iter().any(|label| {
         app.get_webview_window(label)
             .and_then(|w| w.is_visible().ok())
             .unwrap_or(false)
     });
-    let next = if any_visible {
+
+    // Skip when the policy isn't actually changing. Beyond avoiding the
+    // dev-only Dock-icon flash, this dodges needless AppKit churn on every
+    // window show/close. All callers run on the main thread, so the
+    // load-then-store is race-free.
+    if POLICY_IS_REGULAR.load(Ordering::SeqCst) == want_regular {
+        return;
+    }
+
+    let next = if want_regular {
         tauri::ActivationPolicy::Regular
     } else {
         tauri::ActivationPolicy::Accessory
     };
     if let Err(err) = app.set_activation_policy(next) {
         eprintln!("[shell] set_activation_policy failed: {err}");
+        return; // don't record a policy we failed to apply
     }
+    POLICY_IS_REGULAR.store(want_regular, Ordering::SeqCst);
+
     // Re-apply the Dock icon in debug builds only. AppKit re-resolves
-    // NSApplication.applicationIconImage on Accessory → Regular
-    // transitions; without this re-apply, a `cargo run` dev binary
-    // falls back to the generic "exec" icon (no Info.plist
-    // CFBundleIconFile exists). In release the bundle handles this.
+    // NSApplication.applicationIconImage on the policy change above; without
+    // this re-apply, a `cargo run` dev binary falls back to the generic
+    // "exec" icon (no Info.plist CFBundleIconFile exists). Release builds
+    // carry a real bundle icon and never run this path.
     #[cfg(debug_assertions)]
-    if any_visible {
+    if want_regular {
         set_dock_icon();
     }
 }
