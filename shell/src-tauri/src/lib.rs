@@ -1697,15 +1697,13 @@ fn open_settings_window(app: &AppHandle, section: Option<&str>) {
     };
 
     if let Some(existing) = app.get_webview_window(SETTINGS_WINDOW_LABEL) {
-        let _ = existing.show();
-        let _ = existing.set_focus();
         // Navigation via re-creation is the simplest cross-platform
         // path; eval'ing window.location is fiddly with CSP-null.
         // Cheap on macOS — the webview process is reused.
         if let Err(err) = existing.navigate(url) {
             eprintln!("[shell] settings navigate failed: {err}");
         }
-        update_activation_policy(app);
+        present_window(app, &existing);
         return;
     }
 
@@ -1721,7 +1719,7 @@ fn open_settings_window(app: &AppHandle, section: Option<&str>) {
     match builder.build() {
         Ok(window) => {
             attach_hide_on_close(app, &window);
-            update_activation_policy(app);
+            present_window(app, &window);
         }
         Err(err) => {
             eprintln!("[shell] settings window build failed: {err}");
@@ -1775,9 +1773,7 @@ fn open_dashboard_window(app: &AppHandle) {
     };
 
     if let Some(existing) = app.get_webview_window(DASHBOARD_WINDOW_LABEL) {
-        let _ = existing.show();
-        let _ = existing.set_focus();
-        update_activation_policy(app);
+        present_window(app, &existing);
         return;
     }
 
@@ -1793,7 +1789,7 @@ fn open_dashboard_window(app: &AppHandle) {
     match builder.build() {
         Ok(window) => {
             attach_hide_on_close(app, &window);
-            update_activation_policy(app);
+            present_window(app, &window);
         }
         Err(err) => {
             eprintln!("[shell] dashboard window build failed: {err}");
@@ -1852,6 +1848,62 @@ fn update_activation_policy(app: &AppHandle) {
 #[cfg(not(target_os = "macos"))]
 fn update_activation_policy(_app: &AppHandle) {}
 
+/// macOS: make Maximal the active (frontmost) application. An Accessory
+/// menu-bar app is not active by default, so even after flipping to Regular
+/// a freshly-shown window won't take the foreground until the app itself is
+/// activated — that's the "had to click the Dock icon" symptom. No-op off
+/// macOS, and a no-op when not called on the main thread.
+#[cfg(target_os = "macos")]
+fn activate_app() {
+    use objc2_app_kit::NSApplication;
+    use objc2_foundation::MainThreadMarker;
+
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let app = NSApplication::sharedApplication(mtm);
+    // `activateIgnoringOtherApps:` is deprecated on macOS 14+, but it remains
+    // the reliable way to pull an Accessory→Regular app to the foreground; the
+    // newer `activate()` no-ops when the app isn't already considered active —
+    // exactly our case on the first show.
+    #[allow(deprecated)]
+    app.activateIgnoringOtherApps(true);
+}
+
+#[cfg(not(target_os = "macos"))]
+fn activate_app() {}
+
+/// Bring a managed window to the foreground reliably, from any thread.
+///
+/// This is the fix for "Settings/Dashboard doesn't come up on the first
+/// invoke / needs a Dock click." The ordering is load-bearing: the window
+/// must be VISIBLE, the app must be a Regular (Dock) app, and the app must be
+/// ACTIVATED *before* the window is focused. The previous code focused while
+/// the app was still Accessory and only flipped the policy afterward, so a
+/// menu-bar app couldn't raise the window — it sat behind whatever was front.
+///
+/// The whole sequence runs in one closure on the main thread: the AppKit
+/// calls (activation policy, NSApp activate, Dock icon) require it, and Tauri
+/// command handlers run OFF the main thread — where reading `is_visible()`
+/// right after `show()` (as `update_activation_policy` does) could race and
+/// pick the wrong policy. Dispatching from the main thread (tray/menu) is
+/// fine: `run_on_main_thread` queues the closure to run right after the
+/// current event handler returns, it does not block or re-enter.
+fn present_window(app: &AppHandle, window: &tauri::WebviewWindow) {
+    let app_for_closure = app.clone();
+    let window = window.clone();
+    let present = move || {
+        let _ = window.unminimize();
+        let _ = window.show();
+        update_activation_policy(&app_for_closure);
+        activate_app();
+        let _ = window.set_focus();
+    };
+    if let Err(err) = app.run_on_main_thread(present) {
+        eprintln!("[shell] present_window: main-thread dispatch failed: {err}");
+    }
+}
+
 /// Entry point for the tray's "Quit Maximal" item. Pops a native
 /// confirm dialog via `tauri-plugin-dialog`; on accept, calls
 /// `app.exit(0)` which routes through `RunEvent::ExitRequested` →
@@ -1908,10 +1960,7 @@ fn graceful_shutdown(app: &AppHandle) {
 fn focus_or_open_main_window(app: &AppHandle) {
     for label in [SETTINGS_WINDOW_LABEL, DASHBOARD_WINDOW_LABEL] {
         if let Some(window) = app.get_webview_window(label) {
-            let _ = window.unminimize();
-            let _ = window.show();
-            let _ = window.set_focus();
-            update_activation_policy(app);
+            present_window(app, &window);
             return;
         }
     }
