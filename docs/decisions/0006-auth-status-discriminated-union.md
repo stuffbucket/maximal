@@ -1,8 +1,9 @@
 ---
 id: ADR-0006
 title: Model AuthStatus as a discriminated union
-status: proposed
+status: accepted
 date: 2026-06-14
+accepted_date: 2026-06-15
 authors:
   - stuffbucket
 supersedes: []
@@ -13,6 +14,7 @@ links:
   shell_renderer: shell/src/main.ts
   backend_route: src/routes/settings/auth.ts
   controller: src/lib/auth-controller.ts
+  implementation_commit: 1a2f1b71a639822e55b6e9df5042147e2f911994
 ---
 
 # Model AuthStatus as a discriminated union
@@ -102,6 +104,27 @@ Co-requirements:
    `renderAccountAvatar()` — by contract, `authenticated` always has
    a real `account_login`. If GitHub omits one, the controller should
    surface an `error` state instead of a fake login.
+
+## Pragmatic carve-out (implementation note, 2026-06-15)
+
+The implementation diverges from item 4 above in one place: when
+`getGitHubUser` fails best-effort during the device flow (the token
+works but the user lookup didn't), the controller emits the literal
+string `"unknown"` on `account_login` rather than failing sign-in
+into the `error` state. Failing the whole sign-in on a transient
+GitHub API hiccup is worse for the user than surfacing a placeholder
+avatar — and there is an existing test (`tests/auth-controller.test.ts`
+"getGitHubUser failure does NOT invalidate the token") that enshrines
+this behavior.
+
+The type contract stays strict — `account_login: string` is
+required, never `undefined` — and the renderer treats `"unknown"`
+(no parens, distinct from the previous renderer-synthesized
+`"(unknown)"` sentinel) as the placeholder trigger. So the
+"sentinel substituted in the renderer" pattern is gone; the
+substitution lives in the controller where the type is constructed,
+and the avatar renderer detects one well-known string instead of
+defending against missing fields.
 
 ## Alternatives considered
 
