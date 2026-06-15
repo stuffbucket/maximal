@@ -16,7 +16,7 @@ Always read the linked doc before acting in its area.
 | Spawn parallel agents / use git stash | [`docs/architecture.md`](docs/architecture.md) → *Parallel-agent convention* |
 | Change `.bun-version` or CI's Bun pin | [`docs/bun-version-policy.md`](docs/bun-version-policy.md) |
 | Write any code | [`docs/code-style.md`](docs/code-style.md) |
-| Touch any HTML, CSS, or component code (Tauri windows, proxy-served pages) | [`.design-context.md`](.design-context.md) — **mandatory before edits** |
+| Touch any HTML, CSS, or component code (Tauri windows, proxy-served pages) | [`.design-context.md`](.design-context.md) — front door; topic deep-dives in [`docs/design/`](docs/design/). **Read `docs/design/failure-modes.md` before any non-trivial UI change.** |
 | Work with the Claude Code or Opencode plugin | [`docs/plugins.md`](docs/plugins.md) |
 | Dispatch or review codegen feedback loops | [`docs/codegen-feedback-loops-practices.md`](docs/codegen-feedback-loops-practices.md) |
 
@@ -38,4 +38,4 @@ those files; don't reinvent it.
 - **Never `git stash pop` in a shared working tree.** See architecture doc → *Parallel-agent convention* for why. Use a worktree for any isolated bisect.
 - **PR titles are Conventional Commits** (`feat:` / `fix:` / `chore:` / etc.) — squash-merge uses the title verbatim. See architecture doc → *Release & PR conventions*.
 - **Pin matters.** `.bun-version` and `.github/workflows/ci.yml` move together. See Bun version policy.
-- **Design context overrides this file** for any UI work. Read `.design-context.md`.
+- **Design context overrides this file** for any UI work. Read `.design-context.md` and the relevant `docs/design/*.md` topic file.
