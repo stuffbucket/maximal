@@ -31,7 +31,7 @@ bun run release:manual  # local fallback cut (bumpp + bun publish). Primary
                         # release path is release-please: merge the auto-opened
                         # release PR → tag → release.yml builds/publishes.
 
-# Tauri app (menu-bar shell wrapping the proxy as a sidecar on :4142)
+# Tauri app (menu-bar shell wrapping the proxy as a sidecar on :4141)
 bun run app:setup    # one-time: install shell deps + force-build sidecar binary
 bun run app:sidecar  # rebuild standalone proxy binary into shell/src-tauri/binaries/
                      # (no-op when binary is newer than src/; override with --force
@@ -39,7 +39,7 @@ bun run app:sidecar  # rebuild standalone proxy binary into shell/src-tauri/bina
 bun run app:dev      # build sidecar (if stale) + tauri dev (hot-reload)
 bun run app:ui       # UI-only iteration: Vite alone at :1420. Run `bun run dev`
                      # in another terminal so the UI's API calls (which target
-                     # :4142 in DEV mode) hit a live proxy. Far faster than
+                     # :4141 in DEV mode) hit a live proxy. Far faster than
                      # spinning the whole Tauri shell for HTML/CSS tweaks.
 bun run app:build    # force-rebuild sidecar + tauri build --bundles app,dmg
 ```
@@ -51,8 +51,8 @@ sidecar binary is a 66 MB Bun compile (~30–90s) and Vite already does
 HMR for the UI. Instead:
 
 ```sh
-# Terminal A — proxy with file watch, bound to :4142 (matches shell/src/api.ts DEV branch).
-bun run dev -- start --port 4142
+# Terminal A — proxy with file watch, bound to :4141 (matches shell/src/api.ts DEV branch).
+bun run dev -- start --port 4141
 
 # Terminal B — Vite for the settings UI.
 bun run app:ui
