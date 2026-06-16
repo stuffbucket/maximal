@@ -106,98 +106,6 @@
                   Sign in to GitHub
                 </button>
               </div>
-
-              <!-- Remembered maximal accounts (persisted, token on disk).
-                   Shown only when GET /settings/api/accounts returns >=1
-                   account while unauthenticated — e.g. the user signed out of
-                   one account but others remain. Uses the shared row template
-                   in the authenticated card. -->
-              <div
-                class="account-roster subsection"
-                data-account-remembered
-                hidden
-              >
-                <h3 class="subsection__title">
-                  Switch to a remembered account
-                </h3>
-                <p class="state__caption">
-                  Accounts you&rsquo;ve signed into before on this Mac. Picking
-                  one restarts the proxy signed in as that account.
-                </p>
-                <ul
-                  class="gh-account-list"
-                  data-account-remembered-list
-                  role="list"
-                ></ul>
-                <p
-                  class="account-roster__error state__caption state__caption--error"
-                  data-account-remembered-error
-                  role="alert"
-                  hidden
-                ></p>
-              </div>
-
-              <!-- gh-reuse: secondary sign-in via an existing GitHub CLI
-                   login. Shown by main.ts only when GET /settings/api/gh/status
-                   reports gh installed AND >=1 account. -->
-              <div class="gh-reuse" data-gh-reuse hidden>
-                <div
-                  class="gh-reuse__divider"
-                  role="separator"
-                  aria-hidden="true"
-                >
-                  <span class="gh-reuse__divider-label">or</span>
-                </div>
-                <div class="subsection">
-                  <div class="gh-reuse__header">
-                    <h3 class="subsection__title">
-                      Reuse a GitHub CLI account
-                    </h3>
-                    <button
-                      type="button"
-                      class="btn btn--ghost btn--sm"
-                      data-action="gh-refresh"
-                    >
-                      Refresh
-                    </button>
-                  </div>
-                  <p class="state__caption">
-                    Sign in with an account you&rsquo;re already logged into
-                    with <code class="mono">gh</code> on this Mac &mdash; no code
-                    to copy.
-                  </p>
-                  <ul class="gh-account-list" data-gh-accounts role="list"></ul>
-                  <template data-gh-row-template>
-                    <li class="gh-account" role="listitem">
-                      <span class="gh-account__dot status" aria-hidden="true"
-                      ></span>
-                      <span class="gh-account__id">
-                        <span
-                          class="gh-account__login"
-                          data-field="gh_login"
-                        ></span>
-                        <span
-                          class="gh-account__host mono"
-                          data-field="gh_host"
-                        ></span>
-                      </span>
-                      <button
-                        type="button"
-                        class="btn btn--secondary btn--sm"
-                        data-action="gh-use"
-                      >
-                        Use this account
-                      </button>
-                    </li>
-                  </template>
-                  <p
-                    class="gh-reuse__error state__caption state__caption--error"
-                    data-gh-error
-                    role="alert"
-                    hidden
-                  ></p>
-                </div>
-              </div>
             </div>
 
             <!-- State: device_code_issued / polling -->
@@ -377,6 +285,109 @@
                 >
                   Try again
                 </button>
+              </div>
+            </div>
+
+            <!-- Shared known-account rosters. Rendered OUTSIDE the per-state
+                 cards so the same single elements can be surfaced across the
+                 unauthenticated, error, and pending states (device-code is a
+                 fallback, never the only option). main.ts toggles
+                 [data-account-rosters] per state and populates the two lists
+                 via loadAccounts("remembered") / loadGhAccounts(). The
+                 authenticated state keeps its own inline "Switch to" roster
+                 (the active account is the hero and excluded from this list). -->
+            <div class="account-rosters" data-account-rosters hidden>
+              <div
+                class="gh-reuse__divider"
+                role="separator"
+                aria-hidden="true"
+              >
+                <span class="gh-reuse__divider-label">or use an account you already know</span>
+              </div>
+
+              <!-- Remembered maximal accounts (persisted, token on disk).
+                   Shown only when GET /settings/api/accounts returns >=1
+                   account — e.g. the user signed out of one account but others
+                   remain, or a sign-in failed. Uses the shared row template
+                   above. -->
+              <div
+                class="account-roster subsection"
+                data-account-remembered
+                hidden
+              >
+                <h3 class="subsection__title">
+                  Switch to a remembered account
+                </h3>
+                <p class="state__caption">
+                  Accounts you&rsquo;ve signed into before on this Mac. Picking
+                  one restarts the proxy signed in as that account.
+                </p>
+                <ul
+                  class="gh-account-list"
+                  data-account-remembered-list
+                  role="list"
+                ></ul>
+                <p
+                  class="account-roster__error state__caption state__caption--error"
+                  data-account-remembered-error
+                  role="alert"
+                  hidden
+                ></p>
+              </div>
+
+              <!-- gh-reuse: secondary sign-in via an existing GitHub CLI
+                   login. Shown by main.ts only when GET /settings/api/gh/status
+                   reports gh installed AND >=1 account. -->
+              <div class="gh-reuse" data-gh-reuse hidden>
+                <div class="subsection">
+                  <div class="gh-reuse__header">
+                    <h3 class="subsection__title">
+                      Reuse a GitHub CLI account
+                    </h3>
+                    <button
+                      type="button"
+                      class="btn btn--ghost btn--sm"
+                      data-action="gh-refresh"
+                    >
+                      Refresh
+                    </button>
+                  </div>
+                  <p class="state__caption">
+                    Sign in with an account you&rsquo;re already logged into
+                    with <code class="mono">gh</code> on this Mac &mdash; no code
+                    to copy.
+                  </p>
+                  <ul class="gh-account-list" data-gh-accounts role="list"></ul>
+                  <template data-gh-row-template>
+                    <li class="gh-account" role="listitem">
+                      <span class="gh-account__dot status" aria-hidden="true"
+                      ></span>
+                      <span class="gh-account__id">
+                        <span
+                          class="gh-account__login"
+                          data-field="gh_login"
+                        ></span>
+                        <span
+                          class="gh-account__host mono"
+                          data-field="gh_host"
+                        ></span>
+                      </span>
+                      <button
+                        type="button"
+                        class="btn btn--secondary btn--sm"
+                        data-action="gh-use"
+                      >
+                        Use this account
+                      </button>
+                    </li>
+                  </template>
+                  <p
+                    class="gh-reuse__error state__caption state__caption--error"
+                    data-gh-error
+                    role="alert"
+                    hidden
+                  ></p>
+                </div>
               </div>
             </div>
           </section>

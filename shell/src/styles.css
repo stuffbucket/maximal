@@ -348,6 +348,29 @@ a:hover {
   display: none;
 }
 
+/* Shared known-account rosters wrapper. Lives outside the per-state cards so
+   the remembered + gh lists can be surfaced across the unauthenticated, error,
+   and device-code states (device-code is a fallback, never the only option).
+   Stacks its children — the "or" divider, the remembered roster, the gh-reuse
+   block — with the same rhythm the gh-reuse block used inline before. */
+.account-rosters {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+  max-width: 65ch;
+}
+
+.account-rosters[hidden] {
+  display: none;
+}
+
+/* The remembered roster sits inside the shared wrapper, which already owns the
+   top margin; drop the roster's own so the gap doesn't double up. */
+.account-rosters .account-roster {
+  margin-top: 0;
+}
+
 /* Switch + Remove sit together at the row's end. */
 .gh-account__actions {
   flex: 0 0 auto;
