@@ -25,6 +25,7 @@ export const PROXY_KEYS = [
   "inferenceGatewayBaseUrl",
   "inferenceGatewayApiKey",
   "inferenceGatewayAuthScheme",
+  "deploymentMode",
   "disableDeploymentModeChooser",
   "isClaudeCodeForDesktopEnabled",
   "coworkEgressAllowedHosts",
@@ -42,11 +43,35 @@ export const PROXY_KEYS = [
 /** @public Used by external integrations / docs as the canonical key list type. */
 export type ProxyKey = (typeof PROXY_KEYS)[number]
 
+/** Sub-keys we own inside the nested `preferences` object. Claude
+ *  Desktop stores many unrelated user preferences here, so unlike the
+ *  top-level allowlist we merge and strip these surgically and never
+ *  replace the whole `preferences` object. */
+export const PROXY_PREFERENCE_KEYS = ["coworkWebSearchEnabled"] as const
+
+export interface ProxyPreferenceValues {
+  coworkWebSearchEnabled: boolean
+}
+
+/** Defaults for the `preferences` sub-keys we own. `coworkWebSearchEnabled`
+ *  turns on Cowork's bundled WebSearch connector; without it a freshly
+ *  toggled machine has the connector off until the user finds the panel. */
+export function defaultProxyPreferences(): ProxyPreferenceValues {
+  return { coworkWebSearchEnabled: true }
+}
+
+/** True for a non-null, non-array object — i.e. something we can safely
+ *  treat as a key/value map (used to guard the nested `preferences`). */
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v)
+}
+
 export interface ProxyKeyValues {
   inferenceProvider: string
   inferenceGatewayBaseUrl: string
   inferenceGatewayApiKey: string
   inferenceGatewayAuthScheme: string
+  deploymentMode: string
   disableDeploymentModeChooser: boolean
   isClaudeCodeForDesktopEnabled: boolean
   coworkEgressAllowedHosts: Array<string>
@@ -73,6 +98,13 @@ export function defaultProxyValues(
     inferenceGatewayBaseUrl: "http://127.0.0.1:4141",
     inferenceGatewayApiKey: "anything",
     inferenceGatewayAuthScheme: "bearer",
+    // Pre-seed the persisted deployment-mode choice. Claude Desktop's
+    // first-run gate is `readPersistedDeploymentMode() === undefined`,
+    // which shows the Claude.ai sign-in screen even when the gateway
+    // provider is fully wired and the chooser is hidden. Writing "3p"
+    // (the value the app itself persists when a user picks third-party)
+    // is what skips that sign-in on a fresh machine.
+    deploymentMode: "3p",
     disableDeploymentModeChooser: true,
     isClaudeCodeForDesktopEnabled: true,
     coworkEgressAllowedHosts: ["*"],
@@ -142,28 +174,52 @@ export function readClaudeDesktopConfig(
 }
 
 /** Allowlist merge: returns a new object with the proxy keys set to
- *  `values`, every other key from `existing` preserved. Pure — no
- *  I/O, no mutation. */
+ *  `values`, every other key from `existing` preserved. The nested
+ *  `preferences` sub-keys we own are merged into any existing
+ *  `preferences` object so unrelated user preferences survive. Pure —
+ *  no I/O, no mutation. */
 export function mergeProxyKeys(
   existing: Record<string, unknown>,
   values: ProxyKeyValues = defaultProxyValues(),
+  preferences: ProxyPreferenceValues = defaultProxyPreferences(),
 ): Record<string, unknown> {
   const out: Record<string, unknown> = { ...existing }
   for (const k of PROXY_KEYS) {
     out[k] = values[k]
   }
+  const existingPrefs =
+    isPlainObject(existing.preferences) ? existing.preferences : {}
+  const mergedPrefs: Record<string, unknown> = { ...existingPrefs }
+  for (const k of PROXY_PREFERENCE_KEYS) {
+    mergedPrefs[k] = preferences[k]
+  }
+  out.preferences = mergedPrefs
   return out
 }
 
 /** Inverse of `mergeProxyKeys`: removes our keys, leaves everything
- *  else. Used by the uninstall flow's `--revert-claude` path. */
+ *  else. Our nested `preferences` sub-keys are stripped from the
+ *  `preferences` object, which is itself dropped only if we emptied it.
+ *  Used by the uninstall flow's `--revert-claude` path. */
 export function stripProxyKeys(
   existing: Record<string, unknown>,
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(existing)) {
+    if (k === "preferences") continue
     if (!(PROXY_KEYS as ReadonlyArray<string>).includes(k)) {
       out[k] = v
+    }
+  }
+  if (isPlainObject(existing.preferences)) {
+    const remainingPrefs: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(existing.preferences)) {
+      if (!(PROXY_PREFERENCE_KEYS as ReadonlyArray<string>).includes(k)) {
+        remainingPrefs[k] = v
+      }
+    }
+    if (Object.keys(remainingPrefs).length > 0) {
+      out.preferences = remainingPrefs
     }
   }
   return out
@@ -171,12 +227,20 @@ export function stripProxyKeys(
 
 /** Are our keys already present with the expected values? Used to
  *  decide "skip — already configured" vs "do the write." Compares
- *  arrays by content (order-sensitive — matches what we'd write). */
+ *  arrays by content (order-sensitive — matches what we'd write) and
+ *  checks the nested `preferences` sub-keys we own. */
 export function alreadyConfigured(
   existing: Record<string, unknown>,
   values: ProxyKeyValues = defaultProxyValues(),
+  preferences: ProxyPreferenceValues = defaultProxyPreferences(),
 ): boolean {
-  return PROXY_KEYS.every((k) => deepEqual(existing[k], values[k]))
+  const topMatches = PROXY_KEYS.every((k) => deepEqual(existing[k], values[k]))
+  if (!topMatches) return false
+  const existingPrefs =
+    isPlainObject(existing.preferences) ? existing.preferences : {}
+  return PROXY_PREFERENCE_KEYS.every((k) =>
+    deepEqual(existingPrefs[k], preferences[k]),
+  )
 }
 
 function deepEqual(a: unknown, b: unknown): boolean {
@@ -254,8 +318,11 @@ export function applyProxyConfig(
   values: ProxyKeyValues = defaultProxyValues(),
 ): ApplySetupResult {
   const existing = readClaudeDesktopConfig(filePath)
+  // `preferences` is partially owned (we set sub-keys inside it), so it
+  // is not a fully-preserved foreign key — exclude it from the report.
   const preservedKeys = Object.keys(existing).filter(
-    (k) => !(PROXY_KEYS as ReadonlyArray<string>).includes(k),
+    (k) =>
+      k !== "preferences" && !(PROXY_KEYS as ReadonlyArray<string>).includes(k),
   )
   const ensuredWorkspaceFolders = ensureWorkspaceFolders(
     values.allowedWorkspaceFolders,
@@ -308,7 +375,11 @@ export function revertProxyConfig(
   filePath: string = getClaudeDesktopConfigPath(),
 ): RevertResult {
   const existing = readClaudeDesktopConfig(filePath)
-  const hasOurs = PROXY_KEYS.some((k) => k in existing)
+  const existingPrefs =
+    isPlainObject(existing.preferences) ? existing.preferences : {}
+  const hasOurs =
+    PROXY_KEYS.some((k) => k in existing)
+    || PROXY_PREFERENCE_KEYS.some((k) => k in existingPrefs)
   if (!hasOurs) {
     return {
       path: filePath,
