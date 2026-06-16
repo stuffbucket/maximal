@@ -48,6 +48,7 @@ gateway-wiring keys. The complete set:
   "inferenceGatewayBaseUrl": "http://127.0.0.1:4141",
   "inferenceGatewayApiKey": "anything",
   "inferenceGatewayAuthScheme": "bearer",
+  "deploymentMode": "3p",
   "disableDeploymentModeChooser": true,
   "isClaudeCodeForDesktopEnabled": true,
   "coworkEgressAllowedHosts": ["*"],
@@ -59,7 +60,8 @@ gateway-wiring keys. The complete set:
   "disableAutoUpdates": false,
   "disableEssentialTelemetry": true,
   "disableNonessentialTelemetry": true,
-  "disableNonessentialServices": false
+  "disableNonessentialServices": false,
+  "preferences": { "coworkWebSearchEnabled": true }
 }
 ```
 
@@ -67,6 +69,24 @@ gateway-wiring keys. The complete set:
 `$HOME` and the directory is created on disk if missing. The merge is
 allowlist-only — keys outside this set are preserved verbatim, and
 `copilot-api uninstall --revert-claude` removes exactly these keys.
+
+`preferences` is the one **nested** block we touch: we set only the
+`coworkWebSearchEnabled` sub-key and preserve every other preference
+the app stores there, so revert strips just that sub-key (dropping the
+`preferences` object only if it was the last thing left).
+
+### Why `deploymentMode` is in the profile
+
+Setting `inferenceProvider` plus `disableDeploymentModeChooser` puts the
+app in third-party mode and hides the provider chooser, but it does
+**not** record a *persisted mode choice*. Claude Desktop's first-run
+gate is `readPersistedDeploymentMode() === undefined` — when no
+`deploymentMode` has ever been written, the app treats the launch as a
+pre-sign-in first run and shows the Claude.ai sign-in screen, even with
+the gateway fully wired. The machine that did interactive setup has the
+key persisted; a freshly-configured one does not. Writing
+`deploymentMode: "3p"` (the exact value the app persists when a user
+picks third-party) is what skips the sign-in on a clean install.
 
 ### MDM-tier interaction
 
@@ -85,6 +105,7 @@ list.
 | Key | Type | Default | Controls |
 |---|---|---|---|
 | `inferenceProvider` | string | unset | `gateway` / `bedrock` / `vertex` / `foundry`. Set via UI when you pick "Gateway" in Configure third-party inference. |
+| `deploymentMode` | string (`3p`/`1p`) | unset | **Persisted deployment-mode choice.** Unset = first-run-before-sign-in → the app shows the Claude.ai sign-in screen even with the gateway wired. Write `3p` to skip it. The app persists this itself once a user picks third-party interactively. |
 | `inferenceGatewayBaseUrl` | string | unset | Gateway endpoint URL (e.g. `http://localhost:4141`). |
 | `inferenceGatewayApiKey` | string | unset | Bearer credential. We accept literal `anything`. |
 | `inferenceModels` | JSON array (as string) | unset | Allowlist of model IDs / aliases. Useful to hide variants if our `/v1/models` listing changes. |
@@ -177,7 +198,8 @@ cat ~/Library/Application\ Support/Claude/claude_desktop_config.json
 | Goal | Where | Value |
 |---|---|---|
 | Point at the local proxy | UI: Configure third-party inference | already done |
-| Skip the login chooser | UI: same panel | already done |
+| Skip the login chooser | `disableDeploymentModeChooser = true` | hides the chooser |
+| Skip the Claude.ai sign-in on a fresh machine | `deploymentMode = "3p"` | persists the third-party choice (see above) |
 | Cowork bundled connectors reach common trustworthy hosts | `coworkEgressAllowedHosts` | see `scripts/install-cowork-egress.sh` |
 | Cowork bundled connectors reach **any** host (turn host gating off) | `coworkEgressAllowedHosts` | `["*"]` (bare `*` is the allow-all sentinel) |
 | Avoid duplicate variant ids in picker | proxy-side, already shipped | n/a |

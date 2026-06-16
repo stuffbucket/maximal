@@ -6,9 +6,11 @@ import path from "node:path"
 import {
   alreadyConfigured,
   applyProxyConfig,
+  defaultProxyPreferences,
   defaultProxyValues,
   mergeProxyKeys,
   PROXY_KEYS,
+  PROXY_PREFERENCE_KEYS,
   readClaudeDesktopConfig,
   revertProxyConfig,
   stripProxyKeys,
@@ -38,6 +40,13 @@ afterEach(() => {
 
 function writeRaw(value: string): void {
   fs.writeFileSync(configPath, value)
+}
+
+/** A config object with every owned key (top-level + nested
+ *  `preferences`) set to its default — i.e. what a fully configured
+ *  file looks like on disk. */
+function fullyConfigured(): Record<string, unknown> {
+  return mergeProxyKeys({}, values)
 }
 
 describe("defaultProxyValues", () => {
@@ -108,15 +117,44 @@ describe("mergeProxyKeys / stripProxyKeys / alreadyConfigured", () => {
 
   it("strip removes every owned key, preserves user keys", () => {
     const stripped = stripProxyKeys({
-      ...(values as unknown as Record<string, unknown>),
+      ...fullyConfigured(),
       myCustomKey: "stays",
       mcpServers: { x: 1 },
     })
     expect(stripped).toEqual({ myCustomKey: "stays", mcpServers: { x: 1 } })
   })
 
+  it("merges our preference sub-key, preserving unrelated preferences", () => {
+    const merged = mergeProxyKeys(
+      { preferences: { someOtherPref: 42, coworkWebSearchEnabled: false } },
+      values,
+    )
+    expect(merged.preferences).toEqual({
+      someOtherPref: 42,
+      coworkWebSearchEnabled: true,
+    })
+  })
+
+  it("merge tolerates a non-object preferences value", () => {
+    const merged = mergeProxyKeys({ preferences: "garbage" }, values)
+    expect(merged.preferences).toEqual({ coworkWebSearchEnabled: true })
+  })
+
+  it("strip removes only our preference sub-key, keeps the rest", () => {
+    const stripped = stripProxyKeys({
+      ...fullyConfigured(),
+      preferences: { someOtherPref: 42, coworkWebSearchEnabled: true },
+    })
+    expect(stripped).toEqual({ preferences: { someOtherPref: 42 } })
+  })
+
+  it("strip drops the preferences object when only our sub-key remained", () => {
+    const stripped = stripProxyKeys(fullyConfigured())
+    expect(stripped).toEqual({})
+  })
+
   it("alreadyConfigured deep-compares arrays", () => {
-    const matching = { ...(values as unknown as Record<string, unknown>) }
+    const matching = fullyConfigured()
     expect(alreadyConfigured(matching, values)).toBe(true)
     expect(alreadyConfigured({ ...matching, otherKey: 1 }, values)).toBe(true)
     expect(
@@ -132,6 +170,23 @@ describe("mergeProxyKeys / stripProxyKeys / alreadyConfigured", () => {
       ),
     ).toBe(false)
     expect(alreadyConfigured({}, values)).toBe(false)
+  })
+
+  it("alreadyConfigured is false when our preference sub-key is missing", () => {
+    // Top-level keys all match, but the nested preference is absent.
+    const onlyTopLevel: Record<string, unknown> = {}
+    for (const k of PROXY_KEYS) {
+      onlyTopLevel[k] = values[k]
+    }
+    expect(alreadyConfigured(onlyTopLevel, values)).toBe(false)
+    // ...and true once the preference is present with the default.
+    expect(
+      alreadyConfigured(
+        { ...onlyTopLevel, preferences: defaultProxyPreferences() },
+        values,
+      ),
+    ).toBe(true)
+    expect(PROXY_PREFERENCE_KEYS).toContain("coworkWebSearchEnabled")
   })
 })
 
@@ -188,7 +243,7 @@ describe("applyProxyConfig (end-to-end)", () => {
 
   it("skips write when already configured", () => {
     writeClaudeDesktopConfig(configPath, {
-      ...(values as unknown as Record<string, unknown>),
+      ...fullyConfigured(),
       mcpServers: { x: 1 },
     })
     const before = fs.statSync(configPath).mtimeMs
@@ -196,6 +251,20 @@ describe("applyProxyConfig (end-to-end)", () => {
     expect(result.wrote).toBe(false)
     expect(result.preservedKeys).toEqual(["mcpServers"])
     expect(fs.statSync(configPath).mtimeMs).toBe(before)
+  })
+
+  it("rewrites when only the preference sub-key is missing", () => {
+    // Every top-level key matches, so a pre-`deploymentMode`/preferences
+    // install would have been wrongly treated as fully configured.
+    const stale: Record<string, unknown> = {}
+    for (const k of PROXY_KEYS) {
+      stale[k] = values[k]
+    }
+    writeClaudeDesktopConfig(configPath, stale)
+    const result = applyProxyConfig(configPath, values)
+    expect(result.wrote).toBe(true)
+    const after = readClaudeDesktopConfig(configPath)
+    expect(after.preferences).toEqual({ coworkWebSearchEnabled: true })
   })
 })
 
@@ -222,10 +291,15 @@ describe("revertProxyConfig", () => {
   })
 
   it("removes file entirely when nothing else remains", () => {
-    writeClaudeDesktopConfig(
-      configPath,
-      values as unknown as Record<string, unknown>,
-    )
+    writeClaudeDesktopConfig(configPath, fullyConfigured())
+    const result = revertProxyConfig(configPath)
+    expect(result.wrote).toBe(true)
+    expect(result.remainingKeys).toEqual([])
+    expect(fs.existsSync(configPath)).toBe(false)
+  })
+
+  it("reverts a lone preference sub-key even with no top-level keys", () => {
+    writeRaw(JSON.stringify({ preferences: { coworkWebSearchEnabled: true } }))
     const result = revertProxyConfig(configPath)
     expect(result.wrote).toBe(true)
     expect(result.remainingKeys).toEqual([])
