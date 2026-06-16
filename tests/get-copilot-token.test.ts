@@ -128,9 +128,27 @@ describe("getCopilotToken", () => {
     expect(result).toEqual(payload)
   })
 
-  test("401 with structured JSON body throws CopilotAuthFatalError", async () => {
+  test("401 throws a friendly auth-fatal message, not the raw upstream body", async () => {
+    // Raw gRPC-style body that we must NOT surface verbatim to the user.
+    const body = "unauthorized: AuthenticateToken authentication failed"
+    stubFetch(new Response(body, { status: 401 }))
+
+    try {
+      await getCopilotToken()
+      throw new Error("expected throw")
+    } catch (err) {
+      expect(err).toBeInstanceOf(CopilotAuthFatalError)
+      const e = err as CopilotAuthFatalError
+      expect(e.status).toBe(401)
+      expect(e.message).not.toContain("AuthenticateToken")
+      expect(e.message).toContain("expired or revoked")
+      expect(e.message).toContain("gh auth login")
+    }
+  })
+
+  test("401 still propagates the remediation URL from the upstream body", async () => {
     const body = JSON.stringify({
-      message: "License revoked",
+      message: "unauthorized: AuthenticateToken authentication failed",
       documentation_url: "https://github.com/settings/copilot",
     })
     stubFetch(new Response(body, { status: 401 }))
@@ -141,13 +159,12 @@ describe("getCopilotToken", () => {
     } catch (err) {
       expect(err).toBeInstanceOf(CopilotAuthFatalError)
       const e = err as CopilotAuthFatalError
-      expect(e.status).toBe(401)
-      expect(e.message).toBe("License revoked")
+      expect(e.message).not.toContain("AuthenticateToken")
       expect(e.remediationUrl).toBe("https://github.com/settings/copilot")
     }
   })
 
-  test("403 with plain-text body uses regex sweep for URL", async () => {
+  test("403 throws a friendly no-access message and propagates the URL", async () => {
     const body =
       "Please accept the updated Copilot terms at https://github.com/site/terms"
     stubFetch(new Response(body, { status: 403 }))
@@ -159,8 +176,9 @@ describe("getCopilotToken", () => {
       expect(err).toBeInstanceOf(CopilotAuthFatalError)
       const e = err as CopilotAuthFatalError
       expect(e.status).toBe(403)
+      expect(e.message).not.toContain("Copilot terms")
+      expect(e.message).toContain("doesn't have access to GitHub Copilot")
       expect(e.remediationUrl).toBe("https://github.com/site/terms")
-      expect(e.message).toContain("Copilot terms")
     }
   })
 

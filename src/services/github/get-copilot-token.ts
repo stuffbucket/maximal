@@ -26,9 +26,19 @@ export const getCopilotToken = async () => {
     // markers. Other endpoints (completion services) use the shared
     // body-marker discriminator via isAuthFatal().
     if (response.status === 401 || response.status === 403) {
+      // The raw upstream body (a gRPC string like "unauthorized:
+      // AuthenticateToken authentication failed") is already logged above
+      // and is unreadable in the UI. Map to a friendly, actionable message
+      // by status — mirroring the wording in preflightCopilotError. The raw
+      // remediationUrl still flows through to power the UI's remediation link.
       const parsed = parseCopilotErrorBody(errorText)
+      const who = state.userName ?? "your account"
+      const friendlyMessage =
+        response.status === 401 ?
+          `GitHub rejected ${who}'s token — it may be expired or revoked. Run \`gh auth login\` and try again, or sign in with a code.`
+        : `${who} doesn't have access to GitHub Copilot. Pick another account with an active Copilot subscription, or sign in with a code.`
       throw new CopilotAuthFatalError(
-        parsed.message,
+        friendlyMessage,
         response.status,
         parsed.remediationUrl,
       )
