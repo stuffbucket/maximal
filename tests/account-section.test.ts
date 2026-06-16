@@ -77,4 +77,36 @@ describe("Account section markup", () => {
     // the empty href= placeholder the controller fills.
     expect(section.includes("window.open")).toBe(false)
   })
+
+  test("known-account rosters live in a shared container, not a state card", () => {
+    const section = accountSection()
+    // The remembered + gh rosters moved OUT of the unauthenticated card into a
+    // shared [data-account-rosters] block so the controller can surface them
+    // across the unauthenticated, error, and device-code states (device-code
+    // is a fallback, never the only option). Both list anchors the controller
+    // queries must live inside that shared container.
+    const start = section.indexOf("data-account-rosters")
+    expect(start).toBeGreaterThan(-1)
+    // Both roster anchors the controller queries must appear AFTER the shared
+    // container opens (i.e. inside it), not before.
+    expect(section.indexOf("data-account-remembered-list")).toBeGreaterThan(
+      start,
+    )
+    expect(section.indexOf("data-gh-accounts")).toBeGreaterThan(start)
+    // There must be exactly one of each roster anchor in the section (the
+    // shared one) — they must not also linger inside a per-state card.
+    expect(section.split("data-account-remembered-list").length - 1).toBe(1)
+    expect(section.split("data-gh-accounts").length - 1).toBe(1)
+  })
+
+  test("the shared rosters block is not gated to a single state card", () => {
+    const section = accountSection()
+    // It must NOT carry a data-state-account attribute (which the controller's
+    // hide-all-but-active loop would clobber); the controller toggles it
+    // directly per state instead.
+    const open = section.indexOf('<div class="account-rosters"')
+    expect(open).toBeGreaterThan(-1)
+    const openTag = section.slice(open, section.indexOf(">", open))
+    expect(openTag.includes("data-state-account")).toBe(false)
+  })
 })

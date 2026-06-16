@@ -660,6 +660,41 @@ function formatExpiresAt(iso: string | undefined): string {
   return date.toLocaleTimeString();
 }
 
+/**
+ * Show or hide the shared known-account rosters (remembered registry accounts
+ * + gh-cli cached accounts) that live OUTSIDE the per-state cards. These are
+ * surfaced across the unauthenticated, error, and device-code/polling states
+ * so the device-code flow is a fallback, never the only option.
+ *
+ * When shown, both lists are (re)populated fresh — `loadAccounts`/
+ * `loadGhAccounts` each hide their own sub-block when empty, so the outer
+ * wrapper can collapse to nothing visible if there's truly nothing to offer.
+ * Best-effort: a failed fetch just hides that list, never blocks the page.
+ */
+function showKnownAccountRosters(visible: boolean): void {
+  const wrapper = document.querySelector<HTMLElement>("[data-account-rosters]");
+  if (!wrapper) return;
+  if (!visible) {
+    wrapper.hidden = true;
+    return;
+  }
+  // Reveal the wrapper while the lists load so the "or" divider doesn't pop in
+  // after them; collapse it again if BOTH inner blocks turn out empty (so a
+  // user with no remembered/gh accounts sees no dangling divider).
+  wrapper.hidden = false;
+  // Repopulated each time so a `gh logout` or registry change elsewhere can't
+  // leave a stale row. Best-effort: a failed fetch just hides that list.
+  void Promise.all([loadAccounts("remembered"), loadGhAccounts()]).then(() => {
+    const remembered = document.querySelector<HTMLElement>(
+      "[data-account-remembered]",
+    );
+    const gh = document.querySelector<HTMLElement>("[data-gh-reuse]");
+    const nothingToOffer =
+      (!remembered || remembered.hidden) && (!gh || gh.hidden);
+    wrapper.hidden = nothingToOffer;
+  });
+}
+
 function renderAccount(status: AuthStatus): void {
   currentAuthStatus = status;
   const active = accountKeyFor(status.state);
@@ -684,6 +719,9 @@ function renderAccount(status: AuthStatus): void {
         link.href = status.verification_uri;
         link.textContent = status.verification_uri.replace(/^https?:\/\//, "");
       }
+      // A pending device code is a fallback, not a trap: also surface any
+      // known accounts so the user can abandon the code and pick one.
+      showKnownAccountRosters(true);
       break;
     }
     case "authenticated": {
@@ -694,6 +732,10 @@ function renderAccount(status: AuthStatus): void {
       setAccountField("account_login", status.account_login);
       renderAccountAvatar(status.account_login);
       renderUpstreamRejection(status.last_upstream_rejection);
+      // The authenticated card has its OWN inline "Switch to" roster (the
+      // active account is the hero, excluded from the list); the shared
+      // known-account rosters are for the not-signed-in states only.
+      showKnownAccountRosters(false);
       // Populate the "Switch to" roster (the other persisted accounts).
       void loadAccounts("roster");
       break;
@@ -701,16 +743,13 @@ function renderAccount(status: AuthStatus): void {
     case "error": {
       setAccountField("error", status.error);
       renderRemediationLink(status.remediation_url);
+      // A failed sign-in must not strand the user on "Try again": offer the
+      // accounts we already know about as an escape hatch.
+      showKnownAccountRosters(true);
       break;
     }
     case "unauthenticated": {
-      // The "reuse a GitHub CLI account" list lives inside the
-      // unauthenticated state; (re)populate it whenever we land there
-      // (fresh each time, so a `gh logout` elsewhere can't leave a
-      // stale row). Best-effort — gh hinting never blocks the page.
-      void loadGhAccounts();
-      // Remembered maximal accounts (e.g. signed out of one, others remain).
-      void loadAccounts("remembered");
+      showKnownAccountRosters(true);
       break;
     }
     default: {
