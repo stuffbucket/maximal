@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.25](https://github.com/stuffbucket/maximal/compare/v0.4.24...v0.4.25) (2026-06-16)
+
+
+### Bug Fixes
+
+* **auth:** show a readable message when Copilot token mint is rejected ([#124](https://github.com/stuffbucket/maximal/issues/124)) ([59ab92d](https://github.com/stuffbucket/maximal/commit/59ab92da643a19dfb5db5164a25bffe19290c680))
+* **claude-desktop:** persist deploymentMode=3p and enable Cowork web search ([#128](https://github.com/stuffbucket/maximal/issues/128)) ([e0599a7](https://github.com/stuffbucket/maximal/commit/e0599a7d0f75870368b03bbc6b8f4975f63ccc47))
+* **shell:** show known-account roster in the failed/device-code states ([#125](https://github.com/stuffbucket/maximal/issues/125)) ([abd4df2](https://github.com/stuffbucket/maximal/commit/abd4df2722e137b5d3f832192ab95e76fc87e882))
+
 ## [0.4.24](https://github.com/stuffbucket/maximal/compare/v0.4.23...v0.4.24) (2026-06-15)
 
 
