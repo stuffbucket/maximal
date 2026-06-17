@@ -20,6 +20,7 @@
 import { Hono } from "hono"
 
 import { BUILD_VERSION } from "~/lib/build-info"
+import { describeLaunchSource } from "~/lib/cli-path"
 import {
   DiagnosticsResponse,
   type DiagnosticsResponse as DiagnosticsResponseT,
@@ -43,10 +44,13 @@ const PROCESS_START_MS = Date.now()
 
 function buildDiagnostics(): DiagnosticsResponseT {
   const git = getGitVersion()
+  const launch = describeLaunchSource()
   return {
     version: BUILD_VERSION,
     source_revision: git.sha ? shortSha(git.sha) : null,
     source_branch: git.branch ?? null,
+    launch_path: launch.path,
+    launch_kind: launch.kind,
     pid: process.pid,
     uptime_ms: Date.now() - PROCESS_START_MS,
     account_type: state.accountType,

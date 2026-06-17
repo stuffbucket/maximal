@@ -268,12 +268,30 @@ function setField(name: string, value: string): void {
 function renderDiagnostics(data: DiagnosticsResponse): void {
   setField("version", data.version);
   setField("source_revision", data.source_revision ?? "unknown");
+  setField("launch_source", formatLaunchSource(data));
   setField("pid", String(data.pid));
   setField("uptime", formatUptime(data.uptime_ms));
   setField("account_type", data.account_type ?? "unknown");
   setField("models_cached", String(data.models_cached));
   setField("github_copilot_status", deriveGithubCopilotStatus(data.tokens));
   setField("rate_limit", formatRateLimit(data.rate_limit));
+}
+
+/**
+ * Human-readable launch origin: a short label for the install kind plus
+ * the absolute path it ran from. Lets a bug report distinguish a DMG
+ * launch from a stray Homebrew or dev-build one at a glance.
+ */
+function formatLaunchSource(data: DiagnosticsResponse): string {
+  const labels: Record<DiagnosticsResponse["launch_kind"], string> = {
+    "dmg-app": "Desktop app",
+    homebrew: "Homebrew",
+    "user-bin": "User bin",
+    dev: "Dev build",
+    other: "Other",
+  };
+  const label = labels[data.launch_kind] ?? "Other";
+  return `${label} — ${data.launch_path}`;
 }
 
 /**

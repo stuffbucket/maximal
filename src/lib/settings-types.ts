@@ -42,6 +42,12 @@ export const DiagnosticsResponse = z.object({
   version: z.string(),
   source_revision: z.string().nullable(),
   source_branch: z.string().nullable(),
+  /** Absolute path the running sidecar was launched from
+   *  (`process.execPath`). Distinguishes a DMG-app launch from a
+   *  Homebrew / dev / standalone one in bug reports. */
+  launch_path: z.string(),
+  /** Coarse classification of `launch_path`. */
+  launch_kind: z.enum(["dmg-app", "homebrew", "user-bin", "dev", "other"]),
   pid: z.number().int(),
   uptime_ms: z.number().int(),
   account_type: z.string(),

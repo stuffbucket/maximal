@@ -19,6 +19,11 @@ describe("GET /settings/api/diagnostics", () => {
       expect(parsed.data.pid).toBe(process.pid)
       expect(parsed.data.uptime_ms).toBeGreaterThanOrEqual(0)
       expect(typeof parsed.data.tokens.github_token_present).toBe("boolean")
+      // launch_path/kind classify where the sidecar was launched from.
+      expect(parsed.data.launch_path.length).toBeGreaterThan(0)
+      expect(["dmg-app", "homebrew", "user-bin", "dev", "other"]).toContain(
+        parsed.data.launch_kind,
+      )
     }
   })
 
@@ -62,6 +67,8 @@ describe("DiagnosticsResponse schema round-trip", () => {
       version: "0.1.0",
       source_revision: "a123fc0",
       source_branch: "main",
+      launch_path: "/Applications/Maximal.app/Contents/MacOS/maximal",
+      launch_kind: "dmg-app" as const,
       pid: 12345,
       uptime_ms: 60_000,
       account_type: "individual",
