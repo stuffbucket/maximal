@@ -6,6 +6,7 @@
 ### Features
 
 * **cli:** symlink DMG CLI onto PATH + show launch path in diagnostics ([#129](https://github.com/stuffbucket/maximal/issues/129)) ([1e70756](https://github.com/stuffbucket/maximal/commit/1e7075695e619e88f459bb675cfc74019e1aac8b))
+* **settings:** models section with capabilities + manual refresh ([#130](https://github.com/stuffbucket/maximal/issues/130)) ([1e70756](https://github.com/stuffbucket/maximal/commit/1e7075695e619e88f459bb675cfc74019e1aac8b))
 
 ## [0.4.25](https://github.com/stuffbucket/maximal/compare/v0.4.24...v0.4.25) (2026-06-16)
 
