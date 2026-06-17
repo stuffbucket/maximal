@@ -68,6 +68,12 @@ const SIDECAR_PORT: u16 = 4141;
 /// relay to the splash. MUST match `BOOT_STATUS_MARKER` in src/start.ts.
 const BOOT_STATUS_MARKER: &str = "@@MAXIMAL_STATUS@@";
 
+/// Brand-minimum time the splash stays on screen once the sidecar reaches a
+/// Running state, before it fades. The state-aware dismiss loop in
+/// `create_splash` enforces this, and the first-run Settings auto-open
+/// (`apply_state`) defers to it so Settings doesn't race up over the splash.
+const SPLASH_MIN_DISPLAY: Duration = Duration::from_millis(1600);
+
 /// How often `subscribe_token_usage` GETs `/token-usage` from the
 /// sidecar. Each iteration also probes the `Channel<TokenUsageEvent>`
 /// — when the JS side drops the channel, the next `send` returns Err
@@ -1171,7 +1177,24 @@ fn apply_state(app: &AppHandle, next: SidecarState) {
         // they're doing; the notification click / tray brings it up on demand.
         if prev == SidecarState::Starting && app.state::<SetupPromptShown>().claim()
         {
-            open_settings_window(app, Some("account"));
+            // Defer the auto-open until the splash has had its brand-minimum
+            // display time. open_settings_window calls dismiss_splash
+            // immediately, so opening synchronously here would yank Settings
+            // up over (and kill) the splash on first run — the splash would
+            // effectively never be seen. Sleeping SPLASH_MIN_DISPLAY first
+            // mirrors the min-display the create_splash auto-dismiss loop
+            // enforces on the Running state, so the sequence is:
+            // splash shows → splash fades/closes → Settings appears. The
+            // auto-dismiss loop still dismisses the splash on its own (it
+            // fires on the Running state independently of this open), and the
+            // SetupPromptShown.claim() above already gated this to exactly
+            // once, so the deferred open fires once. Keep this deferred — do
+            // not "simplify" it back into a synchronous call.
+            let handle = app.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(SPLASH_MIN_DISPLAY).await;
+                open_settings_window(&handle, Some("account"));
+            });
         }
     } else if first_up {
         fire_startup_notification(app);
@@ -1265,7 +1288,7 @@ fn create_splash(app: &AppHandle) {
             let handle = app.clone();
             tauri::async_runtime::spawn(async move {
                 let start = std::time::Instant::now();
-                let min_display = Duration::from_millis(1600);
+                let min_display = SPLASH_MIN_DISPLAY;
                 let hard_cap = Duration::from_secs(35);
                 loop {
                     tokio::time::sleep(Duration::from_millis(300)).await;
