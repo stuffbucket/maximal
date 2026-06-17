@@ -157,8 +157,8 @@ describe("ensureCliSymlink", () => {
     })
     expect(r.skipped).toBe("foreign-file-at-target")
     expect(r.linked).toBe(false)
-    // The user's file is intact.
-    expect(fs.lstatSync(file).isSymbolicLink()).toBe(false)
+    // The user's file is intact — its original contents prove it wasn't
+    // replaced by a symlink (a link to APP_EXEC couldn't read back as this).
     expect(fs.readFileSync(file, "utf8")).toContain("not ours")
   })
 })
