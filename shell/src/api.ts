@@ -30,6 +30,7 @@ import type {
   ApiKeysListResponse,
   AuthStatus,
   DiagnosticsResponse,
+  ModelsListResponse,
   UpstreamRejection,
 } from "../../src/lib/settings-types"
 
@@ -236,6 +237,16 @@ type Endpoint =
       path: "/settings/api/apps"
     }
   | {
+      kind: "models-list"
+      method: "GET"
+      path: "/settings/api/models"
+    }
+  | {
+      kind: "models-refresh"
+      method: "POST"
+      path: "/settings/api/models/refresh"
+    }
+  | {
       kind: "claude-code-toggle"
       method: "POST"
       path: "/settings/api/apps/claude-code/toggle"
@@ -270,6 +281,8 @@ interface ResponseFor {
   "apps-list": AppsListResponse
   "claude-code-toggle": AppEntry
   "claude-desktop-toggle": AppEntry
+  "models-list": ModelsListResponse
+  "models-refresh": ModelsListResponse
 }
 
 interface ApiOptions {
