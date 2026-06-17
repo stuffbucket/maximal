@@ -57,6 +57,53 @@ export const DiagnosticsResponse = z.object({
 })
 export type DiagnosticsResponse = z.infer<typeof DiagnosticsResponse>
 
+/** A model's distilled capability flags — the "key capabilities" the
+ *  Settings UI surfaces (not the full upstream model card). Each is a
+ *  plain boolean derived from `capabilities.supports.*`, so the shell
+ *  can render a compact flag row without knowing Copilot's schema. */
+export const ModelCapabilityFlags = z.object({
+  vision: z.boolean(),
+  tool_calls: z.boolean(),
+  streaming: z.boolean(),
+  /** Reasoning / extended-thinking support (adaptive_thinking or a
+   *  declared reasoning_effort ladder). */
+  reasoning: z.boolean(),
+})
+export type ModelCapabilityFlags = z.infer<typeof ModelCapabilityFlags>
+
+/** One row in the Settings → Models list. A flattened, UI-shaped view
+ *  of the upstream `Model` (src/services/copilot/get-models.ts) — only
+ *  the fields the section actually renders, snake_cased per the
+ *  contract convention. */
+export const ModelSummary = z.object({
+  id: z.string(),
+  name: z.string(),
+  vendor: z.string(),
+  family: z.string(),
+  /** Upstream `capabilities.type` — "chat", "embeddings", etc. The UI
+   *  groups by this. */
+  type: z.string(),
+  preview: z.boolean(),
+  /** Max context window in tokens, or null when upstream omits it. */
+  context_window_tokens: z.number().int().nullable(),
+  /** Max output tokens, or null when upstream omits it. */
+  max_output_tokens: z.number().int().nullable(),
+  capabilities: ModelCapabilityFlags,
+})
+export type ModelSummary = z.infer<typeof ModelSummary>
+
+/** Response of GET/POST `/settings/api/models`. Carries the cached
+ *  catalog plus its freshness so the UI can show staleness and offer a
+ *  manual refresh. `loaded_at` is null before the first successful
+ *  fetch. */
+export const ModelsListResponse = z.object({
+  models: z.array(ModelSummary),
+  count: z.number().int(),
+  /** ISO timestamp of when the cache was last populated, or null. */
+  loaded_at: z.string().nullable(),
+})
+export type ModelsListResponse = z.infer<typeof ModelsListResponse>
+
 /** Structured error envelope. Mirrors what Hono routes already emit
  *  via forwardError, so the shell can render either source uniformly. */
 export const ApiErrorBody = z.object({

@@ -35,6 +35,7 @@ import { authRoutes } from "./auth"
 import { clientsRoutes } from "./clients"
 import { eventsRoutes } from "./events"
 import { ghRoutes } from "./gh"
+import { modelsRoutes } from "./models"
 
 /** Captured once at module load. process.uptime() works too, but
  *  this anchors uptime to "when the route module first ran" rather
@@ -99,4 +100,5 @@ settingsApiRoutes.route("/accounts", accountsRoutes)
 settingsApiRoutes.route("/api-keys", apiKeysRoutes)
 settingsApiRoutes.route("/clients", clientsRoutes)
 settingsApiRoutes.route("/apps", appsRoutes)
+settingsApiRoutes.route("/models", modelsRoutes)
 settingsApiRoutes.route("/events", eventsRoutes)

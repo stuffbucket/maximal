@@ -5,12 +5,14 @@ import type { AuthStatus, EventSubscription, UpstreamRejection } from "./api";
 import { apiCall, subscribeAuthEvents } from "./api";
 import { mountApiClients } from "./api-clients-island";
 import { mountApps } from "./apps-island";
+import { mountModels } from "./models-island";
 
 type SectionId =
   | "account"
   | "apps"
   | "endpoint"
   | "api-clients"
+  | "models"
   | "logs"
   | "diagnostics";
 
@@ -19,6 +21,7 @@ const SECTIONS: ReadonlyArray<SectionId> = [
   "apps",
   "endpoint",
   "api-clients",
+  "models",
   "logs",
   "diagnostics",
 ];
@@ -1514,6 +1517,7 @@ window.addEventListener("DOMContentLoaded", () => {
   wireUninstall();
   mountApiClients();
   mountApps();
+  mountModels();
   wireNav();
   syncFromHash();
   void loadDiagnostics();
@@ -1529,6 +1533,9 @@ window.addEventListener("hashchange", () => {
   if (section === "diagnostics") void loadDiagnostics();
   if (section === "apps") {
     window.dispatchEvent(new CustomEvent("maximal:apps-refresh"));
+  }
+  if (section === "models") {
+    window.dispatchEvent(new CustomEvent("maximal:models-refresh"));
   }
   if (section === "account") {
     void loadAuthStatus();
