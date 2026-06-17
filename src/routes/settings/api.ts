@@ -20,6 +20,7 @@
 import { Hono } from "hono"
 
 import { BUILD_VERSION } from "~/lib/build-info"
+import { describeLaunchSource } from "~/lib/cli-path"
 import {
   DiagnosticsResponse,
   type DiagnosticsResponse as DiagnosticsResponseT,
@@ -34,6 +35,7 @@ import { authRoutes } from "./auth"
 import { clientsRoutes } from "./clients"
 import { eventsRoutes } from "./events"
 import { ghRoutes } from "./gh"
+import { modelsRoutes } from "./models"
 
 /** Captured once at module load. process.uptime() works too, but
  *  this anchors uptime to "when the route module first ran" rather
@@ -43,10 +45,13 @@ const PROCESS_START_MS = Date.now()
 
 function buildDiagnostics(): DiagnosticsResponseT {
   const git = getGitVersion()
+  const launch = describeLaunchSource()
   return {
     version: BUILD_VERSION,
     source_revision: git.sha ? shortSha(git.sha) : null,
     source_branch: git.branch ?? null,
+    launch_path: launch.path,
+    launch_kind: launch.kind,
     pid: process.pid,
     uptime_ms: Date.now() - PROCESS_START_MS,
     account_type: state.accountType,
@@ -95,4 +100,5 @@ settingsApiRoutes.route("/accounts", accountsRoutes)
 settingsApiRoutes.route("/api-keys", apiKeysRoutes)
 settingsApiRoutes.route("/clients", clientsRoutes)
 settingsApiRoutes.route("/apps", appsRoutes)
+settingsApiRoutes.route("/models", modelsRoutes)
 settingsApiRoutes.route("/events", eventsRoutes)

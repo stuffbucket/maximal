@@ -1713,8 +1713,8 @@ fn open_settings_window(app: &AppHandle, section: Option<&str>) {
         WebviewUrl::External(url),
     )
     .title("Maximal — Settings")
-    .inner_size(900.0, 640.0)
-    .min_inner_size(600.0, 480.0);
+    .inner_size(900.0, 760.0)
+    .min_inner_size(600.0, 560.0);
 
     match builder.build() {
         Ok(window) => {

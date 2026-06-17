@@ -41,6 +41,9 @@
               >
             </li>
             <li>
+              <a class="nav__item" href="#models" data-nav="models">Models</a>
+            </li>
+            <li>
               <a class="nav__item" href="#logs" data-nav="logs">Logs</a>
             </li>
             <li>
@@ -515,6 +518,19 @@
             <div id="api-clients-root"></div>
           </section>
 
+          <!-- MODELS -->
+          <section class="section" data-section="models" hidden>
+            <header class="section__head">
+              <h2 class="section__title">Models</h2>
+              <p class="section__sub">
+                Models available to apps through Maximal, grouped by kind.
+                The list is fetched from the provider — refresh to pull the
+                current catalog if a model looks missing.
+              </p>
+            </header>
+            <div id="models-root"></div>
+          </section>
+
           <!-- LOGS -->
           <section class="section" data-section="logs" hidden>
             <header class="section__head">
@@ -578,6 +594,10 @@
                 <div class="kv__row">
                   <dt>Git SHA</dt>
                   <dd class="mono" data-field="source_revision">…</dd>
+                </div>
+                <div class="kv__row">
+                  <dt>Launched from</dt>
+                  <dd class="mono" data-field="launch_source">…</dd>
                 </div>
                 <div class="kv__row">
                   <dt>Sidecar PID</dt>

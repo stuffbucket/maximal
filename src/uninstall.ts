@@ -24,6 +24,10 @@ import {
   revertProxyBaseUrl,
 } from "./lib/claude-code-settings"
 import { revertProxyConfig } from "./lib/claude-desktop-config"
+import {
+  FIRST_LAUNCH_PATH_MARKER_END,
+  FIRST_LAUNCH_PATH_MARKER_START,
+} from "./lib/cli-path"
 import { PATHS } from "./lib/paths"
 
 interface RunUninstallOptions {
@@ -149,9 +153,10 @@ interface InstallTarget {
  *  `brew install` + a `.dmg` install both leave a binary on disk).
  *
  *  macOS .dmg install path: `/Applications/maximal.app` (the
- *  bundle) plus `~/.local/bin/maximal` (copy made by the
- *  bundle's first-launch shim). Brew installs at
- *  `/opt/homebrew/bin/maximal`. */
+ *  bundle) plus `~/.local/bin/maximal` (a **symlink** into the bundle
+ *  created by the first-launch shim — see lib/cli-path.ts;
+ *  pre-v0.4.x installs left a copy there instead, which this also
+ *  removes). Brew installs at `/opt/homebrew/bin/maximal`. */
 function installTargets(): Array<InstallTarget> {
   const home = os.homedir()
   if (process.platform === "win32") {
@@ -177,9 +182,23 @@ function installTargets(): Array<InstallTarget> {
 function removeBinary(): void {
   let removed = 0
   for (const target of installTargets()) {
-    if (!fs.existsSync(target.path)) continue
+    // lstat (not existsSync) so a *broken* symlink — e.g.
+    // ~/.local/bin/maximal pointing at a Maximal.app that's already
+    // been dragged to the Trash — is still detected and unlinked
+    // rather than silently skipped as "not found".
+    let stat: fs.Stats
     try {
-      fs.rmSync(target.path, target.recursive ? { recursive: true } : undefined)
+      stat = fs.lstatSync(target.path)
+    } catch {
+      continue
+    }
+    try {
+      fs.rmSync(
+        target.path,
+        target.recursive && !stat.isSymbolicLink() ?
+          { recursive: true }
+        : undefined,
+      )
       consola.success(`  removed ${target.path}`)
       removed++
     } catch (err) {
@@ -218,9 +237,6 @@ function removeClaudeCodeIntegration(): void {
     )
   }
 }
-
-const FIRST_LAUNCH_PATH_MARKER_START = "# >>> maximal PATH >>>"
-const FIRST_LAUNCH_PATH_MARKER_END = "# <<< maximal PATH <<<"
 
 function escapeRegExp(s: string): string {
   return s.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`)

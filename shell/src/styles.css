@@ -1301,6 +1301,72 @@ a:hover {
   gap: var(--space-5);
 }
 
+/* ---- Models section ---- */
+.models {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.models__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.models__freshness {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+/* Tighten the grouped tables a touch — these are dense reference rows,
+   not the airy form rows the default .table spacing assumes. */
+.models__table td,
+.models__table th {
+  padding: var(--space-2) var(--space-3);
+}
+
+.models__name {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  color: var(--text-strong);
+  font-weight: var(--weight-md);
+}
+
+.models__id {
+  display: block;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.models__preview {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--space-1);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-md);
+  color: var(--text-muted);
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-chip);
+}
+
+.models__count {
+  color: var(--text-muted);
+  font-weight: var(--weight-md);
+}
+
+.models__chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.models__muted {
+  color: var(--text-muted);
+}
+
 .connection-list {
   display: flex;
   flex-direction: column;
