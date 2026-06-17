@@ -1,3 +1,5 @@
+import { invoke } from "@tauri-apps/api/core";
+
 import { getShellApiKey, openUrl, safeInvoke } from "./tauri/shell";
 
 
@@ -158,17 +160,88 @@ async function copyToClipboard(text: string, btn: Element | null): Promise<void>
   }
 }
 
+/** Show or clear the inline, non-blocking error inside the Uninstall card.
+ *  Pass null to clear. Mirrors the diagnostics error row. */
+function setUninstallError(message: string | null): void {
+  const row = document.querySelector<HTMLElement>("[data-uninstall-error]");
+  const msg = document.querySelector<HTMLElement>(
+    "[data-uninstall-error-message]",
+  );
+  if (!row || !msg) return;
+  if (message === null) {
+    row.hidden = true;
+    return;
+  }
+  msg.textContent = message;
+  row.hidden = false;
+}
+
+/** Wire the in-app "Uninstall Maximal…" button. Reads the two option
+ *  checkboxes in the card (not the dialog — neither window.confirm nor the
+ *  native dialog supports in-dialog checkboxes), summarizes the choices into a
+ *  confirm prompt, then runs the privileged `uninstall_maximal` command.
+ *  Mirrors the signOut() shape: confirm → setBusy → invoke → settle. */
 function wireUninstall(): void {
   const section = document.querySelector('[data-section="diagnostics"]');
   if (!section) return;
   section
-    .querySelector('[data-action="copy-uninstall-cmd"]')
-    ?.addEventListener("click", (ev) => {
-      void copyToClipboard(
-        "maximal uninstall --revert-claude",
-        ev.currentTarget as Element,
-      );
+    .querySelector('[data-action="uninstall-maximal"]')
+    ?.addEventListener("click", () => {
+      void runInAppUninstall();
     });
+}
+
+async function runInAppUninstall(): Promise<void> {
+  const revertClaude =
+    document.querySelector<HTMLInputElement>("[data-uninstall-revert-claude]")
+      ?.checked ?? false;
+  const purge =
+    document.querySelector<HTMLInputElement>("[data-uninstall-purge]")
+      ?.checked ?? false;
+
+  const clauses = ["removes the maximal CLI"];
+  if (revertClaude) clauses.push("reverts Claude Desktop’s keys");
+  if (purge) clauses.push("deletes stored secrets & config");
+  const tail = clauses.length > 1 ? `, and ${clauses.pop() ?? ""}` : "";
+  const summary = `${clauses.join(", ")}${tail}`;
+  const confirmed = window.confirm(
+    "Uninstall Maximal?\n\n" +
+      `This stops the background agent and ${summary}. ` +
+      "You'll drag the app to the Trash to finish.\n\n" +
+      "This can't be undone.",
+  );
+  if (!confirmed) return;
+
+  setUninstallError(null);
+  setBusy(true, "Uninstalling…");
+  try {
+    await invoke("uninstall_maximal", { revertClaude, purge });
+    showUninstallComplete();
+  } catch (err) {
+    // Tauri rejects with the Err(String) reason from the Rust command, or a
+    // generic message in plain-browser (app:ui, no Tauri host). Surface it
+    // inline rather than leaving the user with no feedback.
+    console.warn("invoke(uninstall_maximal) failed:", err);
+    setUninstallError(
+      `Couldn't finish uninstalling: ${String(err)}. ` +
+        "You can run `maximal uninstall` in the terminal instead.",
+    );
+  } finally {
+    setBusy(false);
+  }
+}
+
+/** Replace the card body with a calm completion state. No new quit command —
+ *  the user quits from the tray and trashes the app from Applications. */
+function showUninstallComplete(): void {
+  const body = document.querySelector<HTMLElement>("[data-uninstall-body]");
+  if (!body) return;
+  const done = document.createElement("p");
+  done.className = "card__hint";
+  done.textContent =
+    "Maximal is uninstalled. Quit Maximal from the tray menu, then drag it " +
+    "from Applications to the Trash to finish.";
+  body.replaceChildren(done);
 }
 
 function wireEndpoint(): void {

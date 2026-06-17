@@ -34,6 +34,11 @@ interface RunUninstallOptions {
   purge: boolean
   revertClaude: boolean
   unattended: boolean
+  /** When true, leave the application bundle (`/Applications/maximal.app`)
+   *  on disk while still removing the `~/.local/bin/maximal` symlink and the
+   *  other PATH binaries. Used by the in-app uninstall: the running `.app`
+   *  can't delete itself, so the user drags it to the Trash afterwards. */
+  keepApp: boolean
 }
 
 export async function runUninstall(opts: RunUninstallOptions): Promise<void> {
@@ -49,7 +54,7 @@ export async function runUninstall(opts: RunUninstallOptions): Promise<void> {
 
   // 3. Remove the binary --------------------------------------------
   consola.info("Step 3/5: Remove the binary")
-  removeBinary()
+  removeBinary({ keepApp: opts.keepApp })
 
   // 4. Revert Claude Code routing + installer PATH block ------------
   // Ownership-guarded: only removes the ANTHROPIC_BASE_URL we wrote.
@@ -146,6 +151,15 @@ interface InstallTarget {
   /** Directory targets (the macOS .app bundle is one) need recursive
    *  removal; single-file binaries don't. */
   recursive?: boolean
+  /** True for the macOS application bundle (`/Applications/maximal.app`).
+   *  The in-app uninstall (`keepApp`) filters these out so the running
+   *  bundle survives — the user trashes it afterwards. */
+  appBundle?: boolean
+}
+
+interface InstallTargetOptions {
+  /** Skip the application bundle (the running `.app`) — see `keepApp`. */
+  keepApp?: boolean
 }
 
 /** Candidate install locations, in order of likelihood. We delete
@@ -156,32 +170,42 @@ interface InstallTarget {
  *  bundle) plus `~/.local/bin/maximal` (a **symlink** into the bundle
  *  created by the first-launch shim — see lib/cli-path.ts;
  *  pre-v0.4.x installs left a copy there instead, which this also
- *  removes). Brew installs at `/opt/homebrew/bin/maximal`. */
-function installTargets(): Array<InstallTarget> {
+ *  removes). Brew installs at `/opt/homebrew/bin/maximal`.
+ *
+ *  With `keepApp`, the `.app` bundle is omitted (the in-app uninstall
+ *  can't delete the bundle it's running from), but the PATH symlink and
+ *  the other binaries are still removed. */
+export function installTargets(
+  opts: InstallTargetOptions = {},
+): Array<InstallTarget> {
   const home = os.homedir()
   if (process.platform === "win32") {
-    const localAppData =
-      process.env.LOCALAPPDATA ?? path.join(home, "AppData", "Local")
     return [
       {
-        path: path.join(localAppData, "Programs", "maximal", "maximal.exe"),
+        path: path.join(
+          process.env.LOCALAPPDATA ?? path.join(home, "AppData", "Local"),
+          "Programs",
+          "maximal",
+          "maximal.exe",
+        ),
       },
       // The PowerShell installer's parent dir gets removed when it
       // becomes empty; we don't recurse into it ourselves to avoid
       // nuking unrelated files.
     ]
   }
-  return [
+  const targets: Array<InstallTarget> = [
     { path: path.join(home, ".local", "bin", "maximal") },
     { path: "/usr/local/bin/maximal" },
     { path: "/opt/homebrew/bin/maximal" },
-    { path: "/Applications/maximal.app", recursive: true },
+    { path: "/Applications/maximal.app", recursive: true, appBundle: true },
   ]
+  return opts.keepApp ? targets.filter((t) => !t.appBundle) : targets
 }
 
-function removeBinary(): void {
+function removeBinary(opts: InstallTargetOptions = {}): void {
   let removed = 0
-  for (const target of installTargets()) {
+  for (const target of installTargets(opts)) {
     // lstat (not existsSync) so a *broken* symlink — e.g.
     // ~/.local/bin/maximal pointing at a Maximal.app that's already
     // been dragged to the Trash — is still detected and unlinked
@@ -398,12 +422,19 @@ export const uninstall = defineCommand({
       description:
         "No prompts. Combined with default flags, leaves secrets and Claude config untouched.",
     },
+    "keep-app": {
+      type: "boolean",
+      default: false,
+      description:
+        "Leave /Applications/maximal.app in place (still removes the ~/.local/bin/maximal symlink and other PATH binaries). Used by the in-app uninstall, which can't delete the running bundle.",
+    },
   },
   run({ args }) {
     return runUninstall({
       purge: args.purge,
       revertClaude: args["revert-claude"],
       unattended: args.unattended,
+      keepApp: args["keep-app"],
     })
   },
 })

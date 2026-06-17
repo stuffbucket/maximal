@@ -720,45 +720,61 @@
               </button>
             </div>
 
-            <div class="card">
+            <div class="card" data-uninstall-card>
               <div class="card__head">
                 <h3 class="card__title">Uninstall</h3>
               </div>
-              <p class="card__hint">
-                Trashing
-                <code class="mono">Maximal.app</code>
-                only removes the app bundle. To fully clean up — the
-                launchd agent, the
-                <code class="mono">~/.local/bin/maximal</code>
-                symlink, and (optionally) Claude Desktop&rsquo;s gateway
-                keys — quit Maximal, then run this in Terminal:
-              </p>
-              <dl class="kv kv--bare">
-                <div class="kv__row">
-                  <dt>Command</dt>
-                  <dd>
-                    <span class="mono" data-field="uninstall-cmd"
-                      >maximal uninstall --revert-claude</span
+              <div data-uninstall-body>
+                <p class="card__hint">
+                  This stops Maximal&rsquo;s background agent and removes the
+                  <code class="mono">maximal</code>
+                  CLI from your PATH. You&rsquo;ll drag Maximal to the Trash to
+                  finish.
+                </p>
+                <div class="uninstall-options">
+                  <label class="checkbox-label">
+                    <input
+                      type="checkbox"
+                      class="checkbox"
+                      data-uninstall-revert-claude
+                      checked
+                    />
+                    Revert Claude Desktop keys
+                  </label>
+                  <label class="checkbox-label">
+                    <input
+                      type="checkbox"
+                      class="checkbox"
+                      data-uninstall-purge
+                    />
+                    Delete stored secrets &amp; config
+                    <span class="uninstall-options__note mono"
+                      >~/.local/share/maximal</span
                     >
-                    <button
-                      type="button"
-                      class="btn btn--ghost btn--sm"
-                      data-action="copy-uninstall-cmd"
-                    >
-                      Copy
-                    </button>
-                  </dd>
+                  </label>
                 </div>
-              </dl>
-              <p class="card__hint">
-                Add
-                <code class="mono">--purge</code>
-                to also delete stored secrets and config under
-                <code class="mono">~/.local/share/maximal/</code>.
-                Omit
-                <code class="mono">--revert-claude</code>
-                to leave Claude Desktop&rsquo;s config alone.
-              </p>
+                <div
+                  class="card__hint uninstall-error"
+                  data-uninstall-error
+                  role="alert"
+                  hidden
+                >
+                  <span data-uninstall-error-message></span>
+                </div>
+                <div class="actions">
+                  <button
+                    type="button"
+                    class="btn btn--destructive"
+                    data-action="uninstall-maximal"
+                  >
+                    Uninstall Maximal…
+                  </button>
+                </div>
+                <p class="card__hint">
+                  Prefer the terminal? Run
+                  <code class="mono">maximal uninstall</code>.
+                </p>
+              </div>
             </div>
           </section>
         </main>

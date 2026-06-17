@@ -18,6 +18,7 @@ permissions = [
   "allow-reveal-config-dir",
   "allow-reveal-logs-dir",
   "allow-restart-sidecar",
+  "allow-uninstall-maximal",
   "allow-get-shell-api-key",
   "allow-subscribe-token-usage",
 ]
@@ -46,6 +47,11 @@ commands.allow = ["reveal_logs_dir"]
 identifier = "allow-restart-sidecar"
 description = "Reboot the proxy sidecar into the on-disk config — the final step of an account switch / sign-in / sign-out, invoked from the Settings webview (a 'remote' loopback origin, so it needs an explicit permission)."
 commands.allow = ["restart_sidecar"]
+
+[[permission]]
+identifier = "allow-uninstall-maximal"
+description = "Run the in-app uninstall (maximal uninstall --unattended --keep-app, plus --revert-claude / --purge per the user's choices) from the Settings webview — a 'remote' loopback origin, so it needs an explicit permission."
+commands.allow = ["uninstall_maximal"]
 
 [[permission]]
 identifier = "allow-get-shell-api-key"

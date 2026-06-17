@@ -525,6 +525,7 @@ pub fn run() {
             reveal_config_dir,
             reveal_logs_dir,
             restart_sidecar,
+            uninstall_maximal,
             get_shell_api_key,
             subscribe_token_usage,
         ])
@@ -2050,6 +2051,55 @@ fn reveal_logs_dir(app: AppHandle) {
 fn restart_sidecar(app: AppHandle) {
     eprintln!("[shell] sidecar restart requested");
     respawn_sidecar(&app);
+}
+
+/// Tauri command — run the in-app uninstall. Spawns the bundled sidecar with
+/// `maximal uninstall --unattended --keep-app` (plus `--revert-claude` /
+/// `--purge` per the booleans the Settings webview passes) and awaits the
+/// result. `--keep-app` is mandatory here: the running `.app` can't delete the
+/// bundle it's executing from, so the CLI removes the launchd agent, the
+/// `~/.local/bin/maximal` PATH symlink, and the other PATH binaries, then the
+/// user drags Maximal to the Trash to finish. Returns `Err(String)` (a
+/// human-readable reason) on a missing binary or non-zero exit so the webview
+/// can surface a non-blocking inline error instead of silently stranding the
+/// user. Mirrors the spawn+`.output()` shape of `reconcile_claude_code_revert`.
+#[tauri::command]
+async fn uninstall_maximal(
+    app: AppHandle,
+    revert_claude: bool,
+    purge: bool,
+) -> Result<(), String> {
+    eprintln!("[shell] in-app uninstall requested (revert_claude={revert_claude}, purge={purge})");
+    let mut args: Vec<String> = vec![
+        "uninstall".to_string(),
+        "--unattended".to_string(),
+        "--keep-app".to_string(),
+    ];
+    if revert_claude {
+        args.push("--revert-claude".to_string());
+    }
+    if purge {
+        args.push("--purge".to_string());
+    }
+    let command = app
+        .shell()
+        .sidecar("maximal")
+        .map_err(|err| format!("could not build uninstall command: {err}"))?
+        .args(args);
+    let output = command
+        .output()
+        .await
+        .map_err(|err| format!("uninstall failed to run: {err}"))?;
+    if output.status.success() {
+        eprintln!("[shell] in-app uninstall completed");
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let reason = extract_error_reason(&stderr)
+            .unwrap_or_else(|| format!("uninstall exited {:?}", output.status.code()));
+        eprintln!("[shell] in-app uninstall failed: {reason}");
+        Err(reason)
+    }
 }
 
 

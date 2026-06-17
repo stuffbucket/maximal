@@ -98,6 +98,32 @@ describe("uninstall — Claude Code settings revert integration", () => {
   })
 })
 
+describe("uninstall — install-target selection (--keep-app)", () => {
+  const home = os.homedir()
+  const symlinkPath = path.join(home, ".local", "bin", "maximal")
+  const appBundlePath = "/Applications/maximal.app"
+
+  it("default removal targets the .app bundle and the PATH symlink", async () => {
+    const { installTargets } = await import("~/uninstall")
+    if (process.platform === "win32") return // .app path is macOS/Linux only
+    const paths = installTargets().map((t) => t.path)
+    expect(paths).toContain(symlinkPath)
+    expect(paths).toContain(appBundlePath)
+  })
+
+  it("--keep-app leaves the .app bundle untouched but still removes the symlink", async () => {
+    const { installTargets } = await import("~/uninstall")
+    if (process.platform === "win32") return
+    const paths = installTargets({ keepApp: true }).map((t) => t.path)
+    // The running bundle survives…
+    expect(paths).not.toContain(appBundlePath)
+    expect(paths.some((p) => p.endsWith(".app"))).toBe(false)
+    // …but the on-PATH CLI symlink (and the other PATH binaries) still go.
+    expect(paths).toContain(symlinkPath)
+    expect(paths).toContain("/opt/homebrew/bin/maximal")
+  })
+})
+
 describe("uninstall — first-launch installer PATH block removal", () => {
   it("strips the # >>> maximal PATH >>> block, preserving other rc content", async () => {
     const { removeFirstLaunchPathBlock } = await import("~/uninstall")
