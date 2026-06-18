@@ -903,6 +903,23 @@ describe("markAuthDegraded", () => {
     })
   })
 
+  test("idempotent: repeated calls with the same error flag the account only once (no stampede)", async () => {
+    state.githubToken = "ghu_x"
+    const err = new CopilotAuthFatalError("revoked", 401, null)
+
+    // A burst of concurrent completion-401s all call markAuthDegraded.
+    await markAuthDegraded(err)
+    await markAuthDegraded(err)
+    await markAuthDegraded(new CopilotAuthFatalError("revoked", 401, null))
+
+    // The disk flag write happens once; the later calls early-return.
+    expect(harness.markNeedsReauthCalls).toHaveLength(1)
+    // But the live token is dropped on every call (idempotent fail-fast).
+    state.githubToken = "ghu_again"
+    await markAuthDegraded(err)
+    expect(state.githubToken).toBeUndefined()
+  })
+
   test("omits remediation_url from status when remediationUrl is null", async () => {
     state.githubToken = "ghu_x"
     state.copilotToken = "tok"

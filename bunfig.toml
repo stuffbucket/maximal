@@ -2,3 +2,6 @@
 # Skill templates under .claude/skills/*/templates/ contain reference *.test.ts
 # snippets that document patterns rather than execute as tests. Exclude them.
 root = "tests"
+# Redirect COPILOT_API_HOME to a temp dir before any module loads, so no test
+# reads/writes the developer's real ~/.local/share/maximal data. See test-setup.ts.
+preload = ["./tests/test-setup.ts"]

@@ -17,6 +17,7 @@ import { CopilotAuthFatalError, HTTPError } from "./error"
 import { currentGitHubHost } from "./github-host"
 import {
   addAccountToDefaultRegistry,
+  clearActiveNeedsReauthInDefaultRegistry,
   inferTokenType,
   makeAccountRecord,
   readDefaultRecord,
@@ -29,6 +30,15 @@ import { setCopilotToken, state } from "./state"
 // auth-controller writes to) so the device-code flow, Copilot mint, and refresh
 // retries are observable after the fact, not just in the dev terminal.
 const log = createTeeLogger("auth")
+
+/** Best-effort: the active credential just worked, so clear any stale
+ *  needs-reauth flag (a prior transient rejection self-healed). Fire-and-forget
+ *  — a flag-clear failure must not add latency to or fail the mint path. */
+const clearActiveNeedsReauth = (): void => {
+  void clearActiveNeedsReauthInDefaultRegistry().catch((err: unknown) => {
+    log.warn("Couldn't clear needs-reauth flag after a successful mint:", err)
+  })
+}
 
 // Dependency-injection shim for tests, mirroring the pattern in
 // `auth-controller.ts`. Process-wide `mock.module` for these symbols
@@ -108,6 +118,7 @@ export const setupCopilotToken = async () => {
   const githubToken = state.githubToken
   if (githubToken && inferTokenType(githubToken) === "gho_") {
     setCopilotToken(githubToken)
+    clearActiveNeedsReauth()
 
     log.debug("Using gho_ token directly as Copilot bearer; no refresh")
     if (state.showToken) {
@@ -143,6 +154,7 @@ export const setupCopilotToken = async () => {
     throw error
   }
   setCopilotToken(token)
+  clearActiveNeedsReauth()
 
   log.debug("GitHub Copilot Token fetched successfully!")
   if (state.showToken) {
@@ -215,6 +227,7 @@ const runCopilotRefreshLoop = async (
       setCopilotToken(token)
       applyCopilotApiUrl(endpoints?.api)
       refreshAtMs = getRefreshDeadlineMs(refresh_in)
+      if (fatalRetries > 0) clearActiveNeedsReauth()
       fatalRetries = 0
       log.debug("Copilot token refreshed")
       if (state.showToken) {

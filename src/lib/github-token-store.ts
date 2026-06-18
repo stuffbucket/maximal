@@ -441,6 +441,18 @@ export async function markActiveNeedsReauthInDefaultRegistry(
   await writeDefaultRegistry(markNeedsReauth(reg, reg.activeKey, error))
 }
 
+/** Clear the active account's needs-reauth flag on disk after a successful
+ *  mint/refresh (the credential works again). Write-if-changed: `clearNeedsReauth`
+ *  returns the same registry when there's nothing flagged, so a healthy session
+ *  doesn't rewrite the file on every refresh. No-op when nothing is active. */
+export async function clearActiveNeedsReauthInDefaultRegistry(): Promise<void> {
+  const reg = await readDefaultRegistry()
+  if (!reg.activeKey) return
+  const cleared = clearNeedsReauth(reg, reg.activeKey)
+  if (cleared === reg) return
+  await writeDefaultRegistry(cleared)
+}
+
 /**
  * Back-compat read: "the active account's token", in the legacy record shape.
  * Boot, the CLI auth reuse-check, setup-status, and debug all just want the

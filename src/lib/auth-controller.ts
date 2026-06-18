@@ -581,6 +581,16 @@ export async function markAuthDegraded(
   state.githubToken = undefined
   state.userName = undefined
 
+  // Idempotency: forwardError calls this on EVERY completion auth-fatal, so a
+  // burst of concurrent 401s (and the boot path re-reporting setupCopilotToken's
+  // already-handled fatal) all land here with the same error. Once we're in the
+  // matching error state the account is already flagged and the UI notified —
+  // skip the redundant accounts.json write + SSE emission. In-memory tokens are
+  // cleared above on every call (idempotent + cheap), so failing fast still holds.
+  if (authState.kind === "error" && authState.message === error.message) {
+    return
+  }
+
   try {
     await markActiveNeedsReauth({
       status: error.status,
