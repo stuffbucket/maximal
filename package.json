@@ -32,7 +32,7 @@
     "app:setup": "cd shell && bun install && cd .. && MAXIMAL_FORCE_SIDECAR=1 bun run app:sidecar",
     "app:sidecar": "bun run scripts/build-sidecar.ts",
     "app:ui": "cd shell && bun run dev",
-    "build": "bun run scripts/generate-css-tokens.ts && bun build src/main.ts --target=bun --outdir dist",
+    "build": "bun build src/main.ts --target=bun --outdir dist",
     "check:deep": "bun run check:fast && bun test && bun run knip",
     "check:fast": "bun run lint:fast && bun run typecheck && bun run lint:all && bun run check:tokens",
     "check:tokens": "bun scripts/check-design-tokens.ts",
@@ -92,7 +92,6 @@
     "knip": "^5.64.1",
     "lint-staged": "^16.2.3",
     "oxlint": "^1.63.0",
-    "playwright": "^1.61.0",
     "prettier-plugin-packagejson": "^2.5.19",
     "simple-git-hooks": "^2.13.1",
     "typescript": "^5.9.3"
