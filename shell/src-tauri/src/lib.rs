@@ -988,6 +988,13 @@ async fn poll_sidecar_status(app: AppHandle) {
     let auth_status_url = format!(
         "http://127.0.0.1:{SIDECAR_PORT}/settings/api/auth/github/status",
     );
+    let update_status_url = format!(
+        "http://127.0.0.1:{SIDECAR_PORT}/settings/api/update-status",
+    );
+    // Once-per-launch update check: flips true on the first definitive response
+    // so we don't re-ping every 5s. A transient failure leaves it false so the
+    // next iteration retries (e.g. the network came back after a cold start).
+    let mut update_checked = false;
     loop {
         tokio::time::sleep(Duration::from_secs(5)).await;
         // Stop polling if we've already concluded the sidecar is gone.
@@ -1002,6 +1009,11 @@ async fn poll_sidecar_status(app: AppHandle) {
             fetch_rejection(&app, &client, &auth_status_url).await
         {
             apply_rejection(&app, rejection);
+        }
+        if !update_checked
+            && check_for_update(&app, &client, &update_status_url).await
+        {
+            update_checked = true;
         }
         // A single failed poll during phase 2 is ignored — the proxy
         // might be momentarily busy. We only flip to Failed via the
@@ -1094,6 +1106,67 @@ fn fire_rejection_notification(app: &AppHandle, message: &str) {
         .show()
     {
         eprintln!("[shell] rejection notification failed: {err}");
+    }
+}
+
+/// One-shot (per launch) update check: GET `/settings/api/update-status` against
+/// the sidecar and, when a newer release is available, fire a single OS
+/// notification pointing at the download page (mxml.sh — install-channel
+/// neutral). Returns true once a definitive 2xx response is seen so the caller
+/// stops re-checking this launch; false on a transient failure (unreachable /
+/// non-2xx / unparseable) so it retries on the next poll tick. The sidecar
+/// caches the GitHub ping for hours and honors `config.checkUpdates`, so this
+/// stays cheap and is a no-op when the user opted out.
+async fn check_for_update(
+    app: &AppHandle,
+    client: &reqwest::Client,
+    url: &str,
+) -> bool {
+    let key = app.state::<ShellApiKey>().value().to_owned();
+    let resp = match client.get(url).header("x-api-key", key).send().await {
+        Ok(r) if r.status().is_success() => r,
+        _ => return false, // transient — retry next tick
+    };
+    let payload: serde_json::Value = match resp.json().await {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    let available = payload
+        .get("update_available")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    if available {
+        let latest = payload
+            .get("latest")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .to_owned();
+        let download_url = payload
+            .get("url")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("https://mxml.sh/maximal/")
+            .to_owned();
+        fire_update_notification(app, &latest, &download_url);
+    }
+    true // definitive response — done for this launch
+}
+
+/// One-shot banner notification when a newer release is available. Same
+/// best-effort caveats as `fire_rejection_notification` (dev `cargo run` may
+/// silently no-op without a signed bundle). The body names the download page;
+/// Settings → Diagnostics carries the clickable link.
+fn fire_update_notification(app: &AppHandle, latest: &str, url: &str) {
+    use tauri_plugin_notification::NotificationExt;
+    let title = if latest.is_empty() {
+        "Maximal update available".to_owned()
+    } else {
+        format!("Maximal {latest} is available")
+    };
+    let body = format!("Update at {url}");
+    if let Err(err) =
+        app.notification().builder().title(title).body(body).show()
+    {
+        eprintln!("[shell] update notification failed: {err}");
     }
 }
 

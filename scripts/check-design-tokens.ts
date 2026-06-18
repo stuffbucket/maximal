@@ -55,7 +55,7 @@ const RULES: Array<Rule> = [
 ]
 
 const FILES: Array<string> = [
-  "shell/src/styles.css",
+  "shell/src/ui/styles/styles.css",
   // Add other CSS files here as the project grows. Skill templates
   // (.claude/skills/**) are intentionally NOT scanned — they're
   // reference snippets, not shipped code.

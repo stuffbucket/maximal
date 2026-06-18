@@ -1,11 +1,15 @@
-import { invoke } from "@tauri-apps/api/core";
+import { getShellApiKey, openUrl, safeInvoke } from "./tauri/shell";
 
-import type { DiagnosticsResponse } from "../../src/lib/settings-types";
-import type { AuthStatus, EventSubscription, UpstreamRejection } from "./api";
-import { apiCall, subscribeAuthEvents } from "./api";
-import { mountApiClients } from "./api-clients-island";
-import { mountApps } from "./apps-island";
-import { mountModels } from "./models-island";
+
+import type {
+  DiagnosticsResponse,
+  UpdateStatusResponse,
+} from "../../src/lib/settings-types";
+import type { AuthStatus, EventSubscription, UpstreamRejection } from "./proxy/client";
+import { apiCall, subscribeAuthEvents } from "./proxy/client";
+import { mountApiClients } from "./ui/islands/api-clients-island";
+import { mountApps } from "./ui/islands/apps-island";
+import { mountModels } from "./ui/islands/models-island";
 
 type SectionId =
   | "account"
@@ -84,19 +88,6 @@ function wireNav(): void {
   }
 }
 
-async function safeInvoke(cmd: string): Promise<boolean> {
-  try {
-    await invoke(cmd);
-    return true;
-  } catch (err) {
-    // Tauri command unavailable (e.g. plain-browser app:ui) or the IPC
-    // rejected. Returns false so callers that DEPEND on the command (e.g. the
-    // restart_sidecar reboot that completes a sign-in) can surface a visible
-    // error instead of silently stranding the user.
-    console.warn(`invoke(${cmd}) failed:`, err);
-    return false;
-  }
-}
 
 let busyCount = 0;
 
@@ -139,7 +130,7 @@ let endpointApiKey: string | null = null;
 async function loadEndpointApiKey(): Promise<void> {
   if (endpointApiKey !== null) return;
   try {
-    endpointApiKey = await invoke<string>("get_shell_api_key");
+    endpointApiKey = await getShellApiKey();
   } catch (err) {
     console.warn("invoke(get_shell_api_key) failed:", err);
     endpointApiKey = null;
@@ -353,6 +344,62 @@ async function loadDiagnostics(): Promise<void> {
   }
   lastDiagnostics = result.data;
   renderDiagnostics(result.data);
+  // Best-effort, independent of the diagnostics fetch: the proxy caches the
+  // GitHub ping for hours, so re-running on each section open is cheap.
+  void loadUpdateStatus();
+}
+
+/**
+ * Render the Diagnostics "Updates" row from GET /settings/api/update-status.
+ * Three shapes: a newer release (offer the mxml.sh link), up to date, or
+ * unknown (check disabled / offline / rate-limited — never claim "up to date"
+ * when we couldn't actually check). The link opens in the system browser via
+ * the opener plugin; mxml.sh routes to the right artifact for the install.
+ */
+function renderUpdateStatus(data: UpdateStatusResponse): void {
+  const dd = document.querySelector<HTMLElement>(
+    '[data-field="update_status"]',
+  );
+  if (!dd) return;
+  dd.replaceChildren();
+
+  if (data.update_available && data.latest) {
+    const label = document.createElement("span");
+    label.className = "mono";
+    label.textContent = `v${data.latest} available · `;
+    const link = document.createElement("a");
+    link.href = data.url;
+    link.textContent = "Get it at mxml.sh";
+    link.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      void openExternalUrl(data.url);
+    });
+    dd.append(label, link);
+    return;
+  }
+
+  const span = document.createElement("span");
+  span.className = "mono";
+  // `latest` known but not newer → genuinely current. `latest === null` → we
+  // couldn't check; say so rather than imply everything's fine.
+  span.textContent = data.latest ? "Up to date" : "—";
+  dd.append(span);
+}
+
+async function loadUpdateStatus(): Promise<void> {
+  const dd = document.querySelector<HTMLElement>(
+    '[data-field="update_status"]',
+  );
+  const result = await apiCall({
+    kind: "update-status",
+    method: "GET",
+    path: "/settings/api/update-status",
+  });
+  if (!result.ok) {
+    if (dd) dd.textContent = "—";
+    return;
+  }
+  renderUpdateStatus(result.data);
 }
 
 async function copyDiagnosticsAsJson(): Promise<void> {
@@ -534,7 +581,7 @@ function setAccountField(name: string, value: string): void {
  * to a typographic placeholder showing the user's first initial,
  * so the layout never collapses.
  */
-function renderAccountAvatar(login: string): void {
+function renderAccountAvatar(login: string, avatarUrl?: string): void {
   const slot = accountSlot("account_avatar");
   if (!slot) return;
   // ADR-0006: `account_login` is required on the authenticated variant
@@ -553,7 +600,11 @@ function renderAccountAvatar(login: string): void {
   }
   const img = document.createElement("img");
   img.className = "signed-in-hero__avatar-img";
-  img.src = `https://github.com/${encodeURIComponent(login)}.png?size=128`;
+  // Prefer the API-provided `avatar_url` (resolves for Enterprise Managed
+  // Users, whose login has no public github.com profile); fall back to the
+  // public `github.com/<login>.png` for any account that predates the field.
+  img.src =
+    avatarUrl ?? `https://github.com/${encodeURIComponent(login)}.png?size=128`;
   img.alt = `${login} GitHub avatar`;
   img.loading = "lazy";
   img.decoding = "async";
@@ -564,6 +615,70 @@ function renderAccountAvatar(login: string): void {
     slot.classList.add("signed-in-hero__avatar--fallback");
   });
   slot.appendChild(img);
+}
+
+/**
+ * Format how long the session has been connected, from the `connected_since`
+ * ISO timestamp. Coarse on purpose — "Connected · 2h", not a ticking clock —
+ * so it reads as a status, not a stopwatch. Returns just "Connected" when the
+ * timestamp is absent (cold-boot / legacy session) or in the future (clock
+ * skew).
+ */
+function formatConnectedFor(connectedSince: string | undefined): string {
+  if (!connectedSince) return "Connected";
+  const sinceMs = Date.parse(connectedSince);
+  if (Number.isNaN(sinceMs)) return "Connected";
+  const elapsed = Date.now() - sinceMs;
+  if (elapsed < 60_000) return "Connected · just now";
+  const minutes = Math.floor(elapsed / 60_000);
+  if (minutes < 60) return `Connected · ${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    const rem = minutes % 60;
+    return rem ? `Connected · ${hours}h ${rem}m` : `Connected · ${hours}h`;
+  }
+  const days = Math.floor(hours / 24);
+  return `Connected · ${days}d`;
+}
+
+// Re-render the connection line on a coarse cadence so the uptime advances
+// without a server round-trip. Only runs while the authenticated card is shown;
+// cleared by renderConnection on any non-authenticated state and on leave.
+let connUptimeTimer: ReturnType<typeof setInterval> | null = null;
+
+function stopConnUptimeTicker(): void {
+  if (connUptimeTimer !== null) {
+    clearInterval(connUptimeTimer);
+    connUptimeTimer = null;
+  }
+}
+
+/**
+ * Paint the reachability indicator + the "Connected · <uptime>" line. The ⇄
+ * stroke turns "degraded" when a recent upstream rejection is riding along
+ * (the rejection banner explains the why); otherwise it reads "connected".
+ */
+function renderConnection(
+  connectedSince: string | undefined,
+  degraded: boolean,
+): void {
+  const indicator = accountSlot("conn_indicator");
+  if (indicator) {
+    indicator.dataset.conn = degraded ? "degraded" : "connected";
+    indicator.setAttribute(
+      "aria-label",
+      degraded ? "Connection degraded" : "Connected to GitHub Copilot",
+    );
+  }
+  setAccountField("conn_status", formatConnectedFor(connectedSince));
+  // Keep the uptime advancing while this card is visible.
+  stopConnUptimeTicker();
+  if (connectedSince) {
+    connUptimeTimer = setInterval(() => {
+      if (readHashSection() !== "account") return;
+      setAccountField("conn_status", formatConnectedFor(connectedSince));
+    }, 60_000);
+  }
 }
 
 /**
@@ -716,9 +831,34 @@ function showKnownAccountRosters(visible: boolean): void {
   });
 }
 
+/**
+ * Authenticated-state variant of the shared rosters: surface ONLY the gh-CLI
+ * accounts below the hero (the inline "Switch to" roster already lists the
+ * persisted accounts, so the remembered block stays hidden to avoid showing the
+ * same accounts twice). loadGhAccounts dedups against the registry, so the
+ * active account never appears here. Collapses the wrapper when gh offers
+ * nothing — a single-account user with no gh logins sees just the hero.
+ */
+function showGhAccountsForAuthenticated(): void {
+  const wrapper = document.querySelector<HTMLElement>("[data-account-rosters]");
+  const remembered = document.querySelector<HTMLElement>(
+    "[data-account-remembered]",
+  );
+  if (!wrapper) return;
+  if (remembered) remembered.hidden = true;
+  wrapper.hidden = false;
+  void loadGhAccounts().then(() => {
+    const gh = document.querySelector<HTMLElement>("[data-gh-reuse]");
+    wrapper.hidden = !gh || gh.hidden;
+  });
+}
+
 function renderAccount(status: AuthStatus): void {
   currentAuthStatus = status;
   const active = accountKeyFor(status.state);
+  // The uptime ticker only belongs to the authenticated card; the
+  // authenticated branch restarts it via renderConnection.
+  stopConnUptimeTicker();
 
   for (const card of document.querySelectorAll<HTMLElement>(
     "[data-state-account]",
@@ -751,14 +891,19 @@ function renderAccount(status: AuthStatus): void {
       // during the device flow — `renderAccountAvatar` treats "unknown"
       // as a placeholder trigger.
       setAccountField("account_login", status.account_login);
-      renderAccountAvatar(status.account_login);
+      renderAccountAvatar(status.account_login, status.account_avatar_url);
+      renderConnection(
+        status.connected_since,
+        status.last_upstream_rejection !== undefined,
+      );
       renderUpstreamRejection(status.last_upstream_rejection);
-      // The authenticated card has its OWN inline "Switch to" roster (the
-      // active account is the hero, excluded from the list); the shared
-      // known-account rosters are for the not-signed-in states only.
-      showKnownAccountRosters(false);
-      // Populate the "Switch to" roster (the other persisted accounts).
+      // Populate the inline "Switch to" roster (other persisted accounts; the
+      // active account is the hero and excluded).
       void loadAccounts("roster");
+      // Also surface gh-CLI accounts to switch to — they "follow" below the
+      // hero. The remembered roster stays hidden (the inline "Switch to"
+      // already covers persisted accounts); only gh-reuse shows here.
+      showGhAccountsForAuthenticated();
       break;
     }
     case "error": {
@@ -916,6 +1061,34 @@ async function loadGhAccounts(): Promise<void> {
     list.appendChild(row);
   }
   wrapper.hidden = false;
+}
+
+/**
+ * Refresh the gh-account list with a confirmation micro-interaction: the button
+ * settles Refresh → Refreshing… → Updated ✓ → Refresh, so the action reads as
+ * done even when the list is unchanged (the silent re-render gives no signal on
+ * its own). Motion contract: label + a 150ms colour crossfade only, no
+ * transform; the global prefers-reduced-motion block zeroes the fade. The
+ * `refreshing` flag guards re-entry while the ~1.6s confirmation is showing.
+ */
+function refreshGhAccounts(button: HTMLButtonElement): void {
+  if (button.dataset.refreshing === "true") return;
+  button.dataset.refreshing = "true";
+  button.disabled = true;
+  button.classList.remove("btn--confirmed");
+  button.textContent = "Refreshing…";
+  // loadGhAccounts is best-effort and resolves even on failure (it just hides
+  // the section), so `finally` is the single settle point either way.
+  void loadGhAccounts().finally(() => {
+    button.disabled = false;
+    button.classList.add("btn--confirmed");
+    button.textContent = "Updated ✓";
+    window.setTimeout(() => {
+      button.classList.remove("btn--confirmed");
+      button.textContent = "Refresh";
+      button.dataset.refreshing = "false";
+    }, 1600);
+  });
 }
 
 /**
@@ -1410,7 +1583,7 @@ async function openExternalUrl(url: string): Promise<void> {
     // Tauri v2 opener plugin is registered (opener:default). Call its
     // `open_url` command directly via invoke so we don't need to add a
     // new JS dep just for this one site.
-    await invoke("plugin:opener|open_url", { url });
+    await openUrl(url);
   } catch (err) {
     // Plain-browser fallback (e.g. `bun run app:ui` mode) and last resort
     // if the plugin command is unavailable for any reason.
@@ -1494,7 +1667,7 @@ function wireAccount(): void {
         void useGhAccount(button);
         break;
       case "gh-refresh":
-        void loadGhAccounts();
+        if (button instanceof HTMLButtonElement) refreshGhAccounts(button);
         break;
       case "account-switch":
         void switchToAccount(button);
@@ -1541,10 +1714,11 @@ window.addEventListener("hashchange", () => {
     void loadAuthStatus();
     openAuthEvents();
   } else {
-    // Leaving the Account section: drop any in-flight polling and the
-    // live event stream (re-opened on return).
+    // Leaving the Account section: drop any in-flight polling, the live
+    // event stream, and the uptime ticker (all re-established on return).
     stopAuthPolling();
     closeAuthEvents();
+    stopConnUptimeTicker();
   }
 });
 
