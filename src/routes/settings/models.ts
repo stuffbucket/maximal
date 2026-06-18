@@ -34,11 +34,13 @@ import { cacheModels } from "~/lib/utils"
 /** Flatten an upstream `Model` into the UI-shaped summary. Optional
  *  upstream fields collapse to null/false so the contract stays total. */
 function toSummary(model: Model): ModelSummaryT {
-  // Copilot's catalog is not uniform: some entries omit `capabilities`,
-  // `limits`, or `supports` entirely. The static type claims they're
-  // required, so a single malformed model used to throw here and blank
-  // the whole list. Treat every nested object as optional and collapse
-  // missing fields to null/false so the contract stays total.
+  // `normalizeModel` (the /models fetch boundary) is the primary defense — it
+  // guarantees `capabilities`/`limits`/`supports` are present for everything
+  // that flows through `getModels`. These container guards are a deliberate
+  // backstop: `state.models` is also writable directly via `setModels`, so an
+  // un-normalized entry can still reach this user-facing route (the
+  // settings-api-models regression test pins exactly that path). Collapsing
+  // missing containers + leaves keeps the response total instead of throwing.
   const capabilities =
     (model as { capabilities?: Partial<Model["capabilities"]> }).capabilities
     ?? {}

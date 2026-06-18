@@ -272,23 +272,23 @@ export const createTeeLogger = (name: string): TeeLogger => {
     )
   }
 
+  // Each level forwards to console then tees the same args to the file sink.
+  // `c[type]` is looked up at call time (not captured) so tests that swap
+  // `consola.warn`/`.error` for a spy after construction still intercept it.
+  const tee =
+    (type: "info" | "warn" | "error" | "debug") =>
+    (...args: Array<unknown>) => {
+      c[type](...args)
+      writeFile(type, args)
+    }
+
   return {
-    info: (...args) => {
-      c.info(...args)
-      writeFile("info", args)
-    },
-    warn: (...args) => {
-      c.warn(...args)
-      writeFile("warn", args)
-    },
-    error: (...args) => {
-      c.error(...args)
-      writeFile("error", args)
-    },
+    info: tee("info"),
+    warn: tee("warn"),
+    error: tee("error"),
     debug: (...args) => {
       if (!state.verbose) return
-      c.debug(...args)
-      writeFile("debug", args)
+      tee("debug")(...args)
     },
   }
 }

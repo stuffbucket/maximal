@@ -464,6 +464,18 @@ export async function markNeedsReauthInDefaultRegistry(
   await writeDefaultRegistry(markNeedsReauth(reg, key, error))
 }
 
+/** Commit a recovered account as active on disk and clear its needs-reauth in
+ *  one read-modify-write — for auto-recovery's live switch, AFTER the mint has
+ *  succeeded. Keeps the registry read/write inside the store layer instead of
+ *  the caller hand-composing the pure helpers. No-op on the active pointer when
+ *  the key is absent (setActive guards it). */
+export async function activateAndClearNeedsReauthInDefaultRegistry(
+  key: AccountKey,
+): Promise<void> {
+  const reg = await readDefaultRegistry()
+  await writeDefaultRegistry(clearNeedsReauth(setActive(reg, key), key))
+}
+
 /**
  * Back-compat read: "the active account's token", in the legacy record shape.
  * Boot, the CLI auth reuse-check, setup-status, and debug all just want the

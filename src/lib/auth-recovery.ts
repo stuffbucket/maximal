@@ -25,12 +25,10 @@ import type { AccountRecord } from "./github-token-store"
 import { markSignedIn } from "./auth-controller"
 import { preflightCopilotError } from "./copilot-preflight"
 import {
-  clearNeedsReauth,
+  activateAndClearNeedsReauthInDefaultRegistry,
   listAccounts,
   markNeedsReauthInDefaultRegistry,
   readDefaultRegistry,
-  setActive,
-  writeDefaultRegistry,
 } from "./github-token-store"
 import { createTeeLogger } from "./logger"
 import { emitAuthChanged } from "./settings-events"
@@ -39,6 +37,15 @@ import { setupCopilotToken, stopCopilotRefreshLoop } from "./token"
 import { cacheModels } from "./utils"
 
 const log = createTeeLogger("auth")
+
+/** Flag a candidate that couldn't be recovered onto (preflight or live-mint
+ *  failure); status is null because neither path yields an HTTP code here. */
+const flagBad = (key: string, message: string) =>
+  markNeedsReauthInDefaultRegistry(key, {
+    status: null,
+    message,
+    at: new Date().toISOString(),
+  })
 
 // Dependency-injection shim for tests, mirroring token.ts / auth-controller.ts:
 // a process-wide mock.module for these leaks across sibling test files, so the
@@ -85,8 +92,7 @@ async function switchActiveAccountLive(
   await setupCopilot({ onAuthFatal: "throw" })
 
   // Mint succeeded → commit: make it active on disk + clear its needs-reauth.
-  const reg = await readDefaultRegistry()
-  await writeDefaultRegistry(clearNeedsReauth(setActive(reg, rec.key), rec.key))
+  await activateAndClearNeedsReauthInDefaultRegistry(rec.key)
 
   // Repopulate the model catalog for the new identity (best-effort; the lazy
   // path refetches on the next request if this transiently fails).
@@ -120,11 +126,7 @@ export async function attemptAutoRecovery(): Promise<boolean> {
   for (const cand of candidates) {
     const preErr = await preflight(cand.token, cand.login)
     if (preErr) {
-      await markNeedsReauthInDefaultRegistry(cand.key, {
-        status: null,
-        message: preErr,
-        at: new Date().toISOString(),
-      })
+      await flagBad(cand.key, preErr)
       continue
     }
     try {
@@ -137,11 +139,7 @@ export async function attemptAutoRecovery(): Promise<boolean> {
         `Auto-recovery: ${cand.login} failed on live switch; trying next.`,
         err,
       )
-      await markNeedsReauthInDefaultRegistry(cand.key, {
-        status: null,
-        message: err instanceof Error ? err.message : String(err),
-        at: new Date().toISOString(),
-      })
+      await flagBad(cand.key, err instanceof Error ? err.message : String(err))
     }
   }
 
