@@ -24,8 +24,10 @@ import { describeLaunchSource } from "~/lib/cli-path"
 import {
   DiagnosticsResponse,
   type DiagnosticsResponse as DiagnosticsResponseT,
+  UpdateStatusResponse,
 } from "~/lib/settings-types"
 import { state } from "~/lib/state"
+import { getUpdateStatus } from "~/lib/update-check"
 import { getGitVersion, shortSha } from "~/lib/version"
 
 import { accountsRoutes } from "./accounts"
@@ -84,6 +86,24 @@ settingsApiRoutes.get("/diagnostics", (c) => {
       {
         error: {
           message: "Diagnostics payload failed schema validation",
+          type: "internal_error",
+          details: parsed.error.issues,
+        },
+      },
+      500,
+    )
+  }
+  return c.json(parsed.data)
+})
+
+settingsApiRoutes.get("/update-status", async (c) => {
+  const payload = await getUpdateStatus()
+  const parsed = UpdateStatusResponse.safeParse(payload)
+  if (!parsed.success) {
+    return c.json(
+      {
+        error: {
+          message: "Update-status payload failed schema validation",
           type: "internal_error",
           details: parsed.error.issues,
         },

@@ -91,7 +91,7 @@ export async function bootstrapUpstream(
   if (state.githubToken) {
     try {
       emitBootStatus("Connecting to GitHub Copilot…")
-      await logUser()
+      const avatarUrl = await logUser()
       await setupCopilotToken()
       await cacheModels()
       consola.info(
@@ -104,7 +104,7 @@ export async function bootstrapUpstream(
       // to the unauthenticated degrade path rather than claim signed-in
       // under an unknown identity.
       if (state.userName) {
-        markSignedIn(state.userName)
+        markSignedIn(state.userName, avatarUrl)
         return
       }
       consola.warn(

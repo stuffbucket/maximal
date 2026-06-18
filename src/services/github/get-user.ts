@@ -20,7 +20,11 @@ export async function getGitHubUser(githubToken?: string) {
   return (await response.json()) as GithubUserResponse
 }
 
-// Trimmed for the sake of simplicity
+// Trimmed for the sake of simplicity. `avatar_url` is the user's profile
+// photo URL straight from the API — used for the Settings avatar. It works for
+// Enterprise Managed Users (EMU, e.g. `name_org`), whose `github.com/<login>.png`
+// has no public profile and 404s.
 interface GithubUserResponse {
   login: string
+  avatar_url?: string
 }

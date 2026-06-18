@@ -258,15 +258,17 @@ describe("getAuthStatus + lastUpstreamRejection", () => {
     const at = state.lastUpstreamRejection?.at as string
 
     const status = getAuthStatus()
-    expect(status).toEqual({
-      state: "authenticated",
-      account_login: "alice",
-      last_upstream_rejection: {
-        message: "quota exhausted",
-        status: 402,
-        at,
-        remediation_url: "https://github.com/settings/copilot",
-      },
+    if (status.state !== "authenticated") {
+      throw new Error(`expected authenticated, got ${status.state}`)
+    }
+    // connected_since is a timestamp stamped by markSignedIn; assert the rest.
+    expect(status.connected_since).toMatch(/^\d{4}-\d{2}-\d{2}T/)
+    expect(status.account_login).toBe("alice")
+    expect(status.last_upstream_rejection).toEqual({
+      message: "quota exhausted",
+      status: 402,
+      at,
+      remediation_url: "https://github.com/settings/copilot",
     })
   })
 
@@ -310,7 +312,10 @@ describe("getAuthStatus + lastUpstreamRejection", () => {
     state.lastUpstreamRejection = undefined
 
     const status = getAuthStatus()
-    expect(status).toEqual({ state: "authenticated", account_login: "alice" })
+    expect(status.state).toBe("authenticated")
+    if (status.state === "authenticated") {
+      expect(status.account_login).toBe("alice")
+    }
     expect(status).not.toHaveProperty("last_upstream_rejection")
   })
 })

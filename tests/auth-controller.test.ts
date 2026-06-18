@@ -191,10 +191,23 @@ describe("getAuthStatus", () => {
     // resolve the login via logUser() first.
     markSignedIn("alice")
     const status = getAuthStatus()
-    expect(status).toEqual({ state: "authenticated", account_login: "alice" })
     expect(status.state).toBe("authenticated")
     if (status.state === "authenticated") {
       expect(status.account_login).toBe("alice")
+      // No avatar was passed → the field is omitted, not an empty string.
+      expect(status.account_avatar_url).toBeUndefined()
+      // markSignedIn stamps the connection time; surfaced as an ISO string.
+      expect(status.connected_since).toMatch(/^\d{4}-\d{2}-\d{2}T/)
+    }
+  })
+
+  test("carries the avatar URL passed to markSignedIn", () => {
+    markSignedIn("alice", "https://avatars.githubusercontent.com/u/42?v=4")
+    const status = getAuthStatus()
+    if (status.state === "authenticated") {
+      expect(status.account_avatar_url).toBe(
+        "https://avatars.githubusercontent.com/u/42?v=4",
+      )
     }
   })
 

@@ -51,10 +51,13 @@ describe("auth.changed emission (ADR-0007 producer side)", () => {
     } finally {
       stop()
     }
-    expect(events.at(-1)).toEqual({
-      state: "authenticated",
-      account_login: "octocat",
-    })
+    const last = events.at(-1)
+    expect(last?.state).toBe("authenticated")
+    if (last?.state === "authenticated") {
+      expect(last.account_login).toBe("octocat")
+      // markSignedIn stamps the connection time (the "Connected · uptime" line).
+      expect(last.connected_since).toMatch(/^\d{4}-\d{2}-\d{2}T/)
+    }
   })
 
   test("markSignedOut publishes the unauthenticated status", () => {
