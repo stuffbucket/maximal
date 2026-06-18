@@ -18,10 +18,10 @@
 
 import consola from "consola"
 
-// Side-effect import: registers the zero-click auto-recovery sweep into
-// auth-controller (registerAutoRecovery) before the server binds, so the first
-// completion auth-fatal can trigger a live account switch.
-import "~/lib/auth-recovery"
+// NOTE: auto-recovery (~/lib/auth-recovery) is intentionally NOT imported/wired
+// here. Auto-switching identity needs prior user consent (same plan ≠ same data
+// governance), so a fatal rejection degrades non-destructively and surfaces the
+// reason instead. See auth-recovery.ts header.
 import {
   markAuthDegraded,
   markSignedIn,

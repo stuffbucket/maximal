@@ -302,10 +302,9 @@ describe("runServer — GitHub token resolution", () => {
     // Settings "Sign in" screen instead of dead-ending as a bare
     // "Not signed in".
     storedRecord = { accessToken: "good-token" }
-    // Phase 2 auto-recovery would otherwise try OTHER accounts in the shared
-    // temp registry (polluted by sibling test files) and make real network
-    // preflight calls. With no other accounts, the fatal cleanly surfaces as
-    // the error state — which is exactly what this test asserts.
+    // Isolate from sibling-test pollution of the shared temp registry so the
+    // fatal cleanly surfaces as the error state (auto-recovery is disabled, so
+    // there's no account-switch path to take regardless).
     await realStoreModule.writeDefaultRegistry(realStoreModule.emptyRegistry())
     const tmpSetup = setupCopilotTokenMock.getMockImplementation()
     ;(

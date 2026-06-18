@@ -548,17 +548,20 @@ export async function signOut(): Promise<void> {
   }
 }
 
-// Zero-click auto-recovery hook. Registered by auth-recovery.ts via
-// registerAutoRecovery (NOT a static import — that would deepen the
-// token<->auth-controller cycle). null until that module loads.
+// Auto-recovery hook. DORMANT by default: nothing registers it in production
+// (auth-recovery.ts is intentionally not wired — auto-switching identity needs
+// prior user consent). The hook + its single call site below are kept so the
+// future consent-gated path can register a sweep without reworking the degrade
+// flow; tests register a stub to verify the wiring.
 let autoRecover: (() => Promise<boolean>) | null = null
 // Single-flight + grace-window state for markAuthDegraded.
 let degradeInFlight: Promise<void> | null = null
 let lastAuthSuccessMs = 0
 const RECOVERY_GRACE_MS = 3000
 
-/** Register the zero-click auto-recovery sweep. Called once by auth-recovery.ts
- *  at module load (bootstrap side-effect-imports it). */
+/** Register an auto-recovery sweep to run before markAuthDegraded gives up.
+ *  NOT called in production today (see the dormancy note above) — reserved for
+ *  a future consent-gated re-enable. */
 export function registerAutoRecovery(fn: () => Promise<boolean>): void {
   autoRecover = fn
 }
@@ -639,9 +642,10 @@ async function runDegrade(error: CopilotAuthFatalError): Promise<void> {
     )
   }
 
-  // Zero-click recovery: try a known-good account LIVE before giving up. The
-  // just-flagged account is now needsReauth, so the sweep skips it. On success
-  // the session is already signed-in onto another account — don't set error.
+  // Optional recovery sweep before giving up. DORMANT in production
+  // (`autoRecover` is null — see registerAutoRecovery): auto-switching identity
+  // needs prior user consent, so today we fall straight through to the error
+  // state and surface the reason. Reserved for a future consent-gated path.
   if (autoRecover) {
     try {
       const recovered = await autoRecover()

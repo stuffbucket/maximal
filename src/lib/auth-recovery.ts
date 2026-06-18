@@ -1,26 +1,31 @@
 /**
- * Zero-click auto-recovery.
+ * Auto-recovery onto a known-good account.
  *
- * When the active account's credential is rejected by Copilot, instead of
- * dropping the user to a sign-in screen we switch LIVE — in-process, with NO
- * sidecar restart — to another previously-successful account. The user keeps
- * working; the dead account is left flagged `needsReauth` for later.
+ * ⚠️ DISABLED — NOT WIRED INTO PRODUCTION. The logic below is retained and
+ * tested, but it is intentionally NOT registered with markAuthDegraded, so the
+ * proxy never auto-switches identity on its own.
  *
- * Wired into `auth-controller.markAuthDegraded` via the `registerAutoRecovery`
- * hook (a registration callback, not a static import back into the degrade
- * path) so the token <-> auth-controller module cycle isn't deepened. This
- * module is loaded for its side effect (the registration at the bottom) by a
- * `import "~/lib/auth-recovery"` in bootstrap.
+ * Why: switching accounts is a governance decision the user must authorize in
+ * advance. Two accounts on the SAME plan can sit under different data
+ * governance (tenancy, residency, retention, audit), so "same plan" is not a
+ * safe proxy for "interchangeable". We cannot move which identity serves
+ * completions without prior consent. The intended UX is therefore: on a fatal
+ * rejection, degrade non-destructively (credential retained + flagged
+ * needsReauth) and surface the reason / a notification that deep-links to the
+ * Settings sign-in page — let the user choose. Re-enabling auto-enactment means
+ * wiring this behind an explicit per-account "authorized for auto-switch"
+ * consent gate, plus the seamless (no-drop) restart, not a live in-process
+ * mutation. Until then this module is reachable only from its tests.
  *
- * Re-entrancy: `switchActiveAccountLive` mints via `setupCopilotToken({
- * onAuthFatal: "throw" })` so a mint failure does NOT call back into
- * markAuthDegraded (which would recurse the sweep). The recovery driver owns
- * the per-candidate degrade decision instead.
+ * Implementation note (for the future consent-gated path): `attemptAutoRecovery`
+ * preflights each non-flagged account and would enact via
+ * `switchActiveAccountLive`, which mints with `setupCopilotToken({ onAuthFatal:
+ * "throw" })` so a mint failure doesn't recurse the sweep.
  */
 
 import type { AccountRecord } from "./github-token-store"
 
-import { markSignedIn, registerAutoRecovery } from "./auth-controller"
+import { markSignedIn } from "./auth-controller"
 import { preflightCopilotError } from "./copilot-preflight"
 import {
   clearNeedsReauth,
@@ -151,4 +156,6 @@ export async function attemptAutoRecovery(): Promise<boolean> {
   return false
 }
 
-registerAutoRecovery(attemptAutoRecovery)
+// NO auto-registration. Enacting a switch requires prior user authorization
+// (see the module header) — to re-enable behind a consent gate, call
+// `registerAutoRecovery(attemptAutoRecovery)` from there, not here.
