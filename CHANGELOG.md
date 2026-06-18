@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.29](https://github.com/stuffbucket/maximal/compare/v0.4.28...v0.4.29) (2026-06-18)
+
+
+### Bug Fixes
+
+* **release:** update stale lockfile and pin bun version in release.yml ([#137](https://github.com/stuffbucket/maximal/issues/137)) ([4bdc182](https://github.com/stuffbucket/maximal/commit/4bdc1824725fb79e6be8fabb72704d79090d0869))
+
 ## [0.4.28](https://github.com/stuffbucket/maximal/compare/v0.4.27...v0.4.28) (2026-06-18)
 
 
