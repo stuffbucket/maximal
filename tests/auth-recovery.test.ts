@@ -47,6 +47,8 @@ const harness = {
     Promise.resolve(null),
   setup: (): Promise<void> => Promise.resolve(),
   setupSawToken: undefined as string | undefined,
+  setupSawOpts: undefined as { onAuthFatal?: "degrade" | "throw" } | undefined,
+  cacheCalls: 0,
 }
 
 beforeEach(async () => {
@@ -58,13 +60,19 @@ beforeEach(async () => {
   harness.preflight = () => Promise.resolve(null)
   harness.setup = () => Promise.resolve()
   harness.setupSawToken = undefined
+  harness.setupSawOpts = undefined
+  harness.cacheCalls = 0
   __setAuthRecoveryDepsForTests({
     preflightCopilotError: (t, l) => harness.preflight(t, l),
-    setupCopilotToken: () => {
+    setupCopilotToken: (opts) => {
       harness.setupSawToken = state.githubToken
+      harness.setupSawOpts = opts
       return harness.setup()
     },
-    cacheModels: () => Promise.resolve(),
+    cacheModels: () => {
+      harness.cacheCalls++
+      return Promise.resolve()
+    },
   })
   await writeDefaultRegistry(emptyRegistry())
 })
@@ -88,6 +96,11 @@ describe("attemptAutoRecovery", () => {
 
     expect(ok).toBe(true)
     expect(harness.setupSawToken).toBe("ghu_bob") // minted with bob's token
+    // The mint MUST be invoked with onAuthFatal:"throw" — recovery owns the
+    // degrade decision; a default ("degrade") would recurse the sweep.
+    expect(harness.setupSawOpts).toEqual({ onAuthFatal: "throw" })
+    // The live switch repopulates the model catalog for the new identity.
+    expect(harness.cacheCalls).toBe(1)
     expect(state.githubToken).toBe("ghu_bob")
     expect(state.userName).toBe("bob")
     expect(getAuthStatus()).toMatchObject({
@@ -135,6 +148,11 @@ describe("attemptAutoRecovery", () => {
     const after = await readDefaultRegistry()
     expect(after.activeKey).toBe(key("carol"))
     expect(after.accounts[key("bob")].needsReauth).toBe(true) // flagged by sweep
+    // The recorded reason is the preflight error (not an empty payload).
+    expect(after.accounts[key("bob")].lastError?.message).toBe(
+      "bob has no Copilot",
+    )
+    expect(after.accounts[key("bob")].lastError?.status).toBeNull()
   })
 
   test("flags a candidate that passes preflight but FAILS the live mint (TOCTOU), tries next", async () => {
@@ -155,6 +173,8 @@ describe("attemptAutoRecovery", () => {
     expect(state.userName).toBe("carol")
     const after = await readDefaultRegistry()
     expect(after.accounts[key("bob")].needsReauth).toBe(true)
+    // The recorded reason is the thrown mint error (not an empty payload).
+    expect(after.accounts[key("bob")].lastError?.message).toBe("mint 401")
     expect(after.activeKey).toBe(key("carol"))
   })
 })
