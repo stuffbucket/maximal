@@ -90,4 +90,28 @@ describe("createTeeLogger — redacted file write", () => {
 
     fs.unlinkSync(file)
   })
+
+  test("scrubs a secret passed as a bare STRING arg (the leak surface)", async () => {
+    // Regression guard: createTeeLogger used to write string args verbatim, so
+    // a token logged/interpolated as a string leaked to disk. It must be masked.
+    const name = "tee-string-secret"
+    const file = logFileFor(name)
+    if (fs.existsSync(file)) fs.unlinkSync(file)
+
+    const log = createTeeLogger(name)
+    log.warn("GitHub token:", "ghu_AbCdEf0123456789AbCdEf0123456789")
+    log.warn(
+      "bearer tid=abc123def456ghi789;exp=1700000000;sku=z:deadbeefsignature",
+    )
+
+    await new Promise((r) => setTimeout(r, 1300))
+
+    const body = fs.readFileSync(file, "utf8")
+    expect(body).not.toContain("ghu_AbCdEf0123456789AbCdEf0123456789")
+    expect(body).not.toContain("tid=abc123def456ghi789")
+    expect(body).toContain("[redacted github token]")
+    expect(body).toContain("[redacted copilot token]")
+
+    fs.unlinkSync(file)
+  })
 })

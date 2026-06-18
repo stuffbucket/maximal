@@ -4,7 +4,7 @@ import path from "node:path"
 import util from "node:util"
 
 import { getLogRetentionDays } from "./config"
-import { redactForLog } from "./log-redact"
+import { redactForLog, scrubSecrets } from "./log-redact"
 import { PATHS } from "./paths"
 import { registerProcessCleanup } from "./process-cleanup"
 import { requestContext } from "./request-context"
@@ -258,8 +258,11 @@ export const createTeeLogger = (name: string): TeeLogger => {
     const dateKey = now.toLocaleDateString("sv-SE")
     const timestamp = now.toLocaleString("sv-SE", { hour12: false })
     const filePath = path.join(LOG_DIR, `${sanitizedName}-${dateKey}.log`)
+    // Object args run through the key-driven redactor; string args (labels,
+    // interpolated messages) through the secret-pattern scrubber so a token
+    // passed/interpolated as a bare string can't land on disk unmasked.
     const redacted = args.map((arg) =>
-      typeof arg === "string" ? arg : redactForLog(arg),
+      typeof arg === "string" ? scrubSecrets(arg) : redactForLog(arg),
     )
     const message = formatArgs(redacted)
     const traceIdStr = traceId ? ` [${traceId}]` : ""

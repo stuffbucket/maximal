@@ -1,4 +1,5 @@
 import clipboard from "clipboardy"
+import consola from "consola"
 import { setTimeout as delay } from "node:timers/promises"
 
 import { PATHS } from "~/lib/paths"
@@ -110,7 +111,8 @@ export const setupCopilotToken = async () => {
 
     log.debug("Using gho_ token directly as Copilot bearer; no refresh")
     if (state.showToken) {
-      log.info("Copilot token:", state.copilotToken)
+      // console-only: a raw bearer must never reach the auth-*.log file sink.
+      consola.info("Copilot token:", state.copilotToken)
     }
 
     stopCopilotRefreshLoop()
@@ -144,7 +146,8 @@ export const setupCopilotToken = async () => {
 
   log.debug("GitHub Copilot Token fetched successfully!")
   if (state.showToken) {
-    log.info("Copilot token:", token)
+    // console-only: a raw bearer must never reach the auth-*.log file sink.
+    consola.info("Copilot token:", token)
   }
 
   stopCopilotRefreshLoop()
@@ -215,7 +218,8 @@ const runCopilotRefreshLoop = async (
       fatalRetries = 0
       log.debug("Copilot token refreshed")
       if (state.showToken) {
-        log.info("Refreshed Copilot token:", token)
+        // console-only: a raw bearer must never reach the auth-*.log file sink.
+        consola.info("Refreshed Copilot token:", token)
       }
     } catch (error) {
       if (error instanceof CopilotAuthFatalError) {
@@ -285,7 +289,9 @@ function presentDeviceCode(
     // enter the code manually.
   }
 
-  log.info(
+  // console-only: the device user_code is a short-lived pairing credential for
+  // the in-progress flow — keep it visible to the user but off the disk sink.
+  consola.info(
     copiedToClipboard ?
       `Code ${response.user_code} copied to clipboard — paste into the form, then approve.`
     : `Open the form, then enter code: ${response.user_code}`,
@@ -314,7 +320,8 @@ export async function setupGitHubToken(
     if (existing && !options?.force) {
       state.githubToken = existing.accessToken
       if (state.showToken) {
-        log.info("GitHub token:", existing.accessToken)
+        // console-only: a raw token must never reach the auth-*.log file sink.
+        consola.info("GitHub token:", existing.accessToken)
       }
       await logUser()
       return
@@ -330,7 +337,8 @@ export async function setupGitHubToken(
     state.githubToken = token
 
     if (state.showToken) {
-      log.info("GitHub token:", token)
+      // console-only: a raw token must never reach the auth-*.log file sink.
+      consola.info("GitHub token:", token)
     }
 
     // Resolve the login best-effort so the account is keyed by its real
