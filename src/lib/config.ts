@@ -48,6 +48,12 @@ export interface AppConfig {
    * reason; the user picks. See auth-recovery.ts.
    */
   autoRecoverAccount?: boolean
+  /**
+   * Whether to check for a newer maximal release and surface it (Settings line
+   * + a once-per-day OS notification). Defaults ON; set false to opt out of the
+   * GitHub releases ping entirely. See update-check.ts.
+   */
+  checkUpdates?: boolean
   apps?: AppsConfig
 }
 
@@ -451,4 +457,11 @@ export function getLogRetentionDays(): number {
 export function isAutoRecoverAccountEnabled(): boolean {
   const config = getConfig()
   return config.autoRecoverAccount ?? false
+}
+
+/** Whether to ping GitHub for a newer release and surface it. Defaults ON —
+ *  see AppConfig.checkUpdates. */
+export function isUpdateCheckEnabled(): boolean {
+  const config = getConfig()
+  return config.checkUpdates ?? true
 }

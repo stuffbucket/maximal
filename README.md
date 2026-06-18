@@ -2,11 +2,9 @@
 
 Local proxy that lets Anthropic-API and OpenAI-API clients (Claude Code,
 Claude Desktop in Cowork mode, Codex, etc.) talk to GitHub Copilot's
-backend, including GitHub Enterprise deployments. Originally forked from
-[caozhiyuan/copilot-api](https://github.com/caozhiyuan/copilot-api),
-extended with a server-side web-tools agent loop, model-id rewriting
-for Claude Desktop's picker, and an Ollama Cloud–backed search/fetch
-executor.
+backend, including GitHub Enterprise deployments. It adds a server-side
+web-tools agent loop, model-id rewriting for Claude Desktop's picker,
+and an Ollama Cloud–backed search/fetch executor.
 
 ## What this gives you
 
@@ -36,10 +34,8 @@ scripts/                   Operator helpers (e.g. install-cowork-egress.sh).
 contrib/                   Read-only reference (opencode-copilot auth pattern,
                            Ollama anthropic spike).
 LICENSE                    MIT.
-THIRD-PARTY-LICENSE        Upstream attribution (caozhiyuan/copilot-api,
-                           ericc-ch/copilot-api lineage) and dependency
-                           licenses.
-NOTICE.md                  Fork lineage + how to pull from upstream.
+THIRD-PARTY-LICENSE        Bundled-dependency license pointer (npm SBOM)
+                           and site-asset attributions (shaders, sprites).
 ```
 
 ## Run

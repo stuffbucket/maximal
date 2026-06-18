@@ -401,7 +401,7 @@ export async function setupGitHubToken(
   }
 }
 
-export async function logUser() {
+export async function logUser(): Promise<string | undefined> {
   const user = await getGitHubUser()
   state.userName = user.login
   log.info(`Logged in as ${user.login}`)
@@ -412,6 +412,8 @@ export async function logUser() {
   // logUser previously also fetched /copilot_internal/user just to re-apply a
   // second, weaker copy of endpoints.api — a redundant round-trip whose value
   // was immediately overwritten by the mint. logUser now owns identity only.
+  // Hand the avatar URL back so the cold-boot path can pass it to markSignedIn.
+  return user.avatar_url
 }
 
 /**

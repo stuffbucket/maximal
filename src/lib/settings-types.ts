@@ -57,6 +57,18 @@ export const DiagnosticsResponse = z.object({
 })
 export type DiagnosticsResponse = z.infer<typeof DiagnosticsResponse>
 
+/** Update-availability status — GET /settings/api/update-status. Best-effort:
+ *  `latest` is null and `update_available` false whenever the check is disabled
+ *  or the GitHub ping failed. `url` is the install-channel-neutral download
+ *  page (mxml.sh), not a raw release asset. See update-check.ts. */
+export const UpdateStatusResponse = z.object({
+  current: z.string(),
+  latest: z.string().nullable(),
+  update_available: z.boolean(),
+  url: z.string(),
+})
+export type UpdateStatusResponse = z.infer<typeof UpdateStatusResponse>
+
 /** A model's distilled capability flags — the "key capabilities" the
  *  Settings UI surfaces (not the full upstream model card). Each is a
  *  plain boolean derived from `capabilities.supports.*`, so the shell
@@ -174,6 +186,16 @@ export const AuthStatus = z.discriminatedUnion("state", [
   z.object({
     state: z.literal("authenticated"),
     account_login: z.string(),
+    /** Profile photo URL from the GitHub `/user` API (`avatar_url`). Optional:
+     *  a cold-boot session that couldn't re-fetch the user, or a pre-field
+     *  account, omits it and the UI falls back to a typographic initial. Using
+     *  the API URL (not `github.com/<login>.png`) is what makes EMU avatars
+     *  resolve. */
+    account_avatar_url: z.string().optional(),
+    /** ISO timestamp of when this session became authenticated — the anchor
+     *  for the "Connected · <uptime>" line. Optional for the same cold-boot /
+     *  legacy reasons; the UI just shows "Connected" without a duration. */
+    connected_since: z.string().optional(),
     last_upstream_rejection: UpstreamRejection.optional(),
   }),
   z.object({

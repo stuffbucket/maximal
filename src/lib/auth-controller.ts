@@ -114,7 +114,11 @@ function resetAuthControllerDeps(): void {
  * abandoned attempt never drops the user from their current account.
  * `null` when the flow started from a signed-out / error / first-run state.
  */
-type ResumeTarget = { login: string } | null
+type ResumeTarget = {
+  login: string
+  avatarUrl?: string
+  connectedSinceMs?: number
+} | null
 
 interface ActiveFlow {
   deviceCode: DeviceCodeResponse
@@ -131,7 +135,13 @@ interface ActiveFlow {
  */
 function captureResumeTarget(existing: ActiveFlow | null): ResumeTarget {
   if (existing) return existing.resume
-  return authState.kind === "signed-in" ? { login: authState.login } : null
+  return authState.kind === "signed-in" ?
+      {
+        login: authState.login,
+        avatarUrl: authState.avatarUrl,
+        connectedSinceMs: authState.connectedSinceMs,
+      }
+    : null
 }
 
 /**
@@ -147,7 +157,14 @@ type AuthState =
   | { kind: "signed-out" }
   | { kind: "device-issued"; flow: ActiveFlow }
   | { kind: "polling"; flow: ActiveFlow }
-  | { kind: "signed-in"; login: string }
+  | {
+      kind: "signed-in"
+      login: string
+      /** GitHub profile photo URL (`avatar_url`) when known. */
+      avatarUrl?: string
+      /** Epoch ms when this session became authenticated, for the uptime line. */
+      connectedSinceMs?: number
+    }
   | ({ kind: "error" } & ParsedCopilotError)
 
 let authState: AuthState = { kind: "signed-out" }
@@ -180,6 +197,22 @@ function isFlowExpired(flow: ActiveFlow, nowMs: number = Date.now()): boolean {
   return flow.expiresAt <= nowMs
 }
 
+/** Build the optional `account_avatar_url` / `connected_since` fields shared by
+ *  the two authenticated emit sites (live session + expired-flow resume). Each
+ *  is omitted when unknown so the contract stays clean rather than carrying
+ *  empty strings. */
+function authenticatedExtras(source: {
+  avatarUrl?: string
+  connectedSinceMs?: number
+}): { account_avatar_url?: string; connected_since?: string } {
+  return {
+    ...(source.avatarUrl ? { account_avatar_url: source.avatarUrl } : {}),
+    ...(source.connectedSinceMs ?
+      { connected_since: new Date(source.connectedSinceMs).toISOString() }
+    : {}),
+  }
+}
+
 export function getAuthStatus(): AuthStatus {
   // The upstream-rejection sidecar rides along on the two states where a
   // completion attempt is meaningful: `unauthenticated` (banner persists
@@ -210,6 +243,7 @@ export function getAuthStatus(): AuthStatus {
       return {
         state: "authenticated",
         account_login: authState.login,
+        ...authenticatedExtras(authState),
         ...rejectionPayload,
       }
     }
@@ -236,6 +270,7 @@ export function getAuthStatus(): AuthStatus {
           return {
             state: "authenticated",
             account_login: flow.resume.login,
+            ...authenticatedExtras(flow.resume),
             ...rejectionPayload,
           }
         }
@@ -345,7 +380,12 @@ export function cancelDeviceFlow(): AuthStatus {
   flow.abort.abort()
   setAuthState(
     flow.resume ?
-      { kind: "signed-in", login: flow.resume.login }
+      {
+        kind: "signed-in",
+        login: flow.resume.login,
+        avatarUrl: flow.resume.avatarUrl,
+        connectedSinceMs: flow.resume.connectedSinceMs,
+      }
     : { kind: "signed-out" },
   )
   return getAuthStatus()
@@ -369,7 +409,12 @@ function flowFailureState(
   fallbackError: ParsedCopilotError,
 ): AuthState {
   return flow.resume ?
-      { kind: "signed-in", login: flow.resume.login }
+      {
+        kind: "signed-in",
+        login: flow.resume.login,
+        avatarUrl: flow.resume.avatarUrl,
+        connectedSinceMs: flow.resume.connectedSinceMs,
+      }
     : { kind: "error", ...fallbackError }
 }
 
@@ -400,9 +445,11 @@ async function runPoller(flow: ActiveFlow): Promise<void> {
     // (a `verifying` state with bounded retries) is the natural extension if
     // this turns out to fire too often in practice; see ADR-0006 carve-out.
     let login: string
+    let avatarUrl: string | undefined
     try {
       const user = await getGitHubUser(token)
       login = user.login
+      avatarUrl = user.avatar_url
       state.userName = user.login
     } catch (err) {
       if (flow.abort.signal.aborted) return
@@ -462,7 +509,12 @@ async function runPoller(flow: ActiveFlow): Promise<void> {
     // signOut() may have fired and wiped the token. Don't latch signed-in over
     // a just-cleared session.
     if (flow.abort.signal.aborted) return
-    setAuthState({ kind: "signed-in", login })
+    setAuthState({
+      kind: "signed-in",
+      login,
+      avatarUrl,
+      connectedSinceMs: Date.now(),
+    })
   } catch (err) {
     if (flow.abort.signal.aborted) return
     const message = err instanceof Error ? err.message : String(err)
@@ -482,9 +534,14 @@ async function runPoller(flow: ActiveFlow): Promise<void> {
  * logUser()) — there is no "unknown" sentinel; an unknown identity is
  * an error state, not an authenticated one.
  */
-export function markSignedIn(login: string): void {
+export function markSignedIn(login: string, avatarUrl?: string): void {
   noteAuthSuccess()
-  setAuthState({ kind: "signed-in", login })
+  setAuthState({
+    kind: "signed-in",
+    login,
+    avatarUrl,
+    connectedSinceMs: Date.now(),
+  })
 }
 
 /**
