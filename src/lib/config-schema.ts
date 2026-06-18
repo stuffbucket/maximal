@@ -107,6 +107,7 @@ export const AppConfigSchema = z
     useResponsesApiWebSearch: z.boolean().optional(),
     claudeTokenMultiplier: z.number().optional(),
     logRetentionDays: z.number().int().min(0).max(3650).optional(),
+    autoRecoverAccount: z.boolean().optional(),
     apps: z
       .object({
         claudeCode: z

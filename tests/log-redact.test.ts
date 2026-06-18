@@ -1,6 +1,35 @@
 import { describe, expect, test } from "bun:test"
 
-import { redactForLog } from "~/lib/log-redact"
+import { redactForLog, scrubSecrets } from "~/lib/log-redact"
+
+describe("scrubSecrets", () => {
+  test("masks GitHub token shapes (gho_/ghp_/ghu_/ghr_/ghs_)", () => {
+    for (const prefix of ["gho_", "ghp_", "ghu_", "ghr_", "ghs_"]) {
+      const tok = `${prefix}AbCdEf0123456789AbCdEf0123456789`
+      const out = scrubSecrets(`token is ${tok} ok`)
+      expect(out).not.toContain(tok)
+      expect(out).toContain("[redacted github token]")
+    }
+  })
+
+  test("masks the Copilot bearer (tid=…) shape", () => {
+    const tok = "tid=abc123def456ghi789;ol=org;exp=1700000000;sku=x:deadbeefsig"
+    const out = scrubSecrets(`bearer ${tok}`)
+    expect(out).not.toContain("tid=abc123def456ghi789")
+    expect(out).toContain("[redacted copilot token]")
+  })
+
+  test("leaves ordinary auth log labels untouched", () => {
+    for (const label of [
+      "Logged in as octocat",
+      "Copilot rejected the GitHub token; degrading",
+      "Refreshing Copilot token",
+      "GitHub token:",
+    ]) {
+      expect(scrubSecrets(label)).toBe(label)
+    }
+  })
+})
 
 describe("redactForLog", () => {
   test("keeps structural keys, redacts content strings", () => {

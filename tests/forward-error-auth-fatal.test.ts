@@ -1,19 +1,18 @@
 /**
- * forwardError's CopilotAuthFatalError branch — clears the token,
- * stashes the rejection reason, and emits an auth_fatal envelope.
+ * forwardError's CopilotAuthFatalError branch — degrades NON-DESTRUCTIVELY:
+ * drops the live in-memory token, stashes the rejection reason, emits an
+ * auth_fatal envelope, and flags the active account needs-reauth — but RETAINS
+ * the on-disk credential (it does NOT unlink the token file or remove the
+ * account). The old behaviour ran signOut()+unlink here; these tests guard that
+ * a transient completion 401 can never delete the saved credential.
  *
- * Lives in its own file because exercising forwardError on a
- * CopilotAuthFatalError eventually reaches signOut() →
- * fs.unlink(PATHS.GITHUB_TOKEN_PATH), which on a dev machine with a
- * signed-in maximal install would silently delete the user's real
- * token file. We stub node:fs/promises via mock.module at module
- * load to neutralize that side effect. The dynamic-import dance is
- * required because Bun's mock.module hoisting happens AFTER static
- * imports, and once paths.ts has resolved unlink to the real fn,
- * later module-level mocks don't rewrite the captured reference.
+ * Registry/token paths are isolated to a temp COPILOT_API_HOME by the global
+ * test preload (tests/test-setup.ts), so the real registry is never touched. We
+ * still stub fs.unlink so an assertion can prove it is never called on the
+ * token path.
  */
 
-import { afterAll, describe, expect, mock, test } from "bun:test"
+import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test"
 
 // Capture the real module BEFORE mocking so afterAll can restore it
 // (mock.module is process-wide; without the restore, a later test
@@ -42,6 +41,25 @@ const errorMod = await import("~/lib/error")
 const { CopilotAuthFatalError, forwardError, HTTPError } = errorMod
 const stateMod = await import("~/lib/state")
 const { state } = stateMod
+const { PATHS } = await import("~/lib/paths")
+const {
+  accountKey,
+  addAccountToDefaultRegistry,
+  emptyRegistry,
+  makeAccountRecord,
+  readDefaultRegistry,
+  writeDefaultRegistry,
+} = await import("~/lib/github-token-store")
+const { __resetAuthControllerForTests } = await import("~/lib/auth-controller")
+
+beforeEach(async () => {
+  // Reset the auth state machine (so markAuthDegraded's idempotency guard
+  // doesn't dedupe across cases) and the temp registry between tests.
+  __resetAuthControllerForTests()
+  await writeDefaultRegistry(emptyRegistry())
+  unlinkCalls.length = 0
+  state.githubToken = undefined
+})
 
 interface CapturedResponse {
   body: unknown
@@ -122,6 +140,37 @@ describe("forwardError", () => {
         type: "auth_fatal",
       },
     })
+  })
+
+  test("CopilotAuthFatalError RETAINS the account — flags needs-reauth, never unlinks or removes", async () => {
+    // Seed an active account in the (temp-isolated) registry.
+    await addAccountToDefaultRegistry(
+      makeAccountRecord({
+        login: "alice",
+        host: "github.com",
+        token: "ghu_seed_credential",
+        addedVia: "device-code",
+      }),
+    )
+    state.githubToken = "ghu_seed_credential"
+    const { ctx } = makeContextStub()
+
+    await forwardError(
+      ctx as unknown as Parameters<typeof forwardError>[0],
+      new CopilotAuthFatalError("revoked", 401, null),
+    )
+
+    const reg = await readDefaultRegistry()
+    const key = accountKey("alice", "github.com")
+    // The credential is RETAINED — the bug was deleting it here.
+    expect(key in reg.accounts).toBe(true)
+    expect(reg.accounts[key].token).toBe("ghu_seed_credential")
+    expect(reg.accounts[key].needsReauth).toBe(true)
+    expect(reg.accounts[key].lastError?.status).toBe(401)
+    // The token file is never unlinked on an upstream rejection.
+    expect(unlinkCalls).not.toContain(PATHS.GITHUB_TOKEN_PATH)
+    // Live in-memory token is still dropped (fail fast).
+    expect(state.githubToken).toBeUndefined()
   })
 
   test("HTTPError: leaves githubToken untouched and forwards upstream status", async () => {

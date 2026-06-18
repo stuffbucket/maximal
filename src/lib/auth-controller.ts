@@ -35,8 +35,6 @@
  * idempotent — same code returned, no second poller spawned.
  */
 
-import consola from "consola"
-
 import type { DeviceCodeResponse } from "~/services/github/get-device-code"
 
 import { getDeviceCode } from "~/services/github/get-device-code"
@@ -50,14 +48,21 @@ import { CopilotAuthFatalError } from "./error"
 import { currentGitHubHost } from "./github-host"
 import {
   addAccountToDefaultRegistry as defaultAddAccount,
+  deactivateActiveInDefaultRegistry as defaultDeactivateActive,
   makeAccountRecord,
-  removeActiveFromDefaultRegistry as defaultRemoveActiveAccount,
+  markActiveNeedsReauthInDefaultRegistry as defaultMarkActiveNeedsReauth,
 } from "./github-token-store"
+import { createTeeLogger } from "./logger"
 import { PATHS } from "./paths"
 import { registerProcessCleanup } from "./process-cleanup"
 import { emitAuthChanged, registerAuthStatusProjector } from "./settings-events"
 import { clearLastUpstreamRejection, state } from "./state"
-import { setupCopilotToken } from "./token"
+import { setupCopilotToken, stopCopilotRefreshLoop } from "./token"
+
+// Auth events go to the console AND a dated `auth-*.log` so they're observable
+// after the fact (sign-in, degrade, refresh failures, sign-out) instead of
+// vanishing into the dev terminal's stderr.
+const log = createTeeLogger("auth")
 
 // Dependency-injection shim for tests. Process-wide `mock.module` for
 // these modules leaks into sibling test files (poll-access-token.test.ts,
@@ -66,13 +71,16 @@ import { setupCopilotToken } from "./token"
 // module registry untouched. Production callers don't see this layer.
 let pollAccessToken: typeof defaultPollAccessToken = defaultPollAccessToken
 let addAccount: typeof defaultAddAccount = defaultAddAccount
-let removeActiveAccount: typeof defaultRemoveActiveAccount =
-  defaultRemoveActiveAccount
+let deactivateActiveAccount: typeof defaultDeactivateActive =
+  defaultDeactivateActive
+let markActiveNeedsReauth: typeof defaultMarkActiveNeedsReauth =
+  defaultMarkActiveNeedsReauth
 
 export interface AuthControllerTestDeps {
   pollAccessToken?: typeof defaultPollAccessToken
   addAccount?: typeof defaultAddAccount
-  removeActiveAccount?: typeof defaultRemoveActiveAccount
+  deactivateActiveAccount?: typeof defaultDeactivateActive
+  markActiveNeedsReauth?: typeof defaultMarkActiveNeedsReauth
 }
 
 export function __setAuthControllerDepsForTests(
@@ -84,15 +92,19 @@ export function __setAuthControllerDepsForTests(
   if (overrides.addAccount !== undefined) {
     addAccount = overrides.addAccount
   }
-  if (overrides.removeActiveAccount !== undefined) {
-    removeActiveAccount = overrides.removeActiveAccount
+  if (overrides.deactivateActiveAccount !== undefined) {
+    deactivateActiveAccount = overrides.deactivateActiveAccount
+  }
+  if (overrides.markActiveNeedsReauth !== undefined) {
+    markActiveNeedsReauth = overrides.markActiveNeedsReauth
   }
 }
 
 function resetAuthControllerDeps(): void {
   pollAccessToken = defaultPollAccessToken
   addAccount = defaultAddAccount
-  removeActiveAccount = defaultRemoveActiveAccount
+  deactivateActiveAccount = defaultDeactivateActive
+  markActiveNeedsReauth = defaultMarkActiveNeedsReauth
 }
 
 /**
@@ -302,7 +314,7 @@ export async function startDeviceFlow(): Promise<AuthStatus> {
   // Fire-and-forget poller. Errors are captured into authState so the
   // next getAuthStatus call surfaces them; never rethrown.
   runPoller(flow).catch((err: unknown) => {
-    consola.error("Auth-controller poller crashed unexpectedly:", err)
+    log.error("Auth-controller poller crashed unexpectedly:", err)
   })
 
   // Emit once the flow is fully installed (code + poller live), so the
@@ -395,7 +407,7 @@ async function runPoller(flow: ActiveFlow): Promise<void> {
     } catch (err) {
       if (flow.abort.signal.aborted) return
       const message = err instanceof Error ? err.message : String(err)
-      consola.warn(
+      log.warn(
         "Auth-controller: failed to verify GitHub account after sign-in:",
         message,
       )
@@ -440,7 +452,7 @@ async function runPoller(flow: ActiveFlow): Promise<void> {
         // token and bury the reason the user needs to act on.
         return
       }
-      consola.warn(
+      log.warn(
         "Auth-controller: failed to mint Copilot token after sign-in:",
         err,
       )
@@ -455,7 +467,7 @@ async function runPoller(flow: ActiveFlow): Promise<void> {
     if (flow.abort.signal.aborted) return
     const message = err instanceof Error ? err.message : String(err)
     setAuthState(flowFailureState(flow, { message, remediationUrl: null }))
-    consola.warn("Auth-controller: device-code poll terminated:", message)
+    log.warn("Auth-controller: device-code poll terminated:", message)
   }
 }
 /* eslint-enable @typescript-eslint/no-unnecessary-condition */
@@ -471,6 +483,7 @@ async function runPoller(flow: ActiveFlow): Promise<void> {
  * an error state, not an authenticated one.
  */
 export function markSignedIn(login: string): void {
+  noteAuthSuccess()
   setAuthState({ kind: "signed-in", login })
 }
 
@@ -505,17 +518,21 @@ export async function signOut(): Promise<void> {
   // state (no stale rejection riding along on the unauthenticated event).
   setAuthState({ kind: "signed-out" })
 
-  // Drop the active account from the registry (any other persisted accounts
-  // remain available for quick-switch). Behaviour-neutral for the single
-  // account case: the registry empties → next boot is unauthenticated.
+  // Deactivate the active account but RETAIN its record (gh-CLI rule: a sign-
+  // out should not erase the identity). Dropping the active pointer makes the
+  // next boot unauthenticated, while the retained record lets the signed-out UI
+  // name the account and offer reconnect. True deletion is the explicit
+  // "forget account" action (/accounts/remove), never an implicit side effect.
   try {
-    await removeActiveAccount()
+    await deactivateActiveAccount()
   } catch (err) {
-    consola.warn("Auth-controller: failed to update account registry:", err)
+    log.warn("Auth-controller: failed to update account registry:", err)
   }
 
-  // Also delete the legacy single-record file so a slice-2 rollback doesn't
-  // resurrect the signed-out account. Tolerant of "already gone".
+  // Delete the legacy single-record file. readDefaultRecord falls back to it
+  // when the registry has no ACTIVE account (which is exactly our just-
+  // deactivated state), so leaving a token here would resurrect the session on
+  // the next boot. Tolerant of "already gone".
   try {
     const fs = await import("node:fs/promises")
     await fs.unlink(PATHS.GITHUB_TOKEN_PATH)
@@ -526,23 +543,119 @@ export async function signOut(): Promise<void> {
       && "code" in err
       && (err as { code: string }).code !== "ENOENT"
     ) {
-      consola.warn("Auth-controller: failed to delete token file:", err)
+      log.warn("Auth-controller: failed to delete token file:", err)
     }
   }
 }
 
+// Auto-recovery hook. DORMANT by default: bootstrap registers a sweep only when
+// config.autoRecoverAccount is enabled (auto-switching identity needs prior user
+// consent). null otherwise → markAuthDegraded falls through to the error state.
+let autoRecover: (() => Promise<boolean>) | null = null
+// Single-flight + grace-window state for markAuthDegraded.
+let degradeInFlight: Promise<void> | null = null
+let lastAuthSuccessMs = 0
+const RECOVERY_GRACE_MS = 3000
+
+/** Register an auto-recovery sweep to run before markAuthDegraded gives up.
+ *  Called by bootstrap only when config.autoRecoverAccount is enabled. */
+export function registerAutoRecovery(fn: () => Promise<boolean>): void {
+  autoRecover = fn
+}
+
+/** Record that a credential just worked (sign-in / live switch / boot mint), so
+ *  a stale 401 from a request that was in flight under the OLD token doesn't
+ *  tear the fresh session down (see the grace window in markAuthDegraded). */
+export function noteAuthSuccess(): void {
+  lastAuthSuccessMs = Date.now()
+}
+
 /**
- * Treat a CopilotAuthFatalError (GHCP 401/403) identically to a user-
- * initiated sign-out — clear all token state and the on-disk file —
- * but preserve the upstream message and remediation URL so the Sign
- * In screen can render them as a banner. Anything that can throw a
- * CopilotAuthFatalError (setupCopilotToken, the refresh loop) routes
- * through here.
+ * React to a CopilotAuthFatalError (GHCP 401/403) WITHOUT destroying the
+ * GitHub credential. This is the load-bearing fix: the old behaviour ran a
+ * full `signOut()` here — deleting the on-disk account — so a single transient
+ * rejection on ANY completion, refresh, or first-mint forced a fresh device-
+ * code login. Per the gh-CLI rule (failure ≠ deletion):
+ *
+ *   - stop the refresh loop + drop the LIVE Copilot/GitHub tokens, so we fail
+ *     fast instead of hammering a known-bad token;
+ *   - FLAG the active account `needsReauth` on disk (record + token RETAINED),
+ *     so the UI can name it and offer reconnect, and a restart re-attempts the
+ *     same credential (a transient rejection self-heals);
+ *   - surface the upstream message + remediation URL via the error state.
+ *
+ * Genuine, non-transient rejections are handled by zero-click auto-recovery
+ * (Phase 2 — try another known-good account live) and, failing that, the UI;
+ * none of those paths delete the credential either. Only an explicit user
+ * "forget account" removes a record.
  */
-export async function markAuthFatalAndSignOut(
-  error: CopilotAuthFatalError,
-): Promise<void> {
-  await signOut()
+export function markAuthDegraded(error: CopilotAuthFatalError): Promise<void> {
+  // Single-flight: forwardError fires one of these per failing completion, so a
+  // burst of concurrent auth-fatals must coalesce into ONE degrade+recovery
+  // sweep rather than each clearing tokens / racing a recovery.
+  if (degradeInFlight) return degradeInFlight
+  // Grace window: a 401 arriving right after a successful (re)auth is almost
+  // certainly the response to a request that was in flight under the OLD token.
+  // Don't tear down the freshly-recovered/just-signed-in session for it.
+  if (Date.now() - lastAuthSuccessMs < RECOVERY_GRACE_MS)
+    return Promise.resolve()
+  degradeInFlight = runDegrade(error).finally(() => {
+    degradeInFlight = null
+  })
+  return degradeInFlight
+}
+
+async function runDegrade(error: CopilotAuthFatalError): Promise<void> {
+  // Cancel any in-flight device-code poller so it can't latch signed-in over
+  // the degraded state after this returns (the old signOut() path did this).
+  const flow = currentFlow()
+  if (flow) {
+    flow.abort.abort()
+  }
+
+  stopCopilotRefreshLoop()
+  state.copilotToken = undefined
+  state.githubToken = undefined
+  state.userName = undefined
+
+  // Idempotency: once we're already in the matching error state the account is
+  // flagged and the UI notified — skip the redundant accounts.json write + SSE
+  // emission. (In-memory tokens are cleared above on every call.)
+  if (authState.kind === "error" && authState.message === error.message) {
+    return
+  }
+
+  // Flag the (currently-active) account needs-reauth, RETAINING its credential.
+  try {
+    await markActiveNeedsReauth({
+      status: error.status,
+      message: error.message,
+      at: new Date().toISOString(),
+    })
+  } catch (err) {
+    log.warn(
+      "Auth-controller: failed to flag account needs-reauth (credential retained):",
+      err,
+    )
+  }
+
+  // Optional recovery sweep before giving up. Registered only when the user
+  // opted into config.autoRecoverAccount; otherwise `autoRecover` is null and we
+  // fall straight through to the error state and surface the reason.
+  if (autoRecover) {
+    try {
+      const recovered = await autoRecover()
+      if (recovered) {
+        log.info(
+          "Auto-recovered onto a known-good account; no sign-out required.",
+        )
+        return
+      }
+    } catch (err) {
+      log.warn("Auth-controller: auto-recovery sweep failed:", err)
+    }
+  }
+
   setAuthState({
     kind: "error",
     message: error.message,
@@ -574,6 +687,12 @@ export function __resetAuthControllerForTests(): void {
   }
   authState = { kind: "signed-out" }
   resetAuthControllerDeps()
+  // Reset the degrade single-flight / grace-window / recovery-hook state so it
+  // can't leak across cases (a prior markSignedIn must not let the grace window
+  // suppress a fresh test's degrade).
+  degradeInFlight = null
+  lastAuthSuccessMs = 0
+  autoRecover = null
   // getAuthStatus falls back to state.userName for a signed-in session
   // (so cold-boot from a stored token populates the Account UI). Tests
   // reset state.githubToken between cases; reset the cached userName here

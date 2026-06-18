@@ -3,7 +3,7 @@ import type { ContentfulStatusCode } from "hono/utils/http-status"
 
 import consola from "consola"
 
-import { markAuthFatalAndSignOut } from "./auth-controller"
+import { markAuthDegraded } from "./auth-controller"
 
 export class HTTPError extends Error {
   response: Response
@@ -43,17 +43,18 @@ export async function forwardError(
 
   if (error instanceof CopilotAuthFatalError) {
     // Auth-fatal from a completion endpoint (or any other Copilot
-    // upstream): clear the token and stash the remediation reason so
-    // the Settings UI surfaces it as a banner. Forward the error to
-    // the client with the upstream status — the client likely renders
-    // it (e.g. Claude Code's "API error" surface), and the proxy's UI
-    // signals the state change. Best-effort: failures inside the
-    // handler must not block the client response.
+    // upstream): degrade NON-DESTRUCTIVELY — drop the live token + flag the
+    // account needs-reauth, but RETAIN the on-disk credential (a single
+    // transient 401 here must never delete the saved account; that was the
+    // bug). Stash the remediation reason so the Settings UI surfaces it.
+    // Forward the error to the client with the upstream status — the client
+    // likely renders it (e.g. Claude Code's "API error" surface). Best-effort:
+    // failures inside the handler must not block the client response.
     try {
-      await markAuthFatalAndSignOut(error)
+      await markAuthDegraded(error)
     } catch (handlerErr) {
       consola.warn(
-        "markAuthFatalAndSignOut failed while forwarding upstream error:",
+        "markAuthDegraded failed while forwarding upstream error:",
         handlerErr,
       )
     }

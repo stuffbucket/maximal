@@ -11,18 +11,34 @@ import {
 import { getGitHubUser } from "~/services/github/get-user"
 import { pollAccessToken } from "~/services/github/poll-access-token"
 
-import { markAuthFatalAndSignOut as defaultMarkAuthFatalAndSignOut } from "./auth-controller"
+import { markAuthDegraded as defaultMarkAuthDegraded } from "./auth-controller"
 import { toCopilotHost } from "./auth-types"
 import { CopilotAuthFatalError, HTTPError } from "./error"
 import { currentGitHubHost } from "./github-host"
 import {
   addAccountToDefaultRegistry,
+  clearActiveNeedsReauthInDefaultRegistry,
   inferTokenType,
   makeAccountRecord,
   readDefaultRecord,
 } from "./github-token-store"
+import { createTeeLogger } from "./logger"
 import { isHeadless, openUrl } from "./open-url"
 import { setCopilotToken, state } from "./state"
+
+// Token/auth events tee to the console AND a dated `auth-*.log` (the same file
+// auth-controller writes to) so the device-code flow, Copilot mint, and refresh
+// retries are observable after the fact, not just in the dev terminal.
+const log = createTeeLogger("auth")
+
+/** Best-effort: the active credential just worked, so clear any stale
+ *  needs-reauth flag (a prior transient rejection self-healed). Fire-and-forget
+ *  — a flag-clear failure must not add latency to or fail the mint path. */
+const clearActiveNeedsReauth = (): void => {
+  void clearActiveNeedsReauthInDefaultRegistry().catch((err: unknown) => {
+    log.warn("Couldn't clear needs-reauth flag after a successful mint:", err)
+  })
+}
 
 // Dependency-injection shim for tests, mirroring the pattern in
 // `auth-controller.ts`. Process-wide `mock.module` for these symbols
@@ -32,12 +48,14 @@ import { setCopilotToken, state } from "./state"
 // the refresh loop reacts to CopilotAuthFatalError. Production
 // callers see the real implementations.
 let getCopilotToken: typeof defaultGetCopilotToken = defaultGetCopilotToken
-let markAuthFatalAndSignOut: typeof defaultMarkAuthFatalAndSignOut =
-  defaultMarkAuthFatalAndSignOut
+let markAuthDegraded: typeof defaultMarkAuthDegraded = defaultMarkAuthDegraded
 
 export interface TokenDepsTestOverrides {
   getCopilotToken?: typeof defaultGetCopilotToken
-  markAuthFatalAndSignOut?: typeof defaultMarkAuthFatalAndSignOut
+  markAuthDegraded?: typeof defaultMarkAuthDegraded
+  /** Override the refresh-loop fatal-retry threshold (default 3). Set to 1 to
+   *  drive the escalation path deterministically without waiting out retries. */
+  maxFatalRefreshRetries?: number
 }
 
 export function __setTokenDepsForTests(
@@ -46,14 +64,18 @@ export function __setTokenDepsForTests(
   if (overrides.getCopilotToken !== undefined) {
     getCopilotToken = overrides.getCopilotToken
   }
-  if (overrides.markAuthFatalAndSignOut !== undefined) {
-    markAuthFatalAndSignOut = overrides.markAuthFatalAndSignOut
+  if (overrides.markAuthDegraded !== undefined) {
+    markAuthDegraded = overrides.markAuthDegraded
+  }
+  if (overrides.maxFatalRefreshRetries !== undefined) {
+    maxFatalRefreshRetries = overrides.maxFatalRefreshRetries
   }
 }
 
 export function __resetTokenDepsForTests(): void {
   getCopilotToken = defaultGetCopilotToken
-  markAuthFatalAndSignOut = defaultMarkAuthFatalAndSignOut
+  markAuthDegraded = defaultMarkAuthDegraded
+  maxFatalRefreshRetries = 3
 }
 
 let copilotRefreshLoopController: AbortController | null = null
@@ -70,11 +92,11 @@ const applyCopilotApiUrl = (api: string | undefined) => {
   // the completion-host slot (boundary D1 — see auth-types.ts).
   const host = toCopilotHost(api)
   if (!host) {
-    consola.warn(`Ignoring malformed Copilot API host from discovery: ${api}`)
+    log.warn(`Ignoring malformed Copilot API host from discovery: ${api}`)
     return
   }
   if (host === state.copilotApiUrl) return
-  consola.debug(`Copilot API host -> ${host}`)
+  log.debug(`Copilot API host -> ${host}`)
   state.copilotApiUrl = host
 }
 
@@ -87,7 +109,16 @@ export const stopCopilotRefreshLoop = () => {
   copilotRefreshLoopController = null
 }
 
-export const setupCopilotToken = async () => {
+export const setupCopilotToken = async (opts?: {
+  /**
+   * What to do if the FIRST mint hits a CopilotAuthFatalError. Default
+   * "degrade" routes it through markAuthDegraded (flag + retain + error state).
+   * The auto-recovery path passes "throw" so IT owns the degrade decision —
+   * calling markAuthDegraded from inside a recovery sweep would re-enter the
+   * sweep and deadlock/clobber it (see auth-recovery.ts).
+   */
+  onAuthFatal?: "degrade" | "throw"
+}) => {
   // Runtime token-type detection: `gho_` tokens (OAuth-App user tokens, e.g.
   // opencode-style or any Ov23li…-prefixed app) are accepted directly by the
   // Copilot edge, don't expire, and need no refresh loop. `ghu_` tokens
@@ -96,9 +127,11 @@ export const setupCopilotToken = async () => {
   const githubToken = state.githubToken
   if (githubToken && inferTokenType(githubToken) === "gho_") {
     setCopilotToken(githubToken)
+    clearActiveNeedsReauth()
 
-    consola.debug("Using gho_ token directly as Copilot bearer; no refresh")
+    log.debug("Using gho_ token directly as Copilot bearer; no refresh")
     if (state.showToken) {
+      // console-only: a raw bearer must never reach the auth-*.log file sink.
       consola.info("Copilot token:", state.copilotToken)
     }
 
@@ -115,22 +148,28 @@ export const setupCopilotToken = async () => {
     applyCopilotApiUrl(result.endpoints?.api)
   } catch (error) {
     if (error instanceof CopilotAuthFatalError) {
-      // First-mint failure (e.g. user lacks Copilot entitlement, must
-      // accept new TOS). Treat the GitHub token as gone — same
-      // collapse rule as the refresh loop — and surface the reason.
-      consola.warn(
+      // First-mint failure (e.g. user lacks Copilot entitlement, must accept
+      // new TOS, or a transient rejection). Degrade NON-DESTRUCTIVELY — flag
+      // the account needs-reauth but RETAIN the credential on disk — and
+      // surface the reason. Re-throw so the device-flow caller knows the mint
+      // failed (it stays in the error state rather than latching signed-in).
+      log.warn(
         "Copilot rejected the GitHub token at first mint:",
         error.message,
       )
-      await markAuthFatalAndSignOut(error)
+      if (opts?.onAuthFatal !== "throw") {
+        await markAuthDegraded(error)
+      }
       throw error
     }
     throw error
   }
   setCopilotToken(token)
+  clearActiveNeedsReauth()
 
-  consola.debug("GitHub Copilot Token fetched successfully!")
+  log.debug("GitHub Copilot Token fetched successfully!")
   if (state.showToken) {
+    // console-only: a raw bearer must never reach the auth-*.log file sink.
     consola.info("Copilot token:", token)
   }
 
@@ -141,7 +180,7 @@ export const setupCopilotToken = async () => {
 
   runCopilotRefreshLoop(refresh_in, controller.signal)
     .catch(() => {
-      consola.warn("Copilot token refresh loop stopped")
+      log.warn("Copilot token refresh loop stopped")
     })
     .finally(() => {
       if (copilotRefreshLoopController === controller) {
@@ -154,6 +193,13 @@ const REFRESH_POLL_INTERVAL_MS = 15_000
 const EARLY_REFRESH_BUFFER_MS = 60_000
 const RETRY_REFRESH_DELAY_MS = 15_000
 const MIN_REFRESH_DELAY_MS = 1_000
+/** Consecutive auth-fatal refresh rejections tolerated before treating the
+ *  credential as genuinely bad. A single 401/403 on a refresh is usually
+ *  transient (clock skew, a momentary upstream blip, a token-rotation race);
+ *  retrying a few times lets it self-heal instead of tearing down the session
+ *  on the first hiccup. Mutable so tests can drive the escalation path
+ *  deterministically (set to 1) without waiting out real retry delays. */
+let maxFatalRefreshRetries = 3
 
 export const getRefreshDeadlineMs = (
   refreshIn: number,
@@ -174,6 +220,9 @@ const runCopilotRefreshLoop = async (
   signal: AbortSignal,
 ) => {
   let refreshAtMs = getRefreshDeadlineMs(refreshIn)
+  // Count consecutive auth-fatal rejections so a transient 401/403 gets a few
+  // bounded retries before we escalate. Reset on any successful refresh.
+  let fatalRetries = 0
 
   while (!signal.aborted) {
     const nextDelayMs = getRefreshPollDelayMs(refreshAtMs)
@@ -182,35 +231,48 @@ const runCopilotRefreshLoop = async (
       continue
     }
 
-    consola.debug("Refreshing Copilot token")
+    log.debug("Refreshing Copilot token")
 
     try {
       const { token, refresh_in, endpoints } = await getCopilotToken()
       setCopilotToken(token)
       applyCopilotApiUrl(endpoints?.api)
       refreshAtMs = getRefreshDeadlineMs(refresh_in)
-      consola.debug("Copilot token refreshed")
+      if (fatalRetries > 0) clearActiveNeedsReauth()
+      fatalRetries = 0
+      log.debug("Copilot token refreshed")
       if (state.showToken) {
+        // console-only: a raw bearer must never reach the auth-*.log file sink.
         consola.info("Refreshed Copilot token:", token)
       }
     } catch (error) {
       if (error instanceof CopilotAuthFatalError) {
-        // GHCP rejected the GitHub token (401/403). No amount of
-        // retrying will fix this; the user has to re-authenticate
-        // (and possibly accept new TOS / re-enable Copilot upstream).
-        // Wipe local auth state, stash the rejection reason for the
-        // Settings UI, and exit the loop. A successful sign-in will
-        // spin up a fresh loop via setupCopilotToken.
-        consola.warn(
-          "Copilot rejected the GitHub token; stopping refresh loop:",
+        fatalRetries++
+        if (fatalRetries < maxFatalRefreshRetries) {
+          // Probably transient. Retry on the normal cadence before treating
+          // the credential as bad — never tear down a session on one 401.
+          log.warn(
+            `Copilot rejected the GitHub token on refresh (attempt ${fatalRetries}/${maxFatalRefreshRetries}); retrying in ${RETRY_REFRESH_DELAY_MS / 1000}s before treating it as fatal:`,
+            error.message,
+          )
+          refreshAtMs = Date.now() + RETRY_REFRESH_DELAY_MS
+          continue
+        }
+        // Persistent rejection across retries — the GitHub token genuinely
+        // can't mint a Copilot token right now. Degrade NON-DESTRUCTIVELY:
+        // markAuthDegraded flags the account needs-reauth but RETAINS the
+        // credential (no delete, no full sign-out). Exit the loop; a sign-in
+        // or account switch spins up a fresh one via setupCopilotToken.
+        log.warn(
+          `Copilot persistently rejected the GitHub token (${fatalRetries} attempts); degrading without deleting the credential:`,
           error.message,
         )
-        await markAuthFatalAndSignOut(error)
+        await markAuthDegraded(error)
         return
       }
-      consola.error("Failed to refresh Copilot token:", error)
+      log.error("Failed to refresh Copilot token:", error)
       refreshAtMs = Date.now() + RETRY_REFRESH_DELAY_MS
-      consola.warn(
+      log.warn(
         `Retrying Copilot token refresh in ${RETRY_REFRESH_DELAY_MS / 1000}s`,
       )
     }
@@ -247,10 +309,12 @@ function presentDeviceCode(
     copiedToClipboard = true
   } catch {
     // Clipboard unavailable (headless Linux without xclip/xsel, sandboxed
-    // environments). Fall through; the next consola.info tells the user to
+    // environments). Fall through; the next log.info tells the user to
     // enter the code manually.
   }
 
+  // console-only: the device user_code is a short-lived pairing credential for
+  // the in-progress flow — keep it visible to the user but off the disk sink.
   consola.info(
     copiedToClipboard ?
       `Code ${response.user_code} copied to clipboard — paste into the form, then approve.`
@@ -260,14 +324,14 @@ function presentDeviceCode(
   if (!options?.noBrowser && !isHeadless()) {
     const opened = openUrl(verificationUrl)
     if (opened.ok) {
-      consola.info(`(Opened ${verificationUrl} in your browser.)`)
+      log.info(`(Opened ${verificationUrl} in your browser.)`)
     } else {
-      consola.info(
+      log.info(
         `(Couldn't open the browser automatically. Visit ${verificationUrl} manually.)`,
       )
     }
   } else {
-    consola.info(`Visit ${verificationUrl} in any browser.`)
+    log.info(`Visit ${verificationUrl} in any browser.`)
   }
 }
 
@@ -280,15 +344,16 @@ export async function setupGitHubToken(
     if (existing && !options?.force) {
       state.githubToken = existing.accessToken
       if (state.showToken) {
+        // console-only: a raw token must never reach the auth-*.log file sink.
         consola.info("GitHub token:", existing.accessToken)
       }
       await logUser()
       return
     }
 
-    consola.info("Not logged in, requesting a new device code")
+    log.info("Not logged in, requesting a new device code")
     const response = await getDeviceCode()
-    consola.debug("Device code response:", response)
+    log.debug("Device code response:", response)
 
     presentDeviceCode(response, options)
 
@@ -296,6 +361,7 @@ export async function setupGitHubToken(
     state.githubToken = token
 
     if (state.showToken) {
+      // console-only: a raw token must never reach the auth-*.log file sink.
       consola.info("GitHub token:", token)
     }
 
@@ -310,7 +376,7 @@ export async function setupGitHubToken(
       // eslint-disable-next-line require-atomic-updates
       state.userName = user.login
     } catch (error) {
-      consola.warn(
+      log.warn(
         "Couldn't fetch GitHub user; saving the account as 'unknown'.",
         error,
       )
@@ -323,14 +389,14 @@ export async function setupGitHubToken(
         addedVia: "device-code",
       }),
     )
-    consola.info(`Logged in as ${login ?? "(unknown)"}`)
+    log.info(`Logged in as ${login ?? "(unknown)"}`)
   } catch (error) {
     if (error instanceof HTTPError) {
-      consola.error("Failed to get GitHub token:", await error.response.json())
+      log.error("Failed to get GitHub token:", await error.response.json())
       throw error
     }
 
-    consola.error("Failed to get GitHub token:", error)
+    log.error("Failed to get GitHub token:", error)
     throw error
   }
 }
@@ -338,7 +404,7 @@ export async function setupGitHubToken(
 export async function logUser() {
   const user = await getGitHubUser()
   state.userName = user.login
-  consola.info(`Logged in as ${user.login}`)
+  log.info(`Logged in as ${user.login}`)
   // Host discovery is NOT done here. The completion host comes solely from
   // setupCopilotToken's /copilot_internal/v2/token mint (the authoritative
   // endpoints.api the bearer is valid against — see applyCopilotApiUrl), which

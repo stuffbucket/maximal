@@ -26,7 +26,7 @@
   ],
   "scripts": {
     "analyze": "bun run scripts/gemma-watch.ts",
-    "app:build": "MAXIMAL_FORCE_SIDECAR=1 bun run app:sidecar && cd shell && bun run tauri build --bundles app,dmg",
+    "app:build": "MAXIMAL_FORCE_SIDECAR=1 bun run app:sidecar && bun run scripts/predmg-cleanup.ts && cd shell && bun run tauri build --bundles app,dmg",
     "app:dev": "bun run scripts/app-dev-prepare.ts && bun run app:sidecar && cd shell && bun run tauri dev",
     "app:icons": "cd shell && bun run tauri icon ../build/macos/app-icon.svg --output src-tauri/icons",
     "app:setup": "cd shell && bun install && cd .. && MAXIMAL_FORCE_SIDECAR=1 bun run app:sidecar",

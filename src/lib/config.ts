@@ -39,6 +39,15 @@ export interface AppConfig {
   useResponsesApiWebSearch?: boolean
   claudeTokenMultiplier?: number
   logRetentionDays?: number
+  /**
+   * Opt-in: when true, a fatal Copilot rejection may AUTO-SWITCH to another
+   * previously-successful account without a per-event prompt. Defaults OFF —
+   * enabling it is the user's PRIOR AUTHORIZATION that all their stored accounts
+   * are interchangeable (same data governance), since same-plan accounts can
+   * still differ in tenancy/residency/retention. Off → degrade + surface the
+   * reason; the user picks. See auth-recovery.ts.
+   */
+  autoRecoverAccount?: boolean
   apps?: AppsConfig
 }
 
@@ -435,4 +444,11 @@ export const DEFAULT_LOG_RETENTION_DAYS = 7
 export function getLogRetentionDays(): number {
   const config = getConfig()
   return config.logRetentionDays ?? DEFAULT_LOG_RETENTION_DAYS
+}
+
+/** Whether the user has authorized auto-switching to another stored account on
+ *  a fatal rejection. Defaults OFF — see AppConfig.autoRecoverAccount. */
+export function isAutoRecoverAccountEnabled(): boolean {
+  const config = getConfig()
+  return config.autoRecoverAccount ?? false
 }

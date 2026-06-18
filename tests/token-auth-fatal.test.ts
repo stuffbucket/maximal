@@ -71,12 +71,13 @@ beforeEach(() => {
       if (next) return next()
       return harness.getCopilotTokenImpl()
     },
-    markAuthFatalAndSignOut: (
-      err: InstanceType<typeof CopilotAuthFatalError>,
-    ) => {
+    markAuthDegraded: (err: InstanceType<typeof CopilotAuthFatalError>) => {
       harness.markCalls.push(err)
       return harness.markImpl()
     },
+    // Reset the retry threshold each test so a test that lowers it (escalation
+    // path) can't leak into one that depends on the default (retry-before-fatal).
+    maxFatalRefreshRetries: 3,
   })
 })
 
@@ -168,7 +169,11 @@ describe("setupCopilotToken — gho_ tokens", () => {
 // --- E. refresh loop exits on auth-fatal mid-loop --------------------------
 
 describe("runCopilotRefreshLoop — auth-fatal during refresh", () => {
-  test("loop calls markAuthFatalAndSignOut once and stops (no further token calls)", async () => {
+  test("escalates to markAuthDegraded once and stops once the retry threshold is hit", async () => {
+    // Drive the escalation path deterministically: threshold 1 means the first
+    // in-loop fatal escalates immediately (no waiting out the real retry delay).
+    __setTokenDepsForTests({ maxFatalRefreshRetries: 1 })
+
     const fatal = new CopilotAuthFatalError("subscription_lapsed", 403, null)
     // First call (initial mint): short refresh_in to fire the loop fast.
     // Second call (in-loop refresh): throw fatal — loop must exit.
@@ -189,6 +194,33 @@ describe("runCopilotRefreshLoop — auth-fatal during refresh", () => {
     expect(harness.markCalls.length).toBe(1)
     expect(harness.markCalls[0]).toBe(fatal)
     // 1 initial mint + 1 in-loop refresh = 2. No third call after fatal exit.
+    expect(harness.getCopilotTokenCalls).toBe(2)
+  })
+})
+
+// --- E2. retry-before-fatal: a single refresh 401 must NOT tear down the
+// session (the load-bearing fix — a transient rejection self-heals) ----------
+
+describe("runCopilotRefreshLoop — retry-before-fatal (default threshold)", () => {
+  test("a single in-loop auth-fatal does NOT call markAuthDegraded; it retries", async () => {
+    // Default threshold is 3 (reset in beforeEach). One fatal bumps the counter
+    // and schedules a retry ~RETRY_REFRESH_DELAY_MS out — it must NOT escalate.
+    const fatal = new CopilotAuthFatalError("transient_401", 401, null)
+    harness.getCopilotTokenQueue = [
+      () => Promise.resolve(ok("copilot_init", 1)),
+      () => Promise.reject(fatal),
+    ]
+
+    await setupCopilotToken()
+    expect(state.copilotToken).toBe("copilot_init")
+
+    await new Promise((r) => setTimeout(r, 1500))
+    stopCopilotRefreshLoop()
+
+    // The credential is NOT degraded on the first fatal.
+    expect(harness.markCalls.length).toBe(0)
+    // The loop attempted the refresh (init + the one fatal attempt); the next
+    // retry is RETRY_REFRESH_DELAY_MS away, so no further calls in this window.
     expect(harness.getCopilotTokenCalls).toBe(2)
   })
 })

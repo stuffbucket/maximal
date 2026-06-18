@@ -18,27 +18,17 @@ import {
 import type { AccountRecord } from "~/lib/github-token-store"
 
 import {
+  deferred,
+  flushMicrotasks,
+  spyConsola,
+} from "./helpers/auth-flow-utils"
+import {
   assertAuthenticated,
   assertError,
   assertPending,
 } from "./helpers/auth-status"
 
 // --- Mock harness ----------------------------------------------------------
-
-type Deferred<T> = {
-  promise: Promise<T>
-  resolve: (v: T) => void
-  reject: (e: unknown) => void
-}
-function deferred<T>(): Deferred<T> {
-  let resolve!: (v: T) => void
-  let reject!: (e: unknown) => void
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res
-    reject = rej
-  })
-  return { promise, resolve, reject }
-}
 
 // Mutable hooks the tests reassign before each scenario.
 const harness = {
@@ -60,6 +50,12 @@ const harness = {
   addAccountCalls: [] as Array<AccountRecord>,
   setupCopilotTokenImpl: (): Promise<void> => Promise.resolve(),
   setupCopilotTokenCalls: 0,
+  deactivateCalls: 0,
+  markNeedsReauthCalls: [] as Array<{
+    status: number | null
+    message: string
+    at: string
+  }>,
 }
 
 // Capture real modules BEFORE mocking so `afterAll` can restore them.
@@ -88,6 +84,8 @@ void mock.module("~/lib/token", () => ({
     harness.setupCopilotTokenCalls++
     return harness.setupCopilotTokenImpl()
   },
+  // markAuthDegraded calls this to halt the refresh loop; no-op in unit tests.
+  stopCopilotRefreshLoop: () => {},
 }))
 
 // Spread the real namespace so `readFile` / `writeFile` / etc. survive
@@ -123,40 +121,12 @@ const {
   getAuthStatus,
   signOut,
   markSignedIn,
-  markAuthFatalAndSignOut,
+  markAuthDegraded,
   __resetAuthControllerForTests,
   __setAuthControllerDepsForTests,
 } = await import("~/lib/auth-controller")
 const { CopilotAuthFatalError } = await import("~/lib/error")
 const { state } = await import("~/lib/state")
-const { PATHS } = await import("~/lib/paths")
-const consolaMod = await import("consola")
-const consola = consolaMod.default
-
-// Spy helper for consola.warn / consola.error.
-function spyConsola(method: "warn" | "error"): {
-  calls: Array<Array<unknown>>
-  restore: () => void
-} {
-  const calls: Array<Array<unknown>> = []
-  const original = consola[method].bind(consola)
-  consola[method] = ((...args: Array<unknown>) => {
-    calls.push(args)
-  }) as typeof consola.warn
-  return {
-    calls,
-    restore: () => {
-      consola[method] = original
-    },
-  }
-}
-
-// Helper to wait for the fire-and-forget poller microtask chain to settle.
-async function flushMicrotasks(turns = 5): Promise<void> {
-  for (let i = 0; i < turns; i++) {
-    await Promise.resolve()
-  }
-}
 
 beforeEach(() => {
   __resetAuthControllerForTests()
@@ -169,9 +139,16 @@ beforeEach(() => {
       harness.addAccountCalls.push(rec)
       return harness.addAccountImpl(rec)
     },
-    // No-op so signOut doesn't touch the real on-disk registry in unit tests
-    // (and resolves within the microtask window the assertions flush).
-    removeActiveAccount: () => Promise.resolve(),
+    // No-ops so signOut / markAuthDegraded don't touch the real on-disk
+    // registry in unit tests (and resolve within the flushed microtask window).
+    deactivateActiveAccount: () => {
+      harness.deactivateCalls++
+      return Promise.resolve()
+    },
+    markActiveNeedsReauth: (err) => {
+      harness.markNeedsReauthCalls.push(err)
+      return Promise.resolve()
+    },
   })
   state.githubToken = undefined
   state.copilotToken = undefined
@@ -190,6 +167,8 @@ beforeEach(() => {
   harness.unlinkImpl = () => Promise.resolve()
   harness.unlinkCalls = []
   harness.addAccountCalls = []
+  harness.deactivateCalls = 0
+  harness.markNeedsReauthCalls = []
   harness.pollAccessTokenCalls = 0
   harness.setupCopilotTokenImpl = () => Promise.resolve()
   harness.setupCopilotTokenCalls = 0
@@ -548,9 +527,10 @@ describe("runPoller (driven by startDeviceFlow)", () => {
 
   test("fatal Copilot rejection after sign-in surfaces the error, never latches signed-in", async () => {
     // setupCopilotToken mimics production: a 401/403 from Copilot (license
-    // revoked / TOS unaccepted) routes through markAuthFatalAndSignOut — which
-    // wipes the token AND sets the error state — then rethrows. runPoller must
-    // NOT paper a signed-in UI over that wiped session and bury the reason.
+    // revoked / TOS unaccepted) routes through markAuthDegraded — which drops
+    // the live token AND sets the error state (but RETAINS the on-disk
+    // credential) — then rethrows. runPoller must NOT paper a signed-in UI over
+    // that degraded session and bury the reason.
     const poll = deferred<string>()
     harness.pollAccessTokenImpl = () => poll.promise
     harness.getGitHubUserImpl = () => Promise.resolve({ login: "alice" })
@@ -560,7 +540,7 @@ describe("runPoller (driven by startDeviceFlow)", () => {
       "https://github.com/settings/copilot",
     )
     harness.setupCopilotTokenImpl = async () => {
-      await markAuthFatalAndSignOut(fatal)
+      await markAuthDegraded(fatal)
       throw fatal
     }
 
@@ -571,7 +551,7 @@ describe("runPoller (driven by startDeviceFlow)", () => {
     const status = getAuthStatus()
     assertError(status)
     expect(status.error).toBe("Copilot license revoked")
-    // The session was wiped by markAuthFatalAndSignOut — never left signed-in.
+    // The live token was dropped by markAuthDegraded — never left signed-in.
     expect(state.githubToken).toBeUndefined()
   })
 
@@ -737,282 +717,5 @@ describe("runPoller (driven by startDeviceFlow)", () => {
     const status = getAuthStatus()
     // signOut cleared everything; aborted catch returned early so no error.
     expect(status.state).toBe("unauthenticated")
-  })
-})
-
-// --- signOut: state wipe + on-disk unlink ENOENT branch -------------------
-
-describe("signOut", () => {
-  test("clears tokens, attempts to unlink the on-disk token at the configured path", async () => {
-    state.githubToken = "ghu_seed"
-    state.copilotToken = "cop_seed"
-    state.userName = "alice"
-
-    await signOut()
-
-    expect(state.githubToken).toBeUndefined()
-    expect(state.copilotToken).toBeUndefined()
-    expect(state.userName).toBeUndefined()
-    expect(harness.unlinkCalls).toContain(PATHS.GITHUB_TOKEN_PATH)
-  })
-
-  test("swallows ENOENT from unlink without warning", async () => {
-    const err: NodeJS.ErrnoException = Object.assign(new Error("missing"), {
-      code: "ENOENT",
-    })
-    harness.unlinkImpl = () => Promise.reject(err)
-    const spy = spyConsola("warn")
-    try {
-      await signOut()
-      expect(state.githubToken).toBeUndefined()
-      // The ENOENT path must NOT emit the "failed to delete token file" warn.
-      const failedDelete = spy.calls.find(
-        (args) =>
-          typeof args[0] === "string"
-          && args[0].includes("failed to delete token file"),
-      )
-      expect(failedDelete).toBeUndefined()
-    } finally {
-      spy.restore()
-    }
-  })
-
-  test("non-ENOENT unlink error emits the 'failed to delete token file' warn", async () => {
-    const err: NodeJS.ErrnoException = Object.assign(new Error("permission"), {
-      code: "EACCES",
-    })
-    harness.unlinkImpl = () => Promise.reject(err)
-    const spy = spyConsola("warn")
-    try {
-      await signOut()
-      const failedDelete = spy.calls.find(
-        (args) =>
-          typeof args[0] === "string"
-          && args[0].includes("failed to delete token file"),
-      )
-      expect(failedDelete).toBeDefined()
-      // The error object is passed through as the second arg.
-      expect(failedDelete?.[1]).toBe(err)
-    } finally {
-      spy.restore()
-    }
-  })
-
-  test("non-Error rejection from unlink (no code property) is swallowed without crashing", async () => {
-    // Tests the typeof / null / 'code' in branches of the catch guard.
-    harness.unlinkImpl = () => Promise.reject(new Error("plain-error-no-code"))
-    await signOut()
-    // Must not throw — the catch's `'code' in err` guard short-circuits.
-    expect(state.githubToken).toBeUndefined()
-  })
-
-  test("rejection of type null is swallowed (err !== null guard)", async () => {
-    // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- deliberately exercising the `err !== null` guard
-    harness.unlinkImpl = () => Promise.reject(null)
-    await signOut()
-    expect(state.githubToken).toBeUndefined()
-  })
-
-  test("rejection without 'code' property does not produce the 'failed to delete' warn", async () => {
-    // Tests that 'code' in err is required to enter the warn branch.
-    harness.unlinkImpl = () => Promise.reject(new Error("bare error, no code"))
-    const spy = spyConsola("warn")
-    try {
-      await signOut()
-      const failedDelete = spy.calls.find(
-        (args) =>
-          typeof args[0] === "string"
-          && args[0].includes("failed to delete token file"),
-      )
-      expect(failedDelete).toBeUndefined()
-    } finally {
-      spy.restore()
-    }
-  })
-
-  test("aborts any active flow's AbortController and nulls controllerState.flow", async () => {
-    const poll = deferred<string>()
-    harness.pollAccessTokenImpl = () => poll.promise
-
-    await startDeviceFlow()
-    // Mid-flow: status reflects active flow.
-    expect(["device_code_issued", "polling"]).toContain(getAuthStatus().state)
-
-    await signOut()
-
-    expect(getAuthStatus()).toEqual({ state: "unauthenticated" })
-
-    // Even if the poll later resolves, no token is written.
-    poll.resolve("ghu_late")
-    await flushMicrotasks(20)
-    expect(state.githubToken).toBeUndefined()
-  })
-})
-
-// --- markAuthFatalAndSignOut ----------------------------------------------
-
-describe("markAuthFatalAndSignOut", () => {
-  test("clears all token state and restamps lastError with structured payload", async () => {
-    const { markAuthFatalAndSignOut } = await import("~/lib/auth-controller")
-    const { CopilotAuthFatalError } = await import("~/lib/error")
-
-    state.githubToken = "ghu_x"
-    state.copilotToken = "tok"
-    state.userName = "alice"
-
-    await markAuthFatalAndSignOut(
-      new CopilotAuthFatalError(
-        "nope",
-        403,
-        "https://github.com/settings/copilot",
-      ),
-    )
-
-    expect(state.githubToken).toBeUndefined()
-    expect(state.copilotToken).toBeUndefined()
-    expect(state.userName).toBeUndefined()
-    expect(harness.unlinkCalls).toContain(PATHS.GITHUB_TOKEN_PATH)
-    expect(getAuthStatus()).toEqual({
-      state: "error",
-      error: "nope",
-      remediation_url: "https://github.com/settings/copilot",
-    })
-  })
-
-  test("omits remediation_url from status when remediationUrl is null", async () => {
-    const { markAuthFatalAndSignOut } = await import("~/lib/auth-controller")
-    const { CopilotAuthFatalError } = await import("~/lib/error")
-
-    state.githubToken = "ghu_x"
-    state.copilotToken = "tok"
-    state.userName = "alice"
-
-    await markAuthFatalAndSignOut(
-      new CopilotAuthFatalError("revoked", 401, null),
-    )
-
-    const status = getAuthStatus()
-    expect(status).toEqual({ state: "error", error: "revoked" })
-    expect(status).not.toHaveProperty("remediation_url")
-  })
-
-  test("subsequent startDeviceFlow clears the remediation", async () => {
-    const { markAuthFatalAndSignOut } = await import("~/lib/auth-controller")
-    const { CopilotAuthFatalError } = await import("~/lib/error")
-
-    await markAuthFatalAndSignOut(
-      new CopilotAuthFatalError(
-        "nope",
-        403,
-        "https://github.com/settings/copilot",
-      ),
-    )
-    expect(getAuthStatus().state).toBe("error")
-
-    await startDeviceFlow()
-    const status = getAuthStatus()
-    expect(["device_code_issued", "polling"]).toContain(status.state)
-    expect(status).not.toHaveProperty("error")
-    expect(status).not.toHaveProperty("remediation_url")
-  })
-
-  test("tolerates a no-token starting state with ENOENT on unlink", async () => {
-    const { markAuthFatalAndSignOut } = await import("~/lib/auth-controller")
-    const { CopilotAuthFatalError } = await import("~/lib/error")
-
-    // Nothing to clear, file already gone.
-    const enoent: NodeJS.ErrnoException = Object.assign(new Error("missing"), {
-      code: "ENOENT",
-    })
-    harness.unlinkImpl = () => Promise.reject(enoent)
-
-    await markAuthFatalAndSignOut(
-      new CopilotAuthFatalError("tos not accepted", 403, null),
-    )
-
-    const status = getAuthStatus()
-    assertError(status)
-    expect(status.error).toBe("tos not accepted")
-  })
-
-  test("cancels an in-flight device flow (status becomes error, not device_code_issued)", async () => {
-    const { markAuthFatalAndSignOut } = await import("~/lib/auth-controller")
-    const { CopilotAuthFatalError } = await import("~/lib/error")
-
-    // Active flow with a hanging poll.
-    harness.pollAccessTokenImpl = () => new Promise<string>(() => {})
-
-    await startDeviceFlow()
-    expect(["device_code_issued", "polling"]).toContain(getAuthStatus().state)
-
-    await markAuthFatalAndSignOut(
-      new CopilotAuthFatalError("revoked mid-flow", 401, null),
-    )
-
-    // Mirrors existing signOut tests: post-cancel status must NOT
-    // surface the in-flight flow. Here the auth-fatal restamps
-    // lastError, so we see `error` rather than `unauthenticated`.
-    const status = getAuthStatus()
-    assertError(status)
-    expect(status.error).toBe("revoked mid-flow")
-    expect(["device_code_issued", "polling"]).not.toContain(status.state)
-  })
-})
-
-// --- __resetAuthControllerForTests behaviour ------------------------------
-
-describe("__resetAuthControllerForTests", () => {
-  test("nulls flow + clears lastError + accountLogin and aborts the active flow", async () => {
-    const poll = deferred<string>()
-    harness.pollAccessTokenImpl = () => poll.promise
-    harness.getGitHubUserImpl = () => Promise.resolve({ login: "alice" })
-
-    await startDeviceFlow()
-    expect(["device_code_issued", "polling"]).toContain(getAuthStatus().state)
-
-    __resetAuthControllerForTests()
-
-    // Flow nulled, lastError cleared, accountLogin cleared.
-    expect(getAuthStatus()).toEqual({ state: "unauthenticated" })
-
-    // Late poll resolution after reset must not reinstate state.
-    poll.resolve("ghu_late_reset")
-    await flushMicrotasks(20)
-    expect(state.githubToken).toBeUndefined()
-  })
-
-  test("clears lastError so post-reset status is unauthenticated, not error", async () => {
-    const poll = deferred<string>()
-    harness.pollAccessTokenImpl = () => poll.promise
-
-    await startDeviceFlow()
-    poll.reject(new Error("expired_token"))
-    await flushMicrotasks(10)
-    expect(getAuthStatus().state).toBe("error")
-
-    __resetAuthControllerForTests()
-    expect(getAuthStatus()).toEqual({ state: "unauthenticated" })
-  })
-
-  test("clears accountLogin so the next markSignedIn call sees a fresh slate", async () => {
-    const poll = deferred<string>()
-    harness.pollAccessTokenImpl = () => poll.promise
-    harness.getGitHubUserImpl = () => Promise.resolve({ login: "alice" })
-
-    await startDeviceFlow()
-    poll.resolve("ghu_a")
-    await flushMicrotasks(20)
-    const before = getAuthStatus()
-    assertAuthenticated(before)
-    expect(before.account_login).toBe("alice")
-
-    __resetAuthControllerForTests()
-    // After reset the controller is signed-out; the next markSignedIn
-    // call writes its own login without inheriting alice. ADR-0006:
-    // markSignedIn requires a real login (no `null`), so we pass one.
-    markSignedIn("bob")
-    const status = getAuthStatus()
-    assertAuthenticated(status)
-    expect(status.account_login).toBe("bob")
   })
 })

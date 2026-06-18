@@ -130,3 +130,23 @@ function redactValue(
 export function redactForLog(value: unknown): unknown {
   return redactValue(value, undefined, new WeakSet())
 }
+
+/**
+ * Mask secret-shaped substrings in a raw STRING before it reaches a file
+ * sink. `redactForLog` only redacts string *values under object keys*; a
+ * top-level string arg (or a `${secret}` interpolation) bypasses it entirely.
+ * This is the fail-closed backstop for direct string logging: even if a call
+ * site carelessly passes or interpolates a credential, the token-shaped run is
+ * masked on disk. Defense-in-depth — call sites should still avoid logging
+ * secrets — but it makes the file sink safe by construction.
+ *
+ * Patterns masked:
+ *   - GitHub tokens: `gho_/ghp_/ghu_/ghr_/ghs_` + ≥20 token chars.
+ *   - Copilot bearer tokens: the `tid=…;exp=…;…:sig` shape minted by
+ *     `/copilot_internal/v2/token` (keyed off the `tid=` prefix).
+ */
+export function scrubSecrets(text: string): string {
+  return text
+    .replaceAll(/\bgh[oprsu]_[A-Za-z0-9]{20,}\b/g, "[redacted github token]")
+    .replaceAll(/\btid=[\w;=:./-]{20,}/g, "[redacted copilot token]")
+}

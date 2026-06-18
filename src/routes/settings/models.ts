@@ -34,18 +34,27 @@ import { cacheModels } from "~/lib/utils"
 /** Flatten an upstream `Model` into the UI-shaped summary. Optional
  *  upstream fields collapse to null/false so the contract stays total. */
 function toSummary(model: Model): ModelSummaryT {
-  const { capabilities } = model
-  const supports = capabilities.supports
+  // `normalizeModel` (the /models fetch boundary) is the primary defense — it
+  // guarantees `capabilities`/`limits`/`supports` are present for everything
+  // that flows through `getModels`. These container guards are a deliberate
+  // backstop: `state.models` is also writable directly via `setModels`, so an
+  // un-normalized entry can still reach this user-facing route (the
+  // settings-api-models regression test pins exactly that path). Collapsing
+  // missing containers + leaves keeps the response total instead of throwing.
+  const capabilities =
+    (model as { capabilities?: Partial<Model["capabilities"]> }).capabilities
+    ?? {}
+  const limits = capabilities.limits ?? {}
+  const supports = capabilities.supports ?? {}
   return {
     id: model.id,
     name: model.name,
     vendor: model.vendor,
-    family: capabilities.family,
-    type: capabilities.type,
+    family: capabilities.family ?? "",
+    type: capabilities.type ?? "",
     preview: model.preview,
-    context_window_tokens:
-      capabilities.limits.max_context_window_tokens ?? null,
-    max_output_tokens: capabilities.limits.max_output_tokens ?? null,
+    context_window_tokens: limits.max_context_window_tokens ?? null,
+    max_output_tokens: limits.max_output_tokens ?? null,
     capabilities: {
       vision: supports.vision ?? false,
       tool_calls: supports.tool_calls ?? false,
