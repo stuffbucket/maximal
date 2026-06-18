@@ -22,7 +22,43 @@ export const getModels = async () => {
     throw new HTTPError("Failed to get models", response)
   }
 
-  return (await response.json()) as ModelsResponse
+  const parsed = (await response.json()) as Partial<ModelsResponse>
+  return {
+    ...parsed,
+    object: parsed.object ?? "list",
+    data: (parsed.data ?? []).map((model) => normalizeModel(model)),
+  }
+}
+
+/**
+ * Copilot's catalog is not uniform: some entries omit `capabilities`, or
+ * `capabilities.limits` / `capabilities.supports`, even though the static
+ * `Model` type declares them required. The rest of the app trusts that
+ * shape — the boot-time model filter, thinking-budget math, `max_tokens`
+ * auto-fill — so a single sparse entry used to throw and take down the
+ * whole critical path (a failed catalog refresh leaves no usable models).
+ *
+ * Normalize once here, at the single fetch boundary every consumer reads
+ * through, so the container objects are guaranteed present. We deliberately
+ * do NOT invent leaf values: a genuinely-absent `max_context_window_tokens`
+ * stays `undefined` so the UI renders it as "missing" rather than a made-up
+ * number. The principle: secondary metadata gaps degrade gracefully; they
+ * never error out the critical path.
+ */
+export function normalizeModel(raw: Model): Model {
+  const capabilities =
+    (raw as { capabilities?: Partial<ModelCapabilities> }).capabilities ?? {}
+  return {
+    ...raw,
+    capabilities: {
+      family: capabilities.family ?? "",
+      type: capabilities.type ?? "",
+      tokenizer: capabilities.tokenizer ?? "o200k_base",
+      object: capabilities.object ?? "model_capabilities",
+      limits: capabilities.limits ?? {},
+      supports: capabilities.supports ?? {},
+    },
+  }
 }
 
 export interface ModelsResponse {

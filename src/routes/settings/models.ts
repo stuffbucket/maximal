@@ -34,18 +34,25 @@ import { cacheModels } from "~/lib/utils"
 /** Flatten an upstream `Model` into the UI-shaped summary. Optional
  *  upstream fields collapse to null/false so the contract stays total. */
 function toSummary(model: Model): ModelSummaryT {
-  const { capabilities } = model
-  const supports = capabilities.supports
+  // Copilot's catalog is not uniform: some entries omit `capabilities`,
+  // `limits`, or `supports` entirely. The static type claims they're
+  // required, so a single malformed model used to throw here and blank
+  // the whole list. Treat every nested object as optional and collapse
+  // missing fields to null/false so the contract stays total.
+  const capabilities =
+    (model as { capabilities?: Partial<Model["capabilities"]> }).capabilities
+    ?? {}
+  const limits = capabilities.limits ?? {}
+  const supports = capabilities.supports ?? {}
   return {
     id: model.id,
     name: model.name,
     vendor: model.vendor,
-    family: capabilities.family,
-    type: capabilities.type,
+    family: capabilities.family ?? "",
+    type: capabilities.type ?? "",
     preview: model.preview,
-    context_window_tokens:
-      capabilities.limits.max_context_window_tokens ?? null,
-    max_output_tokens: capabilities.limits.max_output_tokens ?? null,
+    context_window_tokens: limits.max_context_window_tokens ?? null,
+    max_output_tokens: limits.max_output_tokens ?? null,
     capabilities: {
       vision: supports.vision ?? false,
       tool_calls: supports.tool_calls ?? false,
