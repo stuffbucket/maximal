@@ -19,7 +19,7 @@
 import consola from "consola"
 
 import {
-  markAuthFatalAndSignOut,
+  markAuthDegraded,
   markSignedIn,
   markSignedOut,
 } from "~/lib/auth-controller"
@@ -101,17 +101,17 @@ export async function bootstrapUpstream(
     } catch (error) {
       // A *fatal* Copilot error (license revoked, TOS not accepted, not
       // entitled) is actionable — but only if we preserve its message +
-      // remediation URL. Route it through markAuthFatalAndSignOut so the
-      // Settings "Sign in" screen shows the real reason instead of a generic
-      // "Not signed in" that dead-ends the user. Non-fatal/transient errors
-      // keep the plain warn-and-degrade path (the token may still be good;
-      // the proxy stays up so the user can retry or re-auth).
+      // remediation URL. Route it through markAuthDegraded so the Settings
+      // "Sign in" screen shows the real reason instead of a generic "Not
+      // signed in" that dead-ends the user. markAuthDegraded RETAINS the
+      // on-disk credential (flags it needs-reauth), so a transient boot-time
+      // rejection self-heals on the next restart rather than forcing re-auth.
       if (error instanceof CopilotAuthFatalError) {
         consola.warn(
           "GitHub token present but Copilot rejected it; surfacing the reason in Settings.",
           error.message,
         )
-        await markAuthFatalAndSignOut(error)
+        await markAuthDegraded(error)
         return
       }
       consola.warn(

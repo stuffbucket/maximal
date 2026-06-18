@@ -88,7 +88,7 @@ const {
   signOut,
   startDeviceFlow,
   markSignedIn,
-  markAuthFatalAndSignOut,
+  markAuthDegraded,
   __resetAuthControllerForTests,
   __setAuthControllerDepsForTests,
 } = await import("~/lib/auth-controller")
@@ -109,7 +109,8 @@ beforeEach(() => {
       harness.addAccountCalls.push(rec)
       return Promise.resolve()
     },
-    removeActiveAccount: () => Promise.resolve(),
+    deactivateActiveAccount: () => Promise.resolve(),
+    markActiveNeedsReauth: () => Promise.resolve(),
   })
   state.githubToken = undefined
   state.copilotToken = undefined
@@ -180,7 +181,7 @@ describe("AuthStatus wire-format invariant", () => {
       {
         label: "error (Copilot fatal)",
         drive: async () => {
-          await markAuthFatalAndSignOut(
+          await markAuthDegraded(
             new CopilotAuthFatalError(
               "revoked",
               403,

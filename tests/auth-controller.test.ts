@@ -60,6 +60,12 @@ const harness = {
   addAccountCalls: [] as Array<AccountRecord>,
   setupCopilotTokenImpl: (): Promise<void> => Promise.resolve(),
   setupCopilotTokenCalls: 0,
+  deactivateCalls: 0,
+  markNeedsReauthCalls: [] as Array<{
+    status: number | null
+    message: string
+    at: string
+  }>,
 }
 
 // Capture real modules BEFORE mocking so `afterAll` can restore them.
@@ -88,6 +94,8 @@ void mock.module("~/lib/token", () => ({
     harness.setupCopilotTokenCalls++
     return harness.setupCopilotTokenImpl()
   },
+  // markAuthDegraded calls this to halt the refresh loop; no-op in unit tests.
+  stopCopilotRefreshLoop: () => {},
 }))
 
 // Spread the real namespace so `readFile` / `writeFile` / etc. survive
@@ -123,7 +131,7 @@ const {
   getAuthStatus,
   signOut,
   markSignedIn,
-  markAuthFatalAndSignOut,
+  markAuthDegraded,
   __resetAuthControllerForTests,
   __setAuthControllerDepsForTests,
 } = await import("~/lib/auth-controller")
@@ -169,9 +177,16 @@ beforeEach(() => {
       harness.addAccountCalls.push(rec)
       return harness.addAccountImpl(rec)
     },
-    // No-op so signOut doesn't touch the real on-disk registry in unit tests
-    // (and resolves within the microtask window the assertions flush).
-    removeActiveAccount: () => Promise.resolve(),
+    // No-ops so signOut / markAuthDegraded don't touch the real on-disk
+    // registry in unit tests (and resolve within the flushed microtask window).
+    deactivateActiveAccount: () => {
+      harness.deactivateCalls++
+      return Promise.resolve()
+    },
+    markActiveNeedsReauth: (err) => {
+      harness.markNeedsReauthCalls.push(err)
+      return Promise.resolve()
+    },
   })
   state.githubToken = undefined
   state.copilotToken = undefined
@@ -190,6 +205,8 @@ beforeEach(() => {
   harness.unlinkImpl = () => Promise.resolve()
   harness.unlinkCalls = []
   harness.addAccountCalls = []
+  harness.deactivateCalls = 0
+  harness.markNeedsReauthCalls = []
   harness.pollAccessTokenCalls = 0
   harness.setupCopilotTokenImpl = () => Promise.resolve()
   harness.setupCopilotTokenCalls = 0
@@ -548,9 +565,10 @@ describe("runPoller (driven by startDeviceFlow)", () => {
 
   test("fatal Copilot rejection after sign-in surfaces the error, never latches signed-in", async () => {
     // setupCopilotToken mimics production: a 401/403 from Copilot (license
-    // revoked / TOS unaccepted) routes through markAuthFatalAndSignOut — which
-    // wipes the token AND sets the error state — then rethrows. runPoller must
-    // NOT paper a signed-in UI over that wiped session and bury the reason.
+    // revoked / TOS unaccepted) routes through markAuthDegraded — which drops
+    // the live token AND sets the error state (but RETAINS the on-disk
+    // credential) — then rethrows. runPoller must NOT paper a signed-in UI over
+    // that degraded session and bury the reason.
     const poll = deferred<string>()
     harness.pollAccessTokenImpl = () => poll.promise
     harness.getGitHubUserImpl = () => Promise.resolve({ login: "alice" })
@@ -560,7 +578,7 @@ describe("runPoller (driven by startDeviceFlow)", () => {
       "https://github.com/settings/copilot",
     )
     harness.setupCopilotTokenImpl = async () => {
-      await markAuthFatalAndSignOut(fatal)
+      await markAuthDegraded(fatal)
       throw fatal
     }
 
@@ -571,7 +589,7 @@ describe("runPoller (driven by startDeviceFlow)", () => {
     const status = getAuthStatus()
     assertError(status)
     expect(status.error).toBe("Copilot license revoked")
-    // The session was wiped by markAuthFatalAndSignOut — never left signed-in.
+    // The live token was dropped by markAuthDegraded — never left signed-in.
     expect(state.githubToken).toBeUndefined()
   })
 
@@ -849,18 +867,15 @@ describe("signOut", () => {
   })
 })
 
-// --- markAuthFatalAndSignOut ----------------------------------------------
+// --- markAuthDegraded (non-destructive) -----------------------------------
 
-describe("markAuthFatalAndSignOut", () => {
-  test("clears all token state and restamps lastError with structured payload", async () => {
-    const { markAuthFatalAndSignOut } = await import("~/lib/auth-controller")
-    const { CopilotAuthFatalError } = await import("~/lib/error")
-
+describe("markAuthDegraded", () => {
+  test("drops the LIVE tokens + sets the error state but RETAINS the credential (no unlink) and flags needs-reauth", async () => {
     state.githubToken = "ghu_x"
     state.copilotToken = "tok"
     state.userName = "alice"
 
-    await markAuthFatalAndSignOut(
+    await markAuthDegraded(
       new CopilotAuthFatalError(
         "nope",
         403,
@@ -868,10 +883,19 @@ describe("markAuthFatalAndSignOut", () => {
       ),
     )
 
+    // Live in-memory tokens are dropped so we fail fast.
     expect(state.githubToken).toBeUndefined()
     expect(state.copilotToken).toBeUndefined()
     expect(state.userName).toBeUndefined()
-    expect(harness.unlinkCalls).toContain(PATHS.GITHUB_TOKEN_PATH)
+    // CRITICAL: the on-disk credential is NOT deleted — never unlink here, and
+    // never run the destructive deactivate. The account is flagged needs-reauth
+    // (retained) with a structured error instead.
+    expect(harness.unlinkCalls).not.toContain(PATHS.GITHUB_TOKEN_PATH)
+    expect(harness.deactivateCalls).toBe(0)
+    expect(harness.markNeedsReauthCalls).toHaveLength(1)
+    expect(harness.markNeedsReauthCalls[0].status).toBe(403)
+    expect(harness.markNeedsReauthCalls[0].message).toBe("nope")
+    expect(typeof harness.markNeedsReauthCalls[0].at).toBe("string")
     expect(getAuthStatus()).toEqual({
       state: "error",
       error: "nope",
@@ -880,16 +904,11 @@ describe("markAuthFatalAndSignOut", () => {
   })
 
   test("omits remediation_url from status when remediationUrl is null", async () => {
-    const { markAuthFatalAndSignOut } = await import("~/lib/auth-controller")
-    const { CopilotAuthFatalError } = await import("~/lib/error")
-
     state.githubToken = "ghu_x"
     state.copilotToken = "tok"
     state.userName = "alice"
 
-    await markAuthFatalAndSignOut(
-      new CopilotAuthFatalError("revoked", 401, null),
-    )
+    await markAuthDegraded(new CopilotAuthFatalError("revoked", 401, null))
 
     const status = getAuthStatus()
     expect(status).toEqual({ state: "error", error: "revoked" })
@@ -897,10 +916,7 @@ describe("markAuthFatalAndSignOut", () => {
   })
 
   test("subsequent startDeviceFlow clears the remediation", async () => {
-    const { markAuthFatalAndSignOut } = await import("~/lib/auth-controller")
-    const { CopilotAuthFatalError } = await import("~/lib/error")
-
-    await markAuthFatalAndSignOut(
+    await markAuthDegraded(
       new CopilotAuthFatalError(
         "nope",
         403,
@@ -916,17 +932,14 @@ describe("markAuthFatalAndSignOut", () => {
     expect(status).not.toHaveProperty("remediation_url")
   })
 
-  test("tolerates a no-token starting state with ENOENT on unlink", async () => {
-    const { markAuthFatalAndSignOut } = await import("~/lib/auth-controller")
-    const { CopilotAuthFatalError } = await import("~/lib/error")
-
-    // Nothing to clear, file already gone.
-    const enoent: NodeJS.ErrnoException = Object.assign(new Error("missing"), {
-      code: "ENOENT",
+  test("tolerates a registry-write failure without throwing (credential degrade is best-effort)", async () => {
+    // The needs-reauth flag write rejects; markAuthDegraded must swallow it and
+    // still land in the error state (degrading must never throw).
+    __setAuthControllerDepsForTests({
+      markActiveNeedsReauth: () => Promise.reject(new Error("disk full")),
     })
-    harness.unlinkImpl = () => Promise.reject(enoent)
 
-    await markAuthFatalAndSignOut(
+    await markAuthDegraded(
       new CopilotAuthFatalError("tos not accepted", 403, null),
     )
 
@@ -936,22 +949,18 @@ describe("markAuthFatalAndSignOut", () => {
   })
 
   test("cancels an in-flight device flow (status becomes error, not device_code_issued)", async () => {
-    const { markAuthFatalAndSignOut } = await import("~/lib/auth-controller")
-    const { CopilotAuthFatalError } = await import("~/lib/error")
-
     // Active flow with a hanging poll.
     harness.pollAccessTokenImpl = () => new Promise<string>(() => {})
 
     await startDeviceFlow()
     expect(["device_code_issued", "polling"]).toContain(getAuthStatus().state)
 
-    await markAuthFatalAndSignOut(
+    await markAuthDegraded(
       new CopilotAuthFatalError("revoked mid-flow", 401, null),
     )
 
-    // Mirrors existing signOut tests: post-cancel status must NOT
-    // surface the in-flight flow. Here the auth-fatal restamps
-    // lastError, so we see `error` rather than `unauthenticated`.
+    // Post-cancel status must NOT surface the in-flight flow. The auth-fatal
+    // sets the error state, so we see `error` rather than `unauthenticated`.
     const status = getAuthStatus()
     assertError(status)
     expect(status.error).toBe("revoked mid-flow")

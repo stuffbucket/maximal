@@ -224,6 +224,72 @@ export const debugJsonTail = (
   ])
 }
 
+/** The subset of consola's surface our runtime call sites use. */
+export interface TeeLogger {
+  info: (...args: Array<unknown>) => void
+  warn: (...args: Array<unknown>) => void
+  error: (...args: Array<unknown>) => void
+  debug: (...args: Array<unknown>) => void
+}
+
+/**
+ * A logger that writes through the GLOBAL `consola` (so the dev console — and
+ * any test that spies on `consola.warn`/`.error` — still sees every line) AND
+ * tees a redacted copy to a dated `<name>-YYYY-MM-DD.log` in the logs dir. This
+ * is the seam that makes runtime events (especially auth: sign-in, degrade,
+ * refresh retries, sign-out) OBSERVABLE AFTER THE FACT instead of vanishing
+ * into stderr / the Tauri dev terminal where they can't be inspected later.
+ *
+ * The file copy redacts non-string args (matching the handler-logger
+ * discipline) so a logged error object can't leak a token to disk; string args
+ * are caller labels and kept. `debug` only writes (console + file) when verbose.
+ */
+export const createTeeLogger = (name: string): TeeLogger => {
+  const sanitizedName = sanitizeName(name)
+  // consola's typed signature won't accept a spread of `unknown[]`; alias to a
+  // permissive shape so we can forward variadic args straight through.
+  const c = consola as unknown as TeeLogger
+
+  const writeFile = (type: string, args: Array<unknown>) => {
+    initializeLoggerRuntime()
+    const context = requestContext.getStore()
+    const traceId = context?.traceId
+    const now = new Date()
+    const dateKey = now.toLocaleDateString("sv-SE")
+    const timestamp = now.toLocaleString("sv-SE", { hour12: false })
+    const filePath = path.join(LOG_DIR, `${sanitizedName}-${dateKey}.log`)
+    const redacted = args.map((arg) =>
+      typeof arg === "string" ? arg : redactForLog(arg),
+    )
+    const message = formatArgs(redacted)
+    const traceIdStr = traceId ? ` [${traceId}]` : ""
+    appendLine(
+      filePath,
+      `[${timestamp}] [${type}] [${name}]${traceIdStr}${message ? ` ${message}` : ""}`,
+    )
+  }
+
+  return {
+    info: (...args) => {
+      c.info(...args)
+      writeFile("info", args)
+    },
+    warn: (...args) => {
+      c.warn(...args)
+      writeFile("warn", args)
+    },
+    error: (...args) => {
+      c.error(...args)
+      writeFile("error", args)
+    },
+    debug: (...args) => {
+      if (!state.verbose) return
+      c.debug(...args)
+      writeFile("debug", args)
+    },
+  }
+}
+
 export const createHandlerLogger = (name: string): ConsolaInstance => {
   const sanitizedName = sanitizeName(name)
   const instance = consola.withTag(name)

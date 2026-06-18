@@ -143,6 +143,14 @@ export function makeRecord(
 
 export type AddedVia = "device-code" | "gh-cli" | "migration"
 
+/** Last fatal rejection recorded for an account (Copilot 401/403). Retained
+ *  on the record so the UI can explain WHY and logs have a durable trail. */
+export interface AccountAuthError {
+  status: number | null
+  message: string
+  at: string
+}
+
 /** One stored identity. `login@host` is the dedup key — re-adding the same
  *  identity replaces the token (latest wins) rather than duplicating. */
 export interface AccountRecord {
@@ -152,6 +160,17 @@ export interface AccountRecord {
   tokenType: TokenType
   addedVia: AddedVia
   obtainedAt: string
+  /**
+   * Set when this account's credential was rejected by Copilot (401/403).
+   * The record + token are RETAINED, never deleted — destroying a credential
+   * on a transient upstream rejection was the bug that forced constant
+   * re-auth. Cleared on the next successful mint. Optional for backward
+   * compatibility: registries written before this field round-trip cleanly
+   * (readRegistry passes `accounts` through verbatim).
+   */
+  needsReauth?: boolean
+  /** The rejection that set `needsReauth`, for UI + logs. */
+  lastError?: AccountAuthError | null
 }
 
 /** Stable identity key. Hosts are gh's host format (`github.com` / a GHES
@@ -227,6 +246,53 @@ export function removeAccount(
     schemaVersion: 2,
     activeKey: reg.activeKey === key ? null : reg.activeKey,
     accounts,
+  }
+}
+
+/** Deactivate the active account WITHOUT deleting it — drop the active
+ *  pointer but keep every record (and its token). The signed-out / degraded
+ *  state then still knows which account it was, so the UI can name it and
+ *  offer one-click (or zero-click) reconnect. Pure. Contrast `removeAccount`,
+ *  which forgets the credential entirely. */
+export function deactivate(reg: AccountRegistry): AccountRegistry {
+  if (!reg.activeKey) return reg
+  return { ...reg, activeKey: null }
+}
+
+/** Flag an account as needing re-auth (its credential was rejected). Retains
+ *  the record + token; records the rejection for the UI/logs. No-op if the
+ *  key is absent. Pure. */
+export function markNeedsReauth(
+  reg: AccountRegistry,
+  key: AccountKey,
+  error: AccountAuthError,
+): AccountRegistry {
+  if (!(key in reg.accounts)) return reg
+  const rec = reg.accounts[key]
+  return {
+    ...reg,
+    accounts: {
+      ...reg.accounts,
+      [key]: { ...rec, needsReauth: true, lastError: error },
+    },
+  }
+}
+
+/** Clear an account's needs-reauth flag (its credential worked again). No-op
+ *  if the key is absent or already clean. Pure. */
+export function clearNeedsReauth(
+  reg: AccountRegistry,
+  key: AccountKey,
+): AccountRegistry {
+  if (!(key in reg.accounts)) return reg
+  const rec = reg.accounts[key]
+  if (!rec.needsReauth && !rec.lastError) return reg
+  return {
+    ...reg,
+    accounts: {
+      ...reg.accounts,
+      [key]: { ...rec, needsReauth: false, lastError: null },
+    },
   }
 }
 
@@ -356,12 +422,23 @@ export async function addAccountToDefaultRegistry(
   await writeDefaultRegistry(addAndActivate(reg, rec))
 }
 
-/** Sign-out helper: drop the active account (keeping any others) and persist.
- *  No-op when nothing is active. */
-export async function removeActiveFromDefaultRegistry(): Promise<void> {
+/** Sign-out helper that RETAINS the account: drop the active pointer but keep
+ *  every record. The signed-out UI can still name the last account and offer
+ *  reconnect. No-op when nothing is active. */
+export async function deactivateActiveInDefaultRegistry(): Promise<void> {
   const reg = await readDefaultRegistry()
   if (!reg.activeKey) return
-  await writeDefaultRegistry(removeAccount(reg, reg.activeKey))
+  await writeDefaultRegistry(deactivate(reg))
+}
+
+/** Flag the active account as needing re-auth on disk (credential rejected),
+ *  retaining its record + token. No-op when nothing is active. */
+export async function markActiveNeedsReauthInDefaultRegistry(
+  error: AccountAuthError,
+): Promise<void> {
+  const reg = await readDefaultRegistry()
+  if (!reg.activeKey) return
+  await writeDefaultRegistry(markNeedsReauth(reg, reg.activeKey, error))
 }
 
 /**
