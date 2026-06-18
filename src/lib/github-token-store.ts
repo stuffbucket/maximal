@@ -453,6 +453,17 @@ export async function clearActiveNeedsReauthInDefaultRegistry(): Promise<void> {
   await writeDefaultRegistry(cleared)
 }
 
+/** Flag a SPECIFIC account (by key) as needing re-auth on disk — for the
+ *  auto-recovery sweep to mark a candidate that fails preflight or mint without
+ *  it being the active account. No-op when the key is absent. */
+export async function markNeedsReauthInDefaultRegistry(
+  key: AccountKey,
+  error: AccountAuthError,
+): Promise<void> {
+  const reg = await readDefaultRegistry()
+  await writeDefaultRegistry(markNeedsReauth(reg, key, error))
+}
+
 /**
  * Back-compat read: "the active account's token", in the legacy record shape.
  * Boot, the CLI auth reuse-check, setup-status, and debug all just want the

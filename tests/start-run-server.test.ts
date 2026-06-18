@@ -142,10 +142,15 @@ globalThis.fetch = (() =>
 
 const { state } = await import("~/lib/state")
 const { runServer, start } = await import("~/start")
-const { getAuthStatus, signOut } = await import("~/lib/auth-controller")
+const { getAuthStatus, signOut, __resetAuthControllerForTests } =
+  await import("~/lib/auth-controller")
 const { CopilotAuthFatalError } = await import("~/lib/error")
 
 function resetState(): void {
+  // Reset auth-controller module state (authState, the degrade single-flight /
+  // grace window, and the auto-recovery hook) so a sibling test file's recent
+  // markSignedIn / registered recovery can't leak in and suppress a boot degrade.
+  __resetAuthControllerForTests()
   state.githubToken = undefined
   state.userName = undefined
   state.copilotToken = undefined
@@ -297,6 +302,11 @@ describe("runServer — GitHub token resolution", () => {
     // Settings "Sign in" screen instead of dead-ending as a bare
     // "Not signed in".
     storedRecord = { accessToken: "good-token" }
+    // Phase 2 auto-recovery would otherwise try OTHER accounts in the shared
+    // temp registry (polluted by sibling test files) and make real network
+    // preflight calls. With no other accounts, the fatal cleanly surfaces as
+    // the error state — which is exactly what this test asserts.
+    await realStoreModule.writeDefaultRegistry(realStoreModule.emptyRegistry())
     const tmpSetup = setupCopilotTokenMock.getMockImplementation()
     ;(
       setupCopilotTokenMock as unknown as Mock<() => Promise<void>>

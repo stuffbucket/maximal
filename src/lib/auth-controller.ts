@@ -483,6 +483,7 @@ async function runPoller(flow: ActiveFlow): Promise<void> {
  * an error state, not an authenticated one.
  */
 export function markSignedIn(login: string): void {
+  noteAuthSuccess()
   setAuthState({ kind: "signed-in", login })
 }
 
@@ -547,6 +548,28 @@ export async function signOut(): Promise<void> {
   }
 }
 
+// Zero-click auto-recovery hook. Registered by auth-recovery.ts via
+// registerAutoRecovery (NOT a static import — that would deepen the
+// token<->auth-controller cycle). null until that module loads.
+let autoRecover: (() => Promise<boolean>) | null = null
+// Single-flight + grace-window state for markAuthDegraded.
+let degradeInFlight: Promise<void> | null = null
+let lastAuthSuccessMs = 0
+const RECOVERY_GRACE_MS = 3000
+
+/** Register the zero-click auto-recovery sweep. Called once by auth-recovery.ts
+ *  at module load (bootstrap side-effect-imports it). */
+export function registerAutoRecovery(fn: () => Promise<boolean>): void {
+  autoRecover = fn
+}
+
+/** Record that a credential just worked (sign-in / live switch / boot mint), so
+ *  a stale 401 from a request that was in flight under the OLD token doesn't
+ *  tear the fresh session down (see the grace window in markAuthDegraded). */
+export function noteAuthSuccess(): void {
+  lastAuthSuccessMs = Date.now()
+}
+
 /**
  * React to a CopilotAuthFatalError (GHCP 401/403) WITHOUT destroying the
  * GitHub credential. This is the load-bearing fix: the old behaviour ran a
@@ -566,9 +589,23 @@ export async function signOut(): Promise<void> {
  * none of those paths delete the credential either. Only an explicit user
  * "forget account" removes a record.
  */
-export async function markAuthDegraded(
-  error: CopilotAuthFatalError,
-): Promise<void> {
+export function markAuthDegraded(error: CopilotAuthFatalError): Promise<void> {
+  // Single-flight: forwardError fires one of these per failing completion, so a
+  // burst of concurrent auth-fatals must coalesce into ONE degrade+recovery
+  // sweep rather than each clearing tokens / racing a recovery.
+  if (degradeInFlight) return degradeInFlight
+  // Grace window: a 401 arriving right after a successful (re)auth is almost
+  // certainly the response to a request that was in flight under the OLD token.
+  // Don't tear down the freshly-recovered/just-signed-in session for it.
+  if (Date.now() - lastAuthSuccessMs < RECOVERY_GRACE_MS)
+    return Promise.resolve()
+  degradeInFlight = runDegrade(error).finally(() => {
+    degradeInFlight = null
+  })
+  return degradeInFlight
+}
+
+async function runDegrade(error: CopilotAuthFatalError): Promise<void> {
   // Cancel any in-flight device-code poller so it can't latch signed-in over
   // the degraded state after this returns (the old signOut() path did this).
   const flow = currentFlow()
@@ -581,16 +618,14 @@ export async function markAuthDegraded(
   state.githubToken = undefined
   state.userName = undefined
 
-  // Idempotency: forwardError calls this on EVERY completion auth-fatal, so a
-  // burst of concurrent 401s (and the boot path re-reporting setupCopilotToken's
-  // already-handled fatal) all land here with the same error. Once we're in the
-  // matching error state the account is already flagged and the UI notified —
-  // skip the redundant accounts.json write + SSE emission. In-memory tokens are
-  // cleared above on every call (idempotent + cheap), so failing fast still holds.
+  // Idempotency: once we're already in the matching error state the account is
+  // flagged and the UI notified — skip the redundant accounts.json write + SSE
+  // emission. (In-memory tokens are cleared above on every call.)
   if (authState.kind === "error" && authState.message === error.message) {
     return
   }
 
+  // Flag the (currently-active) account needs-reauth, RETAINING its credential.
   try {
     await markActiveNeedsReauth({
       status: error.status,
@@ -602,6 +637,23 @@ export async function markAuthDegraded(
       "Auth-controller: failed to flag account needs-reauth (credential retained):",
       err,
     )
+  }
+
+  // Zero-click recovery: try a known-good account LIVE before giving up. The
+  // just-flagged account is now needsReauth, so the sweep skips it. On success
+  // the session is already signed-in onto another account — don't set error.
+  if (autoRecover) {
+    try {
+      const recovered = await autoRecover()
+      if (recovered) {
+        log.info(
+          "Auto-recovered onto a known-good account; no sign-out required.",
+        )
+        return
+      }
+    } catch (err) {
+      log.warn("Auth-controller: auto-recovery sweep failed:", err)
+    }
   }
 
   setAuthState({
@@ -635,6 +687,12 @@ export function __resetAuthControllerForTests(): void {
   }
   authState = { kind: "signed-out" }
   resetAuthControllerDeps()
+  // Reset the degrade single-flight / grace-window / recovery-hook state so it
+  // can't leak across cases (a prior markSignedIn must not let the grace window
+  // suppress a fresh test's degrade).
+  degradeInFlight = null
+  lastAuthSuccessMs = 0
+  autoRecover = null
   // getAuthStatus falls back to state.userName for a signed-in session
   // (so cold-boot from a stored token populates the Account UI). Tests
   // reset state.githubToken between cases; reset the cached userName here

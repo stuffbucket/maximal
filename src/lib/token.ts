@@ -109,7 +109,16 @@ export const stopCopilotRefreshLoop = () => {
   copilotRefreshLoopController = null
 }
 
-export const setupCopilotToken = async () => {
+export const setupCopilotToken = async (opts?: {
+  /**
+   * What to do if the FIRST mint hits a CopilotAuthFatalError. Default
+   * "degrade" routes it through markAuthDegraded (flag + retain + error state).
+   * The auto-recovery path passes "throw" so IT owns the degrade decision —
+   * calling markAuthDegraded from inside a recovery sweep would re-enter the
+   * sweep and deadlock/clobber it (see auth-recovery.ts).
+   */
+  onAuthFatal?: "degrade" | "throw"
+}) => {
   // Runtime token-type detection: `gho_` tokens (OAuth-App user tokens, e.g.
   // opencode-style or any Ov23li…-prefixed app) are accepted directly by the
   // Copilot edge, don't expire, and need no refresh loop. `ghu_` tokens
@@ -148,7 +157,9 @@ export const setupCopilotToken = async () => {
         "Copilot rejected the GitHub token at first mint:",
         error.message,
       )
-      await markAuthDegraded(error)
+      if (opts?.onAuthFatal !== "throw") {
+        await markAuthDegraded(error)
+      }
       throw error
     }
     throw error

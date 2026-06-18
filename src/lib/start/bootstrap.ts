@@ -18,6 +18,10 @@
 
 import consola from "consola"
 
+// Side-effect import: registers the zero-click auto-recovery sweep into
+// auth-controller (registerAutoRecovery) before the server binds, so the first
+// completion auth-fatal can trigger a live account switch.
+import "~/lib/auth-recovery"
 import {
   markAuthDegraded,
   markSignedIn,
