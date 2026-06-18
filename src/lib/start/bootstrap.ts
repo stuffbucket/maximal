@@ -18,15 +18,18 @@
 
 import consola from "consola"
 
-// NOTE: auto-recovery (~/lib/auth-recovery) is intentionally NOT imported/wired
-// here. Auto-switching identity needs prior user consent (same plan ≠ same data
-// governance), so a fatal rejection degrades non-destructively and surfaces the
-// reason instead. See auth-recovery.ts header.
 import {
   markAuthDegraded,
   markSignedIn,
   markSignedOut,
+  registerAutoRecovery,
 } from "~/lib/auth-controller"
+// Auto-recovery is parked behind config.autoRecoverAccount (defaults OFF).
+// Auto-switching identity needs prior user consent — same plan ≠ same data
+// governance — so the registration is gated below and the module is loaded
+// lazily only when the user has opted in. Off → degrade + surface the reason.
+import { attemptAutoRecovery } from "~/lib/auth-recovery"
+import { isAutoRecoverAccountEnabled } from "~/lib/config"
 import { CopilotAuthFatalError } from "~/lib/error"
 import { currentGitHubHost } from "~/lib/github-host"
 import {
@@ -45,6 +48,15 @@ import { emitBootStatus } from "./boot-status"
 export async function bootstrapUpstream(
   githubTokenOverride: string | undefined,
 ): Promise<void> {
+  // Wire the auto-recovery sweep ONLY when the user has opted in
+  // (config.autoRecoverAccount, default OFF). Their opt-in is the prior
+  // authorization to treat stored accounts as interchangeable; otherwise the
+  // hook stays dormant and a fatal rejection degrades + surfaces the reason.
+  if (isAutoRecoverAccountEnabled()) {
+    registerAutoRecovery(attemptAutoRecovery)
+    consola.info("Auto-recover account: enabled")
+  }
+
   if (githubTokenOverride) {
     state.githubToken = githubTokenOverride
     consola.info("Using provided GitHub token")

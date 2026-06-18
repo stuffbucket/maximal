@@ -1,26 +1,23 @@
 /**
  * Auto-recovery onto a known-good account.
  *
- * ⚠️ DISABLED — NOT WIRED INTO PRODUCTION. The logic below is retained and
- * tested, but it is intentionally NOT registered with markAuthDegraded, so the
- * proxy never auto-switches identity on its own.
+ * ⚠️ OFF BY DEFAULT — parked behind `config.autoRecoverAccount`. bootstrap only
+ * registers this sweep with markAuthDegraded when that flag is on; otherwise the
+ * hook stays dormant and the proxy never auto-switches identity.
  *
- * Why: switching accounts is a governance decision the user must authorize in
- * advance. Two accounts on the SAME plan can sit under different data
+ * Why gated: switching accounts is a governance decision the user must authorize
+ * in advance. Two accounts on the SAME plan can sit under different data
  * governance (tenancy, residency, retention, audit), so "same plan" is not a
- * safe proxy for "interchangeable". We cannot move which identity serves
- * completions without prior consent. The intended UX is therefore: on a fatal
- * rejection, degrade non-destructively (credential retained + flagged
- * needsReauth) and surface the reason / a notification that deep-links to the
- * Settings sign-in page — let the user choose. Re-enabling auto-enactment means
- * wiring this behind an explicit per-account "authorized for auto-switch"
- * consent gate, plus the seamless (no-drop) restart, not a live in-process
- * mutation. Until then this module is reachable only from its tests.
+ * safe proxy for "interchangeable". Enabling the flag IS that prior consent.
+ * With it off, a fatal rejection degrades non-destructively (credential retained
+ * + flagged needsReauth) and surfaces the reason / a notification that
+ * deep-links to the Settings sign-in page — the user picks. (A future
+ * refinement pairs the enacted switch with a seamless, no-drop restart rather
+ * than the live in-process mutation here.)
  *
- * Implementation note (for the future consent-gated path): `attemptAutoRecovery`
- * preflights each non-flagged account and would enact via
- * `switchActiveAccountLive`, which mints with `setupCopilotToken({ onAuthFatal:
- * "throw" })` so a mint failure doesn't recurse the sweep.
+ * Re-entrancy: `attemptAutoRecovery` preflights each non-flagged account and
+ * enacts via `switchActiveAccountLive`, which mints with `setupCopilotToken({
+ * onAuthFatal: "throw" })` so a mint failure doesn't recurse the sweep.
  */
 
 import type { AccountRecord } from "./github-token-store"
@@ -156,6 +153,6 @@ export async function attemptAutoRecovery(): Promise<boolean> {
   return false
 }
 
-// NO auto-registration. Enacting a switch requires prior user authorization
-// (see the module header) — to re-enable behind a consent gate, call
-// `registerAutoRecovery(attemptAutoRecovery)` from there, not here.
+// No auto-registration at module load. bootstrap calls
+// registerAutoRecovery(attemptAutoRecovery) ONLY when config.autoRecoverAccount
+// is enabled (the user's prior authorization) — see the module header.

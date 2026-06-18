@@ -548,11 +548,9 @@ export async function signOut(): Promise<void> {
   }
 }
 
-// Auto-recovery hook. DORMANT by default: nothing registers it in production
-// (auth-recovery.ts is intentionally not wired — auto-switching identity needs
-// prior user consent). The hook + its single call site below are kept so the
-// future consent-gated path can register a sweep without reworking the degrade
-// flow; tests register a stub to verify the wiring.
+// Auto-recovery hook. DORMANT by default: bootstrap registers a sweep only when
+// config.autoRecoverAccount is enabled (auto-switching identity needs prior user
+// consent). null otherwise → markAuthDegraded falls through to the error state.
 let autoRecover: (() => Promise<boolean>) | null = null
 // Single-flight + grace-window state for markAuthDegraded.
 let degradeInFlight: Promise<void> | null = null
@@ -560,8 +558,7 @@ let lastAuthSuccessMs = 0
 const RECOVERY_GRACE_MS = 3000
 
 /** Register an auto-recovery sweep to run before markAuthDegraded gives up.
- *  NOT called in production today (see the dormancy note above) — reserved for
- *  a future consent-gated re-enable. */
+ *  Called by bootstrap only when config.autoRecoverAccount is enabled. */
 export function registerAutoRecovery(fn: () => Promise<boolean>): void {
   autoRecover = fn
 }
@@ -642,10 +639,9 @@ async function runDegrade(error: CopilotAuthFatalError): Promise<void> {
     )
   }
 
-  // Optional recovery sweep before giving up. DORMANT in production
-  // (`autoRecover` is null — see registerAutoRecovery): auto-switching identity
-  // needs prior user consent, so today we fall straight through to the error
-  // state and surface the reason. Reserved for a future consent-gated path.
+  // Optional recovery sweep before giving up. Registered only when the user
+  // opted into config.autoRecoverAccount; otherwise `autoRecover` is null and we
+  // fall straight through to the error state and surface the reason.
   if (autoRecover) {
     try {
       const recovered = await autoRecover()

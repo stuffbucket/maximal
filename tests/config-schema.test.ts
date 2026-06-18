@@ -60,6 +60,23 @@ describe("validateAppConfig", () => {
     expect(thrown?.issues[0].path).toBe("useMessagesApi")
   })
 
+  it("accepts the autoRecoverAccount opt-in flag (boolean)", () => {
+    expect(validateAppConfig({ autoRecoverAccount: true })).toEqual({
+      autoRecoverAccount: true,
+    })
+  })
+
+  it("rejects a non-boolean autoRecoverAccount with its key path", () => {
+    let thrown: ConfigValidationError | null = null
+    try {
+      validateAppConfig({ autoRecoverAccount: "yes" })
+    } catch (e) {
+      if (e instanceof ConfigValidationError) thrown = e
+    }
+    expect(thrown).not.toBeNull()
+    expect(thrown?.issues[0].path).toBe("autoRecoverAccount")
+  })
+
   it("rejects a bad reasoning effort value", () => {
     let thrown: ConfigValidationError | null = null
     try {
