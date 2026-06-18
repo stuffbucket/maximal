@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.27](https://github.com/stuffbucket/maximal/compare/v0.4.26...v0.4.27) (2026-06-18)
+
+
+### Bug Fixes
+
+* **auth:** retain credentials on upstream failure; tolerate sparse model catalog ([#133](https://github.com/stuffbucket/maximal/issues/133)) ([911de65](https://github.com/stuffbucket/maximal/commit/911de65b16ea65cc594d6613657aa9f5d3bc9279))
+
 ## [0.4.26](https://github.com/stuffbucket/maximal/compare/v0.4.25...v0.4.26) (2026-06-17)
 
 
