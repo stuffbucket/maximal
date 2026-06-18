@@ -117,7 +117,7 @@ jobs:
 
       - uses: ./.github/actions/setup-bun
         with:
-          bun-version: latest
+          bun-version: 1.3.11
 
       # On merge of a release PR, create + push the TAG only (no GitHub
       # Release — release.yml owns that; see the WHY TAG-ONLY note above).
@@ -142,6 +142,31 @@ jobs:
           git tag -a "${TAG}" -m "${TAG}"
           git push origin "${TAG}"
           echo "Pushed ${TAG} — release.yml will build + publish it."
+
+      # If the manifest version has a tag but its GitHub Release hasn't been
+      # published yet (draft or absent), dispatch release.yml so the release
+      # pipeline is retried automatically. workflow_dispatch is NOT subject
+      # to the GITHUB_TOKEN anti-loop guard that suppresses push:tags: triggers,
+      # so this fires release.yml even when the tag was pushed via GITHUB_TOKEN.
+      - name: Re-trigger release.yml for any unpublished tagged release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="$(jq -r '.["."]' .release-please-manifest.json)"
+          TAG="v${VERSION}"
+          if ! git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "Tag ${TAG} not yet on remote — release.yml will fire when the tag is pushed above."
+            exit 0
+          fi
+          DRAFT="$(gh release view "$TAG" --repo "${{ github.repository }}" --json isDraft --jq '.isDraft' 2>/dev/null || echo 'notfound')"
+          if [ "$DRAFT" = "false" ]; then
+            echo "Release $TAG is already published — nothing to do."
+            exit 0
+          fi
+          echo "Tag ${TAG} exists but release is '${DRAFT}' — dispatching release.yml..."
+          gh workflow run release.yml --repo "${{ github.repository }}" --ref "${TAG}"
+          echo "Dispatched release.yml for ${TAG}."
 
       # Open or update the release PR for the NEXT version (version bump +
       # CHANGELOG.md from conventional commits since the last tag).
