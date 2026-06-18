@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.28](https://github.com/stuffbucket/maximal/compare/v0.4.27...v0.4.28) (2026-06-18)
+
+
+### Features
+
+* **shell:** browser-window UI rewrite — account hero, update alerts, refresh feedback ([#135](https://github.com/stuffbucket/maximal/issues/135)) ([f861a72](https://github.com/stuffbucket/maximal/commit/f861a72e958477c4dc411bbdaf532ffaa4f7e30d))
+
 ## [0.4.27](https://github.com/stuffbucket/maximal/compare/v0.4.26...v0.4.27) (2026-06-18)
 
 
