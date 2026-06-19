@@ -57,6 +57,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  actions: write
 
 # One release-please run per branch. Never cancel in-flight: a run that
 # is mid-tag-creation must finish, not be interrupted by the next push
