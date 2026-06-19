@@ -166,7 +166,7 @@ jobs:
             exit 0
           fi
           echo "Tag ${TAG} exists but release is '${DRAFT}' — dispatching release.yml..."
-          gh workflow run release.yml --repo "${{ github.repository }}" --ref "${TAG}"
+          gh workflow run release.yml --repo "${{ github.repository }}" --ref "${TAG}" -f tag="${TAG}"
           echo "Dispatched release.yml for ${TAG}."
 
       # Open or update the release PR for the NEXT version (version bump +
