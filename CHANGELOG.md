@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.4.30](https://github.com/stuffbucket/maximal/compare/v0.4.29...v0.4.30) (2026-06-22)
+
+
+### Bug Fixes
+
+* **ci:** auto-dispatch release.yml for unpublished tagged releases ([#139](https://github.com/stuffbucket/maximal/issues/139)) ([40ab095](https://github.com/stuffbucket/maximal/commit/40ab095459b5fa9a82fc80f91ad52ee06b5fdc4c))
+* **ci:** grant actions:write so release-please can dispatch release.yml ([#140](https://github.com/stuffbucket/maximal/issues/140)) ([d700c31](https://github.com/stuffbucket/maximal/commit/d700c313740c8cc6a959758fd9208256d015bde0))
+* **ci:** pass required tag input when auto-dispatching release.yml ([#141](https://github.com/stuffbucket/maximal/issues/141)) ([0c41c78](https://github.com/stuffbucket/maximal/commit/0c41c7852c635b6ff8817cfcb5b977cc47fbca7c))
+* **cli:** show 'maximal' instead of legacy 'copilot-api' in debug/setup output ([#3](https://github.com/stuffbucket/maximal/issues/3)) ([#145](https://github.com/stuffbucket/maximal/issues/145)) ([6dba335](https://github.com/stuffbucket/maximal/commit/6dba335333e9a1d1872be290b123526589f065fe))
+* **messages:** strip unsupported top-level diagnostics field from inbound requests ([#127](https://github.com/stuffbucket/maximal/issues/127)) ([#143](https://github.com/stuffbucket/maximal/issues/143)) ([f301dc1](https://github.com/stuffbucket/maximal/commit/f301dc104ac32692ddf3e266a683a3c74dc6eb22))
+
 ## [0.4.29](https://github.com/stuffbucket/maximal/compare/v0.4.28...v0.4.29) (2026-06-18)
 
 
