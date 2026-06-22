@@ -1245,6 +1245,15 @@ fn fire_failed_notification(app: &AppHandle, reason: Option<&str>) {
     }
 }
 
+/// The app's release version (e.g. `0.4.31`), read from `tauri.conf.json`'s
+/// `version`. `.macos-builder/build.sh` stamps that field with the real tag
+/// at release time; in dev it's the `0.0.0` placeholder. Callers surface it
+/// in the splash and the Settings title and suppress the dev placeholder so a
+/// bare `v0.0.0` never ships in UI chrome.
+fn app_version(app: &AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
 /// Pre-boot splash window. Created the instant the app launches so the
 /// user gets immediate, visible feedback. This is a menu-bar-only app
 /// (no Dock icon, no window at launch), so without it, double-clicking
@@ -1262,6 +1271,13 @@ fn create_splash(app: &AppHandle) {
         WebviewUrl::App("splash.html".into()),
     )
     .title("Maximal")
+    // Hand the splash its version before first paint (race-free — runs
+    // ahead of page load, unlike an emitted event the page might miss).
+    // The page renders it unless it's the dev `0.0.0` placeholder.
+    .initialization_script(&format!(
+        "window.__MAXIMAL_VERSION__ = {:?};",
+        app_version(app)
+    ))
     .inner_size(440.0, 240.0)
     .resizable(false)
     .minimizable(false)
@@ -1737,12 +1753,21 @@ fn open_settings_window(app: &AppHandle, section: Option<&str>) {
         return;
     }
 
+    // Surface the version in the titlebar (window-level identity belongs in
+    // the title, not a content H1 — see docs/design/failure-modes.md). Drop
+    // the suffix in dev where the version is the `0.0.0` placeholder.
+    let version = app_version(app);
+    let title = if version == "0.0.0" {
+        "Maximal — Settings".to_string()
+    } else {
+        format!("Maximal — Settings · v{version}")
+    };
     let builder = WebviewWindowBuilder::new(
         app,
         SETTINGS_WINDOW_LABEL,
         WebviewUrl::External(url),
     )
-    .title("Maximal — Settings")
+    .title(title)
     .inner_size(900.0, 760.0)
     .min_inner_size(600.0, 560.0);
 
