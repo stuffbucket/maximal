@@ -87,6 +87,23 @@ describe("ui routes", () => {
     expect(res.headers.get("location")).toBe("/ui/settings/")
   })
 
+  test("redirects the bare /ui/dashboard to the trailing-slash index", async () => {
+    const res = await app.request("/ui/dashboard")
+    expect(res.status).toBe(301)
+    expect(res.headers.get("location")).toBe("/ui/dashboard/")
+  })
+
+  test("serves the dashboard for unknown sub-routes (index fallback)", async () => {
+    const res = await app.request("/ui/dashboard/some/unknown/path")
+    expect(res.status).toBe(200)
+    expect(await res.text()).toContain("dashboard")
+  })
+
+  test("404s an unknown surface under /ui", async () => {
+    const res = await app.request("/ui/nope/index.html")
+    expect(res.status).toBe(404)
+  })
+
   test("rejects path traversal", async () => {
     const res = await app.request("/ui/settings/../../../etc/passwd")
     expect(res.status).toBe(404)
