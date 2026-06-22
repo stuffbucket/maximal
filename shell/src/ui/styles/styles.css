@@ -730,6 +730,44 @@ a:hover {
   margin: 0;
 }
 
+/* ---- Uninstall card ----
+ * The card itself is the only surface (no nested card). Its body is a
+ * vertical stack matching the card's own rhythm; the option checkboxes,
+ * inline error, and action button each get their own row. */
+[data-uninstall-body] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.uninstall-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.uninstall-options__note {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+/* Inline, non-blocking failure line. Destructive-tinted left rule so it
+ * reads as "this went wrong" without the alarm of a filled banner; mirrors
+ * the .upstream-rejection accent treatment. */
+.uninstall-error {
+  border-left-width: 3px;
+  border-left-style: solid;
+  border-left-color: var(--accent-destructive);
+  padding-left: var(--space-3);
+  color: var(--text-base-color);
+}
+
+/* Companion to the surrounding flex stack: restore [hidden] hiding for the
+ * error row, which would otherwise stay laid out by the body's flow. */
+[data-uninstall-error][hidden] {
+  display: none;
+}
+
 /* ---- Upstream-rejection banner ----
  * Shown inside the authenticated account card when the proxy's last
  * completion attempt was rejected upstream (quota, model-not-on-plan,
