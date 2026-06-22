@@ -22,6 +22,7 @@ import {
   getCompactType,
   mergeToolResultForClaude,
   sanitizeIdeTools,
+  stripUnsupportedTopLevelAnthropicFields,
   stripToolReferenceTurnBoundary,
 } from "./preprocess"
 import { parseSubagentMarkerFromFirstUser } from "./subagent-marker"
@@ -51,6 +52,7 @@ export async function handleCompletion(c: Context) {
   await checkRateLimit(state)
 
   const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
+  stripUnsupportedTopLevelAnthropicFields(anthropicPayload)
   debugJson(logger, "Anthropic request payload:", anthropicPayload)
 
   anthropicPayload.model = resolveCopilotModel(c, anthropicPayload)

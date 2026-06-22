@@ -190,6 +190,37 @@ describe("messages handler orchestration", () => {
     expect(forwardedPayload.model).toBe("messages-model")
   })
 
+  test("strips unsupported top-level diagnostics before forwarding", async () => {
+    selectedModel = {
+      id: "messages-model",
+      supported_endpoints: ["/v1/messages"],
+    }
+
+    const app = createApp()
+    const response = await app.request("/", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        ...createPayload({
+          metadata: { user_id: "session-id" },
+        }),
+        diagnostics: {
+          client: "claude-code",
+          enabled: true,
+        },
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    expect(await response.text()).toBe("messages")
+
+    const [, forwardedPayload] = handleWithMessagesApi.mock.calls[0]
+    expect(Object.hasOwn(forwardedPayload, "diagnostics")).toBe(false)
+    expect(forwardedPayload.metadata).toEqual({ user_id: "session-id" })
+  })
+
   test("delegates to the Responses API flow when the model supports /responses", async () => {
     selectedModel = {
       id: "responses-model",

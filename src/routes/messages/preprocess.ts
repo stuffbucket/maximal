@@ -34,6 +34,17 @@ type IndexedAttachment = {
   attachment: AnthropicAttachmentBlock
   order: number
 }
+type UnsupportedTopLevelAnthropicFields = {
+  diagnostics?: unknown
+}
+
+export const stripUnsupportedTopLevelAnthropicFields = (
+  payload: AnthropicMessagesPayload,
+): void => {
+  delete (
+    payload as AnthropicMessagesPayload & UnsupportedTopLevelAnthropicFields
+  ).diagnostics
+}
 
 const getCompactCandidateText = (message: AnthropicMessage): string => {
   if (message.role !== "user") {
