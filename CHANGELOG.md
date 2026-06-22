@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.32](https://github.com/stuffbucket/maximal/compare/v0.4.31...v0.4.32) (2026-06-22)
+
+
+### Features
+
+* detect new versions and surface an in-app upgrade prompt ([#157](https://github.com/stuffbucket/maximal/issues/157)) ([3cd63bb](https://github.com/stuffbucket/maximal/commit/3cd63bb51d1e5d3ec76292720a1eccb4c63f4460))
+* **errors:** reframe opaque upstream errors with context + recovery ([#156](https://github.com/stuffbucket/maximal/issues/156)) ([5a03386](https://github.com/stuffbucket/maximal/commit/5a03386c9cb0e889d304a0512fe3d799910523da))
+* **shell:** defer first-run Settings + show version on splash and Settings titlebar ([#154](https://github.com/stuffbucket/maximal/issues/154)) ([a9c8aae](https://github.com/stuffbucket/maximal/commit/a9c8aaec79f2b0f2444cd9508fa8fb37943e1fc2))
+
+
+### Bug Fixes
+
+* **claude-desktop:** wire Cowork 3P at the gateway via Claude-3p config library ([#159](https://github.com/stuffbucket/maximal/issues/159)) ([3a36604](https://github.com/stuffbucket/maximal/commit/3a366047221127ebba9ad34e677f446dd6e9beec))
+
 ## [0.4.31](https://github.com/stuffbucket/maximal/compare/v0.4.30...v0.4.31) (2026-06-22)
 
 
