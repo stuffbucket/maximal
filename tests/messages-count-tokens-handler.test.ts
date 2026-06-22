@@ -24,7 +24,7 @@ describe("messages count_tokens handler", () => {
       _input: string | URL | Request,
       init?: RequestInit,
     ) => {
-      upstreamBody = JSON.parse(String(init?.body)) as Record<string, unknown>
+      upstreamBody = JSON.parse(init?.body as string) as Record<string, unknown>
       return Promise.resolve(
         new Response(JSON.stringify({ input_tokens: 42 }), {
           status: 200,

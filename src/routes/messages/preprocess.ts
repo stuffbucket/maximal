@@ -41,8 +41,9 @@ type UnsupportedTopLevelAnthropicFields = {
 export const stripUnsupportedTopLevelAnthropicFields = (
   payload: AnthropicMessagesPayload,
 ): void => {
-  delete (payload as AnthropicMessagesPayload & UnsupportedTopLevelAnthropicFields)
-    .diagnostics
+  delete (
+    payload as AnthropicMessagesPayload & UnsupportedTopLevelAnthropicFields
+  ).diagnostics
 }
 
 const getCompactCandidateText = (message: AnthropicMessage): string => {
