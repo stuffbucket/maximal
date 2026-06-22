@@ -1659,11 +1659,13 @@ fn build_menu(app: &AppHandle, state: SidecarState) -> tauri::Result<Menu<tauri:
             )?;
             let sep2 = PredefinedMenuItem::separator(app)?;
             let mut items: Vec<&dyn IsMenuItem<tauri::Wry>> = Vec::new();
-            if let Some(up) = &upgrade_item {
-                items.push(up);
-                items.push(&sep_upgrade);
-            }
             items.push(&sign_in);
+            // Update is its own section BELOW the primary action, shown only
+            // when an update is available — never above sign-in.
+            if let Some(up) = &upgrade_item {
+                items.push(&sep_upgrade);
+                items.push(up);
+            }
             items.push(&sep1);
             items.push(&dashboard_item);
             items.push(&settings_item);
@@ -1685,11 +1687,13 @@ fn build_menu(app: &AppHandle, state: SidecarState) -> tauri::Result<Menu<tauri:
             )?;
             let sep2 = PredefinedMenuItem::separator(app)?;
             let mut items: Vec<&dyn IsMenuItem<tauri::Wry>> = Vec::new();
-            if let Some(up) = &upgrade_item {
-                items.push(up);
-                items.push(&sep_upgrade);
-            }
             items.push(&info);
+            // Update is its own section BELOW the account line, shown only when
+            // an update is available — never above it.
+            if let Some(up) = &upgrade_item {
+                items.push(&sep_upgrade);
+                items.push(up);
+            }
             items.push(&sep1);
             items.push(&dashboard_item);
             items.push(&settings_item);
