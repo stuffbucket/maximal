@@ -24,7 +24,9 @@ import { dirname, join, resolve } from "node:path"
 const REPO = resolve(import.meta.dir, "..")
 const SETTINGS_ENTRY = join(REPO, "shell/ui/settings/index.html")
 const DASHBOARD_SRC = join(REPO, "shell/ui/dashboard")
-const DIST = join(REPO, "shell/dist/ui")
+const SHELL_DIR = join(REPO, "shell")
+const DIST_ROOT = join(REPO, "shell/dist")
+const DIST = join(DIST_ROOT, "ui")
 const SETTINGS_OUT = join(DIST, "settings")
 const DASHBOARD_OUT = join(DIST, "dashboard")
 
@@ -54,9 +56,23 @@ async function copyDashboard(): Promise<void> {
   await cp(DASHBOARD_SRC, DASHBOARD_OUT, { recursive: true })
 }
 
+// Tauri's `frontendDist` (shell/dist) must hold the pre-boot splash it
+// loads via `WebviewUrl::App("splash.html")`, plus an index.html so the
+// bundler has a valid frontend root. The actual settings/dashboard UIs
+// are served by the sidecar at /ui/*, so this index is just a pointer.
+async function copyShellChrome(): Promise<void> {
+  await mkdir(DIST_ROOT, { recursive: true })
+  await cp(join(SHELL_DIR, "splash.html"), join(DIST_ROOT, "splash.html"))
+  await Bun.write(
+    join(DIST_ROOT, "index.html"),
+    "<!doctype html><meta charset=utf-8><title>Maximal</title>"
+      + "<p>Maximal is running. Open Settings from the menu-bar icon.</p>\n",
+  )
+}
+
 async function buildAll(): Promise<void> {
   const t = Date.now()
-  await Promise.all([buildSettings(), copyDashboard()])
+  await Promise.all([buildSettings(), copyDashboard(), copyShellChrome()])
   console.error(`[build-ui] built settings + dashboard → shell/dist/ui (${Date.now() - t}ms)`)
 }
 

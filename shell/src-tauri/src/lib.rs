@@ -18,7 +18,7 @@
 //
 // No main window is created at launch (`app.windows = []` in
 // tauri.conf.json); the tray is the only UI surface. The proxy's
-// /usage-viewer endpoint is reachable directly via the browser, and
+// /ui/dashboard endpoint is reachable directly via the browser, and
 // the `open_settings_at` Tauri command (or the tray's Settings… item)
 // pops a webview window pointed at the sidecar's settings page.
 //
@@ -42,7 +42,6 @@
 
 use std::sync::Mutex;
 use std::time::Duration;
-use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use tauri::{
@@ -81,10 +80,10 @@ const DASHBOARD_PERIODS: &[&str] = &["day", "week", "month"];
 
 const TRAY_ID: &str = "main";
 // Two webview windows, both pointed at the sidecar:
-//   settings  — http://localhost:4141/settings (config UI bundled in Tauri)
-//   dashboard — http://localhost:4141/usage-viewer (usage charts; html
-//               embedded directly into the sidecar binary via Bun import
-//               attributes — see src/server.ts).
+//   settings  — http://localhost:4141/ui/settings/  (React app)
+//   dashboard — http://localhost:4141/ui/dashboard/  (usage charts)
+// Both UIs are embedded in the sidecar binary and served at /ui/* —
+// see src/routes/ui/route.ts.
 // Labels are referenced from capabilities/default.json `windows`.
 const SETTINGS_WINDOW_LABEL: &str = "settings";
 const DASHBOARD_WINDOW_LABEL: &str = "dashboard";
@@ -623,34 +622,6 @@ pub fn run() {
     });
 }
 
-/// Walk up from the current executable (and the CWD as a backstop)
-/// looking for `shell/dist/index.html`. Used in `tauri dev` where
-/// Tauri does not materialise the `resources` mapping. Returns the
-/// absolute path of the dist directory or None.
-fn locate_dev_settings_dist() -> Option<PathBuf> {
-    let mut roots: Vec<PathBuf> = Vec::new();
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(parent) = exe.parent() {
-            roots.push(parent.to_path_buf());
-        }
-    }
-    if let Ok(cwd) = std::env::current_dir() {
-        roots.push(cwd);
-    }
-    for mut dir in roots {
-        for _ in 0..8 {
-            let candidate = dir.join("shell").join("dist");
-            if candidate.join("index.html").exists() {
-                return Some(candidate);
-            }
-            if !dir.pop() {
-                break;
-            }
-        }
-    }
-    None
-}
-
 fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
     // sidecar("maximal") looks up `bundle.externalBin[0]` from
     // tauri.conf.json and resolves the arch-suffixed binary
@@ -668,13 +639,11 @@ fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
         // shouldn't have to know which copy started first.
         .args(["start", "--replace", "--port", port.as_str()]);
 
-    // Packaged builds: tell the proxy to skip its dev-mode Vite
-    // reverse-proxy and serve the bundled settings UI from
-    // <resource_dir>/settings-dist (mapped in tauri.conf.json from
-    // ../dist to avoid the `_up_` escape Tauri applies to `..`).
-    // The route also checks for a real dist directory as a backstop,
-    // but setting NODE_ENV=production removes any ambiguity inside
-    // a Tauri-launched sidecar.
+    // The settings + dashboard UIs are embedded directly in the sidecar
+    // binary and served at /ui/* (see src/routes/ui/route.ts), so there is
+    // nothing to stage or point at — the UI travels inside the binary in
+    // both `tauri dev` and packaged builds. NODE_ENV=production is still
+    // set for parity with `maximal start` defaults elsewhere.
     cmd = cmd.env("NODE_ENV", "production");
     // Hand the shell's PID to the sidecar for its parent-death
     // watchdog. If the tray app is force-killed (Activity Monitor,
@@ -692,35 +661,6 @@ fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
         "MAXIMAL_SHELL_KEY",
         app.state::<ShellApiKey>().value().to_string(),
     );
-    let mut dist_set = false;
-    if let Ok(resource_dir) = app.path().resource_dir() {
-        let settings_dist = resource_dir.join("settings-dist");
-        if settings_dist.exists() {
-            cmd = cmd.env(
-                "MAXIMAL_SETTINGS_DIST",
-                settings_dist.to_string_lossy().to_string(),
-            );
-            dist_set = true;
-        }
-    }
-    // `tauri dev` doesn't materialise the `resources` mapping from
-    // tauri.conf.json — that's a bundler step. So the resource_dir
-    // lookup above misses, and the Bun-compiled sidecar can't walk
-    // for `shell/dist/` either (its `import.meta.dir` resolves into
-    // the embedded `$bunfs` virtual FS, not the host disk). Without
-    // an explicit pointer, every request to /settings would 503 from
-    // the dev-mode Vite fallback. Walk a few likely dev locations
-    // relative to the current exe and the cwd as a safety net.
-    if !dist_set {
-        if let Some(dir) = locate_dev_settings_dist() {
-            eprintln!("[shell] using dev settings-dist: {}", dir.display());
-            cmd = cmd.env("MAXIMAL_SETTINGS_DIST", dir.to_string_lossy().to_string());
-        } else {
-            eprintln!(
-                "[shell] WARNING: no settings-dist found; sidecar will 503 on /settings"
-            );
-        }
-    }
 
     let (mut rx, child) = cmd
         .spawn()
@@ -1746,20 +1686,13 @@ fn open_settings_window(app: &AppHandle, section: Option<&str>) {
     // and would otherwise sit over this one — e.g. the first-launch
     // sign-in nudge).
     dismiss_splash(app);
-    // In debug builds the `beforeDevCommand` in tauri.conf.json starts
-    // Vite on :1420, so we point the webview directly at it. That
-    // gives us native HMR (no proxy WebSocket gymnastics) and exposes
-    // vite-plugin-inspect at /settings/__inspect/. Release builds use
-    // the sidecar's bundled `/settings` route on :4141, which serves
-    // the pre-built dist statically.
-    let settings_origin = if cfg!(debug_assertions) {
-        "http://localhost:1420".to_string()
-    } else {
-        format!("http://localhost:{SIDECAR_PORT}")
-    };
+    // The settings UI is served by the sidecar at /ui/settings/ (embedded
+    // in the binary), in dev and prod alike — there is no separate dev
+    // server to point at anymore.
+    let settings_origin = format!("http://localhost:{SIDECAR_PORT}");
     let url_string = match section {
-        Some(s) => format!("{settings_origin}/settings/#{s}"),
-        None => format!("{settings_origin}/settings/"),
+        Some(s) => format!("{settings_origin}/ui/settings/#{s}"),
+        None => format!("{settings_origin}/ui/settings/"),
     };
     let url = match url::Url::parse(&url_string) {
         Ok(u) => u,
@@ -1827,14 +1760,14 @@ fn do_reveal_logs_dir(app: &AppHandle) {
 }
 
 /// Opens (or focuses) the usage dashboard webview pointed at the
-/// sidecar's `/usage-viewer` endpoint. The HTML + vendored JS for the
-/// dashboard are embedded directly into the sidecar binary via Bun's
-/// import-attribute file loader (see src/server.ts), so the dashboard
-/// ships inside the Tauri bundle with no extra resource staging.
+/// sidecar's `/ui/dashboard/` endpoint. The dashboard (and settings) are
+/// embedded in the sidecar binary and served at /ui/* (see
+/// src/routes/ui/route.ts), so they ship inside the bundle with no extra
+/// resource staging.
 fn open_dashboard_window(app: &AppHandle) {
     dismiss_splash(app);
     let url_string = format!(
-        "http://localhost:{SIDECAR_PORT}/usage-viewer\
+        "http://localhost:{SIDECAR_PORT}/ui/dashboard/\
          ?endpoint=http://localhost:{SIDECAR_PORT}/usage",
     );
     let url = match url::Url::parse(&url_string) {

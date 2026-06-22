@@ -39,11 +39,11 @@ export function initBootLogger(
 export function printReadyBanner(serverUrl: string): void {
   consola.box(
     [
-      `🌐 Settings:     ${serverUrl}/settings/`,
-      `📊 Usage Viewer: ${serverUrl}/usage-viewer?endpoint=${serverUrl}/usage`,
+      `🌐 Settings:     ${serverUrl}/ui/settings/`,
+      `📊 Dashboard:    ${serverUrl}/ui/dashboard/?endpoint=${serverUrl}/usage`,
       ``,
-      `Fast UI iteration: \`bun run app:ui\` serves the Settings`,
-      `bundle at http://localhost:1420/settings/ with HMR.`,
+      `Fast UI iteration: \`bun run app:ui\` rebuilds the UI on save`,
+      `(reload the window to pick up changes).`,
     ].join("\n"),
   )
 }

@@ -305,21 +305,12 @@ type ApiResult<T> =
   | { ok: false; status: number; error: string }
 
 function baseUrl(): string {
-  // Vite injects import.meta.env.DEV at build time. In production the shell
-  // loads from the sidecar's own origin via the Tauri window URL, so a
-  // relative path resolves to the same origin.
-  //
-  // In dev the webview is the Vite server on its own port, so we must
-  // absolute-prefix the proxy. Default to :4141 — the canonical Maximal /
-  // SIDECAR_PORT (shell/src-tauri/src/lib.rs). `bun run app:dev` runs the real
-  // sidecar there, so the default MUST be :4141 or the whole settings UI hits
-  // a dead port. For `app:ui` against a proxy on a different port (e.g. a
-  // second `bun run dev start --port 4142` alongside a running app:dev), set
-  // VITE_API_BASE to override.
-  if (import.meta.env.DEV) {
-    const override = import.meta.env.VITE_API_BASE as string | undefined
-    return override ?? "http://localhost:4141"
-  }
+  // The settings + dashboard UIs are always served by the sidecar itself
+  // (at /ui/*), in dev and prod alike, so the webview's origin *is* the
+  // proxy. A relative path therefore resolves to the right place with no
+  // build-time env injection. (Pre-Bun-unification this branched on Vite's
+  // import.meta.env.DEV to target a separate :1420 dev server; there is no
+  // separate dev server anymore.)
   return ""
 }
 
@@ -330,11 +321,8 @@ function baseUrl(): string {
 
 async function resolveApiKey(override?: string): Promise<string | undefined> {
   if (override) return override
-  // Dev (Vite at :1420 in a plain browser) reads VITE_API_KEY first
-  // so a developer can pin a specific key. Otherwise we ask the Tauri
-  // shell for the per-launch key it injected into the sidecar.
-  const envKey = import.meta.env.VITE_API_KEY
-  if (typeof envKey === "string" && envKey.length > 0) return envKey
+  // The Tauri shell injects a per-launch key into the sidecar and serves
+  // it to the webview on demand; that's the sole key source now.
   const shellKey = await getShellApiKey()
   return shellKey ?? undefined
 }
