@@ -1,45 +1,50 @@
 #!/usr/bin/env node
 /**
- * `maximal configure-claude-desktop` — opt-in subcommand that
- * wires Claude Desktop to point at the local proxy.
+ * `maximal configure-claude-desktop` — opt-in subcommand that wires
+ * Claude Desktop's third-party (Cowork 3P) mode at the local gateway.
  *
- * The proxy itself is client-neutral — Claude Code, opencode, the AI
- * SDK, custom apps, and Claude Desktop all work against the same
- * gateway. Configuring Claude Desktop is a deliberate choice the user
- * makes; `maximal setup` no longer touches it.
+ * The proxy is client-neutral — Claude Code, opencode, the AI SDK, custom
+ * apps, and Claude Desktop all work against the same gateway. Pairing
+ * Claude Desktop is a deliberate choice the user makes; `maximal setup`
+ * no longer touches it.
  *
- * What this command does (mac):
+ * What this does (mac):
  *
  *   1. Detects `/Applications/Claude.app`. If absent, refuses unless
- *      `--force` is given (the file write is harmless when Claude
- *      Desktop never arrives, but the warning catches typos).
- *   2. Writes the 16-key default profile to
- *      `~/Library/Application Support/Claude/claude_desktop_config.json`,
- *      preserving any other keys via allowlist merge.
+ *      `--force` is given.
+ *   2. Writes the gateway profile into Claude Desktop's third-party config
+ *      library (`~/Library/Application Support/Claude-3p/configLibrary/`),
+ *      which the app reads at launch — booting straight into 3P with no
+ *      Anthropic sign-in. Telemetry off; Anthropic update checks left on.
  *   3. Creates `$HOME/Claude` (the workspace folder) if missing.
- *   4. Clears the MDM-tier `coworkEgressAllowedHosts` if Claude
- *      Desktop's installer left a value there — file-tier `["*"]`
- *      then takes effect.
  *
- * `--revert` is the inverse — same allowlist, removed via
- *  `revertProxyConfig`.
+ * `--revert` removes the gateway profile and clears `deploymentMode`,
+ * leaving other config-library entries and user preferences intact.
+ *
+ * `--managed` instead emits a `.mobileconfig` managed-preferences profile
+ * (the robust path for MDM fleets) — install via Intune/Jamf or a one-time
+ * `sudo profiles install`. It is read regardless of the app's userData
+ * dir and outranks any file-tier config.
  */
 
 import { defineCommand } from "citty"
 import consola from "consola"
-import { spawnSync } from "node:child_process"
 import fs from "node:fs"
+import path from "node:path"
 
 import {
-  applyProxyConfig,
-  revertProxyConfig,
-} from "./lib/claude-desktop-config"
+  applyConfigLibraryProfile,
+  generateManagedProfile,
+  revertConfigLibraryProfile,
+} from "./lib/claude-desktop-3p-config"
 
 const CLAUDE_APP_PATH = "/Applications/Claude.app"
+const MANAGED_PROFILE_OUT = "maximal-claude-3p.mobileconfig"
 
 interface ConfigureOptions {
   force: boolean
   revert: boolean
+  managed: boolean
 }
 
 export function runConfigureClaudeDesktop(opts: ConfigureOptions): void {
@@ -54,6 +59,11 @@ export function runConfigureClaudeDesktop(opts: ConfigureOptions): void {
     return
   }
 
+  if (opts.managed) {
+    writeManagedProfile()
+    return
+  }
+
   if (!claudeAppInstalled() && !opts.force) {
     consola.warn(
       `Claude Desktop not found at ${CLAUDE_APP_PATH}. Install it from`
@@ -64,27 +74,26 @@ export function runConfigureClaudeDesktop(opts: ConfigureOptions): void {
   }
 
   apply()
-  clearMdmCoworkEgress()
 }
 
 function apply(): void {
   try {
-    const result = applyProxyConfig()
+    const result = applyConfigLibraryProfile()
     if (result.wrote) {
-      consola.success(`Claude Desktop config updated at ${result.path}`)
-      if (result.preservedKeys.length > 0) {
-        consola.info(
-          `  preserved existing keys: ${result.preservedKeys.join(", ")}`,
-        )
-      }
+      consola.success(
+        `Claude Desktop wired at the gateway (${result.dir}, profile ${result.profileId})`,
+      )
     } else {
-      consola.success(`Claude Desktop config already configured`)
+      consola.success("Claude Desktop already configured")
     }
     if (result.ensuredWorkspaceFolders.length > 0) {
       consola.info(
         `  workspace folders: ${result.ensuredWorkspaceFolders.join(", ")}`,
       )
     }
+    consola.info(
+      "  Quit & relaunch Claude Desktop for the change to take effect.",
+    )
   } catch (err) {
     consola.error("Could not update Claude Desktop config", err)
   }
@@ -92,20 +101,32 @@ function apply(): void {
 
 function revert(): void {
   try {
-    const result = revertProxyConfig()
-    if (!result.wrote) {
-      consola.info("Claude Desktop config didn't have our keys; nothing to do")
-      return
-    }
-    if (result.remainingKeys.length === 0) {
-      consola.success(`Removed ${result.path} (was only our keys)`)
+    const result = revertConfigLibraryProfile()
+    if (result.reverted) {
+      consola.success(`Removed our gateway profile from ${result.dir}`)
     } else {
-      consola.success(
-        `Stripped our keys from ${result.path} (${result.remainingKeys.length} other keys preserved)`,
-      )
+      consola.info("Claude Desktop wasn't wired by us; nothing to do")
     }
   } catch (err) {
     consola.error("Could not revert Claude Desktop config", err)
+  }
+}
+
+function writeManagedProfile(): void {
+  try {
+    fs.writeFileSync(MANAGED_PROFILE_OUT, generateManagedProfile(), {
+      mode: 0o600,
+    })
+    const abs = path.resolve(MANAGED_PROFILE_OUT)
+    consola.success(`Wrote managed-preferences profile to ${abs}`)
+    consola.info(
+      "  Install it (no Anthropic sign-in needed) via either:\n"
+        + `    sudo profiles install -path ${abs}\n`
+        + "  …or push it through your MDM (Intune/Jamf). It is read\n"
+        + "  regardless of Claude Desktop's data dir and outranks file config.",
+    )
+  } catch (err) {
+    consola.error("Could not write managed profile", err)
   }
 }
 
@@ -118,58 +139,11 @@ function claudeAppInstalled(): boolean {
   }
 }
 
-function clearMdmCoworkEgress(): void {
-  if (process.platform !== "darwin") return
-  const existing = readCoworkAllowedHosts()
-  if (existing === null) {
-    consola.success('MDM-tier allowlist absent — file-tier `["*"]` wins')
-    return
-  }
-  const r = deleteMdmAllowedHosts()
-  if (r.ok) {
-    consola.success(
-      `Cleared MDM-tier allowlist (${existing.length} host${existing.length === 1 ? "" : "s"} removed); file-tier \`["*"]\` now wins`,
-    )
-  } else {
-    consola.warn(
-      `Could not delete MDM-tier allowlist (${existing.length} host${existing.length === 1 ? "" : "s"} present); MDM may shadow file-tier`,
-      r.error,
-    )
-  }
-}
-
-function readCoworkAllowedHosts(): Array<string> | null {
-  const r = spawnSync(
-    "defaults",
-    ["read", "com.anthropic.claudefordesktop", "coworkEgressAllowedHosts"],
-    { encoding: "utf8" },
-  )
-  if (r.status !== 0) return null
-  const out = r.stdout.trim()
-  if (!out || out === "()") return null
-  return out
-    .replace(/^\(\s*/, "")
-    .replace(/\s*\)$/, "")
-    .split(",")
-    .map((s) => s.trim().replace(/^"/, "").replace(/"$/, ""))
-    .filter((s) => s.length > 0)
-}
-
-function deleteMdmAllowedHosts(): { ok: true } | { ok: false; error: unknown } {
-  const r = spawnSync(
-    "defaults",
-    ["delete", "com.anthropic.claudefordesktop", "coworkEgressAllowedHosts"],
-    { encoding: "utf8" },
-  )
-  if (r.status !== 0) return { ok: false, error: r.stderr || r.error }
-  return { ok: true }
-}
-
 export const configureClaudeDesktop = defineCommand({
   meta: {
     name: "configure-claude-desktop",
     description:
-      "Wire Claude Desktop to point at the local proxy (opt-in; setup does not configure it).",
+      "Wire Claude Desktop (Cowork 3P) at the local proxy (opt-in; setup does not configure it).",
   },
   args: {
     force: {
@@ -181,14 +155,19 @@ export const configureClaudeDesktop = defineCommand({
     revert: {
       type: "boolean",
       default: false,
-      description:
-        "Remove the keys this command writes, leaving any other keys intact.",
+      description: "Remove the gateway profile this command writes.",
+    },
+    managed: {
+      type: "boolean",
+      default: false,
+      description: `Emit a managed-preferences .mobileconfig (${MANAGED_PROFILE_OUT}) for MDM fleets instead of writing the config library.`,
     },
   },
   run({ args }) {
     runConfigureClaudeDesktop({
       force: args.force,
       revert: args.revert,
+      managed: args.managed,
     })
   },
 })

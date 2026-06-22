@@ -17,7 +17,6 @@ import type { Context } from "hono"
 
 import { Hono } from "hono"
 import fs from "node:fs"
-import path from "node:path"
 
 import {
   type ClaudeInstall,
@@ -29,12 +28,11 @@ import {
   revertProxyBaseUrl,
 } from "~/lib/claude-code-settings"
 import {
-  alreadyConfigured,
-  applyProxyConfig,
-  getClaudeDesktopConfigPath,
-  readClaudeDesktopConfig,
-  revertProxyConfig,
-} from "~/lib/claude-desktop-config"
+  applyConfigLibraryProfile,
+  getClaude3pDir,
+  isConfigLibraryApplied,
+  revertConfigLibraryProfile,
+} from "~/lib/claude-desktop-3p-config"
 import { getConfig, writeConfig, type AppConfig } from "~/lib/config"
 import { forwardError, HTTPError } from "~/lib/error"
 import {
@@ -56,12 +54,11 @@ function httpError(message: string, status: number): HTTPError {
   return new HTTPError(message, new Response(message, { status }))
 }
 
-/** Is Claude Desktop present? True when its config directory exists or
- *  the macOS app bundle is installed. */
+/** Is Claude Desktop present? True when the macOS app bundle is installed
+ *  or its third-party (Claude-3p) userData dir exists. */
 function claudeDesktopInstalled(): boolean {
-  const configDir = path.dirname(getClaudeDesktopConfigPath())
-  if (fs.existsSync(configDir)) return true
-  return fs.existsSync("/Applications/Claude.app")
+  if (fs.existsSync("/Applications/Claude.app")) return true
+  return fs.existsSync(getClaude3pDir())
 }
 
 function buildClaudeCodeApp(
@@ -96,7 +93,7 @@ function buildClaudeCodeApp(
 
 function buildClaudeDesktopApp(): AppEntryT {
   const installed = claudeDesktopInstalled()
-  const configured = alreadyConfigured(readClaudeDesktopConfig())
+  const configured = isConfigLibraryApplied()
   return {
     id: "claude-desktop",
     name: "Claude Desktop",
@@ -245,9 +242,9 @@ appsRoutes.post("/claude-desktop/toggle", async (c) => {
     }
 
     if (parsed.data.enabled) {
-      applyProxyConfig()
+      applyConfigLibraryProfile()
     } else {
-      revertProxyConfig()
+      revertConfigLibraryProfile()
     }
     persistClaudeDesktop(parsed.data.enabled)
 
