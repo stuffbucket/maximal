@@ -4,6 +4,8 @@ import type { ContentfulStatusCode } from "hono/utils/http-status"
 import consola from "consola"
 
 import { markAuthDegraded } from "./auth-controller"
+import { state } from "./state"
+import { adviseUpstreamError } from "./upstream-error-advice"
 
 export class HTTPError extends Error {
   response: Response
@@ -90,10 +92,21 @@ export async function forwardError(
       errorJson = errorText
     }
     consola.error("HTTP error:", errorJson)
+
+    // Recognizable upstream errors (e.g. Copilot's opaque
+    // `model_not_supported` 400) get reframed into context + a recovery
+    // step, with the original error preserved inline. Unrecognized errors
+    // forward the raw body unchanged.
+    const message =
+      adviseUpstreamError(
+        error.response.status,
+        errorText,
+        state.models?.data ?? [],
+      ) ?? errorText
     return c.json(
       {
         error: {
-          message: errorText,
+          message,
           type: "error",
         },
       },
