@@ -16,16 +16,16 @@ different teals named `--accent` (see
 ## Changing a token value
 
 1. Edit `shell/src/tokens.css` (the declared ground truth).
-2. **Also edit `src/pages/usage-viewer.css`** if the token is
+2. **Also edit `shell/ui/dashboard/style.css`** if the token is
    redeclared there. The Dashboard is a single embedded HTML file
    with no CSS imports — token declarations are independent. See
    [`windows.md`](windows.md) for why.
 3. Update the value column in [`tokens.md`](tokens.md) if the value
    appears there.
 4. Search for any inlined raw value the token was supposed to replace:
-   `grep -rn '<old-value>' shell/src src/pages`.
+   `grep -rn '<old-value>' shell/src shell/ui`.
 5. Manually verify both windows: `bun run app:ui` for the Settings
-   window, open the proxy and visit `/usage-viewer` for the Dashboard.
+   window, open the proxy and visit `/ui/dashboard/` for the Dashboard.
 6. If the change is a color, re-check WCAG AA contrast on both
    surface levels per [`color.md`](color.md).
 
@@ -36,7 +36,7 @@ different teals named `--accent` (see
 2. Add the row to [`tokens.md`](tokens.md) **first**, with `Purpose`,
    `Use for`, `Do NOT use for` filled in. A token without a clear
    role is a future drift source.
-3. Declare in `shell/src/tokens.css` (and `usage-viewer.css` if the
+3. Declare in `shell/src/tokens.css` (and the dashboard `style.css` if the
    Dashboard needs it).
 4. Use it. Don't inline the value anywhere else.
 

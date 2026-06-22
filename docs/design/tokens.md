@@ -7,7 +7,7 @@ there only.** This file is the lookup of *name → purpose → scope*.
 If you need a value, open `tokens.css`. If you're describing a token
 in a doc or commit message, use its name — never inline the value.
 
-> **Drift warning.** `src/pages/usage-viewer.css` redeclares many of
+> **Drift warning.** `shell/ui/dashboard/style.css` redeclares many of
 > these tokens independently (the Dashboard is a single embedded HTML
 > file with no CSS imports — see [`windows.md`](windows.md)).
 > Several values currently differ. See

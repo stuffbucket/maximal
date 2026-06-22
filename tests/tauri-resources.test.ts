@@ -1,28 +1,19 @@
 import { describe, expect, test } from "bun:test"
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
 
 /**
- * Catches the "shell/dist not bundled into the Tauri app" class of
- * bug. When the proxy is packaged via `tauri build`, the menu-bar
- * binary needs `shell/dist/**\/*` (or equivalent) listed under
- * bundle.resources or the production /settings route silently 503s
- * because the sidecar's working directory has no `shell/dist`.
- *
- * Depends on the resources entry added in:
- *   feat(shell): bundle shell/dist as Tauri resource
- * If that commit hasn't landed in this worktree's base yet, this
- * test is EXPECTED TO FAIL. Rebase onto main after the parallel
- * `tauri-resources` agent merges and it should pass.
+ * Pins the "the packaged UI is embedded in the sidecar binary, not staged
+ * as a Tauri resource" architecture (src/routes/ui/route.ts + the embed
+ * generator). The old approach shipped `shell/dist` as a `bundle.resources`
+ * entry and pointed the sidecar at it via MAXIMAL_SETTINGS_DIST; the CLI /
+ * Homebrew bottle never carried that directory, so /settings 503'd on those
+ * channels (issue #132). Embedding the UI in the binary fixes that, so the
+ * resource staging must NOT come back.
  */
 
-const TAURI_CONF = resolve(
-  import.meta.dir,
-  "..",
-  "shell",
-  "src-tauri",
-  "tauri.conf.json",
-)
+const REPO_ROOT = resolve(import.meta.dir, "..")
+const TAURI_CONF = resolve(REPO_ROOT, "shell", "src-tauri", "tauri.conf.json")
 
 interface TauriConf {
   bundle?: {
@@ -31,50 +22,39 @@ interface TauriConf {
 }
 
 function loadConf(): TauriConf {
-  const raw = readFileSync(TAURI_CONF, "utf8")
-  return JSON.parse(raw) as TauriConf
+  return JSON.parse(readFileSync(TAURI_CONF, "utf8")) as TauriConf
 }
 
 function resourcePatterns(conf: TauriConf): Array<string> {
   const r = conf.bundle?.resources
   if (!r) return []
-  if (Array.isArray(r)) return r
-  // Tauri 2 also accepts an object form mapping src -> dest.
-  return Object.keys(r)
+  return Array.isArray(r) ? r : Object.keys(r)
 }
 
-describe("tauri.conf.json bundle.resources", () => {
-  test("file parses as JSON", () => {
+describe("packaged UI is embedded, not staged", () => {
+  test("tauri.conf.json parses", () => {
     expect(() => loadConf()).not.toThrow()
   })
 
-  test("bundle.resources includes the shell/dist output", () => {
-    const conf = loadConf()
-    const patterns = resourcePatterns(conf)
+  test("does not stage shell/dist as a Tauri resource (it's embedded instead)", () => {
+    const patterns = resourcePatterns(loadConf())
+    const stagesDist = patterns.some((p) => /dist/i.test(p))
+    expect(
+      stagesDist,
+      `tauri.conf.json bundle.resources stages a dist directory (${JSON.stringify(patterns)}). `
+        + "The UI is now embedded in the sidecar binary (src/routes/ui/route.ts) — "
+        + "staging it again resurrects the #132 split where CLI/Homebrew lacked it.",
+    ).toBe(false)
+  })
 
-    // Accept any of the reasonable conventions; the parallel agent
-    // picks one. We only require that *some* entry references the
-    // shell dist directory.
-    const matchers = [
-      /shell[\\/]dist/i, // shell/dist or shell/dist/**
-      /\.\.[\\/]dist/i, // ../dist (relative to src-tauri/)
-      /\*\*[\\/]dist[\\/]\*\*/, // **/dist/**
-    ]
-
-    const matched = patterns.some((p) => matchers.some((m) => m.test(p)))
-
-    expect(matched).toBe(true)
-    if (!matched) {
-      // This message is what a future failing test surfaces. It
-      // points at the PRD context so the next reader knows why
-      // this assertion exists.
-      throw new Error(
-        "tauri.conf.json bundle.resources is missing a shell/dist "
-          + "entry. Packaged builds will 503 on GET /settings because the "
-          + "sidecar binary can't find shell/dist. See PRD: "
-          + "feat(shell): bundle shell/dist as Tauri resource.\n"
-          + `Current resources: ${JSON.stringify(patterns)}`,
-      )
-    }
+  test("the embed mechanism is present (generator + route)", () => {
+    expect(existsSync(resolve(REPO_ROOT, "scripts", "gen-ui-embed.ts"))).toBe(
+      true,
+    )
+    const route = readFileSync(
+      resolve(REPO_ROOT, "src", "routes", "ui", "route.ts"),
+      "utf8",
+    )
+    expect(route).toContain("UI_FILES")
   })
 })

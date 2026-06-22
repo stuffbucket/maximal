@@ -214,6 +214,17 @@ jobs:
         shell: bash
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
+      # The settings + dashboard UIs are embedded into the compiled binary
+      # (served at /ui/*). Build them and regenerate the embed manifest so
+      # `bun build --compile` below picks the assets up. Without this the
+      # binary ships no UI and /ui/* 503s (cf. issue #132).
+      - name: Build web UI (embedded into the binary)
+        shell: bash
+        run: |
+          set -euo pipefail
+          bun run build:ui
+          bun run scripts/gen-ui-embed.ts
+
       - name: Compile binary
         shell: bash
         env:

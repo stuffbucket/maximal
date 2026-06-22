@@ -4,9 +4,8 @@
   "version": "0.0.0",
   "identifier": "co.stuffbucket.maximal",
   "build": {
-    "beforeDevCommand": "bun run dev",
-    "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "bun run build",
+    "beforeDevCommand": "cd .. && bun run build:ui",
+    "beforeBuildCommand": "cd .. && bun run build:ui",
     "frontendDist": "../dist"
   },
   "app": {
@@ -28,9 +27,6 @@
       "icons/icon.ico"
     ],
     "externalBin": ["binaries/maximal"],
-    "resources": {
-      "../dist": "settings-dist"
-    },
     "macOS": {
       "exceptionDomain": "localhost"
     }

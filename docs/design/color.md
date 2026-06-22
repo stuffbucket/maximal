@@ -73,6 +73,6 @@ block above `--link` in `tokens.css`. Re-measure if you change either.
 
 `--status-error`, `--status-success`, `--status-warning`,
 `--status-info` (and their `-fg` pairings) are declared in
-`src/pages/usage-viewer.css`. They are **not** in `tokens.css`. If
+`shell/ui/dashboard/style.css`. They are **not** in `tokens.css`. If
 you need them in Settings, promote them into `tokens.css` first via
 [`change-checklists.md`](change-checklists.md) → *Adding a new token*.

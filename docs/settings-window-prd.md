@@ -36,6 +36,14 @@ Window: `~880×720`, resizable, single window (re-show + focus if already open).
 
 ## Asset resolution chain
 
+> **Superseded (2026-06).** The external `shell/dist` + `MAXIMAL_SETTINGS_DIST`
+> + dev-mode Vite reverse-proxy described below has been replaced. The UI is
+> now **embedded in the sidecar binary** and served at `/ui/settings`
+> (`src/routes/ui/route.ts`); dev serves from `shell/dist` on disk. There is
+> no `resolveSettingsDistDir()`, no Vite, and no `bundle.resources` staging.
+> See `docs/architecture.md` → *Tauri shell*. The historical detail below is
+> kept for context only.
+
 The proxy serves the Settings UI from `shell/dist/` at `/settings`. Locating that directory on disk works differently across dev, `bun run start`, and the Tauri-packaged `.app`. `src/routes/settings/route.ts` (`resolveSettingsDistDir()`) resolves in this order:
 
 1. **`MAXIMAL_SETTINGS_DIST` env var** (highest priority). Absolute path to the directory containing `index.html`. The Tauri shell sets this when spawning the sidecar — it points at the `settings-dist/` resource inside the `.app` bundle (mapped from `../dist` via `bundle.resources` in `shell/src-tauri/tauri.conf.json`; the `dist/` → `settings-dist/` rename sidesteps Tauri 2's `_up_` escape for `..` path components). This is the only path that works inside a packaged build, where `import.meta.dir` resolves to Tauri's mounted-resource path and the source tree is unreachable.

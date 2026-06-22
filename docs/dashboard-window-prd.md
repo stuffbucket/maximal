@@ -1,5 +1,11 @@
 # PRD: Dashboard window ("Open Maximal")
 
+> **Path/port note (2026-06).** This PRD predates two changes: the canonical
+> port is `:4141` (not `:4142`), and the dashboard now lives at `/ui/dashboard`
+> (the legacy `/usage-viewer` 301-redirects there). The UI is embedded in the
+> sidecar binary and served at `/ui/*` — there is no Vite build. Read URLs/ports
+> below accordingly; see `docs/architecture.md` → *Tauri shell*.
+
 ## Problem
 
 Today "Open Maximal" opens a single-purpose webview pointed at `/usage-viewer?endpoint=/usage` — the Copilot rate-limit dashboard. That answers exactly one question ("what's my Copilot budget?") and ignores the others a user has when they click their menu bar app:

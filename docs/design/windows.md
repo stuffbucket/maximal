@@ -1,7 +1,7 @@
 # Window family: Settings + Dashboard
 
 The Settings window (`shell/`) and the Dashboard window
-(`src/pages/usage-viewer.html`) share one design language. This doc
+(`shell/ui/dashboard/index.html`) share one design language. This doc
 codifies what's shared, where they diverge, and the architectural
 constraint that makes drift between them a permanent risk.
 
@@ -23,7 +23,7 @@ constraint that makes drift between them a permanent risk.
 | Sections | 1 (scroll-only) | 8 (sidebar nav) |
 | Layout | Single column, ~720px max (not tokenized) | `--sidebar-width` rail + `--content-max` pane |
 | Bundling | One embedded HTML file, separate `<style>` block | Vite-bundled multi-file (React + vanilla islands) |
-| Tokens live in | `src/pages/usage-viewer.css` (independent declaration) | `shell/src/tokens.css` (imported by all shell CSS) |
+| Tokens live in | `shell/ui/dashboard/style.css` (independent declaration) | `shell/src/tokens.css` (imported by all shell CSS) |
 
 **Scroll-only vs sidebar-nav is a function of section count, not a
 stylistic choice.** A single-section window doesn't earn a sidebar; a
@@ -54,6 +54,6 @@ property the proxy depends on for single-binary distribution.
 
 The right fix is mechanical: a build-time check (or pre-commit hook,
 or test) that diffs the token declarations in `tokens.css` vs
-`usage-viewer.css` and fails on mismatch. See
+the dashboard `style.css` and fails on mismatch. See
 [`change-checklists.md`](change-checklists.md) → *Changing a token
 value* for the manual workflow until that exists.

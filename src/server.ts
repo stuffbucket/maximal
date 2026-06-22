@@ -9,29 +9,6 @@ import { getModelsLoadedAtMs } from "./lib/state"
 import { buildStatus } from "./lib/status"
 import { traceIdMiddleware } from "./lib/trace"
 import { cacheModels } from "./lib/utils"
-// `with { type: "file" }` is Bun's official asset-embedding path
-// for `--compile` output. The import resolves to a real path in dev
-// (`/abs/.../usage-viewer.html`) and to a virtual `$bunfs/...` path
-// inside the compiled binary; Bun.file() reads both. Survives every
-// platform — including Windows, which broke our previous
-// readFileSync(URL) attempt with `B:\~BUN\root\...` ENOENTs.
-// https://bun.com/docs/bundler/executables
-//
-// The TS cast is needed because Bun's default loader for *.html is
-// `html` (returns an HTMLBundle), and TypeScript's import-attribute
-// support doesn't yet thread through the `type: "file"` override
-// to the resolved module type. The runtime is fine — it honors the
-// attribute regardless.
-import usageViewerImport from "./pages/usage-viewer.html" with { type: "file" }
-const usageViewerPath = usageViewerImport as unknown as string
-import usageViewerCssImport from "./pages/usage-viewer.css" with { type: "file" }
-const usageViewerCssPath = usageViewerCssImport
-import usageViewerJsImport from "./pages/usage-viewer.js" with { type: "file" }
-const usageViewerJsPath = usageViewerJsImport as unknown as string
-import lucideVendorImport from "./pages/vendor/lucide.min.js" with { type: "file" }
-const lucideVendorPath = lucideVendorImport as unknown as string
-import tailwindVendorImport from "./pages/vendor/tailwind.min.js" with { type: "file" }
-const tailwindVendorPath = tailwindVendorImport as unknown as string
 import { completionRoutes } from "./routes/chat-completions/route"
 import { debugRoutes } from "./routes/debug/route"
 import { embeddingRoutes } from "./routes/embeddings/route"
@@ -42,10 +19,10 @@ import { providerMessageRoutes } from "./routes/provider/messages/route"
 import { providerModelRoutes } from "./routes/provider/models/route"
 import { responsesRoutes } from "./routes/responses/route"
 import { settingsApiRoutes } from "./routes/settings/api"
-import { settingsRoutes } from "./routes/settings/route"
 import { setupStatusRoute } from "./routes/setup-status"
 import { tokenUsageRoute } from "./routes/token-usage/route"
 import { tokenRoute } from "./routes/token/route"
+import { uiRoutes } from "./routes/ui/route"
 import { usageRoute } from "./routes/usage/route"
 
 export const server = new Hono()
@@ -64,20 +41,18 @@ server.use(
     allowUnauthenticatedPaths: [
       "/",
       "/status",
+      // Bare-surface redirects to the canonical /ui/* paths.
       "/usage-viewer",
-      "/usage-viewer/",
-      "/usage-viewer.css",
-      "/usage-viewer.js",
-      "/vendor/lucide.min.js",
-      "/vendor/tailwind.min.js",
+      "/settings",
+      "/settings/",
       "/_debug/state",
       "/setup-status",
     ],
-    // /settings serves the UI shell + bundled assets (HTML/JS/CSS).
+    // /ui/* serves the settings + dashboard UI shells and their assets.
     // /settings/api/* are data endpoints — gated by requireAuthPrefixes.
-    allowUnauthenticatedPrefixes: ["/settings"],
+    allowUnauthenticatedPrefixes: ["/ui"],
     requireAuthPrefixes: ["/settings/api"],
-    // The dashboard at /usage-viewer fetches these endpoints from the
+    // The dashboard at /ui/dashboard fetches these endpoints from the
     // same machine. Trusting loopback lets us drop the client-side API
     // key UI (and its clear-text storage) without exposing the same
     // endpoints to remote callers, who still need a valid API key.
@@ -122,69 +97,28 @@ server.get("/", (c) => c.text("Server running"))
 // contract. Safe-for-unauth only (booleans/tiers/counts, no secrets);
 // see src/lib/status.ts. Cheap: in-memory state, no upstream calls.
 server.get("/status", (c) => c.json(buildStatus(SERVER_START_MS)))
-// Our own dashboard assets — `no-store` so the Tauri webview (and any
-// browser tabs) always pull fresh on reload. A previous `max-age=86400`
-// caused WKWebView to serve stale HTML/JS for 24h after every iteration,
-// making it look like our shipped changes never landed.
-const NO_STORE_HTML = {
-  "content-type": "text/html; charset=utf-8",
-  "cache-control": "no-store",
-} as const
-const NO_STORE_CSS = {
-  "content-type": "text/css; charset=utf-8",
-  "cache-control": "no-store",
-} as const
-const NO_STORE_JS = {
-  "content-type": "application/javascript; charset=utf-8",
-  "cache-control": "no-store",
-} as const
-
-// Per-process cache-buster appended to the dashboard's sibling-asset
-// URLs. With Cache-Control: no-store everywhere, this is belt-and-
-// suspenders — but WKWebView's HTTP cache survived our cache-control
-// rollover (entries cached under the old 24h max-age were still served
-// from disk without revalidation). Stamping a fresh `?v=<id>` per
-// sidecar launch sidesteps the cached entries entirely.
-const ASSET_CACHE_BUST = Date.now().toString(36)
-server.get("/usage-viewer", async (c) => {
-  const html = await Bun.file(usageViewerPath).text()
-  const stamped = html
-    .replaceAll(
-      'href="/usage-viewer.css"',
-      `href="/usage-viewer.css?v=${ASSET_CACHE_BUST}"`,
-    )
-    .replaceAll(
-      'src="/usage-viewer.js"',
-      `src="/usage-viewer.js?v=${ASSET_CACHE_BUST}"`,
-    )
-  return c.body(stamped, 200, NO_STORE_HTML)
+// Legacy redirects → canonical /ui/* surfaces. Kept so existing links
+// (Claude config, boot banner, bookmarks, the Tauri shell pre-upgrade)
+// keep working. The dashboard preserves its `?endpoint=…` query.
+server.get("/usage-viewer", (c) => {
+  const qs = new URL(c.req.url).search
+  return c.redirect(`/ui/dashboard/${qs}`, 301)
 })
-server.get("/usage-viewer/", (c) => c.redirect("/usage-viewer", 301))
-server.get("/usage-viewer.css", async (c) =>
-  c.body(await Bun.file(usageViewerCssPath).bytes(), 200, NO_STORE_CSS),
-)
-server.get("/usage-viewer.js", async (c) =>
-  c.body(await Bun.file(usageViewerJsPath).bytes(), 200, NO_STORE_JS),
-)
-
-// Vendored third-party assets — also no-store. They're checked into the
-// repo, served over loopback, and load in under a millisecond. There is
-// no scenario where caching them helps; there are several where it hurts
-// (Lucide or Tailwind version bumps not appearing until cache expiry).
-server.get("/vendor/lucide.min.js", async (c) =>
-  c.body(await Bun.file(lucideVendorPath).bytes(), 200, NO_STORE_JS),
-)
-server.get("/vendor/tailwind.min.js", async (c) =>
-  c.body(await Bun.file(tailwindVendorPath).bytes(), 200, NO_STORE_JS),
-)
+server.get("/usage-viewer/", (c) => {
+  const qs = new URL(c.req.url).search
+  return c.redirect(`/ui/dashboard/${qs}`, 301)
+})
+server.get("/settings", (c) => c.redirect("/ui/settings/", 301))
+server.get("/settings/", (c) => c.redirect("/ui/settings/", 301))
 
 server.route("/_debug", debugRoutes)
 server.route("/_internal", internalRoutes)
 server.route("/setup-status", setupStatusRoute)
 // `/settings/api/*` requires API-key auth (covers the new auth endpoints too).
-// `/settings/*` static bundle inherits whatever its route handler enforces.
 server.route("/settings/api", settingsApiRoutes)
-server.route("/settings", settingsRoutes)
+// `/ui/*` serves the settings + dashboard UI (embedded in prod, from
+// shell/dist in dev). See src/routes/ui/route.ts.
+server.route("/ui", uiRoutes)
 
 // Gate every upstream-touching route on the presence of a GitHub token.
 // When the sidecar boots without one, the HTTP server still listens (so

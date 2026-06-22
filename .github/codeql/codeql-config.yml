@@ -18,4 +18,4 @@ paths-ignore:
   - node_modules
   - dist
   - build
-  - src/pages/vendor
+  - shell/ui/dashboard/vendor

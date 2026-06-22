@@ -13,7 +13,7 @@ import { join, resolve } from "node:path"
  */
 
 const REPO_ROOT = resolve(import.meta.dir, "..")
-const INDEX_HTML = join(REPO_ROOT, "shell", "index.html")
+const INDEX_HTML = join(REPO_ROOT, "shell", "ui", "settings", "index.html")
 
 function html(): string {
   return readFileSync(INDEX_HTML, "utf8")

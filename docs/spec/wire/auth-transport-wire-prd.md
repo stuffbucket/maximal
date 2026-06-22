@@ -56,15 +56,15 @@ Configured at the middleware call site (`src/server.ts:61-95`):
 
 | Class | Paths | Behavior |
 |---|---|---|
-| **Unauthenticated** | `/`, `/status`, `/usage-viewer`(+`.css`/`.js`/`/`), `/vendor/lucide.min.js`, `/vendor/tailwind.min.js`, `/_debug/state`, `/setup-status` | No key required. |
-| **Unauthenticated prefix** | `/settings/*` | The Settings UI shell + bundled assets load without a key. |
-| **Require-auth prefix** | `/settings/api/*` | Overrides the `/settings` exemption — data endpoints require a key. |
+| **Unauthenticated** | `/`, `/status`, `/usage-viewer` + `/settings`/`/settings/` (legacy 301 redirects), `/_debug/state`, `/setup-status` | No key required. |
+| **Unauthenticated prefix** | `/ui/*` | The settings + dashboard UI shells and their assets load without a key. |
+| **Require-auth prefix** | `/settings/api/*` | Data endpoints require a key. |
 | **Loopback-only** | `/usage`, `/token-usage`, `/token-usage/events`, `/_internal/shutdown` | Auth is **skipped for loopback callers**; a remote caller still needs a valid key (and `/_internal/shutdown` rejects remote outright — see `usage-status-wire-prd.md`). |
 
 Loopback is determined by peer IP ∈ {`127.0.0.1`, `::1`,
 `::ffff:127.0.0.1`} via `isLoopbackAddress()`
 (`src/lib/request-auth.ts:48-66`). The rationale: the local dashboard at
-`/usage-viewer` fetches `/usage` and `/token-usage` from the same
+`/ui/dashboard` fetches `/usage` and `/token-usage` from the same
 machine, so trusting loopback lets us drop the client-side API-key UI
 without exposing those endpoints to remote callers.
 
