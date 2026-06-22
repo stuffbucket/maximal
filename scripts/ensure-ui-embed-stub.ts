@@ -10,7 +10,7 @@
  */
 import { existsSync } from "node:fs"
 import { mkdir } from "node:fs/promises"
-import { dirname, join, resolve } from "node:path"
+import { dirname, resolve } from "node:path"
 
 const OUT = resolve(import.meta.dir, "..", "src/generated/ui-embed.ts")
 
