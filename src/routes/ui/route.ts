@@ -3,6 +3,7 @@ import { existsSync } from "node:fs"
 import { dirname, join, normalize, resolve, sep } from "node:path"
 
 import { UI_FILES } from "~/generated/ui-embed"
+import { contentTypeForPath } from "~/lib/web-content-types"
 
 /**
  * Serves the web UIs under `/ui/*`:
@@ -19,33 +20,6 @@ import { UI_FILES } from "~/generated/ui-embed"
  */
 
 const HAS_EMBED = Object.keys(UI_FILES).length > 0
-
-const CONTENT_TYPES: Record<string, string> = {
-  ".html": "text/html; charset=utf-8",
-  ".js": "application/javascript; charset=utf-8",
-  ".mjs": "application/javascript; charset=utf-8",
-  ".css": "text/css; charset=utf-8",
-  ".json": "application/json; charset=utf-8",
-  ".svg": "image/svg+xml",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".gif": "image/gif",
-  ".webp": "image/webp",
-  ".ico": "image/x-icon",
-  ".woff": "font/woff",
-  ".woff2": "font/woff2",
-  ".ttf": "font/ttf",
-  ".map": "application/json; charset=utf-8",
-}
-
-function contentType(path: string): string {
-  const dot = path.toLowerCase().lastIndexOf(".")
-  return (
-    (dot === -1 ? undefined : CONTENT_TYPES[path.toLowerCase().slice(dot)])
-    ?? "application/octet-stream"
-  )
-}
 
 /** Locate `shell/dist/ui` on disk (dev). Walks up from this module. */
 function resolveDiskDistDir(): string | null {
@@ -97,7 +71,7 @@ async function bytesFor(
   if (!full) return null
   const file = Bun.file(full)
   if (!(await file.exists())) return null
-  return { bytes: await file.bytes(), type: contentType(full) }
+  return { bytes: await file.bytes(), type: contentTypeForPath(full) }
 }
 
 // `no-store` mirrors the dashboard's old serving: the Tauri WKWebView
