@@ -169,6 +169,40 @@ jobs:
           gh workflow run release.yml --repo "${{ github.repository }}" --ref "${TAG}" -f tag="${TAG}"
           echo "Dispatched release.yml for ${TAG}."
 
+      # Flip the merged release PR's label pending → tagged. release-please
+      # normally does this in its `github-release` step, but this pipeline
+      # SKIPS github-release (release.yml owns the GitHub Release — see the
+      # WHY TAG-ONLY note). Without this, the label stays `autorelease: pending`,
+      # which makes the release-pr step below abort ("untagged, merged release
+      # PRs outstanding") and blocks EVERY future release until someone flips it
+      # by hand. Runs once the tag exists, before release-pr, so the next PR
+      # opens in the same run. Idempotent: a no-op when nothing is pending, and
+      # self-heals any release PR a prior run left stuck at pending.
+      # (Long-term: provisioning REPOMAN_APP_ID lets release-please own this
+      # natively and removes both this step and the dispatch shim above.)
+      - name: Mark tagged release PRs as autorelease:tagged
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="$(jq -r '.["."]' .release-please-manifest.json)"
+          TAG="v${VERSION}"
+          if ! git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "Tag ${TAG} not on remote yet — nothing to mark."
+            exit 0
+          fi
+          PENDING="$(gh pr list --repo "${{ github.repository }}" --state merged \
+            --label "autorelease: pending" --json number --jq '.[].number')"
+          if [ -z "${PENDING}" ]; then
+            echo "No merged release PRs at 'autorelease: pending' — nothing to flip."
+            exit 0
+          fi
+          for n in ${PENDING}; do
+            gh pr edit "$n" --repo "${{ github.repository }}" \
+              --remove-label "autorelease: pending" --add-label "autorelease: tagged"
+            echo "Flipped #${n}: autorelease: pending → tagged"
+          done
+
       # Open or update the release PR for the NEXT version (version bump +
       # CHANGELOG.md from conventional commits since the last tag).
       - name: release-please release-pr
