@@ -38,7 +38,43 @@ THIRD-PARTY-LICENSE        Bundled-dependency license pointer (npm SBOM)
                            and site-asset attributions (shaders, sprites).
 ```
 
+## Install
+
+### Homebrew (macOS, Apple Silicon)
+
+```sh
+brew install stuffbucket/tap/maximal
+```
+
+This taps `stuffbucket/tap` automatically and installs the `maximal`
+command. Authenticate once, then run it in the foreground:
+
+```sh
+maximal auth --verbose                       # one-time device flow
+maximal start --account-type enterprise      # listen on :4141
+```
+
+Or run it as a login-persistent background service (logs to
+`$(brew --prefix)/var/log/maximal.log`):
+
+```sh
+brew services start maximal
+```
+
+Upgrade later with:
+
+```sh
+brew update && brew upgrade maximal
+```
+
+> The formula is Apple-Silicon-only — there is no Intel (`darwin-x64`)
+> build. On other platforms, run from source (below) or download a
+> binary from the
+> [latest release](https://github.com/stuffbucket/maximal/releases/latest).
+
 ## Run
+
+From source (for development), substitute `maximal` with `bun run ./src/main.ts`:
 
 ```sh
 bun install
