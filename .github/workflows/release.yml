@@ -209,6 +209,15 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # The settings UI (shell/ui/settings) is a React/TSX app whose deps
+      # (react, react-dom, @tauri-apps/api) live in shell/package.json, not
+      # the root manifest. `build:ui` bundles it, so its node_modules must
+      # be present or Bun fails with "Could not resolve: react". The root
+      # install above does NOT cover shell/ (no workspaces), so install it.
+      - name: Install shell UI dependencies
+        working-directory: shell
+        run: bun install --frozen-lockfile
+
       - name: Resolve version
         id: ver
         shell: bash
