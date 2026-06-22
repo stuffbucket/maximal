@@ -9,6 +9,7 @@ import { getTokenCount } from "~/lib/tokenizer"
 
 import { findEndpointModel } from "../../lib/models"
 import { translateToOpenAI } from "./non-stream-translation"
+import { stripUnsupportedTopLevelAnthropicFields } from "./preprocess"
 
 /**
  * Forwards token counting to Anthropic's real /v1/messages/count_tokens endpoint.
@@ -65,6 +66,7 @@ async function countTokensViaAnthropic(
 export async function handleCountTokens(c: Context) {
   try {
     const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
+    stripUnsupportedTopLevelAnthropicFields(anthropicPayload)
 
     // Reverse the dash-date sentinel form (added by /v1/models for Claude
     // Desktop's normalizer) back to Copilot's original dot-form before any

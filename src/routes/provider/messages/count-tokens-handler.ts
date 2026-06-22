@@ -7,6 +7,7 @@ import { createHandlerLogger } from "~/lib/logger"
 import { state } from "~/lib/state"
 import { getTokenCount } from "~/lib/tokenizer"
 import { translateToOpenAI } from "~/routes/messages/non-stream-translation"
+import { stripUnsupportedTopLevelAnthropicFields } from "~/routes/messages/preprocess"
 
 const logger = createHandlerLogger("provider-count-tokens-handler")
 
@@ -33,6 +34,7 @@ export async function handleProviderCountTokens(c: Context): Promise<Response> {
 
   try {
     const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
+    stripUnsupportedTopLevelAnthropicFields(anthropicPayload)
     const openAIPayload = translateToOpenAI(anthropicPayload)
     const modelId = anthropicPayload.model.trim()
 

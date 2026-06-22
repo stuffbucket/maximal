@@ -19,6 +19,7 @@ import {
   type UsageTokens,
 } from "~/lib/token-usage"
 import { parseUserIdMetadata } from "~/lib/utils"
+import { stripUnsupportedTopLevelAnthropicFields } from "~/routes/messages/preprocess"
 import { forwardProviderMessages } from "~/services/providers/anthropic-proxy"
 
 const logger = createHandlerLogger("provider-messages-handler")
@@ -40,6 +41,7 @@ export async function handleProviderMessages(c: Context): Promise<Response> {
 
   try {
     const payload = await c.req.json<AnthropicMessagesPayload>()
+    stripUnsupportedTopLevelAnthropicFields(payload)
 
     const modelConfig = providerConfig.models?.[payload.model]
     payload.temperature ??= modelConfig?.temperature
