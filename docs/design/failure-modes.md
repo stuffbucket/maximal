@@ -35,7 +35,7 @@ regressing across design iterations.
   value* for the full touchpoint list. This is the highest-risk class
   of design bug in the repo today.
 - **Adding a token to one CSS file and assuming the other has it.**
-  `tokens.css` and `usage-viewer.css` are independent declarations,
+  `tokens.css` and the dashboard `style.css` are independent declarations,
   not imports. Anything missing from one is silently `inherit`-ed or
   `initial` in that window.
 
@@ -44,7 +44,7 @@ regressing across design iterations.
 These should be triaged separately; do not "fix" them inline as part
 of an unrelated design change.
 
-| Concern | `shell/src/tokens.css` | `src/pages/usage-viewer.css` |
+| Concern | `shell/src/tokens.css` | `shell/ui/dashboard/style.css` |
 |---|---|---|
 | `--accent` | `#5198a6` | `#14b8a6` ← **different teal** |
 | `--text-muted` (dark) | `#8a8a8a` | `#a1a1a1` |

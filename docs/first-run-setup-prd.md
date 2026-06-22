@@ -53,7 +53,7 @@ A "setup check" is a named boolean with a reason string when false. The proxy ex
 
 `ready = all(ok)`. `nextStep` is the first failing check in canonical order (`appDir` → `config` → `db` → `githubAuth`), or `null` when ready.
 
-The endpoint is **unauthenticated** — same posture as `/` and `/usage-viewer`. It must work *before* any API key has been issued.
+The endpoint is **unauthenticated** — same posture as `/` and `/ui/*`. It must work *before* any API key has been issued.
 
 ## Detection
 

@@ -31,32 +31,36 @@ bun run release:manual  # local fallback cut (bumpp + bun publish). Primary
                         # release path is release-please: merge the auto-opened
                         # release PR → tag → release.yml builds/publishes.
 
-# Tauri app (menu-bar shell wrapping the proxy as a sidecar on :4142)
+# Tauri app (menu-bar shell wrapping the proxy as a sidecar on :4141)
 bun run app:setup    # one-time: install shell deps + force-build sidecar binary
-bun run app:sidecar  # rebuild standalone proxy binary into shell/src-tauri/binaries/
-                     # (no-op when binary is newer than src/; override with --force
-                     # or MAXIMAL_FORCE_SIDECAR=1 — release pipelines must set it)
-bun run app:dev      # build sidecar (if stale) + tauri dev (hot-reload)
-bun run app:ui       # UI-only iteration: Vite alone at :1420. Run `bun run dev`
-                     # in another terminal so the UI's API calls (which target
-                     # :4142 in DEV mode) hit a live proxy. Far faster than
-                     # spinning the whole Tauri shell for HTML/CSS tweaks.
+bun run app:sidecar  # build the UI + regenerate the embed manifest + rebuild the
+                     # standalone proxy binary into shell/src-tauri/binaries/
+                     # (compile is a no-op when the binary is newer than src/;
+                     # override with --force or MAXIMAL_FORCE_SIDECAR=1 — release
+                     # pipelines must set it)
+bun run app:dev      # build sidecar (if stale) + tauri dev
+bun run app:ui       # UI-only iteration: `bun run build:ui --watch` — rebuilds the
+                     # settings + dashboard bundles into shell/dist on every save.
+                     # Run `bun run dev` in another terminal so the sidecar serves
+                     # them at :4141/ui/* (reload the window to pick up changes).
 bun run app:build    # force-rebuild sidecar + tauri build --bundles app,dmg
 ```
 
 ## Fast UI iteration
 
-For HTML/CSS/TS changes under `shell/src/`, **do not** run `app:dev`. The
-sidecar binary is a 66 MB Bun compile (~30–90s) and Vite already does
-HMR for the UI. Instead:
+For HTML/CSS/TS changes under `shell/ui/` or `shell/src/`, **do not** run
+`app:dev` — the sidecar binary is a 66 MB Bun compile (~30–90s). Instead run
+the proxy from source (it serves the UI from `shell/dist` on disk) and a
+watch-build:
 
 ```sh
-# Terminal A — proxy with file watch, bound to :4142 (matches shell/src/api.ts DEV branch).
-bun run dev -- start --port 4142
+# Terminal A — proxy from source with file watch, bound to :4141.
+bun run dev -- start --port 4141
 
-# Terminal B — Vite for the settings UI.
+# Terminal B — rebuild the UI bundles on every save.
 bun run app:ui
-# Open http://localhost:1420/settings/
+# Open http://localhost:4141/ui/settings/  (or /ui/dashboard/)
+# Reload the window after a save to pick up changes.
 ```
 
 `shell/src/main.ts`'s `safeInvoke()` already swallows Tauri-only `invoke()`

@@ -19,8 +19,8 @@ auth/loopback model these inherit.
 | `GET` | `/_debug/state` | unauthenticated, `verbose`-gated | `application/json` |
 | `POST` | `/_internal/shutdown` | loopback-only (+ in-handler enforce) | `application/json` |
 
-(Dashboard assets — `/usage-viewer*`, `/vendor/*` — are served
-`no-store`; they are UI, not a wire contract, and are out of scope here.)
+(Dashboard assets — `/ui/dashboard/*` — are served `no-store`; they are
+UI, not a wire contract, and are out of scope here.)
 
 ## `/status` — identity + liveness
 

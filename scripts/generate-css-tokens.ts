@@ -92,7 +92,7 @@ function generateTokensCSS(): string {
 }
 
 function updateUsageViewerCss() {
-  const cssPath = resolve(REPO, "src/pages/usage-viewer.css");
+  const cssPath = resolve(REPO, "shell/ui/dashboard/style.css");
   let cssSrc = readFileSync(cssPath, "utf8");
 
   // We only replace the :root { ... } block for the dashboard.

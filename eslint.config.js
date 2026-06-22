@@ -8,7 +8,6 @@ export default config({
     "scripts/**",
     "shell/**",
     "site/**",
-    "src/pages/**",
     ".dependency-cruiser.cjs",
     "landing/**",
   ],
