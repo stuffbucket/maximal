@@ -1,8 +1,8 @@
 /**
  * Tests focus on the parts of uninstall that don't require root or
  * platform-specific calls — the Claude Desktop config reversion path
- * (which is fully covered by claude-desktop-config.test.ts) plus the
- * binary-removal candidate list. The launchd / scheduled-task path is
+ * (the writer itself is covered by claude-desktop-3p-config.test.ts) plus
+ * the binary-removal candidate list. The launchd / scheduled-task path is
  * exercised by the install scripts in B2/B3a; mocking spawnSync per-OS
  * here would be more brittle than the production code.
  */
@@ -27,27 +27,43 @@ afterEach(() => {
 })
 
 describe("uninstall — Claude Desktop revert integration", () => {
-  it("calling revertProxyConfig from uninstall removes only our keys", async () => {
-    const { revertProxyConfig, applyProxyConfig, readClaudeDesktopConfig } =
-      await import("~/lib/claude-desktop-config")
+  it("revertConfigLibraryProfile removes our profile, preserving user prefs", async () => {
+    const {
+      applyConfigLibraryProfile,
+      revertConfigLibraryProfile,
+      isConfigLibraryApplied,
+      getClaude3pDir,
+    } = await import("~/lib/claude-desktop-3p-config")
 
-    const cfg = path.join(workDir, "claude_desktop_config.json")
+    const home = workDir
+    const dir = getClaude3pDir(home)
+    // Pre-seed a user-owned top-level config with unrelated prefs.
+    fs.mkdirSync(dir, { recursive: true })
     fs.writeFileSync(
-      cfg,
-      JSON.stringify({ mcpServers: { x: { command: "y" } }, theme: "dark" }),
+      path.join(dir, "claude_desktop_config.json"),
+      JSON.stringify({
+        coworkUserFilesPath: "/Users/x/Claude",
+        preferences: { theme: "dark" },
+      }),
     )
-    applyProxyConfig(cfg)
-    // Sanity: our keys are now present alongside the user's.
-    expect(readClaudeDesktopConfig(cfg).inferenceProvider).toBe("gateway")
 
-    const result = revertProxyConfig(cfg)
-    expect(result.wrote).toBe(true)
-    expect(result.remainingKeys.sort()).toEqual(["mcpServers", "theme"])
+    applyConfigLibraryProfile(home)
+    expect(isConfigLibraryApplied(home)).toBe(true)
 
-    const after = readClaudeDesktopConfig(cfg)
-    expect(after.inferenceProvider).toBeUndefined()
-    expect(after.mcpServers).toEqual({ x: { command: "y" } })
-    expect(after.theme).toBe("dark")
+    const result = revertConfigLibraryProfile(home)
+    expect(result.reverted).toBe(true)
+    expect(isConfigLibraryApplied(home)).toBe(false)
+
+    // User prefs survive the revert; only our deploymentMode is cleared.
+    const cfgFile = path.join(dir, "claude_desktop_config.json")
+    // eslint-disable-next-line unicorn/prefer-json-parse-buffer -- JSON.parse's type only accepts string
+    const after = JSON.parse(fs.readFileSync(cfgFile, "utf8")) as Record<
+      string,
+      unknown
+    >
+    expect(after.deploymentMode).toBeUndefined()
+    expect(after.coworkUserFilesPath).toBe("/Users/x/Claude")
+    expect((after.preferences as { theme: string }).theme).toBe("dark")
   })
 })
 

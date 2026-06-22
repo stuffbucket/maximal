@@ -23,7 +23,7 @@ import {
   getClaudeCodeSettingsPath,
   revertProxyBaseUrl,
 } from "./lib/claude-code-settings"
-import { revertProxyConfig } from "./lib/claude-desktop-config"
+import { revertConfigLibraryProfile } from "./lib/claude-desktop-3p-config"
 import {
   FIRST_LAUNCH_PATH_MARKER_END,
   FIRST_LAUNCH_PATH_MARKER_START,
@@ -364,19 +364,11 @@ async function maybeRevertClaude(opts: RunUninstallOptions): Promise<void> {
     return
   }
   try {
-    const result = revertProxyConfig()
-    if (result.wrote) {
-      if (result.remainingKeys.length === 0) {
-        consola.success(`  removed ${result.path} (was only our keys)`)
-      } else {
-        consola.success(
-          `  stripped our keys from ${result.path} (${result.remainingKeys.length} other keys preserved)`,
-        )
-      }
+    const result = revertConfigLibraryProfile()
+    if (result.reverted) {
+      consola.success(`  removed our gateway profile from ${result.dir}`)
     } else {
-      consola.info(
-        "  Claude Desktop config didn't have our keys; nothing to do",
-      )
+      consola.info("  Claude Desktop wasn't wired by us; nothing to do")
     }
   } catch (err) {
     consola.warn("  could not revert Claude Desktop config", err)

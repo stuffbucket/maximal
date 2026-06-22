@@ -13,8 +13,8 @@
  *     args). Explicit-arg calls delegate to the real implementation.
  *   - `~/lib/claude-code-settings`: file-path defaults point at a tmp
  *     settings.json instead of the user's real ~/.claude/settings.json.
- *   - `~/lib/claude-desktop-config`: file-path defaults point at a tmp
- *     file instead of the user's real Claude Desktop config.
+ *   - `~/lib/claude-desktop-3p-config`: `home` defaults point at a tmp
+ *     home dir instead of the user's real Claude-3p userData dir.
  */
 
 import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test"
@@ -26,10 +26,7 @@ import path from "node:path"
 import type { ClaudeInstall } from "~/lib/claude-cli-detect"
 import type { AppConfig } from "~/lib/config"
 
-const ROUTE_DESKTOP = path.join(
-  fs.mkdtempSync(path.join(os.tmpdir(), "apps-route-desktop-")),
-  "claude_desktop_config.json",
-)
+const ROUTE_3P_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "apps-route-3p-"))
 const ROUTE_CC_SETTINGS = path.join(
   fs.mkdtempSync(path.join(os.tmpdir(), "apps-route-ccsettings-")),
   "settings.json",
@@ -79,31 +76,31 @@ void mock.module("~/lib/claude-code-settings", () => ({
     realCcRead(filePath),
 }))
 
-const actualDesktop = await import("~/lib/claude-desktop-config")
-const realApply = actualDesktop.applyProxyConfig
-const realRevert = actualDesktop.revertProxyConfig
-const realReadDesktop = actualDesktop.readClaudeDesktopConfig
-// Wrappers forward ALL args (only defaulting the first to ROUTE_DESKTOP)
-// so this mock stays behaviorally identical to the real module. Bun's
-// `mock.module` persists forward across files in a run, so a wrapper
-// that dropped later args (e.g. applyProxyConfig's `values`) would
-// corrupt sibling tests that pass them.
-void mock.module("~/lib/claude-desktop-config", () => ({
+const actualDesktop = await import("~/lib/claude-desktop-3p-config")
+const realApply = actualDesktop.applyConfigLibraryProfile
+const realRevert = actualDesktop.revertConfigLibraryProfile
+const realIsApplied = actualDesktop.isConfigLibraryApplied
+const realGetDir = actualDesktop.getClaude3pDir
+// Wrappers forward ALL args (only defaulting the first `home` to the tmp
+// home) so this mock stays behaviorally identical to the real module.
+// Bun's `mock.module` persists forward across files in a run, so a wrapper
+// that dropped later args would corrupt sibling tests that pass them.
+void mock.module("~/lib/claude-desktop-3p-config", () => ({
   ...actualDesktop,
-  getClaudeDesktopConfigPath: () => ROUTE_DESKTOP,
-  readClaudeDesktopConfig: (
-    filePath: string = ROUTE_DESKTOP,
+  applyConfigLibraryProfile: (
+    home: string = ROUTE_3P_HOME,
     ...rest: Array<unknown>
-  ) =>
-    (realReadDesktop as (...a: Array<unknown>) => unknown)(filePath, ...rest),
-  applyProxyConfig: (
-    filePath: string = ROUTE_DESKTOP,
+  ) => (realApply as (...a: Array<unknown>) => unknown)(home, ...rest),
+  revertConfigLibraryProfile: (
+    home: string = ROUTE_3P_HOME,
     ...rest: Array<unknown>
-  ) => (realApply as (...a: Array<unknown>) => unknown)(filePath, ...rest),
-  revertProxyConfig: (
-    filePath: string = ROUTE_DESKTOP,
+  ) => (realRevert as (...a: Array<unknown>) => unknown)(home, ...rest),
+  isConfigLibraryApplied: (
+    home: string = ROUTE_3P_HOME,
     ...rest: Array<unknown>
-  ) => (realRevert as (...a: Array<unknown>) => unknown)(filePath, ...rest),
+  ) => (realIsApplied as (...a: Array<unknown>) => unknown)(home, ...rest),
+  getClaude3pDir: (home: string = ROUTE_3P_HOME, ...rest: Array<unknown>) =>
+    (realGetDir as (...a: Array<unknown>) => unknown)(home, ...rest),
 }))
 
 const { appsRoutes } = await import("~/routes/settings/apps")
@@ -121,8 +118,8 @@ function fakeInstall(p: string): ClaudeInstall {
 }
 
 function cleanTmp() {
-  fs.rmSync(path.dirname(ROUTE_DESKTOP), { recursive: true, force: true })
-  fs.mkdirSync(path.dirname(ROUTE_DESKTOP), { recursive: true })
+  fs.rmSync(ROUTE_3P_HOME, { recursive: true, force: true })
+  fs.mkdirSync(ROUTE_3P_HOME, { recursive: true })
   fs.rmSync(path.dirname(ROUTE_CC_SETTINGS), { recursive: true, force: true })
   fs.mkdirSync(path.dirname(ROUTE_CC_SETTINGS), { recursive: true })
 }
@@ -135,7 +132,7 @@ beforeEach(() => {
 
 afterAll(() => {
   fakeConfig = {}
-  fs.rmSync(path.dirname(ROUTE_DESKTOP), { recursive: true, force: true })
+  fs.rmSync(ROUTE_3P_HOME, { recursive: true, force: true })
   fs.rmSync(path.dirname(ROUTE_CC_SETTINGS), { recursive: true, force: true })
 })
 
@@ -284,11 +281,7 @@ describe("POST /apps/claude-desktop/toggle", () => {
     expect(body.id).toBe("claude-desktop")
     expect(body.enabled).toBe(true)
     expect(getConfig().apps?.claudeDesktop?.enabled).toBe(true)
-    expect(
-      actualDesktop.alreadyConfigured(
-        actualDesktop.readClaudeDesktopConfig(ROUTE_DESKTOP),
-      ),
-    ).toBe(true)
+    expect(actualDesktop.isConfigLibraryApplied(ROUTE_3P_HOME)).toBe(true)
   })
 
   test("disable reverts proxy config and persists enabled=false", async () => {
@@ -305,10 +298,6 @@ describe("POST /apps/claude-desktop/toggle", () => {
     })
     expect(res.status).toBe(200)
     expect(getConfig().apps?.claudeDesktop?.enabled).toBe(false)
-    expect(
-      actualDesktop.alreadyConfigured(
-        actualDesktop.readClaudeDesktopConfig(ROUTE_DESKTOP),
-      ),
-    ).toBe(false)
+    expect(actualDesktop.isConfigLibraryApplied(ROUTE_3P_HOME)).toBe(false)
   })
 })
