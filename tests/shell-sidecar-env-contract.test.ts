@@ -16,8 +16,10 @@ import { resolve } from "node:path"
  *   MAXIMAL_SHELL_KEY — the shell-internal API key the webview sends on every
  *     /settings/api/* call. Drift → the user's own UI gets 401s after they
  *     flip "Block unknown connections", which reads as "sign-in is broken".
- *   MAXIMAL_SETTINGS_DIST — the bundled settings UI directory. Drift → the
- *     /settings route 503s / renders blank in the packaged app.
+ *
+ * (The settings/dashboard UI itself is embedded in the sidecar binary and
+ * served at /ui/*, so the shell no longer passes a UI directory — there is
+ * no MAXIMAL_SETTINGS_DIST contract to pin.)
  *
  * These tests pin both ends of each contract: the Rust spawn block must set
  * the name, and some TS source under src/ must read it. A rename on either
@@ -32,7 +34,6 @@ const SRC_DIR = resolve(REPO_ROOT, "src")
 const LAUNCH_ENV_CONTRACTS = [
   "MAXIMAL_SIDECAR_PARENT_PID",
   "MAXIMAL_SHELL_KEY",
-  "MAXIMAL_SETTINGS_DIST",
 ] as const
 
 function readAllTsSources(dir: string): string {
