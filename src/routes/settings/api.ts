@@ -17,6 +17,7 @@
  * allowlist. This costs zero new code in request-auth.ts.
  */
 
+import consola from "consola"
 import { Hono } from "hono"
 
 import { BUILD_VERSION } from "~/lib/build-info"
@@ -25,6 +26,7 @@ import {
   DiagnosticsResponse,
   type DiagnosticsResponse as DiagnosticsResponseT,
   UpdateStatusResponse,
+  type UpdateStatusResponse as UpdateStatusResponseT,
 } from "~/lib/settings-types"
 import { state } from "~/lib/state"
 import { getUpdateStatus } from "~/lib/update-check"
@@ -100,16 +102,24 @@ settingsApiRoutes.get("/update-status", async (c) => {
   const payload = await getUpdateStatus()
   const parsed = UpdateStatusResponse.safeParse(payload)
   if (!parsed.success) {
-    return c.json(
-      {
-        error: {
-          message: "Update-status payload failed schema validation",
-          type: "internal_error",
-          details: parsed.error.issues,
-        },
-      },
-      500,
+    // getUpdateStatus is contractually total (never throws, always the right
+    // shape), so a parse failure here means a code-level contract break, not a
+    // runtime update problem. The update mechanism must "be patient" and never
+    // push an error at the user — so don't 500. Log it and return a coherent
+    // payload that degrades the Settings row to a quiet "unknown".
+    consola.warn(
+      "update-status payload failed schema validation:",
+      parsed.error.issues,
     )
+    return c.json({
+      current: payload.current,
+      latest: null,
+      update_available: false,
+      url: payload.url,
+      enabled: false,
+      checked_at: null,
+      last_error: "update-status payload malformed",
+    } satisfies UpdateStatusResponseT)
   }
   return c.json(parsed.data)
 })

@@ -86,9 +86,28 @@ Fixed canonical:
 https://github.com/stuffbucket/maximal/releases/latest/download/maximal-v<VERSION>-<arch>.<ext>
 ```
 
-Where `<VERSION>` is resolved by hitting
-`https://api.github.com/repos/stuffbucket/maximal/releases/latest` and
-reading `tag_name`. No PAT required; this endpoint is anon-readable.
+Where `<VERSION>` is resolved by reading a small JSON manifest the project
+site publishes (Astro endpoint `site/src/pages/updates/manifest.json.ts`,
+served via GitHub Pages). The app polls the **Pages origin directly** —
+`https://stuffbucket.github.io/maximal/updates/manifest.json` — rather than
+through the mxml.sh Caddy proxy: a machine poll wants the fewest hops and
+smallest trust surface (the branded mxml.sh URL stays the *human*-facing
+download link). The static object has no auth and **no per-IP rate limit** —
+unlike the REST API
+(`https://api.github.com/repos/stuffbucket/maximal/releases/latest` →
+`tag_name`), which caps anonymous callers at 60/h/IP and silently returns
+"no update" once a shared corporate NAT exhausts that budget.
+
+The manifest is **channel-keyed and schema-versioned**
+(`{ schema, channels: { stable: { version, notes } } }`) so a future
+`beta`/`nightly` channel is a server-only addition. It deliberately carries
+**no download URL**: the client pins its download destination as a
+compile-time constant (`src/lib/update-check.ts` → `DOWNLOAD_URL`), so a
+tampered manifest can at most misreport a version — never redirect a user to
+a malicious download. The notify-only detector
+(`src/lib/update-check.ts`) reads this manifest; the page (and manifest)
+redeploy after each release via `redeploy-site` → `deploy-pages.yml`, which
+auto-purges the Pages CDN (and can be dispatched out-of-band to bust it).
 
 ### 6.6 `--prerelease` flag
 

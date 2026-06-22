@@ -1,7 +1,7 @@
 /**
  * Update-availability check (src/lib/update-check.ts). Drives the DI shim so the
- * GitHub fetch + clock are deterministic; BUILD_VERSION is the real running
- * version (package.json fallback in tests).
+ * releases-CDN fetch + clock are deterministic; BUILD_VERSION is the real
+ * running version (package.json fallback in tests).
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
@@ -13,10 +13,16 @@ import {
   DOWNLOAD_URL,
   getUpdateStatus,
   isNewerVersion,
+  parseManifestVersion,
 } from "~/lib/update-check"
 
-const releaseJson = (tag: string): Response =>
-  new Response(JSON.stringify({ tag_name: tag }), { status: 200 })
+/** A manifest body advertising `version` on the `stable` channel, exactly as
+ *  the site build emits it. */
+const manifestBody = (version: unknown): string =>
+  JSON.stringify({ schema: 1, channels: { stable: { version } } })
+
+const manifestJson = (version: string): Response =>
+  new Response(manifestBody(version), { status: 200 })
 
 describe("isNewerVersion", () => {
   test("compares major/minor/patch numerically", () => {
@@ -39,6 +45,37 @@ describe("isNewerVersion", () => {
   })
 })
 
+describe("parseManifestVersion", () => {
+  test("reads the channel's version, tolerating a leading v", () => {
+    expect(parseManifestVersion(manifestBody("0.4.32"))).toBe("0.4.32")
+    expect(parseManifestVersion(manifestBody("v0.4.32"))).toBe("0.4.32")
+    expect(parseManifestVersion(manifestBody("0.5.0-rc.1"))).toBe("0.5.0-rc.1")
+  })
+
+  test("selects the requested channel", () => {
+    const multi = JSON.stringify({
+      channels: {
+        stable: { version: "0.4.32" },
+        beta: { version: "0.5.0-rc.1" },
+      },
+    })
+    expect(parseManifestVersion(multi, "beta")).toBe("0.5.0-rc.1")
+    expect(parseManifestVersion(multi, "stable")).toBe("0.4.32")
+  })
+
+  test("returns null for unrecognized shapes", () => {
+    expect(parseManifestVersion("<!DOCTYPE html>")).toBeNull() // not JSON
+    expect(parseManifestVersion("{}")).toBeNull() // no channels
+    expect(parseManifestVersion(JSON.stringify({ channels: {} }))).toBeNull()
+    expect(parseManifestVersion(manifestBody(42))).toBeNull() // non-string version
+    expect(parseManifestVersion(manifestBody("0.4"))).toBeNull() // incomplete x.y.z
+  })
+
+  test("an absent requested channel degrades to null", () => {
+    expect(parseManifestVersion(manifestBody("0.4.32"), "beta")).toBeNull()
+  })
+})
+
 describe("getUpdateStatus", () => {
   let fetchCalls = 0
 
@@ -54,7 +91,7 @@ describe("getUpdateStatus", () => {
     __setUpdateCheckDepsForTests({
       fetch: () => {
         fetchCalls++
-        return Promise.resolve(releaseJson("v999.0.0"))
+        return Promise.resolve(manifestJson("v999.0.0"))
       },
     })
 
@@ -70,7 +107,7 @@ describe("getUpdateStatus", () => {
 
   test("reports up to date when the latest tag is not newer", async () => {
     __setUpdateCheckDepsForTests({
-      fetch: () => Promise.resolve(releaseJson("v0.0.1")),
+      fetch: () => Promise.resolve(manifestJson("v0.0.1")),
     })
 
     const status = await getUpdateStatus()
@@ -84,7 +121,7 @@ describe("getUpdateStatus", () => {
     __setUpdateCheckDepsForTests({
       fetch: () => {
         fetchCalls++
-        return Promise.resolve(releaseJson("v999.0.0"))
+        return Promise.resolve(manifestJson("v999.0.0"))
       },
       now: () => clock,
     })
@@ -117,6 +154,39 @@ describe("getUpdateStatus", () => {
   test("degrades to 'unknown' on a non-200 (e.g. rate limited)", async () => {
     __setUpdateCheckDepsForTests({
       fetch: () => Promise.resolve(new Response("limit", { status: 403 })),
+    })
+
+    const status = await getUpdateStatus()
+
+    expect(status.latest).toBeNull()
+    expect(status.update_available).toBe(false)
+  })
+
+  test("requests the canonical manifest URL, not the REST API", async () => {
+    let requested = ""
+    __setUpdateCheckDepsForTests({
+      fetch: (url: string) => {
+        requested = url
+        return Promise.resolve(manifestJson("v999.0.0"))
+      },
+    })
+
+    await getUpdateStatus()
+
+    // The Pages/Fastly origin directly — not the mxml.sh Caddy proxy (fewest
+    // hops + smallest trust surface for a machine poll).
+    expect(requested).toBe(
+      "https://stuffbucket.github.io/maximal/updates/manifest.json",
+    )
+    expect(requested).not.toContain("mxml.sh")
+    // Never the rate-limited REST API.
+    expect(requested).not.toContain("api.github.com")
+  })
+
+  test("degrades to 'unknown' on a 200 with an unparseable body", async () => {
+    __setUpdateCheckDepsForTests({
+      fetch: () =>
+        Promise.resolve(new Response("<html>nope</html>", { status: 200 })),
     })
 
     const status = await getUpdateStatus()

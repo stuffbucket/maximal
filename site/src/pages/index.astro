@@ -2,69 +2,16 @@
 import "../styles/global.css";
 import StarNest from "../components/StarNest.astro";
 import FlyingToasters from "../components/FlyingToasters.astro";
+import { resolveLatestRelease } from "../lib/version";
 
 const REPO = "stuffbucket/maximal";
 const REPO_URL = `https://github.com/${REPO}`;
 const RELEASES_URL = `${REPO_URL}/releases`;
 
-// Temporary version pin. When VITE_SITE_PIN_VERSION is set at build time
-// (surfaced from the SITE_PIN_VERSION repo variable by deploy-pages.yml),
-// the site advertises that exact tag + download links instead of GitHub's
-// /releases/latest. This lets us cut and validate a release without the
-// landing page advancing to it. Clear the repo variable and redeploy to
-// resume tracking latest:
-//   gh variable set SITE_PIN_VERSION --body v0.4.8    # pin
-//   gh variable delete SITE_PIN_VERSION               # unpin
-const PINNED_TAG = (import.meta.env.VITE_SITE_PIN_VERSION ?? "").trim();
-
-interface ReleaseInfo {
-  tag: string | null;
-  hasRelease: boolean;
-}
-
-async function fetchLatestTag(): Promise<ReleaseInfo> {
-  // Authenticate with the build's GITHUB_TOKEN (deploy-pages.yml passes it).
-  // The anonymous API is 60 req/hr per IP, shared across Actions runners — a
-  // busy release day exhausts it, and an unauthenticated 403 used to silently
-  // fall back to "see /releases" with no direct download links. Authenticated
-  // is 1,000+/hr. Read from process.env (build-time Node) so the token never
-  // reaches the client bundle.
-  const token = (process.env.GITHUB_TOKEN ?? "").trim();
-  const headers: Record<string, string> = {
-    Accept: "application/vnd.github+json",
-    "User-Agent": "maximal-site-build",
-    "X-GitHub-Api-Version": "2022-11-28",
-  };
-  if (token) headers.Authorization = `Bearer ${token}`;
-
-  const res = await fetch(
-    `https://api.github.com/repos/${REPO}/releases/latest`,
-    { headers },
-  );
-  // 404 is the *legitimate* "no published release yet" state (first launch) —
-  // fall back to the /releases link without failing the build.
-  if (res.status === 404) return { tag: null, hasRelease: false };
-  // Anything else (403 rate-limit, 5xx, malformed body) is a real failure.
-  // FAIL THE BUILD rather than fall open: a thrown error keeps the last good
-  // site live instead of replacing it with one that lost its version label
-  // and direct download links.
-  if (!res.ok) {
-    throw new Error(
-      `GitHub releases API returned ${res.status} ${res.statusText} — refusing to deploy a site without download links. Re-run once the API recovers.`,
-    );
-  }
-  const body = (await res.json()) as { tag_name?: string };
-  if (typeof body.tag_name === "string" && body.tag_name.length > 0) {
-    return { tag: body.tag_name, hasRelease: true };
-  }
-  throw new Error("GitHub releases API response missing tag_name");
-}
-
-// A pin wins over the live lookup; otherwise track GitHub's latest
-// (non-prerelease, non-draft) release as before.
-const { tag, hasRelease } = PINNED_TAG
-  ? { tag: PINNED_TAG, hasRelease: true }
-  : await fetchLatestTag();
+// Resolution (live lookup, the VITE_SITE_PIN_VERSION pin, and the fail-closed
+// behavior) lives in lib/version.ts so the landing page and the update
+// manifest advertise the exact same release. See that file for the pin recipe.
+const { tag, hasRelease } = await resolveLatestRelease();
 
 const assetUrl = (filename: string): string =>
   hasRelease && tag

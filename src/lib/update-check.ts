@@ -1,10 +1,11 @@
 /**
  * Update-available check — the notify-only half of self-update
  * (`docs/spec/phase-6-self-update.md`, Open Q#1). Resolves the latest published
- * release tag from the GitHub API and compares it to the running
+ * release version from a JSON manifest the project site publishes at a
+ * canonical URL (mxml.sh, fronting GitHub Pages) and compares it to the running
  * `BUILD_VERSION`. Config-gated (`config.checkUpdates`, default ON) and cached
- * so the Settings panel + the shell's once-per-day notification don't hammer
- * the anonymous API.
+ * so the Settings panel + the shell's periodic notification don't refetch
+ * needlessly.
  *
  * Install-channel neutral: we point users at `https://mxml.sh` (the download
  * page that routes to the right artifact / package manager) rather than a raw
@@ -23,15 +24,31 @@ import { createTeeLogger } from "./logger"
 
 const log = createTeeLogger("update")
 
-const RELEASES_LATEST_URL =
-  "https://api.github.com/repos/stuffbucket/maximal/releases/latest"
+/** The update manifest — a small JSON document the project site publishes on
+ *  every release. We fetch it straight from the GitHub Pages origin
+ *  (Fastly-backed, GitHub's own CDN) rather than via the mxml.sh Caddy proxy:
+ *  this is a machine-to-machine poll, so we want the fewest hops and the
+ *  smallest trust surface — the proxy box can fail or be tampered with even
+ *  when Pages is healthy. (The branded mxml.sh URL stays the *human*-facing
+ *  download link — see `DOWNLOAD_URL`.) A static, CDN-cached object: NO auth
+ *  and NO per-IP rate limit, so it scales to every client. (The REST API caps
+ *  anonymous callers at 60/h/IP — a real failure mode behind a shared corporate
+ *  NAT, where it silently returns "no update".) Channel-keyed, so opting a
+ *  build into a future `beta` is a server-only + client-config change. */
+const MANIFEST_URL =
+  "https://stuffbucket.github.io/maximal/updates/manifest.json"
+
+/** Which release channel this build follows. A constant today (only `stable`
+ *  exists); the manifest is already channel-keyed, so wiring this to config is
+ *  all that's needed when a `beta` channel ships. */
+const UPDATE_CHANNEL = "stable"
 
 /** Where to send the user to update — install-channel neutral. */
 export const DOWNLOAD_URL = "https://mxml.sh/maximal/"
 
 /** Cache the resolved status this long. Generous on purpose: a new release is
- *  rare and the anon GitHub API is rate-limited (60/h/IP). The shell's daily
- *  notification and the occasional Settings open both read through this. */
+ *  rare, so there's no value re-fetching the CDN asset more often. The shell's
+ *  periodic check and the occasional Settings open both read through this. */
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000
 
 export interface UpdateStatus {
@@ -43,6 +60,16 @@ export interface UpdateStatus {
   update_available: boolean
   /** Where to get it. */
   url: string
+  /** Whether update checking is enabled (`config.checkUpdates`). False means
+   *  the mechanism is intentionally idle — not broken. */
+  enabled: boolean
+  /** ISO time of the last successful manifest fetch, or null if we've never
+   *  reached it. Lets diagnostics show whether the check is actually running. */
+  checked_at: string | null
+  /** Short reason the most recent attempt didn't yield a usable version
+   *  (network error, non-200, unparseable manifest), or null when the last
+   *  attempt succeeded / checks are disabled. Diagnostic only — never thrown. */
+  last_error: string | null
 }
 
 // Dependency-injection shim for tests, mirroring token.ts / auth-recovery.ts:
@@ -91,52 +118,110 @@ export function isNewerVersion(a: string, b: string): boolean {
   return a2 > b2
 }
 
+interface UpdateManifest {
+  channels?: Record<string, { version?: unknown } | undefined>
+}
+
 /**
- * Resolve whether a newer release is available. Returns a coherent
- * `update_available: false` status (with `latest: null`) whenever the check is
- * disabled or anything goes wrong. `force` bypasses the cache.
+ * Pull a channel's version string out of the manifest JSON. Strict and
+ * best-effort: returns null for any shape we don't recognize (bad JSON, missing
+ * channel, non-version string), so a malformed — or tampered — manifest
+ * degrades to "unknown" rather than reporting a bogus release. The download
+ * destination is never read from the manifest; see `DOWNLOAD_URL`.
+ */
+export function parseManifestVersion(
+  body: string,
+  channel: string = UPDATE_CHANNEL,
+): string | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(body)
+  } catch {
+    return null
+  }
+  const entry = (parsed as UpdateManifest | null)?.channels?.[channel]
+  const version = entry?.version
+  if (typeof version !== "string") return null
+  const match = /^v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)$/u.exec(version.trim())
+  return match ? match[1] : null
+}
+
+/**
+ * Resolve whether a newer release is available. NEVER throws: any failure
+ * (disabled, offline, non-200, timeout, malformed manifest) returns a coherent
+ * status carrying diagnostic fields — `enabled`, `checked_at`, `last_error` —
+ * and the last known `latest` if we have one, so a transient blip doesn't erase
+ * a real result. `force` bypasses the cache.
  */
 export async function getUpdateStatus(force = false): Promise<UpdateStatus> {
   const current = BUILD_VERSION
-  const unknown: UpdateStatus = {
-    current,
-    latest: null,
-    update_available: false,
-    url: DOWNLOAD_URL,
+  const enabled = isUpdateCheckEnabled()
+  const checkedAt = cache ? new Date(cache.atMs).toISOString() : null
+
+  // Disabled is an intentional idle state, not a failure: report it cleanly,
+  // with no stale result and no error.
+  if (!enabled) {
+    return {
+      current,
+      latest: null,
+      update_available: false,
+      url: DOWNLOAD_URL,
+      enabled: false,
+      checked_at: checkedAt,
+      last_error: null,
+    }
   }
 
-  if (!isUpdateCheckEnabled()) return unknown
   if (!force && cache && nowMs() - cache.atMs < CACHE_TTL_MS) {
     return cache.status
   }
 
+  // A failed attempt keeps the last known result (if any) and surfaces why.
+  const fallback = (error: string): UpdateStatus => ({
+    current,
+    latest: cache?.status.latest ?? null,
+    update_available: cache?.status.update_available ?? false,
+    url: DOWNLOAD_URL,
+    enabled: true,
+    checked_at: checkedAt,
+    last_error: error,
+  })
+
   try {
-    const res = await fetchImpl(RELEASES_LATEST_URL, {
-      headers: {
-        accept: "application/vnd.github+json",
-        "user-agent": "maximal",
-      },
+    const res = await fetchImpl(MANIFEST_URL, {
+      headers: { "user-agent": "maximal" },
       signal: AbortSignal.timeout(GITHUB_API_TIMEOUT_MS),
     })
     if (!res.ok) {
-      log.warn(`Update check: GitHub returned ${res.status}; skipping.`)
-      return unknown
+      // Transient CDN/network blip, or a manifest not yet deployed.
+      const error = `manifest fetch returned HTTP ${res.status}`
+      log.warn(`Update check: ${error}; skipping.`)
+      return fallback(error)
     }
-    const body = (await res.json()) as { tag_name?: string }
-    const latest = body.tag_name ? body.tag_name.replace(/^v/u, "") : null
+    const latest = parseManifestVersion(await res.text())
+    const error =
+      latest === null ? "manifest had no usable version for this channel" : null
+    const atMs = nowMs()
     const status: UpdateStatus = {
       current,
       latest,
       update_available: latest !== null && isNewerVersion(latest, current),
       url: DOWNLOAD_URL,
+      enabled: true,
+      checked_at: new Date(atMs).toISOString(),
+      last_error: error,
     }
     // Single-threaded module: a concurrent check would re-fetch and overwrite
     // with identical data, so the "race" the rule warns about is harmless here.
     // eslint-disable-next-line require-atomic-updates
-    cache = { atMs: nowMs(), status }
+    cache = { atMs, status }
     return status
   } catch (err) {
+    const error =
+      err instanceof Error ?
+        `network error: ${err.message}`
+      : "update check failed"
     log.warn("Update check failed (continuing):", err)
-    return unknown
+    return fallback(error)
   }
 }
