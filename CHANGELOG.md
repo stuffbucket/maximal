@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.31](https://github.com/stuffbucket/maximal/compare/v0.4.30...v0.4.31) (2026-06-22)
+
+
+### Features
+
+* **shell:** in-app uninstall button replacing copy-to-terminal ([#150](https://github.com/stuffbucket/maximal/issues/150)) ([57837e9](https://github.com/stuffbucket/maximal/commit/57837e94583950a1de8a37ea6a1b668202652190))
+
+
+### Bug Fixes
+
+* **ci:** auto-flip release PR label pending → tagged after tagging ([#152](https://github.com/stuffbucket/maximal/issues/152)) ([3ee9b8c](https://github.com/stuffbucket/maximal/commit/3ee9b8c622f8b628f8535fa2fd1554471b1667b2))
+
 ## [0.4.30](https://github.com/stuffbucket/maximal/compare/v0.4.29...v0.4.30) (2026-06-22)
 
 
