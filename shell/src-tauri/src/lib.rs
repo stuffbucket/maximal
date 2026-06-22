@@ -47,7 +47,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{
     image::Image,
     ipc::Channel,
-    menu::{Menu, MenuItem, PredefinedMenuItem},
+    menu::{IsMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder,
     WindowEvent,
@@ -79,6 +79,12 @@ const SPLASH_MIN_DISPLAY: Duration = Duration::from_millis(1600);
 /// — when the JS side drops the channel, the next `send` returns Err
 /// and the loop exits cleanly.
 const DASHBOARD_POLL_INTERVAL: Duration = Duration::from_secs(5);
+
+/// How often the phase-2 poll re-checks for a newer release. Generous on
+/// purpose — releases are rare and the sidecar caches the upstream lookup for
+/// hours — but finite so a long-running menu-bar session still notices a
+/// release published after launch. Aligns with the sidecar's cache TTL.
+const UPDATE_CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 
 /// Allowed values for the dashboard's `period` query parameter.
 /// Anything else from the webview is clamped to "day".
@@ -117,6 +123,7 @@ mod menu_id {
     pub const SHOW_LOGS: &str = "show_logs";
     pub const RETRY: &str = "retry";
     pub const OPEN_CONFIG: &str = "open_config";
+    pub const UPGRADE: &str = "upgrade";
 }
 
 /// High-level tray state. Each transition rebuilds the menu and swaps
@@ -223,6 +230,46 @@ enum RejectionTransition {
     Cleared,
     /// Some → Some(different): tray stays in ATTENTION, no re-notify.
     Changed,
+}
+
+/// The latest available release, as last reported by the sidecar's
+/// `/settings/api/update-status`. None = up to date (or unknown). Drives the
+/// "Upgrade to v…" tray item and a one-shot OS notification when a newer
+/// version first appears. Mutex because the poll task writes it while the
+/// tray-refresh and menu-event paths read it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct UpdateSnapshot {
+    /// Latest version, no leading "v".
+    latest: String,
+    /// Install-channel-neutral download page.
+    url: String,
+}
+
+/// Tracks the most recent update snapshot the poll loop has observed. Wrapped
+/// in Mutex because the polling task and the tray paths both touch it.
+struct LatestUpdate(Mutex<Option<UpdateSnapshot>>);
+
+impl LatestUpdate {
+    fn new() -> Self {
+        Self(Mutex::new(None))
+    }
+
+    fn get(&self) -> Option<UpdateSnapshot> {
+        self.0.lock().expect("update mutex poisoned").clone()
+    }
+
+    /// Stores the snapshot; returns true if it changed (a newly available
+    /// version, a changed target, or clearing back to up-to-date). Callers
+    /// fire the one-shot notification only when the new value is Some, so a
+    /// repeated periodic check that finds the same version doesn't re-nag.
+    fn set(&self, next: Option<UpdateSnapshot>) -> bool {
+        let mut guard = self.0.lock().expect("update mutex poisoned");
+        if *guard == next {
+            return false;
+        }
+        *guard = next;
+        true
+    }
 }
 
 /// Holds the most recent error-looking line the sidecar printed to stderr,
@@ -524,6 +571,7 @@ pub fn run() {
         .manage(SplashDismissed::new())
         .manage(SidecarRestarting::new())
         .manage(LastRejection::new())
+        .manage(LatestUpdate::new())
         .manage(LastSidecarError::new())
         .invoke_handler(tauri::generate_handler![
             open_settings_at,
@@ -938,10 +986,12 @@ async fn poll_sidecar_status(app: AppHandle) {
     let update_status_url = format!(
         "http://127.0.0.1:{SIDECAR_PORT}/settings/api/update-status",
     );
-    // Once-per-launch update check: flips true on the first definitive response
-    // so we don't re-ping every 5s. A transient failure leaves it false so the
-    // next iteration retries (e.g. the network came back after a cold start).
-    let mut update_checked = false;
+    // Periodic update check: a menu-bar app can stay open for days, well past a
+    // new release, so we re-check on an interval rather than once per launch.
+    // `last_update_check` holds the last DEFINITIVE check; a transient failure
+    // leaves it unchanged so the next 5s tick retries (e.g. the network came
+    // back after a cold start). The first iteration checks immediately.
+    let mut last_update_check: Option<std::time::Instant> = None;
     loop {
         tokio::time::sleep(Duration::from_secs(5)).await;
         // Stop polling if we've already concluded the sidecar is gone.
@@ -957,10 +1007,12 @@ async fn poll_sidecar_status(app: AppHandle) {
         {
             apply_rejection(&app, rejection);
         }
-        if !update_checked
+        let update_due = last_update_check
+            .is_none_or(|t| t.elapsed() >= UPDATE_CHECK_INTERVAL);
+        if update_due
             && check_for_update(&app, &client, &update_status_url).await
         {
-            update_checked = true;
+            last_update_check = Some(std::time::Instant::now());
         }
         // A single failed poll during phase 2 is ignored — the proxy
         // might be momentarily busy. We only flip to Failed via the
@@ -1056,14 +1108,14 @@ fn fire_rejection_notification(app: &AppHandle, message: &str) {
     }
 }
 
-/// One-shot (per launch) update check: GET `/settings/api/update-status` against
-/// the sidecar and, when a newer release is available, fire a single OS
-/// notification pointing at the download page (mxml.sh — install-channel
-/// neutral). Returns true once a definitive 2xx response is seen so the caller
-/// stops re-checking this launch; false on a transient failure (unreachable /
+/// Update check: GET `/settings/api/update-status` against the sidecar and
+/// hand the result to `apply_update`, which updates the "Upgrade to v…" tray
+/// item and fires a single OS notification when a newer version first appears.
+/// Returns true once a definitive 2xx response is seen (so the periodic caller
+/// records the check time); false on a transient failure (unreachable /
 /// non-2xx / unparseable) so it retries on the next poll tick. The sidecar
-/// caches the GitHub ping for hours and honors `config.checkUpdates`, so this
-/// stays cheap and is a no-op when the user opted out.
+/// caches the upstream lookup for hours and honors `config.checkUpdates`, so
+/// this stays cheap and is a no-op when the user opted out.
 async fn check_for_update(
     app: &AppHandle,
     client: &reqwest::Client,
@@ -1082,7 +1134,7 @@ async fn check_for_update(
         .get("update_available")
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
-    if available {
+    let next = if available {
         let latest = payload
             .get("latest")
             .and_then(serde_json::Value::as_str)
@@ -1093,9 +1145,34 @@ async fn check_for_update(
             .and_then(serde_json::Value::as_str)
             .unwrap_or("https://mxml.sh/maximal/")
             .to_owned();
-        fire_update_notification(app, &latest, &download_url);
+        Some(UpdateSnapshot {
+            latest,
+            url: download_url,
+        })
+    } else {
+        None
+    };
+    apply_update(app, next);
+    true // definitive response — recorded; the periodic loop re-checks later
+}
+
+/// Applies a fetched update snapshot to managed state. Fires a single OS
+/// notification when a newer version first appears (or the target changes),
+/// and refreshes the tray on any change so the "Upgrade to v…" item appears
+/// (or clears once the user is current). Mirrors `apply_rejection`: an
+/// unchanged snapshot is a no-op, so a repeated periodic check that finds the
+/// same version doesn't re-nag or churn the menu.
+fn apply_update(app: &AppHandle, next: Option<UpdateSnapshot>) {
+    if !app.state::<LatestUpdate>().set(next.clone()) {
+        return; // unchanged — no re-notify, no tray churn
     }
-    true // definitive response — done for this launch
+    if let Some(update) = &next {
+        fire_update_notification(app, &update.latest, &update.url);
+    }
+    let current_state = app.state::<AppStatus>().get();
+    if let Err(err) = refresh_tray(app, current_state) {
+        eprintln!("[shell] tray refresh after update change failed: {err}");
+    }
 }
 
 /// One-shot banner notification when a newer release is available. Same
@@ -1544,6 +1621,23 @@ fn build_menu(app: &AppHandle, state: SidecarState) -> tauri::Result<Menu<tauri:
     )?;
     let sep1 = PredefinedMenuItem::separator(app)?;
 
+    // An "Upgrade to v…" item leads the menu in the running states whenever the
+    // poll loop has seen a newer release. Built here (before the match) so both
+    // running arms can prepend it; the other arms simply don't reference it.
+    // Clicking it opens the install-channel-neutral download page.
+    let update = app.state::<LatestUpdate>().get();
+    let upgrade_item = match &update {
+        Some(u) => Some(MenuItem::with_id(
+            app,
+            menu_id::UPGRADE,
+            format!("Upgrade to v{}…", u.latest),
+            true,
+            None::<&str>,
+        )?),
+        None => None,
+    };
+    let sep_upgrade = PredefinedMenuItem::separator(app)?;
+
     match state {
         SidecarState::Starting => {
             let starting = MenuItem::with_id(
@@ -1564,17 +1658,18 @@ fn build_menu(app: &AppHandle, state: SidecarState) -> tauri::Result<Menu<tauri:
                 None::<&str>,
             )?;
             let sep2 = PredefinedMenuItem::separator(app)?;
-            Menu::with_items(
-                app,
-                &[
-                    &sign_in,
-                    &sep1,
-                    &dashboard_item,
-                    &settings_item,
-                    &sep2,
-                    &quit_item,
-                ],
-            )
+            let mut items: Vec<&dyn IsMenuItem<tauri::Wry>> = Vec::new();
+            if let Some(up) = &upgrade_item {
+                items.push(up);
+                items.push(&sep_upgrade);
+            }
+            items.push(&sign_in);
+            items.push(&sep1);
+            items.push(&dashboard_item);
+            items.push(&settings_item);
+            items.push(&sep2);
+            items.push(&quit_item);
+            Menu::with_items(app, &items)
         }
         SidecarState::RunningAuthenticated => {
             // We don't fetch the GitHub login (would require a network
@@ -1589,17 +1684,18 @@ fn build_menu(app: &AppHandle, state: SidecarState) -> tauri::Result<Menu<tauri:
                 None::<&str>,
             )?;
             let sep2 = PredefinedMenuItem::separator(app)?;
-            Menu::with_items(
-                app,
-                &[
-                    &info,
-                    &sep1,
-                    &dashboard_item,
-                    &settings_item,
-                    &sep2,
-                    &quit_item,
-                ],
-            )
+            let mut items: Vec<&dyn IsMenuItem<tauri::Wry>> = Vec::new();
+            if let Some(up) = &upgrade_item {
+                items.push(up);
+                items.push(&sep_upgrade);
+            }
+            items.push(&info);
+            items.push(&sep1);
+            items.push(&dashboard_item);
+            items.push(&settings_item);
+            items.push(&sep2);
+            items.push(&quit_item);
+            Menu::with_items(app, &items)
         }
         SidecarState::Failed | SidecarState::Stopped => {
             let failed = MenuItem::with_id(
@@ -1654,8 +1750,21 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
         menu_id::SHOW_LOGS => do_reveal_logs_dir(app),
         menu_id::OPEN_CONFIG => do_reveal_config_dir(app),
         menu_id::RETRY => retry_startup(app),
+        menu_id::UPGRADE => open_update_url(app),
         menu_id::QUIT => request_quit(app),
         _ => {}
+    }
+}
+
+/// Opens the install-channel-neutral download page for the available update
+/// (the same URL the OS notification points at). No-op if we somehow have no
+/// snapshot — the item is only built when one exists.
+fn open_update_url(app: &AppHandle) {
+    let Some(update) = app.state::<LatestUpdate>().get() else {
+        return;
+    };
+    if let Err(err) = app.opener().open_url(update.url, None::<&str>) {
+        eprintln!("[shell] failed to open update url: {err}");
     }
 }
 

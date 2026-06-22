@@ -59,13 +59,18 @@ export type DiagnosticsResponse = z.infer<typeof DiagnosticsResponse>
 
 /** Update-availability status — GET /settings/api/update-status. Best-effort:
  *  `latest` is null and `update_available` false whenever the check is disabled
- *  or the GitHub ping failed. `url` is the install-channel-neutral download
- *  page (mxml.sh), not a raw release asset. See update-check.ts. */
+ *  or the manifest fetch failed. `url` is the install-channel-neutral download
+ *  page (mxml.sh), not a raw release asset. The `enabled` / `checked_at` /
+ *  `last_error` fields are diagnostic — they let the Settings UI show whether
+ *  the mechanism is working and what it last reported. See update-check.ts. */
 export const UpdateStatusResponse = z.object({
   current: z.string(),
   latest: z.string().nullable(),
   update_available: z.boolean(),
   url: z.string(),
+  enabled: z.boolean(),
+  checked_at: z.string().nullable(),
+  last_error: z.string().nullable(),
 })
 export type UpdateStatusResponse = z.infer<typeof UpdateStatusResponse>
 

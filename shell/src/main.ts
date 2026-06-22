@@ -422,14 +422,37 @@ async function loadDiagnostics(): Promise<void> {
   void loadUpdateStatus();
 }
 
+/** Human "3m ago"-style age from an ISO timestamp; falls back to the raw
+ *  string if it can't parse. */
+function relativeTime(iso: string): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return iso;
+  const secs = Math.max(0, Math.round((Date.now() - then) / 1000));
+  if (secs < 60) return "just now";
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
+}
+
 /**
- * Render the Diagnostics "Updates" row from GET /settings/api/update-status.
- * Three shapes: a newer release (offer the mxml.sh link), up to date, or
- * unknown (check disabled / offline / rate-limited — never claim "up to date"
- * when we couldn't actually check). The link opens in the system browser via
- * the opener plugin; mxml.sh routes to the right artifact for the install.
+ * Render both update rows from GET /settings/api/update-status: the "Updates"
+ * outcome (what it reports) and the "Update check" health (whether the
+ * mechanism is working).
  */
 function renderUpdateStatus(data: UpdateStatusResponse): void {
+  renderUpdateOutcome(data);
+  renderUpdateHealth(data);
+}
+
+/**
+ * The "Updates" outcome row. Three shapes: a newer release (offer the mxml.sh
+ * link), up to date, or unknown (couldn't resolve a version — the "Update
+ * check" row explains why; never claim "up to date" when we couldn't check).
+ * The link opens in the system browser via the opener plugin.
+ */
+function renderUpdateOutcome(data: UpdateStatusResponse): void {
   const dd = document.querySelector<HTMLElement>(
     '[data-field="update_status"]',
   );
@@ -453,23 +476,44 @@ function renderUpdateStatus(data: UpdateStatusResponse): void {
 
   const span = document.createElement("span");
   span.className = "mono";
-  // `latest` known but not newer → genuinely current. `latest === null` → we
-  // couldn't check; say so rather than imply everything's fine.
-  span.textContent = data.latest ? "Up to date" : "—";
+  // `latest` known but not newer → genuinely current. Otherwise we couldn't
+  // resolve a version; say "Unknown" rather than imply everything's fine.
+  span.textContent = data.latest ? "Up to date" : "Unknown";
   dd.append(span);
 }
 
+/**
+ * The "Update check" health row — surfaces whether the mechanism is actually
+ * working: enabled state, when it last reached the manifest, and the reason for
+ * the most recent failure. Makes a silent breakage visible at a glance.
+ */
+function renderUpdateHealth(data: UpdateStatusResponse): void {
+  let text: string;
+  if (!data.enabled) {
+    text = "Disabled";
+  } else if (data.last_error) {
+    const when = data.checked_at
+      ? `last ok ${relativeTime(data.checked_at)}`
+      : "never succeeded";
+    text = `Failed — ${data.last_error} (${when})`;
+  } else if (data.checked_at) {
+    text = `OK · checked ${relativeTime(data.checked_at)}`;
+  } else {
+    text = "Checking…";
+  }
+  setField("update_check", text);
+}
+
 async function loadUpdateStatus(): Promise<void> {
-  const dd = document.querySelector<HTMLElement>(
-    '[data-field="update_status"]',
-  );
   const result = await apiCall({
     kind: "update-status",
     method: "GET",
     path: "/settings/api/update-status",
   });
   if (!result.ok) {
-    if (dd) dd.textContent = "—";
+    // Sidecar unreachable — stay quiet, not alarming.
+    setField("update_status", "Unknown");
+    setField("update_check", "Unavailable");
     return;
   }
   renderUpdateStatus(result.data);
