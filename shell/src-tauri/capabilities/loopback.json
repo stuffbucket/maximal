@@ -1,15 +1,13 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "loopback",
-  "description": "Both webviews load their content from the local sidecar on :4141 (and the Settings dev server on :1420). Tauri classifies those origins as 'remote' even though they're loopback, so the default capability's `local: true` doesn't apply — and IPC fails with 'Plugin not found' for any custom command. This capability mirrors the default permission set onto those remote URLs so commands like `subscribe_token_usage` and `get_shell_api_key` work from the dashboard and settings webviews.",
+  "description": "Both webviews load their content from the local sidecar on :4141 at /ui/*. Tauri classifies those origins as 'remote' even though they're loopback, so the default capability's `local: true` doesn't apply — and IPC fails with 'Plugin not found' for any custom command. This capability mirrors the default permission set onto those remote URLs so commands like `subscribe_token_usage` and `get_shell_api_key` work from the dashboard and settings webviews.",
   "windows": ["settings", "dashboard"],
   "local": false,
   "remote": {
     "urls": [
       "http://localhost:4141/*",
-      "http://localhost:1420/*",
-      "http://127.0.0.1:4141/*",
-      "http://127.0.0.1:1420/*"
+      "http://127.0.0.1:4141/*"
     ]
   },
   "permissions": [
