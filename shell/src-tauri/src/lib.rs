@@ -414,16 +414,20 @@ impl ShellApiKey {
     }
 }
 
-/// 16 random bytes from `/dev/urandom`, hex-encoded, with a recognisable
+/// 16 cryptographically-random bytes, hex-encoded, with a recognisable
 /// prefix so it's greppable in logs / config diffs. Total length 41
 /// chars — comfortably inside the sidecar's API_KEY_VALUE_PATTERN range
 /// (8–128 chars of [A-Za-z0-9_-]).
+///
+/// Sourced via `getrandom`, which pulls bytes from the OS CSPRNG on every
+/// target (`/dev/urandom` / `getrandom(2)` on Unix, `BCryptGenRandom` on
+/// Windows). The previous implementation opened `/dev/urandom` directly,
+/// which does not exist on Windows and would panic the shell at startup —
+/// the single hardest Windows-parity blocker in this file.
 fn generate_shell_api_key() -> String {
-    use std::io::Read;
     let mut buf = [0u8; 16];
-    std::fs::File::open("/dev/urandom")
-        .and_then(|mut f| f.read_exact(&mut buf))
-        .expect("could not read /dev/urandom for shell api key");
+    getrandom::fill(&mut buf)
+        .expect("could not read OS CSPRNG for shell api key");
     let hex: String = buf.iter().map(|b| format!("{:02x}", b)).collect();
     format!("mxlshell_{}", hex)
 }
@@ -886,9 +890,18 @@ fn extract_error_reason(chunk: &str) -> Option<String> {
 ///   3. If the child is still around (still in our `Sidecar` state)
 ///      after 3s, escalate to SIGKILL via `CommandChild::kill()`.
 ///
-/// On non-Unix targets, libc::SIGTERM isn't available, so we fall
-/// straight through to `child.kill()`. The tray app is macOS-first;
-/// this just keeps any future Windows builds compiling.
+/// On Windows there is no SIGTERM to send through this API. We instead
+/// run `taskkill /PID <pid>` *without* `/F`: that posts WM_CLOSE /
+/// CTRL_CLOSE_EVENT to the target, which the Bun runtime surfaces to
+/// the sidecar's emulated `SIGTERM`/`SIGINT` handler (src/lib/start/
+/// shutdown.ts wires both) — so the same graceful drain runs. We then
+/// escalate to `CommandChild::kill()` (SIGKILL-equivalent) after the
+/// grace period, exactly like the Unix path. If taskkill can't be
+/// spawned we fall straight through to the hard kill so a Quit never
+/// hangs. (A future, even-cleaner option is to POST the proxy's own
+/// `/_internal/shutdown` endpoint — the same protocol `--replace` uses —
+/// but that's async work this synchronous Exit path doesn't need today;
+/// the parent-death watchdog already backstops an abrupt kill.)
 fn kill_sidecar(app: &AppHandle) {
     let Some(child) = app.state::<Sidecar>().take() else {
         return;
@@ -928,9 +941,39 @@ fn kill_sidecar(app: &AppHandle) {
 
     #[cfg(not(unix))]
     {
-        // No SIGTERM equivalent we can send through this API on
-        // Windows; just SIGKILL-equivalent and move on.
-        let _ = child.kill();
+        // Windows graceful shutdown: `taskkill` WITHOUT `/F` requests a
+        // polite close (WM_CLOSE / CTRL_CLOSE_EVENT) that Bun delivers to
+        // the sidecar's emulated SIGTERM/SIGINT handler, so the drain in
+        // src/lib/start/shutdown.ts runs (flush logs, close socket, revert
+        // Claude Code base URL). `/T` also reaps any child the sidecar
+        // spawned. Best-effort: if taskkill won't launch we skip straight
+        // to the hard kill below.
+        let pid = child.pid();
+        #[cfg(target_os = "windows")]
+        {
+            use std::process::Command;
+            #[cfg(windows)]
+            use std::os::windows::process::CommandExt;
+            // CREATE_NO_WINDOW: don't flash a console for the helper.
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            let mut cmd = Command::new("taskkill");
+            cmd.args(["/PID", &pid.to_string(), "/T"]);
+            #[cfg(windows)]
+            cmd.creation_flags(CREATE_NO_WINDOW);
+            if let Err(err) = cmd.spawn() {
+                eprintln!("[shell] taskkill spawn failed ({err}); hard-killing");
+            }
+        }
+
+        // Escalate to SIGKILL-equivalent after the grace period, mirroring
+        // the Unix path. MOVE the child into the thread (do NOT return it to
+        // the shared Sidecar slot) so a respawn that fills the slot with a
+        // fresh child isn't killed by this escalation ~3s later.
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(3));
+            // No-op if the graceful close above already made it exit.
+            let _ = child.kill();
+        });
     }
 }
 
@@ -1478,21 +1521,48 @@ fn install_tray(app: &AppHandle) -> tauri::Result<()> {
     let menu = build_menu(app, SidecarState::Starting)?;
     let icon = icon_for(SidecarState::Starting, false)?;
 
+    // Platform tray-click convention:
+    //   * macOS  — left-click opens the menu (HIG menu-bar behavior).
+    //   * Windows — left-click opens Settings (the expected "open the app"
+    //     gesture), right-click opens the menu. Windows has no
+    //     `RunEvent::Reopen`, so this left-click handler is also the path a
+    //     user takes after the sign-in notification ("click the icon").
+    #[cfg(target_os = "macos")]
+    let show_menu_on_left_click = true;
+    #[cfg(not(target_os = "macos"))]
+    let show_menu_on_left_click = false;
+
     TrayIconBuilder::with_id(TRAY_ID)
         .menu(&menu)
-        .show_menu_on_left_click(true)
+        .show_menu_on_left_click(show_menu_on_left_click)
         .tooltip("maximal — starting…")
         .icon(icon)
         .on_menu_event(handle_menu_event)
-        .on_tray_icon_event(|_tray, event| {
+        .on_tray_icon_event(|tray, event| {
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Up,
                 ..
             } = event
             {
-                // Reserved for future left-click behavior; the
-                // current default is show_menu_on_left_click.
+                // macOS: left-click is handled by show_menu_on_left_click
+                // above — nothing to do here. Windows/Linux: open Settings,
+                // deep-linking to account when the user still needs to sign
+                // in (mirrors the macOS RunEvent::Reopen nudge).
+                #[cfg(not(target_os = "macos"))]
+                {
+                    let app = tray.app_handle();
+                    let section = if app.state::<AppStatus>().get()
+                        == SidecarState::RunningUnauthenticated
+                    {
+                        Some("account")
+                    } else {
+                        None
+                    };
+                    open_settings_window(app, section);
+                }
+                #[cfg(target_os = "macos")]
+                let _ = tray;
             }
         })
         .build(app)?;
@@ -1895,23 +1965,62 @@ fn open_settings_window(app: &AppHandle, section: Option<&str>) {
     }
 }
 
+/// The maximal app-data root, resolved to stay in LOCKSTEP with the
+/// sidecar's own path convention (src/lib/paths.ts). Both must agree or
+/// the tray's "reveal" menu items open a different folder than the one
+/// the proxy reads/writes.
+///
+///   * `COPILOT_API_HOME` (env) wins on every platform when set.
+///   * Windows → `%APPDATA%\maximal` (dictated path contract).
+///   * Unix (macOS/Linux) → `~/.local/share/maximal`.
+///
+/// Returns None only if we can't even resolve the home/appdata base.
+fn maximal_data_dir(app: &AppHandle) -> Option<std::path::PathBuf> {
+    if let Some(home) = std::env::var_os("COPILOT_API_HOME") {
+        let p = std::path::PathBuf::from(home);
+        if !p.as_os_str().is_empty() {
+            return Some(p);
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // %APPDATA% is the per-user roaming app-data root
+        // (C:\Users\<user>\AppData\Roaming). Falls back to Tauri's
+        // resolver if the env var is somehow unset.
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            let p = std::path::PathBuf::from(appdata);
+            if !p.as_os_str().is_empty() {
+                return Some(p.join("maximal"));
+            }
+        }
+        return app.path().app_data_dir().ok().map(|d| {
+            // app_data_dir() yields %APPDATA%\<identifier>; redirect to the
+            // sidecar's `maximal` folder so they stay in lockstep.
+            d.parent()
+                .map(|parent| parent.join("maximal"))
+                .unwrap_or_else(|| d.join("maximal"))
+        });
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let home = app.path().home_dir().ok()?;
+        Some(home.join(".local").join("share").join("maximal"))
+    }
+}
+
 fn do_reveal_config_dir(app: &AppHandle) {
-    let Ok(home) = app.path().home_dir() else {
+    let Some(dir) = maximal_data_dir(app) else {
         return;
     };
-    let dir = home.join(".local").join("share").join("maximal");
     let _ = app.opener().open_path(dir.to_string_lossy(), None::<&str>);
 }
 
 fn do_reveal_logs_dir(app: &AppHandle) {
-    let Ok(home) = app.path().home_dir() else {
+    let Some(dir) = maximal_data_dir(app).map(|d| d.join("logs")) else {
         return;
     };
-    let dir = home
-        .join(".local")
-        .join("share")
-        .join("maximal")
-        .join("logs");
     // Sidecar creates this lazily on first request log. Create it
     // here so the menu item always lands somewhere, even on first
     // boot before any request has been served.

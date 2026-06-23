@@ -51,6 +51,12 @@ tokio = { version = "1", features = ["time"] }
 # Url parsing for WebviewUrl::External(...) — the settings deep-link
 # url builder.
 url = "2"
+# Cross-platform CSPRNG for the per-launch shell API key. The previous
+# code read /dev/urandom directly, which doesn't exist on Windows and
+# panicked the shell at startup; getrandom pulls from the OS CSPRNG on
+# every target (BCryptGenRandom on Windows). Already resolved in the dep
+# tree transitively (Cargo.lock pins 0.3.x), so this adds no new graph.
+getrandom = "0.3"
 
 [target.'cfg(unix)'.dependencies]
 # `libc::kill` lets us send SIGTERM to the sidecar before falling back
