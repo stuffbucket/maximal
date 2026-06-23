@@ -14,7 +14,7 @@
  *   - the test preload (`tests/test-setup.ts`, covers bare `bun test`).
  * A real build overwrites the stub via scripts/gen-ui-embed.ts.
  */
-import { existsSync, mkdirSync, writeFileSync } from "node:fs"
+import { mkdirSync, writeFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 
 const OUT = resolve(import.meta.dir, "..", "src/generated/ui-embed.ts")
@@ -40,12 +40,21 @@ export const UI_FILES: Record<string, UiEmbedEntry | undefined> = {}
  * Synchronously guarantee `src/generated/ui-embed.ts` exists. Returns `true`
  * if it wrote the stub, `false` if a file was already there (real or stub).
  * Cheap and idempotent — safe to call from hot paths like the test preload.
+ *
+ * Uses an atomic exclusive create (`wx` = O_CREAT|O_EXCL) rather than a
+ * check-then-write, so concurrent callers can't race between an `existsSync`
+ * probe and the write (CodeQL js/file-system-race). Whoever creates it first
+ * wins; everyone else sees EEXIST and treats it as "already present".
  */
 export function ensureUiEmbedStub(): boolean {
-  if (existsSync(OUT)) return false
   mkdirSync(dirname(OUT), { recursive: true })
-  writeFileSync(OUT, STUB)
-  return true
+  try {
+    writeFileSync(OUT, STUB, { flag: "wx" })
+    return true
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "EEXIST") return false
+    throw err
+  }
 }
 
 if (import.meta.main) {
