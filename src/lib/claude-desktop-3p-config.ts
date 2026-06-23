@@ -93,10 +93,26 @@ export function gatewayProfile(
   }
 }
 
-/** Resolve the 3P userData directory. Mirrors Electron's `userData`
- *  base (`<AppSupport>/Claude`) with the build's `-3p` suffix. */
-export function getClaude3pDir(home: string = os.homedir()): string {
-  if (process.platform === "win32") {
+/**
+ * Resolve the 3P userData directory. Mirrors Electron's `userData` base
+ * (`<userData>/Claude`) with the build's `-3p` suffix, so the config lands
+ * where the Cowork-3P build actually reads it:
+ *
+ *   - macOS:   `~/Library/Application Support/Claude-3p`
+ *   - Windows: `%APPDATA%\Claude-3p`  (Electron's Windows userData base is
+ *              Roaming AppData — NOT Local — so this is `…\Roaming\Claude-3p`).
+ *
+ * The `configLibrary/` subdir (added by callers) is where the applied
+ * inference profile lives; the historically-wrong target was the standard-
+ * mode `…\Claude\claude_desktop_config.json` (no `-3p`), which the 3P build
+ * ignores. `platform` is injectable so the Windows branch is unit-testable
+ * on a POSIX host.
+ */
+export function getClaude3pDir(
+  home: string = os.homedir(),
+  platform: NodeJS.Platform = process.platform,
+): string {
+  if (platform === "win32") {
     const appData = process.env.APPDATA ?? path.join(home, "AppData", "Roaming")
     return path.join(appData, `Claude${USERDATA_3P_SUFFIX}`)
   }
