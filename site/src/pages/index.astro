@@ -1,30 +1,17 @@
 ---
+import { getEntry, render } from "astro:content";
+
 import "../styles/global.css";
-import StarNest from "../components/StarNest.astro";
-import FlyingToasters from "../components/FlyingToasters.astro";
-import { resolveLatestRelease } from "../lib/version";
 
 const REPO = "stuffbucket/maximal";
 const REPO_URL = `https://github.com/${REPO}`;
-const RELEASES_URL = `${REPO_URL}/releases`;
 
-// Resolution (live lookup, the VITE_SITE_PIN_VERSION pin, and the fail-closed
-// behavior) lives in lib/version.ts so the landing page and the update
-// manifest advertise the exact same release. See that file for the pin recipe.
-const { tag, hasRelease } = await resolveLatestRelease();
-
-const assetUrl = (filename: string): string =>
-  hasRelease && tag
-    ? `${REPO_URL}/releases/download/${tag}/${filename}`
-    : RELEASES_URL;
-
-const versionForAsset = tag ?? "latest";
-const macDmgFile = `maximal-${versionForAsset}-darwin-arm64.dmg`;
-const winMsiFile = `maximal-${versionForAsset}-windows-x64.msi`;
-const macDmg = assetUrl(macDmgFile);
-const winMsi = assetUrl(winMsiFile);
-
-const versionLabel = hasRelease && tag ? tag : "see /releases";
+// The landing body is authored in Markdoc (src/content/landing/index.mdoc).
+// Release-dependent data (download URLs, version label) is resolved inside the
+// Hero/Downloads components via the shared, memoized lib/downloads.ts — which
+// wraps the unchanged lib/version.ts logic — so this shell stays presentational.
+const entry = await getEntry("landing", "index");
+const { Content } = await render(entry);
 ---
 
 <!doctype html>
@@ -32,262 +19,42 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>maximal — All your AI coding tools, one Copilot subscription</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT,WONK@9..144,400..900,0..100,0..1&display=swap"
+    />
+
+    <title>maximal — your AI tools, your Copilot models, one connection</title>
     <meta
       name="description"
-      content="Connect Claude Code, Codex, opencode, and more to your existing GitHub Copilot subscription with maximal."
+      content="maximal is the easy way to connect the AI coding tools you use — Claude Code, Codex, opencode, Cursor — to the models in your GitHub Copilot subscription."
     />
     <link
       rel="icon"
       type="image/svg+xml"
       href={`${import.meta.env.BASE_URL.replace(/\/$/, "")}/favicon.svg`}
     />
-    <meta name="theme-color" content="#0f2e3d" />
-    <meta name="color-scheme" content="dark" />
+    <meta
+      name="theme-color"
+      content="#f7f2e9"
+      media="(prefers-color-scheme: light)"
+    />
+    <meta
+      name="theme-color"
+      content="#09090b"
+      media="(prefers-color-scheme: dark)"
+    />
+    <meta name="color-scheme" content="light dark" />
   </head>
   <body>
     <a href="#main" class="skip-link">Skip to content</a>
 
-    <!-- Background: Star Nest fragment shader (deepest layer) -->
-    <StarNest />
-    <!-- Mid layer: After Dark Flying Toasters sprites -->
-    <FlyingToasters />
-
     <main id="main">
-      <!-- HERO — scarlet -->
-      <header class="card card--scarlet hero" aria-labelledby="title">
-        <svg
-          class="hero-ornament hero-ornament--tr"
-          viewBox="0 0 64 64"
-          fill="currentColor"
-          aria-hidden="true"
-        >
-          <path d="M32 2 L36 28 L62 32 L36 36 L32 62 L28 36 L2 32 L28 28 Z" />
-        </svg>
-        <svg
-          class="hero-ornament hero-ornament--bl"
-          viewBox="0 0 64 64"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          aria-hidden="true"
-        >
-          <path d="M4 4 L4 20 M4 4 L20 4" />
-          <path d="M60 60 L60 44 M60 60 L44 60" />
-          <circle cx="32" cy="32" r="6" />
-        </svg>
-        <h1 id="title" class="wordmark">maximal</h1>
-        <p class="tagline">
-          Copilot, Claude and Codex<br />walked into a taskbar…
-        </p>
-        <div class="header-meta">
-          <a href="https://stuffbucket.co/maximal" rel="noopener"
-            >stuffbucket.co/maximal</a
-          >
-          <span aria-hidden="true">·</span>
-          <a href={RELEASES_URL} rel="noopener">latest: {versionLabel}</a>
-        </div>
-      </header>
+      <Content />
 
-      <!-- WHAT — turquoise -->
-      <section
-        id="what"
-        class="card card--turquoise"
-        aria-labelledby="what-h"
-      >
-        <svg
-          class="section-ornament"
-          viewBox="0 0 48 48"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.5"
-          aria-hidden="true"
-        >
-          <path d="M24 4 Q 36 16, 24 28 Q 12 16, 24 4 Z" />
-          <path d="M24 20 Q 36 32, 24 44 Q 12 32, 24 20 Z" />
-        </svg>
-        <h2 id="what-h">What is this</h2>
-        <p>
-          You already have a GitHub Copilot subscription? Of course you
-          do. Connect Claude Code, Codex, opencode, and more to your
-          existing GitHub Copilot subscription with <span class="brand"
-            >maximal</span
-          >.
-        </p>
-        <p>
-          Use Claude Code, Codex, Copilot Chat, opencode: or whatever
-          the cool kids make tomorrow. Run them all, or switch to
-          something new using <span class="brand">maximal</span>.
-        </p>
-      </section>
-
-      <!-- DOWNLOAD — magenta -->
-      <section
-        id="download"
-        class="card card--magenta"
-        aria-labelledby="download-h"
-      >
-        <svg
-          class="section-ornament"
-          viewBox="0 0 48 48"
-          fill="currentColor"
-          aria-hidden="true"
-        >
-          <path d="M24 4 L27 21 L44 24 L27 27 L24 44 L21 27 L4 24 L21 21 Z" />
-        </svg>
-        <h2 id="download-h">Download</h2>
-        <p class="section-note" id="download-note">
-          Click the installer for you, or a copy for a friend. We'll
-          show you what to do with it once the download starts.
-        </p>
-
-        <div class="downloads" role="group" aria-label="Downloads by platform">
-          <a
-            class="btn"
-            data-os="mac"
-            data-installer="mac-app"
-            href={macDmg}
-            rel="noopener"
-          >
-            <span class="btn-label">
-              <svg
-                class="btn-spark"
-                viewBox="0 0 22 22"
-                fill="currentColor"
-                aria-hidden="true"
-              >
-                <path d="M11 1 L13 9 L21 11 L13 13 L11 21 L9 13 L1 11 L9 9 Z" />
-              </svg>
-              <span>macOS</span>
-            </span>
-          </a>
-          <a
-            class="btn"
-            data-os="windows"
-            data-installer="windows-msi"
-            href={winMsi}
-            rel="noopener"
-          >
-            <span class="btn-label">
-              <svg
-                class="btn-spark"
-                viewBox="0 0 22 22"
-                fill="currentColor"
-                aria-hidden="true"
-              >
-                <path d="M11 1 L13 9 L21 11 L13 13 L11 21 L9 13 L1 11 L9 9 Z" />
-              </svg>
-              <span>Windows</span>
-            </span>
-          </a>
-          <button
-            type="button"
-            class="btn"
-            data-os="mac"
-            data-installer="homebrew"
-            data-open-homebrew-modal
-          >
-            <span class="btn-label">
-              <svg
-                class="btn-spark"
-                viewBox="0 0 22 22"
-                fill="currentColor"
-                aria-hidden="true"
-              >
-                <path d="M11 1 L13 9 L21 11 L13 13 L11 21 L9 13 L1 11 L9 9 Z" />
-              </svg>
-              <span>Homebrew</span>
-            </span>
-          </button>
-        </div>
-
-        <dialog class="modal" data-homebrew-modal aria-labelledby="brew-h">
-          <form method="dialog" class="modal-inner">
-            <button
-              type="submit"
-              class="modal-close"
-              aria-label="Close"
-            >×</button>
-            <h3 id="brew-h" class="modal-title">Install with Homebrew</h3>
-            <p class="modal-body">
-              Open Terminal and paste:
-            </p>
-            <button
-              type="button"
-              class="modal-code"
-              data-copy="brew install stuffbucket/tap/maximal"
-              aria-label="Copy: brew install stuffbucket/tap/maximal"
-            >
-              <code>brew install stuffbucket/tap/maximal</code>
-              <span class="modal-copy-icon" aria-hidden="true">
-                <svg
-                  class="modal-copy-icon__copy"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                >
-                  <rect x="5" y="5" width="9" height="9" rx="1.5" />
-                  <path d="M11 5 V3 a1 1 0 0 0 -1 -1 H3 a1 1 0 0 0 -1 1 v7 a1 1 0 0 0 1 1 h2" />
-                </svg>
-                <svg
-                  class="modal-copy-icon__check"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.75"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                >
-                  <path d="M3 8.5 L7 12 L13 4" />
-                </svg>
-              </span>
-              <span class="modal-copy-toast" aria-hidden="true">Copied</span>
-            </button>
-            <p class="modal-body">
-              Then run <code>maximal setup</code> to sign in.
-            </p>
-          </form>
-        </dialog>
-
-      </section>
-
-      <!-- NOW — ochre callout -->
-      <section id="now" class="card card--ochre" aria-labelledby="now-h">
-        <h2 id="now-h">Now what.</h2>
-        <div class="callout" role="note">
-          <svg
-            class="callout-icon"
-            viewBox="0 0 40 40"
-            fill="currentColor"
-            aria-hidden="true"
-          >
-            <path d="M20 2 L23 14 L36 16 L26 24 L29 36 L20 30 L11 36 L14 24 L4 16 L17 14 Z" />
-          </svg>
-          <div>
-            <p>
-              Point Claude Code at <code>maximal</code>. Or Codex. Or
-              opencode. Or Copilot Chat. Pick one, pick the lot —
-              <code>maximal</code> doesn't care which tool is talking,
-              as long as something is.
-            </p>
-            <p>
-              Switching tools won't ask you to sign in again. One
-              Copilot subscription, every coding agent you own,
-              no juggling.
-            </p>
-            <p>
-              The menubar app keeps a running tab on which tool is
-              chewing through your premium quota — handy when the
-              shiny new one shows up next month and you want to know
-              if it's worth the swap. Leaving is just as easy as
-              showing up; nobody's locking the door.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      <!-- FOOTER — console -->
       <footer
         id="footer"
         class="card card--console site-footer"
@@ -309,144 +76,20 @@ const versionLabel = hasRelease && tag ? tag : "see /releases";
     <nav class="dock" aria-label="Page sections">
       <div class="dock-inner">
         <span class="dock-brand">maximal</span>
-        <a href="#what">What</a>
-        <a href="#download">Download</a>
-        <a href="#now">Now</a>
+        <a href="#how">Why maximal</a>
+        <a href="#start">Get started</a>
         <a href={REPO_URL} rel="noopener">GitHub</a>
       </div>
     </nav>
 
     <script is:inline>
-      // OS detection — highlight the most likely download for the
-      // visitor's platform, and toggle per-installer warning copy in
-      // the First-launch warning section.
-      (function () {
-        var ua = navigator.userAgent || "";
-        var platform = navigator.platform || "";
-        var isWindows = /Windows/.test(ua) || /Win/.test(platform);
-
-        var defaultPlatform = isWindows ? "windows" : "mac";
-        var defaultInstaller =
-          defaultPlatform === "windows" ? "windows-msi" : "mac-app";
-
-        function installerToPlatform(key) {
-          if (!key) return defaultPlatform;
-          return key.indexOf("mac") !== -1 ? "mac" : "windows";
-        }
-
-        // Subtle highlight on the OS-detected primary download.
-        var primary = document.querySelector(
-          '.btn[data-installer="' + defaultInstaller + '"]',
-        );
-        if (primary) primary.classList.add("btn--primary");
-
-        function selectVariant(installer) {
-          if (!installer) return;
-          var plat = installerToPlatform(installer);
-          // Per-installer warning copy in the First-launch section.
-          document.querySelectorAll("[data-installer]").forEach(function (el) {
-            // Don't touch download buttons — they keep their own
-            // installer attr regardless of selection.
-            if (el.classList.contains("btn")) return;
-            el.hidden = el.getAttribute("data-installer") !== installer;
-          });
-          // Per-platform phrasing (none currently, but kept for future use).
-          document.querySelectorAll("[data-platform]").forEach(function (el) {
-            el.hidden = el.getAttribute("data-platform") !== plat;
-          });
-        }
-
-        selectVariant(defaultInstaller);
-
-        var btns = document.querySelectorAll(".btn[data-installer]");
-        btns.forEach(function (btn) {
-          btn.addEventListener("click", function (e) {
-            var key = btn.getAttribute("data-installer");
-            if (!key) return;
-            // Homebrew has no file to download — staying on the page
-            // so the user can copy the brew command is more useful
-            // than navigating to the tap README.
-            if (key === "homebrew") e.preventDefault();
-            selectVariant(key);
-          });
-        });
-      })();
-
-      // Homebrew install modal — opens on the Homebrew card click.
-      (function () {
-        var modal = document.querySelector("[data-homebrew-modal]");
-        if (!modal) return;
-        document
-          .querySelectorAll("[data-open-homebrew-modal]")
-          .forEach(function (trigger) {
-            trigger.addEventListener("click", function () {
-              if (typeof modal.showModal === "function") {
-                modal.showModal();
-              } else {
-                modal.setAttribute("open", "");
-              }
-            });
-          });
-        // Click on the backdrop closes (the form[method="dialog"]
-        // close button handles its own click).
-        modal.addEventListener("click", function (e) {
-          if (e.target === modal) modal.close();
-        });
-
-        // Click-to-copy on the brew install command.
-        var copyBtns = modal.querySelectorAll("[data-copy]");
-        copyBtns.forEach(function (btn) {
-          var resetTimer = 0;
-          btn.addEventListener("click", function (e) {
-            // The button lives inside form[method="dialog"]; without
-            // this the dialog closes on every copy.
-            e.preventDefault();
-            var text = btn.getAttribute("data-copy") || "";
-            var done = function () {
-              btn.classList.add("modal-code--copied");
-              if (resetTimer) clearTimeout(resetTimer);
-              resetTimer = window.setTimeout(function () {
-                btn.classList.remove("modal-code--copied");
-              }, 1400);
-            };
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-              navigator.clipboard.writeText(text).then(done, function () {
-                // Permission denied or insecure context — fall through
-                // to the textarea trick.
-                fallback(text);
-                done();
-              });
-            } else {
-              fallback(text);
-              done();
-            }
-          });
-        });
-
-        function fallback(text) {
-          var ta = document.createElement("textarea");
-          ta.value = text;
-          ta.style.position = "fixed";
-          ta.style.opacity = "0";
-          document.body.appendChild(ta);
-          ta.select();
-          try {
-            document.execCommand("copy");
-          } catch (_e) {
-            /* best effort */
-          }
-          document.body.removeChild(ta);
-        }
-      })();
-
       // aria-current on dock links based on viewport scroll position.
       (function () {
         var links = document.querySelectorAll('.dock a[href^="#"]');
         if (!links.length || !("IntersectionObserver" in window)) return;
         var byId = {};
         links.forEach(function (a) {
-          var id = a.getAttribute("href").slice(1);
-          byId[id] = a;
+          byId[a.getAttribute("href").slice(1)] = a;
         });
         var io = new IntersectionObserver(
           function (entries) {

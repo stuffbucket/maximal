@@ -1,0 +1,118 @@
+---
+// markdoc.dev-style hero: a static brand wordmark with the value-prop tagline
+// typed in on load. The full tagline is server-rendered (SEO + no-JS +
+// prefers-reduced-motion all get the complete sentence); JS only replays it as
+// a typing effect when motion is allowed.
+import { getDownloadInfo } from "../../lib/downloads";
+interface Props {
+  tagline: string;
+  downloadLabel?: string;
+}
+const { tagline, downloadLabel = "Download for macOS" } = Astro.props;
+// Markdoc doesn't forward $variables into tag attributes, so pull the resolved
+// release straight from the shared (memoized) build-time module.
+const { macDmg: downloadUrl, releasesUrl } = await getDownloadInfo();
+---
+
+<header class="card card--scarlet hero" aria-labelledby="title">
+  <h1 id="title" class="wordmark">maximal</h1>
+  <p class="tagline hero-typed">
+    <span class="hero-typed__text" data-typed-target>{tagline}</span><span
+      class="hero-typed__caret"
+      aria-hidden="true"></span>
+  </p>
+
+  <div class="hero-cta">
+    {
+      downloadUrl && (
+        <a class="btn btn--primary hero-cta__primary" href={downloadUrl} rel="noopener">
+          <span class="btn-label">
+            <svg class="btn-spark" viewBox="0 0 22 22" fill="currentColor" aria-hidden="true">
+              <path d="M11 1 L13 9 L21 11 L13 13 L11 21 L9 13 L1 11 L9 9 Z" />
+            </svg>
+            <span>{downloadLabel}</span>
+          </span>
+        </a>
+      )
+    }
+    {
+      releasesUrl && (
+        <a class="hero-cta__secondary" href={releasesUrl} rel="noopener">
+          Other ways to install
+        </a>
+      )
+    }
+  </div>
+</header>
+
+<style>
+  .hero-typed {
+    /* Reserve a stable two-line height so the typing effect doesn't reflow the
+       layout beneath it as characters appear. */
+    min-height: 2.6em;
+  }
+  .hero-typed__caret {
+    display: inline-block;
+    width: 0.5ch;
+    height: 1.05em;
+    margin-left: 0.04em;
+    transform: translateY(0.16em);
+    background: var(--ink-gold);
+    animation: hero-caret-blink 1s step-end infinite;
+  }
+  .hero-cta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.85rem 1.25rem;
+    margin: 1.5rem 0 1.25rem;
+  }
+  .hero-cta__primary {
+    /* Let the primary CTA size to its content rather than stretch. */
+    flex: 0 0 auto;
+  }
+  .hero-cta__secondary {
+    font-family: var(--mono);
+    font-size: 0.9rem;
+    color: var(--ink-cream);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    text-decoration-color: var(--ink-gold);
+  }
+  .hero-cta__secondary:hover {
+    text-decoration-thickness: 2px;
+  }
+
+  @keyframes hero-caret-blink {
+    50% {
+      opacity: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .hero-typed__caret {
+      animation: none;
+    }
+  }
+</style>
+
+<script is:inline>
+  // Replay the (already-rendered) tagline as a typing effect. No-JS and
+  // reduced-motion users keep the full sentence untouched.
+  (function () {
+    var el = document.querySelector("[data-typed-target]");
+    if (!el) return;
+    var reduce =
+      window.matchMedia &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduce) return;
+    var full = el.textContent || "";
+    el.textContent = "";
+    var i = 0;
+    function tick() {
+      el.textContent = full.slice(0, i);
+      if (i++ <= full.length) window.setTimeout(tick, 26);
+    }
+    tick();
+  })();
+</script>
