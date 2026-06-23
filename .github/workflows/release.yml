@@ -429,7 +429,15 @@ jobs:
     # After `publish`: sync-homebrew-formula.ts fetches each per-arch
     # .sha256 over public HTTPS, which only resolves once the release
     # is published (draft assets are not publicly downloadable).
-    needs: publish
+    #
+    # Skip for pre-releases: the tap's `maximal.rb` is the STABLE formula
+    # (`brew install stuffbucket/tap/maximal`). Bumping it to a
+    # `-beta.N` version would push the beta onto every stable Homebrew
+    # user. `release` is in `needs` so this job can read is_prerelease.
+    needs:
+      - publish
+      - release
+    if: ${{ needs.release.outputs.is_prerelease == 'false' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -938,7 +946,15 @@ jobs:
     # After `publish`: the landing page advertises "latest: vX.Y.Z" and
     # links the release download URLs, so it must rebuild against a
     # published, fully-assembled release — not the draft.
-    needs: publish
+    #
+    # Skip for pre-releases: the site tracks `releases/latest`, which by
+    # definition excludes pre-releases, so a beta publish changes nothing
+    # the page renders — rebuilding would just re-emit the same stable
+    # "latest". `release` is in `needs` so this job can read is_prerelease.
+    needs:
+      - publish
+      - release
+    if: ${{ needs.release.outputs.is_prerelease == 'false' }}
     runs-on: ubuntu-latest
     permissions:
       actions: write
