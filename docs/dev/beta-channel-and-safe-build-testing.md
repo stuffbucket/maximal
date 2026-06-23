@@ -73,6 +73,61 @@ productName, apiHome }`; the Tauri `SIDECAR_PORT` and identifier read the
 same env at build time; the webview `baseUrl()` is same-origin, so it
 needs no change — it follows whatever port the sidecar opens.
 
+### Port strategy (stable vs beta)
+
+The port is the highest-drift seam: it is hardcoded **twice and
+independently** today — `SIDECAR_PORT = 4141` (Rust const, `lib.rs`) and
+`default: "4141"` (TS CLI, `cli.ts`) — plus literal `:4141` in the Claude
+integration writers (`claude-code-settings.ts`, `claude-desktop-3p-config.ts`).
+That duplication is exactly what caused the historical `4142` drift bug
+that broke `app:dev` (PR #119). The strategy is built to kill that bug
+class, not just to pick a second number.
+
+1. **Port = `f(MAXIMAL_CHANNEL)`, defined once, derived everywhere.**
+   Never write a second port literal. Define the channel→port map in one
+   place and have both languages consume it: Rust `SIDECAR_PORT` reads
+   `MAXIMAL_CHANNEL` **at build time** (via `build.rs`/env, the same way
+   `release.yml` already injects `MAXIMAL_VERSION` / `MAXIMAL_GIT_SHA`);
+   the TS `--port` default and `channel.ts` derive from the same env at
+   runtime. Single source of truth ⇒ no drift.
+
+2. **Beta = `4242`, explicitly *not* `4142`.** `4142` is poisoned by the
+   past drift bug; reusing it invites confusion and regressions. `4242`
+   is distinct and mnemonic.
+
+3. **Distinct ports make `--replace` self-scoping — the big win.** Today
+   the shell spawns `start --port 4141 --replace` (`lib.rs`), which
+   *evicts whatever is on 4141* — i.e. it would kill your stable proxy.
+   With beta on 4242, `--replace` on the beta only ever evicts a stale
+   **beta**. The self-collision disappears by construction; no
+   cross-channel coordination logic is needed.
+
+4. **Belt-and-suspenders: write the *actual bound* port to a
+   channel-scoped runtime file, and discover from it.** A static default
+   is fine until someone passes `--port` or the port is already taken. On
+   successful bind, write the live port to `$COPILOT_API_HOME/runtime.json`
+   (already channel-scoped via `apiHome`). The shell webview/dashboard URL
+   and the Claude integration writers then *read* it instead of
+   re-hardcoding `:4141`. This permanently removes the hardcode-drift
+   class — the port becomes discovered, not assumed. (No such runtime
+   file exists today; `replace-running.ts` is the closest seam.)
+
+5. **Optional resilience: ephemeral fallback.** If the channel default is
+   busy and `--replace` is not set, bind `:0` (OS-assigned) and rely on
+   the runtime file (#4) for discovery — lets N instances coexist with
+   zero config.
+
+6. **Non-negotiable guardrail.** Beta must **not** write the Claude
+   integration files by default (see the channel-abstraction table): they
+   repoint your *real* Claude Code / Desktop at the beta port and silently
+   break your stable setup. Opt-in only, and to a separate profile if ever.
+
+> **TL;DR** — don't "assign beta a port." Make the port a pure function of
+> the channel defined once, let distinct ports turn `--replace` into a safe
+> per-channel operation, and add a runtime port file so everything
+> *discovers* the live port. That fixes the duplication behind the `4142`
+> bug and scales to N channels.
+
 ### Three tiers of isolation — pick by risk
 
 **Tier 0 — inner loop (seconds).** `bun run app:dev`. Already
