@@ -27,6 +27,12 @@
 param(
   [string]$Version = $env:COPILOT_API_VERSION,
   [string]$Repo = $env:COPILOT_API_REPO,
+  # Override the download origin. When set, the zip + sha256 are fetched
+  # from "<BaseUrl>/<zipName>" instead of the GitHub Releases URL. Lets
+  # the dev harness (.github/workflows/windows-installer-dev.yml) point
+  # the installer at a locally-served, un-released build. Empty = the
+  # normal GitHub Releases path (unchanged behavior).
+  [string]$BaseUrl = $env:COPILOT_API_BASE_URL,
   [switch]$Force
 )
 
@@ -131,8 +137,14 @@ if ((Test-Path $BinPath) -and -not $Force) {
 New-Item -ItemType Directory -Force -Path $DownloadDir | Out-Null
 $zipName = "maximal-$Version-windows-x64.zip"
 $shaName = "$zipName.sha256"
-$zipUrl  = "https://github.com/$Repo/releases/download/$Version/$zipName"
-$shaUrl  = "https://github.com/$Repo/releases/download/$Version/$shaName"
+if ($BaseUrl) {
+  $origin = $BaseUrl.TrimEnd('/')
+  $zipUrl = "$origin/$zipName"
+  $shaUrl = "$origin/$shaName"
+} else {
+  $zipUrl = "https://github.com/$Repo/releases/download/$Version/$zipName"
+  $shaUrl = "https://github.com/$Repo/releases/download/$Version/$shaName"
+}
 $zipPath = Join-Path $DownloadDir $zipName
 $shaPath = Join-Path $DownloadDir $shaName
 
