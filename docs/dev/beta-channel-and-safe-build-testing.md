@@ -295,27 +295,32 @@ Goal: ship `vX.Y.Z-beta.N` builds to opt-in testers as GitHub
 >   prerelease, and the `publish` job runs `gh release edit --draft=false
 >   --prerelease` (never `--latest`). So a `-beta.N` tag already publishes
 >   a GitHub pre-release that stays off "Latest".
-> - ✅ **`homebrew-tap` and `redeploy-site` are gated to stable** (`if:
+> - ✅ **`homebrew-tap` is gated to stable** (`if:
 >   needs.release.outputs.is_prerelease == 'false'`) — a beta tag will
->   *not* bump the stable `maximal.rb` formula or rebuild the landing page.
+>   *not* bump the stable `maximal.rb` formula.
+> - ✅ **`redeploy-site` runs for betas** so the update manifest's
+>   `channels.beta` entry refreshes after a beta publish. The landing page
+>   is unaffected because it still tracks `releases/latest` (stable only).
+> - ✅ **The updater manifest is channel-aware.** `src/lib/update-check.ts`
+>   reads the build channel, and `/updates/manifest.json` now emits
+>   `channels.beta` when a GitHub pre-release exists.
 >
 > What's **still missing** before betas are real:
 >
 > - ❌ **No auto-cut path.** `release-please-config.json` is still
->   single-branch; nothing proposes `-beta.N` tags. You'd tag by hand
->   today. (See *release-please multi-branch config* below.)
+>   single-branch; betas are deliberately manual for now:
+>   `git tag vX.Y.Z-beta.N && git push origin vX.Y.Z-beta.N`.
+>   YAGNI: no release-please multi-branch auto-cut until manual tags hurt.
 > - ❌ **No identity isolation.** There is no `src/lib/channel.ts`; the
 >   bundle id and `~/.local/share/maximal` are shared, so a beta
 >   `.app`/`.msi` installs *over* stable and shares its tokens/config. Beta
 >   needs a distinct bundle id + data dir (it can keep stable's `4141`
 >   port). Separately, the `dev` channel needs its own port (`4242`) so it
 >   runs beside stable. This is Phase 1 and the bulk of the work.
-> - ❌ **The in-app updater (#157) is channel-blind.** `src/lib/
->   update-check.ts` + the shell upgrade prompt must learn to track the
->   matching channel (stable ignores prereleases; beta follows them).
 >
-> **Recommended order:** the homebrew/site gate (done) → release-please
-> multi-branch → `MAXIMAL_CHANNEL` identity → channel-aware updater.
+> **Recommended order:** the homebrew/site gates (done) →
+> `MAXIMAL_CHANNEL` identity → release-please multi-branch if manual beta
+> tags become painful.
 
 ### Branch model — promotion flow
 
