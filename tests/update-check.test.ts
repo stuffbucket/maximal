@@ -33,10 +33,21 @@ describe("isNewerVersion", () => {
     expect(isNewerVersion("0.4.25", "0.4.26")).toBe(false)
   })
 
-  test("strips leading v and prerelease suffix", () => {
+  test("strips leading v and treats prerelease as older than release", () => {
     expect(isNewerVersion("v0.4.27", "0.4.26")).toBe(true)
-    // prerelease suffix stripped → 0.4.27 == 0.4.27 → not strictly newer
     expect(isNewerVersion("0.4.27-rc.1", "0.4.27")).toBe(false)
+  })
+
+  test("compares prerelease precedence on equal core versions", () => {
+    expect(isNewerVersion("0.5.0-beta.1", "0.5.0-beta.0")).toBe(true)
+    expect(isNewerVersion("0.5.0", "0.5.0-beta.3")).toBe(true)
+    expect(isNewerVersion("0.5.0-beta.3", "0.5.0")).toBe(false)
+    expect(isNewerVersion("0.5.0-beta.10", "0.5.0-beta.2")).toBe(true)
+    expect(isNewerVersion("0.5.0-rc.0", "0.5.0-beta.9")).toBe(true)
+  })
+
+  test("lets differing core versions decide before prerelease", () => {
+    expect(isNewerVersion("0.5.0-beta.1", "0.4.9")).toBe(true)
   })
 
   test("missing patch segment reads as 0", () => {
