@@ -255,13 +255,25 @@ jobs:
           #   __MAXIMAL_VERSION__   the stripped tag (e.g. "0.3.4")
           #   __MAXIMAL_GIT_SHA__   the full sha (40 hex)
           #   __MAXIMAL_GIT_BRANCH__ the ref name (e.g. "v0.3.4")
+          #   __MAXIMAL_CHANNEL__   release channel: the prerelease label
+          #     (e.g. "beta" from v0.4.33-beta.1) or "stable" for a plain
+          #     vX.Y.Z tag. Drives which manifest channel the build polls
+          #     (src/lib/update-check.ts). Derived from the tag so it matches
+          #     the Detect-pre-release classification without a cross-job output.
           # src/lib/build-info.ts reads these via globalThis with a
           # package.json fallback for non-binary execution.
+          TAG="${GITHUB_REF_NAME}"
+          if [[ "$TAG" == *-* ]]; then
+            CHANNEL="${TAG#*-}"; CHANNEL="${CHANNEL%%.*}"
+          else
+            CHANNEL="stable"
+          fi
           bun build --compile --minify --sourcemap \
             --target=${{ matrix.target }} \
             --define "__MAXIMAL_VERSION__=\"${MAXIMAL_VERSION}\"" \
             --define "__MAXIMAL_GIT_SHA__=\"${MAXIMAL_GIT_SHA}\"" \
             --define "__MAXIMAL_GIT_BRANCH__=\"${MAXIMAL_GIT_BRANCH}\"" \
+            --define "__MAXIMAL_CHANNEL__=\"${CHANNEL}\"" \
             src/main.ts --outfile "$OUT"
 
       # macOS signing + notarization — DEFERRED. v1 ships unsigned.
