@@ -3,20 +3,23 @@
  * Write the empty `src/generated/ui-embed.ts` stub if it's missing.
  *
  * `src/generated/` is gitignored (it holds generated embed code). Fresh
- * clones therefore lack the module that src/routes/ui/route.ts imports,
- * which would break `tsc`/tests before a build runs. This script — wired
- * into `prepare` (runs on `bun install`) — guarantees the stub exists.
- * A real build overwrites it via scripts/gen-ui-embed.ts.
+ * clones — and fresh `git worktree add` checkouts, which do NOT run
+ * `bun install` — therefore lack the module that src/routes/ui/route.ts
+ * imports, which would break `tsc`/eslint/knip/tests before a build runs.
+ *
+ * `ensureUiEmbedStub()` is the reusable, synchronous guarantee. It's wired
+ * into three places so the stub exists no matter how the tree was set up:
+ *   - `prepare` (this file as a script — runs on `bun install`),
+ *   - `check:fast` (covers lint/typecheck/knip via `check:deep`),
+ *   - the test preload (`tests/test-setup.ts`, covers bare `bun test`).
+ * A real build overwrites the stub via scripts/gen-ui-embed.ts.
  */
-import { existsSync } from "node:fs"
-import { mkdir } from "node:fs/promises"
+import { existsSync, mkdirSync, writeFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 
 const OUT = resolve(import.meta.dir, "..", "src/generated/ui-embed.ts")
 
-if (existsSync(OUT)) process.exit(0)
-
-const stub = `// GENERATED (stub) by scripts/ensure-ui-embed-stub.ts — do not edit.
+const STUB = `// GENERATED (stub) by scripts/ensure-ui-embed-stub.ts — do not edit.
 // The real version is written by scripts/gen-ui-embed.ts before
 // \`bun build --compile\` and lists the built UI assets embedded into the
 // proxy binary. This empty stub is what dev/tests see: with no embedded
@@ -33,6 +36,20 @@ export interface UiEmbedEntry {
 export const UI_FILES: Record<string, UiEmbedEntry | undefined> = {}
 `
 
-await mkdir(dirname(OUT), { recursive: true })
-await Bun.write(OUT, stub)
-console.error("[ensure-ui-embed-stub] wrote stub src/generated/ui-embed.ts")
+/**
+ * Synchronously guarantee `src/generated/ui-embed.ts` exists. Returns `true`
+ * if it wrote the stub, `false` if a file was already there (real or stub).
+ * Cheap and idempotent — safe to call from hot paths like the test preload.
+ */
+export function ensureUiEmbedStub(): boolean {
+  if (existsSync(OUT)) return false
+  mkdirSync(dirname(OUT), { recursive: true })
+  writeFileSync(OUT, STUB)
+  return true
+}
+
+if (import.meta.main) {
+  if (ensureUiEmbedStub()) {
+    console.error("[ensure-ui-embed-stub] wrote stub src/generated/ui-embed.ts")
+  }
+}
