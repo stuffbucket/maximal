@@ -1,0 +1,331 @@
+# Windows installer fast-iteration harness (manual).
+#
+# The real Windows installer (MSI via WiX + build/windows/install.ps1) is
+# only ever exercised by the release workflow against a *published* draft
+# release on a windows-2022 runner. That makes iterating on installer
+# changes a slow, full-release round-trip — and the PR-time bun test
+# (tests/windows-installer-template.test.ts) only string-matches the
+# scripts; it never builds or runs anything.
+#
+# This workflow closes that gap. It is `workflow_dispatch`-only (never
+# runs on push/PR/tag) and reproduces the install path end-to-end WITHOUT
+# a release:
+#
+#   1. build-binary (ubuntu):  cross-compile the windows-x64 .exe from the
+#      branch HEAD, pack it as the canonical Stream A zip + .sha256, and
+#      upload it as a build artifact.
+#   2. msi (windows-2022):     build the MSI from that binary via WiX, then
+#      install /qn -> assert files+registry+PATH -> smoke `debug --json` ->
+#      uninstall /qn -> assert clean removal. Mirrors the release jobs
+#      `windows-msi` + `windows-msi-verify`.
+#   3. ps1 (windows-2022):     serve the dev zip over loopback and run
+#      build/windows/install.ps1 -BaseUrl against it -> assert install dir +
+#      scheduled task + PATH -> smoke `debug --json`. Exercises the real
+#      download/verify/unpack/PATH/task/setup path without a release (the
+#      `-BaseUrl` override exists for exactly this).
+#
+# A green run here is strong evidence the release path is green, but it
+# iterates from the branch in minutes instead of a full release round-trip.
+#
+# Trigger: Actions tab -> "windows installer (dev)" -> Run workflow, pick
+# this branch. Artifacts (zip, msi, msiexec logs) are uploaded for download.
+
+name: windows installer (dev)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Synthetic version for the dev build (no leading v)"
+        required: false
+        default: "0.0.0-dev"
+
+# A second dispatch supersedes an in-flight one for the same branch.
+concurrency:
+  group: windows-installer-dev-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Cross-compile the windows-x64 binary from Linux (Bun's --compile
+  # produces a byte-identical .exe to a Windows build) and pack it as the
+  # canonical `maximal-v<version>-windows-x64.zip` + sidecar .sha256 that
+  # the MSI job (and the real release) consume.
+  build-binary:
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ github.event.inputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: ./.github/actions/setup-bun
+        with:
+          bun-version: 1.3.11
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # The embedded settings/dashboard UI lives in shell/ with its own
+      # manifest; the root install doesn't cover it. Without it `build:ui`
+      # fails to resolve react. Mirrors the release `binaries` job.
+      - name: Install shell UI dependencies
+        working-directory: shell
+        run: bun install --frozen-lockfile
+
+      - name: Build web UI (embedded into the binary)
+        run: |
+          set -euo pipefail
+          bun run build:ui
+          bun run scripts/gen-ui-embed.ts
+
+      - name: Compile windows-x64 binary
+        env:
+          MAXIMAL_VERSION: ${{ github.event.inputs.version }}
+          MAXIMAL_GIT_SHA: ${{ github.sha }}
+          MAXIMAL_GIT_BRANCH: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p staging
+          bun build --compile --minify --sourcemap \
+            --target=bun-windows-x64 \
+            --define "__MAXIMAL_VERSION__=\"${MAXIMAL_VERSION}\"" \
+            --define "__MAXIMAL_GIT_SHA__=\"${MAXIMAL_GIT_SHA}\"" \
+            --define "__MAXIMAL_GIT_BRANCH__=\"${MAXIMAL_GIT_BRANCH}\"" \
+            --define "__MAXIMAL_CHANNEL__=\"dev\"" \
+            src/main.ts --outfile staging/maximal.exe
+
+      # Pack as the canonical Stream A artifact name + sha256 so the MSI
+      # job's download/verify mirrors the release path exactly.
+      - name: Pack zip + sha256
+        run: |
+          set -euo pipefail
+          mkdir -p dist-bin
+          ZIP="maximal-v${VERSION}-windows-x64.zip"
+          ( cd staging && zip -q -X "../dist-bin/${ZIP}" maximal.exe )
+          ( cd dist-bin && sha256sum "${ZIP}" > "${ZIP}.sha256" && sha256sum -c "${ZIP}.sha256" )
+          ls -lh dist-bin
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64-dev
+          path: dist-bin/
+          if-no-files-found: error
+
+  # Build the MSI from the dev binary and run the full install lifecycle.
+  msi:
+    needs: build-binary
+    runs-on: windows-2022
+    env:
+      VERSION: ${{ github.event.inputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download binary artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-x64-dev
+          path: dist-bin
+
+      - name: Unpack zip into staging
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = Get-ChildItem -Path dist-bin -Filter '*.zip' | Select-Object -First 1
+          Expand-Archive -Path $zip.FullName -DestinationPath staging -Force
+          if (-not (Test-Path 'staging\maximal.exe')) {
+            Write-Error "maximal.exe missing from $($zip.Name)"
+            exit 1
+          }
+          Get-ChildItem staging
+
+      - name: Install WiX
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.*
+          $userBin = Join-Path $env:USERPROFILE '.dotnet\tools'
+          echo $userBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          & "$userBin\wix.exe" --version
+
+      - name: Build MSI
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # WiX requires a numeric ProductVersion (x.y.z[.b]); strip any
+          # prerelease suffix from the dev version for the MSI itself.
+          $msiVersion = ($env:VERSION -split '-')[0]
+          $out = "dist-release\maximal-v${env:VERSION}-windows-x64.msi"
+          New-Item -ItemType Directory -Path dist-release -Force | Out-Null
+          wix build build\windows\maximal.wxs `
+            -d "Version=$msiVersion" `
+            -arch x64 `
+            -bindpath staging `
+            -out $out
+          Get-ChildItem dist-release
+
+      - name: Upload MSI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-msi-dev
+          path: dist-release/*.msi
+          if-no-files-found: error
+
+      - name: Install MSI silently
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $msi = (Get-ChildItem dist-release -Filter '*.msi' | Select-Object -First 1).FullName
+          $log = Join-Path $env:GITHUB_WORKSPACE 'install.log'
+          # msiexec detaches when invoked bare; -Wait -PassThru gives the
+          # real exit code. 0 = ok, 1641/3010 = restart-related (also ok).
+          $p = Start-Process msiexec.exe `
+            -ArgumentList "/i `"$msi`" /qn /norestart /l*v `"$log`"" `
+            -Wait -PassThru
+          Write-Host "msiexec /i exit code: $($p.ExitCode)"
+          if ($p.ExitCode -notin @(0, 1641, 3010)) {
+            throw "MSI install failed (exit $($p.ExitCode))"
+          }
+
+      - name: Verify post-install state
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Join-Path $env:LOCALAPPDATA 'Programs\maximal\maximal.exe'
+          if (-not (Test-Path $exe)) { throw "maximal.exe missing at $exe" }
+          Write-Host "maximal.exe present ($((Get-Item $exe).Length) bytes)"
+
+          $marker = Get-ItemPropertyValue 'HKCU:\Software\stuffbucket\maximal' 'installed' -ErrorAction SilentlyContinue
+          if ($marker -ne 1) { throw "HKCU marker Software\stuffbucket\maximal\installed != 1 (got '$marker')" }
+
+          $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
+          if ($userPath -notlike '*Programs\maximal*') {
+            Write-Warning "install dir not found in user PATH (non-fatal): $userPath"
+          } else {
+            Write-Host "install dir present in user PATH"
+          }
+          Write-Host "post-install state OK"
+
+      - name: Smoke-test installed binary
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Join-Path $env:LOCALAPPDATA 'Programs\maximal\maximal.exe'
+          & $exe debug --json | Out-File -FilePath debug.json -Encoding utf8
+          $j = Get-Content debug.json | ConvertFrom-Json
+          foreach ($k in @('version','git','runtime','config','secrets','executor')) {
+            if ($null -eq $j.$k) { throw "Missing top-level key in debug --json: $k" }
+          }
+          Write-Host "installed binary debug --json OK (version=$($j.version))"
+
+      - name: Uninstall MSI silently
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $msi = (Get-ChildItem dist-release -Filter '*.msi' | Select-Object -First 1).FullName
+          $log = Join-Path $env:GITHUB_WORKSPACE 'uninstall.log'
+          $p = Start-Process msiexec.exe `
+            -ArgumentList "/x `"$msi`" /qn /norestart /l*v `"$log`"" `
+            -Wait -PassThru
+          Write-Host "msiexec /x exit code: $($p.ExitCode)"
+          if ($p.ExitCode -notin @(0, 1641, 3010)) {
+            throw "MSI uninstall failed (exit $($p.ExitCode))"
+          }
+
+      - name: Verify clean removal
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Join-Path $env:LOCALAPPDATA 'Programs\maximal\maximal.exe'
+          if (Test-Path $exe) { throw "maximal.exe still present after uninstall: $exe" }
+          Write-Host "clean removal OK"
+
+      - name: Upload msiexec logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: msiexec-logs-dev
+          path: |
+            install.log
+            uninstall.log
+          if-no-files-found: ignore
+
+  # Exercise the PowerShell installer end-to-end against the dev build.
+  # install.ps1 normally pulls its zip from a GitHub release URL; the
+  # -BaseUrl override points it at a loopback HTTP server serving the
+  # un-released artifact, so the real download -> sha256 -> unpack -> PATH
+  # -> scheduled task -> setup path runs without a release.
+  ps1:
+    needs: build-binary
+    runs-on: windows-2022
+    env:
+      VERSION: ${{ github.event.inputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download binary artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-x64-dev
+          path: dist-bin
+
+      - name: Serve artifact + run install.ps1
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # python is preinstalled on the windows-2022 image; serve the
+          # zip + .sha256 over loopback so install.ps1's download path runs.
+          $server = Start-Process python `
+            -ArgumentList '-m', 'http.server', '8099' `
+            -WorkingDirectory dist-bin -PassThru
+          try {
+            $ok = $false
+            foreach ($i in 1..20) {
+              try {
+                Invoke-WebRequest 'http://127.0.0.1:8099/' -UseBasicParsing -TimeoutSec 2 | Out-Null
+                $ok = $true; break
+              } catch { Start-Sleep -Milliseconds 500 }
+            }
+            if (-not $ok) { throw 'local http server did not come up' }
+            & .\build\windows\install.ps1 -Version "v$env:VERSION" -BaseUrl 'http://127.0.0.1:8099'
+          } finally {
+            Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Verify post-install state
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Join-Path $env:LOCALAPPDATA 'Programs\maximal\maximal.exe'
+          if (-not (Test-Path $exe)) { throw "maximal.exe missing at $exe" }
+          if (-not (Get-ScheduledTask -TaskName 'maximal' -ErrorAction SilentlyContinue)) {
+            throw "scheduled task 'maximal' not registered"
+          }
+          $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
+          if ($userPath -notlike '*Programs\maximal*') {
+            throw "install dir not on user PATH: $userPath"
+          }
+          Write-Host "ps1 post-install state OK"
+
+      - name: Smoke-test installed binary
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Join-Path $env:LOCALAPPDATA 'Programs\maximal\maximal.exe'
+          $j = & $exe debug --json | ConvertFrom-Json
+          if ($null -eq $j.version) { throw "debug --json missing 'version'" }
+          Write-Host "ps1 installed binary debug --json OK (version=$($j.version))"
+
+      - name: Cleanup
+        if: always()
+        shell: pwsh
+        run: |
+          # Runner is ephemeral, but stop the proxy the installer started so
+          # the file lock releases before the step ends.
+          Get-ScheduledTask -TaskName 'maximal' -ErrorAction SilentlyContinue |
+            Unregister-ScheduledTask -Confirm:$false -ErrorAction SilentlyContinue
+          Stop-Process -Name 'maximal' -Force -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force `
+            (Join-Path $env:LOCALAPPDATA 'Programs\maximal') -ErrorAction SilentlyContinue
+          exit 0
