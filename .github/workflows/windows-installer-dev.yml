@@ -273,10 +273,10 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          # The proxy writes logs under ~/.local/share/maximal/logs
-          # (os.homedir() + .local/share/maximal — Unix-style even on
-          # Windows; see src/lib/paths.ts + src/lib/start/boot-io.ts).
-          $dir = Join-Path $env:USERPROFILE '.local\share\maximal'
+          # The proxy writes its app-data (logs/) under %APPDATA%\maximal on
+          # Windows now (src/lib/paths.ts resolveAppDir win32 branch), kept in
+          # lockstep with the shell's maximal_data_dir() and the WiX/ps1 model.
+          $dir = Join-Path $env:APPDATA 'maximal'
           New-Item -ItemType Directory -Force -Path msi-proxy-logs | Out-Null
           if (Test-Path $dir) {
             Get-ChildItem -Path $dir -Recurse -Include *.log,*.txt,*.json `
@@ -447,7 +447,8 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          $dir = Join-Path $env:USERPROFILE '.local\share\maximal'
+          # %APPDATA%\maximal on Windows (resolveAppDir win32 branch).
+          $dir = Join-Path $env:APPDATA 'maximal'
           New-Item -ItemType Directory -Force -Path ps1-proxy-logs | Out-Null
           if (Test-Path $dir) {
             Get-ChildItem -Path $dir -Recurse -Include *.log,*.txt,*.json `
