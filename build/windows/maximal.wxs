@@ -21,18 +21,23 @@
     - Registers an Add/Remove Programs entry with proper version /
       manufacturer / upgrade-code so MajorUpgrade re-installs work.
 
-  v1 explicitly does NOT register the scheduled task or run
-  `maximal setup` (unattended) from inside the MSI — those touch
-  per-user state and are awkward in WiX custom actions. Users run
-  `maximal setup` once after install (the Start Menu shortcut
-  surfaces this). Parity with B3a's PowerShell installer can be added
-  later by extending `setup` itself to also register the scheduled
-  task on Windows.
+  The MSI converges with B3a's PowerShell installer (install.ps1):
+  both register an at-logon scheduled task that runs `maximal start`,
+  run `maximal setup` unattended (skip-auth) for the Claude Desktop
+  config touches, AND leave a discoverable `maximal setup` Start Menu
+  shortcut + Add/Remove Programs entry. The scheduled task + setup run
+  as deferred, impersonated custom actions (schtasks.exe / the .exe
+  itself) so they touch the *installing user's* per-user state. All are
+  Return="ignore": a flaky setup or task registration must not roll
+  back an otherwise-good install (the user can always re-run `maximal
+  setup` from the Start Menu shortcut). XML comments can't contain
+  consecutive dashes, so CLI flag prose is paraphrased above.
 
   v1 ships unsigned (A4 deferred). SmartScreen prompts on first run;
   the Pages landing site (B4) documents the bypass.
 -->
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
 
   <Package
       Name="maximal"
@@ -75,8 +80,77 @@
         Execute="immediate"
         Return="ignore" />
 
+    <!--
+      Register the at-logon scheduled task that runs `maximal start`.
+      Mirrors install.ps1's Register-StartupTask. schtasks /Create with
+      /SC ONLOGON registers a per-user task that runs in the installing
+      user's session. /RL LIMITED keeps it non-elevated (per-user
+      install needs no admin). /F overwrites an existing task so
+      upgrades/re-installs are idempotent. /IT runs only when the user
+      is logged on (this is a per-user proxy). Deferred + Impersonate so
+      it lands in the installing user's task store, not SYSTEM's.
+
+      We pre-compute the command line into a property so it survives the
+      immediate->deferred boundary (deferred CAs can't read INSTALLFOLDER
+      directly). %LocalAppData% is expanded by schtasks at run time.
+    -->
+    <CustomAction
+        Id="SetRegisterTaskCmd"
+        Property="RegisterStartupTask"
+        Value="&quot;[SystemFolder]schtasks.exe&quot; /Create /TN maximal /TR &quot;\&quot;[INSTALLFOLDER]maximal.exe\&quot; start&quot; /SC ONLOGON /RL LIMITED /IT /F"
+        Execute="immediate" />
+    <CustomAction
+        Id="RegisterStartupTask"
+        BinaryRef="Wix4UtilCA_X64"
+        DllEntry="WixQuietExec64"
+        Execute="deferred"
+        Impersonate="yes"
+        Return="ignore" />
+
+    <!--
+      Run first-run setup unattended (Claude Desktop config touches; no
+      GitHub auth — that needs an interactive device-code flow, which a
+      silent install can't provide). Mirrors install.ps1 step 6.
+    -->
+    <CustomAction
+        Id="SetRunSetupCmd"
+        Property="RunUnattendedSetup"
+        Value="&quot;[INSTALLFOLDER]maximal.exe&quot; setup --unattended --skip-auth"
+        Execute="immediate" />
+    <CustomAction
+        Id="RunUnattendedSetup"
+        BinaryRef="Wix4UtilCA_X64"
+        DllEntry="WixQuietExec64"
+        Execute="deferred"
+        Impersonate="yes"
+        Return="ignore" />
+
+    <!--
+      Tear the scheduled task down on uninstall. immediate + the running
+      .exe is already killed by StopRunningMaximal. schtasks /Delete
+      returns non-zero if the task is absent; Return="ignore" absorbs it.
+    -->
+    <CustomAction
+        Id="DeleteStartupTask"
+        Directory="SystemFolder"
+        ExeCommand="schtasks.exe /Delete /TN maximal /F"
+        Execute="immediate"
+        Return="ignore" />
+
     <InstallExecuteSequence>
       <Custom Action="StopRunningMaximal" Before="InstallValidate" />
+      <!-- Tear down before files vanish, only on a real uninstall. -->
+      <Custom Action="DeleteStartupTask" Before="RemoveFiles"
+              Condition="REMOVE=&quot;ALL&quot;" />
+      <!-- Set the deferred command lines, then run them after files land. -->
+      <Custom Action="SetRegisterTaskCmd" Before="RegisterStartupTask"
+              Condition="NOT REMOVE" />
+      <Custom Action="RegisterStartupTask" After="InstallFiles"
+              Condition="NOT REMOVE" />
+      <Custom Action="SetRunSetupCmd" Before="RunUnattendedSetup"
+              Condition="NOT REMOVE" />
+      <Custom Action="RunUnattendedSetup" After="RegisterStartupTask"
+              Condition="NOT REMOVE" />
     </InstallExecuteSequence>
 
   </Package>

@@ -49,6 +49,12 @@ $InstallDir   = Join-Path $env:LOCALAPPDATA 'Programs\maximal'
 $BinPath      = Join-Path $InstallDir 'maximal.exe'
 $TaskName     = 'maximal'
 $DownloadDir  = Join-Path $env:TEMP "maximal-install-$(Get-Random)"
+# Start Menu folder + ARP key are kept in lock-step with the MSI
+# (build/windows/maximal.wxs) so the two installers leave an equivalent
+# end-state: a discoverable `maximal setup` shortcut and an Add/Remove
+# Programs entry that points `maximal uninstall` at the right place.
+$StartMenuDir = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\maximal'
+$ArpKey       = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\maximal'
 
 function Resolve-LatestVersion {
   param([string]$Repo)
@@ -120,6 +126,42 @@ function Register-StartupTask {
   Write-Host "  ✓ Registered scheduled task '$TaskName' (triggers at logon)" -ForegroundColor Green
 }
 
+function Register-StartMenuShortcut {
+  param([string]$ExePath, [string]$ShortcutDir)
+  # Drop a `maximal setup` shortcut so the post-install auth step is
+  # discoverable from the Start Menu — parity with the MSI's
+  # StartMenuComponents.
+  New-Item -ItemType Directory -Force -Path $ShortcutDir | Out-Null
+  $lnkPath = Join-Path $ShortcutDir 'maximal setup.lnk'
+  $shell = New-Object -ComObject WScript.Shell
+  $lnk = $shell.CreateShortcut($lnkPath)
+  $lnk.TargetPath = $ExePath
+  $lnk.Arguments = 'setup'
+  $lnk.WorkingDirectory = Split-Path -Parent $ExePath
+  $lnk.Description = 'Run first-time setup (GitHub auth + Claude Desktop config)'
+  $lnk.Save()
+  Write-Host "  ✓ Start Menu shortcut 'maximal setup'" -ForegroundColor Green
+}
+
+function Register-ArpEntry {
+  param([string]$InstallDir, [string]$ExePath, [string]$Version, [string]$ArpKey)
+  # Add/Remove Programs entry so `maximal` shows up in
+  # "Apps & features" and uninstall is discoverable — parity with the
+  # MSI's ARP row. UninstallString points at `maximal uninstall`, the
+  # CLI's own teardown (removes PATH + task + files).
+  $ver = $Version.TrimStart('v')
+  New-Item -Path $ArpKey -Force | Out-Null
+  Set-ItemProperty -Path $ArpKey -Name 'DisplayName'     -Value 'maximal'
+  Set-ItemProperty -Path $ArpKey -Name 'DisplayVersion'  -Value $ver
+  Set-ItemProperty -Path $ArpKey -Name 'Publisher'       -Value 'stuffbucket'
+  Set-ItemProperty -Path $ArpKey -Name 'InstallLocation' -Value $InstallDir
+  Set-ItemProperty -Path $ArpKey -Name 'DisplayIcon'     -Value $ExePath
+  Set-ItemProperty -Path $ArpKey -Name 'UninstallString' -Value "`"$ExePath`" uninstall"
+  Set-ItemProperty -Path $ArpKey -Name 'NoModify' -Value 1 -Type DWord
+  Set-ItemProperty -Path $ArpKey -Name 'NoRepair' -Value 1 -Type DWord
+  Write-Host "  ✓ Registered Add/Remove Programs entry" -ForegroundColor Green
+}
+
 # ─────────────────────────────────────────────────────────────────────
 # Main flow
 # ─────────────────────────────────────────────────────────────────────
@@ -173,9 +215,11 @@ if (-not (Test-Path $BinPath)) {
 }
 Write-Host "  ✓ Installed $BinPath" -ForegroundColor Green
 
-# 4. PATH + scheduled task ──────────────────────────────────────────
+# 4. PATH + scheduled task + Start Menu + ARP ───────────────────────
 Add-UserPath -Dir $InstallDir
 Register-StartupTask -ExePath $BinPath -TaskName $TaskName
+Register-StartMenuShortcut -ExePath $BinPath -ShortcutDir $StartMenuDir
+Register-ArpEntry -InstallDir $InstallDir -ExePath $BinPath -Version $Version -ArpKey $ArpKey
 
 # 5. Start it now (so the user doesn't have to log out/in) ──────────
 Start-ScheduledTask -TaskName $TaskName
