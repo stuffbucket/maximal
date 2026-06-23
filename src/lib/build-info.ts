@@ -24,6 +24,7 @@ import packageJson from "../../package.json" with { type: "json" }
 declare const __MAXIMAL_VERSION__: string
 declare const __MAXIMAL_GIT_SHA__: string
 declare const __MAXIMAL_GIT_BRANCH__: string
+declare const __MAXIMAL_CHANNEL__: string
 
 export const BUILD_VERSION: string =
   typeof __MAXIMAL_VERSION__ === "string" && __MAXIMAL_VERSION__.length > 0 ?
@@ -42,3 +43,15 @@ export const BUILD_GIT_BRANCH: string | undefined =
   ) ?
     __MAXIMAL_GIT_BRANCH__
   : undefined
+
+/**
+ * The release channel this build follows (`stable`, `beta`, …). Injected by
+ * `--define __MAXIMAL_CHANNEL__` for release/beta binaries; defaults to
+ * `stable` for source runs and stock builds. The update manifest is
+ * channel-keyed, so this is what decides which channel's version a build
+ * polls (see src/lib/update-check.ts).
+ */
+export const BUILD_CHANNEL: string =
+  typeof __MAXIMAL_CHANNEL__ === "string" && __MAXIMAL_CHANNEL__.length > 0 ?
+    __MAXIMAL_CHANNEL__
+  : "stable"

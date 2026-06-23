@@ -42,9 +42,12 @@ const pkg = (await Bun.file(join(REPO, "package.json")).json()) as {
   version: string
 }
 const version = `${pkg.version}-dev+${sha.slice(0, 8) || "unknown"}`
+// The release channel this binary follows; defaults to stable. Release
+// pipelines (and `app:build:beta`) set MAXIMAL_CHANNEL to stamp the binary.
+const channel = process.env.MAXIMAL_CHANNEL || "stable"
 
 console.error(
-  `[build-sidecar] triple=${triple} target=${target}\n[build-sidecar] out=${outfile}\n[build-sidecar] version=${version} branch=${branch}`,
+  `[build-sidecar] triple=${triple} target=${target}\n[build-sidecar] out=${outfile}\n[build-sidecar] version=${version} branch=${branch} channel=${channel}`,
 )
 
 mkdirSync(dirname(outfile), { recursive: true })
@@ -61,6 +64,8 @@ const r = spawnSync(
     `__MAXIMAL_GIT_SHA__="${sha}"`,
     "--define",
     `__MAXIMAL_GIT_BRANCH__="${branch}"`,
+    "--define",
+    `__MAXIMAL_CHANNEL__="${channel}"`,
     join(REPO, "src/main.ts"),
     `--outfile=${outfile}`,
   ],

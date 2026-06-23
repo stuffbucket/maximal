@@ -17,7 +17,7 @@
  * ping must never degrade the proxy.
  */
 
-import { BUILD_VERSION } from "./build-info"
+import { BUILD_CHANNEL, BUILD_VERSION } from "./build-info"
 import { isUpdateCheckEnabled } from "./config"
 import { GITHUB_API_TIMEOUT_MS } from "./http-timeouts"
 import { createTeeLogger } from "./logger"
@@ -38,10 +38,15 @@ const log = createTeeLogger("update")
 const MANIFEST_URL =
   "https://stuffbucket.github.io/maximal/updates/manifest.json"
 
-/** Which release channel this build follows. A constant today (only `stable`
- *  exists); the manifest is already channel-keyed, so wiring this to config is
- *  all that's needed when a `beta` channel ships. */
-const UPDATE_CHANNEL = "stable"
+/** Which release channel this build follows — derived from the build's
+ *  `BUILD_CHANNEL` (`stable` for source/stock builds; `beta` etc. when a
+ *  channel binary injects `__MAXIMAL_CHANNEL__`). The manifest is
+ *  channel-keyed, so a `beta` build polls the manifest's `beta` entry while
+ *  `stable` keeps reading `stable`. NOTE: `isNewerVersion` strips the
+ *  prerelease suffix, so a same-`x.y.z` beta bump (`-beta.0` → `-beta.1`) is
+ *  not yet flagged; cross-`x.y.z` bumps are. A prerelease-precedence compare
+ *  is the follow-up before betas can fully self-notify. */
+const UPDATE_CHANNEL = BUILD_CHANNEL
 
 /** Where to send the user to update — install-channel neutral. */
 export const DOWNLOAD_URL = "https://mxml.sh/maximal/"
