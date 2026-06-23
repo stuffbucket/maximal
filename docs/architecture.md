@@ -56,7 +56,7 @@ This is a local proxy that exposes the GitHub Copilot API as both an OpenAI-comp
 
 This repo can collide on a shared working tree (lint-staged stash + concurrent merge ate a turn already). For parallel agents:
 - **Spawned subagents:** pass `isolation: "worktree"` to the Agent tool.
-- **Sessions:** create a worktree manually with `git worktree add ../maximal-<task> -b agent/<task>`; clean up with `git worktree remove ../maximal-<task>` after merging back.
+- **Sessions:** create a worktree manually with `git worktree add ../maximal-<task> -b agent/<task>`; clean up with `git worktree remove ../maximal-<task>` after merging back. `git worktree add` does **not** run `bun install`, so the gitignored `src/generated/ui-embed.ts` stub won't exist — the gates now self-heal it (`check:fast` and the test preload call `ensure:ui-embed`), but run `bun install` in the new tree anyway if you need its node_modules.
 - **Never run `git stash pop` in a shared working tree.** It silently merges another in-flight worker's stash into your tree, and on conflict it leaves an inconsistent state that's easy to "clean up" by `rm`-ing files that aren't yours. We lost a session's worth of React-shell work to this exact path: a subagent ran `git stash pop` to bisect a test failure, hit a conflict, and `rm`'d untracked files it didn't recognize. If you need an isolated bisect, use a worktree (see above). If you must inspect a stash, use `git stash show -p stash@{N}` (read-only) and never `pop` / `apply` outside an isolated tree.
 
 See also: `docs/codegen-feedback-loops-practices.md` → Dispatch and review loops.
