@@ -32,14 +32,16 @@ Two extra footguns specific to "Maximal building Maximal":
 - **The shell spawns its sidecar with `--replace`** (`lib.rs`), which
   *evicts* whatever is on `:4141`. Launch a same-port test build and it
   kills the host proxy you're developing against.
-- **A beta build that reconfigures Claude Code / Claude Desktop will
-  repoint your *real* integration at the beta port.** `PROXY_BASE_URL`
+- **A `dev`/test build that reconfigures Claude Code / Claude Desktop will
+  repoint your *real* integration at the dev port.** `PROXY_BASE_URL`
   in `src/lib/claude-code-settings.ts` is hardcoded to `:4141`, and
   `src/lib/claude-desktop-3p-config.ts` defaults its `baseUrl` to
-  `http://127.0.0.1:4141`. A side-by-side beta must **not** write those
-  integration files (or must write them to a separate profile). This is
+  `http://127.0.0.1:4141`. The `dev` channel runs on `4242`, so it must
+  **not** write those integration files (or must write them to a separate
+  profile) — otherwise it points your client at the dev sidecar. This is
   the single most dangerous interaction — it silently breaks the host's
-  day-to-day setup.
+  day-to-day setup. (Beta is safe here: it shares `4141`, so the URL it
+  would write matches stable anyway.)
 
 The good news: the override seams already exist (`--port`, `--api-home` /
 `COPILOT_API_HOME`, Tauri's per-identifier app-data; the webview is
@@ -59,13 +61,23 @@ Isolate along all three axes at once, driven by a single
 | `MAXIMAL_CHANNEL` | Port | Bundle id | Product name | `COPILOT_API_HOME` | Writes Claude integration? |
 |---|---|---|---|---|---|
 | `stable` (default) | 4141 | `co.stuffbucket.maximal` | Maximal | `~/.local/share/maximal` | yes |
-| `beta` | 4242 | `co.stuffbucket.maximal.beta` | Maximal Beta | `~/.local/share/maximal-beta` | **no** (opt-in only) |
-| `dev` (inner loop) | 4141\* | n/a (run from source) | n/a | `~/.local/share/maximal-dev` | no |
+| `beta` | 4141\* | `co.stuffbucket.maximal.beta` | Maximal Beta | `~/.local/share/maximal-beta` | **no** (opt-in only) |
+| `dev` (inner loop) | 4242\*\* | n/a (run from source) | n/a | `~/.local/share/maximal-dev` | no |
 
-\* `dev` keeps 4141 on purpose for the fast `bun run app:dev` loop —
-`app-dev-prepare.ts` already evicts a stale dev sidecar *gracefully*
-(`/_internal/shutdown`, not `--replace`). Use the `beta` channel, not
-`dev`, whenever a *production* Maximal is also running on this machine.
+\* **`beta` shares `4141` with `stable` on purpose.** There is no use
+case for running a beta build *and* the production build at the same time
+— you run one or the other. Launching beta therefore evicts stable via
+the existing `--replace` (and vice-versa); they never coexist, so beta
+needs **no** port isolation. Beta still keeps a distinct bundle id and
+`~/.local/share/maximal-beta` so its tokens/config can't corrupt stable's.
+
+\*\* **`dev` gets the distinct port (`4242`), not beta.** The common case
+is editing Maximal *while your installed stable build keeps serving Claude
+on `4141`*. If `dev` bound `4141` it would evict that stable proxy
+(`app-dev-prepare.ts` does so *gracefully* today, but it still takes it
+down). Moving `dev` to `4242` lets `bun run app:dev` run **alongside**
+stable without touching it. `dev` must not write the Claude integration
+files (it would repoint your real client at `4242`).
 
 Implementation sketch (Phase 1 below): one small `src/lib/channel.ts`
 that reads `MAXIMAL_CHANNEL` and derives `{ port, bundleSuffix,
@@ -91,16 +103,23 @@ class, not just to pick a second number.
    the TS `--port` default and `channel.ts` derive from the same env at
    runtime. Single source of truth ⇒ no drift.
 
-2. **Beta = `4242`, explicitly *not* `4142`.** `4142` is poisoned by the
-   past drift bug; reusing it invites confusion and regressions. `4242`
-   is distinct and mnemonic.
+2. **Channel→port map: `stable` and `beta` both `4141`; `dev` `4242`.**
+   `beta` and `stable` never run at the same time (you use one or the
+   other), so they share `4141` and the "replace" semantics below handle
+   the handoff — beta needs no port of its own. `dev` is the channel that
+   *does* run beside stable, so it gets the distinct port. Use `4242`, not
+   `4142`: `4142` is poisoned by the past drift bug; reusing it invites
+   confusion and regressions.
 
-3. **Distinct ports make `--replace` self-scoping — the big win.** Today
-   the shell spawns `start --port 4141 --replace` (`lib.rs`), which
-   *evicts whatever is on 4141* — i.e. it would kill your stable proxy.
-   With beta on 4242, `--replace` on the beta only ever evicts a stale
-   **beta**. The self-collision disappears by construction; no
-   cross-channel coordination logic is needed.
+3. **Replace vs. coexist — distinct ports make `--replace` self-scoping.**
+   The shell spawns `start --port <channel-port> --replace` (`lib.rs`).
+   - **stable ↔ beta (shared `4141`):** launching one evicts the other via
+     `--replace`. That's the *intended* handoff — they never coexist.
+   - **dev (`4242`):** because it's a different port, `bun run app:dev`
+     binds `4242` and **never touches** the stable proxy on `4141`. The
+     self-collision that motivated this whole doc only existed because dev
+     shared stable's port; moving dev off `4141` removes it by
+     construction.
 
 4. **Belt-and-suspenders: write the *actual bound* port to a
    channel-scoped runtime file, and discover from it.** A static default
@@ -117,30 +136,33 @@ class, not just to pick a second number.
    the runtime file (#4) for discovery — lets N instances coexist with
    zero config.
 
-6. **Non-negotiable guardrail.** Beta must **not** write the Claude
-   integration files by default (see the channel-abstraction table): they
-   repoint your *real* Claude Code / Desktop at the beta port and silently
-   break your stable setup. Opt-in only, and to a separate profile if ever.
+6. **Non-negotiable guardrail.** The `dev` channel must **not** write the
+   Claude integration files (see the channel-abstraction table): on `4242`
+   they would repoint your *real* Claude Code / Desktop at the dev sidecar
+   and silently break your stable setup. (Beta is less hazardous here since
+   it shares `4141`, but it still defaults to not writing them — opt-in
+   only, and to a separate profile if ever.)
 
-> **TL;DR** — don't "assign beta a port." Make the port a pure function of
-> the channel defined once, let distinct ports turn `--replace` into a safe
-> per-channel operation, and add a runtime port file so everything
-> *discovers* the live port. That fixes the duplication behind the `4142`
-> bug and scales to N channels.
+> **TL;DR** — the only channel that needs its own port is `dev` (`4242`),
+> because it runs *beside* stable; `beta` and `stable` share `4141` and use
+> `--replace` to hand off (they never coexist). Define the channel→port map
+> **once** so there's no second literal to drift (the `4142` bug), and add a
+> runtime port file so everything *discovers* the live port.
 
 ### Three tiers of isolation — pick by risk
 
-**Tier 0 — inner loop (seconds).** `bun run app:dev`. Already
-port-aware and self-evicting. Use while actively coding. *Caveat:* it
-binds 4141, so don't run it next to a production Maximal you care
-about — quit the tray app first, or use Tier 1.
+**Tier 0 — inner loop (seconds).** `bun run app:dev` on the `dev` channel
+(port `4242`, `~/.local/share/maximal-dev`). Because it's off stable's
+`4141`, it runs **alongside** your installed stable Maximal without
+evicting it — edit and iterate while your real proxy keeps serving Claude.
 
-**Tier 1 — side-by-side beta install (minutes).** `bun run
-app:build:beta` produces "Maximal Beta" with a distinct bundle id, its
-own tray, its own port (4242), and its own `~/.local/share/maximal-beta`.
-The OS treats it as a different app, so it installs *next to* production
-Maximal and the two never touch. This is the default for "does this
-build actually work when packaged?" without disturbing the host.
+**Tier 1 — separate beta install (minutes).** `bun run app:build:beta`
+produces "Maximal Beta" with a distinct bundle id, its own tray, and its
+own `~/.local/share/maximal-beta`, so the OS installs it *next to*
+production Maximal with isolated tokens/config. It **shares port `4141`**,
+so you run beta *or* stable at a time (launching one evicts the other via
+`--replace`) — which is fine, since there's no reason to run both at once.
+This is the default for "does this build actually work when packaged?"
 
 **Tier 2 — full VM isolation (Windows / installer / risky work).** Use
 the existing UTM Windows VM — see [`windows-vm-utm.md`](./windows-vm-utm.md)
@@ -252,8 +274,8 @@ ships a `debian-trixie-gui` disk for Linux-GUI testing.
 
 | Tier | Mechanism | Isolates | Best for |
 |---|---|---|---|
-| 0 | `app:dev` | port (self-evicting) | inner loop |
-| 1 | side-by-side `Maximal Beta` bundle | identity + port + data | "does the packaged GUI work?" |
+| 0 | `app:dev` (`dev` channel, `:4242`) | port (distinct, runs beside stable) | inner loop |
+| 1 | separate `Maximal Beta` bundle (shares `:4141`) | identity + data (run one at a time) | "does the packaged GUI work?" |
 | **1.5** | **proxy in an Incus/Docker container** | **full netns + fs** | **CI, headless integration + `-beta` proxy smoke** |
 | 2 | bladerunner VM (replaces UTM) | full machine + snapshots | Windows MSI / installer / uninstall (#3, #132) |
 
@@ -282,10 +304,12 @@ Goal: ship `vX.Y.Z-beta.N` builds to opt-in testers as GitHub
 > - ❌ **No auto-cut path.** `release-please-config.json` is still
 >   single-branch; nothing proposes `-beta.N` tags. You'd tag by hand
 >   today. (See *release-please multi-branch config* below.)
-> - ❌ **No identity isolation.** There is no `src/lib/channel.ts`; bundle
->   id, port `4141`, and `~/.local/share/maximal` are shared, so a beta
->   `.app`/`.msi` collides with / clobbers the stable install. This is
->   Phase 1 and the bulk of the work.
+> - ❌ **No identity isolation.** There is no `src/lib/channel.ts`; the
+>   bundle id and `~/.local/share/maximal` are shared, so a beta
+>   `.app`/`.msi` installs *over* stable and shares its tokens/config. Beta
+>   needs a distinct bundle id + data dir (it can keep stable's `4141`
+>   port). Separately, the `dev` channel needs its own port (`4242`) so it
+>   runs beside stable. This is Phase 1 and the bulk of the work.
 > - ❌ **The in-app updater (#157) is channel-blind.** `src/lib/
 >   update-check.ts` + the shell upgrade prompt must learn to track the
 >   matching channel (stable ignores prereleases; beta follows them).
@@ -366,7 +390,7 @@ beta asset can't be `--clobber`-patched after publish — **bump
 | Phase | Scope | Code change? | Unblocks |
 |---|---|---|---|
 | **0** | Document + adopt: Tier 2 VM for Windows/installer work; `--api-home` + manual `--port` for ad-hoc local runs | none | Immediate safe testing, zero risk |
-| **1** | `src/lib/channel.ts` + `MAXIMAL_CHANNEL` threading; `app:dev:beta` / `app:build:beta`; beta bundle id + product name + icon; **beta must not write Claude integration config** | yes (local only) | Side-by-side beta installs |
+| **1** | `src/lib/channel.ts` + `MAXIMAL_CHANNEL` threading; `dev` on `:4242` (runs beside stable); beta bundle id + product name + icon + own data dir (shares `:4141`); **`dev` must not write Claude integration config** | yes (local only) | `app:dev` beside stable + separate beta installs |
 | **2** | `beta` branch + release-please multi-branch prerelease config + beta-aware `release.yml` | yes (CI) | First `vX.Y.Z-beta.N` to testers |
 | **3** | *(optional)* Tauri updater with `channels: [stable, beta]` + per-channel `update.json`; gate on cert/signing (release-runbook → *Open questions* A4) | yes | In-app auto-update per channel |
 
