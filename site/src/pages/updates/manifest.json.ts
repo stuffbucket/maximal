@@ -6,9 +6,11 @@
 // The app polls the Pages origin directly (fewest hops / smallest trust
 // surface); mxml.sh stays the human-facing download link.
 //
-// Shape — channel-keyed and schema-versioned so adding a `beta`/`nightly`
-// channel later is a server-only, non-breaking change:
-//   { "schema": 1, "generated": "<iso>", "channels": { "stable": { ... } } }
+// Shape — channel-keyed and schema-versioned so adding a `nightly` channel
+// later is a server-only, non-breaking change. `beta` is omitted when no
+// prerelease exists:
+//   { "schema": 1, "generated": "<iso>",
+//     "channels": { "stable": { ... }, "beta": { ... } } }
 //
 // Deliberately carries NO download URL. The client pins its download
 // destination as a compile-time constant (see src/lib/update-check.ts →
@@ -21,20 +23,32 @@
 // version-less one. A genuine "no release yet" (404) emits empty channels, so
 // the client reads "unknown" / no update.
 
-import { resolveLatestRelease } from "../../lib/version";
+import {
+  resolveLatestPrerelease,
+  resolveLatestRelease,
+} from "../../lib/version";
 
 export const prerender = true;
 
 const REPO_URL = "https://github.com/stuffbucket/maximal";
 
 export async function GET(): Promise<Response> {
-  const { tag, hasRelease } = await resolveLatestRelease();
+  const [{ tag, hasRelease }, beta] = await Promise.all([
+    resolveLatestRelease(),
+    resolveLatestPrerelease(),
+  ]);
 
   const channels: Record<string, { version: string; notes: string }> = {};
   if (hasRelease && tag) {
     channels.stable = {
       version: tag.replace(/^v/, ""),
       notes: `${REPO_URL}/releases/tag/${tag}`,
+    };
+  }
+  if (beta.hasRelease && beta.tag) {
+    channels.beta = {
+      version: beta.tag.replace(/^v/, ""),
+      notes: `${REPO_URL}/releases/tag/${beta.tag}`,
     };
   }
 
