@@ -42,10 +42,7 @@ const MANIFEST_URL =
  *  `BUILD_CHANNEL` (`stable` for source/stock builds; `beta` etc. when a
  *  channel binary injects `__MAXIMAL_CHANNEL__`). The manifest is
  *  channel-keyed, so a `beta` build polls the manifest's `beta` entry while
- *  `stable` keeps reading `stable`. NOTE: `isNewerVersion` strips the
- *  prerelease suffix, so a same-`x.y.z` beta bump (`-beta.0` → `-beta.1`) is
- *  not yet flagged; cross-`x.y.z` bumps are. A prerelease-precedence compare
- *  is the follow-up before betas can fully self-notify. */
+ *  `stable` keeps reading `stable`. */
 const UPDATE_CHANNEL = BUILD_CHANNEL
 
 /** Where to send the user to update — install-channel neutral. */
@@ -104,23 +101,43 @@ export function __resetUpdateCheckDepsForTests(): void {
 let cache: { atMs: number; status: UpdateStatus } | null = null
 
 /**
- * Numeric compare of two `x.y.z` versions. A leading `v` and any `-prerelease`
- * suffix are stripped (the releases/latest endpoint returns the latest STABLE
- * by default, so we never compare against a prerelease). Returns true if `a` is
- * strictly newer than `b`. Missing/garbage segments read as 0.
+ * Best-effort semver-precedence compare. Returns true if `a` is strictly newer
+ * than `b`. Missing/garbage core segments read as 0.
  */
-function parseSemver(v: string): [number, number, number] {
-  const core = v.replace(/^v/u, "").split("-")[0]
+function parseSemver(v: unknown): [number, number, number, Array<string>] {
+  const raw = typeof v === "string" ? v.replace(/^v/u, "") : ""
+  const prereleaseAt = raw.indexOf("-")
+  const core = prereleaseAt === -1 ? raw : raw.slice(0, prereleaseAt)
+  const prerelease =
+    prereleaseAt === -1 ? [] : raw.slice(prereleaseAt + 1).split(".")
   const parts = core.split(".").map((n) => Number.parseInt(n, 10) || 0)
-  return [parts[0] ?? 0, parts[1] ?? 0, parts[2] ?? 0]
+  return [parts[0] ?? 0, parts[1] ?? 0, parts[2] ?? 0, prerelease]
 }
 
 export function isNewerVersion(a: string, b: string): boolean {
-  const [a0, a1, a2] = parseSemver(a)
-  const [b0, b1, b2] = parseSemver(b)
+  const [a0, a1, a2, aPre] = parseSemver(a)
+  const [b0, b1, b2, bPre] = parseSemver(b)
   if (a0 !== b0) return a0 > b0
   if (a1 !== b1) return a1 > b1
-  return a2 > b2
+  if (a2 !== b2) return a2 > b2
+  if (aPre.length === 0 || bPre.length === 0) return bPre.length > 0
+  for (let i = 0; i < Math.max(aPre.length, bPre.length); i++) {
+    if (i >= aPre.length) return false
+    if (i >= bPre.length) return true
+    const aId = aPre[i]
+    const bId = bPre[i]
+    const aNum = /^\d+$/u.test(aId)
+    const bNum = /^\d+$/u.test(bId)
+    if (aNum && bNum) {
+      const diff = Number.parseInt(aId, 10) - Number.parseInt(bId, 10)
+      if (diff !== 0) return diff > 0
+    } else if (aNum !== bNum) {
+      return !aNum
+    } else if (aId !== bId) {
+      return aId > bId
+    }
+  }
+  return false
 }
 
 interface UpdateManifest {
