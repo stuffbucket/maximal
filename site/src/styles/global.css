@@ -1,50 +1,91 @@
-/* maximal landing — maximalist jewel-tone palette inspired by an
-   ornate interior: deep teal walls, scarlet sofa, stained-glass jewel
-   tones, brass accents. Three layers: page background, jewel cards,
-   pinned glass nav. */
+/* maximal landing — flat and adaptive.
 
-@import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT,WONK@9..144,400..900,0..100,0..1&display=swap");
+   The page follows the OS light/dark setting (prefers-color-scheme). Surfaces
+   and text are neutral, theme-aware tokens; brand identity is carried by the
+   Fraunces wordmark, the spark/star iconography, and a per-section jewel
+   accent (a top rule + the section's spark) rather than full saturated card
+   backgrounds. This keeps the colorway while flattening the depth and letting
+   the majority of the page settle to the visitor's system theme.
+
+   The Fraunces webfont is loaded via a <link> in the page <head> (see
+   index.astro) — earlier discovery than a CSS @import, so less of a
+   flash-of-fallback-font on load. */
 
 :root {
-  /* Page background — deep teal "wall" */
-  --bg-deep: #0f2e3d;
+  color-scheme: light dark;
 
-  /* Jewel-tone "objects" — section card backgrounds */
-  --card-scarlet: #c8334a;
-  --card-turquoise: #2f9aa8;
-  --card-ochre: #d4843c;
-  --card-magenta: #b8407a;
-  --card-indigo: #4a3a8a;
-  --card-console: #08222d; /* footer "console table" — darker than page */
-
-  /* Ink */
-  --ink-cream: #f4ead4;
-  --ink-cream-dim: #d4cab4;
-  --ink-gold: #d4a843;
-  --ink-white: #ffffff;
-  --ink-deep: #0f2e3d;
-
-  /* Layered shadows — sharp to diffuse */
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-2: 0 4px 12px rgba(0, 0, 0, 0.25);
-  --shadow-3: 0 16px 32px rgba(0, 0, 0, 0.2);
-  --shadow-4: 0 32px 64px rgba(0, 0, 0, 0.15);
-  --shadow-card: var(--shadow-1), var(--shadow-2), var(--shadow-3),
-    var(--shadow-4);
-  --shadow-card-hover: 0 1px 2px rgba(0, 0, 0, 0.35),
-    0 6px 18px rgba(0, 0, 0, 0.3), 0 22px 44px rgba(0, 0, 0, 0.28),
-    0 40px 80px rgba(0, 0, 0, 0.22);
-
-  --radius: 14px;
-  --radius-sm: 8px;
-  --max-width: 960px;
-  --nav-height: 64px;
+  /* Brand hues — constant identity across both themes. Used for decorative
+     accents (section rules, spark icons), never as body text or surfaces, so
+     they carry no contrast burden. */
+  --brand-scarlet: #c22f45;
+  --brand-turquoise: #1b6f7a;
+  --brand-magenta: #ad3a70;
+  --brand-indigo: #4a3a8a;
+  --brand-ochre: #c47a2c;
 
   --serif: "Fraunces", Georgia, "Times New Roman", serif;
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
     "Liberation Mono", monospace;
+
+  --radius: 12px;
+  --radius-sm: 8px;
+  --max-width: 940px;
+  --nav-height: 60px;
+}
+
+/* ===== Light theme (default) ===== */
+:root {
+  --bg: #f7f2e9;
+  --surface: #fffdf8;
+  --surface-2: #efe7d6;
+  --text: #1b2a30;
+  --text-muted: #57686d;
+  --border: rgb(27 42 48 / 0.12);
+  --border-strong: rgb(27 42 48 / 0.22);
+  --accent: #15656f;
+  --accent-ink: #fdfcf7;
+  --accent-gold: #8a6312;
+  --link: #15656f;
+  --shadow-1: 0 1px 2px rgb(20 30 30 / 0.06);
+  --shadow-card: 0 1px 2px rgb(20 30 30 / 0.05), 0 1px 1px rgb(20 30 30 / 0.04);
+
+  /* Legacy aliases — keep the component styles readable without re-plumbing
+     every var reference. */
+  --ink-cream: var(--text);
+  --ink-cream-dim: var(--text-muted);
+  --ink-gold: var(--accent-gold);
+  --ink-deep: var(--text);
+  --ink-white: var(--text);
+  --bg-deep: var(--bg);
+}
+
+/* ===== Dark theme ===== */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #09090b;
+    --surface: #143744;
+    --surface-2: #0b2530;
+    --text: #f1e8d6;
+    --text-muted: #aebcbb;
+    --border: rgb(244 234 212 / 0.14);
+    --border-strong: rgb(244 234 212 / 0.26);
+    --accent: #5fb9c5;
+    --accent-ink: #06242c;
+    --accent-gold: #d8b24a;
+    --link: #d8b24a;
+    /* Brighter brand tints so the decorative top-rules + sparks keep their
+       per-section identity on the dark surface (the deep light-mode jewels
+       all but vanish on a dark background). Decorative only — no text. */
+    --brand-scarlet: #e85d72;
+    --brand-turquoise: #4fb3c0;
+    --brand-magenta: #d96aa0;
+    --brand-indigo: #8b7ad0;
+    --brand-ochre: #e0a050;
+    --shadow-1: 0 1px 2px rgb(0 0 0 / 0.3);
+    --shadow-card: 0 1px 2px rgb(0 0 0 / 0.28);
+  }
 }
 
 *,
@@ -63,22 +104,14 @@ body {
   font-family: var(--sans);
   font-size: 16px;
   line-height: 1.6;
-  color: var(--ink-cream);
-  background: var(--bg-deep);
+  color: var(--text);
+  background: var(--bg);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   min-height: 100vh;
   position: relative;
   overflow-x: hidden;
 }
-
-/* ===== Background layers =====
-   The Star Nest shader (canvas.starnest, z-index 0) and Flying
-   Toasters sprites (.toasters, z-index 1) are owned by their
-   respective components. See:
-   - site/src/components/StarNest.astro
-   - site/src/components/FlyingToasters.astro
-   ============================================================== */
 
 /* ===== Layout ===== */
 
@@ -91,8 +124,8 @@ body {
   left: 1rem;
   top: 1rem;
   z-index: 100;
-  background: var(--ink-cream);
-  color: var(--ink-deep);
+  background: var(--accent);
+  color: var(--accent-ink);
   padding: 0.5rem 0.85rem;
   border-radius: var(--radius-sm);
   text-decoration: none;
@@ -100,104 +133,98 @@ body {
 
 main {
   position: relative;
-  /* Above the Star Nest canvas (z:0) and Flying Toasters layer (z:1). */
   z-index: 2;
   max-width: var(--max-width);
   margin: 0 auto;
   padding: 2.5rem 1rem calc(var(--nav-height) + 3rem);
   display: flex;
   flex-direction: column;
-  gap: 1.75rem;
+  gap: 2rem;
 }
 
 @media (min-width: 768px) {
   main {
     padding: 3.5rem 2rem calc(var(--nav-height) + 4rem);
-    gap: 2.25rem;
+    gap: 2.75rem;
   }
 }
 
-/* ===== Cards ===== */
+/* The Markdoc <Content/> wraps the page sections in an <article>, so the cards
+   are NOT direct flex children of <main> and main's `gap` can't space them.
+   Give the article the same column gap (inherited so it tracks the responsive
+   value) so stacked cards never touch. */
+main > article {
+  display: flex;
+  flex-direction: column;
+  gap: inherit;
+}
+
+/* ===== Cards → flat sections ===== */
 
 .card {
   position: relative;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 2rem 1.5rem;
   box-shadow: var(--shadow-card);
-  color: var(--ink-cream);
-  transition: transform 200ms ease, box-shadow 200ms ease;
+  overflow: hidden;
 }
 
 @media (min-width: 768px) {
   .card {
-    padding: 2.75rem 2.5rem;
+    padding: 2.5rem 2.25rem;
   }
 }
 
-.card--scarlet {
-  background: var(--card-scarlet);
-}
-.card--turquoise {
-  background: var(--card-turquoise);
-}
-.card--ochre {
-  background: var(--card-ochre);
-  color: var(--ink-deep);
-}
-.card--ochre a {
-  color: var(--ink-deep);
-}
-.card--magenta {
-  background: var(--card-magenta);
-}
-.card--indigo {
-  background: var(--card-indigo);
-}
-.card--console {
-  background: var(--card-console);
-  color: var(--ink-cream-dim);
-  border: 1px solid rgba(212, 168, 67, 0.25);
+/* Per-section jewel accent: a thin top rule. Decorative only. */
+.card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 4px;
+  background: var(--card-accent, var(--accent));
 }
 
-.card:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-card-hover);
+.card--scarlet {
+  --card-accent: var(--brand-scarlet);
+}
+.card--turquoise {
+  --card-accent: var(--brand-turquoise);
+}
+.card--magenta {
+  --card-accent: var(--brand-magenta);
+}
+.card--indigo {
+  --card-accent: var(--brand-indigo);
+}
+.card--ochre {
+  --card-accent: var(--brand-ochre);
+}
+
+/* Footer reads as a quiet base, not a section. */
+.card--console {
+  background: var(--surface);
+  color: var(--text-muted);
+}
+.card--console::before {
+  display: none;
 }
 
 /* ===== Hero ===== */
 
 .hero {
-  margin-top: 1rem;
+  margin-top: 0.5rem;
   padding-top: 2.5rem;
   padding-bottom: 2.5rem;
-  overflow: hidden;
 }
 
 @media (min-width: 768px) {
   .hero {
-    padding-top: 3.75rem;
-    padding-bottom: 3.5rem;
+    padding-top: 3.5rem;
+    padding-bottom: 3.25rem;
   }
-}
-
-.hero-ornament {
-  position: absolute;
-  color: var(--ink-gold);
-  pointer-events: none;
-  opacity: 0.85;
-}
-.hero-ornament--tr {
-  top: 14px;
-  right: 14px;
-  width: 64px;
-  height: 64px;
-}
-.hero-ornament--bl {
-  bottom: 14px;
-  left: 14px;
-  width: 56px;
-  height: 56px;
-  opacity: 0.7;
 }
 
 .wordmark {
@@ -205,59 +232,31 @@ main {
   font-weight: 900;
   font-style: normal;
   font-variation-settings: "SOFT" 30, "WONK" 1, "opsz" 144;
-  font-size: clamp(3rem, 14vw, 9rem);
+  font-size: clamp(3rem, 13vw, 8rem);
   line-height: 0.92;
   letter-spacing: -0.04em;
   margin: 0 0 0.75rem;
-  color: var(--ink-cream);
+  color: var(--text);
 }
 
-/* Inline brand mark — same Fraunces flourish as the hero wordmark
-   but sized to flow with surrounding body copy. Used wherever the
-   word "maximal" appears in a sentence and we want it to read as
-   the product name, not just italics. */
 .brand {
   font-family: var(--serif);
   font-weight: 900;
   font-style: normal;
   font-variation-settings: "SOFT" 30, "WONK" 1, "opsz" 144;
   letter-spacing: -0.02em;
-  /* Fraunces 900 has a smaller x-height than the surrounding sans
-     so the lowercase letters read a beat smaller — bump it ~1pt to
-     visually match the body copy. */
   font-size: 1.19em;
 }
 
 .tagline {
   font-family: var(--serif);
   font-weight: 500;
-  font-size: clamp(1.15rem, 2.6vw, 1.6rem);
+  font-size: clamp(1.2rem, 2.6vw, 1.7rem);
   line-height: 1.3;
   letter-spacing: -0.01em;
   margin: 0 0 1.25rem;
-  color: var(--ink-cream);
-  max-width: 28ch;
-}
-
-.header-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 1rem;
-  font-family: var(--mono);
-  font-size: 0.85rem;
-  color: var(--ink-cream-dim);
-}
-
-.header-meta a {
-  color: var(--ink-cream);
-  text-decoration: underline;
-  text-underline-offset: 3px;
-  text-decoration-color: var(--ink-gold);
-  text-decoration-thickness: 1px;
-}
-
-.header-meta a:hover {
-  text-decoration-thickness: 2px;
+  color: var(--text);
+  max-width: 30ch;
 }
 
 /* ===== Section typography ===== */
@@ -266,11 +265,11 @@ h2 {
   font-family: var(--serif);
   font-weight: 800;
   font-variation-settings: "SOFT" 50, "opsz" 60;
-  font-size: clamp(1.75rem, 4vw, 2.5rem);
+  font-size: clamp(1.6rem, 3.6vw, 2.25rem);
   line-height: 1.1;
   letter-spacing: -0.02em;
   margin: 0 0 1rem;
-  color: inherit;
+  color: var(--text);
 }
 
 .card p {
@@ -284,15 +283,10 @@ h2 {
 }
 
 .card a:not(.btn) {
-  color: var(--ink-cream);
+  color: var(--link);
   text-decoration: underline;
   text-underline-offset: 3px;
-  text-decoration-color: var(--ink-gold);
   text-decoration-thickness: 1.5px;
-}
-
-.card--ochre a:not(.btn) {
-  text-decoration-color: var(--ink-deep);
 }
 
 .card a:not(.btn):hover {
@@ -302,51 +296,43 @@ h2 {
 code {
   font-family: var(--mono);
   font-size: 0.875em;
-  background: rgba(0, 0, 0, 0.22);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-radius: 4px;
   padding: 0.05em 0.4em;
-  color: inherit;
-}
-
-.card--ochre code {
-  background: rgba(15, 46, 61, 0.14);
+  color: var(--text);
 }
 
 pre {
   font-family: var(--mono);
   font-size: 0.85rem;
-  background: rgba(0, 0, 0, 0.28);
-  border: 1px solid rgba(244, 234, 212, 0.18);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 0.85rem 1rem;
   overflow-x: auto;
   margin: 0.75rem 0;
   line-height: 1.5;
-  color: var(--ink-cream);
+  color: var(--text);
 }
 
 pre code {
   background: transparent;
+  border: 0;
   padding: 0;
-  border-radius: 0;
 }
 
 /* ===== Section ornaments ===== */
 
 .section-ornament {
   position: absolute;
-  top: 1rem;
-  right: 1rem;
-  width: 48px;
-  height: 48px;
-  color: var(--ink-cream);
+  top: 1.1rem;
+  right: 1.1rem;
+  width: 42px;
+  height: 42px;
+  color: var(--card-accent, var(--accent));
   opacity: 0.55;
   pointer-events: none;
-}
-
-.card--ochre .section-ornament {
-  color: var(--ink-deep);
-  opacity: 0.5;
 }
 
 /* ===== Downloads ===== */
@@ -354,28 +340,22 @@ pre code {
 .section-note {
   font-size: 0.95rem;
   margin: 0 0 1.25rem;
-  color: inherit;
-  opacity: 0.92;
+  color: var(--text-muted);
 }
 
 .downloads {
   display: grid;
-  /* Three installers in one row — macOS · Windows · Homebrew. Stack
-     on narrow viewports where three 33% cells would be cramped. */
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 0.65rem;
   margin: 0 0 1.25rem;
 }
 
-@media (max-width: 720px) {
+@media (max-width: 560px) {
   .downloads {
     grid-template-columns: 1fr;
   }
 }
 
-/* `display: inline-flex` on .btn overrides the UA stylesheet's
-   `[hidden] { display: none }`, so any leftover hidden buttons in
-   the future stay actually hidden. */
 .btn[hidden],
 .downloads > [hidden] {
   display: none;
@@ -386,271 +366,62 @@ pre code {
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  padding: 0.85rem 1.1rem;
-  border: 1px solid rgba(244, 234, 212, 0.35);
+  padding: 0.7rem 1.05rem;
+  border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
-  background: rgba(0, 0, 0, 0.18);
-  color: var(--ink-cream);
-  font-family: inherit;
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--sans);
   font-size: 0.95rem;
   font-weight: 500;
   text-decoration: none;
   cursor: pointer;
-  box-shadow: var(--shadow-1);
-  transition:
-    transform 150ms ease,
-    box-shadow 150ms ease,
-    background 150ms ease;
-}
-
-.card--ochre .btn {
-  border-color: rgba(15, 46, 61, 0.35);
-  background: rgba(15, 46, 61, 0.1);
-  color: var(--ink-deep);
+  transition: border-color 150ms ease, background 150ms ease;
 }
 
 .btn:hover {
-  transform: scale(1.02);
-  box-shadow: var(--shadow-2), 0 8px 20px rgba(0, 0, 0, 0.25);
+  border-color: var(--accent);
   text-decoration: none;
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .btn .btn-meta {
   font-family: var(--mono);
   font-size: 0.78rem;
-  opacity: 0.7;
+  color: var(--text-muted);
   font-weight: 400;
 }
 
-/* Homebrew install modal — opens on Homebrew card click. */
-.modal {
-  border: none;
-  border-radius: var(--radius-md);
-  padding: 0;
-  background: transparent;
-  color: var(--ink-cream);
-  max-width: 28rem;
-  width: calc(100% - 2rem);
-}
-
-.modal::backdrop {
-  background: rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(2px);
-}
-
-.modal-inner {
-  position: relative;
-  background: var(--card-magenta);
-  border-radius: var(--radius-md);
-  padding: 1.75rem 1.5rem 1.4rem;
-  box-shadow: var(--shadow-2), 0 16px 48px rgba(0, 0, 0, 0.4);
-}
-
-.modal-close {
-  position: absolute;
-  top: 0.55rem;
-  right: 0.65rem;
-  background: transparent;
-  border: 0;
-  color: var(--ink-cream);
-  font-size: 1.5rem;
-  line-height: 1;
-  width: 2rem;
-  height: 2rem;
-  border-radius: 50%;
-  cursor: pointer;
-  opacity: 0.7;
-  transition: opacity 120ms ease, background 120ms ease;
-}
-
-.modal-close:hover,
-.modal-close:focus-visible {
-  opacity: 1;
-  background: rgba(255, 255, 255, 0.12);
-}
-
-.modal-title {
-  font-family: var(--display);
-  font-size: 1.4rem;
-  font-weight: 600;
-  margin: 0 0 0.6rem;
-}
-
-.modal-body {
-  margin: 0.4rem 0;
-  font-size: 0.95rem;
-  line-height: 1.45;
-}
-
-.modal-body code {
-  font-family: var(--mono);
-  background: rgba(0, 0, 0, 0.2);
-  padding: 0.1em 0.35em;
-  border-radius: 4px;
-  font-size: 0.88em;
-}
-
-/* The brew command — clickable, copies to clipboard, animates a chip
-   into view on copy. A `<button>` rather than a `<pre>` so keyboard
-   activation (Enter / Space) works for free. */
-.modal-code {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  width: 100%;
-  margin: 0.65rem 0;
-  padding: 0.7rem 2.55rem 0.7rem 0.85rem;
-  background: rgba(0, 0, 0, 0.28);
-  border: 1px solid rgba(244, 234, 212, 0.12);
-  border-radius: var(--radius-sm);
-  color: var(--ink-cream);
-  font-family: var(--mono);
-  font-size: 0.88rem;
-  text-align: left;
-  cursor: copy;
-  transition:
-    background 150ms ease,
-    border-color 150ms ease,
-    transform 150ms ease;
-}
-
-.modal-code code {
-  background: transparent;
-  padding: 0;
-  font: inherit;
-  flex: 1;
-  min-width: 0;
-  overflow-x: auto;
-  white-space: nowrap;
-}
-
-.modal-code:hover {
-  background: rgba(0, 0, 0, 0.36);
-  border-color: rgba(244, 234, 212, 0.22);
-}
-
-.modal-code:focus-visible {
-  outline: 2px solid var(--ink-cream);
-  outline-offset: 2px;
-}
-
-.modal-code:active {
-  transform: scale(0.985);
-}
-
-.modal-copy-icon {
-  position: absolute;
-  top: 50%;
-  right: 0.7rem;
-  width: 18px;
-  height: 18px;
-  transform: translateY(-50%);
-  color: var(--ink-cream);
-  opacity: 0.55;
-  transition: opacity 150ms ease;
-}
-
-.modal-code:hover .modal-copy-icon {
-  opacity: 0.85;
-}
-
-.modal-copy-icon svg {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  transition:
-    opacity 180ms ease,
-    transform 180ms ease;
-}
-
-.modal-copy-icon__check {
-  opacity: 0;
-  transform: scale(0.7);
-}
-
-.modal-code--copied .modal-copy-icon__copy {
-  opacity: 0;
-  transform: scale(0.7);
-}
-
-.modal-code--copied .modal-copy-icon__check {
-  opacity: 1;
-  transform: scale(1);
-  color: #9be8b5;
-}
-
-/* Brief "Copied" toast over the right edge of the code block,
-   fading in/out with the icon swap. */
-.modal-copy-toast {
-  position: absolute;
-  top: -0.6rem;
-  right: 0.6rem;
-  padding: 0.18rem 0.55rem;
-  background: var(--ink-cream);
-  color: var(--card-magenta);
-  font-family: var(--sans);
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  border-radius: 999px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  opacity: 0;
-  transform: translateY(4px);
-  transition:
-    opacity 180ms ease,
-    transform 180ms ease;
-  pointer-events: none;
-}
-
-.modal-code--copied .modal-copy-toast {
-  opacity: 1;
-  transform: translateY(0);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .modal-code,
-  .modal-copy-icon svg,
-  .modal-copy-toast {
-    transition: none;
-  }
-}
-
-.modal-footnote {
-  margin: 0.8rem 0 0;
-  font-size: 0.82rem;
-  opacity: 0.75;
-}
-
 .btn--primary {
-  background: var(--ink-cream);
-  color: var(--ink-deep);
-  border-color: var(--ink-gold);
-  box-shadow: var(--shadow-2), 0 0 0 1px var(--ink-gold) inset;
-  font-weight: 700;
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+  font-weight: 600;
 }
 
 .btn--primary:hover {
-  background: var(--ink-white);
-  box-shadow: var(--shadow-3), 0 0 0 1px var(--ink-gold) inset;
+  filter: brightness(1.06);
+  border-color: var(--accent);
 }
 
 .btn--primary .btn-meta {
-  color: var(--ink-deep);
-  opacity: 0.7;
+  color: var(--accent-ink);
+  opacity: 0.8;
 }
 
 .btn-spark {
   flex: 0 0 auto;
-  width: 22px;
-  height: 22px;
-  color: var(--ink-cream);
+  width: 20px;
+  height: 20px;
+  color: var(--card-accent, var(--accent));
 }
 
-
 .btn--primary .btn-spark {
-  color: var(--ink-gold);
+  color: var(--accent-ink);
 }
 
 .btn-label {
@@ -661,39 +432,24 @@ pre code {
   min-width: 0;
 }
 
+/* "Coming soon" platform chip — inert, clearly not a live button. */
+.btn--soon {
+  cursor: default;
+  border-style: dashed;
+  border-color: var(--border-strong);
+  color: var(--text-muted);
+}
+.btn--soon:hover {
+  border-color: var(--border-strong);
+}
+.btn--soon .btn-meta {
+  color: var(--text-muted);
+}
+
 .btn--disabled {
   opacity: 0.55;
   cursor: not-allowed;
   pointer-events: none;
-}
-
-/* ===== Callout (ochre) ===== */
-
-.callout {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 1rem;
-  align-items: start;
-}
-
-.callout-icon {
-  flex: 0 0 auto;
-  width: 40px;
-  height: 40px;
-  color: var(--ink-deep);
-}
-
-.callout p {
-  margin: 0 0 0.6rem;
-  font-size: 0.98rem;
-}
-
-.callout p:last-child {
-  margin-bottom: 0;
-}
-
-.callout strong {
-  font-weight: 700;
 }
 
 /* ===== Footer ===== */
@@ -708,13 +464,12 @@ pre code {
 }
 
 .site-footer a {
-  color: var(--ink-cream);
+  color: var(--link);
   text-decoration: underline;
   text-underline-offset: 3px;
-  text-decoration-color: var(--ink-gold);
 }
 
-/* ===== Bottom-pinned glass nav (foreground "credenza") ===== */
+/* ===== Bottom-pinned glass dock ===== */
 
 .dock {
   position: fixed;
@@ -722,18 +477,11 @@ pre code {
   right: 0;
   bottom: 0;
   z-index: 10;
-  /* Lighter than the page deep-teal so the dock reads as foreground.
-     Slight saturation lift to feel "in front" without losing
-     transparency. */
-  background: rgba(34, 62, 84, 0.78);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
-  /* Stronger gold border + a thin cream highlight on top for
-     edge separation without going opaque. */
-  border-top: 1px solid var(--ink-gold);
-  box-shadow:
-    inset 0 1px 0 rgba(244, 234, 212, 0.12),
-    0 -8px 24px rgba(0, 0, 0, 0.35);
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  border-top: 1px solid var(--border-strong);
+  box-shadow: 0 -2px 12px rgb(0 0 0 / 0.06);
 }
 
 .dock-inner {
@@ -743,10 +491,8 @@ pre code {
   padding: 0 1rem;
   display: flex;
   align-items: center;
-  /* Center the items horizontally; on narrow viewports flex-start
-     lets the dock-inner scroll horizontally instead of cramming. */
   justify-content: center;
-  gap: 0.85rem;
+  gap: 0.65rem;
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -759,11 +505,11 @@ pre code {
   flex: 0 0 auto;
   font-family: var(--serif);
   font-weight: 600;
-  font-size: 1.075rem;
+  font-size: 1.05rem;
   line-height: 1;
-  color: var(--ink-cream);
+  color: var(--text);
   text-decoration: none;
-  padding: 0.55rem 0.95rem;
+  padding: 0.5rem 0.9rem;
   border-radius: var(--radius-sm);
   border: 1px solid transparent;
   transition: background 150ms ease, border-color 150ms ease;
@@ -773,13 +519,18 @@ pre code {
 }
 
 .dock a:hover {
-  background: rgba(212, 168, 67, 0.14);
-  border-color: rgba(212, 168, 67, 0.45);
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+}
+
+.dock a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .dock a[aria-current="page"] {
-  color: var(--ink-gold);
-  border-color: rgba(212, 168, 67, 0.55);
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 .dock-brand {
@@ -787,8 +538,8 @@ pre code {
   font-weight: 800;
   font-size: 1.125rem;
   line-height: 1;
-  color: var(--ink-gold);
-  margin-right: 0.5rem;
+  color: var(--accent);
+  margin-right: 0.4rem;
   flex: 0 0 auto;
   letter-spacing: -0.01em;
   display: inline-flex;
@@ -796,14 +547,13 @@ pre code {
 }
 
 @media (max-width: 540px) {
-  /* Tighten on narrow viewports while keeping the bumped baseline. */
   .dock-inner {
     justify-content: flex-start;
-    gap: 0.55rem;
+    gap: 0.45rem;
   }
   .dock a {
     font-size: 0.95rem;
-    padding: 0.5rem 0.75rem;
+    padding: 0.45rem 0.7rem;
   }
   .dock-brand {
     font-size: 1rem;
