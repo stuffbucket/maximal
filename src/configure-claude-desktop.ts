@@ -30,6 +30,7 @@
 import { defineCommand } from "citty"
 import consola from "consola"
 import fs from "node:fs"
+import os from "node:os"
 import path from "node:path"
 
 import {
@@ -40,6 +41,36 @@ import {
 
 const CLAUDE_APP_PATH = "/Applications/Claude.app"
 const MANAGED_PROFILE_OUT = "maximal-claude-3p.mobileconfig"
+
+/**
+ * Candidate Claude Desktop install locations to probe, per platform.
+ *
+ *  - macOS: the app bundle in `/Applications`.
+ *  - Windows: the per-user Squirrel install dir (`%LOCALAPPDATA%\\AnthropicClaude`)
+ *    and the launcher alias the installer drops on PATH
+ *    (`%LOCALAPPDATA%\\Microsoft\\WindowsApps\\Claude.exe`). Either present
+ *    means Claude Desktop is installed. (The MSIX / Microsoft-Store build
+ *    lives under `%LOCALAPPDATA%\\Packages\\Claude_*` — we don't enumerate
+ *    that package-family dir here; `--force` covers it.)
+ *
+ * Returns an empty list on unsupported platforms (caller treats that as
+ * "can't tell" and only blocks on darwin/win32).
+ */
+function claudeAppCandidates(
+  platform: NodeJS.Platform = process.platform,
+  home: string = os.homedir(),
+): Array<string> {
+  if (platform === "darwin") return [CLAUDE_APP_PATH]
+  if (platform === "win32") {
+    const localAppData =
+      process.env.LOCALAPPDATA ?? path.join(home, "AppData", "Local")
+    return [
+      path.join(localAppData, "AnthropicClaude"),
+      path.join(localAppData, "Microsoft", "WindowsApps", "Claude.exe"),
+    ]
+  }
+  return []
+}
 
 interface ConfigureOptions {
   force: boolean
@@ -65,8 +96,9 @@ export function runConfigureClaudeDesktop(opts: ConfigureOptions): void {
   }
 
   if (!claudeAppInstalled() && !opts.force) {
+    const where = claudeAppCandidates().join(" or ") || "the usual location"
     consola.warn(
-      `Claude Desktop not found at ${CLAUDE_APP_PATH}. Install it from`
+      `Claude Desktop not found (looked at ${where}). Install it from`
         + " https://claude.ai/download, then re-run this command. To"
         + " write the config anyway (e.g. before installing), pass --force.",
     )
@@ -130,13 +162,31 @@ function writeManagedProfile(): void {
   }
 }
 
-function claudeAppInstalled(): boolean {
-  if (process.platform !== "darwin") return true
-  try {
-    return fs.statSync(CLAUDE_APP_PATH).isDirectory()
-  } catch {
-    return false
-  }
+/**
+ * Is Claude Desktop installed? Real check on macOS and Windows; on any
+ * other platform we can't tell, so return true (don't block — `--force`
+ * still exists, and the config write is harmless if the app is absent).
+ *
+ * Exported for unit testing; `platform`/`home` are injectable so the
+ * Windows branch can be exercised on a POSIX host.
+ */
+export function claudeAppInstalled(
+  platform: NodeJS.Platform = process.platform,
+  home: string = os.homedir(),
+): boolean {
+  const candidates = claudeAppCandidates(platform, home)
+  // Unsupported platform: nothing to probe → can't tell, don't block.
+  if (candidates.length === 0) return true
+  return candidates.some((p) => {
+    try {
+      // Accept either a directory (macOS .app bundle, Windows Squirrel dir)
+      // or a file (Windows launcher alias) — any existing candidate counts.
+      fs.statSync(p)
+      return true
+    } catch {
+      return false
+    }
+  })
 }
 
 export const configureClaudeDesktop = defineCommand({
