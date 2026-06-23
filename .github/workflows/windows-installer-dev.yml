@@ -144,7 +144,11 @@ jobs:
       - name: Install WiX
         shell: pwsh
         run: |
-          dotnet tool install --global wix --version 5.*
+          # Pin tool + extension to the same exact 5.x. `wix extension add`
+          # rejects a `5.*` wildcard ("Invalid extension version"); it takes
+          # an exact `name/version` (or no version). 5.0.2 is the latest 5.x
+          # of both the toolset and the Util extension on NuGet.
+          dotnet tool install --global wix --version 5.0.2
           $userBin = Join-Path $env:USERPROFILE '.dotnet\tools'
           echo $userBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           & "$userBin\wix.exe" --version
@@ -152,7 +156,7 @@ jobs:
           # (QtExec) from the Util extension. Install it into the wix
           # extension cache so `wix build -ext WixToolset.Util.wixext`
           # resolves.
-          & "$userBin\wix.exe" extension add --global WixToolset.Util.wixext/5.*
+          & "$userBin\wix.exe" extension add --global WixToolset.Util.wixext/5.0.2
 
       - name: Build MSI
         shell: pwsh
