@@ -144,10 +144,19 @@ jobs:
       - name: Install WiX
         shell: pwsh
         run: |
-          dotnet tool install --global wix --version 5.*
+          # Pin tool + extension to the same exact 5.x. `wix extension add`
+          # rejects a `5.*` wildcard ("Invalid extension version"); it takes
+          # an exact `name/version` (or no version). 5.0.2 is the latest 5.x
+          # of both the toolset and the Util extension on NuGet.
+          dotnet tool install --global wix --version 5.0.2
           $userBin = Join-Path $env:USERPROFILE '.dotnet\tools'
           echo $userBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           & "$userBin\wix.exe" --version
+          # The scheduled-task / setup custom actions use WixQuietExec
+          # (QtExec) from the Util extension. Install it into the wix
+          # extension cache so `wix build -ext WixToolset.Util.wixext`
+          # resolves.
+          & "$userBin\wix.exe" extension add --global WixToolset.Util.wixext/5.0.2
 
       - name: Build MSI
         shell: pwsh
@@ -161,6 +170,7 @@ jobs:
           wix build build\windows\maximal.wxs `
             -d "Version=$msiVersion" `
             -arch x64 `
+            -ext WixToolset.Util.wixext `
             -bindpath staging `
             -out $out
           Get-ChildItem dist-release
@@ -199,6 +209,13 @@ jobs:
           $marker = Get-ItemPropertyValue 'HKCU:\Software\stuffbucket\maximal' 'installed' -ErrorAction SilentlyContinue
           if ($marker -ne 1) { throw "HKCU marker Software\stuffbucket\maximal\installed != 1 (got '$marker')" }
 
+          # The MSI now converges with install.ps1: it registers the
+          # at-logon scheduled task (parity with the ps1 installer).
+          if (-not (Get-ScheduledTask -TaskName 'maximal' -ErrorAction SilentlyContinue)) {
+            throw "scheduled task 'maximal' not registered by the MSI"
+          }
+          Write-Host "scheduled task 'maximal' present"
+
           $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
           if ($userPath -notlike '*Programs\maximal*') {
             Write-Warning "install dir not found in user PATH (non-fatal): $userPath"
@@ -218,6 +235,76 @@ jobs:
             if ($null -eq $j.$k) { throw "Missing top-level key in debug --json: $k" }
           }
           Write-Host "installed binary debug --json OK (version=$($j.version))"
+
+      # The real user ask: prove the install yields a *running* proxy,
+      # not just a binary that prints JSON. Start it via the scheduled
+      # task the MSI registered (Start-ScheduledTask, since the CI runner
+      # never logs in to fire the AtLogOn trigger), then poll the
+      # unauthenticated /setup-status endpoint for a 200 + JSON. boot is
+      # auth-free (bootstrapUpstream never fires device-code), so this
+      # serves even with no GitHub token on the runner.
+      - name: Start proxy + assert it serves
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not (Get-ScheduledTask -TaskName 'maximal' -ErrorAction SilentlyContinue)) {
+            throw "scheduled task 'maximal' not registered by the MSI"
+          }
+          Start-ScheduledTask -TaskName 'maximal'
+          $served = $false
+          foreach ($i in 1..40) {
+            try {
+              $r = Invoke-WebRequest 'http://127.0.0.1:4141/setup-status' `
+                -UseBasicParsing -TimeoutSec 2
+              if ($r.StatusCode -eq 200) {
+                $body = $r.Content
+                $null = $body | ConvertFrom-Json   # must be valid JSON
+                Write-Host "msi proxy is SERVING /setup-status (200): $body"
+                $served = $true; break
+              }
+            } catch { Start-Sleep -Seconds 1 }
+          }
+          if (-not $served) {
+            Write-Error "proxy never served http://127.0.0.1:4141/setup-status after MSI install"
+            exit 1
+          }
+
+      - name: Capture proxy logs (msi)
+        if: always()
+        shell: pwsh
+        run: |
+          # The proxy writes its app-data (logs/) under %APPDATA%\maximal on
+          # Windows now (src/lib/paths.ts resolveAppDir win32 branch), kept in
+          # lockstep with the shell's maximal_data_dir() and the WiX/ps1 model.
+          $dir = Join-Path $env:APPDATA 'maximal'
+          New-Item -ItemType Directory -Force -Path msi-proxy-logs | Out-Null
+          if (Test-Path $dir) {
+            Get-ChildItem -Path $dir -Recurse -Include *.log,*.txt,*.json `
+              -ErrorAction SilentlyContinue |
+              ForEach-Object { Copy-Item $_.FullName msi-proxy-logs -ErrorAction SilentlyContinue }
+          }
+          Get-ScheduledTaskInfo -TaskName 'maximal' -ErrorAction SilentlyContinue |
+            Out-File msi-proxy-logs\scheduled-task-info.txt
+          Get-ChildItem msi-proxy-logs -ErrorAction SilentlyContinue
+
+      - name: Upload proxy logs (msi)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: msi-proxy-logs
+          path: msi-proxy-logs
+          if-no-files-found: ignore
+
+      # Stop the proxy before uninstall so the .exe file lock releases
+      # (StopRunningMaximal also kills it, but releasing first avoids the
+      # MSI "files in use" path entirely).
+      - name: Stop proxy before uninstall
+        shell: pwsh
+        run: |
+          Stop-ScheduledTask -TaskName 'maximal' -ErrorAction SilentlyContinue
+          Get-Process -Name 'maximal' -ErrorAction SilentlyContinue |
+            Stop-Process -Force -ErrorAction SilentlyContinue
+          Start-Sleep -Seconds 2
 
       - name: Uninstall MSI silently
         shell: pwsh
@@ -316,6 +403,67 @@ jobs:
           $j = & $exe debug --json | ConvertFrom-Json
           if ($null -eq $j.version) { throw "debug --json missing 'version'" }
           Write-Host "ps1 installed binary debug --json OK (version=$($j.version))"
+
+      # install.ps1 already started the scheduled task (step 5). Prove
+      # the proxy is actually SERVING: poll the unauthenticated
+      # /setup-status endpoint for a 200 + JSON. If the task didn't
+      # bring it up (CI never logs in to fire AtLogOn), nudge it via
+      # Start-ScheduledTask before giving up.
+      - name: Assert ps1 proxy serves
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Start-ScheduledTask -TaskName 'maximal' -ErrorAction SilentlyContinue
+          $served = $false
+          foreach ($i in 1..40) {
+            try {
+              $r = Invoke-WebRequest 'http://127.0.0.1:4141/setup-status' `
+                -UseBasicParsing -TimeoutSec 2
+              if ($r.StatusCode -eq 200) {
+                $null = $r.Content | ConvertFrom-Json
+                Write-Host "ps1 proxy is SERVING /setup-status (200): $($r.Content)"
+                $served = $true; break
+              }
+            } catch { Start-Sleep -Seconds 1 }
+          }
+          if (-not $served) {
+            Write-Error "proxy never served http://127.0.0.1:4141/setup-status after install.ps1"
+            exit 1
+          }
+
+      - name: Assert ps1 Start Menu shortcut + ARP entry
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $lnk = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\maximal\maximal setup.lnk'
+          if (-not (Test-Path $lnk)) { throw "Start Menu shortcut missing: $lnk" }
+          $arp = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\maximal'
+          if (-not (Test-Path $arp)) { throw "ARP entry missing: $arp" }
+          $name = Get-ItemPropertyValue $arp 'DisplayName'
+          if ($name -ne 'maximal') { throw "ARP DisplayName != maximal (got '$name')" }
+          Write-Host "ps1 Start Menu shortcut + ARP entry OK"
+
+      - name: Capture proxy logs (ps1)
+        if: always()
+        shell: pwsh
+        run: |
+          # %APPDATA%\maximal on Windows (resolveAppDir win32 branch).
+          $dir = Join-Path $env:APPDATA 'maximal'
+          New-Item -ItemType Directory -Force -Path ps1-proxy-logs | Out-Null
+          if (Test-Path $dir) {
+            Get-ChildItem -Path $dir -Recurse -Include *.log,*.txt,*.json `
+              -ErrorAction SilentlyContinue |
+              ForEach-Object { Copy-Item $_.FullName ps1-proxy-logs -ErrorAction SilentlyContinue }
+          }
+          Get-ChildItem ps1-proxy-logs -ErrorAction SilentlyContinue
+
+      - name: Upload proxy logs (ps1)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ps1-proxy-logs
+          path: ps1-proxy-logs
+          if-no-files-found: ignore
 
       - name: Cleanup
         if: always()

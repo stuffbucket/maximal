@@ -49,6 +49,46 @@ function topConfig(): Record<string, unknown> {
   return readJson(path.join(getClaude3pDir(home), "claude_desktop_config.json"))
 }
 
+describe("getClaude3pDir — Windows (platform injected)", () => {
+  let savedAppData: string | undefined
+
+  beforeEach(() => {
+    savedAppData = process.env.APPDATA
+  })
+
+  afterEach(() => {
+    if (savedAppData === undefined) delete process.env.APPDATA
+    else process.env.APPDATA = savedAppData
+  })
+
+  it("targets %APPDATA%/Claude-3p (the -3p suffix, in Roaming)", () => {
+    process.env.APPDATA = path.join(home, "AppData", "Roaming")
+    const dir = getClaude3pDir(home, "win32")
+    // The -3p suffix is what the Cowork-3P build reads; the historically-
+    // wrong target was the standard-mode `…\Claude\` (no -3p suffix).
+    expect(dir).toBe(path.join(home, "AppData", "Roaming", "Claude-3p"))
+    expect(path.basename(dir)).toBe("Claude-3p")
+    // configLibrary is the subdir the applied inference profile lands in.
+    const lib = path.join(dir, "configLibrary")
+    expect(lib).toBe(
+      path.join(home, "AppData", "Roaming", "Claude-3p", "configLibrary"),
+    )
+  })
+
+  it("falls back to ~/AppData/Roaming/Claude-3p when %APPDATA% is unset", () => {
+    delete process.env.APPDATA
+    const dir = getClaude3pDir(home, "win32")
+    expect(dir).toBe(path.join(home, "AppData", "Roaming", "Claude-3p"))
+  })
+
+  it("still resolves the macOS path when platform is darwin", () => {
+    const dir = getClaude3pDir(home, "darwin")
+    expect(dir).toBe(
+      path.join(home, "Library", "Application Support", "Claude-3p"),
+    )
+  })
+})
+
 describe("gatewayProfile", () => {
   it("turns all telemetry off but leaves update checks on", () => {
     const p = gatewayProfile(home)

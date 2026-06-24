@@ -52,8 +52,12 @@ console.error(
 
 mkdirSync(dirname(outfile), { recursive: true })
 
+// Spawn the *same* bun via its absolute path rather than the bare name
+// "bun": on Windows CI, setup-bun only adds bun to PATH in Git-Bash form
+// (/c/Users/.../.bun/bin), which a child process started by bun can't
+// resolve through the OS — process.execPath always points at this bun.
 const r = spawnSync(
-  "bun",
+  process.execPath,
   [
     "build",
     "--compile",
