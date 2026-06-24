@@ -73,6 +73,24 @@ jobs:
           rustup target add x86_64-pc-windows-msvc
           rustc -vV
 
+      # Cache the cargo registry/git downloads + the compiled target dir.
+      # The registry cache means crates are served locally instead of being
+      # re-downloaded from crates.io every run (which intermittently fails
+      # with a connection reset), and target/ skips recompiling unchanged
+      # dependency crates. Same key as the release windows-shell job, so the
+      # two share a warm cache. GitHub-published action (policy-allowed).
+      - name: Cache cargo registry + target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            shell/src-tauri/target
+          key: windows-cargo-shell-${{ hashFiles('shell/src-tauri/Cargo.lock') }}
+          restore-keys: |
+            windows-cargo-shell-
+
       - name: Install dependencies
         # bash: setup-bun adds a Git-Bash-style PATH ($HOME/.bun/bin) to
         # GITHUB_PATH, which pwsh (the windows-2022 default shell) can't
