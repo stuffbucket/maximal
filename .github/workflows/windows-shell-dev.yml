@@ -166,3 +166,65 @@ jobs:
             shell/src-tauri/target/release/bundle/nsis/*-setup.exe
             shell/src-tauri/target/release/Maximal.exe
           if-no-files-found: error
+
+      # Prove the tray app is what a user actually gets: silently install the
+      # NSIS package, then assert the installed app exe + a "Maximal" Start
+      # Menu shortcut land — the Windows analog of the macOS .app in
+      # /Applications, i.e. how a user finds + launches maximal. (We can't
+      # headlessly launch the GUI, so we verify the launcher exists + targets
+      # the app, not the running window.)
+      - name: Install NSIS + verify Start Menu launcher
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $setup = (Get-ChildItem 'shell/src-tauri/target/release/bundle/nsis' -Filter '*-setup.exe' |
+                    Select-Object -First 1).FullName
+          Write-Host "Installing $setup /S ..."
+          $p = Start-Process -FilePath $setup -ArgumentList '/S' -Wait -PassThru
+          Write-Host "installer exit code: $($p.ExitCode)"
+          Start-Sleep -Seconds 3
+
+          # Tauri per-user (currentUser) NSIS installs under %LOCALAPPDATA%\<productName>.
+          $root = Join-Path $env:LOCALAPPDATA 'Maximal'
+          $exe = Get-ChildItem $root -Recurse -Filter 'Maximal.exe' -ErrorAction SilentlyContinue |
+                 Select-Object -First 1
+          if (-not $exe) {
+            # Broad fallback so a path change is diagnosable from the log.
+            $exe = Get-ChildItem $env:LOCALAPPDATA -Recurse -Filter 'Maximal.exe' -ErrorAction SilentlyContinue |
+                   Select-Object -First 1
+          }
+          if (-not $exe) { throw "installed Maximal.exe not found under %LOCALAPPDATA%" }
+          Write-Host "installed app exe: $($exe.FullName)"
+
+          # Start Menu shortcut (per-user Programs).
+          $sm = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
+          $lnk = Get-ChildItem $sm -Recurse -Filter '*.lnk' -ErrorAction SilentlyContinue |
+                 Where-Object { $_.BaseName -like '*Maximal*' } | Select-Object -First 1
+          if (-not $lnk) { throw "no 'Maximal' Start Menu shortcut found under $sm" }
+          Write-Host "Start Menu shortcut: $($lnk.FullName)"
+
+          # Confirm it targets the installed app exe.
+          $sh = New-Object -ComObject WScript.Shell
+          $target = $sh.CreateShortcut($lnk.FullName).TargetPath
+          Write-Host "shortcut target: $target"
+          if ($target -notlike '*Maximal.exe') {
+            throw "Start Menu shortcut does not target Maximal.exe (got '$target')"
+          }
+          Write-Host "Start Menu launcher OK"
+
+      - name: Uninstall NSIS app
+        if: always()
+        shell: pwsh
+        run: |
+          # Kill anything the installer may have auto-launched, then run the
+          # per-user uninstaller silently (best-effort; runner is ephemeral).
+          Get-Process -Name 'Maximal', 'maximal' -ErrorAction SilentlyContinue |
+            Stop-Process -Force -ErrorAction SilentlyContinue
+          $unins = Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Maximal') -Recurse `
+            -Filter 'uninstall.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($unins) {
+            Write-Host "uninstalling: $($unins.FullName)"
+            Start-Process -FilePath $unins.FullName -ArgumentList '/S' -Wait -ErrorAction SilentlyContinue
+          } else {
+            Write-Host "uninstaller not found (non-fatal in CI)"
+          }
