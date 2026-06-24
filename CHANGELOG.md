@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.34](https://github.com/stuffbucket/maximal/compare/v0.4.33...v0.4.34) (2026-06-24)
+
+
+### Bug Fixes
+
+* **windows:** slim CLI installers to binary-on-PATH; verify tray launcher ([#176](https://github.com/stuffbucket/maximal/issues/176)) ([db06e44](https://github.com/stuffbucket/maximal/commit/db06e445d1507321448e5c2f23a5c17341c2e05f))
+
 ## [0.4.33](https://github.com/stuffbucket/maximal/compare/v0.4.32...v0.4.33) (2026-06-24)
 
 
