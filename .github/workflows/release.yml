@@ -906,10 +906,168 @@ jobs:
           }
           Write-Host "clean removal verified"
 
+  # Windows tray app (Tauri shell -> NSIS per-user installer). The Windows
+  # analog of macos-dmg: bundles the SAME windows-x64 sidecar the `binaries`
+  # job attached into the menu-bar/tray GUI, so a Windows user gets the
+  # parity experience (tray, settings webview, app-managed proxy) instead of
+  # a headless CLI. Builds entirely on a public windows-2022 runner; ships
+  # UNSIGNED (Authenticode/SmartScreen deferred, same as the MSI).
+  #
+  # SOFT LAUNCH: attached to the release, but the Pages site keeps Windows
+  # as "coming soon" until we promote it. Gated by `publish` (see its needs)
+  # so the .exe lands on the draft before the single draft->published flip —
+  # immutable releases can't add assets post-publish. To make Windows-shell
+  # non-blocking (a flaky Tauri build wouldn't hold up the macOS release),
+  # drop `windows-shell` from publish's needs and accept that some releases
+  # may ship without it.
+  windows-shell:
+    needs: binaries
+    runs-on: windows-2022
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v6
+
+      # Same opt-in asset-reuse gate as the other installer jobs.
+      - name: Skip if Windows shell installer already attached
+        id: skip
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REUSE: ${{ vars.RELEASE_REUSE_EXISTING_ASSETS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SETUP="maximal-${TAG}-windows-x64-setup.exe"
+          if [ "${REUSE:-}" != "true" ]; then
+            echo "RELEASE_REUSE_EXISTING_ASSETS not 'true' — building from tag commit."
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          ASSETS="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null || echo '')"
+          if grep -Fxq "$SETUP" <<<"$ASSETS"; then
+            echo "Reuse enabled and $SETUP already attached — skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve version
+        id: ver
+        if: steps.skip.outputs.skip != 'true'
+        shell: bash
+        run: echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - uses: ./.github/actions/setup-bun
+        if: steps.skip.outputs.skip != 'true'
+        with:
+          bun-version: 1.3.11
+
+      # rustup is preinstalled on the windows-2022 image (vendored-action
+      # policy: no third-party toolchain action). Same as windows-shell-dev.
+      - name: Ensure Rust msvc toolchain
+        if: steps.skip.outputs.skip != 'true'
+        shell: pwsh
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup target add x86_64-pc-windows-msvc
+          rustc -vV
+
+      # setup-bun adds a Git-Bash-style PATH; bun steps must run under bash
+      # (pwsh/cmd can't resolve it on Windows).
+      - name: Install dependencies
+        if: steps.skip.outputs.skip != 'true'
+        shell: bash
+        run: bun install --frozen-lockfile
+
+      - name: Install shell dependencies
+        if: steps.skip.outputs.skip != 'true'
+        working-directory: shell
+        shell: bash
+        run: bun install --frozen-lockfile
+
+      - name: Build web UI + ui-embed manifest
+        if: steps.skip.outputs.skip != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bun run build:ui
+          bun run scripts/gen-ui-embed.ts
+
+      # Reuse the exact sidecar the `binaries` job built + attached, so the
+      # tray app embeds the identical, version-stamped release binary.
+      - name: Download windows-x64 sidecar from the draft
+        if: steps.skip.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist-bin
+          ZIP="maximal-${TAG}-windows-x64.zip"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern "$ZIP" --pattern "$ZIP.sha256" --dir dist-bin
+          ( cd dist-bin && sha256sum -c "$ZIP.sha256" )
+
+      - name: Place sidecar as Tauri externalBin
+        if: steps.skip.outputs.skip != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = Get-ChildItem dist-bin -Filter '*.zip' | Select-Object -First 1
+          Expand-Archive -Path $zip.FullName -DestinationPath staging -Force
+          if (-not (Test-Path 'staging\maximal.exe')) { Write-Error 'maximal.exe missing from zip'; exit 1 }
+          New-Item -ItemType Directory -Force -Path 'shell\src-tauri\binaries' | Out-Null
+          Copy-Item 'staging\maximal.exe' 'shell\src-tauri\binaries\maximal-x86_64-pc-windows-msvc.exe' -Force
+          Get-ChildItem 'shell\src-tauri\binaries'
+
+      - name: Tauri build (Windows, NSIS)
+        if: steps.skip.outputs.skip != 'true'
+        working-directory: shell
+        shell: bash
+        env:
+          MAXIMAL_VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          # Stamp the real version (tauri.conf.json hardcodes 0.0.0) and skip
+          # beforeBuildCommand — the UI is already built above, and the hook
+          # runs via cmd.exe where bun isn't resolvable on Windows.
+          bun run tauri build --bundles nsis \
+            --config "{\"version\":\"${MAXIMAL_VERSION}\",\"build\":{\"beforeBuildCommand\":\"\"}}"
+
+      - name: Stage NSIS installer + sha256
+        if: steps.skip.outputs.skip != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $nsisDir = 'shell/src-tauri/target/release/bundle/nsis'
+          $setup = Get-ChildItem -Path $nsisDir -Filter '*-setup.exe' | Select-Object -First 1
+          if (-not $setup) { Write-Error "NSIS installer not produced under $nsisDir"; exit 1 }
+          New-Item -ItemType Directory -Force -Path dist-release | Out-Null
+          $name = "maximal-${env:TAG}-windows-x64-setup.exe"
+          $dst = Join-Path 'dist-release' $name
+          Copy-Item $setup.FullName $dst -Force
+          # `<hash>  <filename>` to match the sha256sum convention the other assets use.
+          $hash = (Get-FileHash -Algorithm SHA256 $dst).Hash.ToLower()
+          "$hash  $name" | Out-File -Encoding ascii "$dst.sha256"
+          Write-Host "staged $dst ($((Get-Item $dst).Length) bytes)"
+          Get-Content "$dst.sha256"
+
+      - name: Attach Windows shell installer to release
+        if: steps.skip.outputs.skip != 'true'
+        uses: ./.github/actions/upload-release-asset
+        with:
+          tag: ${{ env.TAG }}
+          files: |
+            dist-release/maximal-${{ env.TAG }}-windows-x64-setup.exe
+            dist-release/maximal-${{ env.TAG }}-windows-x64-setup.exe.sha256
+
   # Flip the draft release to published + latest, but ONLY after every
   # asset is attached: binaries, checksums, the smoke-tested Windows
-  # build, and every installer (macOS .dmg, Windows install.ps1
-  # and MSI, with the MSI verified end-to-end). If any upstream job fails
+  # build, and every installer (macOS .dmg, the Windows Tauri tray
+  # NSIS installer, Windows install.ps1 and MSI, with the MSI verified
+  # end-to-end). If any upstream job fails
   # the release stays a draft, so users never see an incomplete "Latest".
   # Recover by re-running the failed jobs (GitHub "Re-run failed jobs"),
   # then re-running publish — or publish the draft by hand.
@@ -922,6 +1080,7 @@ jobs:
       - windows-msi
       - windows-msi-verify
       - macos-dmg
+      - windows-shell
     runs-on: ubuntu-latest
     permissions:
       contents: write
