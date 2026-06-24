@@ -224,19 +224,22 @@ jobs:
           if (-not (Test-Path $installRoot)) { throw "install dir missing: $installRoot" }
           Get-ChildItem $installRoot | ForEach-Object { Write-Host "  installed: $($_.Name)" }
 
-          # The "Maximal" Start Menu shortcut (per-user Programs) is the launcher.
+          # The launcher is the "Maximal" Start Menu shortcut (per-user
+          # Programs), exactly named Maximal.lnk.
           $sm = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
-          $lnk = Get-ChildItem $sm -Recurse -Filter '*.lnk' -ErrorAction SilentlyContinue |
-                 Where-Object { $_.BaseName -like '*Maximal*' } | Select-Object -First 1
-          if (-not $lnk) { throw "no 'Maximal' Start Menu shortcut found under $sm" }
+          $lnk = Get-ChildItem $sm -Recurse -Filter 'Maximal.lnk' -ErrorAction SilentlyContinue |
+                 Select-Object -First 1
+          if (-not $lnk) { throw "no 'Maximal.lnk' Start Menu shortcut found under $sm" }
           Write-Host "Start Menu shortcut: $($lnk.FullName)"
 
-          # It must target an .exe inside the install dir (the app binary —
-          # currently maximal-shell.exe; don't hardcode the name).
+          # It must target the app binary at the known path. productName is
+          # "Maximal" (install dir) but the Tauri/cargo binary is maximal-shell,
+          # so the launcher target is %LOCALAPPDATA%\Maximal\maximal-shell.exe.
+          $expected = Join-Path $installRoot 'maximal-shell.exe'
           $target = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk.FullName).TargetPath
           Write-Host "shortcut target: $target"
-          if ($target -notlike "$installRoot*" -or $target -notlike '*.exe') {
-            throw "shortcut target is not an .exe under $installRoot (got '$target')"
+          if ($target -ne $expected) {
+            throw "Start Menu shortcut should target '$expected', got '$target'"
           }
           if (-not (Test-Path $target)) { throw "shortcut target does not exist on disk: $target" }
           Write-Host "Start Menu launcher OK -> $target"
