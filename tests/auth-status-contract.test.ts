@@ -53,6 +53,7 @@ const realGetDeviceCodeModule =
   await import("~/services/github/get-device-code")
 const realGetUserModule = await import("~/services/github/get-user")
 const realTokenModule = await import("~/lib/token")
+const realUtilsModule = await import("~/lib/utils")
 
 void mock.module("~/services/github/get-device-code", () => ({
   getDeviceCode: () =>
@@ -74,6 +75,13 @@ void mock.module("~/lib/token", () => ({
   setupCopilotToken: () => Promise.resolve(),
 }))
 
+// Sign-in primes the models cache after minting the Copilot token; stub it
+// so completing a device flow doesn't make a real Copilot /models fetch.
+void mock.module("~/lib/utils", () => ({
+  ...realUtilsModule,
+  cacheModels: () => Promise.resolve(),
+}))
+
 afterAll(() => {
   void mock.module(
     "~/services/github/get-device-code",
@@ -81,6 +89,7 @@ afterAll(() => {
   )
   void mock.module("~/services/github/get-user", () => realGetUserModule)
   void mock.module("~/lib/token", () => realTokenModule)
+  void mock.module("~/lib/utils", () => realUtilsModule)
 })
 
 const {

@@ -58,6 +58,7 @@ import { registerProcessCleanup } from "./process-cleanup"
 import { emitAuthChanged, registerAuthStatusProjector } from "./settings-events"
 import { clearLastUpstreamRejection, state } from "./state"
 import { setupCopilotToken, stopCopilotRefreshLoop } from "./token"
+import { cacheModels } from "./utils"
 
 // Auth events go to the console AND a dated `auth-*.log` so they're observable
 // after the fact (sign-in, degrade, refresh failures, sign-out) instead of
@@ -509,6 +510,21 @@ async function runPoller(flow: ActiveFlow): Promise<void> {
     // signOut() may have fired and wiped the token. Don't latch signed-in over
     // a just-cleared session.
     if (flow.abort.signal.aborted) return
+
+    // Prime the models cache so the catalog is populated the moment sign-in
+    // completes. The cold-boot path (bootstrap.ts) does this after
+    // setupCopilotToken; the device-flow path must too. The lazy
+    // stale-refresh middleware only REVALIDATES an already-primed cache
+    // (`loadedAtMs === null` → "not_primed", no-op), so on a fresh install —
+    // boot has no token, so boot never primes — without an explicit prime
+    // here the models list stays empty until a forced refresh. Best-effort:
+    // a models-fetch failure must not fail sign-in (mirrors setupCopilotToken).
+    try {
+      await cacheModels()
+    } catch (err) {
+      log.warn("Auth-controller: failed to cache models after sign-in:", err)
+    }
+
     setAuthState({
       kind: "signed-in",
       login,
