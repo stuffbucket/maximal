@@ -415,8 +415,10 @@ const CFG = {
     // the imaginary pointer's reflection follows the mouse. The canvas is
     // pointer-events:none, so listen on the host card. rAF-throttled; skipped
     // under reduced motion. Live frames already re-read the uniforms each tick.
+    // DISABLED FOR NOW — flip CURSOR_REFLECTION to re-enable.
+    const CURSOR_REFLECTION = false
     const host = canvas.parentElement
-    if (cfg.coat === 1 && host && !reduced) {
+    if (CURSOR_REFLECTION && cfg.coat === 1 && host && !reduced) {
       let queued = false
       host.addEventListener(
         "pointermove",

@@ -13,7 +13,7 @@ interface Props {
 const { tagline, downloadLabel = "Download for macOS" } = Astro.props;
 // Markdoc doesn't forward $variables into tag attributes, so pull the resolved
 // release straight from the shared (memoized) build-time module.
-const { macDmg: downloadUrl, versionLabel } = await getDownloadInfo();
+const { macDmg: downloadUrl, versionLabel, winSetup } = await getDownloadInfo();
 ---
 
 <header class="card card--scarlet hero" aria-labelledby="title">
@@ -28,7 +28,12 @@ const { macDmg: downloadUrl, versionLabel } = await getDownloadInfo();
   <div class="hero-cta">
     {
       downloadUrl && (
-        <a class="btn btn--primary hero-cta__primary" href={downloadUrl} rel="noopener">
+        <a
+          class="btn btn--primary hero-cta__primary"
+          href={downloadUrl}
+          rel="noopener"
+          data-win-setup={winSetup ?? ""}
+        >
           <Paint base="#15656f" mode="clearcoat" class="btn-paint" />
           <span class="btn-label">
             <Spark class="btn-spark" />
@@ -149,13 +154,22 @@ const { macDmg: downloadUrl, versionLabel } = await getDownloadInfo();
     if (!isWindows) return;
     var btn = document.querySelector(".hero-cta__primary");
     if (!btn) return;
+    var label = btn.querySelector(".btn-label span:last-child");
+    var winSetup = btn.getAttribute("data-win-setup");
+    if (winSetup) {
+      // A Windows installer exists in the release → keep the primary affordance
+      // lit and point it at the .exe.
+      btn.setAttribute("href", winSetup);
+      if (label) label.textContent = "Download for Windows";
+      return;
+    }
+    // No Windows build yet → an honest inert "coming soon" chip.
     btn.classList.remove("btn--primary");
     btn.classList.add("btn--soon");
     btn.removeAttribute("href");
     btn.setAttribute("aria-disabled", "true");
     var paint = btn.querySelector(".btn-paint");
     if (paint) paint.style.display = "none";
-    var label = btn.querySelector(".btn-label span:last-child");
     if (label) label.textContent = "Windows";
     var meta = btn.querySelector(".btn-meta");
     if (meta) meta.textContent = "coming soon";

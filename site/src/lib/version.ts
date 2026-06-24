@@ -5,10 +5,34 @@
 
 const REPO = "stuffbucket/maximal";
 
+export interface ReleaseAsset {
+  /** Asset filename, e.g. "maximal_0.4.34_x64-setup.exe". */
+  name: string;
+  /** Direct browser download URL for the asset. */
+  url: string;
+}
+
 export interface ReleaseInfo {
   /** The latest release tag, e.g. "v0.4.32", or null when no release exists. */
   tag: string | null;
   hasRelease: boolean;
+  /** Release assets (empty for a pinned version — we don't fetch its assets). */
+  assets: ReleaseAsset[];
+}
+
+function parseAssets(raw: unknown): ReleaseAsset[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ReleaseAsset[] = [];
+  for (const item of raw) {
+    const asset = item as { name?: unknown; browser_download_url?: unknown };
+    if (
+      typeof asset.name === "string" &&
+      typeof asset.browser_download_url === "string"
+    ) {
+      out.push({ name: asset.name, url: asset.browser_download_url });
+    }
+  }
+  return out;
 }
 
 function githubHeaders(): Record<string, string> {
@@ -47,23 +71,27 @@ async function fetchGitHubReleaseJson(path: string): Promise<unknown | null> {
 
 async function fetchLatestTag(): Promise<ReleaseInfo> {
   const body = await fetchGitHubReleaseJson("releases/latest");
-  if (!body) return { tag: null, hasRelease: false };
-  const release = body as { tag_name?: string };
+  if (!body) return { tag: null, hasRelease: false, assets: [] };
+  const release = body as { tag_name?: string; assets?: unknown };
   if (typeof release.tag_name === "string" && release.tag_name.length > 0) {
-    return { tag: release.tag_name, hasRelease: true };
+    return {
+      tag: release.tag_name,
+      hasRelease: true,
+      assets: parseAssets(release.assets),
+    };
   }
   throw new Error("GitHub releases API response missing tag_name");
 }
 
 async function fetchLatestPrereleaseTag(): Promise<ReleaseInfo> {
   const body = await fetchGitHubReleaseJson("releases?per_page=100");
-  if (!body) return { tag: null, hasRelease: false };
+  if (!body) return { tag: null, hasRelease: false, assets: [] };
   if (!Array.isArray(body)) {
     throw new Error("GitHub releases API response was not a release list");
   }
 
   const release = body.find(
-    (item): item is { tag_name: string } => {
+    (item): item is { tag_name: string; assets?: unknown } => {
       const release = item as {
         tag_name?: unknown;
         prerelease?: unknown;
@@ -76,8 +104,12 @@ async function fetchLatestPrereleaseTag(): Promise<ReleaseInfo> {
       );
     },
   );
-  if (!release) return { tag: null, hasRelease: false };
-  return { tag: release.tag_name, hasRelease: true };
+  if (!release) return { tag: null, hasRelease: false, assets: [] };
+  return {
+    tag: release.tag_name,
+    hasRelease: true,
+    assets: parseAssets(release.assets),
+  };
 }
 
 /**
@@ -89,7 +121,7 @@ async function fetchLatestPrereleaseTag(): Promise<ReleaseInfo> {
  */
 export async function resolveLatestRelease(): Promise<ReleaseInfo> {
   const pinned = (import.meta.env.VITE_SITE_PIN_VERSION ?? "").trim();
-  if (pinned) return { tag: pinned, hasRelease: true };
+  if (pinned) return { tag: pinned, hasRelease: true, assets: [] };
   return fetchLatestTag();
 }
 

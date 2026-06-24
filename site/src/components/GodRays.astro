@@ -3,9 +3,9 @@
 //
 // - Inlined GLSL (no third-party shader library) + raw WebGL (no Three.js) to
 //   keep the page lean.
-// - DARK MODE ONLY: light shafts read on the black dark-theme background; on the
-//   light (warm paper) theme the canvas is hidden via CSS and the render loop
-//   stays paused.
+// - BOTH THEMES: the canvas is transparent (premultiplied alpha), so the page
+//   background shows through the gaps between shafts. Dark mode glows on the
+//   near-black page; light mode shows softer, deeper shafts on the warm paper.
 // - Reduced motion is a contract: under prefers-reduced-motion we draw a single
 //   static frame, never an animation loop.
 // - Pauses when the tab is hidden. pointer-events:none, z-index 0 — it sits
@@ -21,11 +21,12 @@
   function initGodRays(canvas: HTMLCanvasElement): void {
     const gl = canvas.getContext("webgl", {
       antialias: false,
-      alpha: false,
+      alpha: true,
+      premultipliedAlpha: true,
       depth: false,
       powerPreference: "low-power",
     })
-    if (!gl) return // No WebGL → the black page background is a fine fallback.
+    if (!gl) return // No WebGL → the page background is a fine fallback.
 
     const vert = `
       attribute vec2 p;
@@ -43,6 +44,7 @@
       uniform float uTime;
       uniform float uIntensity;
       uniform float uLightY;
+      uniform float uLight;
       uniform vec3 uColorA;
       uniform vec3 uColorB;
       uniform vec3 uColorC;
@@ -77,12 +79,24 @@
         // Cyclic blend across the brand jewel tones by ray angle, so adjacent
         // shafts differ in hue; drifts slowly over time.
         float g = fract(ang / 6.28318 * 1.2 + uTime * 0.06);
-        vec3 col;
-        if (g < 0.33333) col = mix(uColorA, uColorB, g * 3.0);
-        else if (g < 0.66667) col = mix(uColorB, uColorC, (g - 0.33333) * 3.0);
-        else col = mix(uColorC, uColorA, (g - 0.66667) * 3.0);
-        col *= v;
-        gl_FragColor = vec4(col, 1.0);
+        vec3 hue;
+        if (g < 0.33333) hue = mix(uColorA, uColorB, g * 3.0);
+        else if (g < 0.66667) hue = mix(uColorB, uColorC, (g - 0.33333) * 3.0);
+        else hue = mix(uColorC, uColorA, (g - 0.66667) * 3.0);
+
+        // Premultiplied-alpha output so the page background shows through the
+        // gaps in both themes. Dark: bright shafts glowing on the near-black
+        // page. Light: deeper, slightly stronger shafts that read on warm paper.
+        vec3 rgb;
+        float a;
+        if (uLight > 0.5) {
+          rgb = hue * 0.82;
+          a = clamp(v * 1.15, 0.0, 0.55);
+        } else {
+          rgb = hue;
+          a = clamp(v, 0.0, 1.0);
+        }
+        gl_FragColor = vec4(rgb * a, a);
       }
     `
 
@@ -131,6 +145,7 @@
     const uColorB = gl.getUniformLocation(prog, "uColorB")
     const uColorC = gl.getUniformLocation(prog, "uColorC")
     const uLightY = gl.getUniformLocation(prog, "uLightY")
+    const uLight = gl.getUniformLocation(prog, "uLight")
     gl.uniform1f(uIntensity, 0.62)
     // Brand jewel tones (dark-mode tints): turquoise → indigo → magenta. No
     // gold — these coordinate with the teal cards and complement the red hero.
@@ -176,6 +191,7 @@
     function frame(now: number): void {
       gl!.uniform1f(uTime, (now - start) / 1000)
       gl!.uniform1f(uLightY, lightY())
+      gl!.uniform1f(uLight, darkMM.matches ? 0 : 1)
       gl!.drawArrays(gl!.TRIANGLES, 0, 3)
       if (running) rafId = requestAnimationFrame(frame)
     }
@@ -192,18 +208,16 @@
     const darkMM = window.matchMedia("(prefers-color-scheme: dark)")
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches
 
-    // Active only in dark mode. In light mode CSS hides the canvas and we keep
-    // the loop paused.
+    // Active in both themes (the shader adapts via uLight). Pauses only for
+    // reduced motion (single static frame) and hidden tabs.
     function sync(): void {
-      if (!darkMM.matches) {
-        pause()
-        return
-      }
       if (reduced) {
         pause()
         frame(performance.now()) // single static frame
       } else if (document.visibilityState === "visible") {
         play()
+      } else {
+        pause()
       }
     }
 
@@ -212,7 +226,7 @@
       "resize",
       () => {
         resize()
-        if (!running && darkMM.matches) frame(performance.now())
+        if (!running) frame(performance.now())
       },
       { passive: true },
     )
@@ -229,7 +243,7 @@
     window.addEventListener(
       "scroll",
       () => {
-        if (running || !reduced || !darkMM.matches || scrollPending) return
+        if (running || !reduced || scrollPending) return
         scrollPending = true
         requestAnimationFrame((now) => {
           scrollPending = false
@@ -250,11 +264,5 @@
     z-index: 0;
     pointer-events: none;
     display: block;
-  }
-  /* Light theme keeps its warm-paper background — no shafts there. */
-  @media (prefers-color-scheme: light) {
-    canvas.godrays {
-      display: none;
-    }
   }
 </style>
