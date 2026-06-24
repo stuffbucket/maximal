@@ -1,6 +1,7 @@
 ---
 import { getEntry, render } from "astro:content";
 
+import GodRays from "../components/GodRays.astro";
 import "../styles/global.css";
 
 const REPO = "stuffbucket/maximal";
@@ -51,6 +52,9 @@ const { Content } = await render(entry);
   </head>
   <body>
     <a href="#main" class="skip-link">Skip to content</a>
+
+    <!-- Background: god-rays shader (dark mode only, behind all content) -->
+    <GodRays />
 
     <main id="main">
       <Content />
