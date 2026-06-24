@@ -728,16 +728,10 @@ jobs:
         if: steps.skip.outputs.skip != 'true'
         shell: pwsh
         run: |
-          # Pin tool + extension to the same exact 5.x. `wix extension add`
-          # rejects a `5.*` wildcard; it takes an exact `name/version`.
           dotnet tool install --global wix --version 5.0.2
           $userBin = Join-Path $env:USERPROFILE '.dotnet\tools'
           echo $userBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           & "$userBin\wix.exe" --version
-          # maximal.wxs uses WixQuietExec (Wix4UtilCA_X64) from the Util
-          # extension for the scheduled-task / setup custom actions, so the
-          # extension must be in the cache for `wix build -ext ...` to link.
-          & "$userBin\wix.exe" extension add --global WixToolset.Util.wixext/5.0.2
 
       - name: Build MSI
         if: steps.skip.outputs.skip != 'true'
@@ -747,11 +741,11 @@ jobs:
           $version = '${{ steps.ver.outputs.version }}'
           $out = "dist-release\maximal-${env:TAG}-windows-x64.msi"
           New-Item -ItemType Directory -Path dist-release -Force | Out-Null
-          # WiX resolves the .wxs's source files (maximal.exe) via -bindpath.
+          # CLI-only MSI: no WiX extensions needed. WiX resolves the .wxs's
+          # source files (maximal.exe) via -bindpath.
           wix build build\windows\maximal.wxs `
             -d "Version=$version" `
             -arch x64 `
-            -ext WixToolset.Util.wixext `
             -bindpath staging `
             -out $out
 
@@ -934,6 +928,9 @@ jobs:
       contents: write
     env:
       TAG: ${{ github.ref_name }}
+      # Retry crate downloads instead of failing on a transient connection
+      # reset (belt-and-suspenders alongside the cargo cache).
+      CARGO_NET_RETRY: "10"
     steps:
       - uses: actions/checkout@v6
 
@@ -980,6 +977,24 @@ jobs:
           rustup toolchain install stable --profile minimal --no-self-update
           rustup target add x86_64-pc-windows-msvc
           rustc -vV
+
+      # Cache cargo registry/git downloads + the compiled target dir, so
+      # crates are served locally (not re-downloaded from crates.io, which
+      # intermittently resets) and unchanged dependency crates aren't
+      # recompiled. Same key as windows-shell-dev.yml — the dev harness and
+      # this release job share a warm cache. GitHub-published (policy-OK).
+      - name: Cache cargo registry + target
+        if: steps.skip.outputs.skip != 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            shell/src-tauri/target
+          key: windows-cargo-shell-${{ hashFiles('shell/src-tauri/Cargo.lock') }}
+          restore-keys: |
+            windows-cargo-shell-
 
       # setup-bun adds a Git-Bash-style PATH; bun steps must run under bash
       # (pwsh/cmd can't resolve it on Windows).

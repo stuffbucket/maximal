@@ -17,11 +17,22 @@
  * tests fail with an opaque "Cannot find module '~/generated/ui-embed'".
  */
 
+import { beforeEach } from "bun:test"
+import consola from "consola"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
 import { ensureUiEmbedStub } from "../scripts/ensure-ui-embed-stub"
+
+// Reset the global consola level before every test. Some tests bump it to 5
+// (verbose mode, e.g. start-run-server) and don't restore it, leaking debug
+// logging into later tests — notably the RFC 8628 device-code poll loop in
+// poll-access-token.ts, which logs every poll and floods output with hundreds
+// of lines. Level 3 (Info) hides debug(4)/trace(5); errors/warns still show.
+beforeEach(() => {
+  consola.level = 3
+})
 
 ensureUiEmbedStub()
 
