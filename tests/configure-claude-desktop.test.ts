@@ -58,6 +58,44 @@ describe("claudeAppInstalled — Windows (platform injected)", () => {
     expect(claudeAppInstalled("win32", home)).toBe(true)
   })
 
+  it("detects the MSIX package dir (Packages/Claude_pzs8sxrjxfjjc)", () => {
+    fs.mkdirSync(
+      path.join(home, "AppData", "Local", "Packages", "Claude_pzs8sxrjxfjjc"),
+      { recursive: true },
+    )
+    expect(claudeAppInstalled("win32", home)).toBe(true)
+  })
+
+  it("detects a Claude-family MSIX package by prefix (hashed family name)", () => {
+    // The publisher-hash suffix mutates between installs, so detection scans
+    // the Packages dir for the family prefix rather than an exact name.
+    fs.mkdirSync(
+      path.join(
+        home,
+        "AppData",
+        "Local",
+        "Packages",
+        "AnthropicPBC.Claude_1a2b3c4d5e6f7",
+      ),
+      { recursive: true },
+    )
+    expect(claudeAppInstalled("win32", home)).toBe(true)
+  })
+
+  it("does not false-positive on an unrelated Packages entry", () => {
+    fs.mkdirSync(
+      path.join(
+        home,
+        "AppData",
+        "Local",
+        "Packages",
+        "Microsoft.SomethingElse",
+      ),
+      { recursive: true },
+    )
+    expect(claudeAppInstalled("win32", home)).toBe(false)
+  })
+
   it("returns true on unsupported platforms (can't tell → don't block)", () => {
     expect(claudeAppInstalled("linux", home)).toBe(true)
   })

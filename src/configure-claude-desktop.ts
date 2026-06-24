@@ -46,12 +46,15 @@ const MANAGED_PROFILE_OUT = "maximal-claude-3p.mobileconfig"
  * Candidate Claude Desktop install locations to probe, per platform.
  *
  *  - macOS: the app bundle in `/Applications`.
- *  - Windows: the per-user Squirrel install dir (`%LOCALAPPDATA%\\AnthropicClaude`)
- *    and the launcher alias the installer drops on PATH
- *    (`%LOCALAPPDATA%\\Microsoft\\WindowsApps\\Claude.exe`). Either present
- *    means Claude Desktop is installed. (The MSIX / Microsoft-Store build
- *    lives under `%LOCALAPPDATA%\\Packages\\Claude_*` — we don't enumerate
- *    that package-family dir here; `--force` covers it.)
+ *  - Windows: the per-user Squirrel install dir (`%LOCALAPPDATA%\\AnthropicClaude`),
+ *    the launcher alias the installer drops on PATH
+ *    (`%LOCALAPPDATA%\\Microsoft\\WindowsApps\\Claude.exe`), and the MSIX /
+ *    Microsoft-Store build's known package dir
+ *    (`%LOCALAPPDATA%\\Packages\\Claude_pzs8sxrjxfjjc`). Any present means
+ *    Claude Desktop is installed. New Windows installs are MSIX, which does
+ *    NOT create the Squirrel dir or always drop the alias, so the Packages
+ *    signal — plus the prefix scan in `claudeAppInstalled` — is what catches
+ *    a modern install.
  *
  * Returns an empty list on unsupported platforms (caller treats that as
  * "can't tell" and only blocks on darwin/win32).
@@ -62,14 +65,39 @@ function claudeAppCandidates(
 ): Array<string> {
   if (platform === "darwin") return [CLAUDE_APP_PATH]
   if (platform === "win32") {
-    const localAppData =
-      process.env.LOCALAPPDATA ?? path.join(home, "AppData", "Local")
+    const localAppData = windowsLocalAppData(home)
     return [
       path.join(localAppData, "AnthropicClaude"),
       path.join(localAppData, "Microsoft", "WindowsApps", "Claude.exe"),
+      path.join(localAppData, "Packages", "Claude_pzs8sxrjxfjjc"),
     ]
   }
   return []
+}
+
+/** `%LOCALAPPDATA%`, or its default location under `home` when unset. */
+function windowsLocalAppData(home: string): string {
+  return process.env.LOCALAPPDATA ?? path.join(home, "AppData", "Local")
+}
+
+/**
+ * MSIX package family names mutate (`Claude_<publisherhash>`,
+ * `AnthropicPBC.Claude_<hash>`), so an exact path can't catch every install.
+ * Scan `%LOCALAPPDATA%\\Packages` for any entry in the Claude family. No-ops
+ * (returns false) when the Packages dir is absent or unreadable.
+ */
+function windowsMsixClaudeInstalled(home: string): boolean {
+  const packages = path.join(windowsLocalAppData(home), "Packages")
+  try {
+    return fs
+      .readdirSync(packages)
+      .some(
+        (name) =>
+          name.startsWith("Claude_") || name.startsWith("AnthropicPBC.Claude"),
+      )
+  } catch {
+    return false
+  }
 }
 
 interface ConfigureOptions {
@@ -177,7 +205,7 @@ export function claudeAppInstalled(
   const candidates = claudeAppCandidates(platform, home)
   // Unsupported platform: nothing to probe → can't tell, don't block.
   if (candidates.length === 0) return true
-  return candidates.some((p) => {
+  const hasCandidate = candidates.some((p) => {
     try {
       // Accept either a directory (macOS .app bundle, Windows Squirrel dir)
       // or a file (Windows launcher alias) — any existing candidate counts.
@@ -187,6 +215,11 @@ export function claudeAppInstalled(
       return false
     }
   })
+  if (hasCandidate) return true
+  // Windows MSIX installs use a hashed package-family dir that no fixed path
+  // can pin down — scan the Packages dir for the Claude family as a fallback.
+  if (platform === "win32") return windowsMsixClaudeInstalled(home)
+  return false
 }
 
 export const configureClaudeDesktop = defineCommand({
