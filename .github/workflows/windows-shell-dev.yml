@@ -135,7 +135,14 @@ jobs:
       - name: Tauri build (Windows, NSIS)
         working-directory: shell
         shell: bash
-        run: bun run tauri build --bundles nsis
+        run: |
+          # The UI + ui-embed manifest were already built by the step above.
+          # Tauri runs beforeBuildCommand via cmd.exe on Windows, where bun
+          # (only on the Git-Bash-style PATH from setup-bun) can't resolve —
+          # so override the hook to empty for this CI build to skip the
+          # redundant re-run rather than fight bun-under-cmd.
+          bun run tauri build --bundles nsis \
+            --config '{"build":{"beforeBuildCommand":""}}'
 
       - name: Locate build outputs
         shell: pwsh
