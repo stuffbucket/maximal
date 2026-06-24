@@ -17,6 +17,11 @@ export interface DownloadInfo {
   /** Direct .dmg URL when a release exists, else the releases listing. */
   macDmg: string;
   macDmgFile: string;
+  /** Direct Windows installer URL when the release ships a *-setup.exe, else null. */
+  winSetup: string | null;
+  winSetupFile: string | null;
+  /** True when the release carries a Windows *-setup.exe artifact. */
+  hasWindows: boolean;
   /** Human label, e.g. "v0.4.32" or "see /releases". */
   versionLabel: string;
   tag: string | null;
@@ -31,19 +36,29 @@ export function getDownloadInfo(): Promise<DownloadInfo> {
 }
 
 async function compute(): Promise<DownloadInfo> {
-  const { tag, hasRelease } = await resolveLatestRelease();
+  const { tag, hasRelease, assets } = await resolveLatestRelease();
   const assetUrl = (filename: string): string =>
     hasRelease && tag
       ? `${REPO_URL}/releases/download/${tag}/${filename}`
       : RELEASES_URL;
   const versionForAsset = tag ?? "latest";
   const macDmgFile = `maximal-${versionForAsset}-darwin-arm64.dmg`;
+
+  // Windows: only advertise the installer when the release actually ships a
+  // *-setup.exe (the Tauri NSIS artifact). We pick it up from the resolved
+  // asset list rather than guessing a filename, so the button stays "coming
+  // soon" until a real Windows build is attached.
+  const winAsset = assets.find((a) => /-setup\.exe$/i.test(a.name)) ?? null;
+
   return {
     repo: REPO,
     repoUrl: REPO_URL,
     releasesUrl: RELEASES_URL,
     macDmg: assetUrl(macDmgFile),
     macDmgFile,
+    winSetup: winAsset?.url ?? null,
+    winSetupFile: winAsset?.name ?? null,
+    hasWindows: winAsset !== null,
     versionLabel: hasRelease && tag ? tag : "see /releases",
     tag,
     hasRelease,

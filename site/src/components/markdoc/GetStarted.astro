@@ -6,14 +6,17 @@ import Paint from "../Paint.astro";
 import Spark from "../Spark.astro";
 import { getDownloadInfo } from "../../lib/downloads";
 
-const { macDmg, versionLabel, releasesUrl, repoUrl } = await getDownloadInfo();
+const { macDmg, winSetup, hasWindows, versionLabel, releasesUrl, repoUrl } =
+  await getDownloadInfo();
 const readmeUrl = `${repoUrl}#readme`;
 
 const M = `<span class="brandword">maximal</span>`;
 const steps = [
   {
     title: "Install maximal",
-    body: "Grab the macOS app. It lives quietly in your menu bar; Windows is coming soon.",
+    body: hasWindows
+      ? "Grab the app for macOS or Windows; it sits quietly in your menu bar or system tray."
+      : "Grab the macOS app. It sits quietly in your menu bar; Windows is coming soon.",
   },
   {
     title: "Sign in with GitHub",
@@ -63,20 +66,36 @@ const steps = [
                     </span>
                     {versionLabel && <span class="btn-meta">{versionLabel}</span>}
                   </a>
-                  <div class="btn btn--soon" data-os="windows" aria-disabled="true">
-                    <span class="btn-label">
-                      <svg
-                        class="btn-spark"
-                        viewBox="0 0 22 22"
-                        fill="currentColor"
-                        aria-hidden="true"
-                      >
-                        <path d="M11 1 L13 9 L21 11 L13 13 L11 21 L9 13 L1 11 L9 9 Z" />
-                      </svg>
-                      <span>Windows</span>
-                    </span>
-                    <span class="btn-meta">coming soon</span>
-                  </div>
+                  {hasWindows ? (
+                    <a
+                      class="btn btn--primary"
+                      data-os="windows"
+                      href={winSetup}
+                      rel="noopener"
+                    >
+                      <Paint base="#15656f" mode="clearcoat" class="btn-paint" />
+                      <span class="btn-label">
+                        <Spark class="btn-spark" />
+                        <span>Windows</span>
+                      </span>
+                      {versionLabel && <span class="btn-meta">{versionLabel}</span>}
+                    </a>
+                  ) : (
+                    <div class="btn btn--soon" data-os="windows" aria-disabled="true">
+                      <span class="btn-label">
+                        <svg
+                          class="btn-spark"
+                          viewBox="0 0 22 22"
+                          fill="currentColor"
+                          aria-hidden="true"
+                        >
+                          <path d="M11 1 L13 9 L21 11 L13 13 L11 21 L9 13 L1 11 L9 9 Z" />
+                        </svg>
+                        <span>Windows</span>
+                      </span>
+                      <span class="btn-meta">coming soon</span>
+                    </div>
+                  )}
                 </div>
                 <p class="step__readme">
                   Homebrew and other options are in the{" "}
