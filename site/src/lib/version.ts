@@ -45,13 +45,28 @@ function githubHeaders(): Record<string, string> {
     Accept: "application/vnd.github+json",
     "User-Agent": "maximal-site-build",
     "X-GitHub-Api-Version": "2022-11-28",
+    // The releases API is CDN-cached (s-maxage=60). On a release-day rebuild
+    // the runner's region can keep serving a stale `releases/latest` body for
+    // far longer than 60s — long enough that a deploy fired minutes after a
+    // publish resolves a release whose just-attached assets (e.g. the Windows
+    // *-setup.exe) are missing, silently shipping a "coming soon" button for a
+    // build that actually exists. Force revalidation so the build always sees
+    // current release state.
+    "Cache-Control": "no-cache",
+    Pragma: "no-cache",
   };
   if (token) headers.Authorization = `Bearer ${token}`;
   return headers;
 }
 
 async function fetchGitHubReleaseJson(path: string): Promise<unknown | null> {
-  const res = await fetch(`https://api.github.com/repos/${REPO}/${path}`, {
+  // Per-build cache-buster: the GitHub API cache key includes the query
+  // string, so a unique param guarantees a MISS and a fresh body — belt-and-
+  // suspenders alongside the no-cache headers above, since the CDN doesn't
+  // always honor request cache directives.
+  const sep = path.includes("?") ? "&" : "?";
+  const url = `https://api.github.com/repos/${REPO}/${path}${sep}_cb=${Date.now()}`;
+  const res = await fetch(url, {
     headers: githubHeaders(),
   });
   // 404 is the *legitimate* "no published release yet" state (first launch) —
