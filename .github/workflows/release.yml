@@ -928,6 +928,9 @@ jobs:
       contents: write
     env:
       TAG: ${{ github.ref_name }}
+      # Retry crate downloads instead of failing on a transient connection
+      # reset (belt-and-suspenders alongside the cargo cache).
+      CARGO_NET_RETRY: "10"
     steps:
       - uses: actions/checkout@v6
 
