@@ -42,20 +42,25 @@ async function compute(): Promise<DownloadInfo> {
       ? `${REPO_URL}/releases/download/${tag}/${filename}`
       : RELEASES_URL;
   const versionForAsset = tag ?? "latest";
-  const macDmgFile = `maximal-${versionForAsset}-darwin-arm64.dmg`;
+  const conventionDmg = `maximal-${versionForAsset}-darwin-arm64.dmg`;
 
-  // Windows: only advertise the installer when the release actually ships a
-  // *-setup.exe (the Tauri NSIS artifact). We pick it up from the resolved
-  // asset list rather than guessing a filename, so the button stays "coming
-  // soon" until a real Windows build is attached.
+  // Resolve both downloads from the release's actual asset list rather than
+  // guessing filenames, so each button links to the real artifact for the
+  // latest build. macOS prefers an arm64 .dmg; Windows takes the NSIS
+  // *-setup.exe. A pinned version carries no asset list, so macOS falls back to
+  // the conventional .dmg filename and Windows stays "coming soon".
+  const macAsset =
+    assets.find((a) => /\.dmg$/i.test(a.name) && /arm64|aarch64/i.test(a.name)) ??
+    assets.find((a) => /\.dmg$/i.test(a.name)) ??
+    null;
   const winAsset = assets.find((a) => /-setup\.exe$/i.test(a.name)) ?? null;
 
   return {
     repo: REPO,
     repoUrl: REPO_URL,
     releasesUrl: RELEASES_URL,
-    macDmg: assetUrl(macDmgFile),
-    macDmgFile,
+    macDmg: macAsset?.url ?? assetUrl(conventionDmg),
+    macDmgFile: macAsset?.name ?? conventionDmg,
     winSetup: winAsset?.url ?? null,
     winSetupFile: winAsset?.name ?? null,
     hasWindows: winAsset !== null,
