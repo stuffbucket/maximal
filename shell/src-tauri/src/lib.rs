@@ -1483,11 +1483,19 @@ fn dismiss_splash(app: &AppHandle) {
 /// denial or a dev (`cargo run`) no-op must not matter.
 fn fire_startup_notification(app: &AppHandle) {
     use tauri_plugin_notification::NotificationExt;
+    // Where the icon lives — and which way to point — is platform-specific:
+    // macOS puts it in the top menu bar (↑); Windows puts it in the
+    // bottom-right system tray (↓). Leave the macOS copy exactly as-is.
+    let body = if cfg!(target_os = "macos") {
+        "Look for the Maximal icon in your menu bar ↑"
+    } else {
+        "Maximal is running in your system tray ↓"
+    };
     if let Err(err) = app
         .notification()
         .builder()
         .title("Maximal is running")
-        .body("Look for the Maximal icon in your menu bar ↑")
+        .body(body)
         .show()
     {
         eprintln!("[shell] startup notification failed: {err}");
