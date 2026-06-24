@@ -46,6 +46,21 @@ const { macDmg: downloadUrl, releasesUrl } = await getDownloadInfo();
 </header>
 
 <style>
+  /* The hero is a solid brand-red card (a fixed brand statement in both
+     themes), so it drops the per-section top accent rule and carries cream
+     ink directly — matching the maximal app-icon tile. */
+  .hero {
+    background: #c8334a;
+    color: #f4ead4;
+  }
+  .hero::before {
+    display: none;
+  }
+  .wordmark,
+  .tagline {
+    color: #f4ead4;
+  }
+
   .hero-typed {
     /* Reserve a stable two-line height so the typing effect doesn't reflow the
        layout beneath it as characters appear. */
@@ -74,7 +89,7 @@ const { macDmg: downloadUrl, releasesUrl } = await getDownloadInfo();
   .hero-cta__secondary {
     font-family: var(--mono);
     font-size: 0.9rem;
-    color: var(--ink-cream);
+    color: #f4ead4;
     text-decoration: underline;
     text-underline-offset: 3px;
     text-decoration-color: var(--ink-gold);
@@ -114,5 +129,26 @@ const { macDmg: downloadUrl, releasesUrl } = await getDownloadInfo();
       if (i++ <= full.length) window.setTimeout(tick, 26);
     }
     tick();
+  })();
+</script>
+
+<script is:inline>
+  // OS-aware primary download: macOS is the live build; Windows is "coming
+  // soon", so Windows visitors get an honest inert chip instead of a Mac
+  // download. The server-rendered default is the macOS download (no-JS safe).
+  (function () {
+    var nav = navigator;
+    var uad = nav.userAgentData;
+    var plat = (uad && uad.platform) || nav.platform || "";
+    var isWindows = /win/i.test(plat) || /windows/i.test(nav.userAgent || "");
+    if (!isWindows) return;
+    var btn = document.querySelector(".hero-cta__primary");
+    if (!btn) return;
+    btn.classList.remove("btn--primary");
+    btn.classList.add("btn--soon");
+    btn.removeAttribute("href");
+    btn.setAttribute("aria-disabled", "true");
+    var label = btn.querySelector(".btn-label span:last-child");
+    if (label) label.textContent = "Windows — coming soon";
   })();
 </script>
