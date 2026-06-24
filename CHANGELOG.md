@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.4.35](https://github.com/stuffbucket/maximal/compare/v0.4.34...v0.4.35) (2026-06-24)
+
+
+### Features
+
+* **shell:** warn to restart Claude Code when disabling routing on Windows ([c881305](https://github.com/stuffbucket/maximal/commit/c881305e69dd2af6b6e4dd76ae69f357b01acb20))
+* Windows tray parity + god-rays site redesign (v0.4.35) ([1164d79](https://github.com/stuffbucket/maximal/commit/1164d7989a64d24af24814624824e6ae8bdb868e))
+* Windows tray parity + god-rays site redesign (v0.4.35) ([#181](https://github.com/stuffbucket/maximal/issues/181)) ([1164d79](https://github.com/stuffbucket/maximal/commit/1164d7989a64d24af24814624824e6ae8bdb868e))
+
+
+### Bug Fixes
+
+* **auth:** prime models cache after device-flow sign-in ([#177](https://github.com/stuffbucket/maximal/issues/177)) ([8259883](https://github.com/stuffbucket/maximal/commit/8259883fdb35520b398bac11595289598191b458))
+* **shell:** show splash only once the webview has painted ([6fdb0fc](https://github.com/stuffbucket/maximal/commit/6fdb0fcb17d2202fb901852a1ed619a25702a094))
+* **shell:** windows startup notification — system tray + down arrow ([ba14174](https://github.com/stuffbucket/maximal/commit/ba14174c5bbade3c5fbd60f5b79e4befd64e157e))
+* **windows:** correct Claude Desktop 3P dir to %LOCALAPPDATA% + fix detection ([f010499](https://github.com/stuffbucket/maximal/commit/f0104990b4f9b81f3f9f6f36d40d3fd8ba6c797d))
+* **windows:** detect MSIX/Store Claude Desktop install ([aba5850](https://github.com/stuffbucket/maximal/commit/aba5850cedc8054d5475598c406e6453cd8ce3f1))
+
 ## [0.4.34](https://github.com/stuffbucket/maximal/compare/v0.4.33...v0.4.34) (2026-06-24)
 
 
