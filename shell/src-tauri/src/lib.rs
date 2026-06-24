@@ -49,6 +49,7 @@ use tauri::{
     ipc::Channel,
     menu::{IsMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    webview::PageLoadEvent,
     AppHandle, Emitter, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder,
     WindowEvent,
 };
@@ -660,21 +661,26 @@ pub fn run() {
             kill_sidecar(app_handle);
         }
         // macOS delivers Reopen when the app is re-activated — clicking its
-        // notification banner, its Dock icon, etc. Desktop notifications
-        // can't carry a routable button (the plugin's show() is
-        // fire-and-forget), so this is how the sign-in nudge's "click here"
-        // lands somewhere: if we're up but not signed in and nothing's on
-        // screen, bring up Settings → account.
+        // notification banner ("Maximal is running"), its Dock icon, etc.
+        // Desktop notifications can't carry a routable button (the plugin's
+        // show() is fire-and-forget), so Reopen is how a banner click lands
+        // somewhere: if nothing's on screen, open Settings. Route to the
+        // account section when we're up but not signed in (the sign-in
+        // nudge), otherwise plain Settings.
         #[cfg(target_os = "macos")]
         RunEvent::Reopen {
             has_visible_windows,
             ..
         } => {
-            if !has_visible_windows
-                && app_handle.state::<AppStatus>().get()
+            if !has_visible_windows {
+                let section = if app_handle.state::<AppStatus>().get()
                     == SidecarState::RunningUnauthenticated
-            {
-                open_settings_window(app_handle, Some("account"));
+                {
+                    Some("account")
+                } else {
+                    None
+                };
+                open_settings_window(app_handle, section);
             }
         }
         _ => {}
@@ -1406,6 +1412,18 @@ fn create_splash(app: &AppHandle) {
     .transparent(true)
     .always_on_top(true)
     .skip_taskbar(true)
+    // Build hidden and only show once the webview reports the DOM has
+    // loaded. On Windows/WebView2 the native surface is presented before
+    // the compositor draws its first frame, so a visible-from-launch
+    // transparent window shows an empty outline for hundreds of ms–seconds
+    // before the brand-red `.splash` div pops in. macOS/WKWebView paints in
+    // lockstep with show, so this fires immediately there — no regression.
+    .visible(false)
+    .on_page_load(|window, payload| {
+        if payload.event() == PageLoadEvent::Finished {
+            let _ = window.show();
+        }
+    })
     .center()
     .build();
     match result {
@@ -1483,11 +1501,19 @@ fn dismiss_splash(app: &AppHandle) {
 /// denial or a dev (`cargo run`) no-op must not matter.
 fn fire_startup_notification(app: &AppHandle) {
     use tauri_plugin_notification::NotificationExt;
+    // Where the icon lives — and which way to point — is platform-specific:
+    // macOS puts it in the top menu bar (↑); Windows puts it in the
+    // bottom-right system tray (↓). Leave the macOS copy exactly as-is.
+    let body = if cfg!(target_os = "macos") {
+        "Look for the Maximal icon in your menu bar ↑"
+    } else {
+        "Maximal is running in your system tray ↓"
+    };
     if let Err(err) = app
         .notification()
         .builder()
         .title("Maximal is running")
-        .body("Look for the Maximal icon in your menu bar ↑")
+        .body(body)
         .show()
     {
         eprintln!("[shell] startup notification failed: {err}");

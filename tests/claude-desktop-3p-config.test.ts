@@ -50,35 +50,37 @@ function topConfig(): Record<string, unknown> {
 }
 
 describe("getClaude3pDir — Windows (platform injected)", () => {
-  let savedAppData: string | undefined
+  let savedLocalAppData: string | undefined
 
   beforeEach(() => {
-    savedAppData = process.env.APPDATA
+    savedLocalAppData = process.env.LOCALAPPDATA
   })
 
   afterEach(() => {
-    if (savedAppData === undefined) delete process.env.APPDATA
-    else process.env.APPDATA = savedAppData
+    if (savedLocalAppData === undefined) delete process.env.LOCALAPPDATA
+    else process.env.LOCALAPPDATA = savedLocalAppData
   })
 
-  it("targets %APPDATA%/Claude-3p (the -3p suffix, in Roaming)", () => {
-    process.env.APPDATA = path.join(home, "AppData", "Roaming")
+  it("targets %LOCALAPPDATA%/Claude-3p (the -3p suffix, in Local — not Roaming)", () => {
+    process.env.LOCALAPPDATA = path.join(home, "AppData", "Local")
     const dir = getClaude3pDir(home, "win32")
-    // The -3p suffix is what the Cowork-3P build reads; the historically-
-    // wrong target was the standard-mode `…\Claude\` (no -3p suffix).
-    expect(dir).toBe(path.join(home, "AppData", "Roaming", "Claude-3p"))
+    // Anthropic's docs locate the 3P configLibrary under Local AppData, not
+    // Roaming. This diverges from the consumer `claude_desktop_config.json`
+    // (which IS under Roaming %APPDATA%\Claude) — on Windows the two halves
+    // live on different drives, unlike macOS.
+    expect(dir).toBe(path.join(home, "AppData", "Local", "Claude-3p"))
     expect(path.basename(dir)).toBe("Claude-3p")
     // configLibrary is the subdir the applied inference profile lands in.
     const lib = path.join(dir, "configLibrary")
     expect(lib).toBe(
-      path.join(home, "AppData", "Roaming", "Claude-3p", "configLibrary"),
+      path.join(home, "AppData", "Local", "Claude-3p", "configLibrary"),
     )
   })
 
-  it("falls back to ~/AppData/Roaming/Claude-3p when %APPDATA% is unset", () => {
-    delete process.env.APPDATA
+  it("falls back to ~/AppData/Local/Claude-3p when %LOCALAPPDATA% is unset", () => {
+    delete process.env.LOCALAPPDATA
     const dir = getClaude3pDir(home, "win32")
-    expect(dir).toBe(path.join(home, "AppData", "Roaming", "Claude-3p"))
+    expect(dir).toBe(path.join(home, "AppData", "Local", "Claude-3p"))
   })
 
   it("still resolves the macOS path when platform is darwin", () => {

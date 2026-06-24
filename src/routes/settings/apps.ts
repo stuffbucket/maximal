@@ -16,8 +16,8 @@
 import type { Context } from "hono"
 
 import { Hono } from "hono"
-import fs from "node:fs"
 
+import { claudeAppInstalled } from "~/configure-claude-desktop"
 import {
   type ClaudeInstall,
   detectClaudeInstalls,
@@ -29,7 +29,6 @@ import {
 } from "~/lib/claude-code-settings"
 import {
   applyConfigLibraryProfile,
-  getClaude3pDir,
   isConfigLibraryApplied,
   revertConfigLibraryProfile,
 } from "~/lib/claude-desktop-3p-config"
@@ -52,13 +51,6 @@ const CLAUDE_CODE_INSTALL_COMMAND =
  *  surfaces a clean `{ error: { message } }` at the given status. */
 function httpError(message: string, status: number): HTTPError {
   return new HTTPError(message, new Response(message, { status }))
-}
-
-/** Is Claude Desktop present? True when the macOS app bundle is installed
- *  or its third-party (Claude-3p) userData dir exists. */
-function claudeDesktopInstalled(): boolean {
-  if (fs.existsSync("/Applications/Claude.app")) return true
-  return fs.existsSync(getClaude3pDir())
 }
 
 function buildClaudeCodeApp(
@@ -92,7 +84,7 @@ function buildClaudeCodeApp(
 }
 
 function buildClaudeDesktopApp(): AppEntryT {
-  const installed = claudeDesktopInstalled()
+  const installed = claudeAppInstalled()
   const configured = isConfigLibraryApplied()
   return {
     id: "claude-desktop",
