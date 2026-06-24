@@ -59,20 +59,25 @@ describe("windows installer template", () => {
     expect(ps).toContain(String.raw`Programs\maximal`)
   })
 
-  it("registers an at-logon scheduled task named maximal", () => {
-    const ps = read(SCRIPT)
-    expect(ps).toContain("$TaskName     = 'maximal'")
-    expect(ps).toContain("New-ScheduledTaskTrigger -AtLogOn")
-    expect(ps).toContain("Register-ScheduledTask")
-  })
-
-  it("invokes setup --unattended --skip-auth", () => {
-    const ps = read(SCRIPT)
-    expect(ps).toContain("setup --unattended --skip-auth")
-  })
-
   it("adds the install dir to user PATH", () => {
     const ps = read(SCRIPT)
     expect(ps).toMatch(/SetEnvironmentVariable\(\s*'PATH'.*'User'/s)
+  })
+
+  it("registers an Add/Remove Programs entry", () => {
+    const ps = read(SCRIPT)
+    expect(ps).toContain("Register-ArpEntry")
+    expect(ps).toContain(String.raw`CurrentVersion\Uninstall\maximal`)
+  })
+
+  // CLI-only: the tray app (NSIS installer) owns running the proxy,
+  // auto-start, and first-run setup. The CLI installer must NOT register a
+  // scheduled task, run setup, or drop a Start Menu shortcut.
+  it("does NOT register a scheduled task, run setup, or make a shortcut", () => {
+    const ps = read(SCRIPT)
+    expect(ps).not.toContain("Register-ScheduledTask")
+    expect(ps).not.toContain("New-ScheduledTaskTrigger")
+    expect(ps).not.toContain("setup --unattended")
+    expect(ps).not.toContain("CreateShortcut")
   })
 })

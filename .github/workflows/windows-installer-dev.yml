@@ -144,7 +144,7 @@ jobs:
       - name: Install WiX
         shell: pwsh
         run: |
-          dotnet tool install --global wix --version 5.*
+          dotnet tool install --global wix --version 5.0.2
           $userBin = Join-Path $env:USERPROFILE '.dotnet\tools'
           echo $userBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           & "$userBin\wix.exe" --version
@@ -158,6 +158,7 @@ jobs:
           $msiVersion = ($env:VERSION -split '-')[0]
           $out = "dist-release\maximal-v${env:VERSION}-windows-x64.msi"
           New-Item -ItemType Directory -Path dist-release -Force | Out-Null
+          # CLI-only MSI: no WiX extensions needed.
           wix build build\windows\maximal.wxs `
             -d "Version=$msiVersion" `
             -arch x64 `
@@ -199,6 +200,12 @@ jobs:
           $marker = Get-ItemPropertyValue 'HKCU:\Software\stuffbucket\maximal' 'installed' -ErrorAction SilentlyContinue
           if ($marker -ne 1) { throw "HKCU marker Software\stuffbucket\maximal\installed != 1 (got '$marker')" }
 
+          # CLI-only MSI: it must NOT register a scheduled task (the tray app
+          # owns auto-start now). Assert the task is absent.
+          if (Get-ScheduledTask -TaskName 'maximal' -ErrorAction SilentlyContinue) {
+            throw "CLI MSI should NOT register a scheduled task, but 'maximal' exists"
+          }
+
           $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
           if ($userPath -notlike '*Programs\maximal*') {
             Write-Warning "install dir not found in user PATH (non-fatal): $userPath"
@@ -218,6 +225,70 @@ jobs:
             if ($null -eq $j.$k) { throw "Missing top-level key in debug --json: $k" }
           }
           Write-Host "installed binary debug --json OK (version=$($j.version))"
+
+      # Prove the installed binary yields a *running* proxy, not just a
+      # binary that prints JSON. The CLI MSI doesn't auto-start anything
+      # (the tray app owns that), so start it directly with `maximal start`
+      # in the background, then poll the unauthenticated /setup-status
+      # endpoint for a 200 + JSON. boot is auth-free (bootstrapUpstream
+      # never fires device-code), so this serves with no GitHub token.
+      - name: Start proxy + assert it serves
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Join-Path $env:LOCALAPPDATA 'Programs\maximal\maximal.exe'
+          Start-Process -FilePath $exe -ArgumentList 'start' -WindowStyle Hidden
+          $served = $false
+          foreach ($i in 1..40) {
+            try {
+              $r = Invoke-WebRequest 'http://127.0.0.1:4141/setup-status' `
+                -UseBasicParsing -TimeoutSec 2
+              if ($r.StatusCode -eq 200) {
+                $body = $r.Content
+                $null = $body | ConvertFrom-Json   # must be valid JSON
+                Write-Host "msi proxy is SERVING /setup-status (200): $body"
+                $served = $true; break
+              }
+            } catch { Start-Sleep -Seconds 1 }
+          }
+          if (-not $served) {
+            Write-Error "proxy never served http://127.0.0.1:4141/setup-status after MSI install"
+            exit 1
+          }
+
+      - name: Capture proxy logs (msi)
+        if: always()
+        shell: pwsh
+        run: |
+          # The proxy writes its app-data (logs/) under %APPDATA%\maximal on
+          # Windows now (src/lib/paths.ts resolveAppDir win32 branch), kept in
+          # lockstep with the shell's maximal_data_dir() and the WiX/ps1 model.
+          $dir = Join-Path $env:APPDATA 'maximal'
+          New-Item -ItemType Directory -Force -Path msi-proxy-logs | Out-Null
+          if (Test-Path $dir) {
+            Get-ChildItem -Path $dir -Recurse -Include *.log,*.txt,*.json `
+              -ErrorAction SilentlyContinue |
+              ForEach-Object { Copy-Item $_.FullName msi-proxy-logs -ErrorAction SilentlyContinue }
+          }
+          Get-ChildItem msi-proxy-logs -ErrorAction SilentlyContinue
+
+      - name: Upload proxy logs (msi)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: msi-proxy-logs
+          path: msi-proxy-logs
+          if-no-files-found: ignore
+
+      # Stop the proxy before uninstall so the .exe file lock releases
+      # (StopRunningMaximal also kills it, but releasing first avoids the
+      # MSI "files in use" path entirely).
+      - name: Stop proxy before uninstall
+        shell: pwsh
+        run: |
+          Get-Process -Name 'maximal' -ErrorAction SilentlyContinue |
+            Stop-Process -Force -ErrorAction SilentlyContinue
+          Start-Sleep -Seconds 2
 
       - name: Uninstall MSI silently
         shell: pwsh
@@ -299,8 +370,9 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $exe = Join-Path $env:LOCALAPPDATA 'Programs\maximal\maximal.exe'
           if (-not (Test-Path $exe)) { throw "maximal.exe missing at $exe" }
-          if (-not (Get-ScheduledTask -TaskName 'maximal' -ErrorAction SilentlyContinue)) {
-            throw "scheduled task 'maximal' not registered"
+          # CLI-only: install.ps1 must NOT register a scheduled task.
+          if (Get-ScheduledTask -TaskName 'maximal' -ErrorAction SilentlyContinue) {
+            throw "CLI install.ps1 should NOT register a scheduled task, but 'maximal' exists"
           }
           $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
           if ($userPath -notlike '*Programs\maximal*') {
@@ -316,6 +388,67 @@ jobs:
           $j = & $exe debug --json | ConvertFrom-Json
           if ($null -eq $j.version) { throw "debug --json missing 'version'" }
           Write-Host "ps1 installed binary debug --json OK (version=$($j.version))"
+
+      # The CLI install.ps1 doesn't auto-start anything (the tray app owns
+      # that), so start the proxy directly and prove it SERVES: poll the
+      # unauthenticated /setup-status endpoint for a 200 + JSON.
+      - name: Assert ps1 proxy serves
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Join-Path $env:LOCALAPPDATA 'Programs\maximal\maximal.exe'
+          Start-Process -FilePath $exe -ArgumentList 'start' -WindowStyle Hidden
+          $served = $false
+          foreach ($i in 1..40) {
+            try {
+              $r = Invoke-WebRequest 'http://127.0.0.1:4141/setup-status' `
+                -UseBasicParsing -TimeoutSec 2
+              if ($r.StatusCode -eq 200) {
+                $null = $r.Content | ConvertFrom-Json
+                Write-Host "ps1 proxy is SERVING /setup-status (200): $($r.Content)"
+                $served = $true; break
+              }
+            } catch { Start-Sleep -Seconds 1 }
+          }
+          if (-not $served) {
+            Write-Error "proxy never served http://127.0.0.1:4141/setup-status after install.ps1"
+            exit 1
+          }
+
+      # CLI-only: ARP entry yes, Start Menu shortcut no.
+      - name: Assert ps1 ARP entry (and no shortcut)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $lnk = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\maximal\maximal setup.lnk'
+          if (Test-Path $lnk) { throw "CLI install.ps1 should NOT create a Start Menu shortcut: $lnk" }
+          $arp = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\maximal'
+          if (-not (Test-Path $arp)) { throw "ARP entry missing: $arp" }
+          $name = Get-ItemPropertyValue $arp 'DisplayName'
+          if ($name -ne 'maximal') { throw "ARP DisplayName != maximal (got '$name')" }
+          Write-Host "ps1 ARP entry OK (no shortcut)"
+
+      - name: Capture proxy logs (ps1)
+        if: always()
+        shell: pwsh
+        run: |
+          # %APPDATA%\maximal on Windows (resolveAppDir win32 branch).
+          $dir = Join-Path $env:APPDATA 'maximal'
+          New-Item -ItemType Directory -Force -Path ps1-proxy-logs | Out-Null
+          if (Test-Path $dir) {
+            Get-ChildItem -Path $dir -Recurse -Include *.log,*.txt,*.json `
+              -ErrorAction SilentlyContinue |
+              ForEach-Object { Copy-Item $_.FullName ps1-proxy-logs -ErrorAction SilentlyContinue }
+          }
+          Get-ChildItem ps1-proxy-logs -ErrorAction SilentlyContinue
+
+      - name: Upload proxy logs (ps1)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ps1-proxy-logs
+          path: ps1-proxy-logs
+          if-no-files-found: ignore
 
       - name: Cleanup
         if: always()

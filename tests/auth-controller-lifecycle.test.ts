@@ -65,6 +65,7 @@ const realGetDeviceCodeModule =
   await import("~/services/github/get-device-code")
 const realGetUserModule = await import("~/services/github/get-user")
 const realTokenModule = await import("~/lib/token")
+const realUtilsModule = await import("~/lib/utils")
 const realFsPromisesModule = await import("node:fs/promises")
 
 void mock.module("~/services/github/get-device-code", () => ({
@@ -82,6 +83,15 @@ void mock.module("~/lib/token", () => ({
   },
   // markAuthDegraded calls this to halt the refresh loop; no-op in unit tests.
   stopCopilotRefreshLoop: () => {},
+}))
+
+// Sign-in now primes the models cache (cacheModels) after minting the
+// Copilot token. Stub it so completing a device flow doesn't make a real
+// Copilot /models fetch; spread the real namespace so the other utils
+// exports survive.
+void mock.module("~/lib/utils", () => ({
+  ...realUtilsModule,
+  cacheModels: () => Promise.resolve(),
 }))
 
 // Spread the real namespace so `readFile` / `writeFile` / etc. survive
@@ -109,6 +119,7 @@ afterAll(() => {
   )
   void mock.module("~/services/github/get-user", () => realGetUserModule)
   void mock.module("~/lib/token", () => realTokenModule)
+  void mock.module("~/lib/utils", () => realUtilsModule)
   void mock.module("node:fs/promises", () => realFsPromisesModule)
 })
 

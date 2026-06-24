@@ -1,11 +1,16 @@
 # maximal Windows installer (B3a).
 #
-# Self-contained PowerShell installer. Downloads the latest signed
+# Self-contained PowerShell installer for the maximal CLI. Downloads the
 # release zip from GitHub Releases (or a specific tag with -Version),
-# verifies SHA-256, unpacks under %LocalAppData%\Programs\maximal,
-# adds that directory to the user's PATH, registers an at-logon
-# scheduled task that starts the proxy, and runs `maximal setup
-# --unattended --skip-auth` for the Claude Desktop config touches.
+# verifies SHA-256, unpacks under %LocalAppData%\Programs\maximal, adds
+# that directory to the user's PATH, and registers an Add/Remove Programs
+# entry.
+#
+# CLI-ONLY: it does NOT register a scheduled task, run `maximal setup`, or
+# create a Start Menu shortcut. The Tauri tray app (the NSIS installer,
+# maximal-<ver>-windows-x64-setup.exe) is the canonical Windows experience
+# and owns running the proxy, auto-start, and first-run setup — like the
+# macOS menu-bar app. This installer just puts `maximal` on PATH.
 #
 # v1 ships unsigned (A4 deferred per parent PRD). On first launch
 # Windows SmartScreen will warn — the Pages site (B4) carries the
@@ -47,8 +52,10 @@ if (-not $Repo) {
 
 $InstallDir   = Join-Path $env:LOCALAPPDATA 'Programs\maximal'
 $BinPath      = Join-Path $InstallDir 'maximal.exe'
-$TaskName     = 'maximal'
 $DownloadDir  = Join-Path $env:TEMP "maximal-install-$(Get-Random)"
+# ARP key kept in lock-step with the MSI (build/windows/maximal.wxs) so
+# both CLI installers leave an Add/Remove Programs entry.
+$ArpKey       = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\maximal'
 
 function Resolve-LatestVersion {
   param([string]$Repo)
@@ -95,29 +102,23 @@ function Add-UserPath {
   $env:Path = "$env:Path;$Dir"
 }
 
-function Register-StartupTask {
-  param([string]$ExePath, [string]$TaskName)
-  # Re-register idempotently so re-runs of the installer pick up a
-  # new binary path or argument set without leaving the old task in
-  # place.
-  if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
-    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
-  }
-  $action   = New-ScheduledTaskAction -Execute $ExePath -Argument 'start'
-  $trigger  = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
-  $settings = New-ScheduledTaskSettingsSet `
-    -AllowStartIfOnBatteries `
-    -DontStopIfGoingOnBatteries `
-    -StartWhenAvailable `
-    -ExecutionTimeLimit ([TimeSpan]::Zero) # no kill timeout
-  Register-ScheduledTask `
-    -TaskName $TaskName `
-    -Action $action `
-    -Trigger $trigger `
-    -Settings $settings `
-    -Description 'Run maximal at user logon' `
-    | Out-Null
-  Write-Host "  ✓ Registered scheduled task '$TaskName' (triggers at logon)" -ForegroundColor Green
+function Register-ArpEntry {
+  param([string]$InstallDir, [string]$ExePath, [string]$Version, [string]$ArpKey)
+  # Add/Remove Programs entry so `maximal` shows up in
+  # "Apps & features" and uninstall is discoverable — parity with the
+  # MSI's ARP row. UninstallString points at `maximal uninstall`, the
+  # CLI's own teardown (removes PATH + task + files).
+  $ver = $Version.TrimStart('v')
+  New-Item -Path $ArpKey -Force | Out-Null
+  Set-ItemProperty -Path $ArpKey -Name 'DisplayName'     -Value 'maximal'
+  Set-ItemProperty -Path $ArpKey -Name 'DisplayVersion'  -Value $ver
+  Set-ItemProperty -Path $ArpKey -Name 'Publisher'       -Value 'stuffbucket'
+  Set-ItemProperty -Path $ArpKey -Name 'InstallLocation' -Value $InstallDir
+  Set-ItemProperty -Path $ArpKey -Name 'DisplayIcon'     -Value $ExePath
+  Set-ItemProperty -Path $ArpKey -Name 'UninstallString' -Value "`"$ExePath`" uninstall"
+  Set-ItemProperty -Path $ArpKey -Name 'NoModify' -Value 1 -Type DWord
+  Set-ItemProperty -Path $ArpKey -Name 'NoRepair' -Value 1 -Type DWord
+  Write-Host "  ✓ Registered Add/Remove Programs entry" -ForegroundColor Green
 }
 
 # ─────────────────────────────────────────────────────────────────────
@@ -153,12 +154,8 @@ Download-File -Url $zipUrl -Dest $zipPath
 Download-File -Url $shaUrl -Dest $shaPath
 Verify-Sha256 -File $zipPath -ExpectedSha256File $shaPath
 
-# 2. Stop any running scheduled task before replacing the binary ─────
-if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
-  Write-Host 'Stopping existing scheduled task ...' -ForegroundColor Cyan
-  Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-}
-# Best-effort process termination if a previous run is still up.
+# 2. Best-effort process termination if a previous copy is still up, so
+#    the file lock releases before we overwrite the binary.
 Get-Process -Name 'maximal' -ErrorAction SilentlyContinue | ForEach-Object {
   $_ | Stop-Process -Force -ErrorAction SilentlyContinue
 }
@@ -173,27 +170,16 @@ if (-not (Test-Path $BinPath)) {
 }
 Write-Host "  ✓ Installed $BinPath" -ForegroundColor Green
 
-# 4. PATH + scheduled task ──────────────────────────────────────────
+# 4. PATH + Add/Remove Programs entry ───────────────────────────────
 Add-UserPath -Dir $InstallDir
-Register-StartupTask -ExePath $BinPath -TaskName $TaskName
+Register-ArpEntry -InstallDir $InstallDir -ExePath $BinPath -Version $Version -ArpKey $ArpKey
 
-# 5. Start it now (so the user doesn't have to log out/in) ──────────
-Start-ScheduledTask -TaskName $TaskName
-
-# 6. Setup wizard in unattended mode ────────────────────────────────
-Write-Host 'Running first-run setup ...' -ForegroundColor Cyan
-& $BinPath setup --unattended --skip-auth
-if ($LASTEXITCODE -ne 0) {
-  Write-Host "  Setup returned non-zero ($LASTEXITCODE); continuing anyway." -ForegroundColor Yellow
-}
-
-# 7. Cleanup tempdir ────────────────────────────────────────────────
+# 5. Cleanup tempdir ────────────────────────────────────────────────
 Remove-Item -LiteralPath $DownloadDir -Recurse -Force -ErrorAction SilentlyContinue
 
 Write-Host ''
 Write-Host 'Install complete.' -ForegroundColor Green
-Write-Host '  Run `maximal setup` once from a NEW PowerShell window'
-Write-Host '  to authenticate with GitHub (the device-code flow needs an'
-Write-Host '  interactive shell, which this installer does not provide).'
-Write-Host '  PATH is updated for the next shell; current shell already'
-Write-Host '  has the install dir prepended.'
+Write-Host '  `maximal` is on your PATH (open a NEW shell to pick it up).'
+Write-Host '  For the menu-bar/tray app + guided setup, install the Windows'
+Write-Host '  app (maximal-<version>-windows-x64-setup.exe). To use just the'
+Write-Host '  CLI, run `maximal setup` to authenticate with GitHub.'

@@ -93,12 +93,38 @@ export function gatewayProfile(
   }
 }
 
-/** Resolve the 3P userData directory. Mirrors Electron's `userData`
- *  base (`<AppSupport>/Claude`) with the build's `-3p` suffix. */
-export function getClaude3pDir(home: string = os.homedir()): string {
-  if (process.platform === "win32") {
-    const appData = process.env.APPDATA ?? path.join(home, "AppData", "Roaming")
-    return path.join(appData, `Claude${USERDATA_3P_SUFFIX}`)
+/**
+ * Resolve the 3P userData directory. Mirrors Electron's `userData` base
+ * (`<userData>/Claude`) with the build's `-3p` suffix, so the config lands
+ * where the Cowork-3P build actually reads it:
+ *
+ *   - macOS:   `~/Library/Application Support/Claude-3p`
+ *   - Windows: `%LOCALAPPDATA%\Claude-3p`  (Anthropic's docs locate the 3P
+ *              `configLibrary` under Local AppData, NOT Roaming. Note this
+ *              diverges from the consumer `claude_desktop_config.json`, which
+ *              IS under Roaming `%APPDATA%\Claude` — on Windows the two halves
+ *              live on different drives, unlike macOS where both share
+ *              `~/Library/Application Support`.)
+ *
+ * The `configLibrary/` subdir (added by callers) is where the applied
+ * inference profile lives; the historically-wrong target was the standard-
+ * mode `…\Claude\claude_desktop_config.json` (no `-3p`), which the 3P build
+ * ignores. `platform` is injectable so the Windows branch is unit-testable
+ * on a POSIX host.
+ *
+ * NOTE: an MSIX/Store install virtualizes this under
+ * `%LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\LocalState\Claude-3p`; this
+ * returns the plain `.exe`-install path (the common case). See
+ * docs/spec / the Claude-Desktop-3P memory for the MSIX wrinkle.
+ */
+export function getClaude3pDir(
+  home: string = os.homedir(),
+  platform: NodeJS.Platform = process.platform,
+): string {
+  if (platform === "win32") {
+    const localAppData =
+      process.env.LOCALAPPDATA ?? path.join(home, "AppData", "Local")
+    return path.join(localAppData, `Claude${USERDATA_3P_SUFFIX}`)
   }
   return path.join(
     home,

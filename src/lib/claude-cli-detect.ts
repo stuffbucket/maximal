@@ -109,6 +109,47 @@ export interface DetectOptions {
   npmPrefix?: string | null
   /** Injectable version reader so tests don't exec real binaries. */
   readVersion?: (binPath: string) => string | null
+  /** Override `process.platform` so tests can exercise the Windows code
+   *  paths on a POSIX host (and vice-versa). Defaults to the real platform. */
+  platform?: NodeJS.Platform
+}
+
+/** Basenames a `claude` install can take in a directory, most-specific
+ *  first. On POSIX it's just `claude`. On Windows an install can be a
+ *  native `claude.exe`, an npm shim `claude.cmd` / `claude.ps1`, or a bare
+ *  `claude` (the extension-less symlink npm also drops). We check each so an
+ *  npm-global `claude.cmd` is found even though it has no `.exe`. */
+function claudeBasenames(platform: NodeJS.Platform): Array<string> {
+  if (platform === "win32") {
+    return ["claude.exe", "claude.cmd", "claude.ps1", "claude"]
+  }
+  return ["claude"]
+}
+
+/** The first existing `claude*` candidate in `probe.dir`, inspected; or
+ *  null. Tries each `ctx.basenames` entry in priority order (`.exe` before
+ *  `.cmd` before bare). Used for both the PATH walk and fixed-dir probes so
+ *  a Windows npm shim or native `.exe` is found where POSIX only has
+ *  `claude`. */
+function inspectDir(
+  probe: { dir: string; origin: ClaudeInstallSource },
+  ctx: {
+    home: string
+    npmBin: string | null
+    readVersion: (binPath: string) => string | null
+    seen: Set<string>
+    isWin: boolean
+    basenames: Array<string>
+  },
+): ClaudeInstall | null {
+  for (const base of ctx.basenames) {
+    const inst = inspectCandidate(
+      { raw: path.join(probe.dir, base), origin: probe.origin },
+      ctx,
+    )
+    if (inst) return inst
+  }
+  return null
 }
 
 function defaultPathDirs(): Array<string> {
@@ -197,9 +238,14 @@ interface Candidate {
 
 function classifySource(
   resolved: string,
-  ctx: { origin: ClaudeInstallSource; home: string; npmBin: string | null },
+  ctx: {
+    origin: ClaudeInstallSource
+    home: string
+    npmBin: string | null
+    isWin: boolean
+  },
 ): ClaudeInstallSource {
-  const { origin } = ctx
+  const { origin, isWin } = ctx
   const sep = path.sep
   // `resolved` is symlink-resolved (fs.realpathSync). Resolve the prefixes
   // the same way before comparing, otherwise a symlinked home (e.g. macOS
@@ -207,10 +253,15 @@ function classifySource(
   // startsWith() silently miss and the install gets mislabeled "path".
   const home = realpathOrSelf(ctx.home)
   const npmBin = ctx.npmBin === null ? null : realpathOrSelf(ctx.npmBin)
-  if (resolved.startsWith(path.join(home, ".claude") + sep)) {
+  // Windows paths are case-insensitive; lowercase both sides of every
+  // prefix compare so e.g. `C:\Users\X\.local` matches `c:\users\x\.local`.
+  const norm = (p: string): string => (isWin ? p.toLowerCase() : p)
+  const res = norm(resolved)
+  const startsWith = (prefix: string): boolean => res.startsWith(norm(prefix))
+  if (startsWith(path.join(home, ".claude") + sep)) {
     return "claude-local"
   }
-  if (resolved.startsWith(path.join(home, ".local", "bin") + sep)) {
+  if (startsWith(path.join(home, ".local", "bin") + sep)) {
     return "local-bin"
   }
   // Honour a specific discovery origin (npm/homebrew) before falling
@@ -219,12 +270,14 @@ function classifySource(
   if (origin !== "path") {
     return origin
   }
-  if (npmBin && resolved.startsWith(npmBin + sep)) {
+  if (npmBin && startsWith(npmBin + sep)) {
     return "npm-global"
   }
+  // POSIX-only Homebrew prefixes (these dirs don't exist on Windows).
   if (
-    resolved.startsWith("/opt/homebrew/")
-    || resolved.startsWith("/usr/local/")
+    !isWin
+    && (resolved.startsWith("/opt/homebrew/")
+      || resolved.startsWith("/usr/local/"))
   ) {
     return "homebrew"
   }
@@ -243,6 +296,7 @@ function inspectCandidate(
     npmBin: string | null
     readVersion: (binPath: string) => string | null
     seen: Set<string>
+    isWin: boolean
   },
 ): ClaudeInstall | null {
   let stat: fs.Stats
@@ -277,6 +331,7 @@ function inspectCandidate(
       origin: candidate.origin,
       home: ctx.home,
       npmBin: ctx.npmBin,
+      isWin: ctx.isWin,
     }),
   }
 }
@@ -303,49 +358,68 @@ export function detectClaudeInstalls(
   const home = options.homeDir ?? os.homedir()
   const pathDirs = options.pathDirs ?? defaultPathDirs()
   const readVersion = options.readVersion ?? readClaudeVersion
+  const platform = options.platform ?? process.platform
+  const isWin = platform === "win32"
+  const basenames = claudeBasenames(platform)
   const seen = new Set<string>()
+
+  // The npm-global *bin* dir holding the `claude` launcher differs by
+  // platform: POSIX puts it in `<prefix>/bin`, but on Windows npm drops
+  // `claude.cmd` directly in the prefix (`%APPDATA%\npm`) with no `bin/`.
+  const npmBinOf = (prefix: string): string =>
+    isWin ? prefix : path.join(prefix, "bin")
 
   // Phase 1: active claude on PATH. Only honour an EXPLICIT npmPrefix for
   // classification here — never probe (that's the cost we're avoiding).
   const explicitNpm = options.npmPrefix
   const phase1NpmBin =
-    typeof explicitNpm === "string" ? path.join(explicitNpm, "bin") : null
+    typeof explicitNpm === "string" ? npmBinOf(explicitNpm) : null
   for (const dir of pathDirs) {
-    const inst = inspectCandidate(
-      { raw: path.join(dir, "claude"), origin: "path" },
-      { home, npmBin: phase1NpmBin, readVersion, seen },
+    const inst = inspectDir(
+      { dir, origin: "path" },
+      { home, npmBin: phase1NpmBin, readVersion, seen, isWin, basenames },
     )
     if (inst) return [inst]
   }
 
   // Phase 2: nothing active on PATH — probe known locations + npm-global.
   const npmPrefix = explicitNpm === undefined ? defaultNpmPrefix() : explicitNpm
-  const npmBin = npmPrefix ? path.join(npmPrefix, "bin") : null
-  const fallback: Array<Candidate> = [
-    { raw: "/opt/homebrew/bin/claude", origin: "homebrew" },
-    { raw: "/usr/local/bin/claude", origin: "homebrew" },
-    { raw: path.join(home, ".local", "bin", "claude"), origin: "local-bin" },
-    {
-      raw: path.join(home, ".claude", "local", "claude"),
-      origin: "claude-local",
-    },
-    {
-      raw: path.join(home, ".claude", "bin", "claude"),
-      origin: "claude-local",
-    },
-    { raw: path.join(home, ".claude", "claude"), origin: "claude-local" },
-  ]
+  const npmBin = npmPrefix ? npmBinOf(npmPrefix) : null
+
+  // Known install *dirs*, each tried against every platform basename. The
+  // Homebrew prefixes are POSIX-only (those paths don't exist on Windows).
+  // The native installer (`~/.local/bin`) and `~/.claude/*` are shared:
+  // on Windows the native installer writes `~/.local/bin/claude.exe`, which
+  // `claudeBasenames` covers.
+  const probeDirs: Array<{ dir: string; origin: ClaudeInstallSource }> = []
+  if (!isWin) {
+    // Homebrew prefixes are POSIX-only — these dirs don't exist on Windows.
+    probeDirs.push(
+      { dir: "/opt/homebrew/bin", origin: "homebrew" },
+      { dir: "/usr/local/bin", origin: "homebrew" },
+    )
+  }
+  // Shared: on Windows the native installer writes `~/.local/bin/claude.exe`,
+  // which `claudeBasenames` covers.
+  probeDirs.push(
+    { dir: path.join(home, ".local", "bin"), origin: "local-bin" },
+    { dir: path.join(home, ".claude", "local"), origin: "claude-local" },
+    { dir: path.join(home, ".claude", "bin"), origin: "claude-local" },
+    { dir: path.join(home, ".claude"), origin: "claude-local" },
+  )
   if (npmBin) {
-    fallback.push({ raw: path.join(npmBin, "claude"), origin: "npm-global" })
+    probeDirs.push({ dir: npmBin, origin: "npm-global" })
   }
 
   const installs: Array<ClaudeInstall> = []
-  for (const candidate of fallback) {
-    const inst = inspectCandidate(candidate, {
+  for (const probe of probeDirs) {
+    const inst = inspectDir(probe, {
       home,
       npmBin,
       readVersion,
       seen,
+      isWin,
+      basenames,
     })
     if (inst) installs.push(inst)
   }

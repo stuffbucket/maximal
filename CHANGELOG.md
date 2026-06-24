@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.4.34](https://github.com/stuffbucket/maximal/compare/v0.4.33...v0.4.34) (2026-06-24)
+
+
+### Bug Fixes
+
+* **windows:** slim CLI installers to binary-on-PATH; verify tray launcher ([#176](https://github.com/stuffbucket/maximal/issues/176)) ([db06e44](https://github.com/stuffbucket/maximal/commit/db06e445d1507321448e5c2f23a5c17341c2e05f))
+
+## [0.4.33](https://github.com/stuffbucket/maximal/compare/v0.4.32...v0.4.33) (2026-06-24)
+
+
+### Features
+
+* **update:** add beta manifest channel ([5b4fb02](https://github.com/stuffbucket/maximal/commit/5b4fb028ebe243952347dfd0475ce214b461eb5c))
+* **update:** drive the update channel from the build's MAXIMAL_CHANNEL ([#166](https://github.com/stuffbucket/maximal/issues/166)) ([ae0ca68](https://github.com/stuffbucket/maximal/commit/ae0ca687003c89f171aa03efc97e9e06d4140c3a))
+* **windows:** functional parity with macOS — tray app, %APPDATA% paths, Claude discovery, fixed installers ([#172](https://github.com/stuffbucket/maximal/issues/172)) ([708568c](https://github.com/stuffbucket/maximal/commit/708568cba4a3911d00ac09fef73f3640eda3b392))
+
+
+### Bug Fixes
+
+* **dev:** self-heal the ui-embed stub so fresh worktrees pass the gates ([#161](https://github.com/stuffbucket/maximal/issues/161)) ([baff99e](https://github.com/stuffbucket/maximal/commit/baff99e29b01e3b05901f7a9b5220a880b07b402))
+* **update:** compare prerelease versions ([45e63fc](https://github.com/stuffbucket/maximal/commit/45e63fc03329b5beb97977f64712ef4ae1bce41b))
+
 ## [0.4.32](https://github.com/stuffbucket/maximal/compare/v0.4.31...v0.4.32) (2026-06-22)
 
 

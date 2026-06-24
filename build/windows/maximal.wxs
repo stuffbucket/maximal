@@ -1,36 +1,30 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Per-user MSI for maximal.
+  Per-user, CLI-only MSI for the maximal command-line binary.
 
   WiX 4 / 5 syntax. Built in CI on windows-2022 via:
 
     dotnet tool install (global) wix
     wix build build/windows/maximal.wxs (with) -d Version=x.y.z -arch x64 -o output.msi
 
-  XML comments can't contain consecutive dashes, so flag prose is
-  paraphrased; see installers.yml for the real invocation.
+  The minted MSI:
 
-  No third-party GitHub Action involved: `dotnet` is preinstalled on
-  the runner image, and WiX is a dotnet tool. The minted MSI:
-
-    - Installs to %LocalAppData%\Programs\maximal (per-user; no
-      UAC prompt, no admin needed).
+    - Installs maximal.exe to %LocalAppData%\Programs\maximal (per-user;
+      no UAC prompt, no admin needed).
     - Adds the install dir to the user's PATH.
-    - Drops a Start Menu shortcut to `maximal setup` so the user
-      has a discoverable post-install step.
-    - Registers an Add/Remove Programs entry with proper version /
-      manufacturer / upgrade-code so MajorUpgrade re-installs work.
+    - Registers an Add/Remove Programs entry (MajorUpgrade + UpgradeCode)
+      so upgrades and uninstall work.
 
-  v1 explicitly does NOT register the scheduled task or run
-  `maximal setup` (unattended) from inside the MSI — those touch
-  per-user state and are awkward in WiX custom actions. Users run
-  `maximal setup` once after install (the Start Menu shortcut
-  surfaces this). Parity with B3a's PowerShell installer can be added
-  later by extending `setup` itself to also register the scheduled
-  task on Windows.
+  This is the CLI installer ONLY. It deliberately does NOT register a
+  scheduled task, run `maximal setup`, or drop a Start Menu shortcut. The
+  Tauri tray app (the separate NSIS installer,
+  maximal-<ver>-windows-x64-setup.exe) is the canonical Windows experience
+  and owns running the proxy, auto-start, and first-run setup — exactly
+  like the macOS menu-bar app. Keeping the MSI to "binary on PATH" avoids
+  a console `maximal setup` Start Menu entry that looked like an app
+  launcher, and removes the WiX Util custom actions (no `-ext` needed).
 
-  v1 ships unsigned (A4 deferred). SmartScreen prompts on first run;
-  the Pages landing site (B4) documents the bypass.
+  Ships unsigned (A4 deferred). SmartScreen prompts on first run.
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
 
@@ -53,20 +47,14 @@
 
     <Feature Id="Main" Title="maximal" Level="1">
       <ComponentGroupRef Id="ProductComponents" />
-      <ComponentGroupRef Id="StartMenuComponents" />
     </Feature>
 
     <!--
-      Stop any running copy of maximal.exe before files are touched.
-      Without this, install / upgrade / uninstall hits the MSI
-      "files in use" prompt the moment the running .exe holds the
-      file lock, and a port-bound maximal blocks `maximal start`
-      after install with EADDRINUSE on 4141.
-
-      taskkill returns 128 when the process isn't running; Return
-      "ignore" treats both 0 and 128 as success. SystemFolder
-      resolves to C:\Windows\System32 at runtime so this works on
-      every install path.
+      Stop any running copy of maximal.exe before files are touched, so an
+      upgrade doesn't hit the MSI "files in use" prompt while the running
+      .exe holds the file lock. taskkill returns 128 when nothing matches;
+      Return="ignore" treats 0 and 128 as success. SystemFolder resolves
+      to C:\Windows\System32 at run time.
     -->
     <CustomAction
         Id="StopRunningMaximal"
@@ -87,9 +75,6 @@
         <Directory Id="INSTALLFOLDER" Name="maximal" />
       </Directory>
     </StandardDirectory>
-    <StandardDirectory Id="ProgramMenuFolder">
-      <Directory Id="ApplicationProgramsFolder" Name="maximal" />
-    </StandardDirectory>
   </Fragment>
 
   <Fragment>
@@ -108,20 +93,12 @@
             Action="set"
             System="no" />
       </Component>
-    </ComponentGroup>
-  </Fragment>
-
-  <Fragment>
-    <ComponentGroup Id="StartMenuComponents" Directory="ApplicationProgramsFolder">
-      <Component Id="StartMenuShortcut" Guid="*">
-        <Shortcut
-            Id="SetupShortcut"
-            Name="maximal setup"
-            Description="Run first-time setup (GitHub auth + Claude Desktop config)"
-            Target="[INSTALLFOLDER]maximal.exe"
-            Arguments="setup"
-            WorkingDirectory="INSTALLFOLDER" />
-        <RemoveFolder Id="RemoveAppMenuFolder" On="uninstall" />
+      <!--
+        Per-user HKCU keypath that doubles as an "installed" marker the
+        Windows installer dev harness asserts. Its own component so it has
+        a registry keypath independent of the file.
+      -->
+      <Component Id="InstalledMarker" Bitness="always64">
         <RegistryValue
             Root="HKCU"
             Key="Software\stuffbucket\maximal"
