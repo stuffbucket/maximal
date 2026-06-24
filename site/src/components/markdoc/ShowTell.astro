@@ -2,6 +2,7 @@
 // "Show, don't tell": the tools you use  }  maximal  {  your Copilot models.
 // Labels sit in a row ABOVE the braces; the tall braces wrap only the lists
 // (gather → route → fan out). Brand marks aid scanning. Presentational.
+import Paint from "../Paint.astro";
 
 // Brand marks from Simple Icons (CC0). `fill: true` = solid logo whose path
 // carries its own fill="currentColor"; `fill: false` = a monoline stroke glyph.
@@ -61,15 +62,15 @@ const BRACE = `M5 1C10 1 10 6 10 16L10 42C10 47 12 50 15 50C12 50 10 53 10 58L10
 const shot = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/screenshots/app-dashboard.png`;
 ---
 
-<section id="how" class="card card--turquoise showtell">
+<section id="how" class="card card--turquoise card--painted showtell">
+  <Paint base="#1b6f7a" mode="coat" />
   <h2>Why try maximal</h2>
 
   <p class="why__lede">
-    maximal runs on your own machine. The tools you already use point at
-    maximal, and it does the work of connecting them to the models you want —
-    all on the GitHub Copilot subscription you already pay for, with Copilot's
-    privacy and security guarantees. No hosted gateway to wire up, no per-token
-    bill to track — none of what a service like OpenRouter asks of you.
+    <span class="brandword">maximal</span> swaps out the engine your AI tools use
+    with the models that power GitHub Copilot. You get all of the agility and
+    creativity without sacrificing the power, privacy, and security of GitHub
+    Copilot.
   </p>
 
   <div class="flow">
@@ -161,7 +162,7 @@ const shot = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/screenshots/app-das
     <div class="appshot__frame">
       <img
         src={shot}
-        alt="maximal's usage dashboard — token usage broken down by model across your tools over the last 30 days"
+        alt="maximal's usage dashboard showing token usage broken down by model across your tools over the last 30 days"
         width="1600"
         height="1105"
         loading="lazy"
@@ -169,7 +170,7 @@ const shot = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/screenshots/app-das
       />
     </div>
     <figcaption class="appshot__cap">
-      Every tool, every model, every token — see exactly where your Copilot
+      Every tool, every model, every token. See exactly where your Copilot
       subscription goes.
     </figcaption>
   </figure>
@@ -193,14 +194,17 @@ const shot = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/screenshots/app-das
   }
 
   /* Two rows: labels on top (row 1), then the braced lists + node (row 2),
-     so the braces wrap only the lists — not the labels. */
+     so the braces wrap only the lists — not the labels. Columns are content-
+     sized and the whole group is centered, so each list hugs its brace and the
+     left/right blocks stay symmetric around the node (no stranded whitespace). */
   .flow {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 22px auto 22px minmax(0, 1fr);
+    grid-template-columns: auto 24px auto 24px auto;
     grid-template-rows: auto 1fr;
+    justify-content: center;
     align-items: stretch;
-    column-gap: 1.25rem;
-    row-gap: 1rem;
+    column-gap: 1.5rem;
+    row-gap: 1.1rem;
     margin-top: 1.75rem;
   }
 
@@ -213,6 +217,12 @@ const shot = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/screenshots/app-das
     color: var(--text);
     margin: 0;
     align-self: end;
+    justify-self: start;
+  }
+  /* The models label hugs the right block's left edge so it sits above its
+     first list item, mirroring the tools label on the left. */
+  .flow__label--models {
+    justify-self: start;
   }
   .flow__label--tools {
     grid-column: 1;
@@ -311,9 +321,14 @@ const shot = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/screenshots/app-das
   }
 
   .flow__mark {
+    /* Match the hero wordmark's cut exactly (weight + variable-font axes +
+       tracking), just smaller — so the island "maximal" reads as the same
+       wordmark, not a different font. */
     font-family: var(--serif);
-    font-size: 2.2rem;
-    font-weight: 600;
+    font-size: 2.4rem;
+    font-weight: 900;
+    font-variation-settings: "SOFT" 30, "WONK" 1, "opsz" 144;
+    letter-spacing: -0.04em;
     color: var(--text);
     line-height: 1;
     margin: 0;

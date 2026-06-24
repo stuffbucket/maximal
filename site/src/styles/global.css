@@ -203,13 +203,40 @@ main > article {
   --card-accent: var(--brand-ochre);
 }
 
-/* Footer reads as a quiet base, not a section. */
-.card--console {
-  background: var(--surface);
-  color: var(--text-muted);
+/* ===== Painted cards =====
+   Cards that carry the candy-paint shader (a <canvas class="paint">) read as
+   saturated brand surfaces, like the hero. Drop the top accent rule, lift the
+   content above the canvas, and locally re-point the neutral text/border tokens
+   to a cream palette so copy stays legible on the deep brand base in both
+   themes. (--accent is left alone so the live download button keeps its fill.) */
+.card--painted {
+  --text: #f4ead4;
+  --text-muted: #d9ccad;
+  --border: rgb(244 234 212 / 0.18);
+  --border-strong: rgb(244 234 212 / 0.32);
+  --link: #f3d886;
+  --accent-gold: #f0d27a;
+  color: var(--text);
+  /* Subtle "lit from above" elevation so the cream copy lifts off the deep
+     brand base. Inherited by all descendant text. */
+  text-shadow: 0 1px 2px rgb(8 16 22 / 0.38);
 }
-.card--console::before {
+.card--painted::before {
   display: none;
+}
+.card--painted > .paint {
+  z-index: 0;
+}
+.card--painted > :not(.paint) {
+  position: relative;
+  z-index: 1;
+}
+/* Brand-tone fallback (and the silhouette behind the paint) if WebGL is off. */
+.card--turquoise.card--painted {
+  background: #1b6f7a;
+}
+.card--indigo.card--painted {
+  background: #43357f;
 }
 
 /* ===== Hero ===== */
@@ -246,6 +273,16 @@ main > article {
   font-variation-settings: "SOFT" 30, "WONK" 1, "opsz" 144;
   letter-spacing: -0.02em;
   font-size: 1.19em;
+}
+
+/* Inline brand wordmark for body copy: Fraunces bold at the running text size,
+   so "maximal" reads as the product name wherever it appears in a sentence. */
+.brandword {
+  font-family: var(--serif);
+  font-weight: 700;
+  font-style: normal;
+  font-variation-settings: "opsz" 40, "SOFT" 0, "WONK" 0;
+  letter-spacing: -0.01em;
 }
 
 .tagline {
@@ -396,21 +433,103 @@ pre code {
   font-weight: 400;
 }
 
+/* Primary button: one shared glossy clear-coat treatment used everywhere a
+   primary CTA appears (hero download, get-started download). A clear-coat Paint
+   canvas (<Paint mode="clearcoat" class="btn-paint">) sits behind a label that
+   is lit from above like the wordmark — top-bright gradient fill + soft cast
+   shadow. Fixed deep-teal base (matching the Paint) so the cream label keeps
+   contrast in both themes; the bg is also the no-WebGL fallback. */
 .btn--primary {
-  background: var(--accent);
-  color: var(--accent-ink);
-  border-color: var(--accent);
+  position: relative;
+  overflow: hidden;
+  background: #15656f;
+  color: #fcf5e6;
+  border-color: #15656f;
   font-weight: 600;
 }
 
 .btn--primary:hover {
-  filter: brightness(1.06);
-  border-color: var(--accent);
+  filter: brightness(1.05);
+  border-color: #15656f;
+}
+
+.btn--primary .btn-label,
+.btn--primary .btn-meta {
+  position: relative;
+  z-index: 1;
+}
+
+/* Light the label text from above. The gradient can't tint the SVG (it uses
+   currentColor), so only the text span gets the clip; the spark stays solid.
+   A tight dark shadow plus a soft drop separates the cream label from the
+   glossy teal coat so it pops. */
+.btn--primary .btn-label > span:last-child {
+  background: linear-gradient(180deg, #ffffff 0%, #f2e6cb 58%, #d4c099 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  filter: drop-shadow(0 1px 1px rgba(0, 14, 18, 0.7))
+    drop-shadow(0 2px 5px rgba(0, 14, 18, 0.45));
+}
+
+.btn--primary .btn-spark {
+  color: #ffffff;
+  filter: drop-shadow(0 1px 1px rgba(0, 14, 18, 0.7))
+    drop-shadow(0 2px 4px rgba(0, 14, 18, 0.4));
 }
 
 .btn--primary .btn-meta {
-  color: var(--accent-ink);
-  opacity: 0.8;
+  color: #f6efda;
+  opacity: 0.95;
+  filter: drop-shadow(0 1px 2px rgba(0, 14, 18, 0.5));
+}
+
+/* Click celebration: a soft light bloom from the click point + a tiny press.
+   Subtle and quick. JS sets --rx/--ry to the click coords and toggles
+   .btn--celebrate; skipped under prefers-reduced-motion (the JS bails). */
+.btn--primary::after {
+  content: "";
+  position: absolute;
+  left: var(--rx, 50%);
+  top: var(--ry, 50%);
+  width: 10px;
+  height: 10px;
+  margin: -5px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(255, 255, 255, 0.6),
+    rgba(255, 255, 255, 0)
+  );
+  transform: scale(0);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.btn--celebrate {
+  animation: btn-press 260ms ease;
+}
+.btn--celebrate::after {
+  animation: btn-bloom 560ms ease-out;
+}
+
+@keyframes btn-press {
+  40% {
+    transform: scale(0.975);
+  }
+}
+
+@keyframes btn-bloom {
+  0% {
+    transform: scale(0);
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(20);
+    opacity: 0;
+  }
 }
 
 .btn-spark {
@@ -450,23 +569,6 @@ pre code {
   opacity: 0.55;
   cursor: not-allowed;
   pointer-events: none;
-}
-
-/* ===== Footer ===== */
-
-.site-footer {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 1.5rem;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 0.88rem;
-}
-
-.site-footer a {
-  color: var(--link);
-  text-decoration: underline;
-  text-underline-offset: 3px;
 }
 
 /* ===== Bottom-pinned glass dock ===== */

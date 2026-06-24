@@ -3,6 +3,8 @@
 // typed in on load. The full tagline is server-rendered (SEO + no-JS +
 // prefers-reduced-motion all get the complete sentence); JS only replays it as
 // a typing effect when motion is allowed.
+import Paint from "../Paint.astro";
+import Spark from "../Spark.astro";
 import { getDownloadInfo } from "../../lib/downloads";
 interface Props {
   tagline: string;
@@ -11,10 +13,11 @@ interface Props {
 const { tagline, downloadLabel = "Download for macOS" } = Astro.props;
 // Markdoc doesn't forward $variables into tag attributes, so pull the resolved
 // release straight from the shared (memoized) build-time module.
-const { macDmg: downloadUrl, releasesUrl } = await getDownloadInfo();
+const { macDmg: downloadUrl, versionLabel } = await getDownloadInfo();
 ---
 
 <header class="card card--scarlet hero" aria-labelledby="title">
+  <Paint base="#c8334a" mode="candy" />
   <h1 id="title" class="wordmark">maximal</h1>
   <p class="tagline hero-typed">
     <span class="hero-typed__text" data-typed-target>{tagline}</span><span
@@ -26,19 +29,12 @@ const { macDmg: downloadUrl, releasesUrl } = await getDownloadInfo();
     {
       downloadUrl && (
         <a class="btn btn--primary hero-cta__primary" href={downloadUrl} rel="noopener">
+          <Paint base="#15656f" mode="clearcoat" class="btn-paint" />
           <span class="btn-label">
-            <svg class="btn-spark" viewBox="0 0 22 22" fill="currentColor" aria-hidden="true">
-              <path d="M11 1 L13 9 L21 11 L13 13 L11 21 L9 13 L1 11 L9 9 Z" />
-            </svg>
+            <Spark class="btn-spark" />
             <span>{downloadLabel}</span>
           </span>
-        </a>
-      )
-    }
-    {
-      releasesUrl && (
-        <a class="hero-cta__secondary" href={releasesUrl} rel="noopener">
-          Other ways to install
+          {versionLabel && <span class="btn-meta">{versionLabel}</span>}
         </a>
       )
     }
@@ -56,9 +52,28 @@ const { macDmg: downloadUrl, releasesUrl } = await getDownloadInfo();
   .hero::before {
     display: none;
   }
+  /* Lift the hero content above the paint canvas (which is positioned, so it
+     would otherwise paint over the non-positioned content). A soft shadow keeps
+     the cream type crisp over the moving gloss highlights. */
   .wordmark,
+  .tagline,
+  .hero-cta {
+    position: relative;
+    z-index: 1;
+  }
+  /* Cream type, shaded as if lit from above the card: a top-bright gradient
+     fill on the wordmark + a soft shadow cast down onto the paint. */
+  .wordmark {
+    background: linear-gradient(180deg, #fcf5e6 0%, #f1e5cb 55%, #d6c4a0 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+    filter: drop-shadow(0 5px 9px rgba(26, 0, 4, 0.5));
+  }
   .tagline {
     color: #f4ead4;
+    text-shadow: 0 2px 5px rgba(26, 0, 4, 0.45);
   }
 
   .hero-typed {
@@ -83,19 +98,9 @@ const { macDmg: downloadUrl, releasesUrl } = await getDownloadInfo();
     margin: 1.5rem 0 1.25rem;
   }
   .hero-cta__primary {
-    /* Let the primary CTA size to its content rather than stretch. */
+    /* Size to content rather than stretch. The glossy primary-button effect
+       (clear-coat Paint + lit label) is shared from global.css .btn--primary. */
     flex: 0 0 auto;
-  }
-  .hero-cta__secondary {
-    font-family: var(--mono);
-    font-size: 0.9rem;
-    color: #f4ead4;
-    text-decoration: underline;
-    text-underline-offset: 3px;
-    text-decoration-color: var(--ink-gold);
-  }
-  .hero-cta__secondary:hover {
-    text-decoration-thickness: 2px;
   }
 
   @keyframes hero-caret-blink {
@@ -148,7 +153,11 @@ const { macDmg: downloadUrl, releasesUrl } = await getDownloadInfo();
     btn.classList.add("btn--soon");
     btn.removeAttribute("href");
     btn.setAttribute("aria-disabled", "true");
+    var paint = btn.querySelector(".btn-paint");
+    if (paint) paint.style.display = "none";
     var label = btn.querySelector(".btn-label span:last-child");
-    if (label) label.textContent = "Windows — coming soon";
+    if (label) label.textContent = "Windows";
+    var meta = btn.querySelector(".btn-meta");
+    if (meta) meta.textContent = "coming soon";
   })();
 </script>

@@ -2,15 +2,18 @@
 // Get started in 3 steps. Step 1 carries the actual download (macOS live,
 // Windows "coming soon"); the standalone download section folded in here.
 // Homebrew + other install options live in the repo README.
+import Paint from "../Paint.astro";
+import Spark from "../Spark.astro";
 import { getDownloadInfo } from "../../lib/downloads";
 
 const { macDmg, versionLabel, releasesUrl, repoUrl } = await getDownloadInfo();
 const readmeUrl = `${repoUrl}#readme`;
 
+const M = `<span class="brandword">maximal</span>`;
 const steps = [
   {
     title: "Install maximal",
-    body: "Grab the macOS app — it lives quietly in your menu bar. Windows is coming soon.",
+    body: "Grab the macOS app. It lives quietly in your menu bar; Windows is coming soon.",
   },
   {
     title: "Sign in with GitHub",
@@ -18,16 +21,14 @@ const steps = [
   },
   {
     title: "Pick your tools",
-    body: "Claude Code, Codex, opencode, Cursor — point them at maximal and they run on your Copilot models. Switch anytime; no re-signing-in.",
+    body: `Point Claude Code, Codex, opencode, or GitHub Copilot at ${M} and they run on your Copilot models. Switch anytime; no re-signing-in.`,
   },
 ];
 ---
 
-<section id="start" class="card card--indigo getstarted">
+<section id="start" class="card card--indigo card--painted getstarted">
+  <Paint base="#43357f" mode="coat" />
   <header class="getstarted__head">
-    <svg class="getstarted__spark" viewBox="0 0 22 22" aria-hidden="true">
-      <path d="M11 1 L13 9 L21 11 L13 13 L11 21 L9 13 L1 11 L9 9 Z"></path>
-    </svg>
     <h2>Get started</h2>
     <p class="getstarted__sub">Up and running in three steps.</p>
   </header>
@@ -55,15 +56,9 @@ const steps = [
                     href={macDmg}
                     rel="noopener"
                   >
+                    <Paint base="#15656f" mode="clearcoat" class="btn-paint" />
                     <span class="btn-label">
-                      <svg
-                        class="btn-spark"
-                        viewBox="0 0 22 22"
-                        fill="currentColor"
-                        aria-hidden="true"
-                      >
-                        <path d="M11 1 L13 9 L21 11 L13 13 L11 21 L9 13 L1 11 L9 9 Z" />
-                      </svg>
+                      <Spark class="btn-spark" />
                       <span>macOS</span>
                     </span>
                     {versionLabel && <span class="btn-meta">{versionLabel}</span>}
@@ -112,16 +107,9 @@ const steps = [
     margin-bottom: 1.75rem;
   }
 
-  .getstarted__spark {
-    width: 1.25rem;
-    height: 1.25rem;
-    fill: var(--accent-gold);
-    align-self: center;
-  }
-
   .getstarted__sub {
     font-family: var(--sans);
-    color: var(--text-muted);
+    color: var(--text);
     margin: 0;
     flex-basis: 100%;
   }
@@ -167,7 +155,7 @@ const steps = [
 
   .step__text {
     font-family: var(--sans);
-    color: var(--text-muted);
+    color: var(--text);
     line-height: 1.55;
     margin: 0;
   }
@@ -179,7 +167,7 @@ const steps = [
   .step__readme {
     margin: 0.7rem 0 0;
     font-size: 0.85rem;
-    color: var(--text-muted);
+    color: var(--text);
   }
 
   @media (max-width: 640px) {

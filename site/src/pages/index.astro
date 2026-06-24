@@ -28,10 +28,10 @@ const { Content } = await render(entry);
       href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT,WONK@9..144,400..900,0..100,0..1&display=swap"
     />
 
-    <title>maximal — your AI tools, your Copilot models, one connection</title>
+    <title>maximal · your AI tools, your Copilot models, one connection</title>
     <meta
       name="description"
-      content="maximal is the easy way to connect the AI coding tools you use — Claude Code, Codex, opencode, Cursor — to the models in your GitHub Copilot subscription."
+      content="maximal swaps the engine inside the AI coding tools you use, like Claude Code, Codex, and opencode, so they run on the models in your GitHub Copilot subscription."
     />
     <link
       rel="icon"
@@ -58,22 +58,6 @@ const { Content } = await render(entry);
 
     <main id="main">
       <Content />
-
-      <footer
-        id="footer"
-        class="card card--console site-footer"
-        aria-label="Site footer"
-      >
-        <span>
-          MIT license ·
-          <a href={`${REPO_URL}/blob/main/LICENSE`} rel="noopener">LICENSE</a>
-          ·
-          <a href={`${REPO_URL}/blob/main/THIRD-PARTY-LICENSE`} rel="noopener"
-            >third-party</a
-          >
-        </span>
-        <a href={REPO_URL} rel="noopener">github.com/{REPO}</a>
-      </footer>
     </main>
 
     <!-- Foreground layer: bottom-pinned glass dock -->
@@ -113,6 +97,28 @@ const { Content } = await render(entry);
         Object.keys(byId).forEach(function (id) {
           var el = document.getElementById(id);
           if (el) io.observe(el);
+        });
+      })();
+    </script>
+
+    <script is:inline>
+      // Subtle click celebration on primary buttons: a soft light bloom from
+      // the click point + a tiny press (see .btn--celebrate in global.css).
+      (function () {
+        if (
+          window.matchMedia &&
+          window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        )
+          return;
+        document.addEventListener("click", function (e) {
+          var btn = e.target.closest && e.target.closest(".btn--primary");
+          if (!btn) return;
+          var r = btn.getBoundingClientRect();
+          btn.style.setProperty("--rx", e.clientX - r.left + "px");
+          btn.style.setProperty("--ry", e.clientY - r.top + "px");
+          btn.classList.remove("btn--celebrate");
+          void btn.offsetWidth; // restart the animation on rapid re-clicks
+          btn.classList.add("btn--celebrate");
         });
       })();
     </script>
