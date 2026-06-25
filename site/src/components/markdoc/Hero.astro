@@ -13,7 +13,8 @@ interface Props {
 const { tagline, downloadLabel = "Download for macOS" } = Astro.props;
 // Markdoc doesn't forward $variables into tag attributes, so pull the resolved
 // release straight from the shared (memoized) build-time module.
-const { macDmg: downloadUrl, versionLabel, winSetup } = await getDownloadInfo();
+const { macDmg: downloadUrl, versionLabel, winSetup, hasWindows } =
+  await getDownloadInfo();
 ---
 
 <header class="card card--scarlet hero" aria-labelledby="title">
@@ -28,12 +29,7 @@ const { macDmg: downloadUrl, versionLabel, winSetup } = await getDownloadInfo();
   <div class="hero-cta">
     {
       downloadUrl && (
-        <a
-          class="btn btn--primary hero-cta__primary"
-          href={downloadUrl}
-          rel="noopener"
-          data-win-setup={winSetup ?? ""}
-        >
+        <a class="btn btn--primary hero-cta__primary" href={downloadUrl} rel="noopener">
           <Paint base="#15656f" mode="clearcoat" class="btn-paint" />
           <span class="btn-label">
             <Spark class="btn-spark" />
@@ -41,6 +37,28 @@ const { macDmg: downloadUrl, versionLabel, winSetup } = await getDownloadInfo();
           </span>
           {versionLabel && <span class="btn-meta">{versionLabel}</span>}
         </a>
+      )
+    }
+    {
+      hasWindows ? (
+        <a class="btn btn--primary hero-cta__primary" href={winSetup} rel="noopener">
+          <Paint base="#15656f" mode="clearcoat" class="btn-paint" />
+          <span class="btn-label">
+            <Spark class="btn-spark" />
+            <span>Download for Windows</span>
+          </span>
+          {versionLabel && <span class="btn-meta">{versionLabel}</span>}
+        </a>
+      ) : (
+        <div class="btn btn--soon hero-cta__primary" aria-disabled="true">
+          <span class="btn-label">
+            <svg class="btn-spark" viewBox="0 0 22 22" fill="currentColor" aria-hidden="true">
+              <path d="M11 1 L13 9 L21 11 L13 13 L11 21 L9 13 L1 11 L9 9 Z" />
+            </svg>
+            <span>Windows</span>
+          </span>
+          <span class="btn-meta">coming soon</span>
+        </div>
       )
     }
   </div>
@@ -139,39 +157,5 @@ const { macDmg: downloadUrl, versionLabel, winSetup } = await getDownloadInfo();
       if (i++ <= full.length) window.setTimeout(tick, 26);
     }
     tick();
-  })();
-</script>
-
-<script is:inline>
-  // OS-aware primary download: macOS is the live build; Windows is "coming
-  // soon", so Windows visitors get an honest inert chip instead of a Mac
-  // download. The server-rendered default is the macOS download (no-JS safe).
-  (function () {
-    var nav = navigator;
-    var uad = nav.userAgentData;
-    var plat = (uad && uad.platform) || nav.platform || "";
-    var isWindows = /win/i.test(plat) || /windows/i.test(nav.userAgent || "");
-    if (!isWindows) return;
-    var btn = document.querySelector(".hero-cta__primary");
-    if (!btn) return;
-    var label = btn.querySelector(".btn-label span:last-child");
-    var winSetup = btn.getAttribute("data-win-setup");
-    if (winSetup) {
-      // A Windows installer exists in the release → keep the primary affordance
-      // lit and point it at the .exe.
-      btn.setAttribute("href", winSetup);
-      if (label) label.textContent = "Download for Windows";
-      return;
-    }
-    // No Windows build yet → an honest inert "coming soon" chip.
-    btn.classList.remove("btn--primary");
-    btn.classList.add("btn--soon");
-    btn.removeAttribute("href");
-    btn.setAttribute("aria-disabled", "true");
-    var paint = btn.querySelector(".btn-paint");
-    if (paint) paint.style.display = "none";
-    if (label) label.textContent = "Windows";
-    var meta = btn.querySelector(".btn-meta");
-    if (meta) meta.textContent = "coming soon";
   })();
 </script>
