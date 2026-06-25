@@ -32,13 +32,18 @@ try {
   // Compose a clean card for the capture only (the live page is untouched):
   // hide the download buttons and the rest of the page, and pad the top so the
   // hero card sits centered in the frame, floating on the god-ray backdrop.
+  //
+  // NOTE: hide the buttons with visibility:hidden, NOT display:none — the card
+  // must keep its full height so it covers the god-rays' central fade zone
+  // (anchored to the hero's centre). display:none shrinks the card and exposes
+  // that dark pocket below it as a "black box".
   await page.addStyleTag({
     content: `
-      .hero-cta { display: none !important; }
+      .hero-cta { visibility: hidden !important; }
       .hero-typed__caret { display: none !important; }
       main article section { display: none !important; }
       .dock { display: none !important; }
-      main { padding-top: 225px !important; }
+      main { padding-top: 200px !important; }
     `,
   });
   await page.waitForTimeout(900); // reflow + webfonts + the WebGL frame settle
