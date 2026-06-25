@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.36](https://github.com/stuffbucket/maximal/compare/v0.4.35...v0.4.36) (2026-06-25)
+
+
+### Bug Fixes
+
+* **site:** Windows installer pickup + light-mode god-rays + stale-cache bypass ([#182](https://github.com/stuffbucket/maximal/issues/182)) ([2829bfc](https://github.com/stuffbucket/maximal/commit/2829bfc9301f47e2ad7cd0df1253fed0616c85ae))
+* **update:** dev build of current release no longer self-reports an upgrade ([#186](https://github.com/stuffbucket/maximal/issues/186)) ([389d081](https://github.com/stuffbucket/maximal/commit/389d08127b5a9d40dfb33cfeb7f44a7259fb7eb0))
+
 ## [0.4.35](https://github.com/stuffbucket/maximal/compare/v0.4.34...v0.4.35) (2026-06-24)
 
 
