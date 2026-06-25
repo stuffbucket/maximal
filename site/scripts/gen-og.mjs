@@ -21,7 +21,7 @@ const H = 630; // 1.91:1 — the standard Open Graph / large-summary card ratio
 const browser = await chromium.launch();
 try {
   const page = await browser.newPage({
-    viewport: { width: W, height: 820 },
+    viewport: { width: W, height: H },
     deviceScaleFactor: 1, // output exactly 1200x630 to match the og:image meta
     colorScheme: "dark", // richer: the god-ray backdrop frames the hero card
     reducedMotion: "reduce",
@@ -30,35 +30,41 @@ try {
   await page.waitForSelector(".hero");
 
   // Compose a clean card for the capture only (the live page is untouched):
-  // hide the download buttons and the rest of the page, and pad the top so the
-  // hero card sits centered in the frame, floating on the god-ray backdrop.
-  //
-  // NOTE: hide the buttons with visibility:hidden, NOT display:none — the card
-  // must keep its full height so it covers the god-rays' central fade zone
-  // (anchored to the hero's centre). display:none shrinks the card and exposes
-  // that dark pocket below it as a "black box".
+  //  - hide the download buttons (visibility:hidden keeps the card's height),
+  //    the typing caret, the other sections, and the dock;
+  //  - pin the hero dead-centre at a generous size.
+  // Centering is load-bearing: the god-rays light source is anchored to the
+  // hero's centre, so a large card centred on that point fully covers the
+  // shader's central fade zone — otherwise it peeks out below the card as a
+  // dark box. The card half-height must exceed the fade radius (~0.26 * H).
   await page.addStyleTag({
     content: `
       .hero-cta { visibility: hidden !important; }
       .hero-typed__caret { display: none !important; }
-      main article section { display: none !important; }
-      .dock { display: none !important; }
-      main { padding-top: 200px !important; }
+      main article section, .dock { display: none !important; }
+      .hero {
+        position: fixed !important;
+        top: 50% !important;
+        left: 50% !important;
+        transform: translate(-50%, -50%) !important;
+        width: 880px !important;
+        min-height: 392px !important;
+        margin: 0 !important;
+        display: flex !important;
+        flex-direction: column !important;
+        justify-content: center !important;
+        z-index: 5 !important;
+      }
     `,
   });
-  await page.waitForTimeout(900); // reflow + webfonts + the WebGL frame settle
 
-  const box = await page.locator(".hero").boundingBox();
-  if (!box) throw new Error("hero card not found on page");
-  const cx = box.x + box.width / 2;
-  const cy = box.y + box.height / 2;
-  const clip = {
-    x: Math.max(0, Math.min(Math.round(cx - W / 2), W)),
-    y: Math.max(0, Math.round(cy - H / 2)),
-    width: W,
-    height: H,
-  };
-  await page.screenshot({ path: OUT, clip });
+  // The hero just moved + resized. Force the god-rays backdrop to re-anchor its
+  // light to the new (centred) hero — under reduced motion it only redraws on a
+  // resize/scroll, not a rAF loop — so its fade zone re-centres on the card.
+  await page.evaluate(() => window.dispatchEvent(new Event("resize")));
+  await page.waitForTimeout(1000); // reflow + webfonts + the WebGL frame settle
+
+  await page.screenshot({ path: OUT });
   console.log(`wrote ${OUT} (${W}x${H})`);
 } finally {
   await browser.close();
