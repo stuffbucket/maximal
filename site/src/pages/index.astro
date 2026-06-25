@@ -13,6 +13,17 @@ const REPO_URL = `https://github.com/${REPO}`;
 // wraps the unchanged lib/version.ts logic — so this shell stays presentational.
 const entry = await getEntry("landing", "index");
 const { Content } = await render(entry);
+
+// Social / link-unfurl card. A generated screenshot of the hero card (see
+// scripts/gen-og.mjs → public/og.png) advertised via Open Graph + Twitter meta
+// only — invisible to the rendered page, but it's what unfurlers use instead of
+// guessing at the first inline <img> (which was grabbing the dashboard shot).
+const siteBase = (Astro.site?.href ?? "https://stuffbucket.github.io/maximal/")
+  .replace(/\/$/, "");
+const ogImage = `${siteBase}/og.png`;
+const ogTitle = "maximal · your AI tools, your Copilot models, one connection";
+const ogDescription =
+  "Connect the AI tools you use to the models in GitHub Copilot.";
 ---
 
 <!doctype html>
@@ -49,6 +60,24 @@ const { Content } = await render(entry);
       media="(prefers-color-scheme: dark)"
     />
     <meta name="color-scheme" content="light dark" />
+
+    <!-- Open Graph / Twitter: a generated hero-card screenshot for link unfurls.
+         Head metadata only; does not affect the visible page. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content={`${siteBase}/`} />
+    <meta property="og:title" content={ogTitle} />
+    <meta property="og:description" content={ogDescription} />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="The maximal hero card: the maximal wordmark on a glossy candy-red panel."
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={ogTitle} />
+    <meta name="twitter:description" content={ogDescription} />
+    <meta name="twitter:image" content={ogImage} />
   </head>
   <body>
     <a href="#main" class="skip-link">Skip to content</a>
