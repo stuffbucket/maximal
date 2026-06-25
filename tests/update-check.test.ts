@@ -127,6 +127,46 @@ describe("getUpdateStatus", () => {
     expect(status.update_available).toBe(false)
   })
 
+  test("a dev build of the current release is up to date, not an upgrade", async () => {
+    // build-sidecar.ts stamps local binaries `<version>-dev+<sha>`; the
+    // published release of that same version must not read as an upgrade
+    // (a prerelease ranks below its release, so the naive compare flips it).
+    __setUpdateCheckDepsForTests({
+      fetch: () => Promise.resolve(manifestJson("0.4.35")),
+      currentVersion: "0.4.35-dev+abc12345",
+    })
+
+    const status = await getUpdateStatus()
+
+    expect(status.current).toBe("0.4.35-dev+abc12345") // full string, for diagnostics
+    expect(status.latest).toBe("0.4.35")
+    expect(status.update_available).toBe(false)
+  })
+
+  test("a dev build still sees a genuinely newer release", async () => {
+    __setUpdateCheckDepsForTests({
+      fetch: () => Promise.resolve(manifestJson("0.4.36")),
+      currentVersion: "0.4.35-dev+abc12345",
+    })
+
+    const status = await getUpdateStatus()
+
+    expect(status.update_available).toBe(true)
+  })
+
+  test("a real prerelease still sees its release as an upgrade", async () => {
+    // Only the `-dev+` local suffix is normalized; a beta/rc genuinely precedes
+    // the release and should still be offered the upgrade.
+    __setUpdateCheckDepsForTests({
+      fetch: () => Promise.resolve(manifestJson("0.5.0")),
+      currentVersion: "0.5.0-beta.2",
+    })
+
+    const status = await getUpdateStatus()
+
+    expect(status.update_available).toBe(true)
+  })
+
   test("caches within the TTL; force bypasses it", async () => {
     let clock = 1_000_000
     __setUpdateCheckDepsForTests({

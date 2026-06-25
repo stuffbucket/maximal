@@ -83,18 +83,22 @@ type FetchLike = (url: string, init?: RequestInit) => Promise<Response>
 
 let fetchImpl: FetchLike = fetch
 let nowMs: () => number = Date.now
+let versionImpl: string = BUILD_VERSION
 
 export function __setUpdateCheckDepsForTests(o: {
   fetch?: FetchLike
   now?: () => number
+  currentVersion?: string
 }): void {
   if (o.fetch) fetchImpl = o.fetch
   if (o.now) nowMs = o.now
+  if (o.currentVersion) versionImpl = o.currentVersion
 }
 
 export function __resetUpdateCheckDepsForTests(): void {
   fetchImpl = fetch
   nowMs = Date.now
+  versionImpl = BUILD_VERSION
   cache = null
 }
 
@@ -140,6 +144,21 @@ export function isNewerVersion(a: string, b: string): boolean {
   return false
 }
 
+/**
+ * Strip a local-build suffix (`-dev+<sha>`) so a dev binary compares on its
+ * core version. build-sidecar.ts stamps non-release binaries as
+ * `<pkg.version>-dev+<sha>`; without this, a dev build of the current release
+ * (e.g. `0.4.35-dev+abc`) reads as *older* than the published `0.4.35` — since
+ * semver ranks a prerelease below its release — and perpetually self-reports
+ * "update available" for the version it's already running. A real prerelease
+ * channel (`-beta.N`, `-rc.N`) is left intact: those genuinely precede the
+ * release and should still see it as an upgrade.
+ */
+function normalizeCurrent(version: string): string {
+  const devAt = version.indexOf("-dev+")
+  return devAt === -1 ? version : version.slice(0, devAt)
+}
+
 interface UpdateManifest {
   channels?: Record<string, { version?: unknown } | undefined>
 }
@@ -176,7 +195,7 @@ export function parseManifestVersion(
  * a real result. `force` bypasses the cache.
  */
 export async function getUpdateStatus(force = false): Promise<UpdateStatus> {
-  const current = BUILD_VERSION
+  const current = versionImpl
   const enabled = isUpdateCheckEnabled()
   const checkedAt = cache ? new Date(cache.atMs).toISOString() : null
 
@@ -227,7 +246,8 @@ export async function getUpdateStatus(force = false): Promise<UpdateStatus> {
     const status: UpdateStatus = {
       current,
       latest,
-      update_available: latest !== null && isNewerVersion(latest, current),
+      update_available:
+        latest !== null && isNewerVersion(latest, normalizeCurrent(current)),
       url: DOWNLOAD_URL,
       enabled: true,
       checked_at: new Date(atMs).toISOString(),
