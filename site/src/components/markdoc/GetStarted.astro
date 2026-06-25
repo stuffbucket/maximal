@@ -11,6 +11,9 @@ const { macDmg, winSetup, hasWindows, versionLabel, releasesUrl, repoUrl } =
 const readmeUrl = `${repoUrl}#readme`;
 
 const M = `<span class="brandword">maximal</span>`;
+// Step screenshots are served from site/public/screenshots/ (base-prefixed for
+// GitHub Pages), matching ShowTell's app-dashboard shot.
+const shotBase = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/screenshots`;
 const steps = [
   {
     title: "Install maximal",
@@ -21,10 +24,22 @@ const steps = [
   {
     title: "Sign in with GitHub",
     body: "One click connects your existing GitHub Copilot subscription. No new account, no extra cost.",
+    shot: {
+      src: `${shotBase}/account-signin.png`,
+      alt: "maximal's Account panel showing 'Not signed in' with a Sign in to GitHub button.",
+      width: 2000,
+      height: 1065,
+    },
   },
   {
     title: "Pick your tools",
-    body: `Point Claude Code, Codex, opencode, or GitHub Copilot at ${M} and they run on your Copilot models. Switch anytime; no re-signing-in.`,
+    body: `Point Claude Code, Codex, opencode, or GitHub Copilot at ${M} and they run on your Copilot models.`,
+    shot: {
+      src: `${shotBase}/apps.png`,
+      alt: "maximal's Apps panel with one-click toggles for Claude Code and Claude Desktop pointed at the proxy.",
+      width: 2000,
+      height: 1175,
+    },
   },
 ];
 ---
@@ -46,6 +61,18 @@ const steps = [
           <div class="step__body">
             <h3 class="step__title">{step.title}</h3>
             <p class="step__text" set:html={step.body} />
+            {step.shot && (
+              <figure class="step__shot">
+                <img
+                  src={step.shot.src}
+                  alt={step.shot.alt}
+                  width={step.shot.width}
+                  height={step.shot.height}
+                  loading="lazy"
+                  decoding="async"
+                />
+              </figure>
+            )}
             {i === 0 && (
               <div class="step__install">
                 <div
@@ -181,6 +208,23 @@ const steps = [
 
   .step__install {
     margin-top: 1rem;
+  }
+
+  /* Step screenshots reuse ShowTell's framed-image treatment so the panels
+     read as the same product surface across islands. */
+  .step__shot {
+    margin: 1rem 0 0;
+    max-width: 30rem;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    overflow: hidden;
+    box-shadow: var(--shadow-card);
+    line-height: 0;
+  }
+  .step__shot img {
+    display: block;
+    width: 100%;
+    height: auto;
   }
 
   .step__readme {
