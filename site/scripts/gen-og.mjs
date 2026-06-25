@@ -28,7 +28,20 @@ try {
   });
   await page.goto(TARGET, { waitUntil: "networkidle" });
   await page.waitForSelector(".hero");
-  await page.waitForTimeout(900); // let webfonts + the WebGL frame settle
+
+  // Compose a clean card for the capture only (the live page is untouched):
+  // hide the download buttons and the rest of the page, and pad the top so the
+  // hero card sits centered in the frame, floating on the god-ray backdrop.
+  await page.addStyleTag({
+    content: `
+      .hero-cta { display: none !important; }
+      .hero-typed__caret { display: none !important; }
+      main article section { display: none !important; }
+      .dock { display: none !important; }
+      main { padding-top: 225px !important; }
+    `,
+  });
+  await page.waitForTimeout(900); // reflow + webfonts + the WebGL frame settle
 
   const box = await page.locator(".hero").boundingBox();
   if (!box) throw new Error("hero card not found on page");
