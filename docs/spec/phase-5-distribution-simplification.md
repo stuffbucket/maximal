@@ -4,7 +4,7 @@
 
 Reduce four user-visible Windows install paths (MSI, install.ps1, .zip,
 Homebrew-not-applicable) to one (MSI). Add a config-snapshot file so
-`maximal uninstall --revert-claude` correctly restores the user's prior
+`maximal uninstall --force` correctly restores the user's prior
 state — including MDM-tier `coworkEgressAllowedHosts` values that
 `configure-claude-desktop` clears.
 
@@ -70,7 +70,7 @@ Schema:
 Apply behaviour unchanged: write our 16-key default profile, clear MDM
 `coworkEgressAllowedHosts`.
 
-`uninstall --revert-claude` reads the snapshot and:
+`uninstall --force` reads the snapshot and:
 
 1. For each key in `fileTier.priorKeys`: if `__UNSET__`, remove from JSON;
    else write back the prior value.
@@ -106,7 +106,7 @@ Add/Remove Programs registry, etc.) and writes the marker.
 
 - The install landing page lists exactly: "macOS — Homebrew or DMG",
   "Windows — MSI". `install.ps1` is not referenced.
-- `configure-claude-desktop` followed by `uninstall --revert-claude` on a
+- `configure-claude-desktop` followed by `uninstall --force` on a
   machine that previously had `coworkEgressAllowedHosts: ["github.com"]`
   in its MDM tier *restores* that array. Verified by `defaults read` after
   the round-trip.

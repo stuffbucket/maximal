@@ -36,7 +36,7 @@ There is **no single function** that returns the effective merged
 view of "what would this proxy use right now, and where did each
 value come from." Instead:
 
-- `src/debug.ts` reconstructs it for the `copilot-api debug` command.
+- `src/debug.ts` reconstructs it for the `maximal debug` command.
 - `/settings/api/diagnostics` reconstructs it again for the UI.
 - Individual route handlers reconstruct slices ("read the secret for
   this provider," "read the active account") inline.
