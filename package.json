@@ -54,7 +54,8 @@
     "sbom": "bun scripts/sbom.ts",
     "scan:secrets": "trufflehog filesystem . --no-verification --fail --no-update --exclude-paths .trufflehog-exclude",
     "start": "NODE_ENV=production bun run ./src/main.ts",
-    "typecheck": "tsc"
+    "typecheck": "tsc",
+    "ui:harness": "bun run build:ui && bun run scripts/ui-harness.ts"
   },
   "simple-git-hooks": {
     "pre-commit": "bunx lint-staged"

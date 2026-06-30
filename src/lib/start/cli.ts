@@ -1,7 +1,7 @@
 /**
  * citty `start` subcommand: argument schema + thin mapping to runServer().
  *
- * Kept in its own file so src/start.ts can focus on orchestration
+ * Kept in its own file so src/lib/start/run-server.ts can focus on orchestration
  * (runServer + its boot phases) rather than CLI arg plumbing. The
  * `start` value is re-exported from src/start.ts to preserve the
  * `import { start } from "~/start"` path that src/main.ts and tests

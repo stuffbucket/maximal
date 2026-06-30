@@ -362,7 +362,7 @@ function fetchErrorFromPost(err: PostErr): WebFetchErrorCode {
 
 /**
  * Description of which executor `selectExecutor()` would return for
- * a given env, with the diagnostic shape used by `copilot-api debug`
+ * a given env, with the diagnostic shape used by `maximal debug`
  * and `/_debug/state`. Pure — no side effects, no instantiation.
  *
  * Discriminated on `kind`. The Ollama variant carries the resolved

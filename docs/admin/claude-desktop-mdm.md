@@ -26,16 +26,16 @@ with `defaults write` (no MDM needed) and Claude Desktop respects them.
 file-based managed-settings > Windows registry. The
 `claude_desktop_config.json` UI preferences sit below the managed tier.
 
-## Default profile written by `copilot-api configure-claude-desktop`
+## Default profile written by `maximal configure-claude-desktop`
 
-`copilot-api setup` is client-neutral and **does not configure Claude
+`maximal setup` is client-neutral and **does not configure Claude
 Desktop**. To pair Claude Desktop with the proxy, run the opt-in
 subcommand:
 
 ```sh
-copilot-api configure-claude-desktop          # write the profile
-copilot-api configure-claude-desktop --revert # remove our keys
-copilot-api configure-claude-desktop --force  # write even if Claude Desktop isn't installed yet
+maximal configure-claude-desktop          # write the profile
+maximal configure-claude-desktop --revert # remove our keys
+maximal configure-claude-desktop --force  # write even if Claude Desktop isn't installed yet
 ```
 
 The command writes the full "Default" profile that Claude Desktop's
@@ -68,7 +68,8 @@ gateway-wiring keys. The complete set:
 `allowedWorkspaceFolders` is parameterized to the running user's
 `$HOME` and the directory is created on disk if missing. The merge is
 allowlist-only — keys outside this set are preserved verbatim, and
-`copilot-api uninstall --revert-claude` removes exactly these keys.
+`maximal configure-claude-desktop --revert` (or `maximal uninstall --force`)
+removes exactly these keys.
 
 `preferences` is the one **nested** block we touch: we set only the
 `coworkWebSearchEnabled` sub-key and preserve every other preference

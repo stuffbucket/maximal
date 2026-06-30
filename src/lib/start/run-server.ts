@@ -11,9 +11,9 @@
 import consola from "consola"
 import { serve } from "srvx"
 
+import { removeLegacyShimIfPresent } from "~/apps/claude-code/detect"
+import { reconcileClaudeCodeOnBoot } from "~/apps/claude-code/reconcile"
 import { type AccountType } from "~/lib/auth-types"
-import { removeLegacyShimIfPresent } from "~/lib/claude-cli-detect"
-import { reconcileClaudeCodeOnBoot } from "~/lib/claude-code-reconcile"
 import { ensureCliSymlink } from "~/lib/cli-path"
 import { mergeConfigWithDefaults } from "~/lib/config"
 import { initOpencodeVersion } from "~/lib/opencode"

@@ -23,7 +23,7 @@ imminent.
   removing it.
 - Deferred (not scheduled) because there's no pain right now. The
   cleanup-PRD work (M1–M6) already answers the cold-debugging cases
-  via `copilot-api debug` and `/_debug/state`. Observability is the
+  via `maximal debug` and `/_debug/state`. Observability is the
   next layer up: history, search, correlation across sessions.
 
 ## Problem
@@ -58,7 +58,7 @@ state?" in one command. What it still can't answer:
 | Claude Desktop's own OTel exports land in the same pipeline | Both sources visible in the SigNoz trace explorer; `traceparent` propagates from client into proxy spans |
 | User's five specific questions are answerable from a dashboard | "Active sessions / subagent count / context fullness / session activity / sessions idle" — each as a panel |
 | MIT-licensed end to end | SigNoz (MIT), OTel Collector (Apache 2.0 — kept since it's industry standard, not a UI), proxy SDK code (MIT) |
-| Doesn't replace existing diagnostics | `copilot-api debug`, `/_debug/state`, daily logs all remain functional and authoritative for cold inspection |
+| Doesn't replace existing diagnostics | `maximal debug`, `/_debug/state`, daily logs all remain functional and authoritative for cold inspection |
 
 ## Non-goals
 
@@ -71,7 +71,7 @@ state?" in one command. What it still can't answer:
 - **Hosted backend.** The point is local. Grafana Cloud / Honeycomb /
   Datadog are explicitly out — they're fine paths but not what this
   PRD scopes.
-- **Replacing `copilot-api debug` or `/_debug/state`.** Those answer
+- **Replacing `maximal debug` or `/_debug/state`.** Those answer
   "right now" questions in one command; observability adds history
   on top, not as a replacement.
 - **Replacing the daily log.** Logs stay; logs are the source of
@@ -256,7 +256,7 @@ export.
   buffers. Mitigation: SDK config sets a tight `BatchSpanProcessor`
   timeout and bounded queue so a stalled collector doesn't leak
   memory in the proxy.
-- **`copilot-api debug` already covers the static questions.**
+- **`maximal debug` already covers the static questions.**
   Risk that this milestone adds operational burden (a docker stack)
   for marginal value. Mitigation: keep the SDK behavior gated on the
   env var; running the proxy with no observability is identical to
@@ -269,7 +269,7 @@ End-to-end test for the originating motivation:
 ```
 $ docker compose --profile signoz up -d
 $ scripts/install-claude-otel.sh
-$ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 copilot-api start
+$ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 maximal start
 $ open http://localhost:3301
 
 # In the SigNoz UI:
@@ -306,7 +306,7 @@ This PRD is intentionally not scheduled. Pick it up when one of:
 - Someone wants to study context-window utilization across models
   empirically (the O3 dashboards are the cheapest way to do this)
 
-Until then: cold-debugging via `copilot-api debug` and the daily log
+Until then: cold-debugging via `maximal debug` and the daily log
 is sufficient.
 
 ## Out of scope (this PRD)

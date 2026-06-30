@@ -23,7 +23,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-import type { ClaudeInstall } from "~/lib/claude-cli-detect"
+import type { ClaudeInstall } from "~/apps/claude-code/detect"
 import type { AppConfig } from "~/lib/config"
 
 const ROUTE_3P_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "apps-route-3p-"))
@@ -45,9 +45,9 @@ void mock.module("~/lib/config", () => ({
   },
 }))
 
-const actualDetect = await import("~/lib/claude-cli-detect")
+const actualDetect = await import("~/apps/claude-code/detect")
 const realDetect = actualDetect.detectClaudeInstalls
-void mock.module("~/lib/claude-cli-detect", () => ({
+void mock.module("~/apps/claude-code/detect", () => ({
   ...actualDetect,
   detectClaudeInstalls: (options?: Record<string, unknown>) =>
     options && Object.keys(options).length > 0 ?
@@ -55,7 +55,7 @@ void mock.module("~/lib/claude-cli-detect", () => ({
     : installsFixture,
 }))
 
-const actualCcSettings = await import("~/lib/claude-code-settings")
+const actualCcSettings = await import("~/apps/claude-code/config")
 const realCcApply = actualCcSettings.applyProxyBaseUrl
 const realCcRevert = actualCcSettings.revertProxyBaseUrl
 const realCcConfigured = actualCcSettings.isProxyBaseUrlConfigured
@@ -64,7 +64,7 @@ const realCcRead = actualCcSettings.readClaudeCodeSettings
 // We deliberately do NOT override getClaudeCodeSettingsPath — the route
 // never calls it (it passes the path explicitly via these wrappers), and
 // overriding it would bleed into the writer's own path-resolution tests.
-void mock.module("~/lib/claude-code-settings", () => ({
+void mock.module("~/apps/claude-code/config", () => ({
   ...actualCcSettings,
   applyProxyBaseUrl: (filePath: string = ROUTE_CC_SETTINGS) =>
     realCcApply(filePath),
@@ -76,7 +76,7 @@ void mock.module("~/lib/claude-code-settings", () => ({
     realCcRead(filePath),
 }))
 
-const actualDesktop = await import("~/lib/claude-desktop-3p-config")
+const actualDesktop = await import("~/apps/claude-desktop/config")
 const realApply = actualDesktop.applyConfigLibraryProfile
 const realRevert = actualDesktop.revertConfigLibraryProfile
 const realIsApplied = actualDesktop.isConfigLibraryApplied
@@ -85,7 +85,7 @@ const realGetDir = actualDesktop.getClaude3pDir
 // home) so this mock stays behaviorally identical to the real module.
 // Bun's `mock.module` persists forward across files in a run, so a wrapper
 // that dropped later args would corrupt sibling tests that pass them.
-void mock.module("~/lib/claude-desktop-3p-config", () => ({
+void mock.module("~/apps/claude-desktop/config", () => ({
   ...actualDesktop,
   applyConfigLibraryProfile: (
     home: string = ROUTE_3P_HOME,
@@ -105,7 +105,7 @@ void mock.module("~/lib/claude-desktop-3p-config", () => ({
 
 const { appsRoutes } = await import("~/routes/settings/apps")
 const { getConfig } = await import("~/lib/config")
-const { isProxyBaseUrlConfigured } = await import("~/lib/claude-code-settings")
+const { isProxyBaseUrlConfigured } = await import("~/apps/claude-code/config")
 
 function buildApp() {
   const app = new Hono()

@@ -18,6 +18,7 @@
  *   src/lib/start/bootstrap.ts          — upstream + secrets bootstrap
  *   src/lib/start/shutdown.ts           — SIGTERM + parent-death handlers
  *   src/lib/start/claude-code-flow.ts   — interactive --claude-code helper
+ *   src/lib/start/session-sentinel.ts   — crash-detection session sentinel
  */
 
 export { BOOT_STATUS_MARKER, emitBootStatus } from "~/lib/start/boot-status"

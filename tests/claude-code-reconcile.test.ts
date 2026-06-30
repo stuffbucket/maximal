@@ -14,14 +14,15 @@ import os from "node:os"
 import path from "node:path"
 
 import {
-  reconcileClaudeCodeOnBoot,
-  reconcileClaudeCodeOnShutdown,
-} from "~/lib/claude-code-reconcile"
-import {
+  API_KEY_HELPER_COMMAND,
   isProxyBaseUrlConfigured,
   PROXY_BASE_URL,
   readClaudeCodeSettings,
-} from "~/lib/claude-code-settings"
+} from "~/apps/claude-code/config"
+import {
+  reconcileClaudeCodeOnBoot,
+  reconcileClaudeCodeOnShutdown,
+} from "~/apps/claude-code/reconcile"
 
 const TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "cc-reconcile-"))
 const SETTINGS = path.join(TMP_DIR, "settings.json")
@@ -86,7 +87,10 @@ describe("reconcileClaudeCodeOnShutdown", () => {
     // Edge case: intent off but a stale URL is on disk. Shutdown reconcile
     // is intent-gated, so it must NOT touch it — that's the boot reconciler's
     // and the toggle's job, not shutdown's.
-    writeSettings({ env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL } })
+    writeSettings({
+      apiKeyHelper: API_KEY_HELPER_COMMAND,
+      env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL },
+    })
     reconcileClaudeCodeOnShutdown(false, SETTINGS)
     expect(isProxyBaseUrlConfigured(SETTINGS)).toBe(true)
   })

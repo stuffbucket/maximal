@@ -128,7 +128,7 @@ Returns `{ "token": "<copilotToken>" | null }`; on failure `500`
 
 Unauthenticated **but gated**: returns `404` unless `state.verbose` is
 true (`src/routes/debug/route.ts:25-57`). The live equivalent of
-`copilot-api debug`. Body bundles `git`, `runtime`
+`maximal debug`. Body bundles `git`, `runtime`
 (`account_type`, `verbose`, `manual_approve`, rate-limit settings,
 `models_loaded`/`models_count`, `copilot_token_present`,
 `github_token_present`), `config` (summarized), `executor`, `caches`

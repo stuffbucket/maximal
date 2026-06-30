@@ -6,6 +6,10 @@ import { BUILD_VERSION } from "./lib/build-info"
 import { bindElectronFetch } from "./lib/electron-fetch"
 
 const cliArgs = {
+  apiKeyHelper: {
+    type: "string",
+    description: "Print the API key for an integrated client.",
+  },
   "api-home": {
     type: "string",
     description: "Path to the API home directory.",
@@ -33,13 +37,17 @@ if (typeof args["enterprise-url"] === "string") {
   process.env.COPILOT_API_ENTERPRISE_URL = args["enterprise-url"]
 }
 
+if (typeof args.apiKeyHelper === "string") {
+  const { runApiKeyHelper } = await import("./lib/api-key-helper")
+  process.exit(runApiKeyHelper(args.apiKeyHelper))
+}
+
 bindElectronFetch()
 
 // Dynamically import other modules to ensure environment variables are set
 const { auth } = await import("./auth")
 const { checkUsage } = await import("./check-usage")
-const { configureClaudeCode } = await import("./configure-claude-code")
-const { configureClaudeDesktop } = await import("./configure-claude-desktop")
+const { getAppCliCommands } = await import("./apps/registry")
 const { debug } = await import("./debug")
 const { setup } = await import("./setup")
 const { start } = await import("./start")
@@ -56,8 +64,7 @@ const main = defineCommand({
     auth,
     start,
     setup,
-    "configure-claude-code": configureClaudeCode,
-    "configure-claude-desktop": configureClaudeDesktop,
+    ...getAppCliCommands(),
     uninstall,
     "check-usage": checkUsage,
     debug,

@@ -20,7 +20,7 @@ import {
   getClaude3pDir,
   isConfigLibraryApplied,
   revertConfigLibraryProfile,
-} from "~/lib/claude-desktop-3p-config"
+} from "~/apps/claude-desktop/config"
 
 let home: string
 

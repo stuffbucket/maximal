@@ -34,8 +34,8 @@ Two extra footguns specific to "Maximal building Maximal":
   kills the host proxy you're developing against.
 - **A `dev`/test build that reconfigures Claude Code / Claude Desktop will
   repoint your *real* integration at the dev port.** `PROXY_BASE_URL`
-  in `src/lib/claude-code-settings.ts` is hardcoded to `:4141`, and
-  `src/lib/claude-desktop-3p-config.ts` defaults its `baseUrl` to
+  in `src/apps/claude-code/config.ts` is hardcoded to `:4141`, and
+  `src/apps/claude-desktop/config.ts` defaults its `baseUrl` to
   `http://127.0.0.1:4141`. The `dev` channel runs on `4242`, so it must
   **not** write those integration files (or must write them to a separate
   profile) — otherwise it points your client at the dev sidecar. This is
@@ -90,7 +90,7 @@ needs no change — it follows whatever port the sidecar opens.
 The port is the highest-drift seam: it is hardcoded **twice and
 independently** today — `SIDECAR_PORT = 4141` (Rust const, `lib.rs`) and
 `default: "4141"` (TS CLI, `cli.ts`) — plus literal `:4141` in the Claude
-integration writers (`claude-code-settings.ts`, `claude-desktop-3p-config.ts`).
+integration writers (`src/apps/claude-code/config.ts`, `src/apps/claude-desktop/config.ts`).
 That duplication is exactly what caused the historical `4142` drift bug
 that broke `app:dev` (PR #119). The strategy is built to kill that bug
 class, not just to pick a second number.

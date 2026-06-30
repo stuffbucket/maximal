@@ -192,15 +192,15 @@ function wireUninstall(): void {
 }
 
 async function runInAppUninstall(): Promise<void> {
-  const revertClaude =
-    document.querySelector<HTMLInputElement>("[data-uninstall-revert-claude]")
-      ?.checked ?? false;
   const purge =
     document.querySelector<HTMLInputElement>("[data-uninstall-purge]")
       ?.checked ?? false;
 
-  const clauses = ["removes the maximal CLI"];
-  if (revertClaude) clauses.push("reverts Claude Desktop’s keys");
+  // The in-app uninstall always runs with --force (the Rust command adds it):
+  // it can't surface the CLI's refuse-while-apps-enabled prompt, so it disables
+  // + reverts every app integration through the registry. So "reverts app
+  // integrations" is always part of the summary, not an opt-in.
+  const clauses = ["removes the maximal CLI", "reverts app integrations"];
   if (purge) clauses.push("deletes stored secrets & config");
   const tail = clauses.length > 1 ? `, and ${clauses.pop() ?? ""}` : "";
   const summary = `${clauses.join(", ")}${tail}`;
@@ -215,7 +215,7 @@ async function runInAppUninstall(): Promise<void> {
   setUninstallError(null);
   setBusy(true, "Uninstalling…");
   try {
-    await invoke("uninstall_maximal", { revertClaude, purge });
+    await invoke("uninstall_maximal", { purge });
     showUninstallComplete();
   } catch (err) {
     // Tauri rejects with the Err(String) reason from the Rust command, or a
