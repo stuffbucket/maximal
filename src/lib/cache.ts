@@ -202,7 +202,7 @@ export class SingletonCache<V> {
 }
 
 /** Snapshot of every registered cache, for /_debug/state and
- *  `copilot-api debug`. */
+ *  `maximal debug`. */
 export function allCacheMetrics(): Array<CacheMetrics> {
   return [...cacheRegistry].map((c) => c.metrics())
 }

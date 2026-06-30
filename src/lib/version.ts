@@ -1,6 +1,6 @@
 /**
  * Resolve the running proxy's source revision so /_debug/state and
- * `copilot-api debug` can answer "is the deployed binary on the
+ * `maximal debug` can answer "is the deployed binary on the
  * commit I expect?" without spawning a subprocess.
  *
  * Reads `.git/HEAD` directly — if it's a symbolic ref, follows it to

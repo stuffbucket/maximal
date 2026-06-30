@@ -1,7 +1,7 @@
 /**
  * /_debug/state — runtime introspection endpoint.
  *
- * Same shape as `copilot-api debug --json`, but live from the running
+ * Same shape as `maximal debug --json`, but live from the running
  * proxy. Gated on `state.verbose` so it's 404 by default. Pairs with
  * the `debug` subcommand: that one for cold inspection, this for when
  * a restart isn't an option.

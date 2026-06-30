@@ -149,7 +149,7 @@ export function describeExecutor(
 }
 
 /** Project AppConfig down to the diagnostic subset displayed by both
- *  `copilot-api debug` and `/_debug/state`. Adding a field updates
+ *  `maximal debug` and `/_debug/state`. Adding a field updates
  *  one place. */
 export function summarizeConfig(config: AppConfig): DebugInfo["config"] {
   return {
