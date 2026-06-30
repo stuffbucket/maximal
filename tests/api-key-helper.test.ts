@@ -4,6 +4,7 @@ import type { ApiKeyEntry, AppConfig } from "~/lib/config"
 
 import {
   apiKeyHelperCommand,
+  isOwnedApiKeyHelper,
   resolveApiKey,
   runApiKeyHelper,
 } from "~/lib/api-key-helper"
@@ -34,19 +35,70 @@ function config(auth: AppConfig["auth"]): AppConfig {
 }
 
 describe("apiKeyHelperCommand", () => {
+  // An explicit execPath keeps these deterministic (the default is the test
+  // runner's binary). The command embeds the ABSOLUTE path, double-quoted, so a
+  // GUI-launched client with a minimal PATH can still find maximal.
+  const BIN = "/Applications/Maximal.app/Contents/MacOS/maximal"
+
   test("includes the trimmed label when one is given", () => {
-    expect(apiKeyHelperCommand("claude-code")).toBe(
-      "maximal --apiKeyHelper claude-code",
+    expect(apiKeyHelperCommand("claude-code", BIN)).toBe(
+      `"${BIN}" --apiKeyHelper claude-code`,
     )
-    expect(apiKeyHelperCommand("  spaced  ")).toBe(
-      "maximal --apiKeyHelper spaced",
+    expect(apiKeyHelperCommand("  spaced  ", BIN)).toBe(
+      `"${BIN}" --apiKeyHelper spaced`,
     )
   })
 
   test("omits the label when absent or blank", () => {
-    expect(apiKeyHelperCommand()).toBe("maximal --apiKeyHelper")
-    expect(apiKeyHelperCommand("")).toBe("maximal --apiKeyHelper")
-    expect(apiKeyHelperCommand("   ")).toBe("maximal --apiKeyHelper")
+    expect(apiKeyHelperCommand(undefined, BIN)).toBe(`"${BIN}" --apiKeyHelper`)
+    expect(apiKeyHelperCommand("", BIN)).toBe(`"${BIN}" --apiKeyHelper`)
+    expect(apiKeyHelperCommand("   ", BIN)).toBe(`"${BIN}" --apiKeyHelper`)
+  })
+
+  test("quotes a path containing spaces so sh/cmd treat it as one token", () => {
+    const spaced = "/Users/x/My Apps/Maximal.app/Contents/MacOS/maximal"
+    expect(apiKeyHelperCommand("claude-code", spaced)).toBe(
+      `"${spaced}" --apiKeyHelper claude-code`,
+    )
+  })
+})
+
+describe("isOwnedApiKeyHelper", () => {
+  test("recognizes our command regardless of the binary path", () => {
+    // Current path, an older app path, and a Homebrew path all end in our
+    // signature → all ours (so a stale path is healed/stripped, not orphaned).
+    expect(
+      isOwnedApiKeyHelper(
+        '"/Applications/Maximal.app/Contents/MacOS/maximal" --apiKeyHelper claude-code',
+        "claude-code",
+      ),
+    ).toBe(true)
+    expect(
+      isOwnedApiKeyHelper(
+        '"/opt/homebrew/bin/maximal" --apiKeyHelper claude-code',
+        "claude-code",
+      ),
+    ).toBe(true)
+    // The old bare-string form is still recognized as ours (upgrade path).
+    expect(
+      isOwnedApiKeyHelper("maximal --apiKeyHelper claude-code", "claude-code"),
+    ).toBe(true)
+  })
+
+  test("rejects a genuinely foreign apiKeyHelper", () => {
+    expect(isOwnedApiKeyHelper("/usr/bin/my-secret-tool", "claude-code")).toBe(
+      false,
+    )
+    expect(isOwnedApiKeyHelper("echo hunter2", "claude-code")).toBe(false)
+    // Right flag, wrong label → not ours for this client.
+    expect(
+      isOwnedApiKeyHelper('"/x/maximal" --apiKeyHelper other', "claude-code"),
+    ).toBe(false)
+  })
+
+  test("rejects non-string input", () => {
+    expect(isOwnedApiKeyHelper(undefined, "claude-code")).toBe(false)
+    expect(isOwnedApiKeyHelper(42, "claude-code")).toBe(false)
   })
 })
 

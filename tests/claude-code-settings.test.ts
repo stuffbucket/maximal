@@ -286,6 +286,12 @@ describe("applyProxyBaseUrl (end-to-end)", () => {
     expect(read()).toEqual({
       apiKeyHelper: API_KEY_HELPER_COMMAND,
       env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL },
+      // Snapshot of the prior state: both fields were absent → UNSET, so a later
+      // disable removes them (returns the file to nothing).
+      _maximalPrior: {
+        ANTHROPIC_BASE_URL: "__UNSET__",
+        apiKeyHelper: "__UNSET__",
+      },
     })
   })
 
@@ -296,6 +302,10 @@ describe("applyProxyBaseUrl (end-to-end)", () => {
     expect(read()).toEqual({
       apiKeyHelper: API_KEY_HELPER_COMMAND,
       env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL },
+      _maximalPrior: {
+        ANTHROPIC_BASE_URL: "__UNSET__",
+        apiKeyHelper: "__UNSET__",
+      },
     })
   })
 
@@ -387,6 +397,56 @@ describe("revertProxyBaseUrl", () => {
     expect(result.wrote).toBe(false)
     expect(result.remainingKeys.sort()).toEqual(["env", "theme"])
     expect(read()).toEqual({ theme: "dark", env: { FOO: "1" } })
+  })
+})
+
+describe("apply→revert snapshot round-trip (restores prior state)", () => {
+  it("absent → enable → disable returns the file to nothing", () => {
+    applyProxyBaseUrl(settingsPath)
+    revertProxyBaseUrl(settingsPath)
+    // Nothing was there before, so disable removes everything (file gone).
+    expect(fs.existsSync(settingsPath)).toBe(false)
+  })
+
+  it("restores a user's OWN ANTHROPIC_BASE_URL that equals the proxy URL", () => {
+    // The coincidence trap: the user had set the proxy URL themselves. Ownership
+    // reads "ours", but a blind delete would drop THEIR value. The snapshot makes
+    // disable restore it exactly.
+    writeRaw(JSON.stringify({ env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL } }))
+    applyProxyBaseUrl(settingsPath)
+    revertProxyBaseUrl(settingsPath)
+    expect(read()).toEqual({ env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL } })
+  })
+
+  it("restores a user's own apiKeyHelper that matches our signature", () => {
+    // A pre-existing helper that happens to carry our --apiKeyHelper claude-code
+    // signature (e.g. an older maximal path) is captured and restored verbatim.
+    const userHelper = '"/old/maximal" --apiKeyHelper claude-code'
+    writeRaw(JSON.stringify({ apiKeyHelper: userHelper }))
+    applyProxyBaseUrl(settingsPath)
+    revertProxyBaseUrl(settingsPath)
+    expect(read()).toEqual({ apiKeyHelper: userHelper })
+  })
+
+  it("preserves unrelated settings + sibling env across the round-trip", () => {
+    const before = {
+      theme: "dark",
+      permissions: { allow: ["Bash"] },
+      env: { FOO: "1", ANTHROPIC_API_KEY: "sk-secret" },
+    }
+    writeRaw(JSON.stringify(before))
+    applyProxyBaseUrl(settingsPath)
+    revertProxyBaseUrl(settingsPath)
+    expect(read()).toEqual(before)
+  })
+
+  it("re-apply (self-heal) does not poison the snapshot", () => {
+    // The execPath self-heal re-runs applyProxyBaseUrl. It must NOT capture our
+    // own values as the prior state, or disable would restore the proxy URL.
+    applyProxyBaseUrl(settingsPath)
+    applyProxyBaseUrl(settingsPath) // self-heal / re-apply
+    revertProxyBaseUrl(settingsPath)
+    expect(fs.existsSync(settingsPath)).toBe(false)
   })
 })
 
