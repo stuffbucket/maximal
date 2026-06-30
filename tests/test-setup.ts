@@ -34,7 +34,10 @@ beforeEach(() => {
   consola.level = 3
 })
 
-ensureUiEmbedStub()
+// Force the EMPTY stub: a stray build (build:ui / app:dev / ui:harness) may have
+// left a populated embed behind, which flips `HAS_EMBED` true and makes the
+// ui-route tests serve the real embedded UI instead of their fixture dir.
+ensureUiEmbedStub(true)
 
 if (!process.env.COPILOT_API_HOME) {
   const dir = path.join(os.tmpdir(), `maximal-test-home-${process.pid}`)
