@@ -264,7 +264,7 @@ function removeBinary(opts: InstallTargetOptions = {}): void {
 /** Apps currently routing through the proxy, by the contract's `isEnabled()`.
  *  Drives both the precondition message and the `--force` disable pass — no
  *  per-app knowledge lives here. */
-function enabledApps(): Array<ClientApp> {
+export function enabledApps(): Array<ClientApp> {
   return getAllApps().filter((app) => app.isEnabled())
 }
 
@@ -277,7 +277,7 @@ function enabledApps(): Array<ClientApp> {
  * The PATH block is maximal's own artifact, not an app integration, so it stays
  * here rather than in any app.
  */
-async function revertAppIntegrations(
+export async function revertAppIntegrations(
   stillEnabled: ReadonlyArray<ClientApp>,
 ): Promise<void> {
   for (const app of stillEnabled) {
