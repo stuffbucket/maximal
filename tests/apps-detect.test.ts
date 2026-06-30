@@ -17,7 +17,7 @@ import {
   detectClaudeInstalls,
   readClaudeVersion,
   SHIM_MARKER,
-} from "~/lib/claude-cli-detect"
+} from "~/apps/claude-code/detect"
 
 let root: string
 

@@ -33,7 +33,7 @@ describe("uninstall — Claude Desktop revert integration", () => {
       revertConfigLibraryProfile,
       isConfigLibraryApplied,
       getClaude3pDir,
-    } = await import("~/lib/claude-desktop-3p-config")
+    } = await import("~/apps/claude-desktop/config")
 
     const home = workDir
     const dir = getClaude3pDir(home)
@@ -70,7 +70,7 @@ describe("uninstall — Claude Desktop revert integration", () => {
 describe("uninstall — Claude Code settings revert integration", () => {
   it("reverts only the ANTHROPIC_BASE_URL we wrote, preserving other env", async () => {
     const { applyProxyBaseUrl, revertProxyBaseUrl, isProxyBaseUrlConfigured } =
-      await import("~/lib/claude-code-settings")
+      await import("~/apps/claude-code/config")
     const settings = path.join(workDir, "settings.json")
     // Seed a sibling env var we must NOT touch.
     fs.writeFileSync(
@@ -93,13 +93,13 @@ describe("uninstall — Claude Code settings revert integration", () => {
   })
 
   it("revert is a no-op when nothing was configured", async () => {
-    const { revertProxyBaseUrl } = await import("~/lib/claude-code-settings")
+    const { revertProxyBaseUrl } = await import("~/apps/claude-code/config")
     const settings = path.join(workDir, "settings.json")
     expect(revertProxyBaseUrl(settings).wrote).toBe(false)
   })
 
   it("does not revert a foreign ANTHROPIC_BASE_URL", async () => {
-    const { revertProxyBaseUrl } = await import("~/lib/claude-code-settings")
+    const { revertProxyBaseUrl } = await import("~/apps/claude-code/config")
     const settings = path.join(workDir, "settings.json")
     fs.writeFileSync(
       settings,

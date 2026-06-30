@@ -12,10 +12,8 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-import {
-  claudeAppInstalled,
-  configureClaudeDesktop,
-} from "~/configure-claude-desktop"
+import { configureClaudeDesktop } from "~/apps/claude-desktop/cli"
+import { claudeAppInstalled } from "~/apps/claude-desktop/detect"
 
 describe("claudeAppInstalled — Windows (platform injected)", () => {
   let home: string

@@ -16,8 +16,8 @@
 import { beforeEach, describe, expect, test } from "bun:test"
 import { Hono } from "hono"
 
+import type { GhCliStatus } from "~/lib/system/gh-cli"
 import type { GhRoutesDeps } from "~/routes/settings/gh"
-import type { GhCliStatus } from "~/services/gh-cli"
 
 import { createGhRoutes } from "~/routes/settings/gh"
 

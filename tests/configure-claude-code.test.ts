@@ -17,12 +17,12 @@ import path from "node:path"
 import {
   configureClaudeCode,
   runConfigureClaudeCode,
-} from "~/configure-claude-code"
+} from "~/apps/claude-code/cli"
 import {
   isProxyBaseUrlConfigured,
   PROXY_BASE_URL,
   readClaudeCodeSettings,
-} from "~/lib/claude-code-settings"
+} from "~/apps/claude-code/config"
 
 const TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "cc-configure-"))
 const SETTINGS = path.join(TMP_DIR, "settings.json")

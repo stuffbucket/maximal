@@ -1,29 +1,3 @@
-#!/usr/bin/env node
-/**
- * `maximal configure-claude-code` — opt-in subcommand that wires Claude
- * Code to point at the local proxy by writing `env.ANTHROPIC_BASE_URL`
- * into `~/.claude/settings.json`.
- *
- * This is the *shared reverter* the Tauri shell calls on the sidecar's
- * behalf. The proxy reverts itself on graceful shutdown
- * (`reconcileClaudeCodeOnShutdown`), but a crash / SIGKILL gives it no
- * chance — so the shell, which outlives the sidecar, runs
- * `maximal configure-claude-code --revert` to clean up the stranded base
- * URL. Because it's a CLI subcommand it works even though the server is
- * already down.
- *
- *   - (no flag): write `env.ANTHROPIC_BASE_URL` (ownership-guarded —
- *     a foreign base URL is left untouched).
- *   - `--revert`: remove only the base URL we wrote (ownership-guarded;
- *     sibling env keys like ANTHROPIC_API_KEY are never touched).
- *
- * Unlike the Apps toggle, this does NOT change the persisted intent flag
- * (`config.apps.claudeCode.enabled`) — it only reconciles the on-disk
- * effect. The shell uses it purely to undo a crash-stranded write; the
- * intent stays whatever the user last chose, so the next clean boot
- * re-applies it.
- */
-
 import { defineCommand } from "citty"
 import consola from "consola"
 
@@ -31,12 +5,10 @@ import {
   applyProxyBaseUrl,
   getClaudeCodeSettingsPath,
   revertProxyBaseUrl,
-} from "./lib/claude-code-settings"
+} from "./config"
 
 interface ConfigureOptions {
   revert: boolean
-  /** Settings path override. Defaults to the resolved ~/.claude path; tests
-   *  inject a tmp path (avoids `mock.module` cross-file bleed — CLAUDE.md). */
   filePath?: string
 }
 

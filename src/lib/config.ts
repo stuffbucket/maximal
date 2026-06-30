@@ -54,6 +54,7 @@ export interface AppConfig {
    * GitHub releases ping entirely. See update-check.ts.
    */
   checkUpdates?: boolean
+  editorVersion?: string
   apps?: AppsConfig
 }
 

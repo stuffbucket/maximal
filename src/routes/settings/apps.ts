@@ -1,14 +1,6 @@
 /**
  * /settings/api/apps — wire downstream tools to talk to the proxy.
  *
- * Two active app kinds:
- *   - claude-code   (config): toggle Claude Code's proxy routing by writing
- *                   `env.ANTHROPIC_BASE_URL` into `~/.claude/settings.json`
- *                   (ownership-guarded; only that one key is ever touched).
- *   - claude-desktop (config): toggle Claude Desktop's proxy config via
- *                   the existing `applyProxyConfig`/`revertProxyConfig`.
- *   - copilot-cli   (coming-soon): placeholder card, no wiring yet.
- *
  * Auth-gated by the parent `/settings/api` middleware. Persistence is
  * `config.apps`, round-tripped through `writeConfig()`.
  */
@@ -17,21 +9,7 @@ import type { Context } from "hono"
 
 import { Hono } from "hono"
 
-import { claudeAppInstalled } from "~/configure-claude-desktop"
-import {
-  type ClaudeInstall,
-  detectClaudeInstalls,
-} from "~/lib/claude-cli-detect"
-import {
-  applyProxyBaseUrl,
-  isProxyBaseUrlConfigured,
-  revertProxyBaseUrl,
-} from "~/lib/claude-code-settings"
-import {
-  applyConfigLibraryProfile,
-  isConfigLibraryApplied,
-  revertConfigLibraryProfile,
-} from "~/lib/claude-desktop-3p-config"
+import { getAllApps, getApp } from "~/apps/registry"
 import { getConfig, writeConfig, type AppConfig } from "~/lib/config"
 import { forwardError, HTTPError } from "~/lib/error"
 import {
@@ -42,73 +20,10 @@ import {
   type AppEntry as AppEntryT,
 } from "~/lib/settings-types"
 
-/** The official Claude Code installer command surfaced when no install
- *  is detected. */
-const CLAUDE_CODE_INSTALL_COMMAND =
-  "curl -fsSL https://claude.ai/install.sh | sh"
-
 /** Build an HTTPError whose body is a plain message, so `forwardError`
  *  surfaces a clean `{ error: { message } }` at the given status. */
 function httpError(message: string, status: number): HTTPError {
   return new HTTPError(message, new Response(message, { status }))
-}
-
-function buildClaudeCodeApp(
-  precomputedInstalls?: ReadonlyArray<ClaudeInstall>,
-  conflict: AppEntryT["conflict"] = null,
-): AppEntryT {
-  // Detection spawns subprocesses (npm prefix, claude --version), so reuse
-  // an already-computed list when the caller has one (the toggle does).
-  // Detection is purely for "is claude installed?" (ready vs not-installed
-  // + the install hint) — routing is via the settings.json file now, not a
-  // per-binary shim, so there's no version picker / active flag.
-  const installs = precomputedInstalls ?? detectClaudeInstalls()
-
-  return {
-    id: "claude-code",
-    name: "Claude Code",
-    kind: "config",
-    enabled: isProxyBaseUrlConfigured(),
-    status: installs.length > 0 ? "ready" : "not-installed",
-    installs: installs.map((i) => ({
-      path: i.path,
-      version: i.version,
-      source: i.source,
-    })),
-    install:
-      installs.length === 0 ?
-        { method: "curl", command: CLAUDE_CODE_INSTALL_COMMAND }
-      : null,
-    conflict,
-  }
-}
-
-function buildClaudeDesktopApp(): AppEntryT {
-  const installed = claudeAppInstalled()
-  const configured = isConfigLibraryApplied()
-  return {
-    id: "claude-desktop",
-    name: "Claude Desktop",
-    kind: "config",
-    enabled: configured,
-    status: installed ? "ready" : "not-installed",
-    installs: [],
-    install: null,
-    conflict: null,
-  }
-}
-
-function buildCopilotCliApp(): AppEntryT {
-  return {
-    id: "copilot-cli",
-    name: "Copilot CLI",
-    kind: "coming-soon",
-    enabled: false,
-    status: "coming-soon",
-    installs: [],
-    install: null,
-    conflict: null,
-  }
 }
 
 /** Validate a single app object against the contract before returning
@@ -161,14 +76,13 @@ function persistClaudeDesktop(enabled: boolean): void {
 
 export const appsRoutes = new Hono()
 
-appsRoutes.get("/", (c) => {
+appsRoutes.get("/", async (c) => {
   try {
+    const appsPayloads = await Promise.all(
+      getAllApps().map((app) => app.getDetails()),
+    )
     const payload = {
-      apps: [
-        buildClaudeCodeApp(),
-        buildClaudeDesktopApp(),
-        buildCopilotCliApp(),
-      ],
+      apps: appsPayloads,
     }
     const parsed = AppsListResponse.safeParse(payload)
     if (!parsed.success) {
@@ -197,29 +111,26 @@ appsRoutes.post("/claude-code/toggle", async (c) => {
       throw httpError("Expected { enabled: boolean }", 400)
     }
 
+    const app = getApp("claude-code")
+    if (!app) throw httpError("App not found", 404)
+
     if (parsed.data.enabled) {
-      // Detection only gates "is claude installed?" — routing is via the
-      // settings.json file, not a per-binary shim.
-      const installs = detectClaudeInstalls()
-      if (installs.length === 0) {
+      const isInstalled = await app.detect()
+      if (!isInstalled) {
         throw httpError(
           "No Claude Code install detected. Install it first, then enable routing.",
           409,
         )
       }
-      // Ownership-guarded write of env.ANTHROPIC_BASE_URL. If the user (or
-      // another tool) already set a different base URL, applyProxyBaseUrl
-      // backs off and reports it; surface that as a conflict on the card.
-      const result = applyProxyBaseUrl()
-      const conflict =
-        result.skippedReason === "foreign-base-url" ? "foreign-base-url" : null
+      const result = await app.enable()
+      const conflict = result.conflict || null
       persistClaudeCode({ enabled: true })
-      return jsonApp(c, buildClaudeCodeApp(installs, conflict))
+      return jsonApp(c, await app.getDetails(conflict))
     }
 
-    revertProxyBaseUrl()
+    await app.disable()
     persistClaudeCode({ enabled: false })
-    return jsonApp(c, buildClaudeCodeApp())
+    return jsonApp(c, await app.getDetails())
   } catch (error) {
     return forwardError(c, error)
   }
@@ -233,14 +144,13 @@ appsRoutes.post("/claude-desktop/toggle", async (c) => {
       throw httpError("Expected { enabled: boolean }", 400)
     }
 
-    if (parsed.data.enabled) {
-      applyConfigLibraryProfile()
-    } else {
-      revertConfigLibraryProfile()
-    }
+    const app = getApp("claude-desktop")
+    if (!app) throw httpError("App not found", 404)
+
+    await (parsed.data.enabled ? app.enable() : app.disable())
     persistClaudeDesktop(parsed.data.enabled)
 
-    return jsonApp(c, buildClaudeDesktopApp())
+    return jsonApp(c, await app.getDetails())
   } catch (error) {
     return forwardError(c, error)
   }

@@ -14,7 +14,7 @@ import {
   revertProxyBaseUrl,
   stripBaseUrl,
   writeClaudeCodeSettings,
-} from "~/lib/claude-code-settings"
+} from "~/apps/claude-code/config"
 
 let dir: string
 let settingsPath: string

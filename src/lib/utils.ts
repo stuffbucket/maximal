@@ -7,8 +7,8 @@ import { networkInterfaces } from "node:os"
 import type { AnthropicMessagesPayload } from "~/lib/anthropic-types"
 
 import { getModels } from "~/services/copilot/get-models"
-import { getVSCodeVersion } from "~/services/get-vscode-version"
 
+import { getConfig } from "./config"
 import { getVSCodeDeviceId } from "./deviceid"
 import { setModels, state } from "./state"
 
@@ -31,11 +31,12 @@ export async function cacheModels(): Promise<void> {
   })
 }
 
-export const cacheVSCodeVersion = async () => {
-  const response = await getVSCodeVersion()
+export const cacheVSCodeVersion = (): Promise<void> => {
+  const response = getConfig().editorVersion ?? "1.124.0"
   state.vsCodeVersion = response
 
   consola.info(`Using VSCode version: ${response}`)
+  return Promise.resolve()
 }
 
 const invalidMacAddresses = new Set([

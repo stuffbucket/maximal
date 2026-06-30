@@ -2350,30 +2350,27 @@ fn restart_sidecar(app: AppHandle) {
 }
 
 /// Tauri command — run the in-app uninstall. Spawns the bundled sidecar with
-/// `maximal uninstall --unattended --keep-app` (plus `--revert-claude` /
-/// `--purge` per the booleans the Settings webview passes) and awaits the
-/// result. `--keep-app` is mandatory here: the running `.app` can't delete the
-/// bundle it's executing from, so the CLI removes the launchd agent, the
+/// `maximal uninstall --unattended --keep-app --force` (plus `--purge` when the
+/// Settings webview asks). `--force` is mandatory here: the in-app flow is an
+/// explicit "uninstall now" action that can't surface the CLI's
+/// refuse-while-apps-enabled message, so the CLI disables any enabled app
+/// integrations itself and reverts them through the registry. `--keep-app` is
+/// likewise mandatory: the running `.app` can't delete the bundle it's
+/// executing from, so the CLI removes the launchd agent, the
 /// `~/.local/bin/maximal` PATH symlink, and the other PATH binaries, then the
 /// user drags Maximal to the Trash to finish. Returns `Err(String)` (a
 /// human-readable reason) on a missing binary or non-zero exit so the webview
 /// can surface a non-blocking inline error instead of silently stranding the
 /// user. Mirrors the spawn+`.output()` shape of `reconcile_claude_code_revert`.
 #[tauri::command]
-async fn uninstall_maximal(
-    app: AppHandle,
-    revert_claude: bool,
-    purge: bool,
-) -> Result<(), String> {
-    eprintln!("[shell] in-app uninstall requested (revert_claude={revert_claude}, purge={purge})");
+async fn uninstall_maximal(app: AppHandle, purge: bool) -> Result<(), String> {
+    eprintln!("[shell] in-app uninstall requested (purge={purge})");
     let mut args: Vec<String> = vec![
         "uninstall".to_string(),
         "--unattended".to_string(),
         "--keep-app".to_string(),
+        "--force".to_string(),
     ];
-    if revert_claude {
-        args.push("--revert-claude".to_string());
-    }
     if purge {
         args.push("--purge".to_string());
     }

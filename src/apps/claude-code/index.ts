@@ -1,0 +1,94 @@
+import type { AppEntry } from "~/lib/settings-types"
+
+import type { AppUninstallResult, ClientApp } from "../index"
+
+import { configureClaudeCode } from "./cli"
+import {
+  isProxyBaseUrlConfigured,
+  applyProxyBaseUrl,
+  revertProxyBaseUrl,
+  getClaudeCodeSettingsPath,
+} from "./config"
+import { detectClaudeInstalls } from "./detect"
+import {
+  reconcileClaudeCodeOnBoot,
+  reconcileClaudeCodeOnShutdown,
+} from "./reconcile"
+
+const CLAUDE_CODE_INSTALL_COMMAND =
+  "curl -fsSL https://claude.ai/install.sh | sh"
+
+export const claudeCodeApp: ClientApp = {
+  id: "claude-code",
+  name: "Claude Code",
+  kind: "config",
+
+  detect() {
+    const installs = detectClaudeInstalls()
+    return Promise.resolve(installs.length > 0)
+  },
+
+  getDetails(conflict: AppEntry["conflict"] = null): Promise<AppEntry> {
+    const installs = detectClaudeInstalls()
+    return Promise.resolve({
+      id: "claude-code",
+      name: "Claude Code",
+      kind: "config",
+      enabled: isProxyBaseUrlConfigured(),
+      status: installs.length > 0 ? "ready" : "not-installed",
+      installs: installs.map((i) => ({
+        path: i.path,
+        version: i.version,
+        source: i.source,
+      })),
+      install:
+        installs.length === 0 ?
+          { method: "curl", command: CLAUDE_CODE_INSTALL_COMMAND }
+        : null,
+      conflict,
+    })
+  },
+
+  enable() {
+    const result = applyProxyBaseUrl()
+    const conflict =
+      result.skippedReason === "foreign-base-url" ? "foreign-base-url" : null
+    return Promise.resolve({
+      success: result.wrote || conflict === null,
+      conflict,
+    })
+  },
+
+  disable() {
+    const result = revertProxyBaseUrl()
+    return Promise.resolve({ success: result.wrote })
+  },
+
+  uninstall(): Promise<AppUninstallResult> {
+    // Ownership-guarded: removes only the ANTHROPIC_BASE_URL block we wrote,
+    // no-op when absent or foreign. The installer PATH block is maximal's own
+    // artifact (not an app integration), so the uninstaller handles that.
+    const reverted: Array<string> = []
+    const result = revertProxyBaseUrl()
+    if (result.wrote) {
+      reverted.push(`reverted ${getClaudeCodeSettingsPath()}`)
+    }
+    return Promise.resolve({ reverted })
+  },
+
+  isEnabled() {
+    return isProxyBaseUrlConfigured()
+  },
+
+  onBoot() {
+    reconcileClaudeCodeOnBoot()
+    return Promise.resolve()
+  },
+
+  onShutdown() {
+    reconcileClaudeCodeOnShutdown()
+    return Promise.resolve()
+  },
+
+  cliCommand: configureClaudeCode,
+}

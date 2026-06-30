@@ -2,12 +2,12 @@
 /**
  * `maximal uninstall` — reverse of `setup`.
  *
- * Stops the running proxy (launchd / Windows scheduled task), removes
- * the on-disk binary, and *optionally* purges the user's secrets
- * directory and reverts the Claude Desktop config touches. Defaults
- * are conservative: secrets stay, Claude Desktop config stays —
- * the user can pass `--purge` and `--revert-claude` to remove them
- * non-interactively, or accept the corresponding prompts.
+ * Stops the running proxy (launchd / Windows scheduled task), removes the
+ * on-disk binary, and reverts every app integration through the registry
+ * (`getAllApps()` → each app's ownership-guarded `uninstall()`). Refuses to run
+ * while any app is still enabled — naming them — unless `--force`, which
+ * disables each app first, then uninstalls. Secrets are kept by default; pass
+ * `--purge` to remove them.
  *
  * Spec: docs/spec/archive/internal-distribution-stream-b.md §B6.
  */
@@ -19,11 +19,9 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-import {
-  getClaudeCodeSettingsPath,
-  revertProxyBaseUrl,
-} from "./lib/claude-code-settings"
-import { revertConfigLibraryProfile } from "./lib/claude-desktop-3p-config"
+import type { ClientApp } from "./apps/index"
+
+import { getAllApps } from "./apps/registry"
 import {
   FIRST_LAUNCH_PATH_MARKER_END,
   FIRST_LAUNCH_PATH_MARKER_START,
@@ -32,7 +30,11 @@ import { PATHS } from "./lib/paths"
 
 interface RunUninstallOptions {
   purge: boolean
-  revertClaude: boolean
+  /** When true, uninstall even if apps are still enabled: disable each app
+   *  (idempotent) first, then run the registry revert sweep. Without it,
+   *  uninstall refuses while any app is enabled. Replaces the old
+   *  `--revert-claude` opt-in. */
+  force: boolean
   unattended: boolean
   /** When true, leave the application bundle (`/Applications/maximal.app`)
    *  on disk while still removing the `~/.local/bin/maximal` symlink and the
@@ -43,6 +45,26 @@ interface RunUninstallOptions {
 
 export async function runUninstall(opts: RunUninstallOptions): Promise<void> {
   consola.box("maximal uninstall")
+
+  // Precondition: refuse while any app still routes through the proxy, UNLESS
+  // --force. Uninstall removes maximal; it must not silently rip routing out
+  // from under an integration the user left switched ON. Name the enabled apps
+  // and fail with what to do. `--force` means "uninstall anyway": we disable
+  // each app first (step 4), so routing is cleaned up rather than orphaned.
+  // Checked via the registry's isEnabled(), so this needs no per-app knowledge.
+  const enabled = enabledApps()
+  if (enabled.length > 0 && !opts.force) {
+    const names = enabled.map((a) => a.name).join(", ")
+    consola.error(`These apps are still routing through maximal: ${names}.`)
+    consola.info(
+      "Turn them off in Settings → Apps (or e.g. `maximal configure-claude-code"
+        + " --revert`), then re-run `maximal uninstall`. Or pass `--force` to"
+        + " disable them and uninstall in one step.",
+    )
+    throw new Error(
+      `Refusing to uninstall while apps are enabled: ${names}. Disable them or pass --force.`,
+    )
+  }
 
   // 1. Stop the running proxy (best effort) -------------------------
   consola.info("Step 1/5: Stop the running proxy")
@@ -56,15 +78,16 @@ export async function runUninstall(opts: RunUninstallOptions): Promise<void> {
   consola.info("Step 3/5: Remove the binary")
   removeBinary({ keepApp: opts.keepApp })
 
-  // 4. Revert Claude Code routing + installer PATH block ------------
-  // Ownership-guarded: only removes the ANTHROPIC_BASE_URL we wrote.
-  consola.info("Step 4/5: Revert Claude Code routing")
-  removeClaudeCodeIntegration()
+  // 4. Revert any residual app integrations + installer PATH block ---
+  // Registry-driven: each app reverts its own (ownership-guarded) config via the
+  // contract. With the precondition above every app is already disabled, so this
+  // is a defensive sweep — plus it strips maximal's own first-launch PATH block.
+  consola.info("Step 4/5: Revert app integrations")
+  await revertAppIntegrations(enabled)
 
-  // 5. Optional: secrets + Claude Desktop config --------------------
+  // 5. Optional: secrets --------------------------------------------
   consola.info("Step 5/5: Optional cleanup")
   await maybePurgeSecrets(opts)
-  await maybeRevertClaude(opts)
 
   consola.box("Uninstall complete.")
 }
@@ -235,24 +258,43 @@ function removeBinary(opts: InstallTargetOptions = {}): void {
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Step 4: revert Claude Code routing + remove the installer PATH block.
+// Step 4: disable + revert app integrations (registry), strip PATH block.
 // ────────────────────────────────────────────────────────────────────
 
-/** Revert the Claude Code routing we applied (the `ANTHROPIC_BASE_URL`
- *  block in `~/.claude/settings.json`, ownership-guarded — only removed if
- *  it's ours), and strip the macOS first-launch installer PATH block
- *  (`# >>> maximal PATH >>>`) from the user's zsh rc files. Both are
- *  marker/ownership-scoped and no-op when absent, so this is always safe. */
-function removeClaudeCodeIntegration(): void {
-  try {
-    const reverted = revertProxyBaseUrl()
-    if (reverted.wrote) {
-      consola.success(`  reverted ${getClaudeCodeSettingsPath()}`)
-    } else {
-      consola.info("  Claude Code routing not configured; nothing to revert")
+/** Apps currently routing through the proxy, by the contract's `isEnabled()`.
+ *  Drives both the precondition message and the `--force` disable pass — no
+ *  per-app knowledge lives here. */
+function enabledApps(): Array<ClientApp> {
+  return getAllApps().filter((app) => app.isEnabled())
+}
+
+/**
+ * Revert every app's integration via the registry, then strip maximal's own
+ * first-launch installer PATH block. `stillEnabled` are the apps that were on
+ * at invocation (only non-empty under `--force`): we `disable()` each first so
+ * routing is cleaned, not orphaned. Then every app's `uninstall()` runs as an
+ * ownership-guarded sweep (idempotent — safe even for already-disabled apps).
+ * The PATH block is maximal's own artifact, not an app integration, so it stays
+ * here rather than in any app.
+ */
+async function revertAppIntegrations(
+  stillEnabled: ReadonlyArray<ClientApp>,
+): Promise<void> {
+  for (const app of stillEnabled) {
+    try {
+      await app.disable()
+      consola.success(`  disabled ${app.name}`)
+    } catch (err) {
+      consola.warn(`  could not disable ${app.name}`, err)
     }
-  } catch (err) {
-    consola.warn("  could not revert Claude Code settings", err)
+  }
+  for (const app of getAllApps()) {
+    try {
+      const result = await app.uninstall()
+      for (const line of result.reverted) consola.success(`  ${line}`)
+    } catch (err) {
+      consola.warn(`  could not revert ${app.name}`, err)
+    }
   }
   const installerRc = removeFirstLaunchPathBlock()
   if (installerRc.length > 0) {
@@ -352,41 +394,6 @@ async function confirmPurge(opts: RunUninstallOptions): Promise<boolean> {
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Step 4b: revert Claude Desktop config.
-// ────────────────────────────────────────────────────────────────────
-
-async function maybeRevertClaude(opts: RunUninstallOptions): Promise<void> {
-  const willRevert = opts.revertClaude || (await confirmRevertClaude(opts))
-  if (!willRevert) {
-    consola.info(
-      "  ℹ Claude Desktop config left as-is; use --revert-claude to clean up",
-    )
-    return
-  }
-  try {
-    const result = revertConfigLibraryProfile()
-    if (result.reverted) {
-      consola.success(`  removed our gateway profile from ${result.dir}`)
-    } else {
-      consola.info("  Claude Desktop wasn't wired by us; nothing to do")
-    }
-  } catch (err) {
-    consola.warn("  could not revert Claude Desktop config", err)
-  }
-}
-
-async function confirmRevertClaude(
-  opts: RunUninstallOptions,
-): Promise<boolean> {
-  if (opts.unattended) return false
-  const answer = await consola.prompt(
-    "Remove our keys from Claude Desktop config? (default: no)",
-    { type: "confirm", initial: false },
-  )
-  return answer
-}
-
-// ────────────────────────────────────────────────────────────────────
 // citty wrapper.
 // ────────────────────────────────────────────────────────────────────
 
@@ -394,7 +401,7 @@ export const uninstall = defineCommand({
   meta: {
     name: "uninstall",
     description:
-      "Stop the proxy, remove the binary, optionally purge secrets and revert Claude Desktop config",
+      "Stop the proxy, remove the binary, and revert app integrations. Refuses while apps are enabled unless --force.",
   },
   args: {
     purge: {
@@ -403,16 +410,17 @@ export const uninstall = defineCommand({
       description:
         "Also remove ~/.local/share/maximal/secrets and the GitHub token",
     },
-    "revert-claude": {
+    force: {
       type: "boolean",
       default: false,
-      description: "Also remove our keys from claude_desktop_config.json",
+      description:
+        "Uninstall even if apps are still enabled: disable each app, then revert and remove. Without it, uninstall refuses while any app is enabled.",
     },
     unattended: {
       type: "boolean",
       default: false,
       description:
-        "No prompts. Combined with default flags, leaves secrets and Claude config untouched.",
+        "No prompts. Combined with default flags, leaves secrets untouched.",
     },
     "keep-app": {
       type: "boolean",
@@ -424,7 +432,7 @@ export const uninstall = defineCommand({
   run({ args }) {
     return runUninstall({
       purge: args.purge,
-      revertClaude: args["revert-claude"],
+      force: args.force,
       unattended: args.unattended,
       keepApp: args["keep-app"],
     })

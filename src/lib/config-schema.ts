@@ -109,6 +109,7 @@ export const AppConfigSchema = z
     logRetentionDays: z.number().int().min(0).max(3650).optional(),
     autoRecoverAccount: z.boolean().optional(),
     checkUpdates: z.boolean().optional(),
+    editorVersion: z.string().optional(),
     apps: z
       .object({
         claudeCode: z
