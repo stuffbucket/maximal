@@ -14,6 +14,7 @@ import os from "node:os"
 import path from "node:path"
 
 import {
+  API_KEY_HELPER_COMMAND,
   isProxyBaseUrlConfigured,
   PROXY_BASE_URL,
   readClaudeCodeSettings,
@@ -86,7 +87,10 @@ describe("reconcileClaudeCodeOnShutdown", () => {
     // Edge case: intent off but a stale URL is on disk. Shutdown reconcile
     // is intent-gated, so it must NOT touch it — that's the boot reconciler's
     // and the toggle's job, not shutdown's.
-    writeSettings({ env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL } })
+    writeSettings({
+      apiKeyHelper: API_KEY_HELPER_COMMAND,
+      env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL },
+    })
     reconcileClaudeCodeOnShutdown(false, SETTINGS)
     expect(isProxyBaseUrlConfigured(SETTINGS)).toBe(true)
   })

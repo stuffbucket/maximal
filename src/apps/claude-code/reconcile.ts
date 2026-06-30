@@ -28,6 +28,11 @@ export function reconcileClaudeCodeOnBoot(
         "claude-code: routing intent is on, but a non-proxy ANTHROPIC_BASE_URL"
           + " is present — left it untouched",
       )
+    } else if (result.skippedReason === "foreign-api-key-helper") {
+      consola.warn(
+        "claude-code: routing intent is on, but a custom apiKeyHelper"
+          + " is present — left it untouched",
+      )
     }
   } catch (err) {
     consola.warn("claude-code: failed to reconcile base URL on boot", err)

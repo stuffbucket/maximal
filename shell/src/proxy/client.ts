@@ -106,10 +106,9 @@ export type AppId = "claude-code" | "claude-desktop" | "copilot-cli"
 export type AppKind = "config" | "coming-soon"
 export type AppStatus = "ready" | "not-installed" | "coming-soon"
 
-/** Why enabling was refused. `foreign-base-url`: the app's config already
- *  carries an ANTHROPIC_BASE_URL we don't own, so we backed off rather than
- *  clobber it. */
-export type AppConflict = "foreign-base-url"
+/** Why enabling was refused. The app's config already carries a routing
+ *  setting we don't own, so we backed off rather than clobber it. */
+export type AppConflict = "foreign-base-url" | "foreign-api-key-helper"
 
 export interface AppInstall {
   path: string
@@ -131,9 +130,8 @@ export interface AppEntry {
   installs: Array<AppInstall>
   /** Non-null only when claude-code has no installs (offer to install). */
   install: AppInstallHint | null
-  /** Non-null when the last enable attempt was refused (e.g. a user-set
-   *  ANTHROPIC_BASE_URL). The card surfaces this so the user knows why the
-   *  toggle didn't take and how to resolve it. */
+  /** Non-null when the last enable attempt was refused. The card surfaces this
+   *  so the user knows why the toggle didn't take and how to resolve it. */
   conflict: AppConflict | null
 }
 

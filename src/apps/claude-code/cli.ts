@@ -37,6 +37,11 @@ function apply(filePath: string): void {
         `A non-proxy ANTHROPIC_BASE_URL is already set in ${result.path};`
           + " left it untouched. Remove it first if you want proxy routing.",
       )
+    } else if (result.skippedReason === "foreign-api-key-helper") {
+      consola.warn(
+        `A custom apiKeyHelper is already set in ${result.path}; left it`
+          + " untouched. Remove it first if you want proxy routing.",
+      )
     } else {
       consola.success("Claude Code already points at the proxy")
     }

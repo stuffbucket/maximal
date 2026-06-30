@@ -6,8 +6,12 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-export const PROXY_BASE_URL = "http://127.0.0.1:4141"
+import { apiKeyHelperCommand } from "~/lib/api-key-helper"
 
+export const PROXY_BASE_URL = "http://127.0.0.1:4141"
+export const API_KEY_HELPER_COMMAND = apiKeyHelperCommand("claude-code")
+
+const API_KEY_HELPER_KEY = "apiKeyHelper"
 const BASE_URL_KEY = "ANTHROPIC_BASE_URL"
 const ENV_KEY = "env"
 
@@ -60,18 +64,41 @@ export function getBaseUrlOwnership(
   return env[BASE_URL_KEY] === PROXY_BASE_URL ? "ours" : "foreign"
 }
 
+export type ApiKeyHelperOwnership = "ours" | "foreign" | "absent"
+
+export function getApiKeyHelperOwnership(
+  settings: Record<string, unknown>,
+): ApiKeyHelperOwnership {
+  if (!(API_KEY_HELPER_KEY in settings)) return "absent"
+  return settings[API_KEY_HELPER_KEY] === API_KEY_HELPER_COMMAND ?
+      "ours"
+    : "foreign"
+}
+
 export function mergeBaseUrl(
   existing: Record<string, unknown>,
 ): Record<string, unknown> {
   const env = { ...readEnv(existing), [BASE_URL_KEY]: PROXY_BASE_URL }
-  return { ...existing, [ENV_KEY]: env }
+  return {
+    ...existing,
+    [ENV_KEY]: env,
+    [API_KEY_HELPER_KEY]: API_KEY_HELPER_COMMAND,
+  }
 }
 
 export function stripBaseUrl(
   existing: Record<string, unknown>,
 ): Record<string, unknown> {
-  const { [BASE_URL_KEY]: _droppedBaseUrl, ...env } = readEnv(existing)
-  const { [ENV_KEY]: _droppedEnv, ...rest } = existing
+  const currentEnv = readEnv(existing)
+  const { [BASE_URL_KEY]: _droppedBaseUrl, ...envWithoutBaseUrl } = currentEnv
+  const env =
+    currentEnv[BASE_URL_KEY] === PROXY_BASE_URL ? envWithoutBaseUrl : currentEnv
+  const { [ENV_KEY]: _droppedEnv, ...withoutEnv } = existing
+  const { [API_KEY_HELPER_KEY]: _droppedHelper, ...withoutHelper } = withoutEnv
+  const rest =
+    existing[API_KEY_HELPER_KEY] === API_KEY_HELPER_COMMAND ?
+      withoutHelper
+    : withoutEnv
   if (Object.keys(env).length === 0) {
     return rest
   }
@@ -81,7 +108,11 @@ export function stripBaseUrl(
 export function isProxyBaseUrlConfigured(
   filePath: string = getClaudeCodeSettingsPath(),
 ): boolean {
-  return getBaseUrlOwnership(readClaudeCodeSettings(filePath)) === "ours"
+  const settings = readClaudeCodeSettings(filePath)
+  return (
+    getBaseUrlOwnership(settings) === "ours"
+    && getApiKeyHelperOwnership(settings) === "ours"
+  )
 }
 
 export function writeClaudeCodeSettings(
@@ -123,7 +154,10 @@ export function writeClaudeCodeSettings(
   fs.renameSync(tmp, filePath)
 }
 
-export type SkipReason = "already-ours" | "foreign-base-url"
+export type SkipReason =
+  | "already-ours"
+  | "foreign-base-url"
+  | "foreign-api-key-helper"
 
 export interface ApplyResult {
   path: string
@@ -135,12 +169,20 @@ export function applyProxyBaseUrl(
   filePath: string = getClaudeCodeSettingsPath(),
 ): ApplyResult {
   const existing = readClaudeCodeSettings(filePath)
-  const ownership = getBaseUrlOwnership(existing)
-  if (ownership === "ours") {
+  const baseUrlOwnership = getBaseUrlOwnership(existing)
+  const helperOwnership = getApiKeyHelperOwnership(existing)
+  if (baseUrlOwnership === "ours" && helperOwnership === "ours") {
     return { path: filePath, wrote: false, skippedReason: "already-ours" }
   }
-  if (ownership === "foreign") {
+  if (baseUrlOwnership === "foreign") {
     return { path: filePath, wrote: false, skippedReason: "foreign-base-url" }
+  }
+  if (helperOwnership === "foreign") {
+    return {
+      path: filePath,
+      wrote: false,
+      skippedReason: "foreign-api-key-helper",
+    }
   }
   writeClaudeCodeSettings(filePath, mergeBaseUrl(existing))
   return { path: filePath, wrote: true }
@@ -156,8 +198,9 @@ export function revertProxyBaseUrl(
   filePath: string = getClaudeCodeSettingsPath(),
 ): RevertResult {
   const existing = readClaudeCodeSettings(filePath)
-  const ownership = getBaseUrlOwnership(existing)
-  if (ownership !== "ours") {
+  const baseUrlOwnership = getBaseUrlOwnership(existing)
+  const helperOwnership = getApiKeyHelperOwnership(existing)
+  if (baseUrlOwnership !== "ours" && helperOwnership !== "ours") {
     return {
       path: filePath,
       wrote: false,

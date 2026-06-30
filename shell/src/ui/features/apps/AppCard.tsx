@@ -30,6 +30,14 @@ function conflictCopy(app: AppEntry): { title: string; detail: string } | null {
           " another tool, so we didn't change it. Remove that line from the" +
           " app's settings, then switch this on again to route through maximal.",
       };
+    case "foreign-api-key-helper":
+      return {
+        title: "Left your existing setting in place",
+        detail:
+          `${app.name} already has a custom apiKeyHelper set by you or` +
+          " another tool, so we didn't change it. Remove that line from the" +
+          " app's settings, then switch this on again to route through maximal.",
+      };
     case null:
       return null;
   }

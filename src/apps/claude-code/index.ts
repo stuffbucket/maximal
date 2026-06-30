@@ -52,7 +52,12 @@ export const claudeCodeApp: ClientApp = {
   enable() {
     const result = applyProxyBaseUrl()
     const conflict =
-      result.skippedReason === "foreign-base-url" ? "foreign-base-url" : null
+      (
+        result.skippedReason === "foreign-base-url"
+        || result.skippedReason === "foreign-api-key-helper"
+      ) ?
+        result.skippedReason
+      : null
     return Promise.resolve({
       success: result.wrote || conflict === null,
       conflict,

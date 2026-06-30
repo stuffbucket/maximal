@@ -6,6 +6,10 @@ import { BUILD_VERSION } from "./lib/build-info"
 import { bindElectronFetch } from "./lib/electron-fetch"
 
 const cliArgs = {
+  apiKeyHelper: {
+    type: "string",
+    description: "Print the API key for an integrated client.",
+  },
   "api-home": {
     type: "string",
     description: "Path to the API home directory.",
@@ -31,6 +35,11 @@ if (typeof args["oauth-app"] === "string") {
 }
 if (typeof args["enterprise-url"] === "string") {
   process.env.COPILOT_API_ENTERPRISE_URL = args["enterprise-url"]
+}
+
+if (typeof args.apiKeyHelper === "string") {
+  const { runApiKeyHelper } = await import("./lib/api-key-helper")
+  process.exit(runApiKeyHelper(args.apiKeyHelper))
 }
 
 bindElectronFetch()
