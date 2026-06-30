@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
   "name": "@stuffbucket/maximal",
-  "version": "0.4.36",
+  "version": "0.4.37",
   "description": "Local proxy that exposes GitHub Copilot as OpenAI- and Anthropic-compatible HTTP endpoints.",
   "keywords": [
     "proxy",

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.37](https://github.com/stuffbucket/maximal/compare/v0.4.36...v0.4.37) (2026-06-30)
+
+
+### Features
+
+* **apps:** registry-driven app integrations, generic apiKeyHelper, UI harness ([#189](https://github.com/stuffbucket/maximal/issues/189)) ([f714537](https://github.com/stuffbucket/maximal/commit/f714537a6fb39e21b89b03ee1dad71fadf68c739))
+
 ## [0.4.36](https://github.com/stuffbucket/maximal/compare/v0.4.35...v0.4.36) (2026-06-25)
 
 
