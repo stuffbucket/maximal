@@ -4,7 +4,7 @@ What managed-preferences keys Claude Desktop reads, where they live,
 and which ones matter for using this proxy as a third-party inference
 gateway.
 
-Last verified: 2026-05-04.
+Last verified: 2026-07-03.
 
 ## Why this matters here
 

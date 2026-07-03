@@ -24,6 +24,11 @@ export interface GatewayProfileValues {
   disableNonessentialTelemetry: boolean
   disableNonessentialServices: boolean
   disableAutoUpdates: boolean
+  isLocalDevMcpEnabled: boolean
+  isDesktopExtensionEnabled: boolean
+  isDesktopExtensionDirectoryEnabled: boolean
+  isDesktopExtensionSignatureRequired: boolean
+  isClaudeCodeForDesktopEnabled: boolean
 }
 
 export function gatewayProfile(
@@ -40,8 +45,19 @@ export function gatewayProfile(
     allowedWorkspaceFolders: [path.join(home, "Claude")],
     disableEssentialTelemetry: true,
     disableNonessentialTelemetry: true,
-    disableNonessentialServices: true,
+    // Artifacts preview (favicon/iframe fetch), NOT a telemetry knob despite
+    // the name — must stay false or Artifacts previews break.
+    disableNonessentialServices: false,
     disableAutoUpdates: false,
+    // MCP/extension surface, dropped by 3a36604 (PR #159) while it fixed the
+    // configLibrary directory bug (#160). Their absence collapses to a locked
+    // default once any managed config source is present, which is what
+    // blocked MCPs and Plugins in Claude Desktop (#188).
+    isLocalDevMcpEnabled: true,
+    isDesktopExtensionEnabled: true,
+    isDesktopExtensionDirectoryEnabled: true,
+    isDesktopExtensionSignatureRequired: false,
+    isClaudeCodeForDesktopEnabled: true,
   }
 }
 
