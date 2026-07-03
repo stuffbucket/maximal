@@ -119,9 +119,23 @@ function toPersistedEvent(
     ),
     source: input.source,
     total_tokens: resolveTotalTokens(input),
+    total_nano_aiu: normalizeToken(input.total_nano_aiu),
+    is_premium: resolveIsPremium(input.model),
     trace_id: resolveTraceId(input.traceId),
     user_id: resolveUserId(input),
   }
+}
+
+/** Premium status for a model from the live catalog's billing.is_premium.
+ *  1 = premium, 0 = included, null = unknown (model absent from the catalog,
+ *  e.g. a passthrough provider model or a not-yet-refreshed catalog). */
+function resolveIsPremium(model: string): number | null {
+  const id = model.trim()
+  if (!id) return null
+  const entry = state.models?.data.find((m) => m.id === id)
+  const billing = entry?.billing
+  if (!billing || typeof billing.is_premium !== "boolean") return null
+  return billing.is_premium ? 1 : 0
 }
 
 tokenUsageEventBus.subscribe("token_usage.recorded", enqueueTokenUsageWrite)
@@ -212,6 +226,27 @@ export function normalizeResponsesUsage(
     output_tokens: normalizeToken(usage?.output_tokens),
     total_tokens: normalizeOptionalToken(usage?.total_tokens),
   }
+}
+
+/** Extract Copilot's per-request cost (nano-AIU) from a completion
+ *  response's sibling `copilot_usage` object. Present on chat/completions,
+ *  responses, and messages; undefined/legacy shapes yield undefined. */
+export function extractCopilotCost(
+  copilotUsage: { total_nano_aiu?: unknown } | null | undefined,
+): number | undefined {
+  const nano = copilotUsage?.total_nano_aiu
+  return typeof nano === "number" && Number.isFinite(nano) ? nano : undefined
+}
+
+/** Merge Copilot's per-request cost into already-normalized token counts.
+ *  One place for the (normalized usage + sibling copilot_usage) shape every
+ *  non-streaming Copilot record site needs, so cost capture can't be
+ *  forgotten at a new site or drift in field name. */
+export function withCopilotCost(
+  base: UsageTokens,
+  copilotUsage: { total_nano_aiu?: unknown } | null | undefined,
+): UsageTokens {
+  return { ...base, total_nano_aiu: extractCopilotCost(copilotUsage) }
 }
 
 export function normalizeAnthropicUsage(

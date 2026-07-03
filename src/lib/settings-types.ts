@@ -38,6 +38,16 @@ export const RateLimitStatus = z.object({
 })
 export type RateLimitStatus = z.infer<typeof RateLimitStatus>
 
+/** Which executor resolves web_search / web_fetch tool calls for Claude
+ *  clients. `kind` is the executor class (stable, matches
+ *  `/_debug/state`); `detail` is the human-readable model/base/notes from
+ *  describeExecutor (e.g. the /responses model or "no key"). */
+export const WebSearchStatus = z.object({
+  kind: z.string(),
+  detail: z.string().nullable(),
+})
+export type WebSearchStatus = z.infer<typeof WebSearchStatus>
+
 export const DiagnosticsResponse = z.object({
   version: z.string(),
   source_revision: z.string().nullable(),
@@ -54,6 +64,7 @@ export const DiagnosticsResponse = z.object({
   models_cached: z.number().int(),
   tokens: TokenStatus,
   rate_limit: RateLimitStatus,
+  web_search: WebSearchStatus,
 })
 export type DiagnosticsResponse = z.infer<typeof DiagnosticsResponse>
 

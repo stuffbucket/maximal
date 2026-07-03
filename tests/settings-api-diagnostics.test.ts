@@ -24,6 +24,8 @@ describe("GET /settings/api/diagnostics", () => {
       expect(["dmg-app", "homebrew", "user-bin", "dev", "other"]).toContain(
         parsed.data.launch_kind,
       )
+      // web_search surfaces which executor resolves web tools.
+      expect(parsed.data.web_search.kind.length).toBeGreaterThan(0)
     }
   })
 
@@ -81,6 +83,10 @@ describe("DiagnosticsResponse schema round-trip", () => {
         interval_seconds: null,
         last_request_at: null,
         wait_when_throttled: false,
+      },
+      web_search: {
+        kind: "CopilotResponsesExecutor",
+        detail: "gpt-5-mini",
       },
     }
     const parsed = DiagnosticsResponse.parse(fixture)

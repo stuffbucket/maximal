@@ -20,6 +20,7 @@
 import consola from "consola"
 import { Hono } from "hono"
 
+import { describeExecutor } from "~/debug"
 import { BUILD_VERSION } from "~/lib/build-info"
 import { describeLaunchSource } from "~/lib/cli-path"
 import {
@@ -72,6 +73,18 @@ function buildDiagnostics(): DiagnosticsResponseT {
         : null,
       wait_when_throttled: state.rateLimitWait,
     },
+    web_search: buildWebSearchStatus(),
+  }
+}
+
+/** Map the executor describeExecutor() would pick to the diagnostics
+ *  contract. `base` (the /responses model or Ollama host) is the more
+ *  useful detail when present; else `notes` (the no-key explanation). */
+function buildWebSearchStatus(): DiagnosticsResponseT["web_search"] {
+  const executor = describeExecutor()
+  return {
+    kind: executor.web_tools,
+    detail: executor.base ?? executor.notes ?? null,
   }
 }
 

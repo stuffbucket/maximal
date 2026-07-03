@@ -13,7 +13,10 @@ import { readDefaultRecord } from "./lib/github-token-store"
 import { PATHS } from "./lib/paths"
 import { SECRET_DEFS, secretIsFromFile } from "./lib/secrets"
 import { getGitVersion, shortSha } from "./lib/version"
-import { chooseExecutor } from "./routes/messages/web-tools/executor"
+import {
+  chooseExecutor,
+  resolveResponsesModel,
+} from "./routes/messages/web-tools/executor"
 
 interface SecretStatus {
   name: string
@@ -132,10 +135,19 @@ export function secretStatus(
 export function describeExecutor(
   env: NodeJS.ProcessEnv = process.env,
 ): DebugInfo["executor"] {
-  const choice = chooseExecutor(env)
+  const choice = chooseExecutor(env, {
+    responsesModel: resolveResponsesModel(),
+  })
   switch (choice.kind) {
     case "OllamaWebExecutor": {
       return { web_tools: choice.kind, base: choice.base }
+    }
+    case "CopilotResponsesExecutor": {
+      return {
+        web_tools: choice.kind,
+        base: choice.model,
+        notes: choice.notes,
+      }
     }
     case "InProcessFetchExecutor": {
       return { web_tools: choice.kind, notes: choice.notes }

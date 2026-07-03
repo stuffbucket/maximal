@@ -11,6 +11,7 @@ import {
   createCopilotTokenUsageRecorder,
   normalizeOpenAIUsage,
   type UsageTokens,
+  withCopilotCost,
 } from "~/lib/token-usage"
 import { generateRequestIdFromPayload, getUUID, isNullish } from "~/lib/utils"
 import {
@@ -75,7 +76,12 @@ export async function handleCompletion(c: Context) {
 
   if (isNonStreaming(response)) {
     debugJson(logger, "Non-streaming response:", response)
-    recordUsage(normalizeOpenAIUsage(response.usage))
+    recordUsage(
+      withCopilotCost(
+        normalizeOpenAIUsage(response.usage),
+        response.copilot_usage,
+      ),
+    )
     return c.json(response)
   }
 

@@ -110,4 +110,12 @@ export interface Model {
     terms: string
   }
   supported_endpoints?: Array<string>
+  /** Per-model billing metadata. `is_premium` flags whether the model
+   *  counts against premium quota. `multiplier` is legacy — under
+   *  usage-based billing Copilot warns it no longer applies (the real
+   *  per-request cost is `copilot_usage.total_nano_aiu` on completions). */
+  billing?: {
+    is_premium?: boolean
+    multiplier?: number
+  }
 }

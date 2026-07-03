@@ -6,6 +6,7 @@ import type {
   AnthropicResponse,
   AnthropicToolUseBlock,
 } from "~/lib/anthropic-types"
+import type { Executor } from "~/routes/messages/web-tools/executor"
 import type { WebToolPolicy } from "~/routes/messages/web-tools/rewriter"
 
 import { runAgentLoop } from "~/routes/messages/web-tools/agent"
@@ -249,5 +250,66 @@ describe("runAgentLoop", () => {
     expect(turnLens).toEqual([1, 3])
     expect(turn2.roles).toEqual(["user", "assistant", "user"])
     expect(turn2.trType).toBe("tool_result")
+  })
+})
+
+describe("runAgentLoop — domain filtering", () => {
+  it("post-filters search results to the declared allowed_domains", async () => {
+    // The executor returns mixed hosts (a backend may ignore the domain
+    // filter); the agent loop must drop hits outside the allowlist so the
+    // client's constraint holds regardless.
+    const mixedHostExecutor: Executor = {
+      fetch: () => Promise.resolve({ ok: true, markdown: "" }),
+      search: (_query, opts) => {
+        // The declared domains are forwarded to the executor too.
+        expect(opts?.allowedDomains).toEqual(["docs.python.org"])
+        return Promise.resolve({
+          ok: true,
+          items: [
+            { url: "https://docs.python.org/3/", title: "In", page_age: null },
+            { url: "https://evil.example/x", title: "Out", page_age: null },
+            {
+              url: "https://sub.docs.python.org/y",
+              title: "Sub allowed",
+              page_age: null,
+            },
+          ],
+        })
+      },
+    }
+    const policy: WebToolPolicy = {
+      declarations: [
+        {
+          type: "web_search_20250305",
+          name: "web_search",
+          allowed_domains: ["docs.python.org"],
+        },
+      ],
+      hasSearch: true,
+      hasFetch: false,
+    }
+    const responses: Array<AnthropicResponse> = [
+      makeResponse([searchToolUse("toolu_1", "asyncio")], "tool_use"),
+      makeResponse([{ type: "text", text: "done" }]),
+    ]
+    let turn = 0
+    const callOnce = (_p: AnthropicMessagesPayload) =>
+      Promise.resolve(responses[turn++])
+
+    const result = await runAgentLoop({
+      initialPayload: basePayload,
+      policy,
+      executor: mixedHostExecutor,
+      callOnce,
+    })
+
+    const resultBlock = result.content[1] as unknown as {
+      content: Array<{ url: string }>
+    }
+    // evil.example dropped; docs.python.org and its subdomain kept.
+    expect(resultBlock.content.map((r) => r.url)).toEqual([
+      "https://docs.python.org/3/",
+      "https://sub.docs.python.org/y",
+    ])
   })
 })

@@ -17,6 +17,7 @@ import type { Executor, FetchResult, SearchHit, SearchResult } from "./executor"
 import {
   checkFetchPolicy,
   checkSearchPolicy,
+  isHostAllowed,
   recordUse,
   type RequestState,
 } from "./state"
@@ -80,10 +81,37 @@ export async function executeToolUse(
     return { tool: TOOL_NAME.webSearch, ok: false, code: policy.code }
   }
   const query = (tu.input as { query: string }).query
-  const sr: SearchResult = await executor.search(query)
+  // Honor the client's declared domain constraints: forward them to the
+  // executor (which pushes them to its backend where supported) AND
+  // post-filter the returned hits, so the constraint holds even when the
+  // backend ignores it. See D4 / isHostAllowed.
+  const decl = state.active[TOOL_NAME.webSearch]
+  const sr: SearchResult = await executor.search(query, {
+    allowedDomains: decl?.allowed_domains,
+    blockedDomains: decl?.blocked_domains,
+  })
   if (!sr.ok) return { tool: TOOL_NAME.webSearch, ok: false, code: sr.code }
   recordUse(state, TOOL_NAME.webSearch)
-  return { tool: TOOL_NAME.webSearch, ok: true, query, items: sr.items }
+  const items =
+    decl && (decl.allowed_domains?.length || decl.blocked_domains?.length) ?
+      sr.items.filter((hit) => hostAllowedForHit(hit.url, decl))
+    : sr.items
+  return { tool: TOOL_NAME.webSearch, ok: true, query, items }
+}
+
+/** Post-filter a search hit by the declared domain policy. A hit whose URL
+ *  doesn't parse is dropped (can't verify it satisfies the constraint). */
+function hostAllowedForHit(
+  url: string,
+  policy: { allowed_domains?: Array<string>; blocked_domains?: Array<string> },
+): boolean {
+  let host: string
+  try {
+    host = new URL(url).hostname
+  } catch {
+    return false
+  }
+  return isHostAllowed(host, policy)
 }
 
 // ────────────────────────────────────────────────────────────────────
