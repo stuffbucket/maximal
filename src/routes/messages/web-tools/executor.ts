@@ -1,9 +1,10 @@
 /**
  * Executor interface and implementations. The agent loop calls these to
  * resolve `web_search` / `web_fetch` tool calls; the in-process variant
- * handles fetch (search returns `unavailable`); OllamaWebExecutor
- * covers both via ollama.com hosted endpoints when OLLAMA_API_KEY is
- * set.
+ * handles both without any provider key (fetch via plain HTTPS, search by
+ * scraping DuckDuckGo's server-rendered HTML results page); OllamaWebExecutor
+ * covers both via ollama.com's hosted API when OLLAMA_API_KEY is set, at
+ * higher quality.
  */
 
 import TurndownService from "turndown"
@@ -143,10 +144,125 @@ export class InProcessFetchExecutor implements Executor {
     return { ok: true, markdown: trimTo(markdown, maxChars), title }
   }
 
-  // No search backend wired; configure a different Executor to enable.
-  search(_query: string, _opts?: SearchOpts): Promise<SearchResult> {
-    return Promise.resolve({ ok: false, code: "unavailable" })
+  // Falls back to scraping DuckDuckGo's server-rendered HTML results page —
+  // no API key required, matching the no-key philosophy of fetch() above.
+  // Configure OLLAMA_API_KEY for a real search API at better quality.
+  search(query: string, opts: SearchOpts = {}): Promise<SearchResult> {
+    return ddgHtmlSearch(query, opts.maxResults ?? DEFAULT_SEARCH_MAX_RESULTS)
   }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// No-key web search: scrape DuckDuckGo's html.duckduckgo.com results page
+// (the same server-rendered HTML a JS-disabled browser gets — no API key,
+// no JSON endpoint). Fragile to DuckDuckGo markup changes by nature of
+// being a scrape rather than an API; OllamaWebExecutor is the higher-
+// quality option when a key is available.
+// ────────────────────────────────────────────────────────────────────
+
+const DDG_HTML_SEARCH_URL = "https://html.duckduckgo.com/html/"
+const DEFAULT_SEARCH_MAX_RESULTS = 5
+const SEARCH_TIMEOUT_MS = 15_000
+
+// DDG's html results wrap each hit in `<a ... class="result__a" ...>Title</a>`;
+// attribute order isn't guaranteed, so capture the whole opening tag and
+// inner text, then pull `class` / `href` out of the tag independently.
+const RESULT_ANCHOR_RE = /<a\b([^>]*)>([\s\S]*?)<\/a>/giu
+const HREF_ATTR_RE = /href="([^"]*)"/iu
+const TAG_RE = /<[^>]+>/gu
+
+function stripTags(html: string): string {
+  return html.replaceAll(TAG_RE, "").replaceAll(WHITESPACE_RE, " ").trim()
+}
+
+function decodeHtmlEntities(s: string): string {
+  return s
+    .replaceAll("&amp;", "&")
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&quot;", '"')
+    .replaceAll("&#39;", "'")
+}
+
+// DDG's html endpoint doesn't link directly to results — it wraps them in
+// a same-site redirect (`//duckduckgo.com/l/?uddg=<url-encoded target>&...`)
+// so it can log the outbound click. Decode `uddg` directly instead of
+// following the redirect (fewer round-trips, and it's a same-page anchor
+// href, not a real navigation the model requested).
+function resolveDdgResultUrl(href: string): string | undefined {
+  if (href.includes("duckduckgo.com/l/")) {
+    const query = href.slice(href.indexOf("?") + 1)
+    const uddg = new URLSearchParams(query).get("uddg")
+    return uddg || undefined
+  }
+  if (href.startsWith("http://") || href.startsWith("https://")) return href
+  return undefined
+}
+
+function parseDdgResults(html: string, maxResults: number): Array<SearchHit> {
+  const items: Array<SearchHit> = []
+  const seenUrls = new Set<string>()
+  for (const m of html.matchAll(RESULT_ANCHOR_RE)) {
+    if (items.length >= maxResults) break
+    const [, attrs, inner] = m
+    if (!attrs.includes('class="result__a"')) continue
+
+    const hrefMatch = attrs.match(HREF_ATTR_RE)
+    if (!hrefMatch) continue
+    const url = resolveDdgResultUrl(hrefMatch[1])
+    if (!url || seenUrls.has(url)) continue
+
+    const title = decodeHtmlEntities(stripTags(inner))
+    if (!title) continue
+
+    seenUrls.add(url)
+    items.push({ url, title, page_age: null })
+  }
+  return items
+}
+
+async function ddgHtmlSearch(
+  query: string,
+  maxResults: number,
+): Promise<SearchResult> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS)
+
+  let response: Response
+  try {
+    response = await fetch(
+      `${DDG_HTML_SEARCH_URL}?q=${encodeURIComponent(query)}`,
+      {
+        method: "GET",
+        redirect: "follow",
+        signal: controller.signal,
+        headers: {
+          "User-Agent": "Mozilla/5.0 (compatible; maximal-proxy/0.1)",
+          Accept: "text/html",
+        },
+      },
+    )
+  } catch {
+    clearTimeout(timer)
+    return { ok: false, code: "unavailable" }
+  }
+  clearTimeout(timer)
+
+  if (!response.ok) {
+    return {
+      ok: false,
+      code: response.status === 429 ? "too_many_requests" : "unavailable",
+    }
+  }
+
+  let html: string
+  try {
+    html = await response.text()
+  } catch {
+    return { ok: false, code: "unavailable" }
+  }
+
+  return { ok: true, items: parseDdgResults(html, maxResults) }
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -387,7 +503,8 @@ export function chooseExecutor(
   }
   return {
     kind: "InProcessFetchExecutor",
-    notes: "search disabled; set OLLAMA_API_KEY to enable hosted search/fetch",
+    notes:
+      "search via DuckDuckGo HTML scrape (no key); set OLLAMA_API_KEY for higher-quality hosted search/fetch",
   }
 }
 
