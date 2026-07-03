@@ -1,6 +1,6 @@
 import { getGitHubApiBaseUrl, githubUserHeaders } from "~/lib/api-config"
-import { HTTPError } from "~/lib/error"
 import { GITHUB_API_TIMEOUT_MS } from "~/lib/http-timeouts"
+import { sendRequestJson } from "~/lib/send-request"
 import { state } from "~/lib/state"
 
 export async function getGitHubUser(githubToken?: string) {
@@ -9,16 +9,15 @@ export async function getGitHubUser(githubToken?: string) {
     throw new Error("GitHub token not found")
   }
 
-  const authState = { ...state, githubToken: resolvedGithubToken }
-  const response = await fetch(`${getGitHubApiBaseUrl()}/user`, {
-    // codeql[js/file-access-to-http] -- by design: the proxy reads its own 0o600 GitHub token from disk and forwards it as upstream Authorization. Same posture as gh/aws/kubectl; this is the proxy's reason to exist. See ADR-0001.
-    headers: githubUserHeaders(authState),
-    signal: AbortSignal.timeout(GITHUB_API_TIMEOUT_MS),
-  })
-
-  if (!response.ok) throw new HTTPError("Failed to get GitHub user", response)
-
-  return (await response.json()) as GithubUserResponse
+  return await sendRequestJson<GithubUserResponse>(
+    `${getGitHubApiBaseUrl()}/user`,
+    {
+      githubToken: resolvedGithubToken,
+      headers: githubUserHeaders(),
+      timeoutMs: GITHUB_API_TIMEOUT_MS,
+      errorMessage: "Failed to get GitHub user",
+    },
+  )
 }
 
 // Trimmed for the sake of simplicity. `avatar_url` is the user's profile

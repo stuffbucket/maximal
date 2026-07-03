@@ -4,14 +4,15 @@ import { getGitHubApiBaseUrl, githubHeaders } from "~/lib/api-config"
 import { parseCopilotErrorBody } from "~/lib/copilot-error-parser"
 import { CopilotAuthFatalError, HTTPError } from "~/lib/error"
 import { COPILOT_TOKEN_TIMEOUT_MS } from "~/lib/http-timeouts"
+import { sendRequest } from "~/lib/send-request"
 import { state } from "~/lib/state"
 
 export const getCopilotToken = async () => {
-  const response = await fetch(
+  const response = await sendRequest(
     `${getGitHubApiBaseUrl()}/copilot_internal/v2/token`,
     {
-      headers: githubHeaders(state),
-      signal: AbortSignal.timeout(COPILOT_TOKEN_TIMEOUT_MS),
+      headers: githubHeaders(),
+      timeoutMs: COPILOT_TOKEN_TIMEOUT_MS,
     },
   )
 

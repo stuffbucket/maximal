@@ -5,6 +5,7 @@ import consola from "consola"
 import { reverseId } from "~/lib/anthropic-id-rewrite"
 import { type AnthropicMessagesPayload } from "~/lib/anthropic-types"
 import { getAnthropicApiKey, getClaudeTokenMultiplier } from "~/lib/config"
+import { sendRequest } from "~/lib/send-request"
 import { getTokenCount } from "~/lib/tokenizer"
 
 import { findEndpointModel } from "../../lib/models"
@@ -21,19 +22,19 @@ async function countTokensViaAnthropic(
 ): Promise<Response | null> {
   if (!payload.model.startsWith("claude")) return null
 
-  const apiKey = getAnthropicApiKey()
-  if (!apiKey) return null
+  // Presence check only — the key itself is read + attached inside the
+  // mechanism (host-inferred for api.anthropic.com); this handler never sees it.
+  if (!getAnthropicApiKey()) return null
 
   // Copilot uses dotted names (claude-opus-4.6) but Anthropic requires dashes (claude-opus-4-6)
   const model = payload.model.replaceAll(".", "-")
 
-  const res = await fetch(
+  const res = await sendRequest(
     "https://api.anthropic.com/v1/messages/count_tokens",
     {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-api-key": apiKey,
         "anthropic-version": "2023-06-01",
         "anthropic-beta": "token-counting-2024-11-01",
       },

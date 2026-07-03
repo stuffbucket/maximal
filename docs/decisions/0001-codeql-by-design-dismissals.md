@@ -50,15 +50,17 @@ The current suppressed sites (grep `codeql\[` to enumerate):
 
 | Rule | File | Why |
 |---|---|---|
-| `js/file-access-to-http` | `src/services/copilot/create-embeddings.ts` | Forward Copilot token upstream |
-| `js/file-access-to-http` | `src/services/copilot/get-models.ts` | Forward Copilot token upstream |
-| `js/file-access-to-http` | `src/services/github/get-user.ts` | Forward GitHub token upstream |
-| `js/file-access-to-http` | `src/services/github/get-copilot-usage.ts` | Forward GitHub token upstream |
+| `js/file-access-to-http` | `src/lib/send-request.ts` | **Single mechanism** — every authenticated GitHub/Copilot/provider request funnels through `sendRequest`, which attaches the disk-read token and forwards it upstream |
 | `js/file-access-to-http` | `scripts/gemma-watch.ts` | Dev-only watcher → local Ollama |
-| `js/file-access-to-http` | `src/services/github/get-device-code.ts` | OAuth device-code flow |
-| `js/file-access-to-http` | `src/services/github/poll-access-token.ts` | OAuth access-token flow |
 | `js/http-to-file-access` | `src/lib/github-token-store.ts` | Persist OAuth token to 0o600 file |
 | `js/http-to-file-access` | `scripts/sync-homebrew-formula.ts` | Release tooling renders a formula |
+
+The six per-service `src/services/{copilot,github}/*` suppressions were
+collapsed into the single `send-request.ts` mechanism (see the token-
+ownership amendment below): callers name a credential domain but never
+build the auth header, so the file→HTTP sink they all route through
+lives in one place and the taint terminates at one annotated line. New
+authenticated endpoints inherit the suppression for free.
 
 # Consequences
 
@@ -98,3 +100,54 @@ own analysis do the drift-tracking it is built for, which serves this
 ADR's original goal — greppable rationale that survives change — more
 simply and more robustly. The frontmatter registry, the reconcile
 script, and the `codeql-reconcile.yml` workflow are removed.
+
+# Amendment (2026-07-03): one HTTP mechanism owns token attachment
+
+The six per-service inline suppressions were themselves a symptom: the
+authenticated `fetch` call — and the `Authorization` header — was
+duplicated across ~13 sites in `src/services/{copilot,github}/*` (plus a
+second, un-suppressed sink in `anthropic-proxy.ts`). CodeQL flagged each
+because each was a distinct file→HTTP sink.
+
+We collapsed them into a single mechanism, `src/lib/send-request.ts`
+(`sendRequest` / `sendRequestJson` / `sendProviderRequest`), with three
+properties:
+
+1. **One sink.** Every authenticated request — Copilot completions,
+   GitHub auth/discovery, OAuth device flow, direct Anthropic, and
+   provider passthrough — funnels through the one `fetch` (`dispatch`).
+   That is the only `js/file-access-to-http` suppression for the app.
+2. **The mechanism owns credential selection + attachment — the caller
+   does not choose.** The rule is *the destination host determines the
+   credential*. For the four fixed first-party hosts (Copilot, GitHub
+   API, direct Anthropic, and the unauthenticated GitHub OAuth
+   endpoints), the caller passes only a URL and `attachHostAuth` maps
+   host → token + scheme; there is no credential argument to get wrong.
+   The one case a host can't resolve is the config-selected passthrough
+   provider (arbitrary user-configured base URL), so its resolved
+   `ResolvedProviderConfig` — host + key + scheme bundled — is passed to
+   `sendProviderRequest`; that supplies the credential *object*, not a
+   label that could mismatch the host. Either way the token is read and
+   turned into an `Authorization` / `x-api-key` header on a
+   function-local `Headers` that is never returned, and the header
+   builders in `api-config.ts` were stripped of their `Authorization`
+   lines (now token-free) — a caller cannot obtain the token or the
+   finalized request. An unrecognized host gets no credential (safe
+   default: a typo'd host fails unauthenticated rather than leaking).
+3. **The invariant is enforced, not just documented.** An ESLint
+   `no-restricted-syntax` rule (`eslint.config.js`,
+   `credential-attachment-single-mechanism`) fails CI if any file outside
+   `send-request.ts` hand-builds a `Bearer …` / `token …` auth string or
+   attaches an `x-api-key` header. A new endpoint that tries to attach
+   its own token cannot merge; it must route through the mechanism.
+   (`web-tools/executor.ts` forwards a separate sandbox key and
+   `setup.ts` sends a dummy loopback key — both allowlisted.)
+
+Least-privilege routing (each credential reaches exactly one host; no
+host receives two credentials) was already true and is preserved — the
+mechanism centralizes it rather than changing it.
+
+Out of scope / follow-ups: the authenticated `/token` endpoint
+(`routes/token/route.ts`) still returns the Copilot token to the shell by
+design (it is behind API-key auth, not unauthenticated); the web-tools
+executor's sandbox credential is not yet a `Credential` domain.

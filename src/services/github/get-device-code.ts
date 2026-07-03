@@ -1,25 +1,21 @@
 import { getOauthAppConfig, getOauthUrls } from "~/lib/api-config"
-import { HTTPError } from "~/lib/error"
 import { GITHUB_API_TIMEOUT_MS } from "~/lib/http-timeouts"
+import { sendRequestJson } from "~/lib/send-request"
 
 export async function getDeviceCode(): Promise<DeviceCodeResponse> {
   const { clientId, headers, scope } = getOauthAppConfig()
   const { deviceCodeUrl } = getOauthUrls()
 
-  const response = await fetch(deviceCodeUrl, {
+  return await sendRequestJson<DeviceCodeResponse>(deviceCodeUrl, {
     method: "POST",
-    // codeql[js/file-access-to-http] -- by design: the proxy reads its own OAuth app config from disk and posts it to GitHub's device-code endpoint. This is the auth flow's reason to exist. See ADR-0001.
     headers,
     body: JSON.stringify({
       client_id: clientId,
       scope,
     }),
-    signal: AbortSignal.timeout(GITHUB_API_TIMEOUT_MS),
+    timeoutMs: GITHUB_API_TIMEOUT_MS,
+    errorMessage: "Failed to get device code",
   })
-
-  if (!response.ok) throw new HTTPError("Failed to get device code", response)
-
-  return (await response.json()) as DeviceCodeResponse
 }
 
 export interface DeviceCodeResponse {
