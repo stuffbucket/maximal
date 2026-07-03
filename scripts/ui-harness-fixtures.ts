@@ -101,6 +101,10 @@ const baseDiagnostics: DiagnosticsResponse = {
     wait_when_throttled: false,
     last_request_at: ISO(-60_000),
   },
+  web_search: {
+    kind: "CopilotResponsesExecutor",
+    detail: "gpt-5-mini",
+  },
 }
 
 const upToDate: UpdateStatusResponse = {

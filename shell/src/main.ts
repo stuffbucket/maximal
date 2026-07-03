@@ -340,8 +340,24 @@ function renderDiagnostics(data: DiagnosticsResponse): void {
   setField("uptime", formatUptime(data.uptime_ms));
   setField("account_type", data.account_type ?? "unknown");
   setField("models_cached", String(data.models_cached));
+  setField("web_search", formatWebSearch(data.web_search));
   setField("github_copilot_status", deriveGithubCopilotStatus(data.tokens));
   setField("rate_limit", formatRateLimit(data.rate_limit));
+}
+
+/**
+ * Human-readable label for which executor resolves web_search / web_fetch.
+ * Maps the executor class to plain language, appending the detail (the
+ * /responses model, Ollama host, or no-key note) when present.
+ */
+function formatWebSearch(ws: DiagnosticsResponse["web_search"]): string {
+  const labels: Record<string, string> = {
+    CopilotResponsesExecutor: "Copilot (no extra key)",
+    OllamaWebExecutor: "Ollama hosted",
+    InProcessFetchExecutor: "Built-in (no key)",
+  };
+  const label = labels[ws.kind] ?? ws.kind;
+  return ws.detail ? `${label} — ${ws.detail}` : label;
 }
 
 /**
