@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.38](https://github.com/stuffbucket/maximal/compare/v0.4.37...v0.4.38) (2026-07-03)
+
+
+### Bug Fixes
+
+* **auth:** tear down Copilot refresh loop cleanly on abort ([#197](https://github.com/stuffbucket/maximal/issues/197)) ([18ca76e](https://github.com/stuffbucket/maximal/commit/18ca76e1009d254e449a1e58110bca84f2afc0c3))
+* **ci:** stop CodeQL Reconcile crashing on alert re-open ([#195](https://github.com/stuffbucket/maximal/issues/195)) ([68620c2](https://github.com/stuffbucket/maximal/commit/68620c2b34dbea5af2f2220eab1c749dea4ab18c))
+* **errors:** make model_not_supported advice client-neutral ([#201](https://github.com/stuffbucket/maximal/issues/201)) ([be26b58](https://github.com/stuffbucket/maximal/commit/be26b580b8b5c7a3622687f5a588cee21b8f50fd))
+* **messages:** default Claude Code haiku tier to a tool-competent model ([#191](https://github.com/stuffbucket/maximal/issues/191)) ([6df203c](https://github.com/stuffbucket/maximal/commit/6df203c5f6755c6ca1c493442ad526ff16912af3))
+
 ## [0.4.37](https://github.com/stuffbucket/maximal/compare/v0.4.36...v0.4.37) (2026-06-30)
 
 
