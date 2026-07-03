@@ -1,6 +1,6 @@
 import { getGitHubApiBaseUrl, githubUserHeaders } from "~/lib/api-config"
-import { authFetchJson } from "~/lib/auth-fetch"
 import { GITHUB_API_TIMEOUT_MS } from "~/lib/http-timeouts"
+import { sendRequestJson } from "~/lib/send-request"
 import { state } from "~/lib/state"
 
 export async function getGitHubUser(githubToken?: string) {
@@ -9,11 +9,11 @@ export async function getGitHubUser(githubToken?: string) {
     throw new Error("GitHub token not found")
   }
 
-  const authState = { ...state, githubToken: resolvedGithubToken }
-  return await authFetchJson<GithubUserResponse>(
+  return await sendRequestJson<GithubUserResponse>(
     `${getGitHubApiBaseUrl()}/user`,
     {
-      headers: githubUserHeaders(authState),
+      credential: { domain: "github", token: resolvedGithubToken },
+      headers: githubUserHeaders(),
       timeoutMs: GITHUB_API_TIMEOUT_MS,
       errorMessage: "Failed to get GitHub user",
     },

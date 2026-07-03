@@ -199,16 +199,16 @@ export const prepareMessageProxyHeaders = (headers: Record<string, string>) => {
   delete headers["copilot-integration-id"]
 }
 
-export const githubUserHeaders = (state: State): Record<string, string> => {
+// Non-secret headers only. The Authorization header is attached by the single
+// mechanism in `send-request.ts` (credential domain "github"); see ADR-0001.
+export const githubUserHeaders = (): Record<string, string> => {
   if (isOpencodeOauthApp()) {
     return {
-      Authorization: `Bearer ${state.githubToken}`,
       "User-Agent": getOpencodeVersion(),
     }
   }
   return {
     accept: "application/vnd.github+json",
-    authorization: `token ${state.githubToken}`,
     "user-agent": USER_AGENT,
     "x-github-api-version": "2022-11-28",
     "x-vscode-user-agent-library-version": "electron-fetch",
@@ -218,7 +218,6 @@ export const githubUserHeaders = (state: State): Record<string, string> => {
 export const copilotModelsHeaders = (state: State) => {
   if (isOpencodeOauthApp()) {
     return {
-      Authorization: `Bearer ${state.copilotToken}`,
       "User-Agent": getOpencodeVersion(),
     }
   }
@@ -237,7 +236,6 @@ export const copilotHeaders = (
 ) => {
   if (isOpencodeOauthApp()) {
     const headers: Record<string, string> = {
-      Authorization: `Bearer ${state.copilotToken}`,
       ...getOpencodeLLMHeaders(),
       "Openai-Intent": "conversation-edits",
     }
@@ -273,7 +271,6 @@ const githubCopilotHeaders = (
 ) => {
   const requestIdValue = requestId ?? randomUUID()
   const headers: Record<string, string> = {
-    Authorization: `Bearer ${state.copilotToken}`,
     "content-type": standardHeaders()["content-type"],
     "copilot-integration-id": "vscode-chat",
     "editor-device-id": state.vsCodeDeviceId,
@@ -302,15 +299,15 @@ const githubCopilotHeaders = (
 }
 
 export const GITHUB_API_BASE_URL = "https://api.github.com"
-export const githubHeaders = (state: State): Record<string, string> => {
+// Non-secret headers only. Authorization is attached by `send-request.ts`
+// (credential domain "github"); see ADR-0001.
+export const githubHeaders = (): Record<string, string> => {
   if (isOpencodeOauthApp()) {
     return {
-      Authorization: `Bearer ${state.githubToken}`,
       ...getOpencodeOauthHeaders(),
     }
   }
   return {
-    authorization: `token ${state.githubToken}`,
     "user-agent": USER_AGENT,
     "x-github-api-version": "2025-04-01",
     "x-vscode-user-agent-library-version": "electron-fetch",

@@ -50,17 +50,17 @@ The current suppressed sites (grep `codeql\[` to enumerate):
 
 | Rule | File | Why |
 |---|---|---|
-| `js/file-access-to-http` | `src/lib/auth-fetch.ts` | **Single chokepoint** — every authenticated GitHub/Copilot request funnels through `authFetch`, forwarding the disk-read token upstream |
+| `js/file-access-to-http` | `src/lib/send-request.ts` | **Single mechanism** — every authenticated GitHub/Copilot/provider request funnels through `sendRequest`, which attaches the disk-read token and forwards it upstream |
 | `js/file-access-to-http` | `scripts/gemma-watch.ts` | Dev-only watcher → local Ollama |
 | `js/http-to-file-access` | `src/lib/github-token-store.ts` | Persist OAuth token to 0o600 file |
 | `js/http-to-file-access` | `scripts/sync-homebrew-formula.ts` | Release tooling renders a formula |
 
 The six per-service `src/services/{copilot,github}/*` suppressions were
-collapsed into the single `auth-fetch.ts` chokepoint (see the Amendment
-below): callers build headers and resolve base URLs, but the file→HTTP
-sink they all route through lives in one place, so the taint terminates
-at one annotated line. New authenticated endpoints inherit the
-suppression for free instead of each needing their own.
+collapsed into the single `send-request.ts` mechanism (see the token-
+ownership amendment below): callers name a credential domain but never
+build the auth header, so the file→HTTP sink they all route through
+lives in one place and the taint terminates at one annotated line. New
+authenticated endpoints inherit the suppression for free.
 
 # Consequences
 
@@ -100,3 +100,43 @@ own analysis do the drift-tracking it is built for, which serves this
 ADR's original goal — greppable rationale that survives change — more
 simply and more robustly. The frontmatter registry, the reconcile
 script, and the `codeql-reconcile.yml` workflow are removed.
+
+# Amendment (2026-07-03): one HTTP mechanism owns token attachment
+
+The six per-service inline suppressions were themselves a symptom: the
+authenticated `fetch` call — and the `Authorization` header — was
+duplicated across ~13 sites in `src/services/{copilot,github}/*` (plus a
+second, un-suppressed sink in `anthropic-proxy.ts`). CodeQL flagged each
+because each was a distinct file→HTTP sink.
+
+We collapsed them into a single mechanism, `src/lib/send-request.ts`
+(`sendRequest` / `sendRequestJson`), with three properties:
+
+1. **One sink.** Every authenticated request — Copilot completions,
+   GitHub auth/discovery, OAuth device flow, and provider passthrough —
+   funnels through the one `fetch` in `sendRequest`. That is the only
+   `js/file-access-to-http` suppression for the app.
+2. **The mechanism owns token selection + attachment.** Callers pass a
+   `Credential` (`{ domain: "copilot" | "github" | "provider" | "none" }`)
+   and only non-secret request headers. The token is read and turned into
+   an `Authorization` / `x-api-key` header inside the module-private
+   `attachAuth`, on a function-local `Headers` that is never returned. The
+   header builders in `api-config.ts` were stripped of their `Authorization`
+   lines and are now token-free — a caller cannot obtain the token or the
+   finalized request.
+3. **The invariant is enforced, not just documented.** An ESLint
+   `no-restricted-syntax` rule (`eslint.config.js`,
+   `credential-attachment-single-mechanism`) fails CI if any file outside
+   `send-request.ts` hand-builds a `Bearer …` / `token …` auth string. A
+   new endpoint that tries to attach its own token cannot merge; it must
+   route through the mechanism. (`web-tools/executor.ts` forwards a
+   separate sandbox key and is allowlisted pending a follow-up.)
+
+Least-privilege routing (each credential reaches exactly one host; no
+host receives two credentials) was already true and is preserved — the
+mechanism centralizes it rather than changing it.
+
+Out of scope / follow-ups: the authenticated `/token` endpoint
+(`routes/token/route.ts`) still returns the Copilot token to the shell by
+design (it is behind API-key auth, not unauthenticated); the web-tools
+executor's sandbox credential is not yet a `Credential` domain.

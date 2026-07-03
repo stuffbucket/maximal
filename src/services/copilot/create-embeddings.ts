@@ -1,5 +1,5 @@
 import { copilotHeaders, copilotBaseUrl } from "~/lib/api-config"
-import { authFetchJson } from "~/lib/auth-fetch"
+import { sendRequestJson } from "~/lib/send-request"
 import { state } from "~/lib/state"
 
 export const createEmbeddings = async (payload: EmbeddingRequest) => {
@@ -7,9 +7,10 @@ export const createEmbeddings = async (payload: EmbeddingRequest) => {
 
   // Deliberately unbounded (no timeoutMs): large input arrays can run long,
   // and this is not on the cold-boot critical path the timeout doc guards.
-  return await authFetchJson<EmbeddingResponse>(
+  return await sendRequestJson<EmbeddingResponse>(
     `${copilotBaseUrl(state)}/embeddings`,
     {
+      credential: { domain: "copilot" },
       method: "POST",
       headers: copilotHeaders(state),
       body: JSON.stringify(payload),

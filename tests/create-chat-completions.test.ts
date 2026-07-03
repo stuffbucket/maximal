@@ -12,16 +12,16 @@ const originalState = {
   vsCodeVersion: state.vsCodeVersion,
 }
 
-// Helper to mock fetch
-const fetchMock = mock(
-  (_url: string, opts: { headers: Record<string, string> }) => {
-    return {
-      ok: true,
-      json: () => ({ id: "123", object: "chat.completion", choices: [] }),
-      headers: opts.headers,
-    }
-  },
-)
+// The mechanism (sendRequest) normalizes headers to a `Headers` instance before
+// calling fetch, so the mock receives `Headers`, not a plain record. Read via
+// `.get()`. (The x-initiator behavior is unchanged; only the representation is.)
+const fetchMock = mock((_url: string, opts: { headers: Headers }) => {
+  return {
+    ok: true,
+    json: () => ({ id: "123", object: "chat.completion", choices: [] }),
+    headers: opts.headers,
+  }
+})
 beforeEach(() => {
   state.copilotToken = "test-token"
   state.vsCodeVersion = "1.0.0"
@@ -49,7 +49,7 @@ test("sets x-initiator to agent if tool/assistant present", async () => {
   await createChatCompletions(payload, { requestId: "1" })
   expect(fetchMock).toHaveBeenCalledTimes(1)
   const headers = fetchMock.mock.calls[0][1].headers
-  expect(headers["x-initiator"]).toBe("agent")
+  expect(headers.get("x-initiator")).toBe("agent")
 })
 
 test("sets x-initiator to user if only user present", async () => {
@@ -63,5 +63,5 @@ test("sets x-initiator to user if only user present", async () => {
   await createChatCompletions(payload, { requestId: "1" })
   expect(fetchMock).toHaveBeenCalledTimes(1)
   const headers = fetchMock.mock.calls[0][1].headers
-  expect(headers["x-initiator"]).toBe("user")
+  expect(headers.get("x-initiator")).toBe("user")
 })

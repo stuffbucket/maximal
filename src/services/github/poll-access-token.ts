@@ -1,8 +1,8 @@
 import consola from "consola"
 
 import { getOauthAppConfig, getOauthUrls } from "~/lib/api-config"
-import { authFetch } from "~/lib/auth-fetch"
 import { DEVICE_POLL_TIMEOUT_MS } from "~/lib/http-timeouts"
+import { sendRequest } from "~/lib/send-request"
 import { sleep } from "~/lib/utils"
 
 import type { DeviceCodeResponse } from "./get-device-code"
@@ -48,7 +48,8 @@ export async function pollAccessToken(
 
     let response: Response
     try {
-      response = await authFetch(accessTokenUrl, {
+      response = await sendRequest(accessTokenUrl, {
+        credential: { domain: "none" },
         method: "POST",
         headers,
         timeoutMs: DEVICE_POLL_TIMEOUT_MS,

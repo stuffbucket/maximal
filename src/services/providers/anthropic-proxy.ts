@@ -1,6 +1,8 @@
 import type { AnthropicMessagesPayload } from "~/lib/anthropic-types"
 import type { ResolvedProviderConfig } from "~/lib/config"
 
+import { sendRequest } from "~/lib/send-request"
+
 const FORWARDABLE_HEADERS = [
   "anthropic-version",
   "anthropic-beta",
@@ -21,21 +23,14 @@ const STRIPPED_RESPONSE_HEADERS = [
   "upgrade",
 ] as const
 
+// Non-secret headers only. The provider credential is attached by the single
+// mechanism in `send-request.ts` (credential domain "provider"); see ADR-0001.
 export function buildProviderUpstreamHeaders(
-  providerConfig: ResolvedProviderConfig,
   requestHeaders: Headers,
 ): Record<string, string> {
-  const authHeaders: Record<string, string> = {}
-  if (providerConfig.authType === "authorization") {
-    authHeaders.authorization = `Bearer ${providerConfig.apiKey}`
-  } else {
-    authHeaders["x-api-key"] = providerConfig.apiKey
-  }
-
   const headers: Record<string, string> = {
     "content-type": "application/json",
     accept: "application/json",
-    ...authHeaders,
   }
 
   for (const headerName of FORWARDABLE_HEADERS) {
@@ -69,9 +64,10 @@ export async function forwardProviderMessages(
   payload: AnthropicMessagesPayload,
   requestHeaders: Headers,
 ): Promise<Response> {
-  return await fetch(`${providerConfig.baseUrl}/v1/messages`, {
+  return await sendRequest(`${providerConfig.baseUrl}/v1/messages`, {
+    credential: { domain: "provider", config: providerConfig },
     method: "POST",
-    headers: buildProviderUpstreamHeaders(providerConfig, requestHeaders),
+    headers: buildProviderUpstreamHeaders(requestHeaders),
     body: JSON.stringify(payload),
   })
 }
@@ -80,8 +76,9 @@ export async function forwardProviderModels(
   providerConfig: ResolvedProviderConfig,
   requestHeaders: Headers,
 ): Promise<Response> {
-  return await fetch(`${providerConfig.baseUrl}/v1/models`, {
+  return await sendRequest(`${providerConfig.baseUrl}/v1/models`, {
+    credential: { domain: "provider", config: providerConfig },
     method: "GET",
-    headers: buildProviderUpstreamHeaders(providerConfig, requestHeaders),
+    headers: buildProviderUpstreamHeaders(requestHeaders),
   })
 }

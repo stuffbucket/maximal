@@ -1,12 +1,13 @@
 import { getOauthAppConfig, getOauthUrls } from "~/lib/api-config"
-import { authFetchJson } from "~/lib/auth-fetch"
 import { GITHUB_API_TIMEOUT_MS } from "~/lib/http-timeouts"
+import { sendRequestJson } from "~/lib/send-request"
 
 export async function getDeviceCode(): Promise<DeviceCodeResponse> {
   const { clientId, headers, scope } = getOauthAppConfig()
   const { deviceCodeUrl } = getOauthUrls()
 
-  return await authFetchJson<DeviceCodeResponse>(deviceCodeUrl, {
+  return await sendRequestJson<DeviceCodeResponse>(deviceCodeUrl, {
+    credential: { domain: "none" },
     method: "POST",
     headers,
     body: JSON.stringify({

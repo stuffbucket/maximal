@@ -15,10 +15,10 @@ import {
   prepareInteractionHeaders,
   prepareMessageProxyHeaders,
 } from "~/lib/api-config"
-import { authFetch } from "~/lib/auth-fetch"
 import { isAuthFatal, parseCopilotErrorBody } from "~/lib/copilot-error-parser"
 import { logCopilotRateLimits } from "~/lib/copilot-rate-limit"
 import { CopilotAuthFatalError, HTTPError } from "~/lib/error"
+import { sendRequest } from "~/lib/send-request"
 import {
   clearLastUpstreamRejection,
   setLastUpstreamRejection,
@@ -141,7 +141,8 @@ export const createMessages = async (
 
   consola.log(`<-- model: ${payload.model}`)
 
-  const response = await authFetch(`${copilotBaseUrl(state)}/v1/messages`, {
+  const response = await sendRequest(`${copilotBaseUrl(state)}/v1/messages`, {
+    credential: { domain: "copilot" },
     method: "POST",
     headers,
     body: JSON.stringify(payload),

@@ -1,6 +1,6 @@
 import { getGitHubApiBaseUrl, githubHeaders } from "~/lib/api-config"
-import { authFetchJson } from "~/lib/auth-fetch"
 import { GITHUB_API_TIMEOUT_MS } from "~/lib/http-timeouts"
+import { sendRequestJson } from "~/lib/send-request"
 import { state } from "~/lib/state"
 
 export const getCopilotUsage = async (
@@ -11,11 +11,11 @@ export const getCopilotUsage = async (
     throw new Error("GitHub token not found")
   }
 
-  const authState = { ...state, githubToken: resolvedGithubToken }
-  return await authFetchJson<CopilotUsageResponse>(
+  return await sendRequestJson<CopilotUsageResponse>(
     `${getGitHubApiBaseUrl()}/copilot_internal/user`,
     {
-      headers: githubHeaders(authState),
+      credential: { domain: "github", token: resolvedGithubToken },
+      headers: githubHeaders(),
       timeoutMs: GITHUB_API_TIMEOUT_MS,
       errorMessage: "Failed to get Copilot usage",
     },
