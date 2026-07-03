@@ -35,29 +35,65 @@ cached list and refreshes it lazily:
 - **Fallback** — a `GET /models` while `state.models` is null triggers a
   synchronous `cacheModels()` (`route.ts:12-14`).
 
-## Response contract — `/models`
+## Response contract — `/models` and `/v1/models`
 
-OpenAI list shape (`src/routes/models/route.ts:25-40`):
+**Protocol-negotiated.** One catalog is served in the shape the client's
+protocol expects, built by explicit mappers in
+`src/routes/models/wire-models.ts` (never by spreading the raw Copilot
+model — that leaked `billing`/`policy`/capability internals and could
+make a strict client reject the list and render an empty picker).
+
+Negotiation (`prefersAnthropicModels`): an `anthropic-version` request
+header, or an `anthropic/…` / `claude…` user-agent → **Anthropic** shape.
+Everything else — including no signal — → **OpenAI** shape (the historical
+default; keeps Codex / the openai SDK / LiteLLM working).
+
+**OpenAI shape** (default):
 
 ```json
 {
   "object": "list",
   "data": [
-    {
-      "id": "claude-opus-4-6-20260301",
-      "object": "model",
-      "type": "model",
-      "created": 0,
-      "created_at": "1970-01-01T00:00:00.000Z",
-      "owned_by": "<vendor>",
-      "display_name": "<name>"
-    }
+    { "id": "claude-opus-4-6-20260301", "object": "model", "created": 0, "owned_by": "<vendor>" }
   ],
   "has_more": false
 }
 ```
 
-Two transforms shape the list:
+**Anthropic shape** (on signal) — mirrors Anthropic's Models API
+(`{data, first_id, has_more, last_id}`; no `object`):
+
+```json
+{
+  "data": [
+    {
+      "id": "claude-opus-4-6-20260301",
+      "type": "model",
+      "display_name": "<name>",
+      "created_at": "1970-01-01T00:00:00.000Z",
+      "max_input_tokens": 1000000,
+      "max_tokens": 64000,
+      "capabilities": {
+        "image_input": { "supported": true },
+        "pdf_input": { "supported": false },
+        "structured_outputs": { "supported": true },
+        "thinking": { "supported": true }
+      }
+    }
+  ],
+  "first_id": "claude-opus-4-6-20260301",
+  "has_more": false,
+  "last_id": "claude-opus-4-6-20260301"
+}
+```
+
+Anthropic `capabilities` are derived from the Copilot model's `supports`
+(`image_input`←`vision`, `thinking`←`adaptive_thinking`/`reasoning_effort`,
+`structured_outputs`←`structured_outputs`); `max_input_tokens`/`max_tokens`
+from `limits`. `created_at` is epoch (the Copilot catalog carries no
+release date; Anthropic permits epoch).
+
+Two transforms shape the list (both shapes):
 
 - **ID rewrite** — `forwardId()` converts the upstream dotted ID to a
   dash-date sentinel: `claude-opus-4.6` → `claude-opus-4-6-20260301`,
