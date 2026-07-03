@@ -165,6 +165,8 @@ export interface ResponsesResult {
   output_text: string
   status: string
   usage?: ResponseUsage | null
+  /** Copilot per-request billing (sibling of usage). */
+  copilot_usage?: { total_nano_aiu?: number }
   error: ResponseError | null
   incomplete_details: IncompleteDetails | null
   instructions: string | null

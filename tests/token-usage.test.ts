@@ -141,10 +141,37 @@ describe("token usage storage", () => {
       output_tokens: 9,
       request_count: 2,
       total_tokens: 46,
+      total_nano_aiu: 0,
     })
     expect(summary.totals.total_tokens).toBe(46)
     expect(summary.byModel).toHaveLength(2)
     expect(summary.byModel.every((row) => row.total_tokens > 0)).toBe(true)
+  })
+
+  test("captures and sums total_nano_aiu cost across events", async () => {
+    recordTokenUsageEvent({
+      endpoint: "responses",
+      input_tokens: 10,
+      output_tokens: 5,
+      model: "gpt-a",
+      source: "copilot",
+      total_nano_aiu: 22775000,
+    })
+    recordTokenUsageEvent({
+      endpoint: "responses",
+      input_tokens: 8,
+      output_tokens: 4,
+      model: "gpt-a",
+      source: "copilot",
+      total_nano_aiu: 20400000,
+    })
+
+    const response = await createTokenUsageApp().request(
+      "/token-usage?period=day",
+    )
+    const summary = (await response.json()) as TokenUsageSummary
+    expect(summary.totals.total_nano_aiu).toBe(43175000)
+    expect(summary.byModel[0].total_nano_aiu).toBe(43175000)
   })
 
   test("returns paginated usage events with user id", async () => {

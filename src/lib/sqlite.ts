@@ -121,7 +121,6 @@ export async function openSqliteDatabase(
 export class SqliteDbStore {
   private dbPromise: Promise<SqliteDatabase> | null = null
   private readonly options: SqliteDbStoreOptions
-
   constructor(options: SqliteDbStoreOptions) {
     this.options = options
   }
@@ -151,4 +150,71 @@ export class SqliteDbStore {
     this.options.initialize?.(db)
     return db
   }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Versioned migration framework.
+//
+// Each SQLite-backed store owns an ordered list of Migration steps. The
+// runner uses SQLite's built-in `PRAGMA user_version` as the schema
+// version counter: migration[i] advances the DB from version i to i+1.
+// On open, every migration whose target version exceeds the current
+// user_version runs, in order, each wrapped in its own transaction so a
+// failure rolls back cleanly and leaves user_version untouched (the next
+// boot retries from the same point). Steps may run arbitrary DDL AND
+// data backfill, so existing rows migrate forward rather than being
+// stranded under an old shape.
+// ────────────────────────────────────────────────────────────────────
+
+export interface Migration {
+  /** Human-readable label for logs/errors. Order in the array is what
+   *  determines version, not this string. */
+  name: string
+  /** Apply the schema/data change. Runs inside a transaction. */
+  up: (db: SqliteDatabase) => void
+}
+
+function getUserVersion(db: SqliteDatabase): number {
+  const row = db.prepare("PRAGMA user_version").get() as
+    | { user_version?: number }
+    | undefined
+  return typeof row?.user_version === "number" ? row.user_version : 0
+}
+
+function setUserVersion(db: SqliteDatabase, version: number): void {
+  // PRAGMA doesn't accept bound parameters; version is an integer we
+  // compute, never user input.
+  db.exec(`PRAGMA user_version = ${Math.floor(version)}`)
+}
+
+/**
+ * Run any migrations whose target version exceeds the DB's current
+ * `user_version`, in array order, each in its own transaction. Returns
+ * the resulting schema version. Idempotent: a fully-migrated DB is a
+ * no-op. Throws (after rollback) if a step fails, so a broken migration
+ * never advances the version or leaves a half-applied change committed.
+ */
+export function runMigrations(
+  db: SqliteDatabase,
+  migrations: Array<Migration>,
+): number {
+  let current = getUserVersion(db)
+  for (let target = current + 1; target <= migrations.length; target++) {
+    const migration = migrations[target - 1]
+    db.exec("BEGIN")
+    try {
+      migration.up(db)
+      setUserVersion(db, target)
+      db.exec("COMMIT")
+    } catch (error) {
+      db.exec("ROLLBACK")
+      throw new Error(
+        `SQLite migration failed at step ${target} (${migration.name}): `
+          + (error instanceof Error ? error.message : String(error)),
+        { cause: error },
+      )
+    }
+    current = target
+  }
+  return current
 }

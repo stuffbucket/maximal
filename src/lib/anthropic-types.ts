@@ -139,6 +139,9 @@ export interface AnthropicResponse {
     cache_read_input_tokens?: number
     service_tier?: "standard" | "priority" | "batch"
   }
+  /** Copilot per-request billing (sibling of usage), when proxied via
+   *  Copilot's /v1/messages. */
+  copilot_usage?: { total_nano_aiu?: number }
 }
 
 // Anthropic Stream Event Types

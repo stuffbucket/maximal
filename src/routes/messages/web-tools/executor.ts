@@ -25,6 +25,7 @@ import { getSmallModel } from "~/lib/config"
 import { state } from "~/lib/state"
 import {
   createCopilotTokenUsageRecorder,
+  extractCopilotCost,
   normalizeResponsesUsage,
   type UsageTokens,
 } from "~/lib/token-usage"
@@ -202,6 +203,9 @@ export interface CopilotResponsesExecutorOpts {
    *  brokered /responses call is billed against the account's quota
    *  visibly (it spends GPT-model tokens the same as any /responses call). */
   recordUsage?: (usage: UsageTokens) => void
+  /** Injected for tests; defaults to `() => new Date()`. Used to stamp the
+   *  current date into undated queries. */
+  now?: () => Date
 }
 
 export class CopilotResponsesExecutor implements Executor {
@@ -209,6 +213,7 @@ export class CopilotResponsesExecutor implements Executor {
   private readonly createResponsesFn: typeof createResponses
   private readonly fetchExecutor: Executor
   private readonly recordUsage: (usage: UsageTokens) => void
+  private readonly now: () => Date
 
   constructor(opts: CopilotResponsesExecutorOpts) {
     this.model = opts.model
@@ -220,6 +225,7 @@ export class CopilotResponsesExecutor implements Executor {
         endpoint: "responses",
         model: opts.model,
       })
+    this.now = opts.now ?? (() => new Date())
   }
 
   // Copilot resolves web_fetch server-side too, but a plain HTTPS GET +
@@ -232,13 +238,16 @@ export class CopilotResponsesExecutor implements Executor {
     const maxResults = opts.maxResults ?? DEFAULT_SEARCH_MAX_RESULTS
     const payload: ResponsesPayload = {
       model: this.model,
-      // Steer the GPT broker to actually run a search and cite what it
-      // used, rather than answer from memory — we harvest sources, not prose.
-      input:
-        `Search the web for: ${query}\n\n`
-        + "Use the web_search tool and base your answer only on the results. "
-        + "Cite the sources you use.",
+      // Pass the model's own query through as-is — it's already a well-formed
+      // search intent (recency/site cues baked in by the caller); wrapping it
+      // in steering prose would make the broker search for our wrapper text.
+      // Only append today's date when the query has no date cue, so undated
+      // queries skew to current results (the model has no clock).
+      input: withDateHint(query, this.now()),
       tools: [{ type: "web_search" }],
+      // Force the search to actually run. Without this the model may answer
+      // from memory (tool_choice defaults to "auto"), returning 0 sources.
+      tool_choice: "required",
       // The sources array is only surfaced when explicitly included.
       include: ["web_search_call.action.sources"],
       stream: false,
@@ -263,12 +272,34 @@ export class CopilotResponsesExecutor implements Executor {
     }
 
     // This side-call spends the account's Copilot quota (GPT-model tokens +
-    // a web_search request). Record it so it's visible in `maximal debug` /
-    // the token-usage view rather than billed invisibly to the user.
-    this.recordUsage(normalizeResponsesUsage(result.usage))
+    // a web_search request). Record it — with the real per-request cost —
+    // so it's visible in `maximal debug` / the token-usage view rather than
+    // billed invisibly to the user.
+    this.recordUsage({
+      ...normalizeResponsesUsage(result.usage),
+      total_nano_aiu: extractCopilotCost(result.copilot_usage),
+    })
 
     return { ok: true, items: harvestResponsesHits(result, maxResults) }
   }
+}
+
+// Words/patterns that signal the query already scopes time, so we should
+// NOT inject "today". Covers explicit years (2019-2099), month names, and
+// common recency adverbs.
+const DATE_CUE_RE =
+  /\b(?:19|20)\d{2}\b|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b|\b(?:today|yesterday|tomorrow|latest|current|recent|now|this (?:week|month|year)|last (?:week|month|year))\b/iu
+
+/**
+ * Append today's date to an undated query so the broker skews to current
+ * results (it has no clock). If the query already carries a date cue
+ * (a year, month name, or recency word), pass it through unchanged so we
+ * don't fight an explicit range the caller asked for.
+ */
+export function withDateHint(query: string, now: Date): string {
+  if (DATE_CUE_RE.test(query)) return query
+  const date = now.toISOString().slice(0, 10) // YYYY-MM-DD, stable + locale-free
+  return `${query} (as of ${date})`
 }
 
 /**

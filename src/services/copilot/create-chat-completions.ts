@@ -166,6 +166,8 @@ export interface ChatCompletionResponse {
       cached_tokens: number
     }
   }
+  /** Copilot per-request billing (sibling of usage). */
+  copilot_usage?: { total_nano_aiu?: number }
 }
 
 interface ResponseMessage {

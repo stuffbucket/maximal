@@ -6,6 +6,7 @@ import {
   harvestResponsesHits,
   InProcessFetchExecutor,
   pickResponsesModel,
+  withDateHint,
 } from "~/routes/messages/web-tools/executor"
 
 const realFetch = globalThis.fetch
@@ -259,6 +260,40 @@ describe("CopilotResponsesExecutor.search — harvest from /responses", () => {
     ])
   })
 
+  it("forces the search and stamps an undated query with today's date", async () => {
+    const seen: Array<Record<string, unknown>> = []
+    const exec = new CopilotResponsesExecutor({
+      model: "gpt-5-mini",
+      createResponsesFn: (payload) => {
+        seen.push(payload)
+        return Promise.resolve({ output: [] } as never)
+      },
+      recordUsage: noopRecord,
+      now: () => new Date("2026-07-03T12:00:00Z"),
+    })
+    await exec.search("best espresso machines")
+    expect(seen).toHaveLength(1)
+    // Search is forced, tool declared, raw query preserved + dated.
+    expect(seen[0].tool_choice).toBe("required")
+    expect(seen[0].tools).toEqual([{ type: "web_search" }])
+    expect(seen[0].input).toBe("best espresso machines (as of 2026-07-03)")
+  })
+
+  it("passes a query that already has a date cue through unchanged", async () => {
+    const seen: Array<Record<string, unknown>> = []
+    const exec = new CopilotResponsesExecutor({
+      model: "gpt-5-mini",
+      createResponsesFn: (payload) => {
+        seen.push(payload)
+        return Promise.resolve({ output: [] } as never)
+      },
+      recordUsage: noopRecord,
+      now: () => new Date("2026-07-03T12:00:00Z"),
+    })
+    await exec.search("olympics schedule 2028")
+    expect(seen[0].input).toBe("olympics schedule 2028")
+  })
+
   it("records normalized token usage for the brokered /responses call", async () => {
     const recorded: Array<unknown> = []
     const exec = new CopilotResponsesExecutor({
@@ -360,5 +395,30 @@ describe("harvestResponsesHits — defensive parsing", () => {
     expect(hits).toEqual([
       { url: "https://ok.example", title: "OK", page_age: null },
     ])
+  })
+})
+
+describe("withDateHint", () => {
+  const now = new Date("2026-07-03T00:00:00Z")
+
+  it("appends the current date to an undated query", () => {
+    expect(withDateHint("who won the game", now)).toBe(
+      "who won the game (as of 2026-07-03)",
+    )
+  })
+
+  it("leaves a query with an explicit year unchanged", () => {
+    expect(withDateHint("tax brackets 2025", now)).toBe("tax brackets 2025")
+  })
+
+  it("leaves a query with a recency word unchanged", () => {
+    expect(withDateHint("latest iphone reviews", now)).toBe(
+      "latest iphone reviews",
+    )
+    expect(withDateHint("news today", now)).toBe("news today")
+  })
+
+  it("leaves a query with a month name unchanged", () => {
+    expect(withDateHint("events in December", now)).toBe("events in December")
   })
 })

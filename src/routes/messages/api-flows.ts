@@ -15,6 +15,7 @@ import {
 import { debugJson, debugJsonTail, debugLazy } from "~/lib/logger"
 import {
   createCopilotTokenUsageRecorder,
+  extractCopilotCost,
   mergeAnthropicUsage,
   normalizeAnthropicUsage,
   normalizeOpenAIUsage,
@@ -98,7 +99,10 @@ export const handleWithChatCompletions = async (
 
   if (isNonStreaming(response)) {
     debugJson(logger, "Non-streaming response from Copilot:", response)
-    recordUsage(normalizeOpenAIUsage(response.usage))
+    recordUsage({
+      ...normalizeOpenAIUsage(response.usage),
+      total_nano_aiu: extractCopilotCost(response.copilot_usage),
+    })
     const anthropicResponse = translateToAnthropic(response)
     debugJson(logger, "Translated Anthropic response:", anthropicResponse)
     return c.json(anthropicResponse)
@@ -259,7 +263,7 @@ export const handleWithResponsesApi = async (
   const anthropicResponse = translateResponsesResultToAnthropic(
     response as ResponsesResult,
   )
-  recordUsage(normalizeResponsesUsage((response as ResponsesResult).usage))
+  recordUsage(responsesUsageWithCost(response as ResponsesResult))
   debugJson(logger, "Translated Anthropic response:", anthropicResponse)
   return c.json(anthropicResponse)
 }
@@ -341,7 +345,10 @@ export const handleWithMessagesApi = async (
     value: response,
     tailLength: 400,
   })
-  recordUsage(normalizeAnthropicUsage(response.usage))
+  recordUsage({
+    ...normalizeAnthropicUsage(response.usage),
+    total_nano_aiu: extractCopilotCost(response.copilot_usage),
+  })
   return c.json(response)
 }
 
@@ -365,6 +372,12 @@ const createCopilotUsageRecorder = (options: {
     model: options.model,
     sessionId: getMetadataSessionId(options.payload),
   })
+
+/** Non-streaming /responses usage incl. Copilot's per-request cost. */
+const responsesUsageWithCost = (result: ResponsesResult): UsageTokens => ({
+  ...normalizeResponsesUsage(result.usage),
+  total_nano_aiu: extractCopilotCost(result.copilot_usage),
+})
 
 const getMetadataSessionId = (
   payload: AnthropicMessagesPayload,
