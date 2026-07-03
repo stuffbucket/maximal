@@ -60,16 +60,34 @@ export interface SendRequestInit extends Omit<RequestInit, "headers"> {
  * gets no credential — a safe default: a typo'd host fails unauthenticated
  * rather than leaking a token to the wrong place.
  */
+/**
+ * True iff `url`'s origin (scheme + host + port) exactly equals `baseUrl`'s.
+ *
+ * Host matching MUST parse the URL and compare origins — never a string
+ * prefix. `"https://api.anthropic.com".startsWith`-style checks match hostile
+ * lookalikes such as `https://api.anthropic.com.evil.com/…`, which would
+ * attach our credential and send it to the attacker's domain
+ * (CodeQL js/incomplete-url-substring-sanitization). A URL that fails to parse
+ * matches nothing → no credential attached (safe default).
+ */
+function isSameOrigin(url: string, baseUrl: string): boolean {
+  try {
+    return new URL(url).origin === new URL(baseUrl).origin
+  } catch {
+    return false
+  }
+}
+
 function attachHostAuth(
   url: string,
   headers: Headers,
   githubTokenOverride?: string,
 ): void {
-  if (url.startsWith(copilotBaseUrl(state))) {
+  if (isSameOrigin(url, copilotBaseUrl(state))) {
     headers.set("authorization", `Bearer ${state.copilotToken}`)
     return
   }
-  if (url.startsWith(getGitHubApiBaseUrl())) {
+  if (isSameOrigin(url, getGitHubApiBaseUrl())) {
     const token = githubTokenOverride ?? state.githubToken
     // opencode's GitHub OAuth app expects a Bearer token; the standard
     // (VS Code) identity expects the legacy `token <x>` scheme.
@@ -79,7 +97,7 @@ function attachHostAuth(
     )
     return
   }
-  if (url.startsWith(ANTHROPIC_API_BASE_URL)) {
+  if (isSameOrigin(url, ANTHROPIC_API_BASE_URL)) {
     // Direct Anthropic API (count_tokens). Key from config/env/file; callers
     // gate on its presence but never read it.
     const key = getAnthropicApiKey()

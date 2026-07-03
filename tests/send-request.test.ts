@@ -80,6 +80,24 @@ describe("sendRequest — credential inferred from the destination host", () => 
     expect(cap.request().headers.get("x-api-key")).toBeNull()
   })
 
+  test("a lookalike host that PREFIXES a real host gets NO credential", async () => {
+    // Regression: host matching must compare origin, not string prefix.
+    // `https://api.githubcopilot.com.evil.com` startsWith the Copilot base URL
+    // but is a different origin — it must NOT receive the Copilot token.
+    const cap = captureFetch()
+    await sendRequest(`${COPILOT_HOST}.evil.com/v1/messages`)
+    expect(cap.request().headers.get("authorization")).toBeNull()
+    expect(cap.request().headers.get("x-api-key")).toBeNull()
+  })
+
+  test("the real host still matches even with a path/query", async () => {
+    const cap = captureFetch()
+    await sendRequest(`${COPILOT_HOST}/v1/messages?x=1`)
+    expect(cap.request().headers.get("authorization")).toBe(
+      "Bearer copilot-tok",
+    )
+  })
+
   test("forwards caller non-secret headers and body unchanged", async () => {
     const cap = captureFetch()
     await sendRequest(`${COPILOT_HOST}/x`, {
