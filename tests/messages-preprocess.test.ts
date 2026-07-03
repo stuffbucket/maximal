@@ -767,3 +767,54 @@ describe("prepareMessagesApiPayload", () => {
     expect(payload.temperature).toBeUndefined()
   })
 })
+
+describe("prepareMessagesApiPayload extended-thinking display (#210)", () => {
+  const adaptiveModel = {
+    capabilities: { supports: { adaptive_thinking: true } },
+  } as never
+
+  const run = (
+    thinking?: AnthropicMessagesPayload["thinking"],
+    model = "gpt-5.4",
+  ): AnthropicMessagesPayload => {
+    const payload: AnthropicMessagesPayload = {
+      model,
+      max_tokens: 128,
+      messages: [{ role: "user", content: "hello" }],
+      ...(thinking ? { thinking } : {}),
+    }
+    prepareMessagesApiPayload(payload, adaptiveModel)
+    return payload
+  }
+
+  test("client asks for adaptive with no display -> defaults to summarized", () => {
+    // Bug-fix assertion: previously left display unset -> empty thinking block.
+    expect(run({ type: "adaptive" }).thinking).toEqual({
+      type: "adaptive",
+      display: "summarized",
+    })
+  })
+
+  test("client sends no thinking param -> still defaults to summarized", () => {
+    expect(run().thinking).toEqual({ type: "adaptive", display: "summarized" })
+  })
+
+  test("client supplies an explicit display -> preserved, not overwritten", () => {
+    expect(run({ type: "adaptive", display: "raw" }).thinking).toEqual({
+      type: "adaptive",
+      display: "raw",
+    })
+  })
+
+  test("claude-opus-4.7 -> always summarized regardless of incoming display", () => {
+    expect(
+      run({ type: "adaptive", display: "raw" }, "claude-opus-4.7").thinking,
+    ).toEqual({ type: "adaptive", display: "summarized" })
+  })
+
+  test("client explicitly disables thinking -> not force-set to adaptive", () => {
+    const payload = run({ type: "disabled" })
+    expect(payload.thinking).toEqual({ type: "disabled" })
+    expect(payload.output_config).toBeUndefined()
+  })
+})
