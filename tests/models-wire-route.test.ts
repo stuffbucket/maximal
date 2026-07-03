@@ -60,7 +60,7 @@ function richModel(over: Partial<Model> = {}): Model {
       },
     },
     ...over,
-  } as unknown as Model
+  }
 }
 
 function buildApp() {
