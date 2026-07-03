@@ -1,20 +1,21 @@
 import { copilotHeaders, copilotBaseUrl } from "~/lib/api-config"
-import { HTTPError } from "~/lib/error"
+import { authFetchJson } from "~/lib/auth-fetch"
 import { state } from "~/lib/state"
 
 export const createEmbeddings = async (payload: EmbeddingRequest) => {
   if (!state.copilotToken) throw new Error("Copilot token not found")
 
-  const response = await fetch(`${copilotBaseUrl(state)}/embeddings`, {
-    method: "POST",
-    // codeql[js/file-access-to-http] -- by design: the proxy reads its own 0o600 Copilot token from disk and forwards it as upstream Authorization. Same posture as gh/aws/kubectl; this is the proxy's reason to exist. See ADR-0001.
-    headers: copilotHeaders(state),
-    body: JSON.stringify(payload),
-  })
-
-  if (!response.ok) throw new HTTPError("Failed to create embeddings", response)
-
-  return (await response.json()) as EmbeddingResponse
+  // Deliberately unbounded (no timeoutMs): large input arrays can run long,
+  // and this is not on the cold-boot critical path the timeout doc guards.
+  return await authFetchJson<EmbeddingResponse>(
+    `${copilotBaseUrl(state)}/embeddings`,
+    {
+      method: "POST",
+      headers: copilotHeaders(state),
+      body: JSON.stringify(payload),
+      errorMessage: "Failed to create embeddings",
+    },
+  )
 }
 
 export interface EmbeddingRequest {

@@ -10,6 +10,7 @@ import {
   prepareForCompact,
   prepareInteractionHeaders,
 } from "~/lib/api-config"
+import { authFetch } from "~/lib/auth-fetch"
 import { isAuthFatal, parseCopilotErrorBody } from "~/lib/copilot-error-parser"
 import { logCopilotRateLimits } from "~/lib/copilot-rate-limit"
 import { CopilotAuthFatalError, HTTPError } from "~/lib/error"
@@ -63,11 +64,14 @@ export const createChatCompletions = async (
 
   consola.log(`<-- model: ${payload.model}`)
 
-  const response = await fetch(`${copilotBaseUrl(state)}/chat/completions`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(payload),
-  })
+  const response = await authFetch(
+    `${copilotBaseUrl(state)}/chat/completions`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+    },
+  )
 
   logCopilotRateLimits(response.headers)
 

@@ -50,15 +50,17 @@ The current suppressed sites (grep `codeql\[` to enumerate):
 
 | Rule | File | Why |
 |---|---|---|
-| `js/file-access-to-http` | `src/services/copilot/create-embeddings.ts` | Forward Copilot token upstream |
-| `js/file-access-to-http` | `src/services/copilot/get-models.ts` | Forward Copilot token upstream |
-| `js/file-access-to-http` | `src/services/github/get-user.ts` | Forward GitHub token upstream |
-| `js/file-access-to-http` | `src/services/github/get-copilot-usage.ts` | Forward GitHub token upstream |
+| `js/file-access-to-http` | `src/lib/auth-fetch.ts` | **Single chokepoint** — every authenticated GitHub/Copilot request funnels through `authFetch`, forwarding the disk-read token upstream |
 | `js/file-access-to-http` | `scripts/gemma-watch.ts` | Dev-only watcher → local Ollama |
-| `js/file-access-to-http` | `src/services/github/get-device-code.ts` | OAuth device-code flow |
-| `js/file-access-to-http` | `src/services/github/poll-access-token.ts` | OAuth access-token flow |
 | `js/http-to-file-access` | `src/lib/github-token-store.ts` | Persist OAuth token to 0o600 file |
 | `js/http-to-file-access` | `scripts/sync-homebrew-formula.ts` | Release tooling renders a formula |
+
+The six per-service `src/services/{copilot,github}/*` suppressions were
+collapsed into the single `auth-fetch.ts` chokepoint (see the Amendment
+below): callers build headers and resolve base URLs, but the file→HTTP
+sink they all route through lives in one place, so the taint terminates
+at one annotated line. New authenticated endpoints inherit the
+suppression for free instead of each needing their own.
 
 # Consequences
 

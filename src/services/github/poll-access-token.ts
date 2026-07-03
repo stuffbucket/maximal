@@ -1,6 +1,7 @@
 import consola from "consola"
 
 import { getOauthAppConfig, getOauthUrls } from "~/lib/api-config"
+import { authFetch } from "~/lib/auth-fetch"
 import { DEVICE_POLL_TIMEOUT_MS } from "~/lib/http-timeouts"
 import { sleep } from "~/lib/utils"
 
@@ -47,11 +48,10 @@ export async function pollAccessToken(
 
     let response: Response
     try {
-      response = await fetch(accessTokenUrl, {
+      response = await authFetch(accessTokenUrl, {
         method: "POST",
-        // codeql[js/file-access-to-http] -- by design: the proxy reads its own OAuth app config from disk and posts it to GitHub's access-token endpoint. This is the auth flow's reason to exist. See ADR-0001.
         headers,
-        signal: AbortSignal.timeout(DEVICE_POLL_TIMEOUT_MS),
+        timeoutMs: DEVICE_POLL_TIMEOUT_MS,
         body: JSON.stringify({
           client_id: clientId,
           device_code: deviceCode.device_code,

@@ -15,6 +15,7 @@ import {
   prepareInteractionHeaders,
   prepareMessageProxyHeaders,
 } from "~/lib/api-config"
+import { authFetch } from "~/lib/auth-fetch"
 import { isAuthFatal, parseCopilotErrorBody } from "~/lib/copilot-error-parser"
 import { logCopilotRateLimits } from "~/lib/copilot-rate-limit"
 import { CopilotAuthFatalError, HTTPError } from "~/lib/error"
@@ -140,7 +141,7 @@ export const createMessages = async (
 
   consola.log(`<-- model: ${payload.model}`)
 
-  const response = await fetch(`${copilotBaseUrl(state)}/v1/messages`, {
+  const response = await authFetch(`${copilotBaseUrl(state)}/v1/messages`, {
     method: "POST",
     headers,
     body: JSON.stringify(payload),
