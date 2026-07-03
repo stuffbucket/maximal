@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.4.39](https://github.com/stuffbucket/maximal/compare/v0.4.38...v0.4.39) (2026-07-03)
+
+
+### Features
+
+* **server:** stamp x-maximal-version response header on all responses ([#213](https://github.com/stuffbucket/maximal/issues/213)) ([d45bd8e](https://github.com/stuffbucket/maximal/commit/d45bd8e63c99e74e93baccc351808e5f20ea2e25))
+* **web-tools:** no-key web_search via Copilot /responses, DuckDuckGo fallback ([#205](https://github.com/stuffbucket/maximal/issues/205)) ([6cbdb36](https://github.com/stuffbucket/maximal/commit/6cbdb36a8bcd96bc015d9ad3999f84ea6f828aa3)), closes [#204](https://github.com/stuffbucket/maximal/issues/204)
+
+
+### Bug Fixes
+
+* **claude-desktop:** restore MCP/extension keys, fix Artifacts preview ([#203](https://github.com/stuffbucket/maximal/issues/203)) ([4037fe4](https://github.com/stuffbucket/maximal/commit/4037fe427cacf164ff015a0f51ba3470e5ed5cdd)), closes [#188](https://github.com/stuffbucket/maximal/issues/188)
+* **thinking:** honor client extended-thinking display and disable on Copilot-served Claude ([#211](https://github.com/stuffbucket/maximal/issues/211)) ([e5510a5](https://github.com/stuffbucket/maximal/commit/e5510a5612236342c8ccd7824e3196439945e022))
+* **web-tools:** align web_fetch domain matching with spec-correct web_search matcher ([#209](https://github.com/stuffbucket/maximal/issues/209)) ([0cccb40](https://github.com/stuffbucket/maximal/commit/0cccb40453011960f91c9651c8434cde94e0ce78))
+
 ## [0.4.38](https://github.com/stuffbucket/maximal/compare/v0.4.37...v0.4.38) (2026-07-03)
 
 
