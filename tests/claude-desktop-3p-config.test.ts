@@ -92,11 +92,13 @@ describe("getClaude3pDir — Windows (platform injected)", () => {
 })
 
 describe("gatewayProfile", () => {
-  it("turns all telemetry off but leaves update checks on", () => {
+  it("turns telemetry off but leaves update checks and Artifacts preview on", () => {
     const p = gatewayProfile(home)
     expect(p.disableEssentialTelemetry).toBe(true)
     expect(p.disableNonessentialTelemetry).toBe(true)
-    expect(p.disableNonessentialServices).toBe(true)
+    // disableNonessentialServices governs the Artifacts preview iframe/favicon
+    // fetch, not telemetry — must stay false or Artifacts previews break.
+    expect(p.disableNonessentialServices).toBe(false)
     expect(p.disableAutoUpdates).toBe(false)
   })
 
@@ -106,6 +108,15 @@ describe("gatewayProfile", () => {
     expect(p.inferenceGatewayBaseUrl).toBe("http://127.0.0.1:9999")
     expect(p.disableDeploymentModeChooser).toBe(true)
     expect(p.allowedWorkspaceFolders).toEqual([path.join(home, "Claude")])
+  })
+
+  it("enables MCP and desktop extensions", () => {
+    const p = gatewayProfile(home)
+    expect(p.isLocalDevMcpEnabled).toBe(true)
+    expect(p.isDesktopExtensionEnabled).toBe(true)
+    expect(p.isDesktopExtensionDirectoryEnabled).toBe(true)
+    expect(p.isDesktopExtensionSignatureRequired).toBe(false)
+    expect(p.isClaudeCodeForDesktopEnabled).toBe(true)
   })
 })
 
