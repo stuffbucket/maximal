@@ -5,6 +5,7 @@ import {
   CopilotResponsesExecutor,
   harvestResponsesHits,
   InProcessFetchExecutor,
+  pickResponsesModel,
 } from "~/routes/messages/web-tools/executor"
 
 const realFetch = globalThis.fetch
@@ -73,6 +74,30 @@ describe("InProcessFetchExecutor.search — DuckDuckGo HTML scrape", () => {
     expect(result.items).toHaveLength(1)
   })
 
+  it("fully strips nested tags and decodes entities without double-unescaping", async () => {
+    // Title carries (a) a nested/split tag a single strip pass would leave
+    // residue from, and (b) a double-escaped entity that sequential decoding
+    // would wrongly collapse to a raw `<`. Guards the two CodeQL findings.
+    const fixture = `
+<div class="result">
+  <a rel="nofollow" class="result__a" href="https://ex.example/x">A<b>B</b> &amp;lt;tag&gt; <scr<script>ipt>X</a>
+</div>
+`
+    mockFetch(new Response(fixture, { status: 200 }))
+    const result = await new InProcessFetchExecutor().search("q")
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.items).toHaveLength(1)
+    const title = result.items[0].title
+    // No `<` survives — a stray `<` is what could open an injected tag; the
+    // fixpoint strip removes all tag-like residue (a lone `>`, e.g. from a
+    // legitimately-decoded `&gt;`, can't open a tag, so it's harmless).
+    expect(title).not.toContain("<")
+    expect(title).not.toContain("<script")
+    // `&amp;lt;` stays the literal text `&lt;`, NOT decoded down to `<`.
+    expect(title).toContain("&lt;tag")
+  })
+
   it("returns unavailable on a non-2xx response", async () => {
     mockFetch(new Response("", { status: 500 }))
     const result = await new InProcessFetchExecutor().search("weather")
@@ -123,6 +148,48 @@ describe("chooseExecutor — precedence", () => {
     if (choice.kind !== "InProcessFetchExecutor") return
     expect(choice.notes).toContain("DuckDuckGo")
     expect(choice.notes).toContain("OLLAMA_API_KEY")
+  })
+})
+
+// Compact model-descriptor builder for pickResponsesModel cases.
+const modelDesc = (id: string, supportsResponses = true) => ({
+  id,
+  supportsResponses,
+})
+
+describe("pickResponsesModel — resilient to model churn", () => {
+  const m = modelDesc
+
+  it("returns undefined when no model supports /responses (e.g. Claude-only)", () => {
+    expect(
+      pickResponsesModel(
+        [m("claude-sonnet-5", false), m("claude-haiku-4.5", false)],
+        "gpt-5-mini",
+      ),
+    ).toBeUndefined()
+  })
+
+  it("honors the configured small model when it supports /responses", () => {
+    expect(
+      pickResponsesModel([m("gpt-5-mini"), m("gpt-5.5")], "gpt-5-mini"),
+    ).toBe("gpt-5-mini")
+  })
+
+  it("falls through to a mini-class model when the configured one is gone", () => {
+    // gpt-5-mini deprecated / absent from the live catalog → pick the
+    // current mini-class model by pattern, not the frozen id.
+    expect(
+      pickResponsesModel(
+        [m("gpt-5.3-codex"), m("gpt-6-mini"), m("gpt-6")],
+        "gpt-5-mini",
+      ),
+    ).toBe("gpt-6-mini")
+  })
+
+  it("falls through to any /responses model when no mini-class exists", () => {
+    expect(
+      pickResponsesModel([m("gpt-5.3-codex"), m("gpt-5.5")], "gpt-5-mini"),
+    ).toBe("gpt-5.3-codex")
   })
 })
 

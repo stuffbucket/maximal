@@ -332,17 +332,38 @@ const RESULT_ANCHOR_RE = /<a\b([^>]*)>([\s\S]*?)<\/a>/giu
 const HREF_ATTR_RE = /href="([^"]*)"/iu
 const TAG_RE = /<[^>]+>/gu
 
+// Strip HTML tags. Loop until the output is stable: a single pass over
+// crafted input (e.g. `<scr<script>ipt>`) can leave tag-like residue behind,
+// which CodeQL flags as incomplete-multi-character-sanitization. Iterating
+// to a fixpoint removes any tags exposed by an earlier removal.
 function stripTags(html: string): string {
-  return html.replaceAll(TAG_RE, "").replaceAll(WHITESPACE_RE, " ").trim()
+  let current = html
+  let previous: string
+  do {
+    previous = current
+    current = current.replaceAll(TAG_RE, "")
+  } while (current !== previous)
+  return current.replaceAll(WHITESPACE_RE, " ").trim()
 }
 
+const HTML_ENTITY_RE = /&(amp|lt|gt|quot|#39);/gu
+const HTML_ENTITY_MAP: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  "#39": "'",
+}
+
+// Single-pass decode via one regex + lookup. Decoding entities
+// sequentially (`&amp;`→`&` first, then `&lt;`→`<`) double-unescapes input
+// like `&amp;lt;` into `<` when it should stay the literal `&lt;`. A single
+// pass never re-examines its own output, so ordering can't compound.
 function decodeHtmlEntities(s: string): string {
-  return s
-    .replaceAll("&amp;", "&")
-    .replaceAll("&lt;", "<")
-    .replaceAll("&gt;", ">")
-    .replaceAll("&quot;", '"')
-    .replaceAll("&#39;", "'")
+  return s.replaceAll(
+    HTML_ENTITY_RE,
+    (_, name: string) => HTML_ENTITY_MAP[name],
+  )
 }
 
 // DDG's html endpoint doesn't link directly to results — it wraps them in
@@ -699,20 +720,45 @@ export function chooseExecutor(
  * has no /responses-capable model (e.g. Claude-only accounts — no Claude
  * model supports /responses, which is the whole reason this broker exists).
  *
- * Prefers the configured small model (gpt-5-mini by default — verified to
- * run web_search), else the first /responses-capable model in the catalog.
+ * Never trusts a frozen model id — it queries the LIVE catalog, so a
+ * deprecated model (e.g. gpt-5-mini retired by GitHub) simply drops out and
+ * selection moves on. Order of preference:
+ *   1. the configured small model, if it supports /responses (honor the user);
+ *   2. else a "mini"-class /responses model — tracks the cheap tier by class,
+ *      not a pinned string, so it survives gpt-5-mini → gpt-6-mini renames;
+ *   3. else any /responses-capable model, so search still works.
  */
 export function resolveResponsesModel(): string | undefined {
   if (!state.copilotToken) return undefined
-  const models = state.models?.data ?? []
-  const supportsResponses = (id: string): boolean =>
-    models.find((m) => m.id === id)?.supported_endpoints?.includes("/responses")
-    ?? false
+  return pickResponsesModel(
+    (state.models?.data ?? []).map((m) => ({
+      id: m.id,
+      supportsResponses: m.supported_endpoints?.includes("/responses") ?? false,
+    })),
+    getSmallModel(),
+  )
+}
 
-  const small = getSmallModel()
-  if (supportsResponses(small)) return small
+/**
+ * Pure model-selection core (see resolveResponsesModel for the policy).
+ * Split out so it's testable without live Copilot state.
+ */
+export function pickResponsesModel(
+  models: Array<{ id: string; supportsResponses: boolean }>,
+  configuredSmall: string,
+): string | undefined {
+  const responsesModels = models.filter((m) => m.supportsResponses)
+  if (responsesModels.length === 0) return undefined
 
-  return models.find((m) => m.supported_endpoints?.includes("/responses"))?.id
+  // 1. Honor the configured small model when it can do /responses.
+  if (responsesModels.some((m) => m.id === configuredSmall)) {
+    return configuredSmall
+  }
+  // 2. Prefer the cheap "mini" tier by class (not a frozen id).
+  const mini = responsesModels.find((m) => m.id.toLowerCase().includes("mini"))
+  if (mini) return mini.id
+  // 3. Any /responses-capable model keeps search working.
+  return responsesModels[0].id
 }
 
 /**
