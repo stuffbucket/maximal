@@ -9,6 +9,7 @@ export async function getDeviceCode(): Promise<DeviceCodeResponse> {
   return await sendRequestJson<DeviceCodeResponse>(deviceCodeUrl, {
     credential: { domain: "none" },
     method: "POST",
+    // codeql[js/file-access-to-http] -- by design: the proxy reads its own OAuth app config from disk and posts it to GitHub's device-code endpoint. This is the auth flow's reason to exist. See ADR-0001.
     headers,
     body: JSON.stringify({
       client_id: clientId,
