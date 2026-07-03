@@ -14,7 +14,7 @@ export const getCopilotUsage = async (
   return await sendRequestJson<CopilotUsageResponse>(
     `${getGitHubApiBaseUrl()}/copilot_internal/user`,
     {
-      credential: { domain: "github", token: resolvedGithubToken },
+      githubToken: resolvedGithubToken,
       headers: githubHeaders(),
       timeoutMs: GITHUB_API_TIMEOUT_MS,
       errorMessage: "Failed to get Copilot usage",

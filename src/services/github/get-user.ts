@@ -12,7 +12,7 @@ export async function getGitHubUser(githubToken?: string) {
   return await sendRequestJson<GithubUserResponse>(
     `${getGitHubApiBaseUrl()}/user`,
     {
-      credential: { domain: "github", token: resolvedGithubToken },
+      githubToken: resolvedGithubToken,
       headers: githubUserHeaders(),
       timeoutMs: GITHUB_API_TIMEOUT_MS,
       errorMessage: "Failed to get GitHub user",

@@ -23,7 +23,7 @@ async function countTokensViaAnthropic(
   if (!payload.model.startsWith("claude")) return null
 
   // Presence check only — the key itself is read + attached inside the
-  // mechanism (credential domain "anthropic"); this handler never sees it.
+  // mechanism (host-inferred for api.anthropic.com); this handler never sees it.
   if (!getAnthropicApiKey()) return null
 
   // Copilot uses dotted names (claude-opus-4.6) but Anthropic requires dashes (claude-opus-4-6)
@@ -32,7 +32,6 @@ async function countTokensViaAnthropic(
   const res = await sendRequest(
     "https://api.anthropic.com/v1/messages/count_tokens",
     {
-      credential: { domain: "anthropic" },
       method: "POST",
       headers: {
         "content-type": "application/json",

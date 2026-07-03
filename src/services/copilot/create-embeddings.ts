@@ -10,7 +10,6 @@ export const createEmbeddings = async (payload: EmbeddingRequest) => {
   return await sendRequestJson<EmbeddingResponse>(
     `${copilotBaseUrl(state)}/embeddings`,
     {
-      credential: { domain: "copilot" },
       method: "POST",
       headers: copilotHeaders(state),
       body: JSON.stringify(payload),

@@ -1,12 +1,38 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 
 import { HTTPError } from "~/lib/error"
-import { sendRequest, sendRequestJson } from "~/lib/send-request"
+import {
+  sendProviderRequest,
+  sendRequest,
+  sendRequestJson,
+} from "~/lib/send-request"
+import { state } from "~/lib/state"
 
 const realFetch = globalThis.fetch
 
+// The router infers the credential from the destination host, so tests hit the
+// real first-party hosts. In standard (non-enterprise, non-opencode) mode these
+// resolve to fixed constants.
+const COPILOT_HOST = "https://api.githubcopilot.com"
+const GITHUB_API_HOST = "https://api.github.com"
+
+const originalTokens = {
+  copilotToken: state.copilotToken,
+  githubToken: state.githubToken,
+  accountType: state.accountType,
+  copilotApiUrl: state.copilotApiUrl,
+}
+
+beforeEach(() => {
+  state.copilotToken = "copilot-tok"
+  state.githubToken = "gh-tok"
+  state.accountType = "individual"
+  state.copilotApiUrl = undefined
+})
+
 afterEach(() => {
   globalThis.fetch = realFetch
+  Object.assign(state, originalTokens)
 })
 
 function captureFetch(response?: Response): {
@@ -24,54 +50,39 @@ function captureFetch(response?: Response): {
   }
 }
 
-describe("sendRequest — credential attachment happens inside the mechanism", () => {
-  test("attaches a Copilot bearer the caller never supplied", async () => {
+describe("sendRequest — credential inferred from the destination host", () => {
+  test("Copilot host gets the Copilot bearer, no caller input", async () => {
     const cap = captureFetch()
-    await sendRequest("https://api.example/x", {
-      credential: { domain: "copilot" },
-    })
-    // The caller passed NO headers; the mechanism attached the token.
-    expect(cap.request().headers.get("authorization")).toStartWith("Bearer ")
+    await sendRequest(`${COPILOT_HOST}/v1/messages`)
+    expect(cap.request().headers.get("authorization")).toBe(
+      "Bearer copilot-tok",
+    )
   })
 
-  test("github uses the caller-provided override token via the legacy scheme", async () => {
+  test("GitHub API host gets the github token via the legacy scheme", async () => {
     const cap = captureFetch()
-    await sendRequest("https://api.example/user", {
-      credential: { domain: "github", token: "gho_test" },
-    })
-    expect(cap.request().headers.get("authorization")).toBe("token gho_test")
+    await sendRequest(`${GITHUB_API_HOST}/user`)
+    expect(cap.request().headers.get("authorization")).toBe("token gh-tok")
   })
 
-  test("domain 'none' attaches no auth header", async () => {
+  test("GitHub API host honors a per-request token override (sign-in flow)", async () => {
     const cap = captureFetch()
-    await sendRequest("https://api.example/device", {
-      credential: { domain: "none" },
+    await sendRequest(`${GITHUB_API_HOST}/user`, { githubToken: "candidate" })
+    expect(cap.request().headers.get("authorization")).toBe("token candidate")
+  })
+
+  test("an unrecognized host gets NO credential (safe default)", async () => {
+    const cap = captureFetch()
+    await sendRequest("https://github.com/login/oauth/access_token", {
+      method: "POST",
     })
     expect(cap.request().headers.get("authorization")).toBeNull()
     expect(cap.request().headers.get("x-api-key")).toBeNull()
   })
 
-  test("provider (x-api-key) attaches the configured key as x-api-key", async () => {
-    const cap = captureFetch()
-    await sendRequest("https://provider.example/v1/models", {
-      credential: {
-        domain: "provider",
-        config: {
-          name: "c",
-          type: "anthropic",
-          baseUrl: "https://provider.example",
-          apiKey: "prov-key",
-          authType: "x-api-key",
-        },
-      },
-    })
-    expect(cap.request().headers.get("x-api-key")).toBe("prov-key")
-  })
-
   test("forwards caller non-secret headers and body unchanged", async () => {
     const cap = captureFetch()
-    await sendRequest("https://api.example/x", {
-      credential: { domain: "none" },
+    await sendRequest(`${COPILOT_HOST}/x`, {
       method: "POST",
       headers: { "x-initiator": "agent" },
       body: "hi",
@@ -83,30 +94,56 @@ describe("sendRequest — credential attachment happens inside the mechanism", (
 
   test("attaches an AbortSignal when timeoutMs is set", async () => {
     const cap = captureFetch()
-    await sendRequest("https://api.example/x", {
-      credential: { domain: "none" },
-      timeoutMs: 5000,
-    })
+    await sendRequest(`${COPILOT_HOST}/x`, { timeoutMs: 5000 })
     expect(cap.calls[0].init.signal).toBeInstanceOf(AbortSignal)
   })
 
   test("leaves signal undefined when timeoutMs is omitted", async () => {
     const cap = captureFetch()
-    await sendRequest("https://api.example/x", {
-      credential: { domain: "none" },
-    })
+    await sendRequest(`${COPILOT_HOST}/x`)
     expect(cap.calls[0].init.signal).toBeUndefined()
   })
 
   test("an explicit signal wins over timeoutMs", async () => {
     const cap = captureFetch()
     const controller = new AbortController()
-    await sendRequest("https://api.example/x", {
-      credential: { domain: "none" },
+    await sendRequest(`${COPILOT_HOST}/x`, {
       signal: controller.signal,
       timeoutMs: 5000,
     })
     expect(cap.calls[0].init.signal).toBe(controller.signal)
+  })
+})
+
+describe("sendProviderRequest — credential from the config object", () => {
+  test("attaches x-api-key by default", async () => {
+    const cap = captureFetch()
+    await sendProviderRequest(
+      {
+        name: "c",
+        type: "anthropic",
+        baseUrl: "https://provider.example",
+        apiKey: "prov-key",
+        authType: "x-api-key",
+      },
+      "https://provider.example/v1/models",
+    )
+    expect(cap.request().headers.get("x-api-key")).toBe("prov-key")
+  })
+
+  test("attaches Authorization bearer when configured", async () => {
+    const cap = captureFetch()
+    await sendProviderRequest(
+      {
+        name: "c",
+        type: "anthropic",
+        baseUrl: "https://provider.example",
+        apiKey: "prov-key",
+        authType: "authorization",
+      },
+      "https://provider.example/v1/models",
+    )
+    expect(cap.request().headers.get("authorization")).toBe("Bearer prov-key")
   })
 })
 
@@ -116,8 +153,8 @@ describe("sendRequestJson", () => {
       new Response(JSON.stringify({ login: "octocat" }), { status: 200 }),
     )
     const result = await sendRequestJson<{ login: string }>(
-      "https://api.example/user",
-      { credential: { domain: "none" }, errorMessage: "boom" },
+      `${GITHUB_API_HOST}/user`,
+      { errorMessage: "boom" },
     )
     expect(result.login).toBe("octocat")
   })
@@ -126,10 +163,7 @@ describe("sendRequestJson", () => {
     captureFetch(new Response("nope", { status: 500 }))
     let caught: unknown
     try {
-      await sendRequestJson("https://api.example/user", {
-        credential: { domain: "none" },
-        errorMessage: "boom",
-      })
+      await sendRequestJson(`${GITHUB_API_HOST}/user`, { errorMessage: "boom" })
     } catch (err) {
       caught = err
     }

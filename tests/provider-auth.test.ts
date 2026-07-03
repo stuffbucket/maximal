@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 
 import type { ResolvedProviderConfig } from "~/lib/config"
 
-import { sendRequest } from "~/lib/send-request"
+import { sendProviderRequest } from "~/lib/send-request"
 
 import { buildProviderUpstreamHeaders } from "../src/services/providers/anthropic-proxy"
 
@@ -63,23 +63,22 @@ describe("buildProviderUpstreamHeaders", () => {
 describe("provider credential attachment (inside the mechanism)", () => {
   test("attaches x-api-key by default", async () => {
     const cap = captureRequest()
-    await sendRequest("https://example.com/v1/models", {
-      credential: { domain: "provider", config: createProviderConfig() },
-      headers: buildProviderUpstreamHeaders(new Headers()),
-    })
+    await sendProviderRequest(
+      createProviderConfig(),
+      "https://example.com/v1/models",
+      { headers: buildProviderUpstreamHeaders(new Headers()) },
+    )
     expect(cap.last().headers.get("x-api-key")).toBe("provider-key")
     expect(cap.last().headers.get("authorization")).toBeNull()
   })
 
   test("attaches Authorization bearer when configured", async () => {
     const cap = captureRequest()
-    await sendRequest("https://example.com/v1/models", {
-      credential: {
-        domain: "provider",
-        config: createProviderConfig({ authType: "authorization" }),
-      },
-      headers: buildProviderUpstreamHeaders(new Headers()),
-    })
+    await sendProviderRequest(
+      createProviderConfig({ authType: "authorization" }),
+      "https://example.com/v1/models",
+      { headers: buildProviderUpstreamHeaders(new Headers()) },
+    )
     expect(cap.last().headers.get("authorization")).toBe("Bearer provider-key")
     expect(cap.last().headers.get("x-api-key")).toBeNull()
   })

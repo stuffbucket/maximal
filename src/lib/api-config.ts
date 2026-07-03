@@ -200,7 +200,7 @@ export const prepareMessageProxyHeaders = (headers: Record<string, string>) => {
 }
 
 // Non-secret headers only. The Authorization header is attached by the single
-// mechanism in `send-request.ts` (credential domain "github"); see ADR-0001.
+// mechanism in `send-request.ts` (host-inferred, GitHub API host); see ADR-0001.
 export const githubUserHeaders = (): Record<string, string> => {
   if (isOpencodeOauthApp()) {
     return {
@@ -300,7 +300,7 @@ const githubCopilotHeaders = (
 
 export const GITHUB_API_BASE_URL = "https://api.github.com"
 // Non-secret headers only. Authorization is attached by `send-request.ts`
-// (credential domain "github"); see ADR-0001.
+// (host-inferred, GitHub API host); see ADR-0001.
 export const githubHeaders = (): Record<string, string> => {
   if (isOpencodeOauthApp()) {
     return {

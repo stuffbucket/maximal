@@ -9,7 +9,6 @@ import { state } from "~/lib/state"
 export const getModels = async () => {
   consola.info(`Fetching models from ${copilotBaseUrl(state)}/models`)
   const response = await sendRequest(`${copilotBaseUrl(state)}/models`, {
-    credential: { domain: "copilot" },
     headers: copilotModelsHeaders(state),
     // Bounded like the other auth/discovery fetches — cacheModels runs on the
     // cold-boot critical path, so an unbounded hang here would stall boot.

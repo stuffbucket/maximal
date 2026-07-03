@@ -49,9 +49,7 @@ export async function pollAccessToken(
     let response: Response
     try {
       response = await sendRequest(accessTokenUrl, {
-        credential: { domain: "none" },
         method: "POST",
-        // codeql[js/file-access-to-http] -- by design: the proxy reads its own OAuth app config from disk and posts it to GitHub's access-token endpoint. This is the auth flow's reason to exist. See ADR-0001.
         headers,
         timeoutMs: DEVICE_POLL_TIMEOUT_MS,
         body: JSON.stringify({

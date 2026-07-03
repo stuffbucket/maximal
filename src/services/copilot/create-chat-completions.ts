@@ -67,7 +67,6 @@ export const createChatCompletions = async (
   const response = await sendRequest(
     `${copilotBaseUrl(state)}/chat/completions`,
     {
-      credential: { domain: "copilot" },
       method: "POST",
       headers,
       body: JSON.stringify(payload),

@@ -406,7 +406,6 @@ export const createResponses = async (
   consola.log(`<-- model: ${payload.model}`)
 
   const response = await sendRequest(`${copilotBaseUrl(state)}/responses`, {
-    credential: { domain: "copilot" },
     method: "POST",
     headers,
     body: JSON.stringify(payload),

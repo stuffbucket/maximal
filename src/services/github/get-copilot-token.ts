@@ -11,7 +11,6 @@ export const getCopilotToken = async () => {
   const response = await sendRequest(
     `${getGitHubApiBaseUrl()}/copilot_internal/v2/token`,
     {
-      credential: { domain: "github" },
       headers: githubHeaders(),
       timeoutMs: COPILOT_TOKEN_TIMEOUT_MS,
     },

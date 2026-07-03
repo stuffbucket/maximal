@@ -1,108 +1,122 @@
 /**
  * The single authenticated-HTTP mechanism.
  *
- * Every outbound request that carries a credential funnels through
- * `sendRequest` / `sendRequestJson`. Callers name WHICH credential domain they
- * need (or `none`) but never read, construct, or see the token: `authHeadersFor`
- * — the only place in the codebase that reads `state.copilotToken`,
- * `state.githubToken`, or a provider API key for the wire — is module-private,
- * and the finalized (tokened) `Headers` is a function-local that is never
- * returned. Callers pass non-secret request headers IN and get a `Response` /
- * parsed JSON OUT; the tokened request is sent to the network from in here and
- * is not observable outside this module.
+ * Every outbound request that carries a credential funnels through one `fetch`
+ * sink here, and the mechanism — not the caller — decides which credential to
+ * attach. The rule is: **the destination host determines the credential.** For
+ * the four fixed first-party hosts (Copilot, GitHub API, direct Anthropic, and
+ * the unauthenticated GitHub OAuth endpoints) the caller passes only a URL, and
+ * `attachHostAuth` maps host → token + scheme. A caller therefore cannot select
+ * the wrong credential — there is no credential argument to get wrong.
  *
- * This is also the single CodeQL `js/file-access-to-http` sink: the disk-read
- * token reaches an HTTP request in exactly one annotated line below.
+ * The one case the host cannot resolve is the config-selected passthrough
+ * provider (`/:provider/*`): its base URL is arbitrary user config, so the
+ * resolved `ResolvedProviderConfig` (host + key + scheme, bundled) is passed to
+ * `sendProviderRequest`. That is supplying the credential *object*, not choosing
+ * among ambiguous labels.
  *
+ * Either way, the token is read and turned into an `Authorization` / `x-api-key`
+ * header on a function-local `Headers` that is never returned; callers get a
+ * `Response` out. This is also the single CodeQL `js/file-access-to-http` sink.
  * The invariant "tokens are attached only here" is enforced by an ESLint
- * `no-restricted-syntax` rule (see `eslint.config.js`) that forbids reading the
- * token fields or building `Bearer `/`token `/`x-api-key` auth strings anywhere
- * except this file, plus a grep arch-test in the suite. See ADR-0001.
+ * `no-restricted-syntax` rule (see `eslint.config.js`). See ADR-0001.
  */
 
 import type { ResolvedProviderConfig } from "~/lib/config"
 
-import { isOpencodeOauthApp } from "~/lib/api-config"
+import {
+  copilotBaseUrl,
+  getGitHubApiBaseUrl,
+  isOpencodeOauthApp,
+} from "~/lib/api-config"
 import { getAnthropicApiKey } from "~/lib/config"
 import { HTTPError } from "~/lib/error"
 import { state } from "~/lib/state"
 
-/**
- * Which credential the mechanism should attach — by token SOURCE + scheme, not
- * by endpoint. `copilot` vs "copilot models" and `github` vs "github user"
- * differ only in NON-secret headers (which callers own), so they collapse here.
- */
-export type Credential =
-  | { domain: "copilot" }
-  | { domain: "github"; token?: string }
-  | { domain: "provider"; config: ResolvedProviderConfig }
-  | { domain: "anthropic" }
-  | { domain: "none" }
+const ANTHROPIC_API_BASE_URL = "https://api.anthropic.com"
 
 export interface SendRequestInit extends Omit<RequestInit, "headers"> {
-  credential: Credential
   /** Request-specific NON-secret headers only. The mechanism attaches auth. */
   headers?: Record<string, string>
   /** Abort after this many ms via `AbortSignal.timeout`. Explicit `signal` wins. */
   timeoutMs?: number
+  /**
+   * Override the GitHub token for a GitHub-API request. Used only during
+   * sign-in, to validate a candidate token before it is committed to `state`.
+   * Supplies a *value* the mechanism can't yet read from state — it does not
+   * change which credential the host selects.
+   */
+  githubToken?: string
 }
 
 /**
- * Attach the credential's auth header. The ONLY reader of a token for the wire.
- * Not exported: nothing outside this module can obtain the token or reproduce
- * the auth string. Mutates `headers` in place; `Headers.set` is case-normalized
- * so it reliably overwrites any stray auth value a caller may have passed.
+ * Map the destination host to its credential and attach it. The ONLY reader of
+ * a token for the wire. Not exported: nothing outside this module can obtain
+ * the token or reproduce the auth string. `Headers.set` is case-normalized, so
+ * it reliably overwrites any stray auth value a caller may have passed.
+ *
+ * An unrecognized host (e.g. the GitHub OAuth device/access-token endpoints on
+ * `github.com/login/*`, which authenticate via a public client_id in the body)
+ * gets no credential — a safe default: a typo'd host fails unauthenticated
+ * rather than leaking a token to the wrong place.
  */
-function attachAuth(credential: Credential, headers: Headers): void {
-  switch (credential.domain) {
-    case "copilot": {
-      headers.set("authorization", `Bearer ${state.copilotToken}`)
-      return
-    }
-    case "github": {
-      const token = credential.token ?? state.githubToken
-      // opencode's GitHub OAuth app expects a Bearer token; the standard
-      // (VS Code) identity expects the legacy `token <x>` scheme.
-      headers.set(
-        "authorization",
-        isOpencodeOauthApp() ? `Bearer ${token}` : `token ${token}`,
-      )
-      return
-    }
-    case "provider": {
-      if (credential.config.authType === "authorization") {
-        headers.set("authorization", `Bearer ${credential.config.apiKey}`)
-      } else {
-        headers.set("x-api-key", credential.config.apiKey)
-      }
-      return
-    }
-    case "anthropic": {
-      // Direct Anthropic API (count_tokens). The key comes from config/env/file
-      // via getAnthropicApiKey(); callers gate on its presence but never read it.
-      const key = getAnthropicApiKey()
-      if (key) headers.set("x-api-key", key)
-      return
-    }
-    // Unauthenticated flows ("none") — OAuth device-code / access-token polling
-    // carry a public client_id in the body, no bearer. Also the safe default.
-    default: {
-      return
-    }
+function attachHostAuth(
+  url: string,
+  headers: Headers,
+  githubTokenOverride?: string,
+): void {
+  if (url.startsWith(copilotBaseUrl(state))) {
+    headers.set("authorization", `Bearer ${state.copilotToken}`)
+    return
+  }
+  if (url.startsWith(getGitHubApiBaseUrl())) {
+    const token = githubTokenOverride ?? state.githubToken
+    // opencode's GitHub OAuth app expects a Bearer token; the standard
+    // (VS Code) identity expects the legacy `token <x>` scheme.
+    headers.set(
+      "authorization",
+      isOpencodeOauthApp() ? `Bearer ${token}` : `token ${token}`,
+    )
+    return
+  }
+  if (url.startsWith(ANTHROPIC_API_BASE_URL)) {
+    // Direct Anthropic API (count_tokens). Key from config/env/file; callers
+    // gate on its presence but never read it.
+    const key = getAnthropicApiKey()
+    if (key) headers.set("x-api-key", key)
+    return
+  }
+  // Any other host carries no credential.
+}
+
+/** Attach a config-selected passthrough provider's credential (see module doc). */
+function attachProviderAuth(
+  providerConfig: ResolvedProviderConfig,
+  headers: Headers,
+): void {
+  if (providerConfig.authType === "authorization") {
+    headers.set("authorization", `Bearer ${providerConfig.apiKey}`)
+  } else {
+    headers.set("x-api-key", providerConfig.apiKey)
   }
 }
 
 /**
- * Send an authenticated request. Returns the raw `Response` so callers keep
- * full control of streaming, status handling, and error mapping.
+ * The ONE fetch sink. Given a URL and an already-authorized `Headers`, send it.
+ * The single CodeQL `js/file-access-to-http` suppression lives here.
  */
-export async function sendRequest(
+function dispatch(
   url: string,
+  authorized: Headers,
   init: SendRequestInit,
 ): Promise<Response> {
-  const { credential, timeoutMs, signal, headers, ...rest } = init
-  const merged = new Headers(headers)
-  attachAuth(credential, merged)
+  const {
+    timeoutMs,
+    signal,
+    headers: _headers,
+    githubToken: _token,
+    ...rest
+  } = init
   return fetch(url, {
     // codeql[js/file-access-to-http] -- by design, the SINGLE chokepoint: the
     // proxy reads its own 0o600 GitHub/Copilot token (or a configured provider
@@ -110,11 +124,42 @@ export async function sendRequest(
     // gh/aws/kubectl. Every authenticated fetch funnels here, so this is the
     // only suppression. See ADR-0001.
     ...rest,
-    headers: merged,
+    headers: authorized,
     signal:
       signal
       ?? (timeoutMs === undefined ? undefined : AbortSignal.timeout(timeoutMs)),
   })
+}
+
+/**
+ * Send a request to a first-party host. The credential is selected from the
+ * destination host — the caller passes only a URL (plus, for the sign-in flow,
+ * an optional `githubToken` value). Returns the raw `Response` so callers keep
+ * full control of streaming, status handling, and error mapping.
+ */
+export async function sendRequest(
+  url: string,
+  init: SendRequestInit = {},
+): Promise<Response> {
+  const merged = new Headers(init.headers)
+  attachHostAuth(url, merged, init.githubToken)
+  return dispatch(url, merged, init)
+}
+
+/**
+ * Send a request to a config-selected passthrough provider. The credential is
+ * the provider's own (host + key + scheme travel together in `providerConfig`),
+ * so there is no host-inference here — the `/:provider/*` route already resolved
+ * which provider this is.
+ */
+export async function sendProviderRequest(
+  providerConfig: ResolvedProviderConfig,
+  url: string,
+  init: SendRequestInit = {},
+): Promise<Response> {
+  const merged = new Headers(init.headers)
+  attachProviderAuth(providerConfig, merged)
+  return dispatch(url, merged, init)
 }
 
 /**

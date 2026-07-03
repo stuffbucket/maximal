@@ -110,27 +110,38 @@ second, un-suppressed sink in `anthropic-proxy.ts`). CodeQL flagged each
 because each was a distinct file→HTTP sink.
 
 We collapsed them into a single mechanism, `src/lib/send-request.ts`
-(`sendRequest` / `sendRequestJson`), with three properties:
+(`sendRequest` / `sendRequestJson` / `sendProviderRequest`), with three
+properties:
 
 1. **One sink.** Every authenticated request — Copilot completions,
-   GitHub auth/discovery, OAuth device flow, and provider passthrough —
-   funnels through the one `fetch` in `sendRequest`. That is the only
-   `js/file-access-to-http` suppression for the app.
-2. **The mechanism owns token selection + attachment.** Callers pass a
-   `Credential` (`{ domain: "copilot" | "github" | "provider" | "none" }`)
-   and only non-secret request headers. The token is read and turned into
-   an `Authorization` / `x-api-key` header inside the module-private
-   `attachAuth`, on a function-local `Headers` that is never returned. The
-   header builders in `api-config.ts` were stripped of their `Authorization`
-   lines and are now token-free — a caller cannot obtain the token or the
-   finalized request.
+   GitHub auth/discovery, OAuth device flow, direct Anthropic, and
+   provider passthrough — funnels through the one `fetch` (`dispatch`).
+   That is the only `js/file-access-to-http` suppression for the app.
+2. **The mechanism owns credential selection + attachment — the caller
+   does not choose.** The rule is *the destination host determines the
+   credential*. For the four fixed first-party hosts (Copilot, GitHub
+   API, direct Anthropic, and the unauthenticated GitHub OAuth
+   endpoints), the caller passes only a URL and `attachHostAuth` maps
+   host → token + scheme; there is no credential argument to get wrong.
+   The one case a host can't resolve is the config-selected passthrough
+   provider (arbitrary user-configured base URL), so its resolved
+   `ResolvedProviderConfig` — host + key + scheme bundled — is passed to
+   `sendProviderRequest`; that supplies the credential *object*, not a
+   label that could mismatch the host. Either way the token is read and
+   turned into an `Authorization` / `x-api-key` header on a
+   function-local `Headers` that is never returned, and the header
+   builders in `api-config.ts` were stripped of their `Authorization`
+   lines (now token-free) — a caller cannot obtain the token or the
+   finalized request. An unrecognized host gets no credential (safe
+   default: a typo'd host fails unauthenticated rather than leaking).
 3. **The invariant is enforced, not just documented.** An ESLint
    `no-restricted-syntax` rule (`eslint.config.js`,
    `credential-attachment-single-mechanism`) fails CI if any file outside
-   `send-request.ts` hand-builds a `Bearer …` / `token …` auth string. A
-   new endpoint that tries to attach its own token cannot merge; it must
-   route through the mechanism. (`web-tools/executor.ts` forwards a
-   separate sandbox key and is allowlisted pending a follow-up.)
+   `send-request.ts` hand-builds a `Bearer …` / `token …` auth string or
+   attaches an `x-api-key` header. A new endpoint that tries to attach
+   its own token cannot merge; it must route through the mechanism.
+   (`web-tools/executor.ts` forwards a separate sandbox key and
+   `setup.ts` sends a dummy loopback key — both allowlisted.)
 
 Least-privilege routing (each credential reaches exactly one host; no
 host receives two credentials) was already true and is preserved — the

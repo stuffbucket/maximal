@@ -1,7 +1,7 @@
 import type { AnthropicMessagesPayload } from "~/lib/anthropic-types"
 import type { ResolvedProviderConfig } from "~/lib/config"
 
-import { sendRequest } from "~/lib/send-request"
+import { sendProviderRequest } from "~/lib/send-request"
 
 const FORWARDABLE_HEADERS = [
   "anthropic-version",
@@ -24,7 +24,7 @@ const STRIPPED_RESPONSE_HEADERS = [
 ] as const
 
 // Non-secret headers only. The provider credential is attached by the single
-// mechanism in `send-request.ts` (credential domain "provider"); see ADR-0001.
+// mechanism in `send-request.ts` (`sendProviderRequest`); see ADR-0001.
 export function buildProviderUpstreamHeaders(
   requestHeaders: Headers,
 ): Record<string, string> {
@@ -64,21 +64,27 @@ export async function forwardProviderMessages(
   payload: AnthropicMessagesPayload,
   requestHeaders: Headers,
 ): Promise<Response> {
-  return await sendRequest(`${providerConfig.baseUrl}/v1/messages`, {
-    credential: { domain: "provider", config: providerConfig },
-    method: "POST",
-    headers: buildProviderUpstreamHeaders(requestHeaders),
-    body: JSON.stringify(payload),
-  })
+  return await sendProviderRequest(
+    providerConfig,
+    `${providerConfig.baseUrl}/v1/messages`,
+    {
+      method: "POST",
+      headers: buildProviderUpstreamHeaders(requestHeaders),
+      body: JSON.stringify(payload),
+    },
+  )
 }
 
 export async function forwardProviderModels(
   providerConfig: ResolvedProviderConfig,
   requestHeaders: Headers,
 ): Promise<Response> {
-  return await sendRequest(`${providerConfig.baseUrl}/v1/models`, {
-    credential: { domain: "provider", config: providerConfig },
-    method: "GET",
-    headers: buildProviderUpstreamHeaders(requestHeaders),
-  })
+  return await sendProviderRequest(
+    providerConfig,
+    `${providerConfig.baseUrl}/v1/models`,
+    {
+      method: "GET",
+      headers: buildProviderUpstreamHeaders(requestHeaders),
+    },
+  )
 }
