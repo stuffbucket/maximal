@@ -84,10 +84,13 @@ describe("composeAdvisedMessage", () => {
 })
 
 describe("adviseUpstreamError — model_not_supported", () => {
-  test("matches by code and lists plan models + the /model recovery", () => {
+  test("matches by code and lists plan models with client-neutral recovery", () => {
     const msg = adviseUpstreamError(400, COPILOT_BODY, [SONNET])
     expect(msg).not.toBeNull()
     expect(msg).toContain("doesn't offer the requested model")
+    // Client-neutral lead — the picker/explicit-id path, not a Claude-Code command.
+    expect(msg).toContain("your client's model picker")
+    // Claude Code's /model stays as a parenthetical hint, not the primary instruction.
     expect(msg).toContain("/model")
     // forwardId rewrites the dotted Copilot id to the /v1/models form.
     expect(msg).toContain("Claude Sonnet 4.5 (claude-sonnet-4-5-20260301)")
