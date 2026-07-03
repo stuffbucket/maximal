@@ -7,6 +7,7 @@ export const createEmbeddings = async (payload: EmbeddingRequest) => {
 
   const response = await fetch(`${copilotBaseUrl(state)}/embeddings`, {
     method: "POST",
+    // codeql[js/file-access-to-http] -- by design: the proxy reads its own 0o600 Copilot token from disk and forwards it as upstream Authorization. Same posture as gh/aws/kubectl; this is the proxy's reason to exist. See ADR-0001.
     headers: copilotHeaders(state),
     body: JSON.stringify(payload),
   })

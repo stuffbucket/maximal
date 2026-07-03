@@ -15,6 +15,7 @@ export const getCopilotUsage = async (
   const response = await fetch(
     `${getGitHubApiBaseUrl()}/copilot_internal/user`,
     {
+      // codeql[js/file-access-to-http] -- by design: the proxy reads its own 0o600 GitHub token from disk and forwards it as upstream Authorization. Same posture as gh/aws/kubectl; this is the proxy's reason to exist. See ADR-0001.
       headers: githubHeaders(authState),
       signal: AbortSignal.timeout(GITHUB_API_TIMEOUT_MS),
     },

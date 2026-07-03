@@ -11,6 +11,7 @@ export async function getGitHubUser(githubToken?: string) {
 
   const authState = { ...state, githubToken: resolvedGithubToken }
   const response = await fetch(`${getGitHubApiBaseUrl()}/user`, {
+    // codeql[js/file-access-to-http] -- by design: the proxy reads its own 0o600 GitHub token from disk and forwards it as upstream Authorization. Same posture as gh/aws/kubectl; this is the proxy's reason to exist. See ADR-0001.
     headers: githubUserHeaders(authState),
     signal: AbortSignal.timeout(GITHUB_API_TIMEOUT_MS),
   })

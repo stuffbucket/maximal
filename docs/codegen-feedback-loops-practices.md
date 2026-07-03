@@ -304,15 +304,17 @@ Self-evidencing artifacts: the check run with its annotation-level detail (file,
 
 ### Review / governance loop
 
-Human review is where the loop sometimes turns around: the reviewer pushes back on the *issue's premise*, not the diff. The durable artifact of that pushback is an ADR, not a comment. ADR-driven dismissals (introduced in PR #15) are the canonical example: non-code state — CodeQL dismissals, feature flags, policy decisions — is edited as a PR diff against `docs/decisions/<id>-<slug>.md`, and the merge triggers a reconcile workflow that applies the declared state to the live API. The ADR is the source of truth; the API is the reflection.
+Human review is where the loop sometimes turns around: the reviewer pushes back on the *issue's premise*, not the diff. The durable artifact of that pushback is an ADR, not a comment. When the declared state must be *applied to an external system*, the merge can trigger a reconcile workflow that pushes the ADR's declared state to a live API; the ADR is the source of truth and the API is the reflection.
 
-Hook point: the PR review itself, plus the `on: push` reconcile workflow that watches the ADR path. Loop budget: a normal review cadence; nothing here is auto-retried.
+Choose the enforcement mechanism by whether the target already tracks the decision natively. For CodeQL by-design alerts we originally used an ADR + reconcile daemon, but retired it (ADR-0001, amended 2026-07-03): keying suppressions on `file:line` in an out-of-band registry drifted on ordinary edits, and CodeQL already offers inline `// codeql[rule] -- reason` suppression that lives on the sink line and can't drift. Reach for a reconcile workflow only when the external system has *no* native, in-source way to record the decision.
 
-Self-evidencing artifacts: the PR diff (what changed), the ADR file with YAML frontmatter declaring the state (e.g. `codeql_dismissals:`), and the reconcile workflow run that closes the loop by mutating the live API.
+Hook point: the PR review itself, plus (when an external system is involved) an `on: push` reconcile workflow that watches the ADR path. Loop budget: a normal review cadence; nothing here is auto-retried.
+
+Self-evidencing artifacts: the PR diff (what changed), the ADR file declaring the state, and — where one exists — the reconcile workflow run that closes the loop against the live API.
 
 ### Patterns and anti-patterns
 
-**Pattern — ADR with structured frontmatter + reconcile workflow.** `docs/decisions/0001-codeql-by-design-dismissals.md` declares dismissals under a `codeql_dismissals:` key; `.github/workflows/codeql-reconcile.yml` applies them on merge to main. (Both land in PR #15; cite them as the canonical shape even if not yet on main when you read this.) The diff is the audit trail. The workflow is idempotent. The reviewer is the policy gate.
+**Pattern — ADR with structured frontmatter + reconcile workflow.** When non-code state must be applied to an external system that has no in-source way to record it, declare the state in `docs/decisions/<id>-<slug>.md` and apply it on merge with an idempotent workflow. The diff is the audit trail; the reviewer is the policy gate. **Anti-pattern — using this when the target has a native in-source mechanism.** CodeQL by-design suppressions were originally built this way and then retired (ADR-0001): the reconcile registry keyed on `file:line` and drifted, whereas CodeQL's inline `// codeql[rule] -- reason` comment lives on the sink and can't. Prefer the target's native, in-source affordance; reach for a reconcile daemon only when there is none.
 
 **Pattern — smoke-test artifacts on PR comments.** Commit screenshots under `.github/pr-artifacts/issue-<N>/` and reference them by raw GitHub URL in the PR description. GitHub's HTML sanitizer strips `<img src="data:...">`, so inline base64 is a dead end; raw URLs work. The reviewer sees the page state without checking out the branch. PR #13 is the example.
 
