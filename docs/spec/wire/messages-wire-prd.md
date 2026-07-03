@@ -146,7 +146,10 @@ OpenAI **Chat Completions** and back (`non-stream-translation.ts`,
   `tool_choice` mapped (`auto`/`required`/named/`none`), `thinking` →
   `thinking_budget`.
 - **Response (non-stream):** merge choices into Anthropic `content[]`;
-  `tool_calls` → `tool_use`; `reasoning_text`/`reasoning_opaque` →
+  `tool_calls` → `tool_use` (arguments parsed defensively via
+  `parseToolCallArguments` in `utils.ts` — empty/whitespace → `{}`,
+  malformed JSON → `{raw_arguments}`, never a bare `JSON.parse` that
+  could throw); `reasoning_text`/`reasoning_opaque` →
   `thinking`; `finish_reason` mapped (`stop→end_turn`,
   `length→max_tokens`, `tool_calls→tool_use`,
   `content_filter→end_turn`); usage de-duplicated for cached tokens.

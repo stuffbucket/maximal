@@ -25,7 +25,7 @@ import {
   type ToolCall,
 } from "~/services/copilot/create-chat-completions"
 
-import { mapOpenAIStopReasonToAnthropic } from "./utils"
+import { mapOpenAIStopReasonToAnthropic, parseToolCallArguments } from "./utils"
 
 // Compatible with opencode, it will filter out blocks where the thinking text is empty, so we need add a default thinking text
 export const THINKING_TEXT = "Thinking..."
@@ -431,6 +431,6 @@ function getAnthropicToolUseBlocks(
     type: "tool_use",
     id: toolCall.id,
     name: toolCall.function.name,
-    input: JSON.parse(toolCall.function.arguments) as Record<string, unknown>,
+    input: parseToolCallArguments(toolCall.function.arguments),
   }))
 }
