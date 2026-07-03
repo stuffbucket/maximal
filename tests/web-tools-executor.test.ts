@@ -198,6 +198,10 @@ function fakeCreateResponses(result: unknown) {
   return () => Promise.resolve(result as never)
 }
 
+// Keep the executor's usage recording out of the real token-usage store in
+// tests that don't assert on it.
+const noopRecord = () => {}
+
 describe("CopilotResponsesExecutor.search — harvest from /responses", () => {
   it("harvests cited (title+url) then raw sources, deduped and capped", async () => {
     const responsesResult = {
@@ -233,6 +237,7 @@ describe("CopilotResponsesExecutor.search — harvest from /responses", () => {
     const exec = new CopilotResponsesExecutor({
       model: "gpt-5-mini",
       createResponsesFn: fakeCreateResponses(responsesResult),
+      recordUsage: noopRecord,
     })
     const result = await exec.search("anything", { maxResults: 3 })
     expect(result.ok).toBe(true)
@@ -254,10 +259,37 @@ describe("CopilotResponsesExecutor.search — harvest from /responses", () => {
     ])
   })
 
+  it("records normalized token usage for the brokered /responses call", async () => {
+    const recorded: Array<unknown> = []
+    const exec = new CopilotResponsesExecutor({
+      model: "gpt-5-mini",
+      createResponsesFn: fakeCreateResponses({
+        output: [],
+        usage: {
+          input_tokens: 3103,
+          output_tokens: 114,
+          total_tokens: 3217,
+          input_tokens_details: { cached_tokens: 2432 },
+        },
+      }),
+      recordUsage: (u) => recorded.push(u),
+    })
+    await exec.search("q")
+    expect(recorded).toEqual([
+      {
+        cache_read_input_tokens: 2432,
+        input_tokens: 671, // 3103 - 2432 cached
+        output_tokens: 114,
+        total_tokens: 3217,
+      },
+    ])
+  })
+
   it("returns unavailable when createResponses throws", async () => {
     const exec = new CopilotResponsesExecutor({
       model: "gpt-5-mini",
       createResponsesFn: () => Promise.reject(new Error("boom")),
+      recordUsage: noopRecord,
     })
     expect(await exec.search("q")).toEqual({ ok: false, code: "unavailable" })
   })
@@ -266,6 +298,7 @@ describe("CopilotResponsesExecutor.search — harvest from /responses", () => {
     const exec = new CopilotResponsesExecutor({
       model: "gpt-5-mini",
       createResponsesFn: fakeCreateResponses({ notOutput: true }),
+      recordUsage: noopRecord,
     })
     expect(await exec.search("q")).toEqual({ ok: false, code: "unavailable" })
   })
@@ -275,6 +308,7 @@ describe("CopilotResponsesExecutor.search — harvest from /responses", () => {
     const exec = new CopilotResponsesExecutor({
       model: "gpt-5-mini",
       createResponsesFn: fakeCreateResponses({ output: [] }),
+      recordUsage: noopRecord,
       fetchExecutor: {
         fetch: (url: string) => {
           calls.push(url)

@@ -23,6 +23,11 @@ import type { ResponsesPayload } from "~/services/copilot/create-responses"
 import { Cache } from "~/lib/cache"
 import { getSmallModel } from "~/lib/config"
 import { state } from "~/lib/state"
+import {
+  createCopilotTokenUsageRecorder,
+  normalizeResponsesUsage,
+  type UsageTokens,
+} from "~/lib/token-usage"
 import { createResponses } from "~/services/copilot/create-responses"
 
 import type { WebFetchErrorCode, WebSearchErrorCode } from "./vocab"
@@ -193,17 +198,28 @@ export interface CopilotResponsesExecutorOpts {
   createResponsesFn?: typeof createResponses
   /** Injected for tests; defaults to a real InProcessFetchExecutor. */
   fetchExecutor?: Executor
+  /** Injected for tests; defaults to a real token-usage recorder so the
+   *  brokered /responses call is billed against the account's quota
+   *  visibly (it spends GPT-model tokens the same as any /responses call). */
+  recordUsage?: (usage: UsageTokens) => void
 }
 
 export class CopilotResponsesExecutor implements Executor {
   private readonly model: string
   private readonly createResponsesFn: typeof createResponses
   private readonly fetchExecutor: Executor
+  private readonly recordUsage: (usage: UsageTokens) => void
 
   constructor(opts: CopilotResponsesExecutorOpts) {
     this.model = opts.model
     this.createResponsesFn = opts.createResponsesFn ?? createResponses
     this.fetchExecutor = opts.fetchExecutor ?? new InProcessFetchExecutor()
+    this.recordUsage =
+      opts.recordUsage
+      ?? createCopilotTokenUsageRecorder({
+        endpoint: "responses",
+        model: opts.model,
+      })
   }
 
   // Copilot resolves web_fetch server-side too, but a plain HTTPS GET +
@@ -245,6 +261,11 @@ export class CopilotResponsesExecutor implements Executor {
     if (!("output" in result)) {
       return { ok: false, code: "unavailable" }
     }
+
+    // This side-call spends the account's Copilot quota (GPT-model tokens +
+    // a web_search request). Record it so it's visible in `maximal debug` /
+    // the token-usage view rather than billed invisibly to the user.
+    this.recordUsage(normalizeResponsesUsage(result.usage))
 
     return { ok: true, items: harvestResponsesHits(result, maxResults) }
   }
