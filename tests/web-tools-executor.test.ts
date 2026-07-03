@@ -20,6 +20,15 @@ function mockFetch(response: Response): void {
     Promise.resolve(response)) as unknown as typeof fetch
 }
 
+/** Mock fetch that records the requested URL(s), for asserting query
+ *  construction (e.g. injected `site:` operators). */
+function mockFetchCapturing(response: Response, urls: Array<string>): void {
+  globalThis.fetch = ((input: unknown) => {
+    urls.push(String(input))
+    return Promise.resolve(response)
+  }) as unknown as typeof fetch
+}
+
 // Compact synthetic fixture matching html.duckduckgo.com's server-rendered
 // results markup (captured shape: rel="nofollow" class="result__a"
 // href="//duckduckgo.com/l/?uddg=<url-encoded target>&rut=..."). Real pages
@@ -200,6 +209,32 @@ describe("InProcessFetchExecutor.search — DuckDuckGo HTML scrape", () => {
       { url: "https://ok.example", title: "OK", page_age: null },
     ])
   })
+
+  it("injects DuckDuckGo site:/-site: operators for allowed/blocked domains", async () => {
+    const urls: Array<string> = []
+    mockFetchCapturing(new Response("<div></div>", { status: 200 }), urls)
+    await new InProcessFetchExecutor().search("mountains", {
+      allowedDomains: ["en.wikipedia.org", "britannica.com"],
+      blockedDomains: ["spam.example"],
+    })
+    // The q= param carries the query plus an OR-group of site: filters and a
+    // -site: exclusion. Decode to assert on the human-readable form.
+    const q = new URL(urls[0]).searchParams.get("q")
+    expect(q).toBe(
+      "mountains (site:en.wikipedia.org OR site:britannica.com) -site:spam.example",
+    )
+  })
+
+  it("uses a bare site: (no OR-group) for a single allowed domain", async () => {
+    const urls: Array<string> = []
+    mockFetchCapturing(new Response("<div></div>", { status: 200 }), urls)
+    await new InProcessFetchExecutor().search("weather", {
+      allowedDomains: ["weather.gov"],
+    })
+    expect(new URL(urls[0]).searchParams.get("q")).toBe(
+      "weather site:weather.gov",
+    )
+  })
 })
 
 describe("chooseExecutor — precedence", () => {
@@ -369,6 +404,47 @@ describe("CopilotResponsesExecutor.search — harvest from /responses", () => {
     })
     await exec.search("olympics schedule 2028")
     expect(seen[0].input).toBe("olympics schedule 2028")
+  })
+
+  it("passes allowed/blocked domains through as a /responses filters object", async () => {
+    const seen: Array<Record<string, unknown>> = []
+    const exec = new CopilotResponsesExecutor({
+      model: "gpt-5-mini",
+      createResponsesFn: (payload) => {
+        seen.push(payload)
+        return Promise.resolve({ output: [] } as never)
+      },
+      recordUsage: noopRecord,
+      now: () => new Date("2026-07-03T12:00:00Z"),
+    })
+    await exec.search("q", {
+      allowedDomains: ["docs.python.org"],
+      blockedDomains: ["spam.example"],
+    })
+    expect(seen[0].tools).toEqual([
+      {
+        type: "web_search",
+        filters: {
+          allowed_domains: ["docs.python.org"],
+          blocked_domains: ["spam.example"],
+        },
+      },
+    ])
+  })
+
+  it("omits the filters key entirely when no domains are set", async () => {
+    const seen: Array<Record<string, unknown>> = []
+    const exec = new CopilotResponsesExecutor({
+      model: "gpt-5-mini",
+      createResponsesFn: (payload) => {
+        seen.push(payload)
+        return Promise.resolve({ output: [] } as never)
+      },
+      recordUsage: noopRecord,
+      now: () => new Date("2026-07-03T12:00:00Z"),
+    })
+    await exec.search("q")
+    expect(seen[0].tools).toEqual([{ type: "web_search" }])
   })
 
   it("records normalized token usage for the brokered /responses call", async () => {

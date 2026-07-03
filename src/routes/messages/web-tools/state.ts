@@ -68,6 +68,37 @@ function hostMatches(host: string, patterns: ReadonlyArray<string>): boolean {
   })
 }
 
+/** True iff `host` satisfies an Anthropic web-tool domain policy, per the
+ *  server-tools spec: subdomains of a listed domain are included
+ *  (`example.com` covers `docs.example.com`); a bare-host entry with no dot
+ *  boundary still matches exactly. `allowed_domains` and `blocked_domains`
+ *  are mutually exclusive per spec — if both are somehow present, blocked
+ *  is evaluated first. Path/wildcard entries (search-only) are matched on
+ *  their host portion here; finer path matching is left to the backend.
+ *  Shared by web_search result post-filtering (see exec.ts). */
+export function isHostAllowed(
+  host: string,
+  policy: { allowed_domains?: Array<string>; blocked_domains?: Array<string> },
+): boolean {
+  if (policy.blocked_domains?.length) {
+    return !policy.blocked_domains.some((d) => hostCoveredBy(host, d))
+  }
+  if (policy.allowed_domains?.length) {
+    return policy.allowed_domains.some((d) => hostCoveredBy(host, d))
+  }
+  return true
+}
+
+/** Does `entry` (a bare domain, possibly with a `/path` or trailing `/*`)
+ *  cover `host`? Matches the listed host exactly OR as a parent domain
+ *  (subdomains auto-included). The path portion is ignored for host
+ *  comparison. */
+function hostCoveredBy(host: string, entry: string): boolean {
+  const listedHost = entry.split("/")[0].toLowerCase()
+  const h = host.toLowerCase()
+  return h === listedHost || h.endsWith(`.${listedHost}`)
+}
+
 export function checkSearchPolicy(
   state: RequestState,
   input: unknown,

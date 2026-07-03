@@ -63,6 +63,12 @@ export interface FetchOpts {
 
 export interface SearchOpts {
   maxResults?: number
+  /** Restrict results to these hosts (bare hostnames, subdomains implied).
+   *  An executor may push this to its backend (Copilot /responses `filters`,
+   *  DuckDuckGo `site:`); the agent loop also post-filters as a floor. */
+  allowedDomains?: Array<string>
+  /** Exclude results from these hosts. Same handling as allowedDomains. */
+  blockedDomains?: Array<string>
 }
 
 export interface Executor {
@@ -168,7 +174,10 @@ export class InProcessFetchExecutor implements Executor {
   // no API key required, matching the no-key philosophy of fetch() above.
   // Configure OLLAMA_API_KEY for a real search API at better quality.
   search(query: string, opts: SearchOpts = {}): Promise<SearchResult> {
-    return ddgHtmlSearch(query, opts.maxResults ?? DEFAULT_SEARCH_MAX_RESULTS)
+    return ddgHtmlSearch(
+      withDomainOperators(query, opts),
+      opts.maxResults ?? DEFAULT_SEARCH_MAX_RESULTS,
+    )
   }
 }
 
@@ -244,7 +253,7 @@ export class CopilotResponsesExecutor implements Executor {
       // Only append today's date when the query has no date cue, so undated
       // queries skew to current results (the model has no clock).
       input: withDateHint(query, this.now()),
-      tools: [{ type: "web_search" }],
+      tools: [{ type: "web_search", ...buildResponsesFilters(opts) }],
       // Force the search to actually run. Without this the model may answer
       // from memory (tool_choice defaults to "auto"), returning 0 sources.
       tool_choice: "required",
@@ -284,6 +293,25 @@ export class CopilotResponsesExecutor implements Executor {
 
     return { ok: true, items: harvestResponsesHits(result, maxResults) }
   }
+}
+
+// Copilot's /responses web_search honors an OpenAI-style domain filter:
+//   { type: "web_search", filters: { allowed_domains, blocked_domains } }
+// bare hostnames, subdomains implied, up to 100 each. Verified live
+// (2026-07-03): blocked_domains excluded the named host from results.
+// Shape per OpenAI docs + openai-python web_search_tool_param + Vercel AI
+// SDK. Returns {} (no filters key) when neither list is set, so the tool
+// declaration stays minimal.
+function buildResponsesFilters(opts: SearchOpts): {
+  filters?: { allowed_domains?: Array<string>; blocked_domains?: Array<string> }
+} {
+  const filters: {
+    allowed_domains?: Array<string>
+    blocked_domains?: Array<string>
+  } = {}
+  if (opts.allowedDomains?.length) filters.allowed_domains = opts.allowedDomains
+  if (opts.blockedDomains?.length) filters.blocked_domains = opts.blockedDomains
+  return Object.keys(filters).length > 0 ? { filters } : {}
 }
 
 // Words/patterns that signal the query already scopes time, so we should
@@ -455,6 +483,23 @@ function parseDdgResults(html: string, maxResults: number): Array<SearchHit> {
     items.push({ url, title, page_age: null })
   }
   return items
+}
+
+// DuckDuckGo honors `site:` / `-site:` operators. Append them so the scrape
+// backend narrows at the source (results are still post-filtered by host in
+// exec.ts as the correctness floor). Multiple allowed domains become an OR
+// group — DDG ANDs bare space-separated `site:` terms, which would match
+// nothing. Blocked domains are each excluded with `-site:`.
+function withDomainOperators(query: string, opts: SearchOpts): string {
+  const parts = [query]
+  const allowed = opts.allowedDomains ?? []
+  if (allowed.length === 1) {
+    parts.push(`site:${allowed[0]}`)
+  } else if (allowed.length > 1) {
+    parts.push(`(${allowed.map((d) => `site:${d}`).join(" OR ")})`)
+  }
+  for (const d of opts.blockedDomains ?? []) parts.push(`-site:${d}`)
+  return parts.join(" ")
 }
 
 async function ddgHtmlSearch(
