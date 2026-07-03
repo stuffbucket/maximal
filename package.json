@@ -79,7 +79,6 @@
     "turndown": "^7.2.4",
     "undici": "^7.16.0",
     "winreg": "^1.2.5",
-    "yaml": "^2.9.0",
     "zod": "^4.1.11"
   },
   "devDependencies": {
