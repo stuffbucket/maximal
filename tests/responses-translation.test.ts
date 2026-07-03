@@ -273,4 +273,96 @@ describe("translateResponsesResultToAnthropic", () => {
       expect(textBlock.text).toBe("Added the task to your todo list.")
     }
   })
+
+  it("does not throw on empty function call arguments (contrast with Chat Completions)", () => {
+    const responsesResult: ResponsesResult = {
+      id: "resp_empty_args",
+      object: "response",
+      created_at: 0,
+      model: "gpt-4.1",
+      output: [
+        {
+          id: "call_empty",
+          type: "function_call",
+          call_id: "call_empty",
+          name: "TodoWrite",
+          arguments: "",
+          status: "completed",
+        },
+      ],
+      output_text: "",
+      status: "completed",
+      usage: {
+        input_tokens: 10,
+        output_tokens: 2,
+        total_tokens: 12,
+      },
+      error: null,
+      incomplete_details: null,
+      instructions: null,
+      metadata: null,
+      parallel_tool_calls: false,
+      temperature: null,
+      tool_choice: null,
+      tools: [],
+      top_p: null,
+    }
+
+    const anthropicResponse =
+      translateResponsesResultToAnthropic(responsesResult)
+
+    const [toolUseBlock] = anthropicResponse.content
+    expect(toolUseBlock.type).toBe("tool_use")
+    if (toolUseBlock.type === "tool_use") {
+      expect(toolUseBlock.id).toBe("call_empty")
+      expect(toolUseBlock.name).toBe("TodoWrite")
+      expect(toolUseBlock.input).toEqual({})
+    }
+  })
+
+  it("preserves malformed function call arguments as raw_arguments", () => {
+    const responsesResult: ResponsesResult = {
+      id: "resp_bad_args",
+      object: "response",
+      created_at: 0,
+      model: "gpt-4.1",
+      output: [
+        {
+          id: "call_bad",
+          type: "function_call",
+          call_id: "call_bad",
+          name: "TodoWrite",
+          arguments: '{"x":',
+          status: "completed",
+        },
+      ],
+      output_text: "",
+      status: "completed",
+      usage: {
+        input_tokens: 10,
+        output_tokens: 2,
+        total_tokens: 12,
+      },
+      error: null,
+      incomplete_details: null,
+      instructions: null,
+      metadata: null,
+      parallel_tool_calls: false,
+      temperature: null,
+      tool_choice: null,
+      tools: [],
+      top_p: null,
+    }
+
+    const anthropicResponse =
+      translateResponsesResultToAnthropic(responsesResult)
+
+    const [toolUseBlock] = anthropicResponse.content
+    expect(toolUseBlock.type).toBe("tool_use")
+    if (toolUseBlock.type === "tool_use") {
+      expect(toolUseBlock.id).toBe("call_bad")
+      expect(toolUseBlock.name).toBe("TodoWrite")
+      expect(toolUseBlock.input).toEqual({ raw_arguments: '{"x":' })
+    }
+  })
 })

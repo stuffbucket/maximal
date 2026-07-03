@@ -1,5 +1,3 @@
-import consola from "consola"
-
 import {
   type AnthropicAssistantContentBlock,
   type AnthropicAssistantMessage,
@@ -49,6 +47,7 @@ import {
 } from "~/services/copilot/create-responses"
 
 import { normalizeToolSchema } from "./non-stream-translation"
+import { parseToolCallArguments } from "./utils"
 
 const MESSAGE_TYPE = "message"
 const COMPACTION_SIGNATURE_PREFIX = "cm1#"
@@ -641,7 +640,7 @@ const createToolUseContentBlock = (
     return null
   }
 
-  const input = parseFunctionCallArguments(call.arguments)
+  const input = parseToolCallArguments(call.arguments)
 
   return {
     type: "tool_use",
@@ -666,33 +665,6 @@ const createCompactionThinkingBlock = (
       encrypted_content: item.encrypted_content,
     }),
   }
-}
-
-const parseFunctionCallArguments = (
-  rawArguments: string,
-): Record<string, unknown> => {
-  if (typeof rawArguments !== "string" || rawArguments.trim().length === 0) {
-    return {}
-  }
-
-  try {
-    const parsed: unknown = JSON.parse(rawArguments)
-
-    if (Array.isArray(parsed)) {
-      return { arguments: parsed }
-    }
-
-    if (parsed && typeof parsed === "object") {
-      return parsed as Record<string, unknown>
-    }
-  } catch (error) {
-    consola.warn("Failed to parse function call arguments", {
-      error,
-      rawArguments,
-    })
-  }
-
-  return { raw_arguments: rawArguments }
 }
 
 const fallbackContentBlocks = (
