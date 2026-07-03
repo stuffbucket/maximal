@@ -8,8 +8,11 @@ import path from "node:path"
 
 import { apiKeyHelperCommand, isOwnedApiKeyHelper } from "~/lib/api-key-helper"
 
-/** The label Claude Code attributes its key under (Settings → API clients). */
-const HELPER_LABEL = "claude-code"
+/** The label Claude Code attributes its key under (Settings → API clients).
+ *  Single-sourced: it is both the `api <client>` token written on disk (via
+ *  `API_KEY_HELPER_COMMAND`) and the `ClientApp.apiKeyLabel` used by `maximal
+ *  api claude-code`, so both resolve the same key. */
+export const HELPER_LABEL = "claude-code"
 
 export const PROXY_BASE_URL = "http://127.0.0.1:4141"
 /** The apiKeyHelper command for THIS running binary (absolute execPath). A
@@ -106,9 +109,10 @@ export function getApiKeyHelperOwnership(
   settings: Record<string, unknown>,
 ): ApiKeyHelperOwnership {
   if (!(API_KEY_HELPER_KEY in settings)) return "absent"
-  // Ours by SIGNATURE, not exact string: a command pointing at an older
-  // maximal path still ends with `--apiKeyHelper claude-code`, so we recognize
-  // it as ours (to heal/strip it) rather than misclassifying it as foreign.
+  // Ours by SIGNATURE, not exact string: a command pointing at an older maximal
+  // path — or one still carrying the legacy `--apiKeyHelper claude-code` form —
+  // is recognized as ours (to heal it forward / strip it) rather than
+  // misclassified as foreign.
   return isOwnedApiKeyHelper(settings[API_KEY_HELPER_KEY], HELPER_LABEL) ?
       "ours"
     : "foreign"

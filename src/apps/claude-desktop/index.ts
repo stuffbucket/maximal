@@ -2,7 +2,7 @@ import type { AppEntry } from "~/lib/settings-types"
 
 import type { AppUninstallResult, ClientApp } from "../index"
 
-import { configureClaudeDesktop } from "./cli"
+import { claudeDesktopCli } from "./cli"
 import {
   isConfigLibraryApplied,
   applyConfigLibraryProfile,
@@ -14,6 +14,7 @@ export const claudeDesktopApp: ClientApp = {
   id: "claude-desktop",
   name: "Claude Desktop",
   kind: "config",
+  apiKeyLabel: "claude-desktop",
 
   detect() {
     return Promise.resolve(claudeAppInstalled())
@@ -59,5 +60,5 @@ export const claudeDesktopApp: ClientApp = {
     return isConfigLibraryApplied()
   },
 
-  cliCommand: configureClaudeDesktop,
+  cli: claudeDesktopCli,
 }

@@ -42,31 +42,44 @@ describe("apiKeyHelperCommand", () => {
 
   test("includes the trimmed label when one is given", () => {
     expect(apiKeyHelperCommand("claude-code", BIN)).toBe(
-      `"${BIN}" --apiKeyHelper claude-code`,
+      `"${BIN}" api claude-code`,
     )
-    expect(apiKeyHelperCommand("  spaced  ", BIN)).toBe(
-      `"${BIN}" --apiKeyHelper spaced`,
-    )
+    expect(apiKeyHelperCommand("  spaced  ", BIN)).toBe(`"${BIN}" api spaced`)
   })
 
   test("omits the label when absent or blank", () => {
-    expect(apiKeyHelperCommand(undefined, BIN)).toBe(`"${BIN}" --apiKeyHelper`)
-    expect(apiKeyHelperCommand("", BIN)).toBe(`"${BIN}" --apiKeyHelper`)
-    expect(apiKeyHelperCommand("   ", BIN)).toBe(`"${BIN}" --apiKeyHelper`)
+    expect(apiKeyHelperCommand(undefined, BIN)).toBe(`"${BIN}" api`)
+    expect(apiKeyHelperCommand("", BIN)).toBe(`"${BIN}" api`)
+    expect(apiKeyHelperCommand("   ", BIN)).toBe(`"${BIN}" api`)
   })
 
   test("quotes a path containing spaces so sh/cmd treat it as one token", () => {
     const spaced = "/Users/x/My Apps/Maximal.app/Contents/MacOS/maximal"
     expect(apiKeyHelperCommand("claude-code", spaced)).toBe(
-      `"${spaced}" --apiKeyHelper claude-code`,
+      `"${spaced}" api claude-code`,
     )
   })
 })
 
 describe("isOwnedApiKeyHelper", () => {
-  test("recognizes our command regardless of the binary path", () => {
-    // Current path, an older app path, and a Homebrew path all end in our
-    // signature → all ours (so a stale path is healed/stripped, not orphaned).
+  test("recognizes the current `api <label>` form regardless of binary path", () => {
+    expect(
+      isOwnedApiKeyHelper(
+        '"/Applications/Maximal.app/Contents/MacOS/maximal" api claude-code',
+        "claude-code",
+      ),
+    ).toBe(true)
+    expect(
+      isOwnedApiKeyHelper(
+        '"/opt/homebrew/bin/maximal" api claude-code',
+        "claude-code",
+      ),
+    ).toBe(true)
+  })
+
+  test("still recognizes the legacy `--apiKeyHelper <label>` form (heal-forward path)", () => {
+    // A config written by an older maximal must be classified ours so apply/boot
+    // rewrites it to the current `api <label>` form rather than orphaning it.
     expect(
       isOwnedApiKeyHelper(
         '"/Applications/Maximal.app/Contents/MacOS/maximal" --apiKeyHelper claude-code',
@@ -79,21 +92,27 @@ describe("isOwnedApiKeyHelper", () => {
         "claude-code",
       ),
     ).toBe(true)
-    // The old bare-string form is still recognized as ours (upgrade path).
+    // The old bare-string legacy form is still recognized (pre-quoting upgrade).
     expect(
       isOwnedApiKeyHelper("maximal --apiKeyHelper claude-code", "claude-code"),
     ).toBe(true)
   })
 
-  test("rejects a genuinely foreign apiKeyHelper", () => {
+  test("rejects a genuinely foreign helper — including a foreign bare `api` invocation", () => {
     expect(isOwnedApiKeyHelper("/usr/bin/my-secret-tool", "claude-code")).toBe(
       false,
     )
     expect(isOwnedApiKeyHelper("echo hunter2", "claude-code")).toBe(false)
-    // Right flag, wrong label → not ours for this client.
+    // Right subcommand, wrong label → not ours for this client.
+    expect(isOwnedApiKeyHelper('"/x/maximal" api other', "claude-code")).toBe(
+      false,
+    )
+    // Bare-word `api` is common; a foreign tool using it must NOT match — the
+    // current form is anchored on a leading quoted path.
     expect(
-      isOwnedApiKeyHelper('"/x/maximal" --apiKeyHelper other', "claude-code"),
+      isOwnedApiKeyHelper("some-tool api claude-code", "claude-code"),
     ).toBe(false)
+    expect(isOwnedApiKeyHelper("api claude-code", "claude-code")).toBe(false)
   })
 
   test("rejects non-string input", () => {

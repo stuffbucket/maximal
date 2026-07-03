@@ -16,23 +16,22 @@ import type { ApiKeyEntry, AppConfig } from "~/lib/config"
 import { getConfig } from "~/lib/config"
 import { normalizeApiKeys } from "~/lib/request-auth"
 
+import { HELPER_SUBCOMMAND, LEGACY_HELPER_FLAG } from "./api-key-helper-tokens"
+
 export type ApiKeyHelperResult =
   | { ok: true; key: string; source: "app" | "default" }
   | { ok: false; error: string }
-
-/** The flag maximal exposes for the helper (see src/main.ts). */
-const HELPER_FLAG = "--apiKeyHelper"
 
 /**
  * Build the command a client writes into its config to call this helper.
  *
  * We write an ABSOLUTE path to the running binary (`process.execPath`), not a
  * bare `maximal`, because the consumer runs it from a context that does NOT
- * have our PATH: Claude Code invokes `apiKeyHelper` via `/bin/sh -c` (or
- * `cmd.exe` on Windows), and a GUI-launched Claude Code inherits launchd's
- * minimal PATH (`/usr/bin:/bin:/usr/sbin:/sbin`) — never `~/.local/bin`. A bare
- * `maximal` there fails with `command not found` (exit 127). The absolute path
- * is double-quoted so a space in it survives both `sh` and `cmd.exe`.
+ * have our PATH: Claude Code invokes the helper via `/bin/sh -c` (or `cmd.exe`
+ * on Windows), and a GUI-launched Claude Code inherits launchd's minimal PATH
+ * (`/usr/bin:/bin:/usr/sbin:/sbin`) — never `~/.local/bin`. A bare `maximal`
+ * there fails with `command not found` (exit 127). The absolute path is
+ * double-quoted so a space in it survives both `sh` and `cmd.exe`.
  *
  * `process.execPath` is the right anchor (vs. the macOS-only `~/.local/bin`
  * symlink, which doesn't exist on Windows): it is absolute on every platform.
@@ -41,7 +40,8 @@ const HELPER_FLAG = "--apiKeyHelper"
  * `isOwnedApiKeyHelper`).
  *
  * The optional `label` lets a user attribute a dedicated key to that client
- * (a key entry whose id/label matches `label` wins over the default key).
+ * (a key entry whose id/label matches `label` wins over the default key), and
+ * is the client id citty dispatches on (`maximal api <label>`).
  */
 export function apiKeyHelperCommand(
   label?: string,
@@ -49,23 +49,45 @@ export function apiKeyHelperCommand(
 ): string {
   const trimmed = label?.trim()
   const bin = `"${execPath}"`
-  return trimmed ? `${bin} ${HELPER_FLAG} ${trimmed}` : `${bin} ${HELPER_FLAG}`
+  return trimmed ?
+      `${bin} ${HELPER_SUBCOMMAND} ${trimmed}`
+    : `${bin} ${HELPER_SUBCOMMAND}`
 }
 
 /**
  * Recognize a helper command WE wrote, regardless of which binary path precedes
- * it — i.e. match on the `--apiKeyHelper <label>` signature, not the exact
- * string. This is what lets ownership detection treat a command pointing at a
- * now-stale maximal path as still "ours" (so boot can self-heal it and uninstall
- * can strip it), while leaving a genuinely third-party apiKeyHelper untouched.
+ * it — matching on the invocation SIGNATURE, not the exact string. Accepts BOTH
+ * the current `api <label>` form and the legacy `--apiKeyHelper <label>` form,
+ * so a config written by an older maximal is still ours (boot self-heals it
+ * forward to the `api` form; uninstall strips it), while a genuinely
+ * third-party helper is left untouched.
+ *
+ * The `api <label>` form is anchored on the quoted-path prefix (`"…" api
+ * <label>`) — the bare-word `api` is common enough that matching it unanchored
+ * could misfire on a foreign `some-tool api foo`. The legacy flag stays matched
+ * by its distinctive `--apiKeyHelper` token (unanchored, as before, so a
+ * bare-`maximal` legacy string keeps upgrading).
  */
 export function isOwnedApiKeyHelper(command: unknown, label?: string): boolean {
   if (typeof command !== "string") return false
   const trimmed = label?.trim()
-  const suffix = trimmed ? `${HELPER_FLAG} ${trimmed}` : HELPER_FLAG
-  // "<path>" --apiKeyHelper <label>  — the binary is quoted, then our flag.
-  // Endswith the signature, and contains the flag as a standalone token.
-  return new RegExp(`\\s${suffix}\\s*$`, "u").test(command)
+  // Legacy: "<path>" --apiKeyHelper <label>  — flag as a standalone trailing token.
+  const legacySuffix =
+    trimmed ? `${LEGACY_HELPER_FLAG} ${trimmed}` : LEGACY_HELPER_FLAG
+  if (new RegExp(`\\s${escapeRegExp(legacySuffix)}\\s*$`, "u").test(command)) {
+    return true
+  }
+  // Current: "<abs-path>" api <label> — anchored on a quoted path so a foreign
+  // `tool api foo` can't match.
+  const apiSuffix =
+    trimmed ? `${HELPER_SUBCOMMAND} ${trimmed}` : HELPER_SUBCOMMAND
+  return new RegExp(`^"[^"]+"\\s+${escapeRegExp(apiSuffix)}\\s*$`, "u").test(
+    command,
+  )
+}
+
+function escapeRegExp(value: string): string {
+  return value.replaceAll(/[.*+?^${}()|[\]\\]/gu, String.raw`\$&`)
 }
 
 function normalizeLabel(value: string): string {

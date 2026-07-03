@@ -2,12 +2,12 @@ import type { AppEntry } from "~/lib/settings-types"
 
 import type { AppUninstallResult, ClientApp } from "../index"
 
-import { configureClaudeCode } from "./cli"
 import {
   isProxyBaseUrlConfigured,
   applyProxyBaseUrl,
   revertProxyBaseUrl,
   getClaudeCodeSettingsPath,
+  HELPER_LABEL,
 } from "./config"
 import { detectClaudeInstalls } from "./detect"
 import {
@@ -22,6 +22,7 @@ export const claudeCodeApp: ClientApp = {
   id: "claude-code",
   name: "Claude Code",
   kind: "config",
+  apiKeyLabel: HELPER_LABEL,
 
   detect() {
     const installs = detectClaudeInstalls()
@@ -94,6 +95,4 @@ export const claudeCodeApp: ClientApp = {
     reconcileClaudeCodeOnShutdown()
     return Promise.resolve()
   },
-
-  cliCommand: configureClaudeCode,
 }

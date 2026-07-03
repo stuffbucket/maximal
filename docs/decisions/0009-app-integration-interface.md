@@ -166,8 +166,8 @@ Land per app, not in a big-bang. Suggested order:
 
 Shipped under `src/apps/` (not the proposed `src/services/apps/`). The
 interface is named **`ClientApp`** (`src/apps/index.ts`), collected by a
-registry (`src/apps/registry.ts`: `getAllApps()`, `getApp(id)`,
-`getAppCliCommands()`); per-app code lives under
+registry (`src/apps/registry.ts`: `getAllApps()`, `getApp(id)`);
+per-app code lives under
 `src/apps/{claude-code,claude-desktop,copilot-cli}/`. The `related_files`
 in this ADR's frontmatter are the pre-migration paths — kept as the
 historical record of where the logic moved *from*.
@@ -182,7 +182,11 @@ The shipped contract refined the proposal:
 - `enable()` / `disable()` dropped the `AppState` parameter and return a
   small status object.
 - Added `isEnabled()`, optional `onBoot()` / `onShutdown()` lifecycle
-  hooks, and an optional `cliCommand` (the `configure-*` subcommands).
+  hooks, an optional `cli` hook (`AppCli`) for apps needing extra flags or
+  bespoke handling, and a `apiKeyLabel` used by `maximal api <client>`. The
+  registry-driven `maximal app` / `maximal api` commands live in
+  `src/apps/cli.ts`; coming-soon placeholders come from
+  `src/apps/coming-soon.ts` (`defineComingSoonApp`).
 - Added **`uninstall()`** to the contract, so `maximal uninstall` reverts
   each app's own (ownership-guarded) config through the registry rather
   than hard-coding per-app revert calls.
