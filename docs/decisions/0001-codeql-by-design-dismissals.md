@@ -71,7 +71,7 @@ codeql_dismissals:
       the function's job — same model as `gh auth login`.
   - rule: js/http-to-file-access
     path: scripts/sync-homebrew-formula.ts
-    line: 149
+    line: 166
     reason: "won't fix"
     rationale: >
       Release tooling renders a Homebrew formula. Source is a GitHub

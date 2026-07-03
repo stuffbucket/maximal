@@ -370,11 +370,11 @@ async function main(): Promise<void> {
       console.log(`[reconcile] DRY-RUN would re-open #${alert.number} ${alert.rule.id} ${alert.most_recent_instance.location.path}:${alert.most_recent_instance.location.start_line} (no ADR entry covers this dismissal)`)
     } else {
       console.log(`[reconcile] re-opening #${alert.number} ${alert.rule.id} ${alert.most_recent_instance.location.path}:${alert.most_recent_instance.location.start_line}`)
-      await patchAlert(owner, repo, alert.number, {
-        state: "open",
-        dismissed_reason: null,
-        dismissed_comment: "Reopened — no ADR entry covers this dismissal",
-      }, token)
+      // Re-open only. `dismissed_reason`/`dismissed_comment` are valid *only*
+      // with state:"dismissed"; sending them (even as null) on a re-open makes
+      // GitHub validate null against the reason enum and 422 with "nil is not a
+      // string". Omit them entirely.
+      await patchAlert(owner, repo, alert.number, { state: "open" }, token)
     }
   }
 
