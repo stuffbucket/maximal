@@ -3,6 +3,7 @@ import { Hono } from "hono"
 import { cors } from "hono/cors"
 import { logger } from "hono/logger"
 
+import { BUILD_VERSION } from "./lib/build-info"
 import { staleRefreshMiddleware } from "./lib/refresh-models"
 import { createAuthMiddleware, requireGithubAuth } from "./lib/request-auth"
 import { getModelsLoadedAtMs } from "./lib/state"
@@ -33,6 +34,16 @@ export const server = new Hono()
 const SERVER_START_MS = Date.now()
 
 server.use(traceIdMiddleware)
+// Stamp the proxy build version on every response so downstream clients
+// can read which Maximal build served their request without hitting a
+// separate endpoint. Global (right after trace) means it lands on
+// completion responses, /status, /settings/api/*, redirects, and errors
+// alike. Value is a static build constant — no per-request cost, no
+// secrets. Set before next() so it applies to c.res on the way out.
+server.use(async (c, next) => {
+  c.header("x-maximal-version", BUILD_VERSION)
+  await next()
+})
 server.use(logger())
 server.use(cors())
 server.use(
