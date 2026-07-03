@@ -57,8 +57,8 @@ export async function runUninstall(opts: RunUninstallOptions): Promise<void> {
     const names = enabled.map((a) => a.name).join(", ")
     consola.error(`These apps are still routing through maximal: ${names}.`)
     consola.info(
-      "Turn them off in Settings → Apps (or e.g. `maximal configure-claude-code"
-        + " --revert`), then re-run `maximal uninstall`. Or pass `--force` to"
+      "Turn them off in Settings → Apps (or e.g. `maximal app claude-code"
+        + " --disable`), then re-run `maximal uninstall`. Or pass `--force` to"
         + " disable them and uninstall in one step.",
     )
     throw new Error(

@@ -2,13 +2,16 @@
 
 import { defineCommand, runMain, parseArgs } from "citty"
 
+import { HELPER_SUBCOMMAND } from "./lib/api-key-helper-tokens"
 import { BUILD_VERSION } from "./lib/build-info"
 import { bindElectronFetch } from "./lib/electron-fetch"
 
 const cliArgs = {
   apiKeyHelper: {
     type: "string",
-    description: "Print the API key for an integrated client.",
+    description:
+      "Legacy alias for `maximal api <client>`; the command written into"
+      + " client configs. Prints the API key for an integrated client.",
   },
   "api-home": {
     type: "string",
@@ -44,15 +47,11 @@ if (typeof args.apiKeyHelper === "string") {
 
 bindElectronFetch()
 
-// Dynamically import other modules to ensure environment variables are set
-const { auth } = await import("./auth")
-const { checkUsage } = await import("./check-usage")
-const { getAppCliCommands } = await import("./apps/registry")
-const { debug } = await import("./debug")
-const { setup } = await import("./setup")
-const { start } = await import("./start")
-const { uninstall } = await import("./uninstall")
-
+// Subcommands are LAZY thunks: citty resolves `meta` for `--help`/usage but
+// only invokes the matched command's loader. This keeps each invocation from
+// paying the import cost of the others — e.g. `maximal api <client>` (invoked by
+// clients via `sh -c` on every key fetch) must not load the proxy server,
+// usage client, or auth stack it never touches.
 const main = defineCommand({
   meta: {
     name: "maximal",
@@ -61,13 +60,16 @@ const main = defineCommand({
       "Local proxy that exposes GitHub Copilot as OpenAI- and Anthropic-compatible HTTP endpoints.",
   },
   subCommands: {
-    auth,
-    start,
-    setup,
-    ...getAppCliCommands(),
-    uninstall,
-    "check-usage": checkUsage,
-    debug,
+    auth: () => import("./auth").then((m) => m.auth),
+    start: () => import("./start").then((m) => m.start),
+    setup: () => import("./setup").then((m) => m.setup),
+    app: () => import("./apps/cli").then((m) => m.appCommand),
+    // Keyed by HELPER_SUBCOMMAND so the on-disk `<bin> api <client>` token and
+    // the command citty dispatches share one source of truth (no drift).
+    [HELPER_SUBCOMMAND]: () => import("./apps/cli").then((m) => m.apiCommand),
+    uninstall: () => import("./uninstall").then((m) => m.uninstall),
+    "check-usage": () => import("./check-usage").then((m) => m.checkUsage),
+    debug: () => import("./debug").then((m) => m.debug),
   },
   args: cliArgs,
 })

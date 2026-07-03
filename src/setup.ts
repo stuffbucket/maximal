@@ -14,7 +14,7 @@
  * Pairing the proxy with a specific client (Claude Desktop, Claude
  * Code, opencode, the AI SDK, custom apps) is a deliberate follow-up
  * step. For Claude Desktop specifically, run
- * `maximal configure-claude-desktop` after this.
+ * `maximal app claude-desktop --enable` after this.
  *
  * Runs in two modes: interactive (default) and unattended (used by
  * post-install scripts in B2/B3a). Unattended skips prompts and the
@@ -86,7 +86,7 @@ export async function runSetup(opts: RunSetupOptions): Promise<void> {
       "Auth and config are in place. The proxy just wasn't reachable yet.\n"
         + "  1. Start it:   maximal start\n"
         + "  2. Re-check:   maximal setup\n"
-        + "Pair Claude Desktop once it's up: maximal configure-claude-desktop",
+        + "Pair Claude Desktop once it's up: maximal app claude-desktop --enable",
     )
     return
   }
@@ -94,7 +94,7 @@ export async function runSetup(opts: RunSetupOptions): Promise<void> {
   consola.box("Setup complete.")
   consola.info(
     "To pair Claude Desktop with this proxy, run:\n"
-      + "  maximal configure-claude-desktop",
+      + "  maximal app claude-desktop --enable",
   )
 }
 

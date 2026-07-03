@@ -815,7 +815,7 @@ fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Run `maximal configure-claude-code --revert` as a one-shot sidecar
+/// Run `maximal app claude-code --disable` as a one-shot sidecar
 /// command. Called when the proxy sidecar *crashes* (non-zero exit) — it
 /// can't revert its own Claude Code base URL in that path, so the shell
 /// does it. Best-effort: a missing binary or non-zero exit is logged and
@@ -824,7 +824,7 @@ fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
 /// the Terminated handler stays synchronous.
 fn reconcile_claude_code_revert(app: &AppHandle) {
     let command = match app.shell().sidecar("maximal") {
-        Ok(c) => c.args(["configure-claude-code", "--revert"]),
+        Ok(c) => c.args(["app", "claude-code", "--disable"]),
         Err(err) => {
             eprintln!("[shell] could not build claude-code revert command: {err}");
             return;

@@ -1,51 +1,55 @@
-import { defineCommand } from "citty"
 import consola from "consola"
 import fs from "node:fs"
 import path from "node:path"
 
-import {
-  applyConfigLibraryProfile,
-  generateManagedProfile,
-  revertConfigLibraryProfile,
-} from "./config"
+import type { AppCli, AppCliOp } from "../index"
+
+import { applyConfigLibraryProfile, generateManagedProfile } from "./config"
 import { claudeAppInstalled, claudeAppCandidates } from "./detect"
 
 const MANAGED_PROFILE_OUT = "maximal-claude-3p.mobileconfig"
 
-interface ConfigureOptions {
-  force: boolean
-  revert: boolean
-  managed: boolean
-}
+/** Claude Desktop needs two flags beyond the shared status/enable/disable:
+ *  `--force` (write even when the app isn't installed) and `--managed` (emit an
+ *  MDM .mobileconfig instead of touching the config library). Enable and
+ *  disable otherwise fall through to the generic framework (`ClientApp.enable`
+ *  / `disable`), so this hook only intercepts the two extra behaviours. */
+export const claudeDesktopCli: AppCli = {
+  extraArgs: {
+    force: {
+      type: "boolean",
+      default: false,
+      description:
+        "Enable even if /Applications/Claude.app is missing (write anyway).",
+    },
+    managed: {
+      type: "boolean",
+      default: false,
+      description: `Emit a managed-preferences .mobileconfig (${MANAGED_PROFILE_OUT}) for MDM fleets instead of writing the config library.`,
+    },
+  },
 
-export function runConfigureClaudeDesktop(opts: ConfigureOptions): void {
-  consola.box(
-    opts.revert ?
-      "maximal configure-claude-desktop --revert"
-    : "maximal configure-claude-desktop",
-  )
+  handle(op: AppCliOp, args: Record<string, unknown>): boolean {
+    if (op !== "enable") return false
 
-  if (opts.revert) {
-    revert()
-    return
-  }
+    if (args.managed === true) {
+      writeManagedProfile()
+      return true
+    }
 
-  if (opts.managed) {
-    writeManagedProfile()
-    return
-  }
+    if (!claudeAppInstalled() && args.force !== true) {
+      const where = claudeAppCandidates().join(" or ") || "the usual location"
+      consola.warn(
+        `Claude Desktop not found (looked at ${where}). Install it from`
+          + " https://claude.ai/download, then re-run. To write the config"
+          + " anyway (e.g. before installing), pass --force.",
+      )
+      return true
+    }
 
-  if (!claudeAppInstalled() && !opts.force) {
-    const where = claudeAppCandidates().join(" or ") || "the usual location"
-    consola.warn(
-      `Claude Desktop not found (looked at ${where}). Install it from`
-        + " https://claude.ai/download, then re-run this command. To"
-        + " write the config anyway (e.g. before installing), pass --force.",
-    )
-    return
-  }
-
-  apply()
+    apply()
+    return true
+  },
 }
 
 function apply(): void {
@@ -71,19 +75,6 @@ function apply(): void {
   }
 }
 
-function revert(): void {
-  try {
-    const result = revertConfigLibraryProfile()
-    if (result.reverted) {
-      consola.success(`Removed our gateway profile from ${result.dir}`)
-    } else {
-      consola.info("Claude Desktop wasn't wired by us; nothing to do")
-    }
-  } catch (err) {
-    consola.error("Could not revert Claude Desktop config", err)
-  }
-}
-
 function writeManagedProfile(): void {
   try {
     fs.writeFileSync(MANAGED_PROFILE_OUT, generateManagedProfile(), {
@@ -101,36 +92,3 @@ function writeManagedProfile(): void {
     consola.error("Could not write managed profile", err)
   }
 }
-
-export const configureClaudeDesktop = defineCommand({
-  meta: {
-    name: "configure-claude-desktop",
-    description:
-      "Wire Claude Desktop (Cowork 3P) at the local proxy (opt-in; setup does not configure it).",
-  },
-  args: {
-    force: {
-      type: "boolean",
-      default: false,
-      description:
-        "Write the config even if /Applications/Claude.app is missing.",
-    },
-    revert: {
-      type: "boolean",
-      default: false,
-      description: "Remove the gateway profile this command writes.",
-    },
-    managed: {
-      type: "boolean",
-      default: false,
-      description: `Emit a managed-preferences .mobileconfig (${MANAGED_PROFILE_OUT}) for MDM fleets instead of writing the config library.`,
-    },
-  },
-  run({ args }) {
-    runConfigureClaudeDesktop({
-      force: args.force,
-      revert: args.revert,
-      managed: args.managed,
-    })
-  },
-})
