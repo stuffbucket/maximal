@@ -20,10 +20,15 @@ modelRoutes.get("/", async (c) => {
     // show duplicate "Opus 4.7" entries. The handlers route the right
     // upstream variant when output_config.effort or the 1M-context beta
     // header is set.
+    // Return ONLY the documented fields (see docs/spec/wire/models-wire-prd.md).
+    // Spreading the raw Copilot model (`...model`) leaked internal fields —
+    // `billing`, `capabilities`, `policy`, `model_picker_*`, `supported_endpoints`,
+    // etc. — to every client. That both breaks the documented contract and can
+    // make a strict client validator (e.g. Claude Desktop's model picker) reject
+    // the entries and render an empty list. Build each entry explicitly.
     const models = state.models?.data
       .filter((model) => !isVariantId(model.id))
       .map((model) => ({
-        ...model,
         id: forwardId(model.id),
         object: "model",
         type: "model",
