@@ -238,6 +238,17 @@ export function extractCopilotCost(
   return typeof nano === "number" && Number.isFinite(nano) ? nano : undefined
 }
 
+/** Merge Copilot's per-request cost into already-normalized token counts.
+ *  One place for the (normalized usage + sibling copilot_usage) shape every
+ *  non-streaming Copilot record site needs, so cost capture can't be
+ *  forgotten at a new site or drift in field name. */
+export function withCopilotCost(
+  base: UsageTokens,
+  copilotUsage: { total_nano_aiu?: unknown } | null | undefined,
+): UsageTokens {
+  return { ...base, total_nano_aiu: extractCopilotCost(copilotUsage) }
+}
+
 export function normalizeAnthropicUsage(
   usage:
     | {

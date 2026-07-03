@@ -25,9 +25,9 @@ import { getSmallModel } from "~/lib/config"
 import { state } from "~/lib/state"
 import {
   createCopilotTokenUsageRecorder,
-  extractCopilotCost,
   normalizeResponsesUsage,
   type UsageTokens,
+  withCopilotCost,
 } from "~/lib/token-usage"
 import { createResponses } from "~/services/copilot/create-responses"
 
@@ -275,10 +275,12 @@ export class CopilotResponsesExecutor implements Executor {
     // a web_search request). Record it — with the real per-request cost —
     // so it's visible in `maximal debug` / the token-usage view rather than
     // billed invisibly to the user.
-    this.recordUsage({
-      ...normalizeResponsesUsage(result.usage),
-      total_nano_aiu: extractCopilotCost(result.copilot_usage),
-    })
+    this.recordUsage(
+      withCopilotCost(
+        normalizeResponsesUsage(result.usage),
+        result.copilot_usage,
+      ),
+    )
 
     return { ok: true, items: harvestResponsesHits(result, maxResults) }
   }

@@ -10,9 +10,9 @@ import { checkRateLimit } from "~/lib/rate-limit"
 import { state } from "~/lib/state"
 import {
   createCopilotTokenUsageRecorder,
-  extractCopilotCost,
   normalizeResponsesUsage,
   type UsageTokens,
+  withCopilotCost,
 } from "~/lib/token-usage"
 import { generateRequestIdFromPayload, getUUID } from "~/lib/utils"
 import {
@@ -158,12 +158,12 @@ export const handleResponses = async (c: Context) => {
     value: response,
     tailLength: 400,
   })
-  recordUsage({
-    ...normalizeResponsesUsage((response as ResponsesResult).usage),
-    total_nano_aiu: extractCopilotCost(
+  recordUsage(
+    withCopilotCost(
+      normalizeResponsesUsage((response as ResponsesResult).usage),
       (response as ResponsesResult).copilot_usage,
     ),
-  })
+  )
   return c.json(response as ResponsesResult)
 }
 

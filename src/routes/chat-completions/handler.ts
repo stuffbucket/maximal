@@ -9,9 +9,9 @@ import { checkRateLimit } from "~/lib/rate-limit"
 import { state } from "~/lib/state"
 import {
   createCopilotTokenUsageRecorder,
-  extractCopilotCost,
   normalizeOpenAIUsage,
   type UsageTokens,
+  withCopilotCost,
 } from "~/lib/token-usage"
 import { generateRequestIdFromPayload, getUUID, isNullish } from "~/lib/utils"
 import {
@@ -76,10 +76,12 @@ export async function handleCompletion(c: Context) {
 
   if (isNonStreaming(response)) {
     debugJson(logger, "Non-streaming response:", response)
-    recordUsage({
-      ...normalizeOpenAIUsage(response.usage),
-      total_nano_aiu: extractCopilotCost(response.copilot_usage),
-    })
+    recordUsage(
+      withCopilotCost(
+        normalizeOpenAIUsage(response.usage),
+        response.copilot_usage,
+      ),
+    )
     return c.json(response)
   }
 

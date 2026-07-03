@@ -15,13 +15,13 @@ import {
 import { debugJson, debugJsonTail, debugLazy } from "~/lib/logger"
 import {
   createCopilotTokenUsageRecorder,
-  extractCopilotCost,
   mergeAnthropicUsage,
   normalizeAnthropicUsage,
   normalizeOpenAIUsage,
   normalizeResponsesUsage,
   type TokenUsageEndpoint,
   type UsageTokens,
+  withCopilotCost,
 } from "~/lib/token-usage"
 import { parseUserIdMetadata } from "~/lib/utils"
 import {
@@ -99,10 +99,12 @@ export const handleWithChatCompletions = async (
 
   if (isNonStreaming(response)) {
     debugJson(logger, "Non-streaming response from Copilot:", response)
-    recordUsage({
-      ...normalizeOpenAIUsage(response.usage),
-      total_nano_aiu: extractCopilotCost(response.copilot_usage),
-    })
+    recordUsage(
+      withCopilotCost(
+        normalizeOpenAIUsage(response.usage),
+        response.copilot_usage,
+      ),
+    )
     const anthropicResponse = translateToAnthropic(response)
     debugJson(logger, "Translated Anthropic response:", anthropicResponse)
     return c.json(anthropicResponse)
@@ -256,14 +258,32 @@ export const handleWithResponsesApi = async (
     })
   }
 
+  return finishNonStreamingResponses(c, response as ResponsesResult, {
+    logger,
+    recordUsage,
+  })
+}
+
+/** Non-streaming /responses tail: log, translate to Anthropic, record
+ *  usage+cost, respond. Extracted to keep handleWithResponsesApi under the
+ *  per-function line cap. */
+function finishNonStreamingResponses(
+  c: Context,
+  result: ResponsesResult,
+  deps: { logger: ConsolaInstance; recordUsage: (usage: UsageTokens) => void },
+) {
+  const { logger, recordUsage } = deps
   debugJsonTail(logger, "Non-streaming Responses result:", {
-    value: response,
+    value: result,
     tailLength: 400,
   })
-  const anthropicResponse = translateResponsesResultToAnthropic(
-    response as ResponsesResult,
+  const anthropicResponse = translateResponsesResultToAnthropic(result)
+  recordUsage(
+    withCopilotCost(
+      normalizeResponsesUsage(result.usage),
+      result.copilot_usage,
+    ),
   )
-  recordUsage(responsesUsageWithCost(response as ResponsesResult))
   debugJson(logger, "Translated Anthropic response:", anthropicResponse)
   return c.json(anthropicResponse)
 }
@@ -345,10 +365,12 @@ export const handleWithMessagesApi = async (
     value: response,
     tailLength: 400,
   })
-  recordUsage({
-    ...normalizeAnthropicUsage(response.usage),
-    total_nano_aiu: extractCopilotCost(response.copilot_usage),
-  })
+  recordUsage(
+    withCopilotCost(
+      normalizeAnthropicUsage(response.usage),
+      response.copilot_usage,
+    ),
+  )
   return c.json(response)
 }
 
@@ -372,12 +394,6 @@ const createCopilotUsageRecorder = (options: {
     model: options.model,
     sessionId: getMetadataSessionId(options.payload),
   })
-
-/** Non-streaming /responses usage incl. Copilot's per-request cost. */
-const responsesUsageWithCost = (result: ResponsesResult): UsageTokens => ({
-  ...normalizeResponsesUsage(result.usage),
-  total_nano_aiu: extractCopilotCost(result.copilot_usage),
-})
 
 const getMetadataSessionId = (
   payload: AnthropicMessagesPayload,
