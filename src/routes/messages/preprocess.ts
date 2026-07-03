@@ -588,12 +588,25 @@ export const prepareMessagesApiPayload = (
   stripCacheControl(payload)
   filterAssistantThinkingBlocks(payload)
 
-  const hasThinking = Boolean(payload.thinking)
+  // Capture the client's incoming thinking intent BEFORE we overwrite
+  // payload.thinking with the adaptive rewrite below.
+  //   - incomingDisplay: an explicit `display` the client picked, if any. On
+  //     Copilot-served Claude `display: "summarized"` is what SURFACES the
+  //     thinking text; `{type:"adaptive"}` alone reasons silently and emits an
+  //     empty thinking block. We must preserve an explicit choice and otherwise
+  //     default to "summarized" (see below).
+  //   - clientDisabledThinking: the client EXPLICITLY turned thinking off
+  //     (`type: "disabled"`). We honor that instead of force-enabling adaptive.
+  const incomingDisplay = payload.thinking?.display
+  const clientDisabledThinking = payload.thinking?.type === "disabled"
 
   // https://platform.claude.com/docs/en/build-with-claude/extended-thinking#extended-thinking-with-tool-use
   // Using tool_choice: {"type": "any"} or tool_choice: {"type": "tool", "name": "..."} will result in an error because these options force tool use, which is incompatible with extended thinking.
   const toolChoice = payload.tool_choice
-  const disableThink = toolChoice?.type === "any" || toolChoice?.type === "tool"
+  const disableThink =
+    toolChoice?.type === "any"
+    || toolChoice?.type === "tool"
+    || clientDisabledThinking
 
   // claude-opus-4.7+ rejects temperature/top_p/top_k with a 400.
   stripSamplingParams(payload, selectedModel)
@@ -602,10 +615,13 @@ export const prepareMessagesApiPayload = (
     payload.thinking = {
       type: "adaptive",
     }
-    // align with vscode copilot
-    if (!hasThinking) {
-      payload.thinking.display = "summarized"
-    }
+    // Align with vscode copilot: default `display` to "summarized" unless the
+    // client explicitly picked one. On Copilot-served Claude this is what makes
+    // the thinking text surface, so gating on the incoming `display` field (not
+    // the presence of the whole thinking object) is what keeps "ask for
+    // thinking → get thinking" holding.
+    payload.thinking.display = incomingDisplay ?? "summarized"
+    // claude-opus-4.7 always uses the summarized display.
     if (payload.model === "claude-opus-4.7") {
       payload.thinking.display = "summarized"
     }

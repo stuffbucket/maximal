@@ -15,7 +15,7 @@ export interface AnthropicMessagesPayload {
   }
   max_tokens: number
   thinking?: {
-    type: "enabled" | "adaptive"
+    type: "enabled" | "adaptive" | "disabled"
     budget_tokens?: number
     display?: string
   }
