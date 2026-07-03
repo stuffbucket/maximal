@@ -66,6 +66,10 @@ export type ResponseIncludable =
   | "computer_call_output.output.image_url"
   | "reasoning.encrypted_content"
   | "code_interpreter_call.outputs"
+  // Surfaces the raw searched-source URLs on web_search_call.action.sources[].
+  // Verified accepted by Copilot's /responses (2026-07-03); undocumented but
+  // matches OpenAI's Responses API include vocabulary.
+  | "web_search_call.action.sources"
 
 export interface Reasoning {
   effort?: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | null

@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it } from "bun:test"
 
 import {
   chooseExecutor,
+  CopilotResponsesExecutor,
+  harvestResponsesHits,
   InProcessFetchExecutor,
 } from "~/routes/messages/web-tools/executor"
 
@@ -97,12 +99,165 @@ describe("InProcessFetchExecutor.search — DuckDuckGo HTML scrape", () => {
   })
 })
 
-describe("chooseExecutor — diagnostic notes reflect the no-key fallback", () => {
-  it("mentions DuckDuckGo (no key) when OLLAMA_API_KEY is unset", () => {
-    const choice = chooseExecutor({})
+describe("chooseExecutor — precedence", () => {
+  it("prefers OllamaWebExecutor when OLLAMA_API_KEY is set (over Copilot)", () => {
+    const choice = chooseExecutor(
+      { OLLAMA_API_KEY: "k" },
+      { responsesModel: "gpt-5-mini" },
+    )
+    expect(choice.kind).toBe("OllamaWebExecutor")
+  })
+
+  it("uses CopilotResponsesExecutor when no key but a /responses model exists", () => {
+    const choice = chooseExecutor({}, { responsesModel: "gpt-5-mini" })
+    expect(choice.kind).toBe("CopilotResponsesExecutor")
+    if (choice.kind !== "CopilotResponsesExecutor") return
+    expect(choice.model).toBe("gpt-5-mini")
+    expect(choice.notes).toContain("Copilot")
+    expect(choice.notes).toContain("gpt-5-mini")
+  })
+
+  it("falls back to DuckDuckGo when no key and no /responses model", () => {
+    const choice = chooseExecutor({}, {})
     expect(choice.kind).toBe("InProcessFetchExecutor")
     if (choice.kind !== "InProcessFetchExecutor") return
     expect(choice.notes).toContain("DuckDuckGo")
     expect(choice.notes).toContain("OLLAMA_API_KEY")
+  })
+})
+
+// Minimal stand-in for the createResponses return shape the executor reads.
+function fakeCreateResponses(result: unknown) {
+  return () => Promise.resolve(result as never)
+}
+
+describe("CopilotResponsesExecutor.search — harvest from /responses", () => {
+  it("harvests cited (title+url) then raw sources, deduped and capped", async () => {
+    const responsesResult = {
+      output: [
+        {
+          type: "web_search_call",
+          action: {
+            sources: [
+              { type: "url", url: "https://a.example/raw1" },
+              { type: "url", url: "https://cited.example/x" }, // dup of cited
+              { type: "url", url: "https://b.example/raw2" },
+            ],
+          },
+        },
+        {
+          type: "message",
+          content: [
+            {
+              type: "output_text",
+              text: "answer",
+              annotations: [
+                {
+                  type: "url_citation",
+                  url: "https://cited.example/x",
+                  title: "Cited X",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    }
+    const exec = new CopilotResponsesExecutor({
+      model: "gpt-5-mini",
+      createResponsesFn: fakeCreateResponses(responsesResult),
+    })
+    const result = await exec.search("anything", { maxResults: 3 })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    // Cited hit first (has a real title), then raw URLs backfill; the dup
+    // of the cited URL is dropped.
+    expect(result.items).toEqual([
+      { url: "https://cited.example/x", title: "Cited X", page_age: null },
+      {
+        url: "https://a.example/raw1",
+        title: "https://a.example/raw1",
+        page_age: null,
+      },
+      {
+        url: "https://b.example/raw2",
+        title: "https://b.example/raw2",
+        page_age: null,
+      },
+    ])
+  })
+
+  it("returns unavailable when createResponses throws", async () => {
+    const exec = new CopilotResponsesExecutor({
+      model: "gpt-5-mini",
+      createResponsesFn: () => Promise.reject(new Error("boom")),
+    })
+    expect(await exec.search("q")).toEqual({ ok: false, code: "unavailable" })
+  })
+
+  it("returns unavailable on a non-object / streamed result", async () => {
+    const exec = new CopilotResponsesExecutor({
+      model: "gpt-5-mini",
+      createResponsesFn: fakeCreateResponses({ notOutput: true }),
+    })
+    expect(await exec.search("q")).toEqual({ ok: false, code: "unavailable" })
+  })
+
+  it("delegates fetch() to the injected fetch executor", async () => {
+    const calls: Array<string> = []
+    const exec = new CopilotResponsesExecutor({
+      model: "gpt-5-mini",
+      createResponsesFn: fakeCreateResponses({ output: [] }),
+      fetchExecutor: {
+        fetch: (url: string) => {
+          calls.push(url)
+          return Promise.resolve({ ok: true, markdown: "md" })
+        },
+        search: () => Promise.resolve({ ok: true, items: [] }),
+      },
+    })
+    const r = await exec.fetch("https://example.com")
+    expect(calls).toEqual(["https://example.com"])
+    expect(r).toEqual({ ok: true, markdown: "md" })
+  })
+})
+
+describe("harvestResponsesHits — defensive parsing", () => {
+  it("returns [] for a result with no output array", () => {
+    expect(harvestResponsesHits({}, 5)).toEqual([])
+  })
+
+  it("skips malformed annotations and sources without url", () => {
+    const hits = harvestResponsesHits(
+      {
+        output: [
+          {
+            type: "message",
+            content: [
+              {
+                type: "output_text",
+                annotations: [
+                  { type: "url_citation" }, // no url → skipped
+                  { type: "other", url: "https://nope.example" }, // wrong type
+                  {
+                    type: "url_citation",
+                    url: "https://ok.example",
+                    title: "OK",
+                  },
+                ],
+              },
+            ],
+          },
+          {
+            type: "web_search_call",
+            action: { sources: [{ type: "url" }, "not-an-object"] },
+          },
+        ],
+      },
+      5,
+    )
+    expect(hits).toEqual([
+      { url: "https://ok.example", title: "OK", page_age: null },
+    ])
   })
 })
