@@ -245,6 +245,42 @@ describe("runCopilotRefreshLoop — non-fatal during refresh", () => {
   })
 })
 
+// --- H. abort during the wait tears the loop down CLEANLY -------------------
+// Regression: stopCopilotRefreshLoop() aborts the signal while the loop is
+// parked in `await delay(..., { signal })`, which REJECTS with an AbortError.
+// That deliberate teardown must be swallowed (loop resolves), not surface as an
+// unhandled rejection / "loop crashed" log. Previously it propagated and was
+// logged as "Copilot token refresh loop stopped" on every normal stop.
+
+describe("runCopilotRefreshLoop — abort during wait", () => {
+  test("stopping mid-wait does not raise an unhandled rejection", async () => {
+    // Long refresh_in → the loop parks in delay() (never reaches a refresh),
+    // so the ONLY way out is the abort we fire below.
+    harness.getCopilotTokenImpl = () =>
+      Promise.resolve(ok("copilot_init", 1800))
+
+    const rejections: Array<unknown> = []
+    const onUnhandled = (err: unknown): void => {
+      rejections.push(err)
+    }
+    process.on("unhandledRejection", onUnhandled)
+
+    try {
+      await setupCopilotToken()
+      expect(state.copilotToken).toBe("copilot_init")
+
+      // Abort while parked in the wait, then give microtasks + the rejection
+      // handler a tick to fire if the AbortError escaped.
+      stopCopilotRefreshLoop()
+      await new Promise((r) => setTimeout(r, 50))
+
+      expect(rejections).toEqual([])
+    } finally {
+      process.off("unhandledRejection", onUnhandled)
+    }
+  })
+})
+
 // --- G. completion host resolves from the token's endpoints.api ------------
 // Regression: the bearer minted by /copilot_internal/v2/token is only valid
 // against its own endpoints.api; POSTing it to another GitHub Copilot host is

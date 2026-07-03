@@ -179,8 +179,10 @@ export const setupCopilotToken = async (opts?: {
   copilotRefreshLoopController = controller
 
   runCopilotRefreshLoop(refresh_in, controller.signal)
-    .catch(() => {
-      log.warn("Copilot token refresh loop stopped")
+    .catch((err: unknown) => {
+      // A deliberate abort no longer reaches here (the loop swallows it and
+      // resolves), so a rejection is a genuine unexpected fault worth flagging.
+      log.error("Copilot token refresh loop crashed unexpectedly:", err)
     })
     .finally(() => {
       if (copilotRefreshLoopController === controller) {
@@ -227,7 +229,18 @@ const runCopilotRefreshLoop = async (
   while (!signal.aborted) {
     const nextDelayMs = getRefreshPollDelayMs(refreshAtMs)
     if (nextDelayMs > 0) {
-      await delay(nextDelayMs, undefined, { signal })
+      // `delay` REJECTS with an AbortError when the signal fires mid-wait.
+      // Aborting is a deliberate teardown (stopCopilotRefreshLoop), not a
+      // failure — swallow it and let the `while` guard exit cleanly, so the
+      // loop promise resolves instead of surfacing as "refresh loop stopped".
+      try {
+        await delay(nextDelayMs, undefined, { signal })
+      } catch (err) {
+        // `delay` rejects with an AbortError when the signal fires — that's a
+        // deliberate teardown, so end the loop cleanly. Re-throw anything else.
+        if (err instanceof Error && err.name === "AbortError") break
+        throw err
+      }
       continue
     }
 
