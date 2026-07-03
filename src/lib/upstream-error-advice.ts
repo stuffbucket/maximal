@@ -144,13 +144,14 @@ const modelNotSupportedAdvisor: ErrorAdvisor = {
     }
     const shown = available.slice(0, MAX_LISTED).map((m) => `  • ${m}`)
     if (available.length > MAX_LISTED) {
-      shown.push(`  …and ${available.length - MAX_LISTED} more (see /model).`)
+      shown.push(`  …and ${available.length - MAX_LISTED} more.`)
     }
     return {
       context: "GitHub Copilot doesn't offer the requested model on your plan.",
       recovery:
-        "Switch to a supported model — in Claude Code run /model and pick "
-        + "one (other clients: set the model id explicitly):\n"
+        "Switch to one of the supported models below — select it in your "
+        + "client's model picker, or set the model id explicitly (in Claude "
+        + "Code, run /model):\n"
         + shown.join("\n"),
     }
   },
