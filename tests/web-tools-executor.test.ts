@@ -123,6 +123,83 @@ describe("InProcessFetchExecutor.search — DuckDuckGo HTML scrape", () => {
     const result = await new InProcessFetchExecutor().search("gibberish query")
     expect(result).toEqual({ ok: true, items: [] })
   })
+
+  it("skips non-result anchors, deduplicates URLs, and drops empty titles", async () => {
+    // Exercises parseDdgResults guards: the class filter (a nav anchor
+    // without result__a), URL dedup (same uddg target twice), and the
+    // empty-title skip (anchor whose inner text strips to nothing).
+    const fixture = `
+      <a class="header__logo" href="https://duckduckgo.com/">DuckDuckGo</a>
+      <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fa.example%2F1">First</a>
+      <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fa.example%2F1">First dup</a>
+      <a rel="nofollow" class="result__a" href="https://b.example/2"><img src="x"></a>
+      <a rel="nofollow" class="result__a" href="https://c.example/3">Third</a>
+    `
+    mockFetch(new Response(fixture, { status: 200 }))
+    const result = await new InProcessFetchExecutor().search("q")
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    // Nav anchor excluded (no result__a); dup dropped; empty-title anchor
+    // (b.example) dropped; only the two titled, unique results remain.
+    expect(result.items).toEqual([
+      { url: "https://a.example/1", title: "First", page_age: null },
+      { url: "https://c.example/3", title: "Third", page_age: null },
+    ])
+  })
+
+  it("stops at maxResults even when more result anchors are present", async () => {
+    const fixture = `
+      <a rel="nofollow" class="result__a" href="https://a.example/1">One</a>
+      <a rel="nofollow" class="result__a" href="https://b.example/2">Two</a>
+      <a rel="nofollow" class="result__a" href="https://c.example/3">Three</a>
+    `
+    mockFetch(new Response(fixture, { status: 200 }))
+    const result = await new InProcessFetchExecutor().search("q", {
+      maxResults: 2,
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.items.map((i) => i.url)).toEqual([
+      "https://a.example/1",
+      "https://b.example/2",
+    ])
+  })
+
+  it("keeps direct http:// result links and drops non-URL hrefs", async () => {
+    // resolveDdgResultUrl: the http:// arm (not just https://) is kept; a
+    // relative/non-URL href that isn't a duckduckgo redirect is dropped.
+    const fixture = `
+      <a rel="nofollow" class="result__a" href="http://plain.example/insecure">Insecure</a>
+      <a rel="nofollow" class="result__a" href="/relative/path">Relative</a>
+    `
+    mockFetch(new Response(fixture, { status: 200 }))
+    const result = await new InProcessFetchExecutor().search("q")
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.items).toEqual([
+      {
+        url: "http://plain.example/insecure",
+        title: "Insecure",
+        page_age: null,
+      },
+    ])
+  })
+
+  it("skips a result anchor that has no href attribute", async () => {
+    // parseDdgResults: the `if (!hrefMatch) continue` guard — a result__a
+    // anchor with no href at all must be dropped, not crash.
+    const fixture = `
+      <a rel="nofollow" class="result__a">No href here</a>
+      <a rel="nofollow" class="result__a" href="https://ok.example">OK</a>
+    `
+    mockFetch(new Response(fixture, { status: 200 }))
+    const result = await new InProcessFetchExecutor().search("q")
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.items).toEqual([
+      { url: "https://ok.example", title: "OK", page_age: null },
+    ])
+  })
 })
 
 describe("chooseExecutor — precedence", () => {
@@ -394,6 +471,88 @@ describe("harvestResponsesHits — defensive parsing", () => {
     )
     expect(hits).toEqual([
       { url: "https://ok.example", title: "OK", page_age: null },
+    ])
+  })
+
+  it("caps the harvest at maxResults", () => {
+    const sources = Array.from({ length: 5 }, (_, i) => ({
+      type: "url",
+      url: `https://s${i}.example`,
+    }))
+    const hits = harvestResponsesHits(
+      { output: [{ type: "web_search_call", action: { sources } }] },
+      2,
+    )
+    expect(hits.map((h) => h.url)).toEqual([
+      "https://s0.example",
+      "https://s1.example",
+    ])
+  })
+
+  it("falls back to the url as title when a citation has no title", () => {
+    const hits = harvestResponsesHits(
+      {
+        output: [
+          {
+            type: "message",
+            content: [
+              {
+                type: "output_text",
+                annotations: [
+                  { type: "url_citation", url: "https://notitle.example" },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      5,
+    )
+    expect(hits).toEqual([
+      {
+        url: "https://notitle.example",
+        title: "https://notitle.example",
+        page_age: null,
+      },
+    ])
+  })
+
+  it("ignores non-object content blocks and non-object source entries", () => {
+    // Kills the `if (!isRecord(block)) continue` / `if (!isRecord(src))
+    // continue` guards: junk (a bare string) mixed into content[] / sources[]
+    // must be skipped, not crash, while valid siblings still harvest.
+    const hits = harvestResponsesHits(
+      {
+        output: [
+          {
+            type: "message",
+            content: [
+              "junk-string-block",
+              {
+                type: "output_text",
+                annotations: [
+                  {
+                    type: "url_citation",
+                    url: "https://ok.example",
+                    title: "OK",
+                  },
+                ],
+              },
+            ],
+          },
+          {
+            type: "web_search_call",
+            action: {
+              sources: ["junk", { type: "url", url: "https://s.example" }],
+            },
+          },
+        ],
+      },
+      5,
+    )
+    expect(hits).toEqual([
+      { url: "https://ok.example", title: "OK", page_age: null },
+      { url: "https://s.example", title: "https://s.example", page_age: null },
     ])
   })
 })
