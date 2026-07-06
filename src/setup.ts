@@ -9,7 +9,8 @@
  *   1. GitHub auth (device-code flow if no token)
  *   2. Diagnostic — render `maximal debug` so the user sees the
  *      effective config
- *   3. Smoke test — one /v1/messages request to confirm reachability
+ *   3. Smoke test — a GET /models catalog check to confirm the proxy
+ *      is reachable, authenticated, and has a live upstream token
  *
  * Pairing the proxy with a specific client (Claude Desktop, Claude
  * Code, opencode, the AI SDK, custom apps) is a deliberate follow-up
@@ -27,7 +28,6 @@ import { defineCommand } from "citty"
 import consola from "consola"
 
 import { runDebug } from "./debug"
-import { ANTHROPIC_API_VERSION } from "./lib/anthropic-types"
 import { ensurePaths } from "./lib/paths"
 import { state } from "./lib/state"
 import { setupGitHubToken } from "./lib/token"
@@ -103,23 +103,19 @@ export async function runSetup(opts: RunSetupOptions): Promise<void> {
 // Step 3: Smoke test.
 // ────────────────────────────────────────────────────────────────────
 
-async function smokeTest(port: number): Promise<boolean> {
-  const url = `http://localhost:${port}/v1/messages`
+export async function smokeTest(port: number): Promise<boolean> {
+  const url = `http://localhost:${port}/models`
   let response: Response
   try {
+    // A catalog GET, not an LLM call: proves the proxy is reachable, GitHub
+    // auth passed, and the upstream Copilot token is live (cacheModels fetches
+    // the real catalog) — with no token spend and no hardcoded model string.
+    // We send NO x-api-key on purpose: if the user enabled key enforcement, a
+    // real 401 is worth surfacing rather than masking with a dummy key.
     response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": "anything",
-        "anthropic-version": ANTHROPIC_API_VERSION,
-      },
-      body: JSON.stringify({
-        model: "claude-haiku-4.5",
-        max_tokens: 32,
-        messages: [{ role: "user", content: "hello" }],
-      }),
-      signal: AbortSignal.timeout(15_000),
+      method: "GET",
+      headers: { accept: "application/json" },
+      signal: AbortSignal.timeout(5_000),
     })
   } catch (err) {
     consola.warn(
@@ -128,11 +124,29 @@ async function smokeTest(port: number): Promise<boolean> {
     )
     return false
   }
+  if (response.status === 401) {
+    consola.warn(
+      "  Proxy is up but not authenticated to GitHub. Run `maximal auth`, then re-run setup.",
+    )
+    return false
+  }
   if (!response.ok) {
     consola.warn(`  Proxy responded ${response.status} ${response.statusText}`)
     return false
   }
-  consola.success(`  Proxy responded 200 from ${url}`)
+  const body = (await response.json().catch(() => null)) as {
+    data?: unknown
+  } | null
+  if (!body || !Array.isArray(body.data) || body.data.length === 0) {
+    consola.warn(
+      "  Proxy has a valid token but returned an empty Copilot model catalog"
+        + " (upstream or entitlement issue). Re-run setup once resolved.",
+    )
+    return false
+  }
+  consola.success(
+    `  Proxy responded 200 from ${url} (${body.data.length} models available)`,
+  )
   return true
 }
 
@@ -161,7 +175,7 @@ export const setup = defineCommand({
     "skip-smoke": {
       type: "boolean",
       default: false,
-      description: "Skip the /v1/messages smoke-test step.",
+      description: "Skip the GET /models smoke-test step.",
     },
     "no-browser": {
       type: "boolean",
