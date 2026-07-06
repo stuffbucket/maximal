@@ -24,7 +24,7 @@ let fakeRegistry: AccountRegistry
 // and gh-preflight.test.ts's coverage of it isn't clobbered.
 let usageImpl: (token: string) => Promise<unknown>
 
-void mock.module("~/lib/github-token-store", () => ({
+await mock.module("~/lib/github-token-store", () => ({
   ...actualStore,
   readDefaultRegistry: () => Promise.resolve(fakeRegistry),
   writeDefaultRegistry: (reg: AccountRegistry) => {
@@ -35,7 +35,7 @@ void mock.module("~/lib/github-token-store", () => ({
 
 const actualUsage = await import("~/services/github/get-copilot-usage")
 
-void mock.module("~/services/github/get-copilot-usage", () => ({
+await mock.module("~/services/github/get-copilot-usage", () => ({
   ...actualUsage,
   getCopilotUsage: (token: string) => usageImpl(token),
 }))
@@ -43,9 +43,9 @@ void mock.module("~/services/github/get-copilot-usage", () => ({
 const { accountsRoutes } = await import("~/routes/settings/accounts")
 const { addAndActivate, emptyRegistry, makeAccountRecord } = actualStore
 
-afterAll(() => {
-  void mock.module("~/lib/github-token-store", () => actualStore)
-  void mock.module("~/services/github/get-copilot-usage", () => actualUsage)
+afterAll(async () => {
+  await mock.module("~/lib/github-token-store", () => actualStore)
+  await mock.module("~/services/github/get-copilot-usage", () => actualUsage)
 })
 
 /** An HTTPError carrying the given status, for driving the pre-flight. */

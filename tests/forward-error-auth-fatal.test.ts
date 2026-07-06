@@ -19,7 +19,7 @@ import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test"
 // file in the same `bun test` process gets our stub).
 const realFsPromisesModule = await import("node:fs/promises")
 const unlinkCalls: Array<string> = []
-void mock.module("node:fs/promises", () => ({
+await mock.module("node:fs/promises", () => ({
   ...realFsPromisesModule,
   default: {
     ...(realFsPromisesModule as { default: object }).default,
@@ -33,8 +33,8 @@ void mock.module("node:fs/promises", () => ({
     return Promise.resolve()
   },
 }))
-afterAll(() => {
-  void mock.module("node:fs/promises", () => realFsPromisesModule)
+afterAll(async () => {
+  await mock.module("node:fs/promises", () => realFsPromisesModule)
 })
 
 const errorMod = await import("~/lib/error")

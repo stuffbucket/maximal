@@ -74,15 +74,15 @@ const realTokenModule = await import("~/lib/token")
 const realUtilsModule = await import("~/lib/utils")
 const realFsPromisesModule = await import("node:fs/promises")
 
-void mock.module("~/services/github/get-device-code", () => ({
+await mock.module("~/services/github/get-device-code", () => ({
   getDeviceCode: () => harness.getDeviceCodeImpl(),
 }))
 
-void mock.module("~/services/github/get-user", () => ({
+await mock.module("~/services/github/get-user", () => ({
   getGitHubUser: (_token?: string) => harness.getGitHubUserImpl(),
 }))
 
-void mock.module("~/lib/token", () => ({
+await mock.module("~/lib/token", () => ({
   setupCopilotToken: () => {
     harness.setupCopilotTokenCalls++
     return harness.setupCopilotTokenImpl()
@@ -94,7 +94,7 @@ void mock.module("~/lib/token", () => ({
 // Spread the real namespace so the many OTHER utils exports (getUUID,
 // parseUserIdMetadata, sleep, …) survive; only count/stub cacheModels so
 // the sign-in success path doesn't make a real Copilot /models fetch.
-void mock.module("~/lib/utils", () => ({
+await mock.module("~/lib/utils", () => ({
   ...realUtilsModule,
   cacheModels: () => {
     harness.cacheModelsCalls++
@@ -105,7 +105,7 @@ void mock.module("~/lib/utils", () => ({
 // Spread the real namespace so `readFile` / `writeFile` / etc. survive
 // the override — `tests/github-token-store.test.ts` reads/writes via
 // the same module and gets undefined functions otherwise.
-void mock.module("node:fs/promises", () => ({
+await mock.module("node:fs/promises", () => ({
   ...realFsPromisesModule,
   default: {
     ...(realFsPromisesModule as { default: object }).default,
@@ -120,15 +120,15 @@ void mock.module("node:fs/promises", () => ({
   },
 }))
 
-afterAll(() => {
-  void mock.module(
+afterAll(async () => {
+  await mock.module(
     "~/services/github/get-device-code",
     () => realGetDeviceCodeModule,
   )
-  void mock.module("~/services/github/get-user", () => realGetUserModule)
-  void mock.module("~/lib/token", () => realTokenModule)
-  void mock.module("~/lib/utils", () => realUtilsModule)
-  void mock.module("node:fs/promises", () => realFsPromisesModule)
+  await mock.module("~/services/github/get-user", () => realGetUserModule)
+  await mock.module("~/lib/token", () => realTokenModule)
+  await mock.module("~/lib/utils", () => realUtilsModule)
+  await mock.module("node:fs/promises", () => realFsPromisesModule)
 })
 
 const {

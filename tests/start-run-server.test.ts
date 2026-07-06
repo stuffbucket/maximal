@@ -29,7 +29,7 @@ import {
 
 const initOpencodeVersionMock = mock(() => Promise.resolve())
 const realOpencodeModule = await import("~/lib/opencode")
-void mock.module("~/lib/opencode", () => ({
+await mock.module("~/lib/opencode", () => ({
   ...realOpencodeModule,
   initOpencodeVersion: initOpencodeVersionMock,
 }))
@@ -39,14 +39,14 @@ void mock.module("~/lib/opencode", () => ({
 // `ensurePaths` so the test never touches disk.
 const ensurePathsMock = mock(() => Promise.resolve())
 const realPathsModule = await import("~/lib/paths")
-void mock.module("~/lib/paths", () => ({
+await mock.module("~/lib/paths", () => ({
   ...realPathsModule,
   ensurePaths: ensurePathsMock,
 }))
 
 const initProxyFromEnvMock = mock(() => {})
 const realProxyModule = await import("~/lib/proxy")
-void mock.module("~/lib/proxy", () => ({
+await mock.module("~/lib/proxy", () => ({
   ...realProxyModule,
   initProxyFromEnv: initProxyFromEnvMock,
 }))
@@ -54,7 +54,7 @@ void mock.module("~/lib/proxy", () => ({
 const ensureSecretsDirMock = mock(() => {})
 const loadSecretIntoEnvMock = mock(() => ({ source: "unset" as const }))
 const realSecretsModule = await import("~/lib/secrets")
-void mock.module("~/lib/secrets", () => ({
+await mock.module("~/lib/secrets", () => ({
   ...realSecretsModule,
   ensureSecretsDir: ensureSecretsDirMock,
   loadSecretIntoEnv: loadSecretIntoEnvMock,
@@ -67,7 +67,7 @@ const cacheMacMachineIdMock = mock(() => {})
 const cacheVsCodeSessionIdMock = mock(() => {})
 const cacheVsCodeDeviceIdMock = mock(() => Promise.resolve())
 const realUtilsModule = await import("~/lib/utils")
-void mock.module("~/lib/utils", () => ({
+await mock.module("~/lib/utils", () => ({
   ...realUtilsModule,
   cacheModels: cacheModelsMock,
   cacheVSCodeVersion: cacheVSCodeVersionMock,
@@ -87,7 +87,7 @@ const logUserMock = mock(() => {
 })
 const setupCopilotTokenMock = mock(() => Promise.resolve())
 const realTokenModule = await import("~/lib/token")
-void mock.module("~/lib/token", () => ({
+await mock.module("~/lib/token", () => ({
   ...realTokenModule,
   logUser: logUserMock,
   setupCopilotToken: setupCopilotTokenMock,
@@ -96,7 +96,7 @@ void mock.module("~/lib/token", () => ({
 let storedRecord: { accessToken: string } | null = null
 const readDefaultRecordMock = mock(() => Promise.resolve(storedRecord))
 const realStoreModule = await import("~/lib/github-token-store")
-void mock.module("~/lib/github-token-store", () => ({
+await mock.module("~/lib/github-token-store", () => ({
   ...realStoreModule,
   readDefaultRecord: readDefaultRecordMock,
 }))
@@ -114,7 +114,7 @@ const fakeLogger = {
   debug: () => {},
 }
 const realLoggerModule = await import("~/lib/logger")
-void mock.module("~/lib/logger", () => ({
+await mock.module("~/lib/logger", () => ({
   ...realLoggerModule,
   createHandlerLogger: () => fakeLogger,
 }))
@@ -122,7 +122,7 @@ void mock.module("~/lib/logger", () => ({
 // Stub `serve` from srvx so runServer never binds a port.
 const serveMock = mock(() => ({ close: () => Promise.resolve() }))
 const realSrvxModule = await import("srvx")
-void mock.module("srvx", () => ({ ...realSrvxModule, serve: serveMock }))
+await mock.module("srvx", () => ({ ...realSrvxModule, serve: serveMock }))
 
 // NOTE: we deliberately don't mock `~/server`. Replacing the cached
 // module with a stub Hono leaks into other test files (e.g.
@@ -462,16 +462,16 @@ describe("start.run — citty args → runServer options", () => {
 // stubs. Bun's `mock.restore()` only undoes function spies, not module
 // mocks, so we re-`mock.module` each one back to the captured real
 // module reference.
-afterAll(() => {
+afterAll(async () => {
   globalThis.fetch = realFetch
   mock.restore()
-  void mock.module("~/lib/paths", () => realPathsModule)
-  void mock.module("~/lib/proxy", () => realProxyModule)
-  void mock.module("~/lib/secrets", () => realSecretsModule)
-  void mock.module("~/lib/utils", () => realUtilsModule)
-  void mock.module("~/lib/token", () => realTokenModule)
-  void mock.module("~/lib/github-token-store", () => realStoreModule)
-  void mock.module("~/lib/logger", () => realLoggerModule)
-  void mock.module("~/lib/opencode", () => realOpencodeModule)
-  void mock.module("srvx", () => realSrvxModule)
+  await mock.module("~/lib/paths", () => realPathsModule)
+  await mock.module("~/lib/proxy", () => realProxyModule)
+  await mock.module("~/lib/secrets", () => realSecretsModule)
+  await mock.module("~/lib/utils", () => realUtilsModule)
+  await mock.module("~/lib/token", () => realTokenModule)
+  await mock.module("~/lib/github-token-store", () => realStoreModule)
+  await mock.module("~/lib/logger", () => realLoggerModule)
+  await mock.module("~/lib/opencode", () => realOpencodeModule)
+  await mock.module("srvx", () => realSrvxModule)
 })

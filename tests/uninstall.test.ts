@@ -252,8 +252,8 @@ function makeFakeApp(opts: FakeAppOptions): ClientApp {
 describe("uninstall — enabledApps (registry-driven precondition)", () => {
   // Each test installs its own registry mock; afterAll restores the real one
   // (captured by value at module load — see `realRegistry`).
-  afterAll(() => {
-    void mock.module("~/apps/registry", () => realRegistry)
+  afterAll(async () => {
+    await mock.module("~/apps/registry", () => realRegistry)
   })
 
   it("returns only apps whose isEnabled() is true", async () => {
@@ -267,7 +267,7 @@ describe("uninstall — enabledApps (registry-driven precondition)", () => {
       name: "Claude Desktop",
       enabled: false,
     })
-    void mock.module("~/apps/registry", () => ({
+    await mock.module("~/apps/registry", () => ({
       getAllApps: () => [enabledApp, disabledApp],
     }))
     const { enabledApps } = await import("~/uninstall")
@@ -276,7 +276,7 @@ describe("uninstall — enabledApps (registry-driven precondition)", () => {
   })
 
   it("returns empty when no app is enabled", async () => {
-    void mock.module("~/apps/registry", () => ({
+    await mock.module("~/apps/registry", () => ({
       getAllApps: () => [
         makeFakeApp({ id: "claude-code", name: "Claude Code", enabled: false }),
         makeFakeApp({
@@ -291,7 +291,7 @@ describe("uninstall — enabledApps (registry-driven precondition)", () => {
   })
 
   it("filters a mix down to exactly the enabled subset", async () => {
-    void mock.module("~/apps/registry", () => ({
+    await mock.module("~/apps/registry", () => ({
       getAllApps: () => [
         makeFakeApp({ id: "claude-code", name: "Claude Code", enabled: true }),
         makeFakeApp({
@@ -311,8 +311,8 @@ describe("uninstall — enabledApps (registry-driven precondition)", () => {
 })
 
 describe("uninstall — runUninstall precondition gate (refusal path only)", () => {
-  afterAll(() => {
-    void mock.module("~/apps/registry", () => realRegistry)
+  afterAll(async () => {
+    await mock.module("~/apps/registry", () => realRegistry)
   })
 
   it("throws (refuses) when ≥1 app is enabled and force=false, naming the apps", async () => {
@@ -321,7 +321,7 @@ describe("uninstall — runUninstall precondition gate (refusal path only)", () 
     const disableSpy = mock(() => {
       throw new Error("disable() must not run on the refusal path")
     })
-    void mock.module("~/apps/registry", () => ({
+    await mock.module("~/apps/registry", () => ({
       getAllApps: () => [
         makeFakeApp({
           id: "claude-code",
@@ -410,7 +410,7 @@ describe("uninstall — runUninstall precondition gate (refusal path only)", () 
       neutralizeDestructiveSteps()
       const disable = mock(() => Promise.resolve({ success: true }))
       const uninstall = mock(() => Promise.resolve({ reverted: [] }))
-      void mock.module("~/apps/registry", () => ({
+      await mock.module("~/apps/registry", () => ({
         getAllApps: () => [
           makeFakeApp({
             id: "claude-code",
@@ -440,7 +440,7 @@ describe("uninstall — runUninstall precondition gate (refusal path only)", () 
       neutralizeDestructiveSteps()
       const disable = mock(() => Promise.resolve({ success: true }))
       const uninstall = mock(() => Promise.resolve({ reverted: [] }))
-      void mock.module("~/apps/registry", () => ({
+      await mock.module("~/apps/registry", () => ({
         getAllApps: () => [
           makeFakeApp({
             id: "claude-code",
@@ -469,8 +469,8 @@ describe("uninstall — runUninstall precondition gate (refusal path only)", () 
 })
 
 describe("uninstall — revertAppIntegrations (registry sweep)", () => {
-  afterAll(() => {
-    void mock.module("~/apps/registry", () => realRegistry)
+  afterAll(async () => {
+    await mock.module("~/apps/registry", () => realRegistry)
   })
 
   it("disables every still-enabled app and uninstalls every registered app, surfacing reverted lines", async () => {
@@ -496,7 +496,7 @@ describe("uninstall — revertAppIntegrations (registry sweep)", () => {
       uninstall: uninstallB,
     })
 
-    void mock.module("~/apps/registry", () => ({
+    await mock.module("~/apps/registry", () => ({
       getAllApps: () => [appA, appB],
     }))
     const { revertAppIntegrations } = await import("~/uninstall")
@@ -532,7 +532,7 @@ describe("uninstall — revertAppIntegrations (registry sweep)", () => {
       uninstall: uninstallB,
     })
 
-    void mock.module("~/apps/registry", () => ({
+    await mock.module("~/apps/registry", () => ({
       getAllApps: () => [appA, appB],
     }))
     const { revertAppIntegrations } = await import("~/uninstall")
@@ -566,7 +566,7 @@ describe("uninstall — revertAppIntegrations (registry sweep)", () => {
       uninstall: goodUninstall,
     })
 
-    void mock.module("~/apps/registry", () => ({
+    await mock.module("~/apps/registry", () => ({
       getAllApps: () => [appA, appB],
     }))
     const { revertAppIntegrations } = await import("~/uninstall")
@@ -596,7 +596,7 @@ describe("uninstall — revertAppIntegrations (registry sweep)", () => {
     // at our temp home so the call is observable via the stripped block.
     const homedirSpy = spyOn(os, "homedir").mockReturnValue(fakeHome)
     try {
-      void mock.module("~/apps/registry", () => ({
+      await mock.module("~/apps/registry", () => ({
         getAllApps: () => [
           makeFakeApp({
             id: "claude-code",

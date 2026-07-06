@@ -40,7 +40,7 @@ let installsFixture: Array<ClaudeInstall> = []
 
 const actualDetect = await import("~/apps/claude-code/detect")
 const realDetect = actualDetect.detectClaudeInstalls
-void mock.module("~/apps/claude-code/detect", () => ({
+await mock.module("~/apps/claude-code/detect", () => ({
   ...actualDetect,
   detectClaudeInstalls: (options?: Record<string, unknown>) =>
     options && Object.keys(options).length > 0 ?
@@ -57,7 +57,7 @@ const realCcRead = actualCcSettings.readClaudeCodeSettings
 // We deliberately do NOT override getClaudeCodeSettingsPath — the route
 // never calls it (it passes the path explicitly via these wrappers), and
 // overriding it would bleed into the writer's own path-resolution tests.
-void mock.module("~/apps/claude-code/config", () => ({
+await mock.module("~/apps/claude-code/config", () => ({
   ...actualCcSettings,
   applyProxyBaseUrl: (filePath: string = ROUTE_CC_SETTINGS) =>
     realCcApply(filePath),
@@ -78,7 +78,7 @@ const realGetDir = actualDesktop.getClaude3pDir
 // home) so this mock stays behaviorally identical to the real module.
 // Bun's `mock.module` persists forward across files in a run, so a wrapper
 // that dropped later args would corrupt sibling tests that pass them.
-void mock.module("~/apps/claude-desktop/config", () => ({
+await mock.module("~/apps/claude-desktop/config", () => ({
   ...actualDesktop,
   applyConfigLibraryProfile: (
     home: string = ROUTE_3P_HOME,
@@ -123,9 +123,15 @@ beforeEach(() => {
   cleanTmp()
 })
 
-afterAll(() => {
-  // Leave a clean slate so later files in the shared worker start empty.
+afterAll(async () => {
+  // Leave a clean slate so later files in the shared worker start empty, and
+  // restore the mocked app modules so their tmp-path wrappers can't leak
+  // forward (Bun keeps module mocks for the whole process; awaited so the
+  // restore lands before the next file's static imports resolve).
   writeConfig({})
+  await mock.module("~/apps/claude-code/detect", () => actualDetect)
+  await mock.module("~/apps/claude-code/config", () => actualCcSettings)
+  await mock.module("~/apps/claude-desktop/config", () => actualDesktop)
   fs.rmSync(ROUTE_3P_HOME, { recursive: true, force: true })
   fs.rmSync(path.dirname(ROUTE_CC_SETTINGS), { recursive: true, force: true })
 })

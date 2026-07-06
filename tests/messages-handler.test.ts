@@ -8,6 +8,7 @@ const actualConfigModule = await import("../src/lib/config")
 const actualModelsModule = await import("../src/lib/models")
 const actualRateLimitModule = await import("../src/lib/rate-limit")
 const actualUtilsModule = await import("../src/lib/utils")
+const actualApiFlowsModule = await import("../src/routes/messages/api-flows")
 
 const state = {
   ...actualStateModule.state,
@@ -323,11 +324,15 @@ describe("messages handler orchestration", () => {
 })
 
 // Restore real modules so their mocks don't bleed into other test files
-// that share this Bun worker (e.g. find-endpoint-model.test.ts).
-afterAll(() => {
-  void mock.module("~/lib/state", () => actualStateModule)
-  void mock.module("~/lib/models", () => actualModelsModule)
-  void mock.module("~/lib/rate-limit", () => actualRateLimitModule)
-  void mock.module("~/lib/config", () => actualConfigModule)
-  void mock.module("~/lib/utils", () => actualUtilsModule)
+// that share this Bun worker (e.g. find-endpoint-model.test.ts). Awaited so
+// the restore actually lands before a later file's static imports resolve
+// (Bun keeps module mocks for the whole process; an unawaited restore never
+// lands).
+afterAll(async () => {
+  await mock.module("~/lib/state", () => actualStateModule)
+  await mock.module("~/lib/models", () => actualModelsModule)
+  await mock.module("~/lib/rate-limit", () => actualRateLimitModule)
+  await mock.module("~/lib/config", () => actualConfigModule)
+  await mock.module("~/lib/utils", () => actualUtilsModule)
+  await mock.module("~/routes/messages/api-flows", () => actualApiFlowsModule)
 })
