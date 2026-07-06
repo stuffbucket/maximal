@@ -9,20 +9,25 @@ import type {
 export class FakeExecutor implements Executor {
   searchCalls: Array<string> = []
   fetchCalls: Array<string> = []
+  /** When set, `search`/`fetch` wait this long before resolving. Lets tests
+   *  hold the tool-execution gap open to observe keepalive pings. */
+  delayMs = 0
 
-  search(query: string): Promise<SearchResult> {
+  async search(query: string): Promise<SearchResult> {
     this.searchCalls.push(query)
-    return Promise.resolve({
+    if (this.delayMs > 0) await new Promise((r) => setTimeout(r, this.delayMs))
+    return {
       ok: true,
       items: [
         { url: "https://example.com/a", title: "A", page_age: null },
         { url: "https://example.com/b", title: "B", page_age: null },
       ],
-    })
+    }
   }
 
-  fetch(url: string): Promise<FetchResult> {
+  async fetch(url: string): Promise<FetchResult> {
     this.fetchCalls.push(url)
-    return Promise.resolve({ ok: true, markdown: `body of ${url}` })
+    if (this.delayMs > 0) await new Promise((r) => setTimeout(r, this.delayMs))
+    return { ok: true, markdown: `body of ${url}` }
   }
 }
