@@ -3,7 +3,10 @@ import type { Context } from "hono"
 import consola from "consola"
 
 import { reverseId } from "~/lib/anthropic-id-rewrite"
-import { type AnthropicMessagesPayload } from "~/lib/anthropic-types"
+import {
+  type AnthropicMessagesPayload,
+  ANTHROPIC_API_VERSION,
+} from "~/lib/anthropic-types"
 import { getAnthropicApiKey, getClaudeTokenMultiplier } from "~/lib/config"
 import { sendRequest } from "~/lib/send-request"
 import { getTokenCount } from "~/lib/tokenizer"
@@ -35,7 +38,7 @@ async function countTokensViaAnthropic(
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "anthropic-version": "2023-06-01",
+        "anthropic-version": ANTHROPIC_API_VERSION,
         "anthropic-beta": "token-counting-2024-11-01",
       },
       body: JSON.stringify({ ...payload, model }),

@@ -27,6 +27,7 @@ import { defineCommand } from "citty"
 import consola from "consola"
 
 import { runDebug } from "./debug"
+import { ANTHROPIC_API_VERSION } from "./lib/anthropic-types"
 import { ensurePaths } from "./lib/paths"
 import { state } from "./lib/state"
 import { setupGitHubToken } from "./lib/token"
@@ -111,7 +112,7 @@ async function smokeTest(port: number): Promise<boolean> {
       headers: {
         "Content-Type": "application/json",
         "x-api-key": "anything",
-        "anthropic-version": "2023-06-01",
+        "anthropic-version": ANTHROPIC_API_VERSION,
       },
       body: JSON.stringify({
         model: "claude-haiku-4.5",
