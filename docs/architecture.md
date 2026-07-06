@@ -63,13 +63,27 @@ See also: `docs/codegen-feedback-loops-practices.md` → Dispatch and review loo
 
 ## Testing gotchas
 
-- **`mock.module` persists forward across files in a run.** Bun does not
-  reset module mocks between test files, and CI orders files differently
-  than local. A mock wrapper that drops arguments (e.g. forwards only the
-  first param) will corrupt a *sibling* file's tests that pass the dropped
-  args — and it'll pass locally but fail in CI. Make wrappers behaviorally
-  identical to the real module (forward `...rest`), or prefer injectable
-  function options over `mock.module`. This bit us twice on the apps work.
+- **`mock.module` persists forward across files in a run — now lint-enforced.**
+  Bun does not reset module mocks between test files, and CI orders files
+  differently than local, so an unrestored mock leaks its stub into a
+  *sibling* file that then reads stale state — the classic "green locally,
+  red on CI" (or vice-versa) failure. This bit us **four times** (the last
+  cost a long #229 debugging loop), so an ESLint rule (`mockModuleLeakGuard`
+  in `eslint.config.js`, scoped to `tests/**`) now **bans the fire-and-forget
+  forms**: `void mock.module(...)` and a bare `mock.module(...)` expression
+  statement both error.
+  - **Awaited is *not* automatically safe.** `await mock.module(...)` passes
+    the lint rule, but an awaited `afterAll` *restore* does **not** reliably
+    land before the next file's static imports on CI — so a module mock that
+    intercepts a *shared* module still leaks across files even when restored.
+    The rule catches the common footgun, not this one.
+  - **The durable fix is to not mock a shared module across files at all.**
+    Prefer the **real** module (the test preload redirects `COPILOT_API_HOME`
+    to a temp dir, and `getClaudeCodeSettingsPath()` honors `CLAUDE_CONFIG_DIR`
+    — so config/settings round-trips are already isolated), or **injectable
+    function options**. Only stub a module with no env/injection seam, keep the
+    wrapper behaviorally identical (spread `...actual`, forward `...rest`), and
+    prove via a sequential-import repro that it can't break a later file.
 - **Green tests can still test nothing.** Mutation testing (`bun run mutate`)
   caught classification tests that passed without exercising the branch
   they claimed to cover (the fixture hit a different code path that
