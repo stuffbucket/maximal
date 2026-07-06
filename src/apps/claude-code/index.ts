@@ -13,6 +13,7 @@ import { detectClaudeInstalls } from "./detect"
 import {
   reconcileClaudeCodeOnBoot,
   reconcileClaudeCodeOnShutdown,
+  setClaudeCodeRoutingIntent,
 } from "./reconcile"
 
 const CLAUDE_CODE_INSTALL_COMMAND =
@@ -59,6 +60,10 @@ export const claudeCodeApp: ClientApp = {
       ) ?
         result.skippedReason
       : null
+    // Persist the durable routing intent so boot/shutdown self-heal runs for
+    // ALL callers (CLI + Settings UI), not just the HTTP path. Single writer:
+    // the Settings route no longer persists this separately.
+    setClaudeCodeRoutingIntent(true)
     return Promise.resolve({
       success: result.wrote || conflict === null,
       conflict,
@@ -67,6 +72,7 @@ export const claudeCodeApp: ClientApp = {
 
   disable() {
     const result = revertProxyBaseUrl()
+    setClaudeCodeRoutingIntent(false)
     return Promise.resolve({ success: result.wrote })
   },
 
