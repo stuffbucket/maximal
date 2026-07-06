@@ -7,6 +7,7 @@ import os from "node:os"
 import path from "node:path"
 
 import { apiKeyHelperCommand, isOwnedApiKeyHelper } from "~/lib/api-key-helper"
+import { atomicWriteJson } from "~/lib/atomic-json"
 
 /** The label Claude Code attributes its key under (Settings → API clients).
  *  Single-sourced: it is both the `api <client>` token written on disk (via
@@ -224,39 +225,7 @@ export function writeClaudeCodeSettings(
   filePath: string,
   settings: Record<string, unknown>,
 ): void {
-  const dir = path.dirname(filePath)
-  fs.mkdirSync(dir, { recursive: true })
-  const tmp = `${filePath}.tmp`
-  const json = `${JSON.stringify(settings, null, 2)}\n`
-  try {
-    fs.unlinkSync(tmp)
-  } catch (err: unknown) {
-    if (!(err instanceof Error) || !("code" in err) || err.code !== "ENOENT") {
-      throw err
-    }
-  }
-  let fd: number
-  try {
-    fd = fs.openSync(
-      tmp,
-      fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL,
-      0o600,
-    )
-  } catch (err: unknown) {
-    if (err instanceof Error && "code" in err && err.code === "EEXIST") {
-      throw new Error(
-        `refusing to write Claude Code settings: ${tmp} already exists (possible symlink attack); remove it and retry`,
-      )
-    }
-    throw err
-  }
-  try {
-    fs.writeFileSync(fd, json)
-    fs.fsyncSync(fd)
-  } finally {
-    fs.closeSync(fd)
-  }
-  fs.renameSync(tmp, filePath)
+  atomicWriteJson(filePath, settings, { label: "Claude Code settings" })
 }
 
 export type SkipReason =
