@@ -8,6 +8,8 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
+import { atomicWriteJson as atomicWriteJsonShared } from "~/lib/atomic-json"
+
 const USERDATA_3P_SUFFIX = "-3p"
 
 export const CLAUDE_3P_PREF_DOMAIN = "com.anthropic.claudefordesktop"
@@ -116,28 +118,12 @@ function readJsonObject(file: string): Record<string, unknown> | null {
   }
 }
 
+/** Thin wrapper over the shared guarded writer so call sites stay terse and
+ *  every Claude Desktop write refuses to follow a pre-planted `<file>.tmp`
+ *  symlink (EEXIST → clear error) — the guard that only Claude Code had
+ *  before #231. */
 function atomicWriteJson(file: string, value: unknown): void {
-  fs.mkdirSync(path.dirname(file), { recursive: true })
-  const tmp = `${file}.tmp`
-  try {
-    fs.unlinkSync(tmp)
-  } catch (err: unknown) {
-    if (!(err instanceof Error) || !("code" in err) || err.code !== "ENOENT") {
-      throw err
-    }
-  }
-  const fd = fs.openSync(
-    tmp,
-    fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL,
-    0o600,
-  )
-  try {
-    fs.writeFileSync(fd, `${JSON.stringify(value, null, 2)}\n`)
-    fs.fsyncSync(fd)
-  } finally {
-    fs.closeSync(fd)
-  }
-  fs.renameSync(tmp, file)
+  atomicWriteJsonShared(file, value, { label: "Claude Desktop config" })
 }
 
 export interface ApplyConfigLibraryResult {
