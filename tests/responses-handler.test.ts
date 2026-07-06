@@ -9,20 +9,7 @@ import {
 } from "bun:test"
 import { Hono } from "hono"
 
-const actualConfigModule = await import("../src/lib/config")
-const actualRateLimitModule = await import("../src/lib/rate-limit")
-
 const createResponses = mock(() => Promise.resolve(streamChunks([])))
-
-await mock.module("~/lib/config", () => ({
-  ...actualConfigModule,
-  getConfig: () => ({ useFunctionApplyPatch: true }),
-  isResponsesApiWebSearchEnabled: () => true,
-}))
-await mock.module("~/lib/rate-limit", () => ({
-  ...actualRateLimitModule,
-  checkRateLimit: async () => {},
-}))
 
 const { state } = await import("../src/lib/state")
 const { closeUsageStore } = await import("../src/lib/token-usage")
@@ -200,15 +187,12 @@ describe("responses handler token usage", () => {
 })
 
 afterAll(() => {
-  // Restore real modules so later test files in the same Bun process
-  // don't see this file's `getConfig` stub (which lacks
-  // `modelReasoningEfforts` and silently flips xhigh→high in
-  // tests/messages-preprocess.test.ts).
-  void mock.module("~/lib/config", () => actualConfigModule)
-  void mock.module("~/lib/rate-limit", () => actualRateLimitModule)
   // Release the DI shim for createResponses so the real function is
-  // restored in the handler module (no process-wide mock.module
-  // pollution to clean up here — see comment above the
-  // __setCreateResponsesForTests call at the top of this file).
+  // restored in the handler module. This file uses NO process-wide
+  // `mock.module` on `~/lib/config` or `~/lib/rate-limit` — see the
+  // header comment at the createResponses DI shim for why. The real
+  // config module is used directly (test isolation via the temp
+  // COPILOT_API_HOME preload), and rate limiting is inert because
+  // `beforeEach` leaves `state.rateLimitSeconds` undefined.
   __resetCreateResponsesForTests()
 })
