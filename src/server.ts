@@ -22,7 +22,6 @@ import { responsesRoutes } from "./routes/responses/route"
 import { settingsApiRoutes } from "./routes/settings/api"
 import { setupStatusRoute } from "./routes/setup-status"
 import { tokenUsageRoute } from "./routes/token-usage/route"
-import { tokenRoute } from "./routes/token/route"
 import { uiRoutes } from "./routes/ui/route"
 import { usageRoute } from "./routes/usage/route"
 
@@ -152,7 +151,6 @@ server.route("/models", modelRoutes)
 server.route("/embeddings", embeddingRoutes)
 server.route("/usage", usageRoute)
 server.route("/token-usage", tokenUsageRoute)
-server.route("/token", tokenRoute)
 server.route("/responses", responsesRoutes)
 
 // Compatibility with tools that expect v1/ prefix
