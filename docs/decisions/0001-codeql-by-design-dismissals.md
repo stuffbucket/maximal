@@ -147,7 +147,14 @@ Least-privilege routing (each credential reaches exactly one host; no
 host receives two credentials) was already true and is preserved — the
 mechanism centralizes it rather than changing it.
 
-Out of scope / follow-ups: the authenticated `/token` endpoint
-(`routes/token/route.ts`) still returns the Copilot token to the shell by
-design (it is behind API-key auth, not unauthenticated); the web-tools
-executor's sandbox credential is not yet a `Credential` domain.
+Out of scope / follow-ups: the web-tools executor's sandbox credential
+is not yet a `Credential` domain.
+
+Update (defect #230): the `GET /token` endpoint (`routes/token/route.ts`)
+that returned the raw Copilot token has been DELETED. The claim that it
+"returns the Copilot token to the shell by design" was unsupported by
+code — no shell code path ever fetched it (the shell reads `/token-usage`
+and authenticates with its own key), and it was inherited verbatim from
+the vendored upstream fork. Serving the raw upstream secret was
+inconsistent with every other token-adjacent read in the repo
+(presence-only booleans), so the route was removed rather than gated.
