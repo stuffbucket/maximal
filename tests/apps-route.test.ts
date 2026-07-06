@@ -1,19 +1,24 @@
 /**
  * /settings/api/apps — route-level coverage.
  *
- * Mocking strategy (Bun's `mock.module` persists forward across files in
- * the run, so every override here is a *delegating wrapper* that only
- * changes default arguments — sibling tests that pass explicit args are
- * unaffected):
+ * Config comes from the REAL `~/lib/config`, which the global preload
+ * (tests/test-setup.ts) has already redirected to a throwaway
+ * COPILOT_API_HOME temp dir — so getConfig/writeConfig round-trip through a
+ * temp `config.json`, never the user's real config. We deliberately do NOT
+ * `mock.module("~/lib/config", …)`: Bun shares module mocks across the whole
+ * `bun test` process and never resets them between files, so an unrestored
+ * fake getConfig/writeConfig leaked FORWARD and broke
+ * tests/claude-code-cli-enable-persist.test.ts on CI.
  *
- *   - `~/lib/config`: in-memory getConfig/writeConfig, reset per test
- *     and cleared in afterAll so later files see an empty config.
- *   - `~/lib/claude-cli-detect`: `detectClaudeInstalls()` with no args
+ * The remaining mocks below are delegating wrappers that only default the
+ * first arg to a tmp path (behaviorally identical to the real module, and
+ * Bun's forward-persisting `mock.module` therefore stays harmless):
+ *   - `~/apps/claude-code/detect`: `detectClaudeInstalls()` with no args
  *     returns a controllable fixture (the route always calls it with no
  *     args). Explicit-arg calls delegate to the real implementation.
- *   - `~/lib/claude-code-settings`: file-path defaults point at a tmp
+ *   - `~/apps/claude-code/config`: file-path defaults point at a tmp
  *     settings.json instead of the user's real ~/.claude/settings.json.
- *   - `~/lib/claude-desktop-3p-config`: `home` defaults point at a tmp
+ *   - `~/apps/claude-desktop/config`: `home` defaults point at a tmp
  *     home dir instead of the user's real Claude-3p userData dir.
  */
 
@@ -24,7 +29,6 @@ import os from "node:os"
 import path from "node:path"
 
 import type { ClaudeInstall } from "~/apps/claude-code/detect"
-import type { AppConfig } from "~/lib/config"
 
 const ROUTE_3P_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "apps-route-3p-"))
 const ROUTE_CC_SETTINGS = path.join(
@@ -32,18 +36,7 @@ const ROUTE_CC_SETTINGS = path.join(
   "settings.json",
 )
 
-let fakeConfig: AppConfig = {}
 let installsFixture: Array<ClaudeInstall> = []
-
-const actualConfig = await import("~/lib/config")
-void mock.module("~/lib/config", () => ({
-  ...actualConfig,
-  getConfig: () => fakeConfig,
-  writeConfig: (next: AppConfig) => {
-    fakeConfig = next
-    return next
-  },
-}))
 
 const actualDetect = await import("~/apps/claude-code/detect")
 const realDetect = actualDetect.detectClaudeInstalls
@@ -104,7 +97,7 @@ void mock.module("~/apps/claude-desktop/config", () => ({
 }))
 
 const { appsRoutes } = await import("~/routes/settings/apps")
-const { getConfig } = await import("~/lib/config")
+const { getConfig, writeConfig } = await import("~/lib/config")
 const { isProxyBaseUrlConfigured } = await import("~/apps/claude-code/config")
 
 function buildApp() {
@@ -125,13 +118,14 @@ function cleanTmp() {
 }
 
 beforeEach(() => {
-  fakeConfig = {}
+  writeConfig({})
   installsFixture = []
   cleanTmp()
 })
 
 afterAll(() => {
-  fakeConfig = {}
+  // Leave a clean slate so later files in the shared worker start empty.
+  writeConfig({})
   fs.rmSync(ROUTE_3P_HOME, { recursive: true, force: true })
   fs.rmSync(path.dirname(ROUTE_CC_SETTINGS), { recursive: true, force: true })
 })
