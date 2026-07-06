@@ -1,5 +1,12 @@
 // Anthropic API Types
 
+/**
+ * The Anthropic API version pinned on the `anthropic-version` request header.
+ * Single-sourced here so every outbound Anthropic call (setup smoke test,
+ * count-tokens) agrees; bump in one place when Anthropic revs the wire version.
+ */
+export const ANTHROPIC_API_VERSION = "2023-06-01"
+
 export interface AnthropicMessagesPayload {
   model: string
   messages: Array<AnthropicMessage>
