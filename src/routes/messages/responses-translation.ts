@@ -84,7 +84,9 @@ export const translateAnthropicMessagesToResponsesPayload = (
     tool_choice: toolChoice,
     metadata: payload.metadata ? { ...payload.metadata } : null,
     prompt_cache_key: promptCacheKey,
-    //prompt_cache_retention: "24h",  not work in gpt-5.4
+    // prompt_cache_retention is Copilot/OpenAI-Responses-specific and is set
+    // AFTER translation in the flow handler (api-flows.ts) so this pure
+    // translator stays free of config I/O. See getPromptCacheRetention.
     stream: payload.stream ?? null,
     store: false,
     parallel_tool_calls: true,

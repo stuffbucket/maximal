@@ -98,6 +98,14 @@ export const AppConfigSchema = z
     extraPrompts: z.record(z.string(), z.string()).optional(),
     smallModel: z.string().optional(),
     responsesApiContextManagementModels: z.array(z.string()).optional(),
+    /**
+     * Copilot/OpenAI-Responses-specific: extend server-side prefix-cache
+     * retention on the `/responses` path (default TTL is ~5-10 min; "24h"
+     * keeps the cached prefix alive across long pauses, cutting cost + TTFT
+     * on repeat requests). UNSET by default — some model/endpoint combos have
+     * historically rejected the param, so it is opt-in. See getPromptCacheRetention.
+     */
+    promptCacheRetention: z.enum(["in_memory", "24h"]).optional(),
     modelReasoningEfforts: z
       .record(z.string(), ReasoningEffortSchema)
       .optional(),

@@ -4,7 +4,11 @@ import { streamSSE } from "hono/streaming"
 
 import { reverseId } from "~/lib/anthropic-id-rewrite"
 import { awaitApproval } from "~/lib/approval"
-import { getConfig, isResponsesApiWebSearchEnabled } from "~/lib/config"
+import {
+  getConfig,
+  getPromptCacheRetention,
+  isResponsesApiWebSearchEnabled,
+} from "~/lib/config"
 import { createHandlerLogger, debugJson, debugJsonTail } from "~/lib/logger"
 import { checkRateLimit } from "~/lib/rate-limit"
 import { state } from "~/lib/state"
@@ -104,6 +108,14 @@ export const handleResponses = async (c: Context) => {
     payload,
     selectedModel?.capabilities.limits.max_prompt_tokens,
   )
+
+  // Copilot/OpenAI-Responses-specific prefix-cache retention. On this native
+  // passthrough path we only fill it in when the client didn't set one — never
+  // override an explicit client value. Opt-in via config; omitted otherwise.
+  const promptCacheRetention = getPromptCacheRetention()
+  if (promptCacheRetention && !payload.prompt_cache_retention) {
+    payload.prompt_cache_retention = promptCacheRetention
+  }
 
   debugJson(logger, "Translated Responses payload:", payload)
 

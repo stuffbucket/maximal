@@ -12,6 +12,7 @@ import {
   type AnthropicStreamEventData,
   type AnthropicStreamState,
 } from "~/lib/anthropic-types"
+import { getPromptCacheRetention } from "~/lib/config"
 import { debugJson, debugJsonTail, debugLazy } from "~/lib/logger"
 import {
   createCopilotTokenUsageRecorder,
@@ -175,6 +176,16 @@ export const handleWithResponsesApi = async (
     responsesPayload,
     selectedModel?.capabilities.limits.max_prompt_tokens,
   )
+
+  // Copilot/OpenAI-Responses-specific prefix-cache retention. Opt-in via
+  // config; omitted otherwise so behavior is unchanged. Set on the built
+  // payload here (not in the pure translator). A future non-Copilot provider
+  // path won't use this. Safe to enable: create-responses.ts strips + retries
+  // once if a specific endpoint 400s on the param.
+  const promptCacheRetention = getPromptCacheRetention()
+  if (promptCacheRetention) {
+    responsesPayload.prompt_cache_retention = promptCacheRetention
+  }
 
   compactInputByLatestCompaction(responsesPayload)
 
