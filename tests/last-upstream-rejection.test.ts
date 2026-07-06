@@ -190,7 +190,7 @@ const realGetUserModule = await import("~/services/github/get-user")
 const realTokenModule = await import("~/lib/token")
 const realFsPromisesModule = await import("node:fs/promises")
 
-void mock.module("~/services/github/get-device-code", () => ({
+await mock.module("~/services/github/get-device-code", () => ({
   getDeviceCode: () =>
     Promise.resolve({
       device_code: "device-xyz",
@@ -201,15 +201,15 @@ void mock.module("~/services/github/get-device-code", () => ({
     }),
 }))
 
-void mock.module("~/services/github/get-user", () => ({
+await mock.module("~/services/github/get-user", () => ({
   getGitHubUser: () => Promise.resolve({ login: "octocat" }),
 }))
 
-void mock.module("~/lib/token", () => ({
+await mock.module("~/lib/token", () => ({
   setupCopilotToken: () => Promise.resolve(),
 }))
 
-void mock.module("node:fs/promises", () => ({
+await mock.module("node:fs/promises", () => ({
   ...realFsPromisesModule,
   default: {
     ...(realFsPromisesModule as { default: object }).default,
@@ -218,14 +218,14 @@ void mock.module("node:fs/promises", () => ({
   unlink: () => Promise.resolve(),
 }))
 
-afterAll(() => {
-  void mock.module(
+afterAll(async () => {
+  await mock.module(
     "~/services/github/get-device-code",
     () => realGetDeviceCodeModule,
   )
-  void mock.module("~/services/github/get-user", () => realGetUserModule)
-  void mock.module("~/lib/token", () => realTokenModule)
-  void mock.module("node:fs/promises", () => realFsPromisesModule)
+  await mock.module("~/services/github/get-user", () => realGetUserModule)
+  await mock.module("~/lib/token", () => realTokenModule)
+  await mock.module("node:fs/promises", () => realFsPromisesModule)
 })
 
 const { getAuthStatus, signOut, markSignedIn, __resetAuthControllerForTests } =

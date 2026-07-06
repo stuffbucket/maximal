@@ -9,17 +9,23 @@
  * mocked, so this file can't bleed into siblings.
  */
 
-import { beforeEach, describe, expect, mock, test } from "bun:test"
+import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test"
 import { Hono } from "hono"
 
 import type { Model, ModelsResponse } from "~/services/copilot/get-models"
 
 const actualGetModels = await import("~/services/copilot/get-models")
 let getModelsFixture: ModelsResponse = { object: "list", data: [] }
-void mock.module("~/services/copilot/get-models", () => ({
+await mock.module("~/services/copilot/get-models", () => ({
   ...actualGetModels,
   getModels: () => Promise.resolve(getModelsFixture),
 }))
+// Restore the real module so this stub can't leak forward into a sibling
+// test file (Bun keeps module mocks for the whole process). Awaited so the
+// restore actually lands before the next file's static imports resolve.
+afterAll(async () => {
+  await mock.module("~/services/copilot/get-models", () => actualGetModels)
+})
 
 const { modelsRoutes } = await import("~/routes/settings/models")
 const { setModels } = await import("~/lib/state")

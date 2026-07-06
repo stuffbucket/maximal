@@ -27,7 +27,7 @@ import { Hono } from "hono"
 const realGetDeviceCodeModule =
   await import("~/services/github/get-device-code")
 
-void mock.module("~/services/github/get-device-code", () => ({
+await mock.module("~/services/github/get-device-code", () => ({
   getDeviceCode: () =>
     Promise.resolve({
       device_code: "device-xyz",
@@ -262,8 +262,8 @@ describe("/settings/api/auth/github — cancel keeps you signed in", () => {
   })
 })
 
-afterAll(() => {
-  void mock.module(
+afterAll(async () => {
+  await mock.module(
     "~/services/github/get-device-code",
     () => realGetDeviceCodeModule,
   )

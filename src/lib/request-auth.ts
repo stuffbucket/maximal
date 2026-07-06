@@ -3,7 +3,7 @@ import type { Context, MiddlewareHandler } from "hono"
 import consola from "consola"
 
 import { recordClient } from "./active-clients"
-import { getConfig } from "./config"
+import { getConfig, type AppConfig } from "./config"
 import { state } from "./state"
 
 interface AuthMiddlewareOptions {
@@ -89,8 +89,9 @@ export function normalizeApiKeys(apiKeys: unknown): Array<string> {
   return [...new Set(normalizedKeys)]
 }
 
-export function getConfiguredApiKeys(): Array<string> {
-  const config = getConfig()
+export function getConfiguredApiKeys(
+  config: AppConfig = getConfig(),
+): Array<string> {
   const legacy = normalizeApiKeys(config.auth?.apiKeys)
   const entries = config.auth?.apiKeyEntries ?? []
   const fromEntries = entries

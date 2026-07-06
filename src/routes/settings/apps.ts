@@ -45,21 +45,7 @@ function jsonApp(c: Context, app: AppEntryT) {
   return c.json(parsed.data)
 }
 
-/** Merge an `apps.claudeCode` patch into config and persist. */
-function persistClaudeCode(patch: { enabled?: boolean }): void {
-  const config: AppConfig = getConfig()
-  writeConfig({
-    ...config,
-    apps: {
-      ...config.apps,
-      claudeCode: {
-        ...config.apps?.claudeCode,
-        ...patch,
-      },
-    },
-  })
-}
-
+/** Merge an `apps.claudeDesktop` patch into config and persist. */
 function persistClaudeDesktop(enabled: boolean): void {
   const config: AppConfig = getConfig()
   writeConfig({
@@ -124,12 +110,12 @@ appsRoutes.post("/claude-code/toggle", async (c) => {
       }
       const result = await app.enable()
       const conflict = result.conflict || null
-      persistClaudeCode({ enabled: true })
+      // `app.enable()` is the single owner of the claude-code routing intent
+      // (persists config.apps.claudeCode.enabled itself) — no separate persist.
       return jsonApp(c, await app.getDetails(conflict))
     }
 
     await app.disable()
-    persistClaudeCode({ enabled: false })
     return jsonApp(c, await app.getDetails())
   } catch (error) {
     return forwardError(c, error)
