@@ -30,10 +30,14 @@
 // version — never redirect a download. Do NOT wire the installer to
 // downloads.url. `notes` is a display-only link to the GitHub release.
 //
-// Fail-closed: resolveLatestRelease() throws on a real API failure, failing the
-// build and keeping the last-good manifest live rather than publishing a
-// version-less one. A genuine "no release yet" (404) emits empty channels, so
-// the client reads "unknown" / no update.
+// FALLBACK-ONLY as of #223: the primary manifest is the committed
+// site/public/updates/manifest.json (Astro serves public/** verbatim and a
+// public file wins a same-path collision, so this route is skipped when that
+// file exists — which it always does in the repo). This route now re-emits from
+// that SAME committed manifest (resolveLatestRelease reads it), so if the public
+// file were ever removed the route regenerates a byte-equivalent document. No
+// GitHub API, no GITHUB_TOKEN, no SITE_PIN. An absent channel emits empty
+// channels, so the desktop client reads "unknown" / no update.
 
 import { buildManifest } from "../../lib/updates-manifest";
 import {
@@ -43,11 +47,9 @@ import {
 
 export const prerender = true;
 
-export async function GET(): Promise<Response> {
-  const [stable, beta] = await Promise.all([
-    resolveLatestRelease(),
-    resolveLatestPrerelease(),
-  ]);
+export function GET(): Response {
+  const stable = resolveLatestRelease();
+  const beta = resolveLatestPrerelease();
 
   const manifest = buildManifest({
     stable:

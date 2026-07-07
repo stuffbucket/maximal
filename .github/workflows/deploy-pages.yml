@@ -64,27 +64,15 @@ jobs:
         working-directory: site
         run: bun install --frozen-lockfile
 
+      # Build the static site. As of issue #223 (Phase 4 of #218) the build no
+      # longer queries the GitHub releases API and has no SITE_PIN_VERSION knob:
+      # the version + download links it server-renders come from the committed
+      # static manifest (site/public/updates/manifest.json), which release.yml's
+      # `manifest` job refreshes on every publish. So there is no GITHUB_TOKEN /
+      # rate-limit exposure here, and the build is deterministic + offline. #221's
+      # runtime hydration still layers over this baked, fail-closed fallback.
       - name: Build Astro
         working-directory: site
-        env:
-          # Optional temporary pin: set the SITE_PIN_VERSION repo variable
-          # (e.g. v0.4.8) to freeze the landing page on that release's
-          # version + download links instead of tracking /releases/latest.
-          # Unset it (gh variable delete SITE_PIN_VERSION) + redeploy to
-          # resume tracking latest. Empty when the variable is absent.
-          VITE_SITE_PIN_VERSION: ${{ vars.SITE_PIN_VERSION }}
-          # Authenticate the releases/latest lookup in index.astro so a busy
-          # release day can't exhaust the anonymous 60-req/hr rate limit and
-          # silently deploy a site with no version label / download links.
-          #
-          # RETAINED ON PURPOSE (issue #222 / #218): #221 added runtime
-          # manifest hydration, but it is progressive enhancement over this
-          # build-time resolution, which is still the server-rendered
-          # fail-closed fallback for no-JS / crawlers / a failed manifest
-          # fetch. So the site never fails to advertise a version even without
-          # the removed `redeploy-site` dispatch. Retiring this build-time
-          # GitHub-API lookup (and SITE_PIN) is Phase 4 / issue #223, not here.
-          GITHUB_TOKEN: ${{ github.token }}
         run: bun run build
 
       - name: Setup Pages
