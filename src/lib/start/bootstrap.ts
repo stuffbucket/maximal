@@ -38,7 +38,12 @@ import {
 } from "~/lib/github-token-store"
 import { PATHS } from "~/lib/paths"
 import { ensureSecretsDir, loadSecretIntoEnv, SECRET_DEFS } from "~/lib/secrets"
-import { state } from "~/lib/state"
+import {
+  clearTokenTrio,
+  hasGithubToken,
+  setGithubToken,
+  state,
+} from "~/lib/state"
 import { logUser, setupCopilotToken } from "~/lib/token"
 import { cacheModels } from "~/lib/utils"
 import { getGitHubUser } from "~/services/github/get-user"
@@ -58,7 +63,7 @@ export async function bootstrapUpstream(
   }
 
   if (githubTokenOverride) {
-    state.githubToken = githubTokenOverride
+    setGithubToken(githubTokenOverride)
     consola.info("Using provided GitHub token")
   } else {
     // One-time: lift a legacy single-record token into the multi-account
@@ -81,14 +86,14 @@ export async function bootstrapUpstream(
     })
     const existing = await readDefaultRecord()
     if (existing) {
-      state.githubToken = existing.accessToken
+      setGithubToken(existing.accessToken)
       if (state.showToken) {
         consola.info("GitHub token:", existing.accessToken)
       }
     }
   }
 
-  if (state.githubToken) {
+  if (hasGithubToken()) {
     try {
       emitBootStatus("Connecting to GitHub Copilot…")
       const avatarUrl = await logUser()
@@ -110,8 +115,7 @@ export async function bootstrapUpstream(
       consola.warn(
         "Bootstrap: logUser succeeded but state.userName is empty; degrading to unauthenticated.",
       )
-      state.githubToken = undefined
-      state.copilotToken = undefined
+      clearTokenTrio({ github: true, copilot: true })
       markSignedOut()
       return
     } catch (error) {
@@ -137,7 +141,7 @@ export async function bootstrapUpstream(
       // Clear the in-memory token but keep the on-disk record for a
       // next-restart retry, and set the union explicitly (signed-out) so
       // every bootstrap exit makes its own auth-status statement.
-      state.githubToken = undefined
+      clearTokenTrio({ github: true })
       markSignedOut()
     }
   }

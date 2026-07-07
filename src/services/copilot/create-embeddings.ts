@@ -1,9 +1,9 @@
 import { copilotHeaders, copilotBaseUrl } from "~/lib/api-config"
 import { sendRequestJson } from "~/lib/send-request"
-import { state } from "~/lib/state"
+import { hasCopilotToken, state } from "~/lib/state"
 
 export const createEmbeddings = async (payload: EmbeddingRequest) => {
-  if (!state.copilotToken) throw new Error("Copilot token not found")
+  if (!hasCopilotToken()) throw new Error("Copilot token not found")
 
   // Deliberately unbounded (no timeoutMs): large input arrays can run long,
   // and this is not on the cold-boot critical path the timeout doc guards.

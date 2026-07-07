@@ -24,7 +24,7 @@ import {
 } from "./github-token-store"
 import { createTeeLogger } from "./logger"
 import { isHeadless, openUrl } from "./open-url"
-import { setCopilotToken, state } from "./state"
+import { setCopilotToken, setGithubToken, setUserName, state } from "./state"
 
 // Token/auth events tee to the console AND a dated `auth-*.log` (the same file
 // auth-controller writes to) so the device-code flow, Copilot mint, and refresh
@@ -355,7 +355,7 @@ export async function setupGitHubToken(
     const existing = await readDefaultRecord()
 
     if (existing && !options?.force) {
-      state.githubToken = existing.accessToken
+      setGithubToken(existing.accessToken)
       if (state.showToken) {
         // console-only: a raw token must never reach the auth-*.log file sink.
         consola.info("GitHub token:", existing.accessToken)
@@ -371,7 +371,7 @@ export async function setupGitHubToken(
     presentDeviceCode(response, options)
 
     const token = await pollAccessToken(response)
-    state.githubToken = token
+    setGithubToken(token)
 
     if (state.showToken) {
       // console-only: a raw token must never reach the auth-*.log file sink.
@@ -386,8 +386,7 @@ export async function setupGitHubToken(
       const user = await getGitHubUser(token)
       login = user.login
       // Single-flight CLI auth; `user` is freshly awaited, no interleaving.
-      // eslint-disable-next-line require-atomic-updates
-      state.userName = user.login
+      setUserName(user.login)
     } catch (error) {
       log.warn(
         "Couldn't fetch GitHub user; saving the account as 'unknown'.",
@@ -416,7 +415,7 @@ export async function setupGitHubToken(
 
 export async function logUser(): Promise<string | undefined> {
   const user = await getGitHubUser()
-  state.userName = user.login
+  setUserName(user.login)
   log.info(`Logged in as ${user.login}`)
   // Host discovery is NOT done here. The completion host comes solely from
   // setupCopilotToken's /copilot_internal/v2/token mint (the authoritative

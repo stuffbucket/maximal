@@ -26,7 +26,7 @@
  */
 
 import { BUILD_VERSION } from "./build-info"
-import { state } from "./state"
+import { hasCopilotToken, hasGithubToken, modelsCached, state } from "./state"
 
 /** Health of the GitHub Copilot auth + upstream subsystem. */
 export interface CopilotSubsystemStatus {
@@ -71,8 +71,8 @@ export interface StatusResponse {
  * @param startMs - server start timestamp, for the uptime field.
  */
 export function buildStatus(startMs: number): StatusResponse {
-  const authenticated = state.githubToken !== undefined
-  const ready = authenticated && state.copilotToken !== undefined
+  const authenticated = hasGithubToken()
+  const ready = authenticated && hasCopilotToken()
 
   return {
     service: "maximal",
@@ -86,7 +86,7 @@ export function buildStatus(startMs: number): StatusResponse {
         account_type: state.accountType,
       },
       models: {
-        cached: state.models?.data.length ?? 0,
+        cached: modelsCached(),
       },
     },
   }

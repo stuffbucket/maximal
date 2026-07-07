@@ -11,7 +11,7 @@ import { Hono } from "hono"
 
 import { allCacheMetrics } from "~/lib/cache"
 import { getConfig } from "~/lib/config"
-import { state } from "~/lib/state"
+import { modelsCached, state, tokenPresence } from "~/lib/state"
 import { getGitVersion } from "~/lib/version"
 
 import {
@@ -36,6 +36,8 @@ debugRoutes.get("/state", (c) => {
     config = {}
   }
 
+  const models = modelsCached()
+  const tokens = tokenPresence()
   return c.json({
     git: getGitVersion(),
     runtime: {
@@ -44,10 +46,10 @@ debugRoutes.get("/state", (c) => {
       manual_approve: state.manualApprove,
       rate_limit_seconds: state.rateLimitSeconds ?? null,
       rate_limit_wait: state.rateLimitWait,
-      models_loaded: (state.models?.data.length ?? 0) > 0,
-      models_count: state.models?.data.length ?? 0,
-      copilot_token_present: state.copilotToken !== undefined,
-      github_token_present: state.githubToken !== undefined,
+      models_loaded: models > 0,
+      models_count: models,
+      copilot_token_present: tokens.copilot,
+      github_token_present: tokens.github,
     },
     config: summarizeConfig(config),
     executor: describeExecutor(),
