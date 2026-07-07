@@ -90,3 +90,42 @@ describe("prepareMessagesApiPayload — adaptive-thinking guard and display gate
     })
   })
 })
+
+// Ordering pins for the named pass pipeline (#234). prepareMessagesApiPayload is
+// composed of an explicit ordered pass list; the load-bearing contract is that
+// the adaptive-thinking pass runs LAST and reads the client's ORIGINAL thinking
+// intent (the #210 home). These tests pin that a single call applies the whole
+// pipeline in one pass — sampling strip AND thinking-intent honoring both hold —
+// so a reorder that split the intent-read from the overwrite would regress here.
+describe("prepareMessagesApiPayload — pass pipeline ordering (#234)", () => {
+  test("honors client-disabled thinking AND strips sampling params in one pass", () => {
+    // `thinking.type: "disabled"` is read by the adaptive pass BEFORE it would
+    // overwrite payload.thinking; if that read were ordered after an overwrite,
+    // the disable intent would be lost and adaptive thinking wrongly enabled.
+    const payload = run(
+      {
+        thinking: { type: "disabled" },
+        temperature: 1,
+        top_p: 0.95,
+      },
+      adaptiveModel(),
+    )
+    // Adaptive rewrite suppressed: client explicitly disabled thinking.
+    expect(payload.thinking).toEqual({ type: "disabled" })
+    expect(payload.output_config).toBeUndefined()
+    // Sampling-param pass still ran: adaptive model drops all three.
+    expect(payload.temperature).toBeUndefined()
+    expect(payload.top_p).toBeUndefined()
+    expect(payload.top_k).toBeUndefined()
+  })
+
+  test("reads the incoming display before the adaptive overwrite", () => {
+    // The explicit `display: "raw"` survives only because the pass captures it
+    // before rewriting payload.thinking to a fresh `{type: "adaptive"}` object.
+    const payload = run(
+      { thinking: { type: "adaptive", display: "raw" } },
+      adaptiveModel(),
+    )
+    expect(payload.thinking).toEqual({ type: "adaptive", display: "raw" })
+  })
+})
