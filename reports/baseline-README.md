@@ -25,10 +25,38 @@ Flags / env:
 | `--base-url <url>` | `MAXIMAL_BASE_URL` | `http://127.0.0.1:4141` | Proxy origin |
 | `--model <id>` | `MAXIMAL_MEASURE_MODEL` | `gpt-5-mini` | GPT `/responses` model for the caching probe |
 | `--cache-gap-ms <n>` | — | `3000` | Wait between the two caching requests |
+| `--samples <n>` | — | `8` | Warmup latency samples per run |
+| `--discard <n>` | — | `1` | Leading warmup samples dropped from stats (cold-start) |
+| `--compare <url>` | — | — | Second proxy for interleaved A/B warmup comparison |
 
 If no live proxy is reachable, the harness prints the guidance above, writes a
 `proxy_reachable: false` report, and exits non-zero — it never fabricates
 numbers.
+
+## Telling a real delta from upstream congestion
+
+Latency depends on upstream congestion, which varies minute to minute, so a
+single before/after pair taken at different times can't distinguish a real
+improvement from a quieter moment. Two features address this:
+
+- **Dispersion, not just a median.** Each run reports p50 / p90 / min / max /
+  stdev over the retained samples (first `--discard` cold-start samples
+  excluded). If before/after ranges overlap heavily, the delta is noise.
+- **Interleaved A/B compare (`--compare`).** Run the old and new builds on two
+  ports and alternate one request each, so both arms see the *same* congestion
+  window. The harness reports each arm's stats plus a **Mann–Whitney U**
+  two-sided p-value and a `significant` verdict (only asserted with ≥8 samples
+  per arm; otherwise `null` = inconclusive). Writes `reports/compare-<label>.json`.
+
+  ```
+  # A = current sidecar on 4141, B = new build on 4142
+  bun run measure:baseline -- --label old-vs-new \
+    --base-url http://127.0.0.1:4141 --compare http://127.0.0.1:4142 --samples 20
+  ```
+
+  Use this for small-delta changes (the caching win, a future WebSocket-TTFT
+  experiment). The warmup short-circuit's expected delta is order-of-magnitude
+  (seconds → ~0), so a single run is enough there.
 
 ## What each metric means (and the baseline as of harness v1)
 

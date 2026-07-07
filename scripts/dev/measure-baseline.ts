@@ -39,8 +39,22 @@
  *   # Point at another host/port
  *   bun run measure:baseline -- --label before --base-url http://127.0.0.1:4142
  *
+ *   # More warmup samples + drop the first N cold-start samples from stats
+ *   bun run measure:baseline -- --label before --samples 20 --discard 2
+ *
  *   # Skip the caching probe's inter-request wait (default 3000ms)
  *   bun run measure:baseline -- --label before --cache-gap-ms 0
+ *
+ *   # A/B compare two proxies with INTERLEAVED warmup sampling + a
+ *   # significance test (both arms see the same congestion window):
+ *   bun run measure:baseline -- --label old-vs-new \
+ *     --base-url http://127.0.0.1:4141 --compare http://127.0.0.1:4142 --samples 20
+ *
+ * On timing noise: single before/after runs taken minutes apart can't
+ * separate a real delta from upstream congestion. For small deltas (caching,
+ * future WebSocket TTFT) use --compare, which interleaves A/B so both share
+ * the same congestion and reports a Mann–Whitney p-value; the order-of-
+ * magnitude warmup short-circuit delta is safe to read from a single run.
  *
  * Env overrides: MAXIMAL_BASE_URL, MAXIMAL_MEASURE_MODEL (the /responses GPT
  * model used for the caching probe; default gpt-5-mini).
@@ -56,6 +70,11 @@ const ANTHROPIC_API_VERSION = "2023-06-01"
 const DEFAULT_BASE_URL = "http://127.0.0.1:4141"
 const DEFAULT_MEASURE_MODEL = "gpt-5-mini"
 const DEFAULT_CACHE_GAP_MS = 3000
+/** Warmup latency samples per run. n≈8 gives enough spread to compute a stable
+ *  p50 and a Mann–Whitney verdict against another run. */
+const DEFAULT_SAMPLES = 8
+/** Leading samples discarded before stats (cold connection / model warm-up). */
+const DEFAULT_DISCARD = 1
 /** A Claude model id; forces the warmup small-model short-circuit path so we
  *  measure the round-trip the workstream will replace. Any Claude id works —
  *  the proxy rewrites it and (with beta + no tools + "Warmup") routes to the
@@ -184,6 +203,11 @@ export interface WarmupMetric {
     resolved_model: string | null
   }>
   median_ms: number | null
+  /** Dispersion across the (post-discard) samples — lets a reader judge
+   *  whether a between-run delta exceeds this run's own spread. */
+  stats: LatencyStats | null
+  /** How many leading samples were discarded as cold-start warmups. */
+  discarded: number
   note: string
 }
 
@@ -216,6 +240,185 @@ export function median(values: Array<number>): number | null {
   return sorted.length % 2 === 0 ?
       Math.round((sorted[mid - 1] + sorted[mid]) / 2)
     : sorted[mid]
+}
+
+/**
+ * The p-th percentile (0..100) via linear interpolation between ranks, or null
+ * for an empty list. p50 equals the median for odd lists (even lists differ by
+ * the interpolation method — that's fine; we report both p50 and median).
+ */
+export function percentile(values: Array<number>, p: number): number | null {
+  if (values.length === 0) return null
+  if (values.length === 1) return values[0]
+  const sorted = [...values].sort((a, b) => a - b)
+  const rank = (p / 100) * (sorted.length - 1)
+  const lo = Math.floor(rank)
+  const hi = Math.ceil(rank)
+  if (lo === hi) return sorted[lo]
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (rank - lo)
+}
+
+/** Arithmetic mean, or null for an empty list. */
+export function mean(values: Array<number>): number | null {
+  if (values.length === 0) return null
+  return values.reduce((a, b) => a + b, 0) / values.length
+}
+
+/** Sample standard deviation (n-1), or null for fewer than 2 values. */
+export function stdev(values: Array<number>): number | null {
+  if (values.length < 2) return null
+  const m = mean(values) as number
+  const variance =
+    values.reduce((acc, v) => acc + (v - m) ** 2, 0) / (values.length - 1)
+  return Math.sqrt(variance)
+}
+
+export interface LatencyStats {
+  n: number
+  min: number | null
+  p50: number | null
+  p90: number | null
+  max: number | null
+  mean: number | null
+  stdev: number | null
+}
+
+/** Summarize a latency sample set with the dispersion needed to judge whether
+ *  a between-run delta is real or just spread. All ms, rounded for display. */
+export function summarizeSamples(values: Array<number>): LatencyStats {
+  const round = (v: number | null): number | null =>
+    v === null ? null : Math.round(v)
+  return {
+    n: values.length,
+    min: values.length ? Math.min(...values) : null,
+    p50: round(percentile(values, 50)),
+    p90: round(percentile(values, 90)),
+    max: values.length ? Math.max(...values) : null,
+    mean: round(mean(values)),
+    stdev: round(stdev(values)),
+  }
+}
+
+// ── Significance: Mann–Whitney U (nonparametric; no normality assumption,
+//    which matters because latency distributions are right-skewed). Two-sided
+//    normal approximation with tie + continuity correction. ──────────────────
+
+/** Normal CDF via an Abramowitz–Stegun erf approximation (deterministic). */
+export function normalCdf(z: number): number {
+  const t = 1 / (1 + 0.3275911 * Math.abs(z / Math.SQRT2))
+  const y =
+    1 -
+    ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) *
+      t +
+      0.254829592) *
+      t *
+      Math.exp(-((z / Math.SQRT2) ** 2))
+  const erf = z >= 0 ? y : -y
+  return 0.5 * (1 + erf)
+}
+
+/**
+ * Mann–Whitney U with average-rank tie handling and a two-sided p-value from
+ * the normal approximation (with continuity + tie correction). Returns the
+ * U statistic and approximate p. Meaningful only for n≳8 per group; callers
+ * gate the verdict on sample size.
+ */
+export function mannWhitneyU(
+  a: Array<number>,
+  b: Array<number>,
+): { u: number; p: number } {
+  const n1 = a.length
+  const n2 = b.length
+  if (n1 === 0 || n2 === 0) return { u: 0, p: 1 }
+  const combined = [
+    ...a.map((v) => ({ v, group: 0 })),
+    ...b.map((v) => ({ v, group: 1 })),
+  ].sort((x, y) => x.v - y.v)
+
+  // Average ranks for ties.
+  const ranks = new Array<number>(combined.length)
+  const tieGroups: Array<number> = []
+  let i = 0
+  while (i < combined.length) {
+    let j = i
+    while (j + 1 < combined.length && combined[j + 1].v === combined[i].v) j++
+    const avgRank = (i + j) / 2 + 1 // ranks are 1-based
+    for (let k = i; k <= j; k++) ranks[k] = avgRank
+    if (j > i) tieGroups.push(j - i + 1)
+    i = j + 1
+  }
+
+  let rankSumA = 0
+  for (let k = 0; k < combined.length; k++) {
+    if (combined[k].group === 0) rankSumA += ranks[k]
+  }
+  const u1 = rankSumA - (n1 * (n1 + 1)) / 2
+  const u2 = n1 * n2 - u1
+  const u = Math.min(u1, u2)
+
+  const n = n1 + n2
+  const meanU = (n1 * n2) / 2
+  const tieTerm =
+    tieGroups.reduce((acc, t) => acc + (t ** 3 - t), 0) / (n * (n - 1))
+  const sigma = Math.sqrt(((n1 * n2) / 12) * (n + 1 - tieTerm))
+  if (sigma === 0) return { u, p: 1 }
+  // Continuity correction, clamped so an exact tie at the mean stays z=0
+  // (never pushed away from center by the -0.5).
+  const z = Math.max(0, Math.abs(u - meanU) - 0.5) / sigma
+  const p = 2 * (1 - normalCdf(Math.abs(z)))
+  return { u, p: Math.min(1, Math.max(0, p)) }
+}
+
+export interface DeltaAssessment {
+  /** p50(B) − p50(A), ms. Negative = B faster. */
+  medianDeltaMs: number | null
+  /** Percent change of p50 from A to B. */
+  pctChange: number | null
+  /** Two-sided Mann–Whitney p; null if either group is empty. */
+  p: number | null
+  /** true/false when both groups have ≥ minN samples; null = too few to judge. */
+  significant: boolean | null
+  note: string
+}
+
+/**
+ * Compare two latency sample sets: report the p50 delta, % change, and a
+ * significance verdict. `significant` is only asserted with enough samples
+ * (minN per group) — otherwise null, so a tiny sample never masquerades as a
+ * confident result. A significant delta means the change likely dominates
+ * upstream-congestion noise; a null/false verdict means "re-run with more
+ * samples or the delta is within noise."
+ */
+export function assessDelta(
+  a: Array<number>,
+  b: Array<number>,
+  opts: { minN?: number; alpha?: number } = {},
+): DeltaAssessment {
+  const minN = opts.minN ?? 8
+  const alpha = opts.alpha ?? 0.05
+  const pa = percentile(a, 50)
+  const pb = percentile(b, 50)
+  if (pa === null || pb === null) {
+    return {
+      medianDeltaMs: null,
+      pctChange: null,
+      p: null,
+      significant: null,
+      note: "one or both sample sets are empty",
+    }
+  }
+  const medianDeltaMs = Math.round(pb - pa)
+  const pctChange = pa === 0 ? null : Math.round(((pb - pa) / pa) * 1000) / 10
+  const { p } = mannWhitneyU(a, b)
+  const enoughSamples = a.length >= minN && b.length >= minN
+  const significant = enoughSamples ? p < alpha : null
+  const note =
+    !enoughSamples ?
+      `too few samples for a confident verdict (need ≥${minN}/group; have ${a.length}/${b.length}) — treat as inconclusive`
+    : significant ?
+      `delta likely real (p≈${p.toFixed(3)} < ${alpha}); dominates congestion noise`
+    : `delta within noise (p≈${p.toFixed(3)} ≥ ${alpha}); not distinguishable from congestion`
+  return { medianDeltaMs, pctChange, p, significant, note }
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -334,44 +537,63 @@ async function measureCaching(
   }
 }
 
-async function measureWarmup(ctx: ProxyContext): Promise<WarmupMetric> {
-  const samples: WarmupMetric["samples"] = []
-  for (let i = 0; i < 3; i++) {
-    const t0 = performance.now()
-    try {
-      const res = await fetch(`${ctx.baseUrl}/v1/messages`, {
-        method: "POST",
-        headers: anthropicHeaders({ "anthropic-beta": "claude-code-20250219" }),
-        body: JSON.stringify({
-          model: WARMUP_MODEL,
-          max_tokens: 1,
-          messages: [{ role: "user", content: "Warmup" }],
-        }),
-        signal: AbortSignal.timeout(60_000),
-      })
-      const json = (await res.json()) as { model?: unknown }
-      samples.push({
-        status: res.status,
-        total_ms: Math.round(performance.now() - t0),
-        resolved_model: typeof json.model === "string" ? json.model : null,
-      })
-    } catch {
-      samples.push({
-        status: 0,
-        total_ms: Math.round(performance.now() - t0),
-        resolved_model: null,
-      })
+async function warmupOnce(
+  ctx: ProxyContext,
+): Promise<WarmupMetric["samples"][number]> {
+  const t0 = performance.now()
+  try {
+    const res = await fetch(`${ctx.baseUrl}/v1/messages`, {
+      method: "POST",
+      headers: anthropicHeaders({ "anthropic-beta": "claude-code-20250219" }),
+      body: JSON.stringify({
+        model: WARMUP_MODEL,
+        max_tokens: 1,
+        messages: [{ role: "user", content: "Warmup" }],
+      }),
+      signal: AbortSignal.timeout(60_000),
+    })
+    const json = (await res.json()) as { model?: unknown }
+    return {
+      status: res.status,
+      total_ms: Math.round(performance.now() - t0),
+      resolved_model: typeof json.model === "string" ? json.model : null,
+    }
+  } catch {
+    return {
+      status: 0,
+      total_ms: Math.round(performance.now() - t0),
+      resolved_model: null,
     }
   }
+}
+
+async function measureWarmup(
+  ctx: ProxyContext,
+  samples: number,
+  discard: number,
+): Promise<WarmupMetric> {
+  const collected: WarmupMetric["samples"] = []
+  for (let i = 0; i < samples; i++) {
+    collected.push(await warmupOnce(ctx))
+  }
+  // Drop leading cold-start samples (connection/model warm-up) before stats,
+  // but keep them in `samples` for transparency.
+  const retained = collected.slice(Math.min(discard, collected.length))
+  const retainedMs = retained
+    .filter((s) => s.status === 200)
+    .map((s) => s.total_ms)
   return {
     measured: true,
-    samples,
-    median_ms: median(samples.map((s) => s.total_ms)),
+    samples: collected,
+    median_ms: median(retainedMs),
+    stats: summarizeSamples(retainedMs),
+    discarded: Math.min(discard, collected.length),
     note:
       "Baseline: warmup is forced onto the small model (handler.ts:86) and "
       + "round-trips to gpt-5-mini upstream. Workstream (3) short-circuits it "
-      + "to a canned local response (target: near-zero). resolved_model shows "
-      + "the upstream model the round-trip actually hit.",
+      + "to a canned local response (target: near-zero). Stats exclude the "
+      + "first `discarded` cold-start sample(s); resolved_model shows the "
+      + "upstream model the round-trip actually hit.",
   }
 }
 
@@ -418,6 +640,9 @@ interface Args {
   baseUrl: string
   model: string
   cacheGapMs: number
+  samples: number
+  discard: number
+  compareUrl: string | null
 }
 
 export function parseArgs(argv: Array<string>): Args {
@@ -425,19 +650,26 @@ export function parseArgs(argv: Array<string>): Args {
     const idx = argv.indexOf(flag)
     return idx >= 0 && idx + 1 < argv.length ? argv[idx + 1] : undefined
   }
+  const intArg = (flag: string, fallback: number): number => {
+    const raw = get(flag)
+    if (raw === undefined) return fallback
+    const n = Number.parseInt(raw, 10)
+    return Number.isFinite(n) ? n : fallback
+  }
   const label = get("--label") ?? "unlabeled"
   const baseUrl =
     get("--base-url") ?? process.env.MAXIMAL_BASE_URL ?? DEFAULT_BASE_URL
   const model =
     get("--model") ?? process.env.MAXIMAL_MEASURE_MODEL ?? DEFAULT_MEASURE_MODEL
-  const gapRaw = get("--cache-gap-ms")
-  const cacheGapMs =
-    gapRaw !== undefined ? Number.parseInt(gapRaw, 10) : DEFAULT_CACHE_GAP_MS
+  const compareRaw = get("--compare")
   return {
     label,
     baseUrl: baseUrl.replace(/\/$/, ""),
     model,
-    cacheGapMs: Number.isFinite(cacheGapMs) ? cacheGapMs : DEFAULT_CACHE_GAP_MS,
+    cacheGapMs: intArg("--cache-gap-ms", DEFAULT_CACHE_GAP_MS),
+    samples: Math.max(1, intArg("--samples", DEFAULT_SAMPLES)),
+    discard: Math.max(0, intArg("--discard", DEFAULT_DISCARD)),
+    compareUrl: compareRaw ? compareRaw.replace(/\/$/, "") : null,
   }
 }
 
@@ -479,7 +711,15 @@ function printHuman(report: BaselineReport): void {
 
   console.log("  (3) Warmup round-trip latency")
   if (metrics.warmup.measured) {
-    console.log(`      median: ${metrics.warmup.median_ms} ms`)
+    const st = metrics.warmup.stats
+    if (st) {
+      console.log(
+        `      p50 ${st.p50} ms  (n=${st.n}, p90 ${st.p90}, min ${st.min}, `
+          + `max ${st.max}, stdev ${st.stdev}; discarded ${metrics.warmup.discarded})`,
+      )
+    } else {
+      console.log(`      median: ${metrics.warmup.median_ms} ms`)
+    }
     for (const s of metrics.warmup.samples) {
       console.log(
         `        ${s.total_ms} ms  (status ${s.status}, model ${s.resolved_model})`,
@@ -513,6 +753,17 @@ function printHuman(report: BaselineReport): void {
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2))
+
+  // Compare mode: interleave warmup samples between two proxies (A = base-url,
+  // B = --compare) so both see the SAME upstream-congestion window, then run a
+  // significance test on the paired samples. This is the honest way to tell a
+  // real change from a quieter-upstream moment — separate before/after runs
+  // taken minutes apart can't.
+  if (args.compareUrl) {
+    await runCompare(args)
+    return
+  }
+
   const ctx: ProxyContext = { baseUrl: args.baseUrl }
   const reachable = await isProxyReachable(args.baseUrl)
 
@@ -529,6 +780,8 @@ async function main(): Promise<void> {
     measured: false,
     samples: [],
     median_ms: null,
+    stats: null,
+    discarded: 0,
     note: "proxy not reachable",
   }
   const emptyCost: CostMetric = {
@@ -545,7 +798,9 @@ async function main(): Promise<void> {
     harness_version: HARNESS_VERSION,
     metrics: {
       cost: reachable ? await measureCost(ctx) : emptyCost,
-      warmup: reachable ? await measureWarmup(ctx) : emptyWarmup,
+      warmup:
+        reachable ? await measureWarmup(ctx, args.samples, args.discard)
+        : emptyWarmup,
       caching:
         reachable ?
           await measureCaching(ctx, args.model, args.cacheGapMs)
@@ -562,6 +817,69 @@ async function main(): Promise<void> {
   console.log("")
 
   if (!reachable) process.exitCode = 2
+}
+
+/**
+ * Interleaved A/B warmup comparison. Alternates one sample against A, one
+ * against B, repeatedly — so transient congestion hits both arms roughly
+ * equally — then reports each arm's dispersion and a Mann–Whitney verdict on
+ * whether the p50 delta is real. Writes reports/compare-<label>.json.
+ */
+async function runCompare(args: Args): Promise<void> {
+  const compareUrl = args.compareUrl as string
+  const ctxA: ProxyContext = { baseUrl: args.baseUrl }
+  const ctxB: ProxyContext = { baseUrl: compareUrl }
+  const reachA = await isProxyReachable(args.baseUrl)
+  const reachB = await isProxyReachable(compareUrl)
+  if (!reachA || !reachB) {
+    console.error("")
+    console.error(`  Compare needs BOTH proxies reachable:`)
+    console.error(`    A ${args.baseUrl}: ${reachA ? "ok" : "UNREACHABLE"}`)
+    console.error(`    B ${compareUrl}: ${reachB ? "ok" : "UNREACHABLE"}`)
+    console.error("")
+    process.exitCode = 2
+    return
+  }
+
+  const aMs: Array<number> = []
+  const bMs: Array<number> = []
+  for (let i = 0; i < args.samples; i++) {
+    const a = await warmupOnce(ctxA)
+    const b = await warmupOnce(ctxB)
+    if (i >= args.discard) {
+      if (a.status === 200) aMs.push(a.total_ms)
+      if (b.status === 200) bMs.push(b.total_ms)
+    }
+  }
+
+  const statsA = summarizeSamples(aMs)
+  const statsB = summarizeSamples(bMs)
+  const delta = assessDelta(aMs, bMs, { minN: DEFAULT_SAMPLES })
+  const out = {
+    label: args.label,
+    captured_at_utc: new Date().toISOString(),
+    mode: "compare-warmup",
+    harness_version: HARNESS_VERSION,
+    a: { base_url: args.baseUrl, stats: statsA },
+    b: { base_url: compareUrl, stats: statsB },
+    delta,
+  }
+
+  console.log("")
+  console.log(`  A/B warmup compare: ${args.label}`)
+  console.log(`    A ${args.baseUrl}: p50 ${statsA.p50} ms (n=${statsA.n}, `
+    + `p90 ${statsA.p90}, stdev ${statsA.stdev})`)
+  console.log(`    B ${compareUrl}: p50 ${statsB.p50} ms (n=${statsB.n}, `
+    + `p90 ${statsB.p90}, stdev ${statsB.stdev})`)
+  console.log(`    Δp50: ${delta.medianDeltaMs} ms `
+    + `(${delta.pctChange === null ? "n/a" : `${delta.pctChange}%`})`)
+  console.log(`    significant: ${delta.significant}  — ${delta.note}`)
+  console.log("")
+
+  const outPath = `reports/compare-${args.label}.json`
+  await Bun.write(outPath, JSON.stringify(out, null, 2) + "\n")
+  console.log(`  Report written: ${outPath}`)
+  console.log("")
 }
 
 if (import.meta.main) {

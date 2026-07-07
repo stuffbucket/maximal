@@ -3,10 +3,17 @@ import { describe, expect, it } from "bun:test"
 import {
   assessCaching,
   assessCostVisibility,
+  assessDelta,
   extractStreamCacheRead,
+  mannWhitneyU,
+  mean,
   median,
+  normalCdf,
   normalizeUsage,
   parseArgs,
+  percentile,
+  stdev,
+  summarizeSamples,
 } from "../scripts/dev/measure-baseline"
 
 describe("normalizeUsage", () => {
@@ -148,6 +155,9 @@ describe("parseArgs", () => {
       baseUrl: "http://127.0.0.1:4142",
       model: "gpt-5.4",
       cacheGapMs: 0,
+      samples: 8,
+      discard: 1,
+      compareUrl: null,
     })
   })
 
@@ -157,5 +167,127 @@ describe("parseArgs", () => {
     expect(args.baseUrl).toBe("http://127.0.0.1:4141")
     expect(args.model).toBe("gpt-5-mini")
     expect(args.cacheGapMs).toBe(3000)
+    expect(args.samples).toBe(8)
+    expect(args.discard).toBe(1)
+    expect(args.compareUrl).toBeNull()
+  })
+
+  it("reads --samples, --discard, and --compare (trailing slash trimmed)", () => {
+    const args = parseArgs([
+      "--samples",
+      "20",
+      "--discard",
+      "2",
+      "--compare",
+      "http://127.0.0.1:4142/",
+    ])
+    expect(args.samples).toBe(20)
+    expect(args.discard).toBe(2)
+    expect(args.compareUrl).toBe("http://127.0.0.1:4142")
+  })
+
+  it("clamps nonsensical samples/discard to safe minimums", () => {
+    const args = parseArgs(["--samples", "0", "--discard", "-5"])
+    expect(args.samples).toBe(1)
+    expect(args.discard).toBe(0)
+  })
+})
+
+describe("percentile / mean / stdev", () => {
+  it("interpolates percentiles", () => {
+    expect(percentile([10, 20, 30, 40], 50)).toBe(25)
+    expect(percentile([10, 20, 30, 40], 0)).toBe(10)
+    expect(percentile([10, 20, 30, 40], 100)).toBe(40)
+    expect(percentile([], 50)).toBeNull()
+    expect(percentile([42], 90)).toBe(42)
+  })
+
+  it("computes mean and sample stdev", () => {
+    expect(mean([2, 4, 6])).toBe(4)
+    expect(mean([])).toBeNull()
+    // sample stdev of [2,4,6] = 2
+    expect(stdev([2, 4, 6])).toBeCloseTo(2, 6)
+    expect(stdev([5])).toBeNull()
+  })
+})
+
+describe("summarizeSamples", () => {
+  it("reports dispersion and rounds", () => {
+    const s = summarizeSamples([100, 200, 300, 400, 500])
+    expect(s.n).toBe(5)
+    expect(s.min).toBe(100)
+    expect(s.max).toBe(500)
+    expect(s.p50).toBe(300)
+    expect(s.mean).toBe(300)
+    expect(typeof s.stdev).toBe("number")
+  })
+
+  it("handles empty input", () => {
+    expect(summarizeSamples([])).toEqual({
+      n: 0,
+      min: null,
+      p50: null,
+      p90: null,
+      max: null,
+      mean: null,
+      stdev: null,
+    })
+  })
+})
+
+describe("normalCdf", () => {
+  it("is ~0.5 at 0 and monotonic", () => {
+    expect(normalCdf(0)).toBeCloseTo(0.5, 2)
+    expect(normalCdf(1.96)).toBeCloseTo(0.975, 2)
+    expect(normalCdf(-1.96)).toBeCloseTo(0.025, 2)
+  })
+})
+
+describe("mannWhitneyU", () => {
+  it("returns p≈1 for identical distributions", () => {
+    const { p } = mannWhitneyU([1, 2, 3, 4], [1, 2, 3, 4])
+    expect(p).toBeGreaterThan(0.9)
+  })
+
+  it("detects a clear separation with enough samples", () => {
+    const a = [100, 105, 110, 108, 102, 107, 103, 106]
+    const b = [300, 305, 310, 308, 302, 307, 303, 306]
+    const { p } = mannWhitneyU(a, b)
+    expect(p).toBeLessThan(0.01)
+  })
+
+  it("handles an empty group", () => {
+    expect(mannWhitneyU([], [1, 2, 3])).toEqual({ u: 0, p: 1 })
+  })
+})
+
+describe("assessDelta", () => {
+  it("is inconclusive below the sample threshold", () => {
+    const r = assessDelta([100, 200], [300, 400], { minN: 8 })
+    expect(r.significant).toBeNull()
+    expect(r.note).toContain("too few samples")
+  })
+
+  it("flags a real, large delta as significant", () => {
+    const a = [100, 105, 110, 108, 102, 107, 103, 106]
+    const b = [300, 305, 310, 308, 302, 307, 303, 306]
+    const r = assessDelta(a, b, { minN: 8 })
+    expect(r.significant).toBe(true)
+    expect(r.medianDeltaMs).toBeGreaterThan(150)
+    expect(r.pctChange).toBeGreaterThan(100)
+  })
+
+  it("flags an overlapping delta as not significant", () => {
+    const a = [100, 120, 140, 110, 130, 105, 125, 115]
+    const b = [110, 125, 135, 118, 128, 112, 122, 120]
+    const r = assessDelta(a, b, { minN: 8 })
+    expect(r.significant).toBe(false)
+    expect(r.note).toContain("within noise")
+  })
+
+  it("returns nulls for empty input", () => {
+    const r = assessDelta([], [1, 2, 3])
+    expect(r.medianDeltaMs).toBeNull()
+    expect(r.significant).toBeNull()
   })
 })
