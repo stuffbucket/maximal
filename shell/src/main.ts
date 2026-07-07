@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
+import { t } from "./i18n";
 import { getShellApiKey, openUrl, safeInvoke } from "./tauri/shell";
 
 
@@ -113,6 +114,21 @@ function setBusy(on: boolean, label = "Working…"): void {
     root.removeAttribute("data-busy");
     if (labelEl) labelEl.textContent = ""; // clear; do not re-announce
   }
+}
+
+/**
+ * Populate every `[data-i18n]` element's text from the localized catalog. The
+ * key auto-injects the current `os` and resolved `{fileManager}` noun, so a
+ * button marked `data-i18n="reveal-logs"` renders "Reveal logs in Finder" /
+ * "… in File Explorer" / "… in Files" per OS. General on purpose: any element
+ * carrying the attribute is filled, so future catalog-backed labels need no
+ * extra wiring. Run at boot before first paint so no empty button flashes.
+ */
+function applyI18n(root: ParentNode = document): void {
+  root.querySelectorAll<HTMLElement>("[data-i18n]").forEach((el) => {
+    const key = el.dataset.i18n;
+    if (key) el.textContent = t(key);
+  });
 }
 
 function wireLogs(): void {
@@ -1816,6 +1832,7 @@ function wireAccount(): void {
 
 window.addEventListener("DOMContentLoaded", () => {
   applyTheme();
+  applyI18n();
   wireLogs();
   wireDiagnostics();
   wireAccount();

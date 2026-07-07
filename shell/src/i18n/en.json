@@ -1,0 +1,6 @@
+{
+  "file-manager": "{os, select, windows {File Explorer} linux {Files} other {Finder}}",
+  "app-container": "{os, select, macos {menu bar} other {system tray}}",
+  "reveal-logs": "Reveal logs in {fileManager}",
+  "reveal-config": "Reveal config in {fileManager}…"
+}
