@@ -1,5 +1,6 @@
 import { requestContext, generateTraceId } from "~/lib/request-context"
 import { state } from "~/lib/state"
+import { pricedModelIsPaid } from "~/services/copilot/get-models"
 
 import { EventBus } from "../event-bus"
 import {
@@ -120,21 +121,37 @@ function toPersistedEvent(
     source: input.source,
     total_tokens: resolveTotalTokens(input),
     total_nano_aiu: normalizeToken(input.total_nano_aiu),
-    is_premium: resolveIsPremium(input.model),
+    is_premium: resolveIsPaid(input.model),
     trace_id: resolveTraceId(input.traceId),
     user_id: resolveUserId(input),
   }
 }
 
-/** Premium status for a model from the live catalog's billing.is_premium.
- *  1 = premium, 0 = included, null = unknown (model absent from the catalog,
- *  e.g. a passthrough provider model or a not-yet-refreshed catalog). */
-function resolveIsPremium(model: string): number | null {
+/** Paid/free status for a model from the live catalog, persisted as the
+ *  `is_premium` column: 1 = paid, 0 = free, null = unknown (model absent from
+ *  the catalog — e.g. a passthrough provider model or a not-yet-refreshed
+ *  catalog).
+ *
+ *  Copilot-specific pricing seam (ADR-0016, divergence 1). PRIMARY signal is
+ *  the catalog's `billing.token_prices` (per-token AIU billing, live since
+ *  2026-06-01): any advertised non-zero rate ⇒ paid. The legacy
+ *  `billing.is_premium` flag is only consulted when `token_prices` is absent
+ *  (older catalogs / annual-plan accounts) — under usage-based billing
+ *  `is_premium === false` no longer means "free", so it must not win over a
+ *  present `token_prices`. A second provider would need its own mapping. */
+function resolveIsPaid(model: string): number | null {
   const id = model.trim()
   if (!id) return null
   const entry = state.models?.data.find((m) => m.id === id)
   const billing = entry?.billing
-  if (!billing || typeof billing.is_premium !== "boolean") return null
+  if (!billing) return null
+
+  // PRIMARY: token_prices (per-token AIU billing).
+  const pricedPaid = pricedModelIsPaid(billing.token_prices)
+  if (pricedPaid !== null) return pricedPaid ? 1 : 0
+
+  // LEGACY FALLBACK: is_premium, only when token_prices is absent/unusable.
+  if (typeof billing.is_premium !== "boolean") return null
   return billing.is_premium ? 1 : 0
 }
 

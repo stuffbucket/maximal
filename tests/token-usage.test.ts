@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { Hono } from "hono"
 
+import type { Model, ModelsResponse } from "~/services/copilot/get-models"
+
 import { requestContext } from "~/lib/request-context"
 import { state } from "~/lib/state"
 import {
@@ -24,6 +26,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await closeUsageStore()
   state.userName = undefined
+  state.models = undefined
   Reflect.deleteProperty(process.env, DB_PATH_ENV)
 })
 
@@ -234,5 +237,93 @@ describe("token usage storage", () => {
     expect(page.items).toHaveLength(2)
     expect(page.items[0]?.session_id).toBe("real-session")
     expect(page.items[1]?.session_id).toBe("interaction-session")
+  })
+})
+
+/**
+ * Pricing signal migration (ADR-0016 divergence 1, issue #259).
+ *
+ * The persisted `is_premium` column is the paid/free signal (1/0/NULL). Its
+ * *source* moved from the legacy `billing.is_premium` flag to Copilot's
+ * per-token `billing.token_prices`; `is_premium` is now only the fallback used
+ * when `token_prices` is absent (older catalogs / annual-plan accounts).
+ */
+function seedModel(id: string, billing: Model["billing"]): void {
+  const model = {
+    id,
+    name: id,
+    object: "model",
+    vendor: "copilot",
+    version: "1",
+    model_picker_enabled: true,
+    preview: false,
+    capabilities: {
+      family: id,
+      object: "model_capabilities",
+      type: "chat",
+      tokenizer: "o200k_base",
+      limits: {},
+      supports: {},
+    },
+    billing,
+  } as Model
+  const models: ModelsResponse = { object: "list", data: [model] }
+  state.models = models
+}
+
+async function recordAndReadPremium(model: string): Promise<boolean | null> {
+  recordTokenUsageEvent({
+    endpoint: "responses",
+    input_tokens: 10,
+    output_tokens: 5,
+    model,
+    source: "copilot",
+  })
+  // `is_premium` (the paid/free signal) is surfaced per-model in the summary,
+  // not the events page — read it from there.
+  const response = await createTokenUsageApp().request(
+    "/token-usage?period=day",
+  )
+  expect(response.status).toBe(200)
+  const summary = (await response.json()) as TokenUsageSummary
+  return summary.byModel.find((m) => m.model === model)?.is_premium ?? null
+}
+
+describe("token usage pricing signal (token_prices)", () => {
+  test("prices from token_prices when present (any non-zero rate ⇒ paid)", async () => {
+    // gpt-5-mini: is_premium===false (legacy) but token_prices says paid.
+    // token_prices must win, otherwise a paid model reads as free.
+    seedModel("gpt-5-mini", {
+      is_premium: false,
+      token_prices: { input: 0.25, output: 2.0 },
+    })
+    expect(await recordAndReadPremium("gpt-5-mini")).toBe(true)
+  })
+
+  test("token_prices all-zero reads as free even if is_premium is true", async () => {
+    seedModel("free-model", {
+      is_premium: true,
+      token_prices: { input: 0, output: 0 },
+    })
+    expect(await recordAndReadPremium("free-model")).toBe(false)
+  })
+
+  test("falls back to legacy is_premium when token_prices is absent", async () => {
+    seedModel("legacy-premium", { is_premium: true })
+    expect(await recordAndReadPremium("legacy-premium")).toBe(true)
+
+    await closeUsageStore()
+    seedModel("legacy-included", { is_premium: false })
+    expect(await recordAndReadPremium("legacy-included")).toBe(false)
+  })
+
+  test("unknown when the model is absent from the catalog", async () => {
+    seedModel("some-other-model", { token_prices: { input: 1 } })
+    expect(await recordAndReadPremium("not-in-catalog")).toBeNull()
+  })
+
+  test("unknown when billing carries neither token_prices nor is_premium", async () => {
+    seedModel("bare", {})
+    expect(await recordAndReadPremium("bare")).toBeNull()
   })
 })
