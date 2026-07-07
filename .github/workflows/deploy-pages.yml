@@ -9,17 +9,23 @@ on:
     types: [ published ]
   workflow_dispatch:
 
-# Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
+# Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages.
+# `actions: write` lets the "Remove stale github-pages artifact" step below
+# delete a prior attempt's artifact via the Actions API before re-uploading.
 permissions:
   contents: read
   pages: write
   id-token: write
+  actions: write
 
-# Allow only one concurrent deployment, skipping runs queued between the run in-progress and latest queued.
-# However, do NOT cancel in-progress runs as we want to allow these production deployments to complete.
+# One deployment at a time. `cancel-in-progress: true` so a newer commit or
+# dispatch supersedes and CANCELS an in-flight deploy rather than queuing
+# behind it: the site is a derived artifact with no per-run state worth
+# draining, so the freshest content wins and superseded attempts don't linger
+# (see docs/decisions/site-runtime-version-manifest.md).
 concurrency:
   group: "pages"
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   # Build the Astro site under ./site and deploy site/dist to Pages.
@@ -102,6 +108,31 @@ jobs:
 
       - name: Setup Pages
         uses: actions/configure-pages@v6
+
+      # Guard against the "Multiple artifacts named github-pages" deploy trap.
+      # `actions/deploy-pages` refuses to deploy when a run has >1 artifact
+      # named `github-pages`, and `upload-pages-artifact` does NOT overwrite —
+      # so re-running the failed deploy job re-uploads a SECOND copy without
+      # removing the first, driving the count 1→2→3 and failing every re-run
+      # harder (see issue #239). Deleting any pre-existing copy for THIS run
+      # before uploading keeps the count at exactly 1, making re-runs safe.
+      # No-ops on a first attempt (nothing to delete).
+      - name: Remove stale github-pages artifact from this run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ids=$(gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?name=github-pages" \
+            --jq '.artifacts[].id')
+          if [ -z "$ids" ]; then
+            echo "No pre-existing github-pages artifact for this run; nothing to remove."
+            exit 0
+          fi
+          for id in $ids; do
+            echo "Deleting stale github-pages artifact ${id} from run ${GITHUB_RUN_ID}"
+            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}"
+          done
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v5
