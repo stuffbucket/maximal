@@ -23,6 +23,7 @@ const EMPTY_TOKEN_USAGE_TOTALS = {
   output_tokens: 0,
   request_count: 0,
   total_tokens: 0,
+  total_nano_aiu: 0,
 };
 
 // --- State Management ---
@@ -251,6 +252,28 @@ function updateControls() {
 
 function formatNumber(value) {
   return Number.isFinite(value) ? Number(value).toLocaleString() : "0";
+}
+
+// Copilot reports per-request cost in nano-AIU (1 AIU = 1e9 nano-AIU).
+// See src/lib/token-usage/store.ts (`total_nano_aiu`). We render the human
+// unit (AIU). Zero/absent cost is common — many models bill nothing here —
+// so we show an em dash rather than `0.000 AIU` or `NaN`, per the design
+// failure-modes guidance (graceful zero/absent handling).
+const NANO_AIU_PER_AIU = 1_000_000_000;
+
+function formatCostAiu(nanoAiu) {
+  if (!Number.isFinite(nanoAiu) || nanoAiu <= 0) {
+    return "—";
+  }
+  const aiu = nanoAiu / NANO_AIU_PER_AIU;
+  // Small values (e.g. 0.0096 AIU) need more digits than large ones. Trim
+  // trailing zeros so 7.426 AIU doesn't read as 7.426000 AIU.
+  const digits = aiu < 1 ? 4 : 3;
+  const text = aiu.toLocaleString(undefined, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: digits,
+  });
+  return `${text} AIU`;
 }
 
 function formatDateTime(value) {
@@ -516,7 +539,7 @@ function renderTokenUsageSection() {
           : ""
       }
 
-      <div class="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 ${
+      <div class="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-7 gap-3 ${
         state.isTokenUsageLoading ? "opacity-60" : ""
       }">
         ${renderTokenUsageMetric(
@@ -548,6 +571,11 @@ function renderTokenUsageSection() {
           "Requests",
           totals.request_count,
           "var(--color-purple-accent)"
+        )}
+        ${renderTokenUsageCostMetric(
+          "Cost",
+          totals.total_nano_aiu,
+          "var(--color-green)"
         )}
       </div>
 
@@ -611,6 +639,22 @@ function renderTokenUsageMetric(label, value, accentColor) {
   `;
 }
 
+// A cost metric renders the human AIU unit (from nano-AIU) instead of a raw
+// integer, so it needs its own formatter. Same card chrome as the token
+// metrics above so the grid stays visually uniform.
+function renderTokenUsageCostMetric(label, nanoAiu, accentColor) {
+  return `
+    <div class="p-4 border" style="background-color: var(--color-bg); border-color: var(--color-bg-light-2);">
+      <div class="text-lg font-bold" style="color: ${accentColor};">${escapeHtml(
+        formatCostAiu(nanoAiu)
+      )}</div>
+      <div class="mt-1 text-xs uppercase tracking-wide" style="color: var(--color-gray-accent);">${escapeHtml(
+        label
+      )}</div>
+    </div>
+  `;
+}
+
 function renderTokenUsageModelBreakdown(summary) {
   if (!summary || summary.byModel.length === 0) {
     return renderEmptyState(
@@ -643,6 +687,9 @@ function renderTokenUsageModelBreakdown(summary) {
           <td class="px-4 py-2 text-right font-semibold" style="color: var(--color-yellow-accent);">${formatNumber(
             model.total_tokens
           )}</td>
+          <td class="px-4 py-2 text-right font-semibold" style="color: var(--color-green);">${escapeHtml(
+            formatCostAiu(model.total_nano_aiu)
+          )}</td>
         </tr>
       `;
     })
@@ -650,7 +697,7 @@ function renderTokenUsageModelBreakdown(summary) {
 
   return `
     <div class="overflow-auto ${state.isTokenUsageLoading ? "opacity-60" : ""}">
-      <table class="w-full min-w-[760px] text-left text-xs sm:text-sm">
+      <table class="w-full min-w-[860px] text-left text-xs sm:text-sm">
         <thead style="background-color: var(--color-bg-light-1); color: var(--color-fg-medium);">
           <tr>
             <th class="px-4 py-2 font-semibold">Model</th>
@@ -660,6 +707,7 @@ function renderTokenUsageModelBreakdown(summary) {
             <th class="px-4 py-2 text-right font-semibold">Cache Read</th>
             <th class="px-4 py-2 text-right font-semibold">Cache Write</th>
             <th class="px-4 py-2 text-right font-semibold">Total</th>
+            <th class="px-4 py-2 text-right font-semibold">Cost</th>
           </tr>
         </thead>
         <tbody>
