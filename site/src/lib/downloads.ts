@@ -1,8 +1,8 @@
 // Single build-time source of the release/download data the landing components
-// render. Wraps lib/version.ts (the unchanged release-resolution + fail-closed
-// logic) and memoizes it so Hero + Downloads share one lookup instead of each
-// hitting the GitHub API. Markdoc tag attributes don't receive `$variables`, so
-// the components await this directly rather than taking the data as props.
+// render. Wraps lib/version.ts (which now reads the committed static manifest —
+// no GitHub API) and memoizes it so Hero + Downloads share one lookup. Markdoc
+// tag attributes don't receive `$variables`, so the components await this
+// directly rather than taking the data as props.
 
 import { resolveLatestRelease } from "./version";
 
@@ -36,7 +36,7 @@ export function getDownloadInfo(): Promise<DownloadInfo> {
 }
 
 async function compute(): Promise<DownloadInfo> {
-  const { tag, hasRelease, assets } = await resolveLatestRelease();
+  const { tag, hasRelease, assets } = resolveLatestRelease();
   const assetUrl = (filename: string): string =>
     hasRelease && tag
       ? `${REPO_URL}/releases/download/${tag}/${filename}`
@@ -44,11 +44,12 @@ async function compute(): Promise<DownloadInfo> {
   const versionForAsset = tag ?? "latest";
   const conventionDmg = `maximal-${versionForAsset}-darwin-arm64.dmg`;
 
-  // Resolve both downloads from the release's actual asset list rather than
-  // guessing filenames, so each button links to the real artifact for the
-  // latest build. macOS prefers an arm64 .dmg; Windows takes the NSIS
-  // *-setup.exe. A pinned version carries no asset list, so macOS falls back to
-  // the conventional .dmg filename and Windows stays "coming soon".
+  // Resolve both downloads from the manifest channel's actual asset list rather
+  // than guessing filenames, so each button links to the real artifact for the
+  // advertised build. macOS prefers an arm64 .dmg; Windows takes the NSIS
+  // *-setup.exe. When the manifest carries no channel (no release yet), macOS
+  // falls back to the conventional .dmg filename and Windows stays "coming
+  // soon" — and the release-independent /releases fallback covers the rest.
   const macAsset =
     assets.find((a) => /\.dmg$/i.test(a.name) && /arm64|aarch64/i.test(a.name)) ??
     assets.find((a) => /\.dmg$/i.test(a.name)) ??

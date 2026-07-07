@@ -209,9 +209,14 @@ primary fix.
   `redeploy-site` job and `actions: write`. Cut a real release; confirm it
   advertises the new version to both the site and the app poller with **no** Pages
   deploy triggered by the release.
-- **Phase 4 (optional cleanup).** Retire `site-pin.yml` +
-  `VITE_SITE_PIN_VERSION` / `SITE_PIN_VERSION` (fold pinning into manifest
-  generation).
+- **Phase 4 (optional cleanup) — DONE (#223).** Retired `site-pin.yml` +
+  `VITE_SITE_PIN_VERSION` / `SITE_PIN_VERSION` and the build-time
+  `GITHUB_TOKEN` / `releases/latest` lookup. Pinning is now folded into manifest
+  generation exactly as recommended below: `site/src/lib/version.ts` reads the
+  **committed static** `site/public/updates/manifest.json` (imported at build
+  time, no API), so the server-rendered fail-closed fallback still bakes a real
+  version + direct download links. release.yml's `manifest` job keeps that file
+  fresh on every publish, so "the pin" is now just what the manifest advertises.
 
 **Ordering guarantee:** the release-advertising path (manifest write, Phase 1) is
 proven live *before* the old path (`redeploy-site`, Phase 3) is removed — so
@@ -222,6 +227,11 @@ there's never a window where a release fails to advertise its version.
 1. **Keep `SITE_PIN_VERSION`?** With runtime hydration, "pinning" becomes "what
    the manifest advertises." Recommendation: fold pinning into manifest
    generation and retire the build-time pin — but this is a product call.
+   **RESOLVED (#223):** retired. Pinning is now a manifest-data concern — the
+   build reads the committed static `site/public/updates/manifest.json`, and to
+   pin the site you edit/commit that file (or let a release's `manifest` job
+   write it). `site-pin.yml` + `SITE_PIN_VERSION` + the build-time GitHub-API
+   lookup are gone.
 2. **Quick-win now vs. coherent rollout?** The `paths:` filter + retry alone would
    cut most failures immediately, independent of the manifest work. But it edits
    `deploy-pages.yml` twice (now, then again in Phase 3). Recommendation: land the
@@ -235,4 +245,4 @@ there's never a window where a release fails to advertise its version.
 - `src/lib/update-check.ts` (consumer — no change; contract reference)
 - `.github/workflows/deploy-pages.yml` (paths filter, poll-gate + token removal, concurrency flip)
 - `.github/workflows/release.yml` (`redeploy-site` removal, manifest-write step, `actions: write` removal)
-- `.github/workflows/site-pin.yml` (optional removal)
+- `.github/workflows/site-pin.yml` (removed in #223)
