@@ -1,0 +1,62 @@
+{
+  "label": "live-v0.4.39-warm2",
+  "captured_at_utc": "2026-07-07T03:24:15.329Z",
+  "base_url": "http://127.0.0.1:4141",
+  "proxy_reachable": true,
+  "harness_version": 1,
+  "metrics": {
+    "cost": {
+      "measured": true,
+      "visibility": {
+        "fieldPresent": true,
+        "captured": true,
+        "value": 11616010000
+      },
+      "note": "total_nano_aiu is captured in the store (store.ts) but this checks whether the token-usage summary API exposes it. Baseline: the summary omits it and the dashboard (shell/ui/dashboard/main.js) renders token counts only — cost is captured but NOT UI-surfaced. Workstream (2) surfaces it; expect fieldPresent+captured to flip true here and a cost figure to appear in the dashboard."
+    },
+    "warmup": {
+      "measured": true,
+      "samples": [
+        {
+          "status": 200,
+          "total_ms": 4747,
+          "resolved_model": "gpt-5-mini-2025-08-07"
+        },
+        {
+          "status": 200,
+          "total_ms": 4184,
+          "resolved_model": "gpt-5-mini-2025-08-07"
+        },
+        {
+          "status": 200,
+          "total_ms": 4041,
+          "resolved_model": "gpt-5-mini-2025-08-07"
+        }
+      ],
+      "median_ms": 4184,
+      "note": "Baseline: warmup is forced onto the small model (handler.ts:86) and round-trips to gpt-5-mini upstream. Workstream (3) short-circuits it to a canned local response (target: near-zero). resolved_model shows the upstream model the round-trip actually hit."
+    },
+    "caching": {
+      "measured": true,
+      "model": "gpt-5-mini",
+      "cache_gap_ms": 0,
+      "first": {
+        "status": 200,
+        "ttft_ms": 1431,
+        "total_ms": 1432,
+        "cache_read_input_tokens": 28544
+      },
+      "second": {
+        "status": 200,
+        "ttft_ms": 1516,
+        "total_ms": 1560,
+        "cache_read_input_tokens": 28544
+      },
+      "verdict": {
+        "reused": false,
+        "delta": 0
+      },
+      "note": "Measures the reuse observable from here (fast repeat via upstream prompt_cache_key). prompt_cache_retention:\"24h\" is commented out at src/routes/messages/responses-translation.ts:87, so there is no 24h retention — reuse decays once the upstream window closes. Workstream (4) enables retention; re-run this after the gap grows past the upstream window to prove 24h reuse."
+    }
+  }
+}
