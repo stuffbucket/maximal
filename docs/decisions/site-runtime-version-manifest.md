@@ -23,11 +23,20 @@ Two entangled issues, one root cause:
   **zero** other deploys running (the prior batch finished 6 minutes earlier). A
   solo failure cannot be a collision. Overlap does not predict failure — a trio of
   deploys seconds apart all *succeeded*, while a serialized pair both *failed*.
-  The errors are **GitHub Pages backend flakiness**, amplified by deploy **volume**.
+  The errors were originally attributed to **GitHub Pages backend flakiness**,
+  amplified by deploy **volume**. *(Correction, 2026-07-06, issue #239: a
+  significant and **repo-fixable** contributor is the re-run artifact-accumulation
+  trap — `actions/deploy-pages` refuses to deploy a run with >1 artifact named
+  `github-pages`, and re-running the failed deploy job re-uploads a second copy
+  without removing the first, so the count climbs 1→2→3 and every re-run fails
+  harder. Fixed in `deploy-pages.yml` by deleting any stale artifact before upload;
+  operationally, re-run Pages deploys with a fresh `workflow_dispatch`, never by
+  re-running failed jobs.)*
 - **Volume amplifier #1:** `deploy-pages.yml`'s `push: [main]` trigger has **no
   `paths:` filter**, so the site fully rebuilds+redeploys on *every* main commit —
   even commits that never touch `site/` (verified against 4 recent commits). Busy
-  days hammer the flaky backend.
+  days multiply deploys, which multiplies the odds of hitting the re-run
+  artifact trap above (and any residual backend flakiness).
 - **Volume amplifier #2:** the site **bakes the version at build time**
   (`site/src/lib/version.ts` fetches `releases/latest` during SSG; `Hero.astro` /
   `GetStarted.astro` bake the hrefs into static HTML). So every release *must*
@@ -176,9 +185,11 @@ retrying into it); and one small "write manifest.json" step on release
 **Net:** live deploy paths drop **3 → 1**; several triggers/jobs/steps and one
 permission removed; the `releases/latest` race designed out. Complexity decreases.
 
-*Belt-and-suspenders:* because the backend is *also* just intermittently flaky, a
-lightweight retry around `actions/deploy-pages` is worth adding as a secondary
-guard, but `cancel-in-progress: true` + far fewer deploys is the primary fix.
+*Belt-and-suspenders:* to the extent the backend is *also* intermittently flaky
+(now known to be a smaller factor than the re-run artifact trap addressed in
+issue #239), a lightweight retry around `actions/deploy-pages` is worth adding as
+a secondary guard, but `cancel-in-progress: true` + far fewer deploys is the
+primary fix.
 
 ## Phased migration (never delete the old path before the new one works)
 
