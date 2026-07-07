@@ -130,6 +130,14 @@ const ogDescription =
       })();
     </script>
 
+    <!-- Runtime download hydration (issue #221): upgrade the baked fallback
+         download links + version pills from /updates/manifest.json so a release
+         advertises itself with no site rebuild. Bundled (not is:inline) so it
+         can import the type-checked, schema-2 parser. Fail-closed. -->
+    <script>
+      import "../lib/hydrate-downloads";
+    </script>
+
     <script is:inline>
       // Subtle click celebration on primary buttons: a soft light bloom from
       // the click point + a tiny press (see .btn--celebrate in global.css).

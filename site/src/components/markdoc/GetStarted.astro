@@ -91,7 +91,7 @@ const steps = [
                       <Spark class="btn-spark" />
                       <span>macOS</span>
                     </span>
-                    {versionLabel && <span class="btn-meta">{versionLabel}</span>}
+                    {versionLabel && <span class="btn-meta" data-version-pill>{versionLabel}</span>}
                   </a>
                   {hasWindows ? (
                     <a
@@ -105,7 +105,7 @@ const steps = [
                         <Spark class="btn-spark" />
                         <span>Windows</span>
                       </span>
-                      {versionLabel && <span class="btn-meta">{versionLabel}</span>}
+                      {versionLabel && <span class="btn-meta" data-version-pill>{versionLabel}</span>}
                     </a>
                   ) : (
                     <div class="btn btn--soon" data-os="windows" aria-disabled="true">

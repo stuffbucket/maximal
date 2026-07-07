@@ -26,31 +26,44 @@ const { macDmg: downloadUrl, versionLabel, winSetup, hasWindows } =
       aria-hidden="true"></span>
   </p>
 
+  {/* Server-rendered fallback (SEO / no-JS / fetch failure). A small bundled
+      script in index.astro upgrades these anchors' href + version pill from the
+      runtime manifest via the data-os / data-version-pill hooks. */}
   <div class="hero-cta">
     {
       downloadUrl && (
-        <a class="btn btn--primary hero-cta__primary" href={downloadUrl} rel="noopener">
+        <a
+          class="btn btn--primary hero-cta__primary"
+          data-os="mac"
+          href={downloadUrl}
+          rel="noopener"
+        >
           <Paint base="#15656f" mode="clearcoat" class="btn-paint" />
           <span class="btn-label">
             <Spark class="btn-spark" />
             <span>{downloadLabel}</span>
           </span>
-          {versionLabel && <span class="btn-meta">{versionLabel}</span>}
+          {versionLabel && <span class="btn-meta" data-version-pill>{versionLabel}</span>}
         </a>
       )
     }
     {
       hasWindows ? (
-        <a class="btn btn--primary hero-cta__primary" href={winSetup} rel="noopener">
+        <a
+          class="btn btn--primary hero-cta__primary"
+          data-os="windows"
+          href={winSetup}
+          rel="noopener"
+        >
           <Paint base="#15656f" mode="clearcoat" class="btn-paint" />
           <span class="btn-label">
             <Spark class="btn-spark" />
             <span>Download for Windows</span>
           </span>
-          {versionLabel && <span class="btn-meta">{versionLabel}</span>}
+          {versionLabel && <span class="btn-meta" data-version-pill>{versionLabel}</span>}
         </a>
       ) : (
-        <div class="btn btn--soon hero-cta__primary" aria-disabled="true">
+        <div class="btn btn--soon hero-cta__primary" data-os="windows" aria-disabled="true">
           <span class="btn-label">
             <svg class="btn-spark" viewBox="0 0 22 22" fill="currentColor" aria-hidden="true">
               <path d="M11 1 L13 9 L21 11 L13 13 L11 21 L9 13 L1 11 L9 9 Z" />
