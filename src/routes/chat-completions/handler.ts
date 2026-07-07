@@ -14,10 +14,10 @@ import {
   withCopilotCost,
 } from "~/lib/token-usage"
 import { generateRequestIdFromPayload, getUUID, isNullish } from "~/lib/utils"
+import { isNonStreaming } from "~/routes/streaming-predicates"
 import {
   createChatCompletions,
   type ChatCompletionChunk,
-  type ChatCompletionResponse,
   type ChatCompletionsPayload,
 } from "~/services/copilot/create-chat-completions"
 
@@ -101,10 +101,6 @@ export async function handleCompletion(c: Context) {
     recordUsage(usage)
   })
 }
-
-const isNonStreaming = (
-  response: Awaited<ReturnType<typeof createChatCompletions>>,
-): response is ChatCompletionResponse => Object.hasOwn(response, "choices")
 
 const parseChatCompletionChunk = (
   chunk: unknown,

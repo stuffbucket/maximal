@@ -41,12 +41,12 @@ import type { CompactType } from "~/lib/compact"
 import type { SubagentMarker } from "~/lib/subagent"
 
 import { debugLazy } from "~/lib/logger"
+import { isNonStreaming } from "~/routes/streaming-predicates"
 import {
   createChatCompletions,
   type ChatCompletionChunk,
 } from "~/services/copilot/create-chat-completions"
 
-import { isNonStreaming } from "../api-flows"
 import { translateToOpenAI } from "../non-stream-translation"
 import { translateChunkToAnthropicEvents } from "../stream-translation"
 import {

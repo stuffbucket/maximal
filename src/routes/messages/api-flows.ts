@@ -39,10 +39,10 @@ import {
   compactInputByLatestCompaction,
   getResponsesRequestOptions,
 } from "~/routes/responses/utils"
+import { isAsyncIterable, isNonStreaming } from "~/routes/streaming-predicates"
 import {
   createChatCompletions,
   type ChatCompletionChunk,
-  type ChatCompletionResponse,
 } from "~/services/copilot/create-chat-completions"
 import { createMessages } from "~/services/copilot/create-messages"
 import {
@@ -384,14 +384,6 @@ export const handleWithMessagesApi = async (
   )
   return c.json(response)
 }
-
-export const isNonStreaming = (
-  response: Awaited<ReturnType<typeof createChatCompletions>>,
-): response is ChatCompletionResponse => Object.hasOwn(response, "choices")
-
-const isAsyncIterable = <T>(value: unknown): value is AsyncIterable<T> =>
-  Boolean(value)
-  && typeof (value as AsyncIterable<T>)[Symbol.asyncIterator] === "function"
 
 const createCopilotUsageRecorder = (options: {
   endpoint: TokenUsageEndpoint

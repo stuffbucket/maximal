@@ -1,5 +1,6 @@
 import { Hono } from "hono"
 
+import { forwardError } from "~/lib/error"
 import {
   getTokenUsageEventsPage,
   getTokenUsageSummary,
@@ -23,18 +24,26 @@ function parsePositiveInt(value: string | undefined, fallback: number): number {
 }
 
 tokenUsageRoute.get("/", async (c) => {
-  const period = parsePeriod(c.req.query("period"))
-  const summary = await getTokenUsageSummary(period)
-  return c.json(summary)
+  try {
+    const period = parsePeriod(c.req.query("period"))
+    const summary = await getTokenUsageSummary(period)
+    return c.json(summary)
+  } catch (error) {
+    return forwardError(c, error)
+  }
 })
 
 tokenUsageRoute.get("/events", async (c) => {
-  const period = parsePeriod(c.req.query("period"))
-  const page = parsePositiveInt(c.req.query("page"), 1)
-  const pageSize = parsePositiveInt(
-    c.req.query("page_size"),
-    DEFAULT_EVENTS_PAGE_SIZE,
-  )
-  const eventsPage = await getTokenUsageEventsPage({ page, pageSize, period })
-  return c.json(eventsPage)
+  try {
+    const period = parsePeriod(c.req.query("period"))
+    const page = parsePositiveInt(c.req.query("page"), 1)
+    const pageSize = parsePositiveInt(
+      c.req.query("page_size"),
+      DEFAULT_EVENTS_PAGE_SIZE,
+    )
+    const eventsPage = await getTokenUsageEventsPage({ page, pageSize, period })
+    return c.json(eventsPage)
+  } catch (error) {
+    return forwardError(c, error)
+  }
 })
