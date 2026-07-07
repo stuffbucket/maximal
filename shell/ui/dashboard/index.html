@@ -13,12 +13,9 @@
     <!-- Commissioner is the body face, matching the Settings window.
          The Dashboard has no display heading (the native titlebar
          carries the page name), so Fraunces is intentionally absent —
-         "Fraunces rationed" per .design-context.md. Production should
-         self-host; the prototype link is acceptable. -->
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Commissioner:wght@200..900&display=swap"
-    />
+         "Fraunces rationed" per .design-context.md. The @font-face rules
+         in style.css self-host it from ./vendor/fonts/ — no CDN request,
+         works offline / under a strict CSP. -->
 
     <script src="./vendor/tailwind.min.js"></script>
     <script src="./vendor/lucide.min.js"></script>

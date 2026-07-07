@@ -4,10 +4,61 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>maximal — Settings</title>
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300..900&family=Commissioner:wght@200..900&display=swap"
-    />
+    <!-- Self-hosted web fonts. Fraunces (display, one moment per window)
+         + Commissioner (body). Vendored under ./vendor/fonts/ next to the
+         dashboard's tailwind/lucide convention, so the webview never
+         reaches fonts.googleapis.com — works offline / under a strict CSP,
+         preserving the no-telemetry posture. One variable woff2 per subset
+         covers the full weight range Google served (Commissioner 200..900,
+         Fraunces 300..900 across opsz 9..144). latin + latin-ext captured
+         so accented logins / model names render without a fallback face.
+         The build (scripts/build-ui.ts) copies ./vendor verbatim into the
+         settings dist; Bun leaves these bare relative url()s untouched. -->
+    <style>
+      @font-face {
+        font-family: "Commissioner";
+        font-style: normal;
+        font-weight: 200 900;
+        font-display: swap;
+        src: url("./vendor/fonts/commissioner-latin.woff2") format("woff2");
+        unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC,
+          U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F,
+          U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+      }
+      @font-face {
+        font-family: "Commissioner";
+        font-style: normal;
+        font-weight: 200 900;
+        font-display: swap;
+        src: url("./vendor/fonts/commissioner-latin-ext.woff2")
+          format("woff2");
+        unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7,
+          U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F,
+          U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
+          U+2C60-2C7F, U+A720-A7FF;
+      }
+      @font-face {
+        font-family: "Fraunces";
+        font-style: normal;
+        font-weight: 300 900;
+        font-display: swap;
+        src: url("./vendor/fonts/fraunces-latin.woff2") format("woff2");
+        unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC,
+          U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F,
+          U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+      }
+      @font-face {
+        font-family: "Fraunces";
+        font-style: normal;
+        font-weight: 300 900;
+        font-display: swap;
+        src: url("./vendor/fonts/fraunces-latin-ext.woff2") format("woff2");
+        unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7,
+          U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F,
+          U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
+          U+2C60-2C7F, U+A720-A7FF;
+      }
+    </style>
     <link rel="stylesheet" href="../../src/ui/styles/styles.css" />
     <script type="module" src="../../src/main.ts" defer></script>
   </head>
