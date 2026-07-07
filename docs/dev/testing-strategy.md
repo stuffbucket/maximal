@@ -55,10 +55,17 @@ breaks down into these layers:
 | Layer | What it covers | Example files |
 |---|---|---|
 | **Pure-logic / unit** | Deterministic transforms, parsers, matchers, config resolution | `find-endpoint-model.test.ts`, `copilot-error-parser.test.ts`, `messages-preprocess.test.ts`, `anthropic-id-rewrite.test.ts` |
-| **Contract** | The shape of a wire payload or a public response matches a published schema | `auth-status-contract.test.ts`, `config-schema.test.ts`, diagnostics schema round-trip in `settings-api-diagnostics.test.ts` |
+| **Contract** | The shape of a wire payload or a public response matches a published schema — or a single source of truth still agrees with its mirrors | `auth-status-contract.test.ts`, `config-schema.test.ts`, diagnostics schema round-trip in `settings-api-diagnostics.test.ts`, `i18n-catalog-parity.test.ts` |
 | **Route / handler (in-process)** | A Hono route, exercised via `server.request(...)` / `app.fetch(...)` — no network, no listening port | `*-route.test.ts`, `*-handler.test.ts`, `debug-route.test.ts` |
 | **Behavioral / lifecycle** | Stateful subsystems (auth controller, recovery, rate limit) across event sequences | `auth-controller-lifecycle.test.ts`, `auth-recovery.test.ts`, `copilot-rate-limit.test.ts` |
 | **Mutation (manual, targeted)** | Whether tests *would fail* if the logic were wrong — see §6 | run on demand via `bun run mutate` |
+
+`tests/i18n-catalog-parity.test.ts` is a contract test of the second kind: it
+guards catalog ↔ Rust-mirror ↔ JS-term drift, pinning `shell/src/i18n/en.json`
+as the single source of truth for OS-conditional terminology (see
+[`i18n.md`](i18n.md)). The Rust tray side hand-mirrors the `app-container`
+noun via `cfg!(target_os)` instead of an ICU runtime, and this test fails if
+that mirror or the catalog spelling drifts.
 
 **Not present today** (gaps, see §8):
 - No end-to-end test against a real (or recorded) Copilot backend.
