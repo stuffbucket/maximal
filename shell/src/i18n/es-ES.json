@@ -1,1 +1,6 @@
-{}
+{
+  "account-roster-sub": "Otras cuentas guardadas en {os, select, macos {este Mac} other {este ordenador}}. Al cambiar, el proxy se reinicia con la sesión iniciada en esa cuenta.",
+  "account-remembered-sub": "Cuentas con las que ha iniciado sesión anteriormente en {os, select, macos {este Mac} other {este ordenador}}. Al elegir una, el proxy se reinicia con la sesión iniciada en esa cuenta.",
+  "account-gh-reuse-sub": "Inicie sesión con una cuenta en la que ya tiene sesión iniciada con {ghCode} en {os, select, macos {este Mac} other {este ordenador}}: sin ningún código que copiar.",
+  "dashboard-col-cost": "Coste"
+}

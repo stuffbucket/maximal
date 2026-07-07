@@ -1,1 +1,5 @@
-{}
+{
+  "account-requirement-sub": "Maximal forwards requests through your own Copilot licence. {plansLink}.",
+  "account-waiting-authorization": "Waiting for authorisation · expires {expiresAt}",
+  "models-sub": "Models available to apps through Maximal, grouped by kind. The list is fetched from the provider — refresh to pull the current catalogue if a model looks missing."
+}
