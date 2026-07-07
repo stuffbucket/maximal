@@ -3,10 +3,23 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches: [ "main" ]
-  # Rebuild the site whenever a new release is published so the
-  # download links pick up the new version automatically.
-  release:
-    types: [ published ]
+    # Only redeploy when something the deployed site actually depends on
+    # changes. A src-only or test-only commit no longer rebuilds+redeploys
+    # Pages — the previously unfiltered trigger multiplied deploy volume (and
+    # so the odds of the GitHub Pages backend flakiness / the re-run artifact
+    # trap in #239) on busy main days (issue #222 / #218; see
+    # docs/decisions/site-runtime-version-manifest.md).
+    #
+    # `site/public/updates/manifest.json` is listed on purpose: release.yml's
+    # `manifest` job commits that file to main on publish, and this filter is
+    # what turns that commit into exactly one Pages deploy — so a release
+    # advertises its new version to the site with NO explicit dispatch (the
+    # `redeploy-site` job that used to do that is now gone). It lives under
+    # site/public/ so `site/**` already covers it; it is named here only to
+    # document that the release→site path rides this trigger.
+    paths:
+      - "site/**"
+      - ".github/workflows/deploy-pages.yml"
   workflow_dispatch:
 
 # Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages.
@@ -51,46 +64,6 @@ jobs:
         working-directory: site
         run: bun install --frozen-lockfile
 
-      # Guard against the publish→deploy propagation race. The `release:
-      # published` event fires the deploy seconds before GitHub's
-      # `releases/latest` endpoint recomputes which release is "latest", so the
-      # build below would resolve the PREVIOUS tag and ship stale version +
-      # download links (observed on v0.4.36: the auto-deploy ran 6s after
-      # publish and shipped v0.4.35). The cache-busting in site/src/lib/version.ts
-      # defeats CDN staleness but not this server-side lag — a fresh body still
-      # names the old release until propagation completes.
-      #
-      # So when a release publish triggers this run, poll until the API reflects
-      # the just-published tag before building. Only for non-prereleases: the
-      # landing page tracks the latest *stable* release (resolveLatestRelease →
-      # releases/latest), which never reports a prerelease, so gating a beta
-      # publish on it would spin until timeout. A push / manual dispatch has no
-      # specific tag to wait for and skips this entirely.
-      - name: Wait for releases/latest to reflect this release
-        if: github.event_name == 'release' && github.event.release.prerelease == false
-        env:
-          GH_TOKEN: ${{ github.token }}
-          EXPECTED_TAG: ${{ github.event.release.tag_name }}
-        run: |
-          set -euo pipefail
-          echo "Waiting for releases/latest to report ${EXPECTED_TAG}..."
-          for attempt in $(seq 1 30); do
-            # Cache-bust the CDN (its key includes the query string) and force
-            # revalidation, mirroring site/src/lib/version.ts.
-            latest=$(gh api \
-              -H "Cache-Control: no-cache" \
-              "repos/${GITHUB_REPOSITORY}/releases/latest?_cb=${attempt}-${RANDOM}" \
-              --jq '.tag_name' 2>/dev/null || echo "")
-            if [ "$latest" = "$EXPECTED_TAG" ]; then
-              echo "releases/latest is ${latest} (attempt ${attempt}); proceeding."
-              exit 0
-            fi
-            echo "attempt ${attempt}: releases/latest=${latest:-<none>}, want ${EXPECTED_TAG}; retrying in 10s"
-            sleep 10
-          done
-          echo "::error::releases/latest never reported ${EXPECTED_TAG} after ~5 min. Refusing to deploy a stale site; re-run this job once the API catches up." >&2
-          exit 1
-
       - name: Build Astro
         working-directory: site
         env:
@@ -103,6 +76,14 @@ jobs:
           # Authenticate the releases/latest lookup in index.astro so a busy
           # release day can't exhaust the anonymous 60-req/hr rate limit and
           # silently deploy a site with no version label / download links.
+          #
+          # RETAINED ON PURPOSE (issue #222 / #218): #221 added runtime
+          # manifest hydration, but it is progressive enhancement over this
+          # build-time resolution, which is still the server-rendered
+          # fail-closed fallback for no-JS / crawlers / a failed manifest
+          # fetch. So the site never fails to advertise a version even without
+          # the removed `redeploy-site` dispatch. Retiring this build-time
+          # GitHub-API lookup (and SITE_PIN) is Phase 4 / issue #223, not here.
           GITHUB_TOKEN: ${{ github.token }}
         run: bun run build
 
