@@ -23,6 +23,7 @@ import { dirname, join, resolve } from "node:path"
 
 const REPO = resolve(import.meta.dir, "..")
 const SETTINGS_ENTRY = join(REPO, "shell/ui/settings/index.html")
+const SETTINGS_VENDOR = join(REPO, "shell/ui/settings/vendor")
 const DASHBOARD_SRC = join(REPO, "shell/ui/dashboard")
 const SHELL_DIR = join(REPO, "shell")
 const DIST_ROOT = join(REPO, "shell/dist")
@@ -46,6 +47,12 @@ async function buildSettings(): Promise<void> {
     for (const log of result.logs) console.error(log)
     throw new Error("settings build failed")
   }
+  // Self-hosted web fonts. The @font-face rules in index.html reference
+  // ./vendor/fonts/*.woff2 with a bare relative URL, which Bun's HTML
+  // bundler leaves untouched (it neither inlines nor rewrites them). Copy
+  // the vendored woff2 verbatim next to the bundle, same as the dashboard
+  // serves its ./vendor/ assets, so the webview never hits a CDN.
+  await cp(SETTINGS_VENDOR, join(SETTINGS_OUT, "vendor"), { recursive: true })
 }
 
 async function copyDashboard(): Promise<void> {
