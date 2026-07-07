@@ -17,7 +17,7 @@
  * tests fail with an opaque "Cannot find module '~/generated/ui-embed'".
  */
 
-import { beforeEach } from "bun:test"
+import { afterEach, beforeEach, mock } from "bun:test"
 import consola from "consola"
 import fs from "node:fs"
 import os from "node:os"
@@ -32,6 +32,18 @@ import { ensureUiEmbedStub } from "../scripts/ensure-ui-embed-stub"
 // of lines. Level 3 (Info) hides debug(4)/trace(5); errors/warns still show.
 beforeEach(() => {
   consola.level = 3
+})
+
+// Defense-in-depth safety net: restore all `spyOn` spies after every test.
+// Registered in the preload, so this is the OUTERMOST afterEach and runs LAST
+// (after any file's own afterEach), catching a spy a file forgot to restore.
+// A leaked spyOn permanently patches the real method for every later file in
+// the Bun worker — a classic CI-order-dependent flake. This does NOT undo
+// `mock.module` (that must still be restored per-file in afterAll; see
+// ADR-0011); it only covers spyOn, which today every file self-manages — this
+// keeps that true even if a future test forgets.
+afterEach(() => {
+  mock.restore()
 })
 
 // Force the EMPTY stub: a stray build (build:ui / app:dev / ui:harness) may have

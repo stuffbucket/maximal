@@ -206,6 +206,9 @@ await mock.module("~/services/github/get-user", () => ({
 }))
 
 await mock.module("~/lib/token", () => ({
+  // Spread the real module so exports this test doesn't override stay intact
+  // for sibling files while the mock is active. See ADR-0011.
+  ...realTokenModule,
   setupCopilotToken: () => Promise.resolve(),
 }))
 
