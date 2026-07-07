@@ -18,7 +18,11 @@
  *   - On followup turns, the per-turn upstream index resets to 0 but
  *     the client cursor must keep climbing
  *   - message_delta / message_stop on intermediate turns are swallowed;
- *     only the final turn's terminals reach the client
+ *     only the final turn's terminals reach the client (but every turn's
+ *     usage is summed into that final message_delta — each turn is a
+ *     separately-billed upstream call)
+ *   - while a gap produces no content (tool execution, the next upstream
+ *     turn's round-trip) periodic `ping` events keep the stream visibly alive
  */
 
 import type { ConsolaInstance } from "consola"
@@ -27,6 +31,7 @@ import type { SSEStreamingApi } from "hono/streaming"
 import type {
   AnthropicAssistantContentBlock,
   AnthropicMessage,
+  AnthropicMessageDeltaEvent,
   AnthropicMessagesPayload,
   AnthropicStreamEventData,
   AnthropicStreamState,
@@ -75,6 +80,9 @@ interface StreamingAgentArgs {
    *  real createChatCompletions; pass a stub to drive synthetic
    *  chunk streams. */
   upstreamCall?: UpstreamCall
+  /** Keepalive-ping interval for silent gaps (tool execution, next upstream
+   *  turn). Test seam; defaults to {@link HEARTBEAT_INTERVAL_MS}. */
+  heartbeatIntervalMs?: number
 }
 
 export async function runStreamingAgent(
@@ -89,6 +97,13 @@ export async function runStreamingAgent(
   const cursor = { next: 0 }
   let messageStartEmitted = false
   let bufferedFinalEvents: Array<AnthropicStreamEventData> = []
+  // Every intermediate turn is a real, separately-billed Copilot call. Only
+  // the last turn's terminal events reach the client, so its lone usage count
+  // would under-report the whole request. Sum every turn's usage and stamp the
+  // total onto the terminal message_delta before it goes out.
+  type DeltaUsage = NonNullable<AnthropicMessageDeltaEvent["usage"]>
+  const usageTotal: DeltaUsage = { input_tokens: 0, output_tokens: 0 }
+  const heartbeatIntervalMs = args.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS
 
   debugLazy(logger, () => [
     "web-tools stream start",
@@ -118,9 +133,11 @@ export async function runStreamingAgent(
       executor,
       state,
       upstreamCall: args.upstreamCall ?? createChatCompletions,
+      heartbeatIntervalMs,
     })
     messageStartEmitted = turnResult.messageStartEmitted
     bufferedFinalEvents = turnResult.bufferedFinal
+    accumulateTurnUsage(usageTotal, turnResult.bufferedFinal)
 
     if (
       turnResult.stopReason === "tool_use"
@@ -142,9 +159,38 @@ export async function runStreamingAgent(
     break
   }
 
-  // Emit the buffered terminal events from the last turn.
+  // Emit the buffered terminal events from the last turn, stamping the summed
+  // cross-turn usage onto the final message_delta so the client bills for every
+  // turn, not just the last one.
   for (const ev of bufferedFinalEvents) {
+    if (ev.type === "message_delta") ev.usage = usageTotal
     await writeEvent(args.stream, ev)
+  }
+}
+
+/**
+ * Fold one turn's terminal `message_delta.usage` into the running total. Each
+ * agent turn is a separately-billed upstream call; summing keeps the single
+ * client-facing usage report honest. Missing fields default to 0; optional
+ * cache counts are only surfaced once a turn actually reports them.
+ */
+function accumulateTurnUsage(
+  total: NonNullable<AnthropicMessageDeltaEvent["usage"]>,
+  turnEvents: Array<AnthropicStreamEventData>,
+): void {
+  for (const ev of turnEvents) {
+    if (ev.type !== "message_delta" || !ev.usage) continue
+    const u = ev.usage
+    total.input_tokens = (total.input_tokens ?? 0) + (u.input_tokens ?? 0)
+    total.output_tokens += u.output_tokens
+    if (u.cache_read_input_tokens !== undefined) {
+      total.cache_read_input_tokens =
+        (total.cache_read_input_tokens ?? 0) + u.cache_read_input_tokens
+    }
+    if (u.cache_creation_input_tokens !== undefined) {
+      total.cache_creation_input_tokens =
+        (total.cache_creation_input_tokens ?? 0) + u.cache_creation_input_tokens
+    }
   }
 }
 
@@ -174,6 +220,7 @@ interface TurnArgs {
   executor: Executor
   state: RequestState
   upstreamCall: UpstreamCall
+  heartbeatIntervalMs: number
 }
 
 interface OpenBlock {
@@ -195,12 +242,20 @@ async function runOneStreamingTurn(args: TurnArgs): Promise<TurnResult> {
   const openAIPayload = translateToOpenAI(args.payload)
   openAIPayload.stream = true
 
-  const response = await args.upstreamCall(openAIPayload, {
-    requestId: args.options.requestId,
-    sessionId: args.options.sessionId,
-    compactType: args.options.compactType,
-    subagentMarker: args.options.subagentMarker,
-  })
+  const response = await withHeartbeat(
+    {
+      stream: args.stream,
+      messageStartEmitted: args.messageStartEmitted,
+      intervalMs: args.heartbeatIntervalMs,
+    },
+    () =>
+      args.upstreamCall(openAIPayload, {
+        requestId: args.options.requestId,
+        sessionId: args.options.sessionId,
+        compactType: args.options.compactType,
+        subagentMarker: args.options.subagentMarker,
+      }),
+  )
 
   if (isNonStreaming(response)) {
     throw new Error(
@@ -246,6 +301,7 @@ async function runOneStreamingTurn(args: TurnArgs): Promise<TurnResult> {
         assistantContent,
         bufferedFinal,
         logger: args.options.logger,
+        heartbeatIntervalMs: args.heartbeatIntervalMs,
       })
       if (dispatched.stopReason !== undefined)
         stopReason = dispatched.stopReason
@@ -278,6 +334,7 @@ interface DispatchArgs {
   assistantContent: Array<AnthropicAssistantContentBlock>
   bufferedFinal: Array<AnthropicStreamEventData>
   logger: ConsolaInstance
+  heartbeatIntervalMs: number
 }
 
 async function dispatchEvent(
@@ -447,7 +504,14 @@ async function handleBlockStop(
         name: ToolName
       }
       const t0 = Date.now()
-      const outcome = await executeToolUse(narrowed, d.executor, d.state)
+      const outcome = await withHeartbeat(
+        {
+          stream: d.stream,
+          messageStartEmitted: d.messageStartEmitted,
+          intervalMs: d.heartbeatIntervalMs,
+        },
+        () => executeToolUse(narrowed, d.executor, d.state),
+      )
       const ms = Date.now() - t0
       debugLazy(d.logger, () => [
         "web-tools outcome",
@@ -488,6 +552,51 @@ async function writeEvent(
     event: event.type,
     data: JSON.stringify(event),
   })
+}
+
+/**
+ * Interval between keepalive pings emitted while awaiting a silent gap (tool
+ * execution or the next upstream turn). Mirrors Anthropic's own cadence of
+ * periodic `ping` events across long-running requests so a slow web fetch or
+ * upstream round-trip doesn't look like a stalled stream to the client.
+ */
+const HEARTBEAT_INTERVAL_MS = 5_000
+
+/**
+ * Run `work` while emitting `ping` events every {@link HEARTBEAT_INTERVAL_MS}
+ * so the SSE connection stays visibly alive across a gap that produces no
+ * content. The wrapped `work` MUST NOT itself write to `stream` — a ping firing
+ * mid-write would interleave a partial event. Callers pass only stream-silent
+ * awaits (tool execution, the upstream fetch). Pings are suppressed until
+ * `messageStartEmitted` is true, since a ping before `message_start` is not a
+ * valid Anthropic stream. The interval is always cleared, even if `work` throws.
+ */
+async function withHeartbeat<T>(
+  opts: {
+    stream: SSEStreamingApi
+    messageStartEmitted: boolean
+    intervalMs: number
+  },
+  work: () => Promise<T>,
+): Promise<T> {
+  const { stream, messageStartEmitted, intervalMs } = opts
+  if (!messageStartEmitted) return work()
+  let pinging = false
+  const timer = setInterval(() => {
+    // Guard against overlapping writes if a previous ping is still in flight.
+    if (pinging) return
+    pinging = true
+    void stream
+      .writeSSE({ event: "ping", data: '{"type":"ping"}' })
+      .finally(() => {
+        pinging = false
+      })
+  }, intervalMs)
+  try {
+    return await work()
+  } finally {
+    clearInterval(timer)
+  }
 }
 
 // Re-exports for the flow integration site.

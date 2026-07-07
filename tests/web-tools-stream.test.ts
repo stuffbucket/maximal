@@ -86,7 +86,9 @@ function toolUseTurn(opts: {
   toolId: string
   toolName: string
   input: Record<string, unknown>
+  usage?: { prompt_tokens: number; completion_tokens: number }
 }): Array<{ data?: string }> {
+  const usage = opts.usage ?? { prompt_tokens: 1, completion_tokens: 1 }
   return [
     chunk({
       id: "msg_1",
@@ -149,13 +151,21 @@ function toolUseTurn(opts: {
       created: 0,
       model: "x",
       choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
-      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      usage: {
+        prompt_tokens: usage.prompt_tokens,
+        completion_tokens: usage.completion_tokens,
+        total_tokens: usage.prompt_tokens + usage.completion_tokens,
+      },
     }),
     { data: "[DONE]" },
   ]
 }
 
-function textTurn(text: string): Array<{ data?: string }> {
+function textTurn(
+  text: string,
+  usage?: { prompt_tokens: number; completion_tokens: number },
+): Array<{ data?: string }> {
+  const u = usage ?? { prompt_tokens: 1, completion_tokens: 1 }
   return [
     chunk({
       id: "msg_2",
@@ -176,7 +186,11 @@ function textTurn(text: string): Array<{ data?: string }> {
       created: 0,
       model: "x",
       choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
-      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      usage: {
+        prompt_tokens: u.prompt_tokens,
+        completion_tokens: u.completion_tokens,
+        total_tokens: u.prompt_tokens + u.completion_tokens,
+      },
     }),
     { data: "[DONE]" },
   ]
@@ -370,5 +384,78 @@ describe("runStreamingAgent", () => {
     expect(
       blockStarts.find((b) => b.type === "server_tool_use"),
     ).toBeUndefined()
+  })
+})
+
+describe("runStreamingAgent — usage + keepalive", () => {
+  beforeEach(() => {
+    ;(upstreamCall as unknown as { mockClear: () => void }).mockClear()
+    turns.length = 0
+    turnIdx = 0
+  })
+
+  it("sums usage across every agent turn into the final message_delta", async () => {
+    // Turn 1 (tool call): 10 in / 20 out. Turn 2 (final text): 30 in / 40 out.
+    // Only the final terminal events reach the client, so its usage must carry
+    // the whole request's total, not just turn 2's.
+    setNextTurns(
+      toolUseTurn({
+        toolId: "tooluse_1",
+        toolName: "web_search",
+        input: { query: "shannon" },
+        usage: { prompt_tokens: 10, completion_tokens: 20 },
+      }),
+      textTurn("Claude Shannon was born in 1916.", {
+        prompt_tokens: 30,
+        completion_tokens: 40,
+      }),
+    )
+    const exec = new FakeExecutor()
+    const { stream, events } = captureStream()
+
+    await runStreamingAgent({
+      initialPayload: { ...basePayload, tools: [searchTool] },
+      policy: searchPolicy,
+      stream,
+      executor: exec,
+      options: baseOptions,
+      upstreamCall,
+    })
+
+    const deltas = events.filter((e) => e.event === "message_delta")
+    // Exactly one terminal message_delta reaches the client.
+    expect(deltas.length).toBe(1)
+    const usage = (deltas[0]?.data as { usage: Record<string, number> }).usage
+    expect(usage.input_tokens).toBe(40) // 10 + 30
+    expect(usage.output_tokens).toBe(60) // 20 + 40
+  })
+
+  it("emits keepalive pings while a tool executes", async () => {
+    // A slow executor holds the tool-execution gap open; a short injected
+    // heartbeat interval fires a ping inside that gap without a real 5s wait.
+    setNextTurns(
+      toolUseTurn({
+        toolId: "tooluse_1",
+        toolName: "web_search",
+        input: { query: "shannon" },
+      }),
+      textTurn("done"),
+    )
+    const exec = new FakeExecutor()
+    exec.delayMs = 60
+    const { stream, events } = captureStream()
+
+    await runStreamingAgent({
+      initialPayload: { ...basePayload, tools: [searchTool] },
+      policy: searchPolicy,
+      stream,
+      executor: exec,
+      options: baseOptions,
+      upstreamCall,
+      heartbeatIntervalMs: 10,
+    })
+
+    expect(exec.searchCalls).toEqual(["shannon"])
+    expect(events.some((e) => e.event === "ping")).toBe(true)
   })
 })
