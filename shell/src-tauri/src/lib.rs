@@ -1495,6 +1495,18 @@ fn dismiss_splash(app: &AppHandle) {
     });
 }
 
+/// The OS-conditional container noun. Trivial mirror of the `app-container`
+/// term in shell/src/i18n/en.json (the single source of truth) — kept in
+/// sync by tests/i18n-catalog-parity.test.ts. We intentionally do NOT pull
+/// an ICU runtime into Rust for two words.
+fn app_container_noun() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "menu bar"
+    } else {
+        "system tray"
+    }
+}
+
 /// One-shot "we're up" notification so users who launched from Finder
 /// know it's running and where to find it (menu bar, not Dock). Same
 /// best-effort caveats as `fire_rejection_notification`: a permission
@@ -1503,11 +1515,12 @@ fn fire_startup_notification(app: &AppHandle) {
     use tauri_plugin_notification::NotificationExt;
     // Where the icon lives — and which way to point — is platform-specific:
     // macOS puts it in the top menu bar (↑); Windows puts it in the
-    // bottom-right system tray (↓). Leave the macOS copy exactly as-is.
+    // bottom-right system tray (↓). The noun comes from the single-source
+    // `app_container_noun()` mirror; only the arrow/verb wording is inline.
     let body = if cfg!(target_os = "macos") {
-        "Look for the Maximal icon in your menu bar ↑"
+        format!("Look for the Maximal icon in your {} ↑", app_container_noun())
     } else {
-        "Maximal is running in your system tray ↓"
+        format!("Maximal is running in your {} ↓", app_container_noun())
     };
     if let Err(err) = app
         .notification()
