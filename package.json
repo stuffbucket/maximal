@@ -44,6 +44,7 @@
     "lint": "eslint --cache",
     "lint:all": "eslint --cache .",
     "lint:fast": "oxlint",
+    "measure:baseline": "bun scripts/dev/measure-baseline.ts",
     "mutate": "stryker run",
     "prepack": "bun run build",
     "package-dmg": "bun scripts/package-dmg.ts",
