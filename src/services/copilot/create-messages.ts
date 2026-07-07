@@ -40,7 +40,6 @@ const allowedAnthropicBetas = new Set([
 const buildAnthropicBetaHeader = (
   anthropicBetaHeader: string | undefined,
   thinking: AnthropicMessagesPayload["thinking"],
-  _model: string,
 ): string | undefined => {
   const isAdaptiveThinking = thinking?.type === "adaptive"
 
@@ -51,11 +50,8 @@ const buildAnthropicBetaHeader = (
       .filter((item) => item.length > 0)
       .filter((item) => allowedAnthropicBetas.has(item))
 
-    // in vscode copilot extension, advanced-tool-use is enabled by default
-    // align header with vscode copilot extension
-    const uniqueFilteredBetas = [...filteredBeta]
-    if (uniqueFilteredBetas.length > 0) {
-      return uniqueFilteredBetas.join(",")
+    if (filteredBeta.length > 0) {
+      return filteredBeta.join(",")
     }
 
     return undefined
@@ -133,7 +129,6 @@ export const createMessages = async (
   const anthropicBeta = buildAnthropicBetaHeader(
     anthropicBetaHeader,
     payload.thinking,
-    payload.model,
   )
   if (anthropicBeta) {
     headers["anthropic-beta"] = anthropicBeta
