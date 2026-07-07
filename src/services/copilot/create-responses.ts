@@ -411,11 +411,36 @@ export const createResponses = async (
 
   consola.log(`<-- model: ${payload.model}`)
 
-  const response = await sendRequest(`${copilotBaseUrl(state)}/responses`, {
+  let response = await sendRequest(`${copilotBaseUrl(state)}/responses`, {
     method: "POST",
     headers,
     body: JSON.stringify(payload),
   })
+
+  // Defensive fallback for the Copilot/OpenAI-Responses-specific
+  // prompt_cache_retention param: some model/endpoint combos have historically
+  // 400'd with "Unsupported parameter: prompt_cache_retention". If that exact
+  // rejection occurs, strip the field and retry the request ONCE without it, so
+  // opting into cache retention is safe even where a specific endpoint rejects
+  // it. Any other 400 is left to the normal error path below (not retried).
+  if (
+    !response.ok
+    && response.status === 400
+    && payload.prompt_cache_retention
+  ) {
+    const probeBody = await response.clone().text()
+    if (isUnsupportedPromptCacheRetention(probeBody)) {
+      consola.warn(
+        "Copilot rejected prompt_cache_retention; retrying once without it",
+      )
+      delete payload.prompt_cache_retention
+      response = await sendRequest(`${copilotBaseUrl(state)}/responses`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(payload),
+      })
+    }
+  }
 
   logCopilotRateLimits(response.headers)
 
@@ -445,4 +470,20 @@ export const createResponses = async (
   }
 
   return (await response.json()) as ResponsesResult
+}
+
+/**
+ * True if a 400 body indicates the Copilot/OpenAI-Responses endpoint rejected
+ * the prompt_cache_retention param specifically (vs any other bad-request
+ * cause). Matches the observed "Unsupported parameter: prompt_cache_retention"
+ * shape defensively across JSON/text bodies via a substring check.
+ */
+export function isUnsupportedPromptCacheRetention(body: string): boolean {
+  const text = body.toLowerCase()
+  return (
+    text.includes("prompt_cache_retention")
+    && (text.includes("unsupported parameter")
+      || text.includes("unknown parameter")
+      || text.includes("unsupported value"))
+  )
 }

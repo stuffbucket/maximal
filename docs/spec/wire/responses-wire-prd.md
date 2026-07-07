@@ -48,6 +48,18 @@ Body is a `ResponsesPayload`
    `max_prompt_tokens`) when the model supports it
    (`applyResponsesApiContextManagement()`); slice input history to the
    latest compaction (`compactInputByLatestCompaction()`).
+5. **Prompt-cache retention** — when the `promptCacheRetention` config
+   flag is set (`"in_memory"` | `"24h"`; default UNSET), inject
+   `prompt_cache_retention` into the payload. On the native passthrough it
+   only fills in a value the client omitted (never overrides an explicit
+   one); the translated Messages→Responses path sets it in
+   `handleWithResponsesApi`. This is Copilot/OpenAI-Responses-specific
+   server-side prefix caching (cached input tokens ~10x cheaper; `"24h"`
+   keeps the prefix warm across long pauses). Independent from `store`.
+   If a specific endpoint rejects the param with a
+   `Unsupported parameter: prompt_cache_retention` 400,
+   `create-responses.ts` strips it and retries once
+   (`isUnsupportedPromptCacheRetention`).
 
 ## Upstream call
 

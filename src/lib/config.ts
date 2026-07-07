@@ -29,6 +29,16 @@ export interface AppConfig {
   extraPrompts?: Record<string, string>
   smallModel?: string
   responsesApiContextManagementModels?: Array<string>
+  /**
+   * Copilot/OpenAI-Responses-specific server-side prefix-cache retention for
+   * the `/responses` path. UNSET (undefined) → param is not sent, behavior
+   * unchanged. "24h" keeps the cached prefix alive up to 24h (default is a
+   * few minutes); cached input tokens are ~10x cheaper. Opt-in because some
+   * model/endpoint combos have historically 400'd on this param — enablement
+   * is made safe by a one-shot strip-and-retry fallback in create-responses.ts.
+   * NOTE: independent from `store` (which controls response persistence/ZDR).
+   */
+  promptCacheRetention?: "in_memory" | "24h"
   modelReasoningEfforts?: Record<
     string,
     "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
@@ -342,6 +352,16 @@ export function getResponsesApiContextManagementModels(): Array<string> {
 
 export function isResponsesApiContextManagementModel(model: string): boolean {
   return getResponsesApiContextManagementModels().includes(model)
+}
+
+/**
+ * Copilot/OpenAI-Responses-specific prefix-cache retention knob. Returns the
+ * configured value or `undefined` (the conservative default → param omitted,
+ * behavior unchanged). A future non-Copilot provider path won't use this.
+ */
+export function getPromptCacheRetention(): "in_memory" | "24h" | undefined {
+  const config = getConfig()
+  return config.promptCacheRetention
 }
 
 export function getReasoningEffortForModel(
