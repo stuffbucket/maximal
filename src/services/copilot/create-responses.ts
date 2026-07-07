@@ -1,24 +1,18 @@
 import consola from "consola"
 import { events } from "fetch-event-stream"
 
-import type { CompactType } from "~/lib/compact"
-import type { SubagentMarker } from "~/lib/subagent"
+import { copilotBaseUrl } from "~/lib/api-config"
+import { sendRequest } from "~/lib/send-request"
+import { state } from "~/lib/state"
+
+import type { Initiator } from "./agent-initiator"
+import type { CopilotCallOptions } from "./upstream-request"
 
 import {
-  copilotBaseUrl,
-  copilotHeaders,
-  prepareForCompact,
-  prepareInteractionHeaders,
-} from "~/lib/api-config"
-import { isAuthFatal, parseCopilotErrorBody } from "~/lib/copilot-error-parser"
-import { logCopilotRateLimits } from "~/lib/copilot-rate-limit"
-import { CopilotAuthFatalError, HTTPError } from "~/lib/error"
-import { sendRequest } from "~/lib/send-request"
-import {
-  clearLastUpstreamRejection,
-  setLastUpstreamRejection,
-  state,
-} from "~/lib/state"
+  buildCopilotHeaders,
+  finishUpstreamResponse,
+  requireCopilotToken,
+} from "./upstream-request"
 
 export interface ResponsesPayload {
   model: string
@@ -375,36 +369,22 @@ export interface ResponseTextDoneEvent {
 export type ResponsesStream = ReturnType<typeof events>
 export type CreateResponsesReturn = ResponsesResult | ResponsesStream
 
-interface ResponsesRequestOptions {
+interface ResponsesRequestOptions extends CopilotCallOptions {
   vision: boolean
-  initiator: "agent" | "user"
-  subagentMarker?: SubagentMarker | null
-  requestId: string
-  sessionId?: string
-  compactType?: CompactType
+  initiator: Initiator
 }
 
 export const createResponses = async (
   payload: ResponsesPayload,
-  {
+  { vision, initiator, ...callOptions }: ResponsesRequestOptions,
+): Promise<CreateResponsesReturn> => {
+  requireCopilotToken()
+
+  const headers = buildCopilotHeaders(state, {
+    ...callOptions,
     vision,
     initiator,
-    subagentMarker,
-    requestId,
-    sessionId,
-    compactType,
-  }: ResponsesRequestOptions,
-): Promise<CreateResponsesReturn> => {
-  if (!state.copilotToken) throw new Error("Copilot token not found")
-
-  const headers: Record<string, string> = {
-    ...copilotHeaders(state, requestId, vision),
-    "x-initiator": initiator,
-  }
-
-  prepareInteractionHeaders(sessionId, Boolean(subagentMarker), headers)
-
-  prepareForCompact(headers, compactType)
+  })
 
   // service_tier is not supported by github copilot
   payload.service_tier = undefined
@@ -442,34 +422,10 @@ export const createResponses = async (
     }
   }
 
-  logCopilotRateLimits(response.headers)
-
-  if (!response.ok) {
-    consola.error("Failed to create responses", response)
-    const body = await response.clone().text()
-    const parsed = parseCopilotErrorBody(body)
-    if (isAuthFatal(response.status, parsed)) {
-      throw new CopilotAuthFatalError(
-        parsed.message,
-        response.status,
-        parsed.remediationUrl,
-      )
-    }
-    setLastUpstreamRejection({
-      message: parsed.message,
-      remediationUrl: parsed.remediationUrl,
-      status: response.status,
-    })
-    throw new HTTPError("Failed to create responses", response)
-  }
-
-  clearLastUpstreamRejection()
-
-  if (payload.stream) {
-    return events(response)
-  }
-
-  return (await response.json()) as ResponsesResult
+  return finishUpstreamResponse<ResponsesResult>(response, {
+    stream: Boolean(payload.stream),
+    errorMessage: "Failed to create responses",
+  })
 }
 
 /**
