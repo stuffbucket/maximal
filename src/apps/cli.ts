@@ -17,7 +17,7 @@
  * `api <client>` is the canonical human surface for a client's key; the
  * `--apiKeyHelper <label>` flag is the machine/legacy alias (the exact string
  * written into client configs). Both funnel through the same resolver in
- * `~/lib/api-key-helper`, keyed by the app's declared `apiKeyLabel` — so the
+ * `~/lib/auth/api-key-helper`, keyed by the app's declared `apiKeyLabel` — so the
  * key a client's config helper prints and the key `maximal api <client>` prints
  * are guaranteed identical.
  */
@@ -26,8 +26,8 @@ import type { ArgsDef, CommandDef } from "citty"
 import { defineCommand } from "citty"
 import consola from "consola"
 
-import { runApiKeyHelper } from "~/lib/api-key-helper"
-import { HELPER_SUBCOMMAND } from "~/lib/api-key-helper-tokens"
+import { runApiKeyHelper } from "~/lib/auth/api-key-helper"
+import { HELPER_SUBCOMMAND } from "~/lib/auth/api-key-helper-tokens"
 
 import type { AppCliOp, ClientApp } from "./index"
 

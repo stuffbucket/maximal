@@ -12,13 +12,13 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 
-import type { AnthropicMessagesPayload } from "~/lib/anthropic-types"
-import type { CopilotAuthFatalError as CopilotAuthFatalErrorType } from "~/lib/error"
+import type { CopilotAuthFatalError as CopilotAuthFatalErrorType } from "~/lib/errors/error"
+import type { AnthropicMessagesPayload } from "~/lib/models/anthropic-types"
 import type { ChatCompletionsPayload } from "~/services/copilot/create-chat-completions"
 import type { ResponsesPayload } from "~/services/copilot/create-responses"
 
-import { CopilotAuthFatalError, HTTPError } from "~/lib/error"
-import { state } from "~/lib/state"
+import { CopilotAuthFatalError, HTTPError } from "~/lib/errors/error"
+import { state } from "~/lib/runtime-state/state"
 import { createChatCompletions } from "~/services/copilot/create-chat-completions"
 import { createMessages } from "~/services/copilot/create-messages"
 import { createResponses } from "~/services/copilot/create-responses"

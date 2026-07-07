@@ -19,7 +19,7 @@ import type {
   DiagnosticsResponse,
   ModelsListResponse,
   UpdateStatusResponse,
-} from "../src/lib/settings-types"
+} from "../src/lib/config/settings-types"
 
 // gh-status isn't a settings-types export (it's typed in shell/src/proxy/client.ts),
 // so it's a plain shape here. installed:false hides the gh-reuse list.

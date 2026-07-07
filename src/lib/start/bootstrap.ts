@@ -23,29 +23,33 @@ import {
   markSignedIn,
   markSignedOut,
   registerAutoRecovery,
-} from "~/lib/auth-controller"
+} from "~/lib/auth/auth-controller"
 // Auto-recovery is parked behind config.autoRecoverAccount (defaults OFF).
 // Auto-switching identity needs prior user consent — same plan ≠ same data
 // governance — so the registration is gated below and the module is loaded
 // lazily only when the user has opted in. Off → degrade + surface the reason.
-import { attemptAutoRecovery } from "~/lib/auth-recovery"
-import { isAutoRecoverAccountEnabled } from "~/lib/config"
-import { CopilotAuthFatalError } from "~/lib/error"
-import { currentGitHubHost } from "~/lib/github-host"
+import { attemptAutoRecovery } from "~/lib/auth/auth-recovery"
+import { currentGitHubHost } from "~/lib/auth/github-host"
 import {
   migrateLegacyRecord,
   readDefaultRecord,
-} from "~/lib/github-token-store"
-import { PATHS } from "~/lib/paths"
-import { ensureSecretsDir, loadSecretIntoEnv, SECRET_DEFS } from "~/lib/secrets"
+} from "~/lib/auth/github-token-store"
+import {
+  ensureSecretsDir,
+  loadSecretIntoEnv,
+  SECRET_DEFS,
+} from "~/lib/auth/secrets"
+import { logUser, setupCopilotToken } from "~/lib/auth/token"
+import { isAutoRecoverAccountEnabled } from "~/lib/config/config"
+import { CopilotAuthFatalError } from "~/lib/errors/error"
+import { PATHS } from "~/lib/platform/paths"
+import { cacheModels } from "~/lib/platform/utils"
 import {
   clearTokenTrio,
   hasGithubToken,
   setGithubToken,
   state,
-} from "~/lib/state"
-import { logUser, setupCopilotToken } from "~/lib/token"
-import { cacheModels } from "~/lib/utils"
+} from "~/lib/runtime-state/state"
 import { getGitHubUser } from "~/services/github/get-user"
 
 import { emitBootStatus } from "./boot-status"

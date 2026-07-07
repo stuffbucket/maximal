@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import { Hono } from "hono"
 
-import { createAuthMiddleware } from "~/lib/request-auth"
-import { DiagnosticsResponse } from "~/lib/settings-types"
+import { createAuthMiddleware } from "~/lib/auth/request-auth"
+import { DiagnosticsResponse } from "~/lib/config/settings-types"
 import { server } from "~/server"
 
 import { settingsApiRoutes } from "../src/routes/settings/api"

@@ -7,7 +7,7 @@ import { getShellApiKey, openUrl, safeInvoke } from "./tauri/shell";
 import type {
   DiagnosticsResponse,
   UpdateStatusResponse,
-} from "../../src/lib/settings-types";
+} from "../../src/lib/config/settings-types";
 import type { AuthStatus, EventSubscription, UpstreamRejection } from "./proxy/client";
 import { apiCall, subscribeAuthEvents } from "./proxy/client";
 import { mountApiClients } from "./ui/islands/api-clients-island";

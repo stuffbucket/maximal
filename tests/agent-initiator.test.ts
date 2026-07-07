@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import type { AnthropicMessagesPayload } from "../src/lib/anthropic-types"
+import type { AnthropicMessagesPayload } from "../src/lib/models/anthropic-types"
 import type { ChatCompletionsPayload } from "../src/services/copilot/create-chat-completions"
 import type { ResponsesPayload } from "../src/services/copilot/create-responses"
 

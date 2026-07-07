@@ -12,8 +12,8 @@ import {
   isLoopbackAddress,
   normalizeApiKeys,
   requireGithubAuth,
-} from "../src/lib/request-auth"
-import { state } from "../src/lib/state"
+} from "../src/lib/auth/request-auth"
+import { state } from "../src/lib/runtime-state/state"
 
 function buildApp(opts: {
   apiKeys: Array<string>
@@ -630,7 +630,7 @@ describe("getConfiguredApiKeys integration", () => {
   // Inject the config directly (getConfiguredApiKeys accepts an optional
   // AppConfig, defaulting to getConfig()). This exercises the trim/dedupe/
   // filter logic on arbitrary — including deliberately schema-invalid —
-  // shapes WITHOUT a leak-prone mock.module of ~/lib/config and without
+  // shapes WITHOUT a leak-prone mock.module of ~/lib/config/config and without
   // round-tripping through writeConfig's validation.
   test("merges legacy apiKeys + enabled apiKeyEntries, trims & dedupes", () => {
     const keys = getConfiguredApiKeys({

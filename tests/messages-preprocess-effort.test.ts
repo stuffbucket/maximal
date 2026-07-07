@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 
-import type { AnthropicMessagesPayload } from "~/lib/anthropic-types"
+import type { AnthropicMessagesPayload } from "~/lib/models/anthropic-types"
 
-import { getConfig, writeConfig } from "../src/lib/config"
+import { getConfig, writeConfig } from "../src/lib/config/config"
 import { prepareMessagesApiPayload } from "../src/routes/messages/preprocess"
 
 // Mutation-rigor coverage for the reasoning-effort normalization block of

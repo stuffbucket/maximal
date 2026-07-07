@@ -14,8 +14,8 @@
 import { Hono } from "hono"
 import { z } from "zod"
 
-import { listActiveClients } from "~/lib/active-clients"
-import { forwardError } from "~/lib/error"
+import { forwardError } from "~/lib/errors/error"
+import { listActiveClients } from "~/lib/http/active-clients"
 
 const QuerySchema = z.object({
   maxAgeSeconds: z.coerce.number().int().min(5).max(600).default(60),

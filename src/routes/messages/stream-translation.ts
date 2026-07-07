@@ -1,7 +1,7 @@
 import {
   type AnthropicStreamEventData,
   type AnthropicStreamState,
-} from "~/lib/anthropic-types"
+} from "~/lib/models/anthropic-types"
 import {
   type ChatCompletionChunk,
   type Choice,

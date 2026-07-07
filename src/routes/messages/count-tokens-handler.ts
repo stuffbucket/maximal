@@ -2,16 +2,19 @@ import type { Context } from "hono"
 
 import consola from "consola"
 
-import { reverseId } from "~/lib/anthropic-id-rewrite"
+import {
+  getAnthropicApiKey,
+  getClaudeTokenMultiplier,
+} from "~/lib/config/config"
+import { sendRequest } from "~/lib/http/send-request"
+import { reverseId } from "~/lib/models/anthropic-id-rewrite"
 import {
   type AnthropicMessagesPayload,
   ANTHROPIC_API_VERSION,
-} from "~/lib/anthropic-types"
-import { getAnthropicApiKey, getClaudeTokenMultiplier } from "~/lib/config"
-import { sendRequest } from "~/lib/send-request"
-import { getTokenCount } from "~/lib/tokenizer"
+} from "~/lib/models/anthropic-types"
+import { getTokenCount } from "~/lib/models/tokenizer"
 
-import { findEndpointModel } from "../../lib/models"
+import { findEndpointModel } from "../../lib/models/models"
 import { translateToOpenAI } from "./non-stream-translation"
 import { stripUnsupportedTopLevelAnthropicFields } from "./preprocess"
 

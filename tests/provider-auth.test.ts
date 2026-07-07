@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test"
 
-import type { ResolvedProviderConfig } from "~/lib/config"
+import type { ResolvedProviderConfig } from "~/lib/config/config"
 
-import { sendProviderRequest } from "~/lib/send-request"
+import { sendProviderRequest } from "~/lib/http/send-request"
 
 import { buildProviderUpstreamHeaders } from "../src/services/providers/anthropic-proxy"
 

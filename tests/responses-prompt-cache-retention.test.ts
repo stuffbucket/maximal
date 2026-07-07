@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
 import { Hono } from "hono"
 
-import type { AnthropicMessagesPayload } from "~/lib/anthropic-types"
+import type { AnthropicMessagesPayload } from "~/lib/models/anthropic-types"
 import type { ResponsesPayload } from "~/services/copilot/create-responses"
 
-import { getConfig, writeConfig } from "../src/lib/config"
-import { state } from "../src/lib/state"
+import { getConfig, writeConfig } from "../src/lib/config/config"
+import { state } from "../src/lib/runtime-state/state"
 import { handleWithResponsesApi } from "../src/routes/messages/api-flows"
 import { responsesRoutes } from "../src/routes/responses/route"
 import {

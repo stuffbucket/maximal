@@ -3,7 +3,7 @@ import { useCallback, useState } from "react";
 import { Button } from "../../components/Button";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { Stack } from "../../components/Stack";
-import type { ApiKeyEntry } from "../../../../../src/lib/settings-types";
+import type { ApiKeyEntry } from "../../../../../src/lib/config/settings-types";
 
 import { AddConnection } from "./AddConnection";
 import { AdvancedSection } from "./AdvancedSection";

@@ -22,14 +22,14 @@ import { Hono } from "hono"
 
 import type { Model } from "~/services/copilot/get-models"
 
-import { forwardError } from "~/lib/error"
 import {
   ModelsListResponse,
   type ModelsListResponse as ModelsListResponseT,
   type ModelSummary as ModelSummaryT,
-} from "~/lib/settings-types"
-import { getModelsLoadedAtMs, state } from "~/lib/state"
-import { cacheModels } from "~/lib/utils"
+} from "~/lib/config/settings-types"
+import { forwardError } from "~/lib/errors/error"
+import { cacheModels } from "~/lib/platform/utils"
+import { getModelsLoadedAtMs, state } from "~/lib/runtime-state/state"
 
 import { respondValidated } from "./respond-validated"
 

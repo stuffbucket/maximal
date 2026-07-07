@@ -3,13 +3,16 @@ import { Hono } from "hono"
 import { cors } from "hono/cors"
 import { logger } from "hono/logger"
 
-import { BUILD_VERSION } from "./lib/build-info"
-import { staleRefreshMiddleware } from "./lib/refresh-models"
-import { createAuthMiddleware, requireGithubAuth } from "./lib/request-auth"
-import { getModelsLoadedAtMs } from "./lib/state"
-import { buildStatus } from "./lib/status"
-import { traceIdMiddleware } from "./lib/trace"
-import { cacheModels } from "./lib/utils"
+import {
+  createAuthMiddleware,
+  requireGithubAuth,
+} from "./lib/auth/request-auth"
+import { traceIdMiddleware } from "./lib/http/trace"
+import { staleRefreshMiddleware } from "./lib/models/refresh-models"
+import { cacheModels } from "./lib/platform/utils"
+import { getModelsLoadedAtMs } from "./lib/runtime-state/state"
+import { buildStatus } from "./lib/runtime-state/status"
+import { BUILD_VERSION } from "./lib/update/build-info"
 import { completionRoutes } from "./routes/chat-completions/route"
 import { debugRoutes } from "./routes/debug/route"
 import { embeddingRoutes } from "./routes/embeddings/route"

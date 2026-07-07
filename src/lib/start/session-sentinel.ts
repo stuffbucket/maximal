@@ -33,7 +33,7 @@
 import fs from "node:fs"
 import path from "node:path"
 
-import { PATHS } from "~/lib/paths"
+import { PATHS } from "~/lib/platform/paths"
 
 const SENTINEL_FILENAME = "session-running"
 

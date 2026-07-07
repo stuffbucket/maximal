@@ -17,9 +17,9 @@ import type {
   AnthropicResponse,
   AnthropicToolResultBlock,
   AnthropicToolUseBlock,
-} from "~/lib/anthropic-types"
+} from "~/lib/models/anthropic-types"
 
-import { debugLazy } from "~/lib/logger"
+import { debugLazy } from "~/lib/platform/logger"
 
 import type { Executor } from "./executor"
 

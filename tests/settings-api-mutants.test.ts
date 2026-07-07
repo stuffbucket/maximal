@@ -3,7 +3,7 @@
  * `src/routes/settings/api.ts`. Each block documents the surviving
  * mutant(s) it kills.
  *
- * `~/lib/version` is mocked so we can assert exact `source_branch`
+ * `~/lib/update/version` is mocked so we can assert exact `source_branch`
  * pass-through (kills the `git.branch ?? null` → `git.branch && null`
  * mutant). The mock must be installed before importing the route
  * module under test.
@@ -12,9 +12,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { Hono } from "hono"
 
-import { createAuthMiddleware } from "~/lib/request-auth"
-import { state } from "~/lib/state"
-import { getGitVersion, shortSha } from "~/lib/version"
+import { createAuthMiddleware } from "~/lib/auth/request-auth"
+import { state } from "~/lib/runtime-state/state"
+import { getGitVersion, shortSha } from "~/lib/update/version"
 import { settingsApiRoutes } from "~/routes/settings/api"
 import { authRoutes } from "~/routes/settings/auth"
 

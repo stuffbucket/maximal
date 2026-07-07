@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { BUILD_VERSION } from "~/lib/build-info"
+import { BUILD_VERSION } from "~/lib/update/build-info"
 import { server } from "~/server"
 
 describe("x-maximal-version response header", () => {

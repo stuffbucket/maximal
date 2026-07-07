@@ -3,7 +3,7 @@ import { existsSync } from "node:fs"
 import { dirname, join, normalize, resolve, sep } from "node:path"
 
 import { UI_FILES } from "~/generated/ui-embed"
-import { contentTypeForPath } from "~/lib/web-content-types"
+import { contentTypeForPath } from "~/lib/platform/web-content-types"
 
 /**
  * Serves the web UIs under `/ui/*`:

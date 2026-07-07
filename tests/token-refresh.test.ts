@@ -1,6 +1,9 @@
 import { expect, test } from "bun:test"
 
-import { getRefreshDeadlineMs, getRefreshPollDelayMs } from "../src/lib/token"
+import {
+  getRefreshDeadlineMs,
+  getRefreshPollDelayMs,
+} from "../src/lib/auth/token"
 
 test("builds refresh deadline from refresh_in and local time", () => {
   const nowMs = 1_000_000

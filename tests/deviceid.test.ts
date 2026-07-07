@@ -1,6 +1,6 @@
 import { afterAll, expect, mock, test } from "bun:test"
 
-import { getVSCodeDeviceId } from "../src/lib/deviceid"
+import { getVSCodeDeviceId } from "../src/lib/auth/deviceid"
 
 // Capture the real module so afterAll can restore it via an AWAITED
 // mock.module — `mock.restore()` does NOT undo `mock.module` in Bun, so

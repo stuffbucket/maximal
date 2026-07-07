@@ -1,7 +1,7 @@
 /**
  * /settings/api/apps — route-level coverage.
  *
- * Config comes from the REAL `~/lib/config`, which the global preload
+ * Config comes from the REAL `~/lib/config/config`, which the global preload
  * (tests/test-setup.ts) has already redirected to a throwaway
  * COPILOT_API_HOME temp dir — so getConfig/writeConfig round-trip through a
  * temp `config.json`, never the user's real config.
@@ -84,7 +84,7 @@ await mock.module("~/apps/claude-desktop/config", () => ({
 }))
 
 const { appsRoutes } = await import("~/routes/settings/apps")
-const { getConfig, writeConfig } = await import("~/lib/config")
+const { getConfig, writeConfig } = await import("~/lib/config/config")
 const { isProxyBaseUrlConfigured } = await import("~/apps/claude-code/config")
 
 function buildApp() {

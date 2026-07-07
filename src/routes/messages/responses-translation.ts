@@ -1,4 +1,8 @@
 import {
+  getExtraPromptForModel,
+  getReasoningEffortForModel,
+} from "~/lib/config/config"
+import {
   type AnthropicAssistantContentBlock,
   type AnthropicAssistantMessage,
   type AnthropicDocumentBlock,
@@ -14,12 +18,8 @@ import {
   type AnthropicToolUseBlock,
   type AnthropicUserContentBlock,
   type AnthropicUserMessage,
-} from "~/lib/anthropic-types"
-import {
-  getExtraPromptForModel,
-  getReasoningEffortForModel,
-} from "~/lib/config"
-import { parseUserIdMetadata } from "~/lib/utils"
+} from "~/lib/models/anthropic-types"
+import { parseUserIdMetadata } from "~/lib/platform/utils"
 import {
   type ResponsesPayload,
   type ResponseInputCompaction,

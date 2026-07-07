@@ -22,8 +22,8 @@ import {
   getAuthStatus,
   signOut,
   startDeviceFlow,
-} from "~/lib/auth-controller"
-import { forwardError } from "~/lib/error"
+} from "~/lib/auth/auth-controller"
+import { forwardError } from "~/lib/errors/error"
 
 export const authRoutes = new Hono()
 

@@ -22,7 +22,7 @@
 
 import type { Model } from "~/services/copilot/get-models"
 
-import { forwardId } from "~/lib/anthropic-id-rewrite"
+import { forwardId } from "~/lib/models/anthropic-id-rewrite"
 
 const EPOCH_ISO = new Date(0).toISOString()
 

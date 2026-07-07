@@ -1,13 +1,13 @@
 import { describe, expect, test } from "bun:test"
 
-import type { ApiKeyEntry, AppConfig } from "~/lib/config"
+import type { ApiKeyEntry, AppConfig } from "~/lib/config/config"
 
 import {
   apiKeyHelperCommand,
   isOwnedApiKeyHelper,
   resolveApiKey,
   runApiKeyHelper,
-} from "~/lib/api-key-helper"
+} from "~/lib/auth/api-key-helper"
 
 /**
  * Unit coverage for the generic apiKeyHelper resolver.

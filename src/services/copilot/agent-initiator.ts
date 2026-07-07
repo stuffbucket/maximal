@@ -1,4 +1,4 @@
-import type { AnthropicMessagesPayload } from "~/lib/anthropic-types"
+import type { AnthropicMessagesPayload } from "~/lib/models/anthropic-types"
 
 import type { ChatCompletionsPayload } from "./create-chat-completions"
 import type { ResponsesPayload } from "./create-responses"

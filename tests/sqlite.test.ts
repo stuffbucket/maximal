@@ -8,7 +8,7 @@ import {
   runMigrations,
   type SqliteDatabase,
   UnsupportedNodeSqliteRuntimeError,
-} from "~/lib/sqlite"
+} from "~/lib/platform/sqlite"
 
 describe("sqlite runtime support", () => {
   test("detects the minimum Node.js version for node:sqlite", () => {

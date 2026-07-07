@@ -2,16 +2,26 @@ import type { Context } from "hono"
 
 import type { Model } from "~/services/copilot/get-models"
 
-import { pickCopilotVariantId, reverseId } from "~/lib/anthropic-id-rewrite"
-import { type AnthropicMessagesPayload } from "~/lib/anthropic-types"
-import { awaitApproval } from "~/lib/approval"
-import { COMPACT_REQUEST } from "~/lib/compact"
-import { isMessagesApiEnabled } from "~/lib/config"
-import { createHandlerLogger, debugJson, debugLazy } from "~/lib/logger"
-import { findEndpointModel } from "~/lib/models"
-import { checkRateLimit } from "~/lib/rate-limit"
-import { state } from "~/lib/state"
-import { generateRequestIdFromPayload, getRootSessionId } from "~/lib/utils"
+import { isMessagesApiEnabled } from "~/lib/config/config"
+import { awaitApproval } from "~/lib/http/approval"
+import { checkRateLimit } from "~/lib/http/rate-limit"
+import {
+  pickCopilotVariantId,
+  reverseId,
+} from "~/lib/models/anthropic-id-rewrite"
+import { type AnthropicMessagesPayload } from "~/lib/models/anthropic-types"
+import { COMPACT_REQUEST } from "~/lib/models/compact"
+import { findEndpointModel } from "~/lib/models/models"
+import {
+  createHandlerLogger,
+  debugJson,
+  debugLazy,
+} from "~/lib/platform/logger"
+import {
+  generateRequestIdFromPayload,
+  getRootSessionId,
+} from "~/lib/platform/utils"
+import { state } from "~/lib/runtime-state/state"
 
 import {
   handleWithChatCompletions,

@@ -31,7 +31,7 @@ import {
   resolveLatestPrerelease,
   resolveLatestRelease,
 } from "../site/src/lib/version"
-import { parseManifestVersion } from "../src/lib/update-check"
+import { parseManifestVersion } from "../src/lib/update/update-check"
 
 // Widen the imported JSON literal to the declared contract type so channel
 // lookups (e.g. the optional `beta`) type-check against the schema, not the

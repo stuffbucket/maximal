@@ -10,7 +10,7 @@
 import type {
   AnthropicToolResultBlock,
   AnthropicToolUseBlock,
-} from "~/lib/anthropic-types"
+} from "~/lib/models/anthropic-types"
 
 import type { Executor, FetchResult, SearchHit, SearchResult } from "./executor"
 

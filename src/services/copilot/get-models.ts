@@ -1,10 +1,10 @@
 import consola from "consola"
 
-import { copilotBaseUrl, copilotModelsHeaders } from "~/lib/api-config"
-import { HTTPError } from "~/lib/error"
-import { GITHUB_API_TIMEOUT_MS } from "~/lib/http-timeouts"
-import { sendRequest } from "~/lib/send-request"
-import { state } from "~/lib/state"
+import { copilotBaseUrl, copilotModelsHeaders } from "~/lib/config/api-config"
+import { HTTPError } from "~/lib/errors/error"
+import { GITHUB_API_TIMEOUT_MS } from "~/lib/http/http-timeouts"
+import { sendRequest } from "~/lib/http/send-request"
+import { state } from "~/lib/runtime-state/state"
 
 export const getModels = async () => {
   consola.info(`Fetching models from ${copilotBaseUrl(state)}/models`)

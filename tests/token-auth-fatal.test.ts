@@ -14,12 +14,12 @@ import {
   test,
 } from "bun:test"
 
-import type { CopilotHost } from "~/lib/auth-types"
+import type { CopilotHost } from "~/lib/auth/auth-types"
 
-import { CopilotAuthFatalError, HTTPError } from "~/lib/error"
-import { state } from "~/lib/state"
-// Bypass Bun's module-mock registry for ~/lib/token. auth-controller.test.ts
-// installs a process-wide mock.module for "~/lib/token" (stubbing
+import { CopilotAuthFatalError, HTTPError } from "~/lib/errors/error"
+import { state } from "~/lib/runtime-state/state"
+// Bypass Bun's module-mock registry for ~/lib/auth/token. auth-controller.test.ts
+// installs a process-wide mock.module for "~/lib/auth/token" (stubbing
 // setupCopilotToken) so its own tests can observe controller-driven sign-in
 // without spinning up a real refresh loop. The afterAll restore is unreliable
 // across sibling test files in the same `bun test` process, so a normal
@@ -29,8 +29,8 @@ import { state } from "~/lib/state"
 // /* eslint-disable */ pragma below excludes the two __forTest symbols from
 // knip's unused-export check — they ARE used here, just behind a dynamic
 // specifier knip can't statically resolve.
-const tokenSpec = "../src/lib/token.ts?nomock=token-auth-fatal"
-const tokenMod = (await import(tokenSpec)) as typeof import("~/lib/token")
+const tokenSpec = "../src/lib/auth/token.ts?nomock=token-auth-fatal"
+const tokenMod = (await import(tokenSpec)) as typeof import("~/lib/auth/token")
 const {
   __resetTokenDepsForTests,
   __setTokenDepsForTests,

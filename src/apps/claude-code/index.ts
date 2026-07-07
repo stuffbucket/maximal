@@ -1,4 +1,4 @@
-import type { AppEntry } from "~/lib/settings-types"
+import type { AppEntry } from "~/lib/config/settings-types"
 
 import type { AppUninstallResult, ClientApp } from "../index"
 

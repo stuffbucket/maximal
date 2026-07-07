@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { forwardId, reverseId } from "../src/lib/anthropic-id-rewrite"
+import { forwardId, reverseId } from "../src/lib/models/anthropic-id-rewrite"
 
 describe("anthropic-id-rewrite", () => {
   const anthropicCases: Array<[string, string]> = [

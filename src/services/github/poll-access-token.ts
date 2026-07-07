@@ -1,9 +1,9 @@
 import consola from "consola"
 
-import { getOauthAppConfig, getOauthUrls } from "~/lib/api-config"
-import { DEVICE_POLL_TIMEOUT_MS } from "~/lib/http-timeouts"
-import { sendRequest } from "~/lib/send-request"
-import { sleep } from "~/lib/utils"
+import { getOauthAppConfig, getOauthUrls } from "~/lib/config/api-config"
+import { DEVICE_POLL_TIMEOUT_MS } from "~/lib/http/http-timeouts"
+import { sendRequest } from "~/lib/http/send-request"
+import { sleep } from "~/lib/platform/utils"
 
 import type { DeviceCodeResponse } from "./get-device-code"
 

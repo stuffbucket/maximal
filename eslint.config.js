@@ -1,7 +1,7 @@
 import config from "@echristian/eslint-config"
 
 // The single-mechanism invariant (ADR-0001): a credential token becomes an
-// Authorization / x-api-key header in EXACTLY one file, `src/lib/send-request.ts`.
+// Authorization / x-api-key header in EXACTLY one file, `src/lib/http/send-request.ts`.
 // This rule bans hand-building an auth string (`Bearer …`, `token …`) anywhere
 // else, so "one mechanism" can't silently regress — a new endpoint that tries
 // to attach its own token fails CI and is pushed toward sendRequest().
@@ -16,7 +16,7 @@ const tokenAttachmentGuard = {
   files: ["src/**/*.ts"],
   ignores: [
     // The mechanism itself — the ONE place tokens become auth headers.
-    "src/lib/send-request.ts",
+    "src/lib/http/send-request.ts",
     // Web-tools sandbox executor forwards a SEPARATE sandbox apiKey (not a
     // GitHub/Copilot token) to the web-tools service. Different credential
     // domain; not yet folded into sendRequest. Tracked as a follow-up.
@@ -33,13 +33,13 @@ const tokenAttachmentGuard = {
         selector:
           "TemplateLiteral > TemplateElement[value.raw=/(?:Bearer |token )$/]",
         message:
-          "Do not hand-build an Authorization value. Route the request through sendRequest() with a Credential; the token is attached inside src/lib/send-request.ts. See ADR-0001.",
+          "Do not hand-build an Authorization value. Route the request through sendRequest() with a Credential; the token is attached inside src/lib/http/send-request.ts. See ADR-0001.",
       },
       {
         selector:
           "Property[key.value='x-api-key'], Property[key.name='x-api-key']",
         message:
-          "Do not hand-attach an x-api-key header. Route the request through sendRequest() with a Credential ('anthropic'/'provider'); the key is attached inside src/lib/send-request.ts. See ADR-0001.",
+          "Do not hand-attach an x-api-key header. Route the request through sendRequest() with a Credential ('anthropic'/'provider'); the key is attached inside src/lib/http/send-request.ts. See ADR-0001.",
       },
     ],
   },

@@ -31,7 +31,7 @@ import {
   applyConfigLibraryProfile,
   getClaude3pDir,
 } from "~/apps/claude-desktop/config"
-import { atomicWriteJson } from "~/lib/atomic-json"
+import { atomicWriteJson } from "~/lib/platform/atomic-json"
 
 let dir: string
 

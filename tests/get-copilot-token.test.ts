@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 
-import { CopilotAuthFatalError, HTTPError } from "~/lib/error"
+import { CopilotAuthFatalError, HTTPError } from "~/lib/errors/error"
 import {
   getCopilotToken,
   parseCopilotAuthFailure,

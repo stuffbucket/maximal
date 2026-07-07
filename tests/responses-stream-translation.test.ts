@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import type { AnthropicStreamEventData } from "~/lib/anthropic-types"
+import type { AnthropicStreamEventData } from "~/lib/models/anthropic-types"
 import type { ResponseOutputItemAddedEvent } from "~/services/copilot/create-responses"
 
 import {

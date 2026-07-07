@@ -6,7 +6,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 
-import { BUILD_VERSION } from "~/lib/build-info"
+import { BUILD_VERSION } from "~/lib/update/build-info"
 import {
   __resetUpdateCheckDepsForTests,
   __setUpdateCheckDepsForTests,
@@ -14,7 +14,7 @@ import {
   getUpdateStatus,
   isNewerVersion,
   parseManifestVersion,
-} from "~/lib/update-check"
+} from "~/lib/update/update-check"
 
 /** A manifest body advertising `version` on the `stable` channel, exactly as
  *  the site build emits it. */

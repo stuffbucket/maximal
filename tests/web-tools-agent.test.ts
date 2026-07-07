@@ -5,7 +5,7 @@ import type {
   AnthropicMessagesPayload,
   AnthropicResponse,
   AnthropicToolUseBlock,
-} from "~/lib/anthropic-types"
+} from "~/lib/models/anthropic-types"
 import type { Executor } from "~/routes/messages/web-tools/executor"
 import type { WebToolPolicy } from "~/routes/messages/web-tools/rewriter"
 

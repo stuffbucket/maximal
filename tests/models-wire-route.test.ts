@@ -14,7 +14,7 @@ import { Hono } from "hono"
 
 import type { Model } from "~/services/copilot/get-models"
 
-import { setModels } from "~/lib/state"
+import { setModels } from "~/lib/runtime-state/state"
 import { modelRoutes } from "~/routes/models/route"
 
 const LEAK_VECTORS = [

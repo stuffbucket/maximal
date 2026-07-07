@@ -6,9 +6,10 @@ import type {
   AnthropicTextBlock,
   AnthropicToolResultBlock,
   AnthropicUserContentBlock,
-} from "~/lib/anthropic-types"
+} from "~/lib/models/anthropic-types"
 import type { Model } from "~/services/copilot/get-models"
 
+import { getReasoningEffortForModel } from "~/lib/config/config"
 import {
   COMPACT_AUTO_CONTINUE,
   COMPACT_REQUEST,
@@ -18,8 +19,7 @@ import {
   compactSystemPromptStarts,
   compactTextOnlyGuard,
   type CompactType,
-} from "~/lib/compact"
-import { getReasoningEffortForModel } from "~/lib/config"
+} from "~/lib/models/compact"
 
 export const TOOL_REFERENCE_TURN_BOUNDARY = "Tool loaded."
 

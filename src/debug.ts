@@ -4,15 +4,15 @@ import { defineCommand } from "citty"
 import consola from "consola"
 import os from "node:os"
 
+import { readDefaultRecord } from "./lib/auth/github-token-store"
+import { SECRET_DEFS, secretIsFromFile } from "./lib/auth/secrets"
 import {
   type AppConfig,
   DEFAULT_LOG_RETENTION_DAYS,
   getConfig,
-} from "./lib/config"
-import { readDefaultRecord } from "./lib/github-token-store"
-import { PATHS } from "./lib/paths"
-import { SECRET_DEFS, secretIsFromFile } from "./lib/secrets"
-import { getGitVersion, shortSha } from "./lib/version"
+} from "./lib/config/config"
+import { PATHS } from "./lib/platform/paths"
+import { getGitVersion, shortSha } from "./lib/update/version"
 import {
   chooseExecutor,
   resolveResponsesModel,
@@ -71,7 +71,7 @@ async function getPackageVersion(): Promise<string> {
   // Reading package.json from disk via fs.readFile + import.meta.url
   // fails in `bun --compile` output, which historically left every
   // shipped binary reporting `Version: unknown`.
-  const { BUILD_VERSION } = await import("./lib/build-info")
+  const { BUILD_VERSION } = await import("./lib/update/build-info")
   return BUILD_VERSION
 }
 

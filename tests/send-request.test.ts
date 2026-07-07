@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 
-import { HTTPError } from "~/lib/error"
+import { HTTPError } from "~/lib/errors/error"
 import {
   sendProviderRequest,
   sendRequest,
   sendRequestJson,
-} from "~/lib/send-request"
-import { state } from "~/lib/state"
+} from "~/lib/http/send-request"
+import { state } from "~/lib/runtime-state/state"
 
 const realFetch = globalThis.fetch
 

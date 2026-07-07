@@ -34,9 +34,9 @@ import {
   test,
 } from "bun:test"
 
-import type { AccountRecord } from "~/lib/github-token-store"
+import type { AccountRecord } from "~/lib/auth/github-token-store"
 
-import { AuthStatus } from "~/lib/settings-types"
+import { AuthStatus } from "~/lib/config/settings-types"
 
 // --- Shared harness (mirrors auth-controller.test.ts) ---------------------
 // Kept inline rather than extracted so the leakage profile is obvious in
@@ -52,8 +52,8 @@ const harness = {
 const realGetDeviceCodeModule =
   await import("~/services/github/get-device-code")
 const realGetUserModule = await import("~/services/github/get-user")
-const realTokenModule = await import("~/lib/token")
-const realUtilsModule = await import("~/lib/utils")
+const realTokenModule = await import("~/lib/auth/token")
+const realUtilsModule = await import("~/lib/platform/utils")
 
 await mock.module("~/services/github/get-device-code", () => ({
   getDeviceCode: () =>
@@ -70,14 +70,14 @@ await mock.module("~/services/github/get-user", () => ({
   getGitHubUser: () => harness.getGitHubUserImpl(),
 }))
 
-await mock.module("~/lib/token", () => ({
+await mock.module("~/lib/auth/token", () => ({
   ...realTokenModule,
   setupCopilotToken: () => Promise.resolve(),
 }))
 
 // Sign-in primes the models cache after minting the Copilot token; stub it
 // so completing a device flow doesn't make a real Copilot /models fetch.
-await mock.module("~/lib/utils", () => ({
+await mock.module("~/lib/platform/utils", () => ({
   ...realUtilsModule,
   cacheModels: () => Promise.resolve(),
 }))
@@ -88,8 +88,8 @@ afterAll(async () => {
     () => realGetDeviceCodeModule,
   )
   await mock.module("~/services/github/get-user", () => realGetUserModule)
-  await mock.module("~/lib/token", () => realTokenModule)
-  await mock.module("~/lib/utils", () => realUtilsModule)
+  await mock.module("~/lib/auth/token", () => realTokenModule)
+  await mock.module("~/lib/platform/utils", () => realUtilsModule)
 })
 
 const {
@@ -100,9 +100,9 @@ const {
   markAuthDegraded,
   __resetAuthControllerForTests,
   __setAuthControllerDepsForTests,
-} = await import("~/lib/auth-controller")
-const { CopilotAuthFatalError } = await import("~/lib/error")
-const { state } = await import("~/lib/state")
+} = await import("~/lib/auth/auth-controller")
+const { CopilotAuthFatalError } = await import("~/lib/errors/error")
+const { state } = await import("~/lib/runtime-state/state")
 
 async function flushMicrotasks(turns = 20): Promise<void> {
   for (let i = 0; i < turns; i++) {

@@ -7,18 +7,21 @@ import type {
   AnthropicMessagesPayload,
   AnthropicResponse,
   AnthropicStreamEventData,
-} from "~/lib/anthropic-types"
+} from "~/lib/models/anthropic-types"
 
-import { getProviderConfig, type ResolvedProviderConfig } from "~/lib/config"
-import { HTTPError } from "~/lib/error"
-import { createHandlerLogger, debugJson } from "~/lib/logger"
+import {
+  getProviderConfig,
+  type ResolvedProviderConfig,
+} from "~/lib/config/config"
+import { HTTPError } from "~/lib/errors/error"
+import { createHandlerLogger, debugJson } from "~/lib/platform/logger"
+import { parseUserIdMetadata } from "~/lib/platform/utils"
 import {
   createProviderTokenUsageRecorder,
   mergeAnthropicUsage,
   normalizeAnthropicUsage,
   type UsageTokens,
 } from "~/lib/token-usage"
-import { parseUserIdMetadata } from "~/lib/utils"
 import { stripUnsupportedTopLevelAnthropicFields } from "~/routes/messages/preprocess"
 import { forwardProviderMessages } from "~/services/providers/anthropic-proxy"
 

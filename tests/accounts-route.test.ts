@@ -11,11 +11,11 @@
 import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test"
 import { Hono } from "hono"
 
-import type { AccountRegistry } from "~/lib/github-token-store"
+import type { AccountRegistry } from "~/lib/auth/github-token-store"
 
-import { HTTPError } from "~/lib/error"
+import { HTTPError } from "~/lib/errors/error"
 
-const actualStore = await import("~/lib/github-token-store")
+const actualStore = await import("~/lib/auth/github-token-store")
 
 let fakeRegistry: AccountRegistry
 // Drives the switch route's pre-flight: getCopilotUsage either resolves (token
@@ -24,7 +24,7 @@ let fakeRegistry: AccountRegistry
 // and gh-preflight.test.ts's coverage of it isn't clobbered.
 let usageImpl: (token: string) => Promise<unknown>
 
-await mock.module("~/lib/github-token-store", () => ({
+await mock.module("~/lib/auth/github-token-store", () => ({
   ...actualStore,
   readDefaultRegistry: () => Promise.resolve(fakeRegistry),
   writeDefaultRegistry: (reg: AccountRegistry) => {
@@ -44,7 +44,7 @@ const { accountsRoutes } = await import("~/routes/settings/accounts")
 const { addAndActivate, emptyRegistry, makeAccountRecord } = actualStore
 
 afterAll(async () => {
-  await mock.module("~/lib/github-token-store", () => actualStore)
+  await mock.module("~/lib/auth/github-token-store", () => actualStore)
   await mock.module("~/services/github/get-copilot-usage", () => actualUsage)
 })
 

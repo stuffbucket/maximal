@@ -1,7 +1,7 @@
-import type { AnthropicMessagesPayload } from "~/lib/anthropic-types"
-import type { ResolvedProviderConfig } from "~/lib/config"
+import type { ResolvedProviderConfig } from "~/lib/config/config"
+import type { AnthropicMessagesPayload } from "~/lib/models/anthropic-types"
 
-import { sendProviderRequest } from "~/lib/send-request"
+import { sendProviderRequest } from "~/lib/http/send-request"
 
 const FORWARDABLE_HEADERS = [
   "anthropic-version",

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 
-import { getGitVersion, shortSha } from "../src/lib/version"
+import { getGitVersion, shortSha } from "../src/lib/update/version"
 
 test("shortSha returns 'unknown' for undefined", () => {
   expect(shortSha(undefined)).toBe("unknown")

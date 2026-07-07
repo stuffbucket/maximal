@@ -1,7 +1,7 @@
 import { Hono } from "hono"
 
-import { forwardError } from "~/lib/error"
-import { evaluateSetup } from "~/lib/setup-status"
+import { evaluateSetup } from "~/lib/config/setup-status"
+import { forwardError } from "~/lib/errors/error"
 
 export const setupStatusRoute = new Hono()
 

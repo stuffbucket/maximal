@@ -8,7 +8,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-import { atomicWriteJson as atomicWriteJsonShared } from "~/lib/atomic-json"
+import { atomicWriteJson as atomicWriteJsonShared } from "~/lib/platform/atomic-json"
 
 const USERDATA_3P_SUFFIX = "-3p"
 

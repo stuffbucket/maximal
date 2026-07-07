@@ -1,4 +1,4 @@
-import { type AnthropicStreamEventData } from "~/lib/anthropic-types"
+import { type AnthropicStreamEventData } from "~/lib/models/anthropic-types"
 import {
   type ResponseCompletedEvent,
   type ResponseCreatedEvent,

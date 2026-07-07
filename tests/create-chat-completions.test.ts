@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, mock, test } from "bun:test"
 
 import type { ChatCompletionsPayload } from "../src/services/copilot/create-chat-completions"
 
-import { state } from "../src/lib/state"
+import { state } from "../src/lib/runtime-state/state"
 import { createChatCompletions } from "../src/services/copilot/create-chat-completions"
 
 const originalFetch = globalThis.fetch

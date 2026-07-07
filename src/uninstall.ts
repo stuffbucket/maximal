@@ -25,8 +25,8 @@ import { getAllApps } from "./apps/registry"
 import {
   FIRST_LAUNCH_PATH_MARKER_END,
   FIRST_LAUNCH_PATH_MARKER_START,
-} from "./lib/cli-path"
-import { PATHS } from "./lib/paths"
+} from "./lib/platform/cli-path"
+import { PATHS } from "./lib/platform/paths"
 
 interface RunUninstallOptions {
   purge: boolean

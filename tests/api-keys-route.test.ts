@@ -1,11 +1,11 @@
 /**
  * /settings/api/api-keys — CRUD coverage.
  *
- * Uses the REAL `~/lib/config`, which the global preload
+ * Uses the REAL `~/lib/config/config`, which the global preload
  * (tests/test-setup.ts) has already redirected to a throwaway
  * COPILOT_API_HOME temp dir — so `getConfig()`/`writeConfig()` round-trip
  * through a temp `config.json`, never the developer's real config. We do
- * NOT `mock.module("~/lib/config", …)` here: Bun shares module mocks across
+ * NOT `mock.module("~/lib/config/config", …)` here: Bun shares module mocks across
  * the whole `bun test` process and never resets them between files, so an
  * unrestored config stub leaks a fake getConfig/writeConfig FORWARD into
  * sibling files (it broke tests/claude-code-cli-enable-persist.test.ts on
@@ -16,7 +16,7 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test"
 import { Hono } from "hono"
 
-import { getConfig, writeConfig } from "~/lib/config"
+import { getConfig, writeConfig } from "~/lib/config/config"
 import { apiKeysRoutes } from "~/routes/settings/api-keys"
 
 function buildApp() {
