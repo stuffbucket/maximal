@@ -266,7 +266,7 @@ describe("messages handler orchestration", () => {
     expect(handleWithChatCompletions).toHaveBeenCalledTimes(1)
   })
 
-  test("applies warmup model override and passes request metadata to the selected flow", async () => {
+  test("does not downgrade a non-warmup no-tool request", async () => {
     selectedModel = {
       id: "messages-model",
       supported_endpoints: ["/v1/messages"],
@@ -303,7 +303,10 @@ describe("messages handler orchestration", () => {
 
     expect(response.status).toBe(200)
     expect(await response.text()).toBe("messages")
-    expect(findEndpointModel).toHaveBeenCalledWith("small-model")
+    // Regression for B3: the broad small-model downgrade no longer fires on
+    // non-warmup no-tool turns; the requested model is preserved.
+    expect(findEndpointModel).toHaveBeenCalledWith("original-model")
+    expect(findEndpointModel).not.toHaveBeenCalledWith("small-model")
 
     const expectedSessionId = actualUtilsModule.getUUID("session-123")
     const expectedRequestId = actualUtilsModule.generateRequestIdFromPayload(
@@ -320,6 +323,42 @@ describe("messages handler orchestration", () => {
       agent_type: "Explore",
     })
     expect(options.anthropicBetaHeader).toBe("warmup-beta")
+  })
+})
+
+describe("warmup short-circuit", () => {
+  test("short-circuits a genuine warmup request without an upstream call", async () => {
+    selectedModel = {
+      id: "messages-model",
+      supported_endpoints: ["/v1/messages"],
+    }
+
+    const app = createApp()
+    const response = await app.request("/", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "anthropic-beta": "warmup-beta",
+      },
+      body: JSON.stringify(
+        createPayload({
+          messages: [{ role: "user", content: "Warmup" }],
+        }),
+      ),
+    })
+
+    expect(response.status).toBe(200)
+    const body = (await response.json()) as {
+      type: string
+      content: Array<{ type: string; text: string }>
+    }
+    expect(body.type).toBe("message")
+    expect(body.content).toEqual([{ type: "text", text: "OK" }])
+
+    // No flow was dispatched — the response is canned locally.
+    expect(handleWithMessagesApi).not.toHaveBeenCalled()
+    expect(handleWithResponsesApi).not.toHaveBeenCalled()
+    expect(handleWithChatCompletions).not.toHaveBeenCalled()
   })
 })
 
