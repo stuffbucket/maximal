@@ -17,11 +17,19 @@
          in style.css self-host it from ./vendor/fonts/ — no CDN request,
          works offline / under a strict CSP. -->
 
+    <!-- Tailwind + Lucide are CLASSIC global <script>s, not module imports —
+         the bundled entry references window.lucide / window.tailwind as
+         ambient globals. build-ui.ts copies this HTML + vendor/ verbatim (it
+         bundles only the module entry), so these stay untouched classic tags
+         and the ./vendor/ paths resolve next to the served HTML. -->
     <script src="./vendor/tailwind.min.js"></script>
     <script src="./vendor/lucide.min.js"></script>
 
     <link rel="stylesheet" href="./style.css" />
-    <script src="./main.js" defer></script>
+    <!-- The dashboard app: bundled by build-ui.ts from
+         shell/src/dashboard/main.ts (which imports the shared i18n runtime +
+         DOM binder) into ./main.js, next to this copied-verbatim HTML. -->
+    <script type="module" src="./main.js"></script>
   </head>
   <body class="antialiased">
     <div id="app" class="min-h-screen p-4 sm:p-6">
@@ -32,12 +40,16 @@
         <!-- Period selector. Data refreshes automatically — Tauri
              webviews subscribe to a Channel<TokenUsageEvent> driven by
              the shell; plain-browser viewers poll on a timer. No
-             Fetch button. -->
+             Fetch button. The language picker is a global, section-
+             agnostic control (same maximal.locale override as Settings,
+             shared :4141 origin); options + selection are wired in
+             main.ts (wireLocalePicker), which re-runs applyI18n live. -->
         <div class="mb-6 flex items-center gap-3">
           <span
             id="token-usage-period-label"
             class="text-sm"
             style="color: var(--text-muted); font-weight: var(--weight-md);"
+            data-i18n="dashboard-period-label"
             >Period</span
           >
           <div
@@ -51,19 +63,38 @@
               class="segmented-option"
               data-period="day"
               aria-pressed="true"
+              data-i18n="dashboard-period-days"
+              data-i18n-count="1"
             >1 day</button>
             <button
               type="button"
               class="segmented-option"
               data-period="week"
               aria-pressed="false"
+              data-i18n="dashboard-period-days"
+              data-i18n-count="7"
             >7 days</button>
             <button
               type="button"
               class="segmented-option"
               data-period="month"
               aria-pressed="false"
+              data-i18n="dashboard-period-days"
+              data-i18n-count="30"
             >30 days</button>
+          </div>
+          <div class="lang-picker ml-auto flex items-center gap-2">
+            <label
+              class="text-sm"
+              style="color: var(--text-muted); font-weight: var(--weight-md);"
+              for="locale-select"
+              data-i18n="common-language-label"
+            ></label>
+            <select
+              class="segmented-option"
+              id="locale-select"
+              data-locale-select
+            ></select>
           </div>
         </div>
 

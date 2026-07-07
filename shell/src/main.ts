@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
-import { availableLocales, localeLabel, resolveLocale, setLocale, t } from "./i18n";
+import { t } from "./i18n";
+import { applyI18n, wireLocalePicker } from "./i18n/apply";
 import { getShellApiKey, openUrl, safeInvoke } from "./tauri/shell";
 
 
@@ -114,71 +115,6 @@ function setBusy(on: boolean, label = t("common-working")): void {
     root.removeAttribute("data-busy");
     if (labelEl) labelEl.textContent = ""; // clear; do not re-announce
   }
-}
-
-/**
- * Localized ATTRIBUTES: a `data-i18n-<attr>` dataset key names the catalog key
- * whose text fills the real attribute. Extend by adding a row — no new block.
- */
-const I18N_ATTRS: ReadonlyArray<{ attr: string; dataset: keyof DOMStringMap }> = [
-  { attr: "aria-label", dataset: "i18nAriaLabel" },
-  { attr: "title", dataset: "i18nTitle" },
-  { attr: "placeholder", dataset: "i18nPlaceholder" },
-];
-
-/**
- * Populate every `[data-i18n]` element's text and every `[data-i18n-<attr>]`
- * element's attribute from the localized catalog. The key auto-injects the
- * current `os` and resolved `{fileManager}` noun, so a button marked
- * `data-i18n="reveal-logs"` renders "Reveal logs in Finder" / "… in File
- * Explorer" / "… in Files" per OS. General on purpose: any element carrying an
- * attribute is filled, so future catalog-backed labels need no extra wiring.
- *
- * Idempotent + re-runnable: the locale picker calls it again on every change to
- * repaint the whole UI live, and it is run on freshly-cloned roster rows to
- * fill their templated labels. Run at boot before first paint so no empty
- * control flashes.
- */
-function applyI18n(root: ParentNode = document): void {
-  root.querySelectorAll<HTMLElement>("[data-i18n]").forEach((el) => {
-    const key = el.dataset.i18n;
-    if (key) el.textContent = t(key);
-  });
-  for (const { attr, dataset } of I18N_ATTRS) {
-    root
-      .querySelectorAll<HTMLElement>(`[data-i18n-${attr}]`)
-      .forEach((el) => {
-        const key = el.dataset[dataset];
-        if (key) el.setAttribute(attr, t(key));
-      });
-  }
-}
-
-/**
- * Populate the sidebar language picker: one <option> per shipped locale,
- * labelled for humans, with the resolved locale pre-selected. Changing it
- * persists the override and repaints the whole UI live (no reload). Adding
- * the change listener once is safe — populate runs once at boot.
- */
-function wireLocalePicker(): void {
-  const select = document.querySelector<HTMLSelectElement>("[data-locale-select]");
-  if (!select) return;
-  const active = resolveLocale();
-  select.replaceChildren();
-  for (const tag of availableLocales()) {
-    const opt = document.createElement("option");
-    opt.value = tag;
-    opt.textContent = localeLabel(tag);
-    opt.selected = tag === active;
-    select.appendChild(opt);
-  }
-  select.addEventListener("change", () => {
-    setLocale(select.value);
-    // Repaint every catalog-backed label live, then re-render the dynamic
-    // sections whose copy is composed in JS (they aren't [data-i18n]).
-    applyI18n(document);
-    repaintDynamicI18n();
-  });
 }
 
 /**
@@ -2073,7 +2009,7 @@ window.addEventListener("DOMContentLoaded", () => {
   // Sentences that embed a link/CLI token or a plural count aren't [data-i18n]
   // (they carry live DOM children); render them explicitly after the sweep.
   renderStaticComposites();
-  wireLocalePicker();
+  wireLocalePicker(repaintDynamicI18n);
   wireLogs();
   wireDiagnostics();
   wireAccount();
