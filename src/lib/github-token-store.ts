@@ -119,19 +119,6 @@ export async function writeGitHubTokenRecord(
   await writeJsonAtomic(filePath, record)
 }
 
-export function makeRecord(
-  accessToken: string,
-  refreshToken: string | null = null,
-): GitHubTokenRecord {
-  return {
-    schemaVersion: 1,
-    tokenType: inferTokenType(accessToken),
-    accessToken,
-    refreshToken,
-    obtainedAt: new Date().toISOString(),
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Multi-account registry (schema v2)
 //

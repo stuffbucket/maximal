@@ -62,7 +62,7 @@ export const translateAnthropicMessagesToResponsesPayload = (
   const applyPhase = shouldApplyPhase(payload.model)
 
   for (const message of payload.messages) {
-    input.push(...translateMessage(message, payload.model, applyPhase))
+    input.push(...translateMessage(message, applyPhase))
   }
 
   const translatedTools = convertAnthropicTools(payload.tools)
@@ -140,14 +140,13 @@ export const decodeCompactionCarrierSignature = (
 
 const translateMessage = (
   message: AnthropicMessage,
-  model: string,
   applyPhase: boolean,
 ): Array<ResponseInputItem> => {
   if (message.role === "user") {
     return translateUserMessage(message)
   }
 
-  return translateAssistantMessage(message, model, applyPhase)
+  return translateAssistantMessage(message, applyPhase)
 }
 
 const translateUserMessage = (
@@ -184,14 +183,9 @@ const translateUserMessage = (
 
 const translateAssistantMessage = (
   message: AnthropicAssistantMessage,
-  model: string,
   applyPhase: boolean,
 ): Array<ResponseInputItem> => {
-  const assistantPhase = resolveAssistantPhase(
-    model,
-    message.content,
-    applyPhase,
-  )
+  const assistantPhase = resolveAssistantPhase(message.content, applyPhase)
 
   if (typeof message.content === "string") {
     return [createMessage("assistant", message.content, assistantPhase)]
@@ -308,7 +302,6 @@ const createMessage = (
 })
 
 const resolveAssistantPhase = (
-  _model: string,
   content: AnthropicAssistantMessage["content"],
   applyPhase: boolean,
 ): ResponseInputMessage["phase"] | undefined => {

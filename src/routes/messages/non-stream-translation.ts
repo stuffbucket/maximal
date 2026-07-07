@@ -44,11 +44,7 @@ export function translateToOpenAI(
   const thinkingBudget = getThinkingBudget(payload, model)
   return {
     model: modelId,
-    messages: translateAnthropicMessagesToOpenAI(
-      payload,
-      modelId,
-      thinkingBudget,
-    ),
+    messages: translateAnthropicMessagesToOpenAI(payload, modelId),
     max_tokens: payload.max_tokens,
     stop: payload.stop_sequences,
     stream: payload.stream,
@@ -86,7 +82,6 @@ function getThinkingBudget(
 function translateAnthropicMessagesToOpenAI(
   payload: AnthropicMessagesPayload,
   modelId: string,
-  _thinkingBudget: number | undefined,
 ): Array<Message> {
   const systemMessages = handleSystemPrompt(payload.system)
   const otherMessages = payload.messages.flatMap((message) =>
