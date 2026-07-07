@@ -73,49 +73,52 @@
     </div>
     <div class="app">
       <div class="shell">
-        <nav class="sidebar" aria-label="Settings sections">
+        <nav class="sidebar" data-i18n-aria-label="nav-sidebar-label">
           <ul class="nav">
             <li>
-              <a class="nav__item" href="#account" data-nav="account">Account</a>
+              <a class="nav__item" href="#account" data-nav="account" data-i18n="nav-account"></a>
             </li>
             <li>
-              <a class="nav__item" href="#apps" data-nav="apps">Apps</a>
+              <a class="nav__item" href="#apps" data-nav="apps" data-i18n="nav-apps"></a>
             </li>
             <li>
-              <a class="nav__item" href="#endpoint" data-nav="endpoint"
-                >Endpoint</a
-              >
+              <a class="nav__item" href="#endpoint" data-nav="endpoint" data-i18n="nav-endpoint"></a>
             </li>
             <li>
-              <a class="nav__item" href="#api-clients" data-nav="api-clients"
-                >API keys</a
-              >
+              <a class="nav__item" href="#api-clients" data-nav="api-clients" data-i18n="nav-api-clients"></a>
             </li>
             <li>
-              <a class="nav__item" href="#models" data-nav="models">Models</a>
+              <a class="nav__item" href="#models" data-nav="models" data-i18n="nav-models"></a>
             </li>
             <li>
-              <a class="nav__item" href="#logs" data-nav="logs">Logs</a>
+              <a class="nav__item" href="#logs" data-nav="logs" data-i18n="nav-logs"></a>
             </li>
             <li>
-              <a class="nav__item" href="#diagnostics" data-nav="diagnostics"
-                >Diagnostics</a
-              >
+              <a class="nav__item" href="#diagnostics" data-nav="diagnostics" data-i18n="nav-diagnostics"></a>
             </li>
           </ul>
+
+          <!-- Language picker: a global, section-agnostic control, pinned to
+               the foot of the persistent sidebar rather than duplicated in
+               each section head. Options + selection are wired in main.ts
+               (populateLocalePicker); changing it re-runs applyI18n live. -->
+          <div class="lang-picker">
+            <label class="lang-picker__label" for="locale-select" data-i18n="common-language-label"></label>
+            <select class="lang-picker__select" id="locale-select" data-locale-select></select>
+          </div>
         </nav>
 
         <main class="pane" id="pane">
           <!-- ACCOUNT -->
           <section class="section" data-section="account">
             <header class="section__head">
-              <h2 class="section__title">Account</h2>
-              <p class="section__sub">Your connection to GitHub Copilot.</p>
+              <h2 class="section__title" data-i18n="account-title"></h2>
+              <p class="section__sub" data-i18n="account-sub"></p>
             </header>
 
             <!-- State: unauthenticated -->
             <div class="state" data-state-account="unauthenticated" hidden>
-              <h3 class="state__title">Not signed in</h3>
+              <h3 class="state__title" data-i18n="account-unauth-title"></h3>
               <div class="requirement-callout" role="note">
                 <span class="requirement-callout__icon" aria-hidden="true">
                   <svg
@@ -132,69 +135,52 @@
                   </svg>
                 </span>
                 <div class="requirement-callout__text">
-                  <p class="requirement-callout__title">
-                    Requires a GitHub Copilot subscription
-                  </p>
-                  <p class="requirement-callout__sub">
-                    Maximal forwards requests through your own Copilot license.
-                    <a
-                      href="https://github.com/features/copilot"
-                      target="_blank"
-                      rel="noopener"
-                      >See plans</a
-                    >.
-                  </p>
+                  <p class="requirement-callout__title" data-i18n="account-requirement-title"></p>
+                  <!-- Sentence with an inline "See plans" link: rendered in
+                       main.ts (renderRequirementCallout) so the link is an ICU
+                       argument, never concatenated. -->
+                  <p class="requirement-callout__sub" data-field="requirement_sub"></p>
                 </div>
               </div>
-              <p class="state__body">
-                Sign in with the GitHub account that holds your Copilot
-                subscription. Until you do, the proxy accepts connections but
-                rejects Copilot calls.
-              </p>
+              <p class="state__body" data-i18n="account-unauth-body"></p>
               <div class="actions">
                 <button
                   type="button"
                   class="btn btn--primary"
                   data-action="auth-start"
-                >
-                  Sign in to GitHub
-                </button>
+                  data-i18n="account-sign-in"
+                ></button>
               </div>
             </div>
 
             <!-- State: device_code_issued / polling -->
             <div class="state" data-state-account="pending" hidden>
-              <h3 class="state__title">Almost there</h3>
-              <p class="state__body">
-                We&rsquo;ll copy your sign-in code and open GitHub for you.
-                Paste the code on the GitHub page to finish.
-              </p>
+              <h3 class="state__title" data-i18n="account-pending-title"></h3>
+              <p class="state__body" data-i18n="account-pending-body"></p>
               <button
                 type="button"
                 class="device-code-button"
                 data-action="sign-in-with-code"
               >
-                <span class="device-code-button__label">
-                  Copy
+                <!-- "Copy <code> and open GitHub": the code span is a live
+                     data-field, so the surrounding text is rendered in main.ts
+                     (renderDeviceCodeLabel) rather than via a text-only
+                     data-i18n that would wipe the span. -->
+                <span class="device-code-button__label" data-device-code-label>
                   <span
                     class="device-code-button__code mono"
                     data-field="user_code"
-                    aria-label="Device code"
+                    data-i18n-aria-label="account-device-code-aria"
                   ></span>
-                  and open GitHub
                 </span>
               </button>
-              <p class="state__caption">
-                Waiting for authorization &middot; expires
-                <span data-field="expires_at"></span>
-              </p>
+              <p class="state__caption" data-field="waiting_authorization"></p>
               <button
                 type="button"
                 class="btn btn--secondary btn--sm"
                 data-action="cancel-auth"
-              >
-                Cancel
-              </button>
+                data-i18n="common-cancel"
+              ></button>
             </div>
 
             <!-- State: authenticated -->
@@ -219,7 +205,7 @@
                       data-field="conn_indicator"
                       data-conn="connected"
                       role="img"
-                      aria-label="Connected to GitHub Copilot"
+                      data-i18n-aria-label="account-conn-aria-connected"
                     >
                       <svg
                         class="conn-indicator__icon"
@@ -258,9 +244,8 @@
                   <p
                     class="signed-in-hero__caption"
                     data-field="conn_status"
-                  >
-                    Connected
-                  </p>
+                    data-i18n="account-connected"
+                  ></p>
                 </div>
               </div>
               <!-- Upstream-rejection banner. Hidden when no recent
@@ -297,11 +282,8 @@
                    whole block when there's only the active account. The active
                    account is the hero above, never in this list. -->
               <div class="account-roster subsection" data-account-roster hidden>
-                <h3 class="subsection__title">Switch to</h3>
-                <p class="state__caption">
-                  Other accounts saved on this Mac. Switching restarts the
-                  proxy signed in as that account.
-                </p>
+                <h3 class="subsection__title" data-i18n="account-roster-switch-to"></h3>
+                <p class="state__caption" data-i18n="account-roster-sub"></p>
                 <ul
                   class="gh-account-list"
                   data-account-roster-list
@@ -320,22 +302,21 @@
                   type="button"
                   class="btn btn--secondary"
                   data-action="switch-account"
-                >
-                  Sign in as a different account
-                </button>
+                  data-i18n="account-switch-different"
+                ></button>
                 <button
                   type="button"
                   class="btn btn--secondary"
                   data-action="sign-out"
-                >
-                  Sign out
-                </button>
+                  data-i18n="account-sign-out"
+                ></button>
               </div>
             </div>
 
             <!-- Shared roster row template. Used by both the authenticated
                  "Switch to" roster and the unauthenticated remembered-accounts
-                 list. main.ts stamps button.dataset.acctKey on both buttons. -->
+                 list. main.ts stamps button.dataset.acctKey on both buttons and
+                 runs applyI18n() on the cloned row to fill the data-i18n labels. -->
             <template data-account-row-template>
               <li class="gh-account" role="listitem">
                 <span class="gh-account__dot status" aria-hidden="true"></span>
@@ -354,23 +335,21 @@
                     type="button"
                     class="btn btn--secondary btn--sm"
                     data-action="account-switch"
-                  >
-                    Switch
-                  </button>
+                    data-i18n="common-switch"
+                  ></button>
                   <button
                     type="button"
                     class="btn btn--ghost btn--sm btn--ghost-destructive"
                     data-action="account-remove"
-                  >
-                    Remove
-                  </button>
+                    data-i18n="common-remove"
+                  ></button>
                 </span>
               </li>
             </template>
 
             <!-- State: error -->
             <div class="state state--error card--error" data-state-account="error" hidden>
-              <h3 class="state__title">Sign-in failed</h3>
+              <h3 class="state__title" data-i18n="account-error-title"></h3>
               <p class="state__body" data-field="error"></p>
               <p class="state__body" data-field="remediation" hidden>
                 <a
@@ -384,9 +363,8 @@
                   type="button"
                   class="btn btn--primary"
                   data-action="auth-start"
-                >
-                  Try again
-                </button>
+                  data-i18n="account-try-again"
+                ></button>
               </div>
             </div>
 
@@ -404,7 +382,7 @@
                 role="separator"
                 aria-hidden="true"
               >
-                <span class="gh-reuse__divider-label">or use an account you already know</span>
+                <span class="gh-reuse__divider-label" data-i18n="account-rosters-divider"></span>
               </div>
 
               <!-- Remembered maximal accounts (persisted, token on disk).
@@ -417,13 +395,8 @@
                 data-account-remembered
                 hidden
               >
-                <h3 class="subsection__title">
-                  Switch to a remembered account
-                </h3>
-                <p class="state__caption">
-                  Accounts you&rsquo;ve signed into before on this Mac. Picking
-                  one restarts the proxy signed in as that account.
-                </p>
+                <h3 class="subsection__title" data-i18n="account-remembered-title"></h3>
+                <p class="state__caption" data-i18n="account-remembered-sub"></p>
                 <ul
                   class="gh-account-list"
                   data-account-remembered-list
@@ -443,22 +416,17 @@
               <div class="gh-reuse" data-gh-reuse hidden>
                 <div class="subsection">
                   <div class="gh-reuse__header">
-                    <h3 class="subsection__title">
-                      Reuse a GitHub CLI account
-                    </h3>
+                    <h3 class="subsection__title" data-i18n="account-gh-reuse-title"></h3>
                     <button
                       type="button"
                       class="btn btn--ghost btn--sm"
                       data-action="gh-refresh"
-                    >
-                      Refresh
-                    </button>
+                      data-i18n="common-refresh"
+                    ></button>
                   </div>
-                  <p class="state__caption">
-                    Sign in with an account you&rsquo;re already logged into
-                    with <code class="mono">gh</code> on this Mac &mdash; no code
-                    to copy.
-                  </p>
+                  <!-- Sentence embeds the `gh` CLI token: rendered in main.ts
+                       (renderGhReuseSub) with {ghCode} as an ICU argument. -->
+                  <p class="state__caption" data-field="gh_reuse_sub"></p>
                   <ul class="gh-account-list" data-gh-accounts role="list"></ul>
                   <template data-gh-row-template>
                     <li class="gh-account" role="listitem">
@@ -478,9 +446,8 @@
                         type="button"
                         class="btn btn--secondary btn--sm"
                         data-action="gh-use"
-                      >
-                        Use this account
-                      </button>
+                        data-i18n="account-gh-use"
+                      ></button>
                     </li>
                   </template>
                   <p
@@ -497,11 +464,8 @@
           <!-- APPS -->
           <section class="section" data-section="apps" hidden>
             <header class="section__head">
-              <h2 class="section__title">Apps</h2>
-              <p class="section__sub">
-                One-click setup for the tools that talk to Maximal. Turn
-                an app on and we point it at the proxy for you.
-              </p>
+              <h2 class="section__title" data-i18n="apps-title"></h2>
+              <p class="section__sub" data-i18n="apps-sub"></p>
             </header>
 
             <div id="apps-root"></div>
@@ -510,20 +474,17 @@
           <!-- ENDPOINT -->
           <section class="section" data-section="endpoint" hidden>
             <header class="section__head">
-              <h2 class="section__title">Endpoint</h2>
-              <p class="section__sub">
-                Where Maximal listens. Use these values when wiring up a
-                tool that isn&rsquo;t in the Apps list.
-              </p>
+              <h2 class="section__title" data-i18n="endpoint-title"></h2>
+              <p class="section__sub" data-i18n="endpoint-sub"></p>
             </header>
 
             <div class="card">
               <div class="card__head">
-                <h3 class="card__title">Connection</h3>
+                <h3 class="card__title" data-i18n="endpoint-connection-title"></h3>
               </div>
               <dl class="kv kv--bare">
                 <div class="kv__row">
-                  <dt>Base URL</dt>
+                  <dt data-i18n="endpoint-base-url-label"></dt>
                   <dd>
                     <span class="mono" data-field="endpoint-base-url"
                       >http://127.0.0.1:4141</span
@@ -532,13 +493,12 @@
                       type="button"
                       class="btn btn--ghost btn--sm"
                       data-action="copy-base-url"
-                    >
-                      Copy
-                    </button>
+                      data-i18n="common-copy"
+                    ></button>
                   </dd>
                 </div>
                 <div class="kv__row">
-                  <dt>API key</dt>
+                  <dt data-i18n="endpoint-api-key-label"></dt>
                   <dd>
                     <span
                       class="mono"
@@ -550,45 +510,42 @@
                       type="button"
                       class="btn btn--ghost btn--sm"
                       data-action="reveal-api-key"
-                    >
-                      Reveal
-                    </button>
+                      data-i18n="common-reveal"
+                    ></button>
                     <button
                       type="button"
                       class="btn btn--ghost btn--sm"
                       data-action="copy-api-key"
-                    >
-                      Copy
-                    </button>
+                      data-i18n="common-copy"
+                    ></button>
                   </dd>
                 </div>
               </dl>
-              <p class="card__hint">
-                The key rotates every time Maximal restarts. Use
-                <a href="#api-clients" data-nav="api-clients">API keys</a>
-                to mint a stable, named key for long-running tools.
-              </p>
+              <!-- Hint sentence embeds a link to the API keys section: rendered
+                   in main.ts (renderEndpointHint) with {apiKeysLink} as an ICU
+                   argument. -->
+              <p class="card__hint" data-field="endpoint_hint"></p>
             </div>
 
             <div class="card">
               <div class="card__head">
-                <h3 class="card__title">Endpoints</h3>
+                <h3 class="card__title" data-i18n="endpoint-endpoints-title"></h3>
               </div>
               <dl class="kv kv--bare">
                 <div class="kv__row">
-                  <dt>Anthropic Messages</dt>
+                  <dt data-i18n="endpoint-anthropic-messages"></dt>
                   <dd class="mono">POST /v1/messages</dd>
                 </div>
                 <div class="kv__row">
-                  <dt>OpenAI Chat</dt>
+                  <dt data-i18n="endpoint-openai-chat"></dt>
                   <dd class="mono">POST /v1/chat/completions</dd>
                 </div>
                 <div class="kv__row">
-                  <dt>OpenAI Responses</dt>
+                  <dt data-i18n="endpoint-openai-responses"></dt>
                   <dd class="mono">POST /v1/responses</dd>
                 </div>
                 <div class="kv__row">
-                  <dt>Models</dt>
+                  <dt data-i18n="endpoint-models-label"></dt>
                   <dd class="mono">GET&nbsp; /v1/models</dd>
                 </div>
               </dl>
@@ -597,9 +554,8 @@
                   type="button"
                   class="btn btn--secondary"
                   data-action="copy-curl-example"
-                >
-                  Copy curl example
-                </button>
+                  data-i18n="endpoint-copy-curl"
+                ></button>
               </div>
             </div>
           </section>
@@ -607,12 +563,8 @@
           <!-- API KEYS -->
           <section class="section" data-section="api-clients" hidden>
             <header class="section__head">
-              <h2 class="section__title">API keys</h2>
-              <p class="section__sub">
-                Keys that apps use to call Maximal. Add one per tool so
-                you can tell them apart — anything not listed still works
-                by default.
-              </p>
+              <h2 class="section__title" data-i18n="keys-title"></h2>
+              <p class="section__sub" data-i18n="keys-sub"></p>
             </header>
             <div id="api-clients-root"></div>
           </section>
@@ -620,12 +572,8 @@
           <!-- MODELS -->
           <section class="section" data-section="models" hidden>
             <header class="section__head">
-              <h2 class="section__title">Models</h2>
-              <p class="section__sub">
-                Models available to apps through Maximal, grouped by kind.
-                The list is fetched from the provider — refresh to pull the
-                current catalog if a model looks missing.
-              </p>
+              <h2 class="section__title" data-i18n="models-title"></h2>
+              <p class="section__sub" data-i18n="models-sub"></p>
             </header>
             <div id="models-root"></div>
           </section>
@@ -633,34 +581,32 @@
           <!-- LOGS -->
           <section class="section" data-section="logs" hidden>
             <header class="section__head">
-              <h2 class="section__title">Logs</h2>
-              <p class="section__sub">
-                Daily-rotated request and handler logs, 7-day retention.
-              </p>
+              <h2 class="section__title" data-i18n="logs-title"></h2>
+              <!-- "7-day retention" is a plural; the count is passed as an ICU
+                   argument in main.ts (renderLogsCopy). -->
+              <p class="section__sub" data-field="logs_sub"></p>
             </header>
 
             <div class="card">
               <div class="card__head">
-                <h3 class="card__title">Where logs live</h3>
+                <h3 class="card__title" data-i18n="logs-where-title"></h3>
               </div>
-              <p class="card__hint">
-                Each handler writes a per-day file under the maximal
-                state directory. Reveal the folder to inspect them, or
-                tail the active file with
-                <code class="mono">tail&nbsp;-F</code>.
-              </p>
+              <!-- Hint embeds the `tail -F` CLI token: rendered in main.ts
+                   (renderLogsCopy) with {tailCmd} as an ICU argument. -->
+              <p class="card__hint" data-field="logs_where_hint"></p>
               <dl class="kv kv--bare">
                 <div class="kv__row">
-                  <dt>macOS / Linux</dt>
+                  <dt data-i18n="logs-path-unix-label"></dt>
                   <dd class="mono">~/.local/share/maximal/logs/</dd>
                 </div>
                 <div class="kv__row">
-                  <dt>Windows</dt>
+                  <dt data-i18n="logs-path-windows-label"></dt>
                   <dd class="mono">%USERPROFILE%\.local\share\maximal\logs\</dd>
                 </div>
                 <div class="kv__row">
-                  <dt>Retention</dt>
-                  <dd>7 days, then deleted on next boot</dd>
+                  <dt data-i18n="logs-retention-label"></dt>
+                  <!-- Plural count passed as an ICU argument in main.ts. -->
+                  <dd data-field="logs_retention_value"></dd>
                 </div>
               </dl>
               <div class="actions">
@@ -677,60 +623,58 @@
           <!-- DIAGNOSTICS -->
           <section class="section" data-section="diagnostics" hidden>
             <header class="section__head">
-              <h2 class="section__title">Diagnostics</h2>
-              <p class="section__sub">
-                Live state and a one-click bundle for bug reports.
-              </p>
+              <h2 class="section__title" data-i18n="diagnostics-title"></h2>
+              <p class="section__sub" data-i18n="diagnostics-sub"></p>
             </header>
 
             <div data-diagnostics-root aria-busy="true">
               <dl class="kv kv--bare">
                 <div class="kv__row">
-                  <dt>Proxy version</dt>
+                  <dt data-i18n="diagnostics-proxy-version"></dt>
                   <dd class="mono" data-field="version">…</dd>
                 </div>
                 <div class="kv__row">
-                  <dt>Updates</dt>
+                  <dt data-i18n="diagnostics-updates"></dt>
                   <dd data-field="update_status">…</dd>
                 </div>
                 <div class="kv__row">
-                  <dt>Update check</dt>
+                  <dt data-i18n="diagnostics-update-check"></dt>
                   <dd class="mono" data-field="update_check">…</dd>
                 </div>
                 <div class="kv__row">
-                  <dt>Git SHA</dt>
+                  <dt data-i18n="diagnostics-git-sha"></dt>
                   <dd class="mono" data-field="source_revision">…</dd>
                 </div>
                 <div class="kv__row">
-                  <dt>Launched from</dt>
+                  <dt data-i18n="diagnostics-launched-from"></dt>
                   <dd class="mono" data-field="launch_source">…</dd>
                 </div>
                 <div class="kv__row">
-                  <dt>Sidecar PID</dt>
+                  <dt data-i18n="diagnostics-sidecar-pid"></dt>
                   <dd class="mono" data-field="pid">…</dd>
                 </div>
                 <div class="kv__row">
-                  <dt>Uptime</dt>
+                  <dt data-i18n="diagnostics-uptime"></dt>
                   <dd class="mono" data-field="uptime">…</dd>
                 </div>
                 <div class="kv__row">
-                  <dt>Account type</dt>
+                  <dt data-i18n="diagnostics-account-type"></dt>
                   <dd class="mono" data-field="account_type">…</dd>
                 </div>
                 <div class="kv__row">
-                  <dt>Models cached</dt>
+                  <dt data-i18n="diagnostics-models-cached"></dt>
                   <dd class="mono" data-field="models_cached">…</dd>
                 </div>
                 <div class="kv__row">
-                  <dt>Web search</dt>
+                  <dt data-i18n="diagnostics-web-search"></dt>
                   <dd class="mono" data-field="web_search">…</dd>
                 </div>
                 <div class="kv__row">
-                  <dt>GitHub Copilot</dt>
+                  <dt data-i18n="diagnostics-github-copilot"></dt>
                   <dd class="mono" data-field="github_copilot_status">…</dd>
                 </div>
                 <div class="kv__row">
-                  <dt>Rate limit</dt>
+                  <dt data-i18n="diagnostics-rate-limit"></dt>
                   <dd class="mono" data-field="rate_limit">…</dd>
                 </div>
               </dl>
@@ -747,9 +691,8 @@
                 type="button"
                 class="btn btn--ghost"
                 data-diagnostics-retry
-              >
-                Retry
-              </button>
+                data-i18n="common-retry"
+              ></button>
             </div>
 
             <div class="actions">
@@ -757,9 +700,8 @@
                 type="button"
                 class="btn btn--primary"
                 data-action="copy-json"
-              >
-                Copy debug bundle
-              </button>
+                data-i18n="diagnostics-copy-bundle"
+              ></button>
               <button
                 type="button"
                 class="btn btn--secondary"
@@ -771,24 +713,19 @@
                 class="btn btn--secondary"
                 id="restart-proxy"
                 disabled
-                title="No restart-required change is staged."
-              >
-                Restart proxy
-              </button>
+                data-i18n="diagnostics-restart-proxy"
+                data-i18n-title="diagnostics-restart-proxy-title"
+              ></button>
             </div>
 
             <div class="card" data-uninstall-card>
               <div class="card__head">
-                <h3 class="card__title">Uninstall</h3>
+                <h3 class="card__title" data-i18n="uninstall-title"></h3>
               </div>
               <div data-uninstall-body>
-                <p class="card__hint">
-                  This stops Maximal&rsquo;s background agent, reverts any app
-                  integrations, and removes the
-                  <code class="mono">maximal</code>
-                  CLI from your PATH. You&rsquo;ll drag Maximal to the Trash to
-                  finish.
-                </p>
+                <!-- Hint embeds the `maximal` CLI token: rendered in main.ts
+                     (renderUninstallCopy) with {cliName} as an ICU argument. -->
+                <p class="card__hint" data-field="uninstall_hint"></p>
                 <div class="uninstall-options">
                   <label class="checkbox-label">
                     <input
@@ -796,7 +733,7 @@
                       class="checkbox"
                       data-uninstall-purge
                     />
-                    Delete stored secrets &amp; config
+                    <span data-i18n="uninstall-purge-label"></span>
                     <span class="uninstall-options__note mono"
                       >~/.local/share/maximal</span
                     >
@@ -815,14 +752,13 @@
                     type="button"
                     class="btn btn--destructive"
                     data-action="uninstall-maximal"
-                  >
-                    Uninstall Maximal…
-                  </button>
+                    data-i18n="uninstall-button"
+                  ></button>
                 </div>
-                <p class="card__hint">
-                  Prefer the terminal? Run
-                  <code class="mono">maximal uninstall</code>.
-                </p>
+                <!-- Terminal hint embeds the `maximal uninstall` command:
+                     rendered in main.ts with {uninstallCmd} as an ICU
+                     argument. -->
+                <p class="card__hint" data-field="uninstall_terminal_hint"></p>
               </div>
             </div>
           </section>

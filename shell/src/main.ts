@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
-import { t } from "./i18n";
+import { availableLocales, localeLabel, resolveLocale, setLocale, t } from "./i18n";
 import { getShellApiKey, openUrl, safeInvoke } from "./tauri/shell";
 
 
@@ -101,7 +101,7 @@ let busyCount = 0;
  * Wrap each transient op in setBusy(true, "…") … setBusy(false) (try/finally)
  * so an early return/throw can't leak a stuck bar.
  */
-function setBusy(on: boolean, label = "Working…"): void {
+function setBusy(on: boolean, label = t("common-working")): void {
   busyCount = Math.max(0, busyCount + (on ? 1 : -1));
   const root = document.documentElement;
   const labelEl = document.querySelector<HTMLElement>("[data-busybar-label]");
@@ -117,18 +117,224 @@ function setBusy(on: boolean, label = "Working…"): void {
 }
 
 /**
- * Populate every `[data-i18n]` element's text from the localized catalog. The
- * key auto-injects the current `os` and resolved `{fileManager}` noun, so a
- * button marked `data-i18n="reveal-logs"` renders "Reveal logs in Finder" /
- * "… in File Explorer" / "… in Files" per OS. General on purpose: any element
- * carrying the attribute is filled, so future catalog-backed labels need no
- * extra wiring. Run at boot before first paint so no empty button flashes.
+ * Localized ATTRIBUTES: a `data-i18n-<attr>` dataset key names the catalog key
+ * whose text fills the real attribute. Extend by adding a row — no new block.
+ */
+const I18N_ATTRS: ReadonlyArray<{ attr: string; dataset: keyof DOMStringMap }> = [
+  { attr: "aria-label", dataset: "i18nAriaLabel" },
+  { attr: "title", dataset: "i18nTitle" },
+  { attr: "placeholder", dataset: "i18nPlaceholder" },
+];
+
+/**
+ * Populate every `[data-i18n]` element's text and every `[data-i18n-<attr>]`
+ * element's attribute from the localized catalog. The key auto-injects the
+ * current `os` and resolved `{fileManager}` noun, so a button marked
+ * `data-i18n="reveal-logs"` renders "Reveal logs in Finder" / "… in File
+ * Explorer" / "… in Files" per OS. General on purpose: any element carrying an
+ * attribute is filled, so future catalog-backed labels need no extra wiring.
+ *
+ * Idempotent + re-runnable: the locale picker calls it again on every change to
+ * repaint the whole UI live, and it is run on freshly-cloned roster rows to
+ * fill their templated labels. Run at boot before first paint so no empty
+ * control flashes.
  */
 function applyI18n(root: ParentNode = document): void {
   root.querySelectorAll<HTMLElement>("[data-i18n]").forEach((el) => {
     const key = el.dataset.i18n;
     if (key) el.textContent = t(key);
   });
+  for (const { attr, dataset } of I18N_ATTRS) {
+    root
+      .querySelectorAll<HTMLElement>(`[data-i18n-${attr}]`)
+      .forEach((el) => {
+        const key = el.dataset[dataset];
+        if (key) el.setAttribute(attr, t(key));
+      });
+  }
+}
+
+/**
+ * Populate the sidebar language picker: one <option> per shipped locale,
+ * labelled for humans, with the resolved locale pre-selected. Changing it
+ * persists the override and repaints the whole UI live (no reload). Adding
+ * the change listener once is safe — populate runs once at boot.
+ */
+function wireLocalePicker(): void {
+  const select = document.querySelector<HTMLSelectElement>("[data-locale-select]");
+  if (!select) return;
+  const active = resolveLocale();
+  select.replaceChildren();
+  for (const tag of availableLocales()) {
+    const opt = document.createElement("option");
+    opt.value = tag;
+    opt.textContent = localeLabel(tag);
+    opt.selected = tag === active;
+    select.appendChild(opt);
+  }
+  select.addEventListener("change", () => {
+    setLocale(select.value);
+    // Repaint every catalog-backed label live, then re-render the dynamic
+    // sections whose copy is composed in JS (they aren't [data-i18n]).
+    applyI18n(document);
+    repaintDynamicI18n();
+  });
+}
+
+/**
+ * Re-render the strings that are composed in JS (not filled by applyI18n's
+ * attribute sweep) so a live locale switch updates them too: the link/token
+ * sentences and any currently-rendered dynamic account state.
+ */
+function repaintDynamicI18n(): void {
+  renderStaticComposites();
+  if (currentAuthStatus) renderAccount(currentAuthStatus);
+  if (lastDiagnostics) renderDiagnostics(lastDiagnostics);
+}
+
+/**
+ * Render the handful of sentences that embed a non-translatable token (a link
+ * to another section, a CLI command) — passed as an ICU argument so word order
+ * stays translatable, never concatenated (docs/dev/i18n.md). Each formats the
+ * message with a private placeholder, then swaps that placeholder for a real
+ * DOM node so the token can be a live <a>/<code> rather than flat text.
+ */
+function renderStaticComposites(): void {
+  renderRequirementCallout();
+  renderEndpointHint();
+  renderLogsCopy();
+  renderUninstallCopy();
+  renderGhReuseSub();
+}
+
+/**
+ * Fill an element from an ICU message that carries a single placeholder,
+ * substituting a DOM node for that placeholder. The message is formatted with a
+ * sentinel string for the placeholder, then split on the sentinel so the two
+ * text halves surround the live node — word order comes from the catalog, so a
+ * translation that moves the token still renders correctly.
+ */
+function fillWithNode(
+  el: HTMLElement | null,
+  key: string,
+  placeholder: string,
+  node: Node,
+  values: Record<string, unknown> = {},
+): void {
+  if (!el) return;
+  // A private-use sentinel unlikely to occur in any translated string.
+  const SENTINEL = "";
+  const text = t(key, { ...values, [placeholder]: SENTINEL });
+  const [before, after = ""] = text.split(SENTINEL);
+  el.replaceChildren(
+    document.createTextNode(before ?? ""),
+    node,
+    document.createTextNode(after),
+  );
+}
+
+function externalLink(href: string, textKey: string): HTMLAnchorElement {
+  const a = document.createElement("a");
+  a.href = href;
+  a.target = "_blank";
+  a.rel = "noopener";
+  a.textContent = t(textKey);
+  return a;
+}
+
+function navLink(section: SectionId, textKey: string): HTMLAnchorElement {
+  const a = document.createElement("a");
+  a.href = `#${section}`;
+  a.dataset.nav = section;
+  a.textContent = t(textKey);
+  // The delegated wireNav() handler binds after this node exists on re-render;
+  // for the initial boot the hashchange listener still drives navigation.
+  a.addEventListener("click", (ev) => {
+    ev.preventDefault();
+    if (window.location.hash !== `#${section}`) window.location.hash = section;
+    else showSection(section);
+  });
+  return a;
+}
+
+function monoCode(text: string): HTMLElement {
+  const code = document.createElement("code");
+  code.className = "mono";
+  code.textContent = text;
+  return code;
+}
+
+/** "Maximal forwards requests … {plansLink}." with a live "See plans" link. */
+function renderRequirementCallout(): void {
+  const el = document.querySelector<HTMLElement>('[data-field="requirement_sub"]');
+  fillWithNode(
+    el,
+    "account-requirement-sub",
+    "plansLink",
+    externalLink("https://github.com/features/copilot", "account-requirement-plans-link"),
+  );
+}
+
+/** Endpoint key hint with a live "API keys" link into that section. */
+function renderEndpointHint(): void {
+  const el = document.querySelector<HTMLElement>('[data-field="endpoint_hint"]');
+  fillWithNode(
+    el,
+    "endpoint-hint",
+    "apiKeysLink",
+    navLink("api-clients", "endpoint-hint-api-keys-link"),
+  );
+}
+
+/** gh-reuse sub with a live `gh` <code> token. */
+function renderGhReuseSub(): void {
+  const el = document.querySelector<HTMLElement>('[data-field="gh_reuse_sub"]');
+  fillWithNode(el, "account-gh-reuse-sub", "ghCode", monoCode("gh"));
+}
+
+/**
+ * "Copy {code} and open GitHub" — the {code} slot is the live user_code span
+ * (already in the DOM, populated by renderAccount). We keep that node and
+ * rebuild the surrounding text from the catalog so word order stays
+ * translatable. Idempotent: re-locates the span (or leaves the label be if the
+ * pending state isn't currently mounted).
+ */
+function renderDeviceCodeLabel(): void {
+  const label = document.querySelector<HTMLElement>("[data-device-code-label]");
+  const code = document.querySelector<HTMLElement>('[data-field="user_code"]');
+  if (!label || !code) return;
+  fillWithNode(label, "account-copy-and-open", "code", code);
+}
+
+/** Logs section copy: the plural "7-day retention" sub, the `tail -F` hint,
+ *  and the "7 days, then deleted…" retention value. */
+function renderLogsCopy(): void {
+  const sub = document.querySelector<HTMLElement>('[data-field="logs_sub"]');
+  if (sub) sub.textContent = t("logs-sub", { n: LOG_RETENTION_DAYS });
+  const retention = document.querySelector<HTMLElement>(
+    '[data-field="logs_retention_value"]',
+  );
+  if (retention) {
+    retention.textContent = t("logs-retention-value", { n: LOG_RETENTION_DAYS });
+  }
+  const hint = document.querySelector<HTMLElement>('[data-field="logs_where_hint"]');
+  fillWithNode(hint, "logs-where-hint", "tailCmd", monoCode("tail -F"));
+}
+
+/** Uninstall card copy: the intro hint (with a `maximal` <code> token) and the
+ *  terminal hint (with a `maximal uninstall` <code> command). */
+function renderUninstallCopy(): void {
+  const hint = document.querySelector<HTMLElement>('[data-field="uninstall_hint"]');
+  fillWithNode(hint, "uninstall-hint", "cliName", monoCode("maximal"));
+  const terminal = document.querySelector<HTMLElement>(
+    '[data-field="uninstall_terminal_hint"]',
+  );
+  fillWithNode(
+    terminal,
+    "uninstall-terminal-hint",
+    "uninstallCmd",
+    monoCode("maximal uninstall"),
+  );
 }
 
 function wireLogs(): void {
@@ -143,6 +349,8 @@ function wireLogs(): void {
 // ---- Endpoint section ------------------------------------------------------
 
 const ENDPOINT_BASE_URL = "http://127.0.0.1:4141";
+/** Log retention window (days). Drives the plural copy in the Logs section. */
+const LOG_RETENTION_DAYS = 7;
 let endpointApiKey: string | null = null;
 
 async function loadEndpointApiKey(): Promise<void> {
@@ -166,7 +374,7 @@ async function copyToClipboard(text: string, btn: Element | null): Promise<void>
     await navigator.clipboard.writeText(text);
     if (btn instanceof HTMLElement) {
       const original = btn.textContent;
-      btn.textContent = "Copied";
+      btn.textContent = t("common-copied");
       window.setTimeout(() => {
         btn.textContent = original;
       }, 1200);
@@ -216,20 +424,20 @@ async function runInAppUninstall(): Promise<void> {
   // it can't surface the CLI's refuse-while-apps-enabled prompt, so it disables
   // + reverts every app integration through the registry. So "reverts app
   // integrations" is always part of the summary, not an opt-in.
-  const clauses = ["removes the maximal CLI", "reverts app integrations"];
-  if (purge) clauses.push("deletes stored secrets & config");
-  const tail = clauses.length > 1 ? `, and ${clauses.pop() ?? ""}` : "";
+  const clauses = [t("uninstall-clause-cli"), t("uninstall-clause-integrations")];
+  if (purge) clauses.push(t("uninstall-clause-purge"));
+  // The connector ("…, and X") is a catalog term, not a hardcoded ", and " —
+  // so a language that joins lists differently can override it.
+  const tail =
+    clauses.length > 1
+      ? t("uninstall-summary-tail", { last: clauses.pop() ?? "" })
+      : "";
   const summary = `${clauses.join(", ")}${tail}`;
-  const confirmed = window.confirm(
-    "Uninstall Maximal?\n\n" +
-      `This stops the background agent and ${summary}. ` +
-      "You'll drag the app to the Trash to finish.\n\n" +
-      "This can't be undone.",
-  );
+  const confirmed = window.confirm(t("uninstall-confirm", { summary }));
   if (!confirmed) return;
 
   setUninstallError(null);
-  setBusy(true, "Uninstalling…");
+  setBusy(true, t("common-working"));
   try {
     await invoke("uninstall_maximal", { purge });
     showUninstallComplete();
@@ -238,10 +446,7 @@ async function runInAppUninstall(): Promise<void> {
     // generic message in plain-browser (app:ui, no Tauri host). Surface it
     // inline rather than leaving the user with no feedback.
     console.warn("invoke(uninstall_maximal) failed:", err);
-    setUninstallError(
-      `Couldn't finish uninstalling: ${String(err)}. ` +
-        "You can run `maximal uninstall` in the terminal instead.",
-    );
+    setUninstallError(t("uninstall-err", { error: String(err) }));
   } finally {
     setBusy(false);
   }
@@ -254,9 +459,7 @@ function showUninstallComplete(): void {
   if (!body) return;
   const done = document.createElement("p");
   done.className = "card__hint";
-  done.textContent =
-    "Maximal is uninstalled. Quit Maximal from the tray menu, then drag it " +
-    "from Applications to the Trash to finish.";
+  done.textContent = t("uninstall-complete");
   body.replaceChildren(done);
 }
 
@@ -280,11 +483,11 @@ function wireEndpoint(): void {
       if (revealed) {
         el.dataset.revealed = "false";
         el.textContent = "••••••••••••••••••••••";
-        (ev.currentTarget as HTMLElement).textContent = "Reveal";
+        (ev.currentTarget as HTMLElement).textContent = t("common-reveal");
       } else {
         el.dataset.revealed = "true";
-        el.textContent = endpointApiKey ?? "(not available)";
-        (ev.currentTarget as HTMLElement).textContent = "Hide";
+        el.textContent = endpointApiKey ?? t("endpoint-key-not-available");
+        (ev.currentTarget as HTMLElement).textContent = t("common-hide");
       }
     });
 
@@ -329,18 +532,26 @@ function formatUptime(ms: number): string {
   const h = Math.floor(totalSeconds / 3600);
   const m = Math.floor((totalSeconds % 3600) / 60);
   const s = totalSeconds % 60;
-  if (h > 0) return `${h}h ${m}m`;
-  if (m > 0) return `${m}m ${s}s`;
-  return `${s}s`;
+  if (h > 0) return t("diagnostics-uptime-hours", { h, m });
+  if (m > 0) return t("diagnostics-uptime-minutes", { m, s });
+  return t("diagnostics-uptime-seconds", { s });
 }
 
 function formatRateLimit(rl: DiagnosticsResponse["rate_limit"]): string {
-  if (rl.interval_seconds === null) return "Unlimited";
+  if (rl.interval_seconds === null) return t("diagnostics-rate-unlimited");
   const tail = rl.last_request_at
-    ? ` (last request ${new Date(rl.last_request_at).toLocaleTimeString()})`
+    ? t("diagnostics-rate-last-request", {
+        time: new Date(rl.last_request_at).toLocaleTimeString(),
+      })
     : "";
-  const wait = rl.wait_when_throttled ? "wait" : "reject";
-  return `≥${rl.interval_seconds}s between requests, ${wait}${tail}`;
+  const mode = rl.wait_when_throttled
+    ? t("diagnostics-rate-mode-wait")
+    : t("diagnostics-rate-mode-reject");
+  return t("diagnostics-rate-limited", {
+    seconds: rl.interval_seconds,
+    mode,
+    tail,
+  });
 }
 
 function setField(name: string, value: string): void {
@@ -350,11 +561,11 @@ function setField(name: string, value: string): void {
 
 function renderDiagnostics(data: DiagnosticsResponse): void {
   setField("version", data.version);
-  setField("source_revision", data.source_revision ?? "unknown");
+  setField("source_revision", data.source_revision ?? t("diagnostics-unknown"));
   setField("launch_source", formatLaunchSource(data));
   setField("pid", String(data.pid));
   setField("uptime", formatUptime(data.uptime_ms));
-  setField("account_type", data.account_type ?? "unknown");
+  setField("account_type", data.account_type ?? t("diagnostics-unknown"));
   setField("models_cached", String(data.models_cached));
   setField("web_search", formatWebSearch(data.web_search));
   setField("github_copilot_status", deriveGithubCopilotStatus(data.tokens));
@@ -368,12 +579,14 @@ function renderDiagnostics(data: DiagnosticsResponse): void {
  */
 function formatWebSearch(ws: DiagnosticsResponse["web_search"]): string {
   const labels: Record<string, string> = {
-    CopilotResponsesExecutor: "Copilot (no extra key)",
-    OllamaWebExecutor: "Ollama hosted",
-    InProcessFetchExecutor: "Built-in (no key)",
+    CopilotResponsesExecutor: t("diagnostics-web-search-copilot"),
+    OllamaWebExecutor: t("diagnostics-web-search-ollama"),
+    InProcessFetchExecutor: t("diagnostics-web-search-builtin"),
   };
   const label = labels[ws.kind] ?? ws.kind;
-  return ws.detail ? `${label} — ${ws.detail}` : label;
+  return ws.detail
+    ? t("diagnostics-web-search-detail", { label, detail: ws.detail })
+    : label;
 }
 
 /**
@@ -383,14 +596,14 @@ function formatWebSearch(ws: DiagnosticsResponse["web_search"]): string {
  */
 function formatLaunchSource(data: DiagnosticsResponse): string {
   const labels: Record<DiagnosticsResponse["launch_kind"], string> = {
-    "dmg-app": "Desktop app",
-    homebrew: "Homebrew",
-    "user-bin": "User bin",
-    dev: "Dev build",
-    other: "Other",
+    "dmg-app": t("diagnostics-launch-dmg"),
+    homebrew: t("diagnostics-launch-homebrew"),
+    "user-bin": t("diagnostics-launch-user-bin"),
+    dev: t("diagnostics-launch-dev"),
+    other: t("diagnostics-launch-other"),
   };
-  const label = labels[data.launch_kind] ?? "Other";
-  return `${label} — ${data.launch_path}`;
+  const label = labels[data.launch_kind] ?? t("diagnostics-launch-other");
+  return t("diagnostics-launch-source", { label, path: data.launch_path });
 }
 
 /**
@@ -412,10 +625,10 @@ function deriveGithubCopilotStatus(
 ): string {
   const gh = tokens.github_token_present;
   const cop = tokens.copilot_token_present;
-  if (gh && cop) return "Signed in, ready";
-  if (gh && !cop) return "Token will refresh on first request";
-  if (!gh && !cop) return "Not signed in";
-  return "Inconsistent — try signing in again";
+  if (gh && cop) return t("diagnostics-copilot-ready");
+  if (gh && !cop) return t("diagnostics-copilot-refresh");
+  if (!gh && !cop) return t("diagnostics-copilot-not-signed-in");
+  return t("diagnostics-copilot-inconsistent");
 }
 
 function setDiagnosticsError(message: string | null): void {
@@ -444,7 +657,7 @@ async function loadDiagnostics(): Promise<void> {
   });
   root.setAttribute("aria-busy", "false");
   if (!result.ok) {
-    setDiagnosticsError(`Failed to load diagnostics: ${result.error}`);
+    setDiagnosticsError(t("diagnostics-err-load", { error: result.error }));
     return;
   }
   lastDiagnostics = result.data;
@@ -460,12 +673,12 @@ function relativeTime(iso: string): string {
   const then = new Date(iso).getTime();
   if (Number.isNaN(then)) return iso;
   const secs = Math.max(0, Math.round((Date.now() - then) / 1000));
-  if (secs < 60) return "just now";
+  if (secs < 60) return t("diagnostics-relative-just-now");
   const mins = Math.round(secs / 60);
-  if (mins < 60) return `${mins}m ago`;
+  if (mins < 60) return t("diagnostics-relative-minutes", { m: mins });
   const hours = Math.round(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.round(hours / 24)}d ago`;
+  if (hours < 24) return t("diagnostics-relative-hours", { h: hours });
+  return t("diagnostics-relative-days", { d: Math.round(hours / 24) });
 }
 
 /**
@@ -494,10 +707,10 @@ function renderUpdateOutcome(data: UpdateStatusResponse): void {
   if (data.update_available && data.latest) {
     const label = document.createElement("span");
     label.className = "mono";
-    label.textContent = `v${data.latest} available · `;
+    label.textContent = t("diagnostics-update-newer", { version: data.latest });
     const link = document.createElement("a");
     link.href = data.url;
-    link.textContent = "Get it at mxml.sh";
+    link.textContent = t("diagnostics-update-get-it");
     link.addEventListener("click", (ev) => {
       ev.preventDefault();
       void openExternalUrl(data.url);
@@ -510,7 +723,9 @@ function renderUpdateOutcome(data: UpdateStatusResponse): void {
   span.className = "mono";
   // `latest` known but not newer → genuinely current. Otherwise we couldn't
   // resolve a version; say "Unknown" rather than imply everything's fine.
-  span.textContent = data.latest ? "Up to date" : "Unknown";
+  span.textContent = data.latest
+    ? t("diagnostics-update-up-to-date")
+    : t("diagnostics-update-unknown");
   dd.append(span);
 }
 
@@ -522,16 +737,23 @@ function renderUpdateOutcome(data: UpdateStatusResponse): void {
 function renderUpdateHealth(data: UpdateStatusResponse): void {
   let text: string;
   if (!data.enabled) {
-    text = "Disabled";
+    text = t("diagnostics-update-check-disabled");
   } else if (data.last_error) {
     const when = data.checked_at
-      ? `last ok ${relativeTime(data.checked_at)}`
-      : "never succeeded";
-    text = `Failed — ${data.last_error} (${when})`;
+      ? t("diagnostics-update-check-last-ok", {
+          relative: relativeTime(data.checked_at),
+        })
+      : t("diagnostics-update-check-never");
+    text = t("diagnostics-update-check-failed", {
+      error: data.last_error,
+      when,
+    });
   } else if (data.checked_at) {
-    text = `OK · checked ${relativeTime(data.checked_at)}`;
+    text = t("diagnostics-update-check-ok", {
+      relative: relativeTime(data.checked_at),
+    });
   } else {
-    text = "Checking…";
+    text = t("diagnostics-update-check-checking");
   }
   setField("update_check", text);
 }
@@ -544,8 +766,8 @@ async function loadUpdateStatus(): Promise<void> {
   });
   if (!result.ok) {
     // Sidecar unreachable — stay quiet, not alarming.
-    setField("update_status", "Unknown");
-    setField("update_check", "Unavailable");
+    setField("update_status", t("diagnostics-update-unknown"));
+    setField("update_check", t("diagnostics-update-check-unavailable"));
     return;
   }
   renderUpdateStatus(result.data);
@@ -754,7 +976,7 @@ function renderAccountAvatar(login: string, avatarUrl?: string): void {
   // public `github.com/<login>.png` for any account that predates the field.
   img.src =
     avatarUrl ?? `https://github.com/${encodeURIComponent(login)}.png?size=128`;
-  img.alt = `${login} GitHub avatar`;
+  img.alt = t("account-avatar-alt", { login });
   img.loading = "lazy";
   img.decoding = "async";
   img.width = 56;
@@ -774,20 +996,22 @@ function renderAccountAvatar(login: string, avatarUrl?: string): void {
  * skew).
  */
 function formatConnectedFor(connectedSince: string | undefined): string {
-  if (!connectedSince) return "Connected";
+  if (!connectedSince) return t("account-connected");
   const sinceMs = Date.parse(connectedSince);
-  if (Number.isNaN(sinceMs)) return "Connected";
+  if (Number.isNaN(sinceMs)) return t("account-connected");
   const elapsed = Date.now() - sinceMs;
-  if (elapsed < 60_000) return "Connected · just now";
+  if (elapsed < 60_000) return t("account-connected-just-now");
   const minutes = Math.floor(elapsed / 60_000);
-  if (minutes < 60) return `Connected · ${minutes}m`;
+  if (minutes < 60) return t("account-connected-minutes", { minutes });
   const hours = Math.floor(minutes / 60);
   if (hours < 24) {
     const rem = minutes % 60;
-    return rem ? `Connected · ${hours}h ${rem}m` : `Connected · ${hours}h`;
+    return rem
+      ? t("account-connected-hours-minutes", { hours, minutes: rem })
+      : t("account-connected-hours", { hours });
   }
   const days = Math.floor(hours / 24);
-  return `Connected · ${days}d`;
+  return t("account-connected-days", { days });
 }
 
 // Re-render the connection line on a coarse cadence so the uptime advances
@@ -816,7 +1040,9 @@ function renderConnection(
     indicator.dataset.conn = degraded ? "degraded" : "connected";
     indicator.setAttribute(
       "aria-label",
-      degraded ? "Connection degraded" : "Connected to GitHub Copilot",
+      degraded
+        ? t("account-conn-aria-degraded")
+        : t("account-conn-aria-connected"),
     );
   }
   setAccountField("conn_status", formatConnectedFor(connectedSince));
@@ -863,30 +1089,25 @@ function renderRemediationLink(url: string | undefined): void {
  *  message is generic, the user can tell a "wait and retry" from a "fix your
  *  billing" from a "this model isn't allowed". */
 function rejectionTitle(status: number): string {
-  if (status === 402) return "Copilot billing or plan issue";
-  if (status === 403) return "Request blocked by Copilot";
-  if (status === 404) return "Copilot couldn’t find that";
-  if (status === 408 || status === 504) return "Copilot request timed out";
-  if (status === 429) return "Copilot usage limit reached";
-  if (status >= 500) return "GitHub Copilot is having trouble";
-  if (status >= 400) return "Copilot rejected the request";
-  return "Copilot returned an error";
+  if (status === 402) return t("account-rejection-title-402");
+  if (status === 403) return t("account-rejection-title-403");
+  if (status === 404) return t("account-rejection-title-404");
+  if (status === 408 || status === 504) return t("account-rejection-title-timeout");
+  if (status === 429) return t("account-rejection-title-429");
+  if (status >= 500) return t("account-rejection-title-5xx");
+  if (status >= 400) return t("account-rejection-title-4xx");
+  return t("account-rejection-title-other");
 }
 
 /** Actionable next step keyed off the status, used when the upstream message
  *  itself is missing or the generic fallback. */
 function rejectionExplanation(status: number): string {
-  if (status === 402)
-    return "Check your Copilot plan or billing on GitHub, then try again.";
-  if (status === 403)
-    return "This model or request isn’t allowed on your current plan.";
-  if (status === 408 || status === 504)
-    return "It took too long to respond. Try again in a moment.";
-  if (status === 429)
-    return "You’ve hit a rate or quota limit. Wait a moment and try again.";
-  if (status >= 500)
-    return "GitHub’s side returned an error. This is usually temporary — try again shortly.";
-  return "Try again, or check your Copilot account on GitHub.";
+  if (status === 402) return t("account-rejection-explain-402");
+  if (status === 403) return t("account-rejection-explain-403");
+  if (status === 408 || status === 504) return t("account-rejection-explain-timeout");
+  if (status === 429) return t("account-rejection-explain-429");
+  if (status >= 500) return t("account-rejection-explain-5xx");
+  return t("account-rejection-explain-other");
 }
 
 function renderUpstreamRejection(
@@ -901,10 +1122,14 @@ function renderUpstreamRejection(
   const status = rejection.status;
   const titleEl = accountSlot("upstream_rejection_title");
   if (titleEl)
-    titleEl.textContent = `${rejectionTitle(status)} · HTTP ${status}`;
+    titleEl.textContent = t("account-rejection-title-line", {
+      title: rejectionTitle(status),
+      status,
+    });
 
   // Show the real upstream message when we have one; otherwise the generic
   // fallback tells the user nothing, so swap in a status-derived next step.
+  // The compared literal is GHCP's own wire fallback, not our UI copy.
   const raw = rejection.message.trim();
   const useful = raw && raw !== "Copilot returned an error.";
   const messageEl = accountSlot("upstream_rejection_message");
@@ -932,14 +1157,14 @@ function labelForRemediationUrl(url: string): string {
   // GitHub pages. Map them to verbs the user will recognize; fall
   // back to a generic "Open in GitHub" for everything else so the
   // link still works when GHCP introduces new endpoints.
-  if (/\/settings\/copilot/i.test(url)) return "Open Copilot settings on GitHub";
-  if (/\/copilot\/signup/i.test(url)) return "Accept updated Copilot terms";
-  if (/\/site\/terms|\/terms-of-service/i.test(url)) return "Review GitHub terms";
-  return "Open in GitHub";
+  if (/\/settings\/copilot/i.test(url)) return t("account-remediation-copilot-settings");
+  if (/\/copilot\/signup/i.test(url)) return t("account-remediation-accept-terms");
+  if (/\/site\/terms|\/terms-of-service/i.test(url)) return t("account-remediation-review-terms");
+  return t("account-remediation-generic");
 }
 
 function formatExpiresAt(iso: string | undefined): string {
-  if (!iso) return "soon";
+  if (!iso) return t("account-expires-soon");
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
   return date.toLocaleTimeString();
@@ -1023,7 +1248,13 @@ function renderAccount(status: AuthStatus): void {
     case "device_code_issued":
     case "polling": {
       setAccountField("user_code", status.user_code);
-      setAccountField("expires_at", formatExpiresAt(status.expires_at));
+      renderDeviceCodeLabel();
+      setAccountField(
+        "waiting_authorization",
+        t("account-waiting-authorization", {
+          expiresAt: formatExpiresAt(status.expires_at),
+        }),
+      );
       const link = accountSlot("verification_uri");
       if (link instanceof HTMLAnchorElement) {
         link.href = status.verification_uri;
@@ -1089,7 +1320,7 @@ async function loadAuthStatus(): Promise<void> {
   if (!result.ok) {
     renderAccount({
       state: "error",
-      error: `Failed to load auth status: ${result.error}`,
+      error: t("account-err-load-status", { error: result.error }),
     });
     return;
   }
@@ -1185,6 +1416,9 @@ async function loadGhAccounts(): Promise<void> {
     const seed = template.content.firstElementChild;
     if (!seed) continue;
     const row = seed.cloneNode(true) as HTMLElement;
+    // Fill the templated [data-i18n] labels ("Use this account") on the clone;
+    // applyI18n only sweeps the live DOM, and the template content isn't in it.
+    applyI18n(row);
 
     const loginEl = row.querySelector<HTMLElement>('[data-field="gh_login"]');
     if (loginEl) loginEl.textContent = account.login;
@@ -1195,7 +1429,7 @@ async function loadGhAccounts(): Promise<void> {
       row.querySelector(".gh-account__dot")?.classList.add("status--ok");
       const sr = document.createElement("span");
       sr.className = "sr-only";
-      sr.textContent = " (currently active)";
+      sr.textContent = t("account-active-suffix");
       row.querySelector(".gh-account__id")?.appendChild(sr);
     }
 
@@ -1205,7 +1439,10 @@ async function loadGhAccounts(): Promise<void> {
     if (button) {
       button.dataset.ghLogin = account.login;
       button.dataset.ghHost = account.host;
-      button.setAttribute("aria-label", `Use this account: ${account.login}`);
+      button.setAttribute(
+        "aria-label",
+        t("account-gh-use-aria", { login: account.login }),
+      );
     }
     list.appendChild(row);
   }
@@ -1225,16 +1462,16 @@ function refreshGhAccounts(button: HTMLButtonElement): void {
   button.dataset.refreshing = "true";
   button.disabled = true;
   button.classList.remove("btn--confirmed");
-  button.textContent = "Refreshing…";
+  button.textContent = t("account-refreshing");
   // loadGhAccounts is best-effort and resolves even on failure (it just hides
   // the section), so `finally` is the single settle point either way.
   void loadGhAccounts().finally(() => {
     button.disabled = false;
     button.classList.add("btn--confirmed");
-    button.textContent = "Updated ✓";
+    button.textContent = t("account-updated");
     window.setTimeout(() => {
       button.classList.remove("btn--confirmed");
-      button.textContent = "Refresh";
+      button.textContent = t("common-refresh");
       button.dataset.refreshing = "false";
     }, 1600);
   });
@@ -1259,10 +1496,10 @@ async function useGhAccount(button: HTMLElement): Promise<void> {
   const originalLabel = buttonEl.textContent;
 
   hideGhError();
-  buttonEl.textContent = "Signing in…";
+  buttonEl.textContent = t("account-signing-in");
   row?.setAttribute("aria-busy", "true");
   for (const b of signInButtons) b.disabled = true;
-  setBusy(true, "Signing in…"); // ambient top-of-window indicator
+  setBusy(true, t("account-busy-signing-in")); // ambient top-of-window indicator
 
   const result = await apiCall({
     kind: "gh-use",
@@ -1279,8 +1516,7 @@ async function useGhAccount(button: HTMLElement): Promise<void> {
     // The pre-flight (POST /gh/use) returns a specific reason — stale token,
     // no Copilot subscription, etc. — caught BEFORE any reboot. Show it.
     showGhError(
-      apiErrorMessage(result.error) ||
-        "Couldn't sign in with that account. Try the code-based sign-in above.",
+      apiErrorMessage(result.error) || t("account-err-gh-use-generic"),
     );
     buttonEl.focus();
     return;
@@ -1300,9 +1536,9 @@ async function useGhAccount(button: HTMLElement): Promise<void> {
       buttonEl.textContent = originalLabel;
       row?.removeAttribute("aria-busy");
       showGhError(
-        sawDown ?
-          `Signed in as ${login}, but the proxy came back unauthenticated — that account may not have Copilot access on this host.`
-        : "Sign-in didn't complete — the proxy may not have restarted. Try again, or use the code-based sign-in above.",
+        sawDown
+          ? t("account-err-gh-use-authless", { login })
+          : t("account-err-gh-use-no-restart"),
       );
       buttonEl.focus();
     },
@@ -1437,6 +1673,8 @@ async function loadAccounts(mode: AccountRosterMode): Promise<void> {
     const seed = template.content.firstElementChild;
     if (!seed) continue;
     const row = seed.cloneNode(true) as HTMLElement;
+    // Fill the templated [data-i18n] labels ("Switch" / "Remove") on the clone.
+    applyI18n(row);
 
     const loginEl = row.querySelector<HTMLElement>('[data-field="acct_login"]');
     if (loginEl) loginEl.textContent = account.login;
@@ -1449,8 +1687,9 @@ async function loadAccounts(mode: AccountRosterMode): Promise<void> {
       );
       if (!btn) continue;
       btn.dataset.acctKey = account.key;
-      const verb = action === "account-switch" ? "Switch to" : "Remove";
-      btn.setAttribute("aria-label", `${verb} ${account.login}`);
+      const ariaKey =
+        action === "account-switch" ? "account-switch-aria" : "account-remove-aria";
+      btn.setAttribute("aria-label", t(ariaKey, { login: account.login }));
     }
     list.appendChild(row);
   }
@@ -1475,10 +1714,10 @@ async function switchToAccount(button: HTMLElement): Promise<void> {
   const originalLabel = buttonEl.textContent;
 
   hideRosterError(mode);
-  buttonEl.textContent = "Switching…";
+  buttonEl.textContent = t("account-switching");
   row?.setAttribute("aria-busy", "true");
   for (const b of buttons) b.disabled = true;
-  setBusy(true, "Switching account…");
+  setBusy(true, t("account-busy-switching"));
 
   const result = await apiCall({
     kind: "accounts-switch",
@@ -1495,7 +1734,7 @@ async function switchToAccount(button: HTMLElement): Promise<void> {
     // 422 = the saved token no longer works for Copilot; caught pre-reboot.
     showRosterError(
       mode,
-      apiErrorMessage(result.error) || "Couldn't switch to that account.",
+      apiErrorMessage(result.error) || t("account-err-switch-generic"),
     );
     buttonEl.focus();
     return;
@@ -1513,9 +1752,9 @@ async function switchToAccount(button: HTMLElement): Promise<void> {
       row?.removeAttribute("aria-busy");
       showRosterError(
         mode,
-        sawDown ?
-          "Switched, but the proxy came back unauthenticated — that account's token may no longer be valid."
-        : "Switch didn't complete — the proxy may not have restarted. Try again.",
+        sawDown
+          ? t("account-err-switch-authless")
+          : t("account-err-switch-no-restart"),
       );
       buttonEl.focus();
     },
@@ -1537,7 +1776,7 @@ async function forgetAccount(button: HTMLElement): Promise<void> {
       ?.querySelector('[data-field="acct_login"]')?.textContent ?? key;
 
   const confirmed = window.confirm(
-    `Remove ${login}? Maximal forgets its saved sign-in. This doesn't sign you out of gh or GitHub in the browser.`,
+    t("account-confirm-remove", { login }),
   );
   if (!confirmed) return;
 
@@ -1545,7 +1784,7 @@ async function forgetAccount(button: HTMLElement): Promise<void> {
     '[data-section="account"] [data-action="account-switch"], [data-section="account"] [data-action="account-remove"]',
   );
   for (const b of buttons) b.disabled = true;
-  setBusy(true, "Removing account…");
+  setBusy(true, t("account-busy-removing"));
 
   const result = await apiCall({
     kind: "accounts-remove",
@@ -1560,7 +1799,7 @@ async function forgetAccount(button: HTMLElement): Promise<void> {
   if (!result.ok) {
     showRosterError(
       mode,
-      apiErrorMessage(result.error) || "Couldn't remove that account.",
+      apiErrorMessage(result.error) || t("account-err-remove-generic"),
     );
     return;
   }
@@ -1587,7 +1826,7 @@ async function pollAuthStatus(): Promise<void> {
   if (!result.ok) {
     renderAccount({
       state: "error",
-      error: `Polling failed: ${result.error}`,
+      error: t("account-err-poll-failed", { error: result.error }),
     });
     return;
   }
@@ -1598,7 +1837,7 @@ async function startAuth(): Promise<void> {
   stopAuthPolling();
   // Show the ambient busy bar while the device-code request is in flight —
   // matches signOut/useGhAccount, so no action fires without feedback.
-  setBusy(true, "Starting sign-in…");
+  setBusy(true, t("account-busy-starting-sign-in"));
   const result = await apiCall({
     kind: "auth-start",
     method: "POST",
@@ -1609,7 +1848,7 @@ async function startAuth(): Promise<void> {
   if (!result.ok) {
     renderAccount({
       state: "error",
-      error: `Couldn't start sign-in: ${result.error}`,
+      error: t("account-err-start-failed", { error: result.error }),
     });
     return;
   }
@@ -1633,7 +1872,7 @@ async function cancelAuth(): Promise<void> {
   if (!result.ok) {
     renderAccount({
       state: "error",
-      error: `Couldn't cancel: ${result.error}`,
+      error: t("account-err-cancel-failed", { error: result.error }),
     });
     return;
   }
@@ -1641,9 +1880,7 @@ async function cancelAuth(): Promise<void> {
 }
 
 async function signOut(): Promise<void> {
-  const confirmed = window.confirm(
-    "Sign out? The proxy will restart and stop forwarding Copilot requests until you sign in again.",
-  );
+  const confirmed = window.confirm(t("account-confirm-sign-out"));
   if (!confirmed) return;
   const ok = await performSignOut();
   if (!ok) return;
@@ -1654,7 +1891,7 @@ async function signOut(): Promise<void> {
   // — the token is already gone; the shell's Starting→Ready status carries the
   // proxy back up. `safeInvoke` no-ops gracefully in plain-browser (app:ui).
   renderAccount({ state: "unauthenticated" });
-  setBusy(true, "Signing out…");
+  setBusy(true, t("account-busy-signing-out"));
   try {
     await safeInvoke("restart_sidecar");
     // Keep the indicator up until the sidecar is back (briefly down mid-reboot)
@@ -1702,7 +1939,7 @@ async function performSignOut(): Promise<boolean> {
   if (!result.ok) {
     renderAccount({
       state: "error",
-      error: `Sign-out failed: ${result.error}`,
+      error: t("account-err-sign-out-failed", { error: result.error }),
     });
     return false;
   }
@@ -1766,12 +2003,12 @@ async function signInWithCode(button: HTMLElement): Promise<void> {
     // the code on the button so the user can still copy it manually.
     console.error("clipboard write failed", err);
     if (label) {
-      label.textContent = `Copy ${code} manually — opening GitHub…`;
+      label.textContent = t("account-code-copy-manually", { code });
     }
   }
 
   if (copied && label) {
-    label.textContent = "Copied · Opening GitHub…";
+    label.textContent = t("account-code-copied-opening");
   }
 
   await openExternalUrl(url);
@@ -1833,6 +2070,10 @@ function wireAccount(): void {
 window.addEventListener("DOMContentLoaded", () => {
   applyTheme();
   applyI18n();
+  // Sentences that embed a link/CLI token or a plural count aren't [data-i18n]
+  // (they carry live DOM children); render them explicitly after the sweep.
+  renderStaticComposites();
+  wireLocalePicker();
   wireLogs();
   wireDiagnostics();
   wireAccount();
