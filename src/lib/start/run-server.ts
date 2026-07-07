@@ -20,7 +20,7 @@ import { initOpencodeVersion } from "~/lib/opencode"
 import { ensurePaths } from "~/lib/paths"
 import { initProxyFromEnv } from "~/lib/proxy"
 import { writePidfile } from "~/lib/replace-running"
-import { state } from "~/lib/state"
+import { hasGithubToken, state } from "~/lib/state"
 import {
   cacheMacMachineId,
   cacheVsCodeDeviceId,
@@ -195,7 +195,7 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   bootLogger.info(
     `listening url=${serverUrl} `
       + `executor=${executorName.split(" ")[0]} `
-      + `auth=${state.githubToken ? "authenticated" : "unauthenticated"}`,
+      + `auth=${hasGithubToken() ? "authenticated" : "unauthenticated"}`,
   )
 
   const httpServer = serve({

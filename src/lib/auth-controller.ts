@@ -56,7 +56,13 @@ import { createTeeLogger } from "./logger"
 import { PATHS } from "./paths"
 import { registerProcessCleanup } from "./process-cleanup"
 import { emitAuthChanged, registerAuthStatusProjector } from "./settings-events"
-import { clearLastUpstreamRejection, state } from "./state"
+import {
+  clearLastUpstreamRejection,
+  clearTokenTrio,
+  setGithubToken,
+  setUserName,
+  state,
+} from "./state"
 import { setupCopilotToken, stopCopilotRefreshLoop } from "./token"
 import { cacheModels } from "./utils"
 
@@ -451,7 +457,7 @@ async function runPoller(flow: ActiveFlow): Promise<void> {
       const user = await getGitHubUser(token)
       login = user.login
       avatarUrl = user.avatar_url
-      state.userName = user.login
+      setUserName(user.login)
     } catch (err) {
       if (flow.abort.signal.aborted) return
       const message = err instanceof Error ? err.message : String(err)
@@ -480,7 +486,7 @@ async function runPoller(flow: ActiveFlow): Promise<void> {
         addedVia: "device-code",
       }),
     )
-    state.githubToken = token
+    setGithubToken(token)
 
     // Best-effort: proactively mint the Copilot token so Diagnostics
     // doesn't surface the intermediate "github present, copilot absent"
@@ -579,9 +585,7 @@ export async function signOut(): Promise<void> {
   if (flow) {
     flow.abort.abort()
   }
-  state.githubToken = undefined
-  state.copilotToken = undefined
-  state.userName = undefined
+  clearTokenTrio()
   // A signed-out session has no upstream activity to surface a banner
   // about. Clear here so the sidecar doesn't outlive the token that
   // produced it.
@@ -687,9 +691,7 @@ async function runDegrade(error: CopilotAuthFatalError): Promise<void> {
   }
 
   stopCopilotRefreshLoop()
-  state.copilotToken = undefined
-  state.githubToken = undefined
-  state.userName = undefined
+  clearTokenTrio()
 
   // Idempotency: once we're already in the matching error state the account is
   // flagged and the UI notified — skip the redundant accounts.json write + SSE
@@ -770,5 +772,5 @@ export function __resetAuthControllerForTests(): void {
   // (so cold-boot from a stored token populates the Account UI). Tests
   // reset state.githubToken between cases; reset the cached userName here
   // too so the fallback doesn't leak across them.
-  state.userName = undefined
+  clearTokenTrio({ userName: true })
 }

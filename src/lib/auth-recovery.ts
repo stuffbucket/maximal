@@ -32,7 +32,12 @@ import {
 } from "./github-token-store"
 import { createTeeLogger } from "./logger"
 import { emitAuthChanged } from "./settings-events"
-import { clearLastUpstreamRejection, state } from "./state"
+import {
+  clearLastUpstreamRejection,
+  clearTokenTrio,
+  setGithubToken,
+  setUserName,
+} from "./state"
 import { setupCopilotToken, stopCopilotRefreshLoop } from "./token"
 import { cacheModels } from "./utils"
 
@@ -83,8 +88,8 @@ export function __resetAuthRecoveryDepsForTests(): void {
 async function switchActiveAccountLive(
   rec: AccountRecord & { key: string },
 ): Promise<void> {
-  state.githubToken = rec.token
-  state.userName = rec.login
+  setGithubToken(rec.token)
+  setUserName(rec.login)
   stopCopilotRefreshLoop()
 
   // onAuthFatal:"throw" — recovery owns the degrade decision; this must NOT
@@ -145,9 +150,7 @@ export async function attemptAutoRecovery(): Promise<boolean> {
 
   // No good account. A failed candidate may have populated in-memory token
   // state — clear it so the degraded error state is coherent.
-  state.githubToken = undefined
-  state.copilotToken = undefined
-  state.userName = undefined
+  clearTokenTrio()
   return false
 }
 

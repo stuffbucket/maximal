@@ -22,7 +22,7 @@ import type { ResponsesPayload } from "~/services/copilot/create-responses"
 
 import { Cache } from "~/lib/cache"
 import { getSmallModel } from "~/lib/config"
-import { state } from "~/lib/state"
+import { hasCopilotToken, state } from "~/lib/state"
 import {
   createCopilotTokenUsageRecorder,
   normalizeResponsesUsage,
@@ -828,7 +828,7 @@ export function chooseExecutor(
  *   3. else any /responses-capable model, so search still works.
  */
 export function resolveResponsesModel(): string | undefined {
-  if (!state.copilotToken) return undefined
+  if (!hasCopilotToken()) return undefined
   return pickResponsesModel(
     (state.models?.data ?? []).map((m) => ({
       id: m.id,

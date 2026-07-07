@@ -4,7 +4,7 @@ import consola from "consola"
 
 import { recordClient } from "./active-clients"
 import { getConfig, type AppConfig } from "./config"
-import { state } from "./state"
+import { hasGithubToken, state } from "./state"
 
 interface AuthMiddlewareOptions {
   getApiKeys?: () => Array<string>
@@ -262,7 +262,7 @@ type AuthDecision =
  * needing to handshake the device-code flow before port 4141 listens.
  */
 export const requireGithubAuth: MiddlewareHandler = async (c, next) => {
-  if (state.githubToken) {
+  if (hasGithubToken()) {
     return next()
   }
   return c.json(

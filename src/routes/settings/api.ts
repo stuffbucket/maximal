@@ -29,7 +29,7 @@ import {
   UpdateStatusResponse,
   type UpdateStatusResponse as UpdateStatusResponseT,
 } from "~/lib/settings-types"
-import { state } from "~/lib/state"
+import { modelsCached, state, tokenPresence } from "~/lib/state"
 import { getUpdateStatus } from "~/lib/update-check"
 import { getGitVersion, shortSha } from "~/lib/version"
 
@@ -52,6 +52,7 @@ const PROCESS_START_MS = Date.now()
 function buildDiagnostics(): DiagnosticsResponseT {
   const git = getGitVersion()
   const launch = describeLaunchSource()
+  const tokens = tokenPresence()
   return {
     version: BUILD_VERSION,
     source_revision: git.sha ? shortSha(git.sha) : null,
@@ -61,10 +62,10 @@ function buildDiagnostics(): DiagnosticsResponseT {
     pid: process.pid,
     uptime_ms: Date.now() - PROCESS_START_MS,
     account_type: state.accountType,
-    models_cached: state.models?.data.length ?? 0,
+    models_cached: modelsCached(),
     tokens: {
-      github_token_present: state.githubToken !== undefined,
-      copilot_token_present: state.copilotToken !== undefined,
+      github_token_present: tokens.github,
+      copilot_token_present: tokens.copilot,
     },
     rate_limit: {
       interval_seconds: state.rateLimitSeconds ?? null,

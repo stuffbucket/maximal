@@ -79,12 +79,83 @@ export const state: State = {
   shellApiKey: process.env.MAXIMAL_SHELL_KEY?.trim() || undefined,
 }
 
+// ── Token trio: single owner ────────────────────────────────────────────────
+// `githubToken`, `copilotToken`, and `userName` are the "token trio" — the
+// identity/credential fields that describe the current sign-in. They move
+// together (a sign-in populates them, a sign-out/eviction clears them), so this
+// module is their single owner: every write goes through the setters/clear
+// below and every presence check goes through the accessors below. Callers must
+// not assign `state.githubToken` / `state.copilotToken` / `state.userName`
+// directly. (Token *attachment* to upstream requests still lives only in
+// send-request.ts per ADR-0001 — this owner governs the in-memory trio, not the
+// wire.)
+
+export function setGithubToken(token: string): void {
+  state.githubToken = token
+}
+
 export function setCopilotToken(token: string): void {
   // Skip the metric refresh when the upstream returned the same token —
   // otherwise the refresh counter inflates with no-op rotations.
   if (state.copilotToken === token) return
   state.copilotToken = token
   copilotTokenCache.set(token)
+}
+
+export function setUserName(name: string): void {
+  state.userName = name
+}
+
+/**
+ * Clear the whole token trio. Behaviour-preserving replacement for the
+ * scattered three-line `state.githubToken = state.copilotToken =
+ * state.userName = undefined` blocks in signOut / markAuthFatalAndSignOut /
+ * auto-recovery. Does NOT touch the Copilot-token metric mirror (the previous
+ * code didn't either — the mirror is a monotonic refresh counter, not a live
+ * presence flag) and does NOT stop the refresh loop or emit auth events; those
+ * remain the caller's responsibility so refresh/eviction semantics are
+ * unchanged.
+ *
+ * `fields` selects which of the three to clear (default: all). This lets the
+ * callers that intentionally clear only a subset (e.g. bootstrap's
+ * github+copilot degrade, or the test reset that only resets userName) express
+ * that without re-introducing direct assignment.
+ */
+export function clearTokenTrio(
+  fields: { github?: boolean; copilot?: boolean; userName?: boolean } = {
+    github: true,
+    copilot: true,
+    userName: true,
+  },
+): void {
+  if (fields.github) state.githubToken = undefined
+  if (fields.copilot) state.copilotToken = undefined
+  if (fields.userName) state.userName = undefined
+}
+
+// ── Shared presence accessors ────────────────────────────────────────────────
+// The "is a token present?" predicate was re-derived inline at 4+ HTTP surfaces
+// (`status.ts`, `settings/api.ts`, `debug/route.ts`) and gated internal call
+// sites. Route them all through these so the notion of "present" has one
+// definition. Matches the prior `!== undefined` semantics exactly.
+
+export function hasGithubToken(): boolean {
+  return state.githubToken !== undefined
+}
+
+export function hasCopilotToken(): boolean {
+  return state.copilotToken !== undefined
+}
+
+/** Unified presence snapshot for the diagnostics/status surfaces. */
+export function tokenPresence(): { github: boolean; copilot: boolean } {
+  return { github: hasGithubToken(), copilot: hasCopilotToken() }
+}
+
+/** Number of models currently cached (0 before the first `setModels`).
+ *  Replaces the `state.models?.data.length ?? 0` re-derived at 3 sites. */
+export function modelsCached(): number {
+  return state.models?.data.length ?? 0
 }
 
 export function setModels(models: ModelsResponse): void {
