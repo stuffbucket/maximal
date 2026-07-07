@@ -64,6 +64,11 @@ export async function runAgentLoop(
   const turns: Array<Turn> = []
 
   let last: AnthropicResponse | null = null
+  // Every agent turn is a separately-billed upstream `callOnce`. Only the last
+  // turn's usage rides on the synthesized response, so its lone count would
+  // under-report the whole request. Accumulate every turn's usage (and
+  // copilot_usage) and stamp the total on the final response.
+  const usageTotal = newUsageTotal()
 
   if (logger) {
     debugLazy(logger, () => [
@@ -87,6 +92,7 @@ export async function runAgentLoop(
       ])
     }
     last = await callOnce(turnPayload)
+    accumulateTurnUsage(usageTotal, last)
 
     const content = Array.isArray(last.content) ? last.content : []
     const ours = content.filter((block) => isOurToolUse(block))
@@ -143,13 +149,62 @@ export async function runAgentLoop(
     }
   }
 
-  return synthesizeFinalResponse(last as AnthropicResponse, turns)
+  return synthesizeFinalResponse(last as AnthropicResponse, turns, usageTotal)
 }
 
 function isOurToolUse(
   block: AnthropicAssistantContentBlock,
 ): block is AnthropicToolUseBlock & { name: ToolName } {
   return block.type === "tool_use" && isWebToolName(block.name)
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Cross-turn usage accumulation. Each agent turn is a separately-billed
+// upstream call; the synthesized response reports only the last turn's
+// usage, so we sum every turn's counts (and copilot_usage) here. Mirrors
+// the streaming path's accumulateTurnUsage in web-tools-stream.ts.
+// ────────────────────────────────────────────────────────────────────
+
+/** Mutable running total. `input_tokens`/`output_tokens` always accumulate;
+ *  optional cache counts and `copilot_usage` are only surfaced once at least
+ *  one turn actually reports them, and `service_tier` is kept from the last
+ *  turn that carried it (it's not additive). */
+interface UsageTotal {
+  input_tokens: number
+  output_tokens: number
+  cache_creation_input_tokens?: number
+  cache_read_input_tokens?: number
+  service_tier?: AnthropicResponse["usage"]["service_tier"]
+  copilot_total_nano_aiu?: number
+}
+
+function newUsageTotal(): UsageTotal {
+  return { input_tokens: 0, output_tokens: 0 }
+}
+
+/**
+ * Fold one turn's `usage` (and sibling `copilot_usage`) into the running
+ * total. Missing fields default to 0; optional cache counts and copilot_usage
+ * are only surfaced once a turn reports them. `service_tier` is not additive —
+ * keep whichever the latest turn carried.
+ */
+function accumulateTurnUsage(total: UsageTotal, resp: AnthropicResponse): void {
+  const u = resp.usage
+  total.input_tokens += u.input_tokens
+  total.output_tokens += u.output_tokens
+  if (u.cache_creation_input_tokens !== undefined) {
+    total.cache_creation_input_tokens =
+      (total.cache_creation_input_tokens ?? 0) + u.cache_creation_input_tokens
+  }
+  if (u.cache_read_input_tokens !== undefined) {
+    total.cache_read_input_tokens =
+      (total.cache_read_input_tokens ?? 0) + u.cache_read_input_tokens
+  }
+  if (u.service_tier !== undefined) total.service_tier = u.service_tier
+  const nano = resp.copilot_usage?.total_nano_aiu
+  if (nano !== undefined) {
+    total.copilot_total_nano_aiu = (total.copilot_total_nano_aiu ?? 0) + nano
+  }
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -202,13 +257,33 @@ function weaveTurn(turn: Turn): Array<SynthesizedBlock> {
 function synthesizeFinalResponse(
   last: AnthropicResponse,
   turns: Array<Turn>,
+  usageTotal: UsageTotal,
 ): AnthropicResponse {
   const synthesized: Array<SynthesizedBlock> = []
   for (const turn of turns) {
     for (const block of weaveTurn(turn)) synthesized.push(block)
   }
+  // Replace the last-turn-only usage with the cross-turn total so the client
+  // bills for every turn's upstream call, not just the final one.
+  const usage: AnthropicResponse["usage"] = {
+    input_tokens: usageTotal.input_tokens,
+    output_tokens: usageTotal.output_tokens,
+    ...(usageTotal.cache_creation_input_tokens !== undefined ?
+      { cache_creation_input_tokens: usageTotal.cache_creation_input_tokens }
+    : {}),
+    ...(usageTotal.cache_read_input_tokens !== undefined ?
+      { cache_read_input_tokens: usageTotal.cache_read_input_tokens }
+    : {}),
+    ...(usageTotal.service_tier !== undefined ?
+      { service_tier: usageTotal.service_tier }
+    : {}),
+  }
   return {
     ...last,
     content: synthesized as Array<AnthropicAssistantContentBlock>,
+    usage,
+    ...(usageTotal.copilot_total_nano_aiu !== undefined ?
+      { copilot_usage: { total_nano_aiu: usageTotal.copilot_total_nano_aiu } }
+    : {}),
   }
 }
