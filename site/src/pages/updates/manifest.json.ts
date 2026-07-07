@@ -8,21 +8,23 @@
 //
 // Shape — channel-keyed and schema-versioned so adding a `nightly` channel
 // later is a server-only, non-breaking change. `beta` is omitted when no
-// prerelease exists:
-//   { "schema": 1, "generated": "<iso>",
-//     "channels": { "stable": { ... }, "beta": { ... } } }
+// prerelease exists. Schema 2 adds a per-channel `tag` and a keyed `downloads`
+// map; see site/src/lib/updates-manifest.ts for the full contract. The bump is
+// additive — schema-1 desktop clients keep reading `channels.stable.version`
+// byte-for-byte unchanged.
 //
-// Deliberately carries NO download URL. The client pins its download
-// destination as a compile-time constant (see src/lib/update-check.ts →
-// DOWNLOAD_URL), so a tampered manifest can at most misreport a version — it
-// can never redirect a user to a malicious download. `notes` is a display-only
-// link to the GitHub release.
+// SECURITY: the `downloads` map is BROWSER-ONLY. The desktop client
+// (src/lib/update-check.ts) must read ONLY `version` and keep DOWNLOAD_URL a
+// hardcoded mxml.sh constant, so a tampered manifest can at most misreport a
+// version — never redirect a download. Do NOT wire the installer to
+// downloads.url. `notes` is a display-only link to the GitHub release.
 //
 // Fail-closed: resolveLatestRelease() throws on a real API failure, failing the
 // build and keeping the last-good manifest live rather than publishing a
 // version-less one. A genuine "no release yet" (404) emits empty channels, so
 // the client reads "unknown" / no update.
 
+import { buildManifest } from "../../lib/updates-manifest";
 import {
   resolveLatestPrerelease,
   resolveLatestRelease,
@@ -30,33 +32,22 @@ import {
 
 export const prerender = true;
 
-const REPO_URL = "https://github.com/stuffbucket/maximal";
-
 export async function GET(): Promise<Response> {
-  const [{ tag, hasRelease }, beta] = await Promise.all([
+  const [stable, beta] = await Promise.all([
     resolveLatestRelease(),
     resolveLatestPrerelease(),
   ]);
 
-  const channels: Record<string, { version: string; notes: string }> = {};
-  if (hasRelease && tag) {
-    channels.stable = {
-      version: tag.replace(/^v/, ""),
-      notes: `${REPO_URL}/releases/tag/${tag}`,
-    };
-  }
-  if (beta.hasRelease && beta.tag) {
-    channels.beta = {
-      version: beta.tag.replace(/^v/, ""),
-      notes: `${REPO_URL}/releases/tag/${beta.tag}`,
-    };
-  }
-
-  const manifest = {
-    schema: 1,
-    generated: new Date().toISOString(),
-    channels,
-  };
+  const manifest = buildManifest({
+    stable:
+      stable.hasRelease && stable.tag
+        ? { tag: stable.tag, assets: stable.assets }
+        : null,
+    beta:
+      beta.hasRelease && beta.tag
+        ? { tag: beta.tag, assets: beta.assets }
+        : null,
+  });
 
   return new Response(`${JSON.stringify(manifest, null, 2)}\n`, {
     headers: { "content-type": "application/json; charset=utf-8" },
