@@ -15,7 +15,7 @@ import {
   test,
 } from "bun:test"
 
-import type { AccountRecord } from "~/lib/github-token-store"
+import type { AccountRecord } from "~/lib/auth/github-token-store"
 
 import {
   deferred,
@@ -64,8 +64,8 @@ const harness = {
 const realGetDeviceCodeModule =
   await import("~/services/github/get-device-code")
 const realGetUserModule = await import("~/services/github/get-user")
-const realTokenModule = await import("~/lib/token")
-const realUtilsModule = await import("~/lib/utils")
+const realTokenModule = await import("~/lib/auth/token")
+const realUtilsModule = await import("~/lib/platform/utils")
 const realFsPromisesModule = await import("node:fs/promises")
 
 await mock.module("~/services/github/get-device-code", () => ({
@@ -76,7 +76,7 @@ await mock.module("~/services/github/get-user", () => ({
   getGitHubUser: (_token?: string) => harness.getGitHubUserImpl(),
 }))
 
-await mock.module("~/lib/token", () => ({
+await mock.module("~/lib/auth/token", () => ({
   // Spread the real module so exports this test doesn't override stay intact
   // for sibling files while the mock is active. See ADR-0011.
   ...realTokenModule,
@@ -92,7 +92,7 @@ await mock.module("~/lib/token", () => ({
 // Copilot token. Stub it so completing a device flow doesn't make a real
 // Copilot /models fetch; spread the real namespace so the other utils
 // exports survive.
-await mock.module("~/lib/utils", () => ({
+await mock.module("~/lib/platform/utils", () => ({
   ...realUtilsModule,
   cacheModels: () => Promise.resolve(),
 }))
@@ -121,8 +121,8 @@ afterAll(async () => {
     () => realGetDeviceCodeModule,
   )
   await mock.module("~/services/github/get-user", () => realGetUserModule)
-  await mock.module("~/lib/token", () => realTokenModule)
-  await mock.module("~/lib/utils", () => realUtilsModule)
+  await mock.module("~/lib/auth/token", () => realTokenModule)
+  await mock.module("~/lib/platform/utils", () => realUtilsModule)
   await mock.module("node:fs/promises", () => realFsPromisesModule)
 })
 
@@ -134,10 +134,10 @@ const {
   markAuthDegraded,
   __resetAuthControllerForTests,
   __setAuthControllerDepsForTests,
-} = await import("~/lib/auth-controller")
-const { CopilotAuthFatalError } = await import("~/lib/error")
-const { state } = await import("~/lib/state")
-const { PATHS } = await import("~/lib/paths")
+} = await import("~/lib/auth/auth-controller")
+const { CopilotAuthFatalError } = await import("~/lib/errors/error")
+const { state } = await import("~/lib/runtime-state/state")
+const { PATHS } = await import("~/lib/platform/paths")
 
 beforeEach(() => {
   __resetAuthControllerForTests()

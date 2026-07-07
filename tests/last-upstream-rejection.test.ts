@@ -18,7 +18,7 @@ import {
   clearLastUpstreamRejection,
   setLastUpstreamRejection,
   state,
-} from "~/lib/state"
+} from "~/lib/runtime-state/state"
 
 // --- Pure state-helper tests ----------------------------------------------
 
@@ -187,7 +187,7 @@ describe("clearLastUpstreamRejection", () => {
 const realGetDeviceCodeModule =
   await import("~/services/github/get-device-code")
 const realGetUserModule = await import("~/services/github/get-user")
-const realTokenModule = await import("~/lib/token")
+const realTokenModule = await import("~/lib/auth/token")
 const realFsPromisesModule = await import("node:fs/promises")
 
 await mock.module("~/services/github/get-device-code", () => ({
@@ -205,7 +205,7 @@ await mock.module("~/services/github/get-user", () => ({
   getGitHubUser: () => Promise.resolve({ login: "octocat" }),
 }))
 
-await mock.module("~/lib/token", () => ({
+await mock.module("~/lib/auth/token", () => ({
   // Spread the real module so exports this test doesn't override stay intact
   // for sibling files while the mock is active. See ADR-0011.
   ...realTokenModule,
@@ -227,12 +227,12 @@ afterAll(async () => {
     () => realGetDeviceCodeModule,
   )
   await mock.module("~/services/github/get-user", () => realGetUserModule)
-  await mock.module("~/lib/token", () => realTokenModule)
+  await mock.module("~/lib/auth/token", () => realTokenModule)
   await mock.module("node:fs/promises", () => realFsPromisesModule)
 })
 
 const { getAuthStatus, signOut, markSignedIn, __resetAuthControllerForTests } =
-  await import("~/lib/auth-controller")
+  await import("~/lib/auth/auth-controller")
 
 describe("getAuthStatus + lastUpstreamRejection", () => {
   beforeEach(() => {

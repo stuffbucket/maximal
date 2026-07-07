@@ -21,6 +21,6 @@
   ],
   "ignoreExportsUsedInFile": true,
   "ignore": [
-    "src/lib/token.ts"
+    "src/lib/auth/token.ts"
   ]
 }

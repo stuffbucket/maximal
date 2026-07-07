@@ -1,6 +1,6 @@
-import { copilotHeaders, copilotBaseUrl } from "~/lib/api-config"
-import { sendRequestJson } from "~/lib/send-request"
-import { hasCopilotToken, state } from "~/lib/state"
+import { copilotHeaders, copilotBaseUrl } from "~/lib/config/api-config"
+import { sendRequestJson } from "~/lib/http/send-request"
+import { hasCopilotToken, state } from "~/lib/runtime-state/state"
 
 export const createEmbeddings = async (payload: EmbeddingRequest) => {
   if (!hasCopilotToken()) throw new Error("Copilot token not found")

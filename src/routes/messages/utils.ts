@@ -1,6 +1,6 @@
 import consola from "consola"
 
-import { type AnthropicResponse } from "~/lib/anthropic-types"
+import { type AnthropicResponse } from "~/lib/models/anthropic-types"
 
 /**
  * Parse the `arguments` string of an OpenAI/Copilot tool call into the object

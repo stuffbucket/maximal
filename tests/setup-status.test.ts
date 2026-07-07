@@ -3,7 +3,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 
-import { evaluateSetup, type SetupPaths } from "~/lib/setup-status"
+import { evaluateSetup, type SetupPaths } from "~/lib/config/setup-status"
 
 interface Sandbox {
   dir: string

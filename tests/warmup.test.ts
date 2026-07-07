@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { Hono } from "hono"
 
-import type { AnthropicMessagesPayload } from "~/lib/anthropic-types"
+import type { AnthropicMessagesPayload } from "~/lib/models/anthropic-types"
 
 import { isWarmupRequest, respondToWarmup } from "~/routes/messages/warmup"
 

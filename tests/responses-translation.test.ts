@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 
-import type { AnthropicMessagesPayload } from "~/lib/anthropic-types"
+import type { AnthropicMessagesPayload } from "~/lib/models/anthropic-types"
 import type {
   ResponseFunctionCallOutputItem,
   ResponseInputMessage,

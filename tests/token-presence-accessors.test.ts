@@ -21,8 +21,8 @@ import {
   setUserName,
   state,
   tokenPresence,
-} from "~/lib/state"
-import { buildStatus } from "~/lib/status"
+} from "~/lib/runtime-state/state"
+import { buildStatus } from "~/lib/runtime-state/status"
 
 function clearAll(): void {
   clearTokenTrio()

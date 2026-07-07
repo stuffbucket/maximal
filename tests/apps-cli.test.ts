@@ -18,8 +18,8 @@ import { claudeDesktopCli } from "~/apps/claude-desktop/cli"
 import { apiCommand, appCommand } from "~/apps/cli"
 import { defineComingSoonApp } from "~/apps/coming-soon"
 import { getAllApps, getApp } from "~/apps/registry"
-import { apiKeyHelperCommand } from "~/lib/api-key-helper"
-import { HELPER_SUBCOMMAND } from "~/lib/api-key-helper-tokens"
+import { apiKeyHelperCommand } from "~/lib/auth/api-key-helper"
+import { HELPER_SUBCOMMAND } from "~/lib/auth/api-key-helper-tokens"
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mirrors citty's CommandDef<any> subcommand map
 type AnyCommand = CommandDef<any>

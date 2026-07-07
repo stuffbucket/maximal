@@ -6,8 +6,11 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-import { apiKeyHelperCommand, isOwnedApiKeyHelper } from "~/lib/api-key-helper"
-import { atomicWriteJson } from "~/lib/atomic-json"
+import {
+  apiKeyHelperCommand,
+  isOwnedApiKeyHelper,
+} from "~/lib/auth/api-key-helper"
+import { atomicWriteJson } from "~/lib/platform/atomic-json"
 
 /** The label Claude Code attributes its key under (Settings → API clients).
  *  Single-sourced: it is both the `api <client>` token written on disk (via

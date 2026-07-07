@@ -1,6 +1,6 @@
 import type { ArgsDef } from "citty"
 
-import type { AppEntry } from "~/lib/settings-types"
+import type { AppEntry } from "~/lib/config/settings-types"
 
 /** The mutation a `maximal app <client>` invocation asks for. `status` is the
  *  default (no flag) — show the client's detect/enabled state without changing

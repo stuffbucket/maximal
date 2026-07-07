@@ -9,13 +9,13 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 
 import type { Model } from "~/services/copilot/get-models"
 
-import { forwardError, HTTPError } from "~/lib/error"
-import { state } from "~/lib/state"
+import { forwardError, HTTPError } from "~/lib/errors/error"
 import {
   adviseUpstreamError,
   composeAdvisedMessage,
   parseUpstreamError,
-} from "~/lib/upstream-error-advice"
+} from "~/lib/errors/upstream-error-advice"
+import { state } from "~/lib/runtime-state/state"
 
 function makeModel(over: Partial<Model> & { id: string; name: string }): Model {
   return {

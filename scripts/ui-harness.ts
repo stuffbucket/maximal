@@ -52,7 +52,7 @@ import {
   DiagnosticsResponse,
   ModelsListResponse,
   UpdateStatusResponse,
-} from "../src/lib/settings-types"
+} from "../src/lib/config/settings-types"
 import { SCENARIOS, type ScenarioId, defaultScenarioId } from "./ui-harness-fixtures"
 
 const REPO = resolve(import.meta.dir, "..")

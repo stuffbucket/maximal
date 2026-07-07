@@ -9,10 +9,10 @@
 
 import { Hono } from "hono"
 
-import { allCacheMetrics } from "~/lib/cache"
-import { getConfig } from "~/lib/config"
-import { modelsCached, state, tokenPresence } from "~/lib/state"
-import { getGitVersion } from "~/lib/version"
+import { getConfig } from "~/lib/config/config"
+import { allCacheMetrics } from "~/lib/runtime-state/cache"
+import { modelsCached, state, tokenPresence } from "~/lib/runtime-state/state"
+import { getGitVersion } from "~/lib/update/version"
 
 import {
   collectSecretStatuses,

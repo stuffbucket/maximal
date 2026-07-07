@@ -13,11 +13,11 @@
 import { beforeEach, describe, expect, test } from "bun:test"
 import { Hono } from "hono"
 
+import { createAuthMiddleware } from "~/lib/auth/request-auth"
 import {
   __resetActiveClientsForTests,
   recordClient,
-} from "~/lib/active-clients"
-import { createAuthMiddleware } from "~/lib/request-auth"
+} from "~/lib/http/active-clients"
 import { clientsRoutes } from "~/routes/settings/clients"
 
 function buildApp() {

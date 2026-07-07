@@ -1,6 +1,6 @@
 import { Hono } from "hono"
 
-import { forwardError } from "~/lib/error"
+import { forwardError } from "~/lib/errors/error"
 import {
   getTokenUsageEventsPage,
   getTokenUsageSummary,

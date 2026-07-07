@@ -3,17 +3,18 @@ import type { Context } from "hono"
 
 import { streamSSE } from "hono/streaming"
 
-import type { CompactType } from "~/lib/compact"
-import type { SubagentMarker } from "~/lib/subagent"
+import type { CompactType } from "~/lib/models/compact"
+import type { SubagentMarker } from "~/lib/runtime-state/subagent"
 import type { Model } from "~/services/copilot/get-models"
 
+import { getPromptCacheRetention } from "~/lib/config/config"
 import {
   type AnthropicMessagesPayload,
   type AnthropicStreamEventData,
   type AnthropicStreamState,
-} from "~/lib/anthropic-types"
-import { getPromptCacheRetention } from "~/lib/config"
-import { debugJson, debugJsonTail, debugLazy } from "~/lib/logger"
+} from "~/lib/models/anthropic-types"
+import { debugJson, debugJsonTail, debugLazy } from "~/lib/platform/logger"
+import { parseUserIdMetadata } from "~/lib/platform/utils"
 import {
   createCopilotTokenUsageRecorder,
   mergeAnthropicUsage,
@@ -24,7 +25,6 @@ import {
   type UsageTokens,
   withCopilotCost,
 } from "~/lib/token-usage"
-import { parseUserIdMetadata } from "~/lib/utils"
 import {
   buildErrorEvent,
   createResponsesStreamState,

@@ -10,15 +10,15 @@ import type { Context } from "hono"
 import { Hono } from "hono"
 
 import { getAllApps, getApp } from "~/apps/registry"
-import { getConfig, writeConfig, type AppConfig } from "~/lib/config"
-import { forwardError, HTTPError } from "~/lib/error"
+import { getConfig, writeConfig, type AppConfig } from "~/lib/config/config"
 import {
   AppEntry,
   AppsListResponse,
   ClaudeCodeToggleRequest,
   ClaudeDesktopToggleRequest,
   type AppEntry as AppEntryT,
-} from "~/lib/settings-types"
+} from "~/lib/config/settings-types"
+import { forwardError, HTTPError } from "~/lib/errors/error"
 
 import { respondValidated } from "./respond-validated"
 

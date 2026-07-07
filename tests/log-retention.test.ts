@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 
-import { AppConfigSchema } from "~/lib/config-schema"
+import { AppConfigSchema } from "~/lib/config/config-schema"
 
 describe("logRetentionDays config", () => {
   it("accepts a positive integer", () => {

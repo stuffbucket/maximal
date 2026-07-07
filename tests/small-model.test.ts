@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 
 import type { Model } from "~/services/copilot/get-models"
 
-import { resolveSmallToolModel } from "~/lib/small-model"
+import { resolveSmallToolModel } from "~/lib/models/small-model"
 
 /**
  * Build a minimal Model fixture — only the fields resolveSmallToolModel reads.

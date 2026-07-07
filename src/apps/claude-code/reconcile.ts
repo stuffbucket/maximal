@@ -1,6 +1,6 @@
 import consola from "consola"
 
-import { getConfig, writeConfig } from "~/lib/config"
+import { getConfig, writeConfig } from "~/lib/config/config"
 
 import {
   applyProxyBaseUrl,

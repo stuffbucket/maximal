@@ -23,7 +23,7 @@ import path from "node:path"
 import { claudeCodeApp } from "~/apps/claude-code"
 import { isProxyBaseUrlConfigured } from "~/apps/claude-code/config"
 import { claudeCodeRoutingIntended } from "~/apps/claude-code/reconcile"
-import { getConfig, writeConfig } from "~/lib/config"
+import { getConfig, writeConfig } from "~/lib/config/config"
 
 const TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "cc-cli-persist-"))
 const SETTINGS = path.join(TMP_DIR, "settings.json")

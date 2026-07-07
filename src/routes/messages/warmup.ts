@@ -12,7 +12,7 @@ import type {
   AnthropicMessageStartEvent,
   AnthropicMessageStopEvent,
   AnthropicResponse,
-} from "~/lib/anthropic-types"
+} from "~/lib/models/anthropic-types"
 
 const WARMUP_TEXT = "Warmup"
 const CANNED_REPLY = "OK"

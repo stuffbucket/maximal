@@ -13,8 +13,8 @@ import {
   type AnthropicToolUseBlock,
   type AnthropicUserContentBlock,
   type AnthropicUserMessage,
-} from "~/lib/anthropic-types"
-import { state } from "~/lib/state"
+} from "~/lib/models/anthropic-types"
+import { state } from "~/lib/runtime-state/state"
 import {
   type ChatCompletionResponse,
   type ChatCompletionsPayload,

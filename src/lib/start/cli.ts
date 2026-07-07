@@ -10,7 +10,7 @@
 
 import { defineCommand } from "citty"
 
-import { parseAccountType } from "~/lib/auth-types"
+import { parseAccountType } from "~/lib/auth/auth-types"
 
 import { runServer } from "./run-server"
 

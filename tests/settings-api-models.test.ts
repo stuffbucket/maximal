@@ -19,8 +19,8 @@ import { Hono } from "hono"
 
 import type { ModelsResponse } from "~/services/copilot/get-models"
 
-import { createAuthMiddleware } from "~/lib/request-auth"
-import { setModels, state } from "~/lib/state"
+import { createAuthMiddleware } from "~/lib/auth/request-auth"
+import { setModels, state } from "~/lib/runtime-state/state"
 import { settingsApiRoutes } from "~/routes/settings/api"
 
 function buildApp() {

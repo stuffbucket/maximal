@@ -7,7 +7,7 @@
     "command": "bun test tests/find-endpoint-model.test.ts"
   },
   "mutate": [
-    "src/lib/models.ts"
+    "src/lib/models/models.ts"
   ],
   "reporters": ["progress", "clear-text", "html"],
   "tempDirName": ".stryker-tmp",

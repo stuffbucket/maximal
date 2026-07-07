@@ -1,15 +1,15 @@
 import consola from "consola"
 import path from "node:path"
 
-import { PATHS } from "~/lib/paths"
-import { registerProcessCleanup } from "~/lib/process-cleanup"
+import { PATHS } from "~/lib/platform/paths"
+import { registerProcessCleanup } from "~/lib/platform/process-cleanup"
 import {
   type Migration,
   isSqliteRuntimeSupported,
   runMigrations,
   SqliteDbStore,
   type SqliteDatabase,
-} from "~/lib/sqlite"
+} from "~/lib/platform/sqlite"
 
 export type TokenUsageSource = "copilot" | "provider"
 

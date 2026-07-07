@@ -22,7 +22,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 
-import { state } from "~/lib/state"
+import { state } from "~/lib/runtime-state/state"
 import { server } from "~/server"
 
 const SHELL_KEY = "test-shell-key-230"

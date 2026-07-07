@@ -21,17 +21,17 @@ import consola from "consola"
 import { Hono } from "hono"
 
 import { describeExecutor } from "~/debug"
-import { BUILD_VERSION } from "~/lib/build-info"
-import { describeLaunchSource } from "~/lib/cli-path"
 import {
   DiagnosticsResponse,
   type DiagnosticsResponse as DiagnosticsResponseT,
   UpdateStatusResponse,
   type UpdateStatusResponse as UpdateStatusResponseT,
-} from "~/lib/settings-types"
-import { modelsCached, state, tokenPresence } from "~/lib/state"
-import { getUpdateStatus } from "~/lib/update-check"
-import { getGitVersion, shortSha } from "~/lib/version"
+} from "~/lib/config/settings-types"
+import { describeLaunchSource } from "~/lib/platform/cli-path"
+import { modelsCached, state, tokenPresence } from "~/lib/runtime-state/state"
+import { BUILD_VERSION } from "~/lib/update/build-info"
+import { getUpdateStatus } from "~/lib/update/update-check"
+import { getGitVersion, shortSha } from "~/lib/update/version"
 
 import { accountsRoutes } from "./accounts"
 import { apiKeysRoutes } from "./api-keys"

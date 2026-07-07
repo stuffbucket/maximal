@@ -2,9 +2,9 @@
 
 import { defineCommand, runMain, parseArgs } from "citty"
 
-import { HELPER_SUBCOMMAND } from "./lib/api-key-helper-tokens"
-import { BUILD_VERSION } from "./lib/build-info"
-import { bindElectronFetch } from "./lib/electron-fetch"
+import { HELPER_SUBCOMMAND } from "./lib/auth/api-key-helper-tokens"
+import { bindElectronFetch } from "./lib/http/electron-fetch"
+import { BUILD_VERSION } from "./lib/update/build-info"
 
 const cliArgs = {
   apiKeyHelper: {
@@ -41,7 +41,7 @@ if (typeof args["enterprise-url"] === "string") {
 }
 
 if (typeof args.apiKeyHelper === "string") {
-  const { runApiKeyHelper } = await import("./lib/api-key-helper")
+  const { runApiKeyHelper } = await import("./lib/auth/api-key-helper")
   process.exit(runApiKeyHelper(args.apiKeyHelper))
 }
 

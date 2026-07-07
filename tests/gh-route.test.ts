@@ -10,7 +10,7 @@
  * docs/architecture.md § Testing gotchas). Each test constructs its own
  * routes instance with in-process stubs, so nothing leaks to sibling
  * test files that import the real ~/services/gh-cli or
- * ~/lib/copilot-preflight modules.
+ * ~/lib/auth/copilot-preflight modules.
  */
 
 import { beforeEach, describe, expect, test } from "bun:test"

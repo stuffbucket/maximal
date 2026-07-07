@@ -1,6 +1,6 @@
 import consola from "consola"
 
-import type { AppEntry } from "~/lib/settings-types"
+import type { AppEntry } from "~/lib/config/settings-types"
 
 import type { AppCli, AppCliOp, ClientApp } from "./index"
 

@@ -15,9 +15,9 @@ import clipboard from "clipboardy"
 import consola from "consola"
 import invariant from "tiny-invariant"
 
-import { generateEnvScript } from "~/lib/shell"
-import { resolveSmallToolModel } from "~/lib/small-model"
-import { state } from "~/lib/state"
+import { resolveSmallToolModel } from "~/lib/models/small-model"
+import { generateEnvScript } from "~/lib/platform/shell"
+import { state } from "~/lib/runtime-state/state"
 
 export async function runClaudeCodeFlow(serverUrl: string): Promise<void> {
   consola.log(

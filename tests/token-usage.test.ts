@@ -3,8 +3,9 @@ import { Hono } from "hono"
 
 import type { Model, ModelsResponse } from "~/services/copilot/get-models"
 
-import { requestContext } from "~/lib/request-context"
-import { state } from "~/lib/state"
+import { requestContext } from "~/lib/http/request-context"
+import { traceIdMiddleware } from "~/lib/http/trace"
+import { state } from "~/lib/runtime-state/state"
 import {
   closeUsageStore,
   createCopilotTokenUsageRecorder,
@@ -12,7 +13,6 @@ import {
   type TokenUsageEventsPage,
   type TokenUsageSummary,
 } from "~/lib/token-usage"
-import { traceIdMiddleware } from "~/lib/trace"
 import { tokenUsageRoute } from "~/routes/token-usage/route"
 
 const DB_PATH_ENV = "COPILOT_API_SQLITE_DB_PATH"

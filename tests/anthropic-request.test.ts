@@ -1,9 +1,9 @@
 import { describe, test, expect } from "bun:test"
 import { z } from "zod"
 
-import type { AnthropicMessagesPayload } from "~/lib/anthropic-types"
+import type { AnthropicMessagesPayload } from "~/lib/models/anthropic-types"
 
-import { COMPACT_REQUEST } from "../src/lib/compact"
+import { COMPACT_REQUEST } from "../src/lib/models/compact"
 import { translateToOpenAI } from "../src/routes/messages/non-stream-translation"
 import { getCompactType } from "../src/routes/messages/preprocess"
 

@@ -8,7 +8,7 @@
 import { describe, expect, it } from "bun:test"
 import path from "node:path"
 
-import { resolveAppDir } from "~/lib/paths"
+import { resolveAppDir } from "~/lib/platform/paths"
 
 const HOME = path.join("/home", "alice")
 const WIN_HOME = String.raw`C:\Users\alice`

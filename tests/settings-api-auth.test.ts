@@ -38,15 +38,15 @@ await mock.module("~/services/github/get-device-code", () => ({
     }),
 }))
 
-const { AuthStatus } = await import("~/lib/settings-types")
+const { AuthStatus } = await import("~/lib/config/settings-types")
 const {
   __resetAuthControllerForTests,
   __setAuthControllerDepsForTests,
   markSignedIn,
-} = await import("~/lib/auth-controller")
-const { createAuthMiddleware } = await import("~/lib/request-auth")
+} = await import("~/lib/auth/auth-controller")
+const { createAuthMiddleware } = await import("~/lib/auth/request-auth")
 const { settingsApiRoutes } = await import("~/routes/settings/api")
-const { state } = await import("~/lib/state")
+const { state } = await import("~/lib/runtime-state/state")
 
 function buildApp(opts?: { apiKeys?: Array<string> }) {
   const app = new Hono()

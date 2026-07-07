@@ -36,11 +36,11 @@ import type {
   AnthropicStreamEventData,
   AnthropicStreamState,
   AnthropicToolUseBlock,
-} from "~/lib/anthropic-types"
-import type { CompactType } from "~/lib/compact"
-import type { SubagentMarker } from "~/lib/subagent"
+} from "~/lib/models/anthropic-types"
+import type { CompactType } from "~/lib/models/compact"
+import type { SubagentMarker } from "~/lib/runtime-state/subagent"
 
-import { debugLazy } from "~/lib/logger"
+import { debugLazy } from "~/lib/platform/logger"
 import { isNonStreaming } from "~/routes/streaming-predicates"
 import {
   createChatCompletions,

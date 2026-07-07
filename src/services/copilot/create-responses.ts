@@ -1,9 +1,9 @@
 import consola from "consola"
 import { events } from "fetch-event-stream"
 
-import { copilotBaseUrl } from "~/lib/api-config"
-import { sendRequest } from "~/lib/send-request"
-import { state } from "~/lib/state"
+import { copilotBaseUrl } from "~/lib/config/api-config"
+import { sendRequest } from "~/lib/http/send-request"
+import { state } from "~/lib/runtime-state/state"
 
 import type { Initiator } from "./agent-initiator"
 import type { CopilotCallOptions } from "./upstream-request"

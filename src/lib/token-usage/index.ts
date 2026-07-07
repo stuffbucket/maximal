@@ -1,8 +1,8 @@
-import { requestContext, generateTraceId } from "~/lib/request-context"
-import { state } from "~/lib/state"
+import { requestContext, generateTraceId } from "~/lib/http/request-context"
+import { state } from "~/lib/runtime-state/state"
 import { pricedModelIsPaid } from "~/services/copilot/get-models"
 
-import { EventBus } from "../event-bus"
+import { EventBus } from "../runtime-state/event-bus"
 import {
   enqueueTokenUsageWrite,
   hasAnyToken,

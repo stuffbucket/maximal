@@ -37,11 +37,11 @@ afterAll(async () => {
   await mock.module("node:fs/promises", () => realFsPromisesModule)
 })
 
-const errorMod = await import("~/lib/error")
+const errorMod = await import("~/lib/errors/error")
 const { CopilotAuthFatalError, forwardError, HTTPError } = errorMod
-const stateMod = await import("~/lib/state")
+const stateMod = await import("~/lib/runtime-state/state")
 const { state } = stateMod
-const { PATHS } = await import("~/lib/paths")
+const { PATHS } = await import("~/lib/platform/paths")
 const {
   accountKey,
   addAccountToDefaultRegistry,
@@ -49,8 +49,9 @@ const {
   makeAccountRecord,
   readDefaultRegistry,
   writeDefaultRegistry,
-} = await import("~/lib/github-token-store")
-const { __resetAuthControllerForTests } = await import("~/lib/auth-controller")
+} = await import("~/lib/auth/github-token-store")
+const { __resetAuthControllerForTests } =
+  await import("~/lib/auth/auth-controller")
 
 beforeEach(async () => {
   // Reset the auth state machine (so markAuthDegraded's idempotency guard

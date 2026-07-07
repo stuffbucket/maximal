@@ -3,7 +3,7 @@ import { describe, test, expect, mock } from "bun:test"
 import {
   evictRunning,
   looksLikeMaximalCommand,
-} from "../src/lib/replace-running"
+} from "../src/lib/platform/replace-running"
 
 /**
  * Tests for the --replace eviction flow. Everything is driven through

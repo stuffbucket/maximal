@@ -4,7 +4,7 @@ import {
   hostForAccountType,
   parseAccountType,
   toCopilotHost,
-} from "~/lib/auth-types"
+} from "~/lib/auth/auth-types"
 
 // `toCopilotHost`/`hostForAccountType` return the branded `CopilotHost`; coerce
 // to a plain string in assertions so we can compare against string literals.

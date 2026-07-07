@@ -1,23 +1,26 @@
 import consola from "consola"
 import { events } from "fetch-event-stream"
 
-import type { CompactType } from "~/lib/compact"
-import type { State } from "~/lib/state"
-import type { SubagentMarker } from "~/lib/subagent"
+import type { CompactType } from "~/lib/models/compact"
+import type { State } from "~/lib/runtime-state/state"
+import type { SubagentMarker } from "~/lib/runtime-state/subagent"
 
 import {
   copilotHeaders,
   prepareForCompact,
   prepareInteractionHeaders,
-} from "~/lib/api-config"
-import { isAuthFatal, parseCopilotErrorBody } from "~/lib/copilot-error-parser"
-import { logCopilotRateLimits } from "~/lib/copilot-rate-limit"
-import { CopilotAuthFatalError, HTTPError } from "~/lib/error"
+} from "~/lib/config/api-config"
+import {
+  isAuthFatal,
+  parseCopilotErrorBody,
+} from "~/lib/errors/copilot-error-parser"
+import { logCopilotRateLimits } from "~/lib/errors/copilot-rate-limit"
+import { CopilotAuthFatalError, HTTPError } from "~/lib/errors/error"
 import {
   clearLastUpstreamRejection,
   setLastUpstreamRejection,
   state,
-} from "~/lib/state"
+} from "~/lib/runtime-state/state"
 
 import type { Initiator } from "./agent-initiator"
 

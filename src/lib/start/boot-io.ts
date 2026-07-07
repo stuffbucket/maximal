@@ -14,8 +14,8 @@
 
 import consola from "consola"
 
-import { createHandlerLogger } from "~/lib/logger"
-import { shortSha, type GitVersion } from "~/lib/version"
+import { createHandlerLogger } from "~/lib/platform/logger"
+import { shortSha, type GitVersion } from "~/lib/update/version"
 
 interface BootLoggerOptions {
   port: number

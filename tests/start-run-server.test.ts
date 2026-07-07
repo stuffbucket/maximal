@@ -28,33 +28,33 @@ import {
 // --- Mocks for the chunky boot dependencies ------------------------
 
 const initOpencodeVersionMock = mock(() => Promise.resolve())
-const realOpencodeModule = await import("~/lib/opencode")
-await mock.module("~/lib/opencode", () => ({
+const realOpencodeModule = await import("~/lib/platform/opencode")
+await mock.module("~/lib/platform/opencode", () => ({
   ...realOpencodeModule,
   initOpencodeVersion: initOpencodeVersionMock,
 }))
 
-// `~/lib/paths` is shared by `~/lib/config`, `~/lib/logger`, and the
+// `~/lib/platform/paths` is shared by `~/lib/config/config`, `~/lib/platform/logger`, and the
 // real `~/server` — we keep its PATHS map intact and only stub
 // `ensurePaths` so the test never touches disk.
 const ensurePathsMock = mock(() => Promise.resolve())
-const realPathsModule = await import("~/lib/paths")
-await mock.module("~/lib/paths", () => ({
+const realPathsModule = await import("~/lib/platform/paths")
+await mock.module("~/lib/platform/paths", () => ({
   ...realPathsModule,
   ensurePaths: ensurePathsMock,
 }))
 
 const initProxyFromEnvMock = mock(() => {})
-const realProxyModule = await import("~/lib/proxy")
-await mock.module("~/lib/proxy", () => ({
+const realProxyModule = await import("~/lib/http/proxy")
+await mock.module("~/lib/http/proxy", () => ({
   ...realProxyModule,
   initProxyFromEnv: initProxyFromEnvMock,
 }))
 
 const ensureSecretsDirMock = mock(() => {})
 const loadSecretIntoEnvMock = mock(() => ({ source: "unset" as const }))
-const realSecretsModule = await import("~/lib/secrets")
-await mock.module("~/lib/secrets", () => ({
+const realSecretsModule = await import("~/lib/auth/secrets")
+await mock.module("~/lib/auth/secrets", () => ({
   ...realSecretsModule,
   ensureSecretsDir: ensureSecretsDirMock,
   loadSecretIntoEnv: loadSecretIntoEnvMock,
@@ -66,8 +66,8 @@ const cacheVSCodeVersionMock = mock(() => Promise.resolve())
 const cacheMacMachineIdMock = mock(() => {})
 const cacheVsCodeSessionIdMock = mock(() => {})
 const cacheVsCodeDeviceIdMock = mock(() => Promise.resolve())
-const realUtilsModule = await import("~/lib/utils")
-await mock.module("~/lib/utils", () => ({
+const realUtilsModule = await import("~/lib/platform/utils")
+await mock.module("~/lib/platform/utils", () => ({
   ...realUtilsModule,
   cacheModels: cacheModelsMock,
   cacheVSCodeVersion: cacheVSCodeVersionMock,
@@ -86,8 +86,8 @@ const logUserMock = mock(() => {
   return Promise.resolve()
 })
 const setupCopilotTokenMock = mock(() => Promise.resolve())
-const realTokenModule = await import("~/lib/token")
-await mock.module("~/lib/token", () => ({
+const realTokenModule = await import("~/lib/auth/token")
+await mock.module("~/lib/auth/token", () => ({
   ...realTokenModule,
   logUser: logUserMock,
   setupCopilotToken: setupCopilotTokenMock,
@@ -95,13 +95,13 @@ await mock.module("~/lib/token", () => ({
 
 let storedRecord: { accessToken: string } | null = null
 const readDefaultRecordMock = mock(() => Promise.resolve(storedRecord))
-const realStoreModule = await import("~/lib/github-token-store")
-await mock.module("~/lib/github-token-store", () => ({
+const realStoreModule = await import("~/lib/auth/github-token-store")
+await mock.module("~/lib/auth/github-token-store", () => ({
   ...realStoreModule,
   readDefaultRecord: readDefaultRecordMock,
 }))
 
-// Don't mock `~/lib/config` — its real `mergeConfigWithDefaults` is a
+// Don't mock `~/lib/config/config` — its real `mergeConfigWithDefaults` is a
 // safe no-op on a missing config file, and `~/server` (loaded by the
 // dynamic import in runServer) needs the rest of its exports.
 
@@ -113,8 +113,8 @@ const fakeLogger = {
   error: () => {},
   debug: () => {},
 }
-const realLoggerModule = await import("~/lib/logger")
-await mock.module("~/lib/logger", () => ({
+const realLoggerModule = await import("~/lib/platform/logger")
+await mock.module("~/lib/platform/logger", () => ({
   ...realLoggerModule,
   createHandlerLogger: () => fakeLogger,
 }))
@@ -140,11 +140,11 @@ globalThis.fetch = (() =>
 
 // --- Module under test (imported after mocks are wired) -----------
 
-const { state } = await import("~/lib/state")
+const { state } = await import("~/lib/runtime-state/state")
 const { runServer, start } = await import("~/start")
 const { getAuthStatus, signOut, __resetAuthControllerForTests } =
-  await import("~/lib/auth-controller")
-const { CopilotAuthFatalError } = await import("~/lib/error")
+  await import("~/lib/auth/auth-controller")
+const { CopilotAuthFatalError } = await import("~/lib/errors/error")
 
 function resetState(): void {
   // Reset auth-controller module state (authState, the degrade single-flight /
@@ -465,13 +465,13 @@ describe("start.run — citty args → runServer options", () => {
 afterAll(async () => {
   globalThis.fetch = realFetch
   mock.restore()
-  await mock.module("~/lib/paths", () => realPathsModule)
-  await mock.module("~/lib/proxy", () => realProxyModule)
-  await mock.module("~/lib/secrets", () => realSecretsModule)
-  await mock.module("~/lib/utils", () => realUtilsModule)
-  await mock.module("~/lib/token", () => realTokenModule)
-  await mock.module("~/lib/github-token-store", () => realStoreModule)
-  await mock.module("~/lib/logger", () => realLoggerModule)
-  await mock.module("~/lib/opencode", () => realOpencodeModule)
+  await mock.module("~/lib/platform/paths", () => realPathsModule)
+  await mock.module("~/lib/http/proxy", () => realProxyModule)
+  await mock.module("~/lib/auth/secrets", () => realSecretsModule)
+  await mock.module("~/lib/platform/utils", () => realUtilsModule)
+  await mock.module("~/lib/auth/token", () => realTokenModule)
+  await mock.module("~/lib/auth/github-token-store", () => realStoreModule)
+  await mock.module("~/lib/platform/logger", () => realLoggerModule)
+  await mock.module("~/lib/platform/opencode", () => realOpencodeModule)
   await mock.module("srvx", () => realSrvxModule)
 })

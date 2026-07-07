@@ -24,14 +24,14 @@
 import { Hono } from "hono"
 import { randomBytes, randomUUID } from "node:crypto"
 
-import { getConfig, writeConfig } from "~/lib/config"
-import { API_KEY_VALUE_PATTERN } from "~/lib/config-schema"
+import { getConfig, writeConfig } from "~/lib/config/config"
+import { API_KEY_VALUE_PATTERN } from "~/lib/config/config-schema"
 import {
   ApiKeyCreateRequest,
   ApiKeysListResponse,
   ApiKeyUpdateRequest,
   type ApiKeyEntry,
-} from "~/lib/settings-types"
+} from "~/lib/config/settings-types"
 
 export const apiKeysRoutes = new Hono()
 

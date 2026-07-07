@@ -3,8 +3,11 @@ import { afterEach, expect, test } from "bun:test"
 import {
   prepareForCompact,
   prepareMessageProxyHeaders,
-} from "../src/lib/api-config"
-import { COMPACT_AUTO_CONTINUE, COMPACT_REQUEST } from "../src/lib/compact"
+} from "../src/lib/config/api-config"
+import {
+  COMPACT_AUTO_CONTINUE,
+  COMPACT_REQUEST,
+} from "../src/lib/models/compact"
 
 const originalOauthApp = process.env.COPILOT_API_OAUTH_APP
 

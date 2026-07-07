@@ -4,7 +4,7 @@ import {
   ConfigValidationError,
   detectUnknownKeys,
   validateAppConfig,
-} from "~/lib/config-schema"
+} from "~/lib/config/config-schema"
 
 describe("validateAppConfig", () => {
   it("accepts an empty config", () => {

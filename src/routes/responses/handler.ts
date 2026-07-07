@@ -2,23 +2,27 @@ import type { Context } from "hono"
 
 import { streamSSE } from "hono/streaming"
 
-import { reverseId } from "~/lib/anthropic-id-rewrite"
-import { awaitApproval } from "~/lib/approval"
 import {
   getConfig,
   getPromptCacheRetention,
   isResponsesApiWebSearchEnabled,
-} from "~/lib/config"
-import { createHandlerLogger, debugJson, debugJsonTail } from "~/lib/logger"
-import { checkRateLimit } from "~/lib/rate-limit"
-import { state } from "~/lib/state"
+} from "~/lib/config/config"
+import { awaitApproval } from "~/lib/http/approval"
+import { checkRateLimit } from "~/lib/http/rate-limit"
+import { reverseId } from "~/lib/models/anthropic-id-rewrite"
+import {
+  createHandlerLogger,
+  debugJson,
+  debugJsonTail,
+} from "~/lib/platform/logger"
+import { generateRequestIdFromPayload, getUUID } from "~/lib/platform/utils"
+import { state } from "~/lib/runtime-state/state"
 import {
   createCopilotTokenUsageRecorder,
   normalizeResponsesUsage,
   type UsageTokens,
   withCopilotCost,
 } from "~/lib/token-usage"
-import { generateRequestIdFromPayload, getUUID } from "~/lib/utils"
 import { isAsyncIterable } from "~/routes/streaming-predicates"
 import {
   createResponses as defaultCreateResponses,

@@ -20,9 +20,9 @@ import TurndownService from "turndown"
 
 import type { ResponsesPayload } from "~/services/copilot/create-responses"
 
-import { Cache } from "~/lib/cache"
-import { getSmallModel } from "~/lib/config"
-import { hasCopilotToken, state } from "~/lib/state"
+import { getSmallModel } from "~/lib/config/config"
+import { Cache } from "~/lib/runtime-state/cache"
+import { hasCopilotToken, state } from "~/lib/runtime-state/state"
 import {
   createCopilotTokenUsageRecorder,
   normalizeResponsesUsage,

@@ -4,12 +4,15 @@ import { events } from "fetch-event-stream"
 import type {
   AnthropicMessagesPayload,
   AnthropicResponse,
-} from "~/lib/anthropic-types"
+} from "~/lib/models/anthropic-types"
 
-import { copilotBaseUrl, prepareMessageProxyHeaders } from "~/lib/api-config"
-import { sendRequest } from "~/lib/send-request"
-import { state } from "~/lib/state"
-import { parseUserIdMetadata } from "~/lib/utils"
+import {
+  copilotBaseUrl,
+  prepareMessageProxyHeaders,
+} from "~/lib/config/api-config"
+import { sendRequest } from "~/lib/http/send-request"
+import { parseUserIdMetadata } from "~/lib/platform/utils"
+import { state } from "~/lib/runtime-state/state"
 
 import type { CopilotCallOptions } from "./upstream-request"
 

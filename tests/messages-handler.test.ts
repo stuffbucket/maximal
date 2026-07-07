@@ -1,13 +1,13 @@
 import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test"
 import { Hono } from "hono"
 
-import type { AnthropicMessagesPayload } from "~/lib/anthropic-types"
+import type { AnthropicMessagesPayload } from "~/lib/models/anthropic-types"
 
-const actualStateModule = await import("../src/lib/state")
-const actualConfigModule = await import("../src/lib/config")
-const actualModelsModule = await import("../src/lib/models")
-const actualRateLimitModule = await import("../src/lib/rate-limit")
-const actualUtilsModule = await import("../src/lib/utils")
+const actualStateModule = await import("../src/lib/runtime-state/state")
+const actualConfigModule = await import("../src/lib/config/config")
+const actualModelsModule = await import("../src/lib/models/models")
+const actualRateLimitModule = await import("../src/lib/http/rate-limit")
+const actualUtilsModule = await import("../src/lib/platform/utils")
 const actualApiFlowsModule = await import("../src/routes/messages/api-flows")
 
 const state = {
@@ -54,24 +54,24 @@ const handleWithChatCompletions = mock(
   ) => new Response("chat"),
 )
 
-await mock.module("~/lib/state", () => ({
+await mock.module("~/lib/runtime-state/state", () => ({
   ...actualStateModule,
   state,
 }))
-await mock.module("~/lib/rate-limit", () => ({
+await mock.module("~/lib/http/rate-limit", () => ({
   ...actualRateLimitModule,
   checkRateLimit: async () => {},
 }))
-await mock.module("~/lib/config", () => ({
+await mock.module("~/lib/config/config", () => ({
   ...actualConfigModule,
   getSmallModel: () => "small-model",
   isMessagesApiEnabled: () => messagesApiEnabled,
 }))
-await mock.module("~/lib/models", () => ({
+await mock.module("~/lib/models/models", () => ({
   ...actualModelsModule,
   findEndpointModel,
 }))
-await mock.module("~/lib/utils", () => ({
+await mock.module("~/lib/platform/utils", () => ({
   ...actualUtilsModule,
 }))
 await mock.module("~/routes/messages/api-flows", () => ({
@@ -368,10 +368,10 @@ describe("warmup short-circuit", () => {
 // (Bun keeps module mocks for the whole process; an unawaited restore never
 // lands).
 afterAll(async () => {
-  await mock.module("~/lib/state", () => actualStateModule)
-  await mock.module("~/lib/models", () => actualModelsModule)
-  await mock.module("~/lib/rate-limit", () => actualRateLimitModule)
-  await mock.module("~/lib/config", () => actualConfigModule)
-  await mock.module("~/lib/utils", () => actualUtilsModule)
+  await mock.module("~/lib/runtime-state/state", () => actualStateModule)
+  await mock.module("~/lib/models/models", () => actualModelsModule)
+  await mock.module("~/lib/http/rate-limit", () => actualRateLimitModule)
+  await mock.module("~/lib/config/config", () => actualConfigModule)
+  await mock.module("~/lib/platform/utils", () => actualUtilsModule)
   await mock.module("~/routes/messages/api-flows", () => actualApiFlowsModule)
 })

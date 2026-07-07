@@ -13,7 +13,7 @@ import {
   humanizeUserAgent,
   listActiveClients,
   recordClient,
-} from "~/lib/active-clients"
+} from "~/lib/http/active-clients"
 
 beforeEach(() => {
   __resetActiveClientsForTests()

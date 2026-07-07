@@ -18,12 +18,12 @@ import { Hono } from "hono"
 import {
   preflightCopilotError as defaultPreflightCopilotError,
   type PreflightCopilotErrorFn,
-} from "~/lib/copilot-preflight"
-import { forwardError } from "~/lib/error"
+} from "~/lib/auth/copilot-preflight"
 import {
   addAccountToDefaultRegistry as defaultAddAccountToDefaultRegistry,
   makeAccountRecord,
-} from "~/lib/github-token-store"
+} from "~/lib/auth/github-token-store"
+import { forwardError } from "~/lib/errors/error"
 import {
   detectGhCli as defaultDetectGhCli,
   getGhAccountToken as defaultGetGhAccountToken,

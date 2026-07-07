@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { apiCall } from "../../../proxy/client";
-import type { ApiKeyEntry } from "../../../../../src/lib/settings-types";
+import type { ApiKeyEntry } from "../../../../../src/lib/config/settings-types";
 import { humanize } from "./humanize";
 
 /**

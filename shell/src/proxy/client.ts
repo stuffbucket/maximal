@@ -34,7 +34,7 @@ import type {
   ModelsListResponse,
   UpdateStatusResponse,
   UpstreamRejection,
-} from "../../../src/lib/settings-types"
+} from "../../../src/lib/config/settings-types"
 
 // Re-export so existing shell call sites that pull the type from
 // "./api" keep working. AuthStatus is owned by src/lib/settings-types

@@ -10,7 +10,7 @@ import { streamSSE } from "hono/streaming"
 import type {
   AnthropicMessagesPayload,
   AnthropicResponse,
-} from "~/lib/anthropic-types"
+} from "~/lib/models/anthropic-types"
 
 import { isNonStreaming } from "~/routes/streaming-predicates"
 import { createChatCompletions } from "~/services/copilot/create-chat-completions"

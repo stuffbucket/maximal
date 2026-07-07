@@ -12,18 +12,18 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 
-import type { AuthStatus } from "~/lib/settings-types"
+import type { AuthStatus } from "~/lib/config/settings-types"
 
 import {
   __resetAuthControllerForTests,
   markSignedIn,
   markSignedOut,
-} from "~/lib/auth-controller"
-import { settingsEventBus } from "~/lib/settings-events"
+} from "~/lib/auth/auth-controller"
+import { settingsEventBus } from "~/lib/config/settings-events"
 import {
   clearLastUpstreamRejection,
   setLastUpstreamRejection,
-} from "~/lib/state"
+} from "~/lib/runtime-state/state"
 
 function capture(): { events: Array<AuthStatus>; stop: () => void } {
   const events: Array<AuthStatus> = []

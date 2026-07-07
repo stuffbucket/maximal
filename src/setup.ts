@@ -31,14 +31,14 @@ import consola from "consola"
 import type { Model } from "./services/copilot/get-models"
 
 import { runDebug } from "./debug"
+import { setupGitHubToken } from "./lib/auth/token"
 import {
   type AnthropicMessagesPayload,
   ANTHROPIC_API_VERSION,
-} from "./lib/anthropic-types"
-import { ensurePaths } from "./lib/paths"
-import { resolveSmallToolModel } from "./lib/small-model"
-import { state } from "./lib/state"
-import { setupGitHubToken } from "./lib/token"
+} from "./lib/models/anthropic-types"
+import { resolveSmallToolModel } from "./lib/models/small-model"
+import { ensurePaths } from "./lib/platform/paths"
+import { state } from "./lib/runtime-state/state"
 
 interface RunSetupOptions {
   unattended: boolean

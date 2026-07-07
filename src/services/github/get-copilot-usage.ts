@@ -1,7 +1,7 @@
-import { getGitHubApiBaseUrl, githubHeaders } from "~/lib/api-config"
-import { GITHUB_API_TIMEOUT_MS } from "~/lib/http-timeouts"
-import { sendRequestJson } from "~/lib/send-request"
-import { state } from "~/lib/state"
+import { getGitHubApiBaseUrl, githubHeaders } from "~/lib/config/api-config"
+import { GITHUB_API_TIMEOUT_MS } from "~/lib/http/http-timeouts"
+import { sendRequestJson } from "~/lib/http/send-request"
+import { state } from "~/lib/runtime-state/state"
 
 export const getCopilotUsage = async (
   githubToken?: string,

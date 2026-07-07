@@ -4,7 +4,7 @@ import type {
   ResponsesPayload,
 } from "~/services/copilot/create-responses"
 
-import { isResponsesApiContextManagementModel } from "~/lib/config"
+import { isResponsesApiContextManagementModel } from "~/lib/config/config"
 import { responsesInitiator } from "~/services/copilot/agent-initiator"
 
 export const getResponsesRequestOptions = (

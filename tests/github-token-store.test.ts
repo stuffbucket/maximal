@@ -26,7 +26,7 @@ import {
   setActive,
   writeGitHubTokenRecord,
   writeRegistry,
-} from "~/lib/github-token-store"
+} from "~/lib/auth/github-token-store"
 
 /** Local builder for a v1 single-record token file. Production code never
  *  constructs these outside `readGitHubTokenRecord`'s upgrade path, so this
