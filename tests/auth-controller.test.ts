@@ -83,6 +83,11 @@ await mock.module("~/services/github/get-user", () => ({
 }))
 
 await mock.module("~/lib/token", () => ({
+  // Spread the real module so the ~9 exports this test doesn't override
+  // (setupGitHubToken, logUser, GITHUB_TOKEN_PATH, getRefreshDeadlineMs, …)
+  // stay intact for sibling files while the mock is active — not only after
+  // the afterAll restore. See ADR-0011 (forwarding faithfulness).
+  ...realTokenModule,
   setupCopilotToken: () => {
     harness.setupCopilotTokenCalls++
     return harness.setupCopilotTokenImpl()
