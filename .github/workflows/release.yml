@@ -3,12 +3,6 @@ name: Release
 permissions:
   id-token: write
   contents: write
-  # Needed by the `redeploy-site` job so it can fire deploy-pages.yml.
-  # GitHub's anti-loop guard suppresses `release: published` triggers
-  # when the release is created via GITHUB_TOKEN, so we dispatch the
-  # site rebuild explicitly. (The installer jobs are now part of this
-  # run via `needs:` + the reusable tauri-macos.yml — no dispatch.)
-  actions: write
 
 on:
   push:
@@ -1137,13 +1131,20 @@ jobs:
   # during SSG (the propagation race #187 band-aids). Read-modify-write: a
   # `beta` publish updates only `channels.beta` and never clobbers
   # `channels.stable`, and vice-versa. The build-time generator
-  # (site/src/pages/updates/manifest.json.ts) stays as a fallback — BOTH paths
-  # run now (belt-and-suspenders); phase 3 removes the old one.
+  # (site/src/pages/updates/manifest.json.ts) stays as a fallback so an
+  # ordinary `site/**` push still emits an equivalent file.
   #
   # Commits the regenerated `site/public/updates/manifest.json` to `main` (the
   # served source of truth — Astro copies site/public/** verbatim). This job
-  # itself runs NO `bun run build`; making it live is `redeploy-site`'s job,
-  # which now waits on this commit.
+  # runs NO `bun run build`; it does not need to. That commit touches
+  # site/public/**, which matches deploy-pages.yml's `paths:` filter, so it
+  # AUTO-TRIGGERS exactly one Pages deploy that ships the new manifest (issue
+  # #222 / phase 3 of #218). This is why the old `redeploy-site` job — which
+  # explicitly dispatched deploy-pages.yml after this commit — was deleted:
+  # the paths-filtered push is the trigger now. The site's client-side
+  # manifest hydration (#221) + the build-time fallback (deploy-pages.yml's
+  # GITHUB_TOKEN lookup) both keep the site advertising the version even before
+  # that deploy lands, so a release never fails to advertise its version.
   manifest:
     needs: publish
     runs-on: ubuntu-latest
@@ -1186,39 +1187,3 @@ jobs:
           git pull --rebase origin main
           git push origin HEAD:main
           echo "Committed updated manifest for $TAG to main."
-
-  # GitHub suppresses the `release: published` event when a release is
-  # created via GITHUB_TOKEN (the anti-loop guard documented up top),
-  # which means deploy-pages.yml's `release` trigger never fires for
-  # our releases. Explicitly dispatch the site rebuild here so the
-  # landing page's "latest: vX.Y.Z" + download URLs always track the
-  # release that was just published.
-  redeploy-site:
-    # After `publish`: the landing page advertises "latest: vX.Y.Z" and
-    # links the release download URLs, so it must rebuild against a
-    # published, fully-assembled release — not the draft.
-    #
-    # Run for pre-releases too: the manifest carries `channels.beta`, so beta
-    # publishes must refresh it. The landing page still tracks releases/latest
-    # (stable only), so it is unaffected.
-    #
-    # Waits on `manifest` so the freshly-committed
-    # site/public/updates/manifest.json is on main before this deploy builds +
-    # ships it (belt-and-suspenders: the deploy's own build-time route would
-    # regenerate an equivalent manifest anyway).
-    needs: manifest
-    runs-on: ubuntu-latest
-    permissions:
-      actions: write
-      contents: read
-    steps:
-      - name: Trigger deploy-pages.yml
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          gh workflow run deploy-pages.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref main
-          echo "Dispatched deploy-pages.yml after $TAG"
