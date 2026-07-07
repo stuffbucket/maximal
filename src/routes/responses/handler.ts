@@ -19,6 +19,7 @@ import {
   withCopilotCost,
 } from "~/lib/token-usage"
 import { generateRequestIdFromPayload, getUUID } from "~/lib/utils"
+import { isAsyncIterable } from "~/routes/streaming-predicates"
 import {
   createResponses as defaultCreateResponses,
   type ResponsesPayload,
@@ -178,10 +179,6 @@ export const handleResponses = async (c: Context) => {
   )
   return c.json(response as ResponsesResult)
 }
-
-const isAsyncIterable = <T>(value: unknown): value is AsyncIterable<T> =>
-  Boolean(value)
-  && typeof (value as AsyncIterable<T>)[Symbol.asyncIterator] === "function"
 
 const isStreamingRequested = (payload: ResponsesPayload): boolean =>
   Boolean(payload.stream)

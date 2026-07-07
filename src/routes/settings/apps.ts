@@ -20,6 +20,8 @@ import {
   type AppEntry as AppEntryT,
 } from "~/lib/settings-types"
 
+import { respondValidated } from "./respond-validated"
+
 /** Build an HTTPError whose body is a plain message, so `forwardError`
  *  surfaces a clean `{ error: { message } }` at the given status. */
 function httpError(message: string, status: number): HTTPError {
@@ -29,20 +31,7 @@ function httpError(message: string, status: number): HTTPError {
 /** Validate a single app object against the contract before returning
  *  it, so drift fails loudly in tests rather than silently in the UI. */
 function jsonApp(c: Context, app: AppEntryT) {
-  const parsed = AppEntry.safeParse(app)
-  if (!parsed.success) {
-    return c.json(
-      {
-        error: {
-          message: "App payload failed schema validation",
-          type: "internal_error",
-          details: parsed.error.issues,
-        },
-      },
-      500,
-    )
-  }
-  return c.json(parsed.data)
+  return respondValidated(c, { schema: AppEntry, label: "App" }, app)
 }
 
 /** Merge an `apps.claudeDesktop` patch into config and persist. */
@@ -70,20 +59,11 @@ appsRoutes.get("/", async (c) => {
     const payload = {
       apps: appsPayloads,
     }
-    const parsed = AppsListResponse.safeParse(payload)
-    if (!parsed.success) {
-      return c.json(
-        {
-          error: {
-            message: "Apps payload failed schema validation",
-            type: "internal_error",
-            details: parsed.error.issues,
-          },
-        },
-        500,
-      )
-    }
-    return c.json(parsed.data)
+    return respondValidated(
+      c,
+      { schema: AppsListResponse, label: "Apps" },
+      payload,
+    )
   } catch (error) {
     return forwardError(c, error)
   }

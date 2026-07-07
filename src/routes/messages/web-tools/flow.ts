@@ -12,9 +12,10 @@ import type {
   AnthropicResponse,
 } from "~/lib/anthropic-types"
 
+import { isNonStreaming } from "~/routes/streaming-predicates"
 import { createChatCompletions } from "~/services/copilot/create-chat-completions"
 
-import { isNonStreaming, type FlowBaseOptions } from "../api-flows"
+import { type FlowBaseOptions } from "../api-flows"
 import {
   translateToAnthropic,
   translateToOpenAI,

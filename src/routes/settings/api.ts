@@ -41,6 +41,7 @@ import { clientsRoutes } from "./clients"
 import { eventsRoutes } from "./events"
 import { ghRoutes } from "./gh"
 import { modelsRoutes } from "./models"
+import { respondValidated } from "./respond-validated"
 
 /** Captured once at module load. process.uptime() works too, but
  *  this anchors uptime to "when the route module first ran" rather
@@ -95,20 +96,11 @@ settingsApiRoutes.get("/diagnostics", (c) => {
   // Schema-validate before responding: drift between the runtime
   // shape and the published contract should fail loudly in tests,
   // not silently in the UI.
-  const parsed = DiagnosticsResponse.safeParse(payload)
-  if (!parsed.success) {
-    return c.json(
-      {
-        error: {
-          message: "Diagnostics payload failed schema validation",
-          type: "internal_error",
-          details: parsed.error.issues,
-        },
-      },
-      500,
-    )
-  }
-  return c.json(parsed.data)
+  return respondValidated(
+    c,
+    { schema: DiagnosticsResponse, label: "Diagnostics" },
+    payload,
+  )
 })
 
 settingsApiRoutes.get("/update-status", async (c) => {

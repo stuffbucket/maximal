@@ -31,6 +31,8 @@ import {
 import { getModelsLoadedAtMs, state } from "~/lib/state"
 import { cacheModels } from "~/lib/utils"
 
+import { respondValidated } from "./respond-validated"
+
 /** Flatten an upstream `Model` into the UI-shaped summary. Optional
  *  upstream fields collapse to null/false so the contract stays total. */
 function toSummary(model: Model): ModelSummaryT {
@@ -87,20 +89,11 @@ function buildModelsList(): ModelsListResponseT {
  *  the runtime shape and the published schema fails loudly in tests
  *  rather than silently in the UI. */
 function jsonModels(c: Context) {
-  const parsed = ModelsListResponse.safeParse(buildModelsList())
-  if (!parsed.success) {
-    return c.json(
-      {
-        error: {
-          message: "Models payload failed schema validation",
-          type: "internal_error",
-          details: parsed.error.issues,
-        },
-      },
-      500,
-    )
-  }
-  return c.json(parsed.data)
+  return respondValidated(
+    c,
+    { schema: ModelsListResponse, label: "Models" },
+    buildModelsList(),
+  )
 }
 
 export const modelsRoutes = new Hono()
