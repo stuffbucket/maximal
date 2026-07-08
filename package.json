@@ -48,7 +48,7 @@
     "mutate": "stryker run",
     "prepack": "bun run build",
     "package-dmg": "bun scripts/package-dmg.ts",
-    "prepare": "bun run ensure:ui-embed && simple-git-hooks",
+    "prepare": "bun run ensure:ui-embed && simple-git-hooks && cd shell && bun install",
     "release:dmg": "bun scripts/package-dmg.ts --upload",
     "release:manual": "bumpp && bun publish --access public",
     "render-formula": "bun scripts/sync-homebrew-formula.ts",
