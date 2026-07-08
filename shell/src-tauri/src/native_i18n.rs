@@ -35,11 +35,22 @@ const EN_GB: &str = include_str!("../../src/i18n/en-GB.json");
 const ES: &str = include_str!("../../src/i18n/es.json");
 const ES_MX: &str = include_str!("../../src/i18n/es-MX.json");
 const ES_ES: &str = include_str!("../../src/i18n/es-ES.json");
+const ZH: &str = include_str!("../../src/i18n/zh.json");
+const FR: &str = include_str!("../../src/i18n/fr.json");
+const DE: &str = include_str!("../../src/i18n/de.json");
+const RU: &str = include_str!("../../src/i18n/ru.json");
+const JA: &str = include_str!("../../src/i18n/ja.json");
+const IT: &str = include_str!("../../src/i18n/it.json");
+const PT: &str = include_str!("../../src/i18n/pt.json");
 
 /// The locale tags this build ships, in declared order — the same set the
 /// picker offers. Used both for the best-fit matcher and to validate an
-/// incoming `set_locale` tag.
-pub const AVAILABLE: &[&str] = &["en", "en-GB", "es", "es-MX", "es-ES"];
+/// incoming `set_locale` tag. Keep in lockstep with `CATALOGS` in
+/// shell/src/i18n/index.ts.
+pub const AVAILABLE: &[&str] = &[
+    "en", "en-GB", "es", "es-MX", "es-ES", "zh", "fr", "de", "ru", "ja", "it",
+    "pt",
+];
 
 fn raw(tag: &str) -> &'static str {
     match tag {
@@ -48,6 +59,13 @@ fn raw(tag: &str) -> &'static str {
         "es" => ES,
         "es-MX" => ES_MX,
         "es-ES" => ES_ES,
+        "zh" => ZH,
+        "fr" => FR,
+        "de" => DE,
+        "ru" => RU,
+        "ja" => JA,
+        "it" => IT,
+        "pt" => PT,
         _ => "{}",
     }
 }
@@ -158,6 +176,38 @@ mod tests {
     }
 
     #[test]
+    fn every_available_catalog_parses_non_empty() {
+        // Guards the include_str!/raw() wiring: a full language base added to
+        // AVAILABLE but missing its embed (or with malformed JSON) would show up
+        // here as an empty map instead of silently resolving everything to en at
+        // runtime. Sparse regional overrides (es-MX is literally `{}`, es-ES /
+        // en-GB carry only a few keys) legitimately may be empty, so only the
+        // bases — which must carry the whole catalog incl. native keys — are
+        // asserted.
+        for &tag in AVAILABLE {
+            if tag.contains('-') {
+                continue;
+            }
+            let cat = &catalogs()[tag];
+            assert!(!cat.is_empty(), "catalog for {tag} parsed empty");
+            assert!(
+                cat.contains_key("native-tray-quit"),
+                "{tag} base is missing native keys"
+            );
+            // A mis-wired raw() that returned EN for a new tag would still pass
+            // the checks above; assert the non-English bases actually differ so
+            // the embed is proven distinct, not accidentally aliased to en.
+            if tag != "en" {
+                assert_ne!(
+                    tr(tag, "native-tray-quit"),
+                    "Quit Maximal",
+                    "{tag} base looks aliased to en"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn falls_back_region_to_language_to_en() {
         // es-MX carries no native overrides → resolves to the es language base.
         assert_eq!(tr("es-MX", "native-tray-quit"), "Salir de Maximal");
@@ -187,7 +237,8 @@ mod tests {
         assert_eq!(resolve_locale(Some("es-ES"), Some("en-US")), "es-ES");
         // Unknown override is ignored; OS locale best-fits by language.
         assert_eq!(resolve_locale(Some("fr-FR"), Some("es-419")), "es");
-        assert_eq!(resolve_locale(None, Some("de-DE")), "en");
+        // An OS locale for a language we don't ship falls through to en.
+        assert_eq!(resolve_locale(None, Some("ko-KR")), "en");
         assert_eq!(resolve_locale(None, None), "en");
     }
 }
