@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.4.40](https://github.com/stuffbucket/maximal/compare/v0.4.39...v0.4.40) (2026-07-08)
+
+
+### Features
+
+* **billing:** price usage from Copilot token_prices, demote is_premium to legacy fallback ([#259](https://github.com/stuffbucket/maximal/issues/259)) ([#265](https://github.com/stuffbucket/maximal/issues/265)) ([7bcdc70](https://github.com/stuffbucket/maximal/commit/7bcdc706c562b523e705b624f11300910db90ca4))
+* **dashboard:** add per-model + total cost column from total_nano_aiu ([#259](https://github.com/stuffbucket/maximal/issues/259)) ([#264](https://github.com/stuffbucket/maximal/issues/264)) ([7c69a9b](https://github.com/stuffbucket/maximal/commit/7c69a9b3e35301e27878a158fc0ab6df6860aed9))
+* **dev:** add build-readiness verification (verify:build) + checklist ([#256](https://github.com/stuffbucket/maximal/issues/256)) ([8a3450e](https://github.com/stuffbucket/maximal/commit/8a3450e1840b2fb7f0fec6c736f3036081d2570c))
+* **dev:** add dispersion stats + interleaved A/B significance to baseline harness ([#255](https://github.com/stuffbucket/maximal/issues/255)) ([e3fffce](https://github.com/stuffbucket/maximal/commit/e3fffce8038ad6817d0e09d718bdc95a8247fe6f))
+* **dev:** add reusable baseline measurement harness for cost/warmup/caching ([#253](https://github.com/stuffbucket/maximal/issues/253)) ([6be5c2a](https://github.com/stuffbucket/maximal/commit/6be5c2a760445f349eaa09d4656eac8de14fbe36))
+* **i18n:** add zh, fr, de, ru, ja, it, pt locales ([#285](https://github.com/stuffbucket/maximal/issues/285)) ([4b82922](https://github.com/stuffbucket/maximal/commit/4b82922afc2c02a601d2772d4ec5764360f8a4aa))
+* **i18n:** full multi-locale catalog (es, en-GB, es-MX/es-ES) across settings + dashboard ([#282](https://github.com/stuffbucket/maximal/issues/282)) ([e579acb](https://github.com/stuffbucket/maximal/commit/e579acbcf079ec9accde76d99e340e08568f80a5))
+* **i18n:** localize OS-conditional UI terminology via an ICU MessageFormat catalog ([#279](https://github.com/stuffbucket/maximal/issues/279)) ([a69be20](https://github.com/stuffbucket/maximal/commit/a69be20c02f7ecf93f099b42fd7173e9024b4fab))
+* **i18n:** localize the native shell chrome to the picker locale ([#284](https://github.com/stuffbucket/maximal/issues/284)) ([0abc953](https://github.com/stuffbucket/maximal/commit/0abc953730e19b958c8edd9543622a7f4859d43a))
+* **responses:** enable opt-in prompt_cache_retention with safe fallback ([#252](https://github.com/stuffbucket/maximal/issues/252)) ([55d1736](https://github.com/stuffbucket/maximal/commit/55d1736035884001709e7ffdbb14a995e34cbdf9))
+* **setup:** add opt-in --deep-smoke for an end-to-end completion check ([#250](https://github.com/stuffbucket/maximal/issues/250)) ([7856b66](https://github.com/stuffbucket/maximal/commit/7856b665f2fa7116e8502bd8052d12af605f9b04)), closes [#227](https://github.com/stuffbucket/maximal/issues/227)
+* **shell-ui:** vendor Commissioner + Fraunces web fonts locally (offline/CSP) ([#268](https://github.com/stuffbucket/maximal/issues/268)) ([d1a56df](https://github.com/stuffbucket/maximal/commit/d1a56df30f73802f73cbf5c46761827aa0eb63e7))
+* **site:** extend updates manifest to schema 2 with per-channel downloads ([#267](https://github.com/stuffbucket/maximal/issues/267)) ([a21e17e](https://github.com/stuffbucket/maximal/commit/a21e17e0d5989aa263541f4ff1137ebc27ba418f)), closes [#218](https://github.com/stuffbucket/maximal/issues/218) [#219](https://github.com/stuffbucket/maximal/issues/219)
+* **site:** hydrate download links + version from manifest at runtime ([#221](https://github.com/stuffbucket/maximal/issues/221)) ([#273](https://github.com/stuffbucket/maximal/issues/273)) ([1bdac36](https://github.com/stuffbucket/maximal/commit/1bdac36fe82031e9cf0113dc0ded631c223b0176)), closes [#218](https://github.com/stuffbucket/maximal/issues/218)
+
+
+### Bug Fixes
+
+* **apps:** consolidate atomic-JSON writes behind one shared helper ([#245](https://github.com/stuffbucket/maximal/issues/245)) ([d3401d4](https://github.com/stuffbucket/maximal/commit/d3401d4d5a3655ac8d4a4a92ab8162d52aee1f69)), closes [#231](https://github.com/stuffbucket/maximal/issues/231)
+* **pages:** prevent duplicate github-pages artifacts on deploy re-run ([#239](https://github.com/stuffbucket/maximal/issues/239)) ([#263](https://github.com/stuffbucket/maximal/issues/263)) ([108d1bb](https://github.com/stuffbucket/maximal/commit/108d1bbc3e9d0aaf300f45f6b2bf5b1bfefc087a))
+* **security:** remove /token route that leaked the raw Copilot token ([#240](https://github.com/stuffbucket/maximal/issues/240)) ([43655f9](https://github.com/stuffbucket/maximal/commit/43655f981e0f1376eb020760943c6bd352a8f43d)), closes [#230](https://github.com/stuffbucket/maximal/issues/230)
+* **web-tools:** sum usage across agent turns and add keepalive pings ([#246](https://github.com/stuffbucket/maximal/issues/246)) ([7826578](https://github.com/stuffbucket/maximal/commit/78265785bf229e8cfac419d0f25285037c513fb8))
+* **web-tools:** sum usage across turns in non-streaming agent path ([#260](https://github.com/stuffbucket/maximal/issues/260)) ([#261](https://github.com/stuffbucket/maximal/issues/261)) ([3f0e6d4](https://github.com/stuffbucket/maximal/commit/3f0e6d44b18ab102a18b4519db387f84e46d48c9))
+
+
+### Performance Improvements
+
+* **warmup:** short-circuit Claude Code warmup requests locally instead of round-tripping ([#258](https://github.com/stuffbucket/maximal/issues/258)) ([#262](https://github.com/stuffbucket/maximal/issues/262)) ([8d3ee4d](https://github.com/stuffbucket/maximal/commit/8d3ee4d0da288046e575ae7bfa01463bf7b23d79))
+
 ## [0.4.39](https://github.com/stuffbucket/maximal/compare/v0.4.38...v0.4.39) (2026-07-03)
 
 
