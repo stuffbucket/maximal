@@ -10,6 +10,21 @@
  * callback, so neither surface's dynamic-render logic leaks in here.
  */
 import { availableLocales, localeLabel, resolveLocale, setLocale, t } from "./index";
+import { invoke } from "@tauri-apps/api/core";
+
+/**
+ * Push the active locale across the IPC boundary so the Tauri shell's
+ * native chrome (tray menu, tooltip, notifications, window titles, quit
+ * dialog) follows the same language as the webview. Best-effort: this also
+ * runs in the non-Tauri/dev context (or before the command exists), where
+ * `invoke` rejects — swallow it so a missing native side never breaks the
+ * webview's own re-render.
+ */
+function syncNativeLocale(tag: string): void {
+  void invoke("set_locale", { tag }).catch((err: unknown) => {
+    console.warn("invoke(set_locale) failed:", err);
+  });
+}
 
 /**
  * Localized ATTRIBUTES: a `data-i18n-<attr>` dataset key names the catalog key
@@ -62,11 +77,15 @@ export function applyI18n(root: ParentNode = document): void {
  * strings (Settings: the link/token sentences + live account/diagnostics;
  * Dashboard: its render()). Adding the listener once is safe — populate runs
  * once at boot. No-op if the surface has no picker in its markup.
+ *
+ * Also syncs the resolved locale to the native shell once at boot (so the tray
+ * and titles match the webview from first paint) and again on every change.
  */
 export function wireLocalePicker(onChange: () => void): void {
   const select = document.querySelector<HTMLSelectElement>("[data-locale-select]");
   if (!select) return;
   const active = resolveLocale();
+  syncNativeLocale(active);
   select.replaceChildren();
   for (const tag of availableLocales()) {
     const opt = document.createElement("option");
@@ -77,6 +96,7 @@ export function wireLocalePicker(onChange: () => void): void {
   }
   select.addEventListener("change", () => {
     setLocale(select.value);
+    syncNativeLocale(select.value);
     applyI18n(document);
     onChange();
   });

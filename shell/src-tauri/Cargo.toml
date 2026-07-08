@@ -39,6 +39,11 @@ tauri-plugin-notification = "2"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# System UI locale, used ONLY as the fallback for native strings that fire
+# before any webview (and thus any picker choice) exists — e.g. the
+# first-launch "Maximal is running" banner. Once the picker has run, its
+# persisted choice wins. See src/native_i18n.rs::resolve_locale.
+sys-locale = "0.3"
 # Polls the sidecar's /setup-status endpoint to drive tray state.
 # rustls-tls keeps us off OpenSSL; we only talk to 127.0.0.1 but
 # reqwest still wants a TLS backend feature.
