@@ -11,15 +11,13 @@ import { resolve } from "node:path"
  *   - `file-manager`  = "{os, select, windows {File Explorer} linux {Files} other {Finder}}"
  *
  * The JS UI renders these via a real ICU runtime. The Rust side (Tauri shell)
- * deliberately does NOT pull in an ICU runtime for two words — instead
- * `app_container_noun()` in shell/src-tauri/src/lib.rs is a trivial hand
- * mirror of the `app-container` term. That mirror can silently diverge from
- * the catalog, so this test pins both directions:
- *   1. the catalog still spells the nouns exactly as the code expects, and
- *   2. the Rust mirror still contains those exact literals.
- *
- * If either drifts, this test fails and points you back at the catalog as the
- * source of truth.
+ * deliberately does NOT pull in an ICU runtime: its native strings (tray,
+ * notifications, window titles, quit dialog) come straight from the SAME
+ * catalog via `native_i18n`, with any OS-conditional noun baked into the
+ * per-OS catalog key (e.g. `native-notify-startup-body-macos`) so no runtime
+ * `select` is needed. This test pins the catalog nouns the JS side depends on;
+ * if they drift it fails and points you back at the catalog as the source of
+ * truth.
  */
 
 const REPO_ROOT = resolve(import.meta.dir, "..")
@@ -89,19 +87,39 @@ describe("i18n catalog is the single source of truth", () => {
     expect(term).toContain("system tray")
   })
 
-  test("Rust mirror in lib.rs carries both container-noun literals", () => {
-    // The Rust side has no ICU runtime; app_container_noun() is a hand mirror.
-    // Assert the exact literals are present so the mirror can't drift silently.
-    const rust = readFileSync(RUST_LIB, "utf8")
-    expect(rust).toContain("menu bar")
-    expect(rust).toContain("system tray")
-  })
-
   test("file-manager ICU term defines all three file-manager nouns", () => {
     const term = loadCatalog()["file-manager"]
     expect(term).toContain("Finder")
     expect(term).toContain("File Explorer")
     expect(term).toContain("Files")
+  })
+})
+
+describe("native (Rust) strings resolve from the catalog", () => {
+  // The Tauri shell renders its OS-drawn chrome via `native_i18n`, which reads
+  // the `native-*` keys out of these same JSON catalogs. There is no ICU
+  // runtime and no compile-time check that a key it looks up actually exists —
+  // a typo'd key would silently render as the raw key string in the tray /
+  // notification. Pin every `native-*` key referenced in lib.rs to the en base
+  // so that drift fails here instead of shipping a literal "native-tray-quit".
+  const base = JSON.parse(readFileSync(CATALOG, "utf8")) as Record<
+    string,
+    string
+  >
+  const rust = readFileSync(RUST_LIB, "utf8")
+  const referenced = [
+    ...new Set([...rust.matchAll(/"(native-[a-z0-9-]+)"/g)].map((m) => m[1])),
+  ].sort()
+
+  test("lib.rs actually references native-* keys (guard didn't silently no-op)", () => {
+    // If this ever hits 0, the regex or the call sites changed and the
+    // coverage assertion below would pass vacuously — catch that here.
+    expect(referenced.length).toBeGreaterThan(10)
+  })
+
+  test("every native-* key used in lib.rs exists in the en base catalog", () => {
+    const missing = referenced.filter((k) => !(k in base))
+    expect(missing).toEqual([])
   })
 })
 
