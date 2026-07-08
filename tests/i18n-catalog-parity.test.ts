@@ -31,8 +31,29 @@ const RUST_LIB = resolve(REPO_ROOT, "shell", "src-tauri", "src", "lib.rs")
  * sparse set of overrides (or empty) — but `es` is the Spanish LANGUAGE base
  * that es-MX/es-ES fall back to, so it must cover the whole key set.
  */
-const OVERRIDE_LOCALES = ["en-GB", "es", "es-MX", "es-ES"] as const
-const FULL_COVERAGE_LOCALES = new Set(["es"])
+const OVERRIDE_LOCALES = [
+  "en-GB",
+  "es",
+  "es-MX",
+  "es-ES",
+  "zh",
+  "fr",
+  "de",
+  "ru",
+  "ja",
+  "it",
+  "pt",
+] as const
+const FULL_COVERAGE_LOCALES = new Set([
+  "es",
+  "zh",
+  "fr",
+  "de",
+  "ru",
+  "ja",
+  "it",
+  "pt",
+])
 
 function loadLocale(tag: string): Record<string, string> {
   return JSON.parse(

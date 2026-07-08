@@ -40,6 +40,13 @@ import enGB from "./en-GB.json";
 import es from "./es.json";
 import esES from "./es-ES.json";
 import esMX from "./es-MX.json";
+import zh from "./zh.json";
+import fr from "./fr.json";
+import de from "./de.json";
+import ru from "./ru.json";
+import ja from "./ja.json";
+import it from "./it.json";
+import pt from "./pt.json";
 
 type Catalog = Record<string, string>;
 
@@ -55,6 +62,13 @@ const CATALOGS: Record<string, Catalog> = {
   es,
   "es-MX": esMX,
   "es-ES": esES,
+  zh,
+  fr,
+  de,
+  ru,
+  ja,
+  it,
+  pt,
 };
 
 /** Human labels for the picker, keyed by locale tag. */
@@ -64,6 +78,13 @@ const LOCALE_LABELS: Record<string, string> = {
   es: "Español",
   "es-MX": "Español (México)",
   "es-ES": "Español (España)",
+  zh: "中文（简体）",
+  fr: "Français",
+  de: "Deutsch",
+  ru: "Русский",
+  ja: "日本語",
+  it: "Italiano",
+  pt: "Português",
 };
 
 /** localStorage key holding the user's explicit locale override, if any. */
