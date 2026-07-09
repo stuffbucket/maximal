@@ -18,7 +18,7 @@ const { Content } = await render(entry);
 // scripts/gen-og.mjs → public/og.png) advertised via Open Graph + Twitter meta
 // only — invisible to the rendered page, but it's what unfurlers use instead of
 // guessing at the first inline <img> (which was grabbing the dashboard shot).
-const siteBase = (Astro.site?.href ?? "https://stuffbucket.github.io/maximal/")
+const siteBase = (Astro.site?.href ?? "https://mxml.sh/")
   .replace(/\/$/, "");
 const ogImage = `${siteBase}/og.png`;
 const ogTitle = "maximal · your AI tools, your Copilot models, one connection";

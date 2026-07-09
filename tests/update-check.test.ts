@@ -113,7 +113,7 @@ describe("getUpdateStatus", () => {
     expect(status.update_available).toBe(true)
     // Install-channel-neutral download page, never a raw asset.
     expect(status.url).toBe(DOWNLOAD_URL)
-    expect(DOWNLOAD_URL).toBe("https://mxml.sh/maximal/")
+    expect(DOWNLOAD_URL).toBe("https://mxml.sh/")
   })
 
   test("reports up to date when the latest tag is not newer", async () => {
@@ -224,13 +224,13 @@ describe("getUpdateStatus", () => {
 
     await getUpdateStatus()
 
-    // The Pages/Fastly origin directly — not the mxml.sh Caddy proxy (fewest
-    // hops + smallest trust surface for a machine poll).
-    expect(requested).toBe(
-      "https://stuffbucket.github.io/maximal/updates/manifest.json",
-    )
-    expect(requested).not.toContain("mxml.sh")
-    // Never the rate-limited REST API.
+    // mxml.sh directly — now a Fastly-backed GitHub Pages custom domain (not the
+    // old Caddy proxy), so it's the CDN origin: fewest hops + smallest trust
+    // surface for a machine poll.
+    expect(requested).toBe("https://mxml.sh/updates/manifest.json")
+    // Never the retired /maximal Caddy path…
+    expect(requested).not.toContain("/maximal/")
+    // …and never the rate-limited REST API.
     expect(requested).not.toContain("api.github.com")
   })
 
