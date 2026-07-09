@@ -75,6 +75,9 @@ function backtickedTokens(doc: string): Array<string> {
 function bunRunScripts(doc: string): Array<string> {
   return [...doc.matchAll(/\bbun run ([\w:-]+)/g)].map((m) => m[1])
 }
+function markdownLinks(doc: string): Array<string> {
+  return [...doc.matchAll(/\]\(([^)]+)\)/g)].map((m) => m[1].trim())
+}
 
 describe("docs reference parity", () => {
   for (const rel of DOCS) {
@@ -109,6 +112,23 @@ describe("docs reference parity", () => {
       expect(
         undefinedScripts,
         `undefined bun scripts referenced in ${rel}:\n  ${undefinedScripts.join("\n  ")}`,
+      ).toEqual([])
+    })
+
+    test(`${rel}: every relative markdown link resolves`, () => {
+      const dir = path.dirname(rel)
+      const broken: Array<string> = []
+      for (const link of markdownLinks(doc)) {
+        if (/^(?:https?:|mailto:|#)/.test(link)) continue
+        const target = link.split("#")[0]
+        if (!target) continue
+        if (!fs.existsSync(path.join(REPO_ROOT, dir, target))) {
+          broken.push(link)
+        }
+      }
+      expect(
+        broken,
+        `broken markdown links in ${rel}:\n  ${broken.join("\n  ")}`,
       ).toEqual([])
     })
   }

@@ -30,10 +30,10 @@ costs human judgment only where judgment is actually required:
   directly. Renaming one *is* a policy change, so a doc edit is expected then.
 - **Inventory** — concrete `src/…` paths, function names, example test files —
   is never hand-maintained as prose. Counts come from the `bun test` summary;
-  every path and `bun run` script this document names is checked by
-  `tests/docs-reference-parity.test.ts`, which fails the build the moment one
-  stops existing. Drift surfaces as a red test in CI, not as a stale line an
-  external reviewer finds first.
+  every path, `bun run` script, and relative markdown link this document names
+  is checked by `tests/docs-reference-parity.test.ts`, which fails the build the
+  moment one stops existing. Drift surfaces as a red test in CI, not as a stale
+  line an external reviewer finds first.
 
 **So the contract is:** a pure rename never requires *rethinking* this document —
 at most it re-points a reference the parity test already flagged for you. And the
