@@ -16,6 +16,32 @@ project root [`CLAUDE.md`](../../CLAUDE.md).
 
 ---
 
+## How to read & maintain this document
+
+This document separates **durable policy** from **volatile inventory** so a
+rename in the codebase can't silently make it wrong — and so keeping it true
+costs human judgment only where judgment is actually required:
+
+- **Policy & rationale** — the disposition rule (§6), the leak hazards (§5),
+  which gates exist and why (§9) — is the stable core. It survives any
+  file/function rename untouched.
+- **Anchors** — command names (`bun run …`), config files (`eslint.config.js`,
+  `bunfig.toml`, `stryker.conf.json`, `.bun-version`) and ADRs — are named
+  directly. Renaming one *is* a policy change, so a doc edit is expected then.
+- **Inventory** — concrete `src/…` paths, function names, example test files —
+  is never hand-maintained as prose. Counts come from the `bun test` summary;
+  every path and `bun run` script this document names is checked by
+  `tests/docs-reference-parity.test.ts`, which fails the build the moment one
+  stops existing. Drift surfaces as a red test in CI, not as a stale line an
+  external reviewer finds first.
+
+**So the contract is:** a pure rename never requires *rethinking* this document —
+at most it re-points a reference the parity test already flagged for you. And the
+verification status is unambiguous — if CI is green, every path, script, and
+config anchor this document names is currently true.
+
+---
+
 ## 1. What this project is (context for the test strategy)
 
 `maximal` is a local HTTP proxy that presents an Anthropic-compatible API
@@ -270,16 +296,19 @@ It is slow, flaky under concurrency, and a global number invites gaming. The bar
 is the *per-survivor disposition rule above*, applied during review of
 test/logic PRs — not a percentage.
 
-### Modules that warrant periodic manual sweeps
-The highest-value targets are the branchy, pure-logic transforms on the request
-path: request preprocessing (`src/routes/messages/preprocess.ts`), the
-translation layers (`*-translation.ts`), model dispatch/selection
-(`src/lib/models/models.ts`, exercised by `tests/find-endpoint-model.test.ts`),
-the completion handler's model-resolution gate (`src/routes/messages/handler.ts`
-`handleCompletion` — `resolveCopilotModel` and `findEndpointModel` mutate
-`payload.model` in place and can silently override an explicit model, the same
-"green coverage, no assertion distinguishes the inverted branch" shape this
-section targets), and domain-policy matching (`web-tools/state.ts`).
+### Which modules to sweep — a criterion, not a hand-list
+The target set is *computable*, not a matter of taste. "Branchy, pure-logic
+transforms on the request path" decomposes into three mechanical signals: a
+module is reachable from `src/routes/**` in the import graph, imports no I/O
+sink, and carries cyclomatic complexity above a threshold. Rank that set by a
+*measured* signal — surviving-mutant density from a scheduled `bun run mutate`,
+or branch-density × line-coverage — and the sweep list falls out
+deterministically. Human judgment sets the thresholds and the disposition rule
+above; it does **not** re-pick a file list on every rename. The canonical mutate
+target of record is `stryker.conf.json`. Today's standing high-value areas are
+the request-path transforms: request preprocessing, the protocol translation
+layers, model dispatch/selection, the completion handler's model-resolution
+gate, and domain-policy matching.
 
 ---
 
@@ -313,9 +342,11 @@ We would specifically like external judgment on these:
    with no signal until a user reports breakage. A periodic recorded/live
    contract check would convert silent drift into a failing check. *(Highest
    strategic value, in our view.)*
-2. **Mutation sweeps are manual and unscheduled.** §6 now defines the
-   disposition rule and names the hot-path module list, but sweeps have no
-   schedule and results aren't archived. Risk: they only run when someone
+2. **Mutation sweeps are manual and unscheduled.** §6 defines the disposition
+   rule and a *computable* target criterion, but the pieces that would make it
+   automatic — a generator that emits the target set from the import graph, and
+   a scheduled `bun run mutate` that ranks by surviving-mutant density — aren't
+   built yet, and results aren't archived. Risk: sweeps only run when someone
    remembers.
 3. **No coverage measurement at all.** We intentionally avoid a coverage *gate*
    (§6), but we currently have no coverage *visibility* either — we cannot point
