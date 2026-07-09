@@ -122,6 +122,14 @@ Additionally the preload resets `consola.level` to Info (3) before every test,
 because some tests raise verbosity and don't restore it, leaking flooding debug
 output into later tests.
 
+The preload also registers the **outermost `afterEach(() => mock.restore())`**
+(`tests/test-setup.ts`): a defense-in-depth net that restores every `spyOn` spy
+after each test. It runs last — after any file's own `afterEach` — so a spy a
+file forgot to restore can't leak. A leaked `spyOn` permanently patches the real
+method for every later file in the Bun worker (the spy analog of the
+`mock.module` leak; see §5.2). It does **not** undo `mock.module` — that is
+restored per-file (§5.1).
+
 **Shared fixtures/helpers** live in `tests/helpers/` (`fake-executor.ts`,
 `auth-flow-utils.ts`, `auth-status.ts`). Preference order for test doubles:
 **injectable function options > `mock.module`** — for a hazard reason spelled
@@ -156,14 +164,38 @@ This bit the project **four times** (culminating in a long #229 debugging loop).
   identical (`...actual` / forward `...rest`), and prove with a sequential-import
   repro that it can't break a later file.
 
-### 5.2 Green tests can still test nothing
+This discipline is the decision of
+[ADR-0011](../decisions/0011-mock-module-leakage-discipline.md). Two parts of
+that ADR remain authoritative: **prefer DI / injectable options over
+`mock.module`** for any shared module, and the **wrapper rule** (forward
+`...rest`, preserve return shape) when a stub is unavoidable. What actually
+*shipped* for enforcement is narrower than the ADR's original proposal — there
+is no `tests/helpers/` allowlist; the lint rule bans only the fire-and-forget
+forms and requires an awaited install + awaited `afterAll` restore. See the
+ADR's addendum for the full reconciliation.
+
+### 5.2 Spies leak too
+`spyOn` has the same cross-file hazard as `mock.module`: a spy left unrestored
+permanently patches the real method for every later file in the Bun worker — a
+CI-order-dependent flake whose failure surfaces in a *different* file than the
+one that leaked it. **Mitigations:**
+- **Global net (defense-in-depth).** The preload's outermost
+  `afterEach(() => mock.restore())` (§4) restores every spy after each test, so a
+  forgotten restore can't leak forward. Note `mock.restore()` undoes `spyOn`
+  spies **only** — it does *not* undo `mock.module` (§5.1).
+- **Still restore your own spies per-file.** The net is a backstop, not a
+  license: keep `spy.mockRestore()` in the test's own `afterEach`/`afterAll`
+  (e.g. `tests/uninstall.test.ts`) so intent is local and the leak window is
+  zero even within a file.
+
+### 5.3 Green tests can still test nothing
 A passing assertion does not prove the branch it claims to cover was exercised.
 Mutation testing has caught classification tests whose fixture hit a *different*
 code path that happened to return the same value. **Mitigation:** for
 security-critical or branchy logic, run Stryker and confirm the targeted
 mutants actually die. See §6.
 
-### 5.3 Local staged lint ≠ full-tree CI lint
+### 5.4 Local staged lint ≠ full-tree CI lint
 Both `lint` and `lint:all` pass `--cache`, so this is **not** a cached-vs-uncached
 difference — it is **scope**. The pre-commit `lint` (via lint-staged) only lints
 *staged* files; `bun run lint:all` (`eslint --cache .`) lints the whole tree,
@@ -171,7 +203,7 @@ which is what CI runs — on a fresh checkout with no cache. So a violation in a
 file you didn't stage passes locally and fails CI. **Always run `lint:all`
 before pushing.** This has produced red CI on otherwise-good PRs.
 
-### 5.4 Fresh worktrees need setup
+### 5.5 Fresh worktrees need setup
 A `git worktree` created for isolated work has no `node_modules` and no
 generated stub. `bun install` (matches lockfile) and `bun run ensure:ui-embed`
 may be required before typecheck/tests import cleanly. The preload handles the
@@ -331,11 +363,12 @@ run alongside. Release itself is Conventional-Commit-driven via release-please;
   check:tokens`.
 - `bun run check:deep` = `check:fast → bun test → knip`.
 - **Pre-commit hook** (simple-git-hooks → lint-staged): `bun run lint --fix` +
-  `scripts/secret-scan.sh` on staged files. Note this uses the *cached* lint;
-  §5.3 still applies — run `lint:all` yourself before pushing.
+  `scripts/secret-scan.sh` on staged files. Note this runs the staged-file
+  `lint`, not full-tree `lint:all`; §5.4 still applies — run `lint:all` yourself
+  before pushing.
 
 The single most common CI-only failure is a lint error in a file the local
-pre-commit hook didn't lint (it only sees staged files; §5.3). Running
+pre-commit hook didn't lint (it only sees staged files; §5.4). Running
 `check:fast` (which calls `lint:all` over the full tree) before pushing
 catches it.
 
@@ -350,5 +383,6 @@ catches it.
 - Never touch real user credentials; rely on the preload isolation (§4).
 - For branchy/security-critical logic, **run Stryker and adjudicate every
   survivor** per the three-bucket rule (§6).
-- Run **`lint:all`** (full tree, not just staged files) before pushing (§5.3).
+- Run **`lint:all`** (full tree, not just staged files) before pushing (§5.4).
+- Restore your spies (`spy.mockRestore()`); the global net is a backstop (§5.2).
 - Keep Bun pins in lockstep (`.bun-version` ↔ CI).
