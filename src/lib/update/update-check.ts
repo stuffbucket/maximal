@@ -25,18 +25,16 @@ import { BUILD_CHANNEL, BUILD_VERSION } from "~/lib/update/build-info"
 const log = createTeeLogger("update")
 
 /** The update manifest — a small JSON document the project site publishes on
- *  every release. We fetch it straight from the GitHub Pages origin
- *  (Fastly-backed, GitHub's own CDN) rather than via the mxml.sh Caddy proxy:
- *  this is a machine-to-machine poll, so we want the fewest hops and the
- *  smallest trust surface — the proxy box can fail or be tampered with even
- *  when Pages is healthy. (The branded mxml.sh URL stays the *human*-facing
- *  download link — see `DOWNLOAD_URL`.) A static, CDN-cached object: NO auth
- *  and NO per-IP rate limit, so it scales to every client. (The REST API caps
- *  anonymous callers at 60/h/IP — a real failure mode behind a shared corporate
- *  NAT, where it silently returns "no update".) Channel-keyed, so opting a
- *  build into a future `beta` is a server-only + client-config change. */
-const MANIFEST_URL =
-  "https://stuffbucket.github.io/maximal/updates/manifest.json"
+ *  every release. mxml.sh is now a GitHub Pages CUSTOM DOMAIN (Fastly-backed,
+ *  GitHub's own CDN) — not the old Caddy proxy — so we fetch it straight from
+ *  there: a static, CDN-cached object with NO auth and NO per-IP rate limit, so
+ *  it scales to every client with the fewest hops and smallest trust surface.
+ *  (The REST API caps anonymous callers at 60/h/IP — a real failure mode behind
+ *  a shared corporate NAT, where it silently returns "no update".) The legacy
+ *  stuffbucket.github.io/maximal/updates/manifest.json still 301-redirects here.
+ *  Channel-keyed, so opting a build into a future `beta` is a server-only +
+ *  client-config change. */
+const MANIFEST_URL = "https://mxml.sh/updates/manifest.json"
 
 /** Which release channel this build follows — derived from the build's
  *  `BUILD_CHANNEL` (`stable` for source/stock builds; `beta` etc. when a
@@ -45,8 +43,9 @@ const MANIFEST_URL =
  *  `stable` keeps reading `stable`. */
 const UPDATE_CHANNEL = BUILD_CHANNEL
 
-/** Where to send the user to update — install-channel neutral. */
-export const DOWNLOAD_URL = "https://mxml.sh/maximal/"
+/** Where to send the user to update — install-channel neutral. mxml.sh serves
+ *  at the root (apex) now; the older /maximal Caddy path is retired. */
+export const DOWNLOAD_URL = "https://mxml.sh/"
 
 /** Cache the resolved status this long. Generous on purpose: a new release is
  *  rare, so there's no value re-fetching the CDN asset more often. The shell's
