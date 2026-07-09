@@ -198,7 +198,7 @@ the gate, so the bug was invisible. Post-hoc Stryker flagged the exact mutant
 bug's fingerprint; running mutation testing on that module beforehand would
 have caught it.
 
-### The disposition rule for surviving mutants (policy — under active adoption)
+### The disposition rule for surviving mutants
 
 > A surviving mutant is proof that **no test can distinguish the real code from
 > a changed version of it.** There are exactly three honest dispositions, each
@@ -221,27 +221,28 @@ The anti-pattern we are eliminating: accepting a live mutant because "we can't
 write a test to observe it." If a test can't observe it, that is a finding
 *about the code* (bucket 2), not a license to move on.
 
-**Status of this policy:** newly articulated and being applied
-retroactively — a tracked initiative exists to (a) write this into the testing
-docs, (b) re-adjudicate previously-dismissed "equivalent" survivors (starting
-with the request-preprocess module), and (c) name the hot-path modules that
-warrant periodic manual sweeps. An early audit under this rule already found
-that several mutants previously labeled "equivalent" were in fact **killable**
-(including one reachable via a `selectedModel?: Model` parameter that the public
-contract genuinely allows to be `undefined`).
+**Status of this policy:** codified (issue #216). The three scope items are
+complete — this rule is written into the testing docs (and linked from
+`docs/architecture.md` → *Testing gotchas*), the previously-dismissed
+"equivalent" survivors were re-adjudicated (the request-preprocess audit found
+several were in fact **killable**, including one reachable via a
+`selectedModel?: Model` parameter the public contract genuinely allows to be
+`undefined`), and the hot-path sweep list is named below.
 
 **Deliberate non-goal:** we do **not** gate CI on a mutation-score threshold.
 It is slow, flaky under concurrency, and a global number invites gaming. The bar
 is the *per-survivor disposition rule above*, applied during review of
 test/logic PRs — not a percentage.
 
-### Candidate modules for periodic manual sweeps
+### Modules that warrant periodic manual sweeps
 The highest-value targets are the branchy, pure-logic transforms on the request
 path: request preprocessing (`src/routes/messages/preprocess.ts`), the
 translation layers (`*-translation.ts`), model dispatch/selection
-(`src/lib/models.ts`, `find-endpoint-model`), and domain-policy matching
-(`web-tools/state.ts`). (This list is a recommendation for the review to
-confirm, not yet a codified schedule.)
+(`src/lib/models.ts`, `find-endpoint-model`), the completion handler's
+warmup-downgrade gate (`src/routes/messages/handler.ts` `handleCompletion` — it
+mutates `payload.model` in place and can silently override an explicit model,
+the same "green coverage, no assertion distinguishes the inverted branch" shape
+this section targets), and domain-policy matching (`web-tools/state.ts`).
 
 ---
 

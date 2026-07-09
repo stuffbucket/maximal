@@ -89,7 +89,11 @@ See also: `docs/codegen-feedback-loops-practices.md` → Dispatch and review loo
   they claimed to cover (the fixture hit a different code path that
   returned the same value). For security-critical or branchy logic, run
   Stryker and confirm the targeted mutants actually die — don't trust a
-  passing assertion alone.
+  passing assertion alone. Every surviving mutant must land in exactly one of
+  three buckets — **killable** (write the test), **dead** (delete it / encode
+  the impossibility in types), or **proven-equivalent** (written proof + reason
+  to keep). See [`dev/testing-strategy.md`](dev/testing-strategy.md) §6 for the
+  disposition rule and the hot-path modules that warrant periodic sweeps.
 
 ## Release & PR conventions
 
