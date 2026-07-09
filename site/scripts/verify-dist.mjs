@@ -75,6 +75,23 @@ if (!existsSync(join(DIST, "favicon.svg"))) {
   errors.push("dist/favicon.svg is missing.");
 }
 
+// 4. The legacy /maximal/ path still redirects to root — shipped app builds
+//    (<= v0.4.40) link there for downloads; a static redirect page keeps them
+//    working. Assert it exists and forwards to "/".
+const redirectPath = join(DIST, "maximal", "index.html");
+if (!existsSync(redirectPath)) {
+  errors.push(
+    "dist/maximal/index.html is missing — the legacy /maximal/ path (old app DOWNLOAD_URL) would 404. It lives at site/public/maximal/index.html.",
+  );
+} else {
+  const body = readFileSync(redirectPath, "utf8");
+  if (!/url=\/(?:["']|\s|$)/m.test(body) && !/location\.replace\("\/"/.test(body)) {
+    errors.push(
+      "dist/maximal/index.html exists but does not redirect to the site root (/).",
+    );
+  }
+}
+
 if (errors.length > 0) {
   console.error("verify-dist: FAILED\n");
   for (const e of errors) console.error(`  ✗ ${e}`);
