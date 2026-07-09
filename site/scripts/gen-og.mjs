@@ -3,7 +3,7 @@
 // src/pages/index.astro, so it never appears in the visible page).
 //
 // Needs a running site server. Easiest:
-//   bun run dev      # in another terminal (serves http://localhost:4321/maximal)
+//   bun run dev      # in another terminal (serves http://localhost:4321/)
 //   bun run og       # this script
 // Override the target with OG_URL=... if your dev server is elsewhere.
 //
@@ -13,7 +13,7 @@
 import { chromium } from "playwright";
 import { fileURLToPath } from "node:url";
 
-const TARGET = process.env.OG_URL ?? "http://localhost:4321/maximal";
+const TARGET = process.env.OG_URL ?? "http://localhost:4321/";
 const OUT = fileURLToPath(new URL("../public/og.png", import.meta.url));
 const W = 1200;
 const H = 630; // 1.91:1 — the standard Open Graph / large-summary card ratio
