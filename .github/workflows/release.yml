@@ -1151,11 +1151,43 @@ jobs:
     permissions:
       contents: write
     steps:
+      # Mint an app-repoman token so the push to `main` below bypasses the
+      # require-PR ruleset (issue #287). The default GITHUB_TOKEN has no bypass
+      # on that ruleset, so a plain push is rejected (GH013) and the manifest
+      # goes stale. Mirrors the token dance in release-please.yml. When the App
+      # isn't provisioned we fall back to github.token — the push is then
+      # rejected and the job fails RED (loud, not silent); recover by hand per
+      # the runbook. Resolve the id into a step output first: the `secrets`
+      # context can't be used in an `if:`.
+      - name: Resolve app id
+        id: appid
+        env:
+          APP_ID: ${{ vars.REPOMAN_APP_ID || secrets.REPOMAN_APP_ID }}
+        run: |
+          set -euo pipefail
+          if [ -n "${APP_ID:-}" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::No REPOMAN_APP_ID set — the manifest push will be rejected by the require-PR ruleset. Land it by hand (see docs/release-runbook.md)."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Mint app-repoman token
+        id: app-token
+        if: steps.appid.outputs.present == 'true'
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.REPOMAN_APP_ID || secrets.REPOMAN_APP_ID }}
+          private-key: ${{ secrets.REPOMAN_APP_PRIVATE_KEY }}
+
       - uses: actions/checkout@v6
         with:
           # Commit to main, not the tag ref this run checks out by default.
           ref: main
           fetch-depth: 0
+          # Persist the app-repoman token so the `git push origin HEAD:main`
+          # below authenticates as the App (the ruleset bypass actor).
+          token: ${{ steps.app-token.outputs.token || github.token }}
 
       - uses: ./.github/actions/setup-bun
         with:
