@@ -1,7 +1,7 @@
 # Testing Strategy — maximal
 
 **Status:** Living document, prepared for external review.
-**Last updated:** 2026-07-03.
+**Last updated:** 2026-07-09.
 **Audience:** professional software-testing reviewers, plus contributors who
 need one place that describes how this project verifies itself.
 
@@ -49,7 +49,8 @@ The testing implications that shape everything below:
 ## 2. Test taxonomy
 
 We do not maintain a formal test-pyramid ratio. In practice the suite
-(111 test files under `tests/`, ~1,195 assertions passing at time of writing)
+(100+ test files under `tests/`; exact file/assertion counts live in the CI
+test-run summary rather than being hand-maintained here)
 breaks down into these layers:
 
 | Layer | What it covers | Example files |
@@ -85,7 +86,7 @@ that mirror or the catalog spelling drifts.
 | Test runner | **`bun test`** | Native Bun runner. Fast; no Jest/Vitest layer. |
 | Type checking | **`tsc`** (`bun run typecheck`) | `strict` TypeScript. Treated as a first-class gate, not advisory. |
 | Lint (fast) | **oxlint** (`bun run lint:fast`) | Rust-based, runs first as a cheap filter. |
-| Lint (authoritative) | **ESLint** (`bun run lint:all`) | Full-tree, **uncached**. This is what CI runs and is the source of truth. Local `bun run lint` is cached and can mask errors — see §5. |
+| Lint (authoritative) | **ESLint** (`bun run lint:all` = `eslint --cache .`) | Full-tree. This is what CI runs and is the source of truth. Both `lint` and `lint:all` use `--cache`; the difference is **scope** — the pre-commit `lint` only sees *staged* files, and CI runs on a fresh checkout with no cache, so a violation outside your staged set surfaces only under `lint:all`/CI. See §5. |
 | Mutation testing | **StrykerJS** (`bun run mutate`) | Manual, narrow-scope. `testRunner: "command"`. See §6. |
 | Dead-code / unused deps | **knip** (`bun run knip`) | Part of `check:deep`. |
 | Secret scanning | **trufflehog** + `scripts/secret-scan.sh` | Runs pre-commit (lint-staged) and in CI. |
@@ -162,10 +163,13 @@ code path that happened to return the same value. **Mitigation:** for
 security-critical or branchy logic, run Stryker and confirm the targeted
 mutants actually die. See §6.
 
-### 5.3 Local cached lint ≠ CI lint
-`bun run lint` is cached; `bun run lint:all` is the full uncached run CI
-executes. A change can pass local cached lint and fail CI. **Always run
-`lint:all` before pushing.** This has produced red CI on otherwise-good PRs.
+### 5.3 Local staged lint ≠ full-tree CI lint
+Both `lint` and `lint:all` pass `--cache`, so this is **not** a cached-vs-uncached
+difference — it is **scope**. The pre-commit `lint` (via lint-staged) only lints
+*staged* files; `bun run lint:all` (`eslint --cache .`) lints the whole tree,
+which is what CI runs — on a fresh checkout with no cache. So a violation in a
+file you didn't stage passes locally and fails CI. **Always run `lint:all`
+before pushing.** This has produced red CI on otherwise-good PRs.
 
 ### 5.4 Fresh worktrees need setup
 A `git worktree` created for isolated work has no `node_modules` and no
@@ -175,7 +179,7 @@ stub for the test path specifically; typecheck does not get that for free.
 
 ---
 
-## 6. Mutation testing (the differentiator, and the policy under active revision)
+## 6. Mutation testing (the differentiator)
 
 ### How it's configured
 StrykerJS, invoked manually via `bun run mutate`. The config
@@ -238,11 +242,12 @@ test/logic PRs — not a percentage.
 The highest-value targets are the branchy, pure-logic transforms on the request
 path: request preprocessing (`src/routes/messages/preprocess.ts`), the
 translation layers (`*-translation.ts`), model dispatch/selection
-(`src/lib/models.ts`, `find-endpoint-model`), the completion handler's
-warmup-downgrade gate (`src/routes/messages/handler.ts` `handleCompletion` — it
-mutates `payload.model` in place and can silently override an explicit model,
-the same "green coverage, no assertion distinguishes the inverted branch" shape
-this section targets), and domain-policy matching (`web-tools/state.ts`).
+(`src/lib/models/models.ts`, exercised by `tests/find-endpoint-model.test.ts`),
+the completion handler's model-resolution gate (`src/routes/messages/handler.ts`
+`handleCompletion` — `resolveCopilotModel` and `findEndpointModel` mutate
+`payload.model` in place and can silently override an explicit model, the same
+"green coverage, no assertion distinguishes the inverted branch" shape this
+section targets), and domain-policy matching (`web-tools/state.ts`).
 
 ---
 
@@ -276,9 +281,10 @@ We would specifically like external judgment on these:
    with no signal until a user reports breakage. A periodic recorded/live
    contract check would convert silent drift into a failing check. *(Highest
    strategic value, in our view.)*
-2. **Mutation testing is manual and ad-hoc.** No schedule, no defined module
-   coverage list, results not archived. Policy in §6 is new. Risk: it only runs
-   when someone remembers.
+2. **Mutation sweeps are manual and unscheduled.** §6 now defines the
+   disposition rule and names the hot-path module list, but sweeps have no
+   schedule and results aren't archived. Risk: they only run when someone
+   remembers.
 3. **No coverage measurement at all.** We intentionally avoid a coverage *gate*
    (§6), but we currently have no coverage *visibility* either — we cannot point
    at which modules are under-exercised without running Stryker on each. A
@@ -308,7 +314,7 @@ Steps, in order:
 1. Verify Node `node:sqlite` support (the app uses it).
 2. Pinned Bun setup (`.github/actions/setup-bun`).
 3. `bun install`.
-4. **`bun run lint:all`** (full-tree, uncached ESLint).
+4. **`bun run lint:all`** (full-tree ESLint, `eslint --cache .`).
 5. **`bun run typecheck`** (`tsc`).
 6. **`bun test`** (full suite).
 7. **`bun run build`**.
@@ -328,9 +334,10 @@ run alongside. Release itself is Conventional-Commit-driven via release-please;
   `scripts/secret-scan.sh` on staged files. Note this uses the *cached* lint;
   §5.3 still applies — run `lint:all` yourself before pushing.
 
-The single most common CI-only failure is a lint error masked by the local
-cache (§5.3). Running `check:fast` (which calls `lint:all`) before pushing
-eliminates it.
+The single most common CI-only failure is a lint error in a file the local
+pre-commit hook didn't lint (it only sees staged files; §5.3). Running
+`check:fast` (which calls `lint:all` over the full tree) before pushing
+catches it.
 
 ---
 
@@ -343,5 +350,5 @@ eliminates it.
 - Never touch real user credentials; rely on the preload isolation (§4).
 - For branchy/security-critical logic, **run Stryker and adjudicate every
   survivor** per the three-bucket rule (§6).
-- Run **`lint:all`** (not cached `lint`) before pushing (§5.3).
+- Run **`lint:all`** (full tree, not just staged files) before pushing (§5.3).
 - Keep Bun pins in lockstep (`.bun-version` ↔ CI).
