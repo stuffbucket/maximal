@@ -1,7 +1,7 @@
 # Testing Strategy — maximal
 
 **Status:** Living document, prepared for external review.
-**Last updated:** 2026-07-03.
+**Last updated:** 2026-07-09.
 **Audience:** professional software-testing reviewers, plus contributors who
 need one place that describes how this project verifies itself.
 
@@ -13,6 +13,32 @@ the known weaknesses we want a review to pressure-test. It describes the system
 For the terse in-repo pointers this expands on, see
 [`docs/architecture.md` → *Testing gotchas*](../architecture.md) and the
 project root [`CLAUDE.md`](../../CLAUDE.md).
+
+---
+
+## How to read & maintain this document
+
+This document separates **durable policy** from **volatile inventory** so a
+rename in the codebase can't silently make it wrong — and so keeping it true
+costs human judgment only where judgment is actually required:
+
+- **Policy & rationale** — the disposition rule (§6), the leak hazards (§5),
+  which gates exist and why (§9) — is the stable core. It survives any
+  file/function rename untouched.
+- **Anchors** — command names (`bun run …`), config files (`eslint.config.js`,
+  `bunfig.toml`, `stryker.conf.json`, `.bun-version`) and ADRs — are named
+  directly. Renaming one *is* a policy change, so a doc edit is expected then.
+- **Inventory** — concrete `src/…` paths, function names, example test files —
+  is never hand-maintained as prose. Counts come from the `bun test` summary;
+  every path, `bun run` script, and relative markdown link this document names
+  is checked by `tests/docs-reference-parity.test.ts`, which fails the build the
+  moment one stops existing. Drift surfaces as a red test in CI, not as a stale
+  line an external reviewer finds first.
+
+**So the contract is:** a pure rename never requires *rethinking* this document —
+at most it re-points a reference the parity test already flagged for you. And the
+verification status is unambiguous — if CI is green, every path, script, and
+config anchor this document names is currently true.
 
 ---
 
@@ -49,7 +75,8 @@ The testing implications that shape everything below:
 ## 2. Test taxonomy
 
 We do not maintain a formal test-pyramid ratio. In practice the suite
-(111 test files under `tests/`, ~1,195 assertions passing at time of writing)
+(100+ test files under `tests/`; exact file/assertion counts live in the CI
+test-run summary rather than being hand-maintained here)
 breaks down into these layers:
 
 | Layer | What it covers | Example files |
@@ -85,7 +112,7 @@ that mirror or the catalog spelling drifts.
 | Test runner | **`bun test`** | Native Bun runner. Fast; no Jest/Vitest layer. |
 | Type checking | **`tsc`** (`bun run typecheck`) | `strict` TypeScript. Treated as a first-class gate, not advisory. |
 | Lint (fast) | **oxlint** (`bun run lint:fast`) | Rust-based, runs first as a cheap filter. |
-| Lint (authoritative) | **ESLint** (`bun run lint:all`) | Full-tree, **uncached**. This is what CI runs and is the source of truth. Local `bun run lint` is cached and can mask errors — see §5. |
+| Lint (authoritative) | **ESLint** (`bun run lint:all` = `eslint --cache .`) | Full-tree. This is what CI runs and is the source of truth. Both `lint` and `lint:all` use `--cache`; the difference is **scope** — the pre-commit `lint` only sees *staged* files, and CI runs on a fresh checkout with no cache, so a violation outside your staged set surfaces only under `lint:all`/CI. See §5. |
 | Mutation testing | **StrykerJS** (`bun run mutate`) | Manual, narrow-scope. `testRunner: "command"`. See §6. |
 | Dead-code / unused deps | **knip** (`bun run knip`) | Part of `check:deep`. |
 | Secret scanning | **trufflehog** + `scripts/secret-scan.sh` | Runs pre-commit (lint-staged) and in CI. |
@@ -121,6 +148,14 @@ Additionally the preload resets `consola.level` to Info (3) before every test,
 because some tests raise verbosity and don't restore it, leaking flooding debug
 output into later tests.
 
+The preload also registers the **outermost `afterEach(() => mock.restore())`**
+(`tests/test-setup.ts`): a defense-in-depth net that restores every `spyOn` spy
+after each test. It runs last — after any file's own `afterEach` — so a spy a
+file forgot to restore can't leak. A leaked `spyOn` permanently patches the real
+method for every later file in the Bun worker (the spy analog of the
+`mock.module` leak; see §5.2). It does **not** undo `mock.module` — that is
+restored per-file (§5.1).
+
 **Shared fixtures/helpers** live in `tests/helpers/` (`fake-executor.ts`,
 `auth-flow-utils.ts`, `auth-status.ts`). Preference order for test doubles:
 **injectable function options > `mock.module`** — for a hazard reason spelled
@@ -155,19 +190,46 @@ This bit the project **four times** (culminating in a long #229 debugging loop).
   identical (`...actual` / forward `...rest`), and prove with a sequential-import
   repro that it can't break a later file.
 
-### 5.2 Green tests can still test nothing
+This discipline is the decision of
+[ADR-0011](../decisions/0011-mock-module-leakage-discipline.md). Two parts of
+that ADR remain authoritative: **prefer DI / injectable options over
+`mock.module`** for any shared module, and the **wrapper rule** (forward
+`...rest`, preserve return shape) when a stub is unavoidable. What actually
+*shipped* for enforcement is narrower than the ADR's original proposal — there
+is no `tests/helpers/` allowlist; the lint rule bans only the fire-and-forget
+forms and requires an awaited install + awaited `afterAll` restore. See the
+ADR's addendum for the full reconciliation.
+
+### 5.2 Spies leak too
+`spyOn` has the same cross-file hazard as `mock.module`: a spy left unrestored
+permanently patches the real method for every later file in the Bun worker — a
+CI-order-dependent flake whose failure surfaces in a *different* file than the
+one that leaked it. **Mitigations:**
+- **Global net (defense-in-depth).** The preload's outermost
+  `afterEach(() => mock.restore())` (§4) restores every spy after each test, so a
+  forgotten restore can't leak forward. Note `mock.restore()` undoes `spyOn`
+  spies **only** — it does *not* undo `mock.module` (§5.1).
+- **Still restore your own spies per-file.** The net is a backstop, not a
+  license: keep `spy.mockRestore()` in the test's own `afterEach`/`afterAll`
+  (e.g. `tests/uninstall.test.ts`) so intent is local and the leak window is
+  zero even within a file.
+
+### 5.3 Green tests can still test nothing
 A passing assertion does not prove the branch it claims to cover was exercised.
 Mutation testing has caught classification tests whose fixture hit a *different*
 code path that happened to return the same value. **Mitigation:** for
 security-critical or branchy logic, run Stryker and confirm the targeted
 mutants actually die. See §6.
 
-### 5.3 Local cached lint ≠ CI lint
-`bun run lint` is cached; `bun run lint:all` is the full uncached run CI
-executes. A change can pass local cached lint and fail CI. **Always run
-`lint:all` before pushing.** This has produced red CI on otherwise-good PRs.
+### 5.4 Local staged lint ≠ full-tree CI lint
+Both `lint` and `lint:all` pass `--cache`, so this is **not** a cached-vs-uncached
+difference — it is **scope**. The pre-commit `lint` (via lint-staged) only lints
+*staged* files; `bun run lint:all` (`eslint --cache .`) lints the whole tree,
+which is what CI runs — on a fresh checkout with no cache. So a violation in a
+file you didn't stage passes locally and fails CI. **Always run `lint:all`
+before pushing.** This has produced red CI on otherwise-good PRs.
 
-### 5.4 Fresh worktrees need setup
+### 5.5 Fresh worktrees need setup
 A `git worktree` created for isolated work has no `node_modules` and no
 generated stub. `bun install` (matches lockfile) and `bun run ensure:ui-embed`
 may be required before typecheck/tests import cleanly. The preload handles the
@@ -175,7 +237,7 @@ stub for the test path specifically; typecheck does not get that for free.
 
 ---
 
-## 6. Mutation testing (the differentiator, and the policy under active revision)
+## 6. Mutation testing (the differentiator)
 
 ### How it's configured
 StrykerJS, invoked manually via `bun run mutate`. The config
@@ -198,7 +260,7 @@ the gate, so the bug was invisible. Post-hoc Stryker flagged the exact mutant
 bug's fingerprint; running mutation testing on that module beforehand would
 have caught it.
 
-### The disposition rule for surviving mutants (policy — under active adoption)
+### The disposition rule for surviving mutants
 
 > A surviving mutant is proof that **no test can distinguish the real code from
 > a changed version of it.** There are exactly three honest dispositions, each
@@ -221,27 +283,32 @@ The anti-pattern we are eliminating: accepting a live mutant because "we can't
 write a test to observe it." If a test can't observe it, that is a finding
 *about the code* (bucket 2), not a license to move on.
 
-**Status of this policy:** newly articulated and being applied
-retroactively — a tracked initiative exists to (a) write this into the testing
-docs, (b) re-adjudicate previously-dismissed "equivalent" survivors (starting
-with the request-preprocess module), and (c) name the hot-path modules that
-warrant periodic manual sweeps. An early audit under this rule already found
-that several mutants previously labeled "equivalent" were in fact **killable**
-(including one reachable via a `selectedModel?: Model` parameter that the public
-contract genuinely allows to be `undefined`).
+**Status of this policy:** codified (issue #216). The three scope items are
+complete — this rule is written into the testing docs (and linked from
+`docs/architecture.md` → *Testing gotchas*), the previously-dismissed
+"equivalent" survivors were re-adjudicated (the request-preprocess audit found
+several were in fact **killable**, including one reachable via a
+`selectedModel?: Model` parameter the public contract genuinely allows to be
+`undefined`), and the hot-path sweep list is named below.
 
 **Deliberate non-goal:** we do **not** gate CI on a mutation-score threshold.
 It is slow, flaky under concurrency, and a global number invites gaming. The bar
 is the *per-survivor disposition rule above*, applied during review of
 test/logic PRs — not a percentage.
 
-### Candidate modules for periodic manual sweeps
-The highest-value targets are the branchy, pure-logic transforms on the request
-path: request preprocessing (`src/routes/messages/preprocess.ts`), the
-translation layers (`*-translation.ts`), model dispatch/selection
-(`src/lib/models.ts`, `find-endpoint-model`), and domain-policy matching
-(`web-tools/state.ts`). (This list is a recommendation for the review to
-confirm, not yet a codified schedule.)
+### Which modules to sweep — a criterion, not a hand-list
+The target set is *computable*, not a matter of taste. "Branchy, pure-logic
+transforms on the request path" decomposes into three mechanical signals: a
+module is reachable from `src/routes/**` in the import graph, imports no I/O
+sink, and carries cyclomatic complexity above a threshold. Rank that set by a
+*measured* signal — surviving-mutant density from a scheduled `bun run mutate`,
+or branch-density × line-coverage — and the sweep list falls out
+deterministically. Human judgment sets the thresholds and the disposition rule
+above; it does **not** re-pick a file list on every rename. The canonical mutate
+target of record is `stryker.conf.json`. Today's standing high-value areas are
+the request-path transforms: request preprocessing, the protocol translation
+layers, model dispatch/selection, the completion handler's model-resolution
+gate, and domain-policy matching.
 
 ---
 
@@ -275,9 +342,12 @@ We would specifically like external judgment on these:
    with no signal until a user reports breakage. A periodic recorded/live
    contract check would convert silent drift into a failing check. *(Highest
    strategic value, in our view.)*
-2. **Mutation testing is manual and ad-hoc.** No schedule, no defined module
-   coverage list, results not archived. Policy in §6 is new. Risk: it only runs
-   when someone remembers.
+2. **Mutation sweeps are manual and unscheduled.** §6 defines the disposition
+   rule and a *computable* target criterion, but the pieces that would make it
+   automatic — a generator that emits the target set from the import graph, and
+   a scheduled `bun run mutate` that ranks by surviving-mutant density — aren't
+   built yet, and results aren't archived. Risk: sweeps only run when someone
+   remembers.
 3. **No coverage measurement at all.** We intentionally avoid a coverage *gate*
    (§6), but we currently have no coverage *visibility* either — we cannot point
    at which modules are under-exercised without running Stryker on each. A
@@ -307,7 +377,7 @@ Steps, in order:
 1. Verify Node `node:sqlite` support (the app uses it).
 2. Pinned Bun setup (`.github/actions/setup-bun`).
 3. `bun install`.
-4. **`bun run lint:all`** (full-tree, uncached ESLint).
+4. **`bun run lint:all`** (full-tree ESLint, `eslint --cache .`).
 5. **`bun run typecheck`** (`tsc`).
 6. **`bun test`** (full suite).
 7. **`bun run build`**.
@@ -324,12 +394,14 @@ run alongside. Release itself is Conventional-Commit-driven via release-please;
   check:tokens`.
 - `bun run check:deep` = `check:fast → bun test → knip`.
 - **Pre-commit hook** (simple-git-hooks → lint-staged): `bun run lint --fix` +
-  `scripts/secret-scan.sh` on staged files. Note this uses the *cached* lint;
-  §5.3 still applies — run `lint:all` yourself before pushing.
+  `scripts/secret-scan.sh` on staged files. Note this runs the staged-file
+  `lint`, not full-tree `lint:all`; §5.4 still applies — run `lint:all` yourself
+  before pushing.
 
-The single most common CI-only failure is a lint error masked by the local
-cache (§5.3). Running `check:fast` (which calls `lint:all`) before pushing
-eliminates it.
+The single most common CI-only failure is a lint error in a file the local
+pre-commit hook didn't lint (it only sees staged files; §5.4). Running
+`check:fast` (which calls `lint:all` over the full tree) before pushing
+catches it.
 
 ---
 
@@ -342,5 +414,6 @@ eliminates it.
 - Never touch real user credentials; rely on the preload isolation (§4).
 - For branchy/security-critical logic, **run Stryker and adjudicate every
   survivor** per the three-bucket rule (§6).
-- Run **`lint:all`** (not cached `lint`) before pushing (§5.3).
+- Run **`lint:all`** (full tree, not just staged files) before pushing (§5.4).
+- Restore your spies (`spy.mockRestore()`); the global net is a backstop (§5.2).
 - Keep Bun pins in lockstep (`.bun-version` ↔ CI).
