@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.41](https://github.com/stuffbucket/maximal/compare/v0.4.40...v0.4.41) (2026-07-10)
+
+
+### Bug Fixes
+
+* **ci:** push updates manifest as app-repoman to clear require-PR ruleset ([#296](https://github.com/stuffbucket/maximal/issues/296)) ([ec7822b](https://github.com/stuffbucket/maximal/commit/ec7822b82f0212e9250c6871c341c5aebc425f7c))
+* **i18n:** use "Historique" for French log strings ([#301](https://github.com/stuffbucket/maximal/issues/301)) ([b6d57a0](https://github.com/stuffbucket/maximal/commit/b6d57a0c36da3e47ab901c2e865061bd875b7fe7)), closes [#299](https://github.com/stuffbucket/maximal/issues/299)
+* **site:** redirect legacy /maximal/ path to the root ([#294](https://github.com/stuffbucket/maximal/issues/294)) ([c8c4f43](https://github.com/stuffbucket/maximal/commit/c8c4f4313ff12c3a5527262635e60888b33b48f9))
+* **site:** serve mxml.sh at root, not the /maximal base path ([#290](https://github.com/stuffbucket/maximal/issues/290)) ([a562cc9](https://github.com/stuffbucket/maximal/commit/a562cc94c1842c7f79e5a6aec1e4589597763689))
+
 ## [0.4.40](https://github.com/stuffbucket/maximal/compare/v0.4.39...v0.4.40) (2026-07-08)
 
 
