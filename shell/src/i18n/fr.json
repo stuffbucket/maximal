@@ -1,7 +1,7 @@
 {
   "file-manager": "{os, select, windows {Explorateur de fichiers} linux {Fichiers} other {Finder}}",
   "app-container": "{os, select, macos {barre de menus} other {zone de notification}}",
-  "reveal-logs": "Afficher les journaux dans {fileManager}",
+  "reveal-logs": "Afficher l’historique dans {fileManager}",
   "reveal-config": "Afficher la configuration dans {fileManager}…",
 
   "nav-account": "Compte",
@@ -9,7 +9,7 @@
   "nav-endpoint": "Point de terminaison",
   "nav-api-clients": "Clés d’API",
   "nav-models": "Modèles",
-  "nav-logs": "Journaux",
+  "nav-logs": "Historique",
   "nav-diagnostics": "Diagnostics",
   "nav-sidebar-label": "Sections des réglages",
 
@@ -133,9 +133,9 @@
   "models-title": "Modèles",
   "models-sub": "Modèles disponibles pour les applications via Maximal, regroupés par type. La liste est récupérée auprès du fournisseur — actualisez pour obtenir le catalogue actuel si un modèle semble manquant.",
 
-  "logs-title": "Journaux",
-  "logs-sub": "Journaux de requêtes et de gestionnaires avec rotation quotidienne, {n, plural, one {# jour} other {# jours}} de rétention.",
-  "logs-where-title": "Emplacement des journaux",
+  "logs-title": "Historique",
+  "logs-sub": "Historique des requêtes et des gestionnaires avec rotation quotidienne, {n, plural, one {# jour} other {# jours}} de rétention.",
+  "logs-where-title": "Emplacement de l’historique",
   "logs-where-hint": "Chaque gestionnaire écrit un fichier par jour dans le répertoire d’état de maximal. Affichez le dossier pour les inspecter, ou suivez le fichier actif avec {tailCmd}.",
   "logs-path-unix-label": "macOS / Linux",
   "logs-path-windows-label": "Windows",
@@ -281,7 +281,7 @@
   "native-tray-upgrade": "Mettre à niveau vers la v{latest}…",
   "native-tray-failed": "Échec du démarrage du sidecar",
   "native-tray-retry": "Relancer le démarrage",
-  "native-tray-show-logs": "Afficher les journaux…",
+  "native-tray-show-logs": "Afficher l’historique…",
   "native-tray-open-config": "Ouvrir le dossier de configuration…",
 
   "native-tooltip-starting": "maximal — démarrage…",
@@ -297,8 +297,8 @@
   "native-notify-signin-title": "Se connecter à GitHub",
   "native-notify-signin-body": "Maximal a besoin de votre compte GitHub Copilot avant de pouvoir traiter les requêtes. Cliquez ici — ou sur l’icône de la barre de menus — pour ouvrir les Réglages et vous connecter.",
   "native-notify-failed-title": "Maximal n’a pas pu démarrer",
-  "native-notify-failed-body": "Le proxy en arrière-plan n’a pas pu démarrer. Cliquez sur l’icône de la barre de menus pour relancer le démarrage ou consulter les journaux.",
-  "native-notify-failed-body-reason": "{reason} — cliquez sur l’icône de la barre de menus pour relancer le démarrage ou consulter les journaux.",
+  "native-notify-failed-body": "Le proxy en arrière-plan n’a pas pu démarrer. Cliquez sur l’icône de la barre de menus pour relancer le démarrage ou consulter l’historique.",
+  "native-notify-failed-body-reason": "{reason} — cliquez sur l’icône de la barre de menus pour relancer le démarrage ou consulter l’historique.",
   "native-notify-update-title": "Mise à jour de Maximal disponible",
   "native-notify-update-title-versioned": "Maximal {latest} est disponible",
   "native-notify-update-body": "Mettez à jour sur {url}",
