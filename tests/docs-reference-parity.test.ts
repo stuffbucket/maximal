@@ -5,20 +5,27 @@
  * (or an external reviewer) hits a `src/…` path that no longer exists and stops
  * trusting the rest. This test turns that silent drift into a red build. It is
  * the same drift-guard shape as `i18n-catalog-parity.test.ts` and
- * `config-schema.test.ts` — a single source of truth (here, the repo tree)
- * checked against its mirrors (here, the docs' concrete references).
+ * `config-schema.test.ts` — a single source of truth (here, the set of
+ * git-tracked files) checked against its mirrors (here, the docs' concrete
+ * references).
+ *
+ * It validates against GIT-TRACKED paths, not the filesystem: a clean CI
+ * checkout is the ground truth, so a build artifact that happens to exist in a
+ * developer's working tree does NOT count. (Using `fs.existsSync` here caused
+ * exactly the "green locally, red CI" failure §5.4 warns about.)
  *
  * It validates *validity*, not *choice*: it does not decide what a doc should
  * mention, only that everything it DOES mention as a repo path or `bun run`
- * script actually exists. Prose, illustrative code (`if (!hasThinking)`), env
- * vars, and glob/placeholder patterns (`*-route.test.ts`, `tests/<subject>…`)
- * are deliberately out of scope.
+ * script actually exists in the tree. Prose, illustrative code, env vars, and
+ * glob/placeholder patterns (`*-route.test.ts`, `tests/<subject>…`,
+ * `shell/ui/{settings,dashboard}`) are deliberately out of scope.
  *
  * Extending coverage is a one-line addition to DOCS. Intentional references to
- * a not-yet-existing path are an escape hatch via IGNORE (keep it small and
- * justified — every entry is a promise the parity guard can't keep).
+ * a legitimately-untracked path (generated stubs, build outputs) go in IGNORE
+ * with a justification — every entry is a promise the parity guard can't keep.
  */
 import { describe, expect, test } from "bun:test"
+import { execFileSync } from "node:child_process"
 import fs from "node:fs"
 import path from "node:path"
 
@@ -28,42 +35,42 @@ const REPO_ROOT = path.resolve(import.meta.dir, "..")
 // cleaned; a doc joins only once all its path/script tokens resolve.
 const DOCS = ["docs/dev/testing-strategy.md", "docs/architecture.md"]
 
-// Escape hatch: tokens we reference on purpose that are not (yet) repo paths.
-// Empty by design — prefer fixing the reference over adding an exception.
-const IGNORE = new Set<string>()
+// Escape hatch: references that are real but intentionally NOT git-tracked —
+// generated stubs and build outputs a clean checkout won't have. Keep small.
+const IGNORE = new Set<string>([
+  "src/generated/ui-embed.ts", // gitignored stub, created by the test preload
+  "shell/dist", // gitignored web-UI build output
+  "shell/src-tauri/binaries/", // gitignored sidecar binary output
+])
 
 const TOP_DIRS = ["src", "tests", "scripts", "shell", "docs", ".github"]
 const FULL_PATH_RE = new RegExp(`^(?:${TOP_DIRS.join("|")})/[\\w./-]+$`)
-// Basenames we validate leniently: illustrative source/test files, NOT runtime
-// data files (accounts.json, github_token) that live outside the repo tree.
 const BASENAME_RE = /^\w[\w.-]*\.(?:test\.)?tsx?$/
-const isPlaceholder = (t: string): boolean => /[*<>]/.test(t)
+const isPlaceholder = (t: string): boolean => /[*<>{}]/.test(t)
 
-// One-time index of every source-tree file basename → how many exist.
-function buildBasenameIndex(): Map<string, number> {
-  const index = new Map<string, number>()
-  const roots = ["src", "tests", "scripts", "shell/src", "docs", ".github"]
-  const walk = (dir: string): void => {
-    let entries: Array<fs.Dirent>
-    try {
-      entries = fs.readdirSync(path.join(REPO_ROOT, dir), {
-        withFileTypes: true,
-      })
-    } catch {
-      return
-    }
-    for (const e of entries) {
-      if (e.name === "node_modules" || e.name === ".git") continue
-      const rel = path.join(dir, e.name)
-      if (e.isDirectory()) walk(rel)
-      else index.set(e.name, (index.get(e.name) ?? 0) + 1)
-    }
-  }
-  for (const r of roots) walk(r)
-  return index
+// Ground truth: what a clean checkout of this branch contains.
+const trackedList = execFileSync("git", ["ls-files"], {
+  cwd: REPO_ROOT,
+  encoding: "utf8",
+  maxBuffer: 64 * 1024 * 1024,
+})
+  .split("\n")
+  .filter(Boolean)
+const trackedFiles = new Set(trackedList)
+const trackedDirs = new Set<string>()
+for (const f of trackedList) {
+  const parts = f.split("/")
+  for (let i = 1; i < parts.length; i++)
+    trackedDirs.add(parts.slice(0, i).join("/"))
+}
+const trackedBasenames = new Set(
+  trackedList.map((f) => f.slice(f.lastIndexOf("/") + 1)),
+)
+function isTracked(token: string): boolean {
+  const clean = token.replace(/\/+$/, "")
+  return trackedFiles.has(clean) || trackedDirs.has(clean)
 }
 
-const basenameIndex = buildBasenameIndex()
 const pkg = JSON.parse(
   fs.readFileSync(path.join(REPO_ROOT, "package.json")) as unknown as string,
 ) as { scripts?: Record<string, string> }
@@ -83,20 +90,20 @@ describe("docs reference parity", () => {
   for (const rel of DOCS) {
     const doc = fs.readFileSync(path.join(REPO_ROOT, rel), "utf8")
 
-    test(`${rel}: every referenced repo path exists`, () => {
+    test(`${rel}: every referenced repo path is git-tracked`, () => {
       const missing: Array<string> = []
       for (const t of backtickedTokens(doc)) {
         if (IGNORE.has(t) || isPlaceholder(t)) continue
-        // Strict: a full repo path must exist verbatim.
-        if (FULL_PATH_RE.test(t) && !fs.existsSync(path.join(REPO_ROOT, t))) {
-          missing.push(`${t} (path not found)`)
+        // Strict: a full repo path must be tracked.
+        if (FULL_PATH_RE.test(t) && !isTracked(t)) {
+          missing.push(`${t} (path not in git)`)
         } else if (
           !t.includes("/")
           && BASENAME_RE.test(t)
-          && !basenameIndex.has(t)
+          && !trackedBasenames.has(t)
         ) {
           // Lenient: an illustrative basename must resolve somewhere in the tree.
-          missing.push(`${t} (no file with this name)`)
+          missing.push(`${t} (no tracked file with this name)`)
         }
       }
       expect(
@@ -122,7 +129,7 @@ describe("docs reference parity", () => {
         if (/^(?:https?:|mailto:|#)/.test(link)) continue
         const target = link.split("#")[0]
         if (!target) continue
-        if (!fs.existsSync(path.join(REPO_ROOT, dir, target))) {
+        if (!isTracked(path.normalize(path.join(dir, target)))) {
           broken.push(link)
         }
       }
