@@ -19,6 +19,7 @@ Always read the linked doc before acting in its area.
 | Touch any HTML, CSS, or component code (Tauri windows, proxy-served pages) | [`.design-context.md`](.design-context.md) — front door; topic deep-dives in [`docs/design/`](docs/design/). **Read `docs/design/failure-modes.md` before any non-trivial UI change.** |
 | Work with the Claude Code or Opencode plugin | [`docs/plugins.md`](docs/plugins.md) |
 | Dispatch or review codegen feedback loops | [`docs/codegen-feedback-loops-practices.md`](docs/codegen-feedback-loops-practices.md) |
+| Touch i18n catalogs / translation wording (`shell/src/i18n/`) | [`docs/dev/i18n.md`](docs/dev/i18n.md); loop in the i18n expert per [`CONTRIBUTORS.md`](CONTRIBUTORS.md) |
 
 ## Other knowledge in this repo
 
@@ -28,6 +29,7 @@ Always read the linked doc before acting in its area.
 - `docs/admin/` — operational docs
 - `docs/*-prd.md` — product requirement docs for individual surfaces
 - `research_log/` — dated investigation notes
+- `CONTRIBUTORS.md` — trusted domain experts to loop in per area
 
 If you don't find what you need in a linked doc, **search `docs/` and
 `research_log/` before asking or inferring**. Earned knowledge lives in
