@@ -15,6 +15,7 @@ import { mountModels } from "./ui/islands/models-island";
 
 type SectionId =
   | "account"
+  | "general"
   | "apps"
   | "endpoint"
   | "api-clients"
@@ -24,6 +25,7 @@ type SectionId =
 
 const SECTIONS: ReadonlyArray<SectionId> = [
   "account",
+  "general",
   "apps",
   "endpoint",
   "api-clients",
@@ -1798,12 +1800,84 @@ function wireAccount(): void {
   });
 }
 
+// ---- General section -------------------------------------------------------
+//
+// The Dock/taskbar-visibility toggle. Two-endpoint contract shared with the
+// other layers: GET/POST /settings/api/ui persists the preference, and the
+// Tauri command `set_menu_bar_only` applies it to the Dock/taskbar live.
+
+function getMenuBarOnlyEl(): HTMLInputElement | null {
+  return document.querySelector<HTMLInputElement>(
+    '[data-section="general"] [data-menu-bar-only]',
+  );
+}
+
+/**
+ * Reflect the persisted Dock/taskbar preference in the toggle. Uses the same
+ * `x-api-key` auth as every other `/settings/api/*` call (the shell key from
+ * the Tauri host). Best-effort: on any failure the toggle keeps its default
+ * unchecked state.
+ */
+async function loadGeneral(): Promise<void> {
+  const el = getMenuBarOnlyEl();
+  if (!el) return;
+  try {
+    const key = await getShellApiKey();
+    const headers: Record<string, string> = { accept: "application/json" };
+    if (key) headers["x-api-key"] = key;
+    const res = await fetch("/settings/api/ui", { headers });
+    if (!res.ok) return;
+    const data = (await res.json()) as { menuBarOnly?: boolean };
+    el.checked = !!data.menuBarOnly;
+  } catch (err) {
+    console.warn("GET /settings/api/ui failed:", err);
+  }
+}
+
+function wireGeneral(): void {
+  const el = getMenuBarOnlyEl();
+  if (!el) return;
+  el.addEventListener("change", () => {
+    const menuBarOnly = el.checked;
+    // Persist to the proxy (same auth pattern as the other settings calls).
+    void (async () => {
+      try {
+        const key = await getShellApiKey();
+        const headers: Record<string, string> = {
+          accept: "application/json",
+          "content-type": "application/json",
+        };
+        if (key) headers["x-api-key"] = key;
+        await fetch("/settings/api/ui", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ menuBarOnly }),
+        });
+      } catch (err) {
+        console.warn("POST /settings/api/ui failed:", err);
+      }
+    })();
+    // Apply live to the Dock/taskbar via the Tauri shell. Guarded exactly like
+    // safeInvoke so a plain-browser session (app:ui, where invoke is
+    // unavailable) degrades gracefully instead of throwing.
+    void (async () => {
+      try {
+        await invoke("set_menu_bar_only", { menuBarOnly });
+      } catch (err) {
+        console.warn("invoke(set_menu_bar_only) failed:", err);
+      }
+    })();
+  });
+  void loadGeneral();
+}
+
 window.addEventListener("DOMContentLoaded", () => {
   applyTheme();
   wireLogs();
   wireDiagnostics();
   wireAccount();
   wireEndpoint();
+  wireGeneral();
   wireUninstall();
   mountApiClients();
   mountApps();
@@ -1821,6 +1895,7 @@ window.addEventListener("hashchange", () => {
   syncFromHash();
   const section = readHashSection();
   if (section === "diagnostics") void loadDiagnostics();
+  if (section === "general") void loadGeneral();
   if (section === "apps") {
     window.dispatchEvent(new CustomEvent("maximal:apps-refresh"));
   }

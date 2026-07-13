@@ -393,6 +393,30 @@ impl SidecarRestarting {
     }
 }
 
+/// Runtime mirror of the persisted `config.ui.menuBarOnly` preference.
+/// `true` = live only in the macOS menu bar / Windows tray (the classic
+/// no-Dock/no-taskbar feel). `false` (the DEFAULT) = ALSO appear in the
+/// Dock (macOS) / taskbar (Windows). Seeded from `read_menu_bar_only` in
+/// `setup()`, flipped live by the `set_menu_bar_only` command, and read by
+/// `update_activation_policy` (macOS) + the window builders (Windows).
+struct MenuBarOnly(std::sync::atomic::AtomicBool);
+
+impl MenuBarOnly {
+    /// Starts at the default (`false` — show in Dock/taskbar); `setup()`
+    /// overwrites it with the on-disk value once an AppHandle exists.
+    fn new() -> Self {
+        Self(std::sync::atomic::AtomicBool::new(false))
+    }
+
+    fn get(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    fn set(&self, value: bool) {
+        self.0.store(value, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 /// Random per-launch key the shell shares with its sidecar so the
 /// webview can authenticate against /settings/api/* even when the user
 /// has enabled "Block unknown connections." Injected as an env var when
@@ -573,6 +597,7 @@ pub fn run() {
         .manage(LastRejection::new())
         .manage(LatestUpdate::new())
         .manage(LastSidecarError::new())
+        .manage(MenuBarOnly::new())
         .invoke_handler(tauri::generate_handler![
             open_settings_at,
             open_dashboard,
@@ -582,21 +607,47 @@ pub fn run() {
             uninstall_maximal,
             get_shell_api_key,
             subscribe_token_usage,
+            set_menu_bar_only,
         ])
         .setup(|app| {
-            // Menu-bar app: start with no Dock icon. update_activation_policy
-            // will flip to Regular when a Settings/Dashboard window becomes
-            // visible, and back to Accessory when the last one hides.
+            // Seed the runtime menu-bar-only flag from the persisted
+            // `config.ui.menuBarOnly` preference (absent/false = DEFAULT:
+            // ALSO show in Dock/taskbar; true = menu-bar/tray-only). Every
+            // platform reads it once here; the flag drives Dock presence on
+            // macOS and taskbar presence on Windows from now on.
+            let menu_bar_only = read_menu_bar_only(app.handle());
+            app.state::<MenuBarOnly>().set(menu_bar_only);
+
+            // macOS Dock presence. Default (not menu-bar-only) launches
+            // Regular so the Dock icon is present from the first frame — a
+            // persistent, set-and-forget affordance that needs no open window.
+            // When menu-bar-only we start Accessory (no Dock);
+            // update_activation_policy then flips to Regular only while a
+            // Settings/Dashboard window is visible, and back to Accessory when
+            // the last one hides.
             #[cfg(target_os = "macos")]
             {
-                let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+                let initial = if menu_bar_only {
+                    tauri::ActivationPolicy::Accessory
+                } else {
+                    tauri::ActivationPolicy::Regular
+                };
+                let _ = app.set_activation_policy(initial);
+                // Keep the POLICY_IS_REGULAR mirror in step with what we just
+                // applied so update_activation_policy's no-op-skip stays honest.
+                POLICY_IS_REGULAR
+                    .store(!menu_bar_only, std::sync::atomic::Ordering::SeqCst);
                 // Dock icon: in release the .app bundle's Info.plist
                 // CFBundleIconFile (driven by `bundle.icon` in
                 // tauri.conf.json) handles this. `cargo run` doesn't
                 // produce a bundle, so set the icon explicitly in debug
-                // builds only — release builds skip the FFI dance.
+                // builds only — release builds skip the FFI dance. Only the
+                // Regular (Dock-visible) case needs it now; the Accessory case
+                // gets it later via update_activation_policy when a window shows.
                 #[cfg(debug_assertions)]
-                set_dock_icon();
+                if !menu_bar_only {
+                    set_dock_icon();
+                }
             }
 
             // Install the tray FIRST so the user has a Quit affordance
@@ -626,6 +677,19 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 poll_sidecar_status(handle).await;
             });
+
+            // Windows taskbar discoverability. Unlike macOS (which gets a
+            // persistent Dock icon above), a taskbar button only exists while a
+            // window is open, so with the default preference we open Settings on
+            // launch — that window carries Maximal's taskbar presence. macOS is
+            // deliberately NOT auto-opened here: its Dock icon already provides
+            // discoverability, and set-and-forget means no window is forced open.
+            // TODO(windows): a truly persistent taskbar button with NO window
+            // open is a follow-up; for now an open window stands in for it.
+            #[cfg(windows)]
+            if !menu_bar_only {
+                open_settings_window(app.handle(), None);
+            }
 
             Ok(())
         })
@@ -1883,6 +1947,12 @@ fn open_settings_window(app: &AppHandle, section: Option<&str>) {
     .title(title)
     .inner_size(900.0, 760.0)
     .min_inner_size(600.0, 560.0);
+    // Windows taskbar presence follows the menu-bar-only preference: default
+    // (false) shows the window in the taskbar; menu-bar-only (true) keeps it
+    // out for the tray-only feel. Shadow rather than `mut` so non-Windows
+    // builds stay warning-clean. (The splash keeps its own skip_taskbar(true).)
+    #[cfg(windows)]
+    let builder = builder.skip_taskbar(app.state::<MenuBarOnly>().get());
 
     match builder.build() {
         Ok(window) => {
@@ -1901,6 +1971,30 @@ fn do_reveal_config_dir(app: &AppHandle) {
     };
     let dir = home.join(".local").join("share").join("maximal");
     let _ = app.opener().open_path(dir.to_string_lossy(), None::<&str>);
+}
+
+/// Reads the persisted `config.ui.menuBarOnly` preference from
+/// `~/.local/share/maximal/config.json` (same base dir as
+/// `do_reveal_config_dir`). Every failure mode — no home dir, missing file,
+/// unparseable JSON, or a missing / non-boolean field — collapses to the
+/// DEFAULT `false` (show in Dock/taskbar). Never panics; the on-disk write
+/// itself is owned by another layer.
+fn read_menu_bar_only(app: &AppHandle) -> bool {
+    let Ok(home) = app.path().home_dir() else {
+        return false;
+    };
+    let path = home
+        .join(".local")
+        .join("share")
+        .join("maximal")
+        .join("config.json");
+    let Ok(contents) = std::fs::read_to_string(&path) else {
+        return false;
+    };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&contents) else {
+        return false;
+    };
+    json["ui"]["menuBarOnly"].as_bool().unwrap_or(false)
 }
 
 fn do_reveal_logs_dir(app: &AppHandle) {
@@ -1953,6 +2047,9 @@ fn open_dashboard_window(app: &AppHandle) {
     .title("Maximal — Dashboard")
     .inner_size(1100.0, 760.0)
     .min_inner_size(720.0, 520.0);
+    // See open_settings_window: Windows taskbar presence tracks menu-bar-only.
+    #[cfg(windows)]
+    let builder = builder.skip_taskbar(app.state::<MenuBarOnly>().get());
 
     match builder.build() {
         Ok(window) => {
@@ -2003,12 +2100,18 @@ static POLICY_IS_REGULAR: std::sync::atomic::AtomicBool =
 fn update_activation_policy(app: &AppHandle) {
     use std::sync::atomic::Ordering;
 
+    // The Dock icon is Regular when EITHER the persistent-Dock preference is
+    // on (default: not menu-bar-only) OR a Settings/Dashboard window is
+    // currently visible. Menu-bar-only mode keeps the classic behavior where
+    // the Dock icon comes and goes with window visibility.
+    let menu_bar_only = app.state::<MenuBarOnly>().get();
     let labels = [SETTINGS_WINDOW_LABEL, DASHBOARD_WINDOW_LABEL];
-    let want_regular = labels.iter().any(|label| {
-        app.get_webview_window(label)
-            .and_then(|w| w.is_visible().ok())
-            .unwrap_or(false)
-    });
+    let want_regular = !menu_bar_only
+        || labels.iter().any(|label| {
+            app.get_webview_window(label)
+                .and_then(|w| w.is_visible().ok())
+                .unwrap_or(false)
+        });
 
     // Skip when the policy isn't actually changing. Beyond avoiding the
     // dev-only Dock-icon flash, this dodges needless AppKit churn on every
@@ -2198,6 +2301,44 @@ fn reveal_config_dir(app: AppHandle) {
 #[tauri::command]
 fn reveal_logs_dir(app: AppHandle) {
     do_reveal_logs_dir(&app);
+}
+
+/// Tauri command — apply the menu-bar-only preference LIVE. The Settings UI
+/// calls this with `{ menuBarOnly: boolean }` after persisting the value to
+/// config.json (that on-disk write is another layer's job). We mirror it into
+/// the runtime `MenuBarOnly` flag and re-derive platform presence right away:
+/// on macOS through `update_activation_policy` (Dock icon on when NOT
+/// menu-bar-only, else the show-only-while-a-window-is-visible behavior); on
+/// Windows by toggling taskbar presence on any open Settings/Dashboard windows,
+/// opening Settings if turning presence on while nothing is showing.
+#[tauri::command]
+fn set_menu_bar_only(app: AppHandle, menu_bar_only: bool) {
+    app.state::<MenuBarOnly>().set(menu_bar_only);
+
+    // macOS: no-op-skip inside update_activation_policy keeps this cheap when
+    // the effective policy doesn't actually change.
+    #[cfg(target_os = "macos")]
+    update_activation_policy(&app);
+
+    // Windows: flip taskbar presence on windows that already exist…
+    #[cfg(windows)]
+    {
+        for label in [SETTINGS_WINDOW_LABEL, DASHBOARD_WINDOW_LABEL] {
+            if let Some(window) = app.get_webview_window(label) {
+                let _ = window.set_skip_taskbar(menu_bar_only);
+            }
+        }
+        // …and, when turning taskbar presence ON with nothing open, open
+        // Settings so a taskbar button exists (mirrors the launch-time open).
+        // TODO(windows): a persistent taskbar button with no window open is a
+        // follow-up; until then an open window stands in for it.
+        if !menu_bar_only
+            && app.get_webview_window(SETTINGS_WINDOW_LABEL).is_none()
+            && app.get_webview_window(DASHBOARD_WINDOW_LABEL).is_none()
+        {
+            open_settings_window(&app, None);
+        }
+    }
 }
 
 /// Tauri command — deliberately reboot the sidecar. The UI calls this after a
