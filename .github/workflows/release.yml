@@ -121,15 +121,21 @@ jobs:
           # let `publish` flip draft→published+latest exactly once at the
           # end. That single publish is required for IMMUTABLE RELEASES —
           # a release can't be re-drafted to add assets once published.
-          # release-please only creates the TAG (not a release), so there
-          # is never a pre-existing release to adopt here.
           #
-          # Idempotent: if a draft already exists (partial-failure re-run),
-          # skip creation — the notes are already there and the downstream
-          # jobs just need to attach their assets.
+          # Idempotent: skip creation if a release for this tag ALREADY
+          # EXISTS, in any state — do not fall through to changelogithub.
+          #   - isDraft=true  → a partial-failure re-run; the notes are
+          #     already there and the downstream jobs just attach what's
+          #     missing via their own skip gates.
+          #   - isDraft=false → a sibling run already completed it (e.g. a
+          #     manual workflow_dispatch racing the release-please tag push,
+          #     serialized by the concurrency group above). The release is
+          #     published and IMMUTABLE, so changelogithub's PATCH would
+          #     fail with 422. Nothing to do — exit and let the downstream
+          #     skip gates no-op on the already-attached assets.
           EXISTING="$(gh release view "$TAG" --repo "${{ github.repository }}" --json isDraft --jq '.isDraft' 2>/dev/null || echo 'notfound')"
-          if [ "$EXISTING" = "true" ]; then
-            echo "Draft release for $TAG already exists — skipping creation (re-run)."
+          if [ "$EXISTING" != "notfound" ]; then
+            echo "Release for $TAG already exists (isDraft=$EXISTING) — skipping creation."
             exit 0
           fi
           # changelogithub computes notes from the previous v* tag. On the
