@@ -1,7 +1,8 @@
-import { requestContext, generateTraceId } from "~/lib/request-context"
-import { state } from "~/lib/state"
+import { requestContext, generateTraceId } from "~/lib/http/request-context"
+import { state } from "~/lib/runtime-state/state"
+import { pricedModelIsPaid } from "~/services/copilot/get-models"
 
-import { EventBus } from "../event-bus"
+import { EventBus } from "../runtime-state/event-bus"
 import {
   enqueueTokenUsageWrite,
   hasAnyToken,
@@ -119,9 +120,39 @@ function toPersistedEvent(
     ),
     source: input.source,
     total_tokens: resolveTotalTokens(input),
+    total_nano_aiu: normalizeToken(input.total_nano_aiu),
+    is_premium: resolveIsPaid(input.model),
     trace_id: resolveTraceId(input.traceId),
     user_id: resolveUserId(input),
   }
+}
+
+/** Paid/free status for a model from the live catalog, persisted as the
+ *  `is_premium` column: 1 = paid, 0 = free, null = unknown (model absent from
+ *  the catalog — e.g. a passthrough provider model or a not-yet-refreshed
+ *  catalog).
+ *
+ *  Copilot-specific pricing seam (ADR-0016, divergence 1). PRIMARY signal is
+ *  the catalog's `billing.token_prices` (per-token AIU billing, live since
+ *  2026-06-01): any advertised non-zero rate ⇒ paid. The legacy
+ *  `billing.is_premium` flag is only consulted when `token_prices` is absent
+ *  (older catalogs / annual-plan accounts) — under usage-based billing
+ *  `is_premium === false` no longer means "free", so it must not win over a
+ *  present `token_prices`. A second provider would need its own mapping. */
+function resolveIsPaid(model: string): number | null {
+  const id = model.trim()
+  if (!id) return null
+  const entry = state.models?.data.find((m) => m.id === id)
+  const billing = entry?.billing
+  if (!billing) return null
+
+  // PRIMARY: token_prices (per-token AIU billing).
+  const pricedPaid = pricedModelIsPaid(billing.token_prices)
+  if (pricedPaid !== null) return pricedPaid ? 1 : 0
+
+  // LEGACY FALLBACK: is_premium, only when token_prices is absent/unusable.
+  if (typeof billing.is_premium !== "boolean") return null
+  return billing.is_premium ? 1 : 0
 }
 
 tokenUsageEventBus.subscribe("token_usage.recorded", enqueueTokenUsageWrite)
@@ -212,6 +243,27 @@ export function normalizeResponsesUsage(
     output_tokens: normalizeToken(usage?.output_tokens),
     total_tokens: normalizeOptionalToken(usage?.total_tokens),
   }
+}
+
+/** Extract Copilot's per-request cost (nano-AIU) from a completion
+ *  response's sibling `copilot_usage` object. Present on chat/completions,
+ *  responses, and messages; undefined/legacy shapes yield undefined. */
+export function extractCopilotCost(
+  copilotUsage: { total_nano_aiu?: unknown } | null | undefined,
+): number | undefined {
+  const nano = copilotUsage?.total_nano_aiu
+  return typeof nano === "number" && Number.isFinite(nano) ? nano : undefined
+}
+
+/** Merge Copilot's per-request cost into already-normalized token counts.
+ *  One place for the (normalized usage + sibling copilot_usage) shape every
+ *  non-streaming Copilot record site needs, so cost capture can't be
+ *  forgotten at a new site or drift in field name. */
+export function withCopilotCost(
+  base: UsageTokens,
+  copilotUsage: { total_nano_aiu?: unknown } | null | undefined,
+): UsageTokens {
+  return { ...base, total_nano_aiu: extractCopilotCost(copilotUsage) }
 }
 
 export function normalizeAnthropicUsage(

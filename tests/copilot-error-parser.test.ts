@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test"
 
-import { isAuthFatal, parseCopilotErrorBody } from "~/lib/copilot-error-parser"
+import {
+  isAuthFatal,
+  parseCopilotErrorBody,
+} from "~/lib/errors/copilot-error-parser"
 
 describe("parseCopilotErrorBody", () => {
   test("empty JSON object yields generic default message", () => {

@@ -2,18 +2,28 @@ import type { Context } from "hono"
 
 import { streamSSE } from "hono/streaming"
 
-import { reverseId } from "~/lib/anthropic-id-rewrite"
-import { awaitApproval } from "~/lib/approval"
-import { getConfig, isResponsesApiWebSearchEnabled } from "~/lib/config"
-import { createHandlerLogger, debugJson, debugJsonTail } from "~/lib/logger"
-import { checkRateLimit } from "~/lib/rate-limit"
-import { state } from "~/lib/state"
+import {
+  getConfig,
+  getPromptCacheRetention,
+  isResponsesApiWebSearchEnabled,
+} from "~/lib/config/config"
+import { awaitApproval } from "~/lib/http/approval"
+import { checkRateLimit } from "~/lib/http/rate-limit"
+import { reverseId } from "~/lib/models/anthropic-id-rewrite"
+import {
+  createHandlerLogger,
+  debugJson,
+  debugJsonTail,
+} from "~/lib/platform/logger"
+import { generateRequestIdFromPayload, getUUID } from "~/lib/platform/utils"
+import { state } from "~/lib/runtime-state/state"
 import {
   createCopilotTokenUsageRecorder,
   normalizeResponsesUsage,
   type UsageTokens,
+  withCopilotCost,
 } from "~/lib/token-usage"
-import { generateRequestIdFromPayload, getUUID } from "~/lib/utils"
+import { isAsyncIterable } from "~/routes/streaming-predicates"
 import {
   createResponses as defaultCreateResponses,
   type ResponsesPayload,
@@ -104,6 +114,14 @@ export const handleResponses = async (c: Context) => {
     selectedModel?.capabilities.limits.max_prompt_tokens,
   )
 
+  // Copilot/OpenAI-Responses-specific prefix-cache retention. On this native
+  // passthrough path we only fill it in when the client didn't set one — never
+  // override an explicit client value. Opt-in via config; omitted otherwise.
+  const promptCacheRetention = getPromptCacheRetention()
+  if (promptCacheRetention && !payload.prompt_cache_retention) {
+    payload.prompt_cache_retention = promptCacheRetention
+  }
+
   debugJson(logger, "Translated Responses payload:", payload)
 
   const { vision, initiator } = getResponsesRequestOptions(payload)
@@ -157,13 +175,14 @@ export const handleResponses = async (c: Context) => {
     value: response,
     tailLength: 400,
   })
-  recordUsage(normalizeResponsesUsage((response as ResponsesResult).usage))
+  recordUsage(
+    withCopilotCost(
+      normalizeResponsesUsage((response as ResponsesResult).usage),
+      (response as ResponsesResult).copilot_usage,
+    ),
+  )
   return c.json(response as ResponsesResult)
 }
-
-const isAsyncIterable = <T>(value: unknown): value is AsyncIterable<T> =>
-  Boolean(value)
-  && typeof (value as AsyncIterable<T>)[Symbol.asyncIterator] === "function"
 
 const isStreamingRequested = (payload: ResponsesPayload): boolean =>
   Boolean(payload.stream)

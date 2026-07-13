@@ -13,13 +13,12 @@ import {
   markAuthDegraded,
   markSignedIn,
   registerAutoRecovery,
-} from "~/lib/auth-controller"
+} from "~/lib/auth/auth-controller"
 import {
   __resetAuthRecoveryDepsForTests,
   __setAuthRecoveryDepsForTests,
   attemptAutoRecovery,
-} from "~/lib/auth-recovery"
-import { CopilotAuthFatalError } from "~/lib/error"
+} from "~/lib/auth/auth-recovery"
 import {
   accountKey,
   addAndActivate,
@@ -28,8 +27,9 @@ import {
   markNeedsReauth,
   readDefaultRegistry,
   writeDefaultRegistry,
-} from "~/lib/github-token-store"
-import { state } from "~/lib/state"
+} from "~/lib/auth/github-token-store"
+import { CopilotAuthFatalError } from "~/lib/errors/error"
+import { state } from "~/lib/runtime-state/state"
 
 const HOST = "github.com"
 const rec = (login: string) =>

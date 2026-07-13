@@ -14,12 +14,12 @@ import {
   test,
 } from "bun:test"
 
-import type { CopilotHost } from "~/lib/auth-types"
+import type { CopilotHost } from "~/lib/auth/auth-types"
 
-import { CopilotAuthFatalError, HTTPError } from "~/lib/error"
-import { state } from "~/lib/state"
-// Bypass Bun's module-mock registry for ~/lib/token. auth-controller.test.ts
-// installs a process-wide mock.module for "~/lib/token" (stubbing
+import { CopilotAuthFatalError, HTTPError } from "~/lib/errors/error"
+import { state } from "~/lib/runtime-state/state"
+// Bypass Bun's module-mock registry for ~/lib/auth/token. auth-controller.test.ts
+// installs a process-wide mock.module for "~/lib/auth/token" (stubbing
 // setupCopilotToken) so its own tests can observe controller-driven sign-in
 // without spinning up a real refresh loop. The afterAll restore is unreliable
 // across sibling test files in the same `bun test` process, so a normal
@@ -29,8 +29,8 @@ import { state } from "~/lib/state"
 // /* eslint-disable */ pragma below excludes the two __forTest symbols from
 // knip's unused-export check — they ARE used here, just behind a dynamic
 // specifier knip can't statically resolve.
-const tokenSpec = "../src/lib/token.ts?nomock=token-auth-fatal"
-const tokenMod = (await import(tokenSpec)) as typeof import("~/lib/token")
+const tokenSpec = "../src/lib/auth/token.ts?nomock=token-auth-fatal"
+const tokenMod = (await import(tokenSpec)) as typeof import("~/lib/auth/token")
 const {
   __resetTokenDepsForTests,
   __setTokenDepsForTests,
@@ -242,6 +242,42 @@ describe("runCopilotRefreshLoop — non-fatal during refresh", () => {
 
     expect(harness.markCalls.length).toBe(0)
     expect(harness.getCopilotTokenCalls).toBeGreaterThanOrEqual(2)
+  })
+})
+
+// --- H. abort during the wait tears the loop down CLEANLY -------------------
+// Regression: stopCopilotRefreshLoop() aborts the signal while the loop is
+// parked in `await delay(..., { signal })`, which REJECTS with an AbortError.
+// That deliberate teardown must be swallowed (loop resolves), not surface as an
+// unhandled rejection / "loop crashed" log. Previously it propagated and was
+// logged as "Copilot token refresh loop stopped" on every normal stop.
+
+describe("runCopilotRefreshLoop — abort during wait", () => {
+  test("stopping mid-wait does not raise an unhandled rejection", async () => {
+    // Long refresh_in → the loop parks in delay() (never reaches a refresh),
+    // so the ONLY way out is the abort we fire below.
+    harness.getCopilotTokenImpl = () =>
+      Promise.resolve(ok("copilot_init", 1800))
+
+    const rejections: Array<unknown> = []
+    const onUnhandled = (err: unknown): void => {
+      rejections.push(err)
+    }
+    process.on("unhandledRejection", onUnhandled)
+
+    try {
+      await setupCopilotToken()
+      expect(state.copilotToken).toBe("copilot_init")
+
+      // Abort while parked in the wait, then give microtasks + the rejection
+      // handler a tick to fire if the AbortError escaped.
+      stopCopilotRefreshLoop()
+      await new Promise((r) => setTimeout(r, 50))
+
+      expect(rejections).toEqual([])
+    } finally {
+      process.off("unhandledRejection", onUnhandled)
+    }
   })
 })
 

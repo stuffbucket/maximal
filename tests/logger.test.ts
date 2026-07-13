@@ -1,7 +1,7 @@
 import { afterEach, expect, mock, test } from "bun:test"
 
-import { debugJson, debugJsonTail } from "../src/lib/logger"
-import { state } from "../src/lib/state"
+import { debugJson, debugJsonTail } from "../src/lib/platform/logger"
+import { state } from "../src/lib/runtime-state/state"
 
 afterEach(() => {
   state.verbose = false

@@ -1,0 +1,245 @@
+---
+// Get started in 3 steps. Step 1 carries the actual download (macOS live,
+// Windows "coming soon"); the standalone download section folded in here.
+// Homebrew + other install options live in the repo README.
+import Paint from "../Paint.astro";
+import Spark from "../Spark.astro";
+import { getDownloadInfo } from "../../lib/downloads";
+
+const { macDmg, winSetup, hasWindows, versionLabel, releasesUrl, repoUrl } =
+  await getDownloadInfo();
+const readmeUrl = `${repoUrl}#readme`;
+
+const M = `<span class="brandword">maximal</span>`;
+// Step screenshots are served from site/public/screenshots/ (base-prefixed for
+// GitHub Pages), matching ShowTell's app-dashboard shot.
+const shotBase = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/screenshots`;
+const steps = [
+  {
+    title: "Install maximal",
+    body: hasWindows
+      ? "Grab the app for macOS or Windows; it sits quietly in your menu bar or system tray."
+      : "Grab the macOS app. It sits quietly in your menu bar; Windows is coming soon.",
+  },
+  {
+    title: "Sign in with GitHub",
+    body: "One click connects your existing GitHub Copilot subscription. No new account, no extra cost.",
+    shot: {
+      src: `${shotBase}/account-signin.png`,
+      alt: "maximal's Account panel showing 'Not signed in' with a Sign in to GitHub button.",
+      width: 2000,
+      height: 1065,
+    },
+  },
+  {
+    title: "Pick your tools",
+    body: `Point Claude Code, Codex, opencode, or GitHub Copilot at ${M} and they run on your Copilot models.`,
+    shot: {
+      src: `${shotBase}/apps.png`,
+      alt: "maximal's Apps panel with one-click toggles for Claude Code and Claude Desktop pointed at the proxy.",
+      width: 2000,
+      height: 1175,
+    },
+  },
+];
+---
+
+<section id="start" class="card card--indigo card--painted getstarted">
+  <Paint base="#43357f" mode="coat" />
+  <header class="getstarted__head">
+    <h2>Get started</h2>
+    <p class="getstarted__sub">Up and running in three steps.</p>
+  </header>
+
+  <ol class="getstarted__steps">
+    {
+      steps.map((step, i) => (
+        <li class="step">
+          <span class="step__num" aria-hidden="true">
+            {i + 1}
+          </span>
+          <div class="step__body">
+            <h3 class="step__title">{step.title}</h3>
+            <p class="step__text" set:html={step.body} />
+            {step.shot && (
+              <figure class="step__shot">
+                <img
+                  src={step.shot.src}
+                  alt={step.shot.alt}
+                  width={step.shot.width}
+                  height={step.shot.height}
+                  loading="lazy"
+                  decoding="async"
+                />
+              </figure>
+            )}
+            {i === 0 && (
+              <div class="step__install">
+                <div
+                  class="downloads"
+                  role="group"
+                  aria-label="Downloads by platform"
+                >
+                  <a
+                    class="btn btn--primary"
+                    data-os="mac"
+                    href={macDmg}
+                    rel="noopener"
+                  >
+                    <Paint base="#15656f" mode="clearcoat" class="btn-paint" />
+                    <span class="btn-label">
+                      <Spark class="btn-spark" />
+                      <span>macOS</span>
+                    </span>
+                    {versionLabel && <span class="btn-meta" data-version-pill>{versionLabel}</span>}
+                  </a>
+                  {hasWindows ? (
+                    <a
+                      class="btn btn--primary"
+                      data-os="windows"
+                      href={winSetup}
+                      rel="noopener"
+                    >
+                      <Paint base="#15656f" mode="clearcoat" class="btn-paint" />
+                      <span class="btn-label">
+                        <Spark class="btn-spark" />
+                        <span>Windows</span>
+                      </span>
+                      {versionLabel && <span class="btn-meta" data-version-pill>{versionLabel}</span>}
+                    </a>
+                  ) : (
+                    <div class="btn btn--soon" data-os="windows" aria-disabled="true">
+                      <span class="btn-label">
+                        <svg
+                          class="btn-spark"
+                          viewBox="0 0 22 22"
+                          fill="currentColor"
+                          aria-hidden="true"
+                        >
+                          <path d="M11 1 L13 9 L21 11 L13 13 L11 21 L9 13 L1 11 L9 9 Z" />
+                        </svg>
+                        <span>Windows</span>
+                      </span>
+                      <span class="btn-meta">coming soon</span>
+                    </div>
+                  )}
+                </div>
+                <p class="step__readme">
+                  Homebrew and other options are in the{" "}
+                  <a href={readmeUrl} rel="noopener">
+                    README
+                  </a>
+                  {" · "}
+                  <a href={releasesUrl} rel="noopener">
+                    all releases
+                  </a>
+                  .
+                </p>
+              </div>
+            )}
+          </div>
+        </li>
+      ))
+    }
+  </ol>
+</section>
+
+<style>
+  .getstarted__head {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 0.5rem 0.75rem;
+    margin-bottom: 1.75rem;
+  }
+
+  .getstarted__sub {
+    font-family: var(--sans);
+    color: var(--text);
+    margin: 0;
+    flex-basis: 100%;
+  }
+
+  .getstarted__steps {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 1.5rem;
+  }
+
+  .step {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    align-items: start;
+    gap: 1.25rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+  }
+
+  .step:first-child {
+    padding-top: 0;
+    border-top: none;
+  }
+
+  .step__num {
+    font-family: var(--serif);
+    font-size: 3rem;
+    line-height: 0.9;
+    font-weight: 600;
+    color: var(--accent-gold);
+    font-variant-numeric: lining-nums;
+  }
+
+  .step__title {
+    font-family: var(--sans);
+    font-size: 1.15rem;
+    font-weight: 650;
+    color: var(--text);
+    margin: 0.15rem 0 0.4rem;
+  }
+
+  .step__text {
+    font-family: var(--sans);
+    color: var(--text);
+    line-height: 1.55;
+    margin: 0;
+  }
+
+  .step__install {
+    margin-top: 1rem;
+  }
+
+  /* Step screenshots reuse ShowTell's framed-image treatment so the panels
+     read as the same product surface across islands. */
+  .step__shot {
+    margin: 1rem 0 0;
+    max-width: 30rem;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    overflow: hidden;
+    box-shadow: var(--shadow-card);
+    line-height: 0;
+  }
+  .step__shot img {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+
+  .step__readme {
+    margin: 0.7rem 0 0;
+    font-size: 0.85rem;
+    color: var(--text);
+  }
+
+  @media (max-width: 640px) {
+    .step {
+      grid-template-columns: 1fr;
+      gap: 0.4rem;
+    }
+    .step__num {
+      font-size: 2.25rem;
+    }
+  }
+</style>

@@ -5,8 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "astro dev",
-    "build": "astro build",
+    "build": "astro build && node scripts/verify-dist.mjs",
+    "verify:dist": "node scripts/verify-dist.mjs",
     "preview": "astro preview",
+    "og": "node scripts/gen-og.mjs",
     "astro": "astro"
   },
   "devDependencies": {
@@ -14,6 +16,7 @@
     "typescript": "^5.6.0"
   },
   "dependencies": {
+    "@astrojs/markdoc": "^2.0.0",
     "@types/three": "^0.184.0",
     "three": "^0.184.0"
   }

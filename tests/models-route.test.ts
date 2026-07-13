@@ -5,24 +5,30 @@
  * get-models`'s `getModels()` returns a controllable fixture, so the
  * REAL `cacheModels()` (filter + setModels) runs on /refresh without
  * touching the network. GET tests seed `state.models` directly via the
- * real `setModels`. Nothing global to `~/lib/state` or `~/lib/utils` is
+ * real `setModels`. Nothing global to `~/lib/runtime-state/state` or `~/lib/platform/utils` is
  * mocked, so this file can't bleed into siblings.
  */
 
-import { beforeEach, describe, expect, mock, test } from "bun:test"
+import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test"
 import { Hono } from "hono"
 
 import type { Model, ModelsResponse } from "~/services/copilot/get-models"
 
 const actualGetModels = await import("~/services/copilot/get-models")
 let getModelsFixture: ModelsResponse = { object: "list", data: [] }
-void mock.module("~/services/copilot/get-models", () => ({
+await mock.module("~/services/copilot/get-models", () => ({
   ...actualGetModels,
   getModels: () => Promise.resolve(getModelsFixture),
 }))
+// Restore the real module so this stub can't leak forward into a sibling
+// test file (Bun keeps module mocks for the whole process). Awaited so the
+// restore actually lands before the next file's static imports resolve.
+afterAll(async () => {
+  await mock.module("~/services/copilot/get-models", () => actualGetModels)
+})
 
 const { modelsRoutes } = await import("~/routes/settings/models")
-const { setModels } = await import("~/lib/state")
+const { setModels } = await import("~/lib/runtime-state/state")
 
 interface ModelOverrides {
   id?: string
@@ -152,7 +158,7 @@ describe("GET /models", () => {
 
 describe("POST /models/refresh", () => {
   // NOTE: a sibling test file (start-run-server) globally stubs
-  // `~/lib/utils.cacheModels` to a no-op, and Bun's `mock.module`
+  // `~/lib/platform/utils.cacheModels` to a no-op, and Bun's `mock.module`
   // persists across files — so this test must NOT assert that refresh
   // *changed* the data (whether the real fetch runs is order-dependent).
   // We pre-seed `state` AND the upstream fixture to the SAME already-

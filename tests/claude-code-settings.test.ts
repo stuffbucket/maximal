@@ -4,7 +4,9 @@ import os from "node:os"
 import path from "node:path"
 
 import {
+  API_KEY_HELPER_COMMAND,
   applyProxyBaseUrl,
+  getApiKeyHelperOwnership,
   getBaseUrlOwnership,
   getClaudeCodeSettingsPath,
   isProxyBaseUrlConfigured,
@@ -14,7 +16,7 @@ import {
   revertProxyBaseUrl,
   stripBaseUrl,
   writeClaudeCodeSettings,
-} from "~/lib/claude-code-settings"
+} from "~/apps/claude-code/config"
 
 let dir: string
 let settingsPath: string
@@ -114,13 +116,32 @@ describe("getBaseUrlOwnership", () => {
   })
 })
 
+describe("getApiKeyHelperOwnership", () => {
+  it("absent when no apiKeyHelper is configured", () => {
+    expect(getApiKeyHelperOwnership({})).toBe("absent")
+  })
+
+  it("ours when it equals maximal's helper command", () => {
+    expect(
+      getApiKeyHelperOwnership({ apiKeyHelper: API_KEY_HELPER_COMMAND }),
+    ).toBe("ours")
+  })
+
+  it("foreign when it is some other value", () => {
+    expect(getApiKeyHelperOwnership({ apiKeyHelper: "other-helper" })).toBe(
+      "foreign",
+    )
+  })
+})
+
 describe("mergeBaseUrl / stripBaseUrl (pure)", () => {
-  it("merge sets env.ANTHROPIC_BASE_URL, preserves top-level + sibling env", () => {
+  it("merge sets env.ANTHROPIC_BASE_URL and apiKeyHelper, preserves existing settings", () => {
     const merged = mergeBaseUrl({
       theme: "dark",
       env: { FOO: "1", ANTHROPIC_API_KEY: "sk-secret" },
     })
     expect(merged.theme).toBe("dark")
+    expect(merged.apiKeyHelper).toBe(API_KEY_HELPER_COMMAND)
     expect(envOf(merged)).toEqual({
       FOO: "1",
       ANTHROPIC_API_KEY: "sk-secret",
@@ -132,6 +153,7 @@ describe("mergeBaseUrl / stripBaseUrl (pure)", () => {
     const merged = mergeBaseUrl({ theme: "dark" })
     expect(merged.theme).toBe("dark")
     expect(envOf(merged)).toEqual({ ANTHROPIC_BASE_URL: PROXY_BASE_URL })
+    expect(merged.apiKeyHelper).toBe(API_KEY_HELPER_COMMAND)
   })
 
   it("merge does not mutate the input", () => {
@@ -140,9 +162,10 @@ describe("mergeBaseUrl / stripBaseUrl (pure)", () => {
     expect(input).toEqual({ env: { FOO: "1" } })
   })
 
-  it("strip removes only our key, preserves sibling env + top-level", () => {
+  it("strip removes only our keys, preserves sibling env + top-level", () => {
     const stripped = stripBaseUrl({
       theme: "dark",
+      apiKeyHelper: API_KEY_HELPER_COMMAND,
       env: {
         ANTHROPIC_BASE_URL: PROXY_BASE_URL,
         ANTHROPIC_API_KEY: "sk-secret",
@@ -154,9 +177,21 @@ describe("mergeBaseUrl / stripBaseUrl (pure)", () => {
     })
   })
 
+  it("strip preserves a foreign apiKeyHelper and foreign base URL", () => {
+    const stripped = stripBaseUrl({
+      apiKeyHelper: "other-helper",
+      env: { ANTHROPIC_BASE_URL: "https://other.example" },
+    })
+    expect(stripped).toEqual({
+      apiKeyHelper: "other-helper",
+      env: { ANTHROPIC_BASE_URL: "https://other.example" },
+    })
+  })
+
   it("strip drops the env key when it becomes empty", () => {
     const stripped = stripBaseUrl({
       theme: "dark",
+      apiKeyHelper: API_KEY_HELPER_COMMAND,
       env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL },
     })
     expect(stripped).toEqual({ theme: "dark" })
@@ -193,6 +228,7 @@ describe("applyProxyBaseUrl (end-to-end)", () => {
     expect(result.wrote).toBe(true)
     expect(result.skippedReason).toBeUndefined()
     expect(envOf(read()).ANTHROPIC_BASE_URL).toBe(PROXY_BASE_URL)
+    expect(read().apiKeyHelper).toBe(API_KEY_HELPER_COMMAND)
   })
 
   it("preserves a pre-existing top-level setting and sibling env vars", () => {
@@ -208,6 +244,7 @@ describe("applyProxyBaseUrl (end-to-end)", () => {
     const after = read()
     expect(after.theme).toBe("dark")
     expect(after.permissions).toEqual({ allow: ["Bash"] })
+    expect(after.apiKeyHelper).toBe(API_KEY_HELPER_COMMAND)
     expect(envOf(after)).toEqual({
       FOO: "1",
       ANTHROPIC_API_KEY: "sk-secret",
@@ -239,20 +276,46 @@ describe("applyProxyBaseUrl (end-to-end)", () => {
     expect(fs.statSync(settingsPath).mtimeMs).toBe(before)
     // no duplication
     expect(envOf(read())).toEqual({ ANTHROPIC_BASE_URL: PROXY_BASE_URL })
+    expect(read().apiKeyHelper).toBe(API_KEY_HELPER_COMMAND)
   })
 
   it("handles an absent file (writes fresh)", () => {
     expect(fs.existsSync(settingsPath)).toBe(false)
     const result = applyProxyBaseUrl(settingsPath)
     expect(result.wrote).toBe(true)
-    expect(read()).toEqual({ env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL } })
+    expect(read()).toEqual({
+      apiKeyHelper: API_KEY_HELPER_COMMAND,
+      env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL },
+      // Snapshot of the prior state: both fields were absent → UNSET, so a later
+      // disable removes them (returns the file to nothing).
+      _maximalPrior: {
+        ANTHROPIC_BASE_URL: "__UNSET__",
+        apiKeyHelper: "__UNSET__",
+      },
+    })
   })
 
   it("handles an unparseable file (writes fresh)", () => {
     writeRaw("{ garbage")
     const result = applyProxyBaseUrl(settingsPath)
     expect(result.wrote).toBe(true)
-    expect(read()).toEqual({ env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL } })
+    expect(read()).toEqual({
+      apiKeyHelper: API_KEY_HELPER_COMMAND,
+      env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL },
+      _maximalPrior: {
+        ANTHROPIC_BASE_URL: "__UNSET__",
+        apiKeyHelper: "__UNSET__",
+      },
+    })
+  })
+
+  it("ownership guard: does NOT overwrite a foreign apiKeyHelper", () => {
+    const original = { apiKeyHelper: "other-helper" }
+    writeRaw(JSON.stringify(original))
+    const result = applyProxyBaseUrl(settingsPath)
+    expect(result.wrote).toBe(false)
+    expect(result.skippedReason).toBe("foreign-api-key-helper")
+    expect(read()).toEqual(original)
   })
 })
 
@@ -261,6 +324,7 @@ describe("revertProxyBaseUrl", () => {
     writeRaw(
       JSON.stringify({
         theme: "dark",
+        apiKeyHelper: API_KEY_HELPER_COMMAND,
         env: {
           ANTHROPIC_BASE_URL: PROXY_BASE_URL,
           ANTHROPIC_API_KEY: "sk-secret",
@@ -280,6 +344,7 @@ describe("revertProxyBaseUrl", () => {
     writeRaw(
       JSON.stringify({
         theme: "dark",
+        apiKeyHelper: API_KEY_HELPER_COMMAND,
         env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL },
       }),
     )
@@ -290,7 +355,12 @@ describe("revertProxyBaseUrl", () => {
   })
 
   it("deletes the file when it becomes empty", () => {
-    writeRaw(JSON.stringify({ env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL } }))
+    writeRaw(
+      JSON.stringify({
+        apiKeyHelper: API_KEY_HELPER_COMMAND,
+        env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL },
+      }),
+    )
     const result = revertProxyBaseUrl(settingsPath)
     expect(result.wrote).toBe(true)
     expect(result.remainingKeys).toEqual([])
@@ -305,6 +375,14 @@ describe("revertProxyBaseUrl", () => {
     const result = revertProxyBaseUrl(settingsPath)
     expect(result.wrote).toBe(false)
     expect(read()).toEqual(original)
+  })
+
+  it("removes our apiKeyHelper even when the base URL is absent", () => {
+    writeRaw(JSON.stringify({ apiKeyHelper: API_KEY_HELPER_COMMAND }))
+    const result = revertProxyBaseUrl(settingsPath)
+    expect(result.wrote).toBe(true)
+    expect(result.remainingKeys).toEqual([])
+    expect(fs.existsSync(settingsPath)).toBe(false)
   })
 
   it("no-op on an absent file", () => {
@@ -322,6 +400,56 @@ describe("revertProxyBaseUrl", () => {
   })
 })
 
+describe("apply→revert snapshot round-trip (restores prior state)", () => {
+  it("absent → enable → disable returns the file to nothing", () => {
+    applyProxyBaseUrl(settingsPath)
+    revertProxyBaseUrl(settingsPath)
+    // Nothing was there before, so disable removes everything (file gone).
+    expect(fs.existsSync(settingsPath)).toBe(false)
+  })
+
+  it("restores a user's OWN ANTHROPIC_BASE_URL that equals the proxy URL", () => {
+    // The coincidence trap: the user had set the proxy URL themselves. Ownership
+    // reads "ours", but a blind delete would drop THEIR value. The snapshot makes
+    // disable restore it exactly.
+    writeRaw(JSON.stringify({ env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL } }))
+    applyProxyBaseUrl(settingsPath)
+    revertProxyBaseUrl(settingsPath)
+    expect(read()).toEqual({ env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL } })
+  })
+
+  it("restores a user's own apiKeyHelper that matches our signature", () => {
+    // A pre-existing helper that happens to carry our --apiKeyHelper claude-code
+    // signature (e.g. an older maximal path) is captured and restored verbatim.
+    const userHelper = '"/old/maximal" --apiKeyHelper claude-code'
+    writeRaw(JSON.stringify({ apiKeyHelper: userHelper }))
+    applyProxyBaseUrl(settingsPath)
+    revertProxyBaseUrl(settingsPath)
+    expect(read()).toEqual({ apiKeyHelper: userHelper })
+  })
+
+  it("preserves unrelated settings + sibling env across the round-trip", () => {
+    const before = {
+      theme: "dark",
+      permissions: { allow: ["Bash"] },
+      env: { FOO: "1", ANTHROPIC_API_KEY: "sk-secret" },
+    }
+    writeRaw(JSON.stringify(before))
+    applyProxyBaseUrl(settingsPath)
+    revertProxyBaseUrl(settingsPath)
+    expect(read()).toEqual(before)
+  })
+
+  it("re-apply (self-heal) does not poison the snapshot", () => {
+    // The execPath self-heal re-runs applyProxyBaseUrl. It must NOT capture our
+    // own values as the prior state, or disable would restore the proxy URL.
+    applyProxyBaseUrl(settingsPath)
+    applyProxyBaseUrl(settingsPath) // self-heal / re-apply
+    revertProxyBaseUrl(settingsPath)
+    expect(fs.existsSync(settingsPath)).toBe(false)
+  })
+})
+
 describe("isProxyBaseUrlConfigured", () => {
   it("true only when env.ANTHROPIC_BASE_URL is our proxy URL", () => {
     expect(isProxyBaseUrlConfigured(settingsPath)).toBe(false)
@@ -331,7 +459,12 @@ describe("isProxyBaseUrlConfigured", () => {
     // foreign URL present, so apply backed off — still not ours
     expect(isProxyBaseUrlConfigured(settingsPath)).toBe(false)
     // now make it ours
-    writeRaw(JSON.stringify({ env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL } }))
+    writeRaw(
+      JSON.stringify({
+        apiKeyHelper: API_KEY_HELPER_COMMAND,
+        env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL },
+      }),
+    )
     expect(isProxyBaseUrlConfigured(settingsPath)).toBe(true)
   })
 })

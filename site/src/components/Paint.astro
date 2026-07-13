@@ -1,0 +1,473 @@
+---
+// Glossy candy-paint background, shared across the page. Raw WebGL + inlined
+// GLSL (no dependency). A single hoisted script initializes EVERY `.paint`
+// canvas on the page from its data-* config, so the hero card, the painted
+// content cards, the primary button and the footer all share one shader.
+//
+// Modes:
+//   candy     — hero: vertical candy gradient + metal flake (animated twinkle)
+//               + a broad top-down sheen. The full muscle-car paint job.
+//   matte     — content cards: same paint, but the flake is toned down and
+//               static (no twinkle), rendered as a single frame. Cheap.
+//   clearcoat — button / footer: a flat base + sheen only. No flake, no
+//               gradient — just a glossy clear coat.
+//
+// Sized to its own box via ResizeObserver. Reduced motion / hidden tab /
+// off-screen → paused. pointer-events:none, behind the content. No WebGL → it
+// simply doesn't draw and the element's own background shows.
+interface Props {
+  base?: string;
+  mode?: "candy" | "matte" | "clearcoat";
+  class?: string;
+}
+const { base = "#c8334a", mode = "candy", class: cls = "" } = Astro.props;
+
+// flake · flake-animates · vertical gradient · sheen · coat-depth · loop
+const CFG = {
+  candy: { flake: 1.0, anim: 1, gradient: 1, sheen: 0.32, coat: 0, animate: 1 },
+  matte: { flake: 0.32, anim: 0, gradient: 1, sheen: 0.22, coat: 0, animate: 0 },
+  clearcoat: { flake: 0.0, anim: 0, gradient: 0, sheen: 0.34, coat: 0, animate: 0 },
+  // Polished metal: a strong top→bottom value ramp + bright sheen, no flake.
+  // Meant to be masked to a shape (see Spark.astro) for a chromed icon.
+  chrome: { flake: 0.0, anim: 0, gradient: 1, sheen: 0.6, coat: 0, animate: 0 },
+  // Secondary islands: a clear coat with DEPTH — a smooth height field, shaded
+  // against the top light, reads as a thick translucent coating with broad
+  // soft reflections. No flake; subtle enough not to fight the copy.
+  coat: { flake: 0.0, anim: 0, gradient: 1, sheen: 0.24, coat: 1, animate: 0 },
+}[mode];
+---
+
+<canvas
+  class:list={["paint", cls]}
+  aria-hidden="true"
+  data-base={base}
+  data-flake={CFG.flake}
+  data-anim={CFG.anim}
+  data-gradient={CFG.gradient}
+  data-sheen={CFG.sheen}
+  data-coat={CFG.coat}
+  data-animate={CFG.animate}></canvas>
+
+<script>
+  type PaintCfg = {
+    base: [number, number, number]
+    flake: number
+    anim: number
+    gradient: number
+    sheen: number
+    coat: number
+    animate: number
+  }
+
+  function hexToRgb(h: string): [number, number, number] {
+    let s = h.replace("#", "").trim()
+    if (s.length === 3)
+      s = s
+        .split("")
+        .map((c) => c + c)
+        .join("")
+    const n = parseInt(s, 16)
+    return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255]
+  }
+
+  // Which cursor is the browser actually showing here? → 0 arrow, 1 hand, 2 text.
+  function cursorTypeAt(x: number, y: number): number {
+    const el = document.elementFromPoint(x, y) as HTMLElement | null
+    if (!el) return 0
+    if (el.closest("a, button, [role='button'], .btn, label")) return 1
+    const cur = getComputedStyle(el).cursor
+    if (cur === "pointer") return 1
+    if (cur === "text") return 2
+    // Text-bearing elements resolve to the I-beam under the default `auto`.
+    if (el.matches("p, li, h1, h2, h3, h4, figcaption, span, strong, em, code"))
+      return 2
+    return 0
+  }
+
+  const VERT = `
+    attribute vec2 p;
+    void main() { gl_Position = vec4(p, 0.0, 1.0); }
+  `
+
+  const FRAG = `
+    precision highp float;
+    uniform vec2 uRes;
+    uniform float uTime;
+    uniform vec3 uBase;
+    uniform float uFlake;
+    uniform float uAnim;
+    uniform float uGradient;
+    uniform float uSheen;
+    uniform float uCoat;
+    uniform vec2 uMouse;
+    uniform float uHasMouse;
+    uniform float uCursorSz;
+    uniform float uCursorType;
+
+    const vec3 SHEEN = vec3(1.0, 0.95, 0.9);
+
+    float hash(vec2 p) {
+      return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+    }
+
+    // Smooth, large-scale height field for the translucent clear coat. A few
+    // low-frequency sines → broad gentle lobes across the panel.
+    float coatH(vec2 x) {
+      return sin(x.x * 1.7 + 1.3) * 0.5
+        + sin(x.y * 2.0 - 0.7) * 0.5
+        + sin((x.x + x.y) * 1.15 + 2.1) * 0.35;
+    }
+
+    // Signed distance to an arrow-cursor polygon (iq's polygon SDF, unrolled).
+    // Negative inside. Tip at the origin; body extends down-right (y-down).
+    void polyEdge(vec2 p, vec2 a, vec2 b, inout float d, inout float s) {
+      vec2 e = b - a;
+      vec2 w = p - a;
+      vec2 bcl = w - e * clamp(dot(w, e) / dot(e, e), 0.0, 1.0);
+      d = min(d, dot(bcl, bcl));
+      bvec3 c = bvec3(p.y >= a.y, p.y < b.y, e.x * w.y > e.y * w.x);
+      if (all(c) || all(not(c))) s = -s;
+    }
+    float sdCursor(vec2 p) {
+      vec2 v0 = vec2(0.0, 0.0);
+      vec2 v1 = vec2(0.0, 1.0);
+      vec2 v2 = vec2(0.25, 0.75);
+      vec2 v3 = vec2(0.43, 1.14);
+      vec2 v4 = vec2(0.61, 1.07);
+      vec2 v5 = vec2(0.36, 0.68);
+      vec2 v6 = vec2(0.79, 0.68);
+      float d = dot(p - v0, p - v0);
+      float s = 1.0;
+      polyEdge(p, v0, v1, d, s);
+      polyEdge(p, v1, v2, d, s);
+      polyEdge(p, v2, v3, d, s);
+      polyEdge(p, v3, v4, d, s);
+      polyEdge(p, v4, v5, d, s);
+      polyEdge(p, v5, v6, d, s);
+      polyEdge(p, v6, v0, d, s);
+      return s * sqrt(d);
+    }
+
+    float sdRoundBox(vec2 p, vec2 b, float r) {
+      vec2 d = abs(p) - b + r;
+      return min(max(d.x, d.y), 0.0) + length(max(d, 0.0)) - r;
+    }
+    // I-beam (text cursor): a thin vertical bar with top + bottom serifs,
+    // centered on the origin so its hotspot (the caret midpoint) sits exactly
+    // on the mouse point.
+    float sdIBeam(vec2 p) {
+      float bar = sdRoundBox(p, vec2(0.07, 0.55), 0.03);
+      float top = sdRoundBox(p - vec2(0.0, -0.53), vec2(0.24, 0.06), 0.03);
+      float bot = sdRoundBox(p - vec2(0.0, 0.53), vec2(0.24, 0.06), 0.03);
+      return min(bar, min(top, bot));
+    }
+    // Link (pointer) cursor: a simplified pointing hand — index finger + fist.
+    float sdHand(vec2 p) {
+      float finger = sdRoundBox(p - vec2(0.0, 0.4), vec2(0.16, 0.42), 0.14);
+      float fist = sdRoundBox(p - vec2(0.08, 1.0), vec2(0.34, 0.32), 0.17);
+      return min(finger, fist);
+    }
+    vec2 hash2(vec2 p) {
+      return fract(sin(vec2(
+        dot(p, vec2(127.1, 311.7)),
+        dot(p, vec2(269.5, 183.3))
+      )) * 43758.5453);
+    }
+
+    // One coat of metal flake. Each cell seeds a fleck at a JITTERED position
+    // (not the cell center), sampled across the 3x3 neighborhood, so flecks
+    // scatter freely instead of snapping to a regular lattice. Random presence,
+    // size and facing give the candy coat its depth and twinkle.
+    float flakeCoat(vec2 q, float scale, float seed) {
+      vec2 g = q * scale + seed;
+      vec2 id = floor(g);
+      vec2 f = fract(g);
+      float m = 0.0;
+      for (int j = -1; j <= 1; j++) {
+        for (int i = -1; i <= 1; i++) {
+          vec2 cell = vec2(float(i), float(j));
+          vec2 c = id + cell;
+          vec2 rnd = hash2(c);
+          float present = step(0.55, hash(c + 7.0));
+          float sz = 0.18 + 0.22 * hash(c + 3.0);
+          float d = length(f - (cell + rnd));
+          float shape = smoothstep(sz, 0.0, d);
+          float facing = 0.5 + 0.5 * sin(rnd.x * 6.2831 + uAnim * uTime * 1.6);
+          m += present * shape * pow(facing, 8.0);
+        }
+      }
+      return m;
+    }
+
+    void main() {
+      vec2 uv = gl_FragCoord.xy / uRes;
+      float aspect = uRes.x / uRes.y;
+      vec2 q = vec2(uv.x * aspect, uv.y); // aspect-corrected → round flecks
+
+      // Light from ABOVE: a broad top-down sheen BAND (not a disc / spotlight),
+      // with a faint horizontal drift so it reads as directional but never
+      // resolves into a circle.
+      float drift = sin(uTime * 0.12) * 0.5;
+      float sheen = pow(
+        smoothstep(-0.15, 1.05, uv.y + drift * (uv.x - 0.5) * 0.12), 1.5);
+
+      // Candy base: deep shade → base, top-lit (gradient optional), with a faint
+      // low-freq richness variation (candy-over-metal depth).
+      vec3 dark = uBase * 0.45;
+      float grad = smoothstep(-1.1, 1.3, uv.y);
+      float gradMix = mix(1.0, grad, uGradient);
+      // Low-freq richness only on gradient/coat surfaces; the flat clear-coat
+      // (button) stays perfectly even so it reads as a clean panel, no ripples.
+      float depthAmt = 0.06 * max(uGradient, uCoat);
+      float depth = (1.0 - depthAmt)
+        + depthAmt * (0.5 + 0.5 * sin(q.x * 3.0 + q.y * 5.0 + 1.3));
+      vec3 col = mix(dark, uBase, gradMix) * depth;
+
+      // Translucent clear coat with depth: treat coatH as a height field, derive
+      // a normal, and shade it against the top light. Valleys pool slightly
+      // darker (depth); the slopes catch broad soft reflections — a thick,
+      // ray-marched-looking coating rather than a flat fill.
+      if (uCoat > 0.5) {
+        float e = 0.05;
+        float hx = coatH(q + vec2(e, 0.0)) - coatH(q - vec2(e, 0.0));
+        float hy = coatH(q + vec2(0.0, e)) - coatH(q - vec2(0.0, e));
+        vec3 n = normalize(vec3(-hx * 1.4, -hy * 1.4, 1.0));
+        vec3 L = normalize(vec3(0.12, 0.9, 0.55));
+        float spec = pow(max(dot(n, L), 0.0), 3.0);
+        float body = 0.5 + 0.5 * n.z;
+        col = mix(col * 0.9, col, body);
+        col += SHEEN * spec * 0.12;
+
+        // Reflection of a mouse pointer hovering just above the glossy coat:
+        // the actual arrow silhouette, dim and soft, warped a little by the
+        // coat surface so it reads as a reflection in paint rather than a decal.
+        // A thin dark rim (the pointer's outline) sells the shape; a faint tip
+        // highlight adds gloss. Toned right down so it's a quiet detail.
+        // Hotspot maps 1:1 to the real cursor point (no offset); only a hint of
+        // gloss warp so the shape stays locked to the mouse.
+        vec2 rel = q - vec2(uMouse.x * aspect, uMouse.y);
+        vec2 cp = vec2(rel.x, -rel.y) / uCursorSz; // cursor-local, fixed px size
+        cp += n.xy * 0.08;                          // subtle gloss distortion
+        // Match the shape the browser is actually showing under the cursor.
+        float sd = uCursorType < 0.5
+          ? sdCursor(cp)
+          : (uCursorType < 1.5 ? sdHand(cp) : sdIBeam(cp));
+        float aa = 0.12;
+        float fillC = smoothstep(aa, -aa, sd);            // soft white body
+        float rimC = smoothstep(0.15, 0.0, abs(sd));      // thin dark outline
+        float fres = 0.6 + 0.4 * pow(1.0 - n.z, 1.5);
+        col += vec3(1.0, 0.99, 0.97) * fillC * 0.17 * fres * uHasMouse;
+        col -= vec3(0.45, 0.48, 0.52) * rimC * 0.1 * uHasMouse;
+      }
+
+      // Broad clear-coat sheen from the top light.
+      col += SHEEN * sheen * uSheen;
+
+      // Metal flake across two coats — soft + varied, brighter where the clear
+      // coat catches the light. Scaled by uFlake (0 → clear coat, no flake).
+      float flake = 0.0;
+      flake += flakeCoat(q, 60.0, 0.0) * 0.6;
+      flake += flakeCoat(q, 110.0, 17.3) * 0.4;
+      col += vec3(1.0, 0.96, 0.92) * flake * uFlake * (0.3 + sheen * 0.8);
+
+      gl_FragColor = vec4(col, 1.0);
+    }
+  `
+
+  function initPaint(canvas: HTMLCanvasElement): void {
+    const d = canvas.dataset
+    const cfg: PaintCfg = {
+      base: hexToRgb(d.base || "#c8334a"),
+      flake: parseFloat(d.flake || "1"),
+      anim: parseFloat(d.anim || "0"),
+      gradient: parseFloat(d.gradient || "1"),
+      sheen: parseFloat(d.sheen || "0.3"),
+      coat: parseFloat(d.coat || "0"),
+      animate: parseFloat(d.animate || "0"),
+    }
+
+    const gl = canvas.getContext("webgl", {
+      antialias: false,
+      alpha: false,
+      depth: false,
+      powerPreference: "low-power",
+    })
+    if (!gl) return // No WebGL → the element's own background is the fallback.
+
+    function compile(type: number, src: string): WebGLShader | null {
+      const s = gl!.createShader(type)
+      if (!s) return null
+      gl!.shaderSource(s, src)
+      gl!.compileShader(s)
+      if (!gl!.getShaderParameter(s, gl!.COMPILE_STATUS)) {
+        console.warn("paint shader:", gl!.getShaderInfoLog(s))
+        return null
+      }
+      return s
+    }
+
+    const vs = compile(gl.VERTEX_SHADER, VERT)
+    const fs = compile(gl.FRAGMENT_SHADER, FRAG)
+    if (!vs || !fs) return
+    const prog = gl.createProgram()
+    if (!prog) return
+    gl.attachShader(prog, vs)
+    gl.attachShader(prog, fs)
+    gl.linkProgram(prog)
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+      console.warn("paint link:", gl.getProgramInfoLog(prog))
+      return
+    }
+    gl.useProgram(prog)
+
+    const buf = gl.createBuffer()
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf)
+    gl.bufferData(
+      gl.ARRAY_BUFFER,
+      new Float32Array([-1, -1, 3, -1, -1, 3]),
+      gl.STATIC_DRAW,
+    )
+    const loc = gl.getAttribLocation(prog, "p")
+    gl.enableVertexAttribArray(loc)
+    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0)
+
+    const uRes = gl.getUniformLocation(prog, "uRes")
+    const uTime = gl.getUniformLocation(prog, "uTime")
+    gl.uniform3f(gl.getUniformLocation(prog, "uBase"), ...cfg.base)
+    gl.uniform1f(gl.getUniformLocation(prog, "uFlake"), cfg.flake)
+    gl.uniform1f(gl.getUniformLocation(prog, "uAnim"), cfg.anim)
+    gl.uniform1f(gl.getUniformLocation(prog, "uGradient"), cfg.gradient)
+    gl.uniform1f(gl.getUniformLocation(prog, "uSheen"), cfg.sheen)
+    gl.uniform1f(gl.getUniformLocation(prog, "uCoat"), cfg.coat)
+    const uMouse = gl.getUniformLocation(prog, "uMouse")
+    const uHasMouse = gl.getUniformLocation(prog, "uHasMouse")
+    const uCursorSz = gl.getUniformLocation(prog, "uCursorSz")
+    const uCursorType = gl.getUniformLocation(prog, "uCursorType")
+    gl.uniform2f(uMouse, 0.5, 0.5)
+    gl.uniform1f(uHasMouse, 0)
+    gl.uniform1f(uCursorType, 0)
+
+    const dpr = Math.min(window.devicePixelRatio || 1, 2)
+    function resize(): void {
+      const w = Math.max(1, Math.round(canvas.clientWidth * dpr))
+      const h = Math.max(1, Math.round(canvas.clientHeight * dpr))
+      if (canvas.width === w && canvas.height === h) return
+      canvas.width = w
+      canvas.height = h
+      gl!.viewport(0, 0, w, h)
+      gl!.uniform2f(uRes, w, h)
+      // Keep the reflected cursor a fixed ~px size regardless of card height,
+      // so it reads the same on the tall and short islands. (uv = px / height.)
+      gl!.uniform1f(uCursorSz, 17 / Math.max(1, canvas.clientHeight))
+    }
+
+    const start = performance.now()
+    const wantsLoop = cfg.animate === 1
+    let running = false
+    let rafId = 0
+    let onScreen = true
+    function frame(now: number): void {
+      gl!.uniform1f(uTime, (now - start) / 1000)
+      gl!.drawArrays(gl!.TRIANGLES, 0, 3)
+      if (running) rafId = requestAnimationFrame(frame)
+    }
+    function play(): void {
+      if (running) return
+      running = true
+      rafId = requestAnimationFrame(frame)
+    }
+    function pause(): void {
+      running = false
+      if (rafId) cancelAnimationFrame(rafId)
+    }
+
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    function sync(): void {
+      if (!wantsLoop || reduced) {
+        pause()
+        frame(performance.now()) // single static frame
+      } else if (onScreen && document.visibilityState === "visible") {
+        play()
+      } else {
+        pause()
+      }
+    }
+
+    resize()
+    const ro = new ResizeObserver(() => {
+      resize()
+      if (!running) frame(performance.now())
+    })
+    ro.observe(canvas)
+
+    if ("IntersectionObserver" in window) {
+      new IntersectionObserver((entries) => {
+        onScreen = entries[0]?.isIntersecting ?? true
+        sync()
+      }).observe(canvas)
+    }
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) pause()
+      else sync()
+    })
+
+    // Coat islands: track the cursor over the card and redraw a single frame so
+    // the imaginary pointer's reflection follows the mouse. The canvas is
+    // pointer-events:none, so listen on the host card. rAF-throttled; skipped
+    // under reduced motion. Live frames already re-read the uniforms each tick.
+    // DISABLED FOR NOW — flip CURSOR_REFLECTION to re-enable.
+    const CURSOR_REFLECTION = false
+    const host = canvas.parentElement
+    if (CURSOR_REFLECTION && cfg.coat === 1 && host && !reduced) {
+      let queued = false
+      host.addEventListener(
+        "pointermove",
+        (e) => {
+          const r = canvas.getBoundingClientRect()
+          if (!r.width || !r.height) return
+          gl!.uniform2f(
+            uMouse,
+            (e.clientX - r.left) / r.width,
+            1 - (e.clientY - r.top) / r.height,
+          )
+          gl!.uniform1f(uHasMouse, 1)
+          gl!.uniform1f(uCursorType, cursorTypeAt(e.clientX, e.clientY))
+          if (!running && !queued) {
+            queued = true
+            requestAnimationFrame((now) => {
+              queued = false
+              frame(now)
+            })
+          }
+        },
+        { passive: true },
+      )
+      host.addEventListener(
+        "pointerleave",
+        () => {
+          gl!.uniform1f(uHasMouse, 0)
+          if (!running) frame(performance.now())
+        },
+        { passive: true },
+      )
+    }
+
+    sync()
+  }
+
+  document
+    .querySelectorAll<HTMLCanvasElement>("canvas.paint")
+    .forEach(initPaint)
+</script>
+
+<style>
+  .paint {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+  }
+</style>

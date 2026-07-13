@@ -5,7 +5,7 @@ import {
   getGhAccountToken,
   type GhRunner,
   isReadOnlyGhArgs,
-} from "~/services/gh-cli"
+} from "~/lib/system/gh-cli"
 
 // Build a runner that returns canned results keyed by the gh subcommand, so
 // the parser is exercised without a real `gh` binary.

@@ -20,17 +20,18 @@
 import consola from "consola"
 import { Hono } from "hono"
 
-import { BUILD_VERSION } from "~/lib/build-info"
-import { describeLaunchSource } from "~/lib/cli-path"
+import { describeExecutor } from "~/debug"
 import {
   DiagnosticsResponse,
   type DiagnosticsResponse as DiagnosticsResponseT,
   UpdateStatusResponse,
   type UpdateStatusResponse as UpdateStatusResponseT,
-} from "~/lib/settings-types"
-import { state } from "~/lib/state"
-import { getUpdateStatus } from "~/lib/update-check"
-import { getGitVersion, shortSha } from "~/lib/version"
+} from "~/lib/config/settings-types"
+import { describeLaunchSource } from "~/lib/platform/cli-path"
+import { modelsCached, state, tokenPresence } from "~/lib/runtime-state/state"
+import { BUILD_VERSION } from "~/lib/update/build-info"
+import { getUpdateStatus } from "~/lib/update/update-check"
+import { getGitVersion, shortSha } from "~/lib/update/version"
 
 import { accountsRoutes } from "./accounts"
 import { apiKeysRoutes } from "./api-keys"
@@ -40,6 +41,7 @@ import { clientsRoutes } from "./clients"
 import { eventsRoutes } from "./events"
 import { ghRoutes } from "./gh"
 import { modelsRoutes } from "./models"
+import { respondValidated } from "./respond-validated"
 import { uiRoutes } from "./ui"
 
 /** Captured once at module load. process.uptime() works too, but
@@ -51,6 +53,7 @@ const PROCESS_START_MS = Date.now()
 function buildDiagnostics(): DiagnosticsResponseT {
   const git = getGitVersion()
   const launch = describeLaunchSource()
+  const tokens = tokenPresence()
   return {
     version: BUILD_VERSION,
     source_revision: git.sha ? shortSha(git.sha) : null,
@@ -60,10 +63,10 @@ function buildDiagnostics(): DiagnosticsResponseT {
     pid: process.pid,
     uptime_ms: Date.now() - PROCESS_START_MS,
     account_type: state.accountType,
-    models_cached: state.models?.data.length ?? 0,
+    models_cached: modelsCached(),
     tokens: {
-      github_token_present: state.githubToken !== undefined,
-      copilot_token_present: state.copilotToken !== undefined,
+      github_token_present: tokens.github,
+      copilot_token_present: tokens.copilot,
     },
     rate_limit: {
       interval_seconds: state.rateLimitSeconds ?? null,
@@ -73,6 +76,18 @@ function buildDiagnostics(): DiagnosticsResponseT {
         : null,
       wait_when_throttled: state.rateLimitWait,
     },
+    web_search: buildWebSearchStatus(),
+  }
+}
+
+/** Map the executor describeExecutor() would pick to the diagnostics
+ *  contract. `base` (the /responses model or Ollama host) is the more
+ *  useful detail when present; else `notes` (the no-key explanation). */
+function buildWebSearchStatus(): DiagnosticsResponseT["web_search"] {
+  const executor = describeExecutor()
+  return {
+    kind: executor.web_tools,
+    detail: executor.base ?? executor.notes ?? null,
   }
 }
 
@@ -83,20 +98,11 @@ settingsApiRoutes.get("/diagnostics", (c) => {
   // Schema-validate before responding: drift between the runtime
   // shape and the published contract should fail loudly in tests,
   // not silently in the UI.
-  const parsed = DiagnosticsResponse.safeParse(payload)
-  if (!parsed.success) {
-    return c.json(
-      {
-        error: {
-          message: "Diagnostics payload failed schema validation",
-          type: "internal_error",
-          details: parsed.error.issues,
-        },
-      },
-      500,
-    )
-  }
-  return c.json(parsed.data)
+  return respondValidated(
+    c,
+    { schema: DiagnosticsResponse, label: "Diagnostics" },
+    payload,
+  )
 })
 
 settingsApiRoutes.get("/update-status", async (c) => {

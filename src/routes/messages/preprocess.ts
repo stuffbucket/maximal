@@ -6,9 +6,10 @@ import type {
   AnthropicTextBlock,
   AnthropicToolResultBlock,
   AnthropicUserContentBlock,
-} from "~/lib/anthropic-types"
+} from "~/lib/models/anthropic-types"
 import type { Model } from "~/services/copilot/get-models"
 
+import { getReasoningEffortForModel } from "~/lib/config/config"
 import {
   COMPACT_AUTO_CONTINUE,
   COMPACT_REQUEST,
@@ -18,8 +19,7 @@ import {
   compactSystemPromptStarts,
   compactTextOnlyGuard,
   type CompactType,
-} from "~/lib/compact"
-import { getReasoningEffortForModel } from "~/lib/config"
+} from "~/lib/models/compact"
 
 export const TOOL_REFERENCE_TURN_BOUNDARY = "Tool loaded."
 
@@ -581,44 +581,109 @@ const stripSamplingParams = (
   }
 }
 
-export const prepareMessagesApiPayload = (
+// Adaptive-thinking rewrite (the #210 home). Reads the client's incoming
+// thinking intent, then overwrites `payload.thinking` + sets `output_config`
+// when the model supports adaptive thinking and nothing disables it. The
+// intent read and the overwrite live in ONE pass so the ordering contract
+// (read-before-overwrite) can't be split apart by a later edit — the exact
+// class of regression that produced #210.
+const applyAdaptiveThinking = (
   payload: AnthropicMessagesPayload,
   selectedModel?: Model,
 ): void => {
-  stripCacheControl(payload)
-  filterAssistantThinkingBlocks(payload)
-
-  const hasThinking = Boolean(payload.thinking)
+  // Capture the client's incoming thinking intent BEFORE we overwrite
+  // payload.thinking below.
+  //   - incomingDisplay: an explicit `display` the client picked, if any. On
+  //     Copilot-served Claude `display: "summarized"` is what SURFACES the
+  //     thinking text; `{type:"adaptive"}` alone reasons silently and emits an
+  //     empty thinking block. We must preserve an explicit choice and otherwise
+  //     default to "summarized" (see below).
+  //   - clientDisabledThinking: the client EXPLICITLY turned thinking off
+  //     (`type: "disabled"`). We honor that instead of force-enabling adaptive.
+  const incomingDisplay = payload.thinking?.display
+  const clientDisabledThinking = payload.thinking?.type === "disabled"
 
   // https://platform.claude.com/docs/en/build-with-claude/extended-thinking#extended-thinking-with-tool-use
   // Using tool_choice: {"type": "any"} or tool_choice: {"type": "tool", "name": "..."} will result in an error because these options force tool use, which is incompatible with extended thinking.
   const toolChoice = payload.tool_choice
-  const disableThink = toolChoice?.type === "any" || toolChoice?.type === "tool"
+  const disableThink =
+    toolChoice?.type === "any"
+    || toolChoice?.type === "tool"
+    || clientDisabledThinking
 
-  // claude-opus-4.7+ rejects temperature/top_p/top_k with a 400.
-  stripSamplingParams(payload, selectedModel)
+  if (!selectedModel?.capabilities.supports.adaptive_thinking || disableThink) {
+    return
+  }
 
-  if (selectedModel?.capabilities.supports.adaptive_thinking && !disableThink) {
-    payload.thinking = {
-      type: "adaptive",
-    }
-    // align with vscode copilot
-    if (!hasThinking) {
-      payload.thinking.display = "summarized"
-    }
-    if (payload.model === "claude-opus-4.7") {
-      payload.thinking.display = "summarized"
-    }
-    let effort = getReasoningEffortForModel(payload.model)
-    if (effort === "none" || effort === "minimal") {
-      effort = "low"
-    }
-    const reasoningEffort = selectedModel.capabilities.supports.reasoning_effort
-    if (reasoningEffort && !reasoningEffort.includes(effort)) {
-      effort = reasoningEffort.at(-1) as "low" | "medium" | "high"
-    }
-    payload.output_config = {
-      effort: effort,
-    }
+  payload.thinking = {
+    type: "adaptive",
+  }
+  // Align with vscode copilot: default `display` to "summarized" unless the
+  // client explicitly picked one. On Copilot-served Claude this is what makes
+  // the thinking text surface, so gating on the incoming `display` field (not
+  // the presence of the whole thinking object) is what keeps "ask for
+  // thinking → get thinking" holding.
+  payload.thinking.display = incomingDisplay ?? "summarized"
+  // claude-opus-4.7 always uses the summarized display.
+  if (payload.model === "claude-opus-4.7") {
+    payload.thinking.display = "summarized"
+  }
+  let effort = getReasoningEffortForModel(payload.model)
+  if (effort === "none" || effort === "minimal") {
+    effort = "low"
+  }
+  const reasoningEffort = selectedModel.capabilities.supports.reasoning_effort
+  if (reasoningEffort && !reasoningEffort.includes(effort)) {
+    effort = reasoningEffort.at(-1) as "low" | "medium" | "high"
+  }
+  payload.output_config = {
+    effort: effort,
+  }
+}
+
+// A single named transformation of the outbound Messages-API payload. Passes
+// mutate `payload` in place (matching the existing contract) and read nothing
+// beyond the payload + selected model.
+type MessagesApiPass = {
+  name: string
+  run: (payload: AnthropicMessagesPayload, selectedModel?: Model) => void
+}
+
+// The Messages-API preprocessing pipeline, as an explicit ordered list of
+// named passes. ORDER IS LOAD-BEARING and matches the wire PRD
+// (docs/spec/wire/messages-wire-prd.md → "Upstream flow A"):
+//   1. stripCacheControl             — drop the `scope` field + inner
+//                                      tool_result cache_control Copilot rejects.
+//   2. filterAssistantThinkingBlocks — drop empty/placeholder thinking blocks.
+//   3. stripSamplingParams           — drop temperature/top_p/top_k that
+//                                      Copilot's Bedrock-backed Claude rejects.
+//   4. applyAdaptiveThinking         — enable adaptive thinking + effort; MUST
+//                                      run last so it reads the client's
+//                                      original thinking intent before
+//                                      overwriting it (the #210 contract).
+const MESSAGES_API_PASSES: ReadonlyArray<MessagesApiPass> = [
+  { name: "stripCacheControl", run: (payload) => stripCacheControl(payload) },
+  {
+    name: "filterAssistantThinkingBlocks",
+    run: (payload) => filterAssistantThinkingBlocks(payload),
+  },
+  {
+    name: "stripSamplingParams",
+    run: (payload, selectedModel) =>
+      stripSamplingParams(payload, selectedModel),
+  },
+  {
+    name: "applyAdaptiveThinking",
+    run: (payload, selectedModel) =>
+      applyAdaptiveThinking(payload, selectedModel),
+  },
+]
+
+export const prepareMessagesApiPayload = (
+  payload: AnthropicMessagesPayload,
+  selectedModel?: Model,
+): void => {
+  for (const pass of MESSAGES_API_PASSES) {
+    pass.run(payload, selectedModel)
   }
 }

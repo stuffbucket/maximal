@@ -29,6 +29,11 @@
     "externalBin": ["binaries/maximal"],
     "macOS": {
       "exceptionDomain": "localhost"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
     }
   }
 }

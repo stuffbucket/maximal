@@ -7,8 +7,8 @@
 
 import consola from "consola"
 
-import { evictRunning } from "~/lib/replace-running"
-import { getConfiguredApiKeys } from "~/lib/request-auth"
+import { getConfiguredApiKeys } from "~/lib/auth/request-auth"
+import { evictRunning } from "~/lib/platform/replace-running"
 
 /** Wrap evictRunning() with the CLI's error-handling. On failure to
  *  free the port we exit 1 with a readable message rather than dumping

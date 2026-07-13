@@ -10,7 +10,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-import { readSecret } from "~/lib/secrets"
+import { readSecret } from "~/lib/auth/secrets"
 
 // XDG-style fixture root outside the repo so nothing here can be
 // `git add`-ed. Deliberately NOT os.tmpdir(): CodeQL's

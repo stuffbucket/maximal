@@ -1,8 +1,9 @@
 import consola from "consola"
 
-import { getOauthAppConfig, getOauthUrls } from "~/lib/api-config"
-import { DEVICE_POLL_TIMEOUT_MS } from "~/lib/http-timeouts"
-import { sleep } from "~/lib/utils"
+import { getOauthAppConfig, getOauthUrls } from "~/lib/config/api-config"
+import { DEVICE_POLL_TIMEOUT_MS } from "~/lib/http/http-timeouts"
+import { sendRequest } from "~/lib/http/send-request"
+import { sleep } from "~/lib/platform/utils"
 
 import type { DeviceCodeResponse } from "./get-device-code"
 
@@ -47,10 +48,10 @@ export async function pollAccessToken(
 
     let response: Response
     try {
-      response = await fetch(accessTokenUrl, {
+      response = await sendRequest(accessTokenUrl, {
         method: "POST",
         headers,
-        signal: AbortSignal.timeout(DEVICE_POLL_TIMEOUT_MS),
+        timeoutMs: DEVICE_POLL_TIMEOUT_MS,
         body: JSON.stringify({
           client_id: clientId,
           device_code: deviceCode.device_code,

@@ -8,7 +8,7 @@
 import type {
   AnthropicMessagesPayload,
   AnthropicTool,
-} from "~/lib/anthropic-types"
+} from "~/lib/models/anthropic-types"
 
 import type { WebToolDecl } from "./types"
 

@@ -3,12 +3,16 @@ import { Hono } from "hono"
 import { cors } from "hono/cors"
 import { logger } from "hono/logger"
 
-import { staleRefreshMiddleware } from "./lib/refresh-models"
-import { createAuthMiddleware, requireGithubAuth } from "./lib/request-auth"
-import { getModelsLoadedAtMs } from "./lib/state"
-import { buildStatus } from "./lib/status"
-import { traceIdMiddleware } from "./lib/trace"
-import { cacheModels } from "./lib/utils"
+import {
+  createAuthMiddleware,
+  requireGithubAuth,
+} from "./lib/auth/request-auth"
+import { traceIdMiddleware } from "./lib/http/trace"
+import { staleRefreshMiddleware } from "./lib/models/refresh-models"
+import { cacheModels } from "./lib/platform/utils"
+import { getModelsLoadedAtMs } from "./lib/runtime-state/state"
+import { buildStatus } from "./lib/runtime-state/status"
+import { BUILD_VERSION } from "./lib/update/build-info"
 import { completionRoutes } from "./routes/chat-completions/route"
 import { debugRoutes } from "./routes/debug/route"
 import { embeddingRoutes } from "./routes/embeddings/route"
@@ -21,7 +25,6 @@ import { responsesRoutes } from "./routes/responses/route"
 import { settingsApiRoutes } from "./routes/settings/api"
 import { setupStatusRoute } from "./routes/setup-status"
 import { tokenUsageRoute } from "./routes/token-usage/route"
-import { tokenRoute } from "./routes/token/route"
 import { uiRoutes } from "./routes/ui/route"
 import { usageRoute } from "./routes/usage/route"
 
@@ -33,6 +36,16 @@ export const server = new Hono()
 const SERVER_START_MS = Date.now()
 
 server.use(traceIdMiddleware)
+// Stamp the proxy build version on every response so downstream clients
+// can read which Maximal build served their request without hitting a
+// separate endpoint. Global (right after trace) means it lands on
+// completion responses, /status, /settings/api/*, redirects, and errors
+// alike. Value is a static build constant — no per-request cost, no
+// secrets. Set before next() so it applies to c.res on the way out.
+server.use(async (c, next) => {
+  c.header("x-maximal-version", BUILD_VERSION)
+  await next()
+})
 server.use(logger())
 server.use(cors())
 server.use(
@@ -141,7 +154,6 @@ server.route("/models", modelRoutes)
 server.route("/embeddings", embeddingRoutes)
 server.route("/usage", usageRoute)
 server.route("/token-usage", tokenUsageRoute)
-server.route("/token", tokenRoute)
 server.route("/responses", responsesRoutes)
 
 // Compatibility with tools that expect v1/ prefix

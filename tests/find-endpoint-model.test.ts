@@ -4,12 +4,12 @@ import {
   findEndpointModel,
   findInModels,
   normalizeSdkModelId,
-} from "../src/lib/models"
-import { state } from "../src/lib/state"
+} from "../src/lib/models/models"
+import { state } from "../src/lib/runtime-state/state"
 
 // findInModels is a pure function (no state), so tests are immune to the
 // mock.module contamination that messages-handler.test.ts applies to
-// ~/lib/models. findEndpointModel is a one-line wrapper around findInModels;
+// ~/lib/models/models. findEndpointModel is a one-line wrapper around findInModels;
 // its state-reading path is exercised by route integration tests.
 
 const makeModel = (id: string, version: string, family: string) => ({

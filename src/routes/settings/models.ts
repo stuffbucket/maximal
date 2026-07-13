@@ -22,14 +22,16 @@ import { Hono } from "hono"
 
 import type { Model } from "~/services/copilot/get-models"
 
-import { forwardError } from "~/lib/error"
 import {
   ModelsListResponse,
   type ModelsListResponse as ModelsListResponseT,
   type ModelSummary as ModelSummaryT,
-} from "~/lib/settings-types"
-import { getModelsLoadedAtMs, state } from "~/lib/state"
-import { cacheModels } from "~/lib/utils"
+} from "~/lib/config/settings-types"
+import { forwardError } from "~/lib/errors/error"
+import { cacheModels } from "~/lib/platform/utils"
+import { getModelsLoadedAtMs, state } from "~/lib/runtime-state/state"
+
+import { respondValidated } from "./respond-validated"
 
 /** Flatten an upstream `Model` into the UI-shaped summary. Optional
  *  upstream fields collapse to null/false so the contract stays total. */
@@ -87,20 +89,11 @@ function buildModelsList(): ModelsListResponseT {
  *  the runtime shape and the published schema fails loudly in tests
  *  rather than silently in the UI. */
 function jsonModels(c: Context) {
-  const parsed = ModelsListResponse.safeParse(buildModelsList())
-  if (!parsed.success) {
-    return c.json(
-      {
-        error: {
-          message: "Models payload failed schema validation",
-          type: "internal_error",
-          details: parsed.error.issues,
-        },
-      },
-      500,
-    )
-  }
-  return c.json(parsed.data)
+  return respondValidated(
+    c,
+    { schema: ModelsListResponse, label: "Models" },
+    buildModelsList(),
+  )
 }
 
 export const modelsRoutes = new Hono()

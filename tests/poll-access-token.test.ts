@@ -5,11 +5,27 @@
  * poll interval to elapse. fetch is mocked to return scripted responses.
  */
 
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test"
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  mock,
+} from "bun:test"
 
-void mock.module("~/lib/utils", () => ({
+// Spread the real module so this stub doesn't strip `~/lib/platform/utils`'s other
+// exports for sibling files, and restore it in an awaited afterAll so it can't
+// leak forward (Bun keeps module mocks for the whole `bun test` process).
+const realUtilsModule = await import("~/lib/platform/utils")
+await mock.module("~/lib/platform/utils", () => ({
+  ...realUtilsModule,
   sleep: () => Promise.resolve(),
 }))
+afterAll(async () => {
+  await mock.module("~/lib/platform/utils", () => realUtilsModule)
+})
 
 const { pollAccessToken } = await import("~/services/github/poll-access-token")
 

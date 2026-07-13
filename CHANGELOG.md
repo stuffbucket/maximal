@@ -1,5 +1,129 @@
 # Changelog
 
+## [0.4.41](https://github.com/stuffbucket/maximal/compare/v0.4.40...v0.4.41) (2026-07-10)
+
+
+### Bug Fixes
+
+* **ci:** push updates manifest as app-repoman to clear require-PR ruleset ([#296](https://github.com/stuffbucket/maximal/issues/296)) ([ec7822b](https://github.com/stuffbucket/maximal/commit/ec7822b82f0212e9250c6871c341c5aebc425f7c))
+* **i18n:** use "Historique" for French log strings ([#301](https://github.com/stuffbucket/maximal/issues/301)) ([b6d57a0](https://github.com/stuffbucket/maximal/commit/b6d57a0c36da3e47ab901c2e865061bd875b7fe7)), closes [#299](https://github.com/stuffbucket/maximal/issues/299)
+* **site:** redirect legacy /maximal/ path to the root ([#294](https://github.com/stuffbucket/maximal/issues/294)) ([c8c4f43](https://github.com/stuffbucket/maximal/commit/c8c4f4313ff12c3a5527262635e60888b33b48f9))
+* **site:** serve mxml.sh at root, not the /maximal base path ([#290](https://github.com/stuffbucket/maximal/issues/290)) ([a562cc9](https://github.com/stuffbucket/maximal/commit/a562cc94c1842c7f79e5a6aec1e4589597763689))
+
+## [0.4.40](https://github.com/stuffbucket/maximal/compare/v0.4.39...v0.4.40) (2026-07-08)
+
+
+### Features
+
+* **billing:** price usage from Copilot token_prices, demote is_premium to legacy fallback ([#259](https://github.com/stuffbucket/maximal/issues/259)) ([#265](https://github.com/stuffbucket/maximal/issues/265)) ([7bcdc70](https://github.com/stuffbucket/maximal/commit/7bcdc706c562b523e705b624f11300910db90ca4))
+* **dashboard:** add per-model + total cost column from total_nano_aiu ([#259](https://github.com/stuffbucket/maximal/issues/259)) ([#264](https://github.com/stuffbucket/maximal/issues/264)) ([7c69a9b](https://github.com/stuffbucket/maximal/commit/7c69a9b3e35301e27878a158fc0ab6df6860aed9))
+* **dev:** add build-readiness verification (verify:build) + checklist ([#256](https://github.com/stuffbucket/maximal/issues/256)) ([8a3450e](https://github.com/stuffbucket/maximal/commit/8a3450e1840b2fb7f0fec6c736f3036081d2570c))
+* **dev:** add dispersion stats + interleaved A/B significance to baseline harness ([#255](https://github.com/stuffbucket/maximal/issues/255)) ([e3fffce](https://github.com/stuffbucket/maximal/commit/e3fffce8038ad6817d0e09d718bdc95a8247fe6f))
+* **dev:** add reusable baseline measurement harness for cost/warmup/caching ([#253](https://github.com/stuffbucket/maximal/issues/253)) ([6be5c2a](https://github.com/stuffbucket/maximal/commit/6be5c2a760445f349eaa09d4656eac8de14fbe36))
+* **i18n:** add zh, fr, de, ru, ja, it, pt locales ([#285](https://github.com/stuffbucket/maximal/issues/285)) ([4b82922](https://github.com/stuffbucket/maximal/commit/4b82922afc2c02a601d2772d4ec5764360f8a4aa))
+* **i18n:** full multi-locale catalog (es, en-GB, es-MX/es-ES) across settings + dashboard ([#282](https://github.com/stuffbucket/maximal/issues/282)) ([e579acb](https://github.com/stuffbucket/maximal/commit/e579acbcf079ec9accde76d99e340e08568f80a5))
+* **i18n:** localize OS-conditional UI terminology via an ICU MessageFormat catalog ([#279](https://github.com/stuffbucket/maximal/issues/279)) ([a69be20](https://github.com/stuffbucket/maximal/commit/a69be20c02f7ecf93f099b42fd7173e9024b4fab))
+* **i18n:** localize the native shell chrome to the picker locale ([#284](https://github.com/stuffbucket/maximal/issues/284)) ([0abc953](https://github.com/stuffbucket/maximal/commit/0abc953730e19b958c8edd9543622a7f4859d43a))
+* **responses:** enable opt-in prompt_cache_retention with safe fallback ([#252](https://github.com/stuffbucket/maximal/issues/252)) ([55d1736](https://github.com/stuffbucket/maximal/commit/55d1736035884001709e7ffdbb14a995e34cbdf9))
+* **setup:** add opt-in --deep-smoke for an end-to-end completion check ([#250](https://github.com/stuffbucket/maximal/issues/250)) ([7856b66](https://github.com/stuffbucket/maximal/commit/7856b665f2fa7116e8502bd8052d12af605f9b04)), closes [#227](https://github.com/stuffbucket/maximal/issues/227)
+* **shell-ui:** vendor Commissioner + Fraunces web fonts locally (offline/CSP) ([#268](https://github.com/stuffbucket/maximal/issues/268)) ([d1a56df](https://github.com/stuffbucket/maximal/commit/d1a56df30f73802f73cbf5c46761827aa0eb63e7))
+* **site:** extend updates manifest to schema 2 with per-channel downloads ([#267](https://github.com/stuffbucket/maximal/issues/267)) ([a21e17e](https://github.com/stuffbucket/maximal/commit/a21e17e0d5989aa263541f4ff1137ebc27ba418f)), closes [#218](https://github.com/stuffbucket/maximal/issues/218) [#219](https://github.com/stuffbucket/maximal/issues/219)
+* **site:** hydrate download links + version from manifest at runtime ([#221](https://github.com/stuffbucket/maximal/issues/221)) ([#273](https://github.com/stuffbucket/maximal/issues/273)) ([1bdac36](https://github.com/stuffbucket/maximal/commit/1bdac36fe82031e9cf0113dc0ded631c223b0176)), closes [#218](https://github.com/stuffbucket/maximal/issues/218)
+
+
+### Bug Fixes
+
+* **apps:** consolidate atomic-JSON writes behind one shared helper ([#245](https://github.com/stuffbucket/maximal/issues/245)) ([d3401d4](https://github.com/stuffbucket/maximal/commit/d3401d4d5a3655ac8d4a4a92ab8162d52aee1f69)), closes [#231](https://github.com/stuffbucket/maximal/issues/231)
+* **pages:** prevent duplicate github-pages artifacts on deploy re-run ([#239](https://github.com/stuffbucket/maximal/issues/239)) ([#263](https://github.com/stuffbucket/maximal/issues/263)) ([108d1bb](https://github.com/stuffbucket/maximal/commit/108d1bbc3e9d0aaf300f45f6b2bf5b1bfefc087a))
+* **security:** remove /token route that leaked the raw Copilot token ([#240](https://github.com/stuffbucket/maximal/issues/240)) ([43655f9](https://github.com/stuffbucket/maximal/commit/43655f981e0f1376eb020760943c6bd352a8f43d)), closes [#230](https://github.com/stuffbucket/maximal/issues/230)
+* **web-tools:** sum usage across agent turns and add keepalive pings ([#246](https://github.com/stuffbucket/maximal/issues/246)) ([7826578](https://github.com/stuffbucket/maximal/commit/78265785bf229e8cfac419d0f25285037c513fb8))
+* **web-tools:** sum usage across turns in non-streaming agent path ([#260](https://github.com/stuffbucket/maximal/issues/260)) ([#261](https://github.com/stuffbucket/maximal/issues/261)) ([3f0e6d4](https://github.com/stuffbucket/maximal/commit/3f0e6d44b18ab102a18b4519db387f84e46d48c9))
+
+
+### Performance Improvements
+
+* **warmup:** short-circuit Claude Code warmup requests locally instead of round-tripping ([#258](https://github.com/stuffbucket/maximal/issues/258)) ([#262](https://github.com/stuffbucket/maximal/issues/262)) ([8d3ee4d](https://github.com/stuffbucket/maximal/commit/8d3ee4d0da288046e575ae7bfa01463bf7b23d79))
+
+## [0.4.39](https://github.com/stuffbucket/maximal/compare/v0.4.38...v0.4.39) (2026-07-03)
+
+
+### Features
+
+* **server:** stamp x-maximal-version response header on all responses ([#213](https://github.com/stuffbucket/maximal/issues/213)) ([d45bd8e](https://github.com/stuffbucket/maximal/commit/d45bd8e63c99e74e93baccc351808e5f20ea2e25))
+* **web-tools:** no-key web_search via Copilot /responses, DuckDuckGo fallback ([#205](https://github.com/stuffbucket/maximal/issues/205)) ([6cbdb36](https://github.com/stuffbucket/maximal/commit/6cbdb36a8bcd96bc015d9ad3999f84ea6f828aa3)), closes [#204](https://github.com/stuffbucket/maximal/issues/204)
+
+
+### Bug Fixes
+
+* **claude-desktop:** restore MCP/extension keys, fix Artifacts preview ([#203](https://github.com/stuffbucket/maximal/issues/203)) ([4037fe4](https://github.com/stuffbucket/maximal/commit/4037fe427cacf164ff015a0f51ba3470e5ed5cdd)), closes [#188](https://github.com/stuffbucket/maximal/issues/188)
+* **thinking:** honor client extended-thinking display and disable on Copilot-served Claude ([#211](https://github.com/stuffbucket/maximal/issues/211)) ([e5510a5](https://github.com/stuffbucket/maximal/commit/e5510a5612236342c8ccd7824e3196439945e022))
+* **web-tools:** align web_fetch domain matching with spec-correct web_search matcher ([#209](https://github.com/stuffbucket/maximal/issues/209)) ([0cccb40](https://github.com/stuffbucket/maximal/commit/0cccb40453011960f91c9651c8434cde94e0ce78))
+
+## [0.4.38](https://github.com/stuffbucket/maximal/compare/v0.4.37...v0.4.38) (2026-07-03)
+
+
+### Bug Fixes
+
+* **auth:** tear down Copilot refresh loop cleanly on abort ([#197](https://github.com/stuffbucket/maximal/issues/197)) ([18ca76e](https://github.com/stuffbucket/maximal/commit/18ca76e1009d254e449a1e58110bca84f2afc0c3))
+* **ci:** stop CodeQL Reconcile crashing on alert re-open ([#195](https://github.com/stuffbucket/maximal/issues/195)) ([68620c2](https://github.com/stuffbucket/maximal/commit/68620c2b34dbea5af2f2220eab1c749dea4ab18c))
+* **errors:** make model_not_supported advice client-neutral ([#201](https://github.com/stuffbucket/maximal/issues/201)) ([be26b58](https://github.com/stuffbucket/maximal/commit/be26b580b8b5c7a3622687f5a588cee21b8f50fd))
+* **messages:** default Claude Code haiku tier to a tool-competent model ([#191](https://github.com/stuffbucket/maximal/issues/191)) ([6df203c](https://github.com/stuffbucket/maximal/commit/6df203c5f6755c6ca1c493442ad526ff16912af3))
+
+## [0.4.37](https://github.com/stuffbucket/maximal/compare/v0.4.36...v0.4.37) (2026-06-30)
+
+
+### Features
+
+* **apps:** registry-driven app integrations, generic apiKeyHelper, UI harness ([#189](https://github.com/stuffbucket/maximal/issues/189)) ([f714537](https://github.com/stuffbucket/maximal/commit/f714537a6fb39e21b89b03ee1dad71fadf68c739))
+
+## [0.4.36](https://github.com/stuffbucket/maximal/compare/v0.4.35...v0.4.36) (2026-06-25)
+
+
+### Bug Fixes
+
+* **site:** Windows installer pickup + light-mode god-rays + stale-cache bypass ([#182](https://github.com/stuffbucket/maximal/issues/182)) ([2829bfc](https://github.com/stuffbucket/maximal/commit/2829bfc9301f47e2ad7cd0df1253fed0616c85ae))
+* **update:** dev build of current release no longer self-reports an upgrade ([#186](https://github.com/stuffbucket/maximal/issues/186)) ([389d081](https://github.com/stuffbucket/maximal/commit/389d08127b5a9d40dfb33cfeb7f44a7259fb7eb0))
+
+## [0.4.35](https://github.com/stuffbucket/maximal/compare/v0.4.34...v0.4.35) (2026-06-24)
+
+
+### Features
+
+* **shell:** warn to restart Claude Code when disabling routing on Windows ([c881305](https://github.com/stuffbucket/maximal/commit/c881305e69dd2af6b6e4dd76ae69f357b01acb20))
+* Windows tray parity + god-rays site redesign (v0.4.35) ([1164d79](https://github.com/stuffbucket/maximal/commit/1164d7989a64d24af24814624824e6ae8bdb868e))
+* Windows tray parity + god-rays site redesign (v0.4.35) ([#181](https://github.com/stuffbucket/maximal/issues/181)) ([1164d79](https://github.com/stuffbucket/maximal/commit/1164d7989a64d24af24814624824e6ae8bdb868e))
+
+
+### Bug Fixes
+
+* **auth:** prime models cache after device-flow sign-in ([#177](https://github.com/stuffbucket/maximal/issues/177)) ([8259883](https://github.com/stuffbucket/maximal/commit/8259883fdb35520b398bac11595289598191b458))
+* **shell:** show splash only once the webview has painted ([6fdb0fc](https://github.com/stuffbucket/maximal/commit/6fdb0fcb17d2202fb901852a1ed619a25702a094))
+* **shell:** windows startup notification — system tray + down arrow ([ba14174](https://github.com/stuffbucket/maximal/commit/ba14174c5bbade3c5fbd60f5b79e4befd64e157e))
+* **windows:** correct Claude Desktop 3P dir to %LOCALAPPDATA% + fix detection ([f010499](https://github.com/stuffbucket/maximal/commit/f0104990b4f9b81f3f9f6f36d40d3fd8ba6c797d))
+* **windows:** detect MSIX/Store Claude Desktop install ([aba5850](https://github.com/stuffbucket/maximal/commit/aba5850cedc8054d5475598c406e6453cd8ce3f1))
+
+## [0.4.34](https://github.com/stuffbucket/maximal/compare/v0.4.33...v0.4.34) (2026-06-24)
+
+
+### Bug Fixes
+
+* **windows:** slim CLI installers to binary-on-PATH; verify tray launcher ([#176](https://github.com/stuffbucket/maximal/issues/176)) ([db06e44](https://github.com/stuffbucket/maximal/commit/db06e445d1507321448e5c2f23a5c17341c2e05f))
+
+## [0.4.33](https://github.com/stuffbucket/maximal/compare/v0.4.32...v0.4.33) (2026-06-24)
+
+
+### Features
+
+* **update:** add beta manifest channel ([5b4fb02](https://github.com/stuffbucket/maximal/commit/5b4fb028ebe243952347dfd0475ce214b461eb5c))
+* **update:** drive the update channel from the build's MAXIMAL_CHANNEL ([#166](https://github.com/stuffbucket/maximal/issues/166)) ([ae0ca68](https://github.com/stuffbucket/maximal/commit/ae0ca687003c89f171aa03efc97e9e06d4140c3a))
+* **windows:** functional parity with macOS — tray app, %APPDATA% paths, Claude discovery, fixed installers ([#172](https://github.com/stuffbucket/maximal/issues/172)) ([708568c](https://github.com/stuffbucket/maximal/commit/708568cba4a3911d00ac09fef73f3640eda3b392))
+
+
+### Bug Fixes
+
+* **dev:** self-heal the ui-embed stub so fresh worktrees pass the gates ([#161](https://github.com/stuffbucket/maximal/issues/161)) ([baff99e](https://github.com/stuffbucket/maximal/commit/baff99e29b01e3b05901f7a9b5220a880b07b402))
+* **update:** compare prerelease versions ([45e63fc](https://github.com/stuffbucket/maximal/commit/45e63fc03329b5beb97977f64712ef4ae1bce41b))
+
 ## [0.4.32](https://github.com/stuffbucket/maximal/compare/v0.4.31...v0.4.32) (2026-06-22)
 
 

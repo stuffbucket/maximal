@@ -11,7 +11,7 @@
  */
 import { expect } from "bun:test"
 
-import type { AuthStatus } from "~/lib/settings-types"
+import type { AuthStatus } from "~/lib/config/settings-types"
 
 export type PendingStatus = Extract<
   AuthStatus,

@@ -21,7 +21,7 @@ import {
   markNeedsReauth,
   readRegistry,
   writeRegistry,
-} from "~/lib/github-token-store"
+} from "~/lib/auth/github-token-store"
 
 function seed() {
   // Two accounts, the first active.

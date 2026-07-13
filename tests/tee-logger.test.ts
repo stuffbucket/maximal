@@ -11,9 +11,9 @@ import consolaDefault from "consola"
 import fs from "node:fs"
 import path from "node:path"
 
-import { createTeeLogger } from "~/lib/logger"
-import { PATHS } from "~/lib/paths"
-import { state } from "~/lib/state"
+import { createTeeLogger } from "~/lib/platform/logger"
+import { PATHS } from "~/lib/platform/paths"
+import { state } from "~/lib/runtime-state/state"
 
 const consola = consolaDefault
 

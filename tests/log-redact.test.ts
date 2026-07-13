@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { redactForLog, scrubSecrets } from "~/lib/log-redact"
+import { redactForLog, scrubSecrets } from "~/lib/platform/log-redact"
 
 describe("scrubSecrets", () => {
   test("masks GitHub token shapes (gho_/ghp_/ghu_/ghr_/ghs_)", () => {

@@ -4,7 +4,7 @@ What managed-preferences keys Claude Desktop reads, where they live,
 and which ones matter for using this proxy as a third-party inference
 gateway.
 
-Last verified: 2026-05-04.
+Last verified: 2026-07-03.
 
 ## Why this matters here
 
@@ -26,16 +26,17 @@ with `defaults write` (no MDM needed) and Claude Desktop respects them.
 file-based managed-settings > Windows registry. The
 `claude_desktop_config.json` UI preferences sit below the managed tier.
 
-## Default profile written by `copilot-api configure-claude-desktop`
+## Default profile written by `maximal app claude-desktop --enable`
 
-`copilot-api setup` is client-neutral and **does not configure Claude
+`maximal setup` is client-neutral and **does not configure Claude
 Desktop**. To pair Claude Desktop with the proxy, run the opt-in
 subcommand:
 
 ```sh
-copilot-api configure-claude-desktop          # write the profile
-copilot-api configure-claude-desktop --revert # remove our keys
-copilot-api configure-claude-desktop --force  # write even if Claude Desktop isn't installed yet
+maximal app claude-desktop --enable           # write the profile
+maximal app claude-desktop --disable          # remove our keys
+maximal app claude-desktop --enable --force   # write even if Claude Desktop isn't installed yet
+maximal app claude-desktop --enable --managed # emit an MDM .mobileconfig instead
 ```
 
 The command writes the full "Default" profile that Claude Desktop's
@@ -68,7 +69,8 @@ gateway-wiring keys. The complete set:
 `allowedWorkspaceFolders` is parameterized to the running user's
 `$HOME` and the directory is created on disk if missing. The merge is
 allowlist-only — keys outside this set are preserved verbatim, and
-`copilot-api uninstall --revert-claude` removes exactly these keys.
+`maximal app claude-desktop --disable` (or `maximal uninstall --force`)
+removes exactly these keys.
 
 `preferences` is the one **nested** block we touch: we set only the
 `coworkWebSearchEnabled` sub-key and preserve every other preference

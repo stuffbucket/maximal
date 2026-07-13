@@ -27,7 +27,7 @@ import { Hono } from "hono"
 const realGetDeviceCodeModule =
   await import("~/services/github/get-device-code")
 
-void mock.module("~/services/github/get-device-code", () => ({
+await mock.module("~/services/github/get-device-code", () => ({
   getDeviceCode: () =>
     Promise.resolve({
       device_code: "device-xyz",
@@ -38,15 +38,15 @@ void mock.module("~/services/github/get-device-code", () => ({
     }),
 }))
 
-const { AuthStatus } = await import("~/lib/settings-types")
+const { AuthStatus } = await import("~/lib/config/settings-types")
 const {
   __resetAuthControllerForTests,
   __setAuthControllerDepsForTests,
   markSignedIn,
-} = await import("~/lib/auth-controller")
-const { createAuthMiddleware } = await import("~/lib/request-auth")
+} = await import("~/lib/auth/auth-controller")
+const { createAuthMiddleware } = await import("~/lib/auth/request-auth")
 const { settingsApiRoutes } = await import("~/routes/settings/api")
-const { state } = await import("~/lib/state")
+const { state } = await import("~/lib/runtime-state/state")
 
 function buildApp(opts?: { apiKeys?: Array<string> }) {
   const app = new Hono()
@@ -262,8 +262,8 @@ describe("/settings/api/auth/github — cancel keeps you signed in", () => {
   })
 })
 
-afterAll(() => {
-  void mock.module(
+afterAll(async () => {
+  await mock.module(
     "~/services/github/get-device-code",
     () => realGetDeviceCodeModule,
   )

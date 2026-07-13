@@ -11,23 +11,23 @@
 import consola from "consola"
 import { serve } from "srvx"
 
-import { type AccountType } from "~/lib/auth-types"
-import { removeLegacyShimIfPresent } from "~/lib/claude-cli-detect"
-import { reconcileClaudeCodeOnBoot } from "~/lib/claude-code-reconcile"
-import { ensureCliSymlink } from "~/lib/cli-path"
-import { mergeConfigWithDefaults } from "~/lib/config"
-import { initOpencodeVersion } from "~/lib/opencode"
-import { ensurePaths } from "~/lib/paths"
-import { initProxyFromEnv } from "~/lib/proxy"
-import { writePidfile } from "~/lib/replace-running"
-import { state } from "~/lib/state"
+import { removeLegacyShimIfPresent } from "~/apps/claude-code/detect"
+import { reconcileClaudeCodeOnBoot } from "~/apps/claude-code/reconcile"
+import { type AccountType } from "~/lib/auth/auth-types"
+import { mergeConfigWithDefaults } from "~/lib/config/config"
+import { initProxyFromEnv } from "~/lib/http/proxy"
+import { ensureCliSymlink } from "~/lib/platform/cli-path"
+import { initOpencodeVersion } from "~/lib/platform/opencode"
+import { ensurePaths } from "~/lib/platform/paths"
+import { writePidfile } from "~/lib/platform/replace-running"
 import {
   cacheMacMachineId,
   cacheVsCodeDeviceId,
   cacheVsCodeSessionId,
   cacheVSCodeVersion,
-} from "~/lib/utils"
-import { getGitVersion, shortSha } from "~/lib/version"
+} from "~/lib/platform/utils"
+import { hasGithubToken, state } from "~/lib/runtime-state/state"
+import { getGitVersion, shortSha } from "~/lib/update/version"
 
 import { initBootLogger, printReadyBanner } from "./boot-io"
 import { emitBootStatus } from "./boot-status"
@@ -195,7 +195,7 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   bootLogger.info(
     `listening url=${serverUrl} `
       + `executor=${executorName.split(" ")[0]} `
-      + `auth=${state.githubToken ? "authenticated" : "unauthenticated"}`,
+      + `auth=${hasGithubToken() ? "authenticated" : "unauthenticated"}`,
   )
 
   const httpServer = serve({

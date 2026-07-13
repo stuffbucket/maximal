@@ -1,0 +1,262 @@
+# Windows Tauri shell fast-iteration harness (manual).
+#
+# The macOS menu-bar app (shell/) is built by the private macOS builder via
+# .macos-builder/build.sh; the shell has NEVER been cross-built for Windows,
+# even though its tray / menu / notification code is not macOS-gated and
+# tauri.conf.json declares `targets: "all"`. We develop on macOS and cannot
+# build Tauri-for-Windows locally, so this workflow is the only way to verify
+# the Windows shell actually compiles and bundles.
+#
+# It is `workflow_dispatch`-only (never on push/PR/tag) and runs entirely on
+# a windows-2022 runner:
+#
+#   1. Build the embedded settings/dashboard UI + the ui-embed manifest.
+#   2. Compile the proxy sidecar for win-x64 via scripts/build-sidecar.ts,
+#      which drops it at shell/src-tauri/binaries/maximal-<triple>(.exe) per
+#      Tauri's target-triple externalBin convention.
+#   3. `bun run tauri build` for Windows → NSIS per-user installer (+ the
+#      bare .exe). NSIS is chosen over WiX/MSI to match the macOS per-user,
+#      no-admin model (installMode: currentUser in tauri.conf.json).
+#   4. Upload the installer + exe as artifacts.
+#
+# A green run here proves the Windows shell BUILDS. It does NOT launch the GUI
+# (Tauri can't run headlessly on the runner), so a launch-smoke is out of
+# scope — the build itself is the gate.
+#
+# Trigger: Actions tab -> "windows shell (dev)" -> Run workflow, pick the
+# branch. Or: gh workflow run windows-shell-dev.yml --ref agent/win-shell
+
+name: windows shell (dev)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Synthetic version for the dev build (no leading v)"
+        required: false
+        default: "0.0.0-dev"
+
+# A second dispatch supersedes an in-flight one for the same branch.
+concurrency:
+  group: windows-shell-dev-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    env:
+      MAXIMAL_VERSION: ${{ github.event.inputs.version }}
+      MAXIMAL_GIT_SHA: ${{ github.sha }}
+      MAXIMAL_GIT_BRANCH: ${{ github.ref_name }}
+      MAXIMAL_CHANNEL: dev
+      # Force a fresh sidecar compile so version metadata is re-stamped and the
+      # up-to-date short-circuit in build-sidecar.ts can't skip the win-x64 build.
+      MAXIMAL_FORCE_SIDECAR: "1"
+      # Retry crate downloads instead of failing on a transient connection
+      # reset (belt-and-suspenders alongside the cargo cache).
+      CARGO_NET_RETRY: "10"
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: ./.github/actions/setup-bun
+        with:
+          bun-version: 1.3.11
+
+      # rustup ships preinstalled on the windows-2022 image with the
+      # x86_64-pc-windows-msvc toolchain. Use it directly rather than a
+      # third-party toolchain action (internal MS CI environments reject
+      # non-MS/GitHub-sourced actions — same reason setup-bun is vendored).
+      - name: Ensure Rust msvc toolchain
+        shell: pwsh
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup target add x86_64-pc-windows-msvc
+          rustc -vV
+
+      # Cache the cargo registry/git downloads + the compiled target dir.
+      # The registry cache means crates are served locally instead of being
+      # re-downloaded from crates.io every run (which intermittently fails
+      # with a connection reset), and target/ skips recompiling unchanged
+      # dependency crates. Same key as the release windows-shell job, so the
+      # two share a warm cache. GitHub-published action (policy-allowed).
+      - name: Cache cargo registry + target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            shell/src-tauri/target
+          key: windows-cargo-shell-${{ hashFiles('shell/src-tauri/Cargo.lock') }}
+          restore-keys: |
+            windows-cargo-shell-
+
+      - name: Install dependencies
+        # bash: setup-bun adds a Git-Bash-style PATH ($HOME/.bun/bin) to
+        # GITHUB_PATH, which pwsh (the windows-2022 default shell) can't
+        # resolve — so every bun step must run under bash.
+        shell: bash
+        run: bun install --frozen-lockfile
+
+      # The embedded settings/dashboard UI lives in shell/ with its own
+      # manifest; the root install doesn't cover it. Mirrors the release
+      # `binaries` job and the windows-installer-dev workflow. This also
+      # pulls in the shell's @tauri-apps/cli for `bun run tauri build`.
+      - name: Install shell dependencies
+        working-directory: shell
+        shell: bash
+        run: bun install --frozen-lockfile
+
+      - name: Build web UI + ui-embed manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          bun run build:ui
+          bun run scripts/gen-ui-embed.ts
+
+      # Compile the proxy sidecar for win-x64 and place it under
+      # shell/src-tauri/binaries/ for Tauri's externalBin resolver. On a
+      # Windows host, build-sidecar.ts reads the rustc host triple
+      # (x86_64-pc-windows-msvc) and writes maximal-x86_64-pc-windows-msvc;
+      # Bun's --compile appends .exe on Windows targets.
+      - name: Build win-x64 sidecar (externalBin)
+        shell: bash
+        run: bun run scripts/build-sidecar.ts --force
+
+      # Tauri expects the externalBin at binaries/maximal-<triple>.exe. Make
+      # sure that exact name exists; if build-sidecar.ts wrote it without the
+      # .exe (Bun did not auto-append), copy it into place so the bundle step
+      # can resolve it. Fail loudly if neither form exists.
+      - name: Verify sidecar placement
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = 'shell/src-tauri/binaries'
+          $triple = 'x86_64-pc-windows-msvc'
+          $exe = Join-Path $dir "maximal-$triple.exe"
+          $bare = Join-Path $dir "maximal-$triple"
+          if (-not (Test-Path $exe)) {
+            if (Test-Path $bare) {
+              Copy-Item $bare $exe -Force
+              Write-Host "copied bare sidecar -> $exe"
+            } else {
+              Write-Error "sidecar not found: neither $exe nor $bare exists"
+              exit 1
+            }
+          }
+          Get-ChildItem $dir
+          Write-Host "sidecar OK: $exe ($((Get-Item $exe).Length) bytes)"
+
+      # Build the Tauri app for Windows. The NSIS per-user installer + the
+      # raw .exe are produced under shell/src-tauri/target/release/bundle/.
+      # build:ui runs again as beforeBuildCommand (cheap, idempotent).
+      - name: Tauri build (Windows, NSIS)
+        working-directory: shell
+        shell: bash
+        run: |
+          # The UI + ui-embed manifest were already built by the step above.
+          # Tauri runs beforeBuildCommand via cmd.exe on Windows, where bun
+          # (only on the Git-Bash-style PATH from setup-bun) can't resolve —
+          # so override the hook to empty for this CI build to skip the
+          # redundant re-run rather than fight bun-under-cmd.
+          bun run tauri build --bundles nsis \
+            --config '{"build":{"beforeBuildCommand":""}}'
+
+      - name: Locate build outputs
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = 'shell/src-tauri/target/release'
+          $nsis = Get-ChildItem -Path (Join-Path $root 'bundle/nsis') -Filter '*-setup.exe' -ErrorAction SilentlyContinue
+          $app = Get-ChildItem -Path $root -Filter 'Maximal.exe' -ErrorAction SilentlyContinue
+          if (-not $nsis) {
+            Write-Error "NSIS installer not produced under $root/bundle/nsis"
+            exit 1
+          }
+          Write-Host "NSIS installer: $($nsis.FullName) ($($nsis.Length) bytes)"
+          if ($app) { Write-Host "App exe: $($app.FullName) ($($app.Length) bytes)" }
+
+      - name: Upload Windows shell artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-shell-dev
+          path: |
+            shell/src-tauri/target/release/bundle/nsis/*-setup.exe
+            shell/src-tauri/target/release/Maximal.exe
+          if-no-files-found: error
+
+  # Install + launcher verification — a SEPARATE job so it reuses the
+  # already-built NSIS artifact instead of recompiling. Iterating on these
+  # assertions costs seconds (download + install), not a full Rust compile;
+  # if only this fails, "Re-run failed jobs" reruns just this job.
+  verify-install:
+    needs: build
+    runs-on: windows-2022
+    steps:
+      - name: Download installer artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-shell-dev
+          path: dist
+
+      # Prove the tray app is what a user actually gets: silently install the
+      # NSIS package, then assert a "Maximal" Start Menu shortcut lands that
+      # targets the app exe inside the install dir — the Windows analog of the
+      # macOS .app in /Applications (how a user finds + launches maximal). We
+      # can't headlessly launch the GUI, so we verify the launcher exists +
+      # points at the app, not the running window.
+      - name: Install NSIS + verify Start Menu launcher
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $setup = (Get-ChildItem dist -Recurse -Filter '*-setup.exe' | Select-Object -First 1).FullName
+          if (-not $setup) { throw "no *-setup.exe in the downloaded artifact" }
+          Write-Host "Installing $setup /S ..."
+          $p = Start-Process -FilePath $setup -ArgumentList '/S' -Wait -PassThru
+          Write-Host "installer exit code: $($p.ExitCode)"
+          Start-Sleep -Seconds 3
+
+          # Tauri per-user (currentUser) NSIS installs under %LOCALAPPDATA%\Maximal.
+          $installRoot = Join-Path $env:LOCALAPPDATA 'Maximal'
+          if (-not (Test-Path $installRoot)) { throw "install dir missing: $installRoot" }
+          Get-ChildItem $installRoot | ForEach-Object { Write-Host "  installed: $($_.Name)" }
+
+          # The launcher is the "Maximal" Start Menu shortcut (per-user
+          # Programs), exactly named Maximal.lnk.
+          $sm = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
+          $lnk = Get-ChildItem $sm -Recurse -Filter 'Maximal.lnk' -ErrorAction SilentlyContinue |
+                 Select-Object -First 1
+          if (-not $lnk) { throw "no 'Maximal.lnk' Start Menu shortcut found under $sm" }
+          Write-Host "Start Menu shortcut: $($lnk.FullName)"
+
+          # It must target the app binary at the known path. productName is
+          # "Maximal" (install dir) but the Tauri/cargo binary is maximal-shell,
+          # so the launcher target is %LOCALAPPDATA%\Maximal\maximal-shell.exe.
+          $expected = Join-Path $installRoot 'maximal-shell.exe'
+          $target = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk.FullName).TargetPath
+          Write-Host "shortcut target: $target"
+          if ($target -ne $expected) {
+            throw "Start Menu shortcut should target '$expected', got '$target'"
+          }
+          if (-not (Test-Path $target)) { throw "shortcut target does not exist on disk: $target" }
+          Write-Host "Start Menu launcher OK -> $target"
+
+      - name: Uninstall NSIS app
+        if: always()
+        shell: pwsh
+        run: |
+          # Kill anything the installer may have auto-launched, then run the
+          # per-user uninstaller silently (best-effort; runner is ephemeral).
+          Get-Process -Name 'Maximal', 'maximal', 'maximal-shell' -ErrorAction SilentlyContinue |
+            Stop-Process -Force -ErrorAction SilentlyContinue
+          $unins = Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Maximal') -Recurse `
+            -Filter 'uninstall.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($unins) {
+            Write-Host "uninstalling: $($unins.FullName)"
+            Start-Process -FilePath $unins.FullName -ArgumentList '/S' -Wait -ErrorAction SilentlyContinue
+          } else {
+            Write-Host "uninstaller not found (non-fatal in CI)"
+          }

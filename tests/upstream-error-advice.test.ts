@@ -9,13 +9,13 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 
 import type { Model } from "~/services/copilot/get-models"
 
-import { forwardError, HTTPError } from "~/lib/error"
-import { state } from "~/lib/state"
+import { forwardError, HTTPError } from "~/lib/errors/error"
 import {
   adviseUpstreamError,
   composeAdvisedMessage,
   parseUpstreamError,
-} from "~/lib/upstream-error-advice"
+} from "~/lib/errors/upstream-error-advice"
+import { state } from "~/lib/runtime-state/state"
 
 function makeModel(over: Partial<Model> & { id: string; name: string }): Model {
   return {
@@ -84,10 +84,13 @@ describe("composeAdvisedMessage", () => {
 })
 
 describe("adviseUpstreamError — model_not_supported", () => {
-  test("matches by code and lists plan models + the /model recovery", () => {
+  test("matches by code and lists plan models with client-neutral recovery", () => {
     const msg = adviseUpstreamError(400, COPILOT_BODY, [SONNET])
     expect(msg).not.toBeNull()
     expect(msg).toContain("doesn't offer the requested model")
+    // Client-neutral lead — the picker/explicit-id path, not a Claude-Code command.
+    expect(msg).toContain("your client's model picker")
+    // Claude Code's /model stays as a parenthetical hint, not the primary instruction.
     expect(msg).toContain("/model")
     // forwardId rewrites the dotted Copilot id to the /v1/models form.
     expect(msg).toContain("Claude Sonnet 4.5 (claude-sonnet-4-5-20260301)")

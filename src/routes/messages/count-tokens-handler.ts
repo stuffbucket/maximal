@@ -2,12 +2,19 @@ import type { Context } from "hono"
 
 import consola from "consola"
 
-import { reverseId } from "~/lib/anthropic-id-rewrite"
-import { type AnthropicMessagesPayload } from "~/lib/anthropic-types"
-import { getAnthropicApiKey, getClaudeTokenMultiplier } from "~/lib/config"
-import { getTokenCount } from "~/lib/tokenizer"
+import {
+  getAnthropicApiKey,
+  getClaudeTokenMultiplier,
+} from "~/lib/config/config"
+import { sendRequest } from "~/lib/http/send-request"
+import { reverseId } from "~/lib/models/anthropic-id-rewrite"
+import {
+  type AnthropicMessagesPayload,
+  ANTHROPIC_API_VERSION,
+} from "~/lib/models/anthropic-types"
+import { getTokenCount } from "~/lib/models/tokenizer"
 
-import { findEndpointModel } from "../../lib/models"
+import { findEndpointModel } from "../../lib/models/models"
 import { translateToOpenAI } from "./non-stream-translation"
 import { stripUnsupportedTopLevelAnthropicFields } from "./preprocess"
 
@@ -21,20 +28,20 @@ async function countTokensViaAnthropic(
 ): Promise<Response | null> {
   if (!payload.model.startsWith("claude")) return null
 
-  const apiKey = getAnthropicApiKey()
-  if (!apiKey) return null
+  // Presence check only — the key itself is read + attached inside the
+  // mechanism (host-inferred for api.anthropic.com); this handler never sees it.
+  if (!getAnthropicApiKey()) return null
 
   // Copilot uses dotted names (claude-opus-4.6) but Anthropic requires dashes (claude-opus-4-6)
   const model = payload.model.replaceAll(".", "-")
 
-  const res = await fetch(
+  const res = await sendRequest(
     "https://api.anthropic.com/v1/messages/count_tokens",
     {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
+        "anthropic-version": ANTHROPIC_API_VERSION,
         "anthropic-beta": "token-counting-2024-11-01",
       },
       body: JSON.stringify({ ...payload, model }),

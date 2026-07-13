@@ -14,10 +14,10 @@
 import { describe, expect, test } from "bun:test"
 import { Hono } from "hono"
 
-import type { AuthStatus } from "~/lib/settings-types"
+import type { AuthStatus } from "~/lib/config/settings-types"
 
-import { extractRequestApiKey, SSE_EVENTS_PATH } from "~/lib/request-auth"
-import { settingsEventBus } from "~/lib/settings-events"
+import { extractRequestApiKey, SSE_EVENTS_PATH } from "~/lib/auth/request-auth"
+import { settingsEventBus } from "~/lib/config/settings-events"
 import { eventsRoutes } from "~/routes/settings/events"
 
 function mount(): Hono {

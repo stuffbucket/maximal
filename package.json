@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
   "name": "@stuffbucket/maximal",
-  "version": "0.4.32",
+  "version": "0.4.41",
   "description": "Local proxy that exposes GitHub Copilot as OpenAI- and Anthropic-compatible HTTP endpoints.",
   "keywords": [
     "proxy",
@@ -44,17 +44,20 @@
     "lint": "eslint --cache",
     "lint:all": "eslint --cache .",
     "lint:fast": "oxlint",
+    "measure:baseline": "bun scripts/dev/measure-baseline.ts",
     "mutate": "stryker run",
     "prepack": "bun run build",
     "package-dmg": "bun scripts/package-dmg.ts",
-    "prepare": "bun run ensure:ui-embed && simple-git-hooks",
+    "prepare": "bun run ensure:ui-embed && simple-git-hooks && cd shell && bun install",
     "release:dmg": "bun scripts/package-dmg.ts --upload",
     "release:manual": "bumpp && bun publish --access public",
     "render-formula": "bun scripts/sync-homebrew-formula.ts",
     "sbom": "bun scripts/sbom.ts",
     "scan:secrets": "trufflehog filesystem . --no-verification --fail --no-update --exclude-paths .trufflehog-exclude",
     "start": "NODE_ENV=production bun run ./src/main.ts",
-    "typecheck": "tsc"
+    "typecheck": "tsc",
+    "ui:harness": "bun run build:ui && bun run scripts/ui-harness.ts",
+    "verify:build": "bun scripts/dev/verify-build.ts"
   },
   "simple-git-hooks": {
     "pre-commit": "bunx lint-staged"
@@ -78,7 +81,6 @@
     "turndown": "^7.2.4",
     "undici": "^7.16.0",
     "winreg": "^1.2.5",
-    "yaml": "^2.9.0",
     "zod": "^4.1.11"
   },
   "devDependencies": {

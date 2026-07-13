@@ -15,7 +15,7 @@ import {
   test,
 } from "bun:test"
 
-import type { AccountRecord } from "~/lib/github-token-store"
+import type { AccountRecord } from "~/lib/auth/github-token-store"
 
 import {
   deferred,
@@ -50,6 +50,8 @@ const harness = {
   addAccountCalls: [] as Array<AccountRecord>,
   setupCopilotTokenImpl: (): Promise<void> => Promise.resolve(),
   setupCopilotTokenCalls: 0,
+  cacheModelsImpl: (): Promise<void> => Promise.resolve(),
+  cacheModelsCalls: 0,
   deactivateCalls: 0,
   markNeedsReauthCalls: [] as Array<{
     status: number | null
@@ -68,18 +70,24 @@ const harness = {
 const realGetDeviceCodeModule =
   await import("~/services/github/get-device-code")
 const realGetUserModule = await import("~/services/github/get-user")
-const realTokenModule = await import("~/lib/token")
+const realTokenModule = await import("~/lib/auth/token")
+const realUtilsModule = await import("~/lib/platform/utils")
 const realFsPromisesModule = await import("node:fs/promises")
 
-void mock.module("~/services/github/get-device-code", () => ({
+await mock.module("~/services/github/get-device-code", () => ({
   getDeviceCode: () => harness.getDeviceCodeImpl(),
 }))
 
-void mock.module("~/services/github/get-user", () => ({
+await mock.module("~/services/github/get-user", () => ({
   getGitHubUser: (_token?: string) => harness.getGitHubUserImpl(),
 }))
 
-void mock.module("~/lib/token", () => ({
+await mock.module("~/lib/auth/token", () => ({
+  // Spread the real module so the ~9 exports this test doesn't override
+  // (setupGitHubToken, logUser, GITHUB_TOKEN_PATH, getRefreshDeadlineMs, …)
+  // stay intact for sibling files while the mock is active — not only after
+  // the afterAll restore. See ADR-0011 (forwarding faithfulness).
+  ...realTokenModule,
   setupCopilotToken: () => {
     harness.setupCopilotTokenCalls++
     return harness.setupCopilotTokenImpl()
@@ -88,10 +96,21 @@ void mock.module("~/lib/token", () => ({
   stopCopilotRefreshLoop: () => {},
 }))
 
+// Spread the real namespace so the many OTHER utils exports (getUUID,
+// parseUserIdMetadata, sleep, …) survive; only count/stub cacheModels so
+// the sign-in success path doesn't make a real Copilot /models fetch.
+await mock.module("~/lib/platform/utils", () => ({
+  ...realUtilsModule,
+  cacheModels: () => {
+    harness.cacheModelsCalls++
+    return harness.cacheModelsImpl()
+  },
+}))
+
 // Spread the real namespace so `readFile` / `writeFile` / etc. survive
 // the override — `tests/github-token-store.test.ts` reads/writes via
 // the same module and gets undefined functions otherwise.
-void mock.module("node:fs/promises", () => ({
+await mock.module("node:fs/promises", () => ({
   ...realFsPromisesModule,
   default: {
     ...(realFsPromisesModule as { default: object }).default,
@@ -106,14 +125,15 @@ void mock.module("node:fs/promises", () => ({
   },
 }))
 
-afterAll(() => {
-  void mock.module(
+afterAll(async () => {
+  await mock.module(
     "~/services/github/get-device-code",
     () => realGetDeviceCodeModule,
   )
-  void mock.module("~/services/github/get-user", () => realGetUserModule)
-  void mock.module("~/lib/token", () => realTokenModule)
-  void mock.module("node:fs/promises", () => realFsPromisesModule)
+  await mock.module("~/services/github/get-user", () => realGetUserModule)
+  await mock.module("~/lib/auth/token", () => realTokenModule)
+  await mock.module("~/lib/platform/utils", () => realUtilsModule)
+  await mock.module("node:fs/promises", () => realFsPromisesModule)
 })
 
 const {
@@ -124,9 +144,9 @@ const {
   markAuthDegraded,
   __resetAuthControllerForTests,
   __setAuthControllerDepsForTests,
-} = await import("~/lib/auth-controller")
-const { CopilotAuthFatalError } = await import("~/lib/error")
-const { state } = await import("~/lib/state")
+} = await import("~/lib/auth/auth-controller")
+const { CopilotAuthFatalError } = await import("~/lib/errors/error")
+const { state } = await import("~/lib/runtime-state/state")
 
 beforeEach(() => {
   __resetAuthControllerForTests()
@@ -172,6 +192,8 @@ beforeEach(() => {
   harness.pollAccessTokenCalls = 0
   harness.setupCopilotTokenImpl = () => Promise.resolve()
   harness.setupCopilotTokenCalls = 0
+  harness.cacheModelsImpl = () => Promise.resolve()
+  harness.cacheModelsCalls = 0
 })
 
 afterEach(() => {
@@ -226,6 +248,39 @@ describe("getAuthStatus", () => {
     if (status.state === "authenticated") {
       expect(status.account_login).toBe("alice")
     }
+  })
+
+  test("primes the models cache after a successful device-flow sign-in", async () => {
+    // Regression: the cold-boot path (bootstrap) calls cacheModels() after
+    // minting the Copilot token, but the device-flow sign-in path did not.
+    // On a fresh install (boot has no token → boot never primes), the lazy
+    // stale-refresh middleware can't help (it no-ops on an unprimed cache),
+    // so the models list stayed empty until a forced refresh. Sign-in must
+    // prime it itself.
+    const poll = deferred<string>()
+    harness.pollAccessTokenImpl = () => poll.promise
+
+    await startDeviceFlow()
+    poll.resolve("ghu_ok")
+    await flushMicrotasks(10)
+
+    expect(getAuthStatus().state).toBe("authenticated")
+    expect(harness.cacheModelsCalls).toBe(1)
+  })
+
+  test("a models-cache failure does not fail sign-in (best-effort)", async () => {
+    // cacheModels is best-effort: a Copilot /models hiccup must not block the
+    // user from reaching the signed-in state.
+    harness.cacheModelsImpl = () => Promise.reject(new Error("models 503"))
+    const poll = deferred<string>()
+    harness.pollAccessTokenImpl = () => poll.promise
+
+    await startDeviceFlow()
+    poll.resolve("ghu_ok")
+    await flushMicrotasks(10)
+
+    expect(harness.cacheModelsCalls).toBe(1)
+    expect(getAuthStatus().state).toBe("authenticated")
   })
 
   test("returns { state: 'unauthenticated' } literal when no token and no flow", () => {

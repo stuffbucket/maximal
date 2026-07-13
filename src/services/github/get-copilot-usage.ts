@@ -1,7 +1,7 @@
-import { getGitHubApiBaseUrl, githubHeaders } from "~/lib/api-config"
-import { HTTPError } from "~/lib/error"
-import { GITHUB_API_TIMEOUT_MS } from "~/lib/http-timeouts"
-import { state } from "~/lib/state"
+import { getGitHubApiBaseUrl, githubHeaders } from "~/lib/config/api-config"
+import { GITHUB_API_TIMEOUT_MS } from "~/lib/http/http-timeouts"
+import { sendRequestJson } from "~/lib/http/send-request"
+import { state } from "~/lib/runtime-state/state"
 
 export const getCopilotUsage = async (
   githubToken?: string,
@@ -11,20 +11,15 @@ export const getCopilotUsage = async (
     throw new Error("GitHub token not found")
   }
 
-  const authState = { ...state, githubToken: resolvedGithubToken }
-  const response = await fetch(
+  return await sendRequestJson<CopilotUsageResponse>(
     `${getGitHubApiBaseUrl()}/copilot_internal/user`,
     {
-      headers: githubHeaders(authState),
-      signal: AbortSignal.timeout(GITHUB_API_TIMEOUT_MS),
+      githubToken: resolvedGithubToken,
+      headers: githubHeaders(),
+      timeoutMs: GITHUB_API_TIMEOUT_MS,
+      errorMessage: "Failed to get Copilot usage",
     },
   )
-
-  if (!response.ok) {
-    throw new HTTPError("Failed to get Copilot usage", response)
-  }
-
-  return (await response.json()) as CopilotUsageResponse
 }
 
 export interface QuotaDetail {

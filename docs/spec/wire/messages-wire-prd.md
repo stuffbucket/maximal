@@ -101,13 +101,17 @@ Copilot `${copilotBaseUrl}/v1/messages` via `createMessages()` — the
 client and upstream wire shapes are both Anthropic, so there is **no body
 translation**, only preprocessing:
 
-- `prepareMessagesApiPayload()` (`preprocess.ts:573-613`):
-  `stripCacheControl` (drop the `scope` field and inner
-  `tool_result.content[]` cache_control), `filterAssistantThinkingBlocks`
-  (drop empty/placeholder thinking), `stripSamplingParams` (drop
-  `temperature`/`top_p`/`top_k` for adaptive-thinking models), and add
-  `thinking: {type: "adaptive", display?}` + `output_config: {effort}`
-  when the model supports it.
+- `prepareMessagesApiPayload()` (`preprocess.ts`) runs an explicit ordered
+  list of named passes (`MESSAGES_API_PASSES`); order is load-bearing:
+  1. `stripCacheControl` — drop the `scope` field and inner
+     `tool_result.content[]` cache_control.
+  2. `filterAssistantThinkingBlocks` — drop empty/placeholder thinking.
+  3. `stripSamplingParams` — drop `temperature`/`top_p`/`top_k` for
+     adaptive-thinking models (and never send `temperature`+`top_p` together).
+  4. `applyAdaptiveThinking` — add `thinking: {type: "adaptive", display?}` +
+     `output_config: {effort}` when the model supports it. Runs LAST: it reads
+     the client's original thinking intent (`display` / `type: "disabled"`)
+     before overwriting `payload.thinking` — the #210 ordering contract.
 - **Non-streaming:** upstream JSON returned as-is; usage recorded via
   `normalizeAnthropicUsage()`.
 - **Streaming:** upstream SSE event/data pairs are **forwarded
@@ -146,7 +150,10 @@ OpenAI **Chat Completions** and back (`non-stream-translation.ts`,
   `tool_choice` mapped (`auto`/`required`/named/`none`), `thinking` →
   `thinking_budget`.
 - **Response (non-stream):** merge choices into Anthropic `content[]`;
-  `tool_calls` → `tool_use`; `reasoning_text`/`reasoning_opaque` →
+  `tool_calls` → `tool_use` (arguments parsed defensively via
+  `parseToolCallArguments` in `utils.ts` — empty/whitespace → `{}`,
+  malformed JSON → `{raw_arguments}`, never a bare `JSON.parse` that
+  could throw); `reasoning_text`/`reasoning_opaque` →
   `thinking`; `finish_reason` mapped (`stop→end_turn`,
   `length→max_tokens`, `tool_calls→tool_use`,
   `content_filter→end_turn`); usage de-duplicated for cached tokens.

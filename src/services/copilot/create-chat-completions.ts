@@ -1,34 +1,29 @@
 import consola from "consola"
 import { events } from "fetch-event-stream"
 
-import type { CompactType } from "~/lib/compact"
-import type { SubagentMarker } from "~/lib/subagent"
+import { copilotBaseUrl } from "~/lib/config/api-config"
+import { sendRequest } from "~/lib/http/send-request"
+import { state } from "~/lib/runtime-state/state"
 
+import type { CopilotCallOptions } from "./upstream-request"
+
+import { chatCompletionsInitiator } from "./agent-initiator"
 import {
-  copilotBaseUrl,
-  copilotHeaders,
-  prepareForCompact,
-  prepareInteractionHeaders,
-} from "~/lib/api-config"
-import { isAuthFatal, parseCopilotErrorBody } from "~/lib/copilot-error-parser"
-import { logCopilotRateLimits } from "~/lib/copilot-rate-limit"
-import { CopilotAuthFatalError, HTTPError } from "~/lib/error"
-import {
-  clearLastUpstreamRejection,
-  setLastUpstreamRejection,
-  state,
-} from "~/lib/state"
+  buildCopilotHeaders,
+  finishUpstreamResponse,
+  requireCopilotToken,
+} from "./upstream-request"
+
+export type ChatCompletionsStream = ReturnType<typeof events>
+export type CreateChatCompletionsReturn =
+  | ChatCompletionResponse
+  | ChatCompletionsStream
 
 export const createChatCompletions = async (
   payload: ChatCompletionsPayload,
-  options: {
-    subagentMarker?: SubagentMarker | null
-    requestId: string
-    sessionId?: string
-    compactType?: CompactType
-  },
-) => {
-  if (!state.copilotToken) throw new Error("Copilot token not found")
+  options: CopilotCallOptions,
+): Promise<CreateChatCompletionsReturn> => {
+  requireCopilotToken()
 
   const enableVision = payload.messages.some(
     (x) =>
@@ -36,67 +31,27 @@ export const createChatCompletions = async (
       && x.content?.some((x) => x.type === "image_url"),
   )
 
-  // Agent/user check for x-initiator header
-  // Determine if any message is from an agent ("assistant" or "tool")
-  // Refactor `isAgentCall` logic to check only the last message in the history rather than any message. This prevents valid user messages from being incorrectly flagged as agent calls due to previous assistant history, ensuring proper credit consumption for multi-turn conversations.
-  let isAgentCall = false
-  if (payload.messages.length > 0) {
-    const lastMessage = payload.messages.at(-1)
-    if (lastMessage) {
-      isAgentCall = ["assistant", "tool"].includes(lastMessage.role)
-    }
-  }
-
-  // Build headers and add x-initiator
-  const headers: Record<string, string> = {
-    ...copilotHeaders(state, options.requestId, enableVision),
-    "x-initiator": isAgentCall ? "agent" : "user",
-  }
-
-  prepareInteractionHeaders(
-    options.sessionId,
-    Boolean(options.subagentMarker),
-    headers,
-  )
-
-  prepareForCompact(headers, options.compactType)
+  const headers = buildCopilotHeaders(state, {
+    ...options,
+    vision: enableVision,
+    initiator: chatCompletionsInitiator(payload),
+  })
 
   consola.log(`<-- model: ${payload.model}`)
 
-  const response = await fetch(`${copilotBaseUrl(state)}/chat/completions`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(payload),
+  const response = await sendRequest(
+    `${copilotBaseUrl(state)}/chat/completions`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+    },
+  )
+
+  return finishUpstreamResponse<ChatCompletionResponse>(response, {
+    stream: Boolean(payload.stream),
+    errorMessage: "Failed to create chat completions",
   })
-
-  logCopilotRateLimits(response.headers)
-
-  if (!response.ok) {
-    consola.error("Failed to create chat completions", response)
-    const body = await response.clone().text()
-    const parsed = parseCopilotErrorBody(body)
-    if (isAuthFatal(response.status, parsed)) {
-      throw new CopilotAuthFatalError(
-        parsed.message,
-        response.status,
-        parsed.remediationUrl,
-      )
-    }
-    setLastUpstreamRejection({
-      message: parsed.message,
-      remediationUrl: parsed.remediationUrl,
-      status: response.status,
-    })
-    throw new HTTPError("Failed to create chat completions", response)
-  }
-
-  clearLastUpstreamRejection()
-
-  if (payload.stream) {
-    return events(response)
-  }
-
-  return (await response.json()) as ChatCompletionResponse
 }
 
 // Streaming types
@@ -162,6 +117,8 @@ export interface ChatCompletionResponse {
       cached_tokens: number
     }
   }
+  /** Copilot per-request billing (sibling of usage). */
+  copilot_usage?: { total_nano_aiu?: number }
 }
 
 interface ResponseMessage {

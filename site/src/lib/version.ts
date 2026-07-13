@@ -1,98 +1,112 @@
-// Build-time release resolution, shared by the landing page (index.astro) and
-// the update manifest (pages/updates/manifest.json.ts) so the version they
-// advertise can never drift apart. Runs in the Node build context only — it
-// reads process.env.GITHUB_TOKEN, which must never reach the client bundle.
+// Build-time release resolution, shared by the landing page (Hero/GetStarted via
+// lib/downloads.ts) and the update-manifest route (pages/updates/manifest.json.ts)
+// so the version they advertise can never drift apart.
+//
+// SOURCE OF TRUTH — the committed static manifest at
+// `site/public/updates/manifest.json`. As of issue #223 (Phase 4 of #218) the
+// build no longer queries the GitHub releases API: there is NO build-time
+// `GITHUB_TOKEN` lookup and NO `SITE_PIN_VERSION` knob. The committed manifest
+// IS the pin — updating what the site advertises is a data change (a manifest
+// write), exactly as the design doc (docs/decisions/site-runtime-version-manifest.md)
+// planned. release.yml's `manifest` job commits a fresh copy on every publish
+// via scripts/write-updates-manifest.ts, so this file stays current with no
+// unauthenticated API call, no rate limit, and a deterministic offline build.
+// The manifest is imported directly (Vite inlines it at build time), so the
+// baked SSR data is byte-derived from the very file public/ serves at runtime.
+//
+// The site layers runtime hydration (#221) OVER this: hydrate-downloads.ts
+// re-fetches /updates/manifest.json in the browser so a release advertises
+// itself without a rebuild. This build-time read is the server-rendered,
+// fail-closed fallback (no-JS, crawlers, a failed manifest fetch) — it always
+// bakes a real version + direct download links, never an empty/broken page.
 
-const REPO = "stuffbucket/maximal";
+import type { DownloadSlot, ManifestDownload, UpdateManifest } from "./updates-manifest";
+import { MANIFEST_SCHEMA_VERSION } from "./updates-manifest";
+// The committed static manifest is the build-time source of truth. Import it
+// directly so Vite inlines it at build time (a file-relative fs read via
+// import.meta.url does NOT survive Astro/Vite bundling — it resolved to the
+// wrong path and silently fell back to "no release"). The SAME file is served
+// verbatim from public/ at runtime (public/** wins the /updates/manifest.json
+// route collision), so the baked SSR data and the hydrated data agree.
+import rawManifest from "../../public/updates/manifest.json";
+
+export interface ReleaseAsset {
+  /** Asset filename, e.g. "maximal-v0.4.39-windows-x64-setup.exe". */
+  name: string;
+  /** Direct browser download URL for the asset. */
+  url: string;
+}
 
 export interface ReleaseInfo {
-  /** The latest release tag, e.g. "v0.4.32", or null when no release exists. */
+  /** The advertised release tag, e.g. "v0.4.39", or null when the manifest
+   *  carries no such channel. */
   tag: string | null;
   hasRelease: boolean;
+  /** Release assets, derived from the manifest channel's `downloads` map. */
+  assets: ReleaseAsset[];
 }
 
-function githubHeaders(): Record<string, string> {
-  // Authenticate with the build's GITHUB_TOKEN (deploy-pages.yml passes it).
-  // The anonymous API is 60 req/hr per IP, shared across Actions runners — a
-  // busy release day exhausts it, and an unauthenticated 403 used to silently
-  // fall back to "no version" with no download links. Authenticated is 1,000+/hr.
-  const token = (process.env.GITHUB_TOKEN ?? "").trim();
-  const headers: Record<string, string> = {
-    Accept: "application/vnd.github+json",
-    "User-Agent": "maximal-site-build",
-    "X-GitHub-Api-Version": "2022-11-28",
+const NO_RELEASE: ReleaseInfo = { tag: null, hasRelease: false, assets: [] };
+
+let cachedManifest: UpdateManifest | null | undefined;
+
+/** Validate the imported static manifest once. Returns null when it isn't a
+ *  schema-2 document (⇒ callers resolve "no release", and the site keeps its
+ *  release-independent baked fallback). */
+function loadManifest(): UpdateManifest | null {
+  if (cachedManifest !== undefined) return cachedManifest;
+  cachedManifest = validateManifest(rawManifest);
+  return cachedManifest;
+}
+
+function validateManifest(doc: unknown): UpdateManifest | null {
+  if (typeof doc !== "object" || doc === null) return null;
+  const manifest = doc as { schema?: unknown; channels?: unknown };
+  if (manifest.schema !== MANIFEST_SCHEMA_VERSION) return null;
+  if (typeof manifest.channels !== "object" || manifest.channels === null) {
+    return null;
+  }
+  return doc as UpdateManifest;
+}
+
+/** Flatten a channel's keyed `downloads` map into the flat asset list the site
+ *  build (downloads.ts) and the manifest route already consume. */
+function channelAssets(
+  downloads: Partial<Record<DownloadSlot, ManifestDownload>> | undefined,
+): ReleaseAsset[] {
+  if (!downloads) return [];
+  const out: ReleaseAsset[] = [];
+  for (const entry of Object.values(downloads)) {
+    if (entry) out.push({ name: entry.name, url: entry.url });
+  }
+  return out;
+}
+
+function resolveChannel(channelName: string): ReleaseInfo {
+  const manifest = loadManifest();
+  if (!manifest) return NO_RELEASE;
+  const channel = manifest.channels[channelName];
+  if (!channel || typeof channel.tag !== "string" || !channel.tag) {
+    return NO_RELEASE;
+  }
+  return {
+    tag: channel.tag,
+    hasRelease: true,
+    assets: channelAssets(channel.downloads),
   };
-  if (token) headers.Authorization = `Bearer ${token}`;
-  return headers;
-}
-
-async function fetchGitHubReleaseJson(path: string): Promise<unknown | null> {
-  const res = await fetch(`https://api.github.com/repos/${REPO}/${path}`, {
-    headers: githubHeaders(),
-  });
-  // 404 is the *legitimate* "no published release yet" state (first launch) —
-  // resolve to "no release" without failing the build.
-  if (res.status === 404) return null;
-  // Anything else (403 rate-limit, 5xx, malformed body) is a real failure.
-  // FAIL THE BUILD rather than fall open: a thrown error keeps the last good
-  // site (and its last good manifest) live instead of replacing them with a
-  // version-less deploy.
-  if (!res.ok) {
-    throw new Error(
-      `GitHub releases API returned ${res.status} ${res.statusText} — refusing to deploy a site without download links. Re-run once the API recovers.`,
-    );
-  }
-  return res.json();
-}
-
-async function fetchLatestTag(): Promise<ReleaseInfo> {
-  const body = await fetchGitHubReleaseJson("releases/latest");
-  if (!body) return { tag: null, hasRelease: false };
-  const release = body as { tag_name?: string };
-  if (typeof release.tag_name === "string" && release.tag_name.length > 0) {
-    return { tag: release.tag_name, hasRelease: true };
-  }
-  throw new Error("GitHub releases API response missing tag_name");
-}
-
-async function fetchLatestPrereleaseTag(): Promise<ReleaseInfo> {
-  const body = await fetchGitHubReleaseJson("releases?per_page=100");
-  if (!body) return { tag: null, hasRelease: false };
-  if (!Array.isArray(body)) {
-    throw new Error("GitHub releases API response was not a release list");
-  }
-
-  const release = body.find(
-    (item): item is { tag_name: string } => {
-      const release = item as {
-        tag_name?: unknown;
-        prerelease?: unknown;
-        draft?: unknown;
-      };
-      return (
-        typeof release.tag_name === "string" &&
-        release.prerelease === true &&
-        release.draft === false
-      );
-    },
-  );
-  if (!release) return { tag: null, hasRelease: false };
-  return { tag: release.tag_name, hasRelease: true };
 }
 
 /**
- * Resolve the release to advertise. A `VITE_SITE_PIN_VERSION` pin (surfaced
- * from the SITE_PIN_VERSION repo variable by deploy-pages.yml) wins over the
- * live lookup, letting us cut and validate a release without the site
- * advancing to it. Otherwise track GitHub's latest non-prerelease, non-draft
- * release.
+ * Resolve the stable release to advertise from the committed static manifest.
+ * "Pinning" is now purely a manifest-data concern: the tag this returns is
+ * whatever `channels.stable` in site/public/updates/manifest.json names.
  */
-export async function resolveLatestRelease(): Promise<ReleaseInfo> {
-  const pinned = (import.meta.env.VITE_SITE_PIN_VERSION ?? "").trim();
-  if (pinned) return { tag: pinned, hasRelease: true };
-  return fetchLatestTag();
+export function resolveLatestRelease(): ReleaseInfo {
+  return resolveChannel("stable");
 }
 
-export async function resolveLatestPrerelease(): Promise<ReleaseInfo> {
-  return fetchLatestPrereleaseTag();
+/** Resolve the beta/prerelease channel from the committed manifest (absent ⇒
+ *  no prerelease advertised, same as the old empty-list result). */
+export function resolveLatestPrerelease(): ReleaseInfo {
+  return resolveChannel("beta");
 }

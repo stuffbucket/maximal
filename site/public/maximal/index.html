@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Redirecting to mxml.sh…</title>
+    <!-- Legacy-path redirect. Shipped app builds (<= v0.4.40) point their
+         "Download / Update" link at https://mxml.sh/maximal/ — the old
+         Caddy-proxy subpath, retired when the site moved to a root-served
+         GitHub Pages custom domain (see astro.config.mjs / update-check.ts).
+         This static page keeps those links working: it lives at /maximal/, so
+         GitHub Pages serves it for /maximal/ and 301s /maximal -> /maximal/
+         first, and it forwards to the site root. Kept minimal + noindex. -->
+    <link rel="canonical" href="https://mxml.sh/" />
+    <meta name="robots" content="noindex" />
+    <meta http-equiv="refresh" content="0; url=/" />
+    <script>
+      // Immediate, history-replacing redirect that preserves any query/hash.
+      location.replace("/" + location.search + location.hash);
+    </script>
+    <style>
+      body {
+        font: 16px/1.5 system-ui, sans-serif;
+        margin: 4rem auto;
+        max-width: 32rem;
+        padding: 0 1rem;
+      }
+    </style>
+  </head>
+  <body>
+    <p>Redirecting to <a href="/">mxml.sh</a>…</p>
+  </body>
+</html>

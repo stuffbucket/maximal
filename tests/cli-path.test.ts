@@ -16,7 +16,7 @@ import {
   ensureCliSymlink,
   FIRST_LAUNCH_PATH_MARKER_START,
   isAppBundlePath,
-} from "~/lib/cli-path"
+} from "~/lib/platform/cli-path"
 
 const APP_EXEC = "/Applications/Maximal.app/Contents/MacOS/maximal"
 

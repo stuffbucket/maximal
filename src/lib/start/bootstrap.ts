@@ -23,24 +23,33 @@ import {
   markSignedIn,
   markSignedOut,
   registerAutoRecovery,
-} from "~/lib/auth-controller"
+} from "~/lib/auth/auth-controller"
 // Auto-recovery is parked behind config.autoRecoverAccount (defaults OFF).
 // Auto-switching identity needs prior user consent — same plan ≠ same data
 // governance — so the registration is gated below and the module is loaded
 // lazily only when the user has opted in. Off → degrade + surface the reason.
-import { attemptAutoRecovery } from "~/lib/auth-recovery"
-import { isAutoRecoverAccountEnabled } from "~/lib/config"
-import { CopilotAuthFatalError } from "~/lib/error"
-import { currentGitHubHost } from "~/lib/github-host"
+import { attemptAutoRecovery } from "~/lib/auth/auth-recovery"
+import { currentGitHubHost } from "~/lib/auth/github-host"
 import {
   migrateLegacyRecord,
   readDefaultRecord,
-} from "~/lib/github-token-store"
-import { PATHS } from "~/lib/paths"
-import { ensureSecretsDir, loadSecretIntoEnv, SECRET_DEFS } from "~/lib/secrets"
-import { state } from "~/lib/state"
-import { logUser, setupCopilotToken } from "~/lib/token"
-import { cacheModels } from "~/lib/utils"
+} from "~/lib/auth/github-token-store"
+import {
+  ensureSecretsDir,
+  loadSecretIntoEnv,
+  SECRET_DEFS,
+} from "~/lib/auth/secrets"
+import { logUser, setupCopilotToken } from "~/lib/auth/token"
+import { isAutoRecoverAccountEnabled } from "~/lib/config/config"
+import { CopilotAuthFatalError } from "~/lib/errors/error"
+import { PATHS } from "~/lib/platform/paths"
+import { cacheModels } from "~/lib/platform/utils"
+import {
+  clearTokenTrio,
+  hasGithubToken,
+  setGithubToken,
+  state,
+} from "~/lib/runtime-state/state"
 import { getGitHubUser } from "~/services/github/get-user"
 
 import { emitBootStatus } from "./boot-status"
@@ -58,7 +67,7 @@ export async function bootstrapUpstream(
   }
 
   if (githubTokenOverride) {
-    state.githubToken = githubTokenOverride
+    setGithubToken(githubTokenOverride)
     consola.info("Using provided GitHub token")
   } else {
     // One-time: lift a legacy single-record token into the multi-account
@@ -81,14 +90,14 @@ export async function bootstrapUpstream(
     })
     const existing = await readDefaultRecord()
     if (existing) {
-      state.githubToken = existing.accessToken
+      setGithubToken(existing.accessToken)
       if (state.showToken) {
         consola.info("GitHub token:", existing.accessToken)
       }
     }
   }
 
-  if (state.githubToken) {
+  if (hasGithubToken()) {
     try {
       emitBootStatus("Connecting to GitHub Copilot…")
       const avatarUrl = await logUser()
@@ -110,8 +119,7 @@ export async function bootstrapUpstream(
       consola.warn(
         "Bootstrap: logUser succeeded but state.userName is empty; degrading to unauthenticated.",
       )
-      state.githubToken = undefined
-      state.copilotToken = undefined
+      clearTokenTrio({ github: true, copilot: true })
       markSignedOut()
       return
     } catch (error) {
@@ -137,7 +145,7 @@ export async function bootstrapUpstream(
       // Clear the in-memory token but keep the on-disk record for a
       // next-restart retry, and set the union explicitly (signed-out) so
       // every bootstrap exit makes its own auth-status statement.
-      state.githubToken = undefined
+      clearTokenTrio({ github: true })
       markSignedOut()
     }
   }

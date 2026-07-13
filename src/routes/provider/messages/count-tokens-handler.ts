@@ -2,10 +2,10 @@ import type { Context } from "hono"
 
 import type { Model } from "~/services/copilot/get-models"
 
-import { type AnthropicMessagesPayload } from "~/lib/anthropic-types"
-import { createHandlerLogger } from "~/lib/logger"
-import { state } from "~/lib/state"
-import { getTokenCount } from "~/lib/tokenizer"
+import { type AnthropicMessagesPayload } from "~/lib/models/anthropic-types"
+import { getTokenCount } from "~/lib/models/tokenizer"
+import { createHandlerLogger } from "~/lib/platform/logger"
+import { state } from "~/lib/runtime-state/state"
 import { translateToOpenAI } from "~/routes/messages/non-stream-translation"
 import { stripUnsupportedTopLevelAnthropicFields } from "~/routes/messages/preprocess"
 

@@ -1,13 +1,15 @@
 import consola from "consola"
 import path from "node:path"
 
-import { PATHS } from "~/lib/paths"
-import { registerProcessCleanup } from "~/lib/process-cleanup"
+import { PATHS } from "~/lib/platform/paths"
+import { registerProcessCleanup } from "~/lib/platform/process-cleanup"
 import {
+  type Migration,
   isSqliteRuntimeSupported,
+  runMigrations,
   SqliteDbStore,
   type SqliteDatabase,
-} from "~/lib/sqlite"
+} from "~/lib/platform/sqlite"
 
 export type TokenUsageSource = "copilot" | "provider"
 
@@ -26,6 +28,9 @@ export interface UsageTokens {
   input_tokens?: number | null
   output_tokens?: number | null
   total_tokens?: number | null
+  /** Copilot per-request cost in nano-AIU (copilot_usage.total_nano_aiu).
+   *  Authoritative billing signal under usage-based billing. */
+  total_nano_aiu?: number | null
 }
 
 export interface PersistedTokenUsageEvent {
@@ -41,6 +46,10 @@ export interface PersistedTokenUsageEvent {
   session_id: string
   source: TokenUsageSource
   total_tokens: number
+  total_nano_aiu: number
+  /** 1 = premium model, 0 = included, null = unknown (model not in catalog
+   *  at record time, or a pre-capture row). SQLite stores 0/1/NULL. */
+  is_premium: number | null
   trace_id: string
   user_id: string
 }
@@ -52,10 +61,14 @@ export interface TokenUsageTotals {
   output_tokens: number
   request_count: number
   total_tokens: number
+  total_nano_aiu: number
 }
 
 export interface TokenUsageModelSummary extends TokenUsageTotals {
   model: string
+  /** Premium status for this model, if known (from the model catalog's
+   *  billing.is_premium). null when no row carried a known value. */
+  is_premium: boolean | null
 }
 
 export interface TokenUsageEventRecord {
@@ -72,6 +85,8 @@ export interface TokenUsageEventRecord {
   session_id: string
   source: TokenUsageSource
   total_tokens: number
+  total_nano_aiu: number
+  is_premium: boolean | null
   trace_id: string
   user_id: string
 }
@@ -130,6 +145,10 @@ export function isTokenUsageStorageEnabled(): boolean {
 function initializeTokenUsageDb(db: SqliteDatabase): void {
   db.exec("PRAGMA journal_mode = WAL")
   db.exec("PRAGMA busy_timeout = 5000")
+  // Baseline schema (schema version 0). CREATE ... IF NOT EXISTS + the two
+  // legacy ensureColumn calls are idempotent and predate the versioned
+  // migration framework, so they stay as the v0 floor for DBs created before
+  // it. New schema changes go through TOKEN_USAGE_MIGRATIONS below.
   db.exec(`
     CREATE TABLE IF NOT EXISTS token_usage_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -151,6 +170,11 @@ function initializeTokenUsageDb(db: SqliteDatabase): void {
   `)
   ensureColumn(db, "user_id", "TEXT NOT NULL DEFAULT ''")
   ensureColumn(db, "total_tokens", "INTEGER NOT NULL DEFAULT 0")
+
+  // Versioned migrations for everything after the v0 baseline. Runs on every
+  // open; already-applied steps are skipped via PRAGMA user_version.
+  runMigrations(db, TOKEN_USAGE_MIGRATIONS)
+
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_token_usage_events_created_at_ms
     ON token_usage_events(created_at_ms)
@@ -172,6 +196,26 @@ function initializeTokenUsageDb(db: SqliteDatabase): void {
     ON token_usage_events(user_id)
   `)
 }
+
+// Ordered, append-only. Each entry advances user_version by one; NEVER
+// reorder or edit a shipped migration (that would desync already-migrated
+// DBs) — only append.
+const TOKEN_USAGE_MIGRATIONS: Array<Migration> = [
+  {
+    // Copilot returns per-request cost (`copilot_usage.total_nano_aiu`) and
+    // each model advertises `billing.is_premium`. Capture both so usage can
+    // be costed and split premium/included. Existing rows predate capture:
+    // total_nano_aiu backfills to 0 (cost was never recorded and can't be
+    // known retroactively), is_premium to NULL (genuinely unknown).
+    name: "add total_nano_aiu + is_premium",
+    up: (db) => {
+      db.exec(
+        "ALTER TABLE token_usage_events ADD COLUMN total_nano_aiu INTEGER NOT NULL DEFAULT 0",
+      )
+      db.exec("ALTER TABLE token_usage_events ADD COLUMN is_premium INTEGER")
+    },
+  },
+]
 
 function ensureColumn(
   db: SqliteDatabase,
@@ -209,6 +253,9 @@ export function hasAnyToken(tokens: UsageTokens): boolean {
     || normalizeToken(tokens.cache_read_input_tokens) > 0
     || normalizeToken(tokens.cache_creation_input_tokens) > 0
     || normalizeToken(tokens.total_tokens) > 0
+    // A recorded cost with no token counts is still a real, billable event
+    // worth persisting (e.g. a tool-only turn).
+    || normalizeToken(tokens.total_nano_aiu) > 0
   )
 }
 
@@ -245,8 +292,10 @@ async function writeTokenUsageEvent(
         output_tokens,
         cache_read_input_tokens,
         cache_creation_input_tokens,
-        total_tokens
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        total_tokens,
+        total_nano_aiu,
+        is_premium
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
   ).run(
     event.created_at_ms,
@@ -263,6 +312,8 @@ async function writeTokenUsageEvent(
     event.cache_read_input_tokens,
     event.cache_creation_input_tokens,
     event.total_tokens,
+    event.total_nano_aiu,
+    event.is_premium,
   )
 }
 
@@ -346,6 +397,7 @@ function createEmptyTotals(): TokenUsageTotals {
     output_tokens: 0,
     request_count: 0,
     total_tokens: 0,
+    total_nano_aiu: 0,
   }
 }
 
@@ -411,7 +463,19 @@ function totalsFromRow(
     output_tokens: numberFromRow(row, "output_tokens"),
     request_count: numberFromRow(row, "request_count"),
     total_tokens: numberFromRow(row, "total_tokens"),
+    total_nano_aiu: numberFromRow(row, "total_nano_aiu"),
   }
+}
+
+/** Map a SQLite is_premium cell (1/0/NULL) to boolean|null. In summaries
+ *  the cell is `MAX(is_premium)` so a model with any known-premium row reads
+ *  true; all-null (never captured) stays null. */
+function premiumFromRow(
+  row: Record<string, unknown>,
+  key: string,
+): boolean | null {
+  const value = row[key]
+  return typeof value === "number" ? value === 1 : null
 }
 
 function stringFromRow(row: Record<string, unknown>, key: string): string {
@@ -447,6 +511,8 @@ function usageEventFromRow(
     session_id: stringFromRow(row, "session_id"),
     source: stringFromRow(row, "source") as TokenUsageSource,
     total_tokens: numberFromRow(row, "total_tokens"),
+    total_nano_aiu: numberFromRow(row, "total_nano_aiu"),
+    is_premium: premiumFromRow(row, "is_premium"),
     trace_id: stringFromRow(row, "trace_id"),
     user_id: stringFromRow(row, "user_id"),
   }
@@ -471,7 +537,8 @@ export async function getTokenUsageSummary(
       COALESCE(SUM(output_tokens), 0) AS output_tokens,
       COALESCE(SUM(cache_read_input_tokens), 0) AS cache_read_input_tokens,
       COALESCE(SUM(cache_creation_input_tokens), 0) AS cache_creation_input_tokens,
-      COALESCE(SUM(total_tokens), 0) AS total_tokens
+      COALESCE(SUM(total_tokens), 0) AS total_tokens,
+      COALESCE(SUM(total_nano_aiu), 0) AS total_nano_aiu
     FROM token_usage_events
     WHERE created_at_ms >= ? AND created_at_ms < ?
   `,
@@ -488,7 +555,9 @@ export async function getTokenUsageSummary(
       COALESCE(SUM(output_tokens), 0) AS output_tokens,
       COALESCE(SUM(cache_read_input_tokens), 0) AS cache_read_input_tokens,
       COALESCE(SUM(cache_creation_input_tokens), 0) AS cache_creation_input_tokens,
-      COALESCE(SUM(total_tokens), 0) AS total_tokens
+      COALESCE(SUM(total_tokens), 0) AS total_tokens,
+      COALESCE(SUM(total_nano_aiu), 0) AS total_nano_aiu,
+      MAX(is_premium) AS is_premium
     FROM token_usage_events
     WHERE created_at_ms >= ? AND created_at_ms < ?
     GROUP BY model
@@ -503,6 +572,7 @@ export async function getTokenUsageSummary(
     byModel: byModelRows.map((row) => ({
       ...totalsFromRow(row),
       model: typeof row.model === "string" ? row.model : "unknown",
+      is_premium: premiumFromRow(row, "is_premium"),
     })),
     period,
     range: {

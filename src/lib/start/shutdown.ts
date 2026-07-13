@@ -20,8 +20,8 @@ import type { serve } from "srvx"
 
 import consola from "consola"
 
-import { reconcileClaudeCodeOnShutdown } from "~/lib/claude-code-reconcile"
-import { removePidfile } from "~/lib/replace-running"
+import { reconcileClaudeCodeOnShutdown } from "~/apps/claude-code/reconcile"
+import { removePidfile } from "~/lib/platform/replace-running"
 
 import { clearSessionRunning } from "./session-sentinel"
 

@@ -15,8 +15,9 @@ import clipboard from "clipboardy"
 import consola from "consola"
 import invariant from "tiny-invariant"
 
-import { generateEnvScript } from "~/lib/shell"
-import { state } from "~/lib/state"
+import { resolveSmallToolModel } from "~/lib/models/small-model"
+import { generateEnvScript } from "~/lib/platform/shell"
+import { state } from "~/lib/runtime-state/state"
 
 export async function runClaudeCodeFlow(serverUrl: string): Promise<void> {
   consola.log(
@@ -26,14 +27,35 @@ export async function runClaudeCodeFlow(serverUrl: string): Promise<void> {
 
   invariant(state.models, "Models should be loaded by now")
 
+  const modelIds = state.models.data.map((m) => m.id)
+
   const selectedModel = await consola.prompt(
     "Select a model to use with Claude Code",
-    { type: "select", options: state.models.data.map((m) => m.id) },
+    { type: "select", options: modelIds },
+  )
+
+  // The haiku tier carries Claude Code's background + subagent work, which
+  // makes tool calls — so it must default to a tool-competent model, not a
+  // cheap-but-weak one. Honor a pre-set ANTHROPIC_DEFAULT_HAIKU_MODEL if the
+  // user already exported one; otherwise pre-select a resolved default.
+  const recommendedSmallModel = resolveSmallToolModel(
+    state.models.data,
+    process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL,
   )
 
   const selectedSmallModel = await consola.prompt(
-    "Select a small model to use with Claude Code",
-    { type: "select", options: state.models.data.map((m) => m.id) },
+    "Select a small model to use with Claude Code (used for subagent + background"
+      + " tool calls — pick a tool-capable model)",
+    {
+      type: "select",
+      options: modelIds,
+      // Pre-select a tool-competent haiku-class default when available, so the
+      // user doesn't have to know that a weak small model breaks subagent tools.
+      initial:
+        recommendedSmallModel && modelIds.includes(recommendedSmallModel) ?
+          recommendedSmallModel
+        : undefined,
+    },
   )
 
   const command = generateEnvScript(

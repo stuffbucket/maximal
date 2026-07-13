@@ -1,13 +1,14 @@
 import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test"
 import { Hono } from "hono"
 
-import type { AnthropicMessagesPayload } from "~/lib/anthropic-types"
+import type { AnthropicMessagesPayload } from "~/lib/models/anthropic-types"
 
-const actualStateModule = await import("../src/lib/state")
-const actualConfigModule = await import("../src/lib/config")
-const actualModelsModule = await import("../src/lib/models")
-const actualRateLimitModule = await import("../src/lib/rate-limit")
-const actualUtilsModule = await import("../src/lib/utils")
+const actualStateModule = await import("../src/lib/runtime-state/state")
+const actualConfigModule = await import("../src/lib/config/config")
+const actualModelsModule = await import("../src/lib/models/models")
+const actualRateLimitModule = await import("../src/lib/http/rate-limit")
+const actualUtilsModule = await import("../src/lib/platform/utils")
+const actualApiFlowsModule = await import("../src/routes/messages/api-flows")
 
 const state = {
   ...actualStateModule.state,
@@ -53,24 +54,24 @@ const handleWithChatCompletions = mock(
   ) => new Response("chat"),
 )
 
-await mock.module("~/lib/state", () => ({
+await mock.module("~/lib/runtime-state/state", () => ({
   ...actualStateModule,
   state,
 }))
-await mock.module("~/lib/rate-limit", () => ({
+await mock.module("~/lib/http/rate-limit", () => ({
   ...actualRateLimitModule,
   checkRateLimit: async () => {},
 }))
-await mock.module("~/lib/config", () => ({
+await mock.module("~/lib/config/config", () => ({
   ...actualConfigModule,
   getSmallModel: () => "small-model",
   isMessagesApiEnabled: () => messagesApiEnabled,
 }))
-await mock.module("~/lib/models", () => ({
+await mock.module("~/lib/models/models", () => ({
   ...actualModelsModule,
   findEndpointModel,
 }))
-await mock.module("~/lib/utils", () => ({
+await mock.module("~/lib/platform/utils", () => ({
   ...actualUtilsModule,
 }))
 await mock.module("~/routes/messages/api-flows", () => ({
@@ -265,7 +266,7 @@ describe("messages handler orchestration", () => {
     expect(handleWithChatCompletions).toHaveBeenCalledTimes(1)
   })
 
-  test("applies warmup model override and passes request metadata to the selected flow", async () => {
+  test("does not downgrade a non-warmup no-tool request", async () => {
     selectedModel = {
       id: "messages-model",
       supported_endpoints: ["/v1/messages"],
@@ -302,7 +303,10 @@ describe("messages handler orchestration", () => {
 
     expect(response.status).toBe(200)
     expect(await response.text()).toBe("messages")
-    expect(findEndpointModel).toHaveBeenCalledWith("small-model")
+    // Regression for B3: the broad small-model downgrade no longer fires on
+    // non-warmup no-tool turns; the requested model is preserved.
+    expect(findEndpointModel).toHaveBeenCalledWith("original-model")
+    expect(findEndpointModel).not.toHaveBeenCalledWith("small-model")
 
     const expectedSessionId = actualUtilsModule.getUUID("session-123")
     const expectedRequestId = actualUtilsModule.generateRequestIdFromPayload(
@@ -322,12 +326,52 @@ describe("messages handler orchestration", () => {
   })
 })
 
+describe("warmup short-circuit", () => {
+  test("short-circuits a genuine warmup request without an upstream call", async () => {
+    selectedModel = {
+      id: "messages-model",
+      supported_endpoints: ["/v1/messages"],
+    }
+
+    const app = createApp()
+    const response = await app.request("/", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "anthropic-beta": "warmup-beta",
+      },
+      body: JSON.stringify(
+        createPayload({
+          messages: [{ role: "user", content: "Warmup" }],
+        }),
+      ),
+    })
+
+    expect(response.status).toBe(200)
+    const body = (await response.json()) as {
+      type: string
+      content: Array<{ type: string; text: string }>
+    }
+    expect(body.type).toBe("message")
+    expect(body.content).toEqual([{ type: "text", text: "OK" }])
+
+    // No flow was dispatched — the response is canned locally.
+    expect(handleWithMessagesApi).not.toHaveBeenCalled()
+    expect(handleWithResponsesApi).not.toHaveBeenCalled()
+    expect(handleWithChatCompletions).not.toHaveBeenCalled()
+  })
+})
+
 // Restore real modules so their mocks don't bleed into other test files
-// that share this Bun worker (e.g. find-endpoint-model.test.ts).
-afterAll(() => {
-  void mock.module("~/lib/state", () => actualStateModule)
-  void mock.module("~/lib/models", () => actualModelsModule)
-  void mock.module("~/lib/rate-limit", () => actualRateLimitModule)
-  void mock.module("~/lib/config", () => actualConfigModule)
-  void mock.module("~/lib/utils", () => actualUtilsModule)
+// that share this Bun worker (e.g. find-endpoint-model.test.ts). Awaited so
+// the restore actually lands before a later file's static imports resolve
+// (Bun keeps module mocks for the whole process; an unawaited restore never
+// lands).
+afterAll(async () => {
+  await mock.module("~/lib/runtime-state/state", () => actualStateModule)
+  await mock.module("~/lib/models/models", () => actualModelsModule)
+  await mock.module("~/lib/http/rate-limit", () => actualRateLimitModule)
+  await mock.module("~/lib/config/config", () => actualConfigModule)
+  await mock.module("~/lib/platform/utils", () => actualUtilsModule)
+  await mock.module("~/routes/messages/api-flows", () => actualApiFlowsModule)
 })

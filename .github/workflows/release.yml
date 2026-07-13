@@ -3,12 +3,6 @@ name: Release
 permissions:
   id-token: write
   contents: write
-  # Needed by the `redeploy-site` job so it can fire deploy-pages.yml.
-  # GitHub's anti-loop guard suppresses `release: published` triggers
-  # when the release is created via GITHUB_TOKEN, so we dispatch the
-  # site rebuild explicitly. (The installer jobs are now part of this
-  # run via `needs:` + the reusable tauri-macos.yml — no dispatch.)
-  actions: write
 
 on:
   push:
@@ -127,15 +121,21 @@ jobs:
           # let `publish` flip draft→published+latest exactly once at the
           # end. That single publish is required for IMMUTABLE RELEASES —
           # a release can't be re-drafted to add assets once published.
-          # release-please only creates the TAG (not a release), so there
-          # is never a pre-existing release to adopt here.
           #
-          # Idempotent: if a draft already exists (partial-failure re-run),
-          # skip creation — the notes are already there and the downstream
-          # jobs just need to attach their assets.
+          # Idempotent: skip creation if a release for this tag ALREADY
+          # EXISTS, in any state — do not fall through to changelogithub.
+          #   - isDraft=true  → a partial-failure re-run; the notes are
+          #     already there and the downstream jobs just attach what's
+          #     missing via their own skip gates.
+          #   - isDraft=false → a sibling run already completed it (e.g. a
+          #     manual workflow_dispatch racing the release-please tag push,
+          #     serialized by the concurrency group above). The release is
+          #     published and IMMUTABLE, so changelogithub's PATCH would
+          #     fail with 422. Nothing to do — exit and let the downstream
+          #     skip gates no-op on the already-attached assets.
           EXISTING="$(gh release view "$TAG" --repo "${{ github.repository }}" --json isDraft --jq '.isDraft' 2>/dev/null || echo 'notfound')"
-          if [ "$EXISTING" = "true" ]; then
-            echo "Draft release for $TAG already exists — skipping creation (re-run)."
+          if [ "$EXISTING" != "notfound" ]; then
+            echo "Release for $TAG already exists (isDraft=$EXISTING) — skipping creation."
             exit 0
           fi
           # changelogithub computes notes from the previous v* tag. On the
@@ -728,7 +728,7 @@ jobs:
         if: steps.skip.outputs.skip != 'true'
         shell: pwsh
         run: |
-          dotnet tool install --global wix --version 5.*
+          dotnet tool install --global wix --version 5.0.2
           $userBin = Join-Path $env:USERPROFILE '.dotnet\tools'
           echo $userBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           & "$userBin\wix.exe" --version
@@ -741,7 +741,8 @@ jobs:
           $version = '${{ steps.ver.outputs.version }}'
           $out = "dist-release\maximal-${env:TAG}-windows-x64.msi"
           New-Item -ItemType Directory -Path dist-release -Force | Out-Null
-          # WiX resolves the .wxs's source files (maximal.exe) via -bindpath.
+          # CLI-only MSI: no WiX extensions needed. WiX resolves the .wxs's
+          # source files (maximal.exe) via -bindpath.
           wix build build\windows\maximal.wxs `
             -d "Version=$version" `
             -arch x64 `
@@ -906,10 +907,189 @@ jobs:
           }
           Write-Host "clean removal verified"
 
+  # Windows tray app (Tauri shell -> NSIS per-user installer). The Windows
+  # analog of macos-dmg: bundles the SAME windows-x64 sidecar the `binaries`
+  # job attached into the menu-bar/tray GUI, so a Windows user gets the
+  # parity experience (tray, settings webview, app-managed proxy) instead of
+  # a headless CLI. Builds entirely on a public windows-2022 runner; ships
+  # UNSIGNED (Authenticode/SmartScreen deferred, same as the MSI).
+  #
+  # SOFT LAUNCH: attached to the release, but the Pages site keeps Windows
+  # as "coming soon" until we promote it. Gated by `publish` (see its needs)
+  # so the .exe lands on the draft before the single draft->published flip —
+  # immutable releases can't add assets post-publish. To make Windows-shell
+  # non-blocking (a flaky Tauri build wouldn't hold up the macOS release),
+  # drop `windows-shell` from publish's needs and accept that some releases
+  # may ship without it.
+  windows-shell:
+    needs: binaries
+    runs-on: windows-2022
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.ref_name }}
+      # Retry crate downloads instead of failing on a transient connection
+      # reset (belt-and-suspenders alongside the cargo cache).
+      CARGO_NET_RETRY: "10"
+    steps:
+      - uses: actions/checkout@v6
+
+      # Same opt-in asset-reuse gate as the other installer jobs.
+      - name: Skip if Windows shell installer already attached
+        id: skip
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REUSE: ${{ vars.RELEASE_REUSE_EXISTING_ASSETS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SETUP="maximal-${TAG}-windows-x64-setup.exe"
+          if [ "${REUSE:-}" != "true" ]; then
+            echo "RELEASE_REUSE_EXISTING_ASSETS not 'true' — building from tag commit."
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          ASSETS="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null || echo '')"
+          if grep -Fxq "$SETUP" <<<"$ASSETS"; then
+            echo "Reuse enabled and $SETUP already attached — skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve version
+        id: ver
+        if: steps.skip.outputs.skip != 'true'
+        shell: bash
+        run: echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - uses: ./.github/actions/setup-bun
+        if: steps.skip.outputs.skip != 'true'
+        with:
+          bun-version: 1.3.11
+
+      # rustup is preinstalled on the windows-2022 image (vendored-action
+      # policy: no third-party toolchain action). Same as windows-shell-dev.
+      - name: Ensure Rust msvc toolchain
+        if: steps.skip.outputs.skip != 'true'
+        shell: pwsh
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup target add x86_64-pc-windows-msvc
+          rustc -vV
+
+      # Cache cargo registry/git downloads + the compiled target dir, so
+      # crates are served locally (not re-downloaded from crates.io, which
+      # intermittently resets) and unchanged dependency crates aren't
+      # recompiled. Same key as windows-shell-dev.yml — the dev harness and
+      # this release job share a warm cache. GitHub-published (policy-OK).
+      - name: Cache cargo registry + target
+        if: steps.skip.outputs.skip != 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            shell/src-tauri/target
+          key: windows-cargo-shell-${{ hashFiles('shell/src-tauri/Cargo.lock') }}
+          restore-keys: |
+            windows-cargo-shell-
+
+      # setup-bun adds a Git-Bash-style PATH; bun steps must run under bash
+      # (pwsh/cmd can't resolve it on Windows).
+      - name: Install dependencies
+        if: steps.skip.outputs.skip != 'true'
+        shell: bash
+        run: bun install --frozen-lockfile
+
+      - name: Install shell dependencies
+        if: steps.skip.outputs.skip != 'true'
+        working-directory: shell
+        shell: bash
+        run: bun install --frozen-lockfile
+
+      - name: Build web UI + ui-embed manifest
+        if: steps.skip.outputs.skip != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bun run build:ui
+          bun run scripts/gen-ui-embed.ts
+
+      # Reuse the exact sidecar the `binaries` job built + attached, so the
+      # tray app embeds the identical, version-stamped release binary.
+      - name: Download windows-x64 sidecar from the draft
+        if: steps.skip.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist-bin
+          ZIP="maximal-${TAG}-windows-x64.zip"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern "$ZIP" --pattern "$ZIP.sha256" --dir dist-bin
+          ( cd dist-bin && sha256sum -c "$ZIP.sha256" )
+
+      - name: Place sidecar as Tauri externalBin
+        if: steps.skip.outputs.skip != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = Get-ChildItem dist-bin -Filter '*.zip' | Select-Object -First 1
+          Expand-Archive -Path $zip.FullName -DestinationPath staging -Force
+          if (-not (Test-Path 'staging\maximal.exe')) { Write-Error 'maximal.exe missing from zip'; exit 1 }
+          New-Item -ItemType Directory -Force -Path 'shell\src-tauri\binaries' | Out-Null
+          Copy-Item 'staging\maximal.exe' 'shell\src-tauri\binaries\maximal-x86_64-pc-windows-msvc.exe' -Force
+          Get-ChildItem 'shell\src-tauri\binaries'
+
+      - name: Tauri build (Windows, NSIS)
+        if: steps.skip.outputs.skip != 'true'
+        working-directory: shell
+        shell: bash
+        env:
+          MAXIMAL_VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          # Stamp the real version (tauri.conf.json hardcodes 0.0.0) and skip
+          # beforeBuildCommand — the UI is already built above, and the hook
+          # runs via cmd.exe where bun isn't resolvable on Windows.
+          bun run tauri build --bundles nsis \
+            --config "{\"version\":\"${MAXIMAL_VERSION}\",\"build\":{\"beforeBuildCommand\":\"\"}}"
+
+      - name: Stage NSIS installer + sha256
+        if: steps.skip.outputs.skip != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $nsisDir = 'shell/src-tauri/target/release/bundle/nsis'
+          $setup = Get-ChildItem -Path $nsisDir -Filter '*-setup.exe' | Select-Object -First 1
+          if (-not $setup) { Write-Error "NSIS installer not produced under $nsisDir"; exit 1 }
+          New-Item -ItemType Directory -Force -Path dist-release | Out-Null
+          $name = "maximal-${env:TAG}-windows-x64-setup.exe"
+          $dst = Join-Path 'dist-release' $name
+          Copy-Item $setup.FullName $dst -Force
+          # `<hash>  <filename>` to match the sha256sum convention the other assets use.
+          $hash = (Get-FileHash -Algorithm SHA256 $dst).Hash.ToLower()
+          "$hash  $name" | Out-File -Encoding ascii "$dst.sha256"
+          Write-Host "staged $dst ($((Get-Item $dst).Length) bytes)"
+          Get-Content "$dst.sha256"
+
+      - name: Attach Windows shell installer to release
+        if: steps.skip.outputs.skip != 'true'
+        uses: ./.github/actions/upload-release-asset
+        with:
+          tag: ${{ env.TAG }}
+          files: |
+            dist-release/maximal-${{ env.TAG }}-windows-x64-setup.exe
+            dist-release/maximal-${{ env.TAG }}-windows-x64-setup.exe.sha256
+
   # Flip the draft release to published + latest, but ONLY after every
   # asset is attached: binaries, checksums, the smoke-tested Windows
-  # build, and every installer (macOS .dmg, Windows install.ps1
-  # and MSI, with the MSI verified end-to-end). If any upstream job fails
+  # build, and every installer (macOS .dmg, the Windows Tauri tray
+  # NSIS installer, Windows install.ps1 and MSI, with the MSI verified
+  # end-to-end). If any upstream job fails
   # the release stays a draft, so users never see an incomplete "Latest".
   # Recover by re-running the failed jobs (GitHub "Re-run failed jobs"),
   # then re-running publish — or publish the draft by hand.
@@ -922,6 +1102,7 @@ jobs:
       - windows-msi
       - windows-msi-verify
       - macos-dmg
+      - windows-shell
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -948,33 +1129,99 @@ jobs:
           fi
           echo "Published $TAG"
 
-  # GitHub suppresses the `release: published` event when a release is
-  # created via GITHUB_TOKEN (the anti-loop guard documented up top),
-  # which means deploy-pages.yml's `release` trigger never fires for
-  # our releases. Explicitly dispatch the site rebuild here so the
-  # landing page's "latest: vX.Y.Z" + download URLs always track the
-  # release that was just published.
-  redeploy-site:
-    # After `publish`: the landing page advertises "latest: vX.Y.Z" and
-    # links the release download URLs, so it must rebuild against a
-    # published, fully-assembled release — not the draft.
-    #
-    # Run for pre-releases too: the manifest carries `channels.beta`, so beta
-    # publishes must refresh it. The landing page still tracks releases/latest
-    # (stable only), so it is unaffected.
+  # Write the schema-2 updates manifest at publish time — WITHOUT an Astro
+  # rebuild (issue #220, phase 1 of #218). scripts/write-updates-manifest.ts is
+  # fed THIS release's own tag + published asset list and reuses the SAME pure
+  # `buildChannel` the Astro route uses, so the manifest names its own tag and
+  # is fresh-on-publish rather than resolved from the lagging `releases/latest`
+  # during SSG (the propagation race #187 band-aids). Read-modify-write: a
+  # `beta` publish updates only `channels.beta` and never clobbers
+  # `channels.stable`, and vice-versa. The build-time generator
+  # (site/src/pages/updates/manifest.json.ts) stays as a fallback so an
+  # ordinary `site/**` push still emits an equivalent file.
+  #
+  # Commits the regenerated `site/public/updates/manifest.json` to `main` (the
+  # served source of truth — Astro copies site/public/** verbatim). This job
+  # runs NO `bun run build`; it does not need to. That commit touches
+  # site/public/**, which matches deploy-pages.yml's `paths:` filter, so it
+  # AUTO-TRIGGERS exactly one Pages deploy that ships the new manifest (issue
+  # #222 / phase 3 of #218). This is why the old `redeploy-site` job — which
+  # explicitly dispatched deploy-pages.yml after this commit — was deleted:
+  # the paths-filtered push is the trigger now. The site's client-side
+  # manifest hydration (#221) + the build-time fallback (deploy-pages.yml's
+  # GITHUB_TOKEN lookup) both keep the site advertising the version even before
+  # that deploy lands, so a release never fails to advertise its version.
+  manifest:
     needs: publish
     runs-on: ubuntu-latest
     permissions:
-      actions: write
-      contents: read
+      contents: write
     steps:
-      - name: Trigger deploy-pages.yml
+      # Mint an app-repoman token so the push to `main` below bypasses the
+      # require-PR ruleset (issue #287). The default GITHUB_TOKEN has no bypass
+      # on that ruleset, so a plain push is rejected (GH013) and the manifest
+      # goes stale. Mirrors the token dance in release-please.yml. When the App
+      # isn't provisioned we fall back to github.token — the push is then
+      # rejected and the job fails RED (loud, not silent); recover by hand per
+      # the runbook. Resolve the id into a step output first: the `secrets`
+      # context can't be used in an `if:`.
+      - name: Resolve app id
+        id: appid
+        env:
+          APP_ID: ${{ vars.REPOMAN_APP_ID || secrets.REPOMAN_APP_ID }}
+        run: |
+          set -euo pipefail
+          if [ -n "${APP_ID:-}" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::No REPOMAN_APP_ID set — the manifest push will be rejected by the require-PR ruleset. Land it by hand (see docs/release-runbook.md)."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Mint app-repoman token
+        id: app-token
+        if: steps.appid.outputs.present == 'true'
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.REPOMAN_APP_ID || secrets.REPOMAN_APP_ID }}
+          private-key: ${{ secrets.REPOMAN_APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@v6
+        with:
+          # Commit to main, not the tag ref this run checks out by default.
+          ref: main
+          fetch-depth: 0
+          # Persist the app-repoman token so the `git push origin HEAD:main`
+          # below authenticates as the App (the ruleset bypass actor).
+          token: ${{ steps.app-token.outputs.token || github.token }}
+
+      - uses: ./.github/actions/setup-bun
+        with:
+          bun-version: 1.3.11
+
+      - name: Regenerate updates manifest from the published release
         env:
           GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: bun scripts/write-updates-manifest.ts --tag "$TAG"
+
+      - name: Commit manifest if changed
+        env:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          gh workflow run deploy-pages.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref main
-          echo "Dispatched deploy-pages.yml after $TAG"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name  "github-actions[bot]"
+          git add site/public/updates/manifest.json
+          # `generated` always changes, so a diff is expected on every release;
+          # guard anyway so a manual re-run with an identical body is a no-op.
+          if git diff --cached --quiet -- site/public/updates/manifest.json; then
+            echo "No manifest change for $TAG — already in sync."
+            exit 0
+          fi
+          git commit -m "chore(site): update updates manifest for $TAG"
+          # Rebase-safe push: another job/commit could have advanced main.
+          git pull --rebase origin main
+          git push origin HEAD:main
+          echo "Committed updated manifest for $TAG to main."

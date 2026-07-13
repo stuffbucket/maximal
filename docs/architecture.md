@@ -10,7 +10,7 @@ This is a local proxy that exposes the GitHub Copilot API as both an OpenAI-comp
 2. Parse Anthropic payload
 3. Detect subagent marker (`__SUBAGENT_MARKER__` in `<system-reminder>`) → sets `x-initiator: agent`
 4. Detect compact requests (Claude Code context compaction)
-5. Force `smallModel` for tool-less warmup/probe requests
+5. Force `smallModel` for tool-less warmup/probe requests (default `gpt-5-mini`; **warmup only** — distinct from the Claude Code *haiku tier*, which carries subagent tool calls and must stay tool-competent: see `src/lib/models/small-model.ts` `resolveSmallToolModel`)
 6. Merge mixed `tool_result` + text blocks to avoid fresh premium request
 7. Normalize model ID → look up Copilot model
 8. Route to one of three upstream flows:
@@ -35,16 +35,16 @@ This is a local proxy that exposes the GitHub Copilot API as both an OpenAI-comp
 
 ## Model routing
 
-`src/lib/models.ts` normalizes Claude model IDs via 5 regex patterns (handles variants like `claude-opus-4-6`, `claude-opus-4.6`). The `useMessagesApi` config flag (default `true`) controls whether Claude-family models use the native Messages API or fall back to Chat Completions.
+`src/lib/models/models.ts` normalizes Claude model IDs via 5 regex patterns (handles variants like `claude-opus-4-6`, `claude-opus-4.6`). The `useMessagesApi` config flag (default `true`) controls whether Claude-family models use the native Messages API or fall back to Chat Completions.
 
 ## Config and state
 
-- `src/lib/config.ts` — `AppConfig` shape, disk read/write from `~/.local/share/maximal/config.json` (Linux/macOS) or `%USERPROFILE%\.local\share\maximal\config.json` (Windows). Also respects `COPILOT_API_HOME` env var.
-- `src/lib/config-schema.ts` — zod runtime validation. Bad config → exit non-zero with key path. Unknown keys → warning, kept via `.loose()`.
-- `src/lib/state.ts` — singleton mutable state: tokens, accountType, rate-limit, models cache.
-- `src/lib/github-token-store.ts` — the GitHub identity store. Multi-account registry (schema v2) at `accounts.json` beside the legacy `github_token`: `{ activeKey, accounts: Record<"login@host", AccountRecord> }`, atomic temp+rename writes. Boot reads the active account; the legacy single-record file is migrated in once (gated, offline→`unknown@host`) and kept as a rollback fallback. The three sign-in producers (device-code, CLI, gh-reuse) all persist a typed `AccountRecord`; switch/remove + the `/settings/api/accounts` routes drive quick-switch (set active → reboot the sidecar into it). Sign-out forgets the active account; Remove forgets a specific one; both touch only maximal's own copy — never `gh`. RMW takes no lock (safe on the single Bun sidecar; see the comment above `addAccountToDefaultRegistry`).
-- `src/lib/secrets.ts` — file-based provider keys at `~/.local/share/maximal/secrets/<name>` (mode 0600). Env wins; file fills in unset values.
-- `src/lib/cache.ts` — `Cache<K,V>` LRU wrapper with hit/miss/eviction metrics. Wrapped instances register globally for `/_debug/state`.
+- `src/lib/config/config.ts` — `AppConfig` shape, disk read/write from `~/.local/share/maximal/config.json` (Linux/macOS) or `%USERPROFILE%\.local\share\maximal\config.json` (Windows). Also respects `COPILOT_API_HOME` env var.
+- `src/lib/config/config-schema.ts` — zod runtime validation. Bad config → exit non-zero with key path. Unknown keys → warning, kept via `.loose()`.
+- `src/lib/runtime-state/state.ts` — singleton mutable state: tokens, accountType, rate-limit, models cache.
+- `src/lib/auth/github-token-store.ts` — the GitHub identity store. Multi-account registry (schema v2) at `accounts.json` beside the legacy `github_token`: `{ activeKey, accounts: Record<"login@host", AccountRecord> }`, atomic temp+rename writes. Boot reads the active account; the legacy single-record file is migrated in once (gated, offline→`unknown@host`) and kept as a rollback fallback. The three sign-in producers (device-code, CLI, gh-reuse) all persist a typed `AccountRecord`; switch/remove + the `/settings/api/accounts` routes drive quick-switch (set active → reboot the sidecar into it). Sign-out forgets the active account; Remove forgets a specific one; both touch only maximal's own copy — never `gh`. RMW takes no lock (safe on the single Bun sidecar; see the comment above `addAccountToDefaultRegistry`).
+- `src/lib/auth/secrets.ts` — file-based provider keys at `~/.local/share/maximal/secrets/<name>` (mode 0600). Env wins; file fills in unset values.
+- `src/lib/runtime-state/cache.ts` — `Cache<K,V>` LRU wrapper with hit/miss/eviction metrics. Wrapped instances register globally for `/_debug/state`.
 
 ## Diagnostic surfaces
 
@@ -63,19 +63,37 @@ See also: `docs/codegen-feedback-loops-practices.md` → Dispatch and review loo
 
 ## Testing gotchas
 
-- **`mock.module` persists forward across files in a run.** Bun does not
-  reset module mocks between test files, and CI orders files differently
-  than local. A mock wrapper that drops arguments (e.g. forwards only the
-  first param) will corrupt a *sibling* file's tests that pass the dropped
-  args — and it'll pass locally but fail in CI. Make wrappers behaviorally
-  identical to the real module (forward `...rest`), or prefer injectable
-  function options over `mock.module`. This bit us twice on the apps work.
+- **`mock.module` persists forward across files in a run — now lint-enforced.**
+  Bun does not reset module mocks between test files, and CI orders files
+  differently than local, so an unrestored mock leaks its stub into a
+  *sibling* file that then reads stale state — the classic "green locally,
+  red on CI" (or vice-versa) failure. This bit us **four times** (the last
+  cost a long #229 debugging loop), so an ESLint rule (`mockModuleLeakGuard`
+  in `eslint.config.js`, scoped to `tests/**`) now **bans the fire-and-forget
+  forms**: `void mock.module(...)` and a bare `mock.module(...)` expression
+  statement both error.
+  - **Awaited is *not* automatically safe.** `await mock.module(...)` passes
+    the lint rule, but an awaited `afterAll` *restore* does **not** reliably
+    land before the next file's static imports on CI — so a module mock that
+    intercepts a *shared* module still leaks across files even when restored.
+    The rule catches the common footgun, not this one.
+  - **The durable fix is to not mock a shared module across files at all.**
+    Prefer the **real** module (the test preload redirects `COPILOT_API_HOME`
+    to a temp dir, and `getClaudeCodeSettingsPath()` honors `CLAUDE_CONFIG_DIR`
+    — so config/settings round-trips are already isolated), or **injectable
+    function options**. Only stub a module with no env/injection seam, keep the
+    wrapper behaviorally identical (spread `...actual`, forward `...rest`), and
+    prove via a sequential-import repro that it can't break a later file.
 - **Green tests can still test nothing.** Mutation testing (`bun run mutate`)
   caught classification tests that passed without exercising the branch
   they claimed to cover (the fixture hit a different code path that
   returned the same value). For security-critical or branchy logic, run
   Stryker and confirm the targeted mutants actually die — don't trust a
-  passing assertion alone.
+  passing assertion alone. Every surviving mutant must land in exactly one of
+  three buckets — **killable** (write the test), **dead** (delete it / encode
+  the impossibility in types), or **proven-equivalent** (written proof + reason
+  to keep). See [`dev/testing-strategy.md`](dev/testing-strategy.md) §6 for the
+  disposition rule and the hot-path modules that warrant periodic sweeps.
 
 ## Release & PR conventions
 
@@ -99,4 +117,4 @@ See also: `docs/codegen-feedback-loops-practices.md` → Dispatch and review loo
 
 ## Token counting
 
-`/v1/messages/count_tokens`: when `anthropicApiKey` is configured, forwards Claude model requests to Anthropic's free `/v1/messages/count_tokens` endpoint for exact counts. Otherwise falls back to GPT `o200k_base` tokenizer with 1.15x multiplier (`src/lib/tokenizer.ts`).
+`/v1/messages/count_tokens`: when `anthropicApiKey` is configured, forwards Claude model requests to Anthropic's free `/v1/messages/count_tokens` endpoint for exact counts. Otherwise falls back to GPT `o200k_base` tokenizer with 1.15x multiplier (`src/lib/models/tokenizer.ts`).

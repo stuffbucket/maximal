@@ -1,20 +1,31 @@
 /**
  * /settings/api/apps — route-level coverage.
  *
- * Mocking strategy (Bun's `mock.module` persists forward across files in
- * the run, so every override here is a *delegating wrapper* that only
- * changes default arguments — sibling tests that pass explicit args are
- * unaffected):
+ * Config comes from the REAL `~/lib/config/config`, which the global preload
+ * (tests/test-setup.ts) has already redirected to a throwaway
+ * COPILOT_API_HOME temp dir — so getConfig/writeConfig round-trip through a
+ * temp `config.json`, never the user's real config.
  *
- *   - `~/lib/config`: in-memory getConfig/writeConfig, reset per test
- *     and cleared in afterAll so later files see an empty config.
- *   - `~/lib/claude-cli-detect`: `detectClaudeInstalls()` with no args
- *     returns a controllable fixture (the route always calls it with no
- *     args). Explicit-arg calls delegate to the real implementation.
- *   - `~/lib/claude-code-settings`: file-path defaults point at a tmp
- *     settings.json instead of the user's real ~/.claude/settings.json.
- *   - `~/lib/claude-desktop-3p-config`: `home` defaults point at a tmp
- *     home dir instead of the user's real Claude-3p userData dir.
+ * Path isolation without leak-prone module mocks:
+ *   - claude-code settings.json → we point `process.env.CLAUDE_CONFIG_DIR`
+ *     at a tmp dir (saved+restored around the file). The REAL
+ *     `applyProxyBaseUrl()` / `isProxyBaseUrlConfigured()` etc. resolve their
+ *     default path via `getClaudeCodeSettingsPath()`, which honors that env
+ *     var — so no `mock.module("~/apps/claude-code/config")` is needed. That
+ *     mock used to default the path arg to a tmp file, and on CI it LEAKED
+ *     forward (even with an awaited restore): a later file's arg-less
+ *     `applyProxyBaseUrl()` got the leaked tmp path, breaking
+ *     claude-code-cli-enable-persist.test.ts (#229).
+ *
+ * Two mocks remain because their targets have NO env/injection seam that the
+ * route path reaches (the route calls them with no args). They spread the real
+ * module and are restored in an awaited afterAll; their forward-leak is proven
+ * harmless by the sequential-import repro (see the #229 investigation):
+ *   - `~/apps/claude-code/detect`: `detectClaudeInstalls()` (no args) returns a
+ *     controllable install fixture. No env seam feeds a fixture in.
+ *   - `~/apps/claude-desktop/config`: `home` defaults to `os.homedir()` (no env
+ *     override), so without the mock the route would touch the developer's REAL
+ *     Claude-3p userData dir. The mock redirects it to a tmp home.
  */
 
 import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test"
@@ -23,31 +34,23 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-import type { ClaudeInstall } from "~/lib/claude-cli-detect"
-import type { AppConfig } from "~/lib/config"
+import type { ClaudeInstall } from "~/apps/claude-code/detect"
 
 const ROUTE_3P_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "apps-route-3p-"))
-const ROUTE_CC_SETTINGS = path.join(
-  fs.mkdtempSync(path.join(os.tmpdir(), "apps-route-ccsettings-")),
-  "settings.json",
-)
+const ROUTE_CC_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "apps-route-ccdir-"))
+const ROUTE_CC_SETTINGS = path.join(ROUTE_CC_DIR, "settings.json")
 
-let fakeConfig: AppConfig = {}
+// Redirect the REAL claude-code settings path into our tmp dir via the env var
+// that getClaudeCodeSettingsPath() honors. Saved + restored in afterAll so we
+// don't leak the override to sibling files.
+const savedClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR
+process.env.CLAUDE_CONFIG_DIR = ROUTE_CC_DIR
+
 let installsFixture: Array<ClaudeInstall> = []
 
-const actualConfig = await import("~/lib/config")
-void mock.module("~/lib/config", () => ({
-  ...actualConfig,
-  getConfig: () => fakeConfig,
-  writeConfig: (next: AppConfig) => {
-    fakeConfig = next
-    return next
-  },
-}))
-
-const actualDetect = await import("~/lib/claude-cli-detect")
+const actualDetect = await import("~/apps/claude-code/detect")
 const realDetect = actualDetect.detectClaudeInstalls
-void mock.module("~/lib/claude-cli-detect", () => ({
+await mock.module("~/apps/claude-code/detect", () => ({
   ...actualDetect,
   detectClaudeInstalls: (options?: Record<string, unknown>) =>
     options && Object.keys(options).length > 0 ?
@@ -55,37 +58,14 @@ void mock.module("~/lib/claude-cli-detect", () => ({
     : installsFixture,
 }))
 
-const actualCcSettings = await import("~/lib/claude-code-settings")
-const realCcApply = actualCcSettings.applyProxyBaseUrl
-const realCcRevert = actualCcSettings.revertProxyBaseUrl
-const realCcConfigured = actualCcSettings.isProxyBaseUrlConfigured
-const realCcRead = actualCcSettings.readClaudeCodeSettings
-// Forward all args, defaulting only the first to the tmp settings path.
-// We deliberately do NOT override getClaudeCodeSettingsPath — the route
-// never calls it (it passes the path explicitly via these wrappers), and
-// overriding it would bleed into the writer's own path-resolution tests.
-void mock.module("~/lib/claude-code-settings", () => ({
-  ...actualCcSettings,
-  applyProxyBaseUrl: (filePath: string = ROUTE_CC_SETTINGS) =>
-    realCcApply(filePath),
-  revertProxyBaseUrl: (filePath: string = ROUTE_CC_SETTINGS) =>
-    realCcRevert(filePath),
-  isProxyBaseUrlConfigured: (filePath: string = ROUTE_CC_SETTINGS) =>
-    realCcConfigured(filePath),
-  readClaudeCodeSettings: (filePath: string = ROUTE_CC_SETTINGS) =>
-    realCcRead(filePath),
-}))
-
-const actualDesktop = await import("~/lib/claude-desktop-3p-config")
+const actualDesktop = await import("~/apps/claude-desktop/config")
 const realApply = actualDesktop.applyConfigLibraryProfile
 const realRevert = actualDesktop.revertConfigLibraryProfile
 const realIsApplied = actualDesktop.isConfigLibraryApplied
 const realGetDir = actualDesktop.getClaude3pDir
 // Wrappers forward ALL args (only defaulting the first `home` to the tmp
 // home) so this mock stays behaviorally identical to the real module.
-// Bun's `mock.module` persists forward across files in a run, so a wrapper
-// that dropped later args would corrupt sibling tests that pass them.
-void mock.module("~/lib/claude-desktop-3p-config", () => ({
+await mock.module("~/apps/claude-desktop/config", () => ({
   ...actualDesktop,
   applyConfigLibraryProfile: (
     home: string = ROUTE_3P_HOME,
@@ -104,8 +84,8 @@ void mock.module("~/lib/claude-desktop-3p-config", () => ({
 }))
 
 const { appsRoutes } = await import("~/routes/settings/apps")
-const { getConfig } = await import("~/lib/config")
-const { isProxyBaseUrlConfigured } = await import("~/lib/claude-code-settings")
+const { getConfig, writeConfig } = await import("~/lib/config/config")
+const { isProxyBaseUrlConfigured } = await import("~/apps/claude-code/config")
 
 function buildApp() {
   const app = new Hono()
@@ -120,20 +100,29 @@ function fakeInstall(p: string): ClaudeInstall {
 function cleanTmp() {
   fs.rmSync(ROUTE_3P_HOME, { recursive: true, force: true })
   fs.mkdirSync(ROUTE_3P_HOME, { recursive: true })
-  fs.rmSync(path.dirname(ROUTE_CC_SETTINGS), { recursive: true, force: true })
-  fs.mkdirSync(path.dirname(ROUTE_CC_SETTINGS), { recursive: true })
+  fs.rmSync(ROUTE_CC_DIR, { recursive: true, force: true })
+  fs.mkdirSync(ROUTE_CC_DIR, { recursive: true })
 }
 
 beforeEach(() => {
-  fakeConfig = {}
+  writeConfig({})
   installsFixture = []
   cleanTmp()
 })
 
-afterAll(() => {
-  fakeConfig = {}
+afterAll(async () => {
+  // Leave a clean slate so later files in the shared worker start empty, and
+  // restore the mocked app modules + the env override so nothing leaks forward.
+  writeConfig({})
+  if (savedClaudeConfigDir === undefined) {
+    delete process.env.CLAUDE_CONFIG_DIR
+  } else {
+    process.env.CLAUDE_CONFIG_DIR = savedClaudeConfigDir
+  }
+  await mock.module("~/apps/claude-code/detect", () => actualDetect)
+  await mock.module("~/apps/claude-desktop/config", () => actualDesktop)
   fs.rmSync(ROUTE_3P_HOME, { recursive: true, force: true })
-  fs.rmSync(path.dirname(ROUTE_CC_SETTINGS), { recursive: true, force: true })
+  fs.rmSync(ROUTE_CC_DIR, { recursive: true, force: true })
 })
 
 describe("GET /apps", () => {

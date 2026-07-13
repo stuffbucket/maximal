@@ -21,6 +21,7 @@ permissions = [
   "allow-uninstall-maximal",
   "allow-get-shell-api-key",
   "allow-subscribe-token-usage",
+  "allow-set-locale",
 ]
 
 [[permission]]
@@ -62,3 +63,8 @@ commands.allow = ["get_shell_api_key"]
 identifier = "allow-subscribe-token-usage"
 description = "Stream live token-usage updates to the Dashboard via Channel<TokenUsageEvent>."
 commands.allow = ["subscribe_token_usage"]
+
+[[permission]]
+identifier = "allow-set-locale"
+description = "Adopt the in-app picker's locale for the shell's native chrome (tray menu, tooltip, notifications, window titles, quit dialog), invoked from the Settings/Dashboard webviews — a 'remote' loopback origin, so it needs an explicit permission."
+commands.allow = ["set_locale"]

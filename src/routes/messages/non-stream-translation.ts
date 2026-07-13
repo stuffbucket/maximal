@@ -13,8 +13,8 @@ import {
   type AnthropicToolUseBlock,
   type AnthropicUserContentBlock,
   type AnthropicUserMessage,
-} from "~/lib/anthropic-types"
-import { state } from "~/lib/state"
+} from "~/lib/models/anthropic-types"
+import { state } from "~/lib/runtime-state/state"
 import {
   type ChatCompletionResponse,
   type ChatCompletionsPayload,
@@ -25,7 +25,7 @@ import {
   type ToolCall,
 } from "~/services/copilot/create-chat-completions"
 
-import { mapOpenAIStopReasonToAnthropic } from "./utils"
+import { mapOpenAIStopReasonToAnthropic, parseToolCallArguments } from "./utils"
 
 // Compatible with opencode, it will filter out blocks where the thinking text is empty, so we need add a default thinking text
 export const THINKING_TEXT = "Thinking..."
@@ -44,11 +44,7 @@ export function translateToOpenAI(
   const thinkingBudget = getThinkingBudget(payload, model)
   return {
     model: modelId,
-    messages: translateAnthropicMessagesToOpenAI(
-      payload,
-      modelId,
-      thinkingBudget,
-    ),
+    messages: translateAnthropicMessagesToOpenAI(payload, modelId),
     max_tokens: payload.max_tokens,
     stop: payload.stop_sequences,
     stream: payload.stream,
@@ -86,7 +82,6 @@ function getThinkingBudget(
 function translateAnthropicMessagesToOpenAI(
   payload: AnthropicMessagesPayload,
   modelId: string,
-  _thinkingBudget: number | undefined,
 ): Array<Message> {
   const systemMessages = handleSystemPrompt(payload.system)
   const otherMessages = payload.messages.flatMap((message) =>
@@ -431,6 +426,6 @@ function getAnthropicToolUseBlocks(
     type: "tool_use",
     id: toolCall.id,
     name: toolCall.function.name,
-    input: JSON.parse(toolCall.function.arguments) as Record<string, unknown>,
+    input: parseToolCallArguments(toolCall.function.arguments),
   }))
 }

@@ -49,12 +49,17 @@ use tauri::{
     ipc::Channel,
     menu::{IsMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    webview::PageLoadEvent,
     AppHandle, Emitter, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder,
     WindowEvent,
 };
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
+
+/// Native-string i18n (tray, notifications, window titles, quit dialog),
+/// backed by the same shell/src/i18n/*.json catalogs the webview renders with.
+mod native_i18n;
 
 // Canonical Maximal port. Apps integrating with the proxy (Claude
 // Code, Cursor, custom scripts) only need to know this one URL:
@@ -317,6 +322,28 @@ impl AppStatus {
     }
 }
 
+/// The active native-UI locale (BCP-47 tag), behind a Mutex because the
+/// `set_locale` command (main thread) and the tray / notification paths
+/// (Tokio tasks) both read it. Seeded at setup from the persisted picker
+/// choice or the OS locale (see `native_i18n::resolve_locale`); updated live
+/// by `set_locale` when the user changes the in-app picker so the tray menu,
+/// window titles, and later notifications follow the chosen language.
+struct LocaleState(Mutex<String>);
+
+impl LocaleState {
+    fn new() -> Self {
+        Self(Mutex::new("en".to_string()))
+    }
+
+    fn get(&self) -> String {
+        self.0.lock().expect("locale mutex poisoned").clone()
+    }
+
+    fn set(&self, tag: String) {
+        *self.0.lock().expect("locale mutex poisoned") = tag;
+    }
+}
+
 /// One-shot flag for "we've already auto-opened Settings to prompt
 /// sign-in this session." Lets us open Settings → Account on the
 /// first Starting → RunningUnauthenticated transition without
@@ -438,16 +465,20 @@ impl ShellApiKey {
     }
 }
 
-/// 16 random bytes from `/dev/urandom`, hex-encoded, with a recognisable
+/// 16 cryptographically-random bytes, hex-encoded, with a recognisable
 /// prefix so it's greppable in logs / config diffs. Total length 41
 /// chars — comfortably inside the sidecar's API_KEY_VALUE_PATTERN range
 /// (8–128 chars of [A-Za-z0-9_-]).
+///
+/// Sourced via `getrandom`, which pulls bytes from the OS CSPRNG on every
+/// target (`/dev/urandom` / `getrandom(2)` on Unix, `BCryptGenRandom` on
+/// Windows). The previous implementation opened `/dev/urandom` directly,
+/// which does not exist on Windows and would panic the shell at startup —
+/// the single hardest Windows-parity blocker in this file.
 fn generate_shell_api_key() -> String {
-    use std::io::Read;
     let mut buf = [0u8; 16];
-    std::fs::File::open("/dev/urandom")
-        .and_then(|mut f| f.read_exact(&mut buf))
-        .expect("could not read /dev/urandom for shell api key");
+    getrandom::fill(&mut buf)
+        .expect("could not read OS CSPRNG for shell api key");
     let hex: String = buf.iter().map(|b| format!("{:02x}", b)).collect();
     format!("mxlshell_{}", hex)
 }
@@ -598,6 +629,7 @@ pub fn run() {
         .manage(LatestUpdate::new())
         .manage(LastSidecarError::new())
         .manage(MenuBarOnly::new())
+        .manage(LocaleState::new())
         .invoke_handler(tauri::generate_handler![
             open_settings_at,
             open_dashboard,
@@ -608,6 +640,7 @@ pub fn run() {
             get_shell_api_key,
             subscribe_token_usage,
             set_menu_bar_only,
+            set_locale,
         ])
         .setup(|app| {
             // Seed the runtime menu-bar-only flag from the persisted
@@ -649,6 +682,21 @@ pub fn run() {
                     set_dock_icon();
                 }
             }
+
+            // Seed the native-UI locale BEFORE the tray is built so the very
+            // first menu/tooltip render is already in the right language. Rust
+            // can't read the webview's localStorage picker choice, but the
+            // `set_locale` command persists that choice to disk, so a returning
+            // user's pick wins here; a genuine first run (no persisted file)
+            // falls back to the OS locale. Once a webview boots it re-pushes the
+            // live choice via `set_locale` regardless.
+            let persisted = persisted_locale(app.handle());
+            let os_locale = sys_locale::get_locale();
+            let seeded = native_i18n::resolve_locale(
+                persisted.as_deref(),
+                os_locale.as_deref(),
+            );
+            app.state::<LocaleState>().set(seeded);
 
             // Install the tray FIRST so the user has a Quit affordance
             // before the sidecar's spawn even returns. Any failure
@@ -720,21 +768,26 @@ pub fn run() {
             kill_sidecar(app_handle);
         }
         // macOS delivers Reopen when the app is re-activated — clicking its
-        // notification banner, its Dock icon, etc. Desktop notifications
-        // can't carry a routable button (the plugin's show() is
-        // fire-and-forget), so this is how the sign-in nudge's "click here"
-        // lands somewhere: if we're up but not signed in and nothing's on
-        // screen, bring up Settings → account.
+        // notification banner ("Maximal is running"), its Dock icon, etc.
+        // Desktop notifications can't carry a routable button (the plugin's
+        // show() is fire-and-forget), so Reopen is how a banner click lands
+        // somewhere: if nothing's on screen, open Settings. Route to the
+        // account section when we're up but not signed in (the sign-in
+        // nudge), otherwise plain Settings.
         #[cfg(target_os = "macos")]
         RunEvent::Reopen {
             has_visible_windows,
             ..
         } => {
-            if !has_visible_windows
-                && app_handle.state::<AppStatus>().get()
+            if !has_visible_windows {
+                let section = if app_handle.state::<AppStatus>().get()
                     == SidecarState::RunningUnauthenticated
-            {
-                open_settings_window(app_handle, Some("account"));
+                {
+                    Some("account")
+                } else {
+                    None
+                };
+                open_settings_window(app_handle, section);
             }
         }
         _ => {}
@@ -869,7 +922,7 @@ fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Run `maximal configure-claude-code --revert` as a one-shot sidecar
+/// Run `maximal app claude-code --disable` as a one-shot sidecar
 /// command. Called when the proxy sidecar *crashes* (non-zero exit) — it
 /// can't revert its own Claude Code base URL in that path, so the shell
 /// does it. Best-effort: a missing binary or non-zero exit is logged and
@@ -878,7 +931,7 @@ fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
 /// the Terminated handler stays synchronous.
 fn reconcile_claude_code_revert(app: &AppHandle) {
     let command = match app.shell().sidecar("maximal") {
-        Ok(c) => c.args(["configure-claude-code", "--revert"]),
+        Ok(c) => c.args(["app", "claude-code", "--disable"]),
         Err(err) => {
             eprintln!("[shell] could not build claude-code revert command: {err}");
             return;
@@ -950,9 +1003,18 @@ fn extract_error_reason(chunk: &str) -> Option<String> {
 ///   3. If the child is still around (still in our `Sidecar` state)
 ///      after 3s, escalate to SIGKILL via `CommandChild::kill()`.
 ///
-/// On non-Unix targets, libc::SIGTERM isn't available, so we fall
-/// straight through to `child.kill()`. The tray app is macOS-first;
-/// this just keeps any future Windows builds compiling.
+/// On Windows there is no SIGTERM to send through this API. We instead
+/// run `taskkill /PID <pid>` *without* `/F`: that posts WM_CLOSE /
+/// CTRL_CLOSE_EVENT to the target, which the Bun runtime surfaces to
+/// the sidecar's emulated `SIGTERM`/`SIGINT` handler (src/lib/start/
+/// shutdown.ts wires both) — so the same graceful drain runs. We then
+/// escalate to `CommandChild::kill()` (SIGKILL-equivalent) after the
+/// grace period, exactly like the Unix path. If taskkill can't be
+/// spawned we fall straight through to the hard kill so a Quit never
+/// hangs. (A future, even-cleaner option is to POST the proxy's own
+/// `/_internal/shutdown` endpoint — the same protocol `--replace` uses —
+/// but that's async work this synchronous Exit path doesn't need today;
+/// the parent-death watchdog already backstops an abrupt kill.)
 fn kill_sidecar(app: &AppHandle) {
     let Some(child) = app.state::<Sidecar>().take() else {
         return;
@@ -992,9 +1054,39 @@ fn kill_sidecar(app: &AppHandle) {
 
     #[cfg(not(unix))]
     {
-        // No SIGTERM equivalent we can send through this API on
-        // Windows; just SIGKILL-equivalent and move on.
-        let _ = child.kill();
+        // Windows graceful shutdown: `taskkill` WITHOUT `/F` requests a
+        // polite close (WM_CLOSE / CTRL_CLOSE_EVENT) that Bun delivers to
+        // the sidecar's emulated SIGTERM/SIGINT handler, so the drain in
+        // src/lib/start/shutdown.ts runs (flush logs, close socket, revert
+        // Claude Code base URL). `/T` also reaps any child the sidecar
+        // spawned. Best-effort: if taskkill won't launch we skip straight
+        // to the hard kill below.
+        let pid = child.pid();
+        #[cfg(target_os = "windows")]
+        {
+            use std::process::Command;
+            #[cfg(windows)]
+            use std::os::windows::process::CommandExt;
+            // CREATE_NO_WINDOW: don't flash a console for the helper.
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            let mut cmd = Command::new("taskkill");
+            cmd.args(["/PID", &pid.to_string(), "/T"]);
+            #[cfg(windows)]
+            cmd.creation_flags(CREATE_NO_WINDOW);
+            if let Err(err) = cmd.spawn() {
+                eprintln!("[shell] taskkill spawn failed ({err}); hard-killing");
+            }
+        }
+
+        // Escalate to SIGKILL-equivalent after the grace period, mirroring
+        // the Unix path. MOVE the child into the thread (do NOT return it to
+        // the shared Sidecar slot) so a respawn that fills the slot with a
+        // fresh child isn't killed by this escalation ~3s later.
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(3));
+            // No-op if the graceful close above already made it exit.
+            let _ = child.kill();
+        });
     }
 }
 
@@ -1156,15 +1248,21 @@ fn apply_rejection(app: &AppHandle, next: Option<RejectionSnapshot>) {
 /// the notification may silently no-op, which is expected.
 fn fire_rejection_notification(app: &AppHandle, message: &str) {
     use tauri_plugin_notification::NotificationExt;
+    let locale = app.state::<LocaleState>().get();
+    let title = native_i18n::tr(&locale, "native-notify-rejection-title");
     let body = if message.is_empty() {
-        "An upstream Copilot request was rejected. Open Settings for details.".to_owned()
+        native_i18n::tr(&locale, "native-notify-rejection-body")
     } else {
-        format!("{message} — open Settings for details.")
+        native_i18n::t(
+            &locale,
+            "native-notify-rejection-body-detail",
+            &[("message", message)],
+        )
     };
     if let Err(err) = app
         .notification()
         .builder()
-        .title("Maximal")
+        .title(title)
         .body(body)
         .show()
     {
@@ -1245,12 +1343,17 @@ fn apply_update(app: &AppHandle, next: Option<UpdateSnapshot>) {
 /// Settings → Diagnostics carries the clickable link.
 fn fire_update_notification(app: &AppHandle, latest: &str, url: &str) {
     use tauri_plugin_notification::NotificationExt;
+    let locale = app.state::<LocaleState>().get();
     let title = if latest.is_empty() {
-        "Maximal update available".to_owned()
+        native_i18n::tr(&locale, "native-notify-update-title")
     } else {
-        format!("Maximal {latest} is available")
+        native_i18n::t(
+            &locale,
+            "native-notify-update-title-versioned",
+            &[("latest", latest)],
+        )
     };
-    let body = format!("Update at {url}");
+    let body = native_i18n::t(&locale, "native-notify-update-body", &[("url", url)]);
     if let Err(err) =
         app.notification().builder().title(title).body(body).show()
     {
@@ -1367,18 +1470,19 @@ fn apply_state(app: &AppHandle, next: SidecarState) {
 /// "Show logs…") are always there as the durable surface.
 fn fire_failed_notification(app: &AppHandle, reason: Option<&str>) {
     use tauri_plugin_notification::NotificationExt;
+    let locale = app.state::<LocaleState>().get();
     let body = match reason {
-        Some(r) if !r.is_empty() => format!(
-            "{r} — click the menu-bar icon to retry startup or view the logs."
+        Some(r) if !r.is_empty() => native_i18n::t(
+            &locale,
+            "native-notify-failed-body-reason",
+            &[("reason", r)],
         ),
-        _ => "The background proxy failed to start. Click the menu-bar icon \
-              to retry startup or view the logs."
-            .to_string(),
+        _ => native_i18n::tr(&locale, "native-notify-failed-body"),
     };
     if let Err(err) = app
         .notification()
         .builder()
-        .title("Maximal couldn't start")
+        .title(native_i18n::tr(&locale, "native-notify-failed-title"))
         .body(body)
         .show()
     {
@@ -1427,6 +1531,18 @@ fn create_splash(app: &AppHandle) {
     .transparent(true)
     .always_on_top(true)
     .skip_taskbar(true)
+    // Build hidden and only show once the webview reports the DOM has
+    // loaded. On Windows/WebView2 the native surface is presented before
+    // the compositor draws its first frame, so a visible-from-launch
+    // transparent window shows an empty outline for hundreds of ms–seconds
+    // before the brand-red `.splash` div pops in. macOS/WKWebView paints in
+    // lockstep with show, so this fires immediately there — no regression.
+    .visible(false)
+    .on_page_load(|window, payload| {
+        if payload.event() == PageLoadEvent::Finished {
+            let _ = window.show();
+        }
+    })
     .center()
     .build();
     match result {
@@ -1504,11 +1620,21 @@ fn dismiss_splash(app: &AppHandle) {
 /// denial or a dev (`cargo run`) no-op must not matter.
 fn fire_startup_notification(app: &AppHandle) {
     use tauri_plugin_notification::NotificationExt;
+    let locale = app.state::<LocaleState>().get();
+    // Where the icon lives — and which way to point — is platform-specific:
+    // macOS puts it in the top menu bar (↑); Windows/Linux put it in the
+    // system tray (↓). Each catalog bakes both the container noun and the
+    // arrow into its own per-OS key, so we just pick the key by target_os.
+    let body_key = if cfg!(target_os = "macos") {
+        "native-notify-startup-body-macos"
+    } else {
+        "native-notify-startup-body-other"
+    };
     if let Err(err) = app
         .notification()
         .builder()
-        .title("Maximal is running")
-        .body("Look for the Maximal icon in your menu bar ↑")
+        .title(native_i18n::tr(&locale, "native-notify-startup-title"))
+        .body(native_i18n::tr(&locale, body_key))
         .show()
     {
         eprintln!("[shell] startup notification failed: {err}");
@@ -1523,15 +1649,12 @@ fn fire_startup_notification(app: &AppHandle) {
 /// menu-bar "Sign in to GitHub…" item is the always-available fallback.
 fn fire_sign_in_notification(app: &AppHandle) {
     use tauri_plugin_notification::NotificationExt;
+    let locale = app.state::<LocaleState>().get();
     if let Err(err) = app
         .notification()
         .builder()
-        .title("Sign in to GitHub")
-        .body(
-            "Maximal needs your GitHub Copilot account before it can serve \
-             requests. Click here — or the menu-bar icon — to open Settings \
-             and sign in.",
-        )
+        .title(native_i18n::tr(&locale, "native-notify-signin-title"))
+        .body(native_i18n::tr(&locale, "native-notify-signin-body"))
         .show()
     {
         eprintln!("[shell] sign-in notification failed: {err}");
@@ -1539,24 +1662,52 @@ fn fire_sign_in_notification(app: &AppHandle) {
 }
 
 fn install_tray(app: &AppHandle) -> tauri::Result<()> {
-    let menu = build_menu(app, SidecarState::Starting)?;
+    let locale = app.state::<LocaleState>().get();
+    let menu = build_menu(app, &locale, SidecarState::Starting)?;
     let icon = icon_for(SidecarState::Starting, false)?;
+
+    // Platform tray-click convention:
+    //   * macOS  — left-click opens the menu (HIG menu-bar behavior).
+    //   * Windows — left-click opens Settings (the expected "open the app"
+    //     gesture), right-click opens the menu. Windows has no
+    //     `RunEvent::Reopen`, so this left-click handler is also the path a
+    //     user takes after the sign-in notification ("click the icon").
+    #[cfg(target_os = "macos")]
+    let show_menu_on_left_click = true;
+    #[cfg(not(target_os = "macos"))]
+    let show_menu_on_left_click = false;
 
     TrayIconBuilder::with_id(TRAY_ID)
         .menu(&menu)
-        .show_menu_on_left_click(true)
-        .tooltip("maximal — starting…")
+        .show_menu_on_left_click(show_menu_on_left_click)
+        .tooltip(native_i18n::tr(&locale, "native-tooltip-starting"))
         .icon(icon)
         .on_menu_event(handle_menu_event)
-        .on_tray_icon_event(|_tray, event| {
+        .on_tray_icon_event(|tray, event| {
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Up,
                 ..
             } = event
             {
-                // Reserved for future left-click behavior; the
-                // current default is show_menu_on_left_click.
+                // macOS: left-click is handled by show_menu_on_left_click
+                // above — nothing to do here. Windows/Linux: open Settings,
+                // deep-linking to account when the user still needs to sign
+                // in (mirrors the macOS RunEvent::Reopen nudge).
+                #[cfg(not(target_os = "macos"))]
+                {
+                    let app = tray.app_handle();
+                    let section = if app.state::<AppStatus>().get()
+                        == SidecarState::RunningUnauthenticated
+                    {
+                        Some("account")
+                    } else {
+                        None
+                    };
+                    open_settings_window(app, section);
+                }
+                #[cfg(target_os = "macos")]
+                let _ = tray;
             }
         })
         .build(app)?;
@@ -1567,11 +1718,12 @@ fn refresh_tray(app: &AppHandle, state: SidecarState) -> tauri::Result<()> {
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
         return Ok(());
     };
+    let locale = app.state::<LocaleState>().get();
     let rejection = app.state::<LastRejection>().get();
-    let menu = build_menu(app, state)?;
+    let menu = build_menu(app, &locale, state)?;
     tray.set_menu(Some(menu))?;
     tray.set_icon(Some(icon_for(state, rejection.is_some())?))?;
-    tray.set_tooltip(Some(tooltip_for(state, rejection.as_ref())))?;
+    tray.set_tooltip(Some(tooltip_for(&locale, state, rejection.as_ref())))?;
     Ok(())
 }
 
@@ -1638,6 +1790,7 @@ fn icon_for(
 }
 
 fn tooltip_for(
+    locale: &str,
     state: SidecarState,
     rejection: Option<&RejectionSnapshot>,
 ) -> String {
@@ -1647,39 +1800,46 @@ fn tooltip_for(
     // rejection sidecar isn't actionable while signed out anyway.
     if matches!(state, SidecarState::RunningAuthenticated) {
         if let Some(r) = rejection {
-            return format!("maximal — {}", r.message);
+            return native_i18n::t(
+                locale,
+                "native-tooltip-rejection",
+                &[("message", &r.message)],
+            );
         }
     }
-    match state {
-        SidecarState::Starting => "maximal — starting…".to_owned(),
-        SidecarState::RunningUnauthenticated => {
-            "maximal — sign in to GitHub".to_owned()
-        }
-        SidecarState::RunningAuthenticated => "maximal".to_owned(),
-        SidecarState::Failed => "maximal — sidecar failed".to_owned(),
-        SidecarState::Stopped => "maximal — stopped".to_owned(),
-    }
+    let key = match state {
+        SidecarState::Starting => "native-tooltip-starting",
+        SidecarState::RunningUnauthenticated => "native-tooltip-sign-in",
+        SidecarState::RunningAuthenticated => "native-tooltip-idle",
+        SidecarState::Failed => "native-tooltip-failed",
+        SidecarState::Stopped => "native-tooltip-stopped",
+    };
+    native_i18n::tr(locale, key)
 }
 
-fn build_menu(app: &AppHandle, state: SidecarState) -> tauri::Result<Menu<tauri::Wry>> {
+fn build_menu(
+    app: &AppHandle,
+    locale: &str,
+    state: SidecarState,
+) -> tauri::Result<Menu<tauri::Wry>> {
     let settings_item = MenuItem::with_id(
         app,
         menu_id::SETTINGS,
-        "Settings…",
+        native_i18n::tr(locale, "native-tray-settings"),
         true,
         Some("CmdOrCtrl+,"),
     )?;
     let dashboard_item = MenuItem::with_id(
         app,
         menu_id::DASHBOARD,
-        "Dashboard…",
+        native_i18n::tr(locale, "native-tray-dashboard"),
         true,
         Some("CmdOrCtrl+D"),
     )?;
     let quit_item = MenuItem::with_id(
         app,
         menu_id::QUIT,
-        "Quit Maximal",
+        native_i18n::tr(locale, "native-tray-quit"),
         true,
         Some("CmdOrCtrl+Q"),
     )?;
@@ -1694,7 +1854,7 @@ fn build_menu(app: &AppHandle, state: SidecarState) -> tauri::Result<Menu<tauri:
         Some(u) => Some(MenuItem::with_id(
             app,
             menu_id::UPGRADE,
-            format!("Upgrade to v{}…", u.latest),
+            native_i18n::t(locale, "native-tray-upgrade", &[("latest", &u.latest)]),
             true,
             None::<&str>,
         )?),
@@ -1707,7 +1867,7 @@ fn build_menu(app: &AppHandle, state: SidecarState) -> tauri::Result<Menu<tauri:
             let starting = MenuItem::with_id(
                 app,
                 menu_id::STARTING,
-                "Starting…",
+                native_i18n::tr(locale, "native-tray-starting"),
                 false,
                 None::<&str>,
             )?;
@@ -1717,7 +1877,7 @@ fn build_menu(app: &AppHandle, state: SidecarState) -> tauri::Result<Menu<tauri:
             let sign_in = MenuItem::with_id(
                 app,
                 menu_id::SIGN_IN,
-                "Sign in to GitHub…",
+                native_i18n::tr(locale, "native-tray-sign-in"),
                 true,
                 None::<&str>,
             )?;
@@ -1745,7 +1905,7 @@ fn build_menu(app: &AppHandle, state: SidecarState) -> tauri::Result<Menu<tauri:
             let info = MenuItem::with_id(
                 app,
                 menu_id::ACCOUNT_INFO,
-                "Signed in to GitHub",
+                native_i18n::tr(locale, "native-tray-signed-in"),
                 false,
                 None::<&str>,
             )?;
@@ -1769,28 +1929,28 @@ fn build_menu(app: &AppHandle, state: SidecarState) -> tauri::Result<Menu<tauri:
             let failed = MenuItem::with_id(
                 app,
                 menu_id::FAILED,
-                "Sidecar failed to start",
+                native_i18n::tr(locale, "native-tray-failed"),
                 false,
                 None::<&str>,
             )?;
             let retry = MenuItem::with_id(
                 app,
                 menu_id::RETRY,
-                "Retry startup",
+                native_i18n::tr(locale, "native-tray-retry"),
                 true,
                 None::<&str>,
             )?;
             let show_logs = MenuItem::with_id(
                 app,
                 menu_id::SHOW_LOGS,
-                "Show logs…",
+                native_i18n::tr(locale, "native-tray-show-logs"),
                 true,
                 None::<&str>,
             )?;
             let open_config = MenuItem::with_id(
                 app,
                 menu_id::OPEN_CONFIG,
-                "Open config folder…",
+                native_i18n::tr(locale, "native-tray-open-config"),
                 true,
                 None::<&str>,
             )?;
@@ -1933,12 +2093,7 @@ fn open_settings_window(app: &AppHandle, section: Option<&str>) {
     // Surface the version in the titlebar (window-level identity belongs in
     // the title, not a content H1 — see docs/design/failure-modes.md). Drop
     // the suffix in dev where the version is the `0.0.0` placeholder.
-    let version = app_version(app);
-    let title = if version == "0.0.0" {
-        "Maximal — Settings".to_string()
-    } else {
-        format!("Maximal — Settings · v{version}")
-    };
+    let title = settings_title(app);
     let builder = WebviewWindowBuilder::new(
         app,
         SETTINGS_WINDOW_LABEL,
@@ -1965,29 +2120,69 @@ fn open_settings_window(app: &AppHandle, section: Option<&str>) {
     }
 }
 
+/// The maximal app-data root, resolved to stay in LOCKSTEP with the
+/// sidecar's own path convention (src/lib/paths.ts). Both must agree or
+/// the tray's "reveal" menu items open a different folder than the one
+/// the proxy reads/writes.
+///
+///   * `COPILOT_API_HOME` (env) wins on every platform when set.
+///   * Windows → `%APPDATA%\maximal` (dictated path contract).
+///   * Unix (macOS/Linux) → `~/.local/share/maximal`.
+///
+/// Returns None only if we can't even resolve the home/appdata base.
+fn maximal_data_dir(app: &AppHandle) -> Option<std::path::PathBuf> {
+    if let Some(home) = std::env::var_os("COPILOT_API_HOME") {
+        let p = std::path::PathBuf::from(home);
+        if !p.as_os_str().is_empty() {
+            return Some(p);
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // %APPDATA% is the per-user roaming app-data root
+        // (C:\Users\<user>\AppData\Roaming). Falls back to Tauri's
+        // resolver if the env var is somehow unset.
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            let p = std::path::PathBuf::from(appdata);
+            if !p.as_os_str().is_empty() {
+                return Some(p.join("maximal"));
+            }
+        }
+        return app.path().app_data_dir().ok().map(|d| {
+            // app_data_dir() yields %APPDATA%\<identifier>; redirect to the
+            // sidecar's `maximal` folder so they stay in lockstep.
+            d.parent()
+                .map(|parent| parent.join("maximal"))
+                .unwrap_or_else(|| d.join("maximal"))
+        });
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let home = app.path().home_dir().ok()?;
+        Some(home.join(".local").join("share").join("maximal"))
+    }
+}
+
 fn do_reveal_config_dir(app: &AppHandle) {
-    let Ok(home) = app.path().home_dir() else {
+    let Some(dir) = maximal_data_dir(app) else {
         return;
     };
-    let dir = home.join(".local").join("share").join("maximal");
     let _ = app.opener().open_path(dir.to_string_lossy(), None::<&str>);
 }
 
 /// Reads the persisted `config.ui.menuBarOnly` preference from
-/// `~/.local/share/maximal/config.json` (same base dir as
-/// `do_reveal_config_dir`). Every failure mode — no home dir, missing file,
+/// `<maximal-data-dir>/config.json` (the same directory the "Reveal config"
+/// item opens, via `maximal_data_dir` — so it honors COPILOT_API_HOME and the
+/// per-OS data root). Every failure mode — no data dir, missing file,
 /// unparseable JSON, or a missing / non-boolean field — collapses to the
 /// DEFAULT `false` (show in Dock/taskbar). Never panics; the on-disk write
 /// itself is owned by another layer.
 fn read_menu_bar_only(app: &AppHandle) -> bool {
-    let Ok(home) = app.path().home_dir() else {
+    let Some(path) = maximal_data_dir(app).map(|d| d.join("config.json")) else {
         return false;
     };
-    let path = home
-        .join(".local")
-        .join("share")
-        .join("maximal")
-        .join("config.json");
     let Ok(contents) = std::fs::read_to_string(&path) else {
         return false;
     };
@@ -1997,15 +2192,73 @@ fn read_menu_bar_only(app: &AppHandle) -> bool {
     json["ui"]["menuBarOnly"].as_bool().unwrap_or(false)
 }
 
-fn do_reveal_logs_dir(app: &AppHandle) {
-    let Ok(home) = app.path().home_dir() else {
+/// Path to the persisted locale file — a one-line BCP-47 tag written by the
+/// `set_locale` command. Lives beside the sidecar's data so it survives
+/// restarts and, crucially, is readable BEFORE any webview loads: the
+/// first-launch "Maximal is running" banner needs a locale before the picker
+/// has ever run this session, and the last explicit choice beats the OS locale.
+fn locale_file(app: &AppHandle) -> Option<std::path::PathBuf> {
+    maximal_data_dir(app).map(|d| d.join("locale"))
+}
+
+/// The persisted picker choice, if present and still a locale we ship.
+fn persisted_locale(app: &AppHandle) -> Option<String> {
+    let path = locale_file(app)?;
+    let tag = std::fs::read_to_string(path).ok()?.trim().to_string();
+    native_i18n::AVAILABLE
+        .contains(&tag.as_str())
+        .then_some(tag)
+}
+
+/// Persist the picker choice so the NEXT launch's pre-webview strings match it.
+/// Best-effort: a write failure just means the next cold start falls back to the
+/// OS locale until the webview re-pushes the choice.
+fn write_locale(app: &AppHandle, tag: &str) {
+    let Some(path) = locale_file(app) else {
         return;
     };
-    let dir = home
-        .join(".local")
-        .join("share")
-        .join("maximal")
-        .join("logs");
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Err(err) = std::fs::write(&path, tag) {
+        eprintln!("[shell] could not persist locale {tag}: {err}");
+    }
+}
+
+/// The Settings window title for the active locale — versioned unless the
+/// version is the dev `0.0.0` placeholder. Shared by the window builder and the
+/// live retitle on a locale change so the two can't diverge.
+fn settings_title(app: &AppHandle) -> String {
+    let version = app_version(app);
+    let locale = app.state::<LocaleState>().get();
+    if version == "0.0.0" {
+        native_i18n::tr(&locale, "native-window-settings-title")
+    } else {
+        native_i18n::t(
+            &locale,
+            "native-window-settings-title-versioned",
+            &[("version", &version)],
+        )
+    }
+}
+
+/// Re-title any already-open Settings/Dashboard window to the active locale.
+/// Called from `set_locale` so a picker change updates the OS-drawn titlebar
+/// live, not just on the next window open. No-op for windows that aren't up.
+fn retitle_windows(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window(SETTINGS_WINDOW_LABEL) {
+        let _ = win.set_title(&settings_title(app));
+    }
+    if let Some(win) = app.get_webview_window(DASHBOARD_WINDOW_LABEL) {
+        let locale = app.state::<LocaleState>().get();
+        let _ = win.set_title(&native_i18n::tr(&locale, "native-window-dashboard-title"));
+    }
+}
+
+fn do_reveal_logs_dir(app: &AppHandle) {
+    let Some(dir) = maximal_data_dir(app).map(|d| d.join("logs")) else {
+        return;
+    };
     // Sidecar creates this lazily on first request log. Create it
     // here so the menu item always lands somewhere, even on first
     // boot before any request has been served.
@@ -2044,7 +2297,10 @@ fn open_dashboard_window(app: &AppHandle) {
         DASHBOARD_WINDOW_LABEL,
         WebviewUrl::External(url),
     )
-    .title("Maximal — Dashboard")
+    .title(native_i18n::tr(
+        &app.state::<LocaleState>().get(),
+        "native-window-dashboard-title",
+    ))
     .inner_size(1100.0, 760.0)
     .min_inner_size(720.0, 520.0);
     // See open_settings_window: Windows taskbar presence tracks menu-bar-only.
@@ -2216,14 +2472,15 @@ fn present_window(app: &AppHandle, window: &tauri::WebviewWindow) {
 /// owned by the OS, not by our webview's lifecycle.
 fn request_quit(app: &AppHandle) {
     use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    let locale = app.state::<LocaleState>().get();
     let app_clone = app.clone();
     app.dialog()
-        .message("Maximal will stop and any open Settings windows will close.")
-        .title("Quit Maximal?")
+        .message(native_i18n::tr(&locale, "native-quit-body"))
+        .title(native_i18n::tr(&locale, "native-quit-title"))
         .kind(MessageDialogKind::Warning)
         .buttons(MessageDialogButtons::OkCancelCustom(
-            "Quit Maximal".into(),
-            "Cancel".into(),
+            native_i18n::tr(&locale, "native-quit-confirm"),
+            native_i18n::tr(&locale, "native-quit-cancel"),
         ))
         .show(move |confirmed| {
             if confirmed {
@@ -2356,30 +2613,27 @@ fn restart_sidecar(app: AppHandle) {
 }
 
 /// Tauri command — run the in-app uninstall. Spawns the bundled sidecar with
-/// `maximal uninstall --unattended --keep-app` (plus `--revert-claude` /
-/// `--purge` per the booleans the Settings webview passes) and awaits the
-/// result. `--keep-app` is mandatory here: the running `.app` can't delete the
-/// bundle it's executing from, so the CLI removes the launchd agent, the
+/// `maximal uninstall --unattended --keep-app --force` (plus `--purge` when the
+/// Settings webview asks). `--force` is mandatory here: the in-app flow is an
+/// explicit "uninstall now" action that can't surface the CLI's
+/// refuse-while-apps-enabled message, so the CLI disables any enabled app
+/// integrations itself and reverts them through the registry. `--keep-app` is
+/// likewise mandatory: the running `.app` can't delete the bundle it's
+/// executing from, so the CLI removes the launchd agent, the
 /// `~/.local/bin/maximal` PATH symlink, and the other PATH binaries, then the
 /// user drags Maximal to the Trash to finish. Returns `Err(String)` (a
 /// human-readable reason) on a missing binary or non-zero exit so the webview
 /// can surface a non-blocking inline error instead of silently stranding the
 /// user. Mirrors the spawn+`.output()` shape of `reconcile_claude_code_revert`.
 #[tauri::command]
-async fn uninstall_maximal(
-    app: AppHandle,
-    revert_claude: bool,
-    purge: bool,
-) -> Result<(), String> {
-    eprintln!("[shell] in-app uninstall requested (revert_claude={revert_claude}, purge={purge})");
+async fn uninstall_maximal(app: AppHandle, purge: bool) -> Result<(), String> {
+    eprintln!("[shell] in-app uninstall requested (purge={purge})");
     let mut args: Vec<String> = vec![
         "uninstall".to_string(),
         "--unattended".to_string(),
         "--keep-app".to_string(),
+        "--force".to_string(),
     ];
-    if revert_claude {
-        args.push("--revert-claude".to_string());
-    }
     if purge {
         args.push("--purge".to_string());
     }
@@ -2402,6 +2656,41 @@ async fn uninstall_maximal(
         eprintln!("[shell] in-app uninstall failed: {reason}");
         Err(reason)
     }
+}
+
+/// Tauri command — adopt the locale the in-app picker just selected so the
+/// native chrome (tray menu, tooltip, later notifications) follows the same
+/// language as the webview. The webview persists its own choice to
+/// localStorage; this command carries that choice across the process boundary
+/// into `LocaleState` and rebuilds the tray so the OS-drawn strings re-resolve
+/// through `native_i18n` immediately. An unrecognized tag (not in
+/// `native_i18n::AVAILABLE`) is rejected so a typo can't strand the native UI
+/// on a locale we don't ship.
+#[tauri::command]
+fn set_locale(app: AppHandle, locale: State<'_, LocaleState>, tag: String) -> Result<(), String> {
+    if !native_i18n::AVAILABLE.contains(&tag.as_str()) {
+        return Err(format!("unsupported locale: {tag}"));
+    }
+    // The webview pushes on every boot, not just on a picker change, so skip the
+    // tray rebuild / retitle when nothing actually changed (avoids a needless
+    // menu flicker each time a window opens).
+    if locale.get() == tag {
+        return Ok(());
+    }
+    locale.set(tag.clone());
+    eprintln!("[shell] native locale set to {tag}");
+    // Persist so the NEXT launch's pre-webview strings (startup banner) match
+    // this choice instead of falling back to the OS locale.
+    write_locale(&app, &tag);
+    // Re-render the OS-drawn chrome NOW: rebuild the tray menu/tooltip and
+    // retitle any open Settings/Dashboard window so the switch is live, not
+    // deferred to the next open. Later notifications/dialogs read LocaleState.
+    let state = app.state::<AppStatus>().get();
+    if let Err(err) = refresh_tray(&app, state) {
+        eprintln!("[shell] tray refresh after locale change failed: {err}");
+    }
+    retitle_windows(&app);
+    Ok(())
 }
 
 

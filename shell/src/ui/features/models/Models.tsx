@@ -1,5 +1,5 @@
 import { Button } from "../../components/Button";
-import type { ModelSummary } from "../../../../../src/lib/settings-types";
+import type { ModelSummary } from "../../../../../src/lib/config/settings-types";
 
 import { useModels } from "./useModels";
 

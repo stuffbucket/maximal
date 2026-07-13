@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
 import { Hono } from "hono"
 
-import { state } from "../src/lib/state"
+import { state } from "../src/lib/runtime-state/state"
 import { completionRoutes } from "../src/routes/chat-completions/route"
 
 const originalFetch = globalThis.fetch

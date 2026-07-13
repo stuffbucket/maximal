@@ -8,11 +8,12 @@ import {
   createAuthMiddleware,
   defaultGetRequestIp,
   extractRequestApiKey,
+  getConfiguredApiKeys,
   isLoopbackAddress,
   normalizeApiKeys,
   requireGithubAuth,
-} from "../src/lib/request-auth"
-import { state } from "../src/lib/state"
+} from "../src/lib/auth/request-auth"
+import { state } from "../src/lib/runtime-state/state"
 
 function buildApp(opts: {
   apiKeys: Array<string>
@@ -626,46 +627,35 @@ describe("requireGithubAuth", () => {
 })
 
 describe("getConfiguredApiKeys integration", () => {
-  test("merges legacy apiKeys + enabled apiKeyEntries, trims & dedupes", async () => {
-    void mock.module("~/lib/config", () => ({
-      getConfig: () => ({
-        auth: {
-          apiKeys: ["legacy-a", "  legacy-b  ", "shared"],
-          apiKeyEntries: [
-            {
-              id: "1",
-              label: "x",
-              key: "  entry-a  ",
-              enabled: true,
-              created_at: "",
-            },
-            {
-              id: "2",
-              label: "y",
-              key: "disabled-key",
-              enabled: false,
-              created_at: "",
-            },
-            {
-              id: "3",
-              label: "z",
-              key: "   ",
-              enabled: true,
-              created_at: "",
-            },
-            {
-              id: "4",
-              label: "w",
-              key: "shared",
-              enabled: true,
-              created_at: "",
-            },
-          ],
-        },
-      }),
-    }))
-    const mod = await import("../src/lib/request-auth")
-    const keys = mod.getConfiguredApiKeys()
+  // Inject the config directly (getConfiguredApiKeys accepts an optional
+  // AppConfig, defaulting to getConfig()). This exercises the trim/dedupe/
+  // filter logic on arbitrary — including deliberately schema-invalid —
+  // shapes WITHOUT a leak-prone mock.module of ~/lib/config/config and without
+  // round-tripping through writeConfig's validation.
+  test("merges legacy apiKeys + enabled apiKeyEntries, trims & dedupes", () => {
+    const keys = getConfiguredApiKeys({
+      auth: {
+        apiKeys: ["legacy-a", "  legacy-b  ", "shared"],
+        apiKeyEntries: [
+          {
+            id: "1",
+            label: "x",
+            key: "  entry-a  ",
+            enabled: true,
+            created_at: "",
+          },
+          {
+            id: "2",
+            label: "y",
+            key: "disabled-key",
+            enabled: false,
+            created_at: "",
+          },
+          { id: "3", label: "z", key: "   ", enabled: true, created_at: "" },
+          { id: "4", label: "w", key: "shared", enabled: true, created_at: "" },
+        ],
+      },
+    })
     expect(keys).toContain("legacy-a")
     expect(keys).toContain("legacy-b")
     expect(keys).toContain("entry-a")
@@ -675,24 +665,13 @@ describe("getConfiguredApiKeys integration", () => {
     expect(keys).not.toContain("   ")
     // dedup: "shared" appears once
     expect(keys.filter((k) => k === "shared")).toHaveLength(1)
-    mock.restore()
   })
 
-  test("returns [] when auth config is missing entirely", async () => {
-    void mock.module("~/lib/config", () => ({
-      getConfig: () => ({}),
-    }))
-    const mod = await import("../src/lib/request-auth")
-    expect(mod.getConfiguredApiKeys()).toEqual([])
-    mock.restore()
+  test("returns [] when auth config is missing entirely", () => {
+    expect(getConfiguredApiKeys({})).toEqual([])
   })
 
-  test("returns [] when auth exists but apiKeyEntries is missing", async () => {
-    void mock.module("~/lib/config", () => ({
-      getConfig: () => ({ auth: {} }),
-    }))
-    const mod = await import("../src/lib/request-auth")
-    expect(mod.getConfiguredApiKeys()).toEqual([])
-    mock.restore()
+  test("returns [] when auth exists but apiKeyEntries is missing", () => {
+    expect(getConfiguredApiKeys({ auth: {} })).toEqual([])
   })
 })

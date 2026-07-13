@@ -3,7 +3,7 @@
  *
  * Read-only hinting for the auth UI: is `gh` installed, and which accounts is
  * it already signed in to. Inherits the /settings/api auth gate. See
- * src/services/gh-cli.ts — no token is read or returned here.
+ * src/lib/system/gh-cli.ts — no token is read or returned here.
  *
  * Exposed as `createGhRoutes(deps)` so tests can inject in-process stubs for
  * the three downstream services without process-wide `mock.module`, which
@@ -18,17 +18,17 @@ import { Hono } from "hono"
 import {
   preflightCopilotError as defaultPreflightCopilotError,
   type PreflightCopilotErrorFn,
-} from "~/lib/copilot-preflight"
-import { forwardError } from "~/lib/error"
+} from "~/lib/auth/copilot-preflight"
 import {
   addAccountToDefaultRegistry as defaultAddAccountToDefaultRegistry,
   makeAccountRecord,
-} from "~/lib/github-token-store"
+} from "~/lib/auth/github-token-store"
+import { forwardError } from "~/lib/errors/error"
 import {
   detectGhCli as defaultDetectGhCli,
   getGhAccountToken as defaultGetGhAccountToken,
   type GhCliStatus,
-} from "~/services/gh-cli"
+} from "~/lib/system/gh-cli"
 
 export interface GhRoutesDeps {
   detectGhCli: () => Promise<GhCliStatus>

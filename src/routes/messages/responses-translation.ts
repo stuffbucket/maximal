@@ -1,5 +1,7 @@
-import consola from "consola"
-
+import {
+  getExtraPromptForModel,
+  getReasoningEffortForModel,
+} from "~/lib/config/config"
 import {
   type AnthropicAssistantContentBlock,
   type AnthropicAssistantMessage,
@@ -16,12 +18,8 @@ import {
   type AnthropicToolUseBlock,
   type AnthropicUserContentBlock,
   type AnthropicUserMessage,
-} from "~/lib/anthropic-types"
-import {
-  getExtraPromptForModel,
-  getReasoningEffortForModel,
-} from "~/lib/config"
-import { parseUserIdMetadata } from "~/lib/utils"
+} from "~/lib/models/anthropic-types"
+import { parseUserIdMetadata } from "~/lib/platform/utils"
 import {
   type ResponsesPayload,
   type ResponseInputCompaction,
@@ -49,6 +47,7 @@ import {
 } from "~/services/copilot/create-responses"
 
 import { normalizeToolSchema } from "./non-stream-translation"
+import { parseToolCallArguments } from "./utils"
 
 const MESSAGE_TYPE = "message"
 const COMPACTION_SIGNATURE_PREFIX = "cm1#"
@@ -63,7 +62,7 @@ export const translateAnthropicMessagesToResponsesPayload = (
   const applyPhase = shouldApplyPhase(payload.model)
 
   for (const message of payload.messages) {
-    input.push(...translateMessage(message, payload.model, applyPhase))
+    input.push(...translateMessage(message, applyPhase))
   }
 
   const translatedTools = convertAnthropicTools(payload.tools)
@@ -85,7 +84,9 @@ export const translateAnthropicMessagesToResponsesPayload = (
     tool_choice: toolChoice,
     metadata: payload.metadata ? { ...payload.metadata } : null,
     prompt_cache_key: promptCacheKey,
-    //prompt_cache_retention: "24h",  not work in gpt-5.4
+    // prompt_cache_retention is Copilot/OpenAI-Responses-specific and is set
+    // AFTER translation in the flow handler (api-flows.ts) so this pure
+    // translator stays free of config I/O. See getPromptCacheRetention.
     stream: payload.stream ?? null,
     store: false,
     parallel_tool_calls: true,
@@ -139,14 +140,13 @@ export const decodeCompactionCarrierSignature = (
 
 const translateMessage = (
   message: AnthropicMessage,
-  model: string,
   applyPhase: boolean,
 ): Array<ResponseInputItem> => {
   if (message.role === "user") {
     return translateUserMessage(message)
   }
 
-  return translateAssistantMessage(message, model, applyPhase)
+  return translateAssistantMessage(message, applyPhase)
 }
 
 const translateUserMessage = (
@@ -183,14 +183,9 @@ const translateUserMessage = (
 
 const translateAssistantMessage = (
   message: AnthropicAssistantMessage,
-  model: string,
   applyPhase: boolean,
 ): Array<ResponseInputItem> => {
-  const assistantPhase = resolveAssistantPhase(
-    model,
-    message.content,
-    applyPhase,
-  )
+  const assistantPhase = resolveAssistantPhase(message.content, applyPhase)
 
   if (typeof message.content === "string") {
     return [createMessage("assistant", message.content, assistantPhase)]
@@ -307,7 +302,6 @@ const createMessage = (
 })
 
 const resolveAssistantPhase = (
-  _model: string,
   content: AnthropicAssistantMessage["content"],
   applyPhase: boolean,
 ): ResponseInputMessage["phase"] | undefined => {
@@ -641,7 +635,7 @@ const createToolUseContentBlock = (
     return null
   }
 
-  const input = parseFunctionCallArguments(call.arguments)
+  const input = parseToolCallArguments(call.arguments)
 
   return {
     type: "tool_use",
@@ -666,33 +660,6 @@ const createCompactionThinkingBlock = (
       encrypted_content: item.encrypted_content,
     }),
   }
-}
-
-const parseFunctionCallArguments = (
-  rawArguments: string,
-): Record<string, unknown> => {
-  if (typeof rawArguments !== "string" || rawArguments.trim().length === 0) {
-    return {}
-  }
-
-  try {
-    const parsed: unknown = JSON.parse(rawArguments)
-
-    if (Array.isArray(parsed)) {
-      return { arguments: parsed }
-    }
-
-    if (parsed && typeof parsed === "object") {
-      return parsed as Record<string, unknown>
-    }
-  } catch (error) {
-    consola.warn("Failed to parse function call arguments", {
-      error,
-      rawArguments,
-    })
-  }
-
-  return { raw_arguments: rawArguments }
 }
 
 const fallbackContentBlocks = (

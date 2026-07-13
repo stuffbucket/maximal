@@ -1,38 +1,23 @@
 /**
  * /settings/api/api-keys — CRUD coverage.
  *
- * `getConfig` and `writeConfig` are mocked to a single in-memory
- * fixture so tests don't touch disk or the user's real config. The
- * route is mounted on a bare Hono app (no outer auth middleware) so
- * we exercise the handler contract directly.
+ * Uses the REAL `~/lib/config/config`, which the global preload
+ * (tests/test-setup.ts) has already redirected to a throwaway
+ * COPILOT_API_HOME temp dir — so `getConfig()`/`writeConfig()` round-trip
+ * through a temp `config.json`, never the developer's real config. We do
+ * NOT `mock.module("~/lib/config/config", …)` here: Bun shares module mocks across
+ * the whole `bun test` process and never resets them between files, so an
+ * unrestored config stub leaks a fake getConfig/writeConfig FORWARD into
+ * sibling files (it broke tests/claude-code-cli-enable-persist.test.ts on
+ * CI). The route is mounted on a bare Hono app (no outer auth middleware)
+ * so we exercise the handler contract directly.
  */
 
-import { beforeEach, describe, expect, mock, test } from "bun:test"
+import { afterAll, beforeEach, describe, expect, test } from "bun:test"
 import { Hono } from "hono"
 
-import type { AppConfig } from "~/lib/config"
-
-let fakeConfig: AppConfig = {}
-
-// Spread the real module so process-wide `mock.module` doesn't strip
-// unrelated exports (getReasoningEffortForModel, getSmallModel, etc.)
-// from sibling test files that import them. Bun's `mock.module` is
-// shared across the whole `bun test` process; without the spread,
-// tests/messages-preprocess.test.ts saw `getReasoningEffortForModel`
-// as undefined and the default `"high"` fallback fired instead of the
-// configured `"xhigh"`.
-const actualConfigModule = await import("~/lib/config")
-
-void mock.module("~/lib/config", () => ({
-  ...actualConfigModule,
-  getConfig: () => fakeConfig,
-  writeConfig: (next: AppConfig) => {
-    fakeConfig = next
-    return next
-  },
-}))
-
-const { apiKeysRoutes } = await import("~/routes/settings/api-keys")
+import { getConfig, writeConfig } from "~/lib/config/config"
+import { apiKeysRoutes } from "~/routes/settings/api-keys"
 
 function buildApp() {
   const app = new Hono()
@@ -41,7 +26,12 @@ function buildApp() {
 }
 
 beforeEach(() => {
-  fakeConfig = {}
+  writeConfig({})
+})
+
+afterAll(() => {
+  // Leave a clean slate so later files in the shared worker start empty.
+  writeConfig({})
 })
 
 describe("/api-keys GET /", () => {
@@ -57,14 +47,14 @@ describe("/api-keys GET /", () => {
   })
 
   test("enforce flag drives the enforcing field", async () => {
-    fakeConfig = { auth: { enforce: true } }
+    writeConfig({ auth: { enforce: true } })
     const res = await buildApp().request("/api-keys")
     const body = (await res.json()) as { enforcing: boolean }
     expect(body.enforcing).toBe(true)
   })
 
   test("only-disabled entries → enforcing=false", async () => {
-    fakeConfig = {
+    writeConfig({
       auth: {
         apiKeyEntries: [
           {
@@ -76,7 +66,7 @@ describe("/api-keys GET /", () => {
           },
         ],
       },
-    }
+    })
     const res = await buildApp().request("/api-keys")
     const body = (await res.json()) as { enforcing: boolean }
     expect(body.enforcing).toBe(false)
@@ -95,7 +85,7 @@ describe("/api-keys POST /", () => {
     expect(body.label).toBe("Claude Code")
     expect(body.key.startsWith("mxl_")).toBe(true)
     expect(/^mxl_[\w-]+$/.test(body.key)).toBe(true)
-    expect(fakeConfig.auth?.apiKeyEntries?.length).toBe(1)
+    expect(getConfig().auth?.apiKeyEntries?.length).toBe(1)
   })
 
   test("accepts the literal '*' wildcard", async () => {
@@ -231,7 +221,7 @@ describe("/api-keys DELETE /:id", () => {
       method: "DELETE",
     })
     expect(res.status).toBe(204)
-    expect(fakeConfig.auth?.apiKeyEntries ?? []).toEqual([])
+    expect(getConfig().auth?.apiKeyEntries ?? []).toEqual([])
   })
 
   test("404 when id is unknown", async () => {

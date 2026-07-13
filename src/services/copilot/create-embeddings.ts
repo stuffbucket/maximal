@@ -1,19 +1,21 @@
-import { copilotHeaders, copilotBaseUrl } from "~/lib/api-config"
-import { HTTPError } from "~/lib/error"
-import { state } from "~/lib/state"
+import { copilotHeaders, copilotBaseUrl } from "~/lib/config/api-config"
+import { sendRequestJson } from "~/lib/http/send-request"
+import { hasCopilotToken, state } from "~/lib/runtime-state/state"
 
 export const createEmbeddings = async (payload: EmbeddingRequest) => {
-  if (!state.copilotToken) throw new Error("Copilot token not found")
+  if (!hasCopilotToken()) throw new Error("Copilot token not found")
 
-  const response = await fetch(`${copilotBaseUrl(state)}/embeddings`, {
-    method: "POST",
-    headers: copilotHeaders(state),
-    body: JSON.stringify(payload),
-  })
-
-  if (!response.ok) throw new HTTPError("Failed to create embeddings", response)
-
-  return (await response.json()) as EmbeddingResponse
+  // Deliberately unbounded (no timeoutMs): large input arrays can run long,
+  // and this is not on the cold-boot critical path the timeout doc guards.
+  return await sendRequestJson<EmbeddingResponse>(
+    `${copilotBaseUrl(state)}/embeddings`,
+    {
+      method: "POST",
+      headers: copilotHeaders(state),
+      body: JSON.stringify(payload),
+      errorMessage: "Failed to create embeddings",
+    },
+  )
 }
 
 export interface EmbeddingRequest {

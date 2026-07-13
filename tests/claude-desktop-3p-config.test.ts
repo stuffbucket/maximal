@@ -20,7 +20,7 @@ import {
   getClaude3pDir,
   isConfigLibraryApplied,
   revertConfigLibraryProfile,
-} from "~/lib/claude-desktop-3p-config"
+} from "~/apps/claude-desktop/config"
 
 let home: string
 
@@ -49,12 +49,56 @@ function topConfig(): Record<string, unknown> {
   return readJson(path.join(getClaude3pDir(home), "claude_desktop_config.json"))
 }
 
+describe("getClaude3pDir — Windows (platform injected)", () => {
+  let savedLocalAppData: string | undefined
+
+  beforeEach(() => {
+    savedLocalAppData = process.env.LOCALAPPDATA
+  })
+
+  afterEach(() => {
+    if (savedLocalAppData === undefined) delete process.env.LOCALAPPDATA
+    else process.env.LOCALAPPDATA = savedLocalAppData
+  })
+
+  it("targets %LOCALAPPDATA%/Claude-3p (the -3p suffix, in Local — not Roaming)", () => {
+    process.env.LOCALAPPDATA = path.join(home, "AppData", "Local")
+    const dir = getClaude3pDir(home, "win32")
+    // Anthropic's docs locate the 3P configLibrary under Local AppData, not
+    // Roaming. This diverges from the consumer `claude_desktop_config.json`
+    // (which IS under Roaming %APPDATA%\Claude) — on Windows the two halves
+    // live on different drives, unlike macOS.
+    expect(dir).toBe(path.join(home, "AppData", "Local", "Claude-3p"))
+    expect(path.basename(dir)).toBe("Claude-3p")
+    // configLibrary is the subdir the applied inference profile lands in.
+    const lib = path.join(dir, "configLibrary")
+    expect(lib).toBe(
+      path.join(home, "AppData", "Local", "Claude-3p", "configLibrary"),
+    )
+  })
+
+  it("falls back to ~/AppData/Local/Claude-3p when %LOCALAPPDATA% is unset", () => {
+    delete process.env.LOCALAPPDATA
+    const dir = getClaude3pDir(home, "win32")
+    expect(dir).toBe(path.join(home, "AppData", "Local", "Claude-3p"))
+  })
+
+  it("still resolves the macOS path when platform is darwin", () => {
+    const dir = getClaude3pDir(home, "darwin")
+    expect(dir).toBe(
+      path.join(home, "Library", "Application Support", "Claude-3p"),
+    )
+  })
+})
+
 describe("gatewayProfile", () => {
-  it("turns all telemetry off but leaves update checks on", () => {
+  it("turns telemetry off but leaves update checks and Artifacts preview on", () => {
     const p = gatewayProfile(home)
     expect(p.disableEssentialTelemetry).toBe(true)
     expect(p.disableNonessentialTelemetry).toBe(true)
-    expect(p.disableNonessentialServices).toBe(true)
+    // disableNonessentialServices governs the Artifacts preview iframe/favicon
+    // fetch, not telemetry — must stay false or Artifacts previews break.
+    expect(p.disableNonessentialServices).toBe(false)
     expect(p.disableAutoUpdates).toBe(false)
   })
 
@@ -64,6 +108,15 @@ describe("gatewayProfile", () => {
     expect(p.inferenceGatewayBaseUrl).toBe("http://127.0.0.1:9999")
     expect(p.disableDeploymentModeChooser).toBe(true)
     expect(p.allowedWorkspaceFolders).toEqual([path.join(home, "Claude")])
+  })
+
+  it("enables MCP and desktop extensions", () => {
+    const p = gatewayProfile(home)
+    expect(p.isLocalDevMcpEnabled).toBe(true)
+    expect(p.isDesktopExtensionEnabled).toBe(true)
+    expect(p.isDesktopExtensionDirectoryEnabled).toBe(true)
+    expect(p.isDesktopExtensionSignatureRequired).toBe(false)
+    expect(p.isClaudeCodeForDesktopEnabled).toBe(true)
   })
 })
 

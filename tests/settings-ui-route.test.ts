@@ -1,32 +1,19 @@
 /**
  * /settings/api/ui — route-level coverage.
  *
- * Mocking strategy mirrors apps-route.test.ts: an in-memory
- * getConfig/writeConfig (Bun's `mock.module` persists forward across
- * files, so this stays a delegating wrapper that only swaps those two
- * functions), reset per test and cleared in afterAll so later files see
- * an empty config.
+ * Config comes from the REAL `~/lib/config/config`, which the global preload
+ * (tests/test-setup.ts) has already redirected to a throwaway
+ * COPILOT_API_HOME temp dir — so getConfig/writeConfig round-trip through a
+ * temp `config.json`, never the user's real config. No `mock.module` on
+ * config (it leaks forward across files — see apps-route.test.ts / #229);
+ * we just reset with `writeConfig({})` per test.
  */
 
-import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test"
+import { afterAll, beforeEach, describe, expect, test } from "bun:test"
 import { Hono } from "hono"
 
-import type { AppConfig } from "~/lib/config"
-
-let fakeConfig: AppConfig = {}
-
-const actualConfig = await import("~/lib/config")
-void mock.module("~/lib/config", () => ({
-  ...actualConfig,
-  getConfig: () => fakeConfig,
-  writeConfig: (next: AppConfig) => {
-    fakeConfig = next
-    return next
-  },
-}))
-
 const { uiRoutes } = await import("~/routes/settings/ui")
-const { getConfig } = await import("~/lib/config")
+const { getConfig, writeConfig } = await import("~/lib/config/config")
 
 function buildApp() {
   const app = new Hono()
@@ -35,11 +22,12 @@ function buildApp() {
 }
 
 beforeEach(() => {
-  fakeConfig = {}
+  writeConfig({})
 })
 
 afterAll(() => {
-  fakeConfig = {}
+  // Leave a clean slate so later files in the shared worker start empty.
+  writeConfig({})
 })
 
 describe("GET /ui", () => {

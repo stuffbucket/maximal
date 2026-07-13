@@ -9,8 +9,8 @@ import {
   refreshIfStale,
   STALE_AFTER_MS,
   staleRefreshMiddleware,
-} from "~/lib/refresh-models"
-import { state } from "~/lib/state"
+} from "~/lib/models/refresh-models"
+import { state } from "~/lib/runtime-state/state"
 
 afterEach(() => {
   _resetRefreshInFlightForTests()

@@ -13,15 +13,15 @@
 
 import { Hono } from "hono"
 
-import { preflightCopilotError } from "~/lib/copilot-preflight"
-import { forwardError } from "~/lib/error"
+import { preflightCopilotError } from "~/lib/auth/copilot-preflight"
 import {
   listAccounts,
   readDefaultRegistry,
   removeAccount,
   setActive,
   writeDefaultRegistry,
-} from "~/lib/github-token-store"
+} from "~/lib/auth/github-token-store"
+import { forwardError } from "~/lib/errors/error"
 
 export const accountsRoutes = new Hono()
 

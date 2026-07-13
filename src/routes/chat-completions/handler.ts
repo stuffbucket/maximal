@@ -2,21 +2,30 @@ import type { Context } from "hono"
 
 import { streamSSE, type SSEMessage } from "hono/streaming"
 
-import { reverseId } from "~/lib/anthropic-id-rewrite"
-import { awaitApproval } from "~/lib/approval"
-import { createHandlerLogger, debugJson, debugJsonTail } from "~/lib/logger"
-import { checkRateLimit } from "~/lib/rate-limit"
-import { state } from "~/lib/state"
+import { awaitApproval } from "~/lib/http/approval"
+import { checkRateLimit } from "~/lib/http/rate-limit"
+import { reverseId } from "~/lib/models/anthropic-id-rewrite"
+import {
+  createHandlerLogger,
+  debugJson,
+  debugJsonTail,
+} from "~/lib/platform/logger"
+import {
+  generateRequestIdFromPayload,
+  getUUID,
+  isNullish,
+} from "~/lib/platform/utils"
+import { state } from "~/lib/runtime-state/state"
 import {
   createCopilotTokenUsageRecorder,
   normalizeOpenAIUsage,
   type UsageTokens,
+  withCopilotCost,
 } from "~/lib/token-usage"
-import { generateRequestIdFromPayload, getUUID, isNullish } from "~/lib/utils"
+import { isNonStreaming } from "~/routes/streaming-predicates"
 import {
   createChatCompletions,
   type ChatCompletionChunk,
-  type ChatCompletionResponse,
   type ChatCompletionsPayload,
 } from "~/services/copilot/create-chat-completions"
 
@@ -75,7 +84,12 @@ export async function handleCompletion(c: Context) {
 
   if (isNonStreaming(response)) {
     debugJson(logger, "Non-streaming response:", response)
-    recordUsage(normalizeOpenAIUsage(response.usage))
+    recordUsage(
+      withCopilotCost(
+        normalizeOpenAIUsage(response.usage),
+        response.copilot_usage,
+      ),
+    )
     return c.json(response)
   }
 
@@ -95,10 +109,6 @@ export async function handleCompletion(c: Context) {
     recordUsage(usage)
   })
 }
-
-const isNonStreaming = (
-  response: Awaited<ReturnType<typeof createChatCompletions>>,
-): response is ChatCompletionResponse => Object.hasOwn(response, "choices")
 
 const parseChatCompletionChunk = (
   chunk: unknown,

@@ -17,7 +17,7 @@ import {
   detectClaudeInstalls,
   readClaudeVersion,
   SHIM_MARKER,
-} from "~/lib/claude-cli-detect"
+} from "~/apps/claude-code/detect"
 
 let root: string
 
@@ -47,6 +47,21 @@ function makeClaude(
 function makeDir(dir: string): string {
   fs.mkdirSync(dir, { recursive: true })
   return dir
+}
+
+/** A Windows-style claude install with an explicit basename
+ *  (`claude.exe` / `claude.cmd` / …). The body is still a POSIX shell
+ *  script — these tests inject `readVersion`, so the body is never run. */
+function makeWinClaude(
+  dir: string,
+  base: string,
+  opts: { version?: string } = {},
+): string {
+  fs.mkdirSync(dir, { recursive: true })
+  const file = path.join(dir, base)
+  fs.writeFileSync(file, `#!/bin/sh\necho "${opts.version ?? "1.2.3"}"\n`)
+  fs.chmodSync(file, 0o755)
+  return file
 }
 
 describe("detectClaudeInstalls", () => {
@@ -381,6 +396,114 @@ describe("detectClaudeInstalls — source classification", () => {
     expect(installs.find((i) => i.resolvedPath === resolved)?.version).toBe(
       "10.20.30",
     )
+  })
+})
+
+describe("detectClaudeInstalls — Windows (platform injected)", () => {
+  // `platform: "win32"` is injected so these run on the POSIX CI host.
+  // The fixtures are real files on the tmp fs (we can't fake `fs`), but the
+  // basename set (`claude.exe` / `claude.cmd` / `claude`) and the npm-bin
+  // layout (`%APPDATA%\npm` holds `claude.cmd` directly, no `bin/`) are the
+  // Windows-specific behaviour under test. `makeWinClaude` (module scope)
+  // creates the fixture with an explicit basename.
+  test("finds an npm-global claude.cmd on PATH (no .exe extension)", () => {
+    // The reported gap: an npm-global `claude.cmd` was invisible because the
+    // PATH walk only joined `dir/claude`. With the win32 basename set it's
+    // found and exec'd as the active install.
+    const dir = path.join(root, "npmbin")
+    const file = makeWinClaude(dir, "claude.cmd")
+    const resolved = fs.realpathSync(file)
+
+    const installs = detectClaudeInstalls({
+      homeDir: path.join(root, "home"),
+      pathDirs: [dir],
+      npmPrefix: null,
+      platform: "win32",
+      readVersion: () => "1.2.3",
+    })
+    expect(installs).toHaveLength(1)
+    expect(installs[0].resolvedPath).toBe(resolved)
+    expect(installs[0].path).toBe(path.join(dir, "claude.cmd"))
+  })
+
+  test("prefers claude.exe over claude.cmd in the same dir", () => {
+    const dir = path.join(root, "both")
+    makeWinClaude(dir, "claude.cmd")
+    const exe = makeWinClaude(dir, "claude.exe")
+    const installs = detectClaudeInstalls({
+      homeDir: path.join(root, "home"),
+      pathDirs: [dir],
+      npmPrefix: null,
+      platform: "win32",
+      readVersion: () => "1.2.3",
+    })
+    expect(installs).toHaveLength(1)
+    expect(installs[0].path).toBe(exe) // .exe wins
+  })
+
+  test("finds the native installer claude.exe under ~/.local/bin (Phase 2)", () => {
+    const home = path.join(root, "winhome")
+    const file = makeWinClaude(path.join(home, ".local", "bin"), "claude.exe")
+    const resolved = fs.realpathSync(file)
+    const installs = detectClaudeInstalls({
+      homeDir: home,
+      pathDirs: [], // nothing active on PATH
+      npmPrefix: null,
+      platform: "win32",
+      readVersion: () => "1.2.3",
+    })
+    const mine = installs.find((i) => i.resolvedPath === resolved)
+    expect(mine?.source).toBe("local-bin")
+  })
+
+  test("npm-global on Windows lives in the prefix itself, not <prefix>/bin", () => {
+    // POSIX npm puts the launcher in `<prefix>/bin`; Windows npm drops
+    // `claude.cmd` directly in `%APPDATA%\npm` (== the prefix). Phase-2
+    // probing must look in the prefix dir, and classify it npm-global.
+    const home = path.join(root, "winhome2")
+    const npmPrefix = path.join(root, "AppData", "Roaming", "npm")
+    const file = makeWinClaude(npmPrefix, "claude.cmd")
+    const resolved = fs.realpathSync(file)
+    const installs = detectClaudeInstalls({
+      homeDir: home,
+      pathDirs: [],
+      npmPrefix,
+      platform: "win32",
+      readVersion: () => "1.2.3",
+    })
+    const mine = installs.find((i) => i.resolvedPath === resolved)
+    expect(mine?.source).toBe("npm-global")
+  })
+
+  test('classifies a binary under ~/.claude as "claude-local" on Windows', () => {
+    const home = makeDir(path.join(root, "winhome3"))
+    const dir = path.join(home, ".claude", "local")
+    const file = makeWinClaude(dir, "claude.exe")
+    const resolved = fs.realpathSync(file)
+    const installs = detectClaudeInstalls({
+      homeDir: home,
+      pathDirs: [dir],
+      npmPrefix: null,
+      platform: "win32",
+      readVersion: () => "1.2.3",
+    })
+    expect(installs.find((i) => i.resolvedPath === resolved)?.source).toBe(
+      "claude-local",
+    )
+  })
+
+  test("does NOT probe POSIX Homebrew dirs on Windows", () => {
+    // Nothing on PATH and no fixtures anywhere → empty. Guards against the
+    // win32 fallback accidentally including /opt/homebrew or /usr/local
+    // (which may even hold a real claude on the macOS CI host).
+    const installs = detectClaudeInstalls({
+      homeDir: path.join(root, "emptyhome"),
+      pathDirs: [],
+      npmPrefix: null,
+      platform: "win32",
+      readVersion: () => "1.2.3",
+    })
+    expect(installs).toHaveLength(0)
   })
 })
 

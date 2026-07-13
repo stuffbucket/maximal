@@ -30,6 +30,36 @@ related_files:
 > isolated and self-restoring; they migrate to DI opportunistically as those
 > tests are next touched. The discipline is now the default for new tests.
 
+> **Addendum (2026-07-09) — reconciled with what shipped.** The enforcement that
+> landed is narrower than Decision layer 2 below, so this addendum states what
+> remains authoritative versus what the implementation superseded.
+>
+> **Still authoritative (do not drop):**
+> - **Layer 1 — prefer DI / injectable function options over `mock.module`** for
+>   any module another test might import. This is the durable default.
+> - **Layer 3's wrapper rule** — when `mock.module` is genuinely required,
+>   forward `...rest` and preserve return shape so a wrapper can't corrupt a
+>   sibling file.
+> - The **context / failure mode** (green-local, red-CI, cross-file leak
+>   surfacing in a different file than the one that installed the bad mock).
+>
+> **Superseded by the shipped rule:**
+> - **Layer 2's `tests/helpers/` allowlist via `no-restricted-syntax`.** What
+>   shipped instead is `eslint.config.js`'s `mockModuleLeakGuard` (scoped to
+>   `tests/**`), which bans only the *fire-and-forget* forms — `void
+>   mock.module(…)` and a bare `mock.module(…)` statement — and requires an
+>   **awaited** install plus an awaited `afterAll` restore. Awaited `mock.module`
+>   is therefore permitted anywhere, not gated to a helpers allowlist.
+> - **Layer 3's `eslint-disable no-restricted-syntax` comment template.** Moot —
+>   there is no `no-restricted-syntax` gate to disable; awaited usage needs no
+>   opt-out. The wrapper *discipline* the template carried still applies (above).
+>
+> **Also note:** a `spyOn` leak is the same cross-file hazard for spies; the
+> preload's outermost `afterEach(() => mock.restore())` is a defense-in-depth net
+> for it. `mock.restore()` undoes `spyOn` only — never `mock.module`. Migration
+> step 4 (link this ADR from the testing docs) is done: see
+> `docs/dev/testing-strategy.md` §5.1–5.2.
+
 # Cross-file module-mock leakage discipline (prefer DI over `mock.module`)
 
 ## Context

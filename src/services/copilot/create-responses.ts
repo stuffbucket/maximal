@@ -1,23 +1,18 @@
 import consola from "consola"
 import { events } from "fetch-event-stream"
 
-import type { CompactType } from "~/lib/compact"
-import type { SubagentMarker } from "~/lib/subagent"
+import { copilotBaseUrl } from "~/lib/config/api-config"
+import { sendRequest } from "~/lib/http/send-request"
+import { state } from "~/lib/runtime-state/state"
+
+import type { Initiator } from "./agent-initiator"
+import type { CopilotCallOptions } from "./upstream-request"
 
 import {
-  copilotBaseUrl,
-  copilotHeaders,
-  prepareForCompact,
-  prepareInteractionHeaders,
-} from "~/lib/api-config"
-import { isAuthFatal, parseCopilotErrorBody } from "~/lib/copilot-error-parser"
-import { logCopilotRateLimits } from "~/lib/copilot-rate-limit"
-import { CopilotAuthFatalError, HTTPError } from "~/lib/error"
-import {
-  clearLastUpstreamRejection,
-  setLastUpstreamRejection,
-  state,
-} from "~/lib/state"
+  buildCopilotHeaders,
+  finishUpstreamResponse,
+  requireCopilotToken,
+} from "./upstream-request"
 
 export interface ResponsesPayload {
   model: string
@@ -65,6 +60,10 @@ export type ResponseIncludable =
   | "computer_call_output.output.image_url"
   | "reasoning.encrypted_content"
   | "code_interpreter_call.outputs"
+  // Surfaces the raw searched-source URLs on web_search_call.action.sources[].
+  // Verified accepted by Copilot's /responses (2026-07-03); undocumented but
+  // matches OpenAI's Responses API include vocabulary.
+  | "web_search_call.action.sources"
 
 export interface Reasoning {
   effort?: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | null
@@ -160,6 +159,8 @@ export interface ResponsesResult {
   output_text: string
   status: string
   usage?: ResponseUsage | null
+  /** Copilot per-request billing (sibling of usage). */
+  copilot_usage?: { total_nano_aiu?: number }
   error: ResponseError | null
   incomplete_details: IncompleteDetails | null
   instructions: string | null
@@ -368,74 +369,77 @@ export interface ResponseTextDoneEvent {
 export type ResponsesStream = ReturnType<typeof events>
 export type CreateResponsesReturn = ResponsesResult | ResponsesStream
 
-interface ResponsesRequestOptions {
+interface ResponsesRequestOptions extends CopilotCallOptions {
   vision: boolean
-  initiator: "agent" | "user"
-  subagentMarker?: SubagentMarker | null
-  requestId: string
-  sessionId?: string
-  compactType?: CompactType
+  initiator: Initiator
 }
 
 export const createResponses = async (
   payload: ResponsesPayload,
-  {
+  { vision, initiator, ...callOptions }: ResponsesRequestOptions,
+): Promise<CreateResponsesReturn> => {
+  requireCopilotToken()
+
+  const headers = buildCopilotHeaders(state, {
+    ...callOptions,
     vision,
     initiator,
-    subagentMarker,
-    requestId,
-    sessionId,
-    compactType,
-  }: ResponsesRequestOptions,
-): Promise<CreateResponsesReturn> => {
-  if (!state.copilotToken) throw new Error("Copilot token not found")
-
-  const headers: Record<string, string> = {
-    ...copilotHeaders(state, requestId, vision),
-    "x-initiator": initiator,
-  }
-
-  prepareInteractionHeaders(sessionId, Boolean(subagentMarker), headers)
-
-  prepareForCompact(headers, compactType)
+  })
 
   // service_tier is not supported by github copilot
   payload.service_tier = undefined
 
   consola.log(`<-- model: ${payload.model}`)
 
-  const response = await fetch(`${copilotBaseUrl(state)}/responses`, {
+  let response = await sendRequest(`${copilotBaseUrl(state)}/responses`, {
     method: "POST",
     headers,
     body: JSON.stringify(payload),
   })
 
-  logCopilotRateLimits(response.headers)
-
-  if (!response.ok) {
-    consola.error("Failed to create responses", response)
-    const body = await response.clone().text()
-    const parsed = parseCopilotErrorBody(body)
-    if (isAuthFatal(response.status, parsed)) {
-      throw new CopilotAuthFatalError(
-        parsed.message,
-        response.status,
-        parsed.remediationUrl,
+  // Defensive fallback for the Copilot/OpenAI-Responses-specific
+  // prompt_cache_retention param: some model/endpoint combos have historically
+  // 400'd with "Unsupported parameter: prompt_cache_retention". If that exact
+  // rejection occurs, strip the field and retry the request ONCE without it, so
+  // opting into cache retention is safe even where a specific endpoint rejects
+  // it. Any other 400 is left to the normal error path below (not retried).
+  if (
+    !response.ok
+    && response.status === 400
+    && payload.prompt_cache_retention
+  ) {
+    const probeBody = await response.clone().text()
+    if (isUnsupportedPromptCacheRetention(probeBody)) {
+      consola.warn(
+        "Copilot rejected prompt_cache_retention; retrying once without it",
       )
+      delete payload.prompt_cache_retention
+      response = await sendRequest(`${copilotBaseUrl(state)}/responses`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(payload),
+      })
     }
-    setLastUpstreamRejection({
-      message: parsed.message,
-      remediationUrl: parsed.remediationUrl,
-      status: response.status,
-    })
-    throw new HTTPError("Failed to create responses", response)
   }
 
-  clearLastUpstreamRejection()
+  return finishUpstreamResponse<ResponsesResult>(response, {
+    stream: Boolean(payload.stream),
+    errorMessage: "Failed to create responses",
+  })
+}
 
-  if (payload.stream) {
-    return events(response)
-  }
-
-  return (await response.json()) as ResponsesResult
+/**
+ * True if a 400 body indicates the Copilot/OpenAI-Responses endpoint rejected
+ * the prompt_cache_retention param specifically (vs any other bad-request
+ * cause). Matches the observed "Unsupported parameter: prompt_cache_retention"
+ * shape defensively across JSON/text bodies via a substring check.
+ */
+export function isUnsupportedPromptCacheRetention(body: string): boolean {
+  const text = body.toLowerCase()
+  return (
+    text.includes("prompt_cache_retention")
+    && (text.includes("unsupported parameter")
+      || text.includes("unknown parameter")
+      || text.includes("unsupported value"))
+  )
 }

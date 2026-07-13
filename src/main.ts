@@ -2,10 +2,17 @@
 
 import { defineCommand, runMain, parseArgs } from "citty"
 
-import { BUILD_VERSION } from "./lib/build-info"
-import { bindElectronFetch } from "./lib/electron-fetch"
+import { HELPER_SUBCOMMAND } from "./lib/auth/api-key-helper-tokens"
+import { bindElectronFetch } from "./lib/http/electron-fetch"
+import { BUILD_VERSION } from "./lib/update/build-info"
 
 const cliArgs = {
+  apiKeyHelper: {
+    type: "string",
+    description:
+      "Legacy alias for `maximal api <client>`; the command written into"
+      + " client configs. Prints the API key for an integrated client.",
+  },
   "api-home": {
     type: "string",
     description: "Path to the API home directory.",
@@ -33,18 +40,18 @@ if (typeof args["enterprise-url"] === "string") {
   process.env.COPILOT_API_ENTERPRISE_URL = args["enterprise-url"]
 }
 
+if (typeof args.apiKeyHelper === "string") {
+  const { runApiKeyHelper } = await import("./lib/auth/api-key-helper")
+  process.exit(runApiKeyHelper(args.apiKeyHelper))
+}
+
 bindElectronFetch()
 
-// Dynamically import other modules to ensure environment variables are set
-const { auth } = await import("./auth")
-const { checkUsage } = await import("./check-usage")
-const { configureClaudeCode } = await import("./configure-claude-code")
-const { configureClaudeDesktop } = await import("./configure-claude-desktop")
-const { debug } = await import("./debug")
-const { setup } = await import("./setup")
-const { start } = await import("./start")
-const { uninstall } = await import("./uninstall")
-
+// Subcommands are LAZY thunks: citty resolves `meta` for `--help`/usage but
+// only invokes the matched command's loader. This keeps each invocation from
+// paying the import cost of the others — e.g. `maximal api <client>` (invoked by
+// clients via `sh -c` on every key fetch) must not load the proxy server,
+// usage client, or auth stack it never touches.
 const main = defineCommand({
   meta: {
     name: "maximal",
@@ -53,14 +60,16 @@ const main = defineCommand({
       "Local proxy that exposes GitHub Copilot as OpenAI- and Anthropic-compatible HTTP endpoints.",
   },
   subCommands: {
-    auth,
-    start,
-    setup,
-    "configure-claude-code": configureClaudeCode,
-    "configure-claude-desktop": configureClaudeDesktop,
-    uninstall,
-    "check-usage": checkUsage,
-    debug,
+    auth: () => import("./auth").then((m) => m.auth),
+    start: () => import("./start").then((m) => m.start),
+    setup: () => import("./setup").then((m) => m.setup),
+    app: () => import("./apps/cli").then((m) => m.appCommand),
+    // Keyed by HELPER_SUBCOMMAND so the on-disk `<bin> api <client>` token and
+    // the command citty dispatches share one source of truth (no drift).
+    [HELPER_SUBCOMMAND]: () => import("./apps/cli").then((m) => m.apiCommand),
+    uninstall: () => import("./uninstall").then((m) => m.uninstall),
+    "check-usage": () => import("./check-usage").then((m) => m.checkUsage),
+    debug: () => import("./debug").then((m) => m.debug),
   },
   args: cliArgs,
 })

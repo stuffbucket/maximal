@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test"
 
-import { state } from "~/lib/state"
+import { state } from "~/lib/runtime-state/state"
 import { server } from "~/server"
 
 const originalVerbose = state.verbose

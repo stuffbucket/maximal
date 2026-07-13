@@ -65,6 +65,10 @@ a:hover {
   padding: var(--space-3) var(--space-2);
   overflow-y: auto;
   min-height: 0;
+  /* Column so the nav takes the slack and the language picker pins to the
+     foot — a global control that shouldn't scroll with the section list. */
+  display: flex;
+  flex-direction: column;
 }
 
 .nav {
@@ -100,6 +104,46 @@ a:hover {
 }
 
 .nav__item:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* ---- Language picker ----
+   A global control pinned to the foot of the sidebar (margin-top:auto pushes
+   it below the nav, which takes the vertical slack). Quiet by default —
+   label + a bordered <select> that inherits the app's control surface — so it
+   reads as a utility, not a primary affordance. All values are tokens. */
+.lang-picker {
+  margin-top: auto;
+  padding-top: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.lang-picker__label {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-md);
+  color: var(--text-muted);
+  padding-inline: var(--space-1);
+}
+
+.lang-picker__select {
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  color: var(--text-base-color);
+  background: var(--surface-control);
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-input);
+  padding: var(--space-2) var(--space-2);
+  cursor: pointer;
+}
+
+.lang-picker__select:hover {
+  border-color: var(--border-strong);
+}
+
+.lang-picker__select:focus-visible {
   outline: var(--focus-ring);
   outline-offset: var(--focus-ring-offset);
 }
@@ -1896,10 +1940,9 @@ a:hover {
 
 .app-card__cmd {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: stretch;
   gap: var(--space-3);
-  flex-wrap: wrap;
   background: var(--surface-control);
   border: var(--border-width-hairline) solid var(--border-subtle);
   border-radius: var(--radius-card);
@@ -1907,7 +1950,6 @@ a:hover {
 }
 
 .app-card__cmd-text {
-  flex: 1 1 16ch;
   min-width: 0;
   font-size: var(--text-sm);
   color: var(--text-base-color);
@@ -1918,6 +1960,7 @@ a:hover {
 .app-card__cmd-actions {
   flex: 0 0 auto;
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-2);
 }
 

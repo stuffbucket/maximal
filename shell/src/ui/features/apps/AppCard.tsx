@@ -2,8 +2,10 @@ import { useState } from "react";
 
 import type { AppEntry } from "../../../proxy/client";
 import { Button } from "../../components/Button";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { Switch } from "../../components/Switch";
 import { cx } from "../../components/cx";
+import { isWindows } from "../../platform";
 
 import type { MutationResult } from "./useApps";
 
@@ -28,6 +30,14 @@ function conflictCopy(app: AppEntry): { title: string; detail: string } | null {
           " another tool, so we didn't change it. Remove that line from the" +
           " app's settings, then switch this on again to route through maximal.",
       };
+    case "foreign-api-key-helper":
+      return {
+        title: "Left your existing setting in place",
+        detail:
+          `${app.name} already has a custom apiKeyHelper set by you or` +
+          " another tool, so we didn't change it. Remove that line from the" +
+          " app's settings, then switch this on again to route through maximal.",
+      };
     case null:
       return null;
   }
@@ -36,6 +46,13 @@ function conflictCopy(app: AppEntry): { title: string; detail: string } | null {
 export function AppCard({ app, onToggle, onRescan }: AppCardProps): JSX.Element {
   const [copied, setCopied] = useState(false);
   const [rescanning, setRescanning] = useState(false);
+  // Windows-only: disabling Claude Code routing doesn't take effect in an
+  // already-running session (Claude Code reads its base URL at launch on
+  // Windows; macOS picks it up live). Warn before disabling so the user
+  // knows to /exit and relaunch. See issue #178.
+  const [restartWarnOpen, setRestartWarnOpen] = useState(false);
+  const [disabling, setDisabling] = useState(false);
+  const needsWindowsRestartWarning = app.id === "claude-code" && isWindows();
 
   const comingSoon = app.kind === "coming-soon";
   const notInstalled = app.status === "not-installed";
@@ -64,6 +81,23 @@ export function AppCard({ app, onToggle, onRescan }: AppCardProps): JSX.Element 
     setRescanning(false);
   };
 
+  // Intercept only the Claude-Code-disable-on-Windows case; everything else
+  // (enabling, other apps, macOS) toggles straight through.
+  const handleToggle = (next: boolean): void => {
+    if (!next && needsWindowsRestartWarning) {
+      setRestartWarnOpen(true);
+      return;
+    }
+    void onToggle(next);
+  };
+
+  const confirmDisable = async (): Promise<void> => {
+    setDisabling(true);
+    await onToggle(false);
+    setDisabling(false);
+    setRestartWarnOpen(false);
+  };
+
   return (
     <article
       className={cx("app-card", comingSoon && "app-card--soon")}
@@ -79,7 +113,7 @@ export function AppCard({ app, onToggle, onRescan }: AppCardProps): JSX.Element 
             <Switch
               checked={app.enabled}
               disabled={notInstalled}
-              onCheckedChange={(next) => void onToggle(next)}
+              onCheckedChange={handleToggle}
               label={app.enabled ? "On" : "Off"}
             />
           )}
@@ -157,6 +191,32 @@ export function AppCard({ app, onToggle, onRescan }: AppCardProps): JSX.Element 
             <span className="app-card__conflict-detail">{conflict.detail}</span>
           </span>
         </div>
+      )}
+
+      {/* Windows-only heads-up before disabling Claude Code routing: a
+          running session keeps using the proxy until it's restarted. */}
+      {needsWindowsRestartWarning && (
+        <ConfirmDialog
+          open={restartWarnOpen}
+          title="Restart Claude Code to finish"
+          body={
+            <>
+              <p>
+                On Windows, a Claude Code session that's already running keeps
+                routing through maximal until you restart it.
+              </p>
+              <p>
+                After you disable this, run <code className="mono">/exit</code>{" "}
+                in Claude Code and start it again for the change to take effect.
+              </p>
+            </>
+          }
+          confirmLabel="Disable routing"
+          cancelLabel="Keep on"
+          busy={disabling}
+          onConfirm={confirmDisable}
+          onCancel={() => setRestartWarnOpen(false)}
+        />
       )}
     </article>
   );

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "bun:test"
 
-import { allCacheMetrics, Cache, SingletonCache } from "~/lib/cache"
+import {
+  allCacheMetrics,
+  Cache,
+  SingletonCache,
+} from "~/lib/runtime-state/cache"
 
 describe("Cache", () => {
   it("get returns undefined and increments misses for absent keys", () => {

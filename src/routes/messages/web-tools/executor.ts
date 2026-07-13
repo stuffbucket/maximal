@@ -1,14 +1,35 @@
 /**
  * Executor interface and implementations. The agent loop calls these to
- * resolve `web_search` / `web_fetch` tool calls; the in-process variant
- * handles fetch (search returns `unavailable`); OllamaWebExecutor
- * covers both via ollama.com hosted endpoints when OLLAMA_API_KEY is
- * set.
+ * resolve `web_search` / `web_fetch` tool calls.
+ *
+ * Three implementations, in preference order (see chooseExecutor):
+ *   - CopilotResponsesExecutor — resolves `search` via an internal /responses
+ *     side-call using a GPT model that has Copilot's native (server-side Bing)
+ *     web_search tool. No extra key: reuses the Copilot entitlement already
+ *     present. Claude models can't reach /responses, which is exactly why a
+ *     Claude client's web_search has to be brokered through a GPT model here.
+ *     `fetch` delegates to the in-process HTTP fetcher (no backend needed).
+ *   - OllamaWebExecutor — both halves via ollama.com's hosted API when
+ *     OLLAMA_API_KEY is set.
+ *   - InProcessFetchExecutor — no key at all: fetch via plain HTTPS + Turndown,
+ *     search by scraping DuckDuckGo's server-rendered HTML.
  */
 
+import { randomUUID } from "node:crypto"
 import TurndownService from "turndown"
 
-import { Cache } from "~/lib/cache"
+import type { ResponsesPayload } from "~/services/copilot/create-responses"
+
+import { getSmallModel } from "~/lib/config/config"
+import { Cache } from "~/lib/runtime-state/cache"
+import { hasCopilotToken, state } from "~/lib/runtime-state/state"
+import {
+  createCopilotTokenUsageRecorder,
+  normalizeResponsesUsage,
+  type UsageTokens,
+  withCopilotCost,
+} from "~/lib/token-usage"
+import { createResponses } from "~/services/copilot/create-responses"
 
 import type { WebFetchErrorCode, WebSearchErrorCode } from "./vocab"
 
@@ -42,6 +63,12 @@ export interface FetchOpts {
 
 export interface SearchOpts {
   maxResults?: number
+  /** Restrict results to these hosts (bare hostnames, subdomains implied).
+   *  An executor may push this to its backend (Copilot /responses `filters`,
+   *  DuckDuckGo `site:`); the agent loop also post-filters as a floor. */
+  allowedDomains?: Array<string>
+  /** Exclude results from these hosts. Same handling as allowedDomains. */
+  blockedDomains?: Array<string>
 }
 
 export interface Executor {
@@ -143,10 +170,380 @@ export class InProcessFetchExecutor implements Executor {
     return { ok: true, markdown: trimTo(markdown, maxChars), title }
   }
 
-  // No search backend wired; configure a different Executor to enable.
-  search(_query: string, _opts?: SearchOpts): Promise<SearchResult> {
-    return Promise.resolve({ ok: false, code: "unavailable" })
+  // Falls back to scraping DuckDuckGo's server-rendered HTML results page —
+  // no API key required, matching the no-key philosophy of fetch() above.
+  // Configure OLLAMA_API_KEY for a real search API at better quality.
+  search(query: string, opts: SearchOpts = {}): Promise<SearchResult> {
+    return ddgHtmlSearch(
+      withDomainOperators(query, opts),
+      opts.maxResults ?? DEFAULT_SEARCH_MAX_RESULTS,
+    )
   }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Copilot Responses-API web search. Copilot's native web search is a
+// server-side Bing capability exposed ONLY on the /responses endpoint,
+// and ONLY GPT models advertise /responses (no Claude model does — which
+// is why a Claude client's web_search reaches us here unresolved). We
+// broker it: fire an internal /responses call with a GPT model and the
+// `{type:"web_search"}` tool, then harvest the structured sources the
+// model cites.
+//
+// Verified response shape (2026-07-03, gpt-5-mini):
+//   output[].type === "web_search_call"
+//     .action.sources[] === { type:"url", url }        // raw hits
+//   output[].type === "message"
+//     .content[].annotations[] === {                    // cited hits (+title)
+//       type:"url_citation", url, title, start_index, end_index }
+//
+// `fetch` needs no backend — plain HTTPS + Turndown already works key-free
+// — so we delegate it to an inner InProcessFetchExecutor.
+// ────────────────────────────────────────────────────────────────────
+
+export interface CopilotResponsesExecutorOpts {
+  /** GPT model id that advertises the /responses endpoint. */
+  model: string
+  /** Injected for tests; defaults to the real createResponses. */
+  createResponsesFn?: typeof createResponses
+  /** Injected for tests; defaults to a real InProcessFetchExecutor. */
+  fetchExecutor?: Executor
+  /** Injected for tests; defaults to a real token-usage recorder so the
+   *  brokered /responses call is billed against the account's quota
+   *  visibly (it spends GPT-model tokens the same as any /responses call). */
+  recordUsage?: (usage: UsageTokens) => void
+  /** Injected for tests; defaults to `() => new Date()`. Used to stamp the
+   *  current date into undated queries. */
+  now?: () => Date
+}
+
+export class CopilotResponsesExecutor implements Executor {
+  private readonly model: string
+  private readonly createResponsesFn: typeof createResponses
+  private readonly fetchExecutor: Executor
+  private readonly recordUsage: (usage: UsageTokens) => void
+  private readonly now: () => Date
+
+  constructor(opts: CopilotResponsesExecutorOpts) {
+    this.model = opts.model
+    this.createResponsesFn = opts.createResponsesFn ?? createResponses
+    this.fetchExecutor = opts.fetchExecutor ?? new InProcessFetchExecutor()
+    this.recordUsage =
+      opts.recordUsage
+      ?? createCopilotTokenUsageRecorder({
+        endpoint: "responses",
+        model: opts.model,
+      })
+    this.now = opts.now ?? (() => new Date())
+  }
+
+  // Copilot resolves web_fetch server-side too, but a plain HTTPS GET +
+  // HTML→markdown is simpler, cheaper, and already key-free, so reuse it.
+  fetch(url: string, opts?: FetchOpts): Promise<FetchResult> {
+    return this.fetchExecutor.fetch(url, opts)
+  }
+
+  async search(query: string, opts: SearchOpts = {}): Promise<SearchResult> {
+    const maxResults = opts.maxResults ?? DEFAULT_SEARCH_MAX_RESULTS
+    const payload: ResponsesPayload = {
+      model: this.model,
+      // Pass the model's own query through as-is — it's already a well-formed
+      // search intent (recency/site cues baked in by the caller); wrapping it
+      // in steering prose would make the broker search for our wrapper text.
+      // Only append today's date when the query has no date cue, so undated
+      // queries skew to current results (the model has no clock).
+      input: withDateHint(query, this.now()),
+      tools: [{ type: "web_search", ...buildResponsesFilters(opts) }],
+      // Force the search to actually run. Without this the model may answer
+      // from memory (tool_choice defaults to "auto"), returning 0 sources.
+      tool_choice: "required",
+      // The sources array is only surfaced when explicitly included.
+      include: ["web_search_call.action.sources"],
+      stream: false,
+    }
+
+    let result: Awaited<ReturnType<typeof createResponses>>
+    try {
+      result = await this.createResponsesFn(payload, {
+        vision: false,
+        initiator: "agent",
+        requestId: randomUUID(),
+      })
+    } catch {
+      return { ok: false, code: "unavailable" }
+    }
+
+    // createResponses returns a stream union member when payload.stream is
+    // true; we set it false, so a shape without `output` is a contract
+    // violation we treat as unavailable rather than crash on.
+    if (!("output" in result)) {
+      return { ok: false, code: "unavailable" }
+    }
+
+    // This side-call spends the account's Copilot quota (GPT-model tokens +
+    // a web_search request). Record it — with the real per-request cost —
+    // so it's visible in `maximal debug` / the token-usage view rather than
+    // billed invisibly to the user.
+    this.recordUsage(
+      withCopilotCost(
+        normalizeResponsesUsage(result.usage),
+        result.copilot_usage,
+      ),
+    )
+
+    return { ok: true, items: harvestResponsesHits(result, maxResults) }
+  }
+}
+
+// Copilot's /responses web_search honors an OpenAI-style domain filter:
+//   { type: "web_search", filters: { allowed_domains, blocked_domains } }
+// bare hostnames, subdomains implied, up to 100 each. Verified live
+// (2026-07-03): blocked_domains excluded the named host from results.
+// Shape per OpenAI docs + openai-python web_search_tool_param + Vercel AI
+// SDK. Returns {} (no filters key) when neither list is set, so the tool
+// declaration stays minimal.
+function buildResponsesFilters(opts: SearchOpts): {
+  filters?: { allowed_domains?: Array<string>; blocked_domains?: Array<string> }
+} {
+  const filters: {
+    allowed_domains?: Array<string>
+    blocked_domains?: Array<string>
+  } = {}
+  if (opts.allowedDomains?.length) filters.allowed_domains = opts.allowedDomains
+  if (opts.blockedDomains?.length) filters.blocked_domains = opts.blockedDomains
+  return Object.keys(filters).length > 0 ? { filters } : {}
+}
+
+// Words/patterns that signal the query already scopes time, so we should
+// NOT inject "today". Covers explicit years (2019-2099), month names, and
+// common recency adverbs.
+const DATE_CUE_RE =
+  /\b(?:19|20)\d{2}\b|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b|\b(?:today|yesterday|tomorrow|latest|current|recent|now|this (?:week|month|year)|last (?:week|month|year))\b/iu
+
+/**
+ * Append today's date to an undated query so the broker skews to current
+ * results (it has no clock). If the query already carries a date cue
+ * (a year, month name, or recency word), pass it through unchanged so we
+ * don't fight an explicit range the caller asked for.
+ */
+export function withDateHint(query: string, now: Date): string {
+  if (DATE_CUE_RE.test(query)) return query
+  const date = now.toISOString().slice(0, 10) // YYYY-MM-DD, stable + locale-free
+  return `${query} (as of ${date})`
+}
+
+/**
+ * Pull SearchHit[] out of a /responses result. url_citation annotations
+ * carry both url AND title, so they seed the list first (richer); raw
+ * web_search_call.action.sources[] fill in any remaining slots (url only).
+ * Deduped by url, capped at maxResults.
+ */
+export function harvestResponsesHits(
+  result: { output?: unknown },
+  maxResults: number,
+): Array<SearchHit> {
+  const items: Array<SearchHit> = []
+  const seen = new Set<string>()
+  const output = Array.isArray(result.output) ? result.output : []
+
+  const push = (url: unknown, title: unknown): void => {
+    if (items.length >= maxResults) return
+    if (typeof url !== "string" || url.length === 0 || seen.has(url)) return
+    seen.add(url)
+    items.push({
+      url,
+      title: typeof title === "string" && title.length > 0 ? title : url,
+      page_age: null,
+    })
+  }
+
+  // Pass 1 — cited URLs (have titles). Pass 2 — raw searched sources
+  // (url only), backfilling remaining slots.
+  for (const item of output) harvestCitations(item, push)
+  for (const item of output) harvestSearchSources(item, push)
+
+  return items
+}
+
+type PushHit = (url: unknown, title: unknown) => void
+
+function harvestCitations(item: unknown, push: PushHit): void {
+  if (!isRecord(item) || item.type !== "message") return
+  const content = Array.isArray(item.content) ? item.content : []
+  for (const block of content) {
+    if (!isRecord(block)) continue
+    const annotations =
+      Array.isArray(block.annotations) ? block.annotations : []
+    for (const ann of annotations) {
+      if (!isRecord(ann) || ann.type !== "url_citation") continue
+      push(ann.url, ann.title)
+    }
+  }
+}
+
+function harvestSearchSources(item: unknown, push: PushHit): void {
+  if (!isRecord(item) || item.type !== "web_search_call") return
+  const action = isRecord(item.action) ? item.action : {}
+  const sources = Array.isArray(action.sources) ? action.sources : []
+  for (const src of sources) {
+    if (!isRecord(src)) continue
+    push(src.url, undefined)
+  }
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null
+}
+
+// ────────────────────────────────────────────────────────────────────
+// No-key web search: scrape DuckDuckGo's html.duckduckgo.com results page
+// (the same server-rendered HTML a JS-disabled browser gets — no API key,
+// no JSON endpoint). Fragile to DuckDuckGo markup changes by nature of
+// being a scrape rather than an API; OllamaWebExecutor is the higher-
+// quality option when a key is available.
+// ────────────────────────────────────────────────────────────────────
+
+const DDG_HTML_SEARCH_URL = "https://html.duckduckgo.com/html/"
+const DEFAULT_SEARCH_MAX_RESULTS = 5
+const SEARCH_TIMEOUT_MS = 15_000
+
+// DDG's html results wrap each hit in `<a ... class="result__a" ...>Title</a>`;
+// attribute order isn't guaranteed, so capture the whole opening tag and
+// inner text, then pull `class` / `href` out of the tag independently.
+const RESULT_ANCHOR_RE = /<a\b([^>]*)>([\s\S]*?)<\/a>/giu
+const HREF_ATTR_RE = /href="([^"]*)"/iu
+const TAG_RE = /<[^>]+>/gu
+
+// Strip HTML tags. Loop until the output is stable: a single pass over
+// crafted input (e.g. `<scr<script>ipt>`) can leave tag-like residue behind,
+// which CodeQL flags as incomplete-multi-character-sanitization. Iterating
+// to a fixpoint removes any tags exposed by an earlier removal.
+function stripTags(html: string): string {
+  let current = html
+  let previous: string
+  do {
+    previous = current
+    current = current.replaceAll(TAG_RE, "")
+  } while (current !== previous)
+  return current.replaceAll(WHITESPACE_RE, " ").trim()
+}
+
+const HTML_ENTITY_RE = /&(amp|lt|gt|quot|#39);/gu
+const HTML_ENTITY_MAP: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  "#39": "'",
+}
+
+// Single-pass decode via one regex + lookup. Decoding entities
+// sequentially (`&amp;`→`&` first, then `&lt;`→`<`) double-unescapes input
+// like `&amp;lt;` into `<` when it should stay the literal `&lt;`. A single
+// pass never re-examines its own output, so ordering can't compound.
+function decodeHtmlEntities(s: string): string {
+  return s.replaceAll(
+    HTML_ENTITY_RE,
+    (_, name: string) => HTML_ENTITY_MAP[name],
+  )
+}
+
+// DDG's html endpoint doesn't link directly to results — it wraps them in
+// a same-site redirect (`//duckduckgo.com/l/?uddg=<url-encoded target>&...`)
+// so it can log the outbound click. Decode `uddg` directly instead of
+// following the redirect (fewer round-trips, and it's a same-page anchor
+// href, not a real navigation the model requested).
+function resolveDdgResultUrl(href: string): string | undefined {
+  if (href.includes("duckduckgo.com/l/")) {
+    const query = href.slice(href.indexOf("?") + 1)
+    const uddg = new URLSearchParams(query).get("uddg")
+    return uddg || undefined
+  }
+  if (href.startsWith("http://") || href.startsWith("https://")) return href
+  return undefined
+}
+
+function parseDdgResults(html: string, maxResults: number): Array<SearchHit> {
+  const items: Array<SearchHit> = []
+  const seenUrls = new Set<string>()
+  for (const m of html.matchAll(RESULT_ANCHOR_RE)) {
+    if (items.length >= maxResults) break
+    const [, attrs, inner] = m
+    if (!attrs.includes('class="result__a"')) continue
+
+    const hrefMatch = attrs.match(HREF_ATTR_RE)
+    if (!hrefMatch) continue
+    const url = resolveDdgResultUrl(hrefMatch[1])
+    if (!url || seenUrls.has(url)) continue
+
+    const title = decodeHtmlEntities(stripTags(inner))
+    if (!title) continue
+
+    seenUrls.add(url)
+    items.push({ url, title, page_age: null })
+  }
+  return items
+}
+
+// DuckDuckGo honors `site:` / `-site:` operators. Append them so the scrape
+// backend narrows at the source (results are still post-filtered by host in
+// exec.ts as the correctness floor). Multiple allowed domains become an OR
+// group — DDG ANDs bare space-separated `site:` terms, which would match
+// nothing. Blocked domains are each excluded with `-site:`.
+function withDomainOperators(query: string, opts: SearchOpts): string {
+  const parts = [query]
+  const allowed = opts.allowedDomains ?? []
+  if (allowed.length === 1) {
+    parts.push(`site:${allowed[0]}`)
+  } else if (allowed.length > 1) {
+    parts.push(`(${allowed.map((d) => `site:${d}`).join(" OR ")})`)
+  }
+  for (const d of opts.blockedDomains ?? []) parts.push(`-site:${d}`)
+  return parts.join(" ")
+}
+
+async function ddgHtmlSearch(
+  query: string,
+  maxResults: number,
+): Promise<SearchResult> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS)
+
+  let response: Response
+  try {
+    response = await fetch(
+      `${DDG_HTML_SEARCH_URL}?q=${encodeURIComponent(query)}`,
+      {
+        method: "GET",
+        redirect: "follow",
+        signal: controller.signal,
+        headers: {
+          "User-Agent": "Mozilla/5.0 (compatible; maximal-proxy/0.1)",
+          Accept: "text/html",
+        },
+      },
+    )
+  } catch {
+    clearTimeout(timer)
+    return { ok: false, code: "unavailable" }
+  }
+  clearTimeout(timer)
+
+  if (!response.ok) {
+    return {
+      ok: false,
+      code: response.status === 429 ? "too_many_requests" : "unavailable",
+    }
+  }
+
+  let html: string
+  try {
+    html = await response.text()
+  } catch {
+    return { ok: false, code: "unavailable" }
+  }
+
+  return { ok: true, items: parseDdgResults(html, maxResults) }
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -361,22 +758,35 @@ function fetchErrorFromPost(err: PostErr): WebFetchErrorCode {
 }
 
 /**
- * Description of which executor `selectExecutor()` would return for
- * a given env, with the diagnostic shape used by `copilot-api debug`
- * and `/_debug/state`. Pure — no side effects, no instantiation.
+ * Description of which executor `selectExecutor()` would return, with the
+ * diagnostic shape used by `maximal debug` and `/_debug/state`. Pure — no
+ * side effects, no instantiation.
  *
- * Discriminated on `kind`. The Ollama variant carries the resolved
- * apiKey so `selectExecutor` can construct without re-reading env.
+ * Discriminated on `kind`. The Ollama variant carries the resolved apiKey
+ * and the Copilot variant the resolved model so `selectExecutor` can
+ * construct without re-deriving anything.
  *
  * Single source of truth for the executor-selection contract.
  */
 export type ExecutorChoice =
   | { kind: "OllamaWebExecutor"; base: string; apiKey: string }
+  | { kind: "CopilotResponsesExecutor"; model: string; notes: string }
   | { kind: "InProcessFetchExecutor"; notes: string }
+
+export interface ChooseExecutorDeps {
+  /** A GPT model id that advertises the /responses endpoint and can run
+   *  Copilot's native web_search, if the account has one and is
+   *  authenticated. undefined otherwise. Resolved from live state by
+   *  `resolveResponsesModel()`; injectable for pure/testable selection. */
+  responsesModel?: string
+}
 
 export function chooseExecutor(
   env: NodeJS.ProcessEnv = process.env,
+  deps: ChooseExecutorDeps = {},
 ): ExecutorChoice {
+  // 1. Explicit OLLAMA_API_KEY wins — a deliberate operator opt-in to a
+  //    separate hosted provider; honor it over the implicit Copilot path.
   const apiKey = env.OLLAMA_API_KEY
   if (apiKey !== undefined && apiKey.length > 0) {
     return {
@@ -385,21 +795,85 @@ export function chooseExecutor(
       apiKey,
     }
   }
+  // 2. No key, but the account can reach Copilot's native (server-side Bing)
+  //    web_search via a GPT /responses model. Best no-key option — uses the
+  //    Copilot entitlement already present, real search, structured sources.
+  if (deps.responsesModel) {
+    return {
+      kind: "CopilotResponsesExecutor",
+      model: deps.responsesModel,
+      notes: `search via Copilot /responses (${deps.responsesModel}); no extra key`,
+    }
+  }
+  // 3. Last resort — scrape DuckDuckGo HTML. No key, no Copilot needed.
   return {
     kind: "InProcessFetchExecutor",
-    notes: "search disabled; set OLLAMA_API_KEY to enable hosted search/fetch",
+    notes:
+      "search via DuckDuckGo HTML scrape (no Copilot /responses model available); set OLLAMA_API_KEY for hosted search",
   }
 }
 
 /**
- * Select the executor based on environment. Per-request to keep the
- * Ollama prefetch cache scoped to one request.
+ * Resolve a GPT model that can broker web_search via /responses, reading
+ * live Copilot state. Returns undefined when unauthenticated or the catalog
+ * has no /responses-capable model (e.g. Claude-only accounts — no Claude
+ * model supports /responses, which is the whole reason this broker exists).
+ *
+ * Never trusts a frozen model id — it queries the LIVE catalog, so a
+ * deprecated model (e.g. gpt-5-mini retired by GitHub) simply drops out and
+ * selection moves on. Order of preference:
+ *   1. the configured small model, if it supports /responses (honor the user);
+ *   2. else a "mini"-class /responses model — tracks the cheap tier by class,
+ *      not a pinned string, so it survives gpt-5-mini → gpt-6-mini renames;
+ *   3. else any /responses-capable model, so search still works.
+ */
+export function resolveResponsesModel(): string | undefined {
+  if (!hasCopilotToken()) return undefined
+  return pickResponsesModel(
+    (state.models?.data ?? []).map((m) => ({
+      id: m.id,
+      supportsResponses: m.supported_endpoints?.includes("/responses") ?? false,
+    })),
+    getSmallModel(),
+  )
+}
+
+/**
+ * Pure model-selection core (see resolveResponsesModel for the policy).
+ * Split out so it's testable without live Copilot state.
+ */
+export function pickResponsesModel(
+  models: Array<{ id: string; supportsResponses: boolean }>,
+  configuredSmall: string,
+): string | undefined {
+  const responsesModels = models.filter((m) => m.supportsResponses)
+  if (responsesModels.length === 0) return undefined
+
+  // 1. Honor the configured small model when it can do /responses.
+  if (responsesModels.some((m) => m.id === configuredSmall)) {
+    return configuredSmall
+  }
+  // 2. Prefer the cheap "mini" tier by class (not a frozen id).
+  const mini = responsesModels.find((m) => m.id.toLowerCase().includes("mini"))
+  if (mini) return mini.id
+  // 3. Any /responses-capable model keeps search working.
+  return responsesModels[0].id
+}
+
+/**
+ * Select the executor. Per-request so the Ollama prefetch cache stays
+ * scoped to one request.
  */
 export function selectExecutor(): Executor {
-  const choice = chooseExecutor()
+  const choice = chooseExecutor(process.env, {
+    responsesModel: resolveResponsesModel(),
+  })
   switch (choice.kind) {
     case "OllamaWebExecutor": {
       return new OllamaWebExecutor({ apiKey: choice.apiKey })
+    }
+    case "CopilotResponsesExecutor": {
+      return new CopilotResponsesExecutor({ model: choice.model })
     }
     case "InProcessFetchExecutor": {
       return new InProcessFetchExecutor()

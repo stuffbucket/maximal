@@ -1,7 +1,7 @@
-import { getGitHubApiBaseUrl, githubUserHeaders } from "~/lib/api-config"
-import { HTTPError } from "~/lib/error"
-import { GITHUB_API_TIMEOUT_MS } from "~/lib/http-timeouts"
-import { state } from "~/lib/state"
+import { getGitHubApiBaseUrl, githubUserHeaders } from "~/lib/config/api-config"
+import { GITHUB_API_TIMEOUT_MS } from "~/lib/http/http-timeouts"
+import { sendRequestJson } from "~/lib/http/send-request"
+import { state } from "~/lib/runtime-state/state"
 
 export async function getGitHubUser(githubToken?: string) {
   const resolvedGithubToken = githubToken ?? state.githubToken
@@ -9,15 +9,15 @@ export async function getGitHubUser(githubToken?: string) {
     throw new Error("GitHub token not found")
   }
 
-  const authState = { ...state, githubToken: resolvedGithubToken }
-  const response = await fetch(`${getGitHubApiBaseUrl()}/user`, {
-    headers: githubUserHeaders(authState),
-    signal: AbortSignal.timeout(GITHUB_API_TIMEOUT_MS),
-  })
-
-  if (!response.ok) throw new HTTPError("Failed to get GitHub user", response)
-
-  return (await response.json()) as GithubUserResponse
+  return await sendRequestJson<GithubUserResponse>(
+    `${getGitHubApiBaseUrl()}/user`,
+    {
+      githubToken: resolvedGithubToken,
+      headers: githubUserHeaders(),
+      timeoutMs: GITHUB_API_TIMEOUT_MS,
+      errorMessage: "Failed to get GitHub user",
+    },
+  )
 }
 
 // Trimmed for the sake of simplicity. `avatar_url` is the user's profile

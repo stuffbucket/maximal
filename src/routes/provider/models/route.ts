@@ -1,8 +1,8 @@
 import { Hono } from "hono"
 
-import { getProviderConfig } from "~/lib/config"
-import { forwardError } from "~/lib/error"
-import { createHandlerLogger } from "~/lib/logger"
+import { getProviderConfig } from "~/lib/config/config"
+import { forwardError } from "~/lib/errors/error"
+import { createHandlerLogger } from "~/lib/platform/logger"
 import {
   createProviderProxyResponse,
   forwardProviderModels,

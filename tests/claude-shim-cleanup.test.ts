@@ -15,7 +15,7 @@ import {
   legacyShimPath,
   removeLegacyShimIfPresent,
   SHIM_MARKER,
-} from "~/lib/claude-cli-detect"
+} from "~/apps/claude-code/detect"
 
 let tmp: string
 

@@ -1,0 +1,174 @@
+---
+// markdoc.dev-style hero: a static brand wordmark with the value-prop tagline
+// typed in on load. The full tagline is server-rendered (SEO + no-JS +
+// prefers-reduced-motion all get the complete sentence); JS only replays it as
+// a typing effect when motion is allowed.
+import Paint from "../Paint.astro";
+import Spark from "../Spark.astro";
+import { getDownloadInfo } from "../../lib/downloads";
+interface Props {
+  tagline: string;
+  downloadLabel?: string;
+}
+const { tagline, downloadLabel = "Download for macOS" } = Astro.props;
+// Markdoc doesn't forward $variables into tag attributes, so pull the resolved
+// release straight from the shared (memoized) build-time module.
+const { macDmg: downloadUrl, versionLabel, winSetup, hasWindows } =
+  await getDownloadInfo();
+---
+
+<header class="card card--scarlet hero" aria-labelledby="title">
+  <Paint base="#c8334a" mode="candy" />
+  <h1 id="title" class="wordmark">maximal</h1>
+  <p class="tagline hero-typed">
+    <span class="hero-typed__text" data-typed-target>{tagline}</span><span
+      class="hero-typed__caret"
+      aria-hidden="true"></span>
+  </p>
+
+  {/* Server-rendered fallback (SEO / no-JS / fetch failure). A small bundled
+      script in index.astro upgrades these anchors' href + version pill from the
+      runtime manifest via the data-os / data-version-pill hooks. */}
+  <div class="hero-cta">
+    {
+      downloadUrl && (
+        <a
+          class="btn btn--primary hero-cta__primary"
+          data-os="mac"
+          href={downloadUrl}
+          rel="noopener"
+        >
+          <Paint base="#15656f" mode="clearcoat" class="btn-paint" />
+          <span class="btn-label">
+            <Spark class="btn-spark" />
+            <span>{downloadLabel}</span>
+          </span>
+          {versionLabel && <span class="btn-meta" data-version-pill>{versionLabel}</span>}
+        </a>
+      )
+    }
+    {
+      hasWindows ? (
+        <a
+          class="btn btn--primary hero-cta__primary"
+          data-os="windows"
+          href={winSetup}
+          rel="noopener"
+        >
+          <Paint base="#15656f" mode="clearcoat" class="btn-paint" />
+          <span class="btn-label">
+            <Spark class="btn-spark" />
+            <span>Download for Windows</span>
+          </span>
+          {versionLabel && <span class="btn-meta" data-version-pill>{versionLabel}</span>}
+        </a>
+      ) : (
+        <div class="btn btn--soon hero-cta__primary" data-os="windows" aria-disabled="true">
+          <span class="btn-label">
+            <svg class="btn-spark" viewBox="0 0 22 22" fill="currentColor" aria-hidden="true">
+              <path d="M11 1 L13 9 L21 11 L13 13 L11 21 L9 13 L1 11 L9 9 Z" />
+            </svg>
+            <span>Windows</span>
+          </span>
+          <span class="btn-meta">coming soon</span>
+        </div>
+      )
+    }
+  </div>
+</header>
+
+<style>
+  /* The hero is a solid brand-red card (a fixed brand statement in both
+     themes), so it drops the per-section top accent rule and carries cream
+     ink directly — matching the maximal app-icon tile. */
+  .hero {
+    background: #c8334a;
+    color: #f4ead4;
+  }
+  .hero::before {
+    display: none;
+  }
+  /* Lift the hero content above the paint canvas (which is positioned, so it
+     would otherwise paint over the non-positioned content). A soft shadow keeps
+     the cream type crisp over the moving gloss highlights. */
+  .wordmark,
+  .tagline,
+  .hero-cta {
+    position: relative;
+    z-index: 1;
+  }
+  /* Cream type, shaded as if lit from above the card: a top-bright gradient
+     fill on the wordmark + a soft shadow cast down onto the paint. */
+  .wordmark {
+    background: linear-gradient(180deg, #fcf5e6 0%, #f1e5cb 55%, #d6c4a0 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+    filter: drop-shadow(0 5px 9px rgba(26, 0, 4, 0.5));
+  }
+  .tagline {
+    color: #f4ead4;
+    text-shadow: 0 2px 5px rgba(26, 0, 4, 0.45);
+  }
+
+  .hero-typed {
+    /* Reserve a stable two-line height so the typing effect doesn't reflow the
+       layout beneath it as characters appear. */
+    min-height: 2.6em;
+  }
+  .hero-typed__caret {
+    display: inline-block;
+    width: 0.5ch;
+    height: 1.05em;
+    margin-left: 0.04em;
+    transform: translateY(0.16em);
+    background: var(--ink-gold);
+    animation: hero-caret-blink 1s step-end infinite;
+  }
+  .hero-cta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.85rem 1.25rem;
+    margin: 1.5rem 0 1.25rem;
+  }
+  .hero-cta__primary {
+    /* Size to content rather than stretch. The glossy primary-button effect
+       (clear-coat Paint + lit label) is shared from global.css .btn--primary. */
+    flex: 0 0 auto;
+  }
+
+  @keyframes hero-caret-blink {
+    50% {
+      opacity: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .hero-typed__caret {
+      animation: none;
+    }
+  }
+</style>
+
+<script is:inline>
+  // Replay the (already-rendered) tagline as a typing effect. No-JS and
+  // reduced-motion users keep the full sentence untouched.
+  (function () {
+    var el = document.querySelector("[data-typed-target]");
+    if (!el) return;
+    var reduce =
+      window.matchMedia &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduce) return;
+    var full = el.textContent || "";
+    el.textContent = "";
+    var i = 0;
+    function tick() {
+      el.textContent = full.slice(0, i);
+      if (i++ <= full.length) window.setTimeout(tick, 26);
+    }
+    tick();
+  })();
+</script>

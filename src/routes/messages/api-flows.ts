@@ -3,16 +3,18 @@ import type { Context } from "hono"
 
 import { streamSSE } from "hono/streaming"
 
-import type { CompactType } from "~/lib/compact"
-import type { SubagentMarker } from "~/lib/subagent"
+import type { CompactType } from "~/lib/models/compact"
+import type { SubagentMarker } from "~/lib/runtime-state/subagent"
 import type { Model } from "~/services/copilot/get-models"
 
+import { getPromptCacheRetention } from "~/lib/config/config"
 import {
   type AnthropicMessagesPayload,
   type AnthropicStreamEventData,
   type AnthropicStreamState,
-} from "~/lib/anthropic-types"
-import { debugJson, debugJsonTail, debugLazy } from "~/lib/logger"
+} from "~/lib/models/anthropic-types"
+import { debugJson, debugJsonTail, debugLazy } from "~/lib/platform/logger"
+import { parseUserIdMetadata } from "~/lib/platform/utils"
 import {
   createCopilotTokenUsageRecorder,
   mergeAnthropicUsage,
@@ -21,8 +23,8 @@ import {
   normalizeResponsesUsage,
   type TokenUsageEndpoint,
   type UsageTokens,
+  withCopilotCost,
 } from "~/lib/token-usage"
-import { parseUserIdMetadata } from "~/lib/utils"
 import {
   buildErrorEvent,
   createResponsesStreamState,
@@ -37,10 +39,10 @@ import {
   compactInputByLatestCompaction,
   getResponsesRequestOptions,
 } from "~/routes/responses/utils"
+import { isAsyncIterable, isNonStreaming } from "~/routes/streaming-predicates"
 import {
   createChatCompletions,
   type ChatCompletionChunk,
-  type ChatCompletionResponse,
 } from "~/services/copilot/create-chat-completions"
 import { createMessages } from "~/services/copilot/create-messages"
 import {
@@ -98,7 +100,12 @@ export const handleWithChatCompletions = async (
 
   if (isNonStreaming(response)) {
     debugJson(logger, "Non-streaming response from Copilot:", response)
-    recordUsage(normalizeOpenAIUsage(response.usage))
+    recordUsage(
+      withCopilotCost(
+        normalizeOpenAIUsage(response.usage),
+        response.copilot_usage,
+      ),
+    )
     const anthropicResponse = translateToAnthropic(response)
     debugJson(logger, "Translated Anthropic response:", anthropicResponse)
     return c.json(anthropicResponse)
@@ -169,6 +176,16 @@ export const handleWithResponsesApi = async (
     responsesPayload,
     selectedModel?.capabilities.limits.max_prompt_tokens,
   )
+
+  // Copilot/OpenAI-Responses-specific prefix-cache retention. Opt-in via
+  // config; omitted otherwise so behavior is unchanged. Set on the built
+  // payload here (not in the pure translator). A future non-Copilot provider
+  // path won't use this. Safe to enable: create-responses.ts strips + retries
+  // once if a specific endpoint 400s on the param.
+  const promptCacheRetention = getPromptCacheRetention()
+  if (promptCacheRetention) {
+    responsesPayload.prompt_cache_retention = promptCacheRetention
+  }
 
   compactInputByLatestCompaction(responsesPayload)
 
@@ -252,14 +269,32 @@ export const handleWithResponsesApi = async (
     })
   }
 
+  return finishNonStreamingResponses(c, response as ResponsesResult, {
+    logger,
+    recordUsage,
+  })
+}
+
+/** Non-streaming /responses tail: log, translate to Anthropic, record
+ *  usage+cost, respond. Extracted to keep handleWithResponsesApi under the
+ *  per-function line cap. */
+function finishNonStreamingResponses(
+  c: Context,
+  result: ResponsesResult,
+  deps: { logger: ConsolaInstance; recordUsage: (usage: UsageTokens) => void },
+) {
+  const { logger, recordUsage } = deps
   debugJsonTail(logger, "Non-streaming Responses result:", {
-    value: response,
+    value: result,
     tailLength: 400,
   })
-  const anthropicResponse = translateResponsesResultToAnthropic(
-    response as ResponsesResult,
+  const anthropicResponse = translateResponsesResultToAnthropic(result)
+  recordUsage(
+    withCopilotCost(
+      normalizeResponsesUsage(result.usage),
+      result.copilot_usage,
+    ),
   )
-  recordUsage(normalizeResponsesUsage((response as ResponsesResult).usage))
   debugJson(logger, "Translated Anthropic response:", anthropicResponse)
   return c.json(anthropicResponse)
 }
@@ -341,17 +376,14 @@ export const handleWithMessagesApi = async (
     value: response,
     tailLength: 400,
   })
-  recordUsage(normalizeAnthropicUsage(response.usage))
+  recordUsage(
+    withCopilotCost(
+      normalizeAnthropicUsage(response.usage),
+      response.copilot_usage,
+    ),
+  )
   return c.json(response)
 }
-
-export const isNonStreaming = (
-  response: Awaited<ReturnType<typeof createChatCompletions>>,
-): response is ChatCompletionResponse => Object.hasOwn(response, "choices")
-
-const isAsyncIterable = <T>(value: unknown): value is AsyncIterable<T> =>
-  Boolean(value)
-  && typeof (value as AsyncIterable<T>)[Symbol.asyncIterator] === "function"
 
 const createCopilotUsageRecorder = (options: {
   endpoint: TokenUsageEndpoint

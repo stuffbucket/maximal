@@ -21,8 +21,8 @@
 import { Hono } from "hono"
 import { streamSSE } from "hono/streaming"
 
-import { getAuthStatus } from "~/lib/auth-controller"
-import { settingsEventBus } from "~/lib/settings-events"
+import { getAuthStatus } from "~/lib/auth/auth-controller"
+import { settingsEventBus } from "~/lib/config/settings-events"
 
 /** Keep-alive cadence. Proxies and idle-connection reapers close silent
  *  streams; a periodic comment line keeps the channel warm at negligible

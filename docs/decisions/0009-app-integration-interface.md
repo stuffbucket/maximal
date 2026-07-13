@@ -1,7 +1,7 @@
 ---
 id: ADR-0009
 title: Consolidate app integrations behind an AppIntegration interface
-status: proposed
+status: accepted
 date: 2026-06-14
 authors:
   - stuffbucket
@@ -161,3 +161,35 @@ Land per app, not in a big-bang. Suggested order:
   disk I/O; the shell pings it often. Cache for 5s inside the
   integration; invalidate on `enable`/`disable`. Document in the
   interface.
+
+## Status update — implemented (2026-06)
+
+Shipped under `src/apps/` (not the proposed `src/services/apps/`). The
+interface is named **`ClientApp`** (`src/apps/index.ts`), collected by a
+registry (`src/apps/registry.ts`: `getAllApps()`, `getApp(id)`);
+per-app code lives under
+`src/apps/{claude-code,claude-desktop,copilot-cli}/`. The `related_files`
+in this ADR's frontmatter are the pre-migration paths — kept as the
+historical record of where the logic moved *from*.
+
+The shipped contract refined the proposal:
+
+- `detect()` returns `boolean` ("is it installed?"), not `AppInstall[]`;
+  the install list moved into `getDetails()`.
+- `read()` / `conflict()` / `installHint()` were folded into a single
+  `getDetails(conflict?): Promise<AppEntry>`; conflict now rides on the
+  `enable()` result.
+- `enable()` / `disable()` dropped the `AppState` parameter and return a
+  small status object.
+- Added `isEnabled()`, optional `onBoot()` / `onShutdown()` lifecycle
+  hooks, an optional `cli` hook (`AppCli`) for apps needing extra flags or
+  bespoke handling, and a `apiKeyLabel` used by `maximal api <client>`. The
+  registry-driven `maximal app` / `maximal api` commands live in
+  `src/apps/cli.ts`; coming-soon placeholders come from
+  `src/apps/coming-soon.ts` (`defineComingSoonApp`).
+- Added **`uninstall()`** to the contract, so `maximal uninstall` reverts
+  each app's own (ownership-guarded) config through the registry rather
+  than hard-coding per-app revert calls.
+
+The open question about opencode is unresolved — there is no opencode app
+in the registry yet, and no `EnvVarAppIntegration` subtype was introduced.

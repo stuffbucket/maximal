@@ -15,10 +15,10 @@ import {
   addAndActivate,
   emptyRegistry,
   getActiveRecord,
+  type GitHubTokenRecord,
   inferTokenType,
   listAccounts,
   makeAccountRecord,
-  makeRecord,
   migrateLegacyRecord,
   readGitHubTokenRecord,
   readRegistry,
@@ -26,7 +26,21 @@ import {
   setActive,
   writeGitHubTokenRecord,
   writeRegistry,
-} from "~/lib/github-token-store"
+} from "~/lib/auth/github-token-store"
+
+/** Local builder for a v1 single-record token file. Production code never
+ *  constructs these outside `readGitHubTokenRecord`'s upgrade path, so this
+ *  helper lives with the tests that need a record to write/read back. */
+const makeRecord = (
+  accessToken: string,
+  refreshToken: string | null = null,
+): GitHubTokenRecord => ({
+  schemaVersion: 1,
+  tokenType: inferTokenType(accessToken),
+  accessToken,
+  refreshToken,
+  obtainedAt: new Date().toISOString(),
+})
 
 let tokenDir: string
 let tokenPath: string
@@ -113,14 +127,6 @@ describe("writeGitHubTokenRecord", () => {
       const stat = await fs.stat(tokenPath)
       expect(stat.mode & 0o777).toBe(0o600)
     }
-  })
-
-  it("makeRecord populates obtainedAt with a fresh timestamp", () => {
-    const before = Date.now()
-    const r = makeRecord("ghu_x")
-    const ts = new Date(r.obtainedAt).getTime()
-    expect(ts).toBeGreaterThanOrEqual(before - 1000)
-    expect(ts).toBeLessThanOrEqual(Date.now() + 1000)
   })
 })
 

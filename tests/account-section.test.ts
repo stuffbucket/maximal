@@ -58,9 +58,17 @@ describe("Account section markup", () => {
     const section = accountSection()
     // verification_uri is no longer rendered as a data-field slot —
     // the sign-in-with-code button reads it from currentAuthStatus and
-    // hands it to the system opener. The other three pending-state
-    // fields plus the authenticated/error slots remain.
-    for (const field of ["user_code", "expires_at", "account_login", "error"]) {
+    // hands it to the system opener. expires_at is likewise no longer a
+    // standalone slot: the i18n refactor folds it into the localized
+    // `waiting_authorization` caption, which the controller fills via
+    // t("account-waiting-authorization", { expiresAt }). The other slots
+    // (user_code, authenticated login, error) remain.
+    for (const field of [
+      "user_code",
+      "waiting_authorization",
+      "account_login",
+      "error",
+    ]) {
       expect(section.includes(`data-field="${field}"`)).toBe(true)
     }
   })

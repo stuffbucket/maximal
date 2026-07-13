@@ -6,7 +6,7 @@ import type {
   ChatCompletionResponse,
 } from "~/services/copilot/create-chat-completions"
 
-import { type AnthropicStreamState } from "~/lib/anthropic-types"
+import { type AnthropicStreamState } from "~/lib/models/anthropic-types"
 import { translateToAnthropic } from "~/routes/messages/non-stream-translation"
 import { translateChunkToAnthropicEvents } from "~/routes/messages/stream-translation"
 
@@ -65,6 +65,52 @@ const anthropicStreamEventSchema = z.looseObject({
 
 function isValidAnthropicStreamEvent(payload: unknown): boolean {
   return anthropicStreamEventSchema.safeParse(payload).success
+}
+
+// Copilot can return a tool call whose `arguments` is an empty string or
+// malformed JSON. The translation must degrade to a valid input object, not
+// crash: empty → `{}`, unparseable → the raw string under `raw_arguments`.
+const toolCallResponse = (
+  id: string,
+  args: string,
+): ChatCompletionResponse => ({
+  id,
+  object: "chat.completion",
+  created: 1677652288,
+  model: "gpt-4o-2024-05-13",
+  choices: [
+    {
+      index: 0,
+      message: {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          {
+            id,
+            type: "function",
+            function: { name: "get_current_weather", arguments: args },
+          },
+        ],
+      },
+      finish_reason: "tool_calls",
+      logprobs: null,
+    },
+  ],
+  usage: { prompt_tokens: 30, completion_tokens: 5, total_tokens: 35 },
+})
+
+const expectToolUseInput = (
+  response: ChatCompletionResponse,
+  expectedInput: Record<string, unknown>,
+) => {
+  const anthropicResponse = translateToAnthropic(response)
+  expect(isValidAnthropicResponse(anthropicResponse)).toBe(true)
+  expect(anthropicResponse.content[0].type).toBe("tool_use")
+  if (anthropicResponse.content[0].type === "tool_use") {
+    expect(anthropicResponse.content[0].input).toEqual(expectedInput)
+  } else {
+    throw new Error("Expected tool_use block")
+  }
 }
 
 describe("OpenAI to Anthropic Non-Streaming Response Translation", () => {
@@ -188,6 +234,19 @@ describe("OpenAI to Anthropic Non-Streaming Response Translation", () => {
 
     expect(isValidAnthropicResponse(anthropicResponse)).toBe(true)
     expect(anthropicResponse.stop_reason).toBe("max_tokens")
+  })
+
+  test("handles tool call with empty arguments string", () => {
+    expectToolUseInput(toolCallResponse("call_empty", ""), {})
+  })
+
+  test("handles tool call with malformed arguments JSON", () => {
+    expectToolUseInput(
+      toolCallResponse("call_malformed", '{"location": "Boston'),
+      {
+        raw_arguments: '{"location": "Boston',
+      },
+    )
   })
 })
 
@@ -363,5 +422,198 @@ describe("OpenAI to Anthropic Streaming Response Translation", () => {
     for (const event of translatedStream) {
       expect(isValidAnthropicStreamEvent(event)).toBe(true)
     }
+  })
+})
+
+describe("OpenAI to Anthropic Streaming Tool-Call Argument Edge Cases", () => {
+  // Characterization: a streamed tool call that carries an id + name but never
+  // sends an `arguments` delta. `handleToolCalls` opens the tool_use block with
+  // `input: {}` and emits no `input_json_delta`, so the client receives a
+  // tool_use whose input is empty — the shape a client union validator reports
+  // as "received undefined".
+  test("characterizes streamed tool call with no arguments delta", () => {
+    const openAIStream: Array<ChatCompletionChunk> = [
+      {
+        id: "cmpl-empty",
+        object: "chat.completion.chunk",
+        created: 1677652288,
+        model: "gpt-4o-2024-05-13",
+        choices: [
+          {
+            index: 0,
+            delta: { role: "assistant" },
+            finish_reason: null,
+            logprobs: null,
+          },
+        ],
+      },
+      {
+        id: "cmpl-empty",
+        object: "chat.completion.chunk",
+        created: 1677652288,
+        model: "gpt-4o-2024-05-13",
+        choices: [
+          {
+            index: 0,
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: "call_noargs",
+                  type: "function",
+                  function: { name: "SendMessage", arguments: "" },
+                },
+              ],
+            },
+            finish_reason: null,
+            logprobs: null,
+          },
+        ],
+      },
+      {
+        id: "cmpl-empty",
+        object: "chat.completion.chunk",
+        created: 1677652288,
+        model: "gpt-4o-2024-05-13",
+        choices: [
+          { index: 0, delta: {}, finish_reason: "tool_calls", logprobs: null },
+        ],
+      },
+    ]
+
+    const streamState: AnthropicStreamState = {
+      messageStartSent: false,
+      contentBlockIndex: 0,
+      contentBlockOpen: false,
+      toolCalls: {},
+      thinkingBlockOpen: false,
+    }
+    const translatedStream = openAIStream.flatMap((chunk) =>
+      translateChunkToAnthropicEvents(chunk, streamState),
+    )
+
+    const toolUseStart = translatedStream.find(
+      (event) =>
+        event.type === "content_block_start"
+        && event.content_block.type === "tool_use",
+    )
+    expect(toolUseStart).toBeDefined()
+    if (
+      toolUseStart?.type === "content_block_start"
+      && toolUseStart.content_block.type === "tool_use"
+    ) {
+      expect(toolUseStart.content_block.name).toBe("SendMessage")
+      // Documents current behavior: the tool_use input is emitted empty.
+      expect(toolUseStart.content_block.input).toEqual({})
+    }
+
+    // And no input_json_delta is produced, so the client never fills the input.
+    const hasInputDelta = translatedStream.some(
+      (event) =>
+        event.type === "content_block_delta"
+        && event.delta.type === "input_json_delta",
+    )
+    expect(hasInputDelta).toBe(false)
+  })
+
+  // Characterization: the accumulator matches argument deltas to their tool
+  // call SOLELY by `toolCall.index` (registered at handleToolCalls; looked up
+  // when arguments arrive). If an argument delta carries an index that does not
+  // match the index used when the id+name were sent, the lookup misses and the
+  // arguments are SILENTLY DROPPED — the tool_use reaches the client with empty
+  // input even though Copilot did send arguments. This is a maximal-side
+  // fragility, independent of whether Copilot omits arguments.
+  test("characterizes dropped arguments when delta index does not match", () => {
+    const openAIStream: Array<ChatCompletionChunk> = [
+      {
+        id: "cmpl-mismatch",
+        object: "chat.completion.chunk",
+        created: 1677652288,
+        model: "gpt-4o-2024-05-13",
+        choices: [
+          {
+            index: 0,
+            delta: { role: "assistant" },
+            finish_reason: null,
+            logprobs: null,
+          },
+        ],
+      },
+      {
+        id: "cmpl-mismatch",
+        object: "chat.completion.chunk",
+        created: 1677652288,
+        model: "gpt-4o-2024-05-13",
+        choices: [
+          {
+            index: 0,
+            delta: {
+              // id + name registered under index 0
+              tool_calls: [
+                {
+                  index: 0,
+                  id: "call_mismatch",
+                  type: "function",
+                  function: { name: "SendMessage" },
+                },
+              ],
+            },
+            finish_reason: null,
+            logprobs: null,
+          },
+        ],
+      },
+      {
+        id: "cmpl-mismatch",
+        object: "chat.completion.chunk",
+        created: 1677652288,
+        model: "gpt-4o-2024-05-13",
+        choices: [
+          {
+            index: 0,
+            delta: {
+              // arguments arrive under a DIFFERENT index (1) — lookup misses
+              tool_calls: [
+                {
+                  index: 1,
+                  function: { arguments: '{"message":"hi"}' },
+                },
+              ],
+            },
+            finish_reason: null,
+            logprobs: null,
+          },
+        ],
+      },
+      {
+        id: "cmpl-mismatch",
+        object: "chat.completion.chunk",
+        created: 1677652288,
+        model: "gpt-4o-2024-05-13",
+        choices: [
+          { index: 0, delta: {}, finish_reason: "tool_calls", logprobs: null },
+        ],
+      },
+    ]
+
+    const streamState: AnthropicStreamState = {
+      messageStartSent: false,
+      contentBlockIndex: 0,
+      contentBlockOpen: false,
+      toolCalls: {},
+      thinkingBlockOpen: false,
+    }
+    const translatedStream = openAIStream.flatMap((chunk) =>
+      translateChunkToAnthropicEvents(chunk, streamState),
+    )
+
+    // Documents current behavior: the mismatched-index arguments are dropped,
+    // so no input_json_delta carries the "hi" message the model actually sent.
+    const inputDeltas = translatedStream.filter(
+      (event) =>
+        event.type === "content_block_delta"
+        && event.delta.type === "input_json_delta",
+    )
+    expect(inputDeltas).toHaveLength(0)
   })
 })

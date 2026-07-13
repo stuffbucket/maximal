@@ -14,7 +14,7 @@
 import { readdirSync, statSync } from "node:fs"
 import { join, relative, resolve } from "node:path"
 
-import { contentTypeForPath } from "../src/lib/web-content-types"
+import { contentTypeForPath } from "../src/lib/platform/web-content-types"
 
 const REPO = resolve(import.meta.dir, "..")
 const DIST = join(REPO, "shell/dist/ui")

@@ -2,16 +2,26 @@ import type { Context } from "hono"
 
 import type { Model } from "~/services/copilot/get-models"
 
-import { pickCopilotVariantId, reverseId } from "~/lib/anthropic-id-rewrite"
-import { type AnthropicMessagesPayload } from "~/lib/anthropic-types"
-import { awaitApproval } from "~/lib/approval"
-import { COMPACT_REQUEST } from "~/lib/compact"
-import { getSmallModel, isMessagesApiEnabled } from "~/lib/config"
-import { createHandlerLogger, debugJson } from "~/lib/logger"
-import { findEndpointModel } from "~/lib/models"
-import { checkRateLimit } from "~/lib/rate-limit"
-import { state } from "~/lib/state"
-import { generateRequestIdFromPayload, getRootSessionId } from "~/lib/utils"
+import { isMessagesApiEnabled } from "~/lib/config/config"
+import { awaitApproval } from "~/lib/http/approval"
+import { checkRateLimit } from "~/lib/http/rate-limit"
+import {
+  pickCopilotVariantId,
+  reverseId,
+} from "~/lib/models/anthropic-id-rewrite"
+import { type AnthropicMessagesPayload } from "~/lib/models/anthropic-types"
+import { COMPACT_REQUEST } from "~/lib/models/compact"
+import { findEndpointModel } from "~/lib/models/models"
+import {
+  createHandlerLogger,
+  debugJson,
+  debugLazy,
+} from "~/lib/platform/logger"
+import {
+  generateRequestIdFromPayload,
+  getRootSessionId,
+} from "~/lib/platform/utils"
+import { state } from "~/lib/runtime-state/state"
 
 import {
   handleWithChatCompletions,
@@ -26,6 +36,7 @@ import {
   stripToolReferenceTurnBoundary,
 } from "./preprocess"
 import { parseSubagentMarkerFromFirstUser } from "./subagent-marker"
+import { isWarmupRequest, respondToWarmup } from "./warmup"
 import { handleWithWebToolsAgent, splitWebTools } from "./web-tools"
 
 const logger = createHandlerLogger("messages-handler")
@@ -78,13 +89,28 @@ export async function handleCompletion(c: Context) {
   // claude code and opencode compact / auto-continue detection
   const compactType = getCompactType(anthropicPayload)
 
-  // fix claude code 2.0.28+ warmup request consume premium request, forcing small model if no tools are used
-  // set "CLAUDE_CODE_SUBAGENT_MODEL": "you small model" also can avoid this
+  // Claude Code 2.0.28+ fires a tool-less "Warmup" request on startup (and
+  // around subagent spawns) that today round-trips upstream (~4s p50). When
+  // the request precisely matches the warmup shape, short-circuit it with a
+  // canned local response — no upstream call, no model mutation. The detector
+  // errs tight (a false positive would canned-respond to a real request); we
+  // also require the anthropic-beta header (warmups always carry it) to be
+  // extra conservative. Non-warmup no-tool turns fall through untouched.
   const anthropicBeta = c.req.header("anthropic-beta")
   logger.debug("Anthropic Beta header:", anthropicBeta)
   const noTools = !anthropicPayload.tools || anthropicPayload.tools.length === 0
   if (anthropicBeta && noTools && compactType === 0) {
-    anthropicPayload.model = getSmallModel()
+    if (isWarmupRequest(anthropicPayload)) {
+      logger.debug("warmup short-circuit", {
+        model: anthropicPayload.model,
+        stream: anthropicPayload.stream ?? false,
+      })
+      return respondToWarmup(c, anthropicPayload)
+    }
+    debugLazy(logger, () => [
+      "no-tool beta request, not warmup-shaped",
+      { msgCount: anthropicPayload.messages.length },
+    ])
   }
 
   if (compactType) {

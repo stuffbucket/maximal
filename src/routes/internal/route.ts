@@ -20,8 +20,8 @@ import type { Context } from "hono"
 import consola from "consola"
 import { Hono } from "hono"
 
-import { defaultGetRequestIp, isLoopbackAddress } from "~/lib/request-auth"
-import { requestContext } from "~/lib/request-context"
+import { defaultGetRequestIp, isLoopbackAddress } from "~/lib/auth/request-auth"
+import { requestContext } from "~/lib/http/request-context"
 
 interface InternalRoutesOptions {
   /** Injectable for tests so we don't actually exit the runner. */

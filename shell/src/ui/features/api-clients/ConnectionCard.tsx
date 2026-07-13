@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Checkbox } from "../../components/Checkbox";
-import type { ApiKeyEntry } from "../../../../../src/lib/settings-types";
+import type { ApiKeyEntry } from "../../../../../src/lib/config/settings-types";
 import type { MutationResult } from "./useApiKeys";
 
 interface ConnectionCardProps {

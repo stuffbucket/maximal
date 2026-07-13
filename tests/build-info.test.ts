@@ -12,7 +12,7 @@ import {
   BUILD_GIT_BRANCH,
   BUILD_GIT_SHA,
   BUILD_VERSION,
-} from "~/lib/build-info"
+} from "~/lib/update/build-info"
 
 import packageJson from "../package.json" with { type: "json" }
 

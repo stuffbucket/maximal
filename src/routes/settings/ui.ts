@@ -13,8 +13,8 @@
 
 import { Hono } from "hono"
 
-import { getConfig, writeConfig, type AppConfig } from "~/lib/config"
-import { forwardError, HTTPError } from "~/lib/error"
+import { getConfig, writeConfig, type AppConfig } from "~/lib/config/config"
+import { forwardError, HTTPError } from "~/lib/errors/error"
 
 /** Build an HTTPError whose body is a plain message, so `forwardError`
  *  surfaces a clean `{ error: { message } }` at the given status. */

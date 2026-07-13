@@ -4,16 +4,19 @@ import { defineCommand } from "citty"
 import consola from "consola"
 import os from "node:os"
 
+import { readDefaultRecord } from "./lib/auth/github-token-store"
+import { SECRET_DEFS, secretIsFromFile } from "./lib/auth/secrets"
 import {
   type AppConfig,
   DEFAULT_LOG_RETENTION_DAYS,
   getConfig,
-} from "./lib/config"
-import { readDefaultRecord } from "./lib/github-token-store"
-import { PATHS } from "./lib/paths"
-import { SECRET_DEFS, secretIsFromFile } from "./lib/secrets"
-import { getGitVersion, shortSha } from "./lib/version"
-import { chooseExecutor } from "./routes/messages/web-tools/executor"
+} from "./lib/config/config"
+import { PATHS } from "./lib/platform/paths"
+import { getGitVersion, shortSha } from "./lib/update/version"
+import {
+  chooseExecutor,
+  resolveResponsesModel,
+} from "./routes/messages/web-tools/executor"
 
 interface SecretStatus {
   name: string
@@ -68,7 +71,7 @@ async function getPackageVersion(): Promise<string> {
   // Reading package.json from disk via fs.readFile + import.meta.url
   // fails in `bun --compile` output, which historically left every
   // shipped binary reporting `Version: unknown`.
-  const { BUILD_VERSION } = await import("./lib/build-info")
+  const { BUILD_VERSION } = await import("./lib/update/build-info")
   return BUILD_VERSION
 }
 
@@ -132,10 +135,19 @@ export function secretStatus(
 export function describeExecutor(
   env: NodeJS.ProcessEnv = process.env,
 ): DebugInfo["executor"] {
-  const choice = chooseExecutor(env)
+  const choice = chooseExecutor(env, {
+    responsesModel: resolveResponsesModel(),
+  })
   switch (choice.kind) {
     case "OllamaWebExecutor": {
       return { web_tools: choice.kind, base: choice.base }
+    }
+    case "CopilotResponsesExecutor": {
+      return {
+        web_tools: choice.kind,
+        base: choice.model,
+        notes: choice.notes,
+      }
     }
     case "InProcessFetchExecutor": {
       return { web_tools: choice.kind, notes: choice.notes }
@@ -149,7 +161,7 @@ export function describeExecutor(
 }
 
 /** Project AppConfig down to the diagnostic subset displayed by both
- *  `copilot-api debug` and `/_debug/state`. Adding a field updates
+ *  `maximal debug` and `/_debug/state`. Adding a field updates
  *  one place. */
 export function summarizeConfig(config: AppConfig): DebugInfo["config"] {
   return {

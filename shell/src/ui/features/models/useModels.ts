@@ -4,7 +4,7 @@ import { apiCall } from "../../../proxy/client";
 import type {
   ModelsListResponse,
   ModelSummary,
-} from "../../../../../src/lib/settings-types";
+} from "../../../../../src/lib/config/settings-types";
 
 /**
  * Data hook over `/settings/api/models`. Owns the model list, the

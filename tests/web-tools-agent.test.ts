@@ -5,7 +5,8 @@ import type {
   AnthropicMessagesPayload,
   AnthropicResponse,
   AnthropicToolUseBlock,
-} from "~/lib/anthropic-types"
+} from "~/lib/models/anthropic-types"
+import type { Executor } from "~/routes/messages/web-tools/executor"
 import type { WebToolPolicy } from "~/routes/messages/web-tools/rewriter"
 
 import { runAgentLoop } from "~/routes/messages/web-tools/agent"
@@ -33,6 +34,10 @@ const searchPolicy: WebToolPolicy = {
 function makeResponse(
   content: Array<AnthropicAssistantContentBlock>,
   stop_reason: AnthropicResponse["stop_reason"] = "end_turn",
+  billing?: {
+    usage?: AnthropicResponse["usage"]
+    copilot_usage?: AnthropicResponse["copilot_usage"]
+  },
 ): AnthropicResponse {
   return {
     id: "msg_test",
@@ -42,7 +47,8 @@ function makeResponse(
     model: "claude-3-5-sonnet",
     stop_reason,
     stop_sequence: null,
-    usage: { input_tokens: 1, output_tokens: 1 },
+    usage: billing?.usage ?? { input_tokens: 1, output_tokens: 1 },
+    ...(billing?.copilot_usage ? { copilot_usage: billing.copilot_usage } : {}),
   }
 }
 
@@ -249,5 +255,120 @@ describe("runAgentLoop", () => {
     expect(turnLens).toEqual([1, 3])
     expect(turn2.roles).toEqual(["user", "assistant", "user"])
     expect(turn2.trType).toBe("tool_result")
+  })
+})
+
+describe("runAgentLoop — usage accounting", () => {
+  it("sums usage across every agent turn (not just the last turn)", async () => {
+    // Turn 1 (tool call): 10 in / 20 out, with cache fields + copilot_usage.
+    // Turn 2 (final text): 30 in / 40 out. The synthesized response rides on
+    // the last turn, so its usage must carry the whole request's total, not
+    // just turn 2's — otherwise intermediate tool-calling turns go unbilled.
+    const responses: Array<AnthropicResponse> = [
+      makeResponse([searchToolUse("toolu_1", "shannon")], "tool_use", {
+        usage: {
+          input_tokens: 10,
+          output_tokens: 20,
+          cache_creation_input_tokens: 5,
+          cache_read_input_tokens: 3,
+          service_tier: "standard",
+        },
+        copilot_usage: { total_nano_aiu: 100 },
+      }),
+      makeResponse(
+        [{ type: "text", text: "Claude Shannon was born in 1916." }],
+        "end_turn",
+        {
+          usage: {
+            input_tokens: 30,
+            output_tokens: 40,
+            cache_creation_input_tokens: 7,
+            service_tier: "priority",
+          },
+          copilot_usage: { total_nano_aiu: 200 },
+        },
+      ),
+    ]
+    let turn = 0
+    const callOnce = (_p: AnthropicMessagesPayload) =>
+      Promise.resolve(responses[turn++])
+
+    const result = await runAgentLoop({
+      initialPayload: basePayload,
+      policy: searchPolicy,
+      executor: new FakeExecutor(),
+      callOnce,
+    })
+
+    expect(turn).toBe(2)
+    expect(result.usage.input_tokens).toBe(40) // 10 + 30
+    expect(result.usage.output_tokens).toBe(60) // 20 + 40
+    expect(result.usage.cache_creation_input_tokens).toBe(12) // 5 + 7
+    expect(result.usage.cache_read_input_tokens).toBe(3) // 3 + (absent)
+    // service_tier is not additive: keep the latest turn's value.
+    expect(result.usage.service_tier).toBe("priority")
+    // copilot_usage is the cost signal; each turn is separately billed.
+    expect(result.copilot_usage?.total_nano_aiu).toBe(300) // 100 + 200
+  })
+})
+
+describe("runAgentLoop — domain filtering", () => {
+  it("post-filters search results to the declared allowed_domains", async () => {
+    // The executor returns mixed hosts (a backend may ignore the domain
+    // filter); the agent loop must drop hits outside the allowlist so the
+    // client's constraint holds regardless.
+    const mixedHostExecutor: Executor = {
+      fetch: () => Promise.resolve({ ok: true, markdown: "" }),
+      search: (_query, opts) => {
+        // The declared domains are forwarded to the executor too.
+        expect(opts?.allowedDomains).toEqual(["docs.python.org"])
+        return Promise.resolve({
+          ok: true,
+          items: [
+            { url: "https://docs.python.org/3/", title: "In", page_age: null },
+            { url: "https://evil.example/x", title: "Out", page_age: null },
+            {
+              url: "https://sub.docs.python.org/y",
+              title: "Sub allowed",
+              page_age: null,
+            },
+          ],
+        })
+      },
+    }
+    const policy: WebToolPolicy = {
+      declarations: [
+        {
+          type: "web_search_20250305",
+          name: "web_search",
+          allowed_domains: ["docs.python.org"],
+        },
+      ],
+      hasSearch: true,
+      hasFetch: false,
+    }
+    const responses: Array<AnthropicResponse> = [
+      makeResponse([searchToolUse("toolu_1", "asyncio")], "tool_use"),
+      makeResponse([{ type: "text", text: "done" }]),
+    ]
+    let turn = 0
+    const callOnce = (_p: AnthropicMessagesPayload) =>
+      Promise.resolve(responses[turn++])
+
+    const result = await runAgentLoop({
+      initialPayload: basePayload,
+      policy,
+      executor: mixedHostExecutor,
+      callOnce,
+    })
+
+    const resultBlock = result.content[1] as unknown as {
+      content: Array<{ url: string }>
+    }
+    // evil.example dropped; docs.python.org and its subdomain kept.
+    expect(resultBlock.content.map((r) => r.url)).toEqual([
+      "https://docs.python.org/3/",
+      "https://sub.docs.python.org/y",
+    ])
   })
 })

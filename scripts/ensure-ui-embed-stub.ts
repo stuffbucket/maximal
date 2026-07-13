@@ -45,9 +45,19 @@ export const UI_FILES: Record<string, UiEmbedEntry | undefined> = {}
  * check-then-write, so concurrent callers can't race between an `existsSync`
  * probe and the write (CodeQL js/file-system-race). Whoever creates it first
  * wins; everyone else sees EEXIST and treats it as "already present".
+ *
+ * `force: true` overwrites unconditionally — used by the TEST preload, which
+ * REQUIRES the empty stub (so `HAS_EMBED` is false and the UI route serves from
+ * the test's fixture dir). A stray `build:ui` / `app:dev` / `ui:harness` run
+ * otherwise leaves a populated embed behind, silently reddening the ui-route
+ * tests on the next `bun test`. Returns true when the stub was (re)written.
  */
-export function ensureUiEmbedStub(): boolean {
+export function ensureUiEmbedStub(force = false): boolean {
   mkdirSync(dirname(OUT), { recursive: true })
+  if (force) {
+    writeFileSync(OUT, STUB)
+    return true
+  }
   try {
     writeFileSync(OUT, STUB, { flag: "wx" })
     return true

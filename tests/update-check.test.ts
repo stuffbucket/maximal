@@ -6,7 +6,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 
-import { BUILD_VERSION } from "~/lib/build-info"
+import { BUILD_VERSION } from "~/lib/update/build-info"
 import {
   __resetUpdateCheckDepsForTests,
   __setUpdateCheckDepsForTests,
@@ -14,7 +14,7 @@ import {
   getUpdateStatus,
   isNewerVersion,
   parseManifestVersion,
-} from "~/lib/update-check"
+} from "~/lib/update/update-check"
 
 /** A manifest body advertising `version` on the `stable` channel, exactly as
  *  the site build emits it. */
@@ -113,7 +113,7 @@ describe("getUpdateStatus", () => {
     expect(status.update_available).toBe(true)
     // Install-channel-neutral download page, never a raw asset.
     expect(status.url).toBe(DOWNLOAD_URL)
-    expect(DOWNLOAD_URL).toBe("https://mxml.sh/maximal/")
+    expect(DOWNLOAD_URL).toBe("https://mxml.sh/")
   })
 
   test("reports up to date when the latest tag is not newer", async () => {
@@ -125,6 +125,46 @@ describe("getUpdateStatus", () => {
 
     expect(status.latest).toBe("0.0.1")
     expect(status.update_available).toBe(false)
+  })
+
+  test("a dev build of the current release is up to date, not an upgrade", async () => {
+    // build-sidecar.ts stamps local binaries `<version>-dev+<sha>`; the
+    // published release of that same version must not read as an upgrade
+    // (a prerelease ranks below its release, so the naive compare flips it).
+    __setUpdateCheckDepsForTests({
+      fetch: () => Promise.resolve(manifestJson("0.4.35")),
+      currentVersion: "0.4.35-dev+abc12345",
+    })
+
+    const status = await getUpdateStatus()
+
+    expect(status.current).toBe("0.4.35-dev+abc12345") // full string, for diagnostics
+    expect(status.latest).toBe("0.4.35")
+    expect(status.update_available).toBe(false)
+  })
+
+  test("a dev build still sees a genuinely newer release", async () => {
+    __setUpdateCheckDepsForTests({
+      fetch: () => Promise.resolve(manifestJson("0.4.36")),
+      currentVersion: "0.4.35-dev+abc12345",
+    })
+
+    const status = await getUpdateStatus()
+
+    expect(status.update_available).toBe(true)
+  })
+
+  test("a real prerelease still sees its release as an upgrade", async () => {
+    // Only the `-dev+` local suffix is normalized; a beta/rc genuinely precedes
+    // the release and should still be offered the upgrade.
+    __setUpdateCheckDepsForTests({
+      fetch: () => Promise.resolve(manifestJson("0.5.0")),
+      currentVersion: "0.5.0-beta.2",
+    })
+
+    const status = await getUpdateStatus()
+
+    expect(status.update_available).toBe(true)
   })
 
   test("caches within the TTL; force bypasses it", async () => {
@@ -184,13 +224,13 @@ describe("getUpdateStatus", () => {
 
     await getUpdateStatus()
 
-    // The Pages/Fastly origin directly — not the mxml.sh Caddy proxy (fewest
-    // hops + smallest trust surface for a machine poll).
-    expect(requested).toBe(
-      "https://stuffbucket.github.io/maximal/updates/manifest.json",
-    )
-    expect(requested).not.toContain("mxml.sh")
-    // Never the rate-limited REST API.
+    // mxml.sh directly — now a Fastly-backed GitHub Pages custom domain (not the
+    // old Caddy proxy), so it's the CDN origin: fewest hops + smallest trust
+    // surface for a machine poll.
+    expect(requested).toBe("https://mxml.sh/updates/manifest.json")
+    // Never the retired /maximal Caddy path…
+    expect(requested).not.toContain("/maximal/")
+    // …and never the rate-limited REST API.
     expect(requested).not.toContain("api.github.com")
   })
 
