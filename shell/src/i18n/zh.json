@@ -5,6 +5,7 @@
   "reveal-config": "在 {fileManager} 中显示配置…",
 
   "nav-account": "账户",
+  "nav-general": "通用",
   "nav-apps": "应用",
   "nav-endpoint": "端点",
   "nav-api-clients": "API 密钥",
@@ -24,6 +25,11 @@
   "common-remove": "移除",
   "common-working": "处理中…",
   "common-language-label": "语言",
+
+  "general-title": "通用",
+  "general-sub": "Maximal 在桌面上的显示方式。",
+  "general-menu-bar-only-label": "仅在{os, select, macos {菜单栏} other {系统托盘}}中显示",
+  "general-menu-bar-only-hint": "默认情况下，Maximal 也会显示在{os, select, macos {程序坞} other {任务栏}}中，方便你找到并切换到前台。开启此项可将其收起：Maximal 仅保留{os, select, macos {菜单栏} other {系统托盘}}图标继续运行，并从{os, select, macos {程序坞} other {任务栏}}中消失。",
 
   "account-title": "账户",
   "account-sub": "你与 GitHub Copilot 的连接。",

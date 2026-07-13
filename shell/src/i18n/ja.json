@@ -5,6 +5,7 @@
   "reveal-config": "{fileManager} で構成を表示…",
 
   "nav-account": "アカウント",
+  "nav-general": "一般",
   "nav-apps": "アプリ",
   "nav-endpoint": "エンドポイント",
   "nav-api-clients": "API キー",
@@ -24,6 +25,11 @@
   "common-remove": "削除",
   "common-working": "処理中…",
   "common-language-label": "言語",
+
+  "general-title": "一般",
+  "general-sub": "Maximal をデスクトップにどう表示するか。",
+  "general-menu-bar-only-label": "{os, select, macos {メニューバー} other {システムトレイ}}にのみ表示",
+  "general-menu-bar-only-hint": "デフォルトでは、Maximal は{os, select, macos {Dock} other {タスクバー}}にも表示され、見つけやすく前面に呼び出しやすくなっています。これをオンにすると目立たない場所に収まり、Maximal は{os, select, macos {メニューバー} other {システムトレイ}}のアイコンだけで動作を続け、{os, select, macos {Dock} other {タスクバー}}からは消えます。",
 
   "account-title": "アカウント",
   "account-sub": "GitHub Copilot への接続。",

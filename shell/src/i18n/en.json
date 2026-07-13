@@ -5,6 +5,7 @@
   "reveal-config": "Reveal config in {fileManager}…",
 
   "nav-account": "Account",
+  "nav-general": "General",
   "nav-apps": "Apps",
   "nav-endpoint": "Endpoint",
   "nav-api-clients": "API keys",
@@ -24,6 +25,11 @@
   "common-remove": "Remove",
   "common-working": "Working…",
   "common-language-label": "Language",
+
+  "general-title": "General",
+  "general-sub": "How Maximal shows up on your desktop.",
+  "general-menu-bar-only-label": "Show in {os, select, macos {menu bar} other {system tray}} only",
+  "general-menu-bar-only-hint": "By default Maximal also lives in your {os, select, macos {Dock} other {taskbar}}, so it’s easy to spot and bring forward. Turn this on to tuck it out of the way — Maximal keeps running with just its {os, select, macos {menu-bar} other {system-tray}} icon, and steps out of the {os, select, macos {Dock} other {taskbar}}.",
 
   "account-title": "Account",
   "account-sub": "Your connection to GitHub Copilot.",

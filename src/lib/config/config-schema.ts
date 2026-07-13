@@ -132,6 +132,11 @@ export const AppConfigSchema = z
           .optional(),
       })
       .optional(),
+    ui: z
+      .object({
+        menuBarOnly: z.boolean().optional(),
+      })
+      .optional(),
   })
   // passthrough: keep unknown keys in the parsed output. Lets older
   // proxies tolerate config files written by newer ones.

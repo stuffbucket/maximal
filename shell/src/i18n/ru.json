@@ -5,6 +5,7 @@
   "reveal-config": "Показать конфигурацию в {fileManager}…",
 
   "nav-account": "Учётная запись",
+  "nav-general": "Основные",
   "nav-apps": "Приложения",
   "nav-endpoint": "Endpoint",
   "nav-api-clients": "Ключи API",
@@ -24,6 +25,11 @@
   "common-remove": "Удалить",
   "common-working": "Выполняется…",
   "common-language-label": "Язык",
+
+  "general-title": "Основные",
+  "general-sub": "Как Maximal отображается на рабочем столе.",
+  "general-menu-bar-only-label": "Показывать только в {os, select, macos {строке меню} other {системном трее}}",
+  "general-menu-bar-only-hint": "По умолчанию Maximal также присутствует в {os, select, macos {Dock} other {панели задач}}, чтобы его было легко найти и вывести на передний план. Включите этот параметр, чтобы убрать его с глаз: Maximal продолжит работать только со значком в {os, select, macos {строке меню} other {системном трее}} и исчезнет из {os, select, macos {Dock} other {панели задач}}.",
 
   "account-title": "Учётная запись",
   "account-sub": "Ваше подключение к GitHub Copilot.",

@@ -5,6 +5,7 @@
   "reveal-config": "Mostra la configurazione in {fileManager}…",
 
   "nav-account": "Account",
+  "nav-general": "Generale",
   "nav-apps": "App",
   "nav-endpoint": "Endpoint",
   "nav-api-clients": "Chiavi API",
@@ -24,6 +25,11 @@
   "common-remove": "Rimuovi",
   "common-working": "Elaborazione…",
   "common-language-label": "Lingua",
+
+  "general-title": "Generale",
+  "general-sub": "Come Maximal appare sulla tua scrivania.",
+  "general-menu-bar-only-label": "Mostra solo {os, select, macos {nella barra dei menu} other {nell’area di notifica}}",
+  "general-menu-bar-only-hint": "Per impostazione predefinita Maximal compare anche {os, select, macos {nel Dock} other {nella barra delle applicazioni}}, così è facile da individuare e portare in primo piano. Attiva questa opzione per toglierlo di mezzo: Maximal continua a funzionare solo con la sua icona {os, select, macos {nella barra dei menu} other {nell’area di notifica}} e scompare {os, select, macos {dal Dock} other {dalla barra delle applicazioni}}.",
 
   "account-title": "Account",
   "account-sub": "La tua connessione a GitHub Copilot.",

@@ -5,6 +5,7 @@
   "reveal-config": "Afficher la configuration dans {fileManager}…",
 
   "nav-account": "Compte",
+  "nav-general": "Général",
   "nav-apps": "Applications",
   "nav-endpoint": "Point de terminaison",
   "nav-api-clients": "Clés d’API",
@@ -24,6 +25,11 @@
   "common-remove": "Retirer",
   "common-working": "En cours…",
   "common-language-label": "Langue",
+
+  "general-title": "Général",
+  "general-sub": "Comment Maximal apparaît sur votre bureau.",
+  "general-menu-bar-only-label": "Afficher uniquement dans {os, select, macos {la barre des menus} other {la zone de notification}}",
+  "general-menu-bar-only-hint": "Par défaut, Maximal figure aussi dans {os, select, macos {le Dock} other {la barre des tâches}}, pour être facile à repérer et à afficher. Activez cette option pour le mettre de côté : Maximal continue de fonctionner avec seulement son icône dans {os, select, macos {la barre des menus} other {la zone de notification}} et disparaît {os, select, macos {du Dock} other {de la barre des tâches}}.",
 
   "account-title": "Compte",
   "account-sub": "Votre connexion à GitHub Copilot.",

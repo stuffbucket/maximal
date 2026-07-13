@@ -66,6 +66,14 @@ export interface AppConfig {
   checkUpdates?: boolean
   editorVersion?: string
   apps?: AppsConfig
+  ui?: {
+    /**
+     * When true, Maximal lives ONLY in the macOS menu bar / Windows system
+     * tray. Absent or false (the default) also shows it in the Dock on
+     * macOS / the taskbar on Windows. See the Rust shell + Settings UI.
+     */
+    menuBarOnly?: boolean
+  }
 }
 
 export interface AppsConfig {

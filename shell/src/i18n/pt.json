@@ -5,6 +5,7 @@
   "reveal-config": "Mostrar configuração no {fileManager}…",
 
   "nav-account": "Conta",
+  "nav-general": "Geral",
   "nav-apps": "Aplicativos",
   "nav-endpoint": "Endpoint",
   "nav-api-clients": "Chaves de API",
@@ -24,6 +25,11 @@
   "common-remove": "Remover",
   "common-working": "Trabalhando…",
   "common-language-label": "Idioma",
+
+  "general-title": "Geral",
+  "general-sub": "Como o Maximal aparece na sua área de trabalho.",
+  "general-menu-bar-only-label": "Mostrar apenas {os, select, macos {na barra de menus} other {na bandeja do sistema}}",
+  "general-menu-bar-only-hint": "Por padrão, o Maximal também fica {os, select, macos {no Dock} other {na barra de tarefas}}, para ser fácil de localizar e trazer para a frente. Ative isto para deixá-lo de lado: o Maximal continua em execução apenas com o ícone {os, select, macos {na barra de menus} other {na bandeja do sistema}} e sai {os, select, macos {do Dock} other {da barra de tarefas}}.",
 
   "account-title": "Conta",
   "account-sub": "Sua conexão com o GitHub Copilot.",

@@ -5,6 +5,7 @@
   "reveal-config": "Konfiguration in {fileManager} anzeigen…",
 
   "nav-account": "Konto",
+  "nav-general": "Allgemein",
   "nav-apps": "Apps",
   "nav-endpoint": "Endpunkt",
   "nav-api-clients": "API-Schlüssel",
@@ -24,6 +25,11 @@
   "common-remove": "Entfernen",
   "common-working": "Wird ausgeführt…",
   "common-language-label": "Sprache",
+
+  "general-title": "Allgemein",
+  "general-sub": "Wie Maximal auf Ihrem Desktop erscheint.",
+  "general-menu-bar-only-label": "Nur {os, select, macos {in der Menüleiste} other {im Infobereich}} anzeigen",
+  "general-menu-bar-only-hint": "Standardmäßig erscheint Maximal auch {os, select, macos {im Dock} other {in der Taskleiste}}, damit es leicht zu finden und in den Vordergrund zu holen ist. Aktivieren Sie diese Option, um es aus dem Weg zu räumen: Maximal läuft weiter – nur mit seinem Symbol {os, select, macos {in der Menüleiste} other {im Infobereich}} – und verschwindet {os, select, macos {aus dem Dock} other {aus der Taskleiste}}.",
 
   "account-title": "Konto",
   "account-sub": "Ihre Verbindung zu GitHub Copilot.",
