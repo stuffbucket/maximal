@@ -5,6 +5,11 @@ manager) AND in `.github/workflows/ci.yml`. Both must move together —
 dev/CI drift is what got us a 22-test failure on a Bun `latest`
 regression once, and the pin is the antidote.
 
+The ops workflows under `scripts/ops/` — `tooling-ci.yml` and
+`watch-external-drift.yml` — instead read `.bun-version` at runtime (a
+`cat .bun-version` step feeding `setup-bun`), so they hold no copy to drift;
+only `.bun-version` and `ci.yml` need the manual bump below.
+
 Bump intentionally:
 
 1. Pick the new Bun version (read its release notes — confirm no

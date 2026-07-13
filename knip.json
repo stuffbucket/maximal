@@ -3,6 +3,7 @@
   "entry": [
     "scripts/*.ts",
     "scripts/dev/*.ts",
+    "scripts/ops/*.ts",
     "tests/**/*.test.ts"
   ],
   "project": [

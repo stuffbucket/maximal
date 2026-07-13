@@ -36,6 +36,7 @@
     "build:ui": "bun run scripts/build-ui.ts",
     "check:deep": "bun run check:fast && bun test && bun run knip",
     "check:fast": "bun run ensure:ui-embed && bun run lint:fast && bun run typecheck && bun run lint:all && bun run check:tokens",
+    "check:ops": "bun run typecheck:ops && bun run test:ops",
     "check:tokens": "bun scripts/check-design-tokens.ts",
     "deps:check": "depcruise --config .dependency-cruiser.cjs src tests",
     "dev": "bun run --watch ./src/main.ts",
@@ -55,9 +56,12 @@
     "sbom": "bun scripts/sbom.ts",
     "scan:secrets": "trufflehog filesystem . --no-verification --fail --no-update --exclude-paths .trufflehog-exclude",
     "start": "NODE_ENV=production bun run ./src/main.ts",
+    "test:ops": "cd scripts/ops && bun test",
     "typecheck": "tsc",
+    "typecheck:ops": "tsc -p scripts/ops/tsconfig.json",
     "ui:harness": "bun run build:ui && bun run scripts/ui-harness.ts",
-    "verify:build": "bun scripts/dev/verify-build.ts"
+    "verify:build": "bun scripts/dev/verify-build.ts",
+    "watch:drift": "bun scripts/ops/watch-external-drift.ts"
   },
   "simple-git-hooks": {
     "pre-commit": "bunx lint-staged"
