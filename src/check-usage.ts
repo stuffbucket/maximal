@@ -18,12 +18,6 @@ export const checkUsage = defineCommand({
     await setupGitHubToken()
     try {
       const usage = await getCopilotUsage()
-      const premium = usage.quota_snapshots.premium_interactions
-      const premiumTotal = premium.entitlement
-      const premiumUsed = premiumTotal - premium.remaining
-      const premiumPercentUsed =
-        premiumTotal > 0 ? (premiumUsed / premiumTotal) * 100 : 0
-      const premiumPercentRemaining = premium.percent_remaining
 
       // Helper to summarize a quota snapshot
       function summarizeQuota(name: string, snap: QuotaDetail | undefined) {
@@ -35,7 +29,10 @@ export const checkUsage = defineCommand({
         return `${name}: ${used}/${total} used (${percentUsed.toFixed(1)}% used, ${percentRemaining.toFixed(1)}% remaining)`
       }
 
-      const premiumLine = `Premium: ${premiumUsed}/${premiumTotal} used (${premiumPercentUsed.toFixed(1)}% used, ${premiumPercentRemaining.toFixed(1)}% remaining)`
+      const premiumLine = summarizeQuota(
+        "Premium",
+        usage.quota_snapshots.premium_interactions,
+      )
       const chatLine = summarizeQuota("Chat", usage.quota_snapshots.chat)
       const completionsLine = summarizeQuota(
         "Completions",
