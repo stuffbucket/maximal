@@ -2,4 +2,8 @@ app_path = shell/src-tauri/target/release/bundle/macos/Maximal.app
 volname = Maximal
 bundle_id = co.stuffbucket.maximal
 entitlements = bun-runtime
-artifact = dmg
+artifact = dmg,updater
+# Tauri auto-update artifact ships under a versioned, convention-matching name
+# ({tag} = the full tag, e.g. v0.4.41), so the builder uploads it final-named and
+# release.yml needs no rename step for it (unlike the dmg).
+updater_name = maximal-{tag}-darwin-arm64.app.tar.gz
