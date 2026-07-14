@@ -1,0 +1,38 @@
+# Placeholder entry point for `needs-bot` hand-off (see issue #315).
+#
+# This repo's automation tooling expects a `bot-check.yml` workflow, triggered
+# via `workflow_dispatch`, as the entry point for automated handling of issues
+# labelled `needs-bot` (the label our triage.yml routes such issues to — see
+# stuffbucket/repoman's triage-reusable.yml). Without this file, any attempt to
+# hand a `needs-bot` issue off for automated processing fails outright because
+# the dispatch target does not exist.
+#
+# For now this is an intentional NO-OP: it only proves the entry point exists
+# and accepts an issue reference. It deliberately invents no bot logic — the
+# actual automated handling lands in a follow-up. Because it only echoes its
+# input, it needs no write scopes; keep it read-only until a step actually
+# comments on or edits the issue (then add `issues: write`, nothing more).
+
+name: bot-check
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: "Issue number or URL to hand off for automated handling"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  acknowledge:
+    runs-on: ubuntu-latest
+    steps:
+      # Placeholder: acknowledge the hand-off and exit successfully. Replace
+      # this with the real automated-handling steps in a follow-up.
+      - name: Acknowledge issue hand-off
+        run: |
+          echo "bot-check placeholder invoked for issue: ${{ inputs.issue }}"
+          echo "No automated handling implemented yet (see issue #315) — exiting cleanly."
