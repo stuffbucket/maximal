@@ -48,6 +48,7 @@ const getOpencodeLLMHeaders = (): Record<string, string> => {
     Accept: "application/json",
     "Content-Type": "application/json",
     "User-Agent": OPENCODE_LLM_USER_AGENT,
+    "X-GitHub-Api-Version": OPENCODE_GITHUB_API_VERSION,
   }
 }
 
@@ -152,6 +153,10 @@ const CLAUDE_AGENT_USER_AGENT =
   "vscode_claude_code/2.1.208 (external, sdk-ts, agent-sdk/0.2.112)"
 
 const API_VERSION = "2025-10-01"
+// opencode 1.16.0+ (sst/opencode PR #30181) sends this on every GitHub Copilot
+// completions and /models request. Verified against upstream
+// packages/opencode/src/plugin/github-copilot/copilot.ts at tag v1.17.20.
+const OPENCODE_GITHUB_API_VERSION = "2026-06-01"
 
 export const copilotBaseUrl = (state: State): CopilotHost => {
   // Precedence, highest first. The two config-driven overrides INTENTIONALLY
@@ -218,6 +223,7 @@ export const copilotModelsHeaders = (state: State) => {
   if (isOpencodeOauthApp()) {
     return {
       "User-Agent": getOpencodeVersion(),
+      "X-GitHub-Api-Version": OPENCODE_GITHUB_API_VERSION,
     }
   }
   const headers = githubCopilotHeaders(state)
