@@ -1,5 +1,9 @@
+import { OpenAPIHono } from "@hono/zod-openapi"
 import { describe, expect, test } from "bun:test"
 
+import { SetupStatusSchema } from "~/lib/config/setup-status"
+import { forwardError } from "~/lib/errors/error"
+import { PRODUCT_ENDPOINTS } from "~/routes/product-api"
 import { server } from "~/server"
 
 /**
@@ -114,8 +118,9 @@ describe("GET /openapi.json (drift-binding)", () => {
     const res = await server.request("/openapi.json")
     const doc = (await res.json()) as { paths: Record<string, unknown> }
 
-    // Exactly the one product endpoint for this proof.
-    expect(Object.keys(doc.paths)).toEqual(["/setup-status"])
+    // Exactly the product endpoints declared in the closed-world allowlist
+    // (single source of truth in routes/product-api.ts).
+    expect(Object.keys(doc.paths).sort()).toEqual([...PRODUCT_ENDPOINTS].sort())
 
     // Belt-and-braces: none of the proxy/mirror surfaces leaked in.
     const forbidden =
@@ -123,5 +128,82 @@ describe("GET /openapi.json (drift-binding)", () => {
     for (const path of Object.keys(doc.paths)) {
       expect(path).not.toMatch(forbidden)
     }
+  })
+
+  test("is served without authentication (public spec)", async () => {
+    // No Authorization header, no API key: a fresh install must reach the
+    // doc. `/openapi.json` is in server.ts's allowUnauthenticatedPaths.
+    const res = await server.request("/openapi.json")
+    expect(res.status).toBe(200)
+    expect(res.headers.get("content-type")).toContain("application/json")
+  })
+})
+
+describe("product-API mount does not shadow sibling routes", () => {
+  test("sibling routes remain reachable (mount at '/' is not a catch-all)", async () => {
+    // `/status` is unauthenticated and served alongside the productApiRoutes
+    // mount. If `server.route("/", productApiRoutes)` behaved as a catch-all
+    // it would swallow this path; a 200 proves the mount is fall-through.
+    const res = await server.request("/status")
+    expect(res.status).toBe(200)
+  })
+
+  test("an unknown path still 404s (mount is not a catch-all)", async () => {
+    const res = await server.request("/definitely-not-a-route")
+    expect(res.status).toBe(404)
+  })
+})
+
+describe("onError → forwardError wiring", () => {
+  test("yields a 500 JSON error shape", async () => {
+    // Mirror setup-status.ts's error wiring on a throwaway app so we exercise
+    // the exact `.onError((e, c) => forwardError(c, e))` contract without
+    // mocking the shared evaluateSetup module (see architecture.md → Testing
+    // gotchas: no unrestored mock.module on shared modules).
+    const probe = new OpenAPIHono()
+    probe.get("/boom", () => {
+      throw new Error("evaluateSetup failed")
+    })
+    probe.onError((error, c) => forwardError(c, error))
+
+    const res = await probe.request("/boom")
+    expect(res.status).toBe(500)
+    const body = (await res.json()) as {
+      error?: { message: string; type: string }
+    }
+    expect(body.error?.type).toBe("error")
+    expect(body.error?.message).toContain("evaluateSetup failed")
+  })
+})
+
+describe("SetupStatusSchema fidelity (interface → Zod migration)", () => {
+  test("locks the pre-migration response shape", () => {
+    const parsed = SetupStatusSchema.parse({
+      ready: false,
+      checks: {
+        appDir: { ok: true, path: "/x" },
+        config: { ok: false, reason: "invalid JSON", path: "/y" },
+        db: { ok: true },
+        githubAuth: { ok: true },
+      },
+      nextStep: "config",
+    })
+
+    // Exact top-level keys.
+    expect(Object.keys(parsed).sort()).toEqual(["checks", "nextStep", "ready"])
+    // Exact check keys, in the canonical set.
+    expect(Object.keys(parsed.checks).sort()).toEqual(
+      ["appDir", "config", "db", "githubAuth"].sort(),
+    )
+    // Optional detail fields (reason/path) survive the schema.
+    expect(parsed.checks.config).toEqual({
+      ok: false,
+      reason: "invalid JSON",
+      path: "/y",
+    })
+    // nextStep is a nullable enum member, not free-form.
+    expect(() =>
+      SetupStatusSchema.parse({ ...parsed, nextStep: "not-a-check" }),
+    ).toThrow()
   })
 })

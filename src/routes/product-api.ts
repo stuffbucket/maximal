@@ -19,6 +19,15 @@ import { setupStatusRoute } from "~/routes/setup-status"
  */
 export const productApiRoutes = new OpenAPIHono()
 
+/**
+ * The complete set of paths the product OpenAPI doc may expose. Any new
+ * product endpoint MUST be added here AND mounted below; the test in
+ * tests/setup-status-openapi.test.ts asserts `doc.paths` === this set, so
+ * mounting an endpoint without listing it here (or vice versa) reds the
+ * build. This keeps the scope closed-world per ADR-0018.
+ */
+export const PRODUCT_ENDPOINTS = ["/setup-status"] as const
+
 // Mount the product endpoints. The operation `setupStatusRoute` defines
 // at path "/" becomes "/setup-status" here, and its OpenAPI registry is
 // merged into this app so `/openapi.json` picks it up.
