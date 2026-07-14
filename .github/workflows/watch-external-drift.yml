@@ -1,0 +1,107 @@
+# Daily external-surface drift watch.
+#
+# `maximal` impersonates several third-party clients and mirrors the Anthropic
+# /v1/messages wire contract; those upstreams drift on their own schedule and a
+# stale pin fails silently in production (see
+# docs/admin/external-drift-watch.md). This job runs
+# scripts/ops/watch-external-drift.ts (deterministic, no
+# LLM, no interactive auth) and reacts WITHOUT a human, but stops at DETECTION:
+#
+#   - any drift (a version pin fell behind, the Anthropic spec hash moved, or a
+#     check failed) → file/refresh ONE idempotent `external-drift`-labelled
+#     issue whose body is scoped so a PR can be derived from it directly.
+#   - nothing drifting → close a stale drift issue if one is open.
+#
+# It deliberately does NOT open a PR. The watcher hands off a detailed,
+# PR-derivable issue, and repoman's issue triage (wired in
+# .github/workflows/triage.yml) routes it so the reconciliation PR can be
+# derived and landed; a maintainer can also pick it up straight from the
+# labelled issue. Note the drift issue below is created with `github.token`, so
+# it does NOT fire the issues.opened event that triage.yml keys on — repoman's
+# poll backstop (processMissedTriage) is what triages it. This also keeps the
+# watcher off the require-PR ruleset path entirely — filing an issue needs only
+# a plain `GITHUB_TOKEN` with `issues: write`, so there is no app-token or
+# CI-won't-fire-on-a-bot-PR fragility to manage here. Bumping an impersonated
+# client version can shift proxy behaviour, so a human/agent reviewing the
+# upstream release before the pin moves is the correct gate, not a blind rewrite.
+
+name: watch-external-drift
+
+on:
+  schedule:
+    - cron: "17 7 * * *" # daily, 07:17 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: external-drift
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # Pin Bun to the repo's source of truth so this ops workflow can never
+      # drift from .bun-version (see docs/bun-version-policy.md) — no hardcoded
+      # copy of the version literal.
+      - name: Read Bun version
+        id: bun
+        run: |
+          set -euo pipefail
+          echo "version=$(cat .bun-version)" >> "$GITHUB_OUTPUT"
+
+      - uses: ./.github/actions/setup-bun
+        with:
+          bun-version: ${{ steps.bun.outputs.version }}
+
+      # Never act on broken tooling — run the colocated ops tests (parity guard)
+      # before the watcher does anything.
+      - name: Self-check tooling
+        run: bun run test:ops
+
+      # Detect only — writes external-drift-report.md and sets the `drift` output.
+      - name: Detect drift
+        id: watch
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bun run scripts/ops/watch-external-drift.ts --body-file external-drift-report.md
+
+      # Any drift → one idempotent labelled issue. repoman triages it (via the
+      # poll backstop, since this token-authored create fires no issues event)
+      # and derives the reconciliation PR (the body is written to be
+      # PR-derivable).
+      - name: File or refresh drift issue
+        if: steps.watch.outputs.drift == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh label create external-drift --color BFD4F2 \
+            --description "Upstream surface drift flagged by the daily watcher" --force
+          NUM=$(gh issue list --label external-drift --state open --json number --jq '.[0].number // empty')
+          if [ -n "$NUM" ]; then
+            gh issue edit "$NUM" --body-file external-drift-report.md
+            echo "Refreshed issue #$NUM"
+          else
+            gh issue create --label external-drift \
+              --title "External-surface drift detected" \
+              --body-file external-drift-report.md
+          fi
+
+      # Clean run → retire a stale drift issue.
+      - name: Close stale drift issue
+        if: steps.watch.outputs.drift == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          NUM=$(gh issue list --label external-drift --state open --json number --jq '.[0].number // empty')
+          if [ -n "$NUM" ]; then
+            gh issue comment "$NUM" --body "All watched upstreams now match our pins — auto-closing."
+            gh issue close "$NUM"
+          fi

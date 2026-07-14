@@ -1,0 +1,40 @@
+# GitOps tooling CI — separate from the product's ci.yml.
+#
+# The product test suite (`bun test`, bunfig root=tests) deliberately excludes
+# scripts/ops/**. This lane gives that tooling its own PR-time coverage without
+# re-coupling it to the product gate: it runs only when the tooling changes.
+name: tooling-ci
+
+on:
+  pull_request:
+    paths:
+      - "scripts/ops/**"
+      - ".github/workflows/tooling-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      # Read Bun from the repo's source of truth (docs/bun-version-policy.md); no
+      # hardcoded copy of the version to drift from .bun-version.
+      - name: Read Bun version
+        id: bun
+        run: |
+          set -euo pipefail
+          echo "version=$(cat .bun-version)" >> "$GITHUB_OUTPUT"
+      - uses: ./.github/actions/setup-bun
+        with:
+          bun-version: ${{ steps.bun.outputs.version }}
+      # check:ops runs `tsc`, which needs the type packages (@types/bun,
+      # @types/node) on disk — setup-bun only installs the Bun binary, so
+      # install deps here or the typecheck fails with "Cannot find name
+      # 'process'/'fetch'/'bun:test'". `bun test` alone would pass (Bun's
+      # runtime has those globals), but the typecheck half would not.
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Ops tooling checks
+        run: bun run check:ops
