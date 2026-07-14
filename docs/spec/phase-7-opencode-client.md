@@ -68,6 +68,33 @@ that "latest" lives in a single place (`OPENCODE_VERSION`) and a small
 nightly CI job (Phase 1's nightly-smoke pattern) probes the
 `anomalyco/opencode` releases API for drift. Failure → opens an issue.
 
+**Outbound header parity (folded in from #318).** UA passthrough alone
+does not make our outbound request byte-identical to a real opencode
+client — opencode also sends request headers we currently omit. When the
+inbound request is opencode-shaped, these should pass through verbatim
+too; the synthesized fallback (opencode mode with no inbound opencode
+headers) should include them from constants. Known gaps as of `sst/opencode`
+v1.17.20 (source: `packages/opencode/src/plugin/github-copilot/copilot.ts`),
+surfaced during the #317 pin bump:
+
+- `X-GitHub-Api-Version: 2026-06-01` — sent on **both** the Copilot
+  completions and `/models` requests by every opencode ≥ v1.16.0
+  ("token-based billing", PR sst/opencode#30181). Its absence is a
+  plausible fingerprint now that we impersonate 1.17.x. **MED** priority.
+- `X-Interaction-Type: agent-session-name-generation` — sent **only** on
+  title / session-name-generation side-calls (`agent === "title"`).
+  **LOW** priority; the proxy has no code path that distinguishes
+  title-generation traffic today, so attaching it unconditionally would
+  be a *worse* fingerprint than omitting it — wire it only if/when a
+  title-side-call path exists.
+
+A standalone hardcoded-constant patch for these was deliberately **not**
+taken (see closed #318): it adds another pin that drifts and needs
+reconciliation, in exactly the subsystem this phase moves toward
+passthrough. Confirm the header name/casing/value against a live
+opencode 1.17.x capture before shipping — the exact date string may
+matter for fingerprint fidelity.
+
 ### 7.3 Token sharing with opencode's on-disk auth
 
 opencode persists its tokens at `~/.local/share/opencode/auth.json` on
