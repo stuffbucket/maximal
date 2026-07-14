@@ -36,7 +36,7 @@ export interface QuotaDetail {
 interface QuotaSnapshots {
   chat: QuotaDetail
   completions: QuotaDetail
-  premium_interactions: QuotaDetail
+  premium_interactions?: QuotaDetail
 }
 
 interface CopilotUsageResponse {
