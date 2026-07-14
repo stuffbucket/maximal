@@ -1,4 +1,8 @@
 {
   "anthropicSdkStatsSha": "e8ebb7b475c162ea64dbf392d0e95b0303296a82",
-  "_note": "Blob SHA of anthropics/anthropic-sdk-typescript/.stats.yml — a file generated from Anthropic's OpenAPI spec, so a change here tracks /v1/messages wire-contract drift. When the external-drift watcher flags this, review the SDK diff, reconcile src/lib/models/anthropic-types.ts, then bump this SHA in the same PR. Get the current value with: gh api repos/anthropics/anthropic-sdk-typescript/contents/.stats.yml --jq .sha"
+  "_note": "Blob SHA of anthropics/anthropic-sdk-typescript/.stats.yml — a file generated from Anthropic's OpenAPI spec, so a change here tracks /v1/messages wire-contract drift. When the external-drift watcher flags this, review the SDK diff, reconcile src/lib/models/anthropic-types.ts, then bump this SHA in the same PR. Get the current value with: gh api repos/anthropics/anthropic-sdk-typescript/contents/.stats.yml --jq .sha",
+  "anthropicVersion": "2023-06-01",
+  "githubApiVersionUser": "2022-11-28",
+  "githubApiVersionToken": "2025-04-01",
+  "_headerPinsNote": "Last-reviewed values of the pinned upstream API-version *header* date strings (read from src/ by the external-drift watcher's HEADER_PINS). These have no machine-readable 'latest' — a bump needs a human to read the provider changelog for breaking changes first, so they route to the drift ISSUE path, never the auto --fix path. When the watcher flags one, review the changelog, then bump the matching key here to the pinned source value in the same PR. anthropicVersion → https://docs.anthropic.com/en/api/versioning ; githubApiVersion* → https://docs.github.com/en/rest/about-the-rest-api/api-versions"
 }
