@@ -629,7 +629,9 @@ export async function getTokenUsageEventsPage(input: {
       output_tokens,
       cache_read_input_tokens,
       cache_creation_input_tokens,
-      total_tokens
+      total_tokens,
+      total_nano_aiu,
+      is_premium
     FROM token_usage_events
     WHERE created_at_ms >= ? AND created_at_ms < ?
     ORDER BY created_at_ms DESC, id DESC
