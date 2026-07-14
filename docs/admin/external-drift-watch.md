@@ -46,17 +46,41 @@ an issue — it never opens a PR**:
 - **Clean run** → closes a stale drift issue.
 
 **Why issue-only, not auto-PR.** Deriving and landing a PR from a well-formed
-issue is `repoman`'s job (the repo's triage / merge-queue agent), where its
-issue-triage is wired — so the watcher hands off a detailed, PR-derivable issue
-rather than duplicating that job with a narrower, blind pin rewrite. If that
-handoff isn't wired, the labelled issue is still directly actionable by a
-maintainer, so drift never goes silently unhandled. Bumping an impersonated
-client version can shift proxy behaviour, so reviewing the upstream release
-_before_ the pin moves is the correct gate. This also keeps the watcher off the
-require-PR ruleset path entirely: filing an issue needs only a plain
-`GITHUB_TOKEN` with `issues: write` — no app-token, and none of the "a
-bot-authored PR won't trigger CI" fragility that an auto-PR path would have to
-manage.
+issue is `repoman`'s job (the repo's triage / merge-queue agent). Issue triage
+is wired in `.github/workflows/triage.yml`, a thin caller that delegates every
+issue event to repoman's `triage-reusable.yml@v1` — so the watcher hands off a
+detailed, PR-derivable issue rather than duplicating that job with a narrower,
+blind pin rewrite. Note the drift issue is created with `github.token`, which
+by design fires **no** `issues.opened` event, so `triage.yml` never runs on it;
+repoman's poll backstop picks it up instead (see below), so drift never goes
+silently unhandled. Bumping an impersonated client version can shift proxy
+behaviour, so reviewing the upstream release _before_ the pin moves is the
+correct gate. This also keeps the watcher off the require-PR ruleset path
+entirely: filing an issue needs only a plain `GITHUB_TOKEN` with `issues: write`
+— no app-token, and none of the "a bot-authored PR won't trigger CI" fragility
+that an auto-PR path would have to manage.
+
+## How triage is wired
+
+`.github/workflows/triage.yml` is a thin caller stub. On every `issues`
+event (`opened`, `edited`, `reopened`) it delegates to repoman's shared
+`stuffbucket/repoman/.github/workflows/triage-reusable.yml@v1`, which
+auto-applies `needs-triage` (with an explainer comment) to any issue lacking
+`needs-bot`/`needs-triage`. This mirrors the shape every repoman-managed repo
+ships; `@v1` is a floating major tag that repoman dogfoods via a local ref
+before propagating it to external callers.
+
+Two paths cover triage, and the drift watcher relies on the second:
+
+- **Event path** — `triage.yml`, for human-filed issues. The default
+  `GITHUB_TOKEN` deliberately does not fire new workflow runs, so issues opened
+  by a token-authored job (like this watcher's `external-drift` issue) never
+  trigger it.
+- **Poll backstop** — repoman's `poll.mjs` → `processMissedTriage`, scheduled
+  every ~5 minutes across every managed repo (maximal is in repoman's
+  `config/managed-repos.json`). It re-applies `needs-triage` to any open issue
+  lacking **all** of {`needs-bot`, `needs-triage`, `repoman:internal`}, catching
+  exactly the events the token-authored create above misses.
 
 ## Separation of concerns
 
@@ -73,9 +97,9 @@ manage.
 
 ## Reconciling a flag
 
-Where `repoman`'s issue-triage is wired, it picks up the `external-drift` issue
-and derives the reconciliation PR; otherwise a maintainer picks it up from the
-labelled issue by hand. Either way:
+repoman's issue-triage picks up the `external-drift` issue (via the poll
+backstop — see *How triage is wired*) and derives the reconciliation PR; a
+maintainer can also pick it up from the labelled issue by hand. Either way:
 
 - **Version pin:** review the linked upstream release for behavioural changes,
   then bump the pin in `src/lib/config/api-config.ts` to the target version.

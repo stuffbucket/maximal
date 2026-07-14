@@ -1,0 +1,45 @@
+name: triage
+
+# Delegate issue management to repoman. This is a thin caller stub: every
+# issue event hands off to repoman's canonical reusable triage workflow, which
+# auto-applies `needs-triage` (with a one-line explainer comment) to any issue
+# that arrives without `needs-bot` or `needs-triage`. Add `needs-bot` to route
+# an issue through the repoman bot; any other label signals manual handling.
+#
+# We pin the shared workflow at `@v1` (a floating major tag). repoman dogfoods
+# every change to it via a local `./` ref before it propagates to external
+# callers like this one, so the `@v1` shape is stable. This mirrors the shape
+# other repoman-managed repos ship (see stuffbucket/bladerunner) and the one
+# prescribed in repoman's triage-reusable.yml header.
+#
+# Least privilege: the reusable only touches this issue's labels/comments, so
+# the caller grants `issues: write` and nothing else — no app token and no
+# require-PR-ruleset interaction. We pass NO `secrets:` block: a called workflow
+# receives a `GITHUB_TOKEN` automatically (scoped by the `permissions:` below),
+# and the reusable uses only that token. `secrets: inherit` would hand every
+# maximal secret (Apple signing keys, notarization creds, the app-repoman
+# private key) to a workflow pinned to a floating `@v1` tag in another repo —
+# far more than triage needs, so we don't.
+#
+# Event-path only: the default `GITHUB_TOKEN` deliberately does NOT fire new
+# workflow runs, so issues opened by a token-authored job (e.g. the daily
+# `watch-external-drift.yml`, which creates its `external-drift` issue with
+# `github.token`) will NOT trigger this workflow. repoman's poll backstop
+# (`poll.mjs` → `processMissedTriage`, every ~5 min) catches exactly those
+# missed events: it re-applies `needs-triage` to any open issue in a managed
+# repo lacking all of {`needs-bot`, `needs-triage`, `repoman:internal`}. So the
+# event path here plus that backstop together cover both human- and bot-filed
+# issues.
+
+on:
+  issues:
+    types: [opened, edited, reopened]
+
+permissions:
+  issues: write
+
+jobs:
+  call:
+    uses: stuffbucket/repoman/.github/workflows/triage-reusable.yml@v1
+    with:
+      issue_number: ${{ github.event.issue.number }}

@@ -5,7 +5,7 @@
  * `maximal` impersonates several third-party clients and mirrors an
  * external API spec. Those upstreams live outside this repo and move on
  * their own schedule; when they do, a hardcoded pin here silently goes
- * stale (see docs/architecture.md → external surfaces). This watcher
+ * stale (see docs/admin/external-drift-watch.md). This watcher
  * compares each pin against its authoritative upstream and flags drift so
  * a human can file/reconcile. Every check is a plain GitHub-API fetch plus
  * a string/semver compare — reproducible and offline-testable (the pure
