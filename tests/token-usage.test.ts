@@ -177,6 +177,27 @@ describe("token usage storage", () => {
     expect(summary.byModel[0].total_nano_aiu).toBe(43175000)
   })
 
+  test("events page carries per-event total_nano_aiu and is_premium", async () => {
+    // Paid catalog entry so is_premium resolves to 1 (token_prices wins).
+    seedModel("gpt-a", {
+      is_premium: false,
+      token_prices: { input: 0.25, output: 2.0 },
+    })
+    recordTokenUsageEvent({
+      endpoint: "responses",
+      input_tokens: 10,
+      output_tokens: 5,
+      model: "gpt-a",
+      source: "copilot",
+      total_nano_aiu: 22775000,
+    })
+
+    const page = await fetchEventsPage()
+    expect(page.items).toHaveLength(1)
+    expect(page.items[0]?.total_nano_aiu).toBe(22775000)
+    expect(page.items[0]?.is_premium).toBe(true)
+  })
+
   test("returns paginated usage events with user id", async () => {
     recordTokenUsageEvent({
       endpoint: "chat_completions",
