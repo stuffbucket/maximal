@@ -149,7 +149,7 @@ const COPILOT_VERSION = "0.46.0"
 const EDITOR_PLUGIN_VERSION = `copilot-chat/${COPILOT_VERSION}`
 const USER_AGENT = `GitHubCopilotChat/${COPILOT_VERSION}`
 const CLAUDE_AGENT_USER_AGENT =
-  "vscode_claude_code/2.1.208 (external, sdk-ts, agent-sdk/0.2.112)"
+  "vscode_claude_code/2.1.209 (external, sdk-ts, agent-sdk/0.2.112)"
 
 const API_VERSION = "2025-10-01"
 
