@@ -1,5 +1,5 @@
 {
-  "anthropicSdkStatsSha": "e8ebb7b475c162ea64dbf392d0e95b0303296a82",
+  "anthropicSdkStatsSha": "8e36e3546f4d48a99e89549206f1ae6de77c93b8",
   "_note": "Blob SHA of anthropics/anthropic-sdk-typescript/.stats.yml — a file generated from Anthropic's OpenAPI spec, so a change here tracks /v1/messages wire-contract drift. When the external-drift watcher flags this, review the SDK diff, reconcile src/lib/models/anthropic-types.ts, then bump this SHA in the same PR. Get the current value with: gh api repos/anthropics/anthropic-sdk-typescript/contents/.stats.yml --jq .sha",
   "anthropicVersion": "2023-06-01",
   "githubApiVersionUser": "2022-11-28",
