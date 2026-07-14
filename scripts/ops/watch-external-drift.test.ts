@@ -4,6 +4,7 @@ import fs from "node:fs/promises"
 import {
   BASELINE_PATH,
   extractPin,
+  HEADER_PINS,
   normalizeTag,
   parseSemver,
   renderReport,
@@ -30,6 +31,28 @@ describe("pin parity (source of truth = src/)", () => {
   test("extractPin throws a clear error when the pattern is gone", () => {
     const [spec] = VERSION_PINS
     expect(() => extractPin(spec, "// constant removed")).toThrow(spec.id)
+  })
+
+  test("every header pin still resolves to a date in its source file", async () => {
+    for (const spec of HEADER_PINS) {
+      const source = await fs.readFile(repoPath(spec.file), "utf8")
+      const value = extractPin(spec, source)
+      expect(value).toMatch(/^\d{4}-\d\d-\d\d$/u)
+    }
+  })
+
+  test("header pins currently match their committed baseline (ok on first commit)", async () => {
+    const raw = await fs.readFile(BASELINE_PATH)
+    const baseline = JSON.parse(raw.toString()) as Record<string, string>
+    for (const spec of HEADER_PINS) {
+      const source = await fs.readFile(repoPath(spec.file), "utf8")
+      expect(extractPin(spec, source)).toBe(baseline[spec.id])
+    }
+  })
+
+  test("extractPin throws for a header spec whose pattern is absent", () => {
+    const [spec] = HEADER_PINS
+    expect(() => extractPin(spec, "// header removed")).toThrow(spec.id)
   })
 })
 

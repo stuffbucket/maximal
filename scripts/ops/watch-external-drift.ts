@@ -20,6 +20,10 @@
  *   - anthropicSdk .stats.yml blob SHA      vs anthropics/anthropic-sdk-typescript
  *                  (that file is generated from Anthropic's OpenAPI spec, so a
  *                   SHA change ~= a /v1/messages wire-contract change)
+ *   - HEADER_PINS  pinned upstream API-version *header* date strings
+ *                  (anthropic-version, x-github-api-version) vs a last-reviewed
+ *                  baseline value; a bump needs a human changelog read, so these
+ *                  route to the ISSUE path only — never the auto-`--fix` path.
  *
  * The runtime Copilot /models *values* sit behind an authed token and have
  * no public source, so this watcher does NOT hit that endpoint. Diff the
@@ -62,11 +66,15 @@ export const BASELINE_PATH = path.join(
 
 // --- pins: the repo is the source of truth; read them, don't duplicate ---
 
-export interface PinSpec {
+/** The minimum shape `extractPin` needs: an id, a source file, a pattern. */
+export interface ExtractSpec {
   id: string
   file: string
-  /** Must capture the version in group 1. */
+  /** Must capture the value in group 1. */
   pattern: RegExp
+}
+
+export interface PinSpec extends ExtractSpec {
   /** Upstream `owner/repo` whose latest release tag is the authority. */
   repo: string
   describe: string
@@ -99,8 +107,57 @@ export const VERSION_PINS: ReadonlyArray<PinSpec> = [
   },
 ]
 
+/** A pinned upstream API-version *header* date string. */
+export interface HeaderPinSpec extends ExtractSpec {
+  describe: string
+}
+
+/**
+ * Upstream API-version *header* date strings we send. Unlike VERSION_PINS,
+ * these have no single machine-readable "latest" and a bump needs a human to
+ * read the provider changelog first — so they are compared against a
+ * last-reviewed baseline value (see external-drift-baseline.json) and route to
+ * the ISSUE path, never the auto-`--fix` path. They are deliberately NOT in
+ * VERSION_PINS: that keeps `fixable` false and sends them to `needs_issue`.
+ */
+export const HEADER_PINS: ReadonlyArray<HeaderPinSpec> = [
+  {
+    id: "anthropicVersion",
+    file: "src/lib/models/anthropic-types.ts",
+    pattern: /ANTHROPIC_API_VERSION = "([\d-]+)"/u,
+    describe:
+      "Anthropic API version we send on every outbound /v1 call (ANTHROPIC_API_VERSION / anthropic-version header).",
+  },
+  {
+    id: "githubApiVersionUser",
+    file: "src/lib/config/api-config.ts",
+    pattern: /"x-github-api-version": "(2022-\d\d-\d\d)"/u,
+    describe:
+      "GitHub REST API version we send on the Copilot user/token endpoints (x-github-api-version header).",
+  },
+  {
+    id: "githubApiVersionToken",
+    file: "src/lib/config/api-config.ts",
+    pattern: /"x-github-api-version": "(2025-04-\d\d)"/u,
+    describe:
+      "GitHub REST API version we send on the Copilot token-exchange endpoint (x-github-api-version header).",
+  },
+]
+
+/**
+ * Provider changelog to review before bumping each header pin's baseline.
+ * Rendered into the drift issue as the "review the change" link.
+ */
+const HEADER_PIN_CHANGELOGS: Record<string, string> = {
+  anthropicVersion: "https://docs.anthropic.com/en/api/versioning",
+  githubApiVersionUser:
+    "https://docs.github.com/en/rest/about-the-rest-api/api-versions",
+  githubApiVersionToken:
+    "https://docs.github.com/en/rest/about-the-rest-api/api-versions",
+}
+
 /** Extract a pin's current value from its source file text. Pure. */
-export function extractPin(spec: PinSpec, source: string): string {
+export function extractPin(spec: ExtractSpec, source: string): string {
   const m = source.match(spec.pattern)
   if (!m?.[1]) {
     throw new Error(
@@ -200,6 +257,10 @@ export interface WatchResult {
 
 interface Baseline {
   anthropicSdkStatsSha: string
+  /** Last-reviewed value of each HEADER_PINS entry, keyed by pin id. */
+  anthropicVersion: string
+  githubApiVersionUser: string
+  githubApiVersionToken: string
 }
 
 export async function runAllWatches(): Promise<Array<WatchResult>> {
@@ -260,6 +321,38 @@ export async function runAllWatches(): Promise<Array<WatchResult>> {
     )
   }
 
+  // Pinned upstream API-version *header* date strings → last-reviewed baseline.
+  // These have no machine-readable "latest": drift means someone changed the
+  // header in source without bumping the baseline (a bump must follow a human
+  // changelog read). Each surfaces to the ISSUE path — they are not in
+  // VERSION_PINS, so `main()`'s --fix path never rewrites them.
+  for (const spec of HEADER_PINS) {
+    try {
+      const baseline = JSON.parse(
+        await fs.readFile(BASELINE_PATH, "utf8"),
+      ) as Baseline
+      const source = await fs.readFile(repoPath(spec.file), "utf8")
+      const pinned = extractPin(spec, source)
+      const reviewed = baseline[spec.id as keyof Baseline]
+      const drift = pinned !== reviewed
+      const changelog = HEADER_PIN_CHANGELOGS[spec.id]
+      results.push({
+        id: spec.id,
+        describe: spec.describe,
+        drift,
+        local: reviewed,
+        upstream: pinned,
+        file: "scripts/ops/external-drift-baseline.json",
+        upstreamUrl: drift ? changelog : undefined,
+        note: drift
+          ? `The pinned header in \`${spec.file}\` (\`${pinned}\`) no longer matches the last-reviewed baseline (\`${reviewed}\`). Review the provider changelog for breaking changes, then bump \`${spec.id}\` in \`scripts/ops/external-drift-baseline.json\` to \`${pinned}\` in the same change.`
+          : "matches the last-reviewed baseline.",
+      })
+    } catch (err) {
+      results.push(failed(spec.id, spec.describe, err))
+    }
+  }
+
   return results
 }
 
@@ -316,7 +409,7 @@ async function main(): Promise<number> {
 
   for (const r of results) {
     console.error(
-      `${r.drift ? "DRIFT" : "ok   "}  ${r.id.padEnd(13)} ours=${r.local} upstream=${r.upstream}`,
+      `${r.drift ? "DRIFT" : "ok   "}  ${r.id.padEnd(21)} ours=${r.local} upstream=${r.upstream}`,
     )
   }
 
