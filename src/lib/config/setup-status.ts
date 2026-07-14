@@ -15,6 +15,7 @@
  * See docs/first-run-setup-prd.md.
  */
 
+import { z } from "@hono/zod-openapi"
 import {
   accessSync,
   constants as fsConstants,
@@ -33,19 +34,45 @@ import {
 import { AppConfigSchema } from "~/lib/config/config-schema"
 import { PATHS } from "~/lib/platform/paths"
 
-export type SetupCheckName = "appDir" | "config" | "db" | "githubAuth"
+/**
+ * Single source of truth for the `/setup-status` response shape.
+ *
+ * The Zod schema is authoritative: the `SetupStatus` TypeScript type is
+ * derived from it via `z.infer`, and the `/setup-status` OpenAPI
+ * operation registers this same schema (see `src/routes/setup-status.ts`).
+ * That route-binding is what keeps the published spec from drifting away
+ * from the runtime response — there is no second hand-maintained shape to
+ * fall out of sync.
+ */
 
-export interface SetupCheckResult {
-  ok: boolean
-  reason?: string
-  path?: string
-}
+export const SetupCheckNameSchema = z
+  .enum(["appDir", "config", "db", "githubAuth"])
+  .openapi("SetupCheckName")
 
-export interface SetupStatus {
-  ready: boolean
-  checks: Record<SetupCheckName, SetupCheckResult>
-  nextStep: SetupCheckName | null
-}
+export const SetupCheckResultSchema = z
+  .object({
+    ok: z.boolean(),
+    reason: z.string().optional(),
+    path: z.string().optional(),
+  })
+  .openapi("SetupCheckResult")
+
+export const SetupStatusSchema = z
+  .object({
+    ready: z.boolean(),
+    checks: z.object({
+      appDir: SetupCheckResultSchema,
+      config: SetupCheckResultSchema,
+      db: SetupCheckResultSchema,
+      githubAuth: SetupCheckResultSchema,
+    }),
+    nextStep: SetupCheckNameSchema.nullable(),
+  })
+  .openapi("SetupStatus")
+
+export type SetupCheckName = z.infer<typeof SetupCheckNameSchema>
+export type SetupCheckResult = z.infer<typeof SetupCheckResultSchema>
+export type SetupStatus = z.infer<typeof SetupStatusSchema>
 
 const CHECK_ORDER: ReadonlyArray<SetupCheckName> = [
   "appDir",
