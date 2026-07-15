@@ -16,6 +16,20 @@ export interface ApiKeyEntry {
   created_at: string
 }
 
+/**
+ * The reasoning-effort ladder maximal understands. Mirrors
+ * `ReasoningEffortSchema` in config-schema.ts (keep them in lockstep). "max" is
+ * the top rung, introduced with the GPT-5.6 trio.
+ */
+export type ReasoningEffort =
+  | "none"
+  | "minimal"
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh"
+  | "max"
+
 export interface AppConfig {
   auth?: {
     /** Legacy free-form list of accepted bearer tokens. */
@@ -39,10 +53,7 @@ export interface AppConfig {
    * NOTE: independent from `store` (which controls response persistence/ZDR).
    */
   promptCacheRetention?: "in_memory" | "24h"
-  modelReasoningEfforts?: Record<
-    string,
-    "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
-  >
+  modelReasoningEfforts?: Record<string, ReasoningEffort>
   useFunctionApplyPatch?: boolean
   useMessagesApi?: boolean
   anthropicApiKey?: string
@@ -382,17 +393,47 @@ export function getPromptCacheRetention(): "in_memory" | "24h" | undefined {
   return config.promptCacheRetention
 }
 
-export function getReasoningEffortForModel(
+/**
+ * The explicitly-authored effort for a model, or `undefined` when none is set.
+ * "Authored" = a user entry OR a curated `defaultConfig` entry; both are honored
+ * so a config that doesn't carry `modelReasoningEfforts` (a test stub, or a
+ * pre-field user config) still gets the curated per-model value. Returns
+ * `undefined` — not "high" — so callers can layer a family default in between.
+ */
+export function getReasoningEffortOverride(
   model: string,
-): "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" {
+): ReasoningEffort | undefined {
   const config = getConfig()
-  // Fall through to the static default map so a config that
-  // doesn't carry modelReasoningEfforts (e.g. a test stub, or a
-  // user config that pre-dates the field) still gets the curated
-  // per-model effort instead of a global "high" fallback.
   return (
     config.modelReasoningEfforts?.[model]
     ?? defaultConfig.modelReasoningEfforts?.[model]
+  )
+}
+
+/**
+ * Effort default inferred from the model FAMILY, so a brand-new model in a known
+ * family is handled without a config edit (the drift that hid the GPT-5.6 trio).
+ * Applies only when nothing is explicitly authored — the whole curated GPT-5.x
+ * set already carries explicit entries, so this changes behavior only for
+ * not-yet-configured models, and only to a saner default than the global "high".
+ *
+ * GPT-5.x reasoning family → "xhigh" (matches the curated 5.4/5.5/5.6 entries),
+ * except the mini/nano tiers → "low" (matches gpt-5-mini). Returns `undefined`
+ * for families with no opinion, so the caller falls through to "high".
+ */
+export function familyDefaultReasoningEffort(
+  model: string,
+): ReasoningEffort | undefined {
+  if (/^gpt-5(?:[.-]|$)/u.test(model)) {
+    return model.includes("mini") || model.includes("nano") ? "low" : "xhigh"
+  }
+  return undefined
+}
+
+export function getReasoningEffortForModel(model: string): ReasoningEffort {
+  return (
+    getReasoningEffortOverride(model)
+    ?? familyDefaultReasoningEffort(model)
     ?? "high"
   )
 }

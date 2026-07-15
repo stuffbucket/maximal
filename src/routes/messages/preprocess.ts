@@ -20,7 +20,7 @@ import {
   compactTextOnlyGuard,
   type CompactType,
 } from "~/lib/models/compact"
-import { isReasoningModel } from "~/services/copilot/get-models"
+import { resolveModelProfile } from "~/lib/models/model-profile"
 
 export const TOOL_REFERENCE_TURN_BOUNDARY = "Tool loaded."
 
@@ -576,7 +576,7 @@ const stripSamplingParams = (
   payload: AnthropicMessagesPayload,
   selectedModel?: Model,
 ): void => {
-  if (selectedModel && isReasoningModel(selectedModel)) {
+  if (selectedModel && resolveModelProfile(selectedModel).isReasoning) {
     delete payload.temperature
     delete payload.top_p
     delete payload.top_k
