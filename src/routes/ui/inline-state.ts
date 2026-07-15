@@ -18,7 +18,8 @@ import type { LiveFeedSnapshot } from "~/lib/ws/feed-types"
  * the Response. Left un-wired in this scaffold so existing UI-serve tests are
  * unaffected until the builder is real.
  */
-import { notImplemented } from "~/lib/dev/not-implemented"
+import { state } from "~/lib/runtime-state/state"
+import { buildSnapshot } from "~/lib/ws/live-feed"
 
 export interface InlineUiState {
   /** The full live snapshot (same shape the WS sends on connect). */
@@ -33,14 +34,37 @@ export interface InlineUiState {
   readonly dismissedUpdateVersion: string | null
 }
 
+/**
+ * Default locale for the inlined state. TODO(single-window §1.4): the chosen
+ * locale must move OFF `localStorage["maximal.locale"]` (Safari ITP evicts it
+ * before first paint) into server-side persistence; until that store exists, the
+ * client falls back to `navigator.languages`, so inlining the base locale here is
+ * a safe no-op rather than a wrong override.
+ */
+const DEFAULT_INLINE_LOCALE = "en"
+
 /** Assemble the inline state for a served page load. */
-export function buildInlineUiState(): Promise<InlineUiState> {
-  return notImplemented("buildInlineUiState")
+export async function buildInlineUiState(): Promise<InlineUiState> {
+  return {
+    // §1.4: the inlined `__STATE__` IS the WS snapshot, so the first paint and the
+    // first live frame never disagree — one builder, one shape.
+    snapshot: await buildSnapshot(),
+    // TODO(single-window §6.5/ADR-0003): mint a per-load session token instead of
+    // reusing the per-launch shell key. Empty string when the sidecar wasn't
+    // spawned by the shell (no key to hand off).
+    sessionToken: state.shellApiKey ?? "",
+    // TODO(single-window §1.4): source from server-side locale persistence.
+    locale: DEFAULT_INLINE_LOCALE,
+    boundPort: state.boundPort,
+    // TODO(single-window §3.2): source the per-version dismissal from server-side
+    // storage (not localStorage). Null = nothing dismissed yet.
+    dismissedUpdateVersion: null,
+  }
 }
 
 /** True for HTML responses that should receive the injected state. */
 export function isHtmlResponse(contentType: string): boolean {
-  return notImplemented("isHtmlResponse", { contentType })
+  return contentType.toLowerCase().includes("text/html")
 }
 
 /**
@@ -50,10 +74,25 @@ export function isHtmlResponse(contentType: string): boolean {
  * an XSS vector. This is the escaping-unit-test anchor.
  */
 export function renderStateScript(state: InlineUiState): string {
-  return notImplemented("renderStateScript", { state })
+  // Escape every `<` to `<`: that single substitution neutralizes BOTH a
+  // `</script>` breakout and an HTML-comment `<!--` opener, the only two ways to
+  // escape an inline <script> context. U+2028/U+2029 are literal line terminators
+  // inside a JS string, so escape them too. The result is valid JSON (JS reads it
+  // back verbatim) and inert as HTML.
+  const json = JSON.stringify(state)
+    .replaceAll("<", String.raw`\u003c`)
+    .replaceAll("\u2028", String.raw`\u2028`)
+    .replaceAll("\u2029", String.raw`\u2029`)
+  return `<script>window.__STATE__=${json}</script>`
 }
 
 /** Insert the state script into the served HTML (before `</head>`). */
 export function injectInlineState(html: string, state: InlineUiState): string {
-  return notImplemented("injectInlineState", { html, state })
+  const script = renderStateScript(state)
+  // Prefer just before </head> so it runs before the app bundle. Fall back to
+  // prepending if the document has no head (never drop the state silently).
+  if (html.includes("</head>")) {
+    return html.replace("</head>", `${script}</head>`)
+  }
+  return script + html
 }
