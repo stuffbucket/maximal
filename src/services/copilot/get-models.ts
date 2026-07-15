@@ -188,38 +188,3 @@ export function pricedModelIsPaid(
   if (rates.length === 0) return null
   return rates.some((rate) => rate > 0)
 }
-
-/**
- * Does this model do extended reasoning? True when the catalog advertises
- * adaptive thinking OR a non-empty reasoning-effort ladder — either signals a
- * reasoning model. Two consequences track this one predicate: the model wire
- * mapper reports `thinking: supported`, and the Messages preprocessing pipeline
- * strips raw sampling params (temperature/top_p/top_k) that reasoning upstreams
- * reject (Copilot's Bedrock-backed Claude 400s outright; OpenAI's reasoning
- * models forbid temperature). Centralized here so those two sites can't drift —
- * a brand-new reasoning model (e.g. the GPT-5.6 trio) is handled by both the
- * moment its catalog entry carries `reasoning_effort`.
- *
- * NOTE: assumes `capabilities.supports` is present — true for every model that
- * flows through `getModels`/`normalizeModel`. The settings-list route keeps its
- * own inline copy on purpose: it must tolerate un-normalized entries injected
- * via `setModels`, which this helper would throw on.
- */
-export function isReasoningModel(model: Model): boolean {
-  const { supports } = model.capabilities
-  return (
-    supports.adaptive_thinking === true
-    || (supports.reasoning_effort?.length ?? 0) > 0
-  )
-}
-
-/**
- * Does this model accept image / PDF document inputs? Copilot advertises a
- * single `vision` capability that covers both raster images and rendered PDF
- * pages (verified against OpenAI's file-input docs for the GPT-5.x models
- * Copilot serves), so the wire mapper's `image_input` and `pdf_input` both
- * track this one flag rather than pdf_input being hardcoded false.
- */
-export function modelSupportsVision(model: Model): boolean {
-  return model.capabilities.supports.vision === true
-}

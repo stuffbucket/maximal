@@ -617,7 +617,11 @@ const applyAdaptiveThinking = (
     || toolChoice?.type === "tool"
     || clientDisabledThinking
 
-  if (!selectedModel?.capabilities.supports.adaptive_thinking || disableThink) {
+  if (!selectedModel || disableThink) {
+    return
+  }
+  const profile = resolveModelProfile(selectedModel)
+  if (!profile.supportsAdaptiveThinking) {
     return
   }
 
@@ -638,7 +642,11 @@ const applyAdaptiveThinking = (
   if (effort === "none" || effort === "minimal") {
     effort = "low"
   }
-  const reasoningEffort = selectedModel.capabilities.supports.reasoning_effort
+  // Clamp the resolved effort into the model's advertised ladder. The ladder is
+  // `undefined` (not `[]`) when the model declares none, so an absent ladder
+  // correctly SKIPS the clamp — the old raw read could be `[]`, which made
+  // `![].includes(effort)` true and set effort to `[].at(-1)` (undefined).
+  const reasoningEffort = profile.reasoningEffortLadder
   if (reasoningEffort && !reasoningEffort.includes(effort)) {
     effort = reasoningEffort.at(-1) as "low" | "medium" | "high"
   }
