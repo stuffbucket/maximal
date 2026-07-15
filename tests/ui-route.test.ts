@@ -57,6 +57,21 @@ describe("ui routes", () => {
     expect(await res.text()).toContain("settings")
   })
 
+  test("inlines window.__STATE__ into the settings index for instant paint (§1.4)", async () => {
+    const body = await (await app.request("/ui/settings/")).text()
+    // The serve path injects the snapshot as window.__STATE__ (best-effort); a
+    // populated first paint means the tab renders before the WS connects.
+    expect(body).toContain("window.__STATE__=")
+    // The snapshot is a real object with the auth surface, not an empty stub.
+    expect(body).toContain("snapshot")
+  })
+
+  test("does NOT inline state into JS assets (only HTML is injected)", async () => {
+    const body = await (await app.request("/ui/settings/index-abc.js")).text()
+    expect(body).not.toContain("window.__STATE__=")
+    expect(body).toContain("settings") // the asset's own content is intact
+  })
+
   test("serves the dashboard index", async () => {
     const res = await app.request("/ui/dashboard/")
     expect(res.status).toBe(200)

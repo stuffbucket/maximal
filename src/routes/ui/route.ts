@@ -1,3 +1,4 @@
+import consola from "consola"
 import { Hono } from "hono"
 import { existsSync } from "node:fs"
 import { dirname, join, normalize, resolve, sep } from "node:path"
@@ -7,6 +8,11 @@ import { contentTypeForPath } from "~/lib/platform/web-content-types"
 import { buildDebugState } from "~/routes/debug/route"
 
 import { renderDiagnosticsPage } from "./diagnostics"
+import {
+  buildInlineUiState,
+  injectInlineState,
+  isHtmlResponse,
+} from "./inline-state"
 
 /**
  * Serves the web UIs under `/ui/*`:
@@ -84,6 +90,7 @@ const NO_STORE = { "cache-control": "no-store" } as const
 async function serve(
   urlPath: string,
   fallbackIndex: string,
+  injectState = false,
 ): Promise<Response> {
   const hit = (await bytesFor(urlPath)) ?? (await bytesFor(fallbackIndex))
   if (!hit) {
@@ -92,7 +99,24 @@ async function serve(
       { status: 503, headers: { "content-type": "text/plain; charset=utf-8" } },
     )
   }
-  return new Response(hit.bytes, {
+  // Instant paint (§1.4): inline the current state as `window.__STATE__` into the
+  // served settings HTML so the tab paints populated on first frame; the WS then
+  // takes over. Best-effort — a snapshot-build failure serves the plain HTML (the
+  // WS still hydrates on connect), never a 500. Only HTML responses are touched,
+  // so assets pass straight through.
+  let body: Uint8Array | string = hit.bytes
+  if (injectState && isHtmlResponse(hit.type)) {
+    try {
+      const html = new TextDecoder().decode(hit.bytes)
+      body = injectInlineState(html, await buildInlineUiState())
+    } catch (error) {
+      consola.warn(
+        "inline-state injection failed; serving UI without window.__STATE__",
+        error,
+      )
+    }
+  }
+  return new Response(body, {
     status: 200,
     headers: { "content-type": hit.type, ...NO_STORE },
   })
@@ -112,15 +136,18 @@ uiRoutes.get("/diagnostics", (c) =>
 )
 
 uiRoutes.get("/settings/", () =>
-  serve("/ui/settings/index.html", "/ui/settings/index.html"),
+  serve("/ui/settings/index.html", "/ui/settings/index.html", true),
 )
 uiRoutes.get("/dashboard/", () =>
   serve("/ui/dashboard/index.html", "/ui/dashboard/index.html"),
 )
 
 // Assets + client-side routes. Settings is an SPA, so unknown sub-paths
-// fall back to its index.html; the dashboard is a single page.
-uiRoutes.get("/settings/*", (c) => serve(c.req.path, "/ui/settings/index.html"))
+// fall back to its index.html (which gets the inlined state); the dashboard is
+// a single page. Assets (JS/CSS) pass through untouched — only HTML is injected.
+uiRoutes.get("/settings/*", (c) =>
+  serve(c.req.path, "/ui/settings/index.html", true),
+)
 uiRoutes.get("/dashboard/*", (c) =>
   serve(c.req.path, "/ui/dashboard/index.html"),
 )
