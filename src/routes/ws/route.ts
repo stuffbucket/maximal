@@ -80,7 +80,15 @@ export function createWsRoutes(): Hono {
     const key = c.req.query("key")
     if (!key) return c.text("missing session token", 401)
     const data: WsData = { authed: true, tabId: c.req.query("tabId") ?? null }
-    const upgraded = server.upgrade(c.req.raw, { data })
+    // A plain (non-WebSocket) GET to /ws — a probe, a health check, a route
+    // walker — makes `server.upgrade` throw. Catch it so it degrades to a clean
+    // 426 instead of a 500 out of Hono's error handler.
+    let upgraded: boolean
+    try {
+      upgraded = server.upgrade(c.req.raw, { data })
+    } catch {
+      return c.text("expected a WebSocket upgrade", 426)
+    }
     // THE GATE (proven): on success the handler returns `undefined` and Bun keeps
     // the upgraded socket. srvx hands this return straight to Bun (no coercion),
     // so the `undefined` survives Hono's dispatch. The cast only satisfies Hono's

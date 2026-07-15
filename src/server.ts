@@ -32,6 +32,7 @@ import { setupStatusRoute } from "./routes/setup-status"
 import { tokenUsageRoute } from "./routes/token-usage/route"
 import { uiRoutes } from "./routes/ui/route"
 import { usageRoute } from "./routes/usage/route"
+import { createWsRoutes, WS_PATH } from "./routes/ws/route"
 
 export const server = new Hono()
 
@@ -82,6 +83,11 @@ server.use(
       // above, so it is exempt from the /settings/api mandatory-auth prefix.
       "/settings/api/diagnostics",
       "/setup-status",
+      // The live-feed WebSocket handshake (§1.3). It is Origin-gated (a
+      // cross-origin browser WS is 403'd by the guard above) and the route
+      // itself requires the minted `?key=` session token — so it is exempt
+      // from the API-key middleware here, not unprotected.
+      WS_PATH,
     ],
     // /ui/* serves the settings + dashboard UI shells and their assets.
     // /settings/api/* are data endpoints — gated by requireAuthPrefixes.
@@ -159,6 +165,12 @@ server.route("/settings/api", settingsApiRoutes)
 // `/ui/*` serves the settings + dashboard UI (embedded in prod, from
 // shell/dist in dev). See src/routes/ui/route.ts.
 server.route("/ui", uiRoutes)
+
+// `/ws` — the unified live-feed WebSocket (§1.3). This mounts the HTTP GET that
+// performs the Bun upgrade; the socket callbacks (presence + feed) are the
+// `websocket` handler passed to `serve({ bun: { websocket } })` in run-server.ts.
+// Origin-gated + `?key=`-scoped (see the allowlist note above).
+server.route(WS_PATH, createWsRoutes())
 
 // Gate every upstream-touching route on the presence of a GitHub token.
 // When the sidecar boots without one, the HTTP server still listens (so

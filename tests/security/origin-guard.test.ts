@@ -9,6 +9,7 @@ import {
   isAllowedOrigin,
   isCsrfGuardedPath,
 } from "~/lib/auth/origin-guard"
+import { WS_PATH } from "~/routes/ws/route"
 
 /**
  * Control-surface hardening (spec §6, ADR-0021). The CSRF hole is live TODAY, so
@@ -27,6 +28,14 @@ describe("hardening constants — active now", () => {
 
   test("mandatory auth is scoped to /settings/api, decoupled from enforce (§6.2)", () => {
     expect(MANDATORY_AUTH_PREFIX).toBe("/settings/api")
+  })
+
+  test("the live-feed WS path is Origin-gated, and the constant hasn't drifted (§1.3)", () => {
+    // The snapshot exposes auth/accounts state and WebSockets bypass CORS, so the
+    // handshake GET must be Origin-gated. Pin CSRF_GUARDED_PREFIXES to the actual
+    // mount path so a rename of one doesn't silently un-gate the socket.
+    expect(CSRF_GUARDED_PREFIXES).toContain(WS_PATH)
+    expect(isCsrfGuardedPath(`${WS_PATH}?key=tok`.split("?")[0])).toBe(true)
   })
 })
 

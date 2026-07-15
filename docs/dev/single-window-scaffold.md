@@ -18,8 +18,8 @@ edited, so the 1477-test suite stays green. Each stub delegates to
 | `src/lib/ws/tray-open.ts` | §1.2 | pure `decideTrayOpen` — called by the presence registry + the tray-open orchestrator |
 | `src/lib/ws/presence-registry.ts` | §1.2 | one instance in `run-server.ts`; identity-checked `remove` is the mutation anchor |
 | `src/lib/ws/feed-types.ts` | §1.3 | wire contract shared by sidecar **and** shell (relative import, DOM-free) |
-| `src/lib/ws/live-feed.ts` | §1.3 | **Bodies implemented (Build Track 2):** `LiveFeedHub.start/stop/publish` bridge the settings event bus (`auth.changed`) → wrapped feed events broadcast to all tabs (idempotent start; the other 8 event types await their producers). `buildSnapshot()` composes the 9 snapshot fields from the extracted GET builders (`buildAccountsList`/`buildAppsList`) + `getAuthStatus`/`listActiveClients`/`getTokenUsageSummary`/`getUpdateStatus`. Still not constructed in `run-server.ts`. |
-| `src/routes/ws/route.ts` | §1.3 | mount `createWsRoutes()` on the app at `WS_PATH`; pass `createWebSocketHandler(...)` into `serve({ bun: { websocket } })` in `run-server.ts`. **srvx-upgrade gate: PROVEN** — a real WebSocket connects through the srvx→Bun upgrade; the `undefined` return after `server.upgrade()` survives Hono + srvx + Bun with no coercion (no plugin fallback needed). **Callbacks now wired (Build Track 2):** `open`→authcheck + snapshot-on-connect, `message`→`hello`/`visibility`/`pong` drive the presence registry, `close`→identity-checked remove. Covered by `tests/ws/ws-handler.test.ts` (fake sockets + real registry + a `LiveFeedHub` with an injected snapshot builder). Still not wired into `run-server.ts`. |
+| `src/lib/ws/live-feed.ts` | §1.3 | **WIRED (Build Track 2):** `LiveFeedHub.start/stop/publish` bridge the settings event bus (`auth.changed`) → wrapped feed events broadcast to all tabs (idempotent; the other 8 event types await their producers). `buildSnapshot()` composes the 9 snapshot fields from the extracted GET builders (`buildAccountsList`/`buildAppsList`) + `getAuthStatus`/`listActiveClients`/`getTokenUsageSummary`/`getUpdateStatus`. One hub + registry are constructed in `run-server.ts` (`createLiveFeed`) and `hub.start()` runs in `finalizeBoot` after the bind. |
+| `src/routes/ws/route.ts` | §1.3 | **WIRED (Build Track 2):** `createWsRoutes()` is mounted at `WS_PATH` in `server.ts` (Origin-gated + `?key=`-exempt from the API-key middleware), and `createWebSocketHandler(...)` is passed into `serve({ bun: { websocket } })` by `run-server.ts` (`createLiveFeed`). **srvx-upgrade gate: PROVEN.** Callbacks: `open`→authcheck + snapshot-on-connect, `message`→`hello`/`visibility`/`pong` drive the presence registry, `close`→identity-checked remove; the handshake GET catches a non-upgrade probe → clean 426. Covered by `tests/ws/ws-handler.test.ts`. |
 | `src/lib/auth/origin-guard.ts` | §6.1 | **DONE (Build Track 1):** `createOriginGuardMiddleware` + narrowed `buildCorsOptions(...)` are mounted in `server.ts` before the sub-app routes; the bound port is read lazily from `state.boundPort` (set by `runServer`, default 4141). §6.2 (mandatory `/settings/api` auth) is delivered as the `alwaysEnforcePrefixes` mode of the existing `createAuthMiddleware`, so the `shellApiKey` bypass + attribution stay single-sourced; the read-only `/settings/api/diagnostics` GET is exempt (§1.7/§6.5) and CSRF-safe via the Origin guard |
 | `src/routes/ui/inline-state.ts` | §1.4 | call `injectInlineState` inside `serve()` in `src/routes/ui/route.ts` when `isHtmlResponse(hit.type)` |
 | `shell/src/router.ts` | §1.4 / ADR-0020 | DOM-free router core; `history.replaceState` only |
@@ -52,8 +52,10 @@ the matching body lands. Contract/shape/grep tests run **live now**.
 
 ## Notes for the implementer
 
-- **`knip` (check:deep)** will report the new exports as unused-in-production until
-  the integration points above are wired — expected during scaffolding.
+- **`knip` (check:deep)** now passes for the WS surface — the Track-2 exports are
+  all wired. One scaffold export remains flagged: `buildInlineUiState`
+  (`src/routes/ui/inline-state.ts`, §1.4 instant-paint) — expected until the SPA
+  track wires it. Don't treat that single knip finding as a regression.
 - **Mutation targets** (`stryker.conf.json` `mutate`, one module at a time):
   `src/lib/ws/tray-open.ts` and `presence-registry.ts` (the identity guard) are
   **done — both 100%** (Build Track 2, 2026-07-15). `src/lib/auth/origin-guard.ts`
@@ -62,5 +64,11 @@ the matching body lands. Contract/shape/grep tests run **live now**.
 - **No jsdom.** DOM-touching shell code is split into a DOM-free core (imported +
   unit-tested) and thin `*-bootstrap` / `*-client` glue (source-grepped only).
   Keep that split when filling bodies in.
-- **The `?key=` allowlist** (`request-auth.ts` `SSE_EVENTS_PATH`) must **move** to
-  `WS_PATH` when the WS lands — it is a single hardcoded path today.
+- **The `?key=` allowlist** (`request-auth.ts` `SSE_EVENTS_PATH`) still points at
+  the SSE path — it has NOT moved yet, because the SSE route lives until the
+  transport-migration cleanup (Track 7). `WS_PATH` is instead exempted from the
+  API-key middleware (`allowUnauthenticatedPaths`) and protected by the Origin
+  guard + its own `?key=` presence check; validating that `?key=` as a **minted
+  session token** (§6.5) is the pending piece and depends on the token being
+  inlined into the served HTML (Track 4). Move/retire the SSE `?key=` when the SSE
+  route is deleted.
