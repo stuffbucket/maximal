@@ -66,7 +66,15 @@ export type ResponseIncludable =
   | "web_search_call.action.sources"
 
 export interface Reasoning {
-  effort?: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | null
+  effort?:
+    | "none"
+    | "minimal"
+    | "low"
+    | "medium"
+    | "high"
+    | "xhigh"
+    | "max"
+    | null
   summary?: "auto" | "concise" | "detailed" | null
 }
 

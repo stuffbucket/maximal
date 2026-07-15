@@ -45,6 +45,10 @@ const ReasoningEffortSchema = z.enum([
   "medium",
   "high",
   "xhigh",
+  // Top of the GPT-5.6 (sol/terra/luna) reasoning ladder. Without this, a
+  // config that sets any model's effort to "max" failed validation and the
+  // proxy exited non-zero on boot (readConfigFromDisk → process.exit(1)).
+  "max",
 ])
 
 /**

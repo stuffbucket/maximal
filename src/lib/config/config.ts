@@ -41,7 +41,7 @@ export interface AppConfig {
   promptCacheRetention?: "in_memory" | "24h"
   modelReasoningEfforts?: Record<
     string,
-    "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
+    "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
   >
   useFunctionApplyPatch?: boolean
   useMessagesApi?: boolean
@@ -154,6 +154,9 @@ const defaultConfig: AppConfig = {
     "gpt-5.4-mini": gpt5CommentaryPrompt,
     "gpt-5.4": gpt5CommentaryPrompt,
     "gpt-5.5": gpt5CommentaryPrompt,
+    "gpt-5.6-sol": gpt5CommentaryPrompt,
+    "gpt-5.6-terra": gpt5CommentaryPrompt,
+    "gpt-5.6-luna": gpt5CommentaryPrompt,
   },
   smallModel: "gpt-5-mini",
   responsesApiContextManagementModels: [],
@@ -163,6 +166,13 @@ const defaultConfig: AppConfig = {
     "gpt-5.4-mini": "xhigh",
     "gpt-5.4": "xhigh",
     "gpt-5.5": "xhigh",
+    // GPT-5.6 trio (Copilot-served OpenAI reasoning models). "xhigh" matches
+    // the 5.4/5.5 siblings and is guaranteed to be on their effort ladder; the
+    // ladder also exposes "max" (now a valid config value — see
+    // ReasoningEffortSchema) for users who want to opt the trio up.
+    "gpt-5.6-sol": "xhigh",
+    "gpt-5.6-terra": "xhigh",
+    "gpt-5.6-luna": "xhigh",
   },
   useFunctionApplyPatch: true,
   useMessagesApi: true,
@@ -374,7 +384,7 @@ export function getPromptCacheRetention(): "in_memory" | "24h" | undefined {
 
 export function getReasoningEffortForModel(
   model: string,
-): "none" | "minimal" | "low" | "medium" | "high" | "xhigh" {
+): "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" {
   const config = getConfig()
   // Fall through to the static default map so a config that
   // doesn't carry modelReasoningEfforts (e.g. a test stub, or a

@@ -23,6 +23,10 @@
 import type { Model } from "~/services/copilot/get-models"
 
 import { forwardId } from "~/lib/models/anthropic-id-rewrite"
+import {
+  isReasoningModel,
+  modelSupportsVision,
+} from "~/services/copilot/get-models"
 
 const EPOCH_ISO = new Date(0).toISOString()
 
@@ -88,9 +92,11 @@ export interface AnthropicModelList {
 
 export function toAnthropicModel(model: Model): AnthropicModel {
   const { limits, supports } = model.capabilities
-  const thinkingSupported =
-    supports.adaptive_thinking === true
-    || (supports.reasoning_effort?.length ?? 0) > 0
+  // image_input and pdf_input both track the single `vision` capability —
+  // Copilot advertises no separate PDF flag, and the GPT-5.x / Claude models it
+  // serves accept PDF document inputs wherever they accept images. Previously
+  // pdf_input was hardcoded false, which under-reported every vision model.
+  const visionSupported = modelSupportsVision(model)
   return {
     id: forwardId(model.id),
     type: "model",
@@ -101,10 +107,10 @@ export function toAnthropicModel(model: Model): AnthropicModel {
     max_input_tokens: limits.max_context_window_tokens ?? 0,
     max_tokens: limits.max_output_tokens ?? 0,
     capabilities: {
-      image_input: { supported: supports.vision === true },
-      pdf_input: { supported: false },
+      image_input: { supported: visionSupported },
+      pdf_input: { supported: visionSupported },
       structured_outputs: { supported: supports.structured_outputs === true },
-      thinking: { supported: thinkingSupported },
+      thinking: { supported: isReasoningModel(model) },
     },
   }
 }
