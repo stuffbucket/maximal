@@ -21,10 +21,16 @@ import type { ServerRequest } from "srvx"
  * `bun: { websocket: createWebSocketHandler(hub, registry) }` into `serve(...)`
  * and mount `createWsRoutes(...)` on the app at `WS_PATH`.
  */
+import consola from "consola"
 import { Hono } from "hono"
 
+import type {
+  LiveFeedClientMessage,
+  LiveFeedServerMessage,
+} from "~/lib/ws/feed-types"
 import type { LiveFeedHub } from "~/lib/ws/live-feed"
 import type { PresenceRegistry } from "~/lib/ws/presence-registry"
+import type { TabVisibility } from "~/lib/ws/tray-open"
 
 /** The single WS endpoint. Replaces `SSE_EVENTS_PATH` as the `?key=` allowlisted path. */
 export const WS_PATH = "/ws"
@@ -86,20 +92,128 @@ export function createWsRoutes(): Hono {
   return app
 }
 
+/** Client `visibilityState` strings we track; anything else is treated as buried. */
+function normalizeVisibility(raw: string): TabVisibility {
+  return raw === "visible" || raw === "prerender" ? raw : "hidden"
+}
+
+/**
+ * Parse a frame a tab sent us (hello/visibility/pong). Never throws — a malformed
+ * frame from an untrusted browser wire returns null and is dropped, not fatal.
+ */
+export function parseClientMessage(raw: string): LiveFeedClientMessage | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  if (typeof parsed !== "object" || parsed === null || !("type" in parsed)) {
+    return null
+  }
+  const msg = parsed as { type: unknown; tabId?: unknown; visibility?: unknown }
+  switch (msg.type) {
+    case "hello": {
+      if (typeof msg.tabId !== "string" || typeof msg.visibility !== "string") {
+        return null
+      }
+      return { type: "hello", tabId: msg.tabId, visibility: msg.visibility }
+    }
+    case "visibility": {
+      if (typeof msg.visibility !== "string") return null
+      return { type: "visibility", visibility: msg.visibility }
+    }
+    case "pong": {
+      return { type: "pong" }
+    }
+    default: {
+      return null
+    }
+  }
+}
+
 /**
  * The Bun websocket handler passed to `serve({ bun: { websocket } })`.
  *
- * SPIKE SCOPE: these are minimal non-throwing callbacks that prove the handshake.
- * The full behavior — `open` → register presence + send snapshot; `message` →
- * hello/visibility/pong frames update the registry; `close` → identity-checked
- * remove — is TODO(single-window §1.2/§1.3) and depends on the (still stubbed)
- * PresenceRegistry + LiveFeedHub methods, so it is intentionally not wired here.
+ * Wires the presence registry + snapshot into the socket lifecycle (§1.2–1.3):
+ *   - `open`    → an unauthed socket is closed; an authed one is sent the full
+ *                 snapshot so the tab resyncs without a poll.
+ *   - `message` → `hello` registers the tab (registry key = its `tabId`);
+ *                 `visibility` updates presence; `pong` is liveness (Bun's own
+ *                 heartbeat drives the ping).
+ *   - `close`   → identity-checked remove, so a reconnected tab's live socket
+ *                 survives this (stale) socket's late close.
  */
-export function createWebSocketHandler(_deps: WsDeps) {
+export function createWebSocketHandler({ hub, registry }: WsDeps) {
   return {
-    open(_ws: ServerWebSocket<WsData>): void {},
-    message(_ws: ServerWebSocket<WsData>, _raw: string | Buffer): void {},
-    close(_ws: ServerWebSocket<WsData>): void {},
+    open(ws: ServerWebSocket<WsData>): void {
+      if (!ws.data.authed) {
+        ws.close()
+        return
+      }
+      // Send the complete snapshot on (re)connect (§1.3). Fire-and-forget: the
+      // socket is already open, and a snapshot build failure must not throw out
+      // of the Bun callback (it would tear the connection down uncleanly).
+      void hub
+        .snapshot()
+        .then((snapshot) => {
+          sendServer(ws, { type: "snapshot", snapshot })
+        })
+        .catch((error: unknown) => {
+          consola.warn("live-feed: snapshot build failed on open", error)
+        })
+    },
+
+    message(ws: ServerWebSocket<WsData>, raw: string | Buffer): void {
+      const message = parseClientMessage(
+        typeof raw === "string" ? raw : raw.toString(),
+      )
+      if (!message) return
+      switch (message.type) {
+        case "hello": {
+          // The registry key. Track it on the socket so `close` can evict the
+          // right tab even though the close frame carries no body.
+          ws.data.tabId = message.tabId
+          registry.register(
+            message.tabId,
+            ws,
+            normalizeVisibility(message.visibility),
+          )
+          return
+        }
+        case "visibility": {
+          if (ws.data.tabId) {
+            registry.updateVisibility(
+              ws.data.tabId,
+              normalizeVisibility(message.visibility),
+            )
+          }
+          return
+        }
+        case "pong": {
+          // Liveness ack; Bun's built-in heartbeat sends the ping. No state to
+          // change — receiving it at all is the signal the socket is alive.
+          return
+        }
+        default: {
+          // `parseClientMessage` already rejected unknown frames; unreachable.
+          return
+        }
+      }
+    },
+
+    close(ws: ServerWebSocket<WsData>): void {
+      if (ws.data.tabId) registry.remove(ws.data.tabId, ws)
+    },
+
     pong(_ws: ServerWebSocket<WsData>): void {},
   }
+}
+
+/** Serialize + send one server frame to a single socket. */
+function sendServer(
+  ws: ServerWebSocket<WsData>,
+  message: LiveFeedServerMessage,
+): void {
+  ws.send(JSON.stringify(message))
 }
