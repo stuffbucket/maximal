@@ -38,7 +38,7 @@ the matching body lands. Contract/shape/grep tests run **live now**.
 | `tests/ws/tray-open-decision.test.ts` | skip | `decideTrayOpen` |
 | `tests/ws/presence-registry.test.ts` | partial (`size`) | registry methods |
 | `tests/ws/live-feed-contract.test.ts` | **live** | — (guards the 9-event coverage) |
-| `tests/ws/srvx-upgrade-handshake.test.ts` | **PROVEN**, gated behind `MAXIMAL_TEST_WS=1` (skipped by default — can't co-run with `start-run-server.test.ts`'s srvx `mock.module`) | run `MAXIMAL_TEST_WS=1 bun test tests/ws/srvx-upgrade-handshake.test.ts` |
+| `tests/ws/srvx-upgrade-handshake.test.ts` | **PROVEN**, runs in the default suite (`start-run-server.test.ts` now injects its `serve` stub via `__setServeForTests` instead of mocking srvx, so the two co-run; `mockModuleLeakGuard` forbids re-adding `mock.module("srvx", …)`) | — |
 | `tests/ws/live-feed-core.test.ts` | skip | core helpers |
 | `tests/security/origin-guard.test.ts` | partial (consts) | guard middleware |
 | `tests/security/settings-api-route-enumeration.test.ts` | partial (enum) | guard wired into `server.ts` |

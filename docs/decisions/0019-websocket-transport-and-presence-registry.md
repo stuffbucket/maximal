@@ -83,8 +83,12 @@ ping-pong liveness; reconnect-on-`visibilitychange`; full snapshot on
   connects through the srvx→Bun upgrade: srvx returns the Hono `app.fetch` result
   straight to Bun with no coercion (`node_modules/srvx/dist/adapters/bun.mjs:50`),
   so the `undefined` survives. **The fallback (a srvx plugin that upgrades before
-  Hono) is not needed.** The test is gated behind `MAXIMAL_TEST_WS=1` because it
-  cannot co-run with `start-run-server.test.ts`'s srvx `mock.module`.
+  Hono) is not needed.** The test runs in the default `bun test` suite (2026-07-15):
+  it used to be gated because it could not co-run with `start-run-server.test.ts`'s
+  srvx `mock.module`, but that test now injects its `serve` stub through a
+  module-local DI seam (`__setServeForTests`) instead of mocking srvx, so both
+  co-run. An eslint rule (`mockModuleLeakGuard`) forbids re-introducing
+  `mock.module("srvx", …)`.
 
 ## Migration
 
@@ -98,6 +102,6 @@ directly touched (`boot.state`).
 
 ## Open questions
 
-- The srvx-upgrade-wrapper gate (above) — settle in build step 1.
+- ~~The srvx-upgrade-wrapper gate (above)~~ — settled: PROVEN and running in the default suite.
 - Safari background-teardown convergence: eager eviction on `ping` timeout vs
   lazy heal on refocus.

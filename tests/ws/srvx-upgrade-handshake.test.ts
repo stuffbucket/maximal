@@ -21,19 +21,17 @@ import {
  * genuine WebSocket against it. If the gate ever fails, the fallback is a srvx
  * plugin/middleware that upgrades before Hono.
  *
- * PROVEN: run in isolation this passes — the `undefined` return after
- * `server.upgrade()` survives Hono + srvx + Bun with no coercion.
- *
- * GATED (like `settings-build.test.ts`'s `MAXIMAL_TEST_BUILD`): opt-in via
- * `MAXIMAL_TEST_WS=1` and skipped in the default `bun test`. It CANNOT share a
- * process with `start-run-server.test.ts`, which applies a top-level
- * `mock.module("srvx", …)`; per CLAUDE.md that leaks across files and its restore
- * does not fully un-rewire the live `serve` binding, so a real-port srvx test
- * co-running with the mock breaks. Run it directly:
- *   MAXIMAL_TEST_WS=1 bun test tests/ws/srvx-upgrade-handshake.test.ts
+ * PROVEN: the `undefined` return after `server.upgrade()` survives Hono + srvx
+ * + Bun with no coercion. This runs in the default `bun test` — it no longer
+ * needs a gate. It used to conflict with `start-run-server.test.ts`, which
+ * mocked srvx via `mock.module("srvx", …)` (a stub that forward-leaks across
+ * files per CLAUDE.md and left the live `serve` binding half-rewired). That
+ * test now injects its serve stub through a module-local DI seam
+ * (`__setServeForTests`) instead of mocking srvx, so the real srvx reaches
+ * this file and the two co-run cleanly. Ungating is guarded by the
+ * mockModuleLeakGuard eslint rule, which forbids re-introducing
+ * `mock.module("srvx", …)`.
  */
-
-const WS_GATE_ENABLED = process.env.MAXIMAL_TEST_WS === "1"
 
 const sockets: Array<{ close: () => void }> = []
 let httpServer: ReturnType<typeof serve> | null = null
@@ -43,49 +41,46 @@ afterAll(async () => {
   await httpServer?.close(true)
 })
 
-describe.skipIf(!WS_GATE_ENABLED)(
-  "srvx bun:{websocket} upgrade handshake",
-  () => {
-    test("a real WebSocket connects through the srvx→Bun upgrade", async () => {
-      const registry = new PresenceRegistry()
-      const hub = new LiveFeedHub({
-        registry,
-        buildSnapshot: () => Promise.reject(new Error("stub")),
-      })
-      const app = new Hono()
-      app.route(WS_PATH, createWsRoutes())
-
-      httpServer = serve({
-        port: 0,
-        fetch: app.fetch,
-        // The passthrough under test: this handler object must reach Bun.serve.
-        bun: { websocket: createWebSocketHandler({ hub, registry }) },
-      })
-
-      // srvx exposes the bound address on the server handle; derive the ws:// URL.
-      const url = new URL((httpServer as unknown as { url: string }).url)
-      const wsUrl = `ws://${url.host}${WS_PATH}?key=test-token`
-
-      const opened = await new Promise<boolean>(
-        (resolvePromise, rejectPromise) => {
-          const ws = new WebSocket(wsUrl)
-          sockets.push({ close: () => ws.close() })
-          const timer = setTimeout(
-            () => rejectPromise(new Error("handshake timeout")),
-            2000,
-          )
-          ws.addEventListener("open", () => {
-            clearTimeout(timer)
-            resolvePromise(true)
-          })
-          ws.addEventListener("error", () => {
-            clearTimeout(timer)
-            rejectPromise(new Error("handshake failed"))
-          })
-        },
-      )
-
-      expect(opened).toBe(true)
+describe("srvx bun:{websocket} upgrade handshake", () => {
+  test("a real WebSocket connects through the srvx→Bun upgrade", async () => {
+    const registry = new PresenceRegistry()
+    const hub = new LiveFeedHub({
+      registry,
+      buildSnapshot: () => Promise.reject(new Error("stub")),
     })
-  },
-)
+    const app = new Hono()
+    app.route(WS_PATH, createWsRoutes())
+
+    httpServer = serve({
+      port: 0,
+      fetch: app.fetch,
+      // The passthrough under test: this handler object must reach Bun.serve.
+      bun: { websocket: createWebSocketHandler({ hub, registry }) },
+    })
+
+    // srvx exposes the bound address on the server handle; derive the ws:// URL.
+    const url = new URL((httpServer as unknown as { url: string }).url)
+    const wsUrl = `ws://${url.host}${WS_PATH}?key=test-token`
+
+    const opened = await new Promise<boolean>(
+      (resolvePromise, rejectPromise) => {
+        const ws = new WebSocket(wsUrl)
+        sockets.push({ close: () => ws.close() })
+        const timer = setTimeout(
+          () => rejectPromise(new Error("handshake timeout")),
+          2000,
+        )
+        ws.addEventListener("open", () => {
+          clearTimeout(timer)
+          resolvePromise(true)
+        })
+        ws.addEventListener("error", () => {
+          clearTimeout(timer)
+          rejectPromise(new Error("handshake failed"))
+        })
+      },
+    )
+
+    expect(opened).toBe(true)
+  })
+})

@@ -40,6 +40,20 @@ import {
 } from "./session-sentinel"
 import { installShutdownHandlers } from "./shutdown"
 
+// Injectable server binder. Defaults to srvx's real `serve()`; tests swap it
+// via `__setServeForTests` to avoid binding a port. This is a module-local
+// seam ON PURPOSE — the alternative, `mock.module("srvx", …)`, forward-leaks
+// the stub into sibling files that need the REAL srvx (the real-port WS
+// handshake test), and Bun does not reset module mocks between files. See
+// docs/dev/testing-strategy.md §5 + the mockModuleLeakGuard eslint rule.
+type ServeFn = typeof serve
+let serveImpl: ServeFn = serve
+
+/** Test-only: swap the srvx `serve` binder. Pass `null` to restore the real one. */
+export function __setServeForTests(fn: ServeFn | null): void {
+  serveImpl = fn ?? serve
+}
+
 export interface RunServerOptions {
   port: number
   verbose: boolean
@@ -198,7 +212,7 @@ export async function runServer(options: RunServerOptions): Promise<void> {
       + `auth=${hasGithubToken() ? "authenticated" : "unauthenticated"}`,
   )
 
-  const httpServer = serve({
+  const httpServer = serveImpl({
     fetch: server.fetch,
     port: options.port,
     bun: {
