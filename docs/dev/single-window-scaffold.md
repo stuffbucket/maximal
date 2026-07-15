@@ -50,6 +50,7 @@ the matching body lands. Contract/shape/grep tests run **live now**.
 | `tests/spa-router.test.ts` | **live** — `createRouter` implemented (replaceState-only, single-history) | — |
 | `tests/single-history-invariant.test.ts` | **live** | — (grep gate; add `main.ts`/`dashboard/main.ts` to `ROUTING_SOURCES` after the SPA/dashboard port) |
 | `tests/project-slice.test.ts` | **live** — `curateProjectSlice` implemented (caps rail at N=0/3/6/7/50, pinned-first) | — |
+| `tests/token-usage-project-id-migration.test.ts` | **live** — nullable `project_id` migration (§5): idempotent, back-compat NULL reads | — |
 
 ## Notes for the implementer
 
