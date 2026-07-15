@@ -61,6 +61,12 @@ use tauri_plugin_shell::ShellExt;
 /// backed by the same shell/src/i18n/*.json catalogs the webview renders with.
 mod native_i18n;
 
+/// Pure, UI-free tray/splash decision logic (spec §1.2/§3.3/§10). Owns
+/// `SidecarState` so the decisions that read it are cargo-testable without a
+/// running Tauri app.
+mod decisions;
+use crate::decisions::{failure_surface_for, SidecarState, SplashSurface};
+
 // Canonical Maximal port. Apps integrating with the proxy (Claude
 // Code, Cursor, custom scripts) only need to know this one URL:
 // http://localhost:4141. The Tauri shell and the standalone CLI both
@@ -131,17 +137,8 @@ mod menu_id {
     pub const UPGRADE: &str = "upgrade";
 }
 
-/// High-level tray state. Each transition rebuilds the menu and swaps
-/// the tray icon.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SidecarState {
-    Starting,
-    RunningUnauthenticated,
-    RunningAuthenticated,
-    #[allow(dead_code)]
-    Stopped,
-    Failed,
-}
+// High-level tray state lives in `decisions::SidecarState` (imported above) so
+// the pure tray/splash decisions that read it stay cargo-testable.
 
 /// Owns the sidecar's CommandChild for the lifetime of the app.
 ///
@@ -1565,9 +1562,8 @@ fn create_splash(app: &AppHandle) {
                 let hard_cap = Duration::from_secs(35);
                 loop {
                     tokio::time::sleep(Duration::from_millis(300)).await;
-                    match handle.state::<AppStatus>().get() {
-                        SidecarState::RunningAuthenticated
-                        | SidecarState::RunningUnauthenticated => {
+                    match failure_surface_for(handle.state::<AppStatus>().get()) {
+                        SplashSurface::Dismiss => {
                             let elapsed = start.elapsed();
                             if elapsed < min_display {
                                 tokio::time::sleep(min_display - elapsed).await;
@@ -1575,12 +1571,14 @@ fn create_splash(app: &AppHandle) {
                             dismiss_splash(&handle);
                             break;
                         }
-                        SidecarState::Failed | SidecarState::Stopped => {
-                            tokio::time::sleep(Duration::from_secs(12)).await;
-                            dismiss_splash(&handle);
+                        SplashSurface::HoldRecovery => {
+                            // §3.3 fix: a failed/stopped sidecar HOLDS the recovery
+                            // UI — we stop polling but do NOT dismiss (the old 12 s
+                            // auto-dismiss ate the recovery affordance). The user
+                            // acts via the splash's Retry/Logs/Quit.
                             break;
                         }
-                        SidecarState::Starting => {
+                        SplashSurface::Progress => {
                             if start.elapsed() >= hard_cap {
                                 dismiss_splash(&handle);
                                 break;

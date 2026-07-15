@@ -28,6 +28,7 @@ the bun-testable cores by their unit + mutation suites.
 | `shell/src/proxy/live-feed-core.ts` | §1.2–1.3 | DOM-free helpers (tab id, URL, backoff, frames) |
 | `shell/src/proxy/live-feed-client.ts` | §1.2–1.3 | **Body implemented (source-grep + tsc verified):** WebSocket state machine over `live-feed-core` — stable `tabId`, connect on the inlined port/token, `hello`/`visibility`/`pong`, snapshot/event/close dispatch, visibility-driven reconnect with bounded backoff. Still to wire: replaces `subscribeAuthEvents` in `client.ts` (SPA track) |
 | `shell/src/ui/nav/project-slice.ts` | §2.2–2.3 | **Body implemented (Track-5 groundwork):** pure `curateProjectSlice` (pinned-first, recency-filled, hard-capped) — feeds the Projects rail group; consumed by the nav render when Track 5 lands |
+| `shell/src-tauri/src/decisions.rs` | §1.2/§3.3/§10 | **Track-3 pure core (cargo-tested):** `click_action` (tray click → OpenApp, single-click no-menu) + `failure_surface_for` (SidecarState → Progress/Dismiss/HoldRecovery). Owns `SidecarState`. The splash poll loop routes through `failure_surface_for`, **fixing the §3.3 bug** (Failed/Stopped no longer auto-dismisses after 12 s and eats the recovery UI). 6 `cargo test` cases; clippy-clean. Still to wire (Tauri glue, needs a running app): remove the tray menu + route left-click to `open_app`, add `quit_app` + app-menu Quit, the splash recovery buttons |
 
 ## Test map (§10 gates)
 
