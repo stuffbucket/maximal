@@ -22,11 +22,11 @@ edited, so the 1477-test suite stays green. Each stub delegates to
 | `src/routes/ws/route.ts` | §1.3 | **WIRED (Build Track 2):** `createWsRoutes()` is mounted at `WS_PATH` in `server.ts` (Origin-gated + `?key=`-exempt from the API-key middleware), and `createWebSocketHandler(...)` is passed into `serve({ bun: { websocket } })` by `run-server.ts` (`createLiveFeed`). **srvx-upgrade gate: PROVEN.** Callbacks: `open`→authcheck + snapshot-on-connect, `message`→`hello`/`visibility`/`pong` drive the presence registry, `close`→identity-checked remove; the handshake GET catches a non-upgrade probe → clean 426. Covered by `tests/ws/ws-handler.test.ts`. |
 | `src/lib/auth/origin-guard.ts` | §6.1 | **DONE (Build Track 1):** `createOriginGuardMiddleware` + narrowed `buildCorsOptions(...)` are mounted in `server.ts` before the sub-app routes; the bound port is read lazily from `state.boundPort` (set by `runServer`, default 4141). §6.2 (mandatory `/settings/api` auth) is delivered as the `alwaysEnforcePrefixes` mode of the existing `createAuthMiddleware`, so the `shellApiKey` bypass + attribution stay single-sourced; the read-only `/settings/api/diagnostics` GET is exempt (§1.7/§6.5) and CSRF-safe via the Origin guard |
 | `src/routes/ui/inline-state.ts` | §1.4 | **Bodies implemented (Track-4 groundwork):** `renderStateScript` (XSS-safe `<`/U+2028/U+2029 escaping), `isHtmlResponse`, `injectInlineState` (before `</head>`, never drops state). `buildInlineUiState` composes `buildSnapshot` (the inlined `__STATE__` IS the WS snapshot) with TODO-sourced token/locale/dismissal. **Still to wire:** call `injectInlineState` inside `serve()` in `src/routes/ui/route.ts` when `isHtmlResponse(hit.type)` — deferred to the SPA track (it calls `buildSnapshot()` per HTML serve, so it lands with the consumer). |
-| `shell/src/router.ts` | §1.4 / ADR-0020 | DOM-free router core; `history.replaceState` only |
+| `shell/src/router.ts` | §1.4 / ADR-0020 | **Body implemented (Track-4 groundwork):** DOM-free `createRouter` (replaceState-only, single-history), `defaultSection`/`isSectionId`/`readSectionFromLocation`/`readProjectSlug`/`targetUrl`. Still to wire: `router-bootstrap.ts` DOM glue replacing `main.ts` hash routing |
 | `shell/src/router-bootstrap.ts` | §1.4 | DOM glue: reads `window`, calls `createRouter`; replaces hash routing in `main.ts` |
 | `shell/src/proxy/live-feed-core.ts` | §1.2–1.3 | DOM-free helpers (tab id, URL, backoff, frames) |
 | `shell/src/proxy/live-feed-client.ts` | §1.2–1.3 | WebSocket/DOM glue; replaces `subscribeAuthEvents` in `client.ts` |
-| `shell/src/ui/nav/project-slice.ts` | §2.2–2.3 | pure `curateProjectSlice` — feeds the Projects rail group |
+| `shell/src/ui/nav/project-slice.ts` | §2.2–2.3 | **Body implemented (Track-5 groundwork):** pure `curateProjectSlice` (pinned-first, recency-filled, hard-capped) — feeds the Projects rail group; consumed by the nav render when Track 5 lands |
 
 ## Test map (§10 gates)
 
@@ -46,9 +46,9 @@ the matching body lands. Contract/shape/grep tests run **live now**.
 | `tests/security/settings-api-route-enumeration.test.ts` | **live** — every mutating `/settings/api` route asserts 403 to an evil Origin (self-extending) | — |
 | `tests/security/cli-client-regression.test.ts` | **live** — no-Origin `Bearer` on `/v1/*` still 200 (§6.6) | — |
 | `tests/ui/inline-state.test.ts` | **live** — escaping/isHtmlResponse/injectInlineState implemented (XSS anchor); `buildInlineUiState` composes `buildSnapshot` (unwired) | wiring into `route.ts` |
-| `tests/spa-router.test.ts` | skip | `createRouter` |
+| `tests/spa-router.test.ts` | **live** — `createRouter` implemented (replaceState-only, single-history) | — |
 | `tests/single-history-invariant.test.ts` | **live** | — (grep gate; add `main.ts`/`dashboard/main.ts` to `ROUTING_SOURCES` after the SPA/dashboard port) |
-| `tests/project-slice.test.ts` | skip | `curateProjectSlice` |
+| `tests/project-slice.test.ts` | **live** — `curateProjectSlice` implemented (caps rail at N=0/3/6/7/50, pinned-first) | — |
 
 ## Notes for the implementer
 

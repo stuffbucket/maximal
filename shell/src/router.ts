@@ -18,7 +18,6 @@
  * drove (section load/refresh, auth-event stream lifecycle, ADR-0002's api-clients
  * `selectMode` reset), delivered via `RouterHandlers`.
  */
-import { notImplemented } from "./dev/not-implemented";
 
 // Single source of truth: the tuple carries no payload types, so the union is
 // derived losslessly — adding/renaming a section can't drift the two apart.
@@ -56,26 +55,34 @@ export interface LocationLike {
 
 /** Default landing is dynamic: Account signed-out, Usage signed-in (§2.3, D1). */
 export function defaultSection(signedIn: boolean): SectionId {
-  return notImplemented("defaultSection", { signedIn });
+  return signedIn ? "usage" : "account";
 }
 
 export function isSectionId(value: string): value is SectionId {
-  return notImplemented("isSectionId", { value });
+  return (SECTIONS as readonly string[]).includes(value);
 }
 
 /** Read the initial section from `#hash` (boot/deep-link only — never re-read). */
 export function readSectionFromLocation(location: LocationLike): SectionId {
-  return notImplemented("readSectionFromLocation", { location });
+  const raw = location.hash.replace(/^#/, "");
+  // An unknown/empty hash falls back to the signed-out default; the caller
+  // (bootstrap) can re-navigate once it knows the auth state (§2.3, D1).
+  return isSectionId(raw) ? raw : "account";
 }
 
 /** Optional open-time project scope for a project detail view (§2.4/§2.5). */
 export function readProjectSlug(location: LocationLike): string | null {
-  return notImplemented("readProjectSlug", { location });
+  const slug = new URLSearchParams(location.search).get("project");
+  return slug && slug.length > 0 ? slug : null;
 }
 
 /** Compute the target URL for `replaceState` (path + optional `?project=`). Pure. */
 export function targetUrl(id: SectionId, project: string | null): string {
-  return notImplemented("targetUrl", { id, project });
+  // Relative URL: `?project=…` scopes the Projects master-detail (§2.5), `#id`
+  // keeps the deep-link contract WITHOUT assigning `location.hash` (which would
+  // accrue a history entry and break stale-tab self-close — §1.4).
+  const query = project ? `?project=${encodeURIComponent(project)}` : "";
+  return `${query}#${id}`;
 }
 
 export interface NavigateOptions {
@@ -117,5 +124,40 @@ export interface Router {
  * `router-bootstrap.ts` with real `window` bindings; tests call it with fakes.
  */
 export function createRouter(context: RouterContext): Router {
-  return notImplemented("createRouter", { context });
+  // Seed the current section from the boot location so `navigate` has a valid
+  // "previous" before `start()` runs, and `current()` is never undefined.
+  let current = readSectionFromLocation(context.location);
+  let currentProject = readProjectSlug(context.location);
+
+  // Enter a section: the ONLY writer of history, and it ALWAYS uses replaceState
+  // (never pushState / `location.hash =`) so `history.length` stays 1 (§1.4).
+  // Does NOT fire `onLeave` — that is the departing section's concern, handled by
+  // `navigate`; `start()` enters the boot section with no prior section to leave.
+  const enter = (id: SectionId, project: string | null): void => {
+    current = id;
+    currentProject = project;
+    context.history.replaceState(null, "", targetUrl(id, project));
+    context.handlers.showSection(id, project);
+    context.handlers.onEnter(id, project);
+  };
+
+  return {
+    navigate(id: SectionId, options?: NavigateOptions): void {
+      const project = options?.project ?? null;
+      // Idempotent: re-navigating to the same (id, project) is a no-op, so a
+      // repeated nav click doesn't churn history or re-run side effects.
+      if (id === current && project === currentProject) return;
+      context.handlers.onLeave(current);
+      enter(id, project);
+    },
+    start(): void {
+      enter(
+        readSectionFromLocation(context.location),
+        readProjectSlug(context.location),
+      );
+    },
+    current(): SectionId {
+      return current;
+    },
+  };
 }

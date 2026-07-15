@@ -9,7 +9,6 @@
  * Pure function — the §10 verification anchor: "`curateProjectSlice` caps the rail
  * at N=0/3/6/7/50". No DOM, no I/O.
  */
-import { notImplemented } from "../../dev/not-implemented";
 
 /** The durable project key is the API-key label, never the ephemeral session_id (§5). */
 export interface Project {
@@ -40,5 +39,19 @@ export function curateProjectSlice(
   projects: readonly Project[],
   cap: number = DEFAULT_PROJECT_SLICE_CAP,
 ): CuratedSlice {
-  return notImplemented("curateProjectSlice", { projects, cap });
+  // Pinned first, each group most-recent-first, so a truncation to `cap` keeps the
+  // pinned shortcuts and the freshest recents (§2.3). filter() copies, so sorting
+  // never mutates the caller's array.
+  const byRecency = (a: Project, b: Project): number =>
+    b.lastActiveAt - a.lastActiveAt;
+  const ordered = [
+    ...projects.filter((p) => p.pinned).sort(byRecency),
+    ...projects.filter((p) => !p.pinned).sort(byRecency),
+  ];
+  if (ordered.length <= cap) {
+    return { items: ordered, hasOverflow: false };
+  }
+  // The rail height stays constant: the >cap tail lives in the content-pane
+  // master-detail behind "All projects" (hasOverflow drives that entry).
+  return { items: ordered.slice(0, cap), hasOverflow: true };
 }

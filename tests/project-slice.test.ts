@@ -20,7 +20,7 @@ function many(n: number): Array<Project> {
   return Array.from({ length: n }, (_, i) => project(`p${i}`, false, i))
 }
 
-describe.skip("curateProjectSlice — unskip when implemented", () => {
+describe("curateProjectSlice — unskip when implemented", () => {
   test("N=0 → empty slice, no overflow", () => {
     expect(curateProjectSlice([])).toEqual({ items: [], hasOverflow: false })
   })

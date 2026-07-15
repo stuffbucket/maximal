@@ -50,7 +50,7 @@ function noopHandlers(): RouterHandlers {
   return { showSection: () => {}, onEnter: () => {}, onLeave: () => {} }
 }
 
-describe.skip("router single-history invariant — unskip when implemented", () => {
+describe("router single-history invariant — unskip when implemented", () => {
   test("navigate uses replaceState and never grows history", () => {
     const history = fakeHistory()
     const router = createRouter({
