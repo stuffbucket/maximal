@@ -9,9 +9,13 @@ import type {
   DiagnosticsResponse,
   UpdateStatusResponse,
 } from "../../src/lib/config/settings-types";
-import type { AuthStatus, EventSubscription, UpstreamRejection } from "./proxy/client";
-import { apiCall, subscribeAuthEvents } from "./proxy/client";
+import type { AuthStatus, UpstreamRejection } from "./proxy/client";
+import { apiCall } from "./proxy/client";
 import { readInlineState } from "./proxy/inline-state-client";
+import {
+  connectLiveFeed,
+  type LiveFeedConnection,
+} from "./proxy/live-feed-client";
 import { mountApiClients } from "./ui/islands/api-clients-island";
 import { mountApps } from "./ui/islands/apps-island";
 import { mountModels } from "./ui/islands/models-island";
@@ -787,9 +791,8 @@ let authPollTimer: ReturnType<typeof setTimeout> | null = null;
  * asynchronously, so a generation counter discards a subscription that
  * resolved after the section was already left.
  */
-let authEvents: EventSubscription | null = null;
-let sseConnected = false;
-let authEventsGen = 0;
+let liveFeed: LiveFeedConnection | null = null;
+let feedConnected = false;
 
 function stopAuthPolling(): void {
   if (authPollTimer !== null) {
@@ -798,9 +801,17 @@ function stopAuthPolling(): void {
   }
 }
 
+function signInPending(): boolean {
+  return (
+    currentAuthStatus !== null &&
+    (currentAuthStatus.state === "device_code_issued" ||
+      currentAuthStatus.state === "polling")
+  );
+}
+
 function schedulePoll(): void {
-  // SSE is the primary channel; only poll as a fallback when it's down.
-  if (sseConnected) {
+  // The live feed is the primary channel; only poll as a fallback when it's down.
+  if (feedConnected) {
     stopAuthPolling();
     return;
   }
@@ -811,57 +822,76 @@ function schedulePoll(): void {
   }, POLL_INTERVAL_MS);
 }
 
-function openAuthEvents(): void {
-  if (authEvents) return;
-  const gen = ++authEventsGen;
-  void subscribeAuthEvents({
-    onOpen: () => {
-      if (gen !== authEventsGen) return;
-      sseConnected = true;
-      // The stream is live; the fallback poll is now redundant.
-      stopAuthPolling();
+/**
+ * Open the single page-lifetime live-feed WebSocket (ADR-0019), replacing the
+ * per-section SSE. ONE socket per tab, opened at boot: it carries the presence
+ * registry (its `hello` — tabId + visibility — lets a tray click find/close this
+ * tab, §1.2) AND the unified feed. Coordinates come from the inlined
+ * `window.__STATE__` (a plain browser tab has no Tauri IPC). Idempotent; a missing
+ * `__STATE__` leaves the GET-poll fallback to carry auth updates.
+ */
+function openLiveFeed(): void {
+  if (liveFeed) return;
+  const inlined = readInlineState(window);
+  if (!inlined) return;
+  liveFeed = connectLiveFeed(
+    {
+      onSnapshot: (snapshot) => {
+        if (readHashSection() === "account") renderAccount(snapshot.auth);
+        // A resumed tab resyncs its data islands without a manual poll.
+        window.dispatchEvent(new CustomEvent("maximal:apps-refresh"));
+        window.dispatchEvent(new CustomEvent("maximal:models-refresh"));
+      },
+      onEvent: (event) => {
+        switch (event.type) {
+          case "auth.changed": {
+            if (readHashSection() === "account") renderAccount(event.payload);
+            break;
+          }
+          case "apps.changed": {
+            window.dispatchEvent(new CustomEvent("maximal:apps-refresh"));
+            break;
+          }
+          case "clients.changed": {
+            window.dispatchEvent(new CustomEvent("maximal:clients-refresh"));
+            break;
+          }
+          default: {
+            // accounts/upstream/boot/usage/update/health consumers land with the
+            // Usage port + banner tracks (§3.2/§5); ignored now, forward-compatible.
+            break;
+          }
+        }
+      },
+      onCloseCommand: () => {
+        // Tray dedup (§1.2): the sidecar told this buried tab to self-close so a
+        // fresh foreground tab can open. Reliable under single-history (ADR-0020).
+        window.close();
+      },
+      onStatusChange: (status) => {
+        feedConnected = status === "open";
+        if (feedConnected) {
+          stopAuthPolling();
+        } else if (readHashSection() === "account" && signInPending()) {
+          // Feed dropped mid sign-in → degrade to the GET poll until it recovers.
+          schedulePoll();
+        }
+      },
     },
-    onAuth: (status) => {
-      if (gen !== authEventsGen) return;
-      // Only paint while the user is actually on the Account section.
-      if (readHashSection() === "account") renderAccount(status);
-    },
-    onError: () => {
-      if (gen !== authEventsGen) return;
-      sseConnected = false;
-      // Stream dropped — fall back to polling if a sign-in is mid-flight.
-      if (
-        readHashSection() === "account" &&
-        currentAuthStatus !== null &&
-        (currentAuthStatus.state === "device_code_issued" ||
-          currentAuthStatus.state === "polling")
-      ) {
-        schedulePoll();
-      }
-    },
-  }).then(
-    (subscription) => {
-      // Section was left (or re-entered) while the key resolved — discard.
-      if (gen !== authEventsGen) {
-        subscription.close();
-        return;
-      }
-      authEvents = subscription;
-    },
-    () => {
-      // Key resolution / EventSource construction failed; polling fallback
-      // stays in force. Nothing to clean up.
-    },
+    inlined.boundPort,
+    inlined.sessionToken,
   );
 }
 
+// Entering/leaving the Account section no longer opens a transport — the feed is
+// page-lifetime. These only arm/cancel the GET-poll fallback for a mid-flight
+// sign-in while the feed happens to be down.
+function openAuthEvents(): void {
+  if (!feedConnected && signInPending()) schedulePoll();
+}
+
 function closeAuthEvents(): void {
-  authEventsGen++;
-  sseConnected = false;
-  if (authEvents) {
-    authEvents.close();
-    authEvents = null;
-  }
+  stopAuthPolling();
 }
 
 function accountKeyFor(state: AuthStatus["state"]): AccountStateKey {
@@ -2109,6 +2139,9 @@ window.addEventListener("DOMContentLoaded", () => {
   mountModels();
   wireNav();
   syncFromHash();
+  // Open the single page-lifetime live feed (ADR-0019): presence + auth/apps/
+  // clients live updates + tray self-close, for the life of the tab.
+  openLiveFeed();
   void loadDiagnostics();
   if (readHashSection() === "account") {
     // Instant paint (§1.4): if the sidecar inlined state, render the account from
