@@ -59,7 +59,31 @@ function resolveCopilotModel(
   )
 }
 
-export async function handleCompletion(c: Context) {
+// Injectable seam for tests. `mock.module`-ing shared modules (`~/lib/models/models`,
+// `~/routes/messages/api-flows`) leaks across test files on CI because Bun keeps
+// module mocks process-wide and an awaited afterAll restore doesn't reliably land
+// before the next file's static imports (see docs/architecture.md → Testing
+// gotchas). Passing the boundary functions in lets the handler test spy on them
+// without touching the process-global module registry. Production callers use the
+// real defaults.
+export interface HandleCompletionDeps {
+  findEndpointModel: typeof findEndpointModel
+  handleWithMessagesApi: typeof handleWithMessagesApi
+  handleWithResponsesApi: typeof handleWithResponsesApi
+  handleWithChatCompletions: typeof handleWithChatCompletions
+}
+
+const defaultDeps: HandleCompletionDeps = {
+  findEndpointModel,
+  handleWithMessagesApi,
+  handleWithResponsesApi,
+  handleWithChatCompletions,
+}
+
+export async function handleCompletion(
+  c: Context,
+  deps: HandleCompletionDeps = defaultDeps,
+) {
   await checkRateLimit(state)
 
   const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
@@ -135,7 +159,7 @@ export async function handleCompletion(c: Context) {
     await awaitApproval()
   }
 
-  const selectedModel = findEndpointModel(anthropicPayload.model)
+  const selectedModel = deps.findEndpointModel(anthropicPayload.model)
   anthropicPayload.model = selectedModel?.id ?? anthropicPayload.model
 
   if (webToolPolicy.declarations.length > 0) {
@@ -148,7 +172,7 @@ export async function handleCompletion(c: Context) {
   }
 
   if (shouldUseMessagesApi(selectedModel)) {
-    return await handleWithMessagesApi(c, anthropicPayload, {
+    return await deps.handleWithMessagesApi(c, anthropicPayload, {
       anthropicBetaHeader: anthropicBeta,
       subagentMarker,
       selectedModel,
@@ -160,7 +184,7 @@ export async function handleCompletion(c: Context) {
   }
 
   if (shouldUseResponsesApi(selectedModel)) {
-    return await handleWithResponsesApi(c, anthropicPayload, {
+    return await deps.handleWithResponsesApi(c, anthropicPayload, {
       subagentMarker,
       selectedModel,
       requestId,
@@ -170,7 +194,7 @@ export async function handleCompletion(c: Context) {
     })
   }
 
-  return await handleWithChatCompletions(c, anthropicPayload, {
+  return await deps.handleWithChatCompletions(c, anthropicPayload, {
     subagentMarker,
     requestId,
     sessionId,
