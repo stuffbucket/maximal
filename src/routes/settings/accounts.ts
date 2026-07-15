@@ -13,6 +13,8 @@
 
 import { Hono } from "hono"
 
+import type { AccountsListResponse } from "~/lib/config/settings-types"
+
 import { preflightCopilotError } from "~/lib/auth/copilot-preflight"
 import {
   listAccounts,
@@ -24,6 +26,25 @@ import {
 import { forwardError } from "~/lib/errors/error"
 
 export const accountsRoutes = new Hono()
+
+/**
+ * Build the `/settings/api/accounts` GET body from the on-disk registry. Extracted
+ * so the live-feed snapshot (§1.3/§1.4) emits the byte-identical shape without
+ * re-implementing the snake-case field mapping. Async (reads the registry); may
+ * throw — callers wrap it (the route via `forwardError`).
+ */
+export async function buildAccountsList(): Promise<AccountsListResponse> {
+  const reg = await readDefaultRegistry()
+  const accounts = listAccounts(reg).map((a) => ({
+    key: a.key,
+    login: a.login,
+    host: a.host,
+    added_via: a.addedVia,
+    obtained_at: a.obtainedAt,
+    active: a.active,
+  }))
+  return { accounts, active_key: reg.activeKey }
+}
 
 /** Read `{ key }` from the JSON body, or null if it isn't a non-empty string. */
 async function readKey(c: {
@@ -38,16 +59,7 @@ async function readKey(c: {
 
 accountsRoutes.get("/", async (c) => {
   try {
-    const reg = await readDefaultRegistry()
-    const accounts = listAccounts(reg).map((a) => ({
-      key: a.key,
-      login: a.login,
-      host: a.host,
-      added_via: a.addedVia,
-      obtained_at: a.obtainedAt,
-      active: a.active,
-    }))
-    return c.json({ accounts, active_key: reg.activeKey })
+    return c.json(await buildAccountsList())
   } catch (error) {
     return await forwardError(c, error)
   }
