@@ -29,7 +29,7 @@ import {
 import { hasGithubToken, state } from "~/lib/runtime-state/state"
 import { getGitVersion, shortSha } from "~/lib/update/version"
 import { buildSnapshot, LiveFeedHub } from "~/lib/ws/live-feed"
-import { PresenceRegistry } from "~/lib/ws/presence-registry"
+import { presenceRegistry } from "~/lib/ws/presence-registry"
 import { createWebSocketHandler } from "~/routes/ws/route"
 
 import { initBootLogger, printReadyBanner } from "./boot-io"
@@ -68,7 +68,7 @@ function createLiveFeed(): {
   hub: LiveFeedHub
   websocket: ReturnType<typeof createWebSocketHandler>
 } {
-  const registry = new PresenceRegistry()
+  const registry = presenceRegistry
   const hub = new LiveFeedHub({ registry, buildSnapshot })
   return { hub, websocket: createWebSocketHandler({ hub, registry }) }
 }

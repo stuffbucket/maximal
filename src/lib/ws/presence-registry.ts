@@ -89,3 +89,39 @@ export class PresenceRegistry<S extends PresenceSocket = PresenceSocket> {
     return this.tabs.size
   }
 }
+
+/**
+ * The app-level presence registry singleton (one per sidecar). `run-server`'s
+ * live-feed wiring registers tabs here via the WS handler, and the tray-open
+ * endpoint reads it to decide the single-tab action. A module singleton (like the
+ * settings event bus) so both the WS route and the `/_internal/tray-open` route
+ * see the same open-tab set. Tests construct their own `PresenceRegistry`.
+ */
+export const presenceRegistry = new PresenceRegistry()
+
+/** What the tray-open endpoint tells the native shell to do after orchestrating. */
+export interface TrayOpenOutcome {
+  /** True → the shell opens one fresh foreground tab; false → a visible tab exists. */
+  readonly open: boolean
+}
+
+/**
+ * Run the single-tab tray-open decision (spec §1.2) over a registry: a visible tab
+ * → no-op; only buried tabs → command each to self-close over the WS, then tell the
+ * shell to open one fresh tab; no tabs → open one. The "open a tab" half is the
+ * native shell's job (it has the browser); this owns the "close stale tabs" half.
+ */
+export function orchestrateTrayOpen(
+  registry: PresenceRegistry,
+): TrayOpenOutcome {
+  const decision = registry.trayDecision()
+  if (decision.kind === "noop") return { open: false }
+  if (decision.kind === "close-then-open") {
+    const closeFrame: LiveFeedServerMessage = { type: "close" }
+    const data = JSON.stringify(closeFrame)
+    for (const tabId of decision.closeTabIds) {
+      registry.socketFor(tabId)?.send(data)
+    }
+  }
+  return { open: true }
+}
