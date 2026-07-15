@@ -18,7 +18,7 @@ function tab(
   return { tabId, visibility }
 }
 
-describe.skip("decideTrayOpen — unskip when implemented", () => {
+describe("decideTrayOpen — unskip when implemented", () => {
   test("no tabs → open one", () => {
     expect(decideTrayOpen([])).toEqual({ kind: "open" })
   })

@@ -7,8 +7,6 @@
  * per-workstream invariant "the sidecar opens exactly one tab and closes stale
  * ones"). Keep it dependency-free so `bun run mutate` can target it in isolation.
  */
-import { notImplemented } from "~/lib/dev/not-implemented"
-
 /** Matches the browser `Document.visibilityState` the tab reports over the WS. */
 export type TabVisibility = "visible" | "hidden" | "prerender"
 
@@ -37,7 +35,14 @@ export type TrayOpenAction =
 export function decideTrayOpen(
   tabs: ReadonlyArray<RegisteredTab>,
 ): TrayOpenAction {
-  // TODO(single-window §1.2): any visibility==="visible" → noop; empty → open;
-  // otherwise → close-then-open with every buried tabId.
-  return notImplemented("decideTrayOpen", { tabs })
+  // A visible tab is already shown, and a background one can't be raised
+  // (`window.focus()` is a no-op [spike]) — so any visible tab means nothing to do.
+  if (tabs.some((tab) => tab.visibility === "visible")) return { kind: "noop" }
+  // No tabs at all → open one fresh foreground tab.
+  if (tabs.length === 0) return { kind: "open" }
+  // Only buried tab(s): tell each to self-close, then open one fresh (§1.2).
+  return {
+    kind: "close-then-open",
+    closeTabIds: tabs.map((tab) => tab.tabId),
+  }
 }

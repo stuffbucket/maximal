@@ -11,7 +11,6 @@ import type { LiveFeedServerMessage } from "~/lib/ws/feed-types"
  * Generic over the socket type so unit tests can pass a fake `{ send, close }`
  * without Bun's `ServerWebSocket` (there is no real-port harness in the repo).
  */
-import { notImplemented } from "~/lib/dev/not-implemented"
 import {
   decideTrayOpen,
   type RegisteredTab,
@@ -38,11 +37,7 @@ export class PresenceRegistry<S extends PresenceSocket = PresenceSocket> {
     socket: S,
     visibility: RegisteredTab["visibility"],
   ): void {
-    return notImplemented("PresenceRegistry.register", {
-      tabId,
-      socket,
-      visibility,
-    })
+    this.tabs.set(tabId, { socket, visibility })
   }
 
   /** Update a tab's visibility on a `visibility` frame (no-op if the tab is gone). */
@@ -50,10 +45,8 @@ export class PresenceRegistry<S extends PresenceSocket = PresenceSocket> {
     tabId: string,
     visibility: RegisteredTab["visibility"],
   ): void {
-    return notImplemented("PresenceRegistry.updateVisibility", {
-      tabId,
-      visibility,
-    })
+    const entry = this.tabs.get(tabId)
+    if (entry) entry.visibility = visibility
   }
 
   /**
@@ -61,12 +54,19 @@ export class PresenceRegistry<S extends PresenceSocket = PresenceSocket> {
    * the one registered (a stale socket's late close for a reconnected tab is a no-op).
    */
   remove(tabId: string, socket: S): boolean {
-    return notImplemented("PresenceRegistry.remove", { tabId, socket })
+    // The identity guard: a reconnecting tab's new socket registered under the
+    // same tabId must survive the OLD socket's late `close`. Deleting on tabId
+    // alone would evict the live connection.
+    if (this.tabs.get(tabId)?.socket !== socket) return false
+    return this.tabs.delete(tabId)
   }
 
   /** Pure snapshot for `decideTrayOpen` and the diagnostics page. */
   snapshot(): ReadonlyArray<RegisteredTab> {
-    return notImplemented("PresenceRegistry.snapshot")
+    return [...this.tabs].map(([tabId, entry]) => ({
+      tabId,
+      visibility: entry.visibility,
+    }))
   }
 
   /** Convenience: current tray decision over the live snapshot. */
@@ -76,12 +76,13 @@ export class PresenceRegistry<S extends PresenceSocket = PresenceSocket> {
 
   /** Look up the socket for a tabId (used to send the `close` command on dedup). */
   socketFor(tabId: string): S | undefined {
-    return notImplemented("PresenceRegistry.socketFor", { tabId })
+    return this.tabs.get(tabId)?.socket
   }
 
   /** Fan a server message out to every connected tab (feed broadcast). */
   broadcast(message: LiveFeedServerMessage): void {
-    return notImplemented("PresenceRegistry.broadcast", { message })
+    const data = JSON.stringify(message)
+    for (const entry of this.tabs.values()) entry.socket.send(data)
   }
 
   get size(): number {

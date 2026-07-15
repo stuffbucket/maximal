@@ -35,7 +35,7 @@ describe("PresenceRegistry — active now", () => {
   })
 })
 
-describe.skip("PresenceRegistry behavior — unskip when implemented", () => {
+describe("PresenceRegistry behavior — unskip when implemented", () => {
   test("register then snapshot reflects the tab", () => {
     const reg = new PresenceRegistry()
     reg.register("a", fakeSocket(), "visible")
@@ -59,6 +59,31 @@ describe.skip("PresenceRegistry behavior — unskip when implemented", () => {
     const sock = fakeSocket()
     reg.register("a", sock, "hidden")
     expect(reg.remove("a", sock)).toBe(true)
+    expect(reg.size).toBe(0)
+  })
+
+  test("remove on an unknown tab is a no-op returning false (never throws)", () => {
+    const reg = new PresenceRegistry()
+    expect(reg.remove("ghost", fakeSocket())).toBe(false)
+    expect(reg.size).toBe(0)
+  })
+
+  test("socketFor on an unknown tab returns undefined (never throws)", () => {
+    expect(new PresenceRegistry().socketFor("ghost")).toBeUndefined()
+  })
+
+  test("updateVisibility changes what the snapshot reports", () => {
+    const reg = new PresenceRegistry()
+    reg.register("a", fakeSocket(), "hidden")
+    reg.updateVisibility("a", "visible")
+    expect(reg.snapshot()).toEqual([{ tabId: "a", visibility: "visible" }])
+    // A visible tab now flips the tray decision to noop.
+    expect(reg.trayDecision()).toEqual({ kind: "noop" })
+  })
+
+  test("updateVisibility on an unknown tab is a silent no-op (never throws)", () => {
+    const reg = new PresenceRegistry()
+    reg.updateVisibility("ghost", "visible")
     expect(reg.size).toBe(0)
   })
 

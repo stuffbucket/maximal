@@ -40,7 +40,7 @@ function throwingMinter(): string {
   throw new Error("should not mint")
 }
 
-describe.skip("live-feed core — unskip when implemented", () => {
+describe("live-feed core — unskip when implemented", () => {
   test("getTabId mints once and is stable across calls", () => {
     const storage = fakeStorage()
     const mint = countingMinter()

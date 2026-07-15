@@ -35,11 +35,11 @@ the matching body lands. Contract/shape/grep tests run **live now**.
 
 | Test | Live now? | Unskip when |
 |---|---|---|
-| `tests/ws/tray-open-decision.test.ts` | skip | `decideTrayOpen` |
-| `tests/ws/presence-registry.test.ts` | partial (`size`) | registry methods |
+| `tests/ws/tray-open-decision.test.ts` | **live** — `decideTrayOpen` implemented; mutation score 100% | — |
+| `tests/ws/presence-registry.test.ts` | **live** — registry implemented (identity-checked delete); mutation score 100% | — |
 | `tests/ws/live-feed-contract.test.ts` | **live** | — (guards the 9-event coverage) |
 | `tests/ws/srvx-upgrade-handshake.test.ts` | **PROVEN**, runs in the default suite (`start-run-server.test.ts` now injects its `serve` stub via `__setServeForTests` instead of mocking srvx, so the two co-run; `mockModuleLeakGuard` forbids re-adding `mock.module("srvx", …)`) | — |
-| `tests/ws/live-feed-core.test.ts` | skip | core helpers |
+| `tests/ws/live-feed-core.test.ts` | **live** — DOM-free client core implemented (tab-id/URL/backoff/parse/serialize) | — |
 | `tests/security/origin-guard.test.ts` | **live** — guard implemented + mounted (§6.1–6.2); origin-guard.ts mutation score 88% (message wording deliberately unpinned) | — |
 | `tests/security/settings-api-route-enumeration.test.ts` | **live** — every mutating `/settings/api` route asserts 403 to an evil Origin (self-extending) | — |
 | `tests/security/cli-client-regression.test.ts` | **live** — no-Origin `Bearer` on `/v1/*` still 200 (§6.6) | — |
@@ -53,9 +53,10 @@ the matching body lands. Contract/shape/grep tests run **live now**.
 - **`knip` (check:deep)** will report the new exports as unused-in-production until
   the integration points above are wired — expected during scaffolding.
 - **Mutation targets** (`stryker.conf.json` `mutate`, one module at a time):
-  `src/lib/ws/tray-open.ts`, then `presence-registry.ts` (the identity guard).
-  `src/lib/auth/origin-guard.ts` was mutation-checked at Build Track 1 (88%; the
-  only survivors are the 403 message wording, deliberately unpinned).
+  `src/lib/ws/tray-open.ts` and `presence-registry.ts` (the identity guard) are
+  **done — both 100%** (Build Track 2, 2026-07-15). `src/lib/auth/origin-guard.ts`
+  was mutation-checked at Build Track 1 (88%; the only survivors are the 403
+  message wording, deliberately unpinned).
 - **No jsdom.** DOM-touching shell code is split into a DOM-free core (imported +
   unit-tested) and thin `*-bootstrap` / `*-client` glue (source-grepped only).
   Keep that split when filling bodies in.
