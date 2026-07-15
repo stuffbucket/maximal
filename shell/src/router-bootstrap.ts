@@ -11,17 +11,41 @@
  * Registers NO `hashchange`/`popstate` listener: single-history means there is no
  * back/forward to react to (that is the whole point of the invariant).
  */
-import { createRouter, type Router, type RouterHandlers } from "./router";
-import { notImplemented } from "./dev/not-implemented";
+import {
+  createRouter,
+  isSectionId,
+  type Router,
+  type RouterHandlers,
+} from "./router";
 
 let active: Router | null = null;
 
 /** Construct the router from the live `window`, wire click delegation, and start it. */
 export function initRouter(handlers: RouterHandlers): Router {
-  // TODO(single-window §1.4): createRouter({ history: window.history,
-  // location: window.location, handlers }); delegate [data-nav] clicks to
-  // router.navigate (preventDefault, NEVER assign location.hash); router.start().
-  return notImplemented("initRouter", { handlers, createRouter, active });
+  const router = createRouter({
+    history: window.history,
+    location: window.location,
+    handlers,
+  });
+
+  // Delegated nav: a single listener handles every `[data-nav="<section>"]` link,
+  // routing through `router.navigate` (which uses replaceState) instead of letting
+  // the anchor assign `location.hash` — assigning hash accrues history and breaks
+  // stale-tab self-close (§1.4/ADR-0020). An optional `data-project` scopes the
+  // Projects master-detail (§2.5).
+  document.addEventListener("click", (event: MouseEvent) => {
+    const origin =
+      event.target instanceof Element ? event.target.closest("[data-nav]") : null;
+    if (!origin) return;
+    const id = origin.getAttribute("data-nav");
+    if (!id || !isSectionId(id)) return;
+    event.preventDefault();
+    router.navigate(id, { project: origin.getAttribute("data-project") });
+  });
+
+  router.start();
+  active = router;
+  return router;
 }
 
 /** The active router instance (for nav-link handlers created after boot). */
