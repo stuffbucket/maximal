@@ -662,7 +662,7 @@ pub fn run() {
                 } else {
                     tauri::ActivationPolicy::Regular
                 };
-                let _ = app.set_activation_policy(initial);
+                app.set_activation_policy(initial);
                 // Keep the POLICY_IS_REGULAR mirror in step with what we just
                 // applied so update_activation_policy's no-op-skip stays honest.
                 POLICY_IS_REGULAR
@@ -775,8 +775,8 @@ pub fn run() {
         RunEvent::Reopen {
             has_visible_windows,
             ..
-        } => {
-            if !has_visible_windows {
+        }
+            if !has_visible_windows => {
                 let section = if app_handle.state::<AppStatus>().get()
                     == SidecarState::RunningUnauthenticated
                 {
@@ -786,7 +786,6 @@ pub fn run() {
                 };
                 open_settings_window(app_handle, section);
             }
-        }
         _ => {}
     });
 }
@@ -828,7 +827,7 @@ fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
     // after they flip "Block unknown connections."
     cmd = cmd.env(
         "MAXIMAL_SHELL_KEY",
-        app.state::<ShellApiKey>().value().to_string(),
+        app.state::<ShellApiKey>().value(),
     );
 
     let (mut rx, child) = cmd
@@ -1516,7 +1515,7 @@ fn create_splash(app: &AppHandle) {
     // Hand the splash its version before first paint (race-free — runs
     // ahead of page load, unlike an emitted event the page might miss).
     // The page renders it unless it's the dev `0.0.0` placeholder.
-    .initialization_script(&format!(
+    .initialization_script(format!(
         "window.__MAXIMAL_VERSION__ = {:?};",
         app_version(app)
     ))
