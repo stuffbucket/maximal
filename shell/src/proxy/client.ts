@@ -35,11 +35,17 @@ import type {
   UpdateStatusResponse,
   UpstreamRejection,
 } from "../../../src/lib/config/settings-types"
+// The active-clients wire contract is owned by the shared feed contract
+// (single source of truth for the WS + this fetch client). See feed-types.ts.
+import type {
+  ActiveApiClient,
+  ActiveApiClientsResponse,
+} from "../../../src/lib/ws/feed-types"
 
 // Re-export so existing shell call sites that pull the type from
 // "./api" keep working. AuthStatus is owned by src/lib/settings-types
 // (ADR-0005/0006) — the shell does NOT redeclare it.
-export type { AuthStatus, UpstreamRejection }
+export type { ActiveApiClient, AuthStatus, UpstreamRejection }
 
 const TIMEOUT_MS = 5000
 
@@ -77,22 +83,6 @@ interface AccountRemoveResponse {
   was_active: boolean
 }
 
-/**
- * Active API clients (last-seen within a recency window). Contract is
- * jointly owned with `/settings/api/clients` on the proxy side; if the
- * server-side route ships under a different shape, update both ends.
- */
-export interface ActiveApiClient {
-  key: string
-  label: string
-  userAgent: string
-  ageSeconds: number
-}
-
-interface ActiveApiClientsResponse {
-  clients: Array<ActiveApiClient>
-  total: number
-}
 
 /**
  * Apps integrations (Claude Code, Claude Desktop, Copilot CLI). Contract
