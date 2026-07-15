@@ -26,8 +26,6 @@ import { Hono } from "hono"
 import type { LiveFeedHub } from "~/lib/ws/live-feed"
 import type { PresenceRegistry } from "~/lib/ws/presence-registry"
 
-import { notImplemented } from "~/lib/dev/not-implemented"
-
 /** The single WS endpoint. Replaces `SSE_EVENTS_PATH` as the `?key=` allowlisted path. */
 export const WS_PATH = "/ws"
 
@@ -44,48 +42,64 @@ interface WsDeps {
   readonly registry: PresenceRegistry
 }
 
+/** The one Bun-server capability the route needs: upgrade a request to a WS. */
+interface Upgradable {
+  upgrade(request: Request, options?: { data?: WsData }): boolean
+}
+
 /**
  * Reach the Bun server decorated on the srvx request, for `server.upgrade`.
  * One-line type-cast seam (not business logic): srvx puts the handle at
- * `request.runtime.bun.server` (node_modules/srvx types).
+ * `request.runtime.bun.server` (node_modules/srvx types). Narrowed to `Upgradable`
+ * so the `data` payload types as `WsData` without fighting Bun's `Server<T>`
+ * generic (which srvx pins to `<any>`).
  */
-function bunServer(raw: Request) {
+function bunServer(raw: Request): Upgradable | undefined {
   return (raw as unknown as ServerRequest).runtime?.bun?.server
 }
 
 /**
  * The Hono route whose GET performs the upgrade. Returns `undefined` on a
- * successful upgrade (the gate above), or a 401/426 Response otherwise.
+ * successful upgrade (the gate proven in tests/ws/srvx-upgrade-handshake.test.ts),
+ * or an error Response otherwise. Stateless — presence lives in the WS callbacks.
  */
-export function createWsRoutes(deps: WsDeps): Hono {
+export function createWsRoutes(): Hono {
   const app = new Hono()
   app.get("/", (c) => {
-    // TODO(single-window §1.3): validate `?key=`; on success call
-    // bunServer(c.req.raw).upgrade(c.req.raw, { data }) and return undefined; else 401/426.
-    return notImplemented("wsRoutes.GET", { deps, path: c.req.path, bunServer })
+    const server = bunServer(c.req.raw)
+    if (!server) return c.text("bun server unavailable", 500)
+    // TODO(single-window §1.3/§6.5): validate the `?key=` session token (the
+    // SSE_EVENTS_PATH `?key=` allowlist moves here). For now, presence of a key
+    // is required so the handshake can't be opened anonymously.
+    const key = c.req.query("key")
+    if (!key) return c.text("missing session token", 401)
+    const data: WsData = { authed: true, tabId: c.req.query("tabId") ?? null }
+    const upgraded = server.upgrade(c.req.raw, { data })
+    // THE GATE (proven): on success the handler returns `undefined` and Bun keeps
+    // the upgraded socket. srvx hands this return straight to Bun (no coercion),
+    // so the `undefined` survives Hono's dispatch. The cast only satisfies Hono's
+    // handler-return typing (which expects a Response) — at runtime this is a
+    // genuine `undefined`, which is exactly what Bun requires post-upgrade.
+    if (upgraded) return undefined as unknown as Response
+    return c.text("upgrade failed", 426)
   })
   return app
 }
 
 /**
  * The Bun websocket handler passed to `serve({ bun: { websocket } })`.
- * `open`  → register presence, send snapshot.
- * `message` → hello/visibility/pong frames update the registry.
- * `close` → identity-checked remove.
+ *
+ * SPIKE SCOPE: these are minimal non-throwing callbacks that prove the handshake.
+ * The full behavior — `open` → register presence + send snapshot; `message` →
+ * hello/visibility/pong frames update the registry; `close` → identity-checked
+ * remove — is TODO(single-window §1.2/§1.3) and depends on the (still stubbed)
+ * PresenceRegistry + LiveFeedHub methods, so it is intentionally not wired here.
  */
-export function createWebSocketHandler(deps: WsDeps) {
+export function createWebSocketHandler(_deps: WsDeps) {
   return {
-    open(ws: ServerWebSocket<WsData>): void {
-      return notImplemented("ws.open", { ws, deps })
-    },
-    message(ws: ServerWebSocket<WsData>, raw: string | Buffer): void {
-      return notImplemented("ws.message", { ws, raw, deps })
-    },
-    close(ws: ServerWebSocket<WsData>): void {
-      return notImplemented("ws.close", { ws, deps })
-    },
-    pong(ws: ServerWebSocket<WsData>): void {
-      return notImplemented("ws.pong", { ws })
-    },
+    open(_ws: ServerWebSocket<WsData>): void {},
+    message(_ws: ServerWebSocket<WsData>, _raw: string | Buffer): void {},
+    close(_ws: ServerWebSocket<WsData>): void {},
+    pong(_ws: ServerWebSocket<WsData>): void {},
   }
 }

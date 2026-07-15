@@ -76,10 +76,15 @@ ping-pong liveness; reconnect-on-`visibilitychange`; full snapshot on
 - **Safari tears down a backgrounded tab's WS after ~5 min** — a
   long-buried tab can transiently duplicate and **self-heals** on refocus
   (Chromium keeps warm sockets). Accepted, bounded by a liveness deadline.
-- **One gate to prove first:** srvx's fetch-wrapper must tolerate the
-  `undefined` return after `server.upgrade()`; if it coerces to a `Response`,
-  the handshake silently fails (fallback: a srvx plugin that upgrades before
-  Hono). Covered by a real-port handshake test.
+- **One gate to prove first — PROVEN (2026-07-14):** srvx's fetch-wrapper must
+  tolerate the `undefined` return after `server.upgrade()`; if it coerces to a
+  `Response`, the handshake silently fails. A real-port test
+  (`tests/ws/srvx-upgrade-handshake.test.ts`) confirms a genuine WebSocket
+  connects through the srvx→Bun upgrade: srvx returns the Hono `app.fetch` result
+  straight to Bun with no coercion (`node_modules/srvx/dist/adapters/bun.mjs:50`),
+  so the `undefined` survives. **The fallback (a srvx plugin that upgrades before
+  Hono) is not needed.** The test is gated behind `MAXIMAL_TEST_WS=1` because it
+  cannot co-run with `start-run-server.test.ts`'s srvx `mock.module`.
 
 ## Migration
 
