@@ -33,6 +33,7 @@ import {
 } from "~/lib/net/network-diagnostics"
 
 import {
+  causeOnlyTransportError,
   deadResolver,
   GUARANTEED_NXDOMAIN_HOST,
   GUARANTEED_NXDOMAIN_URL,
@@ -94,6 +95,15 @@ describe("isTransportError", () => {
     expect(isTransportError(nodeFetchFailed())).toBe(true)
   })
 
+  test("recognises a nested cause.code even without the 'fetch failed' name/message", () => {
+    // nodeFetchFailed() is BOTH a `TypeError: fetch failed` and carries a
+    // transport `cause.code`, so it can't prove the `cause.code` branch alone is
+    // load-bearing. This fixture is caught *only* by inspecting `cause.code`:
+    // deleting that branch (or its TRANSPORT_ERROR_CODES lookup) would let this
+    // wrapped ECONNRESET be misread as an application error.
+    expect(isTransportError(causeOnlyTransportError())).toBe(true)
+  })
+
   test("recognises AbortSignal.timeout's TimeoutError", () => {
     expect(
       isTransportError({ name: "TimeoutError", message: "timed out" }),
@@ -136,6 +146,48 @@ describe("summarizeTransportError / formatTransportError", () => {
     expect(s.code).toBe("ECONNREFUSED")
     expect(s.syscall).toBe("connect")
     expect(formatTransportError(s)).toContain("syscall=connect")
+  })
+
+  test("carries the top-level error name and message through the summary", () => {
+    // `name` and `message` are populated from the top-level error (lines that
+    // read `rec.name` / `rec.message`). Nothing else asserts them, so a mutant
+    // hard-coding either to null would otherwise survive. bunConnRefused() is a
+    // plain `Error` whose name is "Error" and message is "ConnectionRefused".
+    const s = summarizeTransportError(bunConnRefused())
+    expect(s.name).toBe("Error")
+    expect(s.message).toBe("ConnectionRefused")
+  })
+
+  test("falls back to the raw message when no structured fields are present", () => {
+    // When code/syscall/errno/url are all absent, the renderer's last branch
+    // (`parts.length === 0 && summary.message`) surfaces the bare message.
+    // A mutant deleting that branch, or flipping the `parts.length === 0`
+    // guard, would drop the only remaining signal.
+    const messageOnly = {
+      code: null,
+      errno: null,
+      syscall: null,
+      url: null,
+      name: null,
+      message: "opaque boom",
+    }
+    expect(formatTransportError(messageOnly)).toBe("opaque boom")
+  })
+
+  test("renders an empty string when the summary is entirely empty", () => {
+    // No fields and no message -> nothing to render. Pins that the fallback
+    // does NOT invent content (e.g. a mutant pushing a literal when message is
+    // null would break this).
+    expect(
+      formatTransportError({
+        code: null,
+        errno: null,
+        syscall: null,
+        url: null,
+        name: null,
+        message: null,
+      }),
+    ).toBe("")
   })
 })
 
@@ -211,6 +263,23 @@ describe("probeNetwork", () => {
     // No host to probe -> can't disprove DNS, so don't flag dns-failure.
     expect(probe.dnsResolves).toBe(true)
   })
+
+  test("reports reachability via IPv6 when only the v6 targets connect", async () => {
+    // v4 legs all fail, v6 legs succeed. Pins the per-family aggregation: a
+    // mutant swapping the v6 filter to IP_FAMILY.v4 (line building
+    // ipv6Reachable), or dropping the `&& r.ok`, would misreport v6 as down
+    // while ipReachable still reads true off the (here-false) v4 leg — invisible
+    // unless v4 and v6 diverge, which every other case avoids.
+    const probe = await probeNetwork({
+      tcpConnect: (_host, _port, family) =>
+        Promise.resolve(family === IP_FAMILY.v6),
+      dnsLookup: () => Promise.resolve(true),
+      interfaces: () => ["en0"],
+    })
+    expect(probe.ipv4Reachable).toBe(false)
+    expect(probe.ipv6Reachable).toBe(true)
+    expect(probe.ipReachable).toBe(true)
+  })
 })
 
 describe("kind predicates (rot-free interpretation)", () => {
@@ -241,6 +310,13 @@ describe("hostFromUrl", () => {
     expect(hostFromUrl(null)).toBeNull()
     expect(hostFromUrl("")).toBeNull()
     expect(hostFromUrl("not a url")).toBeNull()
+  })
+
+  test("returns null for a parseable URL with an empty hostname", () => {
+    // A `file:` URL parses but has no host. Pins the `|| null` half of
+    // `new URL(url).hostname || null` — a mutant dropping it would leak an
+    // empty string to the DNS probe instead of the null the caller expects.
+    expect(hostFromUrl("file:///etc/hosts")).toBeNull()
   })
 })
 
@@ -333,6 +409,29 @@ describe("formatDiagnosisForLog", () => {
     expect(line).toContain("dns=ok")
     expect(line).toContain("ifaces=2")
     expect(line).toContain("code=ConnectionRefused")
+  })
+
+  test("renders down/no-scope: ip=down, dns=down, and omits scope= when null", () => {
+    // The all-ok test above never exercises the "down" side of the
+    // `ip=/dns=` ternaries, nor the `if (scope)` guard. Drive an offline,
+    // DNS-broken, scope-less verdict so a mutant flipping either ternary
+    // (ok<->down) or dropping the scope guard is caught.
+    const d = classifyNetworkFailure(
+      summarizeTransportError(bunConnRefused()),
+      {
+        ipReachable: false,
+        ipv4Reachable: false,
+        ipv6Reachable: false,
+        dnsResolves: false,
+        activeInterfaces: [],
+      },
+      null,
+    )
+    const line = formatDiagnosisForLog(d)
+    expect(line).toContain("ip=down")
+    expect(line).toContain("dns=down")
+    expect(line).toContain("ifaces=0")
+    expect(line).not.toContain("scope=")
   })
 })
 

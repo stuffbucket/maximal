@@ -91,3 +91,21 @@ export const healthyResolver = (host: string): Promise<boolean> =>
 /** A DNS stub modelling a *dead / unreachable resolver*: every lookup fails,
  *  including the reserved anchor. */
 export const deadResolver = (): Promise<boolean> => Promise.resolve(false)
+
+/**
+ * A transport error carrying its real code on a nested `.cause` but WITHOUT the
+ * `TypeError: fetch failed` name/message that node/undici usually attaches. This
+ * isolates `isTransportError`'s `cause.code` branch: the common `nodeFetchFailed`
+ * fixture satisfies both the cause-code check and the `name === "TypeError" &&
+ * message === "fetch failed"` check, so it can't prove the cause-code branch
+ * alone is load-bearing. This one can — it's caught *only* by inspecting
+ * `cause.code`.
+ */
+export const causeOnlyTransportError = (): Error =>
+  Object.assign(new Error("some wrapper"), {
+    cause: Object.assign(new Error("socket reset"), {
+      code: "ECONNRESET",
+      syscall: "read",
+      errno: -54,
+    }),
+  })
