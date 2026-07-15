@@ -56,6 +56,7 @@ use tauri::{
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
+use tauri_plugin_updater::UpdaterExt;
 
 /// Native-string i18n (tray, notifications, window titles, quit dialog),
 /// backed by the same shell/src/i18n/*.json catalogs the webview renders with.
@@ -618,6 +619,11 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        // In-place self-update. Reads `plugins.updater.{pubkey,endpoints}` from
+        // tauri.conf.json; the tray "Upgrade" item drives check/download/install
+        // via `handle_upgrade`. Registration order is not sensitive (unlike
+        // single-instance above) — it exposes no second-launch callback.
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Sidecar::new())
         .manage(AppStatus::new())
         .manage(ShellApiKey::new())
@@ -1978,7 +1984,7 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
         menu_id::SHOW_LOGS => do_reveal_logs_dir(app),
         menu_id::OPEN_CONFIG => do_reveal_config_dir(app),
         menu_id::RETRY => retry_startup(app),
-        menu_id::UPGRADE => open_update_url(app),
+        menu_id::UPGRADE => handle_upgrade(app),
         menu_id::QUIT => request_quit(app),
         _ => {}
     }
@@ -1994,6 +2000,99 @@ fn open_update_url(app: &AppHandle) {
     if let Err(err) = app.opener().open_url(update.url, None::<&str>) {
         eprintln!("[shell] failed to open update url: {err}");
     }
+}
+
+/// Tray "Upgrade to v…" click. Attempts an in-place install — download the
+/// signed `.app.tar.gz`, verify its Ed25519 signature against the configured
+/// `pubkey`, swap the bundle, and relaunch — and falls back to opening the
+/// download page in the browser whenever that path isn't available: a dev
+/// build, an unreachable/absent updater endpoint, no signed artifact for this
+/// platform yet, or a failed check. That keeps the button useful everywhere the
+/// notify path surfaces it, even before the signed-artifact pipeline covers a
+/// channel. Runs on the async runtime because the updater check does network I/O.
+fn handle_upgrade(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        match check_inplace_update(&app).await {
+            Ok(Some(update)) => prompt_and_install(&app, update),
+            // Endpoint reachable but nothing installable in the signed channel —
+            // still send the user somewhere useful.
+            Ok(None) => open_update_url(&app),
+            Err(err) => {
+                eprintln!(
+                    "[shell] in-place update unavailable ({err}); opening download page"
+                );
+                open_update_url(&app);
+            }
+        }
+    });
+}
+
+/// Runs a signed-update check via the Tauri updater. Honors an optional
+/// `MAXIMAL_UPDATE_ENDPOINT` override so an isolated build can be pointed at a
+/// local `latest.json` + test bundle and exercised end-to-end without touching
+/// the production endpoint or shipping a release (see docs/dev/self-updater.md).
+/// Returns the pending `Update` when one is available, `None` when the signed
+/// channel has nothing newer, or an error when the updater can't run here.
+async fn check_inplace_update(
+    app: &AppHandle,
+) -> tauri_plugin_updater::Result<Option<tauri_plugin_updater::Update>> {
+    let mut builder = app.updater_builder();
+    if let Ok(endpoint) = std::env::var("MAXIMAL_UPDATE_ENDPOINT") {
+        let endpoint = endpoint.trim();
+        if !endpoint.is_empty() {
+            let parsed: std::result::Result<url::Url, _> = endpoint.parse();
+            match parsed {
+                Ok(url) => builder = builder.endpoints(vec![url])?,
+                Err(err) => eprintln!(
+                    "[shell] ignoring invalid MAXIMAL_UPDATE_ENDPOINT: {err}"
+                ),
+            }
+        }
+    }
+    builder.build()?.check().await
+}
+
+/// Native confirm → download+install → relaunch. The dialog is non-blocking
+/// (mirrors `request_quit`); on confirm we download on the async runtime and
+/// then `app.restart()`, which routes through RunEvent::ExitRequested →
+/// `kill_sidecar` so the old sidecar is torn down before the fresh shell
+/// relaunches and spawns the new one with `--replace`. A failed download leaves
+/// the user on the download page rather than silently doing nothing.
+fn prompt_and_install(app: &AppHandle, update: tauri_plugin_updater::Update) {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    let locale = app.state::<LocaleState>().get();
+    let version = update.version.clone();
+    let app_clone = app.clone();
+    app.dialog()
+        .message(native_i18n::tr(&locale, "native-update-install-body"))
+        .title(native_i18n::t(
+            &locale,
+            "native-update-install-title",
+            &[("latest", &version)],
+        ))
+        .kind(MessageDialogKind::Info)
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            native_i18n::tr(&locale, "native-update-install-confirm"),
+            native_i18n::tr(&locale, "native-update-install-cancel"),
+        ))
+        .show(move |confirmed| {
+            if !confirmed {
+                return;
+            }
+            let app_inner = app_clone.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(err) =
+                    update.download_and_install(|_chunk, _total| {}, || {}).await
+                {
+                    eprintln!("[shell] in-place install failed: {err}");
+                    open_update_url(&app_inner);
+                    return;
+                }
+                // Bundle swapped in place; relaunch into the new version.
+                app_inner.restart();
+            });
+        });
 }
 
 /// Re-run the startup sequence from the Failed/Stopped state: clear any

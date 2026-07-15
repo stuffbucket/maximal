@@ -315,5 +315,10 @@
   "native-quit-title": "Quit Maximal?",
   "native-quit-body": "Maximal will stop and any open Settings windows will close.",
   "native-quit-confirm": "Quit Maximal",
-  "native-quit-cancel": "Cancel"
+  "native-quit-cancel": "Cancel",
+
+  "native-update-install-title": "Install Maximal {latest}?",
+  "native-update-install-body": "Maximal will download the update, verify it, and restart. This takes a few seconds.",
+  "native-update-install-confirm": "Install and restart",
+  "native-update-install-cancel": "Not now"
 }
