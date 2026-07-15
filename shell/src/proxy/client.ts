@@ -1,5 +1,7 @@
 import { getShellApiKey } from "../tauri/shell";
 
+import { readInlineState } from "./inline-state-client";
+
 /**
  * Typed fetch client for the proxy's `/settings/api/*` surface.
  *
@@ -309,8 +311,15 @@ function baseUrl(): string {
 
 async function resolveApiKey(override?: string): Promise<string | undefined> {
   if (override) return override
-  // The Tauri shell injects a per-launch key into the sidecar and serves
-  // it to the webview on demand; that's the sole key source now.
+  // Browser-tab delivery (§6.5): the sidecar mints a per-load session token into
+  // the served HTML as `window.__STATE__.sessionToken` — a plain browser tab has
+  // no Tauri IPC to fetch a key over. Prefer it when present. The `typeof window`
+  // guard keeps this safe under the DOM-less test runner.
+  const inlined =
+    typeof window === "undefined" ? null : readInlineState(window)
+  if (inlined?.sessionToken) return inlined.sessionToken
+  // Tauri delivery: the shell injects a per-launch key into the sidecar and
+  // serves it to the webview on demand.
   const shellKey = await getShellApiKey()
   return shellKey ?? undefined
 }
