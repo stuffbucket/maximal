@@ -760,16 +760,16 @@ function wireDiagnostics(): void {
 // ---- Account section -------------------------------------------------------
 
 /**
- * Account-section update contract (ADR-0007):
- *  - SSE is the PRIMARY channel. While #account is open we hold one
- *    `subscribeAuthEvents` subscription; `auth.changed` drives `renderAccount`
- *    with no poll lag. Opened on section enter, closed on leave.
- *  - The GET poll is the FALLBACK. `schedulePoll()` is a no-op while the
- *    stream is connected (`sseConnected`); it only runs when a sign-in is
- *    pending and SSE is down, so a dropped stream degrades to polling.
+ * Account-section update contract (ADR-0019, supersedes ADR-0007's SSE):
+ *  - The page-lifetime live-feed WebSocket (`openLiveFeed`) is the PRIMARY
+ *    channel; its `auth.changed` drives `renderAccount` with no poll lag, for
+ *    any section (guarded to paint only while #account is shown).
+ *  - The GET poll is the FALLBACK. `schedulePoll()` is a no-op while the feed
+ *    is connected (`feedConnected`); it only runs when a sign-in is pending and
+ *    the feed is down, so a dropped socket degrades to polling.
  *  - Only one poll timer runs at a time (`authPollTimer`).
  *  - `stopAuthPolling()` clears the timer; called on terminal states
- *    (authenticated, error, unauthenticated), on sign-out, on SSE connect,
+ *    (authenticated, error, unauthenticated), on sign-out, on feed connect,
  *    and on navigation away from #account.
  *  - `renderAccount` is the single source of truth for visibility;
  *    a non-pending state always stops polling before the next call.
@@ -782,14 +782,11 @@ let currentAuthStatus: AuthStatus | null = null;
 let authPollTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
- * Live updates (ADR-0007). While the Account section is open we hold one
- * SSE subscription to the sidecar; `auth.changed` events drive `renderAccount`
- * the instant the device-code poller resolves — no 2s poll lag. The GET poll
- * remains as a FALLBACK: it runs only while a sign-in is pending AND the SSE
- * stream is not connected (`sseConnected`), so a dropped stream degrades to
- * polling instead of stalling. `subscribeAuthEvents` resolves the API key
- * asynchronously, so a generation counter discards a subscription that
- * resolved after the section was already left.
+ * Live updates (ADR-0019). ONE page-lifetime WebSocket (`openLiveFeed`) carries
+ * `auth.changed`, driving `renderAccount` the instant the device-code poller
+ * resolves — no 2s poll lag. The GET poll remains a FALLBACK: it runs only while
+ * a sign-in is pending AND the feed is down (`feedConnected`), so a dropped socket
+ * degrades to polling instead of stalling.
  */
 let liveFeed: LiveFeedConnection | null = null;
 let feedConnected = false;

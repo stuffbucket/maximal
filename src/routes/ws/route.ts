@@ -14,8 +14,8 @@ import type { ServerRequest } from "srvx"
  * real-port test that proves this (the one deliberate port-binding test).
  *
  * Auth (§1.3, §6): a browser WS cannot send `x-api-key`, so the minted session
- * token rides as `?key=`. The path-scoped `?key=` allowlist that lives in
- * `request-auth.ts` for `SSE_EVENTS_PATH` must MOVE to `WS_PATH`.
+ * token rides as `?key=`. This is the app's only query-string key (the SSE route
+ * that formerly shared the `?key=` pattern has been deleted, ADR-0019).
  *
  * Integration point (not done here): `run-server.ts` must pass
  * `bun: { websocket: createWebSocketHandler(hub, registry) }` into `serve(...)`
@@ -32,7 +32,7 @@ import type { LiveFeedHub } from "~/lib/ws/live-feed"
 import type { PresenceRegistry } from "~/lib/ws/presence-registry"
 import type { TabVisibility } from "~/lib/ws/tray-open"
 
-/** The single WS endpoint. Replaces `SSE_EVENTS_PATH` as the `?key=` allowlisted path. */
+/** The single WS endpoint. Its own `?key=` minted token is the only query-string key in the app. */
 export const WS_PATH = "/ws"
 
 /** Per-socket data attached at upgrade time and read back in the handler callbacks. */
@@ -74,9 +74,11 @@ export function createWsRoutes(): Hono {
   app.get("/", (c) => {
     const server = bunServer(c.req.raw)
     if (!server) return c.text("bun server unavailable", 500)
-    // TODO(single-window §1.3/§6.5): validate the `?key=` session token (the
-    // SSE_EVENTS_PATH `?key=` allowlist moves here). For now, presence of a key
-    // is required so the handshake can't be opened anonymously.
+    // TODO(single-window §6.5): validate the `?key=` session token against the
+    // minted per-load token (it rides here because a browser WS can't send
+    // headers). For now, presence of a key is required so the handshake can't be
+    // opened anonymously. This is the ONLY `?key=` in the app (the SSE route that
+    // once shared the pattern is deleted).
     const key = c.req.query("key")
     if (!key) return c.text("missing session token", 401)
     const data: WsData = { authed: true, tabId: c.req.query("tabId") ?? null }

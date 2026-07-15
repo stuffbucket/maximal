@@ -138,15 +138,6 @@ export function findApiKeyEntry(
   return match ? { id: match.id, label: match.label } : null
 }
 
-/**
- * The ONE endpoint that accepts its API key via query string (`?key=`).
- * SSE clients (`EventSource`) can't set request headers, so the live-events
- * stream (ADR-0007) has no other way to authenticate. Honouring a
- * query-string key only for this exact path keeps keys out of URLs/logs for
- * every other endpoint. Must equal the mount path in src/routes/settings/api.ts.
- */
-export const SSE_EVENTS_PATH = "/settings/api/events"
-
 export function extractRequestApiKey(c: Context): string | null {
   const xApiKey = c.req.header("x-api-key")?.trim()
   if (xApiKey) {
@@ -162,14 +153,11 @@ export function extractRequestApiKey(c: Context): string | null {
     }
   }
 
-  // Query-string key: honoured ONLY for the SSE events endpoint (see
-  // SSE_EVENTS_PATH). EventSource can't send headers; every other path
-  // ignores `?key=` so credentials don't leak into request URLs broadly.
-  if (c.req.path === SSE_EVENTS_PATH) {
-    const queryKey = c.req.query("key")?.trim()
-    if (queryKey) return queryKey
-  }
-
+  // No query-string `?key=` fallback anywhere: the header paths above are the
+  // only ways to authenticate a proxy/control request, so keys never leak into
+  // request URLs or logs. The live-feed WebSocket (which a browser can't send
+  // headers to) validates its own `?key=` minted token inside its route
+  // (routes/ws/route.ts), independent of this extractor.
   return null
 }
 
