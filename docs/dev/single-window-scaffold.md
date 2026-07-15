@@ -52,6 +52,7 @@ the matching body lands. Contract/shape/grep tests run **live now**.
 | `tests/single-history-invariant.test.ts` | **live** | — (grep gate; add `main.ts`/`dashboard/main.ts` to `ROUTING_SOURCES` after the SPA/dashboard port) |
 | `tests/project-slice.test.ts` | **live** — `curateProjectSlice` implemented (caps rail at N=0/3/6/7/50, pinned-first) | — |
 | `tests/token-usage-project-id-migration.test.ts` | **live** — nullable `project_id` migration (§5): idempotent, back-compat NULL reads | — |
+| `tests/ui-diagnostics.test.ts` | **live** — read-only `/ui/diagnostics` page (§1.7): served 200 unauthenticated no-store, POST 404, XSS-escaped, secret-sources-only | — |
 
 ## Notes for the implementer
 

@@ -4,6 +4,9 @@ import { dirname, join, normalize, resolve, sep } from "node:path"
 
 import { UI_FILES } from "~/generated/ui-embed"
 import { contentTypeForPath } from "~/lib/platform/web-content-types"
+import { buildDebugState } from "~/routes/debug/route"
+
+import { renderDiagnosticsPage } from "./diagnostics"
 
 /**
  * Serves the web UIs under `/ui/*`:
@@ -100,6 +103,13 @@ export const uiRoutes = new Hono()
 // Bare-surface redirects to the canonical trailing-slash index.
 uiRoutes.get("/settings", (c) => c.redirect("/ui/settings/", 301))
 uiRoutes.get("/dashboard", (c) => c.redirect("/ui/dashboard/", 301))
+
+// Read-only diagnostics page (§1.7): server-rendered, mutation-free, unauthenticated
+// (under the /ui prefix). CSRF-safe by construction; secret values are never shown.
+// `no-store` so a browser never serves a stale runtime snapshot.
+uiRoutes.get("/diagnostics", (c) =>
+  c.html(renderDiagnosticsPage(buildDebugState()), 200, NO_STORE),
+)
 
 uiRoutes.get("/settings/", () =>
   serve("/ui/settings/index.html", "/ui/settings/index.html"),
