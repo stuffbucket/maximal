@@ -24,8 +24,8 @@ describe("validateAppConfig", () => {
           authType: "authorization" as const,
         },
       },
-      modelReasoningEfforts: {
-        "gpt-5.5": "xhigh" as const,
+      models: {
+        "gpt-5.5": { reasoningEffort: "xhigh" as const },
       },
     }
     expect(validateAppConfig(config)).toEqual(config)
@@ -36,8 +36,8 @@ describe("validateAppConfig", () => {
     // ReasoningEffortSchema, a config setting any model's effort to the top of
     // the GPT-5.6 ladder failed validation and the proxy exited non-zero.
     const config = {
-      modelReasoningEfforts: {
-        "gpt-5.6-sol": "max" as const,
+      models: {
+        "gpt-5.6-sol": { reasoningEffort: "max" as const },
       },
     }
     expect(validateAppConfig(config)).toEqual(config)
@@ -93,13 +93,13 @@ describe("validateAppConfig", () => {
     let thrown: ConfigValidationError | null = null
     try {
       validateAppConfig({
-        modelReasoningEfforts: { "gpt-5": "ULTRA" },
+        models: { "gpt-5": { reasoningEffort: "ULTRA" } },
       })
     } catch (e) {
       if (e instanceof ConfigValidationError) thrown = e
     }
     expect(thrown).not.toBeNull()
-    expect(thrown?.issues[0].path).toBe("modelReasoningEfforts.gpt-5")
+    expect(thrown?.issues[0].path).toBe("models.gpt-5.reasoningEffort")
   })
 
   it("keeps unknown top-level keys (passthrough)", () => {

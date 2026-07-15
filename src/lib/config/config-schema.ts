@@ -52,6 +52,17 @@ const ReasoningEffortSchema = z.enum([
 ])
 
 /**
+ * Per-model authored tuning (mirrors `ModelTuning` in config.ts — keep in
+ * lockstep). One entry replaces the old parallel extraPrompts /
+ * modelReasoningEfforts / responsesApiContextManagementModels maps.
+ */
+const ModelTuningSchema = z.object({
+  extraPrompt: z.string().optional(),
+  reasoningEffort: ReasoningEffortSchema.optional(),
+  responsesApiContextManagement: z.boolean().optional(),
+})
+
+/**
  * Validation regex for an API key value. CLI-safe character set so the
  * key can survive double-quoting / single-quoting in any shell without
  * escaping headaches: ASCII letters, digits, underscore, hyphen.
@@ -99,9 +110,8 @@ export const AppConfigSchema = z
       })
       .optional(),
     providers: z.record(z.string(), ProviderConfigSchema).optional(),
-    extraPrompts: z.record(z.string(), z.string()).optional(),
+    models: z.record(z.string(), ModelTuningSchema).optional(),
     smallModel: z.string().optional(),
-    responsesApiContextManagementModels: z.array(z.string()).optional(),
     /**
      * Copilot/OpenAI-Responses-specific: extend server-side prefix-cache
      * retention on the `/responses` path (default TTL is ~5-10 min; "24h"
@@ -110,9 +120,6 @@ export const AppConfigSchema = z
      * historically rejected the param, so it is opt-in. See getPromptCacheRetention.
      */
     promptCacheRetention: z.enum(["in_memory", "24h"]).optional(),
-    modelReasoningEfforts: z
-      .record(z.string(), ReasoningEffortSchema)
-      .optional(),
     useFunctionApplyPatch: z.boolean().optional(),
     useMessagesApi: z.boolean().optional(),
     anthropicApiKey: z.string().optional(),

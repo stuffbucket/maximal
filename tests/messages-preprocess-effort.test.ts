@@ -32,12 +32,12 @@ describe("prepareMessagesApiPayload — reasoning-effort normalization", () => {
     original = getConfig()
     writeConfig({
       ...original,
-      modelReasoningEfforts: {
-        ...original.modelReasoningEfforts,
-        "test-effort-none": "none",
-        "test-effort-minimal": "minimal",
-        "test-effort-high": "high",
-        "test-effort-medium": "medium",
+      models: {
+        ...original.models,
+        "test-effort-none": { reasoningEffort: "none" },
+        "test-effort-minimal": { reasoningEffort: "minimal" },
+        "test-effort-high": { reasoningEffort: "high" },
+        "test-effort-medium": { reasoningEffort: "medium" },
       },
     })
   })

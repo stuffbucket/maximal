@@ -30,6 +30,28 @@ export type ReasoningEffort =
   | "xhigh"
   | "max"
 
+/**
+ * Per-model AUTHORED tuning — maximal's deltas over default behavior for one
+ * model, keyed by forward model id. Consolidates the old parallel `extraPrompts`
+ * / `modelReasoningEfforts` / `responsesApiContextManagementModels` maps into one
+ * record so onboarding a model is a single keyed entry, not three edits that can
+ * drift out of alignment (the gap that hid the GPT-5.6 trio). This is the
+ * "authored" half of a future full ModelProfile (#338); the intrinsic catalog
+ * facts are the other half. Legacy shapes are folded in on load by
+ * `migrateLegacyModelTuning`. `smallModel` stays a separate scalar selector.
+ */
+export interface ModelTuning {
+  /** Extra system-prompt text appended for this model (was extraPrompts[id]). */
+  extraPrompt?: string
+  /** Authored reasoning effort (was modelReasoningEfforts[id]). */
+  reasoningEffort?: ReasoningEffort
+  /**
+   * Opt this model into the Responses-API server-side context-management path
+   * (was membership in responsesApiContextManagementModels).
+   */
+  responsesApiContextManagement?: boolean
+}
+
 export interface AppConfig {
   auth?: {
     /** Legacy free-form list of accepted bearer tokens. */
@@ -40,9 +62,14 @@ export interface AppConfig {
     enforce?: boolean
   }
   providers?: Record<string, ProviderConfig>
-  extraPrompts?: Record<string, string>
+  /**
+   * Per-model authored tuning, keyed by forward model id. Replaces the old
+   * parallel `extraPrompts` / `modelReasoningEfforts` /
+   * `responsesApiContextManagementModels` maps (folded in on load by
+   * `migrateLegacyModelTuning`). See {@link ModelTuning}.
+   */
+  models?: Record<string, ModelTuning>
   smallModel?: string
-  responsesApiContextManagementModels?: Array<string>
   /**
    * Copilot/OpenAI-Responses-specific server-side prefix-cache retention for
    * the `/responses` path. UNSET (undefined) → param is not sent, behavior
@@ -53,7 +80,6 @@ export interface AppConfig {
    * NOTE: independent from `store` (which controls response persistence/ZDR).
    */
   promptCacheRetention?: "in_memory" | "24h"
-  modelReasoningEfforts?: Record<string, ReasoningEffort>
   useFunctionApplyPatch?: boolean
   useMessagesApi?: boolean
   anthropicApiKey?: string
@@ -159,32 +185,39 @@ const defaultConfig: AppConfig = {
     apiKeys: [],
   },
   providers: {},
-  extraPrompts: {
-    "gpt-5-mini": gpt5ExplorationPrompt,
-    "gpt-5.3-codex": gpt5CommentaryPrompt,
-    "gpt-5.4-mini": gpt5CommentaryPrompt,
-    "gpt-5.4": gpt5CommentaryPrompt,
-    "gpt-5.5": gpt5CommentaryPrompt,
-    "gpt-5.6-sol": gpt5CommentaryPrompt,
-    "gpt-5.6-terra": gpt5CommentaryPrompt,
-    "gpt-5.6-luna": gpt5CommentaryPrompt,
-  },
-  smallModel: "gpt-5-mini",
-  responsesApiContextManagementModels: [],
-  modelReasoningEfforts: {
-    "gpt-5-mini": "low",
-    "gpt-5.3-codex": "xhigh",
-    "gpt-5.4-mini": "xhigh",
-    "gpt-5.4": "xhigh",
-    "gpt-5.5": "xhigh",
+  models: {
+    "gpt-5-mini": {
+      extraPrompt: gpt5ExplorationPrompt,
+      reasoningEffort: "low",
+    },
+    "gpt-5.3-codex": {
+      extraPrompt: gpt5CommentaryPrompt,
+      reasoningEffort: "xhigh",
+    },
+    "gpt-5.4-mini": {
+      extraPrompt: gpt5CommentaryPrompt,
+      reasoningEffort: "xhigh",
+    },
+    "gpt-5.4": { extraPrompt: gpt5CommentaryPrompt, reasoningEffort: "xhigh" },
+    "gpt-5.5": { extraPrompt: gpt5CommentaryPrompt, reasoningEffort: "xhigh" },
     // GPT-5.6 trio (Copilot-served OpenAI reasoning models). "xhigh" matches
     // the 5.4/5.5 siblings and is guaranteed to be on their effort ladder; the
-    // ladder also exposes "max" (now a valid config value — see
-    // ReasoningEffortSchema) for users who want to opt the trio up.
-    "gpt-5.6-sol": "xhigh",
-    "gpt-5.6-terra": "xhigh",
-    "gpt-5.6-luna": "xhigh",
+    // ladder also exposes "max" (a valid config value — see ReasoningEffortSchema)
+    // for users who want to opt the trio up.
+    "gpt-5.6-sol": {
+      extraPrompt: gpt5CommentaryPrompt,
+      reasoningEffort: "xhigh",
+    },
+    "gpt-5.6-terra": {
+      extraPrompt: gpt5CommentaryPrompt,
+      reasoningEffort: "xhigh",
+    },
+    "gpt-5.6-luna": {
+      extraPrompt: gpt5CommentaryPrompt,
+      reasoningEffort: "xhigh",
+    },
   },
+  smallModel: "gpt-5-mini",
   useFunctionApplyPatch: true,
   useMessagesApi: true,
   useResponsesApiWebSearch: true,
@@ -210,7 +243,88 @@ function ensureConfigFile(): void {
   }
 }
 
-function readConfigFromDisk(): AppConfig {
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+/**
+ * Fold the three legacy maps on `obj` into `models` in place. Container-guarded:
+ * a malformed legacy value (e.g. a hand-edited `extraPrompts` that isn't an
+ * object) is skipped rather than iterated into junk entries. Individual leaf
+ * values flow through unchecked so a bad one (e.g. an invalid reasoning effort)
+ * still fails loudly at schema validation, on the new `models.<id>.…` path.
+ */
+function foldLegacyTuning(
+  obj: Record<string, unknown>,
+  models: Record<string, Record<string, unknown>>,
+): void {
+  const ensure = (id: string): Record<string, unknown> => (models[id] ??= {})
+
+  const extraPrompts = obj.extraPrompts
+  if (isPlainObject(extraPrompts)) {
+    for (const [id, prompt] of Object.entries(extraPrompts)) {
+      ensure(id).extraPrompt ??= prompt
+    }
+  }
+  const efforts = obj.modelReasoningEfforts
+  if (isPlainObject(efforts)) {
+    for (const [id, effort] of Object.entries(efforts)) {
+      ensure(id).reasoningEffort ??= effort
+    }
+  }
+  const ctxModels = obj.responsesApiContextManagementModels
+  if (Array.isArray(ctxModels)) {
+    for (const id of ctxModels) {
+      if (typeof id === "string") {
+        ensure(id).responsesApiContextManagement ??= true
+      }
+    }
+  }
+}
+
+/**
+ * Fold the legacy parallel tuning maps (`extraPrompts`, `modelReasoningEfforts`,
+ * `responsesApiContextManagementModels`) into the consolidated `models` record
+ * and DELETE the legacy keys. Runs on the raw parsed JSON before validation.
+ *
+ * Idempotent: a no-op (`migrated: false`, same object) when no legacy key is
+ * present. Existing `models` entries win over legacy values (`??=`), so a
+ * half-migrated file (both shapes) merges rather than clobbers.
+ *
+ * MUST delete the legacy keys: `AppConfigSchema` is `.loose()`, so leaving them
+ * would (a) make `detectUnknownKeys` warn "unknown keys (ignored)" — implying the
+ * user's tuning was dropped — and (b) strand stale data on disk forever. Deleting
+ * converges the on-disk file to exactly one representation.
+ */
+export function migrateLegacyModelTuning(raw: unknown): {
+  config: unknown
+  migrated: boolean
+} {
+  if (!isPlainObject(raw)) {
+    return { config: raw, migrated: false }
+  }
+  const obj = raw
+  const hasLegacy =
+    "extraPrompts" in obj
+    || "modelReasoningEfforts" in obj
+    || "responsesApiContextManagementModels" in obj
+  if (!hasLegacy) return { config: raw, migrated: false }
+
+  const models: Record<string, Record<string, unknown>> = {
+    // Start from any already-present new-shape entries so a half-migrated file
+    // merges rather than overwrites. Spreading `undefined` is a safe no-op.
+    ...(obj.models as Record<string, Record<string, unknown>> | undefined),
+  }
+  foldLegacyTuning(obj, models)
+
+  const next: Record<string, unknown> = { ...obj, models }
+  delete next.extraPrompts
+  delete next.modelReasoningEfforts
+  delete next.responsesApiContextManagementModels
+  return { config: next, migrated: true }
+}
+
+function readConfigFromDisk(): { config: AppConfig; migrated: boolean } {
   ensureConfigFile()
   let parsed: unknown
   try {
@@ -221,13 +335,18 @@ function readConfigFromDisk(): AppConfig {
         `${JSON.stringify(defaultConfig, null, 2)}\n`,
         "utf8",
       )
-      return defaultConfig
+      return { config: defaultConfig, migrated: false }
     }
     parsed = JSON.parse(raw)
   } catch (error) {
     consola.error("Failed to read config file, using default config", error)
-    return defaultConfig
+    return { config: defaultConfig, migrated: false }
   }
+
+  // Fold legacy parallel tuning maps into `models` BEFORE validation +
+  // unknown-key detection, so both see the consolidated shape.
+  const migration = migrateLegacyModelTuning(parsed)
+  parsed = migration.config
 
   // Schema-validate before returning. A bad value (e.g. typo'd
   // authType) is fatal — the proxy should not boot with an invalid
@@ -259,43 +378,33 @@ function readConfigFromDisk(): AppConfig {
     )
   }
 
-  return config
+  return { config, migrated: migration.migrated }
 }
 
 function mergeDefaultConfig(config: AppConfig): {
   mergedConfig: AppConfig
   changed: boolean
 } {
-  const extraPrompts = config.extraPrompts ?? {}
-  const defaultExtraPrompts = defaultConfig.extraPrompts ?? {}
-  const modelReasoningEfforts = config.modelReasoningEfforts ?? {}
-  const defaultModelReasoningEfforts = defaultConfig.modelReasoningEfforts ?? {}
+  const models = config.models ?? {}
+  const defaultModels = defaultConfig.models ?? {}
 
-  const missingExtraPromptModels = Object.keys(defaultExtraPrompts).filter(
-    (model) => !Object.hasOwn(extraPrompts, model),
+  // Back-fill whole missing model keys only (one level, matching the historical
+  // Object.hasOwn semantics): a user who customizes one field of an existing
+  // model is not clobbered, and a brand-new curated model is added.
+  const missingModels = Object.keys(defaultModels).filter(
+    (model) => !Object.hasOwn(models, model),
   )
 
-  const missingReasoningEffortModels = Object.keys(
-    defaultModelReasoningEfforts,
-  ).filter((model) => !Object.hasOwn(modelReasoningEfforts, model))
-
-  const hasExtraPromptChanges = missingExtraPromptModels.length > 0
-  const hasReasoningEffortChanges = missingReasoningEffortModels.length > 0
-
-  if (!hasExtraPromptChanges && !hasReasoningEffortChanges) {
+  if (missingModels.length === 0) {
     return { mergedConfig: config, changed: false }
   }
 
   return {
     mergedConfig: {
       ...config,
-      extraPrompts: {
-        ...defaultExtraPrompts,
-        ...extraPrompts,
-      },
-      modelReasoningEfforts: {
-        ...defaultModelReasoningEfforts,
-        ...modelReasoningEfforts,
+      models: {
+        ...defaultModels,
+        ...models,
       },
     },
     changed: true,
@@ -303,10 +412,12 @@ function mergeDefaultConfig(config: AppConfig): {
 }
 
 export function mergeConfigWithDefaults(): AppConfig {
-  const config = readConfigFromDisk()
+  const { config, migrated } = readConfigFromDisk()
   const { mergedConfig, changed } = mergeDefaultConfig(config)
 
-  if (changed) {
+  // Write back when defaults were merged OR a legacy file was migrated, so the
+  // on-disk file always converges to the consolidated `models` shape at boot.
+  if (changed || migrated) {
     try {
       fs.writeFileSync(
         PATHS.CONFIG_PATH,
@@ -314,10 +425,7 @@ export function mergeConfigWithDefaults(): AppConfig {
         "utf8",
       )
     } catch (writeError) {
-      consola.warn(
-        "Failed to write merged extraPrompts to config file",
-        writeError,
-      )
+      consola.warn("Failed to write merged config to config file", writeError)
     }
   }
 
@@ -326,7 +434,7 @@ export function mergeConfigWithDefaults(): AppConfig {
 }
 
 export function getConfig(): AppConfig {
-  cachedConfig ??= readConfigFromDisk()
+  cachedConfig ??= readConfigFromDisk().config
   return cachedConfig
 }
 
@@ -362,7 +470,7 @@ export function writeConfig(next: AppConfig): AppConfig {
 
 export function getExtraPromptForModel(model: string): string {
   const config = getConfig()
-  return config.extraPrompts?.[model] ?? ""
+  return config.models?.[model]?.extraPrompt ?? ""
 }
 
 export function getSmallModel(): string {
@@ -370,17 +478,13 @@ export function getSmallModel(): string {
   return config.smallModel ?? "gpt-5-mini"
 }
 
-export function getResponsesApiContextManagementModels(): Array<string> {
+export function isResponsesApiContextManagementModel(model: string): boolean {
   const config = getConfig()
   return (
-    config.responsesApiContextManagementModels
-    ?? defaultConfig.responsesApiContextManagementModels
-    ?? []
+    config.models?.[model]?.responsesApiContextManagement
+    ?? defaultConfig.models?.[model]?.responsesApiContextManagement
+    ?? false
   )
-}
-
-export function isResponsesApiContextManagementModel(model: string): boolean {
-  return getResponsesApiContextManagementModels().includes(model)
 }
 
 /**
@@ -396,17 +500,17 @@ export function getPromptCacheRetention(): "in_memory" | "24h" | undefined {
 /**
  * The explicitly-authored effort for a model, or `undefined` when none is set.
  * "Authored" = a user entry OR a curated `defaultConfig` entry; both are honored
- * so a config that doesn't carry `modelReasoningEfforts` (a test stub, or a
- * pre-field user config) still gets the curated per-model value. Returns
- * `undefined` — not "high" — so callers can layer a family default in between.
+ * so a config that doesn't carry a `models` entry (a test stub, or a pre-field
+ * user config) still gets the curated per-model value. Returns `undefined` — not
+ * "high" — so callers can layer a family default in between.
  */
 export function getReasoningEffortOverride(
   model: string,
 ): ReasoningEffort | undefined {
   const config = getConfig()
   return (
-    config.modelReasoningEfforts?.[model]
-    ?? defaultConfig.modelReasoningEfforts?.[model]
+    config.models?.[model]?.reasoningEffort
+    ?? defaultConfig.models?.[model]?.reasoningEffort
   )
 }
 
