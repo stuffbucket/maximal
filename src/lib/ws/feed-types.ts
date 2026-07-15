@@ -125,6 +125,26 @@ export interface LiveFeedSnapshot {
   readonly health: SidecarHealth
 }
 
+/**
+ * The state inlined into the served HTML as `window.__STATE__` for instant paint
+ * (§1.4): the full snapshot plus a few first-paint-only extras. Declared here (with
+ * the snapshot) so BOTH the sidecar's `buildInlineUiState` (routes/ui/inline-state.ts)
+ * and the shell's `readInlineState` (proxy/inline-state-client.ts) agree on the shape
+ * without the shell importing the sidecar's stateful builder.
+ */
+export interface InlineUiState {
+  /** The full live snapshot (same shape the WS sends on connect). */
+  readonly snapshot: LiveFeedSnapshot
+  /** The minted session token the tab uses to authenticate the WS (§6.5). */
+  readonly sessionToken: string
+  /** Server-persisted locale override, off localStorage (§1.4 / i18n.md). */
+  readonly locale: string
+  /** The discovered bound port so the client derives the WS URL (§1.1). */
+  readonly boundPort: number
+  /** Per-version update-banner dismissal (§3.2), server-side not localStorage. */
+  readonly dismissedUpdateVersion: string | null
+}
+
 // TODO(single-window §1.3): these two frame unions cross an untrusted wire and
 // feed `parseServerMessage` (live-feed-core.ts) + the inlined `window.__STATE__`.
 // The repo convention for wire payloads is Zod-first (const schema + inferred

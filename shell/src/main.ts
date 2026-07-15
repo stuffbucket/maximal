@@ -11,6 +11,7 @@ import type {
 } from "../../src/lib/config/settings-types";
 import type { AuthStatus, EventSubscription, UpstreamRejection } from "./proxy/client";
 import { apiCall, subscribeAuthEvents } from "./proxy/client";
+import { readInlineState } from "./proxy/inline-state-client";
 import { mountApiClients } from "./ui/islands/api-clients-island";
 import { mountApps } from "./ui/islands/apps-island";
 import { mountModels } from "./ui/islands/models-island";
@@ -2110,6 +2111,11 @@ window.addEventListener("DOMContentLoaded", () => {
   syncFromHash();
   void loadDiagnostics();
   if (readHashSection() === "account") {
+    // Instant paint (§1.4): if the sidecar inlined state, render the account from
+    // it NOW so the tab shows the real auth status on the first frame instead of a
+    // spinner; loadAuthStatus() then confirms/refreshes and the WS keeps it live.
+    const inlined = readInlineState(window);
+    if (inlined) renderAccount(inlined.snapshot.auth);
     void loadAuthStatus();
     openAuthEvents();
   }

@@ -1,5 +1,3 @@
-import type { LiveFeedSnapshot } from "~/lib/ws/feed-types"
-
 /**
  * Instant paint via inlined `window.__STATE__` (spec §1.4).
  *
@@ -9,30 +7,19 @@ import type { LiveFeedSnapshot } from "~/lib/ws/feed-types"
  * ALSO carries the locale override (§1.4) and the per-version update-banner
  * dismissal (§3.2) that would otherwise live in evictable client storage.
  *
- * The inlined shape IS the `LiveFeedSnapshot` (feed-types.ts) plus a few
- * first-paint-only extras, so the first frame never disagrees with the first WS
- * frame.
- *
- * Integration point (not done here): `serve()` in `src/routes/ui/route.ts` calls
- * `injectInlineState(html, state)` when `isHtmlResponse(hit.type)` before building
- * the Response. Left un-wired in this scaffold so existing UI-serve tests are
- * unaffected until the builder is real.
+ * The inlined shape IS the `InlineUiState` (feed-types.ts) — the `LiveFeedSnapshot`
+ * plus a few first-paint-only extras — so the first frame never disagrees with the
+ * first WS frame. `serve()` in `src/routes/ui/route.ts` injects it into the settings
+ * HTML; the shell reads it back via `readInlineState` (proxy/inline-state-client.ts).
  */
+import type { InlineUiState } from "~/lib/ws/feed-types"
+
 import { state } from "~/lib/runtime-state/state"
 import { buildSnapshot } from "~/lib/ws/live-feed"
 
-export interface InlineUiState {
-  /** The full live snapshot (same shape the WS sends on connect). */
-  readonly snapshot: LiveFeedSnapshot
-  /** The minted session token the tab uses to authenticate the WS (§6.5). */
-  readonly sessionToken: string
-  /** Server-persisted locale override, off localStorage (§1.4 / i18n.md). */
-  readonly locale: string
-  /** The discovered bound port so the client derives the WS URL (§1.1). */
-  readonly boundPort: number
-  /** Per-version update-banner dismissal (§3.2), server-side not localStorage. */
-  readonly dismissedUpdateVersion: string | null
-}
+// Re-export the shared shape so existing importers of `~/routes/ui/inline-state`
+// keep resolving it (the canonical declaration lives in feed-types.ts).
+export type { InlineUiState } from "~/lib/ws/feed-types"
 
 /**
  * Default locale for the inlined state. TODO(single-window §1.4): the chosen
