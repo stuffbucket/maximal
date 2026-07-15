@@ -31,7 +31,7 @@ describe("route enumeration — active now", () => {
   })
 })
 
-describe.skip("every mutating /settings/api route is Origin-gated — unskip when wired", () => {
+describe("every mutating /settings/api route is Origin-gated — unskip when wired", () => {
   test("evil Origin is rejected on every POST/PUT/DELETE under /settings/api", async () => {
     const evil = { origin: "https://evil.example" } as const
     for (const route of server.routes) {

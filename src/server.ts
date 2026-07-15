@@ -4,13 +4,18 @@ import { cors } from "hono/cors"
 import { logger } from "hono/logger"
 
 import {
+  buildCorsOptions,
+  createOriginGuardMiddleware,
+  MANDATORY_AUTH_PREFIX,
+} from "./lib/auth/origin-guard"
+import {
   createAuthMiddleware,
   requireGithubAuth,
 } from "./lib/auth/request-auth"
 import { traceIdMiddleware } from "./lib/http/trace"
 import { staleRefreshMiddleware } from "./lib/models/refresh-models"
 import { cacheModels } from "./lib/platform/utils"
-import { getModelsLoadedAtMs } from "./lib/runtime-state/state"
+import { getModelsLoadedAtMs, state } from "./lib/runtime-state/state"
 import { buildStatus } from "./lib/runtime-state/status"
 import { BUILD_VERSION } from "./lib/update/build-info"
 import { completionRoutes } from "./routes/chat-completions/route"
@@ -47,7 +52,19 @@ server.use(async (c, next) => {
   await next()
 })
 server.use(logger())
-server.use(cors())
+// Control-surface hardening (§6, ADR-0021). `boundPort` is read lazily per
+// request — `runServer` sets `state.boundPort` from the resolved `--port` before
+// it binds, and in-memory tests fall back to the 4141 default.
+const boundPort = (): number => state.boundPort
+// CORS narrowed from `*` to a localhost allowlist. The OPTIONS preflight is the
+// load-bearing case (auth bypasses OPTIONS), so a `*` here would let any origin
+// preflight-probe the control surface.
+server.use(cors(buildCorsOptions(boundPort)))
+// Reject any present, non-localhost `Origin` on the control prefixes
+// (`/settings/api`, `/_internal`, `/_debug/state`) — including `/_internal/shutdown`.
+// A missing Origin passes (the CLI/plugin/SDK invariant, §6.6). Mounted before
+// auth so a cross-origin browser request is refused regardless of any key.
+server.use(createOriginGuardMiddleware({ boundPort }))
 server.use(
   "*",
   createAuthMiddleware({
@@ -59,12 +76,22 @@ server.use(
       "/settings",
       "/settings/",
       "/_debug/state",
+      // The read-only, secret-redacting diagnostics endpoint (§1.7): the data
+      // behind the "open in any browser" diagnostics page, deliberately
+      // unauthenticated (§6.5). GET-only and CSRF-safe via the Origin guard
+      // above, so it is exempt from the /settings/api mandatory-auth prefix.
+      "/settings/api/diagnostics",
       "/setup-status",
     ],
     // /ui/* serves the settings + dashboard UI shells and their assets.
     // /settings/api/* are data endpoints — gated by requireAuthPrefixes.
     allowUnauthenticatedPrefixes: ["/ui"],
     requireAuthPrefixes: ["/settings/api"],
+    // §6.2: /settings/api stays auth-mandatory even when the user-facing
+    // `enforce` toggle is off — a local browser page must not be able to drive
+    // the control surface key-less. The shell-key bypass keeps the Settings UI
+    // working. One auth decision, not a parallel gate (see origin-guard.ts).
+    alwaysEnforcePrefixes: [MANDATORY_AUTH_PREFIX],
     // The dashboard at /ui/dashboard fetches these endpoints from the
     // same machine. Trusting loopback lets us drop the client-side API
     // key UI (and its clear-text storage) without exposing the same

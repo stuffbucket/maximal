@@ -30,7 +30,7 @@ describe("hardening constants — active now", () => {
   })
 })
 
-describe.skip("isAllowedOrigin — unskip when implemented", () => {
+describe("isAllowedOrigin — unskip when implemented", () => {
   test("a missing Origin passes — CLI/plugin clients send none (§6.6 invariant)", () => {
     expect(isAllowedOrigin(null, PORT)).toBe(true)
   })
@@ -46,7 +46,7 @@ describe.skip("isAllowedOrigin — unskip when implemented", () => {
   })
 })
 
-describe.skip("isCsrfGuardedPath — unskip when implemented", () => {
+describe("isCsrfGuardedPath — unskip when implemented", () => {
   test("guards the control prefixes and not the proxy surface", () => {
     expect(isCsrfGuardedPath("/settings/api/accounts")).toBe(true)
     expect(isCsrfGuardedPath("/_internal/shutdown")).toBe(true)
@@ -62,13 +62,16 @@ function mountGuarded() {
   return app
 }
 
-describe.skip("origin guard middleware — unskip when implemented", () => {
+describe("origin guard middleware — unskip when implemented", () => {
   test("evil Origin → 403 on a mutation", async () => {
     const res = await mountGuarded().request("/settings/api/accounts/remove", {
       method: "POST",
       headers: { origin: "https://evil.example" },
     })
     expect(res.status).toBe(403)
+    // Pin the machine-readable error contract — clients branch on `type`.
+    const body = (await res.json()) as { error?: { type?: string } }
+    expect(body.error?.type).toBe("csrf_error")
   })
 
   test("localhost Origin passes the Origin gate (reaches the route)", async () => {

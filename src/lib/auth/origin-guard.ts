@@ -29,13 +29,11 @@
  * `MANDATORY_AUTH_PREFIX` with `isEnforcing: () => true`), so there is ONE auth
  * decision, not two.
  *
- * Integration point (not done here): mount the Origin guard + narrowed cors on the
- * app in `server.ts` BEFORE the sub-app routes. Kept out of the live app in this
- * scaffold so the 130 existing `~/server` tests stay green.
+ * Integration point: the Origin guard + narrowed cors are mounted on the app in
+ * `server.ts` before the sub-app routes; `MANDATORY_AUTH_PREFIX` is wired into
+ * `createAuthMiddleware`'s `alwaysEnforcePrefixes`.
  */
 import type { MiddlewareHandler } from "hono"
-
-import { notImplemented } from "~/lib/dev/not-implemented"
 
 /**
  * Prefixes that mutate or expose control state and therefore need the Origin gate.
@@ -55,6 +53,17 @@ export const CSRF_GUARDED_PREFIXES = [
  */
 export const MANDATORY_AUTH_PREFIX = "/settings/api"
 
+/** Loopback hostnames a browser may report in an `Origin` for the local UI. */
+const LOCALHOST_HOSTNAMES = new Set([
+  "localhost",
+  "127.0.0.1",
+  "[::1]", // URL.hostname brackets IPv6 literals
+])
+
+function pathMatchesPrefix(path: string, prefix: string): boolean {
+  return path === prefix || path.startsWith(prefix + "/")
+}
+
 /**
  * True if the request may proceed past the Origin gate.
  * - `origin === null` (no header) → true  — non-browser CLI callers (§6.6).
@@ -67,12 +76,28 @@ export function isAllowedOrigin(
   origin: string | null,
   boundPort: number,
 ): boolean {
-  return notImplemented("isAllowedOrigin", { origin, boundPort })
+  // No Origin header at all: the CLI/plugin/SDK invariant (§6.6). `Origin` is a
+  // Forbidden header, so page JS can never suppress it — a missing one means a
+  // non-browser caller, which we let through.
+  if (origin === null) return true
+  let url: URL
+  try {
+    url = new URL(origin)
+  } catch {
+    // Unparseable / opaque origin (e.g. the literal "null" a sandboxed iframe
+    // sends) — treat as hostile.
+    return false
+  }
+  if (!LOCALHOST_HOSTNAMES.has(url.hostname)) return false
+  // A localhost UI is always served on an explicit port, so require an exact
+  // match against the bound port — not a blanket "any localhost" allow (which
+  // would let a page on another local port drive the control surface).
+  return url.port === String(boundPort)
 }
 
 /** True if `path` falls under any guarded prefix (drives where the gate applies). */
 export function isCsrfGuardedPath(path: string): boolean {
-  return notImplemented("isCsrfGuardedPath", { path })
+  return CSRF_GUARDED_PREFIXES.some((prefix) => pathMatchesPrefix(path, prefix))
 }
 
 export interface OriginGuardOptions {
@@ -80,20 +105,26 @@ export interface OriginGuardOptions {
   readonly boundPort: () => number
 }
 
-/** 403s a present, non-localhost `Origin`/`Referer` on any guarded path. */
+/** 403s a present, non-localhost `Origin` on any guarded path. */
 export function createOriginGuardMiddleware(
   options: OriginGuardOptions,
 ): MiddlewareHandler {
-  // NOTE: the implementation will be `async` (it awaits `next()`); the stub is
-  // sync because it only throws. Restore `async` when filling in the body.
-  return (c, next) => {
-    // TODO(single-window §6.1): if isCsrfGuardedPath(path) and Origin present and
-    // !isAllowedOrigin(origin, boundPort()) → 403; else next().
-    return notImplemented("originGuardMiddleware", {
-      options,
-      path: c.req.path,
-      next,
-    })
+  return async (c, next) => {
+    if (
+      isCsrfGuardedPath(c.req.path)
+      && !isAllowedOrigin(c.req.header("origin") ?? null, options.boundPort())
+    ) {
+      return c.json(
+        {
+          error: {
+            message: "Forbidden: cross-origin request to a control endpoint",
+            type: "csrf_error",
+          },
+        },
+        403,
+      )
+    }
+    return next()
   }
 }
 
@@ -105,5 +136,11 @@ export function createOriginGuardMiddleware(
 export function buildCorsOptions(boundPort: () => number): {
   origin: (origin: string) => string | null
 } {
-  return notImplemented("buildCorsOptions", { boundPort })
+  // hono/cors calls this with the request's `Origin`; echo it back (allow) only
+  // for a localhost origin on the bound port, else return null (no
+  // Access-Control-Allow-Origin header → the browser blocks the cross-origin read).
+  return {
+    origin: (origin: string) =>
+      origin && isAllowedOrigin(origin, boundPort()) ? origin : null,
+  }
 }

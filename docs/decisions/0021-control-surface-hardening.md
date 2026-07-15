@@ -1,7 +1,7 @@
 ---
 id: ADR-0021
 title: Control-surface hardening (Origin allowlist + mandatory settings-api auth)
-status: proposed
+status: accepted
 date: 2026-07-14
 authors:
   - stuffbucket
@@ -80,6 +80,35 @@ narrowed **global** `cors()` must all leave those routes reachable.
   nothing and is CSRF-safe by construction.
 - The `state.shellApiKey` role changes (ADR-0003): clarify whether it survives
   as the minted token's source or is replaced.
+
+## Implementation status
+
+**Landed (Build Track 1, 2026-07-15) — the live hole is closed:**
+
+- **Origin allowlist (§6.1):** `createOriginGuardMiddleware`
+  (`src/lib/auth/origin-guard.ts`) 403s any present, non-localhost `Origin` on
+  `/settings/api`, `/_internal` (incl. `/_internal/shutdown`), and `/_debug/state`;
+  a missing `Origin` passes (CLI/plugin/SDK invariant, §6.6). Mounted in
+  `server.ts` before auth. Port-exact against `state.boundPort` (set by
+  `runServer` from `--port`, default 4141).
+- **Mandatory `/settings/api` auth (§6.2):** delivered as the
+  `alwaysEnforcePrefixes` mode of the existing `createAuthMiddleware`, so the
+  `shellApiKey` bypass + client attribution stay single-sourced. Read-only
+  `/settings/api/diagnostics` GET is exempt (§1.7/§6.5), CSRF-safe via the Origin
+  guard.
+- **CORS narrowed (§6.3):** `buildCorsOptions` replaces `cors()`'s `*` with a
+  localhost-on-the-bound-port echo (null otherwise), covering the OPTIONS preflight.
+- **CLI/plugin non-regression (§6.6):** asserted by
+  `tests/security/cli-client-regression.test.ts` (no-Origin `Bearer` on `/v1/*`
+  still 200). `origin-guard.ts` mutation score 88%.
+
+**Pending (later tracks):**
+
+- **Minted WS session token (§6.5)** — depends on the WS transport track; today the
+  Settings UI still authenticates via `state.shellApiKey`. The `shellApiKey`-vs-token
+  question (ADR-0003) is unresolved.
+- **Destructive ops native/IPC-only (§6.4)** — `accounts/remove` + `api-keys/enforce`
+  are Origin-gated + auth-mandatory now, but not yet IPC-only.
 
 ## Migration
 

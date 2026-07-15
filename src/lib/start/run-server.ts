@@ -126,6 +126,10 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   state.rateLimitSeconds = options.rateLimit
   state.rateLimitWait = options.rateLimitWait
   state.showToken = options.showToken
+  // Record the port we're about to bind so the control-surface Origin guard +
+  // CORS (server.ts) know which localhost origin is "us" (§6). Set before the
+  // bind since the server module reads it lazily, per-request.
+  state.boundPort = options.port
 
   await ensurePaths()
   bootSecrets()

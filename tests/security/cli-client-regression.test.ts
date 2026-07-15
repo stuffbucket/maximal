@@ -27,7 +27,7 @@ function mountWithGuard() {
   return app
 }
 
-describe.skip("no-Origin Bearer client on /v1/* still succeeds — unskip when implemented", () => {
+describe("no-Origin Bearer client on /v1/* still succeeds — unskip when implemented", () => {
   test("a Bearer request with no Origin header reaches /v1/messages", async () => {
     const res = await mountWithGuard().request("/v1/messages", {
       method: "POST",

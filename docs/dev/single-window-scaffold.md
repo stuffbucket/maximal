@@ -20,7 +20,7 @@ edited, so the 1477-test suite stays green. Each stub delegates to
 | `src/lib/ws/feed-types.ts` | §1.3 | wire contract shared by sidecar **and** shell (relative import, DOM-free) |
 | `src/lib/ws/live-feed.ts` | §1.3 | `LiveFeedHub` constructed in `run-server.ts`; `start()` after sidecar up |
 | `src/routes/ws/route.ts` | §1.3 | mount `createWsRoutes()` on the app at `WS_PATH`; pass `createWebSocketHandler(...)` into `serve({ bun: { websocket } })` in `run-server.ts`. **srvx-upgrade gate: PROVEN** — a real WebSocket connects through the srvx→Bun upgrade; the `undefined` return after `server.upgrade()` survives Hono + srvx + Bun with no coercion (no plugin fallback needed). The `GET` upgrade + minimal non-throwing WS callbacks are wired; presence/hub logic in the callbacks is still TODO. |
-| `src/lib/auth/origin-guard.ts` | §6.1 | mount `createOriginGuardMiddleware` in `server.ts` **before** the sub-app routes; swap `cors()` for `buildCorsOptions(...)`. §6.2 (mandatory `/settings/api` auth) is **not** here — deliver it as an always-enforce mode of the existing `createAuthMiddleware` so the `shellApiKey` bypass + attribution stay single-sourced |
+| `src/lib/auth/origin-guard.ts` | §6.1 | **DONE (Build Track 1):** `createOriginGuardMiddleware` + narrowed `buildCorsOptions(...)` are mounted in `server.ts` before the sub-app routes; the bound port is read lazily from `state.boundPort` (set by `runServer`, default 4141). §6.2 (mandatory `/settings/api` auth) is delivered as the `alwaysEnforcePrefixes` mode of the existing `createAuthMiddleware`, so the `shellApiKey` bypass + attribution stay single-sourced; the read-only `/settings/api/diagnostics` GET is exempt (§1.7/§6.5) and CSRF-safe via the Origin guard |
 | `src/routes/ui/inline-state.ts` | §1.4 | call `injectInlineState` inside `serve()` in `src/routes/ui/route.ts` when `isHtmlResponse(hit.type)` |
 | `shell/src/router.ts` | §1.4 / ADR-0020 | DOM-free router core; `history.replaceState` only |
 | `shell/src/router-bootstrap.ts` | §1.4 | DOM glue: reads `window`, calls `createRouter`; replaces hash routing in `main.ts` |
@@ -40,9 +40,9 @@ the matching body lands. Contract/shape/grep tests run **live now**.
 | `tests/ws/live-feed-contract.test.ts` | **live** | — (guards the 9-event coverage) |
 | `tests/ws/srvx-upgrade-handshake.test.ts` | **PROVEN**, runs in the default suite (`start-run-server.test.ts` now injects its `serve` stub via `__setServeForTests` instead of mocking srvx, so the two co-run; `mockModuleLeakGuard` forbids re-adding `mock.module("srvx", …)`) | — |
 | `tests/ws/live-feed-core.test.ts` | skip | core helpers |
-| `tests/security/origin-guard.test.ts` | partial (consts) | guard middleware |
-| `tests/security/settings-api-route-enumeration.test.ts` | partial (enum) | guard wired into `server.ts` |
-| `tests/security/cli-client-regression.test.ts` | skip | guard middleware |
+| `tests/security/origin-guard.test.ts` | **live** — guard implemented + mounted (§6.1–6.2); origin-guard.ts mutation score 88% (message wording deliberately unpinned) | — |
+| `tests/security/settings-api-route-enumeration.test.ts` | **live** — every mutating `/settings/api` route asserts 403 to an evil Origin (self-extending) | — |
+| `tests/security/cli-client-regression.test.ts` | **live** — no-Origin `Bearer` on `/v1/*` still 200 (§6.6) | — |
 | `tests/ui/inline-state.test.ts` | skip | inline-state fns |
 | `tests/spa-router.test.ts` | skip | `createRouter` |
 | `tests/single-history-invariant.test.ts` | **live** | — (grep gate; add `main.ts`/`dashboard/main.ts` to `ROUTING_SOURCES` after the SPA/dashboard port) |
@@ -53,8 +53,9 @@ the matching body lands. Contract/shape/grep tests run **live now**.
 - **`knip` (check:deep)** will report the new exports as unused-in-production until
   the integration points above are wired — expected during scaffolding.
 - **Mutation targets** (`stryker.conf.json` `mutate`, one module at a time):
-  `src/lib/ws/tray-open.ts`, then `presence-registry.ts` (the identity guard),
-  then `src/lib/auth/origin-guard.ts` (the `isAllowedOrigin` / enforce-decoupling).
+  `src/lib/ws/tray-open.ts`, then `presence-registry.ts` (the identity guard).
+  `src/lib/auth/origin-guard.ts` was mutation-checked at Build Track 1 (88%; the
+  only survivors are the 403 message wording, deliberately unpinned).
 - **No jsdom.** DOM-touching shell code is split into a DOM-free core (imported +
   unit-tested) and thin `*-bootstrap` / `*-client` glue (source-grepped only).
   Keep that split when filling bodies in.

@@ -38,6 +38,15 @@ export interface State {
   copilotApiUrl?: CopilotHost
 
   /**
+   * The port the HTTP server actually bound to this run. Set by `runServer`
+   * from the resolved `--port` (default 4141). The control-surface Origin guard
+   * + narrowed CORS read it to decide which `http://localhost:<port>` origin is
+   * "us" (§6, ADR-0021) — it must reflect the real bound port, not a literal,
+   * so a non-default `--port` UI still passes its own origin gate (§1.1).
+   */
+  boundPort: number
+
+  /**
    * Set by the Tauri shell at sidecar spawn (env var MAXIMAL_SHELL_KEY).
    * When a request carries this exact key, auth always succeeds — even
    * if the user has flipped "Block unknown connections" on. Lets the
@@ -74,6 +83,10 @@ export const state: State = {
   rateLimitWait: false,
   showToken: false,
   verbose: false,
+  // Default port; `runServer` overwrites with the resolved `--port` at boot.
+  // In-memory tests (`server.request(...)`, no runServer) see this default,
+  // which matches the CLI's own 4141 default (src/lib/start/cli.ts).
+  boundPort: 4141,
   vsCodeDeviceId: randomUUID(),
   shellApiKey: process.env.MAXIMAL_SHELL_KEY?.trim() || undefined,
 }
