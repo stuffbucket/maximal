@@ -94,6 +94,11 @@
               <a class="nav__item" href="#models" data-nav="models" data-i18n="nav-models"></a>
             </li>
             <li>
+              <!-- TODO(single-window §3.4): add a `nav-usage` i18n key across all
+                   catalogs (loop in the i18n expert); hardcoded until then. -->
+              <a class="nav__item" href="#usage" data-nav="usage">Usage</a>
+            </li>
+            <li>
               <a class="nav__item" href="#logs" data-nav="logs" data-i18n="nav-logs"></a>
             </li>
             <li>
@@ -598,6 +603,15 @@
               <p class="section__sub" data-i18n="models-sub"></p>
             </header>
             <div id="models-root"></div>
+          </section>
+
+          <!-- USAGE (§4: ported from the standalone dashboard) -->
+          <section class="section" data-section="usage" hidden>
+            <header class="section__head">
+              <h2 class="section__title">Usage</h2>
+              <p class="section__sub">Token usage and cost by model.</p>
+            </header>
+            <div id="usage-root"></div>
           </section>
 
           <!-- LOGS -->

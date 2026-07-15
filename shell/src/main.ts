@@ -19,9 +19,11 @@ import {
 import { mountApiClients } from "./ui/islands/api-clients-island";
 import { mountApps } from "./ui/islands/apps-island";
 import { mountModels } from "./ui/islands/models-island";
+import { mountUsage } from "./ui/islands/usage-island";
 
 type SectionId =
   | "account"
+  | "usage"
   | "general"
   | "apps"
   | "endpoint"
@@ -32,6 +34,7 @@ type SectionId =
 
 const SECTIONS: ReadonlyArray<SectionId> = [
   "account",
+  "usage",
   "general",
   "apps",
   "endpoint",
@@ -851,6 +854,10 @@ function openLiveFeed(): void {
           }
           case "clients.changed": {
             window.dispatchEvent(new CustomEvent("maximal:clients-refresh"));
+            break;
+          }
+          case "usage": {
+            window.dispatchEvent(new CustomEvent("maximal:usage-refresh"));
             break;
           }
           default: {
@@ -2134,6 +2141,7 @@ window.addEventListener("DOMContentLoaded", () => {
   mountApiClients();
   mountApps();
   mountModels();
+  mountUsage();
   wireNav();
   syncFromHash();
   // Open the single page-lifetime live feed (ADR-0019): presence + auth/apps/
@@ -2161,6 +2169,9 @@ window.addEventListener("hashchange", () => {
   }
   if (section === "models") {
     window.dispatchEvent(new CustomEvent("maximal:models-refresh"));
+  }
+  if (section === "usage") {
+    window.dispatchEvent(new CustomEvent("maximal:usage-refresh"));
   }
   if (section === "account") {
     void loadAuthStatus();
