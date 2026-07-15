@@ -68,6 +68,26 @@ function syncFromHash(): void {
 }
 
 /**
+ * The single in-app navigation entry point (spec §1.4 / ADR-0020). Uses
+ * `history.replaceState` — NEVER `location.hash =` (assigning the hash pushes a
+ * history entry, and once `history.length > 1` a stale tab's `window.close()`
+ * silently no-ops, breaking tray dedup §1.2). replaceState updates the `#section`
+ * deep-link contract without accruing history; we then re-run the existing
+ * `hashchange` side-effect path (section load/refresh, auth-stream lifecycle) so
+ * behavior is identical to the old hash-assignment flow.
+ */
+function navigateTo(section: SectionId): void {
+  if (window.location.hash !== `#${section}`) {
+    window.history.replaceState(null, "", `#${section}`);
+    // replaceState does NOT fire hashchange; drive the side-effect path manually.
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+  } else {
+    // Same hash → nothing to update; just (re)show the section.
+    showSection(section);
+  }
+}
+
+/**
  * Bind a direct click handler to nav links in addition to the
  * hashchange listener. Belt-and-braces: in some webviews (Tauri's
  * WebKit on macOS in particular) a click on an `<a href="#x">` whose
@@ -84,12 +104,7 @@ function wireNav(): void {
       const id = link.dataset.nav;
       if (!id || !isSectionId(id)) return;
       ev.preventDefault();
-      if (window.location.hash !== `#${id}`) {
-        window.location.hash = id;
-      } else {
-        // Same hash → hashchange won't fire. Drive it manually.
-        showSection(id);
-      }
+      navigateTo(id);
     });
   }
 }
@@ -189,8 +204,7 @@ function navLink(section: SectionId, textKey: string): HTMLAnchorElement {
   // for the initial boot the hashchange listener still drives navigation.
   a.addEventListener("click", (ev) => {
     ev.preventDefault();
-    if (window.location.hash !== `#${section}`) window.location.hash = section;
-    else showSection(section);
+    navigateTo(section);
   });
   return a;
 }

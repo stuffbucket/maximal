@@ -10,10 +10,10 @@ import { resolve } from "node:path"
  * the source (the repo tests DOM glue by text — there is no jsdom harness) so a
  * regression reds CI at commit time. Runs LIVE now.
  *
- * Scope note (§7): the legacy offenders — `shell/src/main.ts`'s `location.hash =`
- * writes and `shell/src/dashboard/main.ts:337`'s `history.pushState` — are NOT yet
- * in scope; they join this ban when the SPA refactor + dashboard port land. Add
- * them to ROUTING_SOURCES then.
+ * Scope note (§7): `shell/src/main.ts` is now in scope — its nav goes through
+ * `history.replaceState` (never `location.hash =`). `shell/src/dashboard/main.ts:337`'s
+ * `history.pushState` is still OUT of scope; it joins this ban when the dashboard
+ * is ported into the SPA (§4). Add it to ROUTING_SOURCES then.
  */
 
 const REPO_ROOT = resolve(import.meta.dir, "..")
@@ -23,6 +23,7 @@ const ROUTING_SOURCES = [
   "shell/src/router-bootstrap.ts",
   "shell/src/proxy/live-feed-client.ts",
   "shell/src/proxy/live-feed-core.ts",
+  "shell/src/main.ts",
 ]
 
 function read(rel: string): string {
