@@ -46,3 +46,22 @@ export interface QuotaDetails {
 export interface UsageData {
   quota_snapshots?: Record<string, QuotaDetails> | null;
 }
+
+/** One recent request row from `/token-usage/events`. */
+export interface TokenUsageEvent {
+  created_at_utc: string;
+  created_at_ms: number;
+  endpoint: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+}
+
+/** A page of recent events from `/token-usage/events`. */
+export interface TokenUsageEventsPage {
+  items: Array<TokenUsageEvent>;
+  page: number;
+  total: number;
+  total_pages: number;
+}
