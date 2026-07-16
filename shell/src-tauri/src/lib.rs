@@ -1853,36 +1853,6 @@ fn write_locale(app: &AppHandle, tag: &str) {
     }
 }
 
-/// The Settings window title for the active locale — versioned unless the
-/// version is the dev `0.0.0` placeholder. Shared by the window builder and the
-/// live retitle on a locale change so the two can't diverge.
-fn settings_title(app: &AppHandle) -> String {
-    let version = app_version(app);
-    let locale = app.state::<LocaleState>().get();
-    if version == "0.0.0" {
-        native_i18n::tr(&locale, "native-window-settings-title")
-    } else {
-        native_i18n::t(
-            &locale,
-            "native-window-settings-title-versioned",
-            &[("version", &version)],
-        )
-    }
-}
-
-/// Re-title any already-open Settings/Dashboard window to the active locale.
-/// Called from `set_locale` so a picker change updates the OS-drawn titlebar
-/// live, not just on the next window open. No-op for windows that aren't up.
-fn retitle_windows(app: &AppHandle) {
-    if let Some(win) = app.get_webview_window(SETTINGS_WINDOW_LABEL) {
-        let _ = win.set_title(&settings_title(app));
-    }
-    if let Some(win) = app.get_webview_window(DASHBOARD_WINDOW_LABEL) {
-        let locale = app.state::<LocaleState>().get();
-        let _ = win.set_title(&native_i18n::tr(&locale, "native-window-dashboard-title"));
-    }
-}
-
 fn do_reveal_logs_dir(app: &AppHandle) {
     let Some(dir) = maximal_data_dir(app).map(|d| d.join("logs")) else {
         return;
@@ -2312,14 +2282,13 @@ fn set_locale(app: AppHandle, locale: State<'_, LocaleState>, tag: String) -> Re
     // Persist so the NEXT launch's pre-webview strings (startup banner) match
     // this choice instead of falling back to the OS locale.
     write_locale(&app, &tag);
-    // Re-render the OS-drawn chrome NOW: rebuild the tray menu/tooltip and
-    // retitle any open Settings/Dashboard window so the switch is live, not
-    // deferred to the next open. Later notifications/dialogs read LocaleState.
+    // Re-render the OS-drawn chrome NOW: refresh the tray tooltip so the switch
+    // is live. Later notifications/dialogs read LocaleState. (The UI itself is a
+    // browser tab whose title comes from the served HTML — no window to retitle.)
     let state = app.state::<AppStatus>().get();
     if let Err(err) = refresh_tray(&app, state) {
         eprintln!("[shell] tray refresh after locale change failed: {err}");
     }
-    retitle_windows(&app);
     Ok(())
 }
 
