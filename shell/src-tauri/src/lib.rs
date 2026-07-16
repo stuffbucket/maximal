@@ -79,6 +79,12 @@ const SIDECAR_PORT: u16 = 4141;
 /// relay to the splash. MUST match `BOOT_STATUS_MARKER` in src/start.ts.
 const BOOT_STATUS_MARKER: &str = "@@MAXIMAL_STATUS@@";
 
+/// Line the sidecar prints (stdout) when the browser-tab UI asks to quit the
+/// whole app (§1.6): a tab has no Tauri host to `invoke` a quit, so it POSTs
+/// `/_internal/quit` and the sidecar signals us over this channel. MUST match
+/// `QUIT_REQUEST_MARKER` in src/lib/start/boot-status.ts.
+const QUIT_REQUEST_MARKER: &str = "@@MAXIMAL_QUIT@@";
+
 /// Brand-minimum time the splash stays on screen once the sidecar reaches a
 /// Running state, before it fades. The state-aware dismiss loop in
 /// `create_splash` enforces this, and the first-run Settings auto-open
@@ -847,14 +853,25 @@ fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
                     // src/start.ts) drive the splash's live status. Relay the
                     // message and don't echo the raw marker to our own stdout.
                     for raw in text.lines() {
-                        if let Some(msg) = raw.trim().strip_prefix(BOOT_STATUS_MARKER)
+                        let trimmed = raw.trim();
+                        if trimmed == QUIT_REQUEST_MARKER {
+                            // The browser-tab UI asked to quit the whole app
+                            // (§1.6). Route through the same confirm-and-exit
+                            // path as the app-menu/splash Quit, on the main
+                            // thread (the native dialog requires it).
+                            let quit_handle = handle.clone();
+                            let _ = handle.run_on_main_thread(move || {
+                                request_quit(&quit_handle);
+                            });
+                        } else if let Some(msg) =
+                            trimmed.strip_prefix(BOOT_STATUS_MARKER)
                         {
                             let _ = handle.emit_to(
                                 "splash",
                                 "splash:status",
                                 msg.trim().to_string(),
                             );
-                        } else if !raw.is_empty() {
+                        } else if !trimmed.is_empty() {
                             println!("[maximal] {raw}");
                         }
                     }

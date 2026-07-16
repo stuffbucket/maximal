@@ -360,6 +360,43 @@ function setUninstallError(message: string | null): void {
   row.hidden = false;
 }
 
+/**
+ * Wire the in-app "Quit Maximal" button (§1.6). A browser tab has no Tauri host
+ * to invoke a quit, so POST `/_internal/quit`: the sidecar signals the supervising
+ * shell (over stdout) to run its confirm-and-exit. On 202 the shell takes over
+ * (its native confirm dialog); a 409 means we're a plain-CLI run with no shell.
+ */
+function wireQuit(): void {
+  const btn = document.querySelector<HTMLButtonElement>(
+    '[data-action="quit-maximal"]',
+  );
+  if (!btn) return;
+  const err = document.querySelector<HTMLElement>("[data-quit-error]");
+  const showError = (message: string): void => {
+    if (err) {
+      err.textContent = message;
+      err.hidden = false;
+    }
+    btn.disabled = false;
+  };
+  btn.addEventListener("click", () => {
+    btn.disabled = true;
+    if (err) err.hidden = true;
+    void fetch("/_internal/quit", { method: "POST" }).then(
+      (res) => {
+        // 202 → the shell owns the quit now (confirm dialog + exit); keep the
+        // button disabled. 409 → no supervising shell (plain CLI); other → fail.
+        if (res.status === 409) {
+          showError("Not running under the menu-bar app — nothing to quit.");
+        } else if (!res.ok) {
+          showError(`Quit failed (HTTP ${res.status}).`);
+        }
+      },
+      () => showError("Quit request failed."),
+    );
+  });
+}
+
 /** Wire the in-app "Uninstall Maximal…" button. Reads the two option
  *  checkboxes in the card (not the dialog — neither window.confirm nor the
  *  native dialog supports in-dialog checkboxes), summarizes the choices into a
@@ -2138,6 +2175,7 @@ window.addEventListener("DOMContentLoaded", () => {
   wireEndpoint();
   wireGeneral();
   wireUninstall();
+  wireQuit();
   mountApiClients();
   mountApps();
   mountModels();

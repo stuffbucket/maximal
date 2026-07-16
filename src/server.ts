@@ -119,6 +119,10 @@ server.use(
       // loopback + it's Origin-gated), so skip auth for the loopback caller,
       // else dedup would break when "block unknown connections" is on.
       "/_internal/tray-open",
+      // Quit (§1.6): the browser-tab UI POSTs this to quit the whole app (it
+      // has no Tauri host to invoke a quit). Loopback + Origin-gated; keyless
+      // for the local caller like the two above.
+      "/_internal/quit",
     ],
   }),
 )
