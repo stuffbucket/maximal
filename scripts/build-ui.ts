@@ -96,6 +96,20 @@ async function buildDashboard(): Promise<void> {
 async function copyShellChrome(): Promise<void> {
   await mkdir(DIST_ROOT, { recursive: true })
   await cp(join(SHELL_DIR, "splash.html"), join(DIST_ROOT, "splash.html"))
+  // The branded update-confirm window (WebviewUrl::App("update-confirm.html"))
+  // and its two self-hosted faces — copied to dist root so the surface is
+  // self-contained (references ./vendor/fonts/*). See updater.rs.
+  await cp(
+    join(SHELL_DIR, "update-confirm.html"),
+    join(DIST_ROOT, "update-confirm.html"),
+  )
+  await mkdir(join(DIST_ROOT, "vendor/fonts"), { recursive: true })
+  for (const face of ["fraunces-latin.woff2", "commissioner-latin.woff2"]) {
+    await cp(
+      join(SHELL_DIR, "ui/settings/vendor/fonts", face),
+      join(DIST_ROOT, "vendor/fonts", face),
+    )
+  }
   await Bun.write(
     join(DIST_ROOT, "index.html"),
     "<!doctype html><meta charset=utf-8><title>Maximal</title>"
