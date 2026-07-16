@@ -47,7 +47,6 @@ use serde::{Deserialize, Serialize};
 use tauri::{
     image::Image,
     ipc::Channel,
-    menu::{IsMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     webview::PageLoadEvent,
     AppHandle, Emitter, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder,
@@ -129,19 +128,6 @@ const TRAY_ICON_NORMAL: &[u8] = include_bytes!("../icons/tray/icon@2x.png");
 const TRAY_ICON_STARTING: &[u8] = include_bytes!("../icons/tray/icon-starting@2x.png");
 const TRAY_ICON_ATTENTION: &[u8] = include_bytes!("../icons/tray/icon-attention@2x.png");
 
-mod menu_id {
-    pub const SETTINGS: &str = "settings";
-    pub const DASHBOARD: &str = "dashboard";
-    pub const QUIT: &str = "quit";
-    pub const SIGN_IN: &str = "sign_in";
-    pub const ACCOUNT_INFO: &str = "account_info";
-    pub const STARTING: &str = "starting";
-    pub const FAILED: &str = "failed";
-    pub const SHOW_LOGS: &str = "show_logs";
-    pub const RETRY: &str = "retry";
-    pub const OPEN_CONFIG: &str = "open_config";
-    pub const UPGRADE: &str = "upgrade";
-}
 
 // High-level tray state lives in `decisions::SidecarState` (imported above) so
 // the pure tray/splash decisions that read it stay cargo-testable.
@@ -260,10 +246,6 @@ struct LatestUpdate(Mutex<Option<UpdateSnapshot>>);
 impl LatestUpdate {
     fn new() -> Self {
         Self(Mutex::new(None))
-    }
-
-    fn get(&self) -> Option<UpdateSnapshot> {
-        self.0.lock().expect("update mutex poisoned").clone()
     }
 
     /// Stores the snapshot; returns true if it changed (a newly available
@@ -1678,21 +1660,16 @@ fn fire_sign_in_notification(app: &AppHandle) {
 
 fn install_tray(app: &AppHandle) -> tauri::Result<()> {
     let locale = app.state::<LocaleState>().get();
-    let menu = build_menu(app, &locale, SidecarState::Starting)?;
     let icon = icon_for(SidecarState::Starting, false)?;
 
-    // Single-click opens the app (§1.2): a left-click routes to `open_app`
-    // (browser-tab delivery) on BOTH platforms via the pure `click_action`
-    // decision. The menu moves to right-click for now — full menu removal +
-    // browser-delivery of every UI entry point is the remaining §10-manual
-    // cutover (the webview `open_settings_window` is still called from setup /
-    // splash / commands, so it stays until those sites migrate together).
+    // Single-click, NO menu (§1.2): a tray click routes to `open_app` on both
+    // platforms via the pure `click_action` decision. Quit + recovery live in
+    // the browser UI (`/_internal/quit`, §1.6) and the native splash (§3.3), so
+    // the tray no longer carries a menu at all.
     TrayIconBuilder::with_id(TRAY_ID)
-        .menu(&menu)
         .show_menu_on_left_click(false)
         .tooltip(native_i18n::tr(&locale, "native-tooltip-starting"))
         .icon(icon)
-        .on_menu_event(handle_menu_event)
         .on_tray_icon_event(|tray, event| {
             if let TrayIconEvent::Click {
                 button,
@@ -1724,8 +1701,7 @@ fn refresh_tray(app: &AppHandle, state: SidecarState) -> tauri::Result<()> {
     };
     let locale = app.state::<LocaleState>().get();
     let rejection = app.state::<LastRejection>().get();
-    let menu = build_menu(app, &locale, state)?;
-    tray.set_menu(Some(menu))?;
+    // No menu to rebuild (§1.2) — a state change only swaps the icon + tooltip.
     tray.set_icon(Some(icon_for(state, rejection.is_some())?))?;
     tray.set_tooltip(Some(tooltip_for(&locale, state, rejection.as_ref())))?;
     Ok(())
@@ -1821,204 +1797,6 @@ fn tooltip_for(
     native_i18n::tr(locale, key)
 }
 
-fn build_menu(
-    app: &AppHandle,
-    locale: &str,
-    state: SidecarState,
-) -> tauri::Result<Menu<tauri::Wry>> {
-    let settings_item = MenuItem::with_id(
-        app,
-        menu_id::SETTINGS,
-        native_i18n::tr(locale, "native-tray-settings"),
-        true,
-        Some("CmdOrCtrl+,"),
-    )?;
-    let dashboard_item = MenuItem::with_id(
-        app,
-        menu_id::DASHBOARD,
-        native_i18n::tr(locale, "native-tray-dashboard"),
-        true,
-        Some("CmdOrCtrl+D"),
-    )?;
-    let quit_item = MenuItem::with_id(
-        app,
-        menu_id::QUIT,
-        native_i18n::tr(locale, "native-tray-quit"),
-        true,
-        Some("CmdOrCtrl+Q"),
-    )?;
-    let sep1 = PredefinedMenuItem::separator(app)?;
-
-    // An "Upgrade to v…" item leads the menu in the running states whenever the
-    // poll loop has seen a newer release. Built here (before the match) so both
-    // running arms can prepend it; the other arms simply don't reference it.
-    // Clicking it opens the install-channel-neutral download page.
-    let update = app.state::<LatestUpdate>().get();
-    let upgrade_item = match &update {
-        Some(u) => Some(MenuItem::with_id(
-            app,
-            menu_id::UPGRADE,
-            native_i18n::t(locale, "native-tray-upgrade", &[("latest", &u.latest)]),
-            true,
-            None::<&str>,
-        )?),
-        None => None,
-    };
-    let sep_upgrade = PredefinedMenuItem::separator(app)?;
-
-    match state {
-        SidecarState::Starting => {
-            let starting = MenuItem::with_id(
-                app,
-                menu_id::STARTING,
-                native_i18n::tr(locale, "native-tray-starting"),
-                false,
-                None::<&str>,
-            )?;
-            Menu::with_items(app, &[&starting, &sep1, &settings_item, &quit_item])
-        }
-        SidecarState::RunningUnauthenticated => {
-            let sign_in = MenuItem::with_id(
-                app,
-                menu_id::SIGN_IN,
-                native_i18n::tr(locale, "native-tray-sign-in"),
-                true,
-                None::<&str>,
-            )?;
-            let sep2 = PredefinedMenuItem::separator(app)?;
-            let mut items: Vec<&dyn IsMenuItem<tauri::Wry>> = Vec::new();
-            items.push(&sign_in);
-            // Update is its own section BELOW the primary action, shown only
-            // when an update is available — never above sign-in.
-            if let Some(up) = &upgrade_item {
-                items.push(&sep_upgrade);
-                items.push(up);
-            }
-            items.push(&sep1);
-            items.push(&dashboard_item);
-            items.push(&settings_item);
-            items.push(&sep2);
-            items.push(&quit_item);
-            Menu::with_items(app, &items)
-        }
-        SidecarState::RunningAuthenticated => {
-            // We don't fetch the GitHub login (would require a network
-            // call to api.github.com from Rust, or expanding the
-            // sidecar's response shape). Showing the generic "Signed
-            // in to GitHub" is honest and avoids that complexity.
-            let info = MenuItem::with_id(
-                app,
-                menu_id::ACCOUNT_INFO,
-                native_i18n::tr(locale, "native-tray-signed-in"),
-                false,
-                None::<&str>,
-            )?;
-            let sep2 = PredefinedMenuItem::separator(app)?;
-            let mut items: Vec<&dyn IsMenuItem<tauri::Wry>> = Vec::new();
-            items.push(&info);
-            // Update is its own section BELOW the account line, shown only when
-            // an update is available — never above it.
-            if let Some(up) = &upgrade_item {
-                items.push(&sep_upgrade);
-                items.push(up);
-            }
-            items.push(&sep1);
-            items.push(&dashboard_item);
-            items.push(&settings_item);
-            items.push(&sep2);
-            items.push(&quit_item);
-            Menu::with_items(app, &items)
-        }
-        SidecarState::Failed | SidecarState::Stopped => {
-            let failed = MenuItem::with_id(
-                app,
-                menu_id::FAILED,
-                native_i18n::tr(locale, "native-tray-failed"),
-                false,
-                None::<&str>,
-            )?;
-            let retry = MenuItem::with_id(
-                app,
-                menu_id::RETRY,
-                native_i18n::tr(locale, "native-tray-retry"),
-                true,
-                None::<&str>,
-            )?;
-            let show_logs = MenuItem::with_id(
-                app,
-                menu_id::SHOW_LOGS,
-                native_i18n::tr(locale, "native-tray-show-logs"),
-                true,
-                None::<&str>,
-            )?;
-            let open_config = MenuItem::with_id(
-                app,
-                menu_id::OPEN_CONFIG,
-                native_i18n::tr(locale, "native-tray-open-config"),
-                true,
-                None::<&str>,
-            )?;
-            Menu::with_items(
-                app,
-                &[
-                    &failed,
-                    &retry,
-                    &show_logs,
-                    &open_config,
-                    &sep1,
-                    &settings_item,
-                    &quit_item,
-                ],
-            )
-        }
-    }
-}
-
-fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
-    match event.id().as_ref() {
-        menu_id::SETTINGS => open_settings_window(app, None),
-        menu_id::DASHBOARD => open_dashboard_window(app),
-        menu_id::SIGN_IN => open_settings_window(app, Some("account")),
-        menu_id::SHOW_LOGS => do_reveal_logs_dir(app),
-        menu_id::OPEN_CONFIG => do_reveal_config_dir(app),
-        menu_id::RETRY => retry_startup(app),
-        menu_id::UPGRADE => open_update_url(app),
-        menu_id::QUIT => request_quit(app),
-        _ => {}
-    }
-}
-
-/// Opens the install-channel-neutral download page for the available update
-/// (the same URL the OS notification points at). No-op if we somehow have no
-/// snapshot — the item is only built when one exists.
-fn open_update_url(app: &AppHandle) {
-    let Some(update) = app.state::<LatestUpdate>().get() else {
-        return;
-    };
-    if let Err(err) = app.opener().open_url(update.url, None::<&str>) {
-        eprintln!("[shell] failed to open update url: {err}");
-    }
-}
-
-/// Re-run the startup sequence from the Failed/Stopped state: clear any
-/// lingering sidecar, flip back to Starting, respawn, and restart polling.
-/// This is the recovery path for a transient startup failure (slow first
-/// boot, a port held by something that has since let go, a one-off crash) —
-/// without it, the only way out of Failed was to quit and relaunch the whole
-/// app, a dead-end for a menu-bar utility the user expects to "just run."
-///
-/// Only acts from Failed/Stopped so a stray click while healthy can't tear
-/// down a working sidecar. Reuses kill_sidecar's SIGTERM→SIGKILL path to
-/// reap any half-dead child before respawning so we don't leak a process or
-/// collide on :4141.
-fn retry_startup(app: &AppHandle) {
-    let current = app.state::<AppStatus>().get();
-    if !matches!(current, SidecarState::Failed | SidecarState::Stopped) {
-        return;
-    }
-    eprintln!("[shell] retry startup requested");
-    respawn_sidecar(app);
-}
 
 /// Tear down the running sidecar and boot a fresh one. The reap→respawn→poll
 /// core shared by the tray-driven `retry_startup` (recovery from Failed) and
