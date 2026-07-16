@@ -50,7 +50,6 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     webview::PageLoadEvent,
     AppHandle, Emitter, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder,
-    WindowEvent,
 };
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
@@ -1687,7 +1686,7 @@ fn install_tray(app: &AppHandle) -> tauri::Result<()> {
                     _ => crate::decisions::ClickPhase::Down,
                 };
                 if crate::decisions::click_action(click_button, phase).is_some() {
-                    open_app(tray.app_handle());
+                    open_app(tray.app_handle(), None);
                 }
             }
         })
@@ -1841,65 +1840,10 @@ fn respawn_sidecar(app: &AppHandle) {
 /// settings page. The optional `section` becomes a URL fragment so the
 /// frontend can scroll to / select that section.
 fn open_settings_window(app: &AppHandle, section: Option<&str>) {
-    // Any window taking the stage retires the splash (it's always-on-top
-    // and would otherwise sit over this one — e.g. the first-launch
-    // sign-in nudge).
-    dismiss_splash(app);
-    // The settings UI is served by the sidecar at /ui/settings/ (embedded
-    // in the binary), in dev and prod alike — there is no separate dev
-    // server to point at anymore.
-    let settings_origin = format!("http://localhost:{SIDECAR_PORT}");
-    let url_string = match section {
-        Some(s) => format!("{settings_origin}/ui/settings/#{s}"),
-        None => format!("{settings_origin}/ui/settings/"),
-    };
-    let url = match url::Url::parse(&url_string) {
-        Ok(u) => u,
-        Err(err) => {
-            eprintln!("[shell] bad settings URL: {err}");
-            return;
-        }
-    };
-
-    if let Some(existing) = app.get_webview_window(SETTINGS_WINDOW_LABEL) {
-        // Navigation via re-creation is the simplest cross-platform
-        // path; eval'ing window.location is fiddly with CSP-null.
-        // Cheap on macOS — the webview process is reused.
-        if let Err(err) = existing.navigate(url) {
-            eprintln!("[shell] settings navigate failed: {err}");
-        }
-        present_window(app, &existing);
-        return;
-    }
-
-    // Surface the version in the titlebar (window-level identity belongs in
-    // the title, not a content H1 — see docs/design/failure-modes.md). Drop
-    // the suffix in dev where the version is the `0.0.0` placeholder.
-    let title = settings_title(app);
-    let builder = WebviewWindowBuilder::new(
-        app,
-        SETTINGS_WINDOW_LABEL,
-        WebviewUrl::External(url),
-    )
-    .title(title)
-    .inner_size(900.0, 760.0)
-    .min_inner_size(600.0, 560.0);
-    // Windows taskbar presence follows the menu-bar-only preference: default
-    // (false) shows the window in the taskbar; menu-bar-only (true) keeps it
-    // out for the tray-only feel. Shadow rather than `mut` so non-Windows
-    // builds stay warning-clean. (The splash keeps its own skip_taskbar(true).)
-    #[cfg(windows)]
-    let builder = builder.skip_taskbar(app.state::<MenuBarOnly>().get());
-
-    match builder.build() {
-        Ok(window) => {
-            attach_hide_on_close(app, &window);
-            present_window(app, &window);
-        }
-        Err(err) => {
-            eprintln!("[shell] settings window build failed: {err}");
-        }
-    }
+    // Browser-tab delivery (ADR-0018): the settings UI is a browser tab, not a
+    // Tauri webview window. Every former "open settings" entry point now opens
+    // (or focuses) that tab via the sidecar tray-open flow.
+    open_app(app, section);
 }
 
 /// The maximal app-data root, resolved to stay in LOCKSTEP with the
@@ -2057,21 +2001,6 @@ fn open_dashboard_window(app: &AppHandle) {
     open_settings_window(app, Some("usage"));
 }
 
-/// Wires the OS close button (red ✕ on macOS) to HIDE the window
-/// rather than close it. The tray remains the persistent UI surface,
-/// so closing a settings/dashboard window is just a visibility change.
-/// Also drives the Dock icon via `update_activation_policy`.
-fn attach_hide_on_close(app: &AppHandle, window: &tauri::WebviewWindow) {
-    let window_clone = window.clone();
-    let app_clone = app.clone();
-    window.on_window_event(move |event| {
-        if let WindowEvent::CloseRequested { api, .. } = event {
-            api.prevent_close();
-            let _ = window_clone.hide();
-            update_activation_policy(&app_clone);
-        }
-    });
-}
 
 /// macOS-only: flips the activation policy between Regular (Dock icon
 /// visible) and Accessory (menu-bar-only, no Dock) based on whether
@@ -2095,23 +2024,16 @@ static POLICY_IS_REGULAR: std::sync::atomic::AtomicBool =
 fn update_activation_policy(app: &AppHandle) {
     use std::sync::atomic::Ordering;
 
-    // The Dock icon is Regular when EITHER the persistent-Dock preference is
-    // on (default: not menu-bar-only) OR a Settings/Dashboard window is
-    // currently visible. Menu-bar-only mode keeps the classic behavior where
-    // the Dock icon comes and goes with window visibility.
+    // Browser-tab delivery (ADR-0018) has no persistent app windows — the UI is a
+    // browser tab, and the only Tauri window is the transient splash. So the Dock
+    // icon is driven SOLELY by the "menu-bar only" preference (§8 resolution):
+    // Regular (Dock shown) when the preference is off, Accessory (menu-bar only)
+    // when it's on. There is no window-visibility input anymore.
     let menu_bar_only = app.state::<MenuBarOnly>().get();
-    let labels = [SETTINGS_WINDOW_LABEL, DASHBOARD_WINDOW_LABEL];
-    let want_regular = !menu_bar_only
-        || labels.iter().any(|label| {
-            app.get_webview_window(label)
-                .and_then(|w| w.is_visible().ok())
-                .unwrap_or(false)
-        });
+    let want_regular = !menu_bar_only;
 
-    // Skip when the policy isn't actually changing. Beyond avoiding the
-    // dev-only Dock-icon flash, this dodges needless AppKit churn on every
-    // window show/close. All callers run on the main thread, so the
-    // load-then-store is race-free.
+    // Skip when the policy isn't actually changing (avoids AppKit churn + a
+    // dev-only Dock-icon flash). Callers run on the main thread → race-free.
     if POLICY_IS_REGULAR.load(Ordering::SeqCst) == want_regular {
         return;
     }
@@ -2236,13 +2158,19 @@ async fn sidecar_tray_open() -> bool {
 /// NOTE(§10 manual-only): the actual single-tab UX (exactly one focused tab per
 /// click, stale-tab self-close) is verifiable only by manual macOS/browser
 /// testing — not by `cargo build`.
-fn open_app(app: &AppHandle) {
+fn open_app(app: &AppHandle, section: Option<&str>) {
     // A visible native window (the splash) would sit over the browser; retire it.
     dismiss_splash(app);
     let handle = app.clone();
+    let section = section.map(str::to_string);
     tauri::async_runtime::spawn(async move {
         if sidecar_tray_open().await {
-            let url = format!("http://localhost:{SIDECAR_PORT}/ui/settings/");
+            let url = match &section {
+                Some(s) => {
+                    format!("http://localhost:{SIDECAR_PORT}/ui/settings/#{s}")
+                }
+                None => format!("http://localhost:{SIDECAR_PORT}/ui/settings/"),
+            };
             if let Err(err) = handle.opener().open_url(url, None::<&str>) {
                 eprintln!("[shell] open_app: failed to open browser tab: {err}");
             }
