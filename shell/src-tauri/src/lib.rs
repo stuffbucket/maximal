@@ -2255,54 +2255,11 @@ fn do_reveal_logs_dir(app: &AppHandle) {
     let _ = app.opener().open_path(dir.to_string_lossy(), None::<&str>);
 }
 
-/// Opens (or focuses) the usage dashboard webview pointed at the
-/// sidecar's `/ui/dashboard/` endpoint. The dashboard (and settings) are
-/// embedded in the sidecar binary and served at /ui/* (see
-/// src/routes/ui/route.ts), so they ship inside the bundle with no extra
-/// resource staging.
+/// The standalone usage dashboard was removed (§7); its view is now the
+/// Settings SPA's Usage section. This opens (or focuses) the Settings window
+/// at that section, so the legacy "Dashboard" entry point stays functional.
 fn open_dashboard_window(app: &AppHandle) {
-    dismiss_splash(app);
-    let url_string = format!(
-        "http://localhost:{SIDECAR_PORT}/ui/dashboard/\
-         ?endpoint=http://localhost:{SIDECAR_PORT}/usage",
-    );
-    let url = match url::Url::parse(&url_string) {
-        Ok(u) => u,
-        Err(err) => {
-            eprintln!("[shell] bad dashboard URL: {err}");
-            return;
-        }
-    };
-
-    if let Some(existing) = app.get_webview_window(DASHBOARD_WINDOW_LABEL) {
-        present_window(app, &existing);
-        return;
-    }
-
-    let builder = WebviewWindowBuilder::new(
-        app,
-        DASHBOARD_WINDOW_LABEL,
-        WebviewUrl::External(url),
-    )
-    .title(native_i18n::tr(
-        &app.state::<LocaleState>().get(),
-        "native-window-dashboard-title",
-    ))
-    .inner_size(1100.0, 760.0)
-    .min_inner_size(720.0, 520.0);
-    // See open_settings_window: Windows taskbar presence tracks menu-bar-only.
-    #[cfg(windows)]
-    let builder = builder.skip_taskbar(app.state::<MenuBarOnly>().get());
-
-    match builder.build() {
-        Ok(window) => {
-            attach_hide_on_close(app, &window);
-            present_window(app, &window);
-        }
-        Err(err) => {
-            eprintln!("[shell] dashboard window build failed: {err}");
-        }
-    }
+    open_settings_window(app, Some("usage"));
 }
 
 /// Wires the OS close button (red ✕ on macOS) to HIDE the window

@@ -15,9 +15,10 @@ import {
 } from "./inline-state"
 
 /**
- * Serves the web UIs under `/ui/*`:
- *   - /ui/settings  — the React settings app (Bun-bundled)
- *   - /ui/dashboard — the usage dashboard (vanilla)
+ * Serves the web UI under `/ui/*`:
+ *   - /ui/settings  — the React settings app (Bun-bundled), incl. the Usage
+ *     section (the standalone dashboard was removed, §7)
+ *   - /ui/diagnostics — the read-only diagnostics page (§1.7)
  *
  * One serving path for both, dev and prod:
  *   - Production: assets are embedded in the compiled binary via the
@@ -124,9 +125,8 @@ async function serve(
 
 export const uiRoutes = new Hono()
 
-// Bare-surface redirects to the canonical trailing-slash index.
+// Bare-surface redirect to the canonical trailing-slash index.
 uiRoutes.get("/settings", (c) => c.redirect("/ui/settings/", 301))
-uiRoutes.get("/dashboard", (c) => c.redirect("/ui/dashboard/", 301))
 
 // Read-only diagnostics page (§1.7): server-rendered, mutation-free, unauthenticated
 // (under the /ui prefix). CSRF-safe by construction; secret values are never shown.
@@ -138,16 +138,11 @@ uiRoutes.get("/diagnostics", (c) =>
 uiRoutes.get("/settings/", () =>
   serve("/ui/settings/index.html", "/ui/settings/index.html", true),
 )
-uiRoutes.get("/dashboard/", () =>
-  serve("/ui/dashboard/index.html", "/ui/dashboard/index.html"),
-)
 
-// Assets + client-side routes. Settings is an SPA, so unknown sub-paths
-// fall back to its index.html (which gets the inlined state); the dashboard is
-// a single page. Assets (JS/CSS) pass through untouched — only HTML is injected.
+// Assets + client-side routes. Settings is an SPA, so unknown sub-paths fall
+// back to its index.html (which gets the inlined state). Assets (JS/CSS) pass
+// through untouched — only HTML is injected. (The standalone /ui/dashboard was
+// removed — its usage view is now the settings SPA's Usage section, §4/§7.)
 uiRoutes.get("/settings/*", (c) =>
   serve(c.req.path, "/ui/settings/index.html", true),
-)
-uiRoutes.get("/dashboard/*", (c) =>
-  serve(c.req.path, "/ui/dashboard/index.html"),
 )

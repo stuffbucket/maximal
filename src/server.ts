@@ -153,15 +153,10 @@ server.get("/", (c) => c.text("Server running"))
 server.get("/status", (c) => c.json(buildStatus(SERVER_START_MS)))
 // Legacy redirects → canonical /ui/* surfaces. Kept so existing links
 // (Claude config, boot banner, bookmarks, the Tauri shell pre-upgrade)
-// keep working. The dashboard preserves its `?endpoint=…` query.
-server.get("/usage-viewer", (c) => {
-  const qs = new URL(c.req.url).search
-  return c.redirect(`/ui/dashboard/${qs}`, 301)
-})
-server.get("/usage-viewer/", (c) => {
-  const qs = new URL(c.req.url).search
-  return c.redirect(`/ui/dashboard/${qs}`, 301)
-})
+// keep working. The standalone dashboard is gone (§7) — its usage view is now
+// the settings SPA's Usage section, so `/usage-viewer` lands on `#usage`.
+server.get("/usage-viewer", (c) => c.redirect("/ui/settings/#usage", 301))
+server.get("/usage-viewer/", (c) => c.redirect("/ui/settings/#usage", 301))
 server.get("/settings", (c) => c.redirect("/ui/settings/", 301))
 server.get("/settings/", (c) => c.redirect("/ui/settings/", 301))
 
