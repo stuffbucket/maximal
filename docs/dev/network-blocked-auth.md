@@ -77,13 +77,19 @@ Historically this was invisible:
 
 ## Follow-ups (intentionally not done yet)
 
-1. **Surface a distinct "scope-unreachable" state in the UI.** Right now the
-   typed diagnosis only reaches the log + `getLastNetworkDiagnosis()`. A
-   dedicated auth-state / Settings banner — with the user-facing copy produced
-   by the i18n framework, keyed on `(kind, scope)` — distinct from "your token
-   is invalid → re-auth" would stop users from pointlessly re-signing-in. Needs
-   SSE event + i18n strings (`shell/src/i18n/*`). New scopes (other providers)
-   extend the `NetworkScope` union.
+1. **Proactive signed-out connectivity poll.** The network-issue banner (built
+   — see below) is driven by the Copilot **token-refresh loop**, which only runs
+   while signed in. That covers the dominant case (a working session loses
+   connectivity). It does NOT cover a signed-out user sitting at the sign-in
+   screen while offline. A proactive poll — gated on ≥1 live SSE subscriber (GUI
+   open), auth-independent, feeding the same hysteresis — would surface an
+   "you're offline" banner pre-sign-in. Deferred deliberately: it introduces a
+   **second producer on the shared hysteresis singleton**, which a single-producer
+   unit harness can't faithfully reproduce (see the DUT-vs-harness note in
+   `tests/network-hysteresis.test.ts`); it must be built with fake-timer +
+   real-singleton coverage that reproduces the interleaving, and must stay
+   mutually exclusive with the refresh-loop producer (poll only when NOT
+   authenticated) so it can't false-clear a `scope-unreachable` it cannot see.
 
 2. **Interface rebinding / discovery.** When `activeInterfaces.length > 1`, a
    working network may have come up *after* maximal started and our socket is

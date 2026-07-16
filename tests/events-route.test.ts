@@ -116,6 +116,7 @@ describe("GET /settings/api/events (SSE)", () => {
     const status: AuthStatus = {
       state: "authenticated",
       account_login: "octocat-sse-probe",
+      account_type: null,
     }
     settingsEventBus.publish("auth.changed", status)
 

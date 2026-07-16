@@ -16,6 +16,11 @@
 
 import { z } from "zod"
 
+import {
+  NETWORK_DIAGNOSIS_KIND,
+  NETWORK_SCOPE,
+} from "~/lib/net/network-diagnostics"
+
 /** Tail-4 redacted token presence + (when known) source. We do NOT
  *  expose token values, validity windows we don't track, or any
  *  data that could narrow the secret. */
@@ -159,6 +164,36 @@ export const UpstreamRejection = z.object({
 })
 export type UpstreamRejection = z.infer<typeof UpstreamRejection>
 
+/** The hysteresis-resolved network-issue signal for the banner. Distinct from
+ *  `last_upstream_rejection` (a completion-time rejection) and from the auth
+ *  `error` state (a token problem): this says "we can't reach the service" and
+ *  the token may be perfectly fine. Carries ONLY the typed discriminant + scope
+ *  — no user-facing prose. The shell builds the message via i18n keyed on
+ *  `(kind, scope)` (and, for `scope-unreachable`, tailors copy by `account_type`
+ *  on the authenticated variant). Rides on the `authenticated` AND
+ *  `unauthenticated` variants so the banner works signed-out. Present only when
+ *  a failure has persisted past the onset window; cleared on recovery.
+ *
+ *  `kind` values match `NETWORK_DIAGNOSIS_KIND`, `scope` matches `NETWORK_SCOPE`
+ *  (nullable — the scope-independent buckets echo it back or carry null). */
+export const NetworkDiagnosisSignal = z.object({
+  kind: z.enum([
+    NETWORK_DIAGNOSIS_KIND.offline,
+    NETWORK_DIAGNOSIS_KIND.dnsFailure,
+    NETWORK_DIAGNOSIS_KIND.scopeUnreachable,
+    NETWORK_DIAGNOSIS_KIND.unknown,
+  ]),
+  scope: z.enum([NETWORK_SCOPE.githubCopilotAuth]).nullable(),
+})
+export type NetworkDiagnosisSignal = z.infer<typeof NetworkDiagnosisSignal>
+
+/** Account plan type, mirroring `AccountType` (individual|business|enterprise).
+ *  Surfaced on the `authenticated` variant so the shell can tailor the
+ *  network-banner copy (e.g. an enterprise-specific restart nudge). Nullable
+ *  because a session may not have resolved a plan yet. */
+export const AccountTypeWire = z.enum(["individual", "business", "enterprise"])
+export type AccountTypeWire = z.infer<typeof AccountTypeWire>
+
 /** GitHub device-code auth state, exposed by /settings/api/auth/github/*.
  *
  *  Lifecycle:
@@ -186,6 +221,14 @@ export const AuthStatus = z.discriminatedUnion("state", [
   z.object({
     state: z.literal("unauthenticated"),
     last_upstream_rejection: UpstreamRejection.optional(),
+    /** Network-issue banner signal — present when a failure has persisted past
+     *  the onset window. Rides on the signed-out variant so the banner works
+     *  before sign-in. */
+    network_diagnosis: NetworkDiagnosisSignal.optional(),
+    /** Transient: true on the single event that recovers a long outage, telling
+     *  the shell to fire a "reconnected" OS notification. Not part of steady
+     *  state — the very next event omits it. */
+    notify_on_reconnect: z.boolean().optional(),
   }),
   z.object({
     state: z.literal("device_code_issued"),
@@ -212,7 +255,14 @@ export const AuthStatus = z.discriminatedUnion("state", [
      *  for the "Connected · <uptime>" line. Optional for the same cold-boot /
      *  legacy reasons; the UI just shows "Connected" without a duration. */
     connected_since: z.string().optional(),
+    /** The account's plan type — lets the shell tailor the network-banner copy
+     *  (e.g. the enterprise restart nudge). Null when unresolved. */
+    account_type: AccountTypeWire.nullable(),
     last_upstream_rejection: UpstreamRejection.optional(),
+    /** Network-issue banner signal — see the unauthenticated variant. */
+    network_diagnosis: NetworkDiagnosisSignal.optional(),
+    /** Transient reconnect-notification flag — see the unauthenticated variant. */
+    notify_on_reconnect: z.boolean().optional(),
   }),
   z.object({
     state: z.literal("error"),
