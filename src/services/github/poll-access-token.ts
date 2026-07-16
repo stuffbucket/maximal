@@ -25,21 +25,51 @@ import type { DeviceCodeResponse } from "./get-device-code"
 
 const SLOW_DOWN_BUMP_SECONDS = 5
 
+/** RFC 8628 §3.5 default client poll interval (seconds) when the server omits
+ *  one. Also the fallback that keeps a malformed response from producing a
+ *  zero/NaN sleep that would spin the loop. */
+const DEFAULT_POLL_INTERVAL_SECONDS = 5
+
+/** Fallback device-code lifetime (seconds) when `expires_in` is absent, so the
+ *  deadline guard can never be NaN (which would never fire). GitHub codes
+ *  typically live ~15 min. */
+const DEFAULT_EXPIRES_IN_SECONDS = 900
+
+/** Give up after this many back-to-back transport failures: a persistently-
+ *  unreachable network can't complete the flow, and retrying forever (or, on an
+ *  instantaneous failure, spinning) helps no one. Reset on any response. */
+const MAX_CONSECUTIVE_TRANSPORT_ERRORS = 12
+
+/** The value if it's a finite number, else the fallback. Guards malformed
+ *  device-code fields (`undefined`/`NaN`) from poisoning the interval/deadline
+ *  math. A literal `0` is finite and preserved (callers use it to mean
+ *  "already expired"). */
+function finiteOr(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback
+}
+
 export async function pollAccessToken(
   deviceCode: DeviceCodeResponse,
 ): Promise<string> {
   const { clientId, headers } = getOauthAppConfig()
   const { accessTokenUrl } = getOauthUrls()
 
-  // Server-told interval is in seconds. Add a 1s safety buffer (small bump
-  // shields against minor clock skew).
-  let intervalSeconds = deviceCode.interval + 1
+  // Server-told interval, in seconds, plus a 1s buffer for minor clock skew.
+  let intervalSeconds =
+    finiteOr(deviceCode.interval, DEFAULT_POLL_INTERVAL_SECONDS) + 1
   consola.debug(`Polling access token at ${intervalSeconds}s interval`)
 
   // Self-expiry guard: bound the whole poll on the device code's own lifetime
   // so `polling` always terminates into a terminal error even if GitHub never
   // returns `expired_token` (a hung/misbehaving upstream can't poll forever).
-  const deadlineMs = Date.now() + deviceCode.expires_in * 1000
+  const deadlineMs =
+    Date.now()
+    + finiteOr(deviceCode.expires_in, DEFAULT_EXPIRES_IN_SECONDS) * 1000
+
+  // Bound consecutive transport failures (see the constant); reset on any
+  // response received, so intermittent blips don't accumulate.
+
+  let consecutiveTransportErrors = 0
 
   while (true) {
     if (Date.now() >= deadlineMs) throw new Error("expired_token")
@@ -59,9 +89,17 @@ export async function pollAccessToken(
         }),
       })
     } catch (err) {
+      consecutiveTransportErrors++
+      if (consecutiveTransportErrors >= MAX_CONSECUTIVE_TRANSPORT_ERRORS) {
+        throw new Error(
+          "Device-code poll: network unreachable after repeated attempts. Check your connection and re-run setup.",
+        )
+      }
       consola.warn("Device-code poll: network error, retrying", err)
       continue
     }
+    // A response arrived — the transport is working; reset the failure streak.
+    consecutiveTransportErrors = 0
 
     let body: PollResponseBody
     try {
