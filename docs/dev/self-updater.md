@@ -191,6 +191,14 @@ High-level recipe:
    `MAXIMAL_UPDATE_ENDPOINT=http://127.0.0.1:PORT/latest.json` and click the
    tray "Upgrade" item.
 
+> **`http` endpoints are rejected unless the build opts in.** Tauri's updater
+> refuses any non-`https` endpoint ("The configured updater endpoint must use a
+> secure protocol like `https`.") and exposes **no runtime setter** for it — the
+> escape hatch is the config flag `plugins.updater.dangerousInsecureTransportProtocol: true`,
+> which is baked at build time. So a local **http** `latest.json` only works in a
+> test build compiled with that flag (never commit it to the shipped config).
+> Alternatively serve the endpoint over **https** with a locally-trusted cert.
+
 > **Must be a real `.app` install, not `cargo run` / dev.** A faithful test
 > requires an actually-installed `.app` bundle — the updater swaps a bundle
 > on disk and relaunches, which a `cargo run` dev process has no equivalent
@@ -198,6 +206,14 @@ High-level recipe:
 > beta install so it doesn't disturb a running production copy** (see
 > `docs/dev/beta-channel-and-safe-build-testing.md` for the isolated-build
 > tiers — a distinct-identity beta install is the right lane for this).
+
+> **✅ Verified end-to-end (2026-07-15).** A base build (v0.4.0, throwaway
+> pubkey + `dangerousInsecureTransportProtocol`) installed to `/Applications`,
+> pointed via `MAXIMAL_UPDATE_ENDPOINT` at a local http `latest.json` offering a
+> throwaway-signed v0.99.0, upgraded in place on the tray click: dialog →
+> download → signature verify → bundle swap → `app.restart()` → sidecar
+> respawned on `:4141`. Rolled back to the real notarized build via the v0.4.41
+> dmg. The signature/verify half was independently confirmed with `minisign -Vm`.
 
 ---
 
@@ -232,7 +248,9 @@ This is wired but **not yet shippable**. Before the in-place path is real:
       `https://mxml.sh/updates/latest.json` (the Tauri updater manifest,
       distinct from the existing `manifest.json` the notify path reads),
       pointing at the signed per-target artifacts the macos-builder produces.
-- [ ] **Full end-to-end install test on real hardware.** The
-      `MAXIMAL_UPDATE_ENDPOINT` seam makes this possible, but an actual
-      download → verify → swap → restart run against a real `.app` install
-      is still pending.
+- [x] **Full end-to-end install test on real hardware.** Done 2026-07-15
+      (see the *Isolated test* callout above): base v0.4.0 → in-place upgrade to
+      a throwaway-signed v0.99.0 over a local endpoint — download → verify →
+      bundle swap → restart → sidecar respawn all confirmed, then rolled back to
+      the real build. Remaining before ship: publish `latest.json` (above) and
+      swap the real per-release signed artifact in for the throwaway one.
