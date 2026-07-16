@@ -708,6 +708,14 @@ async function runDegrade(error: CopilotAuthFatalError): Promise<void> {
       message: error.message,
       at: new Date().toISOString(),
     })
+    // Record the degrade in auth-*.log. Previously this moment left NO trace in
+    // the dated auth log (forwardError logs via bare consola, and runDegrade
+    // was silent on the happy path), so the event that flipped an account to
+    // needs-reauth was invisible after the fact. `error.message` is the
+    // friendly, user-facing reason — safe for the file sink.
+    log.warn(
+      `Auth degraded — active account flagged needs-reauth (status ${error.status}): ${error.message}`,
+    )
   } catch (err) {
     log.warn(
       "Auth-controller: failed to flag account needs-reauth (credential retained):",

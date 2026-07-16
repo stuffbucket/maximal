@@ -166,13 +166,15 @@ const defaultConfig: AppConfig = {
     "gpt-5.4-mini": "xhigh",
     "gpt-5.4": "xhigh",
     "gpt-5.5": "xhigh",
-    // GPT-5.6 trio (Copilot-served OpenAI reasoning models). "xhigh" matches
-    // the 5.4/5.5 siblings and is guaranteed to be on their effort ladder; the
-    // ladder also exposes "max" (now a valid config value — see
-    // ReasoningEffortSchema) for users who want to opt the trio up.
-    "gpt-5.6-sol": "xhigh",
-    "gpt-5.6-terra": "xhigh",
-    "gpt-5.6-luna": "xhigh",
+    // GPT-5.6 (Sol/Terra/Luna): pinned to medium per OpenAI's 5.6 guidance,
+    // which names medium the balanced baseline and reserves high/xhigh for when
+    // evals show a meaningful gain. This matches the global default today, but
+    // we pin it explicitly so these frontier models stay at the guided value
+    // even if the global baseline is ever changed. Escalate per-variant if
+    // evals justify it.
+    "gpt-5.6-sol": "medium",
+    "gpt-5.6-terra": "medium",
+    "gpt-5.6-luna": "medium",
   },
   useFunctionApplyPatch: true,
   useMessagesApi: true,
@@ -386,15 +388,29 @@ export function getReasoningEffortForModel(
   model: string,
 ): "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" {
   const config = getConfig()
-  // Fall through to the static default map so a config that
-  // doesn't carry modelReasoningEfforts (e.g. a test stub, or a
-  // user config that pre-dates the field) still gets the curated
-  // per-model effort instead of a global "high" fallback.
+  // Precedence: an explicit user override, then the curated per-model default
+  // (so a config that doesn't carry modelReasoningEfforts — a test stub, or a
+  // user config predating the field — still gets the curated effort), then a
+  // model-aware baseline (see defaultReasoningEffortForModel). Curated entries
+  // deviate up (coding models → xhigh) or down (gpt-5-mini → low) from it.
   return (
     config.modelReasoningEfforts?.[model]
     ?? defaultConfig.modelReasoningEfforts?.[model]
-    ?? "high"
+    ?? defaultReasoningEffortForModel(model)
   )
+}
+
+/**
+ * Baseline reasoning effort for a model with no explicit or curated entry.
+ * Claude/Anthropic models default to "high" — that is Anthropic's own default
+ * (omitting `output_config.effort` is equivalent to `high`), so a Copilot-served
+ * Claude request isn't silently downgraded. Every other model gets the "medium"
+ * balanced baseline (matching OpenAI's guidance for its reasoning models). At
+ * this call site `model` is the Copilot dot-form id (e.g. "claude-opus-4.8"), so
+ * a "claude" prefix — the same test used in small-model.ts — identifies the
+ * Anthropic family across all versions and variant suffixes. */
+function defaultReasoningEffortForModel(model: string): "high" | "medium" {
+  return model.startsWith("claude") ? "high" : "medium"
 }
 
 export function normalizeProviderBaseUrl(url: string): string {

@@ -35,6 +35,16 @@ export const getGitHubApiBaseUrl = (): string => {
   return resolvedDomain ? `https://api.${resolvedDomain}` : GITHUB_API_BASE_URL
 }
 
+/** Path of the GitHub endpoint that mints/refreshes a Copilot bearer token.
+ *  Shared so callers (the refresh loop, the token minter, and network
+ *  diagnostics) reference one discoverable value instead of re-typing it. */
+export const COPILOT_TOKEN_PATH = "/copilot_internal/v2/token"
+
+/** Fully-qualified Copilot token endpoint for the active (possibly enterprise)
+ *  GitHub API host. */
+export const getCopilotTokenUrl = (): string =>
+  `${getGitHubApiBaseUrl()}${COPILOT_TOKEN_PATH}`
+
 const getOpencodeOauthHeaders = (): Record<string, string> => {
   return {
     Accept: "application/json",
