@@ -28,6 +28,7 @@ import {
 
 import type { NetworkDiagnosis } from "~/lib/net/network-diagnostics"
 
+import { NetworkDiagnosisSignal } from "~/lib/config/settings-types"
 import {
   NETWORK_DIAGNOSIS_KIND,
   NETWORK_SCOPE,
@@ -173,6 +174,27 @@ describe("advanceHysteresis — shared singleton", () => {
     advanceHysteresis(OFFLINE, 1)
     __resetHysteresisForTests()
     expect(getHysteresisState()).toEqual(initialHysteresisState)
+  })
+})
+
+// --- Wire drift guard -----------------------------------------------------
+//
+// settings-types.ts re-declares the network-diagnosis enum literals rather than
+// importing them (so the browser bundle never pulls network-diagnostics' node:
+// deps). These assertions fail the build if the wire enums drift out of sync
+// with the source-of-truth constants.
+
+describe("NetworkDiagnosisSignal wire enum stays in sync with the source constants", () => {
+  test("kind options equal NETWORK_DIAGNOSIS_KIND values", () => {
+    expect([...NetworkDiagnosisSignal.shape.kind.options].sort()).toEqual(
+      Object.values(NETWORK_DIAGNOSIS_KIND).sort(),
+    )
+  })
+
+  test("scope options equal NETWORK_SCOPE values", () => {
+    expect(
+      [...NetworkDiagnosisSignal.shape.scope.unwrap().options].sort(),
+    ).toEqual(Object.values(NETWORK_SCOPE).sort())
   })
 })
 

@@ -16,11 +16,6 @@
 
 import { z } from "zod"
 
-import {
-  NETWORK_DIAGNOSIS_KIND,
-  NETWORK_SCOPE,
-} from "~/lib/net/network-diagnostics"
-
 /** Tail-4 redacted token presence + (when known) source. We do NOT
  *  expose token values, validity windows we don't track, or any
  *  data that could narrow the secret. */
@@ -174,16 +169,16 @@ export type UpstreamRejection = z.infer<typeof UpstreamRejection>
  *  `unauthenticated` variants so the banner works signed-out. Present only when
  *  a failure has persisted past the onset window; cleared on recovery.
  *
- *  `kind` values match `NETWORK_DIAGNOSIS_KIND`, `scope` matches `NETWORK_SCOPE`
- *  (nullable — the scope-independent buckets echo it back or carry null). */
+ *  `kind` values MIRROR `NETWORK_DIAGNOSIS_KIND` and `scope` MIRRORS
+ *  `NETWORK_SCOPE` (both in `~/lib/net/network-diagnostics`). The literals are
+ *  DELIBERATELY re-declared here rather than imported: this wire-type module is
+ *  consumed by the Tauri shell, and importing network-diagnostics (which pulls
+ *  `node:dns`/`node:net`/`node:os`) would drag those into the browser bundle.
+ *  A drift guard in `tests/network-hysteresis.test.ts` fails the build if these
+ *  fall out of sync with the source-of-truth constants. */
 export const NetworkDiagnosisSignal = z.object({
-  kind: z.enum([
-    NETWORK_DIAGNOSIS_KIND.offline,
-    NETWORK_DIAGNOSIS_KIND.dnsFailure,
-    NETWORK_DIAGNOSIS_KIND.scopeUnreachable,
-    NETWORK_DIAGNOSIS_KIND.unknown,
-  ]),
-  scope: z.enum([NETWORK_SCOPE.githubCopilotAuth]).nullable(),
+  kind: z.enum(["offline", "dns-failure", "scope-unreachable", "unknown"]),
+  scope: z.enum(["github-copilot-auth"]).nullable(),
 })
 export type NetworkDiagnosisSignal = z.infer<typeof NetworkDiagnosisSignal>
 

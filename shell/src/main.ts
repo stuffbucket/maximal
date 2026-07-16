@@ -127,6 +127,7 @@ function setBusy(on: boolean, label = t("common-working")): void {
 function repaintDynamicI18n(): void {
   renderStaticComposites();
   if (currentAuthStatus) renderAccount(currentAuthStatus);
+  if (currentAuthStatus) renderNetworkBanner(currentAuthStatus);
   if (lastDiagnostics) renderDiagnostics(lastDiagnostics);
 }
 
@@ -808,7 +809,11 @@ function openAuthEvents(): void {
     },
     onAuth: (status) => {
       if (gen !== authEventsGen) return;
-      // Only paint while the user is actually on the Account section.
+      currentAuthStatus = status;
+      // The network banner is global — paint it on every event, whatever
+      // section is open.
+      renderNetworkBanner(status);
+      // The account card only when the user is actually on that section.
       if (readHashSection() === "account") renderAccount(status);
     },
     onError: () => {
@@ -1090,6 +1095,173 @@ function renderUpstreamRejection(
   wrapper.hidden = false;
 }
 
+// ---- Network-issue banner ------------------------------------------------
+//
+// A connectivity problem reaching GitHub Copilot, surfaced across the top of
+// every section — distinct from an auth/token error (the token may be fine;
+// the service just isn't reachable). The sidecar debounces (network_diagnosis
+// appears only once a failure has persisted past the onset window) and folds
+// the typed { kind, scope } + account_type onto every auth.changed; the shell
+// resolves copy and paints. Status color is the only signal — no motion.
+
+/** GitHub's official status page — the one external lever we can offer when
+ *  Copilot itself (not the user's network) is the unreachable party. */
+const GITHUB_STATUS_URL = "https://www.githubstatus.com/";
+
+/** Wi-Fi-with-slash: a local-network problem the user can act on. */
+const BANNER_ICON_OFFLINE =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="2" x2="22" y2="22"/><path d="M8.5 16.5a5 5 0 0 1 7 0"/><path d="M2 8.82a15 15 0 0 1 4.17-2.65"/><path d="M10.66 5c4.01-.36 8.14.9 11.34 3.76"/><path d="M5 13a10 10 0 0 1 5.24-2.76"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>';
+
+/** Cloud-with-slash: reachable network, but Copilot itself isn't answering. */
+const BANNER_ICON_COPILOT =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 0 0 .8-8.94 6 6 0 0 0-11.28-1.7"/><path d="M6.2 8.7A5 5 0 0 0 6 19h4"/><line x1="2" y1="2" x2="22" y2="22"/></svg>';
+
+interface BannerCopy {
+  /** Trusted static SVG markup for the leading glyph. */
+  icon: string;
+  /** i18n key for the title line. */
+  titleKey: string;
+  /** i18n key for the message body. When `link` is true it carries a `{service}`
+   *  placeholder for the inline status-page link. */
+  messageKey: string;
+  /** Whether the message embeds the status-page link. */
+  link: boolean;
+}
+
+/**
+ * Map an auth status to the banner copy, or null when no banner should show.
+ *
+ *   offline | dns-failure  → "You're offline" — a local-network problem with a
+ *                            real user lever, so it leads with the connection,
+ *                            not with Copilot.
+ *   scope-unreachable |    → "Can't reach GitHub Copilot" — account-aware:
+ *   unknown                  enterprise gets the restart-if-widespread nudge;
+ *                            individual/business/unknown the honest "we're
+ *                            retrying". Never "nothing you need to do".
+ *
+ * account_type only rides the authenticated variant; a signed-out diagnosis
+ * (once the proactive poll lands — deferred) falls through to the non-
+ * enterprise copy.
+ */
+function resolveBannerCopy(status: AuthStatus): BannerCopy | null {
+  const diagnosis =
+    status.state === "authenticated" || status.state === "unauthenticated" ?
+      status.network_diagnosis
+    : undefined;
+  if (!diagnosis) return null;
+
+  if (diagnosis.kind === "offline" || diagnosis.kind === "dns-failure") {
+    return {
+      icon: BANNER_ICON_OFFLINE,
+      titleKey: "banner-offline-title",
+      messageKey: "banner-offline-msg",
+      link: false,
+    };
+  }
+
+  const accountType =
+    status.state === "authenticated" ? status.account_type : null;
+  return {
+    icon: BANNER_ICON_COPILOT,
+    titleKey: "banner-copilot-title",
+    messageKey:
+      accountType === "enterprise" ?
+        "banner-copilot-msg-enterprise"
+      : "banner-copilot-msg-individual",
+    link: true,
+  };
+}
+
+/**
+ * Paint (or hide) the network-issue banner. Called on every auth.changed,
+ * regardless of the active section — the banner is global. Content is built in
+ * JS because the icon and copy vary by diagnosis kind and account type.
+ */
+function renderNetworkBanner(status: AuthStatus): void {
+  const banner = document.getElementById("network-banner");
+  if (!banner) return;
+
+  const copy = resolveBannerCopy(status);
+  if (!copy) {
+    banner.hidden = true;
+    return;
+  }
+
+  const iconEl = document.getElementById("network-banner-icon");
+  if (iconEl) iconEl.innerHTML = copy.icon;
+
+  const titleEl = document.getElementById("network-banner-title");
+  if (titleEl) titleEl.textContent = t(copy.titleKey);
+
+  const msgEl = document.getElementById("network-banner-msg");
+  if (msgEl instanceof HTMLElement) {
+    if (copy.link) {
+      // The status-page link rides inside the sentence as a {service} arg so
+      // word order stays the translator's (docs/dev/i18n.md) — the same helper
+      // the requirement-callout / endpoint-hint sentences use.
+      fillWithNode(
+        msgEl,
+        copy.messageKey,
+        "service",
+        externalLink(GITHUB_STATUS_URL, "banner-service-link"),
+      );
+    } else {
+      msgEl.textContent = t(copy.messageKey);
+    }
+  }
+
+  banner.hidden = false;
+}
+
+// ---- Account-type glyph --------------------------------------------------
+//
+// A small inline icon next to the connection indicator marking the account's
+// plan (individual / team / enterprise), with a hover + aria label. Purely
+// informational — it tells the user which kind of identity they're on, the
+// same distinction the network banner uses to tailor its copy.
+
+type AccountTypeName = "individual" | "business" | "enterprise";
+
+/** lucide "user" — a single person. */
+const ACCOUNT_TYPE_ICON: Record<AccountTypeName, string> = {
+  individual:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
+  // lucide "users" — a small group (a Copilot Business / team seat).
+  business:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+  // lucide "building-2" — an organization (a Copilot Enterprise seat).
+  enterprise:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/><path d="M9 9h.01M9 12h.01M9 15h.01M15 9h.01M15 12h.01M15 15h.01"/></svg>',
+};
+
+const ACCOUNT_TYPE_LABEL_KEY: Record<AccountTypeName, string> = {
+  individual: "account-type-individual",
+  business: "account-type-team",
+  enterprise: "account-type-enterprise",
+};
+
+/**
+ * Set (or hide) the account-type glyph. Hidden when the plan is unresolved —
+ * we show a real type or nothing, never a guess. The label doubles as the
+ * hover title and the aria-label (the glyph is otherwise silent to a reader).
+ */
+function renderAccountType(accountType: AccountTypeName | null | undefined): void {
+  const el = document.querySelector<HTMLElement>('[data-field="account_type"]');
+  if (!el) return;
+  if (!accountType) {
+    el.hidden = true;
+    el.replaceChildren();
+    el.removeAttribute("aria-label");
+    el.removeAttribute("title");
+    return;
+  }
+  const label = t(ACCOUNT_TYPE_LABEL_KEY[accountType]);
+  el.innerHTML = ACCOUNT_TYPE_ICON[accountType];
+  el.setAttribute("aria-label", label);
+  el.title = label;
+  el.hidden = false;
+}
+
 function labelForRemediationUrl(url: string): string {
   // Most GHCP rejection bodies point at one of a few well-known
   // GitHub pages. Map them to verbs the user will recognize; fall
@@ -1214,6 +1386,7 @@ function renderAccount(status: AuthStatus): void {
         status.connected_since,
         status.last_upstream_rejection !== undefined,
       );
+      renderAccountType(status.account_type);
       renderUpstreamRejection(status.last_upstream_rejection);
       // Populate the inline "Switch to" roster (other persisted accounts; the
       // active account is the hero and excluded).
@@ -2095,9 +2268,13 @@ window.addEventListener("DOMContentLoaded", () => {
   wireNav();
   syncFromHash();
   void loadDiagnostics();
+  // The live auth stream is always-on for the window's lifetime: it drives the
+  // global network banner on every section (not just Account). The initial SSE
+  // snapshot paints the banner without a separate GET. The Account card still
+  // GET-loads on entry so gh discovery runs.
+  openAuthEvents();
   if (readHashSection() === "account") {
     void loadAuthStatus();
-    openAuthEvents();
   }
 });
 
@@ -2116,12 +2293,18 @@ window.addEventListener("hashchange", () => {
     void loadAuthStatus();
     openAuthEvents();
   } else {
-    // Leaving the Account section: drop any in-flight polling, the live
-    // event stream, and the uptime ticker (all re-established on return).
+    // Leaving the Account section: drop the sign-in fallback poll and the
+    // uptime ticker (both re-established on return). The event stream stays
+    // open — it feeds the global network banner on every section.
     stopAuthPolling();
-    closeAuthEvents();
     stopConnUptimeTicker();
   }
+});
+
+// Tear the always-on auth stream down when the window goes away, so a closed
+// (or reloaded) webview doesn't leave a dangling EventSource.
+window.addEventListener("pagehide", () => {
+  closeAuthEvents();
 });
 
 // Refresh on returning to the window. The common flow is: open the Account
