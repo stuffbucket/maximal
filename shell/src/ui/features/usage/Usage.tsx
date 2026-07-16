@@ -1,5 +1,11 @@
-import { formatCellText, formatCostAiu, formatNumber } from "./format";
+import {
+  formatCellText,
+  formatCostAiu,
+  formatNumber,
+  quotaView,
+} from "./format";
 import type {
+  QuotaDetails,
   TokenUsageModelSummary,
   TokenUsageSummary,
 } from "./usage-types";
@@ -25,6 +31,51 @@ function StatTile({ label, value }: { label: string; value: string }) {
       <div className="usage__tile-value">{value}</div>
       <div className="usage__tile-label">{label}</div>
     </div>
+  );
+}
+
+/** A single entitlement/quota card with a severity-coloured progress bar (§4). */
+function QuotaCard({ name, details }: { name: string; details: QuotaDetails }) {
+  const view = quotaView(details);
+  return (
+    <div className={`usage__quota usage__quota--${view.level}`}>
+      <div className="usage__quota-head">
+        <span className="usage__quota-name">{name.split("_").join(" ")}</span>
+        <span className="usage__quota-pct">
+          {view.level === "unlimited" ?
+            "Unlimited"
+          : `${view.percentUsed.toFixed(1)}% used`}
+        </span>
+      </div>
+      <div className="usage__quota-bar">
+        <div
+          className="usage__quota-bar-fill"
+          style={{ width: `${view.level === "unlimited" ? 100 : view.percentUsed}%` }}
+        />
+      </div>
+      <div className="usage__quota-foot">
+        <span>
+          {view.used} / {view.entitlement}
+        </span>
+        <span>{view.remaining} left</span>
+      </div>
+    </div>
+  );
+}
+
+function Quotas({
+  quotas,
+}: {
+  quotas: Record<string, QuotaDetails> | null;
+}) {
+  const entries = quotas ? Object.entries(quotas) : [];
+  if (entries.length === 0) return null;
+  return (
+    <section className="usage__quotas" aria-label="Quotas">
+      {entries.map(([name, details]) => (
+        <QuotaCard key={name} name={name} details={details} />
+      ))}
+    </section>
   );
 }
 
@@ -67,7 +118,7 @@ function Breakdown({ summary }: { summary: TokenUsageSummary }) {
 }
 
 export function Usage() {
-  const { summary, period, setPeriod, isLoading, error } = useUsage();
+  const { summary, quotas, period, setPeriod, isLoading, error } = useUsage();
 
   return (
     <div className="usage">
@@ -99,6 +150,7 @@ export function Usage() {
       : summary === null ?
         <p className="usage__empty">No usage data.</p>
       : <>
+          <Quotas quotas={quotas} />
           <div className="usage__tiles">
             <StatTile
               label="Total tokens"

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-import type { TokenUsageSummary } from "./usage-types";
+import type { QuotaDetails, TokenUsageSummary } from "./usage-types";
 
 /**
  * Data hook over `/token-usage` (spec §4). The endpoint is loopback-exempt from
@@ -15,6 +15,7 @@ export type UsagePeriod = "day" | "week" | "month" | "all";
 
 interface UseUsage {
   summary: TokenUsageSummary | null;
+  quotas: Record<string, QuotaDetails> | null;
   period: UsagePeriod;
   setPeriod: (p: UsagePeriod) => void;
   isLoading: boolean;
@@ -36,20 +37,41 @@ async function fetchSummary(
   }
 }
 
+/** Quota snapshots from `/usage`. Best-effort: a failure just hides the cards. */
+async function fetchQuotas(): Promise<Record<string, QuotaDetails> | null> {
+  try {
+    const res = await fetch("/usage");
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      quota_snapshots?: Record<string, QuotaDetails> | null;
+    };
+    return data.quota_snapshots ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export function useUsage(): UseUsage {
   const [summary, setSummary] = useState<TokenUsageSummary | null>(null);
+  const [quotas, setQuotas] = useState<Record<string, QuotaDetails> | null>(
+    null,
+  );
   const [period, setPeriod] = useState<UsagePeriod>("day");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const result = await fetchSummary(period);
+    const [result, quotaSnapshots] = await Promise.all([
+      fetchSummary(period),
+      fetchQuotas(),
+    ]);
     if (result.ok) {
       setSummary(result.data);
       setError(null);
     } else {
       setError(result.error);
     }
+    setQuotas(quotaSnapshots);
     setIsLoading(false);
   }, [period]);
 
@@ -66,5 +88,5 @@ export function useUsage(): UseUsage {
       window.removeEventListener("maximal:usage-refresh", onRefresh);
   }, [load]);
 
-  return { summary, period, setPeriod, isLoading, error, refresh: load };
+  return { summary, quotas, period, setPeriod, isLoading, error, refresh: load };
 }

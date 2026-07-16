@@ -33,3 +33,16 @@ export interface TokenUsageSummary {
   };
   totals: TokenUsageTotals;
 }
+
+/** One entitlement snapshot from `/usage` (`quota_snapshots[<name>]`). */
+export interface QuotaDetails {
+  entitlement: number;
+  remaining: number;
+  percent_remaining: number;
+  unlimited: boolean;
+}
+
+/** The `/usage` response (the quota half of the dashboard, §4). */
+export interface UsageData {
+  quota_snapshots?: Record<string, QuotaDetails> | null;
+}

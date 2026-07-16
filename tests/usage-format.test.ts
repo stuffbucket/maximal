@@ -5,6 +5,7 @@ import {
   formatCostAiu,
   formatNumber,
   formatQuotaUsed,
+  quotaView,
 } from "../shell/src/ui/features/usage/format"
 
 /**
@@ -61,5 +62,35 @@ describe("formatQuotaUsed", () => {
   test("used = entitlement − remaining, floored at 0", () => {
     expect(formatQuotaUsed(100, 30, false).replaceAll(/[,. ]/g, "")).toBe("70")
     expect(formatQuotaUsed(100, 200, false)).toBe("0") // never negative
+  })
+})
+
+describe("quotaView", () => {
+  const base = {
+    entitlement: 100,
+    remaining: 100,
+    percent_remaining: 100,
+    unlimited: false,
+  }
+  test("unlimited is its own level with ∞ labels", () => {
+    const v = quotaView({ ...base, unlimited: true })
+    expect(v.level).toBe("unlimited")
+    expect(v.entitlement).toBe("∞")
+    expect(v.remaining).toBe("∞")
+  })
+  test("severity thresholds: ok ≤75 < warn ≤90 < crit", () => {
+    expect(quotaView({ ...base, percent_remaining: 50 }).level).toBe("ok") // 50% used
+    expect(quotaView({ ...base, percent_remaining: 20 }).level).toBe("warn") // 80% used
+    expect(quotaView({ ...base, percent_remaining: 5 }).level).toBe("crit") // 95% used
+  })
+  test("percentUsed = 100 − percent_remaining; used floored at 0", () => {
+    const v = quotaView({
+      entitlement: 100,
+      remaining: 30,
+      percent_remaining: 30,
+      unlimited: false,
+    })
+    expect(v.percentUsed).toBe(70)
+    expect(v.used.replaceAll(/[,. ]/g, "")).toBe("70")
   })
 })

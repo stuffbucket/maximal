@@ -48,3 +48,46 @@ export function formatQuotaUsed(
   if (unlimited) return "0";
   return Math.max(0, entitlement - remaining).toLocaleString();
 }
+
+/** Severity of a quota's consumption, driving the progress-bar colour (§4). */
+export type QuotaLevel = "ok" | "warn" | "crit" | "unlimited";
+
+/** Display-ready projection of a raw `QuotaDetails` (pure; DOM-free). */
+export interface QuotaView {
+  readonly percentUsed: number;
+  readonly level: QuotaLevel;
+  readonly used: string;
+  readonly entitlement: string;
+  readonly remaining: string;
+}
+
+/**
+ * Project a quota snapshot to its display view (ported from the dashboard's
+ * `renderQuotaCard` thresholds: >90% crit, >75% warn, unlimited its own state).
+ */
+export function quotaView(details: {
+  entitlement: number;
+  remaining: number;
+  percent_remaining: number;
+  unlimited: boolean;
+}): QuotaView {
+  if (details.unlimited) {
+    return {
+      percentUsed: 100,
+      level: "unlimited",
+      used: "∞",
+      entitlement: "∞",
+      remaining: "∞",
+    };
+  }
+  const percentUsed = 100 - details.percent_remaining;
+  const level: QuotaLevel =
+    percentUsed > 90 ? "crit" : percentUsed > 75 ? "warn" : "ok";
+  return {
+    percentUsed,
+    level,
+    used: Math.max(0, details.entitlement - details.remaining).toLocaleString(),
+    entitlement: details.entitlement.toLocaleString(),
+    remaining: details.remaining.toLocaleString(),
+  };
+}
