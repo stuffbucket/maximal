@@ -54,7 +54,10 @@ check_inplace_update           app.updater_builder().build().check()
   ├─ Ok(Some(update)) ─────▶ prompt_and_install
   │                            │
   │                            ▼
-  │                          native confirm dialog  (tauri-plugin-dialog)
+  │                          branded confirm webview  (update-confirm.html)
+  │                            · self-measures post-fonts → emits `update:size`
+  │                            · Rust sizes the window to fit → reveals it
+  │                            · buttons emit `update:resolve {confirm}`
   │                            │  user confirms
   │                            ▼
   │                          update.download_and_install()
@@ -164,6 +167,46 @@ to the one place that has the key.
 At a high level: **the private macos-builder signs; this side only
 verifies + installs.** Key-provisioning / runner-setup specifics for the
 builder are intentionally not documented here.
+
+---
+
+## Isolating the branded confirm surface: `MAXIMAL_CONFIRM_HARNESS`
+
+The confirm window (`update-confirm.html`) is a self-contained webview whose
+geometry is **content-driven**: the WKWebView measures its own laid-out height
+after fonts settle, emits `update:size`, and Rust sizes the window to fit and
+reveals it (see `open_confirm_window` in `updater.rs`). That measure → size →
+reveal → resolve handshake can't be exercised in a browser preview — only a real
+WKWebView measures a real WKWebView.
+
+A debug-only harness drives that exact path without the updater endpoint, a real
+`Update`, the sidecar, or any bundle swap:
+
+```sh
+cd shell/src-tauri && MAXIMAL_CONFIRM_HARNESS=1 cargo run
+# optional: MAXIMAL_CONFIRM_VERSION=1.2.3 to change the injected version copy
+```
+
+`run()` branches to `run_confirm_harness_app` (both `#[cfg(debug_assertions)]`,
+compiled out of release), which builds a minimal Tauri app **without the
+single-instance plugin** — so it coexists with a running production instance
+sharing the `co.stuffbucket.maximal` identifier instead of poking it — and opens
+the confirm window via the same `open_confirm_window` the real installer uses.
+On either button it logs the choice and exits. The stderr trace is the proof:
+
+```
+[harness] opening branded confirm for v0.99.0
+[shell] update-confirm sized via update:size (height=280)   ← measure→size→reveal
+[harness] update:resolve confirm=true — exiting             ← resolve→clean exit
+```
+
+> **✅ Verified in a real WKWebView (2026-07-16).** The handshake fired, the
+> window sized to the measured height, and the resolve path exited cleanly. Note:
+> in a *cold debug build* the 1200 ms reveal fallback can win the race and show
+> the window at the provisional height before `update:size` corrects it (a few-px
+> nudge); release builds settle fonts far faster, so the size handshake reveals
+> first there. The fallback exists precisely so a missed handshake never strands
+> the window hidden.
 
 ---
 

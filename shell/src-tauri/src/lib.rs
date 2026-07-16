@@ -66,6 +66,22 @@ pub(crate) const SIDECAR_PORT: u16 = 4141;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Expanded exactly once — `generate_context!` embeds Info.plist as a symbol
+    // and can't appear twice in one binary. Both the normal app and the harness
+    // consume this same context.
+    let context = tauri::generate_context!();
+
+    // Debug-only isolation harness: `MAXIMAL_CONFIRM_HARNESS=1 cargo run` opens
+    // ONLY the branded update-confirm window and drives its real WKWebView
+    // measure→size→reveal→resolve handshake — no sidecar, no tray, no
+    // single-instance plugin, so it can't collide with or poke a running prod
+    // instance sharing this bundle identifier. See updater::run_confirm_harness_app.
+    #[cfg(debug_assertions)]
+    if std::env::var_os("MAXIMAL_CONFIRM_HARNESS").is_some() {
+        crate::updater::run_confirm_harness_app(context);
+        return;
+    }
+
     let app = tauri::Builder::default()
         // MUST be the FIRST plugin registered. The single-instance
         // plugin's callback fires as part of plugin init; registering
@@ -214,7 +230,7 @@ pub fn run() {
 
             Ok(())
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building tauri application");
 
     app.run(|app_handle, event| match event {

@@ -150,27 +150,14 @@ async fn check_inplace_update(
     builder.build()?.check().await
 }
 
-/// Branded confirm → download+install → relaunch. Opens the self-contained
-/// `update-confirm.html` webview (the app's design language, not the native OS
-/// alert), the same race-safe pattern as `create_splash`: the localized copy is
-/// injected via an init-script BEFORE first paint. The window is created hidden
-/// and sized to the height the webview reports (`update:size`) — Rust can't
-/// measure the laid-out webview, so the surface measures itself and we fit the
-/// window to it, correct across engines/locales/font-scaling. The surface then
-/// emits a one-shot `update:resolve` with the user's choice. The control flow
-/// stays here in Rust — on confirm we download on the async runtime and then
-/// `app.restart()`, which routes through RunEvent::ExitRequested → `kill_sidecar`
-/// so the old sidecar is torn down before the fresh shell relaunches and spawns
-/// the new one with `--replace`. A failed download leaves the user on the
+/// Branded confirm → download+install → relaunch. Builds the confirm surface
+/// with the localized install copy, and on confirm downloads on the async
+/// runtime and then `app.restart()`, which routes through
+/// RunEvent::ExitRequested → `kill_sidecar` so the old sidecar is torn down
+/// before the fresh shell relaunches and spawns the new one with `--replace`. A
+/// failed download (or a window that never opened) leaves the user on the
 /// download page rather than silently doing nothing.
 fn prompt_and_install(app: &AppHandle, update: tauri_plugin_updater::Update) {
-    // Clicked twice while the window is up — focus it, don't stack a second
-    // window or a second one-shot listener.
-    if let Some(existing) = app.get_webview_window("update-confirm") {
-        let _ = existing.set_focus();
-        return;
-    }
-
     let locale = app.state::<LocaleState>().get();
     let version = update.version.clone();
     // Resolve the localized copy and hand it to the surface race-free.
@@ -181,15 +168,62 @@ fn prompt_and_install(app: &AppHandle, update: tauri_plugin_updater::Update) {
         "confirmLabel": native_i18n::tr(&locale, "native-update-install-confirm"),
         "cancelLabel": native_i18n::tr(&locale, "native-update-install-cancel"),
     });
+
+    let opened = open_confirm_window(app, payload, move |app, confirmed| {
+        if !confirmed {
+            return;
+        }
+        let app_inner = app.clone();
+        tauri::async_runtime::spawn(async move {
+            if let Err(err) = update.download_and_install(|_chunk, _total| {}, || {}).await {
+                eprintln!("[shell] in-place install failed: {err}");
+                open_update_url(&app_inner);
+                return;
+            }
+            // Bundle swapped in place; relaunch into the new version.
+            app_inner.restart();
+        });
+    });
+
+    if !opened {
+        eprintln!("[shell] update-confirm window failed; opening download page");
+        open_update_url(app);
+    }
+}
+
+/// Opens the self-contained `update-confirm.html` webview (the app's design
+/// language, not the native OS alert) and drives the full
+/// measure→size→reveal→resolve handshake, invoking `on_resolve(app, confirmed)`
+/// exactly once with the user's choice (after closing the window). Split out of
+/// `prompt_and_install` so this same window/handshake path can be exercised in
+/// isolation by the debug harness (`run_confirm_harness_app`) — it otherwise
+/// only ever ran in a browser preview, never in a real WKWebView.
+///
+/// Same race-safe pattern as `create_splash`: `payload` (version + localized
+/// title/body/button copy) is injected as `window.__UPDATE__` via an
+/// init-script BEFORE first paint. The window is created HIDDEN at a provisional
+/// size and sized to the height the webview reports via `update:size` — Rust
+/// can't measure the laid-out webview (height depends on engine font metrics,
+/// locale copy length, user font scaling), so the surface measures itself and
+/// we fit the window to it, then reveal, correct across engines/locales/scaling.
+/// A short fallback timer reveals it at the provisional size if that handshake
+/// never lands. Returns false only if the window couldn't be created (the caller
+/// then falls back); an already-open window is focused and counts as handled.
+fn open_confirm_window<F>(app: &AppHandle, payload: serde_json::Value, on_resolve: F) -> bool
+where
+    F: FnOnce(&AppHandle, bool) + Send + 'static,
+{
+    // Clicked twice while the window is up — focus it, don't stack a second
+    // window or a second one-shot listener.
+    if let Some(existing) = app.get_webview_window("update-confirm") {
+        let _ = existing.set_focus();
+        return true;
+    }
+
     let init = format!("window.__UPDATE__ = {payload};");
 
-    // Fixed width controls the wrap; the height is provisional. Created HIDDEN,
-    // the webview measures its own laid-out content (post-fonts) and reports it
-    // via `update:size`; we size the window to that and reveal it, so the user
-    // never sees a wrongly-sized frame. Rust can't measure the webview itself —
-    // the height depends on the runtime engine's font metrics, the localized
-    // copy, and user font scaling (see update-confirm.html). 285 is only the
-    // fallback height used if that handshake never lands.
+    // Fixed width controls the wrap; the height is provisional. 285 is only the
+    // fallback height used if the size handshake never lands.
     const CONFIRM_WIDTH: f64 = 360.0;
     const CONFIRM_FALLBACK_HEIGHT: f64 = 285.0;
     let built = WebviewWindowBuilder::new(
@@ -212,9 +246,8 @@ fn prompt_and_install(app: &AppHandle, update: tauri_plugin_updater::Update) {
     .build();
 
     if let Err(err) = built {
-        eprintln!("[shell] update-confirm window failed ({err}); opening download page");
-        open_update_url(app);
-        return;
+        eprintln!("[shell] update-confirm window failed ({err})");
+        return false;
     }
 
     // The webview reports its measured content height once fonts + layout settle;
@@ -233,6 +266,7 @@ fn prompt_and_install(app: &AppHandle, update: tauri_plugin_updater::Update) {
             let _ = window.center();
             let _ = window.show();
             let _ = window.set_focus();
+            eprintln!("[shell] update-confirm sized via update:size (height={height})");
         }
     });
 
@@ -246,34 +280,74 @@ fn prompt_and_install(app: &AppHandle, update: tauri_plugin_updater::Update) {
             if !window.is_visible().unwrap_or(false) {
                 let _ = window.show();
                 let _ = window.set_focus();
+                eprintln!("[shell] update-confirm revealed via fallback timer (size handshake missed)");
             }
         }
     });
 
     // One-shot: the surface emits `update:resolve` = {confirm: bool}. Close the
-    // window on either choice; install + relaunch only on confirm. `once` fires
-    // at most once, so the `update` move is sound.
-    let app_handle = app.clone();
+    // window on either choice, then hand the result to the caller. `once` fires
+    // at most once, so `on_resolve` (FnOnce) is sound.
+    let resolve_app = app.clone();
     app.once("update:resolve", move |event| {
         let confirmed = serde_json::from_str::<serde_json::Value>(event.payload())
             .ok()
             .and_then(|v| v.get("confirm").and_then(serde_json::Value::as_bool))
             .unwrap_or(false);
-        if let Some(window) = app_handle.get_webview_window("update-confirm") {
+        if let Some(window) = resolve_app.get_webview_window("update-confirm") {
             let _ = window.close();
         }
-        if !confirmed {
-            return;
-        }
-        let app_inner = app_handle.clone();
-        tauri::async_runtime::spawn(async move {
-            if let Err(err) = update.download_and_install(|_chunk, _total| {}, || {}).await {
-                eprintln!("[shell] in-place install failed: {err}");
-                open_update_url(&app_inner);
-                return;
-            }
-            // Bundle swapped in place; relaunch into the new version.
-            app_inner.restart();
-        });
+        on_resolve(&resolve_app, confirmed);
     });
+
+    true
+}
+
+/// Debug-only isolated harness for the branded confirm surface. Builds a
+/// minimal Tauri app — crucially WITHOUT the single-instance plugin, so it can
+/// coexist with a running production instance sharing the same bundle
+/// identifier — that opens the confirm window via the real `open_confirm_window`
+/// and drives the actual WKWebView self-measure → `update:size` → Rust set_size
+/// + reveal → `update:resolve` handshake, WITHOUT the updater endpoint, a real
+/// `Update`, the sidecar, or any bundle swap. On resolve it logs the choice and
+/// exits. Gated by `run()` behind `MAXIMAL_CONFIRM_HARNESS`; compiled out of
+/// release. See docs/dev/self-updater.md.
+#[cfg(debug_assertions)]
+pub(crate) fn run_confirm_harness_app(context: tauri::Context) {
+    tauri::Builder::default()
+        .manage(LocaleState::new())
+        .setup(|app| {
+            // A normal, focusable, screenshot-able window (the real app is a
+            // tray/Accessory app; the harness just needs the surface on screen).
+            #[cfg(target_os = "macos")]
+            let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+
+            let locale =
+                native_i18n::resolve_locale(None, sys_locale::get_locale().as_deref());
+            app.state::<LocaleState>().set(locale.clone());
+
+            let version =
+                std::env::var("MAXIMAL_CONFIRM_VERSION").unwrap_or_else(|_| "0.99.0".to_string());
+            let payload = serde_json::json!({
+                "version": version,
+                "title": native_i18n::t(&locale, "native-update-install-title", &[("latest", &version)]),
+                "body": native_i18n::tr(&locale, "native-update-install-body"),
+                "confirmLabel": native_i18n::tr(&locale, "native-update-install-confirm"),
+                "cancelLabel": native_i18n::tr(&locale, "native-update-install-cancel"),
+            });
+            eprintln!("[harness] opening branded confirm for v{version}");
+
+            let opened = open_confirm_window(app.handle(), payload, |app, confirmed| {
+                eprintln!("[harness] update:resolve confirm={confirmed} — exiting");
+                app.exit(0);
+            });
+            if !opened {
+                eprintln!("[harness] update-confirm window failed to open");
+                app.handle().exit(1);
+            }
+            Ok(())
+        })
+        .build(context)
+        .expect("error while building confirm harness")
+        .run(|_app, _event| {});
 }
