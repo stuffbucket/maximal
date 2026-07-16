@@ -1,22 +1,30 @@
-import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
 import { Hono } from "hono"
 
 import type { AnthropicMessagesPayload } from "~/lib/models/anthropic-types"
 
-const actualStateModule = await import("../src/lib/runtime-state/state")
-const actualConfigModule = await import("../src/lib/config/config")
-const actualModelsModule = await import("../src/lib/models/models")
-const actualRateLimitModule = await import("../src/lib/http/rate-limit")
-const actualUtilsModule = await import("../src/lib/platform/utils")
-const actualApiFlowsModule = await import("../src/routes/messages/api-flows")
+import {
+  generateRequestIdFromPayload,
+  getUUID,
+} from "../src/lib/platform/utils"
+import { state } from "../src/lib/runtime-state/state"
+import { handleCompletion } from "../src/routes/messages/handler"
 
-const state = {
-  ...actualStateModule.state,
-  manualApprove: false,
-  verbose: false,
+// No `mock.module` on shared modules: those leak process-wide across test
+// files on CI (Bun keeps module mocks for the whole run and an awaited
+// afterAll restore doesn't reliably land before the next file's static
+// imports — see docs/architecture.md → Testing gotchas). Instead we drive the
+// real handler with real `state`/config and inject the boundary functions
+// (findEndpointModel + the three flow handlers) through handleCompletion's
+// deps seam, so nothing is stubbed in the process-global module registry.
+
+const originalState = {
+  manualApprove: state.manualApprove,
+  verbose: state.verbose,
+  rateLimitSeconds: state.rateLimitSeconds,
+  lastRequestTimestamp: state.lastRequestTimestamp,
 }
 
-let messagesApiEnabled = true
 type SelectedModel = {
   id: string
   supported_endpoints?: Array<string>
@@ -54,39 +62,16 @@ const handleWithChatCompletions = mock(
   ) => new Response("chat"),
 )
 
-await mock.module("~/lib/runtime-state/state", () => ({
-  ...actualStateModule,
-  state,
-}))
-await mock.module("~/lib/http/rate-limit", () => ({
-  ...actualRateLimitModule,
-  checkRateLimit: async () => {},
-}))
-await mock.module("~/lib/config/config", () => ({
-  ...actualConfigModule,
-  getSmallModel: () => "small-model",
-  isMessagesApiEnabled: () => messagesApiEnabled,
-}))
-await mock.module("~/lib/models/models", () => ({
-  ...actualModelsModule,
+const deps = {
   findEndpointModel,
-}))
-await mock.module("~/lib/platform/utils", () => ({
-  ...actualUtilsModule,
-}))
-await mock.module("~/routes/messages/api-flows", () => ({
   handleWithMessagesApi,
   handleWithResponsesApi,
   handleWithChatCompletions,
-  isNonStreaming: (response: unknown) =>
-    Object.hasOwn(response as object, "choices"),
-}))
-
-const { handleCompletion } = await import("../src/routes/messages/handler")
+} as unknown as Parameters<typeof handleCompletion>[1]
 
 const createApp = () => {
   const app = new Hono()
-  app.post("/", handleCompletion)
+  app.post("/", (c) => handleCompletion(c, deps))
   return app
 }
 
@@ -102,13 +87,22 @@ const createPayload = (
 beforeEach(() => {
   state.manualApprove = false
   state.verbose = false
-  messagesApiEnabled = true
+  // Leave rateLimitSeconds unset so the real checkRateLimit is a no-op.
+  state.rateLimitSeconds = undefined
+  state.lastRequestTimestamp = undefined
   selectedModel = undefined
 
   findEndpointModel.mockClear()
   handleWithMessagesApi.mockClear()
   handleWithResponsesApi.mockClear()
   handleWithChatCompletions.mockClear()
+})
+
+afterEach(() => {
+  state.manualApprove = originalState.manualApprove
+  state.verbose = originalState.verbose
+  state.rateLimitSeconds = originalState.rateLimitSeconds
+  state.lastRequestTimestamp = originalState.lastRequestTimestamp
 })
 
 describe("messages handler orchestration", () => {
@@ -308,8 +302,8 @@ describe("messages handler orchestration", () => {
     expect(findEndpointModel).toHaveBeenCalledWith("original-model")
     expect(findEndpointModel).not.toHaveBeenCalledWith("small-model")
 
-    const expectedSessionId = actualUtilsModule.getUUID("session-123")
-    const expectedRequestId = actualUtilsModule.generateRequestIdFromPayload(
+    const expectedSessionId = getUUID("session-123")
+    const expectedRequestId = generateRequestIdFromPayload(
       payload,
       expectedSessionId,
     )
@@ -360,18 +354,4 @@ describe("warmup short-circuit", () => {
     expect(handleWithResponsesApi).not.toHaveBeenCalled()
     expect(handleWithChatCompletions).not.toHaveBeenCalled()
   })
-})
-
-// Restore real modules so their mocks don't bleed into other test files
-// that share this Bun worker (e.g. find-endpoint-model.test.ts). Awaited so
-// the restore actually lands before a later file's static imports resolve
-// (Bun keeps module mocks for the whole process; an unawaited restore never
-// lands).
-afterAll(async () => {
-  await mock.module("~/lib/runtime-state/state", () => actualStateModule)
-  await mock.module("~/lib/models/models", () => actualModelsModule)
-  await mock.module("~/lib/http/rate-limit", () => actualRateLimitModule)
-  await mock.module("~/lib/config/config", () => actualConfigModule)
-  await mock.module("~/lib/platform/utils", () => actualUtilsModule)
-  await mock.module("~/routes/messages/api-flows", () => actualApiFlowsModule)
 })
