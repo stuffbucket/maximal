@@ -634,7 +634,14 @@ const applyAdaptiveThinking = (
   }
   const reasoningEffort = selectedModel.capabilities.supports.reasoning_effort
   if (reasoningEffort && !reasoningEffort.includes(effort)) {
-    effort = reasoningEffort.at(-1) as "low" | "medium" | "high"
+    // Clamp to the model's highest advertised tier. Copilot's array is ordered
+    // low→high, so the last element is the ceiling (may be xhigh or max).
+    effort = reasoningEffort.at(-1) as
+      | "low"
+      | "medium"
+      | "high"
+      | "xhigh"
+      | "max"
   }
   payload.output_config = {
     effort: effort,

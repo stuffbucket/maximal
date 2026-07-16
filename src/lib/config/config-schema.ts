@@ -45,6 +45,7 @@ const ReasoningEffortSchema = z.enum([
   "medium",
   "high",
   "xhigh",
+  "max",
 ])
 
 /**
