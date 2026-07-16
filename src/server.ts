@@ -24,11 +24,11 @@ import { embeddingRoutes } from "./routes/embeddings/route"
 import { internalRoutes } from "./routes/internal/route"
 import { messageRoutes } from "./routes/messages/route"
 import { modelRoutes } from "./routes/models/route"
+import { productApiRoutes } from "./routes/product-api"
 import { providerMessageRoutes } from "./routes/provider/messages/route"
 import { providerModelRoutes } from "./routes/provider/models/route"
 import { responsesRoutes } from "./routes/responses/route"
 import { settingsApiRoutes } from "./routes/settings/api"
-import { setupStatusRoute } from "./routes/setup-status"
 import { tokenUsageRoute } from "./routes/token-usage/route"
 import { uiRoutes } from "./routes/ui/route"
 import { usageRoute } from "./routes/usage/route"
@@ -88,6 +88,9 @@ server.use(
       // itself requires the minted `?key=` session token — so it is exempt
       // from the API-key middleware here, not unprotected.
       WS_PATH,
+      // The product-API OpenAPI document is a public spec (no secrets),
+      // served alongside the fresh-install `/setup-status` surface.
+      "/openapi.json",
     ],
     // /ui/* serves the settings + dashboard UI shells and their assets.
     // /settings/api/* are data endpoints — gated by requireAuthPrefixes.
@@ -159,7 +162,9 @@ server.get("/settings/", (c) => c.redirect("/ui/settings/", 301))
 
 server.route("/_debug", debugRoutes)
 server.route("/_internal", internalRoutes)
-server.route("/setup-status", setupStatusRoute)
+// The maximal-specific product API surface: `/setup-status` plus its
+// route-bound OpenAPI document at `/openapi.json`. See routes/product-api.ts.
+server.route("/", productApiRoutes)
 // `/settings/api/*` requires API-key auth (covers the new auth endpoints too).
 server.route("/settings/api", settingsApiRoutes)
 // `/ui/*` serves the settings + dashboard UI (embedded in prod, from

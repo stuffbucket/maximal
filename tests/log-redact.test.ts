@@ -264,3 +264,25 @@ describe("redactForLog", () => {
     expect(out.Stop_Reason).toBe("end_turn")
   })
 })
+
+describe("redactForLog — transport/socket error fields", () => {
+  test("keeps unambiguous socket/DNS error fields, still redacts code/path", () => {
+    // A transport error object: syscall/hostname/address are structural network
+    // diagnostics (never content) and must survive; `code` and `path` collide
+    // with content keys (source code, file paths) and stay redacted.
+    const out = redactForLog({
+      code: "ConnectionRefused",
+      path: "https://api.github.com/copilot_internal/v2/token",
+      errno: 0,
+      syscall: "connect",
+      hostname: "api.github.com",
+      address: "140.82.112.6",
+    }) as Record<string, unknown>
+    expect(out.syscall).toBe("connect")
+    expect(out.hostname).toBe("api.github.com")
+    expect(out.address).toBe("140.82.112.6")
+    expect(out.errno).toBe(0)
+    expect(out.code).toBe(`[redacted ${"ConnectionRefused".length} chars]`)
+    expect(out.path).toContain("[redacted")
+  })
+})

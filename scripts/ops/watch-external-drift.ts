@@ -2,8 +2,8 @@
 /**
  * External-surface drift watcher — deterministic, no LLM, no secrets.
  *
- * `maximal` impersonates several third-party clients and mirrors an
- * external API spec. Those upstreams live outside this repo and move on
+ * `maximal` sends request headers matching several third-party clients and
+ * mirrors an external API spec. Those upstreams live outside this repo and move on
  * their own schedule; when they do, a hardcoded pin here silently goes
  * stale (see docs/admin/external-drift-watch.md). This watcher
  * compares each pin against its authoritative upstream and flags drift so
@@ -32,19 +32,23 @@
  *
  * Usage:
  *   bun run scripts/ops/watch-external-drift.ts [--body-file <path>]
+ *   bun run scripts/ops/watch-external-drift.ts --fix   # rewrite fixable pins
  *
  * Emits (for the daily workflow):
- *   - `drift=true|false` to $GITHUB_OUTPUT
+ *   - `drift=true|false` to $GITHUB_OUTPUT, plus `fixable=` (a version pin can
+ *     be bumped mechanically) and `needs_issue=` (something needs a human).
  *   - a Markdown issue body to --body-file (default external-drift-report.md)
  *     when any watch is drifted. The body is scoped so a PR can be derived from
- *     it directly: the workflow files ONE labelled issue — actionable by a
- *     maintainer, or by `repoman`'s issue triage where that is wired. The
- *     workflow itself never opens a PR.
- * This watcher DETECTS and reports only; it never rewrites the pins. A version
- * value is often duplicated in a coupled string (e.g. OPENCODE_VERSION also
- * appears verbatim in the opencode User-Agent we send), so a mechanical
- * single-pin rewrite would half-update the source — reconciling the bump by
- * hand, guided by the issue body, is the correct and reviewable gate.
+ *     it directly: the workflow files ONE labelled issue, actionable by a
+ *     maintainer. The workflow itself never opens a PR.
+ *
+ * `--fix` rewrites ONLY the fixable VERSION_PINS in place (see applyFix) so an
+ * autonomous bump PR can carry them, then exits without writing outputs or a
+ * report. It never rewrites the Anthropic spec SHA or the HEADER_PINS: those
+ * need a human changelog read and stay on the issue path. A version value can
+ * be duplicated in a coupled string (the opencode UA repeats it), so each
+ * fixable pin is sourced from ONE constant the copies derive from — a raw
+ * single-site rewrite would otherwise half-update the source.
  * Always exits 0 (a failed *check* is reported as drift, not a crash) so the
  * workflow can decide what to do.
  */
@@ -80,7 +84,7 @@ export interface PinSpec extends ExtractSpec {
   describe: string
 }
 
-/** Version pins we impersonate, each checked against an upstream release. */
+/** Client version pins we send, each checked against an upstream release. */
 export const VERSION_PINS: ReadonlyArray<PinSpec> = [
   {
     id: "copilotChat",
@@ -88,7 +92,7 @@ export const VERSION_PINS: ReadonlyArray<PinSpec> = [
     pattern: /const COPILOT_VERSION = "([\d.]+)"/u,
     repo: "microsoft/vscode-copilot-chat",
     describe:
-      "Copilot Chat client version we impersonate (COPILOT_VERSION / User-Agent). Also our proxy for /models schema drift.",
+      "Copilot Chat client version we send (COPILOT_VERSION / User-Agent). Also our proxy for /models schema drift.",
   },
   {
     id: "claudeCode",
@@ -96,14 +100,14 @@ export const VERSION_PINS: ReadonlyArray<PinSpec> = [
     pattern: /vscode_claude_code\/([\d.]+)/u,
     repo: "anthropics/claude-code",
     describe:
-      "Claude Code agent version we impersonate (CLAUDE_AGENT_USER_AGENT).",
+      "Claude Code agent version we send (CLAUDE_AGENT_USER_AGENT).",
   },
   {
     id: "opencode",
     file: "src/lib/config/api-config.ts",
-    pattern: /const OPENCODE_VERSION = "opencode\/([\d.]+)"/u,
+    pattern: /const OPENCODE_SEMVER = "([\d.]+)"/u,
     repo: "sst/opencode",
-    describe: "opencode client version we impersonate (OPENCODE_VERSION).",
+    describe: "opencode client version we send (OPENCODE_VERSION).",
   },
 ]
 
@@ -194,6 +198,33 @@ export function normalizeTag(tag: string): string {
     .trim()
     .replace(/^sdk-v/u, "")
     .replace(/^v/u, "")
+}
+
+/**
+ * Rewrite a version pin in place, replacing only the captured value (group 1)
+ * with `next` and preserving all surrounding text. Pure and deterministic —
+ * this is what `--fix` uses so an autonomous bump PR can carry the change.
+ * Throws if the pattern no longer matches (the parity test guards that).
+ *
+ * SAFETY: this only touches the single captured site. A pin whose version is
+ * duplicated in a coupled string (the opencode UA repeats it) must therefore
+ * be sourced from ONE constant that the copies derive from — that is why the
+ * opencode pin targets `OPENCODE_SEMVER`, not the raw `OPENCODE_VERSION`
+ * literal. Only fixable VERSION_PINS are ever passed here; HEADER_PINS and the
+ * Anthropic spec SHA deliberately stay on the issue-only path.
+ */
+export function applyFix(source: string, spec: PinSpec, next: string): string {
+  let replaced = false
+  const out = source.replace(spec.pattern, (full, group1: string) => {
+    replaced = true
+    return full.replace(group1, next)
+  })
+  if (!replaced) {
+    throw new Error(
+      `applyFix ${spec.id}: ${String(spec.pattern)} no longer matches ${spec.file}`,
+    )
+  }
+  return out
 }
 
 // --- GitHub API (the only network) ---
@@ -376,7 +407,7 @@ export function renderReport(results: ReadonlyArray<WatchResult>): string {
   const lines: Array<string> = [
     "## External-surface drift detected",
     "",
-    "The daily watcher (deterministic, no LLM) found upstream changes to sources `maximal` mirrors or impersonates. Each item below is scoped so a reconciliation PR can be derived from it directly.",
+    "The daily drift-watch workflow found upstream changes to the client versions and API specs that `maximal` pins to. Each item below is scoped so a reconciliation PR can be derived from it directly.",
     "",
   ]
   for (const r of drifted) {
@@ -392,7 +423,7 @@ export function renderReport(results: ReadonlyArray<WatchResult>): string {
   }
   lines.push(
     "---",
-    "_Generated by `scripts/ops/watch-external-drift.ts` (deterministic, no LLM). Reused while drift persists; auto-closes on the next clean run. A maintainer — or `repoman`'s issue triage, where wired — derives the reconciliation PR from this issue._",
+    "_Generated by the `watch-external-drift` workflow. Reused while drift persists; auto-closes on the next clean run. A maintainer derives the reconciliation PR from this issue._",
   )
   return lines.join("\n")
 }
@@ -415,8 +446,39 @@ async function main(): Promise<number> {
 
   const anyDrift = results.some((r) => r.drift)
 
+  // Partition the drift once. A watch is mechanically fixable only when it is a
+  // VERSION_PIN (a semver with a machine-readable upstream) whose check
+  // succeeded (local !== "?"). Everything else — the Anthropic spec SHA, every
+  // HEADER_PIN, and any failed check — needs a human read and routes to the
+  // issue path. This mirrors the invariant in applyFix's contract.
+  const isVersionPin = (id: string): boolean =>
+    VERSION_PINS.some((p) => p.id === id)
+  const drifted = results.filter((r) => r.drift)
+  const fixable = drifted.filter((r) => r.local !== "?" && isVersionPin(r.id))
+  const needsIssue = drifted.some((r) => r.local === "?" || !isVersionPin(r.id))
+
+  // `--fix`: rewrite the fixable version pins in place so an autonomous bump PR
+  // can carry them. Non-fixable drift is left untouched (it routes to an issue
+  // on the normal, no-`--fix` run). Exits without touching $GITHUB_OUTPUT or
+  // the report — a mutation run does one job.
+  if (process.argv.includes("--fix")) {
+    for (const spec of VERSION_PINS) {
+      const r = fixable.find((x) => x.id === spec.id)
+      if (!r) continue
+      const next = normalizeTag(r.upstream)
+      const abs = repoPath(spec.file)
+      const src = await fs.readFile(abs, "utf8")
+      await fs.writeFile(abs, applyFix(src, spec, next))
+      console.error(`fixed ${spec.id}: ${r.local} → ${next} in ${spec.file}`)
+    }
+    return 0
+  }
+
   if (process.env.GITHUB_OUTPUT) {
-    await fs.appendFile(process.env.GITHUB_OUTPUT, `drift=${anyDrift}\n`)
+    await fs.appendFile(
+      process.env.GITHUB_OUTPUT,
+      `drift=${anyDrift}\nfixable=${fixable.length > 0}\nneeds_issue=${needsIssue}\n`,
+    )
   }
 
   if (anyDrift) {

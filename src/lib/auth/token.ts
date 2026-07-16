@@ -12,7 +12,16 @@ import {
   makeAccountRecord,
   readDefaultRecord,
 } from "~/lib/auth/github-token-store"
+import { getCopilotTokenUrl } from "~/lib/config/api-config"
 import { CopilotAuthFatalError, HTTPError } from "~/lib/errors/error"
+import {
+  diagnoseNetworkError,
+  formatDiagnosisForLog,
+  formatTransportError,
+  isTransportError,
+  NETWORK_SCOPE,
+  summarizeTransportError,
+} from "~/lib/net/network-diagnostics"
 import { createTeeLogger } from "~/lib/platform/logger"
 import { isHeadless, openUrl } from "~/lib/platform/open-url"
 import { PATHS } from "~/lib/platform/paths"
@@ -166,6 +175,15 @@ export const setupCopilotToken = async (opts?: {
       }
       throw error
     }
+    // Non-auth-fatal first-mint failure. When it's a *transport* failure
+    // (device offline / DNS broken / GitHub blocked by compliance/ZTNA), log a
+    // readable classification before rethrowing so the caller's "signed-in"
+    // attempt records *why* the mint never happened — the device-flow/bootstrap
+    // callers only log a generic message. For non-transport errors that generic
+    // caller-side line already covers it, so we don't add a duplicate here.
+    if (isTransportError(error)) {
+      await logRefreshFailure("Copilot token mint failed", error)
+    }
     throw error
   }
   setCopilotToken(token)
@@ -287,12 +305,46 @@ const runCopilotRefreshLoop = async (
         await markAuthDegraded(error)
         return
       }
-      log.error("Failed to refresh Copilot token:", error)
+      await logRefreshFailure("Failed to refresh Copilot token", error)
       refreshAtMs = Date.now() + RETRY_REFRESH_DELAY_MS
       log.warn(
         `Retrying Copilot token refresh in ${RETRY_REFRESH_DELAY_MS / 1000}s`,
       )
     }
+  }
+}
+
+/**
+ * Log a non-auth-fatal Copilot-token failure. A *transport* failure (no HTTP
+ * status — the socket never completed) is the offline / DNS-broken /
+ * scope-unreachable signature: instead of dumping the opaque, fully-redacted
+ * `{ code, path, errno }` object, probe what actually works and log the typed
+ * classification. Any other error falls back to the raw log. The user-facing
+ * message (i18n) is NOT built here — that's the UI's job, keyed on the typed
+ * `(kind, scope)` verdict. Best-effort — never throws. */
+async function logRefreshFailure(label: string, error: unknown): Promise<void> {
+  if (!isTransportError(error)) {
+    log.error(`${label}:`, error)
+    return
+  }
+  try {
+    const diag = await diagnoseNetworkError(error, {
+      target: {
+        scope: NETWORK_SCOPE.githubCopilotAuth,
+        url: getCopilotTokenUrl(),
+      },
+    })
+    // A pre-formatted string arg passes through the file sink's secret-scrubber
+    // (not the object redactor), so the safe transport fields stay visible
+    // instead of being masked as `[redacted N chars]`. Dev log content — no
+    // translation needed.
+    log.warn(`${label}: ${formatDiagnosisForLog(diag)}`)
+  } catch {
+    // Diagnosis is telemetry; if the probe itself throws, still record the
+    // safe summary so the failure isn't invisible.
+    log.warn(
+      `${label}: ${formatTransportError(summarizeTransportError(error))}`,
+    )
   }
 }
 
