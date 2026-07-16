@@ -43,10 +43,9 @@
 use std::sync::Mutex;
 use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tauri::{
     image::Image,
-    ipc::Channel,
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     webview::PageLoadEvent,
     AppHandle, Emitter, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder,
@@ -89,11 +88,6 @@ const QUIT_REQUEST_MARKER: &str = "@@MAXIMAL_QUIT@@";
 /// (`apply_state`) defers to it so Settings doesn't race up over the splash.
 const SPLASH_MIN_DISPLAY: Duration = Duration::from_millis(1600);
 
-/// How often `subscribe_token_usage` GETs `/token-usage` from the
-/// sidecar. Each iteration also probes the `Channel<TokenUsageEvent>`
-/// — when the JS side drops the channel, the next `send` returns Err
-/// and the loop exits cleanly.
-const DASHBOARD_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
 /// How often the phase-2 poll re-checks for a newer release. Generous on
 /// purpose — releases are rare and the sidecar caches the upstream lookup for
@@ -101,9 +95,6 @@ const DASHBOARD_POLL_INTERVAL: Duration = Duration::from_secs(5);
 /// release published after launch. Aligns with the sidecar's cache TTL.
 const UPDATE_CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 
-/// Allowed values for the dashboard's `period` query parameter.
-/// Anything else from the webview is clamped to "day".
-const DASHBOARD_PERIODS: &[&str] = &["day", "week", "month"];
 
 const TRAY_ID: &str = "main";
 // Two webview windows, both pointed at the sidecar:
@@ -467,94 +458,6 @@ fn generate_shell_api_key() -> String {
     format!("mxlshell_{}", hex)
 }
 
-/// Streaming event the dashboard subscriber sends down the
-/// `Channel<TokenUsageEvent>`. Tagged so the JS side can `switch` on
-/// `msg.event` and unpack `msg.data` without sniffing shape.
-///
-/// `Update` carries the JSON response from `/token-usage?period=…`
-/// verbatim. `Error` carries a stringified failure for the most
-/// recent fetch attempt — the loop keeps retrying after emitting one
-/// so a single blip doesn't kill the live feed.
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase", tag = "event", content = "data")]
-enum TokenUsageEvent {
-    Update { payload: serde_json::Value },
-    Error { message: String },
-}
-
-/// Sanitize the period string from the JS side, defaulting to "day"
-/// for anything unrecognized. Returns `&'static str` so the URL
-/// builder doesn't re-allocate per poll.
-fn canonical_period(requested: &str) -> &'static str {
-    DASHBOARD_PERIODS
-        .iter()
-        .copied()
-        .find(|p| *p == requested)
-        .unwrap_or("day")
-}
-
-/// One-shot GET of `/token-usage?period=…` against the local sidecar.
-/// Returns the parsed JSON body on 2xx, an error string otherwise.
-async fn fetch_token_usage(
-    client: &reqwest::Client,
-    period: &str,
-) -> Result<serde_json::Value, String> {
-    let url = format!(
-        "http://127.0.0.1:{port}/token-usage?period={period}",
-        port = SIDECAR_PORT,
-    );
-    let response = client.get(&url).send().await.map_err(|e| e.to_string())?;
-    if !response.status().is_success() {
-        return Err(format!("status {}", response.status()));
-    }
-    response
-        .json::<serde_json::Value>()
-        .await
-        .map_err(|e| e.to_string())
-}
-
-/// Streaming command: subscribes the caller to a steady feed of
-/// `/token-usage?period=…` snapshots. The loop terminates when the
-/// JS side drops the channel (next `send` returns Err) — which is
-/// also how period changes work: the webview discards the current
-/// channel + calls `subscribe_token_usage` again with the new period.
-///
-/// Errors during a single fetch are emitted as `Error` events but do
-/// not terminate the loop — transient sidecar restarts shouldn't
-/// require the dashboard to re-subscribe.
-#[tauri::command]
-async fn subscribe_token_usage(
-    period: String,
-    on_event: Channel<TokenUsageEvent>,
-) -> Result<(), String> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(2))
-        .build()
-        .map_err(|e| e.to_string())?;
-    let period = canonical_period(&period);
-
-    loop {
-        match fetch_token_usage(&client, period).await {
-            Ok(payload) => {
-                if on_event
-                    .send(TokenUsageEvent::Update { payload })
-                    .is_err()
-                {
-                    return Ok(());
-                }
-            }
-            Err(message) => {
-                if on_event
-                    .send(TokenUsageEvent::Error { message })
-                    .is_err()
-                {
-                    return Ok(());
-                }
-            }
-        }
-        tokio::time::sleep(DASHBOARD_POLL_INTERVAL).await;
-    }
-}
 
 #[tauri::command]
 fn get_shell_api_key(state: State<'_, ShellApiKey>) -> String {
@@ -622,7 +525,6 @@ pub fn run() {
             restart_sidecar,
             uninstall_maximal,
             get_shell_api_key,
-            subscribe_token_usage,
             set_menu_bar_only,
             set_locale,
             quit_app,
