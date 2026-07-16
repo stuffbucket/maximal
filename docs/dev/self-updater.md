@@ -115,7 +115,7 @@ In `shell/src-tauri/tauri.conf.json`:
 ```json
 "plugins": {
   "updater": {
-    "pubkey": "PLACEHOLDER_TAURI_SIGNING_PUBLIC_KEY",
+    "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6…",
     "endpoints": [
       "https://mxml.sh/updates/latest.json"
     ]
@@ -126,12 +126,11 @@ In `shell/src-tauri/tauri.conf.json`:
 - **`endpoints`** — where the plugin fetches `latest.json`. Tauri expands
   `{{target}}` / `{{arch}}` / `{{current_version}}` placeholders here if
   present; ours is a single static URL that serves a multi-target manifest.
-- **`pubkey`** — the **public** verification key. It is public by design and
-  **commit-safe** (it verifies signatures; it can't produce them). The value
-  currently committed is a **placeholder** — `PLACEHOLDER_TAURI_SIGNING_PUBLIC_KEY`
-  — and **must be replaced with the real `TAURI_SIGNING_PUBLIC_KEY` before the
-  feature can ship.** With the placeholder in place, every signature check
-  fails and the tray button just falls back to the browser (see *Fallback*).
+- **`pubkey`** — the **public** verification key (minisign key id
+  `BF65715BAE1C1F9F`). It is public by design and **commit-safe** (it verifies
+  signatures; it can't produce them), so the real value is committed to
+  `tauri.conf.json`. Base64-decode it to see the `untrusted comment: minisign
+  public key …` block.
 
 The matching **private** key is provisioned **privately on the builder
 runner** — it never lives in this repo and is out of scope here.
@@ -178,10 +177,11 @@ release or touching production.
 
 High-level recipe:
 
-1. **Throwaway keypair.** Generate a disposable Tauri signing keypair. Put
-   its **public** key in `plugins.updater.pubkey` for the *test build only*
-   (this is why the pubkey has to be real for a genuine test — the committed
-   placeholder can't verify anything). Keep its private key local.
+1. **Throwaway keypair.** Generate a disposable Tauri signing keypair and
+   temporarily swap its **public** key into `plugins.updater.pubkey` for the
+   *test build only* (the committed production pubkey only trusts artifacts the
+   private builder key signed, which you don't have locally). Keep its private
+   key local.
 2. **Sign a test artifact.** Build a `.app.tar.gz` for a slightly-higher
    version and sign it with the throwaway private key, producing the `.sig`.
 3. **Serve a local `latest.json`.** Write a `latest.json` pointing at the
@@ -207,7 +207,7 @@ Every failure mode of the in-place path falls back to opening the
 install-channel-neutral **download page in the browser** (`open_update_url`,
 the same URL the OS notification points at). Concretely, that covers:
 
-- a **dev build** (no updater artifacts / placeholder pubkey),
+- a **dev build** (no updater artifacts / no matching signature),
 - an **unreachable or absent** updater endpoint,
 - **no signed artifact for this platform** yet (`Ok(None)` — endpoint
   reachable but nothing installable),
@@ -225,9 +225,9 @@ doesn't cover yet.
 
 This is wired but **not yet shippable**. Before the in-place path is real:
 
-- [ ] **Fill the pubkey.** Replace `PLACEHOLDER_TAURI_SIGNING_PUBLIC_KEY`
-      in `tauri.conf.json` with the real `TAURI_SIGNING_PUBLIC_KEY`. Until
-      then every verify fails and the button falls back to the browser.
+- [x] **Fill the pubkey.** The real public verification key
+      (minisign id `BF65715BAE1C1F9F`) is committed in `tauri.conf.json`; the
+      matching private key is provisioned privately on the builder runner.
 - [ ] **Publish `latest.json`.** The site must publish
       `https://mxml.sh/updates/latest.json` (the Tauri updater manifest,
       distinct from the existing `manifest.json` the notify path reads),

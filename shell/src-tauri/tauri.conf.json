@@ -39,7 +39,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "PLACEHOLDER_TAURI_SIGNING_PUBLIC_KEY",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEJGNjU3MTVCQUUxQzFGOUYKUldTZkh4eXVXM0ZsdjF1RkM4N1BBUHYrNFZWeWI1YTUvd05EMENiY25iVVVNcms5dE9adnBlTVgK",
       "endpoints": [
         "https://mxml.sh/updates/latest.json"
       ]
