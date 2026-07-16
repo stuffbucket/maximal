@@ -638,6 +638,7 @@ pub fn run() {
             subscribe_token_usage,
             set_menu_bar_only,
             set_locale,
+            quit_app,
         ])
         .setup(|app| {
             // Seed the runtime menu-bar-only flag from the persisted
@@ -1663,48 +1664,37 @@ fn install_tray(app: &AppHandle) -> tauri::Result<()> {
     let menu = build_menu(app, &locale, SidecarState::Starting)?;
     let icon = icon_for(SidecarState::Starting, false)?;
 
-    // Platform tray-click convention:
-    //   * macOS  — left-click opens the menu (HIG menu-bar behavior).
-    //   * Windows — left-click opens Settings (the expected "open the app"
-    //     gesture), right-click opens the menu. Windows has no
-    //     `RunEvent::Reopen`, so this left-click handler is also the path a
-    //     user takes after the sign-in notification ("click the icon").
-    #[cfg(target_os = "macos")]
-    let show_menu_on_left_click = true;
-    #[cfg(not(target_os = "macos"))]
-    let show_menu_on_left_click = false;
-
+    // Single-click opens the app (§1.2): a left-click routes to `open_app`
+    // (browser-tab delivery) on BOTH platforms via the pure `click_action`
+    // decision. The menu moves to right-click for now — full menu removal +
+    // browser-delivery of every UI entry point is the remaining §10-manual
+    // cutover (the webview `open_settings_window` is still called from setup /
+    // splash / commands, so it stays until those sites migrate together).
     TrayIconBuilder::with_id(TRAY_ID)
         .menu(&menu)
-        .show_menu_on_left_click(show_menu_on_left_click)
+        .show_menu_on_left_click(false)
         .tooltip(native_i18n::tr(&locale, "native-tooltip-starting"))
         .icon(icon)
         .on_menu_event(handle_menu_event)
         .on_tray_icon_event(|tray, event| {
             if let TrayIconEvent::Click {
-                button: MouseButton::Left,
-                button_state: MouseButtonState::Up,
+                button,
+                button_state,
                 ..
             } = event
             {
-                // macOS: left-click is handled by show_menu_on_left_click
-                // above — nothing to do here. Windows/Linux: open Settings,
-                // deep-linking to account when the user still needs to sign
-                // in (mirrors the macOS RunEvent::Reopen nudge).
-                #[cfg(not(target_os = "macos"))]
-                {
-                    let app = tray.app_handle();
-                    let section = if app.state::<AppStatus>().get()
-                        == SidecarState::RunningUnauthenticated
-                    {
-                        Some("account")
-                    } else {
-                        None
-                    };
-                    open_settings_window(app, section);
+                let click_button = match button {
+                    MouseButton::Left => crate::decisions::ClickButton::Left,
+                    MouseButton::Right => crate::decisions::ClickButton::Right,
+                    _ => crate::decisions::ClickButton::Middle,
+                };
+                let phase = match button_state {
+                    MouseButtonState::Up => crate::decisions::ClickPhase::Up,
+                    _ => crate::decisions::ClickPhase::Down,
+                };
+                if crate::decisions::click_action(click_button, phase).is_some() {
+                    open_app(tray.app_handle());
                 }
-                #[cfg(target_os = "macos")]
-                let _ = tray;
             }
         })
         .build(app)?;
@@ -2455,7 +2445,68 @@ fn present_window(app: &AppHandle, window: &tauri::WebviewWindow) {
     }
 }
 
-/// Entry point for the tray's "Quit Maximal" item. Pops a native
+/// The sidecar's answer to a tray click (`POST /_internal/tray-open`, §1.2).
+#[derive(Deserialize)]
+struct TrayOpenResponse {
+    open: bool,
+}
+
+/// Ask the sidecar (which owns the browser-tab set) what a tray click should do:
+/// it closes any buried tab over the WS and returns whether the shell should open
+/// one fresh foreground tab. On ANY error, default to opening — a possible
+/// duplicate tab is better than a click that does nothing.
+async fn sidecar_tray_open() -> bool {
+    let Ok(client) = reqwest::Client::builder()
+        .timeout(Duration::from_secs(2))
+        .build()
+    else {
+        return true;
+    };
+    let url = format!("http://127.0.0.1:{SIDECAR_PORT}/_internal/tray-open");
+    match client.post(&url).send().await {
+        Ok(resp) => resp
+            .json::<TrayOpenResponse>()
+            .await
+            .map(|body| body.open)
+            .unwrap_or(true),
+        Err(err) => {
+            eprintln!("[shell] tray-open request failed: {err}");
+            true
+        }
+    }
+}
+
+/// Browser-tab delivery (§1.2, ADR-0018): a tray click no longer opens a native
+/// window — it signals the sidecar, which runs the single-tab decision (close
+/// buried tabs over the WS), then opens ONE fresh foreground browser tab if told
+/// to. The sidecar serves the UI at `/ui/settings/`.
+///
+/// NOTE(§10 manual-only): the actual single-tab UX (exactly one focused tab per
+/// click, stale-tab self-close) is verifiable only by manual macOS/browser
+/// testing — not by `cargo build`.
+fn open_app(app: &AppHandle) {
+    // A visible native window (the splash) would sit over the browser; retire it.
+    dismiss_splash(app);
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if sidecar_tray_open().await {
+            let url = format!("http://localhost:{SIDECAR_PORT}/ui/settings/");
+            if let Err(err) = handle.opener().open_url(url, None::<&str>) {
+                eprintln!("[shell] open_app: failed to open browser tab: {err}");
+            }
+        }
+    });
+}
+
+/// §1.6 quit reachability WITHOUT the tray menu. Exposed to the splash's Quit
+/// button (the always-available path in `Accessory` mode, where the app menu is
+/// absent) and the app menu. Pops the same confirm dialog as the old tray Quit.
+#[tauri::command]
+fn quit_app(app: AppHandle) {
+    request_quit(&app);
+}
+
+
 /// confirm dialog via `tauri-plugin-dialog`; on accept, calls
 /// `app.exit(0)` which routes through `RunEvent::ExitRequested` →
 /// `kill_sidecar` (graceful SIGTERM + 3s SIGKILL escalation).

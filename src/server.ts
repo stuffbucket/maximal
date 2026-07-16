@@ -114,6 +114,11 @@ server.use(
       // must NOT be able to evict the running instance), but listing
       // it here means we skip the auth dance for the local caller.
       "/_internal/shutdown",
+      // Tray-open (§1.2): the native shell POSTs this on a tray click — a
+      // local, keyless caller. Same posture as shutdown (the route re-checks
+      // loopback + it's Origin-gated), so skip auth for the loopback caller,
+      // else dedup would break when "block unknown connections" is on.
+      "/_internal/tray-open",
     ],
   }),
 )
