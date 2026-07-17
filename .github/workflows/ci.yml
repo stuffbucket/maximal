@@ -46,6 +46,12 @@ jobs:
       - name: Run type check
         run: bun run typecheck
 
+      - name: Guard boundary casts
+        # Fail on a NEW unvalidated any→concrete boundary cast (the class behind
+        # the device-code interval:NaN poll spin). The known-safe set is annotated
+        # in-place with `// casts-keep: <reason>`; see scripts/find-casts.ts.
+        run: bun run casts:check
+
       - name: Run tests
         run: bun test
 

@@ -60,6 +60,7 @@ const parseSubagentMarkerFromSystemReminder = (
       .trim()
 
     try {
+      // casts-keep: required fields presence-guarded below before use
       const parsed = JSON.parse(markerJson) as SubagentMarker
       if (!parsed.session_id || !parsed.agent_id || !parsed.agent_type) {
         searchFrom = reminderEnd + endTag.length
