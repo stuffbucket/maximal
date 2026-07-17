@@ -1,14 +1,24 @@
+import consola from "consola"
 import { Hono } from "hono"
 import { existsSync } from "node:fs"
 import { dirname, join, normalize, resolve, sep } from "node:path"
 
 import { UI_FILES } from "~/generated/ui-embed"
 import { contentTypeForPath } from "~/lib/platform/web-content-types"
+import { buildDebugState } from "~/routes/debug/route"
+
+import { renderDiagnosticsPage } from "./diagnostics"
+import {
+  buildInlineUiState,
+  injectInlineState,
+  isHtmlResponse,
+} from "./inline-state"
 
 /**
- * Serves the web UIs under `/ui/*`:
- *   - /ui/settings  — the React settings app (Bun-bundled)
- *   - /ui/dashboard — the usage dashboard (vanilla)
+ * Serves the web UI under `/ui/*`:
+ *   - /ui/settings  — the React settings app (Bun-bundled), incl. the Usage
+ *     section (the standalone dashboard was removed, §7)
+ *   - /ui/diagnostics — the read-only diagnostics page (§1.7)
  *
  * One serving path for both, dev and prod:
  *   - Production: assets are embedded in the compiled binary via the
@@ -81,6 +91,7 @@ const NO_STORE = { "cache-control": "no-store" } as const
 async function serve(
   urlPath: string,
   fallbackIndex: string,
+  injectState = false,
 ): Promise<Response> {
   const hit = (await bytesFor(urlPath)) ?? (await bytesFor(fallbackIndex))
   if (!hit) {
@@ -89,7 +100,24 @@ async function serve(
       { status: 503, headers: { "content-type": "text/plain; charset=utf-8" } },
     )
   }
-  return new Response(hit.bytes, {
+  // Instant paint (§1.4): inline the current state as `window.__STATE__` into the
+  // served settings HTML so the tab paints populated on first frame; the WS then
+  // takes over. Best-effort — a snapshot-build failure serves the plain HTML (the
+  // WS still hydrates on connect), never a 500. Only HTML responses are touched,
+  // so assets pass straight through.
+  let body: Uint8Array | string = hit.bytes
+  if (injectState && isHtmlResponse(hit.type)) {
+    try {
+      const html = new TextDecoder().decode(hit.bytes)
+      body = injectInlineState(html, await buildInlineUiState())
+    } catch (error) {
+      consola.warn(
+        "inline-state injection failed; serving UI without window.__STATE__",
+        error,
+      )
+    }
+  }
+  return new Response(body, {
     status: 200,
     headers: { "content-type": hit.type, ...NO_STORE },
   })
@@ -97,20 +125,24 @@ async function serve(
 
 export const uiRoutes = new Hono()
 
-// Bare-surface redirects to the canonical trailing-slash index.
+// Bare-surface redirect to the canonical trailing-slash index.
 uiRoutes.get("/settings", (c) => c.redirect("/ui/settings/", 301))
-uiRoutes.get("/dashboard", (c) => c.redirect("/ui/dashboard/", 301))
+
+// Read-only diagnostics page (§1.7): server-rendered, mutation-free, unauthenticated
+// (under the /ui prefix). CSRF-safe by construction; secret values are never shown.
+// `no-store` so a browser never serves a stale runtime snapshot.
+uiRoutes.get("/diagnostics", (c) =>
+  c.html(renderDiagnosticsPage(buildDebugState()), 200, NO_STORE),
+)
 
 uiRoutes.get("/settings/", () =>
-  serve("/ui/settings/index.html", "/ui/settings/index.html"),
-)
-uiRoutes.get("/dashboard/", () =>
-  serve("/ui/dashboard/index.html", "/ui/dashboard/index.html"),
+  serve("/ui/settings/index.html", "/ui/settings/index.html", true),
 )
 
-// Assets + client-side routes. Settings is an SPA, so unknown sub-paths
-// fall back to its index.html; the dashboard is a single page.
-uiRoutes.get("/settings/*", (c) => serve(c.req.path, "/ui/settings/index.html"))
-uiRoutes.get("/dashboard/*", (c) =>
-  serve(c.req.path, "/ui/dashboard/index.html"),
+// Assets + client-side routes. Settings is an SPA, so unknown sub-paths fall
+// back to its index.html (which gets the inlined state). Assets (JS/CSS) pass
+// through untouched — only HTML is injected. (The standalone /ui/dashboard was
+// removed — its usage view is now the settings SPA's Usage section, §4/§7.)
+uiRoutes.get("/settings/*", (c) =>
+  serve(c.req.path, "/ui/settings/index.html", true),
 )

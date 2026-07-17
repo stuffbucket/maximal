@@ -22,11 +22,13 @@ import {
 
 export const debugRoutes = new Hono()
 
-debugRoutes.get("/state", (c) => {
-  if (!state.verbose) {
-    return c.notFound()
-  }
-
+/**
+ * Assemble the read-only runtime introspection payload (same shape as
+ * `maximal debug --json`). Extracted so the unauthenticated `/ui/diagnostics`
+ * page (§1.7) renders the byte-identical data without the `verbose` gate — the
+ * gate is a property of the `/_debug/state` ROUTE, not of the data.
+ */
+export function buildDebugState() {
   // Config read may throw on disk error; surface as empty rather than
   // 500ing. Mirrors the debug-subcommand behavior.
   let config: ReturnType<typeof getConfig>
@@ -38,7 +40,7 @@ debugRoutes.get("/state", (c) => {
 
   const models = modelsCached()
   const tokens = tokenPresence()
-  return c.json({
+  return {
     git: getGitVersion(),
     runtime: {
       account_type: state.accountType,
@@ -55,5 +57,12 @@ debugRoutes.get("/state", (c) => {
     executor: describeExecutor(),
     caches: allCacheMetrics(),
     secrets: collectSecretStatuses(config),
-  })
+  }
+}
+
+debugRoutes.get("/state", (c) => {
+  if (!state.verbose) {
+    return c.notFound()
+  }
+  return c.json(buildDebugState())
 })

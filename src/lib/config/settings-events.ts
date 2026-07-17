@@ -7,9 +7,10 @@
  *
  * This module is intentionally tiny and dependency-light (only the generic
  * EventBus + the wire types) so producers across the codebase can publish
- * without importing the SSE route or the shell. The SSE adapter in
- * `src/routes/settings/events.ts` is the sole consumer; it subscribes here
- * and writes each event out to the connected shell.
+ * without importing the consumer or the shell. The `LiveFeedHub`
+ * (src/lib/ws/live-feed.ts) subscribes here and fans each event out to every
+ * connected tab over the unified WebSocket (ADR-0019, which supersedes the
+ * original SSE route this bus once fed).
  *
  * Initial scope is `auth.changed` (the sign-in smoothness win). The map is
  * shaped to grow — accounts.changed, apps.changed, clients.changed,

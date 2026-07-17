@@ -1,7 +1,8 @@
 ---
 id: ADR-0007
 title: Replace shell polling with sidecar-pushed SSE events
-status: accepted
+status: superseded
+superseded_by: ADR-0019
 date: 2026-06-14
 authors:
   - stuffbucket
@@ -18,6 +19,12 @@ links:
   clients_route: src/routes/settings/clients.ts
 ---
 
+> **Superseded by [ADR-0019](0019-websocket-transport-and-presence-registry.md).**
+> Browser-tab delivery (ADR-0018) requires a client→server presence push and a
+> multi-subscriber feed — reversing this ADR's "the shell never needs to push
+> state" rationale and its "one shell, one connection" scope. The `auth.changed`
+> SSE slice below is real and shipping *today*; it is retired when the WS lands.
+>
 > **Implementation status (slice 1, accepted).** The SSE channel is built and
 > shipping for the **auth** flow — the path that most needed it (sign-in now
 > flips to authenticated the instant the device-code poller resolves, with no

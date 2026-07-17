@@ -21,8 +21,10 @@ const SHELL_LIB_RS = readFileSync(
   "utf8",
 )
 
-// The canonical UI window URLs the Tauri shell navigates to.
-const UI_WINDOW_PATHS = ["/ui/settings/", "/ui/dashboard/"] as const
+// The canonical UI window URL the Tauri shell navigates to. (The standalone
+// /ui/dashboard/ was removed in §7 — its usage view is the settings SPA's Usage
+// section, so lib.rs opens Settings at #usage, not a separate dashboard route.)
+const UI_WINDOW_PATHS = ["/ui/settings/"] as const
 
 describe("shell ↔ proxy /ui URL contract", () => {
   for (const path of UI_WINDOW_PATHS) {
@@ -47,9 +49,10 @@ describe("shell ↔ proxy /ui URL contract", () => {
 
   test("legacy /settings and /usage-viewer paths are still referenced as redirects", () => {
     // The shell may still deep-link the old paths; the proxy 301s them. Pin
-    // that the redirect surface exists in server wiring.
+    // that the redirect surface exists in server wiring — including the
+    // /usage-viewer → Usage-section redirect that replaced the old dashboard.
     const server = readFileSync(resolve(REPO_ROOT, "src", "server.ts"), "utf8")
     expect(server).toContain('"/ui/settings/"')
-    expect(server).toContain("/ui/dashboard/")
+    expect(server).toContain("/ui/settings/#usage")
   })
 })

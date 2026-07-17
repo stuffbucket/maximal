@@ -171,8 +171,8 @@ mod tests {
     fn embedded_catalogs_parse_and_cover_english() {
         // en is the base; every native key we render must exist in it.
         let en = &catalogs()["en"];
-        assert!(en.contains_key("native-tray-quit"));
-        assert_eq!(en["native-tray-quit"], "Quit Maximal");
+        assert!(en.contains_key("native-quit-title"));
+        assert_eq!(en["native-quit-title"], "Quit Maximal?");
     }
 
     #[test]
@@ -191,7 +191,7 @@ mod tests {
             let cat = &catalogs()[tag];
             assert!(!cat.is_empty(), "catalog for {tag} parsed empty");
             assert!(
-                cat.contains_key("native-tray-quit"),
+                cat.contains_key("native-quit-title"),
                 "{tag} base is missing native keys"
             );
             // A mis-wired raw() that returned EN for a new tag would still pass
@@ -199,8 +199,8 @@ mod tests {
             // the embed is proven distinct, not accidentally aliased to en.
             if tag != "en" {
                 assert_ne!(
-                    tr(tag, "native-tray-quit"),
-                    "Quit Maximal",
+                    tr(tag, "native-quit-title"),
+                    "Quit Maximal?",
                     "{tag} base looks aliased to en"
                 );
             }
@@ -210,7 +210,7 @@ mod tests {
     #[test]
     fn falls_back_region_to_language_to_en() {
         // es-MX carries no native overrides → resolves to the es language base.
-        assert_eq!(tr("es-MX", "native-tray-quit"), "Salir de Maximal");
+        assert_eq!(tr("es-MX", "native-quit-title"), "¿Salir de Maximal?");
         // A key only in en resolves there from any locale.
         assert_eq!(tr("es", "native-tooltip-idle"), "maximal");
     }
@@ -223,8 +223,12 @@ mod tests {
     #[test]
     fn interpolates_named_placeholders() {
         assert_eq!(
-            t("en", "native-tray-upgrade", &[("latest", "0.5.0")]),
-            "Upgrade to v0.5.0…"
+            t(
+                "en",
+                "native-window-settings-title-versioned",
+                &[("version", "0.5.0")]
+            ),
+            "Maximal — Settings · v0.5.0"
         );
         assert_eq!(
             t("es", "native-notify-update-body", &[("url", "https://x")]),

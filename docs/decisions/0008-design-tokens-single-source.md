@@ -1,7 +1,8 @@
 ---
 id: ADR-0008
 title: Single source of truth for design tokens (kill the dashboard duplicate)
-status: proposed
+status: obsoleted
+obsoleted_by: docs/spec/single-window-redesign.md
 date: 2026-06-14
 authors:
   - stuffbucket
@@ -16,6 +17,15 @@ related_files:
   shell/index.html: shell entry that imports tokens.css
   src/pages/usage-viewer.html: dashboard entry that re-declares tokens inline
 ---
+
+> **Obsoleted by the single-window redesign** (`docs/spec/single-window-redesign.md`
+> §4, §11). This ADR exists to de-dupe tokens between the shell and the
+> standalone dashboard/usage-viewer. That redesign **deletes** the dashboard and
+> ports Usage into the shell SPA on the shared tokens — removing the duplicate
+> this ADR was written to sync. This is the exit condition the ADR itself
+> predicted (Consequences: "the script is moot once usage-viewer moves into the
+> shell build"). Note: the canonical path is now `shell/src/ui/styles/tokens.css`,
+> not `shell/src/tokens.css` as referenced below.
 
 # Single source of truth for design tokens
 
