@@ -51,18 +51,22 @@ function persistClaudeDesktop(enabled: boolean): void {
 
 export const appsRoutes = new Hono()
 
+/**
+ * Build the `/settings/api/apps` GET body (every app's live details). Extracted so
+ * the live-feed snapshot (§1.3/§1.4) emits the byte-identical shape. Async (each
+ * app resolves its own status); may throw — the route wraps it via `forwardError`.
+ */
+export async function buildAppsList(): Promise<AppsListResponse> {
+  const apps = await Promise.all(getAllApps().map((app) => app.getDetails()))
+  return { apps }
+}
+
 appsRoutes.get("/", async (c) => {
   try {
-    const appsPayloads = await Promise.all(
-      getAllApps().map((app) => app.getDetails()),
-    )
-    const payload = {
-      apps: appsPayloads,
-    }
     return respondValidated(
       c,
       { schema: AppsListResponse, label: "Apps" },
-      payload,
+      await buildAppsList(),
     )
   } catch (error) {
     return forwardError(c, error)

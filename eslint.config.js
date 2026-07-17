@@ -61,6 +61,12 @@ const tokenAttachmentGuard = {
 // `afterAll(async () => { await mock.module(id, () => actual) })`. Better still,
 // use the real module (the test preload redirects COPILOT_API_HOME to a temp
 // dir, so config/token round-trips are already isolated) or inject deps.
+//
+// It ALSO bans `mock.module("srvx", …)` in any form (awaited or not). srvx's
+// `serve` binds real ports; even an awaited restore leaves the live binding
+// half-rewired, so mocking it here breaks the one real-port test that needs
+// the genuine serve (tests/ws/srvx-upgrade-handshake.test.ts). Inject the
+// binder through `__setServeForTests` from ~/start instead.
 const mockModuleLeakGuard = {
   name: "no-unrestored-mock-module",
   files: ["tests/**/*.ts"],
@@ -78,6 +84,12 @@ const mockModuleLeakGuard = {
           'ExpressionStatement > CallExpression[callee.object.name="mock"][callee.property.name="module"]',
         message:
           "Unawaited `mock.module(...)` leaks across test files (Bun does not reset module mocks between files). `await` it and restore it in an awaited afterAll, or prefer the real module / injectable deps.",
+      },
+      {
+        selector:
+          'CallExpression[callee.object.name="mock"][callee.property.name="module"][arguments.0.value="srvx"]',
+        message:
+          'Do not `mock.module("srvx", …)`. srvx\'s `serve` binds real ports; the module mock leaks the stub into the real-port WS handshake test (tests/ws/srvx-upgrade-handshake.test.ts) and its restore leaves the live binding half-rewired. Inject the binder via `__setServeForTests` from ~/start instead.',
       },
     ],
   },

@@ -1,8 +1,9 @@
 /**
  * RFC 8628 §3.5 polling correctness for the device-code flow.
  *
- * `sleep` is mocked to a no-op so the test doesn't actually wait for the
- * poll interval to elapse. fetch is mocked to return scripted responses.
+ * `sleep`/`abortableSleep` are mocked to no-ops so the test doesn't actually
+ * wait for the poll interval to elapse. fetch is mocked to return scripted
+ * responses.
  */
 
 import {
@@ -22,6 +23,7 @@ const realUtilsModule = await import("~/lib/platform/utils")
 await mock.module("~/lib/platform/utils", () => ({
   ...realUtilsModule,
   sleep: () => Promise.resolve(),
+  abortableSleep: () => Promise.resolve(),
 }))
 afterAll(async () => {
   await mock.module("~/lib/platform/utils", () => realUtilsModule)

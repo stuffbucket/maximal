@@ -27,13 +27,10 @@ import { join, resolve } from "node:path"
 const REPO = resolve(import.meta.dir, "..")
 const SETTINGS_ENTRY = join(REPO, "shell/ui/settings/index.html")
 const SETTINGS_VENDOR = join(REPO, "shell/ui/settings/vendor")
-const DASHBOARD_SRC = join(REPO, "shell/ui/dashboard")
-const DASHBOARD_ENTRY_TS = join(REPO, "shell/src/dashboard/main.ts")
 const SHELL_DIR = join(REPO, "shell")
 const DIST_ROOT = join(REPO, "shell/dist")
 const DIST = join(DIST_ROOT, "ui")
 const SETTINGS_OUT = join(DIST, "settings")
-const DASHBOARD_OUT = join(DIST, "dashboard")
 
 async function buildSettings(): Promise<void> {
   await rm(SETTINGS_OUT, { recursive: true, force: true })
@@ -54,45 +51,15 @@ async function buildSettings(): Promise<void> {
   // Self-hosted web fonts. The @font-face rules in index.html reference
   // ./vendor/fonts/*.woff2 with a bare relative URL, which Bun's HTML
   // bundler leaves untouched (it neither inlines nor rewrites them). Copy
-  // the vendored woff2 verbatim next to the bundle, same as the dashboard
-  // serves its ./vendor/ assets, so the webview never hits a CDN.
+  // the vendored woff2 verbatim next to the bundle so the webview never
+  // hits a CDN.
   await cp(SETTINGS_VENDOR, join(SETTINGS_OUT, "vendor"), { recursive: true })
-}
-
-async function buildDashboard(): Promise<void> {
-  await rm(DASHBOARD_OUT, { recursive: true, force: true })
-  await mkdir(DASHBOARD_OUT, { recursive: true })
-  // Unlike settings we do NOT feed the HTML to Bun's bundler: the HTML-entry
-  // path rewrites/absorbs the classic <script src="./vendor/*"> tags into the
-  // module bundle, which breaks Tailwind + Lucide (they must run as global
-  // <script>s, not ES-module imports). Instead we bundle ONLY the module entry
-  // (shell/src/dashboard/main.ts + the shared i18n modules) to ./main.js, and
-  // copy the hand-authored HTML/CSS + vendor/ verbatim. The HTML keeps its two
-  // classic vendor tags AND `<script type="module" src="./main.js">` untouched,
-  // so Tailwind/Lucide stay window globals and the app module loads bundled.
-  const result = await Bun.build({
-    entrypoints: [DASHBOARD_ENTRY_TS],
-    outdir: DASHBOARD_OUT,
-    minify: true,
-    sourcemap: "none",
-    naming: { entry: "main.js", chunk: "[name]-[hash].[ext]", asset: "[name]-[hash].[ext]" },
-  })
-  if (!result.success) {
-    for (const log of result.logs) console.error(log)
-    throw new Error("dashboard build failed")
-  }
-  // Copy the static surface verbatim (html, css, vendor/) — but not the TS
-  // entry, which lives in shell/src and is already bundled above.
-  await cp(DASHBOARD_SRC, DASHBOARD_OUT, {
-    recursive: true,
-    filter: (src) => !src.endsWith("main.ts"),
-  })
 }
 
 // Tauri's `frontendDist` (shell/dist) must hold the pre-boot splash it
 // loads via `WebviewUrl::App("splash.html")`, plus an index.html so the
-// bundler has a valid frontend root. The actual settings/dashboard UIs
-// are served by the sidecar at /ui/*, so this index is just a pointer.
+// bundler has a valid frontend root. The actual settings UI is served by the
+// sidecar at /ui/settings/, so this index is just a pointer.
 async function copyShellChrome(): Promise<void> {
   await mkdir(DIST_ROOT, { recursive: true })
   await cp(join(SHELL_DIR, "splash.html"), join(DIST_ROOT, "splash.html"))
@@ -105,8 +72,8 @@ async function copyShellChrome(): Promise<void> {
 
 async function buildAll(): Promise<void> {
   const t = Date.now()
-  await Promise.all([buildSettings(), buildDashboard(), copyShellChrome()])
-  console.error(`[build-ui] built settings + dashboard → shell/dist/ui (${Date.now() - t}ms)`)
+  await Promise.all([buildSettings(), copyShellChrome()])
+  console.error(`[build-ui] built settings → shell/dist/ui (${Date.now() - t}ms)`)
 }
 
 await buildAll()

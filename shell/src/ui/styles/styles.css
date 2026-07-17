@@ -2110,3 +2110,321 @@ a:hover {
   line-height: var(--leading-lg);
   color: var(--text-muted);
 }
+
+/* ---- Usage section (§4) ----
+   The standalone token-usage dashboard ported onto the Settings SPA.
+   Composition (top to bottom): a period tablist, an optional inline
+   error, then either a loading/empty note or the content stack —
+   quota cards, headline tiles, the per-model breakdown table, and the
+   paginated recent-requests table. `.usage` lives inside `#usage-root`
+   under `.section`, which already owns the content max-width and the
+   header→body rhythm; here we only stack the section's own parts. */
+.usage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+/* Period selector — a row of tab pills (role=tablist). Wraps on a
+   narrow pane. Inactive pills sit on the control surface; the active
+   pill takes the accent fill (interactive-active is accent, never
+   brand — see .design-context). */
+.usage__periods {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.usage__period {
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-md);
+  line-height: var(--leading-lg);
+  color: var(--text-base-color);
+  background: var(--surface-control);
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  padding: var(--space-1) var(--space-3);
+  cursor: pointer;
+  transition:
+    color 150ms ease-out,
+    background-color 150ms ease-out,
+    border-color 150ms ease-out;
+}
+
+.usage__period:hover {
+  border-color: var(--border-strong);
+  color: var(--text-strong);
+}
+
+.usage__period:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.usage__period--active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+
+/* Keep the accent fill on hover of the active pill (don't fade it to
+   the inactive treatment). */
+.usage__period--active:hover {
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+
+/* Inline, non-blocking load failure. Destructive-tinted left rule so
+   it reads as "this went wrong" without a filled alarm banner —
+   mirrors .uninstall-error. */
+.usage__error {
+  margin: 0;
+  border-left-width: var(--border-width-thick);
+  border-left-style: solid;
+  border-left-color: var(--accent-destructive);
+  padding-left: var(--space-3);
+  font-size: var(--text-sm);
+  line-height: var(--leading-base);
+  color: var(--text-base-color);
+}
+
+/* Loading / empty notes — quiet muted prose, not card chrome (these
+   are transient states of one panel, not entities). */
+.usage__loading,
+.usage__empty {
+  margin: 0;
+  padding: var(--space-2) 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-base);
+  color: var(--text-muted);
+}
+
+/* ---- Quotas ----
+   Each entitlement is a discrete, independently-metered thing, so a
+   card earns its chrome here (the quota list is not sectioning chrome).
+   `.usage` is not itself a card, so these are top-level cards, not
+   nested ones. */
+.usage__quotas {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.usage__quota {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  background: var(--surface-card);
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  box-shadow: var(--elevation-card);
+  padding: var(--space-3) var(--space-4);
+}
+
+.usage__quota-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.usage__quota-name {
+  font-size: var(--text-base);
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+  text-transform: capitalize;
+  word-break: break-word;
+}
+
+.usage__quota-pct {
+  flex: 0 0 auto;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Progress track + fill. Width is set inline by the component
+   (∝ percent used); the fill colour comes from the quota-state
+   modifier on the parent. The track is one control-surface step off
+   the card so the fill reads against it in both themes. */
+.usage__quota-bar {
+  height: var(--space-2);
+  background: var(--surface-control);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+
+.usage__quota-bar-fill {
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  /* Never let a >100% (overage) inline width spill past the track. */
+  max-width: 100%;
+}
+
+.usage__quota-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Quota severity → bar-fill colour. ok uses the interactive accent
+   (healthy); warn/crit borrow the saturated semantic status bases,
+   which read on the control-surface track in both themes. The
+   percentage label itself stays muted (not status-tinted): the -fg
+   status tones are tuned for the dark-first surface and would fall
+   sub-legible as text on the light card, and the bar already carries
+   the severity signal. `unlimited` stays neutral — a full but calm
+   bar, since there is no cap to warn about. */
+.usage__quota--ok .usage__quota-bar-fill {
+  background: var(--accent);
+}
+
+.usage__quota--warn .usage__quota-bar-fill {
+  background: var(--status-warning);
+}
+
+.usage__quota--crit .usage__quota-bar-fill {
+  background: var(--status-error);
+}
+
+.usage__quota--unlimited .usage__quota-bar-fill {
+  background: var(--border-strong);
+}
+
+/* ---- Headline tiles ----
+   Value-over-label summary tiles (total tokens, requests, cost). Equal
+   columns that reflow to fewer per row as the pane narrows. Each is a
+   quiet card; the value leads. Body font, not Fraunces — the section
+   title already spends this window's one display-heading moment. */
+.usage__tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--space-4);
+}
+
+.usage__tile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  background: var(--surface-card);
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  box-shadow: var(--elevation-card);
+  padding: var(--space-3) var(--space-4);
+}
+
+.usage__tile-value {
+  font-size: var(--text-xl);
+  font-weight: var(--weight-2xl);
+  line-height: var(--leading-xl);
+  letter-spacing: var(--tracking-xl);
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+  word-break: break-word;
+}
+
+.usage__tile-label {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+/* ---- Breakdown / events tables ----
+   Shared table treatment (mirrors .table): full width, hairline row
+   rules, muted uppercase headers. Numbers are tabular for column
+   alignment; long model/endpoint strings wrap rather than force the
+   table past the pane (failure-modes: long strings / overflow). */
+.usage__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.usage__table th,
+.usage__table td {
+  text-align: start;
+  padding: var(--space-2) var(--space-3);
+  border-block-end: var(--border-width-hairline) solid var(--border-subtle);
+  word-break: break-word;
+}
+
+.usage__table th {
+  font-weight: var(--weight-md);
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.usage__table td {
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Recent-requests block ---- */
+.usage__events {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.usage__events-title {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: var(--text-md);
+  font-weight: var(--weight-lg);
+  line-height: var(--leading-lg);
+  color: var(--text-strong);
+}
+
+/* Pager — prev / page-of / next. The page indicator sits between two
+   unclassed <button>s the component emits, so they're styled by
+   descendant selector as quiet secondary controls. */
+.usage__pager {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.usage__pager span {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.usage__pager button {
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-md);
+  line-height: var(--leading-lg);
+  color: var(--text-strong);
+  background: var(--surface-control);
+  border: var(--border-width-hairline) solid var(--border-strong);
+  border-radius: var(--radius-input);
+  padding: var(--space-1) var(--space-3);
+  min-height: var(--size-lg);
+  cursor: pointer;
+  transition:
+    color 150ms ease-out,
+    background-color 150ms ease-out;
+}
+
+.usage__pager button:hover:not(:disabled) {
+  color: var(--text-strong);
+  background: var(--surface-card);
+  border-color: var(--border-strong);
+}
+
+.usage__pager button:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.usage__pager button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
