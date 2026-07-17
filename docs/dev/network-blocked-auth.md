@@ -77,15 +77,54 @@ Historically this was invisible:
 
 ## Follow-ups (intentionally not done yet)
 
-1. **Surface a distinct "scope-unreachable" state in the UI.** Right now the
-   typed diagnosis only reaches the log + `getLastNetworkDiagnosis()`. A
-   dedicated auth-state / Settings banner — with the user-facing copy produced
-   by the i18n framework, keyed on `(kind, scope)` — distinct from "your token
-   is invalid → re-auth" would stop users from pointlessly re-signing-in. Needs
-   SSE event + i18n strings (`shell/src/i18n/*`). New scopes (other providers)
-   extend the `NetworkScope` union.
+The **network-issue banner is built** for the Settings window: a global,
+account-aware, 12-locale banner that mirrors `.requirement-callout` in the
+warning tone, plus an account-type glyph (individual/team/enterprise) next to
+the connection indicator. It's driven by the token-refresh loop's transport
+diagnosis through the onset/notify hysteresis (`network-hysteresis.ts`). The
+remaining surfaces below are additive and were scoped out of the first PR:
 
-2. **Interface rebinding / discovery.** When `activeInterfaces.length > 1`, a
+1. **Proactive signed-out connectivity poll.** The banner is driven by the
+   Copilot **token-refresh loop**, which only runs while signed in. That covers
+   the dominant case (a working session loses connectivity). It does NOT cover a
+   signed-out user sitting at the sign-in screen while offline. A proactive poll
+   — gated on ≥1 live SSE subscriber (GUI open), auth-independent, feeding the
+   same hysteresis — would surface a "you're offline" banner pre-sign-in.
+   Deferred deliberately: it introduces a **second producer on the shared
+   hysteresis singleton**, which a single-producer unit harness can't faithfully
+   reproduce (see the DUT-vs-harness note in
+   `tests/network-hysteresis.test.ts`); it must be built with fake-timer +
+   real-singleton coverage that reproduces the interleaving, and must stay
+   mutually exclusive with the refresh-loop producer (poll only when NOT
+   authenticated) so it can't false-clear a `scope-unreachable` it cannot see.
+
+2. **Dashboard-window banner.** The Settings window and the Dashboard window use
+   **different styling systems** — Settings is the design-token
+   `styles.css`/`.requirement-callout` idiom; the Dashboard is Tailwind
+   utilities + its own `style.css`. So the banner is NOT a mechanical port: the
+   copy/icon resolution is reusable (extract `resolveBannerCopy` + the icon
+   constants from `shell/src/main.ts` into a shared `shell/src/ui/*` module), but
+   the Dashboard needs its own Tailwind-idiom render + an auth SSE subscription
+   (it has none today — add a `subscribeAuthEvents` consumer like Settings').
+   Doing it hastily risks the aesthetic mismatch we explicitly avoid; it wants a
+   short design pass against the Dashboard's existing components.
+
+3. **Apps-tab outage badge.** When a diagnosis is active, mark the config apps
+   that route through Copilot (Claude Code, Claude Desktop — NOT Copilot CLI)
+   with a small warning glyph + hover title matching the banner's visual
+   language (see the approved mockup `docs/design/network-banner-preview.html`).
+   Lives in the React apps island (`shell/src/ui/features/apps/AppCard.tsx` +
+   `useApps.ts`), which needs the `network_diagnosis` signal threaded in.
+
+4. **Native reconnect notification.** The backend already emits a one-shot
+   `notify_on_reconnect: true` on the `auth.changed` event when an outage longer
+   than `NOTIFY_ON_RECONNECT_MS` (30s) recovers. Nothing consumes it yet — the
+   shell has no native-notification path (the tray covers other out-of-band
+   nudges). Wiring it needs the Tauri notification plugin (permission flow) or a
+   tray toast; until then a long outage recovers silently (the banner just
+   disappears).
+
+5. **Interface rebinding / discovery.** When `activeInterfaces.length > 1`, a
    working network may have come up *after* maximal started and our socket is
    bound to a dead interface. The typed verdict exposes `probe.activeInterfaces`
    for a caller to act on; today nothing does. A real fix would watch for
