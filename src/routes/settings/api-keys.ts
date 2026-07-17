@@ -113,6 +113,7 @@ apiKeysRoutes.post("/", async (c) => {
 })
 
 apiKeysRoutes.patch("/enforce", async (c) => {
+  // casts-keep: field is unknown and typeof-guarded before use
   const body = (await c.req.json().catch(() => null)) as {
     enforce?: unknown
   } | null

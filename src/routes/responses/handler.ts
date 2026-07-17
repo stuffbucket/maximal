@@ -199,6 +199,7 @@ const parseResponsesStreamEvent = (
   }
 
   try {
+    // casts-keep: trusted Copilot SSE chunk; translator tolerates missing fields
     return JSON.parse(data) as ResponseStreamEvent
   } catch {
     return null
