@@ -1,5 +1,7 @@
 import { getShellApiKey } from "../tauri/shell";
 
+import { readInlineState } from "./inline-state-client";
+
 /**
  * Typed fetch client for the proxy's `/settings/api/*` surface.
  *
@@ -35,11 +37,17 @@ import type {
   UpdateStatusResponse,
   UpstreamRejection,
 } from "../../../src/lib/config/settings-types"
+// The active-clients wire contract is owned by the shared feed contract
+// (single source of truth for the WS + this fetch client). See feed-types.ts.
+import type {
+  ActiveApiClient,
+  ActiveApiClientsResponse,
+} from "../../../src/lib/ws/feed-types"
 
 // Re-export so existing shell call sites that pull the type from
 // "./api" keep working. AuthStatus is owned by src/lib/settings-types
 // (ADR-0005/0006) — the shell does NOT redeclare it.
-export type { AuthStatus, UpstreamRejection }
+export type { ActiveApiClient, AuthStatus, UpstreamRejection }
 
 const TIMEOUT_MS = 5000
 
@@ -77,22 +85,6 @@ interface AccountRemoveResponse {
   was_active: boolean
 }
 
-/**
- * Active API clients (last-seen within a recency window). Contract is
- * jointly owned with `/settings/api/clients` on the proxy side; if the
- * server-side route ships under a different shape, update both ends.
- */
-export interface ActiveApiClient {
-  key: string
-  label: string
-  userAgent: string
-  ageSeconds: number
-}
-
-interface ActiveApiClientsResponse {
-  clients: Array<ActiveApiClient>
-  total: number
-}
 
 /**
  * Apps integrations (Claude Code, Claude Desktop, Copilot CLI). Contract
@@ -319,8 +311,15 @@ function baseUrl(): string {
 
 async function resolveApiKey(override?: string): Promise<string | undefined> {
   if (override) return override
-  // The Tauri shell injects a per-launch key into the sidecar and serves
-  // it to the webview on demand; that's the sole key source now.
+  // Browser-tab delivery (§6.5): the sidecar mints a per-load session token into
+  // the served HTML as `window.__STATE__.sessionToken` — a plain browser tab has
+  // no Tauri IPC to fetch a key over. Prefer it when present. The `typeof window`
+  // guard keeps this safe under the DOM-less test runner.
+  const inlined =
+    typeof window === "undefined" ? null : readInlineState(window)
+  if (inlined?.sessionToken) return inlined.sessionToken
+  // Tauri delivery: the shell injects a per-launch key into the sidecar and
+  // serves it to the webview on demand.
   const shellKey = await getShellApiKey()
   return shellKey ?? undefined
 }
@@ -387,44 +386,3 @@ export async function apiCall<K extends EndpointKind>(
   }
 }
 
-/** Handle to the live SSE subscription; call `close()` to disconnect. */
-export interface EventSubscription {
-  close: () => void
-}
-
-/**
- * Subscribe to the sidecar's live event stream (ADR-0007). Opens an
- * `EventSource` against `/settings/api/events` and dispatches typed events
- * to the handlers — currently `auth.changed`, carrying the full `AuthStatus`
- * (same shape as GET /settings/api/auth/github/status).
- *
- * EventSource can't send headers, so the API key rides in the query string;
- * the sidecar honours `?key=` only for this endpoint (see request-auth.ts).
- * The browser's EventSource auto-reconnects on transient drops; `onError`
- * fires on each disconnect so the caller can fall back to a GET/poll until
- * the stream recovers. Never throws — payload parse failures are swallowed
- * and resynced by the next event or the GET fallback.
- */
-export async function subscribeAuthEvents(handlers: {
-  onAuth: (status: AuthStatus) => void
-  onOpen?: () => void
-  onError?: () => void
-}): Promise<EventSubscription> {
-  const apiKey = await resolveApiKey()
-  const query = apiKey ? `?key=${encodeURIComponent(apiKey)}` : ""
-  const source = new EventSource(`${baseUrl()}/settings/api/events${query}`)
-
-  source.addEventListener("open", () => handlers.onOpen?.())
-  source.addEventListener("error", () => handlers.onError?.())
-  source.addEventListener("auth.changed", (event) => {
-    const message = event as MessageEvent<string>
-    try {
-      handlers.onAuth(JSON.parse(message.data) as AuthStatus)
-    } catch {
-      // Malformed frame — drop it; the next event (or a GET fallback)
-      // resyncs. An event listener must never throw.
-    }
-  })
-
-  return { close: () => source.close() }
-}

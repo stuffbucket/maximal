@@ -94,6 +94,11 @@
               <a class="nav__item" href="#models" data-nav="models" data-i18n="nav-models"></a>
             </li>
             <li>
+              <!-- TODO(single-window §3.4): add a `nav-usage` i18n key across all
+                   catalogs (loop in the i18n expert); hardcoded until then. -->
+              <a class="nav__item" href="#usage" data-nav="usage">Usage</a>
+            </li>
+            <li>
               <a class="nav__item" href="#logs" data-nav="logs" data-i18n="nav-logs"></a>
             </li>
             <li>
@@ -633,6 +638,15 @@
             <div id="models-root"></div>
           </section>
 
+          <!-- USAGE (§4: ported from the standalone dashboard) -->
+          <section class="section" data-section="usage" hidden>
+            <header class="section__head">
+              <h2 class="section__title">Usage</h2>
+              <p class="section__sub">Token usage and cost by model.</p>
+            </header>
+            <div id="usage-root"></div>
+          </section>
+
           <!-- LOGS -->
           <section class="section" data-section="logs" hidden>
             <header class="section__head">
@@ -771,6 +785,23 @@
                 data-i18n="diagnostics-restart-proxy"
                 data-i18n-title="diagnostics-restart-proxy-title"
               ></button>
+            </div>
+
+            <div class="card">
+              <div class="card__head">
+                <h3 class="card__title">Quit Maximal</h3>
+              </div>
+              <p class="card__hint">
+                Stop the menu-bar app and its background proxy.
+              </p>
+              <button
+                type="button"
+                class="btn"
+                data-action="quit-maximal"
+              >
+                Quit Maximal
+              </button>
+              <p class="card__hint" data-quit-error hidden></p>
             </div>
 
             <div class="card" data-uninstall-card>

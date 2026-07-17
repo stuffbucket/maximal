@@ -3,7 +3,6 @@
   "app-container": "{os, select, macos {Menüleiste} other {Infobereich}}",
   "reveal-logs": "Protokolle in {fileManager} anzeigen",
   "reveal-config": "Konfiguration in {fileManager} anzeigen…",
-
   "nav-account": "Konto",
   "nav-general": "Allgemein",
   "nav-apps": "Apps",
@@ -13,7 +12,6 @@
   "nav-logs": "Protokolle",
   "nav-diagnostics": "Diagnose",
   "nav-sidebar-label": "Einstellungsbereiche",
-
   "common-copy": "Kopieren",
   "common-copied": "Kopiert",
   "common-reveal": "Anzeigen",
@@ -25,12 +23,10 @@
   "common-remove": "Entfernen",
   "common-working": "Wird ausgeführt…",
   "common-language-label": "Sprache",
-
   "general-title": "Allgemein",
   "general-sub": "Wie Maximal auf Ihrem Desktop erscheint.",
   "general-menu-bar-only-label": "Nur {os, select, macos {in der Menüleiste} other {im Infobereich}} anzeigen",
   "general-menu-bar-only-hint": "Standardmäßig erscheint Maximal auch {os, select, macos {im Dock} other {in der Taskleiste}}, damit es leicht zu finden und in den Vordergrund zu holen ist. Aktivieren Sie diese Option, um es aus dem Weg zu räumen: Maximal läuft weiter – nur mit seinem Symbol {os, select, macos {in der Menüleiste} other {im Infobereich}} – und verschwindet {os, select, macos {aus dem Dock} other {aus der Taskleiste}}.",
-
   "account-title": "Konto",
   "account-sub": "Ihre Verbindung zu GitHub Copilot.",
   "account-unauth-title": "Nicht angemeldet",
@@ -123,10 +119,8 @@
   "account-rejection-explain-429": "Sie haben ein Frequenz- oder Kontingentlimit erreicht. Warten Sie einen Moment und versuchen Sie es erneut.",
   "account-rejection-explain-5xx": "Auf GitHubs Seite wurde ein Fehler zurückgegeben. Das ist meist vorübergehend – versuchen Sie es in Kürze erneut.",
   "account-rejection-explain-other": "Versuchen Sie es erneut oder prüfen Sie Ihr Copilot-Konto auf GitHub.",
-
   "apps-title": "Apps",
   "apps-sub": "Einrichtung mit einem Klick für die Tools, die mit Maximal kommunizieren. Aktivieren Sie eine App, und wir richten sie für Sie auf den Proxy aus.",
-
   "endpoint-title": "Endpunkt",
   "endpoint-sub": "Wo Maximal lauscht. Verwenden Sie diese Werte, wenn Sie ein Tool einrichten, das nicht in der App-Liste enthalten ist.",
   "endpoint-connection-title": "Verbindung",
@@ -141,13 +135,10 @@
   "endpoint-models-label": "Modelle",
   "endpoint-key-not-available": "(nicht verfügbar)",
   "endpoint-copy-curl": "curl-Beispiel kopieren",
-
   "keys-title": "API-Schlüssel",
   "keys-sub": "Schlüssel, mit denen Apps Maximal aufrufen. Fügen Sie pro Tool einen hinzu, um sie unterscheiden zu können – alles, was nicht aufgeführt ist, funktioniert standardmäßig weiterhin.",
-
   "models-title": "Modelle",
   "models-sub": "Modelle, die Apps über Maximal zur Verfügung stehen, nach Art gruppiert. Die Liste wird vom Anbieter abgerufen – aktualisieren Sie sie, um den aktuellen Katalog zu laden, falls ein Modell zu fehlen scheint.",
-
   "logs-title": "Protokolle",
   "logs-sub": "Täglich rotierte Anfrage- und Handler-Protokolle, {n, plural, one {#-tägige} other {#-tägige}} Aufbewahrung.",
   "logs-where-title": "Wo die Protokolle liegen",
@@ -156,7 +147,6 @@
   "logs-path-windows-label": "Windows",
   "logs-retention-label": "Aufbewahrung",
   "logs-retention-value": "{n, plural, one {# Tag} other {# Tage}}, dann beim nächsten Start gelöscht",
-
   "diagnostics-title": "Diagnose",
   "diagnostics-sub": "Live-Status und ein Bündel mit einem Klick für Fehlerberichte.",
   "diagnostics-proxy-version": "Proxy-Version",
@@ -213,7 +203,6 @@
   "diagnostics-relative-minutes": "vor {m} Min.",
   "diagnostics-relative-hours": "vor {h} Std.",
   "diagnostics-relative-days": "vor {d} T.",
-
   "uninstall-title": "Deinstallieren",
   "uninstall-hint": "Dies stoppt den Hintergrundagenten von Maximal, macht alle App-Integrationen rückgängig und entfernt die {cliName}-CLI aus Ihrem PATH. Zum Abschluss ziehen Sie Maximal in den Papierkorb.",
   "uninstall-purge-label": "Gespeicherte Geheimnisse und Konfiguration löschen",
@@ -226,18 +215,14 @@
   "uninstall-summary-tail": " und {last}",
   "uninstall-err": "Deinstallation konnte nicht abgeschlossen werden: {error}. Sie können stattdessen {uninstallCmd} im Terminal ausführen.",
   "uninstall-complete": "Maximal ist deinstalliert. Beenden Sie Maximal über {os, select, macos {die Menüleiste} other {den Infobereich}} und ziehen Sie es dann aus „Programme“ in den Papierkorb, um abzuschließen.",
-
   "dashboard-title": "Maximal — Dashboard",
   "dashboard-period-label": "Zeitraum",
   "dashboard-period-days": "{n, plural, one {# Tag} other {# Tage}}",
-
   "dashboard-quotas-title": "Nutzungskontingente",
   "dashboard-quota-unlimited": "Unbegrenzt",
   "dashboard-quota-percent-used": "{percent} % genutzt",
   "dashboard-quota-remaining": "{n} verbleibend",
-
   "dashboard-api-response-title": "Antwort der Nutzungs-API",
-
   "dashboard-token-usage-title": "Tokennutzung",
   "dashboard-window-day": "Tagesfenster",
   "dashboard-window-week": "Wochenfenster",
@@ -245,7 +230,6 @@
   "dashboard-window-range": "{label}: {start} - {end}",
   "dashboard-refreshing-summary": "Zusammenfassung wird aktualisiert…",
   "dashboard-refreshing-details": "Details werden aktualisiert…",
-
   "dashboard-col-total": "Gesamt",
   "dashboard-col-input": "Eingabe",
   "dashboard-col-output": "Ausgabe",
@@ -259,53 +243,33 @@
   "dashboard-col-endpoint": "Endpunkt",
   "dashboard-col-session": "Sitzung",
   "dashboard-col-trace": "Trace",
-
   "dashboard-by-model-title": "Nach Modell",
   "dashboard-by-model-count": "{n, plural, one {# Modell} other {# Modelle}}",
   "dashboard-by-model-none": "Keine Zusammenfassungszeilen geladen.",
-
   "dashboard-event-details-title": "Ereignisdetails",
   "dashboard-events-meta": "Seite {page} / {total} · {events, plural, one {# Ereignis} other {# Ereignisse}}",
   "dashboard-events-none": "Noch keine Detailseite geladen.",
   "dashboard-pager-previous": "Zurück",
   "dashboard-pager-next": "Weiter",
-
   "dashboard-empty-summary": "Für den ausgewählten Zeitraum wurde keine Tokennutzung aufgezeichnet.",
   "dashboard-empty-events": "Keine Detailzeilen zur Tokennutzung für den ausgewählten Zeitraum.",
-
   "dashboard-error-usage": "Nutzungsanfrage fehlgeschlagen",
   "dashboard-error-summary": "Zusammenfassung der Tokennutzung fehlgeschlagen",
   "dashboard-error-details": "Details zur Tokennutzung fehlgeschlagen",
   "dashboard-error-generic": "Ein Fehler ist aufgetreten",
-
   "dashboard-welcome-title": "Willkommen!",
   "dashboard-welcome-body": "Nutzungs- und Tokennutzungsdaten werden hier angezeigt, sobald sie geladen sind.",
   "dashboard-unknown-error": "Unbekannter Fehler.",
   "dashboard-not-available": "–",
-
   "native-window-settings-title": "Maximal — Einstellungen",
   "native-window-settings-title-versioned": "Maximal — Einstellungen · v{version}",
   "native-window-dashboard-title": "Maximal — Dashboard",
-
-  "native-tray-settings": "Einstellungen…",
-  "native-tray-dashboard": "Dashboard…",
-  "native-tray-quit": "Maximal beenden",
-  "native-tray-starting": "Wird gestartet…",
-  "native-tray-sign-in": "Bei GitHub anmelden…",
-  "native-tray-signed-in": "Bei GitHub angemeldet",
-  "native-tray-upgrade": "Auf v{latest} aktualisieren…",
-  "native-tray-failed": "Sidecar konnte nicht starten",
-  "native-tray-retry": "Start wiederholen",
-  "native-tray-show-logs": "Protokolle anzeigen…",
-  "native-tray-open-config": "Konfigurationsordner öffnen…",
-
   "native-tooltip-starting": "maximal — wird gestartet…",
   "native-tooltip-sign-in": "maximal — bei GitHub anmelden",
   "native-tooltip-idle": "maximal",
   "native-tooltip-failed": "maximal — Sidecar fehlgeschlagen",
   "native-tooltip-stopped": "maximal — gestoppt",
   "native-tooltip-rejection": "maximal — {message}",
-
   "native-notify-startup-title": "Maximal läuft",
   "native-notify-startup-body-macos": "Suchen Sie das Maximal-Symbol in Ihrer Menüleiste ↑",
   "native-notify-startup-body-other": "Maximal läuft in Ihrem Infobereich ↓",
@@ -320,7 +284,6 @@
   "native-notify-rejection-title": "Maximal",
   "native-notify-rejection-body": "Eine vorgelagerte Copilot-Anfrage wurde abgelehnt. Öffnen Sie die Einstellungen für Details.",
   "native-notify-rejection-body-detail": "{message} — öffnen Sie die Einstellungen für Details.",
-
   "native-quit-title": "Maximal beenden?",
   "native-quit-body": "Maximal wird gestoppt und alle geöffneten Einstellungsfenster werden geschlossen.",
   "native-quit-confirm": "Maximal beenden",
