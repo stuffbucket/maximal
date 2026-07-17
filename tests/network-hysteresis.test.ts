@@ -16,15 +16,7 @@
  *      projector IS registered, mirroring production module-load order.
  */
 
-import {
-  afterAll,
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  test,
-} from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 
 import type { NetworkDiagnosis } from "~/lib/net/network-diagnostics"
 
@@ -230,57 +222,15 @@ describe("setNetworkDiagnosis / clearNetworkDiagnosis", () => {
 
 // --- Wired seam: getAuthStatus propagation --------------------------------
 //
-// auth-controller pulls in several sibling modules at import; mock them at
-// module scope before the dynamic import (the exact pattern in
-// tests/last-upstream-rejection.test.ts), restored in afterAll so the stubs
-// don't leak into later files in the same `bun test` run. The dynamic import
-// registers the auth-status projector, so `setNetworkDiagnosis` reaches a real
-// emit — the production wiring, not a re-plumbed parallel.
-
-const realGetDeviceCodeModule =
-  await import("~/services/github/get-device-code")
-const realGetUserModule = await import("~/services/github/get-user")
-const realTokenModule = await import("~/lib/auth/token")
-const realFsPromisesModule = await import("node:fs/promises")
-
-await mock.module("~/services/github/get-device-code", () => ({
-  getDeviceCode: () =>
-    Promise.resolve({
-      device_code: "device-xyz",
-      user_code: "ABCD-1234",
-      verification_uri: "https://github.com/login/device",
-      expires_in: 900,
-      interval: 5,
-    }),
-}))
-
-await mock.module("~/services/github/get-user", () => ({
-  getGitHubUser: () => Promise.resolve({ login: "octocat" }),
-}))
-
-await mock.module("~/lib/auth/token", () => ({
-  ...realTokenModule,
-  setupCopilotToken: () => Promise.resolve(),
-}))
-
-await mock.module("node:fs/promises", () => ({
-  ...realFsPromisesModule,
-  default: {
-    ...(realFsPromisesModule as { default: object }).default,
-    unlink: () => Promise.resolve(),
-  },
-  unlink: () => Promise.resolve(),
-}))
-
-afterAll(async () => {
-  await mock.module(
-    "~/services/github/get-device-code",
-    () => realGetDeviceCodeModule,
-  )
-  await mock.module("~/services/github/get-user", () => realGetUserModule)
-  await mock.module("~/lib/auth/token", () => realTokenModule)
-  await mock.module("node:fs/promises", () => realFsPromisesModule)
-})
+// Per ADR-0011 this drives the REAL modules — no `mock.module` of a shared
+// module (whose awaited afterAll restore doesn't reliably land before the next
+// file's imports on CI, leaking stubs sideways). The test preload redirects
+// COPILOT_API_HOME to a temp dir, so signOut's registry deactivation + token-
+// file unlink land there harmlessly (both are ENOENT-tolerant). markSignedIn /
+// getAuthStatus are pure in-memory state; nothing here touches the network or
+// real credentials. Importing auth-controller registers the auth-status
+// projector, so setNetworkDiagnosis reaches a real emit — the production
+// wiring, not a re-plumbed parallel.
 
 const { getAuthStatus, signOut, markSignedIn, __resetAuthControllerForTests } =
   await import("~/lib/auth/auth-controller")
