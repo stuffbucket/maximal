@@ -126,6 +126,7 @@ const parseChatCompletionChunk = (
   }
 
   try {
+    // casts-keep: trusted Copilot SSE chunk; translator tolerates missing fields
     return JSON.parse(data) as ChatCompletionChunk
   } catch {
     return null

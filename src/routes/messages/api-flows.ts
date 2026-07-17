@@ -134,6 +134,7 @@ export const handleWithChatCompletions = async (
           continue
         }
 
+        // casts-keep: trusted Copilot SSE chunk; translator tolerates missing fields
         const chunk = JSON.parse(rawEvent.data) as ChatCompletionChunk
         if (chunk.usage) {
           usage = normalizeOpenAIUsage(chunk.usage)
@@ -222,6 +223,7 @@ export const handleWithResponsesApi = async (
 
           debugLazy(logger, () => ["Responses raw stream event:", data])
 
+          // casts-keep: trusted Copilot SSE chunk; translator tolerates missing fields
           const responseEvent = JSON.parse(data) as ResponseStreamEvent
           if (
             responseEvent.type === "response.completed"
@@ -409,6 +411,7 @@ const parseAnthropicStreamEvent = (
   data: string,
 ): AnthropicStreamEventData | null => {
   try {
+    // casts-keep: trusted Copilot SSE chunk; translator tolerates missing fields
     return JSON.parse(data) as AnthropicStreamEventData
   } catch {
     return null

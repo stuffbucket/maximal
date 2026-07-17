@@ -75,6 +75,7 @@ export function createGhRoutes(deps: Partial<GhRoutesDeps> = {}): Hono {
    */
   routes.post("/use", async (c) => {
     try {
+      // casts-keep: fields are unknown and typeof-guarded before use
       const body = (await c.req.json().catch(() => null)) as {
         login?: unknown
         host?: unknown
