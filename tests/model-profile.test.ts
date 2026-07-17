@@ -2,7 +2,6 @@ import { describe, expect, it } from "bun:test"
 
 import type { Model } from "~/services/copilot/get-models"
 
-import { familyDefaultReasoningEffort } from "~/lib/config/config"
 import { resolveModelProfile } from "~/lib/models/model-profile"
 
 /** Minimal catalog Model with the given `supports` + `limits` capability maps. */
@@ -120,25 +119,15 @@ describe("resolveModelProfile — intrinsic capability derivation", () => {
       "gpt-5.6-luna",
     )
   })
-})
 
-describe("familyDefaultReasoningEffort — new-model-without-a-branch", () => {
-  it("gives an unconfigured GPT-5.x reasoning model xhigh by default", () => {
-    // The payoff: a brand-new gpt-5.7 needs NO config entry and NO code branch —
-    // it inherits the family's high-effort default automatically.
-    expect(familyDefaultReasoningEffort("gpt-5.7")).toBe("xhigh")
-    expect(familyDefaultReasoningEffort("gpt-5.7-codex")).toBe("xhigh")
-  })
-
-  it("gives GPT-5.x mini/nano tiers low, matching gpt-5-mini", () => {
-    expect(familyDefaultReasoningEffort("gpt-5.7-mini")).toBe("low")
-    expect(familyDefaultReasoningEffort("gpt-5-nano")).toBe("low")
-  })
-
-  it("has no opinion outside the GPT-5.x family (falls through to global)", () => {
-    expect(familyDefaultReasoningEffort("claude-opus-4.7")).toBeUndefined()
-    expect(familyDefaultReasoningEffort("gpt-4o")).toBeUndefined()
-    // Must not match gpt-50 / gpt-5000 etc. — the boundary is anchored.
-    expect(familyDefaultReasoningEffort("gpt-50-turbo")).toBeUndefined()
+  it("resolves a sparse/un-normalized entry to conservative defaults", () => {
+    // No capabilities container at all — must not throw; everything defaults.
+    const profile = resolveModelProfile({
+      id: "sparse",
+      name: "sparse",
+    } as unknown as Model)
+    expect(profile.isReasoning).toBe(false)
+    expect(profile.supportsVision).toBe(false)
+    expect(profile.id).toBe("sparse")
   })
 })

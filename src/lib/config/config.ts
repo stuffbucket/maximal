@@ -16,20 +16,6 @@ export interface ApiKeyEntry {
   created_at: string
 }
 
-/**
- * The reasoning-effort ladder maximal understands. Mirrors
- * `ReasoningEffortSchema` in config-schema.ts (keep them in lockstep). "max" is
- * the top rung, introduced with the GPT-5.6 trio.
- */
-export type ReasoningEffort =
-  | "none"
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh"
-  | "max"
-
 export interface AppConfig {
   auth?: {
     /** Legacy free-form list of accepted bearer tokens. */
@@ -53,7 +39,10 @@ export interface AppConfig {
    * NOTE: independent from `store` (which controls response persistence/ZDR).
    */
   promptCacheRetention?: "in_memory" | "24h"
-  modelReasoningEfforts?: Record<string, ReasoningEffort>
+  modelReasoningEfforts?: Record<
+    string,
+    "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
+  >
   useFunctionApplyPatch?: boolean
   useMessagesApi?: boolean
   anthropicApiKey?: string
@@ -177,13 +166,15 @@ const defaultConfig: AppConfig = {
     "gpt-5.4-mini": "xhigh",
     "gpt-5.4": "xhigh",
     "gpt-5.5": "xhigh",
-    // GPT-5.6 trio (Copilot-served OpenAI reasoning models). "xhigh" matches
-    // the 5.4/5.5 siblings and is guaranteed to be on their effort ladder; the
-    // ladder also exposes "max" (now a valid config value — see
-    // ReasoningEffortSchema) for users who want to opt the trio up.
-    "gpt-5.6-sol": "xhigh",
-    "gpt-5.6-terra": "xhigh",
-    "gpt-5.6-luna": "xhigh",
+    // GPT-5.6 (Sol/Terra/Luna): pinned to medium per OpenAI's 5.6 guidance,
+    // which names medium the balanced baseline and reserves high/xhigh for when
+    // evals show a meaningful gain. This matches the global default today, but
+    // we pin it explicitly so these frontier models stay at the guided value
+    // even if the global baseline is ever changed. Escalate per-variant if
+    // evals justify it.
+    "gpt-5.6-sol": "medium",
+    "gpt-5.6-terra": "medium",
+    "gpt-5.6-luna": "medium",
   },
   useFunctionApplyPatch: true,
   useMessagesApi: true,
@@ -393,49 +384,33 @@ export function getPromptCacheRetention(): "in_memory" | "24h" | undefined {
   return config.promptCacheRetention
 }
 
-/**
- * The explicitly-authored effort for a model, or `undefined` when none is set.
- * "Authored" = a user entry OR a curated `defaultConfig` entry; both are honored
- * so a config that doesn't carry `modelReasoningEfforts` (a test stub, or a
- * pre-field user config) still gets the curated per-model value. Returns
- * `undefined` — not "high" — so callers can layer a family default in between.
- */
-export function getReasoningEffortOverride(
+export function getReasoningEffortForModel(
   model: string,
-): ReasoningEffort | undefined {
+): "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" {
   const config = getConfig()
+  // Precedence: an explicit user override, then the curated per-model default
+  // (so a config that doesn't carry modelReasoningEfforts — a test stub, or a
+  // user config predating the field — still gets the curated effort), then a
+  // model-aware baseline (see defaultReasoningEffortForModel). Curated entries
+  // deviate up (coding models → xhigh) or down (gpt-5-mini → low) from it.
   return (
     config.modelReasoningEfforts?.[model]
     ?? defaultConfig.modelReasoningEfforts?.[model]
+    ?? defaultReasoningEffortForModel(model)
   )
 }
 
 /**
- * Effort default inferred from the model FAMILY, so a brand-new model in a known
- * family is handled without a config edit (the drift that hid the GPT-5.6 trio).
- * Applies only when nothing is explicitly authored — the whole curated GPT-5.x
- * set already carries explicit entries, so this changes behavior only for
- * not-yet-configured models, and only to a saner default than the global "high".
- *
- * GPT-5.x reasoning family → "xhigh" (matches the curated 5.4/5.5/5.6 entries),
- * except the mini/nano tiers → "low" (matches gpt-5-mini). Returns `undefined`
- * for families with no opinion, so the caller falls through to "high".
- */
-export function familyDefaultReasoningEffort(
-  model: string,
-): ReasoningEffort | undefined {
-  if (/^gpt-5(?:[.-]|$)/u.test(model)) {
-    return model.includes("mini") || model.includes("nano") ? "low" : "xhigh"
-  }
-  return undefined
-}
-
-export function getReasoningEffortForModel(model: string): ReasoningEffort {
-  return (
-    getReasoningEffortOverride(model)
-    ?? familyDefaultReasoningEffort(model)
-    ?? "high"
-  )
+ * Baseline reasoning effort for a model with no explicit or curated entry.
+ * Claude/Anthropic models default to "high" — that is Anthropic's own default
+ * (omitting `output_config.effort` is equivalent to `high`), so a Copilot-served
+ * Claude request isn't silently downgraded. Every other model gets the "medium"
+ * balanced baseline (matching OpenAI's guidance for its reasoning models). At
+ * this call site `model` is the Copilot dot-form id (e.g. "claude-opus-4.8"), so
+ * a "claude" prefix — the same test used in small-model.ts — identifies the
+ * Anthropic family across all versions and variant suffixes. */
+function defaultReasoningEffortForModel(model: string): "high" | "medium" {
+  return model.startsWith("claude") ? "high" : "medium"
 }
 
 export function normalizeProviderBaseUrl(url: string): string {

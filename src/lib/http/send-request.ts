@@ -181,16 +181,30 @@ export async function sendProviderRequest(
 }
 
 /**
+ * A minimal structural validator — satisfied by any Zod schema (`.parse`). Keeps
+ * this auth sink decoupled from the validation library while still forcing every
+ * JSON boundary through a runtime check instead of an unsound `as T` cast.
+ */
+export interface JsonValidator<T> {
+  parse(input: unknown): T
+}
+
+/**
  * Convenience for the auth/discovery shape: a bounded (or unbounded) read, an
- * `ok` check that throws `HTTPError`, and a JSON parse. Callers with bespoke
- * non-OK handling (strict auth-fatal, 200-with-error bodies) use `sendRequest`.
+ * `ok` check that throws `HTTPError`, and a **validated** JSON parse. The schema
+ * turns the untrusted response body into `T` at runtime, so a missing or
+ * mistyped field fails loudly here instead of silently becoming
+ * `undefined`/`NaN` downstream (the class of bug behind the device-code
+ * `interval`/`expires_in` poll spin). Callers with bespoke non-OK handling
+ * (strict auth-fatal, 200-with-error bodies) use `sendRequest` + their own parse.
  */
 export async function sendRequestJson<T>(
   url: string,
   init: SendRequestInit & { errorMessage: string },
+  schema: JsonValidator<T>,
 ): Promise<T> {
   const { errorMessage, ...rest } = init
   const response = await sendRequest(url, rest)
   if (!response.ok) throw new HTTPError(errorMessage, response)
-  return (await response.json()) as T
+  return schema.parse(await response.json())
 }

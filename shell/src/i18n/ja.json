@@ -3,7 +3,6 @@
   "app-container": "{os, select, macos {メニューバー} other {システムトレイ}}",
   "reveal-logs": "{fileManager} でログを表示",
   "reveal-config": "{fileManager} で構成を表示…",
-
   "nav-account": "アカウント",
   "nav-general": "一般",
   "nav-apps": "アプリ",
@@ -13,7 +12,6 @@
   "nav-logs": "ログ",
   "nav-diagnostics": "診断",
   "nav-sidebar-label": "設定セクション",
-
   "common-copy": "コピー",
   "common-copied": "コピー済み",
   "common-reveal": "表示",
@@ -25,12 +23,10 @@
   "common-remove": "削除",
   "common-working": "処理中…",
   "common-language-label": "言語",
-
   "general-title": "一般",
   "general-sub": "Maximal をデスクトップにどう表示するか。",
   "general-menu-bar-only-label": "{os, select, macos {メニューバー} other {システムトレイ}}にのみ表示",
   "general-menu-bar-only-hint": "デフォルトでは、Maximal は{os, select, macos {Dock} other {タスクバー}}にも表示され、見つけやすく前面に呼び出しやすくなっています。これをオンにすると目立たない場所に収まり、Maximal は{os, select, macos {メニューバー} other {システムトレイ}}のアイコンだけで動作を続け、{os, select, macos {Dock} other {タスクバー}}からは消えます。",
-
   "account-title": "アカウント",
   "account-sub": "GitHub Copilot への接続。",
   "account-unauth-title": "サインインしていません",
@@ -99,6 +95,15 @@
   "account-remediation-accept-terms": "更新された Copilot の利用規約に同意する",
   "account-remediation-review-terms": "GitHub の利用規約を確認する",
   "account-remediation-generic": "GitHub で開く",
+  "banner-offline-title": "オフラインです",
+  "banner-offline-msg": "接続を確認してください。再試行を続けます。",
+  "banner-copilot-title": "GitHub Copilot に接続できません",
+  "banner-copilot-msg-individual": "再接続を試みています（{service}）。",
+  "banner-copilot-msg-enterprise": "他のアプリも動作しない場合は、再起動が必要かもしれません（{service}）。",
+  "banner-service-link": "Copilot サービスの状態を確認",
+  "account-type-individual": "個人アカウント",
+  "account-type-team": "チームアカウント",
+  "account-type-enterprise": "Enterprise アカウント",
   "account-rejection-title-402": "Copilot の請求またはプランの問題",
   "account-rejection-title-403": "Copilot によってリクエストがブロックされました",
   "account-rejection-title-404": "Copilot が見つけられませんでした",
@@ -114,10 +119,8 @@
   "account-rejection-explain-429": "レートまたはクォータの上限に達しました。しばらく待ってからもう一度お試しください。",
   "account-rejection-explain-5xx": "GitHub 側でエラーが返されました。通常は一時的なものです。まもなくもう一度お試しください。",
   "account-rejection-explain-other": "もう一度お試しになるか、GitHub で Copilot アカウントをご確認ください。",
-
   "apps-title": "アプリ",
   "apps-sub": "Maximal と連携するツールをワンクリックでセットアップ。アプリをオンにすると、Maximal がプロキシに向けて設定します。",
-
   "endpoint-title": "エンドポイント",
   "endpoint-sub": "Maximal がリッスンする場所。Apps の一覧にないツールを接続する際は、これらの値を使用してください。",
   "endpoint-connection-title": "接続",
@@ -132,13 +135,10 @@
   "endpoint-models-label": "モデル",
   "endpoint-key-not-available": "（利用できません）",
   "endpoint-copy-curl": "curl の例をコピー",
-
   "keys-title": "API キー",
   "keys-sub": "アプリが Maximal を呼び出すために使用するキー。ツールごとに 1 つ追加すると区別できます。一覧にないものも既定で引き続き動作します。",
-
   "models-title": "モデル",
   "models-sub": "Maximal を通じてアプリが利用できるモデルを種類別にグループ化。一覧はプロバイダーから取得されます。モデルが見当たらない場合は、更新して最新のカタログを取得してください。",
-
   "logs-title": "ログ",
   "logs-sub": "日次ローテーションのリクエストおよびハンドラーのログ、{n, plural, other {#日}}間保持。",
   "logs-where-title": "ログの保存場所",
@@ -147,7 +147,6 @@
   "logs-path-windows-label": "Windows",
   "logs-retention-label": "保持期間",
   "logs-retention-value": "{n, plural, other {#日}}、その後、次回起動時に削除",
-
   "diagnostics-title": "診断",
   "diagnostics-sub": "ライブ状態と、バグ報告用のワンクリックバンドル。",
   "diagnostics-proxy-version": "プロキシのバージョン",
@@ -204,7 +203,6 @@
   "diagnostics-relative-minutes": "{m}分前",
   "diagnostics-relative-hours": "{h}時間前",
   "diagnostics-relative-days": "{d}日前",
-
   "uninstall-title": "アンインストール",
   "uninstall-hint": "これにより Maximal のバックグラウンドエージェントが停止し、アプリ連携が元に戻され、{cliName} CLI が PATH から削除されます。完了するには Maximal をゴミ箱にドラッグします。",
   "uninstall-purge-label": "保存されたシークレットと構成を削除",
@@ -217,18 +215,14 @@
   "uninstall-summary-tail": "、そして{last}",
   "uninstall-err": "アンインストールを完了できませんでした: {error}。代わりにターミナルで {uninstallCmd} を実行できます。",
   "uninstall-complete": "Maximal はアンインストールされました。{os, select, macos {メニューバー} other {システムトレイ}}から Maximal を終了し、アプリケーションフォルダからゴミ箱にドラッグして完了してください。",
-
   "dashboard-title": "Maximal — ダッシュボード",
   "dashboard-period-label": "期間",
   "dashboard-period-days": "{n, plural, other {#日}}",
-
   "dashboard-quotas-title": "使用量クォータ",
   "dashboard-quota-unlimited": "無制限",
   "dashboard-quota-percent-used": "{percent}% 使用済み",
   "dashboard-quota-remaining": "残り {n}",
-
   "dashboard-api-response-title": "使用量 API レスポンス",
-
   "dashboard-token-usage-title": "トークン使用量",
   "dashboard-window-day": "日ウィンドウ",
   "dashboard-window-week": "週ウィンドウ",
@@ -236,7 +230,6 @@
   "dashboard-window-range": "{label}: {start} - {end}",
   "dashboard-refreshing-summary": "サマリーを更新しています…",
   "dashboard-refreshing-details": "詳細を更新しています…",
-
   "dashboard-col-total": "合計",
   "dashboard-col-input": "入力",
   "dashboard-col-output": "出力",
@@ -250,53 +243,33 @@
   "dashboard-col-endpoint": "エンドポイント",
   "dashboard-col-session": "セッション",
   "dashboard-col-trace": "トレース",
-
   "dashboard-by-model-title": "モデル別",
   "dashboard-by-model-count": "{n, plural, other {#個のモデル}}",
   "dashboard-by-model-none": "サマリー行が読み込まれていません。",
-
   "dashboard-event-details-title": "イベントの詳細",
   "dashboard-events-meta": "ページ {page} / {total} · {events, plural, other {#件のイベント}}",
   "dashboard-events-none": "詳細ページはまだ読み込まれていません。",
   "dashboard-pager-previous": "前へ",
   "dashboard-pager-next": "次へ",
-
   "dashboard-empty-summary": "選択した期間に記録されたトークン使用量はありません。",
   "dashboard-empty-events": "選択した期間のトークン使用量の詳細行はありません。",
-
   "dashboard-error-usage": "使用量リクエストに失敗しました",
   "dashboard-error-summary": "トークン使用量サマリーに失敗しました",
   "dashboard-error-details": "トークン使用量の詳細に失敗しました",
   "dashboard-error-generic": "エラーが発生しました",
-
   "dashboard-welcome-title": "ようこそ！",
   "dashboard-welcome-body": "使用量とトークン使用量のデータは、読み込まれるとここに表示されます。",
   "dashboard-unknown-error": "不明なエラー。",
   "dashboard-not-available": "N/A",
-
   "native-window-settings-title": "Maximal — 設定",
   "native-window-settings-title-versioned": "Maximal — 設定 · v{version}",
   "native-window-dashboard-title": "Maximal — ダッシュボード",
-
-  "native-tray-settings": "設定…",
-  "native-tray-dashboard": "ダッシュボード…",
-  "native-tray-quit": "Maximal を終了",
-  "native-tray-starting": "起動中…",
-  "native-tray-sign-in": "GitHub にサインイン…",
-  "native-tray-signed-in": "GitHub にサインイン済み",
-  "native-tray-upgrade": "v{latest} にアップグレード…",
-  "native-tray-failed": "サイドカーの起動に失敗しました",
-  "native-tray-retry": "起動を再試行",
-  "native-tray-show-logs": "ログを表示…",
-  "native-tray-open-config": "構成フォルダを開く…",
-
   "native-tooltip-starting": "maximal — 起動中…",
   "native-tooltip-sign-in": "maximal — GitHub にサインイン",
   "native-tooltip-idle": "maximal",
   "native-tooltip-failed": "maximal — サイドカーが失敗しました",
   "native-tooltip-stopped": "maximal — 停止しました",
   "native-tooltip-rejection": "maximal — {message}",
-
   "native-notify-startup-title": "Maximal が実行中です",
   "native-notify-startup-body-macos": "メニューバーで Maximal のアイコンを探してください ↑",
   "native-notify-startup-body-other": "Maximal はシステムトレイで実行中です ↓",
@@ -311,7 +284,6 @@
   "native-notify-rejection-title": "Maximal",
   "native-notify-rejection-body": "上流の Copilot リクエストが拒否されました。詳細は設定を開いてください。",
   "native-notify-rejection-body-detail": "{message} — 詳細は設定を開いてください。",
-
   "native-quit-title": "Maximal を終了しますか？",
   "native-quit-body": "Maximal が停止し、開いている設定ウィンドウはすべて閉じます。",
   "native-quit-confirm": "Maximal を終了",

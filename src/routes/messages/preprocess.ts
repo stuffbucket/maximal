@@ -561,12 +561,11 @@ const filterAssistantThinkingBlocks = (
 
 // Copilot's reasoning-model backends reject sampling params in two ways:
 //   1. Reasoning models reject temperature/top_p/top_k outright with a 400.
-//      This covers Copilot's Bedrock-backed Claude (claude-opus-4.7+, which
-//      advertise `adaptive_thinking`) AND OpenAI's reasoning models served via
-//      Copilot (the GPT-5.x trio, which advertise a `reasoning_effort` ladder
-//      but NOT adaptive_thinking) — so the guard keys on `isReasoningModel`,
-//      not `adaptive_thinking` alone, which had let temperature leak through
-//      to the GPT-5.x models and 400.
+//      This covers Copilot's Bedrock-backed Claude (adaptive_thinking) AND
+//      OpenAI's reasoning models served via Copilot (the GPT-5.x trio, which
+//      advertise a reasoning_effort ladder but NOT adaptive_thinking) — so the
+//      guard keys on the resolved `isReasoning`, not `adaptive_thinking` alone,
+//      which had let temperature leak through to the GPT-5.x models and 400.
 //   2. ALL models reject temperature and top_p *together* ("`temperature` and
 //      `top_p` cannot both be specified for this model. Please use only one.").
 // (2) is an API-level constraint, so it is deliberately not gated on model
@@ -648,7 +647,14 @@ const applyAdaptiveThinking = (
   // `![].includes(effort)` true and set effort to `[].at(-1)` (undefined).
   const reasoningEffort = profile.reasoningEffortLadder
   if (reasoningEffort && !reasoningEffort.includes(effort)) {
-    effort = reasoningEffort.at(-1) as "low" | "medium" | "high"
+    // Clamp to the model's highest advertised tier. Copilot's array is ordered
+    // low→high, so the last element is the ceiling (may be xhigh or max).
+    effort = reasoningEffort.at(-1) as
+      | "low"
+      | "medium"
+      | "high"
+      | "xhigh"
+      | "max"
   }
   payload.output_config = {
     effort: effort,

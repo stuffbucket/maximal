@@ -16,6 +16,31 @@ export const sleep = (ms: number) =>
     setTimeout(resolve, ms)
   })
 
+/**
+ * Like `sleep`, but resolves immediately when `signal` aborts (and clears the
+ * timer) so a caller in a poll loop can be cancelled without waiting out the
+ * full delay. Resolves rather than rejects on abort — the caller re-checks
+ * `signal.aborted` after awaiting and decides what to do, keeping the abort
+ * path a normal control-flow branch rather than an exception to catch.
+ */
+export const abortableSleep = (
+  ms: number,
+  signal?: AbortSignal,
+): Promise<void> => {
+  if (signal?.aborted) return Promise.resolve()
+  return new Promise<void>((resolve) => {
+    const onAbort = () => {
+      clearTimeout(timer)
+      resolve()
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort)
+      resolve()
+    }, ms)
+    signal?.addEventListener("abort", onAbort, { once: true })
+  })
+}
+
 export const isNullish = (value: unknown): value is null | undefined =>
   value === null || value === undefined
 

@@ -127,8 +127,8 @@ describe("GET /v1/models — Anthropic shape on signal", () => {
     expect(entry.max_input_tokens).toBe(1_000_000)
     expect(entry.max_tokens).toBe(64_000)
     // Anthropic capability shape ({supported:boolean}), derived from Copilot supports.
-    // image_input and pdf_input both track the single `vision` flag (this
-    // fixture is vision-capable), so both report supported.
+    // image_input and pdf_input both track the single `vision` flag (this fixture
+    // is vision-capable), so both report supported.
     expect(entry.capabilities).toEqual({
       image_input: { supported: true },
       pdf_input: { supported: true },

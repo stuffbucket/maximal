@@ -40,7 +40,7 @@ export function printReadyBanner(serverUrl: string): void {
   consola.box(
     [
       `🌐 Settings:     ${serverUrl}/ui/settings/`,
-      `📊 Dashboard:    ${serverUrl}/ui/dashboard/?endpoint=${serverUrl}/usage`,
+      `📊 Usage:        ${serverUrl}/ui/settings/#usage`,
       ``,
       `Fast UI iteration: \`bun run app:ui\` rebuilds the UI on save`,
       `(reload the window to pick up changes).`,

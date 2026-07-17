@@ -1,8 +1,9 @@
 /**
  * RFC 8628 §3.5 polling correctness for the device-code flow.
  *
- * `sleep` is mocked to a no-op so the test doesn't actually wait for the
- * poll interval to elapse. fetch is mocked to return scripted responses.
+ * `sleep`/`abortableSleep` are mocked to no-ops so the test doesn't actually
+ * wait for the poll interval to elapse. fetch is mocked to return scripted
+ * responses.
  */
 
 import {
@@ -22,6 +23,7 @@ const realUtilsModule = await import("~/lib/platform/utils")
 await mock.module("~/lib/platform/utils", () => ({
   ...realUtilsModule,
   sleep: () => Promise.resolve(),
+  abortableSleep: () => Promise.resolve(),
 }))
 afterAll(async () => {
   await mock.module("~/lib/platform/utils", () => realUtilsModule)
@@ -141,5 +143,55 @@ describe("pollAccessToken (RFC 8628)", () => {
       /expired_token/,
     )
     expect(fetchMock).toHaveBeenCalledTimes(0)
+  })
+
+  it("gives up after repeated transport failures instead of polling forever", async () => {
+    // A persistently-unreachable network can't complete the flow. It must
+    // terminate (and, when the failure is instantaneous — as under a stubbed
+    // fetch — never spin), not retry until the code expires.
+    const fetchMock = mock(() => Promise.reject(new Error("network down")))
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+    await expectRejects(
+      () => pollAccessToken(DEVICE_CODE),
+      /network unreachable/,
+    )
+    // Bounded: MAX_CONSECUTIVE_TRANSPORT_ERRORS attempts, then throw.
+    expect(fetchMock).toHaveBeenCalledTimes(12)
+  })
+
+  it("does not hot-loop or run unbounded when interval/expires_in are missing", async () => {
+    // A malformed device-code response — no `interval` (would make sleep(NaN) a
+    // zero-delay spin) and no `expires_in` (would make the deadline NaN and
+    // never fire) — must still terminate. With a failing transport it exits via
+    // the consecutive-error cap rather than hanging.
+    const malformed = {
+      device_code: "device-xyz",
+      user_code: "ABCD-1234",
+      verification_uri: "https://github.com/login/device",
+    } as unknown as typeof DEVICE_CODE
+    const fetchMock = mock(() => Promise.reject(new Error("network down")))
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+    await expectRejects(() => pollAccessToken(malformed), /network unreachable/)
+    expect(fetchMock).toHaveBeenCalledTimes(12)
+  })
+
+  it("retries a transient transport error and then succeeds", async () => {
+    // A single dropped request must not abort the flow — the poll retries and
+    // completes once the transport recovers (the failure streak resets on any
+    // response), so a brief blip doesn't cost the user their sign-in.
+    let calls = 0
+    const fetchMock = mock(() => {
+      calls++
+      if (calls === 1) return Promise.reject(new Error("blip"))
+      return Promise.resolve(
+        new Response(JSON.stringify({ access_token: "ghu_recovered" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      )
+    })
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+    expect(await pollAccessToken(DEVICE_CODE)).toBe("ghu_recovered")
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 })

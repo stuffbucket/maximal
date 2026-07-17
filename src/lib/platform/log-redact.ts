@@ -70,6 +70,17 @@ const STRUCTURAL_STRING_KEYS: ReadonlySet<string> = new Set(
     "reasoning_effort",
     "effort",
     "authtype",
+    // Transport/socket error diagnostics. These keys only ever carry
+    // structural network-error values (the failing syscall, the resolver
+    // host, a socket peer address/port) — never request/response content — so
+    // they're safe to surface for auth/network debugging. `code` and `path`
+    // are deliberately NOT here: they collide with content keys (source-code
+    // payloads, file paths). Transport errors on the auth path are instead
+    // logged via `formatTransportError` (network-diagnostics.ts), which emits
+    // only known-safe fields as a plain string.
+    "syscall",
+    "hostname",
+    "address",
   ].map((k) => k.toLowerCase()),
 )
 

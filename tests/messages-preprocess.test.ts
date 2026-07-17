@@ -768,11 +768,10 @@ describe("prepareMessagesApiPayload", () => {
   })
 
   test("strips temperature/top_p/top_k on a reasoning-effort-only model (GPT-5.6)", () => {
-    // The GPT-5.6 trio (sol/terra/luna) are reasoning models that advertise a
-    // `reasoning_effort` ladder but NOT `adaptive_thinking`. Before the guard
-    // was broadened to `isReasoningModel`, the capability-gated strip keyed on
-    // `adaptive_thinking` alone, so temperature/top_p/top_k leaked through and
-    // Copilot 400'd. Assert all three sampling params are removed here.
+    // The GPT-5.6 trio are reasoning models that advertise a reasoning_effort
+    // ladder but NOT adaptive_thinking. Before the guard was broadened to the
+    // resolved `isReasoning`, the strip keyed on adaptive_thinking alone, so
+    // temperature/top_p/top_k leaked through and Copilot 400'd.
     const payload: AnthropicMessagesPayload = {
       model: "gpt-5.6-sol",
       max_tokens: 64,
