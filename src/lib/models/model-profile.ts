@@ -19,8 +19,10 @@
  * SCOPE: this holds INTRINSIC, catalog-derived facts (the `base_model` analog in
  * models.dev terms). Authored per-model tuning (extra prompts, reasoning-effort
  * overrides, responses context-management) still lives behind the config
- * accessors and is being consolidated separately (#336); once that lands, the
- * resolved tuning merges in here too, completing the ModelProfile picture (#338).
+ * accessors and is being consolidated separately (#336, parked — see
+ * docs/decisions/0022-per-model-tuning-consolidation-parked.md); once that
+ * lands, the resolved tuning merges in here too, completing the ModelProfile
+ * picture (#338).
  *
  * CANDIDATES TO ABSORB NEXT — the per-model literal branches this resolver is
  * meant to replace, each becoming a labeled profile field instead of inline
