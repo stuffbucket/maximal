@@ -13,6 +13,10 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # Backstop against a hung/runaway step (e.g. a poll loop that spins on a
+    # blocked network): fail fast in minutes instead of burning the full runner
+    # allowance. The whole suite runs well under this locally and in CI.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
 

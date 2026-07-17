@@ -464,7 +464,7 @@ async function runPoller(flow: ActiveFlow): Promise<void> {
     // pollAccessToken loops internally with the server-told interval,
     // honouring slow_down and authorization_pending. It resolves on
     // success and throws on expired_token / access_denied.
-    const token = await pollAccessToken(flow.deviceCode)
+    const token = await pollAccessToken(flow.deviceCode, flow.abort.signal)
 
     if (flow.abort.signal.aborted) return
 
