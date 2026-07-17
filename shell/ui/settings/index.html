@@ -112,6 +112,30 @@
         </nav>
 
         <main class="pane" id="pane">
+          <!-- Network-issue banner — spans every section, so it lives at the
+               top of the scroll pane rather than inside a panel. Content is
+               fully dynamic (the icon + copy vary by diagnosis kind and account
+               type), so renderNetworkBanner populates it in JS on each
+               auth.changed; the container just reserves the slot and stays
+               hidden until a diagnosis persists past the onset window. -->
+          <div
+            class="network-banner"
+            id="network-banner"
+            role="status"
+            aria-live="polite"
+            hidden
+          >
+            <span
+              class="network-banner__icon"
+              id="network-banner-icon"
+              aria-hidden="true"
+            ></span>
+            <div class="network-banner__text">
+              <p class="network-banner__title" id="network-banner-title"></p>
+              <p class="network-banner__msg" id="network-banner-msg"></p>
+            </div>
+          </div>
+
           <!-- ACCOUNT -->
           <section class="section" data-section="account">
             <header class="section__head">
@@ -240,6 +264,15 @@
                         <path d="M6.25 9.037a.75.75 0 0 1 .75.75v1.501a.75.75 0 0 1-1.5 0V9.787a.75.75 0 0 1 .75-.75Zm4.25.75v1.501a.75.75 0 0 1-1.5 0V9.787a.75.75 0 0 1 1.5 0Z" />
                       </svg>
                     </span>
+                    <!-- Account plan type (individual / team / enterprise).
+                         main.ts sets the glyph + hover/aria label from
+                         account_type; hidden until the plan is known. -->
+                    <span
+                      class="acct-type"
+                      data-field="account_type"
+                      role="img"
+                      hidden
+                    ></span>
                   </div>
                   <!-- Replaces the old "Signed in to GitHub Copilot." caption
                        (the section subtitle already says that). Shows live
