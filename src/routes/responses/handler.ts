@@ -10,6 +10,7 @@ import {
 import { awaitApproval } from "~/lib/http/approval"
 import { checkRateLimit } from "~/lib/http/rate-limit"
 import { reverseId } from "~/lib/models/anthropic-id-rewrite"
+import { resolveModelProfile } from "~/lib/models/model-profile"
 import {
   createHandlerLogger,
   debugJson,
@@ -111,7 +112,9 @@ export const handleResponses = async (c: Context) => {
 
   applyResponsesApiContextManagement(
     payload,
-    selectedModel?.capabilities.limits.max_prompt_tokens,
+    selectedModel ?
+      resolveModelProfile(selectedModel).maxPromptTokens
+    : undefined,
   )
 
   // Copilot/OpenAI-Responses-specific prefix-cache retention. On this native

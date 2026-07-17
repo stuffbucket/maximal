@@ -13,6 +13,7 @@ import {
   type AnthropicStreamEventData,
   type AnthropicStreamState,
 } from "~/lib/models/anthropic-types"
+import { resolveModelProfile } from "~/lib/models/model-profile"
 import { debugJson, debugJsonTail, debugLazy } from "~/lib/platform/logger"
 import { parseUserIdMetadata } from "~/lib/platform/utils"
 import {
@@ -174,7 +175,9 @@ export const handleWithResponsesApi = async (
 
   applyResponsesApiContextManagement(
     responsesPayload,
-    selectedModel?.capabilities.limits.max_prompt_tokens,
+    selectedModel ?
+      resolveModelProfile(selectedModel).maxPromptTokens
+    : undefined,
   )
 
   // Copilot/OpenAI-Responses-specific prefix-cache retention. Opt-in via
