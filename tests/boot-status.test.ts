@@ -9,6 +9,10 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 
+import {
+  emitUpdateRequest,
+  UPDATE_REQUEST_MARKER,
+} from "~/lib/start/boot-status"
 import { BOOT_STATUS_MARKER, emitBootStatus } from "~/start"
 
 const SHELL_LIB_RS = resolve(
@@ -63,6 +67,21 @@ describe("emitBootStatus", () => {
   })
 })
 
+describe("emitUpdateRequest", () => {
+  test("is a no-op for plain CLI users (no updatable app bundle)", () => {
+    delete process.env.MAXIMAL_SIDECAR_PARENT_PID
+    expect(emitUpdateRequest()).toBe(false)
+    expect(writes).toHaveLength(0)
+  })
+
+  test("emits the bare marker line and reports a shell is present", () => {
+    process.env.MAXIMAL_SIDECAR_PARENT_PID = "12345"
+    expect(emitUpdateRequest()).toBe(true)
+    expect(writes).toHaveLength(1)
+    expect(writes[0]).toBe(`${UPDATE_REQUEST_MARKER}\n`)
+  })
+})
+
 describe("boot-status marker cross-boundary invariant", () => {
   // The splash's live status is carried over a plain-text stdout protocol:
   // the sidecar (TS) prints `<marker> <message>` lines, the shell (Rust)
@@ -83,5 +102,22 @@ describe("boot-status marker cross-boundary invariant", () => {
       'could not find `const BOOT_STATUS_MARKER: &str = "…";` in shell/src-tauri/src/lib.rs',
     ).not.toBeNull()
     expect(match?.[1]).toBe(BOOT_STATUS_MARKER)
+  })
+
+  // Same cross-boundary hazard for the in-place self-update signal: the browser
+  // tab POSTs /_internal/upgrade, the sidecar (TS) prints this bare marker, and
+  // the shell (Rust) matches it EXACTLY (`trimmed == UPDATE_REQUEST_MARKER`) to
+  // run the signed install. A one-sided edit would silently break "Upgrade"
+  // (the shell never sees the request) — pin the Rust literal to the TS constant.
+  test("Rust UPDATE_REQUEST_MARKER literal equals the TS constant", () => {
+    const rust = readFileSync(SHELL_LIB_RS, "utf8")
+    const match = rust.match(
+      /const\s+UPDATE_REQUEST_MARKER\s*:\s*&str\s*=\s*"([^"]*)"\s*;/,
+    )
+    expect(
+      match,
+      'could not find `const UPDATE_REQUEST_MARKER: &str = "…";` in shell/src-tauri/src/lib.rs',
+    ).not.toBeNull()
+    expect(match?.[1]).toBe(UPDATE_REQUEST_MARKER)
   })
 })

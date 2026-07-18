@@ -64,6 +64,14 @@ mod native_i18n;
 mod decisions;
 use crate::decisions::{failure_surface_for, SidecarState, SplashSurface};
 
+/// In-place self-update INSTALL half (docs/spec/phase-6-self-update.md). The
+/// browser-tab Settings "Upgrade" button POSTs `/_internal/upgrade`; the sidecar
+/// emits `UPDATE_REQUEST_MARKER`; the stdout reader below relays it to
+/// `updater::handle_upgrade`, which downloads+verifies+installs the signed bundle
+/// and relaunches. The DETECTION half (poll → `LatestUpdate` → notification)
+/// stays inline in this file.
+mod updater;
+
 // Canonical Maximal port. Apps integrating with the proxy (Claude
 // Code, Cursor, custom scripts) only need to know this one URL:
 // http://localhost:4141. The Tauri shell and the standalone CLI both
@@ -81,6 +89,13 @@ const BOOT_STATUS_MARKER: &str = "@@MAXIMAL_STATUS@@";
 /// `/_internal/quit` and the sidecar signals us over this channel. MUST match
 /// `QUIT_REQUEST_MARKER` in src/lib/start/boot-status.ts.
 const QUIT_REQUEST_MARKER: &str = "@@MAXIMAL_QUIT@@";
+
+/// Line the sidecar prints (stdout) when the browser-tab UI asks to run the
+/// in-place self-update (Settings "Upgrade" button → `/_internal/upgrade`): a tab
+/// has no Tauri host to `invoke`, so it POSTs the sidecar, which signals us over
+/// this channel — same pattern as quit. MUST match `UPDATE_REQUEST_MARKER` in
+/// src/lib/start/boot-status.ts.
+const UPDATE_REQUEST_MARKER: &str = "@@MAXIMAL_UPDATE@@";
 
 /// Brand-minimum time the splash stays on screen once the sidecar reaches a
 /// Running state, before it fades. The state-aware dismiss loop in
@@ -222,16 +237,16 @@ enum RejectionTransition {
 /// version first appears. Mutex because the poll task writes it while the
 /// tray-refresh and menu-event paths read it.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct UpdateSnapshot {
+pub(crate) struct UpdateSnapshot {
     /// Latest version, no leading "v".
-    latest: String,
+    pub(crate) latest: String,
     /// Install-channel-neutral download page.
-    url: String,
+    pub(crate) url: String,
 }
 
 /// Tracks the most recent update snapshot the poll loop has observed. Wrapped
 /// in Mutex because the polling task and the tray paths both touch it.
-struct LatestUpdate(Mutex<Option<UpdateSnapshot>>);
+pub(crate) struct LatestUpdate(Mutex<Option<UpdateSnapshot>>);
 
 impl LatestUpdate {
     fn new() -> Self {
@@ -249,6 +264,13 @@ impl LatestUpdate {
         }
         *guard = next;
         true
+    }
+
+    /// Reads the current snapshot — the in-place upgrade action opens the
+    /// download-page fallback from its `url` when a signed install isn't
+    /// available for this build/platform.
+    pub(crate) fn get(&self) -> Option<UpdateSnapshot> {
+        self.0.lock().expect("update mutex poisoned").clone()
     }
 }
 
@@ -303,18 +325,18 @@ impl AppStatus {
 /// choice or the OS locale (see `native_i18n::resolve_locale`); updated live
 /// by `set_locale` when the user changes the in-app picker so the tray menu,
 /// window titles, and later notifications follow the chosen language.
-struct LocaleState(Mutex<String>);
+pub(crate) struct LocaleState(Mutex<String>);
 
 impl LocaleState {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self(Mutex::new("en".to_string()))
     }
 
-    fn get(&self) -> String {
+    pub(crate) fn get(&self) -> String {
         self.0.lock().expect("locale mutex poisoned").clone()
     }
 
-    fn set(&self, tag: String) {
+    pub(crate) fn set(&self, tag: String) {
         *self.0.lock().expect("locale mutex poisoned") = tag;
     }
 }
@@ -482,6 +504,22 @@ struct SetupStatusResponse {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Expanded exactly once — `generate_context!` embeds Info.plist as a symbol
+    // and can't appear twice in one binary. Both the normal app and the debug
+    // confirm harness consume this same context.
+    let context = tauri::generate_context!();
+
+    // Debug-only isolation harness: `MAXIMAL_CONFIRM_HARNESS=1 cargo run` opens
+    // ONLY the branded update-confirm window and drives its real WKWebView
+    // measure→size→reveal→resolve handshake — no sidecar, no tray, no
+    // single-instance plugin, so it can't collide with a running prod instance
+    // sharing this bundle identifier. See updater::run_confirm_harness_app.
+    #[cfg(debug_assertions)]
+    if std::env::var_os("MAXIMAL_CONFIRM_HARNESS").is_some() {
+        crate::updater::run_confirm_harness_app(context);
+        return;
+    }
+
     let app = tauri::Builder::default()
         // MUST be the FIRST plugin registered. The single-instance
         // plugin's callback fires as part of plugin init; registering
@@ -505,6 +543,12 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        // In-place self-update. Reads `plugins.updater.{pubkey,endpoints}` from
+        // tauri.conf.json; the browser-tab Settings "Upgrade" button drives
+        // check/download/install via `updater::handle_upgrade` (relayed from the
+        // sidecar's UPDATE_REQUEST_MARKER). Registration order isn't sensitive
+        // (unlike single-instance above) — it exposes no second-launch callback.
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Sidecar::new())
         .manage(AppStatus::new())
         .manage(ShellApiKey::new())
@@ -628,7 +672,7 @@ pub fn run() {
 
             Ok(())
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building tauri application");
 
     app.run(|app_handle, event| match event {
@@ -746,6 +790,13 @@ fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
                             let _ = handle.run_on_main_thread(move || {
                                 request_quit(&quit_handle);
                             });
+                        } else if trimmed == UPDATE_REQUEST_MARKER {
+                            // The browser-tab UI asked to run the in-place
+                            // self-update (Phase 6). `handle_upgrade` clones the
+                            // handle and spawns its own async task (network check
+                            // → branded confirm → download+install → relaunch), so
+                            // it's safe to call straight from this reader task.
+                            crate::updater::handle_upgrade(&handle);
                         } else if let Some(msg) =
                             trimmed.strip_prefix(BOOT_STATUS_MARKER)
                         {

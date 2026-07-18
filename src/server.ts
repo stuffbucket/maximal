@@ -123,6 +123,10 @@ server.use(
       // has no Tauri host to invoke a quit). Loopback + Origin-gated; keyless
       // for the local caller like the two above.
       "/_internal/quit",
+      // In-place self-update (Phase 6): the browser-tab Settings "Upgrade" button
+      // POSTs this; the sidecar signals the shell to run the signed install.
+      // Loopback + Origin-gated; keyless for the local caller like the others.
+      "/_internal/upgrade",
     ],
   }),
 )

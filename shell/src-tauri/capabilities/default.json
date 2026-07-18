@@ -1,11 +1,13 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Tray + settings/dashboard/splash window permissions",
-  "windows": ["settings", "dashboard", "splash"],
+  "description": "Tray + settings/dashboard/splash/update-confirm window permissions",
+  "windows": ["settings", "dashboard", "splash", "update-confirm"],
   "permissions": [
     "core:default",
     "core:webview:allow-create-webview-window",
+    "core:event:allow-emit",
+    "core:event:allow-listen",
     "opener:default",
     "notification:default",
     "default",
@@ -15,7 +17,12 @@
         {
           "name": "binaries/maximal",
           "sidecar": true,
-          "args": ["start", "--replace", "--port", { "validator": "^\\d{2,5}$" }]
+          "args": [
+            "start",
+            "--replace",
+            "--port",
+            { "validator": "^\\d{2,5}$" }
+          ]
         }
       ]
     }

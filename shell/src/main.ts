@@ -4,7 +4,6 @@ import { t } from "./i18n";
 import { applyI18n, wireLocalePicker } from "./i18n/apply";
 import { getShellApiKey, openUrl, safeInvoke } from "./tauri/shell";
 
-
 import type {
   DiagnosticsResponse,
   UpdateStatusResponse,
@@ -117,7 +116,6 @@ function wireNav(): void {
   }
 }
 
-
 let busyCount = 0;
 
 /**
@@ -227,18 +225,25 @@ function monoCode(text: string): HTMLElement {
 
 /** "Maximal forwards requests … {plansLink}." with a live "See plans" link. */
 function renderRequirementCallout(): void {
-  const el = document.querySelector<HTMLElement>('[data-field="requirement_sub"]');
+  const el = document.querySelector<HTMLElement>(
+    '[data-field="requirement_sub"]',
+  );
   fillWithNode(
     el,
     "account-requirement-sub",
     "plansLink",
-    externalLink("https://github.com/features/copilot", "account-requirement-plans-link"),
+    externalLink(
+      "https://github.com/features/copilot",
+      "account-requirement-plans-link",
+    ),
   );
 }
 
 /** Endpoint key hint with a live "API keys" link into that section. */
 function renderEndpointHint(): void {
-  const el = document.querySelector<HTMLElement>('[data-field="endpoint_hint"]');
+  const el = document.querySelector<HTMLElement>(
+    '[data-field="endpoint_hint"]',
+  );
   fillWithNode(
     el,
     "endpoint-hint",
@@ -276,16 +281,22 @@ function renderLogsCopy(): void {
     '[data-field="logs_retention_value"]',
   );
   if (retention) {
-    retention.textContent = t("logs-retention-value", { n: LOG_RETENTION_DAYS });
+    retention.textContent = t("logs-retention-value", {
+      n: LOG_RETENTION_DAYS,
+    });
   }
-  const hint = document.querySelector<HTMLElement>('[data-field="logs_where_hint"]');
+  const hint = document.querySelector<HTMLElement>(
+    '[data-field="logs_where_hint"]',
+  );
   fillWithNode(hint, "logs-where-hint", "tailCmd", monoCode("tail -F"));
 }
 
 /** Uninstall card copy: the intro hint (with a `maximal` <code> token) and the
  *  terminal hint (with a `maximal uninstall` <code> command). */
 function renderUninstallCopy(): void {
-  const hint = document.querySelector<HTMLElement>('[data-field="uninstall_hint"]');
+  const hint = document.querySelector<HTMLElement>(
+    '[data-field="uninstall_hint"]',
+  );
   fillWithNode(hint, "uninstall-hint", "cliName", monoCode("maximal"));
   const terminal = document.querySelector<HTMLElement>(
     '[data-field="uninstall_terminal_hint"]',
@@ -330,7 +341,10 @@ function getEndpointKeyEl(): HTMLElement | null {
   );
 }
 
-async function copyToClipboard(text: string, btn: Element | null): Promise<void> {
+async function copyToClipboard(
+  text: string,
+  btn: Element | null,
+): Promise<void> {
   try {
     await navigator.clipboard.writeText(text);
     if (btn instanceof HTMLElement) {
@@ -422,7 +436,10 @@ async function runInAppUninstall(): Promise<void> {
   // it can't surface the CLI's refuse-while-apps-enabled prompt, so it disables
   // + reverts every app integration through the registry. So "reverts app
   // integrations" is always part of the summary, not an opt-in.
-  const clauses = [t("uninstall-clause-cli"), t("uninstall-clause-integrations")];
+  const clauses = [
+    t("uninstall-clause-cli"),
+    t("uninstall-clause-integrations"),
+  ];
   if (purge) clauses.push(t("uninstall-clause-purge"));
   // The connector ("…, and X") is a catalog term, not a hardcoded ", and " —
   // so a language that joins lists differently can override it.
@@ -630,7 +647,9 @@ function deriveGithubCopilotStatus(
 }
 
 function setDiagnosticsError(message: string | null): void {
-  const banner = document.querySelector<HTMLElement>("[data-diagnostics-error]");
+  const banner = document.querySelector<HTMLElement>(
+    "[data-diagnostics-error]",
+  );
   const msg = document.querySelector<HTMLElement>("[data-error-message]");
   if (!banner || !msg) return;
   if (message === null) {
@@ -711,7 +730,18 @@ function renderUpdateOutcome(data: UpdateStatusResponse): void {
     link.textContent = t("diagnostics-update-get-it");
     link.addEventListener("click", (ev) => {
       ev.preventDefault();
-      void openExternalUrl(data.url);
+      // In-place self-update (Phase 6): a browser tab can't invoke the updater
+      // plugin, so POST /_internal/upgrade — the sidecar signals the supervising
+      // shell to run the signed download+verify+install+relaunch (its branded
+      // confirm window appears). 202 → the shell owns it now. Anything else (409
+      // plain-CLI / browser-only, or an error) → fall back to the manual
+      // download page, so the action is never a dead end.
+      void fetch("/_internal/upgrade", { method: "POST" }).then(
+        (res) => {
+          if (res.status !== 202) void openExternalUrl(data.url);
+        },
+        () => void openExternalUrl(data.url),
+      );
     });
     dd.append(label, link);
     return;
@@ -774,7 +804,9 @@ async function loadUpdateStatus(): Promise<void> {
 async function copyDiagnosticsAsJson(): Promise<void> {
   if (!lastDiagnostics) return;
   try {
-    await navigator.clipboard.writeText(JSON.stringify(lastDiagnostics, null, 2));
+    await navigator.clipboard.writeText(
+      JSON.stringify(lastDiagnostics, null, 2),
+    );
   } catch (err) {
     console.error("clipboard write failed", err);
   }
@@ -815,7 +847,11 @@ function wireDiagnostics(): void {
  *  - `renderAccount` is the single source of truth for visibility;
  *    a non-pending state always stops polling before the next call.
  */
-type AccountStateKey = "unauthenticated" | "pending" | "authenticated" | "error";
+type AccountStateKey =
+  | "unauthenticated"
+  | "pending"
+  | "authenticated"
+  | "error";
 
 const POLL_INTERVAL_MS = 2000;
 
@@ -1123,7 +1159,8 @@ function rejectionTitle(status: number): string {
   if (status === 402) return t("account-rejection-title-402");
   if (status === 403) return t("account-rejection-title-403");
   if (status === 404) return t("account-rejection-title-404");
-  if (status === 408 || status === 504) return t("account-rejection-title-timeout");
+  if (status === 408 || status === 504)
+    return t("account-rejection-title-timeout");
   if (status === 429) return t("account-rejection-title-429");
   if (status >= 500) return t("account-rejection-title-5xx");
   if (status >= 400) return t("account-rejection-title-4xx");
@@ -1135,7 +1172,8 @@ function rejectionTitle(status: number): string {
 function rejectionExplanation(status: number): string {
   if (status === 402) return t("account-rejection-explain-402");
   if (status === 403) return t("account-rejection-explain-403");
-  if (status === 408 || status === 504) return t("account-rejection-explain-timeout");
+  if (status === 408 || status === 504)
+    return t("account-rejection-explain-timeout");
   if (status === 429) return t("account-rejection-explain-429");
   if (status >= 500) return t("account-rejection-explain-5xx");
   return t("account-rejection-explain-other");
@@ -1233,9 +1271,9 @@ interface BannerCopy {
  */
 function resolveBannerCopy(status: AuthStatus): BannerCopy | null {
   const diagnosis =
-    status.state === "authenticated" || status.state === "unauthenticated" ?
-      status.network_diagnosis
-    : undefined;
+    status.state === "authenticated" || status.state === "unauthenticated"
+      ? status.network_diagnosis
+      : undefined;
   if (!diagnosis) return null;
 
   if (diagnosis.kind === "offline" || diagnosis.kind === "dns-failure") {
@@ -1253,9 +1291,9 @@ function resolveBannerCopy(status: AuthStatus): BannerCopy | null {
     icon: BANNER_ICON_COPILOT,
     titleKey: "banner-copilot-title",
     messageKey:
-      accountType === "enterprise" ?
-        "banner-copilot-msg-enterprise"
-      : "banner-copilot-msg-individual",
+      accountType === "enterprise"
+        ? "banner-copilot-msg-enterprise"
+        : "banner-copilot-msg-individual",
     link: true,
   };
 }
@@ -1333,7 +1371,9 @@ const ACCOUNT_TYPE_LABEL_KEY: Record<AccountTypeName, string> = {
  * we show a real type or nothing, never a guess. The label doubles as the
  * hover title and the aria-label (the glyph is otherwise silent to a reader).
  */
-function renderAccountType(accountType: AccountTypeName | null | undefined): void {
+function renderAccountType(
+  accountType: AccountTypeName | null | undefined,
+): void {
   const el = document.querySelector<HTMLElement>('[data-field="account_type"]');
   if (!el) return;
   if (!accountType) {
@@ -1355,9 +1395,12 @@ function labelForRemediationUrl(url: string): string {
   // GitHub pages. Map them to verbs the user will recognize; fall
   // back to a generic "Open in GitHub" for everything else so the
   // link still works when GHCP introduces new endpoints.
-  if (/\/settings\/copilot/i.test(url)) return t("account-remediation-copilot-settings");
-  if (/\/copilot\/signup/i.test(url)) return t("account-remediation-accept-terms");
-  if (/\/site\/terms|\/terms-of-service/i.test(url)) return t("account-remediation-review-terms");
+  if (/\/settings\/copilot/i.test(url))
+    return t("account-remediation-copilot-settings");
+  if (/\/copilot\/signup/i.test(url))
+    return t("account-remediation-accept-terms");
+  if (/\/site\/terms|\/terms-of-service/i.test(url))
+    return t("account-remediation-review-terms");
   return t("account-remediation-generic");
 }
 
@@ -1581,7 +1624,11 @@ async function loadGhAccounts(): Promise<void> {
     method: "GET",
     path: "/settings/api/gh/status",
   });
-  if (!result.ok || !result.data.installed || result.data.accounts.length === 0) {
+  if (
+    !result.ok ||
+    !result.data.installed ||
+    result.data.accounts.length === 0
+  ) {
     wrapper.hidden = true;
     list.replaceChildren();
     return;
@@ -1853,10 +1900,9 @@ async function loadAccounts(mode: AccountRosterMode): Promise<void> {
     method: "GET",
     path: "/settings/api/accounts",
   });
-  const accounts =
-    result.ok ?
-      mode === "roster" ?
-        result.data.accounts.filter((a) => !a.active)
+  const accounts = result.ok
+    ? mode === "roster"
+      ? result.data.accounts.filter((a) => !a.active)
       : result.data.accounts
     : [];
 
@@ -1887,7 +1933,9 @@ async function loadAccounts(mode: AccountRosterMode): Promise<void> {
       if (!btn) continue;
       btn.dataset.acctKey = account.key;
       const ariaKey =
-        action === "account-switch" ? "account-switch-aria" : "account-remove-aria";
+        action === "account-switch"
+          ? "account-switch-aria"
+          : "account-remove-aria";
       btn.setAttribute("aria-label", t(ariaKey, { login: account.login }));
     }
     list.appendChild(row);
@@ -1970,13 +2018,10 @@ async function forgetAccount(button: HTMLElement): Promise<void> {
   if (!key) return;
   const mode = rosterModeFor(button);
   const login =
-    button
-      .closest(".gh-account")
-      ?.querySelector('[data-field="acct_login"]')?.textContent ?? key;
+    button.closest(".gh-account")?.querySelector('[data-field="acct_login"]')
+      ?.textContent ?? key;
 
-  const confirmed = window.confirm(
-    t("account-confirm-remove", { login }),
-  );
+  const confirmed = window.confirm(t("account-confirm-remove", { login }));
   if (!confirmed) return;
 
   const buttons = document.querySelectorAll<HTMLButtonElement>(
@@ -2182,8 +2227,8 @@ async function signInWithCode(button: HTMLElement): Promise<void> {
   // the button somehow fires from another state, no-op.
   const status = currentAuthStatus;
   if (
-    !status
-    || (status.state !== "device_code_issued" && status.state !== "polling")
+    !status ||
+    (status.state !== "device_code_issued" && status.state !== "polling")
   ) {
     return;
   }

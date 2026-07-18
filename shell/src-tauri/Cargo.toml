@@ -37,6 +37,12 @@ tauri-plugin-notification = "2"
 # `deep-link` feature is opt-in scaffolding for a future deep-link
 # integration; it's cheap (no extra runtime cost) and harmless today.
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+# In-place self-update: downloads the signed `.app.tar.gz` from
+# `plugins.updater.endpoints`, verifies its Ed25519 signature against the
+# `plugins.updater.pubkey` in tauri.conf.json, swaps the bundle, and relaunches.
+# The signed artifact is produced by the private macOS builder (see #348 /
+# docs/dev/self-updater.md), not by `tauri build` (createUpdaterArtifacts:false).
+tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # System UI locale, used ONLY as the fallback for native strings that fire
