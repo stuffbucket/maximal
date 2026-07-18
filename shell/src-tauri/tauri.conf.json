@@ -18,6 +18,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": false,
     "targets": "all",
     "icon": [
       "icons/32x32.png",
@@ -34,6 +35,12 @@
       "nsis": {
         "installMode": "currentUser"
       }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEJGNjU3MTVCQUUxQzFGOUYKUldTZkh4eXVXM0ZsdjF1RkM4N1BBUHYrNFZWeWI1YTUvd05EMENiY25iVVVNcms5dE9adnBlTVgK",
+      "endpoints": ["https://mxml.sh/updates/latest.json"]
     }
   }
 }

@@ -5,11 +5,14 @@
  * (so a slow/failed start isn't a blank "Starting…"). `QUIT_REQUEST_MARKER` — the
  * browser-tab UI's way to quit the whole app: a tab has no Tauri host to `invoke`
  * a quit, so it POSTs the sidecar, which signals the shell over this same channel.
+ * `UPDATE_REQUEST_MARKER` — the same pattern for the in-place self-update: the
+ * Settings "Upgrade" button POSTs the sidecar, which signals the shell to run the
+ * signed download+install+relaunch (the shell owns the updater plugin, a tab can't).
  *
- * Both are no-ops for plain CLI users — gated on the parent-pid env the shell sets
+ * All are no-ops for plain CLI users — gated on the parent-pid env the shell sets
  * when it spawns the sidecar — so their terminal never sees a marker. MUST stay in
- * sync with the `BOOT_STATUS_MARKER` / `QUIT_REQUEST_MARKER` constants in
- * shell/src-tauri/src/lib.rs.
+ * sync with the `BOOT_STATUS_MARKER` / `QUIT_REQUEST_MARKER` / `UPDATE_REQUEST_MARKER`
+ * constants in shell/src-tauri/src/lib.rs.
  */
 
 export const BOOT_STATUS_MARKER = "@@MAXIMAL_STATUS@@"
@@ -29,5 +32,19 @@ export const QUIT_REQUEST_MARKER = "@@MAXIMAL_QUIT@@"
 export function emitQuitRequest(): boolean {
   if (!process.env.MAXIMAL_SIDECAR_PARENT_PID) return false
   process.stdout.write(`${QUIT_REQUEST_MARKER}\n`)
+  return true
+}
+
+export const UPDATE_REQUEST_MARKER = "@@MAXIMAL_UPDATE@@"
+
+/**
+ * Ask the supervising Tauri shell to run the in-place self-update (download the
+ * signed bundle, verify its signature, swap, relaunch). Returns whether a shell is
+ * present to receive the request (false on a plain-CLI run, where there is no
+ * updatable app bundle — the caller should fall back to the download page).
+ */
+export function emitUpdateRequest(): boolean {
+  if (!process.env.MAXIMAL_SIDECAR_PARENT_PID) return false
+  process.stdout.write(`${UPDATE_REQUEST_MARKER}\n`)
   return true
 }
