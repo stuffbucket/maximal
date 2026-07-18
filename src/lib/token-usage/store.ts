@@ -200,7 +200,7 @@ function initializeTokenUsageDb(db: SqliteDatabase): void {
 // Ordered, append-only. Each entry advances user_version by one; NEVER
 // reorder or edit a shipped migration (that would desync already-migrated
 // DBs) — only append.
-const TOKEN_USAGE_MIGRATIONS: Array<Migration> = [
+export const TOKEN_USAGE_MIGRATIONS: Array<Migration> = [
   {
     // Copilot returns per-request cost (`copilot_usage.total_nano_aiu`) and
     // each model advertises `billing.is_premium`. Capture both so usage can
@@ -213,6 +213,18 @@ const TOKEN_USAGE_MIGRATIONS: Array<Migration> = [
         "ALTER TABLE token_usage_events ADD COLUMN total_nano_aiu INTEGER NOT NULL DEFAULT 0",
       )
       db.exec("ALTER TABLE token_usage_events ADD COLUMN is_premium INTEGER")
+    },
+  },
+  {
+    // Forward-looking (spec §5): a nullable per-project attribution key so the
+    // schema/filter/route exist BEFORE per-project tracking turns on. It will be
+    // populated later — from `api_key_id` first, then a client-supplied
+    // `workspace` header — never from the ephemeral, high-cardinality
+    // `session_id` (which would flood the rail). Existing rows predate it and
+    // stay NULL (unattributed), which is the correct "no project" reading.
+    name: "add nullable project_id",
+    up: (db) => {
+      db.exec("ALTER TABLE token_usage_events ADD COLUMN project_id TEXT")
     },
   },
 ]

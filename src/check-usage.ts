@@ -31,12 +31,12 @@ export const checkUsage = defineCommand({
 
       const premiumLine = summarizeQuota(
         "Premium",
-        usage.quota_snapshots.premium_interactions,
+        usage.quota_snapshots?.premium_interactions,
       )
-      const chatLine = summarizeQuota("Chat", usage.quota_snapshots.chat)
+      const chatLine = summarizeQuota("Chat", usage.quota_snapshots?.chat)
       const completionsLine = summarizeQuota(
         "Completions",
-        usage.quota_snapshots.completions,
+        usage.quota_snapshots?.completions,
       )
 
       consola.box(

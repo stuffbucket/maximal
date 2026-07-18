@@ -9,14 +9,21 @@ import type {
   DiagnosticsResponse,
   UpdateStatusResponse,
 } from "../../src/lib/config/settings-types";
-import type { AuthStatus, EventSubscription, UpstreamRejection } from "./proxy/client";
-import { apiCall, subscribeAuthEvents } from "./proxy/client";
+import type { AuthStatus, UpstreamRejection } from "./proxy/client";
+import { apiCall } from "./proxy/client";
+import { readInlineState } from "./proxy/inline-state-client";
+import {
+  connectLiveFeed,
+  type LiveFeedConnection,
+} from "./proxy/live-feed-client";
 import { mountApiClients } from "./ui/islands/api-clients-island";
 import { mountApps } from "./ui/islands/apps-island";
 import { mountModels } from "./ui/islands/models-island";
+import { mountUsage } from "./ui/islands/usage-island";
 
 type SectionId =
   | "account"
+  | "usage"
   | "general"
   | "apps"
   | "endpoint"
@@ -27,6 +34,7 @@ type SectionId =
 
 const SECTIONS: ReadonlyArray<SectionId> = [
   "account",
+  "usage",
   "general",
   "apps",
   "endpoint",
@@ -68,6 +76,26 @@ function syncFromHash(): void {
 }
 
 /**
+ * The single in-app navigation entry point (spec §1.4 / ADR-0020). Uses
+ * `history.replaceState` — NEVER `location.hash =` (assigning the hash pushes a
+ * history entry, and once `history.length > 1` a stale tab's `window.close()`
+ * silently no-ops, breaking tray dedup §1.2). replaceState updates the `#section`
+ * deep-link contract without accruing history; we then re-run the existing
+ * `hashchange` side-effect path (section load/refresh, auth-stream lifecycle) so
+ * behavior is identical to the old hash-assignment flow.
+ */
+function navigateTo(section: SectionId): void {
+  if (window.location.hash !== `#${section}`) {
+    window.history.replaceState(null, "", `#${section}`);
+    // replaceState does NOT fire hashchange; drive the side-effect path manually.
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+  } else {
+    // Same hash → nothing to update; just (re)show the section.
+    showSection(section);
+  }
+}
+
+/**
  * Bind a direct click handler to nav links in addition to the
  * hashchange listener. Belt-and-braces: in some webviews (Tauri's
  * WebKit on macOS in particular) a click on an `<a href="#x">` whose
@@ -84,12 +112,7 @@ function wireNav(): void {
       const id = link.dataset.nav;
       if (!id || !isSectionId(id)) return;
       ev.preventDefault();
-      if (window.location.hash !== `#${id}`) {
-        window.location.hash = id;
-      } else {
-        // Same hash → hashchange won't fire. Drive it manually.
-        showSection(id);
-      }
+      navigateTo(id);
     });
   }
 }
@@ -127,6 +150,7 @@ function setBusy(on: boolean, label = t("common-working")): void {
 function repaintDynamicI18n(): void {
   renderStaticComposites();
   if (currentAuthStatus) renderAccount(currentAuthStatus);
+  if (currentAuthStatus) renderNetworkBanner(currentAuthStatus);
   if (lastDiagnostics) renderDiagnostics(lastDiagnostics);
 }
 
@@ -189,8 +213,7 @@ function navLink(section: SectionId, textKey: string): HTMLAnchorElement {
   // for the initial boot the hashchange listener still drives navigation.
   a.addEventListener("click", (ev) => {
     ev.preventDefault();
-    if (window.location.hash !== `#${section}`) window.location.hash = section;
-    else showSection(section);
+    navigateTo(section);
   });
   return a;
 }
@@ -336,6 +359,43 @@ function setUninstallError(message: string | null): void {
   }
   msg.textContent = message;
   row.hidden = false;
+}
+
+/**
+ * Wire the in-app "Quit Maximal" button (§1.6). A browser tab has no Tauri host
+ * to invoke a quit, so POST `/_internal/quit`: the sidecar signals the supervising
+ * shell (over stdout) to run its confirm-and-exit. On 202 the shell takes over
+ * (its native confirm dialog); a 409 means we're a plain-CLI run with no shell.
+ */
+function wireQuit(): void {
+  const btn = document.querySelector<HTMLButtonElement>(
+    '[data-action="quit-maximal"]',
+  );
+  if (!btn) return;
+  const err = document.querySelector<HTMLElement>("[data-quit-error]");
+  const showError = (message: string): void => {
+    if (err) {
+      err.textContent = message;
+      err.hidden = false;
+    }
+    btn.disabled = false;
+  };
+  btn.addEventListener("click", () => {
+    btn.disabled = true;
+    if (err) err.hidden = true;
+    void fetch("/_internal/quit", { method: "POST" }).then(
+      (res) => {
+        // 202 → the shell owns the quit now (confirm dialog + exit); keep the
+        // button disabled. 409 → no supervising shell (plain CLI); other → fail.
+        if (res.status === 409) {
+          showError("Not running under the menu-bar app — nothing to quit.");
+        } else if (!res.ok) {
+          showError(`Quit failed (HTTP ${res.status}).`);
+        }
+      },
+      () => showError("Quit request failed."),
+    );
+  });
 }
 
 /** Wire the in-app "Uninstall Maximal…" button. Reads the two option
@@ -741,16 +801,16 @@ function wireDiagnostics(): void {
 // ---- Account section -------------------------------------------------------
 
 /**
- * Account-section update contract (ADR-0007):
- *  - SSE is the PRIMARY channel. While #account is open we hold one
- *    `subscribeAuthEvents` subscription; `auth.changed` drives `renderAccount`
- *    with no poll lag. Opened on section enter, closed on leave.
- *  - The GET poll is the FALLBACK. `schedulePoll()` is a no-op while the
- *    stream is connected (`sseConnected`); it only runs when a sign-in is
- *    pending and SSE is down, so a dropped stream degrades to polling.
+ * Account-section update contract (ADR-0019, supersedes ADR-0007's SSE):
+ *  - The page-lifetime live-feed WebSocket (`openLiveFeed`) is the PRIMARY
+ *    channel; its `auth.changed` drives `renderAccount` with no poll lag, for
+ *    any section (guarded to paint only while #account is shown).
+ *  - The GET poll is the FALLBACK. `schedulePoll()` is a no-op while the feed
+ *    is connected (`feedConnected`); it only runs when a sign-in is pending and
+ *    the feed is down, so a dropped socket degrades to polling.
  *  - Only one poll timer runs at a time (`authPollTimer`).
  *  - `stopAuthPolling()` clears the timer; called on terminal states
- *    (authenticated, error, unauthenticated), on sign-out, on SSE connect,
+ *    (authenticated, error, unauthenticated), on sign-out, on feed connect,
  *    and on navigation away from #account.
  *  - `renderAccount` is the single source of truth for visibility;
  *    a non-pending state always stops polling before the next call.
@@ -763,18 +823,14 @@ let currentAuthStatus: AuthStatus | null = null;
 let authPollTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
- * Live updates (ADR-0007). While the Account section is open we hold one
- * SSE subscription to the sidecar; `auth.changed` events drive `renderAccount`
- * the instant the device-code poller resolves — no 2s poll lag. The GET poll
- * remains as a FALLBACK: it runs only while a sign-in is pending AND the SSE
- * stream is not connected (`sseConnected`), so a dropped stream degrades to
- * polling instead of stalling. `subscribeAuthEvents` resolves the API key
- * asynchronously, so a generation counter discards a subscription that
- * resolved after the section was already left.
+ * Live updates (ADR-0019). ONE page-lifetime WebSocket (`openLiveFeed`) carries
+ * `auth.changed`, driving `renderAccount` the instant the device-code poller
+ * resolves — no 2s poll lag. The GET poll remains a FALLBACK: it runs only while
+ * a sign-in is pending AND the feed is down (`feedConnected`), so a dropped socket
+ * degrades to polling instead of stalling.
  */
-let authEvents: EventSubscription | null = null;
-let sseConnected = false;
-let authEventsGen = 0;
+let liveFeed: LiveFeedConnection | null = null;
+let feedConnected = false;
 
 function stopAuthPolling(): void {
   if (authPollTimer !== null) {
@@ -783,9 +839,17 @@ function stopAuthPolling(): void {
   }
 }
 
+function signInPending(): boolean {
+  return (
+    currentAuthStatus !== null &&
+    (currentAuthStatus.state === "device_code_issued" ||
+      currentAuthStatus.state === "polling")
+  );
+}
+
 function schedulePoll(): void {
-  // SSE is the primary channel; only poll as a fallback when it's down.
-  if (sseConnected) {
+  // The live feed is the primary channel; only poll as a fallback when it's down.
+  if (feedConnected) {
     stopAuthPolling();
     return;
   }
@@ -796,57 +860,86 @@ function schedulePoll(): void {
   }, POLL_INTERVAL_MS);
 }
 
-function openAuthEvents(): void {
-  if (authEvents) return;
-  const gen = ++authEventsGen;
-  void subscribeAuthEvents({
-    onOpen: () => {
-      if (gen !== authEventsGen) return;
-      sseConnected = true;
-      // The stream is live; the fallback poll is now redundant.
-      stopAuthPolling();
+/**
+ * Open the single page-lifetime live-feed WebSocket (ADR-0019), replacing the
+ * per-section SSE. ONE socket per tab, opened at boot: it carries the presence
+ * registry (its `hello` — tabId + visibility — lets a tray click find/close this
+ * tab, §1.2) AND the unified feed. Coordinates come from the inlined
+ * `window.__STATE__` (a plain browser tab has no Tauri IPC). Idempotent; a missing
+ * `__STATE__` leaves the GET-poll fallback to carry auth updates.
+ */
+function openLiveFeed(): void {
+  if (liveFeed) return;
+  const inlined = readInlineState(window);
+  if (!inlined) return;
+  liveFeed = connectLiveFeed(
+    {
+      onSnapshot: (snapshot) => {
+        // The network-issue banner is global (#359): paint it on every
+        // snapshot from the live feed's auth status, whatever section is open.
+        renderNetworkBanner(snapshot.auth);
+        if (readHashSection() === "account") renderAccount(snapshot.auth);
+        // A resumed tab resyncs its data islands without a manual poll.
+        window.dispatchEvent(new CustomEvent("maximal:apps-refresh"));
+        window.dispatchEvent(new CustomEvent("maximal:models-refresh"));
+      },
+      onEvent: (event) => {
+        switch (event.type) {
+          case "auth.changed": {
+            // Global banner (#359) rides every auth event; the sidecar folds
+            // the network diagnosis (and upstream rejection) into the status.
+            renderNetworkBanner(event.payload);
+            if (readHashSection() === "account") renderAccount(event.payload);
+            break;
+          }
+          case "apps.changed": {
+            window.dispatchEvent(new CustomEvent("maximal:apps-refresh"));
+            break;
+          }
+          case "clients.changed": {
+            window.dispatchEvent(new CustomEvent("maximal:clients-refresh"));
+            break;
+          }
+          case "usage": {
+            window.dispatchEvent(new CustomEvent("maximal:usage-refresh"));
+            break;
+          }
+          default: {
+            // accounts/upstream/boot/usage/update/health consumers land with the
+            // Usage port + banner tracks (§3.2/§5); ignored now, forward-compatible.
+            break;
+          }
+        }
+      },
+      onCloseCommand: () => {
+        // Tray dedup (§1.2): the sidecar told this buried tab to self-close so a
+        // fresh foreground tab can open. Reliable under single-history (ADR-0020).
+        window.close();
+      },
+      onStatusChange: (status) => {
+        feedConnected = status === "open";
+        if (feedConnected) {
+          stopAuthPolling();
+        } else if (readHashSection() === "account" && signInPending()) {
+          // Feed dropped mid sign-in → degrade to the GET poll until it recovers.
+          schedulePoll();
+        }
+      },
     },
-    onAuth: (status) => {
-      if (gen !== authEventsGen) return;
-      // Only paint while the user is actually on the Account section.
-      if (readHashSection() === "account") renderAccount(status);
-    },
-    onError: () => {
-      if (gen !== authEventsGen) return;
-      sseConnected = false;
-      // Stream dropped — fall back to polling if a sign-in is mid-flight.
-      if (
-        readHashSection() === "account" &&
-        currentAuthStatus !== null &&
-        (currentAuthStatus.state === "device_code_issued" ||
-          currentAuthStatus.state === "polling")
-      ) {
-        schedulePoll();
-      }
-    },
-  }).then(
-    (subscription) => {
-      // Section was left (or re-entered) while the key resolved — discard.
-      if (gen !== authEventsGen) {
-        subscription.close();
-        return;
-      }
-      authEvents = subscription;
-    },
-    () => {
-      // Key resolution / EventSource construction failed; polling fallback
-      // stays in force. Nothing to clean up.
-    },
+    inlined.boundPort,
+    inlined.sessionToken,
   );
 }
 
+// Entering/leaving the Account section no longer opens a transport — the feed is
+// page-lifetime. These only arm/cancel the GET-poll fallback for a mid-flight
+// sign-in while the feed happens to be down.
+function openAuthEvents(): void {
+  if (!feedConnected && signInPending()) schedulePoll();
+}
+
 function closeAuthEvents(): void {
-  authEventsGen++;
-  sseConnected = false;
-  if (authEvents) {
-    authEvents.close();
-    authEvents = null;
-  }
+  stopAuthPolling();
 }
 
 function accountKeyFor(state: AuthStatus["state"]): AccountStateKey {
@@ -1090,6 +1183,173 @@ function renderUpstreamRejection(
   wrapper.hidden = false;
 }
 
+// ---- Network-issue banner ------------------------------------------------
+//
+// A connectivity problem reaching GitHub Copilot, surfaced across the top of
+// every section — distinct from an auth/token error (the token may be fine;
+// the service just isn't reachable). The sidecar debounces (network_diagnosis
+// appears only once a failure has persisted past the onset window) and folds
+// the typed { kind, scope } + account_type onto every auth.changed; the shell
+// resolves copy and paints. Status color is the only signal — no motion.
+
+/** GitHub's official status page — the one external lever we can offer when
+ *  Copilot itself (not the user's network) is the unreachable party. */
+const GITHUB_STATUS_URL = "https://www.githubstatus.com/";
+
+/** Wi-Fi-with-slash: a local-network problem the user can act on. */
+const BANNER_ICON_OFFLINE =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="2" x2="22" y2="22"/><path d="M8.5 16.5a5 5 0 0 1 7 0"/><path d="M2 8.82a15 15 0 0 1 4.17-2.65"/><path d="M10.66 5c4.01-.36 8.14.9 11.34 3.76"/><path d="M5 13a10 10 0 0 1 5.24-2.76"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>';
+
+/** Cloud-with-slash: reachable network, but Copilot itself isn't answering. */
+const BANNER_ICON_COPILOT =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 0 0 .8-8.94 6 6 0 0 0-11.28-1.7"/><path d="M6.2 8.7A5 5 0 0 0 6 19h4"/><line x1="2" y1="2" x2="22" y2="22"/></svg>';
+
+interface BannerCopy {
+  /** Trusted static SVG markup for the leading glyph. */
+  icon: string;
+  /** i18n key for the title line. */
+  titleKey: string;
+  /** i18n key for the message body. When `link` is true it carries a `{service}`
+   *  placeholder for the inline status-page link. */
+  messageKey: string;
+  /** Whether the message embeds the status-page link. */
+  link: boolean;
+}
+
+/**
+ * Map an auth status to the banner copy, or null when no banner should show.
+ *
+ *   offline | dns-failure  → "You're offline" — a local-network problem with a
+ *                            real user lever, so it leads with the connection,
+ *                            not with Copilot.
+ *   scope-unreachable |    → "Can't reach GitHub Copilot" — account-aware:
+ *   unknown                  enterprise gets the restart-if-widespread nudge;
+ *                            individual/business/unknown the honest "we're
+ *                            retrying". Never "nothing you need to do".
+ *
+ * account_type only rides the authenticated variant; a signed-out diagnosis
+ * (once the proactive poll lands — deferred) falls through to the non-
+ * enterprise copy.
+ */
+function resolveBannerCopy(status: AuthStatus): BannerCopy | null {
+  const diagnosis =
+    status.state === "authenticated" || status.state === "unauthenticated" ?
+      status.network_diagnosis
+    : undefined;
+  if (!diagnosis) return null;
+
+  if (diagnosis.kind === "offline" || diagnosis.kind === "dns-failure") {
+    return {
+      icon: BANNER_ICON_OFFLINE,
+      titleKey: "banner-offline-title",
+      messageKey: "banner-offline-msg",
+      link: false,
+    };
+  }
+
+  const accountType =
+    status.state === "authenticated" ? status.account_type : null;
+  return {
+    icon: BANNER_ICON_COPILOT,
+    titleKey: "banner-copilot-title",
+    messageKey:
+      accountType === "enterprise" ?
+        "banner-copilot-msg-enterprise"
+      : "banner-copilot-msg-individual",
+    link: true,
+  };
+}
+
+/**
+ * Paint (or hide) the network-issue banner. Called on every auth.changed,
+ * regardless of the active section — the banner is global. Content is built in
+ * JS because the icon and copy vary by diagnosis kind and account type.
+ */
+function renderNetworkBanner(status: AuthStatus): void {
+  const banner = document.getElementById("network-banner");
+  if (!banner) return;
+
+  const copy = resolveBannerCopy(status);
+  if (!copy) {
+    banner.hidden = true;
+    return;
+  }
+
+  const iconEl = document.getElementById("network-banner-icon");
+  if (iconEl) iconEl.innerHTML = copy.icon;
+
+  const titleEl = document.getElementById("network-banner-title");
+  if (titleEl) titleEl.textContent = t(copy.titleKey);
+
+  const msgEl = document.getElementById("network-banner-msg");
+  if (msgEl instanceof HTMLElement) {
+    if (copy.link) {
+      // The status-page link rides inside the sentence as a {service} arg so
+      // word order stays the translator's (docs/dev/i18n.md) — the same helper
+      // the requirement-callout / endpoint-hint sentences use.
+      fillWithNode(
+        msgEl,
+        copy.messageKey,
+        "service",
+        externalLink(GITHUB_STATUS_URL, "banner-service-link"),
+      );
+    } else {
+      msgEl.textContent = t(copy.messageKey);
+    }
+  }
+
+  banner.hidden = false;
+}
+
+// ---- Account-type glyph --------------------------------------------------
+//
+// A small inline icon next to the connection indicator marking the account's
+// plan (individual / team / enterprise), with a hover + aria label. Purely
+// informational — it tells the user which kind of identity they're on, the
+// same distinction the network banner uses to tailor its copy.
+
+type AccountTypeName = "individual" | "business" | "enterprise";
+
+/** lucide "user" — a single person. */
+const ACCOUNT_TYPE_ICON: Record<AccountTypeName, string> = {
+  individual:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
+  // lucide "users" — a small group (a Copilot Business / team seat).
+  business:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+  // lucide "building-2" — an organization (a Copilot Enterprise seat).
+  enterprise:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/><path d="M9 9h.01M9 12h.01M9 15h.01M15 9h.01M15 12h.01M15 15h.01"/></svg>',
+};
+
+const ACCOUNT_TYPE_LABEL_KEY: Record<AccountTypeName, string> = {
+  individual: "account-type-individual",
+  business: "account-type-team",
+  enterprise: "account-type-enterprise",
+};
+
+/**
+ * Set (or hide) the account-type glyph. Hidden when the plan is unresolved —
+ * we show a real type or nothing, never a guess. The label doubles as the
+ * hover title and the aria-label (the glyph is otherwise silent to a reader).
+ */
+function renderAccountType(accountType: AccountTypeName | null | undefined): void {
+  const el = document.querySelector<HTMLElement>('[data-field="account_type"]');
+  if (!el) return;
+  if (!accountType) {
+    el.hidden = true;
+    el.replaceChildren();
+    el.removeAttribute("aria-label");
+    el.removeAttribute("title");
+    return;
+  }
+  const label = t(ACCOUNT_TYPE_LABEL_KEY[accountType]);
+  el.innerHTML = ACCOUNT_TYPE_ICON[accountType];
+  el.setAttribute("aria-label", label);
+  el.title = label;
+  el.hidden = false;
+}
+
 function labelForRemediationUrl(url: string): string {
   // Most GHCP rejection bodies point at one of a few well-known
   // GitHub pages. Map them to verbs the user will recognize; fall
@@ -1214,6 +1474,7 @@ function renderAccount(status: AuthStatus): void {
         status.connected_since,
         status.last_upstream_rejection !== undefined,
       );
+      renderAccountType(status.account_type);
       renderUpstreamRejection(status.last_upstream_rejection);
       // Populate the inline "Switch to" roster (other persisted accounts; the
       // active account is the hero and excluded).
@@ -2089,15 +2350,29 @@ window.addEventListener("DOMContentLoaded", () => {
   wireEndpoint();
   wireGeneral();
   wireUninstall();
+  wireQuit();
   mountApiClients();
   mountApps();
   mountModels();
+  mountUsage();
   wireNav();
   syncFromHash();
+  // Open the single page-lifetime live feed (ADR-0019): presence + auth/apps/
+  // clients live updates + tray self-close, for the life of the tab.
+  openLiveFeed();
   void loadDiagnostics();
+  // The live auth stream is always-on for the window's lifetime: it drives the
+  // global network banner on every section (not just Account). The initial SSE
+  // snapshot paints the banner without a separate GET. The Account card still
+  // GET-loads on entry so gh discovery runs.
+  openAuthEvents();
   if (readHashSection() === "account") {
+    // Instant paint (§1.4): if the sidecar inlined state, render the account from
+    // it NOW so the tab shows the real auth status on the first frame instead of a
+    // spinner; loadAuthStatus() then confirms/refreshes and the WS keeps it live.
+    const inlined = readInlineState(window);
+    if (inlined) renderAccount(inlined.snapshot.auth);
     void loadAuthStatus();
-    openAuthEvents();
   }
 });
 
@@ -2112,16 +2387,25 @@ window.addEventListener("hashchange", () => {
   if (section === "models") {
     window.dispatchEvent(new CustomEvent("maximal:models-refresh"));
   }
+  if (section === "usage") {
+    window.dispatchEvent(new CustomEvent("maximal:usage-refresh"));
+  }
   if (section === "account") {
     void loadAuthStatus();
     openAuthEvents();
   } else {
-    // Leaving the Account section: drop any in-flight polling, the live
-    // event stream, and the uptime ticker (all re-established on return).
+    // Leaving the Account section: drop the sign-in fallback poll and the
+    // uptime ticker (both re-established on return). The event stream stays
+    // open — it feeds the global network banner on every section.
     stopAuthPolling();
-    closeAuthEvents();
     stopConnUptimeTicker();
   }
+});
+
+// Tear the always-on auth stream down when the window goes away, so a closed
+// (or reloaded) webview doesn't leave a dangling EventSource.
+window.addEventListener("pagehide", () => {
+  closeAuthEvents();
 });
 
 // Refresh on returning to the window. The common flow is: open the Account

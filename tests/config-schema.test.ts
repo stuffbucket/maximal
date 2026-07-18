@@ -31,6 +31,18 @@ describe("validateAppConfig", () => {
     expect(validateAppConfig(config)).toEqual(config)
   })
 
+  it("accepts 'max' reasoning effort (GPT-5.6 ladder top)", () => {
+    // Regression for the boot-rejection bug: before "max" was added to
+    // ReasoningEffortSchema, a config setting any model's effort to the top of
+    // the GPT-5.6 ladder failed validation and the proxy exited non-zero.
+    const config = {
+      modelReasoningEfforts: {
+        "gpt-5.6-sol": "max" as const,
+      },
+    }
+    expect(validateAppConfig(config)).toEqual(config)
+  })
+
   it("rejects a typo'd authType with the offending key path", () => {
     let thrown: ConfigValidationError | null = null
     try {

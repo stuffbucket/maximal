@@ -34,6 +34,8 @@
     "app:ui": "bun run scripts/build-ui.ts --watch",
     "build": "bun build src/main.ts --target=bun --outdir dist",
     "build:ui": "bun run scripts/build-ui.ts",
+    "casts": "bun run scripts/find-casts.ts",
+    "casts:check": "bun run scripts/find-casts.ts --check",
     "check:deep": "bun run check:fast && bun test && bun run knip",
     "check:fast": "bun run ensure:ui-embed && bun run lint:fast && bun run typecheck && bun run lint:all && bun run check:tokens",
     "check:ops": "bun run typecheck:ops && bun run test:ops",
@@ -73,12 +75,13 @@
     ]
   },
   "dependencies": {
+    "@hono/zod-openapi": "^1.5.0",
     "citty": "^0.1.6",
     "clipboardy": "^5.0.0",
     "consola": "^3.4.2",
     "fetch-event-stream": "^0.1.5",
     "gpt-tokenizer": "^3.0.1",
-    "hono": "^4.9.9",
+    "hono": "^4.12.0",
     "proxy-from-env": "^1.1.0",
     "srvx": "^0.11.15",
     "tiny-invariant": "^1.3.3",

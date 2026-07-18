@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto"
 
 import type { AccountType, CopilotHost } from "~/lib/auth/auth-types"
+import type {
+  NetworkDiagnosisKind,
+  NetworkScope,
+} from "~/lib/net/network-diagnostics"
 import type { ModelsResponse } from "~/services/copilot/get-models"
 
 import { emitAuthChanged } from "~/lib/config/settings-events"
@@ -38,6 +42,15 @@ export interface State {
   copilotApiUrl?: CopilotHost
 
   /**
+   * The port the HTTP server actually bound to this run. Set by `runServer`
+   * from the resolved `--port` (default 4141). The control-surface Origin guard
+   * + narrowed CORS read it to decide which `http://localhost:<port>` origin is
+   * "us" (§6, ADR-0021) — it must reflect the real bound port, not a literal,
+   * so a non-default `--port` UI still passes its own origin gate (§1.1).
+   */
+  boundPort: number
+
+  /**
    * Set by the Tauri shell at sidecar spawn (env var MAXIMAL_SHELL_KEY).
    * When a request carries this exact key, auth always succeeds — even
    * if the user has flipped "Block unknown connections" on. Lets the
@@ -66,6 +79,25 @@ export interface State {
     status: number
     at: string
   }
+
+  /**
+   * The hysteresis-resolved network-issue diagnosis for the banner, or
+   * undefined when connectivity is healthy (or a failure hasn't yet persisted
+   * past the onset window). Set/cleared ONLY via `setNetworkDiagnosis` /
+   * `clearNetworkDiagnosis` below — the producers (the token refresh loop and
+   * the connectivity poller) feed the raw verdict through `network-hysteresis`
+   * first, and only the promoted `{ kind, scope }` reaches here.
+   *
+   * Like `lastUpstreamRejection`, this rides on the auth status (getAuthStatus
+   * folds it into the `authenticated` AND `unauthenticated` variants so the
+   * banner works signed-out) and is published via `emitAuthChanged()`. Carries
+   * only the typed discriminant + scope; the user-facing copy is the shell's
+   * job (i18n, keyed on `(kind, scope)`).
+   */
+  networkDiagnosis?: {
+    kind: NetworkDiagnosisKind
+    scope: NetworkScope | null
+  }
 }
 
 export const state: State = {
@@ -74,6 +106,10 @@ export const state: State = {
   rateLimitWait: false,
   showToken: false,
   verbose: false,
+  // Default port; `runServer` overwrites with the resolved `--port` at boot.
+  // In-memory tests (`server.request(...)`, no runServer) see this default,
+  // which matches the CLI's own 4141 default (src/lib/start/cli.ts).
+  boundPort: 4141,
   vsCodeDeviceId: randomUUID(),
   shellApiKey: process.env.MAXIMAL_SHELL_KEY?.trim() || undefined,
 }
@@ -205,6 +241,49 @@ export function clearLastUpstreamRejection(): void {
   const hadRejection = state.lastUpstreamRejection !== undefined
   state.lastUpstreamRejection = undefined
   if (hadRejection) {
+    emitAuthChanged()
+  }
+}
+
+/**
+ * Set the hysteresis-resolved network-diagnosis banner signal. Callers pass the
+ * ALREADY-DEBOUNCED banner diagnosis (the `bannerDiagnosis` from
+ * `network-hysteresis.step`): a null value clears, a non-null value shows. This
+ * is the single owner of `state.networkDiagnosis` — the producers (refresh loop,
+ * connectivity poller) never poke the field directly.
+ *
+ * Compare-then-emit, mirroring `setLastUpstreamRejection` /
+ * `clearLastUpstreamRejection`: the poller ticks every ~30s and the refresh loop
+ * retries on its own cadence, so most calls re-assert the same verdict.
+ * `emitAuthChanged()` fires only on an actual `(kind, scope)` change, so the SSE
+ * stream doesn't get an event per tick.
+ */
+export function setNetworkDiagnosis(
+  value: { kind: NetworkDiagnosisKind; scope: NetworkScope | null } | null,
+): void {
+  if (value === null) {
+    clearNetworkDiagnosis()
+    return
+  }
+  const existing = state.networkDiagnosis
+  if (
+    existing
+    && existing.kind === value.kind
+    && existing.scope === value.scope
+  ) {
+    return
+  }
+  state.networkDiagnosis = { kind: value.kind, scope: value.scope }
+  emitAuthChanged()
+}
+
+/** Clear the network-diagnosis banner signal (connectivity recovered). Emits
+ *  only on an actual change — the refresh success path and the poller's healthy
+ *  ticks both call this, but only the first clear after an outage fans out. */
+export function clearNetworkDiagnosis(): void {
+  const hadDiagnosis = state.networkDiagnosis !== undefined
+  state.networkDiagnosis = undefined
+  if (hadDiagnosis) {
     emitAuthChanged()
   }
 }

@@ -20,6 +20,7 @@ import {
   compactTextOnlyGuard,
   type CompactType,
 } from "~/lib/models/compact"
+import { resolveModelProfile } from "~/lib/models/model-profile"
 
 export const TOOL_REFERENCE_TURN_BOUNDARY = "Tool loaded."
 
@@ -558,9 +559,13 @@ const filterAssistantThinkingBlocks = (
   }
 }
 
-// Copilot's Bedrock-backed Claude rejects sampling params in two ways:
-//   1. claude-opus-4.7+ (adaptive_thinking models) reject temperature/top_p/top_k
-//      outright with a 400.
+// Copilot's reasoning-model backends reject sampling params in two ways:
+//   1. Reasoning models reject temperature/top_p/top_k outright with a 400.
+//      This covers Copilot's Bedrock-backed Claude (adaptive_thinking) AND
+//      OpenAI's reasoning models served via Copilot (the GPT-5.x trio, which
+//      advertise a reasoning_effort ladder but NOT adaptive_thinking) — so the
+//      guard keys on the resolved `isReasoning`, not `adaptive_thinking` alone,
+//      which had let temperature leak through to the GPT-5.x models and 400.
 //   2. ALL models reject temperature and top_p *together* ("`temperature` and
 //      `top_p` cannot both be specified for this model. Please use only one.").
 // (2) is an API-level constraint, so it is deliberately not gated on model
@@ -570,7 +575,7 @@ const stripSamplingParams = (
   payload: AnthropicMessagesPayload,
   selectedModel?: Model,
 ): void => {
-  if (selectedModel?.capabilities.supports.adaptive_thinking) {
+  if (selectedModel && resolveModelProfile(selectedModel).isReasoning) {
     delete payload.temperature
     delete payload.top_p
     delete payload.top_k
@@ -611,7 +616,11 @@ const applyAdaptiveThinking = (
     || toolChoice?.type === "tool"
     || clientDisabledThinking
 
-  if (!selectedModel?.capabilities.supports.adaptive_thinking || disableThink) {
+  if (!selectedModel || disableThink) {
+    return
+  }
+  const profile = resolveModelProfile(selectedModel)
+  if (!profile.supportsAdaptiveThinking) {
     return
   }
 
@@ -632,9 +641,20 @@ const applyAdaptiveThinking = (
   if (effort === "none" || effort === "minimal") {
     effort = "low"
   }
-  const reasoningEffort = selectedModel.capabilities.supports.reasoning_effort
+  // Clamp the resolved effort into the model's advertised ladder. The ladder is
+  // `undefined` (not `[]`) when the model declares none, so an absent ladder
+  // correctly SKIPS the clamp — the old raw read could be `[]`, which made
+  // `![].includes(effort)` true and set effort to `[].at(-1)` (undefined).
+  const reasoningEffort = profile.reasoningEffortLadder
   if (reasoningEffort && !reasoningEffort.includes(effort)) {
-    effort = reasoningEffort.at(-1) as "low" | "medium" | "high"
+    // Clamp to the model's highest advertised tier. Copilot's array is ordered
+    // low→high, so the last element is the ceiling (may be xhigh or max).
+    effort = reasoningEffort.at(-1) as
+      | "low"
+      | "medium"
+      | "high"
+      | "xhigh"
+      | "max"
   }
   payload.output_config = {
     effort: effort,

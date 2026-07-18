@@ -35,6 +35,16 @@ export const getGitHubApiBaseUrl = (): string => {
   return resolvedDomain ? `https://api.${resolvedDomain}` : GITHUB_API_BASE_URL
 }
 
+/** Path of the GitHub endpoint that mints/refreshes a Copilot bearer token.
+ *  Shared so callers (the refresh loop, the token minter, and network
+ *  diagnostics) reference one discoverable value instead of re-typing it. */
+export const COPILOT_TOKEN_PATH = "/copilot_internal/v2/token"
+
+/** Fully-qualified Copilot token endpoint for the active (possibly enterprise)
+ *  GitHub API host. */
+export const getCopilotTokenUrl = (): string =>
+  `${getGitHubApiBaseUrl()}${COPILOT_TOKEN_PATH}`
+
 const getOpencodeOauthHeaders = (): Record<string, string> => {
   return {
     Accept: "application/json",
@@ -141,9 +151,14 @@ export const getOpencodeVersion = () => {
   return OPENCODE_VERSION
 }
 
-const OPENCODE_VERSION = "opencode/1.17.20"
-const OPENCODE_LLM_USER_AGENT =
-  "opencode/1.17.20 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.13, opencode/1.17.20"
+// Single source of truth for the opencode client version. It appears three
+// times below (the bare client version plus twice in the LLM User-Agent), so
+// the drift watcher's `--fix` path bumps this one constant and every derived
+// string follows — a raw literal would half-update. See
+// scripts/ops/watch-external-drift.ts (opencode pin → OPENCODE_SEMVER).
+const OPENCODE_SEMVER = "1.17.20"
+const OPENCODE_VERSION = `opencode/${OPENCODE_SEMVER}`
+const OPENCODE_LLM_USER_AGENT = `opencode/${OPENCODE_SEMVER} ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.13, opencode/${OPENCODE_SEMVER}`
 
 const COPILOT_VERSION = "0.46.0"
 const EDITOR_PLUGIN_VERSION = `copilot-chat/${COPILOT_VERSION}`

@@ -3,7 +3,6 @@
   "app-container": "{os, select, macos {строке меню} other {системном лотке}}",
   "reveal-logs": "Показать журналы в {fileManager}",
   "reveal-config": "Показать конфигурацию в {fileManager}…",
-
   "nav-account": "Учётная запись",
   "nav-general": "Основные",
   "nav-apps": "Приложения",
@@ -13,7 +12,6 @@
   "nav-logs": "Журналы",
   "nav-diagnostics": "Диагностика",
   "nav-sidebar-label": "Разделы настроек",
-
   "common-copy": "Копировать",
   "common-copied": "Скопировано",
   "common-reveal": "Показать",
@@ -25,12 +23,10 @@
   "common-remove": "Удалить",
   "common-working": "Выполняется…",
   "common-language-label": "Язык",
-
   "general-title": "Основные",
   "general-sub": "Как Maximal отображается на рабочем столе.",
   "general-menu-bar-only-label": "Показывать только в {os, select, macos {строке меню} other {системном трее}}",
   "general-menu-bar-only-hint": "По умолчанию Maximal также присутствует в {os, select, macos {Dock} other {панели задач}}, чтобы его было легко найти и вывести на передний план. Включите этот параметр, чтобы убрать его с глаз: Maximal продолжит работать только со значком в {os, select, macos {строке меню} other {системном трее}} и исчезнет из {os, select, macos {Dock} other {панели задач}}.",
-
   "account-title": "Учётная запись",
   "account-sub": "Ваше подключение к GitHub Copilot.",
   "account-unauth-title": "Вход не выполнен",
@@ -99,6 +95,15 @@
   "account-remediation-accept-terms": "Принять обновлённые условия Copilot",
   "account-remediation-review-terms": "Просмотреть условия GitHub",
   "account-remediation-generic": "Открыть в GitHub",
+  "banner-offline-title": "Вы не в сети",
+  "banner-offline-msg": "Проверьте подключение; мы продолжаем попытки.",
+  "banner-copilot-title": "Не удаётся подключиться к GitHub Copilot",
+  "banner-copilot-msg-individual": "Пытаемся восстановить подключение ({service}).",
+  "banner-copilot-msg-enterprise": "Если другие приложения тоже не работают, возможно, потребуется перезапуск ({service}).",
+  "banner-service-link": "проверить состояние службы Copilot",
+  "account-type-individual": "Личная учётная запись",
+  "account-type-team": "Командная учётная запись",
+  "account-type-enterprise": "Учётная запись Enterprise",
   "account-rejection-title-402": "Проблема с оплатой или планом Copilot",
   "account-rejection-title-403": "Запрос заблокирован Copilot",
   "account-rejection-title-404": "Copilot не удалось это найти",
@@ -114,10 +119,8 @@
   "account-rejection-explain-429": "Вы достигли лимита частоты или квоты. Подождите немного и повторите попытку.",
   "account-rejection-explain-5xx": "Со стороны GitHub возвращена ошибка. Обычно это временно — повторите попытку в ближайшее время.",
   "account-rejection-explain-other": "Повторите попытку или проверьте свою учётную запись Copilot на GitHub.",
-
   "apps-title": "Приложения",
   "apps-sub": "Настройка в один клик для инструментов, которые взаимодействуют с Maximal. Включите приложение, и мы направим его на прокси за вас.",
-
   "endpoint-title": "Endpoint",
   "endpoint-sub": "Где слушает Maximal. Используйте эти значения при настройке инструмента, которого нет в списке приложений.",
   "endpoint-connection-title": "Подключение",
@@ -132,13 +135,10 @@
   "endpoint-models-label": "Модели",
   "endpoint-key-not-available": "(недоступно)",
   "endpoint-copy-curl": "Скопировать пример curl",
-
   "keys-title": "Ключи API",
   "keys-sub": "Ключи, которые приложения используют для вызова Maximal. Добавьте по одному на каждый инструмент, чтобы различать их — всё, чего нет в списке, по умолчанию продолжает работать.",
-
   "models-title": "Модели",
   "models-sub": "Модели, доступные приложениям через Maximal, сгруппированные по типу. Список загружается от провайдера — обновите, чтобы получить текущий каталог, если какой-либо модели не хватает.",
-
   "logs-title": "Журналы",
   "logs-sub": "Ежедневно ротируемые журналы запросов и обработчиков, срок хранения {n, plural, one {# день} few {# дня} many {# дней} other {# дня}}.",
   "logs-where-title": "Где находятся журналы",
@@ -147,7 +147,6 @@
   "logs-path-windows-label": "Windows",
   "logs-retention-label": "Хранение",
   "logs-retention-value": "{n, plural, one {# день} few {# дня} many {# дней} other {# дня}}, затем удаляются при следующей загрузке",
-
   "diagnostics-title": "Диагностика",
   "diagnostics-sub": "Состояние в реальном времени и пакет для отчётов об ошибках в один клик.",
   "diagnostics-proxy-version": "Версия прокси",
@@ -204,7 +203,6 @@
   "diagnostics-relative-minutes": "{m} мин назад",
   "diagnostics-relative-hours": "{h} ч назад",
   "diagnostics-relative-days": "{d} дн назад",
-
   "uninstall-title": "Удалить",
   "uninstall-hint": "Это останавливает фоновый агент Maximal, отменяет все интеграции приложений и удаляет CLI {cliName} из вашего PATH. Чтобы завершить, перетащите Maximal в Корзину.",
   "uninstall-purge-label": "Удалить сохранённые секреты и конфигурацию",
@@ -217,18 +215,14 @@
   "uninstall-summary-tail": " и {last}",
   "uninstall-err": "Не удалось завершить удаление: {error}. Вместо этого вы можете выполнить {uninstallCmd} в терминале.",
   "uninstall-complete": "Maximal удалён. Завершите работу Maximal из {os, select, macos {строки меню} other {системного лотка}}, затем перетащите его из Приложений в Корзину, чтобы завершить.",
-
   "dashboard-title": "Maximal — Панель",
   "dashboard-period-label": "Период",
   "dashboard-period-days": "{n, plural, one {# день} few {# дня} many {# дней} other {# дня}}",
-
   "dashboard-quotas-title": "Квоты использования",
   "dashboard-quota-unlimited": "Без ограничений",
   "dashboard-quota-percent-used": "Использовано {percent} %",
   "dashboard-quota-remaining": "осталось {n}",
-
   "dashboard-api-response-title": "Ответ API использования",
-
   "dashboard-token-usage-title": "Использование токенов",
   "dashboard-window-day": "Окно дня",
   "dashboard-window-week": "Окно недели",
@@ -236,7 +230,6 @@
   "dashboard-window-range": "{label}: {start} - {end}",
   "dashboard-refreshing-summary": "Обновление сводки…",
   "dashboard-refreshing-details": "Обновление деталей…",
-
   "dashboard-col-total": "Всего",
   "dashboard-col-input": "Вход",
   "dashboard-col-output": "Выход",
@@ -250,53 +243,33 @@
   "dashboard-col-endpoint": "Endpoint",
   "dashboard-col-session": "Сеанс",
   "dashboard-col-trace": "Трассировка",
-
   "dashboard-by-model-title": "По модели",
   "dashboard-by-model-count": "{n, plural, one {# модель} few {# модели} many {# моделей} other {# модели}}",
   "dashboard-by-model-none": "Строки сводки не загружены.",
-
   "dashboard-event-details-title": "Детали события",
   "dashboard-events-meta": "Страница {page} / {total} · {events, plural, one {# событие} few {# события} many {# событий} other {# события}}",
   "dashboard-events-none": "Страница деталей ещё не загружена.",
   "dashboard-pager-previous": "Назад",
   "dashboard-pager-next": "Далее",
-
   "dashboard-empty-summary": "За выбранный период использование токенов не зафиксировано.",
   "dashboard-empty-events": "Нет строк деталей использования токенов за выбранный период.",
-
   "dashboard-error-usage": "Запрос использования не удался",
   "dashboard-error-summary": "Не удалось получить сводку использования токенов",
   "dashboard-error-details": "Не удалось получить детали использования токенов",
   "dashboard-error-generic": "Произошла ошибка",
-
   "dashboard-welcome-title": "Добро пожаловать!",
   "dashboard-welcome-body": "Данные об использовании и о расходе токенов появятся здесь по мере загрузки.",
   "dashboard-unknown-error": "Неизвестная ошибка.",
   "dashboard-not-available": "Н/Д",
-
   "native-window-settings-title": "Maximal — Настройки",
   "native-window-settings-title-versioned": "Maximal — Настройки · v{version}",
   "native-window-dashboard-title": "Maximal — Панель",
-
-  "native-tray-settings": "Настройки…",
-  "native-tray-dashboard": "Панель…",
-  "native-tray-quit": "Выйти из Maximal",
-  "native-tray-starting": "Запуск…",
-  "native-tray-sign-in": "Войти в GitHub…",
-  "native-tray-signed-in": "Вход в GitHub выполнен",
-  "native-tray-upgrade": "Обновить до v{latest}…",
-  "native-tray-failed": "Не удалось запустить sidecar",
-  "native-tray-retry": "Повторить запуск",
-  "native-tray-show-logs": "Показать журналы…",
-  "native-tray-open-config": "Открыть папку конфигурации…",
-
   "native-tooltip-starting": "maximal — запуск…",
   "native-tooltip-sign-in": "maximal — войдите в GitHub",
   "native-tooltip-idle": "maximal",
   "native-tooltip-failed": "maximal — sidecar не запустился",
   "native-tooltip-stopped": "maximal — остановлено",
   "native-tooltip-rejection": "maximal — {message}",
-
   "native-notify-startup-title": "Maximal работает",
   "native-notify-startup-body-macos": "Ищите значок Maximal в строке меню ↑",
   "native-notify-startup-body-other": "Maximal работает в системном лотке ↓",
@@ -311,7 +284,6 @@
   "native-notify-rejection-title": "Maximal",
   "native-notify-rejection-body": "Вышестоящий запрос Copilot был отклонён. Откройте Настройки для получения деталей.",
   "native-notify-rejection-body-detail": "{message} — откройте Настройки для получения деталей.",
-
   "native-quit-title": "Выйти из Maximal?",
   "native-quit-body": "Maximal остановится, и все открытые окна Настроек закроются.",
   "native-quit-confirm": "Выйти из Maximal",

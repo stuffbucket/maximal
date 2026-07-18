@@ -12,13 +12,30 @@ import {
   makeAccountRecord,
   readDefaultRecord,
 } from "~/lib/auth/github-token-store"
+import { getCopilotTokenUrl } from "~/lib/config/api-config"
+import { emitAuthChangedWithReconnect } from "~/lib/config/settings-events"
 import { CopilotAuthFatalError, HTTPError } from "~/lib/errors/error"
+import {
+  diagnoseNetworkError,
+  formatDiagnosisForLog,
+  formatTransportError,
+  isTransportError,
+  type NetworkDiagnosis,
+  NETWORK_SCOPE,
+  summarizeTransportError,
+} from "~/lib/net/network-diagnostics"
+import {
+  advanceHysteresis,
+  type HysteresisStep,
+} from "~/lib/net/network-hysteresis"
 import { createTeeLogger } from "~/lib/platform/logger"
 import { isHeadless, openUrl } from "~/lib/platform/open-url"
 import { PATHS } from "~/lib/platform/paths"
 import {
+  clearNetworkDiagnosis,
   setCopilotToken,
   setGithubToken,
+  setNetworkDiagnosis,
   setUserName,
   state,
 } from "~/lib/runtime-state/state"
@@ -166,6 +183,15 @@ export const setupCopilotToken = async (opts?: {
       }
       throw error
     }
+    // Non-auth-fatal first-mint failure. When it's a *transport* failure
+    // (device offline / DNS broken / GitHub blocked by compliance/ZTNA), log a
+    // readable classification before rethrowing so the caller's "signed-in"
+    // attempt records *why* the mint never happened — the device-flow/bootstrap
+    // callers only log a generic message. For non-transport errors that generic
+    // caller-side line already covers it, so we don't add a duplicate here.
+    if (isTransportError(error)) {
+      await logRefreshFailure("Copilot token mint failed", error)
+    }
     throw error
   }
   setCopilotToken(token)
@@ -258,6 +284,9 @@ const runCopilotRefreshLoop = async (
       if (fatalRetries > 0) clearActiveNeedsReauth()
       fatalRetries = 0
       log.debug("Copilot token refreshed")
+      // A completed refresh proves connectivity: clear any banner and, if the
+      // outage was long enough, fire the reconnect notification.
+      noteConnectivityRecovered()
       if (state.showToken) {
         // console-only: a raw bearer must never reach the auth-*.log file sink.
         consola.info("Refreshed Copilot token:", token)
@@ -284,15 +313,112 @@ const runCopilotRefreshLoop = async (
           `Copilot persistently rejected the GitHub token (${fatalRetries} attempts); degrading without deleting the credential:`,
           error.message,
         )
+        // A persistent 401/403 means we DID reach the service (it answered) —
+        // that's an auth problem, not a connectivity one, so clear any network
+        // banner before degrading.
+        noteConnectivityRecovered()
         await markAuthDegraded(error)
         return
       }
-      log.error("Failed to refresh Copilot token:", error)
+      const diagnosis = await logRefreshFailure(
+        "Failed to refresh Copilot token",
+        error,
+      )
+      noteConnectivityFailure(diagnosis)
       refreshAtMs = Date.now() + RETRY_REFRESH_DELAY_MS
       log.warn(
         `Retrying Copilot token refresh in ${RETRY_REFRESH_DELAY_MS / 1000}s`,
       )
     }
+  }
+}
+
+/**
+ * Log a non-auth-fatal Copilot-token failure. A *transport* failure (no HTTP
+ * status — the socket never completed) is the offline / DNS-broken /
+ * scope-unreachable signature: instead of dumping the opaque, fully-redacted
+ * `{ code, path, errno }` object, probe what actually works and log the typed
+ * classification. Any other error falls back to the raw log. The user-facing
+ * message (i18n) is NOT built here — that's the UI's job, keyed on the typed
+ * `(kind, scope)` verdict. Best-effort — never throws.
+ *
+ * Returns the typed `NetworkDiagnosis` when the error was a transport failure we
+ * could classify (so the caller can feed it through the banner hysteresis),
+ * otherwise null (non-transport error, or the probe itself threw). */
+async function logRefreshFailure(
+  label: string,
+  error: unknown,
+): Promise<NetworkDiagnosis | null> {
+  if (!isTransportError(error)) {
+    log.error(`${label}:`, error)
+    return null
+  }
+  try {
+    const diag = await diagnoseNetworkError(error, {
+      target: {
+        scope: NETWORK_SCOPE.githubCopilotAuth,
+        url: getCopilotTokenUrl(),
+      },
+    })
+    // A pre-formatted string arg passes through the file sink's secret-scrubber
+    // (not the object redactor), so the safe transport fields stay visible
+    // instead of being masked as `[redacted N chars]`. Dev log content — no
+    // translation needed.
+    log.warn(`${label}: ${formatDiagnosisForLog(diag)}`)
+    return diag
+  } catch {
+    // Diagnosis is telemetry; if the probe itself throws, still record the
+    // safe summary so the failure isn't invisible.
+    log.warn(
+      `${label}: ${formatTransportError(summarizeTransportError(error))}`,
+    )
+    return null
+  }
+}
+
+/**
+ * Feed a transport failure's diagnosis through the banner hysteresis and update
+ * the network-diagnosis signal. Only a diagnosis that has PERSISTED past the
+ * onset window promotes to a shown banner (setNetworkDiagnosis(null) is a no-op
+ * clear otherwise). Best-effort — never throws. `now` is injectable for tests.
+ */
+function noteConnectivityFailure(
+  diagnosis: NetworkDiagnosis | null,
+  now: number = Date.now(),
+): void {
+  if (!diagnosis) return
+  try {
+    const { bannerDiagnosis }: HysteresisStep = advanceHysteresis(
+      diagnosis,
+      now,
+    )
+    setNetworkDiagnosis(
+      bannerDiagnosis ?
+        { kind: bannerDiagnosis.kind, scope: bannerDiagnosis.scope }
+      : null,
+    )
+  } catch (err) {
+    log.warn("Couldn't update network-diagnosis banner signal:", err)
+  }
+}
+
+/**
+ * Signal that connectivity recovered: feed a null through the hysteresis, clear
+ * the banner, and — if the outage lasted long enough — fire the reconnect
+ * notification. The sidecar can't fire a native OS notification itself (the
+ * Tauri shell owns notifications and reads the flag off the auth.changed
+ * payload, same model as last_upstream_rejection), so a qualifying recovery
+ * rides a single `notify_on_reconnect: true` event. Best-effort — never throws.
+ */
+function noteConnectivityRecovered(now: number = Date.now()): void {
+  try {
+    const { notifyReconnect }: HysteresisStep = advanceHysteresis(null, now)
+    clearNetworkDiagnosis()
+    if (notifyReconnect) {
+      emitAuthChangedWithReconnect()
+    }
+  } catch (err) {
+    log.warn("Couldn't clear network-diagnosis banner signal:", err)
   }
 }
 

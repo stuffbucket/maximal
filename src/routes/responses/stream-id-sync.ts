@@ -33,6 +33,7 @@ export const fixStreamIds = (
   tracker: StreamIdTracker,
 ): string => {
   if (!data) return data
+  // casts-keep: trusted Copilot SSE chunk; translator tolerates missing fields
   const parsed = JSON.parse(data) as ResponseStreamEvent
   switch (event) {
     case "response.output_item.added": {

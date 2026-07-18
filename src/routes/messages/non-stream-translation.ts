@@ -14,6 +14,7 @@ import {
   type AnthropicUserContentBlock,
   type AnthropicUserMessage,
 } from "~/lib/models/anthropic-types"
+import { resolveModelProfile } from "~/lib/models/model-profile"
 import { state } from "~/lib/runtime-state/state"
 import {
   type ChatCompletionResponse,
@@ -63,17 +64,15 @@ function getThinkingBudget(
 ): number | undefined {
   const thinking = payload.thinking
   if (model && thinking) {
+    const profile = resolveModelProfile(model)
     const maxThinkingBudget = Math.min(
-      model.capabilities.supports.max_thinking_budget ?? 0,
-      (model.capabilities.limits.max_output_tokens ?? 0) - 1,
+      profile.maxThinkingBudget,
+      profile.maxOutputTokens - 1,
     )
     thinking.budget_tokens ??= maxThinkingBudget
     if (maxThinkingBudget > 0) {
       const budgetTokens = Math.min(thinking.budget_tokens, maxThinkingBudget)
-      return Math.max(
-        budgetTokens,
-        model.capabilities.supports.min_thinking_budget ?? 1024,
-      )
+      return Math.max(budgetTokens, profile.minThinkingBudget)
     }
   }
   return undefined

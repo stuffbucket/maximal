@@ -29,6 +29,15 @@ interface AuthMiddlewareOptions {
    * without having to enumerate every static asset path.
    */
   requireAuthPrefixes?: Array<string>
+  /**
+   * Path prefixes where a valid key is ALWAYS required, independent of the
+   * user-facing `enforce` toggle (§6.2). The control surface (`/settings/api`)
+   * must stay authenticated even when "Block unknown connections" is off, so a
+   * malicious local page can't drive it. The `state.shellApiKey` bypass and
+   * per-request client attribution are unaffected — this only removes the
+   * `enforce=false` early-allow for these prefixes, not the shell-key path.
+   */
+  alwaysEnforcePrefixes?: Array<string>
   allowOptionsBypass?: boolean
   /**
    * Paths that should skip auth when the request comes from loopback
@@ -129,15 +138,6 @@ export function findApiKeyEntry(
   return match ? { id: match.id, label: match.label } : null
 }
 
-/**
- * The ONE endpoint that accepts its API key via query string (`?key=`).
- * SSE clients (`EventSource`) can't set request headers, so the live-events
- * stream (ADR-0007) has no other way to authenticate. Honouring a
- * query-string key only for this exact path keeps keys out of URLs/logs for
- * every other endpoint. Must equal the mount path in src/routes/settings/api.ts.
- */
-export const SSE_EVENTS_PATH = "/settings/api/events"
-
 export function extractRequestApiKey(c: Context): string | null {
   const xApiKey = c.req.header("x-api-key")?.trim()
   if (xApiKey) {
@@ -153,15 +153,27 @@ export function extractRequestApiKey(c: Context): string | null {
     }
   }
 
-  // Query-string key: honoured ONLY for the SSE events endpoint (see
-  // SSE_EVENTS_PATH). EventSource can't send headers; every other path
-  // ignores `?key=` so credentials don't leak into request URLs broadly.
-  if (c.req.path === SSE_EVENTS_PATH) {
-    const queryKey = c.req.query("key")?.trim()
-    if (queryKey) return queryKey
-  }
-
+  // No query-string `?key=` fallback anywhere: the header paths above are the
+  // only ways to authenticate a proxy/control request, so keys never leak into
+  // request URLs or logs. The live-feed WebSocket (which a browser can't send
+  // headers to) validates its own `?key=` minted token inside its route
+  // (routes/ws/route.ts), independent of this extractor.
   return null
+}
+
+/**
+ * Shell-internal key match. When the Tauri menu-bar app spawns the sidecar it
+ * injects MAXIMAL_SHELL_KEY as env; a request carrying that exact key bypasses
+ * the enforce flag so a user who turns on "Block unknown connections" can't lock
+ * themselves out of their own Settings UI — and it keeps the mandatory-auth
+ * prefixes (§6.2) usable by the Settings UI itself.
+ */
+function isShellKey(requestApiKey: string | null): boolean {
+  return (
+    requestApiKey !== null
+    && state.shellApiKey !== undefined
+    && requestApiKey === state.shellApiKey
+  )
 }
 
 function createUnauthorizedResponse(c: Context): Response {
@@ -187,6 +199,7 @@ export function createAuthMiddleware(
   const allowUnauthenticatedPrefixes =
     options.allowUnauthenticatedPrefixes ?? []
   const requireAuthPrefixes = options.requireAuthPrefixes ?? []
+  const alwaysEnforcePrefixes = options.alwaysEnforcePrefixes ?? []
   const allowOptionsBypass = options.allowOptionsBypass ?? true
   const loopbackOnlyPaths = options.loopbackOnlyPaths ?? []
   const getRequestIp = options.getRequestIp ?? defaultGetRequestIp
@@ -213,19 +226,17 @@ export function createAuthMiddleware(
     return false
   }
 
-  const decideAuth = (requestApiKey: string | null): AuthDecision => {
-    // Shell-internal key: when the Tauri menu-bar app spawns the sidecar
-    // it injects MAXIMAL_SHELL_KEY as env. Requests carrying that key
-    // bypass the enforce flag so a user who turns on "Block unknown
-    // connections" can't lock themselves out of their own Settings UI.
-    if (
-      requestApiKey
-      && state.shellApiKey
-      && requestApiKey === state.shellApiKey
-    ) {
+  const decideAuth = (
+    requestApiKey: string | null,
+    mandatory: boolean,
+  ): AuthDecision => {
+    if (isShellKey(requestApiKey)) {
       return { allow: true, id: null, label: "Maximal Settings" }
     }
-    if (!isEnforcing()) {
+    // `mandatory` (a §6.2 always-enforce prefix) forces enforcement on even when
+    // the user-facing toggle is off, so the control surface can't be driven
+    // key-less by a local browser page.
+    if (!mandatory && !isEnforcing()) {
       const entry = requestApiKey ? findApiKeyEntry(requestApiKey) : null
       return { allow: true, id: entry?.id ?? null, label: entry?.label ?? null }
     }
@@ -238,7 +249,10 @@ export function createAuthMiddleware(
 
   return async (c, next) => {
     if (shouldBypass(c)) return next()
-    const decision = decideAuth(extractRequestApiKey(c))
+    const mandatory = alwaysEnforcePrefixes.some((p) =>
+      pathMatchesPrefix(c.req.path, p),
+    )
+    const decision = decideAuth(extractRequestApiKey(c), mandatory)
     if (!decision.allow) return createUnauthorizedResponse(c)
     recordClient({
       apiKeyId: decision.id,

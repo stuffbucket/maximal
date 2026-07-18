@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { z } from "zod"
 
 import { HTTPError } from "~/lib/errors/error"
 import {
@@ -170,9 +171,10 @@ describe("sendRequestJson", () => {
     captureFetch(
       new Response(JSON.stringify({ login: "octocat" }), { status: 200 }),
     )
-    const result = await sendRequestJson<{ login: string }>(
+    const result = await sendRequestJson(
       `${GITHUB_API_HOST}/user`,
       { errorMessage: "boom" },
+      z.object({ login: z.string() }).loose(),
     )
     expect(result.login).toBe("octocat")
   })
@@ -181,7 +183,11 @@ describe("sendRequestJson", () => {
     captureFetch(new Response("nope", { status: 500 }))
     let caught: unknown
     try {
-      await sendRequestJson(`${GITHUB_API_HOST}/user`, { errorMessage: "boom" })
+      await sendRequestJson(
+        `${GITHUB_API_HOST}/user`,
+        { errorMessage: "boom" },
+        z.object({}).loose(),
+      )
     } catch (err) {
       caught = err
     }

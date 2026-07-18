@@ -150,6 +150,7 @@ const parseProviderStreamEvent = (
   providerConfig: ResolvedProviderConfig,
 ): { data: string; model?: string; usage: UsageTokens } | null => {
   try {
+    // casts-keep: trusted Copilot SSE chunk; translator tolerates missing fields
     const parsed = JSON.parse(data) as AnthropicStreamEventData
     if (parsed.type === "message_start") {
       adjustInputTokens(providerConfig, parsed.message.usage)

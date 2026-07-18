@@ -285,6 +285,7 @@ async function runOneStreamingTurn(args: TurnArgs): Promise<TurnResult> {
     if (rawEvent.data === "[DONE]") break
     if (!rawEvent.data) continue
 
+    // casts-keep: trusted Copilot SSE chunk; translator tolerates missing fields
     const chunk = JSON.parse(rawEvent.data) as ChatCompletionChunk
     const events = translateChunkToAnthropicEvents(chunk, innerState)
 
