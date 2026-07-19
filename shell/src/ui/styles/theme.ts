@@ -115,9 +115,11 @@ export const focusRing = {
   width: "2px",
   offset: "2px",
   color: "var(--accent)",
+  // Single canonical treatment for every surface: a 2px solid outline
+  // in the accent color, offset 2px. Applied via `outline: var(--focus-ring)`
+  // on `:focus-visible`. There is deliberately no box-shadow variant —
+  // see docs/design/components.md → Focus rings.
   expr: "var(--focus-ring-width) solid var(--focus-ring-color)",
-  // The dashboard had a slightly custom focus-ring box-shadow format. Let's provide both or standardise later.
-  dashboardExpr: "0 0 0 2px var(--surface-base), 0 0 0 4px var(--accent)",
 } as const;
 
 export const layout = {
