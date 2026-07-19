@@ -46,6 +46,13 @@ jobs:
       - name: Run type check
         run: bun run typecheck
 
+      - name: Check design tokens
+        # Two gates: (1) the design-token drift rules (check:tokens), and
+        # (2) freshness — shell/src/ui/styles/tokens.css must be a clean
+        # regeneration of theme.ts (tokens:verify). Previously local-only via
+        # check:fast, so drift or a stale generated file could merge freely.
+        run: bun run check:design
+
       - name: Guard boundary casts
         # Fail on a NEW unvalidated any→concrete boundary cast (the class behind
         # the device-code interval:NaN poll spin). The known-safe set is annotated

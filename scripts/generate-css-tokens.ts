@@ -1,4 +1,4 @@
-import { writeFileSync } from "node:fs";
+import { writeFileSync, readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   fontStacks, text, weight, leading, tracking, spacing, radii, borderWidth, size,
@@ -92,6 +92,25 @@ function generateTokensCSS(): string {
 }
 
 
+const OUT_PATH = resolve(REPO, "shell/src/ui/styles/tokens.css");
 const tokensContent = generateTokensCSS();
-writeFileSync(resolve(REPO, "shell/src/ui/styles/tokens.css"), tokensContent, "utf8");
-console.log("Tokens synchronized strictly from typescript source.");
+
+// `--check` verifies the committed CSS is a fresh generation of theme.ts
+// without writing. This is the single-source enforcement gate: if theme.ts
+// changed but tokens.css wasn't regenerated (or tokens.css was hand-edited),
+// the two diverge and CI fails. Run `bun run tokens:generate` to fix.
+if (process.argv.includes("--check")) {
+  const committed = existsSync(OUT_PATH) ? readFileSync(OUT_PATH, "utf8") : "";
+  if (committed !== tokensContent) {
+    console.error(
+      "[generate-css-tokens] shell/src/ui/styles/tokens.css is out of sync " +
+        "with shell/src/ui/styles/theme.ts.\n" +
+        "  Run `bun run tokens:generate` and commit the result.",
+    );
+    process.exit(1);
+  }
+  console.log("[generate-css-tokens] tokens.css is in sync with theme.ts.");
+} else {
+  writeFileSync(OUT_PATH, tokensContent, "utf8");
+  console.log("Tokens synchronized strictly from typescript source.");
+}
