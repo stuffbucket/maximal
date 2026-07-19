@@ -46,6 +46,16 @@ jobs:
       - name: Run type check
         run: bun run typecheck
 
+      - name: Type check (shell UI)
+        # The shell/src tree (settings React app + islands, i18n runtime, proxy
+        # client, Tauri bridge) is excluded from the root tsconfig, so a type
+        # error there could ship. Typecheck it against shell/tsconfig.json.
+        # Hermetic: install shell's own deps (@types/react etc.) in-step rather
+        # than relying on the root `prepare` side effect.
+        run: |
+          cd shell && bun install --frozen-lockfile
+          bun run typecheck
+
       - name: Check design tokens
         # Two gates: (1) the design-token drift rules (check:tokens), and
         # (2) freshness — shell/src/ui/styles/tokens.css must be a clean
