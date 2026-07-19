@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react"
 
-import { apiCall } from "../../../proxy/client";
 import type {
   ModelsListResponse,
   ModelSummary,
-} from "../../../../../src/lib/config/settings-types";
+} from "../../../../../src/lib/config/settings-types"
+
+import { apiCall } from "../../../proxy/client"
 
 /**
  * Data hook over `/settings/api/models`. Owns the model list, the
@@ -16,77 +17,78 @@ import type {
  * — the stale list stays visible while the fresh fetch runs.
  */
 interface UseModels {
-  models: Array<ModelSummary>;
-  loadedAt: string | null;
-  isLoading: boolean;
-  isRefreshing: boolean;
-  error: string | null;
-  refresh: () => Promise<void>;
+  models: Array<ModelSummary>
+  loadedAt: string | null
+  isLoading: boolean
+  isRefreshing: boolean
+  error: string | null
+  refresh: () => Promise<void>
 }
 
 function applyResult(
   result: ModelsListResponse,
   set: {
-    setModels: (m: Array<ModelSummary>) => void;
-    setLoadedAt: (t: string | null) => void;
+    setModels: (m: Array<ModelSummary>) => void
+    setLoadedAt: (t: string | null) => void
   },
 ): void {
-  set.setModels(result.models);
-  set.setLoadedAt(result.loaded_at);
+  set.setModels(result.models)
+  set.setLoadedAt(result.loaded_at)
 }
 
 export function useModels(): UseModels {
-  const [models, setModels] = useState<Array<ModelSummary>>([]);
-  const [loadedAt, setLoadedAt] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [models, setModels] = useState<Array<ModelSummary>>([])
+  const [loadedAt, setLoadedAt] = useState<string | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const [isRefreshing, setIsRefreshing] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     const result = await apiCall({
       kind: "models-list",
       method: "GET",
       path: "/settings/api/models",
-    });
+    })
     if (result.ok) {
-      applyResult(result.data, { setModels, setLoadedAt });
-      setError(null);
+      applyResult(result.data, { setModels, setLoadedAt })
+      setError(null)
     } else {
-      setError(result.error);
+      setError(result.error)
     }
-    setIsLoading(false);
-  }, []);
+    setIsLoading(false)
+  }, [])
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    void load()
+  }, [load])
 
   // Re-pull when the user navigates back to the Models section. main.ts
   // dispatches this on hashchange so the list + freshness stay current
   // (parallels the apps/diagnostics refetch-on-nav behaviour). This is the
   // cheap GET, not a forced upstream refresh — that stays on the button.
   useEffect(() => {
-    const onRefresh = (): void => void load();
-    window.addEventListener("maximal:models-refresh", onRefresh);
-    return () => window.removeEventListener("maximal:models-refresh", onRefresh);
-  }, [load]);
+    const onRefresh = (): void => void load()
+    globalThis.addEventListener("maximal:models-refresh", onRefresh)
+    return () =>
+      globalThis.removeEventListener("maximal:models-refresh", onRefresh)
+  }, [load])
 
   const refresh = useCallback(async () => {
-    setIsRefreshing(true);
+    setIsRefreshing(true)
     const result = await apiCall({
       kind: "models-refresh",
       method: "POST",
       path: "/settings/api/models/refresh",
-    });
+    })
     if (result.ok) {
-      applyResult(result.data, { setModels, setLoadedAt });
-      setError(null);
+      applyResult(result.data, { setModels, setLoadedAt })
+      setError(null)
     } else {
       // Keep the stale list visible; surface why the refresh failed.
-      setError(result.error);
+      setError(result.error)
     }
-    setIsRefreshing(false);
-  }, []);
+    setIsRefreshing(false)
+  }, [])
 
-  return { models, loadedAt, isLoading, isRefreshing, error, refresh };
+  return { models, loadedAt, isLoading, isRefreshing, error, refresh }
 }

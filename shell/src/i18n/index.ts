@@ -32,23 +32,23 @@
  * into a sentence — it is passed as an ICU argument (`Reveal logs in
  * {fileManager}`) so word order stays translatable across languages.
  */
-import { IntlMessageFormat } from "intl-messageformat";
+import { IntlMessageFormat } from "intl-messageformat"
 
-import { osKind } from "../ui/platform";
-import en from "./en.json";
-import enGB from "./en-GB.json";
-import es from "./es.json";
-import esES from "./es-ES.json";
-import esMX from "./es-MX.json";
-import zh from "./zh.json";
-import fr from "./fr.json";
-import de from "./de.json";
-import ru from "./ru.json";
-import ja from "./ja.json";
-import it from "./it.json";
-import pt from "./pt.json";
+import { osKind } from "../ui/platform"
+import de from "./de.json"
+import enGB from "./en-GB.json"
+import en from "./en.json"
+import esES from "./es-ES.json"
+import esMX from "./es-MX.json"
+import es from "./es.json"
+import fr from "./fr.json"
+import it from "./it.json"
+import ja from "./ja.json"
+import pt from "./pt.json"
+import ru from "./ru.json"
+import zh from "./zh.json"
 
-type Catalog = Record<string, string>;
+type Catalog = Record<string, string>
 
 /**
  * All shippable catalogs. `en` is fully populated (the base); the rest are
@@ -69,7 +69,7 @@ const CATALOGS: Record<string, Catalog> = {
   ja,
   it,
   pt,
-};
+}
 
 /** Human labels for the picker, keyed by locale tag. */
 const LOCALE_LABELS: Record<string, string> = {
@@ -85,34 +85,34 @@ const LOCALE_LABELS: Record<string, string> = {
   ja: "日本語",
   it: "Italiano",
   pt: "Português",
-};
+}
 
 /** localStorage key holding the user's explicit locale override, if any. */
-const LOCALE_OVERRIDE_KEY = "maximal.locale";
+const LOCALE_OVERRIDE_KEY = "maximal.locale"
 
 /** The locale tags this build ships, in declared order. */
-export function availableLocales(): string[] {
-  return Object.keys(CATALOGS);
+export function availableLocales(): Array<string> {
+  return Object.keys(CATALOGS)
 }
 
 /** Human label for a locale tag (falls back to the tag itself). */
 export function localeLabel(tag: string): string {
-  return LOCALE_LABELS[tag] ?? tag;
+  return LOCALE_LABELS[tag] ?? tag
 }
 
 function readOverride(): string | null {
   try {
-    return globalThis.localStorage?.getItem(LOCALE_OVERRIDE_KEY) ?? null;
+    return globalThis.localStorage.getItem(LOCALE_OVERRIDE_KEY) ?? null
   } catch {
     // localStorage can throw (privacy mode, disabled storage); treat as unset.
-    return null;
+    return null
   }
 }
 
 /** Persist an explicit locale override and use it on the next resolve. */
 export function setLocale(tag: string): void {
   try {
-    globalThis.localStorage?.setItem(LOCALE_OVERRIDE_KEY, tag);
+    globalThis.localStorage.setItem(LOCALE_OVERRIDE_KEY, tag)
   } catch {
     // Non-fatal: the picker still re-renders live for this session.
   }
@@ -120,7 +120,7 @@ export function setLocale(tag: string): void {
 
 /** The language subtag of a BCP-47 tag (`es-MX` → `es`). */
 function languageOf(tag: string): string {
-  return tag.split("-", 1)[0] ?? tag;
+  return tag.split("-", 1)[0] ?? tag
 }
 
 /**
@@ -128,25 +128,24 @@ function languageOf(tag: string): string {
  * preferred tag as a full match first (`es-MX`), then language-only (`es`),
  * in preference order. Returns null when nothing matches.
  */
-function bestFitFromNavigator(available: string[]): string | null {
-  const availableSet = new Set(available);
-  const byLanguage = new Map<string, string>();
+function bestFitFromNavigator(available: Array<string>): string | null {
+  const availableSet = new Set(available)
+  const byLanguage = new Map<string, string>()
   // First declared locale per language wins as the language-only fallback
   // (so `es` maps to the base `es` catalog, not `es-MX`).
   for (const tag of available) {
-    const lang = languageOf(tag);
-    if (!byLanguage.has(lang)) byLanguage.set(lang, tag);
+    const lang = languageOf(tag)
+    if (!byLanguage.has(lang)) byLanguage.set(lang, tag)
   }
 
-  const preferred =
-    typeof navigator === "undefined" ? [] : (navigator.languages ?? []);
+  const preferred = typeof navigator === "undefined" ? [] : navigator.languages
   for (const raw of preferred) {
-    if (availableSet.has(raw)) return raw;
-    const lang = languageOf(raw);
-    const langMatch = byLanguage.get(lang);
-    if (langMatch) return langMatch;
+    if (availableSet.has(raw)) return raw
+    const lang = languageOf(raw)
+    const langMatch = byLanguage.get(lang)
+    if (langMatch) return langMatch
   }
-  return null;
+  return null
 }
 
 /**
@@ -156,10 +155,10 @@ function bestFitFromNavigator(available: string[]): string | null {
  *   (c) `"en"`.
  */
 export function resolveLocale(): string {
-  const available = availableLocales();
-  const override = readOverride();
-  if (override && available.includes(override)) return override;
-  return bestFitFromNavigator(available) ?? "en";
+  const available = availableLocales()
+  const override = readOverride()
+  if (override && available.includes(override)) return override
+  return bestFitFromNavigator(available) ?? "en"
 }
 
 /**
@@ -168,24 +167,21 @@ export function resolveLocale(): string {
  * no catalog carries the key.
  */
 function lookup(key: string, locale: string): string | undefined {
-  const lang = languageOf(locale);
-  return (
-    CATALOGS[locale]?.[key] ??
-    CATALOGS[lang]?.[key] ??
-    CATALOGS.en[key]
-  );
+  const lang = languageOf(locale)
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Record index type is optimistic (no noUncheckedIndexedAccess); a missing locale/lang key is a real runtime case the ?. / ?? handle.
+  return CATALOGS[locale]?.[key] ?? CATALOGS[lang]?.[key] ?? CATALOGS.en[key]
 }
 
 function format(key: string, values: Record<string, unknown>): string {
-  const locale = resolveLocale();
-  const message = lookup(key, locale);
-  if (message === undefined) return key; // fail visibly, never throw over a UI string
-  return new IntlMessageFormat(message, locale).format(values) as string;
+  const locale = resolveLocale()
+  const message = lookup(key, locale)
+  if (message === undefined) return key // fail visibly, never throw over a UI string
+  return new IntlMessageFormat(message, locale).format(values) as string
 }
 
 /** The OS-appropriate file-manager noun: Finder / File Explorer / Files. */
 export function fileManagerName(): string {
-  return format("file-manager", { os: osKind() });
+  return format("file-manager", { os: osKind() })
 }
 
 /**
@@ -195,5 +191,9 @@ export function fileManagerName(): string {
  * via `values`.
  */
 export function t(key: string, values: Record<string, unknown> = {}): string {
-  return format(key, { os: osKind(), fileManager: fileManagerName(), ...values });
+  return format(key, {
+    os: osKind(),
+    fileManager: fileManagerName(),
+    ...values,
+  })
 }

@@ -1,7 +1,7 @@
-import { StrictMode } from "react";
-import { createRoot } from "react-dom/client";
+import { StrictMode } from "react"
+import { createRoot } from "react-dom/client"
 
-import { Models } from "../features/models/Models";
+import { Models } from "../features/models/Models"
 
 /**
  * Mounts the Models React island into #models-root.
@@ -9,12 +9,12 @@ import { Models } from "../features/models/Models";
  * `mountApiClients` in api-clients-island.tsx.
  */
 export function mountModels(): void {
-  const el = document.getElementById("models-root");
-  if (!el) return;
-  const root = createRoot(el);
+  const el = document.querySelector("#models-root")
+  if (!el) return
+  const root = createRoot(el)
   root.render(
     <StrictMode>
       <Models />
     </StrictMode>,
-  );
+  )
 }

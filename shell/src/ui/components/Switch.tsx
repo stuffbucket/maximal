@@ -1,14 +1,16 @@
 // vendored: controlled toggle wrapping the .switch checkbox in styles.css.
-import { cx } from "./cx";
+import type { ReactElement } from "react"
+
+import { cx } from "./cx"
 
 interface SwitchProps {
-  checked: boolean;
-  onCheckedChange: (next: boolean) => void;
-  label?: string;
-  hideLabel?: boolean;
-  disabled?: boolean;
-  id?: string;
-  className?: string;
+  checked: boolean
+  onCheckedChange: (next: boolean) => void
+  label?: string
+  hideLabel?: boolean
+  disabled?: boolean
+  id?: string
+  className?: string
 }
 
 export function Switch({
@@ -19,7 +21,7 @@ export function Switch({
   disabled,
   id,
   className,
-}: SwitchProps): JSX.Element {
+}: SwitchProps): ReactElement {
   return (
     <label className={cx("switch", className)}>
       <input
@@ -33,5 +35,5 @@ export function Switch({
         <span className={hideLabel ? "sr-only" : undefined}>{label}</span>
       )}
     </label>
-  );
+  )
 }

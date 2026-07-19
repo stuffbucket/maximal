@@ -1,53 +1,54 @@
-import { useEffect, useRef, useState } from "react";
+import { type ReactElement, useEffect, useRef, useState } from "react"
 
-import { Button } from "../../components/Button";
-import type { MutationResult } from "./useApiKeys";
+import type { MutationResult } from "./useApiKeys"
+
+import { Button } from "../../components/Button"
 
 interface AddConnectionProps {
   create: (input: {
-    label: string;
-    key?: string;
-    enabled?: boolean;
-  }) => Promise<MutationResult>;
-  onDone: () => void;
+    label: string
+    key?: string
+    enabled?: boolean
+  }) => Promise<MutationResult>
+  onDone: () => void
 }
 
 export function AddConnection({
   create,
   onDone,
-}: AddConnectionProps): JSX.Element {
-  const [label, setLabel] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const nameInputRef = useRef<HTMLInputElement | null>(null);
+}: AddConnectionProps): ReactElement {
+  const [label, setLabel] = useState("")
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const nameInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
-    nameInputRef.current?.focus();
-  }, []);
+    nameInputRef.current?.focus()
+  }, [])
 
   const submit = async (): Promise<void> => {
-    const trimmed = label.trim();
+    const trimmed = label.trim()
     if (!trimmed) {
-      setError("Give this connection a name first.");
-      return;
+      setError("Give this connection a name first.")
+      return
     }
-    setBusy(true);
-    setError(null);
-    const result = await create({ label: trimmed, enabled: true });
-    setBusy(false);
+    setBusy(true)
+    setError(null)
+    const result = await create({ label: trimmed, enabled: true })
+    setBusy(false)
     if (!result.ok) {
-      setError(result.error ?? "Couldn't add this connection.");
-      return;
+      setError(result.error ?? "Couldn't add this connection.")
+      return
     }
-    onDone();
-  };
+    onDone()
+  }
 
   return (
     <form
       className="add-connection"
       onSubmit={(e) => {
-        e.preventDefault();
-        void submit();
+        e.preventDefault()
+        void submit()
       }}
     >
       <label className="add-connection__field">
@@ -65,8 +66,8 @@ export function AddConnection({
           onChange={(e) => setLabel(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Escape") {
-              e.preventDefault();
-              onDone();
+              e.preventDefault()
+              onDone()
             }
           }}
           aria-label="Connection name"
@@ -95,5 +96,5 @@ export function AddConnection({
         </Button>
       </div>
     </form>
-  );
+  )
 }

@@ -1,16 +1,19 @@
 // vendored: wraps <button> with .btn .btn--* classes from styles.css.
-import type { ButtonHTMLAttributes, ReactNode } from "react";
-import { cx } from "./cx";
+import type { ReactElement, ButtonHTMLAttributes, ReactNode } from "react"
 
-type ButtonVariant = "primary" | "secondary" | "ghost" | "destructive";
-type ButtonSize = "md" | "sm";
+import { cx } from "./cx"
 
-interface ButtonProps
-  extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "type"> {
-  variant?: ButtonVariant;
-  size?: ButtonSize;
-  type?: "button" | "submit" | "reset";
-  children: ReactNode;
+type ButtonVariant = "primary" | "secondary" | "ghost" | "destructive"
+type ButtonSize = "md" | "sm"
+
+interface ButtonProps extends Omit<
+  ButtonHTMLAttributes<HTMLButtonElement>,
+  "type"
+> {
+  variant?: ButtonVariant
+  size?: ButtonSize
+  type?: "button" | "submit" | "reset"
+  children: ReactNode
 }
 
 const VARIANT_CLASS: Record<ButtonVariant, string> = {
@@ -18,7 +21,7 @@ const VARIANT_CLASS: Record<ButtonVariant, string> = {
   secondary: "btn btn--secondary",
   ghost: "btn btn--ghost",
   destructive: "btn btn--destructive",
-};
+}
 
 export function Button({
   variant = "secondary",
@@ -27,14 +30,18 @@ export function Button({
   className,
   children,
   ...rest
-}: ButtonProps): JSX.Element {
+}: ButtonProps): ReactElement {
   return (
     <button
       type={type}
-      className={cx(VARIANT_CLASS[variant], size === "sm" && "btn--sm", className)}
+      className={cx(
+        VARIANT_CLASS[variant],
+        size === "sm" && "btn--sm",
+        className,
+      )}
       {...rest}
     >
       {children}
     </button>
-  );
+  )
 }

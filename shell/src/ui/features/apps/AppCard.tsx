@@ -1,20 +1,20 @@
-import { useState } from "react";
+import { type ReactElement, useState } from "react"
 
-import type { AppEntry } from "../../../proxy/client";
-import { Button } from "../../components/Button";
-import { ConfirmDialog } from "../../components/ConfirmDialog";
-import { Switch } from "../../components/Switch";
-import { cx } from "../../components/cx";
-import { isWindows } from "../../platform";
+import type { AppEntry } from "../../../proxy/client"
+import type { MutationResult } from "./useApps"
 
-import type { MutationResult } from "./useApps";
+import { Button } from "../../components/Button"
+import { ConfirmDialog } from "../../components/ConfirmDialog"
+import { cx } from "../../components/cx"
+import { Switch } from "../../components/Switch"
+import { isWindows } from "../../platform"
 
-const COPIED_FLASH_MS = 1400;
+const COPIED_FLASH_MS = 1400
 
 interface AppCardProps {
-  app: AppEntry;
-  onToggle: (enabled: boolean) => Promise<MutationResult>;
-  onRescan: () => Promise<void>;
+  app: AppEntry
+  onToggle: (enabled: boolean) => Promise<MutationResult>
+  onRescan: () => Promise<void>
 }
 
 /** Human-readable explanation + remedy for each refused-enable reason.
@@ -22,81 +22,108 @@ interface AppCardProps {
  *  to do about it. */
 function conflictCopy(app: AppEntry): { title: string; detail: string } | null {
   switch (app.conflict) {
-    case "foreign-base-url":
+    case "foreign-base-url": {
       return {
         title: "Left your existing setting in place",
         detail:
-          `${app.name} already has a custom ANTHROPIC_BASE_URL set by you or` +
-          " another tool, so we didn't change it. Remove that line from the" +
-          " app's settings, then switch this on again to route through maximal.",
-      };
-    case "foreign-api-key-helper":
+          `${app.name} already has a custom ANTHROPIC_BASE_URL set by you or`
+          + " another tool, so we didn't change it. Remove that line from the"
+          + " app's settings, then switch this on again to route through maximal.",
+      }
+    }
+    case "foreign-api-key-helper": {
       return {
         title: "Left your existing setting in place",
         detail:
-          `${app.name} already has a custom apiKeyHelper set by you or` +
-          " another tool, so we didn't change it. Remove that line from the" +
-          " app's settings, then switch this on again to route through maximal.",
-      };
-    case null:
-      return null;
+          `${app.name} already has a custom apiKeyHelper set by you or`
+          + " another tool, so we didn't change it. Remove that line from the"
+          + " app's settings, then switch this on again to route through maximal.",
+      }
+    }
+    case null: {
+      return null
+    }
+    default: {
+      return null
+    }
   }
 }
 
-export function AppCard({ app, onToggle, onRescan }: AppCardProps): JSX.Element {
-  const [copied, setCopied] = useState(false);
-  const [rescanning, setRescanning] = useState(false);
+// eslint-disable-next-line max-lines-per-function, complexity -- cohesive card component; splitting would fragment tightly-coupled JSX + handlers, and branch count reflects the distinct app states it renders.
+export function AppCard({
+  app,
+  onToggle,
+  onRescan,
+}: AppCardProps): ReactElement {
+  const [copied, setCopied] = useState(false)
+  const [rescanning, setRescanning] = useState(false)
   // Windows-only: disabling Claude Code routing doesn't take effect in an
   // already-running session (Claude Code reads its base URL at launch on
   // Windows; macOS picks it up live). Warn before disabling so the user
   // knows to /exit and relaunch. See issue #178.
-  const [restartWarnOpen, setRestartWarnOpen] = useState(false);
-  const [disabling, setDisabling] = useState(false);
-  const needsWindowsRestartWarning = app.id === "claude-code" && isWindows();
+  const [restartWarnOpen, setRestartWarnOpen] = useState(false)
+  const [disabling, setDisabling] = useState(false)
+  const needsWindowsRestartWarning = app.id === "claude-code" && isWindows()
 
-  const comingSoon = app.kind === "coming-soon";
-  const notInstalled = app.status === "not-installed";
-  const hasInstalls = app.installs.length > 0;
+  const comingSoon = app.kind === "coming-soon"
+  const notInstalled = app.status === "not-installed"
+  const hasInstalls = app.installs.length > 0
   // Config apps with no detected install offer a one-line installer +
   // re-scan (currently only Claude Code ships an install hint).
   const offerInstall =
-    app.kind === "config" && !hasInstalls && app.install !== null;
-  const conflict = conflictCopy(app);
+    app.kind === "config" && !hasInstalls && app.install !== null
+  const conflict = conflictCopy(app)
 
   const copyInstall = async (): Promise<void> => {
-    if (!app.install) return;
+    if (!app.install) return
     try {
-      await navigator.clipboard.writeText(app.install.command);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), COPIED_FLASH_MS);
+      await navigator.clipboard.writeText(app.install.command)
+      setCopied(true)
+      globalThis.setTimeout(() => setCopied(false), COPIED_FLASH_MS)
     } catch {
       // Clipboard unavailable (insecure context / plain browser). Silent —
       // the command is also shown in a code block the user can select.
     }
-  };
+  }
 
   const rescan = async (): Promise<void> => {
-    setRescanning(true);
-    await onRescan();
-    setRescanning(false);
-  };
+    setRescanning(true)
+    await onRescan()
+    setRescanning(false)
+  }
 
   // Intercept only the Claude-Code-disable-on-Windows case; everything else
   // (enabling, other apps, macOS) toggles straight through.
   const handleToggle = (next: boolean): void => {
     if (!next && needsWindowsRestartWarning) {
-      setRestartWarnOpen(true);
-      return;
+      setRestartWarnOpen(true)
+      return
     }
-    void onToggle(next);
-  };
+    void onToggle(next)
+  }
 
   const confirmDisable = async (): Promise<void> => {
-    setDisabling(true);
-    await onToggle(false);
-    setDisabling(false);
-    setRestartWarnOpen(false);
-  };
+    setDisabling(true)
+    await onToggle(false)
+    setDisabling(false)
+    setRestartWarnOpen(false)
+  }
+
+  let control: ReactElement | null
+  if (comingSoon) {
+    control = <span className="chip app-card__pill">Coming soon</span>
+  } else if (offerInstall) {
+    control = null
+  } else {
+    control = (
+      <Switch
+        checked={app.enabled}
+        disabled={notInstalled}
+        onCheckedChange={handleToggle}
+        label={app.enabled ? "On" : "Off"}
+      />
+    )
+  }
 
   return (
     <article
@@ -106,18 +133,7 @@ export function AppCard({ app, onToggle, onRescan }: AppCardProps): JSX.Element 
       <header className="app-card__head">
         <h3 className="app-card__name">{app.name}</h3>
 
-        <div className="app-card__control">
-          {comingSoon ? (
-            <span className="chip app-card__pill">Coming soon</span>
-          ) : offerInstall ? null : (
-            <Switch
-              checked={app.enabled}
-              disabled={notInstalled}
-              onCheckedChange={handleToggle}
-              label={app.enabled ? "On" : "Off"}
-            />
-          )}
-        </div>
+        <div className="app-card__control">{control}</div>
       </header>
 
       {/* Config app with no install: offer the one-line installer. */}
@@ -154,15 +170,13 @@ export function AppCard({ app, onToggle, onRescan }: AppCardProps): JSX.Element 
       {/* Config app with an install: show its location, or a "not
           installed" note. No version picker — routing is by config file,
           not a per-binary shim. */}
-      {app.kind === "config" &&
-        !offerInstall &&
-        (notInstalled ? (
+      {app.kind === "config"
+        && !offerInstall
+        && (notInstalled ?
           <p className="app-card__hint">Not installed.</p>
-        ) : (
-          app.installs[0] && (
+        : app.installs[0] && (
             <p className="app-card__hint mono">{app.installs[0].path}</p>
-          )
-        ))}
+          ))}
 
       {/* Enable was refused (e.g. a base URL we don't own). Explain it and
           point at the fix — the toggle silently snapping back would be a
@@ -219,5 +233,5 @@ export function AppCard({ app, onToggle, onRescan }: AppCardProps): JSX.Element 
         />
       )}
     </article>
-  );
+  )
 }
