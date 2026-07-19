@@ -4,17 +4,13 @@
  *
  *   - settings: a React/TSX app — transpiled + bundled by Bun's bundler
  *     (replaces the old Vite build). Browser-runnable plain files.
- *   - dashboard: hand-authored HTML/CSS with a TS module entry
- *     (shell/src/dashboard/main.ts) that imports the shared i18n runtime +
- *     DOM binder, so it localizes on the same catalog as Settings. Bun
- *     bundles that entry. Its Tailwind/Lucide vendors stay CLASSIC global
- *     <script>s (window.tailwind / window.lucide) — the entry references
- *     `window.lucide` rather than importing them, and we copy vendor/
- *     verbatim next to the bundle so those globals load unbundled.
  *
- * Both end up as plain static files served by the proxy under `/ui/*`
+ * The output is plain static files served by the proxy under `/ui/*`
  * (src/routes/ui/route.ts): from disk in dev, embedded in the compiled
- * binary in production (see scripts/gen-ui-embed.ts).
+ * binary in production (see scripts/gen-ui-embed.ts). `copyShellChrome`
+ * also stages the native chrome (splash + update-confirm + fonts) into
+ * `shell/dist`. The separate dashboard surface was removed by the
+ * single-window redesign (#343); its usage view is now a settings section.
  *
  * Usage:
  *   bun scripts/build-ui.ts            # one-shot build
