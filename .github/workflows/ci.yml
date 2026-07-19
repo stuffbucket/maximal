@@ -70,6 +70,13 @@ jobs:
         run: bun run casts:check
 
       - name: Run tests
+        # MAXIMAL_TEST_BUILD enables the production-build smoke test
+        # (tests/settings-build.test.ts), which spawns `bun run build:ui` and
+        # asserts the servable assets exist. Gated off for local `bun test`
+        # loops (it writes to shell/dist); enabled here so a broken UI build
+        # reds CI. shell deps are already installed by the shell typecheck step.
+        env:
+          MAXIMAL_TEST_BUILD: "1"
         run: bun test
 
       - name: Build

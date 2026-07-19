@@ -11,9 +11,10 @@ import { resolve } from "node:path"
  * regression reds CI at commit time. Runs LIVE now.
  *
  * Scope note (§7): `shell/src/main.ts` is now in scope — its nav goes through
- * `history.replaceState` (never `location.hash =`). `shell/src/dashboard/main.ts:337`'s
- * `history.pushState` is still OUT of scope; it joins this ban when the dashboard
- * is ported into the SPA (§4). Add it to ROUTING_SOURCES then.
+ * `history.replaceState` (never `location.hash =`). The separate dashboard
+ * surface (and its `shell/src/dashboard/main.ts`) was removed by the
+ * single-window redesign (#343); its usage view is now a settings section
+ * that shares these routing sources.
  */
 
 const REPO_ROOT = resolve(import.meta.dir, "..")
