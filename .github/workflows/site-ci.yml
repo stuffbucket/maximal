@@ -1,0 +1,42 @@
+# Site tooling CI — separate from the product's ci.yml.
+#
+# The product suite (`bun test`, bunfig root=tests) excludes site/tests/**, so
+# the site's pure modules never had PR-time coverage. This lane runs them when
+# the site changes — notably the Tauri updater-manifest builder
+# (site/src/lib/tauri-updater-manifest.ts) that generates the `latest.json` the
+# desktop self-updater polls. Its fail-closed contract (no manifest rather than
+# an unverifiable one) is load-bearing for update safety, so a regression must
+# red a PR, not surface in a shipped manifest.
+
+name: site-ci
+
+on:
+  pull_request:
+    paths:
+      - "site/**"
+      - ".github/workflows/site-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      # Read Bun from the repo's source of truth (docs/bun-version-policy.md);
+      # no hardcoded version to drift from .bun-version.
+      - name: Read Bun version
+        id: bun
+        run: |
+          set -euo pipefail
+          echo "version=$(cat .bun-version)" >> "$GITHUB_OUTPUT"
+      - uses: ./.github/actions/setup-bun
+        with:
+          bun-version: ${{ steps.bun.outputs.version }}
+      - name: Install site dependencies
+        working-directory: site
+        run: bun install --frozen-lockfile
+      - name: Site tests
+        working-directory: site
+        run: bun run test

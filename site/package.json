@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "astro dev",
     "build": "astro build && node scripts/verify-dist.mjs",
+    "test": "bun test tests",
     "verify:dist": "node scripts/verify-dist.mjs",
     "preview": "astro preview",
     "og": "node scripts/gen-og.mjs",
