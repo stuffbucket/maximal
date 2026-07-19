@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "cd .. && bun run app:ui",
     "build": "cd .. && bun run build:ui",
+    "typecheck": "tsc -p tsconfig.json",
     "tauri": "tauri"
   },
   "dependencies": {

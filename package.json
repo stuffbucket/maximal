@@ -64,6 +64,7 @@
     "tokens:verify": "bun scripts/generate-css-tokens.ts --check",
     "typecheck": "tsc",
     "typecheck:ops": "tsc -p scripts/ops/tsconfig.json",
+    "typecheck:shell": "cd shell && bun run typecheck",
     "ui:harness": "bun run build:ui && bun run scripts/ui-harness.ts",
     "verify:build": "bun scripts/dev/verify-build.ts",
     "watch:drift": "bun scripts/ops/watch-external-drift.ts"
