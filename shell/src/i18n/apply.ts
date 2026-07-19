@@ -1,3 +1,5 @@
+import { invoke } from "@tauri-apps/api/core"
+
 /**
  * Shared DOM binder for the i18n runtime — used by BOTH webview surfaces
  * (Settings via shell/src/main.ts, Dashboard via shell/ui/dashboard/main.ts).
@@ -9,8 +11,13 @@
  * strings after a locale change" step is passed in as the picker's `onChange`
  * callback, so neither surface's dynamic-render logic leaks in here.
  */
-import { availableLocales, localeLabel, resolveLocale, setLocale, t } from "./index";
-import { invoke } from "@tauri-apps/api/core";
+import {
+  availableLocales,
+  localeLabel,
+  resolveLocale,
+  setLocale,
+  t,
+} from "./index"
 
 /**
  * Push the active locale across the IPC boundary so the Tauri shell's
@@ -22,19 +29,20 @@ import { invoke } from "@tauri-apps/api/core";
  */
 function syncNativeLocale(tag: string): void {
   void invoke("set_locale", { tag }).catch((err: unknown) => {
-    console.warn("invoke(set_locale) failed:", err);
-  });
+    console.warn("invoke(set_locale) failed:", err)
+  })
 }
 
 /**
  * Localized ATTRIBUTES: a `data-i18n-<attr>` dataset key names the catalog key
  * whose text fills the real attribute. Extend by adding a row — no new block.
  */
-const I18N_ATTRS: ReadonlyArray<{ attr: string; dataset: keyof DOMStringMap }> = [
-  { attr: "aria-label", dataset: "i18nAriaLabel" },
-  { attr: "title", dataset: "i18nTitle" },
-  { attr: "placeholder", dataset: "i18nPlaceholder" },
-];
+const I18N_ATTRS: ReadonlyArray<{ attr: string; dataset: keyof DOMStringMap }> =
+  [
+    { attr: "aria-label", dataset: "i18nAriaLabel" },
+    { attr: "title", dataset: "i18nTitle" },
+    { attr: "placeholder", dataset: "i18nPlaceholder" },
+  ]
 
 /**
  * Populate every `[data-i18n]` element's text and every `[data-i18n-<attr>]`
@@ -49,23 +57,22 @@ const I18N_ATTRS: ReadonlyArray<{ attr: string; dataset: keyof DOMStringMap }> =
  * templated labels. Run at boot before first paint so no empty control flashes.
  */
 export function applyI18n(root: ParentNode = document): void {
-  root.querySelectorAll<HTMLElement>("[data-i18n]").forEach((el) => {
-    const key = el.dataset.i18n;
-    if (!key) return;
+  for (const el of root.querySelectorAll<HTMLElement>("[data-i18n]")) {
+    const key = el.dataset.i18n
+    if (!key) continue
     // `data-i18n-count` on the same element feeds an ICU `plural` — e.g. the
     // dashboard period buttons: data-i18n="dashboard-period-days" +
     // data-i18n-count="7" → "7 days". Absent → no count arg (the common case).
-    const count = el.dataset.i18nCount;
-    el.textContent =
-      count === undefined ? t(key) : t(key, { n: Number(count) });
-  });
+    const count = el.dataset.i18nCount
+    el.textContent = count === undefined ? t(key) : t(key, { n: Number(count) })
+  }
   for (const { attr, dataset } of I18N_ATTRS) {
-    root
-      .querySelectorAll<HTMLElement>(`[data-i18n-${attr}]`)
-      .forEach((el) => {
-        const key = el.dataset[dataset];
-        if (key) el.setAttribute(attr, t(key));
-      });
+    for (const el of root.querySelectorAll<HTMLElement>(
+      `[data-i18n-${attr}]`,
+    )) {
+      const key = el.dataset[dataset]
+      if (key) el.setAttribute(attr, t(key))
+    }
   }
 }
 
@@ -82,22 +89,24 @@ export function applyI18n(root: ParentNode = document): void {
  * and titles match the webview from first paint) and again on every change.
  */
 export function wireLocalePicker(onChange: () => void): void {
-  const select = document.querySelector<HTMLSelectElement>("[data-locale-select]");
-  if (!select) return;
-  const active = resolveLocale();
-  syncNativeLocale(active);
-  select.replaceChildren();
+  const select = document.querySelector<HTMLSelectElement>(
+    "[data-locale-select]",
+  )
+  if (!select) return
+  const active = resolveLocale()
+  syncNativeLocale(active)
+  select.replaceChildren()
   for (const tag of availableLocales()) {
-    const opt = document.createElement("option");
-    opt.value = tag;
-    opt.textContent = localeLabel(tag);
-    opt.selected = tag === active;
-    select.appendChild(opt);
+    const opt = document.createElement("option")
+    opt.value = tag
+    opt.textContent = localeLabel(tag)
+    opt.selected = tag === active
+    select.append(opt)
   }
   select.addEventListener("change", () => {
-    setLocale(select.value);
-    syncNativeLocale(select.value);
-    applyI18n(document);
-    onChange();
-  });
+    setLocale(select.value)
+    syncNativeLocale(select.value)
+    applyI18n(document)
+    onChange()
+  })
 }

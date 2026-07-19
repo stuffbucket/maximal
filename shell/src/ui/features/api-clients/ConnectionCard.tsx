@@ -1,75 +1,87 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  type ReactElement,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react"
 
-import { Checkbox } from "../../components/Checkbox";
-import type { ApiKeyEntry } from "../../../../../src/lib/config/settings-types";
-import type { MutationResult } from "./useApiKeys";
+import type { ApiKeyEntry } from "../../../../../src/lib/config/settings-types"
+import type { MutationResult } from "./useApiKeys"
+
+import { Checkbox } from "../../components/Checkbox"
 
 interface ConnectionCardProps {
-  entry: ApiKeyEntry;
+  entry: ApiKeyEntry
   update: (
     id: string,
     patch: { label?: string; key?: string; enabled?: boolean },
-  ) => Promise<MutationResult>;
-  onDelete: () => void;
+  ) => Promise<MutationResult>
+  onDelete: () => void
 }
 
-const MASK_CAP = 24;
-const COPIED_FLASH_MS = 1200;
+const MASK_CAP = 24
+const COPIED_FLASH_MS = 1200
 
 function mask(value: string): string {
-  return "•".repeat(Math.min(value.length, MASK_CAP));
+  return "•".repeat(Math.min(value.length, MASK_CAP))
 }
 
+// eslint-disable-next-line max-lines-per-function -- cohesive card component; extracting sub-parts would fragment tightly-coupled JSX + handlers.
 export function ConnectionCard({
   entry,
   update,
   onDelete,
-}: ConnectionCardProps): JSX.Element {
-  const [showKey, setShowKey] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [editingName, setEditingName] = useState(false);
-  const [nameDraft, setNameDraft] = useState(entry.label);
-  const nameInputRef = useRef<HTMLInputElement | null>(null);
+}: ConnectionCardProps): ReactElement {
+  const [showKey, setShowKey] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const [editingName, setEditingName] = useState(false)
+  const [nameDraft, setNameDraft] = useState(entry.label)
+  const nameInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
-    if (!editingName) setNameDraft(entry.label);
-  }, [entry.label, editingName]);
+    if (!editingName) setNameDraft(entry.label)
+  }, [entry.label, editingName])
 
   useEffect(() => {
-    if (editingName) nameInputRef.current?.select();
-  }, [editingName]);
+    if (editingName) nameInputRef.current?.select()
+  }, [editingName])
 
   const commitName = useCallback((): void => {
-    const next = nameDraft.trim();
-    setEditingName(false);
+    const next = nameDraft.trim()
+    setEditingName(false)
     if (!next || next === entry.label) {
-      setNameDraft(entry.label);
-      return;
+      setNameDraft(entry.label)
+      return
     }
-    void update(entry.id, { label: next });
-  }, [nameDraft, entry.id, entry.label, update]);
+    void update(entry.id, { label: next })
+  }, [nameDraft, entry.id, entry.label, update])
 
   const onCopy = async (): Promise<void> => {
     try {
-      await navigator.clipboard.writeText(entry.key);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), COPIED_FLASH_MS);
+      await navigator.clipboard.writeText(entry.key)
+      setCopied(true)
+      globalThis.setTimeout(() => setCopied(false), COPIED_FLASH_MS)
     } catch {
       // Clipboard unavailable (insecure context). Silent.
     }
-  };
+  }
+
+  let keyText: string
+  if (copied) keyText = "Copied"
+  else if (showKey) keyText = entry.key
+  else keyText = mask(entry.key)
 
   return (
     <article className="connection-card" data-key-id={entry.id}>
       <header className="connection-card__head">
         <span
           className={
-            "connection-card__dot"
-            + (entry.enabled ? " is-active" : "")
+            "connection-card__dot" + (entry.enabled ? " is-active" : "")
           }
           aria-hidden
         />
-        {editingName ? (
+        {editingName ?
           <input
             ref={nameInputRef}
             type="text"
@@ -80,17 +92,16 @@ export function ConnectionCard({
             onBlur={commitName}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
-                e.preventDefault();
-                commitName();
+                e.preventDefault()
+                commitName()
               } else if (e.key === "Escape") {
-                e.preventDefault();
-                setNameDraft(entry.label);
-                setEditingName(false);
+                e.preventDefault()
+                setNameDraft(entry.label)
+                setEditingName(false)
               }
             }}
           />
-        ) : (
-          <button
+        : <button
             type="button"
             className="connection-card__name"
             onClick={() => setEditingName(true)}
@@ -98,7 +109,7 @@ export function ConnectionCard({
           >
             {entry.label || <span className="muted">Untitled</span>}
           </button>
-        )}
+        }
         <button
           type="button"
           className="btn btn--ghost btn--sm connection-card__delete"
@@ -116,11 +127,10 @@ export function ConnectionCard({
           <div className="connection-card__key">
             <span
               className={
-                "connection-card__key-text mono"
-                + (copied ? " is-copied" : "")
+                "connection-card__key-text mono" + (copied ? " is-copied" : "")
               }
             >
-              {copied ? "Copied" : showKey ? entry.key : mask(entry.key)}
+              {keyText}
             </span>
             <button
               type="button"
@@ -142,14 +152,12 @@ export function ConnectionCard({
         <label className="connection-card__enabled">
           <Checkbox
             checked={entry.enabled}
-            onCheckedChange={(next) =>
-              void update(entry.id, { enabled: next })
-            }
+            onCheckedChange={(next) => void update(entry.id, { enabled: next })}
             aria-label={`Enable ${entry.label}`}
           />
           <span>{entry.enabled ? "On" : "Off"}</span>
         </label>
       </div>
     </article>
-  );
+  )
 }

@@ -20,7 +20,7 @@
 import type {
   LiveFeedEvent,
   LiveFeedSnapshot,
-} from "../../../src/lib/ws/feed-types";
+} from "../../../src/lib/ws/feed-types"
 
 import {
   computeBackoffMs,
@@ -28,21 +28,21 @@ import {
   liveFeedUrl,
   parseServerMessage,
   serializeClientMessage,
-} from "./live-feed-core";
+} from "./live-feed-core"
 
 export interface LiveFeedHandlers {
-  readonly onSnapshot: (snapshot: LiveFeedSnapshot) => void;
-  readonly onEvent: (event: LiveFeedEvent) => void;
+  readonly onSnapshot: (snapshot: LiveFeedSnapshot) => void
+  readonly onEvent: (event: LiveFeedEvent) => void
   /** The sidecar told this (buried) tab to self-close for tray dedup. */
-  readonly onCloseCommand: () => void;
-  readonly onStatusChange?: (status: LiveFeedStatus) => void;
+  readonly onCloseCommand: () => void
+  readonly onStatusChange?: (status: LiveFeedStatus) => void
 }
 
-export type LiveFeedStatus = "connecting" | "open" | "reconnecting" | "closed";
+export type LiveFeedStatus = "connecting" | "open" | "reconnecting" | "closed"
 
 export interface LiveFeedConnection {
-  readonly status: () => LiveFeedStatus;
-  readonly close: () => void;
+  readonly status: () => LiveFeedStatus
+  readonly close: () => void
 }
 
 /**
@@ -56,103 +56,108 @@ export function connectLiveFeed(
 ): LiveFeedConnection {
   // Stable presence-registry key (§1.2), minted once per tab and kept across
   // reconnects so the sidecar recognizes a resumed tab as the same one.
-  const tabId = getTabId(window.sessionStorage, () => crypto.randomUUID());
+  const tabId = getTabId(globalThis.sessionStorage, () => crypto.randomUUID())
 
-  let socket: WebSocket | null = null;
-  let status: LiveFeedStatus = "closed";
-  let attempt = 0;
-  let reconnectTimer: number | null = null;
-  let closedByUser = false;
+  let socket: WebSocket | null = null
+  let status: LiveFeedStatus = "closed"
+  let attempt = 0
+  let reconnectTimer: ReturnType<typeof globalThis.setTimeout> | null = null
+  let closedByUser = false
 
   const setStatus = (next: LiveFeedStatus): void => {
-    status = next;
-    handlers.onStatusChange?.(next);
-  };
+    status = next
+    handlers.onStatusChange?.(next)
+  }
 
-  const send = (message: Parameters<typeof serializeClientMessage>[0]): void => {
+  const send = (
+    message: Parameters<typeof serializeClientMessage>[0],
+  ): void => {
     if (socket?.readyState === WebSocket.OPEN) {
-      socket.send(serializeClientMessage(message));
+      socket.send(serializeClientMessage(message))
     }
-  };
+  }
 
   const scheduleReconnect = (): void => {
-    if (closedByUser) return;
-    setStatus("reconnecting");
+    if (closedByUser) return
+    setStatus("reconnecting")
     // Bounded exponential backoff (§1.3); `attempt` resets to 0 on a clean open.
-    reconnectTimer = window.setTimeout(connect, computeBackoffMs(attempt));
-    attempt += 1;
-  };
+    reconnectTimer = globalThis.setTimeout(connect, computeBackoffMs(attempt))
+    attempt += 1
+  }
 
   function connect(): void {
-    if (closedByUser) return;
-    setStatus(attempt === 0 ? "connecting" : "reconnecting");
-    socket = new WebSocket(liveFeedUrl(boundPort, sessionToken));
+    if (closedByUser) return
+    setStatus(attempt === 0 ? "connecting" : "reconnecting")
+    socket = new WebSocket(liveFeedUrl(boundPort, sessionToken))
 
-    socket.onopen = (): void => {
-      attempt = 0;
-      setStatus("open");
+    socket.addEventListener("open", (): void => {
+      attempt = 0
+      setStatus("open")
       // The sidecar sends a full snapshot on connect, so a reconnect resyncs
       // without an extra request; we only announce presence + visibility.
-      send({ type: "hello", tabId, visibility: document.visibilityState });
-    };
+      send({ type: "hello", tabId, visibility: document.visibilityState })
+    })
 
-    socket.onmessage = (ev: MessageEvent): void => {
+    socket.addEventListener("message", (ev: MessageEvent): void => {
       const message = parseServerMessage(
         typeof ev.data === "string" ? ev.data : "",
-      );
-      if (!message) return;
+      )
+      if (!message) return
       switch (message.type) {
         case "snapshot": {
-          handlers.onSnapshot(message.snapshot);
-          return;
+          handlers.onSnapshot(message.snapshot)
+          return
         }
         case "event": {
-          handlers.onEvent(message.event);
-          return;
+          handlers.onEvent(message.event)
+          return
         }
         case "ping": {
-          send({ type: "pong" });
-          return;
+          send({ type: "pong" })
+          return
         }
         case "close": {
           // Tray dedup (§1.2): a buried tab is told to self-close. Reliable only
           // under the single-history invariant (ADR-0020).
-          handlers.onCloseCommand();
-          return;
+          handlers.onCloseCommand()
+          return
+        }
+        default: {
+          break
         }
       }
-    };
+    })
 
     // A dropped socket reconnects with backoff; an error just closes it, which
     // routes into the same onclose path.
-    socket.onclose = (): void => scheduleReconnect();
-    socket.onerror = (): void => socket?.close();
+    socket.addEventListener("close", (): void => scheduleReconnect())
+    socket.addEventListener("error", (): void => socket?.close())
   }
 
   const onVisibilityChange = (): void => {
-    if (document.visibilityState === "visible") {
-      // Refocus after the socket was dropped (e.g. Safari tore it down while
+    if (
+      document.visibilityState === "visible"  // Refocus after the socket was dropped (e.g. Safari tore it down while
       // backgrounded): reconnect immediately at the base backoff.
-      if (!socket || socket.readyState === WebSocket.CLOSED) {
-        attempt = 0;
-        connect();
-        return;
-      }
+      && (!socket || socket.readyState === WebSocket.CLOSED)
+    ) {
+      attempt = 0
+      connect()
+      return
     }
-    send({ type: "visibility", visibility: document.visibilityState });
-  };
-  document.addEventListener("visibilitychange", onVisibilityChange);
+    send({ type: "visibility", visibility: document.visibilityState })
+  }
+  document.addEventListener("visibilitychange", onVisibilityChange)
 
-  connect();
+  connect()
 
   return {
     status: () => status,
     close: (): void => {
-      closedByUser = true;
-      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
-      document.removeEventListener("visibilitychange", onVisibilityChange);
-      socket?.close();
-      setStatus("closed");
+      closedByUser = true
+      if (reconnectTimer !== null) globalThis.clearTimeout(reconnectTimer)
+      document.removeEventListener("visibilitychange", onVisibilityChange)
+      socket?.close()
+      setStatus("closed")
     },
-  };
+  }
 }

@@ -1,67 +1,66 @@
-import { Button } from "../../components/Button";
-import type { ModelSummary } from "../../../../../src/lib/config/settings-types";
+import type { ReactElement } from "react"
 
-import { useModels } from "./useModels";
+import type { ModelSummary } from "../../../../../src/lib/config/settings-types"
+
+import { Button } from "../../components/Button"
+import { useModels } from "./useModels"
 
 /** Human label for a `capabilities.type`. Falls back to a capitalized
  *  form for any type we don't have a friendlier name for. */
 function groupLabel(type: string): string {
-  if (type === "chat") return "Chat models";
-  if (type === "embeddings") return "Embeddings";
-  return type.charAt(0).toUpperCase() + type.slice(1);
+  if (type === "chat") return "Chat models"
+  if (type === "embeddings") return "Embeddings"
+  return type.charAt(0).toUpperCase() + type.slice(1)
 }
 
 /** Compact token count: 200000 → "200K", 1000000 → "1M", null → "—". */
 function formatTokens(n: number | null): string {
-  if (n === null) return "—";
+  if (n === null) return "—"
   if (n >= 1_000_000) {
-    const m = n / 1_000_000;
-    return `${Number.isInteger(m) ? m : m.toFixed(1)}M`;
+    const m = n / 1_000_000
+    return `${Number.isInteger(m) ? m : m.toFixed(1)}M`
   }
-  if (n >= 1_000) return `${Math.round(n / 1_000)}K`;
-  return String(n);
+  if (n >= 1_000) return `${Math.round(n / 1_000)}K`
+  return String(n)
 }
 
 /** Relative age of the cache, e.g. "just now", "3 min ago", "2 h ago".
  *  Null timestamp (never loaded) is handled by the caller. */
 function formatAge(iso: string): string {
-  const then = new Date(iso).getTime();
-  const seconds = Math.max(0, Math.round((Date.now() - then) / 1000));
-  if (seconds < 45) return "just now";
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes} min ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} h ago`;
-  const days = Math.round(hours / 24);
-  return `${days} d ago`;
+  const then = new Date(iso).getTime()
+  const seconds = Math.max(0, Math.round((Date.now() - then) / 1000))
+  if (seconds < 45) return "just now"
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) return `${minutes} min ago`
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return `${hours} h ago`
+  const days = Math.round(hours / 24)
+  return `${days} d ago`
 }
 
 /** The present capability flags as labelled chips. */
 function CapabilityChips({
   capabilities,
 }: {
-  capabilities: ModelSummary["capabilities"];
-}): JSX.Element {
+  capabilities: ModelSummary["capabilities"]
+}): ReactElement {
   const flags: Array<[string, boolean]> = [
     ["Vision", capabilities.vision],
     ["Tools", capabilities.tool_calls],
     ["Streaming", capabilities.streaming],
     ["Reasoning", capabilities.reasoning],
-  ];
-  const present = flags.filter(([, on]) => on);
-  if (present.length === 0) return <span className="models__muted">—</span>;
+  ]
+  const present = flags.filter(([, on]) => on)
+  if (present.length === 0) return <span className="models__muted">—</span>
   return (
     <span className="models__chips">
       {present.map(([label]) => (
-        <span
-          key={label}
-          className="chip"
-        >
+        <span key={label} className="chip">
           {label}
         </span>
       ))}
     </span>
-  );
+  )
 }
 
 function ModelGroup({
@@ -69,15 +68,12 @@ function ModelGroup({
   models,
   open,
 }: {
-  type: string;
-  models: Array<ModelSummary>;
-  open: boolean;
-}): JSX.Element {
+  type: string
+  models: Array<ModelSummary>
+  open: boolean
+}): ReactElement {
   return (
-    <details
-      className="advanced-section"
-      open={open}
-    >
+    <details className="advanced-section" open={open}>
       <summary className="advanced-section__summary">
         <span className="advanced-section__title">
           {groupLabel(type)}{" "}
@@ -117,25 +113,25 @@ function ModelGroup({
         </table>
       </div>
     </details>
-  );
+  )
 }
 
-export function Models(): JSX.Element {
+export function Models(): ReactElement {
   const { models, loadedAt, isLoading, isRefreshing, error, refresh } =
-    useModels();
+    useModels()
 
   // Preserve the server's type-then-name order while grouping.
-  const groups: Array<[string, Array<ModelSummary>]> = [];
+  const groups: Array<[string, Array<ModelSummary>]> = []
   for (const model of models) {
-    const last = groups[groups.length - 1];
+    const last = groups.at(-1)
     if (last && last[0] === model.type) {
-      last[1].push(model);
+      last[1].push(model)
     } else {
-      groups.push([model.type, [model]]);
+      groups.push([model.type, [model]])
     }
   }
 
-  const showEmpty = !isLoading && models.length === 0;
+  const showEmpty = !isLoading && models.length === 0
 
   return (
     <div className="models">
@@ -156,10 +152,7 @@ export function Models(): JSX.Element {
       </div>
 
       {error && (
-        <p
-          className="state__caption state__caption--error"
-          role="alert"
-        >
+        <p className="state__caption state__caption--error" role="alert">
           {error}
         </p>
       )}
@@ -174,14 +167,9 @@ export function Models(): JSX.Element {
           </p>
         </div>
       : groups.map(([type, list], index) => (
-          <ModelGroup
-            key={type}
-            type={type}
-            models={list}
-            open={index === 0}
-          />
+          <ModelGroup key={type} type={type} models={list} open={index === 0} />
         ))
       }
     </div>
-  );
+  )
 }

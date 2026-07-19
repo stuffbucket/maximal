@@ -16,17 +16,17 @@ import {
   isSectionId,
   type Router,
   type RouterHandlers,
-} from "./router";
+} from "./router"
 
-let active: Router | null = null;
+let active: Router | null = null
 
 /** Construct the router from the live `window`, wire click delegation, and start it. */
 export function initRouter(handlers: RouterHandlers): Router {
   const router = createRouter({
-    history: window.history,
-    location: window.location,
+    history: globalThis.history,
+    location: globalThis.location,
     handlers,
-  });
+  })
 
   // Delegated nav: a single listener handles every `[data-nav="<section>"]` link,
   // routing through `router.navigate` (which uses replaceState) instead of letting
@@ -35,20 +35,22 @@ export function initRouter(handlers: RouterHandlers): Router {
   // Projects master-detail (§2.5).
   document.addEventListener("click", (event: MouseEvent) => {
     const origin =
-      event.target instanceof Element ? event.target.closest("[data-nav]") : null;
-    if (!origin) return;
-    const id = origin.getAttribute("data-nav");
-    if (!id || !isSectionId(id)) return;
-    event.preventDefault();
-    router.navigate(id, { project: origin.getAttribute("data-project") });
-  });
+      event.target instanceof Element ?
+        event.target.closest<HTMLElement>("[data-nav]")
+      : null
+    if (!origin) return
+    const id = origin.dataset.nav
+    if (!id || !isSectionId(id)) return
+    event.preventDefault()
+    router.navigate(id, { project: origin.dataset.project })
+  })
 
-  router.start();
-  active = router;
-  return router;
+  router.start()
+  active = router
+  return router
 }
 
 /** The active router instance (for nav-link handlers created after boot). */
 export function activeRouter(): Router | null {
-  return active;
+  return active
 }

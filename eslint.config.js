@@ -102,7 +102,14 @@ export default [
       "contrib/**",
       "docs/**",
       "scripts/**",
-      "shell/**",
+      // shell/src (the browser UI) IS linted (#357). Its non-source
+      // siblings are not: build output, the Rust/Tauri crate, generated
+      // wordmark tooling, and the HTML entry dir.
+      "shell/dist/**",
+      "shell/node_modules/**",
+      "shell/src-tauri/**",
+      "shell/tools/**",
+      "shell/ui/**",
       "site/**",
       ".dependency-cruiser.cjs",
       "landing/**",

@@ -2,7 +2,7 @@ export const fontStacks = {
   display: '"Fraunces", Georgia, "Times New Roman", serif',
   body: '"Commissioner", "Segoe UI", Helvetica, Arial, sans-serif',
   mono: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace',
-} as const;
+} as const
 
 export const text = {
   xs: "0.75rem",
@@ -14,7 +14,7 @@ export const text = {
   "2xl": "2rem",
   "3xl": "2.5rem",
   "4xl": "3rem",
-} as const;
+} as const
 
 export const weight = {
   base: "400",
@@ -22,19 +22,19 @@ export const weight = {
   lg: "600",
   xl: "600",
   "2xl": "700",
-} as const;
+} as const
 
 export const leading = {
   base: "1.6",
   lg: "1.4",
   xl: "1.3",
   "2xl": "1.2",
-} as const;
+} as const
 
 export const tracking = {
   xl: "-0.01em",
   "2xl": "-0.015em",
-} as const;
+} as const
 
 export const spacing = {
   1: "4px",
@@ -45,21 +45,21 @@ export const spacing = {
   6: "32px",
   7: "48px",
   8: "64px",
-} as const;
+} as const
 
 export const radii = {
   input: "6px",
   card: "8px",
   chip: "4px",
   pill: "9999px",
-} as const;
+} as const
 
 export const borderWidth = {
   hairline: "1px",
   thin: "1px",
   thick: "2px",
   heavy: "4px",
-} as const;
+} as const
 
 export const size = {
   xs: "12px",
@@ -68,18 +68,18 @@ export const size = {
   lg: "24px",
   xl: "32px",
   "2xl": "40px",
-} as const;
+} as const
 
 export const elevation = {
   card: "0 1px 2px rgb(0 0 0 / 0.06)",
   modal: "0 8px 24px rgb(0 0 0 / 0.18)",
   tooltip: "0 2px 6px rgb(0 0 0 / 0.1)",
-} as const;
+} as const
 
 export const brand = {
   color: "#c8334a",
   fg: "#ffffff",
-} as const;
+} as const
 
 export const accent = {
   color: "#5198a6", // Used from tokens.css (overriding the drift in usage-viewer)
@@ -87,7 +87,7 @@ export const accent = {
   fg: "#ffffff",
   destructive: "#b32d3f",
   destructiveFg: "#ffffff",
-} as const;
+} as const
 
 export const status = {
   error: "#ef4444",
@@ -98,7 +98,7 @@ export const status = {
   warningFg: "#facc15",
   info: "#38bdf8",
   infoFg: "#7dd3fc",
-} as const;
+} as const
 
 export const link = {
   dark: {
@@ -108,8 +108,8 @@ export const link = {
   light: {
     color: "#2d6470",
     hover: "#1e5560",
-  }
-} as const;
+  },
+} as const
 
 export const focusRing = {
   width: "2px",
@@ -120,12 +120,12 @@ export const focusRing = {
   // on `:focus-visible`. There is deliberately no box-shadow variant —
   // see docs/design/components.md → Focus rings.
   expr: "var(--focus-ring-width) solid var(--focus-ring-color)",
-} as const;
+} as const
 
 export const layout = {
   sidebarWidth: "200px",
   contentMax: "640px",
-} as const;
+} as const
 
 export const themes = {
   dark: {
@@ -151,5 +151,5 @@ export const themes = {
     borderStrong: "#8a8a8a",
     link: link.light.color,
     linkHover: link.light.hover,
-  }
-} as const;
+  },
+} as const

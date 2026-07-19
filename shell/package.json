@@ -1,13 +1,14 @@
 {
   "name": "maximal-shell",
-  "private": true,
   "version": "0.1.0",
+  "private": true,
+  "description": "Tauri shell + browser UI (settings app, islands, splash) for the maximal proxy.",
   "type": "module",
   "scripts": {
-    "dev": "cd .. && bun run app:ui",
     "build": "cd .. && bun run build:ui",
-    "typecheck": "tsc -p tsconfig.json",
-    "tauri": "tauri"
+    "dev": "cd .. && bun run app:ui",
+    "tauri": "tauri",
+    "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

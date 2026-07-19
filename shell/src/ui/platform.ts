@@ -9,7 +9,7 @@
  * WKWebView on macOS reports "Macintosh". Prefer the structured
  * `userAgentData.platform` when present, fall back to the UA string.
  */
-export type OsKind = "macos" | "windows" | "linux";
+export type OsKind = "macos" | "windows" | "linux"
 
 /**
  * The current OS, normalized to the values the i18n catalog's `os` argument
@@ -17,15 +17,15 @@ export type OsKind = "macos" | "windows" | "linux";
  * and any runtime OS check derive from it.
  */
 export function osKind(): OsKind {
-  if (typeof navigator === "undefined") return "macos";
+  if (typeof navigator === "undefined") return "macos"
   const uaData = (navigator as { userAgentData?: { platform?: string } })
-    .userAgentData;
-  const signal = uaData?.platform ?? navigator.userAgent;
-  if (/win/i.test(signal)) return "windows";
-  if (/linux|x11/i.test(signal) && !/android/i.test(signal)) return "linux";
-  return "macos";
+    .userAgentData
+  const signal = uaData?.platform ?? navigator.userAgent
+  if (/win/i.test(signal)) return "windows"
+  if (/linux|x11/i.test(signal) && !/android/i.test(signal)) return "linux"
+  return "macos"
 }
 
 export function isWindows(): boolean {
-  return osKind() === "windows";
+  return osKind() === "windows"
 }

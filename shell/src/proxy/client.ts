@@ -1,6 +1,15 @@
-import { getShellApiKey } from "../tauri/shell";
-
-import { readInlineState } from "./inline-state-client";
+import type {
+  AccountsListResponse,
+  ApiKeyEntry,
+  ApiKeysListResponse,
+  AuthStatus,
+  DiagnosticsResponse,
+  ModelsListResponse,
+  UpdateStatusResponse,
+} from "../../../src/lib/config/settings-types"
+// The active-clients wire contract is owned by the shared feed contract
+// (single source of truth for the WS + this fetch client). See feed-types.ts.
+import type { ActiveApiClientsResponse } from "../../../src/lib/ws/feed-types"
 
 /**
  * Typed fetch client for the proxy's `/settings/api/*` surface.
@@ -25,29 +34,12 @@ import { readInlineState } from "./inline-state-client";
  * is sized for that — `apiCall<TReq, TRes>(endpoint, { body? })` —
  * so we don't need to refactor call sites then.
  */
-
-
-import type {
-  AccountsListResponse,
-  ApiKeyEntry,
-  ApiKeysListResponse,
-  AuthStatus,
-  DiagnosticsResponse,
-  ModelsListResponse,
-  UpdateStatusResponse,
-  UpstreamRejection,
-} from "../../../src/lib/config/settings-types"
-// The active-clients wire contract is owned by the shared feed contract
-// (single source of truth for the WS + this fetch client). See feed-types.ts.
-import type {
-  ActiveApiClient,
-  ActiveApiClientsResponse,
-} from "../../../src/lib/ws/feed-types"
+import { getShellApiKey } from "../tauri/shell"
+import { readInlineState } from "./inline-state-client"
 
 // Re-export so existing shell call sites that pull the type from
 // "./api" keep working. AuthStatus is owned by src/lib/settings-types
 // (ADR-0005/0006) — the shell does NOT redeclare it.
-export type { ActiveApiClient, AuthStatus, UpstreamRejection }
 
 const TIMEOUT_MS = 5000
 
@@ -84,7 +76,6 @@ interface AccountRemoveResponse {
   key: string
   was_active: boolean
 }
-
 
 /**
  * Apps integrations (Claude Code, Claude Desktop, Copilot CLI). Contract
@@ -316,7 +307,9 @@ async function resolveApiKey(override?: string): Promise<string | undefined> {
   // no Tauri IPC to fetch a key over. Prefer it when present. The `typeof window`
   // guard keeps this safe under the DOM-less test runner.
   const inlined =
-    typeof window === "undefined" ? null : readInlineState(window)
+    typeof globalThis.window === "undefined" ?
+      null
+    : readInlineState(globalThis)
   if (inlined?.sessionToken) return inlined.sessionToken
   // Tauri delivery: the shell injects a per-launch key into the sidecar and
   // serves it to the webview on demand.
@@ -386,3 +379,8 @@ export async function apiCall<K extends EndpointKind>(
   }
 }
 
+export {
+  type AuthStatus,
+  type UpstreamRejection,
+} from "../../../src/lib/config/settings-types"
+export { type ActiveApiClient } from "../../../src/lib/ws/feed-types"

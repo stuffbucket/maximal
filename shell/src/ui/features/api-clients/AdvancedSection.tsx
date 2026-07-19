@@ -1,9 +1,12 @@
-import { Checkbox } from "../../components/Checkbox";
-import type { MutationResult } from "./useApiKeys";
+import type { ReactElement } from "react"
+
+import type { MutationResult } from "./useApiKeys"
+
+import { Checkbox } from "../../components/Checkbox"
 
 interface AdvancedSectionProps {
-  enforcing: boolean;
-  setEnforce: (next: boolean) => Promise<MutationResult>;
+  enforcing: boolean
+  setEnforce: (next: boolean) => Promise<MutationResult>
 }
 
 /**
@@ -15,7 +18,7 @@ interface AdvancedSectionProps {
 export function AdvancedSection({
   enforcing,
   setEnforce,
-}: AdvancedSectionProps): JSX.Element {
+}: AdvancedSectionProps): ReactElement {
   return (
     <details className="advanced-section">
       <summary className="advanced-section__summary">
@@ -28,9 +31,8 @@ export function AdvancedSection({
               Block unknown connections
             </span>
             <span className="advanced-section__row-hint">
-              When on, apps that don't present one of the keys listed above
-              are turned away. Leave off if you just want to see which app
-              is which.
+              When on, apps that don't present one of the keys listed above are
+              turned away. Leave off if you just want to see which app is which.
             </span>
           </div>
           <Checkbox
@@ -41,5 +43,5 @@ export function AdvancedSection({
         </div>
       </div>
     </details>
-  );
+  )
 }
