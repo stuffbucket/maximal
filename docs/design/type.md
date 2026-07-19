@@ -7,7 +7,7 @@ is the workhorse humanist sans for everything else.
 
 **Ramp: 16px base, 1.2 ratio.** Always reference token names —
 never inline raw pixel/rem values in components. Values live in
-[`shell/src/tokens.css`](../../shell/src/tokens.css); vocabulary in
+[`shell/src/ui/styles/tokens.css`](../../shell/src/ui/styles/tokens.css); vocabulary in
 [`tokens.md`](tokens.md).
 
 ## Usage by token name

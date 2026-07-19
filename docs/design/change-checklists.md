@@ -1,31 +1,32 @@
 # Change checklists
 
 Recipes for common design changes. Following the checklist costs a
-minute; not following one is how the codebase ends up with two
-different teals named `--accent` (see
-[`failure-modes.md`](failure-modes.md) → *Known active drift*).
+minute; not following one is how the codebase used to end up with two
+different teals named `--accent`. Token values are now single-sourced
+from [`theme.ts`](../../shell/src/ui/styles/theme.ts), which closes
+that gap — keep it closed by editing the source, never the generated
+CSS.
 
 ## Token value hygiene (read first)
 
-- **Values live in `shell/src/tokens.css` only.** Design docs reference
-  tokens by name + purpose, never by value. The only allowed exception
-  is [`failure-modes.md`](failure-modes.md)'s drift audit table.
+- **Values are sourced from `shell/src/ui/styles/theme.ts` only** and
+  generated into `shell/src/ui/styles/tokens.css`. Design docs
+  reference tokens by name + purpose, never by value.
 - If a doc shows a value, that's a bug — fix the doc.
 - If you change a value, follow *Changing a token value* below.
 
 ## Changing a token value
 
-1. Edit `shell/src/tokens.css` (the declared ground truth).
-2. **Also edit `shell/ui/dashboard/style.css`** if the token is
-   redeclared there. The Dashboard is a single embedded HTML file
-   with no CSS imports — token declarations are independent. See
-   [`windows.md`](windows.md) for why.
+1. Edit the value in
+   [`shell/src/ui/styles/theme.ts`](../../shell/src/ui/styles/theme.ts)
+   (the source of truth).
+2. Regenerate the CSS: `bun run scripts/generate-css-tokens.ts`. Never
+   hand-edit `tokens.css` — it is overwritten.
 3. Update the value column in [`tokens.md`](tokens.md) if the value
    appears there.
 4. Search for any inlined raw value the token was supposed to replace:
-   `grep -rn '<old-value>' shell/src shell/ui`.
-5. Manually verify both windows: `bun run app:ui` for the Settings
-   window, open the proxy and visit `/ui/dashboard/` for the Dashboard.
+   `grep -rn '<old-value>' shell/src shell/splash.html`.
+5. Manually verify the app: `bun run app:ui`.
 6. If the change is a color, re-check WCAG AA contrast on both
    surface levels per [`color.md`](color.md).
 
@@ -36,8 +37,8 @@ different teals named `--accent` (see
 2. Add the row to [`tokens.md`](tokens.md) **first**, with `Purpose`,
    `Use for`, `Do NOT use for` filled in. A token without a clear
    role is a future drift source.
-3. Declare in `shell/src/tokens.css` (and the dashboard `style.css` if the
-   Dashboard needs it).
+3. Declare it in [`theme.ts`](../../shell/src/ui/styles/theme.ts) and
+   regenerate (`bun run scripts/generate-css-tokens.ts`).
 4. Use it. Don't inline the value anywhere else.
 
 ## Adding a new component
@@ -83,16 +84,19 @@ different teals named `--accent` (see
 
 ## Adding a window
 
-1. Read [`windows.md`](windows.md) → *Where they diverge*.
-2. Decide: sidecar-served (single embedded HTML, like Dashboard) or
-   Vite-bundled (like Settings)? The choice is architectural, not
-   stylistic.
+1. Read [`windows.md`](windows.md).
+2. Decide: standalone embedded HTML (boots before any bundle, like
+   `splash.html`) or part of the Vite-bundled app (like Settings)? The
+   choice is architectural, not stylistic. Prefer the bundled app so
+   the surface inherits the generated `tokens.css` for free.
 3. Add to the window-sizes table in [`layout.md`](layout.md).
 4. Single-instance behavior: re-show + focus the existing window
    instead of opening another.
 5. Position: center on first launch, then respect last position.
-6. **If sidecar-served:** add a token-declaration block matching
-   `tokens.css`. Mirror future token edits.
+6. **If standalone embedded HTML:** it can't import `tokens.css`, so
+   any inlined brand hex must be kept in sync with `theme.ts` by hand
+   (this is the `splash.html` gap tracked in #352). Avoid adding a
+   second such surface if the bundled app can serve the need.
 
 ## Touching `.design-context.md` itself
 

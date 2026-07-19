@@ -298,8 +298,7 @@ projects get no display type. Routing uses `replaceState` (§1.4): `#projects`
 Split by health: the **auth chip and update banner live in-page** (they matter
 when the sidecar is up to answer for them); **failure recovery lives in the
 native splash** (it matters when the sidecar is down). Status color tokens
-(`--status-*`) already exist in `tokens.css` (the `failure-modes.md` drift table
-is stale — fix separately).
+(`--status-*`) already exist in `tokens.css`, generated from `theme.ts`.
 
 ### 3.1 Auth chip (in the app UI)
 
