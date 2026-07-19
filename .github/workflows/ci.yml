@@ -56,6 +56,13 @@ jobs:
           cd shell && bun install --frozen-lockfile
           bun run typecheck
 
+      - name: Test (shell UI)
+        # Behavioral render tests for the React islands (happy-dom +
+        # @testing-library, preloaded via shell/bunfig.toml). shell deps were
+        # installed by the typecheck step above. Catches render crashes and
+        # wrong-state output; visual-regression is a separate follow-up.
+        run: cd shell && bun run test
+
       - name: Check design tokens
         # Two gates: (1) the design-token drift rules (check:tokens), and
         # (2) freshness — shell/src/ui/styles/tokens.css must be a clean

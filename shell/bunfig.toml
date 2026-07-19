@@ -1,0 +1,5 @@
+# Test config for the shell browser UI. The product suite (root bunfig,
+# root=tests) does not cover shell/src; this runs the React island render
+# tests under shell/tests with a happy-dom DOM registered first.
+[test]
+preload = ["./tests/setup/happydom.ts"]
