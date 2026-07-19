@@ -8,7 +8,7 @@ exist, this doc is canon — match the spec exactly rather than
 hand-rolling something nearby.
 
 Token values themselves live in
-[`shell/src/tokens.css`](../../shell/src/tokens.css); token vocabulary
+[`shell/src/ui/styles/tokens.css`](../../shell/src/ui/styles/tokens.css); token vocabulary
 in [`tokens.md`](tokens.md).
 
 ## Buttons

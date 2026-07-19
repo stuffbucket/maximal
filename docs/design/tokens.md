@@ -1,19 +1,23 @@
 # Token vocabulary
 
-The canonical declaration site is
-[`shell/src/tokens.css`](../../shell/src/tokens.css). **Values live
-there only.** This file is the lookup of *name → purpose → scope*.
+The canonical *source* of token values is
+[`shell/src/ui/styles/theme.ts`](../../shell/src/ui/styles/theme.ts);
+`shell/src/ui/styles/tokens.css` is generated from it by
+`scripts/generate-css-tokens.ts`. **Values live in `theme.ts` only.**
+This file is the lookup of *name → purpose → scope*.
 
-If you need a value, open `tokens.css`. If you're describing a token
-in a doc or commit message, use its name — never inline the value.
+If you need a value, open `theme.ts` (or the generated `tokens.css`).
+If you're describing a token in a doc or commit message, use its name
+— never inline the value.
 
-> **Drift warning.** `shell/ui/dashboard/style.css` redeclares many of
-> these tokens independently (the Dashboard is a single embedded HTML
-> file with no CSS imports — see [`windows.md`](windows.md)).
-> Several values currently differ. See
-> [`failure-modes.md`](failure-modes.md) → *Known active drift* for
-> the audit (and that's the one place we *do* show conflicting values
-> on purpose).
+> **Single source.** Every shell surface is styled from the one
+> generated `tokens.css`. The separate dashboard window that used to
+> redeclare tokens independently was folded into the settings app by
+> the single-window redesign (#343), so the cross-surface token drift
+> this doc once warned about no longer exists. The one surface still
+> outside the generator is `shell/splash.html` (it boots before any
+> bundle) — see [`failure-modes.md`](failure-modes.md) → *Tokens &
+> drift*.
 
 ## Type
 

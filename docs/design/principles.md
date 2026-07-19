@@ -30,7 +30,7 @@ else in `docs/design/` or any agent's intuition, **these win**.
 ## Decision log (locked — do not revisit without cause)
 
 Token names below; canonical values in
-[`shell/src/tokens.css`](../../shell/src/tokens.css).
+[`shell/src/ui/styles/tokens.css`](../../shell/src/ui/styles/tokens.css).
 
 - **Crimson `--brand` is brand only.** Rendered "m," hero moments,
   badging. Not for buttons, focus rings, or interactive states.
