@@ -91,6 +91,13 @@ describe("resolveUpdaterAssets", () => {
   test("returns null when the bundle is present but its .sig is missing", () => {
     expect(resolveUpdaterAssets([dmg, sha256, bundle])).toBeNull();
   });
+
+  test("returns null when a .sig is present but its bundle is absent", () => {
+    // A partial/broken upload — the `.sig` (and `.sha256`) landed but the
+    // `.app.tar.gz` it signs did not. The bundle guard must hold on its own,
+    // not lean on the later signature guard to catch this.
+    expect(resolveUpdaterAssets([dmg, sha256, sig])).toBeNull();
+  });
 });
 
 describe("resolveUpdaterArtifact (signature inlined via mocked fetch)", () => {
