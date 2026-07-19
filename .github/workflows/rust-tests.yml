@@ -1,0 +1,64 @@
+name: Rust tests
+
+# The Tauri crate under shell/src-tauri (updater/decision/native-i18n logic +
+# the boot/tray state machine) has ~17 unit tests that never ran in CI — no
+# workflow invoked `cargo test`. The app is macOS-targeted and the crate only
+# ever compiled on the private signed-build runner, so this gates the Rust
+# tests on a GitHub-hosted macOS runner instead.
+#
+# Path-filtered: only runs when the crate (or this workflow) changes, so it
+# doesn't add macOS minutes to unrelated PRs.
+
+on:
+  pull_request:
+    paths:
+      - "shell/src-tauri/**"
+      - ".github/workflows/rust-tests.yml"
+  push:
+    branches: ["main"]
+    paths:
+      - "shell/src-tauri/**"
+      - ".github/workflows/rust-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  cargo-test:
+    # macOS: WebKit is system-provided (no apt webkit deps), matching the
+    # platform the app targets. macos-latest ships a stable Rust toolchain, so
+    # no toolchain action is needed — this environment also rejects
+    # non-MS/GitHub-sourced actions (the reason setup-bun is vendored).
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            shell/src-tauri/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('shell/src-tauri/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
+
+      - name: Stub build.rs prerequisites
+        # `cargo test` compiles the whole crate, so tauri-build's build script
+        # runs and validates the externalBin sidecar path and frontendDist. The
+        # unit tests don't exercise the real UI or sidecar, so stub both: an
+        # empty executable at binaries/maximal-<triple> and an empty shell/dist
+        # dir satisfy the checks (verified). This avoids a full UI + sidecar
+        # build just to run the Rust tests.
+        run: |
+          set -euo pipefail
+          triple="$(rustc -vV | sed -n 's/^host: //p')"
+          echo "target triple: ${triple}"
+          mkdir -p shell/src-tauri/binaries shell/dist
+          : > "shell/src-tauri/binaries/maximal-${triple}"
+          chmod +x "shell/src-tauri/binaries/maximal-${triple}"
+
+      - name: cargo test
+        run: cargo test --manifest-path shell/src-tauri/Cargo.toml --locked
