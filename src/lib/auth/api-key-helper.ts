@@ -11,6 +11,8 @@
  * (see e.g. `apiKeyHelperCommand`); the resolution itself lives here so every
  * client shares one implementation rather than each reimplementing it.
  */
+import { randomBytes, randomUUID } from "node:crypto"
+
 import type { ApiKeyEntry, AppConfig } from "~/lib/config/config"
 
 import {
@@ -18,7 +20,7 @@ import {
   LEGACY_HELPER_FLAG,
 } from "~/lib/auth/api-key-helper-tokens"
 import { normalizeApiKeys } from "~/lib/auth/request-auth"
-import { getConfig } from "~/lib/config/config"
+import { getConfig, writeConfig } from "~/lib/config/config"
 
 export type ApiKeyHelperResult =
   | { ok: true; key: string; source: "app" | "default" }
@@ -36,10 +38,16 @@ export type ApiKeyHelperResult =
  * double-quoted so a space in it survives both `sh` and `cmd.exe`.
  *
  * `process.execPath` is the right anchor (vs. the macOS-only `~/.local/bin`
- * symlink, which doesn't exist on Windows): it is absolute on every platform.
- * If the app moves/updates, the path can go stale — boot reconciliation
- * rewrites it to the current execPath (see config.ts `applyProxyBaseUrl` +
- * `isOwnedApiKeyHelper`).
+ * symlink, which doesn't exist on Windows) — BUT only when we ARE the maximal
+ * binary, i.e. the compiled single-file sidecar (`bun build --compile`). When
+ * maximal runs under a RUNTIME (dev, `bun run …`, any bun/node-launched CLI),
+ * `process.execPath` is the runtime, not maximal — writing `"…/bun" api <label>`
+ * would make the client run `bun api <label>` (bun tries to exec a script named
+ * `api`, which fails). So in the runtime case we emit `"<runtime>" "<entry>"
+ * api <label>` (with the entry script from `Bun.main`/`process.argv[1]`), which
+ * actually invokes maximal's CLI. The packaged app heals this back to the stable
+ * single-token compiled path on the next boot (see config.ts `applyProxyBaseUrl`
+ * + `isOwnedApiKeyHelper`, which recognizes both forms as ours).
  *
  * The optional `label` lets a user attribute a dedicated key to that client
  * (a key entry whose id/label matches `label` wins over the default key), and
@@ -48,12 +56,42 @@ export type ApiKeyHelperResult =
 export function apiKeyHelperCommand(
   label?: string,
   execPath: string = process.execPath,
+  mainScript: string | undefined = resolveMainScript(),
 ): string {
   const trimmed = label?.trim()
-  const bin = `"${execPath}"`
+  const bin =
+    isRuntimeExecPath(execPath) && mainScript ?
+      `"${execPath}" "${mainScript}"`
+    : `"${execPath}"`
   return trimmed ?
       `${bin} ${HELPER_SUBCOMMAND} ${trimmed}`
     : `${bin} ${HELPER_SUBCOMMAND}`
+}
+
+/** True when `execPath` is a bare JS runtime (bun/node) rather than a compiled
+ *  maximal binary. Basename check, tolerant of a Windows `.exe` suffix and
+ *  either path separator (so it's correct regardless of the host platform); the
+ *  compiled sidecar's basename is `maximal` / `maximal-<triple>`, never these. */
+function isRuntimeExecPath(execPath: string): boolean {
+  const base =
+    execPath
+      .split(/[/\\]/u)
+      .pop()
+      ?.toLowerCase()
+      .replace(/\.exe$/u, "") ?? ""
+  return base === "bun" || base === "node"
+}
+
+/** The entry script maximal was launched with, so a runtime invocation can be
+ *  reconstructed as `"<runtime>" "<entry>" …`. `Bun.main` is set under bun
+ *  (including `bun run src/main.ts`); `process.argv[1]` covers node. Only
+ *  consulted when {@link isRuntimeExecPath} is true, so the compiled binary's
+ *  `$bunfs` `Bun.main` is never written to disk. */
+function resolveMainScript(): string | undefined {
+  // casts-keep: `Bun.main` is an optional runtime global (absent under node).
+  const bunMain = (globalThis as { Bun?: { main?: string } }).Bun?.main
+  if (typeof bunMain === "string" && bunMain.length > 0) return bunMain
+  return process.argv[1]
 }
 
 /**
@@ -79,13 +117,17 @@ export function isOwnedApiKeyHelper(command: unknown, label?: string): boolean {
   if (new RegExp(`\\s${escapeRegExp(legacySuffix)}\\s*$`, "u").test(command)) {
     return true
   }
-  // Current: "<abs-path>" api <label> — anchored on a quoted path so a foreign
-  // `tool api foo` can't match.
+  // Current: "<abs-path>" api <label>  — or the runtime two-token form
+  // "<runtime>" "<entry>" api <label>. Anchored on a leading quoted path so a
+  // foreign `tool api foo` can't match; the optional second quoted token covers
+  // a dev/bun invocation, which boot reconciliation heals to the single-token
+  // compiled path.
   const apiSuffix =
     trimmed ? `${HELPER_SUBCOMMAND} ${trimmed}` : HELPER_SUBCOMMAND
-  return new RegExp(`^"[^"]+"\\s+${escapeRegExp(apiSuffix)}\\s*$`, "u").test(
-    command,
-  )
+  return new RegExp(
+    `^"[^"]+"(?:\\s+"[^"]+")?\\s+${escapeRegExp(apiSuffix)}\\s*$`,
+    "u",
+  ).test(command)
 }
 
 function escapeRegExp(value: string): string {
@@ -148,6 +190,71 @@ function getDefaultEndpointApiKey(config: AppConfig): string | null {
     isEnabledEntry(entry),
   )
   return fallbackEntry?.key.trim() ?? null
+}
+
+/**
+ * Generate a random API-key value: `mxl_` + 24 bytes base64url (32 chars).
+ * base64url is [A-Za-z0-9_-], so the result already satisfies
+ * `API_KEY_VALUE_PATTERN`. The `mxl_` prefix makes an accidental commit
+ * greppable. Single source for BOTH the Settings "generate key" route and the
+ * auto-minted default endpoint key (see `ensureDefaultEndpointKey`).
+ */
+export function generateApiKeyValue(): string {
+  return `mxl_${randomBytes(24).toString("base64url")}`
+}
+
+/** Injectable seams for {@link ensureDefaultEndpointKey} — real config/FS by
+ *  default, overridable in tests so no on-disk config is touched. */
+export interface EnsureDefaultKeyDeps {
+  read?: () => AppConfig
+  write?: (config: AppConfig) => void
+  mintKey?: () => string
+  newId?: () => string
+  now?: () => string
+}
+
+/**
+ * Guarantee a resolvable default endpoint key exists, minting one if not.
+ *
+ * A config app with an `apiKeyLabel` points its client at `maximal api <label>`,
+ * which falls back to the default endpoint key when no per-app key matches. If
+ * NO key is configured at all, that fallback is empty and the helper exits 1 —
+ * so the client's `apiKeyHelper` hard-fails even though the proxy accepts
+ * key-less requests while enforcement is off. Enabling such an app (and boot
+ * reconciliation) calls this so the client always has a usable key, and so
+ * turning on "Block unknown connections" later can't lock out a client that was
+ * already wired up.
+ *
+ * Idempotent: a no-op when any enabled endpoint key (legacy `auth.apiKeys` or an
+ * enabled `apiKeyEntries` entry) already exists. Labeled "Default" (generic) so
+ * it is the shared fallback, not coupled to any one app.
+ */
+export function ensureDefaultEndpointKey(
+  deps: EnsureDefaultKeyDeps = {},
+): void {
+  const read = deps.read ?? getConfig
+  const write = deps.write ?? writeConfig
+  const mintKey = deps.mintKey ?? generateApiKeyValue
+  const newId = deps.newId ?? randomUUID
+  const now = deps.now ?? (() => new Date().toISOString())
+
+  const config = read()
+  if (getDefaultEndpointApiKey(config) !== null) return
+
+  const entry: ApiKeyEntry = {
+    id: newId(),
+    label: "Default",
+    key: mintKey(),
+    enabled: true,
+    created_at: now(),
+  }
+  write({
+    ...config,
+    auth: {
+      ...config.auth,
+      apiKeyEntries: [...(config.auth?.apiKeyEntries ?? []), entry],
+    },
+  })
 }
 
 /**

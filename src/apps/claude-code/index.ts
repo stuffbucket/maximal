@@ -1,5 +1,7 @@
 import type { AppEntry } from "~/lib/config/settings-types"
 
+import { ensureDefaultEndpointKey } from "~/lib/auth/api-key-helper"
+
 import type { AppUninstallResult, ClientApp } from "../index"
 
 import {
@@ -64,6 +66,11 @@ export const claudeCodeApp: ClientApp = {
     // ALL callers (CLI + Settings UI), not just the HTTP path. Single writer:
     // the Settings route no longer persists this separately.
     setClaudeCodeRoutingIntent(true)
+    // Guarantee the apiKeyHelper can resolve a key: mint the default endpoint
+    // key if none is configured, so `maximal api claude-code` never exits
+    // key-less (which would break the client even though the proxy accepts
+    // key-less requests while enforcement is off).
+    ensureDefaultEndpointKey()
     return Promise.resolve({
       success: result.wrote || conflict === null,
       conflict,

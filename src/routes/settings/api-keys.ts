@@ -22,8 +22,9 @@
  */
 
 import { Hono } from "hono"
-import { randomBytes, randomUUID } from "node:crypto"
+import { randomUUID } from "node:crypto"
 
+import { generateApiKeyValue } from "~/lib/auth/api-key-helper"
 import { getConfig, writeConfig } from "~/lib/config/config"
 import { API_KEY_VALUE_PATTERN } from "~/lib/config/config-schema"
 import {
@@ -34,19 +35,6 @@ import {
 } from "~/lib/config/settings-types"
 
 export const apiKeysRoutes = new Hono()
-
-/**
- * Generate a random 32-character key. base64url-ish but restricted to
- * the same charset the validator accepts. Prefixed `mxl_` so an
- * accidental commit is greppable.
- */
-function generateKey(): string {
-  // 24 bytes → 32 base64url chars (`=` stripped). base64url uses only
-  // [A-Za-z0-9_-], so the result already matches API_KEY_VALUE_PATTERN
-  // (minus the prefix, which we add separately and is also in-charset).
-  const body = randomBytes(24).toString("base64url")
-  return `mxl_${body}`
-}
 
 function buildListResponse(): ApiKeysListResponse {
   const config = getConfig()
@@ -70,7 +58,7 @@ apiKeysRoutes.post("/", async (c) => {
       400,
     )
   }
-  const key = (parsed.data.key ?? generateKey()).trim()
+  const key = (parsed.data.key ?? generateApiKeyValue()).trim()
   if (!API_KEY_VALUE_PATTERN.test(key)) {
     return c.json(
       {
