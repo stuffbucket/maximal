@@ -1,5 +1,6 @@
 import consola from "consola"
 
+import { ensureDefaultEndpointKey } from "~/lib/auth/api-key-helper"
 import { getConfig, writeConfig } from "~/lib/config/config"
 
 import {
@@ -41,6 +42,9 @@ export function reconcileClaudeCodeOnBoot(
 ): void {
   if (!intended) return
   try {
+    // Heal existing already-enabled-but-key-less installs: mint the default
+    // endpoint key if none exists (idempotent), so the apiKeyHelper resolves.
+    ensureDefaultEndpointKey()
     const result = applyProxyBaseUrl(filePath)
     if (result.wrote) {
       consola.info(
