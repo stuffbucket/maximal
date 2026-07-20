@@ -26,7 +26,7 @@ import {
   cacheVsCodeSessionId,
   cacheVSCodeVersion,
 } from "~/lib/platform/utils"
-import { hasGithubToken, state } from "~/lib/runtime-state/state"
+import { hasGithubToken, setLastView, state } from "~/lib/runtime-state/state"
 import { getGitVersion, shortSha } from "~/lib/update/version"
 import { buildSnapshot, LiveFeedHub } from "~/lib/ws/live-feed"
 import { presenceRegistry } from "~/lib/ws/presence-registry"
@@ -70,7 +70,12 @@ function createLiveFeed(): {
 } {
   const registry = presenceRegistry
   const hub = new LiveFeedHub({ registry, buildSnapshot })
-  return { hub, websocket: createWebSocketHandler({ hub, registry }) }
+  return {
+    hub,
+    // onView persists the tab's section+scroll (§1.4) so a tray-reopened tab keeps
+    // the user's place; buildInlineUiState reads it back on the next page load.
+    websocket: createWebSocketHandler({ hub, registry, onView: setLastView }),
+  }
 }
 
 export interface RunServerOptions {
