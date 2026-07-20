@@ -78,11 +78,13 @@ describe("live-feed core — unskip when implemented", () => {
       type: "hello",
       tabId: "a",
       visibility: "visible",
+      focused: true,
     })
     expect(JSON.parse(frame)).toEqual({
       type: "hello",
       tabId: "a",
       visibility: "visible",
+      focused: true,
     })
   })
 })

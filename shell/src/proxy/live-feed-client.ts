@@ -46,6 +46,34 @@ export interface LiveFeedConnection {
 }
 
 /**
+ * Wire the DOM listeners that keep the sidecar's presence registry current, and
+ * return a teardown. BOTH visibility and OS focus are reported (§1.2): switching
+ * app or browser window changes `document.hasFocus()` WITHOUT firing
+ * `visibilitychange` (the tab stays "visible") — that gap is exactly what made a
+ * tray click dead when the browser wasn't frontmost. On a hidden→visible
+ * transition, `reconnectIfDropped` reconnects a dead socket (and returns true,
+ * suppressing the presence report, since the reconnect's `hello` carries it).
+ */
+function installPresenceReporting(
+  reportPresence: () => void,
+  reconnectIfDropped: () => boolean,
+): () => void {
+  const onVisibilityChange = (): void => {
+    if (document.visibilityState === "visible" && reconnectIfDropped()) return
+    reportPresence()
+  }
+  const onFocusChange = (): void => reportPresence()
+  document.addEventListener("visibilitychange", onVisibilityChange)
+  globalThis.addEventListener("focus", onFocusChange)
+  globalThis.addEventListener("blur", onFocusChange)
+  return (): void => {
+    document.removeEventListener("visibilitychange", onVisibilityChange)
+    globalThis.removeEventListener("focus", onFocusChange)
+    globalThis.removeEventListener("blur", onFocusChange)
+  }
+}
+
+/**
  * Open the feed using values inlined in `window.__STATE__` (bound port + session
  * token). Owns reconnect/backoff/visibility internally via `live-feed-core.ts`.
  */
@@ -95,7 +123,12 @@ export function connectLiveFeed(
       setStatus("open")
       // The sidecar sends a full snapshot on connect, so a reconnect resyncs
       // without an extra request; we only announce presence + visibility.
-      send({ type: "hello", tabId, visibility: document.visibilityState })
+      send({
+        type: "hello",
+        tabId,
+        visibility: document.visibilityState,
+        focused: document.hasFocus(),
+      })
     })
 
     socket.addEventListener("message", (ev: MessageEvent): void => {
@@ -134,19 +167,25 @@ export function connectLiveFeed(
     socket.addEventListener("error", (): void => socket?.close())
   }
 
-  const onVisibilityChange = (): void => {
-    if (
-      document.visibilityState === "visible"  // Refocus after the socket was dropped (e.g. Safari tore it down while
-      // backgrounded): reconnect immediately at the base backoff.
-      && (!socket || socket.readyState === WebSocket.CLOSED)
-    ) {
-      attempt = 0
-      connect()
-      return
-    }
-    send({ type: "visibility", visibility: document.visibilityState })
-  }
-  document.addEventListener("visibilitychange", onVisibilityChange)
+  // Keep the sidecar's presence registry current (visibility + OS focus, §1.2). A
+  // hidden→visible transition that finds the socket dropped reconnects instead of
+  // just reporting.
+  const teardownPresence = installPresenceReporting(
+    () =>
+      send({
+        type: "visibility",
+        visibility: document.visibilityState,
+        focused: document.hasFocus(),
+      }),
+    () => {
+      if (!socket || socket.readyState === WebSocket.CLOSED) {
+        attempt = 0
+        connect()
+        return true
+      }
+      return false
+    },
+  )
 
   connect()
 
@@ -155,7 +194,7 @@ export function connectLiveFeed(
     close: (): void => {
       closedByUser = true
       if (reconnectTimer !== null) globalThis.clearTimeout(reconnectTimer)
-      document.removeEventListener("visibilitychange", onVisibilityChange)
+      teardownPresence()
       socket?.close()
       setStatus("closed")
     },
