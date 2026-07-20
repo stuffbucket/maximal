@@ -19,6 +19,7 @@ function validState(): InlineUiState {
     locale: "en",
     boundPort: 4242,
     dismissedUpdateVersion: null,
+    restoreView: null,
   }
 }
 

@@ -45,13 +45,18 @@ function asServerWs(ws: FakeWs): ServerWebSocket<WsData> {
 /** A sentinel snapshot — only identity matters for "was it forwarded?". */
 const SENTINEL_SNAPSHOT = { health: "healthy" } as unknown as LiveFeedSnapshot
 
-function makeHandler() {
+function makeHandler(
+  onView?: (view: { section: string; scrollY: number }) => void,
+) {
   const registry = new PresenceRegistry()
   const hub = new LiveFeedHub({
     registry,
     buildSnapshot: () => Promise.resolve(SENTINEL_SNAPSHOT),
   })
-  return { registry, handler: createWebSocketHandler({ hub, registry }) }
+  return {
+    registry,
+    handler: createWebSocketHandler({ hub, registry, onView }),
+  }
 }
 
 /** Flush the microtask + macrotask queue so the fire-and-forget snapshot lands. */
@@ -236,6 +241,28 @@ describe("createWebSocketHandler — message", () => {
     expect(registry.snapshot()).toEqual([
       { tabId: "b", visibility: "visible", focused: false },
     ])
+  })
+
+  test("a view frame is routed to onView (restore-on-reopen §1.4)", () => {
+    const seen: Array<{ section: string; scrollY: number }> = []
+    const { handler } = makeHandler((v) => seen.push(v))
+    const ws = fakeWs({ authed: true, tabId: null })
+    handler.message(
+      asServerWs(ws),
+      JSON.stringify({ type: "view", section: "usage", scrollY: 240 }),
+    )
+    expect(seen).toEqual([{ section: "usage", scrollY: 240 }])
+  })
+
+  test("a view frame with a non-finite scroll clamps to 0, section preserved", () => {
+    const seen: Array<{ section: string; scrollY: number }> = []
+    const { handler } = makeHandler((v) => seen.push(v))
+    const ws = fakeWs({ authed: true, tabId: null })
+    handler.message(
+      asServerWs(ws),
+      JSON.stringify({ type: "view", section: "apps", scrollY: null }),
+    )
+    expect(seen).toEqual([{ section: "apps", scrollY: 0 }])
   })
 })
 

@@ -5,6 +5,7 @@ import type {
   NetworkDiagnosisKind,
   NetworkScope,
 } from "~/lib/net/network-diagnostics"
+import type { ViewState } from "~/lib/ws/feed-types"
 import type { ModelsResponse } from "~/services/copilot/get-models"
 
 import { emitAuthChanged } from "~/lib/config/settings-events"
@@ -98,6 +99,15 @@ export interface State {
     kind: NetworkDiagnosisKind
     scope: NetworkScope | null
   }
+
+  /**
+   * The section + scroll the most-recent tab reported (§1.4 restore-on-reopen).
+   * In-memory only (session UX, not durable config): a tray click that surfaces
+   * the app by closing a not-in-front tab and opening a fresh one reads this back
+   * via `buildInlineUiState` so the fresh tab keeps the user's place. Written only
+   * via `setLastView`, fed by the WS `view` frame (routes/ws/route.ts).
+   */
+  lastView?: ViewState
 }
 
 export const state: State = {
@@ -139,6 +149,16 @@ export function setCopilotToken(token: string): void {
 
 export function setUserName(name: string): void {
   state.userName = name
+}
+
+/**
+ * Record the section + scroll a tab last reported (§1.4 restore-on-reopen). Fed by
+ * the WS `view` frame; read by `buildInlineUiState` so a tray-reopened tab keeps
+ * the user's place. Last writer wins — with the single-tab invariant that is the
+ * tab the user was just looking at.
+ */
+export function setLastView(view: ViewState): void {
+  state.lastView = view
 }
 
 /**
