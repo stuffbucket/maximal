@@ -1,5 +1,7 @@
 import { type ReactElement, useEffect, useRef, type ReactNode } from "react"
 
+import { Button } from "./Button"
+
 interface ConfirmDialogProps {
   open: boolean
   title: string
@@ -95,25 +97,21 @@ export function ConfirmDialog({
         <h2 className="confirm-dialog__title">{title}</h2>
         <div className="confirm-dialog__body">{body}</div>
         <div className="confirm-dialog__actions">
-          <button
+          <Button
             ref={cancelRef}
-            type="button"
-            className="btn btn--ghost"
+            variant="ghost"
             onClick={onCancelGuard}
             disabled={busy}
           >
             {cancelLabel}
-          </button>
-          <button
-            type="button"
-            className={
-              tone === "danger" ? "btn btn--danger" : "btn btn--primary"
-            }
+          </Button>
+          <Button
+            variant={tone === "danger" ? "destructive" : "primary"}
             onClick={onConfirmClick}
             disabled={busy}
           >
             {busy ? "Working…" : confirmLabel}
-          </button>
+          </Button>
         </div>
       </div>
     </dialog>

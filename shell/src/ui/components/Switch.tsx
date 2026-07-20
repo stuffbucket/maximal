@@ -1,16 +1,16 @@
 // vendored: controlled toggle wrapping the .switch checkbox in styles.css.
-import type { ReactElement } from "react"
+import type { ReactElement, InputHTMLAttributes } from "react"
 
 import { cx } from "./cx"
 
-interface SwitchProps {
+interface SwitchProps extends Omit<
+  InputHTMLAttributes<HTMLInputElement>,
+  "type" | "checked" | "onChange"
+> {
   checked: boolean
   onCheckedChange: (next: boolean) => void
   label?: string
   hideLabel?: boolean
-  disabled?: boolean
-  id?: string
-  className?: string
 }
 
 export function Switch({
@@ -18,18 +18,16 @@ export function Switch({
   onCheckedChange,
   label,
   hideLabel,
-  disabled,
-  id,
   className,
+  ...rest
 }: SwitchProps): ReactElement {
   return (
     <label className={cx("switch", className)}>
       <input
         type="checkbox"
-        id={id}
         checked={checked}
-        disabled={disabled}
         onChange={(e) => onCheckedChange(e.target.checked)}
+        {...rest}
       />
       {label !== undefined && (
         <span className={hideLabel ? "sr-only" : undefined}>{label}</span>

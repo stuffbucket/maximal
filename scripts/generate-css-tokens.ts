@@ -2,7 +2,7 @@ import { writeFileSync, readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   fontStacks, text, weight, leading, tracking, spacing, radii, borderWidth, size,
-  elevation, brand, accent, status, viz, link, focusRing, layout, themes
+  elevation, opacity, duration, easing, brand, accent, status, viz, link, focusRing, layout, themes
 } from "../shell/src/ui/styles/theme";
 
 const REPO = resolve(import.meta.dir, "..");
@@ -55,6 +55,13 @@ function generateTokensCSS(): string {
 
   rootLines.push("\n  /* ---- Elevation ---- */");
   Object.entries(elevation).forEach(([k, v]) => rootLines.push(`  --elevation-${k}: ${v};`));
+
+  rootLines.push("\n  /* ---- Opacity ---- */");
+  Object.entries(opacity).forEach(([k, v]) => rootLines.push(`  --opacity-${k}: ${v};`));
+
+  rootLines.push("\n  /* ---- Motion ---- */");
+  Object.entries(duration).forEach(([k, v]) => rootLines.push(`  --duration-${k}: ${v};`));
+  Object.entries(easing).forEach(([k, v]) => rootLines.push(`  --easing-${k}: ${v};`));
 
   rootLines.push("\n  /* ---- Colors ---- */");
   rootLines.push(...processGroup("brand", brand as any));

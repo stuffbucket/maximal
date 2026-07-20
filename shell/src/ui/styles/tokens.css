@@ -28,6 +28,7 @@
   --leading-2xl: 1.2;
   --tracking-xl: -0.01em;
   --tracking-2xl: -0.015em;
+  --tracking-caps: 0.02em;
 
   /* ---- Spacing ---- */
   --space-1: 4px;
@@ -64,12 +65,20 @@
   --elevation-modal: 0 8px 24px rgb(0 0 0 / 0.18);
   --elevation-tooltip: 0 2px 6px rgb(0 0 0 / 0.1);
 
+  /* ---- Opacity ---- */
+  --opacity-disabled: 0.5;
+
+  /* ---- Motion ---- */
+  --duration-fast: 120ms;
+  --duration-base: 150ms;
+  --easing-standard: ease-out;
+
   /* ---- Colors ---- */
   --brand: #c8334a;
   --brand-fg: #ffffff;
   --accent: #5198a6;
   --accent-fg: #ffffff;
-  --accent-hover: #2dd4bf;
+  --accent-hover: #63a9b6;
   --accent-destructive: #b32d3f;
   --accent-destructive-foreground: #ffffff;
 

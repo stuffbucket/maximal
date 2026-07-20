@@ -1,5 +1,7 @@
+import type { ButtonHTMLAttributes, ReactNode } from "react"
+
 // vendored: wraps <button> with .btn .btn--* classes from styles.css.
-import type { ReactElement, ButtonHTMLAttributes, ReactNode } from "react"
+import { forwardRef } from "react"
 
 import { cx } from "./cx"
 
@@ -23,25 +25,33 @@ const VARIANT_CLASS: Record<ButtonVariant, string> = {
   destructive: "btn btn--destructive",
 }
 
-export function Button({
-  variant = "secondary",
-  size = "md",
-  type = "button",
-  className,
-  children,
-  ...rest
-}: ButtonProps): ReactElement {
-  return (
-    <button
-      type={type}
-      className={cx(
-        VARIANT_CLASS[variant],
-        size === "sm" && "btn--sm",
-        className,
-      )}
-      {...rest}
-    >
-      {children}
-    </button>
-  )
-}
+export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
+  function Button(
+    {
+      variant = "secondary",
+      size = "md",
+      type = "button",
+      className,
+      children,
+      ...rest
+    },
+    ref,
+  ) {
+    return (
+      <button
+        ref={ref}
+        type={type}
+        className={cx(
+          VARIANT_CLASS[variant],
+          size === "sm" && "btn--sm",
+          className,
+        )}
+        {...rest}
+      >
+        {children}
+      </button>
+    )
+  },
+)
+
+Button.displayName = "Button"
