@@ -2327,110 +2327,76 @@ a:hover {
   font-variant-numeric: tabular-nums;
 }
 
+/* ---- Live trackers ----
+   Five counters in ONE typographic stat row — deliberately NOT a KPI-tile
+   grid (the #1 failure mode). No card chrome: each counter is a colored
+   sentence-case label, a 2px token-color top rule, and a big mono tabular
+   number. A single horizontal band that passes the squint test; wraps on a
+   narrow pane. The per-counter accent color arrives inline via
+   border-top-color / label color (a viz token var); everything else is a
+   token here. The count-up is JS-gated on reduced motion, and the status dot
+   is static, so no reduced-motion CSS is needed for this block. */
+.usage-trackers {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-4) var(--space-6);
+}
+.usage-trackers__item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-top: var(--space-2);
+  border-top: var(--border-width-thick) solid var(--border-subtle);
+  min-width: 0;
+}
+.usage-trackers__label {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-md);
+  line-height: var(--leading-lg);
+}
+.usage-trackers__value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-base);
+  line-height: var(--leading-2xl);
+  color: var(--text-strong);
+}
+/* The Total is the sum — biggest by SIZE, not weight. */
+.usage-trackers__item--total .usage-trackers__value {
+  font-size: var(--text-3xl);
+}
+
+/* Two graphs side by side on a wide canvas (near-term hero + period trend),
+   stacking to one column when the pane is narrow. Not cards — each chart's own
+   visual separates it. */
+.usage-graphs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: var(--space-6);
+  align-items: start;
+}
+
+/* The explicit timescale label above a graph ("Live · last hour", "This week"). */
+.usage-hero__caption {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
 /* ---- Live hero ----
-   NOT a card: the chart's own gradient is the visual. Numerals + live rate
-   sit above the stream, models below. */
+   NOT a card: the chart's own gradient is the visual. The numbers and the color
+   key both live in the tracker strip above; this section is just the stream. */
 .usage-hero {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
 }
-.usage-hero__head {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: var(--space-4);
-  flex-wrap: wrap;
-}
-.usage-hero__now {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-.usage-hero__now-value {
-  font-size: var(--text-3xl);
-  font-weight: var(--weight-2xl);
-  line-height: var(--leading-2xl);
-  letter-spacing: var(--tracking-2xl);
-  color: var(--text-strong);
-  font-variant-numeric: tabular-nums;
-}
-.usage-hero__now-label {
-  font-size: var(--text-sm);
-  color: var(--text-muted);
-}
-.usage-hero__rate {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-.usage-hero__rate-value {
-  font-size: var(--text-sm);
-  color: var(--text-base-color);
-  font-variant-numeric: tabular-nums;
-}
-.usage-hero__dot {
-  width: var(--space-2);
-  height: var(--space-2);
-  border-radius: var(--radius-pill);
-  background: var(--border-strong);
-}
-.usage-hero__dot--live {
-  background: var(--viz-input);
-  animation: usage-pulse 2s ease-out infinite;
-}
 
 .usage-hero__stream {
   width: 100%;
 }
-
-/* Recent-model chips; the newest flashes once as it mounts. */
-.usage-hero__models {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.usage-hero__model {
-  font-size: var(--text-sm);
-  font-family: var(--font-mono);
-  color: var(--text-base-color);
-  background: var(--surface-control);
-  border: var(--border-width-hairline) solid var(--border-subtle);
-  border-radius: var(--radius-chip);
-  padding: var(--space-1) var(--space-2);
-}
-.usage-hero__model--flash {
-  animation: usage-flash 900ms ease-out;
-}
-
-/* Legend for the stacked bands. */
-.usage-hero__legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-4);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  font-size: var(--text-sm);
-  color: var(--text-muted);
-}
-.usage-hero__legend-item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-.usage-hero__legend-item::before {
-  content: "";
-  width: var(--space-3);
-  height: var(--space-2);
-  border-radius: var(--radius-chip);
-}
-.usage-hero__legend-item--input::before { background: var(--viz-input); }
-.usage-hero__legend-item--output::before { background: var(--viz-output); }
-.usage-hero__legend-item--cache::before { background: var(--viz-cache); }
 
 /* Chart wrapper — the SVG fills its measured width. */
 .usage-chart {
@@ -2441,6 +2407,13 @@ a:hover {
   width: 100%;
   height: auto;
   overflow: visible;
+}
+/* Period-trend empty state. */
+.usage-chart__empty {
+  margin: 0;
+  padding: var(--space-6) 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
 }
 
 /* ---- Sections (typographic, not cards) ---- */
@@ -2693,22 +2666,8 @@ a:hover {
 }
 
 /* ---- Motion ---- */
-@keyframes usage-pulse {
-  0% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.4; transform: scale(1.35); }
-  100% { opacity: 1; transform: scale(1); }
-}
-@keyframes usage-flash {
-  0% { border-color: var(--viz-input); background: var(--surface-card); }
-  100% { border-color: var(--border-subtle); background: var(--surface-control); }
-}
-
-/* Reduced motion is literal: no pulse, no flash, no bar tween. */
+/* Reduced motion is literal: no bar tween. */
 @media (prefers-reduced-motion: reduce) {
-  .usage-hero__dot--live,
-  .usage-hero__model--flash {
-    animation: none !important;
-  }
   .usage-ranked__fill {
     transition: none !important;
   }

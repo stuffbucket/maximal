@@ -1,162 +1,83 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 
 import type { LiveEvent, UsageLive } from "../useUsage"
+import type { TrafficPoint } from "./traffic-bands"
 
-import { formatCompact, formatNumber, providerLabel } from "../format"
-import { AreaTrend, type TrendPoint } from "./AreaTrend"
-import { useReducedMotion } from "./useReducedMotion"
+import { AreaTrend } from "./AreaTrend"
 
 /**
- * The live-traffic hero (§4) — the mesmerizing centerpiece. Its spectacle is
- * REAL proxy traffic: a rolling per-minute stacked area of the last hour that
- * redraws as requests land, a live "last minute" rate, and the models currently
- * in flight. The only decorative motion is the pulse on the newest model chip,
- * which is turned OFF (not softened) under `prefers-reduced-motion`.
+ * The near-term (last hour) live view of token traffic (§4). The per-type
+ * numbers and the color key both live in the tracker strip above; this chart
+ * just shows the SHAPE of recent activity over a rolling 60-minute window,
+ * stacked into the shared 4 token-type bands (input / output / cached input /
+ * cached output). It updates every second so the window rolls forward and old
+ * minutes scroll off even when idle. The period-reactive trend (week/month/all)
+ * is a separate component. No legend or model chips here — the tracker strip is
+ * the single legend, and the moving area is its own liveness signal.
  */
 
+const WINDOW_MINUTES = 60
 const MINUTE_MS = 60_000
-const WINDOW_MINUTES = 120
 
-/** Bucket the live ring into `WINDOW_MINUTES` per-minute bins ending at `now`. */
-function toBins(
+/**
+ * Bin the live ring into per-minute token-type bins across the last hour,
+ * aligned to minute boundaries and ending at the current minute. Cache bands
+ * come straight from each event's read/creation counts (not a total residual).
+ */
+function binEvents(
   events: ReadonlyArray<LiveEvent>,
   now: number,
-): Array<TrendPoint> {
-  const endMinute = Math.floor(now / MINUTE_MS)
-  const startMinute = endMinute - (WINDOW_MINUTES - 1)
-  const bins: Array<TrendPoint> = []
-  for (let m = startMinute; m <= endMinute; m += 1) {
-    bins.push({ t: m * MINUTE_MS, input: 0, output: 0, cache: 0 })
-  }
+): Array<TrafficPoint> {
+  const curMinute = Math.floor(now / MINUTE_MS) * MINUTE_MS
+  const startMinute = curMinute - (WINDOW_MINUTES - 1) * MINUTE_MS
+  const bins: Array<TrafficPoint> = Array.from(
+    { length: WINDOW_MINUTES },
+    (_unused, i) => ({
+      t: startMinute + i * MINUTE_MS,
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheCreation: 0,
+    }),
+  )
   for (const e of events) {
-    const m = Math.floor(e.ms / MINUTE_MS)
-    const idx = m - startMinute
-    if (idx < 0 || idx >= bins.length) continue
+    const idx = Math.floor((e.ms - startMinute) / MINUTE_MS)
+    if (idx < 0 || idx >= WINDOW_MINUTES) continue
     const bin = bins[idx]
     bin.input += e.inputTokens
     bin.output += e.outputTokens
-    bin.cache += Math.max(0, e.totalTokens - e.inputTokens - e.outputTokens)
+    bin.cacheRead += e.cacheReadTokens
+    bin.cacheCreation += e.cacheCreationTokens
   }
   return bins
 }
 
-/** Tokens recorded in the trailing minute — the "now" rate. */
-function lastMinuteTokens(
-  events: ReadonlyArray<LiveEvent>,
-  now: number,
-): number {
-  const cutoff = now - MINUTE_MS
-  let sum = 0
-  for (const e of events) if (e.ms >= cutoff) sum += e.totalTokens
-  return sum
-}
-
-/** Distinct models seen most recently, newest first (max `limit`). */
-function recentModels(
-  events: ReadonlyArray<LiveEvent>,
-  limit: number,
-): Array<{ model: string; provider: string }> {
-  const seen = new Set<string>()
-  const out: Array<{ model: string; provider: string }> = []
-  for (let i = events.length - 1; i >= 0 && out.length < limit; i -= 1) {
-    const e = events[i]
-    if (seen.has(e.model)) continue
-    seen.add(e.model)
-    out.push({ model: e.model, provider: e.provider })
-  }
-  return out
-}
-
 export function LiveTrafficStream({
   live,
-  totalTokensToday,
-  requestsToday,
 }: {
   live: UsageLive
-  totalTokensToday: number
-  requestsToday: number
 }): React.ReactElement {
-  const reduced = useReducedMotion()
-
-  // A 1s tick keeps the rolling window + "last minute" rate current even when no
-  // new events arrive (so old traffic scrolls off the left edge honestly).
+  // Tick every second so the rolling hour advances (and old minutes scroll off)
+  // even when no new events arrive.
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(id)
   }, [])
 
-  const bins = toBins(live.events, now)
-  const rate = lastMinuteTokens(live.events, now)
-  const models = recentModels(live.events, 6)
-  const isLive = live.lastAt !== null && now - live.lastAt < 90_000
+  const bins = useMemo(() => binEvents(live.events, now), [live.events, now])
 
   return (
-    <section className="usage-hero" aria-label="Live traffic">
-      <header className="usage-hero__head">
-        <div className="usage-hero__now">
-          <span className="usage-hero__now-value">
-            {formatCompact(totalTokensToday)}
-          </span>
-          <span className="usage-hero__now-label">
-            tokens today · {formatNumber(requestsToday)} requests
-          </span>
-        </div>
-        <div className="usage-hero__rate">
-          <span
-            className={
-              isLive ?
-                "usage-hero__dot usage-hero__dot--live"
-              : "usage-hero__dot"
-            }
-            aria-hidden="true"
-          />
-          <span className="usage-hero__rate-value" aria-live="polite">
-            {formatCompact(rate)}/min
-          </span>
-        </div>
-      </header>
-
+    <section className="usage-hero" aria-label="Token traffic — last hour">
+      <p className="usage-hero__caption">Live · last hour</p>
       <div className="usage-hero__stream">
         <AreaTrend
           data={bins}
           height={200}
           showAxes
-          ariaLabel="Live token traffic over the last two hours"
+          ariaLabel="Live token traffic — last hour"
         />
       </div>
-
-      {models.length > 0 && (
-        <ul className="usage-hero__models" aria-label="Recently active models">
-          {models.map((m, i) => (
-            <li
-              // The newest chip flashes as it enters (reduced-motion neutralizes
-              // the flash globally). Keyed by model so a re-used model stays put.
-              key={m.model}
-              className={
-                i === 0 && !reduced ?
-                  "usage-hero__model usage-hero__model--flash"
-                : "usage-hero__model"
-              }
-              title={`${m.model} · ${providerLabel(m.provider)}`}
-            >
-              {m.model}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <ul className="usage-hero__legend" aria-hidden="true">
-        <li className="usage-hero__legend-item usage-hero__legend-item--input">
-          Input
-        </li>
-        <li className="usage-hero__legend-item usage-hero__legend-item--output">
-          Output
-        </li>
-        <li className="usage-hero__legend-item usage-hero__legend-item--cache">
-          Cache
-        </li>
-      </ul>
     </section>
   )
 }

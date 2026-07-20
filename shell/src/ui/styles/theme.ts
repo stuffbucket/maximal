@@ -128,14 +128,21 @@ export const status = {
  * Data visualization). Category identity by token TYPE, not interactive state —
  * deliberately not `--accent`, never `--brand`. Mid-tone values chosen to read
  * on both the dark and light surfaces; declared once on `:root`
- * (theme-independent). These three are the token-type split (input / output /
- * cache) used consistently across the traffic area, the proportion bar, and the
- * per-model/provider bars, so one color language reads everywhere.
+ * (theme-independent). The first three are the coarse token-type split (input /
+ * output / cache) used across the proportion bar and the per-model/provider
+ * bars, where cache is one calm neutral. The live tracker strip and the two
+ * token-traffic graphs use the FOUR-way split where cache is broken into
+ * read/creation — those must be told apart at a glance, so the scheme is
+ * **cool = fresh, warm = cached**: teal input + indigo output (cool), amber
+ * cached-input + rose cached-output (warm). Four distinct hues, not two
+ * near-identical pairs.
  */
 export const viz = {
-  input: "#3f9aa8", // teal
-  output: "#7b6fd0", // indigo
-  cache: "#8a8f98", // slate — calm neutral (cache is "free")
+  input: "#3f9aa8", // teal — fresh input (cool)
+  output: "#7b6fd0", // indigo — fresh output (cool)
+  cache: "#8a8f98", // slate — combined cache, calm neutral (the 3-way split)
+  cacheRead: "#c68a3c", // amber — cached input (warm)
+  cacheCreation: "#c56b86", // rose — cached output (warm)
 } as const
 
 export const link = {

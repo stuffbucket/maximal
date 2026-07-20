@@ -115,6 +115,8 @@ describe("LiveFeedHub producer bridge", () => {
     started.start()
 
     recordTokenUsageEvent({
+      cache_creation_input_tokens: 50,
+      cache_read_input_tokens: 100,
       endpoint: "chat_completions",
       input_tokens: 10,
       model: "gpt-a",
@@ -131,7 +133,13 @@ describe("LiveFeedHub producer bridge", () => {
     }
     const payload = message.event.payload
     expect(payload.requestCount).toBe(1)
-    expect(payload.totalTokens).toBe(15)
+    // total = input + output + cache read + cache creation (165), and each
+    // per-type running total is exposed so the client strip needs no fabrication.
+    expect(payload.totalTokens).toBe(165)
+    expect(payload.inputTokens).toBe(10)
+    expect(payload.outputTokens).toBe(5)
+    expect(payload.cacheReadTokens).toBe(100)
+    expect(payload.cacheCreationTokens).toBe(50)
     expect(payload.lastEvent).toEqual({
       model: "gpt-a",
       source: "copilot",
@@ -139,7 +147,9 @@ describe("LiveFeedHub producer bridge", () => {
       endpoint: "chat_completions",
       inputTokens: 10,
       outputTokens: 5,
-      totalTokens: 15,
+      cacheReadTokens: 100,
+      cacheCreationTokens: 50,
+      totalTokens: 165,
       createdAtMs: expect.any(Number) as unknown as number,
     })
   })
