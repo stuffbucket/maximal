@@ -27,6 +27,7 @@ import {
   cacheVSCodeVersion,
 } from "~/lib/platform/utils"
 import { hasGithubToken, setLastView, state } from "~/lib/runtime-state/state"
+import { startTokenUsageRetention } from "~/lib/token-usage"
 import { getGitVersion, shortSha } from "~/lib/update/version"
 import { buildSnapshot, LiveFeedHub } from "~/lib/ws/live-feed"
 import { presenceRegistry } from "~/lib/ws/presence-registry"
@@ -268,5 +269,6 @@ function finalizeBoot(httpServer: ReturnType<ServeFn>, hub: LiveFeedHub): void {
   reconcileClaudeCodeOnBoot()
   markSessionRunning()
   hub.start()
+  startTokenUsageRetention()
   installShutdownHandlers(httpServer)
 }

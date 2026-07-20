@@ -15,11 +15,14 @@ import {
   type UsageTokens,
 } from "./store"
 
+export { startTokenUsageRetention } from "./retention"
+
 export {
   closeUsageStore,
   getTokenUsageEventsPage,
   getTokenUsageSeries,
   getTokenUsageSummary,
+  pruneTokenUsageEvents,
 } from "./store"
 
 export type {

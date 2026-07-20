@@ -9,6 +9,7 @@ import { state } from "~/lib/runtime-state/state"
 import {
   closeUsageStore,
   createCopilotTokenUsageRecorder,
+  pruneTokenUsageEvents,
   recordTokenUsageEvent,
   type TokenUsageEventsPage,
   type TokenUsageSeries,
@@ -447,5 +448,28 @@ describe("token usage pricing signal (token_prices)", () => {
   test("unknown when billing carries neither token_prices nor is_premium", async () => {
     seedModel("bare", {})
     expect(await recordAndReadPremium("bare")).toBeNull()
+  })
+})
+
+describe("token usage retention", () => {
+  test("pruneTokenUsageEvents deletes only rows older than the cutoff", async () => {
+    for (const input_tokens of [10, 8]) {
+      recordTokenUsageEvent({
+        endpoint: "chat_completions",
+        input_tokens,
+        model: "gpt-test",
+        output_tokens: 2,
+        source: "copilot",
+      })
+    }
+
+    // The range is half-open (`created_at_ms < cutoff`): nothing predates the
+    // epoch, so a cutoff of 0 removes nothing.
+    expect(await pruneTokenUsageEvents(0)).toBe(0)
+    expect((await fetchEventsPage()).total).toBe(2)
+
+    // Every row predates a far-future cutoff, so all are pruned and counted.
+    expect(await pruneTokenUsageEvents(Date.now() + 60_000)).toBe(2)
+    expect((await fetchEventsPage()).total).toBe(0)
   })
 })
