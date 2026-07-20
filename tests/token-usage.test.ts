@@ -11,6 +11,7 @@ import {
   createCopilotTokenUsageRecorder,
   recordTokenUsageEvent,
   type TokenUsageEventsPage,
+  type TokenUsageSeries,
   type TokenUsageSummary,
 } from "~/lib/token-usage"
 import { tokenUsageRoute } from "~/routes/token-usage/route"
@@ -258,6 +259,106 @@ describe("token usage storage", () => {
     expect(page.items).toHaveLength(2)
     expect(page.items[0]?.session_id).toBe("real-session")
     expect(page.items[1]?.session_id).toBe("interaction-session")
+  })
+})
+
+/**
+ * Provider dimension, time-series, and the `all` period — the additions that
+ * power the reworked Usage view (§4). Providers/series are computed by the store
+ * and surfaced over the same route.
+ */
+describe("token usage provider dimension + series + all period", () => {
+  test("summary groups by provider (copilot + external)", async () => {
+    recordTokenUsageEvent({
+      endpoint: "chat_completions",
+      input_tokens: 10,
+      model: "gpt-a",
+      output_tokens: 5,
+      source: "copilot",
+    })
+    recordTokenUsageEvent({
+      endpoint: "provider_messages",
+      input_tokens: 20,
+      model: "claude-a",
+      output_tokens: 7,
+      providerName: "anthropic",
+      source: "provider",
+    })
+
+    const response = await createTokenUsageApp().request(
+      "/token-usage?period=day",
+    )
+    expect(response.status).toBe(200)
+    const summary = (await response.json()) as TokenUsageSummary
+
+    expect(summary.byProvider).toHaveLength(2)
+    const byKey = new Map(summary.byProvider.map((row) => [row.provider, row]))
+    expect(byKey.get("copilot")?.total_tokens).toBe(15)
+    expect(byKey.get("copilot")?.source).toBe("copilot")
+    expect(byKey.get("anthropic")?.total_tokens).toBe(27)
+    expect(byKey.get("anthropic")?.source).toBe("provider")
+    expect(byKey.get("anthropic")?.provider_name).toBe("anthropic")
+    // Totals across providers reconcile with the grand total.
+    const providerSum = summary.byProvider.reduce(
+      (acc, row) => acc + row.total_tokens,
+      0,
+    )
+    expect(providerSum).toBe(summary.totals.total_tokens)
+  })
+
+  test("series buckets sum to the summary total (day → hourly, zero-filled)", async () => {
+    recordTokenUsageEvent({
+      endpoint: "responses",
+      input_tokens: 30,
+      model: "gpt-a",
+      output_tokens: 12,
+      source: "copilot",
+    })
+
+    const response = await createTokenUsageApp().request(
+      "/token-usage/series?period=day",
+    )
+    expect(response.status).toBe(200)
+    const series = (await response.json()) as TokenUsageSeries
+
+    // Day defaults to hourly buckets; the axis is zero-filled across the day.
+    expect(series.bucket_ms).toBe(3_600_000)
+    expect(series.buckets.length).toBeGreaterThanOrEqual(23)
+    expect(series.buckets.length).toBeLessThanOrEqual(25)
+    const bucketSum = series.buckets.reduce((acc, b) => acc + b.total_tokens, 0)
+    expect(bucketSum).toBe(42)
+    // Exactly one bucket carries the traffic; the rest are zero-fill.
+    expect(series.buckets.filter((b) => b.total_tokens > 0)).toHaveLength(1)
+  })
+
+  test("series honours an explicit bucket width shorthand", async () => {
+    const response = await createTokenUsageApp().request(
+      "/token-usage/series?period=day&bucket=15m",
+    )
+    expect(response.status).toBe(200)
+    const series = (await response.json()) as TokenUsageSeries
+    expect(series.bucket_ms).toBe(15 * 60_000)
+  })
+
+  test("all period is a real range (start at epoch), not coerced to day", async () => {
+    recordTokenUsageEvent({
+      endpoint: "responses",
+      input_tokens: 10,
+      model: "gpt-a",
+      output_tokens: 5,
+      source: "copilot",
+    })
+
+    const response = await createTokenUsageApp().request(
+      "/token-usage?period=all",
+    )
+    expect(response.status).toBe(200)
+    const summary = (await response.json()) as TokenUsageSummary
+    // Regression: "all" previously fell through to "day" (start = midnight).
+    // The all-time range starts at the epoch.
+    expect(summary.period).toBe("all")
+    expect(summary.range.start_ms).toBe(0)
+    expect(summary.totals.total_tokens).toBe(15)
   })
 })
 

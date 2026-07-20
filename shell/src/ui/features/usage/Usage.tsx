@@ -1,193 +1,244 @@
 import type { ReactElement } from "react"
 
+import type { RankedRow, Segment } from "./ProportionBar"
 import type {
-  QuotaDetails,
-  TokenUsageEventsPage,
   TokenUsageModelSummary,
+  TokenUsageProviderSummary,
+  TokenUsageSeries,
   TokenUsageSummary,
 } from "./usage-types"
 
+import { AreaTrend, type TrendPoint } from "./charts/AreaTrend"
+import { LiveTrafficStream } from "./charts/LiveTrafficStream"
+import { EventsTable } from "./EventsTable"
 import {
-  formatCellText,
   formatCostAiu,
   formatNumber,
-  quotaView,
+  providerLabel,
+  vizSeriesColor,
 } from "./format"
+import { ProportionBar, RankedBars } from "./ProportionBar"
+import { ProvidersStrip } from "./ProvidersStrip"
 import { useUsage, type UsagePeriod } from "./useUsage"
 
 /**
- * Usage section (spec §4) — the standalone dashboard ported onto the settings
- * SPA's design tokens. Headline totals + per-model breakdown over `/token-usage`.
- * Pure presentation over the hook; formatters are unit-tested in `format.ts`. The
- * old dashboard's paginated events table is a follow-on.
+ * Usage view (§4) — reworked into a single narrative scroll: a person-first
+ * summary line, the live-traffic hero (the mesmerizing centerpiece), connected
+ * providers, a where-it-went breakdown (proportion + ranked bars over the
+ * detail table), and the recent-requests ledger. Provider-forward throughout.
+ * Cards are reserved for provider entities; every other section is typographic.
  */
 
-const PERIODS: ReadonlyArray<{ id: UsagePeriod; label: string }> = [
-  { id: "day", label: "Today" },
-  { id: "week", label: "This week" },
-  { id: "month", label: "This month" },
-  { id: "all", label: "All time" },
-]
+const PERIODS: ReadonlyArray<{ id: UsagePeriod; label: string; noun: string }> =
+  [
+    { id: "day", label: "Today", noun: "today" },
+    { id: "week", label: "This week", noun: "this week" },
+    { id: "month", label: "This month", noun: "this month" },
+    { id: "all", label: "All time", noun: "all time" },
+  ]
 
-function StatTile({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="usage__tile">
-      <div className="usage__tile-value">{value}</div>
-      <div className="usage__tile-label">{label}</div>
-    </div>
-  )
+function periodNoun(period: UsagePeriod): string {
+  return PERIODS.find((p) => p.id === period)?.noun ?? "today"
 }
 
-/** A single entitlement/quota card with a severity-coloured progress bar (§4). */
-function QuotaCard({ name, details }: { name: string; details: QuotaDetails }) {
-  const view = quotaView(details)
-  return (
-    <div className={`usage__quota usage__quota--${view.level}`}>
-      <div className="usage__quota-head">
-        <span className="usage__quota-name">{name.split("_").join(" ")}</span>
-        <span className="usage__quota-pct">
-          {view.level === "unlimited" ?
-            "Unlimited"
-          : `${view.percentUsed.toFixed(1)}% used`}
-        </span>
-      </div>
-      <div className="usage__quota-bar">
-        <div
-          className="usage__quota-bar-fill"
-          style={{
-            width: `${view.level === "unlimited" ? 100 : view.percentUsed}%`,
-          }}
-        />
-      </div>
-      <div className="usage__quota-foot">
-        <span>
-          {view.used} / {view.entitlement}
-        </span>
-        <span>{view.remaining} left</span>
-      </div>
-    </div>
-  )
-}
-
-function Quotas({ quotas }: { quotas: Record<string, QuotaDetails> | null }) {
-  const entries = quotas ? Object.entries(quotas) : []
-  if (entries.length === 0) return null
-  return (
-    <section className="usage__quotas" aria-label="Quotas">
-      {entries.map(([name, details]) => (
-        <QuotaCard key={name} name={name} details={details} />
-      ))}
-    </section>
-  )
-}
-
-function ModelRow({ row }: { row: TokenUsageModelSummary }) {
-  return (
-    <tr>
-      <td>{formatCellText(row.model)}</td>
-      <td>{formatNumber(row.total_tokens)}</td>
-      <td>{formatNumber(row.input_tokens)}</td>
-      <td>{formatNumber(row.output_tokens)}</td>
-      <td>{formatNumber(row.request_count)}</td>
-      <td>{formatCostAiu(row.total_nano_aiu)}</td>
-    </tr>
-  )
-}
-
-function Breakdown({ summary }: { summary: TokenUsageSummary }) {
-  if (summary.byModel.length === 0) {
-    return (
-      <p className="usage__empty">No usage recorded for this period yet.</p>
-    )
-  }
-  return (
-    <table className="usage__table">
-      <thead>
-        <tr>
-          <th>Model</th>
-          <th>Tokens</th>
-          <th>Input</th>
-          <th>Output</th>
-          <th>Requests</th>
-          <th>Cost</th>
-        </tr>
-      </thead>
-      <tbody>
-        {summary.byModel.map((row) => (
-          <ModelRow key={row.model} row={row} />
-        ))}
-      </tbody>
-    </table>
-  )
-}
-
-/** Recent-requests table with server-side pagination (§4). */
-function EventsTable({
-  events,
-  page,
-  setPage,
+/** The person-first headline sentence with the numbers emphasized. */
+function SummaryLine({
+  summary,
+  period,
 }: {
-  events: TokenUsageEventsPage | null
-  page: number
-  setPage: (p: number) => void
-}) {
-  if (!events || events.items.length === 0) return null
-  const totalPages = Math.max(events.total_pages, 1)
+  summary: TokenUsageSummary
+  period: UsagePeriod
+}): ReactElement {
+  const { totals, byModel, byProvider } = summary
+  const providerCount = byProvider.length
   return (
-    <section className="usage__events" aria-label="Recent requests">
-      <h3 className="usage__events-title">Recent requests</h3>
+    <p className="usage__summary">
+      {periodNoun(period) === "all time" ?
+        "All time, you’ve sent "
+      : <>
+          {periodNoun(period).charAt(0).toUpperCase()
+            + periodNoun(period).slice(1)}
+          , you’ve sent{" "}
+        </>
+      }
+      <strong>{formatNumber(totals.total_tokens)}</strong> tokens across{" "}
+      <strong>{formatNumber(totals.request_count)}</strong>{" "}
+      {totals.request_count === 1 ? "request" : "requests"} to{" "}
+      <strong>{byModel.length}</strong>{" "}
+      {byModel.length === 1 ? "model" : "models"}
+      {providerCount > 0 ?
+        <>
+          {" "}
+          via <strong>{providerCount}</strong>{" "}
+          {providerCount === 1 ? "provider" : "providers"}
+        </>
+      : null}
+      {totals.total_nano_aiu > 0 ?
+        <>
+          {" "}
+          · <strong>{formatCostAiu(totals.total_nano_aiu)}</strong>
+        </>
+      : null}
+      .
+    </p>
+  )
+}
+
+/** Input / output / cache split as one proportion bar. */
+function tokenSplit(summary: TokenUsageSummary): Array<Segment> {
+  const { totals } = summary
+  return [
+    {
+      key: "input",
+      label: "Input",
+      value: totals.input_tokens,
+      color: "var(--viz-input)",
+    },
+    {
+      key: "output",
+      label: "Output",
+      value: totals.output_tokens,
+      color: "var(--viz-output)",
+    },
+    {
+      key: "cache",
+      label: "Cache",
+      value:
+        totals.cache_read_input_tokens + totals.cache_creation_input_tokens,
+      color: "var(--viz-cache)",
+    },
+  ]
+}
+
+function modelRows(
+  byModel: ReadonlyArray<TokenUsageModelSummary>,
+): Array<RankedRow> {
+  return byModel.map((m, i) => ({
+    key: m.model,
+    label: m.model,
+    value: m.total_tokens,
+    color: vizSeriesColor(i),
+    meta: `${formatNumber(m.request_count)} req`,
+    badge: m.is_premium === true ? "premium" : undefined,
+  }))
+}
+
+function providerRows(
+  byProvider: ReadonlyArray<TokenUsageProviderSummary>,
+): Array<RankedRow> {
+  return byProvider.map((p, i) => ({
+    key: p.provider,
+    label: providerLabel(p.provider),
+    value: p.total_tokens,
+    color: vizSeriesColor(i),
+    meta: `${formatNumber(p.request_count)} req`,
+  }))
+}
+
+function seriesToTrend(series: TokenUsageSeries | null): Array<TrendPoint> {
+  if (!series || !Array.isArray(series.buckets)) return []
+  return series.buckets.map((b) => ({
+    t: b.bucket_start_ms,
+    input: b.input_tokens,
+    output: b.output_tokens,
+    cache: b.cache_read_input_tokens + b.cache_creation_input_tokens,
+  }))
+}
+
+/** Detail table (depth layer) — the exhaustive per-model numbers. */
+function ModelTable({
+  byModel,
+}: {
+  byModel: ReadonlyArray<TokenUsageModelSummary>
+}): ReactElement | null {
+  if (byModel.length === 0) return null
+  return (
+    <details className="usage__detail">
+      <summary className="usage__detail-summary">Per-model detail</summary>
       <table className="usage__table">
         <thead>
           <tr>
-            <th>When</th>
             <th>Model</th>
-            <th>Endpoint</th>
+            <th>Tokens</th>
             <th>Input</th>
             <th>Output</th>
-            <th>Total</th>
+            <th>Requests</th>
+            <th>Cost</th>
           </tr>
         </thead>
         <tbody>
-          {events.items.map((event, index) => (
-            <tr key={`${event.created_at_ms}-${index}`}>
-              <td>{new Date(event.created_at_ms).toLocaleString()}</td>
-              <td>{formatCellText(event.model)}</td>
-              <td>{formatCellText(event.endpoint)}</td>
-              <td>{formatNumber(event.input_tokens)}</td>
-              <td>{formatNumber(event.output_tokens)}</td>
-              <td>{formatNumber(event.total_tokens)}</td>
+          {byModel.map((row) => (
+            <tr key={row.model}>
+              <td>{row.model}</td>
+              <td>{formatNumber(row.total_tokens)}</td>
+              <td>{formatNumber(row.input_tokens)}</td>
+              <td>{formatNumber(row.output_tokens)}</td>
+              <td>{formatNumber(row.request_count)}</td>
+              <td>{formatCostAiu(row.total_nano_aiu)}</td>
             </tr>
           ))}
         </tbody>
       </table>
-      <div className="usage__pager">
-        <button
-          type="button"
-          disabled={page <= 1}
-          onClick={() => setPage(page - 1)}
-        >
-          Previous
-        </button>
-        <span>
-          Page {events.page} of {totalPages}
-        </span>
-        <button
-          type="button"
-          disabled={page >= totalPages}
-          onClick={() => setPage(page + 1)}
-        >
-          Next
-        </button>
+    </details>
+  )
+}
+
+/** The "where it went" analysis block — trend + split + ranked breakdowns. */
+function WhereItWent({
+  summary,
+  series,
+  period,
+  trendLabel,
+}: {
+  summary: TokenUsageSummary
+  series: TokenUsageSeries | null
+  period: UsagePeriod
+  trendLabel: string
+}): ReactElement {
+  return (
+    <section className="usage__section" aria-label="Where it went">
+      <h3 className="usage__section-title">Where it went — {trendLabel}</h3>
+      <div className="usage__trend">
+        <AreaTrend
+          data={seriesToTrend(series)}
+          height={120}
+          ariaLabel={`Token traffic ${periodNoun(period)}`}
+        />
       </div>
+      <ProportionBar
+        segments={tokenSplit(summary)}
+        ariaLabel="Input, output and cache token split"
+      />
+      <div className="usage__breakdowns">
+        {summary.byProvider.length > 1 && (
+          <div className="usage__breakdown">
+            <h4 className="usage__breakdown-title">By provider</h4>
+            <RankedBars
+              rows={providerRows(summary.byProvider)}
+              ariaLabel="Tokens by provider"
+            />
+          </div>
+        )}
+        <div className="usage__breakdown">
+          <h4 className="usage__breakdown-title">By model</h4>
+          <RankedBars
+            rows={modelRows(summary.byModel)}
+            ariaLabel="Tokens by model"
+          />
+        </div>
+      </div>
+      <ModelTable byModel={summary.byModel} />
     </section>
   )
 }
 
-export function Usage() {
+export function Usage(): ReactElement {
   const {
     summary,
     quotas,
+    series,
     events,
+    live,
     period,
     setPeriod,
     page,
@@ -196,30 +247,41 @@ export function Usage() {
     error,
   } = useUsage()
 
+  const trendLabel =
+    PERIODS.find((p) => p.id === period)?.label ?? "This period"
+
   let content: ReactElement
   if (isLoading && summary === null) {
     content = <p className="usage__loading">Loading usage…</p>
   } else if (summary === null) {
     content = <p className="usage__empty">No usage data.</p>
   } else {
+    const hasTraffic = summary.totals.request_count > 0
     content = (
       <>
-        <Quotas quotas={quotas} />
-        <div className="usage__tiles">
-          <StatTile
-            label="Total tokens"
-            value={formatNumber(summary.totals.total_tokens)}
+        <SummaryLine summary={summary} period={period} />
+
+        <LiveTrafficStream
+          live={live}
+          totalTokensToday={summary.totals.total_tokens}
+          requestsToday={summary.totals.request_count}
+        />
+
+        <ProvidersStrip providers={summary.byProvider} quotas={quotas} />
+
+        {hasTraffic ?
+          <WhereItWent
+            summary={summary}
+            series={series}
+            period={period}
+            trendLabel={trendLabel}
           />
-          <StatTile
-            label="Requests"
-            value={formatNumber(summary.totals.request_count)}
-          />
-          <StatTile
-            label="Cost"
-            value={formatCostAiu(summary.totals.total_nano_aiu)}
-          />
-        </div>
-        <Breakdown summary={summary} />
+        : <p className="usage__empty">
+            No requests recorded {periodNoun(period)} yet — traffic will appear
+            here the moment it flows through.
+          </p>
+        }
+
         <EventsTable events={events} page={page} setPage={setPage} />
       </>
     )

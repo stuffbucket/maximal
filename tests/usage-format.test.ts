@@ -1,11 +1,18 @@
 import { describe, expect, test } from "bun:test"
 
 import {
+  endpointLabel,
   formatCellText,
+  formatCompact,
   formatCostAiu,
   formatNumber,
   formatQuotaUsed,
+  formatRate,
+  formatRelativeTime,
+  providerLabel,
   quotaView,
+  vizSeriesColor,
+  VIZ_SERIES_VARS,
 } from "../shell/src/ui/features/usage/format"
 
 /**
@@ -92,5 +99,66 @@ describe("quotaView", () => {
     })
     expect(v.percentUsed).toBe(70)
     expect(v.used.replaceAll(/[,. ]/g, "")).toBe("70")
+  })
+})
+
+describe("formatCompact", () => {
+  test("below 1000 renders the rounded integer", () => {
+    expect(formatCompact(0)).toBe("0")
+    expect(formatCompact(999)).toBe("999")
+  })
+  test("scales into K / M / B with one decimal below 10", () => {
+    expect(formatCompact(1_234)).toBe("1.2K")
+    expect(formatCompact(12_000)).toBe("12K")
+    expect(formatCompact(3_400_000)).toBe("3.4M")
+    expect(formatCompact(2_000_000_000)).toBe("2B")
+  })
+  test("non-finite degrades to 0", () => {
+    expect(formatCompact(Number.NaN)).toBe("0")
+  })
+})
+
+describe("providerLabel", () => {
+  test("the built-in path is GitHub Copilot", () => {
+    expect(providerLabel("copilot")).toBe("GitHub Copilot")
+    expect(providerLabel("")).toBe("GitHub Copilot")
+  })
+  test("an external provider is title-cased", () => {
+    expect(providerLabel("anthropic")).toBe("Anthropic")
+  })
+})
+
+describe("endpointLabel", () => {
+  test("humanizes known endpoints", () => {
+    expect(endpointLabel("chat_completions")).toBe("Chat")
+    expect(endpointLabel("responses")).toBe("Responses")
+    expect(endpointLabel("provider_messages")).toBe("Messages")
+  })
+})
+
+describe("formatRelativeTime", () => {
+  const now = 1_000_000_000
+  test("recent → just now; seconds/minutes/hours/days scale", () => {
+    expect(formatRelativeTime(now, now)).toBe("just now")
+    expect(formatRelativeTime(now - 12_000, now)).toBe("12s ago")
+    expect(formatRelativeTime(now - 5 * 60_000, now)).toBe("5m ago")
+    expect(formatRelativeTime(now - 3 * 3_600_000, now)).toBe("3h ago")
+    expect(formatRelativeTime(now - 2 * 86_400_000, now)).toBe("2d ago")
+  })
+})
+
+describe("formatRate", () => {
+  test("tokens over a window → per-minute compact rate", () => {
+    // 600 tokens over 60s = 600/min.
+    expect(formatRate(600, 60_000)).toBe("600/min")
+    expect(formatRate(0, 0)).toBe("0/min")
+  })
+})
+
+describe("vizSeriesColor", () => {
+  test("cycles the ramp and wraps by index", () => {
+    expect(vizSeriesColor(0)).toBe(VIZ_SERIES_VARS[0])
+    expect(vizSeriesColor(VIZ_SERIES_VARS.length)).toBe(VIZ_SERIES_VARS[0])
+    expect(vizSeriesColor(-1)).toBe(VIZ_SERIES_VARS.at(-1) ?? "")
   })
 })

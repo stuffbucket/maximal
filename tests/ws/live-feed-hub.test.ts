@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 
 import type { AuthStatus } from "~/lib/config/settings-types"
 import type {
@@ -7,15 +7,23 @@ import type {
 } from "~/lib/ws/feed-types"
 
 import { settingsEventBus } from "~/lib/config/settings-events"
+import { state } from "~/lib/runtime-state/state"
+import { closeUsageStore, recordTokenUsageEvent } from "~/lib/token-usage"
 import { LiveFeedHub } from "~/lib/ws/live-feed"
 import { PresenceRegistry } from "~/lib/ws/presence-registry"
 
 /**
- * LiveFeedHub producer bridge (spec §1.3). Today the only live producer is the
- * settings event bus (`auth.changed`); the hub translates it into the unified feed
- * event and broadcasts to every connected tab. start() is idempotent and stop()
- * detaches, so a sidecar restart doesn't double-subscribe or leak.
+ * LiveFeedHub producer bridge (spec §1.3). The hub translates producer events
+ * (the settings bus `auth.changed` and every recorded token-usage event) into
+ * unified feed events and broadcasts to every connected tab. start() is
+ * idempotent and stop() detaches, so a sidecar restart doesn't double-subscribe
+ * or leak.
+ *
+ * start() now also seeds today's usage tally from the store, so every test here
+ * pins an in-memory DB to avoid touching the real app-dir SQLite file.
  */
+
+const DB_PATH_ENV = "COPILOT_API_SQLITE_DB_PATH"
 
 /** A signed-out AuthStatus is enough — the hub forwards the payload verbatim. */
 const AUTH_PAYLOAD = { state: "unauthenticated" } as unknown as AuthStatus
@@ -43,11 +51,21 @@ function makeHub(registry: PresenceRegistry) {
 }
 
 let started: LiveFeedHub | null = null
-afterEach(() => {
-  // Always detach — the settings bus is a shared singleton; a leaked subscription
-  // would fire into a dead registry in later tests.
+
+beforeEach(async () => {
+  process.env[DB_PATH_ENV] = ":memory:"
+  state.userName = "copilot-login"
+  await closeUsageStore()
+})
+
+afterEach(async () => {
+  // Always detach — the settings + token-usage buses are shared singletons; a
+  // leaked subscription would fire into a dead registry in later tests.
   started?.stop()
   started = null
+  await closeUsageStore()
+  state.userName = undefined
+  Reflect.deleteProperty(process.env, DB_PATH_ENV)
 })
 
 describe("LiveFeedHub producer bridge", () => {
@@ -88,6 +106,41 @@ describe("LiveFeedHub producer bridge", () => {
     expect(JSON.parse(sent[0]) as LiveFeedServerMessage).toEqual({
       type: "event",
       event: { type: "sidecar-health", payload: "degraded" },
+    })
+  })
+
+  test("bridges a recorded token-usage event into a `usage` feed frame", () => {
+    const { registry, sent } = captureRegistry()
+    started = makeHub(registry)
+    started.start()
+
+    recordTokenUsageEvent({
+      endpoint: "chat_completions",
+      input_tokens: 10,
+      model: "gpt-a",
+      output_tokens: 5,
+      source: "copilot",
+    })
+
+    // Exactly one broadcast — the recorded event (auth seeding does not emit).
+    expect(sent).toHaveLength(1)
+    const message = JSON.parse(sent[0]) as LiveFeedServerMessage
+    expect(message.type).toBe("event")
+    if (message.type !== "event" || message.event.type !== "usage") {
+      throw new Error("expected a usage event")
+    }
+    const payload = message.event.payload
+    expect(payload.requestCount).toBe(1)
+    expect(payload.totalTokens).toBe(15)
+    expect(payload.lastEvent).toEqual({
+      model: "gpt-a",
+      source: "copilot",
+      providerName: null,
+      endpoint: "chat_completions",
+      inputTokens: 10,
+      outputTokens: 5,
+      totalTokens: 15,
+      createdAtMs: expect.any(Number) as unknown as number,
     })
   })
 })

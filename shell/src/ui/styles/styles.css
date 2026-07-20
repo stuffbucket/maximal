@@ -2428,3 +2428,407 @@ a:hover {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* ============================================================================
+   Usage — reworked view (§4)
+   A single narrative scroll. Cards are reserved for provider entities
+   (`.usage-provider`); every other section is typographic — no card grid.
+   All color from tokens; the viz palette is `--viz-*`. Motion is honored
+   literally via the reduced-motion block at the end of this section.
+   ========================================================================== */
+
+/* Person-first headline. Larger than body; numbers carry weight. */
+.usage__summary {
+  margin: 0;
+  font-size: var(--text-md);
+  line-height: var(--leading-lg);
+  color: var(--text-base-color);
+}
+.usage__summary strong {
+  color: var(--text-strong);
+  font-weight: var(--weight-lg);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Live hero ----
+   NOT a card: the chart's own gradient is the visual. Numerals + live rate
+   sit above the stream, models below. */
+.usage-hero {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.usage-hero__head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+.usage-hero__now {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.usage-hero__now-value {
+  font-size: var(--text-3xl);
+  font-weight: var(--weight-2xl);
+  line-height: var(--leading-2xl);
+  letter-spacing: var(--tracking-2xl);
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+}
+.usage-hero__now-label {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+.usage-hero__rate {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.usage-hero__rate-value {
+  font-size: var(--text-sm);
+  color: var(--text-base-color);
+  font-variant-numeric: tabular-nums;
+}
+.usage-hero__dot {
+  width: var(--space-2);
+  height: var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--border-strong);
+}
+.usage-hero__dot--live {
+  background: var(--viz-input);
+  animation: usage-pulse 2s ease-out infinite;
+}
+
+.usage-hero__stream {
+  width: 100%;
+}
+
+/* Recent-model chips; the newest flashes once as it mounts. */
+.usage-hero__models {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.usage-hero__model {
+  font-size: var(--text-sm);
+  font-family: var(--font-mono);
+  color: var(--text-base-color);
+  background: var(--surface-control);
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-chip);
+  padding: var(--space-1) var(--space-2);
+}
+.usage-hero__model--flash {
+  animation: usage-flash 900ms ease-out;
+}
+
+/* Legend for the stacked bands. */
+.usage-hero__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+.usage-hero__legend-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.usage-hero__legend-item::before {
+  content: "";
+  width: var(--space-3);
+  height: var(--space-2);
+  border-radius: var(--radius-chip);
+}
+.usage-hero__legend-item--input::before { background: var(--viz-input); }
+.usage-hero__legend-item--output::before { background: var(--viz-output); }
+.usage-hero__legend-item--cache::before { background: var(--viz-cache); }
+
+/* Chart wrapper — the SVG fills its measured width. */
+.usage-chart {
+  width: 100%;
+}
+.usage-chart__svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+/* ---- Sections (typographic, not cards) ---- */
+.usage__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.usage__section-title {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: var(--text-md);
+  font-weight: var(--weight-lg);
+  line-height: var(--leading-lg);
+  color: var(--text-strong);
+}
+.usage__trend {
+  width: 100%;
+}
+
+/* ---- Proportion bar ---- */
+.usage-proportion {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.usage-proportion__bar {
+  display: flex;
+  width: 100%;
+  height: var(--space-3);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+  background: var(--surface-control);
+}
+.usage-proportion__seg {
+  height: 100%;
+}
+.usage-proportion__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.usage-proportion__legend-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+.usage-proportion__swatch {
+  width: var(--space-3);
+  height: var(--space-3);
+  border-radius: var(--radius-chip);
+}
+.usage-proportion__legend-value {
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Ranked bars (by model / provider) ---- */
+.usage__breakdowns {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+.usage__breakdown-title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-md);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.usage-ranked {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.usage-ranked__row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.usage-ranked__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+}
+.usage-ranked__label {
+  color: var(--text-strong);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  word-break: break-word;
+}
+.usage-ranked__badge {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  background: var(--surface-control);
+  border-radius: var(--radius-chip);
+  padding: 0 var(--space-1);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.usage-ranked__value {
+  color: var(--text-base-color);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.usage-ranked__meta {
+  color: var(--text-muted);
+}
+.usage-ranked__track {
+  height: var(--space-2);
+  background: var(--surface-control);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+.usage-ranked__fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-pill);
+  transition: width 200ms ease-out;
+}
+
+/* ---- Providers strip (cards ARE warranted — discrete entities) ---- */
+.usage-providers {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-4);
+}
+.usage-provider {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  background: var(--surface-card);
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  box-shadow: var(--elevation-card);
+  padding: var(--space-4);
+}
+.usage-provider__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.usage-provider__name {
+  font-size: var(--text-base);
+  font-weight: var(--weight-lg);
+  color: var(--text-strong);
+}
+.usage-provider__source {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.usage-provider__stats {
+  display: flex;
+  gap: var(--space-4);
+  margin: 0;
+}
+.usage-provider__stat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.usage-provider__stat dt {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+.usage-provider__stat dd {
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+}
+.usage-provider__quotas {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  border-top: var(--border-width-hairline) solid var(--border-subtle);
+  padding-top: var(--space-3);
+}
+.usage-provider__quota {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.usage-provider__quota-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+}
+.usage-provider__quota-name {
+  color: var(--text-base-color);
+  text-transform: capitalize;
+}
+.usage-provider__quota-pct {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.usage-provider__quota-bar {
+  height: var(--space-1);
+  background: var(--surface-control);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+.usage-provider__quota-fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  max-width: 100%;
+}
+.usage-provider__quota--warn .usage-provider__quota-fill { background: var(--status-warning); }
+.usage-provider__quota--crit .usage-provider__quota-fill { background: var(--status-error); }
+.usage-provider__quota--unlimited .usage-provider__quota-fill { background: var(--border-strong); }
+
+/* ---- Detail disclosure (depth layer) ---- */
+.usage__detail {
+  border-top: var(--border-width-hairline) solid var(--border-subtle);
+  padding-top: var(--space-3);
+}
+.usage__detail-summary {
+  cursor: pointer;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-md);
+  color: var(--text-muted);
+}
+.usage__detail-summary:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* ---- Motion ---- */
+@keyframes usage-pulse {
+  0% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(1.35); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes usage-flash {
+  0% { border-color: var(--viz-input); background: var(--surface-card); }
+  100% { border-color: var(--border-subtle); background: var(--surface-control); }
+}
+
+/* Reduced motion is literal: no pulse, no flash, no bar tween. */
+@media (prefers-reduced-motion: reduce) {
+  .usage-hero__dot--live,
+  .usage-hero__model--flash {
+    animation: none !important;
+  }
+  .usage-ranked__fill {
+    transition: none !important;
+  }
+}

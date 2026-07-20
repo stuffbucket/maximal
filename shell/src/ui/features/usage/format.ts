@@ -92,3 +92,100 @@ export function quotaView(details: {
     remaining: details.remaining.toLocaleString(),
   }
 }
+
+/**
+ * Compact token count for the big live/headline numerals, e.g. 1_234 → "1.2K",
+ * 3_400_000 → "3.4M". Keeps the ticking counter from wrapping. Non-finite → "0".
+ */
+export function formatCompact(value: number): string {
+  if (!Number.isFinite(value)) return "0"
+  const abs = Math.abs(value)
+  if (abs < 1000) return String(Math.round(value))
+  const units = [
+    { size: 1_000_000_000, suffix: "B" },
+    { size: 1_000_000, suffix: "M" },
+    { size: 1_000, suffix: "K" },
+  ]
+  for (const { size, suffix } of units) {
+    if (abs >= size) {
+      const scaled = value / size
+      // One decimal below 10 (1.2K), none above (12K) — keeps width stable.
+      const text =
+        Math.abs(scaled) < 10 ? scaled.toFixed(1) : String(Math.round(scaled))
+      return `${text.replace(/\.0$/, "")}${suffix}`
+    }
+  }
+  return String(Math.round(value))
+}
+
+/** Human display name for a provider key. The built-in path is "GitHub Copilot";
+ *  an external provider is title-cased from its key (e.g. "anthropic" → "Anthropic"). */
+export function providerLabel(provider: string): string {
+  const key = provider.trim().toLowerCase()
+  if (key === "copilot" || key === "") return "GitHub Copilot"
+  return key.charAt(0).toUpperCase() + key.slice(1)
+}
+
+/** Humanize an endpoint id for display, e.g. "chat_completions" → "Chat". */
+export function endpointLabel(endpoint: string): string {
+  switch (endpoint) {
+    case "chat_completions": {
+      return "Chat"
+    }
+    case "provider_messages":
+    case "messages": {
+      return "Messages"
+    }
+    case "responses": {
+      return "Responses"
+    }
+    case "embeddings": {
+      return "Embeddings"
+    }
+    default: {
+      return formatCellText(endpoint)
+    }
+  }
+}
+
+/** Short relative age of a timestamp, e.g. "just now", "12s ago", "4m ago".
+ *  `now` is injectable for tests. */
+export function formatRelativeTime(ms: number, now = Date.now()): string {
+  const delta = Math.max(0, now - ms)
+  const secs = Math.floor(delta / 1000)
+  if (secs < 3) return "just now"
+  if (secs < 60) return `${secs}s ago`
+  const mins = Math.floor(secs / 60)
+  if (mins < 60) return `${mins}m ago`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  return `${days}d ago`
+}
+
+/** A tokens-per-minute rate label from a token count over a window (ms). */
+export function formatRate(tokens: number, windowMs: number): string {
+  if (!Number.isFinite(tokens) || !Number.isFinite(windowMs) || windowMs <= 0) {
+    return "0/min"
+  }
+  const perMin = (tokens / windowMs) * 60_000
+  return `${formatCompact(perMin)}/min`
+}
+
+/** The six categorical viz series tokens, in order. Cycle by stable index so a
+ *  given provider/model keeps its color across renders. */
+export const VIZ_SERIES_VARS: ReadonlyArray<string> = [
+  "var(--viz-series1)",
+  "var(--viz-series2)",
+  "var(--viz-series3)",
+  "var(--viz-series4)",
+  "var(--viz-series5)",
+  "var(--viz-series6)",
+]
+
+/** Pick a stable categorical viz color for a series index (wraps the ramp). */
+export function vizSeriesColor(index: number): string {
+  const n = VIZ_SERIES_VARS.length
+  const i = ((Math.trunc(index) % n) + n) % n
+  return VIZ_SERIES_VARS[i]
+}

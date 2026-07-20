@@ -20,7 +20,7 @@ export type TokenUsageEndpoint =
   | "provider_messages"
   | "responses"
 
-export type TokenUsagePeriod = "day" | "week" | "month"
+export type TokenUsagePeriod = "day" | "week" | "month" | "all"
 
 export interface UsageTokens {
   cache_creation_input_tokens?: number | null
@@ -71,6 +71,19 @@ export interface TokenUsageModelSummary extends TokenUsageTotals {
   is_premium: boolean | null
 }
 
+/**
+ * Per-provider rollup (GROUP BY source, provider_name). The UI's provider
+ * dimension: today one row (`copilot`), but the shape is provider-forward so
+ * additional upstreams (`source: "provider"`, keyed by `provider_name`) fan out
+ * here without a schema change. `provider` is the display/stable key — `copilot`
+ * for the built-in path, else the `provider_name`.
+ */
+export interface TokenUsageProviderSummary extends TokenUsageTotals {
+  source: TokenUsageSource
+  provider_name: string | null
+  provider: string
+}
+
 export interface TokenUsageEventRecord {
   cache_creation_input_tokens: number
   cache_read_input_tokens: number
@@ -93,6 +106,7 @@ export interface TokenUsageEventRecord {
 
 export interface TokenUsageSummary {
   byModel: Array<TokenUsageModelSummary>
+  byProvider: Array<TokenUsageProviderSummary>
   period: TokenUsagePeriod
   range: {
     end_ms: number
@@ -101,6 +115,28 @@ export interface TokenUsageSummary {
     start_utc: string
   }
   totals: TokenUsageTotals
+}
+
+/**
+ * One time bucket of the usage series (§4 live/trend charts). Buckets are
+ * fixed-width windows of `created_at_ms` (floor to `bucketMs`), carrying the
+ * token-type split so a stacked area (input / output / cache) renders directly.
+ * `request_count` drives the per-bucket density read.
+ */
+export interface TokenUsageSeriesBucket extends TokenUsageTotals {
+  bucket_start_ms: number
+}
+
+export interface TokenUsageSeries {
+  buckets: Array<TokenUsageSeriesBucket>
+  bucket_ms: number
+  period: TokenUsagePeriod
+  range: {
+    end_ms: number
+    end_utc: string
+    start_ms: number
+    start_utc: string
+  }
 }
 
 export interface TokenUsageEventsPage {
@@ -353,6 +389,15 @@ async function flushTokenUsageEvents(): Promise<void> {
 }
 
 function getPeriodRange(period: TokenUsagePeriod, now = new Date()) {
+  // All-time: from the epoch to now. A fixed lower bound (rather than a
+  // MIN(created_at_ms) probe) keeps this pure and synchronous like the other
+  // ranges; the UI labels it "All time" and never renders the 1970 start. The
+  // end is `now + 1` because the range is half-open (`created_at_ms < endMs`):
+  // an event recorded in the same millisecond as the query must still count.
+  if (period === "all") {
+    return { endMs: now.getTime() + 1, startMs: 0 }
+  }
+
   const start = new Date(now)
 
   switch (period) {
@@ -418,6 +463,7 @@ function createEmptySummary(period: TokenUsagePeriod): TokenUsageSummary {
 
   return {
     byModel: [],
+    byProvider: [],
     period,
     range: {
       end_ms: range.endMs,
@@ -503,6 +549,17 @@ function nullableStringFromRow(
   return typeof value === "string" ? value : null
 }
 
+/** Stable display key for the provider dimension: the built-in Copilot path is
+ *  always `copilot`; an external upstream is keyed by its `provider_name`,
+ *  falling back to the generic `provider` when unnamed. */
+function providerKey(
+  source: TokenUsageSource,
+  providerName: string | null,
+): string {
+  if (source === "copilot") return "copilot"
+  return providerName && providerName.trim() ? providerName : "provider"
+}
+
 function usageEventFromRow(
   row: Record<string, unknown>,
 ): TokenUsageEventRecord {
@@ -580,12 +637,48 @@ export async function getTokenUsageSummary(
     )
     .all(range.startMs, range.endMs) as Array<Record<string, unknown>>
 
+  // Provider dimension (§4). GROUP BY the raw (source, provider_name) pair; a
+  // NULL provider_name for a `provider` row collapses under COALESCE so it is
+  // still one bucket. Ordered by traffic so the dominant provider leads.
+  const byProviderRows = db
+    .prepare(
+      `
+    SELECT
+      source,
+      provider_name,
+      COUNT(*) AS request_count,
+      COALESCE(SUM(input_tokens), 0) AS input_tokens,
+      COALESCE(SUM(output_tokens), 0) AS output_tokens,
+      COALESCE(SUM(cache_read_input_tokens), 0) AS cache_read_input_tokens,
+      COALESCE(SUM(cache_creation_input_tokens), 0) AS cache_creation_input_tokens,
+      COALESCE(SUM(total_tokens), 0) AS total_tokens,
+      COALESCE(SUM(total_nano_aiu), 0) AS total_nano_aiu
+    FROM token_usage_events
+    WHERE created_at_ms >= ? AND created_at_ms < ?
+    GROUP BY source, provider_name
+    ORDER BY
+      total_tokens DESC,
+      source ASC
+  `,
+    )
+    .all(range.startMs, range.endMs) as Array<Record<string, unknown>>
+
   return {
     byModel: byModelRows.map((row) => ({
       ...totalsFromRow(row),
       model: typeof row.model === "string" ? row.model : "unknown",
       is_premium: premiumFromRow(row, "is_premium"),
     })),
+    byProvider: byProviderRows.map((row) => {
+      const source = stringFromRow(row, "source") as TokenUsageSource
+      const providerName = nullableStringFromRow(row, "provider_name")
+      return {
+        ...totalsFromRow(row),
+        source,
+        provider_name: providerName,
+        provider: providerKey(source, providerName),
+      }
+    }),
     period,
     range: {
       end_ms: range.endMs,
@@ -669,6 +762,162 @@ export async function getTokenUsageEventsPage(input: {
     },
     total,
     total_pages: Math.max(1, Math.ceil(total / pageSize)),
+  }
+}
+
+/** Aim for ~this many buckets across a period; cap the total so an all-time
+ *  query over a wide span can't emit an unbounded (zero-filled) series. */
+const SERIES_TARGET_BUCKETS = 60
+const SERIES_MAX_BUCKETS = 500
+const MINUTE_MS = 60_000
+const HOUR_MS = 3_600_000
+const DAY_MS = 86_400_000
+
+/** Pick a bucket width for a series: an explicit request wins (clamped so the
+ *  span can't exceed SERIES_MAX_BUCKETS), else a period-appropriate default. */
+function resolveBucketMs(input: {
+  period: TokenUsagePeriod
+  startMs: number
+  endMs: number
+  requestedMs?: number
+}): number {
+  const { period, startMs, endMs, requestedMs } = input
+  const span = Math.max(1, endMs - startMs)
+  let base: number
+  if (
+    requestedMs !== undefined
+    && Number.isFinite(requestedMs)
+    && requestedMs > 0
+  ) {
+    base = Math.floor(requestedMs)
+  } else {
+    switch (period) {
+      case "day": {
+        base = HOUR_MS
+        break
+      }
+      case "week":
+      case "month": {
+        base = DAY_MS
+        break
+      }
+      default: {
+        // all-time: size to the target bucket count over the real span
+        base = Math.max(DAY_MS, Math.ceil(span / SERIES_TARGET_BUCKETS))
+        break
+      }
+    }
+  }
+  const floor = Math.ceil(span / SERIES_MAX_BUCKETS)
+  return Math.max(base, floor, MINUTE_MS)
+}
+
+function createEmptySeries(period: TokenUsagePeriod): TokenUsageSeries {
+  const range = getPeriodRange(period)
+  return {
+    buckets: [],
+    bucket_ms: resolveBucketMs({
+      period,
+      startMs: range.startMs,
+      endMs: range.endMs,
+    }),
+    period,
+    range: {
+      end_ms: range.endMs,
+      end_utc: new Date(range.endMs).toISOString(),
+      start_ms: range.startMs,
+      start_utc: new Date(range.startMs).toISOString(),
+    },
+  }
+}
+
+/**
+ * Time-bucketed token series for the trend/live charts (§4). Buckets floor
+ * `created_at_ms` to a fixed width and carry the token-type split so a stacked
+ * area renders directly. Empty buckets are zero-filled between the first and
+ * last populated windows so the chart has a continuous x-axis (the count is
+ * bounded by SERIES_MAX_BUCKETS). For "all", the range is tightened to the real
+ * min/max event time so the buckets track the data, not the epoch.
+ */
+export async function getTokenUsageSeries(input: {
+  period: TokenUsagePeriod
+  bucketMs?: number
+}): Promise<TokenUsageSeries> {
+  const period = input.period
+  if (!isTokenUsageStorageEnabled()) {
+    return createEmptySeries(period)
+  }
+
+  await flushTokenUsageEvents()
+  const db = await getDb()
+
+  let { startMs, endMs } = getPeriodRange(period)
+  if (period === "all") {
+    const bounds = db
+      .prepare(
+        "SELECT MIN(created_at_ms) AS min_ms, MAX(created_at_ms) AS max_ms FROM token_usage_events",
+      )
+      .get() as Record<string, unknown> | undefined
+    const maxMs = numberFromRow(bounds, "max_ms")
+    if (maxMs > 0) {
+      startMs = numberFromRow(bounds, "min_ms")
+      endMs = maxMs + 1
+    } else {
+      // No data — show a single day's empty axis rather than 56 years of it.
+      startMs = endMs - DAY_MS
+    }
+  }
+
+  const bucketMs = resolveBucketMs({
+    period,
+    startMs,
+    endMs,
+    requestedMs: input.bucketMs,
+  })
+
+  const rows = db
+    .prepare(
+      `
+    SELECT
+      (CAST(created_at_ms / ? AS INTEGER)) * ? AS bucket_start_ms,
+      COUNT(*) AS request_count,
+      COALESCE(SUM(input_tokens), 0) AS input_tokens,
+      COALESCE(SUM(output_tokens), 0) AS output_tokens,
+      COALESCE(SUM(cache_read_input_tokens), 0) AS cache_read_input_tokens,
+      COALESCE(SUM(cache_creation_input_tokens), 0) AS cache_creation_input_tokens,
+      COALESCE(SUM(total_tokens), 0) AS total_tokens,
+      COALESCE(SUM(total_nano_aiu), 0) AS total_nano_aiu
+    FROM token_usage_events
+    WHERE created_at_ms >= ? AND created_at_ms < ?
+    GROUP BY bucket_start_ms
+    ORDER BY bucket_start_ms ASC
+  `,
+    )
+    .all(bucketMs, bucketMs, startMs, endMs) as Array<Record<string, unknown>>
+
+  const byBucket = new Map<number, TokenUsageTotals>()
+  for (const row of rows) {
+    byBucket.set(numberFromRow(row, "bucket_start_ms"), totalsFromRow(row))
+  }
+
+  // Zero-fill from the first aligned bucket up to (not including) endMs.
+  const firstBucket = Math.floor(startMs / bucketMs) * bucketMs
+  const buckets: Array<TokenUsageSeriesBucket> = []
+  for (let t = firstBucket; t < endMs; t += bucketMs) {
+    const totals = byBucket.get(t) ?? createEmptyTotals()
+    buckets.push({ ...totals, bucket_start_ms: t })
+  }
+
+  return {
+    buckets,
+    bucket_ms: bucketMs,
+    period,
+    range: {
+      end_ms: endMs,
+      end_utc: new Date(endMs).toISOString(),
+      start_ms: startMs,
+      start_utc: new Date(startMs).toISOString(),
+    },
   }
 }
 

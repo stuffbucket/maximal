@@ -18,15 +18,20 @@ import {
 export {
   closeUsageStore,
   getTokenUsageEventsPage,
+  getTokenUsageSeries,
   getTokenUsageSummary,
 } from "./store"
 
 export type {
+  PersistedTokenUsageEvent,
   TokenUsageEndpoint,
   TokenUsageEventRecord,
   TokenUsageEventsPage,
   TokenUsageModelSummary,
   TokenUsagePeriod,
+  TokenUsageProviderSummary,
+  TokenUsageSeries,
+  TokenUsageSeriesBucket,
   TokenUsageSource,
   TokenUsageSummary,
   TokenUsageTotals,
@@ -156,6 +161,18 @@ function resolveIsPaid(model: string): number | null {
 }
 
 tokenUsageEventBus.subscribe("token_usage.recorded", enqueueTokenUsageWrite)
+
+/**
+ * Subscribe to every recorded token-usage event. The live-feed hub bridges this
+ * into the `usage` LiveFeedEvent so a tab streams traffic as it happens (§4),
+ * without polling. Returns an unsubscribe handle. Fires AFTER normalization, so
+ * the event is the persisted shape (already filtered by `hasAnyToken`).
+ */
+export function onTokenUsageRecorded(
+  listener: (event: PersistedTokenUsageEvent) => void,
+): () => void {
+  return tokenUsageEventBus.subscribe("token_usage.recorded", listener)
+}
 
 export function recordTokenUsageEvent(input: TokenUsageEventInput): void {
   const event = toPersistedEvent(input)

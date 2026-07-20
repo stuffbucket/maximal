@@ -83,6 +83,17 @@
   --status-info: #38bdf8;
   --status-info-fg: #7dd3fc;
 
+  /* ---- Data viz (Usage charts) ---- */
+  --viz-input: #3f9aa8;
+  --viz-output: #7b6fd0;
+  --viz-cache: #8a8f98;
+  --viz-series1: #3f9aa8;
+  --viz-series2: #7b6fd0;
+  --viz-series3: #d99a3c;
+  --viz-series4: #cc6f92;
+  --viz-series5: #5aa876;
+  --viz-series6: #5b8fc9;
+
   /* ---- Link colors (defaults to dark theme) ---- */
   --link: #7fc1d2;
   --link-hover: #a8d8e3;

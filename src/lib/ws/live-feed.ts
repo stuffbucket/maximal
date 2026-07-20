@@ -1,6 +1,7 @@
 import type {
   LiveFeedEvent,
   LiveFeedSnapshot,
+  UsageLastEvent,
   UsageSnapshot,
 } from "~/lib/ws/feed-types"
 import type { PresenceRegistry } from "~/lib/ws/presence-registry"
@@ -21,7 +22,11 @@ import type { PresenceRegistry } from "~/lib/ws/presence-registry"
 import { getAuthStatus } from "~/lib/auth/auth-controller"
 import { settingsEventBus } from "~/lib/config/settings-events"
 import { listActiveClients } from "~/lib/http/active-clients"
-import { getTokenUsageSummary } from "~/lib/token-usage"
+import {
+  getTokenUsageSummary,
+  onTokenUsageRecorded,
+  type PersistedTokenUsageEvent,
+} from "~/lib/token-usage"
 import { getUpdateStatus } from "~/lib/update/update-check"
 import { buildAccountsList } from "~/routes/settings/accounts"
 import { buildAppsList } from "~/routes/settings/apps"
@@ -36,6 +41,21 @@ export class LiveFeedHub {
   private readonly deps: LiveFeedHubDeps
   /** Active producer unsubscribe handles; non-empty iff `start()` has run. */
   private readonly unsubscribes: Array<() => void> = []
+  /**
+   * Running tally of today's usage, so a live `usage` event can carry the
+   * current totals without a per-request DB query. Seeded from the `day`
+   * summary at `start()`, incremented per recorded event, and re-seeded when an
+   * event crosses the day boundary. Authoritative totals still come from the
+   * HTTP summary the tab refetches on the event — this is the between-refetch
+   * ticker (§4).
+   */
+  private usageToday = {
+    tokens: 0,
+    requests: 0,
+    rangeStartMs: 0,
+    rangeEndMs: 0,
+    seeded: false,
+  }
 
   constructor(deps: LiveFeedHubDeps) {
     this.deps = deps
@@ -44,14 +64,65 @@ export class LiveFeedHub {
   /** Subscribe to every producer and translate → `publish`. Idempotent. */
   start(): void {
     if (this.unsubscribes.length > 0) return // already started — don't double-subscribe
-    // Today the only live producer is the settings event bus (`auth.changed`).
-    // The other eight event types have no emitter yet (ADR-0007's bus is
-    // "shaped to grow"); they are wired here as their producers land (§1.3).
     this.unsubscribes.push(
       settingsEventBus.subscribe("auth.changed", (payload) => {
         this.publish({ type: "auth.changed", payload })
       }),
+      // Token-usage → `usage`: every recorded request becomes a live frame
+      // carrying the just-recorded event (the pulse/stream, §4) plus the
+      // running day totals.
+      onTokenUsageRecorded((event) => {
+        this.onUsageRecorded(event)
+      }),
     )
+    // Seed the running day totals from the store (best-effort, async).
+    void this.seedUsageToday()
+  }
+
+  /** Load the authoritative day totals so the live ticker starts from truth. */
+  private async seedUsageToday(): Promise<void> {
+    try {
+      const summary = await getTokenUsageSummary("day")
+      this.usageToday = {
+        tokens: summary.totals.total_tokens,
+        requests: summary.totals.request_count,
+        rangeStartMs: summary.range.start_ms,
+        rangeEndMs: summary.range.end_ms,
+        seeded: true,
+      }
+    } catch {
+      // Leave unseeded; onUsageRecorded still increments from zero and the tab's
+      // HTTP refetch supplies authoritative numbers regardless.
+    }
+  }
+
+  /** Fold one recorded event into the day tally and broadcast a `usage` frame. */
+  private onUsageRecorded(event: PersistedTokenUsageEvent): void {
+    // Crossed into a new day (or never seeded) → resync the window + totals.
+    if (
+      !this.usageToday.seeded
+      || event.created_at_ms >= this.usageToday.rangeEndMs
+    ) {
+      void this.seedUsageToday()
+    }
+    this.usageToday.tokens += event.total_tokens
+    this.usageToday.requests += 1
+    this.publish({
+      type: "usage",
+      payload: {
+        periodStart:
+          this.usageToday.rangeStartMs > 0 ?
+            new Date(this.usageToday.rangeStartMs).toISOString()
+          : event.created_at_utc,
+        periodEnd:
+          this.usageToday.rangeEndMs > 0 ?
+            new Date(this.usageToday.rangeEndMs).toISOString()
+          : event.created_at_utc,
+        totalTokens: this.usageToday.tokens,
+        requestCount: this.usageToday.requests,
+        lastEvent: toUsageLastEvent(event),
+      },
+    })
   }
 
   /** Tear down all producer subscriptions (test cleanup + sidecar restart). */
@@ -71,15 +142,32 @@ export class LiveFeedHub {
   }
 }
 
-/** Map the token-usage summary to the feed's distilled usage shape (§4). */
+/** Map the token-usage summary to the feed's distilled usage shape (§4). The
+ *  (re)connect snapshot has no "last event" — that only rides live frames. */
 function toUsageSnapshot(summary: {
   range: { start_utc: string; end_utc: string }
-  totals: { total_tokens: number }
+  totals: { total_tokens: number; request_count: number }
 }): UsageSnapshot {
   return {
     periodStart: summary.range.start_utc,
     periodEnd: summary.range.end_utc,
     totalTokens: summary.totals.total_tokens,
+    requestCount: summary.totals.request_count,
+    lastEvent: null,
+  }
+}
+
+/** Distil a persisted event to the wire `UsageLastEvent` (camelCase). */
+function toUsageLastEvent(event: PersistedTokenUsageEvent): UsageLastEvent {
+  return {
+    model: event.model,
+    source: event.source,
+    providerName: event.provider_name,
+    endpoint: event.endpoint,
+    inputTokens: event.input_tokens,
+    outputTokens: event.output_tokens,
+    totalTokens: event.total_tokens,
+    createdAtMs: event.created_at_ms,
   }
 }
 
