@@ -60,7 +60,6 @@ function ProviderCard({
         <span className="usage-provider__name">
           {providerLabel(summary.provider)}
         </span>
-        <span className="usage-provider__source">{summary.source}</span>
       </header>
       <dl className="usage-provider__stats">
         <div className="usage-provider__stat">
@@ -78,6 +77,7 @@ function ProviderCard({
       </dl>
       {quotaEntries.length > 0 && (
         <div className="usage-provider__quotas">
+          <span className="usage-provider__quotas-label">Quota remaining</span>
           {quotaEntries.map(([name, details]) => (
             <QuotaMeter key={name} name={name} details={details} />
           ))}
@@ -115,10 +115,15 @@ export function ProvidersStrip({
   if (rows.length === 0) return null
 
   return (
-    <div className="usage-providers" aria-label="Connected providers">
-      {rows.map((p) => (
-        <ProviderCard key={p.provider} summary={p} quotas={quotas} />
-      ))}
-    </div>
+    <section className="usage__section" aria-label="Providers">
+      <h3 className="usage__section-title">
+        {rows.length === 1 ? "Provider" : "Providers"}
+      </h3>
+      <div className="usage-providers">
+        {rows.map((p) => (
+          <ProviderCard key={p.provider} summary={p} quotas={quotas} />
+        ))}
+      </div>
+    </section>
   )
 }

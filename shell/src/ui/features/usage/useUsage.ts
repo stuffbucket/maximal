@@ -24,7 +24,7 @@ const EVENTS_PAGE_SIZE = 20
 /** How many recent live events to retain for the stream/pulse (bounded memory). */
 const LIVE_RING_CAPACITY = 400
 /** Rolling window the live hero visualizes. */
-export const LIVE_WINDOW_MS = 60 * 60 * 1000
+export const LIVE_WINDOW_MS = 2 * 60 * 60 * 1000
 /** Minimum gap between authoritative refetches triggered by live frames. */
 const REFETCH_THROTTLE_MS = 4000
 

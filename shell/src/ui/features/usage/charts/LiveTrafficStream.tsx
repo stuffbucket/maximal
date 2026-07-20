@@ -15,7 +15,7 @@ import { useReducedMotion } from "./useReducedMotion"
  */
 
 const MINUTE_MS = 60_000
-const WINDOW_MINUTES = 60
+const WINDOW_MINUTES = 120
 
 /** Bucket the live ring into `WINDOW_MINUTES` per-minute bins ending at `now`. */
 function toBins(
@@ -120,8 +120,9 @@ export function LiveTrafficStream({
       <div className="usage-hero__stream">
         <AreaTrend
           data={bins}
-          height={168}
-          ariaLabel="Live token traffic over the last hour"
+          height={200}
+          showAxes
+          ariaLabel="Live token traffic over the last two hours"
         />
       </div>
 

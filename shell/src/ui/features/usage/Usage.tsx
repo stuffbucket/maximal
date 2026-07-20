@@ -1,6 +1,6 @@
 import type { ReactElement } from "react"
 
-import type { RankedRow, Segment } from "./ProportionBar"
+import type { Segment, StackedRow } from "./ProportionBar"
 import type {
   TokenUsageModelSummary,
   TokenUsageProviderSummary,
@@ -11,13 +11,8 @@ import type {
 import { AreaTrend, type TrendPoint } from "./charts/AreaTrend"
 import { LiveTrafficStream } from "./charts/LiveTrafficStream"
 import { EventsTable } from "./EventsTable"
-import {
-  formatCostAiu,
-  formatNumber,
-  providerLabel,
-  vizSeriesColor,
-} from "./format"
-import { ProportionBar, RankedBars } from "./ProportionBar"
+import { formatCostAiu, formatNumber, providerLabel } from "./format"
+import { ProportionBar, StackedBars } from "./ProportionBar"
 import { ProvidersStrip } from "./ProvidersStrip"
 import { useUsage, type UsagePeriod } from "./useUsage"
 
@@ -112,12 +107,14 @@ function tokenSplit(summary: TokenUsageSummary): Array<Segment> {
 
 function modelRows(
   byModel: ReadonlyArray<TokenUsageModelSummary>,
-): Array<RankedRow> {
-  return byModel.map((m, i) => ({
+): Array<StackedRow> {
+  return byModel.map((m) => ({
     key: m.model,
     label: m.model,
-    value: m.total_tokens,
-    color: vizSeriesColor(i),
+    input: m.input_tokens,
+    output: m.output_tokens,
+    cache: m.cache_read_input_tokens + m.cache_creation_input_tokens,
+    total: m.total_tokens,
     meta: `${formatNumber(m.request_count)} req`,
     badge: m.is_premium === true ? "premium" : undefined,
   }))
@@ -125,12 +122,14 @@ function modelRows(
 
 function providerRows(
   byProvider: ReadonlyArray<TokenUsageProviderSummary>,
-): Array<RankedRow> {
-  return byProvider.map((p, i) => ({
+): Array<StackedRow> {
+  return byProvider.map((p) => ({
     key: p.provider,
     label: providerLabel(p.provider),
-    value: p.total_tokens,
-    color: vizSeriesColor(i),
+    input: p.input_tokens,
+    output: p.output_tokens,
+    cache: p.cache_read_input_tokens + p.cache_creation_input_tokens,
+    total: p.total_tokens,
     meta: `${formatNumber(p.request_count)} req`,
   }))
 }
@@ -213,7 +212,7 @@ function WhereItWent({
         {summary.byProvider.length > 1 && (
           <div className="usage__breakdown">
             <h4 className="usage__breakdown-title">By provider</h4>
-            <RankedBars
+            <StackedBars
               rows={providerRows(summary.byProvider)}
               ariaLabel="Tokens by provider"
             />
@@ -221,7 +220,7 @@ function WhereItWent({
         )}
         <div className="usage__breakdown">
           <h4 className="usage__breakdown-title">By model</h4>
-          <RankedBars
+          <StackedBars
             rows={modelRows(summary.byModel)}
             ariaLabel="Tokens by model"
           />

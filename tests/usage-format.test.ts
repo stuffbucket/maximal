@@ -11,8 +11,6 @@ import {
   formatRelativeTime,
   providerLabel,
   quotaView,
-  vizSeriesColor,
-  VIZ_SERIES_VARS,
 } from "../shell/src/ui/features/usage/format"
 
 /**
@@ -152,13 +150,5 @@ describe("formatRate", () => {
     // 600 tokens over 60s = 600/min.
     expect(formatRate(600, 60_000)).toBe("600/min")
     expect(formatRate(0, 0)).toBe("0/min")
-  })
-})
-
-describe("vizSeriesColor", () => {
-  test("cycles the ramp and wraps by index", () => {
-    expect(vizSeriesColor(0)).toBe(VIZ_SERIES_VARS[0])
-    expect(vizSeriesColor(VIZ_SERIES_VARS.length)).toBe(VIZ_SERIES_VARS[0])
-    expect(vizSeriesColor(-1)).toBe(VIZ_SERIES_VARS.at(-1) ?? "")
   })
 })

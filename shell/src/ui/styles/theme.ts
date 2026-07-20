@@ -102,22 +102,17 @@ export const status = {
 
 /**
  * Data-visualization palette for the Usage charts (see docs/design/tokens.md →
- * Data visualization). Category identity, not interactive state — deliberately
- * not `--accent`, never `--brand`. Mid-tone values chosen to read on both the
- * dark and light surfaces; declared once on `:root` (theme-independent). The
- * three band colors are the token-type split of the traffic area; `series1..6`
- * is the categorical ramp cycled across providers/models by stable index.
+ * Data visualization). Category identity by token TYPE, not interactive state —
+ * deliberately not `--accent`, never `--brand`. Mid-tone values chosen to read
+ * on both the dark and light surfaces; declared once on `:root`
+ * (theme-independent). These three are the token-type split (input / output /
+ * cache) used consistently across the traffic area, the proportion bar, and the
+ * per-model/provider bars, so one color language reads everywhere.
  */
 export const viz = {
-  input: "#3f9aa8", // teal — the primary/dominant band
-  output: "#7b6fd0", // indigo — clearly distinct from input
+  input: "#3f9aa8", // teal
+  output: "#7b6fd0", // indigo
   cache: "#8a8f98", // slate — calm neutral (cache is "free")
-  series1: "#3f9aa8",
-  series2: "#7b6fd0",
-  series3: "#d99a3c",
-  series4: "#cc6f92", // rose — softer/pinker than --brand crimson
-  series5: "#5aa876",
-  series6: "#5b8fc9",
 } as const
 
 export const link = {
@@ -145,6 +140,7 @@ export const focusRing = {
 export const layout = {
   sidebarWidth: "200px",
   contentMax: "640px",
+  contentMaxWide: "1040px",
 } as const
 
 export const themes = {
