@@ -3,6 +3,7 @@ import type { ReactElement } from "react"
 import type { MutationResult } from "./useApiKeys"
 
 import { Checkbox } from "../../components/Checkbox"
+import { Disclosure } from "../../components/Disclosure"
 
 interface AdvancedSectionProps {
   enforcing: boolean
@@ -20,28 +21,25 @@ export function AdvancedSection({
   setEnforce,
 }: AdvancedSectionProps): ReactElement {
   return (
-    <details className="advanced-section">
-      <summary className="advanced-section__summary">
-        <span className="advanced-section__title">Advanced</span>
-      </summary>
-      <div className="advanced-section__body">
-        <div className="advanced-section__row">
-          <div className="advanced-section__label">
-            <span className="advanced-section__row-title">
-              Block unknown connections
-            </span>
-            <span className="advanced-section__row-hint">
-              When on, apps that don't present one of the keys listed above are
-              turned away. Leave off if you just want to see which app is which.
-            </span>
-          </div>
-          <Checkbox
-            checked={enforcing}
-            onCheckedChange={(next) => void setEnforce(next)}
-            aria-label="Block unknown connections"
-          />
+    <Disclosure
+      summary={<span className="advanced-section__title">Advanced</span>}
+    >
+      <div className="advanced-section__row">
+        <div className="advanced-section__label">
+          <span className="advanced-section__row-title">
+            Block unknown connections
+          </span>
+          <span className="advanced-section__row-hint">
+            When on, apps that don't present one of the keys listed above are
+            turned away. Leave off if you just want to see which app is which.
+          </span>
         </div>
+        <Checkbox
+          checked={enforcing}
+          onCheckedChange={(next) => void setEnforce(next)}
+          aria-label="Block unknown connections"
+        />
       </div>
-    </details>
+    </Disclosure>
   )
 }
