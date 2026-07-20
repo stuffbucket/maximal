@@ -1122,6 +1122,10 @@ async fn poll_sidecar_status(app: AppHandle) {
         if let Some(status) = fetch_setup_status(&client, &url).await {
             apply_setup_status(&app, &status);
         }
+        // Live-apply a menu-bar-only toggle the browser-tab UI persisted to
+        // config.json (it has no Tauri IPC to apply it directly). Cheap no-op
+        // when unchanged.
+        sync_menu_bar_only_from_config(&app);
         if let Some(rejection) =
             fetch_rejection(&app, &client, &auth_status_url).await
         {
@@ -1885,6 +1889,30 @@ fn read_menu_bar_only(app: &AppHandle) -> bool {
         return false;
     };
     json["ui"]["menuBarOnly"].as_bool().unwrap_or(false)
+}
+
+/// Live-apply a menu-bar-only change the browser-tab UI persisted to config.json.
+///
+/// Browser-tab delivery (ADR-0018): the Settings UI is a plain browser tab with no
+/// Tauri IPC, so it CANNOT call the `set_menu_bar_only` command — it only persists
+/// `config.ui.menuBarOnly` through the sidecar. This runs on each phase-2 poll tick
+/// (`poll_sidecar_status`), reads the on-disk preference, and — only when it differs
+/// from the runtime `MenuBarOnly` flag — updates the flag and re-applies the Dock/
+/// activation policy. The common case (no change) is a cheap file read + compare.
+fn sync_menu_bar_only_from_config(app: &AppHandle) {
+    let want = read_menu_bar_only(app);
+    let flag = app.state::<MenuBarOnly>();
+    if flag.get() == want {
+        return;
+    }
+    flag.set(want);
+    // AppKit activation-policy changes must run on the main thread; the poll runs
+    // on a tokio task, so hop over. `update_activation_policy` is a no-op on
+    // non-macOS, so this is harmless everywhere.
+    let app_for_main = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        update_activation_policy(&app_for_main);
+    });
 }
 
 /// Path to the persisted locale file — a one-line BCP-47 tag written by the

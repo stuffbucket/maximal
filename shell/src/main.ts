@@ -938,7 +938,14 @@ function openLiveFeed(): void {
             break
           }
           case "usage": {
-            globalThis.dispatchEvent(new CustomEvent("maximal:usage-refresh"))
+            // Forward the enriched payload (the just-recorded event + running
+            // day totals) so the Usage hook can stream the pulse without a
+            // refetch, while still nudging an authoritative reload.
+            globalThis.dispatchEvent(
+              new CustomEvent("maximal:usage-refresh", {
+                detail: event.payload,
+              }),
+            )
             break
           }
           default: {
@@ -2371,6 +2378,10 @@ function wireGeneral(): void {
   el.addEventListener("change", () => {
     const menuBarOnly = el.checked
     // Persist to the proxy (same auth pattern as the other settings calls).
+    // The Settings UI is a browser tab with no Tauri IPC, so it CANNOT apply the
+    // Dock/activation policy directly — the Rust shell watches config.json on its
+    // status poll and live-applies the change (sync_menu_bar_only_from_config),
+    // typically within a few seconds. So persisting the preference is all we do.
     void (async () => {
       try {
         const key = await getShellApiKey()
@@ -2386,16 +2397,6 @@ function wireGeneral(): void {
         })
       } catch (err) {
         console.warn("POST /settings/api/ui failed:", err)
-      }
-    })()
-    // Apply live to the Dock/taskbar via the Tauri shell. Guarded exactly like
-    // safeInvoke so a plain-browser session (app:ui, where invoke is
-    // unavailable) degrades gracefully instead of throwing.
-    void (async () => {
-      try {
-        await invoke("set_menu_bar_only", { menuBarOnly })
-      } catch (err) {
-        console.warn("invoke(set_menu_bar_only) failed:", err)
       }
     })()
   })
