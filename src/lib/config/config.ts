@@ -50,6 +50,13 @@ export interface AppConfig {
   claudeTokenMultiplier?: number
   logRetentionDays?: number
   /**
+   * How many days of `token_usage_events` rows to keep; older rows are pruned on
+   * boot and daily. 0 disables pruning (keep forever). Defaults to
+   * DEFAULT_TOKEN_USAGE_RETENTION_DAYS (365) — roughly tens of MB/year at typical
+   * volume, so a year is cheap while still bounding unbounded growth.
+   */
+  tokenUsageRetentionDays?: number
+  /**
    * Opt-in: when true, a fatal Copilot rejection may AUTO-SWITCH to another
    * previously-successful account without a per-event prompt. Defaults OFF —
    * enabling it is the user's PRIOR AUTHORIZATION that all their stored accounts
@@ -505,6 +512,16 @@ export const DEFAULT_LOG_RETENTION_DAYS = 7
 export function getLogRetentionDays(): number {
   const config = getConfig()
   return config.logRetentionDays ?? DEFAULT_LOG_RETENTION_DAYS
+}
+
+/** Default retention for `token_usage_events` — one year. Cheap on disk (tens of
+ *  MB/year at typical volume) while keeping the table from growing unbounded. */
+export const DEFAULT_TOKEN_USAGE_RETENTION_DAYS = 365
+
+/** Days of token-usage history to retain; 0 disables pruning (keep forever). */
+export function getTokenUsageRetentionDays(): number {
+  const config = getConfig()
+  return config.tokenUsageRetentionDays ?? DEFAULT_TOKEN_USAGE_RETENTION_DAYS
 }
 
 /** Whether the user has authorized auto-switching to another stored account on

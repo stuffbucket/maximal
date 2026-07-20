@@ -388,6 +388,17 @@ async function flushTokenUsageEvents(): Promise<void> {
   }
 }
 
+/** Delete rows older than `beforeMs`, flushing pending writes first so every
+ *  committed row is visible. Returns the number of rows removed. */
+export async function pruneTokenUsageEvents(beforeMs: number): Promise<number> {
+  if (!isTokenUsageStorageEnabled()) return 0
+  await flushTokenUsageEvents()
+  const db = await getDb()
+  const sql = "DELETE FROM token_usage_events WHERE created_at_ms < ?"
+  // casts-keep: bun:sqlite run() returns a trusted { changes } shape.
+  return (db.prepare(sql).run(beforeMs) as { changes: number }).changes
+}
+
 function getPeriodRange(period: TokenUsagePeriod, now = new Date()) {
   // All-time: from the epoch to now. A fixed lower bound (rather than a
   // MIN(created_at_ms) probe) keeps this pure and synchronous like the other
