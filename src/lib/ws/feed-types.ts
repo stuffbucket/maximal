@@ -152,14 +152,28 @@ export interface InlineUiState {
 // parse/serialize bodies land, promote these to `z.discriminatedUnion("type", …)`
 // so `parseServerMessage` validates against a schema instead of hand shape-checks.
 
-/** Frames a tab may send to the sidecar (presence + liveness). */
+/**
+ * Frames a tab may send to the sidecar (presence + liveness).
+ *
+ * `focused` mirrors `document.hasFocus()` and is distinct from `visibility`: a
+ * tab can be `visibilityState: "visible"` yet unfocused (browser backgrounded,
+ * or the active tab of a non-key window). The tray-open decision (§1.2) needs
+ * both — only a visible AND focused tab is genuinely in front of the user, so
+ * only that is a no-op; a visible-but-unfocused tab still gets reopened because
+ * a browser tab can't raise itself.
+ */
 export type LiveFeedClientMessage =
   | {
       readonly type: "hello"
       readonly tabId: string
       readonly visibility: string
+      readonly focused: boolean
     }
-  | { readonly type: "visibility"; readonly visibility: string }
+  | {
+      readonly type: "visibility"
+      readonly visibility: string
+      readonly focused: boolean
+    }
   | { readonly type: "pong" }
 
 /** Frames the sidecar may send to a tab (the feed, plus tray-driven control). */

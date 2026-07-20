@@ -38,8 +38,10 @@ describe("PresenceRegistry — active now", () => {
 describe("PresenceRegistry behavior — unskip when implemented", () => {
   test("register then snapshot reflects the tab", () => {
     const reg = new PresenceRegistry()
-    reg.register("a", fakeSocket(), "visible")
-    expect(reg.snapshot()).toEqual([{ tabId: "a", visibility: "visible" }])
+    reg.register("a", fakeSocket(), { visibility: "visible", focused: true })
+    expect(reg.snapshot()).toEqual([
+      { tabId: "a", visibility: "visible", focused: true },
+    ])
     expect(reg.size).toBe(1)
   })
 
@@ -47,8 +49,8 @@ describe("PresenceRegistry behavior — unskip when implemented", () => {
     const reg = new PresenceRegistry()
     const oldSock = fakeSocket()
     const newSock = fakeSocket()
-    reg.register("a", oldSock, "visible") // first connection
-    reg.register("a", newSock, "visible") // reconnect supersedes
+    reg.register("a", oldSock, { visibility: "visible", focused: true }) // first connection
+    reg.register("a", newSock, { visibility: "visible", focused: true }) // reconnect supersedes
     expect(reg.remove("a", oldSock)).toBe(false) // stale close is a no-op
     expect(reg.size).toBe(1)
     expect(reg.socketFor("a")).toBe(newSock)
@@ -57,7 +59,7 @@ describe("PresenceRegistry behavior — unskip when implemented", () => {
   test("remove with the current socket evicts", () => {
     const reg = new PresenceRegistry()
     const sock = fakeSocket()
-    reg.register("a", sock, "hidden")
+    reg.register("a", sock, { visibility: "hidden", focused: false })
     expect(reg.remove("a", sock)).toBe(true)
     expect(reg.size).toBe(0)
   })
@@ -74,16 +76,29 @@ describe("PresenceRegistry behavior — unskip when implemented", () => {
 
   test("updateVisibility changes what the snapshot reports", () => {
     const reg = new PresenceRegistry()
-    reg.register("a", fakeSocket(), "hidden")
-    reg.updateVisibility("a", "visible")
-    expect(reg.snapshot()).toEqual([{ tabId: "a", visibility: "visible" }])
-    // A visible tab now flips the tray decision to noop.
+    reg.register("a", fakeSocket(), { visibility: "hidden", focused: false })
+    reg.updateVisibility("a", { visibility: "visible", focused: true })
+    expect(reg.snapshot()).toEqual([
+      { tabId: "a", visibility: "visible", focused: true },
+    ])
+    // A visible AND focused tab now flips the tray decision to noop.
     expect(reg.trayDecision()).toEqual({ kind: "noop" })
+  })
+
+  test("updateVisibility to visible-but-unfocused keeps the reopen decision", () => {
+    const reg = new PresenceRegistry()
+    reg.register("a", fakeSocket(), { visibility: "hidden", focused: false })
+    // Becoming "visible" alone (browser still backgrounded) must NOT noop.
+    reg.updateVisibility("a", { visibility: "visible", focused: false })
+    expect(reg.trayDecision()).toEqual({
+      kind: "close-then-open",
+      closeTabIds: ["a"],
+    })
   })
 
   test("updateVisibility on an unknown tab is a silent no-op (never throws)", () => {
     const reg = new PresenceRegistry()
-    reg.updateVisibility("ghost", "visible")
+    reg.updateVisibility("ghost", { visibility: "visible", focused: true })
     expect(reg.size).toBe(0)
   })
 
@@ -91,8 +106,8 @@ describe("PresenceRegistry behavior — unskip when implemented", () => {
     const reg = new PresenceRegistry()
     const s1 = fakeSocket()
     const s2 = fakeSocket()
-    reg.register("a", s1, "visible")
-    reg.register("b", s2, "hidden")
+    reg.register("a", s1, { visibility: "visible", focused: true })
+    reg.register("b", s2, { visibility: "hidden", focused: false })
     reg.broadcast({ type: "ping" })
     expect(s1.sent).toHaveLength(1)
     expect(s2.sent).toHaveLength(1)
@@ -100,7 +115,7 @@ describe("PresenceRegistry behavior — unskip when implemented", () => {
 
   test("trayDecision delegates to decideTrayOpen over the snapshot", () => {
     const reg = new PresenceRegistry()
-    reg.register("a", fakeSocket(), "hidden")
+    reg.register("a", fakeSocket(), { visibility: "hidden", focused: false })
     expect(reg.trayDecision()).toEqual({
       kind: "close-then-open",
       closeTabIds: ["a"],

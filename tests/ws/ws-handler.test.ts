@@ -68,7 +68,7 @@ describe("parseClientMessage", () => {
     expect(parseClientMessage(JSON.stringify({ type: "nope" }))).toBeNull()
   })
 
-  test("hello requires both tabId and visibility", () => {
+  test("hello requires both tabId and visibility; focused defaults to false", () => {
     expect(parseClientMessage(JSON.stringify({ type: "hello" }))).toBeNull()
     expect(
       parseClientMessage(JSON.stringify({ type: "hello", tabId: "a" })),
@@ -77,7 +77,57 @@ describe("parseClientMessage", () => {
       parseClientMessage(
         JSON.stringify({ type: "hello", tabId: "a", visibility: "visible" }),
       ),
-    ).toEqual({ type: "hello", tabId: "a", visibility: "visible" })
+    ).toEqual({
+      type: "hello",
+      tabId: "a",
+      visibility: "visible",
+      focused: false,
+    })
+  })
+
+  test("focused rides hello and visibility frames when present", () => {
+    expect(
+      parseClientMessage(
+        JSON.stringify({
+          type: "hello",
+          tabId: "a",
+          visibility: "visible",
+          focused: true,
+        }),
+      ),
+    ).toEqual({
+      type: "hello",
+      tabId: "a",
+      visibility: "visible",
+      focused: true,
+    })
+    expect(
+      parseClientMessage(
+        JSON.stringify({
+          type: "visibility",
+          visibility: "visible",
+          focused: true,
+        }),
+      ),
+    ).toEqual({ type: "visibility", visibility: "visible", focused: true })
+  })
+
+  test("a non-boolean focused is coerced to false (only literal true counts)", () => {
+    expect(
+      parseClientMessage(
+        JSON.stringify({
+          type: "hello",
+          tabId: "a",
+          visibility: "visible",
+          focused: "yes",
+        }),
+      ),
+    ).toEqual({
+      type: "hello",
+      tabId: "a",
+      visibility: "visible",
+      focused: false,
+    })
   })
 
   test("pong parses with no payload", () => {
@@ -117,10 +167,17 @@ describe("createWebSocketHandler — message", () => {
     const ws = fakeWs({ authed: true, tabId: null })
     handler.message(
       asServerWs(ws),
-      JSON.stringify({ type: "hello", tabId: "a", visibility: "visible" }),
+      JSON.stringify({
+        type: "hello",
+        tabId: "a",
+        visibility: "visible",
+        focused: true,
+      }),
     )
     expect(ws.data.tabId).toBe("a")
-    expect(registry.snapshot()).toEqual([{ tabId: "a", visibility: "visible" }])
+    expect(registry.snapshot()).toEqual([
+      { tabId: "a", visibility: "visible", focused: true },
+    ])
   })
 
   test("an unknown visibility string is treated as buried (hidden)", () => {
@@ -130,7 +187,9 @@ describe("createWebSocketHandler — message", () => {
       asServerWs(ws),
       JSON.stringify({ type: "hello", tabId: "a", visibility: "bogus" }),
     )
-    expect(registry.snapshot()).toEqual([{ tabId: "a", visibility: "hidden" }])
+    expect(registry.snapshot()).toEqual([
+      { tabId: "a", visibility: "hidden", focused: false },
+    ])
   })
 
   test("visibility before hello is a no-op (no tabId yet)", () => {
@@ -143,7 +202,7 @@ describe("createWebSocketHandler — message", () => {
     expect(registry.size).toBe(0)
   })
 
-  test("visibility after hello updates presence", () => {
+  test("visibility after hello updates presence (visibility + focus)", () => {
     const { registry, handler } = makeHandler()
     const ws = fakeWs({ authed: true, tabId: null })
     const wire = asServerWs(ws)
@@ -153,9 +212,15 @@ describe("createWebSocketHandler — message", () => {
     )
     handler.message(
       wire,
-      JSON.stringify({ type: "visibility", visibility: "visible" }),
+      JSON.stringify({
+        type: "visibility",
+        visibility: "visible",
+        focused: true,
+      }),
     )
-    expect(registry.snapshot()).toEqual([{ tabId: "a", visibility: "visible" }])
+    expect(registry.snapshot()).toEqual([
+      { tabId: "a", visibility: "visible", focused: true },
+    ])
   })
 
   test("a Buffer frame is decoded, and malformed input is ignored", () => {
@@ -168,7 +233,9 @@ describe("createWebSocketHandler — message", () => {
         JSON.stringify({ type: "hello", tabId: "b", visibility: "visible" }),
       ),
     )
-    expect(registry.snapshot()).toEqual([{ tabId: "b", visibility: "visible" }])
+    expect(registry.snapshot()).toEqual([
+      { tabId: "b", visibility: "visible", focused: false },
+    ])
   })
 })
 
