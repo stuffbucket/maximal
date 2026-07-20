@@ -74,7 +74,24 @@ If you're describing a token in a doc or commit message, use its name
 | `--border-subtle` | Subtle divider | Hairline separators, card borders | High-contrast emphasis |
 | `--border-strong` | Strong divider | Input borders, emphasized rules | Subtle dividers |
 
-## Operational rules
+## Data visualization (Usage charts)
+
+The Usage view's charts (live traffic stream, trend area, proportion/breakdown
+bars) need a small, stable color vocabulary that reads on **both** themes. These
+are declared once on `:root` (not per-`[data-theme]`) — the values are mid-tone
+and chosen for dual-theme legibility, and the design system's "warn at sub-AA,
+never block" stance applies to chart color the same as elsewhere. Viz color is
+**category identity**, so — unlike interactive surfaces — it is deliberately not
+the single `--accent`; it never uses `--brand` crimson.
+
+| Token | Purpose | Use for | Do NOT use for |
+|---|---|---|---|
+| `--viz-input` | Input-token band | The input band of the stacked token-traffic area | Interactive fills; non-viz surfaces |
+| `--viz-output` | Output-token band | The output band of the token-traffic area | Interactive fills |
+| `--viz-cache` | Cache-token band | The cache-read/creation band (a calm neutral — cache is "free") | Emphasis; text color |
+| `--viz-series1` … `--viz-series6` | Categorical ramp | Per-provider / per-model series color (assign by stable index) | Sequential/quantitative encodings; status meaning |
+
+
 
 - **One token table, one place to look.** Don't redeclare values
   inline in components.

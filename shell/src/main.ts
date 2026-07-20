@@ -938,7 +938,14 @@ function openLiveFeed(): void {
             break
           }
           case "usage": {
-            globalThis.dispatchEvent(new CustomEvent("maximal:usage-refresh"))
+            // Forward the enriched payload (the just-recorded event + running
+            // day totals) so the Usage hook can stream the pulse without a
+            // refetch, while still nudging an authoritative reload.
+            globalThis.dispatchEvent(
+              new CustomEvent("maximal:usage-refresh", {
+                detail: event.payload,
+              }),
+            )
             break
           }
           default: {

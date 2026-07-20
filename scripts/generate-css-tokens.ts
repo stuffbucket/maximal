@@ -2,7 +2,7 @@ import { writeFileSync, readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   fontStacks, text, weight, leading, tracking, spacing, radii, borderWidth, size,
-  elevation, brand, accent, status, link, focusRing, layout, themes
+  elevation, brand, accent, status, viz, link, focusRing, layout, themes
 } from "../shell/src/ui/styles/theme";
 
 const REPO = resolve(import.meta.dir, "..");
@@ -66,6 +66,9 @@ function generateTokensCSS(): string {
   
   rootLines.push("\n  /* ---- Semantic status ---- */");
   rootLines.push(...processGroup("status", status as any));
+
+  rootLines.push("\n  /* ---- Data viz (Usage charts) ---- */");
+  rootLines.push(...processGroup("viz", viz as any));
 
   rootLines.push("\n  /* ---- Link colors (defaults to dark theme) ---- */");
   rootLines.push(`  --link: ${link.dark.color};`);

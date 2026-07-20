@@ -50,13 +50,32 @@ export type BootState =
   | { readonly phase: "ready" }
   | { readonly phase: "failed"; readonly reason: string }
 
+/**
+ * The most recent recorded request, carried on the live `usage` event so a tab
+ * can stream traffic (the pulse + rolling counter, §4) without a refetch. Null
+ * in the (re)connect snapshot — there is no "last event" for a cold tab; it
+ * populates only on subsequent live `usage` events.
+ */
+export interface UsageLastEvent {
+  readonly model: string
+  readonly source: "copilot" | "provider"
+  readonly providerName: string | null
+  readonly endpoint: string
+  readonly inputTokens: number
+  readonly outputTokens: number
+  readonly totalTokens: number
+  readonly createdAtMs: number
+}
+
 /** Usage rollup that drives the ported Usage section live (replaces the Rust Channel). */
 export interface UsageSnapshot {
-  // TODO(single-window §4): mirror the `/token-usage` response shape exactly so
-  // the ported Usage island renders from this without a second fetch.
   readonly periodStart: string
   readonly periodEnd: string
   readonly totalTokens: number
+  /** Today's request count (matches the `day` summary's `totals.request_count`). */
+  readonly requestCount: number
+  /** The just-recorded request that triggered this event; null on a snapshot. */
+  readonly lastEvent: UsageLastEvent | null
 }
 
 /** Update-available signal, sourced from the Phase-6 `update-check.ts` detector (§8). */
