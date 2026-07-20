@@ -391,9 +391,11 @@ async function flushTokenUsageEvents(): Promise<void> {
 function getPeriodRange(period: TokenUsagePeriod, now = new Date()) {
   // All-time: from the epoch to now. A fixed lower bound (rather than a
   // MIN(created_at_ms) probe) keeps this pure and synchronous like the other
-  // ranges; the UI labels it "All time" and never renders the 1970 start.
+  // ranges; the UI labels it "All time" and never renders the 1970 start. The
+  // end is `now + 1` because the range is half-open (`created_at_ms < endMs`):
+  // an event recorded in the same millisecond as the query must still count.
   if (period === "all") {
-    return { endMs: now.getTime(), startMs: 0 }
+    return { endMs: now.getTime() + 1, startMs: 0 }
   }
 
   const start = new Date(now)
