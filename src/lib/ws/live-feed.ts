@@ -51,6 +51,10 @@ export class LiveFeedHub {
    */
   private usageToday = {
     tokens: 0,
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheCreation: 0,
     requests: 0,
     rangeStartMs: 0,
     rangeEndMs: 0,
@@ -85,6 +89,10 @@ export class LiveFeedHub {
       const summary = await getTokenUsageSummary("day")
       this.usageToday = {
         tokens: summary.totals.total_tokens,
+        input: summary.totals.input_tokens,
+        output: summary.totals.output_tokens,
+        cacheRead: summary.totals.cache_read_input_tokens,
+        cacheCreation: summary.totals.cache_creation_input_tokens,
         requests: summary.totals.request_count,
         rangeStartMs: summary.range.start_ms,
         rangeEndMs: summary.range.end_ms,
@@ -106,6 +114,10 @@ export class LiveFeedHub {
       void this.seedUsageToday()
     }
     this.usageToday.tokens += event.total_tokens
+    this.usageToday.input += event.input_tokens
+    this.usageToday.output += event.output_tokens
+    this.usageToday.cacheRead += event.cache_read_input_tokens
+    this.usageToday.cacheCreation += event.cache_creation_input_tokens
     this.usageToday.requests += 1
     this.publish({
       type: "usage",
@@ -119,6 +131,10 @@ export class LiveFeedHub {
             new Date(this.usageToday.rangeEndMs).toISOString()
           : event.created_at_utc,
         totalTokens: this.usageToday.tokens,
+        inputTokens: this.usageToday.input,
+        outputTokens: this.usageToday.output,
+        cacheReadTokens: this.usageToday.cacheRead,
+        cacheCreationTokens: this.usageToday.cacheCreation,
         requestCount: this.usageToday.requests,
         lastEvent: toUsageLastEvent(event),
       },
@@ -146,12 +162,23 @@ export class LiveFeedHub {
  *  (re)connect snapshot has no "last event" — that only rides live frames. */
 function toUsageSnapshot(summary: {
   range: { start_utc: string; end_utc: string }
-  totals: { total_tokens: number; request_count: number }
+  totals: {
+    total_tokens: number
+    input_tokens: number
+    output_tokens: number
+    cache_read_input_tokens: number
+    cache_creation_input_tokens: number
+    request_count: number
+  }
 }): UsageSnapshot {
   return {
     periodStart: summary.range.start_utc,
     periodEnd: summary.range.end_utc,
     totalTokens: summary.totals.total_tokens,
+    inputTokens: summary.totals.input_tokens,
+    outputTokens: summary.totals.output_tokens,
+    cacheReadTokens: summary.totals.cache_read_input_tokens,
+    cacheCreationTokens: summary.totals.cache_creation_input_tokens,
     requestCount: summary.totals.request_count,
     lastEvent: null,
   }
@@ -166,6 +193,8 @@ function toUsageLastEvent(event: PersistedTokenUsageEvent): UsageLastEvent {
     endpoint: event.endpoint,
     inputTokens: event.input_tokens,
     outputTokens: event.output_tokens,
+    cacheReadTokens: event.cache_read_input_tokens,
+    cacheCreationTokens: event.cache_creation_input_tokens,
     totalTokens: event.total_tokens,
     createdAtMs: event.created_at_ms,
   }

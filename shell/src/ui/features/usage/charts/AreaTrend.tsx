@@ -5,45 +5,47 @@ import { scaleLinear } from "@visx/scale"
 import { AreaStack } from "@visx/shape"
 import { useId } from "react"
 
+import type { TrafficBandKey, TrafficPoint } from "./traffic-bands"
+
 import { formatCompact } from "../format"
+import { TRAFFIC_BANDS, trafficTotal } from "./traffic-bands"
 import { useMeasure } from "./useMeasure"
 
 /**
  * A stacked-area trend of token traffic over time, banded by token type
- * (input / output / cache). Headless visx primitives styled entirely from the
- * viz design tokens — the design system owns every pixel. Purely a function of
- * its data: it re-renders as new points arrive (the live "motion" is real data,
- * not a decorative tween), so there is nothing to gate on reduced-motion here.
- * With `showAxes`, a time x-axis and a token-magnitude y-axis are drawn so the
- * timeframe is legible.
+ * (input / output / cached input / cached output) using the shared 4-band
+ * language, so it reads as one color system with the tracker strip. Headless
+ * visx primitives styled entirely from the viz design tokens — the design
+ * system owns every pixel. Purely a function of its data: it re-renders as new
+ * points arrive (the live "motion" is real data, not a decorative tween), so
+ * there is nothing to gate on reduced-motion here. With `showAxes`, a time
+ * x-axis and a token-magnitude y-axis are drawn so the timeframe is legible.
  */
 
-export interface TrendPoint {
-  /** Bucket start (ms) — the x position, and the axis label source. */
-  t: number
-  input: number
-  output: number
-  cache: number
-}
+const BAND_KEYS: ReadonlyArray<TrafficBandKey> = TRAFFIC_BANDS.map((b) => b.key)
 
-type BandKey = "input" | "output" | "cache"
-const BANDS: ReadonlyArray<BandKey> = ["input", "output", "cache"]
-const BAND_COLOR: Record<BandKey, string> = {
-  input: "var(--viz-input)",
-  output: "var(--viz-output)",
-  cache: "var(--viz-cache)",
+/** The band color for a key, from the shared 4-band source of truth. */
+function bandColor(key: TrafficBandKey): string {
+  return TRAFFIC_BANDS.find((b) => b.key === key)?.color ?? ""
 }
 
 const AXIS_MARGIN = { top: 8, right: 14, bottom: 22, left: 48 }
 const BARE_MARGIN = { top: 4, right: 0, bottom: 2, left: 0 }
 
-function stackTotal(p: TrendPoint): number {
-  return p.input + p.output + p.cache
-}
+/** Two days — above this span, ticks read as dates, not clock times. */
+const AXIS_DATE_THRESHOLD_MS = 2 * 86_400_000
 
-/** Local HH:MM clock label for an x-axis tick (unpinned locale is fine here). */
-function clockLabel(ms: number): string {
+/**
+ * X-axis tick label, chosen by the visible span so the timescale is legible at
+ * every period: HH:MM for a sub-two-day window (today/live), a short month/day
+ * date for wider spans (week/month/all) — the day-sized buckets would otherwise
+ * all collapse to "0:00". Unpinned locale is fine here (matches the rest).
+ */
+function axisTickLabel(ms: number, spanMs: number): string {
   const d = new Date(ms)
+  if (spanMs > AXIS_DATE_THRESHOLD_MS) {
+    return d.toLocaleDateString(undefined, { month: "short", day: "numeric" })
+  }
   const h = d.getHours()
   const m = d.getMinutes().toString().padStart(2, "0")
   return `${h}:${m}`
@@ -55,11 +57,13 @@ function TrendAxes({
   yScale,
   innerH,
   innerW,
+  spanMs,
 }: {
   xScale: AxisScale<number>
   yScale: AxisScale<number>
   innerH: number
   innerW: number
+  spanMs: number
 }): React.ReactElement {
   const labelColor = "var(--text-muted)"
   return (
@@ -84,7 +88,7 @@ function TrendAxes({
         numTicks={Math.min(6, Math.max(2, Math.floor(innerW / 90)))}
         stroke="var(--border-subtle)"
         hideTicks
-        tickFormat={(v) => clockLabel(Number(v))}
+        tickFormat={(v) => axisTickLabel(Number(v), spanMs)}
         tickLabelProps={() => ({
           fill: labelColor,
           fontSize: 11,
@@ -102,7 +106,7 @@ export function AreaTrend({
   ariaLabel,
   showAxes = false,
 }: {
-  data: ReadonlyArray<TrendPoint>
+  data: ReadonlyArray<TrafficPoint>
   height?: number
   ariaLabel?: string
   showAxes?: boolean
@@ -111,8 +115,10 @@ export function AreaTrend({
   const gradientId = useId()
 
   const points =
-    data.length > 0 ? data : [{ t: 0, input: 0, output: 0, cache: 0 }]
-  const maxTotal = Math.max(1, ...points.map((p) => stackTotal(p)))
+    data.length > 0 ?
+      data
+    : [{ t: 0, input: 0, output: 0, cacheRead: 0, cacheCreation: 0 }]
+  const maxTotal = Math.max(1, ...points.map((p) => trafficTotal(p)))
   const firstT = points[0].t
   const lastT = points.at(-1)?.t ?? firstT
 
@@ -141,34 +147,34 @@ export function AreaTrend({
         aria-label={ariaLabel ?? "Token traffic over time"}
         className="usage-chart__svg"
       >
-        {BANDS.map((band) => (
+        {TRAFFIC_BANDS.map((band) => (
           <LinearGradient
-            key={band}
-            id={`${gradientId}-${band}`}
-            from={BAND_COLOR[band]}
-            to={BAND_COLOR[band]}
+            key={band.key}
+            id={`${gradientId}-${band.key}`}
+            from={band.color}
+            to={band.color}
             fromOpacity={0.55}
             toOpacity={0.12}
           />
         ))}
         <Group left={margin.left} top={margin.top}>
-          <AreaStack<TrendPoint>
-            keys={BANDS as Array<BandKey>}
-            data={points as Array<TrendPoint>}
+          <AreaStack<TrafficPoint>
+            keys={BAND_KEYS as Array<TrafficBandKey>}
+            data={points as Array<TrafficPoint>}
             x={(d) => xScale(d.data.t)}
             y0={(d) => yScale(d[0])}
             y1={(d) => yScale(d[1])}
-            value={(d, key) => d[key as BandKey]}
+            value={(d, key) => d[key as TrafficBandKey]}
           >
             {({ stacks, path }) =>
               stacks.map((stack) => {
-                const band = stack.key as BandKey
+                const key = stack.key as TrafficBandKey
                 return (
                   <path
-                    key={`stack-${band}`}
+                    key={`stack-${key}`}
                     d={path(stack) ?? ""}
-                    fill={`url(#${gradientId}-${band})`}
-                    stroke={BAND_COLOR[band]}
+                    fill={`url(#${gradientId}-${key})`}
+                    stroke={bandColor(key)}
                     strokeWidth={1}
                     strokeOpacity={0.9}
                   />
@@ -182,6 +188,7 @@ export function AreaTrend({
               yScale={yScale}
               innerH={innerH}
               innerW={innerW}
+              spanMs={lastT - firstT}
             />
           )}
         </Group>

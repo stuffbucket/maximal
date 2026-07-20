@@ -91,6 +91,16 @@ and bar — so — unlike interactive surfaces — it is deliberately not the si
 | `--viz-input` | Input-token band | The input band of the traffic area, proportion bar, and per-model bars | Interactive fills; non-viz surfaces |
 | `--viz-output` | Output-token band | The output band, everywhere token type is shown | Interactive fills |
 | `--viz-cache` | Cache-token band | The cache-read/creation band (a calm neutral — cache is "free") | Emphasis; text color |
+| `--viz-cache-read` | Cached-input series | The "Cached input" tracker + its line/band in the traffic graphs; **amber** (warm = cached) | The coarse cache band (use `--viz-cache`); interactive fills |
+| `--viz-cache-creation` | Cached-output series | The "Cached output" tracker + its line/band in the traffic graphs; **rose** (warm = cached) | The coarse cache band (use `--viz-cache`); interactive fills |
+
+The last two are a **finer split of cache** used by the live tracker strip and
+the two token-traffic graphs, which show all four token types at once and must
+tell them apart at a glance. The scheme is **cool = fresh, warm = cached**: teal
+input + indigo output (cool), amber cached-input + rose cached-output (warm) —
+four distinct hues, not two near-identical pairs. Still token-type semantics, not
+a new color role, and never `--accent` or `--brand`. The coarse `--viz-cache`
+neutral still owns the aggregated cache band in the proportion + per-model bars.
 
 
 

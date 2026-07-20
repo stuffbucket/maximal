@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import type {
   QuotaDetails,
@@ -35,7 +35,18 @@ export interface LiveEvent {
   provider: string
   inputTokens: number
   outputTokens: number
+  cacheReadTokens: number
+  cacheCreationTokens: number
   totalTokens: number
+}
+
+/** Running per-type token totals for the live tracker strip. */
+export interface LiveTotals {
+  input: number
+  output: number
+  cacheRead: number
+  cacheCreation: number
+  total: number
 }
 
 export interface UsageLive {
@@ -55,6 +66,8 @@ interface UseUsage {
   series: TokenUsageSeries | null
   events: TokenUsageEventsPage | null
   live: UsageLive
+  /** Live per-type counters: period summary baseline + streamed delta. */
+  liveTotals: LiveTotals
   period: UsagePeriod
   setPeriod: (p: UsagePeriod) => void
   page: number
@@ -141,6 +154,31 @@ function trimRing(events: Array<LiveEvent>, now: number): Array<LiveEvent> {
     : fresh
 }
 
+/** Stable identity of a ring entry, used to dedupe seeded vs streamed events
+ *  (the same request can arrive both as a seed row and as a live frame). */
+function ringKey(e: LiveEvent): string {
+  return `${e.ms}-${e.model}-${e.totalTokens}`
+}
+
+/** Merge two ring slices, drop duplicates by `ringKey`, sort oldest→newest,
+ *  and trim to the rolling window + capacity. */
+function mergeRing(
+  a: ReadonlyArray<LiveEvent>,
+  b: ReadonlyArray<LiveEvent>,
+  now: number,
+): Array<LiveEvent> {
+  const seen = new Set<string>()
+  const out: Array<LiveEvent> = []
+  for (const e of [...a, ...b]) {
+    const key = ringKey(e)
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(e)
+  }
+  out.sort((x, y) => x.ms - y.ms)
+  return trimRing(out, now)
+}
+
 /**
  * The live-stream half of the Usage hook, factored out to keep each hook small.
  * Seeds a ring buffer from recent events, then folds each WS `usage` frame's
@@ -173,14 +211,17 @@ function useLiveStream(
           provider: providerKeyOf(e.source, e.provider_name),
           inputTokens: e.input_tokens,
           outputTokens: e.output_tokens,
+          cacheReadTokens: e.cache_read_input_tokens,
+          cacheCreationTokens: e.cache_creation_input_tokens,
           totalTokens: e.total_tokens,
         }))
         .sort((a, b) => a.ms - b.ms)
-      setLive((prev) =>
-        prev.events.length > 0 ?
-          prev
-        : { events: trimRing(seeded, now), pulse: 0, last: null, lastAt: null },
-      )
+      // Merge (don't discard) so a frame that streamed in before the seed
+      // resolved isn't lost, and a request present in both isn't double-counted.
+      setLive((prev) => ({
+        ...prev,
+        events: mergeRing(prev.events, seeded, now),
+      }))
     })()
     return () => {
       guard.cancelled = true
@@ -200,10 +241,12 @@ function useLiveStream(
           provider: providerKeyOf(last.source, last.providerName),
           inputTokens: last.inputTokens,
           outputTokens: last.outputTokens,
+          cacheReadTokens: last.cacheReadTokens,
+          cacheCreationTokens: last.cacheCreationTokens,
           totalTokens: last.totalTokens,
         }
         setLive((prev) => ({
-          events: trimRing([...prev.events, entry], now),
+          events: mergeRing(prev.events, [entry], now),
           pulse: prev.pulse + 1,
           last: entry,
           lastAt: now,
@@ -233,6 +276,11 @@ export function useUsage(): UseUsage {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  // The authoritative-fetch start time. Live events newer than this are the
+  // delta layered on top of the summary; older ones are already in the summary,
+  // so they must not be double-counted. Set at the START of each load().
+  const [baselineAtMs, setBaselineAtMs] = useState(() => Date.now())
+
   // Last authoritative refetch time, so live bursts don't hammer the endpoints.
   const lastFetchAt = useRef(0)
 
@@ -244,7 +292,8 @@ export function useUsage(): UseUsage {
   }, [])
 
   const load = useCallback(async () => {
-    lastFetchAt.current = Date.now()
+    const startedAt = Date.now()
+    lastFetchAt.current = startedAt
     const [result, quotaSnapshots, seriesData, eventsPage] = await Promise.all([
       fetchSummary(period),
       fetchQuotas(),
@@ -260,6 +309,12 @@ export function useUsage(): UseUsage {
         byModel: Array.isArray(data.byModel) ? data.byModel : [],
         byProvider: Array.isArray(data.byProvider) ? data.byProvider : [],
       })
+      // Advance the baseline ATOMICALLY with the summary it belongs to (not
+      // before the awaits): the fresh summary already accounts for every event
+      // up to `startedAt`, so events after it are the new delta. Moving the
+      // baseline early would drop the in-flight delta until the fetch lands,
+      // making the counters stutter backward on every refetch.
+      setBaselineAtMs(startedAt)
       setError(null)
     } else {
       setError(result.error)
@@ -276,12 +331,36 @@ export function useUsage(): UseUsage {
 
   const live = useLiveStream(load, lastFetchAt)
 
+  // Live per-type counters: the authoritative period summary plus every streamed
+  // event newer than the last fetch. Recomputes on each ring change so the
+  // numbers tick sub-second without waiting on the throttled refetch.
+  const liveTotals = useMemo<LiveTotals>(() => {
+    const b = summary?.totals
+    const totals: LiveTotals = {
+      input: b?.input_tokens ?? 0,
+      output: b?.output_tokens ?? 0,
+      cacheRead: b?.cache_read_input_tokens ?? 0,
+      cacheCreation: b?.cache_creation_input_tokens ?? 0,
+      total: b?.total_tokens ?? 0,
+    }
+    for (const e of live.events) {
+      if (e.ms <= baselineAtMs) continue
+      totals.input += e.inputTokens
+      totals.output += e.outputTokens
+      totals.cacheRead += e.cacheReadTokens
+      totals.cacheCreation += e.cacheCreationTokens
+      totals.total += e.totalTokens
+    }
+    return totals
+  }, [summary, live.events, baselineAtMs])
+
   return {
     summary,
     quotas,
     series,
     events,
     live,
+    liveTotals,
     period,
     setPeriod,
     page,

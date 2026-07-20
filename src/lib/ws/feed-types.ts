@@ -54,7 +54,9 @@ export type BootState =
  * The most recent recorded request, carried on the live `usage` event so a tab
  * can stream traffic (the pulse + rolling counter, §4) without a refetch. Null
  * in the (re)connect snapshot — there is no "last event" for a cold tab; it
- * populates only on subsequent live `usage` events.
+ * populates only on subsequent live `usage` events. Carries the full token
+ * split — input/output plus the cache read/creation components — so the client
+ * never has to fabricate the cache portion from `total − input − output`.
  */
 export interface UsageLastEvent {
   readonly model: string
@@ -63,15 +65,30 @@ export interface UsageLastEvent {
   readonly endpoint: string
   readonly inputTokens: number
   readonly outputTokens: number
+  readonly cacheReadTokens: number
+  readonly cacheCreationTokens: number
   readonly totalTokens: number
   readonly createdAtMs: number
 }
 
-/** Usage rollup that drives the ported Usage section live (replaces the Rust Channel). */
+/**
+ * Usage rollup that drives the ported Usage section live (replaces the Rust Channel).
+ * Carries the full per-type running split (input/output/cache read/cache creation),
+ * not just the grand total, so a client counter strip can show all five counters —
+ * input, output, cached input, cached output, and total — live off one frame.
+ */
 export interface UsageSnapshot {
   readonly periodStart: string
   readonly periodEnd: string
   readonly totalTokens: number
+  /** Running period total of input tokens (matches the summary's `totals.input_tokens`). */
+  readonly inputTokens: number
+  /** Running period total of output tokens (matches the summary's `totals.output_tokens`). */
+  readonly outputTokens: number
+  /** Running period total of cache-read tokens (matches `totals.cache_read_input_tokens`). */
+  readonly cacheReadTokens: number
+  /** Running period total of cache-creation tokens (matches `totals.cache_creation_input_tokens`). */
+  readonly cacheCreationTokens: number
   /** Today's request count (matches the `day` summary's `totals.request_count`). */
   readonly requestCount: number
   /** The just-recorded request that triggered this event; null on a snapshot. */

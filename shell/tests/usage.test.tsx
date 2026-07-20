@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react"
+import { act, cleanup, render, screen, within } from "@testing-library/react"
 import { afterEach, describe, expect, test } from "bun:test"
 
 import { Usage } from "../src/ui/features/usage/Usage"
@@ -8,8 +8,9 @@ import { Usage } from "../src/ui/features/usage/Usage"
  * (shell/src/ui/features/usage/Usage.tsx). These exercise the three top-level
  * branches (loading / no-data+error / content) by stubbing the only boundary the
  * hook touches: `fetch` to /token-usage, /token-usage/series,
- * /token-usage/events, and /usage. No pixels are asserted — this catches render
- * crashes and wrong-state output, not visual drift.
+ * /token-usage/events, and /usage. The content branch also asserts the five live
+ * trackers render and that a `maximal:usage-refresh` WS frame ticks them. No
+ * pixels are asserted — this catches render crashes and wrong-state output.
  */
 
 const realFetch = globalThis.fetch
@@ -109,6 +110,41 @@ function contentRoutes(): Array<[string, Route]> {
   ]
 }
 
+/** Dispatch a `maximal:usage-refresh` WS frame carrying one just-recorded
+ *  request, mirroring what main.ts forwards on each live `usage` event. */
+function dispatchUsageFrame(last: {
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheCreationTokens: number
+  totalTokens: number
+}): void {
+  act(() => {
+    globalThis.dispatchEvent(
+      new CustomEvent("maximal:usage-refresh", {
+        detail: {
+          periodStart: "",
+          periodEnd: "",
+          requestCount: 1,
+          totalTokens: last.totalTokens,
+          inputTokens: last.inputTokens,
+          outputTokens: last.outputTokens,
+          cacheReadTokens: last.cacheReadTokens,
+          cacheCreationTokens: last.cacheCreationTokens,
+          lastEvent: {
+            model: "gpt-4o",
+            source: "copilot",
+            providerName: null,
+            endpoint: "chat_completions",
+            createdAtMs: Date.now(),
+            ...last,
+          },
+        },
+      }),
+    )
+  })
+}
+
 afterEach(() => {
   cleanup()
   globalThis.fetch = realFetch
@@ -125,20 +161,53 @@ describe("Usage island", () => {
     expect(screen.getByText("Loading usage…")).toBeDefined()
   })
 
-  test("renders the summary, live hero, and breakdown once data loads", async () => {
+  test("renders the five live trackers, graph, and breakdown once data loads", async () => {
     stubFetch(contentRoutes())
 
     render(<Usage />)
 
-    // The person-first summary line renders the totals; the model shows in the
-    // breakdown. findBy* retries until the effect-driven load resolves.
-    expect(await screen.findByLabelText("Live traffic")).toBeDefined()
+    // The near-term live hero section (its numbers live in the tracker strip).
+    expect(
+      await screen.findByLabelText("Token traffic — last hour"),
+    ).toBeDefined()
+    // The five trackers render as one labeled stat row, in fixed order.
+    const trackers = screen.getByRole("group", { name: "Live token counters" })
+    for (const label of [
+      "Input",
+      "Output",
+      "Cached input",
+      "Cached output",
+      "Total",
+    ]) {
+      expect(within(trackers).getByText(label)).toBeDefined()
+    }
     // The model appears in both the ranked breakdown and the detail table.
     expect(screen.getAllByText("gpt-4o").length).toBeGreaterThan(0)
     // GitHub Copilot provider card is present (provider-forward).
     expect(screen.getByText("GitHub Copilot")).toBeDefined()
     // The four period tabs are always present.
     expect(screen.getAllByRole("tab")).toHaveLength(4)
+  })
+
+  test("a live usage-refresh frame ticks the Total and Input counters", async () => {
+    stubFetch(contentRoutes())
+
+    render(<Usage />)
+    await screen.findByLabelText("Token traffic — last hour")
+
+    // Baseline: summary input 1000, total 1234. A live frame adds its delta on
+    // top of the summary (input +300 → 1,300; total +500 → 1,734). These
+    // strings are unique to the trackers — the summary line stays at 1,234.
+    dispatchUsageFrame({
+      inputTokens: 300,
+      outputTokens: 150,
+      cacheReadTokens: 20,
+      cacheCreationTokens: 10,
+      totalTokens: 500,
+    })
+
+    expect(await screen.findByText("1,734")).toBeDefined()
+    expect(await screen.findByText("1,300")).toBeDefined()
   })
 
   test("surfaces an error and the no-data state when the summary fetch fails", async () => {

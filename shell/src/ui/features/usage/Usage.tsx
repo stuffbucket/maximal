@@ -1,5 +1,6 @@
 import type { ReactElement } from "react"
 
+import type { TrafficPoint } from "./charts/traffic-bands"
 import type { Segment, StackedRow } from "./ProportionBar"
 import type {
   TokenUsageModelSummary,
@@ -8,10 +9,11 @@ import type {
   TokenUsageSummary,
 } from "./usage-types"
 
-import { AreaTrend, type TrendPoint } from "./charts/AreaTrend"
 import { LiveTrafficStream } from "./charts/LiveTrafficStream"
+import { PeriodTrend } from "./charts/PeriodTrend"
 import { EventsTable } from "./EventsTable"
 import { formatCostAiu, formatNumber, providerLabel } from "./format"
+import { LiveTrackers } from "./LiveTrackers"
 import { ProportionBar, StackedBars } from "./ProportionBar"
 import { ProvidersStrip } from "./ProvidersStrip"
 import { useUsage, type UsagePeriod } from "./useUsage"
@@ -134,13 +136,18 @@ function providerRows(
   }))
 }
 
-function seriesToTrend(series: TokenUsageSeries | null): Array<TrendPoint> {
+/** Map the period series buckets to the shared 4-band traffic points that the
+ *  period trend renders (input / output / cached input / cached output). */
+function seriesToTrafficPoints(
+  series: TokenUsageSeries | null,
+): Array<TrafficPoint> {
   if (!series || !Array.isArray(series.buckets)) return []
   return series.buckets.map((b) => ({
     t: b.bucket_start_ms,
     input: b.input_tokens,
     output: b.output_tokens,
-    cache: b.cache_read_input_tokens + b.cache_creation_input_tokens,
+    cacheRead: b.cache_read_input_tokens,
+    cacheCreation: b.cache_creation_input_tokens,
   }))
 }
 
@@ -182,28 +189,18 @@ function ModelTable({
   )
 }
 
-/** The "where it went" analysis block — trend + split + ranked breakdowns. */
+/** The "where it went" breakdown — split + ranked breakdowns + detail table.
+ *  The period trend chart itself lives up top next to the live hero. */
 function WhereItWent({
   summary,
-  series,
-  period,
   trendLabel,
 }: {
   summary: TokenUsageSummary
-  series: TokenUsageSeries | null
-  period: UsagePeriod
   trendLabel: string
 }): ReactElement {
   return (
     <section className="usage__section" aria-label="Where it went">
       <h3 className="usage__section-title">Where it went — {trendLabel}</h3>
-      <div className="usage__trend">
-        <AreaTrend
-          data={seriesToTrend(series)}
-          height={120}
-          ariaLabel={`Token traffic ${periodNoun(period)}`}
-        />
-      </div>
       <ProportionBar
         segments={tokenSplit(summary)}
         ariaLabel="Input, output and cache token split"
@@ -238,6 +235,7 @@ export function Usage(): ReactElement {
     series,
     events,
     live,
+    liveTotals,
     period,
     setPeriod,
     page,
@@ -258,23 +256,22 @@ export function Usage(): ReactElement {
     const hasTraffic = summary.totals.request_count > 0
     content = (
       <>
-        <SummaryLine summary={summary} period={period} />
+        <LiveTrackers totals={liveTotals} />
 
-        <LiveTrafficStream
-          live={live}
-          totalTokensToday={summary.totals.total_tokens}
-          requestsToday={summary.totals.request_count}
-        />
+        <div className="usage-graphs">
+          <LiveTrafficStream live={live} />
+          <PeriodTrend
+            data={seriesToTrafficPoints(series)}
+            periodLabel={trendLabel}
+          />
+        </div>
+
+        <SummaryLine summary={summary} period={period} />
 
         <ProvidersStrip providers={summary.byProvider} quotas={quotas} />
 
         {hasTraffic ?
-          <WhereItWent
-            summary={summary}
-            series={series}
-            period={period}
-            trendLabel={trendLabel}
-          />
+          <WhereItWent summary={summary} trendLabel={trendLabel} />
         : <p className="usage__empty">
             No requests recorded {periodNoun(period)} yet — traffic will appear
             here the moment it flows through.

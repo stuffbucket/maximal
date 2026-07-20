@@ -96,6 +96,8 @@
   --viz-input: #3f9aa8;
   --viz-output: #7b6fd0;
   --viz-cache: #8a8f98;
+  --viz-cache-read: #c68a3c;
+  --viz-cache-creation: #c56b86;
 
   /* ---- Link colors (defaults to dark theme) ---- */
   --link: #7fc1d2;
