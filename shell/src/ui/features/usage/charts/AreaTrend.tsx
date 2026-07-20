@@ -49,14 +49,6 @@ function clockLabel(ms: number): string {
   return `${h}:${m}`
 }
 
-/** Local HH:MM clock label for an x-axis tick (unpinned locale is fine here). */
-function clockLabel(ms: number): string {
-  const d = new Date(ms)
-  const h = d.getHours()
-  const m = d.getMinutes().toString().padStart(2, "0")
-  return `${h}:${m}`
-}
-
 /** Time (x) + token-magnitude (y) axes for the trend, drawn inside the plot group. */
 function TrendAxes({
   xScale,
