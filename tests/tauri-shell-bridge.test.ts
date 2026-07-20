@@ -18,6 +18,9 @@ import {
 
 afterEach(() => {
   __resetShellBridgeForTests()
+  // The inlined-token fallback reads globalThis.__STATE__; clear it so a test
+  // that sets it can't leak into the others.
+  delete (globalThis as { __STATE__?: unknown }).__STATE__
 })
 
 describe("tauri shell bridge", () => {
@@ -44,6 +47,21 @@ describe("tauri shell bridge", () => {
     expect(await getShellApiKey()).toBeNull()
     expect(await getShellApiKey()).toBeNull()
     expect(calls).toBe(1)
+  })
+
+  test("getShellApiKey falls back to the inlined session token when invoke fails (browser tab)", async () => {
+    // A plain browser tab has no Tauri host, so invoke throws. The sidecar inlines
+    // the shell key as window.__STATE__.sessionToken (§1.4); getShellApiKey must
+    // read it back so /settings/api/* auth still works from the tab.
+    const g = globalThis as { __STATE__?: unknown }
+    g.__STATE__ = {
+      snapshot: {},
+      boundPort: 4141,
+      sessionToken: "inlined-shell-key",
+    }
+    __setInvokeForTests(() => Promise.reject(new Error("no tauri host")))
+
+    expect(await getShellApiKey()).toBe("inlined-shell-key")
   })
 
   test("openUrl dispatches the opener command with the url payload", async () => {

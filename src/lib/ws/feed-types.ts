@@ -145,6 +145,21 @@ export interface LiveFeedSnapshot {
 }
 
 /**
+ * The section + scroll a tab was last showing (spec §1.4 restore-on-reopen). The
+ * sidecar remembers the most recent report so that when a tray click surfaces the
+ * app by closing a not-in-front tab and opening a fresh one (§1.2), the fresh tab
+ * lands where the user left off instead of resetting to the default section. Kept
+ * deliberately minimal: `section` is a bare string (validated against the shell's
+ * SECTIONS on restore, not on the wire), `scrollY` is the scroll container's
+ * `scrollTop` in CSS pixels. Best-effort — scroll can under-restore on sections
+ * whose content grows asynchronously.
+ */
+export interface ViewState {
+  readonly section: string
+  readonly scrollY: number
+}
+
+/**
  * The state inlined into the served HTML as `window.__STATE__` for instant paint
  * (§1.4): the full snapshot plus a few first-paint-only extras. Declared here (with
  * the snapshot) so BOTH the sidecar's `buildInlineUiState` (routes/ui/inline-state.ts)
@@ -162,6 +177,13 @@ export interface InlineUiState {
   readonly boundPort: number
   /** Per-version update-banner dismissal (§3.2), server-side not localStorage. */
   readonly dismissedUpdateVersion: string | null
+  /**
+   * The section + scroll a prior tab last reported, or null if none (§1.4). A
+   * reopened tab restores this so a tray-surfaced tab keeps the user's place; an
+   * explicit deep-link hash in the URL wins over it (see the shell's
+   * `pickInitialView`).
+   */
+  readonly restoreView: ViewState | null
 }
 
 // TODO(single-window §1.3): these two frame unions cross an untrusted wire and
@@ -171,14 +193,37 @@ export interface InlineUiState {
 // parse/serialize bodies land, promote these to `z.discriminatedUnion("type", …)`
 // so `parseServerMessage` validates against a schema instead of hand shape-checks.
 
-/** Frames a tab may send to the sidecar (presence + liveness). */
+/**
+ * Frames a tab may send to the sidecar (presence + liveness).
+ *
+ * `focused` mirrors `document.hasFocus()` and is distinct from `visibility`: a
+ * tab can be `visibilityState: "visible"` yet unfocused (browser backgrounded,
+ * or the active tab of a non-key window). The tray-open decision (§1.2) needs
+ * both — only a visible AND focused tab is genuinely in front of the user, so
+ * only that is a no-op; a visible-but-unfocused tab still gets reopened because
+ * a browser tab can't raise itself.
+ */
 export type LiveFeedClientMessage =
   | {
       readonly type: "hello"
       readonly tabId: string
       readonly visibility: string
+      readonly focused: boolean
     }
-  | { readonly type: "visibility"; readonly visibility: string }
+  | {
+      readonly type: "visibility"
+      readonly visibility: string
+      readonly focused: boolean
+    }
+  | {
+      // The tab's current section + scroll (§1.4 restore-on-reopen). Sent on
+      // connect, on section navigation, and whenever presence changes (focus/blur/
+      // visibility) — the last of which captures the view at the moment the user
+      // switched away, which is exactly what a later tray click should restore.
+      readonly type: "view"
+      readonly section: string
+      readonly scrollY: number
+    }
   | { readonly type: "pong" }
 
 /** Frames the sidecar may send to a tab (the feed, plus tray-driven control). */

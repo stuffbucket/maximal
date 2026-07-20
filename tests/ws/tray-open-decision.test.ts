@@ -14,8 +14,9 @@ import { decideTrayOpen, type RegisteredTab } from "~/lib/ws/tray-open"
 function tab(
   tabId: string,
   visibility: RegisteredTab["visibility"],
+  focused = false,
 ): RegisteredTab {
-  return { tabId, visibility }
+  return { tabId, visibility, focused }
 }
 
 describe("decideTrayOpen — unskip when implemented", () => {
@@ -23,10 +24,17 @@ describe("decideTrayOpen — unskip when implemented", () => {
     expect(decideTrayOpen([])).toEqual({ kind: "open" })
   })
 
-  test("a visible tab exists → noop (a background page can't be raised anyway)", () => {
-    expect(decideTrayOpen([tab("a", "hidden"), tab("b", "visible")])).toEqual({
-      kind: "noop",
-    })
+  test("a visible AND focused tab exists → noop (it's in front of the user)", () => {
+    expect(
+      decideTrayOpen([tab("a", "hidden"), tab("b", "visible", true)]),
+    ).toEqual({ kind: "noop" })
+  })
+
+  test("a visible but UNFOCUSED tab → close-then-open (can't raise a foreign tab)", () => {
+    // The dead-click case: backgrounded browser / non-key window still reports
+    // "visible". Reopening is the only way to actually surface it.
+    const action = decideTrayOpen([tab("a", "visible", false)])
+    expect(action).toEqual({ kind: "close-then-open", closeTabIds: ["a"] })
   })
 
   test("only buried tabs → close every buried tab, then open one fresh", () => {
@@ -35,6 +43,15 @@ describe("decideTrayOpen — unskip when implemented", () => {
     if (action.kind === "close-then-open") {
       expect([...action.closeTabIds].sort()).toEqual(["a", "b"])
     }
+  })
+
+  test("focused but hidden (not visible) → still close-then-open", () => {
+    // `focused` without `visible` shouldn't count as in-front (defensive: a hidden
+    // tab reporting focus is nonsensical, but the guard requires BOTH).
+    expect(decideTrayOpen([tab("a", "hidden", true)])).toEqual({
+      kind: "close-then-open",
+      closeTabIds: ["a"],
+    })
   })
 
   test("prerender is not 'visible' → treated as buried", () => {

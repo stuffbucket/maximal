@@ -486,6 +486,22 @@ fn get_shell_api_key(state: State<'_, ShellApiKey>) -> String {
     state.value().to_string()
 }
 
+/// A short random token appended to the Settings URL on every tray-driven open.
+///
+/// The OS URL opener (macOS `open`, the Windows/Linux equivalents) FOCUSES an
+/// already-open tab when the URL matches one — which, combined with the WS `close`
+/// we send the old tab in the same click, produces the tray-click focus flicker:
+/// the opener focuses the about-to-close tab, then it closes, leaving the user
+/// somewhere else. A unique URL per open can never match the closing tab, so the
+/// opener always lands as one fresh, focused tab. The served page ignores unknown
+/// query params, so nothing server-side has to handle it.
+fn tray_open_nonce() -> String {
+    let mut buf = [0u8; 8];
+    getrandom::fill(&mut buf)
+        .expect("could not read OS CSPRNG for tray-open nonce");
+    buf.iter().map(|b| format!("{:02x}", b)).collect()
+}
+
 #[derive(Debug, Deserialize)]
 struct SetupCheckResult {
     ok: bool,
@@ -1106,6 +1122,10 @@ async fn poll_sidecar_status(app: AppHandle) {
         if let Some(status) = fetch_setup_status(&client, &url).await {
             apply_setup_status(&app, &status);
         }
+        // Live-apply a menu-bar-only toggle the browser-tab UI persisted to
+        // config.json (it has no Tauri IPC to apply it directly). Cheap no-op
+        // when unchanged.
+        sync_menu_bar_only_from_config(&app);
         if let Some(rejection) =
             fetch_rejection(&app, &client, &auth_status_url).await
         {
@@ -1871,6 +1891,30 @@ fn read_menu_bar_only(app: &AppHandle) -> bool {
     json["ui"]["menuBarOnly"].as_bool().unwrap_or(false)
 }
 
+/// Live-apply a menu-bar-only change the browser-tab UI persisted to config.json.
+///
+/// Browser-tab delivery (ADR-0018): the Settings UI is a plain browser tab with no
+/// Tauri IPC, so it CANNOT call the `set_menu_bar_only` command — it only persists
+/// `config.ui.menuBarOnly` through the sidecar. This runs on each phase-2 poll tick
+/// (`poll_sidecar_status`), reads the on-disk preference, and — only when it differs
+/// from the runtime `MenuBarOnly` flag — updates the flag and re-applies the Dock/
+/// activation policy. The common case (no change) is a cheap file read + compare.
+fn sync_menu_bar_only_from_config(app: &AppHandle) {
+    let want = read_menu_bar_only(app);
+    let flag = app.state::<MenuBarOnly>();
+    if flag.get() == want {
+        return;
+    }
+    flag.set(want);
+    // AppKit activation-policy changes must run on the main thread; the poll runs
+    // on a tokio task, so hop over. `update_activation_policy` is a no-op on
+    // non-macOS, so this is harmless everywhere.
+    let app_for_main = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        update_activation_policy(&app_for_main);
+    });
+}
+
 /// Path to the persisted locale file — a one-line BCP-47 tag written by the
 /// `set_locale` command. Lives beside the sidecar's data so it survives
 /// restarts and, crucially, is readable BEFORE any webview loads: the
@@ -2088,11 +2132,17 @@ fn open_app(app: &AppHandle, section: Option<&str>) {
     let section = section.map(str::to_string);
     tauri::async_runtime::spawn(async move {
         if sidecar_tray_open().await {
+            // Unique per open so the OS opener can't focus-steal the tab we just
+            // told to self-close (see `tray_open_nonce`). Query goes before the
+            // fragment: `/ui/settings/?n=<nonce>#<section>`.
+            let nonce = tray_open_nonce();
             let url = match &section {
-                Some(s) => {
-                    format!("http://localhost:{SIDECAR_PORT}/ui/settings/#{s}")
-                }
-                None => format!("http://localhost:{SIDECAR_PORT}/ui/settings/"),
+                Some(s) => format!(
+                    "http://localhost:{SIDECAR_PORT}/ui/settings/?n={nonce}#{s}"
+                ),
+                None => format!(
+                    "http://localhost:{SIDECAR_PORT}/ui/settings/?n={nonce}"
+                ),
             };
             if let Err(err) = handle.opener().open_url(url, None::<&str>) {
                 eprintln!("[shell] open_app: failed to open browser tab: {err}");
@@ -2347,6 +2397,21 @@ fn set_locale(app: AppHandle, locale: State<'_, LocaleState>, tag: String) -> Re
 #[cfg(test)]
 mod tests {
     use super::extract_error_reason;
+    use super::tray_open_nonce;
+
+    #[test]
+    fn tray_open_nonce_is_hex_and_distinct() {
+        // 8 random bytes → 16 lowercase hex chars. Distinctness is what defeats
+        // the OS opener's URL-dedup focus-steal, so assert two draws differ.
+        let a = tray_open_nonce();
+        let b = tray_open_nonce();
+        assert_eq!(a.len(), 16, "nonce should be 16 hex chars");
+        assert!(
+            a.chars().all(|c| c.is_ascii_hexdigit()),
+            "nonce should be hex: {a}"
+        );
+        assert_ne!(a, b, "two nonces should differ (astronomically likely)");
+    }
 
     #[test]
     fn extracts_consola_fancy_error() {

@@ -21,6 +21,7 @@ import { mountApiClients } from "./ui/islands/api-clients-island"
 import { mountApps } from "./ui/islands/apps-island"
 import { mountModels } from "./ui/islands/models-island"
 import { mountUsage } from "./ui/islands/usage-island"
+import { pickInitialView } from "./view-restore"
 
 type SectionId =
   | "account"
@@ -65,6 +66,22 @@ function showSection(id: SectionId): void {
   // Pane is the scroll container now; reset *its* scroll, not the window's.
   const pane = document.querySelector("#pane")
   if (pane) pane.scrollTop = 0
+}
+
+/**
+ * Best-effort scroll restore into #pane after the section renders (§1.4). Two rAFs
+ * so the section un-hides and lays out its first content before we set scrollTop;
+ * sections whose data loads asynchronously may still grow, so this can under-shoot
+ * — acceptable for a "keep my place" nicety.
+ */
+function restorePaneScroll(scrollY: number): void {
+  if (scrollY <= 0) return
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      const pane = document.querySelector("#pane")
+      if (pane instanceof HTMLElement) pane.scrollTop = scrollY
+    })
+  })
 }
 
 function readHashSection(): SectionId {
@@ -969,10 +986,22 @@ function openLiveFeed(): void {
           schedulePoll()
         }
       },
+      // Restore-on-reopen (§1.4): report the current section + scroll so a tray-
+      // surfaced fresh tab can land where the user left off.
+      sampleView: sampleCurrentView,
     },
     inlined.boundPort,
     inlined.sessionToken,
   )
+}
+
+/** Current section + scroll for restore reporting (§1.4). #pane is the scroll container. */
+function sampleCurrentView(): { section: string; scrollY: number } {
+  const pane = document.querySelector("#pane")
+  return {
+    section: readHashSection(),
+    scrollY: pane instanceof HTMLElement ? pane.scrollTop : 0,
+  }
 }
 
 // Entering/leaving the Account section no longer opens a transport — the feed is
@@ -2378,6 +2407,10 @@ function wireGeneral(): void {
   el.addEventListener("change", () => {
     const menuBarOnly = el.checked
     // Persist to the proxy (same auth pattern as the other settings calls).
+    // The Settings UI is a browser tab with no Tauri IPC, so it CANNOT apply the
+    // Dock/activation policy directly — the Rust shell watches config.json on its
+    // status poll and live-applies the change (sync_menu_bar_only_from_config),
+    // typically within a few seconds. So persisting the preference is all we do.
     void (async () => {
       try {
         const key = await getShellApiKey()
@@ -2393,16 +2426,6 @@ function wireGeneral(): void {
         })
       } catch (err) {
         console.warn("POST /settings/api/ui failed:", err)
-      }
-    })()
-    // Apply live to the Dock/taskbar via the Tauri shell. Guarded exactly like
-    // safeInvoke so a plain-browser session (app:ui, where invoke is
-    // unavailable) degrades gracefully instead of throwing.
-    void (async () => {
-      try {
-        await invoke("set_menu_bar_only", { menuBarOnly })
-      } catch (err) {
-        console.warn("invoke(set_menu_bar_only) failed:", err)
       }
     })()
   })
@@ -2428,7 +2451,24 @@ globalThis.addEventListener("DOMContentLoaded", () => {
   mountModels()
   mountUsage()
   wireNav()
+  // Restore-on-reopen (§1.4): with no explicit deep-link hash, land on the section
+  // (and scroll) the sidecar inlined from the prior tab, so a tray-surfaced fresh
+  // tab keeps the user's place. Set the hash via replaceState (single-history-safe,
+  // ADR-0020) so the rest of boot (syncFromHash, the account instant-paint check)
+  // stays consistent with what's shown.
+  const initialView = pickInitialView(
+    globalThis.location.hash,
+    readInlineState(globalThis)?.restoreView,
+    DEFAULT_SECTION,
+  )
+  if (
+    !isSectionId(globalThis.location.hash.replace(/^#/, ""))
+    && initialView.section !== DEFAULT_SECTION
+  ) {
+    globalThis.history.replaceState(null, "", `#${initialView.section}`)
+  }
   syncFromHash()
+  restorePaneScroll(initialView.scrollY)
   // Open the single page-lifetime live feed (ADR-0019): presence + auth/apps/
   // clients live updates + tray self-close, for the life of the tab.
   openLiveFeed()

@@ -22,6 +22,7 @@ function fakeState(overrides: Partial<InlineUiState> = {}): InlineUiState {
     locale: "en",
     boundPort: 4141,
     dismissedUpdateVersion: null,
+    restoreView: null,
     ...overrides,
   }
 }

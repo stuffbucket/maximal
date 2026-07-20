@@ -27,6 +27,7 @@ import { Hono } from "hono"
 import type {
   LiveFeedClientMessage,
   LiveFeedServerMessage,
+  ViewState,
 } from "~/lib/ws/feed-types"
 import type { LiveFeedHub } from "~/lib/ws/live-feed"
 import type { PresenceRegistry } from "~/lib/ws/presence-registry"
@@ -46,6 +47,12 @@ export interface WsData {
 interface WsDeps {
   readonly hub: LiveFeedHub
   readonly registry: PresenceRegistry
+  /**
+   * Sink for a tab's reported `view` frame (§1.4 restore-on-reopen). Injected so
+   * the route stays decoupled from runtime state (and testable with a spy); wired
+   * to `setLastView` in run-server. Optional — omitted in tests that don't care.
+   */
+  readonly onView?: (view: ViewState) => void
 }
 
 /** The one Bun-server capability the route needs: upgrade a request to a WS. */
@@ -121,17 +128,44 @@ export function parseClientMessage(raw: string): LiveFeedClientMessage | null {
   if (typeof parsed !== "object" || parsed === null || !("type" in parsed)) {
     return null
   }
-  const msg = parsed as { type: unknown; tabId?: unknown; visibility?: unknown }
+  const msg = parsed as {
+    type: unknown
+    tabId?: unknown
+    visibility?: unknown
+    focused?: unknown
+    section?: unknown
+    scrollY?: unknown
+  }
+  // `focused` mirrors `document.hasFocus()`. Optional on the wire: a frame from an
+  // older client (or a malformed one) defaults to `false`, which is the safe bias —
+  // "not in front" makes the tray reopen rather than dead-click.
+  const focused = msg.focused === true
   switch (msg.type) {
     case "hello": {
       if (typeof msg.tabId !== "string" || typeof msg.visibility !== "string") {
         return null
       }
-      return { type: "hello", tabId: msg.tabId, visibility: msg.visibility }
+      return {
+        type: "hello",
+        tabId: msg.tabId,
+        visibility: msg.visibility,
+        focused,
+      }
     }
     case "visibility": {
       if (typeof msg.visibility !== "string") return null
-      return { type: "visibility", visibility: msg.visibility }
+      return { type: "visibility", visibility: msg.visibility, focused }
+    }
+    case "view": {
+      // Restore-on-reopen (§1.4). Require a string section and a finite numeric
+      // scroll; a NaN/Infinity or wrong-typed scroll clamps to 0 rather than
+      // dropping the whole frame (the section is the more valuable half).
+      if (typeof msg.section !== "string") return null
+      const scrollY =
+        typeof msg.scrollY === "number" && Number.isFinite(msg.scrollY) ?
+          Math.max(0, msg.scrollY)
+        : 0
+      return { type: "view", section: msg.section, scrollY }
     }
     case "pong": {
       return { type: "pong" }
@@ -154,7 +188,7 @@ export function parseClientMessage(raw: string): LiveFeedClientMessage | null {
  *   - `close`   → identity-checked remove, so a reconnected tab's live socket
  *                 survives this (stale) socket's late close.
  */
-export function createWebSocketHandler({ hub, registry }: WsDeps) {
+export function createWebSocketHandler({ hub, registry, onView }: WsDeps) {
   return {
     open(ws: ServerWebSocket<WsData>): void {
       if (!ws.data.authed) {
@@ -184,20 +218,25 @@ export function createWebSocketHandler({ hub, registry }: WsDeps) {
           // The registry key. Track it on the socket so `close` can evict the
           // right tab even though the close frame carries no body.
           ws.data.tabId = message.tabId
-          registry.register(
-            message.tabId,
-            ws,
-            normalizeVisibility(message.visibility),
-          )
+          registry.register(message.tabId, ws, {
+            visibility: normalizeVisibility(message.visibility),
+            focused: message.focused,
+          })
           return
         }
         case "visibility": {
           if (ws.data.tabId) {
-            registry.updateVisibility(
-              ws.data.tabId,
-              normalizeVisibility(message.visibility),
-            )
+            registry.updateVisibility(ws.data.tabId, {
+              visibility: normalizeVisibility(message.visibility),
+              focused: message.focused,
+            })
           }
+          return
+        }
+        case "view": {
+          // Restore-on-reopen (§1.4): remember where this tab is so a tray-
+          // surfaced fresh tab lands here. Global (not per-tab): last writer wins.
+          onView?.({ section: message.section, scrollY: message.scrollY })
           return
         }
         case "pong": {
