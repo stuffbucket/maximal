@@ -121,17 +121,31 @@ export function parseClientMessage(raw: string): LiveFeedClientMessage | null {
   if (typeof parsed !== "object" || parsed === null || !("type" in parsed)) {
     return null
   }
-  const msg = parsed as { type: unknown; tabId?: unknown; visibility?: unknown }
+  const msg = parsed as {
+    type: unknown
+    tabId?: unknown
+    visibility?: unknown
+    focused?: unknown
+  }
+  // `focused` mirrors `document.hasFocus()`. Optional on the wire: a frame from an
+  // older client (or a malformed one) defaults to `false`, which is the safe bias —
+  // "not in front" makes the tray reopen rather than dead-click.
+  const focused = msg.focused === true
   switch (msg.type) {
     case "hello": {
       if (typeof msg.tabId !== "string" || typeof msg.visibility !== "string") {
         return null
       }
-      return { type: "hello", tabId: msg.tabId, visibility: msg.visibility }
+      return {
+        type: "hello",
+        tabId: msg.tabId,
+        visibility: msg.visibility,
+        focused,
+      }
     }
     case "visibility": {
       if (typeof msg.visibility !== "string") return null
-      return { type: "visibility", visibility: msg.visibility }
+      return { type: "visibility", visibility: msg.visibility, focused }
     }
     case "pong": {
       return { type: "pong" }
@@ -184,19 +198,18 @@ export function createWebSocketHandler({ hub, registry }: WsDeps) {
           // The registry key. Track it on the socket so `close` can evict the
           // right tab even though the close frame carries no body.
           ws.data.tabId = message.tabId
-          registry.register(
-            message.tabId,
-            ws,
-            normalizeVisibility(message.visibility),
-          )
+          registry.register(message.tabId, ws, {
+            visibility: normalizeVisibility(message.visibility),
+            focused: message.focused,
+          })
           return
         }
         case "visibility": {
           if (ws.data.tabId) {
-            registry.updateVisibility(
-              ws.data.tabId,
-              normalizeVisibility(message.visibility),
-            )
+            registry.updateVisibility(ws.data.tabId, {
+              visibility: normalizeVisibility(message.visibility),
+              focused: message.focused,
+            })
           }
           return
         }

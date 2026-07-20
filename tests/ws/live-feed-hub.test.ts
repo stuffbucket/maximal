@@ -30,7 +30,7 @@ function captureRegistry() {
       send: (data: string) => sent.push(data),
       close: () => {},
     },
-    "visible",
+    { visibility: "visible", focused: true },
   )
   return { registry, sent }
 }

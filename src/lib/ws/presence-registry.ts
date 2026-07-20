@@ -14,6 +14,7 @@ import type { LiveFeedServerMessage } from "~/lib/ws/feed-types"
 import {
   decideTrayOpen,
   type RegisteredTab,
+  type TabPresence,
   type TrayOpenAction,
 } from "~/lib/ws/tray-open"
 
@@ -25,28 +26,25 @@ export interface PresenceSocket {
 
 interface Entry<S extends PresenceSocket> {
   readonly socket: S
-  visibility: RegisteredTab["visibility"]
+  presence: TabPresence
 }
 
 export class PresenceRegistry<S extends PresenceSocket = PresenceSocket> {
   private readonly tabs = new Map<string, Entry<S>>()
 
   /** Insert/replace on `hello`. Replacing a tabId supersedes its prior socket. */
-  register(
-    tabId: string,
-    socket: S,
-    visibility: RegisteredTab["visibility"],
-  ): void {
-    this.tabs.set(tabId, { socket, visibility })
+  register(tabId: string, socket: S, presence: TabPresence): void {
+    this.tabs.set(tabId, { socket, presence })
   }
 
-  /** Update a tab's visibility on a `visibility` frame (no-op if the tab is gone). */
-  updateVisibility(
-    tabId: string,
-    visibility: RegisteredTab["visibility"],
-  ): void {
+  /**
+   * Update a tab's presence (visibility + focus) on a `visibility` frame (no-op if
+   * the tab is gone). Focus rides the same frame because both change on the same
+   * user actions (switching tabs/windows/apps) and the tray decision needs both.
+   */
+  updateVisibility(tabId: string, presence: TabPresence): void {
     const entry = this.tabs.get(tabId)
-    if (entry) entry.visibility = visibility
+    if (entry) entry.presence = presence
   }
 
   /**
@@ -65,7 +63,8 @@ export class PresenceRegistry<S extends PresenceSocket = PresenceSocket> {
   snapshot(): ReadonlyArray<RegisteredTab> {
     return [...this.tabs].map(([tabId, entry]) => ({
       tabId,
-      visibility: entry.visibility,
+      visibility: entry.presence.visibility,
+      focused: entry.presence.focused,
     }))
   }
 
