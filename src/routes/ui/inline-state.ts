@@ -46,6 +46,9 @@ export async function buildInlineUiState(): Promise<InlineUiState> {
     // TODO(single-window §3.2): source the per-version dismissal from server-side
     // storage (not localStorage). Null = nothing dismissed yet.
     dismissedUpdateVersion: null,
+    // §1.4 restore-on-reopen: the section + scroll the last tab reported, so a
+    // tray-surfaced fresh tab keeps the user's place. Null until a tab reports one.
+    restoreView: state.lastView ?? null,
   }
 }
 

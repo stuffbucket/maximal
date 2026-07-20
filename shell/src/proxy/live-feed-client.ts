@@ -20,6 +20,7 @@
 import type {
   LiveFeedEvent,
   LiveFeedSnapshot,
+  ViewState,
 } from "../../../src/lib/ws/feed-types"
 
 import {
@@ -36,6 +37,13 @@ export interface LiveFeedHandlers {
   /** The sidecar told this (buried) tab to self-close for tray dedup. */
   readonly onCloseCommand: () => void
   readonly onStatusChange?: (status: LiveFeedStatus) => void
+  /**
+   * Sample the tab's current section + scroll for restore-on-reopen (§1.4). Called
+   * on connect and on each presence change (focus/blur/visibility) — the latter
+   * captures the view at the moment the user switches away, which is what a later
+   * tray click restores. Also invoked by `reportView()`. Omit to disable reporting.
+   */
+  readonly sampleView?: () => ViewState
 }
 
 export type LiveFeedStatus = "connecting" | "open" | "reconnecting" | "closed"
@@ -43,6 +51,8 @@ export type LiveFeedStatus = "connecting" | "open" | "reconnecting" | "closed"
 export interface LiveFeedConnection {
   readonly status: () => LiveFeedStatus
   readonly close: () => void
+  /** Report the current view now (e.g. on section navigation). No-op without `sampleView`. */
+  readonly reportView: () => void
 }
 
 /**
@@ -70,6 +80,40 @@ function installPresenceReporting(
     document.removeEventListener("visibilitychange", onVisibilityChange)
     globalThis.removeEventListener("focus", onFocusChange)
     globalThis.removeEventListener("blur", onFocusChange)
+  }
+}
+
+/**
+ * Route one parsed server frame to the handlers. Extracted from `connectLiveFeed`
+ * to keep that function within the line budget; pure dispatch, no socket state.
+ */
+function dispatchServerMessage(
+  message: NonNullable<ReturnType<typeof parseServerMessage>>,
+  handlers: LiveFeedHandlers,
+  send: (message: Parameters<typeof serializeClientMessage>[0]) => void,
+): void {
+  switch (message.type) {
+    case "snapshot": {
+      handlers.onSnapshot(message.snapshot)
+      return
+    }
+    case "event": {
+      handlers.onEvent(message.event)
+      return
+    }
+    case "ping": {
+      send({ type: "pong" })
+      return
+    }
+    case "close": {
+      // Tray dedup (§1.2): a buried tab is told to self-close. Reliable only
+      // under the single-history invariant (ADR-0020).
+      handlers.onCloseCommand()
+      return
+    }
+    default: {
+      break
+    }
   }
 }
 
@@ -105,6 +149,14 @@ export function connectLiveFeed(
     }
   }
 
+  // Restore-on-reopen (§1.4): sample and report the current section + scroll.
+  const reportView = (): void => {
+    const view = handlers.sampleView?.()
+    if (view) {
+      send({ type: "view", section: view.section, scrollY: view.scrollY })
+    }
+  }
+
   const scheduleReconnect = (): void => {
     if (closedByUser) return
     setStatus("reconnecting")
@@ -129,36 +181,15 @@ export function connectLiveFeed(
         visibility: document.visibilityState,
         focused: document.hasFocus(),
       })
+      // Announce the current view too, so the sidecar has it from first connect.
+      reportView()
     })
 
     socket.addEventListener("message", (ev: MessageEvent): void => {
       const message = parseServerMessage(
         typeof ev.data === "string" ? ev.data : "",
       )
-      if (!message) return
-      switch (message.type) {
-        case "snapshot": {
-          handlers.onSnapshot(message.snapshot)
-          return
-        }
-        case "event": {
-          handlers.onEvent(message.event)
-          return
-        }
-        case "ping": {
-          send({ type: "pong" })
-          return
-        }
-        case "close": {
-          // Tray dedup (§1.2): a buried tab is told to self-close. Reliable only
-          // under the single-history invariant (ADR-0020).
-          handlers.onCloseCommand()
-          return
-        }
-        default: {
-          break
-        }
-      }
+      if (message) dispatchServerMessage(message, handlers, send)
     })
 
     // A dropped socket reconnects with backoff; an error just closes it, which
@@ -171,12 +202,16 @@ export function connectLiveFeed(
   // hidden→visible transition that finds the socket dropped reconnects instead of
   // just reporting.
   const teardownPresence = installPresenceReporting(
-    () =>
+    () => {
       send({
         type: "visibility",
         visibility: document.visibilityState,
         focused: document.hasFocus(),
-      }),
+      })
+      // Capture section + scroll on the same triggers — a blur/hidden transition
+      // (user switching away) freezes exactly the view a later reopen restores.
+      reportView()
+    },
     () => {
       if (!socket || socket.readyState === WebSocket.CLOSED) {
         attempt = 0
@@ -191,6 +226,7 @@ export function connectLiveFeed(
 
   return {
     status: () => status,
+    reportView,
     close: (): void => {
       closedByUser = true
       if (reconnectTimer !== null) globalThis.clearTimeout(reconnectTimer)
