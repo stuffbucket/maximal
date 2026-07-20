@@ -43,6 +43,7 @@ If you're describing a token in a doc or commit message, use its name
 | `--border-width-hairline` / `-thin` / `-thick` / `-heavy` | Border widths | Reference by name | Off-scale borders |
 | `--sidebar-width` | Settings sidebar width | Settings sidebar only | Anything else |
 | `--content-max` | Settings content pane max-width | Settings content max-width | Dashboard (uses its own max) |
+| `--content-max-wide` | Wide content max-width for data-dense sections | The Usage section (charts/tables earn more width than prose) | Prose sections (use `--content-max`, ~65ch is more readable) |
 
 ## Elevation
 
@@ -80,16 +81,16 @@ The Usage view's charts (live traffic stream, trend area, proportion/breakdown
 bars) need a small, stable color vocabulary that reads on **both** themes. These
 are declared once on `:root` (not per-`[data-theme]`) — the values are mid-tone
 and chosen for dual-theme legibility, and the design system's "warn at sub-AA,
-never block" stance applies to chart color the same as elsewhere. Viz color is
-**category identity**, so — unlike interactive surfaces — it is deliberately not
-the single `--accent`; it never uses `--brand` crimson.
+never block" stance applies to chart color the same as elsewhere. Viz color
+encodes **token type** (input / output / cache) consistently across every chart
+and bar — so — unlike interactive surfaces — it is deliberately not the single
+`--accent`; it never uses `--brand` crimson.
 
 | Token | Purpose | Use for | Do NOT use for |
 |---|---|---|---|
-| `--viz-input` | Input-token band | The input band of the stacked token-traffic area | Interactive fills; non-viz surfaces |
-| `--viz-output` | Output-token band | The output band of the token-traffic area | Interactive fills |
+| `--viz-input` | Input-token band | The input band of the traffic area, proportion bar, and per-model bars | Interactive fills; non-viz surfaces |
+| `--viz-output` | Output-token band | The output band, everywhere token type is shown | Interactive fills |
 | `--viz-cache` | Cache-token band | The cache-read/creation band (a calm neutral — cache is "free") | Emphasis; text color |
-| `--viz-series1` … `--viz-series6` | Categorical ramp | Per-provider / per-model series color (assign by stable index) | Sequential/quantitative encodings; status meaning |
 
 
 

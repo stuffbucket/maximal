@@ -60,26 +60,43 @@ export function ProportionBar({
   )
 }
 
-export interface RankedRow {
+export interface StackedRow {
   key: string
   label: string
-  value: number
-  color: string
-  /** Optional trailing meta (e.g. request count, cost). */
+  input: number
+  output: number
+  cache: number
+  total: number
+  /** Optional trailing meta (e.g. request count). */
   meta?: string
   /** Optional badge (e.g. "premium"). */
   badge?: string
 }
 
-export function RankedBars({
+const ROW_SEGMENTS: ReadonlyArray<{
+  key: "input" | "output" | "cache"
+  color: string
+}> = [
+  { key: "input", color: "var(--viz-input)" },
+  { key: "output", color: "var(--viz-output)" },
+  { key: "cache", color: "var(--viz-cache)" },
+]
+
+/**
+ * Ranked rows whose bar length encodes each entity's share of the max, and whose
+ * bar is itself split by token type (input/output/cache) — the SAME color
+ * language as the legend and the overall proportion bar. So one glance reads both
+ * "which model is biggest" and "how much of it is cache vs input vs output".
+ */
+export function StackedBars({
   rows,
   ariaLabel,
 }: {
-  rows: ReadonlyArray<RankedRow>
+  rows: ReadonlyArray<StackedRow>
   ariaLabel: string
 }): React.ReactElement | null {
   if (rows.length === 0) return null
-  const max = Math.max(1, ...rows.map((r) => r.value))
+  const max = Math.max(1, ...rows.map((r) => r.total))
   return (
     <ul className="usage-ranked" aria-label={ariaLabel}>
       {rows.map((r) => (
@@ -92,20 +109,33 @@ export function RankedBars({
               : null}
             </span>
             <span className="usage-ranked__value">
-              {formatNumber(r.value)}
+              {formatNumber(r.total)}
               {r.meta ?
                 <span className="usage-ranked__meta"> · {r.meta}</span>
               : null}
             </span>
           </div>
           <div className="usage-ranked__track">
-            <span
+            <div
               className="usage-ranked__fill"
-              style={{
-                width: `${(r.value / max) * 100}%`,
-                background: r.color,
-              }}
-            />
+              style={{ width: `${(r.total / max) * 100}%` }}
+            >
+              {r.total > 0 ?
+                ROW_SEGMENTS.map((seg) => {
+                  const value = r[seg.key]
+                  return value > 0 ?
+                      <span
+                        key={seg.key}
+                        className="usage-ranked__seg"
+                        style={{
+                          width: `${(value / r.total) * 100}%`,
+                          background: seg.color,
+                        }}
+                      />
+                    : null
+                })
+              : null}
+            </div>
           </div>
         </li>
       ))}

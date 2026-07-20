@@ -171,21 +171,3 @@ export function formatRate(tokens: number, windowMs: number): string {
   const perMin = (tokens / windowMs) * 60_000
   return `${formatCompact(perMin)}/min`
 }
-
-/** The six categorical viz series tokens, in order. Cycle by stable index so a
- *  given provider/model keeps its color across renders. */
-export const VIZ_SERIES_VARS: ReadonlyArray<string> = [
-  "var(--viz-series1)",
-  "var(--viz-series2)",
-  "var(--viz-series3)",
-  "var(--viz-series4)",
-  "var(--viz-series5)",
-  "var(--viz-series6)",
-]
-
-/** Pick a stable categorical viz color for a series index (wraps the ramp). */
-export function vizSeriesColor(index: number): string {
-  const n = VIZ_SERIES_VARS.length
-  const i = ((Math.trunc(index) % n) + n) % n
-  return VIZ_SERIES_VARS[i]
-}

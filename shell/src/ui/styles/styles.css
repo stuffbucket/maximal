@@ -2437,14 +2437,19 @@ a:hover {
    literally via the reduced-motion block at the end of this section.
    ========================================================================== */
 
+/* Usage is data-dense (charts, tables) — it earns more width than the prose
+   sections, which cap at --content-max for readable line length. */
+.section[data-section="usage"] {
+  max-width: var(--content-max-wide);
+}
+
 /* Person-first headline. Larger than body; numbers carry weight. */
 .usage__summary {
   margin: 0;
   font-size: var(--text-md);
   line-height: var(--leading-lg);
   color: var(--text-base-color);
-}
-.usage__summary strong {
+}.usage__summary strong {
   color: var(--text-strong);
   font-weight: var(--weight-lg);
   font-variant-numeric: tabular-nums;
@@ -2685,22 +2690,26 @@ a:hover {
   color: var(--text-muted);
 }
 .usage-ranked__track {
-  height: var(--space-2);
+  height: var(--space-3);
   background: var(--surface-control);
   border-radius: var(--radius-pill);
   overflow: hidden;
 }
 .usage-ranked__fill {
-  display: block;
+  display: flex;
   height: 100%;
   border-radius: var(--radius-pill);
+  overflow: hidden;
   transition: width 200ms ease-out;
+}
+.usage-ranked__seg {
+  height: 100%;
 }
 
 /* ---- Providers strip (cards ARE warranted — discrete entities) ---- */
 .usage-providers {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(240px, 320px));
   gap: var(--space-4);
 }
 .usage-provider {
@@ -2723,12 +2732,6 @@ a:hover {
   font-size: var(--text-base);
   font-weight: var(--weight-lg);
   color: var(--text-strong);
-}
-.usage-provider__source {
-  font-size: var(--text-sm);
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
 }
 .usage-provider__stats {
   display: flex;
@@ -2757,6 +2760,12 @@ a:hover {
   gap: var(--space-2);
   border-top: var(--border-width-hairline) solid var(--border-subtle);
   padding-top: var(--space-3);
+}
+.usage-provider__quotas-label {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
 }
 .usage-provider__quota {
   display: flex;
