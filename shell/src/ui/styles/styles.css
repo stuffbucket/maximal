@@ -164,8 +164,8 @@ a:hover {
 }
 
 .pane::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: var(--space-2);
+  height: var(--space-2);
 }
 
 .pane::-webkit-scrollbar-track {
@@ -211,7 +211,7 @@ a:hover {
   font-size: var(--text-2xl);
   font-weight: var(--weight-2xl);
   line-height: var(--leading-2xl);
-  letter-spacing: -0.015em;
+  letter-spacing: var(--tracking-2xl);
   color: var(--text-strong);
 }
 
@@ -593,6 +593,7 @@ a:hover {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  /* off-scale one-off: signed-in avatar, one step above --size-2xl (40px). */
   width: 56px;
   height: 56px;
   border-radius: var(--radius-pill);
@@ -626,7 +627,7 @@ a:hover {
   font-size: var(--text-2xl);
   font-weight: var(--weight-2xl);
   line-height: var(--leading-2xl);
-  letter-spacing: -0.015em;
+  letter-spacing: var(--tracking-2xl);
   color: var(--text-strong);
   word-break: break-word;
 }
@@ -725,6 +726,7 @@ a:hover {
   align-items: center;
   justify-content: center;
   width: 100%;
+  /* off-scale one-off: device-code button width cap (single readable line). */
   max-width: 28rem;
   gap: var(--space-2);
   padding: var(--space-3) var(--space-5);
@@ -747,7 +749,7 @@ a:hover {
 }
 
 .device-code-button:disabled {
-  opacity: 0.5;
+  opacity: var(--opacity-disabled);
   cursor: not-allowed;
 }
 
@@ -811,32 +813,11 @@ a:hover {
   white-space: nowrap;
 }
 
-.card__row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-4);
-}
-
-.card__main {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-
 .card__title {
   font-size: var(--text-md);
   font-weight: var(--weight-lg);
   line-height: var(--leading-lg);
   color: var(--text-strong);
-}
-
-.card__meta {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: var(--text-sm);
-  color: var(--text-base-color);
 }
 
 .card__hint {
@@ -845,23 +826,8 @@ a:hover {
   line-height: var(--leading-lg);
 }
 
-.card__aside {
-  display: flex;
-  align-items: center;
-}
-
 .card--error {
   border-color: var(--accent-destructive);
-}
-
-.card--planned {
-  border-style: dashed;
-  opacity: 0.92;
-}
-
-.card--planned .card__title {
-  color: var(--text-muted);
-  font-weight: var(--weight-md);
 }
 
 /* ---- Info card ---- */
@@ -899,7 +865,7 @@ a:hover {
  * reads as "this went wrong" without the alarm of a filled banner; mirrors
  * the .upstream-rejection accent treatment. */
 .uninstall-error {
-  border-left-width: 3px;
+  border-left-width: var(--border-width-thick);
   border-left-style: solid;
   border-left-color: var(--accent-destructive);
   padding-left: var(--space-3);
@@ -922,7 +888,7 @@ a:hover {
 .upstream-rejection {
   margin-top: var(--space-3);
   padding: var(--space-3) var(--space-4);
-  border-left-width: 3px;
+  border-left-width: var(--border-width-thick);
   border-left-color: var(--accent-destructive);
   display: flex;
   flex-direction: column;
@@ -981,20 +947,6 @@ a:hover {
   white-space: pre;
 }
 
-/* ---- Sidebar 'planned' chip ---- */
-.nav__chip {
-  margin-left: var(--space-2);
-  padding: 0 var(--space-1);
-  font-size: 0.65rem;
-  font-weight: var(--weight-md);
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  background: transparent;
-  border: var(--border-width-hairline) solid var(--border-subtle);
-  border-radius: var(--radius-chip);
-}
-
 /* ---- Key/value list ---- */
 .kv {
   margin: 0;
@@ -1037,47 +989,6 @@ a:hover {
   gap: var(--space-4);
 }
 
-.form__row {
-  display: grid;
-  grid-template-columns: 33% 1fr;
-  gap: var(--space-4);
-  align-items: start;
-  padding-block: var(--space-2);
-  border-block-end: var(--border-width-hairline) solid var(--border-subtle);
-}
-
-.form__row:last-child {
-  border-block-end: 0;
-}
-
-.form__label {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-
-.form__label label {
-  font-size: var(--text-sm);
-  font-weight: var(--weight-md);
-  color: var(--text-strong);
-}
-
-.form__hint {
-  margin: 0;
-  font-size: var(--text-sm);
-  color: var(--text-muted);
-  line-height: var(--leading-lg);
-}
-
-.form__control {
-  display: flex;
-  align-items: center;
-}
-
-.form__control--inline {
-  gap: var(--space-2);
-}
-
 /* ---- Inputs ---- */
 .input {
   appearance: none;
@@ -1093,17 +1004,13 @@ a:hover {
   width: 100%;
 }
 
-.input--narrow {
-  width: var(--size-2xl);
-}
-
 .input:focus-visible {
   outline: var(--focus-ring);
   outline-offset: var(--focus-ring-offset);
 }
 
 .input:disabled {
-  opacity: 0.6;
+  opacity: var(--opacity-disabled);
   cursor: not-allowed;
 }
 
@@ -1157,7 +1064,7 @@ a:hover {
 }
 
 .switch input[type="checkbox"]:disabled {
-  opacity: 0.6;
+  opacity: var(--opacity-disabled);
   cursor: not-allowed;
 }
 
@@ -1204,7 +1111,7 @@ a:hover {
 }
 
 .checkbox:disabled {
-  opacity: 0.45;
+  opacity: var(--opacity-disabled);
   cursor: not-allowed;
 }
 
@@ -1234,12 +1141,12 @@ a:hover {
   color: var(--text-strong);
   cursor: pointer;
   min-height: var(--size-xl);
-  /* 150ms ease-out per the motion contract (utility, not delight). Carries
-     the hover/active tint and the "Updated ✓" confirmation crossfade; the
-     global prefers-reduced-motion block zeroes it. */
+  /* --duration-base standard ease per the motion contract (utility, not
+     delight). Carries the hover/active tint and the "Updated ✓" confirmation
+     crossfade; the global prefers-reduced-motion block zeroes it. */
   transition:
-    color 150ms ease-out,
-    background-color 150ms ease-out;
+    color var(--duration-base) var(--easing-standard),
+    background-color var(--duration-base) var(--easing-standard);
 }
 
 /* Transient confirmation tint for an action that completed (e.g. the gh-account
@@ -1255,7 +1162,7 @@ a:hover {
 }
 
 .btn:disabled {
-  opacity: 0.5;
+  opacity: var(--opacity-disabled);
   cursor: not-allowed;
 }
 
@@ -1291,28 +1198,6 @@ a:hover {
   min-height: var(--size-lg);
 }
 
-/* Borderless input variant for inline editing inside table cells.
-   The vendored TextInput primitive selects this via `inline` prop. */
-.input--inline {
-  appearance: none;
-  background: transparent;
-  color: var(--text-strong);
-  border: 0;
-  padding: var(--space-1) var(--space-2);
-  font-family: inherit;
-  font-size: var(--text-sm);
-  line-height: var(--leading-lg);
-  width: 100%;
-  min-height: var(--size-lg);
-}
-
-.input--inline:focus-visible {
-  outline: var(--focus-ring);
-  outline-offset: 0;
-  background: var(--surface-control);
-  border-radius: var(--radius-input);
-}
-
 /* ---- Chips ---- */
 .chip {
   display: inline-flex;
@@ -1325,12 +1210,6 @@ a:hover {
   background: var(--surface-control);
   border: var(--border-width-hairline) solid var(--border-subtle);
   border-radius: var(--radius-chip);
-}
-
-.chip--ok {
-  color: var(--accent-fg);
-  background: var(--accent);
-  border-color: var(--accent);
 }
 
 /* ---- Status dot ---- */
@@ -1364,16 +1243,12 @@ a:hover {
   font-weight: var(--weight-md);
   color: var(--text-muted);
   font-size: var(--text-sm);
-  letter-spacing: 0.02em;
+  letter-spacing: var(--tracking-caps);
   text-transform: uppercase;
 }
 
 .table td {
   color: var(--text-strong);
-}
-
-.row__actions {
-  text-align: end;
 }
 
 /* ---- Empty states ---- */
@@ -1489,7 +1364,7 @@ a:hover {
 
 [data-busy="true"] .busybar {
   opacity: 1;
-  transition: opacity 150ms ease-out;
+  transition: opacity var(--duration-base) var(--easing-standard);
 }
 
 [data-busy="true"] .busybar::before {
@@ -1642,8 +1517,8 @@ a:hover {
 }
 
 .connection-card__dot {
-  width: 8px;
-  height: 8px;
+  width: var(--space-2);
+  height: var(--space-2);
   border-radius: var(--radius-pill);
   background: var(--border-strong);
   flex: 0 0 auto;
@@ -1699,7 +1574,7 @@ a:hover {
    header row — same intent pattern as Apple Internet Accounts. */
 .connection-card__delete {
   opacity: 0;
-  transition: opacity 120ms ease-out;
+  transition: opacity var(--duration-fast) var(--easing-standard);
   flex: 0 0 auto;
 }
 
@@ -1832,7 +1707,7 @@ a:hover {
   content: "▸";
   font-size: var(--text-sm);
   color: var(--text-muted);
-  transition: transform 120ms ease-out;
+  transition: transform var(--duration-fast) var(--easing-standard);
 }
 
 .advanced-section[open] .advanced-section__summary::before {
@@ -1849,11 +1724,6 @@ a:hover {
   font-size: var(--text-base);
   font-weight: var(--weight-md);
   color: var(--text-strong);
-}
-
-.advanced-section__hint {
-  font-size: var(--text-sm);
-  color: var(--text-muted);
 }
 
 .advanced-section__body {
@@ -1897,6 +1767,7 @@ a:hover {
   border-radius: var(--radius-card);
   background: var(--surface-card);
   color: var(--text-base-color);
+  /* off-scale one-off: confirm-dialog max width. */
   max-width: 420px;
   width: calc(100% - var(--space-6));
   box-shadow: var(--elevation-modal);
@@ -1947,10 +1818,10 @@ a:hover {
 /* Default: a subtle fade-in. Respect reduced-motion as a hard contract. */
 @media (prefers-reduced-motion: no-preference) {
   .confirm-dialog[open] {
-    animation: confirm-dialog-in 120ms ease-out;
+    animation: confirm-dialog-in var(--duration-fast) var(--easing-standard);
   }
   .confirm-dialog[open]::backdrop {
-    animation: confirm-backdrop-in 120ms ease-out;
+    animation: confirm-backdrop-in var(--duration-fast) var(--easing-standard);
   }
   @keyframes confirm-dialog-in {
     from { opacity: 0; transform: translateY(4px); }
@@ -1986,7 +1857,7 @@ a:hover {
 }
 
 /* Coming-soon apps read as present-but-inert: dashed, dimmed, no
-   interaction. Mirrors .card--planned. */
+   interaction. */
 .app-card--soon {
   border-style: dashed;
   opacity: 0.85;
@@ -2147,9 +2018,9 @@ a:hover {
   padding: var(--space-1) var(--space-3);
   cursor: pointer;
   transition:
-    color 150ms ease-out,
-    background-color 150ms ease-out,
-    border-color 150ms ease-out;
+    color var(--duration-base) var(--easing-standard),
+    background-color var(--duration-base) var(--easing-standard),
+    border-color var(--duration-base) var(--easing-standard);
 }
 
 .usage__period:hover {
@@ -2304,6 +2175,7 @@ a:hover {
    title already spends this window's one display-heading moment. */
 .usage__tiles {
   display: grid;
+  /* off-scale one-off: usage-tile min column width before the grid reflows. */
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: var(--space-4);
 }
@@ -2356,7 +2228,7 @@ a:hover {
 .usage__table th {
   font-weight: var(--weight-md);
   color: var(--text-muted);
-  letter-spacing: 0.02em;
+  letter-spacing: var(--tracking-caps);
   text-transform: uppercase;
 }
 
@@ -2409,8 +2281,8 @@ a:hover {
   min-height: var(--size-lg);
   cursor: pointer;
   transition:
-    color 150ms ease-out,
-    background-color 150ms ease-out;
+    color var(--duration-base) var(--easing-standard),
+    background-color var(--duration-base) var(--easing-standard);
 }
 
 .usage__pager button:hover:not(:disabled) {
@@ -2425,7 +2297,7 @@ a:hover {
 }
 
 .usage__pager button:disabled {
-  opacity: 0.5;
+  opacity: var(--opacity-disabled);
   cursor: not-allowed;
 }
 
@@ -2643,7 +2515,7 @@ a:hover {
   font-weight: var(--weight-md);
   color: var(--text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.02em;
+  letter-spacing: var(--tracking-caps);
 }
 .usage-ranked {
   display: flex;
@@ -2679,7 +2551,7 @@ a:hover {
   border-radius: var(--radius-chip);
   padding: 0 var(--space-1);
   text-transform: uppercase;
-  letter-spacing: 0.02em;
+  letter-spacing: var(--tracking-caps);
 }
 .usage-ranked__value {
   color: var(--text-base-color);

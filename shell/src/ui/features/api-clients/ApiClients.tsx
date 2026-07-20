@@ -2,6 +2,7 @@ import { type ReactElement, useCallback, useState } from "react"
 
 import type { ApiKeyEntry } from "../../../../../src/lib/config/settings-types"
 
+import { Alert } from "../../components/Alert"
 import { Button } from "../../components/Button"
 import { ConfirmDialog } from "../../components/ConfirmDialog"
 import { Stack } from "../../components/Stack"
@@ -40,11 +41,7 @@ export function ApiClients(): ReactElement {
 
   return (
     <Stack proximity="region" className="api-clients">
-      {error && (
-        <p className="state__caption state__caption--error" role="alert">
-          {error}
-        </p>
-      )}
+      {error && <Alert>{error}</Alert>}
 
       <Stack proximity="section" className="connection-list">
         {entries.map((entry) => (

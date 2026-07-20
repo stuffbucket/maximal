@@ -34,6 +34,29 @@ export const leading = {
 export const tracking = {
   xl: "-0.01em",
   "2xl": "-0.015em",
+  caps: "0.02em", // Uppercase micro-labels / table headers (open the caps a touch).
+} as const
+
+/**
+ * Disabled-state opacity. One canonical value for every disabled control
+ * (buttons, inputs, switches, checkboxes, pager) so the dim reads uniformly.
+ */
+export const opacity = {
+  disabled: "0.5",
+} as const
+
+/**
+ * Motion — utility transition durations + the standard easing. Per the motion
+ * contract these are short, functional eases (not delight). `fast` (120ms) for
+ * small reveals/rotations, `base` (150ms) for the common color/background tint.
+ */
+export const duration = {
+  fast: "120ms",
+  base: "150ms",
+} as const
+
+export const easing = {
+  standard: "ease-out",
 } as const
 
 export const spacing = {
@@ -83,7 +106,7 @@ export const brand = {
 
 export const accent = {
   color: "#5198a6", // Used from tokens.css (overriding the drift in usage-viewer)
-  hover: "#2dd4bf", // Inherited from usage-viewer for now, or maybe derived?
+  hover: "#63a9b6", // Derived from --accent (#5198a6): a subtle ~10% lighten for hover.
   fg: "#ffffff",
   destructive: "#b32d3f",
   destructiveFg: "#ffffff",

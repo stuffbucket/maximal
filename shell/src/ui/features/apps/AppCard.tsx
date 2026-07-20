@@ -7,14 +7,33 @@ import { Button } from "../../components/Button"
 import { ConfirmDialog } from "../../components/ConfirmDialog"
 import { cx } from "../../components/cx"
 import { Switch } from "../../components/Switch"
+import { useCopyToClipboard } from "../../hooks/useCopyToClipboard"
 import { isWindows } from "../../platform"
-
-const COPIED_FLASH_MS = 1400
 
 interface AppCardProps {
   app: AppEntry
   onToggle: (enabled: boolean) => Promise<MutationResult>
   onRescan: () => Promise<void>
+}
+
+/** triangle-alert glyph shown beside a refused-enable conflict. */
+function ConflictIcon(): ReactElement {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
+      <line x1="12" y1="9" x2="12" y2="13" />
+      <line x1="12" y1="17" x2="12.01" y2="17" />
+    </svg>
+  )
 }
 
 /** Human-readable explanation + remedy for each refused-enable reason.
@@ -55,7 +74,7 @@ export function AppCard({
   onToggle,
   onRescan,
 }: AppCardProps): ReactElement {
-  const [copied, setCopied] = useState(false)
+  const { copied, copy } = useCopyToClipboard(1400)
   const [rescanning, setRescanning] = useState(false)
   // Windows-only: disabling Claude Code routing doesn't take effect in an
   // already-running session (Claude Code reads its base URL at launch on
@@ -76,14 +95,7 @@ export function AppCard({
 
   const copyInstall = async (): Promise<void> => {
     if (!app.install) return
-    try {
-      await navigator.clipboard.writeText(app.install.command)
-      setCopied(true)
-      globalThis.setTimeout(() => setCopied(false), COPIED_FLASH_MS)
-    } catch {
-      // Clipboard unavailable (insecure context / plain browser). Silent —
-      // the command is also shown in a code block the user can select.
-    }
+    await copy(app.install.command)
   }
 
   const rescan = async (): Promise<void> => {
@@ -184,21 +196,7 @@ export function AppCard({
       {conflict && (
         <div className="app-card__conflict" role="status">
           <span className="app-card__conflict-icon" aria-hidden="true">
-            {/* triangle-alert */}
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
-              <line x1="12" y1="9" x2="12" y2="13" />
-              <line x1="12" y1="17" x2="12.01" y2="17" />
-            </svg>
+            <ConflictIcon />
           </span>
           <span className="app-card__conflict-text">
             <span className="app-card__conflict-title">{conflict.title}</span>

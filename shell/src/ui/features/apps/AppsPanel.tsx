@@ -1,5 +1,6 @@
 import type { ReactElement } from "react"
 
+import { Alert } from "../../components/Alert"
 import { Stack } from "../../components/Stack"
 import { AppCard } from "./AppCard"
 import { useApps } from "./useApps"
@@ -16,11 +17,7 @@ export function AppsPanel(): ReactElement {
 
   return (
     <Stack proximity="region" className="apps-panel" aria-busy={isLoading}>
-      {error && (
-        <p className="state__caption state__caption--error" role="alert">
-          {error}
-        </p>
-      )}
+      {error && <Alert>{error}</Alert>}
 
       {isLoading && apps.length === 0 ?
         <p className="state__caption">Looking for installed apps…</p>

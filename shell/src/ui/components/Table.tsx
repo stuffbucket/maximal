@@ -1,8 +1,16 @@
 // vendored: thin wrappers over <table>/<thead>/<tbody>/<tr>/<th>/<td>.
+// The root bakes in the `.table` class (defined in styles.css) so callers
+// get the shared styling without repeating `className="table"`; extra
+// classes compose via cx().
 import type { ReactElement, HTMLAttributes, ThHTMLAttributes } from "react"
 
-export function Table(p: HTMLAttributes<HTMLTableElement>): ReactElement {
-  return <table {...p} />
+import { cx } from "./cx"
+
+export function Table({
+  className,
+  ...rest
+}: HTMLAttributes<HTMLTableElement>): ReactElement {
+  return <table className={cx("table", className)} {...rest} />
 }
 
 export function Thead(
