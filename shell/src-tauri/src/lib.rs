@@ -43,15 +43,12 @@
 use std::sync::Mutex;
 use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tauri::{
     image::Image,
-    ipc::Channel,
-    menu::{IsMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     webview::PageLoadEvent,
     AppHandle, Emitter, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder,
-    WindowEvent,
 };
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
@@ -60,6 +57,20 @@ use tauri_plugin_shell::ShellExt;
 /// Native-string i18n (tray, notifications, window titles, quit dialog),
 /// backed by the same shell/src/i18n/*.json catalogs the webview renders with.
 mod native_i18n;
+
+/// Pure, UI-free tray/splash decision logic (spec §1.2/§3.3/§10). Owns
+/// `SidecarState` so the decisions that read it are cargo-testable without a
+/// running Tauri app.
+mod decisions;
+use crate::decisions::{failure_surface_for, SidecarState, SplashSurface};
+
+/// In-place self-update INSTALL half (docs/spec/phase-6-self-update.md). The
+/// browser-tab Settings "Upgrade" button POSTs `/_internal/upgrade`; the sidecar
+/// emits `UPDATE_REQUEST_MARKER`; the stdout reader below relays it to
+/// `updater::handle_upgrade`, which downloads+verifies+installs the signed bundle
+/// and relaunches. The DETECTION half (poll → `LatestUpdate` → notification)
+/// stays inline in this file.
+mod updater;
 
 // Canonical Maximal port. Apps integrating with the proxy (Claude
 // Code, Cursor, custom scripts) only need to know this one URL:
@@ -73,17 +84,25 @@ const SIDECAR_PORT: u16 = 4141;
 /// relay to the splash. MUST match `BOOT_STATUS_MARKER` in src/start.ts.
 const BOOT_STATUS_MARKER: &str = "@@MAXIMAL_STATUS@@";
 
+/// Line the sidecar prints (stdout) when the browser-tab UI asks to quit the
+/// whole app (§1.6): a tab has no Tauri host to `invoke` a quit, so it POSTs
+/// `/_internal/quit` and the sidecar signals us over this channel. MUST match
+/// `QUIT_REQUEST_MARKER` in src/lib/start/boot-status.ts.
+const QUIT_REQUEST_MARKER: &str = "@@MAXIMAL_QUIT@@";
+
+/// Line the sidecar prints (stdout) when the browser-tab UI asks to run the
+/// in-place self-update (Settings "Upgrade" button → `/_internal/upgrade`): a tab
+/// has no Tauri host to `invoke`, so it POSTs the sidecar, which signals us over
+/// this channel — same pattern as quit. MUST match `UPDATE_REQUEST_MARKER` in
+/// src/lib/start/boot-status.ts.
+const UPDATE_REQUEST_MARKER: &str = "@@MAXIMAL_UPDATE@@";
+
 /// Brand-minimum time the splash stays on screen once the sidecar reaches a
 /// Running state, before it fades. The state-aware dismiss loop in
 /// `create_splash` enforces this, and the first-run Settings auto-open
 /// (`apply_state`) defers to it so Settings doesn't race up over the splash.
 const SPLASH_MIN_DISPLAY: Duration = Duration::from_millis(1600);
 
-/// How often `subscribe_token_usage` GETs `/token-usage` from the
-/// sidecar. Each iteration also probes the `Channel<TokenUsageEvent>`
-/// — when the JS side drops the channel, the next `send` returns Err
-/// and the loop exits cleanly.
-const DASHBOARD_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
 /// How often the phase-2 poll re-checks for a newer release. Generous on
 /// purpose — releases are rare and the sidecar caches the upstream lookup for
@@ -91,9 +110,6 @@ const DASHBOARD_POLL_INTERVAL: Duration = Duration::from_secs(5);
 /// release published after launch. Aligns with the sidecar's cache TTL.
 const UPDATE_CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 
-/// Allowed values for the dashboard's `period` query parameter.
-/// Anything else from the webview is clamped to "day".
-const DASHBOARD_PERIODS: &[&str] = &["day", "week", "month"];
 
 const TRAY_ID: &str = "main";
 // Two webview windows, both pointed at the sidecar:
@@ -117,31 +133,9 @@ const TRAY_ICON_NORMAL: &[u8] = include_bytes!("../icons/tray/icon@2x.png");
 const TRAY_ICON_STARTING: &[u8] = include_bytes!("../icons/tray/icon-starting@2x.png");
 const TRAY_ICON_ATTENTION: &[u8] = include_bytes!("../icons/tray/icon-attention@2x.png");
 
-mod menu_id {
-    pub const SETTINGS: &str = "settings";
-    pub const DASHBOARD: &str = "dashboard";
-    pub const QUIT: &str = "quit";
-    pub const SIGN_IN: &str = "sign_in";
-    pub const ACCOUNT_INFO: &str = "account_info";
-    pub const STARTING: &str = "starting";
-    pub const FAILED: &str = "failed";
-    pub const SHOW_LOGS: &str = "show_logs";
-    pub const RETRY: &str = "retry";
-    pub const OPEN_CONFIG: &str = "open_config";
-    pub const UPGRADE: &str = "upgrade";
-}
 
-/// High-level tray state. Each transition rebuilds the menu and swaps
-/// the tray icon.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SidecarState {
-    Starting,
-    RunningUnauthenticated,
-    RunningAuthenticated,
-    #[allow(dead_code)]
-    Stopped,
-    Failed,
-}
+// High-level tray state lives in `decisions::SidecarState` (imported above) so
+// the pure tray/splash decisions that read it stay cargo-testable.
 
 /// Owns the sidecar's CommandChild for the lifetime of the app.
 ///
@@ -243,24 +237,20 @@ enum RejectionTransition {
 /// version first appears. Mutex because the poll task writes it while the
 /// tray-refresh and menu-event paths read it.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct UpdateSnapshot {
+pub(crate) struct UpdateSnapshot {
     /// Latest version, no leading "v".
-    latest: String,
+    pub(crate) latest: String,
     /// Install-channel-neutral download page.
-    url: String,
+    pub(crate) url: String,
 }
 
 /// Tracks the most recent update snapshot the poll loop has observed. Wrapped
 /// in Mutex because the polling task and the tray paths both touch it.
-struct LatestUpdate(Mutex<Option<UpdateSnapshot>>);
+pub(crate) struct LatestUpdate(Mutex<Option<UpdateSnapshot>>);
 
 impl LatestUpdate {
     fn new() -> Self {
         Self(Mutex::new(None))
-    }
-
-    fn get(&self) -> Option<UpdateSnapshot> {
-        self.0.lock().expect("update mutex poisoned").clone()
     }
 
     /// Stores the snapshot; returns true if it changed (a newly available
@@ -274,6 +264,13 @@ impl LatestUpdate {
         }
         *guard = next;
         true
+    }
+
+    /// Reads the current snapshot — the in-place upgrade action opens the
+    /// download-page fallback from its `url` when a signed install isn't
+    /// available for this build/platform.
+    pub(crate) fn get(&self) -> Option<UpdateSnapshot> {
+        self.0.lock().expect("update mutex poisoned").clone()
     }
 }
 
@@ -328,18 +325,18 @@ impl AppStatus {
 /// choice or the OS locale (see `native_i18n::resolve_locale`); updated live
 /// by `set_locale` when the user changes the in-app picker so the tray menu,
 /// window titles, and later notifications follow the chosen language.
-struct LocaleState(Mutex<String>);
+pub(crate) struct LocaleState(Mutex<String>);
 
 impl LocaleState {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self(Mutex::new("en".to_string()))
     }
 
-    fn get(&self) -> String {
+    pub(crate) fn get(&self) -> String {
         self.0.lock().expect("locale mutex poisoned").clone()
     }
 
-    fn set(&self, tag: String) {
+    pub(crate) fn set(&self, tag: String) {
         *self.0.lock().expect("locale mutex poisoned") = tag;
     }
 }
@@ -483,98 +480,26 @@ fn generate_shell_api_key() -> String {
     format!("mxlshell_{}", hex)
 }
 
-/// Streaming event the dashboard subscriber sends down the
-/// `Channel<TokenUsageEvent>`. Tagged so the JS side can `switch` on
-/// `msg.event` and unpack `msg.data` without sniffing shape.
-///
-/// `Update` carries the JSON response from `/token-usage?period=…`
-/// verbatim. `Error` carries a stringified failure for the most
-/// recent fetch attempt — the loop keeps retrying after emitting one
-/// so a single blip doesn't kill the live feed.
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase", tag = "event", content = "data")]
-enum TokenUsageEvent {
-    Update { payload: serde_json::Value },
-    Error { message: String },
-}
-
-/// Sanitize the period string from the JS side, defaulting to "day"
-/// for anything unrecognized. Returns `&'static str` so the URL
-/// builder doesn't re-allocate per poll.
-fn canonical_period(requested: &str) -> &'static str {
-    DASHBOARD_PERIODS
-        .iter()
-        .copied()
-        .find(|p| *p == requested)
-        .unwrap_or("day")
-}
-
-/// One-shot GET of `/token-usage?period=…` against the local sidecar.
-/// Returns the parsed JSON body on 2xx, an error string otherwise.
-async fn fetch_token_usage(
-    client: &reqwest::Client,
-    period: &str,
-) -> Result<serde_json::Value, String> {
-    let url = format!(
-        "http://127.0.0.1:{port}/token-usage?period={period}",
-        port = SIDECAR_PORT,
-    );
-    let response = client.get(&url).send().await.map_err(|e| e.to_string())?;
-    if !response.status().is_success() {
-        return Err(format!("status {}", response.status()));
-    }
-    response
-        .json::<serde_json::Value>()
-        .await
-        .map_err(|e| e.to_string())
-}
-
-/// Streaming command: subscribes the caller to a steady feed of
-/// `/token-usage?period=…` snapshots. The loop terminates when the
-/// JS side drops the channel (next `send` returns Err) — which is
-/// also how period changes work: the webview discards the current
-/// channel + calls `subscribe_token_usage` again with the new period.
-///
-/// Errors during a single fetch are emitted as `Error` events but do
-/// not terminate the loop — transient sidecar restarts shouldn't
-/// require the dashboard to re-subscribe.
-#[tauri::command]
-async fn subscribe_token_usage(
-    period: String,
-    on_event: Channel<TokenUsageEvent>,
-) -> Result<(), String> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(2))
-        .build()
-        .map_err(|e| e.to_string())?;
-    let period = canonical_period(&period);
-
-    loop {
-        match fetch_token_usage(&client, period).await {
-            Ok(payload) => {
-                if on_event
-                    .send(TokenUsageEvent::Update { payload })
-                    .is_err()
-                {
-                    return Ok(());
-                }
-            }
-            Err(message) => {
-                if on_event
-                    .send(TokenUsageEvent::Error { message })
-                    .is_err()
-                {
-                    return Ok(());
-                }
-            }
-        }
-        tokio::time::sleep(DASHBOARD_POLL_INTERVAL).await;
-    }
-}
 
 #[tauri::command]
 fn get_shell_api_key(state: State<'_, ShellApiKey>) -> String {
     state.value().to_string()
+}
+
+/// A short random token appended to the Settings URL on every tray-driven open.
+///
+/// The OS URL opener (macOS `open`, the Windows/Linux equivalents) FOCUSES an
+/// already-open tab when the URL matches one — which, combined with the WS `close`
+/// we send the old tab in the same click, produces the tray-click focus flicker:
+/// the opener focuses the about-to-close tab, then it closes, leaving the user
+/// somewhere else. A unique URL per open can never match the closing tab, so the
+/// opener always lands as one fresh, focused tab. The served page ignores unknown
+/// query params, so nothing server-side has to handle it.
+fn tray_open_nonce() -> String {
+    let mut buf = [0u8; 8];
+    getrandom::fill(&mut buf)
+        .expect("could not read OS CSPRNG for tray-open nonce");
+    buf.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
 #[derive(Debug, Deserialize)]
@@ -595,6 +520,22 @@ struct SetupStatusResponse {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Expanded exactly once — `generate_context!` embeds Info.plist as a symbol
+    // and can't appear twice in one binary. Both the normal app and the debug
+    // confirm harness consume this same context.
+    let context = tauri::generate_context!();
+
+    // Debug-only isolation harness: `MAXIMAL_CONFIRM_HARNESS=1 cargo run` opens
+    // ONLY the branded update-confirm window and drives its real WKWebView
+    // measure→size→reveal→resolve handshake — no sidecar, no tray, no
+    // single-instance plugin, so it can't collide with a running prod instance
+    // sharing this bundle identifier. See updater::run_confirm_harness_app.
+    #[cfg(debug_assertions)]
+    if std::env::var_os("MAXIMAL_CONFIRM_HARNESS").is_some() {
+        crate::updater::run_confirm_harness_app(context);
+        return;
+    }
+
     let app = tauri::Builder::default()
         // MUST be the FIRST plugin registered. The single-instance
         // plugin's callback fires as part of plugin init; registering
@@ -618,6 +559,12 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        // In-place self-update. Reads `plugins.updater.{pubkey,endpoints}` from
+        // tauri.conf.json; the browser-tab Settings "Upgrade" button drives
+        // check/download/install via `updater::handle_upgrade` (relayed from the
+        // sidecar's UPDATE_REQUEST_MARKER). Registration order isn't sensitive
+        // (unlike single-instance above) — it exposes no second-launch callback.
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Sidecar::new())
         .manage(AppStatus::new())
         .manage(ShellApiKey::new())
@@ -638,9 +585,9 @@ pub fn run() {
             restart_sidecar,
             uninstall_maximal,
             get_shell_api_key,
-            subscribe_token_usage,
             set_menu_bar_only,
             set_locale,
+            quit_app,
         ])
         .setup(|app| {
             // Seed the runtime menu-bar-only flag from the persisted
@@ -665,7 +612,7 @@ pub fn run() {
                 } else {
                     tauri::ActivationPolicy::Regular
                 };
-                let _ = app.set_activation_policy(initial);
+                app.set_activation_policy(initial);
                 // Keep the POLICY_IS_REGULAR mirror in step with what we just
                 // applied so update_activation_policy's no-op-skip stays honest.
                 POLICY_IS_REGULAR
@@ -741,7 +688,7 @@ pub fn run() {
 
             Ok(())
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building tauri application");
 
     app.run(|app_handle, event| match event {
@@ -778,8 +725,8 @@ pub fn run() {
         RunEvent::Reopen {
             has_visible_windows,
             ..
-        } => {
-            if !has_visible_windows {
+        }
+            if !has_visible_windows => {
                 let section = if app_handle.state::<AppStatus>().get()
                     == SidecarState::RunningUnauthenticated
                 {
@@ -789,7 +736,6 @@ pub fn run() {
                 };
                 open_settings_window(app_handle, section);
             }
-        }
         _ => {}
     });
 }
@@ -831,7 +777,7 @@ fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
     // after they flip "Block unknown connections."
     cmd = cmd.env(
         "MAXIMAL_SHELL_KEY",
-        app.state::<ShellApiKey>().value().to_string(),
+        app.state::<ShellApiKey>().value(),
     );
 
     let (mut rx, child) = cmd
@@ -850,14 +796,32 @@ fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
                     // src/start.ts) drive the splash's live status. Relay the
                     // message and don't echo the raw marker to our own stdout.
                     for raw in text.lines() {
-                        if let Some(msg) = raw.trim().strip_prefix(BOOT_STATUS_MARKER)
+                        let trimmed = raw.trim();
+                        if trimmed == QUIT_REQUEST_MARKER {
+                            // The browser-tab UI asked to quit the whole app
+                            // (§1.6). Route through the same confirm-and-exit
+                            // path as the app-menu/splash Quit, on the main
+                            // thread (the native dialog requires it).
+                            let quit_handle = handle.clone();
+                            let _ = handle.run_on_main_thread(move || {
+                                request_quit(&quit_handle);
+                            });
+                        } else if trimmed == UPDATE_REQUEST_MARKER {
+                            // The browser-tab UI asked to run the in-place
+                            // self-update (Phase 6). `handle_upgrade` clones the
+                            // handle and spawns its own async task (network check
+                            // → branded confirm → download+install → relaunch), so
+                            // it's safe to call straight from this reader task.
+                            crate::updater::handle_upgrade(&handle);
+                        } else if let Some(msg) =
+                            trimmed.strip_prefix(BOOT_STATUS_MARKER)
                         {
                             let _ = handle.emit_to(
                                 "splash",
                                 "splash:status",
                                 msg.trim().to_string(),
                             );
-                        } else if !raw.is_empty() {
+                        } else if !trimmed.is_empty() {
                             println!("[maximal] {raw}");
                         }
                     }
@@ -1158,6 +1122,10 @@ async fn poll_sidecar_status(app: AppHandle) {
         if let Some(status) = fetch_setup_status(&client, &url).await {
             apply_setup_status(&app, &status);
         }
+        // Live-apply a menu-bar-only toggle the browser-tab UI persisted to
+        // config.json (it has no Tauri IPC to apply it directly). Cheap no-op
+        // when unchanged.
+        sync_menu_bar_only_from_config(&app);
         if let Some(rejection) =
             fetch_rejection(&app, &client, &auth_status_url).await
         {
@@ -1519,7 +1487,7 @@ fn create_splash(app: &AppHandle) {
     // Hand the splash its version before first paint (race-free — runs
     // ahead of page load, unlike an emitted event the page might miss).
     // The page renders it unless it's the dev `0.0.0` placeholder.
-    .initialization_script(&format!(
+    .initialization_script(format!(
         "window.__MAXIMAL_VERSION__ = {:?};",
         app_version(app)
     ))
@@ -1565,9 +1533,8 @@ fn create_splash(app: &AppHandle) {
                 let hard_cap = Duration::from_secs(35);
                 loop {
                     tokio::time::sleep(Duration::from_millis(300)).await;
-                    match handle.state::<AppStatus>().get() {
-                        SidecarState::RunningAuthenticated
-                        | SidecarState::RunningUnauthenticated => {
+                    match failure_surface_for(handle.state::<AppStatus>().get()) {
+                        SplashSurface::Dismiss => {
                             let elapsed = start.elapsed();
                             if elapsed < min_display {
                                 tokio::time::sleep(min_display - elapsed).await;
@@ -1575,12 +1542,14 @@ fn create_splash(app: &AppHandle) {
                             dismiss_splash(&handle);
                             break;
                         }
-                        SidecarState::Failed | SidecarState::Stopped => {
-                            tokio::time::sleep(Duration::from_secs(12)).await;
-                            dismiss_splash(&handle);
+                        SplashSurface::HoldRecovery => {
+                            // §3.3 fix: a failed/stopped sidecar HOLDS the recovery
+                            // UI — we stop polling but do NOT dismiss (the old 12 s
+                            // auto-dismiss ate the recovery affordance). The user
+                            // acts via the splash's Retry/Logs/Quit.
                             break;
                         }
-                        SidecarState::Starting => {
+                        SplashSurface::Progress => {
                             if start.elapsed() >= hard_cap {
                                 dismiss_splash(&handle);
                                 break;
@@ -1663,51 +1632,35 @@ fn fire_sign_in_notification(app: &AppHandle) {
 
 fn install_tray(app: &AppHandle) -> tauri::Result<()> {
     let locale = app.state::<LocaleState>().get();
-    let menu = build_menu(app, &locale, SidecarState::Starting)?;
     let icon = icon_for(SidecarState::Starting, false)?;
 
-    // Platform tray-click convention:
-    //   * macOS  — left-click opens the menu (HIG menu-bar behavior).
-    //   * Windows — left-click opens Settings (the expected "open the app"
-    //     gesture), right-click opens the menu. Windows has no
-    //     `RunEvent::Reopen`, so this left-click handler is also the path a
-    //     user takes after the sign-in notification ("click the icon").
-    #[cfg(target_os = "macos")]
-    let show_menu_on_left_click = true;
-    #[cfg(not(target_os = "macos"))]
-    let show_menu_on_left_click = false;
-
+    // Single-click, NO menu (§1.2): a tray click routes to `open_app` on both
+    // platforms via the pure `click_action` decision. Quit + recovery live in
+    // the browser UI (`/_internal/quit`, §1.6) and the native splash (§3.3), so
+    // the tray no longer carries a menu at all.
     TrayIconBuilder::with_id(TRAY_ID)
-        .menu(&menu)
-        .show_menu_on_left_click(show_menu_on_left_click)
+        .show_menu_on_left_click(false)
         .tooltip(native_i18n::tr(&locale, "native-tooltip-starting"))
         .icon(icon)
-        .on_menu_event(handle_menu_event)
         .on_tray_icon_event(|tray, event| {
             if let TrayIconEvent::Click {
-                button: MouseButton::Left,
-                button_state: MouseButtonState::Up,
+                button,
+                button_state,
                 ..
             } = event
             {
-                // macOS: left-click is handled by show_menu_on_left_click
-                // above — nothing to do here. Windows/Linux: open Settings,
-                // deep-linking to account when the user still needs to sign
-                // in (mirrors the macOS RunEvent::Reopen nudge).
-                #[cfg(not(target_os = "macos"))]
-                {
-                    let app = tray.app_handle();
-                    let section = if app.state::<AppStatus>().get()
-                        == SidecarState::RunningUnauthenticated
-                    {
-                        Some("account")
-                    } else {
-                        None
-                    };
-                    open_settings_window(app, section);
+                let click_button = match button {
+                    MouseButton::Left => crate::decisions::ClickButton::Left,
+                    MouseButton::Right => crate::decisions::ClickButton::Right,
+                    _ => crate::decisions::ClickButton::Middle,
+                };
+                let phase = match button_state {
+                    MouseButtonState::Up => crate::decisions::ClickPhase::Up,
+                    _ => crate::decisions::ClickPhase::Down,
+                };
+                if crate::decisions::click_action(click_button, phase).is_some() {
+                    open_app(tray.app_handle(), None);
                 }
-                #[cfg(target_os = "macos")]
-                let _ = tray;
             }
         })
         .build(app)?;
@@ -1720,8 +1673,7 @@ fn refresh_tray(app: &AppHandle, state: SidecarState) -> tauri::Result<()> {
     };
     let locale = app.state::<LocaleState>().get();
     let rejection = app.state::<LastRejection>().get();
-    let menu = build_menu(app, &locale, state)?;
-    tray.set_menu(Some(menu))?;
+    // No menu to rebuild (§1.2) — a state change only swaps the icon + tooltip.
     tray.set_icon(Some(icon_for(state, rejection.is_some())?))?;
     tray.set_tooltip(Some(tooltip_for(&locale, state, rejection.as_ref())))?;
     Ok(())
@@ -1817,204 +1769,6 @@ fn tooltip_for(
     native_i18n::tr(locale, key)
 }
 
-fn build_menu(
-    app: &AppHandle,
-    locale: &str,
-    state: SidecarState,
-) -> tauri::Result<Menu<tauri::Wry>> {
-    let settings_item = MenuItem::with_id(
-        app,
-        menu_id::SETTINGS,
-        native_i18n::tr(locale, "native-tray-settings"),
-        true,
-        Some("CmdOrCtrl+,"),
-    )?;
-    let dashboard_item = MenuItem::with_id(
-        app,
-        menu_id::DASHBOARD,
-        native_i18n::tr(locale, "native-tray-dashboard"),
-        true,
-        Some("CmdOrCtrl+D"),
-    )?;
-    let quit_item = MenuItem::with_id(
-        app,
-        menu_id::QUIT,
-        native_i18n::tr(locale, "native-tray-quit"),
-        true,
-        Some("CmdOrCtrl+Q"),
-    )?;
-    let sep1 = PredefinedMenuItem::separator(app)?;
-
-    // An "Upgrade to v…" item leads the menu in the running states whenever the
-    // poll loop has seen a newer release. Built here (before the match) so both
-    // running arms can prepend it; the other arms simply don't reference it.
-    // Clicking it opens the install-channel-neutral download page.
-    let update = app.state::<LatestUpdate>().get();
-    let upgrade_item = match &update {
-        Some(u) => Some(MenuItem::with_id(
-            app,
-            menu_id::UPGRADE,
-            native_i18n::t(locale, "native-tray-upgrade", &[("latest", &u.latest)]),
-            true,
-            None::<&str>,
-        )?),
-        None => None,
-    };
-    let sep_upgrade = PredefinedMenuItem::separator(app)?;
-
-    match state {
-        SidecarState::Starting => {
-            let starting = MenuItem::with_id(
-                app,
-                menu_id::STARTING,
-                native_i18n::tr(locale, "native-tray-starting"),
-                false,
-                None::<&str>,
-            )?;
-            Menu::with_items(app, &[&starting, &sep1, &settings_item, &quit_item])
-        }
-        SidecarState::RunningUnauthenticated => {
-            let sign_in = MenuItem::with_id(
-                app,
-                menu_id::SIGN_IN,
-                native_i18n::tr(locale, "native-tray-sign-in"),
-                true,
-                None::<&str>,
-            )?;
-            let sep2 = PredefinedMenuItem::separator(app)?;
-            let mut items: Vec<&dyn IsMenuItem<tauri::Wry>> = Vec::new();
-            items.push(&sign_in);
-            // Update is its own section BELOW the primary action, shown only
-            // when an update is available — never above sign-in.
-            if let Some(up) = &upgrade_item {
-                items.push(&sep_upgrade);
-                items.push(up);
-            }
-            items.push(&sep1);
-            items.push(&dashboard_item);
-            items.push(&settings_item);
-            items.push(&sep2);
-            items.push(&quit_item);
-            Menu::with_items(app, &items)
-        }
-        SidecarState::RunningAuthenticated => {
-            // We don't fetch the GitHub login (would require a network
-            // call to api.github.com from Rust, or expanding the
-            // sidecar's response shape). Showing the generic "Signed
-            // in to GitHub" is honest and avoids that complexity.
-            let info = MenuItem::with_id(
-                app,
-                menu_id::ACCOUNT_INFO,
-                native_i18n::tr(locale, "native-tray-signed-in"),
-                false,
-                None::<&str>,
-            )?;
-            let sep2 = PredefinedMenuItem::separator(app)?;
-            let mut items: Vec<&dyn IsMenuItem<tauri::Wry>> = Vec::new();
-            items.push(&info);
-            // Update is its own section BELOW the account line, shown only when
-            // an update is available — never above it.
-            if let Some(up) = &upgrade_item {
-                items.push(&sep_upgrade);
-                items.push(up);
-            }
-            items.push(&sep1);
-            items.push(&dashboard_item);
-            items.push(&settings_item);
-            items.push(&sep2);
-            items.push(&quit_item);
-            Menu::with_items(app, &items)
-        }
-        SidecarState::Failed | SidecarState::Stopped => {
-            let failed = MenuItem::with_id(
-                app,
-                menu_id::FAILED,
-                native_i18n::tr(locale, "native-tray-failed"),
-                false,
-                None::<&str>,
-            )?;
-            let retry = MenuItem::with_id(
-                app,
-                menu_id::RETRY,
-                native_i18n::tr(locale, "native-tray-retry"),
-                true,
-                None::<&str>,
-            )?;
-            let show_logs = MenuItem::with_id(
-                app,
-                menu_id::SHOW_LOGS,
-                native_i18n::tr(locale, "native-tray-show-logs"),
-                true,
-                None::<&str>,
-            )?;
-            let open_config = MenuItem::with_id(
-                app,
-                menu_id::OPEN_CONFIG,
-                native_i18n::tr(locale, "native-tray-open-config"),
-                true,
-                None::<&str>,
-            )?;
-            Menu::with_items(
-                app,
-                &[
-                    &failed,
-                    &retry,
-                    &show_logs,
-                    &open_config,
-                    &sep1,
-                    &settings_item,
-                    &quit_item,
-                ],
-            )
-        }
-    }
-}
-
-fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
-    match event.id().as_ref() {
-        menu_id::SETTINGS => open_settings_window(app, None),
-        menu_id::DASHBOARD => open_dashboard_window(app),
-        menu_id::SIGN_IN => open_settings_window(app, Some("account")),
-        menu_id::SHOW_LOGS => do_reveal_logs_dir(app),
-        menu_id::OPEN_CONFIG => do_reveal_config_dir(app),
-        menu_id::RETRY => retry_startup(app),
-        menu_id::UPGRADE => open_update_url(app),
-        menu_id::QUIT => request_quit(app),
-        _ => {}
-    }
-}
-
-/// Opens the install-channel-neutral download page for the available update
-/// (the same URL the OS notification points at). No-op if we somehow have no
-/// snapshot — the item is only built when one exists.
-fn open_update_url(app: &AppHandle) {
-    let Some(update) = app.state::<LatestUpdate>().get() else {
-        return;
-    };
-    if let Err(err) = app.opener().open_url(update.url, None::<&str>) {
-        eprintln!("[shell] failed to open update url: {err}");
-    }
-}
-
-/// Re-run the startup sequence from the Failed/Stopped state: clear any
-/// lingering sidecar, flip back to Starting, respawn, and restart polling.
-/// This is the recovery path for a transient startup failure (slow first
-/// boot, a port held by something that has since let go, a one-off crash) —
-/// without it, the only way out of Failed was to quit and relaunch the whole
-/// app, a dead-end for a menu-bar utility the user expects to "just run."
-///
-/// Only acts from Failed/Stopped so a stray click while healthy can't tear
-/// down a working sidecar. Reuses kill_sidecar's SIGTERM→SIGKILL path to
-/// reap any half-dead child before respawning so we don't leak a process or
-/// collide on :4141.
-fn retry_startup(app: &AppHandle) {
-    let current = app.state::<AppStatus>().get();
-    if !matches!(current, SidecarState::Failed | SidecarState::Stopped) {
-        return;
-    }
-    eprintln!("[shell] retry startup requested");
-    respawn_sidecar(app);
-}
 
 /// Tear down the running sidecar and boot a fresh one. The reap→respawn→poll
 /// core shared by the tray-driven `retry_startup` (recovery from Failed) and
@@ -2059,65 +1813,10 @@ fn respawn_sidecar(app: &AppHandle) {
 /// settings page. The optional `section` becomes a URL fragment so the
 /// frontend can scroll to / select that section.
 fn open_settings_window(app: &AppHandle, section: Option<&str>) {
-    // Any window taking the stage retires the splash (it's always-on-top
-    // and would otherwise sit over this one — e.g. the first-launch
-    // sign-in nudge).
-    dismiss_splash(app);
-    // The settings UI is served by the sidecar at /ui/settings/ (embedded
-    // in the binary), in dev and prod alike — there is no separate dev
-    // server to point at anymore.
-    let settings_origin = format!("http://localhost:{SIDECAR_PORT}");
-    let url_string = match section {
-        Some(s) => format!("{settings_origin}/ui/settings/#{s}"),
-        None => format!("{settings_origin}/ui/settings/"),
-    };
-    let url = match url::Url::parse(&url_string) {
-        Ok(u) => u,
-        Err(err) => {
-            eprintln!("[shell] bad settings URL: {err}");
-            return;
-        }
-    };
-
-    if let Some(existing) = app.get_webview_window(SETTINGS_WINDOW_LABEL) {
-        // Navigation via re-creation is the simplest cross-platform
-        // path; eval'ing window.location is fiddly with CSP-null.
-        // Cheap on macOS — the webview process is reused.
-        if let Err(err) = existing.navigate(url) {
-            eprintln!("[shell] settings navigate failed: {err}");
-        }
-        present_window(app, &existing);
-        return;
-    }
-
-    // Surface the version in the titlebar (window-level identity belongs in
-    // the title, not a content H1 — see docs/design/failure-modes.md). Drop
-    // the suffix in dev where the version is the `0.0.0` placeholder.
-    let title = settings_title(app);
-    let builder = WebviewWindowBuilder::new(
-        app,
-        SETTINGS_WINDOW_LABEL,
-        WebviewUrl::External(url),
-    )
-    .title(title)
-    .inner_size(900.0, 760.0)
-    .min_inner_size(600.0, 560.0);
-    // Windows taskbar presence follows the menu-bar-only preference: default
-    // (false) shows the window in the taskbar; menu-bar-only (true) keeps it
-    // out for the tray-only feel. Shadow rather than `mut` so non-Windows
-    // builds stay warning-clean. (The splash keeps its own skip_taskbar(true).)
-    #[cfg(windows)]
-    let builder = builder.skip_taskbar(app.state::<MenuBarOnly>().get());
-
-    match builder.build() {
-        Ok(window) => {
-            attach_hide_on_close(app, &window);
-            present_window(app, &window);
-        }
-        Err(err) => {
-            eprintln!("[shell] settings window build failed: {err}");
-        }
-    }
+    // Browser-tab delivery (ADR-0018): the settings UI is a browser tab, not a
+    // Tauri webview window. Every former "open settings" entry point now opens
+    // (or focuses) that tab via the sidecar tray-open flow.
+    open_app(app, section);
 }
 
 /// The maximal app-data root, resolved to stay in LOCKSTEP with the
@@ -2192,6 +1891,30 @@ fn read_menu_bar_only(app: &AppHandle) -> bool {
     json["ui"]["menuBarOnly"].as_bool().unwrap_or(false)
 }
 
+/// Live-apply a menu-bar-only change the browser-tab UI persisted to config.json.
+///
+/// Browser-tab delivery (ADR-0018): the Settings UI is a plain browser tab with no
+/// Tauri IPC, so it CANNOT call the `set_menu_bar_only` command — it only persists
+/// `config.ui.menuBarOnly` through the sidecar. This runs on each phase-2 poll tick
+/// (`poll_sidecar_status`), reads the on-disk preference, and — only when it differs
+/// from the runtime `MenuBarOnly` flag — updates the flag and re-applies the Dock/
+/// activation policy. The common case (no change) is a cheap file read + compare.
+fn sync_menu_bar_only_from_config(app: &AppHandle) {
+    let want = read_menu_bar_only(app);
+    let flag = app.state::<MenuBarOnly>();
+    if flag.get() == want {
+        return;
+    }
+    flag.set(want);
+    // AppKit activation-policy changes must run on the main thread; the poll runs
+    // on a tokio task, so hop over. `update_activation_policy` is a no-op on
+    // non-macOS, so this is harmless everywhere.
+    let app_for_main = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        update_activation_policy(&app_for_main);
+    });
+}
+
 /// Path to the persisted locale file — a one-line BCP-47 tag written by the
 /// `set_locale` command. Lives beside the sidecar's data so it survives
 /// restarts and, crucially, is readable BEFORE any webview loads: the
@@ -2225,36 +1948,6 @@ fn write_locale(app: &AppHandle, tag: &str) {
     }
 }
 
-/// The Settings window title for the active locale — versioned unless the
-/// version is the dev `0.0.0` placeholder. Shared by the window builder and the
-/// live retitle on a locale change so the two can't diverge.
-fn settings_title(app: &AppHandle) -> String {
-    let version = app_version(app);
-    let locale = app.state::<LocaleState>().get();
-    if version == "0.0.0" {
-        native_i18n::tr(&locale, "native-window-settings-title")
-    } else {
-        native_i18n::t(
-            &locale,
-            "native-window-settings-title-versioned",
-            &[("version", &version)],
-        )
-    }
-}
-
-/// Re-title any already-open Settings/Dashboard window to the active locale.
-/// Called from `set_locale` so a picker change updates the OS-drawn titlebar
-/// live, not just on the next window open. No-op for windows that aren't up.
-fn retitle_windows(app: &AppHandle) {
-    if let Some(win) = app.get_webview_window(SETTINGS_WINDOW_LABEL) {
-        let _ = win.set_title(&settings_title(app));
-    }
-    if let Some(win) = app.get_webview_window(DASHBOARD_WINDOW_LABEL) {
-        let locale = app.state::<LocaleState>().get();
-        let _ = win.set_title(&native_i18n::tr(&locale, "native-window-dashboard-title"));
-    }
-}
-
 fn do_reveal_logs_dir(app: &AppHandle) {
     let Some(dir) = maximal_data_dir(app).map(|d| d.join("logs")) else {
         return;
@@ -2268,71 +1961,13 @@ fn do_reveal_logs_dir(app: &AppHandle) {
     let _ = app.opener().open_path(dir.to_string_lossy(), None::<&str>);
 }
 
-/// Opens (or focuses) the usage dashboard webview pointed at the
-/// sidecar's `/ui/dashboard/` endpoint. The dashboard (and settings) are
-/// embedded in the sidecar binary and served at /ui/* (see
-/// src/routes/ui/route.ts), so they ship inside the bundle with no extra
-/// resource staging.
+/// The standalone usage dashboard was removed (§7); its view is now the
+/// Settings SPA's Usage section. This opens (or focuses) the Settings window
+/// at that section, so the legacy "Dashboard" entry point stays functional.
 fn open_dashboard_window(app: &AppHandle) {
-    dismiss_splash(app);
-    let url_string = format!(
-        "http://localhost:{SIDECAR_PORT}/ui/dashboard/\
-         ?endpoint=http://localhost:{SIDECAR_PORT}/usage",
-    );
-    let url = match url::Url::parse(&url_string) {
-        Ok(u) => u,
-        Err(err) => {
-            eprintln!("[shell] bad dashboard URL: {err}");
-            return;
-        }
-    };
-
-    if let Some(existing) = app.get_webview_window(DASHBOARD_WINDOW_LABEL) {
-        present_window(app, &existing);
-        return;
-    }
-
-    let builder = WebviewWindowBuilder::new(
-        app,
-        DASHBOARD_WINDOW_LABEL,
-        WebviewUrl::External(url),
-    )
-    .title(native_i18n::tr(
-        &app.state::<LocaleState>().get(),
-        "native-window-dashboard-title",
-    ))
-    .inner_size(1100.0, 760.0)
-    .min_inner_size(720.0, 520.0);
-    // See open_settings_window: Windows taskbar presence tracks menu-bar-only.
-    #[cfg(windows)]
-    let builder = builder.skip_taskbar(app.state::<MenuBarOnly>().get());
-
-    match builder.build() {
-        Ok(window) => {
-            attach_hide_on_close(app, &window);
-            present_window(app, &window);
-        }
-        Err(err) => {
-            eprintln!("[shell] dashboard window build failed: {err}");
-        }
-    }
+    open_settings_window(app, Some("usage"));
 }
 
-/// Wires the OS close button (red ✕ on macOS) to HIDE the window
-/// rather than close it. The tray remains the persistent UI surface,
-/// so closing a settings/dashboard window is just a visibility change.
-/// Also drives the Dock icon via `update_activation_policy`.
-fn attach_hide_on_close(app: &AppHandle, window: &tauri::WebviewWindow) {
-    let window_clone = window.clone();
-    let app_clone = app.clone();
-    window.on_window_event(move |event| {
-        if let WindowEvent::CloseRequested { api, .. } = event {
-            api.prevent_close();
-            let _ = window_clone.hide();
-            update_activation_policy(&app_clone);
-        }
-    });
-}
 
 /// macOS-only: flips the activation policy between Regular (Dock icon
 /// visible) and Accessory (menu-bar-only, no Dock) based on whether
@@ -2356,23 +1991,16 @@ static POLICY_IS_REGULAR: std::sync::atomic::AtomicBool =
 fn update_activation_policy(app: &AppHandle) {
     use std::sync::atomic::Ordering;
 
-    // The Dock icon is Regular when EITHER the persistent-Dock preference is
-    // on (default: not menu-bar-only) OR a Settings/Dashboard window is
-    // currently visible. Menu-bar-only mode keeps the classic behavior where
-    // the Dock icon comes and goes with window visibility.
+    // Browser-tab delivery (ADR-0018) has no persistent app windows — the UI is a
+    // browser tab, and the only Tauri window is the transient splash. So the Dock
+    // icon is driven SOLELY by the "menu-bar only" preference (§8 resolution):
+    // Regular (Dock shown) when the preference is off, Accessory (menu-bar only)
+    // when it's on. There is no window-visibility input anymore.
     let menu_bar_only = app.state::<MenuBarOnly>().get();
-    let labels = [SETTINGS_WINDOW_LABEL, DASHBOARD_WINDOW_LABEL];
-    let want_regular = !menu_bar_only
-        || labels.iter().any(|label| {
-            app.get_webview_window(label)
-                .and_then(|w| w.is_visible().ok())
-                .unwrap_or(false)
-        });
+    let want_regular = !menu_bar_only;
 
-    // Skip when the policy isn't actually changing. Beyond avoiding the
-    // dev-only Dock-icon flash, this dodges needless AppKit churn on every
-    // window show/close. All callers run on the main thread, so the
-    // load-then-store is race-free.
+    // Skip when the policy isn't actually changing (avoids AppKit churn + a
+    // dev-only Dock-icon flash). Callers run on the main thread → race-free.
     if POLICY_IS_REGULAR.load(Ordering::SeqCst) == want_regular {
         return;
     }
@@ -2458,7 +2086,80 @@ fn present_window(app: &AppHandle, window: &tauri::WebviewWindow) {
     }
 }
 
-/// Entry point for the tray's "Quit Maximal" item. Pops a native
+/// The sidecar's answer to a tray click (`POST /_internal/tray-open`, §1.2).
+#[derive(Deserialize)]
+struct TrayOpenResponse {
+    open: bool,
+}
+
+/// Ask the sidecar (which owns the browser-tab set) what a tray click should do:
+/// it closes any buried tab over the WS and returns whether the shell should open
+/// one fresh foreground tab. On ANY error, default to opening — a possible
+/// duplicate tab is better than a click that does nothing.
+async fn sidecar_tray_open() -> bool {
+    let Ok(client) = reqwest::Client::builder()
+        .timeout(Duration::from_secs(2))
+        .build()
+    else {
+        return true;
+    };
+    let url = format!("http://127.0.0.1:{SIDECAR_PORT}/_internal/tray-open");
+    match client.post(&url).send().await {
+        Ok(resp) => resp
+            .json::<TrayOpenResponse>()
+            .await
+            .map(|body| body.open)
+            .unwrap_or(true),
+        Err(err) => {
+            eprintln!("[shell] tray-open request failed: {err}");
+            true
+        }
+    }
+}
+
+/// Browser-tab delivery (§1.2, ADR-0018): a tray click no longer opens a native
+/// window — it signals the sidecar, which runs the single-tab decision (close
+/// buried tabs over the WS), then opens ONE fresh foreground browser tab if told
+/// to. The sidecar serves the UI at `/ui/settings/`.
+///
+/// NOTE(§10 manual-only): the actual single-tab UX (exactly one focused tab per
+/// click, stale-tab self-close) is verifiable only by manual macOS/browser
+/// testing — not by `cargo build`.
+fn open_app(app: &AppHandle, section: Option<&str>) {
+    // A visible native window (the splash) would sit over the browser; retire it.
+    dismiss_splash(app);
+    let handle = app.clone();
+    let section = section.map(str::to_string);
+    tauri::async_runtime::spawn(async move {
+        if sidecar_tray_open().await {
+            // Unique per open so the OS opener can't focus-steal the tab we just
+            // told to self-close (see `tray_open_nonce`). Query goes before the
+            // fragment: `/ui/settings/?n=<nonce>#<section>`.
+            let nonce = tray_open_nonce();
+            let url = match &section {
+                Some(s) => format!(
+                    "http://localhost:{SIDECAR_PORT}/ui/settings/?n={nonce}#{s}"
+                ),
+                None => format!(
+                    "http://localhost:{SIDECAR_PORT}/ui/settings/?n={nonce}"
+                ),
+            };
+            if let Err(err) = handle.opener().open_url(url, None::<&str>) {
+                eprintln!("[shell] open_app: failed to open browser tab: {err}");
+            }
+        }
+    });
+}
+
+/// §1.6 quit reachability WITHOUT the tray menu. Exposed to the splash's Quit
+/// button (the always-available path in `Accessory` mode, where the app menu is
+/// absent) and the app menu. Pops the same confirm dialog as the old tray Quit.
+#[tauri::command]
+fn quit_app(app: AppHandle) {
+    request_quit(&app);
+}
+
+
 /// confirm dialog via `tauri-plugin-dialog`; on accept, calls
 /// `app.exit(0)` which routes through `RunEvent::ExitRequested` →
 /// `kill_sidecar` (graceful SIGTERM + 3s SIGKILL escalation).
@@ -2682,14 +2383,13 @@ fn set_locale(app: AppHandle, locale: State<'_, LocaleState>, tag: String) -> Re
     // Persist so the NEXT launch's pre-webview strings (startup banner) match
     // this choice instead of falling back to the OS locale.
     write_locale(&app, &tag);
-    // Re-render the OS-drawn chrome NOW: rebuild the tray menu/tooltip and
-    // retitle any open Settings/Dashboard window so the switch is live, not
-    // deferred to the next open. Later notifications/dialogs read LocaleState.
+    // Re-render the OS-drawn chrome NOW: refresh the tray tooltip so the switch
+    // is live. Later notifications/dialogs read LocaleState. (The UI itself is a
+    // browser tab whose title comes from the served HTML — no window to retitle.)
     let state = app.state::<AppStatus>().get();
     if let Err(err) = refresh_tray(&app, state) {
         eprintln!("[shell] tray refresh after locale change failed: {err}");
     }
-    retitle_windows(&app);
     Ok(())
 }
 
@@ -2697,6 +2397,21 @@ fn set_locale(app: AppHandle, locale: State<'_, LocaleState>, tag: String) -> Re
 #[cfg(test)]
 mod tests {
     use super::extract_error_reason;
+    use super::tray_open_nonce;
+
+    #[test]
+    fn tray_open_nonce_is_hex_and_distinct() {
+        // 8 random bytes → 16 lowercase hex chars. Distinctness is what defeats
+        // the OS opener's URL-dedup focus-steal, so assert two draws differ.
+        let a = tray_open_nonce();
+        let b = tray_open_nonce();
+        assert_eq!(a.len(), 16, "nonce should be 16 hex chars");
+        assert!(
+            a.chars().all(|c| c.is_ascii_hexdigit()),
+            "nonce should be hex: {a}"
+        );
+        assert_ne!(a, b, "two nonces should differ (astronomically likely)");
+    }
 
     #[test]
     fn extracts_consola_fancy_error() {

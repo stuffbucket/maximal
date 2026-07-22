@@ -1,32 +1,42 @@
-import { invoke } from "@tauri-apps/api/core";
-
-import { t } from "./i18n";
-import { applyI18n, wireLocalePicker } from "./i18n/apply";
-import { getShellApiKey, openUrl, safeInvoke } from "./tauri/shell";
-
+/* eslint-disable max-lines -- settings-window orchestrator; splitting into modules is tracked separately, out of scope for lint adoption. */
+import { invoke } from "@tauri-apps/api/core"
 
 import type {
+  AccountSummary,
   DiagnosticsResponse,
   UpdateStatusResponse,
-} from "../../src/lib/config/settings-types";
-import type { AuthStatus, EventSubscription, UpstreamRejection } from "./proxy/client";
-import { apiCall, subscribeAuthEvents } from "./proxy/client";
-import { mountApiClients } from "./ui/islands/api-clients-island";
-import { mountApps } from "./ui/islands/apps-island";
-import { mountModels } from "./ui/islands/models-island";
+} from "../../src/lib/config/settings-types"
+import type { AuthStatus, UpstreamRejection } from "./proxy/client"
+
+import { t } from "./i18n"
+import { applyI18n, wireLocalePicker } from "./i18n/apply"
+import { apiCall } from "./proxy/client"
+import { readInlineState } from "./proxy/inline-state-client"
+import {
+  connectLiveFeed,
+  type LiveFeedConnection,
+} from "./proxy/live-feed-client"
+import { getShellApiKey, openUrl, safeInvoke } from "./tauri/shell"
+import { mountApiClients } from "./ui/islands/api-clients-island"
+import { mountApps } from "./ui/islands/apps-island"
+import { mountModels } from "./ui/islands/models-island"
+import { mountUsage } from "./ui/islands/usage-island"
+import { pickInitialView } from "./view-restore"
 
 type SectionId =
   | "account"
+  | "usage"
   | "general"
   | "apps"
   | "endpoint"
   | "api-clients"
   | "models"
   | "logs"
-  | "diagnostics";
+  | "diagnostics"
 
 const SECTIONS: ReadonlyArray<SectionId> = [
   "account",
+  "usage",
   "general",
   "apps",
   "endpoint",
@@ -34,37 +44,73 @@ const SECTIONS: ReadonlyArray<SectionId> = [
   "models",
   "logs",
   "diagnostics",
-];
+]
 
-const DEFAULT_SECTION: SectionId = "account";
+const DEFAULT_SECTION: SectionId = "account"
 
 function isSectionId(value: string): value is SectionId {
-  return (SECTIONS as ReadonlyArray<string>).includes(value);
+  return (SECTIONS as ReadonlyArray<string>).includes(value)
 }
 
 function showSection(id: SectionId): void {
   for (const sec of document.querySelectorAll<HTMLElement>("[data-section]")) {
-    sec.hidden = sec.dataset.section !== id;
+    sec.hidden = sec.dataset.section !== id
   }
   for (const link of document.querySelectorAll<HTMLAnchorElement>(
     "[data-nav]",
   )) {
-    const active = link.dataset.nav === id;
-    link.setAttribute("aria-current", active ? "page" : "false");
-    link.classList.toggle("nav__item--active", active);
+    const active = link.dataset.nav === id
+    link.setAttribute("aria-current", active ? "page" : "false")
+    link.classList.toggle("nav__item--active", active)
   }
   // Pane is the scroll container now; reset *its* scroll, not the window's.
-  const pane = document.getElementById("pane");
-  if (pane) pane.scrollTop = 0;
+  const pane = document.querySelector("#pane")
+  if (pane) pane.scrollTop = 0
+}
+
+/**
+ * Best-effort scroll restore into #pane after the section renders (§1.4). Two rAFs
+ * so the section un-hides and lays out its first content before we set scrollTop;
+ * sections whose data loads asynchronously may still grow, so this can under-shoot
+ * — acceptable for a "keep my place" nicety.
+ */
+function restorePaneScroll(scrollY: number): void {
+  if (scrollY <= 0) return
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      const pane = document.querySelector("#pane")
+      if (pane instanceof HTMLElement) pane.scrollTop = scrollY
+    })
+  })
 }
 
 function readHashSection(): SectionId {
-  const raw = window.location.hash.replace(/^#/, "");
-  return isSectionId(raw) ? raw : DEFAULT_SECTION;
+  const raw = globalThis.location.hash.replace(/^#/, "")
+  return isSectionId(raw) ? raw : DEFAULT_SECTION
 }
 
 function syncFromHash(): void {
-  showSection(readHashSection());
+  showSection(readHashSection())
+}
+
+/**
+ * The single in-app navigation entry point (spec §1.4 / ADR-0020). Uses
+ * `history.replaceState` — NEVER `location.hash =` (assigning the hash pushes a
+ * history entry, and once `history.length > 1` a stale tab's `window.close()`
+ * silently no-ops, breaking tray dedup §1.2). replaceState updates the `#section`
+ * deep-link contract without accruing history; we then re-run the existing
+ * `hashchange` side-effect path (section load/refresh, auth-stream lifecycle) so
+ * behavior is identical to the old hash-assignment flow.
+ */
+function navigateTo(section: SectionId): void {
+  if (globalThis.location.hash !== `#${section}`) {
+    globalThis.history.replaceState(null, "", `#${section}`)
+    // replaceState does NOT fire hashchange; drive the side-effect path manually.
+    globalThis.dispatchEvent(new HashChangeEvent("hashchange"))
+  } else {
+    // Same hash → nothing to update; just (re)show the section.
+    showSection(section)
+  }
 }
 
 /**
@@ -81,21 +127,15 @@ function wireNav(): void {
     "[data-nav]",
   )) {
     link.addEventListener("click", (ev) => {
-      const id = link.dataset.nav;
-      if (!id || !isSectionId(id)) return;
-      ev.preventDefault();
-      if (window.location.hash !== `#${id}`) {
-        window.location.hash = id;
-      } else {
-        // Same hash → hashchange won't fire. Drive it manually.
-        showSection(id);
-      }
-    });
+      const id = link.dataset.nav
+      if (!id || !isSectionId(id)) return
+      ev.preventDefault()
+      navigateTo(id)
+    })
   }
 }
 
-
-let busyCount = 0;
+let busyCount = 0
 
 /**
  * Toggle the ambient "work in progress" indicator (the accent bar across the
@@ -105,17 +145,17 @@ let busyCount = 0;
  * so an early return/throw can't leak a stuck bar.
  */
 function setBusy(on: boolean, label = t("common-working")): void {
-  busyCount = Math.max(0, busyCount + (on ? 1 : -1));
-  const root = document.documentElement;
-  const labelEl = document.querySelector<HTMLElement>("[data-busybar-label]");
+  busyCount = Math.max(0, busyCount + (on ? 1 : -1))
+  const root = document.documentElement
+  const labelEl = document.querySelector<HTMLElement>("[data-busybar-label]")
   if (busyCount > 0) {
-    if (root.getAttribute("data-busy") !== "true") {
-      root.setAttribute("data-busy", "true"); // 0 -> 1: show + announce once
-      if (labelEl) labelEl.textContent = label;
+    if (root.dataset.busy !== "true") {
+      root.dataset.busy = "true" // 0 -> 1: show + announce once
+      if (labelEl) labelEl.textContent = label
     }
   } else {
-    root.removeAttribute("data-busy");
-    if (labelEl) labelEl.textContent = ""; // clear; do not re-announce
+    delete root.dataset.busy
+    if (labelEl) labelEl.textContent = "" // clear; do not re-announce
   }
 }
 
@@ -125,9 +165,10 @@ function setBusy(on: boolean, label = t("common-working")): void {
  * sentences and any currently-rendered dynamic account state.
  */
 function repaintDynamicI18n(): void {
-  renderStaticComposites();
-  if (currentAuthStatus) renderAccount(currentAuthStatus);
-  if (lastDiagnostics) renderDiagnostics(lastDiagnostics);
+  renderStaticComposites()
+  if (currentAuthStatus) renderAccount(currentAuthStatus)
+  if (currentAuthStatus) renderNetworkBanner(currentAuthStatus)
+  if (lastDiagnostics) renderDiagnostics(lastDiagnostics)
 }
 
 /**
@@ -138,11 +179,11 @@ function repaintDynamicI18n(): void {
  * DOM node so the token can be a live <a>/<code> rather than flat text.
  */
 function renderStaticComposites(): void {
-  renderRequirementCallout();
-  renderEndpointHint();
-  renderLogsCopy();
-  renderUninstallCopy();
-  renderGhReuseSub();
+  renderRequirementCallout()
+  renderEndpointHint()
+  renderLogsCopy()
+  renderUninstallCopy()
+  renderGhReuseSub()
 }
 
 /**
@@ -152,6 +193,7 @@ function renderStaticComposites(): void {
  * text halves surround the live node — word order comes from the catalog, so a
  * translation that moves the token still renders correctly.
  */
+// eslint-disable-next-line max-params -- i18n node-injection helper; the five inputs are cohesive, an options object would only obscure them.
 function fillWithNode(
   el: HTMLElement | null,
   key: string,
@@ -159,75 +201,79 @@ function fillWithNode(
   node: Node,
   values: Record<string, unknown> = {},
 ): void {
-  if (!el) return;
+  if (!el) return
   // A private-use sentinel unlikely to occur in any translated string.
-  const SENTINEL = "";
-  const text = t(key, { ...values, [placeholder]: SENTINEL });
-  const [before, after = ""] = text.split(SENTINEL);
+  const SENTINEL = ""
+  const text = t(key, { ...values, [placeholder]: SENTINEL })
+  const [before, after = ""] = text.split(SENTINEL)
   el.replaceChildren(
-    document.createTextNode(before ?? ""),
+    document.createTextNode(before),
     node,
     document.createTextNode(after),
-  );
+  )
 }
 
 function externalLink(href: string, textKey: string): HTMLAnchorElement {
-  const a = document.createElement("a");
-  a.href = href;
-  a.target = "_blank";
-  a.rel = "noopener";
-  a.textContent = t(textKey);
-  return a;
+  const a = document.createElement("a")
+  a.href = href
+  a.target = "_blank"
+  a.rel = "noopener"
+  a.textContent = t(textKey)
+  return a
 }
 
 function navLink(section: SectionId, textKey: string): HTMLAnchorElement {
-  const a = document.createElement("a");
-  a.href = `#${section}`;
-  a.dataset.nav = section;
-  a.textContent = t(textKey);
+  const a = document.createElement("a")
+  a.href = `#${section}`
+  a.dataset.nav = section
+  a.textContent = t(textKey)
   // The delegated wireNav() handler binds after this node exists on re-render;
   // for the initial boot the hashchange listener still drives navigation.
   a.addEventListener("click", (ev) => {
-    ev.preventDefault();
-    if (window.location.hash !== `#${section}`) window.location.hash = section;
-    else showSection(section);
-  });
-  return a;
+    ev.preventDefault()
+    navigateTo(section)
+  })
+  return a
 }
 
 function monoCode(text: string): HTMLElement {
-  const code = document.createElement("code");
-  code.className = "mono";
-  code.textContent = text;
-  return code;
+  const code = document.createElement("code")
+  code.className = "mono"
+  code.textContent = text
+  return code
 }
 
 /** "Maximal forwards requests … {plansLink}." with a live "See plans" link. */
 function renderRequirementCallout(): void {
-  const el = document.querySelector<HTMLElement>('[data-field="requirement_sub"]');
+  const el = document.querySelector<HTMLElement>(
+    '[data-field="requirement_sub"]',
+  )
   fillWithNode(
     el,
     "account-requirement-sub",
     "plansLink",
-    externalLink("https://github.com/features/copilot", "account-requirement-plans-link"),
-  );
+    externalLink(
+      "https://github.com/features/copilot",
+      "account-requirement-plans-link",
+    ),
+  )
 }
 
 /** Endpoint key hint with a live "API keys" link into that section. */
 function renderEndpointHint(): void {
-  const el = document.querySelector<HTMLElement>('[data-field="endpoint_hint"]');
+  const el = document.querySelector<HTMLElement>('[data-field="endpoint_hint"]')
   fillWithNode(
     el,
     "endpoint-hint",
     "apiKeysLink",
     navLink("api-clients", "endpoint-hint-api-keys-link"),
-  );
+  )
 }
 
 /** gh-reuse sub with a live `gh` <code> token. */
 function renderGhReuseSub(): void {
-  const el = document.querySelector<HTMLElement>('[data-field="gh_reuse_sub"]');
-  fillWithNode(el, "account-gh-reuse-sub", "ghCode", monoCode("gh"));
+  const el = document.querySelector<HTMLElement>('[data-field="gh_reuse_sub"]')
+  fillWithNode(el, "account-gh-reuse-sub", "ghCode", monoCode("gh"))
 }
 
 /**
@@ -238,104 +284,153 @@ function renderGhReuseSub(): void {
  * pending state isn't currently mounted).
  */
 function renderDeviceCodeLabel(): void {
-  const label = document.querySelector<HTMLElement>("[data-device-code-label]");
-  const code = document.querySelector<HTMLElement>('[data-field="user_code"]');
-  if (!label || !code) return;
-  fillWithNode(label, "account-copy-and-open", "code", code);
+  const label = document.querySelector<HTMLElement>("[data-device-code-label]")
+  const code = document.querySelector<HTMLElement>('[data-field="user_code"]')
+  if (!label || !code) return
+  fillWithNode(label, "account-copy-and-open", "code", code)
 }
 
 /** Logs section copy: the plural "7-day retention" sub, the `tail -F` hint,
  *  and the "7 days, then deleted…" retention value. */
 function renderLogsCopy(): void {
-  const sub = document.querySelector<HTMLElement>('[data-field="logs_sub"]');
-  if (sub) sub.textContent = t("logs-sub", { n: LOG_RETENTION_DAYS });
+  const sub = document.querySelector<HTMLElement>('[data-field="logs_sub"]')
+  if (sub) sub.textContent = t("logs-sub", { n: LOG_RETENTION_DAYS })
   const retention = document.querySelector<HTMLElement>(
     '[data-field="logs_retention_value"]',
-  );
+  )
   if (retention) {
-    retention.textContent = t("logs-retention-value", { n: LOG_RETENTION_DAYS });
+    retention.textContent = t("logs-retention-value", {
+      n: LOG_RETENTION_DAYS,
+    })
   }
-  const hint = document.querySelector<HTMLElement>('[data-field="logs_where_hint"]');
-  fillWithNode(hint, "logs-where-hint", "tailCmd", monoCode("tail -F"));
+  const hint = document.querySelector<HTMLElement>(
+    '[data-field="logs_where_hint"]',
+  )
+  fillWithNode(hint, "logs-where-hint", "tailCmd", monoCode("tail -F"))
 }
 
 /** Uninstall card copy: the intro hint (with a `maximal` <code> token) and the
  *  terminal hint (with a `maximal uninstall` <code> command). */
 function renderUninstallCopy(): void {
-  const hint = document.querySelector<HTMLElement>('[data-field="uninstall_hint"]');
-  fillWithNode(hint, "uninstall-hint", "cliName", monoCode("maximal"));
+  const hint = document.querySelector<HTMLElement>(
+    '[data-field="uninstall_hint"]',
+  )
+  fillWithNode(hint, "uninstall-hint", "cliName", monoCode("maximal"))
   const terminal = document.querySelector<HTMLElement>(
     '[data-field="uninstall_terminal_hint"]',
-  );
+  )
   fillWithNode(
     terminal,
     "uninstall-terminal-hint",
     "uninstallCmd",
     monoCode("maximal uninstall"),
-  );
+  )
 }
 
 function wireLogs(): void {
+  // eslint-disable-next-line unicorn/consistent-function-scoping -- kept co-located with its only listener registration.
   const revealLogs = () => {
-    void safeInvoke("reveal_logs_dir");
-  };
+    void safeInvoke("reveal_logs_dir")
+  }
   document
     .querySelector('[data-section="logs"] [data-action="reveal-logs"]')
-    ?.addEventListener("click", revealLogs);
+    ?.addEventListener("click", revealLogs)
 }
 
 // ---- Endpoint section ------------------------------------------------------
 
-const ENDPOINT_BASE_URL = "http://127.0.0.1:4141";
+const ENDPOINT_BASE_URL = "http://127.0.0.1:4141"
 /** Log retention window (days). Drives the plural copy in the Logs section. */
-const LOG_RETENTION_DAYS = 7;
-let endpointApiKey: string | null = null;
+const LOG_RETENTION_DAYS = 7
+let endpointApiKey: string | null = null
 
 async function loadEndpointApiKey(): Promise<void> {
-  if (endpointApiKey !== null) return;
+  if (endpointApiKey !== null) return
   try {
-    endpointApiKey = await getShellApiKey();
+    // eslint-disable-next-line require-atomic-updates -- idempotent one-shot memo in a single-threaded UI; a concurrent double-fetch is harmless.
+    endpointApiKey = await getShellApiKey()
   } catch (err) {
-    console.warn("invoke(get_shell_api_key) failed:", err);
-    endpointApiKey = null;
+    console.warn("invoke(get_shell_api_key) failed:", err)
+    // eslint-disable-next-line require-atomic-updates -- idempotent one-shot memo in a single-threaded UI; a concurrent double-fetch is harmless.
+    endpointApiKey = null
   }
 }
 
 function getEndpointKeyEl(): HTMLElement | null {
   return document.querySelector<HTMLElement>(
     '[data-section="endpoint"] [data-field="endpoint-api-key"]',
-  );
+  )
 }
 
-async function copyToClipboard(text: string, btn: Element | null): Promise<void> {
+async function copyToClipboard(
+  text: string,
+  btn: Element | null,
+): Promise<void> {
   try {
-    await navigator.clipboard.writeText(text);
+    await navigator.clipboard.writeText(text)
     if (btn instanceof HTMLElement) {
-      const original = btn.textContent;
-      btn.textContent = t("common-copied");
-      window.setTimeout(() => {
-        btn.textContent = original;
-      }, 1200);
+      const original = btn.textContent
+      btn.textContent = t("common-copied")
+      globalThis.setTimeout(() => {
+        btn.textContent = original
+      }, 1200)
     }
   } catch (err) {
-    console.warn("clipboard.writeText failed:", err);
+    console.warn("clipboard.writeText failed:", err)
   }
 }
 
 /** Show or clear the inline, non-blocking error inside the Uninstall card.
  *  Pass null to clear. Mirrors the diagnostics error row. */
 function setUninstallError(message: string | null): void {
-  const row = document.querySelector<HTMLElement>("[data-uninstall-error]");
+  const row = document.querySelector<HTMLElement>("[data-uninstall-error]")
   const msg = document.querySelector<HTMLElement>(
     "[data-uninstall-error-message]",
-  );
-  if (!row || !msg) return;
+  )
+  if (!row || !msg) return
   if (message === null) {
-    row.hidden = true;
-    return;
+    row.hidden = true
+    return
   }
-  msg.textContent = message;
-  row.hidden = false;
+  msg.textContent = message
+  row.hidden = false
+}
+
+/**
+ * Wire the in-app "Quit Maximal" button (§1.6). A browser tab has no Tauri host
+ * to invoke a quit, so POST `/_internal/quit`: the sidecar signals the supervising
+ * shell (over stdout) to run its confirm-and-exit. On 202 the shell takes over
+ * (its native confirm dialog); a 409 means we're a plain-CLI run with no shell.
+ */
+function wireQuit(): void {
+  const btn = document.querySelector<HTMLButtonElement>(
+    '[data-action="quit-maximal"]',
+  )
+  if (!btn) return
+  const err = document.querySelector<HTMLElement>("[data-quit-error]")
+  const showError = (message: string): void => {
+    if (err) {
+      err.textContent = message
+      err.hidden = false
+    }
+    btn.disabled = false
+  }
+  btn.addEventListener("click", () => {
+    btn.disabled = true
+    if (err) err.hidden = true
+    void fetch("/_internal/quit", { method: "POST" }).then(
+      (res) => {
+        // 202 → the shell owns the quit now (confirm dialog + exit); keep the
+        // button disabled. 409 → no supervising shell (plain CLI); other → fail.
+        if (res.status === 409) {
+          showError("Not running under the menu-bar app — nothing to quit.")
+        } else if (!res.ok) {
+          showError(`Quit failed (HTTP ${res.status}).`)
+        }
+      },
+      () => showError("Quit request failed."),
+    )
+  })
 }
 
 /** Wire the in-app "Uninstall Maximal…" button. Reads the two option
@@ -344,170 +439,176 @@ function setUninstallError(message: string | null): void {
  *  confirm prompt, then runs the privileged `uninstall_maximal` command.
  *  Mirrors the signOut() shape: confirm → setBusy → invoke → settle. */
 function wireUninstall(): void {
-  const section = document.querySelector('[data-section="diagnostics"]');
-  if (!section) return;
+  const section = document.querySelector('[data-section="diagnostics"]')
+  if (!section) return
   section
     .querySelector('[data-action="uninstall-maximal"]')
     ?.addEventListener("click", () => {
-      void runInAppUninstall();
-    });
+      void runInAppUninstall()
+    })
 }
 
 async function runInAppUninstall(): Promise<void> {
   const purge =
-    document.querySelector<HTMLInputElement>("[data-uninstall-purge]")
-      ?.checked ?? false;
+    document.querySelector<HTMLInputElement>("[data-uninstall-purge]")?.checked
+    ?? false
 
   // The in-app uninstall always runs with --force (the Rust command adds it):
   // it can't surface the CLI's refuse-while-apps-enabled prompt, so it disables
   // + reverts every app integration through the registry. So "reverts app
   // integrations" is always part of the summary, not an opt-in.
-  const clauses = [t("uninstall-clause-cli"), t("uninstall-clause-integrations")];
-  if (purge) clauses.push(t("uninstall-clause-purge"));
+  const clauses = [
+    t("uninstall-clause-cli"),
+    t("uninstall-clause-integrations"),
+  ]
+  if (purge) clauses.push(t("uninstall-clause-purge"))
   // The connector ("…, and X") is a catalog term, not a hardcoded ", and " —
   // so a language that joins lists differently can override it.
   const tail =
-    clauses.length > 1
-      ? t("uninstall-summary-tail", { last: clauses.pop() ?? "" })
-      : "";
-  const summary = `${clauses.join(", ")}${tail}`;
-  const confirmed = window.confirm(t("uninstall-confirm", { summary }));
-  if (!confirmed) return;
+    clauses.length > 1 ?
+      t("uninstall-summary-tail", { last: clauses.pop() ?? "" })
+    : ""
+  const summary = `${clauses.join(", ")}${tail}`
+  const confirmed = globalThis.confirm(t("uninstall-confirm", { summary }))
+  if (!confirmed) return
 
-  setUninstallError(null);
-  setBusy(true, t("common-working"));
+  setUninstallError(null)
+  setBusy(true, t("common-working"))
   try {
-    await invoke("uninstall_maximal", { purge });
-    showUninstallComplete();
+    await invoke("uninstall_maximal", { purge })
+    showUninstallComplete()
   } catch (err) {
     // Tauri rejects with the Err(String) reason from the Rust command, or a
     // generic message in plain-browser (app:ui, no Tauri host). Surface it
     // inline rather than leaving the user with no feedback.
-    console.warn("invoke(uninstall_maximal) failed:", err);
-    setUninstallError(t("uninstall-err", { error: String(err) }));
+    console.warn("invoke(uninstall_maximal) failed:", err)
+    setUninstallError(t("uninstall-err", { error: String(err) }))
   } finally {
-    setBusy(false);
+    setBusy(false)
   }
 }
 
 /** Replace the card body with a calm completion state. No new quit command —
  *  the user quits from the tray and trashes the app from Applications. */
 function showUninstallComplete(): void {
-  const body = document.querySelector<HTMLElement>("[data-uninstall-body]");
-  if (!body) return;
-  const done = document.createElement("p");
-  done.className = "card__hint";
-  done.textContent = t("uninstall-complete");
-  body.replaceChildren(done);
+  const body = document.querySelector<HTMLElement>("[data-uninstall-body]")
+  if (!body) return
+  const done = document.createElement("p")
+  done.className = "card__hint"
+  done.textContent = t("uninstall-complete")
+  body.replaceChildren(done)
 }
 
 function wireEndpoint(): void {
-  const section = document.querySelector('[data-section="endpoint"]');
-  if (!section) return;
+  const section = document.querySelector('[data-section="endpoint"]')
+  if (!section) return
 
   section
     .querySelector('[data-action="copy-base-url"]')
     ?.addEventListener("click", (ev) => {
-      void copyToClipboard(ENDPOINT_BASE_URL, ev.currentTarget as Element);
-    });
+      void copyToClipboard(ENDPOINT_BASE_URL, ev.currentTarget as Element)
+    })
 
   section
     .querySelector('[data-action="reveal-api-key"]')
     ?.addEventListener("click", async (ev) => {
-      await loadEndpointApiKey();
-      const el = getEndpointKeyEl();
-      if (!el) return;
-      const revealed = el.dataset.revealed === "true";
+      await loadEndpointApiKey()
+      const el = getEndpointKeyEl()
+      if (!el) return
+      const revealed = el.dataset.revealed === "true"
       if (revealed) {
-        el.dataset.revealed = "false";
-        el.textContent = "••••••••••••••••••••••";
-        (ev.currentTarget as HTMLElement).textContent = t("common-reveal");
+        el.dataset.revealed = "false"
+        el.textContent = "••••••••••••••••••••••"
+        ;(ev.currentTarget as HTMLElement).textContent = t("common-reveal")
       } else {
-        el.dataset.revealed = "true";
-        el.textContent = endpointApiKey ?? t("endpoint-key-not-available");
-        (ev.currentTarget as HTMLElement).textContent = t("common-hide");
+        el.dataset.revealed = "true"
+        el.textContent = endpointApiKey ?? t("endpoint-key-not-available")
+        ;(ev.currentTarget as HTMLElement).textContent = t("common-hide")
       }
-    });
+    })
 
   section
     .querySelector('[data-action="copy-api-key"]')
     ?.addEventListener("click", async (ev) => {
-      await loadEndpointApiKey();
+      await loadEndpointApiKey()
       if (endpointApiKey) {
-        void copyToClipboard(endpointApiKey, ev.currentTarget as Element);
+        void copyToClipboard(endpointApiKey, ev.currentTarget as Element)
       }
-    });
+    })
 
   section
     .querySelector('[data-action="copy-curl-example"]')
     ?.addEventListener("click", async (ev) => {
-      await loadEndpointApiKey();
-      const key = endpointApiKey ?? "$MAXIMAL_API_KEY";
+      await loadEndpointApiKey()
+      const key = endpointApiKey ?? "$MAXIMAL_API_KEY"
       const curl = [
         `curl ${ENDPOINT_BASE_URL}/v1/messages \\`,
         `  -H "x-api-key: ${key}" \\`,
         `  -H "anthropic-version: 2023-06-01" \\`,
         `  -H "content-type: application/json" \\`,
         `  -d '{"model":"claude-sonnet-4-5","max_tokens":256,"messages":[{"role":"user","content":"Hello"}]}'`,
-      ].join("\n");
-      void copyToClipboard(curl, ev.currentTarget as Element);
-    });
+      ].join("\n")
+      void copyToClipboard(curl, ev.currentTarget as Element)
+    })
 }
 
 function applyTheme(): void {
-  const root = document.documentElement;
-  if (root.dataset.theme) return;
+  const root = document.documentElement
+  if (root.dataset.theme) return
   const prefersLight =
-    window.matchMedia &&
-    window.matchMedia("(prefers-color-scheme: light)").matches;
-  root.dataset.theme = prefersLight ? "light" : "dark";
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- matchMedia is typed always-present but can be absent in non-browser contexts; guard is defensive.
+    globalThis.matchMedia
+    && globalThis.matchMedia("(prefers-color-scheme: light)").matches
+  root.dataset.theme = prefersLight ? "light" : "dark"
 }
 
 // ---- Diagnostics section ---------------------------------------------------
 
 function formatUptime(ms: number): string {
-  const totalSeconds = Math.floor(ms / 1000);
-  const h = Math.floor(totalSeconds / 3600);
-  const m = Math.floor((totalSeconds % 3600) / 60);
-  const s = totalSeconds % 60;
-  if (h > 0) return t("diagnostics-uptime-hours", { h, m });
-  if (m > 0) return t("diagnostics-uptime-minutes", { m, s });
-  return t("diagnostics-uptime-seconds", { s });
+  const totalSeconds = Math.floor(ms / 1000)
+  const h = Math.floor(totalSeconds / 3600)
+  const m = Math.floor((totalSeconds % 3600) / 60)
+  const s = totalSeconds % 60
+  if (h > 0) return t("diagnostics-uptime-hours", { h, m })
+  if (m > 0) return t("diagnostics-uptime-minutes", { m, s })
+  return t("diagnostics-uptime-seconds", { s })
 }
 
 function formatRateLimit(rl: DiagnosticsResponse["rate_limit"]): string {
-  if (rl.interval_seconds === null) return t("diagnostics-rate-unlimited");
-  const tail = rl.last_request_at
-    ? t("diagnostics-rate-last-request", {
+  if (rl.interval_seconds === null) return t("diagnostics-rate-unlimited")
+  const tail =
+    rl.last_request_at ?
+      t("diagnostics-rate-last-request", {
         time: new Date(rl.last_request_at).toLocaleTimeString(),
       })
-    : "";
-  const mode = rl.wait_when_throttled
-    ? t("diagnostics-rate-mode-wait")
-    : t("diagnostics-rate-mode-reject");
+    : ""
+  const mode =
+    rl.wait_when_throttled ?
+      t("diagnostics-rate-mode-wait")
+    : t("diagnostics-rate-mode-reject")
   return t("diagnostics-rate-limited", {
     seconds: rl.interval_seconds,
     mode,
     tail,
-  });
+  })
 }
 
 function setField(name: string, value: string): void {
-  const el = document.querySelector<HTMLElement>(`[data-field="${name}"]`);
-  if (el) el.textContent = value;
+  const el = document.querySelector<HTMLElement>(`[data-field="${name}"]`)
+  if (el) el.textContent = value
 }
 
 function renderDiagnostics(data: DiagnosticsResponse): void {
-  setField("version", data.version);
-  setField("source_revision", data.source_revision ?? t("diagnostics-unknown"));
-  setField("launch_source", formatLaunchSource(data));
-  setField("pid", String(data.pid));
-  setField("uptime", formatUptime(data.uptime_ms));
-  setField("account_type", data.account_type ?? t("diagnostics-unknown"));
-  setField("models_cached", String(data.models_cached));
-  setField("web_search", formatWebSearch(data.web_search));
-  setField("github_copilot_status", deriveGithubCopilotStatus(data.tokens));
-  setField("rate_limit", formatRateLimit(data.rate_limit));
+  setField("version", data.version)
+  setField("source_revision", data.source_revision ?? t("diagnostics-unknown"))
+  setField("launch_source", formatLaunchSource(data))
+  setField("pid", String(data.pid))
+  setField("uptime", formatUptime(data.uptime_ms))
+  setField("account_type", data.account_type)
+  setField("models_cached", String(data.models_cached))
+  setField("web_search", formatWebSearch(data.web_search))
+  setField("github_copilot_status", deriveGithubCopilotStatus(data.tokens))
+  setField("rate_limit", formatRateLimit(data.rate_limit))
 }
 
 /**
@@ -520,11 +621,11 @@ function formatWebSearch(ws: DiagnosticsResponse["web_search"]): string {
     CopilotResponsesExecutor: t("diagnostics-web-search-copilot"),
     OllamaWebExecutor: t("diagnostics-web-search-ollama"),
     InProcessFetchExecutor: t("diagnostics-web-search-builtin"),
-  };
-  const label = labels[ws.kind] ?? ws.kind;
-  return ws.detail
-    ? t("diagnostics-web-search-detail", { label, detail: ws.detail })
-    : label;
+  }
+  const label = labels[ws.kind] ?? ws.kind
+  return ws.detail ?
+      t("diagnostics-web-search-detail", { label, detail: ws.detail })
+    : label
 }
 
 /**
@@ -539,9 +640,9 @@ function formatLaunchSource(data: DiagnosticsResponse): string {
     "user-bin": t("diagnostics-launch-user-bin"),
     dev: t("diagnostics-launch-dev"),
     other: t("diagnostics-launch-other"),
-  };
-  const label = labels[data.launch_kind] ?? t("diagnostics-launch-other");
-  return t("diagnostics-launch-source", { label, path: data.launch_path });
+  }
+  const label = labels[data.launch_kind]
+  return t("diagnostics-launch-source", { label, path: data.launch_path })
 }
 
 /**
@@ -561,62 +662,62 @@ function formatLaunchSource(data: DiagnosticsResponse): string {
 function deriveGithubCopilotStatus(
   tokens: DiagnosticsResponse["tokens"],
 ): string {
-  const gh = tokens.github_token_present;
-  const cop = tokens.copilot_token_present;
-  if (gh && cop) return t("diagnostics-copilot-ready");
-  if (gh && !cop) return t("diagnostics-copilot-refresh");
-  if (!gh && !cop) return t("diagnostics-copilot-not-signed-in");
-  return t("diagnostics-copilot-inconsistent");
+  const gh = tokens.github_token_present
+  const cop = tokens.copilot_token_present
+  if (gh && cop) return t("diagnostics-copilot-ready")
+  if (gh && !cop) return t("diagnostics-copilot-refresh")
+  if (!gh && !cop) return t("diagnostics-copilot-not-signed-in")
+  return t("diagnostics-copilot-inconsistent")
 }
 
 function setDiagnosticsError(message: string | null): void {
-  const banner = document.querySelector<HTMLElement>("[data-diagnostics-error]");
-  const msg = document.querySelector<HTMLElement>("[data-error-message]");
-  if (!banner || !msg) return;
+  const banner = document.querySelector<HTMLElement>("[data-diagnostics-error]")
+  const msg = document.querySelector<HTMLElement>("[data-error-message]")
+  if (!banner || !msg) return
   if (message === null) {
-    banner.hidden = true;
-    return;
+    banner.hidden = true
+    return
   }
-  msg.textContent = message;
-  banner.hidden = false;
+  msg.textContent = message
+  banner.hidden = false
 }
 
-let lastDiagnostics: DiagnosticsResponse | null = null;
+let lastDiagnostics: DiagnosticsResponse | null = null
 
 async function loadDiagnostics(): Promise<void> {
-  const root = document.querySelector<HTMLElement>("[data-diagnostics-root]");
-  if (!root) return;
-  root.setAttribute("aria-busy", "true");
-  setDiagnosticsError(null);
+  const root = document.querySelector<HTMLElement>("[data-diagnostics-root]")
+  if (!root) return
+  root.setAttribute("aria-busy", "true")
+  setDiagnosticsError(null)
   const result = await apiCall({
     kind: "diagnostics",
     method: "GET",
     path: "/settings/api/diagnostics",
-  });
-  root.setAttribute("aria-busy", "false");
+  })
+  root.setAttribute("aria-busy", "false")
   if (!result.ok) {
-    setDiagnosticsError(t("diagnostics-err-load", { error: result.error }));
-    return;
+    setDiagnosticsError(t("diagnostics-err-load", { error: result.error }))
+    return
   }
-  lastDiagnostics = result.data;
-  renderDiagnostics(result.data);
+  lastDiagnostics = result.data
+  renderDiagnostics(result.data)
   // Best-effort, independent of the diagnostics fetch: the proxy caches the
   // GitHub ping for hours, so re-running on each section open is cheap.
-  void loadUpdateStatus();
+  void loadUpdateStatus()
 }
 
 /** Human "3m ago"-style age from an ISO timestamp; falls back to the raw
  *  string if it can't parse. */
 function relativeTime(iso: string): string {
-  const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return iso;
-  const secs = Math.max(0, Math.round((Date.now() - then) / 1000));
-  if (secs < 60) return t("diagnostics-relative-just-now");
-  const mins = Math.round(secs / 60);
-  if (mins < 60) return t("diagnostics-relative-minutes", { m: mins });
-  const hours = Math.round(mins / 60);
-  if (hours < 24) return t("diagnostics-relative-hours", { h: hours });
-  return t("diagnostics-relative-days", { d: Math.round(hours / 24) });
+  const then = new Date(iso).getTime()
+  if (Number.isNaN(then)) return iso
+  const secs = Math.max(0, Math.round((Date.now() - then) / 1000))
+  if (secs < 60) return t("diagnostics-relative-just-now")
+  const mins = Math.round(secs / 60)
+  if (mins < 60) return t("diagnostics-relative-minutes", { m: mins })
+  const hours = Math.round(mins / 60)
+  if (hours < 24) return t("diagnostics-relative-hours", { h: hours })
+  return t("diagnostics-relative-days", { d: Math.round(hours / 24) })
 }
 
 /**
@@ -625,8 +726,8 @@ function relativeTime(iso: string): string {
  * mechanism is working).
  */
 function renderUpdateStatus(data: UpdateStatusResponse): void {
-  renderUpdateOutcome(data);
-  renderUpdateHealth(data);
+  renderUpdateOutcome(data)
+  renderUpdateHealth(data)
 }
 
 /**
@@ -636,35 +737,45 @@ function renderUpdateStatus(data: UpdateStatusResponse): void {
  * The link opens in the system browser via the opener plugin.
  */
 function renderUpdateOutcome(data: UpdateStatusResponse): void {
-  const dd = document.querySelector<HTMLElement>(
-    '[data-field="update_status"]',
-  );
-  if (!dd) return;
-  dd.replaceChildren();
+  const dd = document.querySelector<HTMLElement>('[data-field="update_status"]')
+  if (!dd) return
+  dd.replaceChildren()
 
   if (data.update_available && data.latest) {
-    const label = document.createElement("span");
-    label.className = "mono";
-    label.textContent = t("diagnostics-update-newer", { version: data.latest });
-    const link = document.createElement("a");
-    link.href = data.url;
-    link.textContent = t("diagnostics-update-get-it");
+    const label = document.createElement("span")
+    label.className = "mono"
+    label.textContent = t("diagnostics-update-newer", { version: data.latest })
+    const link = document.createElement("a")
+    link.href = data.url
+    link.textContent = t("diagnostics-update-get-it")
     link.addEventListener("click", (ev) => {
-      ev.preventDefault();
-      void openExternalUrl(data.url);
-    });
-    dd.append(label, link);
-    return;
+      ev.preventDefault()
+      // In-place self-update (Phase 6): a browser tab can't invoke the updater
+      // plugin, so POST /_internal/upgrade — the sidecar signals the supervising
+      // shell to run the signed download+verify+install+relaunch (its branded
+      // confirm window appears). 202 → the shell owns it now. Anything else (409
+      // plain-CLI / browser-only, or an error) → fall back to the manual
+      // download page, so the action is never a dead end.
+      void fetch("/_internal/upgrade", { method: "POST" }).then(
+        (res) => {
+          if (res.status !== 202) void openExternalUrl(data.url)
+        },
+        () => void openExternalUrl(data.url),
+      )
+    })
+    dd.append(label, link)
+    return
   }
 
-  const span = document.createElement("span");
-  span.className = "mono";
+  const span = document.createElement("span")
+  span.className = "mono"
   // `latest` known but not newer → genuinely current. Otherwise we couldn't
   // resolve a version; say "Unknown" rather than imply everything's fine.
-  span.textContent = data.latest
-    ? t("diagnostics-update-up-to-date")
-    : t("diagnostics-update-unknown");
-  dd.append(span);
+  span.textContent =
+    data.latest ?
+      t("diagnostics-update-up-to-date")
+    : t("diagnostics-update-unknown")
+  dd.append(span)
 }
 
 /**
@@ -673,27 +784,28 @@ function renderUpdateOutcome(data: UpdateStatusResponse): void {
  * the most recent failure. Makes a silent breakage visible at a glance.
  */
 function renderUpdateHealth(data: UpdateStatusResponse): void {
-  let text: string;
+  let text: string
   if (!data.enabled) {
-    text = t("diagnostics-update-check-disabled");
+    text = t("diagnostics-update-check-disabled")
   } else if (data.last_error) {
-    const when = data.checked_at
-      ? t("diagnostics-update-check-last-ok", {
+    const when =
+      data.checked_at ?
+        t("diagnostics-update-check-last-ok", {
           relative: relativeTime(data.checked_at),
         })
-      : t("diagnostics-update-check-never");
+      : t("diagnostics-update-check-never")
     text = t("diagnostics-update-check-failed", {
       error: data.last_error,
       when,
-    });
+    })
   } else if (data.checked_at) {
     text = t("diagnostics-update-check-ok", {
       relative: relativeTime(data.checked_at),
-    });
+    })
   } else {
-    text = t("diagnostics-update-check-checking");
+    text = t("diagnostics-update-check-checking")
   }
-  setField("update_check", text);
+  setField("update_check", text)
 }
 
 async function loadUpdateStatus(): Promise<void> {
@@ -701,22 +813,24 @@ async function loadUpdateStatus(): Promise<void> {
     kind: "update-status",
     method: "GET",
     path: "/settings/api/update-status",
-  });
+  })
   if (!result.ok) {
     // Sidecar unreachable — stay quiet, not alarming.
-    setField("update_status", t("diagnostics-update-unknown"));
-    setField("update_check", t("diagnostics-update-check-unavailable"));
-    return;
+    setField("update_status", t("diagnostics-update-unknown"))
+    setField("update_check", t("diagnostics-update-check-unavailable"))
+    return
   }
-  renderUpdateStatus(result.data);
+  renderUpdateStatus(result.data)
 }
 
 async function copyDiagnosticsAsJson(): Promise<void> {
-  if (!lastDiagnostics) return;
+  if (!lastDiagnostics) return
   try {
-    await navigator.clipboard.writeText(JSON.stringify(lastDiagnostics, null, 2));
+    await navigator.clipboard.writeText(
+      JSON.stringify(lastDiagnostics, null, 2),
+    )
   } catch (err) {
-    console.error("clipboard write failed", err);
+    console.error("clipboard write failed", err)
   }
 }
 
@@ -724,129 +838,181 @@ function wireDiagnostics(): void {
   document
     .querySelector("[data-diagnostics-retry]")
     ?.addEventListener("click", () => {
-      void loadDiagnostics();
-    });
+      void loadDiagnostics()
+    })
   document
     .querySelector('[data-action="copy-json"]')
     ?.addEventListener("click", () => {
-      void copyDiagnosticsAsJson();
-    });
+      void copyDiagnosticsAsJson()
+    })
   document
     .querySelector('[data-section="diagnostics"] [data-action="reveal-config"]')
     ?.addEventListener("click", () => {
-      void safeInvoke("reveal_config_dir");
-    });
+      void safeInvoke("reveal_config_dir")
+    })
 }
 
 // ---- Account section -------------------------------------------------------
 
 /**
- * Account-section update contract (ADR-0007):
- *  - SSE is the PRIMARY channel. While #account is open we hold one
- *    `subscribeAuthEvents` subscription; `auth.changed` drives `renderAccount`
- *    with no poll lag. Opened on section enter, closed on leave.
- *  - The GET poll is the FALLBACK. `schedulePoll()` is a no-op while the
- *    stream is connected (`sseConnected`); it only runs when a sign-in is
- *    pending and SSE is down, so a dropped stream degrades to polling.
+ * Account-section update contract (ADR-0019, supersedes ADR-0007's SSE):
+ *  - The page-lifetime live-feed WebSocket (`openLiveFeed`) is the PRIMARY
+ *    channel; its `auth.changed` drives `renderAccount` with no poll lag, for
+ *    any section (guarded to paint only while #account is shown).
+ *  - The GET poll is the FALLBACK. `schedulePoll()` is a no-op while the feed
+ *    is connected (`feedConnected`); it only runs when a sign-in is pending and
+ *    the feed is down, so a dropped socket degrades to polling.
  *  - Only one poll timer runs at a time (`authPollTimer`).
  *  - `stopAuthPolling()` clears the timer; called on terminal states
- *    (authenticated, error, unauthenticated), on sign-out, on SSE connect,
+ *    (authenticated, error, unauthenticated), on sign-out, on feed connect,
  *    and on navigation away from #account.
  *  - `renderAccount` is the single source of truth for visibility;
  *    a non-pending state always stops polling before the next call.
  */
-type AccountStateKey = "unauthenticated" | "pending" | "authenticated" | "error";
+type AccountStateKey = "unauthenticated" | "pending" | "authenticated" | "error"
 
-const POLL_INTERVAL_MS = 2000;
+const POLL_INTERVAL_MS = 2000
 
-let currentAuthStatus: AuthStatus | null = null;
-let authPollTimer: ReturnType<typeof setTimeout> | null = null;
+let currentAuthStatus: AuthStatus | null = null
+let authPollTimer: ReturnType<typeof setTimeout> | null = null
 
 /**
- * Live updates (ADR-0007). While the Account section is open we hold one
- * SSE subscription to the sidecar; `auth.changed` events drive `renderAccount`
- * the instant the device-code poller resolves — no 2s poll lag. The GET poll
- * remains as a FALLBACK: it runs only while a sign-in is pending AND the SSE
- * stream is not connected (`sseConnected`), so a dropped stream degrades to
- * polling instead of stalling. `subscribeAuthEvents` resolves the API key
- * asynchronously, so a generation counter discards a subscription that
- * resolved after the section was already left.
+ * Live updates (ADR-0019). ONE page-lifetime WebSocket (`openLiveFeed`) carries
+ * `auth.changed`, driving `renderAccount` the instant the device-code poller
+ * resolves — no 2s poll lag. The GET poll remains a FALLBACK: it runs only while
+ * a sign-in is pending AND the feed is down (`feedConnected`), so a dropped socket
+ * degrades to polling instead of stalling.
  */
-let authEvents: EventSubscription | null = null;
-let sseConnected = false;
-let authEventsGen = 0;
+let liveFeed: LiveFeedConnection | null = null
+let feedConnected = false
 
 function stopAuthPolling(): void {
   if (authPollTimer !== null) {
-    clearTimeout(authPollTimer);
-    authPollTimer = null;
+    clearTimeout(authPollTimer)
+    authPollTimer = null
   }
+}
+
+function signInPending(): boolean {
+  return (
+    currentAuthStatus !== null
+    && (currentAuthStatus.state === "device_code_issued"
+      || currentAuthStatus.state === "polling")
+  )
 }
 
 function schedulePoll(): void {
-  // SSE is the primary channel; only poll as a fallback when it's down.
-  if (sseConnected) {
-    stopAuthPolling();
-    return;
+  // The live feed is the primary channel; only poll as a fallback when it's down.
+  if (feedConnected) {
+    stopAuthPolling()
+    return
   }
-  stopAuthPolling();
+  stopAuthPolling()
   authPollTimer = setTimeout(() => {
-    authPollTimer = null;
-    void pollAuthStatus();
-  }, POLL_INTERVAL_MS);
+    authPollTimer = null
+    void pollAuthStatus()
+  }, POLL_INTERVAL_MS)
 }
 
+/**
+ * Open the single page-lifetime live-feed WebSocket (ADR-0019), replacing the
+ * per-section SSE. ONE socket per tab, opened at boot: it carries the presence
+ * registry (its `hello` — tabId + visibility — lets a tray click find/close this
+ * tab, §1.2) AND the unified feed. Coordinates come from the inlined
+ * `window.__STATE__` (a plain browser tab has no Tauri IPC). Idempotent; a missing
+ * `__STATE__` leaves the GET-poll fallback to carry auth updates.
+ */
+function openLiveFeed(): void {
+  if (liveFeed) return
+  const inlined = readInlineState(globalThis)
+  if (!inlined) return
+  liveFeed = connectLiveFeed(
+    {
+      onSnapshot: (snapshot) => {
+        // The network-issue banner is global (#359): paint it on every
+        // snapshot from the live feed's auth status, whatever section is open.
+        renderNetworkBanner(snapshot.auth)
+        if (readHashSection() === "account") renderAccount(snapshot.auth)
+        // A resumed tab resyncs its data islands without a manual poll.
+        globalThis.dispatchEvent(new CustomEvent("maximal:apps-refresh"))
+        globalThis.dispatchEvent(new CustomEvent("maximal:models-refresh"))
+      },
+      onEvent: (event) => {
+        switch (event.type) {
+          case "auth.changed": {
+            // Global banner (#359) rides every auth event; the sidecar folds
+            // the network diagnosis (and upstream rejection) into the status.
+            renderNetworkBanner(event.payload)
+            if (readHashSection() === "account") renderAccount(event.payload)
+            break
+          }
+          case "apps.changed": {
+            globalThis.dispatchEvent(new CustomEvent("maximal:apps-refresh"))
+            break
+          }
+          case "clients.changed": {
+            globalThis.dispatchEvent(new CustomEvent("maximal:clients-refresh"))
+            break
+          }
+          case "usage": {
+            // Forward the enriched payload (the just-recorded event + running
+            // day totals) so the Usage hook can stream the pulse without a
+            // refetch, while still nudging an authoritative reload.
+            globalThis.dispatchEvent(
+              new CustomEvent("maximal:usage-refresh", {
+                detail: event.payload,
+              }),
+            )
+            break
+          }
+          default: {
+            // accounts/upstream/boot/usage/update/health consumers land with the
+            // Usage port + banner tracks (§3.2/§5); ignored now, forward-compatible.
+            break
+          }
+        }
+      },
+      onCloseCommand: () => {
+        // Tray dedup (§1.2): the sidecar told this buried tab to self-close so a
+        // fresh foreground tab can open. Reliable under single-history (ADR-0020).
+        window.close()
+      },
+      onStatusChange: (status) => {
+        feedConnected = status === "open"
+        if (feedConnected) {
+          stopAuthPolling()
+        } else if (readHashSection() === "account" && signInPending()) {
+          // Feed dropped mid sign-in → degrade to the GET poll until it recovers.
+          schedulePoll()
+        }
+      },
+      // Restore-on-reopen (§1.4): report the current section + scroll so a tray-
+      // surfaced fresh tab can land where the user left off.
+      sampleView: sampleCurrentView,
+    },
+    inlined.boundPort,
+    inlined.sessionToken,
+  )
+}
+
+/** Current section + scroll for restore reporting (§1.4). #pane is the scroll container. */
+function sampleCurrentView(): { section: string; scrollY: number } {
+  const pane = document.querySelector("#pane")
+  return {
+    section: readHashSection(),
+    scrollY: pane instanceof HTMLElement ? pane.scrollTop : 0,
+  }
+}
+
+// Entering/leaving the Account section no longer opens a transport — the feed is
+// page-lifetime. These only arm/cancel the GET-poll fallback for a mid-flight
+// sign-in while the feed happens to be down.
 function openAuthEvents(): void {
-  if (authEvents) return;
-  const gen = ++authEventsGen;
-  void subscribeAuthEvents({
-    onOpen: () => {
-      if (gen !== authEventsGen) return;
-      sseConnected = true;
-      // The stream is live; the fallback poll is now redundant.
-      stopAuthPolling();
-    },
-    onAuth: (status) => {
-      if (gen !== authEventsGen) return;
-      // Only paint while the user is actually on the Account section.
-      if (readHashSection() === "account") renderAccount(status);
-    },
-    onError: () => {
-      if (gen !== authEventsGen) return;
-      sseConnected = false;
-      // Stream dropped — fall back to polling if a sign-in is mid-flight.
-      if (
-        readHashSection() === "account" &&
-        currentAuthStatus !== null &&
-        (currentAuthStatus.state === "device_code_issued" ||
-          currentAuthStatus.state === "polling")
-      ) {
-        schedulePoll();
-      }
-    },
-  }).then(
-    (subscription) => {
-      // Section was left (or re-entered) while the key resolved — discard.
-      if (gen !== authEventsGen) {
-        subscription.close();
-        return;
-      }
-      authEvents = subscription;
-    },
-    () => {
-      // Key resolution / EventSource construction failed; polling fallback
-      // stays in force. Nothing to clean up.
-    },
-  );
+  if (!feedConnected && signInPending()) schedulePoll()
 }
 
 function closeAuthEvents(): void {
-  authEventsGen++;
-  sseConnected = false;
-  if (authEvents) {
-    authEvents.close();
-    authEvents = null;
-  }
+  stopAuthPolling()
 }
 
 function accountKeyFor(state: AuthStatus["state"]): AccountStateKey {
@@ -856,18 +1022,22 @@ function accountKeyFor(state: AuthStatus["state"]): AccountStateKey {
   // class that hid the upstream-rejection + gh-reuse state additions.
   switch (state) {
     case "device_code_issued":
-    case "polling":
-      return "pending";
-    case "authenticated":
-      return "authenticated";
-    case "error":
-      return "error";
-    case "unauthenticated":
-      return "unauthenticated";
+    case "polling": {
+      return "pending"
+    }
+    case "authenticated": {
+      return "authenticated"
+    }
+    case "error": {
+      return "error"
+    }
+    case "unauthenticated": {
+      return "unauthenticated"
+    }
     default: {
-      const _exhaust: never = state;
-      void _exhaust;
-      return "unauthenticated";
+      const _exhaust: never = state
+      void _exhaust
+      return "unauthenticated"
     }
   }
 }
@@ -875,12 +1045,12 @@ function accountKeyFor(state: AuthStatus["state"]): AccountStateKey {
 function accountSlot(name: string): HTMLElement | null {
   return document.querySelector<HTMLElement>(
     `[data-section="account"] [data-field="${name}"]`,
-  );
+  )
 }
 
 function setAccountField(name: string, value: string): void {
-  const el = accountSlot(name);
-  if (el) el.textContent = value;
+  const el = accountSlot(name)
+  if (el) el.textContent = value
 }
 
 /**
@@ -891,39 +1061,39 @@ function setAccountField(name: string, value: string): void {
  * so the layout never collapses.
  */
 function renderAccountAvatar(login: string, avatarUrl?: string): void {
-  const slot = accountSlot("account_avatar");
-  if (!slot) return;
+  const slot = accountSlot("account_avatar")
+  if (!slot) return
   // ADR-0006: `account_login` is required on the authenticated variant
   // and the controller only emits a real GitHub login (a failed user
   // lookup surfaces as `state: "error"` instead — there is no "unknown"
   // sentinel). The empty-string guard remains as belt-and-braces for
   // future variants; current backend never emits one.
-  const isPlaceholder = !login;
-  const initial = isPlaceholder ? "?" : (login[0] ?? "?").toUpperCase();
-  slot.textContent = "";
-  slot.classList.remove("signed-in-hero__avatar--fallback");
+  const isPlaceholder = !login
+  const initial = isPlaceholder ? "?" : login[0].toUpperCase()
+  slot.textContent = ""
+  slot.classList.remove("signed-in-hero__avatar--fallback")
   if (isPlaceholder) {
-    slot.textContent = initial;
-    slot.classList.add("signed-in-hero__avatar--fallback");
-    return;
+    slot.textContent = initial
+    slot.classList.add("signed-in-hero__avatar--fallback")
+    return
   }
-  const img = document.createElement("img");
-  img.className = "signed-in-hero__avatar-img";
+  const img = document.createElement("img")
+  img.className = "signed-in-hero__avatar-img"
   // Prefer the API-provided `avatar_url` (resolves for Enterprise Managed
   // Users, whose login has no public github.com profile); fall back to the
   // public `github.com/<login>.png` for any account that predates the field.
   img.src =
-    avatarUrl ?? `https://github.com/${encodeURIComponent(login)}.png?size=128`;
-  img.alt = t("account-avatar-alt", { login });
-  img.loading = "lazy";
-  img.decoding = "async";
-  img.width = 56;
-  img.height = 56;
+    avatarUrl ?? `https://github.com/${encodeURIComponent(login)}.png?size=128`
+  img.alt = t("account-avatar-alt", { login })
+  img.loading = "lazy"
+  img.decoding = "async"
+  img.width = 56
+  img.height = 56
   img.addEventListener("error", () => {
-    slot.textContent = initial;
-    slot.classList.add("signed-in-hero__avatar--fallback");
-  });
-  slot.appendChild(img);
+    slot.textContent = initial
+    slot.classList.add("signed-in-hero__avatar--fallback")
+  })
+  slot.append(img)
 }
 
 /**
@@ -934,33 +1104,33 @@ function renderAccountAvatar(login: string, avatarUrl?: string): void {
  * skew).
  */
 function formatConnectedFor(connectedSince: string | undefined): string {
-  if (!connectedSince) return t("account-connected");
-  const sinceMs = Date.parse(connectedSince);
-  if (Number.isNaN(sinceMs)) return t("account-connected");
-  const elapsed = Date.now() - sinceMs;
-  if (elapsed < 60_000) return t("account-connected-just-now");
-  const minutes = Math.floor(elapsed / 60_000);
-  if (minutes < 60) return t("account-connected-minutes", { minutes });
-  const hours = Math.floor(minutes / 60);
+  if (!connectedSince) return t("account-connected")
+  const sinceMs = Date.parse(connectedSince)
+  if (Number.isNaN(sinceMs)) return t("account-connected")
+  const elapsed = Date.now() - sinceMs
+  if (elapsed < 60_000) return t("account-connected-just-now")
+  const minutes = Math.floor(elapsed / 60_000)
+  if (minutes < 60) return t("account-connected-minutes", { minutes })
+  const hours = Math.floor(minutes / 60)
   if (hours < 24) {
-    const rem = minutes % 60;
-    return rem
-      ? t("account-connected-hours-minutes", { hours, minutes: rem })
-      : t("account-connected-hours", { hours });
+    const rem = minutes % 60
+    return rem ?
+        t("account-connected-hours-minutes", { hours, minutes: rem })
+      : t("account-connected-hours", { hours })
   }
-  const days = Math.floor(hours / 24);
-  return t("account-connected-days", { days });
+  const days = Math.floor(hours / 24)
+  return t("account-connected-days", { days })
 }
 
 // Re-render the connection line on a coarse cadence so the uptime advances
 // without a server round-trip. Only runs while the authenticated card is shown;
 // cleared by renderConnection on any non-authenticated state and on leave.
-let connUptimeTimer: ReturnType<typeof setInterval> | null = null;
+let connUptimeTimer: ReturnType<typeof setInterval> | null = null
 
 function stopConnUptimeTicker(): void {
   if (connUptimeTimer !== null) {
-    clearInterval(connUptimeTimer);
-    connUptimeTimer = null;
+    clearInterval(connUptimeTimer)
+    connUptimeTimer = null
   }
 }
 
@@ -973,24 +1143,24 @@ function renderConnection(
   connectedSince: string | undefined,
   degraded: boolean,
 ): void {
-  const indicator = accountSlot("conn_indicator");
+  const indicator = accountSlot("conn_indicator")
   if (indicator) {
-    indicator.dataset.conn = degraded ? "degraded" : "connected";
+    indicator.dataset.conn = degraded ? "degraded" : "connected"
     indicator.setAttribute(
       "aria-label",
-      degraded
-        ? t("account-conn-aria-degraded")
-        : t("account-conn-aria-connected"),
-    );
+      degraded ?
+        t("account-conn-aria-degraded")
+      : t("account-conn-aria-connected"),
+    )
   }
-  setAccountField("conn_status", formatConnectedFor(connectedSince));
+  setAccountField("conn_status", formatConnectedFor(connectedSince))
   // Keep the uptime advancing while this card is visible.
-  stopConnUptimeTicker();
+  stopConnUptimeTicker()
   if (connectedSince) {
     connUptimeTimer = setInterval(() => {
-      if (readHashSection() !== "account") return;
-      setAccountField("conn_status", formatConnectedFor(connectedSince));
-    }, 60_000);
+      if (readHashSection() !== "account") return
+      setAccountField("conn_status", formatConnectedFor(connectedSince))
+    }, 60_000)
   }
 }
 
@@ -1001,18 +1171,18 @@ function renderConnection(
  * state never shows.
  */
 function renderRemediationLink(url: string | undefined): void {
-  const wrapper = accountSlot("remediation");
-  const anchor = accountSlot("remediation_uri");
-  if (!wrapper || !(anchor instanceof HTMLAnchorElement)) return;
+  const wrapper = accountSlot("remediation")
+  const anchor = accountSlot("remediation_uri")
+  if (!wrapper || !(anchor instanceof HTMLAnchorElement)) return
   if (!url) {
-    wrapper.hidden = true;
-    anchor.removeAttribute("href");
-    anchor.textContent = "";
-    return;
+    wrapper.hidden = true
+    anchor.removeAttribute("href")
+    anchor.textContent = ""
+    return
   }
-  anchor.href = url;
-  anchor.textContent = labelForRemediationUrl(url);
-  wrapper.hidden = false;
+  anchor.href = url
+  anchor.textContent = labelForRemediationUrl(url)
+  wrapper.hidden = false
 }
 
 /**
@@ -1027,67 +1197,238 @@ function renderRemediationLink(url: string | undefined): void {
  *  message is generic, the user can tell a "wait and retry" from a "fix your
  *  billing" from a "this model isn't allowed". */
 function rejectionTitle(status: number): string {
-  if (status === 402) return t("account-rejection-title-402");
-  if (status === 403) return t("account-rejection-title-403");
-  if (status === 404) return t("account-rejection-title-404");
-  if (status === 408 || status === 504) return t("account-rejection-title-timeout");
-  if (status === 429) return t("account-rejection-title-429");
-  if (status >= 500) return t("account-rejection-title-5xx");
-  if (status >= 400) return t("account-rejection-title-4xx");
-  return t("account-rejection-title-other");
+  if (status === 402) return t("account-rejection-title-402")
+  if (status === 403) return t("account-rejection-title-403")
+  if (status === 404) return t("account-rejection-title-404")
+  if (status === 408 || status === 504)
+    return t("account-rejection-title-timeout")
+  if (status === 429) return t("account-rejection-title-429")
+  if (status >= 500) return t("account-rejection-title-5xx")
+  if (status >= 400) return t("account-rejection-title-4xx")
+  return t("account-rejection-title-other")
 }
 
 /** Actionable next step keyed off the status, used when the upstream message
  *  itself is missing or the generic fallback. */
 function rejectionExplanation(status: number): string {
-  if (status === 402) return t("account-rejection-explain-402");
-  if (status === 403) return t("account-rejection-explain-403");
-  if (status === 408 || status === 504) return t("account-rejection-explain-timeout");
-  if (status === 429) return t("account-rejection-explain-429");
-  if (status >= 500) return t("account-rejection-explain-5xx");
-  return t("account-rejection-explain-other");
+  if (status === 402) return t("account-rejection-explain-402")
+  if (status === 403) return t("account-rejection-explain-403")
+  if (status === 408 || status === 504)
+    return t("account-rejection-explain-timeout")
+  if (status === 429) return t("account-rejection-explain-429")
+  if (status >= 500) return t("account-rejection-explain-5xx")
+  return t("account-rejection-explain-other")
 }
 
 function renderUpstreamRejection(
   rejection: UpstreamRejection | undefined,
 ): void {
-  const wrapper = accountSlot("upstream_rejection");
-  if (!wrapper) return;
+  const wrapper = accountSlot("upstream_rejection")
+  if (!wrapper) return
   if (!rejection) {
-    wrapper.hidden = true;
-    return;
+    wrapper.hidden = true
+    return
   }
-  const status = rejection.status;
-  const titleEl = accountSlot("upstream_rejection_title");
+  const status = rejection.status
+  const titleEl = accountSlot("upstream_rejection_title")
   if (titleEl)
     titleEl.textContent = t("account-rejection-title-line", {
       title: rejectionTitle(status),
       status,
-    });
+    })
 
   // Show the real upstream message when we have one; otherwise the generic
   // fallback tells the user nothing, so swap in a status-derived next step.
   // The compared literal is GHCP's own wire fallback, not our UI copy.
-  const raw = rejection.message.trim();
-  const useful = raw && raw !== "Copilot returned an error.";
-  const messageEl = accountSlot("upstream_rejection_message");
+  const raw = rejection.message.trim()
+  const useful = raw && raw !== "Copilot returned an error."
+  const messageEl = accountSlot("upstream_rejection_message")
   if (messageEl)
-    messageEl.textContent = useful ? raw : rejectionExplanation(status);
+    messageEl.textContent = useful ? raw : rejectionExplanation(status)
 
-  const linkWrap = accountSlot("upstream_rejection_link_wrap");
-  const link = accountSlot("upstream_rejection_link");
+  const linkWrap = accountSlot("upstream_rejection_link_wrap")
+  const link = accountSlot("upstream_rejection_link")
   if (link instanceof HTMLAnchorElement && linkWrap) {
     if (rejection.remediation_url) {
-      link.href = rejection.remediation_url;
-      link.textContent = labelForRemediationUrl(rejection.remediation_url);
-      linkWrap.hidden = false;
+      link.href = rejection.remediation_url
+      link.textContent = labelForRemediationUrl(rejection.remediation_url)
+      linkWrap.hidden = false
     } else {
-      link.removeAttribute("href");
-      link.textContent = "";
-      linkWrap.hidden = true;
+      link.removeAttribute("href")
+      link.textContent = ""
+      linkWrap.hidden = true
     }
   }
-  wrapper.hidden = false;
+  wrapper.hidden = false
+}
+
+// ---- Network-issue banner ------------------------------------------------
+//
+// A connectivity problem reaching GitHub Copilot, surfaced across the top of
+// every section — distinct from an auth/token error (the token may be fine;
+// the service just isn't reachable). The sidecar debounces (network_diagnosis
+// appears only once a failure has persisted past the onset window) and folds
+// the typed { kind, scope } + account_type onto every auth.changed; the shell
+// resolves copy and paints. Status color is the only signal — no motion.
+
+/** GitHub's official status page — the one external lever we can offer when
+ *  Copilot itself (not the user's network) is the unreachable party. */
+const GITHUB_STATUS_URL = "https://www.githubstatus.com/"
+
+/** Wi-Fi-with-slash: a local-network problem the user can act on. */
+const BANNER_ICON_OFFLINE =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="2" x2="22" y2="22"/><path d="M8.5 16.5a5 5 0 0 1 7 0"/><path d="M2 8.82a15 15 0 0 1 4.17-2.65"/><path d="M10.66 5c4.01-.36 8.14.9 11.34 3.76"/><path d="M5 13a10 10 0 0 1 5.24-2.76"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>'
+
+/** Cloud-with-slash: reachable network, but Copilot itself isn't answering. */
+const BANNER_ICON_COPILOT =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 0 0 .8-8.94 6 6 0 0 0-11.28-1.7"/><path d="M6.2 8.7A5 5 0 0 0 6 19h4"/><line x1="2" y1="2" x2="22" y2="22"/></svg>'
+
+interface BannerCopy {
+  /** Trusted static SVG markup for the leading glyph. */
+  icon: string
+  /** i18n key for the title line. */
+  titleKey: string
+  /** i18n key for the message body. When `link` is true it carries a `{service}`
+   *  placeholder for the inline status-page link. */
+  messageKey: string
+  /** Whether the message embeds the status-page link. */
+  link: boolean
+}
+
+/**
+ * Map an auth status to the banner copy, or null when no banner should show.
+ *
+ *   offline | dns-failure  → "You're offline" — a local-network problem with a
+ *                            real user lever, so it leads with the connection,
+ *                            not with Copilot.
+ *   scope-unreachable |    → "Can't reach GitHub Copilot" — account-aware:
+ *   unknown                  enterprise gets the restart-if-widespread nudge;
+ *                            individual/business/unknown the honest "we're
+ *                            retrying". Never "nothing you need to do".
+ *
+ * account_type only rides the authenticated variant; a signed-out diagnosis
+ * (once the proactive poll lands — deferred) falls through to the non-
+ * enterprise copy.
+ */
+function resolveBannerCopy(status: AuthStatus): BannerCopy | null {
+  const diagnosis =
+    status.state === "authenticated" || status.state === "unauthenticated" ?
+      status.network_diagnosis
+    : undefined
+  if (!diagnosis) return null
+
+  if (diagnosis.kind === "offline" || diagnosis.kind === "dns-failure") {
+    return {
+      icon: BANNER_ICON_OFFLINE,
+      titleKey: "banner-offline-title",
+      messageKey: "banner-offline-msg",
+      link: false,
+    }
+  }
+
+  const accountType =
+    status.state === "authenticated" ? status.account_type : null
+  return {
+    icon: BANNER_ICON_COPILOT,
+    titleKey: "banner-copilot-title",
+    messageKey:
+      accountType === "enterprise" ?
+        "banner-copilot-msg-enterprise"
+      : "banner-copilot-msg-individual",
+    link: true,
+  }
+}
+
+/**
+ * Paint (or hide) the network-issue banner. Called on every auth.changed,
+ * regardless of the active section — the banner is global. Content is built in
+ * JS because the icon and copy vary by diagnosis kind and account type.
+ */
+function renderNetworkBanner(status: AuthStatus): void {
+  const banner = document.querySelector<HTMLElement>("#network-banner")
+  if (!banner) return
+
+  const copy = resolveBannerCopy(status)
+  if (!copy) {
+    banner.hidden = true
+    return
+  }
+
+  const iconEl = document.querySelector("#network-banner-icon")
+  if (iconEl) iconEl.innerHTML = copy.icon
+
+  const titleEl = document.querySelector("#network-banner-title")
+  if (titleEl) titleEl.textContent = t(copy.titleKey)
+
+  const msgEl = document.querySelector("#network-banner-msg")
+  if (msgEl instanceof HTMLElement) {
+    if (copy.link) {
+      // The status-page link rides inside the sentence as a {service} arg so
+      // word order stays the translator's (docs/dev/i18n.md) — the same helper
+      // the requirement-callout / endpoint-hint sentences use.
+      fillWithNode(
+        msgEl,
+        copy.messageKey,
+        "service",
+        externalLink(GITHUB_STATUS_URL, "banner-service-link"),
+      )
+    } else {
+      msgEl.textContent = t(copy.messageKey)
+    }
+  }
+
+  banner.hidden = false
+}
+
+// ---- Account-type glyph --------------------------------------------------
+//
+// A small inline icon next to the connection indicator marking the account's
+// plan (individual / team / enterprise), with a hover + aria label. Purely
+// informational — it tells the user which kind of identity they're on, the
+// same distinction the network banner uses to tailor its copy.
+
+type AccountTypeName = "individual" | "business" | "enterprise"
+
+/** lucide "user" — a single person. */
+const ACCOUNT_TYPE_ICON: Record<AccountTypeName, string> = {
+  individual:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
+  // lucide "users" — a small group (a Copilot Business / team seat).
+  business:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+  // lucide "building-2" — an organization (a Copilot Enterprise seat).
+  enterprise:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/><path d="M9 9h.01M9 12h.01M9 15h.01M15 9h.01M15 12h.01M15 15h.01"/></svg>',
+}
+
+const ACCOUNT_TYPE_LABEL_KEY: Record<AccountTypeName, string> = {
+  individual: "account-type-individual",
+  business: "account-type-team",
+  enterprise: "account-type-enterprise",
+}
+
+/**
+ * Set (or hide) the account-type glyph. Hidden when the plan is unresolved —
+ * we show a real type or nothing, never a guess. The label doubles as the
+ * hover title and the aria-label (the glyph is otherwise silent to a reader).
+ */
+function renderAccountType(
+  accountType: AccountTypeName | null | undefined,
+): void {
+  const el = document.querySelector<HTMLElement>('[data-field="account_type"]')
+  if (!el) return
+  if (!accountType) {
+    el.hidden = true
+    el.replaceChildren()
+    el.removeAttribute("aria-label")
+    el.removeAttribute("title")
+    return
+  }
+  const label = t(ACCOUNT_TYPE_LABEL_KEY[accountType])
+  el.innerHTML = ACCOUNT_TYPE_ICON[accountType]
+  el.setAttribute("aria-label", label)
+  el.title = label
+  el.hidden = false
 }
 
 function labelForRemediationUrl(url: string): string {
@@ -1095,17 +1436,20 @@ function labelForRemediationUrl(url: string): string {
   // GitHub pages. Map them to verbs the user will recognize; fall
   // back to a generic "Open in GitHub" for everything else so the
   // link still works when GHCP introduces new endpoints.
-  if (/\/settings\/copilot/i.test(url)) return t("account-remediation-copilot-settings");
-  if (/\/copilot\/signup/i.test(url)) return t("account-remediation-accept-terms");
-  if (/\/site\/terms|\/terms-of-service/i.test(url)) return t("account-remediation-review-terms");
-  return t("account-remediation-generic");
+  if (/\/settings\/copilot/i.test(url))
+    return t("account-remediation-copilot-settings")
+  if (/\/copilot\/signup/i.test(url))
+    return t("account-remediation-accept-terms")
+  if (/\/site\/terms|\/terms-of-service/i.test(url))
+    return t("account-remediation-review-terms")
+  return t("account-remediation-generic")
 }
 
 function formatExpiresAt(iso: string | undefined): string {
-  if (!iso) return t("account-expires-soon");
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleTimeString();
+  if (!iso) return t("account-expires-soon")
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return iso
+  return date.toLocaleTimeString()
 }
 
 /**
@@ -1120,27 +1464,27 @@ function formatExpiresAt(iso: string | undefined): string {
  * Best-effort: a failed fetch just hides that list, never blocks the page.
  */
 function showKnownAccountRosters(visible: boolean): void {
-  const wrapper = document.querySelector<HTMLElement>("[data-account-rosters]");
-  if (!wrapper) return;
+  const wrapper = document.querySelector<HTMLElement>("[data-account-rosters]")
+  if (!wrapper) return
   if (!visible) {
-    wrapper.hidden = true;
-    return;
+    wrapper.hidden = true
+    return
   }
   // Reveal the wrapper while the lists load so the "or" divider doesn't pop in
   // after them; collapse it again if BOTH inner blocks turn out empty (so a
   // user with no remembered/gh accounts sees no dangling divider).
-  wrapper.hidden = false;
+  wrapper.hidden = false
   // Repopulated each time so a `gh logout` or registry change elsewhere can't
   // leave a stale row. Best-effort: a failed fetch just hides that list.
   void Promise.all([loadAccounts("remembered"), loadGhAccounts()]).then(() => {
     const remembered = document.querySelector<HTMLElement>(
       "[data-account-remembered]",
-    );
-    const gh = document.querySelector<HTMLElement>("[data-gh-reuse]");
+    )
+    const gh = document.querySelector<HTMLElement>("[data-gh-reuse]")
     const nothingToOffer =
-      (!remembered || remembered.hidden) && (!gh || gh.hidden);
-    wrapper.hidden = nothingToOffer;
-  });
+      (!remembered || remembered.hidden) && (!gh || gh.hidden)
+    wrapper.hidden = nothingToOffer
+  })
 }
 
 /**
@@ -1152,30 +1496,30 @@ function showKnownAccountRosters(visible: boolean): void {
  * nothing — a single-account user with no gh logins sees just the hero.
  */
 function showGhAccountsForAuthenticated(): void {
-  const wrapper = document.querySelector<HTMLElement>("[data-account-rosters]");
+  const wrapper = document.querySelector<HTMLElement>("[data-account-rosters]")
   const remembered = document.querySelector<HTMLElement>(
     "[data-account-remembered]",
-  );
-  if (!wrapper) return;
-  if (remembered) remembered.hidden = true;
-  wrapper.hidden = false;
+  )
+  if (!wrapper) return
+  if (remembered) remembered.hidden = true
+  wrapper.hidden = false
   void loadGhAccounts().then(() => {
-    const gh = document.querySelector<HTMLElement>("[data-gh-reuse]");
-    wrapper.hidden = !gh || gh.hidden;
-  });
+    const gh = document.querySelector<HTMLElement>("[data-gh-reuse]")
+    wrapper.hidden = !gh || gh.hidden
+  })
 }
 
 function renderAccount(status: AuthStatus): void {
-  currentAuthStatus = status;
-  const active = accountKeyFor(status.state);
+  currentAuthStatus = status
+  const active = accountKeyFor(status.state)
   // The uptime ticker only belongs to the authenticated card; the
   // authenticated branch restarts it via renderConnection.
-  stopConnUptimeTicker();
+  stopConnUptimeTicker()
 
   for (const card of document.querySelectorAll<HTMLElement>(
     "[data-state-account]",
   )) {
-    card.hidden = card.dataset.stateAccount !== active;
+    card.hidden = card.dataset.stateAccount !== active
   }
 
   // ADR-0006: switch on the discriminator so the compiler narrows per
@@ -1185,67 +1529,68 @@ function renderAccount(status: AuthStatus): void {
   switch (status.state) {
     case "device_code_issued":
     case "polling": {
-      setAccountField("user_code", status.user_code);
-      renderDeviceCodeLabel();
+      setAccountField("user_code", status.user_code)
+      renderDeviceCodeLabel()
       setAccountField(
         "waiting_authorization",
         t("account-waiting-authorization", {
           expiresAt: formatExpiresAt(status.expires_at),
         }),
-      );
-      const link = accountSlot("verification_uri");
+      )
+      const link = accountSlot("verification_uri")
       if (link instanceof HTMLAnchorElement) {
-        link.href = status.verification_uri;
-        link.textContent = status.verification_uri.replace(/^https?:\/\//, "");
+        link.href = status.verification_uri
+        link.textContent = status.verification_uri.replace(/^https?:\/\//, "")
       }
       // A pending device code is a fallback, not a trap: also surface any
       // known accounts so the user can abandon the code and pick one.
-      showKnownAccountRosters(true);
-      break;
+      showKnownAccountRosters(true)
+      break
     }
     case "authenticated": {
       // `account_login` is required on this variant. The controller emits
       // the literal "unknown" string when getGitHubUser failed best-effort
       // during the device flow — `renderAccountAvatar` treats "unknown"
       // as a placeholder trigger.
-      setAccountField("account_login", status.account_login);
-      renderAccountAvatar(status.account_login, status.account_avatar_url);
+      setAccountField("account_login", status.account_login)
+      renderAccountAvatar(status.account_login, status.account_avatar_url)
       renderConnection(
         status.connected_since,
         status.last_upstream_rejection !== undefined,
-      );
-      renderUpstreamRejection(status.last_upstream_rejection);
+      )
+      renderAccountType(status.account_type)
+      renderUpstreamRejection(status.last_upstream_rejection)
       // Populate the inline "Switch to" roster (other persisted accounts; the
       // active account is the hero and excluded).
-      void loadAccounts("roster");
+      void loadAccounts("roster")
       // Also surface gh-CLI accounts to switch to — they "follow" below the
       // hero. The remembered roster stays hidden (the inline "Switch to"
       // already covers persisted accounts); only gh-reuse shows here.
-      showGhAccountsForAuthenticated();
-      break;
+      showGhAccountsForAuthenticated()
+      break
     }
     case "error": {
-      setAccountField("error", status.error);
-      renderRemediationLink(status.remediation_url);
+      setAccountField("error", status.error)
+      renderRemediationLink(status.remediation_url)
       // A failed sign-in must not strand the user on "Try again": offer the
       // accounts we already know about as an escape hatch.
-      showKnownAccountRosters(true);
-      break;
+      showKnownAccountRosters(true)
+      break
     }
     case "unauthenticated": {
-      showKnownAccountRosters(true);
-      break;
+      showKnownAccountRosters(true)
+      break
     }
     default: {
-      const _exhaust: never = status;
-      void _exhaust;
+      const _exhaust: never = status
+      void _exhaust
     }
   }
 
   if (active === "pending") {
-    schedulePoll();
+    schedulePoll()
   } else {
-    stopAuthPolling();
+    stopAuthPolling()
   }
 }
 
@@ -1254,36 +1599,36 @@ async function loadAuthStatus(): Promise<void> {
     kind: "auth-status",
     method: "GET",
     path: "/settings/api/auth/github/status",
-  });
+  })
   if (!result.ok) {
     renderAccount({
       state: "error",
       error: t("account-err-load-status", { error: result.error }),
-    });
-    return;
+    })
+    return
   }
-  renderAccount(result.data);
+  renderAccount(result.data)
 }
 
 function ghErrorEl(): HTMLElement | null {
-  return document.querySelector<HTMLElement>("[data-gh-error]");
+  return document.querySelector<HTMLElement>("[data-gh-error]")
 }
 
 function showGhError(message: string): void {
-  const el = ghErrorEl();
-  if (!el) return;
-  el.textContent = message;
-  el.hidden = false;
+  const el = ghErrorEl()
+  if (!el) return
+  el.textContent = message
+  el.hidden = false
   // The account section can be tall (remembered + gh lists), so an error on a
   // row near the bottom can land off-screen. Bring it into view.
-  el.scrollIntoView({ block: "nearest" });
+  el.scrollIntoView({ block: "nearest" })
 }
 
 function hideGhError(): void {
-  const el = ghErrorEl();
-  if (!el) return;
-  el.hidden = true;
-  el.textContent = "";
+  const el = ghErrorEl()
+  if (!el) return
+  el.hidden = true
+  el.textContent = ""
 }
 
 /** apiCall surfaces the raw response body in `error`. Our settings endpoints
@@ -1291,14 +1636,14 @@ function hideGhError(): void {
  *  reason (e.g. the /gh/use pre-flight message) rather than raw JSON. */
 function apiErrorMessage(raw: string): string {
   try {
-    const parsed = JSON.parse(raw) as { error?: { message?: string } };
+    const parsed = JSON.parse(raw) as { error?: { message?: string } }
     if (typeof parsed.error?.message === "string" && parsed.error.message) {
-      return parsed.error.message;
+      return parsed.error.message
     }
   } catch {
     // not JSON — use the raw text
   }
-  return raw;
+  return raw
 }
 
 /**
@@ -1307,23 +1652,28 @@ function apiErrorMessage(raw: string): string {
  * with gh-but-no-login sees nothing (the device flow already covers them).
  * Best-effort: any failure just hides the section.
  */
+// eslint-disable-next-line complexity -- best-effort DOM wiring; one over the threshold, splitting would scatter tightly-coupled steps.
 async function loadGhAccounts(): Promise<void> {
-  const wrapper = document.querySelector<HTMLElement>("[data-gh-reuse]");
-  const list = document.querySelector<HTMLUListElement>("[data-gh-accounts]");
+  const wrapper = document.querySelector<HTMLElement>("[data-gh-reuse]")
+  const list = document.querySelector<HTMLUListElement>("[data-gh-accounts]")
   const template = document.querySelector<HTMLTemplateElement>(
     "[data-gh-row-template]",
-  );
-  if (!wrapper || !list || !template) return;
+  )
+  if (!wrapper || !list || !template) return
 
   const result = await apiCall({
     kind: "gh-status",
     method: "GET",
     path: "/settings/api/gh/status",
-  });
-  if (!result.ok || !result.data.installed || result.data.accounts.length === 0) {
-    wrapper.hidden = true;
-    list.replaceChildren();
-    return;
+  })
+  if (
+    !result.ok
+    || !result.data.installed
+    || result.data.accounts.length === 0
+  ) {
+    wrapper.hidden = true
+    list.replaceChildren()
+    return
   }
 
   // Dedup against the registry: a gh account that's already a remembered
@@ -1335,56 +1685,56 @@ async function loadGhAccounts(): Promise<void> {
     kind: "accounts-list",
     method: "GET",
     path: "/settings/api/accounts",
-  });
+  })
   const rememberedKeys = new Set(
     remembered.ok ? remembered.data.accounts.map((a) => a.key) : [],
-  );
+  )
   const ghAccounts = result.data.accounts.filter(
     (a) => !rememberedKeys.has(`${a.login}@${a.host}`),
-  );
+  )
   if (ghAccounts.length === 0) {
-    wrapper.hidden = true;
-    list.replaceChildren();
-    return;
+    wrapper.hidden = true
+    list.replaceChildren()
+    return
   }
 
-  list.replaceChildren();
-  hideGhError();
+  list.replaceChildren()
+  hideGhError()
   for (const account of ghAccounts) {
-    const seed = template.content.firstElementChild;
-    if (!seed) continue;
-    const row = seed.cloneNode(true) as HTMLElement;
+    const seed = template.content.firstElementChild
+    if (!seed) continue
+    const row = seed.cloneNode(true) as HTMLElement
     // Fill the templated [data-i18n] labels ("Use this account") on the clone;
     // applyI18n only sweeps the live DOM, and the template content isn't in it.
-    applyI18n(row);
+    applyI18n(row)
 
-    const loginEl = row.querySelector<HTMLElement>('[data-field="gh_login"]');
-    if (loginEl) loginEl.textContent = account.login;
-    const hostEl = row.querySelector<HTMLElement>('[data-field="gh_host"]');
-    if (hostEl) hostEl.textContent = account.host;
+    const loginEl = row.querySelector<HTMLElement>('[data-field="gh_login"]')
+    if (loginEl) loginEl.textContent = account.login
+    const hostEl = row.querySelector<HTMLElement>('[data-field="gh_host"]')
+    if (hostEl) hostEl.textContent = account.host
 
     if (account.active) {
-      row.querySelector(".gh-account__dot")?.classList.add("status--ok");
-      const sr = document.createElement("span");
-      sr.className = "sr-only";
-      sr.textContent = t("account-active-suffix");
-      row.querySelector(".gh-account__id")?.appendChild(sr);
+      row.querySelector(".gh-account__dot")?.classList.add("status--ok")
+      const sr = document.createElement("span")
+      sr.className = "sr-only"
+      sr.textContent = t("account-active-suffix")
+      row.querySelector(".gh-account__id")?.append(sr)
     }
 
     const button = row.querySelector<HTMLButtonElement>(
       '[data-action="gh-use"]',
-    );
+    )
     if (button) {
-      button.dataset.ghLogin = account.login;
-      button.dataset.ghHost = account.host;
+      button.dataset.ghLogin = account.login
+      button.dataset.ghHost = account.host
       button.setAttribute(
         "aria-label",
         t("account-gh-use-aria", { login: account.login }),
-      );
+      )
     }
-    list.appendChild(row);
+    list.append(row)
   }
-  wrapper.hidden = false;
+  wrapper.hidden = false
 }
 
 /**
@@ -1396,23 +1746,23 @@ async function loadGhAccounts(): Promise<void> {
  * `refreshing` flag guards re-entry while the ~1.6s confirmation is showing.
  */
 function refreshGhAccounts(button: HTMLButtonElement): void {
-  if (button.dataset.refreshing === "true") return;
-  button.dataset.refreshing = "true";
-  button.disabled = true;
-  button.classList.remove("btn--confirmed");
-  button.textContent = t("account-refreshing");
+  if (button.dataset.refreshing === "true") return
+  button.dataset.refreshing = "true"
+  button.disabled = true
+  button.classList.remove("btn--confirmed")
+  button.textContent = t("account-refreshing")
   // loadGhAccounts is best-effort and resolves even on failure (it just hides
   // the section), so `finally` is the single settle point either way.
   void loadGhAccounts().finally(() => {
-    button.disabled = false;
-    button.classList.add("btn--confirmed");
-    button.textContent = t("account-updated");
-    window.setTimeout(() => {
-      button.classList.remove("btn--confirmed");
-      button.textContent = t("common-refresh");
-      button.dataset.refreshing = "false";
-    }, 1600);
-  });
+    button.disabled = false
+    button.classList.add("btn--confirmed")
+    button.textContent = t("account-updated")
+    globalThis.setTimeout(() => {
+      button.classList.remove("btn--confirmed")
+      button.textContent = t("common-refresh")
+      button.dataset.refreshing = "false"
+    }, 1600)
+  })
 }
 
 /**
@@ -1422,42 +1772,43 @@ function refreshGhAccounts(button: HTMLButtonElement): void {
  * button is disabled while this is in flight.
  */
 async function useGhAccount(button: HTMLElement): Promise<void> {
-  const login = button.dataset.ghLogin;
-  const host = button.dataset.ghHost;
-  if (!login || !host) return;
+  const login = button.dataset.ghLogin
+  const host = button.dataset.ghHost
+  if (!login || !host) return
 
-  const row = button.closest<HTMLElement>(".gh-account");
+  const row = button.closest<HTMLElement>(".gh-account")
   const signInButtons = document.querySelectorAll<HTMLButtonElement>(
     '[data-section="account"] [data-action="gh-use"], [data-section="account"] [data-action="auth-start"]',
-  );
-  const buttonEl = button as HTMLButtonElement;
-  const originalLabel = buttonEl.textContent;
+  )
+  const buttonEl = button as HTMLButtonElement
+  const originalLabel = buttonEl.textContent
 
-  hideGhError();
-  buttonEl.textContent = t("account-signing-in");
-  row?.setAttribute("aria-busy", "true");
-  for (const b of signInButtons) b.disabled = true;
-  setBusy(true, t("account-busy-signing-in")); // ambient top-of-window indicator
+  hideGhError()
+  buttonEl.textContent = t("account-signing-in")
+  row?.setAttribute("aria-busy", "true")
+  for (const b of signInButtons) b.disabled = true
+  setBusy(true, t("account-busy-signing-in")) // ambient top-of-window indicator
 
   const result = await apiCall({
     kind: "gh-use",
     method: "POST",
     path: "/settings/api/gh/use",
     body: { login, host },
-  });
+  })
 
   if (!result.ok) {
-    setBusy(false);
-    for (const b of signInButtons) b.disabled = false;
-    buttonEl.textContent = originalLabel;
-    row?.removeAttribute("aria-busy");
+    setBusy(false)
+    for (const b of signInButtons) b.disabled = false
+    // eslint-disable-next-line require-atomic-updates -- single UI click handler restoring its own button label after an await; no concurrent reentry.
+    buttonEl.textContent = originalLabel
+    row?.removeAttribute("aria-busy")
     // The pre-flight (POST /gh/use) returns a specific reason — stale token,
     // no Copilot subscription, etc. — caught BEFORE any reboot. Show it.
     showGhError(
       apiErrorMessage(result.error) || t("account-err-gh-use-generic"),
-    );
-    buttonEl.focus();
-    return;
+    )
+    buttonEl.focus()
+    return
   }
 
   // Token written. Reboot into it, then report the result (success switches
@@ -1465,22 +1816,22 @@ async function useGhAccount(button: HTMLElement): Promise<void> {
   // re-render, which would re-fetch the gh list and clear the message).
   await rebootAndAwaitAuth(
     (status) => {
-      setBusy(false);
-      renderAccount(status);
+      setBusy(false)
+      renderAccount(status)
     },
     (sawDown) => {
-      setBusy(false);
-      for (const b of signInButtons) b.disabled = false;
-      buttonEl.textContent = originalLabel;
-      row?.removeAttribute("aria-busy");
+      setBusy(false)
+      for (const b of signInButtons) b.disabled = false
+      buttonEl.textContent = originalLabel
+      row?.removeAttribute("aria-busy")
       showGhError(
-        sawDown
-          ? t("account-err-gh-use-authless", { login })
-          : t("account-err-gh-use-no-restart"),
-      );
-      buttonEl.focus();
+        sawDown ?
+          t("account-err-gh-use-authless", { login })
+        : t("account-err-gh-use-no-restart"),
+      )
+      buttonEl.focus()
     },
-  );
+  )
 }
 
 /**
@@ -1499,33 +1850,33 @@ async function rebootAndAwaitAuth(
   // the proxy will never reboot — fail fast and visibly rather than polling a
   // never-changing status for 20s. `sawDown: false` → the "didn't restart"
   // branch of the caller's message.
-  const restarted = await safeInvoke("restart_sidecar");
+  const restarted = await safeInvoke("restart_sidecar")
   if (!restarted) {
-    onFailure(false);
-    return;
+    onFailure(false)
+    return
   }
-  const deadlineMs = Date.now() + 20_000;
-  let sawDown = false;
+  const deadlineMs = Date.now() + 20_000
+  let sawDown = false
   while (Date.now() < deadlineMs) {
-    await new Promise((resolve) => setTimeout(resolve, 1200));
+    await new Promise((resolve) => setTimeout(resolve, 1200))
     const poll = await apiCall({
       kind: "auth-status",
       method: "GET",
       path: "/settings/api/auth/github/status",
-    });
+    })
     if (!poll.ok) {
-      sawDown = true; // sidecar is restarting
-      continue;
+      sawDown = true // sidecar is restarting
+      continue
     }
     if (poll.data.state === "authenticated") {
-      onSuccess(poll.data);
-      return;
+      onSuccess(poll.data)
+      return
     }
-    if (poll.data.state === "error" || sawDown) break;
+    if (poll.data.state === "error" || sawDown) break
     // Still up + unauthenticated and never saw it go down — the restart likely
     // didn't fire yet. Keep polling until the deadline.
   }
-  onFailure(sawDown);
+  onFailure(sawDown)
 }
 
 // ---- Multi-account roster (quick-switch) ---------------------------------
@@ -1533,7 +1884,7 @@ async function rebootAndAwaitAuth(
 /** Which roster a row lives in: the authenticated "Switch to" list, or the
  *  unauthenticated "remembered accounts" list. They share a row template but
  *  have distinct list/error containers. */
-type AccountRosterMode = "roster" | "remembered";
+type AccountRosterMode = "roster" | "remembered"
 
 const ROSTER_SELECTORS: Record<
   AccountRosterMode,
@@ -1549,26 +1900,26 @@ const ROSTER_SELECTORS: Record<
     list: "[data-account-remembered-list]",
     error: "[data-account-remembered-error]",
   },
-};
+}
 
 function rosterModeFor(el: HTMLElement): AccountRosterMode {
-  return el.closest("[data-account-remembered]") ? "remembered" : "roster";
+  return el.closest("[data-account-remembered]") ? "remembered" : "roster"
 }
 
 function showRosterError(mode: AccountRosterMode, message: string): void {
-  const el = document.querySelector<HTMLElement>(ROSTER_SELECTORS[mode].error);
+  const el = document.querySelector<HTMLElement>(ROSTER_SELECTORS[mode].error)
   if (el) {
-    el.textContent = message;
-    el.hidden = false;
-    el.scrollIntoView({ block: "nearest" });
+    el.textContent = message
+    el.hidden = false
+    el.scrollIntoView({ block: "nearest" })
   }
 }
 
 function hideRosterError(mode: AccountRosterMode): void {
-  const el = document.querySelector<HTMLElement>(ROSTER_SELECTORS[mode].error);
+  const el = document.querySelector<HTMLElement>(ROSTER_SELECTORS[mode].error)
   if (el) {
-    el.textContent = "";
-    el.hidden = true;
+    el.textContent = ""
+    el.hidden = true
   }
 }
 
@@ -1579,59 +1930,62 @@ function hideRosterError(mode: AccountRosterMode): void {
  * hides the section, mirroring loadGhAccounts.
  */
 async function loadAccounts(mode: AccountRosterMode): Promise<void> {
-  const sel = ROSTER_SELECTORS[mode];
-  const wrapper = document.querySelector<HTMLElement>(sel.wrapper);
-  const list = document.querySelector<HTMLUListElement>(sel.list);
+  const sel = ROSTER_SELECTORS[mode]
+  const wrapper = document.querySelector<HTMLElement>(sel.wrapper)
+  const list = document.querySelector<HTMLUListElement>(sel.list)
   const template = document.querySelector<HTMLTemplateElement>(
     "[data-account-row-template]",
-  );
-  if (!wrapper || !list || !template) return;
+  )
+  if (!wrapper || !list || !template) return
 
   const result = await apiCall({
     kind: "accounts-list",
     method: "GET",
     path: "/settings/api/accounts",
-  });
-  const accounts =
-    result.ok ?
+  })
+  let accounts: Array<AccountSummary> = []
+  if (result.ok) {
+    accounts =
       mode === "roster" ?
         result.data.accounts.filter((a) => !a.active)
       : result.data.accounts
-    : [];
-
-  if (accounts.length === 0) {
-    wrapper.hidden = true;
-    list.replaceChildren();
-    return;
   }
 
-  list.replaceChildren();
-  hideRosterError(mode);
-  for (const account of accounts) {
-    const seed = template.content.firstElementChild;
-    if (!seed) continue;
-    const row = seed.cloneNode(true) as HTMLElement;
-    // Fill the templated [data-i18n] labels ("Switch" / "Remove") on the clone.
-    applyI18n(row);
+  if (accounts.length === 0) {
+    wrapper.hidden = true
+    list.replaceChildren()
+    return
+  }
 
-    const loginEl = row.querySelector<HTMLElement>('[data-field="acct_login"]');
-    if (loginEl) loginEl.textContent = account.login;
-    const hostEl = row.querySelector<HTMLElement>('[data-field="acct_host"]');
-    if (hostEl) hostEl.textContent = account.host;
+  list.replaceChildren()
+  hideRosterError(mode)
+  for (const account of accounts) {
+    const seed = template.content.firstElementChild
+    if (!seed) continue
+    const row = seed.cloneNode(true) as HTMLElement
+    // Fill the templated [data-i18n] labels ("Switch" / "Remove") on the clone.
+    applyI18n(row)
+
+    const loginEl = row.querySelector<HTMLElement>('[data-field="acct_login"]')
+    if (loginEl) loginEl.textContent = account.login
+    const hostEl = row.querySelector<HTMLElement>('[data-field="acct_host"]')
+    if (hostEl) hostEl.textContent = account.host
 
     for (const action of ["account-switch", "account-remove"] as const) {
       const btn = row.querySelector<HTMLButtonElement>(
         `[data-action="${action}"]`,
-      );
-      if (!btn) continue;
-      btn.dataset.acctKey = account.key;
+      )
+      if (!btn) continue
+      btn.dataset.acctKey = account.key
       const ariaKey =
-        action === "account-switch" ? "account-switch-aria" : "account-remove-aria";
-      btn.setAttribute("aria-label", t(ariaKey, { login: account.login }));
+        action === "account-switch" ?
+          "account-switch-aria"
+        : "account-remove-aria"
+      btn.setAttribute("aria-label", t(ariaKey, { login: account.login }))
     }
-    list.appendChild(row);
+    list.append(row)
   }
-  wrapper.hidden = false;
+  wrapper.hidden = false
 }
 
 /**
@@ -1641,62 +1995,63 @@ async function loadAccounts(mode: AccountRosterMode): Promise<void> {
  * the reboot and shown in the roster's error line.
  */
 async function switchToAccount(button: HTMLElement): Promise<void> {
-  const key = button.dataset.acctKey;
-  if (!key) return;
-  const mode = rosterModeFor(button);
-  const row = button.closest<HTMLElement>(".gh-account");
+  const key = button.dataset.acctKey
+  if (!key) return
+  const mode = rosterModeFor(button)
+  const row = button.closest<HTMLElement>(".gh-account")
   const buttons = document.querySelectorAll<HTMLButtonElement>(
     '[data-section="account"] [data-action="account-switch"], [data-section="account"] [data-action="account-remove"]',
-  );
-  const buttonEl = button as HTMLButtonElement;
-  const originalLabel = buttonEl.textContent;
+  )
+  const buttonEl = button as HTMLButtonElement
+  const originalLabel = buttonEl.textContent
 
-  hideRosterError(mode);
-  buttonEl.textContent = t("account-switching");
-  row?.setAttribute("aria-busy", "true");
-  for (const b of buttons) b.disabled = true;
-  setBusy(true, t("account-busy-switching"));
+  hideRosterError(mode)
+  buttonEl.textContent = t("account-switching")
+  row?.setAttribute("aria-busy", "true")
+  for (const b of buttons) b.disabled = true
+  setBusy(true, t("account-busy-switching"))
 
   const result = await apiCall({
     kind: "accounts-switch",
     method: "POST",
     path: "/settings/api/accounts/switch",
     body: { key },
-  });
+  })
 
   if (!result.ok) {
-    setBusy(false);
-    for (const b of buttons) b.disabled = false;
-    buttonEl.textContent = originalLabel;
-    row?.removeAttribute("aria-busy");
+    setBusy(false)
+    for (const b of buttons) b.disabled = false
+    // eslint-disable-next-line require-atomic-updates -- single UI click handler restoring its own button label after an await; no concurrent reentry.
+    buttonEl.textContent = originalLabel
+    row?.removeAttribute("aria-busy")
     // 422 = the saved token no longer works for Copilot; caught pre-reboot.
     showRosterError(
       mode,
       apiErrorMessage(result.error) || t("account-err-switch-generic"),
-    );
-    buttonEl.focus();
-    return;
+    )
+    buttonEl.focus()
+    return
   }
 
   await rebootAndAwaitAuth(
     (status) => {
-      setBusy(false);
-      renderAccount(status);
+      setBusy(false)
+      renderAccount(status)
     },
     (sawDown) => {
-      setBusy(false);
-      for (const b of buttons) b.disabled = false;
-      buttonEl.textContent = originalLabel;
-      row?.removeAttribute("aria-busy");
+      setBusy(false)
+      for (const b of buttons) b.disabled = false
+      buttonEl.textContent = originalLabel
+      row?.removeAttribute("aria-busy")
       showRosterError(
         mode,
-        sawDown
-          ? t("account-err-switch-authless")
-          : t("account-err-switch-no-restart"),
-      );
-      buttonEl.focus();
+        sawDown ?
+          t("account-err-switch-authless")
+        : t("account-err-switch-no-restart"),
+      )
+      buttonEl.focus()
     },
-  );
+  )
 }
 
 /**
@@ -1705,92 +2060,89 @@ async function switchToAccount(button: HTMLElement): Promise<void> {
  * — just re-render the shorter list.
  */
 async function forgetAccount(button: HTMLElement): Promise<void> {
-  const key = button.dataset.acctKey;
-  if (!key) return;
-  const mode = rosterModeFor(button);
+  const key = button.dataset.acctKey
+  if (!key) return
+  const mode = rosterModeFor(button)
   const login =
-    button
-      .closest(".gh-account")
-      ?.querySelector('[data-field="acct_login"]')?.textContent ?? key;
+    button.closest(".gh-account")?.querySelector('[data-field="acct_login"]')
+      ?.textContent ?? key
 
-  const confirmed = window.confirm(
-    t("account-confirm-remove", { login }),
-  );
-  if (!confirmed) return;
+  const confirmed = globalThis.confirm(t("account-confirm-remove", { login }))
+  if (!confirmed) return
 
   const buttons = document.querySelectorAll<HTMLButtonElement>(
     '[data-section="account"] [data-action="account-switch"], [data-section="account"] [data-action="account-remove"]',
-  );
-  for (const b of buttons) b.disabled = true;
-  setBusy(true, t("account-busy-removing"));
+  )
+  for (const b of buttons) b.disabled = true
+  setBusy(true, t("account-busy-removing"))
 
   const result = await apiCall({
     kind: "accounts-remove",
     method: "POST",
     path: "/settings/api/accounts/remove",
     body: { key },
-  });
+  })
 
-  setBusy(false);
-  for (const b of buttons) b.disabled = false;
+  setBusy(false)
+  for (const b of buttons) b.disabled = false
 
   if (!result.ok) {
     showRosterError(
       mode,
       apiErrorMessage(result.error) || t("account-err-remove-generic"),
-    );
-    return;
+    )
+    return
   }
   // Re-render the now-shorter list (hides the section if it's the last one).
-  void loadAccounts(mode);
+  void loadAccounts(mode)
 }
 
 async function pollAuthStatus(): Promise<void> {
   // Stop if the user navigated away while a poll was in flight.
   if (readHashSection() !== "account") {
-    stopAuthPolling();
-    return;
+    stopAuthPolling()
+    return
   }
   const result = await apiCall({
     kind: "auth-status",
     method: "GET",
     path: "/settings/api/auth/github/status",
-  });
+  })
   if (readHashSection() !== "account") {
     // Navigated away mid-request; drop the response.
-    stopAuthPolling();
-    return;
+    stopAuthPolling()
+    return
   }
   if (!result.ok) {
     renderAccount({
       state: "error",
       error: t("account-err-poll-failed", { error: result.error }),
-    });
-    return;
+    })
+    return
   }
-  renderAccount(result.data);
+  renderAccount(result.data)
 }
 
 async function startAuth(): Promise<void> {
-  stopAuthPolling();
+  stopAuthPolling()
   // Show the ambient busy bar while the device-code request is in flight —
   // matches signOut/useGhAccount, so no action fires without feedback.
-  setBusy(true, t("account-busy-starting-sign-in"));
+  setBusy(true, t("account-busy-starting-sign-in"))
   const result = await apiCall({
     kind: "auth-start",
     method: "POST",
     path: "/settings/api/auth/github/start",
   }).finally(() => {
-    setBusy(false);
-  });
+    setBusy(false)
+  })
   if (!result.ok) {
     renderAccount({
       state: "error",
       error: t("account-err-start-failed", { error: result.error }),
-    });
-    return;
+    })
+    return
   }
-  renderAccount(result.data);
+  renderAccount(result.data)
 }
 
 /**
@@ -1801,42 +2153,42 @@ async function startAuth(): Promise<void> {
  * poller and reports the restored status; we render whatever it returns.
  */
 async function cancelAuth(): Promise<void> {
-  stopAuthPolling();
+  stopAuthPolling()
   const result = await apiCall({
     kind: "auth-cancel",
     method: "POST",
     path: "/settings/api/auth/github/cancel",
-  });
+  })
   if (!result.ok) {
     renderAccount({
       state: "error",
       error: t("account-err-cancel-failed", { error: result.error }),
-    });
-    return;
+    })
+    return
   }
-  renderAccount(result.data);
+  renderAccount(result.data)
 }
 
 async function signOut(): Promise<void> {
-  const confirmed = window.confirm(t("account-confirm-sign-out"));
-  if (!confirmed) return;
-  const ok = await performSignOut();
-  if (!ok) return;
+  const confirmed = globalThis.confirm(t("account-confirm-sign-out"))
+  if (!confirmed) return
+  const ok = await performSignOut()
+  if (!ok) return
   // The on-disk token is now deleted. Reboot the sidecar rather than editing
   // the running instance: the fresh process boots unauthenticated with a clean
   // runtime (no leftover Copilot token-refresh loop, no stale cached model
   // list from the signed-out account). Optimistically show the signed-out view
   // — the token is already gone; the shell's Starting→Ready status carries the
   // proxy back up. `safeInvoke` no-ops gracefully in plain-browser (app:ui).
-  renderAccount({ state: "unauthenticated" });
-  setBusy(true, t("account-busy-signing-out"));
+  renderAccount({ state: "unauthenticated" })
+  setBusy(true, t("account-busy-signing-out"))
   try {
-    await safeInvoke("restart_sidecar");
+    await safeInvoke("restart_sidecar")
     // Keep the indicator up until the sidecar is back (briefly down mid-reboot)
     // so the bar reflects the real "restarting" window, not just the IPC call.
-    await waitForSidecarBack(8_000);
+    await waitForSidecarBack(8_000)
   } finally {
-    setBusy(false);
+    setBusy(false)
   }
 }
 
@@ -1844,20 +2196,20 @@ async function signOut(): Promise<void> {
  *  up to `timeoutMs`. Used to keep the busy indicator honest across a restart
  *  without changing what's rendered. */
 async function waitForSidecarBack(timeoutMs: number): Promise<void> {
-  const deadlineMs = Date.now() + timeoutMs;
-  let sawDown = false;
+  const deadlineMs = Date.now() + timeoutMs
+  let sawDown = false
   while (Date.now() < deadlineMs) {
-    await new Promise((resolve) => setTimeout(resolve, 800));
+    await new Promise((resolve) => setTimeout(resolve, 800))
     const poll = await apiCall({
       kind: "auth-status",
       method: "GET",
       path: "/settings/api/auth/github/status",
-    });
+    })
     if (!poll.ok) {
-      sawDown = true; // restarting
-      continue;
+      sawDown = true // restarting
+      continue
     }
-    if (sawDown) return; // went down and came back → reboot complete
+    if (sawDown) return // went down and came back → reboot complete
   }
 }
 
@@ -1868,20 +2220,20 @@ async function waitForSidecarBack(timeoutMs: number): Promise<void> {
  * fresh device flow) or surface an error.
  */
 async function performSignOut(): Promise<boolean> {
-  stopAuthPolling();
+  stopAuthPolling()
   const result = await apiCall({
     kind: "auth-sign-out",
     method: "POST",
     path: "/settings/api/auth/github/sign-out",
-  });
+  })
   if (!result.ok) {
     renderAccount({
       state: "error",
       error: t("account-err-sign-out-failed", { error: result.error }),
-    });
-    return false;
+    })
+    return false
   }
-  return true;
+  return true
 }
 
 /**
@@ -1894,115 +2246,125 @@ async function performSignOut(): Promise<boolean> {
  * commitment.
  */
 async function switchAccount(): Promise<void> {
-  await startAuth();
+  await startAuth()
 }
 
 // One-shot button: copy code to clipboard, then open verification URL.
 // Brief on-button flash confirms the clipboard write — it's the only
 // feedback the user gets before the system browser takes focus.
-const SIGN_IN_FLASH_MS = 1200;
+const SIGN_IN_FLASH_MS = 1200
 
 async function openExternalUrl(url: string): Promise<void> {
   try {
     // Tauri v2 opener plugin is registered (opener:default). Call its
     // `open_url` command directly via invoke so we don't need to add a
     // new JS dep just for this one site.
-    await openUrl(url);
+    await openUrl(url)
   } catch (err) {
     // Plain-browser fallback (e.g. `bun run app:ui` mode) and last resort
     // if the plugin command is unavailable for any reason.
-    console.warn("opener plugin unavailable, falling back to window.open", err);
-    window.open(url, "_blank", "noopener,noreferrer");
+    console.warn("opener plugin unavailable, falling back to window.open", err)
+    window.open(url, "_blank", "noopener,noreferrer")
   }
 }
 
 async function signInWithCode(button: HTMLElement): Promise<void> {
   // Narrow to the pending variants — code + url only exist there. If
   // the button somehow fires from another state, no-op.
-  const status = currentAuthStatus;
+  const status = currentAuthStatus
   if (
     !status
     || (status.state !== "device_code_issued" && status.state !== "polling")
   ) {
-    return;
+    return
   }
-  const code = status.user_code;
-  const url = status.verification_uri;
+  const code = status.user_code
+  const url = status.verification_uri
 
-  const label = button.querySelector<HTMLElement>(".device-code-button__label");
-  const original = label?.innerHTML ?? null;
+  const label = button.querySelector<HTMLElement>(".device-code-button__label")
+  const original = label?.innerHTML ?? null
 
-  let copied = false;
+  let copied = false
   try {
-    await navigator.clipboard.writeText(code);
-    copied = true;
+    await navigator.clipboard.writeText(code)
+    copied = true
   } catch (err) {
     // Insecure context, denied permission, or no clipboard API. Surface
     // the code on the button so the user can still copy it manually.
-    console.error("clipboard write failed", err);
+    console.error("clipboard write failed", err)
     if (label) {
-      label.textContent = t("account-code-copy-manually", { code });
+      label.textContent = t("account-code-copy-manually", { code })
     }
   }
 
   if (copied && label) {
-    label.textContent = t("account-code-copied-opening");
+    label.textContent = t("account-code-copied-opening")
   }
 
-  await openExternalUrl(url);
+  await openExternalUrl(url)
 
   if (label && original !== null) {
-    window.setTimeout(() => {
+    globalThis.setTimeout(() => {
       // Only restore if the pending state is still rendered (label still
       // in the DOM). Otherwise we'd flash text into a torn-down node.
       if (document.body.contains(label)) {
-        label.innerHTML = original;
+        label.innerHTML = original
       }
-    }, SIGN_IN_FLASH_MS);
+    }, SIGN_IN_FLASH_MS)
   }
 }
 
 function wireAccount(): void {
-  const section = document.querySelector('[data-section="account"]');
-  if (!section) return;
+  const section = document.querySelector('[data-section="account"]')
+  if (!section) return
   section.addEventListener("click", (ev) => {
-    const target = ev.target;
-    if (!(target instanceof HTMLElement)) return;
-    const button = target.closest<HTMLElement>("[data-action]");
-    if (!button) return;
-    const action = button.dataset.action;
+    const target = ev.target
+    if (!(target instanceof HTMLElement)) return
+    const button = target.closest<HTMLElement>("[data-action]")
+    if (!button) return
+    const action = button.dataset.action
     switch (action) {
-      case "auth-start":
-        void startAuth();
-        break;
-      case "sign-out":
-        void signOut();
-        break;
-      case "switch-account":
-        void switchAccount();
-        break;
-      case "sign-in-with-code":
-        void signInWithCode(button);
-        break;
-      case "cancel-auth":
-        void cancelAuth();
-        break;
-      case "gh-use":
-        void useGhAccount(button);
-        break;
-      case "gh-refresh":
-        if (button instanceof HTMLButtonElement) refreshGhAccounts(button);
-        break;
-      case "account-switch":
-        void switchToAccount(button);
-        break;
-      case "account-remove":
-        void forgetAccount(button);
-        break;
-      default:
-        break;
+      case "auth-start": {
+        void startAuth()
+        break
+      }
+      case "sign-out": {
+        void signOut()
+        break
+      }
+      case "switch-account": {
+        void switchAccount()
+        break
+      }
+      case "sign-in-with-code": {
+        void signInWithCode(button)
+        break
+      }
+      case "cancel-auth": {
+        void cancelAuth()
+        break
+      }
+      case "gh-use": {
+        void useGhAccount(button)
+        break
+      }
+      case "gh-refresh": {
+        if (button instanceof HTMLButtonElement) refreshGhAccounts(button)
+        break
+      }
+      case "account-switch": {
+        void switchToAccount(button)
+        break
+      }
+      case "account-remove": {
+        void forgetAccount(button)
+        break
+      }
+      default: {
+        break
+      }
     }
-  });
+  })
 }
 
 // ---- General section -------------------------------------------------------
@@ -2014,7 +2376,7 @@ function wireAccount(): void {
 function getMenuBarOnlyEl(): HTMLInputElement | null {
   return document.querySelector<HTMLInputElement>(
     '[data-section="general"] [data-menu-bar-only]',
-  );
+  )
 }
 
 /**
@@ -2024,105 +2386,139 @@ function getMenuBarOnlyEl(): HTMLInputElement | null {
  * unchecked state.
  */
 async function loadGeneral(): Promise<void> {
-  const el = getMenuBarOnlyEl();
-  if (!el) return;
+  const el = getMenuBarOnlyEl()
+  if (!el) return
   try {
-    const key = await getShellApiKey();
-    const headers: Record<string, string> = { accept: "application/json" };
-    if (key) headers["x-api-key"] = key;
-    const res = await fetch("/settings/api/ui", { headers });
-    if (!res.ok) return;
-    const data = (await res.json()) as { menuBarOnly?: boolean };
-    el.checked = !!data.menuBarOnly;
+    const key = await getShellApiKey()
+    const headers: Record<string, string> = { accept: "application/json" }
+    if (key) headers["x-api-key"] = key
+    const res = await fetch("/settings/api/ui", { headers })
+    if (!res.ok) return
+    const data = (await res.json()) as { menuBarOnly?: boolean }
+    el.checked = Boolean(data.menuBarOnly)
   } catch (err) {
-    console.warn("GET /settings/api/ui failed:", err);
+    console.warn("GET /settings/api/ui failed:", err)
   }
 }
 
 function wireGeneral(): void {
-  const el = getMenuBarOnlyEl();
-  if (!el) return;
+  const el = getMenuBarOnlyEl()
+  if (!el) return
   el.addEventListener("change", () => {
-    const menuBarOnly = el.checked;
+    const menuBarOnly = el.checked
     // Persist to the proxy (same auth pattern as the other settings calls).
+    // The Settings UI is a browser tab with no Tauri IPC, so it CANNOT apply the
+    // Dock/activation policy directly — the Rust shell watches config.json on its
+    // status poll and live-applies the change (sync_menu_bar_only_from_config),
+    // typically within a few seconds. So persisting the preference is all we do.
     void (async () => {
       try {
-        const key = await getShellApiKey();
+        const key = await getShellApiKey()
         const headers: Record<string, string> = {
           accept: "application/json",
           "content-type": "application/json",
-        };
-        if (key) headers["x-api-key"] = key;
+        }
+        if (key) headers["x-api-key"] = key
         await fetch("/settings/api/ui", {
           method: "POST",
           headers,
           body: JSON.stringify({ menuBarOnly }),
-        });
+        })
       } catch (err) {
-        console.warn("POST /settings/api/ui failed:", err);
+        console.warn("POST /settings/api/ui failed:", err)
       }
-    })();
-    // Apply live to the Dock/taskbar via the Tauri shell. Guarded exactly like
-    // safeInvoke so a plain-browser session (app:ui, where invoke is
-    // unavailable) degrades gracefully instead of throwing.
-    void (async () => {
-      try {
-        await invoke("set_menu_bar_only", { menuBarOnly });
-      } catch (err) {
-        console.warn("invoke(set_menu_bar_only) failed:", err);
-      }
-    })();
-  });
-  void loadGeneral();
+    })()
+  })
+  void loadGeneral()
 }
 
-window.addEventListener("DOMContentLoaded", () => {
-  applyTheme();
-  applyI18n();
+globalThis.addEventListener("DOMContentLoaded", () => {
+  applyTheme()
+  applyI18n()
   // Sentences that embed a link/CLI token or a plural count aren't [data-i18n]
   // (they carry live DOM children); render them explicitly after the sweep.
-  renderStaticComposites();
-  wireLocalePicker(repaintDynamicI18n);
-  wireLogs();
-  wireDiagnostics();
-  wireAccount();
-  wireEndpoint();
-  wireGeneral();
-  wireUninstall();
-  mountApiClients();
-  mountApps();
-  mountModels();
-  wireNav();
-  syncFromHash();
-  void loadDiagnostics();
-  if (readHashSection() === "account") {
-    void loadAuthStatus();
-    openAuthEvents();
+  renderStaticComposites()
+  wireLocalePicker(repaintDynamicI18n)
+  wireLogs()
+  wireDiagnostics()
+  wireAccount()
+  wireEndpoint()
+  wireGeneral()
+  wireUninstall()
+  wireQuit()
+  mountApiClients()
+  mountApps()
+  mountModels()
+  mountUsage()
+  wireNav()
+  // Restore-on-reopen (§1.4): with no explicit deep-link hash, land on the section
+  // (and scroll) the sidecar inlined from the prior tab, so a tray-surfaced fresh
+  // tab keeps the user's place. Set the hash via replaceState (single-history-safe,
+  // ADR-0020) so the rest of boot (syncFromHash, the account instant-paint check)
+  // stays consistent with what's shown.
+  const initialView = pickInitialView(
+    globalThis.location.hash,
+    readInlineState(globalThis)?.restoreView,
+    DEFAULT_SECTION,
+  )
+  if (
+    !isSectionId(globalThis.location.hash.replace(/^#/, ""))
+    && initialView.section !== DEFAULT_SECTION
+  ) {
+    globalThis.history.replaceState(null, "", `#${initialView.section}`)
   }
-});
+  syncFromHash()
+  restorePaneScroll(initialView.scrollY)
+  // Open the single page-lifetime live feed (ADR-0019): presence + auth/apps/
+  // clients live updates + tray self-close, for the life of the tab.
+  openLiveFeed()
+  void loadDiagnostics()
+  // The live auth stream is always-on for the window's lifetime: it drives the
+  // global network banner on every section (not just Account). The initial SSE
+  // snapshot paints the banner without a separate GET. The Account card still
+  // GET-loads on entry so gh discovery runs.
+  openAuthEvents()
+  if (readHashSection() === "account") {
+    // Instant paint (§1.4): if the sidecar inlined state, render the account from
+    // it NOW so the tab shows the real auth status on the first frame instead of a
+    // spinner; loadAuthStatus() then confirms/refreshes and the WS keeps it live.
+    const inlined = readInlineState(globalThis)
+    if (inlined) renderAccount(inlined.snapshot.auth)
+    void loadAuthStatus()
+  }
+})
 
-window.addEventListener("hashchange", () => {
-  syncFromHash();
-  const section = readHashSection();
-  if (section === "diagnostics") void loadDiagnostics();
-  if (section === "general") void loadGeneral();
+globalThis.addEventListener("hashchange", () => {
+  syncFromHash()
+  const section = readHashSection()
+  if (section === "diagnostics") void loadDiagnostics()
+  if (section === "general") void loadGeneral()
   if (section === "apps") {
-    window.dispatchEvent(new CustomEvent("maximal:apps-refresh"));
+    globalThis.dispatchEvent(new CustomEvent("maximal:apps-refresh"))
   }
   if (section === "models") {
-    window.dispatchEvent(new CustomEvent("maximal:models-refresh"));
+    globalThis.dispatchEvent(new CustomEvent("maximal:models-refresh"))
+  }
+  if (section === "usage") {
+    globalThis.dispatchEvent(new CustomEvent("maximal:usage-refresh"))
   }
   if (section === "account") {
-    void loadAuthStatus();
-    openAuthEvents();
+    void loadAuthStatus()
+    openAuthEvents()
   } else {
-    // Leaving the Account section: drop any in-flight polling, the live
-    // event stream, and the uptime ticker (all re-established on return).
-    stopAuthPolling();
-    closeAuthEvents();
-    stopConnUptimeTicker();
+    // Leaving the Account section: drop the sign-in fallback poll and the
+    // uptime ticker (both re-established on return). The event stream stays
+    // open — it feeds the global network banner on every section.
+    stopAuthPolling()
+    stopConnUptimeTicker()
   }
-});
+})
+
+// Tear the always-on auth stream down when the window goes away, so a closed
+// (or reloaded) webview doesn't leave a dangling EventSource.
+window.addEventListener("pagehide", () => {
+  closeAuthEvents()
+})
 
 // Refresh on returning to the window. The common flow is: open the Account
 // section here, switch to a terminal, `gh auth login` (or out) of an account,
@@ -2131,12 +2527,12 @@ window.addEventListener("hashchange", () => {
 // poll (gh auth status touches the OS keyring); focus/visibility is the right
 // "moment of attention" to refresh.
 function refreshAccountOnAttention(): void {
-  if (readHashSection() === "account") void loadAuthStatus();
+  if (readHashSection() === "account") void loadAuthStatus()
 }
-window.addEventListener("focus", refreshAccountOnAttention);
+window.addEventListener("focus", refreshAccountOnAttention)
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") refreshAccountOnAttention();
-});
+  if (document.visibilityState === "visible") refreshAccountOnAttention()
+})
 
 // Recovery trigger (auth resilience). Independent of the section-gated status
 // refresh above: fire a re-arm on any "moment of connectivity" — an OS wake
@@ -2146,23 +2542,23 @@ document.addEventListener("visibilitychange", () => {
 // heals WITHOUT the user having to switch accounts back and forth. The sidecar
 // endpoint is itself single-flight and non-destructive; the client throttle
 // just avoids spamming it on a burst of focus/visibility/online events.
-let lastRearmMs = 0;
-const REARM_MIN_INTERVAL_MS = 10_000;
+let lastRearmMs = 0
+const REARM_MIN_INTERVAL_MS = 10_000
 function triggerAuthRearm(): void {
-  const now = Date.now();
-  if (now - lastRearmMs < REARM_MIN_INTERVAL_MS) return;
-  lastRearmMs = now;
+  const now = Date.now()
+  if (now - lastRearmMs < REARM_MIN_INTERVAL_MS) return
+  lastRearmMs = now
   void apiCall({
     kind: "auth-rearm",
     method: "POST",
     path: "/settings/api/auth/github/rearm",
   }).then((result) => {
     // If we recovered and the user is looking at the Account tab, reflect it.
-    if (result.ok && readHashSection() === "account") void loadAuthStatus();
-  });
+    if (result.ok && readHashSection() === "account") void loadAuthStatus()
+  })
 }
-window.addEventListener("online", triggerAuthRearm);
-window.addEventListener("focus", triggerAuthRearm);
+globalThis.addEventListener("online", triggerAuthRearm)
+globalThis.addEventListener("focus", triggerAuthRearm)
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") triggerAuthRearm();
-});
+  if (document.visibilityState === "visible") triggerAuthRearm()
+})

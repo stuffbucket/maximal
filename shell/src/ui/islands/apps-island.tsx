@@ -1,7 +1,7 @@
-import { StrictMode } from "react";
-import { createRoot } from "react-dom/client";
+import { StrictMode } from "react"
+import { createRoot } from "react-dom/client"
 
-import { AppsPanel } from "../features/apps/AppsPanel";
+import { AppsPanel } from "../features/apps/AppsPanel"
 
 /**
  * Mounts the Apps React island into #apps-root.
@@ -9,12 +9,12 @@ import { AppsPanel } from "../features/apps/AppsPanel";
  * `mountApiClients` in api-clients-island.tsx.
  */
 export function mountApps(): void {
-  const el = document.getElementById("apps-root");
-  if (!el) return;
-  const root = createRoot(el);
+  const el = document.querySelector("#apps-root")
+  if (!el) return
+  const root = createRoot(el)
   root.render(
     <StrictMode>
       <AppsPanel />
     </StrictMode>,
-  );
+  )
 }

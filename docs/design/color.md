@@ -1,7 +1,9 @@
 # Color
 
 Four roles, deliberately split to keep each from flooding the surface.
-**Token values live in [`shell/src/tokens.css`](../../shell/src/tokens.css).**
+**Token values are sourced from
+[`shell/src/ui/styles/theme.ts`](../../shell/src/ui/styles/theme.ts)**
+and generated into `shell/src/ui/styles/tokens.css`.
 This file describes role, scope, and the reasoning behind the split.
 
 | Token | Role |
@@ -69,10 +71,11 @@ block above `--link` in `tokens.css`. Re-measure if you change either.
   on the root; only surface, text, and `--link*` keys override per
   theme. Numeric and structural tokens stay constant.
 
-## Status colors (Dashboard only, currently)
+## Status colors
 
 `--status-error`, `--status-success`, `--status-warning`,
-`--status-info` (and their `-fg` pairings) are declared in
-`shell/ui/dashboard/style.css`. They are **not** in `tokens.css`. If
-you need them in Settings, promote them into `tokens.css` first via
-[`change-checklists.md`](change-checklists.md) → *Adding a new token*.
+`--status-info` (and their `-fg` pairings) are declared in `theme.ts`
+(`status`) and generated into `tokens.css`, available to every shell
+surface. (They previously lived only in the standalone dashboard
+stylesheet; the single-window redesign folded that surface into the
+settings app.)

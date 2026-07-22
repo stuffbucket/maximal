@@ -1,6 +1,6 @@
 # Layout system
 
-**All token values live in [`shell/src/tokens.css`](../../shell/src/tokens.css).**
+**All token values live in [`shell/src/ui/styles/tokens.css`](../../shell/src/ui/styles/tokens.css).**
 This file describes structure, scope, and which token to reach for —
 never the literal value.
 

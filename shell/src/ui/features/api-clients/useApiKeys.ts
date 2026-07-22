@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react"
 
-import { apiCall } from "../../../proxy/client";
-import type { ApiKeyEntry } from "../../../../../src/lib/config/settings-types";
-import { humanize } from "./humanize";
+import type { ApiKeyEntry } from "../../../../../src/lib/config/settings-types"
+
+import { apiCall } from "../../../proxy/client"
+import { humanize } from "./humanize"
 
 /**
  * Data hook over `/settings/api/api-keys`. Owns the entries list, the
@@ -16,54 +17,55 @@ import { humanize } from "./humanize";
  * fast enough on loopback that the resulting flicker is negligible.
  */
 interface UseApiKeys {
-  entries: Array<ApiKeyEntry>;
-  enforcing: boolean;
-  isLoading: boolean;
-  error: string | null;
-  reload: () => Promise<void>;
+  entries: Array<ApiKeyEntry>
+  enforcing: boolean
+  isLoading: boolean
+  error: string | null
+  reload: () => Promise<void>
   create: (input: {
-    label: string;
-    key?: string;
-    enabled?: boolean;
-  }) => Promise<MutationResult>;
+    label: string
+    key?: string
+    enabled?: boolean
+  }) => Promise<MutationResult>
   update: (
     id: string,
     patch: { label?: string; key?: string; enabled?: boolean },
-  ) => Promise<MutationResult>;
-  remove: (id: string) => Promise<MutationResult>;
-  setEnforce: (next: boolean) => Promise<MutationResult>;
+  ) => Promise<MutationResult>
+  remove: (id: string) => Promise<MutationResult>
+  setEnforce: (next: boolean) => Promise<MutationResult>
 }
 
 export interface MutationResult {
-  ok: boolean;
-  error?: string;
+  ok: boolean
+  error?: string
 }
 
+// eslint-disable-next-line max-lines-per-function -- cohesive hook; its state + effects belong together.
 export function useApiKeys(): UseApiKeys {
-  const [entries, setEntries] = useState<Array<ApiKeyEntry>>([]);
-  const [enforcing, setEnforcing] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [entries, setEntries] = useState<Array<ApiKeyEntry>>([])
+  const [enforcing, setEnforcing] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   const reload = useCallback(async () => {
     const result = await apiCall({
       kind: "api-keys-list",
       method: "GET",
       path: "/settings/api/api-keys",
-    });
+    })
     if (result.ok) {
-      setEntries(result.data.entries);
-      setEnforcing(result.data.enforcing);
-      setError(null);
+      setEntries(result.data.entries)
+      setEnforcing(result.data.enforcing)
+      setError(null)
     } else {
-      setError(humanize(result.error));
+      setError(humanize(result.error))
     }
-    setIsLoading(false);
-  }, []);
+    setIsLoading(false)
+  }, [])
 
   useEffect(() => {
-    void reload();
-  }, [reload]);
+    void reload()
+  }, [reload])
 
   const create = useCallback<UseApiKeys["create"]>(
     async (input) => {
@@ -72,18 +74,18 @@ export function useApiKeys(): UseApiKeys {
         method: "POST",
         path: "/settings/api/api-keys",
         body: input,
-      });
+      })
       if (!result.ok) {
-        const message = humanize(result.error);
-        setError(message);
-        return { ok: false, error: message };
+        const message = humanize(result.error)
+        setError(message)
+        return { ok: false, error: message }
       }
-      setError(null);
-      await reload();
-      return { ok: true };
+      setError(null)
+      await reload()
+      return { ok: true }
     },
     [reload],
-  );
+  )
 
   const update = useCallback<UseApiKeys["update"]>(
     async (id, patch) => {
@@ -92,59 +94,53 @@ export function useApiKeys(): UseApiKeys {
         method: "PATCH",
         path: `/settings/api/api-keys/${id}`,
         body: patch,
-      });
+      })
       if (!result.ok) {
-        const message = humanize(result.error);
-        setError(message);
-        return { ok: false, error: message };
+        const message = humanize(result.error)
+        setError(message)
+        return { ok: false, error: message }
       }
-      setError(null);
-      await reload();
-      return { ok: true };
+      setError(null)
+      await reload()
+      return { ok: true }
     },
     [reload],
-  );
+  )
 
-  const remove = useCallback<UseApiKeys["remove"]>(
-    async (id) => {
-      const result = await apiCall({
-        kind: "api-keys-delete",
-        method: "DELETE",
-        path: `/settings/api/api-keys/${id}`,
-      });
-      if (!result.ok) {
-        const message = humanize(result.error);
-        setError(message);
-        return { ok: false, error: message };
-      }
-      setError(null);
-      // Deliberately do NOT reload here — bulk delete fans out N calls
-      // and only the last should trigger a refresh. The caller decides.
-      return { ok: true };
-    },
-    [],
-  );
+  const remove = useCallback<UseApiKeys["remove"]>(async (id) => {
+    const result = await apiCall({
+      kind: "api-keys-delete",
+      method: "DELETE",
+      path: `/settings/api/api-keys/${id}`,
+    })
+    if (!result.ok) {
+      const message = humanize(result.error)
+      setError(message)
+      return { ok: false, error: message }
+    }
+    setError(null)
+    // Deliberately do NOT reload here — bulk delete fans out N calls
+    // and only the last should trigger a refresh. The caller decides.
+    return { ok: true }
+  }, [])
 
-  const setEnforce = useCallback<UseApiKeys["setEnforce"]>(
-    async (next) => {
-      const result = await apiCall({
-        kind: "api-keys-enforce",
-        method: "PATCH",
-        path: "/settings/api/api-keys/enforce",
-        body: { enforce: next },
-      });
-      if (!result.ok) {
-        const message = humanize(result.error);
-        setError(message);
-        return { ok: false, error: message };
-      }
-      setEntries(result.data.entries);
-      setEnforcing(result.data.enforcing);
-      setError(null);
-      return { ok: true };
-    },
-    [],
-  );
+  const setEnforce = useCallback<UseApiKeys["setEnforce"]>(async (next) => {
+    const result = await apiCall({
+      kind: "api-keys-enforce",
+      method: "PATCH",
+      path: "/settings/api/api-keys/enforce",
+      body: { enforce: next },
+    })
+    if (!result.ok) {
+      const message = humanize(result.error)
+      setError(message)
+      return { ok: false, error: message }
+    }
+    setEntries(result.data.entries)
+    setEnforcing(result.data.enforcing)
+    setError(null)
+    return { ok: true }
+  }, [])
 
   return {
     entries,
@@ -156,5 +152,5 @@ export function useApiKeys(): UseApiKeys {
     update,
     remove,
     setEnforce,
-  };
+  }
 }

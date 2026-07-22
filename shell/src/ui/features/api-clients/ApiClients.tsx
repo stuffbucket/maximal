@@ -1,16 +1,17 @@
-import { useCallback, useState } from "react";
+import { type ReactElement, useCallback, useState } from "react"
 
-import { Button } from "../../components/Button";
-import { ConfirmDialog } from "../../components/ConfirmDialog";
-import { Stack } from "../../components/Stack";
-import type { ApiKeyEntry } from "../../../../../src/lib/config/settings-types";
+import type { ApiKeyEntry } from "../../../../../src/lib/config/settings-types"
 
-import { AddConnection } from "./AddConnection";
-import { AdvancedSection } from "./AdvancedSection";
-import { ConnectionCard } from "./ConnectionCard";
-import { useApiKeys } from "./useApiKeys";
+import { Alert } from "../../components/Alert"
+import { Button } from "../../components/Button"
+import { ConfirmDialog } from "../../components/ConfirmDialog"
+import { Stack } from "../../components/Stack"
+import { AddConnection } from "./AddConnection"
+import { AdvancedSection } from "./AdvancedSection"
+import { ConnectionCard } from "./ConnectionCard"
+import { useApiKeys } from "./useApiKeys"
 
-export function ApiClients(): JSX.Element {
+export function ApiClients(): ReactElement {
   const {
     entries,
     enforcing,
@@ -21,33 +22,26 @@ export function ApiClients(): JSX.Element {
     update,
     remove,
     setEnforce,
-  } = useApiKeys();
+  } = useApiKeys()
 
-  const [adding, setAdding] = useState(false);
-  const [pendingDelete, setPendingDelete] = useState<ApiKeyEntry | null>(null);
-  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [adding, setAdding] = useState(false)
+  const [pendingDelete, setPendingDelete] = useState<ApiKeyEntry | null>(null)
+  const [deleteBusy, setDeleteBusy] = useState(false)
 
   const onConfirmDelete = useCallback(async (): Promise<void> => {
-    if (!pendingDelete) return;
-    setDeleteBusy(true);
-    await remove(pendingDelete.id);
-    await reload();
-    setDeleteBusy(false);
-    setPendingDelete(null);
-  }, [pendingDelete, remove, reload]);
+    if (!pendingDelete) return
+    setDeleteBusy(true)
+    await remove(pendingDelete.id)
+    await reload()
+    setDeleteBusy(false)
+    setPendingDelete(null)
+  }, [pendingDelete, remove, reload])
 
-  const showEmpty = !isLoading && entries.length === 0 && !adding;
+  const showEmpty = !isLoading && entries.length === 0 && !adding
 
   return (
     <Stack proximity="region" className="api-clients">
-      {error && (
-        <p
-          className="state__caption state__caption--error"
-          role="alert"
-        >
-          {error}
-        </p>
-      )}
+      {error && <Alert>{error}</Alert>}
 
       <Stack proximity="section" className="connection-list">
         {entries.map((entry) => (
@@ -66,28 +60,17 @@ export function ApiClients(): JSX.Element {
           </p>
         )}
 
-        {adding ? (
-          <AddConnection
-            create={create}
-            onDone={() => setAdding(false)}
-          />
-        ) : (
-          <div className="connection-list__add">
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={() => setAdding(true)}
-            >
+        {adding ?
+          <AddConnection create={create} onDone={() => setAdding(false)} />
+        : <div className="connection-list__add">
+            <Button variant="primary" size="sm" onClick={() => setAdding(true)}>
               + Add a connection
             </Button>
           </div>
-        )}
+        }
       </Stack>
 
-      <AdvancedSection
-        enforcing={enforcing}
-        setEnforce={setEnforce}
-      />
+      <AdvancedSection enforcing={enforcing} setEnforce={setEnforce} />
 
       <ConfirmDialog
         open={pendingDelete !== null}
@@ -97,13 +80,13 @@ export function ApiClients(): JSX.Element {
         busy={deleteBusy}
         body={
           <p>
-            <strong>{pendingDelete?.label}</strong> will no longer show up
-            on this list. You can always add it back later.
+            <strong>{pendingDelete?.label}</strong> will no longer show up on
+            this list. You can always add it back later.
           </p>
         }
         onConfirm={onConfirmDelete}
         onCancel={() => setPendingDelete(null)}
       />
     </Stack>
-  );
+  )
 }

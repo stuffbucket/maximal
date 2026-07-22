@@ -63,6 +63,7 @@ import { registerProcessCleanup } from "~/lib/platform/process-cleanup"
 import { cacheModels } from "~/lib/platform/utils"
 import {
   clearLastUpstreamRejection,
+  clearNetworkDiagnosis,
   clearTokenTrio,
   setGithubToken,
   setUserName,
@@ -248,6 +249,18 @@ export function getAuthStatus(): AuthStatus {
       }
     : {}
 
+  // The network-diagnosis banner signal rides on the SAME two variants (and
+  // works signed-out, so the shell can show "you're offline" before sign-in).
+  // Hysteresis-resolved: `state.networkDiagnosis` is set only once a failure has
+  // persisted past the onset window (see setNetworkDiagnosis). The transient
+  // `notify_on_reconnect` flag is NOT projected here — it's added to a single
+  // emitted event via emitAuthChangedWithReconnect so it can't re-fire.
+  const diagnosis = state.networkDiagnosis
+  const networkPayload =
+    diagnosis ?
+      { network_diagnosis: { kind: diagnosis.kind, scope: diagnosis.scope } }
+    : {}
+
   switch (authState.kind) {
     case "signed-in": {
       // `login` is required on the signed-in variant — the only writers
@@ -256,8 +269,10 @@ export function getAuthStatus(): AuthStatus {
       return {
         state: "authenticated",
         account_login: authState.login,
+        account_type: state.accountType,
         ...authenticatedExtras(authState),
         ...rejectionPayload,
+        ...networkPayload,
       }
     }
 
@@ -283,11 +298,17 @@ export function getAuthStatus(): AuthStatus {
           return {
             state: "authenticated",
             account_login: flow.resume.login,
+            account_type: state.accountType,
             ...authenticatedExtras(flow.resume),
             ...rejectionPayload,
+            ...networkPayload,
           }
         }
-        return { state: "unauthenticated", ...rejectionPayload }
+        return {
+          state: "unauthenticated",
+          ...rejectionPayload,
+          ...networkPayload,
+        }
       }
       return {
         state: authState.kind === "polling" ? "polling" : "device_code_issued",
@@ -298,7 +319,11 @@ export function getAuthStatus(): AuthStatus {
     }
 
     case "signed-out": {
-      return { state: "unauthenticated", ...rejectionPayload }
+      return {
+        state: "unauthenticated",
+        ...rejectionPayload,
+        ...networkPayload,
+      }
     }
 
     default: {
@@ -306,7 +331,11 @@ export function getAuthStatus(): AuthStatus {
       // makes a newly-added variant a compile error rather than a silent
       // fall-through.
       authState satisfies never
-      return { state: "unauthenticated", ...rejectionPayload }
+      return {
+        state: "unauthenticated",
+        ...rejectionPayload,
+        ...networkPayload,
+      }
     }
   }
 }
@@ -440,7 +469,7 @@ async function runPoller(flow: ActiveFlow): Promise<void> {
     // pollAccessToken loops internally with the server-told interval,
     // honouring slow_down and authorization_pending. It resolves on
     // success and throws on expired_token / access_denied.
-    const token = await pollAccessToken(flow.deviceCode)
+    const token = await pollAccessToken(flow.deviceCode, flow.abort.signal)
 
     if (flow.abort.signal.aborted) return
 
@@ -619,6 +648,10 @@ export async function signOut(): Promise<void> {
   // about. Clear here so the sidecar doesn't outlive the token that
   // produced it.
   clearLastUpstreamRejection()
+  // Likewise clear the network-issue banner: in v1 its only producer is the
+  // Copilot refresh loop, which stops on sign-out — so nothing would ever
+  // refresh or clear a stale diagnosis. Tie it to the producer's lifetime.
+  clearNetworkDiagnosis()
   // Set the union LAST, after the token + rejection are cleared, so the
   // auth.changed snapshot the shell receives reflects the fully signed-out
   // state (no stale rejection riding along on the unauthenticated event).
@@ -801,6 +834,14 @@ async function runDegrade(error: CopilotAuthFatalError): Promise<void> {
       message: error.message,
       at: new Date().toISOString(),
     })
+    // Record the degrade in auth-*.log. Previously this moment left NO trace in
+    // the dated auth log (forwardError logs via bare consola, and runDegrade
+    // was silent on the happy path), so the event that flipped an account to
+    // needs-reauth was invisible after the fact. `error.message` is the
+    // friendly, user-facing reason — safe for the file sink.
+    log.warn(
+      `Auth degraded — active account flagged needs-reauth (status ${error.status}): ${error.message}`,
+    )
   } catch (err) {
     log.warn(
       "Auth-controller: failed to flag account needs-reauth (credential retained):",

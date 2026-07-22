@@ -28,6 +28,7 @@
   --leading-2xl: 1.2;
   --tracking-xl: -0.01em;
   --tracking-2xl: -0.015em;
+  --tracking-caps: 0.02em;
 
   /* ---- Spacing ---- */
   --space-1: 4px;
@@ -64,12 +65,20 @@
   --elevation-modal: 0 8px 24px rgb(0 0 0 / 0.18);
   --elevation-tooltip: 0 2px 6px rgb(0 0 0 / 0.1);
 
+  /* ---- Opacity ---- */
+  --opacity-disabled: 0.5;
+
+  /* ---- Motion ---- */
+  --duration-fast: 120ms;
+  --duration-base: 150ms;
+  --easing-standard: ease-out;
+
   /* ---- Colors ---- */
   --brand: #c8334a;
   --brand-fg: #ffffff;
   --accent: #5198a6;
   --accent-fg: #ffffff;
-  --accent-hover: #2dd4bf;
+  --accent-hover: #63a9b6;
   --accent-destructive: #b32d3f;
   --accent-destructive-foreground: #ffffff;
 
@@ -82,6 +91,13 @@
   --status-warning-fg: #facc15;
   --status-info: #38bdf8;
   --status-info-fg: #7dd3fc;
+
+  /* ---- Data viz (Usage charts) ---- */
+  --viz-input: #3f9aa8;
+  --viz-output: #7b6fd0;
+  --viz-cache: #8a8f98;
+  --viz-cache-read: #c68a3c;
+  --viz-cache-creation: #c56b86;
 
   /* ---- Link colors (defaults to dark theme) ---- */
   --link: #7fc1d2;
@@ -96,6 +112,7 @@
   /* ---- Layout constants ---- */
   --sidebar-width: 200px;
   --content-max: 640px;
+  --content-max-wide: 1040px;
 }
 
 [data-theme="dark"] {

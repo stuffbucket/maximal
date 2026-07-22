@@ -19,9 +19,11 @@
 
 import type { Model } from "~/services/copilot/get-models"
 
+import { resolveModelProfile } from "~/lib/models/model-profile"
+
 /** A model is usable for the tool-calling haiku tier only if it can call tools. */
 function supportsToolCalls(model: Model): boolean {
-  return model.capabilities.supports.tool_calls === true
+  return resolveModelProfile(model).supportsToolCalls
 }
 
 /** Claude haiku-class models identify their family as "claude" + a haiku name. */

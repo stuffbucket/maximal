@@ -9,26 +9,26 @@
  * raw text through (truncated at a reasonable cap so a giant HTML
  * 500-page doesn't blow up the layout).
  */
-const MAX_RAW_LEN = 280;
+const MAX_RAW_LEN = 280
 
 export function humanize(raw: string | undefined | null): string {
-  if (!raw) return "Something went wrong.";
-  const trimmed = raw.trim();
-  if (!trimmed) return "Something went wrong.";
+  if (!raw) return "Something went wrong."
+  const trimmed = raw.trim()
+  if (!trimmed) return "Something went wrong."
 
   // Most proxy errors come back as JSON. parse() lazily, swallow.
   try {
-    const parsed: unknown = JSON.parse(trimmed);
+    const parsed: unknown = JSON.parse(trimmed)
     if (
-      parsed &&
-      typeof parsed === "object" &&
-      "error" in parsed &&
-      typeof (parsed as { error: unknown }).error === "object" &&
-      (parsed as { error: { message?: unknown } }).error !== null
+      parsed
+      && typeof parsed === "object"
+      && "error" in parsed
+      && typeof parsed.error === "object"
+      && parsed.error !== null
     ) {
-      const inner = (parsed as { error: { message?: unknown } }).error;
+      const inner = (parsed as { error: { message?: unknown } }).error
       if (typeof inner.message === "string" && inner.message.length > 0) {
-        return inner.message;
+        return inner.message
       }
     }
   } catch {
@@ -36,7 +36,7 @@ export function humanize(raw: string | undefined | null): string {
   }
 
   if (trimmed.length > MAX_RAW_LEN) {
-    return `${trimmed.slice(0, MAX_RAW_LEN)}…`;
+    return `${trimmed.slice(0, MAX_RAW_LEN)}…`
   }
-  return trimmed;
+  return trimmed
 }

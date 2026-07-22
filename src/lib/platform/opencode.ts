@@ -2,6 +2,10 @@ import consola from "consola"
 import { exec } from "node:child_process"
 import { readFile } from "node:fs/promises"
 import path from "node:path"
+import { z } from "zod"
+
+/** Only `version` is read; everything else in the package.json passes through. */
+const OpencodePackageSchema = z.object({ version: z.string() }).loose()
 
 const execAsync = (command: string): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -32,7 +36,7 @@ async function resolveOpencodeVersion(): Promise<void> {
       "package.json",
     )
     const packageJson = await readFile(opencodePackagePath, "utf8")
-    const { version } = JSON.parse(packageJson) as { version: string }
+    const { version } = OpencodePackageSchema.parse(JSON.parse(packageJson))
     opencodeVersionCache = version
   } catch (error) {
     consola.warn(`Failed to resolve opencode version`, error)

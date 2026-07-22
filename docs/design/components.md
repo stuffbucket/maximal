@@ -8,7 +8,7 @@ exist, this doc is canon — match the spec exactly rather than
 hand-rolling something nearby.
 
 Token values themselves live in
-[`shell/src/tokens.css`](../../shell/src/tokens.css); token vocabulary
+[`shell/src/ui/styles/tokens.css`](../../shell/src/ui/styles/tokens.css); token vocabulary
 in [`tokens.md`](tokens.md).
 
 ## Buttons
@@ -76,6 +76,12 @@ in [`tokens.md`](tokens.md).
   3:1.
 - **Identical ring on all focusable elements** — buttons, inputs,
   switches, links, nav items. No special-case ring styles.
+- **One treatment, encoded once.** The ring is a solid outline
+  (`--focus-ring` → `2px solid var(--accent)`), applied as
+  `outline: var(--focus-ring)`. There is no box-shadow variant: every
+  surface resolves `--focus-ring` to the same value from
+  `theme.ts` (`focusRing.expr`). Do not reintroduce a per-surface
+  focus expression.
 
 ## Component dimensions (size tokens)
 

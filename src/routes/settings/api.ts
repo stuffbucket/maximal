@@ -38,7 +38,6 @@ import { apiKeysRoutes } from "./api-keys"
 import { appsRoutes } from "./apps"
 import { authRoutes } from "./auth"
 import { clientsRoutes } from "./clients"
-import { eventsRoutes } from "./events"
 import { ghRoutes } from "./gh"
 import { modelsRoutes } from "./models"
 import { respondValidated } from "./respond-validated"
@@ -138,5 +137,4 @@ settingsApiRoutes.route("/api-keys", apiKeysRoutes)
 settingsApiRoutes.route("/clients", clientsRoutes)
 settingsApiRoutes.route("/apps", appsRoutes)
 settingsApiRoutes.route("/models", modelsRoutes)
-settingsApiRoutes.route("/events", eventsRoutes)
 settingsApiRoutes.route("/ui", uiRoutes)

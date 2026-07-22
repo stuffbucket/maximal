@@ -766,6 +766,34 @@ describe("prepareMessagesApiPayload", () => {
     expect(payload.top_p).toBe(0.9)
     expect(payload.temperature).toBeUndefined()
   })
+
+  test("strips temperature/top_p/top_k on a reasoning-effort-only model (GPT-5.6)", () => {
+    // The GPT-5.6 trio are reasoning models that advertise a reasoning_effort
+    // ladder but NOT adaptive_thinking. Before the guard was broadened to the
+    // resolved `isReasoning`, the strip keyed on adaptive_thinking alone, so
+    // temperature/top_p/top_k leaked through and Copilot 400'd.
+    const payload: AnthropicMessagesPayload = {
+      model: "gpt-5.6-sol",
+      max_tokens: 64,
+      temperature: 0.7,
+      top_p: 0.9,
+      top_k: 40,
+      messages: [{ role: "user", content: "hello" }],
+    }
+
+    prepareMessagesApiPayload(payload, {
+      capabilities: {
+        supports: {
+          adaptive_thinking: false,
+          reasoning_effort: ["low", "medium", "high", "xhigh", "max"],
+        },
+      },
+    } as never)
+
+    expect(payload.temperature).toBeUndefined()
+    expect(payload.top_p).toBeUndefined()
+    expect(payload.top_k).toBeUndefined()
+  })
 })
 
 describe("prepareMessagesApiPayload extended-thinking display (#210)", () => {

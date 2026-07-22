@@ -4,13 +4,18 @@ import { cors } from "hono/cors"
 import { logger } from "hono/logger"
 
 import {
+  buildCorsOptions,
+  createOriginGuardMiddleware,
+  MANDATORY_AUTH_PREFIX,
+} from "./lib/auth/origin-guard"
+import {
   createAuthMiddleware,
   requireGithubAuth,
 } from "./lib/auth/request-auth"
 import { traceIdMiddleware } from "./lib/http/trace"
 import { staleRefreshMiddleware } from "./lib/models/refresh-models"
 import { cacheModels } from "./lib/platform/utils"
-import { getModelsLoadedAtMs } from "./lib/runtime-state/state"
+import { getModelsLoadedAtMs, state } from "./lib/runtime-state/state"
 import { buildStatus } from "./lib/runtime-state/status"
 import { BUILD_VERSION } from "./lib/update/build-info"
 import { completionRoutes } from "./routes/chat-completions/route"
@@ -19,14 +24,15 @@ import { embeddingRoutes } from "./routes/embeddings/route"
 import { internalRoutes } from "./routes/internal/route"
 import { messageRoutes } from "./routes/messages/route"
 import { modelRoutes } from "./routes/models/route"
+import { productApiRoutes } from "./routes/product-api"
 import { providerMessageRoutes } from "./routes/provider/messages/route"
 import { providerModelRoutes } from "./routes/provider/models/route"
 import { responsesRoutes } from "./routes/responses/route"
 import { settingsApiRoutes } from "./routes/settings/api"
-import { setupStatusRoute } from "./routes/setup-status"
 import { tokenUsageRoute } from "./routes/token-usage/route"
 import { uiRoutes } from "./routes/ui/route"
 import { usageRoute } from "./routes/usage/route"
+import { createWsRoutes, WS_PATH } from "./routes/ws/route"
 
 export const server = new Hono()
 
@@ -47,7 +53,19 @@ server.use(async (c, next) => {
   await next()
 })
 server.use(logger())
-server.use(cors())
+// Control-surface hardening (§6, ADR-0021). `boundPort` is read lazily per
+// request — `runServer` sets `state.boundPort` from the resolved `--port` before
+// it binds, and in-memory tests fall back to the 4141 default.
+const boundPort = (): number => state.boundPort
+// CORS narrowed from `*` to a localhost allowlist. The OPTIONS preflight is the
+// load-bearing case (auth bypasses OPTIONS), so a `*` here would let any origin
+// preflight-probe the control surface.
+server.use(cors(buildCorsOptions(boundPort)))
+// Reject any present, non-localhost `Origin` on the control prefixes
+// (`/settings/api`, `/_internal`, `/_debug/state`) — including `/_internal/shutdown`.
+// A missing Origin passes (the CLI/plugin/SDK invariant, §6.6). Mounted before
+// auth so a cross-origin browser request is refused regardless of any key.
+server.use(createOriginGuardMiddleware({ boundPort }))
 server.use(
   "*",
   createAuthMiddleware({
@@ -59,12 +77,30 @@ server.use(
       "/settings",
       "/settings/",
       "/_debug/state",
+      // The read-only, secret-redacting diagnostics endpoint (§1.7): the data
+      // behind the "open in any browser" diagnostics page, deliberately
+      // unauthenticated (§6.5). GET-only and CSRF-safe via the Origin guard
+      // above, so it is exempt from the /settings/api mandatory-auth prefix.
+      "/settings/api/diagnostics",
       "/setup-status",
+      // The live-feed WebSocket handshake (§1.3). It is Origin-gated (a
+      // cross-origin browser WS is 403'd by the guard above) and the route
+      // itself requires the minted `?key=` session token — so it is exempt
+      // from the API-key middleware here, not unprotected.
+      WS_PATH,
+      // The product-API OpenAPI document is a public spec (no secrets),
+      // served alongside the fresh-install `/setup-status` surface.
+      "/openapi.json",
     ],
     // /ui/* serves the settings + dashboard UI shells and their assets.
     // /settings/api/* are data endpoints — gated by requireAuthPrefixes.
     allowUnauthenticatedPrefixes: ["/ui"],
     requireAuthPrefixes: ["/settings/api"],
+    // §6.2: /settings/api stays auth-mandatory even when the user-facing
+    // `enforce` toggle is off — a local browser page must not be able to drive
+    // the control surface key-less. The shell-key bypass keeps the Settings UI
+    // working. One auth decision, not a parallel gate (see origin-guard.ts).
+    alwaysEnforcePrefixes: [MANDATORY_AUTH_PREFIX],
     // The dashboard at /ui/dashboard fetches these endpoints from the
     // same machine. Trusting loopback lets us drop the client-side API
     // key UI (and its clear-text storage) without exposing the same
@@ -78,6 +114,19 @@ server.use(
       // must NOT be able to evict the running instance), but listing
       // it here means we skip the auth dance for the local caller.
       "/_internal/shutdown",
+      // Tray-open (§1.2): the native shell POSTs this on a tray click — a
+      // local, keyless caller. Same posture as shutdown (the route re-checks
+      // loopback + it's Origin-gated), so skip auth for the loopback caller,
+      // else dedup would break when "block unknown connections" is on.
+      "/_internal/tray-open",
+      // Quit (§1.6): the browser-tab UI POSTs this to quit the whole app (it
+      // has no Tauri host to invoke a quit). Loopback + Origin-gated; keyless
+      // for the local caller like the two above.
+      "/_internal/quit",
+      // In-place self-update (Phase 6): the browser-tab Settings "Upgrade" button
+      // POSTs this; the sidecar signals the shell to run the signed install.
+      // Loopback + Origin-gated; keyless for the local caller like the others.
+      "/_internal/upgrade",
     ],
   }),
 )
@@ -112,26 +161,29 @@ server.get("/", (c) => c.text("Server running"))
 server.get("/status", (c) => c.json(buildStatus(SERVER_START_MS)))
 // Legacy redirects → canonical /ui/* surfaces. Kept so existing links
 // (Claude config, boot banner, bookmarks, the Tauri shell pre-upgrade)
-// keep working. The dashboard preserves its `?endpoint=…` query.
-server.get("/usage-viewer", (c) => {
-  const qs = new URL(c.req.url).search
-  return c.redirect(`/ui/dashboard/${qs}`, 301)
-})
-server.get("/usage-viewer/", (c) => {
-  const qs = new URL(c.req.url).search
-  return c.redirect(`/ui/dashboard/${qs}`, 301)
-})
+// keep working. The standalone dashboard is gone (§7) — its usage view is now
+// the settings SPA's Usage section, so `/usage-viewer` lands on `#usage`.
+server.get("/usage-viewer", (c) => c.redirect("/ui/settings/#usage", 301))
+server.get("/usage-viewer/", (c) => c.redirect("/ui/settings/#usage", 301))
 server.get("/settings", (c) => c.redirect("/ui/settings/", 301))
 server.get("/settings/", (c) => c.redirect("/ui/settings/", 301))
 
 server.route("/_debug", debugRoutes)
 server.route("/_internal", internalRoutes)
-server.route("/setup-status", setupStatusRoute)
+// The maximal-specific product API surface: `/setup-status` plus its
+// route-bound OpenAPI document at `/openapi.json`. See routes/product-api.ts.
+server.route("/", productApiRoutes)
 // `/settings/api/*` requires API-key auth (covers the new auth endpoints too).
 server.route("/settings/api", settingsApiRoutes)
 // `/ui/*` serves the settings + dashboard UI (embedded in prod, from
 // shell/dist in dev). See src/routes/ui/route.ts.
 server.route("/ui", uiRoutes)
+
+// `/ws` — the unified live-feed WebSocket (§1.3). This mounts the HTTP GET that
+// performs the Bun upgrade; the socket callbacks (presence + feed) are the
+// `websocket` handler passed to `serve({ bun: { websocket } })` in run-server.ts.
+// Origin-gated + `?key=`-scoped (see the allowlist note above).
+server.route(WS_PATH, createWsRoutes())
 
 // Gate every upstream-touching route on the presence of a GitHub token.
 // When the sidecar boots without one, the HTTP server still listens (so

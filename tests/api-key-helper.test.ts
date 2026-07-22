@@ -4,10 +4,13 @@ import type { ApiKeyEntry, AppConfig } from "~/lib/config/config"
 
 import {
   apiKeyHelperCommand,
+  ensureDefaultEndpointKey,
+  generateApiKeyValue,
   isOwnedApiKeyHelper,
   resolveApiKey,
   runApiKeyHelper,
 } from "~/lib/auth/api-key-helper"
+import { API_KEY_VALUE_PATTERN } from "~/lib/config/config-schema"
 
 /**
  * Unit coverage for the generic apiKeyHelper resolver.
@@ -34,6 +37,24 @@ function config(auth: AppConfig["auth"]): AppConfig {
   return { auth }
 }
 
+/** Injected seams keep {@link ensureDefaultEndpointKey} off the real FS/config
+ *  entirely: an in-memory config with deterministic mint/id/now. */
+function ensureKeyHarness(initial: AppConfig) {
+  let current = initial
+  const writes: Array<AppConfig> = []
+  const deps = {
+    read: () => current,
+    write: (c: AppConfig) => {
+      current = c
+      writes.push(c)
+    },
+    mintKey: () => "mxl_minted",
+    newId: () => "id-minted",
+    now: () => "2026-07-20T00:00:00.000Z",
+  }
+  return { deps, writes, get: () => current }
+}
+
 describe("apiKeyHelperCommand", () => {
   // An explicit execPath keeps these deterministic (the default is the test
   // runner's binary). The command embeds the ABSOLUTE path, double-quoted, so a
@@ -57,6 +78,46 @@ describe("apiKeyHelperCommand", () => {
     const spaced = "/Users/x/My Apps/Maximal.app/Contents/MacOS/maximal"
     expect(apiKeyHelperCommand("claude-code", spaced)).toBe(
       `"${spaced}" api claude-code`,
+    )
+  })
+
+  // When maximal runs under a RUNTIME (bun/node) rather than the compiled
+  // binary, process.execPath is the runtime — a bare `"…/bun" api claude-code`
+  // would make the client exec a script named `api`. So we emit the two-token
+  // `"<runtime>" "<entry-script>"` form, which actually invokes maximal's CLI.
+  const BUN = "/opt/homebrew/Cellar/bun/1.3.10/bin/bun"
+  const ENTRY = "/Users/x/maximal/src/main.ts"
+
+  test("runtime execPath (bun) → two-token form with the entry script", () => {
+    expect(apiKeyHelperCommand("claude-code", BUN, ENTRY)).toBe(
+      `"${BUN}" "${ENTRY}" api claude-code`,
+    )
+  })
+
+  test("runtime execPath (node) → two-token form", () => {
+    const node = "/usr/local/bin/node"
+    expect(apiKeyHelperCommand("claude-code", node, ENTRY)).toBe(
+      `"${node}" "${ENTRY}" api claude-code`,
+    )
+  })
+
+  test("a Windows runtime basename (bun.exe) is still detected", () => {
+    const bunExe = String.raw`C:\Users\x\bun.exe`
+    expect(apiKeyHelperCommand(undefined, bunExe, ENTRY)).toBe(
+      `"${bunExe}" "${ENTRY}" api`,
+    )
+  })
+
+  test("compiled maximal binary ignores mainScript (single-token form)", () => {
+    // basename `maximal` (or `maximal-<triple>`) is NOT a runtime → the entry
+    // script is irrelevant; the compiled path invokes itself directly.
+    expect(apiKeyHelperCommand("claude-code", BIN, ENTRY)).toBe(
+      `"${BIN}" api claude-code`,
+    )
+    const triple =
+      "/Applications/Maximal.app/Contents/MacOS/maximal-aarch64-apple-darwin"
+    expect(apiKeyHelperCommand("claude-code", triple, ENTRY)).toBe(
+      `"${triple}" api claude-code`,
     )
   })
 })
@@ -96,6 +157,27 @@ describe("isOwnedApiKeyHelper", () => {
     expect(
       isOwnedApiKeyHelper("maximal --apiKeyHelper claude-code", "claude-code"),
     ).toBe(true)
+  })
+
+  test('recognizes the runtime two-token form `"<runtime>" "<entry>" api <label>`', () => {
+    // A dev/bun invocation writes execPath + entry-script. It must be classed
+    // ours so the packaged app heals it forward to the single-token compiled
+    // path on next boot.
+    expect(
+      isOwnedApiKeyHelper(
+        '"/opt/homebrew/bin/bun" "/Users/x/maximal/src/main.ts" api claude-code',
+        "claude-code",
+      ),
+    ).toBe(true)
+  })
+
+  test("two-token form with the wrong label is NOT ours", () => {
+    expect(
+      isOwnedApiKeyHelper(
+        '"/opt/homebrew/bin/bun" "/Users/x/maximal/src/main.ts" api other',
+        "claude-code",
+      ),
+    ).toBe(false)
   })
 
   test("rejects a genuinely foreign helper — including a foreign bare `api` invocation", () => {
@@ -547,6 +629,80 @@ describe("runApiKeyHelper", () => {
       expect(stderr.join("")).toBe(`ERROR: ${expected.error}\n`)
       expect(stdout.join("")).toBe("")
     }
+  })
+})
+
+describe("generateApiKeyValue", () => {
+  test("is prefixed `mxl_` and matches the accepted key charset", () => {
+    const key = generateApiKeyValue()
+    expect(key.startsWith("mxl_")).toBe(true)
+    expect(API_KEY_VALUE_PATTERN.test(key)).toBe(true)
+  })
+
+  test("is unique across calls", () => {
+    expect(generateApiKeyValue()).not.toBe(generateApiKeyValue())
+  })
+})
+
+describe("ensureDefaultEndpointKey", () => {
+  const harness = ensureKeyHarness
+
+  test("mints a `Default` entry when nothing is configured", () => {
+    const h = harness({})
+    ensureDefaultEndpointKey(h.deps)
+    expect(h.writes).toHaveLength(1)
+    expect(h.get().auth?.apiKeyEntries).toEqual([
+      {
+        id: "id-minted",
+        label: "Default",
+        key: "mxl_minted",
+        enabled: true,
+        created_at: "2026-07-20T00:00:00.000Z",
+      },
+    ])
+    // The freshly-minted key is now resolvable as the default endpoint key.
+    expect(resolveApiKey(undefined, h.get())).toEqual({
+      ok: true,
+      key: "mxl_minted",
+      source: "default",
+    })
+  })
+
+  test("no-op when a legacy apiKeys default already exists", () => {
+    const h = harness(config({ apiKeys: ["legacy-default"] }))
+    ensureDefaultEndpointKey(h.deps)
+    expect(h.writes).toHaveLength(0)
+  })
+
+  test("no-op when an enabled apiKeyEntries default already exists", () => {
+    const h = harness(
+      config({ apiKeyEntries: [entry({ id: "e", key: "k-existing" })] }),
+    )
+    ensureDefaultEndpointKey(h.deps)
+    expect(h.writes).toHaveLength(0)
+  })
+
+  test("mints when the only entry is disabled (no resolvable default)", () => {
+    const h = harness(
+      config({
+        apiKeyEntries: [entry({ id: "d", key: "k-x", enabled: false })],
+      }),
+    )
+    ensureDefaultEndpointKey(h.deps)
+    expect(h.writes).toHaveLength(1)
+    // Appends alongside the existing disabled entry rather than replacing it.
+    expect(h.get().auth?.apiKeyEntries?.map((e) => e.id)).toEqual([
+      "d",
+      "id-minted",
+    ])
+  })
+
+  test("is idempotent across repeated calls", () => {
+    const h = harness({})
+    ensureDefaultEndpointKey(h.deps)
+    ensureDefaultEndpointKey(h.deps)
+    ensureDefaultEndpointKey(h.deps)
+    expect(h.writes).toHaveLength(1)
   })
 })
 

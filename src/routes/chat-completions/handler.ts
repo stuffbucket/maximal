@@ -5,6 +5,7 @@ import { streamSSE, type SSEMessage } from "hono/streaming"
 import { awaitApproval } from "~/lib/http/approval"
 import { checkRateLimit } from "~/lib/http/rate-limit"
 import { reverseId } from "~/lib/models/anthropic-id-rewrite"
+import { resolveModelProfile } from "~/lib/models/model-profile"
 import {
   createHandlerLogger,
   debugJson,
@@ -58,9 +59,15 @@ export async function handleCompletion(c: Context) {
   if (state.manualApprove) await awaitApproval()
 
   if (isNullish(payload.max_tokens)) {
+    // Preserve the historical "absent → leave unset" behavior: only fill in a
+    // POSITIVE limit. profile.maxOutputTokens defaults to 0 when the catalog
+    // carries no limit, and sending max_tokens: 0 would differ from the old
+    // `?? undefined` behavior — so treat 0 as "omit".
+    const maxOutputTokens =
+      selectedModel ? resolveModelProfile(selectedModel).maxOutputTokens : 0
     payload = {
       ...payload,
-      max_tokens: selectedModel?.capabilities.limits.max_output_tokens,
+      max_tokens: maxOutputTokens > 0 ? maxOutputTokens : undefined,
     }
     debugJson(logger, "Set max_tokens to:", payload.max_tokens)
   }
@@ -119,6 +126,7 @@ const parseChatCompletionChunk = (
   }
 
   try {
+    // casts-keep: trusted Copilot SSE chunk; translator tolerates missing fields
     return JSON.parse(data) as ChatCompletionChunk
   } catch {
     return null

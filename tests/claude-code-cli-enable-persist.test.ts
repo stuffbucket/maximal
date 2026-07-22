@@ -23,6 +23,7 @@ import path from "node:path"
 import { claudeCodeApp } from "~/apps/claude-code"
 import { isProxyBaseUrlConfigured } from "~/apps/claude-code/config"
 import { claudeCodeRoutingIntended } from "~/apps/claude-code/reconcile"
+import { resolveApiKey } from "~/lib/auth/api-key-helper"
 import { getConfig, writeConfig } from "~/lib/config/config"
 
 const TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "cc-cli-persist-"))
@@ -81,5 +82,44 @@ describe("claude-code CLI enable/disable persists routing intent (#229)", () => 
     const apps = getConfig().apps
     expect(apps?.claudeCode?.enabled).toBe(true)
     expect(apps?.claudeDesktop?.enabled).toBe(true)
+  })
+
+  test("enable() mints a default endpoint key so the apiKeyHelper resolves", async () => {
+    // Fresh config: no key at all — `maximal api claude-code` would otherwise
+    // exit key-less and break the client.
+    expect(getConfig().auth?.apiKeyEntries ?? []).toHaveLength(0)
+    expect(resolveApiKey("claude-code").ok).toBe(false)
+
+    await claudeCodeApp.enable()
+
+    const entries = getConfig().auth?.apiKeyEntries ?? []
+    expect(entries).toHaveLength(1)
+    expect(entries[0]?.label).toBe("Default")
+    expect(entries[0]?.enabled).toBe(true)
+    // The helper now resolves the freshly-minted default endpoint key.
+    const resolved = resolveApiKey("claude-code")
+    expect(resolved).toMatchObject({ ok: true, source: "default" })
+  })
+
+  test("enable() does not mint a second key when one already exists", async () => {
+    writeConfig({
+      auth: {
+        apiKeyEntries: [
+          {
+            id: "x",
+            label: "Mine",
+            key: "mxl_existing",
+            enabled: true,
+            created_at: "2026-01-01T00:00:00.000Z",
+          },
+        ],
+      },
+    })
+
+    await claudeCodeApp.enable()
+
+    const entries = getConfig().auth?.apiKeyEntries ?? []
+    expect(entries).toHaveLength(1)
+    expect(entries[0]?.key).toBe("mxl_existing")
   })
 })

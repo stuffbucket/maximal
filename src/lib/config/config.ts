@@ -41,7 +41,7 @@ export interface AppConfig {
   promptCacheRetention?: "in_memory" | "24h"
   modelReasoningEfforts?: Record<
     string,
-    "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
+    "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
   >
   useFunctionApplyPatch?: boolean
   useMessagesApi?: boolean
@@ -49,6 +49,13 @@ export interface AppConfig {
   useResponsesApiWebSearch?: boolean
   claudeTokenMultiplier?: number
   logRetentionDays?: number
+  /**
+   * How many days of `token_usage_events` rows to keep; older rows are pruned on
+   * boot and daily. 0 disables pruning (keep forever). Defaults to
+   * DEFAULT_TOKEN_USAGE_RETENTION_DAYS (365) — roughly tens of MB/year at typical
+   * volume, so a year is cheap while still bounding unbounded growth.
+   */
+  tokenUsageRetentionDays?: number
   /**
    * Opt-in: when true, a fatal Copilot rejection may AUTO-SWITCH to another
    * previously-successful account without a per-event prompt. Defaults OFF —
@@ -154,6 +161,9 @@ const defaultConfig: AppConfig = {
     "gpt-5.4-mini": gpt5CommentaryPrompt,
     "gpt-5.4": gpt5CommentaryPrompt,
     "gpt-5.5": gpt5CommentaryPrompt,
+    "gpt-5.6-sol": gpt5CommentaryPrompt,
+    "gpt-5.6-terra": gpt5CommentaryPrompt,
+    "gpt-5.6-luna": gpt5CommentaryPrompt,
   },
   smallModel: "gpt-5-mini",
   responsesApiContextManagementModels: [],
@@ -163,6 +173,15 @@ const defaultConfig: AppConfig = {
     "gpt-5.4-mini": "xhigh",
     "gpt-5.4": "xhigh",
     "gpt-5.5": "xhigh",
+    // GPT-5.6 (Sol/Terra/Luna): pinned to medium per OpenAI's 5.6 guidance,
+    // which names medium the balanced baseline and reserves high/xhigh for when
+    // evals show a meaningful gain. This matches the global default today, but
+    // we pin it explicitly so these frontier models stay at the guided value
+    // even if the global baseline is ever changed. Escalate per-variant if
+    // evals justify it.
+    "gpt-5.6-sol": "medium",
+    "gpt-5.6-terra": "medium",
+    "gpt-5.6-luna": "medium",
   },
   useFunctionApplyPatch: true,
   useMessagesApi: true,
@@ -374,17 +393,31 @@ export function getPromptCacheRetention(): "in_memory" | "24h" | undefined {
 
 export function getReasoningEffortForModel(
   model: string,
-): "none" | "minimal" | "low" | "medium" | "high" | "xhigh" {
+): "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" {
   const config = getConfig()
-  // Fall through to the static default map so a config that
-  // doesn't carry modelReasoningEfforts (e.g. a test stub, or a
-  // user config that pre-dates the field) still gets the curated
-  // per-model effort instead of a global "high" fallback.
+  // Precedence: an explicit user override, then the curated per-model default
+  // (so a config that doesn't carry modelReasoningEfforts — a test stub, or a
+  // user config predating the field — still gets the curated effort), then a
+  // model-aware baseline (see defaultReasoningEffortForModel). Curated entries
+  // deviate up (coding models → xhigh) or down (gpt-5-mini → low) from it.
   return (
     config.modelReasoningEfforts?.[model]
     ?? defaultConfig.modelReasoningEfforts?.[model]
-    ?? "high"
+    ?? defaultReasoningEffortForModel(model)
   )
+}
+
+/**
+ * Baseline reasoning effort for a model with no explicit or curated entry.
+ * Claude/Anthropic models default to "high" — that is Anthropic's own default
+ * (omitting `output_config.effort` is equivalent to `high`), so a Copilot-served
+ * Claude request isn't silently downgraded. Every other model gets the "medium"
+ * balanced baseline (matching OpenAI's guidance for its reasoning models). At
+ * this call site `model` is the Copilot dot-form id (e.g. "claude-opus-4.8"), so
+ * a "claude" prefix — the same test used in small-model.ts — identifies the
+ * Anthropic family across all versions and variant suffixes. */
+function defaultReasoningEffortForModel(model: string): "high" | "medium" {
+  return model.startsWith("claude") ? "high" : "medium"
 }
 
 export function normalizeProviderBaseUrl(url: string): string {
@@ -479,6 +512,16 @@ export const DEFAULT_LOG_RETENTION_DAYS = 7
 export function getLogRetentionDays(): number {
   const config = getConfig()
   return config.logRetentionDays ?? DEFAULT_LOG_RETENTION_DAYS
+}
+
+/** Default retention for `token_usage_events` — one year. Cheap on disk (tens of
+ *  MB/year at typical volume) while keeping the table from growing unbounded. */
+export const DEFAULT_TOKEN_USAGE_RETENTION_DAYS = 365
+
+/** Days of token-usage history to retain; 0 disables pruning (keep forever). */
+export function getTokenUsageRetentionDays(): number {
+  const config = getConfig()
+  return config.tokenUsageRetentionDays ?? DEFAULT_TOKEN_USAGE_RETENTION_DAYS
 }
 
 /** Whether the user has authorized auto-switching to another stored account on

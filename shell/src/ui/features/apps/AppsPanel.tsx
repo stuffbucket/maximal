@@ -1,8 +1,11 @@
-import { AppCard } from "./AppCard";
-import { useApps } from "./useApps";
-import { Stack } from "../../components/Stack";
+import type { ReactElement } from "react"
 
-export function AppsPanel(): JSX.Element {
+import { Alert } from "../../components/Alert"
+import { Stack } from "../../components/Stack"
+import { AppCard } from "./AppCard"
+import { useApps } from "./useApps"
+
+export function AppsPanel(): ReactElement {
   const {
     apps,
     isLoading,
@@ -10,34 +13,29 @@ export function AppsPanel(): JSX.Element {
     refresh,
     toggleClaudeCode,
     toggleClaudeDesktop,
-  } = useApps();
+  } = useApps()
 
   return (
     <Stack proximity="region" className="apps-panel" aria-busy={isLoading}>
-      {error && (
-        <p className="state__caption state__caption--error" role="alert">
-          {error}
-        </p>
-      )}
+      {error && <Alert>{error}</Alert>}
 
-      {isLoading && apps.length === 0 ? (
+      {isLoading && apps.length === 0 ?
         <p className="state__caption">Looking for installed apps…</p>
-      ) : (
-        <Stack proximity="section" className="apps-list">
+      : <Stack proximity="section" className="apps-list">
           {apps.map((app) => (
             <AppCard
               key={app.id}
               app={app}
               onRescan={refresh}
               onToggle={
-                app.id === "claude-desktop"
-                  ? (enabled) => toggleClaudeDesktop(enabled)
-                  : (enabled) => toggleClaudeCode(enabled)
+                app.id === "claude-desktop" ?
+                  (enabled) => toggleClaudeDesktop(enabled)
+                : (enabled) => toggleClaudeCode(enabled)
               }
             />
           ))}
         </Stack>
-      )}
+      }
     </Stack>
-  );
+  )
 }

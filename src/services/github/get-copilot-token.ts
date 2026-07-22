@@ -1,6 +1,6 @@
 import consola from "consola"
 
-import { getGitHubApiBaseUrl, githubHeaders } from "~/lib/config/api-config"
+import { getCopilotTokenUrl, githubHeaders } from "~/lib/config/api-config"
 import { parseCopilotErrorBody } from "~/lib/errors/copilot-error-parser"
 import { CopilotAuthFatalError, HTTPError } from "~/lib/errors/error"
 import { COPILOT_TOKEN_TIMEOUT_MS } from "~/lib/http/http-timeouts"
@@ -8,13 +8,10 @@ import { sendRequest } from "~/lib/http/send-request"
 import { state } from "~/lib/runtime-state/state"
 
 export const getCopilotToken = async () => {
-  const response = await sendRequest(
-    `${getGitHubApiBaseUrl()}/copilot_internal/v2/token`,
-    {
-      headers: githubHeaders(),
-      timeoutMs: COPILOT_TOKEN_TIMEOUT_MS,
-    },
-  )
+  const response = await sendRequest(getCopilotTokenUrl(), {
+    headers: githubHeaders(),
+    timeoutMs: COPILOT_TOKEN_TIMEOUT_MS,
+  })
 
   if (!response.ok) {
     const errorText = await response.clone().text()

@@ -1,15 +1,17 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { type ReactElement, useEffect, useRef, type ReactNode } from "react"
+
+import { Button } from "./Button"
 
 interface ConfirmDialogProps {
-  open: boolean;
-  title: string;
-  body: ReactNode;
-  confirmLabel?: string;
-  cancelLabel?: string;
-  tone?: "default" | "danger";
-  busy?: boolean;
-  onConfirm: () => void | Promise<void>;
-  onCancel: () => void;
+  open: boolean
+  title: string
+  body: ReactNode
+  confirmLabel?: string
+  cancelLabel?: string
+  tone?: "default" | "danger"
+  busy?: boolean
+  onConfirm: () => void | Promise<void>
+  onCancel: () => void
 }
 
 /**
@@ -30,9 +32,9 @@ export function ConfirmDialog({
   busy = false,
   onConfirm,
   onCancel,
-}: ConfirmDialogProps): JSX.Element | null {
-  const dialogRef = useRef<HTMLDialogElement | null>(null);
-  const cancelRef = useRef<HTMLButtonElement | null>(null);
+}: ConfirmDialogProps): ReactElement | null {
+  const dialogRef = useRef<HTMLDialogElement | null>(null)
+  const cancelRef = useRef<HTMLButtonElement | null>(null)
 
   // Sync `open` prop with the imperative <dialog> state. showModal()
   // is what gives us the focus trap + backdrop; close() tears them
@@ -40,40 +42,40 @@ export function ConfirmDialog({
   // is already open and vice versa — harmless in normal flow but
   // possible under strict-mode double effects.
   useEffect(() => {
-    const el = dialogRef.current;
-    if (!el) return;
+    const el = dialogRef.current
+    if (!el) return
     if (open && !el.open) {
       try {
-        el.showModal();
+        el.showModal()
       } catch {
         /* ignore */
       }
     } else if (!open && el.open) {
       try {
-        el.close();
+        el.close()
       } catch {
         /* ignore */
       }
     }
-  }, [open]);
+  }, [open])
 
   // Initial focus on Cancel after showModal(). Browsers autofocus the
   // first interactive element otherwise, which would land on Confirm
   // for a destructive dialog — wrong default.
   useEffect(() => {
-    if (open) cancelRef.current?.focus();
-  }, [open]);
+    if (open) cancelRef.current?.focus()
+  }, [open])
 
-  if (!open) return null;
+  if (!open) return null
 
   const onCancelGuard = (): void => {
-    if (busy) return;
-    onCancel();
-  };
+    if (busy) return
+    onCancel()
+  }
 
   const onConfirmClick = (): void => {
-    void onConfirm();
-  };
+    void onConfirm()
+  }
 
   // The <dialog>'s built-in close event fires on ESC. Route it through
   // our cancel path so callers don't have to special-case keyboard
@@ -84,38 +86,34 @@ export function ConfirmDialog({
       className="confirm-dialog"
       onClose={onCancelGuard}
       onCancel={(e) => {
-        e.preventDefault();
-        onCancelGuard();
+        e.preventDefault()
+        onCancelGuard()
       }}
       onClick={(e) => {
-        if (e.target === dialogRef.current) onCancelGuard();
+        if (e.target === dialogRef.current) onCancelGuard()
       }}
     >
       <div className="confirm-dialog__panel">
         <h2 className="confirm-dialog__title">{title}</h2>
         <div className="confirm-dialog__body">{body}</div>
         <div className="confirm-dialog__actions">
-          <button
+          <Button
             ref={cancelRef}
-            type="button"
-            className="btn btn--ghost"
+            variant="ghost"
             onClick={onCancelGuard}
             disabled={busy}
           >
             {cancelLabel}
-          </button>
-          <button
-            type="button"
-            className={
-              tone === "danger" ? "btn btn--danger" : "btn btn--primary"
-            }
+          </Button>
+          <Button
+            variant={tone === "danger" ? "destructive" : "primary"}
             onClick={onConfirmClick}
             disabled={busy}
           >
             {busy ? "Working…" : confirmLabel}
-          </button>
+          </Button>
         </div>
       </div>
     </dialog>
-  );
+  )
 }

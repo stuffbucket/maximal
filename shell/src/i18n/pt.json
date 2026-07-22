@@ -3,7 +3,6 @@
   "app-container": "{os, select, macos {barra de menus} other {bandeja do sistema}}",
   "reveal-logs": "Mostrar registros no {fileManager}",
   "reveal-config": "Mostrar configuração no {fileManager}…",
-
   "nav-account": "Conta",
   "nav-general": "Geral",
   "nav-apps": "Aplicativos",
@@ -13,7 +12,6 @@
   "nav-logs": "Registros",
   "nav-diagnostics": "Diagnóstico",
   "nav-sidebar-label": "Seções de configuração",
-
   "common-copy": "Copiar",
   "common-copied": "Copiado",
   "common-reveal": "Mostrar",
@@ -25,12 +23,10 @@
   "common-remove": "Remover",
   "common-working": "Trabalhando…",
   "common-language-label": "Idioma",
-
   "general-title": "Geral",
   "general-sub": "Como o Maximal aparece na sua área de trabalho.",
   "general-menu-bar-only-label": "Mostrar apenas {os, select, macos {na barra de menus} other {na bandeja do sistema}}",
   "general-menu-bar-only-hint": "Por padrão, o Maximal também fica {os, select, macos {no Dock} other {na barra de tarefas}}, para ser fácil de localizar e trazer para a frente. Ative isto para deixá-lo de lado: o Maximal continua em execução apenas com o ícone {os, select, macos {na barra de menus} other {na bandeja do sistema}} e sai {os, select, macos {do Dock} other {da barra de tarefas}}.",
-
   "account-title": "Conta",
   "account-sub": "Sua conexão com o GitHub Copilot.",
   "account-unauth-title": "Sessão não iniciada",
@@ -99,6 +95,15 @@
   "account-remediation-accept-terms": "Aceitar os termos atualizados do Copilot",
   "account-remediation-review-terms": "Revisar os termos do GitHub",
   "account-remediation-generic": "Abrir no GitHub",
+  "banner-offline-title": "Você está off-line",
+  "banner-offline-msg": "Verifique sua conexão; continuaremos tentando.",
+  "banner-copilot-title": "Não é possível acessar o GitHub Copilot",
+  "banner-copilot-msg-individual": "Estamos tentando reconectar ({service}).",
+  "banner-copilot-msg-enterprise": "Se outros aplicativos também não estiverem funcionando, talvez seja necessário reiniciar ({service}).",
+  "banner-service-link": "verificar o status do serviço do Copilot",
+  "account-type-individual": "Conta individual",
+  "account-type-team": "Conta de equipe",
+  "account-type-enterprise": "Conta Enterprise",
   "account-rejection-title-402": "Problema de faturamento ou de plano do Copilot",
   "account-rejection-title-403": "Solicitação bloqueada pelo Copilot",
   "account-rejection-title-404": "O Copilot não encontrou isso",
@@ -114,10 +119,8 @@
   "account-rejection-explain-429": "Você atingiu um limite de frequência ou de cota. Aguarde um momento e tente novamente.",
   "account-rejection-explain-5xx": "O lado do GitHub retornou um erro. Isso costuma ser temporário — tente novamente em breve.",
   "account-rejection-explain-other": "Tente novamente ou verifique sua conta do Copilot no GitHub.",
-
   "apps-title": "Aplicativos",
   "apps-sub": "Configuração com um clique para as ferramentas que se comunicam com o Maximal. Ative um aplicativo e nós o apontamos para o proxy por você.",
-
   "endpoint-title": "Endpoint",
   "endpoint-sub": "Onde o Maximal escuta. Use estes valores ao configurar uma ferramenta que não esteja na lista de Aplicativos.",
   "endpoint-connection-title": "Conexão",
@@ -132,13 +135,10 @@
   "endpoint-models-label": "Modelos",
   "endpoint-key-not-available": "(não disponível)",
   "endpoint-copy-curl": "Copiar exemplo de curl",
-
   "keys-title": "Chaves de API",
   "keys-sub": "Chaves que os aplicativos usam para chamar o Maximal. Adicione uma por ferramenta para poder distingui-las — qualquer uma não listada continua funcionando por padrão.",
-
   "models-title": "Modelos",
   "models-sub": "Modelos disponíveis para os aplicativos através do Maximal, agrupados por tipo. A lista é obtida do provedor — atualize para buscar o catálogo atual se algum modelo parecer ausente.",
-
   "logs-title": "Registros",
   "logs-sub": "Registros de solicitações e de handlers com rotação diária, {n, plural, one {# dia} other {# dias}} de retenção.",
   "logs-where-title": "Onde ficam os registros",
@@ -147,7 +147,6 @@
   "logs-path-windows-label": "Windows",
   "logs-retention-label": "Retenção",
   "logs-retention-value": "{n, plural, one {# dia} other {# dias}}, depois excluídos na próxima inicialização",
-
   "diagnostics-title": "Diagnóstico",
   "diagnostics-sub": "Estado ao vivo e um pacote com um clique para relatórios de erros.",
   "diagnostics-proxy-version": "Versão do proxy",
@@ -204,7 +203,6 @@
   "diagnostics-relative-minutes": "há {m} min",
   "diagnostics-relative-hours": "há {h} h",
   "diagnostics-relative-days": "há {d} d",
-
   "uninstall-title": "Desinstalar",
   "uninstall-hint": "Isso interrompe o agente em segundo plano do Maximal, reverte quaisquer integrações de aplicativos e remove o CLI do {cliName} do seu PATH. Você vai arrastar o Maximal para a Lixeira para concluir.",
   "uninstall-purge-label": "Excluir segredos e configuração armazenados",
@@ -217,18 +215,14 @@
   "uninstall-summary-tail": " e {last}",
   "uninstall-err": "Não foi possível concluir a desinstalação: {error}. Em vez disso, você pode executar {uninstallCmd} no terminal.",
   "uninstall-complete": "O Maximal foi desinstalado. Saia do Maximal pela {os, select, macos {barra de menus} other {bandeja do sistema}}, depois arraste-o de Aplicativos para a Lixeira para concluir.",
-
   "dashboard-title": "Maximal — Painel",
   "dashboard-period-label": "Período",
   "dashboard-period-days": "{n, plural, one {# dia} other {# dias}}",
-
   "dashboard-quotas-title": "Cotas de uso",
   "dashboard-quota-unlimited": "Sem limite",
   "dashboard-quota-percent-used": "{percent}% usado",
   "dashboard-quota-remaining": "{n} restante(s)",
-
   "dashboard-api-response-title": "Resposta da API de uso",
-
   "dashboard-token-usage-title": "Uso de tokens",
   "dashboard-window-day": "Janela de dia",
   "dashboard-window-week": "Janela de semana",
@@ -236,7 +230,6 @@
   "dashboard-window-range": "{label}: {start} - {end}",
   "dashboard-refreshing-summary": "Atualizando o resumo…",
   "dashboard-refreshing-details": "Atualizando os detalhes…",
-
   "dashboard-col-total": "Total",
   "dashboard-col-input": "Entrada",
   "dashboard-col-output": "Saída",
@@ -250,53 +243,33 @@
   "dashboard-col-endpoint": "Endpoint",
   "dashboard-col-session": "Sessão",
   "dashboard-col-trace": "Rastreamento",
-
   "dashboard-by-model-title": "Por modelo",
   "dashboard-by-model-count": "{n, plural, one {# modelo} other {# modelos}}",
   "dashboard-by-model-none": "Nenhuma linha de resumo carregada.",
-
   "dashboard-event-details-title": "Detalhes do evento",
   "dashboard-events-meta": "Página {page} / {total} · {events, plural, one {# evento} other {# eventos}}",
   "dashboard-events-none": "Nenhuma página de detalhes carregada ainda.",
   "dashboard-pager-previous": "Anterior",
   "dashboard-pager-next": "Próxima",
-
   "dashboard-empty-summary": "Nenhum uso de tokens registrado para o período selecionado.",
   "dashboard-empty-events": "Nenhuma linha de detalhe de uso de tokens para o período selecionado.",
-
   "dashboard-error-usage": "A solicitação de uso falhou",
   "dashboard-error-summary": "O resumo de uso de tokens falhou",
   "dashboard-error-details": "Os detalhes de uso de tokens falharam",
   "dashboard-error-generic": "Ocorreu um erro",
-
   "dashboard-welcome-title": "Bem-vindo!",
   "dashboard-welcome-body": "Os dados de uso e de uso de tokens aparecerão aqui à medida que forem carregados.",
   "dashboard-unknown-error": "Erro desconhecido.",
   "dashboard-not-available": "N/D",
-
   "native-window-settings-title": "Maximal — Configurações",
   "native-window-settings-title-versioned": "Maximal — Configurações · v{version}",
   "native-window-dashboard-title": "Maximal — Painel",
-
-  "native-tray-settings": "Configurações…",
-  "native-tray-dashboard": "Painel…",
-  "native-tray-quit": "Sair do Maximal",
-  "native-tray-starting": "Iniciando…",
-  "native-tray-sign-in": "Iniciar sessão no GitHub…",
-  "native-tray-signed-in": "Sessão iniciada no GitHub",
-  "native-tray-upgrade": "Atualizar para a v{latest}…",
-  "native-tray-failed": "O sidecar não iniciou",
-  "native-tray-retry": "Tentar iniciar novamente",
-  "native-tray-show-logs": "Ver registros…",
-  "native-tray-open-config": "Abrir pasta de configuração…",
-
   "native-tooltip-starting": "maximal — iniciando…",
   "native-tooltip-sign-in": "maximal — inicie sessão no GitHub",
   "native-tooltip-idle": "maximal",
   "native-tooltip-failed": "maximal — o sidecar falhou",
   "native-tooltip-stopped": "maximal — parado",
   "native-tooltip-rejection": "maximal — {message}",
-
   "native-notify-startup-title": "O Maximal está em execução",
   "native-notify-startup-body-macos": "Procure o ícone do Maximal na sua barra de menus ↑",
   "native-notify-startup-body-other": "O Maximal está em execução na sua bandeja do sistema ↓",
@@ -308,10 +281,13 @@
   "native-notify-update-title": "Atualização do Maximal disponível",
   "native-notify-update-title-versioned": "O Maximal {latest} já está disponível",
   "native-notify-update-body": "Atualize em {url}",
+  "native-update-install-title": "Instalar o Maximal {latest}?",
+  "native-update-install-body": "O Maximal vai baixar a atualização, verificá-la e reiniciar. Isso leva alguns segundos.",
+  "native-update-install-confirm": "Instalar e reiniciar",
+  "native-update-install-cancel": "Agora não",
   "native-notify-rejection-title": "Maximal",
   "native-notify-rejection-body": "Uma solicitação upstream do Copilot foi rejeitada. Abra as Configurações para ver os detalhes.",
   "native-notify-rejection-body-detail": "{message} — abra as Configurações para ver os detalhes.",
-
   "native-quit-title": "Sair do Maximal?",
   "native-quit-body": "O Maximal será interrompido e todas as janelas de Configurações abertas serão fechadas.",
   "native-quit-confirm": "Sair do Maximal",

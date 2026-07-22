@@ -119,10 +119,12 @@ await mock.module("~/lib/platform/logger", () => ({
   createHandlerLogger: () => fakeLogger,
 }))
 
-// Stub `serve` from srvx so runServer never binds a port.
+// Stub the srvx `serve` binder so runServer never binds a port — injected via
+// the module-local DI seam (__setServeForTests), NOT mock.module("srvx"). A
+// module mock of srvx forward-leaks the stub into tests/ws/srvx-upgrade-
+// handshake.test.ts, which needs the real port-binding serve(); Bun doesn't
+// reset module mocks between files. The seam is wired below, after import.
 const serveMock = mock(() => ({ close: () => Promise.resolve() }))
-const realSrvxModule = await import("srvx")
-await mock.module("srvx", () => ({ ...realSrvxModule, serve: serveMock }))
 
 // NOTE: we deliberately don't mock `~/server`. Replacing the cached
 // module with a stub Hono leaks into other test files (e.g.
@@ -141,7 +143,12 @@ globalThis.fetch = (() =>
 // --- Module under test (imported after mocks are wired) -----------
 
 const { state } = await import("~/lib/runtime-state/state")
-const { runServer, start } = await import("~/start")
+const { runServer, start, __setServeForTests } = await import("~/start")
+
+// Inject the port-avoiding serve stub through the DI seam (no module mock).
+__setServeForTests(
+  serveMock as unknown as Parameters<typeof __setServeForTests>[0],
+)
 const { getAuthStatus, signOut, __resetAuthControllerForTests } =
   await import("~/lib/auth/auth-controller")
 const { stopCopilotOnlineRetry } =
@@ -477,6 +484,7 @@ describe("start.run — citty args → runServer options", () => {
 afterAll(async () => {
   stopCopilotOnlineRetry()
   globalThis.fetch = realFetch
+  __setServeForTests(null)
   mock.restore()
   await mock.module("~/lib/platform/paths", () => realPathsModule)
   await mock.module("~/lib/http/proxy", () => realProxyModule)
@@ -486,5 +494,4 @@ afterAll(async () => {
   await mock.module("~/lib/auth/github-token-store", () => realStoreModule)
   await mock.module("~/lib/platform/logger", () => realLoggerModule)
   await mock.module("~/lib/platform/opencode", () => realOpencodeModule)
-  await mock.module("srvx", () => realSrvxModule)
 })

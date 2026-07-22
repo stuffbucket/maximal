@@ -13,6 +13,10 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # Backstop against a hung/runaway step (e.g. a poll loop that spins on a
+    # blocked network): fail fast in minutes instead of burning the full runner
+    # allowance. The whole suite runs well under this locally and in CI.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
 
@@ -42,7 +46,44 @@ jobs:
       - name: Run type check
         run: bun run typecheck
 
+      - name: Type check (shell UI)
+        # The shell/src tree (settings React app + islands, i18n runtime, proxy
+        # client, Tauri bridge) is excluded from the root tsconfig, so a type
+        # error there could ship. Typecheck it against shell/tsconfig.json.
+        # Hermetic: install shell's own deps (@types/react etc.) in-step rather
+        # than relying on the root `prepare` side effect.
+        run: |
+          cd shell && bun install --frozen-lockfile
+          bun run typecheck
+
+      - name: Test (shell UI)
+        # Behavioral render tests for the React islands (happy-dom +
+        # @testing-library, preloaded via shell/bunfig.toml). shell deps were
+        # installed by the typecheck step above. Catches render crashes and
+        # wrong-state output; visual-regression is a separate follow-up.
+        run: cd shell && bun run test
+
+      - name: Check design tokens
+        # Two gates: (1) the design-token drift rules (check:tokens), and
+        # (2) freshness — shell/src/ui/styles/tokens.css must be a clean
+        # regeneration of theme.ts (tokens:verify). Previously local-only via
+        # check:fast, so drift or a stale generated file could merge freely.
+        run: bun run check:design
+
+      - name: Guard boundary casts
+        # Fail on a NEW unvalidated any→concrete boundary cast (the class behind
+        # the device-code interval:NaN poll spin). The known-safe set is annotated
+        # in-place with `// casts-keep: <reason>`; see scripts/find-casts.ts.
+        run: bun run casts:check
+
       - name: Run tests
+        # MAXIMAL_TEST_BUILD enables the production-build smoke test
+        # (tests/settings-build.test.ts), which spawns `bun run build:ui` and
+        # asserts the servable assets exist. Gated off for local `bun test`
+        # loops (it writes to shell/dist); enabled here so a broken UI build
+        # reds CI. shell deps are already installed by the shell typecheck step.
+        env:
+          MAXIMAL_TEST_BUILD: "1"
         run: bun test
 
       - name: Build

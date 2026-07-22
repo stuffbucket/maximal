@@ -25,39 +25,41 @@ regressing across design iterations.
 ## Tokens & drift
 
 - **Inline raw `px`, `rem`, or `#hex` in a component file *or in a
-  design doc.*** Reference a token. If no suitable token exists, add
-  one to `shell/src/tokens.css` and document it in
-  [`tokens.md`](tokens.md) before using it. The one allowed exception
-  is the drift table below, where the conflict is the point.
-- **Editing a token value in only one place.** There are currently
-  three token-declaration sites; they are not in sync. See
-  [`change-checklists.md`](change-checklists.md) → *Changing a token
-  value* for the full touchpoint list. This is the highest-risk class
-  of design bug in the repo today.
-- **Adding a token to one CSS file and assuming the other has it.**
-  `tokens.css` and the dashboard `style.css` are independent declarations,
-  not imports. Anything missing from one is silently `inherit`-ed or
-  `initial` in that window.
+  design doc.*** Reference a token. Token *values* live in
+  [`theme.ts`](../../shell/src/ui/styles/theme.ts) (the source of
+  truth); `shell/src/ui/styles/tokens.css` is generated from it by
+  `scripts/generate-css-tokens.ts`. If no suitable token exists, add
+  it to `theme.ts`, regenerate, and document it in
+  [`tokens.md`](tokens.md) before using it.
+- **Hand-editing a generated file.** Never edit `tokens.css` directly
+  — it is overwritten from `theme.ts`. Change the value in `theme.ts`
+  and regenerate. See [`change-checklists.md`](change-checklists.md) →
+  *Changing a token value*.
+- **Re-inlining brand hex in a standalone surface.** `shell/splash.html`
+  still hard-codes brand hex inline (it boots before any bundle loads),
+  making it the last token-consuming surface not fed from `theme.ts`.
+  Keep its `keep in sync` values matched to `theme.ts`, and prefer
+  wiring it to the generator over adding a second inlined surface.
+  Tracked in #352.
 
-## Known active drift (as of last audit — June 2026)
+## Known active drift
 
-These should be triaged separately; do not "fix" them inline as part
-of an unrelated design change.
+_None._ The previously-tracked Settings ↔ Dashboard divergence (a
+different teal, muted-text and border values, and a dark-only
+dashboard) is resolved.
 
-| Concern | `shell/src/tokens.css` | `shell/ui/dashboard/style.css` |
-|---|---|---|
-| `--accent` | `#5198a6` | `#14b8a6` ← **different teal** |
-| `--text-muted` (dark) | `#8a8a8a` | `#a1a1a1` |
-| `--border-subtle` (dark) | `#2a2a2a` | `rgb(255 255 255 / 0.08)` |
-| `--border-strong` (dark) | `#666666` | `rgb(255 255 255 / 0.18)` |
-| `--accent-destructive` | present | absent |
-| `--accent-hover` | absent | present |
-| `--status-*` (error/success/warning/info) | absent | present |
-| `--color-bg-*` legacy aliases | absent | present |
-| `--font-display` (Fraunces) | present | absent |
-| Light theme block | present | absent |
+The single-window redesign ([#343]) removed the separate dashboard
+surface and its hand-authored `shell/ui/dashboard/style.css`. The usage
+view is now a React feature inside the settings app, styled from the
+same generated `tokens.css`, so the two-file divergence the old audit
+table tracked no longer exists — there is no second declaration site to
+drift against.
 
-The Dashboard literally renders a different teal than Settings.
+The one remaining single-source gap is `shell/splash.html` (inlined
+brand hex, above); CI enforcement of token freshness is tracked in
+#352 / #354.
+
+[#343]: https://github.com/stuffbucket/maximal/pull/343
 
 ## Accessibility
 

@@ -6,20 +6,26 @@ import { join, resolve } from "node:path"
  * Production-build smoke test for the web UI. Catches the "build stopped
  * producing servable assets" regression.
  *
- * GATED OFF BY DEFAULT — set MAXIMAL_TEST_BUILD=1 to enable. CI flips the
- * flag. The build is fast (Bun bundler), but it writes into shell/dist,
- * which we don't want every `bun test` loop to do.
+ * GATED OFF BY DEFAULT — set MAXIMAL_TEST_BUILD=1 to enable. CI sets it on
+ * the `bun test` step (.github/workflows/ci.yml). The build is fast (Bun
+ * bundler), but it writes into shell/dist, which we don't want every local
+ * `bun test` loop to do.
+ *
+ * The single-window redesign (#343) collapsed the app to one bundled
+ * surface (settings) plus the standalone native chrome (splash +
+ * update-confirm). The separate dashboard surface was removed, so this only
+ * asserts what `build:ui` actually produces today.
  */
 
 const REPO_ROOT = resolve(import.meta.dir, "..")
-const DIST_UI = join(REPO_ROOT, "shell", "dist", "ui")
+const DIST_ROOT = join(REPO_ROOT, "shell", "dist")
+const DIST_UI = join(DIST_ROOT, "ui")
 const SETTINGS_INDEX = join(DIST_UI, "settings", "index.html")
-const DASHBOARD_INDEX = join(DIST_UI, "dashboard", "index.html")
 
 const ENABLED = process.env.MAXIMAL_TEST_BUILD === "1"
 
 describe.skipIf(!ENABLED)("web UI production build", () => {
-  test("`bun run build:ui` produces settings + dashboard under shell/dist/ui", async () => {
+  test("`bun run build:ui` produces the settings surface + native chrome", async () => {
     const proc = Bun.spawn(["bun", "run", "build:ui"], {
       cwd: REPO_ROOT,
       stdout: "pipe",
@@ -43,9 +49,17 @@ describe.skipIf(!ENABLED)("web UI production build", () => {
         ?? 0,
     ).toBeGreaterThan(0)
 
-    // Dashboard: vanilla, copied verbatim — references its sibling assets.
-    expect(existsSync(DASHBOARD_INDEX)).toBe(true)
-    const dashboardHtml = readFileSync(DASHBOARD_INDEX, "utf8")
-    expect(dashboardHtml).toContain("./main.js")
+    // Native chrome copied verbatim (copyShellChrome): the pre-boot splash,
+    // the branded update-confirm window, the root pointer page, and the
+    // vendored fonts those surfaces reference.
+    for (const asset of [
+      "splash.html",
+      "update-confirm.html",
+      "index.html",
+      "vendor/fonts/fraunces-latin.woff2",
+      "vendor/fonts/commissioner-latin.woff2",
+    ]) {
+      expect(existsSync(join(DIST_ROOT, asset))).toBe(true)
+    }
   }, 60_000)
 })

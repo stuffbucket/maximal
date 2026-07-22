@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import fs from "node:fs/promises"
 
 import {
+  applyFix,
   BASELINE_PATH,
   extractPin,
   HEADER_PINS,
@@ -80,6 +81,36 @@ describe("normalizeTag", () => {
     expect(normalizeTag("v2.1.205")).toBe("2.1.205")
     expect(normalizeTag("sdk-v0.110.0")).toBe("0.110.0")
     expect(normalizeTag("1.17.18")).toBe("1.17.18")
+  })
+})
+
+describe("applyFix (autonomous --fix path)", () => {
+  test("rewrites only the captured version, leaving surrounding text intact", () => {
+    const [spec] = VERSION_PINS // copilotChat
+    const line = 'const COPILOT_VERSION = "0.46.0"'
+    expect(applyFix(line, spec, "0.47.0")).toBe(
+      'const COPILOT_VERSION = "0.47.0"',
+    )
+  })
+
+  test("round-trips against the real source and updates every coupled copy", async () => {
+    // opencode is sourced from a single OPENCODE_SEMVER constant precisely so a
+    // one-site rewrite propagates to the (thrice-repeated) UA. Assert the fixed
+    // source re-extracts to the new value and that the OLD value is fully gone.
+    const spec = VERSION_PINS.find((p) => p.id === "opencode")
+    expect(spec).toBeDefined()
+    if (!spec) return
+    const source = await fs.readFile(repoPath(spec.file), "utf8")
+    const current = extractPin(spec, source)
+    const bumped = applyFix(source, spec, "9.9.9")
+    expect(extractPin(spec, bumped)).toBe("9.9.9")
+    // and the change is reversible (pure, no side effects)
+    expect(applyFix(bumped, spec, current)).toBe(source)
+  })
+
+  test("throws when the pattern is gone", () => {
+    const [spec] = VERSION_PINS
+    expect(() => applyFix("// constant removed", spec, "1.0.0")).toThrow(spec.id)
   })
 })
 

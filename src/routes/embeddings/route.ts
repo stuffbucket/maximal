@@ -19,7 +19,7 @@ embeddingRoutes.post("/", async (c) => {
     })
 
     recordUsage({
-      input_tokens: response.usage.prompt_tokens,
+      input_tokens: response.usage?.prompt_tokens ?? 0,
       output_tokens: 0,
     })
 

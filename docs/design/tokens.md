@@ -1,19 +1,23 @@
 # Token vocabulary
 
-The canonical declaration site is
-[`shell/src/tokens.css`](../../shell/src/tokens.css). **Values live
-there only.** This file is the lookup of *name → purpose → scope*.
+The canonical *source* of token values is
+[`shell/src/ui/styles/theme.ts`](../../shell/src/ui/styles/theme.ts);
+`shell/src/ui/styles/tokens.css` is generated from it by
+`scripts/generate-css-tokens.ts`. **Values live in `theme.ts` only.**
+This file is the lookup of *name → purpose → scope*.
 
-If you need a value, open `tokens.css`. If you're describing a token
-in a doc or commit message, use its name — never inline the value.
+If you need a value, open `theme.ts` (or the generated `tokens.css`).
+If you're describing a token in a doc or commit message, use its name
+— never inline the value.
 
-> **Drift warning.** `shell/ui/dashboard/style.css` redeclares many of
-> these tokens independently (the Dashboard is a single embedded HTML
-> file with no CSS imports — see [`windows.md`](windows.md)).
-> Several values currently differ. See
-> [`failure-modes.md`](failure-modes.md) → *Known active drift* for
-> the audit (and that's the one place we *do* show conflicting values
-> on purpose).
+> **Single source.** Every shell surface is styled from the one
+> generated `tokens.css`. The separate dashboard window that used to
+> redeclare tokens independently was folded into the settings app by
+> the single-window redesign (#343), so the cross-surface token drift
+> this doc once warned about no longer exists. The one surface still
+> outside the generator is `shell/splash.html` (it boots before any
+> bundle) — see [`failure-modes.md`](failure-modes.md) → *Tokens &
+> drift*.
 
 ## Type
 
@@ -39,6 +43,7 @@ in a doc or commit message, use its name — never inline the value.
 | `--border-width-hairline` / `-thin` / `-thick` / `-heavy` | Border widths | Reference by name | Off-scale borders |
 | `--sidebar-width` | Settings sidebar width | Settings sidebar only | Anything else |
 | `--content-max` | Settings content pane max-width | Settings content max-width | Dashboard (uses its own max) |
+| `--content-max-wide` | Wide content max-width for data-dense sections | The Usage section (charts/tables earn more width than prose) | Prose sections (use `--content-max`, ~65ch is more readable) |
 
 ## Elevation
 
@@ -70,7 +75,34 @@ in a doc or commit message, use its name — never inline the value.
 | `--border-subtle` | Subtle divider | Hairline separators, card borders | High-contrast emphasis |
 | `--border-strong` | Strong divider | Input borders, emphasized rules | Subtle dividers |
 
-## Operational rules
+## Data visualization (Usage charts)
+
+The Usage view's charts (live traffic stream, trend area, proportion/breakdown
+bars) need a small, stable color vocabulary that reads on **both** themes. These
+are declared once on `:root` (not per-`[data-theme]`) — the values are mid-tone
+and chosen for dual-theme legibility, and the design system's "warn at sub-AA,
+never block" stance applies to chart color the same as elsewhere. Viz color
+encodes **token type** (input / output / cache) consistently across every chart
+and bar — so — unlike interactive surfaces — it is deliberately not the single
+`--accent`; it never uses `--brand` crimson.
+
+| Token | Purpose | Use for | Do NOT use for |
+|---|---|---|---|
+| `--viz-input` | Input-token band | The input band of the traffic area, proportion bar, and per-model bars | Interactive fills; non-viz surfaces |
+| `--viz-output` | Output-token band | The output band, everywhere token type is shown | Interactive fills |
+| `--viz-cache` | Cache-token band | The cache-read/creation band (a calm neutral — cache is "free") | Emphasis; text color |
+| `--viz-cache-read` | Cached-input series | The "Cached input" tracker + its line/band in the traffic graphs; **amber** (warm = cached) | The coarse cache band (use `--viz-cache`); interactive fills |
+| `--viz-cache-creation` | Cached-output series | The "Cached output" tracker + its line/band in the traffic graphs; **rose** (warm = cached) | The coarse cache band (use `--viz-cache`); interactive fills |
+
+The last two are a **finer split of cache** used by the live tracker strip and
+the two token-traffic graphs, which show all four token types at once and must
+tell them apart at a glance. The scheme is **cool = fresh, warm = cached**: teal
+input + indigo output (cool), amber cached-input + rose cached-output (warm) —
+four distinct hues, not two near-identical pairs. Still token-type semantics, not
+a new color role, and never `--accent` or `--brand`. The coarse `--viz-cache`
+neutral still owns the aggregated cache band in the proportion + per-model bars.
+
+
 
 - **One token table, one place to look.** Don't redeclare values
   inline in components.

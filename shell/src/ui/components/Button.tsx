@@ -1,16 +1,21 @@
+import type { ButtonHTMLAttributes, ReactNode } from "react"
+
 // vendored: wraps <button> with .btn .btn--* classes from styles.css.
-import type { ButtonHTMLAttributes, ReactNode } from "react";
-import { cx } from "./cx";
+import { forwardRef } from "react"
 
-type ButtonVariant = "primary" | "secondary" | "ghost" | "destructive";
-type ButtonSize = "md" | "sm";
+import { cx } from "./cx"
 
-interface ButtonProps
-  extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "type"> {
-  variant?: ButtonVariant;
-  size?: ButtonSize;
-  type?: "button" | "submit" | "reset";
-  children: ReactNode;
+type ButtonVariant = "primary" | "secondary" | "ghost" | "destructive"
+type ButtonSize = "md" | "sm"
+
+interface ButtonProps extends Omit<
+  ButtonHTMLAttributes<HTMLButtonElement>,
+  "type"
+> {
+  variant?: ButtonVariant
+  size?: ButtonSize
+  type?: "button" | "submit" | "reset"
+  children: ReactNode
 }
 
 const VARIANT_CLASS: Record<ButtonVariant, string> = {
@@ -18,23 +23,35 @@ const VARIANT_CLASS: Record<ButtonVariant, string> = {
   secondary: "btn btn--secondary",
   ghost: "btn btn--ghost",
   destructive: "btn btn--destructive",
-};
-
-export function Button({
-  variant = "secondary",
-  size = "md",
-  type = "button",
-  className,
-  children,
-  ...rest
-}: ButtonProps): JSX.Element {
-  return (
-    <button
-      type={type}
-      className={cx(VARIANT_CLASS[variant], size === "sm" && "btn--sm", className)}
-      {...rest}
-    >
-      {children}
-    </button>
-  );
 }
+
+export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
+  function Button(
+    {
+      variant = "secondary",
+      size = "md",
+      type = "button",
+      className,
+      children,
+      ...rest
+    },
+    ref,
+  ) {
+    return (
+      <button
+        ref={ref}
+        type={type}
+        className={cx(
+          VARIANT_CLASS[variant],
+          size === "sm" && "btn--sm",
+          className,
+        )}
+        {...rest}
+      >
+        {children}
+      </button>
+    )
+  },
+)
+
+Button.displayName = "Button"

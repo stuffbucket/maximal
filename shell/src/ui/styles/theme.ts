@@ -2,7 +2,7 @@ export const fontStacks = {
   display: '"Fraunces", Georgia, "Times New Roman", serif',
   body: '"Commissioner", "Segoe UI", Helvetica, Arial, sans-serif',
   mono: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace',
-} as const;
+} as const
 
 export const text = {
   xs: "0.75rem",
@@ -14,7 +14,7 @@ export const text = {
   "2xl": "2rem",
   "3xl": "2.5rem",
   "4xl": "3rem",
-} as const;
+} as const
 
 export const weight = {
   base: "400",
@@ -22,19 +22,42 @@ export const weight = {
   lg: "600",
   xl: "600",
   "2xl": "700",
-} as const;
+} as const
 
 export const leading = {
   base: "1.6",
   lg: "1.4",
   xl: "1.3",
   "2xl": "1.2",
-} as const;
+} as const
 
 export const tracking = {
   xl: "-0.01em",
   "2xl": "-0.015em",
-} as const;
+  caps: "0.02em", // Uppercase micro-labels / table headers (open the caps a touch).
+} as const
+
+/**
+ * Disabled-state opacity. One canonical value for every disabled control
+ * (buttons, inputs, switches, checkboxes, pager) so the dim reads uniformly.
+ */
+export const opacity = {
+  disabled: "0.5",
+} as const
+
+/**
+ * Motion — utility transition durations + the standard easing. Per the motion
+ * contract these are short, functional eases (not delight). `fast` (120ms) for
+ * small reveals/rotations, `base` (150ms) for the common color/background tint.
+ */
+export const duration = {
+  fast: "120ms",
+  base: "150ms",
+} as const
+
+export const easing = {
+  standard: "ease-out",
+} as const
 
 export const spacing = {
   1: "4px",
@@ -45,21 +68,21 @@ export const spacing = {
   6: "32px",
   7: "48px",
   8: "64px",
-} as const;
+} as const
 
 export const radii = {
   input: "6px",
   card: "8px",
   chip: "4px",
   pill: "9999px",
-} as const;
+} as const
 
 export const borderWidth = {
   hairline: "1px",
   thin: "1px",
   thick: "2px",
   heavy: "4px",
-} as const;
+} as const
 
 export const size = {
   xs: "12px",
@@ -68,26 +91,26 @@ export const size = {
   lg: "24px",
   xl: "32px",
   "2xl": "40px",
-} as const;
+} as const
 
 export const elevation = {
   card: "0 1px 2px rgb(0 0 0 / 0.06)",
   modal: "0 8px 24px rgb(0 0 0 / 0.18)",
   tooltip: "0 2px 6px rgb(0 0 0 / 0.1)",
-} as const;
+} as const
 
 export const brand = {
   color: "#c8334a",
   fg: "#ffffff",
-} as const;
+} as const
 
 export const accent = {
   color: "#5198a6", // Used from tokens.css (overriding the drift in usage-viewer)
-  hover: "#2dd4bf", // Inherited from usage-viewer for now, or maybe derived?
+  hover: "#63a9b6", // Derived from --accent (#5198a6): a subtle ~10% lighten for hover.
   fg: "#ffffff",
   destructive: "#b32d3f",
   destructiveFg: "#ffffff",
-} as const;
+} as const
 
 export const status = {
   error: "#ef4444",
@@ -98,7 +121,29 @@ export const status = {
   warningFg: "#facc15",
   info: "#38bdf8",
   infoFg: "#7dd3fc",
-} as const;
+} as const
+
+/**
+ * Data-visualization palette for the Usage charts (see docs/design/tokens.md →
+ * Data visualization). Category identity by token TYPE, not interactive state —
+ * deliberately not `--accent`, never `--brand`. Mid-tone values chosen to read
+ * on both the dark and light surfaces; declared once on `:root`
+ * (theme-independent). The first three are the coarse token-type split (input /
+ * output / cache) used across the proportion bar and the per-model/provider
+ * bars, where cache is one calm neutral. The live tracker strip and the two
+ * token-traffic graphs use the FOUR-way split where cache is broken into
+ * read/creation — those must be told apart at a glance, so the scheme is
+ * **cool = fresh, warm = cached**: teal input + indigo output (cool), amber
+ * cached-input + rose cached-output (warm). Four distinct hues, not two
+ * near-identical pairs.
+ */
+export const viz = {
+  input: "#3f9aa8", // teal — fresh input (cool)
+  output: "#7b6fd0", // indigo — fresh output (cool)
+  cache: "#8a8f98", // slate — combined cache, calm neutral (the 3-way split)
+  cacheRead: "#c68a3c", // amber — cached input (warm)
+  cacheCreation: "#c56b86", // rose — cached output (warm)
+} as const
 
 export const link = {
   dark: {
@@ -108,22 +153,25 @@ export const link = {
   light: {
     color: "#2d6470",
     hover: "#1e5560",
-  }
-} as const;
+  },
+} as const
 
 export const focusRing = {
   width: "2px",
   offset: "2px",
   color: "var(--accent)",
+  // Single canonical treatment for every surface: a 2px solid outline
+  // in the accent color, offset 2px. Applied via `outline: var(--focus-ring)`
+  // on `:focus-visible`. There is deliberately no box-shadow variant —
+  // see docs/design/components.md → Focus rings.
   expr: "var(--focus-ring-width) solid var(--focus-ring-color)",
-  // The dashboard had a slightly custom focus-ring box-shadow format. Let's provide both or standardise later.
-  dashboardExpr: "0 0 0 2px var(--surface-base), 0 0 0 4px var(--accent)",
-} as const;
+} as const
 
 export const layout = {
   sidebarWidth: "200px",
   contentMax: "640px",
-} as const;
+  contentMaxWide: "1040px",
+} as const
 
 export const themes = {
   dark: {
@@ -149,5 +197,5 @@ export const themes = {
     borderStrong: "#8a8a8a",
     link: link.light.color,
     linkHover: link.light.hover,
-  }
-} as const;
+  },
+} as const
