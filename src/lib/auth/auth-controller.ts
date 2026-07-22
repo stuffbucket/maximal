@@ -469,7 +469,8 @@ async function runPoller(flow: ActiveFlow): Promise<void> {
     // pollAccessToken loops internally with the server-told interval,
     // honouring slow_down and authorization_pending. It resolves on
     // success and throws on expired_token / access_denied.
-    const token = await pollAccessToken(flow.deviceCode, flow.abort.signal)
+    const tokens = await pollAccessToken(flow.deviceCode, flow.abort.signal)
+    const token = tokens.accessToken
 
     if (flow.abort.signal.aborted) return
 
@@ -519,6 +520,9 @@ async function runPoller(flow: ActiveFlow): Promise<void> {
         host: currentGitHubHost(),
         token,
         addedVia: "device-code",
+        refreshToken: tokens.refreshToken,
+        accessTokenExpiresAt: tokens.accessTokenExpiresAt,
+        refreshTokenExpiresAt: tokens.refreshTokenExpiresAt,
       }),
     )
     setGithubToken(token)

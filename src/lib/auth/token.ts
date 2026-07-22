@@ -508,7 +508,8 @@ export async function setupGitHubToken(
 
     presentDeviceCode(response, options)
 
-    const token = await pollAccessToken(response)
+    const tokens = await pollAccessToken(response)
+    const token = tokens.accessToken
     setGithubToken(token)
 
     if (state.showToken) {
@@ -537,6 +538,9 @@ export async function setupGitHubToken(
         host: currentGitHubHost(),
         token,
         addedVia: "device-code",
+        refreshToken: tokens.refreshToken,
+        accessTokenExpiresAt: tokens.accessTokenExpiresAt,
+        refreshTokenExpiresAt: tokens.refreshTokenExpiresAt,
       }),
     )
     log.info(`Logged in as ${login ?? "(unknown)"}`)

@@ -209,6 +209,37 @@ describe("registry — persistence", () => {
     expect(back).toEqual(reg)
   })
 
+  it("persists the refresh token + expiries when present, defaults to null otherwise", async () => {
+    const withRefresh = makeAccountRecord({
+      login: "alice",
+      host: "github.com",
+      token: "ghu_expiring",
+      addedVia: "device-code",
+      refreshToken: "ghr_renewal",
+      accessTokenExpiresAt: 1_700_000_000_000,
+      refreshTokenExpiresAt: 1_800_000_000_000,
+    })
+    expect(withRefresh.refreshToken).toBe("ghr_renewal")
+    expect(withRefresh.accessTokenExpiresAt).toBe(1_700_000_000_000)
+
+    const reg = addAndActivate(emptyRegistry(), withRefresh)
+    await writeRegistry(registryPath, reg)
+    const back = await readRegistry(registryPath)
+    const key = Object.keys(back.accounts)[0]
+    expect(back.accounts[key].refreshToken).toBe("ghr_renewal")
+    expect(back.accounts[key].refreshTokenExpiresAt).toBe(1_800_000_000_000)
+
+    // Omitted → null defaults (non-expiring token), round-trips cleanly.
+    const noRefresh = makeAccountRecord({
+      login: "bob",
+      host: "github.com",
+      token: "gho_forever",
+      addedVia: "gh-cli",
+    })
+    expect(noRefresh.refreshToken).toBeNull()
+    expect(noRefresh.accessTokenExpiresAt).toBeNull()
+  })
+
   it("write is mode 0o600 on POSIX (atomic temp+rename preserves it)", async () => {
     await writeRegistry(registryPath, emptyRegistry())
     if (process.platform !== "win32") {
