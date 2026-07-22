@@ -29,7 +29,8 @@ afterAll(async () => {
   await mock.module("~/lib/platform/utils", () => realUtilsModule)
 })
 
-const { pollAccessToken } = await import("~/services/github/poll-access-token")
+const { pollAccessToken, toDeviceTokenResult } =
+  await import("~/services/github/poll-access-token")
 
 const DEVICE_CODE = {
   device_code: "device-xyz",
@@ -80,7 +81,48 @@ async function expectRejects(
 describe("pollAccessToken (RFC 8628)", () => {
   it("returns the token when GitHub responds with access_token", async () => {
     withResponses([{ access_token: "ghu_real_token" }])
-    expect(await pollAccessToken(DEVICE_CODE)).toBe("ghu_real_token")
+    expect((await pollAccessToken(DEVICE_CODE)).accessToken).toBe(
+      "ghu_real_token",
+    )
+  })
+
+  it("captures refresh_token + expiries when the App issues expiring tokens", async () => {
+    withResponses([
+      {
+        access_token: "ghu_expiring",
+        refresh_token: "ghr_renewal",
+        expires_in: 28800,
+        refresh_token_expires_in: 15897600,
+      },
+    ])
+    const result = await pollAccessToken(DEVICE_CODE)
+    expect(result.accessToken).toBe("ghu_expiring")
+    expect(result.refreshToken).toBe("ghr_renewal")
+    expect(result.accessTokenExpiresAt).toBeGreaterThan(Date.now())
+    expect(result.refreshTokenExpiresAt).toBeGreaterThan(
+      result.accessTokenExpiresAt ?? 0,
+    )
+  })
+
+  it("leaves refresh material null for a non-expiring token (no fields present)", () => {
+    // toDeviceTokenResult is the shared mapper — pin the null defaults directly.
+    const r = toDeviceTokenResult({ access_token: "gho_forever" }, 1_000_000)
+    expect(r).toEqual({
+      accessToken: "gho_forever",
+      refreshToken: null,
+      accessTokenExpiresAt: null,
+      refreshTokenExpiresAt: null,
+    })
+  })
+
+  it("converts expires_in seconds to absolute epoch-ms against the given now", () => {
+    const r = toDeviceTokenResult(
+      { access_token: "ghu_x", refresh_token: "ghr_x", expires_in: 100 },
+      1_000_000,
+    )
+    expect(r.accessTokenExpiresAt).toBe(1_000_000 + 100_000)
+    expect(r.refreshToken).toBe("ghr_x")
+    expect(r.refreshTokenExpiresAt).toBeNull()
   })
 
   it("keeps polling on authorization_pending", async () => {
@@ -89,7 +131,7 @@ describe("pollAccessToken (RFC 8628)", () => {
       { error: "authorization_pending" },
       { access_token: "ghu_token" },
     ])
-    expect(await pollAccessToken(DEVICE_CODE)).toBe("ghu_token")
+    expect((await pollAccessToken(DEVICE_CODE)).accessToken).toBe("ghu_token")
     expect(fetchMock).toHaveBeenCalledTimes(3)
   })
 
@@ -98,7 +140,9 @@ describe("pollAccessToken (RFC 8628)", () => {
       { error: "slow_down" },
       { access_token: "ghu_after_bump" },
     ])
-    expect(await pollAccessToken(DEVICE_CODE)).toBe("ghu_after_bump")
+    expect((await pollAccessToken(DEVICE_CODE)).accessToken).toBe(
+      "ghu_after_bump",
+    )
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
@@ -107,7 +151,7 @@ describe("pollAccessToken (RFC 8628)", () => {
       { error: "slow_down", interval: 30 },
       { access_token: "ghu_t" },
     ])
-    expect(await pollAccessToken(DEVICE_CODE)).toBe("ghu_t")
+    expect((await pollAccessToken(DEVICE_CODE)).accessToken).toBe("ghu_t")
   })
 
   it("throws on expired_token", async () => {
@@ -129,7 +173,7 @@ describe("pollAccessToken (RFC 8628)", () => {
 
   it("treats 200 with empty body as pending, not success", async () => {
     const fetchMock = withResponses([{}, { access_token: "ghu_late" }])
-    expect(await pollAccessToken(DEVICE_CODE)).toBe("ghu_late")
+    expect((await pollAccessToken(DEVICE_CODE)).accessToken).toBe("ghu_late")
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
@@ -191,7 +235,9 @@ describe("pollAccessToken (RFC 8628)", () => {
       )
     })
     globalThis.fetch = fetchMock as unknown as typeof fetch
-    expect(await pollAccessToken(DEVICE_CODE)).toBe("ghu_recovered")
+    expect((await pollAccessToken(DEVICE_CODE)).accessToken).toBe(
+      "ghu_recovered",
+    )
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 })
