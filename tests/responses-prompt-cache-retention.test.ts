@@ -85,6 +85,9 @@ afterEach(() => {
   state.accountType = originalState.accountType
   state.models = originalState.models
   state.manualApprove = originalState.manualApprove
+  // A non-OK upstream in these tests sets the rejection sidecar; clear it so it
+  // can't leak into a sibling file's getAuthStatus() (which folds it in).
+  state.lastUpstreamRejection = undefined
 })
 
 function installFetch(handler: (body: ResponsesPayload) => Response): void {

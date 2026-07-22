@@ -177,6 +177,10 @@ beforeEach(() => {
   state.githubToken = undefined
   state.copilotToken = undefined
   state.userName = undefined
+  // getAuthStatus() folds in state.lastUpstreamRejection; a sibling test file
+  // that set it (and didn't clear) would otherwise leak into the exact-shape
+  // status assertions here. Reset it so these tests are order-independent.
+  state.lastUpstreamRejection = undefined
   harness.getDeviceCodeImpl = () =>
     Promise.resolve({
       device_code: "device-xyz",
