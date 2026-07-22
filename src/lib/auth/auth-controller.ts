@@ -39,6 +39,10 @@ import type { AuthStatus } from "~/lib/config/settings-types"
 import type { ParsedCopilotError } from "~/lib/errors/copilot-error-parser"
 import type { DeviceCodeResponse } from "~/services/github/get-device-code"
 
+import {
+  scheduleCopilotOnlineRetry,
+  stopCopilotOnlineRetry,
+} from "~/lib/auth/copilot-online-retry"
 import { currentGitHubHost } from "~/lib/auth/github-host"
 import {
   addAccountToDefaultRegistry as defaultAddAccount,
@@ -508,9 +512,16 @@ async function runPoller(flow: ActiveFlow): Promise<void> {
         return
       }
       log.warn(
-        "Auth-controller: failed to mint Copilot token after sign-in:",
+        "Auth-controller: Copilot token mint failed transiently after sign-in; scheduling a background retry:",
         err,
       )
+      // The GitHub identity is valid — the mint (or model cache) just failed
+      // transiently. Sign-in still completes (below), but without this the app
+      // would sit tokenless until a manual restart (the refresh loop only
+      // starts after a successful first mint). Keep retrying in the background
+      // until it comes online. The GitHub token stays in memory, so the loop
+      // can mint with it.
+      scheduleCopilotOnlineRetry()
     }
 
     // Re-check abort: setupCopilotToken is an awaited round-trip during which
@@ -558,6 +569,9 @@ async function runPoller(flow: ActiveFlow): Promise<void> {
  * an error state, not an authenticated one.
  */
 export function markSignedIn(login: string, avatarUrl?: string): void {
+  // We're online — cancel any background online-retry left over from a prior
+  // transient-failure schedule so it can't re-mint under a stale credential.
+  stopCopilotOnlineRetry()
   noteAuthSuccess()
   setAuthState({
     kind: "signed-in",
@@ -586,6 +600,9 @@ export async function signOut(): Promise<void> {
   if (flow) {
     flow.abort.abort()
   }
+  // Stop any background online-retry — there's no credential to mint with once
+  // we sign out, and it must not resurrect a token after the wipe below.
+  stopCopilotOnlineRetry()
   clearTokenTrio()
   // A signed-out session has no upstream activity to surface a banner
   // about. Clear here so the sidecar doesn't outlive the token that
@@ -692,6 +709,9 @@ async function runDegrade(error: CopilotAuthFatalError): Promise<void> {
   }
 
   stopCopilotRefreshLoop()
+  // A genuinely auth-fatal credential can't mint a Copilot token; stop the
+  // background online-retry too so it doesn't keep hammering a known-bad token.
+  stopCopilotOnlineRetry()
   clearTokenTrio()
 
   // Idempotency: once we're already in the matching error state the account is

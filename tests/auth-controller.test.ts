@@ -17,6 +17,8 @@ import {
 
 import type { AccountRecord } from "~/lib/auth/github-token-store"
 
+import { stopCopilotOnlineRetry } from "~/lib/auth/copilot-online-retry"
+
 import {
   deferred,
   flushMicrotasks,
@@ -198,6 +200,9 @@ beforeEach(() => {
 
 afterEach(() => {
   __resetAuthControllerForTests()
+  // The sign-in transient-mint path now schedules a background online-retry
+  // loop; make sure a test that triggered it doesn't leak a parked timer.
+  stopCopilotOnlineRetry()
   state.githubToken = undefined
   state.copilotToken = undefined
   state.userName = undefined
@@ -764,7 +769,7 @@ describe("runPoller (driven by startDeviceFlow)", () => {
       const hit = spy.calls.find(
         (args) =>
           typeof args[0] === "string"
-          && args[0].includes("failed to mint Copilot token"),
+          && args[0].includes("Copilot token mint failed"),
       )
       expect(hit).toBeDefined()
     } finally {

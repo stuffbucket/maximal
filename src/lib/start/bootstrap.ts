@@ -29,6 +29,7 @@ import {
 // governance — so the registration is gated below and the module is loaded
 // lazily only when the user has opted in. Off → degrade + surface the reason.
 import { attemptAutoRecovery } from "~/lib/auth/auth-recovery"
+import { scheduleCopilotOnlineRetry } from "~/lib/auth/copilot-online-retry"
 import { currentGitHubHost } from "~/lib/auth/github-host"
 import {
   migrateLegacyRecord,
@@ -98,9 +99,12 @@ export async function bootstrapUpstream(
   }
 
   if (hasGithubToken()) {
+    // Hoisted so the transient-failure path below can pass it to a late
+    // markSignedIn once the background online-retry succeeds.
+    let avatarUrl: string | undefined
     try {
       emitBootStatus("Connecting to GitHub Copilot…")
-      const avatarUrl = await logUser()
+      avatarUrl = await logUser()
       await setupCopilotToken()
       await cacheModels()
       consola.info(
@@ -139,14 +143,21 @@ export async function bootstrapUpstream(
         return
       }
       consola.warn(
-        "GitHub token present but Copilot bootstrap failed; serving in unauthenticated mode.",
+        "GitHub token present but Copilot bootstrap failed transiently; keeping the GitHub token and scheduling a background retry.",
         error,
       )
-      // Clear the in-memory token but keep the on-disk record for a
-      // next-restart retry, and set the union explicitly (signed-out) so
-      // every bootstrap exit makes its own auth-status statement.
-      clearTokenTrio({ github: true })
+      // The GitHub token is valid — the mint (or model cache) just failed
+      // transiently (e.g. GitHub's token endpoint intermittently 5xxing). KEEP
+      // the in-memory token so the retry loop can mint with it, and self-heal
+      // to signed-in once it succeeds instead of wedging tokenless until a
+      // manual restart. Mark signed-out for now so this exit states the union
+      // explicitly; the retry flips it back on success.
       markSignedOut()
+      scheduleCopilotOnlineRetry({
+        onOnline: () => {
+          if (state.userName) markSignedIn(state.userName, avatarUrl)
+        },
+      })
     }
   }
 
