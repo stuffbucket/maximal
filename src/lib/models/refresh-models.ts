@@ -19,9 +19,11 @@
 
 import type { Context, Next } from "hono"
 
+import consola from "consola"
 import { createHash } from "node:crypto"
 
-import { state } from "~/lib/runtime-state/state"
+import { cacheModels } from "~/lib/platform/utils"
+import { modelsCached, state } from "~/lib/runtime-state/state"
 
 export const STALE_AFTER_MS = 6 * 60 * 60 * 1000 // 6 hours
 export const JITTER_MS = 2 * 60 * 60 * 1000 // 2 hour total spread (±1 hour)
@@ -65,6 +67,58 @@ export function isStale(args: IsStaleArgs): boolean {
 
 let refreshInFlight = false
 
+// ────────────────────────────────────────────────────────────────────
+// On-demand prime for an EMPTY / never-primed cache.
+//
+// The stale-while-revalidate path below deliberately declines an unprimed
+// cache (`loadedAtMs === null` → the initial fetch hasn't happened), so if a
+// transient boot / token-mint failure left the catalog empty, live traffic
+// would never repopulate it. This helper is the on-demand recovery: WARN on
+// failure and keep serving whatever we have (an empty catalog is non-fatal —
+// completion handlers read `state.models?.data ?? []`), and log a recovery
+// NOTE when an empty cache repopulates. It never throws.
+// ────────────────────────────────────────────────────────────────────
+
+/** Minimal logger shape the prime path needs — satisfied by `consola` and by
+ *  a plain `{ info, warn }` in tests. */
+export interface PrimeLogger {
+  info: (message: string, ...args: Array<unknown>) => void
+  warn: (message: string, ...args: Array<unknown>) => void
+}
+
+/** Prime the models cache, best-effort. Warns on failure (keeps the
+ *  last-known catalog, possibly empty) and logs an info note when an empty
+ *  cache transitions to populated. Never throws — a models refresh is not a
+ *  hard dependency of serving traffic. */
+export async function primeModelsCache(
+  refresh: () => Promise<void> = cacheModels,
+  log: PrimeLogger = consola,
+): Promise<void> {
+  const wasEmpty = modelsCached() === 0
+  try {
+    await refresh()
+  } catch (err) {
+    log.warn(
+      "Models cache prime failed; serving the last-known (possibly empty) catalog. Will retry on the next model-list request or activity.",
+      err,
+    )
+    return
+  }
+  if (wasEmpty && modelsCached() > 0) {
+    log.info(`Models cache recovered: ${modelsCached()} models now available.`)
+  }
+}
+
+// Single-flight + cooldown for the empty-cache prime. Separate from the stale
+// path's `refreshInFlight` (the two states are mutually exclusive — an unprimed
+// cache never reaches the stale check). The cooldown is a plain-arithmetic
+// compare against the injectable `now()`, NOT a timer, so a persistent outage
+// doesn't re-hit the endpoint on every request while staying deterministic in
+// tests (no real delays, nothing an afterEach must stop).
+let primeInFlight = false
+let lastPrimeAttemptMs: number | null = null
+export const PRIME_COOLDOWN_MS = 60_000
+
 export interface RefreshOpts {
   /** Reads the models cache's last-load timestamp. */
   getLoadedAtMs: () => number | null
@@ -92,13 +146,40 @@ export interface RefreshOpts {
  *  the background. */
 export function refreshIfStale(
   opts: RefreshOpts,
-): "fired" | "fresh" | "in_flight" | "not_primed" {
+):
+  | "fired"
+  | "fresh"
+  | "in_flight"
+  | "priming"
+  | "prime_in_flight"
+  | "prime_cooldown" {
   const now = (opts.now ?? Date.now)()
   const loadedAtMs = opts.getLoadedAtMs()
   const jitterMs = opts.jitterMs ?? jitterFor(state.macMachineId)
   const staleAfterMs = opts.staleAfterMs ?? STALE_AFTER_MS
 
-  if (loadedAtMs === null) return "not_primed"
+  if (loadedAtMs === null) {
+    // Never primed — a transient boot / token-mint failure left the catalog
+    // empty. The stale-while-revalidate path only revalidates an ALREADY-primed
+    // cache, so without this an empty catalog would never self-heal on live
+    // traffic. Fire a bounded, single-flight prime: same fire-and-forget,
+    // timer-free shape as the stale path, plus a plain-arithmetic cooldown so a
+    // persistent outage doesn't re-hit the endpoint on every request.
+    if (primeInFlight) return "prime_in_flight"
+    if (
+      lastPrimeAttemptMs !== null
+      && now < lastPrimeAttemptMs + PRIME_COOLDOWN_MS
+    ) {
+      return "prime_cooldown"
+    }
+    lastPrimeAttemptMs = now
+    primeInFlight = true
+    // primeModelsCache owns the warn/recover logging and never throws.
+    void primeModelsCache(opts.refresh).finally(() => {
+      primeInFlight = false
+    })
+    return "priming"
+  }
   if (refreshInFlight) return "in_flight"
   if (!isStale({ now, loadedAtMs, staleAfterMs, jitterMs })) return "fresh"
 
@@ -119,6 +200,12 @@ export function refreshIfStale(
  *  needs this. */
 export function _resetRefreshInFlightForTests(): void {
   refreshInFlight = false
+}
+
+/** Reset the on-demand prime single-flight guard + cooldown. Tests only. */
+export function _resetPrimeStateForTests(): void {
+  primeInFlight = false
+  lastPrimeAttemptMs = null
 }
 
 // ────────────────────────────────────────────────────────────────────

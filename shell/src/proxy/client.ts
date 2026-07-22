@@ -159,6 +159,11 @@ type Endpoint =
       path: "/settings/api/auth/github/cancel"
     }
   | {
+      kind: "auth-rearm"
+      method: "POST"
+      path: "/settings/api/auth/github/rearm"
+    }
+  | {
       kind: "gh-status"
       method: "GET"
       path: "/settings/api/gh/status"
@@ -256,6 +261,10 @@ interface ResponseFor {
   "auth-start": AuthStatus
   "auth-sign-out": AuthSignOutResponse
   "auth-cancel": AuthStatus
+  "auth-rearm": {
+    outcome: "online" | "auth_fatal" | "offline"
+    status: AuthStatus
+  }
   "gh-status": GhCliStatus
   "gh-use": GhUseResponse
   "accounts-list": AccountsListResponse
