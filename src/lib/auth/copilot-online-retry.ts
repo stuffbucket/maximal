@@ -3,9 +3,12 @@ import { setTimeout as delay } from "node:timers/promises"
 import { CopilotAuthFatalError } from "~/lib/errors/error"
 import { createTeeLogger } from "~/lib/platform/logger"
 import { cacheModels as defaultCacheModels } from "~/lib/platform/utils"
-import { hasGithubToken } from "~/lib/runtime-state/state"
+import { clearTokenTrio, hasGithubToken } from "~/lib/runtime-state/state"
 
-import { setupCopilotToken as defaultSetupCopilotToken } from "./token"
+import {
+  setupCopilotToken as defaultSetupCopilotToken,
+  stopCopilotRefreshLoop,
+} from "./token"
 
 /**
  * Self-healing background retry for a transient FIRST Copilot-token mint failure.
@@ -140,15 +143,8 @@ const runOnlineRetryLoop = async (
       log.info(
         "Retrying Copilot token mint after a transient first-mint failure",
       )
-      // On success this ALSO starts the normal refresh loop (token.ts), so the
-      // loop hands off cleanly once we're online.
+      // On success this ALSO starts the normal refresh loop (token.ts).
       await setupCopilotToken()
-      // Prime the models cache the same way a fresh boot does; the lazy
-      // stale-refresh middleware only revalidates an already-primed cache.
-      await cacheModels()
-      log.info("Copilot came online after a retry")
-      opts.onOnline?.()
-      return
     } catch (err) {
       if (err instanceof CopilotAuthFatalError) {
         // setupCopilotToken already routed this through markAuthDegraded — the
@@ -162,6 +158,42 @@ const runOnlineRetryLoop = async (
       log.warn(
         `Copilot online-retry: mint still failing; retrying in ${retryDelayMs / 1000}s`,
       )
+      continue
     }
+
+    // The mint SUCCEEDED: the Copilot token is set and token.ts's refresh loop
+    // is live, so we are online regardless of what the models cache does. But
+    // `setupCopilotToken` isn't signal-aware, so a teardown (sign-out / switch /
+    // degrade — each clears the GitHub credential) may have landed while it was
+    // in flight. If the credential is now gone, undo the mint's side-effects
+    // rather than resurrecting a token past the wipe, and don't fire onOnline
+    // (which would latch signed-in over a signed-out session). `signal.aborted`
+    // itself is unreliable to test here — TS narrows it to false from the
+    // while-guard — so key off the credential, which every teardown clears.
+    if (!hasGithubToken()) {
+      stopCopilotRefreshLoop()
+      clearTokenTrio({ copilot: true })
+      return
+    }
+
+    // Prime the models cache the same way a fresh boot does — but BEST-EFFORT.
+    // A /models outage (an endpoint independent of the token mint) must not
+    // keep us looping and re-minting under a token that already works, nor
+    // block the come-online hand-off. If this misses, an empty catalog now
+    // self-heals on demand: the /models route and the stale-refresh middleware
+    // both prime a never-loaded cache on the next request (see
+    // lib/models/refresh-models.ts), and completions don't hard-depend on it.
+    try {
+      await cacheModels()
+    } catch (err) {
+      log.warn(
+        "Copilot online-retry: token minted but priming the models cache failed (best-effort; will self-heal on demand):",
+        err,
+      )
+    }
+
+    log.info("Copilot came online after a retry")
+    opts.onOnline?.()
+    return
   }
 }

@@ -2,7 +2,10 @@ import clipboard from "clipboardy"
 import consola from "consola"
 import { setTimeout as delay } from "node:timers/promises"
 
-import { markAuthDegraded as defaultMarkAuthDegraded } from "~/lib/auth/auth-controller"
+import {
+  markAuthDegraded as defaultMarkAuthDegraded,
+  noteAuthSuccess,
+} from "~/lib/auth/auth-controller"
 import { toCopilotHost } from "~/lib/auth/auth-types"
 import { currentGitHubHost } from "~/lib/auth/github-host"
 import {
@@ -257,6 +260,11 @@ const runCopilotRefreshLoop = async (
       refreshAtMs = getRefreshDeadlineMs(refresh_in)
       if (fatalRetries > 0) clearActiveNeedsReauth()
       fatalRetries = 0
+      // A successful refresh proves the credential still works — refresh the
+      // grace window so a stale in-flight 401 (or a first request right after
+      // wake) doesn't tear the session down, and so the window isn't left
+      // stuck at a hours-old sign-in timestamp after a long sleep (P0.4).
+      noteAuthSuccess()
       log.debug("Copilot token refreshed")
       if (state.showToken) {
         // console-only: a raw bearer must never reach the auth-*.log file sink.

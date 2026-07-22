@@ -2137,3 +2137,32 @@ window.addEventListener("focus", refreshAccountOnAttention);
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") refreshAccountOnAttention();
 });
+
+// Recovery trigger (auth resilience). Independent of the section-gated status
+// refresh above: fire a re-arm on any "moment of connectivity" — an OS wake
+// surfaces as a focus/visibility event and/or a network `online` event — so a
+// session that degraded while the laptop slept (a Copilot bearer that expired
+// past its ~25-min TTL, leaving the sidecar wedged in the `error` state) self-
+// heals WITHOUT the user having to switch accounts back and forth. The sidecar
+// endpoint is itself single-flight and non-destructive; the client throttle
+// just avoids spamming it on a burst of focus/visibility/online events.
+let lastRearmMs = 0;
+const REARM_MIN_INTERVAL_MS = 10_000;
+function triggerAuthRearm(): void {
+  const now = Date.now();
+  if (now - lastRearmMs < REARM_MIN_INTERVAL_MS) return;
+  lastRearmMs = now;
+  void apiCall({
+    kind: "auth-rearm",
+    method: "POST",
+    path: "/settings/api/auth/github/rearm",
+  }).then((result) => {
+    // If we recovered and the user is looking at the Account tab, reflect it.
+    if (result.ok && readHashSection() === "account") void loadAuthStatus();
+  });
+}
+window.addEventListener("online", triggerAuthRearm);
+window.addEventListener("focus", triggerAuthRearm);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") triggerAuthRearm();
+});

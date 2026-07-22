@@ -155,7 +155,27 @@ export async function bootstrapUpstream(
       markSignedOut()
       scheduleCopilotOnlineRetry({
         onOnline: () => {
-          if (state.userName) markSignedIn(state.userName, avatarUrl)
+          // logUser() runs FIRST at boot and is what sets state.userName, so a
+          // transient failure THERE (not in the mint) leaves userName unset.
+          // The retry loop only re-mints the Copilot token — it never re-runs
+          // logUser — so re-resolve identity here before latching signed-in.
+          // Without this, a now-working token would never surface as signed-in
+          // and the app would wedge signed-out despite being online.
+          void (async () => {
+            let avatar = avatarUrl
+            if (!state.userName) {
+              try {
+                avatar = await logUser()
+              } catch (err) {
+                consola.warn(
+                  "Bootstrap online-retry: Copilot came online but the GitHub identity lookup is still failing; staying signed-out until it recovers.",
+                  err,
+                )
+                return
+              }
+            }
+            if (state.userName) markSignedIn(state.userName, avatar)
+          })()
         },
       })
     }

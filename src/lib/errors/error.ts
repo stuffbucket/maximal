@@ -3,7 +3,9 @@ import type { ContentfulStatusCode } from "hono/utils/http-status"
 
 import consola from "consola"
 
-import { markAuthDegraded } from "~/lib/auth/auth-controller"
+import type { RearmOutcome } from "~/lib/auth/auth-controller"
+
+import { markAuthDegraded, rearmCopilotAuth } from "~/lib/auth/auth-controller"
 import { adviseUpstreamError } from "~/lib/errors/upstream-error-advice"
 import { state } from "~/lib/runtime-state/state"
 
@@ -44,9 +46,45 @@ export async function forwardError(
   consola.error("Error occurred:", error)
 
   if (error instanceof CopilotAuthFatalError) {
-    // Auth-fatal from a completion endpoint (or any other Copilot
-    // upstream): degrade NON-DESTRUCTIVELY — drop the live token + flag the
-    // account needs-reauth, but RETAIN the on-disk credential (a single
+    // A Copilot 401/403 from a completion endpoint might be a merely-STALE
+    // short-lived bearer (common after the laptop sleeps past the ~25-min
+    // bearer TTL), NOT a dead GitHub identity. Try to re-mint from the retained
+    // credential first — the mint is the discriminator (it 401s only if the
+    // identity is genuinely bad). This is the antidote to the "wedged until you
+    // switch accounts" bug: previously ANY completion 401 terminally degraded a
+    // fully-recoverable session.
+    let outcome: RearmOutcome = "auth_fatal"
+    try {
+      outcome = await rearmCopilotAuth()
+    } catch (handlerErr) {
+      consola.warn(
+        "rearmCopilotAuth threw while forwarding upstream error:",
+        handlerErr,
+      )
+    }
+
+    if (outcome !== "auth_fatal") {
+      // "online" → we re-minted a fresh bearer and the session is healthy again.
+      // "offline" → the mint failed transiently; don't wedge the session over a
+      // network blip. Either way, ask the client to retry rather than degrade:
+      // the fresh bearer (online) or the next attempt (offline) serves it.
+      return c.json(
+        {
+          error: {
+            message:
+              outcome === "online" ?
+                "Re-authenticated with Copilot after a stale token; please retry the request."
+              : "Reconnecting to Copilot; please retry the request.",
+            type: "server_error",
+          },
+        },
+        503,
+      )
+    }
+
+    // Genuinely auth-fatal (the re-mint itself was rejected, or there is no
+    // GitHub credential): degrade NON-DESTRUCTIVELY — drop the live token + flag
+    // the account needs-reauth, but RETAIN the on-disk credential (a single
     // transient 401 here must never delete the saved account; that was the
     // bug). Stash the remediation reason so the Settings UI surfaces it.
     // Forward the error to the client with the upstream status — the client

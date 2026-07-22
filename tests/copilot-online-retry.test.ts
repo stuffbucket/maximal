@@ -92,6 +92,61 @@ describe("scheduleCopilotOnlineRetry — recovery after transient failure", () =
   })
 })
 
+describe("scheduleCopilotOnlineRetry — a minted token counts as online even if the models cache fails", () => {
+  test("fires onOnline once and stops when the mint succeeds but cacheModels throws", async () => {
+    // The token endpoint recovers and mints, but /models stays down — an
+    // independent endpoint. A live token means we ARE online; cacheModels is
+    // best-effort and must not keep the loop re-minting or block the hand-off.
+    harness.setupImpl = () => Promise.resolve()
+    harness.cacheImpl = () =>
+      Promise.reject(new HTTPError("502", new Response(null, { status: 502 })))
+
+    scheduleCopilotOnlineRetry({
+      retryDelayMs: 10,
+      onOnline: () => {
+        harness.onOnlineCalls++
+      },
+    })
+
+    // Ample time for many ticks had the loop wrongly kept retrying.
+    await tick(60)
+    stopCopilotOnlineRetry()
+
+    // Exactly one mint, onOnline fired once — no re-mint churn on a working
+    // token just because the models cache was unreachable.
+    expect(harness.setupCalls).toBe(1)
+    expect(harness.cacheCalls).toBe(1)
+    expect(harness.onOnlineCalls).toBe(1)
+  })
+})
+
+describe("scheduleCopilotOnlineRetry — a teardown during an in-flight mint isn't overridden", () => {
+  test("does not fire onOnline if the GitHub credential is wiped while the mint is in flight", async () => {
+    // Simulate a sign-out (clears the GitHub token) landing during the awaited
+    // mint: the mint resolves, but the credential is gone by the time it does.
+    harness.setupImpl = () => {
+      state.githubToken = undefined
+      return Promise.resolve()
+    }
+
+    scheduleCopilotOnlineRetry({
+      retryDelayMs: 10,
+      onOnline: () => {
+        harness.onOnlineCalls++
+      },
+    })
+
+    await tick(40)
+    stopCopilotOnlineRetry()
+
+    // The mint ran once, but the post-mint credential check bailed before
+    // onOnline — so a stale mint can't latch signed-in over a signed-out
+    // session, and the loop stops rather than looping.
+    expect(harness.setupCalls).toBe(1)
+    expect(harness.onOnlineCalls).toBe(0)
+  })
+})
+
 describe("scheduleCopilotOnlineRetry — auth-fatal mint stops the loop", () => {
   test("a CopilotAuthFatalError ends the loop without further attempts or onOnline", async () => {
     const fatal = new CopilotAuthFatalError("no_license", 403, null)

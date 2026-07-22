@@ -144,10 +144,12 @@ const {
   signOut,
   markSignedIn,
   markAuthDegraded,
+  rearmCopilotAuth,
   __resetAuthControllerForTests,
   __setAuthControllerDepsForTests,
 } = await import("~/lib/auth/auth-controller")
-const { CopilotAuthFatalError } = await import("~/lib/errors/error")
+const { CopilotAuthFatalError, forwardError } =
+  await import("~/lib/errors/error")
 const { state } = await import("~/lib/runtime-state/state")
 
 beforeEach(() => {
@@ -790,5 +792,93 @@ describe("runPoller (driven by startDeviceFlow)", () => {
     const status = getAuthStatus()
     // signOut cleared everything; aborted catch returned early so no error.
     expect(status.state).toBe("unauthenticated")
+  })
+})
+
+describe("rearmCopilotAuth — re-mint discriminator", () => {
+  test("ghu_ token + successful mint → 'online' and re-signs-in", async () => {
+    state.githubToken = "ghu_valid"
+    state.userName = "octocat"
+    harness.setupCopilotTokenImpl = () => Promise.resolve()
+    const outcome = await rearmCopilotAuth()
+    expect(outcome).toBe("online")
+    expect(harness.setupCopilotTokenCalls).toBe(1)
+    expect(getAuthStatus().state).toBe("authenticated")
+  })
+
+  test("ghu_ token + auth-fatal mint → 'auth_fatal' (caller degrades)", async () => {
+    state.githubToken = "ghu_dead"
+    harness.setupCopilotTokenImpl = () =>
+      Promise.reject(new CopilotAuthFatalError("revoked", 401, null))
+    const outcome = await rearmCopilotAuth()
+    expect(outcome).toBe("auth_fatal")
+  })
+
+  test("ghu_ token + transient mint failure → 'offline' (must NOT degrade)", async () => {
+    state.githubToken = "ghu_valid"
+    harness.setupCopilotTokenImpl = () =>
+      Promise.reject(new Error("network down"))
+    const outcome = await rearmCopilotAuth()
+    expect(outcome).toBe("offline")
+  })
+
+  test("gho_ token short-circuits to 'auth_fatal' without a mint round-trip", async () => {
+    state.githubToken = "gho_used_directly"
+    const outcome = await rearmCopilotAuth()
+    expect(outcome).toBe("auth_fatal")
+    expect(harness.setupCopilotTokenCalls).toBe(0)
+  })
+
+  test("no GitHub credential → 'auth_fatal'", async () => {
+    state.githubToken = undefined
+    const outcome = await rearmCopilotAuth()
+    expect(outcome).toBe("auth_fatal")
+    expect(harness.setupCopilotTokenCalls).toBe(0)
+  })
+
+  test("is single-flight: concurrent triggers coalesce into one mint", async () => {
+    state.githubToken = "ghu_valid"
+    state.userName = "octocat"
+    let release: (() => void) | undefined
+    harness.setupCopilotTokenImpl = () =>
+      new Promise<void>((r) => {
+        release = () => {
+          r()
+        }
+      })
+    const a = rearmCopilotAuth()
+    const b = rearmCopilotAuth()
+    release?.()
+    const [ra, rb] = await Promise.all([a, b])
+    expect(harness.setupCopilotTokenCalls).toBe(1)
+    expect(ra).toBe("online")
+    expect(rb).toBe("online")
+  })
+})
+
+describe("forwardError recovery path (integration with rearmCopilotAuth)", () => {
+  test("completion 401 with a re-mintable ghu_ → 503 retry, session NOT degraded", async () => {
+    state.githubToken = "ghu_valid"
+    state.userName = "octocat"
+    markSignedIn("octocat")
+    harness.setupCopilotTokenImpl = () => Promise.resolve()
+
+    const captured = { status: 0 }
+    const ctx = {
+      json: (_body: unknown, status?: number): Response => {
+        captured.status = status ?? 200
+        return new Response(null, { status: status ?? 200 })
+      },
+    }
+    await forwardError(
+      ctx as unknown as Parameters<typeof forwardError>[0],
+      new CopilotAuthFatalError("stale bearer", 401, null),
+    )
+
+    // Recovered via re-mint → retryable 503, and we did NOT tear the session
+    // down: still authenticated, no needs-reauth flag written.
+    expect(captured.status).toBe(503)
+    expect(getAuthStatus().state).toBe("authenticated")
+    expect(harness.markNeedsReauthCalls.length).toBe(0)
   })
 })

@@ -47,6 +47,7 @@ import { currentGitHubHost } from "~/lib/auth/github-host"
 import {
   addAccountToDefaultRegistry as defaultAddAccount,
   deactivateActiveInDefaultRegistry as defaultDeactivateActive,
+  inferTokenType,
   makeAccountRecord,
   markActiveNeedsReauthInDefaultRegistry as defaultMarkActiveNeedsReauth,
 } from "~/lib/auth/github-token-store"
@@ -498,8 +499,10 @@ async function runPoller(flow: ActiveFlow): Promise<void> {
     // state. Failure (no Copilot license, network down, upstream 5xx)
     // must NOT fail sign-in — the lazy path in token.ts retries on the
     // first /v1/messages request via setupCopilotToken's TTL refresh.
+    let copilotMinted = false
     try {
       await setupCopilotToken()
+      copilotMinted = true
     } catch (err) {
       if (err instanceof CopilotAuthFatalError) {
         // The account authenticated with GitHub but has no usable Copilot
@@ -542,6 +545,14 @@ async function runPoller(flow: ActiveFlow): Promise<void> {
     } catch (err) {
       log.warn("Auth-controller: failed to cache models after sign-in:", err)
     }
+
+    // This flow minted a Copilot token, so we're fully online for THIS
+    // account. Cancel any leftover boot-time online-retry (scheduled by a
+    // cold-boot transient failure in bootstrap) so it can't re-mint or
+    // overwrite this state with a stale-avatar markSignedIn a few seconds
+    // later. Guarded on copilotMinted so we never cancel the retry this flow
+    // may have just scheduled above on its own transient failure.
+    if (copilotMinted) stopCopilotOnlineRetry()
 
     setAuthState({
       kind: "signed-in",
@@ -663,6 +674,68 @@ export function registerAutoRecovery(fn: () => Promise<boolean>): void {
  *  tear the fresh session down (see the grace window in markAuthDegraded). */
 export function noteAuthSuccess(): void {
   lastAuthSuccessMs = Date.now()
+}
+
+/** Outcome of a re-arm attempt. */
+export type RearmOutcome = "online" | "auth_fatal" | "offline"
+
+// Single-flight guard: a burst of triggers (many completion 401s, a wake event,
+// a focus event) must coalesce into ONE re-mint, not a stampede.
+let rearmInFlight: Promise<RearmOutcome> | null = null
+
+/**
+ * Re-mint the Copilot token from the RETAINED GitHub credential and restore the
+ * signed-in state on success. This is the discriminator the completion path
+ * otherwise lacks: a Copilot 401 can be a merely-STALE short-lived bearer
+ * (recoverable — the mint succeeds because the GitHub identity is fine, e.g.
+ * after the laptop slept past the ~25-min bearer TTL) OR a genuinely dead
+ * identity (the mint ITSELF 401/403s). The mint tells them apart:
+ *   - "online"     → mint succeeded; session restored to signed-in.
+ *   - "auth_fatal" → the mint itself is auth-fatal (or there's no GitHub
+ *                    credential to mint with); the caller should degrade.
+ *   - "offline"    → the mint failed transiently (network / 5xx); DON'T degrade
+ *                    — a retry (refresh loop, next trigger) will recover.
+ *
+ * Single-flight + idempotent, so it's safe to fire from many recovery triggers
+ * (completion 401, OS wake, network online, webview focus). It does NOT run the
+ * device flow; with no GitHub credential it returns "auth_fatal" immediately.
+ */
+export function rearmCopilotAuth(): Promise<RearmOutcome> {
+  if (rearmInFlight) return rearmInFlight
+  rearmInFlight = runRearm().finally(() => {
+    rearmInFlight = null
+  })
+  return rearmInFlight
+}
+
+async function runRearm(): Promise<RearmOutcome> {
+  const githubToken = state.githubToken
+  if (!githubToken) return "auth_fatal"
+  // A `gho_` token is used DIRECTLY as the Copilot bearer (no mint / refresh —
+  // see setupCopilotToken). If a completion rejected it, re-minting can't
+  // produce a different bearer: the credential itself is bad. Treat as
+  // auth_fatal so we degrade, rather than looping — re-setting the same dead
+  // token and reporting "online" forever.
+  if (inferTokenType(githubToken) === "gho_") return "auth_fatal"
+  try {
+    // onAuthFatal:"throw" so a genuine identity failure surfaces HERE instead of
+    // self-degrading — this function owns the degrade decision (and must not
+    // re-enter forwardError). A successful mint (re)starts the refresh loop.
+    await setupCopilotToken({ onAuthFatal: "throw" })
+  } catch (err) {
+    if (err instanceof CopilotAuthFatalError) return "auth_fatal"
+    return "offline"
+  }
+  // Mint succeeded → the GitHub identity is valid and we have a fresh bearer.
+  // Restore signed-in (clears any lingering `error` state, refreshes the grace
+  // window, stops a redundant online-retry). markSignedIn needs a real login;
+  // if we somehow lack one, at least refresh the grace window.
+  if (state.userName) {
+    markSignedIn(state.userName)
+  } else {
+    noteAuthSuccess()
+  }
+  return "online"
 }
 
 /**
