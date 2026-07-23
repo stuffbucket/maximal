@@ -891,3 +891,62 @@ describe("forwardError recovery path (integration with rearmCopilotAuth)", () =>
     expect(harness.markNeedsReauthCalls.length).toBe(0)
   })
 })
+
+describe("rearmCopilotAuth — GitHub-token renewal on an expired ghu_", () => {
+  test("mint auth-fatal → renew succeeds → re-mint online", async () => {
+    state.githubToken = "ghu_expired"
+    state.userName = "octocat"
+    let mintCalls = 0
+    harness.setupCopilotTokenImpl = () => {
+      harness.setupCopilotTokenCalls++
+      mintCalls++
+      // First mint fails (expired ghu_); after renewal, second mint succeeds.
+      return mintCalls === 1 ?
+          Promise.reject(new CopilotAuthFatalError("expired", 401, null))
+        : Promise.resolve()
+    }
+    // Note: harness wraps setupCopilotTokenImpl via the mock.module above, so we
+    // bump the counter inside the impl here rather than via that wrapper.
+    harness.setupCopilotTokenCalls = 0
+    __setAuthControllerDepsForTests({
+      renewGithubToken: () => Promise.resolve(true),
+    })
+
+    const outcome = await rearmCopilotAuth()
+    expect(outcome).toBe("online")
+    expect(mintCalls).toBe(2)
+    expect(getAuthStatus().state).toBe("authenticated")
+  })
+
+  test("mint auth-fatal → renew fails → auth_fatal, no re-mint", async () => {
+    state.githubToken = "ghu_dead"
+    let mintCalls = 0
+    harness.setupCopilotTokenImpl = () => {
+      mintCalls++
+      return Promise.reject(new CopilotAuthFatalError("revoked", 401, null))
+    }
+    __setAuthControllerDepsForTests({
+      renewGithubToken: () => Promise.resolve(false),
+    })
+
+    const outcome = await rearmCopilotAuth()
+    expect(outcome).toBe("auth_fatal")
+    expect(mintCalls).toBe(1)
+  })
+
+  test("mint auth-fatal → renew succeeds but re-mint still fatal → auth_fatal", async () => {
+    state.githubToken = "ghu_x"
+    let mintCalls = 0
+    harness.setupCopilotTokenImpl = () => {
+      mintCalls++
+      return Promise.reject(new CopilotAuthFatalError("nope", 403, null))
+    }
+    __setAuthControllerDepsForTests({
+      renewGithubToken: () => Promise.resolve(true),
+    })
+
+    const outcome = await rearmCopilotAuth()
+    expect(outcome).toBe("auth_fatal")
+    expect(mintCalls).toBe(2)
+  })
+})
