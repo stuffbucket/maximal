@@ -27,6 +27,9 @@ const LIVE_RING_CAPACITY = 400
 export const LIVE_WINDOW_MS = 2 * 60 * 60 * 1000
 /** Minimum gap between authoritative refetches triggered by live frames. */
 const REFETCH_THROTTLE_MS = 4000
+/** Poll cadence for the authoritative data + live re-seed, so the view keeps
+ *  moving even without live WS frames (a preview proxy, a dropped socket). */
+const POLL_MS = 15_000
 
 /** One entry in the live ring buffer — a distilled recorded request. */
 export interface LiveEvent {
@@ -65,7 +68,6 @@ interface UseUsage {
   quotas: Record<string, QuotaDetails> | null
   series: TokenUsageSeries | null
   events: TokenUsageEventsPage | null
-  live: UsageLive
   /** Live per-type counters: period summary baseline + streamed delta. */
   liveTotals: LiveTotals
   period: UsagePeriod
@@ -108,13 +110,28 @@ async function fetchQuotas(): Promise<Record<string, QuotaDetails> | null> {
   }
 }
 
+/**
+ * Per-period series bucket width. Deliberately finer than one day: the server
+ * buckets on `created_at_ms / bucketMs`, which floors to UTC boundaries, so a
+ * DAY-wide bucket would lump a whole local day's tokens onto a UTC-midnight
+ * timestamp — misplaced by the timezone offset and far too coarse (a week would
+ * be ~2 points). Sub-day buckets land each sample near its real time instead.
+ * The server clamps to ≤500 buckets, so wide "all" spans coarsen automatically.
+ */
+const SERIES_BUCKET: Record<UsagePeriod, string> = {
+  day: "5m",
+  week: "1h",
+  month: "3h",
+  all: "6h",
+}
+
 /** Time-series for the trend chart. Best-effort: a failure just hides it. */
 async function fetchSeries(
   period: UsagePeriod,
 ): Promise<TokenUsageSeries | null> {
   try {
     const res = await fetch(
-      `/token-usage/series?period=${encodeURIComponent(period)}`,
+      `/token-usage/series?period=${encodeURIComponent(period)}&bucket=${SERIES_BUCKET[period]}`,
     )
     if (!res.ok) return null
     return (await res.json()) as TokenUsageSeries
@@ -195,12 +212,15 @@ function useLiveStream(
     lastAt: null,
   })
 
-  // Seed from the most recent events so the stream isn't empty on first paint.
+  // Seed from recent events on mount, then RE-seed on a timer. The re-seed is
+  // what keeps the near-term chart alive on an instance that receives no live WS
+  // frames (e.g. a preview proxy the traffic doesn't route through) — it tops up
+  // the ring from the shared DB. mergeRing dedupes against streamed frames.
   useEffect(() => {
     // Object guard (not a bare `let`): a property read isn't narrowed across the
     // await, so the cancellation check stays meaningful to the type-checker.
     const guard = { cancelled: false }
-    void (async () => {
+    const reseed = async (): Promise<void> => {
       const recent = await fetchEvents("day", 1)
       if (guard.cancelled || !recent) return
       const now = Date.now()
@@ -222,9 +242,12 @@ function useLiveStream(
         ...prev,
         events: mergeRing(prev.events, seeded, now),
       }))
-    })()
+    }
+    void reseed()
+    const id = setInterval(() => void reseed(), POLL_MS)
     return () => {
       guard.cancelled = true
+      clearInterval(id)
     }
   }, [])
 
@@ -329,6 +352,14 @@ export function useUsage(): UseUsage {
     void load()
   }, [load])
 
+  // Poll the authoritative data so the summary/series/events keep refreshing
+  // even when no live WS frame arrives (preview proxy, dropped socket). Live
+  // frames still drive the sub-second tracker ticks on top of this.
+  useEffect(() => {
+    const id = setInterval(() => void load(), POLL_MS)
+    return () => clearInterval(id)
+  }, [load])
+
   const live = useLiveStream(load, lastFetchAt)
 
   // Live per-type counters: the authoritative period summary plus every streamed
@@ -359,7 +390,6 @@ export function useUsage(): UseUsage {
     quotas,
     series,
     events,
-    live,
     liveTotals,
     period,
     setPeriod,
