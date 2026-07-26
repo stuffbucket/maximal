@@ -2368,36 +2368,6 @@ a:hover {
   font-size: var(--text-3xl);
 }
 
-/* Two graphs side by side on a wide canvas (near-term hero + period trend),
-   stacking to one column when the pane is narrow. Not cards — each chart's own
-   visual separates it. */
-.usage-graphs {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  gap: var(--space-6);
-  align-items: start;
-}
-
-/* The explicit timescale label above a graph ("Live · last hour", "This week"). */
-.usage-hero__caption {
-  margin: 0;
-  font-size: var(--text-sm);
-  color: var(--text-muted);
-}
-
-/* ---- Live hero ----
-   NOT a card: the chart's own gradient is the visual. The numbers and the color
-   key both live in the tracker strip above; this section is just the stream. */
-.usage-hero {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-}
-
-.usage-hero__stream {
-  width: 100%;
-}
-
 /* Chart wrapper — the SVG fills its measured width. */
 .usage-chart {
   width: 100%;
@@ -2408,12 +2378,13 @@ a:hover {
   height: auto;
   overflow: visible;
 }
-/* Period-trend empty state. */
+/* Chart empty state — centered in the panel (see rule above). */
 .usage-chart__empty {
   margin: 0;
   padding: var(--space-6) 0;
   font-size: var(--text-sm);
   color: var(--text-muted);
+  text-align: center;
 }
 
 /* ---- Sections (typographic, not cards) ---- */
