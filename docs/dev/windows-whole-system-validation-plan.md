@@ -81,22 +81,35 @@ a "the *build* runs as expected as a whole" test rather than a unit test.
 ### Components to build
 
 1. **Mock Copilot upstream** (`tests/e2e/mock-upstream.ts`) — a `Bun.serve`
-   stub implementing the two upstream surfaces the proxy calls:
-   - `POST /copilot_internal/v2/token` (the Copilot token mint;
-     `COPILOT_TOKEN_PATH` in `src/lib/config/api-config.ts`) → returns a token
-     whose `endpoints.api` points **back at this stub**, so completions are
-     redirected here too.
-   - The chat/completions + messages + responses endpoints → return canned,
-     fixture-driven upstream responses (streaming + non-streaming). Record each
-     received request so the test can assert what the proxy *sent* upstream
-     (i.e. that translation happened).
+   stub implementing the two upstream **hosts** the proxy calls when the
+   enterprise override is set (see §2 for why it's two, and their exact shape):
+   - `https://api.<domain>/copilot_internal/v2/token` — the Copilot token mint
+     (`COPILOT_TOKEN_PATH` in `src/lib/config/api-config.ts`). Accepts any GitHub
+     token and returns a canned Copilot token.
+   - `https://copilot-api.<domain>/…` — chat/completions + messages + responses;
+     return canned, fixture-driven upstream responses (streaming + non-streaming).
+     Record each received request so the test can assert what the proxy *sent*
+     upstream (i.e. that translation happened).
 
-2. **Upstream redirection seam.** The proxy derives the upstream from
-   `getGitHubApiBaseUrl()` (`api-config.ts:33`), which honors
-   `COPILOT_API_ENTERPRISE_URL`. **Open decision (see risks):** that base is
-   forced `https://`, so the stub must either (a) serve TLS with a cert added via
-   `NODE_EXTRA_CA_CERTS` (no production code change — preferred), or (b) we add a
-   test-only, non-production-gated env to allow an `http://` upstream override.
+2. **Upstream redirection seam (verified).** Setting `COPILOT_API_ENTERPRISE_URL`
+   pins BOTH upstream hosts, and it does so at the **highest precedence** —
+   `copilotBaseUrl()` (`api-config.ts`, the `enterpriseDomain` branch) ranks the
+   enterprise override *above* token discovery, so we do NOT rely on the minted
+   token's `endpoints.api` (an earlier draft of this plan did — that was wrong).
+   With `COPILOT_API_ENTERPRISE_URL=<domain>` the proxy calls exactly two hosts:
+   - token mint  → `https://api.<domain>` (via `getGitHubApiBaseUrl()`)
+   - completions → `https://copilot-api.<domain>` (via `copilotBaseUrl()`)
+
+   **Both are forced `https://`**, so the harness must terminate TLS for both
+   subdomains on loopback. Concretely: map `api.<domain>` and `copilot-api.<domain>`
+   to `127.0.0.1` (hosts file / a resolver the runner honors) and serve them with a
+   **wildcard `*.<domain>` cert** trusted via `NODE_EXTRA_CA_CERTS` (preferred — no
+   production code change; confirm Bun's `fetch` honors it). Fallback if that's
+   fragile in CI: a test-only, non-production-gated env allowing an `http://`
+   upstream override. Pick a `<domain>` that can't resolve publicly (e.g.
+   `maximal.test`). Do NOT run as the opencode OAuth app — that branch pins the
+   apex host and alters proxy headers; the enterprise override outranks it, but
+   keep the harness on the default app to avoid surprises.
 
 3. **Auth seeding.** Pre-seed a fake credential in a temp `COPILOT_API_HOME` so
    the proxy boots "authenticated" and hits the stub for the Copilot token:
@@ -135,9 +148,12 @@ every-PR, Windows nightly/on-label. Reuse `windows-installer-dev.yml`'s existing
 - (Phase 2 extends this to: WS live-feed pushed the event; UI island rendered it).
 
 ### Open questions / risks (resolve before building)
-1. **TLS vs http upstream seam** (§2) — the main technical gate. Prefer the
-   `NODE_EXTRA_CA_CERTS` cert route to avoid a production code change; confirm Bun
-   honors it for the proxy's `fetch`.
+1. **Two-subdomain TLS + loopback DNS** (§2) — the main technical gate. The
+   enterprise override pins `api.<domain>` AND `copilot-api.<domain>`, both
+   `https://`, so the harness needs loopback DNS for both subdomains plus a
+   wildcard `*.<domain>` cert trusted via `NODE_EXTRA_CA_CERTS`. Confirm Bun's
+   `fetch` honors that CA var on all three OSes; the `http://`-override fallback
+   is the escape hatch if it's fragile (esp. on the Windows runner).
 2. **Auth-seeding fidelity** — exact on-disk shape the token store/loader expects
    so the proxy treats the seeded creds as valid without a network round-trip.
 3. **Usage assertion surface** — DB vs API vs WS; pick the most stable (likely the
