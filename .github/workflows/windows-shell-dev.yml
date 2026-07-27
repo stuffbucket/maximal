@@ -35,13 +35,6 @@ on:
         description: "Synthetic version for the dev build (no leading v)"
         required: false
         default: "0.0.0-dev"
-  # Branch-scoped auto-validation: pushing the Windows build-validation branch
-  # runs the full Windows shell build so we get a green/red signal without a
-  # manual dispatch. Scoped to this single branch so ordinary PRs don't pay the
-  # slow Windows Rust compile. Remove the branch (or this trigger) once merged.
-  push:
-    branches:
-      - "worktree-ci+windows-build-validation"
 
 # A second dispatch supersedes an in-flight one for the same branch.
 concurrency:
@@ -55,7 +48,7 @@ jobs:
   build:
     runs-on: windows-2022
     env:
-      MAXIMAL_VERSION: ${{ github.event.inputs.version || '0.0.0-dev' }}
+      MAXIMAL_VERSION: ${{ github.event.inputs.version }}
       MAXIMAL_GIT_SHA: ${{ github.sha }}
       MAXIMAL_GIT_BRANCH: ${{ github.ref_name }}
       MAXIMAL_CHANNEL: dev
