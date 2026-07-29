@@ -1,7 +1,6 @@
 ---
 import { getEntry, render } from "astro:content";
 
-import GodRays from "../components/GodRays.astro";
 import "../styles/global.css";
 
 const REPO = "stuffbucket/maximal";
@@ -21,9 +20,9 @@ const { Content } = await render(entry);
 const siteBase = (Astro.site?.href ?? "https://mxml.sh/")
   .replace(/\/$/, "");
 const ogImage = `${siteBase}/og.png`;
-const ogTitle = "maximal · your AI tools, your Copilot models, one connection";
+const ogTitle = "maximal · your AI tools, powered by GitHub Copilot";
 const ogDescription =
-  "Connect the AI tools you use to the models in GitHub Copilot.";
+  "Use Claude Code, Codex, and opencode with the models in your GitHub Copilot plan — no extra API keys, no second bill.";
 ---
 
 <!doctype html>
@@ -32,14 +31,22 @@ const ogDescription =
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT,WONK@9..144,400..900,0..100,0..1&display=swap"
+      rel="preload"
+      as="font"
+      type="font/woff2"
+      href="/fonts/fraunces-latin.woff2"
+      crossorigin
+    />
+    <link
+      rel="preload"
+      as="font"
+      type="font/woff2"
+      href="/fonts/commissioner-latin.woff2"
+      crossorigin
     />
 
-    <title>maximal · your AI tools, your Copilot models, one connection</title>
+    <title>maximal · your AI tools, powered by GitHub Copilot</title>
     <meta
       name="description"
       content="maximal swaps the engine inside the AI coding tools you use, like Claude Code, Codex, and opencode, so they run on the models in your GitHub Copilot subscription."
@@ -51,12 +58,12 @@ const ogDescription =
     />
     <meta
       name="theme-color"
-      content="#f7f2e9"
+      content="#fafafa"
       media="(prefers-color-scheme: light)"
     />
     <meta
       name="theme-color"
-      content="#09090b"
+      content="#0a0a0a"
       media="(prefers-color-scheme: dark)"
     />
     <meta name="color-scheme" content="light dark" />
@@ -72,7 +79,7 @@ const ogDescription =
     <meta property="og:image:height" content="630" />
     <meta
       property="og:image:alt"
-      content="The maximal hero card: the maximal wordmark on a glossy candy-red panel."
+      content="The maximal wordmark on a dark canvas."
     />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={ogTitle} />
@@ -81,9 +88,6 @@ const ogDescription =
   </head>
   <body>
     <a href="#main" class="skip-link">Skip to content</a>
-
-    <!-- Background: god-rays shader (dark mode only, behind all content) -->
-    <GodRays />
 
     <main id="main">
       <Content />
@@ -136,28 +140,6 @@ const ogDescription =
          can import the type-checked, schema-2 parser. Fail-closed. -->
     <script>
       import "../lib/hydrate-downloads";
-    </script>
-
-    <script is:inline>
-      // Subtle click celebration on primary buttons: a soft light bloom from
-      // the click point + a tiny press (see .btn--celebrate in global.css).
-      (function () {
-        if (
-          window.matchMedia &&
-          window.matchMedia("(prefers-reduced-motion: reduce)").matches
-        )
-          return;
-        document.addEventListener("click", function (e) {
-          var btn = e.target.closest && e.target.closest(".btn--primary");
-          if (!btn) return;
-          var r = btn.getBoundingClientRect();
-          btn.style.setProperty("--rx", e.clientX - r.left + "px");
-          btn.style.setProperty("--ry", e.clientY - r.top + "px");
-          btn.classList.remove("btn--celebrate");
-          void btn.offsetWidth; // restart the animation on rapid re-clicks
-          btn.classList.add("btn--celebrate");
-        });
-      })();
     </script>
   </body>
 </html>
