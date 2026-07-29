@@ -42,8 +42,8 @@ const tools = [
   { name: "any Anthropic / OpenAI SDK", icon: "sdk" },
 ];
 const models = [
-  { name: "Claude Opus 4.8", icon: "claude" },
-  { name: "GPT-5.5", icon: "openai" },
+  { name: "Claude Opus 5", icon: "claude" },
+  { name: "GPT-5.6", icon: "openai" },
   { name: "Gemini 3 Pro", icon: "gemini" },
   { name: "…and more", icon: "more" },
 ];
@@ -53,22 +53,20 @@ const shot = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/screenshots/app-das
 ---
 
 <section id="how" class="showtell">
-  <h2>Why maximal</h2>
-
   <div class="flow-lede">
-    <svg class="flow-lede__mark" viewBox="0 0 64 64" aria-hidden="true">
-      <rect width="64" height="64" rx="15" fill="#c8334a"></rect>
-      <text
-        class="flow-lede__mark-m"
-        x="32"
-        y="46"
-        text-anchor="middle"
-        fill="#f4ead4">m</text
-      >
-    </svg>
-    <p class="flow-lede__text">
-      maximal runs the tools you already use on
-      <span class="ink-brand">the models in your Copilot plan</span>.
+    <h2 class="flow-lede__text">
+      <span class="lede-initial" aria-hidden="true">
+        <svg viewBox="0 0 100 100">
+          <rect width="100" height="100" rx="23" fill="#c8334a"></rect>
+          <text class="lede-initial__m" x="50" y="66" text-anchor="middle"
+            fill="#f4ead4">m</text>
+        </svg></span
+      ><span class="sr-only">m</span>aximalize
+      <span class="ink-brand">your AI ecosystem</span>
+    </h2>
+    <p class="flow-lede__how">
+      Switch on the tools you use, and maximal runs them on the models in your
+      Copilot plan.
     </p>
   </div>
 
@@ -156,44 +154,56 @@ const shot = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/screenshots/app-das
 </section>
 
 <style>
-  /* Centre the section heading over the centred island content. */
-  h2 {
-    text-align: center;
-  }
-
-  /* Value sentence — the second Fraunces display moment, led by the crimson
-     app tile as a centred brand mark (clean, not fused into the word). */
+  /* The value headline (the section's h2) — the crimson app tile is fused in as
+     the initial "m" of "maximalize". Reset the global h2's variation axes so the
+     display face renders with default optical sizing, matching the rest. */
   .flow-lede {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    margin: 2rem auto 0;
+    margin: 0 auto;
   }
-  .flow-lede__mark {
-    width: clamp(3rem, 7vw, 3.75rem);
-    height: auto;
-    margin-bottom: 1.1rem;
-    border-radius: 0.9rem;
-    /* Hairline ring so the crimson tile's silhouette survives on dark. */
-    box-shadow: var(--shadow-card), 0 0 0 1px var(--border-strong);
+  .lede-initial {
+    display: inline-block;
+    width: 1.6em;
+    height: 1.6em;
+    /* Drop the tile so the cream glyph's baseline (y=66/100 in the SVG) lands on
+       the text baseline: below-baseline space = 34% of tile height. */
+    vertical-align: -0.544em;
+    margin-right: 0.05em;
   }
-  .flow-lede__mark-m {
+  .lede-initial svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+  .lede-initial__m {
     font-family: var(--serif);
     font-weight: 900;
-    font-size: 46px;
+    font-size: 72px;
     font-variation-settings: "SOFT" 30, "WONK" 1, "opsz" 144;
   }
   .flow-lede__text {
     font-family: var(--serif);
     font-weight: 500;
     font-size: clamp(1.6rem, 3.2vw, 2.4rem);
+    font-variation-settings: normal;
     line-height: 1.25;
     letter-spacing: -0.01em;
     color: var(--text);
     text-align: center;
     text-wrap: balance;
     max-width: 24ch;
-    margin: 0;
+    margin: 0 auto;
+  }
+  /* The "how" — a quiet sans sub-line that bridges the coined-verb headline into
+     the tools → models rail below. */
+  .flow-lede__how {
+    font-family: var(--sans);
+    font-size: clamp(1rem, 1.6vw, 1.15rem);
+    line-height: 1.55;
+    color: var(--text-muted);
+    text-align: center;
+    text-wrap: balance;
+    max-width: 42ch;
+    margin: 1rem auto 0;
   }
 
   /* Directional rail — apps on the left, a single crimson arrow, models on the
