@@ -211,7 +211,6 @@
   "diagnostics-discovered-upstream": "Amont détecté",
   "diagnostics-value-none": "—",
   "diagnostics-manage-title": "Gérer Maximal",
-  "diagnostics-quit-title": "Quitter Maximal",
   "diagnostics-quit-desc": "Arrêtez l’application de la barre de menus et son proxy en arrière-plan.",
   "diagnostics-quit-button": "Quitter Maximal",
   "uninstall-title": "Désinstaller",

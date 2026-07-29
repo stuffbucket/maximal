@@ -211,7 +211,6 @@
   "diagnostics-discovered-upstream": "Discovered upstream",
   "diagnostics-value-none": "—",
   "diagnostics-manage-title": "Manage Maximal",
-  "diagnostics-quit-title": "Quit Maximal",
   "diagnostics-quit-desc": "Stop the menu-bar app and its background proxy.",
   "diagnostics-quit-button": "Quit Maximal",
   "uninstall-title": "Uninstall",

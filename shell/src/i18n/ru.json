@@ -211,7 +211,6 @@
   "diagnostics-discovered-upstream": "Обнаруженный хост",
   "diagnostics-value-none": "—",
   "diagnostics-manage-title": "Управление Maximal",
-  "diagnostics-quit-title": "Выйти из Maximal",
   "diagnostics-quit-desc": "Остановить приложение в строке меню и его фоновый прокси.",
   "diagnostics-quit-button": "Выйти из Maximal",
   "uninstall-title": "Удалить",

@@ -211,7 +211,6 @@
   "diagnostics-discovered-upstream": "Host ascendente detectado",
   "diagnostics-value-none": "—",
   "diagnostics-manage-title": "Gestionar Maximal",
-  "diagnostics-quit-title": "Salir de Maximal",
   "diagnostics-quit-desc": "Detenga la app de la barra de menús y su proxy en segundo plano.",
   "diagnostics-quit-button": "Salir de Maximal",
   "uninstall-title": "Desinstalar",
