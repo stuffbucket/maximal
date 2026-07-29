@@ -95,43 +95,114 @@ function resolveMainScript(): string | undefined {
 }
 
 /**
- * Recognize a helper command WE wrote, regardless of which binary path precedes
- * it — matching on the invocation SIGNATURE, not the exact string. Accepts BOTH
- * the current `api <label>` form and the legacy `--apiKeyHelper <label>` form,
- * so a config written by an older maximal is still ours (boot self-heals it
- * forward to the `api` form; uninstall strips it), while a genuinely
- * third-party helper is left untouched.
+ * Recognize a helper command WE wrote by WHAT IT INVOKES, not by an exact
+ * string shape. We tokenize the command and check that its trailing tokens are
+ * our subcommand signature (`api <label>` or the legacy `--apiKeyHelper
+ * <label>`) AND that the leading tokens actually launch maximal — a maximal
+ * binary (`maximal` / `maximal-<triple>`), our entry script (`main.ts` /
+ * `main.js`), or a JS runtime (bun/node, which we only ever spawn to run
+ * maximal). This is deliberately robust to path/runtime/format drift so a
+ * helper written by ANY maximal — a moved worktree, an updated install, a
+ * three-token invocation, an unquoted path — is still classed ours and healed
+ * forward to the running instance (see `applyProxyBaseUrl`), rather than being
+ * misclassified as foreign and stranded.
  *
- * The `api <label>` form is anchored on the quoted-path prefix (`"…" api
- * <label>`) — the bare-word `api` is common enough that matching it unanchored
- * could misfire on a foreign `some-tool api foo`. The legacy flag stays matched
- * by its distinctive `--apiKeyHelper` token (unanchored, as before, so a
- * bare-`maximal` legacy string keeps upgrading).
+ * The maximal-identity requirement is why this is also stricter where it
+ * matters: a foreign `"/opt/other-tool" api claude-code` is NOT ours (the old
+ * shape-only regex wrongly claimed any quoted path ending in `api <label>`).
+ * The bare-word `api`/`node` risk is bounded by requiring both the exact label
+ * and a maximal anchor.
+ *
+ * Note: this can only recognize forms the CURRENT code understands — an older
+ * running maximal won't parse a newer format. The guard is forward-compatible,
+ * not retroactive.
  */
 export function isOwnedApiKeyHelper(command: unknown, label?: string): boolean {
   if (typeof command !== "string") return false
+  const tokens = tokenizeCommand(command)
+  if (tokens.length === 0) return false
   const trimmed = label?.trim()
-  // Legacy: "<path>" --apiKeyHelper <label>  — flag as a standalone trailing token.
-  const legacySuffix =
-    trimmed ? `${LEGACY_HELPER_FLAG} ${trimmed}` : LEGACY_HELPER_FLAG
-  if (new RegExp(`\\s${escapeRegExp(legacySuffix)}\\s*$`, "u").test(command)) {
-    return true
-  }
-  // Current: "<abs-path>" api <label>  — or the runtime two-token form
-  // "<runtime>" "<entry>" api <label>. Anchored on a leading quoted path so a
-  // foreign `tool api foo` can't match; the optional second quoted token covers
-  // a dev/bun invocation, which boot reconciliation heals to the single-token
-  // compiled path.
-  const apiSuffix =
-    trimmed ? `${HELPER_SUBCOMMAND} ${trimmed}` : HELPER_SUBCOMMAND
-  return new RegExp(
-    `^"[^"]+"(?:\\s+"[^"]+")?\\s+${escapeRegExp(apiSuffix)}\\s*$`,
-    "u",
-  ).test(command)
+
+  // Legacy: "<path>" --apiKeyHelper <label>. The flag is maximal-distinctive
+  // enough to anchor on alone (boot heals it forward to the `api` form).
+  const legacyLeading = matchTrailingSubcommand(
+    tokens,
+    LEGACY_HELPER_FLAG,
+    trimmed,
+  )
+  if (legacyLeading) return true
+
+  // Current: <maximal-invocation> api <label>. Require the leading tokens to
+  // actually launch maximal so a foreign `tool api <label>` can't match.
+  const apiLeading = matchTrailingSubcommand(tokens, HELPER_SUBCOMMAND, trimmed)
+  if (apiLeading) return invokesMaximal(apiLeading)
+
+  return false
 }
 
-function escapeRegExp(value: string): string {
-  return value.replaceAll(/[.*+?^${}()|[\]\\]/gu, String.raw`\$&`)
+/** Split a shell-ish command into tokens, treating a `"double quoted"` run as a
+ *  single token (our writer always quotes the exec path). Good enough for the
+ *  commands we emit; we don't need full POSIX quoting. */
+function tokenizeCommand(command: string): Array<string> {
+  return (command.match(/"[^"]*"|\S+/gu) ?? []).map((tok) =>
+    tok.startsWith(`"`) && tok.endsWith(`"`) ? tok.slice(1, -1) : tok,
+  )
+}
+
+/** When `tokens` ends with `subcommand [label]`, return the LEADING tokens
+ *  (everything before the subcommand); otherwise null. With a `label`, the last
+ *  token must equal it; without, the subcommand must be the last token. */
+function matchTrailingSubcommand(
+  tokens: Array<string>,
+  subcommand: string,
+  label: string | undefined,
+): Array<string> | null {
+  if (label) {
+    const n = tokens.length
+    if (n >= 2 && tokens[n - 2] === subcommand && tokens[n - 1] === label) {
+      return tokens.slice(0, n - 2)
+    }
+    return null
+  }
+  if (tokens.length > 0 && tokens.at(-1) === subcommand) {
+    return tokens.slice(0, -1)
+  }
+  return null
+}
+
+/** True when the leading tokens of a helper command launch maximal: a maximal
+ *  binary or entry script appears among them, or the first token is a JS
+ *  runtime (bun/node — we only ever spawn one to run maximal, incl. the
+ *  pre-#388 `"<bun>" api <label>` bug artifact we still heal). */
+function invokesMaximal(leading: Array<string>): boolean {
+  if (leading.length === 0) return false
+  if (leading.some((token) => isMaximalAnchor(token))) return true
+  return isRuntimeExecPath(leading[0])
+}
+
+/** Basename of a path, split on BOTH separators so it's correct regardless of
+ *  the host that wrote the command (a Windows path can reach a POSIX reader via
+ *  a synced config), lowercased with a trailing `.exe` stripped. */
+function basename(p: string): string {
+  return (
+    p
+      .split(/[/\\]/u)
+      .pop()
+      ?.toLowerCase()
+      .replace(/\.exe$/u, "") ?? ""
+  )
+}
+
+/** True when a token is a maximal binary (`maximal` / `maximal-<triple>`) or
+ *  our entry script (`main.ts` / `main.js`). */
+function isMaximalAnchor(token: string): boolean {
+  const base = basename(token)
+  return (
+    base === "maximal"
+    || base.startsWith("maximal-")
+    || base === "main.ts"
+    || base === "main.js"
+  )
 }
 
 function normalizeLabel(value: string): string {
