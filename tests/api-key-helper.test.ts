@@ -171,6 +171,54 @@ describe("isOwnedApiKeyHelper", () => {
     ).toBe(true)
   })
 
+  test("recognizes maximal by what it invokes, across path/format drift", () => {
+    // A moved worktree (different bun, different checkout) — still ours, so it
+    // heals to the running instance instead of being stranded as foreign.
+    expect(
+      isOwnedApiKeyHelper(
+        '"/opt/homebrew/Cellar/bun/1.3.10/bin/bun" "/Users/x/other-worktree/src/main.ts" api claude-code',
+        "claude-code",
+      ),
+    ).toBe(true)
+    // A three-token runtime invocation (extra flag) — anchored on the entry
+    // script, not a rigid token count.
+    expect(
+      isOwnedApiKeyHelper(
+        '"/usr/bin/bun" "--smol" "/x/maximal/src/main.ts" api claude-code',
+        "claude-code",
+      ),
+    ).toBe(true)
+    // An unquoted compiled-binary path (space-free) is still recognized.
+    expect(
+      isOwnedApiKeyHelper(
+        "/usr/local/bin/maximal api claude-code",
+        "claude-code",
+      ),
+    ).toBe(true)
+    // The pre-#388 bare-runtime bug artifact (`"<bun>" api <label>`) is ours via
+    // the runtime anchor, so boot can heal it.
+    expect(
+      isOwnedApiKeyHelper(
+        '"/opt/homebrew/bin/bun" api claude-code',
+        "claude-code",
+      ),
+    ).toBe(true)
+    // A Windows compiled sidecar (target-triple basename + .exe).
+    expect(
+      isOwnedApiKeyHelper(
+        String.raw`"C:\Users\x\AppData\Local\Maximal\maximal-x86_64-pc-windows-msvc.exe" api claude-code`,
+        "claude-code",
+      ),
+    ).toBe(true)
+    // node entry-script form.
+    expect(
+      isOwnedApiKeyHelper(
+        '"/usr/bin/node" "/x/dist/main.js" api claude-code',
+        "claude-code",
+      ),
+    ).toBe(true)
+  })
+
   test("two-token form with the wrong label is NOT ours", () => {
     expect(
       isOwnedApiKeyHelper(
@@ -190,11 +238,19 @@ describe("isOwnedApiKeyHelper", () => {
       false,
     )
     // Bare-word `api` is common; a foreign tool using it must NOT match — the
-    // current form is anchored on a leading quoted path.
+    // leading tokens must actually launch maximal.
     expect(
       isOwnedApiKeyHelper("some-tool api claude-code", "claude-code"),
     ).toBe(false)
     expect(isOwnedApiKeyHelper("api claude-code", "claude-code")).toBe(false)
+    // A FOREIGN quoted path ending in `api <label>` is NOT ours — the old
+    // shape-only regex wrongly claimed any quoted path here.
+    expect(
+      isOwnedApiKeyHelper(
+        '"/opt/other-tool/bin/other" api claude-code',
+        "claude-code",
+      ),
+    ).toBe(false)
   })
 
   test("rejects non-string input", () => {
