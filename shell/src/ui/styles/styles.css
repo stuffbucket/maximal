@@ -844,7 +844,7 @@ a:hover {
  * The card itself is the only surface (no nested card). Its body is a
  * vertical stack matching the card's own rhythm; the option checkboxes,
  * inline error, and action button each get their own row. */
-[data-uninstall-body] {
+.uninstall-body {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);

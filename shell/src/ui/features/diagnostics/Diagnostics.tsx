@@ -272,7 +272,7 @@ function UninstallCard({ t }: { t: TranslateFn }): ReactElement {
       </div>
       {done ?
         <p className="card__hint">{t("uninstall-complete")}</p>
-      : <div>
+      : <div className="uninstall-body">
           <p className="card__hint">
             {fillNode(t, "uninstall-hint", {
               name: "cliName",
