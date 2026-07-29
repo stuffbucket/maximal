@@ -87,7 +87,11 @@ export const DiagnosticsResponse = z.object({
   tokens: TokenStatus,
   rate_limit: RateLimitStatus,
   web_search: WebSearchStatus,
-  copilot_service: CopilotServiceStatus,
+  /** Resolved Copilot service configuration. Optional across versions: a
+   *  sidecar predating this field (added with the service disclosure) omits
+   *  it, so a newer UI talking to an older running proxy must tolerate its
+   *  absence rather than assume it. The current backend always populates it. */
+  copilot_service: CopilotServiceStatus.optional(),
 })
 export type DiagnosticsResponse = z.infer<typeof DiagnosticsResponse>
 

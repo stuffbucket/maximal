@@ -1,16 +1,20 @@
-import type {
+import { z } from "zod"
+
+// The active-clients wire contract is owned by the shared feed contract
+// (single source of truth for the WS + this fetch client). See feed-types.ts.
+import type { ActiveApiClientsResponse } from "../../../src/lib/ws/feed-types"
+
+import {
   AccountsListResponse,
   ApiKeyEntry,
   ApiKeysListResponse,
+  AppEntry,
+  AppsListResponse,
   AuthStatus,
   DiagnosticsResponse,
   ModelsListResponse,
   UpdateStatusResponse,
 } from "../../../src/lib/config/settings-types"
-// The active-clients wire contract is owned by the shared feed contract
-// (single source of truth for the WS + this fetch client). See feed-types.ts.
-import type { ActiveApiClientsResponse } from "../../../src/lib/ws/feed-types"
-
 /**
  * Typed fetch client for the proxy's `/settings/api/*` surface.
  *
@@ -43,84 +47,71 @@ import { readInlineState } from "./inline-state-client"
 
 const TIMEOUT_MS = 5000
 
-interface AuthSignOutResponse {
-  ok: true
-}
+/** Minimal `{ ok: true }` acknowledgement (sign-out, key delete). */
+const AckResponse = z.object({ ok: z.literal(true) })
 
 /** Local GitHub CLI status — mirrors GhCliStatus in src/services/gh-cli.ts
- *  (mirror by name, not import; see the note below). */
-export interface GhCliStatus {
-  installed: boolean
-  version: string | null
-  accounts: Array<{
-    login: string
-    host: string
-    active: boolean
-    scopes: Array<string>
-  }>
-}
+ *  (mirror by name; the proxy has no zod schema for it to share). */
+export const GhCliStatus = z.object({
+  installed: z.boolean(),
+  version: z.string().nullable(),
+  accounts: z.array(
+    z.object({
+      login: z.string(),
+      host: z.string(),
+      active: z.boolean(),
+      scopes: z.array(z.string()),
+    }),
+  ),
+})
+export type GhCliStatus = z.infer<typeof GhCliStatus>
 
-interface GhUseResponse {
-  ok: true
-  login: string
-  host: string
-}
+const GhUseResponse = z.object({
+  ok: z.literal(true),
+  login: z.string(),
+  host: z.string(),
+})
 
-interface AccountSwitchResponse {
-  ok: true
-  key: string
-}
+const AccountSwitchResponse = z.object({
+  ok: z.literal(true),
+  key: z.string(),
+})
 
-interface AccountRemoveResponse {
-  ok: true
-  key: string
-  was_active: boolean
-}
+const AccountRemoveResponse = z.object({
+  ok: z.literal(true),
+  key: z.string(),
+  was_active: z.boolean(),
+})
 
-/**
- * Apps integrations (Claude Code, Claude Desktop, Copilot CLI). Contract
- * is jointly owned with `/settings/api/apps` on the proxy side; if the
- * server-side route ships under a different shape, update both ends.
- * Kept LOCAL to this file on purpose — the backend's new `src/`
- * settings-types are not present in this worktree, so importing them
- * would break the typecheck. Mirror by name, not by import.
- */
-export type AppId = "claude-code" | "claude-desktop" | "copilot-cli"
-export type AppKind = "config" | "coming-soon"
-export type AppStatus = "ready" | "not-installed" | "coming-soon"
+/** `/settings/api/auth/github/rearm` — re-arm outcome plus the fresh status. */
+const AuthRearmResponse = z.object({
+  outcome: z.enum(["online", "auth_fatal", "offline"]),
+  status: AuthStatus,
+})
 
-/** Why enabling was refused. The app's config already carries a routing
- *  setting we don't own, so we backed off rather than clobber it. */
-export type AppConflict = "foreign-base-url" | "foreign-api-key-helper"
+/** `/settings/api/clients` — inline `{ clients, total }` snapshot. The wire
+ *  type is owned by feed-types (no zod schema there yet); this mirrors it so
+ *  the fetch path validates the same shape the WS feed delivers. */
+const ActiveApiClientsResponseSchema = z.object({
+  clients: z.array(
+    z.object({
+      key: z.string(),
+      label: z.string(),
+      userAgent: z.string(),
+      ageSeconds: z.number(),
+    }),
+  ),
+  total: z.number(),
+})
 
-export interface AppInstall {
-  path: string
-  version: string | null
-  source: string
-}
-
-export interface AppInstallHint {
-  method: "curl"
-  command: string
-}
-
-export interface AppEntry {
-  id: AppId
-  name: string
-  kind: AppKind
-  enabled: boolean
-  status: AppStatus
-  installs: Array<AppInstall>
-  /** Non-null only when claude-code has no installs (offer to install). */
-  install: AppInstallHint | null
-  /** Non-null when the last enable attempt was refused. The card surfaces this
-   *  so the user knows why the toggle didn't take and how to resolve it. */
-  conflict: AppConflict | null
-}
-
-interface AppsListResponse {
-  apps: Array<AppEntry>
-}
+// Apps integrations (Claude Code, Claude Desktop, Copilot CLI) reuse the
+// authoritative, backend-validated schemas from settings-types — the same
+// schemas the proxy's /settings/api/apps route validates its responses
+// against — so there is a single source of truth, not a hand-kept mirror.
+export type AppId = AppEntry["id"]
+export type AppKind = AppEntry["kind"]
+export type AppStatus = AppEntry["status"]
+export type AppConflict = NonNullable<AppEntry["conflict"]>
 
 /** Endpoint catalog — adding a new call means adding a member here
  *  plus a `ResponseFor` mapping. Splitting the request shape from
@@ -259,21 +250,18 @@ interface ResponseFor {
   "update-status": UpdateStatusResponse
   "auth-status": AuthStatus
   "auth-start": AuthStatus
-  "auth-sign-out": AuthSignOutResponse
+  "auth-sign-out": z.infer<typeof AckResponse>
   "auth-cancel": AuthStatus
-  "auth-rearm": {
-    outcome: "online" | "auth_fatal" | "offline"
-    status: AuthStatus
-  }
+  "auth-rearm": z.infer<typeof AuthRearmResponse>
   "gh-status": GhCliStatus
-  "gh-use": GhUseResponse
+  "gh-use": z.infer<typeof GhUseResponse>
   "accounts-list": AccountsListResponse
-  "accounts-switch": AccountSwitchResponse
-  "accounts-remove": AccountRemoveResponse
+  "accounts-switch": z.infer<typeof AccountSwitchResponse>
+  "accounts-remove": z.infer<typeof AccountRemoveResponse>
   "api-keys-list": ApiKeysListResponse
   "api-keys-create": ApiKeyEntry
   "api-keys-update": ApiKeyEntry
-  "api-keys-delete": { ok: true }
+  "api-keys-delete": z.infer<typeof AckResponse>
   "api-keys-enforce": ApiKeysListResponse
   "active-clients": ActiveApiClientsResponse
   "apps-list": AppsListResponse
@@ -281,6 +269,45 @@ interface ResponseFor {
   "claude-desktop-toggle": AppEntry
   "models-list": ModelsListResponse
   "models-refresh": ModelsListResponse
+}
+
+/**
+ * Runtime schema for every endpoint's response body. `apiCall` `safeParse`s
+ * the JSON against the matching entry so a shape the server didn't actually
+ * send (version skew, a partial/'500-shaped' body, an older sidecar) becomes
+ * a clean `{ ok: false }` Result instead of a raw cast that a consumer later
+ * dereferences and crashes on. Total over `EndpointKind` — a new endpoint
+ * won't typecheck until it declares its schema here.
+ *
+ * The settings-types schemas are the *same* objects the proxy validates its
+ * responses against (see src/routes/settings/api.ts, apps.ts), so they can't
+ * drift from the wire; the handful of small local schemas above mirror the
+ * routes that have no shared schema yet.
+ */
+const SCHEMA_FOR: Record<EndpointKind, z.ZodType> = {
+  diagnostics: DiagnosticsResponse,
+  "update-status": UpdateStatusResponse,
+  "auth-status": AuthStatus,
+  "auth-start": AuthStatus,
+  "auth-sign-out": AckResponse,
+  "auth-cancel": AuthStatus,
+  "auth-rearm": AuthRearmResponse,
+  "gh-status": GhCliStatus,
+  "gh-use": GhUseResponse,
+  "accounts-list": AccountsListResponse,
+  "accounts-switch": AccountSwitchResponse,
+  "accounts-remove": AccountRemoveResponse,
+  "api-keys-list": ApiKeysListResponse,
+  "api-keys-create": ApiKeyEntry,
+  "api-keys-update": ApiKeyEntry,
+  "api-keys-delete": AckResponse,
+  "api-keys-enforce": ApiKeysListResponse,
+  "active-clients": ActiveApiClientsResponseSchema,
+  "apps-list": AppsListResponse,
+  "claude-code-toggle": AppEntry,
+  "claude-desktop-toggle": AppEntry,
+  "models-list": ModelsListResponse,
+  "models-refresh": ModelsListResponse,
 }
 
 interface ApiOptions {
@@ -373,8 +400,24 @@ export async function apiCall<K extends EndpointKind>(
     if (res.status === 204) {
       return { ok: true, data: { ok: true } as ResponseFor[K] }
     }
-    const data = (await res.json()) as ResponseFor[K]
-    return { ok: true, data }
+    const json: unknown = await res.json()
+    // Validate the body against the endpoint's schema. A cast alone is a lie
+    // the moment the wire disagrees (an older sidecar, a partial payload); a
+    // failed parse becomes an error Result the caller already handles, instead
+    // of surfacing as an undefined-deref crash deep inside a consumer.
+    const parsed = SCHEMA_FOR[endpoint.kind].safeParse(json)
+    if (!parsed.success) {
+      console.warn(
+        `apiCall(${endpoint.kind}): response failed schema validation`,
+        parsed.error.issues,
+      )
+      return {
+        ok: false,
+        status: res.status,
+        error: `Malformed response for ${endpoint.kind}`,
+      }
+    }
+    return { ok: true, data: parsed.data as ResponseFor[K] }
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error"
     const isAbort = err instanceof DOMException && err.name === "AbortError"
@@ -389,6 +432,12 @@ export async function apiCall<K extends EndpointKind>(
 }
 
 export {
+  // Apps types now live in settings-types (single source of truth); re-export
+  // so shell call sites keep importing them from the client.
+  type AppEntry,
+  type AppInstall,
+  type AppInstallHint,
+  type AppsListResponse,
   type AuthStatus,
   type UpstreamRejection,
 } from "../../../src/lib/config/settings-types"
