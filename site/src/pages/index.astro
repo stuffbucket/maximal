@@ -1,6 +1,7 @@
 ---
 import { getEntry, render } from "astro:content";
 
+import StarButton from "../components/StarButton.astro";
 import "../styles/global.css";
 
 const REPO = "stuffbucket/maximal";
@@ -88,6 +89,8 @@ const ogDescription =
   </head>
   <body>
     <a href="#main" class="skip-link">Skip to content</a>
+
+    <StarButton />
 
     <main id="main">
       <Content />
