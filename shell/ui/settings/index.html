@@ -749,6 +749,45 @@
                   <dd class="mono" data-field="rate_limit">…</dd>
                 </div>
               </dl>
+
+              <details class="advanced-section" data-service-config>
+                <summary class="advanced-section__summary">
+                  <span
+                    class="advanced-section__title"
+                    data-i18n="diagnostics-service-config"
+                  ></span>
+                </summary>
+                <div class="advanced-section__body">
+                  <dl class="kv kv--bare">
+                    <div class="kv__row">
+                      <dt data-i18n="diagnostics-upstream-host"></dt>
+                      <dd class="mono" data-field="copilot_upstream_host">…</dd>
+                    </div>
+                    <div class="kv__row">
+                      <dt data-i18n="diagnostics-github-api"></dt>
+                      <dd class="mono" data-field="copilot_github_api">…</dd>
+                    </div>
+                    <div class="kv__row">
+                      <dt data-i18n="diagnostics-token-endpoint"></dt>
+                      <dd class="mono" data-field="copilot_token_endpoint">…</dd>
+                    </div>
+                    <div class="kv__row">
+                      <dt data-i18n="diagnostics-enterprise-domain"></dt>
+                      <dd
+                        class="mono"
+                        data-field="copilot_enterprise_domain"
+                      >…</dd>
+                    </div>
+                    <div class="kv__row">
+                      <dt data-i18n="diagnostics-discovered-upstream"></dt>
+                      <dd
+                        class="mono"
+                        data-field="copilot_discovered_upstream"
+                      >…</dd>
+                    </div>
+                  </dl>
+                </div>
+              </details>
             </div>
 
             <div
@@ -789,64 +828,72 @@
               ></button>
             </div>
 
-            <div class="card">
-              <div class="card__head">
-                <h3 class="card__title">Quit Maximal</h3>
-              </div>
-              <p class="card__hint">
-                Stop the menu-bar app and its background proxy.
-              </p>
-              <button
-                type="button"
-                class="btn"
-                data-action="quit-maximal"
-              >
-                Quit Maximal
-              </button>
-              <p class="card__hint" data-quit-error hidden></p>
-            </div>
+            <div class="subsection">
+              <h3
+                class="subsection__title"
+                data-i18n="diagnostics-manage-title"
+              ></h3>
 
-            <div class="card" data-uninstall-card>
-              <div class="card__head">
-                <h3 class="card__title" data-i18n="uninstall-title"></h3>
-              </div>
-              <div data-uninstall-body>
-                <!-- Hint embeds the `maximal` CLI token: rendered in main.ts
-                     (renderUninstallCopy) with {cliName} as an ICU argument. -->
-                <p class="card__hint" data-field="uninstall_hint"></p>
-                <div class="uninstall-options">
-                  <label class="checkbox-label">
-                    <input
-                      type="checkbox"
-                      class="checkbox"
-                      data-uninstall-purge
-                    />
-                    <span data-i18n="uninstall-purge-label"></span>
-                    <span class="uninstall-options__note mono"
-                      >~/.local/share/maximal</span
-                    >
-                  </label>
-                </div>
-                <div
-                  class="card__hint uninstall-error"
-                  data-uninstall-error
-                  role="alert"
-                  hidden
-                >
-                  <span data-uninstall-error-message></span>
-                </div>
+              <!-- Quit is a lifecycle action, not a discrete entity: a
+                   chrome-free typographic block, not a card. Keeping it out
+                   of a card leaves Uninstall as the section's single card so
+                   the page stops reading as a grid of rectangles. -->
+              <div class="state">
+                <h4 class="state__title" data-i18n="diagnostics-quit-title"></h4>
+                <p class="state__body" data-i18n="diagnostics-quit-desc"></p>
                 <div class="actions">
                   <button
                     type="button"
-                    class="btn btn--destructive"
-                    data-action="uninstall-maximal"
-                    data-i18n="uninstall-button"
+                    class="btn btn--secondary"
+                    data-action="quit-maximal"
+                    data-i18n="diagnostics-quit-button"
                   ></button>
                 </div>
-                <!-- Terminal hint embeds the `maximal uninstall` command:
-                     rendered in main.ts with {uninstallCmd} as an ICU
-                     argument. -->
-                <p class="card__hint" data-field="uninstall_terminal_hint"></p>
+                <p class="card__hint" data-quit-error hidden></p>
+              </div>
+
+              <div class="card" data-uninstall-card>
+                <div class="card__head">
+                  <h4 class="card__title" data-i18n="uninstall-title"></h4>
+                </div>
+                <div data-uninstall-body>
+                  <!-- Hint embeds the `maximal` CLI token: rendered in main.ts
+                       (renderUninstallCopy) with {cliName} as an ICU argument. -->
+                  <p class="card__hint" data-field="uninstall_hint"></p>
+                  <div class="uninstall-options">
+                    <label class="checkbox-label">
+                      <input
+                        type="checkbox"
+                        class="checkbox"
+                        data-uninstall-purge
+                      />
+                      <span data-i18n="uninstall-purge-label"></span>
+                      <span class="uninstall-options__note mono"
+                        >~/.local/share/maximal</span
+                      >
+                    </label>
+                  </div>
+                  <div
+                    class="card__hint uninstall-error"
+                    data-uninstall-error
+                    role="alert"
+                    hidden
+                  >
+                    <span data-uninstall-error-message></span>
+                  </div>
+                  <div class="actions">
+                    <button
+                      type="button"
+                      class="btn btn--destructive"
+                      data-action="uninstall-maximal"
+                      data-i18n="uninstall-button"
+                    ></button>
+                  </div>
+                  <!-- Terminal hint embeds the `maximal uninstall` command:
+                       rendered in main.ts with {uninstallCmd} as an ICU
+                       argument. -->
+                  <p class="card__hint" data-field="uninstall_terminal_hint"></p>
+                </div>
               </div>
             </div>
           </section>

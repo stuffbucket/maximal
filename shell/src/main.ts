@@ -609,6 +609,21 @@ function renderDiagnostics(data: DiagnosticsResponse): void {
   setField("web_search", formatWebSearch(data.web_search))
   setField("github_copilot_status", deriveGithubCopilotStatus(data.tokens))
   setField("rate_limit", formatRateLimit(data.rate_limit))
+  renderCopilotService(data.copilot_service)
+}
+
+/** Upstream service hosts/URLs, shown in the collapsible "Copilot service"
+ *  disclosure. All non-secret; the two nullable fields render as an em-dash
+ *  placeholder (no enterprise override / nothing discovered yet). */
+function renderCopilotService(
+  svc: DiagnosticsResponse["copilot_service"],
+): void {
+  const none = t("diagnostics-value-none")
+  setField("copilot_upstream_host", svc.upstream_host)
+  setField("copilot_github_api", svc.github_api_base_url)
+  setField("copilot_token_endpoint", svc.token_endpoint)
+  setField("copilot_enterprise_domain", svc.enterprise_domain ?? none)
+  setField("copilot_discovered_upstream", svc.discovered_upstream ?? none)
 }
 
 /**
