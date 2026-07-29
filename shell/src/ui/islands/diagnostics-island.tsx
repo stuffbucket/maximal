@@ -1,6 +1,7 @@
 import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
 
+import { ErrorBoundary } from "../components/ErrorBoundary"
 import { Diagnostics } from "../features/diagnostics/Diagnostics"
 
 /**
@@ -14,7 +15,16 @@ export function mountDiagnostics(): void {
   const root = createRoot(el)
   root.render(
     <StrictMode>
-      <Diagnostics />
+      <ErrorBoundary
+        fallback={
+          <p className="card__hint" role="alert">
+            Diagnostics couldn’t be displayed. Reopen the section, and if it
+            persists, restart Maximal.
+          </p>
+        }
+      >
+        <Diagnostics />
+      </ErrorBoundary>
     </StrictMode>,
   )
 }

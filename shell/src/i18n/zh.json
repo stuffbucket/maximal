@@ -211,7 +211,6 @@
   "diagnostics-discovered-upstream": "发现的上游",
   "diagnostics-value-none": "—",
   "diagnostics-manage-title": "管理 Maximal",
-  "diagnostics-quit-title": "退出 Maximal",
   "diagnostics-quit-desc": "停止菜单栏应用及其后台代理。",
   "diagnostics-quit-button": "退出 Maximal",
   "uninstall-title": "卸载",

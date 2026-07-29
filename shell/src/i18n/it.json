@@ -211,7 +211,6 @@
   "diagnostics-discovered-upstream": "Upstream rilevato",
   "diagnostics-value-none": "—",
   "diagnostics-manage-title": "Gestisci Maximal",
-  "diagnostics-quit-title": "Esci da Maximal",
   "diagnostics-quit-desc": "Arresta l’app nella barra dei menu e il suo proxy in background.",
   "diagnostics-quit-button": "Esci da Maximal",
   "uninstall-title": "Disinstalla",

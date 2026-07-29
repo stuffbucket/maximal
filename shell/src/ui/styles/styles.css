@@ -279,6 +279,29 @@ a:hover {
   color: var(--text-muted);
 }
 
+/* ---- Lifecycle action row (chrome-free) ----
+   A one-line managed action: a short description leads and the action button
+   sits at the trailing edge. Not a card — a card implies a discrete entity;
+   this is a single verb (Quit). Wraps gracefully when the pane is narrow. */
+.lifecycle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.lifecycle-row__desc {
+  min-width: 0;
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-lg);
+  color: var(--text-muted);
+}
+
+.lifecycle-row > .btn {
+  flex: 0 0 auto;
+}
+
 /* ---- gh-reuse: alternate sign-in via an existing GitHub CLI login ----
    A secondary path inside the unauthenticated account state. Chrome-free
    like its sibling auth states (see .state); a thin "or" rule separates it
@@ -814,6 +837,7 @@ a:hover {
 }
 
 .card__title {
+  margin: 0;
   font-size: var(--text-md);
   font-weight: var(--weight-lg);
   line-height: var(--leading-lg);
@@ -1482,7 +1506,6 @@ a:hover {
   color: var(--text-muted);
 }
 
-
 .connection-list__empty {
   margin: 0;
   padding: var(--space-5) var(--space-4);
@@ -1834,12 +1857,22 @@ a:hover {
     animation: confirm-backdrop-in var(--duration-fast) var(--easing-standard);
   }
   @keyframes confirm-dialog-in {
-    from { opacity: 0; transform: translateY(4px); }
-    to   { opacity: 1; transform: translateY(0); }
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
   @keyframes confirm-backdrop-in {
-    from { opacity: 0; }
-    to   { opacity: 1; }
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
   }
 }
 
@@ -1853,7 +1886,6 @@ a:hover {
   flex-direction: column;
   gap: var(--space-4);
 }
-
 
 .app-card {
   background: var(--surface-card);
@@ -1958,8 +1990,7 @@ a:hover {
   padding: var(--space-3) var(--space-4);
   background: var(--surface-control);
   border: var(--border-width-hairline) solid var(--border-subtle);
-  border-inline-start: var(--border-width-heavy) solid
-    var(--accent-destructive);
+  border-inline-start: var(--border-width-heavy) solid var(--accent-destructive);
   border-radius: var(--radius-card);
 }
 
@@ -2331,7 +2362,8 @@ a:hover {
   font-size: var(--text-md);
   line-height: var(--leading-lg);
   color: var(--text-base-color);
-}.usage__summary strong {
+}
+.usage__summary strong {
   color: var(--text-strong);
   font-weight: var(--weight-lg);
   font-variant-numeric: tabular-nums;
@@ -2626,9 +2658,15 @@ a:hover {
   background: var(--accent);
   max-width: 100%;
 }
-.usage-provider__quota--warn .usage-provider__quota-fill { background: var(--status-warning); }
-.usage-provider__quota--crit .usage-provider__quota-fill { background: var(--status-error); }
-.usage-provider__quota--unlimited .usage-provider__quota-fill { background: var(--border-strong); }
+.usage-provider__quota--warn .usage-provider__quota-fill {
+  background: var(--status-warning);
+}
+.usage-provider__quota--crit .usage-provider__quota-fill {
+  background: var(--status-error);
+}
+.usage-provider__quota--unlimited .usage-provider__quota-fill {
+  background: var(--border-strong);
+}
 
 /* ---- Detail disclosure (depth layer) ---- */
 .usage__detail {

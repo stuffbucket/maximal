@@ -157,9 +157,14 @@ function ServiceDisclosure({
   svc,
 }: {
   t: TranslateFn
-  svc: DiagnosticsResponse["copilot_service"]
-}): ReactElement {
+  // Typed optional on purpose: `apiCall` casts the response body without
+  // validating it (see proxy/client.ts), so an older sidecar that predates
+  // the `copilot_service` field sends it as undefined. Dereferencing it
+  // unguarded threw and crashed the whole island to blank.
+  svc: DiagnosticsResponse["copilot_service"] | undefined
+}): ReactElement | null {
   const none = t("diagnostics-value-none")
+  if (!svc) return null
   return (
     <Disclosure
       summary={
@@ -213,14 +218,17 @@ function QuitBlock({ t }: { t: TranslateFn }): ReactElement {
 
   return (
     <div className="state">
-      <h4 className="state__title">{t("diagnostics-quit-title")}</h4>
-      <p className="state__body">{t("diagnostics-quit-desc")}</p>
-      <div className="actions">
+      <div className="lifecycle-row">
+        <p className="lifecycle-row__desc">{t("diagnostics-quit-desc")}</p>
         <Button variant="secondary" onClick={onQuit} disabled={disabled}>
           {t("diagnostics-quit-button")}
         </Button>
       </div>
-      {quitError && <p className="card__hint">{quitError}</p>}
+      {quitError && (
+        <p className="card__hint" role="alert">
+          {quitError}
+        </p>
+      )}
     </div>
   )
 }

@@ -187,4 +187,26 @@ describe("Diagnostics island", () => {
     expect(call).toBeDefined()
     expect(call?.args).toEqual({ purge: false })
   })
+
+  test("survives a sidecar that omits copilot_service (version skew)", async () => {
+    installInvokeStub()
+    // An older running sidecar predates the `copilot_service` field. `apiCall`
+    // casts the response body without validating it, so the field arrives as
+    // undefined — which used to crash the whole island to blank (the content
+    // flickered in, then vanished). It must now degrade gracefully.
+    const legacy = diagnostics() as Partial<DiagnosticsResponse>
+    delete legacy.copilot_service
+    stubFetch([
+      ["/settings/api/update-status", { body: updateStatus() }],
+      ["/settings/api/diagnostics", { body: legacy }],
+    ])
+    render(<Diagnostics />)
+
+    // The section still renders its live state (no blank crash) …
+    expect(await screen.findByText("1.2.3")).toBeDefined()
+    // … the Quit button is present as an actual button …
+    expect(screen.getByRole("button", { name: "Quit Maximal" })).toBeDefined()
+    // … and the "Copilot service" disclosure is simply omitted, not thrown on.
+    expect(screen.queryByText("Copilot service")).toBeNull()
+  })
 })

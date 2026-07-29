@@ -211,7 +211,6 @@
   "diagnostics-discovered-upstream": "Erkannter Upstream",
   "diagnostics-value-none": "—",
   "diagnostics-manage-title": "Maximal verwalten",
-  "diagnostics-quit-title": "Maximal beenden",
   "diagnostics-quit-desc": "Beenden Sie die Menüleisten-App und ihren Hintergrund-Proxy.",
   "diagnostics-quit-button": "Maximal beenden",
   "uninstall-title": "Deinstallieren",

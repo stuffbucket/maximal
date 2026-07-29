@@ -211,7 +211,6 @@
   "diagnostics-discovered-upstream": "検出されたアップストリーム",
   "diagnostics-value-none": "—",
   "diagnostics-manage-title": "Maximal の管理",
-  "diagnostics-quit-title": "Maximal を終了",
   "diagnostics-quit-desc": "メニューバーアプリとそのバックグラウンドプロキシを停止します。",
   "diagnostics-quit-button": "Maximal を終了",
   "uninstall-title": "アンインストール",
