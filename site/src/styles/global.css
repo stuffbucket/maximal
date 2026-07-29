@@ -199,7 +199,11 @@ body {
   text-decoration: none;
 }
 
-main {
+/* Landing-page shell only. The guide uses its own scoped grid layout
+   (GuideLayout.astro → main.guide-main), so exclude it here — otherwise this
+   flex `gap` overrides the guide prose's per-element margins and blows every
+   paragraph and heading apart by 5.5rem. */
+main:not(.guide-main) {
   position: relative;
   z-index: 2;
   max-width: var(--max-width);
@@ -211,15 +215,15 @@ main {
 }
 
 @media (min-width: 768px) {
-  main {
+  main:not(.guide-main) {
     padding: 4.5rem 2rem calc(var(--nav-height) + 5rem);
-    gap: 5.5rem;
+    gap: 4rem;
   }
 }
 
 /* Markdoc wraps sections in an <article>, so sections aren't direct flex
    children of <main>; give the article the same column gap. */
-main > article {
+main:not(.guide-main) > article {
   display: flex;
   flex-direction: column;
   gap: inherit;
