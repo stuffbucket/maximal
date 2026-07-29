@@ -1,0 +1,25 @@
+---
+import GuideLayout from "../../layouts/GuideLayout.astro";
+import { GUIDE_NAV } from "../../lib/guide";
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+const description =
+  "Install maximal, connect it to your GitHub Copilot plan, and point your AI coding tools at it.";
+---
+
+<GuideLayout title="Guide" description={description}>
+  <h1>maximal guide</h1>
+  <p>
+    Install maximal, connect it to your GitHub Copilot plan, and point the AI
+    coding tools you already use at it. Start here.
+  </p>
+  <ul>
+    {
+      GUIDE_NAV.map((p) => (
+        <li>
+          <a href={`${base}/guide/${p.slug}`}>{p.title}</a>
+        </li>
+      ))
+    }
+  </ul>
+</GuideLayout>
