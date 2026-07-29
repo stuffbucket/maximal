@@ -1459,25 +1459,71 @@ a:hover {
   color: var(--text-muted);
 }
 
-/* Tighten the grouped tables a touch — these are dense reference rows,
-   not the airy form rows the default .table spacing assumes. */
-.models__table td,
-.models__table th {
-  padding: var(--space-2) var(--space-3);
+/* Model catalog as a grid of cards — discrete entities, each a quiet
+   card, reflowing to fewer columns as the pane narrows. Mirrors the
+   .usage-providers strip idiom. */
+.models__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--space-3);
 }
 
-.models__name {
+.model-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  background: var(--surface-card);
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  box-shadow: var(--elevation-card);
+  padding: var(--space-4);
+}
+
+.model-card__head {
   display: flex;
   align-items: baseline;
+  justify-content: space-between;
   gap: var(--space-2);
-  color: var(--text-strong);
-  font-weight: var(--weight-md);
 }
 
-.models__id {
-  display: block;
+.model-card__name {
+  color: var(--text-strong);
+  font-weight: var(--weight-lg);
+  line-height: var(--leading-lg);
+}
+
+.model-card__id {
   font-size: var(--text-sm);
   color: var(--text-muted);
+  word-break: break-all;
+}
+
+.model-card__stats {
+  display: flex;
+  gap: var(--space-4);
+  margin: 0;
+}
+
+.model-card__stat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.model-card__stat-label {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.model-card__stat-value {
+  margin: 0;
+  color: var(--text-strong);
+  font-weight: var(--weight-md);
+  font-variant-numeric: tabular-nums;
+}
+
+.model-card__stats + .models__chips {
+  margin-top: auto;
 }
 
 .models__preview {
