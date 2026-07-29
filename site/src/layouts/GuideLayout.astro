@@ -6,8 +6,9 @@ interface Props {
   title: string;
   slug?: string;
   description?: string;
+  bare?: boolean;
 }
-const { title, slug, description } = Astro.props;
+const { title, slug, description, bare } = Astro.props;
 const base = import.meta.env.BASE_URL.replace(/\/$/, "");
 const href = (s: string) => `${base}/guide/${s}`;
 ---
@@ -75,9 +76,15 @@ const href = (s: string) => `${base}/guide/${s}`;
       </aside>
 
       <main id="main" class="guide-main">
-        <article class="prose">
-          <slot />
-        </article>
+        {
+          bare ? (
+            <slot />
+          ) : (
+            <article class="prose">
+              <slot />
+            </article>
+          )
+        }
       </main>
     </div>
 
