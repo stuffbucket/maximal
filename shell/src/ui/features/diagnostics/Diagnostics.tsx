@@ -157,9 +157,14 @@ function ServiceDisclosure({
   svc,
 }: {
   t: TranslateFn
-  svc: DiagnosticsResponse["copilot_service"]
-}): ReactElement {
+  // Typed optional on purpose: `apiCall` casts the response body without
+  // validating it (see proxy/client.ts), so an older sidecar that predates
+  // the `copilot_service` field sends it as undefined. Dereferencing it
+  // unguarded threw and crashed the whole island to blank.
+  svc: DiagnosticsResponse["copilot_service"] | undefined
+}): ReactElement | null {
   const none = t("diagnostics-value-none")
+  if (!svc) return null
   return (
     <Disclosure
       summary={
