@@ -61,3 +61,17 @@ export async function safeInvoke(cmd: string): Promise<boolean> {
     return false
   }
 }
+
+/**
+ * Invoke a native command through the injectable transport, PROPAGATING the
+ * rejection (unlike {@link safeInvoke}, which swallows it). Use when the caller
+ * needs the `Err(String)` reason or must pass args — e.g. `uninstall_maximal`.
+ * Goes through the same `invokeImpl` seam so tests can stub it via
+ * `__setInvokeForTests`.
+ */
+export async function invokeCommand(
+  cmd: string,
+  args?: Record<string, unknown>,
+): Promise<unknown> {
+  return invokeImpl(cmd, args)
+}
