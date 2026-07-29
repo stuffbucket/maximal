@@ -10,6 +10,7 @@ import { Button } from "../../components/Button"
 import { Checkbox } from "../../components/Checkbox"
 import { ConfirmDialog } from "../../components/ConfirmDialog"
 import { Disclosure } from "../../components/Disclosure"
+import { Stack } from "../../components/Stack"
 import { useT } from "../../i18n/useT"
 import {
   deriveGithubCopilotStatus,
@@ -341,7 +342,7 @@ export function Diagnostics(): ReactElement {
   }
 
   return (
-    <div aria-busy={isLoading}>
+    <Stack proximity="region" aria-busy={isLoading}>
       {error && (
         <div className="card__hint" role="alert">
           <span>{t("diagnostics-err-load", { error })}</span>{" "}
@@ -386,6 +387,6 @@ export function Diagnostics(): ReactElement {
         <QuitBlock t={t} />
         <UninstallCard t={t} />
       </div>
-    </div>
+    </Stack>
   )
 }
