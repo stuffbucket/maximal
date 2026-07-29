@@ -844,7 +844,7 @@ a:hover {
  * The card itself is the only surface (no nested card). Its body is a
  * vertical stack matching the card's own rhythm; the option checkboxes,
  * inline error, and action button each get their own row. */
-[data-uninstall-body] {
+.uninstall-body {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
@@ -1759,9 +1759,16 @@ a:hover {
 }
 
 /* ---- Confirm dialog ----
-   Uses native <dialog>. The element itself sits at the top layer
-   (free, no z-index gymnastics); ::backdrop styles the scrim. */
+   Radix AlertDialog. Content + Overlay are portaled divs (not a native
+   <dialog>), so centering + the modal stacking tier live here. */
 .confirm-dialog {
+  /* inset:0 + margin:auto + fit-content height centers on both axes,
+     leaving `transform` free for the slide-in animation below. */
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  height: fit-content;
+  z-index: 50; /* modal tier — above the sticky header (10) */
   padding: 0;
   border: var(--border-width-hairline) solid var(--border-subtle);
   border-radius: var(--radius-card);
@@ -1774,7 +1781,10 @@ a:hover {
   font-family: var(--font-body);
 }
 
-.confirm-dialog::backdrop {
+.confirm-dialog__overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50; /* Content follows in DOM order, so it layers above */
   background: rgb(0 0 0 / 0.5);
 }
 
@@ -1817,10 +1827,10 @@ a:hover {
 
 /* Default: a subtle fade-in. Respect reduced-motion as a hard contract. */
 @media (prefers-reduced-motion: no-preference) {
-  .confirm-dialog[open] {
+  .confirm-dialog[data-state="open"] {
     animation: confirm-dialog-in var(--duration-fast) var(--easing-standard);
   }
-  .confirm-dialog[open]::backdrop {
+  .confirm-dialog__overlay[data-state="open"] {
     animation: confirm-backdrop-in var(--duration-fast) var(--easing-standard);
   }
   @keyframes confirm-dialog-in {
