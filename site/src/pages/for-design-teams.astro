@@ -13,8 +13,6 @@ const SOURCE = {
   href: "https://stateofaidesign.com/",
 }
 
-// Coding & dev tools designers use (2026). Claude Code is the tool they reach
-// for; GitHub Copilot is the plan they pay for — the wedge, made visible.
 const codingTools = [
   { label: "Claude Code", value: 65, tone: "brand" as const },
   { label: "Cursor", value: 39 },
@@ -22,14 +20,18 @@ const codingTools = [
   { label: "v0 by Vercel", value: 17 },
   { label: "OpenAI Codex", value: 15 },
   { label: "Company internal tools", value: 12 },
-  { label: "GitHub Copilot", value: 9, tone: "accent" as const, note: "the plan you pay for" },
+  { label: "GitHub Copilot", value: 9, tone: "accent" as const, note: "the plan you have" },
   { label: "Replit", value: 8 },
   { label: "Bolt", value: 2 },
 ]
 
-const ogTitle = "maximal for design teams · the tools they use, the plan you have"
+// The rolodex reel — the tools a designer already reaches for. First item is
+// repeated at the end for a seamless loop.
+const reel = ["Claude Code", "Cursor", "Codex", "opencode", "v0", "Lovable"]
+
+const ogTitle = "maximal for designers · the tools you love, the plan you have"
 const ogDescription =
-  "Your designers already use Claude Code and Codex. maximal runs them on the GitHub Copilot plan your company already pays for."
+  "You already use Claude Code and Codex. maximal runs them on your company's GitHub Copilot plan — no keys to request, no sign-off to wait on."
 ---
 
 <!doctype html>
@@ -59,20 +61,21 @@ const ogDescription =
         <span class="topbar__mark" aria-hidden="true">m</span>
         <span class="topbar__word">maximal</span>
       </a>
-      <span class="topbar__tag">for design teams</span>
+      <span class="topbar__tag">for designers</span>
     </header>
 
     <main id="main" class="dt">
-      <!-- Hero: left type + CTAs, a crimson brand panel carrying the wedge. -->
+      <!-- Hero — spoken to the designer. -->
       <section class="dt-hero">
         <div class="dt-hero__lede">
           <h1 class="dt-h1">
-            The tools your designers use.<br />
-            <span class="ink-brand">The plan you already have.</span>
+            The tools you love.<br />
+            <span class="ink-brand">The plan your company already has.</span>
           </h1>
           <p class="dt-hero__sub">
-            Claude Code, Codex, and the rest — on your company's GitHub Copilot
-            plan.
+            You already reach for Claude Code and Codex. maximal runs them on your
+            company's GitHub Copilot plan — no keys to request, no budget to
+            approve.
           </p>
           <div class="dt-cta">
             <a class="btn btn--primary" data-os="mac" href={macDmg} rel="noopener">
@@ -89,17 +92,17 @@ const ogDescription =
         <aside class="dt-stat" aria-label="The gap the 2026 report exposes">
           <p class="dt-stat__fig"><b>65%</b> use Claude Code</p>
           <p class="dt-stat__fig dt-stat__fig--dim"><b>9%</b> use Copilot's own app</p>
-          <p class="dt-stat__line">They reach for one. You pay for the other.</p>
+          <p class="dt-stat__line">You reach for one. Your company pays for the other.</p>
         </aside>
       </section>
 
       <!-- Evidence -->
       <section class="dt-block">
-        <p class="dt-eyebrow">Your designers already chose</p>
+        <p class="dt-eyebrow">You're not the only one</p>
         <h2 class="dt-h2">Coding agents are core design tooling now.</h2>
         <p class="dt-lede">
-          And it isn't the one you're paying for. Designers run an average of
-          seven AI tools today, up from three a year ago.
+          Designers run seven AI tools on average, up from three last year — and
+          the one they reach for isn't the one their company pays for.
         </p>
         <div class="dt-chart">
           <SurveyBars
@@ -110,33 +113,37 @@ const ogDescription =
         </div>
       </section>
 
-      <!-- The gap -->
-      <section class="dt-block dt-block--wedge">
-        <h2 class="dt-h2">But the budget lives with engineering.</h2>
-        <p class="dt-prose">
-          Designers don't hold API keys or budgets, so each tool means its own
-          subscription. <b>maximal points those tools at the Copilot plan your
-          company already has.</b>
+      <!-- The rolodex moment -->
+      <section class="dt-reel-block">
+        <p class="dt-reel__lead">So keep using</p>
+        <span class="sr-only">Claude Code, Cursor, Codex, opencode, v0, Lovable, and more.</span>
+        <div class="reel" aria-hidden="true">
+          <ul class="reel__list" id="reel">
+            {reel.map((t) => <li>{t}</li>)}
+            <li>{reel[0]}</li>
+          </ul>
+        </div>
+        <p class="dt-reel__tail">
+          maximal runs it on the Copilot plan your company already has.
         </p>
       </section>
 
-      <!-- Mechanism -->
+      <!-- The blockers, removed -->
       <section class="dt-block">
-        <h2 class="dt-h2">Switch it on. Keep working.</h2>
-        <p class="dt-prose">
-          Turn on the tools your designers use, and maximal runs them on your
-          Copilot plan.
-        </p>
-        <ul class="dt-points">
-          <li><b>No design-side budget.</b> They use the tools they know; maximal handles the connection.</li>
-          <li><b>No procurement.</b> It runs on the Copilot seats you already pay for.</li>
-          <li><b>No second bill.</b> The plan is the one you already have.</li>
+        <ul class="dt-triad">
+          <li>No keys to request.</li>
+          <li>No subscription to expense.</li>
+          <li>No sign-off to wait on.</li>
         </ul>
       </section>
 
-      <!-- Close -->
+      <!-- Close — the designer starts, then spreads it. -->
       <section class="dt-close">
-        <h2 class="dt-h2 dt-h2--close">Give your team what they already reached for.</h2>
+        <h2 class="dt-h2 dt-h2--close">Start now. No one has to sign off.</h2>
+        <p class="dt-lede">
+          Download it, point your tools at your Copilot plan, and get back to
+          work — then tell the rest of your team.
+        </p>
         <div class="dt-cta">
           <a class="btn btn--primary" data-os="mac" href={macDmg} rel="noopener">
             <span class="btn-label">Download for macOS</span>
@@ -160,53 +167,84 @@ const ogDescription =
     <script>
       import "../lib/hydrate-downloads"
     </script>
+    <script is:inline>
+      // Rolodex reel: step one tool per beat, snap back over the duplicate for a
+      // seamless loop. Reduced motion is a contract — leave it on the first item.
+      (function () {
+        var reel = document.getElementById("reel")
+        if (!reel) return
+        if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return
+        var real = reel.children.length - 1 // last is the duplicate first
+        var n = 0
+        setInterval(function () {
+          n++
+          reel.style.transition = "transform 0.6s cubic-bezier(0.16, 1, 0.3, 1)"
+          reel.style.setProperty("--n", String(n))
+          if (n === real) {
+            setTimeout(function () {
+              reel.style.transition = "none"
+              n = 0
+              reel.style.setProperty("--n", "0")
+            }, 640)
+          }
+        }, 2000)
+      })()
+    </script>
 
     <style>
-      /* Editorial, asymmetric, brand-anchored. Type + space carry it; the one
-         crimson panel is the identity moment. No card soup, no drop shadows. */
       .topbar,
       .dt,
       .dt-footer {
         max-width: 64rem;
         margin: 0 auto;
       }
+
+      /* Tightened lockup: compact mark, snug wordmark, thin fixed-height rule. */
       .topbar {
         display: flex;
         align-items: center;
-        gap: 0.85rem;
+        gap: 0.55rem;
         padding: 1.5rem 1.5rem 0;
       }
       .topbar__home {
         display: inline-flex;
         align-items: center;
-        gap: 0.5rem;
+        gap: 0.45rem;
         text-decoration: none;
       }
       .topbar__mark {
         display: inline-grid;
         place-items: center;
-        width: 1.6rem;
-        height: 1.6rem;
-        border-radius: 6px;
+        width: 1.5rem;
+        height: 1.5rem;
+        border-radius: 5px;
         background: var(--brand);
         color: var(--brand-ink);
         font-family: var(--serif);
         font-weight: 700;
-        font-size: 1rem;
+        font-size: 0.95rem;
+        line-height: 1;
       }
       .topbar__word {
         font-family: var(--serif);
         font-weight: 700;
-        font-size: 1.15rem;
+        font-size: 1.05rem;
         letter-spacing: -0.01em;
         color: var(--text);
       }
       .topbar__tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.55rem;
         font-family: var(--sans);
         font-size: 0.8rem;
         color: var(--text-muted);
-        padding-left: 0.85rem;
-        border-left: 1px solid var(--border);
+      }
+      .topbar__tag::before {
+        content: "";
+        width: 1px;
+        height: 0.9rem;
+        background: var(--border-strong);
       }
 
       .dt {
@@ -255,7 +293,6 @@ const ogDescription =
         margin-top: 1.9rem;
       }
 
-      /* The crimson identity moment — the wedge, in the brand's own voice. */
       .dt-stat {
         background: var(--brand);
         color: var(--brand-ink);
@@ -290,7 +327,7 @@ const ogDescription =
         color: var(--brand-ink);
       }
 
-      /* ===== Blocks — typographic sections, not cards ===== */
+      /* ===== Blocks ===== */
       .dt-eyebrow {
         font-family: var(--sans);
         font-size: 0.78rem;
@@ -310,8 +347,7 @@ const ogDescription =
         margin: 0;
         max-width: 20ch;
       }
-      .dt-lede,
-      .dt-prose {
+      .dt-lede {
         font-family: var(--sans);
         font-size: 1.1rem;
         line-height: 1.6;
@@ -319,17 +355,7 @@ const ogDescription =
         max-width: 40rem;
         margin: 1rem 0 0;
       }
-      .dt-prose b {
-        color: var(--text);
-        font-weight: 600;
-      }
 
-      .dt-block--wedge {
-        border-left: 3px solid var(--brand);
-        padding-left: clamp(1.25rem, 3vw, 2rem);
-      }
-
-      /* Chart: a quiet framed surface — hairline, no drop shadow. */
       .dt-chart {
         margin-top: 2rem;
         max-width: 40rem;
@@ -339,35 +365,73 @@ const ogDescription =
         padding: 1.75rem;
       }
 
-      .dt-points {
-        list-style: none;
-        margin: 1.75rem 0 0;
-        padding: 0;
-        display: grid;
-        gap: 1rem;
-        max-width: 44rem;
+      /* ===== Rolodex reel ===== */
+      .dt-reel-block {
+        text-align: left;
       }
-      .dt-points li {
+      .dt-reel__lead {
         font-family: var(--sans);
-        font-size: 1.02rem;
-        line-height: 1.5;
-        color: var(--text-body);
-        padding-left: 1.4rem;
-        position: relative;
+        font-size: 1.05rem;
+        color: var(--text-muted);
+        margin: 0 0 0.4rem;
       }
-      .dt-points li::before {
+      .reel {
+        height: 1.12em;
+        overflow: hidden;
+        font-family: var(--serif);
+        font-weight: 700;
+        font-variation-settings: "SOFT" 30, "WONK" 1, "opsz" 144;
+        font-size: clamp(2.8rem, 9vw, 6rem);
+        line-height: 1.12;
+        letter-spacing: -0.03em;
+        color: var(--brand-lit);
+      }
+      .reel__list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        transform: translateY(calc(var(--n, 0) * -1.12em));
+      }
+      .reel__list li {
+        height: 1.12em;
+      }
+      .dt-reel__tail {
+        font-family: var(--serif);
+        font-weight: 500;
+        font-size: clamp(1.3rem, 3vw, 1.9rem);
+        line-height: 1.25;
+        color: var(--text);
+        max-width: 24ch;
+        margin: 0.5rem 0 0;
+      }
+
+      /* ===== Blockers triad ===== */
+      .dt-triad {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem 2.25rem;
+      }
+      .dt-triad li {
+        font-family: var(--serif);
+        font-weight: 600;
+        font-size: clamp(1.25rem, 2.6vw, 1.7rem);
+        letter-spacing: -0.015em;
+        color: var(--text);
+        position: relative;
+        padding-left: 1.4rem;
+      }
+      .dt-triad li::before {
         content: "";
         position: absolute;
         left: 0;
-        top: 0.6em;
+        top: 0.62em;
         width: 0.5rem;
         height: 0.5rem;
         border-radius: 2px;
         background: var(--brand);
-      }
-      .dt-points b {
-        color: var(--text);
-        font-weight: 600;
       }
 
       /* ===== Close ===== */
