@@ -49,6 +49,19 @@ pay for. maximal turns that underused spend into the fuel for the tools people
 actually reach for (Claude Code, Codex, and the rest). That gap — 65% Claude Code
 vs 9% Copilot-the-app — is the sharpest single fact in the dataset.
 
+**The bill is a counterfactual — frame it that way.** With maximal, nobody sees a
+second bill; the value is the bill you *avoid*. Without maximal, each tool needs
+its own paid API subscription. Say "one plan, not one per tool," not just "no
+second bill" — the point is the per-tool cost you'd otherwise rack up, not the
+absence of cost.
+
+**It lands hardest on design teams.** Designers now lean on coding agents (Claude
+Code 65%) but rarely hold dev-side API budgets or keys, so the per-tool
+subscription barrier falls on them disproportionately. Two implications: keep the
+copy legible to the non-technical end of the spectrum, and treat "design teams
+priced out of the tools they already use" as a strong candidate angle if we ever
+segment the messaging.
+
 ## Messaging pillars
 
 1. **Your ecosystem, unified.** One connection behind a toolstack that keeps
