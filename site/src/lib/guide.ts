@@ -10,7 +10,7 @@ export const GUIDE_NAV = [
   {
     slug: "install",
     title: "Install maximal",
-    blurb: "Homebrew or the menu-bar app, on macOS.",
+    blurb: "Download the desktop app on macOS.",
   },
   {
     slug: "connect-copilot",
