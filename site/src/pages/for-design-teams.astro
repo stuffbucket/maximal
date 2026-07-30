@@ -22,29 +22,14 @@ const codingTools = [
   { label: "v0 by Vercel", value: 17 },
   { label: "OpenAI Codex", value: 15 },
   { label: "Company internal tools", value: 12 },
-  {
-    label: "GitHub Copilot",
-    value: 9,
-    tone: "accent" as const,
-    note: "the plan you already pay for",
-  },
+  { label: "GitHub Copilot", value: 9, tone: "accent" as const, note: "the plan you pay for" },
   { label: "Replit", value: 8 },
   { label: "Bolt", value: 2 },
 ]
 
-// Where AI grew fastest for designers — the move into the production layer.
-const whereItMoved = [
-  { label: "Code generation & front-end", value: 31, tone: "brand" as const, note: "now 50%" },
-  { label: "Wireframing", value: 27, note: "now 43%" },
-  { label: "Design systems & components", value: 24, note: "now 33%" },
-  { label: "UI copy & content", value: 18, note: "now 70%" },
-  { label: "Design QA & accessibility", value: 16, note: "now 27%" },
-  { label: "Developer handoff", value: 12, note: "now 23%" },
-]
-
 const ogTitle = "maximal for design teams · the tools they use, the plan you have"
 const ogDescription =
-  "Your designers already adopted Claude Code and Codex. maximal runs them on the GitHub Copilot plan your company already pays for — no new keys, no procurement, no second bill."
+  "Your designers already use Claude Code and Codex. maximal runs them on the GitHub Copilot plan your company already pays for."
 ---
 
 <!doctype html>
@@ -74,140 +59,90 @@ const ogDescription =
         <span class="topbar__mark" aria-hidden="true">m</span>
         <span class="topbar__word">maximal</span>
       </a>
+      <span class="topbar__tag">for design teams</span>
     </header>
 
     <main id="main" class="dt">
-      <!-- Hero: left-aligned, asymmetric. Text + elevated CTAs on the left,
-           floating data cards on the right. No crimson slab. -->
+      <!-- Hero: left type + CTAs, a crimson brand panel carrying the wedge. -->
       <section class="dt-hero">
         <div class="dt-hero__lede">
-          <span class="dt-eyebrow">For design teams</span>
           <h1 class="dt-h1">
-            The coding tools your design team already uses.
-            <span class="dt-h1__accent">On the Copilot plan you already pay for.</span>
+            The tools your designers use.<br />
+            <span class="ink-brand">The plan you already have.</span>
           </h1>
-          <p class="dt-hero__body">
-            Designers have quietly adopted Claude Code, Codex, and the rest — but
-            the tools sit outside the engineering budget. maximal runs them on the
-            GitHub Copilot plan your company already pays for. No new keys, no
-            procurement, no second bill.
+          <p class="dt-hero__sub">
+            Claude Code, Codex, and the rest — on your company's GitHub Copilot
+            plan.
           </p>
           <div class="dt-cta">
-            <a class="btn btn--primary dt-cta__btn" data-os="mac" href={macDmg} rel="noopener">
+            <a class="btn btn--primary" data-os="mac" href={macDmg} rel="noopener">
               <span class="btn-label">Download for macOS</span>
               {versionLabel && <span class="btn-meta" data-version-pill>{versionLabel}</span>}
             </a>
-            <a class="btn dt-cta__btn" href={guideUrl}>
+            <a class="btn" href={guideUrl}>
               <span class="btn-label">Read the guide</span>
               <span class="btn-meta" aria-hidden="true">→</span>
             </a>
           </div>
         </div>
 
-        <div class="dt-hero__cards" aria-hidden="false">
-          <article class="dt-card dt-card--wedge pop">
-            <p class="dt-card__eyebrow">The gap the report exposes</p>
-            <div class="dt-figrow">
-              <span class="dt-fig dt-fig--brand">65%</span>
-              <span class="dt-fig__label">of designers use <b>Claude Code</b></span>
-            </div>
-            <div class="dt-figrow">
-              <span class="dt-fig dt-fig--muted">9%</span>
-              <span class="dt-fig__label">use <b>GitHub Copilot's</b> own app</span>
-            </div>
-            <p class="dt-card__foot">
-              They reach for one. Their company pays for the other. maximal
-              connects them.
-            </p>
-          </article>
+        <aside class="dt-stat" aria-label="The gap the 2026 report exposes">
+          <p class="dt-stat__fig"><b>65%</b> use Claude Code</p>
+          <p class="dt-stat__fig dt-stat__fig--dim"><b>9%</b> use Copilot's own app</p>
+          <p class="dt-stat__line">They reach for one. You pay for the other.</p>
+        </aside>
+      </section>
 
-          <article class="dt-card dt-card--sprawl pop">
-            <div class="dt-sprawl">
-              <span class="dt-sprawl__from">3</span>
-              <span class="dt-sprawl__arrow" aria-hidden="true">→</span>
-              <span class="dt-sprawl__to">7</span>
-            </div>
-            <p class="dt-card__label">AI tools per designer, in a single year</p>
-          </article>
+      <!-- Evidence -->
+      <section class="dt-block">
+        <p class="dt-eyebrow">Your designers already chose</p>
+        <h2 class="dt-h2">Coding agents are core design tooling now.</h2>
+        <p class="dt-lede">
+          And it isn't the one you're paying for. Designers run an average of
+          seven AI tools today, up from three a year ago.
+        </p>
+        <div class="dt-chart">
+          <SurveyBars
+            title="Coding &amp; dev tools designers use (2026)"
+            series={codingTools}
+            source={SOURCE}
+          />
         </div>
       </section>
 
-      <!-- Data: designers already made the choice -->
-      <section class="dt-section">
-        <div class="dt-section__head">
-          <h2 class="dt-h2">Your designers already made the choice</h2>
-          <p class="dt-section__lead">
-            The 2026 AI in Design report puts numbers on it: coding agents are now
-            core design tooling — and the one they reach for isn't the one the
-            company is paying for.
-          </p>
-        </div>
-        <div class="dt-charts">
-          <div class="dt-chartcard pop">
-            <SurveyBars
-              title="Coding & dev tools designers use (2026)"
-              series={codingTools}
-              source={SOURCE}
-            />
-          </div>
-          <div class="dt-chartcard pop">
-            <SurveyBars
-              title="Fastest-growing design tasks (points gained, 2025 → 2026)"
-              series={whereItMoved}
-              max={35}
-              unit=" pt"
-              source={SOURCE}
-            />
-          </div>
-        </div>
-      </section>
-
-      <!-- Wedge / barrier -->
-      <section class="dt-section dt-section--wedge">
-        <h2 class="dt-h2">But the tools sit outside the budget</h2>
+      <!-- The gap -->
+      <section class="dt-block dt-block--wedge">
+        <h2 class="dt-h2">But the budget lives with engineering.</h2>
         <p class="dt-prose">
-          Design teams don't hold dev-side API keys or budgets. Used directly,
-          each tool needs its own paid subscription — a cost and a procurement
-          cycle that lands squarely on design. Your company is almost certainly
-          already paying for GitHub Copilot. <b>maximal points the tools your
-          designers already use at that plan.</b>
+          Designers don't hold API keys or budgets, so each tool means its own
+          subscription. <b>maximal points those tools at the Copilot plan your
+          company already has.</b>
         </p>
       </section>
 
-      <!-- What maximal does -->
-      <section class="dt-section">
-        <h2 class="dt-h2">What maximal does</h2>
+      <!-- Mechanism -->
+      <section class="dt-block">
+        <h2 class="dt-h2">Switch it on. Keep working.</h2>
         <p class="dt-prose">
-          Switch on the coding tools your designers already use, and maximal runs
-          them on the GitHub Copilot plan your company already pays for.
+          Turn on the tools your designers use, and maximal runs them on your
+          Copilot plan.
         </p>
-        <div class="dt-notes">
-          <div class="dt-note pop">
-            <b>No design-side API budget needed.</b>
-            <span>
-              Your designers use the tools they already know — maximal points them
-              at the company's Copilot plan.
-            </span>
-          </div>
-          <div class="dt-note pop">
-            <b>No procurement, no new subscription.</b>
-            <span>
-              It runs on the Copilot seats you already pay for, GitHub Enterprise
-              included.
-            </span>
-          </div>
-        </div>
+        <ul class="dt-points">
+          <li><b>No design-side budget.</b> They use the tools they know; maximal handles the connection.</li>
+          <li><b>No procurement.</b> It runs on the Copilot seats you already pay for.</li>
+          <li><b>No second bill.</b> The plan is the one you already have.</li>
+        </ul>
       </section>
 
-      <!-- Final CTA -->
-      <section class="dt-final">
-        <h2 class="dt-h2">Give your design team what they already reached for.</h2>
+      <!-- Close -->
+      <section class="dt-close">
+        <h2 class="dt-h2 dt-h2--close">Give your team what they already reached for.</h2>
         <div class="dt-cta">
-          <a class="btn btn--primary dt-cta__btn" data-os="mac" href={macDmg} rel="noopener">
+          <a class="btn btn--primary" data-os="mac" href={macDmg} rel="noopener">
             <span class="btn-label">Download for macOS</span>
             {versionLabel && <span class="btn-meta" data-version-pill>{versionLabel}</span>}
           </a>
-          <a class="btn dt-cta__btn" href={guideUrl}>
+          <a class="btn" href={guideUrl}>
             <span class="btn-label">Read the guide</span>
             <span class="btn-meta" aria-hidden="true">→</span>
           </a>
@@ -227,19 +162,19 @@ const ogDescription =
     </script>
 
     <style>
-      /* ===== Page shell — left-aligned, wider measure than the centered home ===== */
-      .dt {
-        max-width: 68rem;
+      /* Editorial, asymmetric, brand-anchored. Type + space carry it; the one
+         crimson panel is the identity moment. No card soup, no drop shadows. */
+      .topbar,
+      .dt,
+      .dt-footer {
+        max-width: 64rem;
         margin: 0 auto;
-        padding: 1.5rem 1.5rem 5rem;
-        display: flex;
-        flex-direction: column;
-        gap: 5rem;
       }
       .topbar {
-        max-width: 68rem;
-        margin: 0 auto;
-        padding: 1.25rem 1.5rem 0;
+        display: flex;
+        align-items: center;
+        gap: 0.85rem;
+        padding: 1.5rem 1.5rem 0;
       }
       .topbar__home {
         display: inline-flex;
@@ -266,211 +201,122 @@ const ogDescription =
         letter-spacing: -0.01em;
         color: var(--text);
       }
-
-      /* Shared elevation so cards pop off the neutral canvas. Light mode uses
-         shadow; dark follows the site convention (--shadow-card: none) and lifts
-         with a stronger border instead. */
-      .pop {
-        box-shadow:
-          0 18px 40px -20px rgba(10, 10, 12, 0.35),
-          0 4px 12px -6px rgba(10, 10, 12, 0.18);
+      .topbar__tag {
+        font-family: var(--sans);
+        font-size: 0.8rem;
+        color: var(--text-muted);
+        padding-left: 0.85rem;
+        border-left: 1px solid var(--border);
       }
-      @media (prefers-color-scheme: dark) {
-        .pop {
-          box-shadow: none;
-          border-color: var(--border-strong);
-        }
-        .dt-cta__btn {
-          box-shadow: none;
-        }
+
+      .dt {
+        padding: 3.5rem 1.5rem 4rem;
+        display: flex;
+        flex-direction: column;
+        gap: clamp(3.5rem, 8vw, 6rem);
       }
 
       /* ===== Hero ===== */
       .dt-hero {
         display: grid;
-        grid-template-columns: 1.1fr 0.9fr;
-        gap: 3rem;
+        grid-template-columns: 1.25fr 0.75fr;
+        gap: clamp(2rem, 5vw, 4rem);
         align-items: center;
       }
-      @media (max-width: 860px) {
+      @media (max-width: 820px) {
         .dt-hero {
           grid-template-columns: 1fr;
           gap: 2.5rem;
         }
       }
-      .dt-eyebrow {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.5rem;
-        padding: 0.3rem 0.7rem;
-        border: 1px solid var(--border-strong);
-        border-radius: var(--radius-pill);
-        font-family: var(--sans);
-        font-size: 0.8rem;
-        font-weight: 600;
-        color: var(--text-body);
-      }
-      .dt-eyebrow::before {
-        content: "";
-        width: 0.45rem;
-        height: 0.45rem;
-        border-radius: var(--radius-pill);
-        background: var(--brand);
-      }
       .dt-h1 {
         font-family: var(--serif);
         font-weight: 600;
         font-optical-sizing: auto;
-        font-variation-settings: "SOFT" 30, "opsz" 96;
-        font-size: clamp(2.4rem, 5.2vw, 3.9rem);
-        line-height: 1.05;
-        letter-spacing: -0.025em;
+        font-variation-settings: "SOFT" 30, "opsz" 110;
+        font-size: clamp(2.6rem, 6vw, 4.4rem);
+        line-height: 1.02;
+        letter-spacing: -0.03em;
         color: var(--text);
-        margin: 1.25rem 0 0;
+        margin: 0;
       }
-      .dt-h1__accent {
-        display: block;
-        color: var(--brand-lit);
-        margin-top: 0.3rem;
-      }
-      .dt-hero__body {
+      .dt-hero__sub {
         font-family: var(--sans);
-        font-size: 1.1rem;
-        line-height: 1.6;
+        font-size: 1.15rem;
+        line-height: 1.55;
         color: var(--text-body);
-        max-width: 34rem;
-        margin: 1.5rem 0 0;
+        max-width: 30rem;
+        margin: 1.4rem 0 0;
       }
       .dt-cta {
         display: flex;
         flex-wrap: wrap;
         gap: 0.75rem;
-        margin-top: 1.75rem;
-      }
-      .dt-cta__btn {
-        box-shadow:
-          0 10px 22px -12px rgba(10, 10, 12, 0.4),
-          0 2px 6px -3px rgba(10, 10, 12, 0.2);
+        margin-top: 1.9rem;
       }
 
-      /* Hero cards — staggered, layered, elevated. */
-      .dt-hero__cards {
-        display: flex;
-        flex-direction: column;
-        gap: 1rem;
+      /* The crimson identity moment — the wedge, in the brand's own voice. */
+      .dt-stat {
+        background: var(--brand);
+        color: var(--brand-ink);
+        border-radius: clamp(14px, 2vw, 20px);
+        padding: clamp(1.6rem, 3vw, 2.2rem);
       }
-      .dt-card {
-        background: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: var(--radius);
-        padding: 1.5rem 1.6rem;
-      }
-      .dt-card--wedge {
-        margin-right: -1.5rem;
-      }
-      .dt-card--sprawl {
-        margin-left: 2rem;
-        margin-right: -0.5rem;
-      }
-      @media (max-width: 860px) {
-        .dt-card--wedge,
-        .dt-card--sprawl {
-          margin: 0;
-        }
-      }
-      .dt-card__eyebrow {
+      .dt-stat__fig {
         font-family: var(--sans);
-        font-size: 0.72rem;
+        font-size: 1.05rem;
+        margin: 0 0 0.5rem;
+        color: var(--brand-ink);
+      }
+      .dt-stat__fig b {
+        font-family: var(--serif);
+        font-weight: 700;
+        font-variation-settings: "SOFT" 30, "WONK" 1, "opsz" 144;
+        font-size: 2.9rem;
+        line-height: 1;
+        margin-right: 0.4rem;
+        letter-spacing: -0.02em;
+      }
+      .dt-stat__fig--dim {
+        opacity: 0.62;
+      }
+      .dt-stat__line {
+        font-family: var(--serif);
+        font-size: 1.1rem;
+        line-height: 1.3;
+        margin: 1.1rem 0 0;
+        padding-top: 1.1rem;
+        border-top: 1px solid color-mix(in srgb, var(--brand-ink) 28%, transparent);
+        color: var(--brand-ink);
+      }
+
+      /* ===== Blocks — typographic sections, not cards ===== */
+      .dt-eyebrow {
+        font-family: var(--sans);
+        font-size: 0.78rem;
         font-weight: 600;
-        letter-spacing: 0.05em;
+        letter-spacing: 0.08em;
         text-transform: uppercase;
-        color: var(--text-muted);
-        margin: 0 0 1rem;
-      }
-      .dt-figrow {
-        display: flex;
-        align-items: baseline;
-        gap: 0.75rem;
-        margin-bottom: 0.6rem;
-      }
-      .dt-fig {
-        font-family: var(--serif);
-        font-weight: 700;
-        font-size: 2.3rem;
-        line-height: 1;
-        font-variant-numeric: tabular-nums;
-        min-width: 3.4rem;
-      }
-      .dt-fig--brand {
         color: var(--brand-lit);
-      }
-      .dt-fig--muted {
-        color: var(--text-muted);
-      }
-      .dt-fig__label {
-        font-family: var(--sans);
-        font-size: 0.95rem;
-        color: var(--text-body);
-      }
-      .dt-card__foot {
-        font-family: var(--sans);
-        font-size: 0.9rem;
-        line-height: 1.5;
-        color: var(--text-muted);
-        margin: 1rem 0 0;
-        padding-top: 0.9rem;
-        border-top: 1px solid var(--border);
-      }
-      .dt-sprawl {
-        display: flex;
-        align-items: baseline;
-        gap: 0.9rem;
-      }
-      .dt-sprawl__from {
-        font-family: var(--serif);
-        font-weight: 600;
-        font-size: 2rem;
-        color: var(--text-muted);
-      }
-      .dt-sprawl__arrow {
-        color: var(--brand);
-        font-size: 1.5rem;
-      }
-      .dt-sprawl__to {
-        font-family: var(--serif);
-        font-weight: 700;
-        font-size: 3rem;
-        line-height: 1;
-        color: var(--brand-lit);
-      }
-      .dt-card__label {
-        font-family: var(--sans);
-        font-size: 0.9rem;
-        color: var(--text-body);
-        margin: 0.6rem 0 0;
-      }
-
-      /* ===== Sections ===== */
-      .dt-section__head {
-        max-width: 40rem;
-        margin-bottom: 2rem;
+        margin: 0 0 0.6rem;
       }
       .dt-h2 {
         font-family: var(--serif);
         font-weight: 600;
-        font-size: clamp(1.6rem, 3.4vw, 2.3rem);
-        line-height: 1.12;
-        letter-spacing: -0.02em;
+        font-size: clamp(1.7rem, 3.8vw, 2.6rem);
+        line-height: 1.08;
+        letter-spacing: -0.025em;
         color: var(--text);
         margin: 0;
+        max-width: 20ch;
       }
-      .dt-section__lead,
+      .dt-lede,
       .dt-prose {
         font-family: var(--sans);
-        font-size: 1.05rem;
-        line-height: 1.65;
+        font-size: 1.1rem;
+        line-height: 1.6;
         color: var(--text-body);
-        max-width: 42rem;
+        max-width: 40rem;
         margin: 1rem 0 0;
       }
       .dt-prose b {
@@ -478,80 +324,70 @@ const ogDescription =
         font-weight: 600;
       }
 
-      .dt-charts {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 1.5rem;
-        align-items: start;
+      .dt-block--wedge {
+        border-left: 3px solid var(--brand);
+        padding-left: clamp(1.25rem, 3vw, 2rem);
       }
-      @media (max-width: 860px) {
-        .dt-charts {
-          grid-template-columns: 1fr;
-        }
-      }
-      .dt-chartcard {
+
+      /* Chart: a quiet framed surface — hairline, no drop shadow. */
+      .dt-chart {
+        margin-top: 2rem;
+        max-width: 40rem;
         background: var(--surface);
         border: 1px solid var(--border);
         border-radius: var(--radius);
-        padding: 1.75rem 1.75rem 1.5rem;
+        padding: 1.75rem;
       }
 
-      .dt-notes {
+      .dt-points {
+        list-style: none;
+        margin: 1.75rem 0 0;
+        padding: 0;
         display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 1.25rem;
-        margin-top: 1.75rem;
+        gap: 1rem;
+        max-width: 44rem;
       }
-      @media (max-width: 700px) {
-        .dt-notes {
-          grid-template-columns: 1fr;
-        }
-      }
-      .dt-note {
-        background: var(--surface);
-        border: 1px solid var(--border);
-        border-left: 3px solid var(--brand-lit);
-        border-radius: var(--radius-sm);
-        padding: 1.1rem 1.25rem;
-        display: flex;
-        flex-direction: column;
-        gap: 0.35rem;
-      }
-      .dt-note b {
+      .dt-points li {
         font-family: var(--sans);
+        font-size: 1.02rem;
+        line-height: 1.5;
+        color: var(--text-body);
+        padding-left: 1.4rem;
+        position: relative;
+      }
+      .dt-points li::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        top: 0.6em;
+        width: 0.5rem;
+        height: 0.5rem;
+        border-radius: 2px;
+        background: var(--brand);
+      }
+      .dt-points b {
         color: var(--text);
         font-weight: 600;
       }
-      .dt-note span {
-        font-family: var(--sans);
-        font-size: 0.95rem;
-        line-height: 1.55;
-        color: var(--text-body);
-      }
 
-      .dt-final {
-        text-align: center;
-        padding: 2.5rem 1.5rem;
-        background: var(--surface-2);
-        border: 1px solid var(--border);
-        border-radius: var(--radius);
+      /* ===== Close ===== */
+      .dt-close {
+        border-top: 1px solid var(--border);
+        padding-top: clamp(3rem, 6vw, 4rem);
       }
-      .dt-final .dt-h2 {
-        max-width: 30ch;
-        margin: 0 auto;
+      .dt-h2--close {
+        font-size: clamp(2rem, 5vw, 3.2rem);
+        max-width: 18ch;
       }
-      .dt-final .dt-cta {
-        justify-content: center;
+      .dt-close .dt-cta {
+        margin-top: 1.75rem;
       }
 
       .dt-footer {
-        max-width: 68rem;
-        margin: 0 auto;
         padding: 2rem 1.5rem 3rem;
         display: flex;
         flex-wrap: wrap;
         gap: 1.5rem;
-        border-top: 1px solid var(--border);
         font-family: var(--sans);
         font-size: 0.9rem;
       }
