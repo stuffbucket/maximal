@@ -72,9 +72,6 @@ const ogDescription =
           ><span class="sr-only">m</span>aximize the AI tools you love
           <span class="ink-brand">on the Copilot plan that's already paid for.</span>
         </h1>
-        <p class="dt-hero__sub">
-          You already reach for Claude Code and Codex. No new keys, no new bill.
-        </p>
         <div class="dt-cta">
           <a class="btn btn--primary" data-os="mac" href={macDmg} rel="noopener">
             <span class="btn-label">Download for macOS</span>
@@ -261,13 +258,16 @@ const ogDescription =
       .dt-h1 .ink-brand {
         color: var(--brand-lit);
       }
-      /* Tile drop-cap for the leading "m", baseline-matched to the word. */
+      /* Tile drop-cap for the leading "m". Negative margin lets the word tuck
+         onto the tile so "m·a" kern as one word — the tile isn't a hard box. */
       .hz-tile {
         display: inline-block;
         width: 1.6em;
         height: 1.6em;
         vertical-align: -0.544em;
-        margin-right: 0.04em;
+        margin-right: -0.26em;
+        position: relative;
+        z-index: 0;
       }
       .hz-tile svg {
         display: block;
@@ -298,9 +298,14 @@ const ogDescription =
       /* ===== Evidence — text | chart ===== */
       .dt-evidence {
         display: grid;
-        grid-template-columns: 0.85fr 1.15fr;
+        grid-template-columns: 0.9fr 1.1fr;
         gap: clamp(2rem, 5vw, 4rem);
         align-items: center;
+      }
+      /* Nudge the evidence text down so it optically centers against the chart's
+         bars rather than its title, and give it breathing room. */
+      .dt-evidence__text {
+        padding-top: 0.5rem;
       }
       @media (max-width: 820px) {
         .dt-evidence {
