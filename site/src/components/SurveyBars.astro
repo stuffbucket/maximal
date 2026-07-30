@@ -1,0 +1,138 @@
+---
+// A restrained horizontal bar chart for recreating survey data on-brand.
+// Bars are a crimson family (not the source's category colors): `brand` = solid
+// crimson for the hero stat, `accent` = bronze for the counterpoint, `muted` =
+// soft crimson for the rest. Values scale against `max` and always leave room
+// for the trailing value label. Source attribution renders as a footnote.
+interface Bar {
+  label: string
+  value: number
+  note?: string
+  tone?: "brand" | "accent" | "muted"
+}
+interface Props {
+  title?: string
+  series: Array<Bar>
+  max?: number
+  unit?: string
+  source?: { text: string; href: string }
+}
+const { title, series, max = 100, unit = "%", source } = Astro.props
+// Longest bar maps to 88% of the track so the value label never collides.
+const scale = (v: number) => `${Math.max(3, (v / max) * 88)}%`
+---
+
+<figure class="bars">
+  {title && <figcaption class="bars__title">{title}</figcaption>}
+  <div class="bars__rows">
+    {
+      series.map((b) => (
+        <div class={`bars__row bars__row--${b.tone ?? "muted"}`}>
+          <div class="bars__head">
+            <span class="bars__name">{b.label}</span>
+            {b.note && <span class="bars__note">{b.note}</span>}
+          </div>
+          <div class="bars__meter">
+            <span class="bars__fill" style={`width:${scale(b.value)}`} />
+            <span class="bars__value">
+              {b.value}
+              {unit}
+            </span>
+          </div>
+        </div>
+      ))
+    }
+  </div>
+  {
+    source && (
+      <p class="bars__source">
+        Source:{" "}
+        <a href={source.href} rel="noopener">
+          {source.text}
+        </a>
+      </p>
+    )
+  }
+</figure>
+
+<style>
+  .bars {
+    margin: 0;
+  }
+  .bars__title {
+    font-family: var(--sans);
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin: 0 0 1.1rem;
+  }
+  .bars__rows {
+    display: grid;
+    gap: 0.9rem;
+  }
+  .bars__head {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 0.3rem;
+  }
+  .bars__name {
+    font-family: var(--sans);
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .bars__note {
+    font-family: var(--sans);
+    font-size: 0.8rem;
+    color: var(--accent);
+  }
+  .bars__meter {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
+  .bars__fill {
+    height: 0.85rem;
+    border-radius: var(--radius-pill);
+    background: color-mix(in srgb, var(--brand) 26%, transparent);
+    flex: 0 0 auto;
+    min-width: 0.85rem;
+  }
+  .bars__row--brand .bars__fill {
+    background: var(--brand);
+  }
+  .bars__row--accent .bars__fill {
+    background: var(--accent);
+  }
+  .bars__value {
+    font-family: var(--sans);
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+  .bars__row--brand .bars__value {
+    color: var(--brand-lit);
+  }
+  .bars__row--accent .bars__value {
+    color: var(--accent);
+  }
+  .bars__source {
+    margin: 1.4rem 0 0;
+    font-family: var(--sans);
+    font-size: 0.8rem;
+    color: var(--text-muted);
+  }
+  .bars__source a {
+    color: var(--link);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .bars__source a:hover {
+    color: var(--link-hover);
+  }
+</style>

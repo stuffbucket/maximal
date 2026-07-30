@@ -1,0 +1,556 @@
+---
+import SurveyBars from "../components/SurveyBars.astro"
+import StarButton from "../components/StarButton.astro"
+import { getDownloadInfo } from "../lib/downloads"
+import "../styles/global.css"
+
+const { macDmg, versionLabel, releasesUrl, repoUrl } = await getDownloadInfo()
+const base = import.meta.env.BASE_URL.replace(/\/$/, "")
+const guideUrl = `${base}/guide`
+
+const SOURCE = {
+  text: "AI in Design Report 2026, stateofaidesign.com",
+  href: "https://stateofaidesign.com/",
+}
+
+// Coding & dev tools designers use (2026). Claude Code is the tool they reach
+// for; GitHub Copilot is the plan they pay for — the wedge, made visible.
+const codingTools = [
+  { label: "Claude Code", value: 65, tone: "brand" as const },
+  { label: "Cursor", value: 39 },
+  { label: "Lovable", value: 19 },
+  { label: "v0 by Vercel", value: 17 },
+  { label: "OpenAI Codex", value: 15 },
+  { label: "Company internal tools", value: 12 },
+  {
+    label: "GitHub Copilot",
+    value: 9,
+    tone: "accent" as const,
+    note: "the plan you already pay for",
+  },
+  { label: "Replit", value: 8 },
+  { label: "Bolt", value: 2 },
+]
+
+// Where AI grew fastest for designers — the move into the production layer.
+const whereItMoved = [
+  { label: "Code generation & front-end", value: 31, tone: "brand" as const, note: "now 50%" },
+  { label: "Wireframing", value: 27, note: "now 43%" },
+  { label: "Design systems & components", value: 24, note: "now 33%" },
+  { label: "UI copy & content", value: 18, note: "now 70%" },
+  { label: "Design QA & accessibility", value: 16, note: "now 27%" },
+  { label: "Developer handoff", value: 12, note: "now 23%" },
+]
+
+const ogTitle = "maximal for design teams · the tools they use, the plan you have"
+const ogDescription =
+  "Your designers already adopted Claude Code and Codex. maximal runs them on the GitHub Copilot plan your company already pays for — no new keys, no procurement, no second bill."
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="preload" as="font" type="font/woff2" href="/fonts/fraunces-latin.woff2" crossorigin />
+    <link rel="preload" as="font" type="font/woff2" href="/fonts/commissioner-latin.woff2" crossorigin />
+    <title>{ogTitle}</title>
+    <meta name="description" content={ogDescription} />
+    <link rel="icon" type="image/svg+xml" href={`${base}/favicon.svg`} />
+    <meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0a0a0a" media="(prefers-color-scheme: dark)" />
+    <meta name="color-scheme" content="light dark" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={ogTitle} />
+    <meta property="og:description" content={ogDescription} />
+    <meta name="twitter:card" content="summary_large_image" />
+  </head>
+  <body>
+    <a href="#main" class="skip-link">Skip to content</a>
+    <StarButton />
+
+    <header class="topbar">
+      <a class="topbar__home" href={`${base}/`}>
+        <span class="topbar__mark" aria-hidden="true">m</span>
+        <span class="topbar__word">maximal</span>
+      </a>
+    </header>
+
+    <main id="main" class="dt">
+      <!-- Hero: left-aligned, asymmetric. Text + elevated CTAs on the left,
+           floating data cards on the right. No crimson slab. -->
+      <section class="dt-hero">
+        <div class="dt-hero__lede">
+          <span class="dt-eyebrow">For design teams</span>
+          <h1 class="dt-h1">
+            The coding tools your design team already uses.
+            <span class="dt-h1__accent">On the Copilot plan you already pay for.</span>
+          </h1>
+          <p class="dt-hero__body">
+            Designers have quietly adopted Claude Code, Codex, and the rest — but
+            the tools sit outside the engineering budget. maximal runs them on the
+            GitHub Copilot plan your company already pays for. No new keys, no
+            procurement, no second bill.
+          </p>
+          <div class="dt-cta">
+            <a class="btn btn--primary dt-cta__btn" data-os="mac" href={macDmg} rel="noopener">
+              <span class="btn-label">Download for macOS</span>
+              {versionLabel && <span class="btn-meta" data-version-pill>{versionLabel}</span>}
+            </a>
+            <a class="btn dt-cta__btn" href={guideUrl}>
+              <span class="btn-label">Read the guide</span>
+              <span class="btn-meta" aria-hidden="true">→</span>
+            </a>
+          </div>
+        </div>
+
+        <div class="dt-hero__cards" aria-hidden="false">
+          <article class="dt-card dt-card--wedge pop">
+            <p class="dt-card__eyebrow">The gap the report exposes</p>
+            <div class="dt-figrow">
+              <span class="dt-fig dt-fig--brand">65%</span>
+              <span class="dt-fig__label">of designers use <b>Claude Code</b></span>
+            </div>
+            <div class="dt-figrow">
+              <span class="dt-fig dt-fig--muted">9%</span>
+              <span class="dt-fig__label">use <b>GitHub Copilot's</b> own app</span>
+            </div>
+            <p class="dt-card__foot">
+              They reach for one. Their company pays for the other. maximal
+              connects them.
+            </p>
+          </article>
+
+          <article class="dt-card dt-card--sprawl pop">
+            <div class="dt-sprawl">
+              <span class="dt-sprawl__from">3</span>
+              <span class="dt-sprawl__arrow" aria-hidden="true">→</span>
+              <span class="dt-sprawl__to">7</span>
+            </div>
+            <p class="dt-card__label">AI tools per designer, in a single year</p>
+          </article>
+        </div>
+      </section>
+
+      <!-- Data: designers already made the choice -->
+      <section class="dt-section">
+        <div class="dt-section__head">
+          <h2 class="dt-h2">Your designers already made the choice</h2>
+          <p class="dt-section__lead">
+            The 2026 AI in Design report puts numbers on it: coding agents are now
+            core design tooling — and the one they reach for isn't the one the
+            company is paying for.
+          </p>
+        </div>
+        <div class="dt-charts">
+          <div class="dt-chartcard pop">
+            <SurveyBars
+              title="Coding & dev tools designers use (2026)"
+              series={codingTools}
+              source={SOURCE}
+            />
+          </div>
+          <div class="dt-chartcard pop">
+            <SurveyBars
+              title="Fastest-growing design tasks (points gained, 2025 → 2026)"
+              series={whereItMoved}
+              max={35}
+              unit=" pt"
+              source={SOURCE}
+            />
+          </div>
+        </div>
+      </section>
+
+      <!-- Wedge / barrier -->
+      <section class="dt-section dt-section--wedge">
+        <h2 class="dt-h2">But the tools sit outside the budget</h2>
+        <p class="dt-prose">
+          Design teams don't hold dev-side API keys or budgets. Used directly,
+          each tool needs its own paid subscription — a cost and a procurement
+          cycle that lands squarely on design. Your company is almost certainly
+          already paying for GitHub Copilot. <b>maximal points the tools your
+          designers already use at that plan.</b>
+        </p>
+      </section>
+
+      <!-- What maximal does -->
+      <section class="dt-section">
+        <h2 class="dt-h2">What maximal does</h2>
+        <p class="dt-prose">
+          Switch on the coding tools your designers already use, and maximal runs
+          them on the GitHub Copilot plan your company already pays for.
+        </p>
+        <div class="dt-notes">
+          <div class="dt-note pop">
+            <b>No design-side API budget needed.</b>
+            <span>
+              Your designers use the tools they already know — maximal points them
+              at the company's Copilot plan.
+            </span>
+          </div>
+          <div class="dt-note pop">
+            <b>No procurement, no new subscription.</b>
+            <span>
+              It runs on the Copilot seats you already pay for, GitHub Enterprise
+              included.
+            </span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Final CTA -->
+      <section class="dt-final">
+        <h2 class="dt-h2">Give your design team what they already reached for.</h2>
+        <div class="dt-cta">
+          <a class="btn btn--primary dt-cta__btn" data-os="mac" href={macDmg} rel="noopener">
+            <span class="btn-label">Download for macOS</span>
+            {versionLabel && <span class="btn-meta" data-version-pill>{versionLabel}</span>}
+          </a>
+          <a class="btn dt-cta__btn" href={guideUrl}>
+            <span class="btn-label">Read the guide</span>
+            <span class="btn-meta" aria-hidden="true">→</span>
+          </a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="dt-footer">
+      <a href={`${base}/`}>maximal</a>
+      <a href={guideUrl}>Guide</a>
+      <a href={repoUrl} rel="noopener">GitHub</a>
+      <a href={releasesUrl} rel="noopener">Releases</a>
+    </footer>
+
+    <script>
+      import "../lib/hydrate-downloads"
+    </script>
+
+    <style>
+      /* ===== Page shell — left-aligned, wider measure than the centered home ===== */
+      .dt {
+        max-width: 68rem;
+        margin: 0 auto;
+        padding: 1.5rem 1.5rem 5rem;
+        display: flex;
+        flex-direction: column;
+        gap: 5rem;
+      }
+      .topbar {
+        max-width: 68rem;
+        margin: 0 auto;
+        padding: 1.25rem 1.5rem 0;
+      }
+      .topbar__home {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        text-decoration: none;
+      }
+      .topbar__mark {
+        display: inline-grid;
+        place-items: center;
+        width: 1.6rem;
+        height: 1.6rem;
+        border-radius: 6px;
+        background: var(--brand);
+        color: var(--brand-ink);
+        font-family: var(--serif);
+        font-weight: 700;
+        font-size: 1rem;
+      }
+      .topbar__word {
+        font-family: var(--serif);
+        font-weight: 700;
+        font-size: 1.15rem;
+        letter-spacing: -0.01em;
+        color: var(--text);
+      }
+
+      /* Shared elevation so cards pop off the neutral canvas. */
+      .pop {
+        box-shadow:
+          0 18px 40px -20px rgba(10, 10, 12, 0.35),
+          0 4px 12px -6px rgba(10, 10, 12, 0.18);
+      }
+
+      /* ===== Hero ===== */
+      .dt-hero {
+        display: grid;
+        grid-template-columns: 1.1fr 0.9fr;
+        gap: 3rem;
+        align-items: center;
+      }
+      @media (max-width: 860px) {
+        .dt-hero {
+          grid-template-columns: 1fr;
+          gap: 2.5rem;
+        }
+      }
+      .dt-eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.3rem 0.7rem;
+        border: 1px solid var(--border-strong);
+        border-radius: var(--radius-pill);
+        font-family: var(--sans);
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: var(--text-body);
+      }
+      .dt-eyebrow::before {
+        content: "";
+        width: 0.45rem;
+        height: 0.45rem;
+        border-radius: var(--radius-pill);
+        background: var(--brand);
+      }
+      .dt-h1 {
+        font-family: var(--serif);
+        font-weight: 600;
+        font-optical-sizing: auto;
+        font-variation-settings: "SOFT" 30, "opsz" 96;
+        font-size: clamp(2.4rem, 5.2vw, 3.9rem);
+        line-height: 1.05;
+        letter-spacing: -0.025em;
+        color: var(--text);
+        margin: 1.25rem 0 0;
+      }
+      .dt-h1__accent {
+        display: block;
+        color: var(--brand-lit);
+        margin-top: 0.3rem;
+      }
+      .dt-hero__body {
+        font-family: var(--sans);
+        font-size: 1.1rem;
+        line-height: 1.6;
+        color: var(--text-body);
+        max-width: 34rem;
+        margin: 1.5rem 0 0;
+      }
+      .dt-cta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-top: 1.75rem;
+      }
+      .dt-cta__btn {
+        box-shadow:
+          0 10px 22px -12px rgba(10, 10, 12, 0.4),
+          0 2px 6px -3px rgba(10, 10, 12, 0.2);
+      }
+
+      /* Hero cards — staggered, layered, elevated. */
+      .dt-hero__cards {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+      }
+      .dt-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 1.5rem 1.6rem;
+      }
+      .dt-card--wedge {
+        margin-right: -1.5rem;
+      }
+      .dt-card--sprawl {
+        margin-left: 2rem;
+        margin-right: -0.5rem;
+      }
+      @media (max-width: 860px) {
+        .dt-card--wedge,
+        .dt-card--sprawl {
+          margin: 0;
+        }
+      }
+      .dt-card__eyebrow {
+        font-family: var(--sans);
+        font-size: 0.72rem;
+        font-weight: 600;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: var(--text-muted);
+        margin: 0 0 1rem;
+      }
+      .dt-figrow {
+        display: flex;
+        align-items: baseline;
+        gap: 0.75rem;
+        margin-bottom: 0.6rem;
+      }
+      .dt-fig {
+        font-family: var(--serif);
+        font-weight: 700;
+        font-size: 2.3rem;
+        line-height: 1;
+        font-variant-numeric: tabular-nums;
+        min-width: 3.4rem;
+      }
+      .dt-fig--brand {
+        color: var(--brand-lit);
+      }
+      .dt-fig--muted {
+        color: var(--text-muted);
+      }
+      .dt-fig__label {
+        font-family: var(--sans);
+        font-size: 0.95rem;
+        color: var(--text-body);
+      }
+      .dt-card__foot {
+        font-family: var(--sans);
+        font-size: 0.9rem;
+        line-height: 1.5;
+        color: var(--text-muted);
+        margin: 1rem 0 0;
+        padding-top: 0.9rem;
+        border-top: 1px solid var(--border);
+      }
+      .dt-sprawl {
+        display: flex;
+        align-items: baseline;
+        gap: 0.9rem;
+      }
+      .dt-sprawl__from {
+        font-family: var(--serif);
+        font-weight: 600;
+        font-size: 2rem;
+        color: var(--text-muted);
+      }
+      .dt-sprawl__arrow {
+        color: var(--brand);
+        font-size: 1.5rem;
+      }
+      .dt-sprawl__to {
+        font-family: var(--serif);
+        font-weight: 700;
+        font-size: 3rem;
+        line-height: 1;
+        color: var(--brand-lit);
+      }
+      .dt-card__label {
+        font-family: var(--sans);
+        font-size: 0.9rem;
+        color: var(--text-body);
+        margin: 0.6rem 0 0;
+      }
+
+      /* ===== Sections ===== */
+      .dt-section__head {
+        max-width: 40rem;
+        margin-bottom: 2rem;
+      }
+      .dt-h2 {
+        font-family: var(--serif);
+        font-weight: 600;
+        font-size: clamp(1.6rem, 3.4vw, 2.3rem);
+        line-height: 1.12;
+        letter-spacing: -0.02em;
+        color: var(--text);
+        margin: 0;
+      }
+      .dt-section__lead,
+      .dt-prose {
+        font-family: var(--sans);
+        font-size: 1.05rem;
+        line-height: 1.65;
+        color: var(--text-body);
+        max-width: 42rem;
+        margin: 1rem 0 0;
+      }
+      .dt-prose b {
+        color: var(--text);
+        font-weight: 600;
+      }
+
+      .dt-charts {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1.5rem;
+        align-items: start;
+      }
+      @media (max-width: 860px) {
+        .dt-charts {
+          grid-template-columns: 1fr;
+        }
+      }
+      .dt-chartcard {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 1.75rem 1.75rem 1.5rem;
+      }
+
+      .dt-notes {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1.25rem;
+        margin-top: 1.75rem;
+      }
+      @media (max-width: 700px) {
+        .dt-notes {
+          grid-template-columns: 1fr;
+        }
+      }
+      .dt-note {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-left: 3px solid var(--brand-lit);
+        border-radius: var(--radius-sm);
+        padding: 1.1rem 1.25rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+      }
+      .dt-note b {
+        font-family: var(--sans);
+        color: var(--text);
+        font-weight: 600;
+      }
+      .dt-note span {
+        font-family: var(--sans);
+        font-size: 0.95rem;
+        line-height: 1.55;
+        color: var(--text-body);
+      }
+
+      .dt-final {
+        text-align: center;
+        padding: 2.5rem 1.5rem;
+        background: var(--surface-2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+      }
+      .dt-final .dt-h2 {
+        max-width: 30ch;
+        margin: 0 auto;
+      }
+      .dt-final .dt-cta {
+        justify-content: center;
+      }
+
+      .dt-footer {
+        max-width: 68rem;
+        margin: 0 auto;
+        padding: 2rem 1.5rem 3rem;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1.5rem;
+        border-top: 1px solid var(--border);
+        font-family: var(--sans);
+        font-size: 0.9rem;
+      }
+      .dt-footer a {
+        color: var(--text-muted);
+        text-decoration: none;
+      }
+      .dt-footer a:hover {
+        color: var(--text);
+      }
+    </style>
+  </body>
+</html>
