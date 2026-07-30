@@ -16,18 +16,18 @@ const SOURCE = {
 // Trimmed to the six that tell the story: Claude Code dominant, Copilot low.
 const codingTools = [
   { label: "Claude Code", value: 65, tone: "brand" as const },
-  { label: "Cursor", value: 39 },
+  { label: "Cursor", value: 32 },
   { label: "Lovable", value: 19 },
   { label: "v0 by Vercel", value: 17 },
   { label: "OpenAI Codex", value: 15 },
-  { label: "GitHub Copilot", value: 9, tone: "accent" as const, note: "the plan you have" },
+  { label: "GitHub Copilot", value: 9 },
 ]
 
 const reel = ["Claude Code", "Cursor", "Codex", "opencode", "v0", "Lovable"]
 
 const ogTitle = "maximal for designers · the tools you love, the plan you have"
 const ogDescription =
-  "You already use Claude Code and Codex. maximal runs them on your company's GitHub Copilot plan. No keys to request, no sign-off to wait on."
+  "maximal runs tools like Codex and Claude Code on your existing GitHub Copilot plan. No keys to request, no sign-off to wait on."
 ---
 
 <!doctype html>
@@ -85,12 +85,28 @@ const ogDescription =
           <p class="dt-eyebrow">You're not the only one</p>
           <h2 class="dt-h2">Coding agents are core design tooling now.</h2>
           <p class="dt-lede">
-            Designers run seven AI tools on average, up from three last year. The
-            one you reach for is often a coding tool, funded by engineering, not
-            design. But design isn't engineering. You can't put a debugger on a
-            mental model. So you reach for whatever helps you think.
+            Designers today use an average of seven AI tools, up from three last year.
+            More and more of them are coding tools, and they fit your work fine.
+            Getting to them is the hard part.
           </p>
-        </div>
+          <!-- The rolodex moment. Lead and reel share one baseline, so it
+               reads as a sentence rather than three stacked objects. -->
+          <div class="dt-reel-block">
+            <p class="dt-reel__line">
+              <span class="dt-reel__lead">So keep using</span>
+              <span class="sr-only">Claude Code, Cursor, Codex, opencode, v0, and more.</span>
+              <span class="reel" aria-hidden="true">
+                <span class="reel__list" id="reel">
+                  {reel.map((t) => <span class="reel__item">{t}</span>)}
+                  <span class="reel__item">{reel[0]}</span>
+                </span>
+              </span>
+            </p>
+            <p class="dt-reel__tail">
+              maximal runs it on the Copilot plan you already have.
+            </p>
+          </div>
+        </div>        
         <div class="dt-chart">
           <SurveyBars
             title="Coding &amp; dev tools designers use (2026)"
@@ -100,20 +116,7 @@ const ogDescription =
         </div>
       </section>
 
-      <!-- The rolodex moment -->
-      <section class="dt-reel-block">
-        <p class="dt-reel__lead">So keep using</p>
-        <span class="sr-only">Claude Code, Cursor, Codex, opencode, v0, Lovable, and more.</span>
-        <div class="reel" aria-hidden="true">
-          <ul class="reel__list" id="reel">
-            {reel.map((t) => <li>{t}</li>)}
-            <li>{reel[0]}</li>
-          </ul>
-        </div>
-        <p class="dt-reel__tail">
-          maximal runs it on the Copilot plan your company already has.
-        </p>
-      </section>
+ 
 
       <!-- Blockers, removed -->
       <section class="dt-block">
@@ -337,30 +340,58 @@ const ogDescription =
       }
 
       /* ===== Rolodex reel ===== */
+      .dt-reel__line {
+        display: flex;
+        align-items: baseline;
+        flex-wrap: wrap;
+        gap: 0 0.5rem;
+        margin: 0;
+      }
       .dt-reel__lead {
         font-family: var(--sans);
         font-size: 1.05rem;
         color: var(--text-muted);
-        margin: 0 0 0.4rem;
+        margin: 0;
       }
       .reel {
+        /*
+         * Clipped with clip-path rather than overflow.
+         *
+         * An element with overflow other than visible is a scroll container,
+         * and a scroll container synthesises its baseline from the bottom of
+         * its box rather than from its text. Aligned that way the word sits a
+         * descender low and the line stops reading as a sentence. clip-path
+         * paints the same clip and leaves the real baseline alone.
+         *
+         * The inset is not cosmetic. A 1.12em line box at a clamped font size
+         * never lands on a whole device pixel, so the item above bleeds a
+         * hairline into the top of the frame, and the error grows with each
+         * turn. The trim is heavier at the top because that is the only edge
+         * the neighbouring item can reach. The line box carries about ten
+         * pixels of headroom over the tallest glyph, so this costs nothing
+         * visible, and the descender on "opencode" still clears the bottom.
+         */
+        clip-path: inset(2px 0 1px);
+        display: inline-block;
         height: 1.12em;
-        overflow: hidden;
         font-family: var(--serif);
         font-weight: 700;
         font-variation-settings: "SOFT" 30, "WONK" 1, "opsz" 144;
-        font-size: clamp(2.8rem, 9vw, 6.5rem);
+        font-size: clamp(2rem, 5vw, 3.5rem);
         line-height: 1.12;
         letter-spacing: -0.03em;
         color: var(--brand-lit);
       }
+      /*
+       * Shrink to fit takes the widest item, so the box does not resize as the
+       * reel turns. Nothing after it moves.
+       */
       .reel__list {
-        list-style: none;
-        margin: 0;
-        padding: 0;
+        display: block;
         transform: translateY(calc(var(--n, 0) * -1.12em));
       }
-      .reel__list li {
+      .reel__item {
+        display: block;
         height: 1.12em;
       }
       .dt-reel__tail {
@@ -370,7 +401,7 @@ const ogDescription =
         line-height: 1.25;
         color: var(--text);
         max-width: 26ch;
-        margin: 0.5rem 0 0;
+        margin: 0.35rem 0 0;
       }
 
       /* ===== Triad ===== */
