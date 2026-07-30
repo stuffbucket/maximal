@@ -64,12 +64,7 @@ const ogDescription =
       <!-- Hero — full-width statement, the tile as the initial "m". -->
       <section class="dt-hero">
         <h1 class="dt-h1">
-          <span class="hz-tile" aria-hidden="true">
-            <svg viewBox="0 0 100 100">
-              <rect width="100" height="100" rx="23" fill="#c8334a"></rect>
-              <text class="hz-tile__m" x="50" y="66" text-anchor="middle" fill="#f4ead4">m</text>
-            </svg></span
-          ><span class="sr-only">m</span>aximize the AI tools you love
+          <span class="dt-badge">maximize</span> the AI tools you love
           <span class="ink-brand">on the Copilot plan that's already paid for.</span>
         </h1>
         <div class="dt-cta">
@@ -260,26 +255,16 @@ const ogDescription =
       .dt-h1 .ink-brand {
         color: var(--brand-lit);
       }
-      /* Tile drop-cap for the leading "m". Negative margin lets the word tuck
-         onto the tile so "m·a" kern as one word. No positioning — the inline
-         word must paint ON TOP of the tile (document order), not behind it. */
-      .hz-tile {
-        display: inline-block;
-        width: 1.6em;
-        height: 1.6em;
-        vertical-align: -0.544em;
-        margin-right: -0.26em;
-      }
-      .hz-tile svg {
-        display: block;
-        width: 100%;
-        height: 100%;
-      }
-      .hz-tile__m {
-        font-family: var(--serif);
-        font-weight: 900;
-        font-size: 72px;
-        font-variation-settings: "SOFT" 30, "WONK" 1, "opsz" 144;
+      /* The whole first word sits inside the crimson mark — cream Fraunces on a
+         rounded crimson badge, echoing the app icon. box-decoration-break keeps
+         the shape intact if the word ever wraps. */
+      .dt-badge {
+        background: var(--brand);
+        color: var(--brand-ink);
+        border-radius: 0.16em;
+        padding: 0.04em 0.2em;
+        -webkit-box-decoration-break: clone;
+        box-decoration-break: clone;
       }
       .dt-hero__sub {
         font-family: var(--sans);
