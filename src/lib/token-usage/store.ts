@@ -409,16 +409,16 @@ function getPeriodRange(period: TokenUsagePeriod, now = new Date()) {
     return { endMs: now.getTime() + 1, startMs: 0 }
   }
 
+  if (period === "week") {
+    // "7 Days" — a rolling last-7-days window (not a calendar week). Half-open
+    // end at now+1 so a same-ms event still counts (see the all-time note).
+    return { endMs: now.getTime() + 1, startMs: now.getTime() - 7 * 86_400_000 }
+  }
+
   const start = new Date(now)
 
   switch (period) {
     case "day": {
-      start.setHours(0, 0, 0, 0)
-      break
-    }
-    case "week": {
-      const daysSinceMonday = (start.getDay() + 6) % 7
-      start.setDate(start.getDate() - daysSinceMonday)
       start.setHours(0, 0, 0, 0)
       break
     }
@@ -436,10 +436,6 @@ function getPeriodRange(period: TokenUsagePeriod, now = new Date()) {
   switch (period) {
     case "day": {
       end.setDate(end.getDate() + 1)
-      break
-    }
-    case "week": {
-      end.setDate(end.getDate() + 7)
       break
     }
     case "month": {

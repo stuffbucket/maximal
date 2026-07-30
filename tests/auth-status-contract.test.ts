@@ -113,7 +113,13 @@ async function flushMicrotasks(turns = 20): Promise<void> {
 beforeEach(() => {
   __resetAuthControllerForTests()
   __setAuthControllerDepsForTests({
-    pollAccessToken: () => harness.pollAccessTokenImpl(),
+    pollAccessToken: () =>
+      harness.pollAccessTokenImpl().then((accessToken) => ({
+        accessToken,
+        refreshToken: null,
+        accessTokenExpiresAt: null,
+        refreshTokenExpiresAt: null,
+      })),
     addAccount: (rec: AccountRecord) => {
       harness.addAccountCalls.push(rec)
       return Promise.resolve()

@@ -1,4 +1,6 @@
-import { type ReactElement, useEffect, useRef, type ReactNode } from "react"
+import type { ReactElement, ReactNode } from "react"
+
+import * as AlertDialog from "@radix-ui/react-alert-dialog"
 
 import { Button } from "./Button"
 
@@ -15,12 +17,19 @@ interface ConfirmDialogProps {
 }
 
 /**
- * Reusable confirmation modal. Uses the native <dialog> element so we
- * get the top-layer stack, focus trap, and ESC handling for free.
+ * Reusable confirmation modal, backed by Radix AlertDialog — the correct
+ * role for a decision that interrupts and requires an explicit response
+ * (focus trap, ESC, `role="alertdialog"`, aria-labelledby/describedby all
+ * handled by the primitive, so we no longer hand-roll the imperative
+ * `showModal()` juggling the native <dialog> needed).
  *
- * Caller owns `open` + `busy`. ESC and backdrop click route through
- * `onCancel`. Initial focus lands on Cancel — the safe default for any
- * destructive action.
+ * Caller owns `open` + `busy`. ESC and the Cancel button route through
+ * `onCancel` (via `onOpenChange`); an overlay click does NOT dismiss (an
+ * AlertDialog demands an explicit choice). The confirm button is a plain
+ * Button, NOT `AlertDialog.Action`, so it does not auto-close — the caller
+ * keeps the dialog open via `busy` while an async `onConfirm` runs and flips
+ * `open` itself when done. Cancel is first in DOM order, so it takes initial
+ * focus — the safe default for a destructive action.
  */
 export function ConfirmDialog({
   open,
@@ -32,88 +41,43 @@ export function ConfirmDialog({
   busy = false,
   onConfirm,
   onCancel,
-}: ConfirmDialogProps): ReactElement | null {
-  const dialogRef = useRef<HTMLDialogElement | null>(null)
-  const cancelRef = useRef<HTMLButtonElement | null>(null)
-
-  // Sync `open` prop with the imperative <dialog> state. showModal()
-  // is what gives us the focus trap + backdrop; close() tears them
-  // down. Wrap in try/catch because showModal() throws if the dialog
-  // is already open and vice versa — harmless in normal flow but
-  // possible under strict-mode double effects.
-  useEffect(() => {
-    const el = dialogRef.current
-    if (!el) return
-    if (open && !el.open) {
-      try {
-        el.showModal()
-      } catch {
-        /* ignore */
-      }
-    } else if (!open && el.open) {
-      try {
-        el.close()
-      } catch {
-        /* ignore */
-      }
-    }
-  }, [open])
-
-  // Initial focus on Cancel after showModal(). Browsers autofocus the
-  // first interactive element otherwise, which would land on Confirm
-  // for a destructive dialog — wrong default.
-  useEffect(() => {
-    if (open) cancelRef.current?.focus()
-  }, [open])
-
-  if (!open) return null
-
-  const onCancelGuard = (): void => {
-    if (busy) return
-    onCancel()
-  }
-
-  const onConfirmClick = (): void => {
-    void onConfirm()
-  }
-
-  // The <dialog>'s built-in close event fires on ESC. Route it through
-  // our cancel path so callers don't have to special-case keyboard
-  // dismissal. Same for backdrop clicks (event.target === dialog).
+}: ConfirmDialogProps): ReactElement {
   return (
-    <dialog
-      ref={dialogRef}
-      className="confirm-dialog"
-      onClose={onCancelGuard}
-      onCancel={(e) => {
-        e.preventDefault()
-        onCancelGuard()
-      }}
-      onClick={(e) => {
-        if (e.target === dialogRef.current) onCancelGuard()
+    <AlertDialog.Root
+      open={open}
+      onOpenChange={(next) => {
+        // Fires for ESC and the Cancel button. Ignore while busy so a
+        // mid-flight async confirm can't be dismissed out from under itself.
+        if (!next && !busy) onCancel()
       }}
     >
-      <div className="confirm-dialog__panel">
-        <h2 className="confirm-dialog__title">{title}</h2>
-        <div className="confirm-dialog__body">{body}</div>
-        <div className="confirm-dialog__actions">
-          <Button
-            ref={cancelRef}
-            variant="ghost"
-            onClick={onCancelGuard}
-            disabled={busy}
-          >
-            {cancelLabel}
-          </Button>
-          <Button
-            variant={tone === "danger" ? "destructive" : "primary"}
-            onClick={onConfirmClick}
-            disabled={busy}
-          >
-            {busy ? "Working…" : confirmLabel}
-          </Button>
-        </div>
-      </div>
-    </dialog>
+      <AlertDialog.Portal>
+        <AlertDialog.Overlay className="confirm-dialog__overlay" />
+        <AlertDialog.Content className="confirm-dialog">
+          <div className="confirm-dialog__panel">
+            <AlertDialog.Title className="confirm-dialog__title">
+              {title}
+            </AlertDialog.Title>
+            <AlertDialog.Description asChild>
+              <div className="confirm-dialog__body">{body}</div>
+            </AlertDialog.Description>
+            <div className="confirm-dialog__actions">
+              <AlertDialog.Cancel asChild>
+                <Button variant="ghost" disabled={busy}>
+                  {cancelLabel}
+                </Button>
+              </AlertDialog.Cancel>
+              <Button
+                variant={tone === "danger" ? "destructive" : "primary"}
+                onClick={() => void onConfirm()}
+                disabled={busy}
+              >
+                {busy ? "Working…" : confirmLabel}
+              </Button>
+            </div>
+          </div>
+        </AlertDialog.Content>
+      </AlertDialog.Portal>
+    </AlertDialog.Root>
   )
 }

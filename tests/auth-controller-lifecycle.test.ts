@@ -144,7 +144,12 @@ beforeEach(() => {
   __setAuthControllerDepsForTests({
     pollAccessToken: (_dc: unknown) => {
       harness.pollAccessTokenCalls++
-      return harness.pollAccessTokenImpl()
+      return harness.pollAccessTokenImpl().then((accessToken) => ({
+        accessToken,
+        refreshToken: null,
+        accessTokenExpiresAt: null,
+        refreshTokenExpiresAt: null,
+      }))
     },
     addAccount: (rec: AccountRecord) => {
       harness.addAccountCalls.push(rec)

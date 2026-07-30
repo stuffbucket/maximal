@@ -159,6 +159,18 @@ export interface AccountRecord {
   needsReauth?: boolean
   /** The rejection that set `needsReauth`, for UI + logs. */
   lastError?: AccountAuthError | null
+  /**
+   * The GitHub refresh token (`ghr_`), present ONLY when the App issues
+   * expiring user tokens. Used to renew an expired `ghu_` access token without a
+   * fresh device flow (see refresh-access-token.ts). null/absent = non-expiring
+   * token, nothing to renew. Optional for backward compat: older registries
+   * round-trip cleanly.
+   */
+  refreshToken?: string | null
+  /** Absolute epoch-ms expiry of `token`, or null/absent if non-expiring. */
+  accessTokenExpiresAt?: number | null
+  /** Absolute epoch-ms expiry of `refreshToken`, or null/absent if none. */
+  refreshTokenExpiresAt?: number | null
 }
 
 /** Stable identity key. Hosts are gh's host format (`github.com` / a GHES
@@ -185,6 +197,9 @@ export function makeAccountRecord(opts: {
   host: string
   token: string
   addedVia: AddedVia
+  refreshToken?: string | null
+  accessTokenExpiresAt?: number | null
+  refreshTokenExpiresAt?: number | null
 }): AccountRecord {
   return {
     login: opts.login,
@@ -193,6 +208,9 @@ export function makeAccountRecord(opts: {
     tokenType: inferTokenType(opts.token),
     addedVia: opts.addedVia,
     obtainedAt: new Date().toISOString(),
+    refreshToken: opts.refreshToken ?? null,
+    accessTokenExpiresAt: opts.accessTokenExpiresAt ?? null,
+    refreshTokenExpiresAt: opts.refreshTokenExpiresAt ?? null,
   }
 }
 

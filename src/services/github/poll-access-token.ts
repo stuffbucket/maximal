@@ -47,6 +47,13 @@ const PollResponseBodySchema = z
     access_token: z.string().optional(),
     token_type: z.string().optional(),
     scope: z.string().optional(),
+    // Present ONLY when the GitHub App has "expiring user tokens" enabled. When
+    // present, access_token is a short-lived ghu_ that must be renewed via
+    // refresh_token before expiry (see refresh-access-token.ts). Absent → the
+    // token never expires and there's nothing to renew.
+    refresh_token: z.string().optional(),
+    expires_in: z.number().nonnegative().optional(),
+    refresh_token_expires_in: z.number().nonnegative().optional(),
     error: z.string().optional(),
     error_description: z.string().optional(),
     error_uri: z.string().optional(),
@@ -56,10 +63,51 @@ const PollResponseBodySchema = z
 
 type PollResponseBody = z.infer<typeof PollResponseBodySchema>
 
+/**
+ * The credential material from a device-code grant (or a refresh grant — see
+ * refresh-access-token.ts, which returns the same shape). `refreshToken` and the
+ * `*ExpiresAt` timestamps are null when GitHub's App does not issue expiring
+ * user tokens (the common case today), in which case there is nothing to renew.
+ */
+export interface DeviceTokenResult {
+  accessToken: string
+  refreshToken: string | null
+  /** Absolute epoch-ms expiry of the access token, or null if non-expiring. */
+  accessTokenExpiresAt: number | null
+  /** Absolute epoch-ms expiry of the refresh token, or null if none. */
+  refreshTokenExpiresAt: number | null
+}
+
+/** Build a DeviceTokenResult from a validated token-bearing response body,
+ *  converting the relative `expires_in` seconds to absolute epoch-ms. Shared by
+ *  the device-code poll and the refresh grant so both persist the same shape. */
+export function toDeviceTokenResult(
+  body: {
+    access_token?: string
+    refresh_token?: string
+    expires_in?: number
+    refresh_token_expires_in?: number
+  },
+  nowMs: number = Date.now(),
+): DeviceTokenResult {
+  return {
+    accessToken: body.access_token ?? "",
+    refreshToken: body.refresh_token ?? null,
+    accessTokenExpiresAt:
+      typeof body.expires_in === "number" ?
+        nowMs + body.expires_in * 1000
+      : null,
+    refreshTokenExpiresAt:
+      typeof body.refresh_token_expires_in === "number" ?
+        nowMs + body.refresh_token_expires_in * 1000
+      : null,
+  }
+}
+
 /** What to do after reading one poll response: hand back a token, or keep
  *  polling (optionally at a new interval). Terminal server errors throw. */
 type PollOutcome =
-  | { kind: "token"; token: string }
+  | { kind: "token"; result: DeviceTokenResult }
   | { kind: "retry"; nextInterval?: number }
 
 function abortError(): Error {
@@ -80,7 +128,7 @@ function interpretPollBody(
   intervalSeconds: number,
 ): PollOutcome {
   if (typeof body.access_token === "string" && body.access_token) {
-    return { kind: "token", token: body.access_token }
+    return { kind: "token", result: toDeviceTokenResult(body) }
   }
 
   switch (body.error) {
@@ -118,7 +166,7 @@ function interpretPollBody(
 export async function pollAccessToken(
   deviceCode: DeviceCodeResponse,
   signal?: AbortSignal,
-): Promise<string> {
+): Promise<DeviceTokenResult> {
   const { clientId, headers } = getOauthAppConfig()
   const { accessTokenUrl } = getOauthUrls()
 
@@ -190,7 +238,7 @@ export async function pollAccessToken(
 
     consola.debug("Device-code poll response:", parsed.data)
     const outcome = interpretPollBody(parsed.data, intervalSeconds)
-    if (outcome.kind === "token") return outcome.token
+    if (outcome.kind === "token") return outcome.result
     if (outcome.nextInterval !== undefined)
       intervalSeconds = outcome.nextInterval
   }

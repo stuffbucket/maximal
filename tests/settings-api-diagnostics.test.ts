@@ -88,6 +88,13 @@ describe("DiagnosticsResponse schema round-trip", () => {
         kind: "CopilotResponsesExecutor",
         detail: "gpt-5-mini",
       },
+      copilot_service: {
+        upstream_host: "https://api.githubcopilot.com",
+        github_api_base_url: "https://api.github.com",
+        token_endpoint: "https://api.github.com/copilot_internal/v2/token",
+        enterprise_domain: null,
+        discovered_upstream: null,
+      },
     }
     const parsed = DiagnosticsResponse.parse(fixture)
     expect(parsed).toEqual(fixture)

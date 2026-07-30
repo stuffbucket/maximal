@@ -22,6 +22,7 @@
   ],
   "ignoreExportsUsedInFile": true,
   "ignore": [
-    "src/lib/auth/token.ts"
+    "src/lib/auth/token.ts",
+    "src/lib/auth/copilot-online-retry.ts"
   ]
 }

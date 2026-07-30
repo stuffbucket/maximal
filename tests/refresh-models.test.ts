@@ -3,9 +3,12 @@ import { afterEach, describe, expect, it, mock } from "bun:test"
 import { Hono } from "hono"
 
 import {
+  _resetPrimeStateForTests,
   _resetRefreshInFlightForTests,
   isStale,
   JITTER_MS,
+  PRIME_COOLDOWN_MS,
+  primeModelsCache,
   refreshIfStale,
   STALE_AFTER_MS,
   staleRefreshMiddleware,
@@ -14,6 +17,10 @@ import { state } from "~/lib/runtime-state/state"
 
 afterEach(() => {
   _resetRefreshInFlightForTests()
+  _resetPrimeStateForTests()
+  // The on-demand prime reads modelsCached(); leave the cache empty for the
+  // next test so a stray primed catalog can't mask a "not primed" branch.
+  state.models = undefined
 })
 
 describe("isStale", () => {
@@ -120,7 +127,7 @@ describe("isStale", () => {
 })
 
 describe("refreshIfStale", () => {
-  it("returns 'not_primed' before the first load", () => {
+  it("primes on demand when the cache was never loaded (empty catalog self-heals)", () => {
     const refresh = mock(() => Promise.resolve())
     const result = refreshIfStale({
       getLoadedAtMs: () => null,
@@ -128,8 +135,57 @@ describe("refreshIfStale", () => {
       now: () => 1_000_000_000,
       jitterMs: 0,
     })
-    expect(result).toBe("not_primed")
-    expect(refresh).not.toHaveBeenCalled()
+    expect(result).toBe("priming")
+    expect(refresh).toHaveBeenCalledTimes(1)
+  })
+
+  it("single-flights concurrent on-demand primes", () => {
+    let resolveRefresh: (() => void) | undefined
+    const refresh = mock(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveRefresh = resolve
+        }),
+    )
+    const opts = {
+      getLoadedAtMs: () => null,
+      refresh,
+      now: () => 1_000_000_000,
+      jitterMs: 0,
+    }
+    expect(refreshIfStale(opts)).toBe("priming")
+    expect(refreshIfStale(opts)).toBe("prime_in_flight")
+    expect(refreshIfStale(opts)).toBe("prime_in_flight")
+    expect(refresh).toHaveBeenCalledTimes(1)
+    resolveRefresh?.()
+  })
+
+  it("cooldown bounds sequential prime retries without a timer", async () => {
+    const t0 = 1_000_000_000
+    const refresh = mock(() =>
+      Promise.reject(new Error("models endpoint down")),
+    )
+    const base = {
+      getLoadedAtMs: () => null,
+      refresh,
+      jitterMs: 0,
+    }
+    // First attempt fires and fails.
+    expect(refreshIfStale({ ...base, now: () => t0 })).toBe("priming")
+    await new Promise((r) => setTimeout(r, 0))
+    expect(refresh).toHaveBeenCalledTimes(1)
+
+    // A retry inside the cooldown window is skipped — no re-hit of the endpoint.
+    expect(
+      refreshIfStale({ ...base, now: () => t0 + PRIME_COOLDOWN_MS - 1 }),
+    ).toBe("prime_cooldown")
+    expect(refresh).toHaveBeenCalledTimes(1)
+
+    // Past the cooldown, it fires again.
+    expect(
+      refreshIfStale({ ...base, now: () => t0 + PRIME_COOLDOWN_MS + 1 }),
+    ).toBe("priming")
+    expect(refresh).toHaveBeenCalledTimes(2)
   })
 
   it("returns 'fresh' inside the staleness window", () => {
@@ -231,6 +287,45 @@ describe("refreshIfStale", () => {
     await new Promise((r) => setTimeout(r, 0))
     expect(refreshIfStale(opts)).toBe("fired")
     expect(refresh).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe("primeModelsCache", () => {
+  it("logs a recovery note when an empty cache repopulates", async () => {
+    state.models = undefined // empty catalog
+    const info = mock((..._a: Array<unknown>) => {})
+    const warn = mock((..._a: Array<unknown>) => {})
+    await primeModelsCache(
+      () => {
+        // Simulate a successful refresh that populates the cache.
+        state.models = { data: [{ id: "gpt-4" }] } as never
+        return Promise.resolve()
+      },
+      { info, warn },
+    )
+    expect(info).toHaveBeenCalledTimes(1)
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  it("does NOT log a recovery note when the cache was already populated", async () => {
+    state.models = { data: [{ id: "gpt-4" }] } as never // already primed
+    const info = mock((..._a: Array<unknown>) => {})
+    const warn = mock((..._a: Array<unknown>) => {})
+    await primeModelsCache(() => Promise.resolve(), { info, warn })
+    expect(info).not.toHaveBeenCalled()
+  })
+
+  it("warns and does not throw when the prime fails", async () => {
+    state.models = undefined
+    const info = mock((..._a: Array<unknown>) => {})
+    const warn = mock((..._a: Array<unknown>) => {})
+    // Resolves cleanly (no throw) despite the refresh rejecting.
+    await primeModelsCache(() => Promise.reject(new Error("down")), {
+      info,
+      warn,
+    })
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(info).not.toHaveBeenCalled()
   })
 })
 
@@ -394,7 +489,8 @@ describe("staleRefreshMiddleware", () => {
     }
   })
 
-  it("does not trigger refresh before initial prime (loadedAtMs null)", async () => {
+  it("primes on demand (self-heals) when the cache was never loaded, without blocking the request", async () => {
+    state.models = undefined // empty / never-primed catalog
     const refresh = mock(() => Promise.resolve())
     const app = new Hono()
     app.use(
@@ -412,7 +508,10 @@ describe("staleRefreshMiddleware", () => {
     const res = await app.request("/ping")
     expect(res.status).toBe(200)
     expect(ran).toBe(true)
-    expect(refresh).not.toHaveBeenCalled()
+    // An empty cache now triggers a background prime (fire-and-forget) so the
+    // catalog self-heals on live traffic — the request still completes without
+    // waiting on it.
+    expect(refresh).toHaveBeenCalledTimes(1)
   })
 
   it("forwards refresh rejections to onError when stale", async () => {

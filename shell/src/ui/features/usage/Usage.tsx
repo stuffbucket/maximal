@@ -9,7 +9,6 @@ import type {
   TokenUsageSummary,
 } from "./usage-types"
 
-import { LiveTrafficStream } from "./charts/LiveTrafficStream"
 import { PeriodTrend } from "./charts/PeriodTrend"
 import { EventsTable } from "./EventsTable"
 import { formatCostAiu, formatNumber, providerLabel } from "./format"
@@ -29,7 +28,7 @@ import { useUsage, type UsagePeriod } from "./useUsage"
 const PERIODS: ReadonlyArray<{ id: UsagePeriod; label: string; noun: string }> =
   [
     { id: "day", label: "Today", noun: "today" },
-    { id: "week", label: "This week", noun: "this week" },
+    { id: "week", label: "7 days", noun: "the last 7 days" },
     { id: "month", label: "This month", noun: "this month" },
     { id: "all", label: "All time", noun: "all time" },
   ]
@@ -234,7 +233,6 @@ export function Usage(): ReactElement {
     quotas,
     series,
     events,
-    live,
     liveTotals,
     period,
     setPeriod,
@@ -258,13 +256,16 @@ export function Usage(): ReactElement {
       <>
         <LiveTrackers totals={liveTotals} />
 
-        <div className="usage-graphs">
-          <LiveTrafficStream live={live} />
+        <section className="usage__section" aria-label="Traffic by type">
+          <h3 className="usage__section-title">
+            Traffic by type · {trendLabel}
+          </h3>
           <PeriodTrend
             data={seriesToTrafficPoints(series)}
             periodLabel={trendLabel}
+            height={260}
           />
-        </div>
+        </section>
 
         <SummaryLine summary={summary} period={period} />
 

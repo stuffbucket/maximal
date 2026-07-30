@@ -166,10 +166,8 @@ describe("Usage island", () => {
 
     render(<Usage />)
 
-    // The near-term live hero section (its numbers live in the tracker strip).
-    expect(
-      await screen.findByLabelText("Token traffic — last hour"),
-    ).toBeDefined()
+    // The traffic-by-type strip plot (period-reactive).
+    expect(await screen.findByText(/Traffic by type/)).toBeDefined()
     // The five trackers render as one labeled stat row, in fixed order.
     const trackers = screen.getByRole("group", { name: "Live token counters" })
     for (const label of [
@@ -193,7 +191,7 @@ describe("Usage island", () => {
     stubFetch(contentRoutes())
 
     render(<Usage />)
-    await screen.findByLabelText("Token traffic — last hour")
+    await screen.findByText(/Traffic by type/)
 
     // Baseline: summary input 1000, total 1234. A live frame adds its delta on
     // top of the summary (input +300 → 1,300; total +500 → 1,734). These

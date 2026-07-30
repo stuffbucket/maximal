@@ -20,6 +20,7 @@ import { Hono } from "hono"
 import {
   cancelDeviceFlow,
   getAuthStatus,
+  rearmCopilotAuth,
   signOut,
   startDeviceFlow,
 } from "~/lib/auth/auth-controller"
@@ -28,6 +29,18 @@ import { forwardError } from "~/lib/errors/error"
 export const authRoutes = new Hono()
 
 authRoutes.get("/status", (c) => c.json(getAuthStatus()))
+
+// Recovery trigger. The shell POSTs this on OS wake / network-online / window
+// focus so a session that degraded while the laptop slept (stale Copilot bearer
+// → terminal `error` state) self-heals WITHOUT the user having to switch
+// accounts. Single-flight + non-destructive: re-mints from the retained
+// credential and restores signed-in on success; a genuinely dead identity is
+// reported so the UI can prompt reconnect. Cheap to call (coalesces), so the
+// shell can fire it liberally. Returns the fresh auth status.
+authRoutes.post("/rearm", async (c) => {
+  const outcome = await rearmCopilotAuth()
+  return c.json({ outcome, status: getAuthStatus() })
+})
 
 authRoutes.post("/start", async (c) => {
   try {

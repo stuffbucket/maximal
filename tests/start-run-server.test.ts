@@ -151,6 +151,8 @@ __setServeForTests(
 )
 const { getAuthStatus, signOut, __resetAuthControllerForTests } =
   await import("~/lib/auth/auth-controller")
+const { stopCopilotOnlineRetry } =
+  await import("~/lib/auth/copilot-online-retry")
 const { CopilotAuthFatalError } = await import("~/lib/errors/error")
 
 function resetState(): void {
@@ -158,6 +160,10 @@ function resetState(): void {
   // grace window, and the auto-recovery hook) so a sibling test file's recent
   // markSignedIn / registered recovery can't leak in and suppress a boot degrade.
   __resetAuthControllerForTests()
+  // The transient-Copilot-failure boot path now schedules a background
+  // online-retry loop (keeps a parked timer). Stop any leftover from a prior
+  // test so it can't re-mint or flip auth state mid-run.
+  stopCopilotOnlineRetry()
   state.githubToken = undefined
   state.userName = undefined
   state.copilotToken = undefined
@@ -287,7 +293,7 @@ describe("runServer — GitHub token resolution", () => {
     expect(setupCopilotTokenMock).toHaveBeenCalledTimes(0)
   })
 
-  test("disk-loaded token that fails Copilot bootstrap is cleared", async () => {
+  test("disk-loaded token that fails Copilot bootstrap transiently is RETAINED for a background retry", async () => {
     storedRecord = { accessToken: "stale" }
     const tmpLogUser = logUserMock.getMockImplementation()
     ;(
@@ -298,9 +304,15 @@ describe("runServer — GitHub token resolution", () => {
     } finally {
       if (tmpLogUser) logUserMock.mockImplementation(tmpLogUser)
     }
-    // bootstrapUpstream catches the error and clears the token so
-    // requireGithubAuth treats the proxy as unauthenticated.
-    expect(state.githubToken).toBeUndefined()
+    // A transient Copilot-bootstrap failure is no longer treated as a wipe:
+    // bootstrapUpstream KEEPS the in-memory GitHub token so the scheduled
+    // background online-retry can re-mint with it (self-heal instead of
+    // wedging tokenless until a manual restart), while still stating the
+    // union explicitly as signed-out for now.
+    expect(state.githubToken).toBe("stale")
+    expect(getAuthStatus().state).toBe("unauthenticated")
+    // The parked retry loop is torn down by resetState()/afterAll's
+    // stopCopilotOnlineRetry(); assert we didn't latch signed-in over it.
   })
 
   test("a fatal Copilot rejection at boot surfaces its reason (not a generic sign-out)", async () => {
@@ -470,6 +482,7 @@ describe("start.run — citty args → runServer options", () => {
 // mocks, so we re-`mock.module` each one back to the captured real
 // module reference.
 afterAll(async () => {
+  stopCopilotOnlineRetry()
   globalThis.fetch = realFetch
   __setServeForTests(null)
   mock.restore()

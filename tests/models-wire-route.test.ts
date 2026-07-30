@@ -9,13 +9,30 @@
  * strict client (Claude Desktop's picker) reject the list and render empty.
  */
 
-import { beforeEach, describe, expect, test } from "bun:test"
+import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test"
 import { Hono } from "hono"
 
 import type { Model } from "~/services/copilot/get-models"
 
 import { setModels } from "~/lib/runtime-state/state"
 import { modelRoutes } from "~/routes/models/route"
+
+// Stub the network layer so the route's on-demand prime (primeModelsCache →
+// cacheModels → getModels) never hits the real network. It rejects: the prime
+// is best-effort (warn + serve empty), so the route still 200s. Restored in
+// afterAll so it can't leak into a sibling file (Bun keeps mocks process-wide).
+// NB: a sibling file globally no-ops cacheModels itself, so this file must not
+// assert the prime *repopulated* the cache (order-dependent) — only that an
+// unloadable catalog never 5xxes. The repopulation path is unit-tested in
+// tests/refresh-models.test.ts with injected fns.
+const actualGetModels = await import("~/services/copilot/get-models")
+await mock.module("~/services/copilot/get-models", () => ({
+  ...actualGetModels,
+  getModels: () => Promise.reject(new Error("models endpoint down")),
+}))
+afterAll(async () => {
+  await mock.module("~/services/copilot/get-models", () => actualGetModels)
+})
 
 const LEAK_VECTORS = [
   "billing",
@@ -152,5 +169,18 @@ describe("GET /v1/models — Anthropic shape on signal", () => {
     const body = (await res.json()) as { object?: string; data: Array<Entry> }
     expect(body.object).toBeUndefined()
     expect(body.data[0].type).toBe("model")
+  })
+})
+
+describe("GET /v1/models — empty-catalog on-demand recovery", () => {
+  test("an unloadable catalog yields an empty 200 list, never a 5xx", async () => {
+    setModels({ object: "list", data: [] }) // primed-but-empty catalog
+    // modelsCached() === 0 triggers a best-effort prime; the mocked getModels
+    // rejects, so primeModelsCache warns and the route serves an empty list —
+    // it must NOT relay a 500 (clients don't hard-depend on the catalog).
+    const res = await buildApp().request("/v1/models")
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { data?: Array<unknown> }
+    expect(body.data ?? []).toEqual([])
   })
 })

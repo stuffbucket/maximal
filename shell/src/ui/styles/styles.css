@@ -279,6 +279,29 @@ a:hover {
   color: var(--text-muted);
 }
 
+/* ---- Lifecycle action row (chrome-free) ----
+   A one-line managed action: a short description leads and the action button
+   sits at the trailing edge. Not a card — a card implies a discrete entity;
+   this is a single verb (Quit). Wraps gracefully when the pane is narrow. */
+.lifecycle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.lifecycle-row__desc {
+  min-width: 0;
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-lg);
+  color: var(--text-muted);
+}
+
+.lifecycle-row > .btn {
+  flex: 0 0 auto;
+}
+
 /* ---- gh-reuse: alternate sign-in via an existing GitHub CLI login ----
    A secondary path inside the unauthenticated account state. Chrome-free
    like its sibling auth states (see .state); a thin "or" rule separates it
@@ -814,6 +837,7 @@ a:hover {
 }
 
 .card__title {
+  margin: 0;
   font-size: var(--text-md);
   font-weight: var(--weight-lg);
   line-height: var(--leading-lg);
@@ -844,7 +868,7 @@ a:hover {
  * The card itself is the only surface (no nested card). Its body is a
  * vertical stack matching the card's own rhythm; the option checkboxes,
  * inline error, and action button each get their own row. */
-[data-uninstall-body] {
+.uninstall-body {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
@@ -1435,25 +1459,71 @@ a:hover {
   color: var(--text-muted);
 }
 
-/* Tighten the grouped tables a touch — these are dense reference rows,
-   not the airy form rows the default .table spacing assumes. */
-.models__table td,
-.models__table th {
-  padding: var(--space-2) var(--space-3);
+/* Model catalog as a grid of cards — discrete entities, each a quiet
+   card, reflowing to fewer columns as the pane narrows. Mirrors the
+   .usage-providers strip idiom. */
+.models__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--space-3);
 }
 
-.models__name {
+.model-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  background: var(--surface-card);
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  box-shadow: var(--elevation-card);
+  padding: var(--space-4);
+}
+
+.model-card__head {
   display: flex;
   align-items: baseline;
+  justify-content: space-between;
   gap: var(--space-2);
-  color: var(--text-strong);
-  font-weight: var(--weight-md);
 }
 
-.models__id {
-  display: block;
+.model-card__name {
+  color: var(--text-strong);
+  font-weight: var(--weight-lg);
+  line-height: var(--leading-lg);
+}
+
+.model-card__id {
   font-size: var(--text-sm);
   color: var(--text-muted);
+  word-break: break-all;
+}
+
+.model-card__stats {
+  display: flex;
+  gap: var(--space-4);
+  margin: 0;
+}
+
+.model-card__stat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.model-card__stat-label {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.model-card__stat-value {
+  margin: 0;
+  color: var(--text-strong);
+  font-weight: var(--weight-md);
+  font-variant-numeric: tabular-nums;
+}
+
+.model-card__stats + .models__chips {
+  margin-top: auto;
 }
 
 .models__preview {
@@ -1481,7 +1551,6 @@ a:hover {
 .models__muted {
   color: var(--text-muted);
 }
-
 
 .connection-list__empty {
   margin: 0;
@@ -1759,9 +1828,16 @@ a:hover {
 }
 
 /* ---- Confirm dialog ----
-   Uses native <dialog>. The element itself sits at the top layer
-   (free, no z-index gymnastics); ::backdrop styles the scrim. */
+   Radix AlertDialog. Content + Overlay are portaled divs (not a native
+   <dialog>), so centering + the modal stacking tier live here. */
 .confirm-dialog {
+  /* inset:0 + margin:auto + fit-content height centers on both axes,
+     leaving `transform` free for the slide-in animation below. */
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  height: fit-content;
+  z-index: 50; /* modal tier — above the sticky header (10) */
   padding: 0;
   border: var(--border-width-hairline) solid var(--border-subtle);
   border-radius: var(--radius-card);
@@ -1774,7 +1850,10 @@ a:hover {
   font-family: var(--font-body);
 }
 
-.confirm-dialog::backdrop {
+.confirm-dialog__overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50; /* Content follows in DOM order, so it layers above */
   background: rgb(0 0 0 / 0.5);
 }
 
@@ -1817,19 +1896,29 @@ a:hover {
 
 /* Default: a subtle fade-in. Respect reduced-motion as a hard contract. */
 @media (prefers-reduced-motion: no-preference) {
-  .confirm-dialog[open] {
+  .confirm-dialog[data-state="open"] {
     animation: confirm-dialog-in var(--duration-fast) var(--easing-standard);
   }
-  .confirm-dialog[open]::backdrop {
+  .confirm-dialog__overlay[data-state="open"] {
     animation: confirm-backdrop-in var(--duration-fast) var(--easing-standard);
   }
   @keyframes confirm-dialog-in {
-    from { opacity: 0; transform: translateY(4px); }
-    to   { opacity: 1; transform: translateY(0); }
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
   @keyframes confirm-backdrop-in {
-    from { opacity: 0; }
-    to   { opacity: 1; }
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
   }
 }
 
@@ -1843,7 +1932,6 @@ a:hover {
   flex-direction: column;
   gap: var(--space-4);
 }
-
 
 .app-card {
   background: var(--surface-card);
@@ -1948,8 +2036,7 @@ a:hover {
   padding: var(--space-3) var(--space-4);
   background: var(--surface-control);
   border: var(--border-width-hairline) solid var(--border-subtle);
-  border-inline-start: var(--border-width-heavy) solid
-    var(--accent-destructive);
+  border-inline-start: var(--border-width-heavy) solid var(--accent-destructive);
   border-radius: var(--radius-card);
 }
 
@@ -2321,7 +2408,8 @@ a:hover {
   font-size: var(--text-md);
   line-height: var(--leading-lg);
   color: var(--text-base-color);
-}.usage__summary strong {
+}
+.usage__summary strong {
   color: var(--text-strong);
   font-weight: var(--weight-lg);
   font-variant-numeric: tabular-nums;
@@ -2368,36 +2456,6 @@ a:hover {
   font-size: var(--text-3xl);
 }
 
-/* Two graphs side by side on a wide canvas (near-term hero + period trend),
-   stacking to one column when the pane is narrow. Not cards — each chart's own
-   visual separates it. */
-.usage-graphs {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  gap: var(--space-6);
-  align-items: start;
-}
-
-/* The explicit timescale label above a graph ("Live · last hour", "This week"). */
-.usage-hero__caption {
-  margin: 0;
-  font-size: var(--text-sm);
-  color: var(--text-muted);
-}
-
-/* ---- Live hero ----
-   NOT a card: the chart's own gradient is the visual. The numbers and the color
-   key both live in the tracker strip above; this section is just the stream. */
-.usage-hero {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-}
-
-.usage-hero__stream {
-  width: 100%;
-}
-
 /* Chart wrapper — the SVG fills its measured width. */
 .usage-chart {
   width: 100%;
@@ -2408,12 +2466,13 @@ a:hover {
   height: auto;
   overflow: visible;
 }
-/* Period-trend empty state. */
+/* Chart empty state — centered in the panel (see rule above). */
 .usage-chart__empty {
   margin: 0;
   padding: var(--space-6) 0;
   font-size: var(--text-sm);
   color: var(--text-muted);
+  text-align: center;
 }
 
 /* ---- Sections (typographic, not cards) ---- */
@@ -2645,9 +2704,15 @@ a:hover {
   background: var(--accent);
   max-width: 100%;
 }
-.usage-provider__quota--warn .usage-provider__quota-fill { background: var(--status-warning); }
-.usage-provider__quota--crit .usage-provider__quota-fill { background: var(--status-error); }
-.usage-provider__quota--unlimited .usage-provider__quota-fill { background: var(--border-strong); }
+.usage-provider__quota--warn .usage-provider__quota-fill {
+  background: var(--status-warning);
+}
+.usage-provider__quota--crit .usage-provider__quota-fill {
+  background: var(--status-error);
+}
+.usage-provider__quota--unlimited .usage-provider__quota-fill {
+  background: var(--border-strong);
+}
 
 /* ---- Detail disclosure (depth layer) ---- */
 .usage__detail {

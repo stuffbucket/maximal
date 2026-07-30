@@ -48,6 +48,28 @@ export const WebSearchStatus = z.object({
 })
 export type WebSearchStatus = z.infer<typeof WebSearchStatus>
 
+/** The upstream Copilot service the proxy is talking to — hosts/URLs only, no
+ *  secrets (consistent with the "presence, never values" rule above). All are
+ *  resolved from the live request-path config in `~/lib/config/api-config`, so
+ *  they reflect exactly where traffic is being sent. `enterprise_domain` and
+ *  `discovered_upstream` are null on the default (non-enterprise / pre-token)
+ *  path. */
+export const CopilotServiceStatus = z.object({
+  /** Resolved upstream Copilot completions host (`copilotBaseUrl`). */
+  upstream_host: z.string(),
+  /** GitHub API base the Copilot token is minted against. */
+  github_api_base_url: z.string(),
+  /** Fully-qualified Copilot token endpoint. */
+  token_endpoint: z.string(),
+  /** Self-hosted GHES domain override, or null when unset. */
+  enterprise_domain: z.string().nullable(),
+  /** Host discovered from the token exchange (`endpoints.api`), or null before
+   *  the first token mint / when not provided. May differ from `upstream_host`
+   *  when an explicit override outranks discovery. */
+  discovered_upstream: z.string().nullable(),
+})
+export type CopilotServiceStatus = z.infer<typeof CopilotServiceStatus>
+
 export const DiagnosticsResponse = z.object({
   version: z.string(),
   source_revision: z.string().nullable(),
@@ -65,6 +87,11 @@ export const DiagnosticsResponse = z.object({
   tokens: TokenStatus,
   rate_limit: RateLimitStatus,
   web_search: WebSearchStatus,
+  /** Resolved Copilot service configuration. Optional across versions: a
+   *  sidecar predating this field (added with the service disclosure) omits
+   *  it, so a newer UI talking to an older running proxy must tolerate its
+   *  absence rather than assume it. The current backend always populates it. */
+  copilot_service: CopilotServiceStatus.optional(),
 })
 export type DiagnosticsResponse = z.infer<typeof DiagnosticsResponse>
 

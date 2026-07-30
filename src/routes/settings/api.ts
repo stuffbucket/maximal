@@ -22,6 +22,12 @@ import { Hono } from "hono"
 
 import { describeExecutor } from "~/debug"
 import {
+  copilotBaseUrl,
+  getCopilotTokenUrl,
+  getEnterpriseDomain,
+  getGitHubApiBaseUrl,
+} from "~/lib/config/api-config"
+import {
   DiagnosticsResponse,
   type DiagnosticsResponse as DiagnosticsResponseT,
   UpdateStatusResponse,
@@ -76,6 +82,13 @@ function buildDiagnostics(): DiagnosticsResponseT {
       wait_when_throttled: state.rateLimitWait,
     },
     web_search: buildWebSearchStatus(),
+    copilot_service: {
+      upstream_host: copilotBaseUrl(state),
+      github_api_base_url: getGitHubApiBaseUrl(),
+      token_endpoint: getCopilotTokenUrl(),
+      enterprise_domain: getEnterpriseDomain(),
+      discovered_upstream: state.copilotApiUrl ?? null,
+    },
   }
 }
 

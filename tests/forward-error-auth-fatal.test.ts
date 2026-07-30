@@ -1,10 +1,16 @@
 /**
- * forwardError's CopilotAuthFatalError branch — degrades NON-DESTRUCTIVELY:
- * drops the live in-memory token, stashes the rejection reason, emits an
- * auth_fatal envelope, and flags the active account needs-reauth — but RETAINS
- * the on-disk credential (it does NOT unlink the token file or remove the
- * account). The old behaviour ran signOut()+unlink here; these tests guard that
- * a transient completion 401 can never delete the saved credential.
+ * forwardError's CopilotAuthFatalError branch. A completion 401/403 is first
+ * run through rearmCopilotAuth (the re-mint discriminator): only a GENUINELY
+ * dead identity degrades. These cases pin the degrade path — they use `gho_`
+ * tokens (used directly as the bearer, so a rejection can't be re-minted → the
+ * re-arm short-circuits to auth_fatal without a network round-trip). The
+ * degrade is NON-DESTRUCTIVE: it drops the live in-memory token, stashes the
+ * rejection reason, emits an auth_fatal envelope, and flags the active account
+ * needs-reauth — but RETAINS the on-disk credential (it does NOT unlink the
+ * token file or remove the account). The old behaviour ran signOut()+unlink
+ * here; these tests guard that a fatal completion 401 can never delete the
+ * saved credential. The recoverable-`ghu_` re-mint path is covered in
+ * tests/auth-controller.test.ts (rearmCopilotAuth).
  *
  * Registry/token paths are isolated to a temp COPILOT_API_HOME by the global
  * test preload (tests/test-setup.ts), so the real registry is never touched. We
@@ -144,16 +150,18 @@ describe("forwardError", () => {
   })
 
   test("CopilotAuthFatalError RETAINS the account — flags needs-reauth, never unlinks or removes", async () => {
-    // Seed an active account in the (temp-isolated) registry.
+    // Seed an active account in the (temp-isolated) registry. A `gho_` token so
+    // the re-mint discriminator short-circuits to auth_fatal (no network) and
+    // we exercise the degrade-retains path deterministically.
     await addAccountToDefaultRegistry(
       makeAccountRecord({
         login: "alice",
         host: "github.com",
-        token: "ghu_seed_credential",
+        token: "gho_seed_credential",
         addedVia: "device-code",
       }),
     )
-    state.githubToken = "ghu_seed_credential"
+    state.githubToken = "gho_seed_credential"
     const { ctx } = makeContextStub()
 
     await forwardError(
@@ -165,7 +173,7 @@ describe("forwardError", () => {
     const key = accountKey("alice", "github.com")
     // The credential is RETAINED — the bug was deleting it here.
     expect(key in reg.accounts).toBe(true)
-    expect(reg.accounts[key].token).toBe("ghu_seed_credential")
+    expect(reg.accounts[key].token).toBe("gho_seed_credential")
     expect(reg.accounts[key].needsReauth).toBe(true)
     expect(reg.accounts[key].lastError?.status).toBe(401)
     // The token file is never unlinked on an upstream rejection.

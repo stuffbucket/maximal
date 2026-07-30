@@ -70,7 +70,7 @@ beforeEach(() => {
     // Never resolves: tests assert on device_code_issued / polling state
     // without racing the success path. Tests that need a successful poll
     // re-inject locally.
-    pollAccessToken: () => new Promise<string>(() => {}),
+    pollAccessToken: () => new Promise<never>(() => {}),
     addAccount: () => Promise.resolve(),
   })
   state.githubToken = undefined

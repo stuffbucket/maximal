@@ -17,7 +17,7 @@ import {
   debugJsonTail,
 } from "~/lib/platform/logger"
 import { generateRequestIdFromPayload, getUUID } from "~/lib/platform/utils"
-import { state } from "~/lib/runtime-state/state"
+import { modelsCached, state } from "~/lib/runtime-state/state"
 import {
   createCopilotTokenUsageRecorder,
   normalizeResponsesUsage,
@@ -62,6 +62,36 @@ const logger = createHandlerLogger("responses-handler")
 
 const RESPONSES_ENDPOINT = "/responses"
 
+/** Response for a model that can't use the /responses endpoint. Distinguishes
+ *  a genuinely-unsupported model (400) from an empty/never-loaded catalog we
+ *  simply can't answer for yet (503 transient — the stale-refresh middleware
+ *  already kicked a background prime for this request), so we don't mislead the
+ *  client into thinking the model is unsupported during a boot/mint blip. */
+function responsesUnavailableForModel(c: Context) {
+  if (modelsCached() === 0) {
+    return c.json(
+      {
+        error: {
+          message:
+            "The model catalog is still loading; retry this request shortly.",
+          type: "server_error",
+        },
+      },
+      503,
+    )
+  }
+  return c.json(
+    {
+      error: {
+        message:
+          "This model does not support the responses endpoint. Please choose a different model.",
+        type: "invalid_request_error",
+      },
+    },
+    400,
+  )
+}
+
 export const handleResponses = async (c: Context) => {
   await checkRateLimit(state)
 
@@ -98,16 +128,7 @@ export const handleResponses = async (c: Context) => {
     selectedModel?.supported_endpoints?.includes(RESPONSES_ENDPOINT) ?? false
 
   if (!supportsResponses) {
-    return c.json(
-      {
-        error: {
-          message:
-            "This model does not support the responses endpoint. Please choose a different model.",
-          type: "invalid_request_error",
-        },
-      },
-      400,
-    )
+    return responsesUnavailableForModel(c)
   }
 
   applyResponsesApiContextManagement(
