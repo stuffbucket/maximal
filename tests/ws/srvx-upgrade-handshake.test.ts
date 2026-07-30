@@ -11,26 +11,26 @@ import {
 } from "~/routes/ws/route"
 
 /**
- * THE gate to prove first (spec §1.3, §10 "WS real-port handshake"): srvx's
- * fetch-wrapper must tolerate the `undefined` return after `server.upgrade()`. If
- * it coerces that to a `Response`, the Bun WebSocket handshake silently fails.
+ * THE gate to prove first (spec §1.3, §10 "WS real-port handshake"): the
+ * `/ws` handler's return after `server.upgrade()` must pass through Hono + srvx
+ * + Bun so a genuine WebSocket connects. This is the ONE deliberate real-port
+ * test in the suite (every other test uses Hono's in-memory `app.request()` —
+ * the repo binds no ports): `serve({ port: 0, bun: { websocket } })` gets an
+ * ephemeral port and opens a real socket against it.
  *
- * This is the ONE deliberate real-port test in the suite (every other test uses
- * Hono's in-memory `app.request()` — the repo binds no ports). It uses
- * `serve({ port: 0, bun: { websocket } })` to get an ephemeral port and opens a
- * genuine WebSocket against it. If the gate ever fails, the fallback is a srvx
- * plugin/middleware that upgrades before Hono.
+ * Note the return VALUE is guarded separately, in `ws-upgrade-return.test.ts`:
+ * Bun hijacks the socket during `server.upgrade()`, so this handshake opens
+ * even if Hono then chokes finalizing the return — the coercion of a bare
+ * `undefined` to status 0 (RangeError) is post-hoc and doesn't reach this
+ * client. That sibling unit test asserts the handler returns a real `101`.
  *
- * PROVEN: the `undefined` return after `server.upgrade()` survives Hono + srvx
- * + Bun with no coercion. This runs in the default `bun test` — it no longer
- * needs a gate. It used to conflict with `start-run-server.test.ts`, which
- * mocked srvx via `mock.module("srvx", …)` (a stub that forward-leaks across
- * files per CLAUDE.md and left the live `serve` binding half-rewired). That
- * test now injects its serve stub through a module-local DI seam
- * (`__setServeForTests`) instead of mocking srvx, so the real srvx reaches
- * this file and the two co-run cleanly. Ungating is guarded by the
- * mockModuleLeakGuard eslint rule, which forbids re-introducing
- * `mock.module("srvx", …)`.
+ * It used to conflict with `start-run-server.test.ts`, which mocked srvx via
+ * `mock.module("srvx", …)` (a stub that forward-leaks across files per
+ * CLAUDE.md and left the live `serve` binding half-rewired). That test now
+ * injects its serve stub through a module-local DI seam (`__setServeForTests`)
+ * instead of mocking srvx, so the real srvx reaches this file and the two
+ * co-run cleanly. Ungating is guarded by the mockModuleLeakGuard eslint rule,
+ * which forbids re-introducing `mock.module("srvx", …)`.
  */
 
 const sockets: Array<{ close: () => void }> = []
