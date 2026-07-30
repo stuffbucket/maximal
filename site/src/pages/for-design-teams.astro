@@ -267,11 +267,22 @@ const ogDescription =
         color: var(--text);
       }
 
-      /* Shared elevation so cards pop off the neutral canvas. */
+      /* Shared elevation so cards pop off the neutral canvas. Light mode uses
+         shadow; dark follows the site convention (--shadow-card: none) and lifts
+         with a stronger border instead. */
       .pop {
         box-shadow:
           0 18px 40px -20px rgba(10, 10, 12, 0.35),
           0 4px 12px -6px rgba(10, 10, 12, 0.18);
+      }
+      @media (prefers-color-scheme: dark) {
+        .pop {
+          box-shadow: none;
+          border-color: var(--border-strong);
+        }
+        .dt-cta__btn {
+          box-shadow: none;
+        }
       }
 
       /* ===== Hero ===== */
