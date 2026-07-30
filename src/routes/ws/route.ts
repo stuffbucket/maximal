@@ -98,12 +98,14 @@ export function createWsRoutes(): Hono {
     } catch {
       return c.text("expected a WebSocket upgrade", 426)
     }
-    // THE GATE (proven): on success the handler returns `undefined` and Bun keeps
-    // the upgraded socket. srvx hands this return straight to Bun (no coercion),
-    // so the `undefined` survives Hono's dispatch. The cast only satisfies Hono's
-    // handler-return typing (which expects a Response) — at runtime this is a
-    // genuine `undefined`, which is exactly what Bun requires post-upgrade.
-    if (upgraded) return undefined as unknown as Response
+    // On a successful upgrade Bun has already hijacked the socket and sent the
+    // 101 to the client, so whatever we return here is discarded by Bun. But it
+    // still passes through Hono's dispatch, which finalizes the handler's return
+    // into a Response — and a bare `undefined` finalizes to status 0, which
+    // `new Response()` rejects (RangeError: status must be 101 or 200-599),
+    // logging a spurious error + 500 on every otherwise-fine WS connection.
+    // Return an explicit 101 Response: valid to construct, ignored by Bun.
+    if (upgraded) return new Response(null, { status: 101 })
     return c.text("upgrade failed", 426)
   })
   return app
