@@ -246,7 +246,7 @@ const ogDescription =
         font-optical-sizing: auto;
         font-variation-settings: "SOFT" 30, "opsz" 110;
         font-size: clamp(2.4rem, 6.5vw, 5rem);
-        line-height: 1.0;
+        line-height: 1.12;
         letter-spacing: -0.03em;
         color: var(--text);
         margin: 0;
@@ -256,11 +256,14 @@ const ogDescription =
         color: var(--brand-lit);
       }
       /* The whole first word sits inside the crimson mark — cream Fraunces on a
-         rounded crimson badge, echoing the app icon. box-decoration-break keeps
-         the shape intact if the word ever wraps. */
+         rounded crimson badge, in the brand's wordmark treatment (heavier, WONK,
+         display optical size) so it reads as the maximal mark, not plain
+         headline type. box-decoration-break keeps the shape intact on a wrap. */
       .dt-badge {
         background: var(--brand);
         color: var(--brand-ink);
+        font-weight: 800;
+        font-variation-settings: "SOFT" 30, "WONK" 1, "opsz" 144;
         border-radius: 0.16em;
         padding: 0.04em 0.2em;
         -webkit-box-decoration-break: clone;
