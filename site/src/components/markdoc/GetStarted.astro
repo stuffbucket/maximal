@@ -2,8 +2,6 @@
 // Get started in 3 steps. Step 1 carries the actual download (macOS live,
 // Windows "coming soon"); the standalone download section folded in here.
 // Homebrew + other install options live in the repo README.
-import Paint from "../Paint.astro";
-import Spark from "../Spark.astro";
 import { getDownloadInfo } from "../../lib/downloads";
 
 const { macDmg, winSetup, hasWindows, versionLabel, releasesUrl, repoUrl } =
@@ -18,12 +16,12 @@ const steps = [
   {
     title: "Install maximal",
     body: hasWindows
-      ? "Grab the app for macOS or Windows; it sits quietly in your menu bar or system tray."
-      : "Grab the macOS app. It sits quietly in your menu bar; Windows is coming soon.",
+      ? "Grab the desktop app for macOS or Windows and open it — it runs quietly in the background."
+      : "Grab the macOS desktop app and open it. Windows is coming soon.",
   },
   {
     title: "Sign in with GitHub",
-    body: "One click connects your existing GitHub Copilot subscription. No new account, no extra cost.",
+    body: "One click connects your GitHub Copilot plan. No new account, no extra cost.",
     shot: {
       src: `${shotBase}/account-signin.png`,
       alt: "maximal's Account panel showing 'Not signed in' with a Sign in to GitHub button.",
@@ -33,10 +31,10 @@ const steps = [
   },
   {
     title: "Pick your tools",
-    body: `Point Claude Code, Codex, opencode, or GitHub Copilot at ${M} and they run on your Copilot models.`,
+    body: `Point Claude Code, Codex, or opencode at ${M}. They run on your Copilot models.`,
     shot: {
       src: `${shotBase}/apps.png`,
-      alt: "maximal's Apps panel with one-click toggles for Claude Code and Claude Desktop pointed at the proxy.",
+      alt: "maximal's Apps panel with one-click toggles for Claude Code and Claude Desktop pointed at maximal.",
       width: 2000,
       height: 1175,
     },
@@ -44,8 +42,7 @@ const steps = [
 ];
 ---
 
-<section id="start" class="card card--indigo card--painted getstarted">
-  <Paint base="#43357f" mode="coat" />
+<section id="start" class="getstarted">
   <header class="getstarted__head">
     <h2>Get started</h2>
     <p class="getstarted__sub">Up and running in three steps.</p>
@@ -86,12 +83,12 @@ const steps = [
                     href={macDmg}
                     rel="noopener"
                   >
-                    <Paint base="#15656f" mode="clearcoat" class="btn-paint" />
-                    <span class="btn-label">
-                      <Spark class="btn-spark" />
-                      <span>macOS</span>
-                    </span>
-                    {versionLabel && <span class="btn-meta" data-version-pill>{versionLabel}</span>}
+                    <span class="btn-label">macOS</span>
+                    {versionLabel && (
+                      <span class="btn-meta" data-version-pill>
+                        {versionLabel}
+                      </span>
+                    )}
                   </a>
                   {hasWindows ? (
                     <a
@@ -100,26 +97,20 @@ const steps = [
                       href={winSetup}
                       rel="noopener"
                     >
-                      <Paint base="#15656f" mode="clearcoat" class="btn-paint" />
-                      <span class="btn-label">
-                        <Spark class="btn-spark" />
-                        <span>Windows</span>
-                      </span>
-                      {versionLabel && <span class="btn-meta" data-version-pill>{versionLabel}</span>}
+                      <span class="btn-label">Windows</span>
+                      {versionLabel && (
+                        <span class="btn-meta" data-version-pill>
+                          {versionLabel}
+                        </span>
+                      )}
                     </a>
                   ) : (
-                    <div class="btn btn--soon" data-os="windows" aria-disabled="true">
-                      <span class="btn-label">
-                        <svg
-                          class="btn-spark"
-                          viewBox="0 0 22 22"
-                          fill="currentColor"
-                          aria-hidden="true"
-                        >
-                          <path d="M11 1 L13 9 L21 11 L13 13 L11 21 L9 13 L1 11 L9 9 Z" />
-                        </svg>
-                        <span>Windows</span>
-                      </span>
+                    <div
+                      class="btn btn--soon"
+                      data-os="windows"
+                      aria-disabled="true"
+                    >
+                      <span class="btn-label">Windows</span>
                       <span class="btn-meta">coming soon</span>
                     </div>
                   )}
@@ -155,7 +146,7 @@ const steps = [
 
   .getstarted__sub {
     font-family: var(--sans);
-    color: var(--text);
+    color: var(--text-muted);
     margin: 0;
     flex-basis: 100%;
   }
@@ -165,7 +156,7 @@ const steps = [
     margin: 0;
     padding: 0;
     display: grid;
-    gap: 1.5rem;
+    gap: 2rem;
   }
 
   .step {
@@ -173,7 +164,7 @@ const steps = [
     grid-template-columns: auto 1fr;
     align-items: start;
     gap: 1.25rem;
-    padding-top: 1.5rem;
+    padding-top: 2rem;
     border-top: 1px solid var(--border);
   }
 
@@ -187,21 +178,21 @@ const steps = [
     font-size: 3rem;
     line-height: 0.9;
     font-weight: 600;
-    color: var(--accent-gold);
+    color: var(--accent);
     font-variant-numeric: lining-nums;
   }
 
   .step__title {
     font-family: var(--sans);
     font-size: 1.15rem;
-    font-weight: 650;
+    font-weight: 600;
     color: var(--text);
     margin: 0.15rem 0 0.4rem;
   }
 
   .step__text {
     font-family: var(--sans);
-    color: var(--text);
+    color: var(--text-body);
     line-height: 1.55;
     margin: 0;
   }
@@ -211,11 +202,11 @@ const steps = [
   }
 
   /* Step screenshots reuse ShowTell's framed-image treatment so the panels
-     read as the same product surface across islands. */
+     read as the same product surface across sections. */
   .step__shot {
     margin: 1rem 0 0;
     max-width: 30rem;
-    border: 1px solid var(--border-strong);
+    border: 1px solid var(--border);
     border-radius: var(--radius);
     overflow: hidden;
     box-shadow: var(--shadow-card);
@@ -230,7 +221,7 @@ const steps = [
   .step__readme {
     margin: 0.7rem 0 0;
     font-size: 0.85rem;
-    color: var(--text);
+    color: var(--text-muted);
   }
 
   @media (max-width: 640px) {
