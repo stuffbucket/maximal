@@ -1,11 +1,5 @@
 /* eslint-disable max-lines -- settings-window orchestrator; splitting into modules is tracked separately, out of scope for lint adoption. */
-import { invoke } from "@tauri-apps/api/core"
-
-import type {
-  AccountSummary,
-  DiagnosticsResponse,
-  UpdateStatusResponse,
-} from "../../src/lib/config/settings-types"
+import type { AccountSummary } from "../../src/lib/config/settings-types"
 import type { AuthStatus, UpstreamRejection } from "./proxy/client"
 
 import { t } from "./i18n"
@@ -19,6 +13,7 @@ import {
 import { getShellApiKey, openUrl, safeInvoke } from "./tauri/shell"
 import { mountApiClients } from "./ui/islands/api-clients-island"
 import { mountApps } from "./ui/islands/apps-island"
+import { mountDiagnostics } from "./ui/islands/diagnostics-island"
 import { mountModels } from "./ui/islands/models-island"
 import { mountUsage } from "./ui/islands/usage-island"
 import { pickInitialView } from "./view-restore"
@@ -168,7 +163,9 @@ function repaintDynamicI18n(): void {
   renderStaticComposites()
   if (currentAuthStatus) renderAccount(currentAuthStatus)
   if (currentAuthStatus) renderNetworkBanner(currentAuthStatus)
-  if (lastDiagnostics) renderDiagnostics(lastDiagnostics)
+  // Notify React islands (which can't be repainted imperatively) so they
+  // re-render in the new locale too. See shell/src/ui/i18n/useT.ts.
+  globalThis.dispatchEvent(new CustomEvent("maximal:locale-change"))
 }
 
 /**
@@ -182,7 +179,6 @@ function renderStaticComposites(): void {
   renderRequirementCallout()
   renderEndpointHint()
   renderLogsCopy()
-  renderUninstallCopy()
   renderGhReuseSub()
 }
 
@@ -309,24 +305,6 @@ function renderLogsCopy(): void {
   fillWithNode(hint, "logs-where-hint", "tailCmd", monoCode("tail -F"))
 }
 
-/** Uninstall card copy: the intro hint (with a `maximal` <code> token) and the
- *  terminal hint (with a `maximal uninstall` <code> command). */
-function renderUninstallCopy(): void {
-  const hint = document.querySelector<HTMLElement>(
-    '[data-field="uninstall_hint"]',
-  )
-  fillWithNode(hint, "uninstall-hint", "cliName", monoCode("maximal"))
-  const terminal = document.querySelector<HTMLElement>(
-    '[data-field="uninstall_terminal_hint"]',
-  )
-  fillWithNode(
-    terminal,
-    "uninstall-terminal-hint",
-    "uninstallCmd",
-    monoCode("maximal uninstall"),
-  )
-}
-
 function wireLogs(): void {
   // eslint-disable-next-line unicorn/consistent-function-scoping -- kept co-located with its only listener registration.
   const revealLogs = () => {
@@ -378,125 +356,6 @@ async function copyToClipboard(
   } catch (err) {
     console.warn("clipboard.writeText failed:", err)
   }
-}
-
-/** Show or clear the inline, non-blocking error inside the Uninstall card.
- *  Pass null to clear. Mirrors the diagnostics error row. */
-function setUninstallError(message: string | null): void {
-  const row = document.querySelector<HTMLElement>("[data-uninstall-error]")
-  const msg = document.querySelector<HTMLElement>(
-    "[data-uninstall-error-message]",
-  )
-  if (!row || !msg) return
-  if (message === null) {
-    row.hidden = true
-    return
-  }
-  msg.textContent = message
-  row.hidden = false
-}
-
-/**
- * Wire the in-app "Quit Maximal" button (§1.6). A browser tab has no Tauri host
- * to invoke a quit, so POST `/_internal/quit`: the sidecar signals the supervising
- * shell (over stdout) to run its confirm-and-exit. On 202 the shell takes over
- * (its native confirm dialog); a 409 means we're a plain-CLI run with no shell.
- */
-function wireQuit(): void {
-  const btn = document.querySelector<HTMLButtonElement>(
-    '[data-action="quit-maximal"]',
-  )
-  if (!btn) return
-  const err = document.querySelector<HTMLElement>("[data-quit-error]")
-  const showError = (message: string): void => {
-    if (err) {
-      err.textContent = message
-      err.hidden = false
-    }
-    btn.disabled = false
-  }
-  btn.addEventListener("click", () => {
-    btn.disabled = true
-    if (err) err.hidden = true
-    void fetch("/_internal/quit", { method: "POST" }).then(
-      (res) => {
-        // 202 → the shell owns the quit now (confirm dialog + exit); keep the
-        // button disabled. 409 → no supervising shell (plain CLI); other → fail.
-        if (res.status === 409) {
-          showError("Not running under the menu-bar app — nothing to quit.")
-        } else if (!res.ok) {
-          showError(`Quit failed (HTTP ${res.status}).`)
-        }
-      },
-      () => showError("Quit request failed."),
-    )
-  })
-}
-
-/** Wire the in-app "Uninstall Maximal…" button. Reads the two option
- *  checkboxes in the card (not the dialog — neither window.confirm nor the
- *  native dialog supports in-dialog checkboxes), summarizes the choices into a
- *  confirm prompt, then runs the privileged `uninstall_maximal` command.
- *  Mirrors the signOut() shape: confirm → setBusy → invoke → settle. */
-function wireUninstall(): void {
-  const section = document.querySelector('[data-section="diagnostics"]')
-  if (!section) return
-  section
-    .querySelector('[data-action="uninstall-maximal"]')
-    ?.addEventListener("click", () => {
-      void runInAppUninstall()
-    })
-}
-
-async function runInAppUninstall(): Promise<void> {
-  const purge =
-    document.querySelector<HTMLInputElement>("[data-uninstall-purge]")?.checked
-    ?? false
-
-  // The in-app uninstall always runs with --force (the Rust command adds it):
-  // it can't surface the CLI's refuse-while-apps-enabled prompt, so it disables
-  // + reverts every app integration through the registry. So "reverts app
-  // integrations" is always part of the summary, not an opt-in.
-  const clauses = [
-    t("uninstall-clause-cli"),
-    t("uninstall-clause-integrations"),
-  ]
-  if (purge) clauses.push(t("uninstall-clause-purge"))
-  // The connector ("…, and X") is a catalog term, not a hardcoded ", and " —
-  // so a language that joins lists differently can override it.
-  const tail =
-    clauses.length > 1 ?
-      t("uninstall-summary-tail", { last: clauses.pop() ?? "" })
-    : ""
-  const summary = `${clauses.join(", ")}${tail}`
-  const confirmed = globalThis.confirm(t("uninstall-confirm", { summary }))
-  if (!confirmed) return
-
-  setUninstallError(null)
-  setBusy(true, t("common-working"))
-  try {
-    await invoke("uninstall_maximal", { purge })
-    showUninstallComplete()
-  } catch (err) {
-    // Tauri rejects with the Err(String) reason from the Rust command, or a
-    // generic message in plain-browser (app:ui, no Tauri host). Surface it
-    // inline rather than leaving the user with no feedback.
-    console.warn("invoke(uninstall_maximal) failed:", err)
-    setUninstallError(t("uninstall-err", { error: String(err) }))
-  } finally {
-    setBusy(false)
-  }
-}
-
-/** Replace the card body with a calm completion state. No new quit command —
- *  the user quits from the tray and trashes the app from Applications. */
-function showUninstallComplete(): void {
-  const body = document.querySelector<HTMLElement>("[data-uninstall-body]")
-  if (!body) return
-  const done = document.createElement("p")
-  done.className = "card__hint"
-  done.textContent = t("uninstall-complete")
-  body.replaceChildren(done)
 }
 
 function wireEndpoint(): void {
@@ -560,296 +419,6 @@ function applyTheme(): void {
     globalThis.matchMedia
     && globalThis.matchMedia("(prefers-color-scheme: light)").matches
   root.dataset.theme = prefersLight ? "light" : "dark"
-}
-
-// ---- Diagnostics section ---------------------------------------------------
-
-function formatUptime(ms: number): string {
-  const totalSeconds = Math.floor(ms / 1000)
-  const h = Math.floor(totalSeconds / 3600)
-  const m = Math.floor((totalSeconds % 3600) / 60)
-  const s = totalSeconds % 60
-  if (h > 0) return t("diagnostics-uptime-hours", { h, m })
-  if (m > 0) return t("diagnostics-uptime-minutes", { m, s })
-  return t("diagnostics-uptime-seconds", { s })
-}
-
-function formatRateLimit(rl: DiagnosticsResponse["rate_limit"]): string {
-  if (rl.interval_seconds === null) return t("diagnostics-rate-unlimited")
-  const tail =
-    rl.last_request_at ?
-      t("diagnostics-rate-last-request", {
-        time: new Date(rl.last_request_at).toLocaleTimeString(),
-      })
-    : ""
-  const mode =
-    rl.wait_when_throttled ?
-      t("diagnostics-rate-mode-wait")
-    : t("diagnostics-rate-mode-reject")
-  return t("diagnostics-rate-limited", {
-    seconds: rl.interval_seconds,
-    mode,
-    tail,
-  })
-}
-
-function setField(name: string, value: string): void {
-  const el = document.querySelector<HTMLElement>(`[data-field="${name}"]`)
-  if (el) el.textContent = value
-}
-
-function renderDiagnostics(data: DiagnosticsResponse): void {
-  setField("version", data.version)
-  setField("source_revision", data.source_revision ?? t("diagnostics-unknown"))
-  setField("launch_source", formatLaunchSource(data))
-  setField("pid", String(data.pid))
-  setField("uptime", formatUptime(data.uptime_ms))
-  setField("account_type", data.account_type)
-  setField("models_cached", String(data.models_cached))
-  setField("web_search", formatWebSearch(data.web_search))
-  setField("github_copilot_status", deriveGithubCopilotStatus(data.tokens))
-  setField("rate_limit", formatRateLimit(data.rate_limit))
-}
-
-/**
- * Human-readable label for which executor resolves web_search / web_fetch.
- * Maps the executor class to plain language, appending the detail (the
- * /responses model, Ollama host, or no-key note) when present.
- */
-function formatWebSearch(ws: DiagnosticsResponse["web_search"]): string {
-  const labels: Record<string, string> = {
-    CopilotResponsesExecutor: t("diagnostics-web-search-copilot"),
-    OllamaWebExecutor: t("diagnostics-web-search-ollama"),
-    InProcessFetchExecutor: t("diagnostics-web-search-builtin"),
-  }
-  const label = labels[ws.kind] ?? ws.kind
-  return ws.detail ?
-      t("diagnostics-web-search-detail", { label, detail: ws.detail })
-    : label
-}
-
-/**
- * Human-readable launch origin: a short label for the install kind plus
- * the absolute path it ran from. Lets a bug report distinguish a DMG
- * launch from a stray Homebrew or dev-build one at a glance.
- */
-function formatLaunchSource(data: DiagnosticsResponse): string {
-  const labels: Record<DiagnosticsResponse["launch_kind"], string> = {
-    "dmg-app": t("diagnostics-launch-dmg"),
-    homebrew: t("diagnostics-launch-homebrew"),
-    "user-bin": t("diagnostics-launch-user-bin"),
-    dev: t("diagnostics-launch-dev"),
-    other: t("diagnostics-launch-other"),
-  }
-  const label = labels[data.launch_kind]
-  return t("diagnostics-launch-source", { label, path: data.launch_path })
-}
-
-/**
- * Collapse the two underlying booleans into one human-readable status.
- *
- *   github | copilot | status
- *   -------+---------+--------------------------------------------------
- *   true   | true    | "Signed in, ready"
- *   true   | false   | "Token will refresh on first request"
- *   false  | false   | "Not signed in"
- *   false  | true    | "Inconsistent — try signing in again"
- *
- * Wire format keeps both booleans; this derivation is purely a UI
- * concern. Surfacing the inconsistent state (rather than hiding it)
- * gives the user an actionable path when something's off.
- */
-function deriveGithubCopilotStatus(
-  tokens: DiagnosticsResponse["tokens"],
-): string {
-  const gh = tokens.github_token_present
-  const cop = tokens.copilot_token_present
-  if (gh && cop) return t("diagnostics-copilot-ready")
-  if (gh && !cop) return t("diagnostics-copilot-refresh")
-  if (!gh && !cop) return t("diagnostics-copilot-not-signed-in")
-  return t("diagnostics-copilot-inconsistent")
-}
-
-function setDiagnosticsError(message: string | null): void {
-  const banner = document.querySelector<HTMLElement>("[data-diagnostics-error]")
-  const msg = document.querySelector<HTMLElement>("[data-error-message]")
-  if (!banner || !msg) return
-  if (message === null) {
-    banner.hidden = true
-    return
-  }
-  msg.textContent = message
-  banner.hidden = false
-}
-
-let lastDiagnostics: DiagnosticsResponse | null = null
-
-async function loadDiagnostics(): Promise<void> {
-  const root = document.querySelector<HTMLElement>("[data-diagnostics-root]")
-  if (!root) return
-  root.setAttribute("aria-busy", "true")
-  setDiagnosticsError(null)
-  const result = await apiCall({
-    kind: "diagnostics",
-    method: "GET",
-    path: "/settings/api/diagnostics",
-  })
-  root.setAttribute("aria-busy", "false")
-  if (!result.ok) {
-    setDiagnosticsError(t("diagnostics-err-load", { error: result.error }))
-    return
-  }
-  lastDiagnostics = result.data
-  renderDiagnostics(result.data)
-  // Best-effort, independent of the diagnostics fetch: the proxy caches the
-  // GitHub ping for hours, so re-running on each section open is cheap.
-  void loadUpdateStatus()
-}
-
-/** Human "3m ago"-style age from an ISO timestamp; falls back to the raw
- *  string if it can't parse. */
-function relativeTime(iso: string): string {
-  const then = new Date(iso).getTime()
-  if (Number.isNaN(then)) return iso
-  const secs = Math.max(0, Math.round((Date.now() - then) / 1000))
-  if (secs < 60) return t("diagnostics-relative-just-now")
-  const mins = Math.round(secs / 60)
-  if (mins < 60) return t("diagnostics-relative-minutes", { m: mins })
-  const hours = Math.round(mins / 60)
-  if (hours < 24) return t("diagnostics-relative-hours", { h: hours })
-  return t("diagnostics-relative-days", { d: Math.round(hours / 24) })
-}
-
-/**
- * Render both update rows from GET /settings/api/update-status: the "Updates"
- * outcome (what it reports) and the "Update check" health (whether the
- * mechanism is working).
- */
-function renderUpdateStatus(data: UpdateStatusResponse): void {
-  renderUpdateOutcome(data)
-  renderUpdateHealth(data)
-}
-
-/**
- * The "Updates" outcome row. Three shapes: a newer release (offer the mxml.sh
- * link), up to date, or unknown (couldn't resolve a version — the "Update
- * check" row explains why; never claim "up to date" when we couldn't check).
- * The link opens in the system browser via the opener plugin.
- */
-function renderUpdateOutcome(data: UpdateStatusResponse): void {
-  const dd = document.querySelector<HTMLElement>('[data-field="update_status"]')
-  if (!dd) return
-  dd.replaceChildren()
-
-  if (data.update_available && data.latest) {
-    const label = document.createElement("span")
-    label.className = "mono"
-    label.textContent = t("diagnostics-update-newer", { version: data.latest })
-    const link = document.createElement("a")
-    link.href = data.url
-    link.textContent = t("diagnostics-update-get-it")
-    link.addEventListener("click", (ev) => {
-      ev.preventDefault()
-      // In-place self-update (Phase 6): a browser tab can't invoke the updater
-      // plugin, so POST /_internal/upgrade — the sidecar signals the supervising
-      // shell to run the signed download+verify+install+relaunch (its branded
-      // confirm window appears). 202 → the shell owns it now. Anything else (409
-      // plain-CLI / browser-only, or an error) → fall back to the manual
-      // download page, so the action is never a dead end.
-      void fetch("/_internal/upgrade", { method: "POST" }).then(
-        (res) => {
-          if (res.status !== 202) void openExternalUrl(data.url)
-        },
-        () => void openExternalUrl(data.url),
-      )
-    })
-    dd.append(label, link)
-    return
-  }
-
-  const span = document.createElement("span")
-  span.className = "mono"
-  // `latest` known but not newer → genuinely current. Otherwise we couldn't
-  // resolve a version; say "Unknown" rather than imply everything's fine.
-  span.textContent =
-    data.latest ?
-      t("diagnostics-update-up-to-date")
-    : t("diagnostics-update-unknown")
-  dd.append(span)
-}
-
-/**
- * The "Update check" health row — surfaces whether the mechanism is actually
- * working: enabled state, when it last reached the manifest, and the reason for
- * the most recent failure. Makes a silent breakage visible at a glance.
- */
-function renderUpdateHealth(data: UpdateStatusResponse): void {
-  let text: string
-  if (!data.enabled) {
-    text = t("diagnostics-update-check-disabled")
-  } else if (data.last_error) {
-    const when =
-      data.checked_at ?
-        t("diagnostics-update-check-last-ok", {
-          relative: relativeTime(data.checked_at),
-        })
-      : t("diagnostics-update-check-never")
-    text = t("diagnostics-update-check-failed", {
-      error: data.last_error,
-      when,
-    })
-  } else if (data.checked_at) {
-    text = t("diagnostics-update-check-ok", {
-      relative: relativeTime(data.checked_at),
-    })
-  } else {
-    text = t("diagnostics-update-check-checking")
-  }
-  setField("update_check", text)
-}
-
-async function loadUpdateStatus(): Promise<void> {
-  const result = await apiCall({
-    kind: "update-status",
-    method: "GET",
-    path: "/settings/api/update-status",
-  })
-  if (!result.ok) {
-    // Sidecar unreachable — stay quiet, not alarming.
-    setField("update_status", t("diagnostics-update-unknown"))
-    setField("update_check", t("diagnostics-update-check-unavailable"))
-    return
-  }
-  renderUpdateStatus(result.data)
-}
-
-async function copyDiagnosticsAsJson(): Promise<void> {
-  if (!lastDiagnostics) return
-  try {
-    await navigator.clipboard.writeText(
-      JSON.stringify(lastDiagnostics, null, 2),
-    )
-  } catch (err) {
-    console.error("clipboard write failed", err)
-  }
-}
-
-function wireDiagnostics(): void {
-  document
-    .querySelector("[data-diagnostics-retry]")
-    ?.addEventListener("click", () => {
-      void loadDiagnostics()
-    })
-  document
-    .querySelector('[data-action="copy-json"]')
-    ?.addEventListener("click", () => {
-      void copyDiagnosticsAsJson()
-    })
-  document
-    .querySelector('[data-section="diagnostics"] [data-action="reveal-config"]')
-    ?.addEventListener("click", () => {
-      void safeInvoke("reveal_config_dir")
-    })
 }
 
 // ---- Account section -------------------------------------------------------
@@ -2440,14 +2009,12 @@ globalThis.addEventListener("DOMContentLoaded", () => {
   renderStaticComposites()
   wireLocalePicker(repaintDynamicI18n)
   wireLogs()
-  wireDiagnostics()
   wireAccount()
   wireEndpoint()
   wireGeneral()
-  wireUninstall()
-  wireQuit()
   mountApiClients()
   mountApps()
+  mountDiagnostics()
   mountModels()
   mountUsage()
   wireNav()
@@ -2472,7 +2039,6 @@ globalThis.addEventListener("DOMContentLoaded", () => {
   // Open the single page-lifetime live feed (ADR-0019): presence + auth/apps/
   // clients live updates + tray self-close, for the life of the tab.
   openLiveFeed()
-  void loadDiagnostics()
   // The live auth stream is always-on for the window's lifetime: it drives the
   // global network banner on every section (not just Account). The initial SSE
   // snapshot paints the banner without a separate GET. The Account card still
@@ -2491,7 +2057,8 @@ globalThis.addEventListener("DOMContentLoaded", () => {
 globalThis.addEventListener("hashchange", () => {
   syncFromHash()
   const section = readHashSection()
-  if (section === "diagnostics") void loadDiagnostics()
+  if (section === "diagnostics")
+    globalThis.dispatchEvent(new CustomEvent("maximal:diagnostics-refresh"))
   if (section === "general") void loadGeneral()
   if (section === "apps") {
     globalThis.dispatchEvent(new CustomEvent("maximal:apps-refresh"))

@@ -5,7 +5,6 @@ import type { ModelSummary } from "../../../../../src/lib/config/settings-types"
 import { Alert } from "../../components/Alert"
 import { Button } from "../../components/Button"
 import { Disclosure } from "../../components/Disclosure"
-import { Table, Tbody, Td, Th, Thead, Tr } from "../../components/Table"
 import { formatRelativeAge, formatTokensCompact } from "../../format"
 import { useModels } from "./useModels"
 
@@ -61,36 +60,34 @@ function ModelGroup({
         </span>
       }
     >
-      <Table className="models__table">
-        <Thead>
-          <Tr>
-            <Th>Model</Th>
-            <Th>Context</Th>
-            <Th>Max out</Th>
-            <Th>Capabilities</Th>
-          </Tr>
-        </Thead>
-        <Tbody>
-          {models.map((model) => (
-            <Tr key={model.id}>
-              <Td>
-                <span className="models__name">
-                  {model.name}
-                  {model.preview && (
-                    <span className="models__preview">Preview</span>
-                  )}
-                </span>
-                <span className="models__id">{model.id}</span>
-              </Td>
-              <Td>{formatTokensCompact(model.context_window_tokens)}</Td>
-              <Td>{formatTokensCompact(model.max_output_tokens)}</Td>
-              <Td>
-                <CapabilityChips capabilities={model.capabilities} />
-              </Td>
-            </Tr>
-          ))}
-        </Tbody>
-      </Table>
+      <div className="models__grid">
+        {models.map((model) => (
+          <article key={model.id} className="model-card">
+            <div className="model-card__head">
+              <span className="model-card__name">{model.name}</span>
+              {model.preview && (
+                <span className="models__preview">Preview</span>
+              )}
+            </div>
+            <span className="model-card__id">{model.id}</span>
+            <dl className="model-card__stats">
+              <div className="model-card__stat">
+                <dt className="model-card__stat-label">Context</dt>
+                <dd className="model-card__stat-value">
+                  {formatTokensCompact(model.context_window_tokens)}
+                </dd>
+              </div>
+              <div className="model-card__stat">
+                <dt className="model-card__stat-label">Max out</dt>
+                <dd className="model-card__stat-value">
+                  {formatTokensCompact(model.max_output_tokens)}
+                </dd>
+              </div>
+            </dl>
+            <CapabilityChips capabilities={model.capabilities} />
+          </article>
+        ))}
+      </div>
     </Disclosure>
   )
 }

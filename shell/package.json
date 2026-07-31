@@ -12,6 +12,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@radix-ui/react-alert-dialog": "^1.1.23",
     "@tauri-apps/api": "^2",
     "@visx/axis": "^4.0.0",
     "@visx/gradient": "^4.0.0",
