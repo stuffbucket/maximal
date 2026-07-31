@@ -1,6 +1,4 @@
-See [CLAUDE.md](./CLAUDE.md).
+Read [CLAUDE.md](./CLAUDE.md).
 
-This pointer exists so non-Claude tools (Cursor, opencode, Aider, etc.)
-that follow the [agents.md](https://agents.md) convention pick up the
-same project context Claude Code uses via `CLAUDE.md`. One source of
-truth; no drift.
+Every tool that follows the [agents.md](https://agents.md) convention reads
+this file. Put all project context in `CLAUDE.md`. Do not add content here.
