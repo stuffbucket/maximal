@@ -1,0 +1,208 @@
+---
+// "Star on GitHub" widget — a floating, glass pill pinned top-right of the
+// landing page. A single tasteful CTA: a bronze star mark, a "Star" label, and
+// the live star count.
+//
+// Design alignment (site global.css tokens):
+//   - The pill CONTAINER borrows the dock's glass treatment (translucent
+//     --surface + backdrop blur, 1px --border-strong, --shadow-card) so it reads
+//     as the same material as the rest of the chrome, in both light + dark.
+//   - --accent is the interactive accent (the star, the hover border + lift, the
+//     focus ring) — the same token every button uses. The brand hues stay
+//     reserved for the section/identity ornaments; this widget never touches
+//     them.
+//   - --radius-pill for the rounded-full shape; count in --mono + tabular-nums.
+//   - :focus-visible only, one canonical 2px --accent ring, offset 2px.
+//   - Motion is a 1px hover lift @ 150ms ease-out, killed under
+//     prefers-reduced-motion.
+//
+// Starring: a styled <a> to the repo rather than GitHub's official
+// buttons.github.io iframe. The iframe ships a fixed black-pill style that can't
+// be tokenised to maximal's palette and adds an external request, which clashes
+// with this site's self-hosted, no-external-request posture (see global.css
+// fonts note). The anchor lands the visitor on the repo where one click stars.
+//
+// Count: fetched at BUILD time (lib/stars.ts, memoized, never throws). When the
+// build-time fetch fails (offline CI, rate limit), the count is simply omitted
+// and the inline refresh below fills it in the browser — the count is a soft
+// enhancement, never a build blocker.
+import { getStarCount, formatStarCount } from "../lib/stars";
+
+const REPO = "stuffbucket/maximal";
+const REPO_URL = `https://github.com/${REPO}`;
+const API_URL = `https://api.github.com/repos/${REPO}`;
+
+const stars = await getStarCount();
+const starLabel = stars !== null ? formatStarCount(stars) : null;
+---
+
+<a
+  class="star-widget"
+  href={REPO_URL}
+  target="_blank"
+  rel="noopener noreferrer"
+  aria-label="Star maximal on GitHub"
+  data-star-api={API_URL}
+>
+  <svg
+    class="star-widget__icon"
+    width="16"
+    height="16"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.75"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    aria-hidden="true"
+  >
+    <path
+      d="M12 17.27 6.18 21l1.64-7.03L2.5 9.24l7.19-.61L12 2l2.31 6.63 7.19.61-5.32 4.73L17.82 21 12 17.27z"
+    ></path>
+  </svg>
+  <span class="star-widget__label">Star</span>
+  <span
+    class="star-widget__count"
+    data-star-count
+    hidden={starLabel === null}
+    aria-hidden={starLabel === null ? "true" : undefined}>{starLabel}</span
+  >
+</a>
+
+<script is:inline>
+  // Progressive refresh: keep the count live between rebuilds, and fill it in
+  // when the build-time fetch came back empty. Fail-silent — the baked value (or
+  // the countless pill) stays put on any error, so this can never break the UI.
+  (function () {
+    var el = document.querySelector(".star-widget");
+    if (!el) return;
+    var api = el.getAttribute("data-star-api");
+    var slot = el.querySelector("[data-star-count]");
+    if (!api || !slot) return;
+
+    function fmt(n) {
+      if (n < 1000) return String(n);
+      var k = n / 1000;
+      var label =
+        k < 10 ? k.toFixed(1).replace(/\.0$/, "") : Math.round(k).toString();
+      return label + "k";
+    }
+
+    fetch(api, { headers: { Accept: "application/vnd.github+json" } })
+      .then(function (r) {
+        return r.ok ? r.json() : null;
+      })
+      .then(function (data) {
+        if (!data || typeof data.stargazers_count !== "number") return;
+        slot.textContent = fmt(data.stargazers_count);
+        slot.hidden = false;
+        slot.removeAttribute("aria-hidden");
+      })
+      .catch(function () {
+        /* offline / rate-limited — keep the baked state */
+      });
+  })();
+</script>
+
+<style>
+  /* Floating glass pill, pinned top-right and visible without scrolling. Fixed
+     so it stays anchored over the neutral page surface, clear of the centered
+     hero slab. Sits under the bottom dock (z 10) and toasts. */
+  .star-widget {
+    position: fixed;
+    top: 1rem;
+    right: 1.25rem;
+    z-index: 9;
+
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.8rem;
+    min-height: 36px;
+
+    font-family: var(--sans);
+    font-size: 0.9rem;
+    font-weight: 500;
+    line-height: 1;
+    color: var(--text);
+    text-decoration: none;
+
+    /* Same material as the dock: translucent surface + blur. */
+    background: color-mix(in srgb, var(--surface) 90%, transparent);
+    backdrop-filter: blur(16px) saturate(140%);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-pill, 9999px);
+    box-shadow: var(--shadow-card);
+
+    transition:
+      border-color 150ms ease-out,
+      transform 150ms ease-out,
+      color 150ms ease-out;
+  }
+
+  .star-widget:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    transform: translateY(-1px);
+    text-decoration: none;
+  }
+
+  .star-widget:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  /* Bronze star — the interactive accent. Warms to a fill on hover. */
+  .star-widget__icon {
+    flex: 0 0 auto;
+    color: var(--accent);
+    transition: fill 150ms ease-out;
+  }
+  .star-widget:hover .star-widget__icon {
+    fill: var(--accent);
+  }
+
+  .star-widget__label {
+    flex: 0 0 auto;
+  }
+
+  /* Count in mono tabular-nums so the digits don't dance on refresh. */
+  .star-widget__count {
+    flex: 0 0 auto;
+    padding-left: 0.55rem;
+    margin-left: 0.15rem;
+    border-left: 1px solid var(--border);
+    font-family: var(--mono);
+    font-size: 0.82rem;
+    font-weight: 400;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-muted);
+  }
+  .star-widget:hover .star-widget__count {
+    color: var(--accent);
+  }
+  .star-widget__count[hidden] {
+    display: none;
+  }
+
+  /* Tuck in on small screens so it clears the hero wordmark. */
+  @media (max-width: 560px) {
+    .star-widget {
+      top: 0.75rem;
+      right: 0.75rem;
+      padding: 0.35rem 0.7rem;
+      font-size: 0.85rem;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .star-widget,
+    .star-widget__icon {
+      transition: none;
+    }
+    .star-widget:hover {
+      transform: none;
+    }
+  }
+</style>
