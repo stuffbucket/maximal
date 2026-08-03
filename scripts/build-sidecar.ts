@@ -70,7 +70,10 @@ const r = spawnSync(
     `__MAXIMAL_GIT_BRANCH__="${branch}"`,
     "--define",
     `__MAXIMAL_CHANNEL__="${channel}"`,
-    join(REPO, "src/main.ts"),
+    // The engine is now the extracted maximal-core package (serves /control);
+    // the shell's own src/ is UI-only. Compile core's entry, resolving its ~/
+    // aliases via its own tsconfig (walked up from the entry).
+    join(REPO, "shell/node_modules/@stuffbucket/maximal-core/src/main.ts"),
     `--outfile=${outfile}`,
   ],
   { cwd: REPO, stdio: "inherit" },
