@@ -1,6 +1,6 @@
 import { type ReactElement, useCallback, useState } from "react"
 
-import type { ApiKeyEntry } from "../../../../../src/lib/config/settings-types"
+import type { ApiKeyEntry } from "@stuffbucket/maximal-core/settings-types"
 
 import { Alert } from "../../components/Alert"
 import { Button } from "../../components/Button"

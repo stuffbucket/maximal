@@ -3,12 +3,12 @@ import { useCallback, useEffect, useState } from "react"
 import type {
   ModelsListResponse,
   ModelSummary,
-} from "../../../../../src/lib/config/settings-types"
+} from "@stuffbucket/maximal-core/settings-types"
 
 import { apiCall } from "../../../proxy/client"
 
 /**
- * Data hook over `/settings/api/models`. Owns the model list, the
+ * Data hook over `/control/models`. Owns the model list, the
  * cache's `loadedAt` timestamp, loading/error/refreshing state, and a
  * `refresh()` verb that forces an upstream re-fetch.
  *
@@ -47,7 +47,7 @@ export function useModels(): UseModels {
     const result = await apiCall({
       kind: "models-list",
       method: "GET",
-      path: "/settings/api/models",
+      path: "/control/models",
     })
     if (result.ok) {
       applyResult(result.data, { setModels, setLoadedAt })
@@ -78,7 +78,7 @@ export function useModels(): UseModels {
     const result = await apiCall({
       kind: "models-refresh",
       method: "POST",
-      path: "/settings/api/models/refresh",
+      path: "/control/models/refresh",
     })
     if (result.ok) {
       applyResult(result.data, { setModels, setLoadedAt })

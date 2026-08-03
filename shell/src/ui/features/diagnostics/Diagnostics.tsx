@@ -3,7 +3,7 @@ import { type ReactElement, type ReactNode, useState } from "react"
 import type {
   DiagnosticsResponse,
   UpdateStatusResponse,
-} from "../../../../../src/lib/config/settings-types"
+} from "@stuffbucket/maximal-core/settings-types"
 
 import { invokeCommand, openUrl, safeInvoke } from "../../../tauri/shell"
 import { Button } from "../../components/Button"

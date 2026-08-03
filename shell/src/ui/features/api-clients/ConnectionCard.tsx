@@ -6,7 +6,7 @@ import {
   useState,
 } from "react"
 
-import type { ApiKeyEntry } from "../../../../../src/lib/config/settings-types"
+import type { ApiKeyEntry } from "@stuffbucket/maximal-core/settings-types"
 import type { MutationResult } from "./useApiKeys"
 
 import { Button } from "../../components/Button"

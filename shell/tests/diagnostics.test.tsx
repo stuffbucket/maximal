@@ -95,8 +95,8 @@ function updateStatus(): UpdateStatusResponse {
 
 function contentRoutes(): Array<[string, Route]> {
   return [
-    ["/settings/api/update-status", { body: updateStatus() }],
-    ["/settings/api/diagnostics", { body: diagnostics() }],
+    ["/control/update-status", { body: updateStatus() }],
+    ["/control/diagnostics", { body: diagnostics() }],
   ]
 }
 
@@ -143,8 +143,8 @@ describe("Diagnostics island", () => {
   test("shows an error banner + retry when the fetch fails", async () => {
     installInvokeStub()
     stubFetch([
-      ["/settings/api/update-status", { body: updateStatus() }],
-      ["/settings/api/diagnostics", { ok: false, status: 500, body: "boom" }],
+      ["/control/update-status", { body: updateStatus() }],
+      ["/control/diagnostics", { ok: false, status: 500, body: "boom" }],
     ])
     render(<Diagnostics />)
 
@@ -197,8 +197,8 @@ describe("Diagnostics island", () => {
     const legacy = diagnostics() as Partial<DiagnosticsResponse>
     delete legacy.copilot_service
     stubFetch([
-      ["/settings/api/update-status", { body: updateStatus() }],
-      ["/settings/api/diagnostics", { body: legacy }],
+      ["/control/update-status", { body: updateStatus() }],
+      ["/control/diagnostics", { body: legacy }],
     ])
     render(<Diagnostics />)
 

@@ -1,5 +1,5 @@
 /* eslint-disable max-lines -- settings-window orchestrator; splitting into modules is tracked separately, out of scope for lint adoption. */
-import type { AccountSummary } from "../../src/lib/config/settings-types"
+import type { AccountSummary } from "@stuffbucket/maximal-core/settings-types"
 import type { AuthStatus, UpstreamRejection } from "./proxy/client"
 
 import { t } from "./i18n"
@@ -1167,7 +1167,7 @@ async function loadAuthStatus(): Promise<void> {
   const result = await apiCall({
     kind: "auth-status",
     method: "GET",
-    path: "/settings/api/auth/github/status",
+    path: "/control/auth",
   })
   if (!result.ok) {
     renderAccount({
@@ -1233,7 +1233,7 @@ async function loadGhAccounts(): Promise<void> {
   const result = await apiCall({
     kind: "gh-status",
     method: "GET",
-    path: "/settings/api/gh/status",
+    path: "/control/gh/status",
   })
   if (
     !result.ok
@@ -1253,7 +1253,7 @@ async function loadGhAccounts(): Promise<void> {
   const remembered = await apiCall({
     kind: "accounts-list",
     method: "GET",
-    path: "/settings/api/accounts",
+    path: "/control/accounts",
   })
   const rememberedKeys = new Set(
     remembered.ok ? remembered.data.accounts.map((a) => a.key) : [],
@@ -1361,7 +1361,7 @@ async function useGhAccount(button: HTMLElement): Promise<void> {
   const result = await apiCall({
     kind: "gh-use",
     method: "POST",
-    path: "/settings/api/gh/use",
+    path: "/control/gh/use",
     body: { login, host },
   })
 
@@ -1431,7 +1431,7 @@ async function rebootAndAwaitAuth(
     const poll = await apiCall({
       kind: "auth-status",
       method: "GET",
-      path: "/settings/api/auth/github/status",
+      path: "/control/auth",
     })
     if (!poll.ok) {
       sawDown = true // sidecar is restarting
@@ -1493,7 +1493,7 @@ function hideRosterError(mode: AccountRosterMode): void {
 }
 
 /**
- * Populate a roster list from GET /settings/api/accounts. The authenticated
+ * Populate a roster list from GET /control/accounts. The authenticated
  * "roster" excludes the active account (it's the hero); the unauthenticated
  * "remembered" list shows all. Best-effort: any failure / empty list just
  * hides the section, mirroring loadGhAccounts.
@@ -1510,7 +1510,7 @@ async function loadAccounts(mode: AccountRosterMode): Promise<void> {
   const result = await apiCall({
     kind: "accounts-list",
     method: "GET",
-    path: "/settings/api/accounts",
+    path: "/control/accounts",
   })
   let accounts: Array<AccountSummary> = []
   if (result.ok) {
@@ -1583,7 +1583,7 @@ async function switchToAccount(button: HTMLElement): Promise<void> {
   const result = await apiCall({
     kind: "accounts-switch",
     method: "POST",
-    path: "/settings/api/accounts/switch",
+    path: "/control/accounts/switch",
     body: { key },
   })
 
@@ -1648,7 +1648,7 @@ async function forgetAccount(button: HTMLElement): Promise<void> {
   const result = await apiCall({
     kind: "accounts-remove",
     method: "POST",
-    path: "/settings/api/accounts/remove",
+    path: "/control/accounts/remove",
     body: { key },
   })
 
@@ -1675,7 +1675,7 @@ async function pollAuthStatus(): Promise<void> {
   const result = await apiCall({
     kind: "auth-status",
     method: "GET",
-    path: "/settings/api/auth/github/status",
+    path: "/control/auth",
   })
   if (readHashSection() !== "account") {
     // Navigated away mid-request; drop the response.
@@ -1700,7 +1700,7 @@ async function startAuth(): Promise<void> {
   const result = await apiCall({
     kind: "auth-start",
     method: "POST",
-    path: "/settings/api/auth/github/start",
+    path: "/control/auth/start",
   }).finally(() => {
     setBusy(false)
   })
@@ -1726,7 +1726,7 @@ async function cancelAuth(): Promise<void> {
   const result = await apiCall({
     kind: "auth-cancel",
     method: "POST",
-    path: "/settings/api/auth/github/cancel",
+    path: "/control/auth/cancel",
   })
   if (!result.ok) {
     renderAccount({
@@ -1772,7 +1772,7 @@ async function waitForSidecarBack(timeoutMs: number): Promise<void> {
     const poll = await apiCall({
       kind: "auth-status",
       method: "GET",
-      path: "/settings/api/auth/github/status",
+      path: "/control/auth",
     })
     if (!poll.ok) {
       sawDown = true // restarting
@@ -1793,7 +1793,7 @@ async function performSignOut(): Promise<boolean> {
   const result = await apiCall({
     kind: "auth-sign-out",
     method: "POST",
-    path: "/settings/api/auth/github/sign-out",
+    path: "/control/auth/sign-out",
   })
   if (!result.ok) {
     renderAccount({
@@ -1939,7 +1939,7 @@ function wireAccount(): void {
 // ---- General section -------------------------------------------------------
 //
 // The Dock/taskbar-visibility toggle. Two-endpoint contract shared with the
-// other layers: GET/POST /settings/api/ui persists the preference, and the
+// other layers: GET/POST /control/ui persists the preference, and the
 // Tauri command `set_menu_bar_only` applies it to the Dock/taskbar live.
 
 function getMenuBarOnlyEl(): HTMLInputElement | null {
@@ -1950,7 +1950,7 @@ function getMenuBarOnlyEl(): HTMLInputElement | null {
 
 /**
  * Reflect the persisted Dock/taskbar preference in the toggle. Uses the same
- * `x-api-key` auth as every other `/settings/api/*` call (the shell key from
+ * `x-api-key` auth as every other `/control/*` call (the shell key from
  * the Tauri host). Best-effort: on any failure the toggle keeps its default
  * unchecked state.
  */
@@ -1961,12 +1961,12 @@ async function loadGeneral(): Promise<void> {
     const key = await getShellApiKey()
     const headers: Record<string, string> = { accept: "application/json" }
     if (key) headers["x-api-key"] = key
-    const res = await fetch("/settings/api/ui", { headers })
+    const res = await fetch("/control/ui", { headers })
     if (!res.ok) return
     const data = (await res.json()) as { menuBarOnly?: boolean }
     el.checked = Boolean(data.menuBarOnly)
   } catch (err) {
-    console.warn("GET /settings/api/ui failed:", err)
+    console.warn("GET /control/ui failed:", err)
   }
 }
 
@@ -1988,13 +1988,13 @@ function wireGeneral(): void {
           "content-type": "application/json",
         }
         if (key) headers["x-api-key"] = key
-        await fetch("/settings/api/ui", {
+        await fetch("/control/ui", {
           method: "POST",
           headers,
           body: JSON.stringify({ menuBarOnly }),
         })
       } catch (err) {
-        console.warn("POST /settings/api/ui failed:", err)
+        console.warn("POST /control/ui failed:", err)
       }
     })()
   })
@@ -2118,7 +2118,7 @@ function triggerAuthRearm(): void {
   void apiCall({
     kind: "auth-rearm",
     method: "POST",
-    path: "/settings/api/auth/github/rearm",
+    path: "/control/auth/rearm",
   }).then((result) => {
     // If we recovered and the user is looking at the Account tab, reflect it.
     if (result.ok && readHashSection() === "account") void loadAuthStatus()

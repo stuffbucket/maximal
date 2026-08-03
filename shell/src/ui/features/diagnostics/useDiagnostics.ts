@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react"
 import type {
   DiagnosticsResponse,
   UpdateStatusResponse,
-} from "../../../../../src/lib/config/settings-types"
+} from "@stuffbucket/maximal-core/settings-types"
 
 import { apiCall } from "../../../proxy/client"
 
@@ -18,8 +18,8 @@ interface UseDiagnostics {
 }
 
 /**
- * Data hook over `GET /settings/api/diagnostics` (+ the best-effort
- * `/settings/api/update-status`). Mirrors `useApps`: owns loading/error, fetches
+ * Data hook over `GET /control/diagnostics` (+ the best-effort
+ * `/control/update-status`). Mirrors `useApps`: owns loading/error, fetches
  * on mount, and re-fetches on the `maximal:diagnostics-refresh` event main.ts
  * dispatches when the user navigates back to the section. `apiCall` returns a
  * Result and never throws.
@@ -36,7 +36,7 @@ export function useDiagnostics(): UseDiagnostics {
     const result = await apiCall({
       kind: "diagnostics",
       method: "GET",
-      path: "/settings/api/diagnostics",
+      path: "/control/diagnostics",
     })
     if (result.ok) {
       setData(result.data)
@@ -52,7 +52,7 @@ export function useDiagnostics(): UseDiagnostics {
     const upd = await apiCall({
       kind: "update-status",
       method: "GET",
-      path: "/settings/api/update-status",
+      path: "/control/update-status",
     })
     setUpdateStatus(upd.ok ? upd.data : null)
   }, [])
