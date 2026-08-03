@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@radix-ui/react-alert-dialog": "^1.1.23",
-    "@stuffbucket/maximal-core": "file:/Users/brian/github/stuffbucket/maximal-core",
+    "@stuffbucket/maximal-core": "github:stuffbucket/maximal-core#v0.1.0",
     "@tauri-apps/api": "^2",
     "@visx/axis": "^4.0.0",
     "@visx/gradient": "^4.0.0",
