@@ -274,7 +274,7 @@ jobs:
             --define "__MAXIMAL_GIT_SHA__=\"${MAXIMAL_GIT_SHA}\"" \
             --define "__MAXIMAL_GIT_BRANCH__=\"${MAXIMAL_GIT_BRANCH}\"" \
             --define "__MAXIMAL_CHANNEL__=\"${CHANNEL}\"" \
-            src/main.ts --outfile "$OUT"
+            node_modules/@stuffbucket/maximal-core/src/main.ts --outfile "$OUT"
 
       # macOS signing + notarization — DEFERRED. v1 ships unsigned.
       # Flip the `if: false` to a real condition once A4 unblocks

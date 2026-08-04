@@ -94,7 +94,7 @@ jobs:
             --define "__MAXIMAL_GIT_SHA__=\"${MAXIMAL_GIT_SHA}\"" \
             --define "__MAXIMAL_GIT_BRANCH__=\"${MAXIMAL_GIT_BRANCH}\"" \
             --define "__MAXIMAL_CHANNEL__=\"dev\"" \
-            src/main.ts --outfile staging/maximal.exe
+            node_modules/@stuffbucket/maximal-core/src/main.ts --outfile staging/maximal.exe
 
       # Pack as the canonical Stream A artifact name + sha256 so the MSI
       # job's download/verify mirrors the release path exactly.
