@@ -9,7 +9,7 @@
 import type {
   LiveFeedClientMessage,
   LiveFeedServerMessage,
-} from "../../../src/lib/ws/feed-types"
+} from "./feed-types"
 
 /** Structural subset of `sessionStorage` — injected so the core stays DOM-free. */
 export interface StorageLike {

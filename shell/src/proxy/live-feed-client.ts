@@ -21,7 +21,7 @@ import type {
   LiveFeedEvent,
   LiveFeedSnapshot,
   ViewState,
-} from "../../../src/lib/ws/feed-types"
+} from "./feed-types"
 
 import {
   computeBackoffMs,

@@ -11,7 +11,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import type {
   DiagnosticsResponse,
   UpdateStatusResponse,
-} from "../../src/lib/config/settings-types"
+} from "@stuffbucket/maximal-core/settings-types"
 
 import {
   __resetShellBridgeForTests,
