@@ -10,7 +10,7 @@
  * (or a tray open AT a section) and WINS — fresh intent, no scroll restore. Else a
  * present `restoreView` is honored. Else the caller's default, at the top.
  */
-import type { ViewState } from "../../src/lib/ws/feed-types"
+import type { ViewState } from "./proxy/feed-types"
 
 import { isSectionId, type SectionId } from "./router"
 

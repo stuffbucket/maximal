@@ -13,7 +13,7 @@ import { z } from "zod"
 
 // The active-clients wire contract is owned by the shared feed contract
 // (single source of truth for the WS + this fetch client). See feed-types.ts.
-import type { ActiveApiClientsResponse } from "../../../src/lib/ws/feed-types"
+import type { ActiveApiClientsResponse } from "./feed-types"
 
 /**
  * Typed fetch client for the proxy's `/control/*` surface.
@@ -431,7 +431,7 @@ export async function apiCall<K extends EndpointKind>(
   }
 }
 
-export { type ActiveApiClient } from "../../../src/lib/ws/feed-types"
+export { type ActiveApiClient } from "./feed-types"
 export {
   // Apps types now live in settings-types (single source of truth); re-export
   // so shell call sites keep importing them from the client.

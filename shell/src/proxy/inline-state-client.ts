@@ -5,7 +5,7 @@
  * `InlineUiState` (feed-types.ts) — the same object the sidecar's
  * `buildInlineUiState` produces — so the first paint agrees with the first WS frame.
  */
-import type { InlineUiState } from "../../../src/lib/ws/feed-types"
+import type { InlineUiState } from "./feed-types"
 
 /** The subset of `window` the reader needs — just the injected state slot. */
 export interface InlineStateWindow {
