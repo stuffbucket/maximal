@@ -1,9 +1,9 @@
-import { type ReactElement, type ReactNode, useState } from "react"
-
 import type {
   DiagnosticsResponse,
   UpdateStatusResponse,
 } from "@stuffbucket/maximal-core/settings-types"
+
+import { type ReactElement, type ReactNode, useState } from "react"
 
 import { invokeCommand, openUrl, safeInvoke } from "../../../tauri/shell"
 import { Button } from "../../components/Button"

@@ -1,5 +1,6 @@
 /* eslint-disable max-lines -- settings-window orchestrator; splitting into modules is tracked separately, out of scope for lint adoption. */
 import type { AccountSummary } from "@stuffbucket/maximal-core/settings-types"
+
 import type { AuthStatus, UpstreamRejection } from "./proxy/client"
 
 import { t } from "./i18n"

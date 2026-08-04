@@ -1,3 +1,5 @@
+import type { ApiKeyEntry } from "@stuffbucket/maximal-core/settings-types"
+
 import {
   type ReactElement,
   useCallback,
@@ -6,7 +8,6 @@ import {
   useState,
 } from "react"
 
-import type { ApiKeyEntry } from "@stuffbucket/maximal-core/settings-types"
 import type { MutationResult } from "./useApiKeys"
 
 import { Button } from "../../components/Button"

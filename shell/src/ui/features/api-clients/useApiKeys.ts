@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from "react"
-
 import type { ApiKeyEntry } from "@stuffbucket/maximal-core/settings-types"
+
+import { useCallback, useEffect, useState } from "react"
 
 import { apiCall } from "../../../proxy/client"
 import { humanize } from "./humanize"

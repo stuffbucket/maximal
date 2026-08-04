@@ -1,6 +1,5 @@
-import type { ReactElement } from "react"
-
 import type { ModelSummary } from "@stuffbucket/maximal-core/settings-types"
+import type { ReactElement } from "react"
 
 import { Alert } from "../../components/Alert"
 import { Button } from "../../components/Button"

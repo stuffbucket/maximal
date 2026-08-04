@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState } from "react"
-
 import type {
   ModelsListResponse,
   ModelSummary,
 } from "@stuffbucket/maximal-core/settings-types"
+
+import { useCallback, useEffect, useState } from "react"
 
 import { apiCall } from "../../../proxy/client"
 
