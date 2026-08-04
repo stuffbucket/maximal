@@ -6,7 +6,7 @@
 import type {
   DiagnosticsResponse,
   UpdateStatusResponse,
-} from "../../../../../src/lib/config/settings-types"
+} from "@stuffbucket/maximal-core/settings-types"
 
 export type TranslateFn = (
   key: string,

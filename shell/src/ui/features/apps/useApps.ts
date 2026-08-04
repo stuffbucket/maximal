@@ -6,7 +6,7 @@ import { apiCall } from "../../../proxy/client"
 import { humanize } from "../api-clients/humanize"
 
 /**
- * Data hook over `/settings/api/apps`. Owns the list of integrations,
+ * Data hook over `/control/apps`. Owns the list of integrations,
  * loading + error state, and the two mutation verbs the Apps screen needs.
  * Each mutation returns a single fresh `AppEntry` (the contract guarantees
  * this), which we splice back into the list in place — no full reload
@@ -43,7 +43,7 @@ export function useApps(): UseApps {
     const result = await apiCall({
       kind: "apps-list",
       method: "GET",
-      path: "/settings/api/apps",
+      path: "/control/apps",
     })
     if (result.ok) {
       setApps(sortAlpha(result.data.apps))
@@ -80,7 +80,7 @@ export function useApps(): UseApps {
       const result = await apiCall({
         kind: "claude-code-toggle",
         method: "POST",
-        path: "/settings/api/apps/claude-code/toggle",
+        path: "/control/apps/claude-code/toggle",
         body: { enabled },
       })
       if (!result.ok) {
@@ -100,7 +100,7 @@ export function useApps(): UseApps {
       const result = await apiCall({
         kind: "claude-desktop-toggle",
         method: "POST",
-        path: "/settings/api/apps/claude-desktop/toggle",
+        path: "/control/apps/claude-desktop/toggle",
         body: { enabled },
       })
       if (!result.ok) {

@@ -38,7 +38,7 @@ export async function getShellApiKey(): Promise<string | null> {
   // the user's default browser, which has NO Tauri host — so `invoke` throws and
   // the shell key is unreachable that way. The sidecar inlines the SAME shell key
   // as `window.__STATE__.sessionToken`, so read it back for `x-api-key` auth on
-  // the `/settings/api/*` REST calls (the menu-bar toggle, uninstall, …). Without
+  // the `/control/*` REST calls (the menu-bar toggle, uninstall, …). Without
   // this, every such call 401s in a browser tab. Empty token → treat as no key.
   if (!shellKeyCache) {
     shellKeyCache = readInlineState(globalThis)?.sessionToken || null

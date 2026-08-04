@@ -1,12 +1,12 @@
-import { useCallback, useEffect, useState } from "react"
+import type { ApiKeyEntry } from "@stuffbucket/maximal-core/settings-types"
 
-import type { ApiKeyEntry } from "../../../../../src/lib/config/settings-types"
+import { useCallback, useEffect, useState } from "react"
 
 import { apiCall } from "../../../proxy/client"
 import { humanize } from "./humanize"
 
 /**
- * Data hook over `/settings/api/api-keys`. Owns the entries list, the
+ * Data hook over `/control/api-keys`. Owns the entries list, the
  * `enforcing` flag, loading + error state, and the four mutation
  * verbs the UI needs.
  *
@@ -51,7 +51,7 @@ export function useApiKeys(): UseApiKeys {
     const result = await apiCall({
       kind: "api-keys-list",
       method: "GET",
-      path: "/settings/api/api-keys",
+      path: "/control/api-keys",
     })
     if (result.ok) {
       setEntries(result.data.entries)
@@ -72,7 +72,7 @@ export function useApiKeys(): UseApiKeys {
       const result = await apiCall({
         kind: "api-keys-create",
         method: "POST",
-        path: "/settings/api/api-keys",
+        path: "/control/api-keys",
         body: input,
       })
       if (!result.ok) {
@@ -92,7 +92,7 @@ export function useApiKeys(): UseApiKeys {
       const result = await apiCall({
         kind: "api-keys-update",
         method: "PATCH",
-        path: `/settings/api/api-keys/${id}`,
+        path: `/control/api-keys/${id}`,
         body: patch,
       })
       if (!result.ok) {
@@ -111,7 +111,7 @@ export function useApiKeys(): UseApiKeys {
     const result = await apiCall({
       kind: "api-keys-delete",
       method: "DELETE",
-      path: `/settings/api/api-keys/${id}`,
+      path: `/control/api-keys/${id}`,
     })
     if (!result.ok) {
       const message = humanize(result.error)
@@ -128,7 +128,7 @@ export function useApiKeys(): UseApiKeys {
     const result = await apiCall({
       kind: "api-keys-enforce",
       method: "PATCH",
-      path: "/settings/api/api-keys/enforce",
+      path: "/control/api-keys/enforce",
       body: { enforce: next },
     })
     if (!result.ok) {

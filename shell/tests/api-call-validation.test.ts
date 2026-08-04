@@ -55,7 +55,7 @@ describe("apiCall response validation", () => {
   test("passes a well-formed body through", async () => {
     stubJson(validModels())
     const res = await apiCall(
-      { kind: "models-list", method: "GET", path: "/settings/api/models" },
+      { kind: "models-list", method: "GET", path: "/control/models" },
       { apiKey: "test" },
     )
     expect(res.ok).toBe(true)
@@ -67,7 +67,7 @@ describe("apiCall response validation", () => {
     delete bad.count // required by ModelsListResponse
     stubJson(bad)
     const res = await apiCall(
-      { kind: "models-list", method: "GET", path: "/settings/api/models" },
+      { kind: "models-list", method: "GET", path: "/control/models" },
       { apiKey: "test" },
     )
     expect(res.ok).toBe(false)
@@ -81,7 +81,7 @@ describe("apiCall response validation", () => {
     caps.vision = "yes"
     stubJson(bad)
     const res = await apiCall(
-      { kind: "models-list", method: "GET", path: "/settings/api/models" },
+      { kind: "models-list", method: "GET", path: "/control/models" },
       { apiKey: "test" },
     )
     expect(res.ok).toBe(false)
@@ -108,7 +108,7 @@ describe("apiCall response validation", () => {
       // copilot_service deliberately absent — now optional in the schema.
     })
     const res = await apiCall(
-      { kind: "diagnostics", method: "GET", path: "/settings/api/diagnostics" },
+      { kind: "diagnostics", method: "GET", path: "/control/diagnostics" },
       { apiKey: "test" },
     )
     expect(res.ok).toBe(true)

@@ -1,9 +1,3 @@
-import { z } from "zod"
-
-// The active-clients wire contract is owned by the shared feed contract
-// (single source of truth for the WS + this fetch client). See feed-types.ts.
-import type { ActiveApiClientsResponse } from "../../../src/lib/ws/feed-types"
-
 import {
   AccountsListResponse,
   ApiKeyEntry,
@@ -14,11 +8,17 @@ import {
   DiagnosticsResponse,
   ModelsListResponse,
   UpdateStatusResponse,
-} from "../../../src/lib/config/settings-types"
+} from "@stuffbucket/maximal-core/settings-types"
+import { z } from "zod"
+
+// The active-clients wire contract is owned by the shared feed contract
+// (single source of truth for the WS + this fetch client). See feed-types.ts.
+import type { ActiveApiClientsResponse } from "../../../src/lib/ws/feed-types"
+
 /**
- * Typed fetch client for the proxy's `/settings/api/*` surface.
+ * Typed fetch client for the proxy's `/control/*` surface.
  *
- * - All data endpoints are auth-gated (see src/routes/settings/api.ts).
+ * - All data endpoints are auth-gated (see src/routes/control.ts).
  *   The shell pulls its API key from the same Tauri-managed config
  *   the sidecar uses; for now we read it from a global injected by
  *   the Tauri Rust shell (TODO: wire via @tauri-apps/api in a later
@@ -83,13 +83,13 @@ const AccountRemoveResponse = z.object({
   was_active: z.boolean(),
 })
 
-/** `/settings/api/auth/github/rearm` — re-arm outcome plus the fresh status. */
+/** `/control/auth/rearm` — re-arm outcome plus the fresh status. */
 const AuthRearmResponse = z.object({
   outcome: z.enum(["online", "auth_fatal", "offline"]),
   status: AuthStatus,
 })
 
-/** `/settings/api/clients` — inline `{ clients, total }` snapshot. The wire
+/** `/control/clients` — inline `{ clients, total }` snapshot. The wire
  *  type is owned by feed-types (no zod schema there yet); this mirrors it so
  *  the fetch path validates the same shape the WS feed delivers. */
 const ActiveApiClientsResponseSchema = z.object({
@@ -106,7 +106,7 @@ const ActiveApiClientsResponseSchema = z.object({
 
 // Apps integrations (Claude Code, Claude Desktop, Copilot CLI) reuse the
 // authoritative, backend-validated schemas from settings-types — the same
-// schemas the proxy's /settings/api/apps route validates its responses
+// schemas the proxy's /control/apps route validates its responses
 // against — so there is a single source of truth, not a hand-kept mirror.
 export type AppId = AppEntry["id"]
 export type AppKind = AppEntry["kind"]
@@ -122,124 +122,124 @@ type Endpoint =
   | {
       kind: "diagnostics"
       method: "GET"
-      path: "/settings/api/diagnostics"
+      path: "/control/diagnostics"
     }
   | {
       kind: "update-status"
       method: "GET"
-      path: "/settings/api/update-status"
+      path: "/control/update-status"
     }
   | {
       kind: "auth-status"
       method: "GET"
-      path: "/settings/api/auth/github/status"
+      path: "/control/auth"
     }
   | {
       kind: "auth-start"
       method: "POST"
-      path: "/settings/api/auth/github/start"
+      path: "/control/auth/start"
     }
   | {
       kind: "auth-sign-out"
       method: "POST"
-      path: "/settings/api/auth/github/sign-out"
+      path: "/control/auth/sign-out"
     }
   | {
       kind: "auth-cancel"
       method: "POST"
-      path: "/settings/api/auth/github/cancel"
+      path: "/control/auth/cancel"
     }
   | {
       kind: "auth-rearm"
       method: "POST"
-      path: "/settings/api/auth/github/rearm"
+      path: "/control/auth/rearm"
     }
   | {
       kind: "gh-status"
       method: "GET"
-      path: "/settings/api/gh/status"
+      path: "/control/gh/status"
     }
   | {
       kind: "gh-use"
       method: "POST"
-      path: "/settings/api/gh/use"
+      path: "/control/gh/use"
       body: { login: string; host: string }
     }
   | {
       kind: "accounts-list"
       method: "GET"
-      path: "/settings/api/accounts"
+      path: "/control/accounts"
     }
   | {
       kind: "accounts-switch"
       method: "POST"
-      path: "/settings/api/accounts/switch"
+      path: "/control/accounts/switch"
       body: { key: string }
     }
   | {
       kind: "accounts-remove"
       method: "POST"
-      path: "/settings/api/accounts/remove"
+      path: "/control/accounts/remove"
       body: { key: string }
     }
   | {
       kind: "api-keys-list"
       method: "GET"
-      path: "/settings/api/api-keys"
+      path: "/control/api-keys"
     }
   | {
       kind: "api-keys-create"
       method: "POST"
-      path: "/settings/api/api-keys"
+      path: "/control/api-keys"
       body: { label: string; key?: string; enabled?: boolean }
     }
   | {
       kind: "api-keys-update"
       method: "PATCH"
-      path: `/settings/api/api-keys/${string}`
+      path: `/control/api-keys/${string}`
       body: { label?: string; key?: string; enabled?: boolean }
     }
   | {
       kind: "api-keys-delete"
       method: "DELETE"
-      path: `/settings/api/api-keys/${string}`
+      path: `/control/api-keys/${string}`
     }
   | {
       kind: "api-keys-enforce"
       method: "PATCH"
-      path: "/settings/api/api-keys/enforce"
+      path: "/control/api-keys/enforce"
       body: { enforce: boolean }
     }
   | {
       kind: "active-clients"
       method: "GET"
-      path: `/settings/api/clients?maxAgeSeconds=${number}`
+      path: `/control/clients?maxAgeSeconds=${number}`
     }
   | {
       kind: "apps-list"
       method: "GET"
-      path: "/settings/api/apps"
+      path: "/control/apps"
     }
   | {
       kind: "models-list"
       method: "GET"
-      path: "/settings/api/models"
+      path: "/control/models"
     }
   | {
       kind: "models-refresh"
       method: "POST"
-      path: "/settings/api/models/refresh"
+      path: "/control/models/refresh"
     }
   | {
       kind: "claude-code-toggle"
       method: "POST"
-      path: "/settings/api/apps/claude-code/toggle"
+      path: "/control/apps/claude-code/toggle"
       body: { enabled: boolean }
     }
   | {
       kind: "claude-desktop-toggle"
       method: "POST"
-      path: "/settings/api/apps/claude-desktop/toggle"
+      path: "/control/apps/claude-desktop/toggle"
       body: { enabled: boolean }
     }
 
@@ -280,7 +280,7 @@ interface ResponseFor {
  * won't typecheck until it declares its schema here.
  *
  * The settings-types schemas are the *same* objects the proxy validates its
- * responses against (see src/routes/settings/api.ts, apps.ts), so they can't
+ * responses against (see src/routes/control.ts, apps.ts), so they can't
  * drift from the wire; the handful of small local schemas above mirror the
  * routes that have no shared schema yet.
  */
@@ -431,6 +431,7 @@ export async function apiCall<K extends EndpointKind>(
   }
 }
 
+export { type ActiveApiClient } from "../../../src/lib/ws/feed-types"
 export {
   // Apps types now live in settings-types (single source of truth); re-export
   // so shell call sites keep importing them from the client.
@@ -440,5 +441,4 @@ export {
   type AppsListResponse,
   type AuthStatus,
   type UpstreamRejection,
-} from "../../../src/lib/config/settings-types"
-export { type ActiveApiClient } from "../../../src/lib/ws/feed-types"
+} from "@stuffbucket/maximal-core/settings-types"
