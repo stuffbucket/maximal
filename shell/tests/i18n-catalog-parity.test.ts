@@ -20,10 +20,10 @@ import { resolve } from "node:path"
  * truth.
  */
 
-const REPO_ROOT = resolve(import.meta.dir, "..")
-const I18N_DIR = resolve(REPO_ROOT, "shell", "src", "i18n")
+const SHELL_ROOT = resolve(import.meta.dir, "..")
+const I18N_DIR = resolve(SHELL_ROOT, "src", "i18n")
 const CATALOG = resolve(I18N_DIR, "en.json")
-const RUST_LIB = resolve(REPO_ROOT, "shell", "src-tauri", "src", "lib.rs")
+const RUST_LIB = resolve(SHELL_ROOT, "src-tauri", "src", "lib.rs")
 
 /**
  * Every locale that ships in the catalog. `en` is the base; the rest resolve
