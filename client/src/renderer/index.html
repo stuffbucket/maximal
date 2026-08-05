@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'" />
+    <title>maximal</title>
+    <style>
+      :root { color-scheme: light dark }
+      body { font: 14px/1.5 ui-sans-serif, system-ui; margin: 0; padding: 24px }
+      h1 { font-size: 15px; margin: 0 0 16px; font-weight: 600 }
+      dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0 0 20px }
+      dt { opacity: .6 }
+      dd { margin: 0; font-variant-numeric: tabular-nums }
+      pre { background: color-mix(in srgb, currentColor 6%, transparent);
+            padding: 10px; border-radius: 6px; font-size: 12px;
+            max-height: 180px; overflow: auto; margin: 0 }
+    </style>
+  </head>
+  <body>
+    <h1>maximal</h1>
+    <dl>
+      <dt>engine</dt><dd id="engine">starting…</dd>
+      <dt>protocol</dt><dd id="protocol">—</dd>
+      <dt>account</dt><dd id="auth">—</dd>
+    </dl>
+    <pre id="boot"></pre>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

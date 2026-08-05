@@ -1,0 +1,21 @@
+{
+  "name": "@stuffbucket/maximal-client",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Electron client for maximal. Supervises the maximal-core sidecar and drives its control plane.",
+  "main": "dist/main.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json && cp src/renderer/index.html dist/renderer/",
+    "start": "bun run build && electron dist/main.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@stuffbucket/maximal-core": "github:stuffbucket/maximal-core#feat/jsonrpc-mcp-control"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "electron": "^33.0.0",
+    "typescript": "^5.6.0"
+  }
+}
