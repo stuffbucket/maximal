@@ -6,6 +6,7 @@
   "main": ".vite/build/main.js",
   "scripts": {
     "build:core": "bun build --compile node_modules/@stuffbucket/maximal-core/src/main.ts --outfile resources/bin/maximal-core",
+    "typecheck": "tsc --noEmit",
     "start": "electron-forge start",
     "package": "electron-forge package"
   },
