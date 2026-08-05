@@ -23,6 +23,12 @@
       "~/*": ["./src/*"]
     }
   },
-  "include": ["src/**/*", "tests/**/*", "eslint.config.js", "tsdown.config.ts"],
+  "include": [
+    "src/**/*",
+    "tests/**/*",
+    "ui/**/*",
+    "eslint.config.js",
+    "tsdown.config.ts"
+  ],
   "exclude": ["node_modules", "dist", "build"]
 }

@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 
-import { app, BrowserWindow, dialog, ipcMain, session, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, session, shell } from 'electron'
 
 import { controlOrigin, killCore, proxyUrl, spawnCore } from './core.js'
 import { runShell } from './shell.js'
@@ -32,6 +32,15 @@ function installCoreCorsShim(origin: string): void {
   })
 }
 
+function installDevelopmentDockIcon(): void {
+  if (app.isPackaged || process.platform !== 'darwin' || !app.dock) return
+
+  const iconPath = join(__dirname, '../../build/icon.png')
+  const icon = nativeImage.createFromPath(iconPath)
+  if (icon.isEmpty()) throw new Error(`Maximal Dock icon is missing or invalid: ${iconPath}`)
+  app.dock.setIcon(icon)
+}
+
 function registerIpc(): void {
   // Bridge = native powers + control-origin injection ONLY. No core-data channels.
   ipcMain.handle('core:origin', () => controlOrigin())
@@ -41,30 +50,49 @@ function registerIpc(): void {
 
 function loadRenderer(win: BrowserWindow): void {
   if (typeof MAIN_WINDOW_VITE_DEV_SERVER_URL !== 'undefined' && MAIN_WINDOW_VITE_DEV_SERVER_URL) {
-    void win.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL)
+    const rendererUrl = new URL(MAIN_WINDOW_VITE_DEV_SERVER_URL)
+    if (process.env.MAXIMAL_RENDERER_PREVIEW === 'workspace') {
+      rendererUrl.searchParams.set('preview', 'workspace')
+    }
+    void win.loadURL(rendererUrl.toString())
   } else {
     void win.loadFile(join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`))
   }
 }
 
 function createWindow(): void {
+  const isMac = process.platform === 'darwin'
   runShell({
     preloadPath: join(__dirname, 'preload.js'),
     title: 'Maximal',
-    width: 760,
-    height: 620,
+    width: 1280,
+    height: 820,
+    minWidth: 880,
+    minHeight: 560,
+    backgroundColor: '#0a0a0a',
+    titleBarStyle: isMac ? 'hiddenInset' : 'hidden',
+    ...(isMac
+      ? { trafficLightPosition: { x: 16, y: 18 } }
+      : {
+          titleBarOverlay: {
+            color: '#0a0a0a',
+            symbolColor: '#f5f5f5',
+            height: 52,
+          },
+        }),
     loadRenderer,
   })
 }
 
 void app.whenReady().then(async () => {
-  registerIpc()
   try {
+    installDevelopmentDockIcon()
+    registerIpc()
     const { controlOrigin: origin, proxyUrl: proxy, port } = await spawnCore()
     installCoreCorsShim(origin)
     console.log(`[maximal-client] core ready — control ${origin}, proxy ${proxy} (port ${port})`)
   } catch (err) {
-    console.error('[maximal-client] core failed to start:', err)
+    console.error('[maximal-client] startup failed:', err)
     dialog.showErrorBox('Maximal could not start', err instanceof Error ? err.message : String(err))
     app.quit()
     return

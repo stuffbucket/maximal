@@ -20,27 +20,25 @@ regressing across design iterations.
   identities; fix the IA, not the type. → [`type.md`](type.md).
 - **Brand crimson on a button, focus ring, link, or active-nav
   affordance.** Brand is identity-only. Interactive surfaces are
-  `--accent` (teal). → [`color.md`](color.md).
+  `--accent` (warm bronze). → [`color.md`](color.md).
 
 ## Tokens & drift
 
 - **Inline raw `px`, `rem`, or `#hex` in a component file *or in a
   design doc.*** Reference a token. Token *values* live in
-  [`theme.ts`](../../shell/src/ui/styles/theme.ts) (the source of
-  truth); `shell/src/ui/styles/tokens.css` is generated from it by
+  [`ui/theme.ts`](../../ui/theme.ts) (the source of truth); both desktop
+  `tokens.css` files are generated from it by
   `scripts/generate-css-tokens.ts`. If no suitable token exists, add
-  it to `theme.ts`, regenerate, and document it in
+  it to `ui/theme.ts`, regenerate, and document it in
   [`tokens.md`](tokens.md) before using it.
-- **Hand-editing a generated file.** Never edit `tokens.css` directly
-  — it is overwritten from `theme.ts`. Change the value in `theme.ts`
+- **Hand-editing a generated file.** Never edit either `tokens.css` directly
+  — both are overwritten from `ui/theme.ts`. Change the value in `ui/theme.ts`
   and regenerate. See [`change-checklists.md`](change-checklists.md) →
   *Changing a token value*.
-- **Re-inlining brand hex in a standalone surface.** `shell/splash.html`
-  still hard-codes brand hex inline (it boots before any bundle loads),
-  making it the last token-consuming surface not fed from `theme.ts`.
-  Keep its `keep in sync` values matched to `theme.ts`, and prefer
-  wiring it to the generator over adding a second inlined surface.
-  Tracked in #352.
+- **Adding an unchecked raw-value mirror.** Pre-bundle shell surfaces cannot
+  import `tokens.css`, and the site uses its own role names. Their explicit
+  mirrors are synchronized and freshness-checked by
+  `scripts/generate-css-tokens.ts`. Add every new mirror to that contract.
 
 ## Known active drift
 
@@ -55,9 +53,8 @@ same generated `tokens.css`, so the two-file divergence the old audit
 table tracked no longer exists — there is no second declaration site to
 drift against.
 
-The one remaining single-source gap is `shell/splash.html` (inlined
-brand hex, above); CI enforcement of token freshness is tracked in
-#352 / #354.
+Generated desktop stylesheets and the explicit standalone/site mirrors are all
+covered by the token freshness gate.
 
 [#343]: https://github.com/stuffbucket/maximal/pull/343
 

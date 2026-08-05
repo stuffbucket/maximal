@@ -1,39 +1,31 @@
 # Layout system
 
-**All token values live in [`shell/src/ui/styles/tokens.css`](../../shell/src/ui/styles/tokens.css).**
-This file describes structure, scope, and which token to reach for —
-never the literal value.
+**All token values live in [`ui/theme.ts`](../../ui/theme.ts).** Generated
+stylesheets expose them to both desktop renderers. This file describes
+structure, scope, and which token to reach for — never the literal value.
 
-## Window sizes
+## Window sizing
 
-Dimensions below are window chrome, not tokens. Single source of truth
-for window sizing is this table — keep `shell/src-tauri/tauri.conf.json`
-and any setup window builder in sync.
+Electron window bounds belong to the client window configuration, not the token
+system. The canonical workspace is resizable with an enforced desktop minimum;
+restore a person's last usable position and size. Singular secondary tasks use
+single-instance windows that re-show and focus rather than duplicate.
 
-| Window     | Default | Min      | Max      | Resizable | Notes |
-|------------|---------|----------|----------|-----------|-------|
-| Setup      | 520×620 | 480×560  | 720×800  | yes       | Single column, vertical scroll on overflow |
-| Dashboard  | 960×720 | 720×560  | 1400×1000| yes       | One scrollable column with sectioned content |
-| Settings   | 880×720 | 720×560  | 1200×900 | yes       | Sidebar + content pane |
+## Grid + panels
 
-Single-instance for all three (re-show + focus the existing window).
-Position: center on first launch, then respect last position.
+**Desktop only — no mobile breakpoint contract.** The workspace may adapt when
+space is constrained, but it does not collapse into a phone layout.
 
-## Grid + columns
+- `--titlebar-height` reserves the renderer's draggable titlebar region.
+- `--panel-width` sizes persistent navigation or inspector panels.
+- `--sidebar-width` remains the legacy settings navigation width.
+- Prose uses `--content-max`; data-dense workspace regions may use
+  `--content-max-wide`.
+- Standard and dense controls use `--control-height` and
+  `--control-height-compact` respectively.
 
-**Desktop only — no responsive breakpoints in v1.** OS enforces min
-size; no mobile fallback.
-
-- **Setup**: single column, content max ~440px, centered.
-- **Dashboard**: single column, content max ~720px, left-aligned,
-  cards full content width.
-- **Settings**: `--sidebar-width` left rail + content pane.
-  Content pane max-width = `--content-max`. Within the pane, form
-  rows use a 33% label / 66% control split.
-
-> Per-pixel column widths are spec, not tokens, because they describe
-> *information architecture* rather than reusable values. If you find
-> yourself reusing one, promote it (e.g., add `--content-max-wide`).
+Promote a repeated structural measurement to `tokens.md` before adding it to
+`ui/theme.ts`; one-off composition remains local to the approved renderer plan.
 
 ## Spacing
 
@@ -60,20 +52,20 @@ Layering — light steps cards forward of base, dark steps the same.
 | `--surface-card` | Cards, sidebar fill |
 | `--surface-control` | Form controls, secondary buttons |
 
-The user-themable accent overrides `--surface-card` deltas. The system
-computes contrast against `--surface-card` (where most text sits) and
-warns when text-on-card drops below WCAG AA. See
-[`color.md`](color.md).
+The shipped themes use fixed, contrast-verified surface deltas. Runtime user
+surface overrides are not yet implemented; their required warning and focus
+validation contract is documented in [`color.md`](color.md).
 
 ## Elevation (3 levels)
 
 | Token | Use |
 |---|---|
 | `--elevation-card` | Cards in **light mode only** (dark mode relies on the surface step) |
-| `--elevation-modal` | Modals |
+| `--elevation-modal` | Legacy modal surfaces |
+| `--elevation-dialog` | Electron dialogs and confirmation layers |
 | `--elevation-tooltip` | Tooltips, popovers |
 
-**Don't add a fourth level.**
+Do not add another elevation role without documenting a distinct z-layer.
 
 ## Radii
 
@@ -81,6 +73,7 @@ warns when text-on-card drops below WCAG AA. See
 |---|---|
 | `--radius-input` | Inputs, buttons |
 | `--radius-card` | Cards, code blocks |
+| `--radius-dialog` | Electron dialogs and confirmation layers |
 | `--radius-chip` | Chips, count badges |
 | `--radius-pill` | Status dots, round/pill badges (text-light only) |
 
@@ -89,7 +82,7 @@ warns when text-on-card drops below WCAG AA. See
 | z-index | Layer |
 |---|---|
 | 0 | Base / card content |
-| 10 | Sticky window header (Settings sidebar's top, Dashboard status strip) |
+| 10 | Desktop titlebar and sticky panel headers |
 | 100 | Dropdowns, popovers, autocomplete results |
 | 200 | Toasts ("Saved", "Copied to clipboard") |
 | 300 | Modals (confirmation dialogs) |

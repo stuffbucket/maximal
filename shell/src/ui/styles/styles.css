@@ -30,9 +30,9 @@ body {
 }
 
 /* Global anchor color. The browser default (#0969da-ish blue) is
-   illegible on --surface-base. --link is a sister cool tone to
-   --accent, theme-flipped in tokens.css to clear WCAG AA on both
-   dark and light surfaces. Per-component selectors below (.nav__item
+   illegible on --surface-base. --link is a distinct cool tone,
+   theme-flipped in tokens.css to clear WCAG AA on both dark and light
+   surfaces. Per-component selectors below (.nav__item
    etc.) override this with their own color where the link role
    doesn't apply. */
 a {
@@ -947,7 +947,7 @@ a:hover {
 }
 
 .upstream-rejection__link-wrap a {
-  color: var(--accent);
+  color: var(--link);
   text-decoration: none;
 }
 
@@ -1173,11 +1173,10 @@ a:hover {
     background-color var(--duration-base) var(--easing-standard);
 }
 
-/* Transient confirmation tint for an action that completed (e.g. the gh-account
-   Refresh settling to "Updated ✓"). Accent, not a status colour — it's
-   interactive feedback, and it crossfades in via the .btn transition above. */
+/* Transient success tint for an action that completed (e.g. the gh-account
+   Refresh settling to "Updated ✓"). It crossfades via the .btn transition. */
 .btn--confirmed {
-  color: var(--accent);
+  color: var(--status-success-fg);
 }
 
 .btn:focus-visible {
@@ -1699,7 +1698,7 @@ a:hover {
 }
 
 .connection-card__key-text.is-copied {
-  color: var(--accent);
+  color: var(--status-success-fg);
 }
 
 .connection-card__enabled {

@@ -3,30 +3,29 @@
 Recipes for common design changes. Following the checklist costs a
 minute; not following one is how the codebase used to end up with two
 different teals named `--accent`. Token values are now single-sourced
-from [`theme.ts`](../../shell/src/ui/styles/theme.ts), which closes
+from [`ui/theme.ts`](../../ui/theme.ts), which closes
 that gap — keep it closed by editing the source, never the generated
 CSS.
 
 ## Token value hygiene (read first)
 
-- **Values are sourced from `shell/src/ui/styles/theme.ts` only** and
-  generated into `shell/src/ui/styles/tokens.css`. Design docs
+- **Values are sourced from `ui/theme.ts` only** and generated into both
+  `shell/src/ui/styles/tokens.css` and
+  `client/src/renderer/styles/tokens.css`. Design docs
   reference tokens by name + purpose, never by value.
 - If a doc shows a value, that's a bug — fix the doc.
 - If you change a value, follow *Changing a token value* below.
 
 ## Changing a token value
 
-1. Edit the value in
-   [`shell/src/ui/styles/theme.ts`](../../shell/src/ui/styles/theme.ts)
-   (the source of truth).
+1. Edit the value in [`ui/theme.ts`](../../ui/theme.ts) (the source of truth).
 2. Regenerate the CSS: `bun run scripts/generate-css-tokens.ts`. Never
    hand-edit `tokens.css` — it is overwritten.
 3. Update the value column in [`tokens.md`](tokens.md) if the value
    appears there.
-4. Search for any inlined raw value the token was supposed to replace:
-   `grep -rn '<old-value>' shell/src shell/splash.html`.
-5. Manually verify the app: `bun run app:ui`.
+4. Search for any inlined raw value the token was supposed to replace across
+   `shell/` and `client/src/renderer/`.
+5. Manually verify the affected legacy shell and Electron client surfaces.
 6. If the change is a color, re-check WCAG AA contrast on both
    surface levels per [`color.md`](color.md).
 
@@ -37,7 +36,7 @@ CSS.
 2. Add the row to [`tokens.md`](tokens.md) **first**, with `Purpose`,
    `Use for`, `Do NOT use for` filled in. A token without a clear
    role is a future drift source.
-3. Declare it in [`theme.ts`](../../shell/src/ui/styles/theme.ts) and
+3. Declare it in [`ui/theme.ts`](../../ui/theme.ts) and
    regenerate (`bun run scripts/generate-css-tokens.ts`).
 4. Use it. Don't inline the value anywhere else.
 
@@ -93,10 +92,10 @@ CSS.
 4. Single-instance behavior: re-show + focus the existing window
    instead of opening another.
 5. Position: center on first launch, then respect last position.
-6. **If standalone embedded HTML:** it can't import `tokens.css`, so
-   any inlined brand hex must be kept in sync with `theme.ts` by hand
-   (this is the `splash.html` gap tracked in #352). Avoid adding a
-   second such surface if the bundled app can serve the need.
+6. **If standalone embedded HTML:** it can't import `tokens.css`, so add each
+   inlined token declaration to the mirror contract in
+   `scripts/generate-css-tokens.ts`. Generation updates it and `--check`
+   enforces freshness. Prefer the bundled app when it can serve the need.
 
 ## Touching `.design-context.md` itself
 

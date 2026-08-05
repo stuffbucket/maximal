@@ -12,7 +12,7 @@
   dependency, even at first paint before any network/font is available.
 
   Raw brand values are inlined (no reliable stylesheet link at boot);
-  they MIRROR shell/src/tokens.css — keep in sync.
+  scripts/generate-css-tokens.ts synchronizes and checks the mirror.
 
   Lifecycle: Rust (shell/src-tauri/src/lib.rs) creates this window on
   launch, emits `splash:ready` when the sidecar goes healthy, then closes
@@ -123,7 +123,7 @@
         .splash,
         .status,
         .hint {
-          transition: opacity 60ms linear;
+          transition: none;
         }
       }
 

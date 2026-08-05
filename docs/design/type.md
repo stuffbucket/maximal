@@ -6,8 +6,7 @@ display tier and the icon share a typographic family. Commissioner
 is the workhorse humanist sans for everything else.
 
 **Ramp: 16px base, 1.2 ratio.** Always reference token names —
-never inline raw pixel/rem values in components. Values live in
-[`shell/src/ui/styles/tokens.css`](../../shell/src/ui/styles/tokens.css); vocabulary in
+never inline raw pixel/rem values in components. Values live in [`ui/theme.ts`](../../ui/theme.ts); vocabulary lives in
 [`tokens.md`](tokens.md).
 
 ## Usage by token name
@@ -47,10 +46,8 @@ from the ramp; don't hand-tune.
 
 ## Mono usage
 
-`var(--font-mono)` is for: code samples (the `curl` block in the
-Dashboard's Connect section), inline API keys, the device code in
-the Setup window's Waiting state, and the numeric tails in the
-Activity feed. **Always `tabular-nums`** when paired with updating
+`var(--font-mono)` is for code samples, inline API keys, device codes,
+file paths, and numeric tails in activity or usage views. **Always `tabular-nums`** when paired with updating
 values so columns don't dance.
 
 ## Lengths and density
@@ -58,10 +55,9 @@ values so columns don't dance.
 - Body text: minimum `--text-base`; never smaller for multi-line prose.
 - Max line length: `65ch` on prose containers. Code/sample blocks
   are exempt and allowed to scroll.
-- Setup and Dashboard windows: prose uses `--text-md` because the
-  column is narrower and the spaces breathe more.
-- Settings: dense form rows use `--text-base` for control labels and
-  values; `--text-sm` for descriptions.
+- Focused onboarding and setup tasks may use `--text-md` lead prose.
+- Dense workspace form rows use `--text-base` for control labels and values;
+  `--text-sm` for descriptions.
 
 ## Numerics
 
@@ -89,7 +85,7 @@ values so columns don't dance.
 
 ## Font loading
 
-Both Fraunces and Commissioner are on Google Fonts. **Production:
-self-host.** The Tauri shell ships WOFF2 files bundled with the Vite
-output so the webview never makes an external request — keeps the
-app working offline and preserves the no-telemetry posture.
+Both Fraunces and Commissioner are self-hosted from `ui/assets/fonts`.
+The Electron renderer resolves them through Vite; the legacy shell build stages
+the same files into its runtime asset location. Neither desktop surface makes an
+external font request, preserving offline operation and the no-telemetry posture.

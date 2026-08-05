@@ -74,6 +74,7 @@ export const radii = {
   input: "6px",
   card: "8px",
   chip: "4px",
+  dialog: "12px",
   pill: "9999px",
 } as const
 
@@ -96,6 +97,7 @@ export const size = {
 export const elevation = {
   card: "0 1px 2px rgb(0 0 0 / 0.06)",
   modal: "0 8px 24px rgb(0 0 0 / 0.18)",
+  dialog: "0 16px 48px rgb(0 0 0 / 0.24)",
   tooltip: "0 2px 6px rgb(0 0 0 / 0.1)",
 } as const
 
@@ -105,8 +107,10 @@ export const brand = {
 } as const
 
 export const accent = {
-  color: "#5198a6", // Used from tokens.css (overriding the drift in usage-viewer)
-  hover: "#63a9b6", // Derived from --accent (#5198a6): a subtle ~10% lighten for hover.
+  // Warm bronze keeps interaction distinct from crimson identity. Both states
+  // clear WCAG AA with the white foreground.
+  color: "#9c6025",
+  hover: "#a56727",
   fg: "#ffffff",
   destructive: "#b32d3f",
   destructiveFg: "#ffffff",
@@ -115,12 +119,18 @@ export const accent = {
 export const status = {
   error: "#ef4444",
   errorFg: "#fca5a5",
+  errorSoft: "color-mix(in srgb, var(--status-error) 12%, var(--surface-card))",
   success: "#22c55e",
   successFg: "#4ade80",
+  successSoft:
+    "color-mix(in srgb, var(--status-success) 12%, var(--surface-card))",
   warning: "#eab308",
   warningFg: "#facc15",
+  warningSoft:
+    "color-mix(in srgb, var(--status-warning) 12%, var(--surface-card))",
   info: "#38bdf8",
   infoFg: "#7dd3fc",
+  infoSoft: "color-mix(in srgb, var(--status-info) 12%, var(--surface-card))",
 } as const
 
 /**
@@ -147,12 +157,12 @@ export const viz = {
 
 export const link = {
   dark: {
-    color: "#7fc1d2",
-    hover: "#a8d8e3",
+    color: "#86adc4",
+    hover: "#a8c8db",
   },
   light: {
-    color: "#2d6470",
-    hover: "#1e5560",
+    color: "#35617a",
+    hover: "#274f66",
   },
 } as const
 
@@ -171,6 +181,10 @@ export const layout = {
   sidebarWidth: "200px",
   contentMax: "640px",
   contentMaxWide: "1040px",
+  titlebarHeight: "52px",
+  panelWidth: "280px",
+  controlHeight: "36px",
+  controlHeightCompact: "28px",
 } as const
 
 export const themes = {
@@ -183,6 +197,10 @@ export const themes = {
     textMuted: "#8a8a8a",
     borderSubtle: "#2a2a2a",
     borderStrong: "#666666",
+    statusErrorFg: status.errorFg,
+    statusSuccessFg: status.successFg,
+    statusWarningFg: status.warningFg,
+    statusInfoFg: status.infoFg,
     link: link.dark.color,
     linkHover: link.dark.hover,
   },
@@ -195,6 +213,10 @@ export const themes = {
     textMuted: "#6a6a6a",
     borderSubtle: "#e5e5e5",
     borderStrong: "#8a8a8a",
+    statusErrorFg: "#b91c1c",
+    statusSuccessFg: "#166534",
+    statusWarningFg: "#854d0e",
+    statusInfoFg: "#075985",
     link: link.light.color,
     linkHover: link.light.hover,
   },

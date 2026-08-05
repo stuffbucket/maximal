@@ -8,6 +8,12 @@ import { defineConfig } from 'vite'
 export default defineConfig({
   root: resolve(import.meta.dirname, 'src/renderer'),
   plugins: [react()],
+  server: {
+    fs: {
+      // Renderer fonts are shared from the repository-level neutral UI assets.
+      allow: [resolve(import.meta.dirname, '..')],
+    },
+  },
   build: {
     outDir: resolve(import.meta.dirname, '.vite/renderer/main_window'),
     emptyOutDir: true,

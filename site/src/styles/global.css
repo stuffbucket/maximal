@@ -1,9 +1,10 @@
 /* maximal landing — restrained, dark-first, app-aligned.
 
    Design direction lives in repo-root DESIGN.md and docs/design/*. This site is
-   hand-aligned to the app's design tokens; the canonical source of those values
-   is shell/src/ui/styles/theme.ts (keep in sync — a shared token pipeline is a
-   possible follow-up). Rules that carry the feeling here:
+   uses site-specific role names mapped to ui/theme.ts. The token generator
+   synchronizes and checks its canonical surface, text, border, brand, accent,
+   and link aliases.
+   Rules that carry the feeling here:
      - type + space carry it; no shaders, no delight-motion.
      - crimson --brand is IDENTITY ONLY (the "m" mark); bronze --accent is every
        interactive surface (buttons, focus, active nav); prose links are a cool
@@ -86,12 +87,13 @@
   --text-body: #2a2a2a;
   --text-muted: #6a6a6a;
   --border: #e5e5e5;
-  --border-strong: #d4d4d4;
+  --border-strong: #8a8a8a;
 
-  /* Bronze — every interactive surface. White ink clears AA on the fill. */
-  --accent: #a86a2c;
-  --accent-hover: #b9803a;
+  /* Canonical bronze for fills/focus; darker site text role clears light surfaces. */
+  --accent: #9c6025;
+  --accent-hover: #a56727;
   --accent-ink: #ffffff;
+  --accent-text: #934f16;
 
   /* Prose links — cool slate-blue, distinct from brand + accent. */
   --link: #35617a;
@@ -113,11 +115,12 @@
     --text-body: #d4d4d4;
     --text-muted: #8a8a8a;
     --border: #2a2a2a;
-    --border-strong: #444444;
+    --border-strong: #666666;
 
-    --accent: #a86a2c;
-    --accent-hover: #bd7d3a;
+    --accent: #9c6025;
+    --accent-hover: #a56727;
     --accent-ink: #ffffff;
+    --accent-text: #c98b4c;
 
     --link: #86adc4;
     --link-hover: #a8c8db;
@@ -478,7 +481,7 @@ pre code {
 
 .btn:hover {
   border-color: var(--accent);
-  color: var(--accent);
+  color: var(--accent-text);
   text-decoration: none;
 }
 
@@ -598,7 +601,7 @@ pre code {
 }
 
 .dock a[aria-current="page"] {
-  color: var(--accent);
+  color: var(--accent-text);
   background: var(--surface-2);
 }
 

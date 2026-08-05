@@ -1,0 +1,57 @@
+:root {
+  --shell-font-display: var(--font-display);
+  --shell-font-body: var(--font-body);
+  --shell-font-mono: var(--font-mono);
+  --shell-font: var(--weight-base) var(--text-sm) / var(--leading-base) var(--font-body);
+
+  --shell-background: var(--surface-card);
+  --shell-canvas: var(--surface-base);
+  --shell-raised: var(--surface-control);
+  --shell-hover: color-mix(in srgb, var(--accent) 10%, transparent);
+  --shell-active: color-mix(in srgb, var(--accent) 18%, transparent);
+  --shell-accent-muted: color-mix(in srgb, var(--accent) 16%, transparent);
+
+  --shell-text: var(--text-strong);
+  --shell-text-muted: var(--text-base-color);
+  --shell-text-subtle: var(--text-muted);
+  --shell-border: var(--border-subtle);
+  --shell-border-strong: var(--border-strong);
+  --shell-accent: var(--accent);
+  --shell-focus: var(--focus-ring-color);
+
+  --shell-space-1: var(--space-1);
+  --shell-space-2: var(--space-2);
+  --shell-space-3: var(--space-3);
+  --shell-space-4: var(--space-4);
+  --shell-titlebar-height: var(--titlebar-height);
+  --shell-control-height: var(--control-height-compact);
+  --shell-radius: var(--radius-input);
+  --shell-radius-small: var(--radius-chip);
+
+  --shell-surface-base: var(--surface-base);
+  --shell-surface-panel: var(--surface-card);
+  --shell-surface-control: var(--surface-control);
+  --shell-text-strong: var(--text-strong);
+  --shell-text-base: var(--text-base-color);
+  --shell-text-muted: var(--text-muted);
+  --shell-border-subtle: var(--border-subtle);
+  --shell-border-strong: var(--border-strong);
+  --shell-accent-hover: var(--accent-hover);
+  --shell-accent-foreground: var(--accent-fg);
+  --shell-link: var(--link);
+  --shell-link-hover: var(--link-hover);
+  --shell-focus-ring: var(--focus-ring);
+  --shell-panel-width: var(--panel-width);
+  --shell-control-height-compact: var(--control-height-compact);
+  --shell-control-radius: var(--radius-input);
+  --shell-dialog-radius: var(--radius-dialog);
+  --shell-dialog-elevation: var(--elevation-dialog);
+  --shell-status-error: var(--status-error);
+  --shell-status-error-soft: var(--status-error-soft);
+  --shell-status-success: var(--status-success);
+  --shell-status-success-soft: var(--status-success-soft);
+  --shell-status-warning: var(--status-warning);
+  --shell-status-warning-soft: var(--status-warning-soft);
+  --shell-status-info: var(--status-info);
+  --shell-status-info-soft: var(--status-info-soft);
+}
