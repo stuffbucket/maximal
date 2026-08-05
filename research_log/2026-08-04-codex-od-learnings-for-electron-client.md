@@ -149,13 +149,7 @@ website when absent. The dependency-free `sandbox:true` preload duplicates chann
 than importing them, keeping the shell's preload free of maximal code (`09-ui-architecture.md §3`,
 `02-electron-desktop-shell.md §5.3b`). `client.osLocale` seeds the fresh i18n when hosted.
 
-**Run/SSE lifecycle (apply only to long streams).** For any long proxied turn: POST→202+id,
-append-only integer-id log + live-client Set, GET does replay-then-subscribe with a dual-sourced
-cursor `Number(Last-Event-ID || ?after || 0)`, and *always emits a terminal frame* so an Electron
-reload never hangs on "done or dropped?". Renderer uses a pure `parseSseFrame` that skips bad-JSON
-frames. SSE hardening: `text/event-stream`, `no-cache,no-transform`, `X-Accel-Buffering:no`,
-single-socket-write per frame, keepalive on an unref'd timer. Skip all of this for small
-synchronous control calls (`13-daemon-http-api.md §5.2`, `09-ui-architecture.md §5.3`).
+**Run/SSE lifecycle — scoped by plane (updated 2026-08-05; see `docs/decisions/0023-control-plane-jsonrpc-over-http-sse.md`).** The `Last-Event-ID` replay-then-subscribe / append-only-log design (`POST→202+id`, dual-sourced cursor `Number(Last-Event-ID || ?after || 0)`) applies **only to `/v1` proxy streams** — OpenAI/Anthropic passthrough, whose SSE semantics are the upstream API's, not ours. The **control-plane feed is stateless SSE-over-JSON-RPC, MCP-aligned**: no `Mcp-Session-Id`, no `Last-Event-ID` resumability (MCP removed both in spec 2026-07-28). On (re)connect the client re-reads current state via `server/discover`/`status` (snapshot-on-connect), then subscribes; a dropped feed is retried as a **fresh POST, never resumed**. Proactive server→client signals are JSON-RPC **notifications** (no `id`, stream stays open); a **response** (`id` + `result`/`error`) is terminal for its request, so an in-flight-request failure closes that stream and is retried as a new POST. There are **no server-initiated JSON-RPC requests** (MCP replaced them with client-driven `input_required`). SSE hardening applies on both planes: `text/event-stream`, `no-cache,no-transform`, `X-Accel-Buffering:no`, single-socket-write per frame, keepalive on an unref'd timer; the renderer uses a pure `parseSseFrame` that skips bad-JSON frames, and *always emits a terminal frame* so an Electron reload never hangs on "done or dropped?". Skip all of this for small synchronous control calls (`13-daemon-http-api.md §5.2`, `09-ui-architecture.md §5.3`). This supersedes the WebSocket feed transport of ADR-0019, whose driver (Tauri browser-tab presence, ADR-0018) the Electron client removes.
 
 **Ephemeral-origin injection.** Because the port is chosen at startup, hand `DAEMON_ORIGIN` to the
 renderer at runtime (via the bridge in prod, dev-server rewrite of `/api,/frames` in dev) so it

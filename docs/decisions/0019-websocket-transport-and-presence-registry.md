@@ -1,7 +1,8 @@
 ---
 id: ADR-0019
 title: WebSocket transport + presence registry (supersedes SSE)
-status: proposed
+status: superseded
+superseded_by: ADR-0023
 date: 2026-07-14
 authors:
   - stuffbucket
@@ -14,6 +15,14 @@ links:
   run_server: src/lib/start/run-server.ts
   shell_lib: shell/src-tauri/src/lib.rs
 ---
+
+> **Superseded by [ADR-0023](0023-control-plane-jsonrpc-over-http-sse.md).**
+> This ADR was *proposed* and never accepted. Its WebSocket choice was driven by
+> Tauri browser-tab delivery (ADR-0018) — a sidecar managing browser tabs it
+> opened, needing client→server presence push + multi-tab fan-out. The Electron
+> client (go-forward line) owns native windows, removing both drivers, so the
+> control plane returns to stateless HTTP+SSE under a JSON-RPC 2.0 (MCP-aligned)
+> contract. See ADR-0023.
 
 # WebSocket transport + presence registry (supersedes SSE)
 
