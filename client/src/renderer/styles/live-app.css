@@ -1,0 +1,111 @@
+.live-app {
+  min-height: 100%;
+  padding: var(--space-6);
+  color: var(--text-base-color);
+  background: var(--surface-base);
+  font-family: var(--font-body);
+  line-height: var(--leading-base);
+}
+
+.live-app h1 {
+  margin: 0 0 var(--space-1);
+  color: var(--text-strong);
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  line-height: var(--leading-2xl);
+}
+
+.live-app p {
+  margin-block: var(--space-3);
+}
+
+.live-app__proxy {
+  margin-top: 0;
+  color: var(--text-muted);
+}
+
+.live-app code,
+.live-app__device-code > strong {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.live-app hr {
+  margin: var(--space-4) 0;
+  border: 0;
+  border-top: var(--border-width-hairline) solid var(--border-subtle);
+}
+
+.live-app__error {
+  color: var(--status-error-fg);
+}
+
+.live-app__device-code {
+  padding: var(--space-4);
+  border: var(--border-width-thin) solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  background: var(--surface-card);
+}
+
+.live-app__device-code p:first-child {
+  margin-top: 0;
+}
+
+.live-app__device-code > strong {
+  color: var(--text-strong);
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-2xl);
+}
+
+.live-app a,
+.live-app__text-action {
+  color: var(--link);
+}
+
+.live-app a:hover,
+.live-app__text-action:hover {
+  color: var(--link-hover);
+}
+
+.live-app__success {
+  color: var(--status-success-fg);
+  font-weight: var(--weight-lg);
+}
+
+.live-app__button,
+.live-app__text-action {
+  font: inherit;
+  cursor: pointer;
+}
+
+.live-app__button {
+  min-height: var(--control-height);
+  padding: var(--space-2) var(--space-4);
+  color: var(--accent-fg);
+  border: var(--border-width-thin) solid var(--accent);
+  border-radius: var(--radius-input);
+  background: var(--accent);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-md);
+}
+
+.live-app__button:hover:not(:disabled) {
+  border-color: var(--accent-hover);
+  background: var(--accent-hover);
+}
+
+.live-app__button:disabled {
+  cursor: default;
+  opacity: var(--opacity-disabled);
+}
+
+.live-app__text-action {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.live-app :is(a, button):focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}

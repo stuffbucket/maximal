@@ -1,7 +1,15 @@
 import { StrictMode, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 
+import 'stuffbucket-electron/renderer/styles.css'
+import './styles/fonts.css'
+import './styles/tokens.css'
+import './styles/shell-adapter.css'
+import './styles/live-app.css'
+import './styles/workspace-preview.css'
+
 import { createCoreClient, type AuthStatus, type CoreClient } from './core-client'
+import { WorkspacePreview } from './preview/WorkspacePreview'
 
 declare global {
   interface Window {
@@ -56,10 +64,10 @@ function App() {
     setBusy(true)
     setError(null)
     try {
-      const s = await client.authStart()
-      setStatus(s)
-      if ('verification_uri' in s && s.verification_uri) {
-        void window.maximal.openExternal(s.verification_uri)
+      const nextStatus = await client.authStart()
+      setStatus(nextStatus)
+      if ('verification_uri' in nextStatus && nextStatus.verification_uri) {
+        void window.maximal.openExternal(nextStatus.verification_uri)
       }
     } catch (err) {
       setError(`Couldn't start sign-in: ${String(err)}`)
@@ -81,26 +89,26 @@ function App() {
   const verify = status && 'verification_uri' in status ? status.verification_uri : undefined
 
   return (
-    <div style={{ fontFamily: 'system-ui, sans-serif', padding: 32, lineHeight: 1.5 }}>
-      <h1 style={{ margin: '0 0 4px' }}>Maximal</h1>
-      <p style={{ color: '#666', marginTop: 0 }}>
+    <main className="live-app" data-theme="light">
+      <h1>Maximal</h1>
+      <p className="live-app__proxy">
         Proxy: <code>{proxy ? `${proxy}/v1` : '…'}</code> — point OpenAI-compatible clients here
       </p>
-      <hr style={{ border: 0, borderTop: '1px solid #eee', margin: '16px 0' }} />
+      <hr />
       <p>
         Status: <strong>{status?.state ?? 'loading…'}</strong>
       </p>
-      {error ? <p style={{ color: '#c5221f' }}>{error}</p> : null}
+      {error ? <p className="live-app__error">{error}</p> : null}
       {inFlow ? (
-        <div style={{ background: '#f6f8fa', padding: 16, borderRadius: 8 }}>
-          <p style={{ margin: '0 0 8px' }}>Enter this code on the GitHub page (opened for you):</p>
-          <p style={{ fontSize: 28, fontWeight: 700, letterSpacing: 2, margin: 0 }}>{code}</p>
+        <section className="live-app__device-code">
+          <p>Enter this code on the GitHub page (opened for you):</p>
+          <strong>{code}</strong>
           {verify ? (
-            <p style={{ margin: '8px 0 0' }}>
+            <p>
               <a
-                href="#"
-                onClick={(e) => {
-                  e.preventDefault()
+                href={verify}
+                onClick={(event) => {
+                  event.preventDefault()
                   void window.maximal.openExternal(verify)
                 }}
               >
@@ -108,40 +116,34 @@ function App() {
               </a>
             </p>
           ) : null}
-        </div>
+        </section>
       ) : null}
       {authed ? (
         <p>
-          <span style={{ color: '#137333', fontWeight: 600 }}>Signed in</span>
+          <span className="live-app__success">Signed in</span>
           {' — '}
-          <a
-            href="#"
-            onClick={(e) => {
-              e.preventDefault()
-              void signOut()
-            }}
-          >
+          <button type="button" className="live-app__text-action" onClick={() => void signOut()}>
             sign out
-          </a>
+          </button>
         </p>
       ) : (
-        <button
-          onClick={() => void signIn()}
-          disabled={busy || !clientRef.current}
-          style={{ padding: '10px 18px', fontSize: 15, cursor: 'pointer' }}
-        >
+        <button type="button" className="live-app__button" onClick={() => void signIn()} disabled={busy || !clientRef.current}>
           {busy ? 'Starting…' : 'Sign in with GitHub'}
         </button>
       )}
-    </div>
+    </main>
   )
 }
 
-const root = document.getElementById('root')
-if (root) {
-  createRoot(root).render(
+const showWorkspacePreview = import.meta.env.DEV
+  && new URLSearchParams(location.search).get('preview') === 'workspace'
+const RendererRoot = showWorkspacePreview ? WorkspacePreview : App
+const container = document.getElementById('root')
+
+if (container) {
+  createRoot(container).render(
     <StrictMode>
-      <App />
+      <RendererRoot />
     </StrictMode>,
   )
 }

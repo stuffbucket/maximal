@@ -15,7 +15,7 @@
   "dependencies": {
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "stuffbucket-electron": "github:stuffbucket/maximal-electron#fe3ca59949c191f86031bc15585855589477e6de",
+    "stuffbucket-electron": "https://codeload.github.com/stuffbucket/maximal-electron/tar.gz/578870ac213d226a91bf6b428e26ebbab74b1c35",
     "zod": "^4.4.3"
   },
   "devDependencies": {

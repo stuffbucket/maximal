@@ -41,18 +41,36 @@ function registerIpc(): void {
 
 function loadRenderer(win: BrowserWindow): void {
   if (typeof MAIN_WINDOW_VITE_DEV_SERVER_URL !== 'undefined' && MAIN_WINDOW_VITE_DEV_SERVER_URL) {
-    void win.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL)
+    const rendererUrl = new URL(MAIN_WINDOW_VITE_DEV_SERVER_URL)
+    if (process.env.MAXIMAL_RENDERER_PREVIEW === 'workspace') {
+      rendererUrl.searchParams.set('preview', 'workspace')
+    }
+    void win.loadURL(rendererUrl.toString())
   } else {
     void win.loadFile(join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`))
   }
 }
 
 function createWindow(): void {
+  const isMac = process.platform === 'darwin'
   runShell({
     preloadPath: join(__dirname, 'preload.js'),
     title: 'Maximal',
-    width: 760,
-    height: 620,
+    width: 1280,
+    height: 820,
+    minWidth: 880,
+    minHeight: 560,
+    backgroundColor: '#0a0a0a',
+    titleBarStyle: isMac ? 'hiddenInset' : 'hidden',
+    ...(isMac
+      ? { trafficLightPosition: { x: 16, y: 18 } }
+      : {
+          titleBarOverlay: {
+            color: '#0a0a0a',
+            symbolColor: '#f5f5f5',
+            height: 52,
+          },
+        }),
     loadRenderer,
   })
 }
