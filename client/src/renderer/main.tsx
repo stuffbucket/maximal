@@ -17,6 +17,7 @@ function App() {
   const [proxy, setProxy] = useState('')
   const [status, setStatus] = useState<AuthStatus | null>(null)
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const clientRef = useRef<CoreClient | null>(null)
 
   useEffect(() => {
@@ -53,12 +54,15 @@ function App() {
     const client = clientRef.current
     if (!client) return
     setBusy(true)
+    setError(null)
     try {
       const s = await client.authStart()
       setStatus(s)
       if ('verification_uri' in s && s.verification_uri) {
         void window.maximal.openExternal(s.verification_uri)
       }
+    } catch (err) {
+      setError(`Couldn't start sign-in: ${String(err)}`)
     } finally {
       setBusy(false)
     }
@@ -86,6 +90,7 @@ function App() {
       <p>
         Status: <strong>{status?.state ?? 'loading…'}</strong>
       </p>
+      {error ? <p style={{ color: '#c5221f' }}>{error}</p> : null}
       {inFlow ? (
         <div style={{ background: '#f6f8fa', padding: 16, borderRadius: 8 }}>
           <p style={{ margin: '0 0 8px' }}>Enter this code on the GitHub page (opened for you):</p>

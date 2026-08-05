@@ -93,12 +93,20 @@ async function startOn(port: number, dataHome: string): Promise<boolean> {
     env: { ...process.env, COPILOT_API_HOME: dataHome, MAXIMAL_MANAGED_BY_ELECTRON: '1' },
   })
   const proc = child
+  let spawnFailed = false
   proc.stdout?.on('data', (b: Buffer) => console.log('[core]', b.toString().trimEnd()))
   proc.stderr?.on('data', (b: Buffer) => console.error('[core]', b.toString().trimEnd()))
   proc.on('exit', (code) => console.log('[core] exited with', code))
+  // Without this, a spawn failure (missing/blocked binary) emits an *unhandled*
+  // 'error' → uncaught exception → the main process crashes. Handle it so we
+  // fail gracefully and the caller can fall back / surface a clean message.
+  proc.on('error', (err) => {
+    spawnFailed = true
+    console.error('[core] spawn failed:', err)
+  })
 
   for (let attempt = 0; attempt < 200; attempt++) {
-    if (proc.exitCode !== null) return false // exited early (port conflict, etc.)
+    if (spawnFailed || proc.exitCode !== null) return false // exited early / never started
     if (await ourCoreServing(base, dataHome, proc.pid, port)) return true
     await new Promise((r) => setTimeout(r, 150))
   }
