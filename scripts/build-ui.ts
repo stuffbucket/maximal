@@ -22,7 +22,7 @@ import { join, resolve } from "node:path";
 
 const REPO = resolve(import.meta.dir, "..");
 const SETTINGS_ENTRY = join(REPO, "shell/ui/settings/index.html");
-const SETTINGS_VENDOR = join(REPO, "shell/ui/settings/vendor");
+const FONT_SOURCE = join(REPO, "ui/assets/fonts");
 const SHELL_DIR = join(REPO, "shell");
 const DIST_ROOT = join(REPO, "shell/dist");
 const DIST = join(DIST_ROOT, "ui");
@@ -48,12 +48,11 @@ async function buildSettings(): Promise<void> {
     for (const log of result.logs) console.error(log);
     throw new Error("settings build failed");
   }
-  // Self-hosted web fonts. The @font-face rules in index.html reference
-  // ./vendor/fonts/*.woff2 with a bare relative URL, which Bun's HTML
-  // bundler leaves untouched (it neither inlines nor rewrites them). Copy
-  // the vendored woff2 verbatim next to the bundle so the webview never
-  // hits a CDN.
-  await cp(SETTINGS_VENDOR, join(SETTINGS_OUT, "vendor"), { recursive: true });
+  // Self-hosted web fonts. The legacy HTML keeps its stable runtime URL while
+  // the source assets live in the neutral ui/ tree shared with the Electron
+  // renderer. Bun leaves the bare relative url() untouched, so stage the fonts
+  // beside the bundle without keeping a duplicate source copy.
+  await cp(FONT_SOURCE, join(SETTINGS_OUT, "vendor/fonts"), { recursive: true });
 }
 
 // Tauri's `frontendDist` (shell/dist) must hold the pre-boot splash it
@@ -73,7 +72,7 @@ async function copyShellChrome(): Promise<void> {
   await mkdir(join(DIST_ROOT, "vendor/fonts"), { recursive: true });
   for (const face of ["fraunces-latin.woff2", "commissioner-latin.woff2"]) {
     await cp(
-      join(SHELL_DIR, "ui/settings/vendor/fonts", face),
+      join(FONT_SOURCE, face),
       join(DIST_ROOT, "vendor/fonts", face),
     );
   }
@@ -107,6 +106,7 @@ if (process.argv.includes("--watch")) {
   };
   watch(join(REPO, "shell/ui"), { recursive: true }, schedule);
   watch(join(REPO, "shell/src"), { recursive: true }, schedule);
+  watch(join(REPO, "ui"), { recursive: true }, schedule);
   // Keep the process alive.
   await new Promise(() => {});
 }

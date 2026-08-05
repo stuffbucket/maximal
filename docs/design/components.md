@@ -8,7 +8,7 @@ exist, this doc is canon — match the spec exactly rather than
 hand-rolling something nearby.
 
 Token values themselves live in
-[`shell/src/ui/styles/tokens.css`](../../shell/src/ui/styles/tokens.css); token vocabulary
+[`ui/theme.ts`](../../ui/theme.ts); token vocabulary
 in [`tokens.md`](tokens.md).
 
 ## Buttons
@@ -71,9 +71,10 @@ in [`tokens.md`](tokens.md).
   `:focus-visible`. Using `:focus` alone is a bug. See
   [`failure-modes.md`](failure-modes.md).
 - Width: `--focus-ring-width` (2px). Offset: `--focus-ring-offset` (2px).
-- Color: `--focus-ring-color` → `--accent`, with contrast fallback
-  to `--text-strong` when accent on the current surface drops below
-  3:1.
+- Color: `--focus-ring-color` → the canonical `--accent`, whose contrast is
+  verified against both surface levels in both themes. Runtime user-accent
+  overrides are not currently shipped; before they are, the application must
+  measure the proposed ring against its surfaces and warn below 3:1.
 - **Identical ring on all focusable elements** — buttons, inputs,
   switches, links, nav items. No special-case ring styles.
 - **One treatment, encoded once.** The ring is a solid outline

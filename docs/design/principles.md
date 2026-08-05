@@ -12,11 +12,11 @@ else in `docs/design/` or any agent's intuition, **these win**.
    clear, and one click away. Advanced controls live one level down
    (collapsible sections, an "Advanced" tab, "Reveal in editor"
    escape hatch).
-3. **Color is the user's, contrast is ours.** Honor user-chosen colors
-   for surface and icon. Always compute and surface contrast for text
-   and controls; warn (don't block) when a combination drops below
-   WCAG AA. The brand mark stays brand-red in the dock and tray —
-   that's identity, not preference.
+3. **Color is the user's, contrast is ours.** When user color controls ship,
+   honor the chosen surface and icon colors while computing contrast for text
+   and controls; warn (don't block) when a combination drops below WCAG AA.
+   The current themes use the canonical verified palette. The brand mark stays
+   brand-red in the dock and tray — that's identity, not preference.
 4. **One humanist accent per window.** The brand "m" or a hand-drawn
    touch appears once per window — to remind the user it was made by
    a person, not on every row. Excess humanism is noise; rationed
@@ -29,24 +29,22 @@ else in `docs/design/` or any agent's intuition, **these win**.
 
 ## Decision log (locked — do not revisit without cause)
 
-Token names below; canonical values in
-[`shell/src/ui/styles/tokens.css`](../../shell/src/ui/styles/tokens.css).
+Token names below; canonical values in [`ui/theme.ts`](../../ui/theme.ts).
 
 - **Crimson `--brand` is brand only.** Rendered "m," hero moments,
   badging. Not for buttons, focus rings, or interactive states.
-- **Teal `--accent` is interactive.** Primary fill, focus ring,
+- **Warm bronze `--accent` is interactive.** Primary fill, focus ring,
   switch "on" state. Distinct from brand so neither role drowns the
   other.
-- **`--link` is a sister cool tone to `--accent`** — same teal family,
-  shifted per theme to clear WCAG AA against both surface levels.
-  Distinct enough that a primary button (accent-filled) and an inline
-  prose link don't read as the same affordance.
+- **Cool slate `--link` is distinct from both warm roles.** It shifts per
+  theme to clear WCAG AA against both surface levels, so a primary button,
+  identity mark, and inline prose link never read as the same affordance.
 - **`--accent-destructive` is crimson-adjacent but NOT the same value
   as `--brand`** — a hair deeper, so it reads as "caution" rather
   than "identity."
-- **Native macOS titlebar is the window identifier.** No duplicate
-  in-window H1 of the window name. The H1 inside the content pane is
-  the *section* name.
+- **The desktop titlebar is the window identifier.** Do not duplicate the
+  app/window name as an in-content H1. Headings inside the content pane
+  identify the current section or task.
 - **Tray icons are colored** (not template) — 22pt viewBox, 44px @2x
   retina. Brand crimson reads on both light and dark menu bars and is
   the one place the brand is allowed to live outside the window.

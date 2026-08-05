@@ -1,0 +1,38 @@
+:root {
+  --shell-font-display: var(--font-display);
+  --shell-font-body: var(--font-body);
+  --shell-font-mono: var(--font-mono);
+
+  --shell-surface-base: var(--surface-base);
+  --shell-surface-panel: var(--surface-card);
+  --shell-surface-control: var(--surface-control);
+  --shell-text-strong: var(--text-strong);
+  --shell-text-base: var(--text-base-color);
+  --shell-text-muted: var(--text-muted);
+  --shell-border-subtle: var(--border-subtle);
+  --shell-border-strong: var(--border-strong);
+
+  --shell-accent: var(--accent);
+  --shell-accent-hover: var(--accent-hover);
+  --shell-accent-foreground: var(--accent-fg);
+  --shell-link: var(--link);
+  --shell-link-hover: var(--link-hover);
+  --shell-focus-ring: var(--focus-ring);
+
+  --shell-titlebar-height: var(--titlebar-height);
+  --shell-panel-width: var(--panel-width);
+  --shell-control-height: var(--control-height);
+  --shell-control-height-compact: var(--control-height-compact);
+  --shell-control-radius: var(--radius-input);
+  --shell-dialog-radius: var(--radius-dialog);
+  --shell-dialog-elevation: var(--elevation-dialog);
+
+  --shell-status-error: var(--status-error);
+  --shell-status-error-soft: var(--status-error-soft);
+  --shell-status-success: var(--status-success);
+  --shell-status-success-soft: var(--status-success-soft);
+  --shell-status-warning: var(--status-warning);
+  --shell-status-warning-soft: var(--status-warning-soft);
+  --shell-status-info: var(--status-info);
+  --shell-status-info-soft: var(--status-info-soft);
+}

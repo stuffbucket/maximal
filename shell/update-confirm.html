@@ -2,7 +2,7 @@
 <!--
   Branded update-confirm surface. Replaces the native OS alert for the tray
   "Upgrade" action with a window that matches the app's design language (dark
-  surface, Fraunces title, teal primary action) — the same self-contained
+  surface, Fraunces title, bronze primary action) — the same self-contained
   webview pattern as splash.html, NOT the hand-rolled modal that once fought a
   load race.
 
@@ -15,9 +15,10 @@
   version. The buttons emit `update:resolve` back to Rust, which drives the
   actual download/verify/install/restart and closes this window.
 
-  Raw brand values are inlined and MIRROR shell/src/ui/styles/tokens.css —
-  keep in sync. Brand crimson is identity-only (the wordmark + a hairline);
-  the interactive primary is --accent (teal), per docs/design/color.md.
+  Raw token values are inlined because this pre-bundle surface cannot import
+  tokens.css. scripts/generate-css-tokens.ts synchronizes and checks every
+  mirrored declaration. Brand crimson is identity-only (the wordmark + a
+  hairline); the interactive primary is --accent (warm bronze).
 -->
 <html lang="en">
   <head>
@@ -46,8 +47,9 @@
         --font-display: "Fraunces", Georgia, "Times New Roman", serif;
         --font-body: "Commissioner", "Segoe UI", Helvetica, Arial, sans-serif;
         --brand: #c8334a; /* identity only — wordmark + hairline */
-        --accent: #5198a6; /* interactive (teal) */
-        --accent-hover: #2dd4bf;
+        --accent: #9c6025; /* interactive (warm bronze) */
+        --accent-hover: #a56727;
+        --accent-fg: #ffffff;
         --surface: #0a0a0a; /* --surface-base */
         --text: #f0e9d6; /* brand cream, used as the near-white ink */
         --text-muted: #8a8a8a; /* --text-muted (dark) */
@@ -143,10 +145,10 @@
       button:disabled {
         opacity: 0.5;
       }
-      /* Primary — teal, the interactive brand-neutral action. */
+      /* Primary — warm bronze, distinct from crimson identity. */
       .primary {
         background: var(--accent);
-        color: #06181c;
+        color: var(--accent-fg);
       }
       .primary:hover:not(:disabled) {
         background: var(--accent-hover);
@@ -169,7 +171,7 @@
       @media (prefers-reduced-motion: reduce) {
         .card,
         button {
-          transition-duration: 60ms;
+          transition: none;
         }
       }
     </style>

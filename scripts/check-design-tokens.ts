@@ -56,9 +56,10 @@ const RULES: Array<Rule> = [
 
 const FILES: Array<string> = [
   "shell/src/ui/styles/styles.css",
-  // Add other CSS files here as the project grows. Skill templates
-  // (.claude/skills/**) are intentionally NOT scanned — they're
-  // reference snippets, not shipped code.
+  "client/src/renderer/styles/fonts.css",
+  "client/src/renderer/styles/shell-adapter.css",
+  // Generated tokens.css files are freshness-checked separately. Skill
+  // templates (.claude/skills/**) are reference snippets, not shipped code.
 ]
 
 const REPO = resolve(import.meta.dir, "..")

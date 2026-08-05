@@ -6,20 +6,17 @@
 > **Provenance.** This file is a synthesized, human-readable snapshot of
 > maximal's design system for setting overall direction and writing agent
 > prompts. **The canonical source of every value is
-> [`shell/src/ui/styles/theme.ts`](shell/src/ui/styles/theme.ts)**, generated into
-> `shell/src/ui/styles/tokens.css`. Component code and the `docs/design/*.md`
+> [`ui/theme.ts`](ui/theme.ts)**, generated into the legacy shell and Electron
+> renderer `tokens.css` files. Component code and the `docs/design/*.md`
 > topic files reference tokens **by name, never by value** — do not inline the
 > hex/px shown here into a component. When values below and `theme.ts` disagree,
 > `theme.ts` wins. The binding rules live in
 > [`docs/design/principles.md`](docs/design/principles.md) and
 > [`.design-context.md`](.design-context.md).
 >
-> **In-flight re-tone (this doc leads source).** The interactive accent is being
-> moved off teal to a **warm bronze**, and prose links flipped to a cool tone —
-> the identity/interaction split is preserved, only the hues change. DESIGN.md
-> records the committed target; `theme.ts`/`color.md`/`principles.md` still ship
-> teal until the swap + contrast verification lands. This is the one place the doc
-> intentionally *leads* source rather than trails it.
+> The committed re-tone is now canonical: warm bronze owns interaction, cool
+> slate owns prose links, and crimson remains identity-only. The source values
+> were adjusted from the initial visual target only as needed to clear WCAG AA.
 
 ## 1. Visual Theme & Atmosphere
 
@@ -27,14 +24,14 @@ maximal's interface is the opposite of a marketing splash — it's a **backgroun
 
 The aesthetic is defined by two acts of discipline, not two acts of excess. First, **restraint over decoration**: layout, type, and spacing carry the feeling; color is one surface, not the only surface. There is no hero gradient, no display type shouting from the rooftop, no pill-everything geometry. Second, a **hard split between identity and interaction**: crimson is brand-only (mark, hero, badging) while a warm bronze accent owns every interactive surface (buttons, switches, focus rings, active nav). This split is the single most important decision in the system — it's what keeps the UI from feeling shouty.
 
-What makes maximal distinctive is its **humanist-powerful** register: dense with capability but never overwhelming. It never pushes machine concerns onto humans (no raw config keys, no JSON dumps in the primary UI) and never pushes human concerns into machine shapes (no chat UI for what should be one button). It's dark-first, editorial in its type pairing (Fraunces + Commissioner), and it hands the user real control — you pick your own accent and surface color, and the system's job is to keep the contrast honest.
+What makes maximal distinctive is its **humanist-powerful** register: dense with capability but never overwhelming. It never pushes machine concerns onto humans (no raw config keys, no JSON dumps in the primary UI) and never pushes human concerns into machine shapes (no chat UI for what should be one button). It's dark-first and editorial in its type pairing (Fraunces + Commissioner). User color controls are planned, with a binding requirement to measure and warn about contrast before those controls ship.
 
 **Key Characteristics:**
 - Dark-first surface (`#0a0a0a` base) with a full light theme + `system` default
-- **Identity/interaction color split**: crimson `--brand` (`#c8334a`) is identity ONLY; warm bronze `--accent` (`#a86a2c`, re-toned off teal) is every interactive surface
+- **Identity/interaction color split**: crimson `--brand` (`#c8334a`) is identity ONLY; warm bronze `--accent` (`#9c6025`, re-toned off teal) is every interactive surface
 - Fraunces (display serif) + Commissioner (humanist sans) editorial pairing — Fraunces rationed to the brand mark + **one** display heading per window
 - Restraint over decoration: type, space, and rhythm do the work; no gradients, no shadows-as-decoration
-- **User-themable** accent + surface; the system computes and warns on contrast but never blocks ("Color is the user's, contrast is ours")
+- Canonical accent + surfaces are verified in both themes; future user color controls must compute contrast, warn, and never block
 - One humanist accent per window — the brand "m" appears once, near the heading, never on every row
 - Comfortable density: line-height ≥ 1.4 for body, generous section gaps, real row padding
 - Cards mean *entities you can act on*, never page sectioning (that's typography's job)
@@ -47,11 +44,11 @@ Four brand/interaction roles are deliberately split so no single color floods th
 
 ### Primary
 - **Brand Crimson** (`#c8334a`, `--brand`): The core identity color. Used **only** for the brand mark, hero moments, badging, and the tray attention dot — **never** for buttons, links, or focus rings. Foreground on brand fill is `--brand-fg` (`#ffffff`).
-- **Accent Bronze** (`#a86a2c`, `--accent`): Every interactive surface — primary button fill, switch "on" state, focus rings, active sidebar nav. Warm, crafted, and deliberately **not teal** (which reads generic-AI). Hover shifts ~10% lighter to `#bd7d3a`. Foreground on accent fill stays `--accent-fg` (`#ffffff`, ≈ 5:1 on the fill — clears AA). **This is user-themable.**
+- **Accent Bronze** (`#9c6025`, `--accent`): Every interactive surface — primary button fill, switch "on" state, focus rings, active sidebar nav. Warm, crafted, and deliberately **not teal** (which reads generic-AI). Hover shifts to `#a56727`. Foreground on both accent fills stays `--accent-fg` (`#ffffff`); both clear AA.
 - **Destructive Crimson** (`#b32d3f`, `--accent-destructive`): Destructive actions only (delete/destroy). Crimson-adjacent but deliberately **a hair deeper than `--brand`** so it reads as "caution," not "identity." Foreground `--accent-destructive-foreground` (`#ffffff`).
 
 ### Links (cool, distinct from both warm roles, per-theme)
-- **Link (targets, pending AA measurement)**: dark ≈ `#86adc4` (hover `#a8c8db`) / light ≈ `#35617a` (hover `#274f66`) — a muted, low-chroma slate-blue. Prose links only. With the interactive accent now **warm** bronze, links go **cool** on purpose — the old "sister to accent" rule flips to "distinct from *both* warm roles" so an inline prose link never reads as brand identity *or* as a primary action. Each value must clear WCAG AA against both `--surface-base` and `--surface-card` per theme before landing in `theme.ts`.
+- **Link**: dark `#86adc4` (hover `#a8c8db`) / light `#35617a` (hover `#274f66`) — a muted, low-chroma slate-blue. Prose links only. With the interactive accent now **warm** bronze, links go **cool** on purpose — the old "sister to accent" rule flips to "distinct from *both* warm roles" so an inline prose link never reads as brand identity *or* as a primary action. Every pairing clears WCAG AA against both `--surface-base` and `--surface-card` in its theme.
 
 ### Surface (per theme — 3 levels)
 | Role | Dark | Light | Use |
@@ -60,7 +57,7 @@ Four brand/interaction roles are deliberately split so no single color floods th
 | `--surface-card` | `#161616` | `#ffffff` | Cards, sidebar fill (contrast computed against this) |
 | `--surface-control` | `#1f1f1f` | `#f0f0f0` | Form controls, secondary buttons |
 
-Light steps cards *forward* of base; dark steps the same direction. `--surface-card` and `--accent` are the two user-themable keys.
+Light steps cards *forward* of base; dark steps the same direction. Runtime user overrides are not currently shipped.
 
 ### Text (per theme)
 | Role | Dark | Light | Use |
@@ -73,9 +70,10 @@ Light steps cards *forward* of base; dark steps the same direction. `--surface-c
 - **`--border-subtle`** (dark `#2a2a2a` / light `#e5e5e5`): hairline separators, card borders.
 - **`--border-strong`** (dark `#666666` / light `#8a8a8a`): input borders, emphasized rules.
 
-### Status (theme-independent, on `:root`)
-Each has a solid value and a lighter `-fg` for text-on-dark:
-- **Error** `#ef4444` (`-fg` `#fca5a5`) · **Success** `#22c55e` (`-fg` `#4ade80`) · **Warning** `#eab308` (`-fg` `#facc15`) · **Info** `#38bdf8` (`-fg` `#7dd3fc`)
+### Status
+Each status has a theme-independent solid marker and soft fill. Its `-fg`
+pairing changes by theme so semantic text and icons clear AA on the matching
+soft fill; use the generated tokens rather than copying a dark-theme value.
 
 ### Data-visualization palette (Usage charts, theme-independent on `:root`)
 Encodes **token TYPE**, not interactive state — deliberately not `--accent`, never `--brand`. Mid-tone for dual-theme legibility. (With the interactive accent now bronze, `--viz-input` teal is the system's only teal — which is fine: viz color is chart-only and never an interactive surface.) Coarse 3-way split (input / output / cache) plus a finer 4-way cache split for the live tracker and traffic graphs, on a **cool = fresh, warm = cached** scheme:
@@ -84,8 +82,9 @@ Encodes **token TYPE**, not interactive state — deliberately not `--accent`, n
 - **`--viz-cache-read`** `#c68a3c` (amber, cached input) · **`--viz-cache-creation`** `#c56b86` (rose, cached output)
 
 ### Contrast contract
-- **Target WCAG AA (4.5:1)** across all text, controls, and focus rings; AAA where reachable.
-- The system computes contrast against `--surface-card` (where most text sits) and **surfaces a warning chip** near the affected control when a user-chosen combination drops below AA.
+- **Target WCAG AA (4.5:1)** for text and 3:1 for focus indicators; AAA where reachable.
+- The shipped canonical palette is statically verified against both surface levels in both themes.
+- Before user color controls ship, they must measure text and focus contrast and **surface a warning chip** near any affected control below threshold.
 - **Never block.** Be honest about the consequence, then defer to the user. The brand mark stays crimson in dock/tray regardless — that's identity, not preference.
 
 ## 3. Typography Rules
@@ -173,7 +172,7 @@ Radius `--radius-input` (6px) on all. **Primary is the bronze `--accent`, never 
 
 ### Focus rings
 - **`:focus-visible` only** — visible on keyboard nav, hidden on mouse. Using `:focus` alone is a bug.
-- One canonical treatment everywhere: `--focus-ring` → `2px solid var(--accent)`, offset 2px, applied as `outline: var(--focus-ring)`. **No box-shadow variant, no per-surface ring.** Contrast fallback to `--text-strong` when accent-on-surface drops below 3:1.
+- One canonical treatment everywhere: `--focus-ring` → `2px solid var(--accent)`, offset 2px, applied as `outline: var(--focus-ring)`. **No box-shadow variant, no per-surface ring.** The canonical accent clears 3:1 on every shipped surface; future user accents require runtime validation and warning before they can override it.
 
 ### Iconography
 - **Functional icons:** monochrome, system-tinted, ~1.5–2px stroke at 16/20/24 (Lucide or Phosphor — pick one).
@@ -191,9 +190,9 @@ Radius `--radius-input` (6px) on all. **Primary is the bronze `--accent`, never 
 
 **Usage charts** — traffic stream, trend area, and proportion/breakdown bars colored by the `--viz-*` token-type palette (cool = fresh, warm = cached). Never `--accent`, never `--brand`.
 
-**Contrast warning chip** — a small status chip surfaced near a control when a user-chosen color combination drops below WCAG AA. Warns, never blocks.
+**Contrast warning chip (planned)** — a small status chip near a future user-color control when its combination drops below WCAG AA. Warns, never blocks.
 
-**Splash window** — the one native, embedded HTML surface (boot + failure recovery). Boots before any bundle, so it inlines a small amount of brand hex by hand and must be kept in sync with `theme.ts`.
+**Splash window** — a native, embedded HTML surface for boot + failure recovery. It boots before any bundle, so its explicit brand mirror is synchronized and checked by the token generator.
 
 ## 5. Layout Principles
 
@@ -203,7 +202,7 @@ Radius `--radius-input` (6px) on all. **Primary is the bronze `--accent`, never 
 
 ### Grid & Containers
 - **Desktop only — no responsive breakpoints in v1.** The OS enforces min window sizes; there is no mobile fallback.
-- **One UI surface — a single-window SPA.** The app is one sidecar-served page (delivered into the user's browser tab) whose left nav scales from scroll-only to a sidebar as sections accrue. **Scroll-only vs sidebar-nav is a function of section count, not style** — "would a user jump to a section by name?" The only *native* window is the splash (boot + failure recovery), which must survive a dead sidecar.
+- **One desktop workspace.** The Electron client is the canonical app surface, with native window chrome and a renderer-owned workspace. Navigation grows from a simple section list into persistent panels only when the information architecture earns them; the legacy shell remains supported during migration but does not define new composition.
 - Content max-widths: `--content-max` **640px** for prose panes; `--content-max-wide` **1040px** for data-dense sections (Usage charts/tables earn more width than prose). Sidebar `--sidebar-width` **200px**.
 
 ### Whitespace Philosophy
@@ -240,12 +239,12 @@ Border widths: `--border-width-hairline`/`-thin` **1px** · `--border-width-thic
 
 ### Do
 - Use crimson `--brand` (`#c8334a`) for **identity only** — mark, hero, badging, tray attention dot
-- Use warm bronze `--accent` (`#a86a2c`) for **every interactive surface** — primary buttons, switches, focus rings, active nav
+- Use warm bronze `--accent` (`#9c6025`) for **every interactive surface** — primary buttons, switches, focus rings, active nav
 - Ration Fraunces to the brand mark + **one** display heading per window
 - Let Commissioner carry the body at weight 400, emphasis at 500–600
 - Keep everything **sentence case**; write human-tone copy ("We can't reach the proxy")
 - Use cards **only** for discrete actionable entities; use typography (heading + space + optional rule) to section a page
-- Honor the user's chosen accent/surface, compute contrast, and **warn** with a chip when it drops below AA
+- Before user color controls ship, compute text and focus contrast and **warn** with a chip when either drops below its threshold
 - Use `--font-mono` + `tabular-nums` for any numbers that update in place
 - Use `:focus-visible` with the single canonical `--focus-ring` on every focusable element
 - Honor `prefers-reduced-motion` **literally** — animations off, at most a 60ms opacity crossfade
@@ -254,7 +253,7 @@ Border widths: `--border-width-hairline`/`-thin` **1px** · `--border-width-thic
 - **Don't use crimson for buttons, links, focus rings, or active-nav** — that's the bronze accent's job (this is the #1 regression)
 - Don't put a destructive action in `--brand` crimson — use `--accent-destructive`, a hair deeper
 - Don't wrap page sections in cards (the "AI-dashboard grid of rectangles"), and **never nest cards**
-- Don't add an in-window H1 that duplicates the native macOS titlebar / window name
+- Don't add an in-content H1 that duplicates the desktop titlebar / window name
 - Don't inline raw `px` / `rem` / `#hex` in a component — add or reference a token
 - Don't use thin (100–300) or 900 weights, or ALL CAPS body/labels
 - Don't use more than one Fraunces moment per window
@@ -270,7 +269,7 @@ Border widths: `--border-width-hairline`/`-thin` **1px** · `--border-width-thic
 
 ### Density & scaling
 - Content panes cap at `--content-max` (640px, prose) or `--content-max-wide` (1040px, data-dense). Prose wraps at `65ch`; code blocks scroll horizontally rather than reflow.
-- The SPA is one surface; the only native window is the splash, which is single-instance, centered on first launch, then remembers position.
+- The Electron workspace is the canonical surface. Secondary windows are single-instance when their task is singular, and window position is restored where appropriate.
 
 ### Touch targets
 - Not a touch target concern in v1 (desktop), but hit targets are generous regardless: 32–36px control heights, 48px form rows, 32px icon-button targets.
@@ -282,9 +281,9 @@ Border widths: `--border-width-hairline`/`-thin` **1px** · `--border-width-thic
 
 ### Quick Color Reference
 - Brand identity (mark/badging ONLY): "Brand Crimson `#c8334a` (`--brand`)"
-- Interactive (buttons/switches/focus/active-nav): "Accent Bronze `#a86a2c` (`--accent`)"
+- Interactive (buttons/switches/focus/active-nav): "Accent Bronze `#9c6025` (`--accent`)"
 - Destructive actions: "Destructive `#b32d3f` (`--accent-destructive`)"
-- Prose links: "Link (cool slate-blue) ≈ `#86adc4` dark / `#35617a` light (`--link`, targets pending AA)"
+- Prose links: "Link (cool slate-blue) `#86adc4` dark / `#35617a` light (`--link`, AA verified)"
 - Window background: "`--surface-base` — `#0a0a0a` dark / `#fafafa` light"
 - Card / sidebar: "`--surface-card` — `#161616` dark / `#ffffff` light"
 - Primary text: "`--text-strong` — `#f5f5f5` dark / `#0a0a0a` light"
@@ -296,7 +295,7 @@ Border widths: `--border-width-hairline`/`-thin` **1px** · `--border-width-thic
 - "Build the brand mark: a `--brand` crimson (`#c8334a`) rounded square holding a slightly wonky Fraunces 'm' in white. Place it once, near the window heading — not on every row."
 - "Create a usage traffic chart with an input band in `--viz-input` teal (`#3f9aa8`), output in `--viz-output` indigo (`#7b6fd0`), cached-input in `--viz-cache-read` amber, cached-output in `--viz-cache-creation` rose (cool = fresh, warm = cached). Axis labels in `--text-xs` `--text-muted`. Never use `--accent` or `--brand` for chart color."
 - "Design a window heading: Fraunces `--text-2xl` (32px) weight 700, `--tracking-2xl` (-0.015em), `--text-strong`. One per window. Do not add a second Fraunces element."
-- "Write a contrast-warning chip that appears beside a control when the user's chosen color drops below WCAG AA: `--radius-chip`, `--status-warning` accent, `--text-xs`. Warn, never block or disable the control."
+- "Prototype the planned contrast-warning chip beside a user-color control: measure text at 4.5:1 and focus indicators at 3:1, use `--radius-chip` and the warning status role, and warn without blocking."
 
 ### Iteration Guide
 1. **Crimson = identity, warm bronze = interaction.** If a button, link, or focus ring is crimson, it's wrong — make it `--accent`.
@@ -304,6 +303,6 @@ Border widths: `--border-width-hairline`/`-thin` **1px** · `--border-width-thic
 3. **Cards are entities, typography is sectioning.** If it looks like a grid of similar rectangles, drop the cards.
 4. **Dark-first**, with a full light theme and `system` default — check both.
 5. **Reference tokens by name, never inline hex/px** in a component; add a token first if one's missing.
-6. **The user owns color; you own contrast** — compute it, warn below AA, never block.
+6. **The user owns color; you own contrast** — when customization ships, compute it, warn below AA, never block.
 7. **Motion is utility** — 120–200ms ease-out, no bounce/parallax/hover-scale, and `prefers-reduced-motion` is literal.
 8. **Sentence case, human-tone copy** — speak to the person, not the file.

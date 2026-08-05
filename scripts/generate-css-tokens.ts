@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import {
   fontStacks, text, weight, leading, tracking, spacing, radii, borderWidth, size,
   elevation, opacity, duration, easing, brand, accent, status, viz, link, focusRing, layout, themes
-} from "../shell/src/ui/styles/theme";
+} from "../ui/theme";
 
 const REPO = resolve(import.meta.dir, "..");
 
@@ -24,8 +24,8 @@ function processGroup(prefix: string, group: Record<string, string>): string[] {
 
 function generateTokensCSS(): string {
   const rootLines: string[] = [
-    "/* AUTO-GENERATED FROM shell/src/ui/styles/theme.ts */",
-    "/* Design tokens — declared values for the shell (Settings window). */",
+    "/* AUTO-GENERATED FROM ui/theme.ts */",
+    "/* Design tokens shared by Maximal desktop surfaces. */",
     "",
     ":root {"
   ];
@@ -102,25 +102,145 @@ function generateTokensCSS(): string {
 }
 
 
-const OUT_PATH = resolve(REPO, "shell/src/ui/styles/tokens.css");
+const OUT_PATHS = [
+  "shell/src/ui/styles/tokens.css",
+  "client/src/renderer/styles/tokens.css",
+].map((path) => resolve(REPO, path));
 const tokensContent = generateTokensCSS();
 
-// `--check` verifies the committed CSS is a fresh generation of theme.ts
-// without writing. This is the single-source enforcement gate: if theme.ts
-// changed but tokens.css wasn't regenerated (or tokens.css was hand-edited),
-// the two diverge and CI fails. Run `bun run tokens:generate` to fix.
+interface MirrorDeclaration {
+  name: string;
+  values: Array<string>;
+}
+
+interface MirrorSpec {
+  path: string;
+  declarations: Array<MirrorDeclaration>;
+}
+
+const MIRROR_SPECS: Array<MirrorSpec> = [
+  {
+    path: "shell/splash.html",
+    declarations: [{ name: "--brand", values: [brand.color] }],
+  },
+  {
+    path: "shell/update-confirm.html",
+    declarations: [
+      { name: "--brand", values: [brand.color] },
+      { name: "--accent", values: [accent.color] },
+      { name: "--accent-hover", values: [accent.hover] },
+      { name: "--accent-fg", values: [accent.fg] },
+      { name: "--surface", values: [themes.dark.surfaceBase] },
+      { name: "--text-muted", values: [themes.dark.textMuted] },
+      { name: "--border-subtle", values: [themes.dark.borderSubtle] },
+    ],
+  },
+  {
+    path: "site/src/styles/global.css",
+    declarations: [
+      { name: "--brand", values: [brand.color] },
+      {
+        name: "--bg",
+        values: [themes.light.surfaceBase, themes.dark.surfaceBase],
+      },
+      {
+        name: "--surface",
+        values: [themes.light.surfaceCard, themes.dark.surfaceCard],
+      },
+      {
+        name: "--surface-2",
+        values: [themes.light.surfaceControl, themes.dark.surfaceControl],
+      },
+      {
+        name: "--text",
+        values: [themes.light.textStrong, themes.dark.textStrong],
+      },
+      {
+        name: "--text-body",
+        values: [themes.light.textBaseColor, themes.dark.textBaseColor],
+      },
+      {
+        name: "--text-muted",
+        values: [themes.light.textMuted, themes.dark.textMuted],
+      },
+      {
+        name: "--border",
+        values: [themes.light.borderSubtle, themes.dark.borderSubtle],
+      },
+      {
+        name: "--border-strong",
+        values: [themes.light.borderStrong, themes.dark.borderStrong],
+      },
+      { name: "--accent", values: [accent.color, accent.color] },
+      { name: "--accent-hover", values: [accent.hover, accent.hover] },
+      { name: "--accent-ink", values: [accent.fg, accent.fg] },
+      { name: "--link", values: [link.light.color, link.dark.color] },
+      { name: "--link-hover", values: [link.light.hover, link.dark.hover] },
+    ],
+  },
+];
+
+function synchronizeMirror(spec: MirrorSpec): {
+  path: string;
+  original: string;
+  synchronized: string;
+} {
+  const path = resolve(REPO, spec.path);
+  const original = readFileSync(path, "utf8");
+  let synchronized = original;
+
+  for (const declaration of spec.declarations) {
+    const escapedName = declaration.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = new RegExp(`(${escapedName}:\\s*)#[0-9a-fA-F]{3,8}(\\s*;)`, "g");
+    const matches = synchronized.match(pattern)?.length ?? 0;
+    if (matches !== declaration.values.length) {
+      throw new Error(
+        `${spec.path}: expected ${declaration.values.length} ${declaration.name} mirror declaration(s), found ${matches}`,
+      );
+    }
+    let occurrence = 0;
+    synchronized = synchronized.replace(pattern, (_match, prefix, suffix) => {
+      const value = declaration.values[occurrence];
+      occurrence += 1;
+      return `${prefix}${value}${suffix}`;
+    });
+  }
+
+  return { path, original, synchronized };
+}
+
+const mirrors = MIRROR_SPECS.map(synchronizeMirror);
+
+// `--check` verifies every generated stylesheet and explicit raw-value mirror
+// against the neutral source without writing. Any stale or hand-edited target
+// fails CI.
 if (process.argv.includes("--check")) {
-  const committed = existsSync(OUT_PATH) ? readFileSync(OUT_PATH, "utf8") : "";
-  if (committed !== tokensContent) {
+  const stale = OUT_PATHS.filter((path) => {
+    const committed = existsSync(path) ? readFileSync(path, "utf8") : "";
+    return committed !== tokensContent;
+  });
+  stale.push(
+    ...mirrors
+      .filter(({ original, synchronized }) => original !== synchronized)
+      .map(({ path }) => path),
+  );
+  if (stale.length > 0) {
     console.error(
-      "[generate-css-tokens] shell/src/ui/styles/tokens.css is out of sync " +
-        "with shell/src/ui/styles/theme.ts.\n" +
-        "  Run `bun run tokens:generate` and commit the result.",
+      "[generate-css-tokens] Generated token CSS or raw-value mirrors are out of sync with ui/theme.ts:\n" +
+        stale.map((path) => `  - ${path.replace(`${REPO}/`, "")}`).join("\n") +
+        "\n  Run `bun run tokens:generate` and commit every synchronized target.",
     );
     process.exit(1);
   }
-  console.log("[generate-css-tokens] tokens.css is in sync with theme.ts.");
+  console.log(
+    `[generate-css-tokens] ${OUT_PATHS.length} generated targets and ${mirrors.length} raw-value mirrors are in sync with ui/theme.ts.`,
+  );
 } else {
-  writeFileSync(OUT_PATH, tokensContent, "utf8");
-  console.log("Tokens synchronized strictly from typescript source.");
+  for (const path of OUT_PATHS) writeFileSync(path, tokensContent, "utf8");
+  for (const mirror of mirrors) {
+    writeFileSync(mirror.path, mirror.synchronized, "utf8");
+  }
+  console.log(
+    `Tokens synchronized to ${OUT_PATHS.length} generated targets and ${mirrors.length} raw-value mirrors.`,
+  );
 }

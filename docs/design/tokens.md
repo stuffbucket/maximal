@@ -1,23 +1,28 @@
 # Token vocabulary
 
-The canonical *source* of token values is
-[`shell/src/ui/styles/theme.ts`](../../shell/src/ui/styles/theme.ts);
-`shell/src/ui/styles/tokens.css` is generated from it by
-`scripts/generate-css-tokens.ts`. **Values live in `theme.ts` only.**
-This file is the lookup of *name → purpose → scope*.
+The canonical *source* of token values is [`ui/theme.ts`](../../ui/theme.ts).
+`scripts/generate-css-tokens.ts` writes two complete generated stylesheets:
 
-If you need a value, open `theme.ts` (or the generated `tokens.css`).
-If you're describing a token in a doc or commit message, use its name
-— never inline the value.
+- `shell/src/ui/styles/tokens.css`
+- `client/src/renderer/styles/tokens.css`
 
-> **Single source.** Every shell surface is styled from the one
-> generated `tokens.css`. The separate dashboard window that used to
-> redeclare tokens independently was folded into the settings app by
-> the single-window redesign (#343), so the cross-surface token drift
-> this doc once warned about no longer exists. The one surface still
-> outside the generator is `shell/splash.html` (it boots before any
-> bundle) — see [`failure-modes.md`](failure-modes.md) → *Tokens &
-> drift*.
+The same command synchronizes canonical raw-value aliases in three surfaces
+that cannot consume those generated names directly:
+
+- `shell/splash.html` — pre-boot brand mirror
+- `shell/update-confirm.html` — standalone dark-surface brand, accent, text,
+  and border mirrors
+- `site/src/styles/global.css` — site aliases for canonical brand, surfaces,
+  text, borders, accent, and link roles in both themes
+
+`--check` verifies all five targets without writing. Site-only roles such as
+`--accent-text` and `--brand-lit` are intentionally outside the canonical
+mirror set. **Canonical values live in `ui/theme.ts` only.** This file is the
+lookup of *name → purpose → scope*.
+
+If you need a canonical value, open `ui/theme.ts` or either generated
+`tokens.css`. If you're describing a token in a doc or commit message, use its
+name — never inline the value.
 
 ## Type
 
@@ -44,13 +49,19 @@ If you're describing a token in a doc or commit message, use its name
 | `--sidebar-width` | Settings sidebar width | Settings sidebar only | Anything else |
 | `--content-max` | Settings content pane max-width | Settings content max-width | Dashboard (uses its own max) |
 | `--content-max-wide` | Wide content max-width for data-dense sections | The Usage section (charts/tables earn more width than prose) | Prose sections (use `--content-max`, ~65ch is more readable) |
+| `--titlebar-height` | Desktop workspace titlebar height | The draggable Electron titlebar region | In-content headers or toolbars |
+| `--panel-width` | Inspector/navigation panel width | Persistent workspace side panels | Prose content width or dialogs |
+| `--control-height` | Standard desktop control height | Buttons, inputs, selects, and toolbar controls | Rows containing descriptive copy |
+| `--control-height-compact` | Compact desktop control height | Dense inspector and toolbar controls | Primary actions or general form controls |
+| `--radius-dialog` | Dialog container radius | Modal and confirmation dialog shells | Cards or controls |
 
 ## Elevation
 
 | Token | Purpose | Use for | Do NOT use for |
 |---|---|---|---|
 | `--elevation-card` | Card shadow | Cards in light mode | Dark mode (surface step does the work) |
-| `--elevation-modal` | Modal shadow | Modals | Cards |
+| `--elevation-modal` | Modal shadow | Legacy modal surfaces | Cards |
+| `--elevation-dialog` | Desktop dialog shadow | Electron dialog and confirmation layers | Cards or persistent panels |
 | `--elevation-tooltip` | Tooltip shadow | Tooltips, popovers | Cards |
 
 ## Color (light + dark via `[data-theme]`)
@@ -59,7 +70,7 @@ If you're describing a token in a doc or commit message, use its name
 |---|---|---|---|
 | `--brand` | Crimson identity | Brand mark, hero, badging, attention-state tray dot | Buttons, links, focus rings |
 | `--brand-fg` | Foreground on brand fill | Text/icon on `--brand` | Anything else |
-| `--accent` | Teal interactive | Primary button fill, switch "on", focus ring, active-nav | Brand identity, prose links |
+| `--accent` | Warm bronze interactive | Primary button fill, switch "on", focus ring, active-nav | Brand identity, prose links |
 | `--accent-fg` | Foreground on accent fill | Button label on `--accent` | Anything else |
 | `--accent-destructive` | Crimson-adjacent destructive | Delete/destroy buttons | Anything non-destructive |
 | `--accent-destructive-foreground` | Foreground on destructive fill | Destructive button label | Anything else |
@@ -74,6 +85,15 @@ If you're describing a token in a doc or commit message, use its name
 | `--text-muted` | Muted text | Helpers, captions, group labels | Body prose (fails contrast for long form) |
 | `--border-subtle` | Subtle divider | Hairline separators, card borders | High-contrast emphasis |
 | `--border-strong` | Strong divider | Input borders, emphasized rules | Subtle dividers |
+| `--status-*-fg` | Theme-specific semantic foreground | Text and icons on the matching `--status-*-soft` fill | Unrelated status fills or solid status markers |
+| `--status-error-soft` | Low-emphasis error fill | Error banners, chips, and inline validation backgrounds | Error text or destructive controls |
+| `--status-success-soft` | Low-emphasis success fill | Success banners, chips, and completed-state backgrounds | Success text or interactive controls |
+| `--status-warning-soft` | Low-emphasis warning fill | Warning banners, chips, and caution backgrounds | Warning text or destructive controls |
+| `--status-info-soft` | Low-emphasis information fill | Informational banners, chips, and neutral notices | Links or interactive controls |
+
+The soft status fills are theme-aware mixtures of their semantic status color and
+`--surface-card`. They provide quiet background emphasis; text and icons use the
+matching theme-specific `--status-*-fg` token.
 
 ## Data visualization (Usage charts)
 
@@ -108,9 +128,9 @@ neutral still owns the aggregated cache band in the proportion + per-model bars.
   inline in components.
 - **If you need a new value, add a token first** and justify it here
   with a `Purpose / Use for / Do NOT use for` row before using it.
-- **User-themable overrides** apply to `--accent` and `--surface-card`
-  only; everything else recomputes against the new pair with the
-  contrast guardrails in [`color.md`](color.md).
+- Runtime user color overrides are not shipped. A future implementation may
+  override `--accent` and `--surface-card` only after adding the warning and
+  focus-indicator validation contract in [`color.md`](color.md).
 - **Numeric tokens** (spacing, type sizes, radii, elevations) ship as
   CSS custom properties on `:root`. Surface, text, and `--link*` keys
   override per theme via `[data-theme="light"]` / `[data-theme="dark"]`.

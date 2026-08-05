@@ -143,7 +143,7 @@ const starLabel = stars !== null ? formatStarCount(stars) : null;
 
   .star-widget:hover {
     border-color: var(--accent);
-    color: var(--accent);
+    color: var(--accent-text);
     transform: translateY(-1px);
     text-decoration: none;
   }
@@ -156,11 +156,11 @@ const starLabel = stars !== null ? formatStarCount(stars) : null;
   /* Bronze star — the interactive accent. Warms to a fill on hover. */
   .star-widget__icon {
     flex: 0 0 auto;
-    color: var(--accent);
+    color: var(--accent-text);
     transition: fill 150ms ease-out;
   }
   .star-widget:hover .star-widget__icon {
-    fill: var(--accent);
+    fill: var(--accent-text);
   }
 
   .star-widget__label {
@@ -180,7 +180,7 @@ const starLabel = stars !== null ? formatStarCount(stars) : null;
     color: var(--text-muted);
   }
   .star-widget:hover .star-widget__count {
-    color: var(--accent);
+    color: var(--accent-text);
   }
   .star-widget__count[hidden] {
     display: none;
