@@ -26,8 +26,26 @@ set -euo pipefail
 # Builder-supplied env consumed: TAG, ARCH, SIGN_IDENTITY, ENTITLEMENTS_DIR,
 # BUN_INSTALL, CARGO_HOME. The keychain is already unlocked — do not unlock it.
 
-# Self-hosted runners use non-login shells that don't read ~/.zshrc.
-export PATH="$BUN_INSTALL/bin:$CARGO_HOME/bin:$PATH"
+# Self-hosted runners use non-login shells that don't read ~/.zshrc. Include
+# Homebrew's bin (/opt/homebrew/bin) — the runner's non-login PATH omits it, and
+# it's where node/npm live if brew-installed (build.yml prepends it the same way).
+export PATH="$BUN_INSTALL/bin:$CARGO_HOME/bin:/opt/homebrew/bin:$PATH"
+
+# electron-forge (used below) does NOT support bun as a package manager — it
+# requires npm/yarn/pnpm on PATH even when we run everything else through bun
+# (its "Checking your system" preflight runs `npm --version`). Fail loudly and
+# early with a diagnosis if none is present, rather than deep inside forge.
+if ! command -v npm >/dev/null 2>&1 && ! command -v pnpm >/dev/null 2>&1 && ! command -v yarn >/dev/null 2>&1; then
+  echo "::group::Node package-manager diagnosis (none found on PATH)"
+  echo "PATH=$PATH"
+  command -v node npm pnpm yarn bun 2>&1 || true
+  ls -la /opt/homebrew/bin/node /opt/homebrew/bin/npm 2>&1 || true
+  ls -d "$HOME"/.nvm/versions/node/* 2>/dev/null || true
+  echo "::endgroup::"
+  echo "::error::electron-forge needs npm/yarn/pnpm on PATH (bun is unsupported by forge). Install Node on the builder runner (e.g. brew install node)." >&2
+  exit 1
+fi
+echo "Package manager for forge: $(command -v npm || command -v pnpm || command -v yarn)"
 
 VERSION="${TAG#v}"
 ARCH="${ARCH:-arm64}"
