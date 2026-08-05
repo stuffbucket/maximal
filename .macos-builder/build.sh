@@ -51,19 +51,14 @@ if ! grep -q "\"version\": \"${VERSION}\"" package.json; then
   exit 1
 fi
 
-# Install deps (brings tagged @stuffbucket/maximal-core into node_modules).
-bun install
-
-# Bun may block Electron's postinstall on a fresh runner. Forge core needs the
-# downloaded Electron.app template but not npm, so run Electron's installer under
-# Bun explicitly when the template is absent.
-if [ ! -d node_modules/electron/dist/Electron.app ]; then
-  bun node_modules/electron/install.js
-fi
+# Electron Forge/Vite is a Node/npm toolchain. Keep Bun scoped to compiling the
+# maximal-core sidecar; using Bun as npm/Node here triggers Forge's package-manager
+# preflight and CommonJS interop failures in plugin-vite.
+npm ci
 
 # Build the Bun-compiled maximal-core sidecar into resources/bin/maximal-core;
 # forge copies it into the app via extraResource.
-bun run build:core
+npm run build:core
 CORE="resources/bin/maximal-core"
 if [ ! -s "$CORE" ]; then
   echo "::error::Sidecar not produced at client/${CORE}" >&2
@@ -85,7 +80,7 @@ rm -rf out
 # notarizes). Signing is enabled because SIGN_IDENTITY + MACOS_ENTITLEMENTS are
 # exported (see forge.config.ts). --arch is pinned so the output dir name matches
 # the config's app_path.
-bun run package -- --arch="${ARCH}"
+npm run package -- --arch="${ARCH}"
 
 cd ..
 ls -la "$(dirname "$APP")"

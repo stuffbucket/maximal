@@ -10,7 +10,7 @@
     "build:core": "bun scripts/build-core.ts",
     "typecheck": "tsc --noEmit",
     "start": "electron-forge start",
-    "package": "bash scripts/package-macos.sh"
+    "package": "electron-forge package"
   },
   "dependencies": {
     "react": "^19.2.8",
@@ -20,7 +20,6 @@
   },
   "devDependencies": {
     "@electron-forge/cli": "7.11.2",
-    "@electron-forge/core": "7.11.2",
     "@electron-forge/plugin-vite": "7.11.2",
     "@electron-forge/shared-types": "7.11.2",
     "@stuffbucket/maximal-core": "github:stuffbucket/maximal-core#v0.2.0",
