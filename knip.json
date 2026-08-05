@@ -1,28 +1,8 @@
 {
   "$schema": "https://unpkg.com/knip@5/schema.json",
-  "entry": [
-    "scripts/*.ts",
-    "scripts/dev/*.ts",
-    "scripts/ops/*.ts",
-    "tests/**/*.test.ts"
-  ],
-  "project": [
-    "src/**/*.ts",
-    "scripts/**/*.ts",
-    "tests/**/*.ts"
-  ],
-  "ignoreDependencies": [
-    "prettier-plugin-packagejson",
-    "electron",
-    "undici",
-    "@stryker-mutator/command-runner"
-  ],
-  "ignoreBinaries": [
-    "trufflehog"
-  ],
-  "ignoreExportsUsedInFile": true,
-  "ignore": [
-    "src/lib/auth/token.ts",
-    "src/lib/auth/copilot-online-retry.ts"
-  ]
+  "entry": ["scripts/*.ts", "scripts/dev/*.ts", "tests/**/*.test.ts"],
+  "project": ["scripts/**/*.ts", "tests/**/*.ts"],
+  "ignoreDependencies": ["prettier-plugin-packagejson", "@stuffbucket/maximal-core"],
+  "ignoreBinaries": ["trufflehog"],
+  "ignoreExportsUsedInFile": true
 }
