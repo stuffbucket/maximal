@@ -1,9 +1,15 @@
-app_path = shell/src-tauri/target/release/bundle/macos/Maximal.app
+app_path = client/out/Maximal-darwin-arm64/Maximal.app
 volname = Maximal
 bundle_id = co.stuffbucket.maximal
 entitlements = bun-runtime
-artifact = dmg,updater
-# Tauri auto-update artifact ships under a versioned, convention-matching name
-# ({tag} = the full tag, e.g. v0.4.41), so the builder uploads it final-named and
-# release.yml needs no rename step for it (unlike the dmg).
-updater_name = maximal-{tag}-darwin-arm64.app.tar.gz
+artifact = dmg
+# The Electron client (client/) replaces the retired Tauri shell as the macOS
+# app. @electron/packager emits the bundle at out/<productName>-darwin-<arch>/,
+# and forge.config.ts pins productName=Maximal + appBundleId=co.stuffbucket.maximal
+# (the id must equal the approved builder policy's bundle_id_allowed). The Bun
+# sidecar (maximal-core) is copied in via extraResource and signed inside-out by
+# @electron/osx-sign in the producer, so `entitlements = bun-runtime` (JIT /
+# unsigned-executable-memory / library-validation) covers both Electron's V8 and
+# the Bun/JavaScriptCore sidecar. `artifact = dmg` only — the Tauri .app.tar.gz
+# updater is dropped in the Electron migration (Electron auto-update is a separate
+# follow-up). Requesting a subset of the policy's `dmg,updater` allowlist is fine.

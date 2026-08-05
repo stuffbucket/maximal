@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 
-import { app, BrowserWindow, ipcMain, session, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, session, shell } from 'electron'
 
 import { controlOrigin, killCore, proxyUrl, spawnCore } from './core.js'
 import { runShell } from './shell.js'
@@ -25,6 +25,8 @@ function installCoreCorsShim(origin: string): void {
       responseHeaders: {
         ...details.responseHeaders,
         'access-control-allow-origin': ['*'],
+        'access-control-allow-methods': ['POST, OPTIONS'],
+        'access-control-allow-headers': ['content-type, mcp-protocol-version'],
       },
     })
   })
@@ -63,6 +65,9 @@ void app.whenReady().then(async () => {
     console.log(`[maximal-client] core ready — control ${origin}, proxy ${proxy} (port ${port})`)
   } catch (err) {
     console.error('[maximal-client] core failed to start:', err)
+    dialog.showErrorBox('Maximal could not start', err instanceof Error ? err.message : String(err))
+    app.quit()
+    return
   }
   createWindow()
   app.on('activate', () => {

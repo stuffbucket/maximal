@@ -7,7 +7,7 @@
   "private": true,
   "main": ".vite/build/main.js",
   "scripts": {
-    "build:core": "bun build --compile node_modules/@stuffbucket/maximal-core/src/main.ts --outfile resources/bin/maximal-core",
+    "build:core": "bun scripts/build-core.ts",
     "typecheck": "tsc --noEmit",
     "start": "electron-forge start",
     "package": "electron-forge package"
@@ -15,13 +15,14 @@
   "dependencies": {
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "stuffbucket-electron": "github:stuffbucket/maximal-electron#fe3ca59949c191f86031bc15585855589477e6de"
+    "stuffbucket-electron": "github:stuffbucket/maximal-electron#fe3ca59949c191f86031bc15585855589477e6de",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@electron-forge/cli": "7.11.2",
     "@electron-forge/plugin-vite": "7.11.2",
     "@electron-forge/shared-types": "7.11.2",
-    "@stuffbucket/maximal-core": "github:stuffbucket/maximal-core#v0.1.1",
+    "@stuffbucket/maximal-core": "github:stuffbucket/maximal-core#v0.2.0",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.2.0",
