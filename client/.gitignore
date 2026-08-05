@@ -3,3 +3,7 @@ node_modules/
 out/
 resources/bin/
 *.log
+# The producer builds with `bun install`; the client still commits package-lock.json
+# for npm users. Don't commit a second lockfile (consolidation is a follow-up).
+bun.lock
+bun.lockb
