@@ -9,7 +9,6 @@ supersedes: []
 related_adrs:
   - docs/decisions/0006-auth-status-discriminated-union.md
   - docs/decisions/0011-mock-module-leakage-discipline.md
-  - docs/decisions/0013-split-tauri-lib-rs.md
 links:
   architecture: docs/architecture.md
   bun_policy: docs/bun-version-policy.md

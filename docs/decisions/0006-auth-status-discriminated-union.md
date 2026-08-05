@@ -7,8 +7,6 @@ accepted_date: 2026-06-15
 authors:
   - stuffbucket
 supersedes: []
-depends_on:
-  - docs/decisions/0005-share-settings-types-shell-proxy.md
 links:
   shell_type: shell/src/api.ts
   shell_renderer: shell/src/main.ts
