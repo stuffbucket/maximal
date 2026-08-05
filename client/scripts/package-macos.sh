@@ -1,20 +1,34 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if command -v node >/dev/null 2>&1; then
-  NODE_BIN="$(command -v node)"
-else
-  # GitHub Actions always ships a Node runtime for JavaScript actions, even when
-  # the self-hosted runner has no npm/node on PATH. RUNNER_WORKSPACE is
-  # <runner-root>/_work, so its sibling `externals/node24` is the runtime selected
-  # by FORCE_JAVASCRIPT_ACTIONS_TO_NODE24 in macos-builder/build.yml.
-  RUNNER_ROOT="$(dirname "${RUNNER_WORKSPACE:-/nonexistent/_work}")"
-  NODE_BIN="$RUNNER_ROOT/externals/node24/bin/node"
+NODE_BIN=""
+
+# GitHub Actions ships a real Node runtime for JavaScript actions even when the
+# host has no Node/npm installation. Prefer it over PATH: Bun installs a `node`
+# shim that resolves from `command -v node` but still has Bun's CommonJS interop,
+# which breaks @electron-forge/plugin-vite's `require("vite").default` call.
+if [ -n "${RUNNER_TEMP:-}" ]; then
+  RUNNER_ROOT="$(cd "$RUNNER_TEMP/../.." && pwd)"
+  for candidate in "$RUNNER_ROOT/externals/node24/bin/node" "$RUNNER_ROOT/externals/node20/bin/node"; do
+    if [ -x "$candidate" ]; then
+      NODE_BIN="$candidate"
+      break
+    fi
+  done
 fi
 
-if [ ! -x "$NODE_BIN" ]; then
-  echo "::error::Node runtime not found. Checked PATH and ${NODE_BIN}." >&2
+if [ -z "$NODE_BIN" ] && command -v node >/dev/null 2>&1; then
+  candidate="$(command -v node)"
+  if "$candidate" -e 'process.exit(process.versions.bun ? 1 : 0)' >/dev/null 2>&1; then
+    NODE_BIN="$candidate"
+  fi
+fi
+
+if [ -z "$NODE_BIN" ]; then
+  echo "::error::A real Node runtime is required for Electron Forge (a Bun node shim is not sufficient)." >&2
+  echo "RUNNER_TEMP=${RUNNER_TEMP:-} PATH=$PATH" >&2
   exit 1
 fi
 
+echo "Packaging with $NODE_BIN ($("$NODE_BIN" --version))"
 exec "$NODE_BIN" scripts/package.cjs "$@"
