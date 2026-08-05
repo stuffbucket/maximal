@@ -24,7 +24,7 @@ import {
   SidecarExitedError,
   SidecarReadyTimeoutError,
 } from "@stuffbucket/maximal-core/supervisor"
-import { app, BrowserWindow, ipcMain } from "electron"
+import { app, BrowserWindow, dialog, ipcMain } from "electron"
 
 const here = dirname(fileURLToPath(import.meta.url))
 
@@ -150,9 +150,29 @@ async function createWindow(): Promise<void> {
   await win.loadFile(join(here, "renderer", "index.html"))
 }
 
+/**
+ * Boot. The `catch` is load-bearing: `startSidecar` builds a message a user can
+ * act on, and without somewhere to put it an engine that fails to start leaves
+ * the app running with no window and no explanation — indistinguishable, from
+ * the user's side, from a launch that did nothing at all. Surface it and quit
+ * rather than idling invisibly.
+ */
 app.whenReady().then(async () => {
   registerIpc()
-  sidecar = await startSidecar()
+  try {
+    sidecar = await startSidecar()
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error)
+    // Logged as well as shown: the dialog is for the user, this is what ends up
+    // in a crash report or a terminal when someone is diagnosing it later.
+    console.error(`maximal: engine failed to start — ${detail}`)
+    dialog.showErrorBox(
+      "maximal could not start",
+      `${detail}\n\nLast output from the engine:\n${bootLines.slice(-5).join("\n") || "(none)"}`,
+    )
+    app.exit(1)
+    return
+  }
   await createWindow()
 })
 
