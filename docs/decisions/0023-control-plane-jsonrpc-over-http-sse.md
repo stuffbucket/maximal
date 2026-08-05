@@ -5,8 +5,6 @@ status: accepted
 date: 2026-08-05
 authors:
   - stuffbucket
-supersedes:
-  - ADR-0019
 depends_on:
   - docs/decisions/0006-auth-status-discriminated-union.md
   - docs/decisions/0021-control-surface-hardening.md
@@ -42,10 +40,12 @@ Prior art in this repo:
 
 - **ADR-0006** models `AuthStatus` as a discriminated union
   (`unauthenticated | device_code_issued | polling | authenticated | error`).
-- **ADR-0007** added an SSE feed; **ADR-0019** (proposed) chose **WebSocket** to
-  supersede it — but explicitly *because of Tauri browser-tab delivery
-  (ADR-0018)*: the sidecar managing browser tabs it opened needed a client→server
-  presence/visibility push and multi-tab fan-out that SSE can't carry.
+- An earlier proposal chain (an SSE feed, then a **WebSocket** transport with a
+  presence registry) targeted the now-retired Tauri browser-tab delivery — a
+  sidecar managing browser tabs it opened, needing a client→server
+  presence/visibility push and multi-tab fan-out that SSE can't carry. Those ADRs
+  were removed with the Tauri shell (see git history); their reasoning is
+  addressed below.
 - **ADR-0021** hardened the control surface (Origin allowlist + mandatory
   `/settings/api` auth + narrowed CORS + a minted same-origin session token),
   with the invariant that **CLI/plugin/SDK clients send no `Origin` and hit
@@ -105,21 +105,20 @@ per-request semantics**; the streaming/session layer above it is what churns.
    well-known URI advertising **only** the JSON-RPC binding (skip gRPC/REST); no
    wire change.
 
-**Why this supersedes ADR-0019.** 0019's WebSocket choice was driven entirely by
-ADR-0018 browser-tab delivery — a sidecar managing browser tabs it opened,
-needing client→server presence push and multi-tab fan-out. The **Electron client
-owns native windows**, eliminating both drivers: renderer visibility/focus is a
-normal POST; MCP's push model is one-way notifications; and multiple read-only
-diagnostics pages each open an **independent stateless SSE**. So the go-forward
-control plane returns to HTTP+SSE. (ADR-0007, already superseded by 0019, stays
-superseded.)
+**Why HTTP+SSE, not WebSocket.** The earlier WebSocket proposal (removed with the
+Tauri shell) was driven entirely by Tauri browser-tab delivery — a sidecar managing
+browser tabs it opened, needing client→server presence push and multi-tab fan-out.
+The **Electron client owns native windows**, eliminating both drivers: renderer
+visibility/focus is a normal POST; MCP's push model is one-way notifications; and
+multiple read-only diagnostics pages each open an **independent stateless SSE**. So
+the go-forward control plane uses HTTP+SSE.
 
 ## Alternatives considered
 
-- **Keep WebSocket (ADR-0019).** Bidirectional, but the control plane needs no
-  client→server socket push (POSTs suffice) and MCP deliberately uses HTTP+SSE,
-  not WS. A proxy control plane has no high-frequency bidirectional traffic to
-  justify it. Rejected for the go-forward line.
+- **A WebSocket transport** (the removed pre-Electron proposal). Bidirectional, but
+  the control plane needs no client→server socket push (POSTs suffice) and MCP
+  deliberately uses HTTP+SSE, not WS. A proxy control plane has no high-frequency
+  bidirectional traffic to justify it. Rejected for the go-forward line.
 - **Bespoke REST control plane.** Would force a *second* message model when MCP
   (JSON-RPC) lands, then a bridge between them — the exact drift trap. Rejected.
 - **gRPC.** HTTP/2-only, binary, browser-hostile (needs gRPC-Web), off-ecosystem
