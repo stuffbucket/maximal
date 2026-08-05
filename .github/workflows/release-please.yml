@@ -1,218 +1,30 @@
+# Release Please — PAUSED during the core excavation / Electron transition.
+#
+# This repo's release story is being redefined: the proxy core moved to
+# @stuffbucket/maximal-core and an Electron client is about to be brought into
+# this repo. The previous flow (open a release PR → tag on merge → dispatch
+# release.yml to build + sign installers) no longer applies: release.yml and the
+# installer/binary build pipeline have been removed, so there is nothing for a
+# tag to fire.
+#
+# The workflow is intentionally left disabled (job `if: false`) rather than
+# deleted so the Electron work can reinstate a version-bump/changelog/tag flow
+# without recovering it from history. Do NOT invest in a release pipeline here
+# until that lands.
 name: Release Please
 
-# Automates the version-bump / changelog / tag dance that used to be a
-# manual `bun run release` (bumpp) + hand-pushed tag. The flow is:
-#
-#   1. Commits land on main (conventional commits).
-#   2. This workflow opens / updates a "release PR" that bumps
-#      package.json `version` and regenerates CHANGELOG.md from those
-#      commits. The PR sits open, accumulating changes, until a
-#      maintainer merges it.
-#   3. On merge of that release PR, this workflow creates + pushes the git
-#      tag `vX.Y.Z`. It does NOT create a GitHub Release.
-#   4. The tag push fires release.yml, which CREATES the draft release,
-#      builds + signs + verifies every installer against it, then
-#      publishes once.
-#
-# DIVISION OF RESPONSIBILITY
-#   release-please (here):  the release PR (version bump + CHANGELOG.md),
-#                           and on merge the git TAG only.
-#   release.yml:            fires on the tag, creates the draft release,
-#                           attaches all assets, and publishes exactly once.
-#
-# WHY TAG-ONLY (not a GitHub Release here)
-#   Immutable Releases lock a release at publish time, and all assets must
-#   be attached BEFORE that single publish. The installers take ~30 min to
-#   build AFTER the tag exists, so the release MUST stay a draft until they
-#   land — which means release.yml has to own creation+publish. If
-#   release-please published the release itself, release.yml could not
-#   re-draft it to attach the installers ("state cannot be changed when
-#   release is immutable"). So release-please stops at the tag.
-#
-# TRIGGER CHAIN / TOKEN
-#   GitHub suppresses workflow triggers for refs pushed via the default
-#   GITHUB_TOKEN (the anti-loop guard release.yml documents at its top).
-#   So we mint a short-lived installation token from the **app-repoman**
-#   GitHub App (first-party actions/create-github-app-token), check out
-#   with it, and push the tag with it — an App-token push is a "real" push
-#   that fires release.yml, with no long-lived PAT to manage.
-#
-#   One-time setup (maintainer):
-#     1. Install app-repoman on this repo with Contents: Read & write
-#        and Pull requests: Read & write.
-#     2. REPOMAN_APP_ID (repo variable OR secret) = the app's App ID.
-#     3. Repo secret     REPOMAN_APP_PRIVATE_KEY = the app's PEM private key.
-#   If REPOMAN_APP_ID is unset we fall back to GITHUB_TOKEN and warn: the
-#   release PR + tag still get created, but a maintainer must kick
-#   release.yml by hand (workflow_dispatch with the tag selected under
-#   "Use workflow from").
-
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
-# GITHUB_TOKEN scopes for the fallback path (no app token). The
-# app-repoman token, when minted, carries its own installation scopes.
 permissions:
-  contents: write
-  pull-requests: write
-  actions: write
-
-# One release-please run per branch. Never cancel in-flight: a run that
-# is mid-tag-creation must finish, not be interrupted by the next push
-# to main.
-concurrency:
-  group: release-please-${{ github.ref }}
-  cancel-in-progress: false
+  contents: read
 
 jobs:
   release-please:
+    # Disabled: see the header. Re-enable and wire to the new (Electron) release
+    # pipeline when it exists.
+    if: false
     runs-on: ubuntu-latest
     steps:
-      # The App ID can live as a repo VARIABLE (idiomatic — it isn't
-      # secret) or a SECRET; support either. The `secrets` context can't
-      # be used in an `if:`, so resolve the id into a step output first
-      # (without echoing it) and gate the mint on that.
-      - name: Resolve app id
-        id: appid
-        env:
-          APP_ID: ${{ vars.REPOMAN_APP_ID || secrets.REPOMAN_APP_ID }}
-        run: |
-          set -euo pipefail
-          if [ -n "${APP_ID:-}" ]; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "present=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      # Mint a short-lived app-repoman installation token. We check out
-      # with it (below) so the tag push re-triggers release.yml. Skipped
-      # when no App ID is set → falls back to github.token (the tag then
-      # won't auto-fire release.yml; see the header note). The token output
-      # is auto-registered as a secret (masked in logs).
-      - name: Mint app-repoman token
-        id: app-token
-        if: steps.appid.outputs.present == 'true'
-        uses: actions/create-github-app-token@v2
-        with:
-          app-id: ${{ vars.REPOMAN_APP_ID || secrets.REPOMAN_APP_ID }}
-          private-key: ${{ secrets.REPOMAN_APP_PRIVATE_KEY }}
-
-      - name: Note token source
-        run: |
-          set -euo pipefail
-          if [ "${{ steps.appid.outputs.present }}" = "true" ]; then
-            echo "Using app-repoman token — the tag push will re-trigger release.yml."
-          else
-            echo "::warning::No REPOMAN_APP_ID (variable or secret) set — falling back to GITHUB_TOKEN."
-            echo "::warning::A tag pushed via GITHUB_TOKEN will NOT fire release.yml (anti-loop guard)."
-            echo "::warning::After the release PR merges, start release.yml manually: Run workflow, selecting the new vX.Y.Z tag under 'Use workflow from'."
-          fi
-
-      # Check out with the app token so `git push` of the tag below is an
-      # App-token push (fans out to release.yml).
-      - uses: actions/checkout@v6
-        with:
-          token: ${{ steps.app-token.outputs.token || github.token }}
-
-      - uses: ./.github/actions/setup-bun
-        with:
-          bun-version: 1.3.11
-
-      # On merge of a release PR, create + push the TAG only (no GitHub
-      # Release — release.yml owns that; see the WHY TAG-ONLY note above).
-      # Runs BEFORE release-pr so the just-released version is tagged and
-      # release-please has a clean baseline for proposing the next one.
-      # The manifest version is bumped only when a release PR merges, so:
-      # if the manifest version has no tag yet, a release PR just merged
-      # → tag it. If the tag already exists, this is an ordinary push to
-      # main → no-op.
-      - name: Tag merged release (release.yml builds + publishes it)
-        run: |
-          set -euo pipefail
-          VERSION="$(jq -r '.["."]' .release-please-manifest.json)"
-          TAG="v${VERSION}"
-          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
-            echo "${TAG} already tagged — no release PR merged, nothing to do."
-            exit 0
-          fi
-          echo "Manifest at ${VERSION} with no ${TAG} tag — tagging the merged release."
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "${TAG}" -m "${TAG}"
-          git push origin "${TAG}"
-          echo "Pushed ${TAG} — release.yml will build + publish it."
-
-      # If the manifest version has a tag but its GitHub Release hasn't been
-      # published yet (draft or absent), dispatch release.yml so the release
-      # pipeline is retried automatically. workflow_dispatch is NOT subject
-      # to the GITHUB_TOKEN anti-loop guard that suppresses push:tags: triggers,
-      # so this fires release.yml even when the tag was pushed via GITHUB_TOKEN.
-      - name: Re-trigger release.yml for any unpublished tagged release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          VERSION="$(jq -r '.["."]' .release-please-manifest.json)"
-          TAG="v${VERSION}"
-          if ! git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
-            echo "Tag ${TAG} not yet on remote — release.yml will fire when the tag is pushed above."
-            exit 0
-          fi
-          DRAFT="$(gh release view "$TAG" --repo "${{ github.repository }}" --json isDraft --jq '.isDraft' 2>/dev/null || echo 'notfound')"
-          if [ "$DRAFT" = "false" ]; then
-            echo "Release $TAG is already published — nothing to do."
-            exit 0
-          fi
-          echo "Tag ${TAG} exists but release is '${DRAFT}' — dispatching release.yml..."
-          gh workflow run release.yml --repo "${{ github.repository }}" --ref "${TAG}" -f tag="${TAG}"
-          echo "Dispatched release.yml for ${TAG}."
-
-      # Flip the merged release PR's label pending → tagged. release-please
-      # normally does this in its `github-release` step, but this pipeline
-      # SKIPS github-release (release.yml owns the GitHub Release — see the
-      # WHY TAG-ONLY note). Without this, the label stays `autorelease: pending`,
-      # which makes the release-pr step below abort ("untagged, merged release
-      # PRs outstanding") and blocks EVERY future release until someone flips it
-      # by hand. Runs once the tag exists, before release-pr, so the next PR
-      # opens in the same run. Idempotent: a no-op when nothing is pending, and
-      # self-heals any release PR a prior run left stuck at pending.
-      # (Long-term: provisioning REPOMAN_APP_ID lets release-please own this
-      # natively and removes both this step and the dispatch shim above.)
-      - name: Mark tagged release PRs as autorelease:tagged
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          VERSION="$(jq -r '.["."]' .release-please-manifest.json)"
-          TAG="v${VERSION}"
-          if ! git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
-            echo "Tag ${TAG} not on remote yet — nothing to mark."
-            exit 0
-          fi
-          PENDING="$(gh pr list --repo "${{ github.repository }}" --state merged \
-            --label "autorelease: pending" --json number --jq '.[].number')"
-          if [ -z "${PENDING}" ]; then
-            echo "No merged release PRs at 'autorelease: pending' — nothing to flip."
-            exit 0
-          fi
-          for n in ${PENDING}; do
-            gh pr edit "$n" --repo "${{ github.repository }}" \
-              --remove-label "autorelease: pending" --add-label "autorelease: tagged"
-            echo "Flipped #${n}: autorelease: pending → tagged"
-          done
-
-      # Open or update the release PR for the NEXT version (version bump +
-      # CHANGELOG.md from conventional commits since the last tag).
-      - name: release-please release-pr
-        env:
-          RP_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
-        run: |
-          set -euo pipefail
-          bunx release-please release-pr \
-            --token "$RP_TOKEN" \
-            --repo-url "${{ github.repository }}" \
-            --target-branch "${{ github.ref_name }}" \
-            --config-file release-please-config.json \
-            --manifest-file .release-please-manifest.json
+      - name: Paused
+        run: echo "release-please is paused during the core excavation / Electron transition."
