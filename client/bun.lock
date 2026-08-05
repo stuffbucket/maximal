@@ -31,7 +31,7 @@
 
     "@sindresorhus/merge-streams": ["@sindresorhus/merge-streams@4.0.0", "", {}, "sha512-tlqY9xq5ukxTUZBmoOp+m61cqwQD5pHJtFY3Mn8CA8ps6yghLH/Hw8UPdqg4OLmFW3IFlcXnQNmo/dh8HzXYIQ=="],
 
-    "@stuffbucket/maximal-core": ["@stuffbucket/maximal-core@github:stuffbucket/maximal-core#ac8c5e2", { "dependencies": { "@hono/zod-openapi": "^1.5.0", "citty": "^0.1.6", "clipboardy": "^5.0.0", "consola": "^3.4.2", "fetch-event-stream": "^0.1.5", "gpt-tokenizer": "^3.0.1", "hono": "^4.12.0", "proxy-from-env": "^1.1.0", "srvx": "^0.11.15", "tiny-invariant": "^1.3.3", "turndown": "^7.2.4", "undici": "^7.16.0", "winreg": "^1.2.5", "zod": "^4.1.11" }, "bin": { "maximal": "./dist/main.js" } }, "stuffbucket-maximal-core-ac8c5e2", "sha512-VEdOzgctXzoyBMC4CRbf4iRtLuxs0Ax9azsFPq5cuG38nUaQeOB6E2IKvSXB8hTmMWL85aY9p7CAt/T07X+DHg=="],
+    "@stuffbucket/maximal-core": ["@stuffbucket/maximal-core@github:stuffbucket/maximal-core#22b1df4", { "dependencies": { "@hono/zod-openapi": "^1.5.0", "citty": "^0.1.6", "clipboardy": "^5.0.0", "consola": "^3.4.2", "fetch-event-stream": "^0.1.5", "gpt-tokenizer": "^3.0.1", "hono": "^4.12.0", "proxy-from-env": "^1.1.0", "srvx": "^0.11.15", "tiny-invariant": "^1.3.3", "turndown": "^7.2.4", "undici": "^7.16.0", "winreg": "^1.2.5", "zod": "^4.1.11" }, "bin": { "maximal": "./dist/main.js" } }, "stuffbucket-maximal-core-22b1df4", "sha512-24+/Cnc6i1GWPBlqMFsoBGGwUw8yra4cwg2jQXByJbPR6fn13HnJ2ab4ZKYuNONVR7B6YGc9b3WbsZhBMTILSQ=="],
 
     "@szmarczak/http-timer": ["@szmarczak/http-timer@4.0.6", "", { "dependencies": { "defer-to-connect": "^2.0.0" } }, "sha512-4BAffykYOgO+5nzBWYwE3W90sBgLJoUPRWWcL8wlyiM8IB8ipJz3UMJ9KXQd1RKQXpKp8Tutn80HZtWsu2u76w=="],
 

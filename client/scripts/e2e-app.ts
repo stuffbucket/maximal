@@ -180,12 +180,31 @@ try {
 
   // What the user actually sees. A window that opened but rendered an error
   // state is still a broken app, and every check above would have passed.
-  const paintedRaw = (await cdp.evaluate(`JSON.stringify({
-    engine: document.getElementById('engine')?.textContent ?? '',
-    protocol: document.getElementById('protocol')?.textContent ?? '',
-    auth: document.getElementById('auth')?.textContent ?? '',
-  })`)) as string
-  const painted = JSON.parse(paintedRaw) as Record<string, string>
+  //
+  // `—` is the placeholder each field ships with in index.html. Reading the DOM
+  // immediately races the renderer's async populate, so poll until the fields
+  // are actually filled. Without this the assertions pass on an *unfilled*
+  // window — the precise failure this harness exists to catch, which is how the
+  // weakness was found in the first place.
+  const PLACEHOLDER = "—"
+  const readPainted = async (): Promise<Record<string, string>> =>
+    JSON.parse(
+      (await cdp.evaluate(`JSON.stringify({
+        engine: document.getElementById('engine')?.textContent ?? '',
+        protocol: document.getElementById('protocol')?.textContent ?? '',
+        auth: document.getElementById('auth')?.textContent ?? '',
+      })`)) as string,
+    ) as Record<string, string>
+
+  let painted = await readPainted()
+  const paintDeadline = Date.now() + 15_000
+  while (
+    Date.now() < paintDeadline
+    && Object.values(painted).some((v) => v === PLACEHOLDER || v === "")
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, 250))
+    painted = await readPainted()
+  }
 
   check(
     "painted",
@@ -199,8 +218,12 @@ try {
   )
   check(
     "auth state",
-    painted.auth.length > 0 && painted.auth !== "error",
-    `auth: "${painted.auth}" (unauthenticated is correct on a fresh isolated home)`,
+    painted.auth.length > 0
+      && painted.auth !== "error"
+      && painted.auth !== PLACEHOLDER,
+    painted.auth === PLACEHOLDER ?
+      `still the "${PLACEHOLDER}" placeholder — the field never populated`
+    : `auth: "${painted.auth}" (unauthenticated is correct on a fresh isolated home)`,
   )
 
   check(
