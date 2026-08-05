@@ -314,7 +314,6 @@ export function WorkspacePreview() {
         onNewTab={addSession}
         tabsLabel="Concept session tabs"
         newTabLabel="Open another fixture session"
-        titleBarLeading={<span className="workspace-preview__brand" aria-label="Maximal">m</span>}
         titleBarActions={(
           <IconButton label={assistantOpen ? 'Close workspace assistant concept' : 'Open workspace assistant concept'} active={assistantOpen} onClick={() => setAssistantOpen((open) => !open)}>
             <MessageSquareText aria-hidden="true" />

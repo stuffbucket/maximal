@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 
-import { app, BrowserWindow, dialog, ipcMain, session, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, session, shell } from 'electron'
 
 import { controlOrigin, killCore, proxyUrl, spawnCore } from './core.js'
 import { runShell } from './shell.js'
@@ -30,6 +30,15 @@ function installCoreCorsShim(origin: string): void {
       },
     })
   })
+}
+
+function installDevelopmentDockIcon(): void {
+  if (app.isPackaged || process.platform !== 'darwin' || !app.dock) return
+
+  const iconPath = join(__dirname, '../../build/icon.png')
+  const icon = nativeImage.createFromPath(iconPath)
+  if (icon.isEmpty()) throw new Error(`Maximal Dock icon is missing or invalid: ${iconPath}`)
+  app.dock.setIcon(icon)
 }
 
 function registerIpc(): void {
@@ -76,13 +85,14 @@ function createWindow(): void {
 }
 
 void app.whenReady().then(async () => {
-  registerIpc()
   try {
+    installDevelopmentDockIcon()
+    registerIpc()
     const { controlOrigin: origin, proxyUrl: proxy, port } = await spawnCore()
     installCoreCorsShim(origin)
     console.log(`[maximal-client] core ready — control ${origin}, proxy ${proxy} (port ${port})`)
   } catch (err) {
-    console.error('[maximal-client] core failed to start:', err)
+    console.error('[maximal-client] startup failed:', err)
     dialog.showErrorBox('Maximal could not start', err instanceof Error ? err.message : String(err))
     app.quit()
     return

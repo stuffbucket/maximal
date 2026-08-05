@@ -100,21 +100,6 @@ input {
   border: 0;
 }
 
-.workspace-preview__brand {
-  display: grid;
-  width: var(--size-xl);
-  height: var(--size-xl);
-  place-items: center;
-  flex: none;
-  color: var(--brand-fg);
-  background: var(--brand);
-  border-radius: var(--radius-input);
-  font-family: var(--font-display);
-  font-size: var(--text-lg);
-  font-weight: var(--weight-xl);
-  line-height: var(--leading-2xl);
-}
-
 .workspace-preview__queue {
   display: flex;
   min-width: 0;
