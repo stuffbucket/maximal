@@ -17,35 +17,16 @@ set -euo pipefail
 # builder's later top-level sign alone cannot do that, so this producer performs
 # the full inside-out sign here via @electron/osx-sign (driven by electron-forge
 # `package`, gated on SIGN_IDENTITY in forge.config.ts). The builder's top-level
-# re-sign then just re-seals the outer bundle (no --deep, idempotent). We also
-# PRE-sign the Bun sidecar before packaging (belt-and-suspenders: a Bun-compiled
-# binary ships only a linker ad-hoc signature the notary rejects; pre-signing with
-# the runner's Developer ID guarantees it's correct regardless of whether
-# osx-sign re-walks it).
+# re-sign then just re-seals the outer bundle (no --deep, idempotent). The
+# compiled sidecar's invalid linker ad-hoc signature is stripped before packaging;
+# @electron/osx-sign then signs the copy inside the final app exactly once, with
+# the same hardened-runtime/JIT profile as every other nested executable.
 #
 # Builder-supplied env consumed: TAG, ARCH, SIGN_IDENTITY, ENTITLEMENTS_DIR,
 # BUN_INSTALL, CARGO_HOME. The keychain is already unlocked — do not unlock it.
 
-# Self-hosted runners use non-login shells that don't read ~/.zshrc. Include
-# Homebrew's bin (/opt/homebrew/bin) — the runner's non-login PATH omits it, and
-# it's where node/npm live if brew-installed (build.yml prepends it the same way).
+# Self-hosted runners use non-login shells that don't read ~/.zshrc.
 export PATH="$BUN_INSTALL/bin:$CARGO_HOME/bin:/opt/homebrew/bin:$PATH"
-
-# electron-forge (used below) does NOT support bun as a package manager — it
-# requires npm/yarn/pnpm on PATH even when we run everything else through bun
-# (its "Checking your system" preflight runs `npm --version`). Fail loudly and
-# early with a diagnosis if none is present, rather than deep inside forge.
-if ! command -v npm >/dev/null 2>&1 && ! command -v pnpm >/dev/null 2>&1 && ! command -v yarn >/dev/null 2>&1; then
-  echo "::group::Node package-manager diagnosis (none found on PATH)"
-  echo "PATH=$PATH"
-  command -v node npm pnpm yarn bun 2>&1 || true
-  ls -la /opt/homebrew/bin/node /opt/homebrew/bin/npm 2>&1 || true
-  ls -d "$HOME"/.nvm/versions/node/* 2>/dev/null || true
-  echo "::endgroup::"
-  echo "::error::electron-forge needs npm/yarn/pnpm on PATH (bun is unsupported by forge). Install Node on the builder runner (e.g. brew install node)." >&2
-  exit 1
-fi
-echo "Package manager for forge: $(command -v npm || command -v pnpm || command -v yarn)"
 
 VERSION="${TAG#v}"
 ARCH="${ARCH:-arm64}"
@@ -70,8 +51,15 @@ if ! grep -q "\"version\": \"${VERSION}\"" package.json; then
   exit 1
 fi
 
-# Install deps (brings @stuffbucket/maximal-core into node_modules for --compile).
+# Install deps (brings tagged @stuffbucket/maximal-core into node_modules).
 bun install
+
+# Bun may block Electron's postinstall on a fresh runner. Forge core needs the
+# downloaded Electron.app template but not npm, so run Electron's installer under
+# Bun explicitly when the template is absent.
+if [ ! -d node_modules/electron/dist/Electron.app ]; then
+  bun node_modules/electron/install.js
+fi
 
 # Build the Bun-compiled maximal-core sidecar into resources/bin/maximal-core;
 # forge copies it into the app via extraResource.
@@ -84,19 +72,10 @@ fi
 chmod 0755 "$CORE"
 ls -la resources/bin/
 
-# Pre-sign the Bun sidecar (strip its linker ad-hoc signature, then sign with
-# Developer ID + hardened runtime + the bun-runtime entitlements the Bun runtime
-# needs: JIT / unsigned-executable-memory / library-validation). osx-sign may
-# re-sign it during packaging with the same profile — either way it ends up
-# correct. The builder's later top-level sign is WITHOUT --deep, so it won't
-# clobber the inner signatures.
+# Bun's compile output carries a linker ad-hoc signature that Apple rejects.
+# Strip it; @electron/osx-sign signs the copied binary inside Maximal.app during
+# its single inside-out pass with hardened runtime + bun-runtime entitlements.
 codesign --remove-signature "$CORE" 2>/dev/null || true
-codesign --force --options runtime --timestamp \
-  --identifier co.stuffbucket.maximal.proxy \
-  --entitlements "$ENTITLEMENTS" \
-  --sign "$SIGN_IDENTITY" \
-  "$CORE"
-codesign --verify --strict --verbose=2 "$CORE"
 
 # Self-hosted runner: out/ persists across builds. Nuke it so every build
 # regenerates the bundle from the freshly-stamped version (no stale Info.plist).

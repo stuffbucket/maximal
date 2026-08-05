@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs'
+
 import { VitePlugin } from '@electron-forge/plugin-vite'
 import type { ForgeConfig } from '@electron-forge/shared-types'
 
@@ -11,6 +13,10 @@ import type { ForgeConfig } from '@electron-forge/shared-types'
 // sign alone is not enough, hence signing happens here during packaging.
 const identity = process.env.SIGN_IDENTITY
 const entitlements = process.env.MACOS_ENTITLEMENTS
+
+if (identity && (!entitlements || !existsSync(entitlements))) {
+  throw new Error(`MACOS_ENTITLEMENTS must name an existing file when SIGN_IDENTITY is set (got ${String(entitlements)})`)
+}
 
 const config: ForgeConfig = {
   packagerConfig: {
