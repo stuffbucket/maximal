@@ -1,30 +1,11 @@
-// The shell seam. Today a minimal inline Electron shell; it is shaped like
-// maximal-electron's future `runMain(runtime, options)` (maximal-electron#22) so
-// swapping to that dependency is a localized change. The shell knows nothing
-// maximal-specific — the client injects everything through `options`.
-import { BrowserWindow } from 'electron'
+// The shell seam — now backed by the `stuffbucket/electron` shell DEPENDENCY.
+//
+// The client's window is created by the shell's `createHostWindow(options)`
+// (imported from the `stuffbucket-electron` package); the client injects its own
+// preload + renderer + core origin, so the shell stays maximal-agnostic. When
+// the shell grows a fuller `runMain(runtime, options)`, this swaps to it with a
+// localized change (maximal-electron#22).
+import { createHostWindow, type HostWindowOptions } from 'stuffbucket-electron/host'
 
-export interface ShellOptions {
-  preloadPath: string
-  windowTitle: string
-  width: number
-  height: number
-  /** Load the renderer (dev-server URL or built index.html) into the window. */
-  loadRenderer: (win: BrowserWindow) => void
-}
-
-export function runShell(options: ShellOptions): BrowserWindow {
-  const win = new BrowserWindow({
-    width: options.width,
-    height: options.height,
-    title: options.windowTitle,
-    webPreferences: {
-      preload: options.preloadPath,
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-    },
-  })
-  options.loadRenderer(win)
-  return win
-}
+export type ShellOptions = HostWindowOptions
+export const runShell = createHostWindow

@@ -1,5 +1,7 @@
 {
   "name": "maximal-client",
+  "description": "Electron client for maximal: spawns maximal-core and composes the stuffbucket/electron shell.",
+  "type": "commonjs",
   "productName": "Maximal",
   "version": "0.0.0",
   "private": true,
@@ -12,7 +14,8 @@
   },
   "dependencies": {
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "stuffbucket-electron": "github:stuffbucket/maximal-electron#fe3ca59949c191f86031bc15585855589477e6de"
   },
   "devDependencies": {
     "@electron-forge/cli": "7.11.2",

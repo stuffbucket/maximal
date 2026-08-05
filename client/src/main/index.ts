@@ -48,7 +48,7 @@ function loadRenderer(win: BrowserWindow): void {
 function createWindow(): void {
   runShell({
     preloadPath: join(__dirname, 'preload.js'),
-    windowTitle: 'Maximal',
+    title: 'Maximal',
     width: 760,
     height: 620,
     loadRenderer,
