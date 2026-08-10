@@ -50,9 +50,22 @@ and brokers requests to GitHub Copilot's backend (Bedrock-hosted Claude and
 GPT models), translating protocols, rewriting payloads, and managing auth. It
 ships as:
 
-- a **CLI / standalone binary** (the proxy itself), and
+- a **CLI / standalone binary** (the proxy itself),
 - a **Tauri 2 menu-bar app** (`shell/`) that wraps the proxy as a sidecar and
-  serves embedded settings/dashboard UIs.
+  serves embedded settings/dashboard UIs — **still live**, and
+- a **desktop Electron app** (`client/`, React 19 + TypeScript + Vite, managed
+  by **npm**, not Bun) that is the go-forward replacement for `shell/`, still
+  mid-migration. `client/` builds/compiles the proxy as its own sidecar via
+  Bun (`client/scripts/build-core.ts`), but everything else in `client/` —
+  install, typecheck, test — runs through npm, not Bun.
+
+**This document (§2–§9) describes the root proxy's Bun test suite only.**
+`client/` has its own, separate test setup: Vitest
+(`client/vitest.config.ts`, jsdom environment), run via `npm run test:run`
+(watch mode: `npm test`) from inside `client/`, and its own CI workflow
+(`.github/workflows/client-ci.yml`), independent of the root `ci.yml`
+described in §9. Do not assume "no tests" or "no CI" for `client/` — that was
+true early in the migration and is no longer true.
 
 The testing implications that shape everything below:
 
@@ -117,6 +130,7 @@ that mirror or the catalog spelling drifts.
 | Dead-code / unused deps | **knip** (`bun run knip`) | Part of `check:deep`. |
 | Secret scanning | **trufflehog** + `scripts/secret-scan.sh` | Runs pre-commit (lint-staged) and in CI. |
 | Design-token lint | `scripts/check-design-tokens.ts` | Guards the design system; UI work only. |
+| `client/` test runner | **Vitest** (`npm run test:run` inside `client/`) | Separate stack — npm-managed, jsdom, `client/vitest.config.ts`. Not part of `bun test`; see §1. |
 
 **Runtime pin:** Bun is pinned via `.bun-version` (currently `1.3.11`) and the
 CI pin in `.github/workflows/ci.yml` / `.github/actions/setup-bun`. These
@@ -382,9 +396,11 @@ Steps, in order:
 6. **`bun test`** (full suite).
 7. **`bun run build`**.
 
-Security workflows (CodeQL, trufflehog) and, on release, the gated
-build/sign/publish pipeline (macOS dmg, Windows MSI verify, checksums, smoke)
-run alongside. Release itself is Conventional-Commit-driven via release-please;
+`client/` (the Electron app) is gated by its own, separate workflow
+(`.github/workflows/client-ci.yml`) running `npm run test:run` — it is not
+part of the `ci.yml` steps above. Security workflows (CodeQL, trufflehog)
+and, on release, the gated build/sign/publish pipeline (macOS dmg, Windows
+MSI verify, checksums, smoke) run alongside. Release itself is Conventional-Commit-driven via release-please;
 `test:`/`chore:`/`docs:` commits are release-silent (see `docs/architecture.md`
 → *Release & PR conventions* and `docs/release-runbook.md`).
 

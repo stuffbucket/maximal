@@ -4,6 +4,15 @@
 **Date:** 2026-07-06.
 **Authors:** consolidated from a parallel investigation (billing, caching, transport, contract-rot), all findings confirmed against code + primary GitHub sources.
 
+> **Addendum — workstreams 1 and 2 landed.** `src/services/copilot/get-models.ts`
+> now types `token_prices` as the PRIMARY billing signal (`pricedModelIsPaid`),
+> with `is_premium`/`multiplier` kept only as a LEGACY fallback — in-code
+> comments cite this ADR by number. `src/routes/responses/handler.ts` now
+> actively sets `payload.prompt_cache_retention` via `getPromptCacheRetention()`
+> (opt-in, never overriding an explicit client value) — the "commented out,
+> not work in gpt-5.4" state described in divergence 2 is gone. Divergences
+> 3–7 are unchanged as of this addendum.
+
 ## Problem
 
 The proxy's request-handling engine was designed against GitHub Copilot's

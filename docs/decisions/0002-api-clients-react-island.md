@@ -1,14 +1,14 @@
 ---
 id: ADR-0002
 title: Settings → API clients as a React island
-status: proposed
+status: accepted
 date: 2026-05-19
 authors:
   - stuffbucket
 supersedes: []
 links:
   design_context: .design-context.md
-  settings_prd: docs/settings-window-prd.md
+  settings_prd: docs/settings-window-prd.md (deleted post-ship as a superseded PRD; see git history)
   api_routes: src/routes/settings/api-keys.ts
   api_types: src/lib/settings-types.ts
 related_files:
@@ -18,6 +18,15 @@ related_files:
   shell/tsconfig.json: 'jsx: "react-jsx"'
   shell/package.json: react/react-dom/@types/* / @vitejs/plugin-react
 ---
+
+> **Implementation status (landed, paths drifted).** The island shipped, but
+> under different paths than proposed below: the component lives at
+> `shell/src/ui/features/api-clients/ApiClients.tsx` (not
+> `shell/src/features/api-clients/`), mounted via
+> `shell/src/ui/islands/api-clients-island.tsx`'s `mountApiClients()`, called
+> from `shell/src/main.ts`. The old `shell/src/api-keys.ts` is gone. The
+> `hashchange`-driven `selectMode` reset this ADR wired now moves into
+> `navigate(id)` per ADR-0020.
 
 # API clients as a React island
 
@@ -289,8 +298,9 @@ they were lost to a concurrent process. Reconstruct as follows:
   `shell/src/main.ts`; React doesn't own routing.
 - **Batch-delete endpoint.** N sequential DELETEs is fine for v1.
 - **Storybook / Ladle / Playwright design loops.** The companion
-  doc `docs/design-stack-vite-playwright.md` is currently
-  aspirational ("not implemented"). Stay vanilla on testing for
+  doc `docs/design-stack-vite-playwright.md` (deleted as an
+  aspirational stack doc that was never implemented; see git
+  history) called this "not implemented". Stay vanilla on testing for
   this section; rely on `bun test` integration tests that grep
   `index.html`.
 

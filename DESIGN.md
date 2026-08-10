@@ -10,9 +10,10 @@
 > `shell/src/ui/styles/tokens.css`. Component code and the `docs/design/*.md`
 > topic files reference tokens **by name, never by value** — do not inline the
 > hex/px shown here into a component. When values below and `theme.ts` disagree,
-> `theme.ts` wins. The binding rules live in
-> [`docs/design/principles.md`](docs/design/principles.md) and
-> [`.design-context.md`](.design-context.md).
+> `theme.ts` wins. The binding rules used to live in `docs/design/principles.md`
+> (deleted with the rest of the Tauri shell design docs; see
+> [`docs/design/failure-modes.md`](docs/design/failure-modes.md)'s scope note
+> and git history) and [`.design-context.md`](.design-context.md).
 >
 > **In-flight re-tone (this doc leads source).** The interactive accent is being
 > moved off teal to a **warm bronze**, and prose links flipped to a cool tone —
@@ -133,7 +134,7 @@ Both Fraunces and Commissioner are **self-hosted** WOFF2 in production (bundled 
 
 ## 4. Component Stylings
 
-Where a token exists, component CSS references it by name. Dimensions below that aren't tokenized are canon in [`docs/design/components.md`](docs/design/components.md) — match them exactly.
+Where a token exists, component CSS references it by name. Dimensions below that aren't tokenized were canon in `docs/design/components.md`, deleted with the rest of the Tauri shell design docs (see [`docs/design/failure-modes.md`](docs/design/failure-modes.md)'s scope note and git history) — match this doc's values exactly until a `client/`-specific successor exists.
 
 ### Buttons
 | Variant | Height | Padding (h) | Font | Weight | Fill / border |

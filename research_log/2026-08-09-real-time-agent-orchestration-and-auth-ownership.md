@@ -1,6 +1,6 @@
 # Real-time agent orchestration and authentication ownership
 
-**Date:** 2026-08-09  
+**Date:** 2026-08-09
 **Status:** research spike; architecture recommendation, not an implementation decision
 
 ## Executive conclusion

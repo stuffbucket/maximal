@@ -53,8 +53,10 @@ gh workflow run windows-installer-dev.yml --ref <branch> -f version=0.0.0-dev
 - **Maintenance + fidelity.** Mock upstream + fixtures must track API/model
   changes; a stub validates *our* pipeline, not real Copilot compatibility
   (contract test, not a substitute).
-- **GUI gap.** The Tauri window/tray can't run headless; only the browser-tab UI
-  (ADR-0018) is drivable without `tauri-driver`. Defer the window/tray E2E.
+- **GUI gap.** Neither desktop shell's window/tray can run fully headless.
+  `shell/` (Tauri) needs `tauri-driver`/WebView2; `client/` (Electron) would
+  need an Electron-driver equivalent. Only the browser-tab UI (ADR-0018) is
+  drivable without either. Defer the window/tray E2E for both stacks.
 
 ## Phasing
 
@@ -62,7 +64,11 @@ gh workflow run windows-installer-dev.yml --ref <branch> -f version=0.0.0-dev
 |---|---|---|
 | **1. Headless system test** | Boot the proxy against a stub upstream; drive synthetic transcripts; assert translation/streaming + usage recorded | every PR, all-OS |
 | **2. Served-UI E2E** | Playwright loads `/ui/settings` + dashboard against the running proxy; assert islands mount, WS connects, usage reflects the synthetic traffic | Linux per-PR; Windows nightly/label |
-| **3. Tauri shell E2E** *(optional)* | `tauri-driver` (WebView2) drives the real window/tray on Windows | nightly only |
+
+> A window/tray E2E phase (driving the real desktop shell, not just the
+> served UI) is deferred for both `shell/` (Tauri) and `client/` (Electron)
+> until one of them regresses badly enough to justify the tooling cost —
+> see the GUI-gap note above.
 
 The already-validated Windows build is the "build" stage feeding Phases 1–2.
 
@@ -163,10 +169,8 @@ every-PR, Windows nightly/on-label. Reuse `windows-installer-dev.yml`'s existing
 5. **Fixture maintenance** — where transcripts live and how they're regenerated
    as models/API shapes change.
 
-## Phase 2 / 3 (outline only)
-- **Phase 2:** add Playwright; load `/ui/settings/` + dashboard against the
+## Phase 2 (outline only)
+- Add Playwright; load `/ui/settings/` + dashboard against the
   running proxy from Phase 1; assert the islands mount, the WS live-feed connects,
   and the usage island reflects the synthetic traffic. Linux per-PR; Windows
   nightly/label.
-- **Phase 3 (optional):** `tauri-driver` + WebView2 to drive the real window/tray
-  on Windows. Nightly only; accept flakiness; only if the tray starts regressing.

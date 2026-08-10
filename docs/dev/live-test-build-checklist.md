@@ -6,11 +6,15 @@ want to test live — and **confirming** it does, rather than assuming.
 ## The problem this solves
 
 There is no automatic link between "merged to `main`" and "in the running
-sidecar." The Tauri sidecar is a compiled binary; `bun run app:dev` only
-recompiles it when its sources changed (see `scripts/build-sidecar.ts` →
-`isUpToDate`). A sidecar built from an older commit silently omits everything
-merged since. Symptom: the proxy on `:4141` reports an old commit in its
-`x-maximal-version` header while `origin/main` has moved on.
+sidecar." The proxy is compiled into a sidecar binary; `bun run app:dev`
+(the `shell/` dev loop) only recompiles it when its sources changed (see
+`scripts/build-sidecar.ts` → `isUpToDate`). A sidecar built from an older
+commit silently omits everything merged since. Symptom: the proxy on `:4141`
+reports an old commit in its `x-maximal-version` header while `origin/main`
+has moved on. The same staleness risk applies to `client/`'s own sidecar
+build (`client/scripts/build-core.ts`) — the verification approach below
+(`verify:build`, the `x-maximal-version` header) is shared, stack-agnostic
+infrastructure.
 
 ## How "which commit is running" is knowable
 
@@ -21,7 +25,7 @@ version = `${pkg.version}-dev+${git rev-parse HEAD (first 8 chars)}`
 ```
 
 injected via `bun build --compile --define __MAXIMAL_VERSION__=...`. That value
-becomes `BUILD_VERSION` (`src/lib/build-info.ts`) and the proxy echoes it on
+becomes `BUILD_VERSION` (`src/lib/update/build-info.ts`) and the proxy echoes it on
 **every** response as the `x-maximal-version` header (`src/server.ts`). So the
 `+<sha>` suffix **is** the source commit the running binary was built from —
 that's exactly what `bun run verify:build` compares against `origin/main`.

@@ -1,16 +1,22 @@
 ---
 id: ADR-0020
 title: Single-history (replaceState-only) routing invariant
-status: proposed
+status: accepted
 date: 2026-07-14
 authors:
   - stuffbucket
 supersedes: []
 links:
-  spec: docs/spec/single-window-redesign.md
+  spec: docs/spec/single-window-redesign.md (deleted post-ship; see git history)
   shell_entry: shell/src/main.ts
   token_drift_gate: scripts/check-design-tokens.ts
 ---
+
+> **Implementation status (landed).** `shell/src/main.ts` navigates via
+> `history.replaceState` only, with an in-code comment citing the
+> tray-dedup rationale this ADR describes. `tests/single-history-invariant.test.ts`
+> and `tests/spa-router.test.ts` guard the invariant. No `pushState` or
+> `location.hash =` assignment remains in the nav path.
 
 # Single-history (replaceState-only) routing invariant
 

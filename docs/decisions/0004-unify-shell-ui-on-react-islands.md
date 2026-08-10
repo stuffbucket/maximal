@@ -9,7 +9,7 @@ supersedes: []
 links:
   prior_adr: docs/decisions/0002-api-clients-react-island.md
   design_context: .design-context.md
-  windows_doc: docs/design/windows.md
+  windows_doc: docs/design/windows.md (deleted with the Tauri shell design docs; see git history)
 related_files:
   shell/src/main.ts: 1360-line imperative vanilla entrypoint (the migration target)
   shell/index.html: 686-line static markup driven by data-section/data-field/data-state-* attributes

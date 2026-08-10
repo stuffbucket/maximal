@@ -146,7 +146,7 @@ What `Stop` + `PostToolUse` *do not* see:
 - External long-runners — a `bun run mutate` started earlier finishes
   in the background; nothing surfaces the result.
 - Port binding, network reachability, OS notification permissions,
-  Tauri dev-server liveness.
+  desktop-app dev-server liveness.
 
 ### 8. Hook can't distinguish "novel" from "ambient" failure
 

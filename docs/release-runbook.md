@@ -170,8 +170,9 @@ bun run render-formula --org stuffbucket --version X.Y.Z \
 
 ## 6. Announce
 
-The Pages site (`docs/index.html`) auto-fetches the latest release via
-the GitHub API at page load — no manual update needed there.
+The marketing site (`site/`) reads the published `updates/manifest.json`
+(built from `site/src/lib/updates-manifest.ts`) to hydrate its download
+buttons — no manual update needed there.
 
 **Re-running a failed Pages deploy — dispatch fresh, never re-run failed jobs.**
 If a `deploy-pages.yml` run fails at the deploy step, trigger a brand-new run:

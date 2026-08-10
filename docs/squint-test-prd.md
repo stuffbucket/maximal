@@ -15,7 +15,7 @@ The human reviewer catches these in two seconds by squinting. We want an L3-tier
 
 ## Goals
 
-- Take a screenshot of any window in the design-tools workspace (or, later, the maximal Tauri shell).
+- Take a screenshot of any surface in the design-tools workspace (or, later, a served route/tab in the `client/` Electron app — moving toward a single window with multiple routes, not multiple windows, so capture should target a route/tab, not "a window").
 - Apply a calibrated Gaussian blur (the "squint").
 - Threshold + segment into connected luminance regions ("blobs").
 - Report a structured verdict: blob count, dominant-blob luminance distribution, presence of a single visually dominant region.

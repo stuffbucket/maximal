@@ -151,4 +151,6 @@ polished `.dmg` to a release.
 Pre-alpha. Functional end-to-end against x3-design enterprise. See
 `docs/spec/archive/web-tools.md` for the agent-loop spec,
 `docs/admin/claude-desktop-mdm.md` for Cowork-side configuration, and
-`docs/spec/archive/internal-distribution.md` for the v1 distribution plan.
+`docs/spec/archive/internal-distribution.md` (deleted post-ship as an
+archived, superseded plan; see git history — `docs/spec/phase-5-distribution-simplification.md`
+covers current distribution work) for the v1 distribution plan.

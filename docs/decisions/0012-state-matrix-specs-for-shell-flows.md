@@ -9,7 +9,7 @@ supersedes: []
 links:
   design_index: .design-context.md
   failure_modes: docs/design/failure-modes.md
-  windows: docs/design/windows.md
+  windows: docs/design/windows.md (deleted with the Tauri shell design docs; see git history)
 related_files:
   src/lib/auth-controller.ts: auth state machine in code
   shell/src/main.ts: renders state transitions
@@ -58,7 +58,8 @@ Initial set:
 - `account-switch.md` — multi-account switch + sidecar reboot
 - `app-enable.md` — enable / disable per app + conflict resolution
 - `first-run.md` — first launch, no config, through first successful
-  request (cross-references `docs/first-run-setup-prd.md`)
+  request (cross-references `docs/first-run-setup-prd.md`, deleted
+  post-ship as a superseded PRD; see git history)
 
 Each document follows a fixed structure:
 

@@ -1,19 +1,29 @@
 ---
 id: ADR-0019
 title: WebSocket transport + presence registry (supersedes SSE)
-status: proposed
+status: accepted
 date: 2026-07-14
 authors:
   - stuffbucket
 supersedes:
   - ADR-0007
 links:
-  spec: docs/spec/single-window-redesign.md
+  spec: docs/spec/single-window-redesign.md (deleted post-ship; see git history)
   sse_events: src/routes/settings/events.ts
   request_auth: src/lib/auth/request-auth.ts
   run_server: src/lib/start/run-server.ts
   shell_lib: shell/src-tauri/src/lib.rs
 ---
+
+> **Implementation status (landed).** `src/lib/ws/{presence-registry,
+> live-feed, feed-types, tray-open}.ts` and `src/routes/ws/route.ts` implement
+> this design; `server.route(WS_PATH, createWsRoutes())` wires it into
+> `src/server.ts`. The srvx-upgrade gate this ADR called out is proven by
+> `tests/ws/srvx-upgrade-handshake.test.ts`, running in the default suite.
+> `src/routes/settings/events.ts` (SSE) is gone, retired as planned. Note:
+> ADR-0023 later recorded that this WebSocket line was itself superseded for
+> the post-Electron-migration control plane — read both before assuming which
+> transport is current.
 
 # WebSocket transport + presence registry (supersedes SSE)
 

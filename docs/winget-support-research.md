@@ -20,8 +20,9 @@ wiring. **Code signing is not required.**
 - Installer must support silent install. MSI is silent by default
   with `/q` — we already qualify.
 - The installer URL must be a stable, public download. GitHub release
-  assets work — that's where our MSI already lands per
-  `.github/workflows/installers.yml`.
+  assets work — that's where our MSI already lands (the `windows-msi`
+  job inside `.github/workflows/release.yml`; there is no separate
+  `installers.yml`).
 
 ## Things winget does **not** require
 
@@ -37,9 +38,12 @@ wiring. **Code signing is not required.**
 
 ## What we already have that fits
 
-- **MSI artifact.** `windows-msi` job in
-  `.github/workflows/installers.yml` produces
-  `maximal-<version>-windows-x64.msi` on every release.
+- **MSI artifact.** `windows-msi` job inside
+  `.github/workflows/release.yml` produces
+  `maximal-<version>-windows-x64.msi` on every release (verified by
+  `windows-msi-verify` in the same run; `windows-installer-dev.yml` is a
+  manual `workflow_dispatch` harness for iterating on the manifest
+  without cutting a full release).
 - **Stable identity in the MSI.**
   `build/windows/maximal.wxs` declares:
   - `Manufacturer="stuffbucket"`
@@ -118,7 +122,7 @@ generated manifest at release time. Option (b) is what
 | ------------------------------------ | ----------- | ----------------------------------------------------------------------- |
 | First manual submission              | 1–2 hours   | `wingetcreate new`, point at the latest release MSI, submit PR          |
 | Pin or extract ProductCode           | 15–30 min   | Either swap WiX `Id="*"` for a stable GUID + bump strategy, or let komac scrape it from the MSI each release |
-| Wire auto-update into release CI     | 1–2 hours   | Add `winget-releaser` to `.github/workflows/installers.yml` (or new workflow) keyed on release publication |
+| Wire auto-update into release CI     | 1–2 hours   | Add `winget-releaser` to `.github/workflows/release.yml` (or a new workflow) keyed on release publication |
 | Add screenshot + Tags / PackageUrl   | 15 min      | One-time polish on the defaultLocale manifest                           |
 
 **Total:** half a day to ship + automate.

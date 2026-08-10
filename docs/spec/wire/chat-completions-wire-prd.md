@@ -25,7 +25,7 @@ Body is a `ChatCompletionsPayload`
   `logprobs`, `response_format`, `seed`, `tools[]`, `tool_choice`,
   `user`, `thinking_budget`.
 
-Client headers consumed (`src/lib/trace.ts`, `request-context.ts`):
+Client headers consumed (`src/lib/http/trace.ts`, `request-context.ts`):
 `x-trace-id` (echoed back), `user-agent` (forwarded only for opencode;
 otherwise replaced), optional `x-session-affinity` and
 `x-parent-session-id` (forwarded upstream when present).
@@ -36,7 +36,7 @@ otherwise replaced), optional `x-session-affinity` and
 
 1. **Model-ID reversal** — `reverseId(payload.model)`:
    `claude-opus-4-6-20260301` → `claude-opus-4.6`; non-Anthropic IDs
-   (e.g. `gpt-*`) pass through (`anthropic-id-rewrite.ts:51-59`).
+   (e.g. `gpt-*`) pass through (`src/lib/models/anthropic-id-rewrite.ts:51-59`).
 2. **Model validation** — look up the model in `state.models`. Special
    case: `gpt-5.4` returns `400` `invalid_request_error` with the
    message *"Please use '/v1/responses' or '/v1/messages' API"*
@@ -64,7 +64,7 @@ Headers, on top of the base Copilot set (see auth PRD):
   (`create-chat-completions.ts:39-54`).
 - **`x-interaction-type`** — `conversation-subagent` for a marked
   subagent, `conversation-other` under compaction; optional
-  `x-interaction-id: <sessionId>` (`api-config.ts:100-129`).
+  `x-interaction-id: <sessionId>` (`src/lib/config/api-config.ts:100-129`).
 
 `tools[]` and `tool_choice` are forwarded with **no schema validation or
 normalization** (`create-chat-completions.ts:200-218`).

@@ -7,7 +7,7 @@ authors:
   - stuffbucket
 supersedes: []
 links:
-  spec: docs/spec/single-window-redesign.md
+  spec: docs/spec/single-window-redesign.md (deleted post-ship; see git history)
   server: src/server.ts
   request_auth: src/lib/auth/request-auth.ts
   settings_routes: src/routes/settings
