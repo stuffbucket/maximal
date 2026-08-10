@@ -1,0 +1,107 @@
+name: Client CI
+
+on:
+  push:
+    branches: [ "main", "dev" ]
+    paths:
+      - "client/**"
+      - ".github/workflows/client-ci.yml"
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - "client/**"
+      - ".github/workflows/client-ci.yml"
+  merge_group:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: client/package-lock.json
+
+      # client/ is an Electron + Vite app managed by npm, NOT bun — bun is
+      # only used here to compile the maximal-core sidecar dependency
+      # (build:core), which this job does not need.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm run test:run
+
+  # Packaged-app E2E (client/e2e/): drives a REAL packaged Electron app via
+  # Playwright's Electron support, from a copy relocated OUTSIDE the repo
+  # (client/e2e/support/relocate-app.ts — see there for why that is
+  # non-negotiable). Separate job from `test` above because it needs a full
+  # `npm run package` first and is far slower (real process spawn + a real
+  # sidecar boot), and needs a macOS runner: build:core only targets
+  # bun-darwin-arm64 today, so this suite only runs on darwin.
+  e2e:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: client/package-lock.json
+
+      # Bun is only used here to compile the maximal-core sidecar
+      # (build:core) — read the version from the repo's pinned source of
+      # truth (docs/bun-version-policy.md) rather than hardcoding a copy.
+      - name: Read Bun version
+        id: bun
+        run: echo "version=$(cat ../.bun-version)" >> "$GITHUB_OUTPUT"
+
+      - uses: ./.github/actions/setup-bun
+        with:
+          bun-version: ${{ steps.bun.outputs.version }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build maximal-core sidecar
+        run: npm run build:core
+
+      # Unsigned — this job proves packaging + sidecar wiring, not
+      # code-signing. Signing is the private macos-builder pipeline's job
+      # (.macos-builder/build.sh), which is never invoked here.
+      - name: Package app
+        run: npm run package -- --arch=arm64
+
+      # Guard so a package step that failed silently upstream (or a future
+      # refactor that changes the output path) fails this job LOUDLY here,
+      # rather than the e2e step silently reporting "0 tests ran" or, worse,
+      # the harness falling back to some other stale app on the runner.
+      - name: Assert the packaged app exists
+        run: |
+          set -euo pipefail
+          APP="out/Maximal-darwin-arm64/Maximal.app"
+          if [ ! -d "$APP" ]; then
+            echo "::error::Packaged app not found at $APP — npm run package must have failed upstream." >&2
+            exit 1
+          fi
+          echo "Packaged app present: $APP"
+
+      - name: E2E (packaged app)
+        run: npm run e2e

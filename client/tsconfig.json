@@ -13,5 +13,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["src", "scripts", "*.config.ts", "forge.config.ts", "forge.env.d.ts"]
+  "include": ["src", "scripts", "e2e", "*.config.ts", "forge.config.ts", "forge.env.d.ts"]
 }

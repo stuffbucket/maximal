@@ -9,25 +9,48 @@
   "scripts": {
     "build:core": "bun scripts/build-core.ts",
     "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "test": "vitest",
+    "test:run": "vitest run",
     "start": "electron-forge start",
-    "package": "electron-forge package"
+    "package": "electron-forge package",
+    "e2e": "playwright test"
   },
   "dependencies": {
+    "@radix-ui/react-collapsible": "^1.1.20",
+    "@radix-ui/react-tabs": "^1.1.21",
+    "@radix-ui/react-tooltip": "^1.2.16",
+    "@radix-ui/react-visually-hidden": "^1.2.11",
+    "ghostty-web": "^0.4.0",
+    "lucide-react": "^1.29.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "stuffbucket-electron": "github:stuffbucket/maximal-electron#fe3ca59949c191f86031bc15585855589477e6de",
+    "react-resizable-panels": "^4.12.2",
+    "stuffbucket-electron": "github:stuffbucket/maximal-electron#2f1a06ced486162b047d43a0fcca5fd82a6943e0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@babel/core": "^7.29.7",
+    "@babel/eslint-parser": "^7.29.7",
+    "@babel/preset-react": "^7.29.7",
+    "@babel/preset-typescript": "^7.29.7",
     "@electron-forge/cli": "7.11.2",
     "@electron-forge/plugin-vite": "7.11.2",
     "@electron-forge/shared-types": "7.11.2",
-    "@stuffbucket/maximal-core": "github:stuffbucket/maximal-core#v0.2.0",
+    "@eslint/js": "^9.39.5",
+    "@playwright/test": "^1.62.1",
+    "@stuffbucket/maximal-core": "github:stuffbucket/maximal-core#v0.6.3",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^5.2.0",
-    "electron": "43.2.0",
-    "typescript": "^5.9.3",
-    "vite": "^7.3.6"
+    "@vitejs/plugin-react": "^6.0.5",
+    "electron": "43.3.0",
+    "eslint": "^9.39.5",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "globals": "^15.15.0",
+    "jsdom": "^30.0.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.1",
+    "vitest": "^4.1.10"
   }
 }

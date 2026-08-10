@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs'
 
 import { VitePlugin } from '@electron-forge/plugin-vite'
 import type { ForgeConfig } from '@electron-forge/shared-types'
+import type { OsxSignOptions } from '@electron/packager'
 
 // macOS inside-out signing is driven here (invoked by @electron/osx-sign during
 // `electron-forge package`) and ENABLED ONLY when SIGN_IDENTITY is present. The
@@ -35,6 +36,13 @@ const config: ForgeConfig = {
       ? {
           osxSign: {
             identity,
+            // Electron Packager defaults this to true, which can report a
+            // successful package after signing failed and left a partial app.
+            continueOnError: false,
+            // osx-sign 1.3.3 follows framework `Versions/Current` symlinks while
+            // walking, then attempts to sign the same binary-looking resources
+            // twice. Sign the canonical `Versions/A` tree and skip only aliases.
+            ignore: (filePath) => filePath.includes('/Versions/Current/'),
             // Apply bun-runtime entitlements + hardened runtime UNIFORMLY to every
             // signed component (app, Helper apps, Electron Framework, and the Bun
             // sidecar). bun-runtime is a superset that satisfies all of them:
@@ -42,7 +50,7 @@ const config: ForgeConfig = {
             // Bun/JavaScriptCore) + disable-library-validation (spawn the
             // separately-signed sidecar, load Bun's bundled libs) + network.
             optionsForFile: () => ({ entitlements, hardenedRuntime: true }),
-          },
+          } as OsxSignOptions & { continueOnError: false },
         }
       : {}),
   },
