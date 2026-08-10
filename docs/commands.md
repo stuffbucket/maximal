@@ -32,37 +32,30 @@ bun run release:manual  # local fallback cut (bumpp + bun publish). Primary
                         # release PR → tag → release.yml builds/publishes.
 
 # Tauri app (menu-bar shell wrapping the proxy as a sidecar on :4141)
+# Still live today, but being replaced by client/ (below) — a minimal pointer,
+# not a full workflow guide.
 bun run app:setup    # one-time: install shell deps + force-build sidecar binary
-bun run app:sidecar  # build the UI + regenerate the embed manifest + rebuild the
-                     # standalone proxy binary into shell/src-tauri/binaries/
-                     # (compile is a no-op when the binary is newer than src/;
-                     # override with --force or MAXIMAL_FORCE_SIDECAR=1 — release
-                     # pipelines must set it)
 bun run app:dev      # build sidecar (if stale) + tauri dev
-bun run app:ui       # UI-only iteration: `bun run build:ui --watch` — rebuilds the
-                     # settings + dashboard bundles into shell/dist on every save.
-                     # Run `bun run dev` in another terminal so the sidecar serves
-                     # them at :4141/ui/* (reload the window to pick up changes).
-bun run app:build    # force-rebuild sidecar + tauri build --bundles app,dmg
 ```
 
-## Fast UI iteration
+## Electron client (`client/`)
 
-For HTML/CSS/TS changes under `shell/ui/` or `shell/src/`, **do not** run
-`app:dev` — the sidecar binary is a 66 MB Bun compile (~30–90s). Instead run
-the proxy from source (it serves the UI from `shell/dist` on disk) and a
-watch-build:
+`client/` is a separate Electron app under active development as the
+replacement for the Tauri `shell/` — **both exist today**, don't assume
+one has replaced the other. It is managed by **npm, not Bun**:
 
 ```sh
-# Terminal A — proxy from source with file watch, bound to :4141.
-bun run dev -- start --port 4141
-
-# Terminal B — rebuild the UI bundles on every save.
-bun run app:ui
-# Open http://localhost:4141/ui/settings/  (or /ui/dashboard/)
-# Reload the window after a save to pick up changes.
+cd client
+npm install          # Install dependencies (npm, not bun)
+npm run build:core   # Compile the maximal-core sidecar (uses bun under the hood)
+npm run typecheck    # tsc --noEmit
+npm run test         # Vitest, watch mode
+npm run test:run     # Vitest, single run (what CI runs)
+npm start            # electron-forge start
+npm run package      # electron-forge package
 ```
 
-`shell/src/main.ts`'s `safeInvoke()` already swallows Tauri-only `invoke()`
-calls when running in a plain browser, so the "Reveal in Finder" buttons
-no-op gracefully — everything else works.
+Bun is only invoked internally by `build:core` to compile the extracted
+`@stuffbucket/maximal-core` proxy engine into a sidecar binary — every other
+`client/` command runs through npm/Node. CI for `client/` runs in its own
+workflow, `.github/workflows/client-ci.yml`, separate from the root `ci.yml`.

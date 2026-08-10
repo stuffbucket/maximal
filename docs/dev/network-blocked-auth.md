@@ -44,15 +44,15 @@ Historically this was invisible:
     constants or the `isOffline` / `isDnsFailure` / `isScopeUnreachable`
     predicates — never a raw `kind === "offline"` string compare (rots on
     rename). All magic values (IPs, port, families, scope) are named constants.
-- `token.ts` refresh loop + first-mint path log the typed classification via
+- `src/lib/auth/token.ts` refresh loop + first-mint path log the typed classification via
   `formatDiagnosisForLog` (a dev-log string — no i18n; survives the file sink's
   secret-scrubber so the safe transport fields stay visible). It passes the
   target `{ scope: NETWORK_SCOPE.githubCopilotAuth, url: getCopilotTokenUrl() }`
-  (the shared endpoint constant in `api-config.ts`).
-- `log-redact.ts` allowlists the unambiguous socket/DNS error keys (`syscall`,
+  (the shared endpoint constant in `src/lib/config/api-config.ts`).
+- `src/lib/platform/log-redact.ts` allowlists the unambiguous socket/DNS error keys (`syscall`,
   `hostname`, `address`). `code` / `path` stay redacted (they collide with
   content keys); transport errors are logged as safe strings instead.
-- `auth-controller.ts` `runDegrade` now tees a line to `auth-*.log` when an
+- `src/lib/auth/auth-controller.ts` `runDegrade` now tees a line to `auth-*.log` when an
   account is flagged `needsReauth`.
 - The latest typed verdict is exposed via `getLastNetworkDiagnosis()` for a
   future UI banner to read (and translate) without re-probing.
@@ -81,7 +81,7 @@ The **network-issue banner is built** for the Settings window: a global,
 account-aware, 12-locale banner that mirrors `.requirement-callout` in the
 warning tone, plus an account-type glyph (individual/team/enterprise) next to
 the connection indicator. It's driven by the token-refresh loop's transport
-diagnosis through the onset/notify hysteresis (`network-hysteresis.ts`). The
+diagnosis through the onset/notify hysteresis (`src/lib/net/network-hysteresis.ts`). The
 remaining surfaces below are additive and were scoped out of the first PR:
 
 1. **Proactive signed-out connectivity poll.** The banner is driven by the
@@ -98,31 +98,25 @@ remaining surfaces below are additive and were scoped out of the first PR:
    mutually exclusive with the refresh-loop producer (poll only when NOT
    authenticated) so it can't false-clear a `scope-unreachable` it cannot see.
 
-2. **Dashboard-window banner.** The Settings window and the Dashboard window use
-   **different styling systems** — Settings is the design-token
-   `styles.css`/`.requirement-callout` idiom; the Dashboard is Tailwind
-   utilities + its own `style.css`. So the banner is NOT a mechanical port: the
-   copy/icon resolution is reusable (extract `resolveBannerCopy` + the icon
-   constants from `shell/src/main.ts` into a shared `shell/src/ui/*` module), but
-   the Dashboard needs its own Tailwind-idiom render + an auth SSE subscription
-   (it has none today — add a `subscribeAuthEvents` consumer like Settings').
-   Doing it hastily risks the aesthetic mismatch we explicitly avoid; it wants a
-   short design pass against the Dashboard's existing components.
+2. **Dashboard-window banner.** *(shell/-specific — Tauri only, no `client/`
+   equivalent planned.)* The Settings window and the Dashboard window use
+   different styling systems, so porting the banner isn't mechanical. Low
+   priority while `client/` (not `shell/`) is the active development target.
 
 3. **Apps-tab outage badge.** When a diagnosis is active, mark the config apps
    that route through Copilot (Claude Code, Claude Desktop — NOT Copilot CLI)
    with a small warning glyph + hover title matching the banner's visual
-   language (see the approved mockup `docs/design/network-banner-preview.html`).
-   Lives in the React apps island (`shell/src/ui/features/apps/AppCard.tsx` +
-   `useApps.ts`), which needs the `network_diagnosis` signal threaded in.
+   language (the approved mockup `docs/design/network-banner-preview.html`
+   was deleted with the rest of the Tauri shell design docs; see git
+   history). This is shell/-specific UI wiring today; `client/` has no
+   equivalent apps island yet.
 
 4. **Native reconnect notification.** The backend already emits a one-shot
    `notify_on_reconnect: true` on the `auth.changed` event when an outage longer
-   than `NOTIFY_ON_RECONNECT_MS` (30s) recovers. Nothing consumes it yet — the
-   shell has no native-notification path (the tray covers other out-of-band
-   nudges). Wiring it needs the Tauri notification plugin (permission flow) or a
-   tray toast; until then a long outage recovers silently (the banner just
-   disappears).
+   than `NOTIFY_ON_RECONNECT_MS` (30s) recovers. Nothing consumes it yet.
+   *(shell/-specific follow-up — wiring a native notification is a per-shell
+   concern; whichever desktop app is active when this is picked up should
+   use its own native-notification API, not necessarily Tauri's.)*
 
 5. **Interface rebinding / discovery.** When `activeInterfaces.length > 1`, a
    working network may have come up *after* maximal started and our socket is

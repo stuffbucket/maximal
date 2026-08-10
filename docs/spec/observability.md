@@ -313,8 +313,7 @@ is sufficient.
 
 - Web-tools work — covered by `docs/spec/archive/web-tools.md`
 - Tool-bridge work — covered by `docs/spec/tool-bridge.md`
-- State / config / cache cleanup — covered by
-  `docs/spec/archive/state-config-cache-cleanup.md` (now closed)
+- State / config / cache cleanup — closed, see git history
 - MDM / egress — covered by `docs/admin/claude-desktop-mdm.md`
 
 ## References

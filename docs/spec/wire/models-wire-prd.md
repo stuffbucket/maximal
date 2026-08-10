@@ -23,10 +23,10 @@ cached list and refreshes it lazily:
 - **Boot fetch** — `cacheModels()` calls `getModels()`:
   `POST ${copilotBaseUrl}/models` with model-access headers
   (`x-interaction-type: model-access`, `openai-intent: model-access`)
-  (`src/services/copilot/get-models.ts:8-26`, `api-config.ts:218-231`).
+  (`src/services/copilot/get-models.ts:8-26`, `src/lib/config/api-config.ts:218-231`).
 - **Lazy stale-while-revalidate** — `staleRefreshMiddleware`
-  (`server.ts:101-112`) runs after auth on every authenticated request.
-  `refreshIfStale()` (`src/lib/refresh-models.ts:93-116`) compares
+  (`server.ts:138-149`) runs after auth on every authenticated request.
+  `refreshIfStale()` (`src/lib/models/refresh-models.ts`) compares
   `getModelsLoadedAtMs()` against `STALE_AFTER_MS` (6 h) ± a deterministic
   per-machine jitter of ±1 h (SHA-256 of `state.macMachineId`). When
   stale, it fires a **background** refresh (single-flight guarded by
@@ -98,15 +98,15 @@ Two transforms shape the list (both shapes):
 - **ID rewrite** — `forwardId()` converts the upstream dotted ID to a
   dash-date sentinel: `claude-opus-4.6` → `claude-opus-4-6-20260301`,
   `claude-opus-4.7-high` → `claude-opus-4-7-high-20260301`
-  (`anthropic-id-rewrite.ts:31-39`). This preserves the minor version in
+  (`src/lib/models/anthropic-id-rewrite.ts:31-39`). This preserves the minor version in
   Claude Desktop's model picker. The inbound handlers reverse it
   (`reverseId()`).
 - **Filtering** — variant IDs (suffixes `-low`/`-medium`/`-high`/
   `-xhigh`/`-max`/`-1m`/`-1m-internal`) are omitted because Anthropic
   exposes those as request-time parameters, not separate models
-  (`anthropic-id-rewrite.ts:67-72`); only models with
+  (`src/lib/models/anthropic-id-rewrite.ts:67-72`); only models with
   `model_picker_enabled: true` **or** `type: "embeddings"` are listed
-  (`src/lib/utils.ts:29`).
+  (`src/lib/platform/utils.ts:29`).
 
 ## Response contract — `/:provider/v1/models`
 
@@ -128,7 +128,7 @@ shape is whatever the provider returns (Anthropic models list).
 - Provider upstream errors → status/body relayed as-is.
 
 A background refresh failure is **swallowed** — the stale cache keeps
-serving and a warning is logged (`server.ts:106-110`). The list never
+serving and a warning is logged (`server.ts:143-147`). The list never
 goes empty due to a transient refresh error.
 
 ## Acceptance

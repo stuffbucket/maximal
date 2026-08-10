@@ -1,8 +1,19 @@
 # Design: decouple the marketing site from releases via a runtime version manifest
 
-**Status:** Proposal for review. Design only — nothing implemented.
+**Status:** Implemented (Phases 0-4 all landed; Phase 4 cleanup done in #223).
+Originally: proposal for review, design only.
 **Date:** 2026-07-03.
 **Authors:** consolidated from a parallel investigation (root-cause, data-contract, CI/workflow).
+
+> **Implementation note.** `site/src/lib/version.ts` and
+> `site/src/pages/updates/manifest.json.ts` cite this document by path in their
+> own header comments and describe themselves as following it exactly: the
+> committed `site/public/updates/manifest.json` is the source of truth,
+> `release.yml`'s `manifest` job keeps it fresh via
+> `scripts/write-updates-manifest.ts`, and `site-pin.yml` /
+> `SITE_PIN_VERSION` / the build-time `GITHUB_TOKEN` lookup are gone, matching
+> Phase 4 below. Kept in place (not deleted) because live source comments
+> reference it directly as the design record.
 
 ## Problem statement
 

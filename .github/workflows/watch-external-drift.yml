@@ -13,12 +13,16 @@
 #   - nothing drifting → close a stale drift issue if one is open.
 #
 # It deliberately does NOT open a PR. The watcher hands off a detailed,
-# PR-derivable issue, and repoman's issue triage (wired in
-# .github/workflows/triage.yml) routes it so the reconciliation PR can be
-# derived and landed; a maintainer can also pick it up straight from the
-# labelled issue. Note the drift issue below is created with `github.token`, so
-# it does NOT fire the issues.opened event that triage.yml keys on — repoman's
-# poll backstop (processMissedTriage) is what triages it. This also keeps the
+# PR-derivable issue, and repoman's issue triage routes it so the
+# reconciliation PR can be derived and landed; a maintainer can also pick it up
+# straight from the labelled issue. Triage happens entirely through repoman's
+# poll backstop (processMissedTriage, ~5 min): the caller stub that once lived
+# at .github/workflows/triage.yml was deleted because a public repository
+# cannot resolve a reusable workflow in the private repoman repo, so it failed
+# on all 48 of its runs with no jobs at all. The backstop was always the only
+# mechanism actually applying `needs-triage` here — and the drift issue below
+# is created with `github.token`, which does not fire `issues.opened` anyway,
+# so nothing about this watcher's triage path changed. This also keeps the
 # watcher off the require-PR ruleset path entirely — filing an issue needs only
 # a plain `GITHUB_TOKEN` with `issues: write`, so there is no app-token or
 # CI-won't-fire-on-a-bot-PR fragility to manage here. Bumping an impersonated

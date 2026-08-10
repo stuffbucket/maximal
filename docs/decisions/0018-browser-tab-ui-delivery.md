@@ -1,17 +1,23 @@
 ---
 id: ADR-0018
 title: Deliver the shell UI as a browser tab, not a Tauri webview
-status: proposed
+status: accepted
 date: 2026-07-14
 authors:
   - stuffbucket
 supersedes: []
 links:
-  spec: docs/spec/single-window-redesign.md
+  spec: docs/spec/single-window-redesign.md (deleted post-ship; see git history)
   ui_route: src/routes/ui/route.ts
   shell_lib: shell/src-tauri/src/lib.rs
   run_server: src/lib/start/run-server.ts
 ---
+
+> **Implementation status (landed).** `shell/src-tauri/src/lib.rs` implements
+> `open_app`/`open_settings_window`/`quit_app` exactly as described in
+> Consequences below, with an in-code comment citing this ADR. Tauri still
+> owns the tray, sidecar supervisor, and native splash/boot/failure window;
+> the settings/dashboard UI is served into a browser tab.
 
 # Deliver the shell UI as a browser tab, not a Tauri webview
 

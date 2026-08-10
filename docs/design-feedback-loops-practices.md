@@ -35,6 +35,8 @@ Hook-harness wiring (Claude Code): L1 runs from `PostToolUse`, L2 runs from `Sto
 
 ## L1 rules to ship in v1
 
+> **Current state vs. this proposal.** No `stylelint` config, plugin, or `.claude/hooks/` directory exists in this repo today. The one L1 check that has actually shipped is `scripts/check-design-tokens.ts` — a small Bun script (not stylelint) wired into `bun run check:design` / `check:tokens` / `tokens:verify` (see `package.json`), which enforces a narrow, hand-picked set of token rules (currently: `--text-xs` reserved for glyph-only contexts) because, per its own header comment, "stylelint's `declaration-property-value-disallowed-list` is selector-blind" for our project-specific selector-scoped rules. The rest of this section (stylelint config, the broader rule table, the `.claude/hooks/design-review-prompt.txt` L2 sketch) is still a **forward-looking proposal**, not shipped tooling — read it as the plan, and check `scripts/check-design-tokens.ts` for what's actually enforced today.
+
 The inner loop runs four checks in parallel on every CSS/TSX/HTML save. Silent on success, exit 2 with compact stderr on failure. Scoped to the edited file.
 
 | Rule | Tool | Latency | What it catches |
@@ -211,7 +213,7 @@ The honest answer is **hybrid**, and the dividing line is the latency budget.
 
 - Reproducibility. A teammate or an agent on a different machine gets the same a11y verdicts and the same screenshots.
 - Isolation. Java (vnu), Playwright browser binaries (~400MB), and axe-core CLI dependencies don't pollute the host's `node_modules` or PATH.
-- Scoping. The container only mounts the directories with UI. For this repo: `shell/src/`, `pages/`, `src/pages/`. Backend code in `src/lib/`, `src/routes/`, `src/services/` is not mounted — the design tools have no signal there and shouldn't see it.
+- Scoping. The container only mounts the directories with UI. For this repo: `client/src/renderer/`, `pages/`, `src/pages/` (and, while the Tauri `shell/` still exists alongside `client/`, `shell/src/`). Backend code in `src/lib/`, `src/routes/`, `src/services/` is not mounted — the design tools have no signal there and shouldn't see it.
 
 **Dockerfile sketch** (~30 lines; do not commit until tested):
 
@@ -245,7 +247,7 @@ RUN chmod +x /usr/local/bin/design-run
 ENTRYPOINT ["design-run"]
 ```
 
-Invoke from the host as `docker run --rm -v $PWD/shell/src:/work/shell/src:ro -v $PWD/pages:/work/pages:ro design-tools axe http://host.docker.internal:4142/dashboard`. First run is 30s of container start plus the actual audit; subsequent runs reuse a long-lived container via `docker compose up -d design-tools` and exec into it.
+Invoke from the host as `docker run --rm -v $PWD/client/src/renderer:/work/client/src/renderer:ro -v $PWD/pages:/work/pages:ro design-tools axe http://host.docker.internal:4142/dashboard`. First run is 30s of container start plus the actual audit; subsequent runs reuse a long-lived container via `docker compose up -d design-tools` and exec into it.
 
 **What goes wrong if you ignore the dividing line:**
 

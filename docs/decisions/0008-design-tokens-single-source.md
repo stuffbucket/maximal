@@ -2,15 +2,15 @@
 id: ADR-0008
 title: Single source of truth for design tokens (kill the dashboard duplicate)
 status: obsoleted
-obsoleted_by: docs/spec/single-window-redesign.md
+obsoleted_by: the single-window redesign (docs/spec/single-window-redesign.md, deleted post-ship; see git history)
 date: 2026-06-14
 authors:
   - stuffbucket
 supersedes: []
 links:
   failure_modes: docs/design/failure-modes.md
-  tokens_doc: docs/design/tokens.md
-  change_checklist: docs/design/change-checklists.md
+  tokens_doc: docs/design/tokens.md (deleted with the Tauri shell design docs; see git history)
+  change_checklist: docs/design/change-checklists.md (deleted with the Tauri shell design docs; see git history)
 related_files:
   shell/src/tokens.css: canonical token declarations
   src/pages/usage-viewer.css: independent duplicate (drift documented)
@@ -18,14 +18,19 @@ related_files:
   src/pages/usage-viewer.html: dashboard entry that re-declares tokens inline
 ---
 
-> **Obsoleted by the single-window redesign** (`docs/spec/single-window-redesign.md`
-> §4, §11). This ADR exists to de-dupe tokens between the shell and the
-> standalone dashboard/usage-viewer. That redesign **deletes** the dashboard and
-> ports Usage into the shell SPA on the shared tokens — removing the duplicate
-> this ADR was written to sync. This is the exit condition the ADR itself
-> predicted (Consequences: "the script is moot once usage-viewer moves into the
-> shell build"). Note: the canonical path is now `shell/src/ui/styles/tokens.css`,
-> not `shell/src/tokens.css` as referenced below.
+> **Obsoleted by the single-window redesign.** Its spec
+> (`docs/spec/single-window-redesign.md`) has since been deleted from the
+> tree — its content shipped and it overlapped heavily with the ADRs it
+> spawned, so it's retrievable via git history rather than kept in-tree. Per
+> that spec's §4/§11, the redesign **deletes** the dashboard and ports Usage
+> into the shell SPA on the shared tokens — removing the duplicate this ADR
+> was written to sync. This is the exit condition the ADR itself predicted
+> (Consequences: "the script is moot once usage-viewer moves into the shell
+> build"). Note: the canonical path is now `shell/src/ui/styles/tokens.css`,
+> not `shell/src/tokens.css` as referenced below. Also note: the body below
+> references `docs/design/tokens.md` and `docs/design/change-checklists.md`,
+> which were deleted along with the rest of the Tauri shell design docs (see
+> `docs/design/failure-modes.md`'s scope note and git history).
 
 # Single source of truth for design tokens
 

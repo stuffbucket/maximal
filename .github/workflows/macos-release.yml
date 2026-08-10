@@ -1,0 +1,66 @@
+# macOS signed .dmg (Electron client) — dispatcher for stuffbucket/macos-builder.
+#
+# WHAT THIS DOES
+#   Triggers build.yml in the PRIVATE builder repo (stuffbucket/macos-builder),
+#   which owns the only self-hosted macOS runner and all Apple signing secrets.
+#   The builder checks THIS repo out at the tag, runs .macos-builder/{config,build.sh}
+#   (which builds + inside-out-signs the Electron client's Maximal.app), then
+#   top-level-signs, packages the .dmg, notarizes, staples, checksums, and uploads
+#   Maximal.dmg (+ .sha256) onto THIS release. This workflow builds nothing itself.
+#
+# WHY workflow_dispatch ONLY (no `release: published`)
+#   GitHub immutable releases reject attaching an asset AFTER publish (HTTP 422),
+#   so an on-`published` trigger would always fail. The automatic release path
+#   builds the .dmg while the GitHub Release is still a DRAFT (mutable) and gates
+#   `publish` on it, so the signed .dmg lands inside the single draft->published
+#   flip. That draft-phase job lives in the release pipeline (the `macos-dmg` job
+#   in release.yml); this workflow is the MANUAL dispatcher / recovery tool — run
+#   it against a still-DRAFT release tag, or for builder debugging.
+#
+#   NOTE: this file is the Electron-era successor to the retired macos-build.yml.
+#   It replaced the Tauri producer (shell/src-tauri) with the Electron client
+#   (client/) — same dispatch, new producer. See .macos-builder/config +
+#   .macos-builder/build.sh.
+#
+# REQUIREMENTS (one-time, already provisioned for maximal)
+#   - app-repoman installed on THIS repo with Contents: read+write (lets the
+#     builder check out + upload here without any PAT on this repo).
+#   - Secret MACOS_BUILDER_PAT — fine-grained PAT, Actions: write on
+#     stuffbucket/macos-builder ONLY (its sole power is to start the build).
+#   - An approved policy clients/stuffbucket/maximal.policy in the builder repo.
+
+name: macOS signed build (Electron, manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to (re)build, e.g. v1.2.3"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger build on stuffbucket/macos-builder
+        env:
+          GH_TOKEN: ${{ secrets.MACOS_BUILDER_PAT }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TAG}" ]; then
+            echo "::error::No tag provided." >&2
+            exit 1
+          fi
+          echo "Triggering macOS Electron build for ${REPO} at ${TAG}"
+          gh workflow run build.yml \
+            --repo stuffbucket/macos-builder \
+            --ref main \
+            -f "repo=${REPO}" \
+            -f "ref=${TAG}"
+          echo "Triggered. The signed Maximal.dmg will appear on the ${TAG} release shortly."
