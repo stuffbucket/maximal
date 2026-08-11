@@ -4,10 +4,6 @@ node_modules
 dist
 dist-build
 dist-release
-shell/dist
-shell/node_modules
-shell/src-tauri/target
-shell/src-tauri/binaries
 .claude/worktrees
 .claude/logs
 bun.lock
