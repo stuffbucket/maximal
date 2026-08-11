@@ -41,7 +41,7 @@ Something not working? See [Troubleshooting](./troubleshooting).
   ```sh
   git clone https://github.com/stuffbucket/maximal
   cd maximal
-  bun install
+  pnpm install
   bun start
   ```
 

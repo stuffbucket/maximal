@@ -6,4 +6,4 @@ dist-build
 dist-release
 .claude/worktrees
 .claude/logs
-bun.lock
+pnpm-lock.yaml

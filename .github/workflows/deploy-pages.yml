@@ -61,9 +61,10 @@ jobs:
         with:
           bun-version: latest
 
+      - uses: pnpm/action-setup@v4
       - name: Install site dependencies
         working-directory: site
-        run: bun install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       # Build the static site. As of issue #223 (Phase 4 of #218) the build no
       # longer queries the GitHub releases API and has no SITE_PIN_VERSION knob:

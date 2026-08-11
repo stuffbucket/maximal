@@ -20,7 +20,7 @@ CI runs these on every PR, so a green release PR already means they pass.
 Re-run locally only if you want to sanity-check before merging:
 
 ```sh
-bun install
+pnpm install
 bun run lint
 bun run typecheck
 bun test

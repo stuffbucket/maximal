@@ -1,7 +1,7 @@
 # Commands
 
 ```sh
-bun install          # Install dependencies
+pnpm install         # Install dependencies (pnpm installs; Bun runs)
 bun run dev          # Dev mode with watch
 bun run build        # Build to dist/ (native Bun import attributes)
 bun run start        # Production start (NODE_ENV=production)

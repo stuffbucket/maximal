@@ -34,9 +34,10 @@ jobs:
       - uses: ./.github/actions/setup-bun
         with:
           bun-version: ${{ steps.bun.outputs.version }}
+      - uses: pnpm/action-setup@v4
       - name: Install site dependencies
         working-directory: site
-        run: bun install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
       - name: Site tests
         working-directory: site
         run: bun run test

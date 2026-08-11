@@ -18,5 +18,6 @@
   },
   "dependencies": {
     "@astrojs/markdoc": "^2.0.0"
-  }
+  },
+  "packageManager": "pnpm@10.20.0"
 }

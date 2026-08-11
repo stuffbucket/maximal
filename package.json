@@ -67,7 +67,13 @@
     "simple-git-hooks": "^2.13.1",
     "typescript": "^5.9.3"
   },
+  "packageManager": "pnpm@10.20.0",
   "engines": {
     "node": ">=22"
+  },
+  "pnpm": {
+    "ignoredBuiltDependencies": [
+      "simple-git-hooks"
+    ]
   }
 }
