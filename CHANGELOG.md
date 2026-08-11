@@ -1,5 +1,52 @@
 # Changelog
 
+## [0.4.42](https://github.com/stuffbucket/maximal/compare/v0.4.41...v0.4.42) (2026-08-11)
+
+
+### Features
+
+* add "menu bar only" setting; show in Dock/taskbar by default ([#304](https://github.com/stuffbucket/maximal/issues/304)) ([a6029bf](https://github.com/stuffbucket/maximal/commit/a6029bf58e31ca0d932bfbd37e94f304783fbdc4))
+* **auth:** diagnose transport-layer network failures on the Copilot auth path ([#347](https://github.com/stuffbucket/maximal/issues/347)) ([ca1dcc4](https://github.com/stuffbucket/maximal/commit/ca1dcc4d839b12a47eeca568cb9b3116cab0fd49))
+* **auth:** persist the GitHub refresh token and token expiry (previously discarded) ([#390](https://github.com/stuffbucket/maximal/issues/390)) ([eb375ed](https://github.com/stuffbucket/maximal/commit/eb375ed47c24022259b631c6eee957fcfc5d4fb1))
+* **auth:** renew an expired GitHub token via its refresh token before degrading ([#391](https://github.com/stuffbucket/maximal/issues/391)) ([60fb33c](https://github.com/stuffbucket/maximal/commit/60fb33c88242ebc26d6a284dc8a05d1ec94e19e1))
+* **client:** Electron client consuming maximal-core + stuffbucket/electron ([#419](https://github.com/stuffbucket/maximal/issues/419)) ([13131db](https://github.com/stuffbucket/maximal/commit/13131db67d6a289495165e6c877fa074214a2ef8))
+* **client:** ship usable Electron desktop MVP ([#440](https://github.com/stuffbucket/maximal/issues/440)) ([a8dac6a](https://github.com/stuffbucket/maximal/commit/a8dac6ad3b325ff3cd583cf105f1419fc8b31336))
+* **design:** enforce theme.ts as the single token source in CI ([#371](https://github.com/stuffbucket/maximal/issues/371)) ([40340f4](https://github.com/stuffbucket/maximal/commit/40340f4f4ebe18483f14295ae626b3bc224fdc62)), refs [#352](https://github.com/stuffbucket/maximal/issues/352) [#354](https://github.com/stuffbucket/maximal/issues/354)
+* **models:** ModelProfile resolver + fix pdf_input and reasoning-model sampling strip ([#350](https://github.com/stuffbucket/maximal/issues/350)) ([cc6c8de](https://github.com/stuffbucket/maximal/commit/cc6c8de1ae8e11d55e7dc5b381f8e4fdf8bb22bf))
+* **models:** render the catalog as a grid of cards, not tables ([#400](https://github.com/stuffbucket/maximal/issues/400)) ([62c5e3e](https://github.com/stuffbucket/maximal/commit/62c5e3e4efff5ef944da3d99f7fbc74add7c8452))
+* network-issue banner + account-type glyph (Settings) ([#359](https://github.com/stuffbucket/maximal/issues/359)) ([9ed94a1](https://github.com/stuffbucket/maximal/commit/9ed94a175a5f92df18f92f11db90f98686e45639))
+* **ops:** add --fix autonomous-bump path to the drift watcher ([#325](https://github.com/stuffbucket/maximal/issues/325)) ([77dfb64](https://github.com/stuffbucket/maximal/commit/77dfb64ed9777036d9805ab4995802d39bf2be32))
+* **ops:** add drift watch for the anthropic-version + x-github-api-version header pins ([#313](https://github.com/stuffbucket/maximal/issues/313)) ([9467704](https://github.com/stuffbucket/maximal/commit/94677041ce1ff701bb589eb389f34bd26d606b51)), refs [#307](https://github.com/stuffbucket/maximal/issues/307)
+* **ops:** external-surface drift watcher with repoman triage handoff ([#310](https://github.com/stuffbucket/maximal/issues/310)) ([db940ce](https://github.com/stuffbucket/maximal/commit/db940ce7dc9bbd2ddb4866d8d1bb920eae1145d1))
+* **ops:** OpenAPI proof-of-shape for /setup-status product endpoint ([#328](https://github.com/stuffbucket/maximal/issues/328)) ([aba42fb](https://github.com/stuffbucket/maximal/commit/aba42fb6ef64ebb97ae3f8b059e74372270c6e8b))
+* **self-update:** land in-place self-updater consistent with the single-window redesign ([#367](https://github.com/stuffbucket/maximal/issues/367)) ([9fc46f9](https://github.com/stuffbucket/maximal/commit/9fc46f9db938498599c2070f832fcac024a86768))
+* **shell:** consume the extracted maximal-core engine ([#406](https://github.com/stuffbucket/maximal/issues/406)) ([a78b8c5](https://github.com/stuffbucket/maximal/commit/a78b8c53e71412fae56b9fab79afe5b8797ea9a4))
+* **shell:** restore section + scroll when a tray click reopens the tab ([#382](https://github.com/stuffbucket/maximal/issues/382)) ([b7effef](https://github.com/stuffbucket/maximal/commit/b7effef2b2a17d01de8f0bc694846b843ffadccc))
+* **single-window:** land the single-window redesign (browser-tab delivery) ([#343](https://github.com/stuffbucket/maximal/issues/343)) ([f72996d](https://github.com/stuffbucket/maximal/commit/f72996d692f70960364ae6b6cede8d6d2105d85e))
+* **site:** landing + guide redesign, design system, star widget ([#402](https://github.com/stuffbucket/maximal/issues/402)) ([bd6e91e](https://github.com/stuffbucket/maximal/commit/bd6e91e4d4de40b8bd784d499bf161bf7ea87168))
+* **token-usage:** bound the events table with a retention window ([#387](https://github.com/stuffbucket/maximal/issues/387)) ([3e04d19](https://github.com/stuffbucket/maximal/commit/3e04d19e07ee6ff32b4c8cf80667b714a7f8be4f))
+* **usage:** live token-type trackers and dual traffic graphs ([#386](https://github.com/stuffbucket/maximal/issues/386)) ([a3106e0](https://github.com/stuffbucket/maximal/commit/a3106e09d5fcfa392a44f540e4c06e4ff5d428c7))
+* **usage:** rework the usage view into a live, provider-forward dashboard ([#383](https://github.com/stuffbucket/maximal/issues/383)) ([520ff28](https://github.com/stuffbucket/maximal/commit/520ff28b4034482b993e1e2e792c0c0aa5ecc073))
+* **usage:** single multi-line traffic chart + rolling 7-day window ([#392](https://github.com/stuffbucket/maximal/issues/392)) ([c35c164](https://github.com/stuffbucket/maximal/commit/c35c1643247fa6525eb46b119490a75b61283410))
+
+
+### Bug Fixes
+
+* **apps:** correct apiKeyHelper invocation under a runtime + mint a default endpoint key ([#388](https://github.com/stuffbucket/maximal/issues/388)) ([f116d4f](https://github.com/stuffbucket/maximal/commit/f116d4f08d8053a603653976d64a3082cfe62c7e))
+* **apps:** recognize apiKeyHelper ownership by invocation, not string shape ([#396](https://github.com/stuffbucket/maximal/issues/396)) ([0acabed](https://github.com/stuffbucket/maximal/commit/0acabed680b83b3aeaa49032914679375c9069a2))
+* **auth:** recover sessions on wake and self-heal stale bearers, mint failures, and the model cache ([#389](https://github.com/stuffbucket/maximal/issues/389)) ([d35da0d](https://github.com/stuffbucket/maximal/commit/d35da0d3869c394f4be620e2dc19e40221dcd6b8))
+* **auth:** validate GitHub/Copilot response boundaries; make the device-code poll cancellable ([#361](https://github.com/stuffbucket/maximal/issues/361)) ([052fdd6](https://github.com/stuffbucket/maximal/commit/052fdd63cff21ff1f4a96f9da73831925d255c5e))
+* **cli:** make check-usage resilient to a missing premium_interactions quota key ([#311](https://github.com/stuffbucket/maximal/issues/311)) ([388f2ae](https://github.com/stuffbucket/maximal/commit/388f2ae39d278fce15ddc8ad66d4f13401b3be1d)), refs [#308](https://github.com/stuffbucket/maximal/issues/308)
+* **deps:** bump serde_with to 3.21.0 (GHSA-7gcf-g7xr-8hxj) ([#362](https://github.com/stuffbucket/maximal/issues/362)) ([8d0f464](https://github.com/stuffbucket/maximal/commit/8d0f464089055f73e999df5a951339c57295caa0))
+* **design:** remove dead focus-ring dashboardExpr, document single treatment ([#369](https://github.com/stuffbucket/maximal/issues/369)) ([d4bc753](https://github.com/stuffbucket/maximal/commit/d4bc7535537e40c56ee37993cbef66245284ba96)), refs [#356](https://github.com/stuffbucket/maximal/issues/356)
+* **diagnostics:** stop the Manage section blanking, and tidy its layout ([#401](https://github.com/stuffbucket/maximal/issues/401)) ([6dd2048](https://github.com/stuffbucket/maximal/commit/6dd2048f6198e9f4914281af7b41f28764cd20b0))
+* **ops:** reconcile anthropic SDK spec drift baseline ([#316](https://github.com/stuffbucket/maximal/issues/316)) ([b8a013c](https://github.com/stuffbucket/maximal/commit/b8a013c746c3eb75c83f9ec444bb4aeef32dab0a))
+* **release:** make release-notes step idempotent for a published release ([#302](https://github.com/stuffbucket/maximal/issues/302)) ([1bedb56](https://github.com/stuffbucket/maximal/commit/1bedb5636304632891af71be121f2a4f8c1f7b1f))
+* **shell:** make the menu-bar-only toggle work in the browser-tab UI ([#380](https://github.com/stuffbucket/maximal/issues/380)) ([69ddae6](https://github.com/stuffbucket/maximal/commit/69ddae692f13fa123d9001c55d60611e19250eb3))
+* **shell:** surface exactly one focused tab on every tray click ([#379](https://github.com/stuffbucket/maximal/issues/379)) ([a151a34](https://github.com/stuffbucket/maximal/commit/a151a34c99e64c23392329e3506cec152731a724))
+* **token-usage:** events-page query omits total_nano_aiu and is_premium ([#312](https://github.com/stuffbucket/maximal/issues/312)) ([e6ed44e](https://github.com/stuffbucket/maximal/commit/e6ed44eaf40d853188e5092e8cd54171411b16d1)), refs [#309](https://github.com/stuffbucket/maximal/issues/309)
+* **ws:** return an explicit 101 from /ws upgrade, not undefined ([#404](https://github.com/stuffbucket/maximal/issues/404)) ([22e8225](https://github.com/stuffbucket/maximal/commit/22e8225245195e72e590a47fcf02ed063c554f71))
+
 ## [0.4.41](https://github.com/stuffbucket/maximal/compare/v0.4.40...v0.4.41) (2026-07-10)
 
 
