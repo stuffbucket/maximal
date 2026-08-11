@@ -191,9 +191,7 @@ JSONL log shape (one line per hook invocation):
 {"ts":"2026-05-10T12:00:00Z","hook":"PostToolUse","tool":"Edit","file":"src/foo.ts","exitCode":2,"durationMs":1840,"stderr":"..."}
 ```
 
-Worked example in this repo: `scripts/gemma-watch.ts` runs Gemma via Ollama and posts to a local viewer. The pattern is portable to any local model (llama.cpp, LM Studio, mlx-lm) or any small cloud model. Backpressure: if the analyzer is behind, drop entries from the middle of the queue, not the head or tail; the head shows the trigger, the tail shows the current state.
-
-`bun run analyze` starts the watcher. It is never invoked from a hook.
+The pattern is portable to any local model (llama.cpp, LM Studio, mlx-lm) or any small cloud model. Backpressure: if the analyzer is behind, drop entries from the middle of the queue, not the head or tail; the head shows the trigger, the tail shows the current state.
 
 ## Hook-harness specifics
 

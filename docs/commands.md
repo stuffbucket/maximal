@@ -20,9 +20,6 @@ bun run check:deep   # check:fast + bun test + knip (end-of-task gate)
 bun run deps:check   # dependency-cruiser layer rules
 bun run knip         # find unused exports/files
 
-# Optional: meta-analysis stream
-bun run analyze      # tails .claude/logs/checks.jsonl into a local Ollama model
-
 # Mutation testing (manual only — not wired into check:deep)
 bun run mutate       # Stryker; configure module under test in stryker.conf.*
 
