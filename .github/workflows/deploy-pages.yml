@@ -1,26 +1,43 @@
 name: Deploy to GitHub Pages
 
+# ============================================================================
+# AUTOMATIC DEPLOYS ARE FROZEN.
+#
+# The `push` trigger is commented out on purpose: the published site is to
+# stay exactly as it is, and nothing should reach Pages without a deliberate
+# human action. The workflow is ALSO disabled at the Actions level
+# (`disabled_manually`), so neither a push nor a `workflow_dispatch` will run
+# it while that holds.
+#
+# To resume automatic deploys, BOTH are required:
+#   1. Restore the `push:` block below.
+#   2. `gh workflow enable deploy-pages.yml` (or the Actions tab).
+# Doing only one will leave you waiting for a deploy that cannot happen.
+#
+# Note when restoring: the paths filter includes this file, so the very
+# commit that restores the trigger will itself deploy.
+# ============================================================================
 on:
-  push:
-    branches: [ "main" ]
-    # Only redeploy when something the deployed site actually depends on
-    # changes. A src-only or test-only commit no longer rebuilds+redeploys
-    # Pages — the previously unfiltered trigger multiplied deploy volume (and
-    # so the odds of the GitHub Pages backend flakiness / the re-run artifact
-    # trap in #239) on busy main days (issue #222 / #218; see
-    # docs/decisions/site-runtime-version-manifest.md).
-    #
-    # `site/public/updates/manifest.json` is listed on purpose: a commit to it
-    # becomes exactly one Pages deploy. Nothing writes it at present —
-    # release.yml's `manifest` job went with the Tauri pipeline — so the site's
-    # advertised version is pinned until `scripts/write-updates-manifest.ts` is
-    # wired into whatever replaces it. The filter stays ready for that (the
-    # `redeploy-site` job that used to do that is now gone). It lives under
-    # site/public/ so `site/**` already covers it; it is named here only to
-    # document that the release→site path rides this trigger.
-    paths:
-      - "site/**"
-      - ".github/workflows/deploy-pages.yml"
+  # push:
+  #   branches: [ "main" ]
+  #   # Only redeploy when something the deployed site actually depends on
+  #   # changes. A src-only or test-only commit no longer rebuilds+redeploys
+  #   # Pages — the previously unfiltered trigger multiplied deploy volume (and
+  #   # so the odds of the GitHub Pages backend flakiness / the re-run artifact
+  #   # trap in #239) on busy main days (issue #222 / #218; see
+  #   # docs/decisions/site-runtime-version-manifest.md).
+  #   #
+  #   # `site/public/updates/manifest.json` is listed on purpose: a commit to it
+  #   # becomes exactly one Pages deploy. Nothing writes it at present —
+  #   # release.yml's `manifest` job went with the Tauri pipeline — so the site's
+  #   # advertised version is pinned until `scripts/write-updates-manifest.ts` is
+  #   # wired into whatever replaces it. The filter stays ready for that (the
+  #   # `redeploy-site` job that used to do that is now gone). It lives under
+  #   # site/public/ so `site/**` already covers it; it is named here only to
+  #   # document that the release→site path rides this trigger.
+  #   paths:
+  #     - "site/**"
+  #     - ".github/workflows/deploy-pages.yml"
   workflow_dispatch:
 
 # Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages.
