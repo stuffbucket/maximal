@@ -27,8 +27,7 @@ This is a local proxy that exposes the GitHub Copilot API as both an OpenAI-comp
 | `src/routes/` | Route handlers grouped by endpoint family |
 | `src/services/` | Upstream API clients (Copilot, GitHub, providers) |
 | `tests/` | All test files (`*.test.ts`), Bun built-in runner |
-| `shell/` | Tauri menu-bar app wrapping the proxy as a sidecar — **still live today**, but being replaced by `client/`; see *Tauri shell* below for the minimum needed to touch it |
-| `client/` | Electron 43 + React 19 + TypeScript + Vite desktop app, **managed by npm, not Bun** — the go-forward replacement for `shell/`, mid-migration. It compiles the proxy as its own sidecar via a Bun-invoked `bun build --compile` (`client/scripts/build-core.ts`), but everything else (install, typecheck, test) runs through npm. Both `shell/` and `client/` exist in the repo today; do not assume one has replaced the other. |
+| `client/` | Electron 43 + React 19 + TypeScript + Vite desktop app, **managed by npm, not Bun** — the desktop app. It compiles the proxy as its own sidecar via a Bun-invoked `bun build --compile` (`client/scripts/build-core.ts`), but everything else (install, typecheck, test) runs through npm. |
 
 ## Middleware stack (in order)
 
@@ -112,13 +111,11 @@ See also: `docs/codegen-feedback-loops-practices.md` → Dispatch and review loo
   contains a real `fix:`. Title PRs accordingly; the body's individual
   commit messages don't reach `main` through a squash.
 
-## Electron client (in progress)
+## Electron client
 
-`client/` is an Electron 43 + React 19 + TypeScript + Vite desktop app under active development as the replacement for `shell/`. It is **managed by npm, not Bun** — `npm install`, `npm run typecheck`, `npm run test:run` (Vitest), `electron-forge` for packaging. Bun is used only to compile the extracted proxy engine (`@stuffbucket/maximal-core`, a separate repo) into a sidecar binary via `client/scripts/build-core.ts`. `client/` has its own CI workflow (`.github/workflows/client-ci.yml`), separate from the root `ci.yml`. See `docs/dev/testing-strategy.md` §1/§3 for how the two test suites (root `bun test` vs. `client/`'s Vitest) relate.
+`client/` is an Electron 43 + React 19 + TypeScript + Vite desktop app — the desktop app for non-CLI users. It is **managed by npm, not Bun** — `npm install`, `npm run typecheck`, `npm run test:run` (Vitest), `electron-forge` for packaging. Bun is used only to compile the extracted proxy engine (`@stuffbucket/maximal-core`, a separate repo) into a sidecar binary via `client/scripts/build-core.ts`. `client/` has its own CI workflow (`.github/workflows/client-ci.yml`), separate from the root `ci.yml`. See `docs/dev/testing-strategy.md` §1/§3 for how the two test suites (root `bun test` vs. `client/`'s Vitest) relate.
 
-## Tauri shell
-
-`shell/` is a Tauri 2 menu-bar app that wraps the proxy for non-CLI users — **still the live desktop app** until `client/` (above) replaces it. `bun run app:sidecar` compiles the standalone proxy binary into `shell/src-tauri/binaries/` and Tauri launches it as a sidecar bound to `127.0.0.1:4141`, serving its settings UI at `/ui/settings` (`src/routes/ui/route.ts`). Treat this section as a pointer, not a tutorial — see `docs/commands.md` for the dev-loop commands if you need to run it.
+The Tauri menu-bar shell that previously filled this role was retired in #442; `shell/` no longer exists.
 
 ## Token counting
 

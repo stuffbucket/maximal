@@ -17,29 +17,25 @@ bun test tests/foo.test.ts  # Run a single test file
 # Aggregates
 bun run check:fast   # lint:fast + typecheck + lint:all (the per-edit inner loop)
 bun run check:deep   # check:fast + bun test + knip (end-of-task gate)
-bun run deps:check   # dependency-cruiser layer rules
 bun run knip         # find unused exports/files
-
-# Mutation testing (manual only — not wired into check:deep)
-bun run mutate       # Stryker; configure module under test in stryker.conf.*
+bun run verify:build # smoke-check the built CLI
 
 # Release tooling
 bun run release:manual  # local fallback cut (bumpp + bun publish). Primary
                         # release path is release-please: merge the auto-opened
                         # release PR → tag → release.yml builds/publishes.
-
-# Tauri app (menu-bar shell wrapping the proxy as a sidecar on :4141)
-# Still live today, but being replaced by client/ (below) — a minimal pointer,
-# not a full workflow guide.
-bun run app:setup    # one-time: install shell deps + force-build sidecar binary
-bun run app:dev      # build sidecar (if stale) + tauri dev
+bun run render-formula  # regenerate the Homebrew formula
+bun run sbom            # generate the SBOM
+bun run scan:secrets    # trufflehog filesystem scan
 ```
+
+`dev`, `build`, and `start` all run the proxy engine out of
+`@stuffbucket/maximal-core` — this repo packages and ships it, but the engine
+source lives in that separate repo.
 
 ## Electron client (`client/`)
 
-`client/` is a separate Electron app under active development as the
-replacement for the Tauri `shell/` — **both exist today**, don't assume
-one has replaced the other. It is managed by **npm, not Bun**:
+`client/` is the desktop app. It is managed by **npm, not Bun**:
 
 ```sh
 cd client
