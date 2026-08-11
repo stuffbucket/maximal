@@ -1,5 +1,12 @@
 # Release runbook
 
+> **Not runnable today.** `release.yml` is deleted and `release-please.yml` is
+> disabled for the Electron transition, so every step naming `release.yml`
+> describes machinery that does not exist. Read this as the specification for
+> what has to be rebuilt, not as instructions.
+
+---
+
 Single source of truth for shipping a release. The flow is
 release-please-driven and mostly automatic — the one human action is
 merging the release PR (step 1). Every other step is a CI link to watch or

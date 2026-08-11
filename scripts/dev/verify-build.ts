@@ -4,20 +4,20 @@
  * running on a host was built from the commit you intend to test, and that the
  * config flags a live test needs are set. Bridges the gap between "merged to
  * main" and "in the running sidecar binary" — there is no automatic link, and
- * a stale `app:dev` build silently omits everything merged since it was built.
+ * a stale sidecar build silently omits everything merged since it was built.
  *
  * How the running commit is known: the sidecar embeds
  * `${pkg.version}-dev+${sha.slice(0,8)}` as `BUILD_VERSION` at compile time via
  * `bun build --compile --define __MAXIMAL_VERSION__=...` (see
- * scripts/build-sidecar.ts). The proxy echoes it on every response as the
- * `x-maximal-version` header (src/server.ts). So the header's `+<sha>` suffix
+ * the client's scripts/build-core.ts). The proxy echoes it on every response as
+ * the `x-maximal-version` header (maximal-core's server). So the `+<sha>` suffix
  * IS the source commit the binary was built from — that is exactly what we
  * compare against origin/main.
  *
  * What it reports:
  *   - PASS  : running build sha == origin/main  (nothing merged is missing)
  *   - STALE : running sha is an ancestor of origin/main, N commits behind —
- *             rebuild needed (`bun run app:dev`)
+ *             rebuild needed (rebuild the client sidecar)
  *   - AHEAD : running sha is ahead of / diverged from origin/main (local work
  *             or origin/main not fetched) — informational
  *   - UNKNOWN: header/sha unparseable, or origin/main not resolvable
@@ -49,8 +49,8 @@ const DEFAULT_BASE_URL = "http://127.0.0.1:4141"
 
 /**
  * Extract the embedded git sha from an `x-maximal-version` header value.
- * Format is `<semver>-dev+<sha8>` for host `app:dev` builds (see
- * scripts/build-sidecar.ts). Release binaries omit the `+<sha>` suffix, so a
+ * Format is `<semver>-dev+<sha8>` for host dev builds (see
+ * the client's scripts/build-core.ts). Release binaries omit `+<sha>`, so a
  * missing suffix yields `null` (we can't map that to a commit). The returned
  * sha is whatever length was embedded (8 chars in dev), lower-cased.
  */
@@ -136,7 +136,7 @@ export function decideVerdict(input: VerdictInput): Verdict {
       verdict: "STALE",
       message:
         `STALE: running ${runningSha} is ${n} commit${n === 1 ? "" : "s"} `
-        + `behind origin/main ${originSha}; rebuild needed (bun run app:dev)`,
+        + `behind origin/main ${originSha}; rebuild needed (npm run build:core in client/)`,
     }
   }
   return {
@@ -188,9 +188,9 @@ export function assessConfigFlags(
 
 /**
  * Resolve the app-data config path exactly as the app does
- * (src/lib/paths.ts → resolveAppDir): `$COPILOT_API_HOME` overrides everywhere;
+ * (maximal-core's paths resolver): `$COPILOT_API_HOME` overrides everywhere;
  * else `%APPDATA%\maximal` on win32; else `~/.local/share/maximal`. Kept in
- * sync with paths.ts by mirroring its precedence — pure so it's testable.
+ * sync with that resolver by mirroring its precedence — pure so it's testable.
  */
 export function resolveConfigPath(env: {
   platform: NodeJS.Platform
@@ -341,7 +341,7 @@ function printUnreachable(baseUrl: string): void {
   console.error("")
   console.error("  Start (or point at) a running proxy, then retry:")
   console.error("")
-  console.error("    bun run app:dev            # rebuild + relaunch the sidecar")
+  console.error("    cd client && npm run build:core && npm start   # rebuild + relaunch the sidecar")
   console.error("    bun run verify:build       # then re-run this check")
   console.error("")
   console.error(
