@@ -12,31 +12,29 @@ set -euo pipefail
 # notarize → staple → checksum). The producer is never handed APPLE_* or
 # KEYCHAIN_PASSWORD.
 #
-# Unlike a Tauri app (one main binary + sidecar), an Electron .app contains nested
-# Helper apps + the Electron Framework, which MUST be signed inside-out. The
-# builder's later top-level sign alone cannot do that, so this producer performs
-# the full inside-out sign here via @electron/osx-sign (driven by electron-forge
-# `package`, gated on SIGN_IDENTITY in forge.config.ts). The builder's top-level
-# re-sign then just re-seals the outer bundle (no --deep, idempotent). The
-# compiled sidecar's invalid linker ad-hoc signature is stripped before packaging;
-# @electron/osx-sign then signs the copy inside the final app exactly once, with
-# the same hardened-runtime/JIT profile as every other nested executable.
+# THIS SCRIPT DOES NOT SIGN, and must not learn how. The builder runs it with the
+# signing keychain LOCKED and SIGN_IDENTITY set to the ad-hoc identity "-", so a
+# packager configured to sign fails with "No identity found for signing". That
+# failure is the point: untrusted client code can never reach the Developer ID.
 #
-# Builder-supplied env consumed: TAG, ARCH, SIGN_IDENTITY, ENTITLEMENTS_DIR,
-# BUN_INSTALL, CARGO_HOME. The keychain is already unlocked — do not unlock it.
+# An Electron .app nests four Helper apps and the Electron Framework, and a
+# bundle must be signed as a DIRECTORY so the seal covers its Info.plist and
+# structure. `sign_walk = bun-runtime` in .macos-builder/config asks the builder
+# to sign every nested code item deepest-first, then seal the outer bundle.
+#
+# Builder-supplied env consumed: TAG, ARCH, BUN_INSTALL, CARGO_HOME.
+# SIGN_IDENTITY and ENTITLEMENTS_DIR are also exported and deliberately UNUSED.
 
 # Self-hosted runners use non-login shells that don't read ~/.zshrc.
-export PATH="$BUN_INSTALL/bin:$CARGO_HOME/bin:/opt/homebrew/bin:$PATH"
+#
+# /opt/homebrew/bin is APPENDED, never prepended. Prepending it put Homebrew's
+# node ahead of the pinned Node the builder installs with actions/setup-node, so
+# the release was built on whatever major Homebrew happened to carry.
+export PATH="$BUN_INSTALL/bin:$CARGO_HOME/bin:$PATH:/opt/homebrew/bin"
 
 VERSION="${TAG#v}"
 ARCH="${ARCH:-arm64}"
 APP="client/out/Maximal-darwin-${ARCH}/Maximal.app"
-# Builder-owned, enumerated entitlements (config: `entitlements = bun-runtime`).
-# forge.config.ts reads MACOS_ENTITLEMENTS to sign every Electron component +
-# the sidecar with this same profile.
-ENTITLEMENTS="$ENTITLEMENTS_DIR/bun-runtime.entitlements"
-export MACOS_ENTITLEMENTS="$ENTITLEMENTS"
-
 echo "Producing Maximal.app (Electron) for ${TAG} (version ${VERSION}, ${ARCH})"
 
 cd client
@@ -108,15 +106,20 @@ if [ "${BUILT_VERSION}" != "${VERSION}" ]; then
   exit 1
 fi
 
-# The sidecar must be present inside the bundle and validly signed.
+# The sidecar must be present in the bundle. It is NOT verified as signed: this
+# producer cannot sign, and the builder signs it during sign_walk.
 BUNDLED_CORE="${APP}/Contents/Resources/bin/maximal-core"
 [ -f "$BUNDLED_CORE" ] || { echo "::error::Sidecar missing from bundle: ${BUNDLED_CORE}" >&2; exit 1; }
-codesign --verify --strict --verbose=2 "$BUNDLED_CORE"
 
-# Full inside-out verification: helpers + Electron Framework + sidecar + app must
-# all be correctly signed. (Under a real Developer ID this passes; under a bare
-# unsigned dev build it will not — signing is builder-only.)
-codesign --verify --deep --strict --verbose=2 "$APP"
-codesign -dvv "$APP" 2>&1 | grep -E 'Identifier=|Authority=|flags=' || true
+# Isolation tripwire, the inverse of the assertions this replaced. A Developer ID
+# signature on a bundle this script built means the builder's keychain lock or
+# its ad-hoc SIGN_IDENTITY has regressed, and untrusted client code is reaching
+# the signing identity.
+CS_OUT="$(codesign -dvv "$APP" 2>&1 || true)"
+printf '%s\n' "$CS_OUT" | grep -E 'Identifier=|Authority=|Signature=|flags=' || true
+if printf '%s\n' "$CS_OUT" | grep -q 'Authority=Developer ID Application'; then
+  echo "::error::Producer output is Developer ID signed. It must not be able to sign — check the builder's keychain isolation." >&2
+  exit 1
+fi
 
-echo "Producer done — ${APP} is ready for the builder (top-level sign + dmg + notarize + staple + sha256)."
+echo "Producer done — ${APP} is unsigned and ready for the builder (sign_walk + top-level seal + dmg + notarize + staple + sha256)."
