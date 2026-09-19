@@ -4,6 +4,7 @@ import type { ApiKeyEntry, AppConfig } from "~/lib/config/config"
 
 import {
   apiKeyHelperCommand,
+  echoApiKeyHelperCommand,
   isOwnedApiKeyHelper,
   resolveApiKey,
   runApiKeyHelper,
@@ -61,6 +62,28 @@ describe("apiKeyHelperCommand", () => {
   })
 })
 
+describe("echoApiKeyHelperCommand", () => {
+  test("writes an arbitrary user-supplied key without requiring an mxl_ prefix", () => {
+    expect(echoApiKeyHelperCommand("custom-user-key")).toBe(
+      "echo 'custom-user-key'",
+    )
+  })
+
+  test("uses a cmd-safe encoded command on Windows", () => {
+    expect(echoApiKeyHelperCommand("user's-key", "win32")).toBe(
+      "powershell.exe -NoProfile -NonInteractive -Command \"[Console]::Out.Write([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('dXNlcidzLWtleQ==')))\"",
+    )
+  })
+
+  test("quotes the wildcard key so the shell does not expand it", () => {
+    expect(echoApiKeyHelperCommand("*")).toBe("echo '*'")
+  })
+
+  test("escapes a single quote in a legacy key without creating shell syntax", () => {
+    expect(echoApiKeyHelperCommand("user's-key")).toBe(`echo 'user'"'"'s-key'`)
+  })
+})
+
 describe("isOwnedApiKeyHelper", () => {
   test("recognizes the current `api <label>` form regardless of binary path", () => {
     expect(
@@ -75,6 +98,31 @@ describe("isOwnedApiKeyHelper", () => {
         "claude-code",
       ),
     ).toBe(true)
+    expect(
+      isOwnedApiKeyHelper(
+        '"/Users/test/.bun/bin/bun" "/Users/test/maximal/src/main.ts" api claude-code',
+        "claude-code",
+      ),
+    ).toBe(true)
+    expect(
+      isOwnedApiKeyHelper(
+        String.raw`"C:\Users\test\bun.exe" "C:\Users\test\maximal\src\main.ts" api claude-code`,
+        "claude-code",
+      ),
+    ).toBe(true)
+  })
+
+  test("trims the requested label before matching", () => {
+    expect(
+      isOwnedApiKeyHelper(
+        '"/opt/homebrew/bin/maximal" api claude-code',
+        "  claude-code  ",
+      ),
+    ).toBe(true)
+  })
+
+  test("recognizes an unlabeled helper when the label is omitted", () => {
+    expect(isOwnedApiKeyHelper('"/opt/homebrew/bin/maximal" api')).toBe(true)
   })
 
   test("still recognizes the legacy `--apiKeyHelper <label>` form (heal-forward path)", () => {
@@ -113,11 +161,23 @@ describe("isOwnedApiKeyHelper", () => {
       isOwnedApiKeyHelper("some-tool api claude-code", "claude-code"),
     ).toBe(false)
     expect(isOwnedApiKeyHelper("api claude-code", "claude-code")).toBe(false)
+    expect(
+      isOwnedApiKeyHelper(
+        '"/usr/bin/node" "/Users/test/other/src/main.ts" api claude-code',
+        "claude-code",
+      ),
+    ).toBe(false)
   })
 
-  test("rejects non-string input", () => {
+  test("rejects non-string input without coercing it", () => {
     expect(isOwnedApiKeyHelper(undefined, "claude-code")).toBe(false)
     expect(isOwnedApiKeyHelper(42, "claude-code")).toBe(false)
+    expect(
+      isOwnedApiKeyHelper(
+        { toString: () => '"/opt/homebrew/bin/maximal" api claude-code' },
+        "claude-code",
+      ),
+    ).toBe(false)
   })
 })
 

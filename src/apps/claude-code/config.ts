@@ -2,27 +2,22 @@
  * Read / merge / write helpers for Claude Code's `~/.claude/settings.json`.
  */
 
+import { createHash } from "node:crypto"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
 import {
-  apiKeyHelperCommand,
+  echoApiKeyHelperCommand,
   isOwnedApiKeyHelper,
+  resolveApiKey,
 } from "~/lib/auth/api-key-helper"
 import { atomicWriteJson } from "~/lib/platform/atomic-json"
 
-/** The label Claude Code attributes its key under (Settings → API clients).
- *  Single-sourced: it is both the `api <client>` token written on disk (via
- *  `API_KEY_HELPER_COMMAND`) and the `ClientApp.apiKeyLabel` used by `maximal
- *  api claude-code`, so both resolve the same key. */
+/** The label Claude Code attributes its key under (Settings → API clients). */
 export const HELPER_LABEL = "claude-code"
 
 export const PROXY_BASE_URL = "http://127.0.0.1:4141"
-/** The apiKeyHelper command for THIS running binary (absolute execPath). A
- *  config carrying an older path is still recognized as ours via
- *  `isOwnedApiKeyHelper` and healed to this value on apply/boot. */
-export const API_KEY_HELPER_COMMAND = apiKeyHelperCommand(HELPER_LABEL)
 
 const API_KEY_HELPER_KEY = "apiKeyHelper"
 const BASE_URL_KEY = "ANTHROPIC_BASE_URL"
@@ -34,6 +29,8 @@ const ENV_KEY = "env"
  *  same proxy URL / our own helper string). Claude Code ignores unknown keys,
  *  and we strip this on revert. */
 const PRIOR_KEY = "_maximalPrior"
+const HELPER_OWNERSHIP_KEY = "_maximalHelper"
+const HELPER_STRATEGY = "echo"
 /** Sentinel recording "this field was absent before we wrote it" → revert
  *  removes it (vs. an empty/real value → revert restores that value). */
 const UNSET = "__UNSET__"
@@ -109,14 +106,44 @@ export function getBaseUrlOwnership(
 
 export type ApiKeyHelperOwnership = "ours" | "foreign" | "absent"
 
+function helperFingerprint(command: string): string {
+  return createHash("sha256").update(command).digest("hex")
+}
+
+function markerOwnsHelper(marker: unknown, command: unknown): boolean {
+  if (
+    typeof marker !== "object"
+    || marker === null
+    || Array.isArray(marker)
+    || typeof command !== "string"
+  ) {
+    return false
+  }
+  const record = marker as Record<string, unknown>
+  return (
+    record.label === HELPER_LABEL
+    && record.strategy === HELPER_STRATEGY
+    && record.fingerprint === helperFingerprint(command)
+  )
+}
+
 export function getApiKeyHelperOwnership(
   settings: Record<string, unknown>,
 ): ApiKeyHelperOwnership {
   if (!(API_KEY_HELPER_KEY in settings)) return "absent"
-  // Ours by SIGNATURE, not exact string: a command pointing at an older maximal
-  // path — or one still carrying the legacy `--apiKeyHelper claude-code` form —
-  // is recognized as ours (to heal it forward / strip it) rather than
-  // misclassified as foreign.
+  if (HELPER_OWNERSHIP_KEY in settings) {
+    return (
+        markerOwnsHelper(
+          settings[HELPER_OWNERSHIP_KEY],
+          settings[API_KEY_HELPER_KEY],
+        )
+      ) ?
+        "ours"
+      : "foreign"
+  }
+  // Before the marker existed, maximal-owned helpers were identifiable by their
+  // binary invocation signature. Keep recognizing those so they can migrate to
+  // the echo strategy; unmarked echo commands remain foreign.
   return isOwnedApiKeyHelper(settings[API_KEY_HELPER_KEY], HELPER_LABEL) ?
       "ours"
     : "foreign"
@@ -124,6 +151,7 @@ export function getApiKeyHelperOwnership(
 
 export function mergeBaseUrl(
   existing: Record<string, unknown>,
+  helperCommand: string,
 ): Record<string, unknown> {
   const env = { ...readEnv(existing), [BASE_URL_KEY]: PROXY_BASE_URL }
   // Capture the prior values of the two fields we touch — but ONLY on the first
@@ -132,21 +160,36 @@ export function mergeBaseUrl(
   // would restore the proxy URL instead of removing it. UNSET marks a field that
   // was absent so revert deletes it rather than writing the sentinel back.
   const priorEnvBaseUrl = readEnv(existing)
+  const priorHelperOwnership = getApiKeyHelperOwnership(existing)
+  const priorBaseUrlOwnership = getBaseUrlOwnership(existing)
+  let priorBaseUrl =
+    BASE_URL_KEY in priorEnvBaseUrl ? priorEnvBaseUrl[BASE_URL_KEY] : UNSET
+  // A matching proxy URL alone could be user-authored, but paired with a
+  // recognized maximal helper it is the pre-marker routing configuration.
+  if (priorBaseUrlOwnership === "ours" && priorHelperOwnership === "ours") {
+    priorBaseUrl = UNSET
+  }
+  // Legacy maximal helpers are owned migration artifacts, not user state to
+  // resurrect when routing is later disabled.
+  let priorHelper =
+    API_KEY_HELPER_KEY in existing ? existing[API_KEY_HELPER_KEY] : UNSET
+  if (priorHelperOwnership === "ours") priorHelper = UNSET
   const prior =
     PRIOR_KEY in existing ?
       existing[PRIOR_KEY]
     : {
-        [BASE_URL_KEY]:
-          BASE_URL_KEY in priorEnvBaseUrl ?
-            priorEnvBaseUrl[BASE_URL_KEY]
-          : UNSET,
-        [API_KEY_HELPER_KEY]:
-          API_KEY_HELPER_KEY in existing ? existing[API_KEY_HELPER_KEY] : UNSET,
+        [BASE_URL_KEY]: priorBaseUrl,
+        [API_KEY_HELPER_KEY]: priorHelper,
       }
   return {
     ...existing,
     [ENV_KEY]: env,
-    [API_KEY_HELPER_KEY]: API_KEY_HELPER_COMMAND,
+    [API_KEY_HELPER_KEY]: helperCommand,
+    [HELPER_OWNERSHIP_KEY]: {
+      label: HELPER_LABEL,
+      strategy: HELPER_STRATEGY,
+      fingerprint: helperFingerprint(helperCommand),
+    },
     [PRIOR_KEY]: prior,
   }
 }
@@ -170,48 +213,40 @@ export function stripBaseUrl(
   existing: Record<string, unknown>,
 ): Record<string, unknown> {
   const snapshot = readPriorSnapshot(existing)
-
-  // Drop our snapshot key + the env wrapper; rebuild env below.
+  const baseUrlOwnership = getBaseUrlOwnership(existing)
+  const helperOwnership = getApiKeyHelperOwnership(existing)
   const {
     [PRIOR_KEY]: _droppedPrior,
+    [HELPER_OWNERSHIP_KEY]: _droppedMarker,
     [ENV_KEY]: _droppedEnv,
     ...rest
   } = existing
+
   const currentEnv = readEnv(existing)
-  const { [BASE_URL_KEY]: _droppedBaseUrl, ...envWithoutBaseUrl } = currentEnv
-  const { [API_KEY_HELPER_KEY]: _droppedHelper, ...withoutHelper } = rest
-
-  if (snapshot) {
-    // RESTORE path: put the two fields back to exactly what was there before we
-    // first applied (or remove them if they were absent). This correctly
-    // handles the case where the user's own prior value happened to equal the
-    // proxy URL / our helper string — a blind delete would have lost it.
-    const env = withRestoredField(
-      envWithoutBaseUrl,
-      BASE_URL_KEY,
-      snapshot[BASE_URL_KEY],
-    )
-    const base = withRestoredField(
-      withoutHelper,
-      API_KEY_HELPER_KEY,
-      snapshot[API_KEY_HELPER_KEY],
-    )
-    if (Object.keys(env).length === 0) return base
-    return { ...base, [ENV_KEY]: env }
+  let env = currentEnv
+  if (baseUrlOwnership === "ours") {
+    const { [BASE_URL_KEY]: _droppedBaseUrl, ...withoutBaseUrl } = currentEnv
+    env =
+      snapshot ?
+        withRestoredField(withoutBaseUrl, BASE_URL_KEY, snapshot[BASE_URL_KEY])
+      : withoutBaseUrl
   }
 
-  // FALLBACK (no snapshot — e.g. a config written before snapshots existed):
-  // delete only the values that are ours, ownership-guarded as before.
-  const env =
-    currentEnv[BASE_URL_KEY] === PROXY_BASE_URL ? envWithoutBaseUrl : currentEnv
-  const baseRest =
-    isOwnedApiKeyHelper(existing[API_KEY_HELPER_KEY], HELPER_LABEL) ?
-      withoutHelper
-    : rest
-  if (Object.keys(env).length === 0) {
-    return baseRest
+  let base = rest
+  if (helperOwnership === "ours") {
+    const { [API_KEY_HELPER_KEY]: _droppedHelper, ...withoutHelper } = rest
+    base =
+      snapshot ?
+        withRestoredField(
+          withoutHelper,
+          API_KEY_HELPER_KEY,
+          snapshot[API_KEY_HELPER_KEY],
+        )
+      : withoutHelper
   }
-  return { ...baseRest, [ENV_KEY]: env }
+
+  if (Object.keys(env).length === 0) return base
+  return { ...base, [ENV_KEY]: env }
 }
 
 export function isProxyBaseUrlConfigured(
@@ -235,6 +270,7 @@ export type SkipReason =
   | "already-ours"
   | "foreign-base-url"
   | "foreign-api-key-helper"
+  | "missing-api-key"
 
 export interface ApplyResult {
   path: string
@@ -242,22 +278,15 @@ export interface ApplyResult {
   skippedReason?: SkipReason
 }
 
+type ResolveHelperKey = () => ReturnType<typeof resolveApiKey>
+
 export function applyProxyBaseUrl(
   filePath: string = getClaudeCodeSettingsPath(),
+  resolveHelperKey: ResolveHelperKey = () => resolveApiKey(HELPER_LABEL),
 ): ApplyResult {
   const existing = readClaudeCodeSettings(filePath)
   const baseUrlOwnership = getBaseUrlOwnership(existing)
   const helperOwnership = getApiKeyHelperOwnership(existing)
-  if (baseUrlOwnership === "ours" && helperOwnership === "ours") {
-    // Both ours. Skip UNLESS the helper command points at a stale maximal path
-    // (ours by signature but not the current execPath) — then heal it to the
-    // current absolute path so a moved/updated app keeps working.
-    if (existing[API_KEY_HELPER_KEY] === API_KEY_HELPER_COMMAND) {
-      return { path: filePath, wrote: false, skippedReason: "already-ours" }
-    }
-    writeClaudeCodeSettings(filePath, mergeBaseUrl(existing))
-    return { path: filePath, wrote: true }
-  }
   if (baseUrlOwnership === "foreign") {
     return { path: filePath, wrote: false, skippedReason: "foreign-base-url" }
   }
@@ -268,7 +297,21 @@ export function applyProxyBaseUrl(
       skippedReason: "foreign-api-key-helper",
     }
   }
-  writeClaudeCodeSettings(filePath, mergeBaseUrl(existing))
+
+  const keyResult = resolveHelperKey()
+  if (!keyResult.ok) {
+    return { path: filePath, wrote: false, skippedReason: "missing-api-key" }
+  }
+  const helperCommand = echoApiKeyHelperCommand(keyResult.key)
+  if (
+    baseUrlOwnership === "ours"
+    && helperOwnership === "ours"
+    && existing[API_KEY_HELPER_KEY] === helperCommand
+  ) {
+    return { path: filePath, wrote: false, skippedReason: "already-ours" }
+  }
+
+  writeClaudeCodeSettings(filePath, mergeBaseUrl(existing, helperCommand))
   return { path: filePath, wrote: true }
 }
 

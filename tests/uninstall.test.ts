@@ -100,7 +100,11 @@ describe("uninstall — Claude Code settings revert integration", () => {
       JSON.stringify({ env: { ANTHROPIC_API_KEY: "user-key" } }),
     )
 
-    applyProxyBaseUrl(settings)
+    applyProxyBaseUrl(settings, () => ({
+      ok: true,
+      key: "test-api-key",
+      source: "default",
+    }))
     expect(isProxyBaseUrlConfigured(settings)).toBe(true)
 
     const reverted = revertProxyBaseUrl(settings)

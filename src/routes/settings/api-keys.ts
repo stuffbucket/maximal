@@ -24,6 +24,7 @@
 import { Hono } from "hono"
 import { randomBytes, randomUUID } from "node:crypto"
 
+import { refreshClaudeCodeApiKeyHelper } from "~/apps/claude-code/reconcile"
 import { getConfig, writeConfig } from "~/lib/config/config"
 import { API_KEY_VALUE_PATTERN } from "~/lib/config/config-schema"
 import {
@@ -108,6 +109,7 @@ apiKeysRoutes.post("/", async (c) => {
       apiKeyEntries: [...existing, entry],
     },
   })
+  refreshClaudeCodeApiKeyHelper()
 
   return c.json(entry, 201)
 })
@@ -198,6 +200,7 @@ apiKeysRoutes.patch("/:id", async (c) => {
     ...config,
     auth: { ...config.auth, apiKeyEntries: nextEntries },
   })
+  refreshClaudeCodeApiKeyHelper()
 
   return c.json(updated)
 })
@@ -217,5 +220,6 @@ apiKeysRoutes.delete("/:id", (c) => {
     ...config,
     auth: { ...config.auth, apiKeyEntries: next },
   })
+  refreshClaudeCodeApiKeyHelper()
   return c.body(null, 204)
 })

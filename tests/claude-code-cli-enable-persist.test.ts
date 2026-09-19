@@ -33,8 +33,8 @@ beforeEach(() => {
   // Route claude-code settings.json writes into the temp dir.
   process.env.CLAUDE_CONFIG_DIR = TMP_DIR
   fs.rmSync(SETTINGS, { force: true })
-  // Clean config so the intent flag starts unset for each case.
-  writeConfig({})
+  // Start with a usable key and no routing intent for each case.
+  writeConfig({ auth: { apiKeys: ["test-api-key"] } })
 })
 
 afterAll(() => {
@@ -73,8 +73,21 @@ describe("claude-code CLI enable/disable persists routing intent (#229)", () => 
     expect(isProxyBaseUrlConfigured(SETTINGS)).toBe(false)
   })
 
+  test("enable fails without a key and leaves routing intent off", async () => {
+    writeConfig({})
+
+    const result = await claudeCodeApp.enable()
+
+    expect(result.success).toBe(false)
+    expect(claudeCodeRoutingIntended()).toBe(false)
+    expect(fs.existsSync(SETTINGS)).toBe(false)
+  })
+
   test("enable does not clobber sibling apps config", async () => {
-    writeConfig({ apps: { claudeDesktop: { enabled: true } } })
+    writeConfig({
+      auth: { apiKeys: ["test-api-key"] },
+      apps: { claudeDesktop: { enabled: true } },
+    })
 
     await claudeCodeApp.enable()
 

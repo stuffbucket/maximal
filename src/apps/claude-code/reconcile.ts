@@ -35,6 +35,21 @@ export function setClaudeCodeRoutingIntent(enabled: boolean): void {
   })
 }
 
+export function refreshClaudeCodeApiKeyHelper(
+  intended: boolean = claudeCodeRoutingIntended(),
+  filePath: string = getClaudeCodeSettingsPath(),
+): void {
+  if (!intended) return
+  try {
+    const result = applyProxyBaseUrl(filePath)
+    if (result.wrote) {
+      consola.info("claude-code: refreshed apiKeyHelper after API key change")
+    }
+  } catch (err) {
+    consola.warn("claude-code: failed to refresh apiKeyHelper", err)
+  }
+}
+
 export function reconcileClaudeCodeOnBoot(
   intended: boolean = claudeCodeRoutingIntended(),
   filePath: string = getClaudeCodeSettingsPath(),

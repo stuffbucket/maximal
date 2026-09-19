@@ -15,9 +15,22 @@
 
 import { afterAll, beforeEach, describe, expect, test } from "bun:test"
 import { Hono } from "hono"
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
 
+import {
+  applyProxyBaseUrl,
+  readClaudeCodeSettings,
+} from "~/apps/claude-code/config"
 import { getConfig, writeConfig } from "~/lib/config/config"
 import { apiKeysRoutes } from "~/routes/settings/api-keys"
+
+const CLAUDE_CONFIG_DIR = fs.mkdtempSync(
+  path.join(os.tmpdir(), "api-keys-route-claude-"),
+)
+const CLAUDE_SETTINGS = path.join(CLAUDE_CONFIG_DIR, "settings.json")
+const savedClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR
 
 function buildApp() {
   const app = new Hono()
@@ -26,12 +39,20 @@ function buildApp() {
 }
 
 beforeEach(() => {
+  process.env.CLAUDE_CONFIG_DIR = CLAUDE_CONFIG_DIR
+  fs.rmSync(CLAUDE_SETTINGS, { force: true })
   writeConfig({})
 })
 
 afterAll(() => {
   // Leave a clean slate so later files in the shared worker start empty.
   writeConfig({})
+  if (savedClaudeConfigDir === undefined) {
+    delete process.env.CLAUDE_CONFIG_DIR
+  } else {
+    process.env.CLAUDE_CONFIG_DIR = savedClaudeConfigDir
+  }
+  fs.rmSync(CLAUDE_CONFIG_DIR, { recursive: true, force: true })
 })
 
 describe("/api-keys GET /", () => {
@@ -86,6 +107,26 @@ describe("/api-keys POST /", () => {
     expect(body.key.startsWith("mxl_")).toBe(true)
     expect(/^mxl_[\w-]+$/.test(body.key)).toBe(true)
     expect(getConfig().auth?.apiKeyEntries?.length).toBe(1)
+    expect(fs.existsSync(CLAUDE_SETTINGS)).toBe(false)
+  })
+
+  test("refreshes an enabled Claude Code helper when a matching key is created", async () => {
+    writeConfig({
+      auth: { apiKeys: ["fallback-key"] },
+      apps: { claudeCode: { enabled: true } },
+    })
+    applyProxyBaseUrl()
+
+    const res = await buildApp().request("/api-keys", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ label: "Claude Code", key: "specific-key" }),
+    })
+
+    expect(res.status).toBe(201)
+    expect(readClaudeCodeSettings(CLAUDE_SETTINGS).apiKeyHelper).toBe(
+      "echo 'specific-key'",
+    )
   })
 
   test("accepts the literal '*' wildcard", async () => {
@@ -175,6 +216,35 @@ describe("/api-keys PATCH /:id", () => {
     expect(updated.enabled).toBe(false)
   })
 
+  test("refreshes an enabled Claude Code helper when its key rotates", async () => {
+    const entry = {
+      id: "claude-code",
+      label: "Claude Code",
+      key: "original-key",
+      enabled: true,
+      created_at: "2026-01-01T00:00:00.000Z",
+    }
+    writeConfig({
+      auth: { apiKeyEntries: [entry] },
+      apps: { claudeCode: { enabled: true } },
+    })
+    applyProxyBaseUrl()
+    expect(readClaudeCodeSettings(CLAUDE_SETTINGS).apiKeyHelper).toBe(
+      "echo 'original-key'",
+    )
+
+    const res = await buildApp().request(`/api-keys/${entry.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ key: "rotated-key" }),
+    })
+
+    expect(res.status).toBe(200)
+    expect(readClaudeCodeSettings(CLAUDE_SETTINGS).apiKeyHelper).toBe(
+      "echo 'rotated-key'",
+    )
+  })
+
   test("404 when id is unknown", async () => {
     const res = await buildApp().request("/api-keys/does-not-exist", {
       method: "PATCH",
@@ -222,6 +292,37 @@ describe("/api-keys DELETE /:id", () => {
     })
     expect(res.status).toBe(204)
     expect(getConfig().auth?.apiKeyEntries ?? []).toEqual([])
+  })
+
+  test("refreshes an enabled Claude Code helper after deleting its key", async () => {
+    const selected = {
+      id: "claude-code",
+      label: "Claude Code",
+      key: "selected-key",
+      enabled: true,
+      created_at: "2026-01-01T00:00:00.000Z",
+    }
+    const fallback = {
+      id: "fallback",
+      label: "Fallback",
+      key: "fallback-key",
+      enabled: true,
+      created_at: "2026-01-01T00:00:00.000Z",
+    }
+    writeConfig({
+      auth: { apiKeyEntries: [selected, fallback] },
+      apps: { claudeCode: { enabled: true } },
+    })
+    applyProxyBaseUrl()
+
+    const res = await buildApp().request(`/api-keys/${selected.id}`, {
+      method: "DELETE",
+    })
+
+    expect(res.status).toBe(204)
+    expect(readClaudeCodeSettings(CLAUDE_SETTINGS).apiKeyHelper).toBe(
+      "echo 'fallback-key'",
+    )
   })
 
   test("404 when id is unknown", async () => {

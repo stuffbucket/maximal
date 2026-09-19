@@ -105,7 +105,7 @@ function cleanTmp() {
 }
 
 beforeEach(() => {
-  writeConfig({})
+  writeConfig({ auth: { apiKeys: ["test-api-key"] } })
   installsFixture = []
   cleanTmp()
 })

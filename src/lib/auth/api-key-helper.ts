@@ -1,15 +1,11 @@
 /**
- * apiKeyHelper — resolve the proxy's API key for an integrated client, invoked
- * as `maximal --apiKeyHelper [label]` (the command a client's config points at
- * so it never stores a key statically).
+ * API-key helpers shared by client integrations and the `maximal api` command.
  *
- * Generic on purpose: this is NOT specific to any one app. Given an optional
- * label, it prefers a configured API-key entry whose id/label best matches that
- * label — so a user can mint a dedicated key per client — and otherwise falls
- * back to the default endpoint key. App configurators (Claude Code, Claude
- * Desktop, …) only WRITE the setting that points their client at this helper
- * (see e.g. `apiKeyHelperCommand`); the resolution itself lives here so every
- * client shares one implementation rather than each reimplementing it.
+ * Given an optional label, resolution prefers a configured API-key entry whose
+ * id/label best matches that label and otherwise falls back to the default
+ * endpoint key. Claude Code writes the resolved value as an echo command so its
+ * settings survive maximal binary upgrades; older binary-backed commands remain
+ * recognizable for migration.
  */
 import type { ApiKeyEntry, AppConfig } from "~/lib/config/config"
 
@@ -24,27 +20,7 @@ export type ApiKeyHelperResult =
   | { ok: true; key: string; source: "app" | "default" }
   | { ok: false; error: string }
 
-/**
- * Build the command a client writes into its config to call this helper.
- *
- * We write an ABSOLUTE path to the running binary (`process.execPath`), not a
- * bare `maximal`, because the consumer runs it from a context that does NOT
- * have our PATH: Claude Code invokes the helper via `/bin/sh -c` (or `cmd.exe`
- * on Windows), and a GUI-launched Claude Code inherits launchd's minimal PATH
- * (`/usr/bin:/bin:/usr/sbin:/sbin`) — never `~/.local/bin`. A bare `maximal`
- * there fails with `command not found` (exit 127). The absolute path is
- * double-quoted so a space in it survives both `sh` and `cmd.exe`.
- *
- * `process.execPath` is the right anchor (vs. the macOS-only `~/.local/bin`
- * symlink, which doesn't exist on Windows): it is absolute on every platform.
- * If the app moves/updates, the path can go stale — boot reconciliation
- * rewrites it to the current execPath (see config.ts `applyProxyBaseUrl` +
- * `isOwnedApiKeyHelper`).
- *
- * The optional `label` lets a user attribute a dedicated key to that client
- * (a key entry whose id/label matches `label` wins over the default key), and
- * is the client id citty dispatches on (`maximal api <label>`).
- */
+/** Build the binary-backed helper form written before v0.4.42. */
 export function apiKeyHelperCommand(
   label?: string,
   execPath: string = process.execPath,
@@ -56,12 +32,34 @@ export function apiKeyHelperCommand(
     : `${bin} ${HELPER_SUBCOMMAND}`
 }
 
+export function echoApiKeyHelperCommand(
+  key: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  if (platform === "win32") {
+    // Claude Code invokes the helper through cmd.exe on Windows, where POSIX
+    // single quotes are literal. Base64 keeps legacy free-form keys out of cmd
+    // and PowerShell syntax while emitting the exact key without quote marks.
+    const encoded = Buffer.from(key, "utf8").toString("base64")
+    return (
+      "powershell.exe -NoProfile -NonInteractive -Command "
+      + `"[Console]::Out.Write([Text.Encoding]::UTF8.GetString(`
+      + `[Convert]::FromBase64String('${encoded}')))"`
+    )
+  }
+
+  // Single-quote for POSIX shells; close/escape/reopen defensively for legacy
+  // free-form keys even though newly-created keys use a restricted charset.
+  const quoted = key.replaceAll("'", `'"'"'`)
+  return `echo '${quoted}'`
+}
+
 /**
  * Recognize a helper command WE wrote, regardless of which binary path precedes
  * it — matching on the invocation SIGNATURE, not the exact string. Accepts BOTH
  * the current `api <label>` form and the legacy `--apiKeyHelper <label>` form,
- * so a config written by an older maximal is still ours (boot self-heals it
- * forward to the `api` form; uninstall strips it), while a genuinely
+ * so a config written by an older maximal is still ours (boot migrates it to
+ * the stable helper form; uninstall strips it), while a genuinely
  * third-party helper is left untouched.
  *
  * The `api <label>` form is anchored on the quoted-path prefix (`"…" api
@@ -83,8 +81,19 @@ export function isOwnedApiKeyHelper(command: unknown, label?: string): boolean {
   // `tool api foo` can't match.
   const apiSuffix =
     trimmed ? `${HELPER_SUBCOMMAND} ${trimmed}` : HELPER_SUBCOMMAND
-  return new RegExp(`^"[^"]+"\\s+${escapeRegExp(apiSuffix)}\\s*$`, "u").test(
-    command,
+  if (
+    new RegExp(`^"[^"]+"\\s+${escapeRegExp(apiSuffix)}\\s*$`, "u").test(command)
+  ) {
+    return true
+  }
+
+  const runtimeMatch = new RegExp(
+    `^"[^"]+"\\s+"([^"]+)"\\s+${escapeRegExp(apiSuffix)}\\s*$`,
+    "u",
+  ).exec(command)
+  return (
+    runtimeMatch?.[1]?.replaceAll("\\", "/").endsWith("/maximal/src/main.ts")
+    ?? false
   )
 }
 

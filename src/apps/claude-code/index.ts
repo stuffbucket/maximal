@@ -60,14 +60,12 @@ export const claudeCodeApp: ClientApp = {
       ) ?
         result.skippedReason
       : null
-    // Persist the durable routing intent so boot/shutdown self-heal runs for
-    // ALL callers (CLI + Settings UI), not just the HTTP path. Single writer:
-    // the Settings route no longer persists this separately.
-    setClaudeCodeRoutingIntent(true)
-    return Promise.resolve({
-      success: result.wrote || conflict === null,
-      conflict,
-    })
+    const success = result.wrote || result.skippedReason === "already-ours"
+    // Persist intent only after settings are usable. In particular, a missing
+    // API key must not leave boot reconciliation enabled for a route we could
+    // not configure.
+    if (success) setClaudeCodeRoutingIntent(true)
+    return Promise.resolve({ success, conflict })
   },
 
   disable() {
