@@ -1,31 +1,31 @@
 {
   "schema": 2,
-  "generated": "2026-09-20T07:29:00.610Z",
+  "generated": "2026-09-20T09:56:45.256Z",
   "channels": {
     "stable": {
-      "version": "0.4.42",
-      "tag": "v0.4.42",
-      "notes": "https://github.com/stuffbucket/maximal/releases/tag/v0.4.42",
+      "version": "0.4.43",
+      "tag": "v0.4.43",
+      "notes": "https://github.com/stuffbucket/maximal/releases/tag/v0.4.43",
       "downloads": {
         "macos-arm64-dmg": {
-          "name": "maximal-v0.4.42-darwin-arm64.dmg",
-          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.4.42/maximal-v0.4.42-darwin-arm64.dmg"
+          "name": "maximal-v0.4.43-darwin-arm64.dmg",
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.4.43/maximal-v0.4.43-darwin-arm64.dmg"
         },
         "windows-x64-setup": {
-          "name": "maximal-v0.4.42-windows-x64-setup.exe",
-          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.4.42/maximal-v0.4.42-windows-x64-setup.exe"
+          "name": "maximal-v0.4.43-windows-x64-setup.exe",
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.4.43/maximal-v0.4.43-windows-x64-setup.exe"
         },
         "windows-x64-msi": {
-          "name": "maximal-v0.4.42-windows-x64.msi",
-          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.4.42/maximal-v0.4.42-windows-x64.msi"
+          "name": "maximal-v0.4.43-windows-x64.msi",
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.4.43/maximal-v0.4.43-windows-x64.msi"
         },
         "windows-x64-zip": {
-          "name": "maximal-v0.4.42-windows-x64.zip",
-          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.4.42/maximal-v0.4.42-windows-x64.zip"
+          "name": "maximal-v0.4.43-windows-x64.zip",
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.4.43/maximal-v0.4.43-windows-x64.zip"
         },
         "windows-install-ps1": {
           "name": "install.ps1",
-          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.4.42/install.ps1"
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.4.43/install.ps1"
         }
       }
     }
