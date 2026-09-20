@@ -1,12 +1,5 @@
 # Release runbook
 
-> **Not runnable today.** `release.yml` is deleted and `release-please.yml` is
-> disabled for the Electron transition, so every step naming `release.yml`
-> describes machinery that does not exist. Read this as the specification for
-> what has to be rebuilt, not as instructions.
-
----
-
 Single source of truth for shipping a release. The flow is
 release-please-driven and mostly automatic — the one human action is
 merging the release PR (step 1). Every other step is a CI link to watch or
@@ -177,9 +170,8 @@ bun run render-formula --org stuffbucket --version X.Y.Z \
 
 ## 6. Announce
 
-The marketing site (`site/`) reads the published `updates/manifest.json`
-(built from `site/src/lib/updates-manifest.ts`) to hydrate its download
-buttons — no manual update needed there.
+The Pages site (`docs/index.html`) auto-fetches the latest release via
+the GitHub API at page load — no manual update needed there.
 
 **Re-running a failed Pages deploy — dispatch fresh, never re-run failed jobs.**
 If a `deploy-pages.yml` run fails at the deploy step, trigger a brand-new run:

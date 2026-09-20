@@ -1,0 +1,268 @@
+---
+// God rays — a subtle volumetric light-shaft backdrop.
+//
+// - Inlined GLSL (no third-party shader library) + raw WebGL (no Three.js) to
+//   keep the page lean.
+// - BOTH THEMES: the canvas is transparent (premultiplied alpha), so the page
+//   background shows through the gaps between shafts. Dark mode glows on the
+//   near-black page; light mode shows softer, deeper shafts on the warm paper.
+// - Reduced motion is a contract: under prefers-reduced-motion we draw a single
+//   static frame, never an animation loop.
+// - Pauses when the tab is hidden. pointer-events:none, z-index 0 — it sits
+//   behind every card, peeking through the card gaps and the page margins.
+---
+
+<canvas class="godrays" aria-hidden="true"></canvas>
+
+<script>
+  const canvas = document.querySelector<HTMLCanvasElement>("canvas.godrays")
+  if (canvas) initGodRays(canvas)
+
+  function initGodRays(canvas: HTMLCanvasElement): void {
+    const gl = canvas.getContext("webgl", {
+      antialias: false,
+      alpha: true,
+      premultipliedAlpha: true,
+      depth: false,
+      powerPreference: "low-power",
+    })
+    if (!gl) return // No WebGL → the page background is a fine fallback.
+
+    const vert = `
+      attribute vec2 p;
+      void main() { gl_Position = vec4(p, 0.0, 1.0); }
+    `
+
+    // Light source just above top-center; rays fan downward. The ray field is
+    // built from layered sines of the angle (each inherently 2π-periodic, so
+    // there's no seam) at irrational-ish frequencies for an irregular look,
+    // scrolled slowly over time. Radial falloff + a soft central glow shape it
+    // into shafts. Output is additive gold-on-black.
+    const frag = `
+      precision highp float;
+      uniform vec2 uRes;
+      uniform float uTime;
+      uniform float uIntensity;
+      uniform float uLightY;
+      uniform float uLight;
+      uniform vec3 uColorA;
+      uniform vec3 uColorB;
+      uniform vec3 uColorC;
+
+      void main() {
+        vec2 uv = gl_FragCoord.xy / uRes;
+        float aspect = uRes.x / uRes.y;
+        vec2 p = vec2((uv.x - 0.5) * aspect + 0.5, uv.y);
+
+        vec2 light = vec2(0.5, uLightY);
+        vec2 d = p - light;
+        float dist = length(d);
+        float ang = atan(d.y, d.x);
+
+        float t = uTime * 0.55;
+        float r = 0.45
+          + 0.30 * sin(ang * 7.0  + t)
+          + 0.22 * sin(ang * 13.0 - t * 1.4 + 2.1)
+          + 0.16 * sin(ang * 23.0 + t * 0.8 + 4.2)
+          + 0.10 * sin(ang * 41.0 - t * 0.6 + 1.3);
+        r = max(r, 0.0);
+        r = pow(r, 2.6);
+
+        float falloff = smoothstep(1.5, 0.05, dist);
+        float beams = r * falloff;
+        // Fade the beams out around the center so the convergence reads as a
+        // soft glow, not a hard point.
+        beams *= smoothstep(0.0, 0.26, dist);
+        float glow = smoothstep(0.85, 0.0, dist) * 0.16;
+
+        float v = (beams * 0.85 + glow) * uIntensity;
+        // Cyclic blend across the brand jewel tones by ray angle, so adjacent
+        // shafts differ in hue; drifts slowly over time.
+        float g = fract(ang / 6.28318 * 1.2 + uTime * 0.06);
+        vec3 hue;
+        if (g < 0.33333) hue = mix(uColorA, uColorB, g * 3.0);
+        else if (g < 0.66667) hue = mix(uColorB, uColorC, (g - 0.33333) * 3.0);
+        else hue = mix(uColorC, uColorA, (g - 0.66667) * 3.0);
+
+        // Premultiplied-alpha output so the page background shows through the
+        // gaps in both themes. Dark: bright shafts glowing on the near-black
+        // page. Light: deeper, slightly stronger shafts that read on warm paper.
+        vec3 rgb;
+        float a;
+        if (uLight > 0.5) {
+          rgb = hue * 0.82;
+          a = clamp(v * 1.15, 0.0, 0.55);
+        } else {
+          rgb = hue;
+          a = clamp(v, 0.0, 1.0);
+        }
+        gl_FragColor = vec4(rgb * a, a);
+      }
+    `
+
+    function compile(type: number, src: string): WebGLShader | null {
+      const s = gl!.createShader(type)
+      if (!s) return null
+      gl!.shaderSource(s, src)
+      gl!.compileShader(s)
+      if (!gl!.getShaderParameter(s, gl!.COMPILE_STATUS)) {
+        console.warn("godrays shader:", gl!.getShaderInfoLog(s))
+        return null
+      }
+      return s
+    }
+
+    const vs = compile(gl.VERTEX_SHADER, vert)
+    const fs = compile(gl.FRAGMENT_SHADER, frag)
+    if (!vs || !fs) return
+    const prog = gl.createProgram()
+    if (!prog) return
+    gl.attachShader(prog, vs)
+    gl.attachShader(prog, fs)
+    gl.linkProgram(prog)
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+      console.warn("godrays link:", gl.getProgramInfoLog(prog))
+      return
+    }
+    gl.useProgram(prog)
+
+    // Single full-screen triangle covering clip space.
+    const buf = gl.createBuffer()
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf)
+    gl.bufferData(
+      gl.ARRAY_BUFFER,
+      new Float32Array([-1, -1, 3, -1, -1, 3]),
+      gl.STATIC_DRAW,
+    )
+    const loc = gl.getAttribLocation(prog, "p")
+    gl.enableVertexAttribArray(loc)
+    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0)
+
+    const uRes = gl.getUniformLocation(prog, "uRes")
+    const uTime = gl.getUniformLocation(prog, "uTime")
+    const uIntensity = gl.getUniformLocation(prog, "uIntensity")
+    const uColorA = gl.getUniformLocation(prog, "uColorA")
+    const uColorB = gl.getUniformLocation(prog, "uColorB")
+    const uColorC = gl.getUniformLocation(prog, "uColorC")
+    const uLightY = gl.getUniformLocation(prog, "uLightY")
+    const uLight = gl.getUniformLocation(prog, "uLight")
+    gl.uniform1f(uIntensity, 0.62)
+    // Brand jewel tones (dark-mode tints): turquoise → indigo → magenta. No
+    // gold — these coordinate with the teal cards and complement the red hero.
+    gl.uniform3f(uColorA, 0.31, 0.7, 0.75) // turquoise
+    gl.uniform3f(uColorB, 0.55, 0.48, 0.82) // indigo
+    gl.uniform3f(uColorC, 0.85, 0.42, 0.63) // magenta
+
+    // The shader is cheap; render at 0.85× and DPR-capped — soft enough that
+    // the upscale never shows, and easy on integrated GPUs / battery.
+    const scale = 0.85
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.5)
+    function resize(): void {
+      const w = Math.max(1, Math.round(window.innerWidth * scale * dpr))
+      const h = Math.max(1, Math.round(window.innerHeight * scale * dpr))
+      canvas.width = w
+      canvas.height = h
+      canvas.style.width = window.innerWidth + "px"
+      canvas.style.height = window.innerHeight + "px"
+      gl!.viewport(0, 0, w, h)
+      gl!.uniform2f(uRes, w, h)
+    }
+
+    // The light source is anchored to the hero card's center: it tracks the
+    // card as the page scrolls, and pins at the top of the viewport once the
+    // card's center scrolls off the top — so the bright convergence never
+    // floats in the gaps between cards.
+    const hero = document.querySelector<HTMLElement>(".hero")
+    function lightY(): number {
+      if (!hero) return 0.8
+      const r = hero.getBoundingClientRect()
+      const vh = window.innerHeight || 1
+      const centerY = r.top + r.height / 2
+      // Track the hero card's center, but never let the source rise above 48px
+      // off the top — so the glowing convergence is fully off-screen by the
+      // time the card has scrolled past, never floating between the lower cards.
+      const pinned = Math.max(centerY, -48)
+      return 1 - pinned / vh
+    }
+
+    const start = performance.now()
+    let running = false
+    let rafId = 0
+    function frame(now: number): void {
+      gl!.uniform1f(uTime, (now - start) / 1000)
+      gl!.uniform1f(uLightY, lightY())
+      gl!.uniform1f(uLight, darkMM.matches ? 0 : 1)
+      gl!.drawArrays(gl!.TRIANGLES, 0, 3)
+      if (running) rafId = requestAnimationFrame(frame)
+    }
+    function play(): void {
+      if (running) return
+      running = true
+      rafId = requestAnimationFrame(frame)
+    }
+    function pause(): void {
+      running = false
+      if (rafId) cancelAnimationFrame(rafId)
+    }
+
+    const darkMM = window.matchMedia("(prefers-color-scheme: dark)")
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+
+    // Active in both themes (the shader adapts via uLight). Pauses only for
+    // reduced motion (single static frame) and hidden tabs.
+    function sync(): void {
+      if (reduced) {
+        pause()
+        frame(performance.now()) // single static frame
+      } else if (document.visibilityState === "visible") {
+        play()
+      } else {
+        pause()
+      }
+    }
+
+    resize()
+    window.addEventListener(
+      "resize",
+      () => {
+        resize()
+        if (!running) frame(performance.now())
+      },
+      { passive: true },
+    )
+    darkMM.addEventListener?.("change", sync)
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) pause()
+      else sync()
+    })
+
+    // When animating, the rAF loop re-anchors the light every frame. Under
+    // reduced motion we draw only a single frame, so redraw it on scroll so the
+    // anchored light still tracks the hero card.
+    let scrollPending = false
+    window.addEventListener(
+      "scroll",
+      () => {
+        if (running || !reduced || scrollPending) return
+        scrollPending = true
+        requestAnimationFrame((now) => {
+          scrollPending = false
+          frame(now)
+        })
+      },
+      { passive: true },
+    )
+
+    sync()
+  }
+</script>
+
+<style>
+  canvas.godrays {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    display: block;
+  }
+</style>
