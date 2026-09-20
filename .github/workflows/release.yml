@@ -803,7 +803,7 @@ jobs:
 
       - name: Upload install log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: msi-install-log-${{ env.TAG }}
           path: install.log
@@ -868,7 +868,7 @@ jobs:
 
       - name: Upload uninstall log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: msi-uninstall-log-${{ env.TAG }}
           path: uninstall.log
@@ -968,7 +968,7 @@ jobs:
       # this release job share a warm cache. GitHub-published (policy-OK).
       - name: Cache cargo registry + target
         if: steps.skip.outputs.skip != 'true'
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry/index
@@ -1137,6 +1137,9 @@ jobs:
       - uses: ./.github/actions/setup-bun
         with:
           bun-version: 1.3.14
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
 
       - name: Create or update the protected manifest PR
         env:

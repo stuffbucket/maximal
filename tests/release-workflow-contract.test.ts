@@ -62,6 +62,17 @@ describe("generated pull request validation", () => {
   })
 })
 
+describe("release action runtimes", () => {
+  test("release actions use Node 24-compatible majors", async () => {
+    const workflow = await readWorkflow("release.yml")
+
+    expect(workflow).toContain("actions/cache@v5")
+    expect(workflow).toContain("actions/upload-artifact@v5")
+    expect(workflow).not.toContain("actions/cache@v4")
+    expect(workflow).not.toContain("actions/upload-artifact@v4")
+  })
+})
+
 describe("manifest publication", () => {
   test("the manifest job proposes a protected PR instead of pushing main", async () => {
     const workflow = await readWorkflow("release.yml")
@@ -72,5 +83,19 @@ describe("manifest publication", () => {
     expect(manifestJob).toContain("automation/updates-manifest")
     expect(manifestJob).toContain("gh pr create")
     expect(manifestJob).not.toContain("git push origin HEAD:main")
+  })
+
+  test("the manifest job installs dependencies before generation and tests", async () => {
+    const workflow = await readWorkflow("release.yml")
+    const manifestJob = workflow.slice(workflow.indexOf("\n  manifest:"))
+    const installIndex = manifestJob.indexOf("bun install --frozen-lockfile")
+    const generationIndex = manifestJob.indexOf(
+      "bun scripts/write-updates-manifest.ts",
+    )
+    const testIndex = manifestJob.indexOf("bun test")
+
+    expect(installIndex).toBeGreaterThan(-1)
+    expect(generationIndex).toBeGreaterThan(installIndex)
+    expect(testIndex).toBeGreaterThan(installIndex)
   })
 })
