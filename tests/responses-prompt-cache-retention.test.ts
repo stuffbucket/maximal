@@ -26,6 +26,7 @@ const originalState = {
   copilotToken: state.copilotToken,
   vsCodeVersion: state.vsCodeVersion,
   accountType: state.accountType,
+  lastUpstreamRejection: state.lastUpstreamRejection,
   models: state.models,
   manualApprove: state.manualApprove,
 }
@@ -63,6 +64,7 @@ beforeEach(() => {
   state.copilotToken = "test-token"
   state.vsCodeVersion = "1.0.0"
   state.accountType = "individual"
+  state.lastUpstreamRejection = undefined
   state.manualApprove = false
   state.models = {
     object: "list",
@@ -83,6 +85,7 @@ afterEach(() => {
   state.copilotToken = originalState.copilotToken
   state.vsCodeVersion = originalState.vsCodeVersion
   state.accountType = originalState.accountType
+  state.lastUpstreamRejection = originalState.lastUpstreamRejection
   state.models = originalState.models
   state.manualApprove = originalState.manualApprove
 })

@@ -3,12 +3,18 @@ import { Hono } from "hono"
 
 import type { AnthropicMessagesPayload } from "~/lib/models/anthropic-types"
 
-const actualStateModule = await import("../src/lib/runtime-state/state")
-const actualConfigModule = await import("../src/lib/config/config")
-const actualModelsModule = await import("../src/lib/models/models")
-const actualRateLimitModule = await import("../src/lib/http/rate-limit")
-const actualUtilsModule = await import("../src/lib/platform/utils")
-const actualApiFlowsModule = await import("../src/routes/messages/api-flows")
+const actualStateModule = {
+  ...(await import("../src/lib/runtime-state/state")),
+}
+const actualConfigModule = { ...(await import("../src/lib/config/config")) }
+const actualModelsModule = { ...(await import("../src/lib/models/models")) }
+const actualRateLimitModule = {
+  ...(await import("../src/lib/http/rate-limit")),
+}
+const actualUtilsModule = { ...(await import("../src/lib/platform/utils")) }
+const actualApiFlowsModule = {
+  ...(await import("../src/routes/messages/api-flows")),
+}
 
 const state = {
   ...actualStateModule.state,
