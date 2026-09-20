@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.43](https://github.com/stuffbucket/maximal/compare/v0.4.42...v0.4.43) (2026-09-20)
+
+
+### Bug Fixes
+
+* restore Claude Code tool compatibility ([acbcd60](https://github.com/stuffbucket/maximal/commit/acbcd601379eb07aaee80f361e42c70ff38d1c35))
+
 ## [0.4.42](https://github.com/stuffbucket/maximal/compare/v0.4.41...v0.4.42) (2026-09-19)
 
 
