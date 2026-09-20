@@ -9,6 +9,7 @@ import path from "node:path"
 
 import {
   echoApiKeyHelperCommand,
+  ensureApiKey,
   isOwnedApiKeyHelper,
   resolveApiKey,
 } from "~/lib/auth/api-key-helper"
@@ -282,7 +283,7 @@ type ResolveHelperKey = () => ReturnType<typeof resolveApiKey>
 
 export function applyProxyBaseUrl(
   filePath: string = getClaudeCodeSettingsPath(),
-  resolveHelperKey: ResolveHelperKey = () => resolveApiKey(HELPER_LABEL),
+  resolveHelperKey: ResolveHelperKey = () => ensureApiKey(HELPER_LABEL),
 ): ApplyResult {
   const existing = readClaudeCodeSettings(filePath)
   const baseUrlOwnership = getBaseUrlOwnership(existing)

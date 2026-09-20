@@ -2,8 +2,11 @@ import { describe, expect, test } from "bun:test"
 import { Hono } from "hono"
 
 import { createAuthMiddleware } from "~/lib/auth/request-auth"
+import { copilotBaseUrl } from "~/lib/config/api-config"
 import { DiagnosticsResponse } from "~/lib/config/settings-types"
+import { state } from "~/lib/runtime-state/state"
 import { server } from "~/server"
+import { observeContextManagementSupport } from "~/services/copilot/context-management-capabilities"
 
 import { settingsApiRoutes } from "../src/routes/settings/api"
 
@@ -26,6 +29,66 @@ describe("GET /settings/api/diagnostics", () => {
       )
       // web_search surfaces which executor resolves web tools.
       expect(parsed.data.web_search.kind.length).toBeGreaterThan(0)
+    }
+  })
+
+  test("reports observed context-management compatibility separately", async () => {
+    const priorUserName = state.userName
+    const priorModels = state.models
+    state.userName = "diagnostics-context-test"
+    state.models = {
+      object: "list",
+      data: [
+        {
+          id: "claude-diagnostics-test",
+          name: "Diagnostics Test",
+          object: "model",
+          vendor: "Anthropic",
+          version: "1",
+          preview: false,
+          model_picker_enabled: true,
+          supported_endpoints: ["/v1/messages"],
+          capabilities: {
+            family: "claude",
+            type: "chat",
+            tokenizer: "o200k_base",
+            object: "model_capabilities",
+            limits: {},
+            supports: {},
+          },
+        },
+      ],
+    }
+    try {
+      observeContextManagementSupport(
+        {
+          account: state.userName,
+          host: copilotBaseUrl(state),
+          model: "claude-diagnostics-test",
+          strategy: "clear_thinking_20251015",
+        },
+        "rejected",
+      )
+
+      const app = new Hono()
+      app.route("/settings/api", settingsApiRoutes)
+      const res = await app.request("/settings/api/diagnostics")
+      const json: unknown = await res.json()
+      const body = DiagnosticsResponse.parse(json)
+
+      expect(body.context_management.cache.policy).toBe("rejections-only")
+      const observation = body.context_management.cache.entries.find(
+        (entry) => entry.model === "claude-diagnostics-test",
+      )
+      expect(observation).toMatchObject({
+        strategy: "clear_thinking_20251015",
+      })
+      expect(typeof observation?.rejected_at).toBe("string")
+    } finally {
+      // eslint-disable-next-line require-atomic-updates -- restores test-global state
+      state.userName = priorUserName
+      // eslint-disable-next-line require-atomic-updates -- restores test-global state
+      state.models = priorModels
     }
   })
 
@@ -87,6 +150,19 @@ describe("DiagnosticsResponse schema round-trip", () => {
       web_search: {
         kind: "CopilotResponsesExecutor",
         detail: "gpt-5-mini",
+      },
+      context_management: {
+        advertised: [{ model: "claude-opus-5", support: true }],
+        cache: {
+          policy: "rejections-only" as const,
+          entries: [
+            {
+              model: "claude-opus-4.7",
+              strategy: "clear_thinking_20251015",
+              rejected_at: "2026-09-19T00:00:00.000Z",
+            },
+          ],
+        },
       },
     }
     const parsed = DiagnosticsResponse.parse(fixture)

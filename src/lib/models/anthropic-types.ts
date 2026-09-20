@@ -30,6 +30,10 @@ export interface AnthropicMessagesPayload {
   output_config?: {
     effort?: "low" | "medium" | "high" | "xhigh" | "max"
   }
+  context_management?: {
+    edits?: Array<Record<string, unknown> & { type?: string }>
+    [key: string]: unknown
+  }
   metadata?: {
     user_id?: string
   }

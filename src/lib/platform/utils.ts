@@ -31,7 +31,7 @@ export async function cacheModels(): Promise<void> {
 }
 
 export const cacheVSCodeVersion = (): Promise<void> => {
-  const response = getConfig().editorVersion ?? "1.124.0"
+  const response = getConfig().editorVersion ?? "1.138.0"
   state.vsCodeVersion = response
 
   consola.info(`Using VSCode version: ${response}`)

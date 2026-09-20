@@ -84,7 +84,11 @@ interface ModelSupports {
   structured_outputs?: boolean
   vision?: boolean
   adaptive_thinking?: boolean
+  context_editing?: boolean
+  prediction?: boolean
   reasoning_effort?: Array<string>
+  tool_search?: boolean
+  [key: string]: unknown
 }
 
 interface ModelCapabilities {

@@ -73,14 +73,16 @@ describe("claude-code CLI enable/disable persists routing intent (#229)", () => 
     expect(isProxyBaseUrlConfigured(SETTINGS)).toBe(false)
   })
 
-  test("enable fails without a key and leaves routing intent off", async () => {
+  test("enable provisions a key and persists routing intent when none exists", async () => {
     writeConfig({})
 
     const result = await claudeCodeApp.enable()
 
-    expect(result.success).toBe(false)
-    expect(claudeCodeRoutingIntended()).toBe(false)
-    expect(fs.existsSync(SETTINGS)).toBe(false)
+    expect(result.success).toBe(true)
+    expect(claudeCodeRoutingIntended()).toBe(true)
+    expect(getConfig().auth?.apiKeyEntries).toHaveLength(1)
+    expect(getConfig().auth?.apiKeyEntries?.[0]?.key).toMatch(/^mxl_[\w-]+$/u)
+    expect(isProxyBaseUrlConfigured(SETTINGS)).toBe(true)
   })
 
   test("enable does not clobber sibling apps config", async () => {

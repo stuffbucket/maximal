@@ -48,6 +48,28 @@ export const WebSearchStatus = z.object({
 })
 export type WebSearchStatus = z.infer<typeof WebSearchStatus>
 
+export const ContextManagementDiagnostics = z.object({
+  advertised: z.array(
+    z.object({
+      model: z.string(),
+      support: z.boolean(),
+    }),
+  ),
+  cache: z.object({
+    policy: z.literal("rejections-only"),
+    entries: z.array(
+      z.object({
+        model: z.string(),
+        strategy: z.string(),
+        rejected_at: z.string(),
+      }),
+    ),
+  }),
+})
+export type ContextManagementDiagnostics = z.infer<
+  typeof ContextManagementDiagnostics
+>
+
 export const DiagnosticsResponse = z.object({
   version: z.string(),
   source_revision: z.string().nullable(),
@@ -65,6 +87,7 @@ export const DiagnosticsResponse = z.object({
   tokens: TokenStatus,
   rate_limit: RateLimitStatus,
   web_search: WebSearchStatus,
+  context_management: ContextManagementDiagnostics,
 })
 export type DiagnosticsResponse = z.infer<typeof DiagnosticsResponse>
 

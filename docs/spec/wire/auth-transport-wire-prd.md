@@ -132,9 +132,9 @@ OAuth app in use:
 | `copilot-integration-id` | `vscode-chat` |
 | `editor-device-id` | `<state.vsCodeDeviceId>` |
 | `editor-version` | `vscode/<state.vsCodeVersion>` |
-| `editor-plugin-version` | `copilot-chat/0.46.0` |
-| `user-agent` | `GitHubCopilotChat/0.46.0` |
-| `x-github-api-version` | `2025-10-01` |
+| `editor-plugin-version` | `copilot-chat/0.48.1` |
+| `user-agent` | `GitHubCopilotChat/0.48.1` |
+| `x-github-api-version` | `2026-08-01` |
 | `x-request-id` | per-request UUID |
 | `x-agent-task-id` | same UUID as `x-request-id` |
 | `openai-intent` | `conversation-agent` (overridden per endpoint) |
@@ -161,6 +161,28 @@ Summarized here; each surface PRD repeats the detail relevant to it.
 | `/responses` | `x-initiator: agent\|user`; `x-interaction-type`/`openai-intent`/`x-interaction-id` via `prepareInteractionHeaders()` + `prepareForCompact()` |
 | `/models` | `x-interaction-type: model-access`, `openai-intent: model-access`; `x-interaction-id` and `content-type` removed (`api-config.ts:218-231`) |
 | `/embeddings` | base headers only |
+
+### Messages context-editing compatibility
+
+Copilot's model catalog may omit `capabilities.supports.context_editing` even
+when a model accepts one or more `context_management.edits` strategies. The
+Messages transport therefore keeps three states separate:
+
+- an explicit catalog value of `false` suppresses context management;
+- an absent catalog value is unknown, so the original request is attempted;
+- a missing rejection-cache entry means support is expected, so the original
+  request is attempted;
+- only a context-specific rejection is cached, in memory, by account, Copilot
+  host, exact model ID, and normalized edit-set signature.
+
+Successful requests create no cache entry. A `400` whose error body explicitly
+names `context_management` records a rejection for the process lifetime and is
+retried once without the field and without only its paired
+`context-management-2025-06-27` beta token. Other beta tokens remain intact,
+and unrelated errors are not retried. A new exact model ID naturally starts
+without a rejection, and process restart clears the in-memory cache. Diagnostics
+reports catalog-advertised support separately from current-catalog rejection
+entries; neither layer claims that Maximal implements every advertised feature.
 
 `x-initiator` is derived from the **last message's role**: an assistant
 or tool message → `agent`, otherwise `user`. This prevents a long

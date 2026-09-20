@@ -12,6 +12,8 @@ import { spawnSync } from "node:child_process"
 import { mkdirSync, readdirSync, rmSync, statSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 
+import { resolveSidecarVersion } from "./build-sidecar-version"
+
 const REPO = resolve(import.meta.dir, "..")
 const FORCE =
   process.argv.includes("--force") || process.env.MAXIMAL_FORCE_SIDECAR === "1"
@@ -41,7 +43,11 @@ const branch = git(["branch", "--show-current"])
 const pkg = (await Bun.file(join(REPO, "package.json")).json()) as {
   version: string
 }
-const version = `${pkg.version}-dev+${sha.slice(0, 8) || "unknown"}`
+const version = resolveSidecarVersion(
+  pkg.version,
+  sha,
+  process.env.MAXIMAL_VERSION,
+)
 // The release channel this binary follows; defaults to stable. Release
 // pipelines (and `app:build:beta`) set MAXIMAL_CHANNEL to stamp the binary.
 const channel = process.env.MAXIMAL_CHANNEL || "stable"

@@ -7,6 +7,8 @@
  * settings survive maximal binary upgrades; older binary-backed commands remain
  * recognizable for migration.
  */
+import { randomBytes, randomUUID } from "node:crypto"
+
 import type { ApiKeyEntry, AppConfig } from "~/lib/config/config"
 
 import {
@@ -14,11 +16,15 @@ import {
   LEGACY_HELPER_FLAG,
 } from "~/lib/auth/api-key-helper-tokens"
 import { normalizeApiKeys } from "~/lib/auth/request-auth"
-import { getConfig } from "~/lib/config/config"
+import { getConfig, writeConfig } from "~/lib/config/config"
 
 export type ApiKeyHelperResult =
   | { ok: true; key: string; source: "app" | "default" }
   | { ok: false; error: string }
+
+export function generateApiKey(): string {
+  return `mxl_${randomBytes(24).toString("base64url")}`
+}
 
 /** Build the binary-backed helper form written before v0.4.42. */
 export function apiKeyHelperCommand(
@@ -185,6 +191,29 @@ export function resolveApiKey(
         `no API key found for "${wanted}" and no default endpoint API key is configured`
       : "no default endpoint API key is configured",
   }
+}
+
+/** Resolve an existing key or provision an enabled app key for `label`. */
+export function ensureApiKey(label: string): ApiKeyHelperResult {
+  const config = getConfig()
+  const resolved = resolveApiKey(label, config)
+  if (resolved.ok) return resolved
+
+  const entry: ApiKeyEntry = {
+    id: randomUUID(),
+    label,
+    key: generateApiKey(),
+    enabled: true,
+    created_at: new Date().toISOString(),
+  }
+  writeConfig({
+    ...config,
+    auth: {
+      ...config.auth,
+      apiKeyEntries: [...(config.auth?.apiKeyEntries ?? []), entry],
+    },
+  })
+  return { ok: true, key: entry.key, source: "app" }
 }
 
 /**

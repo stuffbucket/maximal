@@ -21,6 +21,7 @@ import consola from "consola"
 import { Hono } from "hono"
 
 import { describeExecutor } from "~/debug"
+import { copilotBaseUrl } from "~/lib/config/api-config"
 import {
   DiagnosticsResponse,
   type DiagnosticsResponse as DiagnosticsResponseT,
@@ -32,6 +33,7 @@ import { modelsCached, state, tokenPresence } from "~/lib/runtime-state/state"
 import { BUILD_VERSION } from "~/lib/update/build-info"
 import { getUpdateStatus } from "~/lib/update/update-check"
 import { getGitVersion, shortSha } from "~/lib/update/version"
+import { listObservedContextManagementCapabilities } from "~/services/copilot/context-management-capabilities"
 
 import { accountsRoutes } from "./accounts"
 import { apiKeysRoutes } from "./api-keys"
@@ -76,6 +78,34 @@ function buildDiagnostics(): DiagnosticsResponseT {
       wait_when_throttled: state.rateLimitWait,
     },
     web_search: buildWebSearchStatus(),
+    context_management: buildContextManagementDiagnostics(),
+  }
+}
+
+function buildContextManagementDiagnostics(): DiagnosticsResponseT["context_management"] {
+  const account = state.userName ?? "unknown"
+  const host = copilotBaseUrl(state)
+  const models = state.models?.data ?? []
+  const modelIds = new Set(models.map((model) => model.id))
+  const advertised = models.flatMap((model) => {
+    const support = model.capabilities.supports.context_editing
+    return typeof support === "boolean" ? [{ model: model.id, support }] : []
+  })
+  const entries = listObservedContextManagementCapabilities()
+    .filter(
+      (entry) =>
+        entry.account === account
+        && entry.host === host
+        && modelIds.has(entry.model),
+    )
+    .map((entry) => ({
+      model: entry.model,
+      strategy: entry.strategy,
+      rejected_at: entry.observedAt,
+    }))
+  return {
+    advertised,
+    cache: { policy: "rejections-only", entries },
   }
 }
 

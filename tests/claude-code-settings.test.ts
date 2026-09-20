@@ -16,6 +16,7 @@ import {
   stripBaseUrl,
   writeClaudeCodeSettings,
 } from "~/apps/claude-code/config"
+import { getConfig, writeConfig } from "~/lib/config/config"
 
 const TEST_KEY = "custom-user-key"
 const TEST_HELPER = "echo 'custom-user-key'"
@@ -32,11 +33,13 @@ let dir: string
 let settingsPath: string
 
 beforeEach(() => {
+  writeConfig({})
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "maximal-claude-code-"))
   settingsPath = path.join(dir, "settings.json")
 })
 
 afterEach(() => {
+  writeConfig({})
   try {
     fs.rmSync(dir, { recursive: true, force: true })
   } catch {
@@ -519,6 +522,42 @@ describe("applyProxyBaseUrl (end-to-end)", () => {
     expect(result.wrote).toBe(false)
     expect(result.skippedReason).toBe("foreign-api-key-helper")
     expect(read()).toEqual(original)
+  })
+})
+
+describe("applyProxyBaseUrl API-key provisioning", () => {
+  it("provisions a Claude Code key when no usable key exists", () => {
+    const result = applyProxyBaseUrl(settingsPath)
+
+    expect(result.wrote).toBe(true)
+    const entries = getConfig().auth?.apiKeyEntries ?? []
+    expect(entries).toHaveLength(1)
+    expect(entries[0]).toMatchObject({
+      label: "claude-code",
+      enabled: true,
+    })
+    expect(entries[0]?.key).toMatch(/^mxl_[\w-]+$/u)
+    expect(read().apiKeyHelper).toBe(`echo '${entries[0]?.key}'`)
+  })
+
+  it("does not provision more than one key across repeated applies", () => {
+    applyProxyBaseUrl(settingsPath)
+    applyProxyBaseUrl(settingsPath)
+
+    expect(getConfig().auth?.apiKeyEntries).toHaveLength(1)
+  })
+
+  it("does not provision a key when the base URL is foreign", () => {
+    writeRaw(
+      JSON.stringify({
+        env: { ANTHROPIC_BASE_URL: "https://other.example" },
+      }),
+    )
+
+    const result = applyProxyBaseUrl(settingsPath)
+
+    expect(result.skippedReason).toBe("foreign-base-url")
+    expect(getConfig().auth?.apiKeyEntries ?? []).toEqual([])
   })
 })
 
