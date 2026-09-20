@@ -1,6 +1,8 @@
 # Design: decouple the marketing site from releases via a runtime version manifest
 
-**Status:** Proposal for review. Design only — nothing implemented.
+**Status:** Implemented. The protected-branch write path was revised in
+2026-09: release automation proposes the committed manifest through a rolling
+PR rather than pushing directly to `main`.
 **Date:** 2026-07-03.
 **Authors:** consolidated from a parallel investigation (root-cause, data-contract, CI/workflow).
 
@@ -138,9 +140,11 @@ no-auth / no-rate-limit. Change only *how it's written*: the release must publis
 the JSON to that path **without running the Astro build**. Because Astro serves
 `site/public/**` verbatim, placing the file at `site/public/updates/manifest.json`
 means ordinary builds still emit it (migration fallback) while a release can
-update it via a lightweight file write/sync. Cache the manifest with a short TTL
-(≈60–300s) so a release propagates quickly; the binaries it points at keep
-long/immutable caching (mutable pointer, immutable targets).
+update it via a lightweight generated PR. A maintainer merge preserves the
+repository's required-PR and `test` protections, then the resulting `site/**`
+push deploys Pages. Cache the manifest with a short TTL (≈60–300s) so a release
+propagates quickly; the binaries it points at keep long/immutable caching
+(mutable pointer, immutable targets).
 
 *(Rejected: hosting as a GitHub release asset — the browser would need the GitHub
 API to discover the asset URL, reintroducing the rate limit. Rejected: a brand-new
@@ -178,9 +182,11 @@ workflow (pinning becomes a manifest-data concern).
 **Additions:** a `paths:` filter on the `push` trigger (`site/**` +
 `.github/workflows/deploy-pages.yml`); `cancel-in-progress: true` (safe once the
 deploy no longer carries release-critical state — structurally guarantees ≤1
-environment deploy in flight, eliminating the backend-collision window rather than
-retrying into it); and one small "write manifest.json" step on release
-(read-modify-write so a beta publish never clobbers `stable`, and vice-versa).
+environment deploy in flight, eliminating the backend-collision window rather
+than retrying into it); and a post-publish rolling manifest PR (read-modify-write
+so a beta publish never clobbers `stable`, and vice-versa). The PR is validated
+by an explicit SHA-pinned `ci.yml` dispatch because `GITHUB_TOKEN`-created PRs
+do not recursively trigger `pull_request` workflows.
 
 **Net:** live deploy paths drop **3 → 1**; several triggers/jobs/steps and one
 permission removed; the `releases/latest` race designed out. Complexity decreases.
@@ -196,10 +202,12 @@ primary fix.
 - **Phase 0 — richer manifest (safe, invisible).** Bump `manifest.json.ts` to
   `schema: 2` with `downloads` (derived from assets it already resolves). Desktop
   client unaffected; site still builds as today.
-- **Phase 1 — release writes the manifest without an Astro rebuild.** Add the
-  release-workflow write step so the manifest is fresh-on-release regardless of
-  site rebuilds. Keep the build-time generator as a fallback. **Both paths now
-  run** (belt-and-suspenders).
+- **Phase 1 — release proposes the manifest without an Astro rebuild.** The
+  release workflow generates the published channel on a rolling automation
+  branch and opens or updates a protected PR. A maintainer merge makes the
+  committed manifest fresh without a release-time Astro rebuild. Keep the
+  build-time generator as a fallback. **Both paths now run**
+  (belt-and-suspenders).
 - **Phase 2 — site hydrates at runtime.** Change Hero/GetStarted to the
   fallback-href + runtime-fetch pattern. Verify with a browser smoke artifact
   (JS on → direct dmg + version pill; JS off → `/releases` link).
@@ -215,12 +223,13 @@ primary fix.
   generation exactly as recommended below: `site/src/lib/version.ts` reads the
   **committed static** `site/public/updates/manifest.json` (imported at build
   time, no API), so the server-rendered fail-closed fallback still bakes a real
-  version + direct download links. release.yml's `manifest` job keeps that file
-  fresh on every publish, so "the pin" is now just what the manifest advertises.
+  version + direct download links. release.yml's `manifest` PR keeps that file
+  current after each maintainer merge, so "the pin" is now just what the
+  manifest advertises.
 
-**Ordering guarantee:** the release-advertising path (manifest write, Phase 1) is
-proven live *before* the old path (`redeploy-site`, Phase 3) is removed — so
-there's never a window where a release fails to advertise its version.
+**Ordering guarantee:** the generated manifest PR is the sole repository write
+path. Runtime hydration can advertise the published release while that PR awaits
+maintainer merge; the committed fallback advances only through protected `main`.
 
 ## Open decisions for the reviewer
 

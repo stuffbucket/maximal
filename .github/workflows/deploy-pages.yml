@@ -2,7 +2,7 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
     # Only redeploy when something the deployed site actually depends on
     # changes. A src-only or test-only commit no longer rebuilds+redeploys
     # Pages — the previously unfiltered trigger multiplied deploy volume (and
@@ -11,12 +11,10 @@ on:
     # docs/decisions/site-runtime-version-manifest.md).
     #
     # `site/public/updates/manifest.json` is listed on purpose: release.yml's
-    # `manifest` job commits that file to main on publish, and this filter is
-    # what turns that commit into exactly one Pages deploy — so a release
-    # advertises its new version to the site with NO explicit dispatch (the
-    # `redeploy-site` job that used to do that is now gone). It lives under
-    # site/public/ so `site/**` already covers it; it is named here only to
-    # document that the release→site path rides this trigger.
+    # `manifest` job proposes that file through a protected PR. A maintainer
+    # merge creates the main push that this filter turns into exactly one Pages
+    # deploy. It lives under site/public/ so `site/**` already covers it; it is
+    # named here only to document that the release→site path rides this trigger.
     paths:
       - "site/**"
       - ".github/workflows/deploy-pages.yml"
@@ -68,7 +66,7 @@ jobs:
       # longer queries the GitHub releases API and has no SITE_PIN_VERSION knob:
       # the version + download links it server-renders come from the committed
       # static manifest (site/public/updates/manifest.json), which release.yml's
-      # `manifest` job refreshes on every publish. So there is no GITHUB_TOKEN /
+      # `manifest` PR refreshes after every publish. So there is no GITHUB_TOKEN /
       # rate-limit exposure here, and the build is deterministic + offline. #221's
       # runtime hydration still layers over this baked, fail-closed fallback.
       - name: Build Astro

@@ -1,9 +1,10 @@
 # Release runbook
 
 Single source of truth for shipping a release. The flow is
-release-please-driven and mostly automatic — the one human action is
-merging the release PR (step 1). Every other step is a CI link to watch or
-a recovery command.
+release-please-driven and mostly automatic. Maintainers merge two protected
+PRs: the release PR that cuts the release, then the generated manifest PR that
+advertises the published release on the site. Every other step is a CI link to
+watch or a recovery command.
 
 ---
 
@@ -42,9 +43,10 @@ On merge, `release-please.yml` does the rest automatically:
    `github-release` step, which this pipeline skips — so a dedicated step
    does it instead. Without it, the next release PR is blocked.)
 
-So the only human action is the merge. `release.yml` then builds, verifies,
-publishes, and the post-publish `homebrew-tap` job bumps the formula — watch
-it in step 2.
+That merge starts the release. `release.yml` then builds, verifies, publishes,
+and runs two post-publish jobs: `homebrew-tap` bumps the formula, while
+`manifest` opens or updates a protected manifest PR. Watch the release in step
+2, then merge the manifest PR in step 3.
 
 > **Version note (pre-1.0).** release-please is configured to bump *patch*
 > even for `feat:`, so a feature ships as `0.4.x+1`. To force a version, put
@@ -86,17 +88,46 @@ healthy build stuck as a draft on a wall-clock timeout:
 | Job | Runner | Produces |
 |---|---|---|
 | `macos-dmg` | ubuntu-latest → dispatches the private `stuffbucket/macos-builder` (self-hosted arm64 mac, holds the Apple secrets) | `*-darwin-arm64.dmg` (+ `.sha256`) — **signed + notarized + stapled** by the builder |
-| `homebrew-tap` | ubuntu-latest (post-publish) | bumps `stuffbucket/homebrew-tap/Formula/maximal.rb` (see §5) |
 | `windows-installer` | ubuntu-latest | `install.ps1` (+ `.sha256`) |
 | `windows-msi` | windows-2022 | `*-windows-x64.msi` (+ `.sha256`) |
 | `windows-msi-verify` | windows-2022 | gate only — silently installs the MSI, asserts install/registry/PATH, runs the installed binary, uninstalls, asserts clean removal |
 
-If any job fails, the release stays a draft (never a half-published
-"Latest"). Recover with **Actions → the release run → "Re-run failed
-jobs"**, then re-run `publish`. The macOS bundle alone can also be
-rebuilt from a developer Mac (§3) if the self-hosted runner is offline.
+If any publish-gating job fails, the release stays a draft (never a
+half-published "Latest"). Recover with **Actions → the release run → "Re-run
+failed jobs"**, then re-run `publish`. The macOS bundle alone can also be
+rebuilt from a developer Mac (§4) if the self-hosted runner is offline.
 
-## 3. Build and attach the polished `.dmg` (legacy — superseded by `macos-dmg`)
+After publication, two independent jobs may still need attention:
+
+| Job | Produces |
+|---|---|
+| `homebrew-tap` | bumps `stuffbucket/homebrew-tap/Formula/maximal.rb` (see §6) |
+| `manifest` | opens or updates the protected updates-manifest PR (see §3) |
+
+Their failure does not roll back or invalidate the immutable published release;
+recover the failed post-publish action independently.
+
+## 3. Merge the post-publish manifest PR
+
+After publication, the `manifest` job opens or updates the rolling
+`automation/updates-manifest` PR. It regenerates only the published tag's
+channel in `site/public/updates/manifest.json`, preserves sibling channels, and
+explicitly dispatches `ci.yml` for the PR's exact head SHA because GitHub does
+not emit recursive `pull_request` events for PRs created with `GITHUB_TOKEN`.
+
+Wait for the required `test` check and for the branch to be current with
+`main`, then merge the PR. That ordinary protected merge creates the `site/**`
+push that triggers `deploy-pages.yml`; release automation never pushes the
+manifest directly to `main` and has no ruleset bypass. A later release updates
+the same open PR instead of creating a conflicting per-tag PR.
+
+A manifest-job retry is safe: if the channel already names the immutable tag,
+the generator skips timestamp-only churn; otherwise it updates the same branch
+and PR. If `main` advanced while the PR was open, rerun the manifest job to
+merge current `main` into the automation branch and dispatch CI for the new
+head. Never repair this state by directly pushing the manifest to `main`.
+
+## 4. Build and attach the polished `.dmg` (legacy — superseded by `macos-dmg`)
 
 The `macos-dmg` job (step 2) produces the signed + notarized `.dmg`
 automatically by dispatching the private `stuffbucket/macos-builder` (or
@@ -126,7 +157,7 @@ bun run package-dmg --tag v0.1.0
 # → dist-release/maximal-v0.1.0-darwin-arm64.dmg
 ```
 
-## 4. Pre-publish smoke (manual, macOS-only)
+## 5. Pre-publish smoke (manual, macOS-only)
 
 CI smokes the windows-x64 binary. There's no CI Mach-O smoke under the
 public-repo runner policy. Replace it with one developer-Mac check:
@@ -142,7 +173,7 @@ loadable. (The `release:dmg` step above also unpacks and copies the
 binary into the `.app`, which is its own loose smoke — but `debug
 --json` is the explicit assertion.)
 
-## 5. Homebrew formula (automated)
+## 6. Homebrew formula (automated)
 
 The `homebrew-tap` job in `release.yml` does this automatically after
 `publish`: it renders the formula from `build/homebrew/maximal.rb` with the
@@ -168,10 +199,12 @@ bun run render-formula --org stuffbucket --version X.Y.Z \
 # then commit + push in the tap repo
 ```
 
-## 6. Announce
+## 7. Announce
 
-The Pages site (`docs/index.html`) auto-fetches the latest release via
-the GitHub API at page load — no manual update needed there.
+The Pages site hydrates its download links from
+`/updates/manifest.json` at runtime and keeps the committed manifest as its
+fail-closed server-rendered fallback. No direct browser GitHub API request is
+required.
 
 **Re-running a failed Pages deploy — dispatch fresh, never re-run failed jobs.**
 If a `deploy-pages.yml` run fails at the deploy step, trigger a brand-new run:
@@ -212,7 +245,13 @@ half-publishes. To recover:
 - **Full re-run is idempotent.** The `release` job reuses an existing
   draft; asset uploads use `gh release upload --clobber`; `publish` flips
   draft→published exactly once and no-ops if already published; the
-  per-tag `concurrency` group serializes re-runs so two can't race.
+  per-tag `concurrency` group serializes release re-runs. Manifest updates use
+  a separate cross-tag concurrency group and reuse one protected PR.
+- **Published release with a failed manifest job:** do not mutate, delete, or
+  retag the immutable release. Regenerate its manifest from current `main`,
+  commit only `site/public/updates/manifest.json` on the rolling automation
+  branch, open/update the protected PR, and dispatch `ci.yml` for its exact
+  head SHA. The historical failed job remains an accurate record.
 - **Manual dispatch** (if needed): `gh workflow run release.yml --ref
   vX.Y.Z -f tag=vX.Y.Z` (the `--ref` must be the tag).
 - **Pull a release:** `gh release delete vX.Y.Z` + `git push --delete
@@ -248,8 +287,9 @@ Immutability locks at **publish time**, not at creation, so every
 `checksums`, `macos-dmg`, `windows-installer`, `windows-msi`) runs while
 the release is still a draft and is unaffected. The `publish` job gates on
 all of them via `needs:`, so no asset write lands after publish in the
-happy path. The post-publish jobs (`homebrew-tap`, `redeploy-site`) only
-*read* the release — they never mutate it.
+happy path. The post-publish jobs (`homebrew-tap`, `manifest`) only *read*
+the release — they never mutate it. The manifest job proposes a repository PR
+after publish.
 
 **The one behavioral change:** you can no longer `--clobber` or otherwise
 patch a release **after** it's published. The "Re-build the DMG" /
@@ -268,8 +308,3 @@ itself is frozen.
   `release.yml`). The macOS **`.dmg` is already signed + notarized** via
   the private `macos-builder`; A4 is only about signing the loose
   binaries. When the cred set lands, those gates flip to `if: …`.
-- **`REPOMAN_APP_ID`** (a GitHub App token) is unset, so release-please
-  tags via `GITHUB_TOKEN` — which is why the auto-dispatch + label-flip
-  steps in `release-please.yml` exist (step 1). Provisioning the app
-  would let release-please fire `release.yml` natively and own the label,
-  removing both shims.
