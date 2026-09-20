@@ -383,9 +383,8 @@ GitHub release is flagged **pre-release**, so it never becomes "Latest".
 
 ### Immutability caveat
 
-Pre-releases are still covered by GitHub Immutable Releases (see
-[release-runbook](../release-runbook.md) → *Immutable releases*). A bad
-beta asset can't be `--clobber`-patched after publish — **bump
+Pre-releases are still covered by GitHub Immutable Releases. A bad beta
+asset can't be `--clobber`-patched after publish — **bump
 `-beta.N`**, don't re-cut the same tag.
 
 ---
@@ -397,7 +396,7 @@ beta asset can't be `--clobber`-patched after publish — **bump
 | **0** | Document + adopt: Tier 2 VM for Windows/installer work; `--api-home` + manual `--port` for ad-hoc local runs | none | Immediate safe testing, zero risk |
 | **1** | `src/lib/channel.ts` + `MAXIMAL_CHANNEL` threading; `dev` on `:4242` (runs beside stable); beta bundle id + product name + icon + own data dir (shares `:4141`); **`dev` must not write Claude integration config** | yes (local only) | `app:dev` beside stable + separate beta installs |
 | **2** | `beta` branch + release-please multi-branch prerelease config + beta-aware `release.yml` | yes (CI) | First `vX.Y.Z-beta.N` to testers |
-| **3** | *(optional)* Tauri updater with `channels: [stable, beta]` + per-channel `update.json`; gate on cert/signing (release-runbook → *Open questions* A4) | yes | In-app auto-update per channel |
+| **3** | *(optional)* Tauri updater with `channels: [stable, beta]` + per-channel `update.json`; gate on code signing | yes | In-app auto-update per channel |
 
 Phase 0 is pure docs and is safe to adopt today. Phases 1–3 are
 independent enough to land as separate PRs.
@@ -415,8 +414,7 @@ independent enough to land as separate PRs.
   <https://github.com/googleapis/release-please/blob/main/docs/manifest-releaser.md>
 - GitHub **pre-releases** (kept off "Latest"):
   <https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases>
-- In-repo: [`windows-vm-utm.md`](./windows-vm-utm.md) (Tier 2),
-  [`release-runbook.md`](../release-runbook.md) (immutability, jobs),
-  architecture doc → *Tauri shell* (sidecar/port wiring).
+- In-repo: [`windows-vm-utm.md`](./windows-vm-utm.md) (Tier 2).
+- Architecture doc → *Tauri shell* (sidecar/port wiring).
 - [`stuffbucket/bladerunner`](https://github.com/stuffbucket/bladerunner)
   — Incus VM/container runner on Apple Virtualization (Tier 1.5 + Tier 2).

@@ -1,8 +1,3 @@
 # Placeholder.
 #
-# Packaging replaces this file with the compiled `maximal` binary
-# before wrapping the app in a DMG. See ../../README.md for the
-# template contract.
-#
-# A working .app needs the binary at `Contents/MacOS/copilot-api`
-# alongside `first-launch` (which references it as $BIN_SRC).
+# Packaging replaces this file with the compiled `maximal` binary.

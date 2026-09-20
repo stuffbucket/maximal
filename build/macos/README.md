@@ -1,9 +1,6 @@
 # macOS app template
 
 `app-template/` is the checked-in skeleton used to assemble `maximal.app`.
-Published macOS packaging, signing, notarization, and stapling are owned by the
-private `stuffbucket/macos-builder`; this directory contains no credentials or
-signing workflow.
 
 ## Template contract
 
@@ -18,9 +15,3 @@ signing workflow.
 
 Keep sentinel names stable: the assembly and first-launch scripts replace them
 literally.
-
-## Local validation
-
-The supported local fallback is documented in `docs/release-runbook.md` and is
-invoked with `bun run release:dmg`. Use it only for release recovery; published
-macOS artifacts still come from `macos-builder`.

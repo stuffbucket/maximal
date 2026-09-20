@@ -6,8 +6,8 @@
  * convention produced by the release workflow, plus the contract points the
  * Pages site and setup wizard depend on:
  *
- *   - the script downloads `maximal-<TAG>-windows-x64.zip` (Stream
- *     A's canonical name) and a sidecar `.sha256`
+ *   - the script downloads `maximal-<TAG>-windows-x64.zip` and a sidecar
+ *     `.sha256`
  *   - it verifies the SHA before unpacking
  *   - it installs under %LocalAppData%\Programs\maximal
  *   - it invokes `maximal setup --unattended --skip-auth` so the

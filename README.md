@@ -144,6 +144,6 @@ fallback; Maximal is not published to npm.
 
 ## Status
 
-Pre-alpha. Functional end-to-end against x3-design enterprise. See
+Pre-alpha. Functional end-to-end against GitHub Copilot. See
 `docs/spec/archive/web-tools.md` for the agent-loop spec and
 `docs/admin/claude-desktop-mdm.md` for Cowork-side configuration.
