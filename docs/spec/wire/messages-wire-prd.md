@@ -36,51 +36,57 @@ Anthropic).
 ## Pre-dispatch pipeline
 
 `handleCompletion()` applies these in order
-(`src/routes/messages/handler.ts:50-152`) before choosing an upstream:
+(`src/routes/messages/handler.ts:63-171`) before choosing an upstream:
 
-1. **Rate-limit check** (`handler.ts:51`) — `checkRateLimit(state)`; a
+1. **Rate-limit check** (`handler.ts:64`) — `checkRateLimit(state)`; a
    throttled request is rejected via `forwardError`.
-2. **Model-ID reversal** (`handler.ts:56`,
+2. **Model-ID reversal** (`handler.ts:70`,
    `anthropic-id-rewrite.ts:51-59`) — undo the dash-date sentinel the
    `/models` list advertises: `claude-opus-4-6-20260301` →
    `claude-opus-4.6`. Non-matching IDs pass through.
-3. **IDE tool sanitization** (`handler.ts:58`,
-   `preprocess.ts:455-476`) — drop `mcp__ide__executeCode` when
+3. **IDE tool sanitization** (`handler.ts:72`,
+   `preprocess.ts:487-509`) — drop `mcp__ide__executeCode` when
    `defer_loading` is false; normalize the `getDiagnostics` description.
-4. **Web-tools extraction** (`handler.ts:66`) — if `tools[]` contains
+4. **Claude Code provider-tool compatibility** (`handler.ts:73`,
+   `preprocess.ts:468-485`) — for a `claude-cli/*` or `Claude-Code/*`
+   user agent, omit only the exact `advisor_20260301` / `advisor`
+   declaration that Copilot cannot execute. Other clients and all other
+   provider-tool declarations retain their requested semantics.
+5. **Web-tools extraction** (`handler.ts:81`) — if `tools[]` contains
    Anthropic server-side tools (`web_search_20250305`,
-   `web_fetch_20250910`), split them into a separate agent flow
+   `web_fetch_20250910`), split them into a separate agent flow while
+   preserving unrelated declarations unchanged
    (`handleWithWebToolsAgent`). See `docs/spec/tool-bridge.md`.
-5. **Subagent-marker detection** (`handler.ts:68`) — parse a
+6. **Subagent-marker detection** (`handler.ts:83`) — parse a
    `__SUBAGENT_MARKER__` prefix (carried inside a `<system-reminder>`)
    in the first user message → extract `session_id` / `agent_id` /
    `agent_type`, which drive the upstream `x-initiator: agent` and
    interaction headers.
-6. **Compact detection** (`handler.ts:77`, `preprocess.ts:81-114`) —
+7. **Compact detection** (`handler.ts:92`, `preprocess.ts:81-114`) —
    classify Claude Code context-compaction requests as
    `COMPACT_REQUEST` or `COMPACT_AUTO_CONTINUE`; sets a `compactType`
    flag that influences header intent and the merge step below.
-7. **Small-model forcing for tool-less warmup** (`handler.ts:84-86`) —
-   when `anthropic-beta` is present **and** there are no tools **and**
-   `compactType == 0`, rewrite `payload.model = getSmallModel()`
-   (default `gpt-5-mini`). This keeps Claude Code 2.0.28+ warmup/probe
-   requests off premium quota.
-8. **Tool-reference turn-boundary stripping** (`handler.ts:92`,
+8. **Tool-less warmup short-circuit** (`handler.ts:94-116`) — when
+   `anthropic-beta` is present, there are no tools, and `compactType == 0`,
+   return a canned local response only if the request matches the narrow
+   Claude Code warmup shape. Other tool-less beta requests continue to the
+   selected upstream model unchanged.
+9. **Tool-reference turn-boundary stripping** (`handler.ts:122`,
    `preprocess.ts:415-432`) — remove the synthetic `"Tool loaded."`
    text that accompanies `tool_reference` blocks.
-9. **Mixed `tool_result` + text merge** (`handler.ts:99-101`,
+10. **Mixed `tool_result` + text merge** (`handler.ts:124-131`,
    `preprocess.ts:434-452`) — when a user message mixes `tool_result`
    with text/image/document blocks, merge them so the upstream sees one
    coherent turn (avoids a fresh premium request). Skips the final
    message when `compactType == COMPACT_REQUEST`.
-10. **Model endpoint lookup** (`handler.ts:110-111`) — resolve the
+11. **Model endpoint lookup** (`handler.ts:140-141`) — resolve the
     (possibly variant) model ID to its canonical entry in
     `state.models`, which carries `supported_endpoints`.
 
 ## Upstream routing
 
 The resolved model's capabilities pick the flow
-(`src/routes/messages/handler.ts:122-171`):
+(`src/routes/messages/handler.ts:140-171`):
 
 ```
 web tools extracted?            ──▶ handleWithWebToolsAgent
@@ -89,6 +95,10 @@ shouldUseResponsesApi(model)?   ──▶ handleWithResponsesApi  (Copilot /resp
 else                            ──▶ handleWithChatCompletions (Copilot /chat/completions)
 ```
 
+- A web-tools request uses `/responses` for each agent turn when the
+  selected model advertises that endpoint; otherwise the agent retains its
+  Chat Completions fallback. This applies to both buffered and streaming
+  turns, which are normalized to the same Anthropic response/event shapes.
 - `shouldUseMessagesApi` requires the `useMessagesApi` config flag
   (default `true`) **and** `supported_endpoints` ∋ `/v1/messages`.
 - `shouldUseResponsesApi` requires `supported_endpoints` ∋ `/responses`.
@@ -231,10 +241,16 @@ status, since headers are already sent.
 2. The same for a GPT model routes to `/responses`; for an
    otherwise-unsupported model, to `/chat/completions` — both emitting
    the **same** canonical Anthropic event stream to the client.
-3. A tool-less request carrying `anthropic-beta` and no compaction is
-   served by `gpt-5-mini`, not the requested premium model.
-4. `count_tokens` for a Claude model returns the exact Anthropic count
+3. A web-tools request for a Responses-only model uses `/responses` for
+   both buffered and streaming agent turns; models without that endpoint
+   retain the Chat Completions fallback.
+4. Claude Code requests omit the unsupported `advisor_20260301` / `advisor`
+   declaration, while non-Claude-Code clients and unrelated server-tool
+   declarations pass through unchanged.
+5. A matching tool-less Claude Code warmup carrying `anthropic-beta` is
+   answered locally; a non-warmup request with the same broad headers is not.
+6. `count_tokens` for a Claude model returns the exact Anthropic count
    when `anthropicApiKey` is set, and a `≈1.15×` GPT-tokenizer estimate
    otherwise.
-5. A mid-stream upstream failure yields an Anthropic `error` event, not a
-   broken connection.
+7. A mid-stream upstream failure, including inside the web-tools agent,
+   yields an Anthropic `error` event rather than a broken or empty connection.
