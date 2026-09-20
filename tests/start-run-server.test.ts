@@ -66,7 +66,7 @@ const cacheVSCodeVersionMock = mock(() => Promise.resolve())
 const cacheMacMachineIdMock = mock(() => {})
 const cacheVsCodeSessionIdMock = mock(() => {})
 const cacheVsCodeDeviceIdMock = mock(() => Promise.resolve())
-const realUtilsModule = await import("~/lib/platform/utils")
+const realUtilsModule = { ...(await import("~/lib/platform/utils")) }
 await mock.module("~/lib/platform/utils", () => ({
   ...realUtilsModule,
   cacheModels: cacheModelsMock,
