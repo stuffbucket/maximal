@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.42](https://github.com/stuffbucket/maximal/compare/v0.4.41...v0.4.42) (2026-09-19)
+
+
+### Bug Fixes
+
+* **claude-code:** stabilize API key helper ([7aa751b](https://github.com/stuffbucket/maximal/commit/7aa751bbc5d49bfbcba904a208cb7e79f0e2ab66))
+* restore v0.4 Claude Code compatibility ([ee7ffe7](https://github.com/stuffbucket/maximal/commit/ee7ffe72b70b74e45d332f8d671e2c68acd72cd8))
+
 ## [0.4.41](https://github.com/stuffbucket/maximal/compare/v0.4.40...v0.4.41) (2026-07-10)
 
 
