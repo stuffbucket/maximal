@@ -118,18 +118,28 @@ Anthropic models.
 **Risk:** pure opportunity cost — larger prompts than necessary. Not broken,
 but leaves a documented efficiency win on the table.
 
-### 4. Auto mode / HyDRA routing — *no-op for us, documented to prevent confusion*
+### 4. Copilot Auto routing and Claude Code Auto permissions are separate
 
-**Copilot now:** ships an "Auto" model router (Chat / CLI / IDE surfaces),
-carrying a 10% billing discount and cache-awareness.
+Copilot's Auto router selects a model when its own clients do not name one.
+Maximal always sends a concrete Copilot model, so that router does not run.
 
-**We do:** always name a specific model in every API call. **Naming a model
-bypasses Auto** — the router only engages when the caller declines to pick.
+Claude Code's Auto permission mode is different: it can ask an LLM gateway for
+server-side safety decisions during normal Messages requests. Copilot does not
+document this safeguard contract, and Maximal has not verified that Copilot's
+native `/v1/messages` endpoint returns those decisions. Maximal must not
+fabricate them.
 
-**Risk:** none functionally. Documented here so nobody conflates Copilot's
-product-level "Auto mode" with **our** internal request classifier / model
-dispatch. They are unrelated; our classifier picks a concrete model, which is
-exactly what turns Auto *off* upstream.
+While Maximal owns Claude Code routing, it therefore sets Anthropic's temporary
+`CLAUDE_CODE_AUTO_MODE_SERVER=0` fallback. This suppresses the unsupported
+server review request and its eligibility warning; Claude Code continues using
+its local classifier. It does **not** enable no-charge server classification.
+The setting is snapshotted and reverted with `ANTHROPIC_BASE_URL` and
+`apiKeyHelper`, without overwriting or removing a user-owned value.
+
+The native Messages path passively preserves unknown request fields such as
+`safeguards` and unknown response fields such as `safeguard_results`. That
+transport property is not evidence that Copilot evaluates safeguards, and it
+does not remove the need for the existing Copilot `anthropic-beta` allowlist.
 
 ### 5. WebSocket transport — *latent, opportunity cost*
 
@@ -250,3 +260,6 @@ Primary GitHub / Microsoft sources, all confirmed against the cited code:
 - Models & pricing / `token_prices` — docs.github.com, models-and-pricing.
 - Claude `/v1/messages` breakpoint cap (`maxCacheBreakpoints = 4`) —
   microsoft/vscode-copilot-chat `messagesApi.ts`.
+- Claude Code Auto mode classifier billing and gateway behavior —
+  code.claude.com docs, *Auto mode classifier request charges*, *LLM gateway
+  protocol*, and *Permission modes: server-side classifier review*.

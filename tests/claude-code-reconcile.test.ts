@@ -62,6 +62,7 @@ describe("reconcileClaudeCodeOnBoot", () => {
       unknown
     >
     expect(env.ANTHROPIC_BASE_URL).toBe(PROXY_BASE_URL)
+    expect(env.CLAUDE_CODE_AUTO_MODE_SERVER).toBe("0")
     expect(env.ANTHROPIC_API_KEY).toBe("sk-keep")
     expect(env.ANTHROPIC_AUTH_TOKEN).toBe("tok-keep")
   })
@@ -106,6 +107,7 @@ describe("reconcileClaudeCodeOnShutdown", () => {
       unknown
     >
     expect(env.ANTHROPIC_BASE_URL).toBeUndefined()
+    expect(env.CLAUDE_CODE_AUTO_MODE_SERVER).toBeUndefined()
     expect(env.ANTHROPIC_API_KEY).toBe("sk-keep")
   })
 

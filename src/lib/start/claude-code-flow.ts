@@ -19,6 +19,28 @@ import { resolveSmallToolModel } from "~/lib/models/small-model"
 import { generateEnvScript } from "~/lib/platform/shell"
 import { state } from "~/lib/runtime-state/state"
 
+export function buildClaudeCodeEnv(
+  serverUrl: string,
+  selectedModel: string,
+  selectedSmallModel: string,
+): Record<string, string> {
+  return {
+    ANTHROPIC_BASE_URL: serverUrl,
+    ANTHROPIC_AUTH_TOKEN: "dummy",
+    ANTHROPIC_MODEL: selectedModel,
+    ANTHROPIC_DEFAULT_SONNET_MODEL: selectedModel,
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: selectedSmallModel,
+    DISABLE_NON_ESSENTIAL_MODEL_CALLS: "1",
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+    CLAUDE_CODE_ATTRIBUTION_HEADER: "0",
+    CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION: "false",
+    CLAUDE_CODE_DISABLE_TERMINAL_TITLE: "true",
+    CLAUDE_CODE_ENABLE_AWAY_SUMMARY: "0",
+    CLAUDE_CODE_AUTO_MODE_SERVER: "0",
+    CLAUDE_PLUGIN_ENABLE_QUESTION_RULES: "true",
+  }
+}
+
 export async function runClaudeCodeFlow(serverUrl: string): Promise<void> {
   consola.log(
     "\n💡 Tip: The --claude-code flag simply generates a clipboard command for launching Claude Code. \n"
@@ -59,20 +81,7 @@ export async function runClaudeCodeFlow(serverUrl: string): Promise<void> {
   )
 
   const command = generateEnvScript(
-    {
-      ANTHROPIC_BASE_URL: serverUrl,
-      ANTHROPIC_AUTH_TOKEN: "dummy",
-      ANTHROPIC_MODEL: selectedModel,
-      ANTHROPIC_DEFAULT_SONNET_MODEL: selectedModel,
-      ANTHROPIC_DEFAULT_HAIKU_MODEL: selectedSmallModel,
-      DISABLE_NON_ESSENTIAL_MODEL_CALLS: "1",
-      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
-      CLAUDE_CODE_ATTRIBUTION_HEADER: "0",
-      CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION: "false",
-      CLAUDE_CODE_DISABLE_TERMINAL_TITLE: "true",
-      CLAUDE_CODE_ENABLE_AWAY_SUMMARY: "0",
-      CLAUDE_PLUGIN_ENABLE_QUESTION_RULES: "true",
-    },
+    buildClaudeCodeEnv(serverUrl, selectedModel, selectedSmallModel),
     "claude",
   )
 

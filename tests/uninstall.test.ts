@@ -113,9 +113,13 @@ describe("uninstall — Claude Code settings revert integration", () => {
     // The user's own key survived.
     // eslint-disable-next-line unicorn/prefer-json-parse-buffer
     const after = JSON.parse(fs.readFileSync(settings, "utf8")) as {
-      env?: { ANTHROPIC_API_KEY?: string }
+      env?: {
+        ANTHROPIC_API_KEY?: string
+        CLAUDE_CODE_AUTO_MODE_SERVER?: string
+      }
     }
     expect(after.env?.ANTHROPIC_API_KEY).toBe("user-key")
+    expect(after.env?.CLAUDE_CODE_AUTO_MODE_SERVER).toBeUndefined()
   })
 
   it("revert is a no-op when nothing was configured", async () => {
