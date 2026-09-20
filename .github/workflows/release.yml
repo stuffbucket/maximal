@@ -58,7 +58,7 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -181,7 +181,7 @@ jobs:
           - { target: bun-windows-x64,  artifact: windows-x64,  ext: zip    }
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: ./.github/actions/setup-bun
         with:
@@ -302,7 +302,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Resolve version
         id: ver
@@ -411,7 +411,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: ./.github/actions/setup-bun
         with:
@@ -561,7 +561,7 @@ jobs:
     env:
       TAG: ${{ github.ref_name }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Asset-reuse gate (OPT-IN): only skip when the repo variable
       # RELEASE_REUSE_EXISTING_ASSETS is exactly 'true' AND install.ps1 is
@@ -616,7 +616,7 @@ jobs:
     env:
       TAG: ${{ github.ref_name }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Asset-reuse gate (OPT-IN): only skip when the repo variable
       # RELEASE_REUSE_EXISTING_ASSETS is exactly 'true' AND the MSI is
@@ -777,7 +777,7 @@ jobs:
 
       - name: Upload install log
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: msi-install-log-${{ env.TAG }}
           path: install.log
@@ -842,7 +842,7 @@ jobs:
 
       - name: Upload uninstall log
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: msi-uninstall-log-${{ env.TAG }}
           path: uninstall.log
@@ -889,7 +889,7 @@ jobs:
       # reset (belt-and-suspenders alongside the cargo cache).
       CARGO_NET_RETRY: "10"
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Same opt-in asset-reuse gate as the other installer jobs.
       - name: Skip if Windows shell installer already attached
@@ -942,7 +942,7 @@ jobs:
       # this release job share a warm cache. GitHub-published (policy-OK).
       - name: Cache cargo registry + target
         if: steps.skip.outputs.skip != 'true'
-        uses: actions/cache@v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry/index
@@ -1103,7 +1103,7 @@ jobs:
       group: updates-manifest-pr
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
           fetch-depth: 0
