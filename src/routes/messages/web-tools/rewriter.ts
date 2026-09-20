@@ -55,9 +55,7 @@ export function splitWebTools(
     if (isWebToolDecl(t)) {
       declarations.push(t as unknown as WebToolDecl)
     } else {
-      const clean = { ...t }
-      delete (clean as { type?: unknown }).type
-      remaining.push(clean)
+      remaining.push(t)
     }
   }
   payload.tools = remaining

@@ -1,7 +1,10 @@
 import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test"
 import { Hono } from "hono"
 
-import type { AnthropicMessagesPayload } from "~/lib/models/anthropic-types"
+import type {
+  AnthropicMessagesPayload,
+  AnthropicTool,
+} from "~/lib/models/anthropic-types"
 
 const actualStateModule = {
   ...(await import("../src/lib/runtime-state/state")),
@@ -329,6 +332,65 @@ describe("messages handler orchestration", () => {
       agent_type: "Explore",
     })
     expect(options.anthropicBetaHeader).toBe("warmup-beta")
+  })
+})
+
+describe("Claude Code provider-tool compatibility", () => {
+  test("omits the unsupported advisor tool for Claude Code gateway requests", async () => {
+    selectedModel = {
+      id: "messages-model",
+      supported_endpoints: ["/v1/messages"],
+    }
+
+    const advisorTool = {
+      type: "advisor_20260301",
+      name: "advisor",
+      model: "claude-opus-5",
+    } as unknown as AnthropicTool
+    const customTool: AnthropicTool = {
+      name: "read_file",
+      description: "Read a file",
+      input_schema: { type: "object" },
+    }
+
+    const response = await createApp().request("/", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "user-agent": "claude-cli/2.1.278 (external, cli)",
+      },
+      body: JSON.stringify(createPayload({ tools: [advisorTool, customTool] })),
+    })
+
+    expect(response.status).toBe(200)
+    const [, forwardedPayload] = handleWithMessagesApi.mock.calls[0]
+    expect(forwardedPayload.tools).toEqual([customTool])
+  })
+
+  test("preserves advisor semantics for non-Claude-Code API clients", async () => {
+    selectedModel = {
+      id: "messages-model",
+      supported_endpoints: ["/v1/messages"],
+    }
+
+    const advisorTool = {
+      type: "advisor_20260301",
+      name: "advisor",
+      model: "claude-opus-5",
+    } as unknown as AnthropicTool
+
+    const response = await createApp().request("/", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "user-agent": "anthropic/typescript 0.70",
+      },
+      body: JSON.stringify(createPayload({ tools: [advisorTool] })),
+    })
+
+    expect(response.status).toBe(200)
+    const [, forwardedPayload] = handleWithMessagesApi.mock.calls[0]
+    expect(forwardedPayload.tools).toEqual([advisorTool])
   })
 })
 

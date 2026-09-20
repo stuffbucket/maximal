@@ -39,13 +39,24 @@ import type {
 } from "~/lib/models/anthropic-types"
 import type { CompactType } from "~/lib/models/compact"
 import type { SubagentMarker } from "~/lib/runtime-state/subagent"
+import type { Model } from "~/services/copilot/get-models"
 
 import { debugLazy } from "~/lib/platform/logger"
-import { isNonStreaming } from "~/routes/streaming-predicates"
+import {
+  createResponsesStreamState,
+  translateResponsesStreamEvent,
+} from "~/routes/messages/responses-stream-translation"
+import { translateAnthropicMessagesToResponsesPayload } from "~/routes/messages/responses-translation"
+import { getResponsesRequestOptions } from "~/routes/responses/utils"
+import { isAsyncIterable, isNonStreaming } from "~/routes/streaming-predicates"
 import {
   createChatCompletions,
   type ChatCompletionChunk,
 } from "~/services/copilot/create-chat-completions"
+import {
+  createResponses,
+  type ResponseStreamEvent,
+} from "~/services/copilot/create-responses"
 
 import { translateToOpenAI } from "../non-stream-translation"
 import { translateChunkToAnthropicEvents } from "../stream-translation"
@@ -83,6 +94,7 @@ interface StreamingAgentArgs {
   /** Keepalive-ping interval for silent gaps (tool execution, next upstream
    *  turn). Test seam; defaults to {@link HEARTBEAT_INTERVAL_MS}. */
   heartbeatIntervalMs?: number
+  selectedModel?: Model
 }
 
 export async function runStreamingAgent(
@@ -134,6 +146,7 @@ export async function runStreamingAgent(
       state,
       upstreamCall: args.upstreamCall ?? createChatCompletions,
       heartbeatIntervalMs,
+      selectedModel: args.selectedModel,
     })
     messageStartEmitted = turnResult.messageStartEmitted
     bufferedFinalEvents = turnResult.bufferedFinal
@@ -221,6 +234,7 @@ interface TurnArgs {
   state: RequestState
   upstreamCall: UpstreamCall
   heartbeatIntervalMs: number
+  selectedModel?: Model
 }
 
 interface OpenBlock {
@@ -239,9 +253,61 @@ interface OpenBlock {
 }
 
 async function runOneStreamingTurn(args: TurnArgs): Promise<TurnResult> {
+  const upstreamToClient = new Map<number, OpenBlock>()
+  const outcomes: Array<{
+    toolUse: AnthropicToolUseBlock
+    outcome: ExecOutcome
+  }> = []
+  const assistantContent: Array<AnthropicAssistantContentBlock> = []
+  const bufferedFinal: Array<AnthropicStreamEventData> = []
+  let stopReason: string | null = null
+  let messageStartEmitted = args.messageStartEmitted
+
+  for await (const event of createTurnEventStream(args)) {
+    const dispatched = await dispatchEvent({
+      event,
+      upstreamToClient,
+      cursor: args.cursor,
+      messageStartEmitted,
+      stream: args.stream,
+      executor: args.executor,
+      state: args.state,
+      outcomes,
+      assistantContent,
+      bufferedFinal,
+      logger: args.options.logger,
+      heartbeatIntervalMs: args.heartbeatIntervalMs,
+    })
+    if (dispatched.stopReason !== undefined) {
+      stopReason = dispatched.stopReason
+    }
+    if (event.type === "message_start") messageStartEmitted = true
+  }
+
+  return {
+    stopReason,
+    assistantContent,
+    outcomes,
+    bufferedFinal,
+    messageStartEmitted,
+  }
+}
+
+async function* createTurnEventStream(
+  args: TurnArgs,
+): AsyncGenerator<AnthropicStreamEventData> {
+  if (args.selectedModel?.supported_endpoints?.includes("/responses")) {
+    yield* createResponsesTurnEventStream(args)
+    return
+  }
+  yield* createChatTurnEventStream(args)
+}
+
+async function* createChatTurnEventStream(
+  args: TurnArgs,
+): AsyncGenerator<AnthropicStreamEventData> {
   const openAIPayload = translateToOpenAI(args.payload)
   openAIPayload.stream = true
-
   const response = await withHeartbeat(
     {
       stream: args.stream,
@@ -263,7 +329,7 @@ async function runOneStreamingTurn(args: TurnArgs): Promise<TurnResult> {
     )
   }
 
-  const innerState: AnthropicStreamState = {
+  const streamState: AnthropicStreamState = {
     messageStartSent: false,
     contentBlockIndex: 0,
     contentBlockOpen: false,
@@ -271,50 +337,57 @@ async function runOneStreamingTurn(args: TurnArgs): Promise<TurnResult> {
     thinkingBlockOpen: false,
   }
 
-  const upstreamToClient = new Map<number, OpenBlock>()
-  const outcomes: Array<{
-    toolUse: AnthropicToolUseBlock
-    outcome: ExecOutcome
-  }> = []
-  const assistantContent: Array<AnthropicAssistantContentBlock> = []
-  const bufferedFinal: Array<AnthropicStreamEventData> = []
-  let stopReason: string | null = null
-  let messageStartEmitted = args.messageStartEmitted
-
   for await (const rawEvent of response as AsyncIterable<{ data?: string }>) {
     if (rawEvent.data === "[DONE]") break
     if (!rawEvent.data) continue
 
     const chunk = JSON.parse(rawEvent.data) as ChatCompletionChunk
-    const events = translateChunkToAnthropicEvents(chunk, innerState)
+    yield* translateChunkToAnthropicEvents(chunk, streamState)
+  }
+}
 
-    for (const event of events) {
-      const dispatched = await dispatchEvent({
-        event,
-        upstreamToClient,
-        cursor: args.cursor,
-        messageStartEmitted,
-        stream: args.stream,
-        executor: args.executor,
-        state: args.state,
-        outcomes,
-        assistantContent,
-        bufferedFinal,
-        logger: args.options.logger,
-        heartbeatIntervalMs: args.heartbeatIntervalMs,
-      })
-      if (dispatched.stopReason !== undefined)
-        stopReason = dispatched.stopReason
-      if (event.type === "message_start") messageStartEmitted = true
-    }
+async function* createResponsesTurnEventStream(
+  args: TurnArgs,
+): AsyncGenerator<AnthropicStreamEventData> {
+  const responsesPayload = translateAnthropicMessagesToResponsesPayload(
+    args.payload,
+  )
+  responsesPayload.stream = true
+  const { vision, initiator } = getResponsesRequestOptions(responsesPayload)
+  const response = await withHeartbeat(
+    {
+      stream: args.stream,
+      messageStartEmitted: args.messageStartEmitted,
+      intervalMs: args.heartbeatIntervalMs,
+    },
+    () =>
+      createResponses(responsesPayload, {
+        vision,
+        initiator,
+        requestId: args.options.requestId,
+        sessionId: args.options.sessionId,
+        compactType: args.options.compactType,
+        subagentMarker: args.options.subagentMarker,
+      }),
+  )
+
+  if (!isAsyncIterable(response)) {
+    throw new Error(
+      "web-tools stream: upstream returned non-streaming response despite stream=true",
+    )
   }
 
-  return {
-    stopReason,
-    assistantContent,
-    outcomes,
-    bufferedFinal,
-    messageStartEmitted,
+  const streamState = createResponsesStreamState()
+  for await (const rawEvent of response) {
+    if (rawEvent.event === "ping") {
+      yield { type: "ping" }
+      continue
+    }
+    if (!rawEvent.data) continue
+
+    const event = JSON.parse(rawEvent.data) as ResponseStreamEvent
+    yield* translateResponsesStreamEvent(event, streamState)
+    if (streamState.messageCompleted) break
   }
 }
 
