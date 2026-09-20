@@ -99,7 +99,9 @@ async function analyze(entry: Entry): Promise<void> {
   try {
     const res = await fetch(`${URL}/api/generate`, {
       method: "POST",
-      // codeql[js/file-access-to-http] -- by design: dev-only watcher, not shipped, not on the runtime path. Reads local model state from disk and posts to a local Ollama instance. See ADR-0001.
+      // By design: this dev-only watcher posts local state to local Ollama.
+      // See ADR-0001.
+      // codeql[js/file-access-to-http]
       body: JSON.stringify({ model: MODEL, prompt, stream: true }),
     })
     if (!res.ok || !res.body) {

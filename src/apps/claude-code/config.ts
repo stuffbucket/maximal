@@ -108,6 +108,8 @@ export function getBaseUrlOwnership(
 export type ApiKeyHelperOwnership = "ours" | "foreign" | "absent"
 
 function helperFingerprint(command: string): string {
+  // This is an equality fingerprint for owned config, not a password verifier.
+  // codeql[js/insufficient-password-hash]
   return createHash("sha256").update(command).digest("hex")
 }
 
