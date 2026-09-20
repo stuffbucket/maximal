@@ -47,7 +47,7 @@ class Maximal < Formula
   test do
     # `debug --json` is the cheapest way to confirm the binary boots
     # and renders structured output. We don't assert keys here — the
-    # release pipeline's smoke job (A6) covers schema.
+    # release pipeline's smoke job covers schema.
     output = shell_output("#{bin}/maximal debug --json")
     assert_match "\"version\":", output
     assert_match "\"git\":",     output

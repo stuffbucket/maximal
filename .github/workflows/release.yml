@@ -81,7 +81,7 @@ jobs:
       - name: Build
         run: bun run build
 
-      # A5: SBOM + license scan. Pure Bun script; no third-party
+      # SBOM + license scan. Pure Bun script; no third-party
       # action / npm dep introduced. Fails the job on a disallowed
       # license — the policy is in `scripts/sbom.ts`. Attached to
       # the release later in this job, after `changelogithub` creates
@@ -157,7 +157,7 @@ jobs:
   # macos-builder rather than this Linux matrix. Windows Authenticode
   # signing remains deferred below.
   #
-  # Contract (do not change without coordinating with Stream B):
+  # Artifact-naming contract consumed by the installer jobs below:
   #   <release>/maximal-v<version>-darwin-arm64.tar.gz   # Apple Silicon
   #   <release>/maximal-v<version>-windows-x64.zip
   #   <each>.sha256
@@ -258,11 +258,11 @@ jobs:
             src/main.ts --outfile "$OUT"
 
       # Windows Authenticode signing — DEFERRED. v1 ships unsigned.
-      - name: Sign (Windows) [DEFERRED A4]
+      - name: Sign (Windows) [DEFERRED]
         if: false
         shell: pwsh
         run: |
-          # Replace with internal signing-service invocation once A4 is wired.
+          # Replace with internal signing-service invocation once available.
           # Example using signtool with a cert file (cert handling TBD):
           # signtool sign /tr http://timestamp.digicert.com /td sha256 /fd sha256 /a dist-bin\maximal.exe
           Write-Host "Signing stub — replace with internal signing service"
@@ -328,7 +328,7 @@ jobs:
           tag: ${{ github.ref_name }}
           files: SHA256SUMS
 
-  # A6: smoke test on a clean image. Downloads the windows-x64 artifact,
+  # Smoke test on a clean image. Downloads the windows-x64 artifact,
   # unpacks, runs `maximal debug --json`, asserts the schema keys.
   # Catches static-link / missing-dep bugs the build alone misses.
   #
@@ -336,7 +336,7 @@ jobs:
   # binaries from Linux but can't exec Mach-O on ubuntu-latest, so
   # there's no CI smoke for darwin. Manual mitigations:
   #   - First user of each release validates via Homebrew install on
-  #     a real Mac; B1's `service do` block fails fast on a broken
+  #     a real Mac; Homebrew's `service do` block fails fast on a broken
   #     binary.
   #   - Pre-tag, run `maximal debug --json` once on a developer
   #     Mac.

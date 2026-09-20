@@ -109,7 +109,7 @@ async function fetchText(url: string): Promise<string> {
   throw new Error(`fetch ${url} failed after retries → ${lastErr}`)
 }
 
-/** Each `.sha256` file Stream A publishes contains a single line:
+/** Each release `.sha256` file contains a single line:
  *  "<64-hex>  <filename>". Extract the SHA. */
 export function parseSha256File(content: string, expectFile: string): string {
   const line = content.trim().split("\n")[0]

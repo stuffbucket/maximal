@@ -1,312 +1,81 @@
 # Release runbook
 
-Single source of truth for shipping a release. The flow is
-release-please-driven and mostly automatic. Maintainers merge two protected
-PRs: the release PR that cuts the release, then the generated manifest PR that
-advertises the published release on the site. Every other step is a CI link to
-watch or a recovery command.
+Maximal releases through two protected PR merges: the generated release PR,
+then the generated updates-manifest PR. CI builds and verifies every asset before
+publishing the GitHub release.
 
----
+## Release checklist
 
-## Pre-flight (optional — CI already gates the PR)
+1. Review the `chore(main): release X.Y.Z` PR, wait for its required `test`
+   check, and confirm it is current with `main`.
+2. Merge the release PR. Do not create or move a tag during the normal flow.
+3. Open the resulting `release.yml` run and wait for every publish-gating job.
+4. Confirm the GitHub release changes from draft to published.
+5. Review the rolling `automation/updates-manifest` PR, wait for its required
+   check, confirm it is current with `main`, and merge it.
+6. Confirm the Pages deployment and the post-publication jobs complete.
 
-CI runs these on every PR, so a green release PR already means they pass.
-Re-run locally only if you want to sanity-check before merging:
-
-```sh
-bun install
-bun run lint
-bun run typecheck
-bun test
-bun run build
-```
-
-## 1. Cut the release — merge the release PR
-
-**Releases are release-please-driven and hands-off. There is no manual
-tagging.** Conventional-commit `feat:`/`fix:` changes merged to `main`
-accrue into an open **`chore(main): release X.Y.Z`** PR (release-please
-bumps the version + writes `CHANGELOG.md`). Cutting the release is one
-action: **merge that PR.**
-
-On merge, `release-please.yml` does the rest automatically:
-
-1. **Tags** `vX.Y.Z` (tag only — it does *not* create the GitHub Release;
-   `release.yml` owns that, see *Why tag-only* in `release-please.yml`).
-2. **Auto-dispatches `release.yml`** for the tag. A tag pushed by the
-   default `GITHUB_TOKEN` does **not** fire `release.yml`'s `push: tags`
-   trigger (GitHub's anti-loop guard suppresses it), so release-please
-   dispatches it explicitly via `workflow_dispatch`, which isn't
-   suppressed.
-3. **Flips the merged PR's label** `autorelease: pending → tagged` so the
-   *next* release PR can open. (release-please normally does this in its
-   `github-release` step, which this pipeline skips — so a dedicated step
-   does it instead. Without it, the next release PR is blocked.)
-
-That merge starts the release. `release.yml` then builds, verifies, publishes,
-and runs two post-publish jobs: `homebrew-tap` bumps the formula, while
-`manifest` opens or updates a protected manifest PR. Watch the release in step
-2, then merge the manifest PR in step 3.
-
-> **Version note (pre-1.0).** release-please is configured to bump *patch*
-> even for `feat:`, so a feature ships as `0.4.x+1`. To force a version, put
-> `Release-As: X.Y.Z` in a commit body (e.g. the squash-merge of the feature
-> PR) *before* the release PR is cut.
-
-### Fallback: manual tag (emergency only)
-
-If release-please is unavailable, `release:manual` (bumpp) prepares the
-version commit and tag from a developer machine. Maximal is not published to
-npm. Push the resulting tag, then dispatch `release.yml` as shown below.
+CI already gates the release PR. For an optional local check, run:
 
 ```sh
-bun run release:manual   # bumpp prompts for the version, commit, and tag
+bun run check:deep
 ```
 
-A `GITHUB_TOKEN`-pushed tag still won't auto-fire `release.yml` — dispatch it
-by hand (`--ref` MUST be the tag, and `tag` is a required input):
+Before the release PR is generated, `Release-As: X.Y.Z` in a commit body forces
+an explicit version. Pre-1.0 `feat:` commits otherwise produce patch releases.
 
-```sh
-gh workflow run release.yml --ref vX.Y.Z -f tag=vX.Y.Z
-```
+## Expected results
 
-## 2. Watch CI: `release` workflow
-
-Wait for these jobs to all turn green. Each produces release assets:
-
-| Job | Runner | Produces |
-|---|---|---|
-| `release` | ubuntu-latest | draft GitHub release, `SBOM.cdx.json`, release notes |
-| `binaries` (matrix × 2) | ubuntu-latest | `*-darwin-arm64.tar.gz`, `*-windows-x64.zip` (+ `.sha256` each) |
-| `checksums` | ubuntu-latest | `SHA256SUMS` |
-| `smoke` | windows-2022 | passes/fails — exec validation of the windows-x64 binary |
-
-The installer jobs are part of the same `release.yml` run (no separate
-`installers.yml` dispatch). `publish` gates on all of them via `needs:`,
-so a slow Apple notarization just delays publish — it can't leave a
-healthy build stuck as a draft on a wall-clock timeout:
-
-| Job | Runner | Produces |
-|---|---|---|
-| `macos-dmg` | ubuntu-latest → dispatches the private `stuffbucket/macos-builder` (self-hosted arm64 mac, holds the Apple secrets) | `*-darwin-arm64.dmg` (+ `.sha256`) — **signed + notarized + stapled** by the builder |
-| `windows-installer` | ubuntu-latest | `install.ps1` (+ `.sha256`) |
-| `windows-msi` | windows-2022 | `*-windows-x64.msi` (+ `.sha256`) |
-| `windows-msi-verify` | windows-2022 | gate only — silently installs the MSI, asserts install/registry/PATH, runs the installed binary, uninstalls, asserts clean removal |
-
-If any publish-gating job fails, the release stays a draft (never a
-half-published "Latest"). Recover with **Actions → the release run → "Re-run
-failed jobs"**, then re-run `publish`. The macOS bundle alone can also be
-rebuilt from a developer Mac (§4) if the self-hosted runner is offline.
-
-After publication, two independent jobs may still need attention:
-
-| Job | Produces |
+| Jobs | Expected result |
 |---|---|
-| `homebrew-tap` | bumps `stuffbucket/homebrew-tap/Formula/maximal.rb` (see §6) |
-| `manifest` | opens or updates the protected updates-manifest PR (see §3) |
+| `release`, `binaries`, `checksums`, `smoke` | Draft release, notes, SBOM, raw platform archives, checksums, and binary validation |
+| `macos-dmg` | Signed, notarized, and stapled Apple Silicon DMG from `stuffbucket/macos-builder` |
+| `windows-installer`, `windows-msi`, `windows-msi-verify`, `windows-shell` | Windows installer assets and their required validation |
+| `publish` | Publishes only after every required asset and verification gate succeeds |
+| `homebrew-tap`, `manifest` | Independent post-publication distribution updates |
 
-Their failure does not roll back or invalidate the immutable published release;
-recover the failed post-publish action independently.
+A failed publish gate leaves the release as a draft. A post-publication failure
+does not invalidate or roll back the immutable release.
 
-## 3. Merge the post-publish manifest PR
+## Protected manifest update
 
-After publication, the `manifest` job opens or updates the rolling
-`automation/updates-manifest` PR. It regenerates only the published tag's
-channel in `site/public/updates/manifest.json`, preserves sibling channels, and
-explicitly dispatches `ci.yml` for the PR's exact head SHA because GitHub does
-not emit recursive `pull_request` events for PRs created with `GITHUB_TOKEN`.
+After publication, automation opens or updates the
+`automation/updates-manifest` PR. It never pushes the generated manifest
+directly to protected `main` and has no ruleset bypass.
 
-Wait for the required `test` check and for the branch to be current with
-`main`, then merge the PR. That ordinary protected merge creates the `site/**`
-push that triggers `deploy-pages.yml`; release automation never pushes the
-manifest directly to `main` and has no ruleset bypass. A later release updates
-the same open PR instead of creating a conflicting per-tag PR.
-
-A manifest-job retry is safe: if the channel already names the immutable tag,
-the generator skips timestamp-only churn; otherwise it updates the same branch
-and PR. If `main` advanced while the PR was open, rerun the manifest job to
-merge current `main` into the automation branch and dispatch CI for the new
-head. Never repair this state by directly pushing the manifest to `main`.
-
-## 4. Build and attach the polished `.dmg` (legacy — superseded by `macos-dmg`)
-
-The `macos-dmg` job (step 2) produces the signed + notarized `.dmg`
-automatically by dispatching the private `stuffbucket/macos-builder` (or
-re-run `macos-build.yml` manually: `gh workflow run macos-build.yml --ref
-main -f tag=vX.Y.Z`). The steps below remain documented for an emergency
-build from a developer Mac if the self-hosted builder is offline.
-
-Run from any Apple Silicon developer Mac with this checkout. Auto-
-detects the latest tag from `git describe`:
-
-```sh
-git fetch --tags
-bun run release:dmg
-```
-
-This:
-1. Downloads `*-darwin-arm64.tar.gz` for the latest tag.
-2. Verifies SHA-256.
-3. Assembles `maximal.app` from `build/macos/app-template/`.
-4. Runs `npx create-dmg` (Mac-only — uses `hdiutil`).
-5. Uploads `*-darwin-arm64.dmg` + `.sha256` to the GitHub release.
-
-To build without uploading (e.g. for local testing):
-
-```sh
-bun run package-dmg --tag v0.1.0
-# → dist-release/maximal-v0.1.0-darwin-arm64.dmg
-```
-
-## 5. Pre-publish smoke (manual, macOS-only)
-
-CI smokes the windows-x64 binary. There's no CI Mach-O smoke under the
-public-repo runner policy. Replace it with one developer-Mac check:
-
-```sh
-gh release download v0.1.0 --pattern '*-darwin-arm64.tar.gz' --dir /tmp/smoke
-tar -xzf /tmp/smoke/maximal-v0.1.0-darwin-arm64.tar.gz -C /tmp/smoke
-/tmp/smoke/maximal debug --json | jq '.version, .git'
-```
-
-If the JSON parses with the right version + commit, the binary is
-loadable. (The `release:dmg` step above also unpacks and copies the
-binary into the `.app`, which is its own loose smoke — but `debug
---json` is the explicit assertion.)
-
-## 6. Homebrew formula (automated)
-
-The `homebrew-tap` job in `release.yml` does this automatically after
-`publish`: it renders the formula from `build/homebrew/maximal.rb` with the
-just-released version + per-arch SHAs (`bun run render-formula`) and pushes
-it to **`stuffbucket/homebrew-tap/Formula/maximal.rb`**. Users then:
-
-```sh
-brew install stuffbucket/tap/maximal     # taps stuffbucket/tap automatically
-brew update && brew upgrade maximal       # later
-```
-
-Gating: the job needs the `HOMEBREW_TAP_TOKEN` secret (a fine-grained PAT
-with Contents:write on `stuffbucket/homebrew-tap`). If it's unset the job
-warns and skips — the release still publishes, but the formula won't bump
-until someone re-runs `render-formula` by hand. The formula is
-**Apple-Silicon-only** (no Intel build).
-
-To re-render manually (e.g. the token was missing during the run):
-
-```sh
-bun run render-formula --org stuffbucket --version X.Y.Z \
-  --output ../homebrew-tap/Formula/maximal.rb
-# then commit + push in the tap repo
-```
-
-## 7. Announce
-
-The Pages site hydrates its download links from
-`/updates/manifest.json` at runtime and keeps the committed manifest as its
-fail-closed server-rendered fallback. No direct browser GitHub API request is
-required.
-
-**Re-running a failed Pages deploy — dispatch fresh, never re-run failed jobs.**
-If a `deploy-pages.yml` run fails at the deploy step, trigger a brand-new run:
-
-```sh
-gh workflow run deploy-pages.yml --ref main
-```
-
-Do **not** use `gh run rerun <id> --failed` / the UI "re-run failed jobs" button
-on a Pages deploy. `actions/deploy-pages` refuses to deploy a run that has more
-than one artifact named `github-pages`, and a re-run re-uploads the artifact
-without removing the prior copy — so each re-run drives the count 1→2→3 and fails
-harder (issue #239). The workflow now deletes any stale `github-pages` artifact
-before upload to keep re-runs safe, but a fresh dispatch is still the clean,
-guaranteed-single-artifact path. (The specific error, "Multiple artifacts named
-github-pages", is only visible in the run's **Annotations** — the deploy step's
-generic "Deployment failed, try again later" can mask it.)
-
-Internal wiki post / chat announcement is outside this runbook.
-
----
+Merge the PR only after its required `test` check passes and its branch is
+current with `main`. That ordinary protected merge triggers the Pages deploy.
+If `main` advances or manifest generation fails, rerun the `manifest` job and
+review the refreshed PR.
 
 ## Recovery
 
-`release.yml` is built to be re-run. A failed build leaves the release a
-**draft** (the `publish` job gates on every build via `needs:`), so nothing
-half-publishes. To recover:
+| Failure | Action |
+|---|---|
+| A publish-gating job failed | Use **Re-run failed jobs** on the original `release.yml` run. |
+| The release workflow was not dispatched | Run `gh workflow run release.yml --ref vX.Y.Z -f tag=vX.Y.Z`. |
+| The macOS builder failed or was unavailable | Rerun `macos-dmg`, or run `gh workflow run macos-build.yml --ref main -f tag=vX.Y.Z`. |
+| `manifest` failed after publication | Rerun `manifest`, then merge its protected PR after checks pass. |
+| `homebrew-tap` failed | Rerun only `homebrew-tap`. |
+| Pages deployment failed | Start a fresh run with `gh workflow run deploy-pages.yml --ref main`. |
+| A published asset is wrong | Cut a new patch release. |
 
-- **Re-run failed jobs:** Actions UI → the `release.yml` run → "Re-run
-  failed jobs". The installers are all jobs *inside* `release.yml`
-  (`binaries`, `macos-dmg`, `windows-installer`, `windows-msi`,
-  `checksums`, …) — there is no separate `installers` workflow.
-- **Self-heal:** the auto-dispatch step in `release-please.yml` re-fires
-  `release.yml` on the next push to `main` (or a manual `release-please`
-  dispatch) whenever the current version's tag exists but its release is
-  still a draft. So a transient flake often fixes itself on the next
-  commit.
-- **Full re-run is idempotent.** The `release` job reuses an existing
-  draft; asset uploads use `gh release upload --clobber`; `publish` flips
-  draft→published exactly once and no-ops if already published; the
-  per-tag `concurrency` group serializes release re-runs. Manifest updates use
-  a separate cross-tag concurrency group and reuse one protected PR.
-- **Published release with a failed manifest job:** do not mutate, delete, or
-  retag the immutable release. Regenerate its manifest from current `main`,
-  commit only `site/public/updates/manifest.json` on the rolling automation
-  branch, open/update the protected PR, and dispatch `ci.yml` for its exact
-  head SHA. The historical failed job remains an accurate record.
-- **Manual dispatch** (if needed): `gh workflow run release.yml --ref
-  vX.Y.Z -f tag=vX.Y.Z` (the `--ref` must be the tag).
-- **Pull a release:** `gh release delete vX.Y.Z` + `git push --delete
-  origin vX.Y.Z`. Only works while it's a **draft** — an
-  already-published release is immutable (see below): the tag is frozen,
-  re-cutting it won't work, **bump to a new patch version instead.**
+If release-please itself is unavailable, a maintainer may prepare an emergency
+version commit and tag with `bun run release:manual`, push the tag, then dispatch
+`release.yml` with the command above. Maximal is not published to npm.
 
-<!-- NOTE: "Immutable releases" section added by the release-immutability
-     task. If another agent is editing this runbook, sequence around this
-     anchor to keep merges clean. -->
+## Release safety and signing
 
-## Immutable releases
-
-This repo has **GitHub Immutable Releases enabled** (a repository setting,
-turned on 2026-06). Inspect or toggle it with:
-
-```sh
-gh api repos/stuffbucket/maximal/immutable-releases             # {"enabled":true,...}
-gh api --method PUT  repos/stuffbucket/maximal/immutable-releases    # enable  → 204
-gh api --method DELETE repos/stuffbucket/maximal/immutable-releases  # disable → 204
-```
-
-**What it guarantees:** once a release is *published*, its assets and its
-Git tag are frozen — assets can't be added, replaced, or deleted, and the
-tag can't be moved. This is a supply-chain protection: what you publish is
-exactly what consumers verify against `SHA256SUMS`.
-
-**Why our flow is already compatible:** GitHub's recommended pattern is
-precisely what `release.yml` does — create the release as a **draft**,
-attach *all* assets to the draft, then flip draft→published last.
-Immutability locks at **publish time**, not at creation, so every
-`gh release upload --clobber` in the upstream jobs (`release`, `binaries`,
-`checksums`, `macos-dmg`, `windows-installer`, `windows-msi`) runs while
-the release is still a draft and is unaffected. The `publish` job gates on
-all of them via `needs:`, so no asset write lands after publish in the
-happy path. The post-publish jobs (`homebrew-tap`, `manifest`) only *read*
-the release — they never mutate it. The manifest job proposes a repository PR
-after publish.
-
-**The one behavioral change:** you can no longer `--clobber` or otherwise
-patch a release **after** it's published. The "Re-build the DMG" /
-`gh release upload --clobber` recovery above only works while the release
-is still a draft — i.e. before `publish` succeeds, or while a failed-job
-re-run keeps it a draft. If you find a bad asset on an already-published
-release, **do not try to patch it — cut a new patch version instead.**
-Deleting and re-pushing the same tag won't help either, because the tag
-itself is frozen.
-
-## Open questions
-
-- **Windows Authenticode signing** is still **DEFERRED** for the raw
-  `*-windows-x64.zip` binary; its `signtool` placeholder remains in
-  `release.yml` until signing-service integration exists. macOS signing and
-  notarization are owned exclusively by the private `macos-builder`, which
-  produces the signed, notarized, and stapled `.dmg`. The cross-compiled raw
-  `*-darwin-arm64.tar.gz` remains unsigned; any future signing for that
-  artifact must also be implemented in `macos-builder`, not `release.yml`.
+- Published releases, tags, and assets are immutable. Attach and verify every
+  asset while the release is still a draft.
+- Never delete, retag, replace, or append assets after publication. Cut a new
+  patch release for any correction.
+- `publish` is the final draft-to-published transition.
+- Generated manifest changes always travel through the protected PR described
+  above.
+- The private `stuffbucket/macos-builder` exclusively owns macOS packaging,
+  signing, notarization, and stapling.
+- The raw cross-compiled `*-darwin-arm64.tar.gz` remains unsigned. Any future
+  signing for it belongs in `macos-builder`, not `release.yml`.
+- Windows Authenticode signing remains deferred; the disabled placeholder in
+  `release.yml` is the only signing stub retained.

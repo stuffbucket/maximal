@@ -194,7 +194,7 @@ async function main(): Promise<number> {
   fs.mkdirSync(path.join(work, "unpacked"), { recursive: true })
   run("tar", ["-xzf", tarball, "-C", "unpacked"], { cwd: work })
 
-  // Locate the binary inside the unpacked tree (Stream A's tarball
+  // Locate the binary inside the unpacked release archive
   // ships it at the root, but tolerate one level of nesting).
   const unpackedRoot = path.join(work, "unpacked")
   let binarySrc: string | undefined
@@ -229,9 +229,8 @@ async function main(): Promise<number> {
     createDmgArgs.push("--background", bg)
   }
   // `--identity=` (empty) tells create-dmg not to attempt code-signing
-  // — A4 is deferred. The resulting DMG will trigger Gatekeeper on
-  // first open; users follow the right-click → Open instructions on
-  // the Pages site.
+  // This local recovery path is intentionally unsigned. The resulting DMG
+  // will trigger Gatekeeper on first open.
   createDmgArgs.push("--identity=")
   createDmgArgs.push(`--dmg-title=maximal ${version}`)
   // create-dmg exits non-zero if codesign isn't set up but still

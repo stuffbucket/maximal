@@ -1,4 +1,4 @@
-# maximal Windows installer (B3a).
+# maximal Windows installer.
 #
 # Self-contained PowerShell installer for the maximal CLI. Downloads the
 # release zip from GitHub Releases (or a specific tag with -Version),
@@ -12,8 +12,8 @@
 # and owns running the proxy, auto-start, and first-run setup — like the
 # macOS menu-bar app. This installer just puts `maximal` on PATH.
 #
-# v1 ships unsigned (A4 deferred per parent PRD). On first launch
-# Windows SmartScreen will warn — the Pages site (B4) carries the
+# Windows Authenticode signing remains deferred. On first launch,
+# Windows SmartScreen will warn; the Pages site carries the
 # "More info → Run anyway" instructions.
 #
 # Usage:
@@ -23,8 +23,6 @@
 #   $env:COPILOT_API_VERSION = 'v0.2.0'; iex (irm ...)
 #   # Uninstall path (after install):
 #   maximal uninstall
-#
-# Spec: docs/spec/archive/internal-distribution-stream-b.md §B3a.
 
 #Requires -Version 5.1
 
@@ -75,7 +73,7 @@ function Download-File {
 
 function Verify-Sha256 {
   param([string]$File, [string]$ExpectedSha256File)
-  # The .sha256 file ships as `<sha>  <filename>` per Stream A's
+  # The .sha256 file ships as `<sha>  <filename>` with the release archive's
   # convention (matches `shasum -a 256` output). Parse out the hex.
   $expectedLine = (Get-Content -LiteralPath $ExpectedSha256File -Raw).Trim()
   $expected = ($expectedLine -split '\s+')[0]

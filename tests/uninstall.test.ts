@@ -3,7 +3,7 @@
  * platform-specific calls — the Claude Desktop config reversion path
  * (the writer itself is covered by claude-desktop-3p-config.test.ts) plus
  * the binary-removal candidate list. The launchd / scheduled-task path is
- * exercised by the install scripts in B2/B3a; mocking spawnSync per-OS
+ * exercised by the platform install scripts; mocking spawnSync per-OS
  * here would be more brittle than the production code.
  */
 

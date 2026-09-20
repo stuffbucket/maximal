@@ -1,10 +1,10 @@
 /**
- * PR-time smoke test for the Windows PowerShell installer (B3a).
+ * PR-time smoke test for the Windows PowerShell installer.
  *
  * Doesn't run the script — that needs Windows + a real release. This
  * just guards against drift between install.ps1 and the artifact-name
- * convention Stream A produces, plus the contract points the Pages
- * site (B4) and the setup wizard depend on:
+ * convention produced by the release workflow, plus the contract points the
+ * Pages site and setup wizard depend on:
  *
  *   - the script downloads `maximal-<TAG>-windows-x64.zip` (Stream
  *     A's canonical name) and a sidecar `.sha256`
@@ -38,7 +38,7 @@ describe("windows installer template", () => {
     expect(ps).toContain("$ErrorActionPreference = 'Stop'")
   })
 
-  it("downloads the canonical Stream A artifact name", () => {
+  it("downloads the canonical release artifact name", () => {
     const ps = read(SCRIPT)
     expect(ps).toContain("maximal-$Version-windows-x64.zip")
     expect(ps).toContain("$zipName.sha256")
