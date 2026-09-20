@@ -71,6 +71,18 @@ describe("release action runtimes", () => {
     expect(workflow).not.toContain("actions/cache@v4")
     expect(workflow).not.toContain("actions/upload-artifact@v4")
   })
+
+  test("macOS signing is delegated to macos-builder", async () => {
+    const workflow = await readWorkflow("release.yml")
+
+    expect(workflow).toContain("--repo stuffbucket/macos-builder")
+    expect(workflow).not.toContain("Codesign (macOS)")
+    expect(workflow).not.toContain("Notarize (macOS)")
+    expect(workflow).not.toContain("MACOS_DEVELOPER_ID")
+    expect(workflow).not.toContain("AC_USERNAME")
+    expect(workflow).not.toContain("AC_PASSWORD")
+    expect(workflow).not.toContain("AC_TEAM_ID")
+  })
 })
 
 describe("manifest publication", () => {

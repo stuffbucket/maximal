@@ -35,7 +35,7 @@ A bootstraps its CI.
 | **B5** First-run `setup` subcommand | nothing — pure CLI | ✅ landed (`7c7621c`) |
 | **B6** Uninstall paths | B5 (reverse of `setup`) | ✅ landed (`1752104` + `f1f6dd1`) |
 | **B1** Homebrew formula | Stream A's first `.tar.gz` release | ✅ formula skeleton + sync script landed (agent-A). Real SHAs filled by `bun run render-formula --org … --version …` once the first release publishes. PR to `stuffbucket/homebrew-tap` is the remaining step (cross-repo coordination). |
-| **B2** macOS `.app.zip` (CI) + `.dmg` (local helper) | Stream A3 (`.tar.gz` binary; unsigned in v1) | ✅ landed. CI publishes `.app.zip` on every tag from `ubuntu-latest`. A polished `.dmg` is built via `bun run package-dmg --tag v<x.y.z> [--upload]` from a developer Mac post-tag (`scripts/package-dmg.ts`). Both artifacts attach to the same release. |
+| **B2** macOS distribution | private `macos-builder` | **Superseded here.** Packaging, signing, notarization, and stapling are owned by `macos-builder`. |
 | **B3a** Windows PowerShell installer | Stream A3 (unsigned in v1) | ✅ landed (`cbbd796`) |
 | **B3b** Windows MSI (WiX) | B3a learnings | ✅ landed (agent-A). Minimal per-user MSI: binary + PATH + Start Menu shortcut to `copilot-api setup`. Built via `dotnet tool install --global wix` on windows-2022 — no third-party action. v1 doesn't auto-register the scheduled task from inside the MSI; users run `copilot-api setup` once. |
 | **B4** GitHub Pages landing site | first published release URL | ✅ landed on `agent/stream-b` (fetches release URL at runtime — ships before first publish) |
@@ -45,8 +45,7 @@ fallback per the parent PRD's risk section.
 
 ## 3. The contract with Stream A
 
-Stream A produces per-arch binaries on every `v*` tag (unsigned in
-v1; A4 will sign+notarize them once unblocked) and attaches them to
+Stream A produces per-arch binaries on every `v*` tag and attaches them to
 the GitHub release at:
 
 ```
@@ -61,8 +60,9 @@ the GitHub release at:
   SBOM.spdx.json
 ```
 
-Your installers consume those URLs + SHAs and **re-attach** their own
-outputs (`.app.zip`, `.msi`, `install.ps1`) to the same release.
+The private `macos-builder` consumes the darwin artifact and uploads the
+finished DMG. The Windows installers consume the Windows URL + SHA and attach
+the `.msi` and `install.ps1` outputs to the same release.
 
 Don't change this contract without coordinating with Stream A. The
 artifact names are baked into the Homebrew formula, the Pages site,
@@ -234,191 +234,10 @@ and have a working setup.
 
 ~half a day plus tap-owner coordination time.
 
-## 7. B2 — macOS `.app.zip` (drag-to-Applications after Finder extract)
+## 7. B2 — macOS distribution — **SUPERSEDED**
 
-### Goal
-
-A `.zip` containing a fully-formed `copilot-api.app` bundle. User
-extracts it from Finder (default Archive Utility behavior on
-double-click), drags `copilot-api.app` to /Applications, opens it
-once (right-click → Open the first time to clear Gatekeeper). The
-.app is a one-shot self-installer that registers a launchd agent
-and exits. v1 ships unsigned — the Pages site (B4) surfaces the
-right-click → Open bypass instructions.
-
-A4 (signing/notarization) is deferred per the parent PRD; the build
-pipeline produces an unsigned `.app.zip` for v1, ready to be re-signed
-automatically when A4 unblocks.
-
-### Why `.app.zip` instead of `.dmg`
-
-The original PRD specified a `.dmg` mounted via Finder showing a
-custom-background drag-to-Applications view (`create-dmg`). That
-plan required a macOS runner — `hdiutil` (the only path to a real
-`.dmg`) is Mac-only. **Public-repo policy rules out macOS runners**,
-so the build pipeline now produces a zipped `.app` instead. Trade-off:
-
-- ✅ Builds on `ubuntu-latest` — `.app` bundle is just a directory
-  tree, `zip` is universal.
-- ✅ Same drag-to-Applications endpoint UX after one Finder extract
-  step (Archive Utility extracts on double-click, no terminal).
-- ✅ Same `.app` self-install / launchd-registration on first launch.
-- ❌ Loses the polished mounted-DMG view with custom background art
-  and "drag here ↓" arrow. Users do `Downloads → double-click .zip
-  → drag the resulting .app to Applications` instead of `Downloads
-  → double-click .dmg → drag in mounted view`.
-- ❌ One extra user step (the Finder extract).
-
-The Pages site (B4) compensates for the lost UX cue with a clear
-two-step instruction block.
-
-### `.app` bundle structure
-
-```
-copilot-api.app/
-  Contents/
-    Info.plist                          # LSUIElement=1 (no Dock icon),
-                                        # CFBundleIdentifier =
-                                        #   com.microsoft.copilot-api,
-                                        # CFBundleVersion from CI
-    MacOS/
-      copilot-api                       # the bun --compile binary
-      first-launch                      # tiny shell launcher (see below)
-    Resources/
-      com.microsoft.copilot-api.plist   # launchd plist template
-      AppIcon.icns
-```
-
-`Info.plist` essentials:
-
-- `CFBundleExecutable` = `first-launch` (not the binary directly — the
-  shim handles install-vs-already-installed).
-- `LSUIElement` = `<true/>` so the .app doesn't appear in the Dock or
-  show a window when launched.
-- `CFBundleIdentifier` = `com.microsoft.copilot-api`.
-
-`Contents/MacOS/first-launch` (~30 lines of bash):
-
-```bash
-#!/bin/bash
-set -e
-APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-BIN_SRC="$APP_DIR/MacOS/copilot-api"
-PLIST_SRC="$APP_DIR/Resources/com.microsoft.copilot-api.plist"
-
-INSTALL_BIN="$HOME/.local/bin/copilot-api"
-INSTALL_PLIST="$HOME/Library/LaunchAgents/com.microsoft.copilot-api.plist"
-
-# Install binary + plist (idempotent — overwrite any older install).
-mkdir -p "$(dirname "$INSTALL_BIN")" "$(dirname "$INSTALL_PLIST")"
-cp -f "$BIN_SRC"    "$INSTALL_BIN"
-cp -f "$PLIST_SRC"  "$INSTALL_PLIST"
-chmod 755 "$INSTALL_BIN"
-
-# (Re)load the launch agent.
-launchctl bootout  "gui/$(id -u)" "$INSTALL_PLIST" 2>/dev/null || true
-launchctl bootstrap "gui/$(id -u)" "$INSTALL_PLIST"
-
-# Claude Desktop config in unattended mode (B5; skip GitHub auth here).
-"$INSTALL_BIN" setup --unattended --skip-auth || true
-
-# Notify and exit. No long-lived process from the .app itself.
-osascript -e 'display notification "copilot-api installed. Run `copilot-api setup` once from a terminal to authenticate." with title "copilot-api"'
-exit 0
-```
-
-The `.app` is therefore a one-shot self-installer. Future launches
-re-run `first-launch` (idempotent), so users can re-install just by
-double-clicking the .app from /Applications.
-
-### DMG generator
-
-Use **`create-dmg`**
-([sindresorhus/create-dmg](https://github.com/sindresorhus/create-dmg))
-— Node CLI, actively maintained, produces the canonical macOS install
-UX (custom background, drag-to-Applications symlink, no terminal).
-Alternatives considered:
-
-- `appdmg` — older, JSON-spec; less polished defaults than create-dmg.
-- `dmgbuild` (Python) — full programmatic control; overkill for our
-  shape and adds a Python toolchain dep.
-
-`create-dmg` accepts a built `.app` and emits a `.app.zip`:
-
-```sh
-npx create-dmg copilot-api.app dist-release/ \
-  --dmg-title "copilot-api ${VERSION}" \
-  --background build/macos/dmg-bg.png \
-  --window-size 540,400 \
-  --icon-size 128 \
-  --app-drop-link 380 200
-```
-
-### Build pipeline
-
-CI workflow `installers.yml` `macos-app-zip` job runs after Stream A's
-`binaries`:
-
-```
-needs: binaries (release published)
-runs-on: ubuntu-latest                  # public-repo: no macOS runners
-steps:
-  - download copilot-api-v<v>-darwin-arm64.tar.gz + .sha256
-  - verify sha256
-  - assemble copilot-api.app from build/macos/app-template/
-    - copy unpacked binary into Contents/MacOS/copilot-api
-    - sed Info.plist version placeholder
-  - zip -ryX dist-build copilot-api.app → copilot-api-v<v>-darwin-arm64.app.zip
-  - sha256sum
-  - upload-release-asset (vendored composite)
-```
-
-Single artifact per release — `copilot-api-v<v>-darwin-arm64.app.zip`.
-**Apple Silicon only**; Intel macOS is not a supported target.
-
-### Acceptance
-
-On a clean macOS Sonoma+ Apple Silicon machine:
-
-1. Download `copilot-api-v<v>-darwin-arm64.app.zip` from the Pages site.
-2. Double-click the .zip → Finder extracts to `copilot-api.app`.
-3. Drag `copilot-api.app` to `/Applications`.
-4. Right-click `copilot-api.app` → Open → confirm Open in the dialog
-   (one-time Gatekeeper bypass for unsigned binary). A notification
-   confirms install.
-5. Run `copilot-api setup` from a Terminal once to handle GitHub
-   auth (B5).
-6. Open Claude Desktop, switch to Cowork, ask Claude something.
-
-Steps 1-4 are mouse-only; step 5 is the one terminal step (auth flow
-is interactive by nature). Acceptable for v1.
-
-### Optional: polished `.dmg` via local helper
-
-`scripts/package-dmg.ts` (also exposed as `bun run package-dmg`) lets
-a developer on a Mac produce the polished mounted-DMG view post-tag:
-
-```sh
-bun run package-dmg --tag v0.1.0          # build only
-bun run package-dmg --tag v0.1.0 --upload # build + attach to release
-```
-
-Run from any developer macOS (Apple Silicon) checkout. It downloads
-the published `.tar.gz` for the tag, verifies the SHA, assembles the
-same `.app` bundle the CI workflow builds, then runs `npx create-dmg`
-locally (which needs `hdiutil`, hence Mac-only). Output lands in
-`dist-release/copilot-api-v<v>-darwin-arm64.dmg` with a sidecar
-`.sha256`.
-
-This keeps both artifacts available without adding macOS runners to
-CI: `.app.zip` is the always-on CI default; the `.dmg` is a manual
-release-engineer step when a polished mounted view is wanted.
-
-### Estimate
-
-~2 days. The `.app` template + first-launch script is the bulk;
-signing / notarization stays deferred per the parent PRD. The local
-`package-dmg` helper is ~250 LOC of Bun + shell-out.
+The former in-repository macOS distribution design was retired. The private `macos-builder` owns macOS packaging, signing, notarization,
+and stapling and uploads the finished DMG to the draft release.
 
 ## 8. B3 — Windows installer
 
@@ -442,8 +261,7 @@ Self-contained signed `install.ps1` that:
 6. Runs `copilot-api setup --unattended --skip-auth` for Claude
    Desktop config.
 
-v1 ships unsigned (A4 deferred); SmartScreen surfaces "More info →
-Run anyway" on first run. User install command:
+Windows signing remains deferred; SmartScreen surfaces "More info → Run anyway" on first run. User install command:
 
 ```powershell
 iex (irm https://<internal>/copilot-api/install.ps1)
@@ -518,21 +336,16 @@ no SPA framework.
    parse the version + asset URLs.
 2. UA-detect the OS (`navigator.platform` / `navigator.userAgent`).
 3. Show one big primary button matching the detected OS:
-   - macOS Apple Silicon: `.app.zip` (arm64)
-   - macOS Intel: `.app.zip` (x64)
+   - macOS Apple Silicon: signed and notarized `.dmg` from `macos-builder`
    - Windows: `.msi` (or `.ps1` instructions block)
 4. Below the primary button: secondary buttons for the other shapes
    (`brew` install command, `.tar.gz` direct download,
    `install.ps1` link).
 5. A 2-paragraph "what is this" section above the buttons.
 6. **First-launch warning callout** — load-bearing UX detail. v1
-   binaries are unsigned, so macOS users see Gatekeeper's
-   "unidentified developer" prompt and Windows users see
-   SmartScreen. Render an explicit instruction block:
-   - *macOS:* "First launch: right-click `copilot-api.app` in
-     Applications → Open → confirm Open in the dialog."
-   - *Windows:* "First launch: SmartScreen → More info → Run anyway."
-   - *Brew install:* unaffected — `brew` bypasses Gatekeeper.
+   Windows binaries remain unsigned, so Windows users see SmartScreen. Render
+   an explicit instruction block: "First launch: SmartScreen → More info → Run
+   anyway." macOS downloads are signed and notarized by `macos-builder`.
 7. A screenshot of `copilot-api debug` output (saved as static asset
    in `docs/`) so admins can sanity-check the install.
 8. A link to the internal wiki page (URL TBD by team).
@@ -554,11 +367,7 @@ artifacts, the brew command line works after copy/paste.
 
 - **When Stream A publishes its first release**, ping the parent
   channel; you'll need the actual `.tar.gz` SHA-256 values for B1
-  and to verify B2/B3a artifact-fetching code.
-- **If your B2 post-install script needs to know about new
-  config keys**, propose them as an addition to `src/debug.ts`
-  `summarizeConfig` and the parent PRD — don't add a parallel
-  read path.
+  and to verify B3a artifact-fetching code.
 - **Don't touch Stream A's release workflows.** If you need a
   different artifact (e.g., a directory bundle instead of a tar.gz),
   raise it in the parent issue rather than forking the build.
@@ -587,20 +396,18 @@ Allowed without vendoring (first-party):
 - `actions/configure-pages`, `actions/upload-pages-artifact`,
   `actions/deploy-pages` (B4 only)
 
-Don't introduce these in B2/B3/B4 workflows (vendor first):
+Don't introduce these in B3/B4 workflows (vendor first):
 - Any `docker/*` action — the existing `release-docker.yml` uses
   several of these and has been disabled (manual `workflow_dispatch`
-  only). B2/B3 don't need any Docker actions.
+  only). B3 doesn't need any Docker actions.
 - `sigstore/cosign-installer` — same posture as `docker/*`.
 - Anything else not on the GitHub-published list above.
 - Any third-party tool wrapped as a GHA — prefer the underlying CLI
   via the runner's preinstalled tooling, or vendor the action under
   `.github/actions/<name>/action.yml` as a composite first.
 
-For B2 specifically: `npx create-dmg` is an npm package, not a GHA,
-and is fine to run via `npx` in a step. Same logic for B3a's
-`signtool.exe` (preinstalled on `windows-2022` runners) and any
-PowerShell signing utility — those are CLI tools, not actions.
+B3a's `signtool.exe` (preinstalled on `windows-2022` runners) and
+PowerShell signing utilities are CLI tools, not actions.
 
 ## 11. Files you'll create / modify
 
@@ -612,14 +419,9 @@ src/main.ts                             # B5/B6 — register subcommands
 tests/setup.test.ts                     # B5 (new)
 tests/uninstall.test.ts                 # B6 (new)
 tests/claude-desktop-config.test.ts     # B5 helper (new)
-build/macos/app-template/Info.plist     # B2 — .app metadata (LSUIElement)
-build/macos/app-template/MacOS/first-launch  # B2 — self-install shim (~30 LOC bash)
-build/macos/com.microsoft.copilot-api.plist  # B2 — launchd plist template
-build/macos/dmg-bg.png                  # B2 — DMG background w/ "drag to /Applications"
-build/macos/AppIcon.icns                # B2 — app icon
 build/windows/install.ps1               # B3a (new)
 build/windows/copilot-api.wxs           # B3b (new)
-.github/workflows/installers.yml        # B2 + B3 — runs after Stream A's release
+.github/workflows/installers.yml        # B3 — runs after Stream A's release
 docs/index.html                         # B4 (new)
 docs/install-screenshot.png             # B4 — `copilot-api debug` capture
 ```

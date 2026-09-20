@@ -12,10 +12,10 @@ Working notes for the agent (me) owning Stream A. Symmetric to
 |---|---|---|
 | **A1** Internal repo migration | open — coordination, not code | Block on first internal release |
 | **A2** CI on push/PR | ✅ already exists at `.github/workflows/ci.yml` | Verify after A1 — secrets/cache may need rename |
-| **A3** Per-arch `bun --compile` | ✅ scaffolded — added `binaries` + `checksums` jobs to `release.yml` (this commit) | Codesign/notarize gated `if: false` until A4 |
-| **A4** Signing + notarization | **deferred for v1** | Stubs left as `if: false`-gated `[DEFERRED A4]` steps. Flip after v1 if user feedback / compliance demands it |
+| **A3** Per-arch `bun --compile` | ✅ scaffolded — added `binaries` + `checksums` jobs to `release.yml` (this commit) | macOS signing is owned by `macos-builder` |
+| **A4** Windows Authenticode signing | **deferred** | Signing-service integration remains TBD |
 | **A5** SBOM + license scan | ✅ wired | `scripts/sbom.ts` (pure Bun, no new deps) — emits CycloneDX 1.4 SBOM, fails build on disallowed license. Attached to release as `SBOM.cdx.json` |
-| **A6** Smoke test on clean image | ✅ wired (Windows only) | `smoke` job runs on `windows-2022`; downloads the windows-x64 zip, unpacks, asserts `copilot-api debug --json` schema. No darwin smoke (public-repo: no macOS runners; manual mitigation via Homebrew install on a developer Mac pre-tag) |
+| **A6** Smoke test on clean image | ✅ wired (Windows only) | `smoke` job runs on `windows-2022`; downloads the windows-x64 zip, unpacks, asserts `copilot-api debug --json` schema. The public workflow has no darwin smoke; macOS packaging and release validation belong to `macos-builder`. |
 
 ## Vendored actions policy
 
@@ -42,7 +42,7 @@ Currently vendored as local composites:
 ## A3 — what's wired now
 
 `.github/workflows/release.yml` was extended with two new jobs that
-run after the existing `release` job (npm publish):
+run after the existing `release` job:
 
 - **`binaries`** — single-runner (`ubuntu-latest`) matrix over the
   Bun cross-compile targets `(bun-darwin-arm64, bun-windows-x64)`.
@@ -56,30 +56,22 @@ run after the existing `release` job (npm publish):
   from the release, concatenates into a sorted `SHA256SUMS`,
   re-uploads.
 
-Codesign / notarize / signtool steps are present but `if: false` so
-the workflow stays green pre-A4. Flip them on once cred plumbing
-lands.
+macOS packaging and signing are owned by the private `macos-builder`. The
+Windows `signtool` placeholder remains disabled pending signing-service plumbing.
 
 The **artifact-naming contract** with Stream B is documented in a
 comment block at the top of the `binaries` job. Don't change it
 without coordinating.
 
-## A4 — what's still needed (deferred)
+## A4 — Windows signing still needed (deferred)
 
-Three credential sets gate the flip from `[DEFERRED A4]` `if: false`
-to `if: <cred env present>`:
+The raw Windows binary needs an HSM-backed Authenticode signing service. The
+runner-pool integration remains TBD, and the `Sign (Windows)` workflow step is
+only a placeholder. macOS packaging, signing, notarization, and stapling belong
+to the private `macos-builder` and have no deferred steps in `release.yml`.
 
-1. **Apple Developer notarization** — Apple ID, app-specific
-   password, Team ID. Then enable the `Codesign` and `Notarize`
-   steps in `release.yml`.
-2. **Apple Developer ID Application cert** — for `codesign`. How
-   it's plumbed into the runner (hosted vs self-hosted vs imported
-   keychain) is a v2 decision; v1 ships unsigned.
-3. **Authenticode signing service** — Windows. HSM-backed; runner-
-   pool integration TBD. The `Sign (Windows)` step is a stub.
-
-After A4 lands, repeat the smoke test (A6) on a clean managed device
-and confirm Gatekeeper / SmartScreen don't prompt.
+After Windows signing lands, repeat the smoke test (A6) on a clean managed
+device and confirm SmartScreen does not prompt.
 
 ## A5 — SBOM + license scan (landed)
 
@@ -135,8 +127,7 @@ the windows target.
 1. **Internal repo URL.** Where does the repo land on the MS GitHub
    org? Need this to update `THIRD-PARTY-LICENSE` references and the
    Stream B Homebrew formula.
-2. **Cert / cred set names** for Apple Developer and Authenticode in
-   GitHub Actions secrets.
+2. **Authenticode signing-service credentials** and runner-pool integration.
 3. **SPDX vs CycloneDX** preference for internal compliance.
 4. **Self-hosted runners?** If the Authenticode signing service
    requires a specific pool, configure `runs-on: [self-hosted, …]`

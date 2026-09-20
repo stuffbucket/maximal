@@ -303,9 +303,10 @@ itself is frozen.
 
 ## Open questions
 
-- **Cert plumbing for A4** is still **DEFERRED** for the *raw binaries* —
-  the bun-compiled `*-darwin-arm64.tar.gz` / `*-windows-x64.zip` (and
-  Windows `signtool`) ship **unsigned** (see the `DEFERRED A4` stubs in
-  `release.yml`). The macOS **`.dmg` is already signed + notarized** via
-  the private `macos-builder`; A4 is only about signing the loose
-  binaries. When the cred set lands, those gates flip to `if: …`.
+- **Windows Authenticode signing** is still **DEFERRED** for the raw
+  `*-windows-x64.zip` binary; its `signtool` placeholder remains in
+  `release.yml` until signing-service integration exists. macOS signing and
+  notarization are owned exclusively by the private `macos-builder`, which
+  produces the signed, notarized, and stapled `.dmg`. The cross-compiled raw
+  `*-darwin-arm64.tar.gz` remains unsigned; any future signing for that
+  artifact must also be implemented in `macos-builder`, not `release.yml`.

@@ -19,20 +19,14 @@ contract between them so the work can be picked up by separate agents.
 - Distribution shape: per-arch single-file binaries published to
   GitHub Releases (Apple Silicon macOS + Windows x64; **no Intel
   macOS**); Homebrew formula at `stuffbucket/homebrew-tap` for CLI
-  users; **`.app.zip`** with a drag-to-Applications `.app` bundle
-  for macOS (extracted by Finder on double-click); `.msi` + signed
-  PowerShell `install.ps1` for Windows; static GitHub Pages landing
-  site that auto-detects OS and links to the right artifact.
-- **No macOS runners.** Public-repo policy rules them out. Bun
-  cross-compiles the darwin-arm64 binary from `ubuntu-latest`; the
-  `.app.zip` is assembled on Linux too. Tradeoff: the polished
-  mounted-DMG view is replaced by a one-step Finder extract, and
-  there is no CI smoke test for the Mach-O binary (manual via
-  Homebrew install on a real Mac before tagging).
-- **v1 ships unsigned.** Codesigning and notarization (A4) are
-  deferred until after we have v1 user feedback; first-launch
-  Gatekeeper / SmartScreen prompts are surfaced explicitly in the
-  DMG background art and the Pages landing site.
+  users; a signed, notarized, and stapled macOS DMG produced by the
+  private `macos-builder`; `.msi` + signed PowerShell `install.ps1`
+  for Windows; static GitHub Pages landing site that auto-detects OS
+  and links to the right artifact.
+- The public workflow uses no macOS runners. Bun cross-compiles the raw
+  darwin-arm64 binary from `ubuntu-latest`; `macos-builder` owns the
+  packaged macOS release, including signing and notarization. Windows
+  Authenticode signing remains deferred.
 - Two agents, two streams. Stream A produces the per-arch binaries
   Stream B consumes; the contract is the artifact naming convention
   and checksum publication location (§"Inter-stream contract" below).
@@ -61,12 +55,12 @@ writing their own launchd plist.
 
 | Goal | Acceptance signal |
 |---|---|
-| Drag-to-install on macOS (Apple Silicon) | User downloads a `.app.zip`, double-clicks to extract via Finder, drags `copilot-api.app` to Applications, opens it once (right-click → Open the first time to clear Gatekeeper), proxy registers itself under launchd |
+| Install on macOS (Apple Silicon) | User downloads the signed and notarized DMG produced by `macos-builder`, installs the app, and the proxy registers itself under launchd |
 | One-click install on Windows | User downloads an `.msi`, double-clicks, accepts UAC + SmartScreen, proxy registers as a Windows Service. PowerShell installer acceptable fallback |
 | CLI-friendly install on macOS | `brew install stuffbucket/copilot-api` installs and registers the service via `brew services` |
-| Static landing page | An internal Pages URL shows version, OS-detecting download buttons, and an explicit first-launch warning callout for the unsigned binaries |
+| Static landing page | An internal Pages URL shows version and OS-detecting download buttons; the first-launch warning applies only to unsigned Windows artifacts |
 | Claude Desktop configured automatically | Post-install hook updates `claude_desktop_config.json` to point at `localhost:4141` with a stub API key, preserving existing keys |
-| Reproducible artifacts | Every release has a CI run, SBOM, SHA-256 checksums. Signing/notarization tickets land later when A4 unblocks |
+| Reproducible artifacts | Every release has a CI run, SBOM, SHA-256 checksums, and a signed/notarized macOS DMG from `macos-builder` |
 | Diagnostic posture survives the install | After install, `copilot-api debug` from a terminal still produces the existing diagnostic output, including git SHA so support can confirm running version |
 | Auto-update story documented | At minimum a runbook for "bump the formula / re-publish / Pages site picks up new release". Auto-update software optional |
 
@@ -94,8 +88,7 @@ writing their own launchd plist.
                     │  - SBOM + checksums          │
                     │  - publish to GH Releases    │
                     │                              │
-                    │  - codesign / notarize       │
-                    │    (DEFERRED — A4)           │
+                    │  - dispatch macos-builder    │
                     │  - signtool (DEFERRED — A4)  │
                     └──────────────┬───────────────┘
                                    │ artifact URLs +
@@ -105,7 +98,7 @@ writing their own launchd plist.
                     │  Stream B: Installers + UX   │
                     │                              │
                     │  - Homebrew formula          │
-                    │  - .app.zip (drag-to-/Apps)  │
+                    │  - signed macOS DMG        │
                     │  - .msi / .ps1               │
                     │  - GH Pages landing site     │
                     │  - setup / uninstall (CLI)   │
@@ -124,8 +117,8 @@ location**:
   copilot-api-v<version>-darwin-arm64.tar.gz.sha256
   copilot-api-v<version>-windows-x64.zip           # Stream A
   copilot-api-v<version>-windows-x64.zip.sha256
-  copilot-api-v<version>-darwin-arm64.app.zip      # Stream B (zipped .app)
-  copilot-api-v<version>-darwin-arm64.app.zip.sha256
+  copilot-api-v<version>-darwin-arm64.dmg          # macos-builder
+  copilot-api-v<version>-darwin-arm64.dmg.sha256
   copilot-api-v<version>-windows-x64.msi           # Stream B
   copilot-api-v<version>-windows-x64.msi.sha256
   install.ps1                                      # Stream B
@@ -138,11 +131,10 @@ location**:
 not supported.
 
 Stream A publishes the `.tar.gz`/`.zip` + checksums + SBOM on a
-`ubuntu-latest` runner (Bun cross-compiles). Stream B consumes those,
-builds the `.app.zip`/`.msi`/`.ps1` in a separate workflow that runs
-after Stream A's release succeeds, and re-attaches its outputs to the
-same GitHub release. **No macOS runners are used by either stream**
-(public-repo policy).
+`ubuntu-latest` runner (Bun cross-compiles). The private `macos-builder`
+consumes the darwin artifact and uploads the finished DMG. Stream B builds
+the `.msi`/`.ps1` outputs and attaches them to the same GitHub release.
+The public workflow uses no macOS runners.
 
 ## Stream A — CI/CD + release artifacts
 
@@ -188,38 +180,14 @@ files attached, executable on a clean VM of the target platform.
 **Estimate:** ~150 LOC of GH Actions YAML; half a day to debug matrix
 issues.
 
-### A4. Code signing + notarization — **DEFERRED for v1**
+### A4. Windows Authenticode signing — **DEFERRED**
 
-Cred-set wiring (Apple Developer notarization + Microsoft Authenticode
-signing service) deferred until after the unsigned-binary v1 lands and
-we have evidence on whether the user-facing prompts are tolerable for
-the internal audience. Stubs are left in `release.yml` as
-`if: false`-gated `[DEFERRED A4]` steps so the wiring is in place when
-the cred set is ready.
+The Windows raw binary remains unsigned until an HSM-backed Authenticode
+signing service is integrated. macOS signing and notarization are not part of
+this workstream; the private `macos-builder` owns that pipeline.
 
-**v1 implications:**
-- macOS: first launch shows a Gatekeeper "unidentified developer"
-  prompt; right-click → Open bypasses (one-time per binary).
-- Windows: SmartScreen "unrecognized app" warning on the `.ps1` /
-  `.msi`; "More info → Run anyway" bypasses.
-- Homebrew install path (B1) is unaffected.
-
-When A4 unblocks:
-
-- **macOS:** `codesign --deep --options=runtime` against the binary,
-  then `xcrun notarytool submit` with Microsoft's Apple Developer
-  credentials, then `xcrun stapler staple`. Reuse the internal CI's
-  secret store / cert plumbing.
-- **Windows:** `signtool sign` with the Microsoft Authenticode cert
-  (HSM-backed; CI uses the existing internal signing service).
-
-**Trigger to flip from deferred to active:** v1 user feedback indicates
-the bypass UX is unacceptable, OR a compliance ask requires signed
-artifacts.
-
-**Estimate when re-activated:** ~half a day on macOS (well-trodden
-path); ~1 day on Windows (signing-service integration is the long
-pole).
+**Trigger to activate:** a compliance requirement or unacceptable SmartScreen
+UX, after the signing-service runner integration exists.
 
 ### A5. SBOM + license scan + provenance
 
@@ -293,53 +261,11 @@ copilot-api` works.
 
 **Estimate:** ~half a day plus tap-owner coordination.
 
-### B2. macOS `.app.zip` (Apple Silicon, drag-to-Applications)
+### B2. macOS distribution — **SUPERSEDED**
 
-A `.zip` containing `copilot-api.app`. User double-clicks the zip to
-extract via Finder, drags `copilot-api.app` to /Applications, opens
-it once (right-click → Open the first time for the Gatekeeper
-bypass). The `.app` is a one-shot self-installer that registers a
-launchd agent on first launch.
-
-**Apple Silicon only.** Intel macOS is not a supported target — there
-is no `darwin-x64` artifact in any release.
-
-The original PRD called for a `.dmg`. We switched to `.app.zip`
-because:
-
-- **Public-repo policy rules out macOS runners.** Building a real
-  `.dmg` requires `hdiutil`, which is Mac-only. The `.app` bundle
-  itself is just a directory tree and assembles fine on
-  `ubuntu-latest`.
-- One extra Finder-extract step replaces the mounted-DMG view; the
-  Pages site (B4) surfaces both that step and the Gatekeeper bypass.
-
-`Info.plist` sets `LSUIElement = true` so the .app doesn't show in
-the Dock when launched. The `Contents/MacOS/first-launch` shim
-copies the binary to `~/.local/bin`, registers the launchd plist,
-and runs `copilot-api setup --unattended --skip-auth`. Idempotent —
-re-launching the .app re-runs the install.
-
-v1 ships unsigned per A4's deferral; first-launch right-click → Open
-is documented on the Pages site.
-
-See `internal-distribution-stream-b.md` §7 for the full `.app`
-template, first-launch script, and zip pipeline.
-
-**Deliverable:** `copilot-api-v<v>-darwin-arm64.app.zip` from CI on
-every tag, plus an optional `copilot-api-v<v>-darwin-arm64.dmg` built
-post-tag via `bun run package-dmg --tag v<v> --upload` from any
-Apple Silicon developer Mac (`scripts/package-dmg.ts`). The `.app.zip`
-is the always-on CI default; the `.dmg` is a manual release-engineer
-step when the polished mounted-installer view is wanted. Both attach
-to the same GitHub release.
-
-End-to-end UX: three mouse clicks (extract → drag → right-click-Open)
-plus one terminal command (`copilot-api setup` for GitHub auth) →
-working setup.
-
-**Estimate:** ~2 days. The DMG generator integration + .app template
-+ first-launch shim is the bulk; signing is deferred (A4).
+The former in-repository macOS distribution design was retired.
+The private `macos-builder` owns macOS packaging, signing, notarization, and
+stapling and uploads the finished DMG to the draft release.
 
 ### B3. Windows `.msi` (with PowerShell fallback)
 
@@ -441,15 +367,14 @@ agents or service registrations.
 A1 → A2 → A3 ─┬─→ A5 → A6 ─→ first unsigned release
               │
               ├─→ B1 (Homebrew — unaffected by signing)
-              ├─→ B2 (.pkg — unsigned in v1, Gatekeeper bypass)
+              ├─→ B2 (macos-builder signed/notarized DMG)
               ├─→ B3a (.ps1) → B3b (.msi) (unsigned, SmartScreen bypass)
               │
               └────→ B5 (setup; pure CLI)
                      B6 (uninstall)
                      B4 (Pages — last; needs final release URLs)
 
-A4 (signing + notarization) deferred — flip on after v1 if user
-feedback or compliance requires it.
+A4 (Windows Authenticode signing) remains deferred pending signing-service integration.
 ```
 
 Constraints:
@@ -458,21 +383,12 @@ Constraints:
   internal repo.
 - A3 unblocks B1 (Homebrew needs a URL + SHA), B2, and B3 (the
   unsigned binaries are sufficient for v1).
-- A4 (signing) is deferred; B2/B3 still ship in v1 with Gatekeeper /
-  SmartScreen bypass UX.
+- A4 is Windows-only; macOS signing is owned by `macos-builder`.
 - B5 has zero Stream A dependencies — Agent B starts here while Agent
   A is bootstrapping.
 - B4 lands last because it references final artifact URLs.
 
 ## Risks
-
-- **Apple Developer credential access in CI.** Notarization needs an
-  Apple ID, app-specific password, and Team ID accessible to the GH
-  Actions runner. Microsoft has this for other internal Mac tools;
-  access scope needs sorting upfront.
-  *Mitigation: Stream A's first deliverable after A2 is a notarization
-  smoke test using a no-op binary, so the credential plumbing is proved
-  before the rest of the pipeline depends on it.*
 
 - **Authenticode signing service.** Internal MS signing is HSM-backed
   and rate-limited; CI integration historically requires a specific
@@ -547,16 +463,14 @@ without help in under 10 minutes, this PRD delivered.
    tarballs.
 4. **A5** — SBOM + license scan + provenance.
 5. **A6** — smoke test on clean image.
-6. **A4** — codesign + notarize macOS; signtool Windows. **Deferred
-   for v1**; flip on after v1 feedback.
+6. **A4** — Windows Authenticode signing. **Deferred** pending signing-service integration.
 
 **Agent B** owns Stream B. Deliverables in order:
 
 1. **B5** — `setup` subcommand. Pure CLI, no Stream A dependency;
    start here while A is bootstrapping.
 2. **B1** — Homebrew formula. Depends on A3.
-3. **B2** — macOS `.pkg`. Depends on A3; ships unsigned in v1
-   (Gatekeeper bypass), re-signed automatically when A4 lands.
+3. **B2** — macOS distribution. Superseded by the private `macos-builder`.
 4. **B3a** — Windows PowerShell installer. Depends on A3; same
    unsigned/signed transition.
 5. **B6** — uninstall paths.
