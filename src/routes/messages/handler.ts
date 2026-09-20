@@ -32,6 +32,7 @@ import {
   getCompactType,
   mergeToolResultForClaude,
   sanitizeIdeTools,
+  stripUnsupportedClaudeCodeTools,
   stripUnsupportedTopLevelAnthropicFields,
   stripToolReferenceTurnBoundary,
 } from "./preprocess"
@@ -69,6 +70,7 @@ export async function handleCompletion(c: Context) {
   anthropicPayload.model = resolveCopilotModel(c, anthropicPayload)
 
   sanitizeIdeTools(anthropicPayload)
+  stripUnsupportedClaudeCodeTools(anthropicPayload, c.req.header("user-agent"))
 
   // Detect Anthropic-server-side web tools (web_search_20250305,
   // web_fetch_20250910). Copilot rejects these tool types; the agent
@@ -144,6 +146,7 @@ export async function handleCompletion(c: Context) {
       payload: anthropicPayload,
       options: { subagentMarker, requestId, sessionId, compactType, logger },
       policy: webToolPolicy,
+      selectedModel,
     })
   }
 

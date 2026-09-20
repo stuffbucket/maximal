@@ -13,7 +13,11 @@ import type { SSEStreamingApi } from "hono/streaming"
 
 import { buildErrorEvent } from "~/routes/messages/responses-stream-translation"
 
-export type StreamFlow = "chat_completions" | "responses" | "messages"
+export type StreamFlow =
+  | "chat_completions"
+  | "responses"
+  | "messages"
+  | "web_tools"
 
 /**
  * Emit a clean Anthropic-shaped `error` event when an upstream stream throws

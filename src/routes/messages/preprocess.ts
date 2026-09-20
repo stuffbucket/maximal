@@ -28,6 +28,9 @@ const IDE_GET_DIAGNOSTICS_TOOL = "mcp__ide__getDiagnostics"
 const IDE_GET_DIAGNOSTICS_DESCRIPTION =
   "Get language diagnostics from VS Code. Returns errors, warnings, information, and hints for files in the workspace."
 const PDF_FILE_READ_PREFIX = "PDF file read:"
+const ADVISOR_TOOL_TYPE = "advisor_20260301"
+const ADVISOR_TOOL_NAME = "advisor"
+const CLAUDE_CODE_USER_AGENT = /^(?:claude-cli|claude-code)\//iu
 
 type AnthropicAttachmentBlock = AnthropicImageBlock | AnthropicDocumentBlock
 type IndexedAttachment = {
@@ -460,6 +463,25 @@ export const mergeToolResultForClaude = (
       msg.content = mergedContent
     }
   }
+}
+
+/**
+ * Claude Code intends to omit the provider-executed advisor tool when it is
+ * connected through a gateway, but affected releases still send it. Copilot
+ * cannot execute that tool and rejects the entire request. Remove only the
+ * exact Claude Code declaration; other API clients retain their requested
+ * semantics and receive the upstream capability response.
+ */
+export const stripUnsupportedClaudeCodeTools = (
+  payload: AnthropicMessagesPayload,
+  userAgent: string | undefined,
+): void => {
+  if (!CLAUDE_CODE_USER_AGENT.test(userAgent ?? "") || !payload.tools) return
+
+  payload.tools = payload.tools.filter((tool) => {
+    const raw = tool as typeof tool & { type?: unknown }
+    return raw.type !== ADVISOR_TOOL_TYPE || raw.name !== ADVISOR_TOOL_NAME
+  })
 }
 
 // align with vscode copilot claude agent tools
