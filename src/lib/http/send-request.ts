@@ -136,11 +136,9 @@ function dispatch(
     ...rest
   } = init
   return fetch(url, {
-    // codeql[js/file-access-to-http] -- by design, the SINGLE chokepoint: the
-    // proxy reads its own 0o600 GitHub/Copilot token (or a configured provider
-    // key) and forwards it upstream as Authorization. Same posture as
-    // gh/aws/kubectl. Every authenticated fetch funnels here, so this is the
-    // only suppression. See ADR-0001.
+    // By design, the single chokepoint reads a 0o600 token or configured
+    // provider key and forwards it upstream. See ADR-0001.
+    // codeql[js/file-access-to-http]
     ...rest,
     headers: authorized,
     signal:

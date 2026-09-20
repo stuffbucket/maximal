@@ -107,7 +107,9 @@ async function writeJsonAtomic(
 ): Promise<void> {
   const json = `${JSON.stringify(value, null, 2)}\n`
   const tmp = `${filePath}.tmp.${process.pid}`
-  // codeql[js/http-to-file-access] -- by design: persists the OAuth token we just received to a 0o600 file under ~/.local/share/copilot-api/. That is this function's job — same model as `gh auth login`. See ADR-0001.
+  // By design: persist the OAuth token to a 0o600 file, like `gh auth login`.
+  // See ADR-0001.
+  // codeql[js/http-to-file-access]
   await fs.writeFile(tmp, json, { mode: 0o600 })
   await fs.rename(tmp, filePath)
 }
