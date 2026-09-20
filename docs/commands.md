@@ -27,9 +27,9 @@ bun run analyze      # tails .claude/logs/checks.jsonl into a local Ollama model
 bun run mutate       # Stryker; configure module under test in stryker.conf.*
 
 # Release tooling
-bun run release:manual  # local fallback cut (bumpp + bun publish). Primary
+bun run release:manual  # local fallback version commit + tag (bumpp). Primary
                         # release path is release-please: merge the auto-opened
-                        # release PR → tag → release.yml builds/publishes.
+                        # release PR → tag → release.yml builds/publishes assets.
 
 # Tauri app (menu-bar shell wrapping the proxy as a sidecar on :4141)
 bun run app:setup    # one-time: install shell deps + force-build sidecar binary

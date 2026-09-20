@@ -64,7 +64,7 @@ jobs:
 
       - uses: ./.github/actions/setup-bun
         with:
-          bun-version: 1.3.11
+          bun-version: 1.3.14
 
       - name: Install dependencies
         run: bun install
@@ -94,20 +94,9 @@ jobs:
         run: |
           TAG="${{ github.ref_name }}"
           if [[ "$TAG" == *"-"* ]]; then
-            PRERELEASE_PART="${TAG#*-}"
-            PRERELEASE_PART="${PRERELEASE_PART%%+*}"
-            NPM_TAG="${PRERELEASE_PART%%.*}"
-
-            if [[ ! "$NPM_TAG" =~ ^[A-Za-z][A-Za-z0-9._-]*$ ]]; then
-              echo "Unsupported prerelease channel in tag: $TAG"
-              exit 1
-            fi
-
             echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
-            echo "npm_tag=${NPM_TAG}" >> "$GITHUB_OUTPUT"
           else
             echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
-            echo "npm_tag=latest" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Generate GitHub Release notes (draft)
@@ -159,8 +148,8 @@ jobs:
           files: SBOM.cdx.json
 
   # Per-arch single-file binaries via `bun build --compile`. Attached
-  # to the same GitHub Release as the npm publish above. Stream B's
-  # installer workflows consume these by URL + SHA-256.
+  # to the draft GitHub Release created above. The installer jobs
+  # consume these by URL + SHA-256.
   #
   # Codesigning / notarization (A4) is DEFERRED for v1. Stubs are
   # left below as `if: false`-gated reminders so the wiring is in
@@ -198,7 +187,7 @@ jobs:
 
       - uses: ./.github/actions/setup-bun
         with:
-          bun-version: 1.3.11
+          bun-version: 1.3.14
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -452,7 +441,7 @@ jobs:
 
       - uses: ./.github/actions/setup-bun
         with:
-          bun-version: 1.3.11
+          bun-version: 1.3.14
 
       - name: Resolve version
         id: ver
@@ -960,7 +949,7 @@ jobs:
       - uses: ./.github/actions/setup-bun
         if: steps.skip.outputs.skip != 'true'
         with:
-          bun-version: 1.3.11
+          bun-version: 1.3.14
 
       # rustup is preinstalled on the windows-2022 image (vendored-action
       # policy: no third-party toolchain action). Same as windows-shell-dev.
@@ -1123,99 +1112,137 @@ jobs:
           fi
           echo "Published $TAG"
 
-  # Write the schema-2 updates manifest at publish time — WITHOUT an Astro
-  # rebuild (issue #220, phase 1 of #218). scripts/write-updates-manifest.ts is
-  # fed THIS release's own tag + published asset list and reuses the SAME pure
-  # `buildChannel` the Astro route uses, so the manifest names its own tag and
-  # is fresh-on-publish rather than resolved from the lagging `releases/latest`
-  # during SSG (the propagation race #187 band-aids). Read-modify-write: a
-  # `beta` publish updates only `channels.beta` and never clobbers
-  # `channels.stable`, and vice-versa. The build-time generator
-  # (site/src/pages/updates/manifest.json.ts) stays as a fallback so an
-  # ordinary `site/**` push still emits an equivalent file.
-  #
-  # Commits the regenerated `site/public/updates/manifest.json` to `main` (the
-  # served source of truth — Astro copies site/public/** verbatim). This job
-  # runs NO `bun run build`; it does not need to. That commit touches
-  # site/public/**, which matches deploy-pages.yml's `paths:` filter, so it
-  # AUTO-TRIGGERS exactly one Pages deploy that ships the new manifest (issue
-  # #222 / phase 3 of #218). This is why the old `redeploy-site` job — which
-  # explicitly dispatched deploy-pages.yml after this commit — was deleted:
-  # the paths-filtered push is the trigger now. The site's client-side
-  # manifest hydration (#221) + the build-time fallback (deploy-pages.yml's
-  # GITHUB_TOKEN lookup) both keep the site advertising the version even before
-  # that deploy lands, so a release never fails to advertise its version.
+  # Propose the schema-2 updates manifest after publication without rebuilding
+  # Astro. The generator consumes this release's immutable tag and assets and
+  # preserves sibling channels. A rolling PR keeps protected `main` as the
+  # source of truth; a maintainer merge triggers the existing site/** Pages
+  # deployment. GITHUB_TOKEN-created PRs do not trigger CI, so this job also
+  # dispatches the required check against the exact pushed head SHA.
   manifest:
     needs: publish
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pull-requests: write
+      actions: write
+    concurrency:
+      group: updates-manifest-pr
+      cancel-in-progress: false
     steps:
-      # Mint an app-repoman token so the push to `main` below bypasses the
-      # require-PR ruleset (issue #287). The default GITHUB_TOKEN has no bypass
-      # on that ruleset, so a plain push is rejected (GH013) and the manifest
-      # goes stale. Mirrors the token dance in release-please.yml. When the App
-      # isn't provisioned we fall back to github.token — the push is then
-      # rejected and the job fails RED (loud, not silent); recover by hand per
-      # the runbook. Resolve the id into a step output first: the `secrets`
-      # context can't be used in an `if:`.
-      - name: Resolve app id
-        id: appid
-        env:
-          APP_ID: ${{ vars.REPOMAN_APP_ID || secrets.REPOMAN_APP_ID }}
-        run: |
-          set -euo pipefail
-          if [ -n "${APP_ID:-}" ]; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::warning::No REPOMAN_APP_ID set — the manifest push will be rejected by the require-PR ruleset. Land it by hand (see docs/release-runbook.md)."
-            echo "present=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Mint app-repoman token
-        id: app-token
-        if: steps.appid.outputs.present == 'true'
-        uses: actions/create-github-app-token@v2
-        with:
-          app-id: ${{ vars.REPOMAN_APP_ID || secrets.REPOMAN_APP_ID }}
-          private-key: ${{ secrets.REPOMAN_APP_PRIVATE_KEY }}
-
       - uses: actions/checkout@v6
         with:
-          # Commit to main, not the tag ref this run checks out by default.
           ref: main
           fetch-depth: 0
-          # Persist the app-repoman token so the `git push origin HEAD:main`
-          # below authenticates as the App (the ruleset bypass actor).
-          token: ${{ steps.app-token.outputs.token || github.token }}
 
       - uses: ./.github/actions/setup-bun
         with:
-          bun-version: 1.3.11
+          bun-version: 1.3.14
 
-      - name: Regenerate updates manifest from the published release
+      - name: Create or update the protected manifest PR
         env:
           GH_TOKEN: ${{ github.token }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
-        run: bun scripts/write-updates-manifest.ts --tag "$TAG"
-
-      - name: Commit manifest if changed
-        env:
-          TAG: ${{ github.ref_name }}
+          HEAD_BRANCH: automation/updates-manifest
         run: |
           set -euo pipefail
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git config user.name  "github-actions[bot]"
-          git add site/public/updates/manifest.json
-          # `generated` always changes, so a diff is expected on every release;
-          # guard anyway so a manual re-run with an identical body is a no-op.
-          if git diff --cached --quiet -- site/public/updates/manifest.json; then
-            echo "No manifest change for $TAG — already in sync."
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          OWNER="${GITHUB_REPOSITORY%%/*}"
+          PRS="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open \
+            --base main --head "${OWNER}:${HEAD_BRANCH}" \
+            --json number,headRefName,headRefOid,url)"
+          PR_COUNT="$(jq 'length' <<<"$PRS")"
+          if [ "$PR_COUNT" -gt 1 ]; then
+            echo "::error::Expected at most one open manifest PR, found $PR_COUNT."
+            exit 1
+          fi
+
+          REMOTE_SHA="$(git ls-remote origin "refs/heads/${HEAD_BRANCH}" | awk '{print $1}')"
+          if [ "$PR_COUNT" -eq 1 ]; then
+            if [ -z "$REMOTE_SHA" ]; then
+              echo "::error::Open manifest PR has no remote head branch."
+              exit 1
+            fi
+            PR_SHA="$(jq -r '.[0].headRefOid' <<<"$PRS")"
+            if [ "$REMOTE_SHA" != "$PR_SHA" ]; then
+              echo "::error::Manifest PR head moved during discovery."
+              exit 1
+            fi
+            git fetch origin "refs/heads/${HEAD_BRANCH}:refs/remotes/origin/${HEAD_BRANCH}"
+            git switch --create "$HEAD_BRANCH" --track "origin/$HEAD_BRANCH"
+            git merge --no-edit origin/main
+          else
+            git switch --create "$HEAD_BRANCH" origin/main
+          fi
+
+          if [[ "$TAG" == *-* ]]; then
+            CHANNEL="${TAG#*-}"
+            CHANNEL="${CHANNEL%%.*}"
+          else
+            CHANNEL="stable"
+          fi
+
+          CURRENT_TAG="$(jq -r --arg channel "$CHANNEL" \
+            '.channels[$channel].tag // ""' \
+            site/public/updates/manifest.json)"
+          if [ "$CURRENT_TAG" = "$TAG" ]; then
+            echo "channels.${CHANNEL} already points at ${TAG}; skipping regeneration."
+          else
+            bun scripts/write-updates-manifest.ts --tag "$TAG"
+            bun test \
+              tests/write-updates-manifest.test.ts \
+              tests/site-committed-manifest.test.ts \
+              tests/updates-manifest.test.ts \
+              tests/hydrate-manifest.test.ts \
+              tests/update-check.test.ts
+            git add site/public/updates/manifest.json
+            if ! git diff --cached --quiet -- site/public/updates/manifest.json; then
+              git commit -m "chore(site): update updates manifest for $TAG"
+            fi
+          fi
+
+          if [ "$PR_COUNT" -eq 0 ] && git diff --quiet origin/main...HEAD; then
+            echo "Manifest for ${TAG} is already on main — no PR needed."
             exit 0
           fi
-          git commit -m "chore(site): update updates manifest for $TAG"
-          # Rebase-safe push: another job/commit could have advanced main.
-          git pull --rebase origin main
-          git push origin HEAD:main
-          echo "Committed updated manifest for $TAG to main."
+
+          if [ "$PR_COUNT" -eq 1 ]; then
+            git push origin "HEAD:refs/heads/${HEAD_BRANCH}"
+          elif [ -n "$REMOTE_SHA" ]; then
+            git push \
+              --force-with-lease="refs/heads/${HEAD_BRANCH}:${REMOTE_SHA}" \
+              origin "HEAD:refs/heads/${HEAD_BRANCH}"
+          else
+            git push --set-upstream origin "$HEAD_BRANCH"
+          fi
+
+          HEAD_SHA="$(git ls-remote origin "refs/heads/${HEAD_BRANCH}" | awk '{print $1}')"
+          if [ -z "$HEAD_SHA" ] || [ "$HEAD_SHA" != "$(git rev-parse HEAD)" ]; then
+            echo "::error::Remote manifest branch does not match the generated commit."
+            exit 1
+          fi
+
+          TITLE="chore(site): update updates manifest for $TAG"
+          BODY="Published ${TAG} is now represented in site/public/updates/manifest.json. Merge this PR after the required test check passes; the resulting main push deploys Pages."
+          if [ "$PR_COUNT" -eq 0 ]; then
+            gh pr create --repo "$GITHUB_REPOSITORY" --base main \
+              --head "$HEAD_BRANCH" --title "$TITLE" --body "$BODY"
+          else
+            PR_NUMBER="$(jq -r '.[0].number' <<<"$PRS")"
+            gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+              --title "$TITLE" --body "$BODY"
+          fi
+
+          CURRENT="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open \
+            --base main --head "${OWNER}:${HEAD_BRANCH}" \
+            --json headRefOid,url)"
+          CURRENT_COUNT="$(jq 'length' <<<"$CURRENT")"
+          CURRENT_SHA="$(jq -r '.[0].headRefOid // ""' <<<"$CURRENT")"
+          if [ "$CURRENT_COUNT" -ne 1 ] || [ "$CURRENT_SHA" != "$HEAD_SHA" ]; then
+            echo "::error::Manifest PR does not point at the pushed head SHA."
+            exit 1
+          fi
+          gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" \
+            --ref "$HEAD_BRANCH" -f expected_sha="$HEAD_SHA"
+          echo "Dispatched CI for $(jq -r '.[0].url' <<<"$CURRENT") at $HEAD_SHA."

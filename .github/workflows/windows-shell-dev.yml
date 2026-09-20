@@ -63,7 +63,7 @@ jobs:
 
       - uses: ./.github/actions/setup-bun
         with:
-          bun-version: 1.3.11
+          bun-version: 1.3.14
 
       # rustup ships preinstalled on the windows-2022 image with the
       # x86_64-pc-windows-msvc toolchain. Use it directly rather than a

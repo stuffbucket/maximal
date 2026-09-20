@@ -10,9 +10,9 @@ name: Release Please
 #      maintainer merges it.
 #   3. On merge of that release PR, this workflow creates + pushes the git
 #      tag `vX.Y.Z`. It does NOT create a GitHub Release.
-#   4. The tag push fires release.yml, which CREATES the draft release,
-#      builds + signs + verifies every installer against it, then
-#      publishes once.
+#   4. This workflow explicitly dispatches release.yml for that tag; it
+#      creates the draft release, builds + signs + verifies every installer,
+#      then publishes once.
 #
 # DIVISION OF RESPONSIBILITY
 #   release-please (here):  the release PR (version bump + CHANGELOG.md),
@@ -30,30 +30,19 @@ name: Release Please
 #   release is immutable"). So release-please stops at the tag.
 #
 # TRIGGER CHAIN / TOKEN
-#   GitHub suppresses workflow triggers for refs pushed via the default
-#   GITHUB_TOKEN (the anti-loop guard release.yml documents at its top).
-#   So we mint a short-lived installation token from the **app-repoman**
-#   GitHub App (first-party actions/create-github-app-token), check out
-#   with it, and push the tag with it — an App-token push is a "real" push
-#   that fires release.yml, with no long-lived PAT to manage.
-#
-#   One-time setup (maintainer):
-#     1. Install app-repoman on this repo with Contents: Read & write
-#        and Pull requests: Read & write.
-#     2. REPOMAN_APP_ID (repo variable OR secret) = the app's App ID.
-#     3. Repo secret     REPOMAN_APP_PRIVATE_KEY = the app's PEM private key.
-#   If REPOMAN_APP_ID is unset we fall back to GITHUB_TOKEN and warn: the
-#   release PR + tag still get created, but a maintainer must kick
-#   release.yml by hand (workflow_dispatch with the tag selected under
-#   "Use workflow from").
+#   GitHub suppresses workflow triggers for refs and PRs created with the
+#   repository GITHUB_TOKEN. This workflow therefore dispatches release.yml
+#   explicitly after tag creation and dispatches ci.yml explicitly for the
+#   generated release PR's exact head SHA. No App token or ruleset bypass is
+#   required.
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
-# GITHUB_TOKEN scopes for the fallback path (no app token). The
-# app-repoman token, when minted, carries its own installation scopes.
+# GITHUB_TOKEN scopes for tag creation, release-PR management, and explicit
+# downstream workflow dispatches.
 permissions:
   contents: write
   pull-requests: write
@@ -70,55 +59,11 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     steps:
-      # The App ID can live as a repo VARIABLE (idiomatic — it isn't
-      # secret) or a SECRET; support either. The `secrets` context can't
-      # be used in an `if:`, so resolve the id into a step output first
-      # (without echoing it) and gate the mint on that.
-      - name: Resolve app id
-        id: appid
-        env:
-          APP_ID: ${{ vars.REPOMAN_APP_ID || secrets.REPOMAN_APP_ID }}
-        run: |
-          set -euo pipefail
-          if [ -n "${APP_ID:-}" ]; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "present=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      # Mint a short-lived app-repoman installation token. We check out
-      # with it (below) so the tag push re-triggers release.yml. Skipped
-      # when no App ID is set → falls back to github.token (the tag then
-      # won't auto-fire release.yml; see the header note). The token output
-      # is auto-registered as a secret (masked in logs).
-      - name: Mint app-repoman token
-        id: app-token
-        if: steps.appid.outputs.present == 'true'
-        uses: actions/create-github-app-token@v2
-        with:
-          app-id: ${{ vars.REPOMAN_APP_ID || secrets.REPOMAN_APP_ID }}
-          private-key: ${{ secrets.REPOMAN_APP_PRIVATE_KEY }}
-
-      - name: Note token source
-        run: |
-          set -euo pipefail
-          if [ "${{ steps.appid.outputs.present }}" = "true" ]; then
-            echo "Using app-repoman token — the tag push will re-trigger release.yml."
-          else
-            echo "::warning::No REPOMAN_APP_ID (variable or secret) set — falling back to GITHUB_TOKEN."
-            echo "::warning::A tag pushed via GITHUB_TOKEN will NOT fire release.yml (anti-loop guard)."
-            echo "::warning::After the release PR merges, start release.yml manually: Run workflow, selecting the new vX.Y.Z tag under 'Use workflow from'."
-          fi
-
-      # Check out with the app token so `git push` of the tag below is an
-      # App-token push (fans out to release.yml).
       - uses: actions/checkout@v6
-        with:
-          token: ${{ steps.app-token.outputs.token || github.token }}
 
       - uses: ./.github/actions/setup-bun
         with:
-          bun-version: 1.3.11
+          bun-version: 1.3.14
 
       # On merge of a release PR, create + push the TAG only (no GitHub
       # Release — release.yml owns that; see the WHY TAG-ONLY note above).
@@ -142,7 +87,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "${TAG}" -m "${TAG}"
           git push origin "${TAG}"
-          echo "Pushed ${TAG} — release.yml will build + publish it."
+          echo "Pushed ${TAG}; the next step explicitly dispatches release.yml."
 
       # If the manifest version has a tag but its GitHub Release hasn't been
       # published yet (draft or absent), dispatch release.yml so the release
@@ -178,8 +123,6 @@ jobs:
       # by hand. Runs once the tag exists, before release-pr, so the next PR
       # opens in the same run. Idempotent: a no-op when nothing is pending, and
       # self-heals any release PR a prior run left stuck at pending.
-      # (Long-term: provisioning REPOMAN_APP_ID lets release-please own this
-      # natively and removes both this step and the dispatch shim above.)
       - name: Mark tagged release PRs as autorelease:tagged
         env:
           GH_TOKEN: ${{ github.token }}
@@ -207,7 +150,7 @@ jobs:
       # CHANGELOG.md from conventional commits since the last tag).
       - name: release-please release-pr
         env:
-          RP_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+          RP_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           bunx release-please release-pr \
@@ -216,3 +159,35 @@ jobs:
             --target-branch "${{ github.ref_name }}" \
             --config-file release-please-config.json \
             --manifest-file .release-please-manifest.json
+
+      # GITHUB_TOKEN-created pull requests do not trigger pull_request
+      # workflows. Find release-please's exact open PR head and explicitly run
+      # the required `test` check against that immutable SHA.
+      - name: Dispatch CI for the release PR head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_BRANCH: release-please--branches--main--components--maximal
+        run: |
+          set -euo pipefail
+          PRS="$(gh pr list --repo "${{ github.repository }}" --state open \
+            --base main --head "$HEAD_BRANCH" \
+            --json number,headRefName,headRefOid,url)"
+          COUNT="$(jq 'length' <<<"$PRS")"
+          if [ "$COUNT" -eq 0 ]; then
+            echo "No open release-please PR — nothing to validate."
+            exit 0
+          fi
+          if [ "$COUNT" -ne 1 ]; then
+            echo "::error::Expected one open release-please PR, found $COUNT."
+            exit 1
+          fi
+          HEAD_REF="$(jq -r '.[0].headRefName' <<<"$PRS")"
+          HEAD_SHA="$(jq -r '.[0].headRefOid' <<<"$PRS")"
+          REMOTE_SHA="$(git ls-remote origin "refs/heads/$HEAD_REF" | awk '{print $1}')"
+          if [ -z "$REMOTE_SHA" ] || [ "$REMOTE_SHA" != "$HEAD_SHA" ]; then
+            echo "::error::Release PR head moved during discovery."
+            exit 1
+          fi
+          gh workflow run ci.yml --repo "${{ github.repository }}" \
+            --ref "$HEAD_REF" -f expected_sha="$HEAD_SHA"
+          echo "Dispatched CI for $(jq -r '.[0].url' <<<"$PRS") at $HEAD_SHA."

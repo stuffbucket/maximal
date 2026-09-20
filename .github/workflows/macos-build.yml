@@ -17,7 +17,6 @@
 #   that is STILL A DRAFT (or for builder debugging).
 #
 # REQUIREMENTS (one-time, per client repo)
-#   - app-repoman installed on THIS repo with Contents: read+write.
 #   - Secret MACOS_BUILDER_PAT — fine-grained PAT, Actions: write on
 #     stuffbucket/macos-builder ONLY (its sole power is to start the build).
 #   - .macos-builder/config (required) + .macos-builder/build.sh (the producer).
