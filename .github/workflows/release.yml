@@ -94,20 +94,9 @@ jobs:
         run: |
           TAG="${{ github.ref_name }}"
           if [[ "$TAG" == *"-"* ]]; then
-            PRERELEASE_PART="${TAG#*-}"
-            PRERELEASE_PART="${PRERELEASE_PART%%+*}"
-            NPM_TAG="${PRERELEASE_PART%%.*}"
-
-            if [[ ! "$NPM_TAG" =~ ^[A-Za-z][A-Za-z0-9._-]*$ ]]; then
-              echo "Unsupported prerelease channel in tag: $TAG"
-              exit 1
-            fi
-
             echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
-            echo "npm_tag=${NPM_TAG}" >> "$GITHUB_OUTPUT"
           else
             echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
-            echo "npm_tag=latest" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Generate GitHub Release notes (draft)
@@ -159,8 +148,8 @@ jobs:
           files: SBOM.cdx.json
 
   # Per-arch single-file binaries via `bun build --compile`. Attached
-  # to the same GitHub Release as the npm publish above. Stream B's
-  # installer workflows consume these by URL + SHA-256.
+  # to the draft GitHub Release created above. The installer jobs
+  # consume these by URL + SHA-256.
   #
   # Codesigning / notarization (A4) is DEFERRED for v1. Stubs are
   # left below as `if: false`-gated reminders so the wiring is in

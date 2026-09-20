@@ -55,11 +55,12 @@ and runs two post-publish jobs: `homebrew-tap` bumps the formula, while
 
 ### Fallback: manual tag (emergency only)
 
-If release-please is unavailable, `release:manual` (bumpp) cuts + publishes
-from a developer machine:
+If release-please is unavailable, `release:manual` (bumpp) prepares the
+version commit and tag from a developer machine. Maximal is not published to
+npm. Push the resulting tag, then dispatch `release.yml` as shown below.
 
 ```sh
-bun run release:manual   # bumpp prompts version; commits, tags, pushes; bun publish
+bun run release:manual   # bumpp prompts for the version, commit, and tag
 ```
 
 A `GITHUB_TOKEN`-pushed tag still won't auto-fire `release.yml` — dispatch it
@@ -75,7 +76,7 @@ Wait for these jobs to all turn green. Each produces release assets:
 
 | Job | Runner | Produces |
 |---|---|---|
-| `release` | ubuntu-latest | npm publish, `SBOM.cdx.json`, GitHub release notes |
+| `release` | ubuntu-latest | draft GitHub release, `SBOM.cdx.json`, release notes |
 | `binaries` (matrix × 2) | ubuntu-latest | `*-darwin-arm64.tar.gz`, `*-windows-x64.zip` (+ `.sha256` each) |
 | `checksums` | ubuntu-latest | `SHA256SUMS` |
 | `smoke` | windows-2022 | passes/fails — exec validation of the windows-x64 binary |

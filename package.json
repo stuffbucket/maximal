@@ -50,7 +50,7 @@
     "package-dmg": "bun scripts/package-dmg.ts",
     "prepare": "bun run ensure:ui-embed && simple-git-hooks && cd shell && bun install",
     "release:dmg": "bun scripts/package-dmg.ts --upload",
-    "release:manual": "bumpp && bun publish --access public",
+    "release:manual": "bumpp",
     "render-formula": "bun scripts/sync-homebrew-formula.ts",
     "sbom": "bun scripts/sbom.ts",
     "scan:secrets": "trufflehog filesystem . --no-verification --fail --no-update --exclude-paths .trufflehog-exclude",

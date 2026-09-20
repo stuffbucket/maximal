@@ -1,8 +1,11 @@
 import { describe, expect, test } from "bun:test"
 import { readFile } from "node:fs/promises"
 
+const readRepoFile = (path: string): Promise<string> =>
+  readFile(new URL(`../${path}`, import.meta.url), "utf8")
+
 const readWorkflow = (name: string): Promise<string> =>
-  readFile(new URL(`../.github/workflows/${name}`, import.meta.url), "utf8")
+  readRepoFile(`.github/workflows/${name}`)
 
 describe("release workflow authentication", () => {
   test("active release workflows use no REPOMAN app token", async () => {
@@ -15,6 +18,24 @@ describe("release workflow authentication", () => {
       expect(workflow).not.toContain("REPOMAN_APP_ID")
       expect(workflow).not.toContain("REPOMAN_APP_PRIVATE_KEY")
       expect(workflow).not.toContain("actions/create-github-app-token")
+    }
+  })
+})
+
+describe("release publication contract", () => {
+  test("active release paths do not publish to npm", async () => {
+    const files = await Promise.all([
+      readWorkflow("release.yml"),
+      readRepoFile("package.json"),
+      readRepoFile("docs/commands.md"),
+      readRepoFile("docs/release-runbook.md"),
+    ])
+
+    for (const file of files) {
+      expect(file).not.toContain("npm publish")
+      expect(file).not.toContain("bun publish")
+      expect(file).not.toContain("npm_tag")
+      expect(file).not.toContain("NPM_TAG")
     }
   })
 })
