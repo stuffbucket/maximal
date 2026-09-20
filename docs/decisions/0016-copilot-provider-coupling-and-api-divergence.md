@@ -4,15 +4,6 @@
 **Date:** 2026-07-06.
 **Authors:** consolidated from a parallel investigation (billing, caching, transport, contract-rot), all findings confirmed against code + primary GitHub sources.
 
-> **Addendum — workstreams 1 and 2 landed.** `src/services/copilot/get-models.ts`
-> now types `token_prices` as the PRIMARY billing signal (`pricedModelIsPaid`),
-> with `is_premium`/`multiplier` kept only as a LEGACY fallback — in-code
-> comments cite this ADR by number. `src/routes/responses/handler.ts` now
-> actively sets `payload.prompt_cache_retention` via `getPromptCacheRetention()`
-> (opt-in, never overriding an explicit client value) — the "commented out,
-> not work in gpt-5.4" state described in divergence 2 is gone. Divergences
-> 3–7 are unchanged as of this addendum.
-
 ## Problem
 
 The proxy's request-handling engine was designed against GitHub Copilot's
@@ -167,9 +158,10 @@ quota but never pre-emptively slow down before hitting the wall.
 A cluster of Copilot-contract constants is pinned in source and will silently
 rot when Copilot moves them:
 
-- `src/lib/api-config.ts`: API version `2025-10-01`; editor-plugin
-  `copilot-chat/0.46.0`; user-agent `GitHubCopilotChat/0.46.0`
-  (lines 149-155).
+- `src/lib/config/api-config.ts`: API version `2026-08-01`; editor-plugin
+  `copilot-chat/0.48.1`; user-agent `GitHubCopilotChat/0.48.1`; Claude Code
+  compatibility identity `2.1.278`. These were refreshed for v0.4.42, but
+  remain source-pinned and require periodic verification.
 - `src/services/copilot/create-messages.ts`: `anthropic-beta` date tokens —
   `interleaved-thinking-2025-05-14` (line 32),
   `advanced-tool-use-2025-11-20` (line 33),
@@ -182,6 +174,17 @@ api-version/editor-version has already been observed to produce hard upstream
 failures (the 421 endpoint-migration incident). When Copilot rotates a beta
 token or bumps a required version, these break with upstream errors that look
 unrelated to a version pin.
+
+A v0.4.42 investigation found that identity drift was **not** the cause of the
+observed context-editing failures: old and refreshed profiles produced the same
+strategy-specific results. Copilot's catalog omitted `context_editing` for all
+live Claude models tested, while the endpoint accepted some strategies anyway.
+Maximal now treats absent metadata as expected support, honors explicit
+`false`, and caches only strategy-specific rejections from real requests for the
+process lifetime. Successful requests create no cache entry. A context-specific
+`400` is retried once without that feature; a new exact model ID naturally has no
+cached rejection. See
+`research_log/2026-09-19_copilot-context-management-support.md`.
 
 ## Decision
 

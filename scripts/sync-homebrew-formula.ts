@@ -163,7 +163,9 @@ async function main(): Promise<number> {
   })
 
   if (args.output) {
-    // codeql[js/http-to-file-access] -- by design: release tooling renders a Homebrew formula from a GitHub release SHA to a maintainer-controlled CLI output path. Not on the runtime path. See ADR-0001.
+    // By design: release tooling writes a formula to a maintainer-chosen path.
+    // See ADR-0001.
+    // codeql[js/http-to-file-access]
     await fs.writeFile(args.output, rendered)
     console.error(`wrote ${args.output}`)
   } else {

@@ -71,7 +71,7 @@ describe("decideVerdict", () => {
     })
     expect(v.verdict).toBe("STALE")
     expect(v.message).toContain("5 commits behind")
-    expect(v.message).toContain("build:core")
+    expect(v.message).toContain("app:dev")
   })
 
   it("singularizes the commit count", () => {

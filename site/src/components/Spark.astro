@@ -1,0 +1,34 @@
+---
+// A chromed spark icon: a Paint canvas in "chrome" mode (polished-metal GLSL)
+// masked to the four-point spark shape, so the star itself is a glossy metal
+// reflection rather than a flat fill. Used on primary buttons.
+import Paint from "./Paint.astro";
+interface Props {
+  class?: string;
+}
+const { class: cls = "" } = Astro.props;
+---
+
+<span class:list={["chrome-spark", cls]} aria-hidden="true">
+  <Paint base="#d8dde0" mode="chrome" />
+</span>
+
+<style>
+  .chrome-spark {
+    position: relative;
+    flex: 0 0 auto;
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    /* Clip the shader canvas to the spark silhouette. */
+    -webkit-mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22"><path d="M11 1 L13 9 L21 11 L13 13 L11 21 L9 13 L1 11 L9 9 Z" fill="black"/></svg>')
+      center / contain no-repeat;
+    mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22"><path d="M11 1 L13 9 L21 11 L13 13 L11 21 L9 13 L1 11 L9 9 Z" fill="black"/></svg>')
+      center / contain no-repeat;
+    filter: drop-shadow(0 1px 1px rgba(0, 18, 22, 0.55));
+  }
+  .chrome-spark :global(canvas.paint) {
+    position: absolute;
+    inset: 0;
+  }
+</style>

@@ -27,29 +27,32 @@ churn.
 
 # Decision
 
-**Suppress by-design alerts with an inline CodeQL comment on the sink
-line**, carrying the rationale inline:
+**Suppress by-design alerts with a standalone inline CodeQL comment
+immediately before the sink**, keeping the rationale in ordinary comments:
 
 ```ts
 const response = await fetch(url, {
-  // codeql[js/file-access-to-http] -- by design: the proxy reads its own
-  // 0o600 token from disk and forwards it as upstream Authorization. See ADR-0001.
+  // By design: the proxy reads its own 0o600 token from disk and forwards it
+  // as upstream Authorization. See ADR-0001.
+  // codeql[js/file-access-to-http]
   headers: authHeaders(state),
 })
 ```
 
-`// codeql[<rule-id>] -- <reason>` (legacy alias `// lgtm[...]`) is
-CodeQL's native in-source suppression, honored by the JavaScript/
-TypeScript analyzer. CodeQL emits it as a SARIF `suppressions` entry
-with `@kind: IN_SOURCE`; GitHub code scanning then shows the alert as
-resolved. The comment sits on the dataflow **sink** line, so it moves
-with the code and the rationale is greppable at the exact point of
-concern.
+`// codeql[<rule-id>]` (legacy alias `// lgtm[...]`) is CodeQL's native
+in-source suppression, honored by the JavaScript/TypeScript analyzer. The
+directive must stand alone; rationale appended inside the directive makes the
+current analyzer ignore it. CodeQL emits a recognized directive as a SARIF
+`suppressions` entry with `@kind: IN_SOURCE`; GitHub code scanning then shows
+the alert as resolved. The directive sits immediately before the dataflow
+**sink**, while the adjacent ordinary comment keeps the rationale greppable at
+the exact point of concern.
 
 The current suppressed sites (grep `codeql\[` to enumerate):
 
 | Rule | File | Why |
 |---|---|---|
+| `js/insufficient-password-hash` | `src/apps/claude-code/config.ts` | SHA-256 is an equality fingerprint for Maximal-owned helper configuration, not a password verifier |
 | `js/file-access-to-http` | `src/lib/send-request.ts` | **Single mechanism** — every authenticated GitHub/Copilot/provider request funnels through `sendRequest`, which attaches the disk-read token and forwards it upstream |
 | `js/file-access-to-http` | `scripts/gemma-watch.ts` | Dev-only watcher → local Ollama |
 | `js/http-to-file-access` | `src/lib/github-token-store.ts` | Persist OAuth token to 0o600 file |

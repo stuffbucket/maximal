@@ -1,42 +1,44 @@
 # CLAUDE.md
 
-Read the linked doc before you work in its area.
+Index of where to look for what. This file is intentionally short — its
+job is to make sure you know **what kinds of knowledge exist in this
+repo and where to find them**, not to repeat that knowledge inline.
+Always read the linked doc before acting in its area.
 
-## Before a task
+## When you're about to…
 
-| Task                                                                                                   | Read first                                                                                                                                                                                  |
-| ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Run a script (`bun run …`) or set up the dev environment                                               | [`docs/commands.md`](docs/commands.md)                                                                                                                                                      |
-| Change routing, middleware, model dispatch, config, the token store, or diagnostics                    | **Wrong repo** — that is the engine, and it lives in [`stuffbucket/maximal-core`](https://github.com/stuffbucket/maximal-core). See [`docs/architecture.md`](docs/architecture.md) for the split. |
-| Change packaging, the published CLI, or the site                                                       | [`docs/architecture.md`](docs/architecture.md)                                                                                                                                              |
-| Write or change tests                                                                                  | [`docs/architecture.md`](docs/architecture.md) → _Testing_                                                                                                                                  |
-| Open a PR, change commit conventions, or cut a release                                                 | [`docs/architecture.md`](docs/architecture.md) → _Release & PR conventions_ and [`docs/release-runbook.md`](docs/release-runbook.md)                                                        |
-| Spawn parallel agents or use git stash                                                                 | [`docs/architecture.md`](docs/architecture.md) → _Parallel-agent convention_                                                                                                                |
-| Change `.bun-version` or the CI Bun pin                                                                | [`docs/bun-version-policy.md`](docs/bun-version-policy.md)                                                                                                                                  |
-| Write any code                                                                                         | [`docs/code-style.md`](docs/code-style.md)                                                                                                                                                  |
-| Change any HTML, CSS, or component code (proxy-served pages)                                           | [`.design-context.md`](.design-context.md), then the topic doc in [`docs/design/`](docs/design/). Read [`docs/design/failure-modes.md`](docs/design/failure-modes.md) before any UI change. |
-| Work on the Claude Code or Opencode plugin                                                             | [`docs/plugins.md`](docs/plugins.md)                                                                                                                                                        |
-| Dispatch or review codegen feedback loops                                                              | [`docs/codegen-feedback-loops-practices.md`](docs/codegen-feedback-loops-practices.md)                                                                                                      |
-| Change i18n catalogs or translation wording (`i18n/catalogs/`)                                         | [`i18n/README.md`](i18n/README.md) and [`docs/dev/i18n.md`](docs/dev/i18n.md). Ask the i18n expert in [`CONTRIBUTORS.md`](CONTRIBUTORS.md).                                                 |
+| Do this | Read this first |
+|---|---|
+| Run any script (`bun run …`), set up dev, iterate on the Tauri UI | [`docs/commands.md`](docs/commands.md) |
+| Touch routing, middleware, model dispatch, config, token store, diagnostics, or the Tauri sidecar | [`docs/architecture.md`](docs/architecture.md) |
+| Write or modify tests (especially mocks) | [`docs/architecture.md`](docs/architecture.md) → *Testing gotchas* |
+| Open a PR, change commit conventions, cut a release | [`docs/architecture.md`](docs/architecture.md) → *Release & PR conventions* + [`docs/release-runbook.md`](docs/release-runbook.md) |
+| Spawn parallel agents / use git stash | [`docs/architecture.md`](docs/architecture.md) → *Parallel-agent convention* |
+| Change `.bun-version` or CI's Bun pin | [`docs/bun-version-policy.md`](docs/bun-version-policy.md) |
+| Write any code | [`docs/code-style.md`](docs/code-style.md) |
+| Touch any HTML, CSS, or component code (Tauri windows, proxy-served pages) | [`.design-context.md`](.design-context.md) — front door; topic deep-dives in [`docs/design/`](docs/design/). **Read `docs/design/failure-modes.md` before any non-trivial UI change.** |
+| Work with the Claude Code or Opencode plugin | [`docs/plugins.md`](docs/plugins.md) |
+| Dispatch or review codegen feedback loops | [`docs/codegen-feedback-loops-practices.md`](docs/codegen-feedback-loops-practices.md) |
+| Touch i18n catalogs / translation wording (`shell/src/i18n/`) | [`docs/dev/i18n.md`](docs/dev/i18n.md); loop in the i18n expert per [`CONTRIBUTORS.md`](CONTRIBUTORS.md) |
 
-## Other docs
+## Other knowledge in this repo
 
 - `docs/decisions/` — architecture decision records
 - `docs/spec/` — feature specs
 - `docs/dev/` — developer notes
 - `docs/admin/` — operational docs
-- `docs/*-prd.md` — product requirement docs per surface
+- `docs/*-prd.md` — product requirement docs for individual surfaces
 - `research_log/` — dated investigation notes
-- `CONTRIBUTORS.md` — domain experts to consult per area
+- `CONTRIBUTORS.md` — trusted domain experts to loop in per area
 
-If a linked doc does not answer your question, search `docs/` and
-`research_log/` before you ask or infer.
+If you don't find what you need in a linked doc, **search `docs/` and
+`research_log/` before asking or inferring**. Earned knowledge lives in
+those files; don't reinvent it.
 
-## House rules
+## House rules (the few that must live here)
 
-- **Never run `git stash pop` in a shared working tree.** Use a worktree for an isolated bisect. See [`docs/architecture.md`](docs/architecture.md) → _Parallel-agent convention_.
-- **The proxy engine is not in this repo.** Routing, middleware, model dispatch, config, the token store, and diagnostics all live in [`stuffbucket/maximal-core`](https://github.com/stuffbucket/maximal-core). This repo packages it, ships the Electron client, and hosts the site.
-- **GitHub Pages deploys are frozen.** Restoring them takes two steps, not one. See [`docs/architecture.md`](docs/architecture.md) → _Site and Pages_.
-- **Write each PR title as a Conventional Commit** (`feat:`, `fix:`, `chore:`). See [`docs/architecture.md`](docs/architecture.md) → _Release & PR conventions_.
-- **Update `.bun-version` and `.github/workflows/ci.yml` in the same commit.** See [`docs/bun-version-policy.md`](docs/bun-version-policy.md).
-- **For UI work, follow `.design-context.md` before this file.** Read it and the topic doc in `docs/design/`.
+- **Never `git stash pop` in a shared working tree.** See architecture doc → *Parallel-agent convention* for why. Use a worktree for any isolated bisect.
+- **No unrestored `mock.module` in tests** — `void mock.module(…)` / bare `mock.module(…)` leak across files and are a lint error (`mockModuleLeakGuard`). Awaiting isn't enough for shared modules; prefer the real module (temp `COPILOT_API_HOME` / `CLAUDE_CONFIG_DIR`) or injectable deps. See architecture doc → *Testing gotchas*.
+- **PR titles are Conventional Commits** (`feat:` / `fix:` / `chore:` / etc.) — squash-merge uses the title verbatim. See architecture doc → *Release & PR conventions*.
+- **Pin matters.** `.bun-version` and `.github/workflows/ci.yml` move together. See Bun version policy.
+- **Design context overrides this file** for any UI work. Read `.design-context.md` and the relevant `docs/design/*.md` topic file.
