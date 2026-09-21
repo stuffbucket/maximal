@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.44](https://github.com/stuffbucket/maximal/compare/v0.4.43...v0.4.44) (2026-09-21)
+
+
+### Bug Fixes
+
+* **ci:** repair release workflow setup ([#464](https://github.com/stuffbucket/maximal/issues/464)) ([1e79e16](https://github.com/stuffbucket/maximal/commit/1e79e16f52b7c6daf32ccf7acab587debba034cb))
+
 ## [0.4.43](https://github.com/stuffbucket/maximal/compare/v0.4.42...v0.4.43) (2026-09-20)
 
 
