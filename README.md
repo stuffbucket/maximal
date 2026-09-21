@@ -137,18 +137,13 @@ Secrets are masked everywhere — the debug output reports `<env>` /
 
 ## Releasing
 
-`docs/release-runbook.md` is the canonical checklist. Releases are
-automated by release-please: conventional commits on `main` accrue
-into an open "release PR" that bumps the version and updates
-`CHANGELOG.md`; merging it tags `vX.Y.Z`, which fires `release.yml` to
-build, sign, verify, and publish every installer. `bun run
-release:manual` (the old `bumpp` + `bun publish` path) remains as a
-local fallback. From a developer Mac, `bun run release:dmg` adds the
-polished `.dmg` to a release.
+`docs/release-runbook.md` is the canonical checklist. Merge the generated
+release PR, wait for the gated release workflow to publish, then merge the
+protected updates-manifest PR. `bun run release:manual` is an emergency local
+fallback; Maximal is not published to npm.
 
 ## Status
 
-Pre-alpha. Functional end-to-end against x3-design enterprise. See
-`docs/spec/archive/web-tools.md` for the agent-loop spec,
-`docs/admin/claude-desktop-mdm.md` for Cowork-side configuration, and
-`docs/spec/archive/internal-distribution.md` for the v1 distribution plan.
+Pre-alpha. Functional end-to-end against GitHub Copilot. See
+`docs/spec/archive/web-tools.md` for the agent-loop spec and
+`docs/admin/claude-desktop-mdm.md` for Cowork-side configuration.

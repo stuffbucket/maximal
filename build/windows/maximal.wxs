@@ -24,7 +24,7 @@
   a console `maximal setup` Start Menu entry that looked like an app
   launcher, and removes the WiX Util custom actions (no `-ext` needed).
 
-  Ships unsigned (A4 deferred). SmartScreen prompts on first run.
+  Authenticode signing is deferred. SmartScreen prompts on first run.
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
 

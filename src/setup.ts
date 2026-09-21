@@ -19,10 +19,8 @@
  * `maximal app claude-desktop --enable` after this.
  *
  * Runs in two modes: interactive (default) and unattended (used by
- * post-install scripts in B2/B3a). Unattended skips prompts and the
+ * post-install scripts). Unattended skips prompts and the
  * smoke test.
- *
- * Spec: docs/spec/archive/internal-distribution-stream-b.md §B5.
  */
 
 import { defineCommand } from "citty"

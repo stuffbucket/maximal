@@ -20,6 +20,7 @@ import { getConfig, writeConfig } from "~/lib/config/config"
 
 const TEST_KEY = "custom-user-key"
 const TEST_HELPER = "echo 'custom-user-key'"
+const AUTO_MODE_SERVER_KEY = "CLAUDE_CODE_AUTO_MODE_SERVER"
 const TEST_MARKER = {
   label: "claude-code",
   strategy: "echo",
@@ -233,13 +234,17 @@ describe("mergeBaseUrl / stripBaseUrl (pure)", () => {
       FOO: "1",
       ANTHROPIC_API_KEY: "sk-secret",
       ANTHROPIC_BASE_URL: PROXY_BASE_URL,
+      [AUTO_MODE_SERVER_KEY]: "0",
     })
   })
 
   it("merge creates env when absent", () => {
     const merged = mergeBaseUrl({ theme: "dark" }, TEST_HELPER)
     expect(merged.theme).toBe("dark")
-    expect(envOf(merged)).toEqual({ ANTHROPIC_BASE_URL: PROXY_BASE_URL })
+    expect(envOf(merged)).toEqual({
+      ANTHROPIC_BASE_URL: PROXY_BASE_URL,
+      [AUTO_MODE_SERVER_KEY]: "0",
+    })
     expect(merged.apiKeyHelper).toBe(TEST_HELPER)
   })
 
@@ -317,6 +322,7 @@ describe("applyProxyBaseUrl (end-to-end)", () => {
     expect(result.wrote).toBe(true)
     expect(result.skippedReason).toBeUndefined()
     expect(envOf(read()).ANTHROPIC_BASE_URL).toBe(PROXY_BASE_URL)
+    expect(envOf(read())[AUTO_MODE_SERVER_KEY]).toBe("0")
     expect(read().apiKeyHelper).toBe(TEST_HELPER)
   })
 
@@ -338,6 +344,7 @@ describe("applyProxyBaseUrl (end-to-end)", () => {
       FOO: "1",
       ANTHROPIC_API_KEY: "sk-secret",
       ANTHROPIC_BASE_URL: PROXY_BASE_URL,
+      [AUTO_MODE_SERVER_KEY]: "0",
     })
   })
 
@@ -364,7 +371,10 @@ describe("applyProxyBaseUrl (end-to-end)", () => {
     expect(second.skippedReason).toBe("already-ours")
     expect(fs.statSync(settingsPath).mtimeMs).toBe(before)
     // no duplication
-    expect(envOf(read())).toEqual({ ANTHROPIC_BASE_URL: PROXY_BASE_URL })
+    expect(envOf(read())).toEqual({
+      ANTHROPIC_BASE_URL: PROXY_BASE_URL,
+      [AUTO_MODE_SERVER_KEY]: "0",
+    })
     expect(read().apiKeyHelper).toBe(TEST_HELPER)
   })
 
@@ -390,7 +400,83 @@ describe("applyProxyBaseUrl (end-to-end)", () => {
     expect(result.wrote).toBe(true)
     expect(isProxyBaseUrlConfigured(settingsPath)).toBe(true)
   })
+})
 
+describe("applyProxyBaseUrl classifier setting", () => {
+  for (const existingValue of ["0", "1"] as const) {
+    it(`preserves a user-owned ${AUTO_MODE_SERVER_KEY}=${existingValue}`, () => {
+      const original = {
+        env: { [AUTO_MODE_SERVER_KEY]: existingValue },
+      }
+      writeRaw(JSON.stringify(original))
+
+      apply()
+      expect(envOf(read())[AUTO_MODE_SERVER_KEY]).toBe(existingValue)
+
+      revertProxyBaseUrl(settingsPath)
+      expect(read()).toEqual(original)
+    })
+  }
+
+  it("preserves a classifier setting edited after enable", () => {
+    apply()
+    const edited = read()
+    writeRaw(
+      JSON.stringify({
+        ...edited,
+        env: { ...envOf(edited), [AUTO_MODE_SERVER_KEY]: "1" },
+      }),
+    )
+
+    revertProxyBaseUrl(settingsPath)
+
+    expect(read()).toEqual({ env: { [AUTO_MODE_SERVER_KEY]: "1" } })
+  })
+
+  it("adopts an absent classifier setting from a legacy snapshot", () => {
+    writeRaw(
+      JSON.stringify({
+        apiKeyHelper: TEST_HELPER,
+        _maximalHelper: TEST_MARKER,
+        env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL },
+        _maximalPrior: {
+          ANTHROPIC_BASE_URL: "__UNSET__",
+          apiKeyHelper: "__UNSET__",
+        },
+      }),
+    )
+
+    apply()
+    expect(envOf(read())[AUTO_MODE_SERVER_KEY]).toBe("0")
+
+    revertProxyBaseUrl(settingsPath)
+    expect(fs.existsSync(settingsPath)).toBe(false)
+  })
+
+  it("does not adopt a classifier value from a legacy snapshot", () => {
+    const original = {
+      apiKeyHelper: TEST_HELPER,
+      _maximalHelper: TEST_MARKER,
+      env: {
+        ANTHROPIC_BASE_URL: PROXY_BASE_URL,
+        [AUTO_MODE_SERVER_KEY]: "0",
+      },
+      _maximalPrior: {
+        ANTHROPIC_BASE_URL: "__UNSET__",
+        apiKeyHelper: "__UNSET__",
+      },
+    }
+    writeRaw(JSON.stringify(original))
+
+    const result = apply()
+    expect(result.skippedReason).toBe("already-ours")
+
+    revertProxyBaseUrl(settingsPath)
+    expect(read()).toEqual({ env: { [AUTO_MODE_SERVER_KEY]: "0" } })
+  })
+})
+
+describe("applyProxyBaseUrl (end-to-end continued)", () => {
   it("handles an absent file (writes fresh)", () => {
     expect(fs.existsSync(settingsPath)).toBe(false)
     const result = apply()
@@ -398,12 +484,14 @@ describe("applyProxyBaseUrl (end-to-end)", () => {
     expect(read()).toEqual({
       apiKeyHelper: TEST_HELPER,
       _maximalHelper: TEST_MARKER,
-      env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL },
-      // Snapshot of the prior state: both fields were absent → UNSET, so a later
-      // disable removes them (returns the file to nothing).
+      env: {
+        ANTHROPIC_BASE_URL: PROXY_BASE_URL,
+        [AUTO_MODE_SERVER_KEY]: "0",
+      },
       _maximalPrior: {
         ANTHROPIC_BASE_URL: "__UNSET__",
         apiKeyHelper: "__UNSET__",
+        [AUTO_MODE_SERVER_KEY]: "__UNSET__",
       },
     })
   })
@@ -415,10 +503,14 @@ describe("applyProxyBaseUrl (end-to-end)", () => {
     expect(read()).toEqual({
       apiKeyHelper: TEST_HELPER,
       _maximalHelper: TEST_MARKER,
-      env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL },
+      env: {
+        ANTHROPIC_BASE_URL: PROXY_BASE_URL,
+        [AUTO_MODE_SERVER_KEY]: "0",
+      },
       _maximalPrior: {
         ANTHROPIC_BASE_URL: "__UNSET__",
         apiKeyHelper: "__UNSET__",
+        [AUTO_MODE_SERVER_KEY]: "__UNSET__",
       },
     })
   })
@@ -650,6 +742,29 @@ describe("revertProxyBaseUrl", () => {
 
     expect(result.wrote).toBe(true)
     expect(read()).toEqual({ apiKeyHelper: "echo 'changed-by-user'" })
+  })
+
+  it("removes our classifier setting after both routing fields are edited", () => {
+    apply()
+    const edited = read()
+    writeRaw(
+      JSON.stringify({
+        ...edited,
+        apiKeyHelper: "other-helper",
+        env: {
+          ...envOf(edited),
+          ANTHROPIC_BASE_URL: "https://other.example",
+        },
+      }),
+    )
+
+    const result = revertProxyBaseUrl(settingsPath)
+
+    expect(result.wrote).toBe(true)
+    expect(read()).toEqual({
+      apiKeyHelper: "other-helper",
+      env: { ANTHROPIC_BASE_URL: "https://other.example" },
+    })
   })
 
   it("no-op when our key isn't present", () => {

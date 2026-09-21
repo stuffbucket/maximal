@@ -12,7 +12,7 @@
 # a release:
 #
 #   1. build-binary (ubuntu):  cross-compile the windows-x64 .exe from the
-#      branch HEAD, pack it as the canonical Stream A zip + .sha256, and
+#      branch HEAD, pack it as the canonical release zip + .sha256, and
 #      upload it as a build artifact.
 #   2. msi (windows-2022):     build the MSI from that binary via WiX, then
 #      install /qn -> assert files+registry+PATH -> smoke `debug --json` ->
@@ -96,7 +96,7 @@ jobs:
             --define "__MAXIMAL_CHANNEL__=\"dev\"" \
             src/main.ts --outfile staging/maximal.exe
 
-      # Pack as the canonical Stream A artifact name + sha256 so the MSI
+      # Pack with the canonical release artifact name + sha256 so the MSI
       # job's download/verify mirrors the release path exactly.
       - name: Pack zip + sha256
         run: |

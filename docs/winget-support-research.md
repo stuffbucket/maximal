@@ -28,8 +28,7 @@ wiring. **Code signing is not required.**
 - **Code signing / Authenticode.** Not blocking. The community repo
   carries plenty of unsigned MSIs. Users get the SmartScreen prompt
   on first install but the package still installs and `winget`
-  recognizes upgrades. (Signing is a separate UX hardening pass we
-  already have tracked as A4 in the release runbook.)
+  recognizes upgrades. (Signing is a separate UX hardening pass.)
 - **MSIX format.** Plain MSI is accepted. No store registration.
 - **Publisher account.** Anyone with a GitHub account can submit.
   No paid program.
@@ -158,5 +157,5 @@ generated manifest at release time. Option (b) is what
    PR-review process unblocked.
 2. Once merged, add `vedantmgoyal2009/winget-releaser` to the release
    workflow so every tag → automatic winget PR.
-3. Defer code signing as already planned (A4). It improves first-run
-   UX but does not block winget distribution.
+3. Code signing can follow separately. It improves first-run UX but does not
+   block winget distribution.

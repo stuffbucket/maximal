@@ -22,9 +22,11 @@ export const PROXY_BASE_URL = "http://127.0.0.1:4141"
 
 const API_KEY_HELPER_KEY = "apiKeyHelper"
 const BASE_URL_KEY = "ANTHROPIC_BASE_URL"
+const AUTO_MODE_SERVER_KEY = "CLAUDE_CODE_AUTO_MODE_SERVER"
+const AUTO_MODE_SERVER_DISABLED = "0"
 const ENV_KEY = "env"
 
-/** maximal-namespaced snapshot of the two fields we touch, taken on first
+/** maximal-namespaced snapshot of the fields we touch, taken on first
  *  apply so disable can restore EXACTLY what was there before — rather than
  *  blindly deleting (which would drop a value the user happened to set to the
  *  same proxy URL / our own helper string). Claude Code ignores unknown keys,
@@ -39,6 +41,7 @@ const UNSET = "__UNSET__"
 interface PriorSnapshot {
   [BASE_URL_KEY]: unknown
   [API_KEY_HELPER_KEY]: unknown
+  [AUTO_MODE_SERVER_KEY]?: unknown
 }
 
 function readPriorSnapshot(
@@ -53,6 +56,9 @@ function readPriorSnapshot(
     [BASE_URL_KEY]: BASE_URL_KEY in s ? s[BASE_URL_KEY] : UNSET,
     [API_KEY_HELPER_KEY]:
       API_KEY_HELPER_KEY in s ? s[API_KEY_HELPER_KEY] : UNSET,
+    ...(AUTO_MODE_SERVER_KEY in s ?
+      { [AUTO_MODE_SERVER_KEY]: s[AUTO_MODE_SERVER_KEY] }
+    : {}),
   }
 }
 
@@ -156,13 +162,21 @@ export function mergeBaseUrl(
   existing: Record<string, unknown>,
   helperCommand: string,
 ): Record<string, unknown> {
-  const env = { ...readEnv(existing), [BASE_URL_KEY]: PROXY_BASE_URL }
-  // Capture the prior values of the two fields we touch — but ONLY on the first
+  const existingEnv = readEnv(existing)
+  const addsAutoModeSetting = !(AUTO_MODE_SERVER_KEY in existingEnv)
+  const env = {
+    ...existingEnv,
+    [BASE_URL_KEY]: PROXY_BASE_URL,
+    ...(addsAutoModeSetting ?
+      { [AUTO_MODE_SERVER_KEY]: AUTO_MODE_SERVER_DISABLED }
+    : {}),
+  }
+  // Capture the prior values of the routing fields — but ONLY on the first
   // apply (when no snapshot exists yet). Re-apply / self-heal must not overwrite
   // the snapshot, or it would record OUR values as the "prior" state and disable
   // would restore the proxy URL instead of removing it. UNSET marks a field that
   // was absent so revert deletes it rather than writing the sentinel back.
-  const priorEnvBaseUrl = readEnv(existing)
+  const priorEnvBaseUrl = existingEnv
   const priorHelperOwnership = getApiKeyHelperOwnership(existing)
   const priorBaseUrlOwnership = getBaseUrlOwnership(existing)
   let priorBaseUrl =
@@ -177,13 +191,27 @@ export function mergeBaseUrl(
   let priorHelper =
     API_KEY_HELPER_KEY in existing ? existing[API_KEY_HELPER_KEY] : UNSET
   if (priorHelperOwnership === "ours") priorHelper = UNSET
-  const prior =
-    PRIOR_KEY in existing ?
-      existing[PRIOR_KEY]
-    : {
-        [BASE_URL_KEY]: priorBaseUrl,
-        [API_KEY_HELPER_KEY]: priorHelper,
+  const existingPrior = readPriorSnapshot(existing)
+  let prior: unknown
+  if (PRIOR_KEY in existing) {
+    prior = existing[PRIOR_KEY]
+    if (
+      existingPrior
+      && addsAutoModeSetting
+      && !(AUTO_MODE_SERVER_KEY in existingPrior)
+    ) {
+      prior = {
+        ...(existing[PRIOR_KEY] as Record<string, unknown>),
+        [AUTO_MODE_SERVER_KEY]: UNSET,
       }
+    }
+  } else {
+    prior = {
+      [BASE_URL_KEY]: priorBaseUrl,
+      [API_KEY_HELPER_KEY]: priorHelper,
+      ...(addsAutoModeSetting ? { [AUTO_MODE_SERVER_KEY]: UNSET } : {}),
+    }
+  }
   return {
     ...existing,
     [ENV_KEY]: env,
@@ -212,6 +240,16 @@ function withRestoredField(
   return { ...target, [key]: prior }
 }
 
+function isOwnedAutoModeServerSetting(
+  settings: Record<string, unknown>,
+): boolean {
+  const snapshot = readPriorSnapshot(settings)
+  return (
+    snapshot?.[AUTO_MODE_SERVER_KEY] === UNSET
+    && readEnv(settings)[AUTO_MODE_SERVER_KEY] === AUTO_MODE_SERVER_DISABLED
+  )
+}
+
 export function stripBaseUrl(
   existing: Record<string, unknown>,
 ): Record<string, unknown> {
@@ -233,6 +271,10 @@ export function stripBaseUrl(
       snapshot ?
         withRestoredField(withoutBaseUrl, BASE_URL_KEY, snapshot[BASE_URL_KEY])
       : withoutBaseUrl
+  }
+  if (isOwnedAutoModeServerSetting(existing)) {
+    const { [AUTO_MODE_SERVER_KEY]: _droppedAutoMode, ...withoutAutoMode } = env
+    env = withoutAutoMode
   }
 
   let base = rest
@@ -310,6 +352,7 @@ export function applyProxyBaseUrl(
     baseUrlOwnership === "ours"
     && helperOwnership === "ours"
     && existing[API_KEY_HELPER_KEY] === helperCommand
+    && AUTO_MODE_SERVER_KEY in readEnv(existing)
   ) {
     return { path: filePath, wrote: false, skippedReason: "already-ours" }
   }
@@ -330,7 +373,11 @@ export function revertProxyBaseUrl(
   const existing = readClaudeCodeSettings(filePath)
   const baseUrlOwnership = getBaseUrlOwnership(existing)
   const helperOwnership = getApiKeyHelperOwnership(existing)
-  if (baseUrlOwnership !== "ours" && helperOwnership !== "ours") {
+  if (
+    baseUrlOwnership !== "ours"
+    && helperOwnership !== "ours"
+    && !isOwnedAutoModeServerSetting(existing)
+  ) {
     return {
       path: filePath,
       wrote: false,

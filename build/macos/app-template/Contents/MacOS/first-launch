@@ -6,8 +6,6 @@
 # the launchd agent. The .app stays in /Applications; this shim
 # copies the binary out to ~/.local/bin/maximal and registers
 # the launchd plist so the proxy starts on login.
-#
-# Spec: docs/spec/archive/internal-distribution-stream-b.md §7.
 
 set -euo pipefail
 
@@ -72,7 +70,7 @@ mkdir -p "$HOME/Library/Logs/maximal"
 launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
 launchctl bootstrap "$DOMAIN" "$INSTALL_PLIST"
 
-# Run B5 in unattended mode. --skip-auth: the device-code flow needs
+# Run setup in unattended mode. --skip-auth: the device-code flow needs
 # an interactive shell, which we don't have here. The user runs
 # `maximal setup` from a terminal once after install.
 "$INSTALL_BIN" setup --unattended --skip-auth || true

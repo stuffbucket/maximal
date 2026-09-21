@@ -8,8 +8,6 @@
  * while any app is still enabled — naming them — unless `--force`, which
  * disables each app first, then uninstalls. Secrets are kept by default; pass
  * `--purge` to remove them.
- *
- * Spec: docs/spec/archive/internal-distribution-stream-b.md §B6.
  */
 
 import { defineCommand } from "citty"
