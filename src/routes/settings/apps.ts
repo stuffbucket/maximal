@@ -16,6 +16,7 @@ import {
   AppsListResponse,
   ClaudeCodeToggleRequest,
   ClaudeDesktopToggleRequest,
+  CodexToggleRequest,
   type AppEntry as AppEntryT,
 } from "~/lib/config/settings-types"
 import { forwardError, HTTPError } from "~/lib/errors/error"
@@ -50,6 +51,39 @@ function persistClaudeDesktop(enabled: boolean): void {
 }
 
 export const appsRoutes = new Hono()
+
+for (const id of ["codex", "codex-desktop"] as const) {
+  appsRoutes.post(`/${id}/toggle`, async (c) => {
+    try {
+      const parsed = CodexToggleRequest.safeParse(
+        await c.req.json().catch(() => null),
+      )
+      if (!parsed.success)
+        throw httpError("Expected { enabled: boolean, model?: string }", 400)
+      const app = getApp(id)
+      if (!app) throw httpError("App not found", 404)
+      let restartRequired = false
+      try {
+        const result = await (parsed.data.enabled ?
+          app.enable({ model: parsed.data.model })
+        : app.disable())
+        restartRequired = result.restartRequired ?? false
+      } catch (error) {
+        throw httpError(
+          error instanceof Error ?
+            error.message
+          : "Could not change Codex routing.",
+          409,
+        )
+      }
+      const details = await app.getDetails()
+      if (details.routing) details.routing.restart_required = restartRequired
+      return jsonApp(c, details)
+    } catch (error) {
+      return forwardError(c, error)
+    }
+  })
+}
 
 appsRoutes.get("/", async (c) => {
   try {

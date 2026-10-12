@@ -102,7 +102,7 @@ interface ActiveApiClientsResponse {
  * settings-types are not present in this worktree, so importing them
  * would break the typecheck. Mirror by name, not by import.
  */
-export type AppId = "claude-code" | "claude-desktop" | "copilot-cli"
+export type AppId = "claude-code" | "claude-desktop" | "codex" | "codex-desktop" | "copilot-cli"
 export type AppKind = "config" | "coming-soon"
 export type AppStatus = "ready" | "not-installed" | "coming-soon"
 
@@ -117,7 +117,7 @@ export interface AppInstall {
 }
 
 export interface AppInstallHint {
-  method: "curl"
+  method: string
   command: string
 }
 
@@ -133,6 +133,16 @@ export interface AppEntry {
   /** Non-null when the last enable attempt was refused. The card surfaces this
    *  so the user knows why the toggle didn't take and how to resolve it. */
   conflict: AppConflict | null
+  routing?: {
+    model: string | null
+    available_models: Array<string>
+    managed: boolean
+    notice?: string
+    uses_existing_setup?: boolean
+    automatic_review?: boolean
+    review_update_required?: boolean
+    restart_required?: boolean
+  }
 }
 
 interface AppsListResponse {
@@ -258,6 +268,18 @@ type Endpoint =
       body: { enabled: boolean }
     }
   | {
+      kind: "codex-toggle"
+      method: "POST"
+      path: "/settings/api/apps/codex/toggle"
+      body: { enabled: boolean; model?: string }
+    }
+  | {
+      kind: "codex-desktop-toggle"
+      method: "POST"
+      path: "/settings/api/apps/codex-desktop/toggle"
+      body: { enabled: boolean; model?: string }
+    }
+  | {
       kind: "claude-desktop-toggle"
       method: "POST"
       path: "/settings/api/apps/claude-desktop/toggle"
@@ -287,6 +309,8 @@ interface ResponseFor {
   "apps-list": AppsListResponse
   "claude-code-toggle": AppEntry
   "claude-desktop-toggle": AppEntry
+  "codex-toggle": AppEntry
+  "codex-desktop-toggle": AppEntry
   "models-list": ModelsListResponse
   "models-refresh": ModelsListResponse
 }
@@ -296,6 +320,7 @@ interface ApiOptions {
   signal?: AbortSignal
   /** Override the API key resolver (tests). */
   apiKey?: string
+  timeoutMs?: number
 }
 
 type ApiResult<T> =
@@ -330,7 +355,8 @@ export async function apiCall<K extends EndpointKind>(
   options: ApiOptions = {},
 ): Promise<ApiResult<ResponseFor[K]>> {
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
+  const timeoutMs = options.timeoutMs ?? TIMEOUT_MS
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
   const signal = options.signal ?? controller.signal
 
   const headers: Record<string, string> = {
@@ -380,7 +406,7 @@ export async function apiCall<K extends EndpointKind>(
     return {
       ok: false,
       status: 0,
-      error: isAbort ? `Request timed out after ${TIMEOUT_MS}ms` : message,
+      error: isAbort ? `Request timed out after ${timeoutMs}ms` : message,
     }
   } finally {
     clearTimeout(timer)

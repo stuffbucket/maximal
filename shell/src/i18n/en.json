@@ -309,5 +309,15 @@
   "native-quit-title": "Quit Maximal?",
   "native-quit-body": "Maximal will stop and any open Settings windows will close.",
   "native-quit-confirm": "Quit Maximal",
-  "native-quit-cancel": "Cancel"
+  "native-quit-cancel": "Cancel",
+  "apps-codex-connect": "Connect Codex",
+  "apps-codex-update": "Update connection",
+  "apps-codex-update-help": "Update this connection to configure Copilot reviews for your installed Codex version and supported task models.",
+  "apps-codex-review-configured": "Tasks and automatic permission reviews are configured through GitHub Copilot. Choose automatic approvals in Codex’s approval settings.",
+  "apps-codex-approval-help": "Connect Codex to configure tasks and automatic permission reviews through GitHub Copilot. Choose automatic approvals in Codex’s approval settings. Connection checks may use Copilot quota.",
+  "apps-codex-review-restart": "Restart Codex and start a new local chat afterward. This does not change your approval preference.",
+  "apps-configuring": "Configuring…",
+  "apps-disconnecting": "Disconnecting…",
+  "apps-disconnect": "Disconnect",
+  "apps-configuration-error": "Could not change the configuration. Check that Maximal is running, then try again."
 }

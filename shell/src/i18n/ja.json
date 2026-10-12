@@ -309,5 +309,15 @@
   "native-quit-title": "Maximal を終了しますか？",
   "native-quit-body": "Maximal が停止し、開いている設定ウィンドウはすべて閉じます。",
   "native-quit-confirm": "Maximal を終了",
-  "native-quit-cancel": "キャンセル"
+  "native-quit-cancel": "キャンセル",
+  "apps-codex-connect": "Codex を接続",
+  "apps-codex-update": "接続を更新",
+  "apps-codex-update-help": "接続を更新して、インストール済みの Codex バージョンと対応するタスクモデルに Copilot の審査を設定してください。",
+  "apps-codex-review-configured": "タスクと権限の自動審査が GitHub Copilot 経由で設定されています。自動承認は Codex の承認設定で選択してください。",
+  "apps-codex-approval-help": "Codex を接続すると、タスクと権限の自動審査が GitHub Copilot 経由で設定されます。自動承認は Codex の承認設定で選択してください。接続確認では Copilot の利用枠を消費する場合があります。",
+  "apps-codex-review-restart": "完了後、Codex を再起動し、新しいローカルチャットを開始してください。承認方法の設定は変更されません。",
+  "apps-configuring": "設定中…",
+  "apps-disconnecting": "接続を解除中…",
+  "apps-disconnect": "接続を解除",
+  "apps-configuration-error": "設定を変更できませんでした。Maximal が起動していることを確認して、もう一度お試しください。"
 }

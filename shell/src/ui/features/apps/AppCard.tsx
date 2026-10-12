@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+
+import { t } from "../../../i18n";
 
 import type { AppEntry } from "../../../proxy/client";
 import { Button } from "../../components/Button";
@@ -43,9 +45,20 @@ function conflictCopy(app: AppEntry): { title: string; detail: string } | null {
   }
 }
 
-export function AppCard({ app, onToggle, onRescan }: AppCardProps): JSX.Element {
+export function AppCard({
+  app,
+  onToggle,
+  onRescan,
+}: AppCardProps): JSX.Element {
   const [copied, setCopied] = useState(false);
   const [rescanning, setRescanning] = useState(false);
+  const [toggling, setToggling] = useState(false);
+  const pending = useRef(false);
+  const [connecting, setConnecting] = useState(false);
+  const [restartRequired, setRestartRequired] = useState(false);
+  const isCodex = app.id === "codex" || app.id === "codex-desktop";
+  const needsUpdate = isCodex && app.enabled && app.routing?.automatic_review !== true;
+  const [toggleError, setToggleError] = useState<string | null>(null);
   // Windows-only: disabling Claude Code routing doesn't take effect in an
   // already-running session (Claude Code reads its base URL at launch on
   // Windows; macOS picks it up live). Warn before disabling so the user
@@ -60,7 +73,10 @@ export function AppCard({ app, onToggle, onRescan }: AppCardProps): JSX.Element 
   // Config apps with no detected install offer a one-line installer +
   // re-scan (currently only Claude Code ships an install hint).
   const offerInstall =
-    app.kind === "config" && !hasInstalls && app.install !== null;
+    app.kind === "config" &&
+    !hasInstalls &&
+    app.install !== null &&
+    !app.enabled;
   const conflict = conflictCopy(app);
 
   const copyInstall = async (): Promise<void> => {
@@ -83,12 +99,31 @@ export function AppCard({ app, onToggle, onRescan }: AppCardProps): JSX.Element 
 
   // Intercept only the Claude-Code-disable-on-Windows case; everything else
   // (enabling, other apps, macOS) toggles straight through.
+  const toggle = async (next: boolean): Promise<void> => {
+    if (pending.current) return;
+    pending.current = true;
+    setToggling(true);
+    setConnecting(next);
+    setToggleError(null);
+    try {
+      const result = await onToggle(next);
+      if (!result.ok)
+        setToggleError(result.error ?? t("apps-configuration-error"));
+      else if (result.restartRequired) setRestartRequired(true);
+    } catch {
+      setToggleError(t("apps-configuration-error"));
+    } finally {
+      pending.current = false;
+      setToggling(false);
+    }
+  };
+
   const handleToggle = (next: boolean): void => {
     if (!next && needsWindowsRestartWarning) {
       setRestartWarnOpen(true);
       return;
     }
-    void onToggle(next);
+    void toggle(next);
   };
 
   const confirmDisable = async (): Promise<void> => {
@@ -102,6 +137,7 @@ export function AppCard({ app, onToggle, onRescan }: AppCardProps): JSX.Element 
     <article
       className={cx("app-card", comingSoon && "app-card--soon")}
       data-app-id={app.id}
+      aria-busy={toggling}
     >
       <header className="app-card__head">
         <h3 className="app-card__name">{app.name}</h3>
@@ -109,16 +145,66 @@ export function AppCard({ app, onToggle, onRescan }: AppCardProps): JSX.Element 
         <div className="app-card__control">
           {comingSoon ? (
             <span className="chip app-card__pill">Coming soon</span>
+          ) : isCodex ? (
+            <>
+              {needsUpdate && !notInstalled && (
+                <Button variant="primary" size="sm" disabled={toggling}
+                  onClick={() => void toggle(true)}>
+                  {t(toggling && connecting ? "apps-configuring" : "apps-codex-update")}
+                </Button>
+              )}
+              <Switch
+                checked={app.enabled}
+                disabled={toggling || (notInstalled && !app.enabled)}
+                onCheckedChange={handleToggle}
+                label={toggling ? t("common-working") : app.enabled ? "On" : "Off"}
+              />
+            </>
           ) : offerInstall ? null : (
             <Switch
               checked={app.enabled}
-              disabled={notInstalled}
+              disabled={toggling || (notInstalled && !app.enabled)}
               onCheckedChange={handleToggle}
-              label={app.enabled ? "On" : "Off"}
+              label={toggling ? "Working…" : app.enabled ? "On" : "Off"}
             />
           )}
         </div>
       </header>
+
+      {isCodex && (
+        <div className="app-card__install">
+          <p className="app-card__hint">{t(needsUpdate ? "apps-codex-update-help"
+            : app.enabled ? "apps-codex-review-configured" : "apps-codex-approval-help")}</p>
+          {(app.enabled || restartRequired) && (
+            <p className="app-card__hint" role="status">{t("apps-codex-review-restart")}</p>
+          )}
+        </div>
+      )}
+      {(app.id === "codex" || app.id === "codex-desktop") && app.routing &&
+        (app.routing.notice || (app.routing.managed && !app.enabled)) && (
+        <div className="app-card__install">
+          {app.routing.notice && (
+            <p className="app-card__hint" role="status">
+              {app.routing.notice}
+            </p>
+          )}
+          {app.routing.managed && !app.enabled && (
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={toggling}
+              onClick={() => void toggle(false)}
+            >
+              Remove Maximal settings
+            </Button>
+          )}
+        </div>
+      )}
+      {toggleError && (
+        <p className="state__caption state__caption--error" role="alert">
+          {toggleError}
+        </p>
+      )}
 
       {/* Config app with no install: offer the one-line installer. */}
       {offerInstall && app.install && (
@@ -159,9 +245,9 @@ export function AppCard({ app, onToggle, onRescan }: AppCardProps): JSX.Element 
         (notInstalled ? (
           <p className="app-card__hint">Not installed.</p>
         ) : (
-          app.installs[0] && (
-            <p className="app-card__hint mono">{app.installs[0].path}</p>
-          )
+          app.installs.map((install) => (
+            <p key={install.path} className="app-card__hint mono">{install.path}</p>
+          ))
         ))}
 
       {/* Enable was refused (e.g. a base URL we don't own). Explain it and

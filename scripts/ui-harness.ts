@@ -251,6 +251,11 @@ async function handleApi(req: Request, path: string): Promise<Response> {
     return toggleApp("claude-desktop", (await body()).enabled)
   }
 
+  if ((path === "/settings/api/apps/codex/toggle" ||
+       path === "/settings/api/apps/codex-desktop/toggle") && method === "POST") {
+    return toggleApp(path.split("/")[4], (await body()).enabled)
+  }
+
   // --- models refresh (just re-stamp loaded_at) ---
   if (path === "/settings/api/models/refresh" && method === "POST") {
     ;(state.models as any).loaded_at = new Date().toISOString()
@@ -314,6 +319,13 @@ function toggleApp(id: string, enabled: boolean): Response {
   const app = apps.find((a) => a.id === id)
   if (!app) return json({ error: { message: "no such app" } }, 404)
   app.enabled = enabled
+  if (id === "codex" || id === "codex-desktop") {
+    for (const entry of apps) {
+      if (entry.id !== "codex" && entry.id !== "codex-desktop") continue
+      entry.enabled = enabled
+      entry.routing.managed = enabled
+    }
+  }
   return json(app)
 }
 

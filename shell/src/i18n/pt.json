@@ -309,5 +309,15 @@
   "native-quit-title": "Sair do Maximal?",
   "native-quit-body": "O Maximal será interrompido e todas as janelas de Configurações abertas serão fechadas.",
   "native-quit-confirm": "Sair do Maximal",
-  "native-quit-cancel": "Cancelar"
+  "native-quit-cancel": "Cancelar",
+  "apps-codex-connect": "Conectar Codex",
+  "apps-codex-update": "Atualizar conexão",
+  "apps-codex-update-help": "Atualize esta conexão para configurar as revisões do Copilot para a versão instalada do Codex e os modelos de tarefas compatíveis.",
+  "apps-codex-review-configured": "As tarefas e as revisões automáticas de permissões estão configuradas pelo GitHub Copilot. Escolha as aprovações automáticas nas configurações de aprovação do Codex.",
+  "apps-codex-approval-help": "Conecte o Codex para configurar tarefas e revisões automáticas de permissões pelo GitHub Copilot. Escolha as aprovações automáticas nas configurações de aprovação do Codex. Os testes de conexão podem consumir a cota do Copilot.",
+  "apps-codex-review-restart": "Depois, reinicie o Codex e inicie uma nova conversa local. Sua preferência de aprovação não será alterada.",
+  "apps-configuring": "Configurando…",
+  "apps-disconnecting": "Desconectando…",
+  "apps-disconnect": "Desconectar",
+  "apps-configuration-error": "Não foi possível alterar a configuração. Verifique se o Maximal está aberto e tente novamente."
 }

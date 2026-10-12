@@ -354,7 +354,13 @@ export const AppInstallHint = z.object({
 export type AppInstallHint = z.infer<typeof AppInstallHint>
 
 export const AppEntry = z.object({
-  id: z.enum(["claude-code", "claude-desktop", "copilot-cli"]),
+  id: z.enum([
+    "claude-code",
+    "claude-desktop",
+    "codex",
+    "codex-desktop",
+    "copilot-cli",
+  ]),
   name: z.string(),
   kind: z.enum(["config", "coming-soon"]),
   /** Whether the integration is currently active (proxy config applied). */
@@ -367,6 +373,18 @@ export const AppEntry = z.object({
    *  apiKeyHelper). The UI surfaces this so the user knows why the toggle
    *  didn't take. */
   conflict: z.enum(["foreign-base-url", "foreign-api-key-helper"]).nullable(),
+  routing: z
+    .object({
+      model: z.string().nullable(),
+      available_models: z.array(z.string()),
+      managed: z.boolean(),
+      notice: z.string().optional(),
+      uses_existing_setup: z.boolean().optional(),
+      automatic_review: z.boolean().optional(),
+      review_update_required: z.boolean().optional(),
+      restart_required: z.boolean().optional(),
+    })
+    .optional(),
 })
 export type AppEntry = z.infer<typeof AppEntry>
 
@@ -377,6 +395,12 @@ export type AppsListResponse = z.infer<typeof AppsListResponse>
 
 export const ClaudeCodeToggleRequest = z.object({
   enabled: z.boolean(),
+})
+export const CodexToggleRequest = z.object({
+  enabled: z.boolean(),
+  // Accepted for old clients; reviewer setup belongs to every connection.
+  automaticReview: z.boolean().optional(),
+  model: z.string().trim().min(1).max(200).optional(),
 })
 export type ClaudeCodeToggleRequest = z.infer<typeof ClaudeCodeToggleRequest>
 

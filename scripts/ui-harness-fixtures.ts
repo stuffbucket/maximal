@@ -95,6 +95,7 @@ const baseDiagnostics: DiagnosticsResponse = {
   uptime_ms: 7_265_000,
   account_type: "individual",
   models_cached: 3,
+  context_management: { advertised: [], cache: { policy: "rejections-only", entries: [] } },
   tokens: { github_token_present: true, copilot_token_present: true },
   rate_limit: {
     interval_seconds: null,
@@ -138,6 +139,20 @@ const appsAllInstalled: AppsListResponse = {
       installs: [],
       install: null,
       conflict: null,
+    },
+    {
+      id: "codex",
+      name: "Codex CLI and Desktop",
+      kind: "config",
+      enabled: false,
+      status: "ready",
+      installs: [
+        { path: "/usr/local/bin/codex", version: null, source: "unknown" },
+        { path: "/Applications/ChatGPT.app", version: null, source: "unknown" },
+      ],
+      install: null,
+      conflict: null,
+      routing: { model: "gpt-5-mini", available_models: ["gpt-5-mini"], managed: false },
     },
     {
       id: "copilot-cli",

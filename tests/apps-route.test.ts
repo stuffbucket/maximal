@@ -126,7 +126,7 @@ afterAll(async () => {
 })
 
 describe("GET /apps", () => {
-  test("returns three apps in alphabetical order with the right kinds", async () => {
+  test("returns all registered apps with the right kinds", async () => {
     const res = await buildApp().request("/apps")
     expect(res.status).toBe(200)
     const body = (await res.json()) as {
@@ -135,12 +135,14 @@ describe("GET /apps", () => {
     expect(body.apps.map((a) => a.id)).toEqual([
       "claude-code",
       "claude-desktop",
+      "codex",
       "copilot-cli",
     ])
     expect(body.apps[0].kind).toBe("config")
     expect(body.apps[1].kind).toBe("config")
-    expect(body.apps[2].kind).toBe("coming-soon")
-    expect(body.apps[2].status).toBe("coming-soon")
+    expect(body.apps[2].kind).toBe("config")
+    expect(body.apps[3].kind).toBe("coming-soon")
+    expect(body.apps[3].status).toBe("coming-soon")
   })
 
   test("claude-code offers an install command when no install is detected", async () => {

@@ -309,5 +309,15 @@
   "native-quit-title": "Выйти из Maximal?",
   "native-quit-body": "Maximal остановится, и все открытые окна Настроек закроются.",
   "native-quit-confirm": "Выйти из Maximal",
-  "native-quit-cancel": "Отмена"
+  "native-quit-cancel": "Отмена",
+  "apps-codex-connect": "Подключить Codex",
+  "apps-codex-update": "Обновить подключение",
+  "apps-codex-update-help": "Обновите подключение, чтобы настроить проверки Copilot для установленной версии Codex и поддерживаемых моделей задач.",
+  "apps-codex-review-configured": "Задачи и автоматические проверки разрешений настроены через GitHub Copilot. Выберите автоматическое одобрение в настройках разрешений Codex.",
+  "apps-codex-approval-help": "Подключите Codex, чтобы настроить задачи и автоматические проверки разрешений через GitHub Copilot. Выберите автоматическое одобрение в настройках разрешений Codex. Проверка подключения может расходовать квоту Copilot.",
+  "apps-codex-review-restart": "Затем перезапустите Codex и начните новый локальный чат. Настройка способа одобрения не изменится.",
+  "apps-configuring": "Настройка…",
+  "apps-disconnecting": "Отключение…",
+  "apps-disconnect": "Отключить",
+  "apps-configuration-error": "Не удалось изменить конфигурацию. Убедитесь, что Maximal запущено, и повторите попытку."
 }

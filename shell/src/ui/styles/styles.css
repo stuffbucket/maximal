@@ -1916,8 +1916,23 @@ a:hover {
 
 .app-card__control {
   flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: var(--space-2);
   display: flex;
   align-items: center;
+}
+
+/* Keep the Codex update action and toggle readable at the native minimum window size. */
+.app-card[data-app-id^="codex"] .app-card__head {
+  flex-wrap: wrap;
+}
+
+.app-card[data-app-id^="codex"] .app-card__name {
+  flex-shrink: 0;
+}
+
+.app-card[data-app-id^="codex"] .app-card__control {
+  max-width: 100%;
 }
 
 .app-card__pill {

@@ -309,5 +309,15 @@
   "native-quit-title": "退出 Maximal?",
   "native-quit-body": "Maximal 将停止,所有打开的设置窗口将关闭。",
   "native-quit-confirm": "退出 Maximal",
-  "native-quit-cancel": "取消"
+  "native-quit-cancel": "取消",
+  "apps-codex-connect": "连接 Codex",
+  "apps-codex-update": "更新连接",
+  "apps-codex-update-help": "请更新此连接，为已安装的 Codex 版本和支持的任务模型配置 Copilot 审核。",
+  "apps-codex-review-configured": "已通过 GitHub Copilot 配置任务和自动权限审核。请在 Codex 的审批设置中选择自动审批。",
+  "apps-codex-approval-help": "连接 Codex 后，将通过 GitHub Copilot 配置任务和自动权限审核。请在 Codex 的审批设置中选择自动审批。连接检查可能消耗 Copilot 配额。",
+  "apps-codex-review-restart": "完成后，请重启 Codex 并开始新的本地聊天。此操作不会更改您的审批偏好。",
+  "apps-configuring": "正在配置…",
+  "apps-disconnecting": "正在断开连接…",
+  "apps-disconnect": "断开连接",
+  "apps-configuration-error": "无法更改配置。请确认 Maximal 正在运行，然后重试。"
 }

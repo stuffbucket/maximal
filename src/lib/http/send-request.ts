@@ -109,7 +109,7 @@ function attachHostAuth(
 
 /** Attach a config-selected passthrough provider's credential (see module doc). */
 function attachProviderAuth(
-  providerConfig: ResolvedProviderConfig,
+  providerConfig: Pick<ResolvedProviderConfig, "apiKey" | "authType">,
   headers: Headers,
 ): void {
   if (providerConfig.authType === "authorization") {
@@ -169,7 +169,9 @@ export async function sendRequest(
  * which provider this is.
  */
 export async function sendProviderRequest(
-  providerConfig: ResolvedProviderConfig,
+  providerConfig:
+    | ResolvedProviderConfig
+    | Pick<ResolvedProviderConfig, "baseUrl" | "apiKey" | "authType">,
   url: string,
   init: SendRequestInit = {},
 ): Promise<Response> {

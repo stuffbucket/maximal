@@ -2,6 +2,8 @@ import type { Context } from "hono"
 
 import { streamSSE } from "hono/streaming"
 
+import type { Model } from "~/services/copilot/get-models"
+
 import {
   getConfig,
   getPromptCacheRetention,
@@ -93,21 +95,8 @@ export const handleResponses = async (c: Context) => {
   const selectedModel = state.models?.data.find(
     (model) => model.id === payload.model,
   )
-  const supportsResponses =
-    selectedModel?.supported_endpoints?.includes(RESPONSES_ENDPOINT) ?? false
-
-  if (!supportsResponses) {
-    return c.json(
-      {
-        error: {
-          message:
-            "This model does not support the responses endpoint. Please choose a different model.",
-          type: "invalid_request_error",
-        },
-      },
-      400,
-    )
-  }
+  const modelError = getResponsesModelError(c, payload.model, selectedModel)
+  if (modelError) return modelError
 
   applyResponsesApiContextManagement(
     payload,
@@ -182,6 +171,63 @@ export const handleResponses = async (c: Context) => {
     ),
   )
   return c.json(response as ResponsesResult)
+}
+
+function getResponsesModelError(
+  c: Context,
+  modelId: string,
+  selectedModel: Model | undefined,
+): Response | undefined {
+  if (!state.models) {
+    return c.json(
+      {
+        error: {
+          message:
+            "Maximal's model list is unavailable. Check your Maximal account connection and try again.",
+          type: "server_error",
+          code: "models_unavailable",
+        },
+      },
+      503,
+    )
+  }
+
+  if (!selectedModel) {
+    return c.json(
+      {
+        error: {
+          message:
+            modelId === "codex-auto-review" ?
+              'Codex\'s automatic approval model "codex-auto-review" is not available through Maximal. The approval review could not run. Update the Codex connection in Maximal Settings → Apps, then restart Codex and start a new local chat. You can choose manual approval in Codex.'
+            : `Model "${modelId}" is not available through Maximal. Choose a model listed by /v1/models.`,
+          type: "invalid_request_error",
+          code: "model_not_found",
+          param: "model",
+        },
+      },
+      400,
+    )
+  }
+
+  const supportsResponses =
+    selectedModel.supported_endpoints?.includes(RESPONSES_ENDPOINT) ?? false
+
+  if (!supportsResponses) {
+    return c.json(
+      {
+        error: {
+          message:
+            "This model does not support the responses endpoint. Please choose a different model.",
+          type: "invalid_request_error",
+          code: "unsupported_endpoint",
+          param: "model",
+        },
+      },
+      400,
+    )
+  }
+
+  return undefined
 }
 
 const isStreamingRequested = (payload: ResponsesPayload): boolean =>

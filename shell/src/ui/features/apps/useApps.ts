@@ -18,6 +18,7 @@ import { humanize } from "../api-clients/humanize";
 export interface MutationResult {
   ok: boolean;
   error?: string;
+  restartRequired?: boolean;
 }
 
 interface UseApps {
@@ -27,6 +28,7 @@ interface UseApps {
   refresh: () => Promise<void>;
   toggleClaudeCode: (enabled: boolean) => Promise<MutationResult>;
   toggleClaudeDesktop: (enabled: boolean) => Promise<MutationResult>;
+  toggleCodex: (enabled: boolean, desktop?: boolean) => Promise<MutationResult>;
 }
 
 function sortAlpha(apps: Array<AppEntry>): Array<AppEntry> {
@@ -69,7 +71,14 @@ export function useApps(): UseApps {
   // Replace one app's state with the fresh object the mutation returned.
   const splice = useCallback((fresh: AppEntry) => {
     setApps((prev) =>
-      sortAlpha(prev.map((app) => (app.id === fresh.id ? fresh : app))),
+      sortAlpha(prev.map((app) => {
+        if (app.id === fresh.id) return fresh;
+        if ((fresh.id === "codex" || fresh.id === "codex-desktop") &&
+            (app.id === "codex" || app.id === "codex-desktop")) {
+          return { ...app, enabled: fresh.enabled, routing: fresh.routing };
+        }
+        return app;
+      })),
     );
   }, []);
 
@@ -113,6 +122,36 @@ export function useApps(): UseApps {
     [splice],
   );
 
+  const toggleCodex = useCallback<UseApps["toggleCodex"]>(
+    async (enabled, desktop = false) => {
+      const result = await apiCall(
+        desktop ? {
+          kind: "codex-desktop-toggle",
+          method: "POST",
+          path: "/settings/api/apps/codex-desktop/toggle",
+          body: { enabled },
+        } : {
+          kind: "codex-toggle",
+          method: "POST",
+          path: "/settings/api/apps/codex/toggle",
+          body: { enabled },
+        },
+        { timeoutMs: 240000 },
+      );
+      if (!result.ok) {
+        const message = humanize(result.error);
+        setError(message);
+        await refresh();
+        return { ok: false, error: message };
+      }
+      setError(null);
+      splice(result.data);
+      await refresh();
+      return { ok: true, restartRequired: result.data.routing?.restart_required };
+    },
+    [refresh, splice],
+  );
+
   return {
     apps,
     isLoading,
@@ -120,5 +159,6 @@ export function useApps(): UseApps {
     refresh,
     toggleClaudeCode,
     toggleClaudeDesktop,
+    toggleCodex,
   };
 }

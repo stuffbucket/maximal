@@ -309,5 +309,15 @@
   "native-quit-title": "Maximal beenden?",
   "native-quit-body": "Maximal wird gestoppt und alle geöffneten Einstellungsfenster werden geschlossen.",
   "native-quit-confirm": "Maximal beenden",
-  "native-quit-cancel": "Abbrechen"
+  "native-quit-cancel": "Abbrechen",
+  "apps-codex-connect": "Codex verbinden",
+  "apps-codex-update": "Verbindung aktualisieren",
+  "apps-codex-update-help": "Aktualisieren Sie diese Verbindung, um Copilot-Prüfungen für Ihre installierte Codex-Version und unterstützte Aufgabenmodelle einzurichten.",
+  "apps-codex-review-configured": "Aufgaben und automatische Berechtigungsprüfungen sind über GitHub Copilot eingerichtet. Wählen Sie automatische Genehmigungen in den Genehmigungseinstellungen von Codex.",
+  "apps-codex-approval-help": "Verbinden Sie Codex, um Aufgaben und automatische Berechtigungsprüfungen über GitHub Copilot einzurichten. Wählen Sie automatische Genehmigungen in den Genehmigungseinstellungen von Codex. Verbindungsprüfungen können Copilot-Kontingent verbrauchen.",
+  "apps-codex-review-restart": "Starten Sie anschließend Codex neu und öffnen Sie einen neuen lokalen Chat. Ihre Genehmigungseinstellung bleibt unverändert.",
+  "apps-configuring": "Wird konfiguriert…",
+  "apps-disconnecting": "Wird getrennt…",
+  "apps-disconnect": "Trennen",
+  "apps-configuration-error": "Die Konfiguration konnte nicht geändert werden. Prüfen Sie, ob Maximal läuft, und versuchen Sie es erneut."
 }

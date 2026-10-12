@@ -52,10 +52,14 @@ export interface ClientApp {
   getDetails(conflict?: AppEntry["conflict"]): Promise<AppEntry>
 
   /** Enable the proxy routing for this app (e.g. write settings / profile) */
-  enable(): Promise<{ success: boolean; conflict?: AppEntry["conflict"] }>
+  enable(options?: { model?: string }): Promise<{
+    success: boolean
+    conflict?: AppEntry["conflict"]
+    restartRequired?: boolean
+  }>
 
   /** Disable/revert the proxy routing for this app */
-  disable(): Promise<{ success: boolean }>
+  disable(): Promise<{ success: boolean; restartRequired?: boolean }>
 
   /** Is proxy routing currently active for this app? */
   isEnabled(): boolean

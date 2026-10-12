@@ -85,6 +85,10 @@ async function enableApp(app: ClientApp): Promise<void> {
   }
   if (result.success) {
     consola.success(`Pointed ${app.name} at the local proxy.`)
+    if (result.restartRequired)
+      consola.info(
+        "Restart Codex and start a new local chat to apply the connection. Choose automatic approvals in Codex's approval settings.",
+      )
   } else {
     consola.warn(`Could not enable ${app.name}.`)
   }
@@ -94,6 +98,10 @@ async function disableApp(app: ClientApp): Promise<void> {
   const result = await app.disable()
   if (result.success) {
     consola.success(`Removed proxy routing for ${app.name}.`)
+    if (result.restartRequired)
+      consola.info(
+        "Restart Codex and start a new local chat to apply the change.",
+      )
   } else {
     consola.info(`${app.name} wasn't routed by us; nothing to do.`)
   }
