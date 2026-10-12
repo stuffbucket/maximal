@@ -1031,9 +1031,22 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           OWNER="${GITHUB_REPOSITORY%%/*}"
-          PRS="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open \
-            --base main --head "${OWNER}:${HEAD_BRANCH}" \
-            --json number,headRefName,headRefOid,url)"
+          list_manifest_prs() {
+            gh api --method GET --paginate --slurp \
+              "repos/${GITHUB_REPOSITORY}/pulls" \
+              -f state=open \
+              -f base=main \
+              -f head="${OWNER}:${HEAD_BRANCH}" \
+              -f per_page=100 |
+              jq '[.[][] | {
+                number: .number,
+                headRefName: .head.ref,
+                headRefOid: .head.sha,
+                url: .html_url
+              }]'
+          }
+
+          PRS="$(list_manifest_prs)"
           PR_COUNT="$(jq 'length' <<<"$PRS")"
           if [ "$PR_COUNT" -gt 1 ]; then
             echo "::error::Expected at most one open manifest PR, found $PR_COUNT."
@@ -1116,9 +1129,7 @@ jobs:
               --title "$TITLE" --body "$BODY"
           fi
 
-          CURRENT="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open \
-            --base main --head "${OWNER}:${HEAD_BRANCH}" \
-            --json headRefOid,url)"
+          CURRENT="$(list_manifest_prs)"
           CURRENT_COUNT="$(jq 'length' <<<"$CURRENT")"
           CURRENT_SHA="$(jq -r '.[0].headRefOid // ""' <<<"$CURRENT")"
           if [ "$CURRENT_COUNT" -ne 1 ] || [ "$CURRENT_SHA" != "$HEAD_SHA" ]; then
