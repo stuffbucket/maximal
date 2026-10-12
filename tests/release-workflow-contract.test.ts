@@ -139,33 +139,13 @@ describe("manifest publication", () => {
     expect(testIndex).toBeGreaterThan(installIndex)
   })
 
-  test("the manifest job discovers its protected PR through the pulls API", async () => {
+  test("the manifest job uses tested PR discovery and validates the pushed SHA", async () => {
     const workflow = await readWorkflow("release.yml")
     const manifestJob = workflow.slice(workflow.indexOf("\n  manifest:"))
 
-    expect(manifestJob).not.toContain("gh pr list")
-    const helperStart = manifestJob.indexOf("list_manifest_prs()")
-    const helperEnd = manifestJob.indexOf(
-      "\n          }\n\n          PRS=",
-      helperStart,
-    )
-    expect(helperStart).toBeGreaterThan(-1)
-    expect(helperEnd).toBeGreaterThan(helperStart)
-    const helper = manifestJob.slice(helperStart, helperEnd)
-
-    expect(helper).toContain("gh api --method GET --paginate --slurp")
-    expect(helper).not.toContain("--jq")
-    expect(helper).toMatch(/\|\s+jq '\[\.\[\]\[\] \| \{/u)
-    expect(manifestJob).toContain('"repos/${GITHUB_REPOSITORY}/pulls"')
-    expect(manifestJob).toContain("-f state=open")
-    expect(manifestJob).toContain("-f base=main")
-    expect(manifestJob).toContain('-f head="${OWNER}:${HEAD_BRANCH}"')
-    expect(manifestJob).toContain("-f per_page=100")
-    expect(manifestJob).toContain("headRefName: .head.ref")
-    expect(manifestJob).toContain("headRefOid: .head.sha")
-    expect(manifestJob).toContain("url: .html_url")
-    expect(manifestJob.match(/\$\(list_manifest_prs\)/gu)).toHaveLength(2)
-
+    expect(
+      manifestJob.match(/bun scripts\/list-manifest-prs\.ts/gu),
+    ).toHaveLength(2)
     expect(manifestJob).toContain(
       'git ls-remote origin "refs/heads/${HEAD_BRANCH}"',
     )
