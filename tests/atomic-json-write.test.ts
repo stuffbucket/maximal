@@ -21,7 +21,7 @@
  * rather than asserting the write throws on a pre-existing temp.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test"
+import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
@@ -31,7 +31,7 @@ import {
   applyConfigLibraryProfile,
   getClaude3pDir,
 } from "~/apps/claude-desktop/config"
-import { atomicWriteJson } from "~/lib/platform/atomic-json"
+import { atomicWriteJson, atomicWriteText } from "~/lib/platform/atomic-json"
 
 let dir: string
 
@@ -89,6 +89,263 @@ describe("atomicWriteJson (shared helper)", () => {
     // …the symlink's target was never followed or overwritten…
     expect(fs.readFileSync(victim, "utf8")).toBe("precious")
     // …and the temp is gone.
+    expect(fs.existsSync(`${file}.tmp`)).toBe(false)
+  })
+})
+
+describe("atomicWriteText", () => {
+  it("writes private text atomically and skips identical content", () => {
+    const file = path.join(dir, "config.toml")
+
+    expect(atomicWriteText(file, 'model_provider = "maximal-app"\n')).toBe(true)
+    const firstMtime = fs.statSync(file).mtimeMs
+    expect(fs.readFileSync(file, "utf8")).toBe(
+      'model_provider = "maximal-app"\n',
+    )
+    expect(fs.statSync(file).mode & 0o777).toBe(0o600)
+    expect(fs.existsSync(`${file}.tmp`)).toBe(false)
+
+    expect(atomicWriteText(file, 'model_provider = "maximal-app"\n')).toBe(
+      false,
+    )
+    expect(fs.statSync(file).mtimeMs).toBe(firstMtime)
+  })
+
+  it("refuses a symlink destination without modifying its target", () => {
+    const file = path.join(dir, "config.toml")
+    const victim = path.join(dir, "victim.toml")
+    fs.writeFileSync(victim, "precious")
+    fs.symlinkSync(victim, file)
+
+    expect(() => atomicWriteText(file, "replacement")).toThrow(
+      "refusing to write file: destination is a symbolic link",
+    )
+    expect(fs.readFileSync(victim, "utf8")).toBe("precious")
+  })
+
+  it("writes when the expected value matches current bytes", () => {
+    const file = path.join(dir, "config.toml")
+    fs.writeFileSync(file, "before")
+
+    expect(
+      atomicWriteText(file, "replacement", { expectedContent: "before" }),
+    ).toBe(true)
+    expect(fs.readFileSync(file, "utf8")).toBe("replacement")
+  })
+
+  it("rejects a stale expected value and includes the configured label", () => {
+    const file = path.join(dir, "config.toml")
+    fs.writeFileSync(file, "changed concurrently")
+
+    expect(() =>
+      atomicWriteText(file, "replacement", {
+        expectedContent: "before",
+        label: "Codex config",
+      }),
+    ).toThrow("refusing to write Codex config: file changed")
+    expect(fs.readFileSync(file, "utf8")).toBe("changed concurrently")
+    expect(fs.existsSync(`${file}.tmp`)).toBe(false)
+  })
+
+  it("uses the default label and propagates stale-temp cleanup failures", () => {
+    const file = path.join(dir, "config.toml")
+    fs.mkdirSync(`${file}.tmp`)
+
+    expect(() => atomicWriteText(file, "replacement")).toThrow()
+    expect(fs.existsSync(file)).toBe(false)
+    expect(fs.statSync(`${file}.tmp`).isDirectory()).toBe(true)
+  })
+})
+
+describe("atomicWriteText durability", () => {
+  it("fsyncs and closes both the temporary file and parent directory", () => {
+    const file = path.join(dir, "config.toml")
+    const originalFsyncSync = fs.fsyncSync
+    const originalCloseSync = fs.closeSync
+    const fsynced: Array<number> = []
+    const closed: Array<number> = []
+    const fsyncSpy = spyOn(fs, "fsyncSync").mockImplementation((fd) => {
+      fsynced.push(fd)
+      originalFsyncSync(fd)
+    })
+    const closeSpy = spyOn(fs, "closeSync").mockImplementation((fd) => {
+      closed.push(fd)
+      if (fd !== 1) originalCloseSync(fd)
+    })
+
+    try {
+      expect(atomicWriteText(file, "replacement")).toBe(true)
+    } finally {
+      fsyncSpy.mockRestore()
+      closeSpy.mockRestore()
+    }
+    expect(fsynced).toHaveLength(2)
+    expect(closed).toHaveLength(2)
+    expect(closed).not.toContain(1)
+  })
+
+  it("keeps a completed write when opening the parent for fsync is unsupported", () => {
+    const file = path.join(dir, "config.toml")
+    const originalOpenSync = fs.openSync
+    const unsupported = Object.assign(
+      new Error("directory fsync unsupported"),
+      {
+        code: "EPERM",
+      },
+    )
+    const openSpy = spyOn(fs, "openSync").mockImplementation(
+      (target, flags, mode) => {
+        if (target === dir) throw unsupported
+        return originalOpenSync(target, flags, mode)
+      },
+    )
+
+    try {
+      expect(atomicWriteText(file, "replacement")).toBe(true)
+    } finally {
+      openSpy.mockRestore()
+    }
+    expect(fs.readFileSync(file, "utf8")).toBe("replacement")
+    expect(fs.existsSync(`${file}.tmp`)).toBe(false)
+  })
+
+  for (const code of ["EISDIR", "EINVAL"]) {
+    it(`keeps a completed write when directory fsync raises ${code}`, () => {
+      const file = path.join(dir, "config.toml")
+      const originalFsyncSync = fs.fsyncSync
+      const originalCloseSync = fs.closeSync
+      const closed: Array<number> = []
+      let fsyncCalls = 0
+      const fsyncSpy = spyOn(fs, "fsyncSync").mockImplementation((fd) => {
+        fsyncCalls += 1
+        if (fsyncCalls === 2) {
+          throw Object.assign(new Error("directory fsync unsupported"), {
+            code,
+          })
+        }
+        originalFsyncSync(fd)
+      })
+      const closeSpy = spyOn(fs, "closeSync").mockImplementation((fd) => {
+        closed.push(fd)
+        originalCloseSync(fd)
+      })
+
+      try {
+        expect(atomicWriteText(file, "replacement")).toBe(true)
+      } finally {
+        fsyncSpy.mockRestore()
+        closeSpy.mockRestore()
+      }
+      expect(fsyncCalls).toBe(2)
+      expect(closed).toHaveLength(2)
+      expect(fs.readFileSync(file, "utf8")).toBe("replacement")
+    })
+  }
+
+  it("closes the directory descriptor and propagates unexpected fsync errors", () => {
+    const file = path.join(dir, "config.toml")
+    const originalFsyncSync = fs.fsyncSync
+    const originalCloseSync = fs.closeSync
+    const unexpected = Object.assign(new Error("directory fsync failed"), {
+      code: "EIO",
+    })
+    const closed: Array<number> = []
+    let fsyncCalls = 0
+    const fsyncSpy = spyOn(fs, "fsyncSync").mockImplementation((fd) => {
+      fsyncCalls += 1
+      if (fsyncCalls === 2) throw unexpected
+      originalFsyncSync(fd)
+    })
+    const closeSpy = spyOn(fs, "closeSync").mockImplementation((fd) => {
+      closed.push(fd)
+      originalCloseSync(fd)
+    })
+
+    try {
+      expect(() => atomicWriteText(file, "replacement")).toThrow(unexpected)
+    } finally {
+      fsyncSpy.mockRestore()
+      closeSpy.mockRestore()
+    }
+    expect(fsyncCalls).toBe(2)
+    expect(closed).toHaveLength(2)
+    expect(fs.readFileSync(file, "utf8")).toBe("replacement")
+    expect(fs.existsSync(`${file}.tmp`)).toBe(false)
+  })
+
+  it("closes the temporary descriptor and removes its file after fsync fails", () => {
+    const file = path.join(dir, "config.toml")
+    const originalCloseSync = fs.closeSync
+    const closed: Array<number> = []
+    const fsyncSpy = spyOn(fs, "fsyncSync").mockImplementationOnce(() => {
+      throw new Error("fsync failed")
+    })
+    const closeSpy = spyOn(fs, "closeSync").mockImplementation((fd) => {
+      closed.push(fd)
+      originalCloseSync(fd)
+    })
+
+    try {
+      expect(() => atomicWriteText(file, "replacement")).toThrow("fsync failed")
+    } finally {
+      fsyncSpy.mockRestore()
+      closeSpy.mockRestore()
+    }
+    expect(closed).toHaveLength(1)
+    expect(fs.existsSync(file)).toBe(false)
+    expect(fs.existsSync(`${file}.tmp`)).toBe(false)
+  })
+
+  it("reports an exclusive-open collision and propagates other open failures", () => {
+    const file = path.join(dir, "config.toml")
+    const originalOpenSync = fs.openSync
+    const collision = Object.assign(new Error("collision"), { code: "EEXIST" })
+    const denied = Object.assign(new Error("denied"), { code: "EACCES" })
+    let failure: Error = collision
+    const openSpy = spyOn(fs, "openSync").mockImplementation(
+      (target, flags, mode) => {
+        if (target === `${file}.tmp`) throw failure
+        return originalOpenSync(target, flags, mode)
+      },
+    )
+
+    try {
+      expect(() => atomicWriteText(file, "replacement")).toThrow(
+        "already exists (possible symlink attack)",
+      )
+      failure = denied
+      expect(() => atomicWriteText(file, "replacement")).toThrow(denied)
+    } finally {
+      openSpy.mockRestore()
+    }
+  })
+
+  it("rejects a destination change immediately before rename", () => {
+    const file = path.join(dir, "config.toml")
+    fs.writeFileSync(file, "before")
+    const originalWriteFileSync = fs.writeFileSync
+    let raced = false
+    const writeSpy = spyOn(fs, "writeFileSync").mockImplementation(
+      (target, data, options) => {
+        originalWriteFileSync(target, data, options)
+        if (!raced && typeof target === "number") {
+          raced = true
+          originalWriteFileSync(file, "changed concurrently")
+        }
+      },
+    )
+
+    try {
+      expect(() =>
+        atomicWriteText(file, "replacement", {
+          expectedContent: "before",
+          label: "Codex config",
+        }),
+      ).toThrow("refusing to write Codex config: file changed")
+    } finally {
+      writeSpy.mockRestore()
+    }
+    expect(fs.readFileSync(file, "utf8")).toBe("changed concurrently")
     expect(fs.existsSync(`${file}.tmp`)).toBe(false)
   })
 })

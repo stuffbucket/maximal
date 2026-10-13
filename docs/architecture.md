@@ -37,6 +37,12 @@ This is a local proxy that exposes the GitHub Copilot API as both an OpenAI-comp
 
 `src/lib/models/models.ts` normalizes Claude model IDs via 5 regex patterns (handles variants like `claude-opus-4-6`, `claude-opus-4.6`). The `useMessagesApi` config flag (default `true`) controls whether Claude-family models use the native Messages API or fall back to Chat Completions.
 
+Root inference routes resolve the ordered, settings-driven `modelMappings` aliases after model-ID normalization and before live catalog lookup. See [`docs/dev/codex-integration.md`](dev/codex-integration.md) for exact/glob/regex semantics and the editable default alias.
+
+## App integrations
+
+`src/apps/` owns filesystem detection, narrowly scoped configuration, durable intent, and boot/shutdown reconciliation for supported local clients. The Codex CLI and Desktop share one conservative user-level provider integration; its exact ownership and recovery contract is documented in [`docs/dev/codex-integration.md`](dev/codex-integration.md).
+
 ## Config and state
 
 - `src/lib/config/config.ts` — `AppConfig` shape, disk read/write from `~/.local/share/maximal/config.json` (Linux/macOS) or `%USERPROFILE%\.local\share\maximal\config.json` (Windows). Also respects `COPILOT_API_HOME` env var.

@@ -334,6 +334,8 @@ export const AppInstall = z.object({
   path: z.string(),
   /** `--version` output, or null when it couldn't be read. */
   version: z.string().nullable(),
+  /** Which surface the artifact belongs to when one app covers both. */
+  kind: z.enum(["cli", "desktop"]).optional(),
   /** How it was installed (homebrew / npm-global / local-bin / …). */
   source: z.enum([
     "homebrew",
@@ -354,7 +356,7 @@ export const AppInstallHint = z.object({
 export type AppInstallHint = z.infer<typeof AppInstallHint>
 
 export const AppEntry = z.object({
-  id: z.enum(["claude-code", "claude-desktop", "copilot-cli"]),
+  id: z.enum(["claude-code", "claude-desktop", "codex", "copilot-cli"]),
   name: z.string(),
   kind: z.enum(["config", "coming-soon"]),
   /** Whether the integration is currently active (proxy config applied). */
@@ -366,7 +368,9 @@ export const AppEntry = z.object({
    *  has a setting we don't own (e.g. a user-set ANTHROPIC_BASE_URL or
    *  apiKeyHelper). The UI surfaces this so the user knows why the toggle
    *  didn't take. */
-  conflict: z.enum(["foreign-base-url", "foreign-api-key-helper"]).nullable(),
+  conflict: z
+    .enum(["foreign-base-url", "foreign-api-key-helper", "cleanup-required"])
+    .nullable(),
 })
 export type AppEntry = z.infer<typeof AppEntry>
 
@@ -374,6 +378,11 @@ export const AppsListResponse = z.object({
   apps: z.array(AppEntry),
 })
 export type AppsListResponse = z.infer<typeof AppsListResponse>
+
+export const CodexToggleRequest = z.object({
+  enabled: z.boolean(),
+})
+export type CodexToggleRequest = z.infer<typeof CodexToggleRequest>
 
 export const ClaudeCodeToggleRequest = z.object({
   enabled: z.boolean(),

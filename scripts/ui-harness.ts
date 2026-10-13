@@ -250,6 +250,9 @@ async function handleApi(req: Request, path: string): Promise<Response> {
   if (path === "/settings/api/apps/claude-desktop/toggle" && method === "POST") {
     return toggleApp("claude-desktop", (await body()).enabled)
   }
+  if (path === "/settings/api/apps/codex/toggle" && method === "POST") {
+    return toggleApp("codex", (await body()).enabled)
+  }
 
   // --- models refresh (just re-stamp loaded_at) ---
   if (path === "/settings/api/models/refresh" && method === "POST") {

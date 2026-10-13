@@ -30,6 +30,9 @@ export interface AppUninstallResult {
    *  Empty when the app had nothing wired (no-op), so the uninstaller can
    *  report uniformly without knowing each app's specifics. */
   reverted: Array<string>
+  /** Typed partial-cleanup state for owned content that user edits prevented
+   *  the app from removing safely. */
+  conflict?: AppEntry["conflict"]
 }
 
 export interface ClientApp {
@@ -55,7 +58,7 @@ export interface ClientApp {
   enable(): Promise<{ success: boolean; conflict?: AppEntry["conflict"] }>
 
   /** Disable/revert the proxy routing for this app */
-  disable(): Promise<{ success: boolean }>
+  disable(): Promise<{ success: boolean; conflict?: AppEntry["conflict"] }>
 
   /** Is proxy routing currently active for this app? */
   isEnabled(): boolean

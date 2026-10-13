@@ -1863,10 +1863,10 @@ a:hover {
 }
 
 /* ---- Apps: per-integration cards ----
-   One card per app (Claude Code, Claude Desktop, Copilot CLI) — each
+   One card per app (Claude Code, Claude Desktop, Codex, Copilot CLI) — each
    is a discrete actionable entity, so a card earns its chrome here.
    The name leads; the On/Off switch (or install action) anchors the
-   right edge; detected installs live below as a radio list. */
+   right edge; detected surfaces live below as flat rows. */
 .apps-panel {
   display: flex;
   flex-direction: column;
@@ -1926,6 +1926,49 @@ a:hover {
 
 .app-card__hint {
   margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-lg);
+  color: var(--text-muted);
+}
+
+.app-card__installs {
+  display: flex;
+  flex-direction: column;
+  border-block: var(--border-width-hairline) solid var(--border-subtle);
+}
+
+.app-card__install-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding-block: var(--space-2);
+}
+
+.app-card__install-row + .app-card__install-row {
+  border-block-start: var(--border-width-hairline) solid var(--border-subtle);
+}
+
+.app-card__install-kind {
+  flex: 0 0 auto;
+  min-width: var(--space-12);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-md);
+  color: var(--text-muted);
+}
+
+.app-card__install-path {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--text-sm);
+  color: var(--text-base-color);
+}
+
+.app-card__guidance {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding-inline-start: var(--space-5);
   font-size: var(--text-sm);
   line-height: var(--leading-lg);
   color: var(--text-muted);

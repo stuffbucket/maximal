@@ -23,14 +23,21 @@ import {
   applyProxyBaseUrl,
   readClaudeCodeSettings,
 } from "~/apps/claude-code/config"
-import { getConfig, writeConfig } from "~/lib/config/config"
+import { applyCodexProvider } from "~/apps/codex/provider"
+import { setCodexRoutingIntent } from "~/apps/codex/reconcile"
+import { getConfig, writeConfig, type AppConfig } from "~/lib/config/config"
 import { apiKeysRoutes } from "~/routes/settings/api-keys"
 
 const CLAUDE_CONFIG_DIR = fs.mkdtempSync(
   path.join(os.tmpdir(), "api-keys-route-claude-"),
 )
 const CLAUDE_SETTINGS = path.join(CLAUDE_CONFIG_DIR, "settings.json")
+const CODEX_CONFIG_DIR = fs.mkdtempSync(
+  path.join(os.tmpdir(), "api-keys-route-codex-"),
+)
+const CODEX_CONFIG = path.join(CODEX_CONFIG_DIR, "config.toml")
 const savedClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR
+const savedCodexHome = process.env.CODEX_HOME
 
 function buildApp() {
   const app = new Hono()
@@ -40,7 +47,9 @@ function buildApp() {
 
 beforeEach(() => {
   process.env.CLAUDE_CONFIG_DIR = CLAUDE_CONFIG_DIR
+  process.env.CODEX_HOME = CODEX_CONFIG_DIR
   fs.rmSync(CLAUDE_SETTINGS, { force: true })
+  fs.rmSync(CODEX_CONFIG, { force: true })
   writeConfig({})
 })
 
@@ -52,8 +61,23 @@ afterAll(() => {
   } else {
     process.env.CLAUDE_CONFIG_DIR = savedClaudeConfigDir
   }
+  if (savedCodexHome === undefined) delete process.env.CODEX_HOME
+  else process.env.CODEX_HOME = savedCodexHome
   fs.rmSync(CLAUDE_CONFIG_DIR, { recursive: true, force: true })
+  fs.rmSync(CODEX_CONFIG_DIR, { recursive: true, force: true })
 })
+
+function seedCodexRouting(config: AppConfig): void {
+  writeConfig(config)
+  applyCodexProvider({ execPath: "/old/maximal" })
+  setCodexRoutingIntent(true)
+}
+
+function expectCodexHelperRefreshed(): void {
+  const content = fs.readFileSync(CODEX_CONFIG, "utf8")
+  expect(content).toContain(`command = ${JSON.stringify(process.execPath)}`)
+  expect(content).not.toContain('command = "/old/maximal"')
+}
 
 describe("/api-keys GET /", () => {
   test("empty config → enforcing=false, no entries", async () => {
@@ -274,6 +298,53 @@ describe("/api-keys PATCH /:id", () => {
       body: JSON.stringify({ key: "second-key-bbbb" }),
     })
     expect(res.status).toBe(409)
+  })
+})
+
+describe("Codex API key helper refresh", () => {
+  const entry = {
+    id: "codex-key",
+    label: "codex",
+    key: "original-key",
+    enabled: true,
+    created_at: "2026-01-01T00:00:00.000Z",
+  }
+
+  test("create refreshes owned helper metadata", async () => {
+    seedCodexRouting({})
+
+    const response = await buildApp().request("/api-keys", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ label: "created", key: "created-key" }),
+    })
+
+    expect(response.status).toBe(201)
+    expectCodexHelperRefreshed()
+  })
+
+  test("update refreshes owned helper metadata", async () => {
+    seedCodexRouting({ auth: { apiKeyEntries: [entry] } })
+
+    const response = await buildApp().request(`/api-keys/${entry.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ key: "rotated-key" }),
+    })
+
+    expect(response.status).toBe(200)
+    expectCodexHelperRefreshed()
+  })
+
+  test("delete refreshes owned helper metadata", async () => {
+    seedCodexRouting({ auth: { apiKeyEntries: [entry] } })
+
+    const response = await buildApp().request(`/api-keys/${entry.id}`, {
+      method: "DELETE",
+    })
+
+    expect(response.status).toBe(204)
+    expectCodexHelperRefreshed()
   })
 })
 

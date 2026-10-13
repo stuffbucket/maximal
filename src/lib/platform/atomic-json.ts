@@ -26,36 +26,91 @@
 import fs from "node:fs"
 import path from "node:path"
 
-export interface AtomicWriteJsonOptions {
-  /** Human-readable context for the concurrency/symlink error message, e.g.
-   *  `"Claude Code settings"`. Defaults to `"file"`. */
+export interface AtomicWriteTextOptions {
+  /** Human-readable context for error messages. Defaults to `"file"`. */
   label?: string
+  /** Expected destination bytes. Use `null` when the file must not exist. */
+  expectedContent?: string | null
 }
 
-/**
- * Atomically write `value` as pretty-printed JSON (2-space indent, trailing
- * newline) to `filePath`. Clears a stale temp first (crash recovery) and
- * writes through a fresh O_EXCL temp (symlink-safe) before renaming into place.
- */
-export function atomicWriteJson(
-  filePath: string,
-  value: unknown,
-  opts: AtomicWriteJsonOptions = {},
-): void {
-  const label = opts.label ?? "file"
-  fs.mkdirSync(path.dirname(filePath), { recursive: true })
-  const tmp = `${filePath}.tmp`
-  const json = `${JSON.stringify(value, null, 2)}\n`
-  // Clear a stale temp (e.g. from a crashed prior write). unlink removes the
-  // entry itself without following a symlink, so this is symlink-safe; ENOENT
-  // (no stale temp) is the normal case.
+export type AtomicWriteJsonOptions = Pick<AtomicWriteTextOptions, "label">
+
+function isErrorCode(error: unknown, code: string): boolean {
+  return error instanceof Error && "code" in error && error.code === code
+}
+
+function unlinkIfPresent(filePath: string): void {
   try {
-    fs.unlinkSync(tmp)
-  } catch (err: unknown) {
-    if (!(err instanceof Error) || !("code" in err) || err.code !== "ENOENT") {
-      throw err
-    }
+    fs.unlinkSync(filePath)
+  } catch (error: unknown) {
+    if (!isErrorCode(error, "ENOENT")) throw error
   }
+}
+
+function readRegularDestination(
+  filePath: string,
+  label: string,
+): string | null {
+  let stat: fs.Stats
+  try {
+    stat = fs.lstatSync(filePath)
+  } catch (error: unknown) {
+    if (isErrorCode(error, "ENOENT")) return null
+    throw error
+  }
+  if (stat.isSymbolicLink()) {
+    throw new Error(
+      `refusing to write ${label}: destination is a symbolic link`,
+    )
+  }
+  return fs.readFileSync(filePath, "utf8")
+}
+
+function isUnsupportedDirectorySync(error: unknown): boolean {
+  return ["EPERM", "EISDIR", "EINVAL"].some((code) => isErrorCode(error, code))
+}
+
+/** Best-effort metadata durability on platforms that permit directory fsync. */
+export function fsyncDirectory(directory: string): void {
+  let fd: number
+  try {
+    fd = fs.openSync(directory, fs.constants.O_RDONLY)
+  } catch (error: unknown) {
+    if (isUnsupportedDirectorySync(error)) return
+    throw error
+  }
+  try {
+    fs.fsyncSync(fd)
+  } catch (error: unknown) {
+    if (!isUnsupportedDirectorySync(error)) throw error
+  } finally {
+    fs.closeSync(fd)
+  }
+}
+
+/** Atomically write private text, returning false when the bytes are unchanged. */
+export function atomicWriteText(
+  filePath: string,
+  content: string,
+  opts: AtomicWriteTextOptions = {},
+): boolean {
+  const label = opts.label ?? "file"
+  const directory = path.dirname(filePath)
+  fs.mkdirSync(directory, { recursive: true })
+  const initialContent = readRegularDestination(filePath, label)
+  const hasExpectedContent = Object.hasOwn(opts, "expectedContent")
+  if (hasExpectedContent && initialContent !== opts.expectedContent) {
+    throw new Error(
+      `refusing to write ${label}: file changed before it could be written`,
+    )
+  }
+  if (initialContent === content) {
+    fs.chmodSync(filePath, 0o600)
+    return false
+  }
+
+  const tmp = `${filePath}.tmp`
+  unlinkIfPresent(tmp)
   let fd: number
   try {
     fd = fs.openSync(
@@ -63,19 +118,45 @@ export function atomicWriteJson(
       fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL,
       0o600,
     )
-  } catch (err: unknown) {
-    if (err instanceof Error && "code" in err && err.code === "EEXIST") {
+  } catch (error: unknown) {
+    if (isErrorCode(error, "EEXIST")) {
       throw new Error(
         `refusing to write ${label}: ${tmp} already exists (possible symlink attack); remove it and retry`,
       )
     }
-    throw err
+    throw error
   }
+
   try {
-    fs.writeFileSync(fd, json)
+    fs.writeFileSync(fd, content)
     fs.fsyncSync(fd)
-  } finally {
     fs.closeSync(fd)
+    fd = -1
+
+    const currentContent = readRegularDestination(filePath, label)
+    if (currentContent !== initialContent) {
+      throw new Error(
+        `refusing to write ${label}: file changed before it could be written`,
+      )
+    }
+    fs.renameSync(tmp, filePath)
+    fs.chmodSync(filePath, 0o600)
+    fsyncDirectory(directory)
+    return true
+  } finally {
+    if (fd >= 0) fs.closeSync(fd)
+    unlinkIfPresent(tmp)
   }
-  fs.renameSync(tmp, filePath)
+}
+
+/**
+ * Atomically write `value` as pretty-printed JSON (2-space indent, trailing
+ * newline) to `filePath`.
+ */
+export function atomicWriteJson(
+  filePath: string,
+  value: unknown,
+  opts: AtomicWriteJsonOptions = {},
+): void {
+  atomicWriteText(filePath, `${JSON.stringify(value, null, 2)}\n`, opts)
 }

@@ -280,8 +280,15 @@ export async function revertAppIntegrations(
 ): Promise<void> {
   for (const app of stillEnabled) {
     try {
-      await app.disable()
-      consola.success(`  disabled ${app.name}`)
+      const result = await app.disable()
+      if (result.success) {
+        consola.success(`  disabled ${app.name}`)
+      } else {
+        consola.warn(
+          `  ${app.name} requires manual cleanup`,
+          result.conflict ?? "unknown-conflict",
+        )
+      }
     } catch (err) {
       consola.warn(`  could not disable ${app.name}`, err)
     }
@@ -290,6 +297,9 @@ export async function revertAppIntegrations(
     try {
       const result = await app.uninstall()
       for (const line of result.reverted) consola.success(`  ${line}`)
+      if (result.conflict) {
+        consola.warn(`  ${app.name} requires manual cleanup`, result.conflict)
+      }
     } catch (err) {
       consola.warn(`  could not revert ${app.name}`, err)
     }

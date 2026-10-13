@@ -105,6 +105,13 @@ const baseDiagnostics: DiagnosticsResponse = {
     kind: "CopilotResponsesExecutor",
     detail: "gpt-5-mini",
   },
+  context_management: {
+    advertised: [],
+    cache: {
+      policy: "rejections-only",
+      entries: [],
+    },
+  },
 }
 
 const upToDate: UpdateStatusResponse = {
@@ -136,6 +143,29 @@ const appsAllInstalled: AppsListResponse = {
       enabled: false,
       status: "ready",
       installs: [],
+      install: null,
+      conflict: null,
+    },
+    {
+      id: "codex",
+      name: "Codex",
+      kind: "config",
+      enabled: true,
+      status: "ready",
+      installs: [
+        {
+          kind: "cli",
+          path: "/Users/you/.local/bin/codex",
+          version: null,
+          source: "local-bin",
+        },
+        {
+          kind: "desktop",
+          path: "/Applications/Codex.app",
+          version: null,
+          source: "unknown",
+        },
+      ],
       install: null,
       conflict: null,
     },
@@ -225,6 +255,59 @@ export const SCENARIOS = {
         a.id === "claude-code" ?
           { ...a, enabled: false, status: "not-installed" as const, installs: [], install: { method: "curl", command: "curl -fsSL https://claude.ai/install.sh | sh" } }
         : a,
+      ),
+    },
+    apiKeys: twoApiKeys,
+    accounts: twoAccounts,
+    models: baseModels,
+    diagnostics: baseDiagnostics,
+    updateStatus: upToDate,
+    ghStatus: ghAvailable,
+  },
+
+  "codex-missing": {
+    label: "Apps · Codex not installed",
+    auth: {
+      state: "authenticated",
+      account_login: "octocat",
+      connected_since: ISO(-7_265_000),
+    },
+    apps: {
+      apps: appsAllInstalled.apps.map((app) =>
+        app.id === "codex" ?
+          {
+            ...app,
+            enabled: false,
+            status: "not-installed" as const,
+            installs: [],
+          }
+        : app,
+      ),
+    },
+    apiKeys: twoApiKeys,
+    accounts: twoAccounts,
+    models: baseModels,
+    diagnostics: baseDiagnostics,
+    updateStatus: upToDate,
+    ghStatus: ghAvailable,
+  },
+
+  "codex-cleanup-required": {
+    label: "Apps · Codex cleanup required",
+    auth: {
+      state: "authenticated",
+      account_login: "octocat",
+      connected_since: ISO(-7_265_000),
+    },
+    apps: {
+      apps: appsAllInstalled.apps.map((app) =>
+        app.id === "codex" ?
+          {
+            ...app,
+            enabled: false,
+            conflict: "cleanup-required" as const,
+          }
+        : app,
       ),
     },
     apiKeys: twoApiKeys,

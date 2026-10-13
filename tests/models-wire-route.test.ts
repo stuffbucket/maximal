@@ -9,13 +9,16 @@
  * strict client (Claude Desktop's picker) reject the list and render empty.
  */
 
-import { beforeEach, describe, expect, test } from "bun:test"
+import { afterAll, beforeEach, describe, expect, test } from "bun:test"
 import { Hono } from "hono"
 
 import type { Model } from "~/services/copilot/get-models"
 
+import { getConfig, writeConfig } from "~/lib/config/config"
 import { setModels } from "~/lib/runtime-state/state"
 import { modelRoutes } from "~/routes/models/route"
+
+const originalConfig = getConfig()
 
 const LEAK_VECTORS = [
   "billing",
@@ -74,7 +77,19 @@ interface Entry {
 }
 
 beforeEach(() => {
+  writeConfig({
+    modelMappings: [
+      {
+        match: { type: "exact", value: "catalog-alias" },
+        target: "claude-opus-4.6",
+      },
+    ],
+  })
   setModels({ object: "list", data: [richModel()] })
+})
+
+afterAll(() => {
+  writeConfig(originalConfig)
 })
 
 describe("GET /v1/models — OpenAI default (no protocol signal)", () => {
@@ -88,6 +103,7 @@ describe("GET /v1/models — OpenAI default (no protocol signal)", () => {
       ["created", "id", "object", "owned_by"].sort(),
     )
     expect(entry.id).toBe("claude-opus-4-6-20260301")
+    expect(body.data.some((model) => model.id === "catalog-alias")).toBe(false)
     expect(entry.object).toBe("model")
     expect(entry.owned_by).toBe("anthropic")
     for (const leaked of LEAK_VECTORS) expect(entry[leaked]).toBeUndefined()

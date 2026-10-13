@@ -18,6 +18,7 @@ const actualUtilsModule = { ...(await import("../src/lib/platform/utils")) }
 const actualApiFlowsModule = {
   ...(await import("../src/routes/messages/api-flows")),
 }
+const originalConfig = actualConfigModule.getConfig()
 
 const state = {
   ...actualStateModule.state,
@@ -109,6 +110,7 @@ const createPayload = (
 })
 
 beforeEach(() => {
+  actualConfigModule.writeConfig({ modelMappings: [] })
   state.manualApprove = false
   state.verbose = false
   messagesApiEnabled = true
@@ -120,6 +122,8 @@ beforeEach(() => {
   handleWithChatCompletions.mockClear()
 })
 
+// The shared orchestration harness keeps all flow-spy assertions in one scope.
+// eslint-disable-next-line max-lines-per-function
 describe("messages handler orchestration", () => {
   test("removes executeCode and rewrites getDiagnostics before forwarding tools", async () => {
     selectedModel = {
@@ -198,6 +202,50 @@ describe("messages handler orchestration", () => {
 
     const [, forwardedPayload] = handleWithMessagesApi.mock.calls[0]
     expect(forwardedPayload.model).toBe("messages-model")
+  })
+
+  test("reverses the inbound ID before mapping and variant selection", async () => {
+    const previousModels = state.models
+    selectedModel = {
+      id: "responses-model",
+      supported_endpoints: ["/responses"],
+    }
+    state.models = {
+      object: "list",
+      data: [
+        {
+          id: "responses-model",
+          model_picker_enabled: true,
+          supported_endpoints: ["/responses"],
+        },
+      ],
+    } as typeof state.models
+    actualConfigModule.writeConfig({
+      modelMappings: [
+        {
+          match: { type: "exact", value: "claude-opus-4.6" },
+          target: "responses-model",
+        },
+      ],
+    })
+
+    try {
+      const response = await createApp().request("/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(
+          createPayload({ model: "claude-opus-4-6-20260301" }),
+        ),
+      })
+
+      expect(response.status).toBe(200)
+      expect(await response.text()).toBe("responses")
+      expect(findEndpointModel).toHaveBeenCalledWith("responses-model")
+      const [, forwardedPayload] = handleWithResponsesApi.mock.calls[0]
+      expect(forwardedPayload.model).toBe("responses-model")
+    } finally {
+      Object.assign(state, { models: previousModels })
+    }
   })
 
   test("strips unsupported top-level diagnostics before forwarding", async () => {
@@ -436,6 +484,7 @@ describe("warmup short-circuit", () => {
 // (Bun keeps module mocks for the whole process; an unawaited restore never
 // lands).
 afterAll(async () => {
+  actualConfigModule.writeConfig(originalConfig)
   await mock.module("~/lib/runtime-state/state", () => actualStateModule)
   await mock.module("~/lib/models/models", () => actualModelsModule)
   await mock.module("~/lib/http/rate-limit", () => actualRateLimitModule)

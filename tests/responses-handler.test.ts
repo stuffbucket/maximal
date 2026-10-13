@@ -12,6 +12,7 @@ import { Hono } from "hono"
 const createResponses = mock(() => Promise.resolve(streamChunks([])))
 
 const { state } = await import("../src/lib/runtime-state/state")
+const { getConfig, writeConfig } = await import("../src/lib/config/config")
 const { closeUsageStore } = await import("../src/lib/token-usage")
 const { tokenUsageRoute } = await import("../src/routes/token-usage/route")
 const { responsesRoutes } = await import("../src/routes/responses/route")
@@ -29,6 +30,7 @@ __setCreateResponsesForTests(createResponses)
 
 const DB_PATH_ENV = "COPILOT_API_SQLITE_DB_PATH"
 
+const originalConfig = getConfig()
 const originalState = {
   copilotToken: state.copilotToken,
   lastRequestTimestamp: state.lastRequestTimestamp,
@@ -55,6 +57,7 @@ async function* streamChunks(items: Array<Record<string, unknown>>) {
 
 beforeEach(async () => {
   process.env[DB_PATH_ENV] = ":memory:"
+  writeConfig({ modelMappings: [] })
   await closeUsageStore()
 
   state.copilotToken = "test-token"
@@ -73,6 +76,7 @@ beforeEach(async () => {
           },
         },
         id: "gpt-test",
+        model_picker_enabled: true,
         supported_endpoints: ["/responses"],
       },
     ],
@@ -92,6 +96,7 @@ afterEach(async () => {
   state.rateLimitWait = originalState.rateLimitWait
   state.lastRequestTimestamp = originalState.lastRequestTimestamp
   state.models = originalState.models
+  writeConfig(originalConfig)
 })
 
 describe("responses handler token usage", () => {
@@ -183,6 +188,68 @@ describe("responses handler token usage", () => {
     expect(page.items[0]?.input_tokens).toBe(4)
     expect(page.items[0]?.output_tokens).toBe(2)
     expect(page.items[0]?.total_tokens).toBe(7)
+  })
+})
+
+describe("responses handler model mappings", () => {
+  test("forwards a mapped model from the live catalog", async () => {
+    createResponses.mockImplementation(() => Promise.resolve(streamChunks([])))
+    writeConfig({
+      modelMappings: [
+        {
+          match: { type: "exact", value: "codex-auto-review" },
+          target: "gpt-test",
+        },
+      ],
+    })
+
+    const response = await createApp().request("/v1/responses", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        input: "hello",
+        model: "codex-auto-review",
+        stream: true,
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    await response.text()
+    expect(createResponses).toHaveBeenCalledTimes(1)
+    const [forwardedPayload] = createResponses.mock.calls[0] as unknown as [
+      { model: string },
+    ]
+    expect(forwardedPayload.model).toBe("gpt-test")
+  })
+
+  test("rejects a matched unavailable target without an upstream call", async () => {
+    writeConfig({
+      modelMappings: [
+        {
+          match: { type: "exact", value: "codex-auto-review" },
+          target: "missing-model",
+        },
+      ],
+    })
+
+    const response = await createApp().request("/v1/responses", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        input: "hello",
+        model: "codex-auto-review",
+      }),
+    })
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({
+      error: {
+        message:
+          'Model mapping for "codex-auto-review" targets unavailable model "missing-model".',
+        type: "invalid_request_error",
+      },
+    })
+    expect(createResponses).not.toHaveBeenCalled()
   })
 })
 

@@ -2,7 +2,7 @@ import type { Context } from "hono"
 
 import type { Model } from "~/services/copilot/get-models"
 
-import { isMessagesApiEnabled } from "~/lib/config/config"
+import { getConfig, isMessagesApiEnabled } from "~/lib/config/config"
 import { awaitApproval } from "~/lib/http/approval"
 import { checkRateLimit } from "~/lib/http/rate-limit"
 import {
@@ -11,6 +11,10 @@ import {
 } from "~/lib/models/anthropic-id-rewrite"
 import { type AnthropicMessagesPayload } from "~/lib/models/anthropic-types"
 import { COMPACT_REQUEST } from "~/lib/models/compact"
+import {
+  modelMappingErrorBody,
+  resolveModelMapping,
+} from "~/lib/models/model-mapping"
 import { findEndpointModel } from "~/lib/models/models"
 import {
   createHandlerLogger,
@@ -46,20 +50,22 @@ const logger = createHandlerLogger("messages-handler")
 // Desktop's normalizer) back to Copilot's original dot-form, then route
 // to the variant SKU when the inbound request set effort or requested
 // the 1M-context beta.
-function resolveCopilotModel(
+function resolveCopilotVariant(
   c: Context,
   payload: AnthropicMessagesPayload,
+  model: string,
 ): string {
-  const reversed = reverseId(payload.model)
   const longContext =
     c.req.header("anthropic-beta")?.includes("context-1m-2025-08-07") ?? false
   return pickCopilotVariantId(
-    reversed,
+    model,
     { effort: payload.output_config?.effort, longContext },
-    state.models?.data.map((m) => m.id) ?? [],
+    state.models?.data.map((candidate) => candidate.id) ?? [],
   )
 }
 
+// Mapping validation adds one guarded branch to this orchestration flow.
+// eslint-disable-next-line complexity
 export async function handleCompletion(c: Context) {
   await checkRateLimit(state)
 
@@ -67,7 +73,21 @@ export async function handleCompletion(c: Context) {
   stripUnsupportedTopLevelAnthropicFields(anthropicPayload)
   debugJson(logger, "Anthropic request payload:", anthropicPayload)
 
-  anthropicPayload.model = resolveCopilotModel(c, anthropicPayload)
+  const reversedModel = reverseId(anthropicPayload.model)
+  const mapping = resolveModelMapping({
+    requestedModel: reversedModel,
+    rules: getConfig().modelMappings ?? [],
+    models: state.models?.data ?? [],
+    endpoint: null,
+  })
+  if (mapping.status === "invalid-target") {
+    return c.json(modelMappingErrorBody(mapping), 400)
+  }
+  anthropicPayload.model = resolveCopilotVariant(
+    c,
+    anthropicPayload,
+    mapping.resolvedModel,
+  )
 
   sanitizeIdeTools(anthropicPayload)
   stripUnsupportedClaudeCodeTools(anthropicPayload, c.req.header("user-agent"))

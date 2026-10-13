@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { t } from "../../../i18n";
 import type { AppEntry } from "../../../proxy/client";
 import { Button } from "../../components/Button";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
@@ -24,19 +25,18 @@ function conflictCopy(app: AppEntry): { title: string; detail: string } | null {
   switch (app.conflict) {
     case "foreign-base-url":
       return {
-        title: "Left your existing setting in place",
-        detail:
-          `${app.name} already has a custom ANTHROPIC_BASE_URL set by you or` +
-          " another tool, so we didn't change it. Remove that line from the" +
-          " app's settings, then switch this on again to route through maximal.",
+        title: t("apps-conflict-existing-title"),
+        detail: t("apps-conflict-base-url", { appName: app.name }),
       };
     case "foreign-api-key-helper":
       return {
-        title: "Left your existing setting in place",
-        detail:
-          `${app.name} already has a custom apiKeyHelper set by you or` +
-          " another tool, so we didn't change it. Remove that line from the" +
-          " app's settings, then switch this on again to route through maximal.",
+        title: t("apps-conflict-existing-title"),
+        detail: t("apps-conflict-api-key-helper", { appName: app.name }),
+      };
+    case "cleanup-required":
+      return {
+        title: t("apps-conflict-cleanup-title"),
+        detail: t("apps-conflict-cleanup-detail", { appName: app.name }),
       };
     case null:
       return null;
@@ -108,13 +108,15 @@ export function AppCard({ app, onToggle, onRescan }: AppCardProps): JSX.Element 
 
         <div className="app-card__control">
           {comingSoon ? (
-            <span className="chip app-card__pill">Coming soon</span>
+            <span className="chip app-card__pill">
+              {t("apps-coming-soon")}
+            </span>
           ) : offerInstall ? null : (
             <Switch
               checked={app.enabled}
               disabled={notInstalled}
               onCheckedChange={handleToggle}
-              label={app.enabled ? "On" : "Off"}
+              label={app.enabled ? t("apps-switch-on") : t("apps-switch-off")}
             />
           )}
         </div>
@@ -124,7 +126,7 @@ export function AppCard({ app, onToggle, onRescan }: AppCardProps): JSX.Element 
       {offerInstall && app.install && (
         <div className="app-card__install">
           <p className="app-card__hint">
-            Run this in your terminal to install {app.name}, then re-scan.
+            {t("apps-install-hint", { appName: app.name })}
           </p>
           <div className="app-card__cmd">
             <code className="app-card__cmd-text mono">
@@ -136,7 +138,7 @@ export function AppCard({ app, onToggle, onRescan }: AppCardProps): JSX.Element 
                 size="sm"
                 onClick={() => void copyInstall()}
               >
-                {copied ? "Copied" : "Copy command"}
+                {copied ? t("common-copied") : t("apps-copy-command")}
               </Button>
               <Button
                 variant="secondary"
@@ -144,25 +146,46 @@ export function AppCard({ app, onToggle, onRescan }: AppCardProps): JSX.Element 
                 disabled={rescanning}
                 onClick={() => void rescan()}
               >
-                {rescanning ? "Re-scanning…" : "Re-scan"}
+                {rescanning ? t("apps-rescanning") : t("apps-rescan")}
               </Button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Config app with an install: show its location, or a "not
-          installed" note. No version picker — routing is by config file,
-          not a per-binary shim. */}
+      {/* Config apps show every detected surface as a flat row. Routing is by
+          shared config, not a per-binary shim or nested app card. */}
       {app.kind === "config" &&
         !offerInstall &&
         (notInstalled ? (
-          <p className="app-card__hint">Not installed.</p>
+          <p className="app-card__hint">{t("apps-not-installed")}</p>
         ) : (
-          app.installs[0] && (
-            <p className="app-card__hint mono">{app.installs[0].path}</p>
-          )
+          <div className="app-card__installs">
+            {app.installs.map((install) => (
+              <div className="app-card__install-row" key={install.path}>
+                {install.kind && (
+                  <span className="app-card__install-kind">
+                    {install.kind === "cli"
+                      ? t("apps-install-kind-cli")
+                      : t("apps-install-kind-desktop")}
+                  </span>
+                )}
+                <span className="app-card__install-path mono">
+                  {install.path}
+                </span>
+              </div>
+            ))}
+          </div>
         ))}
+
+      {app.id === "codex" && !notInstalled && (
+        <ul className="app-card__guidance">
+          <li>{t("apps-codex-shared-setting")}</li>
+          <li>{t("apps-codex-restart-session")}</li>
+          <li>{t("apps-codex-settings-unchanged")}</li>
+          <li>{t("apps-codex-settings-precedence")}</li>
+        </ul>
+      )}
 
       {/* Enable was refused (e.g. a base URL we don't own). Explain it and
           point at the fix — the toggle silently snapping back would be a
@@ -198,21 +221,17 @@ export function AppCard({ app, onToggle, onRescan }: AppCardProps): JSX.Element 
       {needsWindowsRestartWarning && (
         <ConfirmDialog
           open={restartWarnOpen}
-          title="Restart Claude Code to finish"
+          title={t("apps-restart-title")}
           body={
             <>
+              <p>{t("apps-restart-windows-body")}</p>
               <p>
-                On Windows, a Claude Code session that's already running keeps
-                routing through maximal until you restart it.
-              </p>
-              <p>
-                After you disable this, run <code className="mono">/exit</code>{" "}
-                in Claude Code and start it again for the change to take effect.
+                {t("apps-restart-after-disable", { exitCommand: "/exit" })}
               </p>
             </>
           }
-          confirmLabel="Disable routing"
-          cancelLabel="Keep on"
+          confirmLabel={t("apps-disable-routing")}
+          cancelLabel={t("apps-keep-on")}
           busy={disabling}
           onConfirm={confirmDisable}
           onCancel={() => setRestartWarnOpen(false)}

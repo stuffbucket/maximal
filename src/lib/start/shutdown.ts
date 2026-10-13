@@ -21,6 +21,7 @@ import type { serve } from "srvx"
 import consola from "consola"
 
 import { reconcileClaudeCodeOnShutdown } from "~/apps/claude-code/reconcile"
+import { reconcileCodexOnShutdown } from "~/apps/codex/reconcile"
 import { removePidfile } from "~/lib/platform/replace-running"
 
 import { clearSessionRunning } from "./session-sentinel"
@@ -46,6 +47,7 @@ export async function initiateShutdown(
   // the next boot re-applies it. Synchronous + best-effort — a slow/failed
   // file write must not delay or block the drain.
   reconcileClaudeCodeOnShutdown()
+  reconcileCodexOnShutdown()
 
   // Fail-safe: if close() hangs, hard-exit after 2.5s. .unref() so the
   // timer itself never holds the loop open in the happy path.
@@ -104,6 +106,11 @@ export function installShutdownHandlers(
       reconcileClaudeCodeOnShutdown()
     } catch {
       // exit handlers can't throw — and we're exiting anyway.
+    }
+    try {
+      reconcileCodexOnShutdown()
+    } catch {
+      // same — best-effort.
     }
     try {
       clearSessionRunning()

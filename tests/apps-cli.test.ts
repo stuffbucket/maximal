@@ -12,10 +12,13 @@
 
 import type { ArgsDef, CommandDef } from "citty"
 
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
+import consola from "consola"
+
+import type { ClientApp } from "~/apps"
 
 import { claudeDesktopCli } from "~/apps/claude-desktop/cli"
-import { apiCommand, appCommand } from "~/apps/cli"
+import { apiCommand, appCommand, disableApp } from "~/apps/cli"
 import { defineComingSoonApp } from "~/apps/coming-soon"
 import { getAllApps, getApp } from "~/apps/registry"
 import { apiKeyHelperCommand } from "~/lib/auth/api-key-helper"
@@ -76,6 +79,27 @@ describe("maximal app command", () => {
     expect(args.disable.type).toBe("boolean")
     expect(args.force.type).toBe("boolean")
     expect(args.managed.type).toBe("boolean")
+  })
+
+  test("reports cleanup-required instead of claiming disable was a no-op", async () => {
+    const info = spyOn(consola, "info")
+    const warn = spyOn(consola, "warn")
+    const app = {
+      name: "Codex",
+      disable: () =>
+        Promise.resolve({ success: false, conflict: "cleanup-required" }),
+    } as ClientApp
+
+    try {
+      await disableApp(app)
+      expect(info).not.toHaveBeenCalled()
+      expect(warn).toHaveBeenCalledWith(
+        "Codex requires manual cleanup: cleanup-required.",
+      )
+    } finally {
+      info.mockRestore()
+      warn.mockRestore()
+    }
   })
 })
 

@@ -5,6 +5,7 @@ import consola from "consola"
 import {
   getAnthropicApiKey,
   getClaudeTokenMultiplier,
+  getConfig,
 } from "~/lib/config/config"
 import { sendRequest } from "~/lib/http/send-request"
 import { reverseId } from "~/lib/models/anthropic-id-rewrite"
@@ -12,7 +13,12 @@ import {
   type AnthropicMessagesPayload,
   ANTHROPIC_API_VERSION,
 } from "~/lib/models/anthropic-types"
+import {
+  modelMappingErrorBody,
+  resolveModelMapping,
+} from "~/lib/models/model-mapping"
 import { getTokenCount } from "~/lib/models/tokenizer"
+import { state } from "~/lib/runtime-state/state"
 
 import { findEndpointModel } from "../../lib/models/models"
 import { translateToOpenAI } from "./non-stream-translation"
@@ -70,6 +76,8 @@ async function countTokensViaAnthropic(
  * and the model is a Claude model, forwards to Anthropic's free /v1/messages/count_tokens
  * endpoint for accurate counts. Otherwise falls back to GPT tokenizer estimation.
  */
+// Mapping validation adds one guarded branch before endpoint selection.
+// eslint-disable-next-line complexity
 export async function handleCountTokens(c: Context) {
   try {
     const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
@@ -79,6 +87,16 @@ export async function handleCountTokens(c: Context) {
     // Desktop's normalizer) back to Copilot's original dot-form before any
     // model lookup happens.
     anthropicPayload.model = reverseId(anthropicPayload.model)
+    const mapping = resolveModelMapping({
+      requestedModel: anthropicPayload.model,
+      rules: getConfig().modelMappings ?? [],
+      models: state.models?.data ?? [],
+      endpoint: null,
+    })
+    if (mapping.status === "invalid-target") {
+      return c.json(modelMappingErrorBody(mapping), 400)
+    }
+    anthropicPayload.model = mapping.resolvedModel
 
     // Try Anthropic's real endpoint first (Claude models only)
     const anthropicResult = await countTokensViaAnthropic(c, anthropicPayload)

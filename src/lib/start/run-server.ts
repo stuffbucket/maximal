@@ -13,6 +13,7 @@ import { serve } from "srvx"
 
 import { removeLegacyShimIfPresent } from "~/apps/claude-code/detect"
 import { reconcileClaudeCodeOnBoot } from "~/apps/claude-code/reconcile"
+import { reconcileCodexOnBoot } from "~/apps/codex/reconcile"
 import { type AccountType } from "~/lib/auth/auth-types"
 import { mergeConfigWithDefaults } from "~/lib/config/config"
 import { initProxyFromEnv } from "~/lib/http/proxy"
@@ -118,21 +119,19 @@ export async function runServer(options: RunServerOptions): Promise<void> {
 
   // Crash-detection: did the previous run exit ungracefully (skipped
   // initiateShutdown AND the `exit` safety net — i.e. SIGKILL, power
-  // loss, OS-level kill)? If so AND the Claude Code base URL is still
-  // ours from before, the user has likely been hitting "connection
-  // refused" in `claude` since then. We can't auto-recover the
-  // inter-session window (an external watchdog would be needed), but
-  // we can at least surface the cause so the symptom isn't mysterious.
-  // The reconcileClaudeCodeOnBoot() call below will re-apply the URL
-  // for the new session; that ends the broken-window.
+  // loss, OS-level kill)? If so, a configured client may still point at
+  // the stopped proxy and produce connection-refused errors. We can't
+  // auto-recover the inter-session window (an external watchdog would
+  // be needed), but we can surface the cause and re-apply intended
+  // routing for the new session below.
   const staleSession = staleSessionMarkerPresent()
   if (staleSession) {
     consola.warn(
       "Previous maximal session ended ungracefully (likely a crash, "
-        + "force-quit, or system shutdown). If `claude` produced "
-        + "connection-refused errors since then, that was why — your "
-        + "Claude Code config still pointed at this proxy. Routing is "
-        + "being re-applied now and will work again.",
+        + "force-quit, or system shutdown). If a configured client produced "
+        + "connection-refused errors since then, that was why — its local "
+        + "config may still point at this proxy. Intended routing is being "
+        + "re-applied now.",
     )
   }
 
@@ -211,12 +210,12 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   // doesn't free the port in time.
   void writePidfile()
 
-  // Now that we're actually listening, re-apply the Claude Code base URL
-  // if the user left routing on. Self-heals a URL a prior crash/force-kill
-  // stranded over a dead proxy. Ownership-guarded; no-op when routing is off.
+  // Now that we're actually listening, re-apply intended client routing.
+  // Ownership-guarded and a no-op for each client whose routing is off.
   reconcileClaudeCodeOnBoot()
+  reconcileCodexOnBoot()
 
-  // Drop the "session running" sentinel only AFTER reconcileClaudeCodeOnBoot
+  // Drop the "session running" sentinel only AFTER client reconciliation
   // so the freshly-written URL is in place when we promise the session is
   // healthy. shutdown clears it; a missing-on-next-boot sentinel means a
   // clean exit, present-on-next-boot means an ungraceful one (see the

@@ -17,6 +17,7 @@ import {
   mock,
   spyOn,
 } from "bun:test"
+import consola from "consola"
 import * as childProcess from "node:child_process"
 import fs from "node:fs"
 import os from "node:os"
@@ -517,6 +518,46 @@ describe("uninstall — revertAppIntegrations (registry sweep)", () => {
     // (b) every app from getAllApps() was uninstalled
     expect(uninstallA).toHaveBeenCalledTimes(1)
     expect(uninstallB).toHaveBeenCalledTimes(1)
+  })
+
+  it("surfaces partial-cleanup conflicts from disable and uninstall", async () => {
+    const warn = spyOn(consola, "warn")
+    const disable = mock(() =>
+      Promise.resolve({
+        success: false,
+        conflict: "cleanup-required" as const,
+      }),
+    )
+    const uninstall = mock(() =>
+      Promise.resolve({
+        reverted: [],
+        conflict: "cleanup-required" as const,
+      }),
+    )
+    const app = makeFakeApp({
+      id: "claude-code",
+      name: "Codex",
+      enabled: true,
+      disable,
+      uninstall,
+    })
+
+    try {
+      await mock.module("~/apps/registry", () => ({
+        getAllApps: () => [app],
+      }))
+      const { revertAppIntegrations } = await import("~/uninstall")
+
+      await revertAppIntegrations([app])
+
+      expect(warn).toHaveBeenCalledWith(
+        "  Codex requires manual cleanup",
+        "cleanup-required",
+      )
+      expect(warn).toHaveBeenCalledTimes(2)
+    } finally {
+      warn.mockRestore()
+    }
   })
 
   it("continues the loop when a disable() throws (other apps still process)", async () => {

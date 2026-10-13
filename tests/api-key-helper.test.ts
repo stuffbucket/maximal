@@ -4,6 +4,7 @@ import type { ApiKeyEntry, AppConfig } from "~/lib/config/config"
 
 import {
   apiKeyHelperCommand,
+  apiKeyHelperInvocation,
   echoApiKeyHelperCommand,
   isOwnedApiKeyHelper,
   resolveApiKey,
@@ -59,6 +60,41 @@ describe("apiKeyHelperCommand", () => {
     expect(apiKeyHelperCommand("claude-code", spaced)).toBe(
       `"${spaced}" api claude-code`,
     )
+  })
+})
+
+describe("apiKeyHelperInvocation", () => {
+  test("returns command and arguments separately without embedding a key", () => {
+    const invocation = apiKeyHelperInvocation(
+      "codex",
+      "/Applications/Maximal.app/Contents/MacOS/maximal",
+    )
+
+    expect(invocation).toEqual({
+      command: "/Applications/Maximal.app/Contents/MacOS/maximal",
+      args: ["api", "codex"],
+    })
+  })
+
+  test("trims the label and omits a blank label", () => {
+    expect(apiKeyHelperInvocation("  codex  ", "/maximal").args).toEqual([
+      "api",
+      "codex",
+    ])
+    expect(apiKeyHelperInvocation("   ", "/maximal").args).toEqual(["api"])
+  })
+
+  test("retains the Maximal entrypoint when running through Bun", () => {
+    expect(
+      apiKeyHelperInvocation(
+        "codex",
+        "/opt/homebrew/bin/bun",
+        "/repo/maximal/src/main.ts",
+      ),
+    ).toEqual({
+      command: "/opt/homebrew/bin/bun",
+      args: ["/repo/maximal/src/main.ts", "api", "codex"],
+    })
   })
 })
 

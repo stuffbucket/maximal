@@ -39,12 +39,23 @@ import type { ClaudeInstall } from "~/apps/claude-code/detect"
 const ROUTE_3P_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "apps-route-3p-"))
 const ROUTE_CC_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "apps-route-ccdir-"))
 const ROUTE_CC_SETTINGS = path.join(ROUTE_CC_DIR, "settings.json")
+const ROUTE_CODEX_HOME = fs.mkdtempSync(
+  path.join(os.tmpdir(), "apps-route-codex-home-"),
+)
+const ROUTE_CODEX_BIN = fs.mkdtempSync(
+  path.join(os.tmpdir(), "apps-route-codex-bin-"),
+)
+const ROUTE_CODEX_CONFIG = path.join(ROUTE_CODEX_HOME, "config.toml")
 
 // Redirect the REAL claude-code settings path into our tmp dir via the env var
 // that getClaudeCodeSettingsPath() honors. Saved + restored in afterAll so we
 // don't leak the override to sibling files.
 const savedClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR
+const savedCodexHome = process.env.CODEX_HOME
+const savedPath = process.env.PATH
 process.env.CLAUDE_CONFIG_DIR = ROUTE_CC_DIR
+process.env.CODEX_HOME = ROUTE_CODEX_HOME
+process.env.PATH = ROUTE_CODEX_BIN
 
 let installsFixture: Array<ClaudeInstall> = []
 
@@ -102,6 +113,13 @@ function cleanTmp() {
   fs.mkdirSync(ROUTE_3P_HOME, { recursive: true })
   fs.rmSync(ROUTE_CC_DIR, { recursive: true, force: true })
   fs.mkdirSync(ROUTE_CC_DIR, { recursive: true })
+  fs.rmSync(ROUTE_CODEX_HOME, { recursive: true, force: true })
+  fs.mkdirSync(ROUTE_CODEX_HOME, { recursive: true })
+  fs.rmSync(ROUTE_CODEX_BIN, { recursive: true, force: true })
+  fs.mkdirSync(ROUTE_CODEX_BIN, { recursive: true })
+  fs.writeFileSync(path.join(ROUTE_CODEX_BIN, "codex"), "artifact only", {
+    mode: 0o700,
+  })
 }
 
 beforeEach(() => {
@@ -119,14 +137,20 @@ afterAll(async () => {
   } else {
     process.env.CLAUDE_CONFIG_DIR = savedClaudeConfigDir
   }
+  if (savedCodexHome === undefined) delete process.env.CODEX_HOME
+  else process.env.CODEX_HOME = savedCodexHome
+  if (savedPath === undefined) delete process.env.PATH
+  else process.env.PATH = savedPath
   await mock.module("~/apps/claude-code/detect", () => actualDetect)
   await mock.module("~/apps/claude-desktop/config", () => actualDesktop)
   fs.rmSync(ROUTE_3P_HOME, { recursive: true, force: true })
   fs.rmSync(ROUTE_CC_DIR, { recursive: true, force: true })
+  fs.rmSync(ROUTE_CODEX_HOME, { recursive: true, force: true })
+  fs.rmSync(ROUTE_CODEX_BIN, { recursive: true, force: true })
 })
 
 describe("GET /apps", () => {
-  test("returns three apps in alphabetical order with the right kinds", async () => {
+  test("returns four apps in alphabetical order with the right kinds", async () => {
     const res = await buildApp().request("/apps")
     expect(res.status).toBe(200)
     const body = (await res.json()) as {
@@ -135,12 +159,14 @@ describe("GET /apps", () => {
     expect(body.apps.map((a) => a.id)).toEqual([
       "claude-code",
       "claude-desktop",
+      "codex",
       "copilot-cli",
     ])
     expect(body.apps[0].kind).toBe("config")
     expect(body.apps[1].kind).toBe("config")
-    expect(body.apps[2].kind).toBe("coming-soon")
-    expect(body.apps[2].status).toBe("coming-soon")
+    expect(body.apps[2].kind).toBe("config")
+    expect(body.apps[3].kind).toBe("coming-soon")
+    expect(body.apps[3].status).toBe("coming-soon")
   })
 
   test("claude-code offers an install command when no install is detected", async () => {
@@ -175,6 +201,20 @@ describe("GET /apps", () => {
     expect(cc?.status).toBe("ready")
     expect(cc?.installs[0].path).toBe("/opt/homebrew/bin/claude")
     expect(cc?.install).toBeNull()
+  })
+
+  test("isolates malformed Codex config as a typed app conflict", async () => {
+    fs.writeFileSync(ROUTE_CODEX_CONFIG, 'model_provider = "unterminated\n')
+
+    const response = await buildApp().request("/apps")
+    expect(response.status).toBe(200)
+    const body = (await response.json()) as {
+      apps: Array<{ id: string; enabled: boolean; conflict: string | null }>
+    }
+    expect(body.apps.find(({ id }) => id === "codex")).toMatchObject({
+      enabled: false,
+      conflict: "cleanup-required",
+    })
   })
 })
 
@@ -255,6 +295,95 @@ describe("POST /apps/claude-code/toggle", () => {
       body: JSON.stringify({ enabled: "yes" }),
     })
     expect(res.status).toBe(400)
+  })
+})
+
+describe("POST /apps/codex/toggle", () => {
+  test("enable and disable round-trip owned Codex routing", async () => {
+    const app = buildApp()
+    const enabled = await app.request("/apps/codex/toggle", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled: true }),
+    })
+
+    expect(enabled.status).toBe(200)
+    expect((await enabled.json()) as { enabled: boolean }).toMatchObject({
+      enabled: true,
+    })
+    expect(getConfig().apps?.codex?.enabled).toBe(true)
+    expect(fs.readFileSync(ROUTE_CODEX_CONFIG, "utf8")).toContain(
+      'model_provider = "maximal-app"',
+    )
+
+    const disabled = await app.request("/apps/codex/toggle", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled: false }),
+    })
+    expect(disabled.status).toBe(200)
+    expect((await disabled.json()) as { enabled: boolean }).toMatchObject({
+      enabled: false,
+    })
+    expect(getConfig().apps?.codex?.enabled).toBe(false)
+    expect(fs.existsSync(ROUTE_CODEX_CONFIG)).toBe(false)
+  })
+
+  test("surfaces cleanup-required when edited provider content is retained", async () => {
+    const app = buildApp()
+    await app.request("/apps/codex/toggle", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled: true }),
+    })
+    fs.writeFileSync(
+      ROUTE_CODEX_CONFIG,
+      fs
+        .readFileSync(ROUTE_CODEX_CONFIG, "utf8")
+        .replace('name = "Maximal"', 'name = "Customized Maximal"'),
+    )
+
+    const response = await app.request("/apps/codex/toggle", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled: false }),
+    })
+
+    expect(response.status).toBe(200)
+    expect((await response.json()) as { conflict: string }).toMatchObject({
+      conflict: "cleanup-required",
+    })
+    expect(fs.readFileSync(ROUTE_CODEX_CONFIG, "utf8")).toContain(
+      'name = "Customized Maximal"',
+    )
+  })
+
+  test("returns typed cleanup state when config cannot be edited safely", async () => {
+    fs.writeFileSync(ROUTE_CODEX_CONFIG, 'model_provider = "unterminated\n')
+
+    for (const enabled of [true, false]) {
+      const response = await buildApp().request("/apps/codex/toggle", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ enabled }),
+      })
+
+      expect(response.status).toBe(200)
+      expect(
+        (await response.json()) as { enabled: boolean; conflict: string },
+      ).toMatchObject({ enabled: false, conflict: "cleanup-required" })
+    }
+  })
+
+  test("rejects an invalid toggle body", async () => {
+    const response = await buildApp().request("/apps/codex/toggle", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled: "yes" }),
+    })
+
+    expect(response.status).toBe(400)
+    expect(fs.existsSync(ROUTE_CODEX_CONFIG)).toBe(false)
   })
 })
 
