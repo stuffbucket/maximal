@@ -92,6 +92,8 @@ export default [
       "scripts/**",
       "shell/**",
       "site/**",
+      // Throwaway experiments kept as evidence; not shipped code.
+      "spikes/**",
       ".dependency-cruiser.cjs",
       "landing/**",
     ],
