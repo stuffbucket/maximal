@@ -1,0 +1,15 @@
+# Project toolchain. Bun's version lives only in .bun-version (see
+# docs/bun-version-policy.md); mise reads it from there. Node is needed only
+# for pnpm-run tools such as create-dmg. packages/mcp-broker/mise.toml pins
+# the isolated broker's own toolchain.
+[settings]
+idiomatic_version_file_enable_tools = ["bun"]
+
+[tools]
+node = "22.23.2"
+pnpm = "12.3.4"
+
+# Resolve every package through the same proxy registry as ~/.npmrc; Bun
+# and pnpm both honor this. Authentication stays in ~/.npmrc.
+[env]
+NPM_CONFIG_REGISTRY = "https://packagefeedproxy.microsoft.io/npm/"

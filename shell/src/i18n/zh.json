@@ -220,6 +220,11 @@
   "dashboard-quota-unlimited": "无限制",
   "dashboard-quota-percent-used": "已使用 {percent}%",
   "dashboard-quota-remaining": "剩余 {n}",
+  "dashboard-quota-resets": "{date} 重置",
+  "dashboard-quota-period-ended": "周期已于 {date} 结束",
+  "dashboard-quota-as-of": "截至 {time}",
+  "dashboard-rate-per-minute": "{n} 令牌/分钟",
+  "dashboard-rate-sparkline-label": "最近 15 分钟每分钟的令牌数",
 
   "dashboard-api-response-title": "使用情况 API 响应",
 

@@ -220,6 +220,11 @@
   "dashboard-quota-unlimited": "Illimitato",
   "dashboard-quota-percent-used": "{percent}% utilizzato",
   "dashboard-quota-remaining": "{n} rimanenti",
+  "dashboard-quota-resets": "Si azzera il {date}",
+  "dashboard-quota-period-ended": "Periodo terminato il {date}",
+  "dashboard-quota-as-of": "Aggiornato alle {time}",
+  "dashboard-rate-per-minute": "{n} token/min",
+  "dashboard-rate-sparkline-label": "Token al minuto negli ultimi 15 minuti",
 
   "dashboard-api-response-title": "Risposta dell’API di utilizzo",
 

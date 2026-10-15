@@ -66,26 +66,9 @@
 
   /* ---- Colors ---- */
   --brand: #c8334a;
-  --brand-fg: #ffffff;
-  --accent: #5198a6;
   --accent-fg: #ffffff;
-  --accent-hover: #2dd4bf;
   --accent-destructive: #b32d3f;
   --accent-destructive-foreground: #ffffff;
-
-  /* ---- Semantic status ---- */
-  --status-error: #ef4444;
-  --status-error-fg: #fca5a5;
-  --status-success: #22c55e;
-  --status-success-fg: #4ade80;
-  --status-warning: #eab308;
-  --status-warning-fg: #facc15;
-  --status-info: #38bdf8;
-  --status-info-fg: #7dd3fc;
-
-  /* ---- Link colors (defaults to dark theme) ---- */
-  --link: #7fc1d2;
-  --link-hover: #a8d8e3;
 
   /* ---- Focus ring ---- */
   --focus-ring-width: 2px;
@@ -98,7 +81,11 @@
   --content-max: 640px;
 }
 
-[data-theme="dark"] {
+/* ---- Theme colors ----
+   Dark by default; follows the OS when its appearance is light; a
+   data-theme="dark" | "light" attribute on <html> pins either one. */
+:root {
+  color-scheme: dark;
   --surface-base: #0a0a0a;
   --surface-card: #161616;
   --surface-control: #1f1f1f;
@@ -106,12 +93,39 @@
   --text-base-color: #d4d4d4;
   --text-muted: #8a8a8a;
   --border-subtle: #2a2a2a;
-  --border-strong: #666666;
+  --border-strong: #737373;
+  --accent: #437e89;
   --link: #7fc1d2;
   --link-hover: #a8d8e3;
+  --status-error: #f87171;
+  --status-success: #22c55e;
+  --status-warning: #eab308;
+  --status-info: #38bdf8;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --surface-base: #fafafa;
+    --surface-card: #ffffff;
+    --surface-control: #f0f0f0;
+    --text-strong: #0a0a0a;
+    --text-base-color: #2a2a2a;
+    --text-muted: #6a6a6a;
+    --border-subtle: #e5e5e5;
+    --border-strong: #8a8a8a;
+    --accent: #36646e;
+    --link: #2d6470;
+    --link-hover: #1e5560;
+    --status-error: #b91c1c;
+    --status-success: #137333;
+    --status-warning: #8a5a00;
+    --status-info: #0369a1;
+  }
 }
 
 [data-theme="light"] {
+  color-scheme: light;
   --surface-base: #fafafa;
   --surface-card: #ffffff;
   --surface-control: #f0f0f0;
@@ -120,6 +134,11 @@
   --text-muted: #6a6a6a;
   --border-subtle: #e5e5e5;
   --border-strong: #8a8a8a;
+  --accent: #36646e;
   --link: #2d6470;
   --link-hover: #1e5560;
+  --status-error: #b91c1c;
+  --status-success: #137333;
+  --status-warning: #8a5a00;
+  --status-info: #0369a1;
 }
