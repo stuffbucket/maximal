@@ -54,6 +54,7 @@
     "render-formula": "bun scripts/sync-homebrew-formula.ts",
     "sbom": "bun scripts/sbom.ts",
     "scan:secrets": "trufflehog filesystem . --no-verification --fail --no-update --exclude-paths .trufflehog-exclude",
+    "shell:test": "bun scripts/shell-test.ts",
     "start": "NODE_ENV=production bun run ./src/main.ts",
     "storybook": "mise -C packages/storybook exec -- pnpm dev",
     "storybook:build": "mise -C packages/storybook exec -- pnpm build",

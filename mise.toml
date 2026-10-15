@@ -1,15 +1,19 @@
 # Project toolchain. Bun's version lives only in .bun-version (see
 # docs/bun-version-policy.md); mise reads it from there. Node is needed only
-# for pnpm-run tools such as create-dmg. packages/mcp-broker/mise.toml pins
-# the isolated broker's own toolchain.
+# for pnpm-run tools such as create-dmg. Rust builds and tests the Tauri shell
+# (`bun run shell:test`). Packages under packages/ may pin their own toolchain
+# in their own mise.toml.
 [settings]
 idiomatic_version_file_enable_tools = ["bun"]
 
 [tools]
 node = "22.23.2"
 pnpm = "12.3.4"
+rust = "1.99.0"
 
-# Resolve every package through the same proxy registry as ~/.npmrc; Bun
-# and pnpm both honor this. Authentication stays in ~/.npmrc.
+# Resolve every npm package through the same proxy registry as ~/.npmrc; Bun
+# and pnpm both honor this. Authentication stays in ~/.npmrc. The proxy has
+# no Cargo or rustup feed, so crates come from public crates.io and the
+# toolchain from static.rust-lang.org.
 [env]
 NPM_CONFIG_REGISTRY = "https://packagefeedproxy.microsoft.io/npm/"
