@@ -75,6 +75,13 @@ afterAll(() => {
 })
 
 describe("desiredEntriesFor", () => {
+  beforeEach(() => {
+    setListeningPort(4141)
+  })
+  afterEach(() => {
+    setListeningPort(undefined)
+  })
+
   const client = {
     clientId: "claude-desktop",
     apiKeyLabel: "claude-desktop",
