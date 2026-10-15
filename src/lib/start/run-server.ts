@@ -15,7 +15,7 @@ import { removeLegacyShimIfPresent } from "~/apps/claude-code/detect"
 import { reconcileClaudeCodeOnBoot } from "~/apps/claude-code/reconcile"
 import { syncMcpClientsOnBoot } from "~/apps/mcp"
 import { type AccountType } from "~/lib/auth/auth-types"
-import { mergeConfigWithDefaults } from "~/lib/config/config"
+import { type AppConfig, mergeConfigWithDefaults } from "~/lib/config/config"
 import { initProxyFromEnv } from "~/lib/http/proxy"
 import {
   startBrokerSupervisor,
@@ -40,6 +40,7 @@ import { emitBootStatus } from "./boot-status"
 import { bootSecrets, bootstrapUpstream } from "./bootstrap"
 import { runClaudeCodeFlow } from "./claude-code-flow"
 import { maybeEvictRunning, probePort, reportPortBusyAndExit } from "./port"
+import { setListeningPort } from "./proxy-port"
 import {
   markSessionRunning,
   staleSessionMarkerPresent,
@@ -212,6 +213,18 @@ export async function runServer(options: RunServerOptions): Promise<void> {
     },
   })
 
+  afterListening(config, options.port, httpServer)
+}
+
+/** Boot steps that need the bound listener: the broker, client entries that
+ *  point at `port`, and the shutdown path that reverts them. */
+function afterListening(
+  config: AppConfig,
+  port: number,
+  httpServer: ReturnType<typeof serve>,
+): void {
+  setListeningPort(port)
+
   // Broker startup is deliberately detached from ordinary server readiness.
   // A missing, hung, or crashing broker degrades MCP only; Hono is already bound.
   startBrokerSupervisor(config.mcpBroker ?? {})
@@ -234,7 +247,7 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   // healthy. shutdown clears it; a missing-on-next-boot sentinel means a
   // clean exit, present-on-next-boot means an ungraceful one (see the
   // staleSession check above).
-  markSessionRunning()
+  markSessionRunning(port)
 
   installShutdownHandlers(httpServer, stopBrokerSupervisor)
 }

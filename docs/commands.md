@@ -84,12 +84,13 @@ isn't running and come back when it starts. A same-name MCP server you already
 had in an app is left alone; if it is a local command, Maximal runs the same
 command for the endpoint (secret-looking environment variables aren't copied).
 
-The CLI applies the change to a running Maximal on port 4141 without a
-restart; pass `--port` if it runs elsewhere.
+The CLI applies the change to the running Maximal without a restart; it
+finds that instance's port itself (`--port` overrides). App entries always
+point at the port Maximal is actually listening on, and follow it if it moves.
 
-Other clients connect to `http://127.0.0.1:4141/mcp/<id>` from the same
-machine. Stdio-only clients can run
-`maximal-mcp-broker stdio-adapter --url http://127.0.0.1:4141/mcp/<id>` with
+Other clients connect to `http://127.0.0.1:<port>/mcp/<id>` (4141 by default)
+from the same machine. Stdio-only clients can run
+`maximal-mcp-broker stdio-adapter --url http://127.0.0.1:<port>/mcp/<id>` with
 `MAXIMAL_MCP_API_KEY` in its environment when a key is required.
 
 ## Fast UI iteration

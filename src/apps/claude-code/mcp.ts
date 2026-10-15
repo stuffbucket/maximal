@@ -30,7 +30,11 @@ import type {
   McpReconcileResult,
 } from "~/lib/mcp-broker/client-sync"
 
-import { MCP_BASE_URL, parseStdioEntry } from "~/lib/mcp-broker/client-sync"
+import {
+  isMaximalMcpUrl,
+  mcpEndpointUrl,
+  parseStdioEntry,
+} from "~/lib/mcp-broker/client-sync"
 import { atomicWriteJson } from "~/lib/platform/atomic-json"
 
 import { HELPER_LABEL, isProxyBaseUrlConfigured } from "./config"
@@ -86,14 +90,15 @@ function readServers(file: string): Record<string, unknown> {
   }
 }
 
-/** Ours only when it is an HTTP entry for this endpoint's Maximal URL. */
+/** Ours only when it is an HTTP entry for this endpoint's Maximal URL, on
+ *  whatever port Maximal used when it was written. */
 export function isOwnedMcpEntry(
   value: unknown,
-  entry: McpClientEntry,
+  entry: Pick<McpClientEntry, "id">,
 ): boolean {
   if (typeof value !== "object" || value === null) return false
   const { type, url } = value as Record<string, unknown>
-  return type === "http" && url === entry.url
+  return type === "http" && isMaximalMcpUrl(url, entry.id)
 }
 
 function authorization(value: unknown): string | undefined {
@@ -192,8 +197,13 @@ function removeFromFile(file: string, entry: McpClientEntry): boolean {
 }
 
 function needsReplace(current: unknown, entry: McpClientEntry): boolean {
-  // Adding or dropping a header changes the entry's shape; recreate it.
-  return (authorization(current) === undefined) !== (entry.apiKey === undefined)
+  // A new port changes the URL, and adding or dropping a header changes the
+  // entry's shape; either way, recreate it.
+  const { url } = current as { url?: unknown }
+  return (
+    url !== entry.url
+    || (authorization(current) === undefined) !== (entry.apiKey === undefined)
+  )
 }
 
 export function createClaudeCodeMcp(
@@ -218,8 +228,7 @@ export function createClaudeCodeMcp(
     },
     existingStdioEntry(id, owned) {
       const value = readServers(configPath())[id]
-      const ours = { id, label: id, url: `${MCP_BASE_URL}/${id}` }
-      if (owned.includes(id) && isOwnedMcpEntry(value, ours)) return undefined
+      if (owned.includes(id) && isOwnedMcpEntry(value, { id })) return undefined
       return parseStdioEntry(value)
     },
   }
@@ -263,7 +272,7 @@ function reconcileUserScope(input: ReconcileInput): McpReconcileResult {
 
   for (const id of owned) {
     if (desiredIds.has(id)) continue
-    const ours = { id, label: id, url: `${MCP_BASE_URL}/${id}` }
+    const ours = { id, label: id, url: mcpEndpointUrl(id) }
     if (!isOwnedMcpEntry(existing[id], ours)) continue
     const removed =
       input.offline ?

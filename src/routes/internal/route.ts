@@ -8,8 +8,9 @@
  *
  * `POST /_internal/reload` tells the running instance that another process
  * (e.g. `maximal mcp`) changed `config.json`: it re-reads the file and
- * restarts the MCP broker if its section changed. Idempotent and harmless,
- * so a repeat or stray call only costs a file read.
+ * restarts the MCP broker if its section changed, then brings client apps'
+ * MCP entries in line with it. Idempotent, so a repeat or stray call
+ * changes nothing.
  *
  * Loopback enforcement is non-negotiable here. The auth middleware in
  * `server.ts` already exempts loopback callers from API-key checks (via
@@ -24,6 +25,7 @@ import type { Context } from "hono"
 import consola from "consola"
 import { Hono } from "hono"
 
+import { syncAllMcpClients } from "~/apps/mcp"
 import { defaultGetRequestIp, isLoopbackAddress } from "~/lib/auth/request-auth"
 import { reloadConfig } from "~/lib/config/config"
 import { requestContext } from "~/lib/http/request-context"
@@ -41,6 +43,9 @@ interface InternalRoutesOptions {
 async function reloadFromDisk(): Promise<void> {
   const config = reloadConfig()
   await reconfigureBroker(config.mcpBroker ?? {})
+  // Rewrite client entries from this process, which knows the port it
+  // actually listens on.
+  syncAllMcpClients(config)
 }
 
 export function createInternalRoutes(

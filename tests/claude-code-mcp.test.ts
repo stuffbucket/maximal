@@ -228,3 +228,36 @@ describe("Claude Code MCP shutdown and adoption", () => {
     expect(mcp.existingStdioEntry?.("ours", ["ours"])).toBeUndefined()
   })
 })
+
+const onPort = (port: number): McpClientEntry => ({
+  ...entry("workiq", KEY),
+  url: `http://127.0.0.1:${port}/mcp/workiq`,
+})
+
+describe("Claude Code MCP across port changes", () => {
+  test("re-adds an owned entry on the port Maximal listens on now", () => {
+    configurator().reconcile([onPort(4141)], [])
+    calls = []
+
+    const result = configurator().reconcile([onPort(4199)], ["workiq"])
+
+    expect(result.owned).toEqual(["workiq"])
+    expect(result.skipped).toEqual([])
+    expect(calls.map((args) => args[1])).toEqual(["remove", "add-json"])
+    for (const args of calls) {
+      expect(args.join(" ")).not.toContain(KEY)
+    }
+    expect(servers().workiq).toEqual({
+      type: "http",
+      url: "http://127.0.0.1:4199/mcp/workiq",
+      headers: { Authorization: `Bearer ${KEY}` },
+    })
+  })
+
+  test("leaves an owned entry alone when nothing changed", () => {
+    configurator().reconcile([onPort(4199)], [])
+    calls = []
+    configurator().reconcile([onPort(4199)], ["workiq"])
+    expect(calls).toEqual([])
+  })
+})

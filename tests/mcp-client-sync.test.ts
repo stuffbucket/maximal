@@ -4,17 +4,27 @@
  * COPILOT_API_HOME from the test preload) and a fake configurator.
  */
 
-import { afterAll, beforeEach, describe, expect, test } from "bun:test"
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "bun:test"
 
 import type { AppConfig } from "~/lib/config/config"
 
 import { getConfig, writeConfig } from "~/lib/config/config"
 import {
   desiredEntriesFor,
+  isMaximalMcpUrl,
   type McpClientConfigurator,
   type McpClientEntry,
+  mcpEndpointUrl,
   syncMcpClient,
 } from "~/lib/mcp-broker/client-sync"
+import { setListeningPort } from "~/lib/start/proxy-port"
 
 interface FakeCall {
   desired: Array<string>
@@ -161,5 +171,34 @@ describe("syncMcpClient", () => {
       "claude-desktop",
     ])
     expect(getConfig().apps?.claudeDesktop?.mcpServers).toEqual([])
+  })
+})
+
+const isWorkiqUrl = (url: unknown) => isMaximalMcpUrl(url, "workiq")
+
+describe("endpoint URLs", () => {
+  afterEach(() => {
+    setListeningPort(undefined)
+  })
+
+  test("follow the port the proxy listens on", () => {
+    setListeningPort(4199)
+    expect(mcpEndpointUrl("workiq")).toBe("http://127.0.0.1:4199/mcp/workiq")
+    expect(mcpEndpointUrl("workiq", 5000)).toBe(
+      "http://127.0.0.1:5000/mcp/workiq",
+    )
+  })
+
+  test("are recognized as Maximal's on any port, for this endpoint only", () => {
+    const ours = isWorkiqUrl
+    expect(ours("http://127.0.0.1:4141/mcp/workiq")).toBe(true)
+    expect(ours("http://127.0.0.1:4199/mcp/workiq")).toBe(true)
+    expect(ours("http://127.0.0.1:4141/mcp/other")).toBe(false)
+    expect(ours("http://127.0.0.1:4141/mcp/workiq/extra")).toBe(false)
+    expect(ours("http://127.0.0.1:4141/mcp/workiq?x=1")).toBe(false)
+    expect(ours("https://127.0.0.1:4141/mcp/workiq")).toBe(false)
+    expect(ours("http://example.com:4141/mcp/workiq")).toBe(false)
+    expect(ours("not a url")).toBe(false)
+    expect(ours(undefined)).toBe(false)
   })
 })

@@ -22,7 +22,7 @@ import type {
 } from "~/lib/mcp-broker/client-sync"
 
 import { getConfig } from "~/lib/config/config"
-import { MCP_BASE_URL, parseStdioEntry } from "~/lib/mcp-broker/client-sync"
+import { isMaximalMcpUrl, parseStdioEntry } from "~/lib/mcp-broker/client-sync"
 import { brokerExecutableCandidates } from "~/lib/mcp-broker/configuration"
 
 import {
@@ -48,10 +48,11 @@ export interface ClaudeDesktopMcpOptions {
   available?: () => boolean
 }
 
-/** Ours only when it runs the broker adapter against this endpoint's URL. */
+/** Ours only when it runs the broker adapter against this endpoint's
+ *  Maximal URL, on whatever port Maximal used when it was written. */
 export function isOwnedMcpEntry(
   value: unknown,
-  entry: McpClientEntry,
+  entry: Pick<McpClientEntry, "id">,
 ): boolean {
   if (typeof value !== "object" || value === null) return false
   const { command, args } = value as Record<string, unknown>
@@ -61,7 +62,7 @@ export function isOwnedMcpEntry(
     (name === "maximal-mcp-broker" || name === "maximal-mcp-broker.exe")
     && args[0] === "stdio-adapter"
     && args[1] === "--url"
-    && args[2] === entry.url
+    && isMaximalMcpUrl(args[2], entry.id)
   )
 }
 
@@ -79,17 +80,6 @@ function buildEntry(entry: McpClientEntry, brokerPath: string): McpServerEntry {
       {}
     : { env: { [ADAPTER_API_KEY_ENV]: entry.apiKey } }),
   }
-}
-
-/** Placeholder entry for an owned id, used only for the signature check. */
-function entryFor(id: string, desired: Array<McpClientEntry>): McpClientEntry {
-  return (
-    desired.find((entry) => entry.id === id) ?? {
-      id,
-      label: id,
-      url: `${MCP_BASE_URL}/${id}`,
-    }
-  )
 }
 
 export function claudeDesktopConfigPath(home?: string): string {
@@ -132,7 +122,7 @@ export function createClaudeDesktopMcp(
     existingStdioEntry(id) {
       // Never adopt Maximal's own adapter entry, owned or not.
       const notOurs = (value: unknown): unknown =>
-        isOwnedMcpEntry(value, entryFor(id, [])) ? undefined : value
+        isOwnedMcpEntry(value, { id }) ? undefined : value
       return parseStdioEntry(
         notOurs(serversIn(claudeDesktopConfigPath(options.home))[id])
           ?? notOurs(
@@ -210,7 +200,7 @@ function removableIds(
   return owned.filter(
     (id) =>
       !desired.some((entry) => entry.id === id)
-      && isOwnedMcpEntry(existing[id], entryFor(id, desired)),
+      && isOwnedMcpEntry(existing[id], { id }),
   )
 }
 

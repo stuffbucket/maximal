@@ -17,10 +17,39 @@ import type { AppConfig } from "~/lib/config/config"
 
 import { resolveApiKey } from "~/lib/auth/api-key-helper"
 import { getConfig, writeConfig } from "~/lib/config/config"
+import { currentProxyPort } from "~/lib/start/proxy-port"
 
 import type { McpClientId } from "./types"
 
-export const MCP_BASE_URL = "http://127.0.0.1:4141/mcp"
+/** Maximal's URL for an endpoint, on the port the proxy listens on now. */
+export function mcpEndpointUrl(
+  id: string,
+  port: number = currentProxyPort(),
+): string {
+  return `http://127.0.0.1:${port}/mcp/${id}`
+}
+
+/** Whether `value` is Maximal's URL for endpoint `id` on any port, so an
+ *  entry written before the proxy moved ports is still recognized (and
+ *  rewritten) rather than mistaken for the user's. */
+export function isMaximalMcpUrl(value: unknown, id: string): boolean {
+  if (typeof value !== "string") return false
+  let url: URL
+  try {
+    url = new URL(value)
+  } catch {
+    return false
+  }
+  return (
+    url.protocol === "http:"
+    && url.hostname === "127.0.0.1"
+    && url.username === ""
+    && url.password === ""
+    && url.pathname === `/mcp/${id}`
+    && url.search === ""
+    && url.hash === ""
+  )
+}
 
 /** One endpoint as a client should see it. Content is Maximal's, not the
  *  MCP server's. */
@@ -101,7 +130,7 @@ export function desiredEntriesFor(
     entries.push({
       id: server.id,
       label: server.label,
-      url: `${MCP_BASE_URL}/${server.id}`,
+      url: mcpEndpointUrl(server.id),
       ...(apiKey === undefined ? {} : { apiKey }),
     })
   }

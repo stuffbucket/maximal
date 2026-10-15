@@ -15,6 +15,8 @@ import consola from "consola"
 
 import type { McpClientId } from "~/lib/mcp-broker/types"
 
+import { currentProxyPort } from "~/lib/start/proxy-port"
+
 import {
   listMcpEndpoints,
   setMcpEndpoint,
@@ -133,9 +135,10 @@ async function reloadRunningMaximal(
 }
 
 function parsePort(value: unknown): number {
-  const port = Number(value ?? 4141)
+  if (value === undefined || value === "") return currentProxyPort()
+  const port = typeof value === "string" ? Number(value) : Number.NaN
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
-    throw new Error(`Invalid --port: ${String(value)}`)
+    throw new Error(`Invalid --port: ${JSON.stringify(value)}`)
   }
   return port
 }
@@ -228,8 +231,8 @@ export const mcpCommand = defineCommand({
     },
     port: {
       type: "string",
-      default: "4141",
-      description: "Port of the running Maximal to apply the change to.",
+      description:
+        "Port of the running Maximal to apply the change to (default: the one running, else 4141).",
     },
   },
   async run({ args }) {

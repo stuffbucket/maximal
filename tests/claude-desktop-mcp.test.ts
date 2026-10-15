@@ -138,6 +138,37 @@ describe("Claude Desktop MCP reconcile", () => {
   })
 })
 
+const onPort = (port: number): McpClientEntry => ({
+  ...entry("workiq"),
+  url: `http://127.0.0.1:${port}/mcp/workiq`,
+})
+
+const adapter = (port: number) => ({
+  command: BROKER,
+  args: ["stdio-adapter", "--url", `http://127.0.0.1:${port}/mcp/workiq`],
+})
+
+describe("Claude Desktop MCP across port changes", () => {
+  test("moves an owned entry to the port Maximal listens on now", () => {
+    seed({ mcpServers: { workiq: adapter(4141) } })
+    const result = configurator().reconcile([onPort(4199)], ["workiq"])
+    expect(result).toEqual({
+      owned: ["workiq"],
+      added: [],
+      removed: [],
+      skipped: [],
+    })
+    expect(readServers()).toEqual({ workiq: adapter(4199) })
+  })
+
+  test("reverts an owned entry written on another port", () => {
+    seed({ mcpServers: { workiq: adapter(4199) } })
+    const result = configurator().reconcile([], ["workiq"])
+    expect(result.removed).toEqual(["workiq"])
+    expect(readServers()).toBeUndefined()
+  })
+})
+
 describe("isOwnedMcpEntry", () => {
   test("requires the broker adapter pointed at this endpoint's URL", () => {
     const workiq = entry("workiq")
