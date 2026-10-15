@@ -93,6 +93,10 @@ from the same machine. Stdio-only clients can run
 `maximal-mcp-broker stdio-adapter --url http://127.0.0.1:<port>/mcp/<id>` with
 `MAXIMAL_MCP_API_KEY` in its environment when a key is required.
 
+Each connected session runs its own copy of the endpoint's server, so Claude
+Code, Claude Desktop, or several Claude Code windows can use one endpoint at
+the same time. `limits.sessions` on the endpoint caps how many (default 8).
+
 ## Fast UI iteration
 
 For HTML/CSS/TS changes under `shell/ui/` or `shell/src/`, **do not** run

@@ -73,6 +73,7 @@ describe("resolveBrokerConfiguration", () => {
           initializeTimeoutMs: 30_000,
           callTimeoutMs: 120_000,
           shutdownTimeoutMs: 2_000,
+          maxSessions: 8,
         },
       ],
       httpBodyBytes: 4096,

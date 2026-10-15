@@ -33,6 +33,8 @@ export const ResolvedMcpEndpointSchema = z
     initializeTimeoutMs: DurationSchema.default(30_000),
     callTimeoutMs: DurationSchema.default(120_000),
     shutdownTimeoutMs: DurationSchema.default(2_000),
+    /** Concurrent sessions, each with its own upstream instance. */
+    maxSessions: z.number().int().min(1).max(64).default(8),
   })
   .superRefine((endpoint, context) => {
     if (

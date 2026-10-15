@@ -52,6 +52,8 @@ export interface ResolvedBrokerEndpoint {
   initializeTimeoutMs: number
   callTimeoutMs: number
   shutdownTimeoutMs: number
+  /** Concurrent sessions; each runs its own instance of the server. */
+  maxSessions: number
 }
 
 export interface ResolvedBrokerConfiguration {
@@ -114,9 +116,22 @@ function resolveEndpoint(
     protocol: server.classification?.protocol ?? "auto",
     interaction: server.classification?.interaction ?? "auto",
     ownership: server.classification?.ownership ?? "auto",
+    ...endpointBounds(server),
+  }
+}
+
+/** Timeouts and the session cap, with their defaults. */
+function endpointBounds(
+  server: McpServerConfig,
+): Pick<
+  ResolvedBrokerEndpoint,
+  "initializeTimeoutMs" | "callTimeoutMs" | "shutdownTimeoutMs" | "maxSessions"
+> {
+  return {
     initializeTimeoutMs: server.timeouts?.initializeMs ?? 30_000,
     callTimeoutMs: server.timeouts?.callMs ?? 120_000,
     shutdownTimeoutMs: server.timeouts?.shutdownMs ?? 2_000,
+    maxSessions: server.limits?.sessions ?? 8,
   }
 }
 

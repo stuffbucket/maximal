@@ -229,14 +229,20 @@ SSE event sequence valid.
 > implemented through that broker boundary rather than by spawning stdio servers
 > in the sidecar.
 
-The currently implemented outbound broker starts all enabled stdio endpoints
+The currently implemented outbound broker probes every enabled stdio endpoint
 when a broker generation is configured. A startup failure closes the generation;
 the sidecar supervisor then applies bounded backoff and a restart circuit breaker.
 Clients reach endpoints at the main port's `/mcp/<id>`, which accepts loopback
 callers only and forwards to the broker's private authenticated loopback port.
-Legacy, unknown, or interactive endpoints default to exclusive ownership.
-Shareable operation remains disabled until exact request cancellation and
-correlation are proven.
+
+Each MCP session gets its own upstream instance, started when the session
+initializes and stopped when it closes (or idles out) — the same thing that
+would happen if each harness ran the server itself, so parallel harnesses
+never share requests, interactions, or cancellations. Concurrent sessions per
+endpoint are capped by `limits.sessions` (default 8); past the cap the endpoint
+answers 503 with a JSON-RPC error saying so. Sharing one instance across
+sessions (`ownership: shareable`) remains disabled until exact request
+cancellation and correlation are proven.
 
 | Transport | Behavior |
 |---|---|

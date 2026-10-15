@@ -175,6 +175,7 @@ function createFixtureServer(era: "legacy" | "modern"): Server {
       "interactive_never",
       "progress",
       "delay",
+      "whoami",
     ].map((name) => ({
       name,
       description: `Deterministic fixture tool: ${name}`,
@@ -221,6 +222,9 @@ function createFixtureServer(era: "legacy" | "modern"): Server {
           })
         }
         return textResult("progress-ok")
+      }
+      case "whoami": {
+        return textResult(`pid:${process.pid}`)
       }
       case "delay": {
         await wait(5_000, ctx.mcpReq.signal)

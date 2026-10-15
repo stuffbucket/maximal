@@ -137,8 +137,11 @@ Clients use the stable main-port address `http://127.0.0.1:<port>/mcp/<id>`
 foreign `Origin`, and authenticates with the endpoint's own `apiKey` when one is
 configured, otherwise with the normal main-port rules (`auth.enforce`,
 `auth.apiKeys`, `auth.apiKeyEntries`). It then streams the request to the
-broker with the internal key. A missing or restarting broker returns 503; an
-unreachable one 502. Concurrency and declared body size are bounded, and only
+broker with the internal key. Every MCP session runs its own instance of the
+endpoint's server (spawned on `initialize`, stopped when the session ends), so
+parallel clients behave as if each ran it themselves; `limits.sessions`
+(default 8) caps them, and a session past the cap gets a 503 that says so. A
+missing or restarting broker returns 503; an unreachable one 502. Concurrency and declared body size are bounded, and only
 the wait for response headers is timed, so SSE streams stay open.
 
 `maximal-mcp-broker stdio-adapter --url http://127.0.0.1:<port>/mcp/<id>` lets a

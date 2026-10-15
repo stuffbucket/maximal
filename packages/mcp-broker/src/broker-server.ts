@@ -63,6 +63,7 @@ export interface EndpointObservation {
   serverVersion: string
   negotiatedProtocol?: string
   protocolEra?: "legacy" | "modern"
+  /** Every session owns its own upstream instance; none is shared. */
   ownership: "exclusive"
   capabilities: {
     completions: boolean
@@ -92,15 +93,10 @@ const clientOptions = (endpoint: ResolvedMcpEndpoint): ClientOptions => ({
   versionNegotiation: resolveVersionNegotiation(endpoint.protocol),
 })
 
-const startEndpoint = async (
+/** Start one upstream instance of the endpoint's stdio server. */
+const connectUpstream = async (
   endpoint: ResolvedMcpEndpoint,
-  apiKey: string,
-  maxBodyBytes: number,
-): Promise<RunningEndpoint> => {
-  if (endpoint.ownership === "shareable") {
-    throw new BrokerStartupError("ENDPOINT_SHARING_DISABLED")
-  }
-
+): Promise<Client> => {
   const transport = new StdioClientTransport({
     args: endpoint.args,
     command: endpoint.command,
@@ -114,38 +110,94 @@ const startEndpoint = async (
     { name: "maximal-mcp-broker", version: "0.0.0" },
     clientOptions(endpoint),
   )
-
   try {
     await client.connect(transport, { timeout: endpoint.initializeTimeoutMs })
   } catch (error) {
     await client.close().catch(() => undefined)
-    throw new BrokerStartupError("ENDPOINT_CONNECT_FAILED", { cause: error })
+    throw error
+  }
+  return client
+}
+
+/** A refusal mcp-proxy sends as-is (it answers a thrown Response verbatim). */
+const refusal = (status: number, message: string): Response =>
+  Response.json(
+    { error: { code: -32_000, message }, id: null, jsonrpc: "2.0" },
+    { status },
+  )
+
+/**
+ * One endpoint: a private loopback listener whose every MCP session gets its
+ * own upstream instance, as if each client ran the server itself. Nothing is
+ * shared between sessions, so one client's requests, interactions and
+ * cancellations can't reach another's. Closing a session closes its instance.
+ */
+const startEndpoint = async (
+  endpoint: ResolvedMcpEndpoint,
+  apiKey: string,
+  maxBodyBytes: number,
+): Promise<RunningEndpoint> => {
+  if (endpoint.ownership === "shareable") {
+    throw new BrokerStartupError("ENDPOINT_SHARING_DISABLED")
   }
 
-  const serverCapabilities = client.getServerCapabilities() ?? {}
-  const serverVersion = client.getServerVersion() ?? {
+  // Probe once at startup: proves the command runs and records what it
+  // serves. Sessions start their own instances.
+  let probe: Client
+  try {
+    probe = await connectUpstream(endpoint)
+  } catch (error) {
+    throw new BrokerStartupError("ENDPOINT_CONNECT_FAILED", { cause: error })
+  }
+  const serverCapabilities = probe.getServerCapabilities() ?? {}
+  const serverVersion = probe.getServerVersion() ?? {
     name: "anonymous-upstream",
     version: "unknown",
   }
-  const protocolEra = client.getProtocolEra()
-  let activeServer: Server | undefined
+  const protocolEra = probe.getProtocolEra()
+  const negotiatedProtocol = probe.getNegotiatedProtocolVersion()
+  await probe.close().catch(() => undefined)
+
+  const sessions = new Map<Server, Client>()
+  let opening = 0
 
   let httpServer
   try {
     httpServer = await startHTTPServer({
       apiKey,
       createServer: async () => {
-        const server = new Server(serverVersion, {
-          capabilities: serverCapabilities,
+        if (sessions.size + opening >= endpoint.maxSessions) {
+          throw refusal(
+            503,
+            `${endpoint.label} already has ${endpoint.maxSessions} sessions open; close one and retry.`,
+          )
+        }
+        opening += 1
+        let client: Client
+        try {
+          client = await connectUpstream(endpoint)
+        } catch {
+          throw refusal(502, `${endpoint.label} failed to start.`)
+        } finally {
+          opening -= 1
+        }
+        const server = new Server(client.getServerVersion() ?? serverVersion, {
+          capabilities: client.getServerCapabilities() ?? serverCapabilities,
           inputRequired: { legacyShim: false },
           instructions: client.getInstructions(),
         })
-        await proxyServer({
-          client,
-          requestTimeout: endpoint.callTimeoutMs,
-          server,
-          serverCapabilities,
-        })
+        try {
+          await proxyServer({
+            client,
+            requestTimeout: endpoint.callTimeoutMs,
+            server,
+            serverCapabilities: client.getServerCapabilities() ?? {},
+          })
+        } catch (error) {
+          await client.close().catch(() => undefined)
+          throw error
+        }
+        sessions.set(server, client)
         return server
       },
       enableJsonResponse: true,
@@ -154,15 +206,9 @@ const startEndpoint = async (
       maxBodySize: maxBodyBytes,
       modern: protocolEra === "modern",
       onClose: async (server) => {
-        if (activeServer === server) {
-          activeServer = undefined
-        }
-      },
-      onConnect: async (server) => {
-        if (activeServer !== undefined && activeServer !== server) {
-          throw new Error("exclusive endpoint already has an owner")
-        }
-        activeServer = server
+        const client = sessions.get(server)
+        sessions.delete(server)
+        await client?.close().catch(() => undefined)
       },
       port: 0,
       sseEndpoint: null,
@@ -170,7 +216,6 @@ const startEndpoint = async (
       streamEndpoint: INTERNAL_PATH,
     })
   } catch (error) {
-    await client.close().catch(() => undefined)
     throw new BrokerStartupError("BROKER_BIND_FAILED", { cause: error })
   }
 
@@ -182,7 +227,7 @@ const startEndpoint = async (
       id: endpoint.id,
       serverName: sanitizeIdentity(serverVersion.name, "anonymous-upstream"),
       serverVersion: sanitizeIdentity(serverVersion.version, "unknown"),
-      negotiatedProtocol: client.getNegotiatedProtocolVersion(),
+      negotiatedProtocol,
       protocolEra,
       ownership: "exclusive",
       capabilities: {
@@ -199,7 +244,11 @@ const startEndpoint = async (
       }
       closed = true
       await httpServer.close().catch(() => undefined)
-      await client.close().catch(() => undefined)
+      const clients = [...sessions.values()]
+      sessions.clear()
+      await Promise.all(
+        clients.map((client) => client.close().catch(() => undefined)),
+      )
     },
   }
 }
