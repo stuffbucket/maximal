@@ -142,6 +142,7 @@ globalThis.fetch = (() =>
 
 const { state } = await import("~/lib/runtime-state/state")
 const { runServer, start } = await import("~/start")
+const { stopBrokerSupervisor } = await import("~/lib/mcp-broker/supervisor")
 const { getAuthStatus, signOut, __resetAuthControllerForTests } =
   await import("~/lib/auth/auth-controller")
 const { CopilotAuthFatalError } = await import("~/lib/errors/error")
@@ -463,6 +464,9 @@ describe("start.run — citty args → runServer options", () => {
 // mocks, so we re-`mock.module` each one back to the captured real
 // module reference.
 afterAll(async () => {
+  // runServer registered the process-wide broker supervisor; clear it so a
+  // later file's reconfigure doesn't find (and restart) it.
+  await stopBrokerSupervisor()
   globalThis.fetch = realFetch
   mock.restore()
   await mock.module("~/lib/platform/paths", () => realPathsModule)

@@ -139,6 +139,53 @@ interface AppsListResponse {
   apps: Array<AppEntry>
 }
 
+/**
+ * Brokered MCP endpoints (`/settings/api/mcp`). Mirrors
+ * `McpEndpointEntry` and friends in `src/lib/config/settings-types.ts` by
+ * name, like the Apps types above.
+ */
+export type McpClientId = "claude-code" | "claude-desktop"
+
+export interface McpClientOffer {
+  id: McpClientId
+  name: string
+  /** Maximal's integration for this client is on, so it can be offered. */
+  available: boolean
+  /** Maximal currently has this endpoint written into the client. */
+  configured: boolean
+}
+
+export interface McpEndpointEntry {
+  id: string
+  label: string
+  enabled: boolean
+  /** Remembered client choices, used to pre-check the prompt. */
+  clients: Array<McpClientId>
+  offered: Array<McpClientOffer>
+}
+
+/** The process that runs every MCP endpoint (see McpBrokerHealth in
+ *  src/lib/config/settings-types.ts for what each state means). */
+export interface McpBrokerHealth {
+  state: "off" | "starting" | "running" | "recovering" | "stuck" | "unavailable"
+  problem: "not-installed" | "unsupported-platform" | null
+}
+
+interface McpEndpointsListResponse {
+  endpoints: Array<McpEndpointEntry>
+  broker: McpBrokerHealth
+}
+
+export interface McpEndpointToggleResponse {
+  endpoint: McpEndpointEntry
+  /** Clients that already had an entry with this name; left unchanged. */
+  skipped: Array<{ client: McpClientId; name: string }>
+  /** The app whose own entry for this server the endpoint now runs. */
+  adoptedFrom?: string
+  /** Environment names from that entry that were not copied. */
+  droppedEnvironment?: Array<string>
+}
+
 /** Endpoint catalog — adding a new call means adding a member here
  *  plus a `ResponseFor` mapping. Splitting the request shape from
  *  the response type keeps call sites free of an awkward `response`
@@ -263,6 +310,17 @@ type Endpoint =
       path: "/settings/api/apps/claude-desktop/toggle"
       body: { enabled: boolean }
     }
+  | {
+      kind: "mcp-list"
+      method: "GET"
+      path: "/settings/api/mcp"
+    }
+  | {
+      kind: "mcp-toggle"
+      method: "POST"
+      path: `/settings/api/mcp/${string}`
+      body: { enabled: boolean; clients?: Array<McpClientId> }
+    }
 
 type EndpointKind = Endpoint["kind"]
 
@@ -287,6 +345,8 @@ interface ResponseFor {
   "apps-list": AppsListResponse
   "claude-code-toggle": AppEntry
   "claude-desktop-toggle": AppEntry
+  "mcp-list": McpEndpointsListResponse
+  "mcp-toggle": McpEndpointToggleResponse
   "models-list": ModelsListResponse
   "models-refresh": ModelsListResponse
 }

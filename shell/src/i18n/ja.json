@@ -6,6 +6,7 @@
 
   "nav-account": "アカウント",
   "nav-apps": "アプリ",
+  "nav-mcp": "MCP サーバー",
   "nav-endpoint": "エンドポイント",
   "nav-api-clients": "API キー",
   "nav-models": "モデル",
@@ -111,6 +112,9 @@
 
   "apps-title": "アプリ",
   "apps-sub": "Maximal と連携するツールをワンクリックでセットアップ。アプリをオンにすると、Maximal がプロキシに向けて設定します。",
+
+  "mcp-title": "MCP サーバー",
+  "mcp-sub": "Work IQ などのツールサーバーをアプリと共有します。オンにして使うアプリを選び、オフにすると元に戻します。",
 
   "endpoint-title": "エンドポイント",
   "endpoint-sub": "Maximal がリッスンする場所。Apps の一覧にないツールを接続する際は、これらの値を使用してください。",

@@ -33,6 +33,7 @@ class Maximal < Formula
 
   def install
     bin.install "maximal"
+    bin.install "maximal-mcp-broker"
   end
 
   service do
@@ -45,9 +46,10 @@ class Maximal < Formula
   end
 
   test do
-    # `debug --json` is the cheapest way to confirm the binary boots
-    # and renders structured output. We don't assert keys here — the
-    # release pipeline's smoke job covers schema.
+    # `debug --json` is the cheapest way to confirm the primary binary boots
+    # and renders structured output. The broker's protocol modes need a live
+    # descriptor or control peer, so only assert that Homebrew installed it.
+    assert_predicate bin/"maximal-mcp-broker", :executable?
     output = shell_output("#{bin}/maximal debug --json")
     assert_match "\"version\":", output
     assert_match "\"git\":",     output

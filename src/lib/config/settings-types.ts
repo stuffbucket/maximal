@@ -386,3 +386,75 @@ export const ClaudeDesktopToggleRequest = z.object({
 export type ClaudeDesktopToggleRequest = z.infer<
   typeof ClaudeDesktopToggleRequest
 >
+
+// ── Brokered MCP endpoints (/settings/api/mcp) ──────────────────────────
+
+export const McpClientId = z.enum(["claude-code", "claude-desktop"])
+export type McpClientId = z.infer<typeof McpClientId>
+
+export const McpClientOffer = z.object({
+  id: McpClientId,
+  name: z.string(),
+  /** Maximal's integration for this client is on, so it can be offered. */
+  available: z.boolean(),
+  /** Maximal currently has this endpoint written into the client. */
+  configured: z.boolean(),
+})
+export type McpClientOffer = z.infer<typeof McpClientOffer>
+
+export const McpEndpointEntry = z.object({
+  id: z.string(),
+  label: z.string(),
+  enabled: z.boolean(),
+  /** Remembered client choices, used to pre-check the prompt. */
+  clients: z.array(McpClientId),
+  offered: z.array(McpClientOffer),
+})
+export type McpEndpointEntry = z.infer<typeof McpEndpointEntry>
+
+/** The process that runs every MCP endpoint, as the Settings UI needs it:
+ *  whether anything is wrong and whether Maximal is already fixing it.
+ *   off         no endpoint is on
+ *   starting    coming up (first start, or after a change)
+ *   running     serving
+ *   recovering  stopped unexpectedly; Maximal is restarting it on its own
+ *   stuck       kept stopping; Maximal paused retries for a minute
+ *   unavailable can't run on this install — `problem` says why */
+export const McpBrokerHealth = z.object({
+  state: z.enum([
+    "off",
+    "starting",
+    "running",
+    "recovering",
+    "stuck",
+    "unavailable",
+  ]),
+  problem: z.enum(["not-installed", "unsupported-platform"]).nullable(),
+})
+export type McpBrokerHealth = z.infer<typeof McpBrokerHealth>
+
+export const McpEndpointsListResponse = z.object({
+  endpoints: z.array(McpEndpointEntry),
+  broker: McpBrokerHealth,
+})
+export type McpEndpointsListResponse = z.infer<typeof McpEndpointsListResponse>
+
+export const McpEndpointToggleRequest = z.object({
+  enabled: z.boolean(),
+  /** Omitted when turning off, so the remembered choice is kept. */
+  clients: z.array(McpClientId).max(2).optional(),
+})
+export type McpEndpointToggleRequest = z.infer<typeof McpEndpointToggleRequest>
+
+export const McpEndpointToggleResponse = z.object({
+  endpoint: McpEndpointEntry,
+  /** Clients that already had an entry with this name; left unchanged. */
+  skipped: z.array(z.object({ client: McpClientId, name: z.string() })),
+  /** The app whose own entry for this server the endpoint now runs. */
+  adoptedFrom: z.string().optional(),
+  /** Environment names from that entry that were not copied. */
+  droppedEnvironment: z.array(z.string()).optional(),
+})
+export type McpEndpointToggleResponse = z.infer<
+  typeof McpEndpointToggleResponse
+>

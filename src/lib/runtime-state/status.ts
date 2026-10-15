@@ -25,6 +25,7 @@
  * the same contract holds on Windows and Linux.
  */
 
+import { getBrokerSupervisorSnapshot } from "~/lib/mcp-broker/supervisor"
 import {
   hasCopilotToken,
   hasGithubToken,
@@ -50,6 +51,21 @@ export interface ModelsSubsystemStatus {
   cached: number
 }
 
+export interface McpBrokerSubsystemStatus {
+  /** Coarse supervisor state; endpoint details remain authenticated. */
+  state:
+    | "disabled"
+    | "starting"
+    | "ready"
+    | "degraded"
+    | "backoff"
+    | "circuit-open"
+    | "stopping"
+    | "unavailable"
+  /** Number of enabled configured endpoints, never their identities. */
+  enabled_endpoints: number
+}
+
 export interface StatusResponse {
   /** Identity marker. Always the literal "maximal" — the stable signal a
    *  caller uses to confirm the thing on the port is this proxy. */
@@ -65,6 +81,7 @@ export interface StatusResponse {
   subsystems: {
     copilot: CopilotSubsystemStatus
     models: ModelsSubsystemStatus
+    mcp_broker: McpBrokerSubsystemStatus
   }
 }
 
@@ -78,6 +95,7 @@ export interface StatusResponse {
 export function buildStatus(startMs: number): StatusResponse {
   const authenticated = hasGithubToken()
   const ready = authenticated && hasCopilotToken()
+  const broker = getBrokerSupervisorSnapshot()
 
   return {
     service: "maximal",
@@ -92,6 +110,10 @@ export function buildStatus(startMs: number): StatusResponse {
       },
       models: {
         cached: modelsCached(),
+      },
+      mcp_broker: {
+        state: broker.state,
+        enabled_endpoints: broker.enabledEndpoints,
       },
     },
   }

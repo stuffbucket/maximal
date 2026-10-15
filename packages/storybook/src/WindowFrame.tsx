@@ -3,6 +3,7 @@ import type { ScenarioId } from "../../../scripts/ui-harness-fixtures";
 export type SettingsSection =
   | "account"
   | "apps"
+  | "mcp"
   | "endpoint"
   | "api-clients"
   | "models"
@@ -12,6 +13,7 @@ export type SettingsSection =
 export const SETTINGS_SECTIONS: Array<SettingsSection> = [
   "account",
   "apps",
+  "mcp",
   "endpoint",
   "api-clients",
   "models",

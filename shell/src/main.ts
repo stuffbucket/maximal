@@ -13,12 +13,14 @@ import type { AuthStatus, EventSubscription, UpstreamRejection } from "./proxy/c
 import { apiCall, subscribeAuthEvents } from "./proxy/client";
 import { mountApiClients } from "./ui/islands/api-clients-island";
 import { mountApps } from "./ui/islands/apps-island";
+import { mountMcp } from "./ui/islands/mcp-island";
 import { mountModels } from "./ui/islands/models-island";
 import { waitForSidecarBack } from "./ui/restart";
 
 type SectionId =
   | "account"
   | "apps"
+  | "mcp"
   | "endpoint"
   | "api-clients"
   | "models"
@@ -28,6 +30,7 @@ type SectionId =
 const SECTIONS: ReadonlyArray<SectionId> = [
   "account",
   "apps",
+  "mcp",
   "endpoint",
   "api-clients",
   "models",
@@ -1987,6 +1990,7 @@ window.addEventListener("DOMContentLoaded", () => {
   wireUninstall();
   mountApiClients();
   mountApps();
+  mountMcp();
   mountModels();
   wireNav();
   syncFromHash();
@@ -2003,6 +2007,9 @@ window.addEventListener("hashchange", () => {
   if (section === "diagnostics") void loadDiagnostics();
   if (section === "apps") {
     window.dispatchEvent(new CustomEvent("maximal:apps-refresh"));
+  }
+  if (section === "mcp") {
+    window.dispatchEvent(new CustomEvent("maximal:mcp-refresh"));
   }
   if (section === "models") {
     window.dispatchEvent(new CustomEvent("maximal:models-refresh"));

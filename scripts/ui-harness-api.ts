@@ -51,12 +51,14 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
     apiKeys: fixture.apiKeys,
     accounts: fixture.accounts,
     models: fixture.models,
+    mcp: fixture.mcp,
   }) as {
     auth: AuthStatus
     apps: ResolvedScenario["apps"]
     apiKeys: ResolvedScenario["apiKeys"]
     accounts: ResolvedScenario["accounts"]
     models: ResolvedScenario["models"]
+    mcp: ResolvedScenario["mcp"]
   }
   const listeners = new Set<(auth: AuthStatus) => void>()
   const setAuth = (next: AuthStatus): void => {
@@ -96,6 +98,7 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
     if (path === "/settings/api/api-keys" && method === "GET") return json(state.apiKeys)
     if (path === "/settings/api/apps") return json(state.apps)
     if (path === "/settings/api/models" && method === "GET") return json(state.models)
+    if (path === "/settings/api/mcp" && method === "GET") return json(state.mcp)
     if (path === "/settings/api/gh/status") return json(fixture.ghStatus)
     if (path === "/settings/api/clients") return json(fixture.clients)
 
@@ -127,6 +130,21 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
       if (!app) return json({ error: { message: "no such app" } }, 404)
       app.enabled = !!(await body()).enabled
       return json(app)
+    }
+
+    // --- mcp toggle (flip enabled, remember the client choice) ---
+    const mcpToggle = /^\/settings\/api\/mcp\/([^/]+)$/.exec(path)
+    if (mcpToggle && method === "POST") {
+      const id = decodeURIComponent(mcpToggle[1])
+      const endpoint = state.mcp.endpoints.find((e) => e.id === id)
+      if (!endpoint) return json({ error: { message: "no such endpoint" } }, 404)
+      const b = await body()
+      endpoint.enabled = !!b.enabled
+      if (Array.isArray(b.clients)) endpoint.clients = b.clients
+      for (const offer of endpoint.offered) {
+        offer.configured = endpoint.enabled && endpoint.clients.includes(offer.id) && offer.available
+      }
+      return json({ endpoint, skipped: [] })
     }
 
     // --- models refresh (just re-stamp loaded_at) ---

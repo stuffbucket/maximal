@@ -6,6 +6,7 @@
 
   "nav-account": "账户",
   "nav-apps": "应用",
+  "nav-mcp": "MCP 服务器",
   "nav-endpoint": "端点",
   "nav-api-clients": "API 密钥",
   "nav-models": "模型",
@@ -111,6 +112,9 @@
 
   "apps-title": "应用",
   "apps-sub": "为与 Maximal 通信的工具提供一键设置。打开某个应用,我们就会为你把它指向代理。",
+
+  "mcp-title": "MCP 服务器",
+  "mcp-sub": "与你的应用共享 Work IQ 等工具服务器。打开某个服务器并选择哪些应用使用它,关闭后我们会把它移除。",
 
   "endpoint-title": "端点",
   "endpoint-sub": "Maximal 的监听位置。配置不在“应用”列表中的工具时,请使用这些值。",
