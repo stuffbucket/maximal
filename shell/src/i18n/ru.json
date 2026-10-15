@@ -310,6 +310,9 @@
   "native-notify-rejection-title": "Maximal",
   "native-notify-rejection-body": "Вышестоящий запрос Copilot был отклонён. Откройте Настройки для получения деталей.",
   "native-notify-rejection-body-detail": "{message} — откройте Настройки для получения деталей.",
+  "native-notify-working-title": "Maximal работает",
+  "native-notify-working-body": "Ваш первый запрос только что прошёл.",
+  "native-notify-working-body-apps": "Запросы проходят: {apps} теперь может использовать Maximal.",
 
   "native-quit-title": "Выйти из Maximal?",
   "native-quit-body": "Maximal остановится, и все открытые окна Настроек закроются.",

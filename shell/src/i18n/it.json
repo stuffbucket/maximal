@@ -310,6 +310,9 @@
   "native-notify-rejection-title": "Maximal",
   "native-notify-rejection-body": "Una richiesta upstream a Copilot è stata rifiutata. Apri le Impostazioni per i dettagli.",
   "native-notify-rejection-body-detail": "{message} — apri le Impostazioni per i dettagli.",
+  "native-notify-working-title": "Maximal funziona",
+  "native-notify-working-body": "La prima richiesta è appena passata.",
+  "native-notify-working-body-apps": "Le richieste passano: {apps} ora può usare Maximal.",
 
   "native-quit-title": "Uscire da Maximal?",
   "native-quit-body": "Maximal si arresterà e tutte le finestre delle Impostazioni aperte si chiuderanno.",
