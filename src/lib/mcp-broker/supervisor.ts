@@ -7,6 +7,7 @@ import type { McpBrokerConfig } from "./types"
 import {
   brokerExecutableCandidates,
   brokerProcessEnvironment,
+  isLiveUpdate,
   resolveBrokerConfiguration,
   type ResolvedBrokerConfiguration,
 } from "./configuration"
@@ -81,6 +82,7 @@ interface BrokerGeneration {
   readyReceived: boolean
   startupTimer?: ReturnType<typeof setTimeout>
   shutdownResponse?: () => void
+  updateResponse?: (ok: boolean) => void
 }
 
 interface SupervisorOptions {
@@ -93,6 +95,15 @@ interface SupervisorOptions {
   randomUUID?: () => string
   spawnProcess?: typeof spawn
 }
+
+/** How long to wait for the broker to take an update before restarting it
+ *  instead. Applying one is synchronous in the broker. */
+const UPDATE_TIMEOUT_MS = 5_000
+
+/** Everything but the endpoints: the supervisor's own settings, which a
+ *  live update can't change. */
+const supervisionKey = ({ servers: _servers, ...rest }: McpBrokerConfig) =>
+  JSON.stringify(rest)
 
 const delay = (milliseconds: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, milliseconds))
@@ -111,7 +122,7 @@ function forceKillProcessGroup(pid: number): boolean {
 }
 
 export class BrokerSupervisor {
-  readonly #config: McpBrokerConfig
+  #config: McpBrokerConfig
   readonly #executableExists: (candidate: string) => boolean
   readonly #forceKillProcessGroup: (pid: number) => boolean
   readonly #now: () => number
@@ -175,6 +186,51 @@ export class BrokerSupervisor {
   stop(): Promise<void> {
     this.#stopPromise ??= this.#performStop()
     return this.#stopPromise
+  }
+
+  /**
+   * Apply `config` to the running broker without restarting it, when only
+   * how a new session's instance starts changed (an upgraded server's new
+   * path, say). Sessions already running keep the instance they have.
+   * False when there's no ready broker, the change needs a restart, or the
+   * broker didn't take it; the caller then restarts.
+   */
+  async update(config: McpBrokerConfig): Promise<boolean> {
+    const generation = this.#generation
+    if (!generation?.readyReceived || this.#stopping) return false
+    if (generation.updateResponse) return false
+    if (supervisionKey(config) !== supervisionKey(this.#config)) return false
+    let next: ResolvedBrokerConfiguration
+    try {
+      next = resolveBrokerConfiguration(config)
+    } catch {
+      return false
+    }
+    if (!isLiveUpdate(generation.configuration, next)) return false
+
+    // Settles once: the broker's answer, a failed send, or the timeout.
+    // Assigned synchronously by the Promise executor below.
+    let finish!: (ok: boolean) => void
+    const answered = new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => finish(false), UPDATE_TIMEOUT_MS)
+      finish = (ok) => {
+        clearTimeout(timer)
+        if (generation.updateResponse === finish) {
+          generation.updateResponse = undefined
+        }
+        resolve(ok)
+      }
+    })
+    generation.updateResponse = finish
+    await this.#send(generation, {
+      operation: "update",
+      requestId: "update",
+      payload: { configuration: next },
+    }).catch(() => finish(false))
+    if (!(await answered) || this.#generation !== generation) return false
+    generation.configuration = next
+    this.#config = config
+    return true
   }
 
   async #performStop(): Promise<void> {
@@ -370,6 +426,12 @@ export class BrokerSupervisor {
       }
       if (!envelope.payload.ok) throw new Error(envelope.payload.code)
       generation.configureAccepted = true
+      return
+    }
+    if (envelope.requestId === "update") {
+      // A late answer to an update that timed out is harmless: the caller
+      // has already restarted the broker.
+      generation.updateResponse?.(envelope.payload.ok)
       return
     }
     if (envelope.requestId === "shutdown") {
@@ -600,15 +662,23 @@ export function startBrokerSupervisor(config: McpBrokerConfig): void {
   activeSupervisor.start()
 }
 
-/** Restart the broker with new config, or leave it alone when the config
- *  is unchanged. Returns false when no supervisor is running in this
- *  process (the caller should ask the running server to reload).
- *  Calls run one at a time, so the most recent config always wins. */
+/** Apply new config to the broker: nothing when it's unchanged, a live
+ *  update when only how new session instances start changed, otherwise a
+ *  restart. Returns false when no supervisor is running in this process
+ *  (the caller should ask the running server to reload). Calls run one at a
+ *  time, so the most recent config always wins. */
 export function reconfigureBroker(config: McpBrokerConfig): Promise<boolean> {
   const run = async (): Promise<boolean> => {
     const previous = activeSupervisor
     if (!previous) return false
-    if (brokerConfigKey(config) === activeConfigJson) return true
+    const key = brokerConfigKey(config)
+    if (key === activeConfigJson) return true
+    if (await previous.update(config)) {
+      // Calls are serialized through `reconfiguring`, so nothing raced us.
+      // eslint-disable-next-line require-atomic-updates
+      activeConfigJson = key
+      return true
+    }
     await previous.stop()
     // Shut down while we waited: don't bring a broker back.
     if (activeSupervisor !== previous) return false

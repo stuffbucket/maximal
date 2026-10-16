@@ -1,7 +1,9 @@
 import { Client } from "@modelcontextprotocol/client"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/client"
 import { afterEach, describe, expect, it } from "bun:test"
-import { resolve } from "node:path"
+import { mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join, resolve } from "node:path"
 
 import {
   type RunningBrokerServer,
@@ -13,10 +15,8 @@ const API_KEY = "broker-test-key-that-is-longer-than-32-bytes"
 const fixturePath = resolve(import.meta.dir, "fixture.ts")
 const runningServers: Array<RunningBrokerServer> = []
 
-const startFixtureBroker = async (
-  endpoint: { maxSessions?: number } = {},
-): Promise<RunningBrokerServer> => {
-  const configuration = BrokerWireConfigurationSchema.parse({
+const fixtureConfiguration = (endpoint: Record<string, unknown> = {}) =>
+  BrokerWireConfigurationSchema.parse({
     endpoints: [
       {
         id: "fixture",
@@ -30,7 +30,11 @@ const startFixtureBroker = async (
       },
     ],
   })
-  const server = await startBrokerServer(configuration, API_KEY)
+
+const startFixtureBroker = async (
+  endpoint: { maxSessions?: number } = {},
+): Promise<RunningBrokerServer> => {
+  const server = await startBrokerServer(fixtureConfiguration(endpoint), API_KEY)
   runningServers.push(server)
   return server
 }
@@ -153,6 +157,44 @@ describe("broker server", () => {
 
     await closeSession(client)
     await waitUntil(() => !isRunning(pid))
+  })
+
+  it("starts new sessions with updated settings; running ones keep theirs", async () => {
+    const server = await startFixtureBroker()
+    const before = await connectClient(server)
+    const dir = mkdtempSync(join(tmpdir(), "broker-update-"))
+    const pidFile = join(dir, "pid")
+    try {
+      const beforePid = await whoami(before)
+      // The new settings make an instance record its pid where we can see it.
+      server.update(
+        fixtureConfiguration({
+          environment: { SPIKE_FIXTURE_PID_FILE: pidFile },
+        }),
+      )
+      const after = await connectClient(server)
+      try {
+        const afterPid = await whoami(after)
+        expect(Number(readFileSync(pidFile, "utf8"))).toBe(afterPid)
+        // The session opened before the update is untouched.
+        expect(await whoami(before)).toBe(beforePid)
+      } finally {
+        await after.close()
+      }
+    } finally {
+      await before.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("refuses an update that changes how an endpoint is served", async () => {
+    const server = await startFixtureBroker()
+    expect(() =>
+      server.update(fixtureConfiguration({ protocol: "auto" })),
+    ).toThrow("RESTART_REQUIRED")
+    expect(() =>
+      server.update(fixtureConfiguration({ id: "renamed" })),
+    ).toThrow("RESTART_REQUIRED")
   })
 
   it("refuses sessions past the endpoint's limit with a clear 503", async () => {

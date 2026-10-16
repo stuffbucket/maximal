@@ -135,6 +135,32 @@ function endpointBounds(
   }
 }
 
+/** What a running broker built each endpoint's listener around. */
+function listenerShape(endpoint: ResolvedBrokerEndpoint) {
+  return {
+    id: endpoint.id,
+    protocol: endpoint.protocol,
+    interaction: endpoint.interaction,
+    ownership: endpoint.ownership,
+  }
+}
+
+/** True when a broker running `current` can take `next` without a restart:
+ *  the same endpoints, built the same way, differing only in how a new
+ *  session's instance starts (command, args, environment, timeouts). Mirrors
+ *  `isLiveUpdate` in the broker package, which re-checks it. */
+export function isLiveUpdate(
+  current: ResolvedBrokerConfiguration,
+  next: ResolvedBrokerConfiguration,
+): boolean {
+  return (
+    current.httpBodyBytes === next.httpBodyBytes
+    && current.heartbeatIntervalMs === next.heartbeatIntervalMs
+    && JSON.stringify(current.endpoints.map((e) => listenerShape(e)))
+      === JSON.stringify(next.endpoints.map((e) => listenerShape(e)))
+  )
+}
+
 export function resolveBrokerConfiguration(
   config: McpBrokerConfig,
   source: NodeJS.ProcessEnv = process.env,

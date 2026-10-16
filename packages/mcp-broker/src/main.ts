@@ -262,6 +262,28 @@ const serve = async (options: ServeOptions): Promise<void> => {
           continue
         }
 
+        if (envelope.operation === "update") {
+          let payload:
+            | { ok: true }
+            | { ok: false; code: string } = { ok: true }
+          if (!running) {
+            payload = { ok: false, code: "NOT_CONFIGURED" }
+          } else {
+            try {
+              running.update(envelope.payload.configuration)
+            } catch (error) {
+              payload = { ok: false, code: errorCode(error) }
+            }
+          }
+          await writer.send({
+            deadlineMs: Date.now() + MESSAGE_DEADLINE_MS,
+            operation: "response",
+            requestId: envelope.requestId,
+            payload,
+          })
+          continue
+        }
+
         if (envelope.operation === "shutdown") {
           await close()
           await writer.send({

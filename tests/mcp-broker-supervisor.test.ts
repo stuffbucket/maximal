@@ -192,6 +192,117 @@ const sendReadyHandshake = (
   )
 }
 
+interface SentFrame {
+  operation: string
+  requestId?: string
+  payload: { configuration?: { endpoints: Array<{ command: string }> } }
+}
+
+/** Frames the supervisor wrote to the fake broker, decoded. */
+const sentFrames = (child: FakeBrokerProcess): Array<SentFrame> => {
+  const frames: Array<SentFrame> = []
+  let buffered = Buffer.alloc(0)
+  child.stdin.on("data", (chunk: Buffer) => {
+    buffered = Buffer.concat([buffered, chunk])
+    while (buffered.byteLength >= 4) {
+      const length = buffered.readUInt32BE(0)
+      if (buffered.byteLength < 4 + length) break
+      frames.push(
+        JSON.parse(buffered.subarray(4, 4 + length).toString()) as SentFrame,
+      )
+      buffered = buffered.subarray(4 + length)
+    }
+  })
+  return frames
+}
+
+const waitForFrame = async (
+  frames: ReturnType<typeof sentFrames>,
+  operation: string,
+) => {
+  const deadline = Date.now() + 2_000
+  while (Date.now() < deadline) {
+    const found = frames.find((f) => f.operation === operation)
+    if (found) return found
+    await Bun.sleep(5)
+  }
+  throw new Error(`timed out waiting for ${operation}`)
+}
+
+/** `config()` with the fixture endpoint's settings changed. */
+const withServer = (
+  changes: Partial<NonNullable<McpBrokerConfig["servers"]>[number]>,
+): McpBrokerConfig => {
+  const base = config()
+  return {
+    ...base,
+    servers: (base.servers ?? []).map((server) => ({ ...server, ...changes })),
+  }
+}
+
+/** A supervisor whose broker has finished its handshake. */
+const ready = async () => {
+  const harness = fixture()
+  harness.supervisor.start()
+  const child = await waitForChild(harness.children)
+  const frames = sentFrames(child)
+  sendReadyHandshake(child, "generation-1")
+  await waitForState("ready")
+  return { ...harness, child, frames }
+}
+
+describe("BrokerSupervisor live updates", () => {
+  test("a new command reaches the running broker without a restart", async () => {
+    const { child, children, frames, supervisor } = await ready()
+    const updated = supervisor.update(
+      withServer({ transport: { type: "stdio", command: "/new/fixture" } }),
+    )
+    const sent = await waitForFrame(frames, "update")
+    expect(sent.payload.configuration?.endpoints[0]?.command).toBe(
+      "/new/fixture",
+    )
+    child.stdout.write(
+      frame(
+        { generation: "generation-1", sequence: 3, requestId: "update" },
+        "response",
+        { ok: true },
+      ),
+    )
+    expect(await updated).toBe(true)
+    expect(children).toHaveLength(1)
+    expect(getBrokerSupervisorSnapshot().state).toBe("ready")
+    await supervisor.stop()
+  })
+
+  test("a change to how the endpoint is served isn't sent; the caller restarts", async () => {
+    const { frames, supervisor } = await ready()
+    expect(
+      await supervisor.update(
+        withServer({ classification: { protocol: "modern" } }),
+      ),
+    ).toBe(false)
+    expect(frames.some((f) => f.operation === "update")).toBe(false)
+    await supervisor.stop()
+  })
+
+  test("the broker refusing an update reports false", async () => {
+    const { child, frames, supervisor } = await ready()
+    const updated = supervisor.update(
+      withServer({ timeouts: { callMs: 5_000 } }),
+    )
+    await waitForFrame(frames, "update")
+    child.stdout.write(
+      frame(
+        { generation: "generation-1", sequence: 3, requestId: "update" },
+        "response",
+        { ok: false, code: "RESTART_REQUIRED" },
+      ),
+    )
+    expect(await updated).toBe(false)
+    await supervisor.stop()
+  })
+})
+
 describe("BrokerSupervisor launches that can't succeed", () => {
   test("stops as unavailable/not-installed when the executable is missing", async () => {
     const { children, supervisor } = fixture(config(), {

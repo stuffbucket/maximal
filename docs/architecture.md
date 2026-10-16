@@ -160,9 +160,12 @@ records an absolute path to the native executable inside the npm package
 shim, or an npm launcher that needs `node`. When several installs exist,
 the highest version wins. Adding asks the user to confirm and writes the
 endpoint off, with `catalog` set. The path contains the package version and
-package managers keep old versions after an upgrade, so boot, every Settings
-list, and every `maximal mcp` run switch a catalog endpoint to the newest
-install found (an uninstalled server keeps its last path). The CLI can also add any stdio
+package managers keep old versions after an upgrade, so Maximal re-reads
+where the newest install is before every request that opens a session (no
+`mcp-session-id`) on a catalog endpoint, as well as at boot, on every
+Settings list, and on every `maximal mcp` run. The next instance (say, after
+an idle session was closed) therefore runs the upgrade; an uninstalled
+server keeps its last path. The CLI can also add any stdio
 server given after `--`, as an absolute path. Removing deletes the
 endpoint from `config.json` first and then syncs clients: the desired
 entries come from `servers`, while what Maximal owns stays recorded per
@@ -211,10 +214,17 @@ non-secret environment into the endpoint once, so the broker runs the same
 server. The app's own entry stays untouched; secret-looking environment names
 are not copied and are reported. Maximal's own adapter is never adopted.
 
-Toggling from Settings restarts the broker in-process, only when what it
-serves changed: endpoints that are off and the apps an endpoint goes to
-don't count, so adding an endpoint or re-picking apps leaves live sessions
-alone. The CLI, which has no broker, calls the
+Config changes reach the in-process broker one of three ways
+(`reconfigureBroker`): nothing, when only endpoints that are off or the
+apps an endpoint goes to changed; a live `update` control message, when
+only how a new session's instance starts changed (command, args, working
+directory, environment, timeouts, session cap), which new sessions pick up
+while running ones keep their instance; otherwise a restart. The broker
+re-checks an `update` and answers `RESTART_REQUIRED` if the endpoints or
+how they're served (protocol, interaction, ownership, body limit) differ,
+and the supervisor then restarts it. The control protocol is versioned
+(`CONTROL_PROTOCOL_VERSION`, 2 since `update`); a sidecar and broker from
+different builds fail the first frame rather than half-work. The CLI, which has no broker, calls the
 running server's loopback-only `POST /_internal/reload`, which re-reads
 `config.json` and restarts the broker if needed, so no restart is required. External MCP commands,
 including Work IQ when configured, remain separately installed programs;

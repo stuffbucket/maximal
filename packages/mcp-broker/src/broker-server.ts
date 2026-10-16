@@ -40,6 +40,8 @@ export type BrokerStartupErrorCode =
   | "BROKER_BIND_FAILED"
   | "ENDPOINT_CONNECT_FAILED"
   | "ENDPOINT_SHARING_DISABLED"
+  /** An update changed more than how new instances start. */
+  | "RESTART_REQUIRED"
 
 export class BrokerStartupError extends Error {
   readonly code: BrokerStartupErrorCode
@@ -79,6 +81,8 @@ interface RunningEndpoint {
   id: string
   internalPort: number
   observation: EndpointObservation
+  /** Use these settings for instances started from now on. */
+  update(endpoint: ResolvedMcpEndpoint): void
 }
 
 export interface RunningBrokerServer {
@@ -86,7 +90,31 @@ export interface RunningBrokerServer {
   endpoints: Array<EndpointObservation>
   host: typeof EXTERNAL_HOST
   port: number
+  /** Apply new settings to how future session instances start, without
+   *  touching sessions already running. Throws RESTART_REQUIRED when the
+   *  change needs a new broker (see `isLiveUpdate`). */
+  update(configuration: BrokerWireConfiguration): void
 }
+
+/** What a running endpoint's listener was built around. Everything else
+ *  only affects how the next instance starts. */
+const listenerShape = (endpoint: ResolvedMcpEndpoint) => ({
+  id: endpoint.id,
+  protocol: endpoint.protocol,
+  interaction: endpoint.interaction,
+  ownership: endpoint.ownership,
+})
+
+/** True when `next` can be applied to a broker running `current`: same
+ *  endpoints, built the same way, only their launch settings differ. */
+export const isLiveUpdate = (
+  current: BrokerWireConfiguration,
+  next: BrokerWireConfiguration,
+): boolean =>
+  current.httpBodyBytes === next.httpBodyBytes
+  && current.heartbeatIntervalMs === next.heartbeatIntervalMs
+  && JSON.stringify(current.endpoints.map(listenerShape))
+    === JSON.stringify(next.endpoints.map(listenerShape))
 
 const clientOptions = (endpoint: ResolvedMcpEndpoint): ClientOptions => ({
   capabilities: {},
@@ -133,10 +161,12 @@ const refusal = (status: number, message: string): Response =>
  * cancellations can't reach another's. Closing a session closes its instance.
  */
 const startEndpoint = async (
-  endpoint: ResolvedMcpEndpoint,
+  initial: ResolvedMcpEndpoint,
   apiKey: string,
   maxBodyBytes: number,
 ): Promise<RunningEndpoint> => {
+  // Replaced by `update`; each new session reads it when it starts.
+  let endpoint = initial
   if (endpoint.ownership === "shareable") {
     throw new BrokerStartupError("ENDPOINT_SHARING_DISABLED")
   }
@@ -223,6 +253,9 @@ const startEndpoint = async (
   return {
     id: endpoint.id,
     internalPort: httpServer.address.port,
+    update(next) {
+      endpoint = next
+    },
     observation: {
       id: endpoint.id,
       serverName: sanitizeIdentity(serverVersion.name, "anonymous-upstream"),
@@ -409,7 +442,17 @@ export const startBrokerServer = async (
 
     const frontDoor = await startFrontDoor(endpoints, apiKey)
     let closed = false
+    let current = configuration
     return {
+      update(next) {
+        if (!isLiveUpdate(current, next)) {
+          throw new BrokerStartupError("RESTART_REQUIRED")
+        }
+        for (const settings of next.endpoints) {
+          endpoints.get(settings.id)?.update(settings)
+        }
+        current = next
+      },
       endpoints: [...endpoints.values()].map(
         (endpoint) => endpoint.observation,
       ),
