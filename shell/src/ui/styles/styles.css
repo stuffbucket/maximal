@@ -423,18 +423,6 @@ a:hover {
   gap: var(--space-2);
 }
 
-/* Quiet destructive: a ghost button whose label reads destructive, so Remove
-   is visibly the cautionary, secondary action beside Switch. Hover lifts to
-   the destructive fill (mirrors .btn--ghost:hover, destructive token). */
-.btn--ghost-destructive {
-  color: var(--status-error);
-}
-
-.btn--ghost-destructive:hover {
-  background: var(--accent-destructive);
-  color: var(--accent-destructive-foreground);
-}
-
 /* ---- Requirement callout ----
    A first-launch signal that this app needs a GitHub Copilot
    subscription to function. Sits above the body copy in the
@@ -1219,6 +1207,25 @@ a:hover {
 .btn--ghost:disabled:hover {
   background: transparent;
   color: var(--text-base-color);
+}
+
+/* Quiet destructive: a ghost button whose label reads destructive, so Remove
+   is visibly the cautionary, secondary action beside Switch. Hover lifts to
+   the destructive fill (mirrors .btn--ghost:hover, destructive token).
+   Declared after the .btn--ghost rules, which have the same specificity,
+   so the red wins; disabled, it stays red and doesn't light up. */
+.btn--ghost-destructive {
+  color: var(--status-error);
+}
+
+.btn--ghost-destructive:hover {
+  background: var(--accent-destructive);
+  color: var(--accent-destructive-foreground);
+}
+
+.btn--ghost-destructive:disabled:hover {
+  background: transparent;
+  color: var(--status-error);
 }
 
 /* Borderless input variant for inline editing inside table cells.

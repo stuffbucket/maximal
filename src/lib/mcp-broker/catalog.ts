@@ -36,7 +36,7 @@ export interface McpCatalogEntry {
   id: string
   label: string
   /** How to install it, shown when it isn't found. */
-  install: { command: string; url: string }
+  install(options?: CatalogDetectOptions): { command: string; url: string }
   locate(options?: CatalogDetectOptions): CatalogInstall | undefined
   /** The endpoint written to config.json when the user adds it. Off until
    *  the user turns it on and picks clients. */
@@ -266,12 +266,22 @@ function newestInstall(
   return best
 }
 
+/** True when mise manages tools on this machine (its data directory
+ *  exists), so an install hint can use it instead of a global npm install. */
+function usesMise(opts: ResolvedOptions): boolean {
+  return fs.existsSync(path.join(opts.miseDataDir, "installs"))
+}
+
 const workiq: McpCatalogEntry = {
   id: "workiq",
   label: "Work IQ",
-  install: {
-    command: "npm install -g @microsoft/workiq",
-    url: "https://www.npmjs.com/package/@microsoft/workiq",
+  install(options) {
+    // Whichever way this machine installs tools; detection finds both.
+    const command =
+      usesMise(resolveOptions(options)) ?
+        "mise use -g npm:@microsoft/workiq"
+      : "npm install -g @microsoft/workiq"
+    return { command, url: "https://www.npmjs.com/package/@microsoft/workiq" }
   },
   locate(options) {
     const opts = resolveOptions(options)
