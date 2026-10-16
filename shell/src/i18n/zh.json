@@ -6,6 +6,7 @@
 
   "nav-account": "账户",
   "nav-apps": "应用",
+  "nav-mcp": "MCP 服务器",
   "nav-endpoint": "端点",
   "nav-api-clients": "API 密钥",
   "nav-models": "模型",
@@ -111,6 +112,9 @@
 
   "apps-title": "应用",
   "apps-sub": "为与 Maximal 通信的工具提供一键设置。打开某个应用,我们就会为你把它指向代理。",
+
+  "mcp-title": "MCP 服务器",
+  "mcp-sub": "与你的应用共享 Work IQ 等工具服务器。打开某个服务器并选择哪些应用使用它,关闭后我们会把它移除。",
 
   "endpoint-title": "端点",
   "endpoint-sub": "Maximal 的监听位置。配置不在“应用”列表中的工具时,请使用这些值。",
@@ -220,6 +224,11 @@
   "dashboard-quota-unlimited": "无限制",
   "dashboard-quota-percent-used": "已使用 {percent}%",
   "dashboard-quota-remaining": "剩余 {n}",
+  "dashboard-quota-resets": "{date} 重置",
+  "dashboard-quota-period-ended": "周期已于 {date} 结束",
+  "dashboard-quota-as-of": "截至 {time}",
+  "dashboard-rate-per-minute": "{n} 令牌/分钟",
+  "dashboard-rate-sparkline-label": "最近 15 分钟每分钟的令牌数",
 
   "dashboard-api-response-title": "使用情况 API 响应",
 
@@ -305,6 +314,9 @@
   "native-notify-rejection-title": "Maximal",
   "native-notify-rejection-body": "一个上游 Copilot 请求被拒绝。打开设置查看详情。",
   "native-notify-rejection-body-detail": "{message} — 打开设置查看详情。",
+  "native-notify-working-title": "Maximal 正在运行",
+  "native-notify-working-body": "你的第一个请求刚刚通过。",
+  "native-notify-working-body-apps": "请求正在通过：{apps} 现在可以使用 Maximal 了。",
 
   "native-quit-title": "退出 Maximal?",
   "native-quit-body": "Maximal 将停止,所有打开的设置窗口将关闭。",

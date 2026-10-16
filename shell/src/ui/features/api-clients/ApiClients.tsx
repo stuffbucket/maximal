@@ -1,7 +1,9 @@
 import { useCallback, useState } from "react";
 
 import { Button } from "../../components/Button";
+import { ProblemCallout } from "../../components/ProblemCallout";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
+import { EmptyState } from "../../components/EmptyState";
 import { Stack } from "../../components/Stack";
 import type { ApiKeyEntry } from "../../../../../src/lib/config/settings-types";
 
@@ -15,7 +17,7 @@ export function ApiClients(): JSX.Element {
     entries,
     enforcing,
     isLoading,
-    error,
+    problem,
     reload,
     create,
     update,
@@ -40,13 +42,12 @@ export function ApiClients(): JSX.Element {
 
   return (
     <Stack proximity="region" className="api-clients">
-      {error && (
-        <p
-          className="state__caption state__caption--error"
-          role="alert"
-        >
-          {error}
-        </p>
+      {problem && (
+        <ProblemCallout
+          problem={problem}
+          onRetry={() => void reload()}
+          onRestarted={() => void reload()}
+        />
       )}
 
       <Stack proximity="section" className="connection-list">
@@ -59,11 +60,14 @@ export function ApiClients(): JSX.Element {
           />
         ))}
 
-        {showEmpty && (
-          <p className="connection-list__empty">
-            Nothing here yet. Add a connection for each app you want to
-            recognize — Claude Code, Cursor, anything else.
-          </p>
+        {showEmpty && !problem && (
+          <EmptyState title="No connections yet" compact>
+            <p>
+              Add a connection for each app you want to recognize — Claude
+              Code, Cursor, anything else. Each one gets its own key, so its
+              traffic is labeled.
+            </p>
+          </EmptyState>
         )}
 
         {adding ? (

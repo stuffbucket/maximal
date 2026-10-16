@@ -15,19 +15,22 @@ different teals named `--accent` (see
 
 ## Changing a token value
 
-1. Edit `shell/src/tokens.css` (the declared ground truth).
-2. **Also edit `shell/ui/dashboard/style.css`** if the token is
-   redeclared there. The Dashboard is a single embedded HTML file
-   with no CSS imports — token declarations are independent. See
-   [`windows.md`](windows.md) for why.
+1. Edit `shell/src/ui/styles/theme.ts` (the declared ground truth). A
+   color that differs between light and dark goes in **both**
+   `themes.dark` and `themes.light`.
+2. Run `bun run tokens:generate`. It rewrites `shell/src/ui/styles/tokens.css`
+   and the generated region of `shell/ui/dashboard/style.css` (the
+   Dashboard can't import CSS, so it gets its own copy — see
+   [`windows.md`](windows.md)). Never hand-edit either.
 3. Update the value column in [`tokens.md`](tokens.md) if the value
    appears there.
 4. Search for any inlined raw value the token was supposed to replace:
    `grep -rn '<old-value>' shell/src shell/ui`.
 5. Manually verify both windows: `bun run app:ui` for the Settings
    window, open the proxy and visit `/ui/dashboard/` for the Dashboard.
-6. If the change is a color, re-check WCAG AA contrast on both
-   surface levels per [`color.md`](color.md).
+6. If the change is a color, re-check WCAG AA contrast on all three
+   surfaces in **both** themes per [`color.md`](color.md). Storybook's
+   Theme toolbar (System / Dark / Light) is the quickest way to look.
 
 ## Adding a new token
 
@@ -53,6 +56,8 @@ different teals named `--accent` (see
    `--focus-ring` composed token.
 5. Hover/active transitions: 150ms ease-out. Wrap in the global
    reduced-motion block ([`motion.md`](motion.md)).
+6. Add stories under `packages/storybook/src/` covering each visual
+   state (not just the happy path). Check them in both themes.
 
 ## Adding or modifying a color role
 

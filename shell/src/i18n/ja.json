@@ -6,6 +6,7 @@
 
   "nav-account": "アカウント",
   "nav-apps": "アプリ",
+  "nav-mcp": "MCP サーバー",
   "nav-endpoint": "エンドポイント",
   "nav-api-clients": "API キー",
   "nav-models": "モデル",
@@ -111,6 +112,9 @@
 
   "apps-title": "アプリ",
   "apps-sub": "Maximal と連携するツールをワンクリックでセットアップ。アプリをオンにすると、Maximal がプロキシに向けて設定します。",
+
+  "mcp-title": "MCP サーバー",
+  "mcp-sub": "Work IQ などのツールサーバーをアプリと共有します。オンにして使うアプリを選び、オフにすると元に戻します。",
 
   "endpoint-title": "エンドポイント",
   "endpoint-sub": "Maximal がリッスンする場所。Apps の一覧にないツールを接続する際は、これらの値を使用してください。",
@@ -220,6 +224,11 @@
   "dashboard-quota-unlimited": "無制限",
   "dashboard-quota-percent-used": "{percent}% 使用済み",
   "dashboard-quota-remaining": "残り {n}",
+  "dashboard-quota-resets": "{date} にリセット",
+  "dashboard-quota-period-ended": "期間は {date} に終了",
+  "dashboard-quota-as-of": "{time} 時点",
+  "dashboard-rate-per-minute": "{n} トークン/分",
+  "dashboard-rate-sparkline-label": "直近 15 分間の 1 分あたりのトークン数",
 
   "dashboard-api-response-title": "使用量 API レスポンス",
 
@@ -305,6 +314,9 @@
   "native-notify-rejection-title": "Maximal",
   "native-notify-rejection-body": "上流の Copilot リクエストが拒否されました。詳細は設定を開いてください。",
   "native-notify-rejection-body-detail": "{message} — 詳細は設定を開いてください。",
+  "native-notify-working-title": "Maximal は動作しています",
+  "native-notify-working-body": "最初のリクエストが通りました。",
+  "native-notify-working-body-apps": "リクエストが通っています。{apps} で Maximal を使えるようになりました。",
 
   "native-quit-title": "Maximal を終了しますか？",
   "native-quit-body": "Maximal が停止し、開いている設定ウィンドウはすべて閉じます。",

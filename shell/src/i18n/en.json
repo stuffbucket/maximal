@@ -6,6 +6,7 @@
 
   "nav-account": "Account",
   "nav-apps": "Apps",
+  "nav-mcp": "MCP servers",
   "nav-endpoint": "Endpoint",
   "nav-api-clients": "API keys",
   "nav-models": "Models",
@@ -111,6 +112,9 @@
 
   "apps-title": "Apps",
   "apps-sub": "One-click setup for the tools that talk to Maximal. Turn an app on and we point it at the proxy for you.",
+
+  "mcp-title": "MCP servers",
+  "mcp-sub": "Share tool servers like Work IQ with your apps. Turn one on and choose which apps get it; turn it off and we take it back out.",
 
   "endpoint-title": "Endpoint",
   "endpoint-sub": "Where Maximal listens. Use these values when wiring up a tool that isn’t in the Apps list.",
@@ -220,6 +224,11 @@
   "dashboard-quota-unlimited": "Unlimited",
   "dashboard-quota-percent-used": "{percent}% Used",
   "dashboard-quota-remaining": "{n} remaining",
+  "dashboard-quota-resets": "Resets {date}",
+  "dashboard-quota-period-ended": "Period ended {date}",
+  "dashboard-quota-as-of": "As of {time}",
+  "dashboard-rate-per-minute": "{n} tokens/min",
+  "dashboard-rate-sparkline-label": "Tokens per minute over the last 15 minutes",
 
   "dashboard-api-response-title": "Usage API Response",
 
@@ -305,6 +314,9 @@
   "native-notify-rejection-title": "Maximal",
   "native-notify-rejection-body": "An upstream Copilot request was rejected. Open Settings for details.",
   "native-notify-rejection-body-detail": "{message} — open Settings for details.",
+  "native-notify-working-title": "Maximal is working",
+  "native-notify-working-body": "Your first request just went through.",
+  "native-notify-working-body-apps": "Requests are going through — {apps} can use Maximal now.",
 
   "native-quit-title": "Quit Maximal?",
   "native-quit-body": "Maximal will stop and any open Settings windows will close.",

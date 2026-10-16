@@ -9,10 +9,12 @@
  *   - the script downloads `maximal-<TAG>-windows-x64.zip` and a sidecar
  *     `.sha256`
  *   - it verifies the SHA before unpacking
- *   - it installs under %LocalAppData%\Programs\maximal
- *   - it invokes `maximal setup --unattended --skip-auth` so the
- *     installer hook from src/setup.ts fires
- *   - the at-logon scheduled task is named `maximal`
+ *   - it installs both sibling executables under
+ *     %LocalAppData%\Programs\maximal
+ *   - it adds that directory to the user PATH and registers the product
+ *   - its ARP helper removes both binaries, PATH, ARP, and itself after the
+ *     running CLI exits
+ *   - it does not own startup or first-run setup
  */
 
 import { describe, expect, it } from "bun:test"
@@ -53,10 +55,22 @@ describe("windows installer template", () => {
     expect(verifyIdx).toBeLessThan(expandIdx)
   })
 
-  it(String.raw`installs under %LocalAppData%\Programs\maximal`, () => {
+  it(
+    String.raw`installs both binaries under %LocalAppData%\Programs\maximal`,
+    () => {
+      const ps = read(SCRIPT)
+      expect(ps).toContain("$env:LOCALAPPDATA")
+      expect(ps).toContain(String.raw`Programs\maximal`)
+      expect(ps).toContain("$BinPath")
+      expect(ps).toContain("$BrokerPath")
+      expect(ps).toContain("maximal-mcp-broker.exe")
+      expect(ps).toContain("foreach ($binaryPath in @($BinPath, $BrokerPath))")
+    },
+  )
+
+  it("stops both executable images before replacing files", () => {
     const ps = read(SCRIPT)
-    expect(ps).toContain("$env:LOCALAPPDATA")
-    expect(ps).toContain(String.raw`Programs\maximal`)
+    expect(ps).toContain("Get-Process -Name 'maximal', 'maximal-mcp-broker'")
   })
 
   it("adds the install dir to user PATH", () => {
@@ -68,6 +82,29 @@ describe("windows installer template", () => {
     const ps = read(SCRIPT)
     expect(ps).toContain("Register-ArpEntry")
     expect(ps).toContain(String.raw`CurrentVersion\Uninstall\maximal`)
+    expect(ps).toContain("$UninstallerPath")
+    expect(ps).toContain("powershell.exe -NoProfile -ExecutionPolicy Bypass")
+  })
+
+  it("installs an ownership-scoped self-removing uninstaller", () => {
+    const ps = read(SCRIPT)
+    expect(ps).toContain("function Write-Uninstaller")
+    expect(ps).toContain("& $BinPath uninstall --force --unattended")
+    expect(ps).toContain("Get-Process -Name 'maximal', 'maximal-mcp-broker'")
+    expect(ps).toContain(
+      "[Environment]::SetEnvironmentVariable('PATH', $newPath, 'User')",
+    )
+    expect(ps).toContain("Remove-Item -LiteralPath $ArpKey -Recurse -Force")
+    expect(ps).toContain("foreach ($file in @($BrokerPath, $BinPath))")
+    expect(ps).toContain("Remove-Item -LiteralPath $selfPath -Force")
+  })
+
+  it("does not delete MSI-owned binaries", () => {
+    const ps = read(SCRIPT)
+    expect(ps).toContain("$MsiMarkerKey")
+    expect(ps).toContain("An MSI-managed maximal installation already owns")
+    expect(ps).toContain("if ($msiOwned)")
+    expect(ps).toContain("msiexec must own the binaries")
   })
 
   // CLI-only: the tray app (NSIS installer) owns running the proxy,

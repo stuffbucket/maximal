@@ -101,6 +101,24 @@ export interface TokenUsageSummary {
     start_utc: string
   }
   totals: TokenUsageTotals
+  /** Tokens per minute for the last RECENT_MINUTES minutes, oldest first,
+   *  whatever the period — the Dashboard's "tokens are coming in" rate and
+   *  sparkline. The last bucket is the current, partial minute. */
+  recent_minutes: Array<{ start_ms: number; total_tokens: number }>
+}
+
+const MINUTE_MS = 60_000
+const RECENT_MINUTES = 15
+
+/** RECENT_MINUTES zeroed buckets ending with the current minute. */
+function emptyRecentMinutes(
+  nowMs: number,
+): TokenUsageSummary["recent_minutes"] {
+  const current = Math.floor(nowMs / MINUTE_MS) * MINUTE_MS
+  return Array.from({ length: RECENT_MINUTES }, (_, i) => ({
+    start_ms: current - (RECENT_MINUTES - 1 - i) * MINUTE_MS,
+    total_tokens: 0,
+  }))
 }
 
 export interface TokenUsageEventsPage {
@@ -414,6 +432,7 @@ function createEmptySummary(period: TokenUsagePeriod): TokenUsageSummary {
       start_utc: new Date(range.startMs).toISOString(),
     },
     totals: createEmptyTotals(),
+    recent_minutes: emptyRecentMinutes(Date.now()),
   }
 }
 
@@ -568,6 +587,24 @@ export async function getTokenUsageSummary(
     )
     .all(range.startMs, range.endMs) as Array<Record<string, unknown>>
 
+  const recent = emptyRecentMinutes(Date.now())
+  const recentRows = db
+    .prepare(
+      `
+    SELECT
+      (created_at_ms / ${MINUTE_MS}) * ${MINUTE_MS} AS minute_ms,
+      COALESCE(SUM(total_tokens), 0) AS total_tokens
+    FROM token_usage_events
+    WHERE created_at_ms >= ?
+    GROUP BY minute_ms
+  `,
+    )
+    .all(recent[0].start_ms) as Array<Record<string, unknown>>
+  for (const row of recentRows) {
+    const bucket = recent.find((b) => b.start_ms === Number(row.minute_ms))
+    if (bucket) bucket.total_tokens = Number(row.total_tokens) || 0
+  }
+
   return {
     byModel: byModelRows.map((row) => ({
       ...totalsFromRow(row),
@@ -582,7 +619,17 @@ export async function getTokenUsageSummary(
       start_utc: new Date(range.startMs).toISOString(),
     },
     totals: totalsFromRow(totalsRow),
+    recent_minutes: recent,
   }
+}
+
+/** Whether any usage has ever been recorded (false when storage is off). */
+export async function hasAnyTokenUsage(): Promise<boolean> {
+  if (!isTokenUsageStorageEnabled()) return false
+  await flushTokenUsageEvents()
+  const db = await getDb()
+  const row = db.prepare("SELECT 1 FROM token_usage_events LIMIT 1").get()
+  return row !== undefined && row !== null
 }
 
 export async function getTokenUsageEventsPage(input: {

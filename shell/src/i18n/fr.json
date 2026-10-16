@@ -6,6 +6,7 @@
 
   "nav-account": "Compte",
   "nav-apps": "Applications",
+  "nav-mcp": "Serveurs MCP",
   "nav-endpoint": "Point de terminaison",
   "nav-api-clients": "Clés d’API",
   "nav-models": "Modèles",
@@ -111,6 +112,9 @@
 
   "apps-title": "Applications",
   "apps-sub": "Configuration en un clic pour les outils qui communiquent avec Maximal. Activez une application et nous la pointons vers le proxy pour vous.",
+
+  "mcp-title": "Serveurs MCP",
+  "mcp-sub": "Partagez des serveurs d’outils comme Work IQ avec vos applications. Activez-en un et choisissez les applications qui le reçoivent ; désactivez-le et nous le retirons.",
 
   "endpoint-title": "Point de terminaison",
   "endpoint-sub": "Où Maximal écoute. Utilisez ces valeurs pour configurer un outil qui ne figure pas dans la liste des applications.",
@@ -220,6 +224,11 @@
   "dashboard-quota-unlimited": "Illimité",
   "dashboard-quota-percent-used": "{percent} % utilisé",
   "dashboard-quota-remaining": "{n} restant(s)",
+  "dashboard-quota-resets": "Réinitialisation le {date}",
+  "dashboard-quota-period-ended": "Période terminée le {date}",
+  "dashboard-quota-as-of": "Mis à jour à {time}",
+  "dashboard-rate-per-minute": "{n} jetons/min",
+  "dashboard-rate-sparkline-label": "Jetons par minute sur les 15 dernières minutes",
 
   "dashboard-api-response-title": "Réponse de l’API d’utilisation",
 
@@ -305,6 +314,9 @@
   "native-notify-rejection-title": "Maximal",
   "native-notify-rejection-body": "Une requête Copilot en amont a été rejetée. Ouvrez les Réglages pour plus de détails.",
   "native-notify-rejection-body-detail": "{message} — ouvrez les Réglages pour plus de détails.",
+  "native-notify-working-title": "Maximal fonctionne",
+  "native-notify-working-body": "Votre première requête vient de passer.",
+  "native-notify-working-body-apps": "Les requêtes passent : {apps} peut maintenant utiliser Maximal.",
 
   "native-quit-title": "Quitter Maximal ?",
   "native-quit-body": "Maximal s’arrêtera et toutes les fenêtres de Réglages ouvertes se fermeront.",

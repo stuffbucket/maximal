@@ -3,7 +3,7 @@
  * `maximal uninstall` — reverse of `setup`.
  *
  * Stops the running proxy (launchd / Windows scheduled task), removes the
- * on-disk binary, and reverts every app integration through the registry
+ * on-disk binaries, and reverts every app integration through the registry
  * (`getAllApps()` → each app's ownership-guarded `uninstall()`). Refuses to run
  * while any app is still enabled — naming them — unless `--force`, which
  * disables each app first, then uninstalls. Secrets are kept by default; pass
@@ -72,8 +72,8 @@ export async function runUninstall(opts: RunUninstallOptions): Promise<void> {
   consola.info("Step 2/5: Remove startup integration")
   removeStartupIntegration()
 
-  // 3. Remove the binary --------------------------------------------
-  consola.info("Step 3/5: Remove the binary")
+  // 3. Remove installed binaries -------------------------------------
+  consola.info("Step 3/5: Remove installed binaries")
   removeBinary({ keepApp: opts.keepApp })
 
   // 4. Revert any residual app integrations + installer PATH block ---
@@ -112,6 +112,17 @@ function stopProxy(): void {
     return
   }
   if (process.platform === "win32") {
+    const broker = spawnSync(
+      "taskkill",
+      ["/F", "/IM", "maximal-mcp-broker.exe", "/T"],
+      { encoding: "utf8" },
+    )
+    if (broker.status === 0) {
+      consola.success("  MCP broker stopped")
+    } else {
+      consola.info("  MCP broker not running")
+    }
+
     const r = spawnSync("schtasks", ["/End", "/TN", "maximal"], {
       encoding: "utf8",
     })
@@ -164,7 +175,7 @@ function removeStartupIntegration(): void {
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Step 3: remove the binary.
+// Step 3: remove installed binaries.
 // ────────────────────────────────────────────────────────────────────
 
 interface InstallTarget {
@@ -181,6 +192,10 @@ interface InstallTarget {
 interface InstallTargetOptions {
   /** Skip the application bundle (the running `.app`) — see `keepApp`. */
   keepApp?: boolean
+  /** Injectable platform inputs keep target selection deterministic in tests. */
+  platform?: NodeJS.Platform
+  homeDir?: string
+  localAppData?: string
 }
 
 /** Candidate install locations, in order of likelihood. We delete
@@ -199,20 +214,20 @@ interface InstallTargetOptions {
 export function installTargets(
   opts: InstallTargetOptions = {},
 ): Array<InstallTarget> {
-  const home = os.homedir()
-  if (process.platform === "win32") {
+  const home = opts.homeDir ?? os.homedir()
+  const platform = opts.platform ?? process.platform
+  if (platform === "win32") {
+    const windowsPath = path.win32
+    const installDirectory = windowsPath.join(
+      opts.localAppData
+        ?? process.env.LOCALAPPDATA
+        ?? windowsPath.join(home, "AppData", "Local"),
+      "Programs",
+      "maximal",
+    )
     return [
-      {
-        path: path.join(
-          process.env.LOCALAPPDATA ?? path.join(home, "AppData", "Local"),
-          "Programs",
-          "maximal",
-          "maximal.exe",
-        ),
-      },
-      // The PowerShell installer's parent dir gets removed when it
-      // becomes empty; we don't recurse into it ourselves to avoid
-      // nuking unrelated files.
+      { path: windowsPath.join(installDirectory, "maximal-mcp-broker.exe") },
+      { path: windowsPath.join(installDirectory, "maximal.exe") },
     ]
   }
   const targets: Array<InstallTarget> = [
@@ -250,8 +265,20 @@ function removeBinary(opts: InstallTargetOptions = {}): void {
       consola.warn(`  could not remove ${target.path}`, err)
     }
   }
+  if (process.platform === "win32") {
+    const windowsTargets = installTargets({ platform: "win32" })
+    const installDirectory = path.win32.dirname(windowsTargets[0]?.path ?? "")
+    if (installDirectory) {
+      try {
+        fs.rmSync(installDirectory)
+        consola.success(`  removed empty ${installDirectory}`)
+      } catch {
+        // Expected when the running primary executable or unrelated files remain.
+      }
+    }
+  }
   if (removed === 0) {
-    consola.info("  no installed binary found")
+    consola.info("  no installed binaries found")
   }
 }
 
@@ -399,7 +426,7 @@ export const uninstall = defineCommand({
   meta: {
     name: "uninstall",
     description:
-      "Stop the proxy, remove the binary, and revert app integrations. Refuses while apps are enabled unless --force.",
+      "Stop the proxy, remove installed binaries, and revert app integrations. Refuses while apps are enabled unless --force.",
   },
   args: {
     purge: {

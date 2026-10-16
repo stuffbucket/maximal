@@ -12,11 +12,14 @@ set -euo pipefail
 # Builder-supplied env consumed: TAG, ARCH, BUN_INSTALL, CARGO_HOME.
 
 # Self-hosted runners use non-login shells that don't read ~/.zshrc.
-export PATH="$BUN_INSTALL/bin:$CARGO_HOME/bin:$PATH"
+export PATH="$HOME/.local/bin:$BUN_INSTALL/bin:$CARGO_HOME/bin:$PATH"
 
 VERSION="${TAG#v}"
 APP="shell/src-tauri/target/release/bundle/macos/Maximal.app"
 SIDECAR="$APP/Contents/MacOS/maximal"
+BROKER="$APP/Contents/MacOS/maximal-mcp-broker"
+MISE_VERSION="v2026.9.5"
+MISE="$HOME/.local/bin/mise"
 
 echo "Producing Maximal.app for ${TAG} (version ${VERSION}, ${ARCH})"
 
@@ -31,11 +34,25 @@ if ! grep -q "\"version\": \"${VERSION}\"" shell/src-tauri/tauri.conf.json; then
   exit 1
 fi
 
+# Keep registry configuration in the runner's home directory; never add a
+# repository .npmrc or use the npm CLI.
+if [ ! -s "$HOME/.npmrc" ]; then
+  printf '%s\n' 'registry=https://packagefeedproxy.microsoft.io/npm/' > "$HOME/.npmrc"
+fi
+
 bun install
 bun install --cwd shell
 
-# Leave the compiled sidecar unsigned. The builder strips any linker stamp and
-# signs the in-bundle copy using the config's bun-runtime entitlement profile.
+# The isolated broker has its own frozen pnpm graph and toolchain.
+mkdir -p "$HOME/.local/bin"
+curl -fsSL https://mise.run \
+  | MISE_VERSION="$MISE_VERSION" MISE_INSTALL_PATH="$MISE" sh
+"$MISE" trust packages/mcp-broker/mise.toml
+"$MISE" -C packages/mcp-broker install
+"$MISE" -C packages/mcp-broker exec -- pnpm install --frozen-lockfile
+
+# Leave the compiled sidecars unsigned. The builder strips any linker stamp and
+# signs the in-bundle copies using the config's bun-runtime entitlement profile.
 MAXIMAL_VERSION="$VERSION" MAXIMAL_FORCE_SIDECAR="1" bun run app:sidecar
 ls -la shell/src-tauri/binaries/
 
@@ -55,10 +72,12 @@ if [ "${BUILT_VERSION}" != "${VERSION}" ]; then
   echo "::error::Bundle version '${BUILT_VERSION}' != release version '${VERSION}'. Stale build artifact?" >&2
   exit 1
 fi
-if [ ! -f "$SIDECAR" ]; then
-  echo "::error::Declared sidecar not found at ${SIDECAR}" >&2
-  exit 1
-fi
+for binary in "$SIDECAR" "$BROKER"; do
+  if [ ! -x "$binary" ]; then
+    echo "::error::Declared executable sidecar not found at ${binary}" >&2
+    exit 1
+  fi
+done
 
 # The builder takes the app from here: sign_nested, top-level sign, package,
 # notarize, staple, and checksum.

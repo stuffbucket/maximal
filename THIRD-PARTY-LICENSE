@@ -7,8 +7,8 @@ third-party sources below, each under the license noted.
 Runtime / build dependencies
 ================================================================================
 
-A complete enumeration of npm-resolved runtime and build dependencies,
-with their licenses, is generated as `SBOM.spdx.json` per release. See
+A complete enumeration of the root and isolated-broker production dependency
+graphs, with their licenses, is generated as `SBOM.cdx.json` per release. See
 the GitHub Releases page for the SBOM associated with each version.
 
 ================================================================================

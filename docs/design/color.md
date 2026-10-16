@@ -1,17 +1,19 @@
 # Color
 
 Four roles, deliberately split to keep each from flooding the surface.
-**Token values live in [`shell/src/tokens.css`](../../shell/src/tokens.css).**
+**Token values live in [`shell/src/ui/styles/theme.ts`](../../shell/src/ui/styles/theme.ts)**
+(generated into `tokens.css`); the full list is in [`tokens.md`](tokens.md).
 This file describes role, scope, and the reasoning behind the split.
 
 | Token | Role |
 |---|---|
-| `--brand` | Crimson. **Identity only.** Mark, hero, badging, attention-state tray dot. |
-| `--accent` | Teal. **Interactive surfaces.** Primary buttons, switches, focus rings, active nav. |
-| `--accent-destructive` | Crimson-adjacent. **Destructive actions only.** |
-| `--link` | Sister cool tone to `--accent`. **Prose links only.** |
+| `--brand` | Crimson. **Identity only.** Mark, requirement stripe, tray dot. Never text or a control. |
+| `--accent` | Teal. **Interactive fills and non-text.** Primary buttons, switches, checkboxes, focus rings. Never text. |
+| `--accent-destructive` | Crimson-adjacent. **Destructive button fill only.** |
+| `--link` | Teal text. **Every piece of teal text** — prose links, "Copied", accent figures. |
 
-Foreground pairings: `--brand-fg`, `--accent-fg`,
+Errors are not destructive actions: error text, icons and stripes use
+`--status-error`. Foreground pairings for fills: `--accent-fg`,
 `--accent-destructive-foreground`.
 
 ## Why the split exists
@@ -32,7 +34,9 @@ content.
 destructive actions want urgency, which is the one place the brand's
 warning-red quality earns its keep. It is **not** the same value as
 `--brand` — destructive is a hair deeper so it reads as "caution"
-rather than "identity."
+rather than "identity." It's a **fill**: white on it is 6.2:1, but as
+text on a dark surface it's under 3:1, which is why error text uses
+`--status-error` instead.
 
 ## Link is sister to accent
 
@@ -65,14 +69,33 @@ block above `--link` in `tokens.css`. Re-measure if you change either.
 - **Both light and dark**, with explicit override in Settings (matches
   Anthropic's monitor / sun / moon toggle). **System**
   (`prefers-color-scheme`) is the third option and the default.
-- Theme is applied via `[data-theme="light"]` / `[data-theme="dark"]`
-  on the root; only surface, text, and `--link*` keys override per
-  theme. Numeric and structural tokens stay constant.
+- With no attribute on the root the tokens follow the OS
+  (`prefers-color-scheme`); `[data-theme="light"]` / `[data-theme="dark"]`
+  on the root pins one. Surfaces, text, borders, `--link*`,
+  `--accent` and `--status-*` change per theme; numeric and
+  structural tokens, brand, and the button labels stay constant. See
+  [`tokens.md`](tokens.md) → *Operational rules*. (The Settings toggle
+  itself isn't built yet; until it is, both windows follow the OS.)
 
-## Status colors (Dashboard only, currently)
+## Status colors
 
 `--status-error`, `--status-success`, `--status-warning`,
-`--status-info` (and their `-fg` pairings) are declared in
-`shell/ui/dashboard/style.css`. They are **not** in `tokens.css`. If
-you need them in Settings, promote them into `tokens.css` first via
-[`change-checklists.md`](change-checklists.md) → *Adding a new token*.
+`--status-info` are text-safe (≥4.5:1 on every surface of their theme),
+so one token serves text, glyphs, bars and fills in that color.
+They're per theme: the light values are darker steps of the same hues
+so the warning amber, for example, stays legible on white. Use them for
+state, never for identity or interaction — that's `--brand` / `--accent`.
+
+## Color in data (Dashboard)
+
+Color on the Dashboard only appears where it means something, and the
+label beside it says what:
+
+- **Meters** (quotas): the fill is the state — `--accent` while fine,
+  `--status-warning` from 75% used, `--status-error` from 90%, with a
+  warning icon at those levels so it never rests on color alone. The
+  track is a pale step of the same color. Unlimited quotas have no meter.
+- **Figures** (token totals, table cells) are text ink (`--text-strong`
+  / `--text-base-color`); hierarchy comes from size. No per-category
+  colors unless a chart with a legend ties each color to its category.
+- **Status colors are for state only**, never to tell categories apart.

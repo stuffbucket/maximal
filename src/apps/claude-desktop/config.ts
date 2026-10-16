@@ -95,7 +95,7 @@ function profileMatches(
   )
 }
 
-function readJsonObject(file: string): Record<string, unknown> | null {
+export function readJsonObject(file: string): Record<string, unknown> | null {
   let raw: string
   try {
     raw = fs.readFileSync(file, "utf8")
@@ -122,7 +122,7 @@ function readJsonObject(file: string): Record<string, unknown> | null {
  *  every Claude Desktop write refuses to follow a pre-planted `<file>.tmp`
  *  symlink (EEXIST → clear error) — the guard that only Claude Code had
  *  before #231. */
-function atomicWriteJson(file: string, value: unknown): void {
+export function atomicWriteJson(file: string, value: unknown): void {
   atomicWriteJsonShared(file, value, { label: "Claude Desktop config" })
 }
 

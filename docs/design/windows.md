@@ -7,7 +7,9 @@ constraint that makes drift between them a permanent risk.
 
 ## What's shared
 
-- Dark-first with light + system override (`prefers-color-scheme`).
+- Follow the OS appearance (`prefers-color-scheme`), dark when it gives
+  no preference; `data-theme` on `<html>` pins one. Same generated theme
+  blocks in both windows.
 - Same crimson `--brand` for identity. Same teal `--accent` for
   interactive surfaces — *in theory.* Currently drifted; see
   [`failure-modes.md`](failure-modes.md).

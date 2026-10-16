@@ -107,7 +107,7 @@ export function ConfirmDialog({
           <button
             type="button"
             className={
-              tone === "danger" ? "btn btn--danger" : "btn btn--primary"
+              tone === "danger" ? "btn btn--destructive" : "btn btn--primary"
             }
             onClick={onConfirmClick}
             disabled={busy}

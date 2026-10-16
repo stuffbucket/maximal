@@ -19,6 +19,7 @@ export {
   closeUsageStore,
   getTokenUsageEventsPage,
   getTokenUsageSummary,
+  hasAnyTokenUsage,
 } from "./store"
 
 export type {
@@ -156,6 +157,11 @@ function resolveIsPaid(model: string): number | null {
 }
 
 tokenUsageEventBus.subscribe("token_usage.recorded", enqueueTokenUsageWrite)
+
+/** Called after each request that used tokens. Returns an unsubscribe. */
+export function onTokenUsageRecorded(listener: () => void): () => void {
+  return tokenUsageEventBus.subscribe("token_usage.recorded", () => listener())
+}
 
 export function recordTokenUsageEvent(input: TokenUsageEventInput): void {
   const event = toPersistedEvent(input)

@@ -168,6 +168,26 @@ describe("uninstall — install-target selection (--keep-app)", () => {
     expect(paths).toContain(symlinkPath)
     expect(paths).toContain("/opt/homebrew/bin/maximal")
   })
+
+  it("targets both sibling Windows executables", async () => {
+    const { installTargets } = await import("~/uninstall")
+    const localAppData = String.raw`C:\Users\fixture\AppData\Local`
+    const paths = installTargets({
+      platform: "win32",
+      homeDir: String.raw`C:\Users\fixture`,
+      localAppData,
+    }).map((target) => target.path)
+
+    expect(paths).toEqual([
+      path.win32.join(
+        localAppData,
+        "Programs",
+        "maximal",
+        "maximal-mcp-broker.exe",
+      ),
+      path.win32.join(localAppData, "Programs", "maximal", "maximal.exe"),
+    ])
+  })
 })
 
 describe("uninstall — first-launch installer PATH block removal", () => {

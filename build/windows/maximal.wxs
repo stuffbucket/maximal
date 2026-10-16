@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Per-user, CLI-only MSI for the maximal command-line binary.
+  Per-user, CLI-only MSI for the maximal command-line binaries.
 
   WiX 4 / 5 syntax. Built in CI on windows-2022 via:
 
@@ -9,8 +9,8 @@
 
   The minted MSI:
 
-    - Installs maximal.exe to %LocalAppData%\Programs\maximal (per-user;
-      no UAC prompt, no admin needed).
+    - Installs maximal.exe and maximal-mcp-broker.exe as siblings under
+      %LocalAppData%\Programs\maximal (per-user; no UAC prompt, no admin needed).
     - Adds the install dir to the user's PATH.
     - Registers an Add/Remove Programs entry (MajorUpgrade + UpgradeCode)
       so upgrades and uninstall work.
@@ -50,12 +50,17 @@
     </Feature>
 
     <!--
-      Stop any running copy of maximal.exe before files are touched, so an
-      upgrade doesn't hit the MSI "files in use" prompt while the running
-      .exe holds the file lock. taskkill returns 128 when nothing matches;
-      Return="ignore" treats 0 and 128 as success. SystemFolder resolves
-      to C:\Windows\System32 at run time.
+      Stop running copies of both executables before files are touched, so an
+      upgrade doesn't hit the MSI "files in use" prompt. taskkill returns 128
+      when nothing matches; Return="ignore" treats that as success. SystemFolder
+      resolves to C:\Windows\System32 at run time.
     -->
+    <CustomAction
+        Id="StopRunningMcpBroker"
+        Directory="SystemFolder"
+        ExeCommand="taskkill.exe /F /IM maximal-mcp-broker.exe /T"
+        Execute="immediate"
+        Return="ignore" />
     <CustomAction
         Id="StopRunningMaximal"
         Directory="SystemFolder"
@@ -64,6 +69,7 @@
         Return="ignore" />
 
     <InstallExecuteSequence>
+      <Custom Action="StopRunningMcpBroker" Before="StopRunningMaximal" />
       <Custom Action="StopRunningMaximal" Before="InstallValidate" />
     </InstallExecuteSequence>
 
@@ -92,6 +98,12 @@
             Part="last"
             Action="set"
             System="no" />
+      </Component>
+      <Component Id="McpBrokerExe" Bitness="always64">
+        <File
+            Id="maximal_mcp_broker_exe"
+            Source="maximal-mcp-broker.exe"
+            KeyPath="yes" />
       </Component>
       <!--
         Per-user HKCU keypath that doubles as an "installed" marker the
