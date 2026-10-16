@@ -61,6 +61,11 @@ jobs:
       - name: Install dependencies
         run: bun install
 
+      # The package feed's tarball hosts rotate; a lockfile that records one
+      # fails a later frozen install (scripts/lockfile-shard-hosts.cjs).
+      - name: Check pnpm lockfiles for rotating feed hosts
+        run: bun scripts/strip-lockfile-hosts.ts --check
+
       - name: Install isolated broker dependencies
         run: |
           mise trust packages/mcp-broker/mise.toml
