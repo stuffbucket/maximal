@@ -67,7 +67,31 @@ mod native_i18n;
 // bind here; the shell passes `--replace` when spawning so it always
 // wins over a stale CLI instance (graceful eviction via
 // /_internal/shutdown — see src/lib/replace-running.ts).
-const SIDECAR_PORT: u16 = 4141;
+//
+// `MAXIMAL_DEV_PORT`, read at build time, moves a dev build onto another
+// port so it can run beside an installed Maximal (`bun run app:dev`, see
+// scripts/app-dev-prepare.ts). Release builds never set it.
+const SIDECAR_PORT: u16 = match option_env!("MAXIMAL_DEV_PORT") {
+    Some(port) => parse_port(port),
+    None => 4141,
+};
+
+/// `str::parse` isn't const; a bad value fails the build.
+const fn parse_port(value: &str) -> u16 {
+    let bytes = value.as_bytes();
+    assert!(!bytes.is_empty(), "MAXIMAL_DEV_PORT is empty");
+    let mut port: u32 = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        let digit = bytes[i];
+        assert!(digit.is_ascii_digit(), "MAXIMAL_DEV_PORT must be a number");
+        port = port * 10 + (digit - b'0') as u32;
+        assert!(port <= 65_535, "MAXIMAL_DEV_PORT must be at most 65535");
+        i += 1;
+    }
+    assert!(port > 0, "MAXIMAL_DEV_PORT must be above 0");
+    port as u16
+}
 
 /// Prefix the sidecar prints (stdout) for structured boot-status lines we
 /// relay to the splash. MUST match `BOOT_STATUS_MARKER` in src/start.ts.
