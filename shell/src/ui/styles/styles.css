@@ -2189,6 +2189,77 @@ a:hover {
   color: var(--text-muted);
 }
 
+/* ---- MCP endpoint card ----
+   Name + Refresh on the left, the on/off switch on the right, then every
+   app that can get the endpoint as one checkbox row — no prompt. "All
+   apps" heads the list; app rows indent under it. Changes save as made. */
+.mcp-card__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.mcp-card__title .app-card__name {
+  flex: 0 1 auto;
+}
+
+.mcp-card__saving {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.mcp-card__apps {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.mcp-card__row {
+  display: flex;
+  align-items: center;
+  padding: var(--space-2) 0;
+}
+
+.mcp-card__row + .mcp-card__row {
+  border-top: var(--border-width-hairline) solid var(--border-subtle);
+}
+
+.mcp-card__row--app {
+  padding-inline-start: var(--space-5);
+}
+
+.mcp-card .app-card__control {
+  gap: var(--space-3);
+}
+
+/* Accordion: the twirldown sits at the far right of the head, after the
+   switch. Open follows the switch (McpEndpointCard.tsx); disabled while
+   off. 200ms is the card-collapse timing (motion.md); the global
+   reduced-motion block zeroes it. */
+.mcp-card__twirl svg {
+  transition: transform 200ms ease-out;
+}
+
+.mcp-card__twirl[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+.mcp-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.mcp-card__body[hidden] {
+  display: none;
+}
+
 /* ---- Link checkbox (components/LinkCheckbox.tsx) ----
    Checkbox + a label that is a link to where the target is managed. When
    the target can't be chosen, a warning glyph takes the checkbox's slot

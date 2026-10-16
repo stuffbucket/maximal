@@ -13,9 +13,14 @@ import { serve } from "srvx"
 
 import { removeLegacyShimIfPresent } from "~/apps/claude-code/detect"
 import { reconcileClaudeCodeOnBoot } from "~/apps/claude-code/reconcile"
+import { syncMcpClientsOnBoot } from "~/apps/mcp"
 import { type AccountType } from "~/lib/auth/auth-types"
-import { mergeConfigWithDefaults } from "~/lib/config/config"
+import { type AppConfig, mergeConfigWithDefaults } from "~/lib/config/config"
 import { initProxyFromEnv } from "~/lib/http/proxy"
+import {
+  startBrokerSupervisor,
+  stopBrokerSupervisor,
+} from "~/lib/mcp-broker/supervisor"
 import { ensureCliSymlink } from "~/lib/platform/cli-path"
 import { initOpencodeVersion } from "~/lib/platform/opencode"
 import { ensurePaths } from "~/lib/platform/paths"
@@ -35,6 +40,7 @@ import { emitBootStatus } from "./boot-status"
 import { bootSecrets, bootstrapUpstream } from "./bootstrap"
 import { runClaudeCodeFlow } from "./claude-code-flow"
 import { maybeEvictRunning, probePort, reportPortBusyAndExit } from "./port"
+import { setListeningPort } from "./proxy-port"
 import {
   markSessionRunning,
   staleSessionMarkerPresent,
@@ -80,7 +86,7 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   if (portState !== "free") reportPortBusyAndExit(options.port, portState)
 
   // Ensure config is merged with defaults at startup
-  mergeConfigWithDefaults()
+  const config = mergeConfigWithDefaults()
 
   const git = getGitVersion()
   consola.info(
@@ -207,6 +213,21 @@ export async function runServer(options: RunServerOptions): Promise<void> {
     },
   })
 
+  afterListening(config, options.port, httpServer)
+}
+
+/** Boot steps that need the bound listener: the broker, client entries that
+ *  point at `port`, and the shutdown path that reverts them. */
+function afterListening(
+  config: AppConfig,
+  port: number,
+  httpServer: ReturnType<typeof serve>,
+): void {
+  setListeningPort(port)
+
+  // Broker startup is deliberately detached from ordinary server readiness.
+  // A missing, hung, or crashing broker degrades MCP only; Hono is already bound.
+  startBrokerSupervisor(config.mcpBroker ?? {})
   // One-time "Maximal is working" notification (shown by the menu-bar shell).
   void startWorkingNotice()
 
@@ -219,13 +240,14 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   // if the user left routing on. Self-heals a URL a prior crash/force-kill
   // stranded over a dead proxy. Ownership-guarded; no-op when routing is off.
   reconcileClaudeCodeOnBoot()
+  syncMcpClientsOnBoot(config)
 
   // Drop the "session running" sentinel only AFTER reconcileClaudeCodeOnBoot
   // so the freshly-written URL is in place when we promise the session is
   // healthy. shutdown clears it; a missing-on-next-boot sentinel means a
   // clean exit, present-on-next-boot means an ungraceful one (see the
   // staleSession check above).
-  markSessionRunning()
+  markSessionRunning(port)
 
-  installShutdownHandlers(httpServer)
+  installShutdownHandlers(httpServer, stopBrokerSupervisor)
 }

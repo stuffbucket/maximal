@@ -6,6 +6,7 @@
 
   "nav-account": "Account",
   "nav-apps": "Apps",
+  "nav-mcp": "MCP servers",
   "nav-endpoint": "Endpoint",
   "nav-api-clients": "API keys",
   "nav-models": "Models",
@@ -111,6 +112,9 @@
 
   "apps-title": "Apps",
   "apps-sub": "One-click setup for the tools that talk to Maximal. Turn an app on and we point it at the proxy for you.",
+
+  "mcp-title": "MCP servers",
+  "mcp-sub": "Share tool servers like Work IQ with your apps. Turn one on and choose which apps get it; turn it off and we take it back out.",
 
   "endpoint-title": "Endpoint",
   "endpoint-sub": "Where Maximal listens. Use these values when wiring up a tool that isn’t in the Apps list.",

@@ -56,6 +56,7 @@ export const AccountSignInPending = at("account", "sign-in-pending");
 export const AccountSignInError = at("account", "auth-error");
 export const AccountUpstreamRejection = at("account", "upstream-rejection");
 export const Apps = at("apps");
+export const McpServers = at("mcp");
 export const Endpoint = at("endpoint");
 export const ApiClients = at("api-clients");
 export const Models = at("models");
@@ -66,9 +67,11 @@ export const FreshInstall = at("apps", "fresh-install");
 
 // ---- section-level load failures (the banner across the section) ----------
 export const AppsLoadError = at("apps", "signed-in", ["/settings/api/apps"]);
+export const McpLoadError = at("mcp", "signed-in", ["/settings/api/mcp"]);
 export const ApiClientsLoadError = at("api-clients", "signed-in", ["/settings/api/api-keys"]);
 export const ModelsLoadError = at("models", "signed-in", ["/settings/api/models"]);
 export const DiagnosticsLoadError = at("diagnostics", "signed-in", ["/settings/api/diagnostics"]);
 
 // ---- empty states ----------------------------------------------------------
+export const McpEmpty = at("mcp", "fresh-install");
 export const ApiClientsEmpty = at("api-clients", "fresh-install");

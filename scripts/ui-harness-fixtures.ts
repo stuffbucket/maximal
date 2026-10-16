@@ -17,6 +17,7 @@ import type {
   AppsListResponse,
   AuthStatus,
   DiagnosticsResponse,
+  McpEndpointsListResponse,
   ModelsListResponse,
   UpdateStatusResponse,
 } from "../src/lib/config/settings-types"
@@ -93,6 +94,8 @@ export interface Scenario {
   diagnostics: DiagnosticsResponse
   updateStatus: UpdateStatusResponse
   ghStatus: GhStatusFixture
+  /** Optional on each scenario; `resolveScenario` fills the shared default. */
+  mcp?: McpEndpointsListResponse
   clients?: ActiveClientsFixture
   dashboard?: DashboardFixture
 }
@@ -242,6 +245,32 @@ const ghAvailable: GhStatusFixture = {
   accounts: [
     { login: "octocat", host: "github.com", active: true },
     { login: "monalisa", host: "github.com", active: false },
+  ],
+}
+
+const twoMcpEndpoints: McpEndpointsListResponse = {
+  broker: { state: "running", problem: null },
+  endpoints: [
+    {
+      id: "workiq",
+      label: "Work IQ",
+      enabled: true,
+      clients: ["claude-code"],
+      offered: [
+        { id: "claude-code", name: "Claude Code", available: true, configured: true },
+        { id: "claude-desktop", name: "Claude Desktop", available: false, configured: false },
+      ],
+    },
+    {
+      id: "github",
+      label: "GitHub",
+      enabled: false,
+      clients: [],
+      offered: [
+        { id: "claude-code", name: "Claude Code", available: true, configured: false },
+        { id: "claude-desktop", name: "Claude Desktop", available: false, configured: false },
+      ],
+    },
   ],
 }
 
@@ -544,6 +573,7 @@ export const SCENARIOS = {
     diagnostics: baseDiagnostics,
     updateStatus: upToDate,
     ghStatus: ghAvailable,
+    mcp: { endpoints: [], broker: { state: "off", problem: null } },
     clients: { clients: [], total: 0 },
     dashboard: emptyDashboard,
   },
@@ -571,6 +601,20 @@ export const SCENARIOS = {
     },
   },
 
+  "mcp-recovering": {
+    ...healthy("MCP · broker stopped, Maximal restarting it"),
+    mcp: { ...twoMcpEndpoints, broker: { state: "recovering", problem: null } },
+  },
+
+  "mcp-stuck": {
+    ...healthy("MCP · broker keeps crashing (retries paused)"),
+    mcp: { ...twoMcpEndpoints, broker: { state: "stuck", problem: null } },
+  },
+
+  "mcp-not-installed": {
+    ...healthy("MCP · broker missing from this install"),
+    mcp: { ...twoMcpEndpoints, broker: { state: "unavailable", problem: "not-installed" } },
+  },
 } satisfies Record<string, Scenario>
 
 export type ScenarioId = keyof typeof SCENARIOS
@@ -581,6 +625,7 @@ export function resolveScenario(id: ScenarioId): ResolvedScenario {
   const s: Scenario = SCENARIOS[id]
   return {
     ...s,
+    mcp: s.mcp ?? twoMcpEndpoints,
     clients: s.clients ?? recentClients,
     dashboard: s.dashboard ?? busyDashboard,
   }

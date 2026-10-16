@@ -14,7 +14,7 @@
  *   2. Verify the SHA-256 against the sidecar file.
  *   3. Assemble `maximal.app` from build/macos/app-template + the
  *      unpacked binary (same logic the `macos-app-zip` CI job runs).
- *   4. `npx create-dmg ...` to build the polished DMG.
+ *   4. `pnpm dlx create-dmg ...` to build the polished DMG.
  *   5. Sidecar `.sha256`. Optional `--upload` attaches both to the
  *      same release.
  *
@@ -224,7 +224,7 @@ async function main(): Promise<number> {
   // Use the real DMG background if a designer has dropped it in;
   // otherwise create-dmg's default template is acceptable for v1.
   const bg = "build/macos/dmg-bg.png"
-  const createDmgArgs = ["--yes", "create-dmg", appOut, release]
+  const createDmgArgs = ["dlx", "create-dmg", appOut, release]
   if (fs.existsSync(bg)) {
     createDmgArgs.push("--background", bg)
   }
@@ -235,7 +235,7 @@ async function main(): Promise<number> {
   createDmgArgs.push(`--dmg-title=maximal ${version}`)
   // create-dmg exits non-zero if codesign isn't set up but still
   // produces the .dmg. Tolerate non-zero by checking for output.
-  const r = spawnSync("npx", createDmgArgs, { stdio: "inherit" })
+  const r = spawnSync("pnpm", createDmgArgs, { stdio: "inherit" })
   if (r.status !== 0) {
     console.warn(
       `create-dmg exited ${r.status} (likely the codesign warning). Verifying .dmg was produced anyway.`,

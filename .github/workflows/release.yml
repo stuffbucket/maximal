@@ -66,8 +66,27 @@ jobs:
         with:
           bun-version: 1.3.14
 
+      - uses: ./.github/actions/setup-mise
+        with:
+          mise-version: v2026.9.5
+
+      - name: Configure package registry
+        run: printf '%s\n' 'registry=https://packagefeedproxy.microsoft.io/npm/' > "$HOME/.npmrc"
+
       - name: Install dependencies
         run: bun install
+
+      - name: Install isolated broker dependencies
+        run: |
+          mise trust packages/mcp-broker/mise.toml
+          mise -C packages/mcp-broker install
+          mise -C packages/mcp-broker exec -- pnpm install --frozen-lockfile
+
+      - name: Check isolated broker
+        run: |
+          mise -C packages/mcp-broker exec -- pnpm typecheck
+          mise -C packages/mcp-broker exec -- pnpm build
+          MAXIMAL_MCP_BROKER_BINARY="$PWD/packages/mcp-broker/dist/maximal-mcp-broker" mise -C packages/mcp-broker exec -- pnpm test
 
       - name: Run linter
         run: bun run lint:all
@@ -87,7 +106,11 @@ jobs:
       # the release later in this job, after `changelogithub` creates
       # the release record.
       - name: Generate SBOM and run license scan
-        run: bun scripts/sbom.ts --output SBOM.cdx.json
+        run: |
+          bun scripts/sbom.ts \
+            --root . \
+            --root packages/mcp-broker \
+            --output SBOM.cdx.json
 
       - name: Detect pre-release
         id: prerelease
@@ -170,8 +193,21 @@ jobs:
         with:
           bun-version: 1.3.14
 
+      - uses: ./.github/actions/setup-mise
+        with:
+          mise-version: v2026.9.5
+
+      - name: Configure package registry
+        run: printf '%s\n' 'registry=https://packagefeedproxy.microsoft.io/npm/' > "$HOME/.npmrc"
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      - name: Install isolated broker dependencies
+        run: |
+          mise trust packages/mcp-broker/mise.toml
+          mise -C packages/mcp-broker install
+          mise -C packages/mcp-broker exec -- pnpm install --frozen-lockfile
 
       # The settings UI (shell/ui/settings) is a React/TSX app whose deps
       # (react, react-dom, @tauri-apps/api) live in shell/package.json, not
@@ -198,7 +234,7 @@ jobs:
           bun run build:ui
           bun run scripts/gen-ui-embed.ts
 
-      - name: Compile binary
+      - name: Compile binaries
         shell: bash
         env:
           MAXIMAL_VERSION: ${{ steps.ver.outputs.version }}
@@ -209,13 +245,18 @@ jobs:
           # shellcheck SC2193 false positive (it can't see the templated
           # value) and keeps workflow expressions out of executed shell.
           ARTIFACT: ${{ matrix.artifact }}
+          BUN_TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
           mkdir -p dist-bin
           OUT="dist-bin/maximal"
-          if [[ "$ARTIFACT" == windows-* ]]; then OUT="${OUT}.exe"; fi
+          BROKER_OUT="dist-bin/maximal-mcp-broker"
+          if [[ "$ARTIFACT" == windows-* ]]; then
+            OUT="${OUT}.exe"
+            BROKER_OUT="${BROKER_OUT}.exe"
+          fi
 
-          # --define injects compile-time constants into the binary:
+          # --define injects compile-time constants into the primary binary:
           #   __MAXIMAL_VERSION__   the stripped tag (e.g. "0.3.4")
           #   __MAXIMAL_GIT_SHA__   the full sha (40 hex)
           #   __MAXIMAL_GIT_BRANCH__ the ref name (e.g. "v0.3.4")
@@ -233,12 +274,15 @@ jobs:
             CHANNEL="stable"
           fi
           bun build --compile --minify --sourcemap \
-            --target=${{ matrix.target }} \
+            --target="$BUN_TARGET" \
             --define "__MAXIMAL_VERSION__=\"${MAXIMAL_VERSION}\"" \
             --define "__MAXIMAL_GIT_SHA__=\"${MAXIMAL_GIT_SHA}\"" \
             --define "__MAXIMAL_GIT_BRANCH__=\"${MAXIMAL_GIT_BRANCH}\"" \
             --define "__MAXIMAL_CHANNEL__=\"${CHANNEL}\"" \
             src/main.ts --outfile "$OUT"
+          mise -C packages/mcp-broker exec -- pnpm build:target \
+            --target="$BUN_TARGET" \
+            --outfile="$GITHUB_WORKSPACE/$BROKER_OUT"
 
       - name: Sign (Windows) [DEFERRED]
         if: false
@@ -253,9 +297,11 @@ jobs:
           mkdir -p dist-release
           cd dist-bin
           if [[ "${{ matrix.ext }}" == "zip" ]]; then
-            7z a "../dist-release/${BASE}.zip" maximal.exe
+            7z a "../dist-release/${BASE}.zip" \
+              maximal.exe maximal-mcp-broker.exe
           else
-            tar -czf "../dist-release/${BASE}.tar.gz" maximal
+            tar -czf "../dist-release/${BASE}.tar.gz" \
+              maximal maximal-mcp-broker
           fi
           cd ../dist-release
           if command -v shasum >/dev/null 2>&1; then
@@ -338,6 +384,14 @@ jobs:
       - name: Smoke check
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($binary in @('maximal.exe', 'maximal-mcp-broker.exe')) {
+            if (-not (Test-Path $binary)) {
+              Write-Error "Missing release binary: $binary"
+              exit 1
+            }
+          }
+
           .\maximal.exe debug --json | Out-File -FilePath debug.json -Encoding utf8
           Get-Content debug.json
           $j = Get-Content debug.json | ConvertFrom-Json
@@ -346,6 +400,22 @@ jobs:
               Write-Error "Missing top-level key: $k"
               exit 1
             }
+          }
+
+          # Load and execute the compiled broker without starting `serve` or
+          # reading an adapter descriptor. Its no-mode path exits with one
+          # stable sanitized error after the runtime has initialized.
+          $ErrorActionPreference = 'Continue'
+          $brokerOutput = & .\maximal-mcp-broker.exe 2>&1
+          $brokerExit = $LASTEXITCODE
+          $ErrorActionPreference = 'Stop'
+          if ($brokerExit -ne 1) {
+            Write-Error "Broker no-mode smoke check exited $brokerExit, expected 1"
+            exit 1
+          }
+          if (($brokerOutput | Out-String) -notmatch 'BROKER_INTERNAL_ERROR') {
+            Write-Error 'Broker no-mode smoke check did not emit its sanitized error'
+            exit 1
           }
 
   # Standard Homebrew release mechanic for a private tap: render
@@ -600,9 +670,11 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $zip = Get-ChildItem -Path dist-bin -Filter '*.zip' | Select-Object -First 1
           Expand-Archive -Path $zip.FullName -DestinationPath staging -Force
-          if (-not (Test-Path 'staging\maximal.exe')) {
-            Write-Error "maximal.exe missing from $($zip.Name)"
-            exit 1
+          foreach ($binary in @('maximal.exe', 'maximal-mcp-broker.exe')) {
+            if (-not (Test-Path (Join-Path 'staging' $binary))) {
+              Write-Error "$binary missing from $($zip.Name)"
+              exit 1
+            }
           }
           Get-ChildItem staging
 
@@ -623,8 +695,8 @@ jobs:
           $version = '${{ steps.ver.outputs.version }}'
           $out = "dist-release\maximal-${env:TAG}-windows-x64.msi"
           New-Item -ItemType Directory -Path dist-release -Force | Out-Null
-          # CLI-only MSI: no WiX extensions needed. WiX resolves the .wxs's
-          # source files (maximal.exe) via -bindpath.
+          # CLI-only MSI: no WiX extensions needed. WiX resolves both .wxs
+          # source executables via -bindpath.
           wix build build\windows\maximal.wxs `
             -d "Version=$version" `
             -arch x64 `
@@ -712,9 +784,12 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $exe = Join-Path $env:LOCALAPPDATA 'Programs\maximal\maximal.exe'
-          if (-not (Test-Path $exe)) { throw "maximal.exe missing at $exe" }
-          Write-Host "maximal.exe present ($((Get-Item $exe).Length) bytes)"
+          $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\maximal'
+          foreach ($binary in @('maximal.exe', 'maximal-mcp-broker.exe')) {
+            $binaryPath = Join-Path $installRoot $binary
+            if (-not (Test-Path $binaryPath)) { throw "$binary missing at $binaryPath" }
+            Write-Host "$binary present ($((Get-Item $binaryPath).Length) bytes)"
+          }
 
           # Don't assert on the Add/Remove-Programs (Uninstall) registry key:
           # for a per-user MSI on a fresh CI profile the HKCU\...\Uninstall
@@ -777,8 +852,13 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $exe = Join-Path $env:LOCALAPPDATA 'Programs\maximal\maximal.exe'
-          if (Test-Path $exe) { throw "maximal.exe still present after uninstall: $exe" }
+          $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\maximal'
+          foreach ($binary in @('maximal.exe', 'maximal-mcp-broker.exe')) {
+            $binaryPath = Join-Path $installRoot $binary
+            if (Test-Path $binaryPath) {
+              throw "$binary still present after uninstall: $binaryPath"
+            }
+          }
           # Check the marker VALUE is gone (the parent key may linger empty,
           # so don't assert on the key path).
           $m = Get-ItemPropertyValue 'HKCU:\Software\stuffbucket\maximal' 'installed' -ErrorAction SilentlyContinue
@@ -789,7 +869,7 @@ jobs:
           }
           Write-Host "clean removal verified"
 
-  # Windows desktop installer built around the release sidecar.
+  # Windows desktop installer built around the release sidecars.
   windows-shell:
     needs: binaries
     runs-on: windows-2022
@@ -866,6 +946,11 @@ jobs:
 
       # setup-bun adds a Git-Bash-style PATH; bun steps must run under bash
       # (pwsh/cmd can't resolve it on Windows).
+      - name: Configure package registry
+        if: steps.skip.outputs.skip != 'true'
+        shell: bash
+        run: printf '%s\n' 'registry=https://packagefeedproxy.microsoft.io/npm/' > "$HOME/.npmrc"
+
       - name: Install dependencies
         if: steps.skip.outputs.skip != 'true'
         shell: bash
@@ -885,9 +970,9 @@ jobs:
           bun run build:ui
           bun run scripts/gen-ui-embed.ts
 
-      # Reuse the exact sidecar the `binaries` job built + attached, so the
-      # tray app embeds the identical, version-stamped release binary.
-      - name: Download windows-x64 sidecar from the draft
+      # Reuse the exact sidecars the `binaries` job built + attached, so the
+      # tray app embeds the identical release executables.
+      - name: Download windows-x64 sidecars from the draft
         if: steps.skip.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -900,16 +985,23 @@ jobs:
             --pattern "$ZIP" --pattern "$ZIP.sha256" --dir dist-bin
           ( cd dist-bin && sha256sum -c "$ZIP.sha256" )
 
-      - name: Place sidecar as Tauri externalBin
+      - name: Place sidecars as Tauri externalBin inputs
         if: steps.skip.outputs.skip != 'true'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $zip = Get-ChildItem dist-bin -Filter '*.zip' | Select-Object -First 1
           Expand-Archive -Path $zip.FullName -DestinationPath staging -Force
-          if (-not (Test-Path 'staging\maximal.exe')) { Write-Error 'maximal.exe missing from zip'; exit 1 }
+          $binaries = @{
+            'maximal.exe' = 'maximal-x86_64-pc-windows-msvc.exe'
+            'maximal-mcp-broker.exe' = 'maximal-mcp-broker-x86_64-pc-windows-msvc.exe'
+          }
           New-Item -ItemType Directory -Force -Path 'shell\src-tauri\binaries' | Out-Null
-          Copy-Item 'staging\maximal.exe' 'shell\src-tauri\binaries\maximal-x86_64-pc-windows-msvc.exe' -Force
+          foreach ($entry in $binaries.GetEnumerator()) {
+            $source = Join-Path 'staging' $entry.Key
+            if (-not (Test-Path $source)) { throw "$($entry.Key) missing from zip" }
+            Copy-Item $source (Join-Path 'shell\src-tauri\binaries' $entry.Value) -Force
+          }
           Get-ChildItem 'shell\src-tauri\binaries'
 
       - name: Tauri build (Windows, NSIS)
@@ -925,6 +1017,37 @@ jobs:
           # runs via cmd.exe where bun isn't resolvable on Windows.
           bun run tauri build --bundles nsis \
             --config "{\"version\":\"${MAXIMAL_VERSION}\",\"build\":{\"beforeBuildCommand\":\"\"}}"
+
+      - name: Verify NSIS installed sidecars
+        if: steps.skip.outputs.skip != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $nsisDir = 'shell/src-tauri/target/release/bundle/nsis'
+          $setup = Get-ChildItem -Path $nsisDir -Filter '*-setup.exe' | Select-Object -First 1
+          if (-not $setup) { throw "NSIS installer not produced under $nsisDir" }
+          $installRoot = Join-Path $env:LOCALAPPDATA 'Maximal'
+          try {
+            $install = Start-Process -FilePath $setup.FullName -ArgumentList '/S' -Wait -PassThru
+            if ($install.ExitCode -ne 0) { throw "NSIS install failed: $($install.ExitCode)" }
+            foreach ($binary in @('maximal.exe', 'maximal-mcp-broker.exe')) {
+              $binaryPath = Join-Path $installRoot $binary
+              if (-not (Test-Path $binaryPath)) { throw "$binary missing at $binaryPath" }
+            }
+          } finally {
+            Get-Process -Name 'Maximal', 'maximal', 'maximal-mcp-broker', 'maximal-shell' `
+              -ErrorAction SilentlyContinue |
+              Stop-Process -Force -ErrorAction SilentlyContinue
+            $uninstaller = Get-ChildItem $installRoot -Recurse -Filter 'uninstall.exe' `
+              -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($uninstaller) {
+              Start-Process -FilePath $uninstaller.FullName -ArgumentList '/S' -Wait
+            }
+          }
+          foreach ($binary in @('maximal.exe', 'maximal-mcp-broker.exe')) {
+            $binaryPath = Join-Path $installRoot $binary
+            if (Test-Path $binaryPath) { throw "$binary remains after NSIS uninstall" }
+          }
 
       - name: Stage NSIS installer + sha256
         if: steps.skip.outputs.skip != 'true'
@@ -1016,6 +1139,9 @@ jobs:
       - uses: ./.github/actions/setup-bun
         with:
           bun-version: 1.3.14
+
+      - name: Configure package registry
+        run: printf '%s\n' 'registry=https://packagefeedproxy.microsoft.io/npm/' > "$HOME/.npmrc"
 
       - name: Install dependencies
         run: bun install --frozen-lockfile

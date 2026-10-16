@@ -11,18 +11,18 @@
 # runs on push/PR/tag) and reproduces the install path end-to-end WITHOUT
 # a release:
 #
-#   1. build-binary (ubuntu):  cross-compile the windows-x64 .exe from the
-#      branch HEAD, pack it as the canonical release zip + .sha256, and
-#      upload it as a build artifact.
+#   1. build-binary (ubuntu):  cross-compile both windows-x64 executables from
+#      the branch HEAD, pack the sibling files as the canonical release zip +
+#      .sha256, and upload it as a build artifact.
 #   2. msi (windows-2022):     build the MSI from that binary via WiX, then
 #      install /qn -> assert files+registry+PATH -> smoke `debug --json` ->
 #      uninstall /qn -> assert clean removal. Mirrors the release jobs
 #      `windows-msi` + `windows-msi-verify`.
 #   3. ps1 (windows-2022):     serve the dev zip over loopback and run
-#      build/windows/install.ps1 -BaseUrl against it -> assert install dir +
-#      scheduled task + PATH -> smoke `debug --json`. Exercises the real
-#      download/verify/unpack/PATH/task/setup path without a release (the
-#      `-BaseUrl` override exists for exactly this).
+#      build/windows/install.ps1 -BaseUrl against it -> assert both files,
+#      PATH, and ARP registration -> smoke `debug --json` -> invoke the
+#      installer-owned ARP helper -> assert files, PATH, ARP, and install dir
+#      are removed. Exercises the real lifecycle without a release.
 #
 # A green run here is strong evidence the release path is green, but it
 # iterates from the branch in minutes instead of a full release round-trip.
@@ -49,9 +49,9 @@ permissions:
   contents: read
 
 jobs:
-  # Cross-compile the windows-x64 binary from Linux (Bun's --compile
-  # produces a byte-identical .exe to a Windows build) and pack it as the
-  # canonical `maximal-v<version>-windows-x64.zip` + sidecar .sha256 that
+  # Cross-compile the windows-x64 binaries from Linux (Bun's --compile
+  # produces byte-identical .exe files to a Windows build) and pack them as
+  # the canonical `maximal-v<version>-windows-x64.zip` + sidecar .sha256 that
   # the MSI job (and the real release) consume.
   build-binary:
     runs-on: ubuntu-latest
@@ -64,8 +64,21 @@ jobs:
         with:
           bun-version: 1.3.14
 
+      - uses: ./.github/actions/setup-mise
+        with:
+          mise-version: v2026.9.5
+
+      - name: Configure package registry
+        run: printf '%s\n' 'registry=https://packagefeedproxy.microsoft.io/npm/' > "$HOME/.npmrc"
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      - name: Install isolated broker dependencies
+        run: |
+          mise trust packages/mcp-broker/mise.toml
+          mise -C packages/mcp-broker install
+          mise -C packages/mcp-broker exec -- pnpm install --frozen-lockfile
 
       # The embedded settings/dashboard UI lives in shell/ with its own
       # manifest; the root install doesn't cover it. Without it `build:ui`
@@ -80,7 +93,7 @@ jobs:
           bun run build:ui
           bun run scripts/gen-ui-embed.ts
 
-      - name: Compile windows-x64 binary
+      - name: Compile windows-x64 binaries
         env:
           MAXIMAL_VERSION: ${{ github.event.inputs.version }}
           MAXIMAL_GIT_SHA: ${{ github.sha }}
@@ -95,6 +108,9 @@ jobs:
             --define "__MAXIMAL_GIT_BRANCH__=\"${MAXIMAL_GIT_BRANCH}\"" \
             --define "__MAXIMAL_CHANNEL__=\"dev\"" \
             src/main.ts --outfile staging/maximal.exe
+          mise -C packages/mcp-broker exec -- pnpm build:target \
+            --target=bun-windows-x64 \
+            --outfile="$GITHUB_WORKSPACE/staging/maximal-mcp-broker.exe"
 
       # Pack with the canonical release artifact name + sha256 so the MSI
       # job's download/verify mirrors the release path exactly.
@@ -103,7 +119,8 @@ jobs:
           set -euo pipefail
           mkdir -p dist-bin
           ZIP="maximal-v${VERSION}-windows-x64.zip"
-          ( cd staging && zip -q -X "../dist-bin/${ZIP}" maximal.exe )
+          ( cd staging && zip -q -X "../dist-bin/${ZIP}" \
+              maximal.exe maximal-mcp-broker.exe )
           ( cd dist-bin && sha256sum "${ZIP}" > "${ZIP}.sha256" && sha256sum -c "${ZIP}.sha256" )
           ls -lh dist-bin
 
@@ -135,9 +152,11 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $zip = Get-ChildItem -Path dist-bin -Filter '*.zip' | Select-Object -First 1
           Expand-Archive -Path $zip.FullName -DestinationPath staging -Force
-          if (-not (Test-Path 'staging\maximal.exe')) {
-            Write-Error "maximal.exe missing from $($zip.Name)"
-            exit 1
+          foreach ($binary in @('maximal.exe', 'maximal-mcp-broker.exe')) {
+            if (-not (Test-Path (Join-Path 'staging' $binary))) {
+              Write-Error "$binary missing from $($zip.Name)"
+              exit 1
+            }
           }
           Get-ChildItem staging
 
@@ -193,9 +212,12 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $exe = Join-Path $env:LOCALAPPDATA 'Programs\maximal\maximal.exe'
-          if (-not (Test-Path $exe)) { throw "maximal.exe missing at $exe" }
-          Write-Host "maximal.exe present ($((Get-Item $exe).Length) bytes)"
+          $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\maximal'
+          foreach ($binary in @('maximal.exe', 'maximal-mcp-broker.exe')) {
+            $binaryPath = Join-Path $installRoot $binary
+            if (-not (Test-Path $binaryPath)) { throw "$binary missing at $binaryPath" }
+            Write-Host "$binary present ($((Get-Item $binaryPath).Length) bytes)"
+          }
 
           $marker = Get-ItemPropertyValue 'HKCU:\Software\stuffbucket\maximal' 'installed' -ErrorAction SilentlyContinue
           if ($marker -ne 1) { throw "HKCU marker Software\stuffbucket\maximal\installed != 1 (got '$marker')" }
@@ -286,7 +308,8 @@ jobs:
       - name: Stop proxy before uninstall
         shell: pwsh
         run: |
-          Get-Process -Name 'maximal' -ErrorAction SilentlyContinue |
+          Get-Process -Name 'maximal', 'maximal-mcp-broker' `
+            -ErrorAction SilentlyContinue |
             Stop-Process -Force -ErrorAction SilentlyContinue
           Start-Sleep -Seconds 2
 
@@ -308,8 +331,13 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $exe = Join-Path $env:LOCALAPPDATA 'Programs\maximal\maximal.exe'
-          if (Test-Path $exe) { throw "maximal.exe still present after uninstall: $exe" }
+          $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\maximal'
+          foreach ($binary in @('maximal.exe', 'maximal-mcp-broker.exe')) {
+            $binaryPath = Join-Path $installRoot $binary
+            if (Test-Path $binaryPath) {
+              throw "$binary still present after uninstall: $binaryPath"
+            }
+          }
           Write-Host "clean removal OK"
 
       - name: Upload msiexec logs
@@ -326,7 +354,7 @@ jobs:
   # install.ps1 normally pulls its zip from a GitHub release URL; the
   # -BaseUrl override points it at a loopback HTTP server serving the
   # un-released artifact, so the real download -> sha256 -> unpack -> PATH
-  # -> scheduled task -> setup path runs without a release.
+  # -> ARP install/uninstall lifecycle runs without a release.
   ps1:
     needs: build-binary
     runs-on: windows-2022
@@ -368,8 +396,11 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $exe = Join-Path $env:LOCALAPPDATA 'Programs\maximal\maximal.exe'
-          if (-not (Test-Path $exe)) { throw "maximal.exe missing at $exe" }
+          $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\maximal'
+          foreach ($binary in @('maximal.exe', 'maximal-mcp-broker.exe')) {
+            $binaryPath = Join-Path $installRoot $binary
+            if (-not (Test-Path $binaryPath)) { throw "$binary missing at $binaryPath" }
+          }
           # CLI-only: install.ps1 must NOT register a scheduled task.
           if (Get-ScheduledTask -TaskName 'maximal' -ErrorAction SilentlyContinue) {
             throw "CLI install.ps1 should NOT register a scheduled task, but 'maximal' exists"
@@ -450,15 +481,60 @@ jobs:
           path: ps1-proxy-logs
           if-no-files-found: ignore
 
+      - name: Uninstall through PowerShell ARP helper
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\maximal'
+          $uninstaller = Join-Path $installRoot 'uninstall.ps1'
+          $arp = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\maximal'
+          if (-not (Test-Path $uninstaller)) {
+            throw "PowerShell uninstaller missing: $uninstaller"
+          }
+          $uninstallCommand = Get-ItemPropertyValue $arp 'UninstallString'
+          if ($uninstallCommand -notlike "*$uninstaller*") {
+            throw "ARP command does not target ${uninstaller}: $uninstallCommand"
+          }
+
+          $p = Start-Process powershell.exe `
+            -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$uninstaller`"" `
+            -Wait -PassThru
+          if ($p.ExitCode -ne 0) {
+            throw "PowerShell uninstall failed: $($p.ExitCode)"
+          }
+
+          foreach ($file in @('maximal.exe', 'maximal-mcp-broker.exe', 'uninstall.ps1')) {
+            $filePath = Join-Path $installRoot $file
+            if (Test-Path $filePath) { throw "$file still present: $filePath" }
+          }
+          if (Test-Path $installRoot) {
+            throw "PowerShell install directory still present: $installRoot"
+          }
+          if (Test-Path $arp) { throw "PowerShell ARP key still present: $arp" }
+
+          $normalizedInstallRoot = $installRoot.TrimEnd([char[]]'\')
+          $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
+          $remaining = @($userPath -split ';' | Where-Object {
+            $_ -and $_.Trim().TrimEnd([char[]]'\') -ieq $normalizedInstallRoot
+          })
+          if ($remaining.Count -ne 0) {
+            throw "PowerShell install directory still present in user PATH: $userPath"
+          }
+          Write-Host 'PowerShell uninstall lifecycle OK'
+
       - name: Cleanup
         if: always()
         shell: pwsh
         run: |
-          # Runner is ephemeral, but stop the proxy the installer started so
-          # the file lock releases before the step ends.
+          # Fallback cleanup if an earlier assertion or the lifecycle itself
+          # failed. A green path reaches this step with nothing left to remove.
           Get-ScheduledTask -TaskName 'maximal' -ErrorAction SilentlyContinue |
             Unregister-ScheduledTask -Confirm:$false -ErrorAction SilentlyContinue
-          Stop-Process -Name 'maximal' -Force -ErrorAction SilentlyContinue
+          Stop-Process -Name 'maximal', 'maximal-mcp-broker' -Force `
+            -ErrorAction SilentlyContinue
+          Remove-Item `
+            'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\maximal' `
+            -Recurse -Force -ErrorAction SilentlyContinue
           Remove-Item -Recurse -Force `
             (Join-Path $env:LOCALAPPDATA 'Programs\maximal') -ErrorAction SilentlyContinue
           exit 0

@@ -6,6 +6,7 @@
 
   "nav-account": "Konto",
   "nav-apps": "Apps",
+  "nav-mcp": "MCP-Server",
   "nav-endpoint": "Endpunkt",
   "nav-api-clients": "API-Schlüssel",
   "nav-models": "Modelle",
@@ -111,6 +112,9 @@
 
   "apps-title": "Apps",
   "apps-sub": "Einrichtung mit einem Klick für die Tools, die mit Maximal kommunizieren. Aktivieren Sie eine App, und wir richten sie für Sie auf den Proxy aus.",
+
+  "mcp-title": "MCP-Server",
+  "mcp-sub": "Teilen Sie Tool-Server wie Work IQ mit Ihren Apps. Aktivieren Sie einen, und wählen Sie, welche Apps ihn erhalten; deaktivieren Sie ihn, und wir entfernen ihn wieder.",
 
   "endpoint-title": "Endpunkt",
   "endpoint-sub": "Wo Maximal lauscht. Verwenden Sie diese Werte, wenn Sie ein Tool einrichten, das nicht in der App-Liste enthalten ist.",

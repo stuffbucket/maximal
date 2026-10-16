@@ -24,6 +24,12 @@ const tokenAttachmentGuard = {
     // Loopback smoke test sends a DUMMY x-api-key ("anything") to its own
     // server — not a real credential.
     "src/setup.ts",
+    // MCP gateway forwards to the isolated broker with that broker's random
+    // per-generation loopback key, not a GitHub/Copilot/provider credential.
+    "src/routes/mcp/route.ts",
+    // Writes an MCP endpoint's Authorization header into Claude Code's own
+    // config file; no request is sent from here.
+    "src/apps/claude-code/mcp.ts",
     "**/*.test.ts",
   ],
   rules: {

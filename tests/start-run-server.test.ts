@@ -142,6 +142,9 @@ globalThis.fetch = (() =>
 
 const { state } = await import("~/lib/runtime-state/state")
 const { runServer, start } = await import("~/start")
+const { stopBrokerSupervisor } = await import("~/lib/mcp-broker/supervisor")
+const { setListeningPort } = await import("~/lib/start/proxy-port")
+const { clearSessionRunning } = await import("~/lib/start/session-sentinel")
 const { getAuthStatus, signOut, __resetAuthControllerForTests } =
   await import("~/lib/auth/auth-controller")
 const { CopilotAuthFatalError } = await import("~/lib/errors/error")
@@ -463,6 +466,12 @@ describe("start.run — citty args → runServer options", () => {
 // mocks, so we re-`mock.module` each one back to the captured real
 // module reference.
 afterAll(async () => {
+  // runServer registered the process-wide broker supervisor and its port,
+  // and wrote the session sentinel (with that port) for this live process;
+  // clear all three so later files don't see them.
+  await stopBrokerSupervisor()
+  setListeningPort(undefined)
+  clearSessionRunning()
   globalThis.fetch = realFetch
   mock.restore()
   await mock.module("~/lib/platform/paths", () => realPathsModule)

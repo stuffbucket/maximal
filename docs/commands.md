@@ -32,12 +32,12 @@ bun run release:manual  # local fallback version commit + tag (bumpp). Primary
                         # release PR → tag → release.yml builds/publishes assets.
 
 # Tauri app (menu-bar shell wrapping the proxy as a sidecar on :4141)
-bun run app:setup    # one-time: install shell deps + force-build sidecar binary
+bun run app:setup    # one-time: install shell + broker deps and force-build binaries
 bun run app:sidecar  # build the UI + regenerate the embed manifest + rebuild the
-                     # standalone proxy binary into shell/src-tauri/binaries/
-                     # (compile is a no-op when the binary is newer than src/;
-                     # override with --force or MAXIMAL_FORCE_SIDECAR=1 — release
-                     # pipelines must set it)
+                     # standalone proxy and isolated broker into src-tauri/binaries/
+                     # (each compile is a no-op when its output is current; override
+                     # with --force or MAXIMAL_FORCE_SIDECAR=1 — release pipelines
+                     # must set it)
 bun run app:dev      # build sidecar (if stale) + tauri dev
 bun run app:ui       # UI-only iteration: `bun run build:ui --watch` — rebuilds the
                      # settings + dashboard bundles into shell/dist on every save.
@@ -47,6 +47,55 @@ bun run app:build    # force-rebuild sidecar + tauri build --bundles app,dmg
 bun run shell:test   # Rust unit tests for the shell (cargo test --lib); Rust is
                      # pinned in mise.toml — run `mise install` once
 ```
+
+## Isolated MCP broker package
+
+The broker has its own exact dependency pins, lockfile, and mise tools. Run its
+commands from the package so the root Bun dependency state is not changed:
+
+```sh
+mise -C packages/mcp-broker exec -- pnpm install --frozen-lockfile
+mise -C packages/mcp-broker exec -- pnpm typecheck
+mise -C packages/mcp-broker exec -- pnpm test
+mise -C packages/mcp-broker exec -- pnpm build
+```
+
+The package-local build writes the ignored development binary to
+`packages/mcp-broker/dist/maximal-mcp-broker`. `bun run app:sidecar` instead
+stages a target-triple broker binary for Tauri. Work IQ is not installed by
+these commands; it is an externally configured stdio endpoint.
+
+### Using a brokered endpoint
+
+Define endpoints under `mcpBroker.servers` in `config.json`. An endpoint may set
+its own `apiKey`; without one, the normal main-port API-key rules apply.
+
+```sh
+maximal mcp                                       # list endpoints and clients
+maximal mcp workiq --enable                       # on; asks which apps get it
+maximal mcp workiq --enable --clients claude-code,claude-desktop
+maximal mcp workiq --disable                      # off; removed from every app
+```
+
+Settings → MCP servers does the same. Only apps whose Maximal integration is on
+are offered; turning an app's integration off removes its MCP entries, and
+turning it back on restores them. Maximal's entries are removed while Maximal
+isn't running and come back when it starts. A same-name MCP server you already
+had in an app is left alone; if it is a local command, Maximal runs the same
+command for the endpoint (secret-looking environment variables aren't copied).
+
+The CLI applies the change to the running Maximal without a restart; it
+finds that instance's port itself (`--port` overrides). App entries always
+point at the port Maximal is actually listening on, and follow it if it moves.
+
+Other clients connect to `http://127.0.0.1:<port>/mcp/<id>` (4141 by default)
+from the same machine. Stdio-only clients can run
+`maximal-mcp-broker stdio-adapter --url http://127.0.0.1:<port>/mcp/<id>` with
+`MAXIMAL_MCP_API_KEY` in its environment when a key is required.
+
+Each connected session runs its own copy of the endpoint's server, so Claude
+Code, Claude Desktop, or several Claude Code windows can use one endpoint at
+the same time. `limits.sessions` on the endpoint caps how many (default 8).
 
 ## Fast UI iteration
 
@@ -68,3 +117,26 @@ bun run app:ui
 `shell/src/main.ts`'s `safeInvoke()` already swallows Tauri-only `invoke()`
 calls when running in a plain browser, so the "Reveal in Finder" buttons
 no-op gracefully — everything else works.
+
+## Storybook (UI catalog)
+
+Every Settings and Dashboard piece in every state, without a running proxy.
+It's an isolated package (`packages/storybook`, its own pnpm lockfile), like
+the MCP broker:
+
+```sh
+bun run storybook:install   # once, or after packages/storybook/pnpm-lock.yaml changes
+bun run storybook           # dev server on :6006; restages the window stories on save
+bun run storybook:build     # static build → packages/storybook/storybook-static
+bun run storybook:check     # fixtures vs. API schemas + stories vs. component props
+```
+
+Storybook is ad-hoc tooling and deliberately not in CI. Run `storybook:check`
+after changing a UI component's props or a `settings-types` schema; it fails on
+a story whose props no longer match the component, and on a fixture that no
+longer matches the wire contract.
+
+It shares its mock backend and fixtures with `bun run ui:harness`
+(`scripts/ui-harness-api.ts`, `scripts/ui-harness-fixtures.ts`). Use the harness
+to click through the whole app against one scenario, and Storybook to see
+each piece in each state side by side. Details: `packages/storybook/README.md`.
