@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.4.45](https://github.com/stuffbucket/maximal/compare/v0.4.44...v0.4.45) (2026-10-16)
+
+
+### Features
+
+* **mcp:** find, add, and remove MCP servers from Settings and the CLI ([#478](https://github.com/stuffbucket/maximal/issues/478)) ([adce18d](https://github.com/stuffbucket/maximal/commit/adce18d4f82571b3ad22dbec609ee3ae3bc27d47))
+* **mcp:** isolated MCP broker with per-endpoint Claude Code/Desktop toggle ([#476](https://github.com/stuffbucket/maximal/issues/476)) ([5d13955](https://github.com/stuffbucket/maximal/commit/5d139559966989e05f756f0378073dd893f9e016))
+* **mcp:** start new sessions on the newest server install without restarting the broker ([#479](https://github.com/stuffbucket/maximal/issues/479)) ([dc17062](https://github.com/stuffbucket/maximal/commit/dc17062a748f9ace6f4283aed9aa52948982404b))
+* **mcp:** suggest installing Work IQ the way this machine installs tools ([#486](https://github.com/stuffbucket/maximal/issues/486)) ([4a46174](https://github.com/stuffbucket/maximal/commit/4a461745e9a44494c488dd6e69de9cbdeb526f2c))
+* notify once when Maximal starts working ([#475](https://github.com/stuffbucket/maximal/issues/475)) ([43bd051](https://github.com/stuffbucket/maximal/commit/43bd0513d801d2a094c8aa52808e04e626665b93))
+* **ui:** OS-following theme, shared problem callouts, live Dashboard rate ([#474](https://github.com/stuffbucket/maximal/issues/474)) ([f2a6064](https://github.com/stuffbucket/maximal/commit/f2a6064e55f49f1e1c5fa5d87a967c517fe207fd))
+
+
+### Bug Fixes
+
+* **build-ui:** rebuild on real changes only, and never leave the UI stale ([#481](https://github.com/stuffbucket/maximal/issues/481)) ([f028b5b](https://github.com/stuffbucket/maximal/commit/f028b5bbb76b76bbaf8c391f9a34a3c1dea1c4c6))
+* **ci:** discover manifest PRs through REST API ([#471](https://github.com/stuffbucket/maximal/issues/471)) ([b1b82a4](https://github.com/stuffbucket/maximal/commit/b1b82a42a62bb817df90c64b7f9f9d9be3c7c25d))
+* stop Maximal from owning shell profiles ([#488](https://github.com/stuffbucket/maximal/issues/488)) ([f18d780](https://github.com/stuffbucket/maximal/commit/f18d78066863da040e2f11b27b1fd45e0738d288))
+* **ui:** serve the UI once it's built, without restarting the proxy ([#483](https://github.com/stuffbucket/maximal/issues/483)) ([eda06e1](https://github.com/stuffbucket/maximal/commit/eda06e16509a27ab38668f29df1908a1bdc0f810))
+* **ui:** show quiet destructive buttons in red ([#484](https://github.com/stuffbucket/maximal/issues/484)) ([eaee6ea](https://github.com/stuffbucket/maximal/commit/eaee6ea03f66ffd3db6c3bd7638ea04f449b7683))
+* **ui:** show the port Maximal actually listens on in Endpoint ([#485](https://github.com/stuffbucket/maximal/issues/485)) ([e291b9b](https://github.com/stuffbucket/maximal/commit/e291b9b183a8bfddfb82900ca041d16511cb7182))
+
 ## [0.4.44](https://github.com/stuffbucket/maximal/compare/v0.4.43...v0.4.44) (2026-09-21)
 
 
