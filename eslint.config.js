@@ -101,6 +101,8 @@ export default [
       // toolchain (`mise -C packages/<name>`).
       "packages/**",
       "site/**",
+      // Throwaway experiments kept as evidence; not shipped code.
+      "spikes/**",
       ".dependency-cruiser.cjs",
       ".pnpmfile.cjs",
       "landing/**",
