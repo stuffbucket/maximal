@@ -154,7 +154,7 @@ export function McpEndpointCard({
           </Button>
           <Button
             variant="ghost"
-            className="btn--icon"
+            className="btn--icon btn--ghost-destructive"
             aria-label={`Remove ${endpoint.label}`}
             title="Remove"
             disabled={refreshing || busy}
