@@ -62,7 +62,7 @@ const writeEnvelope = (
   child.stdin.write(encodeControlEnvelope(envelope))
 }
 
-it("handshakes, reports readiness, and shuts down over framed IPC", async () => {
+it("handshakes, reports readiness, takes updates, and shuts down over framed IPC", async () => {
   const child = spawn(
     process.execPath,
     [
@@ -129,11 +129,44 @@ it("handshakes, reports readiness, and shuts down over framed IPC", async () => 
       payload: { state: "ready" },
     })
 
+    // A live update to how new sessions start is taken; one that changes
+    // how the endpoint is served is refused, and the broker keeps running.
+    const update = (sequence: number, protocol: "legacy" | "auto") =>
+      writeEnvelope(child, {
+        protocol: CONTROL_PROTOCOL,
+        version: CONTROL_PROTOCOL_VERSION,
+        generation: GENERATION,
+        sequence,
+        deadlineMs: Date.now() + 10_000,
+        requestId: `update-${sequence}`,
+        operation: "update",
+        payload: {
+          configuration: {
+            ...configuration,
+            endpoints: configuration.endpoints.map((endpoint) => ({
+              ...endpoint,
+              protocol,
+              callTimeoutMs: 60_000,
+            })),
+          },
+        },
+      })
+    update(1, "legacy")
+    expect(await queue.take("response")).toMatchObject({
+      requestId: "update-1",
+      payload: { ok: true },
+    })
+    update(2, "auto")
+    expect(await queue.take("response")).toMatchObject({
+      requestId: "update-2",
+      payload: { ok: false, code: "RESTART_REQUIRED" },
+    })
+
     writeEnvelope(child, {
       protocol: CONTROL_PROTOCOL,
       version: CONTROL_PROTOCOL_VERSION,
       generation: GENERATION,
-      sequence: 1,
+      sequence: 3,
       deadlineMs: Date.now() + 10_000,
       requestId: "shutdown-1",
       operation: "shutdown",

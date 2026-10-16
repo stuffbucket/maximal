@@ -13,6 +13,11 @@
  *
  * Requests must come from loopback and carry no foreign `Origin`, so MCP
  * tools are never exposed to the LAN or to browser pages (DNS rebinding).
+ *
+ * A request that opens a session (no `mcp-session-id`) starts a fresh
+ * instance of the server, so for a catalog server Maximal first re-reads
+ * where its newest install is; the broker takes a new path without a
+ * restart, and sessions already running keep theirs.
  */
 
 import type { Context, MiddlewareHandler } from "hono"
@@ -22,6 +27,7 @@ import { timingSafeEqual } from "node:crypto"
 
 import type { McpServerConfig } from "~/lib/mcp-broker/types"
 
+import { refreshCatalogCommands } from "~/apps/mcp"
 import {
   createAuthMiddleware,
   defaultGetRequestIp,
@@ -32,6 +38,7 @@ import { getConfig } from "~/lib/config/config"
 import {
   type BrokerUpstream,
   getBrokerUpstream,
+  reconfigureBroker,
 } from "~/lib/mcp-broker/supervisor"
 
 const MAX_CONCURRENT_REQUESTS = 32
@@ -71,6 +78,20 @@ interface McpRoutesOptions {
   getUpstream?: () => BrokerUpstream | undefined
   getRequestIp?: (c: Context) => string | null
   fetchUpstream?: typeof fetch
+  /** Runs before a request that opens a session on a catalog endpoint. */
+  beforeNewSession?: () => Promise<void>
+}
+
+/** Point catalog endpoints at their newest install, then hand any change
+ *  to the broker (a live update when only the path moved). */
+async function useNewestInstalls(): Promise<void> {
+  const before = getConfig()
+  const config = refreshCatalogCommands(before)
+  if (config !== before) await reconfigureBroker(config.mcpBroker ?? {})
+}
+
+function opensSession(c: Context): boolean {
+  return c.req.method === "POST" && !c.req.header("mcp-session-id")
 }
 
 function jsonError(
@@ -109,6 +130,7 @@ export function createMcpRoutes(options: McpRoutesOptions = {}): Hono {
   const getUpstream = options.getUpstream ?? getBrokerUpstream
   const getRequestIp = options.getRequestIp ?? defaultGetRequestIp
   const fetchUpstream = options.fetchUpstream ?? fetch
+  const beforeNewSession = options.beforeNewSession ?? useNewestInstalls
   // Same decision as the main-port middleware, minus its bypass lists.
   const mainPortAuth: MiddlewareHandler = createAuthMiddleware({
     allowUnauthenticatedPaths: [],
@@ -140,6 +162,10 @@ export function createMcpRoutes(options: McpRoutesOptions = {}): Hono {
 
   app.all("/:id", async (c) => {
     const id = c.req.param("id")
+    if (opensSession(c) && findEndpoint(id)?.catalog !== undefined) {
+      // Best effort: a failed check still serves the install already known.
+      await beforeNewSession().catch(() => undefined)
+    }
     const upstream = getUpstream()
     if (!upstream) return jsonError(c, 503, "MCP_BROKER_UNAVAILABLE")
     if (declaredBodyTooLarge(c)) return jsonError(c, 413, "MCP_BODY_TOO_LARGE")

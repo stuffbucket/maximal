@@ -3,7 +3,9 @@ import { z } from "zod"
 import { BrokerWireConfigurationSchema } from "./wire-config.ts"
 
 export const CONTROL_PROTOCOL = "maximal-mcp-control"
-export const CONTROL_PROTOCOL_VERSION = 1
+// 2: adds `update`. Broker and sidecar ship together; a mismatched pair
+// fails the first frame instead of half-working.
+export const CONTROL_PROTOCOL_VERSION = 2
 export const DEFAULT_MAX_CONTROL_FRAME_BYTES = 1_048_576
 
 const IdentifierSchema = z
@@ -51,6 +53,15 @@ export const ControlEnvelopeSchema = z.discriminatedUnion("operation", [
     requestId: IdentifierSchema,
     payload: z.strictObject({
       apiKey: z.string().min(32).max(512),
+      configuration: BrokerWireConfigurationSchema,
+    }),
+  }),
+  BaseEnvelopeSchema.extend({
+    // New launch settings for future session instances; running ones keep
+    // theirs. Answered RESTART_REQUIRED when the change needs a new broker.
+    operation: z.literal("update"),
+    requestId: IdentifierSchema,
+    payload: z.strictObject({
       configuration: BrokerWireConfigurationSchema,
     }),
   }),

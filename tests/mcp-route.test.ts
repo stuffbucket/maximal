@@ -50,10 +50,14 @@ function buildApp(
     ip?: string
     upstream?: typeof UPSTREAM | undefined
     respond?: (request: ForwardedRequest) => Response | Promise<Response>
+    beforeNewSession?: () => Promise<void>
   } = {},
 ) {
   const forwarded: Array<ForwardedRequest> = []
   const routes = createMcpRoutes({
+    ...(options.beforeNewSession ?
+      { beforeNewSession: options.beforeNewSession }
+    : {}),
     getRequestIp: () => options.ip ?? "127.0.0.1",
     getUpstream: () => ("upstream" in options ? options.upstream : UPSTREAM),
     fetchUpstream: (async (url: string, init: RequestInit) => {
@@ -92,6 +96,49 @@ beforeEach(() => {
 
 afterAll(() => {
   writeConfig({})
+})
+
+describe("/mcp/<id> new sessions", () => {
+  test("re-reads a catalog server's newest install before a session opens", async () => {
+    writeConfig(brokerConfig({ catalog: "workiq" }))
+    const calls: Array<string> = []
+    const { app, forwarded } = buildApp({
+      beforeNewSession: () => {
+        calls.push("refresh")
+        // The session request is forwarded only after this finished.
+        expect(forwarded).toHaveLength(0)
+        return Promise.resolve()
+      },
+    })
+    expect((await app.request("/mcp/fixture", post())).status).toBe(200)
+    expect(calls).toEqual(["refresh"])
+
+    // Requests inside a session don't re-check.
+    await app.request("/mcp/fixture", post({ "mcp-session-id": "session-1" }))
+    await app.request("/mcp/fixture", { method: "GET" })
+    expect(calls).toEqual(["refresh"])
+  })
+
+  test("doesn't re-check servers that weren't added from the catalog", async () => {
+    const calls: Array<string> = []
+    const { app } = buildApp({
+      beforeNewSession: () => {
+        calls.push("refresh")
+        return Promise.resolve()
+      },
+    })
+    await app.request("/mcp/fixture", post())
+    expect(calls).toEqual([])
+  })
+
+  test("a failed check still forwards the session", async () => {
+    writeConfig(brokerConfig({ catalog: "workiq" }))
+    const { app, forwarded } = buildApp({
+      beforeNewSession: () => Promise.reject(new Error("probe failed")),
+    })
+    expect((await app.request("/mcp/fixture", post())).status).toBe(200)
+    expect(forwarded).toHaveLength(1)
+  })
 })
 
 describe("/mcp/<id> caller checks", () => {

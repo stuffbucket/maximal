@@ -3,7 +3,9 @@ import { z } from "zod"
 import type { ResolvedBrokerConfiguration } from "./configuration"
 
 export const CONTROL_PROTOCOL = "maximal-mcp-control"
-export const CONTROL_PROTOCOL_VERSION = 1
+// 2: adds `update`. Broker and sidecar ship together; a mismatched pair
+// fails the first frame instead of half-working.
+export const CONTROL_PROTOCOL_VERSION = 2
 export const DEFAULT_MAX_CONTROL_FRAME_BYTES = 1_048_576
 
 const IdentifierSchema = z
@@ -89,6 +91,11 @@ export type SidecarEnvelope =
         apiKey: string
         configuration: ResolvedBrokerConfiguration
       }
+    }
+  | {
+      operation: "update"
+      requestId: string
+      payload: { configuration: ResolvedBrokerConfiguration }
     }
   | {
       operation: "shutdown"
