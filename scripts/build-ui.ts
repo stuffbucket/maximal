@@ -24,6 +24,8 @@ import { watch } from "node:fs"
 import { cp, mkdir, rm } from "node:fs/promises"
 import { join, resolve } from "node:path"
 
+import { createRebuilder, inputSignature } from "./build-ui-watch"
+
 const REPO = resolve(import.meta.dir, "..")
 const SETTINGS_ENTRY = join(REPO, "shell/ui/settings/index.html")
 const SETTINGS_VENDOR = join(REPO, "shell/ui/settings/vendor")
@@ -109,19 +111,36 @@ async function buildAll(): Promise<void> {
   console.error(`[build-ui] built settings + dashboard → shell/dist/ui (${Date.now() - t}ms)`)
 }
 
+// Everything a build reads from the repo (vendor/ included).
+const INPUTS = [
+  join(REPO, "shell/ui"),
+  join(REPO, "shell/src"),
+  join(SHELL_DIR, "splash.html"),
+]
+const watching = process.argv.includes("--watch")
+// Taken before the first build, so a change made during it is caught below.
+const initial = watching ? await inputSignature(INPUTS) : ""
+
 await buildAll()
 
-if (process.argv.includes("--watch")) {
-  console.error("[build-ui] watching shell/ui for changes…")
+if (watching) {
+  console.error("[build-ui] watching shell/ui and shell/src for changes…")
+  const rebuild = createRebuilder({
+    signature: () => inputSignature(INPUTS),
+    build: buildAll,
+    built: initial,
+    onError: (err) => console.error("[build-ui] rebuild failed:", err),
+  })
   let timer: ReturnType<typeof setTimeout> | null = null
   const schedule = () => {
     if (timer) clearTimeout(timer)
-    timer = setTimeout(() => {
-      void buildAll().catch((err) => console.error("[build-ui] rebuild failed:", err))
-    }, 80)
+    timer = setTimeout(() => void rebuild(), 80)
   }
-  watch(join(REPO, "shell/ui"), { recursive: true }, schedule)
-  watch(join(REPO, "shell/src"), { recursive: true }, schedule)
+  for (const input of INPUTS) {
+    watch(input, { recursive: true }, schedule)
+  }
+  // Anything that changed while the first build ran.
+  schedule()
   // Keep the process alive.
   await new Promise(() => {})
 }
