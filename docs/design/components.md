@@ -142,8 +142,9 @@ The button carries `aria-expanded` / `aria-controls`; the group is
 
 The card's other actions (an MCP server's Refresh and Remove) sit just left
 of the switch as ghost icon buttons (`btn--icon`), each with an `aria-label`
-naming the entity and a quiet `title` tooltip. A destructive one always
-confirms in a `ConfirmDialog` (`tone="danger"`) before acting.
+naming the entity and a quiet `title` tooltip. A destructive one reads
+red (`btn--ghost-destructive`) and always confirms in a `ConfirmDialog`
+(`tone="danger"`) before acting.
 
 ## Focus rings
 

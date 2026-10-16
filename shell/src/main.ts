@@ -288,7 +288,10 @@ function wireLogs(): void {
 
 // ---- Endpoint section ------------------------------------------------------
 
-const ENDPOINT_BASE_URL = "http://127.0.0.1:4141";
+/** Where clients reach Maximal. The proxy serves this page, so its port is
+ *  the one to show: 4141 normally, another one for a dev build started
+ *  with MAXIMAL_DEV_PORT. */
+const ENDPOINT_BASE_URL = `http://127.0.0.1:${window.location.port || "4141"}`;
 /** Log retention window (days). Drives the plural copy in the Logs section. */
 const LOG_RETENTION_DAYS = 7;
 let endpointApiKey: string | null = null;
@@ -406,6 +409,9 @@ function showUninstallComplete(): void {
 function wireEndpoint(): void {
   const section = document.querySelector('[data-section="endpoint"]');
   if (!section) return;
+
+  const baseUrl = section.querySelector('[data-field="endpoint-base-url"]');
+  if (baseUrl) baseUrl.textContent = ENDPOINT_BASE_URL;
 
   section
     .querySelector('[data-action="copy-base-url"]')
