@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { apiCall } from "../../../proxy/client";
+import { type Problem, describeProblem, withRetry } from "../../problems";
 import type { ApiKeyEntry } from "../../../../../src/lib/config/settings-types";
 import { humanize } from "./humanize";
 
@@ -19,7 +20,9 @@ interface UseApiKeys {
   entries: Array<ApiKeyEntry>;
   enforcing: boolean;
   isLoading: boolean;
-  error: string | null;
+  /** Panel-level: the list failed to load (after automatic retries) or a
+   *  change failed. Per-row messages travel on the mutation result. */
+  problem: Problem | null;
   reload: () => Promise<void>;
   create: (input: {
     label: string;
@@ -43,20 +46,22 @@ export function useApiKeys(): UseApiKeys {
   const [entries, setEntries] = useState<Array<ApiKeyEntry>>([]);
   const [enforcing, setEnforcing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [problem, setProblem] = useState<Problem | null>(null);
 
   const reload = useCallback(async () => {
-    const result = await apiCall({
+    const result = await withRetry(() =>
+      apiCall({
       kind: "api-keys-list",
       method: "GET",
       path: "/settings/api/api-keys",
-    });
+    }),
+    );
     if (result.ok) {
       setEntries(result.data.entries);
       setEnforcing(result.data.enforcing);
-      setError(null);
+      setProblem(null);
     } else {
-      setError(humanize(result.error));
+      setProblem(describeProblem(result, { subject: "your connections" }));
     }
     setIsLoading(false);
   }, []);
@@ -75,10 +80,10 @@ export function useApiKeys(): UseApiKeys {
       });
       if (!result.ok) {
         const message = humanize(result.error);
-        setError(message);
+        setProblem(describeProblem(result, { subject: "your connections", doing: "save" }));
         return { ok: false, error: message };
       }
-      setError(null);
+      setProblem(null);
       await reload();
       return { ok: true };
     },
@@ -95,10 +100,10 @@ export function useApiKeys(): UseApiKeys {
       });
       if (!result.ok) {
         const message = humanize(result.error);
-        setError(message);
+        setProblem(describeProblem(result, { subject: "your connections", doing: "save" }));
         return { ok: false, error: message };
       }
-      setError(null);
+      setProblem(null);
       await reload();
       return { ok: true };
     },
@@ -114,10 +119,10 @@ export function useApiKeys(): UseApiKeys {
       });
       if (!result.ok) {
         const message = humanize(result.error);
-        setError(message);
+        setProblem(describeProblem(result, { subject: "your connections", doing: "save" }));
         return { ok: false, error: message };
       }
-      setError(null);
+      setProblem(null);
       // Deliberately do NOT reload here — bulk delete fans out N calls
       // and only the last should trigger a refresh. The caller decides.
       return { ok: true };
@@ -135,12 +140,12 @@ export function useApiKeys(): UseApiKeys {
       });
       if (!result.ok) {
         const message = humanize(result.error);
-        setError(message);
+        setProblem(describeProblem(result, { subject: "your connections", doing: "save" }));
         return { ok: false, error: message };
       }
       setEntries(result.data.entries);
       setEnforcing(result.data.enforcing);
-      setError(null);
+      setProblem(null);
       return { ok: true };
     },
     [],
@@ -150,7 +155,7 @@ export function useApiKeys(): UseApiKeys {
     entries,
     enforcing,
     isLoading,
-    error,
+    problem,
     reload,
     create,
     update,

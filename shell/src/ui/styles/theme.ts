@@ -76,39 +76,20 @@ export const elevation = {
   tooltip: "0 2px 6px rgb(0 0 0 / 0.1)",
 } as const;
 
+/** Identity only (brand mark, requirement stripe) — never a control, link or text. */
 export const brand = {
   color: "#c8334a",
-  fg: "#ffffff",
 } as const;
 
+/**
+ * Theme-independent interaction colors. The accent fill itself is per theme
+ * (`themes.*.accent`); its label stays white in both. `destructive` is the
+ * destructive *button fill* only — error text and icons use `statusError`.
+ */
 export const accent = {
-  color: "#5198a6", // Used from tokens.css (overriding the drift in usage-viewer)
-  hover: "#2dd4bf", // Inherited from usage-viewer for now, or maybe derived?
   fg: "#ffffff",
   destructive: "#b32d3f",
   destructiveFg: "#ffffff",
-} as const;
-
-export const status = {
-  error: "#ef4444",
-  errorFg: "#fca5a5",
-  success: "#22c55e",
-  successFg: "#4ade80",
-  warning: "#eab308",
-  warningFg: "#facc15",
-  info: "#38bdf8",
-  infoFg: "#7dd3fc",
-} as const;
-
-export const link = {
-  dark: {
-    color: "#7fc1d2",
-    hover: "#a8d8e3",
-  },
-  light: {
-    color: "#2d6470",
-    hover: "#1e5560",
-  }
 } as const;
 
 export const focusRing = {
@@ -125,6 +106,20 @@ export const layout = {
   contentMax: "640px",
 } as const;
 
+/**
+ * Theme-dependent colors. Every key must exist in both themes. The
+ * generator (scripts/generate-css-tokens.ts) emits dark as the default,
+ * switches to light when the OS appearance is light, and lets a
+ * `data-theme="dark" | "light"` attribute on <html> pin either one.
+ *
+ * Each value is chosen against all three surfaces of its own theme
+ * (bun scripts/contrast-audit.ts in packages/storybook checks them):
+ *   text-*, link*, status-*   ≥ 4.5:1 — usable as text, so also as icons
+ *   accent, border-strong     ≥ 3:1   — controls, focus ring, input borders
+ *   accent behind white text  ≥ 4.5:1 — primary button labels
+ * `link` doubles as the accent family's text color: anything teal that is
+ * text (links, "Copied", accent figures) uses `link`, never `accent`.
+ */
 export const themes = {
   dark: {
     surfaceBase: "#0a0a0a",
@@ -134,9 +129,14 @@ export const themes = {
     textBaseColor: "#d4d4d4",
     textMuted: "#8a8a8a",
     borderSubtle: "#2a2a2a",
-    borderStrong: "#666666",
-    link: link.dark.color,
-    linkHover: link.dark.hover,
+    borderStrong: "#737373",
+    accent: "#437e89",
+    link: "#7fc1d2",
+    linkHover: "#a8d8e3",
+    statusError: "#f87171",
+    statusSuccess: "#22c55e",
+    statusWarning: "#eab308",
+    statusInfo: "#38bdf8",
   },
   light: {
     surfaceBase: "#fafafa",
@@ -147,7 +147,12 @@ export const themes = {
     textMuted: "#6a6a6a",
     borderSubtle: "#e5e5e5",
     borderStrong: "#8a8a8a",
-    link: link.light.color,
-    linkHover: link.light.hover,
-  }
-} as const;
+    accent: "#36646e",
+    link: "#2d6470",
+    linkHover: "#1e5560",
+    statusError: "#b91c1c",
+    statusSuccess: "#137333",
+    statusWarning: "#8a5a00",
+    statusInfo: "#0369a1",
+  },
+} as const satisfies Record<"dark" | "light", Record<string, string>>;

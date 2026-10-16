@@ -1,12 +1,13 @@
 import { AppCard } from "./AppCard";
 import { useApps } from "./useApps";
+import { ProblemCallout } from "../../components/ProblemCallout";
 import { Stack } from "../../components/Stack";
 
 export function AppsPanel(): JSX.Element {
   const {
     apps,
     isLoading,
-    error,
+    problem,
     refresh,
     toggleClaudeCode,
     toggleClaudeDesktop,
@@ -14,10 +15,12 @@ export function AppsPanel(): JSX.Element {
 
   return (
     <Stack proximity="region" className="apps-panel" aria-busy={isLoading}>
-      {error && (
-        <p className="state__caption state__caption--error" role="alert">
-          {error}
-        </p>
+      {problem && (
+        <ProblemCallout
+          problem={problem}
+          onRetry={() => void refresh()}
+          onRestarted={() => void refresh()}
+        />
       )}
 
       {isLoading && apps.length === 0 ? (

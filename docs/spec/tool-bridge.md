@@ -221,6 +221,29 @@ SSE event sequence valid.
 
 ## MCP server lifecycle
 
+> **Process boundary:** stdio MCP transports and their child processes belong to
+> the isolated `maximal-mcp-broker` process, not the main Bun/Hono sidecar. The
+> sidecar owns validated policy/configuration, supervision, and durable UI state.
+> The broker owns MCP clients, transports, sessions, and backend children. The
+> direct in-process lifecycle below is the bridge's target behavior and must be
+> implemented through that broker boundary rather than by spawning stdio servers
+> in the sidecar.
+
+The currently implemented outbound broker probes every enabled stdio endpoint
+when a broker generation is configured. A startup failure closes the generation;
+the sidecar supervisor then applies bounded backoff and a restart circuit breaker.
+Clients reach endpoints at the main port's `/mcp/<id>`, which accepts loopback
+callers only and forwards to the broker's private authenticated loopback port.
+
+Each MCP session gets its own upstream instance, started when the session
+initializes and stopped when it closes (or idles out) — the same thing that
+would happen if each harness ran the server itself, so parallel harnesses
+never share requests, interactions, or cancellations. Concurrent sessions per
+endpoint are capped by `limits.sessions` (default 8); past the cap the endpoint
+answers 503 with a JSON-RPC error saying so. Sharing one instance across
+sessions (`ownership: shareable`) remains disabled until exact request
+cancellation and correlation are proven.
+
 | Transport | Behavior |
 |---|---|
 | `stdio` | Lazy-spawn on first call; kept alive process-wide if `keep_alive: true`. One process per `mcp_servers.<name>` entry. Restart on crash with exponential backoff (1s, 2s, 4s, max 60s). |
@@ -351,13 +374,16 @@ Per-request lifecycle:
            requestState.uses[entry.id]++
 ```
 
-`McpClient` is a thin wrapper over the official
-`@modelcontextprotocol/sdk` client, parameterized by transport.
+`McpClient` is a thin sidecar client for the authenticated loopback broker
+endpoint. Protocol SDK clients and stdio transports stay inside the isolated
+broker executable.
 
 ## Security
 
-- MCP servers run with the proxy's UID. Stdio servers inherit env;
-  use `env:` block to pass secrets, never `args:`.
+- MCP servers run with the proxy's UID. Stdio servers receive only explicitly
+  inherited environment names and explicitly configured non-secret values; the
+  broker never clones the sidecar environment. Named secret references must
+  resolve through secure storage before launch and are never placed in `args:`.
 - `sign_opaque` HMAC key (`MAXIMAL_OPAQUE_SECRET`) must rotate per-
   install; provide a startup warning if the env var is unset.
 - Domain allowlists/blocklists are enforced in the proxy, never
@@ -374,9 +400,10 @@ Per-request lifecycle:
   ships a streamable variant, this spec needs an addendum).
 - Per-org RBAC on which entries are active. v2 with multi-tenant
   rollout.
-- Inbound auth on stdio MCP servers (they're local; we trust local).
-  Streamable-HTTP MCP servers carry whatever headers the config
-  declares.
+- Remote HTTP endpoint authentication. The implemented local broker front door
+  is always authenticated with a dedicated per-generation credential and bound
+  only to `127.0.0.1`; arbitrary configured remote HTTP transports are not part
+  of the initial broker milestone.
 - Per-call audit log. Logging hooks exist but the schema and sink
   are a separate concern.
 - The corresponding outbound MCP server route on the proxy

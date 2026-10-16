@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { apiCall } from "../../../proxy/client";
+import { type Problem, describeProblem, withRetry } from "../../problems";
 import type { AppEntry } from "../../../proxy/client";
 import { humanize } from "../api-clients/humanize";
 
@@ -23,7 +24,9 @@ export interface MutationResult {
 interface UseApps {
   apps: Array<AppEntry>;
   isLoading: boolean;
-  error: string | null;
+  /** Panel-level: the list failed to load (after automatic retries) or a
+   *  change failed. Per-row messages travel on the mutation result. */
+  problem: Problem | null;
   refresh: () => Promise<void>;
   toggleClaudeCode: (enabled: boolean) => Promise<MutationResult>;
   toggleClaudeDesktop: (enabled: boolean) => Promise<MutationResult>;
@@ -36,19 +39,21 @@ function sortAlpha(apps: Array<AppEntry>): Array<AppEntry> {
 export function useApps(): UseApps {
   const [apps, setApps] = useState<Array<AppEntry>>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [problem, setProblem] = useState<Problem | null>(null);
 
   const refresh = useCallback(async () => {
-    const result = await apiCall({
+    const result = await withRetry(() =>
+      apiCall({
       kind: "apps-list",
       method: "GET",
       path: "/settings/api/apps",
-    });
+    }),
+    );
     if (result.ok) {
       setApps(sortAlpha(result.data.apps));
-      setError(null);
+      setProblem(null);
     } else {
-      setError(humanize(result.error));
+      setProblem(describeProblem(result, { subject: "your apps" }));
     }
     setIsLoading(false);
   }, []);
@@ -83,10 +88,10 @@ export function useApps(): UseApps {
       });
       if (!result.ok) {
         const message = humanize(result.error);
-        setError(message);
+        setProblem(describeProblem(result, { subject: "your apps", doing: "save" }));
         return { ok: false, error: message };
       }
-      setError(null);
+      setProblem(null);
       splice(result.data);
       return { ok: true };
     },
@@ -103,10 +108,10 @@ export function useApps(): UseApps {
       });
       if (!result.ok) {
         const message = humanize(result.error);
-        setError(message);
+        setProblem(describeProblem(result, { subject: "your apps", doing: "save" }));
         return { ok: false, error: message };
       }
-      setError(null);
+      setProblem(null);
       splice(result.data);
       return { ok: true };
     },
@@ -116,7 +121,7 @@ export function useApps(): UseApps {
   return {
     apps,
     isLoading,
-    error,
+    problem,
     refresh,
     toggleClaudeCode,
     toggleClaudeDesktop,

@@ -22,6 +22,7 @@ import { PATHS } from "~/lib/platform/paths"
 import {
   clearSessionRunning,
   markSessionRunning,
+  runningSessionPort,
   staleSessionMarkerPresent,
 } from "~/lib/start/session-sentinel"
 
@@ -130,5 +131,24 @@ describe("crash-detection contract (the user-facing invariant)", () => {
     // Simulate a crash: no clearSessionRunning() call before "next boot".
     // Next "run" sees: stale marker present.
     expect(staleSessionMarkerPresent()).toBe(true)
+  })
+})
+
+describe("runningSessionPort", () => {
+  test("is the port a live instance recorded", () => {
+    markSessionRunning(4199)
+    expect(runningSessionPort()).toBe(4199)
+  })
+
+  test("is undefined with no sentinel, no port, or a dead process", () => {
+    expect(runningSessionPort()).toBeUndefined()
+    markSessionRunning()
+    expect(runningSessionPort()).toBeUndefined()
+    const exited = Bun.spawnSync(["true"])
+    fs.writeFileSync(
+      sentinelPath(),
+      JSON.stringify({ pid: exited.pid, port: 4199 }),
+    )
+    expect(runningSessionPort()).toBeUndefined()
   })
 })

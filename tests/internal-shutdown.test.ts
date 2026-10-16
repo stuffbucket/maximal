@@ -67,3 +67,44 @@ describe("/_internal/shutdown", () => {
     expect(exit).toHaveBeenCalledWith(0)
   })
 })
+
+function buildReloadApp(ip: string | null, reload: () => Promise<void>) {
+  const routes = createInternalRoutes({
+    exit: () => undefined,
+    getRequestIp: (_c: Context) => ip,
+    reload,
+  })
+  const app = new Hono()
+  app.route("/_internal", routes)
+  return app
+}
+
+describe("/_internal/reload", () => {
+  test("non-loopback caller → 404, nothing reloaded", async () => {
+    const reload = mock(async () => {})
+    const res = await buildReloadApp("10.0.0.5", reload).request(
+      "/_internal/reload",
+      { method: "POST" },
+    )
+    expect(res.status).toBe(404)
+    expect(reload).not.toHaveBeenCalled()
+  })
+
+  test("loopback caller → reloads and answers ok", async () => {
+    const reload = mock(async () => {})
+    const res = await buildReloadApp("127.0.0.1", reload).request(
+      "/_internal/reload",
+      { method: "POST" },
+    )
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true })
+    expect(reload).toHaveBeenCalledTimes(1)
+  })
+
+  test("a failed reload answers 500", async () => {
+    const res = await buildReloadApp("::1", () =>
+      Promise.reject(new Error("bad config")),
+    ).request("/_internal/reload", { method: "POST" })
+    expect(res.status).toBe(500)
+  })
+})

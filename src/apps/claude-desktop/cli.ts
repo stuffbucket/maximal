@@ -2,10 +2,13 @@ import consola from "consola"
 import fs from "node:fs"
 import path from "node:path"
 
+import { syncMcpClient } from "~/lib/mcp-broker/client-sync"
+
 import type { AppCli, AppCliOp } from "../index"
 
 import { applyConfigLibraryProfile, generateManagedProfile } from "./config"
 import { claudeAppInstalled, claudeAppCandidates } from "./detect"
+import { claudeDesktopMcp } from "./mcp"
 
 const MANAGED_PROFILE_OUT = "maximal-claude-3p.mobileconfig"
 
@@ -66,6 +69,11 @@ function apply(): void {
       consola.info(
         `  workspace folders: ${result.ensuredWorkspaceFolders.join(", ")}`,
       )
+    }
+    const mcp = syncMcpClient(claudeDesktopMcp)
+    const changed = [...mcp.added, ...mcp.removed]
+    if (changed.length > 0) {
+      consola.info(`  MCP servers updated: ${changed.join(", ")}`)
     }
     consola.info(
       "  Quit & relaunch Claude Desktop for the change to take effect.",

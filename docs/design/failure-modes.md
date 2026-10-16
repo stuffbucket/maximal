@@ -12,6 +12,10 @@ regressing across design iterations.
   rectangles, drop the cards.
 - **Cards nested inside cards.** Forbidden. Collapse one level into a
   list-row or a typographic section.
+- **A thick colored stripe down one edge of a box** (the "callout with a
+  left border" look). It reads as generated UI. Callouts, conflicts and
+  banners use a hairline border all round; a colored icon or title
+  carries the tone. → [`components.md`](components.md) → *Callouts*.
 - **Window has a visible H1 that duplicates the macOS titlebar text.**
   The H1 inside the content area is the *section* name, never the
   *window* name.
@@ -21,6 +25,12 @@ regressing across design iterations.
 - **Brand crimson on a button, focus ring, link, or active-nav
   affordance.** Brand is identity-only. Interactive surfaces are
   `--accent` (teal). → [`color.md`](color.md).
+- **A fill color used as text.** `--accent` and `--accent-destructive`
+  are fills: as text they miss 4.5:1 in at least one theme. Teal text
+  is `--link`; error text and icons are `--status-error`.
+- **`opacity` on text that isn't disabled.** It compounds with
+  `--text-muted` and drops below AA (the "Coming soon" card did).
+  Disabled controls are exempt; everything else uses a token.
 
 ## Tokens & drift
 
@@ -29,8 +39,10 @@ regressing across design iterations.
   one to `shell/src/tokens.css` and document it in
   [`tokens.md`](tokens.md) before using it. The one allowed exception
   is the drift table below, where the conflict is the point.
-- **Editing a token value in only one place.** There are currently
-  three token-declaration sites; they are not in sync. See
+- **Editing a token value in only one place.** Edit
+  `shell/src/ui/styles/theme.ts` and run `bun run tokens:generate`;
+  never hand-edit the generated `tokens.css` or the Dashboard's
+  generated region. See
   [`change-checklists.md`](change-checklists.md) → *Changing a token
   value* for the full touchpoint list. This is the highest-risk class
   of design bug in the repo today.
@@ -39,25 +51,23 @@ regressing across design iterations.
   not imports. Anything missing from one is silently `inherit`-ed or
   `initial` in that window.
 
-## Known active drift (as of last audit — June 2026)
+## Known active drift (as of last audit — October 2026)
 
-These should be triaged separately; do not "fix" them inline as part
-of an unrelated design change.
+Both token files are now generated from `shell/src/ui/styles/theme.ts`
+(`bun run tokens:generate`), so color values and both themes match. What
+still differs is which tokens each window gets:
 
-| Concern | `shell/src/tokens.css` | `shell/ui/dashboard/style.css` |
+| Concern | `shell/src/ui/styles/tokens.css` | `shell/ui/dashboard/style.css` |
 |---|---|---|
-| `--accent` | `#5198a6` | `#14b8a6` ← **different teal** |
-| `--text-muted` (dark) | `#8a8a8a` | `#a1a1a1` |
-| `--border-subtle` (dark) | `#2a2a2a` | `rgb(255 255 255 / 0.08)` |
-| `--border-strong` (dark) | `#666666` | `rgb(255 255 255 / 0.18)` |
-| `--accent-destructive` | present | absent |
-| `--accent-hover` | absent | present |
-| `--status-*` (error/success/warning/info) | absent | present |
-| `--color-bg-*` legacy aliases | absent | present |
-| `--font-display` (Fraunces) | present | absent |
-| Light theme block | present | absent |
+| `--accent-destructive` | present | absent (the generator omits it) |
+| `--font-display` (Fraunces) | present | absent (intentional: no display moment) |
+| Layout constants (`--sidebar-width`, `--content-max`) | present | absent (single-column window) |
 
-The Dashboard literally renders a different teal than Settings.
+Resolved in this audit: the Dashboard's different teal, its dark
+`--text-muted` / `--border-*` values, the missing light theme, and
+`--status-*` / `--accent-hover` existing on one side only, and the
+Dashboard's `--color-*` alias layer (gone; it uses the shared tokens). Neither
+window pins `data-theme` any more; both follow the OS.
 
 ## Accessibility
 

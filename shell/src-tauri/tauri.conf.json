@@ -26,7 +26,10 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "externalBin": ["binaries/maximal"],
+    "externalBin": [
+      "binaries/maximal",
+      "binaries/maximal-mcp-broker"
+    ],
     "macOS": {
       "exceptionDomain": "localhost"
     },

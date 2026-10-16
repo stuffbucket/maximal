@@ -1,0 +1,33 @@
+{
+  "name": "@stuffbucket/maximal-mcp-broker",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "maximal-mcp-broker": "./src/main.ts"
+  },
+  "scripts": {
+    "build": "bun build src/main.ts --compile --outfile dist/maximal-mcp-broker",
+    "build:target": "bun build src/main.ts --compile --minify --sourcemap",
+    "test": "bun test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/client": "2.3.1",
+    "@modelcontextprotocol/core": "2.3.1",
+    "@modelcontextprotocol/server": "2.3.1",
+    "@modelcontextprotocol/server-legacy": "2.3.1",
+    "mcp-proxy": "6.7.19",
+    "zod": "4.1.11"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.2",
+    "@types/node": "24.10.1",
+    "typescript": "5.9.3"
+  },
+  "packageManager": "pnpm@12.3.4",
+  "engines": {
+    "node": ">=22"
+  }
+}

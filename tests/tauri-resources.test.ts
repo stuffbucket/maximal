@@ -17,6 +17,7 @@ const TAURI_CONF = resolve(REPO_ROOT, "shell", "src-tauri", "tauri.conf.json")
 
 interface TauriConf {
   bundle?: {
+    externalBin?: Array<string>
     resources?: Array<string> | Record<string, string>
   }
 }
@@ -31,7 +32,7 @@ function resourcePatterns(conf: TauriConf): Array<string> {
   return Array.isArray(r) ? r : Object.keys(r)
 }
 
-describe("packaged UI is embedded, not staged", () => {
+describe("Tauri packaging contracts", () => {
   test("tauri.conf.json parses", () => {
     expect(() => loadConf()).not.toThrow()
   })
@@ -45,6 +46,13 @@ describe("packaged UI is embedded, not staged", () => {
         + "The UI is now embedded in the sidecar binary (src/routes/ui/route.ts) — "
         + "staging it again resurrects the #132 split where CLI/Homebrew lacked it.",
     ).toBe(false)
+  })
+
+  test("packages both sidecar executables", () => {
+    expect(loadConf().bundle?.externalBin).toEqual([
+      "binaries/maximal",
+      "binaries/maximal-mcp-broker",
+    ])
   })
 
   test("the embed mechanism is present (generator + route)", () => {

@@ -1,0 +1,4 @@
+allowBuilds:
+  tldjs: false
+patchedDependencies:
+  mcp-proxy@6.7.19: patches/mcp-proxy@6.7.19.patch

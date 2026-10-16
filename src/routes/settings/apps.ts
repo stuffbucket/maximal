@@ -19,6 +19,7 @@ import {
   type AppEntry as AppEntryT,
 } from "~/lib/config/settings-types"
 import { forwardError, HTTPError } from "~/lib/errors/error"
+import { armWorkingNotice, resetWorkingNotice } from "~/lib/working-notice"
 
 import { respondValidated } from "./respond-validated"
 
@@ -90,12 +91,14 @@ appsRoutes.post("/claude-code/toggle", async (c) => {
       }
       const result = await app.enable()
       const conflict = result.conflict || null
+      if (result.success) armWorkingNotice(app.id, app.name)
       // `app.enable()` is the single owner of the claude-code routing intent
       // (persists config.apps.claudeCode.enabled itself) — no separate persist.
       return jsonApp(c, await app.getDetails(conflict))
     }
 
     await app.disable()
+    resetWorkingNotice(app.id)
     return jsonApp(c, await app.getDetails())
   } catch (error) {
     return forwardError(c, error)
@@ -115,6 +118,8 @@ appsRoutes.post("/claude-desktop/toggle", async (c) => {
 
     await (parsed.data.enabled ? app.enable() : app.disable())
     persistClaudeDesktop(parsed.data.enabled)
+    if (parsed.data.enabled) armWorkingNotice(app.id, app.name)
+    else resetWorkingNotice(app.id)
 
     return jsonApp(c, await app.getDetails())
   } catch (error) {

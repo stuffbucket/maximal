@@ -1,0 +1,138 @@
+/* Storybook chrome only — not product UI. Product styles come from
+   shell/src/ui/styles/styles.css, imported unchanged in preview.tsx. */
+
+:root {
+  /* Default inner sizes of the Tauri windows (shell/src-tauri/src/lib.rs),
+     so window stories render at the size users actually see. */
+  --sb-settings-width: 900px;
+  --sb-settings-height: 760px;
+  --sb-dashboard-width: 1100px;
+  --sb-dashboard-height: 760px;
+}
+
+.sb-window {
+  display: block;
+  max-width: 100%;
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  background: var(--surface-base);
+}
+
+.sb-window--settings {
+  width: var(--sb-settings-width);
+  height: var(--sb-settings-height);
+}
+
+.sb-window--dashboard {
+  width: var(--sb-dashboard-width);
+  height: var(--sb-dashboard-height);
+}
+
+/* Gives a single island/component the Settings pane's measure. */
+.sb-pane {
+  max-width: var(--content-max);
+}
+
+.sb-tokens {
+  display: grid;
+  gap: var(--space-6);
+  max-width: var(--content-max);
+}
+
+.sb-tokens__group h3 {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-lg);
+  color: var(--text-strong);
+}
+
+.sb-tokens__row {
+  display: grid;
+  /* Wide enough for the largest specimen (--space-8 bar, --text-4xl "Aa"). */
+  grid-template-columns: calc(var(--space-8) + var(--space-3)) minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-1) 0;
+  border-bottom: var(--border-width-hairline) solid var(--border-subtle);
+  font-size: var(--text-sm);
+}
+
+.sb-tokens__swatch {
+  width: var(--size-2xl);
+  height: var(--size-lg);
+  border-radius: var(--radius-chip);
+  border: var(--border-width-hairline) solid var(--border-subtle);
+}
+
+.sb-tokens__bar {
+  height: var(--size-sm);
+  background: var(--accent);
+  border-radius: var(--radius-chip);
+}
+
+.sb-tokens__value {
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.sb-contrast {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr));
+  gap: var(--space-5);
+}
+
+.sb-contrast__panel {
+  padding: var(--space-4);
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-card);
+}
+
+.sb-contrast__title {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-md);
+}
+
+.sb-contrast__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.sb-contrast__table th {
+  text-align: start;
+  font-weight: var(--weight-md);
+  padding: var(--space-1) var(--space-2);
+}
+
+.sb-contrast__table td {
+  padding: var(--space-2);
+  vertical-align: middle;
+  border-top: var(--border-width-hairline) solid currentColor;
+  border-top-color: color-mix(in srgb, currentColor 15%, transparent);
+}
+
+.sb-contrast__sample {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--space-7);
+  height: var(--size-xl);
+  border-radius: var(--radius-chip);
+  font-weight: var(--weight-lg);
+  box-shadow: inset 0 0 0 var(--border-width-hairline) color-mix(in srgb, currentColor 20%, transparent);
+}
+
+.sb-contrast__mark {
+  width: var(--size-md);
+  height: var(--size-sm);
+  border-radius: var(--radius-chip);
+}
+
+.sb-contrast__why {
+  font-size: var(--text-xs);
+}
+
+.sb-contrast__ratio {
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}

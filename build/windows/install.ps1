@@ -10,7 +10,8 @@
 # create a Start Menu shortcut. The Tauri tray app (the NSIS installer,
 # maximal-<ver>-windows-x64-setup.exe) is the canonical Windows experience
 # and owns running the proxy, auto-start, and first-run setup — like the
-# macOS menu-bar app. This installer just puts `maximal` on PATH.
+# macOS menu-bar app. This installer puts the `maximal` CLI and its isolated
+# broker sibling on PATH.
 #
 # Windows Authenticode signing remains deferred. On first launch,
 # Windows SmartScreen will warn; the Pages site carries the
@@ -22,6 +23,7 @@
 #   # Specific version:
 #   $env:COPILOT_API_VERSION = 'v0.2.0'; iex (irm ...)
 #   # Uninstall path (after install):
+#   # Apps & features, or directly:
 #   maximal uninstall
 
 #Requires -Version 5.1
@@ -48,12 +50,15 @@ if (-not $Repo) {
   $Repo = 'stuffbucket/maximal'
 }
 
-$InstallDir   = Join-Path $env:LOCALAPPDATA 'Programs\maximal'
-$BinPath      = Join-Path $InstallDir 'maximal.exe'
-$DownloadDir  = Join-Path $env:TEMP "maximal-install-$(Get-Random)"
-# ARP key kept in lock-step with the MSI (build/windows/maximal.wxs) so
-# both CLI installers leave an Add/Remove Programs entry.
+$InstallDir      = Join-Path $env:LOCALAPPDATA 'Programs\maximal'
+$BinPath         = Join-Path $InstallDir 'maximal.exe'
+$BrokerPath      = Join-Path $InstallDir 'maximal-mcp-broker.exe'
+$UninstallerPath = Join-Path $InstallDir 'uninstall.ps1'
+$DownloadDir     = Join-Path $env:TEMP "maximal-install-$(Get-Random)"
+# The PowerShell installer owns this named ARP key. The MSI uses Windows
+# Installer product registration and is detected separately through its marker.
 $ArpKey       = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\maximal'
+$MsiMarkerKey = 'HKCU:\Software\stuffbucket\maximal'
 
 function Resolve-LatestVersion {
   param([string]$Repo)
@@ -100,20 +105,95 @@ function Add-UserPath {
   $env:Path = "$env:Path;$Dir"
 }
 
+function Write-Uninstaller {
+  param([string]$Path)
+  # The installed helper owns only artifacts created by this PowerShell
+  # installer. `maximal uninstall` first reverts application integrations and
+  # stops the isolated broker; after that process exits, the helper can remove
+  # the formerly-running executable, its own file, the user PATH entry, and the
+  # PowerShell installer's ARP key. MSI installs continue to be owned by
+  # msiexec and never use this helper.
+  $script = @'
+#Requires -Version 5.1
+
+$ErrorActionPreference = 'Continue'
+Set-StrictMode -Version Latest
+
+$InstallDir = Split-Path -Parent $PSCommandPath
+$BinPath = Join-Path $InstallDir 'maximal.exe'
+$BrokerPath = Join-Path $InstallDir 'maximal-mcp-broker.exe'
+$ArpKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\maximal'
+$MsiMarkerKey = 'HKCU:\Software\stuffbucket\maximal'
+$exitCode = 0
+
+# If an MSI was installed after this PowerShell package, its Windows Installer
+# registration owns the shared binary directory and PATH entry. Remove only
+# the obsolete PowerShell-installer metadata; msiexec must own the binaries.
+$msiOwned = (Get-ItemPropertyValue $MsiMarkerKey 'installed' -ErrorAction SilentlyContinue) -eq 1
+if ($msiOwned) {
+  Remove-Item -LiteralPath $ArpKey -Recurse -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
+  exit 0
+}
+
+if (Test-Path -LiteralPath $BinPath) {
+  & $BinPath uninstall --force --unattended
+  if ($LASTEXITCODE -ne 0) { $exitCode = $LASTEXITCODE }
+}
+
+# The CLI performs graceful, ownership-aware cleanup first. Terminate any
+# remaining manually-started proxy or broker before deleting locked files.
+Get-Process -Name 'maximal', 'maximal-mcp-broker' -ErrorAction SilentlyContinue |
+  Stop-Process -Force -ErrorAction SilentlyContinue
+Start-Sleep -Milliseconds 500
+
+$currentPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
+if ($null -eq $currentPath) { $currentPath = '' }
+$normalizedInstallDir = $InstallDir.TrimEnd([char[]]'\')
+$segments = @($currentPath -split ';' | Where-Object {
+  $_ -and $_.Trim().TrimEnd([char[]]'\') -ine $normalizedInstallDir
+})
+$newPath = $segments -join ';'
+if ($newPath -ne $currentPath) {
+  [Environment]::SetEnvironmentVariable('PATH', $newPath, 'User')
+}
+
+Remove-Item -LiteralPath $ArpKey -Recurse -Force -ErrorAction SilentlyContinue
+foreach ($file in @($BrokerPath, $BinPath)) {
+  Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue
+}
+
+$selfPath = $PSCommandPath
+Remove-Item -LiteralPath $selfPath -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $InstallDir -Force -ErrorAction SilentlyContinue
+exit $exitCode
+'@
+  Set-Content -LiteralPath $Path -Value $script -Encoding UTF8
+  Write-Host "  ✓ Installed uninstaller $Path" -ForegroundColor Green
+}
+
 function Register-ArpEntry {
-  param([string]$InstallDir, [string]$ExePath, [string]$Version, [string]$ArpKey)
+  param(
+    [string]$InstallDir,
+    [string]$ExePath,
+    [string]$UninstallerPath,
+    [string]$Version,
+    [string]$ArpKey
+  )
   # Add/Remove Programs entry so `maximal` shows up in
-  # "Apps & features" and uninstall is discoverable — parity with the
-  # MSI's ARP row. UninstallString points at `maximal uninstall`, the
-  # CLI's own teardown (removes PATH + task + files).
+  # "Apps & features" and uninstall is discoverable — parity with the MSI's
+  # ARP row. The helper waits for `maximal uninstall` before deleting the
+  # running CLI itself and the remaining installer-owned state.
   $ver = $Version.TrimStart('v')
+  $uninstall = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$UninstallerPath`""
   New-Item -Path $ArpKey -Force | Out-Null
   Set-ItemProperty -Path $ArpKey -Name 'DisplayName'     -Value 'maximal'
   Set-ItemProperty -Path $ArpKey -Name 'DisplayVersion'  -Value $ver
   Set-ItemProperty -Path $ArpKey -Name 'Publisher'       -Value 'stuffbucket'
   Set-ItemProperty -Path $ArpKey -Name 'InstallLocation' -Value $InstallDir
   Set-ItemProperty -Path $ArpKey -Name 'DisplayIcon'     -Value $ExePath
-  Set-ItemProperty -Path $ArpKey -Name 'UninstallString' -Value "`"$ExePath`" uninstall"
+  Set-ItemProperty -Path $ArpKey -Name 'UninstallString' -Value $uninstall
+  Set-ItemProperty -Path $ArpKey -Name 'QuietUninstallString' -Value $uninstall
   Set-ItemProperty -Path $ArpKey -Name 'NoModify' -Value 1 -Type DWord
   Set-ItemProperty -Path $ArpKey -Name 'NoRepair' -Value 1 -Type DWord
   Write-Host "  ✓ Registered Add/Remove Programs entry" -ForegroundColor Green
@@ -122,6 +202,10 @@ function Register-ArpEntry {
 # ─────────────────────────────────────────────────────────────────────
 # Main flow
 # ─────────────────────────────────────────────────────────────────────
+
+if ((Get-ItemPropertyValue $MsiMarkerKey 'installed' -ErrorAction SilentlyContinue) -eq 1) {
+  throw 'An MSI-managed maximal installation already owns this directory. Uninstall or upgrade it with Windows Installer.'
+}
 
 if (-not $Version) { $Version = Resolve-LatestVersion -Repo $Repo }
 if (-not $Version.StartsWith('v')) { $Version = "v$Version" }
@@ -153,24 +237,33 @@ Download-File -Url $shaUrl -Dest $shaPath
 Verify-Sha256 -File $zipPath -ExpectedSha256File $shaPath
 
 # 2. Best-effort process termination if a previous copy is still up, so
-#    the file lock releases before we overwrite the binary.
-Get-Process -Name 'maximal' -ErrorAction SilentlyContinue | ForEach-Object {
-  $_ | Stop-Process -Force -ErrorAction SilentlyContinue
-}
+#    file locks release before we overwrite either executable.
+Get-Process -Name 'maximal', 'maximal-mcp-broker' -ErrorAction SilentlyContinue |
+  ForEach-Object {
+    $_ | Stop-Process -Force -ErrorAction SilentlyContinue
+  }
 
 # 3. Unpack to install dir ──────────────────────────────────────────
 Write-Host "Unpacking to $InstallDir ..." -ForegroundColor Cyan
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 Expand-Archive -Path $zipPath -DestinationPath $InstallDir -Force
 
-if (-not (Test-Path $BinPath)) {
-  throw "Install failed: $BinPath not present after unpack"
+foreach ($binaryPath in @($BinPath, $BrokerPath)) {
+  if (-not (Test-Path $binaryPath)) {
+    throw "Install failed: $binaryPath not present after unpack"
+  }
+  Write-Host "  ✓ Installed $binaryPath" -ForegroundColor Green
 }
-Write-Host "  ✓ Installed $BinPath" -ForegroundColor Green
 
-# 4. PATH + Add/Remove Programs entry ───────────────────────────────
+# 4. PATH + dedicated PowerShell uninstaller + Add/Remove Programs entry
 Add-UserPath -Dir $InstallDir
-Register-ArpEntry -InstallDir $InstallDir -ExePath $BinPath -Version $Version -ArpKey $ArpKey
+Write-Uninstaller -Path $UninstallerPath
+Register-ArpEntry `
+  -InstallDir $InstallDir `
+  -ExePath $BinPath `
+  -UninstallerPath $UninstallerPath `
+  -Version $Version `
+  -ArpKey $ArpKey
 
 # 5. Cleanup tempdir ────────────────────────────────────────────────
 Remove-Item -LiteralPath $DownloadDir -Recurse -Force -ErrorAction SilentlyContinue

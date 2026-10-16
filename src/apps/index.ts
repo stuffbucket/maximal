@@ -1,6 +1,7 @@
 import type { ArgsDef } from "citty"
 
 import type { AppEntry } from "~/lib/config/settings-types"
+import type { McpClientConfigurator } from "~/lib/mcp-broker/client-sync"
 
 /** The mutation a `maximal app <client>` invocation asks for. `status` is the
  *  default (no flag) — show the client's detect/enabled state without changing
@@ -77,4 +78,8 @@ export interface ClientApp {
    *  status/enable/disable (see `AppCli`). Absent for apps that only need the
    *  generic behaviour. */
   cli?: AppCli
+
+  /** Writes Maximal's brokered MCP endpoints into this client's own MCP
+   *  configuration and reverts them. Absent for clients without MCP support. */
+  mcp?: McpClientConfigurator
 }
