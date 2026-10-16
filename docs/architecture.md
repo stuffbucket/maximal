@@ -63,6 +63,15 @@ See also: `docs/codegen-feedback-loops-practices.md` → Dispatch and review loo
 
 ## Testing gotchas
 
+- **Tests run inside a cross-platform user sandbox.** The global preload
+  overwrites POSIX, XDG, Windows app-data, Maximal, Claude, and temp-directory
+  environment variables before application modules load. It also normalizes
+  Bun's cached `os.homedir()` result and provides the same environment to child
+  processes. Destructive functions must still accept explicit fixture paths;
+  the sandbox is defense in depth. Desktop startup and uninstall never edit
+  shell profiles or PATH registries, and package managers/installers own CLI
+  exposure and removal. See [`dev/testing-strategy.md`](dev/testing-strategy.md)
+  §4.
 - **`mock.module` persists forward across files in a run — now lint-enforced.**
   Bun does not reset module mocks between test files, and CI orders files
   differently than local, so an unrestored mock leaks its stub into a

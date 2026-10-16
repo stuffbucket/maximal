@@ -143,7 +143,6 @@ function renderStaticComposites(): void {
   renderRequirementCallout();
   renderEndpointHint();
   renderLogsCopy();
-  renderUninstallCopy();
   renderGhReuseSub();
 }
 
@@ -261,22 +260,6 @@ function renderLogsCopy(): void {
   fillWithNode(hint, "logs-where-hint", "tailCmd", monoCode("tail -F"));
 }
 
-/** Uninstall card copy: the intro hint (with a `maximal` <code> token) and the
- *  terminal hint (with a `maximal uninstall` <code> command). */
-function renderUninstallCopy(): void {
-  const hint = document.querySelector<HTMLElement>('[data-field="uninstall_hint"]');
-  fillWithNode(hint, "uninstall-hint", "cliName", monoCode("maximal"));
-  const terminal = document.querySelector<HTMLElement>(
-    '[data-field="uninstall_terminal_hint"]',
-  );
-  fillWithNode(
-    terminal,
-    "uninstall-terminal-hint",
-    "uninstallCmd",
-    monoCode("maximal uninstall"),
-  );
-}
-
 function wireLogs(): void {
   const revealLogs = () => {
     void safeInvoke("reveal_logs_dir");
@@ -367,7 +350,7 @@ async function runInAppUninstall(): Promise<void> {
   // it can't surface the CLI's refuse-while-apps-enabled prompt, so it disables
   // + reverts every app integration through the registry. So "reverts app
   // integrations" is always part of the summary, not an opt-in.
-  const clauses = [t("uninstall-clause-cli"), t("uninstall-clause-integrations")];
+  const clauses = [t("uninstall-clause-integrations")];
   if (purge) clauses.push(t("uninstall-clause-purge"));
   // The connector ("…, and X") is a catalog term, not a hardcoded ", and " —
   // so a language that joins lists differently can override it.
@@ -389,7 +372,7 @@ async function runInAppUninstall(): Promise<void> {
     // generic message in plain-browser (app:ui, no Tauri host). Surface it
     // inline rather than leaving the user with no feedback.
     console.warn("invoke(uninstall_maximal) failed:", err);
-    setUninstallError(t("uninstall-err", { error: String(err) }));
+    setUninstallError(String(err));
   } finally {
     setBusy(false);
   }

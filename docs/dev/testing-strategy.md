@@ -1,7 +1,7 @@
 # Testing Strategy — maximal
 
 **Status:** Living document, prepared for external review.
-**Last updated:** 2026-07-09.
+**Last updated:** 2026-10-16.
 **Audience:** professional software-testing reviewers, plus contributors who
 need one place that describes how this project verifies itself.
 
@@ -128,33 +128,47 @@ Bun version delta can change test outcomes.
 
 ## 4. Test isolation & safety
 
-Two global safeguards are registered via `bunfig.toml`'s `[test] preload`
-(`tests/test-setup.ts`), applied before any module loads:
+The global preload registered in `bunfig.toml` (`tests/test-setup.ts`) creates a
+unique temporary user sandbox before importing any application module. It
+unconditionally redirects inherited host paths through the standard variables
+used across supported platforms:
 
-1. **Credential isolation.** `COPILOT_API_HOME` is redirected to a throwaway
-   temp directory so `paths.ts` resolves `APP_DIR`, `ACCOUNTS_PATH`,
-   `GITHUB_TOKEN_PATH`, and logs into temp. Without this, any test that reaches
-   the real registry/token helpers would read and **write the developer's real
-   sign-in state** — which has corrupted real credentials during test runs in
-   the past. A test may set its own `COPILOT_API_HOME` and it wins.
-2. **Generated-stub guarantee.** The gitignored `src/generated/ui-embed.ts`
-   stub is force-created (empty) before any module imports it, so a fresh
-   `git worktree` (which never ran `bun install`) doesn't fail server-boot
-   tests with an opaque missing-module error. The stub is forced *empty* so a
-   stray local build that populated the real embed can't make UI-route tests
-   serve the embedded UI instead of their fixture dir.
+- POSIX home: `HOME`
+- Windows home and app data: `USERPROFILE`, `HOMEDRIVE`, `HOMEPATH`,
+  `APPDATA`, `LOCALAPPDATA`
+- XDG data: `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME`,
+  `XDG_STATE_HOME`
+- application state: `COPILOT_API_HOME`, `CLAUDE_CONFIG_DIR`
+- tool-manager state: `MISE_CONFIG_DIR`, `MISE_DATA_DIR`, `MISE_CACHE_DIR`,
+  `MISE_STATE_DIR`
+- temporary files: `TMPDIR`, `TMP`, `TEMP`
 
-Additionally the preload resets `consola.level` to Info (3) before every test,
-because some tests raise verbosity and don't restore it, leaking flooding debug
-output into later tests.
+Every value is created beneath the same sandbox root. The preload fails closed
+if any configured path escapes it. Bun caches `os.homedir()` before preloads
+run, so the test helper also makes that test-process accessor return the
+sandboxed home; child processes receive the same contained environment through
+`sandboxEnv()`. This protects credentials, client configuration, shell files,
+and platform app data instead of isolating only Maximal's token directory.
+Inherited production paths are deliberately overwritten, not respected.
 
-The preload also registers the **outermost `afterEach(() => mock.restore())`**
-(`tests/test-setup.ts`): a defense-in-depth net that restores every `spyOn` spy
-after each test. It runs last — after any file's own `afterEach` — so a spy a
-file forgot to restore can't leak. A leaked `spyOn` permanently patches the real
-method for every later file in the Bun worker (the spy analog of the
-`mock.module` leak; see §5.2). It does **not** undo `mock.module` — that is
-restored per-file (§5.1).
+This sandbox is **defense in depth**, not permission for destructive code to
+rely on ambient state. Filesystem-changing functions must still accept explicit
+path or home-directory injection, and their tests must pass fixture paths. The
+desktop app and `maximal uninstall` do not edit shell profiles or PATH
+registries. Package managers and platform installers own CLI exposure and its
+removal.
+
+The preload also provides three suite-wide safeguards:
+
+1. The gitignored `src/generated/ui-embed.ts` stub is force-created (empty)
+   before any module imports it, so a fresh `git worktree` does not fail
+   server-boot tests with an opaque missing-module error. Forcing it empty keeps
+   a stray local UI build from changing route-test behavior.
+2. `consola.level` is reset to Info (3) before every test because some tests
+   raise verbosity and otherwise leak debug output into later tests.
+3. The outermost `afterEach(() => mock.restore())` restores every `spyOn` spy
+   after each test. It does **not** undo `mock.module`; that remains a per-file
+   responsibility (§5.1).
 
 **Shared fixtures/helpers** live in `tests/helpers/` (`fake-executor.ts`,
 `auth-flow-utils.ts`, `auth-status.ts`). Preference order for test doubles:
@@ -183,9 +197,9 @@ This bit the project **four times** (culminating in a long #229 debugging loop).
   next file's static imports on CI — so a mock of a *shared* module still leaks.
   The rule catches the common footgun, not this one.
 - **Durable fix: don't mock a shared module across files.** Prefer the **real**
-  module — the preload redirects `COPILOT_API_HOME` to a temp dir and
-  `getClaudeCodeSettingsPath()` honors `CLAUDE_CONFIG_DIR`, so config/settings
-  round-trips are already isolated — or **injectable function options**. Only
+  module — the preload redirects the complete user environment (§4), so
+  config/settings round-trips are already isolated — or **injectable function
+  options**. Only
   stub a module with no env/injection seam, keep the wrapper behaviorally
   identical (`...actual` / forward `...rest`), and prove with a sequential-import
   repro that it can't break a later file.

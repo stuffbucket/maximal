@@ -1,5 +1,9 @@
 # Repo cleanup — 2026-05
 
+> **Historical:** The PATH approach below is superseded. Maximal no longer edits
+> shell profiles or installs a terminal command from the macOS app; Homebrew owns
+> CLI installation.
+
 One PR. Disjoint work units so subagents in parallel worktrees don't
 collide. Each unit is independently revertible.
 
