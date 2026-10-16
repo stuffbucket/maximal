@@ -163,6 +163,20 @@ describe("Work IQ locate across install methods", () => {
   })
 })
 
+describe("Work IQ install hint", () => {
+  test("uses mise when mise manages tools here, npm otherwise", () => {
+    const mise = tempDir()
+    fs.mkdirSync(path.join(mise, "installs"))
+    expect(workiq.install({ ...base, miseDataDir: mise }).command).toBe(
+      "mise use -g npm:@microsoft/workiq",
+    )
+    expect(
+      workiq.install({ ...base, miseDataDir: path.join(mise, "absent") })
+        .command,
+    ).toBe("npm install -g @microsoft/workiq")
+  })
+})
+
 describe("listMcpCatalog", () => {
   test("offers catalog servers not added yet, with their status", () => {
     const mise = tempDir()
