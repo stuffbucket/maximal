@@ -1,0 +1,33 @@
+# Vendored replacement for jdx/mise-action.
+#
+# Internal MS GitHub Actions environments reject non-MS/GitHub-sourced
+# actions, so install the pinned official mise release through mise.run.
+
+name: Setup mise
+description: Install mise and add it to PATH
+
+inputs:
+  mise-version:
+    description: Exact mise release to install.
+    required: false
+    default: v2026.9.5
+
+runs:
+  using: composite
+  steps:
+    - name: Install mise
+      shell: bash
+      env:
+        MISE_VERSION: ${{ inputs.mise-version }}
+      run: |
+        set -euo pipefail
+        mkdir -p "$HOME/.local/bin"
+        curl -fsSL https://mise.run \
+          | MISE_VERSION="$MISE_VERSION" MISE_INSTALL_PATH="$HOME/.local/bin/mise" sh
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+    - name: Verify mise
+      shell: bash
+      run: |
+        export PATH="$HOME/.local/bin:$PATH"
+        mise --version

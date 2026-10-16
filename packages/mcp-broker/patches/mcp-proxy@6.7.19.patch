@@ -1,0 +1,127 @@
+diff --git a/src/index.ts b/src/index.ts
+index 75bcd01233795fb1a6afc5936f87ec75072d9111..a2ea76fbeabed0f14f6f36cc0cc31aefdcb40dd4 100644
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -6,6 +6,7 @@ export { proxyServer } from "./proxyServer.js";
+ export type {
+   CorsOptions,
+   EventStoreOption,
++  HTTPServerAddress,
+   ListenSubscriptionsHandler,
+   MaxBodySizeOption,
+   SSEServer,
+diff --git a/src/startHTTPServer.test.ts b/src/startHTTPServer.test.ts
+index 8d36da8db04111ec701206f5aea7003dd5b1d614..0df3a036e26f5adb2ba242c121039baa6652aa84 100644
+--- a/src/startHTTPServer.test.ts
++++ b/src/startHTTPServer.test.ts
+@@ -23,6 +23,25 @@ if (!("EventSource" in global)) {
+   global.EventSource = EventSource;
+ }
+ 
++it("returns the selected TCP address when binding to port zero", async () => {
++  const listener = await startHTTPServer({
++    createServer: async () =>
++      new Server(
++        { name: "test", version: "1.0.0" },
++        { capabilities: {} },
++      ),
++    host: "127.0.0.1",
++    port: 0,
++  });
++
++  try {
++    expect(listener.address.address).toBe("127.0.0.1");
++    expect(listener.address.port).toBeGreaterThan(0);
++  } finally {
++    await listener.close();
++  }
++});
++
+ it("rejects when the HTTP listener cannot bind", async () => {
+   const blocker = net.createServer();
+   await new Promise<void>((resolve, reject) => {
+diff --git a/src/startHTTPServer.ts b/src/startHTTPServer.ts
+index ba73de28c4339aaec8f281e78ded11985f2f196f..9c96e54746be69661288c5e42db1b16784f0ba8f 100644
+--- a/src/startHTTPServer.ts
++++ b/src/startHTTPServer.ts
+@@ -171,7 +171,14 @@ export interface CorsOptions {
+   origin?: ((origin: string) => boolean) | string | string[];
+ }
+ 
++export type HTTPServerAddress = {
++  address: string;
++  family: string;
++  port: number;
++};
++
+ export type SSEServer = {
++  address: HTTPServerAddress;
+   close: () => Promise<void>;
+   /**
+    * Publishes a change event to every open 2026-07-28 `subscriptions/listen`
+@@ -2280,7 +2287,22 @@ export const startHTTPServer = async <T extends ServerLike>({
+     throw error;
+   }
+ 
++  const address = httpServer.address();
++  if (!address || typeof address === "string") {
++    await new Promise<void>((resolve) => httpServer.close(() => resolve()));
++    if (sessionReaper) {
++      clearInterval(sessionReaper);
++    }
++
++    throw new Error("HTTP server did not expose a TCP listener address");
++  }
++
+   return {
++    address: {
++      address: address.address,
++      family: address.family,
++      port: address.port,
++    },
+     close: async () => {
+       if (sessionReaper) {
+         clearInterval(sessionReaper);
+diff --git a/dist/index.d.mts b/dist/index.d.mts
+--- a/dist/index.d.mts
++++ b/dist/index.d.mts
+@@ -134,7 +134,13 @@ interface CorsOptions {
+   methods?: string[];
+   origin?: ((origin: string) => boolean) | string | string[];
+ }
++type HTTPServerAddress = {
++  address: string;
++  family: string;
++  port: number;
++};
+ type SSEServer = {
++  address: HTTPServerAddress;
+   close: () => Promise<void>;
+   /**
+    * Publishes a change event to every open 2026-07-28 `subscriptions/listen`
+@@ -438,2 +444,2 @@ declare const getUpstreamBridge: ({
+ //#endregion
+-export { type AuthConfig, AuthenticationMiddleware, type CorsOptions, DEFAULT_ALLOWED_HEADERS, type EventStoreOption, InMemoryEventStore, type InMemoryEventStoreOptions, type ListenSubscriptionsHandler, type MaxBodySizeOption, type SSEServer, ServerType, type UpstreamBridge, type UpstreamLease, type UpstreamNotificationSink, type UpstreamProtocol, acquireListenSubscriptions, getUpstreamBridge, proxyServer, resolveVersionNegotiation, startHTTPServer, startStdioServer, tapTransport };
++export { type AuthConfig, AuthenticationMiddleware, type CorsOptions, DEFAULT_ALLOWED_HEADERS, type EventStoreOption, type HTTPServerAddress, InMemoryEventStore, type InMemoryEventStoreOptions, type ListenSubscriptionsHandler, type MaxBodySizeOption, type SSEServer, ServerType, type UpstreamBridge, type UpstreamLease, type UpstreamNotificationSink, type UpstreamProtocol, acquireListenSubscriptions, getUpstreamBridge, proxyServer, resolveVersionNegotiation, startHTTPServer, startStdioServer, tapTransport };
+diff --git a/dist/startStdioServer-DHm0KcPu.mjs b/dist/startStdioServer-DHm0KcPu.mjs
+--- a/dist/startStdioServer-DHm0KcPu.mjs
++++ b/dist/startStdioServer-DHm0KcPu.mjs
+@@ -19853,7 +19853,18 @@ const startHTTPServer = async ({ apiKey, authenticate, cors = true, createServer
+ 		if (sessionReaper) clearInterval(sessionReaper);
+ 		throw error;
+ 	}
++	const address = httpServer.address();
++	if (!address || typeof address === "string") {
++		await new Promise((resolve) => httpServer.close(() => resolve()));
++		if (sessionReaper) clearInterval(sessionReaper);
++		throw new Error("HTTP server did not expose a TCP listener address");
++	}
+ 	return {
++		address: {
++			address: address.address,
++			family: address.family,
++			port: address.port
++		},
+ 		close: async () => {
+ 			if (sessionReaper) clearInterval(sessionReaper);
+ 			for (const transport of Object.values(activeSSETransports)) await transport.close();

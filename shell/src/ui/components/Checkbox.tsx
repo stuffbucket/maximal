@@ -8,7 +8,7 @@
 // checkbox invisible" inversion. Wrapper class `.checkbox` defined
 // in styles.css owns the visual; the input itself is the spread
 // landing site for `disabled`, `aria-label`, `onKeyDown`, etc.
-import type { InputHTMLAttributes } from "react";
+import { type InputHTMLAttributes, useEffect, useRef } from "react";
 
 interface CheckboxProps
   extends Omit<InputHTMLAttributes<HTMLInputElement>, "type" | "checked" | "onChange"> {
@@ -16,6 +16,9 @@ interface CheckboxProps
   onCheckedChange: (next: boolean) => void;
   label?: string;
   hideLabel?: boolean;
+  /** Mixed state for an "all" box over a partly-checked group. A DOM
+   *  property, not an attribute, so it's set through a ref. */
+  indeterminate?: boolean;
 }
 
 export function Checkbox({
@@ -23,11 +26,18 @@ export function Checkbox({
   onCheckedChange,
   label,
   hideLabel = true,
+  indeterminate = false,
   className,
   ...rest
 }: CheckboxProps): JSX.Element {
+  const ref = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = indeterminate;
+  }, [indeterminate]);
+
   const input = (
     <input
+      ref={ref}
       type="checkbox"
       className={["checkbox", className].filter(Boolean).join(" ")}
       checked={checked}

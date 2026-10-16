@@ -6,6 +6,7 @@
 
   "nav-account": "Учётная запись",
   "nav-apps": "Приложения",
+  "nav-mcp": "Серверы MCP",
   "nav-endpoint": "Endpoint",
   "nav-api-clients": "Ключи API",
   "nav-models": "Модели",
@@ -111,6 +112,9 @@
 
   "apps-title": "Приложения",
   "apps-sub": "Настройка в один клик для инструментов, которые взаимодействуют с Maximal. Включите приложение, и мы направим его на прокси за вас.",
+
+  "mcp-title": "Серверы MCP",
+  "mcp-sub": "Делитесь серверами инструментов, например Work IQ, с вашими приложениями. Включите сервер и выберите, какие приложения его получат; выключите — и мы его уберём.",
 
   "endpoint-title": "Endpoint",
   "endpoint-sub": "Где слушает Maximal. Используйте эти значения при настройке инструмента, которого нет в списке приложений.",
@@ -220,6 +224,11 @@
   "dashboard-quota-unlimited": "Без ограничений",
   "dashboard-quota-percent-used": "Использовано {percent} %",
   "dashboard-quota-remaining": "осталось {n}",
+  "dashboard-quota-resets": "Сброс {date}",
+  "dashboard-quota-period-ended": "Период закончился {date}",
+  "dashboard-quota-as-of": "Данные на {time}",
+  "dashboard-rate-per-minute": "{n} токенов/мин",
+  "dashboard-rate-sparkline-label": "Токенов в минуту за последние 15 минут",
 
   "dashboard-api-response-title": "Ответ API использования",
 
@@ -305,6 +314,9 @@
   "native-notify-rejection-title": "Maximal",
   "native-notify-rejection-body": "Вышестоящий запрос Copilot был отклонён. Откройте Настройки для получения деталей.",
   "native-notify-rejection-body-detail": "{message} — откройте Настройки для получения деталей.",
+  "native-notify-working-title": "Maximal работает",
+  "native-notify-working-body": "Ваш первый запрос только что прошёл.",
+  "native-notify-working-body-apps": "Запросы проходят: {apps} теперь может использовать Maximal.",
 
   "native-quit-title": "Выйти из Maximal?",
   "native-quit-body": "Maximal остановится, и все открытые окна Настроек закроются.",

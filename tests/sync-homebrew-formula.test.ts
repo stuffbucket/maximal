@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test"
 import fs from "node:fs"
+import { resolve } from "node:path"
 
 import {
   parseSha256File,
@@ -44,7 +45,10 @@ describe("parseSha256File", () => {
 })
 
 describe("renderFormula", () => {
-  const template = fs.readFileSync("build/homebrew/maximal.rb", "utf8")
+  const template = fs.readFileSync(
+    resolve(import.meta.dir, "../build/homebrew/maximal.rb"),
+    "utf8",
+  )
 
   it("substitutes every placeholder in the shipped template", () => {
     const out = renderFormula(template, {
@@ -70,6 +74,11 @@ describe("renderFormula", () => {
     // formula MUST have.
     expect(out).toMatch(/^class Maximal < Formula$/m)
     expect(out).toMatch(/^\s*def install$/m)
+    expect(out).toContain('bin.install "maximal"')
+    expect(out).toContain('bin.install "maximal-mcp-broker"')
+    expect(out).toContain(
+      'assert_predicate bin/"maximal-mcp-broker", :executable?',
+    )
     expect(out).toMatch(/^\s*service do$/m)
     expect(out).toMatch(/^\s*test do$/m)
     expect(out).toMatch(/^end$/m)

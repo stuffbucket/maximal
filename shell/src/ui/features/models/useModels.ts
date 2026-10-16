@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { apiCall } from "../../../proxy/client";
+import { type Problem, describeProblem, withRetry } from "../../problems";
 import type {
   ModelsListResponse,
   ModelSummary,
@@ -20,7 +21,9 @@ interface UseModels {
   loadedAt: string | null;
   isLoading: boolean;
   isRefreshing: boolean;
-  error: string | null;
+  /** Still failing after automatic retries. A failed refresh keeps the
+   *  stale list visible underneath. */
+  problem: Problem | null;
   refresh: () => Promise<void>;
 }
 
@@ -40,19 +43,21 @@ export function useModels(): UseModels {
   const [loadedAt, setLoadedAt] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [problem, setProblem] = useState<Problem | null>(null);
 
   const load = useCallback(async () => {
-    const result = await apiCall({
-      kind: "models-list",
-      method: "GET",
-      path: "/settings/api/models",
-    });
+    const result = await withRetry(() =>
+      apiCall({
+        kind: "models-list",
+        method: "GET",
+        path: "/settings/api/models",
+      }),
+    );
     if (result.ok) {
       applyResult(result.data, { setModels, setLoadedAt });
-      setError(null);
+      setProblem(null);
     } else {
-      setError(result.error);
+      setProblem(describeProblem(result, { subject: "the model list" }));
     }
     setIsLoading(false);
   }, []);
@@ -73,20 +78,26 @@ export function useModels(): UseModels {
 
   const refresh = useCallback(async () => {
     setIsRefreshing(true);
-    const result = await apiCall({
-      kind: "models-refresh",
-      method: "POST",
-      path: "/settings/api/models/refresh",
-    });
+    // The refresh goes through to GitHub Copilot; its errors mean different
+    // things (not signed in, rate limited) than a local failure.
+    const result = await withRetry(() =>
+      apiCall({
+        kind: "models-refresh",
+        method: "POST",
+        path: "/settings/api/models/refresh",
+      }),
+    );
     if (result.ok) {
       applyResult(result.data, { setModels, setLoadedAt });
-      setError(null);
+      setProblem(null);
     } else {
       // Keep the stale list visible; surface why the refresh failed.
-      setError(result.error);
+      setProblem(
+        describeProblem(result, { subject: "the model list", upstream: true }),
+      );
     }
     setIsRefreshing(false);
   }, []);
 
-  return { models, loadedAt, isLoading, isRefreshing, error, refresh };
+  return { models, loadedAt, isLoading, isRefreshing, problem, refresh };
 }

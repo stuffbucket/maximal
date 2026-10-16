@@ -13,11 +13,14 @@ import type { AuthStatus, EventSubscription, UpstreamRejection } from "./proxy/c
 import { apiCall, subscribeAuthEvents } from "./proxy/client";
 import { mountApiClients } from "./ui/islands/api-clients-island";
 import { mountApps } from "./ui/islands/apps-island";
+import { mountMcp } from "./ui/islands/mcp-island";
 import { mountModels } from "./ui/islands/models-island";
+import { waitForSidecarBack } from "./ui/restart";
 
 type SectionId =
   | "account"
   | "apps"
+  | "mcp"
   | "endpoint"
   | "api-clients"
   | "models"
@@ -27,6 +30,7 @@ type SectionId =
 const SECTIONS: ReadonlyArray<SectionId> = [
   "account",
   "apps",
+  "mcp",
   "endpoint",
   "api-clients",
   "models",
@@ -452,15 +456,6 @@ function wireEndpoint(): void {
     });
 }
 
-function applyTheme(): void {
-  const root = document.documentElement;
-  if (root.dataset.theme) return;
-  const prefersLight =
-    window.matchMedia &&
-    window.matchMedia("(prefers-color-scheme: light)").matches;
-  root.dataset.theme = prefersLight ? "light" : "dark";
-}
-
 // ---- Diagnostics section ---------------------------------------------------
 
 function formatUptime(ms: number): string {
@@ -593,7 +588,7 @@ async function loadDiagnostics(): Promise<void> {
   });
   root.setAttribute("aria-busy", "false");
   if (!result.ok) {
-    setDiagnosticsError(t("diagnostics-err-load", { error: result.error }));
+    setDiagnosticsError(t("diagnostics-err-load", { error: apiErrorMessage(result.error) }));
     return;
   }
   lastDiagnostics = result.data;
@@ -1838,27 +1833,6 @@ async function signOut(): Promise<void> {
   }
 }
 
-/** Poll auth-status until the sidecar responds again (it's down mid-reboot),
- *  up to `timeoutMs`. Used to keep the busy indicator honest across a restart
- *  without changing what's rendered. */
-async function waitForSidecarBack(timeoutMs: number): Promise<void> {
-  const deadlineMs = Date.now() + timeoutMs;
-  let sawDown = false;
-  while (Date.now() < deadlineMs) {
-    await new Promise((resolve) => setTimeout(resolve, 800));
-    const poll = await apiCall({
-      kind: "auth-status",
-      method: "GET",
-      path: "/settings/api/auth/github/status",
-    });
-    if (!poll.ok) {
-      sawDown = true; // restarting
-      continue;
-    }
-    if (sawDown) return; // went down and came back → reboot complete
-  }
-}
-
 /**
  * Shared sign-out path used by both the explicit "Sign out" button and
  * the "Sign in as a different account" affordance. Returns true on
@@ -2004,7 +1978,6 @@ function wireAccount(): void {
 }
 
 window.addEventListener("DOMContentLoaded", () => {
-  applyTheme();
   applyI18n();
   // Sentences that embed a link/CLI token or a plural count aren't [data-i18n]
   // (they carry live DOM children); render them explicitly after the sweep.
@@ -2017,6 +1990,7 @@ window.addEventListener("DOMContentLoaded", () => {
   wireUninstall();
   mountApiClients();
   mountApps();
+  mountMcp();
   mountModels();
   wireNav();
   syncFromHash();
@@ -2033,6 +2007,9 @@ window.addEventListener("hashchange", () => {
   if (section === "diagnostics") void loadDiagnostics();
   if (section === "apps") {
     window.dispatchEvent(new CustomEvent("maximal:apps-refresh"));
+  }
+  if (section === "mcp") {
+    window.dispatchEvent(new CustomEvent("maximal:mcp-refresh"));
   }
   if (section === "models") {
     window.dispatchEvent(new CustomEvent("maximal:models-refresh"));

@@ -17,6 +17,7 @@
     "@stryker-mutator/command-runner"
   ],
   "ignoreBinaries": [
+    "mise",
     "trufflehog"
   ],
   "ignoreExportsUsedInFile": true,

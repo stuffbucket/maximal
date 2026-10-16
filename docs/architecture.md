@@ -31,7 +31,7 @@ This is a local proxy that exposes the GitHub Copilot API as both an OpenAI-comp
 
 ## Middleware stack (in order)
 
-`traceIdMiddleware` → `logger()` → `cors()` → `createAuthMiddleware` (API key validation via `x-api-key` or `Authorization: Bearer`; unauthenticated paths: `/`, `/ui/*`)
+`traceIdMiddleware` → `logger()` → `cors()` → `createAuthMiddleware` (API key validation via `x-api-key` or `Authorization: Bearer`; unauthenticated paths: `/`, `/ui/*`; `/mcp/*` authenticates in its own route)
 
 ## Model routing
 
@@ -113,7 +113,128 @@ See also: `docs/codegen-feedback-loops-practices.md` → Dispatch and review loo
 
 ## Tauri shell
 
-`shell/` is a Tauri 2 menu-bar app that wraps the proxy for non-CLI users. `bun run app:sidecar` builds the UI (`bun run build:ui`), regenerates the embed manifest, and compiles the standalone proxy binary into `shell/src-tauri/binaries/`. Tauri launches it as a sidecar bound to `127.0.0.1:4141`. The settings (React, Bun-bundled) and dashboard (vanilla) UIs live in `shell/ui/{settings,dashboard}` and are **embedded in the sidecar binary**, served by the proxy at `/ui/settings` and `/ui/dashboard` (`src/routes/ui/route.ts`) — from `shell/dist` on disk in dev, from `$bunfs` in the compiled binary. The webview windows point at those `/ui/*` URLs; legacy `/settings` and `/usage-viewer` 301-redirect to them. No Vite — Bun is the bundler.
+`shell/` is a Tauri 2 menu-bar app that wraps the proxy for non-CLI users. `bun run app:sidecar` builds the UI (`bun run build:ui`), regenerates the embed manifest, and compiles both the standalone proxy and isolated MCP broker into `shell/src-tauri/binaries/`. Tauri launches only the proxy as a sidecar bound to `127.0.0.1:4141`; the proxy supervises the packaged broker. The settings (React, Bun-bundled) and dashboard (vanilla) UIs live in `shell/ui/{settings,dashboard}` and are **embedded in the sidecar binary**, served by the proxy at `/ui/settings` and `/ui/dashboard` (`src/routes/ui/route.ts`) — from `shell/dist` on disk in dev, from `$bunfs` in the compiled binary. The webview windows point at those `/ui/*` URLs; legacy `/settings` and `/usage-viewer` 301-redirect to them. No Vite — Bun is the bundler.
+
+## Isolated MCP broker
+
+The optional MCP broker is a separate compiled process under
+`packages/mcp-broker/`. The Bun/Hono sidecar remains the only supervisor; Tauri
+continues to supervise only the sidecar. `runServer` starts the broker supervisor
+after the ordinary HTTP listener is bound and never awaits broker readiness, so
+broker startup failure, restart backoff, malformed IPC, and heartbeat timeout do
+not gate or terminate normal Maximal service.
+
+The sidecar and broker use versioned 4-byte big-endian length-prefixed JSON over
+the broker's stdin/stdout. Frames, UTF-8, JSON, operations, generations, and
+sequences are bounded and validated. A ready generation listens on a private
+kernel-selected `127.0.0.1` port and requires a random per-generation key that
+it receives over IPC. The key is never put on a command line or written to
+disk; the sidecar keeps the port and key in memory and withdraws them before
+restart or shutdown.
+
+Clients use the stable main-port address `http://127.0.0.1:<port>/mcp/<id>`
+(`src/routes/mcp/route.ts`). The route accepts loopback peers only, rejects a
+foreign `Origin`, and authenticates with the endpoint's own `apiKey` when one is
+configured, otherwise with the normal main-port rules (`auth.enforce`,
+`auth.apiKeys`, `auth.apiKeyEntries`). It then streams the request to the
+broker with the internal key. Every MCP session runs its own instance of the
+endpoint's server (spawned on `initialize`, stopped when the session ends), so
+parallel clients behave as if each ran it themselves; `limits.sessions`
+(default 8) caps them, and a session past the cap gets a 503 that says so. A
+missing or restarting broker returns 503; an unreachable one 502. Concurrency and declared body size are bounded, and only
+the wait for response headers is timed, so SSE streams stay open.
+
+`maximal-mcp-broker stdio-adapter --url http://127.0.0.1:<port>/mcp/<id>` lets a
+local stdio MCP client reach one endpoint; it reads an optional key from
+`MAXIMAL_MCP_API_KEY`.
+
+Endpoints are added, toggled, and removed from Settings → MCP servers or
+`maximal mcp <id> --add/--enable/--disable/--remove` (`src/apps/mcp.ts`).
+
+Known servers come from a small catalog (`src/lib/mcp-broker/catalog.ts`;
+Work IQ first). Each entry finds the server's own executable and offers it
+under "Available to add", or shows its install command when it isn't
+found. A GUI-launched sidecar has launchd's minimal PATH, so detection
+records an absolute path to the native executable inside the npm package
+(mise install, PATH symlink, or npm global prefix), not a bare name, a mise
+shim, or an npm launcher that needs `node`. When several installs exist,
+the highest version wins. Adding asks the user to confirm and writes the
+endpoint off, with `catalog` set. The path contains the package version and
+package managers keep old versions after an upgrade, so Maximal re-reads
+where the newest install is before every request that opens a session (no
+`mcp-session-id`) on a catalog endpoint, as well as at boot, on every
+Settings list, and on every `maximal mcp` run. The next instance (say, after
+an idle session was closed) therefore runs the upgrade; an uninstalled
+server keeps its last path. The CLI can also add any stdio
+server given after `--`, as an absolute path. Removing deletes the
+endpoint from `config.json` first and then syncs clients: the desired
+entries come from `servers`, while what Maximal owns stays recorded per
+app, so exactly Maximal's entries come out. Turning one on asks which client apps
+should get it; the choice is kept in `mcpBroker.servers[].clients` even while
+the endpoint is off, so turning it back on pre-selects it. Each Claude
+integration exposes an MCP configurator on its `ClientApp` (`mcp`), and the
+shared sync (`src/lib/mcp-broker/client-sync.ts`) decides what each client
+should have: endpoints that are on, chose that client, while Maximal's
+integration for it is on. What Maximal actually wrote is recorded in
+`apps.<client>.mcpServers`, so every change reverts exactly:
+
+- endpoint off → removed from every client;
+- client integration off → its MCP entries removed; back on → restored;
+- a same-name entry the user already had is never touched (reported as
+  skipped), and an owned entry the user edited is forgotten, not deleted.
+
+Entries are generated by Maximal, not copied from the MCP server:
+
+- **Claude Desktop** (`src/apps/claude-desktop/mcp.ts`): a stdio adapter entry
+  in the Claude-3p `claude_desktop_config.json`, key in `env`.
+- **Claude Code** (`src/apps/claude-code/mcp.ts`): a user-scope HTTP entry to
+  `/mcp/<id>`. Added and removed with the `claude` CLI so Claude Code writes its
+  own `~/.claude.json`; the CLI only ever sees a SHA-256 placeholder header, and
+  Maximal then swaps in the real key with one verified atomic edit of that
+  header. Keys stay out of process arguments; the client files hold them under
+  normal filesystem protection, like their other credentials.
+
+Entry URLs use the port the proxy is listening on (`src/lib/start/proxy-port.ts`):
+the server records it at boot, in-process and in its session sentinel, so the
+CLI addresses the same instance. Ownership matches Maximal's `/mcp/<id>` URL on
+any loopback port, so after a port change the entry is rewritten rather than
+mistaken for the user's; `/_internal/reload` also re-syncs entries from the
+server.
+
+Maximal-written entries exist only while Maximal runs: shutdown (and the
+`exit` safety net) removes them from both apps with direct file edits, since
+spawning `claude` doesn't fit the 2.5s shutdown budget, and boot re-adds them
+from the recorded choices. Boot sync runs when `config.json` has an
+`mcpBroker` section.
+
+When an endpoint is turned on and an app already has its own stdio entry with
+that id (Claude Code user scope, or Claude Desktop's Claude-3p or regular
+config), Maximal copies that entry's command, args, working directory, and
+non-secret environment into the endpoint once, so the broker runs the same
+server. The app's own entry stays untouched; secret-looking environment names
+are not copied and are reported. Maximal's own adapter is never adopted.
+
+Config changes reach the in-process broker one of three ways
+(`reconfigureBroker`): nothing, when only endpoints that are off or the
+apps an endpoint goes to changed; a live `update` control message, when
+only how a new session's instance starts changed (command, args, working
+directory, environment, timeouts, session cap), which new sessions pick up
+while running ones keep their instance; otherwise a restart. The broker
+re-checks an `update` and answers `RESTART_REQUIRED` if the endpoints or
+how they're served (protocol, interaction, ownership, body limit) differ,
+and the supervisor then restarts it. The control protocol is versioned
+(`CONTROL_PROTOCOL_VERSION`, 2 since `update`); a sidecar and broker from
+different builds fail the first frame rather than half-work. The CLI, which has no broker, calls the
+running server's loopback-only `POST /_internal/reload`, which re-reads
+`config.json` and restarts the broker if needed, so no restart is required. External MCP commands,
+including Work IQ when configured, remain separately installed programs;
+Maximal does not redistribute them or own their authentication state.
+
+On POSIX, each broker generation is a detached process group. Graceful shutdown
+is bounded and followed by exact-group `SIGKILL`, including descendants. Windows
+currently fails closed because kill-on-close Job Object containment is not
+implemented. Public `/status` exposes only coarse broker state and
+enabled-endpoint count.
 
 ## Token counting
 

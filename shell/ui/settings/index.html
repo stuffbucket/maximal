@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -80,6 +80,9 @@
             </li>
             <li>
               <a class="nav__item" href="#apps" data-nav="apps" data-i18n="nav-apps"></a>
+            </li>
+            <li>
+              <a class="nav__item" href="#mcp" data-nav="mcp" data-i18n="nav-mcp"></a>
             </li>
             <li>
               <a class="nav__item" href="#endpoint" data-nav="endpoint" data-i18n="nav-endpoint"></a>
@@ -471,6 +474,16 @@
             <div id="apps-root"></div>
           </section>
 
+          <!-- MCP SERVERS -->
+          <section class="section" data-section="mcp" hidden>
+            <header class="section__head">
+              <h2 class="section__title" data-i18n="mcp-title"></h2>
+              <p class="section__sub" data-i18n="mcp-sub"></p>
+            </header>
+
+            <div id="mcp-root"></div>
+          </section>
+
           <!-- ENDPOINT -->
           <section class="section" data-section="endpoint" hidden>
             <header class="section__head">
@@ -627,6 +640,35 @@
               <p class="section__sub" data-i18n="diagnostics-sub"></p>
             </header>
 
+            <!-- Load failure: a banner across the top of the section, same
+                 .callout shape as the React islands (components/Callout.tsx).
+                 Shown/filled by setDiagnosticsError() in main.ts. -->
+            <div
+              class="callout callout--error"
+              data-diagnostics-error
+              hidden
+              role="alert"
+            >
+              <span class="callout__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
+                  <line x1="12" y1="9" x2="12" y2="13" />
+                  <line x1="12" y1="17" x2="12.01" y2="17" />
+                </svg>
+              </span>
+              <div class="callout__text">
+                <p class="callout__detail" data-error-message></p>
+              </div>
+              <div class="callout__action">
+                <button
+                  type="button"
+                  class="btn btn--secondary btn--sm"
+                  data-diagnostics-retry
+                  data-i18n="common-retry"
+                ></button>
+              </div>
+            </div>
+
             <div data-diagnostics-root aria-busy="true">
               <dl class="kv kv--bare">
                 <div class="kv__row">
@@ -678,21 +720,6 @@
                   <dd class="mono" data-field="rate_limit">…</dd>
                 </div>
               </dl>
-            </div>
-
-            <div
-              class="card__hint"
-              data-diagnostics-error
-              hidden
-              role="alert"
-            >
-              <span data-error-message></span>
-              <button
-                type="button"
-                class="btn btn--ghost"
-                data-diagnostics-retry
-                data-i18n="common-retry"
-              ></button>
             </div>
 
             <div class="actions">
