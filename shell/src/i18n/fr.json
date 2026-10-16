@@ -220,6 +220,11 @@
   "dashboard-quota-unlimited": "Illimité",
   "dashboard-quota-percent-used": "{percent} % utilisé",
   "dashboard-quota-remaining": "{n} restant(s)",
+  "dashboard-quota-resets": "Réinitialisation le {date}",
+  "dashboard-quota-period-ended": "Période terminée le {date}",
+  "dashboard-quota-as-of": "Mis à jour à {time}",
+  "dashboard-rate-per-minute": "{n} jetons/min",
+  "dashboard-rate-sparkline-label": "Jetons par minute sur les 15 dernières minutes",
 
   "dashboard-api-response-title": "Réponse de l’API d’utilisation",
 

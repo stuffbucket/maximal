@@ -44,6 +44,8 @@ bun run app:ui       # UI-only iteration: `bun run build:ui --watch` — rebuild
                      # Run `bun run dev` in another terminal so the sidecar serves
                      # them at :4141/ui/* (reload the window to pick up changes).
 bun run app:build    # force-rebuild sidecar + tauri build --bundles app,dmg
+bun run shell:test   # Rust unit tests for the shell (cargo test --lib); Rust is
+                     # pinned in mise.toml — run `mise install` once
 ```
 
 ## Fast UI iteration

@@ -1,4 +1,6 @@
 import { Button } from "../../components/Button";
+import { ProblemCallout } from "../../components/ProblemCallout";
+import { EmptyState } from "../../components/EmptyState";
 import type { ModelSummary } from "../../../../../src/lib/config/settings-types";
 
 import { useModels } from "./useModels";
@@ -36,31 +38,49 @@ function formatAge(iso: string): string {
   return `${days} d ago`;
 }
 
-/** The present capability flags as labelled chips. */
-function CapabilityChips({
-  capabilities,
-}: {
-  capabilities: ModelSummary["capabilities"];
-}): JSX.Element {
+/** The capability flags a model has, as plain words ("Vision · Tools"). */
+function capabilityText(capabilities: ModelSummary["capabilities"]): string {
   const flags: Array<[string, boolean]> = [
     ["Vision", capabilities.vision],
     ["Tools", capabilities.tool_calls],
     ["Streaming", capabilities.streaming],
     ["Reasoning", capabilities.reasoning],
   ];
-  const present = flags.filter(([, on]) => on);
-  if (present.length === 0) return <span className="models__muted">—</span>;
+  return flags
+    .filter(([, on]) => on)
+    .map(([label]) => label)
+    .join(" · ");
+}
+
+/**
+ * One model as a two-line row: who it is on the left (name, then the id a
+ * client sends), what it can hold on the right (context, then max output),
+ * capabilities underneath the name. Numbers carry their own labels, so the
+ * list needs no column headers.
+ */
+function ModelRow({ model }: { model: ModelSummary }): JSX.Element {
+  const capabilities = capabilityText(model.capabilities);
   return (
-    <span className="models__chips">
-      {present.map(([label]) => (
-        <span
-          key={label}
-          className="chip"
-        >
-          {label}
+    <li className="model-row">
+      <div className="model-row__who">
+        <span className="model-row__name">
+          {model.name}
+          {model.preview && <span className="model-row__tag">Preview</span>}
         </span>
-      ))}
-    </span>
+        <code className="model-row__id">{model.id}</code>
+        {capabilities && <span className="model-row__caps">{capabilities}</span>}
+      </div>
+      <dl className="model-row__limits">
+        <div>
+          <dt>Context</dt>
+          <dd>{formatTokens(model.context_window_tokens)}</dd>
+        </div>
+        <div>
+          <dt>Max output</dt>
+          <dd>{formatTokens(model.max_output_tokens)}</dd>
+        </div>
+      </dl>
+    </li>
   );
 }
 
@@ -81,47 +101,20 @@ function ModelGroup({
       <summary className="advanced-section__summary">
         <span className="advanced-section__title">
           {groupLabel(type)}{" "}
-          <span className="models__count">({models.length})</span>
+          <span className="models__count">{models.length}</span>
         </span>
       </summary>
-      <div className="advanced-section__body">
-        <table className="table models__table">
-          <thead>
-            <tr>
-              <th>Model</th>
-              <th>Context</th>
-              <th>Max out</th>
-              <th>Capabilities</th>
-            </tr>
-          </thead>
-          <tbody>
-            {models.map((model) => (
-              <tr key={model.id}>
-                <td>
-                  <span className="models__name">
-                    {model.name}
-                    {model.preview && (
-                      <span className="models__preview">Preview</span>
-                    )}
-                  </span>
-                  <span className="models__id">{model.id}</span>
-                </td>
-                <td>{formatTokens(model.context_window_tokens)}</td>
-                <td>{formatTokens(model.max_output_tokens)}</td>
-                <td>
-                  <CapabilityChips capabilities={model.capabilities} />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <ul className="advanced-section__body model-list">
+        {models.map((model) => (
+          <ModelRow key={model.id} model={model} />
+        ))}
+      </ul>
     </details>
   );
 }
 
 export function Models(): JSX.Element {
-  const { models, loadedAt, isLoading, isRefreshing, error, refresh } =
+  const { models, loadedAt, isLoading, isRefreshing, problem, refresh } =
     useModels();
 
   // Preserve the server's type-then-name order while grouping.
@@ -141,9 +134,7 @@ export function Models(): JSX.Element {
     <div className="models">
       <div className="models__toolbar">
         <span className="models__freshness">
-          {loadedAt === null ?
-            "Not loaded yet"
-          : `Updated ${formatAge(loadedAt)}`}
+          {loadedAt !== null && `Updated ${formatAge(loadedAt)}`}
         </span>
         <Button
           variant="secondary"
@@ -155,24 +146,20 @@ export function Models(): JSX.Element {
         </Button>
       </div>
 
-      {error && (
-        <p
-          className="state__caption state__caption--error"
-          role="alert"
-        >
-          {error}
-        </p>
+      {/* The toolbar's Refresh is the retry, so the banner only adds a
+          button for remedies it doesn't cover (restart, sign in). */}
+      {problem && (
+        <ProblemCallout problem={problem} onRestarted={() => void refresh()} />
       )}
 
-      {showEmpty ?
-        <div className="empty empty--compact">
-          <p className="empty__title">No models cached</p>
-          <p className="empty__body">
+      {showEmpty && !problem ?
+        <EmptyState title="No models cached" compact>
+          <p>
             Sign in and the catalog loads automatically. If you're already
             signed in, use Refresh now to pull the current list from the
             provider.
           </p>
-        </div>
+        </EmptyState>
       : groups.map(([type, list], index) => (
           <ModelGroup
             key={type}

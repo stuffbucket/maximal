@@ -7,7 +7,7 @@
 // and the DOM binder from ../i18n/apply. The visible output is unchanged from
 // the previous vanilla main.js — only the strings now route through the
 // catalog and a locale picker is wired into the header.
-import { t } from "../i18n";
+import { resolveLocale, t } from "../i18n";
 import { applyI18n, wireLocalePicker } from "../i18n/apply";
 
 // Tailwind + Lucide are loaded as classic global <script>s in index.html, so
@@ -47,6 +47,9 @@ interface TokenUsageSummary {
   totals?: TokenUsageTotals;
   range?: TokenUsageRange;
   byModel: TokenUsageModelRow[];
+  /** Tokens per minute for the last 15 minutes, oldest first; the last is
+   *  the current, partial minute. Absent from older sidecars. */
+  recent_minutes?: Array<{ start_ms: number; total_tokens: number }>;
 }
 interface TokenUsageEvent {
   created_at_utc: string;
@@ -77,6 +80,9 @@ interface QuotaDetails {
 }
 interface UsageData {
   quota_snapshots?: Record<string, QuotaDetails> | null;
+  /** When the quotas next reset (GitHub sends a date, "2025-07-01", UTC).
+   *  The end of the current period; GitHub doesn't send its start. */
+  quota_reset_date?: string;
 }
 interface TokenUsageChannelMessage {
   event?: "update" | "error";
@@ -122,6 +128,11 @@ interface DashboardState {
   tokenUsageSummaryError: string | null;
   tokenUsageEventsError: string | null;
   tokenUsagePeriod: Period;
+  /** When `data` (/usage) was fetched; /usage is live from GitHub, so this
+   *  is "as of". */
+  usageFetchedAt: number | null;
+  /** Last background /usage refetch attempt (rate-limits them). */
+  usageRefetchAt: number;
 }
 
 const state: DashboardState = {
@@ -135,6 +146,8 @@ const state: DashboardState = {
   tokenUsageSummaryError: null,
   tokenUsageEventsError: null,
   tokenUsagePeriod: DEFAULT_TOKEN_USAGE_PERIOD,
+  usageFetchedAt: null,
+  usageRefetchAt: 0,
 };
 
 // --- Tauri Channel live feed -------------------------------------------
@@ -156,7 +169,19 @@ let tauriCore: TauriCore | null = null;
 let runningInTauri = false;
 let activeTokenUsageChannel: TauriChannel | null = null;
 let browserPollTimer: number | null = null;
-const BROWSER_POLL_INTERVAL_MS = 5000;
+/** After a failed fetch, wait this long instead (don't hammer the sidecar). */
+const BROWSER_RETRY_INTERVAL_MS = 5000;
+
+/** Data-update interval: 500 ms per digit of the total tokens used (0–9 →
+ *  500 ms, 10–99 → 1 s, … 100K–999,999 → 3 s), and a flat 10 s from a
+ *  million on. The point is only to show tokens are coming in, not to hammer
+ *  the sidecar. Same rule as `dashboard_poll_interval` in
+ *  shell/src-tauri/src/lib.rs. */
+function pollIntervalMs(totalTokens: number | undefined): number {
+  const total = Math.max(0, Math.trunc(Number.isFinite(totalTokens) ? Number(totalTokens) : 0));
+  if (total >= 1_000_000) return 10_000;
+  return 500 * String(total).length;
+}
 
 function applyTokenUsagePayload(payload: TokenUsageSummary | undefined): void {
   state.tokenUsageSummary = payload ?? null;
@@ -345,6 +370,79 @@ function updateControls(): void {
   for (const button of tokenUsagePeriodButtons) {
     button.disabled = periodDisabled;
   }
+
+  // The window the numbers cover, beside the period control: compact text
+  // from the hour-aligned baseline, the server's exact range on hover.
+  const rangeEl = document.getElementById("token-usage-range");
+  if (rangeEl) {
+    const baseline = syncRangeBaseline(false);
+    rangeEl.textContent = formatCompactRange(baseline.period, {
+      start_ms: baseline.hourMs - PERIOD_DAYS[baseline.period] * 24 * HOUR_MS,
+      end_ms: baseline.hourMs,
+    });
+    const range =
+      state.tokenUsageSummary?.range || state.tokenUsageEventsPage?.range || null;
+    rangeEl.title = renderTokenUsageRangeText(state.tokenUsagePeriod, range);
+  }
+
+  // The language globe's hover names the current language.
+  const localeSelect = document.getElementById("locale-select") as HTMLSelectElement | null;
+  if (localeSelect) localeSelect.title = localeSelect.selectedOptions[0]?.textContent ?? "";
+}
+
+const HOUR_MS = 3_600_000;
+const PERIOD_DAYS: Record<Period, number> = { day: 1, week: 7, month: 30 };
+
+/** What the range label shows: the selected period, back from the top of the
+ *  hour it was computed in. Every period runs from now into the past, so the
+ *  label has to move with the clock — but not on every 5s data update, and
+ *  not while someone is looking at it. */
+let rangeBaseline: { period: Period; hourMs: number } | null = null;
+
+/**
+ * Recompute the label's baseline when there's none yet or the period changed;
+ * with `hourRolled`, also when the clock has moved into a new hour. Called
+ * with `hourRolled` only as the Dashboard comes back into view (see the
+ * visibilitychange listener), so the label never shifts while it's shown.
+ */
+function syncRangeBaseline(hourRolled: boolean): { period: Period; hourMs: number } {
+  const hourMs = Math.floor(Date.now() / HOUR_MS) * HOUR_MS;
+  if (
+    !rangeBaseline ||
+    rangeBaseline.period !== state.tokenUsagePeriod ||
+    (hourRolled && rangeBaseline.hourMs !== hourMs)
+  ) {
+    rangeBaseline = { period: state.tokenUsagePeriod, hourMs };
+  }
+  return rangeBaseline;
+}
+
+/**
+ * The token-usage window at the precision its period needs, in the UI
+ * locale: a rolling day as weekday + hour ("Sat 8 AM – Sun 8 AM"), a week
+ * or month as dates ("Jun 8 – 15"). No seconds, no year.
+ */
+function formatCompactRange(period: Period, range: TokenUsageRange): string {
+  const options: Intl.DateTimeFormatOptions =
+    period === "day" ?
+      { weekday: "short", hour: "numeric" }
+    : { month: "short", day: "numeric" };
+  try {
+    const format = new Intl.DateTimeFormat(resolveLocale(), options);
+    if (period === "day") {
+      // formatRange would add the day-of-month when the window crosses
+      // midnight; two plain ends read better ("Sat 8 AM – Sun 8 AM").
+      return `${format.format(range.start_ms)} – ${format.format(range.end_ms)}`;
+    }
+    // formatRange is ES2021 (every webview we ship has it); the shell's lib
+    // target is ES2020, so type the one method we use.
+    const ranged = format as Intl.DateTimeFormat & {
+      formatRange: (start: number, end: number) => string;
+    };
+    return ranged.formatRange(range.start_ms, range.end_ms);
+  } catch {
+    return "";
+  }
 }
 
 function formatNumber(value: number): string {
@@ -451,6 +549,9 @@ function render(): void {
 
   // Replace placeholder icons with actual Lucide icons
   createIcons();
+
+  // Numbers from a finished quota period render as "—"; fetch the new ones.
+  if (quotaPeriodEnded()) void refreshUsage();
 }
 
 /**
@@ -461,13 +562,19 @@ function renderUsageQuotas(
 ): string {
   if (!snapshots) return "";
 
-  const quotaCards = Object.entries(snapshots)
-    .map(([key, value]) => renderQuotaCard(key, value))
-    .join("");
+  const entries = Object.entries(snapshots);
+  const metered = entries.filter(([, value]) => !value.unlimited);
+  const unlimited = entries.filter(([, value]) => value.unlimited);
+  // Unlimited quotas have nothing to measure, so they share one card as a
+  // simple list instead of each getting a mostly-empty card.
+  const resetMs = parseResetDate(state.data?.quota_reset_date);
+  const quotaCards =
+    metered.map(([key, value]) => renderQuotaCard(key, value, resetMs)).join("") +
+    (unlimited.length > 0 ? renderUnlimitedQuotas(unlimited.map(([key]) => key)) : "");
 
   return `
             <section id="usage-quotas" class="mb-6">
-                <h2 class="text-xl font-bold mb-3 flex items-center gap-2" style="color: var(--color-fg-lightest);">
+                <h2 class="text-xl font-bold mb-3 flex items-center gap-2" style="color: var(--text-strong);">
                     <i data-lucide="bar-chart-big"></i> ${escapeHtml(t("dashboard-quotas-title"))}
                 </h2>
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -477,41 +584,95 @@ function renderUsageQuotas(
         `;
 }
 
+/** GitHub's quota_reset_date as a timestamp. A bare date is midnight UTC. */
+function parseResetDate(value: string | undefined): number | null {
+  if (!value) return null;
+  const ms = Date.parse(/^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T00:00:00Z` : value);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/** "Jul 1" in the UI locale. Shown in UTC: GitHub's date is a UTC date, and
+ *  local time would turn "Jul 1" into "Jun 30" west of Greenwich. */
+function formatResetDate(ms: number): string {
+  return new Intl.DateTimeFormat(resolveLocale(), {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  }).format(ms);
+}
+
 /**
- * Renders a single quota card.
+ * Renders a single quota card: percent used as the headline, the meter, the
+ * counts, and when the period resets. The meter's color says how close the
+ * quota is to its limit (see .meter in style.css), with an icon from
+ * "running low" on so the state never rests on color alone. Unlimited
+ * quotas don't come here (renderUnlimitedQuotas): a full bar would read as
+ * "used up".
+ *
+ * If the period these numbers belong to has already ended (the window sat
+ * open across the reset), or GitHub's numbers don't add up, the figures show
+ * "—" rather than a stale or made-up percentage.
  */
-function renderQuotaCard(title: string, details: QuotaDetails): string {
-  const { entitlement, remaining, percent_remaining, unlimited } = details;
+function renderQuotaCard(title: string, details: QuotaDetails, resetMs: number | null): string {
+  const { entitlement, remaining, percent_remaining } = details;
+  const ended = resetMs !== null && Date.now() >= resetMs;
+  const known =
+    !ended &&
+    Number.isFinite(percent_remaining) &&
+    Number.isFinite(entitlement) &&
+    Number.isFinite(remaining) &&
+    entitlement > 0;
+  const percentUsed = known ? 100 - percent_remaining : 0;
+  const level = !known ? "ok" : percentUsed >= 90 ? "out" : percentUsed >= 75 ? "low" : "ok";
+  const icon = level === "ok" ? "" : `<i data-lucide="triangle-alert" aria-hidden="true"></i>`;
 
-  const percentUsed = unlimited ? 0 : 100 - percent_remaining;
-  const used = unlimited
-    ? t("dashboard-not-available")
-    : (entitlement - remaining).toLocaleString();
-
-  let progressBarColor = "var(--color-green)";
-  if (percentUsed > 75) progressBarColor = "var(--color-yellow)";
-  if (percentUsed > 90) progressBarColor = "var(--color-red)";
-  if (unlimited) progressBarColor = "var(--color-blue)";
+  const period =
+    resetMs === null ? ""
+    : ended ? t("dashboard-quota-period-ended", { date: formatResetDate(resetMs) })
+    : t("dashboard-quota-resets", { date: formatResetDate(resetMs) });
+  const asOf =
+    state.usageFetchedAt === null ? ""
+    : t("dashboard-quota-as-of", {
+        time: new Intl.DateTimeFormat(resolveLocale(), { timeStyle: "short" }).format(state.usageFetchedAt),
+      });
 
   return `
-            <div class="p-4 border" style="background-color: var(--color-bg); border-color: var(--color-bg-light-2);">
-                <div class="flex justify-between items-center mb-2">
-                    <h3 class="text-md font-semibold capitalize" style="color: var(--color-fg-lightest);">${escapeHtml(title.replace(/_/g, " "))}</h3>
-                    ${
-                      unlimited
-                        ? `<span class="px-2 py-0.5 text-xs font-medium" style="color: var(--color-blue-accent); background-color: var(--color-bg-light-1);">${escapeHtml(t("dashboard-quota-unlimited"))}</span>`
-                        : `<span class="text-sm font-mono" style="color: var(--color-fg-medium);">${escapeHtml(t("dashboard-quota-percent-used", { percent: percentUsed.toFixed(1) }))}</span>`
-                    }
+            <div class="p-4 border" style="background-color: var(--surface-card); border-color: var(--border-subtle);" title="${escapeHtml(asOf)}">
+                <div class="flex justify-between items-start gap-3 mb-2">
+                    <div>
+                        <h3 class="text-md font-semibold capitalize" style="color: var(--text-strong);">${escapeHtml(title.replace(/_/g, " "))}</h3>
+                        ${period ? `<p class="text-sm" style="color: var(--text-muted);">${escapeHtml(period)}</p>` : ""}
+                    </div>
+                    <span class="meter-state meter-state--${level} meter-state--headline">${icon}${
+                      known ?
+                        escapeHtml(t("dashboard-quota-percent-used", { percent: percentUsed.toFixed(1) }))
+                      : "—"
+                    }</span>
                 </div>
-                <div class="mb-3">
-                     <div class="w-full progress-bar-bg h-2">
-                         <div class="progress-bar-fg h-2" style="width: ${unlimited ? 100 : percentUsed}%; background-color: ${progressBarColor};"></div>
-                     </div>
+                <div class="meter meter--${known ? level : "unknown"} mb-3">
+                    <div class="meter__fill" style="width: ${known ? Math.min(100, Math.max(0, percentUsed)) : 0}%;"></div>
                 </div>
-                <div class="flex justify-between text-xs font-mono" style="color: var(--color-fg-dark);">
-                    <span>${used} / ${unlimited ? "∞" : entitlement.toLocaleString()}</span>
-                    <span>${escapeHtml(t("dashboard-quota-remaining", { n: unlimited ? "∞" : remaining.toLocaleString() }))}</span>
+                <div class="flex justify-between text-xs font-mono" style="color: var(--text-muted);">
+                    <span>${known ? `${(entitlement - remaining).toLocaleString()} / ${entitlement.toLocaleString()}` : "—"}</span>
+                    <span>${known ? escapeHtml(t("dashboard-quota-remaining", { n: remaining.toLocaleString() })) : ""}</span>
                 </div>
+            </div>
+        `;
+}
+
+/** The unlimited quotas, as rows in one card: name, then "Unlimited". */
+function renderUnlimitedQuotas(titles: Array<string>): string {
+  const rows = titles
+    .map(
+      (title) => `
+                <div class="flex justify-between items-center">
+                    <h3 class="text-md font-semibold capitalize" style="color: var(--text-strong);">${escapeHtml(title.replace(/_/g, " "))}</h3>
+                    <span class="text-sm" style="color: var(--text-muted);">${escapeHtml(t("dashboard-quota-unlimited"))}</span>
+                </div>`,
+    )
+    .join("");
+  return `
+            <div class="p-4 border flex flex-col gap-3" style="background-color: var(--surface-card); border-color: var(--border-subtle);">${rows}
             </div>
         `;
 }
@@ -521,7 +682,7 @@ function renderQuotaCard(title: string, details: QuotaDetails): string {
  */
 function formatObject(obj: unknown): string {
   if (obj === null || typeof obj !== "object") {
-    return `<span style="color: var(--color-green-accent);">${escapeHtml(JSON.stringify(obj))}</span>`;
+    return `<span style="color: var(--status-success);">${escapeHtml(JSON.stringify(obj))}</span>`;
   }
 
   return (
@@ -534,18 +695,18 @@ function formatObject(obj: unknown): string {
         if (Array.isArray(value)) {
           displayValue =
             value.length > 0
-              ? `<span style='color: var(--color-gray-accent)'>[...${value.length} items]</span>`
-              : `<span style='color: var(--color-gray-accent)'>[]</span>`;
+              ? `<span style='color: var(--text-muted)'>[...${value.length} items]</span>`
+              : `<span style='color: var(--text-muted)'>[]</span>`;
         } else if (typeof value === "object" && value !== null) {
           displayValue = formatObject(value);
         } else if (typeof value === "boolean") {
-          displayValue = `<span class="font-semibold" style="color: ${value ? "var(--color-green-accent)" : "var(--color-red-accent)"}">${escapeHtml(String(value))}</span>`;
+          displayValue = `<span class="font-semibold" style="color: ${value ? "var(--status-success)" : "var(--status-error)"}">${escapeHtml(String(value))}</span>`;
         } else {
-          displayValue = `<span style="color: var(--color-blue-accent);">${escapeHtml(JSON.stringify(value))}</span>`;
+          displayValue = `<span style="color: var(--link);">${escapeHtml(JSON.stringify(value))}</span>`;
         }
 
         return `<div class="mt-1">
-                        <span class="capitalize font-semibold" style="color: var(--color-fg-medium);">${formattedKey}:</span>
+                        <span class="capitalize font-semibold" style="color: var(--text-base-color);">${formattedKey}:</span>
                         ${typeof value === "object" && value !== null && !Array.isArray(value) ? displayValue : ` ${displayValue}`}
                    </div>`;
       })
@@ -561,10 +722,10 @@ function renderDetailedData(data: UsageData): string {
   const formattedDetails = formatObject(data);
   return `
             <section id="detailed-data">
-                <h2 class="text-xl font-bold mb-3 flex items-center gap-2" style="color: var(--color-fg-lightest);">
+                <h2 class="text-xl font-bold mb-3 flex items-center gap-2" style="color: var(--text-strong);">
                    <i data-lucide="file-text"></i> ${escapeHtml(t("dashboard-api-response-title"))}
                 </h2>
-                <div class="border p-4 relative font-mono text-xs code-block overflow-auto" style="background-color: var(--color-bg-darkest); border-color: var(--color-bg-light-2);">
+                <div class="border p-4 relative font-mono text-xs code-block overflow-auto" style="background-color: var(--surface-base); border-color: var(--border-subtle);">
                     ${formattedDetails}
                 </div>
             </section>
@@ -588,7 +749,6 @@ function renderTokenUsageSection(): string {
   const summary = state.tokenUsageSummary;
   const eventsPage = state.tokenUsageEventsPage;
   const totals = summary?.totals || EMPTY_TOKEN_USAGE_TOTALS;
-  const activeRange = summary?.range || eventsPage?.range || null;
   const totalPages = eventsPage ? Math.max(eventsPage.total_pages, 1) : 1;
   const eventsMeta = eventsPage
     ? t("dashboard-events-meta", {
@@ -602,14 +762,11 @@ function renderTokenUsageSection(): string {
     <section id="token-usage" class="mb-6">
       <div class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 class="text-xl font-bold flex items-center gap-2" style="color: var(--color-fg-lightest);">
+          <h2 class="text-xl font-bold flex items-center gap-2" style="color: var(--text-strong);">
             <i data-lucide="database"></i> ${escapeHtml(t("dashboard-token-usage-title"))}
           </h2>
-          <p class="mt-1 text-xs" style="color: var(--color-gray);">${escapeHtml(
-            renderTokenUsageRangeText(state.tokenUsagePeriod, activeRange),
-          )}</p>
         </div>
-        <div class="flex flex-wrap items-center gap-2 text-xs" style="color: var(--color-gray-accent);">
+        <div class="flex flex-wrap items-center gap-2 text-xs" style="color: var(--text-muted);">
           ${
             state.isTokenUsageLoading
               ? `<span>${escapeHtml(t("dashboard-refreshing-summary"))}</span>`
@@ -632,23 +789,29 @@ function renderTokenUsageSection(): string {
           : ""
       }
 
-      <div class="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-7 gap-3 ${
-        state.isTokenUsageLoading ? "opacity-60" : ""
-      }">
-        ${renderTokenUsageMetric(t("dashboard-col-total"), totals.total_tokens, "var(--color-fg-lightest)")}
-        ${renderTokenUsageMetric(t("dashboard-col-input"), totals.input_tokens, "var(--color-blue-accent)")}
-        ${renderTokenUsageMetric(t("dashboard-col-output"), totals.output_tokens, "var(--color-green-accent)")}
-        ${renderTokenUsageMetric(t("dashboard-col-cache-read"), totals.cache_read_input_tokens, "var(--color-aqua-accent)")}
-        ${renderTokenUsageMetric(t("dashboard-col-cache-write"), totals.cache_creation_input_tokens, "var(--color-yellow-accent)")}
-        ${renderTokenUsageMetric(t("dashboard-col-requests"), totals.request_count, "var(--color-purple-accent)")}
-        ${renderTokenUsageCostMetric(t("dashboard-col-cost"), totals.total_nano_aiu, "var(--color-green)")}
+      <div class="totals ${state.isTokenUsageLoading ? "opacity-60" : ""}">
+        <div class="totals__head">
+          <div>
+            <div class="totals__hero-value">${formatNumber(totals.total_tokens)}</div>
+            <div class="totals__label">${escapeHtml(t("dashboard-col-total"))}</div>
+          </div>
+          ${renderRateMeter(summary?.recent_minutes)}
+        </div>
+        <dl class="totals__parts">
+          ${renderTotalsPart(t("dashboard-col-input"), formatNumber(totals.input_tokens))}
+          ${renderTotalsPart(t("dashboard-col-output"), formatNumber(totals.output_tokens))}
+          ${renderTotalsPart(t("dashboard-col-cache-read"), formatNumber(totals.cache_read_input_tokens))}
+          ${renderTotalsPart(t("dashboard-col-cache-write"), formatNumber(totals.cache_creation_input_tokens))}
+          ${renderTotalsPart(t("dashboard-col-requests"), formatNumber(totals.request_count))}
+          ${renderTotalsPart(t("dashboard-col-cost"), escapeHtml(formatCostAiu(totals.total_nano_aiu)))}
+        </dl>
       </div>
 
-      <div class="mt-4 border" style="background-color: var(--color-bg); border-color: var(--color-bg-light-2);">
-        <div class="px-4 py-3 border-b flex items-center justify-between gap-3" style="background-color: var(--color-bg-soft); border-color: var(--color-bg-light-2);">
+      <div class="mt-4 border" style="background-color: var(--surface-card); border-color: var(--border-subtle);">
+        <div class="px-4 py-3 border-b flex items-center justify-between gap-3" style="background-color: var(--surface-card); border-color: var(--border-subtle);">
           <div>
-            <p class="text-sm font-semibold" style="color: var(--color-fg-lightest);">${escapeHtml(t("dashboard-by-model-title"))}</p>
-            <p class="mt-1 text-xs" style="color: var(--color-gray-accent);">${
+            <p class="text-sm font-semibold" style="color: var(--text-strong);">${escapeHtml(t("dashboard-by-model-title"))}</p>
+            <p class="mt-1 text-xs" style="color: var(--text-muted);">${
               summary
                 ? escapeHtml(t("dashboard-by-model-count", { n: summary.byModel.length }))
                 : escapeHtml(t("dashboard-by-model-none"))
@@ -658,11 +821,11 @@ function renderTokenUsageSection(): string {
         ${renderTokenUsageModelBreakdown(summary)}
       </div>
 
-      <div class="mt-4 border" style="background-color: var(--color-bg); border-color: var(--color-bg-light-2);">
-        <div class="px-4 py-3 border-b flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between" style="background-color: var(--color-bg-soft); border-color: var(--color-bg-light-2);">
+      <div class="mt-4 border" style="background-color: var(--surface-card); border-color: var(--border-subtle);">
+        <div class="px-4 py-3 border-b flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between" style="background-color: var(--surface-card); border-color: var(--border-subtle);">
           <div>
-            <p class="text-sm font-semibold" style="color: var(--color-fg-lightest);">${escapeHtml(t("dashboard-event-details-title"))}</p>
-            <p class="mt-1 text-xs" style="color: var(--color-gray-accent);">${escapeHtml(eventsMeta)}</p>
+            <p class="text-sm font-semibold" style="color: var(--text-strong);">${escapeHtml(t("dashboard-event-details-title"))}</p>
+            <p class="mt-1 text-xs" style="color: var(--text-muted);">${escapeHtml(eventsMeta)}</p>
           </div>
           <div class="flex items-center gap-2">
             ${renderPaginationButton("previous", t("dashboard-pager-previous"), !eventsPage || state.isEventsLoading || eventsPage.page <= 1)}
@@ -680,33 +843,48 @@ function renderTokenUsageSection(): string {
   `;
 }
 
-function renderTokenUsageMetric(
-  label: string,
-  value: number,
-  accentColor: string,
+/**
+ * "Are tokens coming in?" at a glance: tokens per minute (averaged over the
+ * last 5 minutes, so one burst doesn't spike it) and a sparkline of the last
+ * 15 minutes. One series, so no legend; the label says what it is.
+ */
+function renderRateMeter(
+  minutes: TokenUsageSummary["recent_minutes"],
 ): string {
+  if (!minutes || minutes.length === 0) return "";
+  const values = minutes.map((m) => Math.max(0, m.total_tokens));
+  const lastFive = values.slice(-5);
+  const rate = Math.round(lastFive.reduce((a, b) => a + b, 0) / lastFive.length);
+
+  // 0..100 x 0..24 drawing space; the line hugs the bottom when idle.
+  const max = Math.max(...values, 1);
+  const step = values.length > 1 ? 100 / (values.length - 1) : 0;
+  const points = values
+    .map((v, i) => `${(i * step).toFixed(1)},${(22 - (v / max) * 20).toFixed(1)}`)
+    .join(" ");
+  const pointList = points.split(" ");
+  const last = pointList[pointList.length - 1]?.split(",") ?? ["100", "22"];
+  const label = t("dashboard-rate-sparkline-label");
+
   return `
-    <div class="p-4 border" style="background-color: var(--color-bg); border-color: var(--color-bg-light-2);">
-      <div class="text-lg font-bold" style="color: ${accentColor};">${formatNumber(value)}</div>
-      <div class="mt-1 text-xs uppercase tracking-wide" style="color: var(--color-gray-accent);">${escapeHtml(label)}</div>
-    </div>
-  `;
+          <div class="rate">
+            <svg class="rate__spark" viewBox="0 0 100 24" preserveAspectRatio="none" role="img" aria-label="${escapeHtml(label)}">
+              <title>${escapeHtml(label)}</title>
+              <polyline points="${points}" fill="none" vector-effect="non-scaling-stroke" />
+              <circle cx="${last[0]}" cy="${last[1]}" r="1.6" />
+            </svg>
+            <div class="rate__value">${escapeHtml(t("dashboard-rate-per-minute", { n: rate.toLocaleString() }))}</div>
+          </div>`;
 }
 
-// A cost metric renders the human AIU unit (from nano-AIU) instead of a raw
-// integer, so it needs its own formatter. Same card chrome as the token
-// metrics above so the grid stays visually uniform.
-function renderTokenUsageCostMetric(
-  label: string,
-  nanoAiu: number,
-  accentColor: string,
-): string {
+/** One figure in the totals row: value over a muted label. The value is
+ *  already formatted/escaped by the caller. */
+function renderTotalsPart(label: string, value: string): string {
   return `
-    <div class="p-4 border" style="background-color: var(--color-bg); border-color: var(--color-bg-light-2);">
-      <div class="text-lg font-bold" style="color: ${accentColor};">${escapeHtml(formatCostAiu(nanoAiu))}</div>
-      <div class="mt-1 text-xs uppercase tracking-wide" style="color: var(--color-gray-accent);">${escapeHtml(label)}</div>
-    </div>
-  `;
+          <div>
+            <dt class="totals__label">${escapeHtml(label)}</dt>
+            <dd>${value}</dd>
+          </div>`;
 }
 
 function renderTokenUsageModelBreakdown(
@@ -719,15 +897,15 @@ function renderTokenUsageModelBreakdown(
   const rows = summary.byModel
     .map((model) => {
       return `
-        <tr class="border-b last:border-b-0" style="border-color: var(--color-bg-light-1);">
-          <td class="px-4 py-2 max-w-[280px] truncate" style="color: var(--color-fg-lightest);" title="${escapeHtml(model.model)}">${escapeHtml(model.model)}</td>
-          <td class="px-4 py-2 text-right" style="color: var(--color-fg-dark);">${formatNumber(model.request_count)}</td>
-          <td class="px-4 py-2 text-right" style="color: var(--color-fg-dark);">${formatNumber(model.input_tokens)}</td>
-          <td class="px-4 py-2 text-right" style="color: var(--color-fg-dark);">${formatNumber(model.output_tokens)}</td>
-          <td class="px-4 py-2 text-right" style="color: var(--color-fg-dark);">${formatNumber(model.cache_read_input_tokens)}</td>
-          <td class="px-4 py-2 text-right" style="color: var(--color-fg-dark);">${formatNumber(model.cache_creation_input_tokens)}</td>
-          <td class="px-4 py-2 text-right font-semibold" style="color: var(--color-yellow-accent);">${formatNumber(model.total_tokens)}</td>
-          <td class="px-4 py-2 text-right font-semibold" style="color: var(--color-green);">${escapeHtml(formatCostAiu(model.total_nano_aiu))}</td>
+        <tr class="border-b last:border-b-0" style="border-color: var(--surface-control);">
+          <td class="px-4 py-2 max-w-[280px] truncate" style="color: var(--text-strong);" title="${escapeHtml(model.model)}">${escapeHtml(model.model)}</td>
+          <td class="px-4 py-2 text-right" style="color: var(--text-muted);">${formatNumber(model.request_count)}</td>
+          <td class="px-4 py-2 text-right" style="color: var(--text-muted);">${formatNumber(model.input_tokens)}</td>
+          <td class="px-4 py-2 text-right" style="color: var(--text-muted);">${formatNumber(model.output_tokens)}</td>
+          <td class="px-4 py-2 text-right" style="color: var(--text-muted);">${formatNumber(model.cache_read_input_tokens)}</td>
+          <td class="px-4 py-2 text-right" style="color: var(--text-muted);">${formatNumber(model.cache_creation_input_tokens)}</td>
+          <td class="px-4 py-2 text-right font-semibold" style="color: var(--text-strong);">${formatNumber(model.total_tokens)}</td>
+          <td class="px-4 py-2 text-right" style="color: var(--text-base-color);">${escapeHtml(formatCostAiu(model.total_nano_aiu))}</td>
         </tr>
       `;
     })
@@ -736,7 +914,7 @@ function renderTokenUsageModelBreakdown(
   return `
     <div class="overflow-auto ${state.isTokenUsageLoading ? "opacity-60" : ""}">
       <table class="w-full min-w-[860px] text-left text-xs sm:text-sm">
-        <thead style="background-color: var(--color-bg-light-1); color: var(--color-fg-medium);">
+        <thead style="background-color: var(--surface-control); color: var(--text-base-color);">
           <tr>
             <th class="px-4 py-2 font-semibold">${escapeHtml(t("dashboard-col-model"))}</th>
             <th class="px-4 py-2 text-right font-semibold">${escapeHtml(t("dashboard-col-requests"))}</th>
@@ -770,18 +948,18 @@ function renderTokenUsageEventsTable(
       const traceId = formatCellText(event.trace_id);
 
       return `
-        <tr class="border-b last:border-b-0" style="border-color: var(--color-bg-light-1);">
-          <td class="px-4 py-2 whitespace-nowrap" style="color: var(--color-fg-dark);" title="${escapeHtml(event.created_at_utc)}">${escapeHtml(formatDateTime(event.created_at_ms))}</td>
-          <td class="px-4 py-2 max-w-[160px] truncate" style="color: var(--color-fg-lightest);" title="${escapeHtml(userId)}">${escapeHtml(userId)}</td>
-          <td class="px-4 py-2 whitespace-nowrap" style="color: var(--color-fg-dark);">${escapeHtml(event.endpoint.replace(/_/g, " "))}</td>
-          <td class="px-4 py-2 max-w-[220px] truncate" style="color: var(--color-fg-lightest);" title="${escapeHtml(event.model)}">${escapeHtml(event.model)}</td>
-          <td class="px-4 py-2 max-w-[180px] truncate font-mono" style="color: var(--color-fg-dark);" title="${escapeHtml(sessionId)}">${escapeHtml(sessionId)}</td>
-          <td class="px-4 py-2 max-w-[200px] truncate font-mono" style="color: var(--color-fg-dark);" title="${escapeHtml(traceId)}">${escapeHtml(traceId)}</td>
-          <td class="px-4 py-2 text-right" style="color: var(--color-fg-dark);">${formatNumber(event.input_tokens)}</td>
-          <td class="px-4 py-2 text-right" style="color: var(--color-fg-dark);">${formatNumber(event.output_tokens)}</td>
-          <td class="px-4 py-2 text-right" style="color: var(--color-fg-dark);">${formatNumber(event.cache_read_input_tokens)}</td>
-          <td class="px-4 py-2 text-right" style="color: var(--color-fg-dark);">${formatNumber(event.cache_creation_input_tokens)}</td>
-          <td class="px-4 py-2 text-right font-semibold" style="color: var(--color-yellow-accent);">${formatNumber(event.total_tokens)}</td>
+        <tr class="border-b last:border-b-0" style="border-color: var(--surface-control);">
+          <td class="px-4 py-2 whitespace-nowrap" style="color: var(--text-muted);" title="${escapeHtml(event.created_at_utc)}">${escapeHtml(formatDateTime(event.created_at_ms))}</td>
+          <td class="px-4 py-2 max-w-[160px] truncate" style="color: var(--text-strong);" title="${escapeHtml(userId)}">${escapeHtml(userId)}</td>
+          <td class="px-4 py-2 whitespace-nowrap" style="color: var(--text-muted);">${escapeHtml(event.endpoint.replace(/_/g, " "))}</td>
+          <td class="px-4 py-2 max-w-[220px] truncate" style="color: var(--text-strong);" title="${escapeHtml(event.model)}">${escapeHtml(event.model)}</td>
+          <td class="px-4 py-2 max-w-[180px] truncate font-mono" style="color: var(--text-muted);" title="${escapeHtml(sessionId)}">${escapeHtml(sessionId)}</td>
+          <td class="px-4 py-2 max-w-[200px] truncate font-mono" style="color: var(--text-muted);" title="${escapeHtml(traceId)}">${escapeHtml(traceId)}</td>
+          <td class="px-4 py-2 text-right" style="color: var(--text-muted);">${formatNumber(event.input_tokens)}</td>
+          <td class="px-4 py-2 text-right" style="color: var(--text-muted);">${formatNumber(event.output_tokens)}</td>
+          <td class="px-4 py-2 text-right" style="color: var(--text-muted);">${formatNumber(event.cache_read_input_tokens)}</td>
+          <td class="px-4 py-2 text-right" style="color: var(--text-muted);">${formatNumber(event.cache_creation_input_tokens)}</td>
+          <td class="px-4 py-2 text-right font-semibold" style="color: var(--text-strong);">${formatNumber(event.total_tokens)}</td>
         </tr>
       `;
     })
@@ -790,7 +968,7 @@ function renderTokenUsageEventsTable(
   return `
     <div class="overflow-auto ${state.isEventsLoading ? "opacity-60" : ""}">
       <table class="w-full min-w-[1180px] text-left text-xs sm:text-sm">
-        <thead style="background-color: var(--color-bg-light-1); color: var(--color-fg-medium);">
+        <thead style="background-color: var(--surface-control); color: var(--text-base-color);">
           <tr>
             <th class="px-4 py-2 font-semibold">${escapeHtml(t("dashboard-col-time"))}</th>
             <th class="px-4 py-2 font-semibold">${escapeHtml(t("dashboard-col-user"))}</th>
@@ -823,7 +1001,7 @@ function renderPaginationButton(
       type="button"
       data-page-action="${action}"
       class="px-3 py-1.5 border text-xs font-medium"
-      style="background-color: var(--color-bg-darkest); border-color: var(--color-bg-light-2); color: var(--color-fg-light);"
+      style="background-color: var(--surface-base); border-color: var(--border-subtle); color: var(--text-base-color);"
       ${disabled ? "disabled" : ""}
     >
       ${escapeHtml(label)}
@@ -833,7 +1011,7 @@ function renderPaginationButton(
 
 function renderEmptyState(message: string): string {
   return `
-    <div class="px-4 py-6 text-sm" style="color: var(--color-gray);">
+    <div class="px-4 py-6 text-sm" style="color: var(--text-muted);">
       ${escapeHtml(message)}
     </div>
   `;
@@ -845,7 +1023,7 @@ function renderEmptyState(message: string): string {
 function renderSpinner(): string {
   return `
     <div class="flex justify-center items-center py-20">
-        <div class="animate-spin h-12 w-12 rounded-full border-4 border-transparent border-t-4" style="border-top-color: var(--color-blue);"></div>
+        <div class="animate-spin h-12 w-12 rounded-full border-4 border-transparent border-t-4" style="border-top-color: var(--accent);"></div>
     </div>`;
 }
 
@@ -859,7 +1037,7 @@ function renderError(
   return `
     <div
       class="p-3 border"
-      style="background-color: rgba(204, 36, 29, 0.2); border-color: var(--color-red); color: var(--color-red-accent);"
+      style="background-color: color-mix(in srgb, var(--status-error) 15%, transparent); border-color: var(--status-error); color: var(--status-error);"
       role="alert"
     >
       <div class="flex items-start">
@@ -878,10 +1056,10 @@ function renderError(
  */
 function renderWelcomeMessage(): string {
   return `
-    <div class="text-center py-16 px-4 border" style="background-color: var(--color-bg-soft); border-color: var(--color-bg-light-2);">
-        <i data-lucide="info" class="mx-auto h-10 w-10" style="color: var(--color-gray-accent);"></i>
-        <h3 class="mt-2 text-lg font-semibold" style="color: var(--color-fg-lightest);">${escapeHtml(t("dashboard-welcome-title"))}</h3>
-        <p class="mt-1 text-sm" style="color: var(--color-gray);">${escapeHtml(t("dashboard-welcome-body"))}</p>
+    <div class="text-center py-16 px-4 border" style="background-color: var(--surface-card); border-color: var(--border-subtle);">
+        <i data-lucide="info" class="mx-auto h-10 w-10" style="color: var(--text-muted);"></i>
+        <h3 class="mt-2 text-lg font-semibold" style="color: var(--text-strong);">${escapeHtml(t("dashboard-welcome-title"))}</h3>
+        <p class="mt-1 text-sm" style="color: var(--text-muted);">${escapeHtml(t("dashboard-welcome-body"))}</p>
     </div>
   `;
 }
@@ -910,6 +1088,7 @@ async function fetchData(page = 1): Promise<void> {
 
     if (usageResult.status === "fulfilled") {
       state.data = usageResult.value;
+      state.usageFetchedAt = Date.now();
     } else {
       state.data = null;
       state.error = getErrorMessage(usageResult.reason);
@@ -948,14 +1127,47 @@ async function fetchData(page = 1): Promise<void> {
   }
 }
 
-async function fetchTokenUsageSummaryAndEvents(page = 1): Promise<void> {
+/**
+ * Re-read just /usage (live from GitHub), quietly, at most once a minute.
+ * Used when the quota period has ended under an open window, and when the
+ * window comes back into view with a stale snapshot.
+ */
+async function refreshUsage(): Promise<void> {
+  if (Date.now() - state.usageRefetchAt < 60_000) return;
+  state.usageRefetchAt = Date.now();
+  try {
+    state.data = await fetchJson<UsageData>(USAGE_PATH);
+    state.usageFetchedAt = Date.now();
+    render();
+  } catch {
+    // Keep what's shown; the next trigger tries again.
+  }
+}
+
+/** True when the quota numbers on screen belong to a period that's over. */
+function quotaPeriodEnded(): boolean {
+  const resetMs = parseResetDate(state.data?.quota_reset_date);
+  return resetMs !== null && Date.now() >= resetMs;
+}
+
+/**
+ * `quiet` is for background updates: keep what's on screen (no blanking, no
+ * loading state) and just swap in the new numbers when they arrive. Polls
+ * can run every 500 ms, so anything else would flicker.
+ */
+async function fetchTokenUsageSummaryAndEvents(
+  page = 1,
+  { quiet = false }: { quiet?: boolean } = {},
+): Promise<void> {
   const period = getSelectedPeriod();
-  state.isTokenUsageLoading = true;
-  state.tokenUsageSummary = null;
-  state.tokenUsageEventsPage = null;
-  state.tokenUsageSummaryError = null;
-  state.tokenUsageEventsError = null;
-  render();
+  if (!quiet) {
+    state.isTokenUsageLoading = true;
+    state.tokenUsageSummary = null;
+    state.tokenUsageEventsPage = null;
+    state.tokenUsageSummaryError = null;
+    state.tokenUsageEventsError = null;
+    render();
+  }
 
   try {
     const [summaryResult, eventsResult] = await Promise.allSettled([
@@ -965,21 +1177,23 @@ async function fetchTokenUsageSummaryAndEvents(page = 1): Promise<void> {
 
     if (summaryResult.status === "fulfilled") {
       state.tokenUsageSummary = summaryResult.value;
+      state.tokenUsageSummaryError = null;
     } else if (isMissingTokenUsageEndpointError(summaryResult.reason)) {
       state.tokenUsageSummary = null;
       state.tokenUsageSummaryError = null;
     } else {
-      state.tokenUsageSummary = null;
+      if (!quiet) state.tokenUsageSummary = null;
       state.tokenUsageSummaryError = getErrorMessage(summaryResult.reason);
     }
 
     if (eventsResult.status === "fulfilled") {
       state.tokenUsageEventsPage = eventsResult.value;
+      state.tokenUsageEventsError = null;
     } else if (isMissingTokenUsageEndpointError(eventsResult.reason)) {
       state.tokenUsageEventsPage = null;
       state.tokenUsageEventsError = null;
     } else {
-      state.tokenUsageEventsPage = null;
+      if (!quiet) state.tokenUsageEventsPage = null;
       state.tokenUsageEventsError = getErrorMessage(eventsResult.reason);
     }
   } catch (error) {
@@ -1130,19 +1344,42 @@ function init(): void {
     window.addEventListener("beforeunload", unsubscribeTokenUsage);
   } else {
     // Plain-browser mode: no Channel available. Poll the same endpoint
-    // ourselves every 5s. Same cadence the Rust shell uses, so users
-    // see equivalent freshness either way.
-    browserPollTimer = window.setInterval(() => {
-      void fetchTokenUsageSummaryAndEvents(1);
-    }, BROWSER_POLL_INTERVAL_MS);
+    // ourselves at the same pace the Rust shell uses (pollIntervalMs), so
+    // users see equivalent freshness either way. Quiet, and on the page
+    // they're looking at, so updates don't blank the view or reset paging.
+    const pollBrowser = (): void => {
+      const wait =
+        state.tokenUsageSummaryError ?
+          BROWSER_RETRY_INTERVAL_MS
+        : pollIntervalMs(state.tokenUsageSummary?.totals?.total_tokens);
+      browserPollTimer = window.setTimeout(async () => {
+        await fetchTokenUsageSummaryAndEvents(state.tokenUsageEventsPage?.page ?? 1, {
+          quiet: true,
+        });
+        pollBrowser();
+      }, wait);
+    };
+    pollBrowser();
     window.addEventListener("beforeunload", () => {
       if (browserPollTimer !== null) {
-        window.clearInterval(browserPollTimer);
+        window.clearTimeout(browserPollTimer);
         browserPollTimer = null;
       }
     });
   }
 }
+
+// /usage is only fetched on load and period changes, so a window left open
+// drifts; re-read it when the window comes back into view and it's >10 min old.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible") return;
+  // Coming back into view: move the range label to the current hour if the
+  // clock has rolled over while it was hidden.
+  syncRangeBaseline(true);
+  updateControls();
+  const age = state.usageFetchedAt === null ? Infinity : Date.now() - state.usageFetchedAt;
+  if (age > 10 * 60_000 || quotaPeriodEnded()) void refreshUsage();
+});
 
 // The bundle is loaded as a deferred module, so the DOM is parsed by the time
 // this runs. Start the app.

@@ -91,6 +91,9 @@ export default [
       "docs/**",
       "scripts/**",
       "shell/**",
+      // Isolated pnpm packages, each with its own lockfile, tsconfig, and
+      // toolchain (`mise -C packages/<name>`).
+      "packages/**",
       "site/**",
       ".dependency-cruiser.cjs",
       "landing/**",

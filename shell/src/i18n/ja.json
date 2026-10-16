@@ -220,6 +220,11 @@
   "dashboard-quota-unlimited": "無制限",
   "dashboard-quota-percent-used": "{percent}% 使用済み",
   "dashboard-quota-remaining": "残り {n}",
+  "dashboard-quota-resets": "{date} にリセット",
+  "dashboard-quota-period-ended": "期間は {date} に終了",
+  "dashboard-quota-as-of": "{time} 時点",
+  "dashboard-rate-per-minute": "{n} トークン/分",
+  "dashboard-rate-sparkline-label": "直近 15 分間の 1 分あたりのトークン数",
 
   "dashboard-api-response-title": "使用量 API レスポンス",
 

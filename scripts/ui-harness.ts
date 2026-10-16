@@ -30,6 +30,8 @@
  * Flags:
  *   --port <n>     listen port (default 4747)
  *   --scenario <s> initial scenario id (default "signed-in")
+ *   --check        validate the fixtures against the schemas and exit
+ *                  (no built UI or server needed; `bun run storybook:check`)
  *
  * Isolation — runs SIDE-BY-SIDE with a real maximal, zero interference:
  *   • Binds 127.0.0.1 only (loopback) — not reachable off-box, never `*`.
@@ -53,7 +55,14 @@ import {
   ModelsListResponse,
   UpdateStatusResponse,
 } from "../src/lib/config/settings-types"
-import { SCENARIOS, type ScenarioId, defaultScenarioId } from "./ui-harness-fixtures"
+import { type MockBackend, createMockBackend } from "./ui-harness-api"
+import {
+  type ResolvedScenario,
+  SCENARIOS,
+  type ScenarioId,
+  defaultScenarioId,
+  resolveScenario,
+} from "./ui-harness-fixtures"
 
 const REPO = resolve(import.meta.dir, "..")
 const DIST = join(REPO, "shell/dist/ui")
@@ -68,32 +77,25 @@ let activeScenario: ScenarioId =
     (argv[scenArg + 1] as ScenarioId)
   : defaultScenarioId
 
-if (!existsSync(join(DIST, "settings", "index.html"))) {
-  console.error(
-    "✗ Built UI not found at shell/dist/ui. Run `bun run build:ui` first " +
-      "(or `bun run build:ui --watch` in another terminal).",
-  )
-  process.exit(1)
-}
-
 // ---- startup contract check: every fixture must satisfy the real schema ----
 // This is the refactor-proof guarantee: if a settings-types schema changes in a
 // way a fixture doesn't meet, the harness refuses to start and names the gap.
 function assertFixtures(): void {
-  const checks: Array<[string, { safeParse: (v: unknown) => { success: boolean; error?: unknown } }, (s: keyof typeof SCENARIOS) => unknown]> =
+  const checks: Array<[string, { safeParse: (v: unknown) => { success: boolean; error?: unknown } }, (s: ResolvedScenario) => unknown]> =
     [
-      ["diagnostics", DiagnosticsResponse, (s) => SCENARIOS[s].diagnostics],
-      ["update-status", UpdateStatusResponse, (s) => SCENARIOS[s].updateStatus],
-      ["auth-status", AuthStatus, (s) => SCENARIOS[s].auth],
-      ["accounts", AccountsListResponse, (s) => SCENARIOS[s].accounts],
-      ["api-keys", ApiKeysListResponse, (s) => SCENARIOS[s].apiKeys],
-      ["apps", AppsListResponse, (s) => SCENARIOS[s].apps],
-      ["models", ModelsListResponse, (s) => SCENARIOS[s].models],
+      ["diagnostics", DiagnosticsResponse, (s) => s.diagnostics],
+      ["update-status", UpdateStatusResponse, (s) => s.updateStatus],
+      ["auth-status", AuthStatus, (s) => s.auth],
+      ["accounts", AccountsListResponse, (s) => s.accounts],
+      ["api-keys", ApiKeysListResponse, (s) => s.apiKeys],
+      ["apps", AppsListResponse, (s) => s.apps],
+      ["models", ModelsListResponse, (s) => s.models],
     ]
   let failures = 0
-  for (const id of Object.keys(SCENARIOS) as Array<keyof typeof SCENARIOS>) {
+  for (const id of Object.keys(SCENARIOS) as Array<ScenarioId>) {
+    const resolved = resolveScenario(id)
     for (const [name, schema, pick] of checks) {
-      const parsed = schema.safeParse(pick(id))
+      const parsed = schema.safeParse(pick(resolved))
       if (!parsed.success) {
         failures++
         console.error(`✗ fixture [${String(id)}].${name} fails schema:`)
@@ -108,33 +110,33 @@ function assertFixtures(): void {
 }
 assertFixtures()
 
-// ---- per-run mutable state, seeded from the active scenario ----------------
-// Mutations (toggles, key create/delete) update this so the UI reacts like the
-// real thing within a session. Switching scenarios reseeds.
-function seed(): {
-  auth: unknown
-  apps: unknown
-  apiKeys: unknown
-  accounts: unknown
-  models: unknown
-} {
-  const s = SCENARIOS[activeScenario]
-  return structuredClone({
-    auth: s.auth,
-    apps: s.apps,
-    apiKeys: s.apiKeys,
-    accounts: s.accounts,
-    models: s.models,
-  })
+// --check: the contract check alone (no built UI needed, no server).
+if (argv.includes("--check")) {
+  console.error(`✓ ${Object.keys(SCENARIOS).length} scenarios match the wire contract`)
+  process.exit(0)
 }
-let state = seed()
+
+if (!existsSync(join(DIST, "settings", "index.html"))) {
+  console.error(
+    "✗ Built UI not found at shell/dist/ui. Run `bun run build:ui` first " +
+      "(or `bun run build:ui --watch` in another terminal).",
+  )
+  process.exit(1)
+}
+
+// ---- per-run mock backend, seeded from the active scenario ----------------
+// Mutations (toggles, key create/delete) update the backend's own state so the
+// UI reacts like the real thing within a session. Switching scenarios reseeds.
+// The request handling itself lives in ui-harness-api.ts, shared with the
+// Storybook package's in-browser fetch mock.
+let backend: MockBackend = createMockBackend(activeScenario)
 
 // ---- SSE subscribers (auth.changed parity with src/routes/settings/events) -
 const sseClients = new Set<ReadableStreamDefaultController<Uint8Array>>()
 const enc = new TextEncoder()
 function broadcastAuth(): void {
   const frame = enc.encode(
-    `event: auth.changed\ndata: ${JSON.stringify(state.auth)}\n\n`,
+    `event: auth.changed\ndata: ${JSON.stringify(backend.auth)}\n\n`,
   )
   for (const c of sseClients) {
     try {
@@ -144,6 +146,7 @@ function broadcastAuth(): void {
     }
   }
 }
+backend.onAuthChange(broadcastAuth)
 
 const json = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), {
@@ -205,118 +208,6 @@ async function serveUi(urlPath: string): Promise<Response> {
   return new Response(file)
 }
 
-// ---- the mock API surface --------------------------------------------------
-async function handleApi(req: Request, path: string): Promise<Response> {
-  const method = req.method
-  const body = async (): Promise<any> => req.json().catch(() => ({}))
-
-  // --- reads ---
-  if (path === "/settings/api/diagnostics") return json(SCENARIOS[activeScenario].diagnostics)
-  if (path === "/settings/api/update-status") return json(SCENARIOS[activeScenario].updateStatus)
-  if (path === "/settings/api/auth/github/status") return json(state.auth)
-  if (path === "/settings/api/accounts") return json(state.accounts)
-  if (path === "/settings/api/api-keys" && method === "GET") return json(state.apiKeys)
-  if (path === "/settings/api/apps") return json(state.apps)
-  if (path === "/settings/api/models" && method === "GET") return json(state.models)
-  if (path === "/settings/api/gh/status") return json(SCENARIOS[activeScenario].ghStatus)
-  if (path.startsWith("/settings/api/clients")) return json({ clients: [] })
-
-  // --- auth lifecycle (drive the device-code flow + sign out) ---
-  if (path === "/settings/api/auth/github/start" && method === "POST") {
-    state.auth = SCENARIOS[activeScenario].deviceCode ?? {
-      state: "device_code_issued",
-      user_code: "WXYZ-1234",
-      verification_uri: "https://github.com/login/device",
-      expires_at: new Date(Date.now() + 900_000).toISOString(),
-    }
-    broadcastAuth()
-    return json(state.auth)
-  }
-  if (path === "/settings/api/auth/github/sign-out" && method === "POST") {
-    state.auth = { state: "unauthenticated" }
-    broadcastAuth()
-    return json({ ok: true })
-  }
-  if (path === "/settings/api/auth/github/cancel" && method === "POST") {
-    state.auth = SCENARIOS[activeScenario].auth
-    broadcastAuth()
-    return json(state.auth)
-  }
-
-  // --- apps toggles (flip enabled, echo the fresh entry) ---
-  if (path === "/settings/api/apps/claude-code/toggle" && method === "POST") {
-    return toggleApp("claude-code", (await body()).enabled)
-  }
-  if (path === "/settings/api/apps/claude-desktop/toggle" && method === "POST") {
-    return toggleApp("claude-desktop", (await body()).enabled)
-  }
-
-  // --- models refresh (just re-stamp loaded_at) ---
-  if (path === "/settings/api/models/refresh" && method === "POST") {
-    ;(state.models as any).loaded_at = new Date().toISOString()
-    return json(state.models)
-  }
-
-  // --- api-keys CRUD (mutate in-memory so the table reacts) ---
-  if (path === "/settings/api/api-keys" && method === "POST") {
-    const b = await body()
-    const entry = {
-      id: `key_${Math.floor(performance.now())}`,
-      label: b.label ?? "New key",
-      key: b.key ?? `mxl_${Math.random().toString(36).slice(2, 14)}`,
-      enabled: b.enabled ?? true,
-      created_at: new Date().toISOString(),
-    }
-    ;(state.apiKeys as any).entries.push(entry)
-    ;(state.apiKeys as any).enforcing = true
-    return json(entry)
-  }
-  if (path.startsWith("/settings/api/api-keys/") && path.endsWith("/enforce") === false && method === "DELETE") {
-    const id = path.split("/").pop()
-    const ks = state.apiKeys as any
-    ks.entries = ks.entries.filter((e: any) => e.id !== id)
-    ks.enforcing = ks.entries.some((e: any) => e.enabled)
-    return new Response(null, { status: 204 })
-  }
-  if (path.startsWith("/settings/api/api-keys/") && method === "PATCH" && path.endsWith("/enforce") === false) {
-    const id = path.split("/").pop()
-    const b = await body()
-    const ks = state.apiKeys as any
-    const e = ks.entries.find((x: any) => x.id === id)
-    if (e) Object.assign(e, b)
-    return json(e ?? { error: { message: "not found" } }, e ? 200 : 404)
-  }
-  if (path === "/settings/api/api-keys/enforce" && method === "PATCH") {
-    const b = await body()
-    ;(state.apiKeys as any).enforcing = !!b.enforcing
-    return json(state.apiKeys)
-  }
-
-  // --- account switch / remove / gh-use: echo authenticated (no real reboot) -
-  if (
-    path === "/settings/api/accounts/switch" ||
-    path === "/settings/api/gh/use"
-  ) {
-    return json({ ok: true })
-  }
-  if (path === "/settings/api/accounts/remove" && method === "POST") {
-    const b = await body()
-    const acc = state.accounts as any
-    acc.accounts = acc.accounts.filter((a: any) => a.key !== b.key)
-    return json({ ok: true })
-  }
-
-  return json({ error: { message: `harness: unhandled ${method} ${path}` } }, 404)
-}
-
-function toggleApp(id: string, enabled: boolean): Response {
-  const apps = (state.apps as any).apps as Array<any>
-  const app = apps.find((a) => a.id === id)
-  if (!app) return json({ error: { message: "no such app" } }, 404)
-  app.enabled = enabled
-  return json(app)
-}
-
 // ---- SSE ------------------------------------------------------------------
 function serveEvents(): Response {
   const stream = new ReadableStream<Uint8Array>({
@@ -324,7 +215,7 @@ function serveEvents(): Response {
       sseClients.add(controller)
       controller.enqueue(enc.encode(": connected\n\n"))
       controller.enqueue(
-        enc.encode(`event: auth.changed\ndata: ${JSON.stringify(state.auth)}\n\n`),
+        enc.encode(`event: auth.changed\ndata: ${JSON.stringify(backend.auth)}\n\n`),
       )
     },
     cancel() {
@@ -368,7 +259,8 @@ function serve(): ReturnType<typeof Bun.serve> {
           const b = await req.json().catch(() => ({}))
           if (b.id in SCENARIOS) {
             activeScenario = b.id as ScenarioId
-            state = seed()
+            backend = createMockBackend(activeScenario)
+            backend.onAuthChange(broadcastAuth)
             broadcastAuth()
           }
           return json({ ok: true, active: activeScenario })
@@ -383,7 +275,8 @@ function serve(): ReturnType<typeof Bun.serve> {
         }
 
         if (path === "/settings/api/events") return serveEvents()
-        if (path.startsWith("/settings/api/")) return handleApi(req, path)
+        const mocked = await backend.handle(req)
+        if (mocked) return mocked
         if (path.startsWith("/ui/")) return serveUi(path)
         if (path === "/") return Response.redirect("/ui/settings/", 302)
         return new Response("Not found", { status: 404 })

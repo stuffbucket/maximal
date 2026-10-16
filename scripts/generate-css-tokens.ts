@@ -2,7 +2,7 @@ import { writeFileSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   fontStacks, text, weight, leading, tracking, spacing, radii, borderWidth, size,
-  elevation, brand, accent, status, link, focusRing, layout, themes
+  elevation, brand, accent, focusRing, layout, themes
 } from "../shell/src/ui/styles/theme";
 
 const REPO = resolve(import.meta.dir, "..");
@@ -20,6 +20,52 @@ function processGroup(prefix: string, group: Record<string, string>): string[] {
       : `--${prefix}-${toKebabCase(k)}`;
     return `  ${key}: ${v};`;
   });
+}
+
+type ThemeColors = Record<string, string>;
+
+function declarations(colors: ThemeColors, indent: string): string[] {
+  return Object.entries(colors).map(([k, v]) => `${indent}--${toKebabCase(k)}: ${v};`);
+}
+
+/**
+ * The theme-dependent color blocks, identical in both outputs:
+ *   - dark is the default (`:root`);
+ *   - the OS light appearance switches to light, unless <html> is pinned
+ *     with data-theme="dark";
+ *   - data-theme="light" pins light regardless of the OS.
+ * `color-scheme` rides along so native controls (selects, scrollbars,
+ * checkboxes before styling) match the theme.
+ */
+function themeBlocks(dark: ThemeColors, light: ThemeColors): string[] {
+  const darkKeys = Object.keys(dark).sort().join(",");
+  const lightKeys = Object.keys(light).sort().join(",");
+  if (darkKeys !== lightKeys) {
+    throw new Error(
+      `themes.dark and themes.light must declare the same colors.\n  dark:  ${darkKeys}\n  light: ${lightKeys}`,
+    );
+  }
+  return [
+    "/* ---- Theme colors ----",
+    "   Dark by default; follows the OS when its appearance is light; a",
+    "   data-theme=\"dark\" | \"light\" attribute on <html> pins either one. */",
+    ":root {",
+    "  color-scheme: dark;",
+    ...declarations(dark, "  "),
+    "}",
+    "",
+    "@media (prefers-color-scheme: light) {",
+    "  :root:not([data-theme=\"dark\"]) {",
+    "    color-scheme: light;",
+    ...declarations(light, "    "),
+    "  }",
+    "}",
+    "",
+    "[data-theme=\"light\"] {",
+    "  color-scheme: light;",
+    ...declarations(light, "  "),
+    "}",
+  ];
 }
 
 function generateTokensCSS(): string {
@@ -58,19 +104,11 @@ function generateTokensCSS(): string {
 
   rootLines.push("\n  /* ---- Colors ---- */");
   rootLines.push(...processGroup("brand", brand as any));
-  const { hover, destructive, destructiveFg, ...accentBase } = accent;
+  const { destructive, destructiveFg, ...accentBase } = accent;
   rootLines.push(...processGroup("accent", accentBase as any));
-  rootLines.push(`  --accent-hover: ${hover};`);
   rootLines.push(`  --accent-destructive: ${destructive};`);
   rootLines.push(`  --accent-destructive-foreground: ${destructiveFg};`);
   
-  rootLines.push("\n  /* ---- Semantic status ---- */");
-  rootLines.push(...processGroup("status", status as any));
-
-  rootLines.push("\n  /* ---- Link colors (defaults to dark theme) ---- */");
-  rootLines.push(`  --link: ${link.dark.color};`);
-  rootLines.push(`  --link-hover: ${link.dark.hover};`);
-
   rootLines.push("\n  /* ---- Focus ring ---- */");
   rootLines.push(`  --focus-ring-width: ${focusRing.width};`);
   rootLines.push(`  --focus-ring-offset: ${focusRing.offset};`);
@@ -82,14 +120,13 @@ function generateTokensCSS(): string {
 
   rootLines.push("}\n");
 
-  const darkTheme = Object.entries(themes.dark).map(([k, v]) => `  --${toKebabCase(k)}: ${v};`).join("\n");
-  rootLines.push(`[data-theme="dark"] {\n${darkTheme}\n}\n`);
-
-  const lightTheme = Object.entries(themes.light).map(([k, v]) => `  --${toKebabCase(k)}: ${v};`).join("\n");
-  rootLines.push(`[data-theme="light"] {\n${lightTheme}\n}\n`);
+  rootLines.push(...themeBlocks(themes.dark, themes.light), "");
 
   return rootLines.join("\n");
 }
+
+const DASHBOARD_BEGIN = "/* ---- BEGIN GENERATED TOKENS (scripts/generate-css-tokens.ts) ---- */";
+const DASHBOARD_END = "/* ---- END GENERATED TOKENS ---- */";
 
 function updateUsageViewerCss() {
   const cssPath = resolve(REPO, "shell/ui/dashboard/style.css");
@@ -113,52 +150,33 @@ function updateUsageViewerCss() {
   Object.entries(tracking).forEach(([k, v]) => rootLines.push(`  --tracking-${k}: ${v};`));
   Object.entries(spacing).forEach(([k, v]) => rootLines.push(`  --space-${k}: ${v};`));
   Object.entries(radii).forEach(([k, v]) => rootLines.push(`  --radius-${k}: ${v};`));
+  Object.entries(borderWidth).forEach(([k, v]) => rootLines.push(`  --border-width-${k}: ${v};`));
+  Object.entries(size).forEach(([k, v]) => rootLines.push(`  --size-${k}: ${v};`));
   Object.entries(elevation).forEach(([k, v]) => rootLines.push(`  --elevation-${k}: ${v};`));
   
   rootLines.push(...processGroup("brand", brand as any));
-  const { hover, destructive, destructiveFg, ...accentBase } = accent;
+  const { destructive, destructiveFg, ...accentBase } = accent;
   rootLines.push(...processGroup("accent", accentBase as any));
-  rootLines.push(`  --accent-hover: ${hover};`);
-  rootLines.push(...processGroup("status", status as any));
-  rootLines.push(`  --link: var(--accent);`);
-  rootLines.push(`  --link-hover: var(--accent-hover);`);
   rootLines.push(`  --focus-ring: ${focusRing.dashboardExpr};`);
   
-  const darkThemeLines = Object.entries(themes.dark).map(([k, v]) => {
-     // Dashboard uses --surface-base for textMuted sometimes? We just provide the vars.
-     return `  --${toKebabCase(k)}: ${v};`;
-  });
-  rootLines.push(...darkThemeLines);
-  
-  rootLines.push("");
-  rootLines.push("  /* Legacy aliases maintained for usage-viewer */");
-  rootLines.push(`  --color-bg-darkest: var(--surface-base);`);
-  rootLines.push(`  --color-bg: var(--surface-card);`);
-  rootLines.push(`  --color-bg-soft: var(--surface-card);`);
-  rootLines.push(`  --color-bg-light-1: var(--surface-control);`);
-  rootLines.push(`  --color-bg-light-2: var(--border-subtle);`);
-  rootLines.push(`  --color-fg-dark: var(--text-muted);`);
-  rootLines.push(`  --color-fg-medium: var(--text-base-color);`);
-  rootLines.push(`  --color-fg-light: var(--text-base-color);`);
-  rootLines.push(`  --color-fg-lightest: var(--text-strong);`);
-  rootLines.push(`  --color-blue: var(--accent);`);
-  rootLines.push(`  --color-blue-accent: var(--accent-hover);`);
-  rootLines.push(`  --color-red: var(--status-error);`);
-  rootLines.push(`  --color-red-accent: var(--status-error-fg);`);
-  rootLines.push(`  --color-green: var(--status-success);`);
-  rootLines.push(`  --color-green-accent: var(--status-success-fg);`);
-  rootLines.push(`  --color-yellow: var(--status-warning);`);
-  rootLines.push(`  --color-yellow-accent: var(--status-warning-fg);`);
-  rootLines.push(`  --color-aqua-accent: var(--status-info-fg);`);
-  rootLines.push(`  --color-purple-accent: #c084fc; /* specific to dashboard */`);
-  rootLines.push(`  --color-gray: var(--text-muted);`);
-  rootLines.push(`  --color-gray-accent: var(--text-muted);`);
-
   rootLines.push("}");
-  
-  // replace from `:root {` down to `}`
-  const regex = /:root\s*\{[^}]+\}/m;
-  const nextSrc = cssSrc.replace(regex, rootLines.join("\n"));
+  rootLines.push("");
+  rootLines.push(
+    ...themeBlocks(themes.dark, themes.light),
+  );
+
+  const generated = [DASHBOARD_BEGIN, ...rootLines, DASHBOARD_END].join("\n");
+  const begin = cssSrc.indexOf(DASHBOARD_BEGIN);
+  const end = cssSrc.indexOf(DASHBOARD_END);
+  let nextSrc: string;
+  if (begin !== -1 && end !== -1) {
+    nextSrc = cssSrc.slice(0, begin) + generated + cssSrc.slice(end + DASHBOARD_END.length);
+  } else {
+    // First run on a file without markers: replace its single :root block.
+    const regex = /:root\s*\{[^}]+\}/m;
+    if (!regex.test(cssSrc)) throw new Error("dashboard style.css has no :root block or token markers");
+    nextSrc = cssSrc.replace(regex, generated);
+  }
   writeFileSync(cssPath, nextSrc, "utf8");
 }
 

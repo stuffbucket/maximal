@@ -298,9 +298,12 @@ interface ApiOptions {
   apiKey?: string
 }
 
-type ApiResult<T> =
+export type ApiResult<T> =
   | { ok: true; data: T }
   | { ok: false; status: number; error: string }
+
+/** A failed call: HTTP status (0 when Maximal never answered) + raw body. */
+export type ApiFailure = Extract<ApiResult<unknown>, { ok: false }>
 
 function baseUrl(): string {
   // The settings + dashboard UIs are always served by the sidecar itself

@@ -220,6 +220,11 @@
   "dashboard-quota-unlimited": "Без ограничений",
   "dashboard-quota-percent-used": "Использовано {percent} %",
   "dashboard-quota-remaining": "осталось {n}",
+  "dashboard-quota-resets": "Сброс {date}",
+  "dashboard-quota-period-ended": "Период закончился {date}",
+  "dashboard-quota-as-of": "Данные на {time}",
+  "dashboard-rate-per-minute": "{n} токенов/мин",
+  "dashboard-rate-sparkline-label": "Токенов в минуту за последние 15 минут",
 
   "dashboard-api-response-title": "Ответ API использования",
 
