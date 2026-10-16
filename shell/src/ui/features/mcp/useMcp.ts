@@ -3,17 +3,20 @@ import { useCallback, useEffect, useState } from "react";
 import { apiCall } from "../../../proxy/client";
 import type {
   McpBrokerHealth,
+  McpCatalogItem,
   McpClientId,
   McpEndpointEntry,
+  McpEndpointRemoveResponse,
   McpEndpointToggleResponse,
 } from "../../../proxy/client";
 import { type Problem, describeProblem, withRetry } from "../../problems";
 
 /**
  * Data hook over `/settings/api/mcp`. Owns the list of brokered MCP
- * endpoints, the health of the process that runs them, and the one mutation
- * the screen needs: turn an endpoint on (with the clients it should reach)
- * or off. A toggle restarts the broker and may run the `claude` CLI, so it
+ * endpoints, the known servers that could be added, the health of the
+ * process that runs them, and the mutations: add a found server, turn an
+ * endpoint on (with the clients it should reach) or off, and remove one. A
+ * toggle or removal restarts the broker and may run the `claude` CLI, so it
  * gets a longer timeout than the default.
  */
 const TOGGLE_TIMEOUT_MS = 60_000;
@@ -31,8 +34,16 @@ export interface McpToggleResult {
   adoptedFrom?: string;
 }
 
+export interface McpMutationResult {
+  ok: boolean;
+  problem?: Problem;
+  removedFrom?: McpEndpointRemoveResponse["removedFrom"];
+}
+
 interface UseMcp {
   endpoints: Array<McpEndpointEntry>;
+  /** Known servers not added yet, with whether each is installed. */
+  available: Array<McpCatalogItem>;
   broker: McpBrokerHealth | null;
   isLoading: boolean;
   /** The list still failed to load after automatic retries. A failed toggle
@@ -44,10 +55,13 @@ interface UseMcp {
     enabled: boolean,
     clients?: Array<McpClientId>,
   ) => Promise<McpToggleResult>;
+  add: (catalogId: string) => Promise<McpMutationResult>;
+  remove: (id: string) => Promise<McpMutationResult>;
 }
 
 export function useMcp(): UseMcp {
   const [endpoints, setEndpoints] = useState<Array<McpEndpointEntry>>([]);
+  const [available, setAvailable] = useState<Array<McpCatalogItem>>([]);
   const [broker, setBroker] = useState<McpBrokerHealth | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [problem, setProblem] = useState<Problem | null>(null);
@@ -62,6 +76,7 @@ export function useMcp(): UseMcp {
     );
     if (result.ok) {
       setEndpoints(result.data.endpoints);
+      setAvailable(result.data.available);
       setBroker(result.data.broker);
       setProblem(null);
     } else {
@@ -147,5 +162,58 @@ export function useMcp(): UseMcp {
     [refresh],
   );
 
-  return { endpoints, broker, isLoading, problem, refresh, toggle };
+  const add = useCallback<UseMcp["add"]>(
+    async (catalogId) => {
+      const result = await apiCall({
+        kind: "mcp-add",
+        method: "POST",
+        path: "/settings/api/mcp",
+        body: { catalogId },
+      });
+      void refresh();
+      if (result.ok) return { ok: true };
+      // Not installed any more, or added meanwhile: the refresh shows which.
+      if (result.status === 409 || result.status === 404) {
+        return {
+          ok: false,
+          problem: {
+            title: "Couldn't add this server",
+            detail:
+              "It was uninstalled or already added since this list was shown, so the list has been updated.",
+            remedy: "none",
+            technical: `HTTP ${result.status}: ${result.error}`,
+          },
+        };
+      }
+      return {
+        ok: false,
+        problem: describeProblem(result, { subject: "this server", doing: "save" }),
+      };
+    },
+    [refresh],
+  );
+
+  const remove = useCallback<UseMcp["remove"]>(
+    async (id) => {
+      const result = await apiCall(
+        {
+          kind: "mcp-remove",
+          method: "DELETE",
+          path: `/settings/api/mcp/${encodeURIComponent(id)}`,
+        },
+        { signal: AbortSignal.timeout(TOGGLE_TIMEOUT_MS) },
+      );
+      void refresh();
+      // Already gone is what the user wanted.
+      if (result.ok) return { ok: true, removedFrom: result.data.removedFrom };
+      if (result.status === 404) return { ok: true, removedFrom: [] };
+      return {
+        ok: false,
+        problem: describeProblem(result, { subject: "this server", doing: "save" }),
+      };
+    },
+    [refresh],
+  );
+
+  return { endpoints, available, broker, isLoading, problem, refresh, toggle, add, remove };
 }

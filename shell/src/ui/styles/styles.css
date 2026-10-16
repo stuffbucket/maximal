@@ -2190,9 +2190,10 @@ a:hover {
 }
 
 /* ---- MCP endpoint card ----
-   Name + Refresh on the left, the on/off switch on the right, then every
-   app that can get the endpoint as one checkbox row — no prompt. "All
-   apps" heads the list; app rows indent under it. Changes save as made. */
+   Name on the left; on the right, Refresh and Remove as icon buttons, the
+   on/off switch, then the twirldown. Below, every app that can get the
+   endpoint as one checkbox row — no prompt. "All apps" heads the list; app
+   rows indent under it. Changes save as made; Remove asks first. */
 .mcp-card__title {
   flex: 1 1 auto;
   min-width: 0;

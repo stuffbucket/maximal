@@ -148,8 +148,25 @@ the wait for response headers is timed, so SSE streams stay open.
 local stdio MCP client reach one endpoint; it reads an optional key from
 `MAXIMAL_MCP_API_KEY`.
 
-Endpoints are toggled from Settings → MCP servers or `maximal mcp <id>
---enable/--disable` (`src/apps/mcp.ts`). Turning one on asks which client apps
+Endpoints are added, toggled, and removed from Settings → MCP servers or
+`maximal mcp <id> --add/--enable/--disable/--remove` (`src/apps/mcp.ts`).
+
+Known servers come from a small catalog (`src/lib/mcp-broker/catalog.ts`;
+Work IQ first). Each entry finds the server's own executable and offers it
+under "Available to add", or shows its install command when it isn't
+found. A GUI-launched sidecar has launchd's minimal PATH, so detection
+records an absolute path to the native executable inside the npm package
+(mise install, PATH symlink, or npm global prefix), not a bare name, a mise
+shim, or an npm launcher that needs `node`. When several installs exist,
+the highest version wins. Adding asks the user to confirm and writes the
+endpoint off, with `catalog` set. The path contains the package version and
+package managers keep old versions after an upgrade, so boot, every Settings
+list, and every `maximal mcp` run switch a catalog endpoint to the newest
+install found (an uninstalled server keeps its last path). The CLI can also add any stdio
+server given after `--`, as an absolute path. Removing deletes the
+endpoint from `config.json` first and then syncs clients: the desired
+entries come from `servers`, while what Maximal owns stays recorded per
+app, so exactly Maximal's entries come out. Turning one on asks which client apps
 should get it; the choice is kept in `mcpBroker.servers[].clients` even while
 the endpoint is off, so turning it back on pre-selects it. Each Claude
 integration exposes an MCP configurator on its `ClientApp` (`mcp`), and the
@@ -194,8 +211,10 @@ non-secret environment into the endpoint once, so the broker runs the same
 server. The app's own entry stays untouched; secret-looking environment names
 are not copied and are reported. Maximal's own adapter is never adopted.
 
-Toggling from Settings restarts the broker in-process (only when the
-`mcpBroker` section actually changed). The CLI, which has no broker, calls the
+Toggling from Settings restarts the broker in-process, only when what it
+serves changed: endpoints that are off and the apps an endpoint goes to
+don't count, so adding an endpoint or re-picking apps leaves live sessions
+alone. The CLI, which has no broker, calls the
 running server's loopback-only `POST /_internal/reload`, which re-reads
 `config.json` and restarts the broker if needed, so no restart is required. External MCP commands,
 including Work IQ when configured, remain separately installed programs;

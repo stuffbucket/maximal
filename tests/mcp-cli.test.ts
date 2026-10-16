@@ -159,6 +159,104 @@ describe("maximal mcp <id> --enable / --disable", () => {
   })
 })
 
+const servers = () => getConfig().mcpBroker?.servers ?? []
+const failure = (promise: Promise<unknown>) =>
+  promise.then(
+    () => undefined,
+    (error_: unknown) => error_ as Error,
+  )
+
+describe("maximal mcp <id> --add / --remove", () => {
+  const ADDED = "cli-added-9c1f"
+  // `--port` goes before `--`: everything after it is the server's command.
+  const add = (...rest: Array<string>) =>
+    runCommand(mcpCommand, {
+      rawArgs: [ADDED, "--add", "--port", String(running.port), ...rest],
+    })
+
+  test("adds a stdio server given after --, off, and asks Maximal to reload", async () => {
+    await add("--label", "Added", "--", "/opt/added/server", "--stdio", "-v")
+    expect(servers().find((server) => server.id === ADDED)).toEqual({
+      id: ADDED,
+      label: "Added",
+      enabled: false,
+      transport: {
+        type: "stdio",
+        command: "/opt/added/server",
+        args: ["--stdio", "-v"],
+      },
+    })
+    expect(reloads).toEqual(["/_internal/reload"])
+  })
+
+  test("refuses a bare command name, which Maximal's PATH may not find", async () => {
+    const error = await failure(add("--", "server"))
+    expect(error?.message).toContain("full path")
+    expect(servers().map((server) => server.id)).toEqual([ID])
+  })
+
+  test("an id that isn't in the catalog needs a command", async () => {
+    const error = await failure(add())
+    expect(error?.message).toContain("isn't a known MCP server")
+    expect(servers().map((server) => server.id)).toEqual([ID])
+  })
+
+  test("refuses an id that's already an endpoint", async () => {
+    const error = await failure(
+      runCommand(mcpCommand, {
+        rawArgs: [ID, "--add", "--", "/opt/added/server"],
+      }),
+    )
+    expect(error?.message).toContain("already exists")
+  })
+
+  test("--remove takes the endpoint out of config", async () => {
+    await run(ID, "--remove")
+    expect(servers()).toEqual([])
+    expect(reloads).toEqual(["/_internal/reload"])
+  })
+
+  test("only one action at a time", async () => {
+    const error = await failure(run(ID, "--enable", "--remove"))
+    expect(error?.message).toContain("only one of")
+    expect(servers().map((server) => server.id)).toEqual([ID])
+  })
+
+  describe("in an interactive terminal", () => {
+    const wasTty = process.stdin.isTTY
+    beforeEach(() => {
+      process.stdin.isTTY = true
+    })
+    afterEach(() => {
+      process.stdin.isTTY = wasTty
+    })
+
+    test("declining the confirm adds or removes nothing", async () => {
+      const prompt = spyOn(consola, "prompt").mockResolvedValue(false)
+      try {
+        await add("--", "/opt/added/server")
+        await run(ID, "--remove")
+        expect(prompt).toHaveBeenCalledTimes(2)
+      } finally {
+        prompt.mockRestore()
+      }
+      expect(servers().map((server) => server.id)).toEqual([ID])
+      expect(reloads).toEqual([])
+    })
+
+    test("--unattended doesn't ask", async () => {
+      const prompt = spyOn(consola, "prompt")
+      try {
+        await run(ID, "--remove", "--unattended")
+        expect(prompt).not.toHaveBeenCalled()
+      } finally {
+        prompt.mockRestore()
+      }
+      expect(servers()).toEqual([])
+    })
+  })
+})
+
 function view(
   clients: McpEndpointView["clients"],
   desktopAvailable: boolean,

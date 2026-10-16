@@ -433,9 +433,23 @@ export const McpBrokerHealth = z.object({
 })
 export type McpBrokerHealth = z.infer<typeof McpBrokerHealth>
 
+/** A known MCP server Maximal looked for that isn't an endpoint yet. */
+export const McpCatalogItem = z.object({
+  id: z.string(),
+  label: z.string(),
+  status: z.enum(["ready", "not-installed"]),
+  /** Absolute path of the executable Maximal found. */
+  command: z.string().optional(),
+  version: z.string().optional(),
+  install: z.object({ command: z.string(), url: z.string() }),
+})
+export type McpCatalogItem = z.infer<typeof McpCatalogItem>
+
 export const McpEndpointsListResponse = z.object({
   endpoints: z.array(McpEndpointEntry),
   broker: McpBrokerHealth,
+  /** Known servers to offer adding, installed or not. */
+  available: z.array(McpCatalogItem),
 })
 export type McpEndpointsListResponse = z.infer<typeof McpEndpointsListResponse>
 
@@ -457,4 +471,18 @@ export const McpEndpointToggleResponse = z.object({
 })
 export type McpEndpointToggleResponse = z.infer<
   typeof McpEndpointToggleResponse
+>
+
+export const McpEndpointAddRequest = z.object({ catalogId: z.string().min(1) })
+export type McpEndpointAddRequest = z.infer<typeof McpEndpointAddRequest>
+
+export const McpEndpointAddResponse = z.object({ endpoint: McpEndpointEntry })
+export type McpEndpointAddResponse = z.infer<typeof McpEndpointAddResponse>
+
+export const McpEndpointRemoveResponse = z.object({
+  /** Apps Maximal took this server's entry out of. */
+  removedFrom: z.array(z.object({ client: McpClientId, name: z.string() })),
+})
+export type McpEndpointRemoveResponse = z.infer<
+  typeof McpEndpointRemoveResponse
 >

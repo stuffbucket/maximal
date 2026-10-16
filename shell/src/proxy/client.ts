@@ -171,9 +171,31 @@ export interface McpBrokerHealth {
   problem: "not-installed" | "unsupported-platform" | null
 }
 
+/** A known MCP server Maximal looked for that isn't an endpoint yet. */
+export interface McpCatalogItem {
+  id: string
+  label: string
+  status: "ready" | "not-installed"
+  /** Absolute path of the executable Maximal found. */
+  command?: string
+  version?: string
+  install: { command: string; url: string }
+}
+
 interface McpEndpointsListResponse {
   endpoints: Array<McpEndpointEntry>
   broker: McpBrokerHealth
+  /** Known servers to offer adding, installed or not. */
+  available: Array<McpCatalogItem>
+}
+
+interface McpEndpointAddResponse {
+  endpoint: McpEndpointEntry
+}
+
+export interface McpEndpointRemoveResponse {
+  /** Apps Maximal took this server's entry out of. */
+  removedFrom: Array<{ client: McpClientId; name: string }>
 }
 
 export interface McpEndpointToggleResponse {
@@ -321,6 +343,17 @@ type Endpoint =
       path: `/settings/api/mcp/${string}`
       body: { enabled: boolean; clients?: Array<McpClientId> }
     }
+  | {
+      kind: "mcp-add"
+      method: "POST"
+      path: "/settings/api/mcp"
+      body: { catalogId: string }
+    }
+  | {
+      kind: "mcp-remove"
+      method: "DELETE"
+      path: `/settings/api/mcp/${string}`
+    }
 
 type EndpointKind = Endpoint["kind"]
 
@@ -347,6 +380,8 @@ interface ResponseFor {
   "claude-desktop-toggle": AppEntry
   "mcp-list": McpEndpointsListResponse
   "mcp-toggle": McpEndpointToggleResponse
+  "mcp-add": McpEndpointAddResponse
+  "mcp-remove": McpEndpointRemoveResponse
   "models-list": ModelsListResponse
   "models-refresh": ModelsListResponse
 }

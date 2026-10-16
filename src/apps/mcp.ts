@@ -12,10 +12,15 @@ import path from "node:path"
 
 import type { AppConfig, McpServerConfig } from "~/lib/config/config"
 import type { McpBrokerHealth } from "~/lib/config/settings-types"
+import type {
+  CatalogDetectOptions,
+  CatalogInstall,
+} from "~/lib/mcp-broker/catalog"
 import type { McpReconcileResult } from "~/lib/mcp-broker/client-sync"
 import type { McpClientId } from "~/lib/mcp-broker/types"
 
 import { getConfig, writeConfig } from "~/lib/config/config"
+import { findCatalogEntry, MCP_CATALOG } from "~/lib/mcp-broker/catalog"
 import { ownedMcpServers, syncMcpClient } from "~/lib/mcp-broker/client-sync"
 import { isProtectedEnvironmentName } from "~/lib/mcp-broker/configuration"
 import {
@@ -267,5 +272,166 @@ export function syncMcpClientsOnBoot(config: AppConfig): void {
     } catch (error) {
       consola.warn(`Could not update ${app.name} MCP servers`, error)
     }
+  }
+}
+
+// ── Finding, adding, and removing endpoints ────────────────────────────
+
+/** A known MCP server from the catalog that isn't an endpoint yet. */
+export interface McpCatalogView {
+  id: string
+  label: string
+  status: "ready" | "not-installed"
+  /** Absolute path of the executable Maximal found. */
+  command?: string
+  version?: string
+  install: { command: string; url: string }
+}
+
+export type McpEndpointErrorCode =
+  | "exists"
+  | "not-installed"
+  | "unknown-catalog"
+
+export class McpEndpointError extends Error {
+  readonly code: McpEndpointErrorCode
+
+  constructor(code: McpEndpointErrorCode, message: string) {
+    super(message)
+    this.name = "McpEndpointError"
+    this.code = code
+  }
+}
+
+/** Catalog servers not yet added, each with whether it's installed. */
+export function listMcpCatalog(
+  config: AppConfig = getConfig(),
+  options?: CatalogDetectOptions,
+): Array<McpCatalogView> {
+  const added = new Set((config.mcpBroker?.servers ?? []).map((s) => s.id))
+  return MCP_CATALOG.filter((entry) => !added.has(entry.id)).map((entry) => {
+    const found = entry.locate(options)
+    return {
+      id: entry.id,
+      label: entry.label,
+      status: found ? "ready" : "not-installed",
+      ...(found ? { command: found.command } : {}),
+      ...(found?.version ? { version: found.version } : {}),
+      install: entry.install,
+    }
+  })
+}
+
+/** The endpoint config for a catalog server found on this machine. */
+export function catalogServer(
+  id: string,
+  options?: CatalogDetectOptions,
+): McpServerConfig {
+  const entry = findCatalogEntry(id)
+  if (!entry) {
+    throw new McpEndpointError("unknown-catalog", `No known MCP server "${id}"`)
+  }
+  const found = entry.locate(options)
+  if (!found) {
+    throw new McpEndpointError(
+      "not-installed",
+      `${entry.label} isn't installed. Install it with: ${entry.install.command}`,
+    )
+  }
+  return entry.template(found)
+}
+
+/**
+ * Add an endpoint, off. Turning it on goes through `setMcpEndpoint`, which
+ * asks which apps get it. An endpoint that is off isn't served, so the
+ * broker keeps running untouched.
+ */
+export async function addMcpEndpoint(
+  server: McpServerConfig,
+): Promise<{ endpoint: McpEndpointView; brokerReloaded: boolean }> {
+  const config = getConfig()
+  const servers = config.mcpBroker?.servers ?? []
+  if (servers.some((existing) => existing.id === server.id)) {
+    throw new McpEndpointError(
+      "exists",
+      `An MCP endpoint "${server.id}" already exists`,
+    )
+  }
+  const next = writeConfig({
+    ...config,
+    mcpBroker: {
+      ...config.mcpBroker,
+      servers: [...servers, { ...server, enabled: false }],
+    },
+  })
+  const brokerReloaded = await reconfigureBroker(next.mcpBroker ?? {})
+  const endpoint = listMcpEndpoints(next).find((view) => view.id === server.id)
+  if (!endpoint) throw new Error(`MCP endpoint "${server.id}" was not saved`)
+  return { endpoint, brokerReloaded }
+}
+
+/**
+ * Remove an endpoint and every entry Maximal wrote for it into client apps.
+ * Config goes first: the apps' desired entries come from `servers`, while
+ * the ids Maximal owns are kept per app, so the sync that follows removes
+ * exactly what Maximal added. Undefined when no endpoint has that id.
+ */
+export async function removeMcpEndpoint(
+  id: string,
+): Promise<
+  { removedFrom: Array<McpClientSkip>; brokerReloaded: boolean } | undefined
+> {
+  const config = getConfig()
+  const servers = config.mcpBroker?.servers ?? []
+  if (!servers.some((server) => server.id === id)) return undefined
+  const next = writeConfig({
+    ...config,
+    mcpBroker: {
+      ...config.mcpBroker,
+      servers: servers.filter((server) => server.id !== id),
+    },
+  })
+  const brokerReloaded = await reconfigureBroker(next.mcpBroker ?? {})
+  const removedFrom = syncAllMcpClients(next).flatMap(
+    ({ client, name, result }) =>
+      result.removed.includes(id) ? [{ client, name }] : [],
+  )
+  return { removedFrom, brokerReloaded }
+}
+
+/**
+ * Keep each catalog endpoint on the newest install of its server. Package
+ * managers install upgrades into new versioned directories and may keep the
+ * old ones, so the saved path goes stale either way. Runs at boot and on
+ * every Settings list. Returns the config in effect (the same object when
+ * nothing changed); an uninstalled server keeps its last path.
+ */
+export function refreshCatalogCommands(
+  config: AppConfig = getConfig(),
+  options?: CatalogDetectOptions,
+): AppConfig {
+  const servers = config.mcpBroker?.servers
+  if (!servers) return config
+  const next = servers.map((server) => {
+    const entry = server.catalog ? findCatalogEntry(server.catalog) : undefined
+    if (!entry) return server
+    const found: CatalogInstall | undefined = entry.locate(options)
+    if (!found || found.command === server.transport.command) return server
+    const version = found.version ? ` ${found.version}` : ""
+    consola.info(`${server.label}: now running${version} at ${found.command}`)
+    return {
+      ...server,
+      transport: { ...server.transport, command: found.command },
+    }
+  })
+  if (next.every((server, i) => server === servers[i])) return config
+  try {
+    return writeConfig({
+      ...config,
+      mcpBroker: { ...config.mcpBroker, servers: next },
+    })
+  } catch (error) {
+    consola.warn("Could not save the updated MCP server paths", error)
+    return config
   }
 }

@@ -140,6 +140,11 @@ disables the twirldown. While on, the twirldown folds the group away.
 The button carries `aria-expanded` / `aria-controls`; the group is
 `hidden` when closed, not just visually collapsed.
 
+The card's other actions (an MCP server's Refresh and Remove) sit just left
+of the switch as ghost icon buttons (`btn--icon`), each with an `aria-label`
+naming the entity and a quiet `title` tooltip. A destructive one always
+confirms in a `ConfirmDialog` (`tone="danger"`) before acting.
+
 ## Focus rings
 
 - **Always visible on keyboard navigation; hidden on mouse use** via

@@ -1,5 +1,5 @@
 /**
- * /settings/api/mcp — endpoint toggle contract.
+ * /settings/api/mcp — list, add, toggle, and remove contract.
  *
  * Uses the real config module (temp COPILOT_API_HOME) and the real app
  * registry. Every case keeps the set of client entries to write empty, so
@@ -17,6 +17,8 @@ import type { AppConfig } from "~/lib/config/config"
 
 import { getConfig, writeConfig } from "~/lib/config/config"
 import {
+  McpEndpointAddResponse,
+  McpEndpointRemoveResponse,
   McpEndpointsListResponse,
   McpEndpointToggleResponse,
 } from "~/lib/config/settings-types"
@@ -77,6 +79,122 @@ describe("GET /mcp", () => {
     // Broker health rides along so the UI can tell "fixing itself" from
     // "needs the user"; no broker has started in this process.
     expect(body.broker.problem).toBeNull()
+  })
+})
+
+/** Point catalog detection at a temp mise dir holding a Work IQ install
+ *  for this platform, with nothing on PATH. Returns the executable. */
+function fakeWorkiqInstall(dir: string): string {
+  const family = { darwin: "osx", win32: "win", linux: "linux" }[
+    process.platform as "darwin" | "win32" | "linux"
+  ]
+  const packageDir = path.join(
+    dir,
+    "installs",
+    "npm-microsoft-workiq",
+    "1.0.1",
+    "node_modules",
+    "@microsoft",
+    "workiq",
+  )
+  const bin = path.join(packageDir, "bin", `${family}-${process.arch}`)
+  fs.mkdirSync(bin, { recursive: true })
+  fs.writeFileSync(
+    path.join(packageDir, "package.json"),
+    JSON.stringify({ version: "1.0.1" }),
+  )
+  const executable = path.join(
+    bin,
+    process.platform === "win32" ? "workiq.exe" : "workiq",
+  )
+  fs.writeFileSync(executable, "")
+  fs.chmodSync(executable, 0o755)
+  return executable
+}
+
+describe("POST /mcp (add a known server)", () => {
+  const miseDir = fs.mkdtempSync(path.join(os.tmpdir(), "mcp-route-mise-"))
+  const saved = { mise: process.env.MISE_DATA_DIR, path: process.env.PATH }
+  let executable = ""
+
+  beforeEach(() => {
+    process.env.MISE_DATA_DIR = miseDir
+    process.env.PATH = ""
+    executable = fakeWorkiqInstall(miseDir)
+    writeConfig({})
+  })
+
+  afterAll(() => {
+    if (saved.mise === undefined) delete process.env.MISE_DATA_DIR
+    else process.env.MISE_DATA_DIR = saved.mise
+    process.env.PATH = saved.path
+    fs.rmSync(miseDir, { recursive: true, force: true })
+  })
+
+  test("the list offers it, with where it was found", async () => {
+    const res = await buildApp().request("/mcp")
+    const body = McpEndpointsListResponse.parse(await res.json())
+    expect(body.available).toHaveLength(1)
+    expect(body.available[0]).toMatchObject({
+      id: "workiq",
+      status: "ready",
+      command: executable,
+    })
+  })
+
+  test("adds it off, running the executable found, and stops offering it", async () => {
+    const res = await buildApp().request("/mcp", post({ catalogId: "workiq" }))
+    expect(res.status).toBe(200)
+    const body = McpEndpointAddResponse.parse(await res.json())
+    expect(body.endpoint).toMatchObject({ id: "workiq", enabled: false })
+    expect(getConfig().mcpBroker?.servers?.[0]).toMatchObject({
+      id: "workiq",
+      enabled: false,
+      catalog: "workiq",
+      transport: { command: executable, args: ["mcp"] },
+    })
+
+    const list = McpEndpointsListResponse.parse(
+      await (await buildApp().request("/mcp")).json(),
+    )
+    expect(list.available).toEqual([])
+  })
+
+  test("409 when already added or not installed; 404 for an unknown id", async () => {
+    const app = buildApp()
+    expect(
+      (await app.request("/mcp", post({ catalogId: "workiq" }))).status,
+    ).toBe(200)
+    expect(
+      (await app.request("/mcp", post({ catalogId: "workiq" }))).status,
+    ).toBe(409)
+
+    writeConfig({})
+    fs.rmSync(executable)
+    expect(
+      (await app.request("/mcp", post({ catalogId: "workiq" }))).status,
+    ).toBe(409)
+    expect(
+      (await app.request("/mcp", post({ catalogId: "nope" }))).status,
+    ).toBe(404)
+    expect((await app.request("/mcp", post({}))).status).toBe(400)
+    expect(getConfig().mcpBroker?.servers ?? []).toEqual([])
+  })
+})
+
+describe("DELETE /mcp/:id", () => {
+  test("removes the endpoint from config", async () => {
+    writeConfig(config({ enabled: true, clients: [] }))
+    const res = await buildApp().request("/mcp/workiq", { method: "DELETE" })
+    expect(res.status).toBe(200)
+    const body = McpEndpointRemoveResponse.parse(await res.json())
+    expect(body.removedFrom).toEqual([])
+    expect(getConfig().mcpBroker?.servers).toEqual([])
+  })
+
+  test("404 for an unknown endpoint", async () => {
+    const res = await buildApp().request("/mcp/nope", { method: "DELETE" })
+    expect(res.status).toBe(404)
   })
 })
 

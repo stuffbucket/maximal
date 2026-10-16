@@ -65,6 +65,7 @@ const meta = {
     endpoint: workiq,
     onToggle: fn<OnToggle>(async () => ({ ok: true, skipped: [] })),
     onRefresh: fn(async () => {}),
+    onRemove: fn(async () => ({ ok: true, removedFrom: [] })),
   },
 } satisfies Meta<typeof McpEndpointCard>;
 export default meta;
@@ -157,6 +158,13 @@ export const CardSaveFails: Story = {
   play: tickAll,
 };
 
+/** Remove asks first, naming the apps it comes out of. */
+export const CardRemoveConfirm: Story = {
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole("button", { name: "Remove Work IQ" }));
+  },
+};
+
 // ---- the whole panel against the mock sidecar ------------------------------
 
 const panel = (mockApi: MockApiParameters): Story => ({
@@ -173,5 +181,9 @@ export const PanelBrokerRecovering = panel({ scenario: "mcp-recovering" });
 export const PanelBrokerStuck = panel({ scenario: "mcp-stuck" });
 /** Can't run at all: explain, no button. */
 export const PanelBrokerMissing = panel({ scenario: "mcp-not-installed" });
+/** Nothing added yet; Work IQ is installed, so it's offered to add. */
+export const PanelServerFound = panel({ scenario: "mcp-found" });
+/** Nothing added yet; Work IQ isn't installed: copy the install command, re-scan. */
+export const PanelServerNotInstalled = panel({ scenario: "mcp-catalog-missing" });
 /** Maximal not answering, after ~5s of automatic retries. */
 export const PanelUnreachable = panel({ overrides: { "/settings/api/mcp": "offline" } });

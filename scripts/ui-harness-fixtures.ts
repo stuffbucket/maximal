@@ -248,8 +248,22 @@ const ghAvailable: GhStatusFixture = {
   ],
 }
 
+const workiqFound: McpEndpointsListResponse["available"][number] = {
+  id: "workiq",
+  label: "Work IQ",
+  status: "ready",
+  command:
+    "/Users/alex/.local/share/mise/installs/npm-microsoft-workiq/1.0.1/node_modules/@microsoft/workiq/bin/osx-arm64/workiq",
+  version: "1.0.1",
+  install: {
+    command: "npm install -g @microsoft/workiq",
+    url: "https://www.npmjs.com/package/@microsoft/workiq",
+  },
+}
+
 const twoMcpEndpoints: McpEndpointsListResponse = {
   broker: { state: "running", problem: null },
+  available: [],
   endpoints: [
     {
       id: "workiq",
@@ -573,7 +587,7 @@ export const SCENARIOS = {
     diagnostics: baseDiagnostics,
     updateStatus: upToDate,
     ghStatus: ghAvailable,
-    mcp: { endpoints: [], broker: { state: "off", problem: null } },
+    mcp: { endpoints: [], broker: { state: "off", problem: null }, available: [] },
     clients: { clients: [], total: 0 },
     dashboard: emptyDashboard,
   },
@@ -614,6 +628,22 @@ export const SCENARIOS = {
   "mcp-not-installed": {
     ...healthy("MCP · broker missing from this install"),
     mcp: { ...twoMcpEndpoints, broker: { state: "unavailable", problem: "not-installed" } },
+  },
+
+  "mcp-found": {
+    ...healthy("MCP · nothing added yet, Work IQ found on this machine"),
+    mcp: { endpoints: [], broker: { state: "off", problem: null }, available: [workiqFound] },
+  },
+
+  "mcp-catalog-missing": {
+    ...healthy("MCP · nothing added yet, Work IQ not installed"),
+    mcp: {
+      endpoints: [],
+      broker: { state: "off", problem: null },
+      available: [
+        { id: "workiq", label: "Work IQ", status: "not-installed", install: workiqFound.install },
+      ],
+    },
   },
 } satisfies Record<string, Scenario>
 

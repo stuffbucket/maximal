@@ -29,6 +29,9 @@ export interface McpServerConfig {
   clients?: Array<McpClientId>
   /** Endpoint-specific key for `/mcp/<id>`; never sent to the broker. */
   apiKey?: string
+  /** Catalog id this endpoint was added from; lets Maximal find the
+   *  executable again after an upgrade moves it. */
+  catalog?: string
   transport: {
     type: "stdio"
     command: string

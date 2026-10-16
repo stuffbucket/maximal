@@ -13,7 +13,7 @@ import { serve } from "srvx"
 
 import { removeLegacyShimIfPresent } from "~/apps/claude-code/detect"
 import { reconcileClaudeCodeOnBoot } from "~/apps/claude-code/reconcile"
-import { syncMcpClientsOnBoot } from "~/apps/mcp"
+import { refreshCatalogCommands, syncMcpClientsOnBoot } from "~/apps/mcp"
 import { type AccountType } from "~/lib/auth/auth-types"
 import { type AppConfig, mergeConfigWithDefaults } from "~/lib/config/config"
 import { initProxyFromEnv } from "~/lib/http/proxy"
@@ -227,7 +227,8 @@ function afterListening(
 
   // Broker startup is deliberately detached from ordinary server readiness.
   // A missing, hung, or crashing broker degrades MCP only; Hono is already bound.
-  startBrokerSupervisor(config.mcpBroker ?? {})
+  // An upgraded catalog server (e.g. Work IQ) may have moved; find it first.
+  startBrokerSupervisor(refreshCatalogCommands(config).mcpBroker ?? {})
   // One-time "Maximal is working" notification (shown by the menu-bar shell).
   void startWorkingNotice()
 
