@@ -317,7 +317,7 @@ export function listMcpCatalog(
       status: found ? "ready" : "not-installed",
       ...(found ? { command: found.command } : {}),
       ...(found?.version ? { version: found.version } : {}),
-      install: entry.install,
+      install: entry.install(options),
     }
   })
 }
@@ -335,7 +335,7 @@ export function catalogServer(
   if (!found) {
     throw new McpEndpointError(
       "not-installed",
-      `${entry.label} isn't installed. Install it with: ${entry.install.command}`,
+      `${entry.label} isn't installed. Install it with: ${entry.install(options).command}`,
     )
   }
   return entry.template(found)
