@@ -2,10 +2,10 @@
 # Self-installer for maximal.app. Runs every time the user
 # double-clicks the .app from /Applications.
 #
-# Behavior is idempotent — re-launches just refresh the binary and
-# the launchd agent. The .app stays in /Applications; this shim
-# copies the binary out to ~/.local/bin/maximal and registers
-# the launchd plist so the proxy starts on login.
+# Behavior is idempotent — re-launches just refresh the service binary and
+# the launchd agent. The .app stays in /Applications; this shim copies the
+# service into Application Support and registers the launchd plist so the
+# proxy starts on login. It does not install a terminal command.
 
 set -euo pipefail
 
@@ -13,7 +13,7 @@ APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BIN_SRC="$APP_DIR/MacOS/maximal"
 PLIST_SRC="$APP_DIR/Resources/co.stuffbucket.maximal.plist"
 
-INSTALL_BIN="$HOME/.local/bin/maximal"
+INSTALL_BIN="$HOME/Library/Application Support/Maximal/bin/maximal"
 INSTALL_PLIST="$HOME/Library/LaunchAgents/co.stuffbucket.maximal.plist"
 
 LABEL="co.stuffbucket.maximal"
@@ -40,26 +40,8 @@ sed \
   "$PLIST_SRC" > "$TMP_PLIST"
 mv -f "$TMP_PLIST" "$INSTALL_PLIST"
 
-# Make sure ~/.local/bin is on the user's interactive shell PATH. The
-# binary copy above lands in ~/.local/bin/maximal, but a fresh-account
-# macOS user's zsh has no reason to look there. We append a marker-
-# guarded block to both ~/.zshrc (interactive) and ~/.zprofile (login)
-# so new terminals pick it up. The current dock launch has no shell to
-# source into — that's fine; this is for the *next* terminal window.
-# Bash is intentionally skipped: zsh has been macOS's default since
-# Catalina (2019).
-PATH_MARKER_START="# >>> maximal PATH >>>"
-PATH_MARKER_END="# <<< maximal PATH <<<"
-PATH_BLOCK="$PATH_MARKER_START
-export PATH=\"\$HOME/.local/bin:\$PATH\"
-$PATH_MARKER_END"
-
-for rc in "$HOME/.zshrc" "$HOME/.zprofile"; do
-  touch "$rc"
-  if ! grep -qF "$PATH_MARKER_START" "$rc"; then
-    printf '\n%s\n' "$PATH_BLOCK" >> "$rc"
-  fi
-done
+# Shell profiles are user-owned. This legacy app template installs its service
+# binary for launchd but does not expose a terminal command or edit PATH.
 
 # Make sure the log dir referenced in the plist exists, otherwise
 # launchd will refuse to bootstrap.
@@ -70,12 +52,11 @@ mkdir -p "$HOME/Library/Logs/maximal"
 launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
 launchctl bootstrap "$DOMAIN" "$INSTALL_PLIST"
 
-# Run setup in unattended mode. --skip-auth: the device-code flow needs
-# an interactive shell, which we don't have here. The user runs
-# `maximal setup` from a terminal once after install.
+# Run setup in unattended mode. Interactive CLI access is installed and owned
+# separately through Homebrew; this app template does not modify shell PATH.
 "$INSTALL_BIN" setup --unattended --skip-auth || true
 
 # Notify and exit. The launchd agent is now running the actual proxy.
 /usr/bin/osascript -e \
-  "display notification \"Run \\\"maximal setup\\\" once from Terminal to authenticate with GitHub.\" with title \"maximal installed\""
+  "display notification \"Install the Maximal CLI with Homebrew for terminal access.\" with title \"maximal installed\""
 exit 0

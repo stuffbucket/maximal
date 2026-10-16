@@ -2584,9 +2584,11 @@ fn restart_sidecar(app: AppHandle) {
 /// refuse-while-apps-enabled message, so the CLI disables any enabled app
 /// integrations itself and reverts them through the registry. `--keep-app` is
 /// likewise mandatory: the running `.app` can't delete the bundle it's
-/// executing from, so the CLI removes the launchd agent, the
-/// `~/.local/bin/maximal` PATH symlink, and the other PATH binaries, then the
-/// user drags Maximal to the Trash to finish. Returns `Err(String)` (a
+/// executing from, so the CLI removes the launchd agent, its app-owned service
+/// binary, and a legacy `~/.local/bin/maximal` symlink if present.
+/// Package-manager binaries remain
+/// untouched; the user drags Maximal to the Trash to finish. Returns
+/// `Err(String)` (a
 /// human-readable reason) on a missing binary or non-zero exit so the webview
 /// can surface a non-blocking inline error instead of silently stranding the
 /// user. Mirrors the spawn+`.output()` shape of `reconcile_claude_code_revert`.

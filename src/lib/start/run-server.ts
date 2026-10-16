@@ -21,7 +21,6 @@ import {
   startBrokerSupervisor,
   stopBrokerSupervisor,
 } from "~/lib/mcp-broker/supervisor"
-import { ensureCliSymlink } from "~/lib/platform/cli-path"
 import { initOpencodeVersion } from "~/lib/platform/opencode"
 import { ensurePaths } from "~/lib/platform/paths"
 import { writePidfile } from "~/lib/platform/replace-running"
@@ -152,21 +151,6 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   const removedShim = removeLegacyShimIfPresent()
   if (removedShim) {
     consola.info(`Removed legacy Claude Code shim at ${removedShim}`)
-  }
-
-  // First-launch CLI shim (macOS .dmg only). The .app bundle's CLI
-  // lives at …/Maximal.app/Contents/MacOS/maximal, off every default
-  // PATH; symlink it into ~/.local/bin so `maximal` works in a
-  // terminal. Idempotent + best-effort — never blocks boot. No-op for
-  // Homebrew/dev launches (not an .app bundle). See lib/cli-path.ts.
-  const link = ensureCliSymlink()
-  if (link.linked) {
-    consola.info(`Linked CLI onto PATH: ${link.symlinkPath} → ${link.target}`)
-    if (link.pathBlockAdded) {
-      consola.info(
-        "Added ~/.local/bin to PATH in ~/.zprofile (open a new terminal to pick it up).",
-      )
-    }
   }
 
   await cacheVSCodeVersion()
