@@ -1,5 +1,9 @@
 # Commands
 
+The repo root uses Bun, not pnpm: `bun.lock` is the lockfile. Running `pnpm`
+here stops before installing anything and lists the Bun commands to use
+instead (`.pnpmfile.cjs`).
+
 ```sh
 bun install          # Install dependencies
 bun run dev          # Dev mode with watch
