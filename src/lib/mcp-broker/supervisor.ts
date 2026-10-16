@@ -582,9 +582,21 @@ let activeSupervisor: BrokerSupervisor | undefined
 let activeConfigJson: string | undefined
 let reconfiguring: Promise<void> = Promise.resolve()
 
+/** What the running broker depends on. Endpoints that are off and the
+ *  client apps an endpoint is offered to don't change what it serves, so
+ *  adding an endpoint or re-picking its apps doesn't restart live sessions. */
+function brokerConfigKey(config: McpBrokerConfig): string {
+  return JSON.stringify({
+    ...config,
+    servers: (config.servers ?? [])
+      .filter((server) => server.enabled !== false)
+      .map(({ clients: _clients, catalog: _catalog, ...server }) => server),
+  })
+}
+
 export function startBrokerSupervisor(config: McpBrokerConfig): void {
   activeSupervisor = new BrokerSupervisor(config)
-  activeConfigJson = JSON.stringify(config)
+  activeConfigJson = brokerConfigKey(config)
   activeSupervisor.start()
 }
 
@@ -596,7 +608,7 @@ export function reconfigureBroker(config: McpBrokerConfig): Promise<boolean> {
   const run = async (): Promise<boolean> => {
     const previous = activeSupervisor
     if (!previous) return false
-    if (JSON.stringify(config) === activeConfigJson) return true
+    if (brokerConfigKey(config) === activeConfigJson) return true
     await previous.stop()
     // Shut down while we waited: don't bring a broker back.
     if (activeSupervisor !== previous) return false

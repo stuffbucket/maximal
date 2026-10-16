@@ -132,6 +132,40 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
       return json(app)
     }
 
+    // --- mcp add (move a found catalog server into the endpoints, off) ---
+    if (path === "/settings/api/mcp" && method === "POST") {
+      const { catalogId } = await body()
+      const item = state.mcp.available.find((a) => a.id === catalogId)
+      if (!item) return json({ error: { message: "no such server" } }, 404)
+      if (item.status !== "ready") return json({ error: { message: "not installed" } }, 409)
+      const endpoint = {
+        id: item.id,
+        label: item.label,
+        enabled: false,
+        clients: [],
+        offered: [
+          { id: "claude-code" as const, name: "Claude Code", available: true, configured: false },
+          { id: "claude-desktop" as const, name: "Claude Desktop", available: false, configured: false },
+        ],
+      }
+      state.mcp.endpoints.push(endpoint)
+      state.mcp.available = state.mcp.available.filter((a) => a.id !== item.id)
+      return json({ endpoint })
+    }
+
+    // --- mcp remove ---
+    const mcpRemove = /^\/settings\/api\/mcp\/([^/]+)$/.exec(path)
+    if (mcpRemove && method === "DELETE") {
+      const id = decodeURIComponent(mcpRemove[1])
+      const endpoint = state.mcp.endpoints.find((e) => e.id === id)
+      if (!endpoint) return json({ error: { message: "no such endpoint" } }, 404)
+      state.mcp.endpoints = state.mcp.endpoints.filter((e) => e.id !== id)
+      const removedFrom = endpoint.offered
+        .filter((o) => o.configured)
+        .map((o) => ({ client: o.id, name: o.name }))
+      return json({ removedFrom })
+    }
+
     // --- mcp toggle (flip enabled, remember the client choice) ---
     const mcpToggle = /^\/settings\/api\/mcp\/([^/]+)$/.exec(path)
     if (mcpToggle && method === "POST") {

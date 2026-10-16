@@ -8,13 +8,14 @@ import type {
 } from "../../../proxy/client";
 import { Button } from "../../components/Button";
 import { Callout } from "../../components/Callout";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { ProblemCallout } from "../../components/ProblemCallout";
 import type { Problem } from "../../problems";
 import { Checkbox } from "../../components/Checkbox";
 import { LinkCheckbox } from "../../components/LinkCheckbox";
 import { Switch } from "../../components/Switch";
 
-import type { McpToggleResult } from "./useMcp";
+import type { McpMutationResult, McpToggleResult } from "./useMcp";
 
 interface McpEndpointCardProps {
   endpoint: McpEndpointEntry;
@@ -24,6 +25,8 @@ interface McpEndpointCardProps {
   ) => Promise<McpToggleResult>;
   /** Re-read every endpoint, e.g. after changing an app's config by hand. */
   onRefresh: () => Promise<void>;
+  /** Remove it from Maximal and from every app Maximal added it to. */
+  onRemove: () => Promise<McpMutationResult>;
 }
 
 interface Change {
@@ -45,6 +48,7 @@ export function McpEndpointCard({
   endpoint,
   onToggle,
   onRefresh,
+  onRemove,
 }: McpEndpointCardProps): JSX.Element {
   // The change in flight, shown in place of the server's state so the
   // controls don't snap back for the seconds a broker restart takes.
@@ -54,8 +58,11 @@ export function McpEndpointCard({
   const [failed, setFailed] = useState<{ problem: Problem; change: Change } | null>(null);
   const [skipped, setSkipped] = useState<McpEndpointToggleResponse["skipped"]>([]);
   const [adoptedFrom, setAdoptedFrom] = useState<string | undefined>();
+  const [removeOpen, setRemoveOpen] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const [removeFailed, setRemoveFailed] = useState<Problem | null>(null);
 
-  const busy = pending !== null;
+  const busy = pending !== null || removing;
   const enabled = pending?.enabled ?? endpoint.enabled;
   // Includes remembered choices for apps that can't be offered right now;
   // those ride along untouched on every save.
@@ -91,6 +98,17 @@ export function McpEndpointCard({
     void save({ enabled, clients: [...next] });
   };
 
+  const remove = async (): Promise<void> => {
+    setRemoving(true);
+    setRemoveFailed(null);
+    const result = await onRemove();
+    setRemoving(false);
+    setRemoveOpen(false);
+    if (!result.ok && result.problem) setRemoveFailed(result.problem);
+  };
+  // Apps Maximal has it in now, named in the confirm.
+  const addedTo = endpoint.offered.filter((client) => client.configured);
+
   const refresh = async (): Promise<void> => {
     setRefreshing(true);
     setFailed(null);
@@ -120,11 +138,19 @@ export function McpEndpointCard({
           >
             {refreshing ? "Refreshing…" : "Refresh"}
           </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={refreshing || busy}
+            onClick={() => setRemoveOpen(true)}
+          >
+            Remove
+          </Button>
         </div>
         <div className="app-card__control">
           {busy && (
             <span className="mcp-card__saving" role="status">
-              Saving…
+              {removing ? "Removing…" : "Saving…"}
             </span>
           )}
           <Switch
@@ -192,6 +218,32 @@ export function McpEndpointCard({
             </Callout>
           ))}
       </div>
+
+      <ConfirmDialog
+        open={removeOpen}
+        title={`Remove ${endpoint.label}?`}
+        body={
+          <p>
+            {addedTo.length > 0
+              ? `Maximal stops running it and takes it out of ${addedTo.map((client) => client.name).join(" and ")}.`
+              : "Maximal stops running it."}{" "}
+            Nothing is uninstalled; you can add it again later.
+          </p>
+        }
+        confirmLabel="Remove"
+        tone="danger"
+        busy={removing}
+        onConfirm={remove}
+        onCancel={() => setRemoveOpen(false)}
+      />
+
+      {removeFailed && (
+        <ProblemCallout
+          problem={removeFailed}
+          onRetry={() => void remove()}
+          onRestarted={() => void refresh()}
+        />
+      )}
 
       {failed && (
         <ProblemCallout

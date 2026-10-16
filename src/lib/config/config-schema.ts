@@ -70,7 +70,7 @@ const HostnameSchema = z
   .max(253)
   .regex(/^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$/u)
 const McpElicitationActionSchema = z.enum(["passthrough", "maximal", "deny"])
-const McpServerIdSchema = z
+export const McpServerIdSchema = z
   .string()
   .min(1)
   .max(64)
@@ -124,6 +124,8 @@ const McpServerConfigSchema = z
     /** Endpoint-specific key for `/mcp/<id>`. When unset, the route uses the
      *  same authentication as the rest of the main port. */
     apiKey: z.string().trim().min(1).max(512).optional(),
+    /** Catalog id this endpoint was added from (`~/lib/mcp-broker/catalog`). */
+    catalog: z.string().min(1).max(64).optional(),
     transport: z.object({
       type: z.literal("stdio"),
       command: z.string().min(1).max(4096),

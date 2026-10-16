@@ -44,8 +44,6 @@ bun run app:ui       # UI-only iteration: `bun run build:ui --watch` — rebuild
                      # Run `bun run dev` in another terminal so the sidecar serves
                      # them at :4141/ui/* (reload the window to pick up changes).
 bun run app:build    # force-rebuild sidecar + tauri build --bundles app,dmg
-bun run shell:test   # Rust unit tests for the shell (cargo test --lib); Rust is
-                     # pinned in mise.toml — run `mise install` once
 ```
 
 ## Isolated MCP broker package
@@ -67,17 +65,29 @@ these commands; it is an externally configured stdio endpoint.
 
 ### Using a brokered endpoint
 
-Define endpoints under `mcpBroker.servers` in `config.json`. An endpoint may set
+Maximal looks for servers it knows (Work IQ, for now) and offers the ones it
+finds to add. Anything else can be added from the CLI with its full command
+path, or written under `mcpBroker.servers` in `config.json`. An endpoint may set
 its own `apiKey`; without one, the normal main-port API-key rules apply.
 
 ```sh
-maximal mcp                                       # list endpoints and clients
+maximal mcp                                       # endpoints, and servers to add
+maximal mcp workiq --add                          # add Work IQ (found here); off
+maximal mcp myserver --add --label "My server" -- /full/path/server --stdio
 maximal mcp workiq --enable                       # on; asks which apps get it
 maximal mcp workiq --enable --clients claude-code,claude-desktop
 maximal mcp workiq --disable                      # off; removed from every app
+maximal mcp workiq --remove                       # gone from Maximal and apps
 ```
 
-Settings → MCP servers does the same. Only apps whose Maximal integration is on
+`--add` and `--remove` ask to confirm; `--unattended` skips every prompt. Put
+`--port` and other flags before `--`; everything after it is the server's
+command. The command must be a full path, because Maximal doesn't run servers
+with your shell's PATH.
+
+Settings → MCP servers does the same: found servers appear under "Available to
+add" (with the install command when one isn't installed), and each added
+server has Remove. Only apps whose Maximal integration is on
 are offered; turning an app's integration off removes its MCP entries, and
 turning it back on restores them. Maximal's entries are removed while Maximal
 isn't running and come back when it starts. A same-name MCP server you already

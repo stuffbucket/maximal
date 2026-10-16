@@ -1,3 +1,4 @@
+import { McpCatalogCard } from "./McpCatalogCard";
 import { McpEndpointCard } from "./McpEndpointCard";
 import { useMcp } from "./useMcp";
 import type { McpBrokerHealth } from "../../../proxy/client";
@@ -46,7 +47,8 @@ function brokerProblem(broker: McpBrokerHealth): Problem | null {
 }
 
 export function McpPanel(): JSX.Element {
-  const { endpoints, broker, isLoading, problem, refresh, toggle } = useMcp();
+  const { endpoints, available, broker, isLoading, problem, refresh, toggle, add, remove } =
+    useMcp();
   const brokerIssue = broker ? brokerProblem(broker) : null;
   const quiet = broker ? QUIET[broker.state] : undefined;
 
@@ -65,7 +67,9 @@ export function McpPanel(): JSX.Element {
       {isLoading && endpoints.length === 0 ? (
         <p className="state__caption">Loading MCP servers…</p>
       ) : endpoints.length === 0 ? (
-        !problem && (
+        // With known servers to add, those cards say what to do instead.
+        !problem &&
+        available.length === 0 && (
           <EmptyState
             title="No MCP servers yet"
             action={
@@ -91,8 +95,25 @@ export function McpPanel(): JSX.Element {
               onToggle={(enabled, clients) =>
                 toggle(endpoint.id, enabled, clients)
               }
+              onRemove={() => remove(endpoint.id)}
             />
           ))}
+        </Stack>
+      )}
+
+      {!problem && available.length > 0 && (
+        <Stack proximity="section" className="subsection">
+          <h3 className="subsection__title">Available to add</h3>
+          <Stack proximity="section" className="apps-list">
+            {available.map((item) => (
+              <McpCatalogCard
+                key={item.id}
+                item={item}
+                onAdd={() => add(item.id)}
+                onRescan={refresh}
+              />
+            ))}
+          </Stack>
         </Stack>
       )}
     </Stack>
