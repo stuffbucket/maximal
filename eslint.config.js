@@ -93,6 +93,7 @@ export default [
       "shell/**",
       "site/**",
       ".dependency-cruiser.cjs",
+      ".pnpmfile.cjs",
       "landing/**",
     ],
     prettier: {
