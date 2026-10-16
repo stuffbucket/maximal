@@ -28,6 +28,7 @@ import {
 } from "~/lib/platform/utils"
 import { hasGithubToken, state } from "~/lib/runtime-state/state"
 import { getGitVersion, shortSha } from "~/lib/update/version"
+import { startWorkingNotice } from "~/lib/working-notice"
 
 import { initBootLogger, printReadyBanner } from "./boot-io"
 import { emitBootStatus } from "./boot-status"
@@ -205,6 +206,9 @@ export async function runServer(options: RunServerOptions): Promise<void> {
       idleTimeout: 0,
     },
   })
+
+  // One-time "Maximal is working" notification (shown by the menu-bar shell).
+  void startWorkingNotice()
 
   // Best-effort: record our PID so a future `maximal start --replace`
   // can fall back to SIGTERM/SIGKILL if the graceful shutdown route

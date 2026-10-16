@@ -310,6 +310,9 @@
   "native-notify-rejection-title": "Maximal",
   "native-notify-rejection-body": "一个上游 Copilot 请求被拒绝。打开设置查看详情。",
   "native-notify-rejection-body-detail": "{message} — 打开设置查看详情。",
+  "native-notify-working-title": "Maximal 正在运行",
+  "native-notify-working-body": "你的第一个请求刚刚通过。",
+  "native-notify-working-body-apps": "请求正在通过：{apps} 现在可以使用 Maximal 了。",
 
   "native-quit-title": "退出 Maximal?",
   "native-quit-body": "Maximal 将停止,所有打开的设置窗口将关闭。",

@@ -310,6 +310,9 @@
   "native-notify-rejection-title": "Maximal",
   "native-notify-rejection-body": "Eine vorgelagerte Copilot-Anfrage wurde abgelehnt. Öffnen Sie die Einstellungen für Details.",
   "native-notify-rejection-body-detail": "{message} — öffnen Sie die Einstellungen für Details.",
+  "native-notify-working-title": "Maximal funktioniert",
+  "native-notify-working-body": "Ihre erste Anfrage ist gerade durchgegangen.",
+  "native-notify-working-body-apps": "Anfragen gehen durch – {apps} kann Maximal jetzt nutzen.",
 
   "native-quit-title": "Maximal beenden?",
   "native-quit-body": "Maximal wird gestoppt und alle geöffneten Einstellungsfenster werden geschlossen.",

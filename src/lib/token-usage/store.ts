@@ -623,6 +623,15 @@ export async function getTokenUsageSummary(
   }
 }
 
+/** Whether any usage has ever been recorded (false when storage is off). */
+export async function hasAnyTokenUsage(): Promise<boolean> {
+  if (!isTokenUsageStorageEnabled()) return false
+  await flushTokenUsageEvents()
+  const db = await getDb()
+  const row = db.prepare("SELECT 1 FROM token_usage_events LIMIT 1").get()
+  return row !== undefined && row !== null
+}
+
 export async function getTokenUsageEventsPage(input: {
   page: number
   pageSize: number

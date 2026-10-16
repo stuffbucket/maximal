@@ -1099,6 +1099,9 @@ async fn poll_sidecar_status(app: AppHandle) {
     let update_status_url = format!(
         "http://127.0.0.1:{SIDECAR_PORT}/settings/api/update-status",
     );
+    let working_notice_url = format!(
+        "http://127.0.0.1:{SIDECAR_PORT}/settings/api/notices/working",
+    );
     // Periodic update check: a menu-bar app can stay open for days, well past a
     // new release, so we re-check on an interval rather than once per launch.
     // `last_update_check` holds the last DEFINITIVE check; a transient failure
@@ -1120,6 +1123,7 @@ async fn poll_sidecar_status(app: AppHandle) {
         {
             apply_rejection(&app, rejection);
         }
+        check_working_notice(&app, &client, &working_notice_url).await;
         let update_due = last_update_check
             .is_none_or(|t| t.elapsed() >= UPDATE_CHECK_INTERVAL);
         if update_due
@@ -1194,6 +1198,59 @@ fn apply_rejection(app: &AppHandle, next: Option<RejectionSnapshot>) {
     let current_state = app.state::<AppStatus>().get();
     if let Err(err) = refresh_tray(app, current_state) {
         eprintln!("[shell] tray refresh after rejection change failed: {err}");
+    }
+}
+
+/// One-time "Maximal is working" notice. POST takes (and clears) the notice
+/// the sidecar queued on the first tokens after a fresh install, or after an
+/// app's integration was turned on (src/lib/working-notice.ts), so each one
+/// shows once. Unreachable, failed, or nothing queued → nothing to do.
+async fn check_working_notice(app: &AppHandle, client: &reqwest::Client, url: &str) {
+    let key = app.state::<ShellApiKey>().value().to_owned();
+    let Ok(resp) = client.post(url).header("x-api-key", key).send().await else {
+        return;
+    };
+    if !resp.status().is_success() {
+        return;
+    }
+    let Ok(payload) = resp.json::<serde_json::Value>().await else {
+        return;
+    };
+    // `notice` is null when there's nothing to show.
+    let Some(apps) = payload
+        .pointer("/notice/apps")
+        .and_then(serde_json::Value::as_array)
+    else {
+        return;
+    };
+    let names: Vec<&str> = apps.iter().filter_map(serde_json::Value::as_str).collect();
+    fire_working_notification(app, &names);
+}
+
+/// "Maximal is working", naming the apps that were just set up if any.
+/// Best-effort like the other notifications.
+fn fire_working_notification(app: &AppHandle, apps: &[&str]) {
+    use tauri_plugin_notification::NotificationExt;
+    let locale = app.state::<LocaleState>().get();
+    let title = native_i18n::tr(&locale, "native-notify-working-title");
+    let body = if apps.is_empty() {
+        native_i18n::tr(&locale, "native-notify-working-body")
+    } else {
+        let joined = apps.join(", ");
+        native_i18n::t(
+            &locale,
+            "native-notify-working-body-apps",
+            &[("apps", joined.as_str())],
+        )
+    };
+    if let Err(err) = app
+        .notification()
+        .builder()
+        .title(title)
+        .body(body)
+        .show()
+    {
+        eprintln!("[shell] working notification failed: {err}");
     }
 }
 
