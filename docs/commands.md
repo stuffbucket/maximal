@@ -55,6 +55,23 @@ bun run app:ui       # UI-only iteration: `bun run build:ui --watch` — rebuild
 bun run app:build    # force-rebuild sidecar + tauri build --bundles app,dmg
 ```
 
+## pnpm lockfiles and the package feed
+
+`packages/mcp-broker` and `packages/storybook` each have their own pnpm
+lockfile. The package feed serves tarballs from `ms-feed-N` hosts that rotate,
+and a lockfile that records one fails a later `--frozen-lockfile` install. Each
+package's `.pnpmfile.cjs` drops those URLs as pnpm writes the lockfile (pnpm
+rebuilds them from the registry), and CI checks the committed files. To repair a
+lockfile that has them anyway:
+
+```sh
+bun scripts/strip-lockfile-hosts.ts          # drop recorded shard hosts
+bun scripts/strip-lockfile-hosts.ts --check  # what CI runs
+```
+
+Editing a package's `.pnpmfile.cjs` changes its lockfile's `pnpmfileChecksum`:
+run `pnpm install` in that package and commit the lockfile with it.
+
 ## Isolated MCP broker package
 
 The broker has its own exact dependency pins, lockfile, and mise tools. Run its
