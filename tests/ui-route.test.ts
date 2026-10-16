@@ -114,3 +114,20 @@ describe("ui routes", () => {
     expect(res.headers.get("cache-control")).toBe("no-store")
   })
 })
+
+describe("rememberWhenFound", () => {
+  test("asks again until the UI build exists, then stops asking", async () => {
+    const { rememberWhenFound } = await import("~/routes/ui/route")
+    const answers: Array<string | null> = [null, null, "/repo/shell/dist/ui"]
+    let calls = 0
+    const locate = rememberWhenFound(() => {
+      if (calls >= answers.length) throw new Error("asked after it was found")
+      return answers[calls++]
+    })
+    expect(locate()).toBeNull()
+    expect(locate()).toBeNull()
+    expect(locate()).toBe("/repo/shell/dist/ui")
+    expect(locate()).toBe("/repo/shell/dist/ui")
+    expect(calls).toBe(3)
+  })
+})
