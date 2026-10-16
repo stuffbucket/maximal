@@ -17,9 +17,34 @@
  * Exits 0 on success (no holder, or holder evicted). Exits 1 on
  * unrecoverable conflict (e.g. :4141 held by something that isn't
  * maximal, or graceful shutdown timed out).
+ *
+ * `MAXIMAL_DEV_PORT=<port>` runs the dev app beside an installed Maximal
+ * instead of replacing it. The shell binds that port (lib.rs reads the same
+ * variable at build time), only a Maximal already on it is evicted, and the
+ * Tauri config written below gives the dev app its own identifier, so the
+ * single-instance lock doesn't hand off to the installed app, plus window
+ * permissions for the dev port's origin. Pair it with COPILOT_API_HOME
+ * pointing at a scratch directory so the dev proxy keeps its own config and
+ * leaves your apps' settings alone.
  */
 
-const SIDECAR_PORT = 4141
+import { writeFileSync } from "node:fs"
+import path from "node:path"
+
+const DEFAULT_PORT = 4141
+
+function sidecarPort(): number {
+  const raw = process.env.MAXIMAL_DEV_PORT
+  if (raw === undefined || raw === "") return DEFAULT_PORT
+  const port = Number(raw)
+  if (!/^\d+$/.test(raw) || port < 1 || port > 65_535) {
+    console.error(`[app-dev-prepare] MAXIMAL_DEV_PORT must be a port number; got "${raw}"`)
+    process.exit(1)
+  }
+  return port
+}
+
+const SIDECAR_PORT = sidecarPort()
 const PORT_RELEASE_TIMEOUT_MS = 8000
 const PORT_POLL_INTERVAL_MS = 100
 
@@ -81,6 +106,48 @@ async function waitForPortRelease(): Promise<void> {
   )
   process.exit(1)
 }
+
+/** Merged over tauri.conf.json by `tauri dev --config` (JSON Merge Patch).
+ *  Empty on the default port, so a plain `app:dev` behaves as before. */
+function devConfig(): Record<string, unknown> {
+  if (SIDECAR_PORT === DEFAULT_PORT) return {}
+  const origins = [
+    `http://localhost:${SIDECAR_PORT}/*`,
+    `http://127.0.0.1:${SIDECAR_PORT}/*`,
+  ]
+  return {
+    productName: "Maximal Dev",
+    identifier: "co.stuffbucket.maximal.dev",
+    app: {
+      security: {
+        // Listing capabilities replaces the capabilities/ directory, so name
+        // the existing ones and add the dev origin beside :4141.
+        capabilities: [
+          "default",
+          "loopback",
+          {
+            identifier: "loopback-dev-port",
+            description: `The loopback capability for the dev port :${SIDECAR_PORT}.`,
+            windows: ["settings", "dashboard"],
+            local: false,
+            remote: { urls: origins },
+            permissions: [
+              "core:default",
+              "core:webview:allow-create-webview-window",
+              "opener:default",
+              "default",
+            ],
+          },
+        ],
+      },
+    },
+  }
+}
+
+writeFileSync(
+  path.join(import.meta.dir, "..", "shell", "src-tauri", "tauri.dev.conf.json"),
+  `${JSON.stringify(devConfig(), null, 2)}\n`,
+)
 
 const state = await probeSidecar()
 switch (state) {
