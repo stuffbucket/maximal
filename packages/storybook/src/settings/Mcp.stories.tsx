@@ -161,7 +161,7 @@ export const CardSaveFails: Story = {
 /** Remove asks first, naming the apps it comes out of. */
 export const CardRemoveConfirm: Story = {
   play: async ({ canvasElement }) => {
-    await userEvent.click(within(canvasElement).getByRole("button", { name: "Remove" }));
+    await userEvent.click(within(canvasElement).getByRole("button", { name: "Remove Work IQ" }));
   },
 };
 

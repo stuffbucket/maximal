@@ -130,22 +130,6 @@ export function McpEndpointCard({
       <header className="app-card__head">
         <div className="mcp-card__title">
           <h3 className="app-card__name">{endpoint.label}</h3>
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={refreshing || busy}
-            onClick={() => void refresh()}
-          >
-            {refreshing ? "Refreshing…" : "Refresh"}
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={refreshing || busy}
-            onClick={() => setRemoveOpen(true)}
-          >
-            Remove
-          </Button>
         </div>
         <div className="app-card__control">
           {busy && (
@@ -153,6 +137,31 @@ export function McpEndpointCard({
               {removing ? "Removing…" : "Saving…"}
             </span>
           )}
+          {refreshing && (
+            <span className="mcp-card__saving" role="status">
+              Refreshing…
+            </span>
+          )}
+          <Button
+            variant="ghost"
+            className="btn--icon"
+            aria-label={`Refresh ${endpoint.label}`}
+            title="Refresh"
+            disabled={refreshing || busy}
+            onClick={() => void refresh()}
+          >
+            <RefreshIcon />
+          </Button>
+          <Button
+            variant="ghost"
+            className="btn--icon"
+            aria-label={`Remove ${endpoint.label}`}
+            title="Remove"
+            disabled={refreshing || busy}
+            onClick={() => setRemoveOpen(true)}
+          >
+            <TrashIcon />
+          </Button>
           <Switch
             checked={enabled}
             disabled={busy}
@@ -253,6 +262,31 @@ export function McpEndpointCard({
         />
       )}
     </article>
+  );
+}
+
+function RefreshIcon(): JSX.Element {
+  // lucide: refresh-cw
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+      <path d="M21 3v5h-5" />
+      <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+      <path d="M8 16H3v5" />
+    </svg>
+  );
+}
+
+function TrashIcon(): JSX.Element {
+  // lucide: trash-2
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 6h18" />
+      <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+      <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+      <line x1="10" x2="10" y1="11" y2="17" />
+      <line x1="14" x2="14" y1="11" y2="17" />
+    </svg>
   );
 }
 
