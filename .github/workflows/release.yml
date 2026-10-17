@@ -417,6 +417,9 @@ jobs:
             Write-Error 'Broker no-mode smoke check did not emit its sanitized error'
             exit 1
           }
+          # The runner's pwsh wrapper exits with $LASTEXITCODE, which still
+          # holds the broker's expected 1.
+          exit 0
 
   # Standard Homebrew release mechanic for a private tap: render
   # the formula with the just-published version + per-arch SHAs and
