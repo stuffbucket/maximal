@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.46](https://github.com/stuffbucket/maximal/compare/v0.4.45...v0.4.46) (2026-10-17)
+
+
+### Bug Fixes
+
+* **ci:** stop the Windows smoke check failing on the broker's expected exit ([#489](https://github.com/stuffbucket/maximal/issues/489)) ([c0e14f8](https://github.com/stuffbucket/maximal/commit/c0e14f827f5e4528df47214bb64ca34125ca9ae9))
+
 ## [0.4.45](https://github.com/stuffbucket/maximal/compare/v0.4.44...v0.4.45) (2026-10-16)
 
 
