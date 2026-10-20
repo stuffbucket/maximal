@@ -14,7 +14,7 @@ export interface McpElicitationRule {
     toolNames?: Array<string>
     mechanisms?: Array<McpElicitationMechanism>
     modes?: Array<"form" | "url">
-    fieldTypes?: Array<"boolean" | "string" | "number" | "integer">
+    fieldTypes?: Array<"boolean" | "string" | "number" | "integer" | "enum">
     urlHosts?: Array<string>
     maxProperties?: number
   }
@@ -65,8 +65,12 @@ export interface McpServerConfig {
     interactionRounds?: number
   }
   elicitation?: {
+    /** passthrough (default): the client if it can show the request, else
+     *  Maximal. maximal: always Maximal. deny: decline without asking. */
     defaultAction?: McpElicitationAction
     rules?: Array<McpElicitationRule>
+    /** How long a request waits for an answer; default 5 minutes. */
+    timeoutMs?: number
   }
 }
 

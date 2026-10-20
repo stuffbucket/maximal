@@ -486,3 +486,73 @@ export const McpEndpointRemoveResponse = z.object({
 export type McpEndpointRemoveResponse = z.infer<
   typeof McpEndpointRemoveResponse
 >
+
+/** One field of a form an MCP server asked the user to fill in, normalized
+ *  from its JSON Schema. Titles, descriptions and options are server text. */
+export const PendingRequestField = z.object({
+  name: z.string(),
+  kind: z.enum(["boolean", "string", "number", "integer", "enum"]),
+  title: z.string().optional(),
+  description: z.string().optional(),
+  required: z.boolean(),
+  default: z.union([z.string(), z.number(), z.boolean()]).optional(),
+  minLength: z.number().optional(),
+  maxLength: z.number().optional(),
+  format: z.enum(["email", "uri", "date", "date-time"]).optional(),
+  minimum: z.number().optional(),
+  maximum: z.number().optional(),
+  /** For `enum`: the allowed values and how to show them. */
+  options: z
+    .array(z.object({ value: z.string(), label: z.string() }))
+    .optional(),
+})
+export type PendingRequestField = z.infer<typeof PendingRequestField>
+
+/** An MCP server's request for user input, waiting for an answer in
+ *  Maximal: a form to fill in, or a URL to open. */
+export const PendingRequest = z.object({
+  id: z.string(),
+  /** The MCP server (endpoint) asking, and its display name. */
+  endpointId: z.string(),
+  label: z.string(),
+  /** The tool call the request belongs to, when known. */
+  toolName: z.string().optional(),
+  mode: z.enum(["form", "url"]),
+  /** The server's message to the user. Untrusted; show as plain text. */
+  message: z.string(),
+  fields: z.array(PendingRequestField),
+  url: z.string().optional(),
+  /** Host of `url`, for showing where the link goes. */
+  urlHost: z.string().optional(),
+  receivedAt: z.string(),
+  expiresAt: z.string(),
+})
+export type PendingRequest = z.infer<typeof PendingRequest>
+
+export const PendingRequestsResponse = z.object({
+  requests: z.array(PendingRequest),
+})
+export type PendingRequestsResponse = z.infer<typeof PendingRequestsResponse>
+
+/** What the shell polls: enough to notice a new request, nothing more. */
+export const PendingRequestsSummary = z.object({
+  pending: z.number().int().nonnegative(),
+  /** The most recent request's id, so a new one is noticed even when the
+   *  count stays the same. */
+  newestId: z.string().nullable(),
+})
+export type PendingRequestsSummary = z.infer<typeof PendingRequestsSummary>
+
+export const PendingRequestAnswer = z.object({
+  action: z.enum(["accept", "decline", "cancel"]),
+  /** Form values, only with `accept` on a form. */
+  content: z
+    .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
+    .optional(),
+})
+export type PendingRequestAnswer = z.infer<typeof PendingRequestAnswer>
+
+export const PendingRequestAnswerResponse = z.object({ ok: z.literal(true) })
+export type PendingRequestAnswerResponse = z.infer<
+  typeof PendingRequestAnswerResponse
+>

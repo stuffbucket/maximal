@@ -12,6 +12,7 @@ import {
   CONTROL_PROTOCOL,
   CONTROL_PROTOCOL_VERSION,
 } from "~/lib/mcp-broker/control-protocol"
+import { PendingRequests } from "~/lib/mcp-broker/pending-requests"
 import {
   BrokerSupervisor,
   getBrokerSupervisorSnapshot,
@@ -299,6 +300,132 @@ describe("BrokerSupervisor live updates", () => {
       ),
     )
     expect(await updated).toBe(false)
+    await supervisor.stop()
+  })
+})
+
+const elicitPayload = (
+  properties: Record<string, unknown> = {
+    confirmed: { type: "boolean", title: "Confirm" },
+  },
+) => ({
+  endpointId: "fixture",
+  label: "Fixture",
+  toolName: "get_debug_link",
+  mechanism: "legacy-form",
+  mode: "form",
+  message: "Allow the debug link?",
+  requestedSchema: { type: "object", properties, required: ["confirmed"] },
+  expiresAtMs: Date.now() + 60_000,
+})
+
+const waitFor = async (condition: () => boolean): Promise<void> => {
+  const deadline = Date.now() + 2_000
+  while (Date.now() < deadline) {
+    if (condition()) return
+    await Bun.sleep(5)
+  }
+  throw new Error("timed out waiting")
+}
+
+/** A ready supervisor whose requests for input land in its own store. */
+const readyWithRequests = async () => {
+  const requests = new PendingRequests()
+  const harness = fixture(config(), { requests })
+  harness.supervisor.start()
+  const child = await waitForChild(harness.children)
+  const frames = sentFrames(child)
+  sendReadyHandshake(child, "generation-1")
+  await waitForState("ready")
+  return { ...harness, child, frames, requests }
+}
+
+describe("BrokerSupervisor requests for user input", () => {
+  test("shows a request and sends the answer back to the broker", async () => {
+    const { child, frames, requests, supervisor } = await readyWithRequests()
+    child.stdout.write(
+      frame(
+        { generation: "generation-1", sequence: 3, requestId: "elicit-1" },
+        "elicit",
+        elicitPayload(),
+      ),
+    )
+    await waitFor(() => requests.list().requests.length === 1)
+    expect(requests.list().requests[0]).toMatchObject({
+      id: "elicit-1",
+      label: "Fixture",
+      toolName: "get_debug_link",
+      fields: [{ name: "confirmed", kind: "boolean", required: true }],
+    })
+
+    expect(
+      requests.answer("elicit-1", {
+        action: "accept",
+        content: { confirmed: true },
+      }),
+    ).toEqual({ ok: true })
+    const sent = await waitForFrame(frames, "elicitResult")
+    expect(sent).toMatchObject({
+      requestId: "elicit-1",
+      payload: { action: "accept", content: { confirmed: true } },
+    })
+    await supervisor.stop()
+  })
+
+  test("declines a form Maximal can't show", async () => {
+    const { child, frames, requests, supervisor } = await readyWithRequests()
+    child.stdout.write(
+      frame(
+        { generation: "generation-1", sequence: 3, requestId: "elicit-1" },
+        "elicit",
+        elicitPayload({ tags: { type: "array", items: { type: "string" } } }),
+      ),
+    )
+    const sent = await waitForFrame(frames, "elicitResult")
+    expect(sent).toMatchObject({
+      requestId: "elicit-1",
+      payload: { action: "decline" },
+    })
+    expect(requests.list().requests).toHaveLength(0)
+    await supervisor.stop()
+  })
+
+  test("forgets withdrawn requests, and all of a generation's when it fails", async () => {
+    const { child, requests, supervisor } = await readyWithRequests()
+    for (const [sequence, requestId] of [
+      [3, "elicit-1"],
+      [4, "elicit-2"],
+    ] as const) {
+      child.stdout.write(
+        frame(
+          { generation: "generation-1", sequence, requestId },
+          "elicit",
+          elicitPayload(),
+        ),
+      )
+    }
+    child.stdout.write(
+      frame(
+        { generation: "generation-1", sequence: 5, requestId: "elicit-1" },
+        "elicitWithdrawn",
+        {},
+      ),
+    )
+    await waitFor(
+      () =>
+        requests
+          .list()
+          .requests.map((request) => request.id)
+          .join(",") === "elicit-2",
+    )
+
+    // An out-of-order frame fails the generation; its requests go with it.
+    child.stdout.write(
+      frame({ generation: "generation-1", sequence: 99 }, "heartbeat", {
+        sentAtMs: Date.now(),
+      }),
+    )
+    await waitFor(() => requests.list().requests.length === 0)
     await supervisor.stop()
   })
 })

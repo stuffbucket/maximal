@@ -45,6 +45,7 @@ import { ghRoutes } from "./gh"
 import { mcpRoutes } from "./mcp"
 import { modelsRoutes } from "./models"
 import { noticesRoutes } from "./notices"
+import { requestsRoutes } from "./requests"
 import { respondValidated } from "./respond-validated"
 
 /** Captured once at module load. process.uptime() works too, but
@@ -171,4 +172,5 @@ settingsApiRoutes.route("/apps", appsRoutes)
 settingsApiRoutes.route("/mcp", mcpRoutes)
 settingsApiRoutes.route("/models", modelsRoutes)
 settingsApiRoutes.route("/notices", noticesRoutes)
+settingsApiRoutes.route("/requests", requestsRoutes)
 settingsApiRoutes.route("/events", eventsRoutes)

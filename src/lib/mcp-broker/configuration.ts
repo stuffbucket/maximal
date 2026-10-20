@@ -1,6 +1,11 @@
 import path from "node:path"
 
-import type { McpBrokerConfig, McpServerConfig } from "./types"
+import type {
+  McpBrokerConfig,
+  McpElicitationAction,
+  McpElicitationRule,
+  McpServerConfig,
+} from "./types"
 
 const SECRET_NAME_PATTERN =
   /(?:^|_)(?:API_?KEY|ACCESS_?KEY|PRIVATE_?KEY|TOKEN|SECRET|PASSWORD|PASSCODE|CREDENTIAL|MFA|OTP|COOKIE)(?:_|$)/u
@@ -54,6 +59,13 @@ export interface ResolvedBrokerEndpoint {
   shutdownTimeoutMs: number
   /** Concurrent sessions; each runs its own instance of the server. */
   maxSessions: number
+  /** Who answers the server's requests for user input; see the broker's
+   *  `elicitation.ts`. */
+  elicitation: {
+    defaultAction: McpElicitationAction
+    rules: Array<McpElicitationRule>
+    timeoutMs: number
+  }
 }
 
 export interface ResolvedBrokerConfiguration {
@@ -117,6 +129,11 @@ function resolveEndpoint(
     interaction: server.classification?.interaction ?? "auto",
     ownership: server.classification?.ownership ?? "auto",
     ...endpointBounds(server),
+    elicitation: {
+      defaultAction: server.elicitation?.defaultAction ?? "passthrough",
+      rules: server.elicitation?.rules ?? [],
+      timeoutMs: server.elicitation?.timeoutMs ?? 300_000,
+    },
   }
 }
 
