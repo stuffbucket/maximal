@@ -1,4 +1,11 @@
-import { ServerType, startStdioServer } from "mcp-proxy"
+import {
+  Client,
+  StreamableHTTPClientTransport,
+} from "@modelcontextprotocol/client"
+import { Server } from "@modelcontextprotocol/server"
+import { StdioServerTransport } from "@modelcontextprotocol/server/stdio"
+import { proxyServer, resolveVersionNegotiation } from "mcp-proxy"
+import { setTimeout as delay } from "node:timers/promises"
 
 export const ADAPTER_API_KEY_ENV = "MAXIMAL_MCP_API_KEY"
 
@@ -28,25 +35,69 @@ export const parseAdapterUrl = (value: string): URL => {
   return url
 }
 
+/** Upper bound on the DELETE, so an unreachable Maximal can't hold up exit. */
+const END_SESSION_TIMEOUT_MS = 2_000
+
+const ADAPTER_IDENTITY = { name: "maximal-mcp-broker", version: "0.0.0" }
+
+/**
+ * Bridge one stdio client to one broker session. mcp-proxy's
+ * `startStdioServer` does the same but never ends its HTTP session. Idle
+ * reaping can't recover it either: the session's event stream counts as open,
+ * and under Bun the broker never sees that stream's client go away. So every
+ * adapter a client discarded kept a server instance, and a slot toward the
+ * endpoint's session limit, until the broker restarted. Holding the transport
+ * here lets shutdown DELETE the session first.
+ */
 export const runStdioAdapter = async (
   options: StdioAdapterOptions,
 ): Promise<void> => {
   const url = parseAdapterUrl(options.url)
   const apiKey = process.env[ADAPTER_API_KEY_ENV]?.trim()
-  const server = await startStdioServer({
-    serverType: ServerType.HTTPStream,
-    transportOptions: {
-      requestInit: {
-        headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
-      },
+  const transport = new StreamableHTTPClientTransport(url, {
+    requestInit: {
+      headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
     },
-    upstreamProtocol: "auto",
-    url: url.href,
   })
+  const client = new Client(ADAPTER_IDENTITY, {
+    capabilities: {},
+    versionNegotiation: resolveVersionNegotiation("auto"),
+  })
+  await client.connect(transport)
 
-  const close = () => {
-    void server.close()
+  let ending: Promise<void> | undefined
+  const endSession = (): Promise<void> => {
+    ending ??= Promise.race([
+      transport.terminateSession().catch(() => undefined),
+      delay(END_SESSION_TIMEOUT_MS, undefined, { ref: false }),
+    ]).then(() => client.close().catch(() => undefined))
+    return ending
   }
-  process.once("SIGINT", close)
-  process.once("SIGTERM", close)
+
+  let server: Server
+  try {
+    const serverCapabilities = client.getServerCapabilities() ?? {}
+    server = new Server(client.getServerVersion() ?? ADAPTER_IDENTITY, {
+      capabilities: serverCapabilities,
+    })
+    await proxyServer({ client, server, serverCapabilities })
+    // Fires when the client closes stdin, which is how most clients stop a
+    // stdio server.
+    const previousOnClose = server.onclose
+    server.onclose = () => {
+      previousOnClose?.()
+      void endSession()
+    }
+    await server.connect(new StdioServerTransport())
+  } catch (error) {
+    await endSession()
+    throw error
+  }
+
+  const stop = () => {
+    void endSession().finally(() => server.close())
+  }
+  process.once("SIGHUP", stop)
+  process.once("SIGINT", stop)
+  process.once("SIGTERM", stop)
 }
