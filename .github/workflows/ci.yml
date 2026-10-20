@@ -77,6 +77,11 @@ jobs:
           mise -C packages/mcp-broker exec -- pnpm typecheck
           mise -C packages/mcp-broker exec -- pnpm build
           MAXIMAL_MCP_BROKER_BINARY="$PWD/packages/mcp-broker/dist/maximal-mcp-broker" mise -C packages/mcp-broker exec -- pnpm test
+          # The release cross-compiles the broker for Windows; catch a Bun
+          # that can't before a release run does.
+          mise -C packages/mcp-broker exec -- pnpm build:target \
+            --target=bun-windows-x64 \
+            --outfile="$RUNNER_TEMP/maximal-mcp-broker-windows-x64.exe"
 
       - name: Run linter
         run: bun run lint:all

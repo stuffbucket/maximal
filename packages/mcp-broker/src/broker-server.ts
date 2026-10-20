@@ -103,6 +103,7 @@ const listenerShape = (endpoint: ResolvedMcpEndpoint) => ({
   protocol: endpoint.protocol,
   interaction: endpoint.interaction,
   ownership: endpoint.ownership,
+  sessionIdleTimeoutMs: endpoint.sessionIdleTimeoutMs,
 })
 
 /** True when `next` can be applied to a broker running `current`: same
@@ -241,6 +242,7 @@ const startEndpoint = async (
         await client?.close().catch(() => undefined)
       },
       port: 0,
+      sessionIdleTimeout: endpoint.sessionIdleTimeoutMs,
       sseEndpoint: null,
       stateless: false,
       streamEndpoint: INTERNAL_PATH,
@@ -375,6 +377,12 @@ const startFrontDoor = async (
       }
     })
     request.on("aborted", () => upstream.destroy())
+    // A client that drops a long-lived stream closes only the response; its
+    // request was read to the end long ago, so "aborted" never fires. Without
+    // this the inner stream stays open and its session is never reclaimed.
+    response.on("close", () => {
+      if (!response.writableFinished) upstream.destroy()
+    })
     request.pipe(upstream)
   })
 

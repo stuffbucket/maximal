@@ -45,7 +45,9 @@ describe("adapter URL", () => {
   })
 })
 
-const startFixtureBroker = async (): Promise<RunningBrokerServer> => {
+const startFixtureBroker = async (
+  endpoint: { sessionIdleTimeoutMs?: number } = {},
+): Promise<RunningBrokerServer> => {
   const configuration = BrokerWireConfigurationSchema.parse({
     endpoints: [
       {
@@ -55,6 +57,7 @@ const startFixtureBroker = async (): Promise<RunningBrokerServer> => {
         args: [resolve(import.meta.dir, "fixture.ts"), "--era", "legacy"],
         protocol: "legacy",
         ownership: "exclusive",
+        ...endpoint,
       },
     ],
   })
@@ -151,4 +154,19 @@ describe("adapter shutdown ends its broker session", () => {
       await client.close()
     }
   })
+})
+
+it("reclaims an idle session whose adapter was killed outright", async () => {
+  const { client, transport } = await connectAdapter(
+    await startFixtureBroker({ sessionIdleTimeoutMs: 500 }),
+  )
+  try {
+    const pid = await whoami(client)
+    // SIGKILL runs no cleanup, so the session is never DELETEd. Only the OS
+    // closing the adapter's connections tells the broker it is gone.
+    process.kill(transport.pid as number, "SIGKILL")
+    await waitUntil(() => !isRunning(pid))
+  } finally {
+    await client.close()
+  }
 })
