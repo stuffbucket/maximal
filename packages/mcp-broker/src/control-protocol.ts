@@ -1,11 +1,15 @@
 import { z } from "zod"
 
-import { BrokerWireConfigurationSchema } from "./wire-config.ts"
+import {
+  BrokerWireConfigurationSchema,
+  ElicitationMechanismSchema,
+} from "./wire-config.ts"
 
 export const CONTROL_PROTOCOL = "maximal-mcp-control"
-// 2: adds `update`. Broker and sidecar ship together; a mismatched pair
-// fails the first frame instead of half-working.
-export const CONTROL_PROTOCOL_VERSION = 2
+// 2: adds `update`. 3: adds `elicit`, `elicitResult` and `elicitWithdrawn`.
+// Broker and sidecar ship together; a mismatched pair fails the first frame
+// instead of half-working.
+export const CONTROL_PROTOCOL_VERSION = 3
 export const DEFAULT_MAX_CONTROL_FRAME_BYTES = 1_048_576
 
 const IdentifierSchema = z
@@ -39,6 +43,36 @@ const EndpointObservationSchema = z.strictObject({
     resources: z.boolean(),
     tools: z.boolean(),
   }),
+})
+
+const ElicitContentValueSchema = z.union([
+  z.string().max(4096),
+  z.number(),
+  z.boolean(),
+  z.array(z.string().max(4096)).max(64),
+])
+
+/** A server's request for user input, for Maximal to show. Server text is
+ *  untrusted; the bounds here only keep frames small. */
+const ElicitPayloadSchema = z.strictObject({
+  endpointId: z.string().min(1).max(64),
+  label: z.string().min(1).max(128),
+  toolName: z.string().min(1).max(256).optional(),
+  mechanism: ElicitationMechanismSchema,
+  mode: z.enum(["form", "url"]),
+  message: z.string().max(4096),
+  requestedSchema: z
+    .looseObject({
+      type: z.literal("object"),
+      properties: z.record(
+        z.string().max(256),
+        z.record(z.string(), z.unknown()),
+      ),
+      required: z.array(z.string().max(256)).max(64).optional(),
+    })
+    .optional(),
+  url: z.string().min(1).max(4096).optional(),
+  expiresAtMs: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
 })
 
 export const ControlEnvelopeSchema = z.discriminatedUnion("operation", [
@@ -87,6 +121,31 @@ export const ControlEnvelopeSchema = z.discriminatedUnion("operation", [
   }),
   BaseEnvelopeSchema.extend({
     operation: z.literal("shutdown"),
+    requestId: IdentifierSchema,
+    payload: z.strictObject({}),
+  }),
+  BaseEnvelopeSchema.extend({
+    // Broker asks the sidecar to put a request for user input in front of
+    // the user. Answered by `elicitResult` with the same requestId, or taken
+    // back by `elicitWithdrawn`.
+    operation: z.literal("elicit"),
+    requestId: IdentifierSchema,
+    payload: ElicitPayloadSchema,
+  }),
+  BaseEnvelopeSchema.extend({
+    operation: z.literal("elicitResult"),
+    requestId: IdentifierSchema,
+    payload: z.strictObject({
+      action: z.enum(["accept", "decline", "cancel"]),
+      content: z
+        .record(z.string().max(256), ElicitContentValueSchema)
+        .optional(),
+    }),
+  }),
+  BaseEnvelopeSchema.extend({
+    // The request no longer needs an answer: it timed out, the server
+    // cancelled it, or its session ended.
+    operation: z.literal("elicitWithdrawn"),
     requestId: IdentifierSchema,
     payload: z.strictObject({}),
   }),

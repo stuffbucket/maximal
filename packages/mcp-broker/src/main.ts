@@ -15,6 +15,7 @@ import {
   encodeControlEnvelope,
 } from "./control-protocol.ts"
 import { installSanitizedDependencyDiagnostics } from "./diagnostics.ts"
+import { MaximalElicitations } from "./maximal-elicitations.ts"
 import { runStdioAdapter } from "./stdio-adapter.ts"
 
 const BINARY_VERSION = "0.0.0"
@@ -136,6 +137,9 @@ const serve = async (options: ServeOptions): Promise<void> => {
   const decoder = new ControlFrameDecoder()
   const sequence = new ControlSequenceValidator(options.generation)
   const writer = new ControlWriter(options.generation)
+  const elicitations = new MaximalElicitations((frame) =>
+    writer.send({ deadlineMs: Date.now() + MESSAGE_DEADLINE_MS, ...frame }),
+  )
   let running: RunningBrokerServer | undefined
   let heartbeat: ReturnType<typeof setInterval> | undefined
   let stopping = false
@@ -148,6 +152,7 @@ const serve = async (options: ServeOptions): Promise<void> => {
     if (heartbeat) {
       clearInterval(heartbeat)
     }
+    elicitations.cancelAll()
     await running?.close()
     running = undefined
   }
@@ -185,6 +190,13 @@ const serve = async (options: ServeOptions): Promise<void> => {
       for (const envelope of envelopes) {
         sequence.accept(envelope)
 
+        // An answer is delivered (or dropped, if no longer awaited) however
+        // late; it is never itself answered.
+        if (envelope.operation === "elicitResult") {
+          elicitations.settle(envelope.requestId, envelope.payload)
+          continue
+        }
+
         if (Date.now() > envelope.deadlineMs) {
           if (envelope.requestId) {
             await writer.send({
@@ -212,6 +224,7 @@ const serve = async (options: ServeOptions): Promise<void> => {
             running = await startBrokerServer(
               envelope.payload.configuration,
               envelope.payload.apiKey,
+              { askMaximal: elicitations.ask },
             )
           } catch (error) {
             await writer.send({
