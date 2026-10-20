@@ -32,6 +32,10 @@ import type {
   AuthStatus,
   DiagnosticsResponse,
   ModelsListResponse,
+  PendingRequest,
+  PendingRequestAnswer,
+  PendingRequestField,
+  PendingRequestsResponse,
   UpdateStatusResponse,
   UpstreamRejection,
 } from "../../../src/lib/config/settings-types"
@@ -40,6 +44,12 @@ import type {
 // "./api" keep working. AuthStatus is owned by src/lib/settings-types
 // (ADR-0005/0006) — the shell does NOT redeclare it.
 export type { AuthStatus, UpstreamRejection }
+export type {
+  PendingRequest,
+  PendingRequestAnswer,
+  PendingRequestField,
+  PendingRequestsResponse,
+}
 
 const TIMEOUT_MS = 5000
 
@@ -354,6 +364,17 @@ type Endpoint =
       method: "DELETE"
       path: `/settings/api/mcp/${string}`
     }
+  | {
+      kind: "requests-list"
+      method: "GET"
+      path: "/settings/api/requests"
+    }
+  | {
+      kind: "requests-answer"
+      method: "POST"
+      path: `/settings/api/requests/${string}`
+      body: PendingRequestAnswer
+    }
 
 type EndpointKind = Endpoint["kind"]
 
@@ -382,6 +403,8 @@ interface ResponseFor {
   "mcp-toggle": McpEndpointToggleResponse
   "mcp-add": McpEndpointAddResponse
   "mcp-remove": McpEndpointRemoveResponse
+  "requests-list": PendingRequestsResponse
+  "requests-answer": { ok: true }
   "models-list": ModelsListResponse
   "models-refresh": ModelsListResponse
 }
@@ -521,6 +544,33 @@ export async function subscribeAuthEvents(handlers: {
     } catch {
       // Malformed frame — drop it; the next event (or a GET fallback)
       // resyncs. An event listener must never throw.
+    }
+  })
+
+  return { close: () => source.close() }
+}
+
+/**
+ * Subscribe to `requests.changed` on the same stream: MCP servers' requests
+ * waiting for an answer, the same shape as GET /settings/api/requests. A
+ * separate EventSource keeps each surface's subscription independent; the
+ * sidecar sends every event on every connection.
+ */
+export async function subscribeRequestEvents(handlers: {
+  onRequests: (requests: PendingRequestsResponse) => void
+  onError?: () => void
+}): Promise<EventSubscription> {
+  const apiKey = await resolveApiKey()
+  const query = apiKey ? `?key=${encodeURIComponent(apiKey)}` : ""
+  const source = new EventSource(`${baseUrl()}/settings/api/events${query}`)
+
+  source.addEventListener("error", () => handlers.onError?.())
+  source.addEventListener("requests.changed", (event) => {
+    const message = event as MessageEvent<string>
+    try {
+      handlers.onRequests(JSON.parse(message.data) as PendingRequestsResponse)
+    } catch {
+      // Malformed frame: drop it; the next event or a GET resyncs.
     }
   })
 

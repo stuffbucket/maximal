@@ -52,6 +52,7 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
     accounts: fixture.accounts,
     models: fixture.models,
     mcp: fixture.mcp,
+    requests: fixture.requests,
   }) as {
     auth: AuthStatus
     apps: ResolvedScenario["apps"]
@@ -59,6 +60,7 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
     accounts: ResolvedScenario["accounts"]
     models: ResolvedScenario["models"]
     mcp: ResolvedScenario["mcp"]
+    requests: ResolvedScenario["requests"]
   }
   const listeners = new Set<(auth: AuthStatus) => void>()
   const setAuth = (next: AuthStatus): void => {
@@ -99,6 +101,13 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
     if (path === "/settings/api/apps") return json(state.apps)
     if (path === "/settings/api/models" && method === "GET") return json(state.models)
     if (path === "/settings/api/mcp" && method === "GET") return json(state.mcp)
+    if (path === "/settings/api/requests" && method === "GET") return json(state.requests)
+    if (path === "/settings/api/requests/summary") {
+      return json({
+        pending: state.requests.requests.length,
+        newestId: state.requests.requests.at(-1)?.id ?? null,
+      })
+    }
     if (path === "/settings/api/gh/status") return json(fixture.ghStatus)
     if (path === "/settings/api/clients") return json(fixture.clients)
 
@@ -151,6 +160,18 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
       state.mcp.endpoints.push(endpoint)
       state.mcp.available = state.mcp.available.filter((a) => a.id !== item.id)
       return json({ endpoint })
+    }
+
+    // --- answer a waiting request (it leaves the list) ---
+    const requestAnswer = /^\/settings\/api\/requests\/([^/]+)$/.exec(path)
+    if (requestAnswer && method === "POST") {
+      const id = decodeURIComponent(requestAnswer[1])
+      const before = state.requests.requests.length
+      state.requests.requests = state.requests.requests.filter((r) => r.id !== id)
+      if (state.requests.requests.length === before) {
+        return new Response("This request is no longer waiting", { status: 404 })
+      }
+      return json({ ok: true })
     }
 
     // --- mcp remove ---

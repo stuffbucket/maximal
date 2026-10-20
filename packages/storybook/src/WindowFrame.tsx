@@ -4,6 +4,7 @@ export type SettingsSection =
   | "account"
   | "apps"
   | "mcp"
+  | "requests"
   | "endpoint"
   | "api-clients"
   | "models"
@@ -14,6 +15,7 @@ export const SETTINGS_SECTIONS: Array<SettingsSection> = [
   "account",
   "apps",
   "mcp",
+  "requests",
   "endpoint",
   "api-clients",
   "models",

@@ -154,6 +154,7 @@ mod menu_id {
     pub const RETRY: &str = "retry";
     pub const OPEN_CONFIG: &str = "open_config";
     pub const UPGRADE: &str = "upgrade";
+    pub const REQUESTS: &str = "requests";
 }
 
 /// High-level tray state. Each transition rebuilds the menu and swaps
@@ -260,6 +261,99 @@ enum RejectionTransition {
     Cleared,
     /// Some → Some(different): tray stays in ATTENTION, no re-notify.
     Changed,
+}
+
+/// MCP servers' requests for user input waiting in Settings → Requests, as
+/// last reported by `/settings/api/requests/summary`: a count and the newest
+/// id, never contents (those stay in Settings). Drives the ATTENTION icon,
+/// a tray item, and one notification per new request.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct RequestsSnapshot {
+    pending: u64,
+    newest_id: Option<String>,
+}
+
+/// How many recent newest ids to remember, so one that becomes newest
+/// again (a later one was answered first) isn't taken for a new arrival.
+const SEEN_REQUEST_IDS: usize = 64;
+
+#[derive(Default)]
+struct RequestsState {
+    snapshot: RequestsSnapshot,
+    seen: std::collections::VecDeque<String>,
+}
+
+struct PendingRequests(Mutex<RequestsState>);
+
+impl PendingRequests {
+    fn new() -> Self {
+        Self(Mutex::new(RequestsState::default()))
+    }
+
+    fn get(&self) -> RequestsSnapshot {
+        self.0.lock().expect("requests mutex poisoned").snapshot.clone()
+    }
+
+    fn set(&self, next: RequestsSnapshot) -> RequestsTransition {
+        let mut guard = self.0.lock().expect("requests mutex poisoned");
+        let transition = requests_transition(&guard.snapshot, &next, &guard.seen);
+        if let Some(id) = &next.newest_id {
+            if !guard.seen.contains(id) {
+                guard.seen.push_back(id.clone());
+                if guard.seen.len() > SEEN_REQUEST_IDS {
+                    guard.seen.pop_front();
+                }
+            }
+        }
+        guard.snapshot = next;
+        transition
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RequestsTransition {
+    Unchanged,
+    /// A request arrived that wasn't there before: notify once.
+    Arrived,
+    /// Fewer or none waiting: refresh the tray, don't notify.
+    Changed,
+}
+
+/// A newest id not seen before means a request arrived; anything else that
+/// differs is requests being answered, withdrawn or expiring.
+fn requests_transition(
+    prev: &RequestsSnapshot,
+    next: &RequestsSnapshot,
+    seen: &std::collections::VecDeque<String>,
+) -> RequestsTransition {
+    if prev == next {
+        return RequestsTransition::Unchanged;
+    }
+    match &next.newest_id {
+        Some(id) if next.pending > 0 && !seen.contains(id) => RequestsTransition::Arrived,
+        _ => RequestsTransition::Changed,
+    }
+}
+
+fn parse_requests_summary(payload: &serde_json::Value) -> Option<RequestsSnapshot> {
+    let pending = payload.get("pending")?.as_u64()?;
+    let newest_id = match payload.get("newestId")? {
+        serde_json::Value::Null => None,
+        value => Some(value.as_str()?.to_owned()),
+    };
+    Some(RequestsSnapshot { pending, newest_id })
+}
+
+/// Where Settings should open when the user reaches for the app without
+/// saying where: waiting requests first (they expire), then sign-in.
+fn default_settings_section(app: &AppHandle) -> Option<&'static str> {
+    if app.state::<PendingRequests>().get().pending > 0 {
+        Some("requests")
+    } else if app.state::<AppStatus>().get() == SidecarState::RunningUnauthenticated {
+        Some("account")
+    } else {
+        None
+    }
 }
 
 /// The latest available release, as last reported by the sidecar's
@@ -648,6 +742,7 @@ pub fn run() {
         .manage(SidecarRestarting::new())
         .manage(LastRejection::new())
         .manage(LatestUpdate::new())
+        .manage(PendingRequests::new())
         .manage(LastSidecarError::new())
         .manage(LocaleState::new())
         .invoke_handler(tauri::generate_handler![
@@ -761,14 +856,7 @@ pub fn run() {
             ..
         } => {
             if !has_visible_windows {
-                let section = if app_handle.state::<AppStatus>().get()
-                    == SidecarState::RunningUnauthenticated
-                {
-                    Some("account")
-                } else {
-                    None
-                };
-                open_settings_window(app_handle, section);
+                open_settings_window(app_handle, default_settings_section(app_handle));
             }
         }
         _ => {}
@@ -1126,6 +1214,9 @@ async fn poll_sidecar_status(app: AppHandle) {
     let working_notice_url = format!(
         "http://127.0.0.1:{SIDECAR_PORT}/settings/api/notices/working",
     );
+    let requests_summary_url = format!(
+        "http://127.0.0.1:{SIDECAR_PORT}/settings/api/requests/summary",
+    );
     // Periodic update check: a menu-bar app can stay open for days, well past a
     // new release, so we re-check on an interval rather than once per launch.
     // `last_update_check` holds the last DEFINITIVE check; a transient failure
@@ -1148,6 +1239,11 @@ async fn poll_sidecar_status(app: AppHandle) {
             apply_rejection(&app, rejection);
         }
         check_working_notice(&app, &client, &working_notice_url).await;
+        if let Some(requests) =
+            fetch_requests_summary(&app, &client, &requests_summary_url).await
+        {
+            apply_requests(&app, requests);
+        }
         let update_due = last_update_check
             .is_none_or(|t| t.elapsed() >= UPDATE_CHECK_INTERVAL);
         if update_due
@@ -1249,6 +1345,52 @@ async fn check_working_notice(app: &AppHandle, client: &reqwest::Client, url: &s
     };
     let names: Vec<&str> = apps.iter().filter_map(serde_json::Value::as_str).collect();
     fire_working_notification(app, &names);
+}
+
+/// `/settings/api/requests/summary`; None when unreachable or malformed, so
+/// a transient blip doesn't clear the tray.
+async fn fetch_requests_summary(
+    app: &AppHandle,
+    client: &reqwest::Client,
+    url: &str,
+) -> Option<RequestsSnapshot> {
+    let key = app.state::<ShellApiKey>().value().to_owned();
+    let resp = client.get(url).header("x-api-key", key).send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let payload: serde_json::Value = resp.json().await.ok()?;
+    parse_requests_summary(&payload)
+}
+
+/// Records the latest summary. A newly arrived request notifies once; any
+/// change refreshes the tray. Nothing here opens or focuses a window.
+fn apply_requests(app: &AppHandle, next: RequestsSnapshot) {
+    match app.state::<PendingRequests>().set(next) {
+        RequestsTransition::Unchanged => return,
+        RequestsTransition::Arrived => fire_requests_notification(app),
+        RequestsTransition::Changed => {}
+    }
+    let current_state = app.state::<AppStatus>().get();
+    if let Err(err) = refresh_tray(app, current_state) {
+        eprintln!("[shell] tray refresh after requests change failed: {err}");
+    }
+}
+
+/// "An MCP server is waiting for your answer". No server text: what it asks
+/// can be private, and a notification is on screen for anyone to read.
+fn fire_requests_notification(app: &AppHandle) {
+    use tauri_plugin_notification::NotificationExt;
+    let locale = app.state::<LocaleState>().get();
+    if let Err(err) = app
+        .notification()
+        .builder()
+        .title(native_i18n::tr(&locale, "native-notify-requests-title"))
+        .body(native_i18n::tr(&locale, "native-notify-requests-body"))
+        .show()
+    {
+        eprintln!("[shell] requests notification failed: {err}");
+    }
 }
 
 /// "Maximal is working", naming the apps that were just set up if any.
@@ -1735,14 +1877,7 @@ fn install_tray(app: &AppHandle) -> tauri::Result<()> {
                 #[cfg(not(target_os = "macos"))]
                 {
                     let app = tray.app_handle();
-                    let section = if app.state::<AppStatus>().get()
-                        == SidecarState::RunningUnauthenticated
-                    {
-                        Some("account")
-                    } else {
-                        None
-                    };
-                    open_settings_window(app, section);
+                    open_settings_window(app, default_settings_section(app));
                 }
                 #[cfg(target_os = "macos")]
                 let _ = tray;
@@ -1758,10 +1893,11 @@ fn refresh_tray(app: &AppHandle, state: SidecarState) -> tauri::Result<()> {
     };
     let locale = app.state::<LocaleState>().get();
     let rejection = app.state::<LastRejection>().get();
+    let waiting = app.state::<PendingRequests>().get().pending > 0;
     let menu = build_menu(app, &locale, state)?;
     tray.set_menu(Some(menu))?;
-    tray.set_icon(Some(icon_for(state, rejection.is_some())?))?;
-    tray.set_tooltip(Some(tooltip_for(&locale, state, rejection.as_ref())))?;
+    tray.set_icon(Some(icon_for(state, rejection.is_some() || waiting)?))?;
+    tray.set_tooltip(Some(tooltip_for(&locale, state, rejection.as_ref(), waiting)))?;
     Ok(())
 }
 
@@ -1803,10 +1939,11 @@ fn set_dock_icon() {
 
 fn icon_for(
     state: SidecarState,
-    has_rejection: bool,
+    needs_attention: bool,
 ) -> tauri::Result<Image<'static>> {
-    // A pending upstream rejection while authenticated promotes the
-    // icon to ATTENTION so the user notices without opening Settings.
+    // A pending upstream rejection or a request waiting for an answer
+    // while authenticated promotes the icon to ATTENTION so the user
+    // notices without opening Settings.
     // Other states already drive the icon themselves (Starting,
     // RunningUnauthenticated also use ATTENTION, etc.); the rejection
     // override only changes the RunningAuthenticated case.
@@ -1814,7 +1951,7 @@ fn icon_for(
         SidecarState::Starting => TRAY_ICON_STARTING,
         SidecarState::RunningUnauthenticated => TRAY_ICON_ATTENTION,
         SidecarState::RunningAuthenticated => {
-            if has_rejection {
+            if needs_attention {
                 TRAY_ICON_ATTENTION
             } else {
                 TRAY_ICON_NORMAL
@@ -1831,7 +1968,17 @@ fn tooltip_for(
     locale: &str,
     state: SidecarState,
     rejection: Option<&RejectionSnapshot>,
+    requests_waiting: bool,
 ) -> String {
+    // A request waiting for an answer comes first: it expires.
+    if requests_waiting
+        && matches!(
+            state,
+            SidecarState::RunningAuthenticated | SidecarState::RunningUnauthenticated
+        )
+    {
+        return native_i18n::tr(locale, "native-tooltip-requests");
+    }
     // Rejection wins over the bare "maximal" idle tooltip when the
     // user is authenticated — the tray badge is meaningless without
     // a hint as to why. Other states keep their own tooltip; the
@@ -1900,6 +2047,21 @@ fn build_menu(
     };
     let sep_upgrade = PredefinedMenuItem::separator(app)?;
 
+    // "Answer requests…" while an MCP server is waiting for an answer;
+    // opens Settings → Requests.
+    let requests_item = if app.state::<PendingRequests>().get().pending > 0 {
+        Some(MenuItem::with_id(
+            app,
+            menu_id::REQUESTS,
+            native_i18n::tr(locale, "native-tray-requests"),
+            true,
+            None::<&str>,
+        )?)
+    } else {
+        None
+    };
+    let sep_requests = PredefinedMenuItem::separator(app)?;
+
     match state {
         SidecarState::Starting => {
             let starting = MenuItem::with_id(
@@ -1922,6 +2084,10 @@ fn build_menu(
             let sep2 = PredefinedMenuItem::separator(app)?;
             let mut items: Vec<&dyn IsMenuItem<tauri::Wry>> = Vec::new();
             items.push(&sign_in);
+            if let Some(answer) = &requests_item {
+                items.push(&sep_requests);
+                items.push(answer);
+            }
             // Update is its own section BELOW the primary action, shown only
             // when an update is available — never above sign-in.
             if let Some(up) = &upgrade_item {
@@ -1950,6 +2116,10 @@ fn build_menu(
             let sep2 = PredefinedMenuItem::separator(app)?;
             let mut items: Vec<&dyn IsMenuItem<tauri::Wry>> = Vec::new();
             items.push(&info);
+            if let Some(answer) = &requests_item {
+                items.push(&sep_requests);
+                items.push(answer);
+            }
             // Update is its own section BELOW the account line, shown only when
             // an update is available — never above it.
             if let Some(up) = &upgrade_item {
@@ -2017,6 +2187,7 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
         menu_id::OPEN_CONFIG => do_reveal_config_dir(app),
         menu_id::RETRY => retry_startup(app),
         menu_id::UPGRADE => open_update_url(app),
+        menu_id::REQUESTS => open_settings_window(app, Some("requests")),
         menu_id::QUIT => request_quit(app),
         _ => {}
     }
@@ -2664,6 +2835,39 @@ fn set_locale(app: AppHandle, locale: State<'_, LocaleState>, tag: String) -> Re
 #[cfg(test)]
 mod tests {
     use super::extract_error_reason;
+
+    #[test]
+    fn reads_the_requests_summary() {
+        use super::{parse_requests_summary, RequestsSnapshot};
+        assert_eq!(
+            parse_requests_summary(&serde_json::json!({ "pending": 2, "newestId": "elicit-9" })),
+            Some(RequestsSnapshot { pending: 2, newest_id: Some("elicit-9".into()) })
+        );
+        assert_eq!(
+            parse_requests_summary(&serde_json::json!({ "pending": 0, "newestId": null })),
+            Some(RequestsSnapshot { pending: 0, newest_id: None })
+        );
+        assert_eq!(parse_requests_summary(&serde_json::json!({ "pending": "x" })), None);
+    }
+
+    #[test]
+    fn notifies_only_when_a_new_request_arrives() {
+        use super::{PendingRequests, RequestsSnapshot, RequestsTransition};
+        let snap = |pending: u64, newest: Option<&str>| RequestsSnapshot {
+            pending,
+            newest_id: newest.map(str::to_owned),
+        };
+        let state = PendingRequests::new();
+        assert_eq!(state.set(snap(0, None)), RequestsTransition::Unchanged);
+        assert_eq!(state.set(snap(1, Some("a"))), RequestsTransition::Arrived);
+        assert_eq!(state.set(snap(1, Some("a"))), RequestsTransition::Unchanged);
+        assert_eq!(state.set(snap(2, Some("b"))), RequestsTransition::Arrived);
+        // Answering the newest makes the older one newest again: not new.
+        assert_eq!(state.set(snap(1, Some("a"))), RequestsTransition::Changed);
+        assert_eq!(state.set(snap(0, None)), RequestsTransition::Changed);
+        // One answered and another arrived: still news.
+        assert_eq!(state.set(snap(1, Some("c"))), RequestsTransition::Arrived);
+    }
 
     #[test]
     fn dashboard_poll_interval_is_500ms_per_digit_capped_at_a_million() {

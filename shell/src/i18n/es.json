@@ -7,6 +7,7 @@
   "nav-account": "Cuenta",
   "nav-apps": "Aplicaciones",
   "nav-mcp": "Servidores MCP",
+  "nav-requests": "Solicitudes",
   "nav-endpoint": "Endpoint",
   "nav-api-clients": "Claves de API",
   "nav-models": "Modelos",
@@ -115,6 +116,8 @@
 
   "mcp-title": "Servidores MCP",
   "mcp-sub": "Comparta servidores de herramientas como Work IQ con sus aplicaciones. Active uno y elija qué aplicaciones lo reciben; desactívelo y lo quitaremos.",
+  "requests-title": "Solicitudes",
+  "requests-sub": "Cuando un servidor MCP le pregunta algo y la aplicación que lo usa no puede mostrar la pregunta, esta espera aquí su respuesta.",
 
   "endpoint-title": "Endpoint",
   "endpoint-sub": "Dónde escucha Maximal. Use estos valores al configurar una herramienta que no esté en la lista de Aplicaciones.",
@@ -292,6 +295,7 @@
   "native-tray-retry": "Reintentar inicio",
   "native-tray-show-logs": "Ver registros…",
   "native-tray-open-config": "Abrir carpeta de configuración…",
+  "native-tray-requests": "Responder solicitudes…",
 
   "native-tooltip-starting": "maximal — iniciando…",
   "native-tooltip-sign-in": "maximal — inicia sesión en GitHub",
@@ -299,6 +303,7 @@
   "native-tooltip-failed": "maximal — el sidecar falló",
   "native-tooltip-stopped": "maximal — detenido",
   "native-tooltip-rejection": "maximal — {message}",
+  "native-tooltip-requests": "maximal — un servidor MCP espera su respuesta",
 
   "native-notify-startup-title": "Maximal está en ejecución",
   "native-notify-startup-body-macos": "Busca el icono de Maximal en tu barra de menús ↑",
@@ -317,6 +322,8 @@
   "native-notify-working-title": "Maximal funciona",
   "native-notify-working-body": "Su primera solicitud acaba de pasar.",
   "native-notify-working-body-apps": "Las solicitudes están pasando: {apps} ya puede usar Maximal.",
+  "native-notify-requests-title": "Un servidor MCP espera su respuesta",
+  "native-notify-requests-body": "Abra Solicitudes en la configuración de Maximal para responder.",
 
   "native-quit-title": "¿Salir de Maximal?",
   "native-quit-body": "Maximal se detendrá y se cerrarán las ventanas de Configuración abiertas.",

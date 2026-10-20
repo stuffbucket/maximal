@@ -53,6 +53,7 @@ import {
   AuthStatus,
   DiagnosticsResponse,
   McpEndpointsListResponse,
+  PendingRequestsResponse,
   ModelsListResponse,
   UpdateStatusResponse,
 } from "../src/lib/config/settings-types"
@@ -92,6 +93,7 @@ function assertFixtures(): void {
       ["apps", AppsListResponse, (s) => s.apps],
       ["models", ModelsListResponse, (s) => s.models],
       ["mcp", McpEndpointsListResponse, (s) => s.mcp],
+      ["requests", PendingRequestsResponse, (s) => s.requests],
     ]
   let failures = 0
   for (const id of Object.keys(SCENARIOS) as Array<ScenarioId>) {

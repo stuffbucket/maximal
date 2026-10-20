@@ -7,6 +7,7 @@
   "nav-account": "Konto",
   "nav-apps": "Apps",
   "nav-mcp": "MCP-Server",
+  "nav-requests": "Anfragen",
   "nav-endpoint": "Endpunkt",
   "nav-api-clients": "API-Schlüssel",
   "nav-models": "Modelle",
@@ -115,6 +116,8 @@
 
   "mcp-title": "MCP-Server",
   "mcp-sub": "Teilen Sie Tool-Server wie Work IQ mit Ihren Apps. Aktivieren Sie einen, und wählen Sie, welche Apps ihn erhalten; deaktivieren Sie ihn, und wir entfernen ihn wieder.",
+  "requests-title": "Anfragen",
+  "requests-sub": "Wenn ein MCP-Server Ihnen eine Frage stellt, die die App, die ihn nutzt, nicht anzeigen kann, wartet sie hier auf Ihre Antwort.",
 
   "endpoint-title": "Endpunkt",
   "endpoint-sub": "Wo Maximal lauscht. Verwenden Sie diese Werte, wenn Sie ein Tool einrichten, das nicht in der App-Liste enthalten ist.",
@@ -292,6 +295,7 @@
   "native-tray-retry": "Start wiederholen",
   "native-tray-show-logs": "Protokolle anzeigen…",
   "native-tray-open-config": "Konfigurationsordner öffnen…",
+  "native-tray-requests": "Anfragen beantworten…",
 
   "native-tooltip-starting": "maximal — wird gestartet…",
   "native-tooltip-sign-in": "maximal — bei GitHub anmelden",
@@ -299,6 +303,7 @@
   "native-tooltip-failed": "maximal — Sidecar fehlgeschlagen",
   "native-tooltip-stopped": "maximal — gestoppt",
   "native-tooltip-rejection": "maximal — {message}",
+  "native-tooltip-requests": "maximal — ein MCP-Server wartet auf Ihre Antwort",
 
   "native-notify-startup-title": "Maximal läuft",
   "native-notify-startup-body-macos": "Suchen Sie das Maximal-Symbol in Ihrer Menüleiste ↑",
@@ -317,6 +322,8 @@
   "native-notify-working-title": "Maximal funktioniert",
   "native-notify-working-body": "Ihre erste Anfrage ist gerade durchgegangen.",
   "native-notify-working-body-apps": "Anfragen gehen durch – {apps} kann Maximal jetzt nutzen.",
+  "native-notify-requests-title": "Ein MCP-Server wartet auf Ihre Antwort",
+  "native-notify-requests-body": "Öffnen Sie „Anfragen“ in den Einstellungen von Maximal, um zu antworten.",
 
   "native-quit-title": "Maximal beenden?",
   "native-quit-body": "Maximal wird gestoppt und alle geöffneten Einstellungsfenster werden geschlossen.",

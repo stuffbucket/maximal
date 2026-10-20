@@ -7,6 +7,7 @@
   "nav-account": "Account",
   "nav-apps": "Apps",
   "nav-mcp": "MCP servers",
+  "nav-requests": "Requests",
   "nav-endpoint": "Endpoint",
   "nav-api-clients": "API keys",
   "nav-models": "Models",
@@ -115,6 +116,8 @@
 
   "mcp-title": "MCP servers",
   "mcp-sub": "Share tool servers like Work IQ with your apps. Turn one on and choose which apps get it; turn it off and we take it back out.",
+  "requests-title": "Requests",
+  "requests-sub": "When an MCP server asks you something and the app using it can't show the question, it waits here for your answer.",
 
   "endpoint-title": "Endpoint",
   "endpoint-sub": "Where Maximal listens. Use these values when wiring up a tool that isn’t in the Apps list.",
@@ -292,6 +295,7 @@
   "native-tray-retry": "Retry startup",
   "native-tray-show-logs": "Show logs…",
   "native-tray-open-config": "Open config folder…",
+  "native-tray-requests": "Answer requests…",
 
   "native-tooltip-starting": "maximal — starting…",
   "native-tooltip-sign-in": "maximal — sign in to GitHub",
@@ -299,6 +303,7 @@
   "native-tooltip-failed": "maximal — sidecar failed",
   "native-tooltip-stopped": "maximal — stopped",
   "native-tooltip-rejection": "maximal — {message}",
+  "native-tooltip-requests": "maximal — an MCP server is waiting for your answer",
 
   "native-notify-startup-title": "Maximal is running",
   "native-notify-startup-body-macos": "Look for the Maximal icon in your menu bar ↑",
@@ -317,6 +322,8 @@
   "native-notify-working-title": "Maximal is working",
   "native-notify-working-body": "Your first request just went through.",
   "native-notify-working-body-apps": "Requests are going through — {apps} can use Maximal now.",
+  "native-notify-requests-title": "An MCP server is waiting for your answer",
+  "native-notify-requests-body": "Open Requests in Maximal's settings to answer it.",
 
   "native-quit-title": "Quit Maximal?",
   "native-quit-body": "Maximal will stop and any open Settings windows will close.",

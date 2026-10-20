@@ -15,12 +15,14 @@ import { mountApiClients } from "./ui/islands/api-clients-island";
 import { mountApps } from "./ui/islands/apps-island";
 import { mountMcp } from "./ui/islands/mcp-island";
 import { mountModels } from "./ui/islands/models-island";
+import { mountRequests } from "./ui/islands/requests-island";
 import { waitForSidecarBack } from "./ui/restart";
 
 type SectionId =
   | "account"
   | "apps"
   | "mcp"
+  | "requests"
   | "endpoint"
   | "api-clients"
   | "models"
@@ -31,6 +33,7 @@ const SECTIONS: ReadonlyArray<SectionId> = [
   "account",
   "apps",
   "mcp",
+  "requests",
   "endpoint",
   "api-clients",
   "models",
@@ -1980,6 +1983,7 @@ window.addEventListener("DOMContentLoaded", () => {
   mountApiClients();
   mountApps();
   mountMcp();
+  mountRequests();
   mountModels();
   wireNav();
   syncFromHash();
@@ -1996,6 +2000,9 @@ window.addEventListener("hashchange", () => {
   if (section === "diagnostics") void loadDiagnostics();
   if (section === "apps") {
     window.dispatchEvent(new CustomEvent("maximal:apps-refresh"));
+  }
+  if (section === "requests") {
+    window.dispatchEvent(new CustomEvent("maximal:requests-refresh"));
   }
   if (section === "mcp") {
     window.dispatchEvent(new CustomEvent("maximal:mcp-refresh"));
