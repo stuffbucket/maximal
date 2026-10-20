@@ -35,6 +35,9 @@ export const ResolvedMcpEndpointSchema = z
     shutdownTimeoutMs: DurationSchema.default(2_000),
     /** Concurrent sessions, each with its own upstream instance. */
     maxSessions: z.number().int().min(1).max(64).default(8),
+    /** Close a session after this long with no request and no open stream,
+     *  which is how one abandoned without a DELETE is reclaimed. */
+    sessionIdleTimeoutMs: DurationSchema.default(1_800_000),
   })
   .superRefine((endpoint, context) => {
     if (
