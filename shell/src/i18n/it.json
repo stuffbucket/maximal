@@ -7,6 +7,7 @@
   "nav-account": "Account",
   "nav-apps": "App",
   "nav-mcp": "Server MCP",
+  "nav-requests": "Richieste",
   "nav-endpoint": "Endpoint",
   "nav-api-clients": "Chiavi API",
   "nav-models": "Modelli",
@@ -115,6 +116,8 @@
 
   "mcp-title": "Server MCP",
   "mcp-sub": "Condividi server di strumenti come Work IQ con le tue app. Attivane uno e scegli quali app lo ricevono; disattivalo e lo rimuoveremo.",
+  "requests-title": "Richieste",
+  "requests-sub": "Quando un server MCP ti fa una domanda che l’app che lo usa non può mostrare, la domanda attende qui la tua risposta.",
 
   "endpoint-title": "Endpoint",
   "endpoint-sub": "Dove Maximal è in ascolto. Usa questi valori quando configuri uno strumento che non è nell’elenco App.",
@@ -292,6 +295,7 @@
   "native-tray-retry": "Riprova l’avvio",
   "native-tray-show-logs": "Mostra i log…",
   "native-tray-open-config": "Apri cartella di configurazione…",
+  "native-tray-requests": "Rispondi alle richieste…",
 
   "native-tooltip-starting": "maximal — avvio…",
   "native-tooltip-sign-in": "maximal — accedi a GitHub",
@@ -299,6 +303,7 @@
   "native-tooltip-failed": "maximal — sidecar non riuscito",
   "native-tooltip-stopped": "maximal — arrestato",
   "native-tooltip-rejection": "maximal — {message}",
+  "native-tooltip-requests": "maximal — un server MCP attende la tua risposta",
 
   "native-notify-startup-title": "Maximal è in esecuzione",
   "native-notify-startup-body-macos": "Cerca l’icona di Maximal nella barra dei menu ↑",
@@ -317,6 +322,8 @@
   "native-notify-working-title": "Maximal funziona",
   "native-notify-working-body": "La prima richiesta è appena passata.",
   "native-notify-working-body-apps": "Le richieste passano: {apps} ora può usare Maximal.",
+  "native-notify-requests-title": "Un server MCP attende la tua risposta",
+  "native-notify-requests-body": "Apri Richieste nelle Impostazioni di Maximal per rispondere.",
 
   "native-quit-title": "Uscire da Maximal?",
   "native-quit-body": "Maximal si arresterà e tutte le finestre delle Impostazioni aperte si chiuderanno.",

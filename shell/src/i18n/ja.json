@@ -7,6 +7,7 @@
   "nav-account": "アカウント",
   "nav-apps": "アプリ",
   "nav-mcp": "MCP サーバー",
+  "nav-requests": "リクエスト",
   "nav-endpoint": "エンドポイント",
   "nav-api-clients": "API キー",
   "nav-models": "モデル",
@@ -115,6 +116,8 @@
 
   "mcp-title": "MCP サーバー",
   "mcp-sub": "Work IQ などのツールサーバーをアプリと共有します。オンにして使うアプリを選び、オフにすると元に戻します。",
+  "requests-title": "リクエスト",
+  "requests-sub": "MCP サーバーからの質問を、それを使っているアプリで表示できない場合は、ここで回答を待ちます。",
 
   "endpoint-title": "エンドポイント",
   "endpoint-sub": "Maximal がリッスンする場所。Apps の一覧にないツールを接続する際は、これらの値を使用してください。",
@@ -292,6 +295,7 @@
   "native-tray-retry": "起動を再試行",
   "native-tray-show-logs": "ログを表示…",
   "native-tray-open-config": "構成フォルダを開く…",
+  "native-tray-requests": "リクエストに回答…",
 
   "native-tooltip-starting": "maximal — 起動中…",
   "native-tooltip-sign-in": "maximal — GitHub にサインイン",
@@ -299,6 +303,7 @@
   "native-tooltip-failed": "maximal — サイドカーが失敗しました",
   "native-tooltip-stopped": "maximal — 停止しました",
   "native-tooltip-rejection": "maximal — {message}",
+  "native-tooltip-requests": "maximal — MCP サーバーが回答を待っています",
 
   "native-notify-startup-title": "Maximal が実行中です",
   "native-notify-startup-body-macos": "メニューバーで Maximal のアイコンを探してください ↑",
@@ -317,6 +322,8 @@
   "native-notify-working-title": "Maximal は動作しています",
   "native-notify-working-body": "最初のリクエストが通りました。",
   "native-notify-working-body-apps": "リクエストが通っています。{apps} で Maximal を使えるようになりました。",
+  "native-notify-requests-title": "MCP サーバーが回答を待っています",
+  "native-notify-requests-body": "Maximal の設定で「リクエスト」を開いて回答してください。",
 
   "native-quit-title": "Maximal を終了しますか？",
   "native-quit-body": "Maximal が停止し、開いている設定ウィンドウはすべて閉じます。",

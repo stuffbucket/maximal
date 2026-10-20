@@ -1940,6 +1940,125 @@ a:hover {
   }
 }
 
+/* ---- Requests: MCP servers' questions waiting for an answer ----
+   One card per request (each is an entity the user acts on). Everything
+   a server sent is plain text: no markup, wrapped wherever it must. */
+.request-card__message {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-base);
+  color: var(--text-base-color);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+
+/* The title is a heading for the outline, not for its default margins;
+   the button lines up with it rather than floating mid-card. */
+.request-card .card__head {
+  align-items: flex-start;
+}
+
+.request-card .card__title {
+  margin: 0;
+}
+
+/* A tool name is one long word; let it break instead of running under
+   the button. */
+.request-card__meta {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.request-dialog {
+  max-width: calc(var(--size-2xl) * 13);
+}
+
+.request-dialog__from {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.request-dialog__source {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+/* Multi-line prose from the server: body size, scrolls when long. */
+.request-dialog__message {
+  margin: 0;
+  font-size: var(--text-base);
+  line-height: var(--leading-base);
+  color: var(--text-strong);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-block-size: calc(var(--size-2xl) * 6);
+  overflow-y: auto;
+}
+
+.request-dialog__url {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-base-color);
+  overflow-wrap: anywhere;
+}
+
+.request-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.request-field__label {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+}
+
+.request-field__optional {
+  font-weight: normal;
+  color: var(--text-muted);
+}
+
+.request-field__check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+}
+
+/* A select that sits with .input: same box, the native chevron kept. */
+.select {
+  background: var(--surface-control);
+  color: var(--text-strong);
+  border: var(--border-width-hairline) solid var(--border-strong);
+  border-radius: var(--radius-input);
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  line-height: var(--leading-lg);
+  min-height: var(--size-xl);
+  width: 100%;
+  cursor: pointer;
+}
+
+.select:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 /* ---- Apps: per-integration cards ----
    One card per app (Claude Code, Claude Desktop, Copilot CLI) — each
    is a discrete actionable entity, so a card earns its chrome here.

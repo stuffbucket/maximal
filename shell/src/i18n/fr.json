@@ -7,6 +7,7 @@
   "nav-account": "Compte",
   "nav-apps": "Applications",
   "nav-mcp": "Serveurs MCP",
+  "nav-requests": "Demandes",
   "nav-endpoint": "Point de terminaison",
   "nav-api-clients": "Clés d’API",
   "nav-models": "Modèles",
@@ -115,6 +116,8 @@
 
   "mcp-title": "Serveurs MCP",
   "mcp-sub": "Partagez des serveurs d’outils comme Work IQ avec vos applications. Activez-en un et choisissez les applications qui le reçoivent ; désactivez-le et nous le retirons.",
+  "requests-title": "Demandes",
+  "requests-sub": "Lorsqu’un serveur MCP vous pose une question que l’application qui l’utilise ne peut pas afficher, elle attend ici votre réponse.",
 
   "endpoint-title": "Point de terminaison",
   "endpoint-sub": "Où Maximal écoute. Utilisez ces valeurs pour configurer un outil qui ne figure pas dans la liste des applications.",
@@ -292,6 +295,7 @@
   "native-tray-retry": "Relancer le démarrage",
   "native-tray-show-logs": "Afficher l’historique…",
   "native-tray-open-config": "Ouvrir le dossier de configuration…",
+  "native-tray-requests": "Répondre aux demandes…",
 
   "native-tooltip-starting": "maximal — démarrage…",
   "native-tooltip-sign-in": "maximal — se connecter à GitHub",
@@ -299,6 +303,7 @@
   "native-tooltip-failed": "maximal — échec du sidecar",
   "native-tooltip-stopped": "maximal — arrêté",
   "native-tooltip-rejection": "maximal — {message}",
+  "native-tooltip-requests": "maximal — un serveur MCP attend votre réponse",
 
   "native-notify-startup-title": "Maximal est en cours d’exécution",
   "native-notify-startup-body-macos": "Cherchez l’icône Maximal dans votre barre de menus ↑",
@@ -317,6 +322,8 @@
   "native-notify-working-title": "Maximal fonctionne",
   "native-notify-working-body": "Votre première requête vient de passer.",
   "native-notify-working-body-apps": "Les requêtes passent : {apps} peut maintenant utiliser Maximal.",
+  "native-notify-requests-title": "Un serveur MCP attend votre réponse",
+  "native-notify-requests-body": "Ouvrez Demandes dans les Réglages de Maximal pour répondre.",
 
   "native-quit-title": "Quitter Maximal ?",
   "native-quit-body": "Maximal s’arrêtera et toutes les fenêtres de Réglages ouvertes se fermeront.",

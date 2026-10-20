@@ -19,6 +19,7 @@ import type {
   DiagnosticsResponse,
   McpEndpointsListResponse,
   ModelsListResponse,
+  PendingRequestsResponse,
   UpdateStatusResponse,
 } from "../src/lib/config/settings-types"
 
@@ -96,6 +97,8 @@ export interface Scenario {
   ghStatus: GhStatusFixture
   /** Optional on each scenario; `resolveScenario` fills the shared default. */
   mcp?: McpEndpointsListResponse
+  /** MCP servers' requests waiting for an answer (Settings → Requests). */
+  requests?: PendingRequestsResponse
   clients?: ActiveClientsFixture
   dashboard?: DashboardFixture
 }
@@ -414,6 +417,52 @@ function healthy(label: string): Scenario {
 }
 
 // ---- the scenarios ---------------------------------------------------------
+// Relative to now (not ISO()), so "time left" reads naturally in the harness.
+const inMinutes = (minutes: number): string =>
+  new Date(Date.now() + minutes * 60_000).toISOString()
+
+const waitingRequests: PendingRequestsResponse = {
+  requests: [
+    {
+      id: "elicit-form",
+      endpointId: "workiq",
+      label: "Work IQ",
+      toolName: "get_debug_link",
+      mode: "form",
+      message:
+        "Create a shareable debug link for this conversation? Anyone with the link can see the conversation's diagnostic details for 7 days.",
+      fields: [
+        { name: "confirmed", kind: "boolean", title: "Create the link", required: true },
+        {
+          name: "audience",
+          kind: "enum",
+          title: "Who can open it",
+          required: true,
+          options: [
+            { value: "org", label: "People in my organization" },
+            { value: "me", label: "Only me" },
+          ],
+        },
+        { name: "note", kind: "string", title: "Note for support", required: false, maxLength: 200 },
+      ],
+      receivedAt: inMinutes(-1),
+      expiresAt: inMinutes(4),
+    },
+    {
+      id: "elicit-url",
+      endpointId: "workiq",
+      label: "Work IQ",
+      mode: "url",
+      message: "Sign in to Microsoft 365 to let Work IQ read your calendar.",
+      fields: [],
+      url: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=example",
+      urlHost: "login.microsoftonline.com",
+      receivedAt: inMinutes(0),
+      expiresAt: inMinutes(5),
+    },
+  ],
+}
+
 export const SCENARIOS = {
   "signed-in": {
     label: "Signed in · healthy",
@@ -630,6 +679,11 @@ export const SCENARIOS = {
     mcp: { ...twoMcpEndpoints, broker: { state: "unavailable", problem: "not-installed" } },
   },
 
+  "requests-waiting": {
+    ...healthy("Requests · a form and a link waiting for an answer"),
+    requests: waitingRequests,
+  },
+
   "mcp-found": {
     ...healthy("MCP · nothing added yet, Work IQ found on this machine"),
     mcp: { endpoints: [], broker: { state: "off", problem: null }, available: [workiqFound] },
@@ -656,6 +710,7 @@ export function resolveScenario(id: ScenarioId): ResolvedScenario {
   return {
     ...s,
     mcp: s.mcp ?? twoMcpEndpoints,
+    requests: s.requests ?? { requests: [] },
     clients: s.clients ?? recentClients,
     dashboard: s.dashboard ?? busyDashboard,
   }

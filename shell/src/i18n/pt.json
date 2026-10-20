@@ -7,6 +7,7 @@
   "nav-account": "Conta",
   "nav-apps": "Aplicativos",
   "nav-mcp": "Servidores MCP",
+  "nav-requests": "Solicitações",
   "nav-endpoint": "Endpoint",
   "nav-api-clients": "Chaves de API",
   "nav-models": "Modelos",
@@ -115,6 +116,8 @@
 
   "mcp-title": "Servidores MCP",
   "mcp-sub": "Compartilhe servidores de ferramentas como o Work IQ com seus aplicativos. Ative um e escolha quais aplicativos o recebem; desative-o e nós o removemos.",
+  "requests-title": "Solicitações",
+  "requests-sub": "Quando um servidor MCP faz uma pergunta que o aplicativo que o usa não consegue mostrar, ela aguarda sua resposta aqui.",
 
   "endpoint-title": "Endpoint",
   "endpoint-sub": "Onde o Maximal escuta. Use estes valores ao configurar uma ferramenta que não esteja na lista de Aplicativos.",
@@ -292,6 +295,7 @@
   "native-tray-retry": "Tentar iniciar novamente",
   "native-tray-show-logs": "Ver registros…",
   "native-tray-open-config": "Abrir pasta de configuração…",
+  "native-tray-requests": "Responder solicitações…",
 
   "native-tooltip-starting": "maximal — iniciando…",
   "native-tooltip-sign-in": "maximal — inicie sessão no GitHub",
@@ -299,6 +303,7 @@
   "native-tooltip-failed": "maximal — o sidecar falhou",
   "native-tooltip-stopped": "maximal — parado",
   "native-tooltip-rejection": "maximal — {message}",
+  "native-tooltip-requests": "maximal — um servidor MCP aguarda sua resposta",
 
   "native-notify-startup-title": "O Maximal está em execução",
   "native-notify-startup-body-macos": "Procure o ícone do Maximal na sua barra de menus ↑",
@@ -317,6 +322,8 @@
   "native-notify-working-title": "O Maximal está funcionando",
   "native-notify-working-body": "Sua primeira solicitação acabou de passar.",
   "native-notify-working-body-apps": "As solicitações estão passando: {apps} já pode usar o Maximal.",
+  "native-notify-requests-title": "Um servidor MCP aguarda sua resposta",
+  "native-notify-requests-body": "Abra Solicitações nas Configurações do Maximal para responder.",
 
   "native-quit-title": "Sair do Maximal?",
   "native-quit-body": "O Maximal será interrompido e todas as janelas de Configurações abertas serão fechadas.",
