@@ -94,9 +94,9 @@ const McpElicitationRuleSchema = z
         .max(2)
         .optional(),
       fieldTypes: z
-        .array(z.enum(["boolean", "string", "number", "integer"]))
+        .array(z.enum(["boolean", "string", "number", "integer", "enum"]))
         .min(1)
-        .max(4)
+        .max(5)
         .optional(),
       urlHosts: z.array(HostnameSchema).min(1).max(64).optional(),
       maxProperties: z.number().int().min(0).max(128).optional(),
@@ -174,6 +174,7 @@ const McpServerConfigSchema = z
       .object({
         defaultAction: McpElicitationActionSchema.optional(),
         rules: z.array(McpElicitationRuleSchema).max(128).optional(),
+        timeoutMs: z.number().int().min(1_000).max(3_600_000).optional(),
       })
       .optional(),
   })

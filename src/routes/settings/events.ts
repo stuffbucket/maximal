@@ -23,6 +23,7 @@ import { streamSSE } from "hono/streaming"
 
 import { getAuthStatus } from "~/lib/auth/auth-controller"
 import { settingsEventBus } from "~/lib/config/settings-events"
+import { pendingRequests } from "~/lib/mcp-broker/pending-requests"
 
 /** Keep-alive cadence. Proxies and idle-connection reapers close silent
  *  streams; a periodic comment line keeps the channel warm at negligible
@@ -40,12 +41,29 @@ eventsRoutes.get("/", (c) =>
       data: JSON.stringify(getAuthStatus()),
     })
 
-    const unsubscribe = settingsEventBus.subscribe("auth.changed", (status) => {
-      void stream.writeSSE({
-        event: "auth.changed",
-        data: JSON.stringify(status),
-      })
+    await stream.writeSSE({
+      event: "requests.changed",
+      data: JSON.stringify(pendingRequests.list()),
     })
+
+    const unsubscribeAuth = settingsEventBus.subscribe(
+      "auth.changed",
+      (status) => {
+        void stream.writeSSE({
+          event: "auth.changed",
+          data: JSON.stringify(status),
+        })
+      },
+    )
+    const unsubscribeRequests = settingsEventBus.subscribe(
+      "requests.changed",
+      (requests) => {
+        void stream.writeSSE({
+          event: "requests.changed",
+          data: JSON.stringify(requests),
+        })
+      },
+    )
 
     const heartbeat = setInterval(() => {
       // A comment-only line (": ping") is ignored by EventSource but resets
@@ -59,7 +77,8 @@ eventsRoutes.get("/", (c) =>
     await new Promise<void>((resolve) => {
       stream.onAbort(() => {
         clearInterval(heartbeat)
-        unsubscribe()
+        unsubscribeAuth()
+        unsubscribeRequests()
         resolve()
       })
     })

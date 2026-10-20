@@ -232,7 +232,7 @@ while running ones keep their instance; otherwise a restart. The broker
 re-checks an `update` and answers `RESTART_REQUIRED` if the endpoints or
 how they're served (protocol, interaction, ownership, body limit) differ,
 and the supervisor then restarts it. The control protocol is versioned
-(`CONTROL_PROTOCOL_VERSION`, 2 since `update`); a sidecar and broker from
+(`CONTROL_PROTOCOL_VERSION`, 3 since `elicit`); a sidecar and broker from
 different builds fail the first frame rather than half-work. The CLI, which has no broker, calls the
 running server's loopback-only `POST /_internal/reload`, which re-reads
 `config.json` and restarts the broker if needed, so no restart is required. External MCP commands,
@@ -244,6 +244,37 @@ is bounded and followed by exact-group `SIGKILL`, including descendants. Windows
 currently fails closed because kill-on-close Job Object containment is not
 implemented. Public `/status` exposes only coarse broker state and
 enabled-endpoint count.
+
+### Requests for user input (elicitation)
+
+An MCP server can ask the user for input: a form to fill in, or a URL to
+open. The broker advertises that it can take these and routes each one by
+the endpoint's `elicitation` policy (`packages/mcp-broker/src/elicitation.ts`):
+
+- `passthrough` (the default): the session's own client, if its `initialize`
+  said it can show that kind of request; otherwise Maximal. Claude Desktop
+  advertises none, so its requests always come to Maximal.
+- `maximal`: always Maximal.
+- `deny`: decline without asking.
+
+Rules (first match wins) narrow this by tool, mechanism, mode, field types,
+URL host and form size. Forms asking for credentials or payment details are
+declined, as are requests too large for Maximal to show. An unanswered
+request is cancelled after the policy's timeout (5 minutes by default), and
+the tool call waiting on it gets that time on top of its own.
+
+To ask Maximal, the broker sends `elicit` on the control channel; the
+sidecar's `elicitResult` answers it, and the broker's `elicitWithdrawn` takes
+it back (timeout, server cancel, session closed). The sidecar keeps waiting
+requests in memory only (`src/lib/mcp-broker/pending-requests.ts`): each
+belongs to a live session inside the broker, its child, so none can outlive
+a restart, and a generation's requests are dropped when it ends. Forms are
+normalized to the field kinds Maximal can show and answers are validated
+before they reach the server; only the first answer counts. Settings reads
+them from `/settings/api/requests` (also pushed as `requests.changed` on the
+events stream), and the shell polls `/settings/api/requests/summary` to
+notice new ones. None of this is on the public `/status`, since requests
+carry server text.
 
 ## Token counting
 

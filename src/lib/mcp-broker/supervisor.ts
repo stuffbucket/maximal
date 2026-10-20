@@ -16,8 +16,10 @@ import {
   BrokerFrameDecoder,
   encodeSidecarEnvelope,
   type BrokerEnvelope,
+  type ElicitResultPayload,
   type SidecarEnvelope,
 } from "./control-protocol"
+import { PendingRequests, pendingRequests } from "./pending-requests"
 
 export type BrokerSupervisorState =
   | "disabled"
@@ -94,6 +96,8 @@ interface SupervisorOptions {
   randomBytes?: (size: number) => Buffer
   randomUUID?: () => string
   spawnProcess?: typeof spawn
+  /** Where requests for user input wait for an answer. */
+  requests?: PendingRequests
 }
 
 /** How long to wait for the broker to take an update before restarting it
@@ -131,6 +135,7 @@ export class BrokerSupervisor {
   readonly #randomBytes: (size: number) => Buffer
   readonly #randomUUID: () => string
   readonly #spawnProcess: typeof spawn
+  readonly #requests: PendingRequests
   #generation: BrokerGeneration | undefined
   #stopping = false
   #restartTimes: Array<number> = []
@@ -151,6 +156,7 @@ export class BrokerSupervisor {
     this.#randomBytes = options.randomBytes ?? crypto.randomBytes
     this.#randomUUID = options.randomUUID ?? crypto.randomUUID
     this.#spawnProcess = options.spawnProcess ?? spawn
+    this.#requests = options.requests ?? pendingRequests
     this.#setState("disabled")
   }
 
@@ -240,7 +246,10 @@ export class BrokerSupervisor {
     currentUpstream = undefined
 
     const generation = this.#generation
-    if (generation) await this.#stopGeneration(generation)
+    if (generation) {
+      this.#requests.dropGeneration(generation.id)
+      await this.#stopGeneration(generation)
+    }
     if (this.#generation === generation) this.#generation = undefined
     this.#setState("disabled")
   }
@@ -326,6 +335,7 @@ export class BrokerSupervisor {
     child.once("exit", () => {
       if (this.#generation !== generation) return
       this.#forceKillGeneration(generation)
+      this.#requests.dropGeneration(generation.id)
       this.#generation = undefined
       currentUpstream = undefined
       this.#clearGenerationTimers(generation)
@@ -370,6 +380,17 @@ export class BrokerSupervisor {
       throw new BrokerControlProtocolError("CONTROL_SEQUENCE_MISMATCH")
     }
     generation.expectedSequence += 1
+
+    // A request for input carries its own expiry, and a withdrawal is valid
+    // however late; neither is dropped as stale.
+    if (envelope.operation === "elicit") {
+      this.#onElicit(generation, envelope)
+      return
+    }
+    if (envelope.operation === "elicitWithdrawn") {
+      this.#requests.withdraw(envelope.requestId)
+      return
+    }
     if (this.#now() > envelope.deadlineMs) return
 
     switch (envelope.operation) {
@@ -397,6 +418,31 @@ export class BrokerSupervisor {
         if (envelope.payload.state === "degraded") this.#setState("degraded")
       }
     }
+  }
+
+  #onElicit(
+    generation: BrokerGeneration,
+    envelope: Extract<BrokerEnvelope, { operation: "elicit" }>,
+  ): void {
+    if (!generation.readyReceived) {
+      throw new BrokerControlProtocolError("CONTROL_ELICIT_BEFORE_READY")
+    }
+    const { requestId } = envelope
+    const reply = (payload: ElicitResultPayload) => {
+      void this.#send(generation, {
+        operation: "elicitResult",
+        requestId,
+        payload,
+      }).catch(() => undefined)
+    }
+    const added = this.#requests.add({
+      generation: generation.id,
+      requestId,
+      payload: envelope.payload,
+      answer: reply,
+    })
+    // A form Maximal can't show is declined rather than left waiting.
+    if (!added) reply({ action: "decline" })
   }
 
   async #onHello(generation: BrokerGeneration): Promise<void> {
@@ -500,6 +546,7 @@ export class BrokerSupervisor {
 
   #failGeneration(generation: BrokerGeneration): void {
     if (this.#generation !== generation || this.#stopping) return
+    this.#requests.dropGeneration(generation.id)
     this.#generation = undefined
     currentUpstream = undefined
     this.#clearGenerationTimers(generation)

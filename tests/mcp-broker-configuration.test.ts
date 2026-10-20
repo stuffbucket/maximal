@@ -74,10 +74,38 @@ describe("resolveBrokerConfiguration", () => {
           callTimeoutMs: 120_000,
           shutdownTimeoutMs: 2_000,
           maxSessions: 8,
+          elicitation: {
+            defaultAction: "passthrough",
+            rules: [],
+            timeoutMs: 300_000,
+          },
         },
       ],
       httpBodyBytes: 4096,
       heartbeatIntervalMs: 3_000,
+    })
+  })
+
+  it("passes each endpoint's policy for requests for user input", () => {
+    const rules = [
+      { match: { toolNames: ["get_debug_link"] }, action: "deny" as const },
+    ]
+    const [endpoint] = resolveBrokerConfiguration({
+      enabled: true,
+      servers: [
+        {
+          id: "fixture",
+          label: "Fixture",
+          transport: { type: "stdio", command: "fixture" },
+          elicitation: { defaultAction: "maximal", rules, timeoutMs: 60_000 },
+        },
+      ],
+    }).endpoints
+
+    expect(endpoint.elicitation).toEqual({
+      defaultAction: "maximal",
+      rules,
+      timeoutMs: 60_000,
     })
   })
 

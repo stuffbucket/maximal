@@ -3,9 +3,10 @@ import { z } from "zod"
 import type { ResolvedBrokerConfiguration } from "./configuration"
 
 export const CONTROL_PROTOCOL = "maximal-mcp-control"
-// 2: adds `update`. Broker and sidecar ship together; a mismatched pair
-// fails the first frame instead of half-working.
-export const CONTROL_PROTOCOL_VERSION = 2
+// 2: adds `update`. 3: adds `elicit`, `elicitResult` and `elicitWithdrawn`.
+// Broker and sidecar ship together; a mismatched pair fails the first frame
+// instead of half-working.
+export const CONTROL_PROTOCOL_VERSION = 3
 export const DEFAULT_MAX_CONTROL_FRAME_BYTES = 1_048_576
 
 const IdentifierSchema = z
@@ -39,6 +40,38 @@ const BaseEnvelopeSchema = z.strictObject({
   requestId: IdentifierSchema.optional(),
 })
 
+/** A server's request for user input, for Maximal to show. Everything in
+ *  it came from the MCP server and is untrusted. */
+export const ElicitPayloadSchema = z.strictObject({
+  endpointId: z.string().min(1).max(64),
+  label: z.string().min(1).max(128),
+  toolName: z.string().min(1).max(256).optional(),
+  mechanism: z.enum(["legacy-form", "legacy-url", "modern-input-required"]),
+  mode: z.enum(["form", "url"]),
+  message: z.string().max(4096),
+  requestedSchema: z
+    .looseObject({
+      type: z.literal("object"),
+      properties: z.record(
+        z.string().max(256),
+        z.record(z.string(), z.unknown()),
+      ),
+      required: z.array(z.string().max(256)).max(64).optional(),
+    })
+    .optional(),
+  url: z.string().min(1).max(4096).optional(),
+  expiresAtMs: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+})
+
+export type ElicitPayload = z.infer<typeof ElicitPayloadSchema>
+
+export type ElicitContentValue = string | number | boolean | Array<string>
+
+export interface ElicitResultPayload {
+  action: "accept" | "decline" | "cancel"
+  content?: Record<string, ElicitContentValue>
+}
+
 export const BrokerEnvelopeSchema = z.discriminatedUnion("operation", [
   BaseEnvelopeSchema.extend({
     operation: z.literal("hello"),
@@ -63,6 +96,16 @@ export const BrokerEnvelopeSchema = z.discriminatedUnion("operation", [
     payload: z.strictObject({
       state: z.enum(["starting", "ready", "degraded", "stopping"]),
     }),
+  }),
+  BaseEnvelopeSchema.extend({
+    operation: z.literal("elicit"),
+    requestId: IdentifierSchema,
+    payload: ElicitPayloadSchema,
+  }),
+  BaseEnvelopeSchema.extend({
+    operation: z.literal("elicitWithdrawn"),
+    requestId: IdentifierSchema,
+    payload: z.strictObject({}),
   }),
   BaseEnvelopeSchema.extend({
     operation: z.literal("response"),
@@ -101,6 +144,11 @@ export type SidecarEnvelope =
       operation: "shutdown"
       requestId: string
       payload: Record<string, never>
+    }
+  | {
+      operation: "elicitResult"
+      requestId: string
+      payload: ElicitResultPayload
     }
 
 export class BrokerControlProtocolError extends Error {
