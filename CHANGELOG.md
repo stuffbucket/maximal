@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.4.47](https://github.com/stuffbucket/maximal/compare/v0.4.46...v0.4.47) (2026-10-20)
+
+
+### Features
+
+* **mcp:** hold servers' requests for user input for Settings to answer ([#495](https://github.com/stuffbucket/maximal/issues/495)) ([d35f6d4](https://github.com/stuffbucket/maximal/commit/d35f6d4278468c2af15cfe77f3a2cc949393fdd4))
+* **mcp:** route servers' requests for user input to the client or Maximal ([#494](https://github.com/stuffbucket/maximal/issues/494)) ([ec93139](https://github.com/stuffbucket/maximal/commit/ec93139c18bc43a577d48ac780ba1ffae7a562e6))
+* **ui:** answer MCP servers' requests in Settings → Requests ([#498](https://github.com/stuffbucket/maximal/issues/498)) ([299aded](https://github.com/stuffbucket/maximal/commit/299adedbdfb0815ee5ae96d0d0097ff4ae50369e))
+
+
+### Bug Fixes
+
+* **mcp:** end the broker session when a stdio adapter stops ([#492](https://github.com/stuffbucket/maximal/issues/492)) ([cb4d4c6](https://github.com/stuffbucket/maximal/commit/cb4d4c65374d206ae40046c71ec8fa3e878f9d56))
+* **mcp:** reclaim sessions whose adapter was killed, on Bun 1.4 ([#493](https://github.com/stuffbucket/maximal/issues/493)) ([202857b](https://github.com/stuffbucket/maximal/commit/202857bc96e0a4f8d4d40b4729b8f608239fff50))
+
 ## [0.4.46](https://github.com/stuffbucket/maximal/compare/v0.4.45...v0.4.46) (2026-10-17)
 
 
