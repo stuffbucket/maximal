@@ -1,3 +1,4 @@
+import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client"
 import { expect, it } from "bun:test"
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
 import { resolve } from "node:path"
@@ -62,7 +63,7 @@ const writeEnvelope = (
   child.stdin.write(encodeControlEnvelope(envelope))
 }
 
-it("handshakes, reports readiness, takes updates, and shuts down over framed IPC", async () => {
+it("handshakes, reports readiness, takes updates, asks for input, and shuts down over framed IPC", async () => {
   const child = spawn(
     process.execPath,
     [
@@ -162,11 +163,48 @@ it("handshakes, reports readiness, takes updates, and shuts down over framed IPC
       payload: { ok: false, code: "RESTART_REQUIRED" },
     })
 
+    // A server's request for user input that the client can't show goes to
+    // the sidecar as `elicit`; the sidecar's `elicitResult` answers it.
+    const client = new Client(
+      { name: "serve-control-client", version: "0.0.0" },
+      { versionNegotiation: { mode: "legacy" } },
+    )
+    await client.connect(
+      new StreamableHTTPClientTransport(
+        new URL(`http://127.0.0.1:${ready.payload.port}/mcp/fixture`),
+        { requestInit: { headers: { Authorization: `Bearer ${API_KEY}` } } },
+      ),
+      { timeout: 10_000 },
+    )
+    const call = client.callTool({ name: "interactive_one", arguments: {} })
+    const elicit = await queue.take("elicit")
+    expect(elicit).toMatchObject({
+      payload: {
+        endpointId: "fixture",
+        toolName: "interactive_one",
+        mode: "form",
+      },
+    })
     writeEnvelope(child, {
       protocol: CONTROL_PROTOCOL,
       version: CONTROL_PROTOCOL_VERSION,
       generation: GENERATION,
       sequence: 3,
+      deadlineMs: Date.now() + 10_000,
+      requestId: elicit.requestId ?? "",
+      operation: "elicitResult",
+      payload: { action: "accept", content: { confirmed: true } },
+    })
+    expect(await call).toMatchObject({
+      content: [{ type: "text", text: "terminal:accept:rounds:1" }],
+    })
+    await client.close()
+
+    writeEnvelope(child, {
+      protocol: CONTROL_PROTOCOL,
+      version: CONTROL_PROTOCOL_VERSION,
+      generation: GENERATION,
+      sequence: 4,
       deadlineMs: Date.now() + 10_000,
       requestId: "shutdown-1",
       operation: "shutdown",
@@ -181,7 +219,11 @@ it("handshakes, reports readiness, takes updates, and shuts down over framed IPC
       child.once("exit", resolveExit)
     })
     expect(exitCode).toBe(0)
-    expect(stderr).toBe("")
+    // Session traffic makes dependencies log; only sanitized codes may
+    // reach stderr, never their text.
+    expect(
+      stderr.replaceAll("[maximal-mcp-broker] DEPENDENCY_DIAGNOSTIC\n", ""),
+    ).toBe("")
     decoder.finish()
   } finally {
     if (child.exitCode === null) {

@@ -3,6 +3,49 @@ import { z } from "zod"
 const DurationSchema = z.number().int().min(100).max(3_600_000)
 const EnvironmentNameSchema = z.string().regex(/^[A-Za-z_]\w*$/u)
 
+export const ElicitationActionSchema = z.enum(["passthrough", "maximal", "deny"])
+export const ElicitationMechanismSchema = z.enum([
+  "legacy-form",
+  "legacy-url",
+  "modern-input-required",
+])
+export const ElicitationFieldTypeSchema = z.enum([
+  "boolean",
+  "string",
+  "number",
+  "integer",
+  "enum",
+])
+
+/** Matches when every criterion it names matches; none named never matches. */
+const ElicitationRuleSchema = z.strictObject({
+  match: z
+    .strictObject({
+      toolNames: z.array(z.string().min(1).max(256)).min(1).max(128).optional(),
+      mechanisms: z.array(ElicitationMechanismSchema).min(1).max(3).optional(),
+      modes: z
+        .array(z.enum(["form", "url"]))
+        .min(1)
+        .max(2)
+        .optional(),
+      fieldTypes: z.array(ElicitationFieldTypeSchema).min(1).max(5).optional(),
+      urlHosts: z.array(z.string().min(1).max(253)).min(1).max(64).optional(),
+      maxProperties: z.number().int().min(0).max(128).optional(),
+    })
+    .refine((match) => Object.keys(match).length > 0),
+  action: ElicitationActionSchema,
+})
+
+/** Who answers a server's request for user input (a form or a URL). */
+export const ElicitationPolicySchema = z.strictObject({
+  /** passthrough: the client, if it can show this kind of request; otherwise
+   *  Maximal. maximal: always Maximal. deny: decline without asking. */
+  defaultAction: ElicitationActionSchema.default("passthrough"),
+  rules: z.array(ElicitationRuleSchema).max(128).default([]),
+  /** How long a request waits for an answer before it is cancelled. */
+  timeoutMs: DurationSchema.default(300_000),
+})
+
 export const ResolvedMcpEndpointSchema = z
   .strictObject({
     id: z
@@ -38,6 +81,11 @@ export const ResolvedMcpEndpointSchema = z
     /** Close a session after this long with no request and no open stream,
      *  which is how one abandoned without a DELETE is reclaimed. */
     sessionIdleTimeoutMs: DurationSchema.default(1_800_000),
+    elicitation: ElicitationPolicySchema.default({
+      defaultAction: "passthrough",
+      rules: [],
+      timeoutMs: 300_000,
+    }),
   })
   .superRefine((endpoint, context) => {
     if (
@@ -82,3 +130,7 @@ export type BrokerWireConfiguration = z.infer<
   typeof BrokerWireConfigurationSchema
 >
 export type ResolvedMcpEndpoint = z.infer<typeof ResolvedMcpEndpointSchema>
+export type ElicitationPolicy = z.infer<typeof ElicitationPolicySchema>
+export type ElicitationAction = z.infer<typeof ElicitationActionSchema>
+export type ElicitationMechanism = z.infer<typeof ElicitationMechanismSchema>
+export type ElicitationFieldType = z.infer<typeof ElicitationFieldTypeSchema>

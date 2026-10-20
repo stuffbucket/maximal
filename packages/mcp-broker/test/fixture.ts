@@ -130,6 +130,52 @@ async function handleLegacyInteraction(
   return terminalResult(second.action, 2)
 }
 
+/** Legacy-only requests for user input beyond the single-boolean form. */
+async function handleLegacyVariant(
+  toolName: string,
+  ctx: ServerContext,
+): Promise<CallToolResult> {
+  if (toolName === "interactive_url") {
+    const result = await ctx.mcpReq.elicitInput({
+      mode: "url",
+      message: "Open the fixture page.",
+      url: "https://fixture.example/consent",
+      elicitationId: "fixture-url-1",
+    })
+    return textResult(`terminal:${result.action}`)
+  }
+  if (toolName === "interactive_sensitive") {
+    const result = await ctx.mcpReq.elicitInput({
+      mode: "form",
+      message: "Enter your password.",
+      requestedSchema: {
+        type: "object",
+        properties: { password: { type: "string", title: "Password" } },
+        required: ["password"],
+      },
+    })
+    return textResult(`terminal:${result.action}`)
+  }
+  // interactive_echo: a richer form whose answer comes back verbatim.
+  const result = await ctx.mcpReq.elicitInput({
+    mode: "form",
+    message: "Fill in the fixture form.",
+    requestedSchema: {
+      type: "object",
+      properties: {
+        confirmed: { type: "boolean", title: "Confirm" },
+        note: { type: "string", title: "Note", maxLength: 40 },
+        count: { type: "integer", title: "Count", minimum: 1, maximum: 5 },
+        color: { type: "string", title: "Color", enum: ["red", "blue"] },
+      },
+      required: ["confirmed"],
+    },
+  })
+  return textResult(
+    `terminal:${result.action}:${JSON.stringify(result.content ?? {})}`,
+  )
+}
+
 function wait(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     const complete = () => {
@@ -173,6 +219,9 @@ function createFixtureServer(era: "legacy" | "modern"): Server {
       "interactive_one",
       "interactive_two",
       "interactive_never",
+      "interactive_echo",
+      "interactive_url",
+      "interactive_sensitive",
       "progress",
       "delay",
       "whoami",
@@ -208,6 +257,13 @@ function createFixtureServer(era: "legacy" | "modern"): Server {
         return era === "modern" ?
             handleModernInteraction(request.params.name, ctx)
           : handleLegacyInteraction(request.params.name, ctx)
+      }
+      case "interactive_echo":
+      case "interactive_url":
+      case "interactive_sensitive": {
+        return era === "modern" ?
+            textResult("legacy-only")
+          : handleLegacyVariant(request.params.name, ctx)
       }
       case "progress": {
         const progressToken = ctx.mcpReq._meta?.progressToken

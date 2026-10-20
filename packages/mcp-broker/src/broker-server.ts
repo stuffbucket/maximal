@@ -1,4 +1,9 @@
-import { Client, type ClientOptions } from "@modelcontextprotocol/client"
+import {
+  Client,
+  type ClientOptions,
+  type ElicitRequestParams,
+  type ElicitResult,
+} from "@modelcontextprotocol/client"
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio"
 import { Server } from "@modelcontextprotocol/server"
 import {
@@ -13,6 +18,12 @@ import type {
   BrokerWireConfiguration,
   ResolvedMcpEndpoint,
 } from "./wire-config.ts"
+
+import {
+  type AskMaximal,
+  answerElicitation,
+  policyCanElicit,
+} from "./elicitation.ts"
 
 const EXTERNAL_HOST = "127.0.0.1"
 const INTERNAL_PATH = "/mcp"
@@ -118,13 +129,24 @@ export const isLiveUpdate = (
     === JSON.stringify(next.endpoints.map(listenerShape))
 
 const clientOptions = (endpoint: ResolvedMcpEndpoint): ClientOptions => ({
-  capabilities: {},
+  // Advertised before the session's client is known, so it can't depend on
+  // what that client supports; each request is routed when it arrives.
+  capabilities:
+    policyCanElicit(endpoint.elicitation) ?
+      { elicitation: { form: {}, url: {} } }
+    : {},
   versionNegotiation: resolveVersionNegotiation(endpoint.protocol),
 })
+
+type ElicitationHandler = (
+  params: ElicitRequestParams,
+  signal: AbortSignal,
+) => Promise<ElicitResult>
 
 /** Start one upstream instance of the endpoint's stdio server. */
 const connectUpstream = async (
   endpoint: ResolvedMcpEndpoint,
+  onElicit?: ElicitationHandler,
 ): Promise<Client> => {
   const transport = new StdioClientTransport({
     args: endpoint.args,
@@ -135,10 +157,16 @@ const connectUpstream = async (
   })
   transport.stderr?.on("data", () => undefined)
 
+  const options = clientOptions(endpoint)
   const client = new Client(
     { name: "maximal-mcp-broker", version: "0.0.0" },
-    clientOptions(endpoint),
+    options,
   )
+  if (onElicit && options.capabilities?.elicitation) {
+    client.setRequestHandler("elicitation/create", (request, ctx) =>
+      onElicit(request.params, ctx.mcpReq.signal),
+    )
+  }
   try {
     await client.connect(transport, { timeout: endpoint.initializeTimeoutMs })
   } catch (error) {
@@ -156,15 +184,63 @@ const refusal = (status: number, message: string): Response =>
   )
 
 /**
+ * Forward tool calls as mcp-proxy does, but remember which are running, so a
+ * request for user input can say which tool it's for. A call may now wait on
+ * the user, so it gets the input timeout on top of its own.
+ */
+const trackToolCalls = (
+  server: Server,
+  client: Client,
+  session: SessionState,
+  settings: ResolvedMcpEndpoint,
+): void => {
+  const timeout =
+    settings.callTimeoutMs
+    + (policyCanElicit(settings.elicitation) ? settings.elicitation.timeoutMs : 0)
+  server.setRequestHandler("tools/call", async (request, ctx) => {
+    const progressToken = ctx.mcpReq._meta?.progressToken
+    const call = { name: request.params.name }
+    session.toolCalls.add(call)
+    try {
+      return await client.callTool(request.params, {
+        ...(progressToken === undefined ?
+          {}
+        : {
+            onprogress: (progress) => {
+              void ctx.mcpReq
+                .notify({
+                  method: "notifications/progress",
+                  params: { ...progress, progressToken },
+                })
+                .catch(() => undefined)
+            },
+          }),
+        signal: ctx.mcpReq.signal,
+        timeout,
+      })
+    } finally {
+      session.toolCalls.delete(call)
+    }
+  })
+}
+
+/**
  * One endpoint: a private loopback listener whose every MCP session gets its
  * own upstream instance, as if each client ran the server itself. Nothing is
  * shared between sessions, so one client's requests, interactions and
  * cancellations can't reach another's. Closing a session closes its instance.
  */
+/** A session's running tool calls, so a request can name the one it serves. */
+interface SessionState {
+  downstream?: Server
+  toolCalls: Set<{ name: string }>
+}
+
 const startEndpoint = async (
   initial: ResolvedMcpEndpoint,
   apiKey: string,
   maxBodyBytes: number,
+  askMaximal: AskMaximal | undefined,
 ): Promise<RunningEndpoint> => {
   // Replaced by `update`; each new session reads it when it starts.
   let endpoint = initial
@@ -204,9 +280,24 @@ const startEndpoint = async (
           )
         }
         opening += 1
+        // Settings as of this session's start, like everything else it uses.
+        const settings = endpoint
+        const session: SessionState = { toolCalls: new Set() }
         let client: Client
         try {
-          client = await connectUpstream(endpoint)
+          client = await connectUpstream(settings, (params, signal) => {
+            const [call] = session.toolCalls.size === 1 ? session.toolCalls : []
+            return answerElicitation(params, {
+              endpointId: settings.id,
+              label: settings.label,
+              era: protocolEra === "modern" ? "modern" : "legacy",
+              policy: settings.elicitation,
+              toolName: call?.name,
+              downstream: session.downstream,
+              askMaximal,
+              signal,
+            })
+          })
         } catch {
           throw refusal(502, `${endpoint.label} failed to start.`)
         } finally {
@@ -217,17 +308,22 @@ const startEndpoint = async (
           inputRequired: { legacyShim: false },
           instructions: client.getInstructions(),
         })
+        const upstreamCapabilities = client.getServerCapabilities() ?? {}
         try {
           await proxyServer({
             client,
-            requestTimeout: endpoint.callTimeoutMs,
+            requestTimeout: settings.callTimeoutMs,
             server,
-            serverCapabilities: client.getServerCapabilities() ?? {},
+            serverCapabilities: upstreamCapabilities,
           })
         } catch (error) {
           await client.close().catch(() => undefined)
           throw error
         }
+        if (upstreamCapabilities.tools) {
+          trackToolCalls(server, client, session, settings)
+        }
+        session.downstream = server
         sessions.set(server, client)
         return server
       },
@@ -428,9 +524,16 @@ const startFrontDoor = async (
   }
 }
 
+export interface BrokerServerOptions {
+  /** Puts a request for user input in front of the user, via Maximal.
+   *  Without it, requests the client can't show are declined. */
+  askMaximal?: AskMaximal
+}
+
 export const startBrokerServer = async (
   configuration: BrokerWireConfiguration,
   apiKey: string,
+  options: BrokerServerOptions = {},
 ): Promise<RunningBrokerServer> => {
   if (apiKey.length < 32) {
     throw new BrokerStartupError("BROKER_AUTH_INVALID")
@@ -444,6 +547,7 @@ export const startBrokerServer = async (
         endpointConfiguration,
         apiKey,
         configuration.httpBodyBytes,
+        options.askMaximal,
       )
       endpoints.set(endpoint.id, endpoint)
     }
