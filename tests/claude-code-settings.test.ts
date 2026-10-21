@@ -10,13 +10,13 @@ import {
   getClaudeCodeSettingsPath,
   isProxyBaseUrlConfigured,
   mergeBaseUrl,
-  PROXY_BASE_URL,
   readClaudeCodeSettings,
   revertProxyBaseUrl,
   stripBaseUrl,
   writeClaudeCodeSettings,
 } from "~/apps/claude-code/config"
 import { getConfig, writeConfig } from "~/lib/config/config"
+import { proxyBaseUrl, setListeningPort } from "~/lib/start/proxy-port"
 
 const TEST_KEY = "custom-user-key"
 const TEST_HELPER = "echo 'custom-user-key'"
@@ -120,9 +120,8 @@ describe("getBaseUrlOwnership", () => {
   })
 
   it("ours when it equals the proxy URL", () => {
-    expect(PROXY_BASE_URL).toBe("http://127.0.0.1:4141")
     expect(
-      getBaseUrlOwnership({ env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL } }),
+      getBaseUrlOwnership({ env: { ANTHROPIC_BASE_URL: proxyBaseUrl() } }),
     ).toBe("ours")
   })
 
@@ -132,6 +131,50 @@ describe("getBaseUrlOwnership", () => {
         env: { ANTHROPIC_BASE_URL: "https://other.example" },
       }),
     ).toBe("foreign")
+  })
+})
+
+describe("base URL follows the proxy's port", () => {
+  afterEach(() => {
+    setListeningPort(undefined)
+  })
+
+  it("writes the port the proxy is listening on", () => {
+    setListeningPort(5555)
+    apply()
+    expect(envOf(read()).ANTHROPIC_BASE_URL).toBe("http://127.0.0.1:5555")
+  })
+
+  it("updates its own URL after the port changes instead of reporting a conflict", () => {
+    setListeningPort(5555)
+    apply()
+    setListeningPort(6666)
+    const result = apply()
+    expect(result.skippedReason).toBeUndefined()
+    expect(envOf(read()).ANTHROPIC_BASE_URL).toBe("http://127.0.0.1:6666")
+  })
+
+  it("revert removes a URL written under an earlier port", () => {
+    setListeningPort(5555)
+    apply()
+    setListeningPort(6666)
+    revertProxyBaseUrl(settingsPath)
+    expect(fs.existsSync(settingsPath)).toBe(false)
+  })
+
+  it("a loopback URL is ours only alongside our own apiKeyHelper", () => {
+    expect(
+      getBaseUrlOwnership({
+        env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8080" },
+      }),
+    ).toBe("foreign")
+    expect(
+      getBaseUrlOwnership({
+        env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8080" },
+        apiKeyHelper: TEST_HELPER,
+        _maximalHelper: TEST_MARKER,
+      }),
+    ).toBe("ours")
   })
 })
 
@@ -233,7 +276,7 @@ describe("mergeBaseUrl / stripBaseUrl (pure)", () => {
     expect(envOf(merged)).toEqual({
       FOO: "1",
       ANTHROPIC_API_KEY: "sk-secret",
-      ANTHROPIC_BASE_URL: PROXY_BASE_URL,
+      ANTHROPIC_BASE_URL: proxyBaseUrl(),
       [AUTO_MODE_SERVER_KEY]: "0",
     })
   })
@@ -242,7 +285,7 @@ describe("mergeBaseUrl / stripBaseUrl (pure)", () => {
     const merged = mergeBaseUrl({ theme: "dark" }, TEST_HELPER)
     expect(merged.theme).toBe("dark")
     expect(envOf(merged)).toEqual({
-      ANTHROPIC_BASE_URL: PROXY_BASE_URL,
+      ANTHROPIC_BASE_URL: proxyBaseUrl(),
       [AUTO_MODE_SERVER_KEY]: "0",
     })
     expect(merged.apiKeyHelper).toBe(TEST_HELPER)
@@ -260,7 +303,7 @@ describe("mergeBaseUrl / stripBaseUrl (pure)", () => {
       apiKeyHelper: TEST_HELPER,
       _maximalHelper: TEST_MARKER,
       env: {
-        ANTHROPIC_BASE_URL: PROXY_BASE_URL,
+        ANTHROPIC_BASE_URL: proxyBaseUrl(),
         ANTHROPIC_API_KEY: "sk-secret",
       },
     })
@@ -286,7 +329,7 @@ describe("mergeBaseUrl / stripBaseUrl (pure)", () => {
       theme: "dark",
       apiKeyHelper: TEST_HELPER,
       _maximalHelper: TEST_MARKER,
-      env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL },
+      env: { ANTHROPIC_BASE_URL: proxyBaseUrl() },
     })
     expect(stripped).toEqual({ theme: "dark" })
     expect("env" in stripped).toBe(false)
@@ -321,7 +364,7 @@ describe("applyProxyBaseUrl (end-to-end)", () => {
     const result = apply()
     expect(result.wrote).toBe(true)
     expect(result.skippedReason).toBeUndefined()
-    expect(envOf(read()).ANTHROPIC_BASE_URL).toBe(PROXY_BASE_URL)
+    expect(envOf(read()).ANTHROPIC_BASE_URL).toBe(proxyBaseUrl())
     expect(envOf(read())[AUTO_MODE_SERVER_KEY]).toBe("0")
     expect(read().apiKeyHelper).toBe(TEST_HELPER)
   })
@@ -343,7 +386,7 @@ describe("applyProxyBaseUrl (end-to-end)", () => {
     expect(envOf(after)).toEqual({
       FOO: "1",
       ANTHROPIC_API_KEY: "sk-secret",
-      ANTHROPIC_BASE_URL: PROXY_BASE_URL,
+      ANTHROPIC_BASE_URL: proxyBaseUrl(),
       [AUTO_MODE_SERVER_KEY]: "0",
     })
   })
@@ -372,14 +415,14 @@ describe("applyProxyBaseUrl (end-to-end)", () => {
     expect(fs.statSync(settingsPath).mtimeMs).toBe(before)
     // no duplication
     expect(envOf(read())).toEqual({
-      ANTHROPIC_BASE_URL: PROXY_BASE_URL,
+      ANTHROPIC_BASE_URL: proxyBaseUrl(),
       [AUTO_MODE_SERVER_KEY]: "0",
     })
     expect(read().apiKeyHelper).toBe(TEST_HELPER)
   })
 
   it("fills in an absent helper when the base URL is already ours", () => {
-    writeRaw(JSON.stringify({ env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL } }))
+    writeRaw(JSON.stringify({ env: { ANTHROPIC_BASE_URL: proxyBaseUrl() } }))
 
     const result = apply()
 
@@ -438,7 +481,7 @@ describe("applyProxyBaseUrl classifier setting", () => {
       JSON.stringify({
         apiKeyHelper: TEST_HELPER,
         _maximalHelper: TEST_MARKER,
-        env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL },
+        env: { ANTHROPIC_BASE_URL: proxyBaseUrl() },
         _maximalPrior: {
           ANTHROPIC_BASE_URL: "__UNSET__",
           apiKeyHelper: "__UNSET__",
@@ -458,7 +501,7 @@ describe("applyProxyBaseUrl classifier setting", () => {
       apiKeyHelper: TEST_HELPER,
       _maximalHelper: TEST_MARKER,
       env: {
-        ANTHROPIC_BASE_URL: PROXY_BASE_URL,
+        ANTHROPIC_BASE_URL: proxyBaseUrl(),
         [AUTO_MODE_SERVER_KEY]: "0",
       },
       _maximalPrior: {
@@ -485,7 +528,7 @@ describe("applyProxyBaseUrl (end-to-end continued)", () => {
       apiKeyHelper: TEST_HELPER,
       _maximalHelper: TEST_MARKER,
       env: {
-        ANTHROPIC_BASE_URL: PROXY_BASE_URL,
+        ANTHROPIC_BASE_URL: proxyBaseUrl(),
         [AUTO_MODE_SERVER_KEY]: "0",
       },
       _maximalPrior: {
@@ -504,7 +547,7 @@ describe("applyProxyBaseUrl (end-to-end continued)", () => {
       apiKeyHelper: TEST_HELPER,
       _maximalHelper: TEST_MARKER,
       env: {
-        ANTHROPIC_BASE_URL: PROXY_BASE_URL,
+        ANTHROPIC_BASE_URL: proxyBaseUrl(),
         [AUTO_MODE_SERVER_KEY]: "0",
       },
       _maximalPrior: {
@@ -534,7 +577,7 @@ describe("applyProxyBaseUrl (end-to-end continued)", () => {
       writeRaw(
         JSON.stringify({
           apiKeyHelper: legacyHelper,
-          env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL },
+          env: { ANTHROPIC_BASE_URL: proxyBaseUrl() },
         }),
       )
 
@@ -551,7 +594,7 @@ describe("applyProxyBaseUrl (end-to-end continued)", () => {
       JSON.stringify({
         apiKeyHelper:
           '"/opt/homebrew/Cellar/maximal/0.4.41/bin/maximal" api claude-code',
-        env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL },
+        env: { ANTHROPIC_BASE_URL: proxyBaseUrl() },
       }),
     )
 
@@ -581,7 +624,7 @@ describe("applyProxyBaseUrl (end-to-end continued)", () => {
     const original = {
       apiKeyHelper:
         '"/opt/homebrew/Cellar/maximal/0.4.41/bin/maximal" api claude-code',
-      env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL },
+      env: { ANTHROPIC_BASE_URL: proxyBaseUrl() },
     }
     writeRaw(JSON.stringify(original))
 
@@ -661,7 +704,7 @@ describe("revertProxyBaseUrl", () => {
         apiKeyHelper: TEST_HELPER,
         _maximalHelper: TEST_MARKER,
         env: {
-          ANTHROPIC_BASE_URL: PROXY_BASE_URL,
+          ANTHROPIC_BASE_URL: proxyBaseUrl(),
           ANTHROPIC_API_KEY: "sk-secret",
         },
       }),
@@ -681,7 +724,7 @@ describe("revertProxyBaseUrl", () => {
         theme: "dark",
         apiKeyHelper: TEST_HELPER,
         _maximalHelper: TEST_MARKER,
-        env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL },
+        env: { ANTHROPIC_BASE_URL: proxyBaseUrl() },
       }),
     )
     const result = revertProxyBaseUrl(settingsPath)
@@ -695,7 +738,7 @@ describe("revertProxyBaseUrl", () => {
       JSON.stringify({
         apiKeyHelper: TEST_HELPER,
         _maximalHelper: TEST_MARKER,
-        env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL },
+        env: { ANTHROPIC_BASE_URL: proxyBaseUrl() },
       }),
     )
     const result = revertProxyBaseUrl(settingsPath)
@@ -788,10 +831,10 @@ describe("apply→revert snapshot round-trip (restores prior state)", () => {
     // The coincidence trap: the user had set the proxy URL themselves. Ownership
     // reads "ours", but a blind delete would drop THEIR value. The snapshot makes
     // disable restore it exactly.
-    writeRaw(JSON.stringify({ env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL } }))
+    writeRaw(JSON.stringify({ env: { ANTHROPIC_BASE_URL: proxyBaseUrl() } }))
     apply()
     revertProxyBaseUrl(settingsPath)
-    expect(read()).toEqual({ env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL } })
+    expect(read()).toEqual({ env: { ANTHROPIC_BASE_URL: proxyBaseUrl() } })
   })
 
   it("removes a migrated legacy helper when routing is disabled", () => {
@@ -830,7 +873,7 @@ describe("isProxyBaseUrlConfigured", () => {
   it("requires both the owned base URL and the owned helper", () => {
     expect(isProxyBaseUrlConfigured(settingsPath)).toBe(false)
 
-    writeRaw(JSON.stringify({ env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL } }))
+    writeRaw(JSON.stringify({ env: { ANTHROPIC_BASE_URL: proxyBaseUrl() } }))
     expect(isProxyBaseUrlConfigured(settingsPath)).toBe(false)
 
     writeRaw(
@@ -845,7 +888,7 @@ describe("isProxyBaseUrlConfigured", () => {
       JSON.stringify({
         apiKeyHelper: TEST_HELPER,
         _maximalHelper: TEST_MARKER,
-        env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL },
+        env: { ANTHROPIC_BASE_URL: proxyBaseUrl() },
       }),
     )
     expect(isProxyBaseUrlConfigured(settingsPath)).toBe(true)

@@ -10,7 +10,6 @@ import type { Context } from "hono"
 import { Hono } from "hono"
 
 import { getAllApps, getApp } from "~/apps/registry"
-import { getConfig, writeConfig, type AppConfig } from "~/lib/config/config"
 import {
   AppEntry,
   AppsListResponse,
@@ -33,21 +32,6 @@ function httpError(message: string, status: number): HTTPError {
  *  it, so drift fails loudly in tests rather than silently in the UI. */
 function jsonApp(c: Context, app: AppEntryT) {
   return respondValidated(c, { schema: AppEntry, label: "App" }, app)
-}
-
-/** Merge an `apps.claudeDesktop` patch into config and persist. */
-function persistClaudeDesktop(enabled: boolean): void {
-  const config: AppConfig = getConfig()
-  writeConfig({
-    ...config,
-    apps: {
-      ...config.apps,
-      claudeDesktop: {
-        ...config.apps?.claudeDesktop,
-        enabled,
-      },
-    },
-  })
 }
 
 export const appsRoutes = new Hono()
@@ -116,20 +100,18 @@ appsRoutes.post("/claude-desktop/toggle", async (c) => {
     const app = getApp("claude-desktop")
     if (!app) throw httpError("App not found", 404)
 
+    // `app.enable()` / `disable()` own the persisted routing intent; a
+    // refused enable (someone else's gateway is applied) doesn't record it.
     if (parsed.data.enabled) {
       const result = await app.enable()
-      // A refused enable (someone else's gateway is applied) isn't the
-      // user's intent taking effect — leave the persisted state alone.
       if (!result.success) {
         return jsonApp(c, await app.getDetails(result.conflict ?? null))
       }
-      persistClaudeDesktop(true)
       armWorkingNotice(app.id, app.name)
       return jsonApp(c, await app.getDetails())
     }
 
     await app.disable()
-    persistClaudeDesktop(false)
     resetWorkingNotice(app.id)
     return jsonApp(c, await app.getDetails())
   } catch (error) {

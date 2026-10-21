@@ -21,6 +21,8 @@ import {
   isConfigLibraryApplied,
   revertConfigLibraryProfile,
 } from "~/apps/claude-desktop/config"
+import { getConfig, writeConfig } from "~/lib/config/config"
+import { setListeningPort } from "~/lib/start/proxy-port"
 
 let home: string
 
@@ -127,6 +129,42 @@ describe("getClaude3pDir — Windows (platform injected)", () => {
     expect(dir).toBe(
       path.join(home, "Library", "Application Support", "Claude-3p"),
     )
+  })
+})
+
+describe("gatewayProfile — follows the proxy's port and key", () => {
+  afterEach(() => {
+    setListeningPort(undefined)
+    writeConfig({})
+  })
+
+  it("points at the port the proxy is listening on", () => {
+    setListeningPort(5555)
+    expect(gatewayProfile(home).inferenceGatewayBaseUrl).toBe(
+      "http://127.0.0.1:5555",
+    )
+  })
+
+  it("authenticates with the claude-desktop API key", () => {
+    writeConfig({
+      auth: {
+        apiKeyEntries: [
+          {
+            id: "k1",
+            label: "claude-desktop",
+            key: "mxl_desktop_key",
+            enabled: true,
+            created_at: "2026-10-21T00:00:00.000Z",
+          },
+        ],
+      },
+    })
+    expect(gatewayProfile(home).inferenceGatewayApiKey).toBe("mxl_desktop_key")
+  })
+
+  it("never mints a key just to describe the profile", () => {
+    gatewayProfile(home)
+    expect(getConfig().auth?.apiKeyEntries ?? []).toEqual([])
   })
 })
 
@@ -443,6 +481,27 @@ describe("generateManagedProfile", () => {
     expect(mc).toContain("<key>inferenceProvider</key>")
     expect(mc).toContain("<string>gateway</string>")
     expect(mc).toContain("<key>disableEssentialTelemetry</key>")
+  })
+
+  it("never embeds this machine's API key in a profile meant for a fleet", () => {
+    writeConfig({
+      auth: {
+        apiKeyEntries: [
+          {
+            id: "k1",
+            label: "claude-desktop",
+            key: "mxl_local_secret",
+            enabled: true,
+            created_at: "2026-10-21T00:00:00.000Z",
+          },
+        ],
+      },
+    })
+    try {
+      expect(generateManagedProfile(home)).not.toContain("mxl_local_secret")
+    } finally {
+      writeConfig({})
+    }
   })
 
   it("uses provided UUIDs for idempotent re-installs", () => {

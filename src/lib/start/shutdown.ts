@@ -21,8 +21,8 @@ import type { serve } from "srvx"
 
 import consola from "consola"
 
-import { reconcileClaudeCodeOnShutdown } from "~/apps/claude-code/reconcile"
 import { removeMcpClientsOnShutdown } from "~/apps/mcp"
+import { runAppShutdownHooks } from "~/apps/registry"
 import { removePidfile } from "~/lib/platform/replace-running"
 
 import { clearSessionRunning } from "./session-sentinel"
@@ -48,7 +48,7 @@ export async function initiateShutdown(
   // intent-gated (no-op when routing is off); the intent flag persists, so
   // the next boot re-applies it. Synchronous + best-effort — a slow/failed
   // file write must not delay or block the drain.
-  reconcileClaudeCodeOnShutdown()
+  runAppShutdownHooks()
   // Same for the MCP servers Maximal added to Claude Code / Claude Desktop:
   // take them out so neither app points at a stopped Maximal. Boot re-adds
   // them from the recorded choices. File-only and synchronous.
@@ -114,11 +114,7 @@ export function installShutdownHandlers(
   // SIGKILL or OS-level termination — those need an external watchdog
   // (the boot-time stale-session warning surfaces them after the fact).
   process.on("exit", () => {
-    try {
-      reconcileClaudeCodeOnShutdown()
-    } catch {
-      // exit handlers can't throw — and we're exiting anyway.
-    }
+    runAppShutdownHooks()
     try {
       removeMcpClientsOnShutdown()
     } catch {

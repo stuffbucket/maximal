@@ -15,7 +15,6 @@ import path from "node:path"
 
 import {
   isProxyBaseUrlConfigured,
-  PROXY_BASE_URL,
   readClaudeCodeSettings,
 } from "~/apps/claude-code/config"
 import {
@@ -23,6 +22,7 @@ import {
   reconcileClaudeCodeOnShutdown,
 } from "~/apps/claude-code/reconcile"
 import { writeConfig } from "~/lib/config/config"
+import { proxyBaseUrl } from "~/lib/start/proxy-port"
 
 const TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "cc-reconcile-"))
 const SETTINGS = path.join(TMP_DIR, "settings.json")
@@ -61,7 +61,7 @@ describe("reconcileClaudeCodeOnBoot", () => {
       string,
       unknown
     >
-    expect(env.ANTHROPIC_BASE_URL).toBe(PROXY_BASE_URL)
+    expect(env.ANTHROPIC_BASE_URL).toBe(proxyBaseUrl())
     expect(env.CLAUDE_CODE_AUTO_MODE_SERVER).toBe("0")
     expect(env.ANTHROPIC_API_KEY).toBe("sk-keep")
     expect(env.ANTHROPIC_AUTH_TOKEN).toBe("tok-keep")
@@ -81,7 +81,7 @@ describe("reconcileClaudeCodeOnBoot", () => {
 
 describe("reconcileClaudeCodeOnShutdown", () => {
   test("removes the proxy base URL when routing is intended", () => {
-    writeSettings({ env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL } })
+    writeSettings({ env: { ANTHROPIC_BASE_URL: proxyBaseUrl() } })
     reconcileClaudeCodeOnShutdown(true, SETTINGS)
     expect(isProxyBaseUrlConfigured(SETTINGS)).toBe(false)
   })
@@ -99,7 +99,7 @@ describe("reconcileClaudeCodeOnShutdown", () => {
 
   test("preserves sibling env keys when reverting", () => {
     writeSettings({
-      env: { ANTHROPIC_BASE_URL: PROXY_BASE_URL, ANTHROPIC_API_KEY: "sk-keep" },
+      env: { ANTHROPIC_BASE_URL: proxyBaseUrl(), ANTHROPIC_API_KEY: "sk-keep" },
     })
     reconcileClaudeCodeOnShutdown(true, SETTINGS)
     const env = (readClaudeCodeSettings(SETTINGS).env ?? {}) as Record<

@@ -273,6 +273,25 @@ describe("POST /apps/claude-desktop/toggle", () => {
     expect(actualDesktop.isConfigLibraryApplied(ROUTE_3P_HOME)).toBe(true)
   })
 
+  test("enable authenticates Desktop with a real key, not a placeholder", async () => {
+    await buildApp().request("/apps/claude-desktop/toggle", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled: true }),
+    })
+    const lib = path.join(
+      actualDesktop.getClaude3pDir(ROUTE_3P_HOME),
+      "configLibrary",
+    )
+    const meta = actualDesktop.readJsonObject(path.join(lib, "_meta.json"))
+    const profile = actualDesktop.readJsonObject(
+      path.join(lib, `${String(meta?.appliedId)}.json`),
+    )
+    // beforeEach configures the default endpoint key, which Desktop shares
+    // until a claude-desktop-labelled key exists — as Claude Code does.
+    expect(profile?.inferenceGatewayApiKey).toBe("test-api-key")
+  })
+
   test("enable leaves a foreign gateway profile alone and reports why", async () => {
     const lib = path.join(
       actualDesktop.getClaude3pDir(ROUTE_3P_HOME),

@@ -6,18 +6,23 @@ import type { AppUninstallResult, ClientApp } from "../index"
 
 import { claudeDesktopCli } from "./cli"
 import {
+  DESKTOP_KEY_LABEL,
   isConfigLibraryApplied,
-  applyConfigLibraryProfile,
   revertConfigLibraryProfile,
 } from "./config"
 import { claudeAppInstalled } from "./detect"
 import { claudeDesktopMcp } from "./mcp"
+import {
+  disableClaudeDesktopRouting,
+  enableClaudeDesktopRouting,
+  reconcileClaudeDesktopOnBoot,
+} from "./reconcile"
 
 export const claudeDesktopApp: ClientApp = {
   id: "claude-desktop",
   name: "Claude Desktop",
   kind: "config",
-  apiKeyLabel: "claude-desktop",
+  apiKeyLabel: DESKTOP_KEY_LABEL,
   mcp: claudeDesktopMcp,
 
   detect() {
@@ -40,7 +45,7 @@ export const claudeDesktopApp: ClientApp = {
   },
 
   enable() {
-    const { conflict } = applyConfigLibraryProfile()
+    const { conflict } = enableClaudeDesktopRouting()
     if (conflict) return Promise.resolve({ success: false, conflict })
     // Restore the MCP endpoints the user chose for Claude Desktop.
     syncMcpClient(claudeDesktopMcp)
@@ -48,7 +53,7 @@ export const claudeDesktopApp: ClientApp = {
   },
 
   disable() {
-    revertConfigLibraryProfile()
+    disableClaudeDesktopRouting()
     syncMcpClient(claudeDesktopMcp, { active: false })
     return Promise.resolve({ success: true })
   },
@@ -74,6 +79,12 @@ export const claudeDesktopApp: ClientApp = {
 
   isEnabled() {
     return isConfigLibraryApplied()
+  },
+
+  // No onShutdown: Desktop reads its config only at launch, so it isn't
+  // reverted per Maximal restart — see ./reconcile.ts.
+  onBoot() {
+    reconcileClaudeDesktopOnBoot()
   },
 
   cli: claudeDesktopCli,

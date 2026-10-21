@@ -39,15 +39,22 @@ maximal app claude-desktop --enable --force   # write even if Claude Desktop isn
 maximal app claude-desktop --enable --managed # emit an MDM .mobileconfig instead
 ```
 
-The command writes the full "Default" profile that Claude Desktop's
-**Configure third-party inference** panel surfaces, not just the three
-gateway-wiring keys. The complete set:
+The command writes a profile named **maximal** into Claude Desktop's config
+library (the one its **Configure third-party inference** panel surfaces),
+not just the three gateway-wiring keys. It won't replace a gateway profile
+someone else applied, and `--disable` puts back whatever Desktop had selected
+before. The gateway URL follows the port the proxy runs on, and the key is
+the `claude-desktop` API key (or the default endpoint key, when no
+`claude-desktop` key exists), so Desktop's requests work when key enforcement
+is on and are attributed to Claude Desktop. A `--managed` profile is the
+exception: it's meant for many machines, so it carries the placeholder
+`anything` rather than this machine's key. The complete set:
 
 ```json
 {
   "inferenceProvider": "gateway",
   "inferenceGatewayBaseUrl": "http://127.0.0.1:4141",
-  "inferenceGatewayApiKey": "anything",
+  "inferenceGatewayApiKey": "<claude-desktop API key>",
   "inferenceGatewayAuthScheme": "bearer",
   "deploymentMode": "3p",
   "disableDeploymentModeChooser": true,
@@ -109,7 +116,7 @@ list.
 | `inferenceProvider` | string | unset | `gateway` / `bedrock` / `vertex` / `foundry`. Set via UI when you pick "Gateway" in Configure third-party inference. |
 | `deploymentMode` | string (`3p`/`1p`) | unset | **Persisted deployment-mode choice.** Unset = first-run-before-sign-in → the app shows the Claude.ai sign-in screen even with the gateway wired. Write `3p` to skip it. The app persists this itself once a user picks third-party interactively. |
 | `inferenceGatewayBaseUrl` | string | unset | Gateway endpoint URL (e.g. `http://localhost:4141`). |
-| `inferenceGatewayApiKey` | string | unset | Bearer credential. We accept literal `anything`. |
+| `inferenceGatewayApiKey` | string | unset | Bearer credential. `--enable` writes the `claude-desktop` API key; a `--managed` profile uses the placeholder `anything`, which works only while key enforcement is off. |
 | `inferenceModels` | JSON array (as string) | unset | Allowlist of model IDs / aliases. Useful to hide variants if our `/v1/models` listing changes. |
 | `coworkEgressAllowedHosts` | JSON array | unset (= deny most) | **The egress allowlist that gates Cowork's bundled tool-call traffic.** Accepts exact hostnames (`api.github.com`), single-level wildcards (`*.corp.com`), and the bare sentinel `*` for allow-all. Wildcards don't cover the apex — `*.corp.com` matches `docs.corp.com` but not `corp.com` itself. Scope is **tool calls only** — inference and MCP traffic have their own allowlists. IP literals and `localhost` always resolve regardless of this list. Surfaced in the desktop UI under **Configure third-party inference → Sandbox & workspace → Allowed egress hosts** (with an `* Allow all` button). |
 | `coworkWebSearchEnabled` | bool | `true` | (UI-tier preference, not MDM.) Enables Cowork's bundled WebSearch connector. |
