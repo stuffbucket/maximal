@@ -13,6 +13,8 @@
  * No DI / singletons module — this mirrors `src/lib/state.ts` style.
  */
 
+import { CLAUDE_CLIENT_NAMES, classifyClaudeClient } from "./claude-client"
+
 interface ActiveClientRecord {
   userAgent: string
   apiKeyId: string | null
@@ -82,8 +84,10 @@ export function humanizeUserAgent(userAgent: string): string {
   const ua = userAgent.trim()
   if (ua.length === 0) return "Unknown client"
 
+  const claude = classifyClaudeClient(ua)
+  if (claude) return CLAUDE_CLIENT_NAMES[claude]
+
   const patterns: Array<[RegExp, string]> = [
-    [/^claude-code\b/i, "Claude Code"],
     [/^cline\b/i, "Cline"],
     [/^openai\/python\b/i, "OpenAI Python SDK"],
     [/^openai\/js\b/i, "OpenAI JS SDK"],
