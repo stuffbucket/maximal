@@ -25,6 +25,7 @@ import { getConfig } from "~/lib/config/config"
 import { McpServerIdSchema } from "~/lib/config/config-schema"
 import { MCP_CATALOG } from "~/lib/mcp-broker/catalog"
 import { currentProxyPort } from "~/lib/start/proxy-port"
+import { npmGlobalPrefix } from "~/lib/system/run-file"
 
 import {
   addMcpEndpoint,
@@ -392,11 +393,13 @@ export const mcpCommand = defineCommand({
       throw new Error("Use only one of --enable, --disable, --add, --remove.")
     }
     // Same upgrade check as boot and Settings; the running Maximal reloads.
+    // Detection reads npm's prefix from a cache it never fills itself.
+    await npmGlobalPrefix()
     const current = getConfig()
     if (refreshCatalogCommands(current) !== current) {
       await applyToRunning(parsePort(args.port))
     }
-    const endpoints = listMcpEndpoints()
+    const endpoints = await listMcpEndpoints()
     if (!args.endpoint) {
       showEndpoints(endpoints)
       showCatalog(listMcpCatalog())

@@ -32,6 +32,7 @@ import {
 } from "~/lib/config/settings-types"
 import { forwardError, HTTPError } from "~/lib/errors/error"
 import { reconfigureBroker } from "~/lib/mcp-broker/supervisor"
+import { npmGlobalPrefix } from "~/lib/system/run-file"
 
 import { respondValidated } from "./respond-validated"
 
@@ -51,6 +52,9 @@ const ADD_ERROR_STATUS = {
 // was just installed or upgraded.
 mcpRoutes.get("/", async (c) => {
   try {
+    // Catalog detection reads npm's prefix from a cache it never fills
+    // itself; this fills it once, without blocking, and is instant after.
+    await npmGlobalPrefix()
     const before = getConfig()
     const config = refreshCatalogCommands(before)
     if (config !== before) await reconfigureBroker(config.mcpBroker ?? {})
@@ -58,7 +62,7 @@ mcpRoutes.get("/", async (c) => {
       c,
       { schema: McpEndpointsListResponse, label: "MCP endpoints" },
       {
-        endpoints: listMcpEndpoints(config),
+        endpoints: await listMcpEndpoints(config),
         broker: mcpBrokerHealth(),
         available: listMcpCatalog(config),
       },

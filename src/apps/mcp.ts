@@ -21,7 +21,11 @@ import type { McpClientId } from "~/lib/mcp-broker/types"
 
 import { getConfig, writeConfig } from "~/lib/config/config"
 import { findCatalogEntry, MCP_CATALOG } from "~/lib/mcp-broker/catalog"
-import { ownedMcpServers, syncMcpClient } from "~/lib/mcp-broker/client-sync"
+import {
+  ownedMcpServers,
+  releaseMcpClientOffline,
+  syncMcpClient,
+} from "~/lib/mcp-broker/client-sync"
 import { isProtectedEnvironmentName } from "~/lib/mcp-broker/configuration"
 import {
   getBrokerSupervisorSnapshot,
@@ -166,14 +170,16 @@ export function mcpBrokerHealth(): McpBrokerHealth {
   }
 }
 
-export function listMcpEndpoints(
+export async function listMcpEndpoints(
   config: AppConfig = getConfig(),
-): Array<McpEndpointView> {
-  const clients = mcpApps().map((app) => ({
-    id: app.mcp.clientId,
-    name: app.name,
-    available: app.mcp.available(),
-  }))
+): Promise<Array<McpEndpointView>> {
+  const clients = await Promise.all(
+    mcpApps().map(async (app) => ({
+      id: app.mcp.clientId,
+      name: app.name,
+      available: await app.mcp.available(),
+    })),
+  )
   const brokerOn = config.mcpBroker?.enabled === true
   return (config.mcpBroker?.servers ?? []).map((server) => ({
     id: server.id,
@@ -187,15 +193,17 @@ export function listMcpEndpoints(
   }))
 }
 
-/** Reconcile every client app with the current config. */
-export function syncAllMcpClients(
-  config: AppConfig = getConfig(),
-): Array<{ client: McpClientId; name: string; result: McpReconcileResult }> {
-  return mcpApps().map((app) => ({
-    client: app.mcp.clientId,
-    name: app.name,
-    result: syncMcpClient(app.mcp, { config }),
-  }))
+/** Reconcile every client app with the current config, all at once. */
+export function syncAllMcpClients(): Promise<
+  Array<{ client: McpClientId; name: string; result: McpReconcileResult }>
+> {
+  return Promise.all(
+    mcpApps().map(async (app) => ({
+      client: app.mcp.clientId,
+      name: app.name,
+      result: await syncMcpClient(app.mcp),
+    })),
+  )
 }
 
 /**
@@ -230,10 +238,11 @@ export async function setMcpEndpoint(
   })
 
   const brokerReloaded = await reconfigureBroker(next.mcpBroker ?? {})
-  const skipped = syncAllMcpClients(next).flatMap(({ client, name, result }) =>
-    result.skipped.includes(id) ? [{ client, name }] : [],
+  const skipped = (await syncAllMcpClients()).flatMap(
+    ({ client, name, result }) =>
+      result.skipped.includes(id) ? [{ client, name }] : [],
   )
-  const endpoint = listMcpEndpoints().find((view) => view.id === id)
+  const endpoint = (await listMcpEndpoints()).find((view) => view.id === id)
   if (!endpoint) return undefined
   return {
     endpoint,
@@ -252,7 +261,7 @@ export async function setMcpEndpoint(
 export function removeMcpClientsOnShutdown(): void {
   for (const app of mcpApps()) {
     try {
-      syncMcpClient(app.mcp, { active: false, offline: true })
+      releaseMcpClientOffline(app.mcp)
     } catch (error) {
       consola.warn(
         `Could not remove ${app.name} MCP servers on shutdown`,
@@ -263,15 +272,14 @@ export function removeMcpClientsOnShutdown(): void {
 }
 
 /** At boot, repair client entries to match config.json. Skipped entirely
- *  when the broker was never configured, and never blocks startup. */
+ *  when the broker was never configured. Runs in the background: it may run
+ *  the `claude` CLI, and startup doesn't wait for it. */
 export function syncMcpClientsOnBoot(config: AppConfig): void {
   if (config.mcpBroker === undefined) return
   for (const app of mcpApps()) {
-    try {
-      syncMcpClient(app.mcp, { config })
-    } catch (error) {
+    syncMcpClient(app.mcp).catch((error: unknown) => {
       consola.warn(`Could not update ${app.name} MCP servers`, error)
-    }
+    })
   }
 }
 
@@ -365,7 +373,9 @@ export async function addMcpEndpoint(
     },
   })
   const brokerReloaded = await reconfigureBroker(next.mcpBroker ?? {})
-  const endpoint = listMcpEndpoints(next).find((view) => view.id === server.id)
+  const endpoint = (await listMcpEndpoints(next)).find(
+    (view) => view.id === server.id,
+  )
   if (!endpoint) throw new Error(`MCP endpoint "${server.id}" was not saved`)
   return { endpoint, brokerReloaded }
 }
@@ -392,7 +402,7 @@ export async function removeMcpEndpoint(
     },
   })
   const brokerReloaded = await reconfigureBroker(next.mcpBroker ?? {})
-  const removedFrom = syncAllMcpClients(next).flatMap(
+  const removedFrom = (await syncAllMcpClients()).flatMap(
     ({ client, name, result }) =>
       result.removed.includes(id) ? [{ client, name }] : [],
   )
