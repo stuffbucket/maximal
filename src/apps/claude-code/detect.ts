@@ -1,7 +1,8 @@
-import { execFileSync } from "node:child_process"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+
+import { npmGlobalPrefix, runFile } from "~/lib/system/run-file"
 
 export const SHIM_MARKER = "# __MAXIMAL_CLAUDE_SHIM__"
 
@@ -41,9 +42,13 @@ export interface DetectOptions {
   homeDir?: string
   pathDirs?: Array<string>
   npmPrefix?: string | null
-  readVersion?: (binPath: string) => string | null
+  /** Defaults to running `<bin> --version` (cached per binary). */
+  readVersion?: (binPath: string) => Promise<string | null> | string | null
   platform?: NodeJS.Platform
 }
+
+/** A found binary whose version hasn't been read yet. */
+type FoundInstall = Omit<ClaudeInstall, "version">
 
 function claudeBasenames(platform: NodeJS.Platform): Array<string> {
   if (platform === "win32") {
@@ -57,12 +62,11 @@ function inspectDir(
   ctx: {
     home: string
     npmBin: string | null
-    readVersion: (binPath: string) => string | null
     seen: Set<string>
     isWin: boolean
     basenames: Array<string>
   },
-): ClaudeInstall | null {
+): FoundInstall | null {
   for (const base of ctx.basenames) {
     const inst = inspectCandidate(
       { raw: path.join(probe.dir, base), origin: probe.origin },
@@ -78,32 +82,34 @@ function defaultPathDirs(): Array<string> {
   return raw.split(path.delimiter).filter((d) => d.length > 0)
 }
 
-function defaultNpmPrefix(): string | null {
+const VERSION_TIMEOUT_MS = 5000
+
+/** `--version` output by binary and modification time: Settings lists detect
+ *  on every load, and an upgrade replaces the file, which refreshes it. */
+const versionCache = new Map<string, string | null>()
+
+export async function readClaudeVersion(
+  binPath: string,
+): Promise<string | null> {
+  let key: string
   try {
-    const out = execFileSync("npm", ["prefix", "-g"], {
-      encoding: "utf8",
-      timeout: 5000,
-      stdio: ["ignore", "pipe", "ignore"],
-    })
-    const trimmed = out.trim()
-    return trimmed.length > 0 ? trimmed : null
+    key = `${binPath}\0${fs.statSync(binPath).mtimeMs}`
   } catch {
     return null
   }
+  const cached = versionCache.get(key)
+  if (cached !== undefined) return cached
+  const result = await runFile(binPath, ["--version"], {
+    timeoutMs: VERSION_TIMEOUT_MS,
+  })
+  const version = result.code === 0 ? parseVersion(result.stdout) : null
+  // A failed read isn't cached; the next list tries again.
+  if (result.code === 0) versionCache.set(key, version)
+  return version
 }
 
-export function readClaudeVersion(binPath: string): string | null {
-  let out: string
-  try {
-    out = execFileSync(binPath, ["--version"], {
-      encoding: "utf8",
-      timeout: 5000,
-      stdio: ["ignore", "pipe", "ignore"],
-    })
-  } catch {
-    return null
-  }
-  const trimmed = out.trim()
+function parseVersion(stdout: string): string | null {
+  const trimmed = stdout.trim()
   if (!trimmed) return null
   const semver = /\d+\.\d+\.\d+/u.exec(trimmed)
   return semver ? semver[0] : trimmed
@@ -183,11 +189,10 @@ function inspectCandidate(
   ctx: {
     home: string
     npmBin: string | null
-    readVersion: (binPath: string) => string | null
     seen: Set<string>
     isWin: boolean
   },
-): ClaudeInstall | null {
+): FoundInstall | null {
   let stat: fs.Stats
   try {
     stat = fs.statSync(candidate.raw)
@@ -211,7 +216,6 @@ function inspectCandidate(
   return {
     path: candidate.raw,
     resolvedPath: resolved,
-    version: ctx.readVersion(candidate.raw),
     source: classifySource(resolved, {
       origin: candidate.origin,
       home: ctx.home,
@@ -221,9 +225,9 @@ function inspectCandidate(
   }
 }
 
-export function detectClaudeInstalls(
+export async function detectClaudeInstalls(
   options: DetectOptions = {},
-): Array<ClaudeInstall> {
+): Promise<Array<ClaudeInstall>> {
   const home = options.homeDir ?? os.homedir()
   const pathDirs = options.pathDirs ?? defaultPathDirs()
   const readVersion = options.readVersion ?? readClaudeVersion
@@ -241,12 +245,13 @@ export function detectClaudeInstalls(
   for (const dir of pathDirs) {
     const inst = inspectDir(
       { dir, origin: "path" },
-      { home, npmBin: phase1NpmBin, readVersion, seen, isWin, basenames },
+      { home, npmBin: phase1NpmBin, seen, isWin, basenames },
     )
-    if (inst) return [inst]
+    if (inst) return withVersions([inst], readVersion)
   }
 
-  const npmPrefix = explicitNpm === undefined ? defaultNpmPrefix() : explicitNpm
+  const npmPrefix =
+    explicitNpm === undefined ? await npmGlobalPrefix() : explicitNpm
   const npmBin = npmPrefix ? npmBinOf(npmPrefix) : null
 
   const probeDirs: Array<{ dir: string; origin: ClaudeInstallSource }> = []
@@ -266,17 +271,23 @@ export function detectClaudeInstalls(
     probeDirs.push({ dir: npmBin, origin: "npm-global" })
   }
 
-  const installs: Array<ClaudeInstall> = []
+  const installs: Array<FoundInstall> = []
   for (const probe of probeDirs) {
-    const inst = inspectDir(probe, {
-      home,
-      npmBin,
-      readVersion,
-      seen,
-      isWin,
-      basenames,
-    })
+    const inst = inspectDir(probe, { home, npmBin, seen, isWin, basenames })
     if (inst) installs.push(inst)
   }
-  return installs
+  return withVersions(installs, readVersion)
+}
+
+/** Read every install's version at once rather than one after another. */
+function withVersions(
+  installs: Array<FoundInstall>,
+  readVersion: NonNullable<DetectOptions["readVersion"]>,
+): Promise<Array<ClaudeInstall>> {
+  return Promise.all(
+    installs.map(async (install) => ({
+      ...install,
+      version: await readVersion(install.path),
+    })),
+  )
 }

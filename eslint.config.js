@@ -51,6 +51,48 @@ const tokenAttachmentGuard = {
   },
 }
 
+// Never block the event loop (docs/architecture.md). The proxy is one process
+// with one event loop: a synchronous spawn holds every in-flight request,
+// streaming responses included, until the child exits. Run programs with
+// runFile() from src/lib/system/run-file.ts instead.
+//
+// This uses no-restricted-imports/-properties rather than no-restricted-syntax,
+// which tokenAttachmentGuard already sets for src/ (a second config for the
+// same rule would replace its selectors, not add to them).
+const SYNC_SPAWN_MESSAGE =
+  "A synchronous spawn stops the whole proxy until the child exits. Use runFile() from ~/lib/system/run-file (see docs/architecture.md → Never block the event loop)."
+const blockingSpawnGuard = {
+  name: "no-blocking-child-processes",
+  files: ["src/**/*.ts"],
+  ignores: [
+    // Allowed only where nothing is being served: each runs before the
+    // server listens, or in a CLI command that isn't the server.
+    // `maximal uninstall`.
+    "src/uninstall.ts",
+    // `start --replace`: finds and stops the old proxy before binding.
+    "src/lib/platform/replace-running.ts",
+    // `start --claude-code`: prints the env script before binding.
+    "src/lib/platform/shell.ts",
+    "**/*.test.ts",
+  ],
+  rules: {
+    "no-restricted-imports": [
+      "error",
+      {
+        paths: ["node:child_process", "child_process"].map((name) => ({
+          name,
+          importNames: ["execSync", "execFileSync", "spawnSync"],
+          message: SYNC_SPAWN_MESSAGE,
+        })),
+      },
+    ],
+    "no-restricted-properties": [
+      "error",
+      { object: "Bun", property: "spawnSync", message: SYNC_SPAWN_MESSAGE },
+    ],
+  },
+}
+
 // Ban the leak-prone `mock.module()` idiom in tests. Bun does NOT reset module
 // mocks between files, and — verified empirically on Bun 1.3.11 — neither
 // `mock.restore()` nor an UNAWAITED `void mock.module(id, () => actual)` in an
@@ -112,5 +154,6 @@ export default [
     },
   }),
   tokenAttachmentGuard,
+  blockingSpawnGuard,
   mockModuleLeakGuard,
 ]

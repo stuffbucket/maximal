@@ -15,9 +15,14 @@ import { removeLegacyShimIfPresent } from "~/apps/claude-code/detect"
 import { reconcileClaudeCodeOnBoot } from "~/apps/claude-code/reconcile"
 import { refreshCatalogCommands, syncMcpClientsOnBoot } from "~/apps/mcp"
 import { type AccountType } from "~/lib/auth/auth-types"
-import { type AppConfig, mergeConfigWithDefaults } from "~/lib/config/config"
+import {
+  type AppConfig,
+  getConfig,
+  mergeConfigWithDefaults,
+} from "~/lib/config/config"
 import { initProxyFromEnv } from "~/lib/http/proxy"
 import {
+  reconfigureBroker,
   startBrokerSupervisor,
   stopBrokerSupervisor,
 } from "~/lib/mcp-broker/supervisor"
@@ -31,6 +36,7 @@ import {
   cacheVSCodeVersion,
 } from "~/lib/platform/utils"
 import { hasGithubToken, state } from "~/lib/runtime-state/state"
+import { npmGlobalPrefix } from "~/lib/system/run-file"
 import { getGitVersion, shortSha } from "~/lib/update/version"
 import { startWorkingNotice } from "~/lib/working-notice"
 
@@ -213,6 +219,18 @@ function afterListening(
   // A missing, hung, or crashing broker degrades MCP only; Hono is already bound.
   // An upgraded catalog server (e.g. Work IQ) may have moved; find it first.
   startBrokerSupervisor(refreshCatalogCommands(config).mcpBroker ?? {})
+  // npm's global prefix is looked up in the background, never on the event
+  // loop; once known, a server installed with npm may turn out to have moved
+  // too. (Until then a refresh keeps each server's last path.)
+  void npmGlobalPrefix()
+    .then(async () => {
+      const before = getConfig()
+      const after = refreshCatalogCommands(before)
+      if (after !== before) await reconfigureBroker(after.mcpBroker ?? {})
+    })
+    .catch((error: unknown) => {
+      consola.warn("Could not recheck MCP server paths", error)
+    })
   // One-time "Maximal is working" notification (shown by the menu-bar shell).
   void startWorkingNotice()
 

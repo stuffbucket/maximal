@@ -45,7 +45,7 @@ async function reloadFromDisk(): Promise<void> {
   await reconfigureBroker(config.mcpBroker ?? {})
   // Rewrite client entries from this process, which knows the port it
   // actually listens on.
-  syncAllMcpClients(config)
+  await syncAllMcpClients()
 }
 
 export function createInternalRoutes(

@@ -18,7 +18,6 @@
  */
 
 import consola from "consola"
-import { execFileSync } from "node:child_process"
 import { createHash } from "node:crypto"
 import fs from "node:fs"
 import os from "node:os"
@@ -36,6 +35,7 @@ import {
   parseStdioEntry,
 } from "~/lib/mcp-broker/client-sync"
 import { atomicWriteJson } from "~/lib/platform/atomic-json"
+import { runFile } from "~/lib/system/run-file"
 
 import { HELPER_LABEL, isProxyBaseUrlConfigured } from "./config"
 import { detectClaudeInstalls } from "./detect"
@@ -43,14 +43,14 @@ import { detectClaudeInstalls } from "./detect"
 const CLI_TIMEOUT_MS = 20_000
 const KEY_SWAP_ATTEMPTS = 3
 
-/** Runs `claude <args>`; throws on failure. */
-export type ClaudeCliRunner = (args: Array<string>) => void
+/** Runs `claude <args>`; rejects on failure. */
+export type ClaudeCliRunner = (args: Array<string>) => Promise<void>
 
 export interface ClaudeCodeMcpOptions {
   configPath?: () => string
   /** Undefined runner means no usable `claude` binary was found. */
-  runner?: () => ClaudeCliRunner | undefined
-  available?: () => boolean
+  runner?: () => Promise<ClaudeCliRunner | undefined>
+  available?: () => Promise<boolean>
 }
 
 export function claudeUserConfigPath(): string {
@@ -60,20 +60,24 @@ export function claudeUserConfigPath(): string {
     : path.join(os.homedir(), ".claude.json")
 }
 
-function defaultRunner(): ClaudeCliRunner | undefined {
+async function defaultRunner(): Promise<ClaudeCliRunner | undefined> {
   // Windows .cmd/.ps1 shims need a shell, which would put JSON through shell
   // quoting; only a real executable is used.
-  const install = detectClaudeInstalls({ readVersion: () => null }).find(
+  const installs = await detectClaudeInstalls({ readVersion: () => null })
+  const install = installs.find(
     (candidate) =>
       process.platform !== "win32" || candidate.path.endsWith(".exe"),
   )
   if (!install) return undefined
-  return (args) => {
-    execFileSync(install.path, args, {
-      timeout: CLI_TIMEOUT_MS,
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true,
+  return async (args) => {
+    const result = await runFile(install.path, args, {
+      timeoutMs: CLI_TIMEOUT_MS,
     })
+    if (result.code !== 0) {
+      throw new Error(
+        result.stderr.trim() || `claude exited with code ${result.code}`,
+      )
+    }
   }
 }
 
@@ -216,15 +220,18 @@ export function createClaudeCodeMcp(
     apiKeyLabel: HELPER_LABEL,
     available:
       options.available
-      ?? (() => isProxyBaseUrlConfigured() && getRunner() !== undefined),
-    reconcile(desired, owned, reconcileOptions) {
+      ?? (async () =>
+        isProxyBaseUrlConfigured() && (await getRunner()) !== undefined),
+    reconcile(desired, owned) {
       return reconcileUserScope({
         file: configPath(),
         desired,
         owned,
         getRunner,
-        offline: reconcileOptions?.offline === true,
       })
+    },
+    releaseOffline(owned) {
+      return releaseUserScope(configPath(), owned)
     },
     existingStdioEntry(id, owned) {
       const value = readServers(configPath())[id]
@@ -238,11 +245,14 @@ interface ReconcileInput {
   file: string
   desired: Array<McpClientEntry>
   owned: Array<string>
-  getRunner: () => ClaudeCliRunner | undefined
-  offline: boolean
+  getRunner: () => Promise<ClaudeCliRunner | undefined>
 }
 
-function reconcileUserScope(input: ReconcileInput): McpReconcileResult {
+type Run = (args: Array<string>) => Promise<boolean>
+
+async function reconcileUserScope(
+  input: ReconcileInput,
+): Promise<McpReconcileResult> {
   const { file, desired, owned } = input
   const existing = readServers(file)
   const result: McpReconcileResult = {
@@ -251,17 +261,13 @@ function reconcileUserScope(input: ReconcileInput): McpReconcileResult {
     removed: [],
     skipped: [],
   }
-  let runner: ClaudeCliRunner | undefined
-  let runnerResolved = false
-  const run = (args: Array<string>): boolean => {
-    if (input.offline) return false
-    if (!runnerResolved) {
-      runner = input.getRunner()
-      runnerResolved = true
-    }
-    if (!runner) return false
+  let runner: Promise<ClaudeCliRunner | undefined> | undefined
+  const run: Run = async (args) => {
+    runner ??= input.getRunner()
+    const claude = await runner
+    if (!claude) return false
     try {
-      runner(args)
+      await claude(args)
       return true
     } catch (error) {
       consola.warn(`claude ${args.slice(0, 2).join(" ")} failed`, error)
@@ -274,16 +280,15 @@ function reconcileUserScope(input: ReconcileInput): McpReconcileResult {
     if (desiredIds.has(id)) continue
     const ours = { id, label: id, url: mcpEndpointUrl(id) }
     if (!isOwnedMcpEntry(existing[id], ours)) continue
-    const removed =
-      input.offline ?
-        removeFromFile(file, ours)
-      : run(["mcp", "remove", "--scope", "user", id])
-    if (removed) result.removed.push(id)
-    else result.owned.push(id)
+    if (await run(["mcp", "remove", "--scope", "user", id])) {
+      result.removed.push(id)
+    } else {
+      result.owned.push(id)
+    }
   }
 
   for (const entry of desired) {
-    const outcome = reconcileEntry({ entry, existing, owned, file, run })
+    const outcome = await reconcileEntry({ entry, existing, owned, file, run })
     if (outcome === "skipped") result.skipped.push(entry.id)
     if (outcome === "added") result.added.push(entry.id)
     if (outcome !== "skipped" && outcome !== "failed") {
@@ -293,13 +298,34 @@ function reconcileUserScope(input: ReconcileInput): McpReconcileResult {
   return result
 }
 
-function reconcileEntry(input: {
+/** Remove every owned entry by editing the file: no CLI, no waiting. */
+function releaseUserScope(
+  file: string,
+  owned: Array<string>,
+): McpReconcileResult {
+  const existing = readServers(file)
+  const result: McpReconcileResult = {
+    owned: [],
+    added: [],
+    removed: [],
+    skipped: [],
+  }
+  for (const id of owned) {
+    const ours = { id, label: id, url: mcpEndpointUrl(id) }
+    if (!isOwnedMcpEntry(existing[id], ours)) continue
+    if (removeFromFile(file, ours)) result.removed.push(id)
+    else result.owned.push(id)
+  }
+  return result
+}
+
+async function reconcileEntry(input: {
   entry: McpClientEntry
   existing: Record<string, unknown>
   owned: Array<string>
   file: string
-  run: (args: Array<string>) => boolean
-}): "added" | "kept" | "skipped" | "failed" {
+  run: Run
+}): Promise<"added" | "kept" | "skipped" | "failed"> {
   const { entry, existing, owned, file, run } = input
   const current = existing[entry.id]
   const ours = owned.includes(entry.id) && isOwnedMcpEntry(current, entry)
@@ -309,19 +335,19 @@ function reconcileEntry(input: {
   if (current === undefined || needsReplace(current, entry)) {
     if (
       current !== undefined
-      && !run(["mcp", "remove", "--scope", "user", entry.id])
+      && !(await run(["mcp", "remove", "--scope", "user", entry.id]))
     ) {
       return "kept"
     }
     if (
-      !run([
+      !(await run([
         "mcp",
         "add-json",
         "--scope",
         "user",
         entry.id,
         addJsonPayload(entry),
-      ])
+      ]))
     ) {
       return current === undefined ? "failed" : "kept"
     }

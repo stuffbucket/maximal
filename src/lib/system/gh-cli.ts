@@ -11,7 +11,7 @@
  *
  * The runner is injectable so tests exercise the parser without a real `gh`.
  */
-import { type ExecFileException, execFile } from "node:child_process"
+import { type RunResult, runFile } from "~/lib/system/run-file"
 
 export interface GhAccount {
   login: string
@@ -30,13 +30,7 @@ export interface GhCliStatus {
   accounts: Array<GhAccount>
 }
 
-interface GhRunResult {
-  stdout: string
-  stderr: string
-  code: number
-  /** True when the `gh` binary isn't on PATH (ENOENT). */
-  notFound: boolean
-}
+type GhRunResult = RunResult
 
 /** Runs a `gh` subcommand. Injectable for tests. */
 export type GhRunner = (args: Array<string>) => Promise<GhRunResult>
@@ -71,24 +65,7 @@ const defaultRunner: GhRunner = (args) => {
       ),
     )
   }
-  return new Promise<GhRunResult>((resolve) => {
-    execFile(
-      "gh",
-      args,
-      { encoding: "utf8", timeout: GH_TIMEOUT_MS, maxBuffer: 1_000_000 },
-      (error: ExecFileException | null, stdout, stderr) => {
-        if (error?.code === "ENOENT") {
-          resolve({ stdout: "", stderr: "", code: 127, notFound: true })
-          return
-        }
-        let code = 0
-        if (error) {
-          code = typeof error.code === "number" ? error.code : 1
-        }
-        resolve({ stdout, stderr, code, notFound: false })
-      },
-    )
-  })
+  return runFile("gh", args, { timeoutMs: GH_TIMEOUT_MS })
 }
 
 // "gh version 2.92.0 (2026-04-28)\n..." -> "2.92.0"

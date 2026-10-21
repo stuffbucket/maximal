@@ -45,7 +45,7 @@ export interface ClaudeDesktopMcpOptions {
    *  tests that redirect it) resolve the same directory as the profile. */
   home?: string
   resolveBrokerPath?: () => string | undefined
-  available?: () => boolean
+  available?: () => Promise<boolean>
 }
 
 /** Ours only when it runs the broker adapter against this endpoint's
@@ -110,13 +110,25 @@ export function createClaudeDesktopMcp(
   return {
     clientId: "claude-desktop",
     apiKeyLabel: "claude-desktop",
-    available: options.available ?? (() => isConfigLibraryApplied()),
+    available:
+      options.available ?? (() => Promise.resolve(isConfigLibraryApplied())),
+    // File edits only, so these finish synchronously either way.
     reconcile(desired, owned) {
+      return Promise.resolve(
+        reconcileFile({
+          topPath: claudeDesktopConfigPath(options.home),
+          desired,
+          owned,
+          brokerPath: desired.length > 0 ? resolveBrokerPath() : undefined,
+        }),
+      )
+    },
+    releaseOffline(owned) {
       return reconcileFile({
         topPath: claudeDesktopConfigPath(options.home),
-        desired,
+        desired: [],
         owned,
-        brokerPath: desired.length > 0 ? resolveBrokerPath() : undefined,
+        brokerPath: undefined,
       })
     },
     existingStdioEntry(id) {
