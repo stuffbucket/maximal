@@ -118,7 +118,10 @@ export type AppStatus = "ready" | "not-installed" | "coming-soon"
 
 /** Why enabling was refused. The app's config already carries a routing
  *  setting we don't own, so we backed off rather than clobber it. */
-export type AppConflict = "foreign-base-url" | "foreign-api-key-helper"
+export type AppConflict =
+  | "foreign-base-url"
+  | "foreign-api-key-helper"
+  | "foreign-gateway-profile"
 
 export interface AppInstall {
   path: string

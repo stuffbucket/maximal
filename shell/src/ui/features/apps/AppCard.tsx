@@ -38,6 +38,14 @@ function conflictCopy(app: AppEntry): { title: string; detail: string } | null {
           " another tool, so we didn't change it. Remove that line from the" +
           " app's settings, then switch this on again to route through maximal.",
       };
+    case "foreign-gateway-profile":
+      return {
+        title: "Left your existing setting in place",
+        detail:
+          `${app.name} is already using a gateway set up by you or another` +
+          " tool, so we didn't switch it. Choose a different configuration in" +
+          ` ${app.name}, then switch this on again to route through maximal.`,
+      };
     case null:
       return null;
   }

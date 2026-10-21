@@ -116,11 +116,21 @@ appsRoutes.post("/claude-desktop/toggle", async (c) => {
     const app = getApp("claude-desktop")
     if (!app) throw httpError("App not found", 404)
 
-    await (parsed.data.enabled ? app.enable() : app.disable())
-    persistClaudeDesktop(parsed.data.enabled)
-    if (parsed.data.enabled) armWorkingNotice(app.id, app.name)
-    else resetWorkingNotice(app.id)
+    if (parsed.data.enabled) {
+      const result = await app.enable()
+      // A refused enable (someone else's gateway is applied) isn't the
+      // user's intent taking effect — leave the persisted state alone.
+      if (!result.success) {
+        return jsonApp(c, await app.getDetails(result.conflict ?? null))
+      }
+      persistClaudeDesktop(true)
+      armWorkingNotice(app.id, app.name)
+      return jsonApp(c, await app.getDetails())
+    }
 
+    await app.disable()
+    persistClaudeDesktop(false)
+    resetWorkingNotice(app.id)
     return jsonApp(c, await app.getDetails())
   } catch (error) {
     return forwardError(c, error)
