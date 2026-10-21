@@ -72,6 +72,12 @@ brew update && brew upgrade maximal
 > binary from the
 > [latest release](https://github.com/stuffbucket/maximal/releases/latest).
 
+### Work IQ on Linux
+
+See [the Linux Work IQ guide](docs/linux-workiq.md) for installing the external
+MCP server, authenticating, and enabling it through Maximal. Optional Pi setup
+is documented [separately](docs/pi-workiq.md).
+
 ## Run
 
 From source (for development), substitute `maximal` with `bun run ./src/main.ts`:
