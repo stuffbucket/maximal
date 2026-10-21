@@ -1,15 +1,13 @@
 import { useState } from "react";
 
 import type { AppEntry } from "../../../proxy/client";
-import { Button } from "../../components/Button";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
+import { InstallSteps } from "../../components/InstallSteps";
 import { Switch } from "../../components/Switch";
 import { cx } from "../../components/cx";
 import { isWindows } from "../../platform";
 
 import type { MutationResult } from "./useApps";
-
-const COPIED_FLASH_MS = 1400;
 
 interface AppCardProps {
   app: AppEntry;
@@ -44,8 +42,6 @@ function conflictCopy(app: AppEntry): { title: string; detail: string } | null {
 }
 
 export function AppCard({ app, onToggle, onRescan }: AppCardProps): JSX.Element {
-  const [copied, setCopied] = useState(false);
-  const [rescanning, setRescanning] = useState(false);
   // Windows-only: disabling Claude Code routing doesn't take effect in an
   // already-running session (Claude Code reads its base URL at launch on
   // Windows; macOS picks it up live). Warn before disabling so the user
@@ -57,29 +53,11 @@ export function AppCard({ app, onToggle, onRescan }: AppCardProps): JSX.Element 
   const comingSoon = app.kind === "coming-soon";
   const notInstalled = app.status === "not-installed";
   const hasInstalls = app.installs.length > 0;
-  // Config apps with no detected install offer a one-line installer +
-  // re-scan (currently only Claude Code ships an install hint).
+  // Config apps with no detected install offer the steps to install it
+  // (currently only Claude Code ships an install hint).
   const offerInstall =
     app.kind === "config" && !hasInstalls && app.install !== null;
   const conflict = conflictCopy(app);
-
-  const copyInstall = async (): Promise<void> => {
-    if (!app.install) return;
-    try {
-      await navigator.clipboard.writeText(app.install.command);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), COPIED_FLASH_MS);
-    } catch {
-      // Clipboard unavailable (insecure context / plain browser). Silent —
-      // the command is also shown in a code block the user can select.
-    }
-  };
-
-  const rescan = async (): Promise<void> => {
-    setRescanning(true);
-    await onRescan();
-    setRescanning(false);
-  };
 
   // Intercept only the Claude-Code-disable-on-Windows case; everything else
   // (enabling, other apps, macOS) toggles straight through.
@@ -120,35 +98,15 @@ export function AppCard({ app, onToggle, onRescan }: AppCardProps): JSX.Element 
         </div>
       </header>
 
-      {/* Config app with no install: offer the one-line installer. */}
+      {/* Config app with no install: the steps to install it. */}
       {offerInstall && app.install && (
-        <div className="app-card__install">
-          <p className="app-card__hint">
-            Run this in your terminal to install {app.name}, then re-scan.
-          </p>
-          <div className="app-card__cmd">
-            <code className="app-card__cmd-text mono">
-              {app.install.command}
-            </code>
-            <div className="app-card__cmd-actions">
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => void copyInstall()}
-              >
-                {copied ? "Copied" : "Copy command"}
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={rescanning}
-                onClick={() => void rescan()}
-              >
-                {rescanning ? "Re-scanning…" : "Re-scan"}
-              </Button>
-            </div>
-          </div>
-        </div>
+        <InstallSteps
+          name={app.name}
+          command={app.install.command}
+          connectTitle={`Route ${app.name} through Maximal`}
+          connectHint="Then switch it on here."
+          onCheck={onRescan}
+        />
       )}
 
       {/* Config app with an install: show its location, or a "not

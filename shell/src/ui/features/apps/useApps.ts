@@ -13,7 +13,7 @@ import { humanize } from "../api-clients/humanize";
  * needed, so the rest of the screen doesn't flicker.
  *
  * `refresh()` re-fetches the whole list and is exposed for the
- * "Re-scan" affordance (after the user installs Claude Code in their
+ * install steps' re-check (after the user installs Claude Code in their
  * terminal) and for the nav-driven refetch in main.ts.
  */
 export interface MutationResult {
