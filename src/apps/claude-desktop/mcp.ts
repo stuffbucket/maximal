@@ -47,7 +47,7 @@ export interface ClaudeDesktopMcpOptions {
    *  tests that redirect it) resolve the same directory as the profile. */
   home?: string
   resolveBrokerPath?: () => string | undefined
-  available?: () => boolean
+  available?: () => Promise<boolean>
   /** Whether another provider's gateway profile is applied in Desktop. */
   otherProviderApplied?: () => boolean
 }
@@ -117,19 +117,31 @@ export function createClaudeDesktopMcp(
     // Desktop reads this file only at launch, and its routing stays applied
     // across Maximal restarts too (see ./reconcile.ts).
     removeOnShutdown: false,
-    available: options.available ?? (() => isConfigLibraryApplied()),
+    available:
+      options.available ?? (() => Promise.resolve(isConfigLibraryApplied())),
     unavailableReason() {
       const other =
         options.otherProviderApplied
         ?? (() => configLibraryConflict(options.home) !== null)
       return other() ? "other-provider-profile" : undefined
     },
+    // File edits only, so these finish synchronously either way.
     reconcile(desired, owned) {
+      return Promise.resolve(
+        reconcileFile({
+          topPath: claudeDesktopConfigPath(options.home),
+          desired,
+          owned,
+          brokerPath: desired.length > 0 ? resolveBrokerPath() : undefined,
+        }),
+      )
+    },
+    releaseOffline(owned) {
       return reconcileFile({
         topPath: claudeDesktopConfigPath(options.home),
-        desired,
+        desired: [],
         owned,
-        brokerPath: desired.length > 0 ? resolveBrokerPath() : undefined,
+        brokerPath: undefined,
       })
     },
     existingStdioEntry(id) {

@@ -65,7 +65,7 @@ function makeWinClaude(
 }
 
 describe("detectClaudeInstalls", () => {
-  test("dedupes a single real binary reachable via multiple PATH dirs", () => {
+  test("dedupes a single real binary reachable via multiple PATH dirs", async () => {
     const realDir = path.join(root, "real")
     const realFile = makeClaude(realDir)
     const resolved = fs.realpathSync(realFile)
@@ -77,7 +77,7 @@ describe("detectClaudeInstalls", () => {
     fs.symlinkSync(realFile, path.join(dir1, "claude"))
     fs.symlinkSync(realFile, path.join(dir2, "claude"))
 
-    const installs = detectClaudeInstalls({
+    const installs = await detectClaudeInstalls({
       homeDir: path.join(root, "home"),
       pathDirs: [dir1, dir2],
       npmPrefix: null,
@@ -86,12 +86,12 @@ describe("detectClaudeInstalls", () => {
     expect(mine).toHaveLength(1)
   })
 
-  test("parses --version output", () => {
+  test("parses --version output", async () => {
     const dir = path.join(root, "bin")
     const file = makeClaude(dir, { version: "9.8.7" })
     const resolved = fs.realpathSync(file)
 
-    const installs = detectClaudeInstalls({
+    const installs = await detectClaudeInstalls({
       homeDir: path.join(root, "home"),
       pathDirs: [dir],
       npmPrefix: null,
@@ -100,11 +100,11 @@ describe("detectClaudeInstalls", () => {
     expect(mine?.version).toBe("9.8.7")
   })
 
-  test("version is null when the binary can't be run", () => {
+  test("version is null when the binary can't be run", async () => {
     const dir = path.join(root, "bin")
     const file = makeClaude(dir)
     const resolved = fs.realpathSync(file)
-    const installs = detectClaudeInstalls({
+    const installs = await detectClaudeInstalls({
       homeDir: path.join(root, "home"),
       pathDirs: [dir],
       npmPrefix: null,
@@ -115,7 +115,7 @@ describe("detectClaudeInstalls", () => {
     ).toBeNull()
   })
 
-  test("reports the stable symlink as `path`, not the resolved version (native installer shape)", () => {
+  test("reports the stable symlink as `path`, not the resolved version (native installer shape)", async () => {
     // Mirror the native installer: ~/.local/bin/claude is a symlink to a
     // versioned binary under ~/.local/share/claude/versions/. The shim
     // must exec the SYMLINK (which auto-update repoints), so `path` must
@@ -129,7 +129,7 @@ describe("detectClaudeInstalls", () => {
     const symlink = path.join(binDir, "claude")
     fs.symlinkSync(versioned, symlink)
 
-    const installs = detectClaudeInstalls({
+    const installs = await detectClaudeInstalls({
       homeDir: home,
       pathDirs: [binDir],
       npmPrefix: null,
@@ -141,12 +141,12 @@ describe("detectClaudeInstalls", () => {
     expect(mine?.resolvedPath).not.toBe(symlink) // resolved to the version
   })
 
-  test("excludes our own shim via the marker line", () => {
+  test("excludes our own shim via the marker line", async () => {
     const dir = path.join(root, "bin")
     const file = makeClaude(dir, { marker: true })
     const resolved = fs.realpathSync(file)
 
-    const installs = detectClaudeInstalls({
+    const installs = await detectClaudeInstalls({
       homeDir: path.join(root, "home"),
       pathDirs: [dir],
       npmPrefix: null,
@@ -154,7 +154,7 @@ describe("detectClaudeInstalls", () => {
     expect(installs.some((i) => i.resolvedPath === resolved)).toBe(false)
   })
 
-  test("does not read large candidate binaries in full (perf regression guard)", () => {
+  test("does not read large candidate binaries in full (perf regression guard)", async () => {
     // The real `claude` is a 200 MB+ binary. Detection must only read a
     // small prefix to check for the shim marker — reading the whole file
     // made the Apps toggle lag for seconds. Here a 64 MB fake binary
@@ -169,7 +169,7 @@ describe("detectClaudeInstalls", () => {
     const resolved = fs.realpathSync(file)
 
     const start = performance.now()
-    const installs = detectClaudeInstalls({
+    const installs = await detectClaudeInstalls({
       homeDir: path.join(root, "home"),
       pathDirs: [dir],
       npmPrefix: null,
@@ -185,7 +185,7 @@ describe("detectClaudeInstalls", () => {
     expect(elapsed).toBeLessThan(500)
   })
 
-  test("returns only the active claude (first on PATH), ignoring others", () => {
+  test("returns only the active claude (first on PATH), ignoring others", async () => {
     // A claude on PATH is the active one; copies in other known install
     // dirs are intentionally ignored. Active-first short-circuits to one.
     const home = path.join(root, "home")
@@ -193,7 +193,7 @@ describe("detectClaudeInstalls", () => {
     const pathDir = path.join(root, "somewhere")
     const pathFile = makeClaude(pathDir)
 
-    const installs = detectClaudeInstalls({
+    const installs = await detectClaudeInstalls({
       homeDir: home,
       pathDirs: [pathDir],
       npmPrefix: null,
@@ -203,7 +203,7 @@ describe("detectClaudeInstalls", () => {
     expect(installs[0].source).toBe("path")
   })
 
-  test("falls back to known install dirs when nothing is active on PATH", () => {
+  test("falls back to known install dirs when nothing is active on PATH", async () => {
     // No claude on PATH → probe known locations + npm-global so an
     // installed-but-not-active claude can still be surfaced.
     const home = path.join(root, "home")
@@ -212,7 +212,7 @@ describe("detectClaudeInstalls", () => {
     const npmPrefix = path.join(root, "npm")
     const npmFile = makeClaude(path.join(npmPrefix, "bin"))
 
-    const installs = detectClaudeInstalls({
+    const installs = await detectClaudeInstalls({
       homeDir: home,
       pathDirs: [], // nothing active
       npmPrefix,
@@ -228,7 +228,7 @@ describe("detectClaudeInstalls", () => {
 })
 
 describe("detectClaudeInstalls — source classification", () => {
-  test('classifies a binary under `<home>/.claude/...` as "claude-local"', () => {
+  test('classifies a binary under `<home>/.claude/...` as "claude-local"', async () => {
     // Discover via pathDirs (origin "path") so the ONLY thing that can
     // produce "claude-local" is the .claude prefix check — not the
     // pre-set origin of the fixed `~/.claude` probe. A non-canonical
@@ -241,7 +241,7 @@ describe("detectClaudeInstalls — source classification", () => {
     const dir = path.join(home, ".claude", "viaPath")
     const file = makeClaude(dir)
     const resolved = fs.realpathSync(file)
-    const installs = detectClaudeInstalls({
+    const installs = await detectClaudeInstalls({
       homeDir: home,
       pathDirs: [dir],
       npmPrefix: null,
@@ -251,14 +251,14 @@ describe("detectClaudeInstalls — source classification", () => {
     )
   })
 
-  test('classifies `<home>/.local/bin/...` as "local-bin"', () => {
+  test('classifies `<home>/.local/bin/...` as "local-bin"', async () => {
     // Same technique: reach it via pathDirs so the .local/bin prefix
     // check is the only path to "local-bin".
     const home = makeDir(path.join(root, "home"))
     const dir = path.join(home, ".local", "bin", "viaPath")
     const file = makeClaude(dir)
     const resolved = fs.realpathSync(file)
-    const installs = detectClaudeInstalls({
+    const installs = await detectClaudeInstalls({
       homeDir: home,
       pathDirs: [dir],
       npmPrefix: null,
@@ -268,7 +268,7 @@ describe("detectClaudeInstalls — source classification", () => {
     )
   })
 
-  test('does NOT treat `<home>/.local/<other>` as "local-bin"', () => {
+  test('does NOT treat `<home>/.local/<other>` as "local-bin"', async () => {
     // Negative test: a binary directly under `~/.local` but NOT under
     // `~/.local/bin` must fall through to "path". This kills the
     // mutant that drops "bin" from the prefix join, which would
@@ -277,7 +277,7 @@ describe("detectClaudeInstalls — source classification", () => {
     const dir = path.join(home, ".local", "share", "viaPath")
     const file = makeClaude(dir)
     const resolved = fs.realpathSync(file)
-    const installs = detectClaudeInstalls({
+    const installs = await detectClaudeInstalls({
       homeDir: home,
       pathDirs: [dir],
       npmPrefix: null,
@@ -287,7 +287,7 @@ describe("detectClaudeInstalls — source classification", () => {
     )
   })
 
-  test('classifies a binary under the npm prefix `/bin` as "npm-global"', () => {
+  test('classifies a binary under the npm prefix `/bin` as "npm-global"', async () => {
     // Reach it via pathDirs (origin "path") so the npmBin prefix check
     // does the classifying, NOT the origin shortcut of the fixed npm
     // probe. This separates the two branches that otherwise mask each
@@ -297,7 +297,7 @@ describe("detectClaudeInstalls — source classification", () => {
     const dir = path.join(npmPrefix, "bin", "viaPath")
     const file = makeClaude(dir)
     const resolved = fs.realpathSync(file)
-    const installs = detectClaudeInstalls({
+    const installs = await detectClaudeInstalls({
       homeDir: home,
       pathDirs: [dir],
       npmPrefix,
@@ -307,7 +307,7 @@ describe("detectClaudeInstalls — source classification", () => {
     )
   })
 
-  test("honours the npm/homebrew origin shortcut over a plain PATH dir", () => {
+  test("honours the npm/homebrew origin shortcut over a plain PATH dir", async () => {
     // The fixed npm probe carries origin "npm-global"; classifySource's
     // origin shortcut returns that origin before the prefix heuristics.
     // Here the file sits at the CANONICAL npm probe path AND is NOT under
@@ -317,7 +317,7 @@ describe("detectClaudeInstalls — source classification", () => {
     const npmPrefix = path.join(root, "npmroot")
     const file = makeClaude(path.join(npmPrefix, "bin"))
     const resolved = fs.realpathSync(file)
-    const installs = detectClaudeInstalls({
+    const installs = await detectClaudeInstalls({
       homeDir: home,
       pathDirs: [],
       npmPrefix,
@@ -327,12 +327,12 @@ describe("detectClaudeInstalls — source classification", () => {
     )
   })
 
-  test('classifies a binary on an ordinary PATH dir as "path"', () => {
+  test('classifies a binary on an ordinary PATH dir as "path"', async () => {
     const home = path.join(root, "home")
     const pathDir = path.join(root, "elsewhere")
     const file = makeClaude(pathDir)
     const resolved = fs.realpathSync(file)
-    const installs = detectClaudeInstalls({
+    const installs = await detectClaudeInstalls({
       homeDir: home,
       pathDirs: [pathDir],
       npmPrefix: null,
@@ -342,7 +342,7 @@ describe("detectClaudeInstalls — source classification", () => {
     )
   })
 
-  test('classifies a binary resolving under /usr/local (or /opt/homebrew) as "homebrew"', () => {
+  test('classifies a binary resolving under /usr/local (or /opt/homebrew) as "homebrew"', async () => {
     // The homebrew prefix heuristic keys off the real (symlink-resolved)
     // path starting with /usr/local/ or /opt/homebrew/. There is no
     // injection point for those prefixes, so we place a real fixture under
@@ -367,7 +367,7 @@ describe("detectClaudeInstalls — source classification", () => {
           || resolved.startsWith("/opt/homebrew/"),
       ).toBe(true)
 
-      const installs = detectClaudeInstalls({
+      const installs = await detectClaudeInstalls({
         homeDir: path.join(root, "home"),
         pathDirs: [brewDir],
         npmPrefix: null,
@@ -380,7 +380,7 @@ describe("detectClaudeInstalls — source classification", () => {
     }
   })
 
-  test("detection reports a multi-digit semver from --version output", () => {
+  test("detection reports a multi-digit semver from --version output", async () => {
     // Pins the /\d+\.\d+\.\d+/ extraction: dropping a `+` would turn
     // "10.20.30" into "0.20.30". A real fake executable is run here
     // (no readVersion injection) so the regex in readClaudeVersion is
@@ -388,7 +388,7 @@ describe("detectClaudeInstalls — source classification", () => {
     const dir = path.join(root, "bin")
     const file = makeClaude(dir, { version: "10.20.30" })
     const resolved = fs.realpathSync(file)
-    const installs = detectClaudeInstalls({
+    const installs = await detectClaudeInstalls({
       homeDir: path.join(root, "home"),
       pathDirs: [dir],
       npmPrefix: null,
@@ -406,7 +406,7 @@ describe("detectClaudeInstalls — Windows (platform injected)", () => {
   // layout (`%APPDATA%\npm` holds `claude.cmd` directly, no `bin/`) are the
   // Windows-specific behaviour under test. `makeWinClaude` (module scope)
   // creates the fixture with an explicit basename.
-  test("finds an npm-global claude.cmd on PATH (no .exe extension)", () => {
+  test("finds an npm-global claude.cmd on PATH (no .exe extension)", async () => {
     // The reported gap: an npm-global `claude.cmd` was invisible because the
     // PATH walk only joined `dir/claude`. With the win32 basename set it's
     // found and exec'd as the active install.
@@ -414,7 +414,7 @@ describe("detectClaudeInstalls — Windows (platform injected)", () => {
     const file = makeWinClaude(dir, "claude.cmd")
     const resolved = fs.realpathSync(file)
 
-    const installs = detectClaudeInstalls({
+    const installs = await detectClaudeInstalls({
       homeDir: path.join(root, "home"),
       pathDirs: [dir],
       npmPrefix: null,
@@ -426,11 +426,11 @@ describe("detectClaudeInstalls — Windows (platform injected)", () => {
     expect(installs[0].path).toBe(path.join(dir, "claude.cmd"))
   })
 
-  test("prefers claude.exe over claude.cmd in the same dir", () => {
+  test("prefers claude.exe over claude.cmd in the same dir", async () => {
     const dir = path.join(root, "both")
     makeWinClaude(dir, "claude.cmd")
     const exe = makeWinClaude(dir, "claude.exe")
-    const installs = detectClaudeInstalls({
+    const installs = await detectClaudeInstalls({
       homeDir: path.join(root, "home"),
       pathDirs: [dir],
       npmPrefix: null,
@@ -441,11 +441,11 @@ describe("detectClaudeInstalls — Windows (platform injected)", () => {
     expect(installs[0].path).toBe(exe) // .exe wins
   })
 
-  test("finds the native installer claude.exe under ~/.local/bin (Phase 2)", () => {
+  test("finds the native installer claude.exe under ~/.local/bin (Phase 2)", async () => {
     const home = path.join(root, "winhome")
     const file = makeWinClaude(path.join(home, ".local", "bin"), "claude.exe")
     const resolved = fs.realpathSync(file)
-    const installs = detectClaudeInstalls({
+    const installs = await detectClaudeInstalls({
       homeDir: home,
       pathDirs: [], // nothing active on PATH
       npmPrefix: null,
@@ -456,7 +456,7 @@ describe("detectClaudeInstalls — Windows (platform injected)", () => {
     expect(mine?.source).toBe("local-bin")
   })
 
-  test("npm-global on Windows lives in the prefix itself, not <prefix>/bin", () => {
+  test("npm-global on Windows lives in the prefix itself, not <prefix>/bin", async () => {
     // POSIX npm puts the launcher in `<prefix>/bin`; Windows npm drops
     // `claude.cmd` directly in `%APPDATA%\npm` (== the prefix). Phase-2
     // probing must look in the prefix dir, and classify it npm-global.
@@ -464,7 +464,7 @@ describe("detectClaudeInstalls — Windows (platform injected)", () => {
     const npmPrefix = path.join(root, "AppData", "Roaming", "npm")
     const file = makeWinClaude(npmPrefix, "claude.cmd")
     const resolved = fs.realpathSync(file)
-    const installs = detectClaudeInstalls({
+    const installs = await detectClaudeInstalls({
       homeDir: home,
       pathDirs: [],
       npmPrefix,
@@ -475,12 +475,12 @@ describe("detectClaudeInstalls — Windows (platform injected)", () => {
     expect(mine?.source).toBe("npm-global")
   })
 
-  test('classifies a binary under ~/.claude as "claude-local" on Windows', () => {
+  test('classifies a binary under ~/.claude as "claude-local" on Windows', async () => {
     const home = makeDir(path.join(root, "winhome3"))
     const dir = path.join(home, ".claude", "local")
     const file = makeWinClaude(dir, "claude.exe")
     const resolved = fs.realpathSync(file)
-    const installs = detectClaudeInstalls({
+    const installs = await detectClaudeInstalls({
       homeDir: home,
       pathDirs: [dir],
       npmPrefix: null,
@@ -492,11 +492,11 @@ describe("detectClaudeInstalls — Windows (platform injected)", () => {
     )
   })
 
-  test("does NOT probe POSIX Homebrew dirs on Windows", () => {
+  test("does NOT probe POSIX Homebrew dirs on Windows", async () => {
     // Nothing on PATH and no fixtures anywhere → empty. Guards against the
     // win32 fallback accidentally including /opt/homebrew or /usr/local
     // (which may even hold a real claude on the macOS CI host).
-    const installs = detectClaudeInstalls({
+    const installs = await detectClaudeInstalls({
       homeDir: path.join(root, "emptyhome"),
       pathDirs: [],
       npmPrefix: null,
@@ -508,29 +508,53 @@ describe("detectClaudeInstalls — Windows (platform injected)", () => {
 })
 
 describe("readClaudeVersion", () => {
-  test("extracts a semver token from noisy output", () => {
+  test("extracts a semver token from noisy output", async () => {
     const dir = path.join(root, "bin")
     const file = makeClaude(dir, { version: "1.0.44" })
-    expect(readClaudeVersion(file)).toBe("1.0.44")
+    expect(await readClaudeVersion(file)).toBe("1.0.44")
   })
 
-  test("extracts a multi-digit semver (each component can be >1 digit)", () => {
+  test("extracts a multi-digit semver (each component can be >1 digit)", async () => {
     // Dropping a `+` from /\d+\.\d+\.\d+/ would yield "0.20.30" here.
     const dir = path.join(root, "multidigit")
     const file = makeClaude(dir, { version: "10.20.30" })
-    expect(readClaudeVersion(file)).toBe("10.20.30")
+    expect(await readClaudeVersion(file)).toBe("10.20.30")
   })
 
-  test("extracts the semver from leading tool-name + trailing build text", () => {
+  test("extracts the semver from leading tool-name + trailing build text", async () => {
     // makeClaude wraps the value as `<value> (Claude Code)`, so passing a
     // leading tool name yields `claude 7.8.9 (Claude Code)`. The semver
     // must be plucked from the middle, not the surrounding prose.
     const dir = path.join(root, "named")
     const file = makeClaude(dir, { version: "claude 7.8.9" })
-    expect(readClaudeVersion(file)).toBe("7.8.9")
+    expect(await readClaudeVersion(file)).toBe("7.8.9")
   })
 
-  test("returns null for a non-existent binary", () => {
-    expect(readClaudeVersion(path.join(root, "nope"))).toBeNull()
+  test("returns null for a non-existent binary", async () => {
+    expect(await readClaudeVersion(path.join(root, "nope"))).toBeNull()
+  })
+
+  test("runs each binary once until it changes", async () => {
+    // Counts its own runs, so a cached read is visible.
+    const dir = makeDir(path.join(root, "counted"))
+    const file = path.join(dir, "claude")
+    const runs = path.join(root, "runs")
+    fs.writeFileSync(
+      file,
+      `#!/bin/sh\necho x >> "${runs}"\necho "2.0.0 (Claude Code)"\n`,
+    )
+    fs.chmodSync(file, 0o755)
+    const count = (): number =>
+      fs.readFileSync(runs, "utf8").split("\n").length - 1
+
+    expect(await readClaudeVersion(file)).toBe("2.0.0")
+    expect(await readClaudeVersion(file)).toBe("2.0.0")
+    expect(count()).toBe(1)
+
+    // An upgrade replaces the file; a new modification time reads it again.
+    const later = new Date(Date.now() + 60_000)
+    fs.utimesSync(file, later, later)
+    expect(await readClaudeVersion(file)).toBe("2.0.0")
+    expect(count()).toBe(2)
   })
 })

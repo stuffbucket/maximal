@@ -32,7 +32,7 @@ const configurator = (brokerPath: string | null = BROKER) =>
   createClaudeDesktopMcp({
     home,
     resolveBrokerPath: () => brokerPath ?? undefined,
-    available: () => true,
+    available: () => Promise.resolve(true),
   })
 
 const readServers = (): Record<string, unknown> | undefined => {
@@ -60,8 +60,8 @@ afterEach(() => {
 })
 
 describe("Claude Desktop MCP reconcile", () => {
-  test("adds Maximal's generated entry with the key in env", () => {
-    const result = configurator().reconcile([entry("workiq", "k1")], [])
+  test("adds Maximal's generated entry with the key in env", async () => {
+    const result = await configurator().reconcile([entry("workiq", "k1")], [])
 
     expect(result).toEqual({
       owned: ["workiq"],
@@ -79,21 +79,21 @@ describe("Claude Desktop MCP reconcile", () => {
     })
   })
 
-  test("leaves a same-name entry the user already had alone", () => {
+  test("leaves a same-name entry the user already had alone", async () => {
     const foreign = { command: "npx", args: ["-y", "workiq"] }
     seed({ deploymentMode: "3p", mcpServers: { workiq: foreign } })
 
-    const result = configurator().reconcile([entry("workiq")], [])
+    const result = await configurator().reconcile([entry("workiq")], [])
 
     expect(result.skipped).toEqual(["workiq"])
     expect(result.owned).toEqual([])
     expect(readServers()).toEqual({ workiq: foreign })
   })
 
-  test("rewrites an owned entry when its key changes", () => {
+  test("rewrites an owned entry when its key changes", async () => {
     const mcp = configurator()
-    mcp.reconcile([entry("workiq", "old")], [])
-    const result = mcp.reconcile([entry("workiq", "new")], ["workiq"])
+    await mcp.reconcile([entry("workiq", "old")], [])
+    const result = await mcp.reconcile([entry("workiq", "new")], ["workiq"])
 
     expect(result.owned).toEqual(["workiq"])
     expect(result.added).toEqual([])
@@ -102,17 +102,17 @@ describe("Claude Desktop MCP reconcile", () => {
     ).toEqual({ MAXIMAL_MCP_API_KEY: "new" })
   })
 
-  test("reverts only owned entries that still carry Maximal's signature", () => {
+  test("reverts only owned entries that still carry Maximal's signature", async () => {
     const foreign = { command: "uvx", args: ["mcp-server-fetch"] }
     seed({ mcpServers: { fetch: foreign } })
     const mcp = configurator()
-    mcp.reconcile([entry("workiq"), entry("other")], [])
+    await mcp.reconcile([entry("workiq"), entry("other")], [])
 
     // The user repointed "other" themselves; Maximal must not remove it.
     const servers = readServers() ?? {}
     seed({ mcpServers: { ...servers, other: { command: "mine", args: [] } } })
 
-    const result = mcp.reconcile([], ["workiq", "other"])
+    const result = await mcp.reconcile([], ["workiq", "other"])
 
     expect(result.removed).toEqual(["workiq"])
     expect(result.owned).toEqual([])
@@ -122,16 +122,19 @@ describe("Claude Desktop MCP reconcile", () => {
     })
   })
 
-  test("drops mcpServers entirely when the last owned entry goes", () => {
+  test("drops mcpServers entirely when the last owned entry goes", async () => {
     const mcp = configurator()
-    mcp.reconcile([entry("workiq")], [])
-    mcp.reconcile([], ["workiq"])
+    await mcp.reconcile([entry("workiq")], [])
+    await mcp.reconcile([], ["workiq"])
     expect(readServers()).toBeUndefined()
   })
 
-  test("without the broker binary, keeps owned entries and adds nothing", () => {
-    configurator().reconcile([entry("a")], [])
-    const result = configurator(null).reconcile([entry("a"), entry("b")], ["a"])
+  test("without the broker binary, keeps owned entries and adds nothing", async () => {
+    await configurator().reconcile([entry("a")], [])
+    const result = await configurator(null).reconcile(
+      [entry("a"), entry("b")],
+      ["a"],
+    )
 
     expect(result.owned).toEqual(["a"])
     // Not the user's own entry: Maximal couldn't write one.
@@ -144,7 +147,7 @@ describe("Claude Desktop MCP reconcile", () => {
     const mcp = createClaudeDesktopMcp({
       home,
       resolveBrokerPath: () => BROKER,
-      available: () => false,
+      available: () => Promise.resolve(false),
       otherProviderApplied: () => true,
     })
     expect(mcp.unavailableReason?.()).toBe("other-provider-profile")
@@ -152,7 +155,7 @@ describe("Claude Desktop MCP reconcile", () => {
     const plain = createClaudeDesktopMcp({
       home,
       resolveBrokerPath: () => BROKER,
-      available: () => false,
+      available: () => Promise.resolve(false),
       otherProviderApplied: () => false,
     })
     expect(plain.unavailableReason?.()).toBeUndefined()
@@ -170,9 +173,9 @@ const adapter = (port: number) => ({
 })
 
 describe("Claude Desktop MCP across port changes", () => {
-  test("moves an owned entry to the port Maximal listens on now", () => {
+  test("moves an owned entry to the port Maximal listens on now", async () => {
     seed({ mcpServers: { workiq: adapter(4141) } })
-    const result = configurator().reconcile([onPort(4199)], ["workiq"])
+    const result = await configurator().reconcile([onPort(4199)], ["workiq"])
     expect(result).toEqual({
       owned: ["workiq"],
       added: [],
@@ -183,9 +186,9 @@ describe("Claude Desktop MCP across port changes", () => {
     expect(readServers()).toEqual({ workiq: adapter(4199) })
   })
 
-  test("reverts an owned entry written on another port", () => {
+  test("reverts an owned entry written on another port", async () => {
     seed({ mcpServers: { workiq: adapter(4199) } })
-    const result = configurator().reconcile([], ["workiq"])
+    const result = await configurator().reconcile([], ["workiq"])
     expect(result.removed).toEqual(["workiq"])
     expect(readServers()).toBeUndefined()
   })
@@ -239,8 +242,8 @@ describe("Claude Desktop existing entries", () => {
     })
   })
 
-  test("never offers Maximal's own adapter entry", () => {
-    configurator().reconcile([entry("workiq")], [])
+  test("never offers Maximal's own adapter entry", async () => {
+    await configurator().reconcile([entry("workiq")], [])
     expect(configurator().existingStdioEntry?.("workiq", [])).toBeUndefined()
   })
 })

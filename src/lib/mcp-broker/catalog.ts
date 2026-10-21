@@ -8,17 +8,20 @@
  * runs `node`) would not start from the broker.
  */
 
-import { execFileSync } from "node:child_process"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+
+import { cachedNpmGlobalPrefix } from "~/lib/system/run-file"
 
 import type { McpServerConfig } from "./types"
 
 export interface CatalogDetectOptions {
   homeDir?: string
   pathDirs?: Array<string>
-  /** `npm prefix -g`; null when npm isn't available. */
+  /** `npm prefix -g`; null when npm isn't available. Defaults to the
+   *  cached value, so call `npmGlobalPrefix()` first (detection is sync and
+   *  must never spawn npm itself). */
   npmPrefix?: string | null
   platform?: NodeJS.Platform
   arch?: string
@@ -85,7 +88,6 @@ function defaultMiseDataDir(home: string, platform: NodeJS.Platform): string {
 function resolveOptions(options: CatalogDetectOptions = {}): ResolvedOptions {
   const home = options.homeDir ?? os.homedir()
   const platform = options.platform ?? process.platform
-  let prefix: string | null | undefined = options.npmPrefix
   return {
     home,
     platform,
@@ -93,31 +95,12 @@ function resolveOptions(options: CatalogDetectOptions = {}): ResolvedOptions {
     pathDirs:
       options.pathDirs
       ?? (process.env.PATH ?? "").split(path.delimiter).filter(Boolean),
-    npmPrefix: () => {
-      if (prefix === undefined) prefix = defaultNpmPrefix()
-      return prefix
-    },
+    npmPrefix: () =>
+      options.npmPrefix === undefined ?
+        (cachedNpmGlobalPrefix() ?? null)
+      : options.npmPrefix,
     miseDataDir: options.miseDataDir ?? defaultMiseDataDir(home, platform),
   }
-}
-
-// npm's global prefix doesn't change while Maximal runs, and spawning npm is
-// the slowest probe; detection runs at boot and on every Settings list.
-let npmPrefixCache: string | null | undefined
-
-function defaultNpmPrefix(): string | null {
-  if (npmPrefixCache !== undefined) return npmPrefixCache
-  try {
-    const out = execFileSync("npm", ["prefix", "-g"], {
-      encoding: "utf8",
-      timeout: 5000,
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim()
-    npmPrefixCache = out.length > 0 ? out : null
-  } catch {
-    npmPrefixCache = null
-  }
-  return npmPrefixCache
 }
 
 function isExecutableFile(file: string, platform: NodeJS.Platform): boolean {

@@ -33,7 +33,7 @@ export const claudeDesktopCli: AppCli = {
     },
   },
 
-  handle(op: AppCliOp, args: Record<string, unknown>): boolean {
+  async handle(op: AppCliOp, args: Record<string, unknown>): Promise<boolean> {
     if (op !== "enable") return false
 
     if (args.managed === true) {
@@ -51,12 +51,12 @@ export const claudeDesktopCli: AppCli = {
       return true
     }
 
-    apply()
+    await apply()
     return true
   },
 }
 
-function apply(): void {
+async function apply(): Promise<void> {
   try {
     const result = enableClaudeDesktopRouting()
     if (result.conflict) {
@@ -79,7 +79,7 @@ function apply(): void {
         `  workspace folders: ${result.ensuredWorkspaceFolders.join(", ")}`,
       )
     }
-    const mcp = syncMcpClient(claudeDesktopMcp)
+    const mcp = await syncMcpClient(claudeDesktopMcp)
     const changed = [...mcp.added, ...mcp.removed]
     if (changed.length > 0) {
       consola.info(`  MCP servers updated: ${changed.join(", ")}`)

@@ -22,6 +22,8 @@ import {
   type McpClientConfigurator,
   type McpClientEntry,
   mcpEndpointUrl,
+  type McpReconcileResult,
+  releaseMcpClientOffline,
   syncMcpClient,
 } from "~/lib/mcp-broker/client-sync"
 import { setListeningPort } from "~/lib/start/proxy-port"
@@ -31,27 +33,39 @@ interface FakeCall {
   owned: Array<string>
 }
 
-function fakeConfigurator(available = true) {
+function outcome(
+  desired: Array<McpClientEntry>,
+  owned: Array<string>,
+): McpReconcileResult {
+  return {
+    owned: desired.map((entry) => entry.id),
+    added: desired.map((entry) => entry.id).filter((id) => !owned.includes(id)),
+    removed: owned.filter((id) => !desired.some((e) => e.id === id)),
+    skipped: [],
+    unavailable: [],
+  }
+}
+
+/** `gate`, when given, holds each reconcile until the test releases it. */
+function fakeConfigurator(available = true, gate?: () => Promise<void>) {
   const calls: Array<FakeCall> = []
+  const offline: Array<Array<string>> = []
   const configurator: McpClientConfigurator = {
     clientId: "claude-desktop",
     apiKeyLabel: "claude-desktop",
     removeOnShutdown: false,
-    available: () => available,
-    reconcile(desired: Array<McpClientEntry>, owned: Array<string>) {
+    available: () => Promise.resolve(available),
+    async reconcile(desired: Array<McpClientEntry>, owned: Array<string>) {
       calls.push({ desired: desired.map((entry) => entry.id), owned })
-      return {
-        owned: desired.map((entry) => entry.id),
-        added: desired
-          .map((entry) => entry.id)
-          .filter((id) => !owned.includes(id)),
-        removed: owned.filter((id) => !desired.some((e) => e.id === id)),
-        skipped: [],
-        unavailable: [],
-      }
+      await gate?.()
+      return outcome(desired, owned)
+    },
+    releaseOffline(owned: Array<string>) {
+      offline.push(owned)
+      return outcome([], owned)
     },
   }
-  return { calls, configurator }
+  return { calls, offline, configurator }
 }
 
 const server = (id: string, extra: Record<string, unknown> = {}) => ({
@@ -133,18 +147,18 @@ describe("desiredEntriesFor", () => {
 })
 
 describe("syncMcpClient", () => {
-  test("persists what the client now owns", () => {
+  test("persists what the client now owns", async () => {
     writeConfig(brokerConfig([server("a", { clients: ["claude-desktop"] })]))
     const { calls, configurator } = fakeConfigurator()
 
-    const result = syncMcpClient(configurator)
+    const result = await syncMcpClient(configurator)
 
     expect(result.added).toEqual(["a"])
     expect(calls).toEqual([{ desired: ["a"], owned: [] }])
     expect(getConfig().apps?.claudeDesktop?.mcpServers).toEqual(["a"])
   })
 
-  test("reverts everything when the integration is inactive", () => {
+  test("reverts everything when the integration is inactive", async () => {
     writeConfig(
       brokerConfig([server("a", { clients: ["claude-desktop"] })], {
         apps: { claudeDesktop: { enabled: true, mcpServers: ["a"] } },
@@ -152,7 +166,7 @@ describe("syncMcpClient", () => {
     )
     const { calls, configurator } = fakeConfigurator()
 
-    const result = syncMcpClient(configurator, { active: false })
+    const result = await syncMcpClient(configurator, { active: false })
 
     expect(result.removed).toEqual(["a"])
     expect(calls).toEqual([{ desired: [], owned: ["a"] }])
@@ -162,7 +176,7 @@ describe("syncMcpClient", () => {
     })
   })
 
-  test("takes its entries back out on Windows", () => {
+  test("takes its entries back out on Windows", async () => {
     writeConfig(
       brokerConfig([server("a", { clients: ["claude-desktop"] })], {
         apps: { claudeDesktop: { mcpServers: ["a"] } },
@@ -170,7 +184,7 @@ describe("syncMcpClient", () => {
     )
     const { calls, configurator } = fakeConfigurator()
 
-    const result = syncMcpClient(configurator, { platform: "win32" })
+    const result = await syncMcpClient(configurator, { platform: "win32" })
 
     expect(result.removed).toEqual(["a"])
     expect(calls).toEqual([{ desired: [], owned: ["a"] }])
@@ -179,16 +193,16 @@ describe("syncMcpClient", () => {
     ])
   })
 
-  test("never touches the client when nothing is desired or owned", () => {
+  test("never touches the client when nothing is desired or owned", async () => {
     writeConfig(brokerConfig([server("a")]))
     const { calls, configurator } = fakeConfigurator()
 
-    syncMcpClient(configurator)
+    await syncMcpClient(configurator)
 
     expect(calls).toEqual([])
   })
 
-  test("keeps the user's client choice when the endpoint is off", () => {
+  test("keeps the user's client choice when the endpoint is off", async () => {
     writeConfig(
       brokerConfig(
         [server("a", { enabled: false, clients: ["claude-desktop"] })],
@@ -197,12 +211,84 @@ describe("syncMcpClient", () => {
     )
     const { configurator } = fakeConfigurator()
 
-    syncMcpClient(configurator)
+    await syncMcpClient(configurator)
 
     expect(getConfig().mcpBroker?.servers?.[0]?.clients).toEqual([
       "claude-desktop",
     ])
     expect(getConfig().apps?.claudeDesktop?.mcpServers).toEqual([])
+  })
+
+  test("runs passes for one client one after another, each seeing the last", async () => {
+    writeConfig(brokerConfig([server("a", { clients: ["claude-desktop"] })]))
+    const releases: Array<() => void> = []
+    const { calls, configurator } = fakeConfigurator(
+      true,
+      () => new Promise<void>((resolve) => releases.push(resolve)),
+    )
+
+    const first = syncMcpClient(configurator)
+    const second = syncMcpClient(configurator, { active: false })
+    await Bun.sleep(0)
+    // The second waits for the first rather than reconciling alongside it.
+    expect(calls).toEqual([{ desired: ["a"], owned: [] }])
+
+    releases[0]()
+    await first
+    await Bun.sleep(0)
+    // It started only after the first recorded "a" as owned, so it reverts it.
+    expect(calls[1]).toEqual({ desired: [], owned: ["a"] })
+    releases[1]()
+    expect((await second).removed).toEqual(["a"])
+    expect(getConfig().apps?.claudeDesktop?.mcpServers).toEqual([])
+  })
+
+  test("a failed pass doesn't stop the next one", async () => {
+    writeConfig(brokerConfig([server("a", { clients: ["claude-desktop"] })]))
+    let fail = true
+    const { calls, configurator } = fakeConfigurator(true, () => {
+      if (!fail) return Promise.resolve()
+      fail = false
+      return Promise.reject(new Error("claude crashed"))
+    })
+
+    const first = syncMcpClient(configurator)
+    const second = syncMcpClient(configurator)
+
+    const failure = await first.then(
+      () => null,
+      (error: unknown) => error,
+    )
+    expect(failure).toBeInstanceOf(Error)
+    expect((await second).added).toEqual(["a"])
+    expect(calls).toHaveLength(2)
+  })
+})
+
+describe("releaseMcpClientOffline", () => {
+  test("removes what Maximal owns, synchronously, without reconciling", () => {
+    writeConfig(
+      brokerConfig([server("a", { clients: ["claude-desktop"] })], {
+        apps: { claudeDesktop: { mcpServers: ["a"] } },
+      }),
+    )
+    const { calls, offline, configurator } = fakeConfigurator()
+
+    const result = releaseMcpClientOffline(configurator)
+
+    expect(result.removed).toEqual(["a"])
+    expect(offline).toEqual([["a"]])
+    expect(calls).toEqual([])
+    expect(getConfig().apps?.claudeDesktop?.mcpServers).toEqual([])
+  })
+
+  test("does nothing when Maximal owns nothing there", () => {
+    writeConfig(brokerConfig([server("a", { clients: ["claude-desktop"] })]))
+    const { offline, configurator } = fakeConfigurator()
+
+    releaseMcpClientOffline(configurator)
+
+    expect(offline).toEqual([])
   })
 })
 
