@@ -287,6 +287,122 @@ describe("applyConfigLibraryProfile — profile from an older maximal", () => {
   })
 })
 
+describe("ownership is never inferred loosely", () => {
+  it("doesn't overwrite a user's own profile that happens to be named maximal", () => {
+    seedUserProfile("mine", CORP_GATEWAY)
+    fs.writeFileSync(
+      path.join(libDir(), "_meta.json"),
+      JSON.stringify({
+        appliedId: "mine",
+        entries: [{ id: "mine", name: "maximal" }],
+      }),
+    )
+    const before = snapshotTree()
+
+    expect(applyConfigLibraryProfile(home).conflict).toBe(
+      "foreign-gateway-profile",
+    )
+    revertConfigLibraryProfile(home)
+    expect(snapshotTree()).toEqual(before)
+  })
+
+  it("never overwrites a profile it kept because the user edited it", () => {
+    const { profileId } = applyConfigLibraryProfile(home)
+    const ours = path.join(libDir(), `${profileId}.json`)
+    const edited = { ...readJson(ours), allowedWorkspaceFolders: ["/mine"] }
+    fs.writeFileSync(ours, JSON.stringify(edited))
+    revertConfigLibraryProfile(home)
+
+    const again = applyConfigLibraryProfile(home)
+
+    expect(again.profileId).not.toBe(profileId)
+    expect(readJson(ours)).toEqual(edited)
+  })
+
+  it("treats a localhost 'Default' gateway on another port as the user's", () => {
+    seedUserProfile("litellm", {
+      ...gatewayProfile(home, "http://127.0.0.1:4000"),
+      inferenceGatewayApiKey: "anything",
+    })
+    fs.writeFileSync(
+      path.join(libDir(), "_meta.json"),
+      JSON.stringify({
+        appliedId: "litellm",
+        entries: [{ id: "litellm", name: "Default" }],
+      }),
+    )
+    const before = snapshotTree()
+
+    expect(applyConfigLibraryProfile(home).conflict).toBe(
+      "foreign-gateway-profile",
+    )
+    revertConfigLibraryProfile(home)
+    expect(snapshotTree()).toEqual(before)
+  })
+
+  it("refuses to write when _meta.json is unreadable, keeping it as is", () => {
+    fs.mkdirSync(libDir(), { recursive: true })
+    const metaPath = path.join(libDir(), "_meta.json")
+    fs.writeFileSync(metaPath, "{ not json")
+
+    expect(() => applyConfigLibraryProfile(home)).toThrow(/_meta\.json/)
+    expect(fs.readFileSync(metaPath, "utf8")).toBe("{ not json")
+  })
+
+  it("refuses to switch away from an applied profile it can't read", () => {
+    seedUserProfile("broken", {})
+    fs.writeFileSync(path.join(libDir(), "broken.json"), "{ not json")
+    expect(applyConfigLibraryProfile(home).conflict).toBe(
+      "foreign-gateway-profile",
+    )
+  })
+
+  it("keeps _meta.json fields it doesn't know about", () => {
+    fs.mkdirSync(libDir(), { recursive: true })
+    fs.writeFileSync(
+      path.join(libDir(), "_meta.json"),
+      JSON.stringify({ appliedId: "", entries: [], futureField: 7 }),
+    )
+    applyConfigLibraryProfile(home)
+    expect(readJson(path.join(libDir(), "_meta.json")).futureField).toBe(7)
+  })
+
+  it("survives a malformed state file without half-reverting", () => {
+    applyConfigLibraryProfile(home)
+    fs.writeFileSync(
+      path.join(getClaude3pDir(home), "maximal-routing.json"),
+      "{}",
+    )
+    expect(() => revertConfigLibraryProfile(home)).not.toThrow()
+    expect(readJson(path.join(libDir(), "_meta.json")).appliedId).toBe("")
+  })
+
+  it("never touches a path outside the library through an entry id", () => {
+    fs.mkdirSync(libDir(), { recursive: true })
+    const outside = path.join(getClaude3pDir(home), "outside.json")
+    fs.writeFileSync(
+      outside,
+      JSON.stringify({
+        ...gatewayProfile(home),
+        inferenceGatewayApiKey: "anything",
+      }),
+    )
+    fs.writeFileSync(
+      path.join(libDir(), "_meta.json"),
+      JSON.stringify({
+        appliedId: "../outside",
+        entries: [{ id: "../outside", name: "maximal" }],
+      }),
+    )
+
+    revertConfigLibraryProfile(home)
+    applyConfigLibraryProfile(home)
+
+    expect(fs.existsSync(outside)).toBe(true)
+    expect(readJson(outside).inferenceGatewayApiKey).toBe("anything")
+  })
+})
+
 describe("isConfigLibraryApplied", () => {
   it("is false before apply, true after, false after revert", () => {
     expect(isConfigLibraryApplied(home)).toBe(false)
