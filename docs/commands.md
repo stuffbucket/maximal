@@ -91,6 +91,10 @@ these commands; it is an externally configured stdio endpoint.
 
 ### Using a brokered endpoint
 
+For Linux installation, Work IQ sign-in, and session-keyring access, see
+[Work IQ on Linux](linux-workiq.md). Pi has a separate
+[connection guide](pi-workiq.md).
+
 Maximal looks for servers it knows (Work IQ, for now) and offers the ones it
 finds to add. Anything else can be added from the CLI with its full command
 path, or written under `mcpBroker.servers` in `config.json`. An endpoint may set

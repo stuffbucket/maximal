@@ -12,9 +12,14 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-import { listMcpCatalog, refreshCatalogCommands } from "~/apps/mcp"
+import {
+  catalogServer,
+  listMcpCatalog,
+  refreshCatalogCommands,
+} from "~/apps/mcp"
 import { getConfig, writeConfig } from "~/lib/config/config"
 import { findCatalogEntry } from "~/lib/mcp-broker/catalog"
+import { resolveBrokerConfiguration } from "~/lib/mcp-broker/configuration"
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "mcp-catalog-"))
 let counter = 0
@@ -24,9 +29,13 @@ function tempDir(): string {
   return dir
 }
 
-/** Lay down an `@microsoft/workiq` package with its macOS arm64 executable. */
-function workiqPackage(packageDir: string, version: string): string {
-  const bin = path.join(packageDir, "bin", "osx-arm64")
+/** Lay down an `@microsoft/workiq` package with a fixture executable. */
+function workiqPackage(
+  packageDir: string,
+  version: string,
+  platformFolder = "osx-arm64",
+): string {
+  const bin = path.join(packageDir, "bin", platformFolder)
   fs.mkdirSync(bin, { recursive: true })
   fs.writeFileSync(
     path.join(packageDir, "package.json"),
@@ -144,6 +153,75 @@ describe("Work IQ locate", () => {
       catalog: "workiq",
       transport: { type: "stdio", command: "/abs/workiq", args: ["mcp"] },
       classification: { ownership: "exclusive" },
+    })
+  })
+})
+
+describe("Work IQ Linux keyring environment", () => {
+  const install = { command: "/abs/workiq", version: "1.0.1" }
+  const sessionBus = "unix:path=/fixture/user-bus"
+
+  test("inherits the session bus through Linux catalog detection and resolution", () => {
+    const prefix = tempDir()
+    workiqPackage(
+      path.join(prefix, "lib", "node_modules", "@microsoft", "workiq"),
+      "1.0.1",
+      "linux-x64",
+    )
+    const server = catalogServer("workiq", {
+      ...base,
+      platform: "linux",
+      arch: "x64",
+      npmPrefix: prefix,
+      miseDataDir: tempDir(),
+    })
+    expect(server.environment).toEqual({
+      inherit: ["HOME", "DBUS_SESSION_BUS_ADDRESS"],
+    })
+    expect(server.enabled).toBe(false)
+    const { endpoints } = resolveBrokerConfiguration(
+      { servers: [{ ...server, enabled: true }] },
+      {
+        HOME: "/fixture/home",
+        DBUS_SESSION_BUS_ADDRESS: sessionBus,
+        DISPLAY: ":fixture",
+        GITHUB_TOKEN: "must-not-leak",
+      },
+    )
+    expect(endpoints[0]?.environment).toEqual({
+      HOME: "/fixture/home",
+      DBUS_SESSION_BUS_ADDRESS: sessionBus,
+    })
+  })
+
+  test("omits an unavailable session bus rather than inventing its value", () => {
+    const server = workiq.template(install, { platform: "linux" })
+    const { endpoints } = resolveBrokerConfiguration(
+      { servers: [{ ...server, enabled: true }] },
+      { HOME: "/fixture/home" },
+    )
+    expect(endpoints[0]?.environment).toEqual({ HOME: "/fixture/home" })
+  })
+
+  test.each(["darwin", "win32"] as const)(
+    "keeps the existing environment policy on %s",
+    (platform) => {
+      const server = workiq.template(install, { platform })
+      expect(server.environment).toEqual({ inherit: ["HOME"] })
+      const { endpoints } = resolveBrokerConfiguration(
+        { servers: [{ ...server, enabled: true }] },
+        { HOME: "/fixture/home", DBUS_SESSION_BUS_ADDRESS: sessionBus },
+      )
+      expect(endpoints[0]?.environment).toEqual({ HOME: "/fixture/home" })
+    },
+  )
+
+  test("defaults to the running platform without detection options", () => {
+    expect(workiq.template(install).environment).toEqual({
+      inherit:
+        process.platform === "linux" ?
+          ["HOME", "DBUS_SESSION_BUS_ADDRESS"]
+        : ["HOME"],
     })
   })
 })
