@@ -5,28 +5,66 @@ import {
   type SubagentMarker,
 } from "~/lib/runtime-state/subagent"
 
+export interface GatewaySubagentHints {
+  requestClass?: string
+  agentType?: string
+  sessionId?: string
+}
+
+const NON_INTERACTIVE_REQUEST_CLASSES = new Set([
+  "subagent",
+  "background",
+  "speculative",
+  "side_question",
+])
+
 export const parseSubagentMarkerFromFirstUser = (
   payload: AnthropicMessagesPayload,
+  hints?: GatewaySubagentHints,
 ): SubagentMarker | null => {
   const firstUserMessage = payload.messages.find(
     (msg) => msg.role === "user" && Array.isArray(msg.content),
   )
-  if (!firstUserMessage || !Array.isArray(firstUserMessage.content)) {
+  if (firstUserMessage && Array.isArray(firstUserMessage.content)) {
+    for (const block of firstUserMessage.content) {
+      if (block.type !== "text") {
+        continue
+      }
+
+      const marker = parseSubagentMarkerFromSystemReminder(block.text)
+      if (marker) {
+        return marker
+      }
+    }
+  }
+
+  return parseSubagentMarkerFromHints(hints)
+}
+
+const parseSubagentMarkerFromHints = (
+  hints?: GatewaySubagentHints,
+): SubagentMarker | null => {
+  if (!hints) {
+    return null
+  }
+  const requestClass = hints.requestClass?.trim().toLowerCase()
+  if (requestClass === "interactive") {
+    return null
+  }
+  const agentType = hints.agentType?.trim()
+  const isNonInteractive =
+    Boolean(requestClass && NON_INTERACTIVE_REQUEST_CLASSES.has(requestClass))
+    || (!requestClass && Boolean(agentType))
+
+  if (!isNonInteractive) {
     return null
   }
 
-  for (const block of firstUserMessage.content) {
-    if (block.type !== "text") {
-      continue
-    }
-
-    const marker = parseSubagentMarkerFromSystemReminder(block.text)
-    if (marker) {
-      return marker
-    }
+  return {
+    session_id: hints.sessionId ?? "gateway-hint",
+    agent_id: requestClass ?? "subagent",
+    agent_type: agentType || requestClass || "subagent",
   }
-
-  return null
 }
 
 const parseSubagentMarkerFromSystemReminder = (

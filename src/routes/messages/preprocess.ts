@@ -92,9 +92,26 @@ const isCompactAutoContinueMessage = (
   )
 }
 
+const COMPACTION_HINT_VALUES = new Set([
+  "manual",
+  "auto",
+  "reactive",
+  "snip",
+  "background",
+])
+
 export const getCompactType = (
   anthropicPayload: AnthropicMessagesPayload,
+  compactionHeader?: string,
 ): CompactType => {
+  const normalizedCompactionHint = compactionHeader?.trim().toLowerCase()
+  if (
+    normalizedCompactionHint
+    && COMPACTION_HINT_VALUES.has(normalizedCompactionHint)
+  ) {
+    return COMPACT_REQUEST
+  }
+
   const lastMessage = anthropicPayload.messages.at(-1)
   if (lastMessage && isCompactMessage(lastMessage)) {
     return COMPACT_REQUEST
