@@ -1,3 +1,7 @@
+import {
+  type AnthropicErrorType,
+  contextOverflowMessage,
+} from "~/lib/errors/anthropic-error"
 import { type AnthropicStreamEventData } from "~/lib/models/anthropic-types"
 import {
   type ResponseCompletedEvent,
@@ -492,7 +496,7 @@ const handleResponseFailed = (
   const message =
     response.error?.message ?? "The response failed due to an unknown error."
 
-  events.push(buildErrorEvent(message))
+  events.push(buildUpstreamErrorEvent(message))
   state.messageCompleted = true
 
   return events
@@ -508,7 +512,7 @@ const handleErrorEvent = (
     : "An unexpected error occurred during streaming."
 
   state.messageCompleted = true
-  return [buildErrorEvent(message)]
+  return [buildUpstreamErrorEvent(message)]
 }
 
 const handleFunctionCallArgumentsValidationError = (
@@ -653,13 +657,26 @@ const closeAllOpenBlocks = (
   state.functionCallStateByOutputIndex.clear()
 }
 
-export const buildErrorEvent = (message: string): AnthropicStreamEventData => ({
+export const buildErrorEvent = (
+  message: string,
+  type: AnthropicErrorType = "api_error",
+): AnthropicStreamEventData => ({
   type: "error",
   error: {
-    type: "api_error",
+    type,
     message,
   },
 })
+
+/** An upstream-reported failure. Overflows are reworded so Claude Code
+ *  compacts; anything else stays `api_error` — the event carries no status
+ *  to tell a transient failure from a permanent one. */
+const buildUpstreamErrorEvent = (message: string): AnthropicStreamEventData => {
+  const overflow = contextOverflowMessage(message)
+  return overflow === null ?
+      buildErrorEvent(message)
+    : buildErrorEvent(overflow, "invalid_request_error")
+}
 
 const getBlockKey = (outputIndex: number, contentIndex: number): string =>
   `${outputIndex}:${contentIndex}`

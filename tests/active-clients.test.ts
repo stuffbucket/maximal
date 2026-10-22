@@ -107,6 +107,21 @@ describe("humanizeUserAgent", () => {
     expect(humanizeUserAgent("HTTPie/3.2.1")).toBe("HTTPie")
   })
 
+  test("names Claude's agent clients from the claude-cli user agent", () => {
+    expect(humanizeUserAgent("claude-cli/2.1.278 (external, cli)")).toBe(
+      "Claude Code",
+    )
+    expect(
+      humanizeUserAgent("claude-cli/2.1.278 (external, claude-desktop)"),
+    ).toBe("Claude Desktop")
+    expect(
+      humanizeUserAgent("claude-cli/2.1.278 (external, claude-desktop-3p)"),
+    ).toBe("Claude Desktop")
+    expect(
+      humanizeUserAgent("claude-cli/2.1.278 (external, local-agent)"),
+    ).toBe("Claude Desktop (Cowork)")
+  })
+
   test("fallback uses first token before '/' or whitespace", () => {
     expect(humanizeUserAgent("MyCustomTool/1.2.3")).toBe("MyCustomTool")
     expect(humanizeUserAgent("SomeAgent extra info")).toBe("SomeAgent")
