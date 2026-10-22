@@ -1,17 +1,12 @@
+import { t } from "../../../i18n";
+
 import { AppCard } from "./AppCard";
 import { useApps } from "./useApps";
 import { ProblemCallout } from "../../components/ProblemCallout";
 import { Stack } from "../../components/Stack";
 
 export function AppsPanel(): JSX.Element {
-  const {
-    apps,
-    isLoading,
-    problem,
-    refresh,
-    toggleClaudeCode,
-    toggleClaudeDesktop,
-  } = useApps();
+  const { apps, isLoading, problem, refresh, toggleApp } = useApps();
 
   return (
     <Stack proximity="region" className="apps-panel" aria-busy={isLoading}>
@@ -24,7 +19,7 @@ export function AppsPanel(): JSX.Element {
       )}
 
       {isLoading && apps.length === 0 ? (
-        <p className="state__caption">Looking for installed apps…</p>
+        <p className="state__caption">{t("apps-loading")}</p>
       ) : (
         <Stack proximity="section" className="apps-list">
           {apps.map((app) => (
@@ -32,11 +27,7 @@ export function AppsPanel(): JSX.Element {
               key={app.id}
               app={app}
               onRescan={refresh}
-              onToggle={
-                app.id === "claude-desktop"
-                  ? (enabled) => toggleClaudeDesktop(enabled)
-                  : (enabled) => toggleClaudeCode(enabled)
-              }
+              onToggle={(enabled) => toggleApp(app.id, enabled)}
             />
           ))}
         </Stack>

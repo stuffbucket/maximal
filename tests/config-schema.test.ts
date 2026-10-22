@@ -60,6 +60,24 @@ describe("validateAppConfig", () => {
     expect(thrown?.issues[0].path).toBe("useMessagesApi")
   })
 
+  it("accepts and validates Codex routing intent", () => {
+    expect(validateAppConfig({ apps: { codex: { enabled: true } } })).toEqual({
+      apps: { codex: { enabled: true } },
+    })
+
+    expect(() =>
+      validateAppConfig({ apps: { codex: { enabled: "yes" } } }),
+    ).toThrow(ConfigValidationError)
+    try {
+      validateAppConfig({ apps: { codex: { enabled: "yes" } } })
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConfigValidationError)
+      if (error instanceof ConfigValidationError) {
+        expect(error.issues[0].path).toBe("apps.codex.enabled")
+      }
+    }
+  })
+
   it("accepts the autoRecoverAccount opt-in flag (boolean)", () => {
     expect(validateAppConfig({ autoRecoverAccount: true })).toEqual({
       autoRecoverAccount: true,
@@ -88,6 +106,87 @@ describe("validateAppConfig", () => {
     }
     expect(thrown).not.toBeNull()
     expect(thrown?.issues[0].path).toBe("modelReasoningEfforts.gpt-5")
+  })
+
+  it("accepts ordered exact, glob, and regex model mappings", () => {
+    const modelMappings = [
+      {
+        match: { type: "exact" as const, value: "codex-auto-review" },
+        target: "gpt-5.6-luna",
+      },
+      {
+        match: { type: "glob" as const, value: "review-*" },
+        target: "gpt-5.6-luna",
+      },
+      {
+        match: {
+          type: "regex" as const,
+          value: String.raw`^review-\\d+$`,
+          flags: "u" as const,
+        },
+        target: "gpt-5.6-luna",
+      },
+    ]
+
+    expect(validateAppConfig({ modelMappings })).toEqual({ modelMappings })
+  })
+
+  it("rejects an invalid model-mapping regex at its config path", () => {
+    let thrown: ConfigValidationError | null = null
+    try {
+      validateAppConfig({
+        modelMappings: [
+          {
+            match: { type: "regex", value: "[" },
+            target: "gpt-5.6-luna",
+          },
+        ],
+      })
+    } catch (error) {
+      if (error instanceof ConfigValidationError) thrown = error
+    }
+
+    expect(thrown?.issues[0]?.path).toBe("modelMappings.0.match.value")
+  })
+
+  it("rejects unsupported model-mapping regex flags", () => {
+    let thrown: ConfigValidationError | null = null
+    try {
+      validateAppConfig({
+        modelMappings: [
+          {
+            match: { type: "regex", value: "^review-", flags: "i" },
+            target: "gpt-5.6-luna",
+          },
+        ],
+      })
+    } catch (error) {
+      if (error instanceof ConfigValidationError) thrown = error
+    }
+
+    expect(thrown?.issues[0]?.path).toBe("modelMappings.0.match.flags")
+  })
+
+  it.each([
+    [
+      "match value",
+      { match: { type: "exact", value: "" }, target: "model" },
+      "modelMappings.0.match.value",
+    ],
+    [
+      "target",
+      { match: { type: "exact", value: "alias" }, target: "" },
+      "modelMappings.0.target",
+    ],
+  ])("rejects an empty model-mapping %s", (_label, mapping, path) => {
+    let thrown: ConfigValidationError | null = null
+    try {
+      validateAppConfig({ modelMappings: [mapping] })
+    } catch (error) {
+      if (error instanceof ConfigValidationError) thrown = error
+    }
+
+    expect(thrown?.issues[0]?.path).toBe(path)
   })
 
   it("keeps unknown top-level keys (passthrough)", () => {

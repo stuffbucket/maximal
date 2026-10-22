@@ -47,6 +47,43 @@ const ReasoningEffortSchema = z.enum([
   "xhigh",
 ])
 
+const ExactModelMatcherSchema = z.object({
+  type: z.literal("exact"),
+  value: z.string().min(1),
+})
+
+const GlobModelMatcherSchema = z.object({
+  type: z.literal("glob"),
+  value: z.string().min(1),
+})
+
+const RegexModelMatcherSchema = z
+  .object({
+    type: z.literal("regex"),
+    value: z.string().min(1),
+    flags: z.enum(["", "u"]).optional(),
+  })
+  .superRefine((matcher, context) => {
+    try {
+      new RegExp(matcher.value, matcher.flags)
+    } catch {
+      context.addIssue({
+        code: "custom",
+        path: ["value"],
+        message: "Invalid regular expression",
+      })
+    }
+  })
+
+const ModelMappingRuleSchema = z.object({
+  match: z.discriminatedUnion("type", [
+    ExactModelMatcherSchema,
+    GlobModelMatcherSchema,
+    RegexModelMatcherSchema,
+  ]),
+  target: z.string().min(1),
+})
+
 const PositiveDurationSchema = z.number().int().min(100).max(3_600_000)
 const EnvironmentNameSchema = z.string().regex(/^[A-Za-z_]\w*$/u)
 const SecretReferenceSchema = z
@@ -338,6 +375,7 @@ export const AppConfigSchema = z
     modelReasoningEfforts: z
       .record(z.string(), ReasoningEffortSchema)
       .optional(),
+    modelMappings: z.array(ModelMappingRuleSchema).optional(),
     useFunctionApplyPatch: z.boolean().optional(),
     useMessagesApi: z.boolean().optional(),
     anthropicApiKey: z.string().optional(),
@@ -349,6 +387,11 @@ export const AppConfigSchema = z
     editorVersion: z.string().optional(),
     apps: z
       .object({
+        codex: z
+          .object({
+            enabled: z.boolean().optional(),
+          })
+          .optional(),
         claudeCode: z
           .object({
             enabled: z.boolean().optional(),

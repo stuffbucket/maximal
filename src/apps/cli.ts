@@ -92,10 +92,12 @@ async function enableApp(app: ClientApp): Promise<void> {
   }
 }
 
-async function disableApp(app: ClientApp): Promise<void> {
+export async function disableApp(app: ClientApp): Promise<void> {
   const result = await app.disable()
   resetWorkingNotice(app.id)
-  if (result.success) {
+  if (result.conflict) {
+    consola.warn(`${app.name} requires manual cleanup: ${result.conflict}.`)
+  } else if (result.success) {
     consola.success(`Removed proxy routing for ${app.name}.`)
   } else {
     consola.info(`${app.name} wasn't routed by us; nothing to do.`)

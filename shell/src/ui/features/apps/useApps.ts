@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 
+import { t } from "../../../i18n";
 import { apiCall } from "../../../proxy/client";
 import { type Problem, describeProblem, withRetry } from "../../problems";
-import type { AppEntry } from "../../../proxy/client";
+import type { AppEntry, AppId } from "../../../proxy/client";
 import { humanize } from "../api-clients/humanize";
 
 /**
@@ -28,9 +29,28 @@ interface UseApps {
    *  change failed. Per-row messages travel on the mutation result. */
   problem: Problem | null;
   refresh: () => Promise<void>;
-  toggleClaudeCode: (enabled: boolean) => Promise<MutationResult>;
-  toggleClaudeDesktop: (enabled: boolean) => Promise<MutationResult>;
+  toggleApp: (appId: AppId, enabled: boolean) => Promise<MutationResult>;
 }
+
+type ToggleableAppId = Exclude<AppId, "copilot-cli">;
+
+const TOGGLE_ENDPOINTS = {
+  "claude-code": {
+    kind: "claude-code-toggle",
+    path: "/settings/api/apps/claude-code/toggle",
+  },
+  "claude-desktop": {
+    kind: "claude-desktop-toggle",
+    path: "/settings/api/apps/claude-desktop/toggle",
+  },
+  codex: {
+    kind: "codex-toggle",
+    path: "/settings/api/apps/codex/toggle",
+  },
+} as const satisfies Record<
+  ToggleableAppId,
+  { kind: string; path: string }
+>;
 
 function sortAlpha(apps: Array<AppEntry>): Array<AppEntry> {
   return [...apps].sort((a, b) => a.name.localeCompare(b.name));
@@ -78,32 +98,15 @@ export function useApps(): UseApps {
     );
   }, []);
 
-  const toggleClaudeCode = useCallback<UseApps["toggleClaudeCode"]>(
-    async (enabled) => {
-      const result = await apiCall({
-        kind: "claude-code-toggle",
-        method: "POST",
-        path: "/settings/api/apps/claude-code/toggle",
-        body: { enabled },
-      });
-      if (!result.ok) {
-        const message = humanize(result.error);
-        setProblem(describeProblem(result, { subject: "your apps", doing: "save" }));
-        return { ok: false, error: message };
+  const toggleApp = useCallback<UseApps["toggleApp"]>(
+    async (appId, enabled) => {
+      if (appId === "copilot-cli") {
+        return { ok: false, error: t("apps-coming-soon") };
       }
-      setProblem(null);
-      splice(result.data);
-      return { ok: true };
-    },
-    [splice],
-  );
-
-  const toggleClaudeDesktop = useCallback<UseApps["toggleClaudeDesktop"]>(
-    async (enabled) => {
+      const endpoint = TOGGLE_ENDPOINTS[appId];
       const result = await apiCall({
-        kind: "claude-desktop-toggle",
+        ...endpoint,
         method: "POST",
-        path: "/settings/api/apps/claude-desktop/toggle",
         body: { enabled },
       });
       if (!result.ok) {
@@ -123,7 +126,6 @@ export function useApps(): UseApps {
     isLoading,
     problem,
     refresh,
-    toggleClaudeCode,
-    toggleClaudeDesktop,
+    toggleApp,
   };
 }

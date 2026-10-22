@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
 import { Hono } from "hono"
 
+import { getConfig, writeConfig } from "../src/lib/config/config"
 import { state } from "../src/lib/runtime-state/state"
 import { completionRoutes } from "../src/routes/chat-completions/route"
 
 const originalFetch = globalThis.fetch
+const originalConfig = getConfig()
 const originalState = {
   accountType: state.accountType,
   copilotToken: state.copilotToken,
@@ -57,6 +59,24 @@ const createModels = () => ({
       vendor: "openai",
       version: "1",
     },
+    {
+      capabilities: {
+        family: "gpt",
+        limits: {},
+        object: "model_capabilities" as const,
+        supports: {},
+        tokenizer: "o200k_base",
+        type: "chat" as const,
+      },
+      id: "gpt-test",
+      model_picker_enabled: true,
+      name: "gpt-test",
+      object: "model" as const,
+      preview: false,
+      supported_endpoints: ["/chat/completions"],
+      vendor: "openai",
+      version: "1",
+    },
   ],
 })
 
@@ -67,6 +87,7 @@ const createApp = () => {
 }
 
 beforeEach(() => {
+  writeConfig({ modelMappings: [] })
   state.accountType = "individual"
   state.copilotToken = "test-token"
   state.manualApprove = false
@@ -92,10 +113,40 @@ afterEach(() => {
   state.rateLimitSeconds = originalState.rateLimitSeconds
   state.lastRequestTimestamp = originalState.lastRequestTimestamp
   state.models = originalState.models
+  writeConfig(originalConfig)
   ;(globalThis as unknown as { fetch: typeof fetch }).fetch = originalFetch
 })
 
 describe("chat completions handler", () => {
+  test("forwards a mapped model from the live catalog", async () => {
+    writeConfig({
+      modelMappings: [
+        {
+          match: { type: "exact", value: "chat-alias" },
+          target: "gpt-test",
+        },
+      ],
+    })
+
+    const response = await createApp().request("/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "chat-alias",
+        messages: [{ role: "user", content: "hello" }],
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [, init] = fetchMock.mock.calls[0] as unknown as [
+      unknown,
+      RequestInit,
+    ]
+    const forwarded = JSON.parse(init.body as string) as { model: string }
+    expect(forwarded.model).toBe("gpt-test")
+  })
+
   test("rejects gpt-5.4 requests with invalid request error", async () => {
     const app = createApp()
     const response = await app.request("/v1/chat/completions", {

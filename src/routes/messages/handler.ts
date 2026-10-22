@@ -2,7 +2,7 @@ import type { Context } from "hono"
 
 import type { Model } from "~/services/copilot/get-models"
 
-import { isMessagesApiEnabled } from "~/lib/config/config"
+import { getConfig, isMessagesApiEnabled } from "~/lib/config/config"
 import { awaitApproval } from "~/lib/http/approval"
 import { checkRateLimit } from "~/lib/http/rate-limit"
 import {
@@ -11,6 +11,10 @@ import {
 } from "~/lib/models/anthropic-id-rewrite"
 import { type AnthropicMessagesPayload } from "~/lib/models/anthropic-types"
 import { COMPACT_REQUEST } from "~/lib/models/compact"
+import {
+  modelMappingErrorBody,
+  resolveModelMapping,
+} from "~/lib/models/model-mapping"
 import { findEndpointModel } from "~/lib/models/models"
 import {
   createHandlerLogger,
@@ -46,17 +50,17 @@ const logger = createHandlerLogger("messages-handler")
 // Desktop's normalizer) back to Copilot's original dot-form, then route
 // to the variant SKU when the inbound request set effort or requested
 // the 1M-context beta.
-function resolveCopilotModel(
+function resolveCopilotVariant(
   c: Context,
   payload: AnthropicMessagesPayload,
+  model: string,
 ): string {
-  const reversed = reverseId(payload.model)
   const longContext =
     c.req.header("anthropic-beta")?.includes("context-1m-2025-08-07") ?? false
   return pickCopilotVariantId(
-    reversed,
+    model,
     { effort: payload.output_config?.effort, longContext },
-    state.models?.data.map((m) => m.id) ?? [],
+    state.models?.data.map((candidate) => candidate.id) ?? [],
   )
 }
 
@@ -76,6 +80,27 @@ function resolveRequestId(
   return generateRequestIdFromPayload(payload, sessionId)
 }
 
+/**
+ * Apply a configured model mapping, then pick the Copilot variant. Returns
+ * the 400 to send when a mapping targets a model that isn't available.
+ */
+function applyModelMapping(
+  c: Context,
+  payload: AnthropicMessagesPayload,
+): Response | null {
+  const mapping = resolveModelMapping({
+    requestedModel: reverseId(payload.model),
+    rules: getConfig().modelMappings ?? [],
+    models: state.models?.data ?? [],
+    endpoint: null,
+  })
+  if (mapping.status === "invalid-target") {
+    return c.json(modelMappingErrorBody(mapping), 400)
+  }
+  payload.model = resolveCopilotVariant(c, payload, mapping.resolvedModel)
+  return null
+}
+
 export async function handleCompletion(c: Context) {
   await checkRateLimit(state)
 
@@ -83,7 +108,8 @@ export async function handleCompletion(c: Context) {
   stripUnsupportedTopLevelAnthropicFields(anthropicPayload)
   debugJson(logger, "Anthropic request payload:", anthropicPayload)
 
-  anthropicPayload.model = resolveCopilotModel(c, anthropicPayload)
+  const mappingError = applyModelMapping(c, anthropicPayload)
+  if (mappingError) return mappingError
 
   sanitizeIdeTools(anthropicPayload)
   stripUnsupportedClaudeCodeTools(anthropicPayload, c.req.header("user-agent"))

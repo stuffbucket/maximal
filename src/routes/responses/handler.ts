@@ -11,6 +11,10 @@ import { awaitApproval } from "~/lib/http/approval"
 import { checkRateLimit } from "~/lib/http/rate-limit"
 import { reverseId } from "~/lib/models/anthropic-id-rewrite"
 import {
+  modelMappingErrorBody,
+  resolveModelMapping,
+} from "~/lib/models/model-mapping"
+import {
   createHandlerLogger,
   debugJson,
   debugJsonTail,
@@ -61,11 +65,23 @@ const logger = createHandlerLogger("responses-handler")
 
 const RESPONSES_ENDPOINT = "/responses"
 
+// Mapping validation adds one guarded branch to this protocol translation flow.
+// eslint-disable-next-line complexity, max-lines-per-function
 export const handleResponses = async (c: Context) => {
   await checkRateLimit(state)
 
   const payload = await c.req.json<ResponsesPayload>()
   payload.model = reverseId(payload.model)
+  const mapping = resolveModelMapping({
+    requestedModel: payload.model,
+    rules: getConfig().modelMappings ?? [],
+    models: state.models?.data ?? [],
+    endpoint: RESPONSES_ENDPOINT,
+  })
+  if (mapping.status === "invalid-target") {
+    return c.json(modelMappingErrorBody(mapping), 400)
+  }
+  payload.model = mapping.resolvedModel
   debugJson(logger, "Responses request payload:", payload)
 
   // not support subagent marker for now , set sessionId = getUUID(requestId)

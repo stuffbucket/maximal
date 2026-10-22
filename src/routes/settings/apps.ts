@@ -14,6 +14,7 @@ import {
   AppEntry,
   AppsListResponse,
   ClaudeCodeToggleRequest,
+  CodexToggleRequest,
   ClaudeDesktopToggleRequest,
   type AppEntry as AppEntryT,
 } from "~/lib/config/settings-types"
@@ -84,6 +85,35 @@ appsRoutes.post("/claude-code/toggle", async (c) => {
     await app.disable()
     resetWorkingNotice(app.id)
     return jsonApp(c, await app.getDetails())
+  } catch (error) {
+    return forwardError(c, error)
+  }
+})
+
+appsRoutes.post("/codex/toggle", async (c) => {
+  try {
+    const body: unknown = await c.req.json().catch(() => null)
+    const parsed = CodexToggleRequest.safeParse(body)
+    if (!parsed.success) {
+      throw httpError("Expected { enabled: boolean }", 400)
+    }
+
+    const app = getApp("codex")
+    if (!app) throw httpError("App not found", 404)
+
+    if (parsed.data.enabled) {
+      if (!(await app.detect())) {
+        throw httpError(
+          "No Codex install detected. Install it first, then enable routing.",
+          409,
+        )
+      }
+      const result = await app.enable()
+      return jsonApp(c, await app.getDetails(result.conflict ?? null))
+    }
+
+    const result = await app.disable()
+    return jsonApp(c, await app.getDetails(result.conflict ?? null))
   } catch (error) {
     return forwardError(c, error)
   }

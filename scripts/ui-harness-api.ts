@@ -133,7 +133,7 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
     }
 
     // --- apps toggles (flip enabled, echo the fresh entry) ---
-    const appToggle = /^\/settings\/api\/apps\/(claude-code|claude-desktop)\/toggle$/.exec(path)
+    const appToggle = /^\/settings\/api\/apps\/(claude-code|claude-desktop|codex)\/toggle$/.exec(path)
     if (appToggle && method === "POST") {
       const app = state.apps.apps.find((a) => a.id === appToggle[1])
       if (!app) return json({ error: { message: "no such app" } }, 404)

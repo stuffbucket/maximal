@@ -26,16 +26,39 @@ export function generateApiKey(): string {
   return `mxl_${randomBytes(24).toString("base64url")}`
 }
 
+export interface ApiKeyHelperInvocation {
+  command: string
+  args: Array<string>
+}
+
+export function apiKeyHelperInvocation(
+  label?: string,
+  execPath: string = process.execPath,
+  entryPath: string | undefined = process.argv[1],
+): ApiKeyHelperInvocation {
+  const trimmed = label?.trim()
+  const runtimeArgs =
+    (
+      /[/\\]bun(?:\.exe)?$/iu.test(execPath)
+      && entryPath
+      && /(?:^|[/\\])src[/\\]main\.ts$/u.test(entryPath)
+    ) ?
+      [entryPath]
+    : []
+  return {
+    command: execPath,
+    args: [...runtimeArgs, HELPER_SUBCOMMAND, ...(trimmed ? [trimmed] : [])],
+  }
+}
+
 /** Build the binary-backed helper form written before v0.4.42. */
 export function apiKeyHelperCommand(
   label?: string,
   execPath: string = process.execPath,
 ): string {
-  const trimmed = label?.trim()
-  const bin = `"${execPath}"`
-  return trimmed ?
-      `${bin} ${HELPER_SUBCOMMAND} ${trimmed}`
-    : `${bin} ${HELPER_SUBCOMMAND}`
+  const invocation = apiKeyHelperInvocation(label, execPath)
+  const bin = `"${invocation.command}"`
+  return `${bin} ${invocation.args.join(" ")}`
 }
 
 export function echoApiKeyHelperCommand(

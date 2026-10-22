@@ -2,9 +2,14 @@ import type { Context } from "hono"
 
 import { streamSSE, type SSEMessage } from "hono/streaming"
 
+import { getConfig } from "~/lib/config/config"
 import { awaitApproval } from "~/lib/http/approval"
 import { checkRateLimit } from "~/lib/http/rate-limit"
 import { reverseId } from "~/lib/models/anthropic-id-rewrite"
+import {
+  modelMappingErrorBody,
+  resolveModelMapping,
+} from "~/lib/models/model-mapping"
 import {
   createHandlerLogger,
   debugJson,
@@ -31,11 +36,23 @@ import {
 
 const logger = createHandlerLogger("chat-completions-handler")
 
+const CHAT_COMPLETIONS_ENDPOINT = "/chat/completions"
+
 export async function handleCompletion(c: Context) {
   await checkRateLimit(state)
 
   let payload = await c.req.json<ChatCompletionsPayload>()
   payload.model = reverseId(payload.model)
+  const mapping = resolveModelMapping({
+    requestedModel: payload.model,
+    rules: getConfig().modelMappings ?? [],
+    models: state.models?.data ?? [],
+    endpoint: CHAT_COMPLETIONS_ENDPOINT,
+  })
+  if (mapping.status === "invalid-target") {
+    return c.json(modelMappingErrorBody(mapping), 400)
+  }
+  payload.model = mapping.resolvedModel
   debugJsonTail(logger, "Request payload:", { value: payload, tailLength: 400 })
 
   // Find the selected model

@@ -124,21 +124,19 @@ export async function runServer(options: RunServerOptions): Promise<void> {
 
   // Crash-detection: did the previous run exit ungracefully (skipped
   // initiateShutdown AND the `exit` safety net — i.e. SIGKILL, power
-  // loss, OS-level kill)? If so AND the Claude Code base URL is still
-  // ours from before, the user has likely been hitting "connection
-  // refused" in `claude` since then. We can't auto-recover the
-  // inter-session window (an external watchdog would be needed), but
-  // we can at least surface the cause so the symptom isn't mysterious.
-  // The runAppBootHooks() call below will re-apply the URL
-  // for the new session; that ends the broken-window.
+  // loss, OS-level kill)? If so, a configured client may still point at
+  // the stopped proxy and produce connection-refused errors. We can't
+  // auto-recover the inter-session window (an external watchdog would
+  // be needed), but we can surface the cause; runAppBootHooks() below
+  // re-applies intended routing for the new session.
   const staleSession = staleSessionMarkerPresent()
   if (staleSession) {
     consola.warn(
       "Previous maximal session ended ungracefully (likely a crash, "
-        + "force-quit, or system shutdown). If `claude` produced "
-        + "connection-refused errors since then, that was why — your "
-        + "Claude Code config still pointed at this proxy. Routing is "
-        + "being re-applied now and will work again.",
+        + "force-quit, or system shutdown). If a configured client produced "
+        + "connection-refused errors since then, that was why — its local "
+        + "config may still point at this proxy. Intended routing is being "
+        + "re-applied now.",
     )
   }
 
@@ -223,8 +221,9 @@ function afterListening(
 
   // Now that we're actually listening, re-apply each client's routing if the
   // user left it on (Claude Code's base URL, Claude Desktop's gateway
-  // profile). Self-heals config a prior crash/force-kill stranded over a dead
-  // proxy and picks up this run's port. Ownership-guarded; no-op when off.
+  // profile, Codex's provider block). Self-heals config a prior
+  // crash/force-kill stranded over a dead proxy and picks up this run's port.
+  // Ownership-guarded; no-op when off.
   runAppBootHooks()
   syncMcpClientsOnBoot(config)
 

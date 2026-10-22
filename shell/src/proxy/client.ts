@@ -105,14 +105,14 @@ interface ActiveApiClientsResponse {
 }
 
 /**
- * Apps integrations (Claude Code, Claude Desktop, Copilot CLI). Contract
+ * Apps integrations (Claude Code, Claude Desktop, Codex, Copilot CLI). Contract
  * is jointly owned with `/settings/api/apps` on the proxy side; if the
  * server-side route ships under a different shape, update both ends.
  * Kept LOCAL to this file on purpose — the backend's new `src/`
  * settings-types are not present in this worktree, so importing them
  * would break the typecheck. Mirror by name, not by import.
  */
-export type AppId = "claude-code" | "claude-desktop" | "copilot-cli"
+export type AppId = "claude-code" | "claude-desktop" | "codex" | "copilot-cli"
 export type AppKind = "config" | "coming-soon"
 export type AppStatus = "ready" | "not-installed" | "coming-soon"
 
@@ -122,15 +122,17 @@ export type AppConflict =
   | "foreign-base-url"
   | "foreign-api-key-helper"
   | "foreign-gateway-profile"
+  | "cleanup-required"
 
 export interface AppInstall {
+  kind?: "cli" | "desktop"
   path: string
   version: string | null
   source: string
 }
 
 export interface AppInstallHint {
-  method: "curl"
+  method: "curl" | "npm"
   command: string
 }
 
@@ -378,6 +380,12 @@ type Endpoint =
       path: `/settings/api/requests/${string}`
       body: PendingRequestAnswer
     }
+  | {
+      kind: "codex-toggle"
+      method: "POST"
+      path: "/settings/api/apps/codex/toggle"
+      body: { enabled: boolean }
+    }
 
 type EndpointKind = Endpoint["kind"]
 
@@ -402,6 +410,7 @@ interface ResponseFor {
   "apps-list": AppsListResponse
   "claude-code-toggle": AppEntry
   "claude-desktop-toggle": AppEntry
+  "codex-toggle": AppEntry
   "mcp-list": McpEndpointsListResponse
   "mcp-toggle": McpEndpointToggleResponse
   "mcp-add": McpEndpointAddResponse

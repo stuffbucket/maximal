@@ -29,6 +29,14 @@ export interface ApiKeyEntry {
   created_at: string
 }
 
+export interface ModelMappingRule {
+  match:
+    | { type: "exact"; value: string }
+    | { type: "glob"; value: string }
+    | { type: "regex"; value: string; flags?: "" | "u" }
+  target: string
+}
+
 export interface AppConfig {
   auth?: {
     /** Legacy free-form list of accepted bearer tokens. */
@@ -56,6 +64,7 @@ export interface AppConfig {
     string,
     "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
   >
+  modelMappings?: Array<ModelMappingRule>
   useFunctionApplyPatch?: boolean
   useMessagesApi?: boolean
   anthropicApiKey?: string
@@ -83,6 +92,10 @@ export interface AppConfig {
 }
 
 export interface AppsConfig {
+  codex?: {
+    /** Maximal-owned user-level model provider routing in Codex config.toml. */
+    enabled?: boolean
+  }
   claudeCode?: {
     /** Proxy routing applied to Claude Code (env.ANTHROPIC_BASE_URL in
      *  ~/.claude/settings.json). */
@@ -174,6 +187,12 @@ const defaultConfig: AppConfig = {
     "gpt-5.4": "xhigh",
     "gpt-5.5": "xhigh",
   },
+  modelMappings: [
+    {
+      match: { type: "exact", value: "codex-auto-review" },
+      target: "gpt-5.6-luna",
+    },
+  ],
   useFunctionApplyPatch: true,
   useMessagesApi: true,
   useResponsesApiWebSearch: true,
@@ -270,8 +289,13 @@ function mergeDefaultConfig(config: AppConfig): {
 
   const hasExtraPromptChanges = missingExtraPromptModels.length > 0
   const hasReasoningEffortChanges = missingReasoningEffortModels.length > 0
+  const needsModelMappingDefault = config.modelMappings === undefined
 
-  if (!hasExtraPromptChanges && !hasReasoningEffortChanges) {
+  if (
+    !hasExtraPromptChanges
+    && !hasReasoningEffortChanges
+    && !needsModelMappingDefault
+  ) {
     return { mergedConfig: config, changed: false }
   }
 
@@ -286,6 +310,9 @@ function mergeDefaultConfig(config: AppConfig): {
         ...defaultModelReasoningEfforts,
         ...modelReasoningEfforts,
       },
+      ...(needsModelMappingDefault ?
+        { modelMappings: defaultConfig.modelMappings }
+      : {}),
     },
     changed: true,
   }

@@ -26,6 +26,7 @@ import { randomUUID } from "node:crypto"
 
 import { refreshClaudeCodeApiKeyHelper } from "~/apps/claude-code/reconcile"
 import { refreshClaudeDesktopApiKey } from "~/apps/claude-desktop/reconcile"
+import { refreshCodexApiKeyHelper } from "~/apps/codex/reconcile"
 import { generateApiKey } from "~/lib/auth/api-key-helper"
 import { getConfig, writeConfig } from "~/lib/config/config"
 import { API_KEY_VALUE_PATTERN } from "~/lib/config/config-schema"
@@ -99,6 +100,7 @@ apiKeysRoutes.post("/", async (c) => {
     },
   })
   refreshClaudeCodeApiKeyHelper()
+  refreshCodexApiKeyHelper()
   refreshClaudeDesktopApiKey()
 
   return c.json(entry, 201)
@@ -191,6 +193,7 @@ apiKeysRoutes.patch("/:id", async (c) => {
     auth: { ...config.auth, apiKeyEntries: nextEntries },
   })
   refreshClaudeCodeApiKeyHelper()
+  refreshCodexApiKeyHelper()
   refreshClaudeDesktopApiKey()
 
   return c.json(updated)
@@ -212,6 +215,7 @@ apiKeysRoutes.delete("/:id", (c) => {
     auth: { ...config.auth, apiKeyEntries: next },
   })
   refreshClaudeCodeApiKeyHelper()
+  refreshCodexApiKeyHelper()
   refreshClaudeDesktopApiKey()
   return c.body(null, 204)
 })
