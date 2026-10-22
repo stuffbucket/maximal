@@ -9,7 +9,7 @@
  * strict client (Claude Desktop's picker) reject the list and render empty.
  */
 
-import { beforeEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { Hono } from "hono"
 
 import type { Model } from "~/services/copilot/get-models"
@@ -74,6 +74,10 @@ interface Entry {
 }
 
 beforeEach(() => {
+  setModels({ object: "list", data: [richModel()] })
+})
+
+afterEach(() => {
   setModels({ object: "list", data: [richModel()] })
 })
 
@@ -223,5 +227,31 @@ describe("GET /v1/models — Anthropic shape on signal", () => {
     expect(bodyOpenAi.data[0].description).toBe(
       "High-capability reasoning model",
     )
+  })
+
+  test("tolerates sparse models missing capabilities containers and ignores whitespace-only protocol headers", async () => {
+    setModels({
+      object: "list",
+      data: [
+        {
+          id: "sparse-model",
+          name: "Sparse Model",
+          object: "model",
+          vendor: "openai",
+          version: "1",
+          preview: false,
+          model_picker_enabled: true,
+        } as unknown as Model,
+      ],
+    })
+
+    const res = await buildApp().request("/v1/models", {
+      headers: { "anthropic-beta": "   " },
+    })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { object?: string; data: Array<Entry> }
+    expect(body.object).toBe("list")
+    expect(body.data[0].max_input_tokens).toBe(0)
+    expect(body.data[0].max_tokens).toBe(0)
   })
 })

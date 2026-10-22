@@ -291,11 +291,11 @@ function translateAnthropicToolsToOpenAI(
 export const normalizeToolSchema = (
   schema: Record<string, unknown> | undefined,
 ): Record<string, unknown> => {
-  if (!schema || typeof schema !== "object") {
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
     return { type: "object", properties: {} }
   }
-  if (schema.type === "object" && !schema.properties) {
-    return { ...schema, properties: {} }
+  if ((!schema.type || schema.type === "object") && !schema.properties) {
+    return { ...schema, type: "object", properties: {} }
   }
   return schema
 }

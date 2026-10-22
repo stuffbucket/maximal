@@ -47,6 +47,7 @@ export const createStreamKeepAlive = (
   let messageStartSent = false
   let stopped = false
   let writing = false
+  let inFlightWrite: Promise<void> | undefined
   let timer: ReturnType<typeof setTimeout> | undefined
 
   const clearTimer = (): void => {
@@ -71,26 +72,41 @@ export const createStreamKeepAlive = (
         return
       }
       writing = true
-      void Promise.resolve(stream.writeSSE(PING_SSE_MESSAGE))
+      const writePromise = Promise.resolve(stream.writeSSE(PING_SSE_MESSAGE))
         .catch(() => {
           // Best-effort heartbeat: if the socket closed, let the main stream
           // loop observe the failure on its next write.
         })
         .finally(() => {
+          if (inFlightWrite === writePromise) {
+            inFlightWrite = undefined
+          }
           writing = false
           scheduleNextPing()
         })
+      inFlightWrite = writePromise
     }, intervalMs)
   }
 
+  const isBeforeMessageStart = (): boolean => !messageStartSent
+
   return {
     writeSSE: async (message, options) => {
+      if (message.event === "ping" && isBeforeMessageStart()) {
+        return
+      }
       clearTimer()
+      if (inFlightWrite) {
+        await inFlightWrite
+      }
       writing = true
       try {
         await stream.writeSSE(message)
         if (options?.isMessageStart || message.event === "message_start") {
           messageStartSent = true
+        }
+        if (message.event === "message_stop" || message.event === "error") {
+          stopped = true
         }
       } finally {
         writing = false
