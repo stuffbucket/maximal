@@ -8,8 +8,8 @@ This is a local proxy that exposes the GitHub Copilot API as both an OpenAI-comp
 
 1. Rate limit check
 2. Parse Anthropic payload
-3. Detect subagent marker (`__SUBAGENT_MARKER__` in `<system-reminder>`) → sets `x-initiator: agent`
-4. Detect compact requests (Claude Code context compaction)
+3. Detect subagent marker (`__SUBAGENT_MARKER__` in `<system-reminder>`, with opt-in `x-claude-code-request-class` / `x-claude-code-agent-type` hint headers as a fallback input) → sets `x-initiator: agent`
+4. Detect compact requests (Claude Code context compaction via `x-claude-code-compaction` hint header or prompt heuristics)
 5. Force `smallModel` for tool-less warmup/probe requests (default `gpt-5-mini`; **warmup only** — distinct from the Claude Code *haiku tier*, which carries subagent tool calls and must stay tool-competent: see `src/lib/models/small-model.ts` `resolveSmallToolModel`)
 6. Merge mixed `tool_result` + text blocks to avoid fresh premium request
 7. Normalize model ID → look up Copilot model

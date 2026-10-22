@@ -60,6 +60,21 @@ function resolveCopilotModel(
   )
 }
 
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu
+
+function resolveRequestId(
+  c: Context,
+  payload: AnthropicMessagesPayload,
+  sessionId: string | undefined,
+): string {
+  const promptId = c.req.header("x-claude-code-prompt-id")?.trim()
+  if (promptId && UUID_PATTERN.test(promptId)) {
+    return promptId.toLowerCase()
+  }
+  return generateRequestIdFromPayload(payload, sessionId)
+}
+
 export async function handleCompletion(c: Context) {
   await checkRateLimit(state)
 
@@ -80,16 +95,23 @@ export async function handleCompletion(c: Context) {
   // steps see only the cleaned tools list.
   const webToolPolicy = splitWebTools(anthropicPayload)
 
-  const subagentMarker = parseSubagentMarkerFromFirstUser(anthropicPayload)
+  const sessionId = getRootSessionId(anthropicPayload, c)
+  logger.debug("Extracted session ID:", sessionId)
+
+  const subagentMarker = parseSubagentMarkerFromFirstUser(anthropicPayload, {
+    requestClass: c.req.header("x-claude-code-request-class"),
+    agentType: c.req.header("x-claude-code-agent-type"),
+    sessionId,
+  })
   if (subagentMarker) {
     debugJson(logger, "Detected Subagent marker:", subagentMarker)
   }
 
-  const sessionId = getRootSessionId(anthropicPayload, c)
-  logger.debug("Extracted session ID:", sessionId)
-
   // claude code and opencode compact / auto-continue detection
-  const compactType = getCompactType(anthropicPayload)
+  const compactType = getCompactType(
+    anthropicPayload,
+    c.req.header("x-claude-code-compaction"),
+  )
 
   // Claude Code 2.0.28+ fires a tool-less "Warmup" request on startup (and
   // around subagent spawns) that today round-trips upstream (~4s p50). When
@@ -130,7 +152,7 @@ export async function handleCompletion(c: Context) {
     skipLastMessage: compactType === COMPACT_REQUEST,
   })
 
-  const requestId = generateRequestIdFromPayload(anthropicPayload, sessionId)
+  const requestId = resolveRequestId(c, anthropicPayload, sessionId)
   logger.debug("Generated request ID:", requestId)
 
   if (state.manualApprove) {
