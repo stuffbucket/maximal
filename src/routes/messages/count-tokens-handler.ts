@@ -16,7 +16,10 @@ import { getTokenCount } from "~/lib/models/tokenizer"
 
 import { findEndpointModel } from "../../lib/models/models"
 import { translateToOpenAI } from "./non-stream-translation"
-import { stripUnsupportedTopLevelAnthropicFields } from "./preprocess"
+import {
+  stripUnsupportedClaudeCodeTools,
+  stripUnsupportedTopLevelAnthropicFields,
+} from "./preprocess"
 
 /**
  * Forwards token counting to Anthropic's real /v1/messages/count_tokens endpoint.
@@ -34,6 +37,7 @@ async function countTokensViaAnthropic(
 
   // Copilot uses dotted names (claude-opus-4.6) but Anthropic requires dashes (claude-opus-4-6)
   const model = payload.model.replaceAll(".", "-")
+  const { context_management: _contextManagement, ...forwardPayload } = payload
 
   const res = await sendRequest(
     "https://api.anthropic.com/v1/messages/count_tokens",
@@ -44,7 +48,7 @@ async function countTokensViaAnthropic(
         "anthropic-version": ANTHROPIC_API_VERSION,
         "anthropic-beta": "token-counting-2024-11-01",
       },
-      body: JSON.stringify({ ...payload, model }),
+      body: JSON.stringify({ ...forwardPayload, model }),
     },
   )
 
@@ -74,6 +78,10 @@ export async function handleCountTokens(c: Context) {
   try {
     const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
     stripUnsupportedTopLevelAnthropicFields(anthropicPayload)
+    stripUnsupportedClaudeCodeTools(
+      anthropicPayload,
+      c.req.header("user-agent"),
+    )
 
     // Reverse the dash-date sentinel form (added by /v1/models for Claude
     // Desktop's normalizer) back to Copilot's original dot-form before any

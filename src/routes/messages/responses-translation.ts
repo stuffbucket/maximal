@@ -256,6 +256,9 @@ const translateUserContentBlock = (
     case "document": {
       return [createFileContent(block)]
     }
+    case "tool_reference": {
+      return [createTextContent(`Tool ${block.tool_name} loaded`)]
+    }
     default: {
       return []
     }
