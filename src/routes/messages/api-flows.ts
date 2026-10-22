@@ -167,7 +167,8 @@ export const handleWithResponsesApi = async (
   anthropicPayload: AnthropicMessagesPayload,
   options: ResponsesFlowOptions,
 ) => {
-  const { logger, selectedModel, ...requestOptions } = options
+  const { logger, selectedModel, keepAliveIntervalMs, ...requestOptions } =
+    options
 
   const responsesPayload =
     translateAnthropicMessagesToResponsesPayload(anthropicPayload)
@@ -207,10 +208,7 @@ export const handleWithResponsesApi = async (
   if (responsesPayload.stream && isAsyncIterable(response)) {
     logger.debug("Streaming response from Copilot (Responses API)")
     return streamSSE(c, async (stream) => {
-      const keepAlive = createStreamKeepAlive(
-        stream,
-        options.keepAliveIntervalMs,
-      )
+      const keepAlive = createStreamKeepAlive(stream, keepAliveIntervalMs)
       const streamState = createResponsesStreamState()
       let usage: UsageTokens = {}
 
@@ -358,6 +356,7 @@ export const handleWithMessagesApi = async (
           }
           debugLazy(logger, () => ["Messages raw stream event:", data])
           const parsedEvent = parseAnthropicStreamEvent(data)
+          const resolvedEventName = eventName ?? parsedEvent?.type
           if (parsedEvent?.type === "message_start") {
             usage = mergeAnthropicUsage(
               usage,
@@ -371,7 +370,7 @@ export const handleWithMessagesApi = async (
           }
           await keepAlive.writeSSE(
             {
-              event: eventName,
+              event: resolvedEventName,
               data,
             },
             { isMessageStart: parsedEvent?.type === "message_start" },

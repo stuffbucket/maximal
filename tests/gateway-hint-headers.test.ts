@@ -2,7 +2,11 @@ import { describe, expect, test } from "bun:test"
 
 import type { AnthropicMessagesPayload } from "~/lib/models/anthropic-types"
 
-import { COMPACT_REQUEST } from "~/lib/models/compact"
+import {
+  COMPACT_AUTO_CONTINUE,
+  COMPACT_REQUEST,
+  compactAutoContinueClaudeCodePromptStart,
+} from "~/lib/models/compact"
 import { getCompactType } from "~/routes/messages/preprocess"
 import { parseSubagentMarkerFromFirstUser } from "~/routes/messages/subagent-marker"
 
@@ -32,12 +36,38 @@ describe("gateway hint headers support", () => {
         agentType: "Explore",
       }),
     ).toBeNull()
+
+    expect(
+      parseSubagentMarkerFromFirstUser(basePayload, {
+        requestClass: "background_agent",
+        agentType: "Explore",
+        sessionId: "sess-456",
+      }),
+    ).toEqual({
+      session_id: "sess-456",
+      agent_id: "background_agent",
+      agent_type: "Explore",
+    })
   })
 
-  test("getCompactType recognizes x-claude-code-compaction header values", () => {
+  test("getCompactType recognizes x-claude-code-compaction header values without masking COMPACT_AUTO_CONTINUE", () => {
     for (const mode of ["manual", "auto", "reactive", "snip", "background"]) {
       expect(getCompactType(basePayload, mode)).toBe(COMPACT_REQUEST)
     }
     expect(getCompactType(basePayload, undefined)).toBe(0)
+
+    const autoContinuePayload: AnthropicMessagesPayload = {
+      model: "claude-opus-4.6",
+      max_tokens: 128,
+      messages: [
+        {
+          role: "user",
+          content: compactAutoContinueClaudeCodePromptStart,
+        },
+      ],
+    }
+    expect(getCompactType(autoContinuePayload, "auto")).toBe(
+      COMPACT_AUTO_CONTINUE,
+    )
   })
 })

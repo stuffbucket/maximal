@@ -22,9 +22,7 @@ export const parseSubagentMarkerFromFirstUser = (
   payload: AnthropicMessagesPayload,
   hints?: GatewaySubagentHints,
 ): SubagentMarker | null => {
-  const firstUserMessage = payload.messages.find(
-    (msg) => msg.role === "user" && Array.isArray(msg.content),
-  )
+  const firstUserMessage = payload.messages.find((msg) => msg.role === "user")
   if (firstUserMessage && Array.isArray(firstUserMessage.content)) {
     for (const block of firstUserMessage.content) {
       if (block.type !== "text") {
@@ -54,7 +52,7 @@ const parseSubagentMarkerFromHints = (
   const agentType = hints.agentType?.trim()
   const isNonInteractive =
     Boolean(requestClass && NON_INTERACTIVE_REQUEST_CLASSES.has(requestClass))
-    || (!requestClass && Boolean(agentType))
+    || Boolean(agentType)
 
   if (!isNonInteractive) {
     return null

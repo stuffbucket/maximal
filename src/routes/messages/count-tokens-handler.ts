@@ -17,6 +17,7 @@ import { getTokenCount } from "~/lib/models/tokenizer"
 import { findEndpointModel } from "../../lib/models/models"
 import { translateToOpenAI } from "./non-stream-translation"
 import {
+  stripToolReferenceTurnBoundary,
   stripUnsupportedClaudeCodeTools,
   stripUnsupportedTopLevelAnthropicFields,
 } from "./preprocess"
@@ -82,6 +83,7 @@ export async function handleCountTokens(c: Context) {
       anthropicPayload,
       c.req.header("user-agent"),
     )
+    stripToolReferenceTurnBoundary(anthropicPayload)
 
     // Reverse the dash-date sentinel form (added by /v1/models for Claude
     // Desktop's normalizer) back to Copilot's original dot-form before any

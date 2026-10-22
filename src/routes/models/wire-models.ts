@@ -45,18 +45,36 @@ export interface OpenAiModelList {
   has_more: false
 }
 
-export function toOpenAiModel(model: Model): OpenAiModel {
-  const { limits } = model.capabilities
+interface DiscoveryMetadata {
+  display_name: string
+  description?: string
+  max_input_tokens: number
+  max_tokens: number
+}
+
+function toDiscoveryMetadata(model: Model): DiscoveryMetadata {
+  const limits =
+    (
+      model.capabilities as
+        | { limits?: Model["capabilities"]["limits"] }
+        | undefined
+    )?.limits ?? {}
   return {
-    id: forwardId(model.id),
-    object: "model",
-    created: 0,
-    owned_by: model.vendor,
     display_name: model.name,
     ...(model.description ? { description: model.description } : {}),
     max_input_tokens:
       limits.max_context_window_tokens ?? limits.max_prompt_tokens ?? 0,
     max_tokens: limits.max_output_tokens ?? 0,
+  }
+}
+
+export function toOpenAiModel(model: Model): OpenAiModel {
+  return {
+    id: forwardId(model.id),
+    object: "model",
+    created: 0,
+    owned_by: model.vendor,
+    ...toDiscoveryMetadata(model),
   }
 }
 
@@ -98,21 +116,22 @@ export interface AnthropicModelList {
 }
 
 export function toAnthropicModel(model: Model): AnthropicModel {
-  const { limits, supports } = model.capabilities
+  const supports =
+    (
+      model.capabilities as
+        | { supports?: Model["capabilities"]["supports"] }
+        | undefined
+    )?.supports ?? {}
   const thinkingSupported =
     supports.adaptive_thinking === true
     || (supports.reasoning_effort?.length ?? 0) > 0
   return {
     id: forwardId(model.id),
     type: "model",
-    display_name: model.name,
-    ...(model.description ? { description: model.description } : {}),
+    ...toDiscoveryMetadata(model),
     // Anthropic permits an epoch when the release date is unknown; the Copilot
     // catalog doesn't carry one.
     created_at: EPOCH_ISO,
-    max_input_tokens:
-      limits.max_context_window_tokens ?? limits.max_prompt_tokens ?? 0,
-    max_tokens: limits.max_output_tokens ?? 0,
     capabilities: {
       image_input: { supported: supports.vision === true },
       pdf_input: { supported: false },
@@ -143,7 +162,10 @@ export function anthropicModelList(models: Array<Model>): AnthropicModelList {
  * historical OpenAI default.
  */
 export function prefersAnthropicModels(headers: Headers): boolean {
-  if (headers.get("anthropic-version") || headers.get("anthropic-beta")) {
+  if (
+    headers.get("anthropic-version")?.trim()
+    || headers.get("anthropic-beta")?.trim()
+  ) {
     return true
   }
   const ua = headers.get("user-agent")?.toLowerCase() ?? ""

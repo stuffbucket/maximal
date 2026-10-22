@@ -4,6 +4,7 @@ import type {
   AnthropicMessage,
   AnthropicMessagesPayload,
   AnthropicTextBlock,
+  AnthropicToolReferenceBlock,
   AnthropicToolResultBlock,
   AnthropicUserContentBlock,
 } from "~/lib/models/anthropic-types"
@@ -104,6 +105,11 @@ export const getCompactType = (
   anthropicPayload: AnthropicMessagesPayload,
   compactionHeader?: string,
 ): CompactType => {
+  const lastMessage = anthropicPayload.messages.at(-1)
+  if (lastMessage && isCompactAutoContinueMessage(lastMessage)) {
+    return COMPACT_AUTO_CONTINUE
+  }
+
   const normalizedCompactionHint = compactionHeader?.trim().toLowerCase()
   if (
     normalizedCompactionHint
@@ -112,13 +118,8 @@ export const getCompactType = (
     return COMPACT_REQUEST
   }
 
-  const lastMessage = anthropicPayload.messages.at(-1)
   if (lastMessage && isCompactMessage(lastMessage)) {
     return COMPACT_REQUEST
-  }
-
-  if (lastMessage && isCompactAutoContinueMessage(lastMessage)) {
-    return COMPACT_AUTO_CONTINUE
   }
 
   const system = anthropicPayload.system
@@ -443,6 +444,20 @@ const mergeToolResult = (
   )
 }
 
+const rewriteToolReferenceBlock = (
+  block: AnthropicToolReferenceBlock,
+): AnthropicTextBlock => {
+  const { cache_control: cacheControl } =
+    block as AnthropicToolReferenceBlock & {
+      cache_control?: unknown
+    }
+  return {
+    type: "text",
+    text: `Tool ${block.tool_name} loaded`,
+    ...(cacheControl !== undefined ? { cache_control: cacheControl } : {}),
+  }
+}
+
 export const stripToolReferenceTurnBoundary = (
   anthropicPayload: AnthropicMessagesPayload,
 ): void => {
@@ -450,15 +465,23 @@ export const stripToolReferenceTurnBoundary = (
     if (msg.role !== "user" || !Array.isArray(msg.content)) continue
 
     const hasToolReference = msg.content.some(
-      (block) => block.type === "tool_result" && hasToolRef(block),
+      (block) =>
+        block.type === "tool_reference"
+        || (block.type === "tool_result" && hasToolRef(block)),
     )
     if (!hasToolReference) continue
 
-    msg.content = msg.content.filter(
-      (block) =>
-        block.type !== "text"
-        || block.text.trim() !== TOOL_REFERENCE_TURN_BOUNDARY,
-    )
+    msg.content = msg.content
+      .filter(
+        (block) =>
+          block.type !== "text"
+          || block.text.trim() !== TOOL_REFERENCE_TURN_BOUNDARY,
+      )
+      .map((block) =>
+        block.type === "tool_reference" ?
+          rewriteToolReferenceBlock(block)
+        : block,
+      )
   }
 }
 
@@ -602,7 +625,7 @@ const filterAssistantThinkingBlocks = (
     } else if (msg.role === "user" && Array.isArray(msg.content)) {
       msg.content = msg.content.map((block) =>
         block.type === "tool_reference" ?
-          { type: "text", text: `Tool ${block.tool_name} loaded` }
+          rewriteToolReferenceBlock(block)
         : block,
       )
     }
