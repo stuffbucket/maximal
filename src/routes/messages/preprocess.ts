@@ -10,6 +10,7 @@ import type {
 import type { Model } from "~/services/copilot/get-models"
 
 import { getReasoningEffortForModel } from "~/lib/config/config"
+import { classifyClaudeClient } from "~/lib/http/claude-client"
 import {
   COMPACT_AUTO_CONTINUE,
   COMPACT_REQUEST,
@@ -30,7 +31,6 @@ const IDE_GET_DIAGNOSTICS_DESCRIPTION =
 const PDF_FILE_READ_PREFIX = "PDF file read:"
 const ADVISOR_TOOL_TYPE = "advisor_20260301"
 const ADVISOR_TOOL_NAME = "advisor"
-const CLAUDE_CODE_USER_AGENT = /^(?:claude-cli|claude-code)\//iu
 
 type AnthropicAttachmentBlock = AnthropicImageBlock | AnthropicDocumentBlock
 type IndexedAttachment = {
@@ -476,7 +476,8 @@ export const stripUnsupportedClaudeCodeTools = (
   payload: AnthropicMessagesPayload,
   userAgent: string | undefined,
 ): void => {
-  if (!CLAUDE_CODE_USER_AGENT.test(userAgent ?? "") || !payload.tools) return
+  // Desktop and Cowork run the same agent, so they send the same tool.
+  if (classifyClaudeClient(userAgent) === null || !payload.tools) return
 
   payload.tools = payload.tools.filter((tool) => {
     const raw = tool as typeof tool & { type?: unknown }

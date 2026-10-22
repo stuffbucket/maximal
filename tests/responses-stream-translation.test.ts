@@ -179,3 +179,59 @@ describe("translateResponsesStreamEvent tool calls", () => {
     expect(state.functionCallStateByOutputIndex.size).toBe(0)
   })
 })
+
+const errorOf = (events: Array<AnthropicStreamEventData>) =>
+  events.find((e) => e.type === "error") as
+    | { error: { type: string; message: string } }
+    | undefined
+
+describe("translateResponsesStreamEvent upstream failures", () => {
+  test("an overflow in response.failed is reworded for auto-compaction", () => {
+    const events = translateResponsesStreamEvent(
+      {
+        type: "response.failed",
+        sequence_number: 1,
+        response: {
+          error: {
+            message:
+              "This model's maximum context length is 400000 tokens. However, your messages resulted in 412345 tokens.",
+          },
+        },
+      } as never,
+      createResponsesStreamState(),
+    )
+    expect(errorOf(events)?.error).toEqual({
+      type: "invalid_request_error",
+      message: "prompt is too long: 412345 tokens > 400000 maximum",
+    })
+  })
+
+  test("an overflow in an error event is reworded too", () => {
+    const events = translateResponsesStreamEvent(
+      {
+        type: "error",
+        sequence_number: 1,
+        code: "context_length_exceeded",
+        param: null,
+        message: "Your input exceeds the context window of this model.",
+      },
+      createResponsesStreamState(),
+    )
+    expect(errorOf(events)?.error.type).toBe("invalid_request_error")
+    expect(errorOf(events)?.error.message).toStartWith("prompt is too long: ")
+  })
+
+  test("other upstream failures stay api_error", () => {
+    const events = translateResponsesStreamEvent(
+      {
+        type: "error",
+        sequence_number: 1,
+        code: null,
+        param: null,
+        message: "content filtered",
+      },
+      createResponsesStreamState(),
+    )
+    expect(errorOf(events)?.error.type).toBe("api_error")
+  })
+})
