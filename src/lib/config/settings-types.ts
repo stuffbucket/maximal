@@ -366,7 +366,13 @@ export const AppEntry = z.object({
    *  has a setting we don't own (e.g. a user-set ANTHROPIC_BASE_URL or
    *  apiKeyHelper). The UI surfaces this so the user knows why the toggle
    *  didn't take. */
-  conflict: z.enum(["foreign-base-url", "foreign-api-key-helper"]).nullable(),
+  conflict: z
+    .enum([
+      "foreign-base-url",
+      "foreign-api-key-helper",
+      "foreign-gateway-profile",
+    ])
+    .nullable(),
 })
 export type AppEntry = z.infer<typeof AppEntry>
 

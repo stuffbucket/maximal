@@ -58,6 +58,14 @@ export const claudeDesktopCli: AppCli = {
 function apply(): void {
   try {
     const result = applyConfigLibraryProfile()
+    if (result.conflict) {
+      consola.warn(
+        "Left Claude Desktop untouched: it's already using a gateway set up by"
+          + " you or another tool. Switch Claude Desktop to a different"
+          + " configuration, then re-run.",
+      )
+      return
+    }
     if (result.wrote) {
       consola.success(
         `Claude Desktop wired at the gateway (${result.dir}, profile ${result.profileId})`,

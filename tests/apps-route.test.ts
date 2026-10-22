@@ -273,6 +273,44 @@ describe("POST /apps/claude-desktop/toggle", () => {
     expect(actualDesktop.isConfigLibraryApplied(ROUTE_3P_HOME)).toBe(true)
   })
 
+  test("enable leaves a foreign gateway profile alone and reports why", async () => {
+    const lib = path.join(
+      actualDesktop.getClaude3pDir(ROUTE_3P_HOME),
+      "configLibrary",
+    )
+    fs.mkdirSync(lib, { recursive: true })
+    fs.writeFileSync(
+      path.join(lib, "corp.json"),
+      JSON.stringify({
+        inferenceProvider: "gateway",
+        inferenceGatewayBaseUrl: "https://llm.corp.example",
+      }),
+    )
+    fs.writeFileSync(
+      path.join(lib, "_meta.json"),
+      JSON.stringify({
+        appliedId: "corp",
+        entries: [{ id: "corp", name: "Work" }],
+      }),
+    )
+
+    const res = await buildApp().request("/apps/claude-desktop/toggle", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled: true }),
+    })
+
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      enabled: boolean
+      conflict: string | null
+    }
+    expect(body.enabled).toBe(false)
+    expect(body.conflict).toBe("foreign-gateway-profile")
+    // The refused enable isn't recorded as the user's intent.
+    expect(getConfig().apps?.claudeDesktop?.enabled).not.toBe(true)
+  })
+
   test("disable reverts proxy config and persists enabled=false", async () => {
     const app = buildApp()
     await app.request("/apps/claude-desktop/toggle", {
