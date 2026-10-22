@@ -100,6 +100,10 @@ describe("createStreamKeepAlive SSE ping heartbeat", () => {
     const keepAlive = createStreamKeepAlive(stream, 20)
 
     try {
+      await keepAlive.writeSSE({
+        event: "ping",
+        data: '{"type":"ping"}',
+      })
       await waitMs(35)
       expect(written).toEqual([])
 
@@ -126,5 +130,29 @@ describe("createStreamKeepAlive SSE ping heartbeat", () => {
     const countAfterStop = written.length
     await waitMs(35)
     expect(written.length).toBe(countAfterStop)
+  })
+
+  test("stops scheduling pings automatically once message_stop is written", async () => {
+    const { stream, written } = createMockStream()
+    const keepAlive = createStreamKeepAlive(stream, 20)
+
+    try {
+      await keepAlive.writeSSE({
+        event: "message_start",
+        data: '{"type":"message_start"}',
+      })
+      await keepAlive.writeSSE({
+        event: "message_stop",
+        data: '{"type":"message_stop"}',
+      })
+      await waitMs(45)
+    } finally {
+      keepAlive.stop()
+    }
+
+    expect(written.map((msg) => msg.event)).toEqual([
+      "message_start",
+      "message_stop",
+    ])
   })
 })

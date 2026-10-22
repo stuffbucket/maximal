@@ -66,15 +66,16 @@ function resolveCopilotVariant(
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu
+const NIL_UUID = "00000000-0000-0000-0000-000000000000"
 
 function resolveRequestId(
   c: Context,
   payload: AnthropicMessagesPayload,
   sessionId: string | undefined,
 ): string {
-  const promptId = c.req.header("x-claude-code-prompt-id")?.trim()
-  if (promptId && UUID_PATTERN.test(promptId)) {
-    return promptId.toLowerCase()
+  const promptId = c.req.header("x-claude-code-prompt-id")?.trim().toLowerCase()
+  if (promptId && promptId !== NIL_UUID && UUID_PATTERN.test(promptId)) {
+    return promptId
   }
   return generateRequestIdFromPayload(payload, sessionId)
 }

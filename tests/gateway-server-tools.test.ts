@@ -6,13 +6,21 @@ import {
   normalizeToolSchema,
   translateToOpenAI,
 } from "~/routes/messages/non-stream-translation"
-import { prepareMessagesApiPayload } from "~/routes/messages/preprocess"
+import {
+  mergeToolResultForClaude,
+  prepareMessagesApiPayload,
+  stripToolReferenceTurnBoundary,
+} from "~/routes/messages/preprocess"
 import { translateAnthropicMessagesToResponsesPayload } from "~/routes/messages/responses-translation"
 import { splitWebTools } from "~/routes/messages/web-tools"
 
 describe("normalizeToolSchema for schema-less server tools", () => {
-  test("returns default empty object schema when input_schema is undefined", () => {
+  test("returns default empty object schema when input_schema is undefined or empty object", () => {
     expect(normalizeToolSchema(undefined)).toEqual({
+      type: "object",
+      properties: {},
+    })
+    expect(normalizeToolSchema({})).toEqual({
       type: "object",
       properties: {},
     })
@@ -124,5 +132,46 @@ describe("Responses translation of top-level tool_reference blocks", () => {
     expect(policy.hasSearch).toBe(true)
     expect(policy.hasFetch).toBe(true)
     expect(payload.tools).toEqual([])
+  })
+
+  test("stripToolReferenceTurnBoundary rewrites top-level tool_reference before mergeToolResultForClaude", () => {
+    const payload: AnthropicMessagesPayload = {
+      model: "claude-opus-5.5",
+      max_tokens: 128,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "toolu_search",
+              content: "found WebFetch",
+            },
+            {
+              type: "tool_reference",
+              tool_name: "WebFetch",
+            },
+            {
+              type: "text",
+              text: "Tool loaded.",
+            },
+          ],
+        },
+      ],
+    }
+
+    stripToolReferenceTurnBoundary(payload)
+    mergeToolResultForClaude(payload)
+
+    expect(payload.messages[0]).toEqual({
+      role: "user",
+      content: [
+        {
+          type: "tool_result",
+          tool_use_id: "toolu_search",
+          content: "found WebFetch\n\nTool WebFetch loaded",
+        },
+      ],
+    })
   })
 })
