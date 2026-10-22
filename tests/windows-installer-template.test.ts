@@ -78,6 +78,15 @@ describe("windows installer template", () => {
     expect(ps).toMatch(/SetEnvironmentVariable\(\s*'PATH'.*'User'/s)
   })
 
+  // Without @(), a one-entry PATH splits to a string and `$segments + $Dir`
+  // concatenates: "...\WindowsAppsC:\Users\...\Programs\maximal".
+  it("splits PATH into an array before appending", () => {
+    const ps = read(SCRIPT)
+    expect(ps).toContain(
+      "$segments = @($current -split ';' | Where-Object { $_ -ne '' })",
+    )
+  })
+
   it("registers an Add/Remove Programs entry", () => {
     const ps = read(SCRIPT)
     expect(ps).toContain("Register-ArpEntry")
