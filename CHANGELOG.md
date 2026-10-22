@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.4.48](https://github.com/stuffbucket/maximal/compare/v0.4.47...v0.4.48) (2026-10-22)
+
+
+### Features
+
+* support opt-in gateway hint headers on /v1/messages ([#516](https://github.com/stuffbucket/maximal/issues/516)) ([fcc01e0](https://github.com/stuffbucket/maximal/commit/fcc01e0f554b9214d24deb03aa60bf096a01d3b6))
+
+
+### Bug Fixes
+
+* **active-clients:** classify Claude Code, Desktop, and Cowork from the claude-cli user agent ([#508](https://github.com/stuffbucket/maximal/issues/508)) ([8b285b7](https://github.com/stuffbucket/maximal/commit/8b285b7be55851785601ac04eeab31afbdd417fe)), refs [#504](https://github.com/stuffbucket/maximal/issues/504)
+* **claude-desktop:** never clobber a user's own 3P profile on enable or revert ([#506](https://github.com/stuffbucket/maximal/issues/506)) ([2de3d3a](https://github.com/stuffbucket/maximal/commit/2de3d3abbc6089ea2e5c8aa3f6d67ef3c06baedc))
+* **claude-desktop:** use a real API key, follow the proxy port, reconcile on boot ([#507](https://github.com/stuffbucket/maximal/issues/507)) ([a38368f](https://github.com/stuffbucket/maximal/commit/a38368f805ee244898ed33d9d79346bd9f445f77))
+* emit SSE keep-alive pings and strip content-block cache_control.scope ([#515](https://github.com/stuffbucket/maximal/issues/515)) ([e870174](https://github.com/stuffbucket/maximal/commit/e870174c88902f4fb738ef6baecc1688ea66d402))
+* harden gateway review follow-ups across models, keepalive, hints, and tools ([#518](https://github.com/stuffbucket/maximal/issues/518)) ([9bdd507](https://github.com/stuffbucket/maximal/commit/9bdd507dc593b1e531f60b4e9559af002933504e))
+* include gateway model discovery metadata on /v1/models ([#514](https://github.com/stuffbucket/maximal/issues/514)) ([8779f72](https://github.com/stuffbucket/maximal/commit/8779f72f285ed1bc748e9349422979c341e208d4))
+* **messages:** return Anthropic-typed errors so Claude Code retries and auto-compacts ([#505](https://github.com/stuffbucket/maximal/issues/505)) ([3e9056c](https://github.com/stuffbucket/maximal/commit/3e9056cbd65965f0fb1375d8dd75d51645d963bd)), refs [#503](https://github.com/stuffbucket/maximal/issues/503)
+* tolerate schema-less server tools, count_tokens fields, and top-level tool_reference ([#513](https://github.com/stuffbucket/maximal/issues/513)) ([99734ae](https://github.com/stuffbucket/maximal/commit/99734ae0fa3da8c328938c6a33d0cd30cad703b6))
+
 ## [0.4.47](https://github.com/stuffbucket/maximal/compare/v0.4.46...v0.4.47) (2026-10-20)
 
 
