@@ -6,7 +6,9 @@ import {
   normalizeToolSchema,
   translateToOpenAI,
 } from "~/routes/messages/non-stream-translation"
+import { prepareMessagesApiPayload } from "~/routes/messages/preprocess"
 import { translateAnthropicMessagesToResponsesPayload } from "~/routes/messages/responses-translation"
+import { splitWebTools } from "~/routes/messages/web-tools"
 
 describe("normalizeToolSchema for schema-less server tools", () => {
   test("returns default empty object schema when input_schema is undefined", () => {
@@ -88,5 +90,39 @@ describe("Responses translation of top-level tool_reference blocks", () => {
         ],
       },
     ])
+
+    prepareMessagesApiPayload(payload)
+    expect(payload.messages).toEqual([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Tool WebFetch loaded" },
+          { type: "text", text: "Use WebFetch now" },
+        ],
+      },
+    ])
+  })
+
+  test("splitWebTools intercepts 20260209 dynamic-filtering web_search and web_fetch tools", () => {
+    const payload: AnthropicMessagesPayload = {
+      model: "claude-opus-5.5",
+      max_tokens: 128,
+      messages: [{ role: "user", content: "hello" }],
+      tools: [
+        {
+          type: "web_search_20260209",
+          name: "web_search",
+        } as unknown as NonNullable<AnthropicMessagesPayload["tools"]>[number],
+        {
+          type: "web_fetch_20260209",
+          name: "web_fetch",
+        } as unknown as NonNullable<AnthropicMessagesPayload["tools"]>[number],
+      ],
+    }
+
+    const policy = splitWebTools(payload)
+    expect(policy.hasSearch).toBe(true)
+    expect(policy.hasFetch).toBe(true)
+    expect(payload.tools).toEqual([])
   })
 })

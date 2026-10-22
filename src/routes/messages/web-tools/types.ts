@@ -23,13 +23,13 @@ export interface UserLocation {
 }
 
 export interface WebSearchToolDecl extends DomainPolicy {
-  type: typeof TOOL_TYPE.webSearch
+  type: typeof TOOL_TYPE.webSearch | typeof TOOL_TYPE.webSearch2026
   name: typeof TOOL_NAME.webSearch
   user_location?: UserLocation
 }
 
 export interface WebFetchToolDecl extends DomainPolicy {
-  type: typeof TOOL_TYPE.webFetch
+  type: typeof TOOL_TYPE.webFetch | typeof TOOL_TYPE.webFetch2026
   name: typeof TOOL_NAME.webFetch
   citations?: { enabled: boolean }
   max_content_tokens?: number

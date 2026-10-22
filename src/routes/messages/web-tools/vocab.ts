@@ -8,8 +8,20 @@
 
 export const TOOL_TYPE = {
   webSearch: "web_search_20250305",
+  webSearch2026: "web_search_20260209",
   webFetch: "web_fetch_20250910",
+  webFetch2026: "web_fetch_20260209",
 } as const
+
+export const WEB_SEARCH_TOOL_TYPES: ReadonlySet<unknown> = new Set([
+  TOOL_TYPE.webSearch,
+  TOOL_TYPE.webSearch2026,
+])
+
+export const WEB_FETCH_TOOL_TYPES: ReadonlySet<unknown> = new Set([
+  TOOL_TYPE.webFetch,
+  TOOL_TYPE.webFetch2026,
+])
 
 export const TOOL_NAME = {
   webSearch: "web_search",
