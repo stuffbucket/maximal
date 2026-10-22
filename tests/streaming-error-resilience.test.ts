@@ -60,10 +60,24 @@ describe("emitStreamError", () => {
       error: { type: string; message: string }
     }
     expect(payload.type).toBe("error")
-    expect(payload.error.type).toBe("api_error")
+    // An upstream drop is retryable: overloaded_error makes Claude Code back
+    // off and resend instead of ending the turn.
+    expect(payload.error.type).toBe("overloaded_error")
     expect(payload.error.message).toContain("upstream reset")
     // The mid-flight failure was logged for operators.
     expect(logger.error).toHaveBeenCalledTimes(1)
+  })
+
+  test("a proxy defect stays api_error so a retry doesn't hide it", async () => {
+    const { writes, stream } = fakeStream()
+
+    await emitStreamError(stream as never, quietLogger() as never, {
+      error: new TypeError("undefined is not an object (evaluating 'x.y')"),
+      flow: "responses",
+    })
+
+    const payload = JSON.parse(writes[0].data) as { error: { type: string } }
+    expect(payload.error.type).toBe("api_error")
   })
 
   test("coerces non-Error throwables to a message", async () => {
