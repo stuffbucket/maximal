@@ -21,3 +21,9 @@ export function setListeningPort(port: number | undefined): void {
 export function currentProxyPort(): number {
   return listeningPort ?? runningSessionPort() ?? DEFAULT_PROXY_PORT
 }
+
+/** The base URL clients are pointed at. `127.0.0.1` rather than `localhost`
+ *  so a client never resolves it to `::1`, which the proxy doesn't bind. */
+export function proxyBaseUrl(): string {
+  return `http://127.0.0.1:${currentProxyPort()}`
+}

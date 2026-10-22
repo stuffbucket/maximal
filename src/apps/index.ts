@@ -68,10 +68,10 @@ export interface ClientApp {
   uninstall(): Promise<AppUninstallResult>
 
   /** Optional hook called when the proxy starts up */
-  onBoot?(): Promise<void>
+  onBoot?(): void
 
   /** Optional hook called when the proxy shuts down (for crash cleanup) */
-  onShutdown?(): Promise<void>
+  onShutdown?(): void
 
   /** Optional hook into the generic `maximal app <client>` command for apps
    *  that need extra flags or bespoke handling beyond the shared

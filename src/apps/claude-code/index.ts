@@ -106,11 +106,9 @@ export const claudeCodeApp: ClientApp = {
 
   onBoot() {
     reconcileClaudeCodeOnBoot()
-    return Promise.resolve()
   },
 
   onShutdown() {
     reconcileClaudeCodeOnShutdown()
-    return Promise.resolve()
   },
 }

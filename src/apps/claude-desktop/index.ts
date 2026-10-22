@@ -5,19 +5,20 @@ import { syncMcpClient } from "~/lib/mcp-broker/client-sync"
 import type { AppUninstallResult, ClientApp } from "../index"
 
 import { claudeDesktopCli } from "./cli"
-import {
-  isConfigLibraryApplied,
-  applyConfigLibraryProfile,
-  revertConfigLibraryProfile,
-} from "./config"
+import { DESKTOP_KEY_LABEL, isConfigLibraryApplied } from "./config"
 import { claudeAppInstalled } from "./detect"
 import { claudeDesktopMcp } from "./mcp"
+import {
+  disableClaudeDesktopRouting,
+  enableClaudeDesktopRouting,
+  reconcileClaudeDesktopOnBoot,
+} from "./reconcile"
 
 export const claudeDesktopApp: ClientApp = {
   id: "claude-desktop",
   name: "Claude Desktop",
   kind: "config",
-  apiKeyLabel: "claude-desktop",
+  apiKeyLabel: DESKTOP_KEY_LABEL,
   mcp: claudeDesktopMcp,
 
   detect() {
@@ -40,7 +41,7 @@ export const claudeDesktopApp: ClientApp = {
   },
 
   enable() {
-    const { conflict } = applyConfigLibraryProfile()
+    const { conflict } = enableClaudeDesktopRouting()
     if (conflict) return Promise.resolve({ success: false, conflict })
     // Restore the MCP endpoints the user chose for Claude Desktop.
     syncMcpClient(claudeDesktopMcp)
@@ -48,7 +49,7 @@ export const claudeDesktopApp: ClientApp = {
   },
 
   disable() {
-    revertConfigLibraryProfile()
+    disableClaudeDesktopRouting()
     syncMcpClient(claudeDesktopMcp, { active: false })
     return Promise.resolve({ success: true })
   },
@@ -58,7 +59,8 @@ export const claudeDesktopApp: ClientApp = {
     // Desktop config, no-op when we never wired them. A profile the user
     // edited after we wrote it is left on disk.
     const reverted: Array<string> = []
-    const result = revertConfigLibraryProfile()
+    // Also clears the routing intent, so the next boot doesn't re-apply.
+    const result = disableClaudeDesktopRouting()
     if (result.reverted) {
       reverted.push(`removed our gateway profile from ${result.dir}`)
     }
@@ -74,6 +76,12 @@ export const claudeDesktopApp: ClientApp = {
 
   isEnabled() {
     return isConfigLibraryApplied()
+  },
+
+  // No onShutdown: Desktop reads its config only at launch, so it isn't
+  // reverted per Maximal restart — see ./reconcile.ts.
+  onBoot() {
+    reconcileClaudeDesktopOnBoot()
   },
 
   cli: claudeDesktopCli,

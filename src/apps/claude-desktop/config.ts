@@ -9,7 +9,9 @@ import os from "node:os"
 import path from "node:path"
 import { z } from "zod"
 
+import { resolveApiKey } from "~/lib/auth/api-key-helper"
 import { atomicWriteJson as atomicWriteJsonShared } from "~/lib/platform/atomic-json"
+import { proxyBaseUrl } from "~/lib/start/proxy-port"
 
 const USERDATA_3P_SUFFIX = "-3p"
 
@@ -34,14 +36,24 @@ export interface GatewayProfileValues {
   isClaudeCodeForDesktopEnabled: boolean
 }
 
+/** The label Claude Desktop's key is provisioned and attributed under
+ *  (Settings → API clients). */
+export const DESKTOP_KEY_LABEL = "claude-desktop"
+
+/**
+ * The profile we write. The key is looked up, never minted: this also runs
+ * for status checks, which must not create keys. Enable provisions it first
+ * (`ensureApiKey`); before that, an empty key just means "not applied".
+ */
 export function gatewayProfile(
   home: string = os.homedir(),
-  baseUrl = "http://127.0.0.1:4141",
+  baseUrl: string = proxyBaseUrl(),
 ): GatewayProfileValues {
+  const key = resolveApiKey(DESKTOP_KEY_LABEL)
   return {
     inferenceProvider: "gateway",
     inferenceGatewayBaseUrl: baseUrl,
-    inferenceGatewayApiKey: "anything",
+    inferenceGatewayApiKey: key.ok ? key.key : "",
     inferenceGatewayAuthScheme: "bearer",
     disableDeploymentModeChooser: true,
     coworkEgressAllowedHosts: ["*"],
@@ -421,6 +433,16 @@ function snapshotPrior(
   }
 }
 
+/** Would enable be refused? Lets callers skip side effects (like minting a
+ *  key) for an enable that won't take effect. */
+export function configLibraryConflict(
+  home: string = os.homedir(),
+): ConfigLibraryConflict | null {
+  return new Library(getClaude3pDir(home)).appliedBlocksSwitch() ?
+      "foreign-gateway-profile"
+    : null
+}
+
 export function isConfigLibraryApplied(
   home: string = os.homedir(),
   values: GatewayProfileValues = gatewayProfile(home),
@@ -571,9 +593,20 @@ export interface ManagedProfileOptions {
   scope?: "User" | "System"
 }
 
+/**
+ * A managed profile is generated once and pushed to many machines, each with
+ * its own local proxy and keys — so it carries a placeholder, never this
+ * machine's key. Fleets either run without key enforcement or provision
+ * per-machine keys through their MDM.
+ */
+const MANAGED_PLACEHOLDER_KEY = "anything"
+
 export function generateManagedProfile(
   home: string = os.homedir(),
-  values: GatewayProfileValues = gatewayProfile(home),
+  values: GatewayProfileValues = {
+    ...gatewayProfile(home),
+    inferenceGatewayApiKey: MANAGED_PLACEHOLDER_KEY,
+  },
   opts: ManagedProfileOptions = {},
 ): string {
   const profileUUID = opts.profileUUID ?? randomUUID()
