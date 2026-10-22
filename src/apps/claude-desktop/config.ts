@@ -433,6 +433,16 @@ function snapshotPrior(
   }
 }
 
+/** Would enable be refused? Lets callers skip side effects (like minting a
+ *  key) for an enable that won't take effect. */
+export function configLibraryConflict(
+  home: string = os.homedir(),
+): ConfigLibraryConflict | null {
+  return new Library(getClaude3pDir(home)).appliedBlocksSwitch() ?
+      "foreign-gateway-profile"
+    : null
+}
+
 export function isConfigLibraryApplied(
   home: string = os.homedir(),
   values: GatewayProfileValues = gatewayProfile(home),

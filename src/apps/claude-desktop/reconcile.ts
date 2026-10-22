@@ -17,6 +17,7 @@ import { getConfig, writeConfig } from "~/lib/config/config"
 import {
   applyConfigLibraryProfile,
   type ApplyConfigLibraryResult,
+  configLibraryConflict,
   DESKTOP_KEY_LABEL,
   revertConfigLibraryProfile,
   type RevertResult,
@@ -49,8 +50,7 @@ function setClaudeDesktopRoutingIntent(enabled: boolean): void {
 export function enableClaudeDesktopRouting(
   home?: string,
 ): ApplyConfigLibraryResult {
-  ensureApiKey(DESKTOP_KEY_LABEL)
-  const result = applyConfigLibraryProfile(home)
+  const result = applyWithKey(home)
   if (!result.conflict) setClaudeDesktopRoutingIntent(true)
   return result
 }
@@ -59,6 +59,14 @@ export function disableClaudeDesktopRouting(home?: string): RevertResult {
   const result = revertConfigLibraryProfile(home)
   setClaudeDesktopRoutingIntent(false)
   return result
+}
+
+/** Apply with a real key: provision one first, but only for an apply that
+ *  will take effect — a refused enable shouldn't leave a key behind, and a
+ *  profile must never be written with an empty key. */
+function applyWithKey(home: string | undefined): ApplyConfigLibraryResult {
+  if (!configLibraryConflict(home)) ensureApiKey(DESKTOP_KEY_LABEL)
+  return applyConfigLibraryProfile(home)
 }
 
 /** Re-apply when the intent is on. A no-op unless something we write
@@ -70,7 +78,7 @@ function reapply(
 ): void {
   if (!intended) return
   try {
-    const result = applyConfigLibraryProfile(home)
+    const result = applyWithKey(home)
     if (result.conflict) {
       consola.warn(
         "claude-desktop: routing intent is on, but another gateway profile is"

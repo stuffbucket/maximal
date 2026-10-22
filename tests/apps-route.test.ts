@@ -63,6 +63,7 @@ const realApply = actualDesktop.applyConfigLibraryProfile
 const realRevert = actualDesktop.revertConfigLibraryProfile
 const realIsApplied = actualDesktop.isConfigLibraryApplied
 const realGetDir = actualDesktop.getClaude3pDir
+const realConflict = actualDesktop.configLibraryConflict
 // Wrappers forward ALL args (only defaulting the first `home` to the tmp
 // home) so this mock stays behaviorally identical to the real module.
 await mock.module("~/apps/claude-desktop/config", () => ({
@@ -79,6 +80,7 @@ await mock.module("~/apps/claude-desktop/config", () => ({
     home: string = ROUTE_3P_HOME,
     ...rest: Array<unknown>
   ) => (realIsApplied as (...a: Array<unknown>) => unknown)(home, ...rest),
+  configLibraryConflict: (home: string = ROUTE_3P_HOME) => realConflict(home),
   getClaude3pDir: (home: string = ROUTE_3P_HOME, ...rest: Array<unknown>) =>
     (realGetDir as (...a: Array<unknown>) => unknown)(home, ...rest),
 }))

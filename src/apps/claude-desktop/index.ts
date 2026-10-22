@@ -5,11 +5,7 @@ import { syncMcpClient } from "~/lib/mcp-broker/client-sync"
 import type { AppUninstallResult, ClientApp } from "../index"
 
 import { claudeDesktopCli } from "./cli"
-import {
-  DESKTOP_KEY_LABEL,
-  isConfigLibraryApplied,
-  revertConfigLibraryProfile,
-} from "./config"
+import { DESKTOP_KEY_LABEL, isConfigLibraryApplied } from "./config"
 import { claudeAppInstalled } from "./detect"
 import { claudeDesktopMcp } from "./mcp"
 import {
@@ -63,7 +59,8 @@ export const claudeDesktopApp: ClientApp = {
     // Desktop config, no-op when we never wired them. A profile the user
     // edited after we wrote it is left on disk.
     const reverted: Array<string> = []
-    const result = revertConfigLibraryProfile()
+    // Also clears the routing intent, so the next boot doesn't re-apply.
+    const result = disableClaudeDesktopRouting()
     if (result.reverted) {
       reverted.push(`removed our gateway profile from ${result.dir}`)
     }

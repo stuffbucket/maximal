@@ -16,6 +16,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
+import { claudeDesktopApp } from "~/apps/claude-desktop"
 import {
   applyConfigLibraryProfile,
   gatewayProfile,
@@ -24,10 +25,12 @@ import {
   readJsonObject,
 } from "~/apps/claude-desktop/config"
 import {
+  claudeDesktopRoutingIntended,
+  enableClaudeDesktopRouting,
   reconcileClaudeDesktopOnBoot,
   refreshClaudeDesktopApiKey,
 } from "~/apps/claude-desktop/reconcile"
-import { writeConfig } from "~/lib/config/config"
+import { getConfig, writeConfig } from "~/lib/config/config"
 import { setListeningPort } from "~/lib/start/proxy-port"
 
 let home: string
@@ -116,5 +119,45 @@ describe("refreshClaudeDesktopApiKey", () => {
   test("does nothing when routing is off", () => {
     refreshClaudeDesktopApiKey(false, home)
     expect(fs.existsSync(getClaude3pDir(home))).toBe(false)
+  })
+})
+
+describe("keys", () => {
+  test("re-applying never writes an empty key", () => {
+    writeConfig({})
+    reconcileClaudeDesktopOnBoot(true, home)
+    const key = appliedProfile()?.inferenceGatewayApiKey
+    expect(typeof key).toBe("string")
+    expect(key).not.toBe("")
+  })
+
+  test("a refused enable doesn't mint a key", () => {
+    writeConfig({})
+    const lib = path.join(getClaude3pDir(home), "configLibrary")
+    fs.mkdirSync(lib, { recursive: true })
+    fs.writeFileSync(
+      path.join(lib, "corp.json"),
+      JSON.stringify({ inferenceProvider: "gateway" }),
+    )
+    fs.writeFileSync(
+      path.join(lib, "_meta.json"),
+      JSON.stringify({
+        appliedId: "corp",
+        entries: [{ id: "corp", name: "Work" }],
+      }),
+    )
+
+    expect(enableClaudeDesktopRouting(home).conflict).toBe(
+      "foreign-gateway-profile",
+    )
+    expect(getConfig().auth?.apiKeyEntries ?? []).toEqual([])
+  })
+})
+
+describe("uninstall", () => {
+  test("clears the routing intent so the next boot doesn't re-apply", async () => {
+    writeConfig({ apps: { claudeDesktop: { enabled: true } } })
+    await claudeDesktopApp.uninstall()
+    expect(claudeDesktopRoutingIntended()).toBe(false)
   })
 })
