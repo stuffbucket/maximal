@@ -9,7 +9,7 @@
  * strict client (Claude Desktop's picker) reject the list and render empty.
  */
 
-import { beforeEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { Hono } from "hono"
 
 import type { Model } from "~/services/copilot/get-models"
@@ -74,6 +74,10 @@ interface Entry {
 }
 
 beforeEach(() => {
+  setModels({ object: "list", data: [richModel()] })
+})
+
+afterEach(() => {
   setModels({ object: "list", data: [richModel()] })
 })
 
