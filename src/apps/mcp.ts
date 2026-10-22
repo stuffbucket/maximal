@@ -338,7 +338,7 @@ export function catalogServer(
       `${entry.label} isn't installed. Install it with: ${entry.install(options).command}`,
     )
   }
-  return entry.template(found)
+  return entry.template(found, options)
 }
 
 /**

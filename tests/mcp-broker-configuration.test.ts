@@ -12,6 +12,7 @@ describe("brokerProcessEnvironment", () => {
     const environment = brokerProcessEnvironment({
       HOME: "/tmp/home",
       PATH: "/bin",
+      DBUS_SESSION_BUS_ADDRESS: "unix:path=/fixture/user-bus",
       GITHUB_TOKEN: "must-not-leak",
       MAXIMAL_SHELL_KEY: "must-not-leak",
     })
@@ -20,6 +21,7 @@ describe("brokerProcessEnvironment", () => {
       process.platform === "win32" ? undefined : "/tmp/home",
     )
     expect(environment.PATH).toBe("/bin")
+    expect(environment.DBUS_SESSION_BUS_ADDRESS).toBeUndefined()
     expect(environment.GITHUB_TOKEN).toBeUndefined()
     expect(environment.MAXIMAL_SHELL_KEY).toBeUndefined()
   })

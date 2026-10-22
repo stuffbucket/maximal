@@ -40,7 +40,10 @@ export interface McpCatalogEntry {
   locate(options?: CatalogDetectOptions): CatalogInstall | undefined
   /** The endpoint written to config.json when the user adds it. Off until
    *  the user turns it on and picks clients. */
-  template(install: CatalogInstall): McpServerConfig
+  template(
+    install: CatalogInstall,
+    options?: CatalogDetectOptions,
+  ): McpServerConfig
 }
 
 interface ResolvedOptions {
@@ -291,7 +294,8 @@ const workiq: McpCatalogEntry = {
       fromNpmGlobal(opts),
     ])
   },
-  template(install) {
+  template(install, options) {
+    const platform = options?.platform ?? process.platform
     return {
       id: "workiq",
       label: "Work IQ",
@@ -306,7 +310,16 @@ const workiq: McpCatalogEntry = {
         interaction: "interactive",
         ownership: "exclusive",
       },
-      environment: { inherit: ["HOME"] },
+      // Work IQ's Linux token cache uses libsecret on the user's session
+      // bus. Without its address, headless broker children cannot read the
+      // tokens saved by an interactive login. Inherit the address by name;
+      // never persist a machine-specific value or pass the full environment.
+      environment: {
+        inherit:
+          platform === "linux" ?
+            ["HOME", "DBUS_SESSION_BUS_ADDRESS"]
+          : ["HOME"],
+      },
     }
   },
 }
