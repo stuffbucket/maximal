@@ -256,8 +256,10 @@ export const handleWithResponsesApi = async (
         logger.warn(
           "Responses stream ended without completion; sending error event",
         )
+        // The upstream closed early — retryable, like a mid-stream drop.
         const errorEvent = buildErrorEvent(
           "Responses stream ended without completion",
+          "overloaded_error",
         )
         await stream.writeSSE({
           event: errorEvent.type,

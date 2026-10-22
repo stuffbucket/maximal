@@ -4,7 +4,16 @@ import type { ContentfulStatusCode } from "hono/utils/http-status"
 import consola from "consola"
 
 import { markAuthDegraded } from "~/lib/auth/auth-controller"
-import { adviseUpstreamError } from "~/lib/errors/upstream-error-advice"
+import {
+  anthropicErrorBody,
+  anthropicErrorType,
+  classifyUpstreamError,
+  isTransientUpstreamStatus,
+} from "~/lib/errors/anthropic-error"
+import {
+  adviseUpstreamError,
+  parseUpstreamError,
+} from "~/lib/errors/upstream-error-advice"
 import { state } from "~/lib/runtime-state/state"
 
 export class HTTPError extends Error {
@@ -52,14 +61,7 @@ export async function forwardError(
     // Forward the error to the client with the upstream status — the client
     // likely renders it (e.g. Claude Code's "API error" surface). Best-effort:
     // failures inside the handler must not block the client response.
-    try {
-      await markAuthDegraded(error)
-    } catch (handlerErr) {
-      consola.warn(
-        "markAuthDegraded failed while forwarding upstream error:",
-        handlerErr,
-      )
-    }
+    await degradeAuth(error)
     return c.json(
       {
         error: {
@@ -75,14 +77,7 @@ export async function forwardError(
   }
 
   if (error instanceof HTTPError) {
-    if (error.response.status === 429) {
-      for (const [name, value] of error.response.headers) {
-        const lowerName = name.toLowerCase()
-        if (lowerName === "retry-after" || lowerName.startsWith("x-")) {
-          c.header(name, value)
-        }
-      }
-    }
+    if (error.response.status === 429) relayRetryHeaders(c, error.response)
 
     const errorText = await error.response.text()
     let errorJson: unknown
@@ -123,4 +118,81 @@ export async function forwardError(
     },
     500,
   )
+}
+
+/**
+ * `forwardError` for the Anthropic-wire routes (`/v1/messages` and its
+ * `count_tokens`). Same side effects — auth-fatal degrades the account,
+ * rate-limit headers are relayed, recognizable errors get advice — but the
+ * body is Anthropic's typed envelope, transient upstream 5xx become a
+ * retryable 529 `overloaded_error`, and a context overflow is reworded so
+ * Claude Code compacts instead of stopping. See `anthropic-error.ts`.
+ */
+export async function forwardAnthropicError(
+  c: Context,
+  error: unknown,
+): Promise<Response> {
+  consola.error("Error occurred:", error)
+
+  if (error instanceof CopilotAuthFatalError) {
+    await degradeAuth(error)
+    const message =
+      error.remediationUrl ?
+        `${error.message} (${error.remediationUrl})`
+      : error.message
+    return c.json(
+      anthropicErrorBody(anthropicErrorType(error.status), message),
+      error.status as ContentfulStatusCode,
+    )
+  }
+
+  if (error instanceof HTTPError) {
+    const status = error.response.status
+    if (status === 429 || isTransientUpstreamStatus(status)) {
+      relayRetryHeaders(c, error.response)
+    }
+
+    const errorText = await error.response.text()
+    consola.error("HTTP error:", errorText)
+
+    const upstream = parseUpstreamError(status, errorText)
+    const classified = classifyUpstreamError(status, upstream.message)
+    // A reworded overflow must reach the client verbatim — Claude Code
+    // matches on its exact prefix — so advice only frames the other errors.
+    const reworded = classified.message !== upstream.message
+    const message =
+      reworded ?
+        classified.message
+      : (adviseUpstreamError(status, errorText, state.models?.data ?? [])
+        ?? classified.message)
+    return c.json(
+      anthropicErrorBody(classified.type, message),
+      classified.status as ContentfulStatusCode,
+    )
+  }
+
+  return c.json(anthropicErrorBody("api_error", (error as Error).message), 500)
+}
+
+/** Best-effort: a failure inside the auth handler must not block the client
+ *  response. */
+async function degradeAuth(error: CopilotAuthFatalError): Promise<void> {
+  try {
+    await markAuthDegraded(error)
+  } catch (handlerErr) {
+    consola.warn(
+      "markAuthDegraded failed while forwarding upstream error:",
+      handlerErr,
+    )
+  }
+}
+
+/** Relay `Retry-After` and the upstream's `x-*` rate-limit headers. */
+function relayRetryHeaders(c: Context, response: Response): void {
+  for (const [name, value] of response.headers) {
+    const lowerName = name.toLowerCase()
+    if (lowerName === "retry-after" || lowerName.startsWith("x-")) {
+      c.header(name, value)
+    }
+  }
 }

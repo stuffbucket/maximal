@@ -13,6 +13,7 @@ import {
   getProviderConfig,
   type ResolvedProviderConfig,
 } from "~/lib/config/config"
+import { anthropicErrorBody } from "~/lib/errors/anthropic-error"
 import { HTTPError } from "~/lib/errors/error"
 import { createHandlerLogger, debugJson } from "~/lib/platform/logger"
 import { parseUserIdMetadata } from "~/lib/platform/utils"
@@ -32,12 +33,10 @@ export async function handleProviderMessages(c: Context): Promise<Response> {
   const providerConfig = getProviderConfig(provider)
   if (!providerConfig) {
     return c.json(
-      {
-        error: {
-          message: `Provider '${provider}' not found or disabled`,
-          type: "invalid_request_error",
-        },
-      },
+      anthropicErrorBody(
+        "not_found_error",
+        `Provider '${provider}' not found or disabled`,
+      ),
       404,
     )
   }
