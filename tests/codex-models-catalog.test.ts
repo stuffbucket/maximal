@@ -229,6 +229,38 @@ describe("GET /v1/models?client_version= (Codex)", () => {
     expect(grok.default_reasoning_level).toBe("medium")
   })
 
+  test("every effort Copilot reports gets Codex-style wording, not its bare name", async () => {
+    setModels({
+      object: "list",
+      data: [
+        model({
+          id: "many-efforts",
+          capabilities: {
+            ...model({ id: "x" }).capabilities,
+            supports: {
+              reasoning_effort: [
+                "none",
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max",
+              ],
+            },
+          },
+        }),
+      ],
+    })
+    const { models } = await codexCatalog()
+    for (const level of entry(models, "many-efforts")
+      .supported_reasoning_levels as Array<{
+      effort: string
+      description: string
+    }>) {
+      expect(level.description).not.toBe(level.effort)
+    }
+  })
+
   test("a model with no reasoning efforts advertises none", async () => {
     setModels({
       object: "list",

@@ -38,15 +38,17 @@ const BUNDLED = new Map(
   (pinned.models as Array<CodexModelInfo>).map((entry) => [entry.slug, entry]),
 )
 
-/** Codex's descriptions for the efforts Copilot reports. */
-const EFFORT_DESCRIPTIONS: Readonly<Record<string, string>> = {
-  none: "No reasoning",
-  minimal: "Minimal reasoning for the fastest responses",
-  low: "Fast responses with lighter reasoning",
-  medium: "Balances speed and reasoning depth for everyday tasks",
-  high: "Greater reasoning depth for complex problems",
-  xhigh: "Extra high reasoning depth for complex problems",
-}
+/** Wording for each effort, taken from Codex's own entries so it follows a
+ *  re-pin; the fallbacks cover efforts Codex's catalog never describes. */
+const EFFORT_DESCRIPTIONS: ReadonlyMap<string, string> = new Map([
+  ["none", "No reasoning"],
+  ["minimal", "Minimal reasoning for the fastest responses"],
+  ...[...BUNDLED.values()].flatMap((entry) =>
+    (entry.supported_reasoning_levels as Array<ReasoningLevel>).map(
+      (level) => [level.effort, level.description] as const,
+    ),
+  ),
+])
 
 /** Settings in Codex's entries that assume OpenAI's own backend: WebSocket
  *  transport, Responses Lite, paid service tiers, hosted search. */
@@ -127,7 +129,7 @@ function fromCopilot(model: Model): CodexModelInfo {
   const limit = inputLimit(model)
   const levels = copilotEfforts(model).map((effort) => ({
     effort,
-    description: EFFORT_DESCRIPTIONS[effort] ?? effort,
+    description: EFFORT_DESCRIPTIONS.get(effort) ?? `${effort} reasoning`,
   }))
   const effort = defaultEffort(levels, undefined)
   return {
