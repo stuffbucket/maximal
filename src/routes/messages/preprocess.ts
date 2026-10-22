@@ -582,7 +582,9 @@ const stripCacheControl = (payload: AnthropicMessagesPayload): void => {
 }
 
 // Pre-request processing: filter thinking blocks for Claude models so only
-// valid thinking blocks are sent to the Copilot Messages API.
+// valid thinking blocks are sent to the Copilot Messages API, and rewrite any
+// top-level user tool_reference blocks (which Anthropic/Copilot Messages API
+// only permits nested inside tool_result.content[]) into text blocks.
 const filterAssistantThinkingBlocks = (
   payload: AnthropicMessagesPayload,
 ): void => {
@@ -597,6 +599,12 @@ const filterAssistantThinkingBlocks = (
           && !block.signature.includes("@")
         )
       })
+    } else if (msg.role === "user" && Array.isArray(msg.content)) {
+      msg.content = msg.content.map((block) =>
+        block.type === "tool_reference" ?
+          { type: "text", text: `Tool ${block.tool_name} loaded` }
+        : block,
+      )
     }
   }
 }

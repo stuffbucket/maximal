@@ -12,7 +12,12 @@ import type {
 
 import type { WebToolDecl } from "./types"
 
-import { TOOL_NAME, TOOL_TYPE, type ToolName } from "./vocab"
+import {
+  TOOL_NAME,
+  WEB_FETCH_TOOL_TYPES,
+  WEB_SEARCH_TOOL_TYPES,
+  type ToolName,
+} from "./vocab"
 
 // Tool declarations may carry a `type` field for server-side variants
 // that the inherited AnthropicTool type doesn't model; widen for read.
@@ -28,8 +33,8 @@ const EMPTY_POLICY: WebToolPolicy = {
 // so Copilot rejects and the client sees the underlying error.
 function isWebToolDecl(tool: RawTool): tool is RawTool & { type: string } {
   return (
-    (tool.type === TOOL_TYPE.webSearch && tool.name === TOOL_NAME.webSearch)
-    || (tool.type === TOOL_TYPE.webFetch && tool.name === TOOL_NAME.webFetch)
+    (WEB_SEARCH_TOOL_TYPES.has(tool.type) && tool.name === TOOL_NAME.webSearch)
+    || (WEB_FETCH_TOOL_TYPES.has(tool.type) && tool.name === TOOL_NAME.webFetch)
   )
 }
 
