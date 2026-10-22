@@ -1,5 +1,9 @@
 import { Hono } from "hono"
 
+import {
+  codexModelCatalog,
+  wantsCodexCatalog,
+} from "~/apps/codex/models-catalog"
 import { forwardError } from "~/lib/errors/error"
 import { isVariantId } from "~/lib/models/anthropic-id-rewrite"
 import { cacheModels } from "~/lib/platform/utils"
@@ -35,6 +39,15 @@ modelRoutes.get("/", async (c) => {
     // `anthropic-version` header / user-agent; everything else gets the
     // historical OpenAI default. Both shapes are built by explicit mappers
     // (`wire-models.ts`) so no raw Copilot field (billing, policy, …) leaks.
+    // Codex adds `?client_version=` and reads its own catalog from `models`.
+    // The OpenAI list stays alongside, so a misdetected caller loses nothing.
+    if (wantsCodexCatalog(c.req.url)) {
+      return c.json({
+        ...openAiModelList(models),
+        models: codexModelCatalog(models),
+      })
+    }
+
     return c.json(
       prefersAnthropicModels(c.req.raw.headers) ?
         anthropicModelList(models)

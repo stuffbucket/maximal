@@ -62,6 +62,35 @@ Routing intent is stored in Maximal's validated `config.json` under
 Normal shutdown temporarily reverts the owned routing while preserving intent
 for the next boot.
 
+## Model catalog
+
+Codex asks `/v1/models?client_version=<version>` for its own catalog shape
+(`{ "models": [ModelInfo] }`) and merges it into its bundled catalog, slug by
+slug. Maximal answers that request, and only that request, with a `models`
+list next to the usual OpenAI `data` list; without `client_version` every
+client gets exactly the shape it got before, embeddings included.
+
+The list covers the Copilot models that support the Responses API, since Codex
+speaks nothing else. Each entry needs Codex's system prompt, so, like LiteLLM
+and opencodex, Maximal answers from a pinned snapshot of Codex's own catalog
+in `src/apps/codex/data/codex-catalog.json` (openai/codex, Apache-2.0):
+
+- A model Codex already knows keeps Codex's entry (prompt, tool mode), with
+  its context window and reasoning efforts clipped to what Copilot serves and
+  the OpenAI-backend features Copilot can't honor turned off: WebSocket
+  transport, Responses Lite, the paid "Fast" service tier and hosted search.
+- Any other model gets Codex's own fallback prompt, the one Codex uses for an
+  unknown model anyway, plus Copilot's context window, efforts and image
+  support.
+
+Each entry sets `auto_review_model_override` to its own slug. Codex's
+automatic permission review runs at low effort and would otherwise ask for
+`codex-auto-review`, which Copilot doesn't serve; the task model reviews its
+own actions instead.
+
+Re-pin the snapshot when a Codex release changes the catalog shape or prompts:
+`bun scripts/pin-codex-catalog.ts <openai/codex tag>`.
+
 ## Generic model mappings
 
 `modelMappings` in Maximal's `config.json` aliases requested model IDs before
