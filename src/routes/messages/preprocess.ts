@@ -533,6 +533,8 @@ const stripCacheControlScope = (obj: unknown): void => {
 // Strips eager_input_streaming from tool definitions — injected by some
 // editors (e.g. Zed) but rejected by Copilot's backend.
 const stripCacheControl = (payload: AnthropicMessagesPayload): void => {
+  stripCacheControlScope(payload)
+
   if (Array.isArray(payload.system)) {
     for (const block of payload.system) {
       stripCacheControlScope(block)
@@ -549,6 +551,7 @@ const stripCacheControl = (payload: AnthropicMessagesPayload): void => {
   for (const msg of payload.messages) {
     if (!Array.isArray(msg.content)) continue
     for (const block of msg.content) {
+      stripCacheControlScope(block)
       if (block.type !== "tool_result" || !Array.isArray(block.content))
         continue
       for (const inner of block.content) {
