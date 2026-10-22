@@ -68,6 +68,16 @@ describe("macos installer templates", () => {
     expect(shim).toContain("setup --unattended --skip-auth")
   })
 
+  it("keeps its service private and does not edit shell profiles or PATH", () => {
+    const shim = read(FIRST_LAUNCH)
+    expect(shim).toContain("Library/Application Support/Maximal/bin/maximal")
+    expect(shim).not.toContain(".local/bin/maximal")
+    expect(shim).not.toContain(".zprofile")
+    expect(shim).not.toContain(".zshrc")
+    expect(shim).not.toContain("maximal PATH")
+    expect(shim).not.toContain("export PATH")
+  })
+
   it("launchd plist carries the sentinels first-launch substitutes", () => {
     const xml = read(LAUNCHD_PLIST)
     expect(xml).toContain("__HOME__")

@@ -17,13 +17,19 @@
  * being the same shape its corresponding GET endpoint returns.
  */
 
-import type { AuthStatus } from "~/lib/config/settings-types"
+import type {
+  AuthStatus,
+  PendingRequestsResponse,
+} from "~/lib/config/settings-types"
 
 import { EventBus } from "~/lib/runtime-state/event-bus"
 
 export interface SettingsEventMap {
   /** The full new auth status, identical to GET /settings/api/auth/github/status. */
   "auth.changed": AuthStatus
+  /** MCP servers' requests waiting for an answer, identical to
+   *  GET /settings/api/requests. */
+  "requests.changed": PendingRequestsResponse
 }
 
 export const settingsEventBus = new EventBus<SettingsEventMap>()

@@ -158,12 +158,10 @@ export function createCodexApp(options: CreateCodexAppOptions = {}): ClientApp {
     onBoot() {
       const provider = providerOptions()
       reconcileCodexOnBoot(undefined, provider.filePath, provider.execPath)
-      return Promise.resolve()
     },
 
     onShutdown() {
       reconcileCodexOnShutdown(undefined, providerOptions().filePath)
-      return Promise.resolve()
     },
   }
 }

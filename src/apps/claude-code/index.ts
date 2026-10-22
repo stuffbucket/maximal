@@ -1,5 +1,7 @@
 import type { AppEntry } from "~/lib/config/settings-types"
 
+import { syncMcpClient } from "~/lib/mcp-broker/client-sync"
+
 import type { AppUninstallResult, ClientApp } from "../index"
 
 import {
@@ -10,6 +12,7 @@ import {
   HELPER_LABEL,
 } from "./config"
 import { detectClaudeInstalls } from "./detect"
+import { claudeCodeMcp } from "./mcp"
 import {
   reconcileClaudeCodeOnBoot,
   reconcileClaudeCodeOnShutdown,
@@ -24,6 +27,7 @@ export const claudeCodeApp: ClientApp = {
   name: "Claude Code",
   kind: "config",
   apiKeyLabel: HELPER_LABEL,
+  mcp: claudeCodeMcp,
 
   detect() {
     const installs = detectClaudeInstalls()
@@ -64,24 +68,34 @@ export const claudeCodeApp: ClientApp = {
     // Persist intent only after settings are usable. In particular, a missing
     // API key must not leave boot reconciliation enabled for a route we could
     // not configure.
-    if (success) setClaudeCodeRoutingIntent(true)
+    if (success) {
+      setClaudeCodeRoutingIntent(true)
+      // Restore the MCP endpoints the user chose for Claude Code.
+      syncMcpClient(claudeCodeMcp)
+    }
     return Promise.resolve({ success, conflict })
   },
 
   disable() {
     const result = revertProxyBaseUrl()
     setClaudeCodeRoutingIntent(false)
+    syncMcpClient(claudeCodeMcp, { active: false })
     return Promise.resolve({ success: result.wrote })
   },
 
   uninstall(): Promise<AppUninstallResult> {
-    // Ownership-guarded: removes only the ANTHROPIC_BASE_URL block we wrote,
-    // no-op when absent or foreign. The installer PATH block is maximal's own
-    // artifact (not an app integration), so the uninstaller handles that.
+    // Ownership-guarded: removes only the ANTHROPIC_BASE_URL block and the MCP
+    // servers we wrote, no-op when absent or foreign. The installer PATH block
+    // is maximal's own artifact (not an app integration), so the uninstaller
+    // handles that.
     const reverted: Array<string> = []
     const result = revertProxyBaseUrl()
     if (result.wrote) {
       reverted.push(`reverted ${getClaudeCodeSettingsPath()}`)
+    }
+    const mcp = syncMcpClient(claudeCodeMcp, { active: false })
+    if (mcp.removed.length > 0) {
+      reverted.push(`removed our MCP servers: ${mcp.removed.join(", ")}`)
     }
     return Promise.resolve({ reverted })
   },
@@ -92,11 +106,9 @@ export const claudeCodeApp: ClientApp = {
 
   onBoot() {
     reconcileClaudeCodeOnBoot()
-    return Promise.resolve()
   },
 
   onShutdown() {
     reconcileClaudeCodeOnShutdown()
-    return Promise.resolve()
   },
 }

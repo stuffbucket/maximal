@@ -2,10 +2,14 @@ import consola from "consola"
 import fs from "node:fs"
 import path from "node:path"
 
+import { syncMcpClient } from "~/lib/mcp-broker/client-sync"
+
 import type { AppCli, AppCliOp } from "../index"
 
-import { applyConfigLibraryProfile, generateManagedProfile } from "./config"
+import { generateManagedProfile } from "./config"
 import { claudeAppInstalled, claudeAppCandidates } from "./detect"
+import { claudeDesktopMcp } from "./mcp"
+import { enableClaudeDesktopRouting } from "./reconcile"
 
 const MANAGED_PROFILE_OUT = "maximal-claude-3p.mobileconfig"
 
@@ -54,7 +58,15 @@ export const claudeDesktopCli: AppCli = {
 
 function apply(): void {
   try {
-    const result = applyConfigLibraryProfile()
+    const result = enableClaudeDesktopRouting()
+    if (result.conflict) {
+      consola.warn(
+        "Left Claude Desktop untouched: it's already using a gateway set up by"
+          + " you or another tool. Switch Claude Desktop to a different"
+          + " configuration, then re-run.",
+      )
+      return
+    }
     if (result.wrote) {
       consola.success(
         `Claude Desktop wired at the gateway (${result.dir}, profile ${result.profileId})`,
@@ -66,6 +78,11 @@ function apply(): void {
       consola.info(
         `  workspace folders: ${result.ensuredWorkspaceFolders.join(", ")}`,
       )
+    }
+    const mcp = syncMcpClient(claudeDesktopMcp)
+    const changed = [...mcp.added, ...mcp.removed]
+    if (changed.length > 0) {
+      consola.info(`  MCP servers updated: ${changed.join(", ")}`)
     }
     consola.info(
       "  Quit & relaunch Claude Desktop for the change to take effect.",

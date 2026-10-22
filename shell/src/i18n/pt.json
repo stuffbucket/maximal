@@ -6,6 +6,8 @@
 
   "nav-account": "Conta",
   "nav-apps": "Aplicativos",
+  "nav-mcp": "Servidores MCP",
+  "nav-requests": "Solicitações",
   "nav-endpoint": "Endpoint",
   "nav-api-clients": "Chaves de API",
   "nav-models": "Modelos",
@@ -125,6 +127,7 @@
   "apps-conflict-existing-title": "Mantivemos sua configuração atual",
   "apps-conflict-base-url": "O {appName} já tem um valor personalizado de ANTHROPIC_BASE_URL definido por você ou por outra ferramenta, por isso o Maximal não o alterou. Remova essa configuração e ative o roteamento novamente.",
   "apps-conflict-api-key-helper": "O {appName} já tem um valor personalizado de apiKeyHelper definido por você ou por outra ferramenta, por isso o Maximal não o alterou. Remova essa configuração e ative o roteamento novamente.",
+  "apps-conflict-gateway-profile": "O {appName} já usa um gateway configurado por você ou por outra ferramenta, por isso o Maximal não o trocou. Escolha outra configuração no {appName} e ative o roteamento novamente.",
   "apps-conflict-cleanup-title": "Limpeza manual necessária",
   "apps-conflict-cleanup-detail": "O Maximal parou de rotear o {appName}, mas preservou as configurações alteradas após a instalação. Revise as configurações do aplicativo e remova manualmente a entrada de roteamento do Maximal antes de tentar novamente.",
   "apps-codex-shared-setting": "A CLI e o aplicativo de desktop compartilham a mesma configuração.",
@@ -136,6 +139,11 @@
   "apps-restart-after-disable": "Depois de desativar o roteamento, execute {exitCommand} no Claude Code e inicie-o novamente para que a alteração entre em vigor.",
   "apps-disable-routing": "Desativar roteamento",
   "apps-keep-on": "Manter ativado",
+
+  "mcp-title": "Servidores MCP",
+  "mcp-sub": "Compartilhe servidores de ferramentas como o Work IQ com seus aplicativos. Ative um e escolha quais aplicativos o recebem; desative-o e nós o removemos.",
+  "requests-title": "Solicitações",
+  "requests-sub": "Quando um servidor MCP faz uma pergunta que o aplicativo que o usa não consegue mostrar, ela aguarda sua resposta aqui.",
 
   "endpoint-title": "Endpoint",
   "endpoint-sub": "Onde o Maximal escuta. Use estes valores ao configurar uma ferramenta que não esteja na lista de Aplicativos.",
@@ -245,6 +253,11 @@
   "dashboard-quota-unlimited": "Sem limite",
   "dashboard-quota-percent-used": "{percent}% usado",
   "dashboard-quota-remaining": "{n} restante(s)",
+  "dashboard-quota-resets": "Reinicia em {date}",
+  "dashboard-quota-period-ended": "Período encerrado em {date}",
+  "dashboard-quota-as-of": "Atualizado às {time}",
+  "dashboard-rate-per-minute": "{n} tokens/min",
+  "dashboard-rate-sparkline-label": "Tokens por minuto nos últimos 15 minutos",
 
   "dashboard-api-response-title": "Resposta da API de uso",
 
@@ -308,6 +321,7 @@
   "native-tray-retry": "Tentar iniciar novamente",
   "native-tray-show-logs": "Ver registros…",
   "native-tray-open-config": "Abrir pasta de configuração…",
+  "native-tray-requests": "Responder solicitações…",
 
   "native-tooltip-starting": "maximal — iniciando…",
   "native-tooltip-sign-in": "maximal — inicie sessão no GitHub",
@@ -315,6 +329,7 @@
   "native-tooltip-failed": "maximal — o sidecar falhou",
   "native-tooltip-stopped": "maximal — parado",
   "native-tooltip-rejection": "maximal — {message}",
+  "native-tooltip-requests": "maximal — um servidor MCP aguarda sua resposta",
 
   "native-notify-startup-title": "O Maximal está em execução",
   "native-notify-startup-body-macos": "Procure o ícone do Maximal na sua barra de menus ↑",
@@ -330,6 +345,11 @@
   "native-notify-rejection-title": "Maximal",
   "native-notify-rejection-body": "Uma solicitação upstream do Copilot foi rejeitada. Abra as Configurações para ver os detalhes.",
   "native-notify-rejection-body-detail": "{message} — abra as Configurações para ver os detalhes.",
+  "native-notify-working-title": "O Maximal está funcionando",
+  "native-notify-working-body": "Sua primeira solicitação acabou de passar.",
+  "native-notify-working-body-apps": "As solicitações estão passando: {apps} já pode usar o Maximal.",
+  "native-notify-requests-title": "Um servidor MCP aguarda sua resposta",
+  "native-notify-requests-body": "Abra Solicitações nas Configurações do Maximal para responder.",
 
   "native-quit-title": "Sair do Maximal?",
   "native-quit-body": "O Maximal será interrompido e todas as janelas de Configurações abertas serão fechadas.",

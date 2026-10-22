@@ -1,6 +1,7 @@
 import type { ArgsDef } from "citty"
 
 import type { AppEntry } from "~/lib/config/settings-types"
+import type { McpClientConfigurator } from "~/lib/mcp-broker/client-sync"
 
 /** The mutation a `maximal app <client>` invocation asks for. `status` is the
  *  default (no flag) — show the client's detect/enabled state without changing
@@ -70,14 +71,18 @@ export interface ClientApp {
   uninstall(): Promise<AppUninstallResult>
 
   /** Optional hook called when the proxy starts up */
-  onBoot?(): Promise<void>
+  onBoot?(): void
 
   /** Optional hook called when the proxy shuts down (for crash cleanup) */
-  onShutdown?(): Promise<void>
+  onShutdown?(): void
 
   /** Optional hook into the generic `maximal app <client>` command for apps
    *  that need extra flags or bespoke handling beyond the shared
    *  status/enable/disable (see `AppCli`). Absent for apps that only need the
    *  generic behaviour. */
   cli?: AppCli
+
+  /** Writes Maximal's brokered MCP endpoints into this client's own MCP
+   *  configuration and reverts them. Absent for clients without MCP support. */
+  mcp?: McpClientConfigurator
 }

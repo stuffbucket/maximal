@@ -13,11 +13,16 @@ import type { AuthStatus, EventSubscription, UpstreamRejection } from "./proxy/c
 import { apiCall, subscribeAuthEvents } from "./proxy/client";
 import { mountApiClients } from "./ui/islands/api-clients-island";
 import { mountApps } from "./ui/islands/apps-island";
+import { mountMcp } from "./ui/islands/mcp-island";
 import { mountModels } from "./ui/islands/models-island";
+import { mountRequests } from "./ui/islands/requests-island";
+import { waitForSidecarBack } from "./ui/restart";
 
 type SectionId =
   | "account"
   | "apps"
+  | "mcp"
+  | "requests"
   | "endpoint"
   | "api-clients"
   | "models"
@@ -27,6 +32,8 @@ type SectionId =
 const SECTIONS: ReadonlyArray<SectionId> = [
   "account",
   "apps",
+  "mcp",
+  "requests",
   "endpoint",
   "api-clients",
   "models",
@@ -139,7 +146,6 @@ function renderStaticComposites(): void {
   renderRequirementCallout();
   renderEndpointHint();
   renderLogsCopy();
-  renderUninstallCopy();
   renderGhReuseSub();
 }
 
@@ -257,22 +263,6 @@ function renderLogsCopy(): void {
   fillWithNode(hint, "logs-where-hint", "tailCmd", monoCode("tail -F"));
 }
 
-/** Uninstall card copy: the intro hint (with a `maximal` <code> token) and the
- *  terminal hint (with a `maximal uninstall` <code> command). */
-function renderUninstallCopy(): void {
-  const hint = document.querySelector<HTMLElement>('[data-field="uninstall_hint"]');
-  fillWithNode(hint, "uninstall-hint", "cliName", monoCode("maximal"));
-  const terminal = document.querySelector<HTMLElement>(
-    '[data-field="uninstall_terminal_hint"]',
-  );
-  fillWithNode(
-    terminal,
-    "uninstall-terminal-hint",
-    "uninstallCmd",
-    monoCode("maximal uninstall"),
-  );
-}
-
 function wireLogs(): void {
   const revealLogs = () => {
     void safeInvoke("reveal_logs_dir");
@@ -284,7 +274,10 @@ function wireLogs(): void {
 
 // ---- Endpoint section ------------------------------------------------------
 
-const ENDPOINT_BASE_URL = "http://127.0.0.1:4141";
+/** Where clients reach Maximal. The proxy serves this page, so its port is
+ *  the one to show: 4141 normally, another one for a dev build started
+ *  with MAXIMAL_DEV_PORT. */
+const ENDPOINT_BASE_URL = `http://127.0.0.1:${window.location.port || "4141"}`;
 /** Log retention window (days). Drives the plural copy in the Logs section. */
 const LOG_RETENTION_DAYS = 7;
 let endpointApiKey: string | null = null;
@@ -360,7 +353,7 @@ async function runInAppUninstall(): Promise<void> {
   // it can't surface the CLI's refuse-while-apps-enabled prompt, so it disables
   // + reverts every app integration through the registry. So "reverts app
   // integrations" is always part of the summary, not an opt-in.
-  const clauses = [t("uninstall-clause-cli"), t("uninstall-clause-integrations")];
+  const clauses = [t("uninstall-clause-integrations")];
   if (purge) clauses.push(t("uninstall-clause-purge"));
   // The connector ("…, and X") is a catalog term, not a hardcoded ", and " —
   // so a language that joins lists differently can override it.
@@ -382,7 +375,7 @@ async function runInAppUninstall(): Promise<void> {
     // generic message in plain-browser (app:ui, no Tauri host). Surface it
     // inline rather than leaving the user with no feedback.
     console.warn("invoke(uninstall_maximal) failed:", err);
-    setUninstallError(t("uninstall-err", { error: String(err) }));
+    setUninstallError(String(err));
   } finally {
     setBusy(false);
   }
@@ -402,6 +395,9 @@ function showUninstallComplete(): void {
 function wireEndpoint(): void {
   const section = document.querySelector('[data-section="endpoint"]');
   if (!section) return;
+
+  const baseUrl = section.querySelector('[data-field="endpoint-base-url"]');
+  if (baseUrl) baseUrl.textContent = ENDPOINT_BASE_URL;
 
   section
     .querySelector('[data-action="copy-base-url"]')
@@ -450,15 +446,6 @@ function wireEndpoint(): void {
       ].join("\n");
       void copyToClipboard(curl, ev.currentTarget as Element);
     });
-}
-
-function applyTheme(): void {
-  const root = document.documentElement;
-  if (root.dataset.theme) return;
-  const prefersLight =
-    window.matchMedia &&
-    window.matchMedia("(prefers-color-scheme: light)").matches;
-  root.dataset.theme = prefersLight ? "light" : "dark";
 }
 
 // ---- Diagnostics section ---------------------------------------------------
@@ -593,7 +580,7 @@ async function loadDiagnostics(): Promise<void> {
   });
   root.setAttribute("aria-busy", "false");
   if (!result.ok) {
-    setDiagnosticsError(t("diagnostics-err-load", { error: result.error }));
+    setDiagnosticsError(t("diagnostics-err-load", { error: apiErrorMessage(result.error) }));
     return;
   }
   lastDiagnostics = result.data;
@@ -1838,27 +1825,6 @@ async function signOut(): Promise<void> {
   }
 }
 
-/** Poll auth-status until the sidecar responds again (it's down mid-reboot),
- *  up to `timeoutMs`. Used to keep the busy indicator honest across a restart
- *  without changing what's rendered. */
-async function waitForSidecarBack(timeoutMs: number): Promise<void> {
-  const deadlineMs = Date.now() + timeoutMs;
-  let sawDown = false;
-  while (Date.now() < deadlineMs) {
-    await new Promise((resolve) => setTimeout(resolve, 800));
-    const poll = await apiCall({
-      kind: "auth-status",
-      method: "GET",
-      path: "/settings/api/auth/github/status",
-    });
-    if (!poll.ok) {
-      sawDown = true; // restarting
-      continue;
-    }
-    if (sawDown) return; // went down and came back → reboot complete
-  }
-}
-
 /**
  * Shared sign-out path used by both the explicit "Sign out" button and
  * the "Sign in as a different account" affordance. Returns true on
@@ -2004,7 +1970,6 @@ function wireAccount(): void {
 }
 
 window.addEventListener("DOMContentLoaded", () => {
-  applyTheme();
   applyI18n();
   // Sentences that embed a link/CLI token or a plural count aren't [data-i18n]
   // (they carry live DOM children); render them explicitly after the sweep.
@@ -2017,6 +1982,8 @@ window.addEventListener("DOMContentLoaded", () => {
   wireUninstall();
   mountApiClients();
   mountApps();
+  mountMcp();
+  mountRequests();
   mountModels();
   wireNav();
   syncFromHash();
@@ -2033,6 +2000,12 @@ window.addEventListener("hashchange", () => {
   if (section === "diagnostics") void loadDiagnostics();
   if (section === "apps") {
     window.dispatchEvent(new CustomEvent("maximal:apps-refresh"));
+  }
+  if (section === "requests") {
+    window.dispatchEvent(new CustomEvent("maximal:requests-refresh"));
+  }
+  if (section === "mcp") {
+    window.dispatchEvent(new CustomEvent("maximal:mcp-refresh"));
   }
   if (section === "models") {
     window.dispatchEvent(new CustomEvent("maximal:models-refresh"));

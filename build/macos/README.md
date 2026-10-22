@@ -7,7 +7,9 @@
 - `Contents/Info.plist` contains `__VERSION__`, replaced during assembly.
 - `Contents/MacOS/maximal.placeholder` marks where the compiled `maximal`
   binary is installed.
-- `Contents/MacOS/first-launch` installs the bundled CLI and launch agent.
+- `Contents/MacOS/first-launch` installs the app's service binary and launch
+  agent. It does not expose a terminal command or edit shell PATH; Homebrew owns
+  CLI installation separately.
 - `Contents/Resources/co.stuffbucket.maximal.plist` contains `__HOME__` and
   `__INSTALL_BIN__`, replaced by `first-launch`.
 - `Contents/Resources/AppIcon.icns` is the application icon.

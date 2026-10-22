@@ -6,6 +6,8 @@
 
   "nav-account": "Учётная запись",
   "nav-apps": "Приложения",
+  "nav-mcp": "Серверы MCP",
+  "nav-requests": "Запросы",
   "nav-endpoint": "Endpoint",
   "nav-api-clients": "Ключи API",
   "nav-models": "Модели",
@@ -125,6 +127,7 @@
   "apps-conflict-existing-title": "Существующая настройка сохранена",
   "apps-conflict-base-url": "Для {appName} уже задано пользовательское значение ANTHROPIC_BASE_URL вами или другим инструментом, поэтому Maximal не стал его менять. Удалите эту настройку и снова включите маршрутизацию.",
   "apps-conflict-api-key-helper": "Для {appName} уже задано пользовательское значение apiKeyHelper вами или другим инструментом, поэтому Maximal не стал его менять. Удалите эту настройку и снова включите маршрутизацию.",
+  "apps-conflict-gateway-profile": "{appName} уже использует шлюз, настроенный вами или другим инструментом, поэтому Maximal не стал его переключать. Выберите другую конфигурацию в {appName} и снова включите маршрутизацию.",
   "apps-conflict-cleanup-title": "Требуется ручная очистка",
   "apps-conflict-cleanup-detail": "Maximal прекратил маршрутизацию {appName}, но сохранил настройки, изменённые после подключения. Проверьте настройки приложения и вручную удалите запись маршрутизации Maximal, прежде чем повторить попытку.",
   "apps-codex-shared-setting": "CLI и приложение для рабочего стола используют одну настройку.",
@@ -136,6 +139,11 @@
   "apps-restart-after-disable": "После отключения маршрутизации выполните {exitCommand} в Claude Code и запустите Claude Code снова, чтобы изменение вступило в силу.",
   "apps-disable-routing": "Отключить маршрутизацию",
   "apps-keep-on": "Оставить включённым",
+
+  "mcp-title": "Серверы MCP",
+  "mcp-sub": "Делитесь серверами инструментов, например Work IQ, с вашими приложениями. Включите сервер и выберите, какие приложения его получат; выключите — и мы его уберём.",
+  "requests-title": "Запросы",
+  "requests-sub": "Если MCP-сервер задаёт вам вопрос, который использующее его приложение не может показать, вопрос ждёт вашего ответа здесь.",
 
   "endpoint-title": "Endpoint",
   "endpoint-sub": "Где слушает Maximal. Используйте эти значения при настройке инструмента, которого нет в списке приложений.",
@@ -245,6 +253,11 @@
   "dashboard-quota-unlimited": "Без ограничений",
   "dashboard-quota-percent-used": "Использовано {percent} %",
   "dashboard-quota-remaining": "осталось {n}",
+  "dashboard-quota-resets": "Сброс {date}",
+  "dashboard-quota-period-ended": "Период закончился {date}",
+  "dashboard-quota-as-of": "Данные на {time}",
+  "dashboard-rate-per-minute": "{n} токенов/мин",
+  "dashboard-rate-sparkline-label": "Токенов в минуту за последние 15 минут",
 
   "dashboard-api-response-title": "Ответ API использования",
 
@@ -308,6 +321,7 @@
   "native-tray-retry": "Повторить запуск",
   "native-tray-show-logs": "Показать журналы…",
   "native-tray-open-config": "Открыть папку конфигурации…",
+  "native-tray-requests": "Ответить на запросы…",
 
   "native-tooltip-starting": "maximal — запуск…",
   "native-tooltip-sign-in": "maximal — войдите в GitHub",
@@ -315,6 +329,7 @@
   "native-tooltip-failed": "maximal — sidecar не запустился",
   "native-tooltip-stopped": "maximal — остановлено",
   "native-tooltip-rejection": "maximal — {message}",
+  "native-tooltip-requests": "maximal — MCP-сервер ждёт вашего ответа",
 
   "native-notify-startup-title": "Maximal работает",
   "native-notify-startup-body-macos": "Ищите значок Maximal в строке меню ↑",
@@ -330,6 +345,11 @@
   "native-notify-rejection-title": "Maximal",
   "native-notify-rejection-body": "Вышестоящий запрос Copilot был отклонён. Откройте Настройки для получения деталей.",
   "native-notify-rejection-body-detail": "{message} — откройте Настройки для получения деталей.",
+  "native-notify-working-title": "Maximal работает",
+  "native-notify-working-body": "Ваш первый запрос только что прошёл.",
+  "native-notify-working-body-apps": "Запросы проходят: {apps} теперь может использовать Maximal.",
+  "native-notify-requests-title": "MCP-сервер ждёт вашего ответа",
+  "native-notify-requests-body": "Откройте «Запросы» в Настройках Maximal, чтобы ответить.",
 
   "native-quit-title": "Выйти из Maximal?",
   "native-quit-body": "Maximal остановится, и все открытые окна Настроек закроются.",

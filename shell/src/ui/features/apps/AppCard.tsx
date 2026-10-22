@@ -38,6 +38,11 @@ function conflictCopy(app: AppEntry): { title: string; detail: string } | null {
         title: t("apps-conflict-cleanup-title"),
         detail: t("apps-conflict-cleanup-detail", { appName: app.name }),
       };
+    case "foreign-gateway-profile":
+      return {
+        title: t("apps-conflict-existing-title"),
+        detail: t("apps-conflict-gateway-profile", { appName: app.name }),
+      };
     case null:
       return null;
   }

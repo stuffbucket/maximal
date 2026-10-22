@@ -23,6 +23,9 @@
  *     user can correlate the symptom they likely just experienced
  *     ("`claude` was broken") with the cause.
  *
+ * The sentinel also records the port the running instance listens on, so
+ * another process (e.g. the CLI) can address it: see `runningSessionPort`.
+ *
  * This doesn't auto-recover the inter-session window — only an
  * external watchdog (launchd, the Tauri shell observing sidecar
  * death) can do that without the sidecar's cooperation. But it
@@ -43,13 +46,14 @@ function sentinelPath(): string {
 
 /** Write the sentinel file. Idempotent (overwrites). Best-effort —
  *  a failed write here must not abort boot. */
-export function markSessionRunning(): void {
+export function markSessionRunning(port?: number): void {
   try {
     fs.mkdirSync(PATHS.APP_DIR, { recursive: true })
     fs.writeFileSync(
       sentinelPath(),
       JSON.stringify({
         pid: process.pid,
+        ...(port === undefined ? {} : { port }),
         started_at: new Date().toISOString(),
       }),
     )
@@ -77,5 +81,31 @@ export function staleSessionMarkerPresent(): boolean {
     return fs.existsSync(sentinelPath())
   } catch {
     return false
+  }
+}
+
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    // EPERM: it exists but belongs to someone else.
+    return (error as NodeJS.ErrnoException).code === "EPERM"
+  }
+}
+
+/** The port of the Maximal instance that wrote the sentinel, when that
+ *  process is still alive; undefined when none is running (or a crashed
+ *  run left the sentinel behind). */
+export function runningSessionPort(): number | undefined {
+  try {
+    // eslint-disable-next-line unicorn/prefer-json-parse-buffer -- JSON.parse's type only accepts string
+    const parsed: unknown = JSON.parse(fs.readFileSync(sentinelPath(), "utf8"))
+    const { pid, port } = (parsed ?? {}) as { pid?: unknown; port?: unknown }
+    if (typeof pid !== "number" || typeof port !== "number") return undefined
+    if (!Number.isInteger(port) || port < 1 || port > 65_535) return undefined
+    return processAlive(pid) ? port : undefined
+  } catch {
+    return undefined
   }
 }

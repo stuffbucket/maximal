@@ -1,12 +1,25 @@
 import consola from "consola"
 import fs from "node:fs"
 
+import type { McpBrokerConfig } from "~/lib/mcp-broker/types"
+
 import {
   ConfigValidationError,
   detectUnknownKeys,
   validateAppConfig,
 } from "~/lib/config/config-schema"
 import { PATHS } from "~/lib/platform/paths"
+
+export type {
+  McpBrokerConfig,
+  McpElicitationAction,
+  McpElicitationMechanism,
+  McpElicitationRule,
+  McpInteractionMode,
+  McpOwnershipMode,
+  McpProtocolMode,
+  McpServerConfig,
+} from "~/lib/mcp-broker/types"
 
 export interface ApiKeyEntry {
   id: string
@@ -75,6 +88,7 @@ export interface AppConfig {
   checkUpdates?: boolean
   editorVersion?: string
   apps?: AppsConfig
+  mcpBroker?: McpBrokerConfig
 }
 
 export interface AppsConfig {
@@ -86,10 +100,14 @@ export interface AppsConfig {
     /** Proxy routing applied to Claude Code (env.ANTHROPIC_BASE_URL in
      *  ~/.claude/settings.json). */
     enabled?: boolean
+    /** MCP endpoint ids Maximal added to Claude Code's user scope. */
+    mcpServers?: Array<string>
   }
   claudeDesktop?: {
     /** Proxy config applied to Claude Desktop. */
     enabled?: boolean
+    /** MCP endpoint ids Maximal added to Claude Desktop's config. */
+    mcpServers?: Array<string>
   }
 }
 
@@ -325,6 +343,13 @@ export function mergeConfigWithDefaults(): AppConfig {
 
 export function getConfig(): AppConfig {
   cachedConfig ??= readConfigFromDisk()
+  return cachedConfig
+}
+
+/** Re-read `config.json` after another process (e.g. the CLI) changed it,
+ *  so the next `getConfig()` sees the edit. */
+export function reloadConfig(): AppConfig {
+  cachedConfig = readConfigFromDisk()
   return cachedConfig
 }
 

@@ -146,74 +146,83 @@ describe("uninstall — Claude Code settings revert integration", () => {
 })
 
 describe("uninstall — install-target selection (--keep-app)", () => {
-  const home = os.homedir()
+  const home = path.join(os.tmpdir(), "maximal-install-target-home")
   const symlinkPath = path.join(home, ".local", "bin", "maximal")
-  const appBundlePath = "/Applications/maximal.app"
+  const servicePath = path.join(
+    home,
+    "Library",
+    "Application Support",
+    "Maximal",
+    "bin",
+    "maximal",
+  )
+  const appBundlePath = path.join(home, "Applications", "Maximal.app")
 
-  it("default removal targets the .app bundle and the PATH symlink", async () => {
+  it("targets only app-owned macOS locations", async () => {
     const { installTargets } = await import("~/uninstall")
-    if (process.platform === "win32") return // .app path is macOS/Linux only
-    const paths = installTargets().map((t) => t.path)
-    expect(paths).toContain(symlinkPath)
-    expect(paths).toContain(appBundlePath)
+    const paths = installTargets({
+      homeDir: home,
+      platform: "darwin",
+      appBundlePath,
+    }).map((target) => target.path)
+    expect(paths).toEqual([symlinkPath, servicePath, appBundlePath])
+    expect(paths).not.toContain("/opt/homebrew/bin/maximal")
+    expect(paths).not.toContain("/usr/local/bin/maximal")
   })
 
-  it("--keep-app leaves the .app bundle untouched but still removes the symlink", async () => {
+  it("--keep-app preserves only the running bundle", async () => {
     const { installTargets } = await import("~/uninstall")
-    if (process.platform === "win32") return
-    const paths = installTargets({ keepApp: true }).map((t) => t.path)
-    // The running bundle survives…
-    expect(paths).not.toContain(appBundlePath)
-    expect(paths.some((p) => p.endsWith(".app"))).toBe(false)
-    // …but the on-PATH CLI symlink (and the other PATH binaries) still go.
-    expect(paths).toContain(symlinkPath)
-    expect(paths).toContain("/opt/homebrew/bin/maximal")
+    const paths = installTargets({
+      homeDir: home,
+      platform: "darwin",
+      appBundlePath,
+      keepApp: true,
+    }).map((target) => target.path)
+    expect(paths).toEqual([symlinkPath, servicePath])
+  })
+
+  it("leaves Linux package-manager binaries to their installer", async () => {
+    const { installTargets } = await import("~/uninstall")
+    expect(installTargets({ homeDir: home, platform: "linux" })).toEqual([])
+  })
+
+  it("leaves Windows package files to their installer", async () => {
+    const { installTargets } = await import("~/uninstall")
+    expect(
+      installTargets({
+        platform: "win32",
+        homeDir: String.raw`C:\Users\fixture`,
+      }),
+    ).toEqual([])
   })
 })
 
-describe("uninstall — first-launch installer PATH block removal", () => {
-  it("strips the # >>> maximal PATH >>> block, preserving other rc content", async () => {
-    const { removeFirstLaunchPathBlock } = await import("~/uninstall")
-    const zshrc = path.join(workDir, ".zshrc")
-    fs.writeFileSync(
-      zshrc,
-      "# my stuff\nexport FOO=bar\n\n"
-        + "# >>> maximal PATH >>>\n"
-        + 'export PATH="$HOME/.local/bin:$PATH"\n'
-        + "# <<< maximal PATH <<<\n",
+describe("uninstall — historical app CLI ownership", () => {
+  it("recognizes only symlinks into Maximal.app", async () => {
+    if (process.platform === "win32") return
+    const { isAppOwnedCliSymlink } = await import("~/uninstall")
+    const owned = path.join(workDir, "owned")
+    const lowercaseOwned = path.join(workDir, "lowercase-owned")
+    const suffixOnly = path.join(workDir, "suffix-only")
+    const foreign = path.join(workDir, "foreign")
+    const regular = path.join(workDir, "regular")
+    fs.symlinkSync("/Applications/Maximal.app/Contents/MacOS/maximal", owned)
+    fs.symlinkSync(
+      "/Applications/maximal.app/Contents/MacOS/maximal",
+      lowercaseOwned,
     )
-
-    const modified = removeFirstLaunchPathBlock(workDir)
-    expect(modified).toContain(zshrc)
-
-    const after = fs.readFileSync(zshrc, "utf8")
-    expect(after).toContain("export FOO=bar") // user content preserved
-    expect(after).not.toContain("maximal PATH") // our block gone
-    expect(after).not.toContain(".local/bin")
-  })
-
-  it("no-ops (returns []) when the block isn't present", async () => {
-    const { removeFirstLaunchPathBlock } = await import("~/uninstall")
-    fs.writeFileSync(path.join(workDir, ".zshrc"), "export FOO=bar\n")
-    expect(removeFirstLaunchPathBlock(workDir)).toEqual([])
-  })
-
-  it("touches only the # >>> maximal PATH >>> block, leaving other content", async () => {
-    const { removeFirstLaunchPathBlock } = await import("~/uninstall")
-    const zshrc = path.join(workDir, ".zshrc")
-    // Installer block plus an unrelated user PATH line that must survive.
-    fs.writeFileSync(
-      zshrc,
-      "# >>> maximal PATH >>>\n"
-        + 'export PATH="$HOME/.local/bin:$PATH"\n'
-        + "# <<< maximal PATH <<<\n"
-        + 'export PATH="$HOME/mytools:$PATH"\n',
+    fs.symlinkSync(
+      path.join(workDir, "Maximal.app", "Contents", "MacOS", "maximal"),
+      suffixOnly,
     )
+    fs.symlinkSync("/opt/homebrew/bin/maximal", foreign)
+    fs.writeFileSync(regular, "user owned\n")
 
-    removeFirstLaunchPathBlock(workDir)
-    const after = fs.readFileSync(zshrc, "utf8")
-    expect(after).not.toContain("maximal PATH") // installer block removed
-    expect(after).toContain("mytools") // unrelated user line untouched
+    expect(isAppOwnedCliSymlink(owned)).toBe(true)
+    expect(isAppOwnedCliSymlink(lowercaseOwned)).toBe(true)
+    expect(isAppOwnedCliSymlink(suffixOnly)).toBe(false)
+    expect(isAppOwnedCliSymlink(foreign)).toBe(false)
+    expect(isAppOwnedCliSymlink(regular)).toBe(false)
   })
 })
 
@@ -358,6 +367,10 @@ describe("uninstall — runUninstall precondition gate (refusal path only)", () 
         force: false,
         unattended: true,
         keepApp: false,
+        homeDir: workDir,
+        platform: "linux",
+        appBundlePath: path.join(workDir, "Applications", "Maximal.app"),
+        dataDir: path.join(workDir, "data"),
       })
     } catch (err) {
       caught = err
@@ -385,7 +398,7 @@ describe("uninstall — runUninstall precondition gate (refusal path only)", () 
   describe("gate PASSES end-to-end (destructive steps mocked)", () => {
     const restore: Array<() => void> = []
 
-    function neutralizeDestructiveSteps(): void {
+    function neutralizeDestructiveSteps() {
       const spawnSpy = spyOn(childProcess, "spawnSync").mockReturnValue({
         status: 0,
         stdout: "",
@@ -409,6 +422,7 @@ describe("uninstall — runUninstall precondition gate (refusal path only)", () 
         () => existsSpy.mockRestore(),
         () => rmSpy.mockRestore(),
       )
+      return { existsSpy, lstatSpy, spawnSpy }
     }
 
     afterEach(() => {
@@ -416,7 +430,7 @@ describe("uninstall — runUninstall precondition gate (refusal path only)", () 
     })
 
     it("force=true with apps enabled does NOT throw and runs the disable→sweep", async () => {
-      neutralizeDestructiveSteps()
+      const { existsSpy, lstatSpy, spawnSpy } = neutralizeDestructiveSteps()
       const disable = mock(() => Promise.resolve({ success: true }))
       const uninstall = mock(() => Promise.resolve({ reverted: [] }))
       await mock.module("~/apps/registry", () => ({
@@ -440,7 +454,26 @@ describe("uninstall — runUninstall precondition gate (refusal path only)", () 
         force: true,
         unattended: true,
         keepApp: false,
+        homeDir: workDir,
+        platform: "darwin",
+        appBundlePath: path.join(workDir, "Applications", "Maximal.app"),
+        dataDir: path.join(workDir, "data"),
+        spawn: spawnSpy as unknown as typeof childProcess.spawnSync,
       })
+      expect(existsSpy).toHaveBeenCalledWith(
+        path.join(
+          workDir,
+          "Library",
+          "LaunchAgents",
+          "co.stuffbucket.maximal.plist",
+        ),
+      )
+      expect(lstatSpy).toHaveBeenCalledWith(
+        path.join(workDir, ".local", "bin", "maximal"),
+      )
+      expect(lstatSpy).toHaveBeenCalledWith(
+        path.join(workDir, "Applications", "Maximal.app"),
+      )
       expect(disable).toHaveBeenCalledTimes(1)
       expect(uninstall).toHaveBeenCalledTimes(1)
     })
@@ -470,6 +503,10 @@ describe("uninstall — runUninstall precondition gate (refusal path only)", () 
         force: false,
         unattended: true,
         keepApp: false,
+        homeDir: workDir,
+        platform: "linux",
+        appBundlePath: path.join(workDir, "Applications", "Maximal.app"),
+        dataDir: path.join(workDir, "data"),
       })
       expect(disable).not.toHaveBeenCalled()
       expect(uninstall).toHaveBeenCalledTimes(1)
@@ -624,45 +661,5 @@ describe("uninstall — revertAppIntegrations (registry sweep)", () => {
 
     expect(badUninstall).toHaveBeenCalledTimes(1)
     expect(goodUninstall).toHaveBeenCalledTimes(1) // sweep continued past the throw
-  })
-
-  it("strips the first-launch installer PATH block via removeFirstLaunchPathBlock", async () => {
-    // revertAppIntegrations calls removeFirstLaunchPathBlock(), which reads the
-    // rc files under os.homedir(). Point HOME at a temp dir holding a seeded
-    // installer block and assert it gets stripped — proof the call is invoked.
-    const fakeHome = fs.mkdtempSync(
-      path.join(os.tmpdir(), "maximal-revert-home-"),
-    )
-    const zshrc = path.join(fakeHome, ".zshrc")
-    fs.writeFileSync(
-      zshrc,
-      "export KEEPME=1\n"
-        + "# >>> maximal PATH >>>\n"
-        + 'export PATH="$HOME/.local/bin:$PATH"\n'
-        + "# <<< maximal PATH <<<\n",
-    )
-    // removeFirstLaunchPathBlock() reads rc files under os.homedir(); point it
-    // at our temp home so the call is observable via the stripped block.
-    const homedirSpy = spyOn(os, "homedir").mockReturnValue(fakeHome)
-    try {
-      await mock.module("~/apps/registry", () => ({
-        getAllApps: () => [
-          makeFakeApp({
-            id: "claude-code",
-            name: "Claude Code",
-            enabled: false,
-          }),
-        ],
-      }))
-      const { revertAppIntegrations } = await import("~/uninstall")
-      await revertAppIntegrations([])
-
-      const after = fs.readFileSync(zshrc, "utf8")
-      expect(after).not.toContain("maximal PATH") // installer block stripped
-      expect(after).toContain("KEEPME=1") // unrelated content preserved
-    } finally {
-      homedirSpy.mockRestore()
-      fs.rmSync(fakeHome, { recursive: true, force: true })
-    }
   })
 })

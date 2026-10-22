@@ -6,6 +6,8 @@
 
   "nav-account": "账户",
   "nav-apps": "应用",
+  "nav-mcp": "MCP 服务器",
+  "nav-requests": "请求",
   "nav-endpoint": "端点",
   "nav-api-clients": "API 密钥",
   "nav-models": "模型",
@@ -125,6 +127,7 @@
   "apps-conflict-existing-title": "已保留你的现有设置",
   "apps-conflict-base-url": "{appName} 已有由你或其他工具设置的自定义 ANTHROPIC_BASE_URL，因此 Maximal 未作更改。移除该设置，然后重新开启路由。",
   "apps-conflict-api-key-helper": "{appName} 已有由你或其他工具设置的自定义 apiKeyHelper，因此 Maximal 未作更改。移除该设置，然后重新开启路由。",
+  "apps-conflict-gateway-profile": "{appName} 已在使用由你或其他工具设置的网关，因此 Maximal 未作切换。在 {appName} 中选择其他配置，然后重新开启路由。",
   "apps-conflict-cleanup-title": "需要手动清理",
   "apps-conflict-cleanup-detail": "Maximal 已停止路由 {appName}，但保留了设置后发生更改的配置。请检查该应用的设置，并手动移除 Maximal 路由条目，然后再试。",
   "apps-codex-shared-setting": "CLI 和桌面应用共享同一项设置。",
@@ -136,6 +139,11 @@
   "apps-restart-after-disable": "关闭路由后，在 Claude Code 中运行 {exitCommand}，然后重新启动 Claude Code 以使更改生效。",
   "apps-disable-routing": "关闭路由",
   "apps-keep-on": "保持开启",
+
+  "mcp-title": "MCP 服务器",
+  "mcp-sub": "与你的应用共享 Work IQ 等工具服务器。打开某个服务器并选择哪些应用使用它,关闭后我们会把它移除。",
+  "requests-title": "请求",
+  "requests-sub": "当 MCP 服务器向你提问，而使用它的应用无法显示该问题时，问题会在这里等待你的回答。",
 
   "endpoint-title": "端点",
   "endpoint-sub": "Maximal 的监听位置。配置不在“应用”列表中的工具时,请使用这些值。",
@@ -245,6 +253,11 @@
   "dashboard-quota-unlimited": "无限制",
   "dashboard-quota-percent-used": "已使用 {percent}%",
   "dashboard-quota-remaining": "剩余 {n}",
+  "dashboard-quota-resets": "{date} 重置",
+  "dashboard-quota-period-ended": "周期已于 {date} 结束",
+  "dashboard-quota-as-of": "截至 {time}",
+  "dashboard-rate-per-minute": "{n} 令牌/分钟",
+  "dashboard-rate-sparkline-label": "最近 15 分钟每分钟的令牌数",
 
   "dashboard-api-response-title": "使用情况 API 响应",
 
@@ -308,6 +321,7 @@
   "native-tray-retry": "重试启动",
   "native-tray-show-logs": "显示日志…",
   "native-tray-open-config": "打开配置文件夹…",
+  "native-tray-requests": "回答请求…",
 
   "native-tooltip-starting": "maximal — 正在启动…",
   "native-tooltip-sign-in": "maximal — 登录 GitHub",
@@ -315,6 +329,7 @@
   "native-tooltip-failed": "maximal — sidecar 启动失败",
   "native-tooltip-stopped": "maximal — 已停止",
   "native-tooltip-rejection": "maximal — {message}",
+  "native-tooltip-requests": "maximal — 有 MCP 服务器在等待你的回答",
 
   "native-notify-startup-title": "Maximal 正在运行",
   "native-notify-startup-body-macos": "在菜单栏中查找 Maximal 图标 ↑",
@@ -330,6 +345,11 @@
   "native-notify-rejection-title": "Maximal",
   "native-notify-rejection-body": "一个上游 Copilot 请求被拒绝。打开设置查看详情。",
   "native-notify-rejection-body-detail": "{message} — 打开设置查看详情。",
+  "native-notify-working-title": "Maximal 正在运行",
+  "native-notify-working-body": "你的第一个请求刚刚通过。",
+  "native-notify-working-body-apps": "请求正在通过：{apps} 现在可以使用 Maximal 了。",
+  "native-notify-requests-title": "有 MCP 服务器在等待你的回答",
+  "native-notify-requests-body": "在 Maximal 设置中打开“请求”进行回答。",
 
   "native-quit-title": "退出 Maximal?",
   "native-quit-body": "Maximal 将停止,所有打开的设置窗口将关闭。",

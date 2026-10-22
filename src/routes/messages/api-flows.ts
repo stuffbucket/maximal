@@ -57,6 +57,7 @@ import {
 } from "./non-stream-translation"
 import { prepareMessagesApiPayload } from "./preprocess"
 import { emitStreamError } from "./stream-error"
+import { createStreamKeepAlive } from "./stream-keepalive"
 import { translateChunkToAnthropicEvents } from "./stream-translation"
 
 export interface FlowBaseOptions {
@@ -65,6 +66,7 @@ export interface FlowBaseOptions {
   requestId: string
   sessionId?: string
   compactType?: CompactType
+  keepAliveIntervalMs?: number
 }
 
 interface ResponsesFlowOptions extends FlowBaseOptions {
@@ -113,6 +115,7 @@ export const handleWithChatCompletions = async (
 
   logger.debug("Streaming response from Copilot")
   return streamSSE(c, async (stream) => {
+    const keepAlive = createStreamKeepAlive(stream, options.keepAliveIntervalMs)
     let usage: UsageTokens = {}
     const streamState: AnthropicStreamState = {
       messageStartSent: false,
@@ -142,14 +145,17 @@ export const handleWithChatCompletions = async (
         for (const event of events) {
           const eventData = JSON.stringify(event)
           debugLazy(logger, () => ["Translated Anthropic event:", eventData])
-          await stream.writeSSE({
+          await keepAlive.writeSSE({
             event: event.type,
             data: eventData,
           })
         }
       }
     } catch (error) {
+      keepAlive.stop()
       await emitStreamError(stream, logger, { error, flow: "chat_completions" })
+    } finally {
+      keepAlive.stop()
     }
 
     recordUsage(usage)
@@ -201,24 +207,23 @@ export const handleWithResponsesApi = async (
   if (responsesPayload.stream && isAsyncIterable(response)) {
     logger.debug("Streaming response from Copilot (Responses API)")
     return streamSSE(c, async (stream) => {
+      const keepAlive = createStreamKeepAlive(
+        stream,
+        options.keepAliveIntervalMs,
+      )
       const streamState = createResponsesStreamState()
       let usage: UsageTokens = {}
 
       try {
         for await (const chunk of response) {
-          const eventName = chunk.event
-          if (eventName === "ping") {
-            await stream.writeSSE({ event: "ping", data: '{"type":"ping"}' })
+          if (chunk.event === "ping") {
+            await keepAlive.writeSSE({ event: "ping", data: '{"type":"ping"}' })
             continue
           }
-
           const data = chunk.data
-          if (!data) {
-            continue
-          }
+          if (!data) continue
 
           debugLazy(logger, () => ["Responses raw stream event:", data])
-
           const responseEvent = JSON.parse(data) as ResponseStreamEvent
           if (
             responseEvent.type === "response.completed"
@@ -228,17 +233,13 @@ export const handleWithResponsesApi = async (
             usage = normalizeResponsesUsage(responseEvent.response.usage)
           }
 
-          const events = translateResponsesStreamEvent(
+          for (const event of translateResponsesStreamEvent(
             responseEvent,
             streamState,
-          )
-          for (const event of events) {
+          )) {
             const eventData = JSON.stringify(event)
             debugLazy(logger, () => ["Translated Anthropic event:", eventData])
-            await stream.writeSSE({
-              event: event.type,
-              data: eventData,
-            })
+            await keepAlive.writeSSE({ event: event.type, data: eventData })
           }
 
           if (streamState.messageCompleted) {
@@ -247,17 +248,22 @@ export const handleWithResponsesApi = async (
           }
         }
       } catch (error) {
+        keepAlive.stop()
         await emitStreamError(stream, logger, { error, flow: "responses" })
         recordUsage(usage)
         return
+      } finally {
+        keepAlive.stop()
       }
 
       if (!streamState.messageCompleted) {
         logger.warn(
           "Responses stream ended without completion; sending error event",
         )
+        // The upstream closed early — retryable, like a mid-stream drop.
         const errorEvent = buildErrorEvent(
           "Responses stream ended without completion",
+          "overloaded_error",
         )
         await stream.writeSSE({
           event: errorEvent.type,
@@ -334,6 +340,10 @@ export const handleWithMessagesApi = async (
   if (isAsyncIterable(response)) {
     logger.debug("Streaming response from Copilot (Messages API)")
     return streamSSE(c, async (stream) => {
+      const keepAlive = createStreamKeepAlive(
+        stream,
+        options.keepAliveIntervalMs,
+      )
       let usage: UsageTokens = {}
 
       try {
@@ -359,13 +369,19 @@ export const handleWithMessagesApi = async (
               normalizeAnthropicUsage(parsedEvent.usage),
             )
           }
-          await stream.writeSSE({
-            event: eventName,
-            data,
-          })
+          await keepAlive.writeSSE(
+            {
+              event: eventName,
+              data,
+            },
+            { isMessageStart: parsedEvent?.type === "message_start" },
+          )
         }
       } catch (error) {
+        keepAlive.stop()
         await emitStreamError(stream, logger, { error, flow: "messages" })
+      } finally {
+        keepAlive.stop()
       }
 
       recordUsage(usage)

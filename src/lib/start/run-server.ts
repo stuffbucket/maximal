@@ -12,12 +12,15 @@ import consola from "consola"
 import { serve } from "srvx"
 
 import { removeLegacyShimIfPresent } from "~/apps/claude-code/detect"
-import { reconcileClaudeCodeOnBoot } from "~/apps/claude-code/reconcile"
-import { reconcileCodexOnBoot } from "~/apps/codex/reconcile"
+import { refreshCatalogCommands, syncMcpClientsOnBoot } from "~/apps/mcp"
+import { runAppBootHooks } from "~/apps/registry"
 import { type AccountType } from "~/lib/auth/auth-types"
-import { mergeConfigWithDefaults } from "~/lib/config/config"
+import { type AppConfig, mergeConfigWithDefaults } from "~/lib/config/config"
 import { initProxyFromEnv } from "~/lib/http/proxy"
-import { ensureCliSymlink } from "~/lib/platform/cli-path"
+import {
+  startBrokerSupervisor,
+  stopBrokerSupervisor,
+} from "~/lib/mcp-broker/supervisor"
 import { initOpencodeVersion } from "~/lib/platform/opencode"
 import { ensurePaths } from "~/lib/platform/paths"
 import { writePidfile } from "~/lib/platform/replace-running"
@@ -29,12 +32,14 @@ import {
 } from "~/lib/platform/utils"
 import { hasGithubToken, state } from "~/lib/runtime-state/state"
 import { getGitVersion, shortSha } from "~/lib/update/version"
+import { startWorkingNotice } from "~/lib/working-notice"
 
 import { initBootLogger, printReadyBanner } from "./boot-io"
 import { emitBootStatus } from "./boot-status"
 import { bootSecrets, bootstrapUpstream } from "./bootstrap"
 import { runClaudeCodeFlow } from "./claude-code-flow"
 import { maybeEvictRunning, probePort, reportPortBusyAndExit } from "./port"
+import { setListeningPort } from "./proxy-port"
 import {
   markSessionRunning,
   staleSessionMarkerPresent,
@@ -80,7 +85,7 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   if (portState !== "free") reportPortBusyAndExit(options.port, portState)
 
   // Ensure config is merged with defaults at startup
-  mergeConfigWithDefaults()
+  const config = mergeConfigWithDefaults()
 
   const git = getGitVersion()
   consola.info(
@@ -122,8 +127,8 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   // loss, OS-level kill)? If so, a configured client may still point at
   // the stopped proxy and produce connection-refused errors. We can't
   // auto-recover the inter-session window (an external watchdog would
-  // be needed), but we can surface the cause and re-apply intended
-  // routing for the new session below.
+  // be needed), but we can surface the cause; runAppBootHooks() below
+  // re-applies intended routing for the new session.
   const staleSession = staleSessionMarkerPresent()
   if (staleSession) {
     consola.warn(
@@ -144,21 +149,6 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   const removedShim = removeLegacyShimIfPresent()
   if (removedShim) {
     consola.info(`Removed legacy Claude Code shim at ${removedShim}`)
-  }
-
-  // First-launch CLI shim (macOS .dmg only). The .app bundle's CLI
-  // lives at …/Maximal.app/Contents/MacOS/maximal, off every default
-  // PATH; symlink it into ~/.local/bin so `maximal` works in a
-  // terminal. Idempotent + best-effort — never blocks boot. No-op for
-  // Homebrew/dev launches (not an .app bundle). See lib/cli-path.ts.
-  const link = ensureCliSymlink()
-  if (link.linked) {
-    consola.info(`Linked CLI onto PATH: ${link.symlinkPath} → ${link.target}`)
-    if (link.pathBlockAdded) {
-      consola.info(
-        "Added ~/.local/bin to PATH in ~/.zprofile (open a new terminal to pick it up).",
-      )
-    }
   }
 
   await cacheVSCodeVersion()
@@ -205,22 +195,44 @@ export async function runServer(options: RunServerOptions): Promise<void> {
     },
   })
 
+  afterListening(config, options.port, httpServer)
+}
+
+/** Boot steps that need the bound listener: the broker, client entries that
+ *  point at `port`, and the shutdown path that reverts them. */
+function afterListening(
+  config: AppConfig,
+  port: number,
+  httpServer: ReturnType<typeof serve>,
+): void {
+  setListeningPort(port)
+
+  // Broker startup is deliberately detached from ordinary server readiness.
+  // A missing, hung, or crashing broker degrades MCP only; Hono is already bound.
+  // An upgraded catalog server (e.g. Work IQ) may have moved; find it first.
+  startBrokerSupervisor(refreshCatalogCommands(config).mcpBroker ?? {})
+  // One-time "Maximal is working" notification (shown by the menu-bar shell).
+  void startWorkingNotice()
+
   // Best-effort: record our PID so a future `maximal start --replace`
   // can fall back to SIGTERM/SIGKILL if the graceful shutdown route
   // doesn't free the port in time.
   void writePidfile()
 
-  // Now that we're actually listening, re-apply intended client routing.
-  // Ownership-guarded and a no-op for each client whose routing is off.
-  reconcileClaudeCodeOnBoot()
-  reconcileCodexOnBoot()
+  // Now that we're actually listening, re-apply each client's routing if the
+  // user left it on (Claude Code's base URL, Claude Desktop's gateway
+  // profile, Codex's provider block). Self-heals config a prior
+  // crash/force-kill stranded over a dead proxy and picks up this run's port.
+  // Ownership-guarded; no-op when off.
+  runAppBootHooks()
+  syncMcpClientsOnBoot(config)
 
-  // Drop the "session running" sentinel only AFTER client reconciliation
+  // Drop the "session running" sentinel only AFTER the boot hooks
   // so the freshly-written URL is in place when we promise the session is
   // healthy. shutdown clears it; a missing-on-next-boot sentinel means a
   // clean exit, present-on-next-boot means an ungraceful one (see the
   // staleSession check above).
-  markSessionRunning()
+  markSessionRunning(port)
 
-  installShutdownHandlers(httpServer)
+  installShutdownHandlers(httpServer, stopBrokerSupervisor)
 }

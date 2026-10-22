@@ -423,25 +423,13 @@ a:hover {
   gap: var(--space-2);
 }
 
-/* Quiet destructive: a ghost button whose label reads destructive, so Remove
-   is visibly the cautionary, secondary action beside Switch. Hover lifts to
-   the destructive fill (mirrors .btn--ghost:hover, destructive token). */
-.btn--ghost-destructive {
-  color: var(--accent-destructive);
-}
-
-.btn--ghost-destructive:hover {
-  background: var(--accent-destructive);
-  color: var(--accent-destructive-foreground);
-}
-
 /* ---- Requirement callout ----
    A first-launch signal that this app needs a GitHub Copilot
    subscription to function. Sits above the body copy in the
    unauthenticated state. Brand-tinted so the requirement reads as
    identity-level (this is what Maximal IS), not as an error or a
-   warning. Restrained: brand stripe + icon + tight copy, on the
-   card surface — not a full brand fill, which would shout. */
+   warning. Restrained: brand icon + tight copy, on the card surface —
+   not a brand fill or a colored edge stripe, which would shout. */
 .requirement-callout {
   display: flex;
   align-items: flex-start;
@@ -449,7 +437,6 @@ a:hover {
   padding: var(--space-3) var(--space-4);
   background: var(--surface-card);
   border: var(--border-width-hairline) solid var(--border-subtle);
-  border-inline-start: var(--border-width-heavy) solid var(--brand);
   border-radius: var(--radius-card);
   box-shadow: var(--elevation-card);
   max-width: 65ch;
@@ -580,11 +567,11 @@ a:hover {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--status-success-fg);
+  color: var(--status-success);
 }
 
 .conn-indicator[data-conn="degraded"] {
-  color: var(--status-warning-fg);
+  color: var(--status-warning);
 }
 
 .conn-indicator__icon {
@@ -609,11 +596,11 @@ a:hover {
 }
 
 .state--error .state__title {
-  color: var(--accent-destructive);
+  color: var(--status-error);
 }
 
 .state__caption--error {
-  color: var(--accent-destructive);
+  color: var(--status-error);
 }
 
 /* ---- Device-code sign-in button (the visual hero during the pending
@@ -751,7 +738,7 @@ a:hover {
 }
 
 .card--error {
-  border-color: var(--accent-destructive);
+  border-color: var(--status-error);
 }
 
 .card--planned {
@@ -795,15 +782,9 @@ a:hover {
   font-size: var(--text-sm);
 }
 
-/* Inline, non-blocking failure line. Destructive-tinted left rule so it
- * reads as "this went wrong" without the alarm of a filled banner; mirrors
- * the .upstream-rejection accent treatment. */
+/* Inline, non-blocking failure line: error-colored text, no banner. */
 .uninstall-error {
-  border-left-width: 3px;
-  border-left-style: solid;
-  border-left-color: var(--accent-destructive);
-  padding-left: var(--space-3);
-  color: var(--text-base-color);
+  color: var(--status-error);
 }
 
 /* Companion to the surrounding flex stack: restore [hidden] hiding for the
@@ -817,13 +798,13 @@ a:hover {
  * completion attempt was rejected upstream (quota, model-not-on-plan,
  * etc.). Non-destructive — the GitHub identity is fine, the upstream
  * told us "no" for a different reason. Borrows card--info styling for
- * the panel chrome and adds a left-border accent so the user notices
- * it without it feeling alarming. */
+ * the panel chrome; the title carries it, no colored edge, so it's
+ * noticed without feeling alarming. */
 .upstream-rejection {
   margin-top: var(--space-3);
   padding: var(--space-3) var(--space-4);
-  border-left-width: 3px;
-  border-left-color: var(--accent-destructive);
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-card);
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
@@ -857,7 +838,7 @@ a:hover {
 }
 
 .upstream-rejection__link-wrap a {
-  color: var(--accent);
+  color: var(--link);
   text-decoration: none;
 }
 
@@ -1098,6 +1079,22 @@ a:hover {
   transform: translate(0, -1px) rotate(45deg);
 }
 
+/* Mixed state for an "all" box over a partly-checked group: a bar, not a tick. */
+.checkbox:indeterminate {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.checkbox:indeterminate::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: var(--space-2);
+  height: var(--border-width-thick);
+  background: var(--accent-fg);
+}
+
 .checkbox:focus-visible {
   outline: var(--focus-ring);
   outline-offset: var(--focus-ring-offset);
@@ -1140,13 +1137,15 @@ a:hover {
   transition:
     color 150ms ease-out,
     background-color 150ms ease-out;
+  /* An <a class="btn"> (e.g. "Go to Account") looks like a button, not a link. */
+  text-decoration: none;
 }
 
 /* Transient confirmation tint for an action that completed (e.g. the gh-account
    Refresh settling to "Updated ✓"). Accent, not a status colour — it's
    interactive feedback, and it crossfades in via the .btn transition above. */
 .btn--confirmed {
-  color: var(--accent);
+  color: var(--link);
 }
 
 .btn:focus-visible {
@@ -1189,6 +1188,44 @@ a:hover {
   font-size: var(--text-sm);
   padding: var(--space-1) var(--space-3);
   min-height: var(--size-lg);
+}
+
+/* Square icon-only button (components.md → Buttons → Icon: 32×32, 16 glyph).
+   Needs an aria-label; the glyph is decorative. */
+.btn--icon {
+  width: var(--size-xl);
+  height: var(--size-xl);
+  padding: 0;
+}
+
+.btn--icon svg {
+  width: var(--size-sm);
+  height: var(--size-sm);
+}
+
+/* A disabled ghost button shouldn't light up on hover like a live one. */
+.btn--ghost:disabled:hover {
+  background: transparent;
+  color: var(--text-base-color);
+}
+
+/* Quiet destructive: a ghost button whose label reads destructive, so Remove
+   is visibly the cautionary, secondary action beside Switch. Hover lifts to
+   the destructive fill (mirrors .btn--ghost:hover, destructive token).
+   Declared after the .btn--ghost rules, which have the same specificity,
+   so the red wins; disabled, it stays red and doesn't light up. */
+.btn--ghost-destructive {
+  color: var(--status-error);
+}
+
+.btn--ghost-destructive:hover {
+  background: var(--accent-destructive);
+  color: var(--accent-destructive-foreground);
+}
+
+.btn--ghost-destructive:disabled:hover {
+  background: transparent;
+  color: var(--status-error);
 }
 
 /* Borderless input variant for inline editing inside table cells.
@@ -1304,6 +1341,16 @@ a:hover {
   font-size: var(--text-sm);
   color: var(--text-muted);
   max-width: 65ch;
+}
+
+.empty__body p {
+  margin: 0;
+}
+
+.empty__action {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }
 
 /* ---- Actions cluster ---- */
@@ -1460,64 +1507,95 @@ a:hover {
   color: var(--text-muted);
 }
 
-/* Tighten the grouped tables a touch — these are dense reference rows,
-   not the airy form rows the default .table spacing assumes. */
-.models__table td,
-.models__table th {
-  padding: var(--space-2) var(--space-3);
-}
-
-.models__name {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-2);
-  color: var(--text-strong);
-  font-weight: var(--weight-md);
-}
-
-.models__id {
-  display: block;
-  font-size: var(--text-sm);
-  color: var(--text-muted);
-}
-
-.models__preview {
-  display: inline-flex;
-  align-items: center;
-  padding: 0 var(--space-1);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-md);
-  color: var(--text-muted);
-  border: var(--border-width-hairline) solid var(--border-subtle);
-  border-radius: var(--radius-chip);
-}
-
 .models__count {
   color: var(--text-muted);
-  font-weight: var(--weight-md);
+  font-weight: var(--weight-base);
 }
 
-.models__chips {
-  display: inline-flex;
+/* ---- Model list ----
+   Two-line rows, no table: name + id + capabilities on the left, the two
+   limits stacked on the right with their own labels. Rows split by a
+   hairline; no column headers. */
+.model-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.model-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) 0;
+}
+
+.model-row + .model-row {
+  border-top: var(--border-width-hairline) solid var(--border-subtle);
+}
+
+.model-row__who {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.model-row__name {
+  display: flex;
+  align-items: baseline;
   flex-wrap: wrap;
   gap: var(--space-2);
+  font-size: var(--text-base);
+  font-weight: var(--weight-md);
+  line-height: var(--leading-lg);
+  color: var(--text-strong);
 }
 
-.models__muted {
+.model-row__tag {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-base);
   color: var(--text-muted);
 }
 
+.model-row__id {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-base-color);
+  overflow-wrap: anywhere;
+}
 
-.connection-list__empty {
-  margin: 0;
-  padding: var(--space-5) var(--space-4);
-  text-align: center;
+.model-row__caps {
   font-size: var(--text-sm);
   color: var(--text-muted);
-  background: var(--surface-card);
-  border: var(--border-width-hairline) dashed var(--border-subtle);
-  border-radius: var(--radius-card);
 }
+
+.model-row__limits {
+  flex: 0 0 auto;
+  margin: 0;
+  display: flex;
+  gap: var(--space-5);
+  text-align: end;
+}
+
+.model-row__limits div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.model-row__limits dt {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.model-row__limits dd {
+  margin: 0;
+  font-size: var(--text-base);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-strong);
+}
+
 
 .connection-list__add {
   display: flex;
@@ -1655,7 +1733,7 @@ a:hover {
 }
 
 .connection-card__key-text.is-copied {
-  color: var(--accent);
+  color: var(--link);
 }
 
 .connection-card__enabled {
@@ -1862,6 +1940,125 @@ a:hover {
   }
 }
 
+/* ---- Requests: MCP servers' questions waiting for an answer ----
+   One card per request (each is an entity the user acts on). Everything
+   a server sent is plain text: no markup, wrapped wherever it must. */
+.request-card__message {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-base);
+  color: var(--text-base-color);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+
+/* The title is a heading for the outline, not for its default margins;
+   the button lines up with it rather than floating mid-card. */
+.request-card .card__head {
+  align-items: flex-start;
+}
+
+.request-card .card__title {
+  margin: 0;
+}
+
+/* A tool name is one long word; let it break instead of running under
+   the button. */
+.request-card__meta {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.request-dialog {
+  max-width: calc(var(--size-2xl) * 13);
+}
+
+.request-dialog__from {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.request-dialog__source {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+/* Multi-line prose from the server: body size, scrolls when long. */
+.request-dialog__message {
+  margin: 0;
+  font-size: var(--text-base);
+  line-height: var(--leading-base);
+  color: var(--text-strong);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-block-size: calc(var(--size-2xl) * 6);
+  overflow-y: auto;
+}
+
+.request-dialog__url {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-base-color);
+  overflow-wrap: anywhere;
+}
+
+.request-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.request-field__label {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+}
+
+.request-field__optional {
+  font-weight: normal;
+  color: var(--text-muted);
+}
+
+.request-field__check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+}
+
+/* A select that sits with .input: same box, the native chevron kept. */
+.select {
+  background: var(--surface-control);
+  color: var(--text-strong);
+  border: var(--border-width-hairline) solid var(--border-strong);
+  border-radius: var(--radius-input);
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  line-height: var(--leading-lg);
+  min-height: var(--size-xl);
+  width: 100%;
+  cursor: pointer;
+}
+
+.select:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 /* ---- Apps: per-integration cards ----
    One card per app (Claude Code, Claude Desktop, Codex, Copilot CLI) — each
    is a discrete actionable entity, so a card earns its chrome here.
@@ -1885,11 +2082,11 @@ a:hover {
   gap: var(--space-3);
 }
 
-/* Coming-soon apps read as present-but-inert: dashed, dimmed, no
-   interaction. Mirrors .card--planned. */
+/* Coming-soon apps read as present-but-inert: dashed border, muted name,
+   no interaction. No opacity — it compounds with --text-muted and drops
+   the name below AA (contrast-audit.ts caught it). */
 .app-card--soon {
   border-style: dashed;
-  opacity: 0.85;
 }
 
 .app-card__head {
@@ -2010,9 +2207,9 @@ a:hover {
 /* ---- Conflict surface (enable refused) ----
    Shown when toggling on was refused because the app's config already
    carries a setting we don't own (e.g. a user-set ANTHROPIC_BASE_URL).
-   Honest, not alarming: a destructive-tinted stripe (the toggle snapped
-   back) with a plain-language remedy so the user is never left guessing
-   why the switch didn't take. Mirrors the requirement-callout idiom. */
+   Honest, not alarming: an error-colored icon (the toggle snapped back)
+   with a plain-language remedy so the user is never left guessing why the
+   switch didn't take. Same shape as .callout. */
 .app-card__conflict {
   display: flex;
   align-items: flex-start;
@@ -2020,8 +2217,6 @@ a:hover {
   padding: var(--space-3) var(--space-4);
   background: var(--surface-control);
   border: var(--border-width-hairline) solid var(--border-subtle);
-  border-inline-start: var(--border-width-heavy) solid
-    var(--accent-destructive);
   border-radius: var(--radius-card);
 }
 
@@ -2031,7 +2226,7 @@ a:hover {
   align-items: center;
   justify-content: center;
   margin-block-start: 2px;
-  color: var(--accent-destructive);
+  color: var(--status-error);
 }
 
 .app-card__conflict-text {
@@ -2052,4 +2247,284 @@ a:hover {
   font-size: var(--text-sm);
   line-height: var(--leading-lg);
   color: var(--text-muted);
+}
+
+/* ---- Callout (banner across a section or card) ----
+   One shape for every "something happened here" state that would otherwise
+   be a bare line of colored text: icon + title + detail + at most one
+   remedy, in a hairline-bordered box. No colored edge stripe — the icon's
+   color carries the tone. error: something failed (--status-error icon).
+   notice: worth knowing, nothing wrong (muted icon). Rendered by
+   components/Callout.tsx; the vanilla Diagnostics error uses the same
+   classes. */
+.callout {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface-control);
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-card);
+}
+
+/* display:flex outranks the UA [hidden] rule; restore it for the vanilla
+   sections that toggle `hidden` on a callout. */
+.callout[hidden] {
+  display: none;
+}
+
+.callout__icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  /* One title line tall, so the glyph sits on the first line of text. */
+  height: calc(var(--text-base) * var(--leading-lg));
+  color: var(--text-muted);
+}
+
+.callout--error .callout__icon {
+  color: var(--status-error);
+}
+
+.callout__icon svg {
+  width: var(--size-sm);
+  height: var(--size-sm);
+}
+
+.callout__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.callout__title {
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: var(--weight-md);
+  line-height: var(--leading-lg);
+  color: var(--text-strong);
+}
+
+.callout__detail {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-lg);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.callout__detail p {
+  margin: 0;
+}
+
+.callout__action {
+  flex: 0 0 auto;
+  align-self: center;
+}
+
+/* The raw error behind a problem, folded away for bug reports. */
+.callout__details {
+  margin-block-start: var(--space-2);
+}
+
+.callout__details summary {
+  cursor: pointer;
+  width: max-content;
+  color: var(--text-muted);
+  border-radius: var(--radius-chip);
+}
+
+.callout__details summary:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.callout__details code {
+  display: block;
+  margin-block-start: var(--space-1);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-base-color);
+  overflow-wrap: anywhere;
+}
+
+/* Quiet one-line status for things Maximal is already handling — no
+   banner, nothing to click. */
+.panel-status {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+/* ---- MCP endpoint card ----
+   Name on the left; on the right, Refresh and Remove as icon buttons, the
+   on/off switch, then the twirldown. Below, every app that can get the
+   endpoint as one checkbox row — no prompt. "All apps" heads the list; app
+   rows indent under it. Changes save as made; Remove asks first. */
+.mcp-card__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.mcp-card__title .app-card__name {
+  flex: 0 1 auto;
+}
+
+.mcp-card__saving {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.mcp-card__apps {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.mcp-card__row {
+  display: flex;
+  align-items: center;
+  padding: var(--space-2) 0;
+}
+
+.mcp-card__row + .mcp-card__row {
+  border-top: var(--border-width-hairline) solid var(--border-subtle);
+}
+
+.mcp-card__row--app {
+  padding-inline-start: var(--space-5);
+}
+
+.mcp-card .app-card__control {
+  gap: var(--space-3);
+}
+
+/* Accordion: the twirldown sits at the far right of the head, after the
+   switch. Open follows the switch (McpEndpointCard.tsx); disabled while
+   off. 200ms is the card-collapse timing (motion.md); the global
+   reduced-motion block zeroes it. */
+.mcp-card__twirl svg {
+  transition: transform 200ms ease-out;
+}
+
+.mcp-card__twirl[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+.mcp-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.mcp-card__body[hidden] {
+  display: none;
+}
+
+/* ---- Link checkbox (components/LinkCheckbox.tsx) ----
+   Checkbox + a label that is a link to where the target is managed. When
+   the target can't be chosen, a warning glyph takes the checkbox's slot
+   (same box size, so rows stay aligned) and the label greys out; the link
+   stays live. The label is never the box's click target. */
+.link-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.link-check__label {
+  font-size: var(--text-sm);
+  color: var(--text-strong);
+  text-decoration: none;
+  border-radius: var(--radius-chip);
+}
+
+.link-check__label:hover {
+  color: var(--link-hover);
+  text-decoration: underline;
+}
+
+.link-check__label:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.link-check--unavailable .link-check__label {
+  color: var(--text-muted);
+}
+
+.link-check--unavailable .link-check__label:hover {
+  color: var(--link-hover);
+}
+
+.link-check__warn {
+  position: relative;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--size-md);
+  height: var(--size-md);
+  color: var(--status-warning);
+  border-radius: var(--radius-chip);
+  cursor: help;
+}
+
+.link-check__warn svg {
+  width: var(--size-md);
+  height: var(--size-md);
+}
+
+.link-check__warn:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* ---- Tooltip ----
+   Hover/focus-revealed text under its trigger. The trigger owns the
+   show/hide (see .link-check__warn); Escape dismisses via a --dismissed
+   modifier. Above cards, under modals (<dialog> is top-layer anyway). */
+.tooltip {
+  position: absolute;
+  top: calc(100% + var(--space-2));
+  left: 0;
+  z-index: 20;
+  width: max-content;
+  max-width: 36ch;
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-card);
+  border: var(--border-width-hairline) solid var(--border-strong);
+  border-radius: var(--radius-input);
+  box-shadow: var(--elevation-tooltip);
+  font-size: var(--text-sm);
+  line-height: var(--leading-lg);
+  color: var(--text-base-color);
+  white-space: normal;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 150ms ease-out, visibility 150ms ease-out;
+}
+
+.link-check__warn:hover .tooltip,
+.link-check__warn:focus-visible .tooltip {
+  opacity: 1;
+  visibility: visible;
+}
+
+.link-check__warn--dismissed .tooltip,
+.link-check__warn--dismissed:hover .tooltip,
+.link-check__warn--dismissed:focus-visible .tooltip {
+  opacity: 0;
+  visibility: hidden;
 }

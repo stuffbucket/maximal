@@ -18,7 +18,8 @@ Codex reads the user file at `$CODEX_HOME/config.toml`, or
 1. the top-level `model_provider` selector; and
 2. one uniquely named `[model_providers.<id>]` table plus its `auth` subtable.
 
-The provider points at `http://127.0.0.1:4141/v1`, uses the Responses wire API,
+The provider points at the proxy's port (`http://127.0.0.1:<port>/v1`,
+4141 by default), uses the Responses wire API,
 and describes an inert command-backed API-key lookup. Maximal writes that
 command and its arguments as data; it does not invoke the helper while
 configuring Codex. Codex may invoke Maximal's helper later when it needs a key.

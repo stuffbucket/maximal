@@ -17,6 +17,7 @@ import { completionRoutes } from "./routes/chat-completions/route"
 import { debugRoutes } from "./routes/debug/route"
 import { embeddingRoutes } from "./routes/embeddings/route"
 import { internalRoutes } from "./routes/internal/route"
+import { mcpRoutes } from "./routes/mcp/route"
 import { messageRoutes } from "./routes/messages/route"
 import { modelRoutes } from "./routes/models/route"
 import { providerMessageRoutes } from "./routes/provider/messages/route"
@@ -63,7 +64,8 @@ server.use(
     ],
     // /ui/* serves the settings + dashboard UI shells and their assets.
     // /settings/api/* are data endpoints — gated by requireAuthPrefixes.
-    allowUnauthenticatedPrefixes: ["/ui"],
+    // /mcp/* applies endpoint keys or these same rules in its own route.
+    allowUnauthenticatedPrefixes: ["/ui", "/mcp"],
     requireAuthPrefixes: ["/settings/api"],
     // The dashboard at /ui/dashboard fetches these endpoints from the
     // same machine. Trusting loopback lets us drop the client-side API
@@ -78,6 +80,9 @@ server.use(
       // must NOT be able to evict the running instance), but listing
       // it here means we skip the auth dance for the local caller.
       "/_internal/shutdown",
+      // Re-read config.json after the CLI changed it. Loopback-gated in the
+      // handler too.
+      "/_internal/reload",
     ],
   }),
 )
@@ -132,6 +137,9 @@ server.route("/settings/api", settingsApiRoutes)
 // `/ui/*` serves the settings + dashboard UI (embedded in prod, from
 // shell/dist in dev). See src/routes/ui/route.ts.
 server.route("/ui", uiRoutes)
+// `/mcp/<id>` forwards to the isolated MCP broker. It authenticates itself
+// (endpoint key or the main-port rules) and needs no GitHub token.
+server.route("/mcp", mcpRoutes)
 
 // Gate every upstream-touching route on the presence of a GitHub token.
 // When the sidecar boots without one, the HTTP server still listens (so

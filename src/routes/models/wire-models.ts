@@ -33,6 +33,10 @@ export interface OpenAiModel {
   object: "model"
   created: number
   owned_by: string
+  display_name: string
+  description?: string
+  max_input_tokens: number
+  max_tokens: number
 }
 
 export interface OpenAiModelList {
@@ -42,11 +46,17 @@ export interface OpenAiModelList {
 }
 
 export function toOpenAiModel(model: Model): OpenAiModel {
+  const { limits } = model.capabilities
   return {
     id: forwardId(model.id),
     object: "model",
     created: 0,
     owned_by: model.vendor,
+    display_name: model.name,
+    ...(model.description ? { description: model.description } : {}),
+    max_input_tokens:
+      limits.max_context_window_tokens ?? limits.max_prompt_tokens ?? 0,
+    max_tokens: limits.max_output_tokens ?? 0,
   }
 }
 
@@ -68,6 +78,7 @@ export interface AnthropicModel {
   id: string
   type: "model"
   display_name: string
+  description?: string
   created_at: string
   max_input_tokens: number
   max_tokens: number
@@ -95,10 +106,12 @@ export function toAnthropicModel(model: Model): AnthropicModel {
     id: forwardId(model.id),
     type: "model",
     display_name: model.name,
+    ...(model.description ? { description: model.description } : {}),
     // Anthropic permits an epoch when the release date is unknown; the Copilot
     // catalog doesn't carry one.
     created_at: EPOCH_ISO,
-    max_input_tokens: limits.max_context_window_tokens ?? 0,
+    max_input_tokens:
+      limits.max_context_window_tokens ?? limits.max_prompt_tokens ?? 0,
     max_tokens: limits.max_output_tokens ?? 0,
     capabilities: {
       image_input: { supported: supports.vision === true },
@@ -123,12 +136,16 @@ export function anthropicModelList(models: Array<Model>): AnthropicModelList {
 
 /**
  * Decide which wire shape a client wants. Anthropic clients send an
- * `anthropic-version` header on every request; Claude Desktop / the anthropic
- * SDK also carry an `anthropic/…` or `claude…` user-agent. Anything else —
- * including no signal at all — gets the historical OpenAI default.
+ * `anthropic-version` or `anthropic-beta` header on requests; Claude Desktop /
+ * Claude Code / the anthropic SDK also carry an `anthropic/…` or `claude…`
+ * user-agent. Anything else — including `x-api-key` alone (which Maximal's
+ * auth middleware accepts from any client) or no signal at all — gets the
+ * historical OpenAI default.
  */
 export function prefersAnthropicModels(headers: Headers): boolean {
-  if (headers.get("anthropic-version")) return true
+  if (headers.get("anthropic-version") || headers.get("anthropic-beta")) {
+    return true
+  }
   const ua = headers.get("user-agent")?.toLowerCase() ?? ""
   return ua.startsWith("anthropic/") || ua.startsWith("claude")
 }

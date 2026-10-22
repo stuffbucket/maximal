@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 
+import { createMockBackend } from "../scripts/ui-harness-api"
+
 const REPO_ROOT = resolve(import.meta.dir, "..")
 
 function source(relativePath: string): string {
@@ -44,9 +46,8 @@ describe("Apps shell contract", () => {
     expect(card).not.toContain('t("apps-codex-settings-preserved")')
   })
 
-  test("provides inspectable Codex harness states and toggle behavior", () => {
+  test("provides inspectable Codex harness states and toggle behavior", async () => {
     const fixtures = source("scripts/ui-harness-fixtures.ts")
-    const harness = source("scripts/ui-harness.ts")
 
     expect(fixtures).toContain('id: "codex"')
     expect(fixtures).toContain('kind: "cli"')
@@ -54,7 +55,19 @@ describe("Apps shell contract", () => {
     expect(fixtures).toContain('"codex-missing"')
     expect(fixtures).toContain('"codex-cleanup-required"')
     expect(fixtures).toContain('conflict: "cleanup-required"')
-    expect(harness).toContain('path === "/settings/api/apps/codex/toggle"')
-    expect(harness).toContain('toggleApp("codex"')
+
+    const backend = createMockBackend("codex-cleanup-required")
+    const res = await backend.handle(
+      new Request("http://harness/settings/api/apps/codex/toggle", {
+        method: "POST",
+        body: JSON.stringify({ enabled: true }),
+      }),
+    )
+    expect(
+      (await res?.json()) as { id: string; enabled: boolean },
+    ).toMatchObject({
+      id: "codex",
+      enabled: true,
+    })
   })
 })

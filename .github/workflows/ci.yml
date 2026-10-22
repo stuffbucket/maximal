@@ -51,8 +51,37 @@ jobs:
           # we want a newer Bun, not by drift.
           bun-version: 1.3.14
 
+      - uses: ./.github/actions/setup-mise
+        with:
+          mise-version: v2026.9.5
+
+      - name: Configure package registry
+        run: printf '%s\n' 'registry=https://packagefeedproxy.microsoft.io/npm/' > "$HOME/.npmrc"
+
       - name: Install dependencies
         run: bun install
+
+      # The package feed's tarball hosts rotate; a lockfile that records one
+      # fails a later frozen install (scripts/lockfile-shard-hosts.cjs).
+      - name: Check pnpm lockfiles for rotating feed hosts
+        run: bun scripts/strip-lockfile-hosts.ts --check
+
+      - name: Install isolated broker dependencies
+        run: |
+          mise trust packages/mcp-broker/mise.toml
+          mise -C packages/mcp-broker install
+          mise -C packages/mcp-broker exec -- pnpm install --frozen-lockfile
+
+      - name: Check isolated broker
+        run: |
+          mise -C packages/mcp-broker exec -- pnpm typecheck
+          mise -C packages/mcp-broker exec -- pnpm build
+          MAXIMAL_MCP_BROKER_BINARY="$PWD/packages/mcp-broker/dist/maximal-mcp-broker" mise -C packages/mcp-broker exec -- pnpm test
+          # The release cross-compiles the broker for Windows; catch a Bun
+          # that can't before a release run does.
+          mise -C packages/mcp-broker exec -- pnpm build:target \
+            --target=bun-windows-x64 \
+            --outfile="$RUNNER_TEMP/maximal-mcp-broker-windows-x64.exe"
 
       - name: Run linter
         run: bun run lint:all

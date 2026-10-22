@@ -34,6 +34,16 @@ an explicit version. Pre-1.0 `feat:` commits otherwise produce patch releases.
 | `publish` | Publishes only after every required asset and verification gate succeeds |
 | `homebrew-tap`, `manifest` | Independent post-publication distribution updates |
 
+Each raw archive and installed application layout must contain `maximal` and
+`maximal-mcp-broker` as executable siblings (`.exe` on Windows). The SBOM covers
+both production dependency graphs. Shipping the Windows broker binary does not
+enable supervision there; runtime remains fail-closed until kill-on-close Job
+Object containment is implemented. The PowerShell installer owns a dedicated
+ARP uninstaller that waits for the CLI cleanup, then removes both sibling
+executables, its exact user-PATH entry, its ARP key, and itself. It refuses to
+overwrite an MSI-managed installation, and its helper leaves MSI-owned files and
+PATH registration to `msiexec` if an MSI was installed later.
+
 A failed publish gate leaves the release as a draft. A post-publication failure
 does not invalidate or roll back the immutable release.
 

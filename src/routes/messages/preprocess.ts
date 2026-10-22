@@ -10,6 +10,7 @@ import type {
 import type { Model } from "~/services/copilot/get-models"
 
 import { getReasoningEffortForModel } from "~/lib/config/config"
+import { classifyClaudeClient } from "~/lib/http/claude-client"
 import {
   COMPACT_AUTO_CONTINUE,
   COMPACT_REQUEST,
@@ -30,7 +31,6 @@ const IDE_GET_DIAGNOSTICS_DESCRIPTION =
 const PDF_FILE_READ_PREFIX = "PDF file read:"
 const ADVISOR_TOOL_TYPE = "advisor_20260301"
 const ADVISOR_TOOL_NAME = "advisor"
-const CLAUDE_CODE_USER_AGENT = /^(?:claude-cli|claude-code)\//iu
 
 type AnthropicAttachmentBlock = AnthropicImageBlock | AnthropicDocumentBlock
 type IndexedAttachment = {
@@ -92,9 +92,26 @@ const isCompactAutoContinueMessage = (
   )
 }
 
+const COMPACTION_HINT_VALUES = new Set([
+  "manual",
+  "auto",
+  "reactive",
+  "snip",
+  "background",
+])
+
 export const getCompactType = (
   anthropicPayload: AnthropicMessagesPayload,
+  compactionHeader?: string,
 ): CompactType => {
+  const normalizedCompactionHint = compactionHeader?.trim().toLowerCase()
+  if (
+    normalizedCompactionHint
+    && COMPACTION_HINT_VALUES.has(normalizedCompactionHint)
+  ) {
+    return COMPACT_REQUEST
+  }
+
   const lastMessage = anthropicPayload.messages.at(-1)
   if (lastMessage && isCompactMessage(lastMessage)) {
     return COMPACT_REQUEST
@@ -476,7 +493,8 @@ export const stripUnsupportedClaudeCodeTools = (
   payload: AnthropicMessagesPayload,
   userAgent: string | undefined,
 ): void => {
-  if (!CLAUDE_CODE_USER_AGENT.test(userAgent ?? "") || !payload.tools) return
+  // Desktop and Cowork run the same agent, so they send the same tool.
+  if (classifyClaudeClient(userAgent) === null || !payload.tools) return
 
   payload.tools = payload.tools.filter((tool) => {
     const raw = tool as typeof tool & { type?: unknown }
@@ -532,6 +550,8 @@ const stripCacheControlScope = (obj: unknown): void => {
 // Strips eager_input_streaming from tool definitions — injected by some
 // editors (e.g. Zed) but rejected by Copilot's backend.
 const stripCacheControl = (payload: AnthropicMessagesPayload): void => {
+  stripCacheControlScope(payload)
+
   if (Array.isArray(payload.system)) {
     for (const block of payload.system) {
       stripCacheControlScope(block)
@@ -548,6 +568,7 @@ const stripCacheControl = (payload: AnthropicMessagesPayload): void => {
   for (const msg of payload.messages) {
     if (!Array.isArray(msg.content)) continue
     for (const block of msg.content) {
+      stripCacheControlScope(block)
       if (block.type !== "tool_result" || !Array.isArray(block.content))
         continue
       for (const inner of block.content) {
@@ -561,7 +582,9 @@ const stripCacheControl = (payload: AnthropicMessagesPayload): void => {
 }
 
 // Pre-request processing: filter thinking blocks for Claude models so only
-// valid thinking blocks are sent to the Copilot Messages API.
+// valid thinking blocks are sent to the Copilot Messages API, and rewrite any
+// top-level user tool_reference blocks (which Anthropic/Copilot Messages API
+// only permits nested inside tool_result.content[]) into text blocks.
 const filterAssistantThinkingBlocks = (
   payload: AnthropicMessagesPayload,
 ): void => {
@@ -576,6 +599,12 @@ const filterAssistantThinkingBlocks = (
           && !block.signature.includes("@")
         )
       })
+    } else if (msg.role === "user" && Array.isArray(msg.content)) {
+      msg.content = msg.content.map((block) =>
+        block.type === "tool_reference" ?
+          { type: "text", text: `Tool ${block.tool_name} loaded` }
+        : block,
+      )
     }
   }
 }

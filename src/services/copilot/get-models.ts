@@ -105,6 +105,7 @@ export interface Model {
   id: string
   model_picker_enabled: boolean
   name: string
+  description?: string
   object: string
   preview: boolean
   vendor: string

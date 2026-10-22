@@ -17,7 +17,9 @@ import type {
   AppsListResponse,
   AuthStatus,
   DiagnosticsResponse,
+  McpEndpointsListResponse,
   ModelsListResponse,
+  PendingRequestsResponse,
   UpdateStatusResponse,
 } from "../src/lib/config/settings-types"
 
@@ -26,6 +28,59 @@ import type {
 interface GhStatusFixture {
   installed: boolean
   accounts: Array<{ login: string; host: string; active: boolean }>
+}
+
+// Active clients and the dashboard's /usage + /token-usage payloads have no
+// Zod schema either (typed in shell/src/proxy/client.ts and
+// shell/src/dashboard/main.ts), so they're plain shapes mirrored by name.
+interface ActiveClientsFixture {
+  clients: Array<{ key: string; label: string; userAgent: string; ageSeconds: number }>
+  total: number
+}
+
+interface QuotaFixture {
+  entitlement: number
+  remaining: number
+  percent_remaining: number
+  unlimited: boolean
+}
+
+interface TokenTotalsFixture {
+  cache_creation_input_tokens: number
+  cache_read_input_tokens: number
+  input_tokens: number
+  output_tokens: number
+  request_count: number
+  total_tokens: number
+  total_nano_aiu: number
+}
+
+interface TokenEventFixture {
+  created_at_utc: string
+  created_at_ms: number
+  user_id: string | null
+  session_id: string | null
+  trace_id: string | null
+  endpoint: string
+  model: string
+  input_tokens: number
+  output_tokens: number
+  cache_read_input_tokens: number
+  cache_creation_input_tokens: number
+  total_tokens: number
+}
+
+export interface DashboardFixture {
+  usage: { quota_snapshots?: Record<string, QuotaFixture> | null; quota_reset_date?: string }
+  tokenUsage: {
+    totals?: TokenTotalsFixture
+    range?: { start_ms: number; end_ms: number }
+    byModel: Array<TokenTotalsFixture & { model: string }>
+    /** Last 15 minutes, oldest first (the Dashboard's rate meter). */
+    recent_minutes?: Array<{ start_ms: number; total_tokens: number }>
+  }
+  /** Every event in the period; the mock pages through it. */
+  tokenEvents: Array<TokenEventFixture>
 }
 
 export interface Scenario {
@@ -40,7 +95,17 @@ export interface Scenario {
   diagnostics: DiagnosticsResponse
   updateStatus: UpdateStatusResponse
   ghStatus: GhStatusFixture
+  /** Optional on each scenario; `resolveScenario` fills the shared default. */
+  mcp?: McpEndpointsListResponse
+  /** MCP servers' requests waiting for an answer (Settings → Requests). */
+  requests?: PendingRequestsResponse
+  clients?: ActiveClientsFixture
+  dashboard?: DashboardFixture
 }
+
+export type ResolvedScenario = Required<Omit<Scenario, "deviceCode">> &
+  Pick<Scenario, "deviceCode">
+
 
 const ISO = (offsetMs = 0): string => new Date(1_750_000_000_000 + offsetMs).toISOString()
 
@@ -106,10 +171,13 @@ const baseDiagnostics: DiagnosticsResponse = {
     detail: "gpt-5-mini",
   },
   context_management: {
-    advertised: [],
+    advertised: [
+      { model: "claude-sonnet-4-5", support: true },
+      { model: "gpt-4o", support: false },
+    ],
     cache: {
       policy: "rejections-only",
-      entries: [],
+      entries: [{ model: "gpt-4o", strategy: "clear_tool_uses", rejected_at: ISO(-3_600_000) }],
     },
   },
 }
@@ -206,7 +274,218 @@ const ghAvailable: GhStatusFixture = {
   ],
 }
 
+const workiqFound: McpEndpointsListResponse["available"][number] = {
+  id: "workiq",
+  label: "Work IQ",
+  status: "ready",
+  command:
+    "/Users/alex/.local/share/mise/installs/npm-microsoft-workiq/1.0.1/node_modules/@microsoft/workiq/bin/osx-arm64/workiq",
+  version: "1.0.1",
+  install: {
+    command: "npm install -g @microsoft/workiq",
+    url: "https://www.npmjs.com/package/@microsoft/workiq",
+  },
+}
+
+const twoMcpEndpoints: McpEndpointsListResponse = {
+  broker: { state: "running", problem: null },
+  available: [],
+  endpoints: [
+    {
+      id: "workiq",
+      label: "Work IQ",
+      enabled: true,
+      clients: ["claude-code"],
+      offered: [
+        { id: "claude-code", name: "Claude Code", available: true, configured: true },
+        { id: "claude-desktop", name: "Claude Desktop", available: false, configured: false },
+      ],
+    },
+    {
+      id: "github",
+      label: "GitHub",
+      enabled: false,
+      clients: [],
+      offered: [
+        { id: "claude-code", name: "Claude Code", available: true, configured: false },
+        { id: "claude-desktop", name: "Claude Desktop", available: false, configured: false },
+      ],
+    },
+  ],
+}
+
+const recentClients: ActiveClientsFixture = {
+  clients: [
+    { key: "key_1", label: "Laptop", userAgent: "claude-cli/2.1.195 (external, cli)", ageSeconds: 12 },
+    { key: "unlabeled", label: "", userAgent: "OpenAI/Python 1.99.0", ageSeconds: 340 },
+  ],
+  total: 2,
+}
+
+const ZERO_TOTALS: TokenTotalsFixture = {
+  cache_creation_input_tokens: 0,
+  cache_read_input_tokens: 0,
+  input_tokens: 0,
+  output_tokens: 0,
+  request_count: 0,
+  total_tokens: 0,
+  total_nano_aiu: 0,
+}
+
+function tokenEvents(count: number): Array<TokenEventFixture> {
+  const models = ["claude-sonnet-4-5", "gpt-4o", "claude-sonnet-4-5", "gpt-5-mini"]
+  const endpoints = ["/v1/messages", "/v1/chat/completions", "/v1/messages", "/v1/responses"]
+  return Array.from({ length: count }, (_, i) => {
+    const ms = 1_750_000_000_000 - i * 97_000
+    const input = 1_200 + ((i * 7_919) % 18_000)
+    const output = 80 + ((i * 3_571) % 2_400)
+    const cacheRead = i % 3 === 0 ? 0 : (i * 1_237) % 40_000
+    return {
+      created_at_utc: new Date(ms).toISOString(),
+      created_at_ms: ms,
+      user_id: null,
+      session_id: `sess_${Math.floor(i / 6)}`,
+      trace_id: null,
+      endpoint: endpoints[i % endpoints.length],
+      model: models[i % models.length],
+      input_tokens: input,
+      output_tokens: output,
+      cache_read_input_tokens: cacheRead,
+      cache_creation_input_tokens: 0,
+      total_tokens: input + output + cacheRead,
+    }
+  })
+}
+
+function summarize(events: Array<TokenEventFixture>): DashboardFixture["tokenUsage"] {
+  const byModel = new Map<string, TokenTotalsFixture & { model: string }>()
+  const totals = { ...ZERO_TOTALS }
+  for (const e of events) {
+    const row = byModel.get(e.model) ?? { model: e.model, ...ZERO_TOTALS }
+    for (const t of [row, totals]) {
+      t.input_tokens += e.input_tokens
+      t.output_tokens += e.output_tokens
+      t.cache_read_input_tokens += e.cache_read_input_tokens
+      t.cache_creation_input_tokens += e.cache_creation_input_tokens
+      t.total_tokens += e.total_tokens
+      t.request_count += 1
+      t.total_nano_aiu += e.total_tokens * 1_000
+    }
+    byModel.set(e.model, row)
+  }
+  return {
+    totals,
+    range: { start_ms: 1_750_000_000_000 - 86_400_000, end_ms: 1_750_000_000_000 },
+    byModel: [...byModel.values()].sort((a, b) => b.total_tokens - a.total_tokens),
+  }
+}
+
+/** GitHub's quota_reset_date shape ("YYYY-MM-DD"), relative to now so the
+ *  fixture never ages into "period ended": the 1st of next month. */
+function nextResetDate(): string {
+  const now = new Date()
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)).toISOString().slice(0, 10)
+}
+
+/** 15 per-minute buckets ending at the current minute, from `values`. */
+function recentMinutes(values: Array<number>): Array<{ start_ms: number; total_tokens: number }> {
+  const current = Math.floor(Date.now() / 60_000) * 60_000
+  return values.map((total_tokens, i) => ({
+    start_ms: current - (values.length - 1 - i) * 60_000,
+    total_tokens,
+  }))
+}
+
+const busyDayEvents = tokenEvents(47)
+const busyDashboard: DashboardFixture = {
+  usage: {
+    quota_snapshots: {
+      chat: { entitlement: 0, remaining: 0, percent_remaining: 100, unlimited: true },
+      completions: { entitlement: 0, remaining: 0, percent_remaining: 100, unlimited: true },
+      premium_interactions: { entitlement: 300, remaining: 112, percent_remaining: 37.3, unlimited: false },
+    },
+    quota_reset_date: nextResetDate(),
+  },
+  tokenUsage: {
+    ...summarize(busyDayEvents),
+    // A quiet stretch, then a working session picking up.
+    recent_minutes: recentMinutes([0, 0, 1200, 0, 0, 3400, 8100, 5200, 0, 2600, 9800, 14200, 11800, 16500, 7400]),
+  },
+  tokenEvents: busyDayEvents,
+}
+
+const emptyDashboard: DashboardFixture = {
+  usage: { quota_snapshots: null },
+  tokenUsage: { totals: ZERO_TOTALS, byModel: [], recent_minutes: recentMinutes(Array(15).fill(0)) },
+  tokenEvents: [],
+}
+
+/** A signed-in, everything-normal scenario to vary one surface from. */
+function healthy(label: string): Scenario {
+  return {
+    label,
+    auth: {
+      state: "authenticated",
+      account_login: "octocat",
+      connected_since: ISO(-7_265_000),
+    },
+    apps: appsAllInstalled,
+    apiKeys: twoApiKeys,
+    accounts: twoAccounts,
+    models: baseModels,
+    diagnostics: baseDiagnostics,
+    updateStatus: upToDate,
+    ghStatus: ghAvailable,
+  }
+}
+
 // ---- the scenarios ---------------------------------------------------------
+// Relative to now (not ISO()), so "time left" reads naturally in the harness.
+const inMinutes = (minutes: number): string =>
+  new Date(Date.now() + minutes * 60_000).toISOString()
+
+const waitingRequests: PendingRequestsResponse = {
+  requests: [
+    {
+      id: "elicit-form",
+      endpointId: "workiq",
+      label: "Work IQ",
+      toolName: "get_debug_link",
+      mode: "form",
+      message:
+        "Create a shareable debug link for this conversation? Anyone with the link can see the conversation's diagnostic details for 7 days.",
+      fields: [
+        { name: "confirmed", kind: "boolean", title: "Create the link", required: true },
+        {
+          name: "audience",
+          kind: "enum",
+          title: "Who can open it",
+          required: true,
+          options: [
+            { value: "org", label: "People in my organization" },
+            { value: "me", label: "Only me" },
+          ],
+        },
+        { name: "note", kind: "string", title: "Note for support", required: false, maxLength: 200 },
+      ],
+      receivedAt: inMinutes(-1),
+      expiresAt: inMinutes(4),
+    },
+    {
+      id: "elicit-url",
+      endpointId: "workiq",
+      label: "Work IQ",
+      mode: "url",
+      message: "Sign in to Microsoft 365 to let Work IQ read your calendar.",
+      fields: [],
+      url: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=example",
+      urlHost: "login.microsoftonline.com",
+      receivedAt: inMinutes(0),
+      expiresAt: inMinutes(5),
+    },
+  ],
+}
+
 export const SCENARIOS = {
   "signed-in": {
     label: "Signed in · healthy",
@@ -399,7 +678,116 @@ export const SCENARIOS = {
     },
     ghStatus: ghAvailable,
   },
+
+  "sign-in-pending": {
+    label: "Account · device code issued (waiting for GitHub)",
+    auth: {
+      state: "device_code_issued",
+      user_code: "WXYZ-1234",
+      verification_uri: "https://github.com/login/device",
+      expires_at: ISO(900_000),
+    },
+    apps: appsAllInstalled,
+    apiKeys: { enforcing: false, entries: [] },
+    accounts: { active_key: null, accounts: [] },
+    models: { count: 0, loaded_at: null, models: [] },
+    diagnostics: baseDiagnostics,
+    updateStatus: upToDate,
+    ghStatus: { installed: false, accounts: [] },
+  },
+
+  "fresh-install": {
+    label: "Fresh install · nothing configured, no usage yet",
+    auth: {
+      state: "authenticated",
+      account_login: "octocat",
+      connected_since: ISO(-20_000),
+    },
+    apps: {
+      apps: appsAllInstalled.apps.map((a) => (a.kind === "config" ? { ...a, enabled: false } : a)),
+    },
+    apiKeys: { enforcing: false, entries: [] },
+    accounts: twoAccounts,
+    models: baseModels,
+    diagnostics: baseDiagnostics,
+    updateStatus: upToDate,
+    ghStatus: ghAvailable,
+    mcp: { endpoints: [], broker: { state: "off", problem: null }, available: [] },
+    clients: { clients: [], total: 0 },
+    dashboard: emptyDashboard,
+  },
+
+  "quota-nearly-out": {
+    ...healthy("Dashboard · premium quota nearly used up"),
+    dashboard: {
+      ...busyDashboard,
+      usage: {
+        quota_snapshots: {
+          chat: { entitlement: 0, remaining: 0, percent_remaining: 100, unlimited: true },
+          premium_interactions: { entitlement: 300, remaining: 14, percent_remaining: 4.7, unlimited: false },
+          code_review: { entitlement: 50, remaining: 11, percent_remaining: 22, unlimited: false },
+        },
+        quota_reset_date: nextResetDate(),
+      },
+    },
+  },
+
+  "quota-period-ended": {
+    ...healthy("Dashboard · quota numbers from a period that already ended"),
+    dashboard: {
+      ...busyDashboard,
+      usage: { ...busyDashboard.usage, quota_reset_date: "2025-06-01" },
+    },
+  },
+
+  "mcp-recovering": {
+    ...healthy("MCP · broker stopped, Maximal restarting it"),
+    mcp: { ...twoMcpEndpoints, broker: { state: "recovering", problem: null } },
+  },
+
+  "mcp-stuck": {
+    ...healthy("MCP · broker keeps crashing (retries paused)"),
+    mcp: { ...twoMcpEndpoints, broker: { state: "stuck", problem: null } },
+  },
+
+  "mcp-not-installed": {
+    ...healthy("MCP · broker missing from this install"),
+    mcp: { ...twoMcpEndpoints, broker: { state: "unavailable", problem: "not-installed" } },
+  },
+
+  "requests-waiting": {
+    ...healthy("Requests · a form and a link waiting for an answer"),
+    requests: waitingRequests,
+  },
+
+  "mcp-found": {
+    ...healthy("MCP · nothing added yet, Work IQ found on this machine"),
+    mcp: { endpoints: [], broker: { state: "off", problem: null }, available: [workiqFound] },
+  },
+
+  "mcp-catalog-missing": {
+    ...healthy("MCP · nothing added yet, Work IQ not installed"),
+    mcp: {
+      endpoints: [],
+      broker: { state: "off", problem: null },
+      available: [
+        { id: "workiq", label: "Work IQ", status: "not-installed", install: workiqFound.install },
+      ],
+    },
+  },
 } satisfies Record<string, Scenario>
 
 export type ScenarioId = keyof typeof SCENARIOS
 export const defaultScenarioId: ScenarioId = "signed-in"
+
+/** A scenario with the optional per-surface fixtures filled from the shared defaults. */
+export function resolveScenario(id: ScenarioId): ResolvedScenario {
+  const s: Scenario = SCENARIOS[id]
+  return {
+    ...s,
+    mcp: s.mcp ?? twoMcpEndpoints,
+    requests: s.requests ?? { requests: [] },
+    clients: s.clients ?? recentClients,
+    dashboard: s.dashboard ?? busyDashboard,
+  }
+}

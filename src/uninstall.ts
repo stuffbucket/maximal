@@ -2,8 +2,9 @@
 /**
  * `maximal uninstall` — reverse of `setup`.
  *
- * Stops the running proxy (launchd / Windows scheduled task), removes the
- * on-disk binary, and reverts every app integration through the registry
+ * Stops the running proxy (launchd / Windows scheduled task), removes
+ * app-owned installation artifacts, and reverts every app integration through
+ * the registry
  * (`getAllApps()` → each app's ownership-guarded `uninstall()`). Refuses to run
  * while any app is still enabled — naming them — unless `--force`, which
  * disables each app first, then uninstalls. Secrets are kept by default; pass
@@ -20,10 +21,6 @@ import path from "node:path"
 import type { ClientApp } from "./apps/index"
 
 import { getAllApps } from "./apps/registry"
-import {
-  FIRST_LAUNCH_PATH_MARKER_END,
-  FIRST_LAUNCH_PATH_MARKER_START,
-} from "./lib/platform/cli-path"
 import { PATHS } from "./lib/platform/paths"
 
 interface RunUninstallOptions {
@@ -34,15 +31,26 @@ interface RunUninstallOptions {
    *  `--revert-claude` opt-in. */
   force: boolean
   unattended: boolean
-  /** When true, leave the application bundle (`/Applications/maximal.app`)
-   *  on disk while still removing the `~/.local/bin/maximal` symlink and the
-   *  other PATH binaries. Used by the in-app uninstall: the running `.app`
-   *  can't delete itself, so the user drags it to the Trash afterwards. */
+  /** When true, leave the application bundle (`/Applications/Maximal.app`)
+   *  on disk while still removing app-owned service files and any legacy CLI
+   *  symlink. Used by the in-app uninstall: the running `.app` can't delete
+   *  itself. */
   keepApp: boolean
+  /** Injectable environment keeps destructive operations contained in tests. */
+  homeDir?: string
+  platform?: NodeJS.Platform
+  appBundlePath?: string
+  dataDir?: string
+  spawn?: typeof spawnSync
 }
 
 export async function runUninstall(opts: RunUninstallOptions): Promise<void> {
   consola.box("maximal uninstall")
+  const homeDir = opts.homeDir ?? os.homedir()
+  const platform = opts.platform ?? process.platform
+  const appBundlePath = opts.appBundlePath
+  const dataDir = opts.dataDir ?? PATHS.APP_DIR
+  const spawn = opts.spawn ?? spawnSync
 
   // Precondition: refuse while any app still routes through the proxy, UNLESS
   // --force. Uninstall removes maximal; it must not silently rip routing out
@@ -66,26 +74,31 @@ export async function runUninstall(opts: RunUninstallOptions): Promise<void> {
 
   // 1. Stop the running proxy (best effort) -------------------------
   consola.info("Step 1/5: Stop the running proxy")
-  stopProxy()
+  stopProxy(platform, spawn)
 
   // 2. Remove launchd plist / Windows scheduled task ----------------
   consola.info("Step 2/5: Remove startup integration")
-  removeStartupIntegration()
+  removeStartupIntegration(homeDir, platform, spawn)
 
-  // 3. Remove the binary --------------------------------------------
-  consola.info("Step 3/5: Remove the binary")
-  removeBinary({ keepApp: opts.keepApp })
+  // 3. Remove app-owned installation artifacts -----------------------
+  consola.info("Step 3/5: Remove app-owned installation artifacts")
+  removeBinary({
+    keepApp: opts.keepApp,
+    homeDir,
+    platform,
+    appBundlePath,
+  })
 
-  // 4. Revert any residual app integrations + installer PATH block ---
-  // Registry-driven: each app reverts its own (ownership-guarded) config via the
-  // contract. With the precondition above every app is already disabled, so this
-  // is a defensive sweep — plus it strips maximal's own first-launch PATH block.
+  // 4. Revert any residual app integrations --------------------------
+  // Registry-driven: each app reverts its own ownership-guarded config. With
+  // the precondition above every app is already disabled, so this is a
+  // defensive sweep.
   consola.info("Step 4/5: Revert app integrations")
   await revertAppIntegrations(enabled)
 
   // 5. Optional: secrets --------------------------------------------
   consola.info("Step 5/5: Optional cleanup")
-  await maybePurgeSecrets(opts)
+  await maybePurgeSecrets(opts, dataDir)
 
   consola.box("Uninstall complete.")
 }
@@ -94,9 +107,9 @@ export async function runUninstall(opts: RunUninstallOptions): Promise<void> {
 // Step 1: stop the proxy.
 // ────────────────────────────────────────────────────────────────────
 
-function stopProxy(): void {
-  if (process.platform === "darwin") {
-    const r = spawnSync(
+function stopProxy(platform: NodeJS.Platform, spawn: typeof spawnSync): void {
+  if (platform === "darwin") {
+    const r = spawn(
       "launchctl",
       ["bootout", `gui/${process.getuid?.() ?? 0}/co.stuffbucket.maximal`],
       { encoding: "utf8" },
@@ -111,8 +124,19 @@ function stopProxy(): void {
     }
     return
   }
-  if (process.platform === "win32") {
-    const r = spawnSync("schtasks", ["/End", "/TN", "maximal"], {
+  if (platform === "win32") {
+    const broker = spawn(
+      "taskkill",
+      ["/F", "/IM", "maximal-mcp-broker.exe", "/T"],
+      { encoding: "utf8" },
+    )
+    if (broker.status === 0) {
+      consola.success("  MCP broker stopped")
+    } else {
+      consola.info("  MCP broker not running")
+    }
+
+    const r = spawn("schtasks", ["/End", "/TN", "maximal"], {
       encoding: "utf8",
     })
     if (r.status === 0) {
@@ -129,10 +153,14 @@ function stopProxy(): void {
 // Step 2: remove launchd plist / scheduled task.
 // ────────────────────────────────────────────────────────────────────
 
-function removeStartupIntegration(): void {
-  if (process.platform === "darwin") {
+function removeStartupIntegration(
+  homeDir: string,
+  platform: NodeJS.Platform,
+  spawn: typeof spawnSync,
+): void {
+  if (platform === "darwin") {
     const plist = path.join(
-      os.homedir(),
+      homeDir,
       "Library",
       "LaunchAgents",
       "co.stuffbucket.maximal.plist",
@@ -149,8 +177,8 @@ function removeStartupIntegration(): void {
     }
     return
   }
-  if (process.platform === "win32") {
-    const r = spawnSync("schtasks", ["/Delete", "/TN", "maximal", "/F"], {
+  if (platform === "win32") {
+    const r = spawn("schtasks", ["/Delete", "/TN", "maximal", "/F"], {
       encoding: "utf8",
     })
     if (r.status === 0) {
@@ -164,7 +192,7 @@ function removeStartupIntegration(): void {
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Step 3: remove the binary.
+// Step 3: remove installed binaries.
 // ────────────────────────────────────────────────────────────────────
 
 interface InstallTarget {
@@ -172,56 +200,76 @@ interface InstallTarget {
   /** Directory targets (the macOS .app bundle is one) need recursive
    *  removal; single-file binaries don't. */
   recursive?: boolean
-  /** True for the macOS application bundle (`/Applications/maximal.app`).
-   *  The in-app uninstall (`keepApp`) filters these out so the running
-   *  bundle survives — the user trashes it afterwards. */
+  /** True for the macOS application bundle (`/Applications/Maximal.app`). */
   appBundle?: boolean
+  /** Remove only when this path is a symlink into Maximal.app. */
+  appCliSymlink?: boolean
 }
 
 interface InstallTargetOptions {
   /** Skip the application bundle (the running `.app`) — see `keepApp`. */
   keepApp?: boolean
+  /** Injectable platform inputs keep target selection deterministic in tests. */
+  platform?: NodeJS.Platform
+  homeDir?: string
+  appBundlePath?: string
 }
 
-/** Candidate install locations, in order of likelihood. We delete
- *  every one we find; users may have copies in multiple places (e.g.
- *  `brew install` + a `.dmg` install both leave a binary on disk).
+/** App-owned install locations. Package-manager paths are deliberately absent:
+ *  Homebrew/MSI own their binaries, links, updates, and uninstallation.
  *
- *  macOS .dmg install path: `/Applications/maximal.app` (the
- *  bundle) plus `~/.local/bin/maximal` (a **symlink** into the bundle
- *  created by the first-launch shim — see lib/cli-path.ts;
- *  pre-v0.4.x installs left a copy there instead, which this also
- *  removes). Brew installs at `/opt/homebrew/bin/maximal`.
- *
- *  With `keepApp`, the `.app` bundle is omitted (the in-app uninstall
- *  can't delete the bundle it's running from), but the PATH symlink and
- *  the other binaries are still removed. */
+ *  The legacy DMG template's Application Support service binary is app-owned.
+ *  Older installs may also have left `~/.local/bin/maximal`; cleanup may remove
+ *  that path only when it is a symlink into Maximal.app. Regular files and
+ *  foreign links remain user-owned. */
 export function installTargets(
   opts: InstallTargetOptions = {},
 ): Array<InstallTarget> {
-  const home = os.homedir()
-  if (process.platform === "win32") {
-    return [
-      {
-        path: path.join(
-          process.env.LOCALAPPDATA ?? path.join(home, "AppData", "Local"),
-          "Programs",
-          "maximal",
-          "maximal.exe",
-        ),
-      },
-      // The PowerShell installer's parent dir gets removed when it
-      // becomes empty; we don't recurse into it ourselves to avoid
-      // nuking unrelated files.
-    ]
-  }
+  const home = opts.homeDir ?? os.homedir()
+  const platform = opts.platform ?? process.platform
+  if (platform !== "darwin") return []
+  const appBundlePaths =
+    opts.appBundlePath ?
+      [opts.appBundlePath]
+    : ["/Applications/Maximal.app", "/Applications/maximal.app"]
   const targets: Array<InstallTarget> = [
-    { path: path.join(home, ".local", "bin", "maximal") },
-    { path: "/usr/local/bin/maximal" },
-    { path: "/opt/homebrew/bin/maximal" },
-    { path: "/Applications/maximal.app", recursive: true, appBundle: true },
+    {
+      path: path.join(home, ".local", "bin", "maximal"),
+      appCliSymlink: true,
+    },
+    {
+      path: path.join(
+        home,
+        "Library",
+        "Application Support",
+        "Maximal",
+        "bin",
+        "maximal",
+      ),
+    },
+    ...appBundlePaths.map((bundlePath) => ({
+      path: bundlePath,
+      recursive: true,
+      appBundle: true,
+    })),
   ]
   return opts.keepApp ? targets.filter((t) => !t.appBundle) : targets
+}
+
+const LEGACY_APP_EXECUTABLES = new Set([
+  "/Applications/Maximal.app/Contents/MacOS/maximal",
+  "/Applications/maximal.app/Contents/MacOS/maximal",
+])
+
+export function isAppOwnedCliSymlink(linkPath: string): boolean {
+  let target: string
+  try {
+    target = fs.readlinkSync(linkPath)
+  } catch {
+    return false
+  }
+  const resolved = path.resolve(path.dirname(linkPath), target)
+  return LEGACY_APP_EXECUTABLES.has(resolved)
 }
 
 function removeBinary(opts: InstallTargetOptions = {}): void {
@@ -235,6 +283,12 @@ function removeBinary(opts: InstallTargetOptions = {}): void {
     try {
       stat = fs.lstatSync(target.path)
     } catch {
+      continue
+    }
+    if (
+      target.appCliSymlink
+      && (!stat.isSymbolicLink() || !isAppOwnedCliSymlink(target.path))
+    ) {
       continue
     }
     try {
@@ -251,12 +305,12 @@ function removeBinary(opts: InstallTargetOptions = {}): void {
     }
   }
   if (removed === 0) {
-    consola.info("  no installed binary found")
+    consola.info("  no installed binaries found")
   }
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Step 4: disable + revert app integrations (registry), strip PATH block.
+// Step 4: disable + revert app integrations (registry).
 // ────────────────────────────────────────────────────────────────────
 
 /** Apps currently routing through the proxy, by the contract's `isEnabled()`.
@@ -267,13 +321,10 @@ export function enabledApps(): Array<ClientApp> {
 }
 
 /**
- * Revert every app's integration via the registry, then strip maximal's own
- * first-launch installer PATH block. `stillEnabled` are the apps that were on
- * at invocation (only non-empty under `--force`): we `disable()` each first so
- * routing is cleaned, not orphaned. Then every app's `uninstall()` runs as an
- * ownership-guarded sweep (idempotent — safe even for already-disabled apps).
- * The PATH block is maximal's own artifact, not an app integration, so it stays
- * here rather than in any app.
+ * Revert every app's integration via the registry. `stillEnabled` are the apps
+ * that were on at invocation (only non-empty under `--force`): we `disable()`
+ * each first so routing is cleaned, not orphaned. Then every app's `uninstall()`
+ * runs as an ownership-guarded sweep (idempotent for already-disabled apps).
  */
 export async function revertAppIntegrations(
   stillEnabled: ReadonlyArray<ClientApp>,
@@ -304,69 +355,24 @@ export async function revertAppIntegrations(
       consola.warn(`  could not revert ${app.name}`, err)
     }
   }
-  const installerRc = removeFirstLaunchPathBlock()
-  if (installerRc.length > 0) {
-    consola.success(
-      `  removed installer PATH block from ${installerRc.join(", ")}`,
-    )
-  }
-}
-
-function escapeRegExp(s: string): string {
-  return s.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`)
-}
-
-/**
- * Strip the first-launch `# >>> maximal PATH >>>` block from the user's
- * zsh rc files. Marker-scoped — it touches only the block between our
- * markers and leaves everything else intact. Best-effort per file (an
- * unreadable/unwritable rc is skipped). Returns the rc files modified.
- *
- * Without this, uninstall used to leave the installer's PATH line orphaned
- * (pointing at a deleted `~/.local/bin/maximal`).
- */
-export function removeFirstLaunchPathBlock(
-  homeDir: string = os.homedir(),
-): Array<string> {
-  const rcFiles = [
-    path.join(homeDir, ".zshrc"),
-    path.join(homeDir, ".zprofile"),
-  ]
-  const re = new RegExp(
-    `\\n?${escapeRegExp(FIRST_LAUNCH_PATH_MARKER_START)}[\\s\\S]*?${escapeRegExp(
-      FIRST_LAUNCH_PATH_MARKER_END,
-    )}\\n?`,
-    "g",
-  )
-  const modified: Array<string> = []
-  for (const rc of rcFiles) {
-    let existing: string
-    try {
-      existing = fs.readFileSync(rc, "utf8")
-    } catch {
-      continue
-    }
-    if (!existing.includes(FIRST_LAUNCH_PATH_MARKER_START)) continue
-    try {
-      fs.writeFileSync(rc, existing.replace(re, "\n"))
-      modified.push(rc)
-    } catch {
-      /* best effort */
-    }
-  }
-  return modified
 }
 
 // ────────────────────────────────────────────────────────────────────
 // Step 4a: purge secrets + tokens.
 // ────────────────────────────────────────────────────────────────────
 
-async function maybePurgeSecrets(opts: RunUninstallOptions): Promise<void> {
-  const secretsDir = path.join(PATHS.APP_DIR, "secrets")
+async function maybePurgeSecrets(
+  opts: RunUninstallOptions,
+  dataDir: string,
+): Promise<void> {
+  const secretsDir = path.join(dataDir, "secrets")
   // Both token stores: the legacy single-record file and the multi-account
   // registry. Purge must take both, or --purge leaves every account's token
   // on disk in accounts.json.
-  const tokenPaths = [PATHS.GITHUB_TOKEN_PATH, PATHS.ACCOUNTS_PATH]
+  const tokenPaths = [
+    path.join(dataDir, path.basename(PATHS.GITHUB_TOKEN_PATH)),
+    path.join(dataDir, path.basename(PATHS.ACCOUNTS_PATH)),
+  ]
   const willPurge = opts.purge || (await confirmPurge(opts))
   if (!willPurge) {
     consola.info(`  ℹ secrets dir kept (${secretsDir}); use --purge to remove`)
@@ -409,7 +415,7 @@ export const uninstall = defineCommand({
   meta: {
     name: "uninstall",
     description:
-      "Stop the proxy, remove the binary, and revert app integrations. Refuses while apps are enabled unless --force.",
+      "Stop the proxy, remove app-owned installation artifacts, and revert app integrations. Refuses while apps are enabled unless --force.",
   },
   args: {
     purge: {
@@ -434,7 +440,7 @@ export const uninstall = defineCommand({
       type: "boolean",
       default: false,
       description:
-        "Leave /Applications/maximal.app in place (still removes the ~/.local/bin/maximal symlink and other PATH binaries). Used by the in-app uninstall, which can't delete the running bundle.",
+        "Leave /Applications/Maximal.app in place (still removes app-owned service files and any legacy ~/.local/bin/maximal symlink). Used by the in-app uninstall, which can't delete the running bundle.",
     },
   },
   run({ args }) {

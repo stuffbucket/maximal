@@ -120,6 +120,10 @@ describe("start in unauthenticated mode", () => {
             account_type: string
           }
           models: { cached: number }
+          mcp_broker: {
+            state: string
+            enabled_endpoints: number
+          }
         }
       }
       // Top level = "Maximal, all up" — the identity + liveness signal.
@@ -134,6 +138,8 @@ describe("start in unauthenticated mode", () => {
       expect(body.subsystems.copilot.ready).toBe(false)
       expect(typeof body.subsystems.copilot.account_type).toBe("string")
       expect(body.subsystems.models.cached).toBeGreaterThanOrEqual(0)
+      expect(body.subsystems.mcp_broker.state).toBe("disabled")
+      expect(body.subsystems.mcp_broker.enabled_endpoints).toBe(0)
     }
   })
 

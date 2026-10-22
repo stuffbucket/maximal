@@ -14,11 +14,10 @@ import {
   resolveApiKey,
 } from "~/lib/auth/api-key-helper"
 import { atomicWriteJson } from "~/lib/platform/atomic-json"
+import { proxyBaseUrl } from "~/lib/start/proxy-port"
 
 /** The label Claude Code attributes its key under (Settings → API clients). */
 export const HELPER_LABEL = "claude-code"
-
-export const PROXY_BASE_URL = "http://127.0.0.1:4141"
 
 const API_KEY_HELPER_KEY = "apiKeyHelper"
 const BASE_URL_KEY = "ANTHROPIC_BASE_URL"
@@ -103,12 +102,29 @@ function readEnv(settings: Record<string, unknown>): Record<string, unknown> {
 
 export type BaseUrlOwnership = "ours" | "foreign" | "absent"
 
+/** Any port, since the proxy's port can change between runs. */
+const LOOPBACK_BASE_URL = /^http:\/\/127\.0\.0\.1:\d+$/
+
+/**
+ * Our URL is the current proxy URL, or — after a port change — a loopback
+ * URL sitting next to our own fingerprinted apiKeyHelper. A loopback URL
+ * without our helper is some other local proxy the user set up, so it stays
+ * foreign.
+ */
 export function getBaseUrlOwnership(
   settings: Record<string, unknown>,
 ): BaseUrlOwnership {
   const env = readEnv(settings)
   if (!(BASE_URL_KEY in env)) return "absent"
-  return env[BASE_URL_KEY] === PROXY_BASE_URL ? "ours" : "foreign"
+  const url = env[BASE_URL_KEY]
+  if (url === proxyBaseUrl()) return "ours"
+  return (
+      typeof url === "string"
+        && LOOPBACK_BASE_URL.test(url)
+        && getApiKeyHelperOwnership(settings) === "ours"
+    ) ?
+      "ours"
+    : "foreign"
 }
 
 export type ApiKeyHelperOwnership = "ours" | "foreign" | "absent"
@@ -166,7 +182,7 @@ export function mergeBaseUrl(
   const addsAutoModeSetting = !(AUTO_MODE_SERVER_KEY in existingEnv)
   const env = {
     ...existingEnv,
-    [BASE_URL_KEY]: PROXY_BASE_URL,
+    [BASE_URL_KEY]: proxyBaseUrl(),
     ...(addsAutoModeSetting ?
       { [AUTO_MODE_SERVER_KEY]: AUTO_MODE_SERVER_DISABLED }
     : {}),
@@ -348,11 +364,12 @@ export function applyProxyBaseUrl(
     return { path: filePath, wrote: false, skippedReason: "missing-api-key" }
   }
   const helperCommand = echoApiKeyHelperCommand(keyResult.key)
+  const env = readEnv(existing)
   if (
-    baseUrlOwnership === "ours"
+    env[BASE_URL_KEY] === proxyBaseUrl()
     && helperOwnership === "ours"
     && existing[API_KEY_HELPER_KEY] === helperCommand
-    && AUTO_MODE_SERVER_KEY in readEnv(existing)
+    && AUTO_MODE_SERVER_KEY in env
   ) {
     return { path: filePath, wrote: false, skippedReason: "already-ours" }
   }

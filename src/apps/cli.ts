@@ -28,6 +28,7 @@ import consola from "consola"
 
 import { runApiKeyHelper } from "~/lib/auth/api-key-helper"
 import { HELPER_SUBCOMMAND } from "~/lib/auth/api-key-helper-tokens"
+import { armWorkingNotice, resetWorkingNotice } from "~/lib/working-notice"
 
 import type { AppCliOp, ClientApp } from "./index"
 
@@ -84,6 +85,7 @@ async function enableApp(app: ClientApp): Promise<void> {
     return
   }
   if (result.success) {
+    armWorkingNotice(app.id, app.name)
     consola.success(`Pointed ${app.name} at the local proxy.`)
   } else {
     consola.warn(`Could not enable ${app.name}.`)
@@ -92,6 +94,7 @@ async function enableApp(app: ClientApp): Promise<void> {
 
 export async function disableApp(app: ClientApp): Promise<void> {
   const result = await app.disable()
+  resetWorkingNotice(app.id)
   if (result.conflict) {
     consola.warn(`${app.name} requires manual cleanup: ${result.conflict}.`)
   } else if (result.success) {

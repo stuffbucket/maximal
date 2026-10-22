@@ -2,10 +2,15 @@
  * /_internal/* — process-control endpoints meant for the local machine
  * only.
  *
- * Currently this exposes a single endpoint: `POST /_internal/shutdown`.
- * It's the graceful-eviction hook that a *second* `maximal start
- * --replace` invocation calls to ask the running instance to release
- * `:4141` cleanly.
+ * `POST /_internal/shutdown` is the graceful-eviction hook that a *second*
+ * `maximal start --replace` invocation calls to ask the running instance to
+ * release `:4141` cleanly.
+ *
+ * `POST /_internal/reload` tells the running instance that another process
+ * (e.g. `maximal mcp`) changed `config.json`: it re-reads the file and
+ * restarts the MCP broker if its section changed, then brings client apps'
+ * MCP entries in line with it. Idempotent, so a repeat or stray call
+ * changes nothing.
  *
  * Loopback enforcement is non-negotiable here. The auth middleware in
  * `server.ts` already exempts loopback callers from API-key checks (via
@@ -20,14 +25,27 @@ import type { Context } from "hono"
 import consola from "consola"
 import { Hono } from "hono"
 
+import { syncAllMcpClients } from "~/apps/mcp"
 import { defaultGetRequestIp, isLoopbackAddress } from "~/lib/auth/request-auth"
+import { reloadConfig } from "~/lib/config/config"
 import { requestContext } from "~/lib/http/request-context"
+import { reconfigureBroker } from "~/lib/mcp-broker/supervisor"
 
 interface InternalRoutesOptions {
   /** Injectable for tests so we don't actually exit the runner. */
   exit?: (code: number) => void
   /** Injectable so tests can simulate non-loopback requests. */
   getRequestIp?: (c: Context) => string | null
+  /** Injectable so tests don't touch the real broker. */
+  reload?: () => Promise<void>
+}
+
+async function reloadFromDisk(): Promise<void> {
+  const config = reloadConfig()
+  await reconfigureBroker(config.mcpBroker ?? {})
+  // Rewrite client entries from this process, which knows the port it
+  // actually listens on.
+  syncAllMcpClients(config)
 }
 
 export function createInternalRoutes(
@@ -35,6 +53,7 @@ export function createInternalRoutes(
 ): Hono {
   const exit = options.exit ?? ((code: number) => process.exit(code))
   const getRequestIp = options.getRequestIp ?? defaultGetRequestIp
+  const reload = options.reload ?? reloadFromDisk
 
   const app = new Hono()
 
@@ -65,6 +84,19 @@ export function createInternalRoutes(
     setTimeout(() => exit(0), 250)
 
     return c.json({ ok: true, draining: true }, 202)
+  })
+
+  app.post("/reload", async (c) => {
+    if (!isLoopbackAddress(getRequestIp(c))) {
+      return c.notFound()
+    }
+    try {
+      await reload()
+    } catch (error) {
+      consola.warn("config reload via /_internal/reload failed", error)
+      return c.json({ ok: false }, 500)
+    }
+    return c.json({ ok: true })
   })
 
   return app

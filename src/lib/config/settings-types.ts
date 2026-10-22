@@ -369,7 +369,12 @@ export const AppEntry = z.object({
    *  apiKeyHelper). The UI surfaces this so the user knows why the toggle
    *  didn't take. */
   conflict: z
-    .enum(["foreign-base-url", "foreign-api-key-helper", "cleanup-required"])
+    .enum([
+      "foreign-base-url",
+      "foreign-api-key-helper",
+      "foreign-gateway-profile",
+      "cleanup-required",
+    ])
     .nullable(),
 })
 export type AppEntry = z.infer<typeof AppEntry>
@@ -394,4 +399,174 @@ export const ClaudeDesktopToggleRequest = z.object({
 })
 export type ClaudeDesktopToggleRequest = z.infer<
   typeof ClaudeDesktopToggleRequest
+>
+
+// ── Brokered MCP endpoints (/settings/api/mcp) ──────────────────────────
+
+export const McpClientId = z.enum(["claude-code", "claude-desktop"])
+export type McpClientId = z.infer<typeof McpClientId>
+
+export const McpClientOffer = z.object({
+  id: McpClientId,
+  name: z.string(),
+  /** Maximal's integration for this client is on, so it can be offered. */
+  available: z.boolean(),
+  /** Maximal currently has this endpoint written into the client. */
+  configured: z.boolean(),
+})
+export type McpClientOffer = z.infer<typeof McpClientOffer>
+
+export const McpEndpointEntry = z.object({
+  id: z.string(),
+  label: z.string(),
+  enabled: z.boolean(),
+  /** Remembered client choices, used to pre-check the prompt. */
+  clients: z.array(McpClientId),
+  offered: z.array(McpClientOffer),
+})
+export type McpEndpointEntry = z.infer<typeof McpEndpointEntry>
+
+/** The process that runs every MCP endpoint, as the Settings UI needs it:
+ *  whether anything is wrong and whether Maximal is already fixing it.
+ *   off         no endpoint is on
+ *   starting    coming up (first start, or after a change)
+ *   running     serving
+ *   recovering  stopped unexpectedly; Maximal is restarting it on its own
+ *   stuck       kept stopping; Maximal paused retries for a minute
+ *   unavailable can't run on this install — `problem` says why */
+export const McpBrokerHealth = z.object({
+  state: z.enum([
+    "off",
+    "starting",
+    "running",
+    "recovering",
+    "stuck",
+    "unavailable",
+  ]),
+  problem: z.enum(["not-installed", "unsupported-platform"]).nullable(),
+})
+export type McpBrokerHealth = z.infer<typeof McpBrokerHealth>
+
+/** A known MCP server Maximal looked for that isn't an endpoint yet. */
+export const McpCatalogItem = z.object({
+  id: z.string(),
+  label: z.string(),
+  status: z.enum(["ready", "not-installed"]),
+  /** Absolute path of the executable Maximal found. */
+  command: z.string().optional(),
+  version: z.string().optional(),
+  install: z.object({ command: z.string(), url: z.string() }),
+})
+export type McpCatalogItem = z.infer<typeof McpCatalogItem>
+
+export const McpEndpointsListResponse = z.object({
+  endpoints: z.array(McpEndpointEntry),
+  broker: McpBrokerHealth,
+  /** Known servers to offer adding, installed or not. */
+  available: z.array(McpCatalogItem),
+})
+export type McpEndpointsListResponse = z.infer<typeof McpEndpointsListResponse>
+
+export const McpEndpointToggleRequest = z.object({
+  enabled: z.boolean(),
+  /** Omitted when turning off, so the remembered choice is kept. */
+  clients: z.array(McpClientId).max(2).optional(),
+})
+export type McpEndpointToggleRequest = z.infer<typeof McpEndpointToggleRequest>
+
+export const McpEndpointToggleResponse = z.object({
+  endpoint: McpEndpointEntry,
+  /** Clients that already had an entry with this name; left unchanged. */
+  skipped: z.array(z.object({ client: McpClientId, name: z.string() })),
+  /** The app whose own entry for this server the endpoint now runs. */
+  adoptedFrom: z.string().optional(),
+  /** Environment names from that entry that were not copied. */
+  droppedEnvironment: z.array(z.string()).optional(),
+})
+export type McpEndpointToggleResponse = z.infer<
+  typeof McpEndpointToggleResponse
+>
+
+export const McpEndpointAddRequest = z.object({ catalogId: z.string().min(1) })
+export type McpEndpointAddRequest = z.infer<typeof McpEndpointAddRequest>
+
+export const McpEndpointAddResponse = z.object({ endpoint: McpEndpointEntry })
+export type McpEndpointAddResponse = z.infer<typeof McpEndpointAddResponse>
+
+export const McpEndpointRemoveResponse = z.object({
+  /** Apps Maximal took this server's entry out of. */
+  removedFrom: z.array(z.object({ client: McpClientId, name: z.string() })),
+})
+export type McpEndpointRemoveResponse = z.infer<
+  typeof McpEndpointRemoveResponse
+>
+
+/** One field of a form an MCP server asked the user to fill in, normalized
+ *  from its JSON Schema. Titles, descriptions and options are server text. */
+export const PendingRequestField = z.object({
+  name: z.string(),
+  kind: z.enum(["boolean", "string", "number", "integer", "enum"]),
+  title: z.string().optional(),
+  description: z.string().optional(),
+  required: z.boolean(),
+  default: z.union([z.string(), z.number(), z.boolean()]).optional(),
+  minLength: z.number().optional(),
+  maxLength: z.number().optional(),
+  format: z.enum(["email", "uri", "date", "date-time"]).optional(),
+  minimum: z.number().optional(),
+  maximum: z.number().optional(),
+  /** For `enum`: the allowed values and how to show them. */
+  options: z
+    .array(z.object({ value: z.string(), label: z.string() }))
+    .optional(),
+})
+export type PendingRequestField = z.infer<typeof PendingRequestField>
+
+/** An MCP server's request for user input, waiting for an answer in
+ *  Maximal: a form to fill in, or a URL to open. */
+export const PendingRequest = z.object({
+  id: z.string(),
+  /** The MCP server (endpoint) asking, and its display name. */
+  endpointId: z.string(),
+  label: z.string(),
+  /** The tool call the request belongs to, when known. */
+  toolName: z.string().optional(),
+  mode: z.enum(["form", "url"]),
+  /** The server's message to the user. Untrusted; show as plain text. */
+  message: z.string(),
+  fields: z.array(PendingRequestField),
+  url: z.string().optional(),
+  /** Host of `url`, for showing where the link goes. */
+  urlHost: z.string().optional(),
+  receivedAt: z.string(),
+  expiresAt: z.string(),
+})
+export type PendingRequest = z.infer<typeof PendingRequest>
+
+export const PendingRequestsResponse = z.object({
+  requests: z.array(PendingRequest),
+})
+export type PendingRequestsResponse = z.infer<typeof PendingRequestsResponse>
+
+/** What the shell polls: enough to notice a new request, nothing more. */
+export const PendingRequestsSummary = z.object({
+  pending: z.number().int().nonnegative(),
+  /** The most recent request's id, so a new one is noticed even when the
+   *  count stays the same. */
+  newestId: z.string().nullable(),
+})
+export type PendingRequestsSummary = z.infer<typeof PendingRequestsSummary>
+
+export const PendingRequestAnswer = z.object({
+  action: z.enum(["accept", "decline", "cancel"]),
+  /** Form values, only with `accept` on a form. */
+  content: z
+    .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
+    .optional(),
+})
+export type PendingRequestAnswer = z.infer<typeof PendingRequestAnswer>
+
+export const PendingRequestAnswerResponse = z.object({ ok: z.literal(true) })
+export type PendingRequestAnswerResponse = z.infer<
+  typeof PendingRequestAnswerResponse
 >

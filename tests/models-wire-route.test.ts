@@ -93,19 +93,30 @@ afterAll(() => {
 })
 
 describe("GET /v1/models — OpenAI default (no protocol signal)", () => {
-  test("returns the OpenAI list shape with only OpenAI fields", async () => {
+  test("returns the OpenAI list shape with only OpenAI + gateway discovery fields", async () => {
     const res = await buildApp().request("/v1/models")
     expect(res.status).toBe(200)
     const body = (await res.json()) as { object: string; data: Array<Entry> }
     expect(body.object).toBe("list")
     const entry = body.data[0]
     expect(Object.keys(entry).sort()).toEqual(
-      ["created", "id", "object", "owned_by"].sort(),
+      [
+        "created",
+        "display_name",
+        "id",
+        "max_input_tokens",
+        "max_tokens",
+        "object",
+        "owned_by",
+      ].sort(),
     )
     expect(entry.id).toBe("claude-opus-4-6-20260301")
     expect(body.data.some((model) => model.id === "catalog-alias")).toBe(false)
     expect(entry.object).toBe("model")
     expect(entry.owned_by).toBe("anthropic")
+    expect(entry.display_name).toBe("Claude Opus 4.6")
+    expect(entry.max_input_tokens).toBe(1_000_000)
+    expect(entry.max_tokens).toBe(64_000)
     for (const leaked of LEAK_VECTORS) expect(entry[leaked]).toBeUndefined()
   })
 
@@ -166,5 +177,67 @@ describe("GET /v1/models — Anthropic shape on signal", () => {
     const body = (await res.json()) as { object?: string; data: Array<Entry> }
     expect(body.object).toBeUndefined()
     expect(body.data[0].type).toBe("model")
+  })
+
+  test("x-api-key alone still gets OpenAI shape while anthropic-beta yields Anthropic envelope", async () => {
+    const resKey = await buildApp().request("/v1/models", {
+      headers: { "x-api-key": "dummy" },
+    })
+    const bodyKey = (await resKey.json()) as {
+      object?: string
+      data: Array<Entry>
+    }
+    expect(bodyKey.object).toBe("list")
+    expect(bodyKey.data[0].object).toBe("model")
+
+    const resBeta = await buildApp().request("/v1/models", {
+      headers: { "anthropic-beta": "interleaved-thinking-2025-05-14" },
+    })
+    const bodyBeta = (await resBeta.json()) as {
+      object?: string
+      data: Array<Entry>
+    }
+    expect(bodyBeta.object).toBeUndefined()
+    expect(bodyBeta.data[0].type).toBe("model")
+  })
+
+  test("falls back to max_prompt_tokens when max_context_window_tokens is absent and forwards description", async () => {
+    setModels({
+      object: "list",
+      data: [
+        richModel({
+          description: "High-capability reasoning model",
+          capabilities: {
+            family: "claude-opus-4.6",
+            object: "model_capabilities",
+            tokenizer: "o200k_base",
+            type: "chat",
+            limits: {
+              max_prompt_tokens: 200_000,
+              max_output_tokens: 32_000,
+            },
+            supports: {},
+          },
+        }),
+      ],
+    })
+
+    const resAnthropic = await buildApp().request("/v1/models", {
+      headers: { "anthropic-version": "2023-06-01" },
+    })
+    const bodyAnthropic = (await resAnthropic.json()) as { data: Array<Entry> }
+    expect(bodyAnthropic.data[0].max_input_tokens).toBe(200_000)
+    expect(bodyAnthropic.data[0].max_tokens).toBe(32_000)
+    expect(bodyAnthropic.data[0].description).toBe(
+      "High-capability reasoning model",
+    )
+
+    const resOpenAi = await buildApp().request("/v1/models")
+    const bodyOpenAi = (await resOpenAi.json()) as { data: Array<Entry> }
+    expect(bodyOpenAi.data[0].max_input_tokens).toBe(200_000)
+    expect(bodyOpenAi.data[0].max_tokens).toBe(32_000)
+    expect(bodyOpenAi.data[0].description).toBe(
+      "High-capability reasoning model",
+    )
   })
 })

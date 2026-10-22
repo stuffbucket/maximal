@@ -37,7 +37,19 @@ function resolveDiskDistDir(): string | null {
   return null
 }
 
-const DISK_DIST_DIR = HAS_EMBED ? null : resolveDiskDistDir()
+/** Remember `find`'s answer once it finds something; until then, ask again
+ *  each time. */
+export function rememberWhenFound(
+  find: () => string | null,
+): () => string | null {
+  let found: string | null = null
+  return () => (found ??= find())
+}
+
+// Looked up on first use, and again on later requests until it exists: a
+// proxy started while `build:ui` was rebuilding (output briefly gone) would
+// otherwise serve "UI bundle not found" until restarted.
+const diskDistDir = rememberWhenFound(resolveDiskDistDir)
 
 /** Reject path traversal; resolve a URL path to a real file under root. */
 function safeJoinDisk(root: string, relUrlPath: string): string | null {
@@ -63,7 +75,7 @@ async function bytesFor(
   // test (or a freshly-built `shell/dist`) is honoured regardless of when
   // this module was first imported.
   const distDir =
-    process.env.MAXIMAL_UI_DIST ? resolveDiskDistDir() : DISK_DIST_DIR
+    process.env.MAXIMAL_UI_DIST ? resolveDiskDistDir() : diskDistDir()
   if (!distDir) return null
   // urlPath is `/ui/<rest>`; map to <distDir>/<rest>.
   const rel = urlPath.replace(/^\/ui\//, "")

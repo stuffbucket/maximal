@@ -4,6 +4,7 @@ import path from "node:path"
 import { parse } from "smol-toml"
 
 import { atomicWriteText, fsyncDirectory } from "~/lib/platform/atomic-json"
+import { proxyBaseUrl } from "~/lib/start/proxy-port"
 
 export interface CodexAuthInvocation {
   command: string
@@ -205,10 +206,15 @@ function chooseProviderId(parsed: Record<string, unknown>): string {
   }
 }
 
+/** Codex's Responses endpoint on this run's proxy port. */
+function codexBaseUrl(): string {
+  return `${proxyBaseUrl()}/v1`
+}
+
 function desiredProvider(invocation: CodexAuthInvocation) {
   return {
     name: "Maximal",
-    base_url: "http://127.0.0.1:4141/v1",
+    base_url: codexBaseUrl(),
     wire_api: "responses",
     auth: {
       command: invocation.command,
@@ -264,7 +270,7 @@ function renderProvider(
   return [
     `[model_providers.${tomlString(providerId)}]`,
     'name = "Maximal"',
-    'base_url = "http://127.0.0.1:4141/v1"',
+    `base_url = ${tomlString(codexBaseUrl())}`,
     'wire_api = "responses"',
     "",
     `[model_providers.${tomlString(providerId)}.auth]`,

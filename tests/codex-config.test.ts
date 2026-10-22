@@ -9,6 +9,7 @@ import {
   revertCodexConfig,
   revertCodexConfigFile,
 } from "~/apps/codex/config"
+import { setListeningPort } from "~/lib/start/proxy-port"
 
 const invocation = {
   command: "/Applications/Maximal.app/Contents/MacOS/maximal",
@@ -392,6 +393,26 @@ describe("Codex config ownership conflicts", () => {
       status: "changed",
       content: original,
     })
+  })
+
+  test("points at the proxy's port and follows it when the port changes", () => {
+    const original = 'model_provider = "openai"\n'
+    setListeningPort(5555)
+    try {
+      const applied = prepareCodexConfig(original, { invocation }).content
+      expect(applied).toContain('base_url = "http://127.0.0.1:5555/v1"')
+
+      setListeningPort(6666)
+      const moved = prepareCodexConfig(applied, { invocation })
+      expect(moved.status).toBe("changed")
+      expect(moved.content).toContain('base_url = "http://127.0.0.1:6666/v1"')
+      expect(revertCodexConfig(moved.content)).toEqual({
+        status: "changed",
+        content: original,
+      })
+    } finally {
+      setListeningPort(undefined)
+    }
   })
 
   test("skips every provider ID already defined or referenced", () => {

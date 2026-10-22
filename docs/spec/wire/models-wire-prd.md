@@ -43,10 +43,16 @@ protocol expects, built by explicit mappers in
 model — that leaked `billing`/`policy`/capability internals and could
 make a strict client reject the list and render an empty picker).
 
-Negotiation (`prefersAnthropicModels`): an `anthropic-version` request
-header, or an `anthropic/…` / `claude…` user-agent → **Anthropic** shape.
-Everything else — including no signal — → **OpenAI** shape (the historical
-default; keeps Codex / the openai SDK / LiteLLM working).
+Negotiation (`prefersAnthropicModels`): an `anthropic-version` or
+`anthropic-beta` request header, or an `anthropic/…` / `claude…`
+user-agent → **Anthropic** shape. Everything else — including `x-api-key`
+alone or no signal — → **OpenAI** shape (the historical default; keeps
+Codex / the openai SDK / LiteLLM working). Both shapes populate
+`display_name`, `max_input_tokens`, `max_tokens`, and optional
+`description` so gateway model discovery
+(`CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY`) gets full picker metadata
+and accurate context windows regardless of which auth or client headers it
+sends.
 
 **OpenAI shape** (default):
 
@@ -54,7 +60,15 @@ default; keeps Codex / the openai SDK / LiteLLM working).
 {
   "object": "list",
   "data": [
-    { "id": "claude-opus-4-6-20260301", "object": "model", "created": 0, "owned_by": "<vendor>" }
+    {
+      "id": "claude-opus-4-6-20260301",
+      "object": "model",
+      "created": 0,
+      "owned_by": "<vendor>",
+      "display_name": "<name>",
+      "max_input_tokens": 1000000,
+      "max_tokens": 64000
+    }
   ],
   "has_more": false
 }

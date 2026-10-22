@@ -6,7 +6,8 @@
  * order, including the Claude Code revert step, is documented inline
  * in initiateShutdown().
  *
- * Coverage matrix for the Claude Code base-URL revert:
+ * Coverage matrix for the Claude Code base-URL revert (and the removal of
+ * Maximal-added MCP servers from Claude Code / Claude Desktop):
  *   - SIGTERM / SIGINT          → initiateShutdown ✓
  *   - process.exit(n) anywhere  → `exit` event safety net ✓
  *   - uncaught exception        → `exit` event safety net ✓
@@ -20,8 +21,8 @@ import type { serve } from "srvx"
 
 import consola from "consola"
 
-import { reconcileClaudeCodeOnShutdown } from "~/apps/claude-code/reconcile"
-import { reconcileCodexOnShutdown } from "~/apps/codex/reconcile"
+import { removeMcpClientsOnShutdown } from "~/apps/mcp"
+import { runAppShutdownHooks } from "~/apps/registry"
 import { removePidfile } from "~/lib/platform/replace-running"
 
 import { clearSessionRunning } from "./session-sentinel"
@@ -35,6 +36,7 @@ let shuttingDown = false
 export async function initiateShutdown(
   httpServer: ReturnType<typeof serve>,
   reason: string,
+  beforeHttpClose?: () => Promise<void>,
 ): Promise<void> {
   if (shuttingDown) return
   shuttingDown = true
@@ -46,8 +48,11 @@ export async function initiateShutdown(
   // intent-gated (no-op when routing is off); the intent flag persists, so
   // the next boot re-applies it. Synchronous + best-effort — a slow/failed
   // file write must not delay or block the drain.
-  reconcileClaudeCodeOnShutdown()
-  reconcileCodexOnShutdown()
+  runAppShutdownHooks()
+  // Same for the MCP servers Maximal added to Claude Code / Claude Desktop:
+  // take them out so neither app points at a stopped Maximal. Boot re-adds
+  // them from the recorded choices. File-only and synchronous.
+  removeMcpClientsOnShutdown()
 
   // Fail-safe: if close() hangs, hard-exit after 2.5s. .unref() so the
   // timer itself never holds the loop open in the happy path.
@@ -56,6 +61,12 @@ export async function initiateShutdown(
     process.exit(1)
   }, 2500)
   watchdog.unref()
+
+  try {
+    await beforeHttpClose?.()
+  } catch (error) {
+    consola.warn("shutdown: subsystem cleanup threw", error)
+  }
 
   try {
     // srvx Server exposes close(); pass true to drop in-flight conns.
@@ -89,12 +100,13 @@ export async function initiateShutdown(
  *  so it's safe even when initiateShutdown ALSO runs first. */
 export function installShutdownHandlers(
   httpServer: ReturnType<typeof serve>,
+  beforeHttpClose?: () => Promise<void>,
 ): void {
   process.on("SIGTERM", () => {
-    void initiateShutdown(httpServer, "received SIGTERM")
+    void initiateShutdown(httpServer, "received SIGTERM", beforeHttpClose)
   })
   process.on("SIGINT", () => {
-    void initiateShutdown(httpServer, "received SIGINT")
+    void initiateShutdown(httpServer, "received SIGINT", beforeHttpClose)
   })
 
   // Safety net: synchronous revert on any Node-controlled exit path,
@@ -102,13 +114,9 @@ export function installShutdownHandlers(
   // SIGKILL or OS-level termination — those need an external watchdog
   // (the boot-time stale-session warning surfaces them after the fact).
   process.on("exit", () => {
+    runAppShutdownHooks()
     try {
-      reconcileClaudeCodeOnShutdown()
-    } catch {
-      // exit handlers can't throw — and we're exiting anyway.
-    }
-    try {
-      reconcileCodexOnShutdown()
+      removeMcpClientsOnShutdown()
     } catch {
       // same — best-effort.
     }
@@ -132,7 +140,11 @@ export function installShutdownHandlers(
       } catch {
         clearInterval(interval)
         consola.warn(`shutdown: parent ${parentPid} gone`)
-        void initiateShutdown(httpServer, `parent ${parentPid} exited`)
+        void initiateShutdown(
+          httpServer,
+          `parent ${parentPid} exited`,
+          beforeHttpClose,
+        )
       }
     }, 3000)
     interval.unref()

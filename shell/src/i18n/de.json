@@ -6,6 +6,8 @@
 
   "nav-account": "Konto",
   "nav-apps": "Apps",
+  "nav-mcp": "MCP-Server",
+  "nav-requests": "Anfragen",
   "nav-endpoint": "Endpunkt",
   "nav-api-clients": "API-Schlüssel",
   "nav-models": "Modelle",
@@ -125,6 +127,7 @@
   "apps-conflict-existing-title": "Ihre vorhandene Einstellung wurde beibehalten",
   "apps-conflict-base-url": "Für {appName} ist bereits eine benutzerdefinierte ANTHROPIC_BASE_URL festgelegt, entweder von Ihnen oder einem anderen Tool. Daher hat Maximal sie nicht geändert. Entfernen Sie diese Einstellung und aktivieren Sie das Routing erneut.",
   "apps-conflict-api-key-helper": "Für {appName} ist bereits ein benutzerdefinierter apiKeyHelper festgelegt, entweder von Ihnen oder einem anderen Tool. Daher hat Maximal ihn nicht geändert. Entfernen Sie diese Einstellung und aktivieren Sie das Routing erneut.",
+  "apps-conflict-gateway-profile": "{appName} verwendet bereits ein Gateway, das von Ihnen oder einem anderen Tool eingerichtet wurde. Daher hat Maximal es nicht umgestellt. Wählen Sie in {appName} eine andere Konfiguration aus und aktivieren Sie das Routing erneut.",
   "apps-conflict-cleanup-title": "Manuelle Bereinigung erforderlich",
   "apps-conflict-cleanup-detail": "Maximal hat das Routing für {appName} beendet, aber Einstellungen beibehalten, die nach der Einrichtung geändert wurden. Prüfen Sie die App-Einstellungen und entfernen Sie den Maximal-Routing-Eintrag manuell, bevor Sie es erneut versuchen.",
   "apps-codex-shared-setting": "CLI und Desktop-App verwenden dieselbe Einstellung.",
@@ -136,6 +139,11 @@
   "apps-restart-after-disable": "Führen Sie nach dem Deaktivieren des Routings {exitCommand} in Claude Code aus und starten Sie Claude Code neu, damit die Änderung wirksam wird.",
   "apps-disable-routing": "Routing deaktivieren",
   "apps-keep-on": "Eingeschaltet lassen",
+
+  "mcp-title": "MCP-Server",
+  "mcp-sub": "Teilen Sie Tool-Server wie Work IQ mit Ihren Apps. Aktivieren Sie einen, und wählen Sie, welche Apps ihn erhalten; deaktivieren Sie ihn, und wir entfernen ihn wieder.",
+  "requests-title": "Anfragen",
+  "requests-sub": "Wenn ein MCP-Server Ihnen eine Frage stellt, die die App, die ihn nutzt, nicht anzeigen kann, wartet sie hier auf Ihre Antwort.",
 
   "endpoint-title": "Endpunkt",
   "endpoint-sub": "Wo Maximal lauscht. Verwenden Sie diese Werte, wenn Sie ein Tool einrichten, das nicht in der App-Liste enthalten ist.",
@@ -245,6 +253,11 @@
   "dashboard-quota-unlimited": "Unbegrenzt",
   "dashboard-quota-percent-used": "{percent} % genutzt",
   "dashboard-quota-remaining": "{n} verbleibend",
+  "dashboard-quota-resets": "Wird am {date} zurückgesetzt",
+  "dashboard-quota-period-ended": "Zeitraum endete am {date}",
+  "dashboard-quota-as-of": "Stand: {time}",
+  "dashboard-rate-per-minute": "{n} Tokens/Min.",
+  "dashboard-rate-sparkline-label": "Tokens pro Minute in den letzten 15 Minuten",
 
   "dashboard-api-response-title": "Antwort der Nutzungs-API",
 
@@ -308,6 +321,7 @@
   "native-tray-retry": "Start wiederholen",
   "native-tray-show-logs": "Protokolle anzeigen…",
   "native-tray-open-config": "Konfigurationsordner öffnen…",
+  "native-tray-requests": "Anfragen beantworten…",
 
   "native-tooltip-starting": "maximal — wird gestartet…",
   "native-tooltip-sign-in": "maximal — bei GitHub anmelden",
@@ -315,6 +329,7 @@
   "native-tooltip-failed": "maximal — Sidecar fehlgeschlagen",
   "native-tooltip-stopped": "maximal — gestoppt",
   "native-tooltip-rejection": "maximal — {message}",
+  "native-tooltip-requests": "maximal — ein MCP-Server wartet auf Ihre Antwort",
 
   "native-notify-startup-title": "Maximal läuft",
   "native-notify-startup-body-macos": "Suchen Sie das Maximal-Symbol in Ihrer Menüleiste ↑",
@@ -330,6 +345,11 @@
   "native-notify-rejection-title": "Maximal",
   "native-notify-rejection-body": "Eine vorgelagerte Copilot-Anfrage wurde abgelehnt. Öffnen Sie die Einstellungen für Details.",
   "native-notify-rejection-body-detail": "{message} — öffnen Sie die Einstellungen für Details.",
+  "native-notify-working-title": "Maximal funktioniert",
+  "native-notify-working-body": "Ihre erste Anfrage ist gerade durchgegangen.",
+  "native-notify-working-body-apps": "Anfragen gehen durch – {apps} kann Maximal jetzt nutzen.",
+  "native-notify-requests-title": "Ein MCP-Server wartet auf Ihre Antwort",
+  "native-notify-requests-body": "Öffnen Sie „Anfragen“ in den Einstellungen von Maximal, um zu antworten.",
 
   "native-quit-title": "Maximal beenden?",
   "native-quit-body": "Maximal wird gestoppt und alle geöffneten Einstellungsfenster werden geschlossen.",

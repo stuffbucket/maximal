@@ -113,6 +113,56 @@ describe("release action supply chain", () => {
   })
 })
 
+describe("isolated MCP broker distribution", () => {
+  test("raw release archives include both sibling executables", async () => {
+    const workflow = await readWorkflow("release.yml")
+
+    expect(workflow).toContain("maximal.exe maximal-mcp-broker.exe")
+    expect(workflow).toContain("maximal maximal-mcp-broker")
+    expect(workflow).toContain("--root packages/mcp-broker")
+    expect(workflow).toContain("pnpm install --frozen-lockfile")
+  })
+
+  test("macOS signs both nested Bun executables", async () => {
+    const config = await readRepoFile(".macos-builder/config")
+    const producer = await readRepoFile(".macos-builder/build.sh")
+
+    expect(config).toContain("Contents/MacOS/maximal:bun-runtime")
+    expect(config).toContain("Contents/MacOS/maximal-mcp-broker:bun-runtime")
+    expect(producer).toContain(
+      'BROKER="$APP/Contents/MacOS/maximal-mcp-broker"',
+    )
+    expect(producer).toContain('for binary in "$SIDECAR" "$BROKER"')
+  })
+
+  test("Windows installers carry and remove the broker sibling", async () => {
+    const [wix, installer, shellWorkflow, installerWorkflow] =
+      await Promise.all([
+        readRepoFile("build/windows/maximal.wxs"),
+        readRepoFile("build/windows/install.ps1"),
+        readWorkflow("windows-shell-dev.yml"),
+        readWorkflow("windows-installer-dev.yml"),
+      ])
+
+    expect(wix).toContain('Source="maximal-mcp-broker.exe"')
+    expect(wix).toContain("StopRunningMcpBroker")
+    expect(installer).toContain("$BrokerPath")
+    expect(installer).toContain("maximal-mcp-broker.exe")
+    expect(installer).toContain("Write-Uninstaller")
+    expect(installer).toContain("& $BinPath uninstall --force --unattended")
+    expect(shellWorkflow).toContain(
+      "foreach ($name in @('maximal', 'maximal-mcp-broker'))",
+    )
+    expect(shellWorkflow).toContain("x86_64-pc-windows-msvc")
+    expect(installerWorkflow).toContain(
+      "Uninstall through PowerShell ARP helper",
+    )
+    expect(installerWorkflow).toContain(
+      "foreach ($file in @('maximal.exe', 'maximal-mcp-broker.exe', 'uninstall.ps1'))",
+    )
+  })
+})
+
 describe("manifest publication", () => {
   test("the manifest job proposes a protected PR instead of pushing main", async () => {
     const workflow = await readWorkflow("release.yml")

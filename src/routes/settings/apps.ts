@@ -10,7 +10,6 @@ import type { Context } from "hono"
 import { Hono } from "hono"
 
 import { getAllApps, getApp } from "~/apps/registry"
-import { getConfig, writeConfig, type AppConfig } from "~/lib/config/config"
 import {
   AppEntry,
   AppsListResponse,
@@ -20,6 +19,7 @@ import {
   type AppEntry as AppEntryT,
 } from "~/lib/config/settings-types"
 import { forwardError, HTTPError } from "~/lib/errors/error"
+import { armWorkingNotice, resetWorkingNotice } from "~/lib/working-notice"
 
 import { respondValidated } from "./respond-validated"
 
@@ -33,21 +33,6 @@ function httpError(message: string, status: number): HTTPError {
  *  it, so drift fails loudly in tests rather than silently in the UI. */
 function jsonApp(c: Context, app: AppEntryT) {
   return respondValidated(c, { schema: AppEntry, label: "App" }, app)
-}
-
-/** Merge an `apps.claudeDesktop` patch into config and persist. */
-function persistClaudeDesktop(enabled: boolean): void {
-  const config: AppConfig = getConfig()
-  writeConfig({
-    ...config,
-    apps: {
-      ...config.apps,
-      claudeDesktop: {
-        ...config.apps?.claudeDesktop,
-        enabled,
-      },
-    },
-  })
 }
 
 export const appsRoutes = new Hono()
@@ -91,12 +76,14 @@ appsRoutes.post("/claude-code/toggle", async (c) => {
       }
       const result = await app.enable()
       const conflict = result.conflict || null
+      if (result.success) armWorkingNotice(app.id, app.name)
       // `app.enable()` is the single owner of the claude-code routing intent
       // (persists config.apps.claudeCode.enabled itself) — no separate persist.
       return jsonApp(c, await app.getDetails(conflict))
     }
 
     await app.disable()
+    resetWorkingNotice(app.id)
     return jsonApp(c, await app.getDetails())
   } catch (error) {
     return forwardError(c, error)
@@ -143,9 +130,19 @@ appsRoutes.post("/claude-desktop/toggle", async (c) => {
     const app = getApp("claude-desktop")
     if (!app) throw httpError("App not found", 404)
 
-    await (parsed.data.enabled ? app.enable() : app.disable())
-    persistClaudeDesktop(parsed.data.enabled)
+    // `app.enable()` / `disable()` own the persisted routing intent; a
+    // refused enable (someone else's gateway is applied) doesn't record it.
+    if (parsed.data.enabled) {
+      const result = await app.enable()
+      if (!result.success) {
+        return jsonApp(c, await app.getDetails(result.conflict ?? null))
+      }
+      armWorkingNotice(app.id, app.name)
+      return jsonApp(c, await app.getDetails())
+    }
 
+    await app.disable()
+    resetWorkingNotice(app.id)
     return jsonApp(c, await app.getDetails())
   } catch (error) {
     return forwardError(c, error)

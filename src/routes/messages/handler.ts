@@ -64,18 +64,31 @@ function resolveCopilotVariant(
   )
 }
 
-// Mapping validation adds one guarded branch to this orchestration flow.
-// eslint-disable-next-line complexity
-export async function handleCompletion(c: Context) {
-  await checkRateLimit(state)
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu
 
-  const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
-  stripUnsupportedTopLevelAnthropicFields(anthropicPayload)
-  debugJson(logger, "Anthropic request payload:", anthropicPayload)
+function resolveRequestId(
+  c: Context,
+  payload: AnthropicMessagesPayload,
+  sessionId: string | undefined,
+): string {
+  const promptId = c.req.header("x-claude-code-prompt-id")?.trim()
+  if (promptId && UUID_PATTERN.test(promptId)) {
+    return promptId.toLowerCase()
+  }
+  return generateRequestIdFromPayload(payload, sessionId)
+}
 
-  const reversedModel = reverseId(anthropicPayload.model)
+/**
+ * Apply a configured model mapping, then pick the Copilot variant. Returns
+ * the 400 to send when a mapping targets a model that isn't available.
+ */
+function applyModelMapping(
+  c: Context,
+  payload: AnthropicMessagesPayload,
+): Response | null {
   const mapping = resolveModelMapping({
-    requestedModel: reversedModel,
+    requestedModel: reverseId(payload.model),
     rules: getConfig().modelMappings ?? [],
     models: state.models?.data ?? [],
     endpoint: null,
@@ -83,11 +96,19 @@ export async function handleCompletion(c: Context) {
   if (mapping.status === "invalid-target") {
     return c.json(modelMappingErrorBody(mapping), 400)
   }
-  anthropicPayload.model = resolveCopilotVariant(
-    c,
-    anthropicPayload,
-    mapping.resolvedModel,
-  )
+  payload.model = resolveCopilotVariant(c, payload, mapping.resolvedModel)
+  return null
+}
+
+export async function handleCompletion(c: Context) {
+  await checkRateLimit(state)
+
+  const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
+  stripUnsupportedTopLevelAnthropicFields(anthropicPayload)
+  debugJson(logger, "Anthropic request payload:", anthropicPayload)
+
+  const mappingError = applyModelMapping(c, anthropicPayload)
+  if (mappingError) return mappingError
 
   sanitizeIdeTools(anthropicPayload)
   stripUnsupportedClaudeCodeTools(anthropicPayload, c.req.header("user-agent"))
@@ -100,16 +121,23 @@ export async function handleCompletion(c: Context) {
   // steps see only the cleaned tools list.
   const webToolPolicy = splitWebTools(anthropicPayload)
 
-  const subagentMarker = parseSubagentMarkerFromFirstUser(anthropicPayload)
+  const sessionId = getRootSessionId(anthropicPayload, c)
+  logger.debug("Extracted session ID:", sessionId)
+
+  const subagentMarker = parseSubagentMarkerFromFirstUser(anthropicPayload, {
+    requestClass: c.req.header("x-claude-code-request-class"),
+    agentType: c.req.header("x-claude-code-agent-type"),
+    sessionId,
+  })
   if (subagentMarker) {
     debugJson(logger, "Detected Subagent marker:", subagentMarker)
   }
 
-  const sessionId = getRootSessionId(anthropicPayload, c)
-  logger.debug("Extracted session ID:", sessionId)
-
   // claude code and opencode compact / auto-continue detection
-  const compactType = getCompactType(anthropicPayload)
+  const compactType = getCompactType(
+    anthropicPayload,
+    c.req.header("x-claude-code-compaction"),
+  )
 
   // Claude Code 2.0.28+ fires a tool-less "Warmup" request on startup (and
   // around subagent spawns) that today round-trips upstream (~4s p50). When
@@ -150,7 +178,7 @@ export async function handleCompletion(c: Context) {
     skipLastMessage: compactType === COMPACT_REQUEST,
   })
 
-  const requestId = generateRequestIdFromPayload(anthropicPayload, sessionId)
+  const requestId = resolveRequestId(c, anthropicPayload, sessionId)
   logger.debug("Generated request ID:", requestId)
 
   if (state.manualApprove) {
