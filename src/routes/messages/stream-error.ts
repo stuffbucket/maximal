@@ -40,6 +40,7 @@ export const emitStreamError = async (
   logger.error(`Upstream ${flow} stream failed mid-flight: ${message}`)
   const errorEvent = buildErrorEvent(
     `Upstream stream ended unexpectedly: ${message}`,
+    isProxyDefect(error) ? "api_error" : "overloaded_error",
   )
   try {
     await stream.writeSSE({
@@ -52,4 +53,23 @@ export const emitStreamError = async (
       writeError,
     )
   }
+}
+
+/**
+ * A failure in our own translation code rather than the upstream stream.
+ * Upstream drops are reported as `overloaded_error` so the client retries;
+ * a defect stays `api_error`, since retrying would only hide the bug. Matches
+ * the engine's own wording for a bad property access or call — anything else
+ * (resets, premature close, truncated JSON) is treated as upstream.
+ */
+function isProxyDefect(error: unknown): boolean {
+  if (error instanceof ReferenceError || error instanceof RangeError) {
+    return true
+  }
+  return (
+    error instanceof TypeError
+    && /is not a function|is not an object|cannot read propert|is undefined|is null/i.test(
+      error.message,
+    )
+  )
 }
