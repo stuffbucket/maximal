@@ -3,7 +3,11 @@ import fs from "node:fs"
 import path from "node:path"
 import { parse } from "smol-toml"
 
-import { atomicWriteText, fsyncDirectory } from "~/lib/platform/atomic-json"
+import {
+  atomicWriteText,
+  fsyncDirectory,
+  readFileNoFollow,
+} from "~/lib/platform/atomic-json"
 import { proxyBaseUrl } from "~/lib/start/proxy-port"
 
 export interface CodexAuthInvocation {
@@ -459,19 +463,13 @@ function assertNoSymlinkedParent(filePath: string): void {
 
 function readCodexConfigFile(filePath: string): string | null {
   assertNoSymlinkedParent(filePath)
-  let stat: fs.Stats
-  try {
-    stat = fs.lstatSync(filePath)
-  } catch (error: unknown) {
-    if (isErrorCode(error, "ENOENT")) return null
-    throw error
-  }
-  if (stat.isSymbolicLink()) {
-    throw new CodexConfigConflictError(
-      "Refusing to read Codex config through a symbolic link",
-    )
-  }
-  return fs.readFileSync(filePath, "utf8")
+  return readFileNoFollow(
+    filePath,
+    () =>
+      new CodexConfigConflictError(
+        "Refusing to read Codex config through a symbolic link",
+      ),
+  )
 }
 
 export function isCodexConfigFileConfigured(filePath: string): boolean {

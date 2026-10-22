@@ -47,23 +47,45 @@ function unlinkIfPresent(filePath: string): void {
   }
 }
 
+/**
+ * Read a file without following a symbolic link at its final component, or
+ * `null` when it doesn't exist. One `O_NOFOLLOW` open, then the read goes
+ * through that descriptor — nothing can swap the path for a link between the
+ * check and the read. Windows has no `O_NOFOLLOW`, so there the link check is
+ * a separate `lstat`.
+ */
+export function readFileNoFollow(
+  filePath: string,
+  symlinkError: () => Error,
+): string | null {
+  const noFollow = fs.constants.O_NOFOLLOW as number | undefined
+  let fd: number
+  try {
+    fd = fs.openSync(filePath, fs.constants.O_RDONLY | (noFollow ?? 0))
+  } catch (error: unknown) {
+    if (isErrorCode(error, "ENOENT")) return null
+    if (isErrorCode(error, "ELOOP")) throw symlinkError()
+    throw error
+  }
+  try {
+    if (noFollow === undefined && fs.lstatSync(filePath).isSymbolicLink()) {
+      throw symlinkError()
+    }
+    return fs.readFileSync(fd, "utf8")
+  } finally {
+    fs.closeSync(fd)
+  }
+}
+
 function readRegularDestination(
   filePath: string,
   label: string,
 ): string | null {
-  let stat: fs.Stats
-  try {
-    stat = fs.lstatSync(filePath)
-  } catch (error: unknown) {
-    if (isErrorCode(error, "ENOENT")) return null
-    throw error
-  }
-  if (stat.isSymbolicLink()) {
-    throw new Error(
-      `refusing to write ${label}: destination is a symbolic link`,
-    )
-  }
-  return fs.readFileSync(filePath, "utf8")
+  return readFileNoFollow(
+    filePath,
+    () =>
+      new Error(`refusing to write ${label}: destination is a symbolic link`),
+  )
 }
 
 function isUnsupportedDirectorySync(error: unknown): boolean {

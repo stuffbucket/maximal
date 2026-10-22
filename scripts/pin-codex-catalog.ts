@@ -15,6 +15,7 @@
 
 import fs from "node:fs"
 import path from "node:path"
+import { z } from "zod"
 
 const REPO = "openai/codex"
 const OUT = path.join(
@@ -35,18 +36,35 @@ async function fetchText(tag: string, file: string): Promise<string> {
 }
 
 const tag = process.argv[2]
-if (!tag) {
+if (!tag || !/^[\w.-]+$/.test(tag)) {
   console.error("usage: bun scripts/pin-codex-catalog.ts <openai/codex tag>")
   process.exit(1)
 }
 
+// Only a well-formed catalog lands in the repo: every entry has a slug and
+// Codex's prompt, and the fallback prompt is real text.
+const CatalogSchema = z.object({
+  models: z
+    .array(
+      z.looseObject({
+        slug: z.string().regex(/^[\w.-]+$/),
+        supported_reasoning_levels: z.array(
+          z.object({ effort: z.string(), description: z.string() }),
+        ),
+      }),
+    )
+    .min(1),
+})
+
+// Validate, but pin Codex's JSON exactly as published (parsing reorders keys).
 const catalog = JSON.parse(
   await fetchText(tag, "codex-rs/models-manager/models.json"),
-) as { models: Array<unknown> }
-const fallbackInstructions = await fetchText(
-  tag,
-  "codex-rs/models-manager/prompt.md",
-)
+) as z.infer<typeof CatalogSchema>
+CatalogSchema.parse(catalog)
+const fallbackInstructions = z
+  .string()
+  .min(1_000)
+  .parse(await fetchText(tag, "codex-rs/models-manager/prompt.md"))
 
 const pinned = {
   source: {

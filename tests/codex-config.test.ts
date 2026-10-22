@@ -564,7 +564,9 @@ describe("Codex config file writes", () => {
         target: fs.PathOrFileDescriptor,
         options?: BufferEncoding,
       ) => {
-        if (target === file && reads++ === 1) {
+        // Reads go through a no-follow descriptor, so count those too.
+        const readsConfig = target === file || typeof target === "number"
+        if (readsConfig && reads++ === 1) {
           originalWriteFileSync(file, "changed concurrently")
         }
         return originalReadFileSync(target, options)
