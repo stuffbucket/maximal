@@ -40,6 +40,7 @@
     "deps:check": "depcruise --config .dependency-cruiser.cjs src tests",
     "dev": "bun run --watch ./src/main.ts",
     "ensure:ui-embed": "bun scripts/ensure-ui-embed-stub.ts",
+    "git:tidy": "bun scripts/tidy-branches.ts",
     "knip": "knip-bun",
     "lint": "eslint --cache",
     "lint:all": "eslint --cache .",
@@ -67,7 +68,8 @@
     "verify:build": "bun scripts/dev/verify-build.ts"
   },
   "simple-git-hooks": {
-    "pre-commit": "bunx lint-staged"
+    "pre-commit": "bunx lint-staged",
+    "commit-msg": "test ! -f scripts/check-commit-msg.ts || bun scripts/check-commit-msg.ts \"$1\""
   },
   "lint-staged": {
     "*": [

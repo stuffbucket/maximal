@@ -51,6 +51,21 @@ jobs:
           # we want a newer Bun, not by drift.
           bun-version: 1.3.14
 
+      # release-please reads the PR title on a squash and every branch commit
+      # on a merge commit, so both must be Conventional Commits.
+      - name: Check Conventional Commit subjects
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          {
+            printf '%s\n' "$PR_TITLE"
+            gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/commits" \
+              --jq '.[].commit.message | split("\n")[0]'
+          } | bun scripts/check-commit-msg.ts --subjects
+
       - uses: ./.github/actions/setup-mise
         with:
           mise-version: v2026.9.5
