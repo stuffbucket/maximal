@@ -56,6 +56,9 @@ jobs:
   build-binary:
     runs-on: ubuntu-latest
     env:
+      # The root mise.toml pins Rust and the broker inherits it; nothing in
+      # this job builds Rust through mise, so don't download the toolchain.
+      MISE_DISABLE_TOOLS: rust
       VERSION: ${{ github.event.inputs.version }}
     steps:
       - uses: actions/checkout@v6
