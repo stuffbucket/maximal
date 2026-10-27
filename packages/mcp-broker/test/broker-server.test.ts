@@ -132,6 +132,26 @@ describe("broker server", () => {
     }
   })
 
+  it("reports the tools the server lists when it starts", async () => {
+    const server = await startFixtureBroker()
+    expect(server.endpoints[0]?.tools).toEqual(
+      expect.arrayContaining(["ordinary", "whoami"]),
+    )
+  })
+
+  it("passes the server's stderr up, line by line, tagged with its endpoint", async () => {
+    const lines: Array<{ endpointId: string; line: string }> = []
+    const server = await startBrokerServer(fixtureConfiguration(), API_KEY, {
+      onServerStderr: (endpointId, line) => lines.push({ endpointId, line }),
+    })
+    runningServers.push(server)
+    await waitUntil(() => lines.length > 0)
+    expect(lines[0]).toEqual({
+      endpointId: "fixture",
+      line: "[fixture] ready era=legacy",
+    })
+  })
+
   it("gives every session its own upstream instance", async () => {
     const server = await startFixtureBroker()
     const first = await connectClient(server)
