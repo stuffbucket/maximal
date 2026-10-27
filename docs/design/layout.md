@@ -13,21 +13,18 @@ declares no windows) — change them there and update this table.
 | Window     | Default  | Min     | Max  | Resizable | Notes |
 |------------|----------|---------|------|-----------|-------|
 | Splash     | 440×240  | —       | —    | no        | Frameless, transparent, centered; shown while the proxy starts, then dismissed |
-| Dashboard  | 1100×760 | 720×520 | none | yes       | One scrollable column with sectioned content |
-| Settings   | 900×760  | 600×560 | none | yes       | Sidebar + content pane |
+| Main (Unified Settings + Dashboard) | 960×720  | 640×480 | work area (`prevent_overflow`) | yes | Single top bar (`.topbar`) with consolidated Settings tabs + right-side Dashboard/Settings mode icon button |
 
-Settings and Dashboard are single-instance: opening one again re-shows
-and focuses the existing window. Closing either hides it.
+The unified window is single-instance: opening Settings or Dashboard re-shows
+and focuses the existing window and switches the active view in place. Closing hides it.
 
 ## Grid + columns
 
-**Desktop only.** The OS enforces min size; no mobile fallback.
-Settings has no breakpoints; the Dashboard uses Tailwind breakpoints to
-reflow its rows and grids as the window widens.
+**Desktop only.** The OS enforces min size (`640×480`); `prevent_overflow` clamps initial size to the monitor's work area.
 
 - **Dashboard**: single column, centered in a wide Tailwind
   `max-w-7xl` container, cards full content width.
-- **Settings**: `--sidebar-width` left rail + content pane.
+- **Settings**: `.topbar` header + centered single-column content pane.
   Section max-width = `--content-max`. Within the pane, form
   rows use a 33% label / 66% control split.
 

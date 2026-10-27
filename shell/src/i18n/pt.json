@@ -14,6 +14,17 @@
   "nav-logs": "Registros",
   "nav-diagnostics": "Diagnóstico",
   "nav-sidebar-label": "Seções de configuração",
+  "nav-integrations": "Integrações",
+  "nav-models-keys": "Modelos e chaves",
+  "nav-appearance": "Aparência",
+  "nav-system": "Sistema",
+  "nav-switch-to-dashboard": "Painel ({shortcut})",
+  "nav-switch-to-settings": "Configurações ({shortcut})",
+
+  "appearance-title": "Aparência",
+  "appearance-sub": "Controle como o Maximal aparece na sua área de trabalho.",
+  "appearance-dock-label": "{os, select, macos {Mostrar sempre no Dock} other {Mostrar sempre na barra de tarefas}}",
+  "appearance-dock-sub": "{os, select, macos {Mantenha o Maximal no Dock mesmo quando a janela estiver fechada. Clique com o botão direito no ícone do Dock para ações rápidas.} other {Mantenha o Maximal na barra de tarefas mesmo quando a janela estiver fechada. Clique com o botão direito no ícone para ações rápidas.}}",
 
   "common-copy": "Copiar",
   "common-copied": "Copiado",

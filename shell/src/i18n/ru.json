@@ -14,6 +14,17 @@
   "nav-logs": "Журналы",
   "nav-diagnostics": "Диагностика",
   "nav-sidebar-label": "Разделы настроек",
+  "nav-integrations": "Интеграции",
+  "nav-models-keys": "Модели и ключи",
+  "nav-appearance": "Оформление",
+  "nav-system": "Система",
+  "nav-switch-to-dashboard": "Панель мониторинга ({shortcut})",
+  "nav-switch-to-settings": "Настройки ({shortcut})",
+
+  "appearance-title": "Оформление",
+  "appearance-sub": "Настройте отображение Maximal на рабочем столе.",
+  "appearance-dock-label": "{os, select, macos {Всегда показывать в Dock} other {Всегда показывать на панели задач}}",
+  "appearance-dock-sub": "{os, select, macos {Оставлять Maximal в Dock даже при закрытом окне. Нажмите правой кнопкой мыши по значку в Dock для быстрых действий.} other {Оставлять Maximal на панели задач даже при закрытом окне. Нажмите правой кнопкой мыши по значку для быстрых действий.}}",
 
   "common-copy": "Копировать",
   "common-copied": "Скопировано",

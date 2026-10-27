@@ -14,6 +14,17 @@
   "nav-logs": "Historique",
   "nav-diagnostics": "Diagnostics",
   "nav-sidebar-label": "Sections des réglages",
+  "nav-integrations": "Intégrations",
+  "nav-models-keys": "Modèles et clés",
+  "nav-appearance": "Apparence",
+  "nav-system": "Système",
+  "nav-switch-to-dashboard": "Tableau de bord ({shortcut})",
+  "nav-switch-to-settings": "Réglages ({shortcut})",
+
+  "appearance-title": "Apparence",
+  "appearance-sub": "Contrôlez l’affichage de Maximal sur votre bureau.",
+  "appearance-dock-label": "{os, select, macos {Toujours afficher dans le Dock} other {Toujours afficher dans la barre des tâches}}",
+  "appearance-dock-sub": "{os, select, macos {Garder Maximal dans le Dock même lorsque la fenêtre est fermée. Faites un clic droit sur l’icône du Dock pour les actions rapides.} other {Garder Maximal dans la barre des tâches même lorsque la fenêtre est fermée. Faites un clic droit sur l’icône pour les actions rapides.}}",
 
   "common-copy": "Copier",
   "common-copied": "Copié",

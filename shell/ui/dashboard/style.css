@@ -380,6 +380,14 @@ main#content-area table {
   font-size: var(--text-sm);
 }
 
+/* When embedded inside the unified Settings + Dashboard window, the parent
+   topbar renders the period selector, range label, and globe language picker. */
+html[data-embedded="true"] #token-usage-period,
+html[data-embedded="true"] #token-usage-range,
+html[data-embedded="true"] .lang-picker {
+  display: none;
+}
+
 /* ---- Meters (quota cards) ----
    The fill says how close the quota is to its limit: accent while fine,
    warning from 75% used, error from 90% (with an icon, never color alone).

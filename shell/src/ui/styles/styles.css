@@ -52,23 +52,39 @@ a:hover {
 }
 
 .shell {
-  display: grid;
-  grid-template-columns: var(--sidebar-width) 1fr;
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 0;
 }
 
-/* ---- Sidebar ---- */
-.sidebar {
-  border-inline-end: var(--border-width-hairline) solid var(--border-subtle);
-  background: var(--surface-card);
-  padding: var(--space-3) var(--space-2);
-  overflow-y: auto;
-  min-height: 0;
-  /* Column so the nav takes the slack and the language picker pins to the
-     foot — a global control that shouldn't scroll with the section list. */
+/* ---- Top bar (unified header + tab bar) ---- */
+.topbar {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+  background: var(--surface-card);
+  border-block-end: var(--border-width-hairline) solid var(--border-subtle);
+  padding-block: var(--space-2);
+  padding-inline: var(--space-6);
+  user-select: none;
+  -webkit-user-select: none;
+  flex-shrink: 0;
+}
+
+/* On macOS with TitleBarStyle::Overlay, leave room on the left for the native
+   traffic-light window controls so the first tab sits cleanly beside them. */
+html[data-os="macos"] .topbar {
+  padding-inline-start: calc(var(--space-8) + var(--space-5));
+}
+
+.topbar__nav {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.topbar__nav[hidden] {
+  display: none;
 }
 
 .nav {
@@ -76,12 +92,15 @@ a:hover {
   margin: 0;
   padding: 0;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
   gap: var(--space-1);
 }
 
 .nav__item {
-  display: block;
+  display: inline-flex;
+  align-items: center;
   padding: var(--space-2) var(--space-3);
   font-family: var(--font-body);
   font-size: var(--text-sm);
@@ -90,6 +109,7 @@ a:hover {
   color: var(--text-base-color);
   text-decoration: none;
   border-radius: var(--radius-input);
+  white-space: nowrap;
 }
 
 .nav__item:hover {
@@ -108,44 +128,147 @@ a:hover {
   outline-offset: var(--focus-ring-offset);
 }
 
-/* ---- Language picker ----
-   A global control pinned to the foot of the sidebar (margin-top:auto pushes
-   it below the nav, which takes the vertical slack). Quiet by default —
-   label + a bordered <select> that inherits the app's control surface — so it
-   reads as a utility, not a primary affordance. All values are tokens. */
-.lang-picker {
-  margin-top: auto;
-  padding-top: var(--space-3);
+/* ---- Dashboard period controls in topbar ---- */
+.topbar__dashboard-controls {
   display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
-.lang-picker__label {
-  font-size: var(--text-sm);
-  font-weight: var(--weight-md);
-  color: var(--text-muted);
-  padding-inline: var(--space-1);
+.topbar__dashboard-controls[hidden] {
+  display: none;
 }
 
-.lang-picker__select {
-  font-family: var(--font-body);
-  font-size: var(--text-sm);
-  color: var(--text-base-color);
+.segmented {
+  display: inline-flex;
+  align-items: stretch;
   background: var(--surface-control);
   border: var(--border-width-hairline) solid var(--border-subtle);
   border-radius: var(--radius-input);
-  padding: var(--space-2) var(--space-2);
+  padding: calc(var(--space-1) / 2);
+  gap: calc(var(--space-1) / 2);
+}
+
+.segmented__option {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: var(--text-base-color);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-md);
+  line-height: var(--leading-lg);
+  padding: calc(var(--space-1) + calc(var(--space-1) / 2)) var(--space-3);
+  border-radius: calc(var(--radius-input) - calc(var(--space-1) / 2));
   cursor: pointer;
 }
 
-.lang-picker__select:hover {
-  border-color: var(--border-strong);
+.segmented__option:hover {
+  color: var(--text-strong);
 }
 
-.lang-picker__select:focus-visible {
+.segmented__option[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+.segmented__option:focus-visible {
   outline: var(--focus-ring);
   outline-offset: var(--focus-ring-offset);
+}
+
+.topbar__range {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* ---- Right-side topbar utilities (language globe + mode switch icon) ---- */
+.topbar__utilities {
+  margin-inline-start: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-shrink: 0;
+}
+
+.topbar__divider {
+  width: var(--border-width-hairline);
+  height: var(--size-md);
+  background: var(--border-subtle);
+}
+
+.lang-picker {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--size-xl);
+  height: var(--size-xl);
+  color: var(--text-muted);
+  border-radius: var(--radius-input);
+}
+
+.lang-picker:hover {
+  color: var(--text-strong);
+  background: var(--surface-control);
+}
+
+.lang-picker:focus-within {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.lang-picker__icon {
+  width: var(--size-sm);
+  height: var(--size-sm);
+  pointer-events: none;
+}
+
+.lang-picker__select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  font-size: var(--text-sm);
+}
+
+.topbar__mode-btn {
+  appearance: none;
+  width: var(--size-xl);
+  height: var(--size-xl);
+  border-radius: var(--radius-input);
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+
+.topbar__mode-btn:hover {
+  color: var(--text-strong);
+  background: var(--surface-control);
+}
+
+.topbar__mode-btn:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.topbar__mode-icon {
+  width: var(--size-sm);
+  height: var(--size-sm);
+}
+
+.topbar__mode-icon[hidden] {
+  display: none;
 }
 
 /* ---- Pane ---- */
@@ -153,7 +276,11 @@ a:hover {
   padding: var(--space-6);
   padding-block-end: var(--space-6);
   overflow-y: auto;
+  flex: 1;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-7);
   /* Always-visible thin scrollbar. macOS hides the overlay scrollbar by
      default when idle, which left users with no signal that a section
      scrolls. The standard scrollbar-width + scrollbar-color properties
@@ -161,6 +288,12 @@ a:hover {
      Tauri/Safari. */
   scrollbar-width: thin;
   scrollbar-color: var(--border-subtle) transparent;
+}
+
+.pane--dashboard {
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
 }
 
 .pane::-webkit-scrollbar {
@@ -182,10 +315,27 @@ a:hover {
 }
 
 .section {
+  width: 100%;
   max-width: var(--content-max);
+  margin-inline: auto;
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
+}
+
+.section--dashboard {
+  max-width: none;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+}
+
+.dashboard-frame {
+  width: 100%;
+  height: 100%;
+  flex: 1;
+  border: 0;
+  background: var(--surface-base);
 }
 
 /* `display: flex` above overrides the UA's `[hidden] { display: none }`,

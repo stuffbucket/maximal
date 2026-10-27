@@ -14,6 +14,17 @@
   "nav-logs": "日志",
   "nav-diagnostics": "诊断",
   "nav-sidebar-label": "设置分区",
+  "nav-integrations": "集成",
+  "nav-models-keys": "模型与密钥",
+  "nav-appearance": "外观",
+  "nav-system": "系统",
+  "nav-switch-to-dashboard": "仪表板 ({shortcut})",
+  "nav-switch-to-settings": "设置 ({shortcut})",
+
+  "appearance-title": "外观",
+  "appearance-sub": "控制 Maximal 在桌面上的显示方式。",
+  "appearance-dock-label": "{os, select, macos {始终在程序坞中显示} other {始终在任务栏中显示}}",
+  "appearance-dock-sub": "{os, select, macos {即使窗口关闭也将 Maximal 保留在程序坞中。右键单击程序坞图标可使用快捷操作。} other {即使窗口关闭也将 Maximal 保留在任务栏中。右键单击图标可使用快捷操作。}}",
 
   "common-copy": "复制",
   "common-copied": "已复制",

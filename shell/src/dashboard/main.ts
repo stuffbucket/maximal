@@ -388,6 +388,18 @@ function updateControls(): void {
   // The language globe's hover names the current language.
   const localeSelect = document.getElementById("locale-select") as HTMLSelectElement | null;
   if (localeSelect) localeSelect.title = localeSelect.selectedOptions[0]?.textContent ?? "";
+
+  if (window.parent && window.parent !== window) {
+    window.parent.postMessage(
+      {
+        type: "maximal:dashboard-state",
+        period: state.tokenUsagePeriod,
+        rangeText: rangeEl?.textContent ?? "",
+        rangeTitle: rangeEl?.title ?? "",
+      },
+      window.location.origin,
+    );
+  }
 }
 
 const HOUR_MS = 3_600_000;
@@ -1329,8 +1341,27 @@ function init(): void {
   contentArea.addEventListener("click", handleContentAreaClick);
 
   const urlParams = new URLSearchParams(window.location.search);
+  if (urlParams.get("embedded") === "1") {
+    document.documentElement.setAttribute("data-embedded", "true");
+  }
   const periodFromUrl = normalizePeriod(urlParams.get("period"));
   setSelectedPeriod(periodFromUrl);
+
+  window.addEventListener("message", (event: MessageEvent) => {
+    if (event.origin !== window.location.origin) return;
+    const msg = event.data as { type?: string; period?: string } | null;
+    if (!msg || typeof msg !== "object") return;
+    if (msg.type === "maximal:set-period") {
+      const nextPeriod = normalizePeriod(msg.period ?? null);
+      if (nextPeriod !== state.tokenUsagePeriod) {
+        setSelectedPeriod(nextPeriod);
+        handlePeriodChange();
+      }
+    } else if (msg.type === "maximal:set-locale") {
+      applyI18n();
+      render();
+    }
+  });
 
   // First paint: pull /usage quotas + initial token-usage page so the
   // page isn't blank for a few seconds while the live feed warms up.
