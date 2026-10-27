@@ -294,8 +294,12 @@ export const normalizeToolSchema = (
   if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
     return { type: "object", properties: {} }
   }
-  if ((!schema.type || schema.type === "object") && !schema.properties) {
-    return { ...schema, type: "object", properties: {} }
+  if (!schema.type || schema.type === "object") {
+    return {
+      ...schema,
+      type: "object",
+      properties: schema.properties ?? {},
+    }
   }
   return schema
 }

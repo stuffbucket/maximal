@@ -53,12 +53,7 @@ interface DiscoveryMetadata {
 }
 
 function toDiscoveryMetadata(model: Model): DiscoveryMetadata {
-  const limits =
-    (
-      model.capabilities as
-        | { limits?: Model["capabilities"]["limits"] }
-        | undefined
-    )?.limits ?? {}
+  const { limits } = model.capabilities
   return {
     display_name: model.name,
     ...(model.description ? { description: model.description } : {}),
@@ -116,12 +111,7 @@ export interface AnthropicModelList {
 }
 
 export function toAnthropicModel(model: Model): AnthropicModel {
-  const supports =
-    (
-      model.capabilities as
-        | { supports?: Model["capabilities"]["supports"] }
-        | undefined
-    )?.supports ?? {}
+  const { supports } = model.capabilities
   const thinkingSupported =
     supports.adaptive_thinking === true
     || (supports.reasoning_effort?.length ?? 0) > 0
