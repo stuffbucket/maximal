@@ -20,6 +20,7 @@ import {
   type SidecarEnvelope,
 } from "./control-protocol"
 import { PendingRequests, pendingRequests } from "./pending-requests"
+import { brokerRunsOn } from "./platform"
 import { createLineSplitter, recordBrokerStderr } from "./server-log"
 
 export type BrokerSupervisorState =
@@ -365,7 +366,7 @@ export class BrokerSupervisor {
     this.#setState("starting")
     withdrawUpstream()
 
-    if (this.#platform === "win32") {
+    if (!brokerRunsOn(this.#platform)) {
       // A kill-on-close Job Object has not been wired yet. Running without one
       // would violate the containment contract and could orphan MCP descendants.
       throw new Error("MCP_BROKER_CONTAINMENT_UNAVAILABLE")

@@ -15,6 +15,7 @@ import type { McpBrokerHealth } from "~/lib/config/settings-types"
 import type {
   CatalogDetectOptions,
   CatalogInstall,
+  CatalogInstallHint,
 } from "~/lib/mcp-broker/catalog"
 import type {
   McpClientOfferUnavailableReason,
@@ -31,6 +32,7 @@ import {
   syncMcpClient,
 } from "~/lib/mcp-broker/client-sync"
 import { isProtectedEnvironmentName } from "~/lib/mcp-broker/configuration"
+import { brokerRunsOn } from "~/lib/mcp-broker/platform"
 import {
   type BrokerReadiness,
   getBrokerSupervisorSnapshot,
@@ -158,8 +160,18 @@ function mcpApps(): Array<McpApp> {
 
 /** The broker's supervisor state, collapsed to what the Settings UI acts on
  *  (see McpBrokerHealth): is it fine, is Maximal already fixing it, or does
- *  the user need to do something. */
-export function mcpBrokerHealth(): McpBrokerHealth {
+ *  the user need to do something. Where the broker can't run (Windows) that
+ *  is said up front, even while it is off. */
+export function mcpBrokerHealth(
+  platform: NodeJS.Platform = process.platform,
+): McpBrokerHealth {
+  if (!brokerRunsOn(platform)) {
+    return { state: "unavailable", problem: "unsupported-platform" }
+  }
+  return supervisorHealth()
+}
+
+function supervisorHealth(): McpBrokerHealth {
   const { state, problem } = getBrokerSupervisorSnapshot()
   switch (state) {
     case "disabled": {
@@ -256,6 +268,8 @@ export interface McpBrokerSteps {
   reconfigure?: typeof reconfigureBroker
   waitForBroker?: (timeoutMs: number) => Promise<BrokerReadiness>
   syncClients?: typeof syncAllMcpClients
+  /** Defaults to this machine's; tests inject another. */
+  platform?: NodeJS.Platform
 }
 
 /** What each client's sync did with endpoint `id`. */
@@ -277,10 +291,24 @@ function clientOutcome(
   return { skipped, unavailable, updated }
 }
 
+/** Turning an endpoint on where the broker can't run (Windows) is refused;
+ *  turning one off still works there. */
+function refuseWhereBrokerCantRun(
+  enabling: boolean,
+  platform: NodeJS.Platform,
+): void {
+  if (!enabling || brokerRunsOn(platform)) return
+  throw new McpEndpointError(
+    "unsupported-platform",
+    "MCP servers don't run on Windows yet, so this one can't be turned on. It stays saved for when they do.",
+  )
+}
+
 const DEFAULT_STEPS: Required<McpBrokerSteps> = {
   reconfigure: reconfigureBroker,
   waitForBroker: waitForBrokerReady,
   syncClients: syncAllMcpClients,
+  platform: process.platform,
 }
 
 /**
@@ -289,14 +317,15 @@ const DEFAULT_STEPS: Required<McpBrokerSteps> = {
  * serve before the apps are updated, so an app that connects right away
  * isn't turned away while the broker probes. The apps are updated either
  * way; `broker` says how far it got. Returns undefined when no endpoint has
- * that id.
+ * that id. Throws `unsupported-platform` when turning one on where the
+ * broker can't run (Windows); turning one off still works there.
  */
 export async function setMcpEndpoint(
   id: string,
   change: { enabled: boolean; clients?: Array<McpClientId> },
   steps: McpBrokerSteps = {},
 ): Promise<SetMcpEndpointResult | undefined> {
-  const { reconfigure, waitForBroker, syncClients } = {
+  const { reconfigure, waitForBroker, syncClients, platform } = {
     ...DEFAULT_STEPS,
     ...steps,
   }
@@ -304,6 +333,7 @@ export async function setMcpEndpoint(
   const servers = config.mcpBroker?.servers ?? []
   const index = servers.findIndex((server) => server.id === id)
   if (index === -1) return undefined
+  refuseWhereBrokerCantRun(change.enabled, platform)
 
   const chosen = {
     ...servers[index],
@@ -364,7 +394,7 @@ export function removeMcpClientsOnShutdown(): void {
 
 /** The broker's readiness right now, without waiting. */
 function brokerReadiness(): BrokerReadiness {
-  switch (mcpBrokerHealth().state) {
+  switch (supervisorHealth().state) {
     case "running": {
       return "ready"
     }
@@ -431,13 +461,14 @@ export interface McpCatalogView {
   /** Absolute path of the executable Maximal found. */
   command?: string
   version?: string
-  install: { command: string; url: string }
+  install: CatalogInstallHint
 }
 
 export type McpEndpointErrorCode =
   | "exists"
   | "not-installed"
   | "unknown-catalog"
+  | "unsupported-platform"
 
 export class McpEndpointError extends Error {
   readonly code: McpEndpointErrorCode
@@ -449,21 +480,33 @@ export class McpEndpointError extends Error {
   }
 }
 
-/** Catalog servers not yet added, each with whether it's installed. */
+/** Detection options with config.json's catalog settings filled in. */
+function catalogOptions(
+  config: AppConfig,
+  options: CatalogDetectOptions = {},
+): CatalogDetectOptions {
+  const npmRegistry = config.mcpBroker?.catalog?.npmRegistry
+  return npmRegistry === undefined ? options : { npmRegistry, ...options }
+}
+
+/** Catalog servers not yet added, each with whether it's installed. None
+ *  where the broker can't run (Windows): there is nothing to install for. */
 export function listMcpCatalog(
   config: AppConfig = getConfig(),
   options?: CatalogDetectOptions,
 ): Array<McpCatalogView> {
+  if (!brokerRunsOn(options?.platform)) return []
+  const detect = catalogOptions(config, options)
   const added = new Set((config.mcpBroker?.servers ?? []).map((s) => s.id))
   return MCP_CATALOG.filter((entry) => !added.has(entry.id)).map((entry) => {
-    const found = entry.locate(options)
+    const found = entry.locate(detect)
     return {
       id: entry.id,
       label: entry.label,
       status: found ? "ready" : "not-installed",
       ...(found ? { command: found.command } : {}),
       ...(found?.version ? { version: found.version } : {}),
-      install: entry.install(options),
+      install: entry.install(detect),
     }
   })
 }
@@ -479,9 +522,10 @@ export function catalogServer(
   }
   const found = entry.locate(options)
   if (!found) {
+    const hint = entry.install(catalogOptions(getConfig(), options))
     throw new McpEndpointError(
       "not-installed",
-      `${entry.label} isn't installed. Install it with: ${entry.install(options).command}`,
+      `${entry.label} isn't installed. Install it with: ${hint.command}`,
     )
   }
   return entry.template(found, options)

@@ -1,6 +1,6 @@
 import { McpCatalogCard } from "./McpCatalogCard";
 import { McpEndpointCard } from "./McpEndpointCard";
-import { useMcp } from "./useMcp";
+import { UNSUPPORTED_PLATFORM, useMcp } from "./useMcp";
 import type { McpBrokerHealth } from "../../../proxy/client";
 import { Button } from "../../components/Button";
 import { EmptyState } from "../../components/EmptyState";
@@ -26,13 +26,7 @@ function brokerProblem(broker: McpBrokerHealth): Problem | null {
     };
   }
   if (broker.state === "unavailable" && broker.problem === "unsupported-platform") {
-    return {
-      title: "MCP servers don't run on Windows yet",
-      detail:
-        "Maximal can't run them safely on Windows yet. Your choices here are saved for when it can.",
-      remedy: "none",
-      technical: "MCP_BROKER_CONTAINMENT_UNAVAILABLE",
-    };
+    return UNSUPPORTED_PLATFORM;
   }
   if (broker.state === "unavailable") {
     return {
@@ -63,6 +57,8 @@ export function McpPanel(): JSX.Element {
   } = useMcp();
   const brokerIssue = broker ? brokerProblem(broker) : null;
   const quiet = broker ? QUIET[broker.state] : undefined;
+  // Nothing to install or add where MCP servers can't run; the callout says so.
+  const canAdd = !problem && brokerIssue !== UNSUPPORTED_PLATFORM;
 
   return (
     <Stack proximity="region" className="apps-panel" aria-busy={isLoading}>
@@ -80,7 +76,7 @@ export function McpPanel(): JSX.Element {
         <p className="state__caption">Loading MCP servers…</p>
       ) : endpoints.length === 0 ? (
         // With known servers to add, those cards say what to do instead.
-        !problem &&
+        canAdd &&
         available.length === 0 && (
           <EmptyState
             title="No MCP servers yet"
@@ -116,7 +112,7 @@ export function McpPanel(): JSX.Element {
         </Stack>
       )}
 
-      {!problem && available.length > 0 && (
+      {canAdd && available.length > 0 && (
         <Stack proximity="section" className="subsection">
           <h3 className="subsection__title">Available to add</h3>
           <Stack proximity="section" className="apps-list">

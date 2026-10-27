@@ -24,6 +24,13 @@ export interface CatalogDetectOptions {
   arch?: string
   /** mise's data directory (`MISE_DATA_DIR`). */
   miseDataDir?: string
+  /** Environment read for tool locations and npm settings (default: this
+   *  process's). */
+  env?: Readonly<Record<string, string | undefined>>
+  /** Fixed Node install prefixes, such as Homebrew's (default per platform). */
+  systemPrefixes?: Array<string>
+  /** `mcpBroker.catalog.npmRegistry`: the install hint downloads from it. */
+  npmRegistry?: string
 }
 
 export interface CatalogInstall {
@@ -32,11 +39,21 @@ export interface CatalogInstall {
   version: string | null
 }
 
+/** How to install a server that wasn't found. */
+export interface CatalogInstallHint {
+  /** Shell command to run. */
+  command: string
+  /** The server's package page. */
+  url: string
+  /** Host of the registry the command downloads from. */
+  registry: string
+}
+
 export interface McpCatalogEntry {
   id: string
   label: string
   /** How to install it, shown when it isn't found. */
-  install(options?: CatalogDetectOptions): { command: string; url: string }
+  install(options?: CatalogDetectOptions): CatalogInstallHint
   locate(options?: CatalogDetectOptions): CatalogInstall | undefined
   /** The endpoint written to config.json when the user adds it. Off until
    *  the user turns it on and picks clients. */
@@ -188,10 +205,13 @@ function workiqExecutable(
 
 /** Package directories under a node install root (mise install or npm
  *  global prefix), in npm's Unix and Windows layouts. */
-function packageDirsUnder(root: string): Array<string> {
+function packageDirsUnder(
+  root: string,
+  name: ReadonlyArray<string> = WORKIQ_PACKAGE,
+): Array<string> {
   return [
-    path.join(root, "lib", "node_modules", ...WORKIQ_PACKAGE),
-    path.join(root, "node_modules", ...WORKIQ_PACKAGE),
+    path.join(root, "lib", "node_modules", ...name),
+    path.join(root, "node_modules", ...name),
   ]
 }
 
@@ -275,23 +295,378 @@ function usesMise(opts: ResolvedOptions): boolean {
   return fs.existsSync(path.join(opts.miseDataDir, "installs"))
 }
 
+// ── Where package managers keep global packages ─────────────────────────
+//
+// A GUI-launched Maximal has launchd's PATH, so it can neither find nor run
+// `npm` or `pnpm`, and every Node installed by Homebrew, the Node.js
+// installer, or a version manager is invisible through PATH. Their global
+// package folders are probed directly instead. Nothing here starts a
+// process; npm settings are read from the environment and npmrc files.
+
+interface DetectContext extends ResolvedOptions {
+  env: Readonly<Record<string, string | undefined>>
+  systemPrefixes: Array<string>
+  npmRegistry: string | undefined
+}
+
+function defaultSystemPrefixes(platform: NodeJS.Platform): Array<string> {
+  switch (platform) {
+    case "darwin": {
+      return ["/opt/homebrew", "/usr/local"]
+    }
+    case "linux": {
+      return ["/usr/local", "/home/linuxbrew/.linuxbrew"]
+    }
+    default: {
+      return []
+    }
+  }
+}
+
+function resolveContext(options: CatalogDetectOptions = {}): DetectContext {
+  const opts = resolveOptions(options)
+  return {
+    ...opts,
+    env: options.env ?? process.env,
+    systemPrefixes:
+      options.systemPrefixes ?? defaultSystemPrefixes(opts.platform),
+    npmRegistry: options.npmRegistry,
+  }
+}
+
+/** Every entry in a directory, symlinks included. */
+function listEntries(dir: string): Array<string> {
+  try {
+    return fs.readdirSync(dir)
+  } catch {
+    return []
+  }
+}
+
+/** `<dir>/<version>/<...sub>` for each version directory (aliases that are
+ *  symlinks, like mise's `22` or `latest`, are skipped). */
+function versionsUnder(dir: string, ...sub: Array<string>): Array<string> {
+  return listDirs(dir).map((version) => path.join(dir, version, ...sub))
+}
+
+/** npm reads `npm_config_<key>` from the environment, in any case. */
+function npmEnv(ctx: DetectContext, key: string): string | undefined {
+  const wanted = `npm_config_${key}`
+  for (const [name, value] of Object.entries(ctx.env)) {
+    if (value && name.toLowerCase() === wanted) return value
+  }
+  return undefined
+}
+
+/** `key=value` settings from an npmrc, `${VAR}` expanded; empty when the
+ *  file is missing. */
+function readNpmrc(
+  file: string | undefined,
+  ctx: DetectContext,
+): Map<string, string> {
+  const settings = new Map<string, string>()
+  if (!file) return settings
+  let text: string
+  try {
+    text = fs.readFileSync(file, "utf8")
+  } catch {
+    return settings
+  }
+  for (const raw of text.split(/\r?\n/u)) {
+    const line = raw.trim()
+    const eq = line.indexOf("=")
+    if (eq <= 0 || /^[;#[]/u.test(line)) continue
+    let value = line.slice(eq + 1).trim()
+    if (/^(["']).*\1$/u.test(value)) value = value.slice(1, -1)
+    settings.set(
+      line.slice(0, eq).trim(),
+      value.replaceAll(
+        /\$\{([^}]+)\}/gu,
+        (match, name: string) => ctx.env[name] ?? match,
+      ),
+    )
+  }
+  return settings
+}
+
+function userNpmrc(ctx: DetectContext): string {
+  return npmEnv(ctx, "userconfig") ?? path.join(ctx.home, ".npmrc")
+}
+
+/** npm's `prefix` setting (environment, then user npmrc), if absolute. */
+function npmPrefixSetting(ctx: DetectContext): string | undefined {
+  const value =
+    npmEnv(ctx, "prefix") ?? readNpmrc(userNpmrc(ctx), ctx).get("prefix")
+  if (!value) return undefined
+  const expanded = value.replace(/^~(?=$|[/\\])/u, ctx.home)
+  return path.isAbsolute(expanded) ? expanded : undefined
+}
+
+function appData(ctx: DetectContext): string {
+  return ctx.env.APPDATA ?? path.join(ctx.home, "AppData", "Roaming")
+}
+
+function localAppData(ctx: DetectContext): string {
+  return ctx.env.LOCALAPPDATA ?? path.join(ctx.home, "AppData", "Local")
+}
+
+function xdgDataHome(ctx: DetectContext): string {
+  return ctx.env.XDG_DATA_HOME ?? path.join(ctx.home, ".local", "share")
+}
+
+/** fnm's base directories: FNM_DIR, else every location fnm has used. */
+function fnmDirs(ctx: DetectContext): Array<string> {
+  if (ctx.env.FNM_DIR) return [ctx.env.FNM_DIR]
+  if (ctx.platform === "win32") return [path.join(appData(ctx), "fnm")]
+  return [
+    path.join(xdgDataHome(ctx), "fnm"),
+    path.join(ctx.home, ".fnm"),
+    ...(ctx.platform === "darwin" ?
+      [path.join(ctx.home, "Library", "Application Support", "fnm")]
+    : []),
+  ]
+}
+
+/** Node install prefixes whose global packages npm puts under
+ *  `lib/node_modules` (Unix) or `node_modules` (Windows). */
+function nodeInstallRoots(ctx: DetectContext): Array<string> {
+  const { env, home } = ctx
+  const prefix = npmPrefixSetting(ctx)
+  const roots = [
+    ...(prefix ? [prefix] : []),
+    ...ctx.systemPrefixes,
+    path.join(home, ".npm-global"),
+    ...(ctx.platform === "win32" ? [path.join(appData(ctx), "npm")] : []),
+    ...versionsUnder(
+      path.join(env.NVM_DIR ?? path.join(home, ".nvm"), "versions", "node"),
+    ),
+    ...fnmDirs(ctx).flatMap((dir) =>
+      versionsUnder(path.join(dir, "node-versions"), "installation"),
+    ),
+    ...versionsUnder(
+      path.join(
+        env.ASDF_DATA_DIR ?? path.join(home, ".asdf"),
+        "installs",
+        "nodejs",
+      ),
+    ),
+    // mise-managed Node, whose own `npm install -g` lands here.
+    ...versionsUnder(path.join(ctx.miseDataDir, "installs", "node")),
+  ]
+  return [...new Set(roots)]
+}
+
+/** Volta installs each global package under its own npm prefix. */
+function voltaPackageRoot(
+  ctx: DetectContext,
+  name: ReadonlyArray<string>,
+): string {
+  const home =
+    ctx.env.VOLTA_HOME
+    ?? (ctx.platform === "win32" ?
+      path.join(localAppData(ctx), "Volta")
+    : path.join(ctx.home, ".volta"))
+  return path.join(home, "tools", "image", "packages", ...name)
+}
+
+function hasPackageUnder(root: string, name: ReadonlyArray<string>): boolean {
+  return packageDirsUnder(root, name).some((dir) =>
+    fs.existsSync(path.join(dir, "package.json")),
+  )
+}
+
+/** npm is on PATH or ships with any Node install found. */
+function npmFound(ctx: DetectContext): boolean {
+  const names = ctx.platform === "win32" ? ["npm.cmd", "npm"] : ["npm"]
+  const onPath = ctx.pathDirs.some((dir) =>
+    names.some((name) => isExecutableFile(path.join(dir, name), ctx.platform)),
+  )
+  return (
+    onPath
+    || nodeInstallRoots(ctx).some((root) => hasPackageUnder(root, ["npm"]))
+  )
+}
+
+/** pnpm's home, as pnpm itself picks it. */
+function pnpmHome(ctx: DetectContext): string {
+  if (ctx.env.PNPM_HOME) return ctx.env.PNPM_HOME
+  if (ctx.env.XDG_DATA_HOME) return path.join(ctx.env.XDG_DATA_HOME, "pnpm")
+  switch (ctx.platform) {
+    case "darwin": {
+      return path.join(ctx.home, "Library", "pnpm")
+    }
+    case "win32": {
+      return path.join(localAppData(ctx), "pnpm")
+    }
+    default: {
+      return path.join(ctx.home, ".local", "share", "pnpm")
+    }
+  }
+}
+
+/** pnpm's global projects: `global/5` (pnpm ≤10), and every project under
+ *  `global/v11/` (pnpm ≥11, reached through hash-named symlinks). Their
+ *  packages are symlinks into pnpm's store, resolved here. */
+function pnpmGlobalPackageDirs(
+  ctx: DetectContext,
+  name: ReadonlyArray<string>,
+): Array<string> {
+  const global = path.join(pnpmHome(ctx), "global")
+  const projects = listEntries(global).flatMap((layout) => {
+    const dir = path.join(global, layout)
+    return [dir, ...listEntries(dir).map((entry) => path.join(dir, entry))]
+  })
+  const found = new Set<string>()
+  for (const project of projects) {
+    try {
+      found.add(fs.realpathSync(path.join(project, "node_modules", ...name)))
+    } catch {
+      // Not installed in this project.
+    }
+  }
+  return [...found]
+}
+
+// ── Which registry an install downloads from ────────────────────────────
+
+const NPM_PUBLIC_REGISTRY = "https://registry.npmjs.org/"
+
+/** The global npmrc: npm's `globalconfig`, else `etc/npmrc` of the first
+ *  Node install that ships npm. */
+function globalNpmrc(ctx: DetectContext): string | undefined {
+  const configured = npmEnv(ctx, "globalconfig")
+  if (configured) return configured
+  const root = nodeInstallRoots(ctx).find((dir) =>
+    hasPackageUnder(dir, ["npm"]),
+  )
+  return root ? path.join(root, "etc", "npmrc") : undefined
+}
+
+/** The registry npm, pnpm, and mise's npm backend fetch a package of
+ *  `scope` from. As in npm, a `<scope>:registry` from any npmrc wins over
+ *  every plain `registry`; those come from the command line (Maximal's
+ *  setting), the environment, the user npmrc, then the global npmrc. */
+function effectiveRegistry(ctx: DetectContext, scope: string): string {
+  const user = readNpmrc(userNpmrc(ctx), ctx)
+  const global = readNpmrc(globalNpmrc(ctx), ctx)
+  const scoped = `${scope}:registry`
+  const candidates = [
+    user.get(scoped),
+    global.get(scoped),
+    ctx.npmRegistry,
+    npmEnv(ctx, "registry"),
+    user.get("registry"),
+    global.get("registry"),
+  ]
+  return candidates.find(Boolean) ?? NPM_PUBLIC_REGISTRY
+}
+
+/** What the user is shown: just the host. */
+function registryHost(registry: string): string {
+  try {
+    return new URL(registry).host || registry
+  } catch {
+    return registry
+  }
+}
+
+/** Quoted for a POSIX shell unless it's plainly safe. */
+function shellArg(value: string): string {
+  return /^[\w%+,./:=@-]+$/u.test(value) ? value : (
+      `'${value.replaceAll("'", String.raw`'\''`)}'`
+    )
+}
+
+type PackageManager = "mise" | "pnpm" | "npm"
+
+/** Whichever way this machine installs tools; detection finds each. mise
+ *  when it manages tools here; pnpm when it has global installs and npm
+ *  can't be found; npm otherwise. */
+function preferredPackageManager(ctx: DetectContext): PackageManager {
+  if (usesMise(ctx)) return "mise"
+  if (fs.existsSync(path.join(pnpmHome(ctx), "global")) && !npmFound(ctx)) {
+    return "pnpm"
+  }
+  return "npm"
+}
+
+/** `spec` installed globally, from `registry` when one is set. */
+function globalInstallCommand(
+  manager: PackageManager,
+  spec: string,
+  registry: string | undefined,
+): string {
+  const flag = registry ? ` --registry ${shellArg(registry)}` : ""
+  switch (manager) {
+    case "mise": {
+      const env = registry ? `NPM_CONFIG_REGISTRY=${shellArg(registry)} ` : ""
+      return `${env}mise use -g npm:${spec}`
+    }
+    case "pnpm": {
+      return `pnpm add -g ${spec}${flag}`
+    }
+    case "npm": {
+      return `npm install -g ${spec}${flag}`
+    }
+    default: {
+      manager satisfies never
+      return `npm install -g ${spec}${flag}`
+    }
+  }
+}
+
+// ── Work IQ in those places ─────────────────────────────────────────────
+
+/** The version range the install hint and docs/linux-workiq.md install.
+ *  Pinned to the major version because detection relies on the package's
+ *  internal layout (`bin/<os>-<arch>/workiq`). */
+export const WORKIQ_PACKAGE_SPEC = `${WORKIQ_PACKAGE.join("/")}@1`
+
+/** npm global installs into any Node found outside PATH, and Volta's. */
+function fromNodeInstalls(ctx: DetectContext): Array<CatalogInstall> {
+  const roots = [
+    ...nodeInstallRoots(ctx),
+    voltaPackageRoot(ctx, WORKIQ_PACKAGE),
+  ]
+  return roots.flatMap((root) => {
+    for (const dir of packageDirsUnder(root)) {
+      const found = workiqExecutable(dir, ctx)
+      if (found) return [found]
+    }
+    return []
+  })
+}
+
+function fromPnpm(ctx: DetectContext): Array<CatalogInstall> {
+  return pnpmGlobalPackageDirs(ctx, WORKIQ_PACKAGE).flatMap((dir) => {
+    const found = workiqExecutable(dir, ctx)
+    return found ? [found] : []
+  })
+}
+
 const workiq: McpCatalogEntry = {
   id: "workiq",
   label: "Work IQ",
   install(options) {
-    // Whichever way this machine installs tools; detection finds both.
-    const command =
-      usesMise(resolveOptions(options)) ?
-        "mise use -g npm:@microsoft/workiq"
-      : "npm install -g @microsoft/workiq"
-    return { command, url: "https://www.npmjs.com/package/@microsoft/workiq" }
+    const ctx = resolveContext(options)
+    return {
+      command: globalInstallCommand(
+        preferredPackageManager(ctx),
+        WORKIQ_PACKAGE_SPEC,
+        ctx.npmRegistry,
+      ),
+      url: "https://www.npmjs.com/package/@microsoft/workiq",
+      registry: registryHost(effectiveRegistry(ctx, WORKIQ_PACKAGE[0])),
+    }
   },
   locate(options) {
-    const opts = resolveOptions(options)
+    const ctx = resolveContext(options)
     return newestInstall([
-      ...fromMise(opts),
-      fromPath(opts),
-      fromNpmGlobal(opts),
+      ...fromMise(ctx),
+      fromPath(ctx),
+      fromNpmGlobal(ctx),
+      ...fromNodeInstalls(ctx),
+      ...fromPnpm(ctx),
     ])
   },
   template(install, options) {

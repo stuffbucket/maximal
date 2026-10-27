@@ -52,25 +52,44 @@ This is a CLI/web-UI setup, not a Linux Tauri desktop build.
 
 ## Install Work IQ
 
-Use your existing package manager. With mise:
+Use your existing package manager. Install the 1.x line: Maximal runs the
+native executable inside the package, so it relies on that package's layout.
+With mise:
 
 ```sh
-mise use --global npm:@microsoft/workiq@1.0.1
+mise use --global npm:@microsoft/workiq@1
 ```
 
 Or, with an appropriately configured Node/npm installation:
 
 ```sh
-npm install --global @microsoft/workiq@1.0.1
+npm install --global @microsoft/workiq@1
 ```
 
-`maximal mcp` detects the native executable inside either installation; it does
-not run an npm launcher or a mise shim. If the shell's `workiq` launcher reports
+Or, with pnpm (after `pnpm setup`):
+
+```sh
+pnpm add --global @microsoft/workiq@1
+```
+
+These download from the registry your npm configuration names:
+`NPM_CONFIG_REGISTRY`, or `@microsoft:registry=` / `registry=` in `~/.npmrc`
+(a `@microsoft:` scope registry wins), else `registry.npmjs.org`. The install
+hint in Settings and `maximal mcp` shows which host that is. If your network
+blocks it, either configure npm's registry as usual or set
+`mcpBroker.catalog.npmRegistry` in Maximal's `config.json` to an `http(s)` URL;
+the hint then adds `--registry <url>` (npm, pnpm) or starts with
+`NPM_CONFIG_REGISTRY=<url>` (mise).
+
+`maximal mcp` detects the native executable inside any of these installations,
+including npm's global folder of a Homebrew, nvm, fnm, asdf, Volta, or
+mise-managed Node; it does not run npm, pnpm, an npm launcher, or a mise shim.
+If the shell's `workiq` launcher reports
 `No version is set for shim: node`, select a compatible Node default, or use the
 native binary directly. For the mise installation above:
 
 ```sh
-WORKIQ_ROOT="$(mise where npm:@microsoft/workiq@1.0.1)"
+WORKIQ_ROOT="$(mise where npm:@microsoft/workiq@1)"
 case "$(uname -m)" in
   x86_64) WORKIQ_ARCH=x64 ;;
   aarch64|arm64) WORKIQ_ARCH=arm64 ;;

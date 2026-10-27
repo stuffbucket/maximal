@@ -424,3 +424,21 @@ describe("detectUnknownKeys", () => {
     expect(detectUnknownKeys([])).toEqual([])
   })
 })
+
+describe("mcpBroker.catalog", () => {
+  it("accepts an http(s) npm registry for install hints, nothing else", () => {
+    const config = {
+      mcpBroker: { catalog: { npmRegistry: "https://npm.example.test/npm/" } },
+    }
+    expect(validateAppConfig(config)).toEqual(config)
+    for (const npmRegistry of ["npm.example.test", "ftp://npm.example.test/"]) {
+      let thrown: ConfigValidationError | null = null
+      try {
+        validateAppConfig({ mcpBroker: { catalog: { npmRegistry } } })
+      } catch (e) {
+        if (e instanceof ConfigValidationError) thrown = e
+      }
+      expect(thrown?.issues[0]?.path).toBe("mcpBroker.catalog.npmRegistry")
+    }
+  })
+})
