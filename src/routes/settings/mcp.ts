@@ -19,6 +19,7 @@ import {
   McpEndpointError,
   refreshCatalogCommands,
   removeMcpEndpoint,
+  repairMcpClientKeys,
   setMcpEndpoint,
 } from "~/apps/mcp"
 import { getConfig } from "~/lib/config/config"
@@ -48,12 +49,14 @@ const ADD_ERROR_STATUS = {
 } as const
 
 // Each list re-scans, so the panel's "Check again" also finds a server that
-// was just installed or upgraded.
+// was just installed or upgraded. It also puts back any key a running Claude
+// Code overwrote with the placeholder (a file check, no CLI).
 mcpRoutes.get("/", async (c) => {
   try {
     const before = getConfig()
     const config = refreshCatalogCommands(before)
     if (config !== before) await reconfigureBroker(config.mcpBroker ?? {})
+    repairMcpClientKeys(config)
     return respondValidated(
       c,
       { schema: McpEndpointsListResponse, label: "MCP endpoints" },

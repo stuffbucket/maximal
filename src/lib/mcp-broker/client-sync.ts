@@ -95,6 +95,10 @@ export interface McpClientConfigurator {
     owned: Array<string>,
     options?: McpReconcileOptions,
   ): McpReconcileResult
+  /** Put the right key back into owned entries the client overwrote,
+   *  touching nothing else. File-only and cheap enough to run on every
+   *  Settings read. */
+  repairKeys?(desired: Array<McpClientEntry>, owned: Array<string>): void
   /** The client's own stdio entry named `id` (one Maximal didn't write), so
    *  an endpoint can adopt its command when it is turned on. */
   existingStdioEntry?(

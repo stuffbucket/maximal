@@ -179,6 +179,95 @@ describe("Claude Code MCP reconcile", () => {
   })
 })
 
+/** `claude mcp add-json` can write the file and then time out. */
+const writesThenTimesOut = (args: Array<string>): void => {
+  fakeClaude(args)
+  throw new Error("spawnSync claude ETIMEDOUT")
+}
+
+const failsOutright = (): void => {
+  throw new Error("claude exited 1")
+}
+
+describe("Claude Code MCP when the CLI fails", () => {
+  test("an add that wrote the entry and then failed is still Maximal's", () => {
+    const mcp = createClaudeCodeMcp({
+      configPath: () => file,
+      runner: () => writesThenTimesOut,
+      available: () => true,
+    })
+
+    const result = mcp.reconcile([entry("workiq", KEY)], [])
+
+    expect(result).toEqual({
+      owned: ["workiq"],
+      added: ["workiq"],
+      removed: [],
+      skipped: [],
+    })
+    // The placeholder was swapped for the real key, so the entry works.
+    expect(servers().workiq.headers).toEqual({ Authorization: `Bearer ${KEY}` })
+  })
+
+  test("an add that wrote nothing is reported as failed and not owned", () => {
+    const mcp = createClaudeCodeMcp({
+      configPath: () => file,
+      runner: () => failsOutright,
+      available: () => true,
+    })
+
+    const result = mcp.reconcile([entry("workiq", KEY)], [])
+
+    expect(result.owned).toEqual([])
+    expect(result.added).toEqual([])
+    expect(result.skipped).toEqual([])
+    expect(servers().workiq).toBeUndefined()
+  })
+})
+
+describe("Claude Code MCP key repair", () => {
+  test("puts the real key back when Claude Code restored the placeholder", () => {
+    const mcp = configurator()
+    mcp.reconcile([entry("workiq", KEY)], [])
+    // A running Claude Code writes back the copy it read before the swap.
+    const document = readDocument()
+    const list = document.mcpServers as Record<string, Record<string, unknown>>
+    list.workiq.headers = { Authorization: keyPlaceholder(KEY) }
+    writeDocument(document)
+    calls = []
+
+    mcp.repairKeys?.([entry("workiq", KEY)], ["workiq"])
+
+    expect(servers().workiq.headers).toEqual({ Authorization: `Bearer ${KEY}` })
+    expect(calls).toEqual([])
+    expect(readDocument().numStartups).toBe(7)
+  })
+
+  test("never touches an entry Maximal doesn't own, or the file when nothing's wrong", () => {
+    const theirs = {
+      type: "http",
+      url: "http://127.0.0.1:4141/mcp/workiq",
+      headers: { Authorization: "Bearer theirs" },
+    }
+    writeDocument({ mcpServers: { workiq: theirs } })
+    const mcp = configurator()
+
+    mcp.repairKeys?.([entry("workiq", KEY)], [])
+    expect(servers().workiq).toEqual(theirs)
+
+    writeDocument({
+      mcpServers: {
+        workiq: { ...theirs, headers: { Authorization: `Bearer ${KEY}` } },
+      },
+    })
+    const before = fs.statSync(file).mtimeMs
+    const text = fs.readFileSync(file, "utf8")
+    mcp.repairKeys?.([entry("workiq", KEY)], ["workiq"])
+    expect(fs.readFileSync(file, "utf8")).toBe(text)
+    expect(fs.statSync(file).mtimeMs).toBe(before)
+  })
+})
+
 describe("Claude Code MCP shutdown and adoption", () => {
   test("offline removal edits the file and never runs the CLI", () => {
     const mcp = configurator()

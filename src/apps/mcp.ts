@@ -21,7 +21,11 @@ import type { McpClientId } from "~/lib/mcp-broker/types"
 
 import { getConfig, writeConfig } from "~/lib/config/config"
 import { findCatalogEntry, MCP_CATALOG } from "~/lib/mcp-broker/catalog"
-import { ownedMcpServers, syncMcpClient } from "~/lib/mcp-broker/client-sync"
+import {
+  desiredEntriesFor,
+  ownedMcpServers,
+  syncMcpClient,
+} from "~/lib/mcp-broker/client-sync"
 import { isProtectedEnvironmentName } from "~/lib/mcp-broker/configuration"
 import {
   getBrokerSupervisorSnapshot,
@@ -196,6 +200,23 @@ export function syncAllMcpClients(
     name: app.name,
     result: syncMcpClient(app.mcp, { config }),
   }))
+}
+
+/** Put the right key back into owned entries a client overwrote (a running
+ *  Claude Code writes back the copy it read before Maximal swapped the
+ *  placeholder for the key). File-only; never adds or removes an entry. */
+export function repairMcpClientKeys(config: AppConfig = getConfig()): void {
+  for (const app of mcpApps()) {
+    if (!app.mcp.repairKeys) continue
+    try {
+      app.mcp.repairKeys(
+        desiredEntriesFor(app.mcp, config),
+        ownedMcpServers(app.mcp.clientId, config),
+      )
+    } catch (error) {
+      consola.warn(`Could not check the ${app.name} MCP server keys`, error)
+    }
+  }
 }
 
 /**
