@@ -16,10 +16,11 @@ import { type Problem, describeProblem, withRetry } from "../../problems";
  * endpoints, the known servers that could be added, the health of the
  * process that runs them, and the mutations: add a found server, turn an
  * endpoint on (with the clients it should reach) or off, and remove one. A
- * toggle or removal restarts the broker and may run the `claude` CLI, so it
- * gets a longer timeout than the default.
+ * toggle or removal restarts the broker and may run the `claude` CLI, and
+ * turning one on waits up to 45s for the broker to start before the apps
+ * are updated, so they get a longer timeout than the default.
  */
-const TOGGLE_TIMEOUT_MS = 60_000;
+const TOGGLE_TIMEOUT_MS = 90_000;
 
 /** Broker states Maximal is still sorting out on its own; the panel
  *  re-reads while in one, doubling the wait from POLL_MIN_MS to POLL_MAX_MS. */
@@ -31,6 +32,9 @@ export interface McpToggleResult {
   ok: boolean;
   problem?: Problem;
   skipped?: McpEndpointToggleResponse["skipped"];
+  unavailable?: McpEndpointToggleResponse["unavailable"];
+  updated?: McpEndpointToggleResponse["updated"];
+  broker?: McpEndpointToggleResponse["broker"];
   adoptedFrom?: string;
 }
 
@@ -156,6 +160,9 @@ export function useMcp(): UseMcp {
       return {
         ok: true,
         skipped: result.data.skipped,
+        unavailable: result.data.unavailable,
+        updated: result.data.updated,
+        broker: result.data.broker,
         adoptedFrom: result.data.adoptedFrom,
       };
     },

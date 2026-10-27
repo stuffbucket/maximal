@@ -36,6 +36,7 @@ function fakeConfigurator(available = true) {
   const configurator: McpClientConfigurator = {
     clientId: "claude-desktop",
     apiKeyLabel: "claude-desktop",
+    removeOnShutdown: false,
     available: () => available,
     reconcile(desired: Array<McpClientEntry>, owned: Array<string>) {
       calls.push({ desired: desired.map((entry) => entry.id), owned })
@@ -46,6 +47,7 @@ function fakeConfigurator(available = true) {
           .filter((id) => !owned.includes(id)),
         removed: owned.filter((id) => !desired.some((e) => e.id === id)),
         skipped: [],
+        unavailable: [],
       }
     },
   }

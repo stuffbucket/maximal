@@ -15,6 +15,7 @@ import path from "node:path"
 
 import type { AppConfig } from "~/lib/config/config"
 
+import { keyPlaceholder } from "~/apps/claude-code/mcp"
 import { getConfig, writeConfig } from "~/lib/config/config"
 import {
   McpEndpointAddResponse,
@@ -79,6 +80,69 @@ describe("GET /mcp", () => {
     // Broker health rides along so the UI can tell "fixing itself" from
     // "needs the user"; no broker has started in this process.
     expect(body.broker.problem).toBeNull()
+  })
+})
+
+describe("GET /mcp key repair", () => {
+  // A running Claude Code can write back the copy of ~/.claude.json it read
+  // before Maximal swapped the placeholder for the key, so the entry 401s.
+  const ID = "keyfix-fixture-2c9d"
+  const KEY = "endpoint-key-for-keyfix"
+  const claudeDir = fs.mkdtempSync(path.join(os.tmpdir(), "mcp-keyfix-"))
+  const claudeJson = path.join(claudeDir, ".claude.json")
+  const savedClaudeDir = process.env.CLAUDE_CONFIG_DIR
+  const served = (): AppConfig => {
+    const base = config({
+      id: ID,
+      enabled: true,
+      clients: ["claude-code"],
+      apiKey: KEY,
+    })
+    return { ...base, mcpBroker: { ...base.mcpBroker, enabled: true } }
+  }
+
+  beforeEach(() => {
+    process.env.CLAUDE_CONFIG_DIR = claudeDir
+    fs.writeFileSync(
+      claudeJson,
+      JSON.stringify({
+        mcpServers: {
+          [ID]: {
+            type: "http",
+            url: `http://127.0.0.1:4141/mcp/${ID}`,
+            headers: { Authorization: keyPlaceholder(KEY) },
+          },
+        },
+      }),
+    )
+    writeConfig({ ...served(), apps: { claudeCode: { mcpServers: [ID] } } })
+  })
+
+  afterAll(() => {
+    if (savedClaudeDir === undefined) delete process.env.CLAUDE_CONFIG_DIR
+    else process.env.CLAUDE_CONFIG_DIR = savedClaudeDir
+    fs.rmSync(claudeDir, { recursive: true, force: true })
+  })
+
+  const header = (): unknown => {
+    // eslint-disable-next-line unicorn/prefer-json-parse-buffer -- JSON.parse's type only accepts string
+    const text = fs.readFileSync(claudeJson, "utf8")
+    const document = JSON.parse(text) as {
+      mcpServers: Record<string, { headers?: { Authorization?: string } }>
+    }
+    return document.mcpServers[ID].headers?.Authorization
+  }
+
+  test("puts the key back into an entry Maximal owns", async () => {
+    const res = await buildApp().request("/mcp")
+    expect(res.status).toBe(200)
+    expect(header()).toBe(`Bearer ${KEY}`)
+  })
+
+  test("leaves an entry Maximal doesn't own alone", async () => {
+    writeConfig(served())
+    await buildApp().request("/mcp")
+    expect(header()).toBe(keyPlaceholder(KEY))
   })
 })
 
@@ -208,6 +272,10 @@ describe("POST /mcp/:id", () => {
     const body = McpEndpointToggleResponse.parse(await res.json())
     expect(body.endpoint.enabled).toBe(true)
     expect(body.skipped).toEqual([])
+    expect(body.unavailable).toEqual([])
+    expect(body.updated).toEqual([])
+    // No broker runs in this test process.
+    expect(body.broker).toBe("off")
 
     const broker = getConfig().mcpBroker
     expect(broker?.enabled).toBe(true)

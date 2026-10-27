@@ -197,16 +197,49 @@ describe("broker server", () => {
     ).toThrow("RESTART_REQUIRED")
   })
 
-  it("refuses sessions past the endpoint's limit with a clear 503", async () => {
+  it("makes room past the limit by closing the least recently used idle session", async () => {
+    // A client that exits without a DELETE leaves its session behind, and
+    // under Bun the broker never sees its event stream go away. Without
+    // eviction such sessions fill the limit for good.
+    const server = await startFixtureBroker({ maxSessions: 2 })
+    const recent = await connectClient(server)
+    const stale = await connectClient(server)
+    try {
+      const stalePid = await whoami(stale)
+      const recentPid = await whoami(recent)
+
+      const newcomer = await connectClient(server)
+      try {
+        await waitUntil(() => !isRunning(stalePid))
+        expect(await whoami(recent)).toBe(recentPid)
+        expect(await whoami(newcomer)).not.toBe(recentPid)
+      } finally {
+        await newcomer.close()
+      }
+    } finally {
+      await recent.close()
+      await stale.close()
+    }
+  })
+
+  it("refuses sessions past the limit with a clear 503 while every one is busy", async () => {
     const server = await startFixtureBroker({ maxSessions: 1 })
     const owner = await connectClient(server)
+    const pid = await whoami(owner)
+    const busy = owner
+      .callTool({ name: "delay", arguments: {} })
+      .catch(() => undefined)
 
     try {
+      await Bun.sleep(200)
       const response = await initialize(server)
       expect(response.status).toBe(503)
       expect(await response.text()).toContain("already has 1 sessions open")
+      // The busy session was left alone.
+      expect(isRunning(pid)).toBe(true)
     } finally {
       await owner.close()
+      await busy
     }
   })
 })

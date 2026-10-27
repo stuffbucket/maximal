@@ -188,7 +188,10 @@ configured, otherwise with the normal main-port rules (`auth.enforce`,
 broker with the internal key. Every MCP session runs its own instance of the
 endpoint's server (spawned on `initialize`, stopped when the session ends), so
 parallel clients behave as if each ran it themselves; `limits.sessions`
-(default 8) caps them, and a session past the cap gets a 503 that says so. A
+(default 8) caps them. At the cap, a new session closes the least recently
+used session with no request in flight (a client that exits without a DELETE
+leaves one behind, and under Bun the broker never sees its event stream go
+away); only when every session is busy does it get a 503 that says so. A
 missing or restarting broker returns 503; an unreachable one 502. Concurrency and declared body size are bounded, and only
 the wait for response headers is timed, so SSE streams stay open.
 
@@ -249,11 +252,19 @@ any loopback port, so after a port change the entry is rewritten rather than
 mistaken for the user's; `/_internal/reload` also re-syncs entries from the
 server.
 
-Maximal-written entries exist only while Maximal runs: shutdown (and the
-`exit` safety net) removes them from both apps with direct file edits, since
-spawning `claude` doesn't fit the 2.5s shutdown budget, and boot re-adds them
-from the recorded choices. Boot sync runs when `config.json` has an
-`mcpBroker` section.
+Claude Code's Maximal-written entries exist only while Maximal runs: each
+session reads `~/.claude.json` when it starts, so shutdown (and the `exit`
+safety net) removes them with direct file edits, since spawning `claude`
+doesn't fit the 2.5s shutdown budget, and boot re-adds them from the recorded
+choices. Claude Desktop's entries stay across shutdown
+(`McpClientConfigurator.removeOnShutdown`): Desktop reads its config only at
+launch, like its routing profile, so removing them would only make its next
+launch come up without the server. Boot sync runs when `config.json` has an
+`mcpBroker` section, after the broker is ready (`waitForBrokerReady`, bounded
+at 45s and detached from the HTTP listener), so an app that connects right
+away isn't turned away with 503 while the broker probes its servers. Turning
+an endpoint on in Settings waits the same way before updating the apps, and
+reports the broker's state (`ready` / `starting` / `failed`) in the response.
 
 When an endpoint is turned on and an app already has its own stdio entry with
 that id (Claude Code user scope, or Claude Desktop's Claude-3p or regular

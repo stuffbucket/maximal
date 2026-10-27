@@ -16,16 +16,26 @@ import type {
   CatalogDetectOptions,
   CatalogInstall,
 } from "~/lib/mcp-broker/catalog"
-import type { McpReconcileResult } from "~/lib/mcp-broker/client-sync"
+import type {
+  McpClientOfferUnavailableReason,
+  McpClientUnavailableReason,
+  McpReconcileResult,
+} from "~/lib/mcp-broker/client-sync"
 import type { McpClientId } from "~/lib/mcp-broker/types"
 
 import { getConfig, writeConfig } from "~/lib/config/config"
 import { findCatalogEntry, MCP_CATALOG } from "~/lib/mcp-broker/catalog"
-import { ownedMcpServers, syncMcpClient } from "~/lib/mcp-broker/client-sync"
+import {
+  desiredEntriesFor,
+  ownedMcpServers,
+  syncMcpClient,
+} from "~/lib/mcp-broker/client-sync"
 import { isProtectedEnvironmentName } from "~/lib/mcp-broker/configuration"
 import {
+  type BrokerReadiness,
   getBrokerSupervisorSnapshot,
   reconfigureBroker,
+  waitForBrokerReady,
 } from "~/lib/mcp-broker/supervisor"
 
 import type { ClientApp } from "./index"
@@ -37,6 +47,8 @@ export interface McpClientOffer {
   name: string
   /** Maximal's integration for the client is on, so it can be offered. */
   available: boolean
+  /** When not available, a more specific reason than "integration off". */
+  unavailableReason?: McpClientOfferUnavailableReason
   /** Maximal currently has this endpoint written into the client. */
   configured: boolean
 }
@@ -55,12 +67,24 @@ export interface McpClientSkip {
   name: string
 }
 
+export interface McpClientUnavailable extends McpClientSkip {
+  reason: McpClientUnavailableReason
+}
+
 export interface SetMcpEndpointResult {
   endpoint: McpEndpointView
   /** Clients that already had an entry with this name; left unchanged. */
   skipped: Array<McpClientSkip>
+  /** Clients Maximal couldn't add the endpoint to on this install. */
+  unavailable: Array<McpClientUnavailable>
+  /** Clients whose config Maximal changed for this endpoint (added it or
+   *  took it out), so the UI can say how each app picks that up. */
+  updated: Array<McpClientSkip>
   /** False when no broker runs in this process (e.g. the CLI). */
   brokerReloaded: boolean
+  /** Where the broker got to before the apps were updated. Turning an
+   *  endpoint on waits (bounded) for it; turning one off doesn't. */
+  broker: BrokerReadiness
   /** The app whose own entry for this id the endpoint now runs. */
   adoptedFrom?: string
   /** Environment names from that entry not copied (they look like secrets). */
@@ -169,11 +193,16 @@ export function mcpBrokerHealth(): McpBrokerHealth {
 export function listMcpEndpoints(
   config: AppConfig = getConfig(),
 ): Array<McpEndpointView> {
-  const clients = mcpApps().map((app) => ({
-    id: app.mcp.clientId,
-    name: app.name,
-    available: app.mcp.available(),
-  }))
+  const clients = mcpApps().map((app) => {
+    const available = app.mcp.available()
+    const reason = available ? undefined : app.mcp.unavailableReason?.()
+    return {
+      id: app.mcp.clientId,
+      name: app.name,
+      available,
+      ...(reason === undefined ? {} : { unavailableReason: reason }),
+    }
+  })
   const brokerOn = config.mcpBroker?.enabled === true
   return (config.mcpBroker?.servers ?? []).map((server) => ({
     id: server.id,
@@ -198,14 +227,79 @@ export function syncAllMcpClients(
   }))
 }
 
+/** Put the right key back into owned entries a client overwrote (a running
+ *  Claude Code writes back the copy it read before Maximal swapped the
+ *  placeholder for the key). File-only; never adds or removes an entry. */
+export function repairMcpClientKeys(config: AppConfig = getConfig()): void {
+  for (const app of mcpApps()) {
+    if (!app.mcp.repairKeys) continue
+    try {
+      app.mcp.repairKeys(
+        desiredEntriesFor(app.mcp, config),
+        ownedMcpServers(app.mcp.clientId, config),
+      )
+    } catch (error) {
+      consola.warn(`Could not check the ${app.name} MCP server keys`, error)
+    }
+  }
+}
+
+/**
+ * How long a toggle or boot waits for the broker to serve before pointing
+ * apps at it anyway. A new broker probes each server first, and Work IQ's
+ * startup timeout is 30s; this leaves margin over that.
+ */
+export const BROKER_READY_TIMEOUT_MS = 45_000
+
+/** The broker and client-sync steps, injectable for tests. */
+export interface McpBrokerSteps {
+  reconfigure?: typeof reconfigureBroker
+  waitForBroker?: (timeoutMs: number) => Promise<BrokerReadiness>
+  syncClients?: typeof syncAllMcpClients
+}
+
+/** What each client's sync did with endpoint `id`. */
+function clientOutcome(
+  id: string,
+  synced: ReturnType<typeof syncAllMcpClients>,
+): Pick<SetMcpEndpointResult, "skipped" | "unavailable" | "updated"> {
+  const skipped: Array<McpClientSkip> = []
+  const unavailable: Array<McpClientUnavailable> = []
+  const updated: Array<McpClientSkip> = []
+  for (const { client, name, result } of synced) {
+    if (result.skipped.includes(id)) skipped.push({ client, name })
+    const missing = result.unavailable.find((entry) => entry.id === id)
+    if (missing) unavailable.push({ client, name, reason: missing.reason })
+    if (result.added.includes(id) || result.removed.includes(id)) {
+      updated.push({ client, name })
+    }
+  }
+  return { skipped, unavailable, updated }
+}
+
+const DEFAULT_STEPS: Required<McpBrokerSteps> = {
+  reconfigure: reconfigureBroker,
+  waitForBroker: waitForBrokerReady,
+  syncClients: syncAllMcpClients,
+}
+
 /**
  * Turn an endpoint on or off and record which clients it should reach.
- * Returns undefined when no endpoint has that id.
+ * Turning one on waits (up to BROKER_READY_TIMEOUT_MS) for the broker to
+ * serve before the apps are updated, so an app that connects right away
+ * isn't turned away while the broker probes. The apps are updated either
+ * way; `broker` says how far it got. Returns undefined when no endpoint has
+ * that id.
  */
 export async function setMcpEndpoint(
   id: string,
   change: { enabled: boolean; clients?: Array<McpClientId> },
+  steps: McpBrokerSteps = {},
 ): Promise<SetMcpEndpointResult | undefined> {
+  const { reconfigure, waitForBroker, syncClients } = {
+    ...DEFAULT_STEPS,
+    ...steps,
+  }
   const config = getConfig()
   const servers = config.mcpBroker?.servers ?? []
   const index = servers.findIndex((server) => server.id === id)
@@ -229,28 +323,34 @@ export async function setMcpEndpoint(
     },
   })
 
-  const brokerReloaded = await reconfigureBroker(next.mcpBroker ?? {})
-  const skipped = syncAllMcpClients(next).flatMap(({ client, name, result }) =>
-    result.skipped.includes(id) ? [{ client, name }] : [],
-  )
+  const brokerReloaded = await reconfigure(next.mcpBroker ?? {})
+  const broker =
+    change.enabled ?
+      await waitForBroker(BROKER_READY_TIMEOUT_MS)
+    : brokerReadiness()
+  const outcome = clientOutcome(id, syncClients(next))
   const endpoint = listMcpEndpoints().find((view) => view.id === id)
   if (!endpoint) return undefined
   return {
     endpoint,
-    skipped,
+    ...outcome,
     brokerReloaded,
+    broker,
     ...(adoption ?
       { adoptedFrom: adoption.from, droppedEnvironment: adoption.dropped }
     : {}),
   }
 }
 
-/** On shutdown, take every entry Maximal wrote back out of the clients so
- *  nothing points at a Maximal that isn't running; boot puts them back from
- *  the recorded choices. Synchronous and file-only, for the shutdown budget
- *  and the `exit` safety net. */
+/** On shutdown, take the entries Maximal wrote back out of the clients that
+ *  read their config per session, so a new session doesn't point at a
+ *  Maximal that isn't running; boot puts them back from the recorded
+ *  choices. Clients that read their config only at launch (Claude Desktop)
+ *  keep theirs. Synchronous and file-only, for the shutdown budget and the
+ *  `exit` safety net. */
 export function removeMcpClientsOnShutdown(): void {
   for (const app of mcpApps()) {
+    if (!app.mcp.removeOnShutdown) continue
     try {
       syncMcpClient(app.mcp, { active: false, offline: true })
     } catch (error) {
@@ -262,9 +362,28 @@ export function removeMcpClientsOnShutdown(): void {
   }
 }
 
-/** At boot, repair client entries to match config.json. Skipped entirely
- *  when the broker was never configured, and never blocks startup. */
-export function syncMcpClientsOnBoot(config: AppConfig): void {
+/** The broker's readiness right now, without waiting. */
+function brokerReadiness(): BrokerReadiness {
+  switch (mcpBrokerHealth().state) {
+    case "running": {
+      return "ready"
+    }
+    case "off": {
+      return "off"
+    }
+    case "stuck":
+    case "unavailable": {
+      return "failed"
+    }
+    default: {
+      return "starting"
+    }
+  }
+}
+
+/** Repair client entries to match config.json. Skipped entirely when the
+ *  broker was never configured; a client that fails is logged, not thrown. */
+function syncMcpClientsOnBoot(config: AppConfig): void {
   if (config.mcpBroker === undefined) return
   for (const app of mcpApps()) {
     try {
@@ -272,6 +391,33 @@ export function syncMcpClientsOnBoot(config: AppConfig): void {
     } catch (error) {
       consola.warn(`Could not update ${app.name} MCP servers`, error)
     }
+  }
+}
+
+/**
+ * At boot, wait (bounded) for the broker to serve, then repair client
+ * entries from the config in effect by then. Run detached: the HTTP
+ * listener and ordinary proxying never wait on the broker. Never rejects.
+ */
+export async function syncMcpClientsWhenBrokerReady(
+  steps: {
+    waitForBroker?: McpBrokerSteps["waitForBroker"]
+    sync?: (config: AppConfig) => void
+  } = {},
+): Promise<void> {
+  if (getConfig().mcpBroker === undefined) return
+  const { waitForBroker = waitForBrokerReady, sync = syncMcpClientsOnBoot } =
+    steps
+  try {
+    const readiness = await waitForBroker(BROKER_READY_TIMEOUT_MS)
+    if (readiness === "starting") {
+      consola.warn(
+        "MCP broker still starting; updating client apps without waiting longer",
+      )
+    }
+    sync(getConfig())
+  } catch (error) {
+    consola.warn("Could not update client MCP servers", error)
   }
 }
 

@@ -20,6 +20,7 @@ import {
   reconfigureBroker,
   startBrokerSupervisor,
   stopBrokerSupervisor,
+  waitForBrokerReady,
 } from "~/lib/mcp-broker/supervisor"
 
 class FakeBrokerProcess extends ChildProcess {
@@ -430,6 +431,68 @@ describe("BrokerSupervisor requests for user input", () => {
   })
 })
 
+describe("BrokerSupervisor readiness", () => {
+  test("waits for the handshake, then reports ready", async () => {
+    const { children, supervisor } = fixture()
+    supervisor.start()
+    let settled: string | undefined
+    const waiting = supervisor.waitUntilReady(2_000).then((readiness) => {
+      settled = readiness
+      return readiness
+    })
+    const child = await waitForChild(children)
+    await Bun.sleep(20)
+    expect(settled).toBeUndefined()
+
+    sendReadyHandshake(child, "generation-1")
+    expect(await waiting).toBe("ready")
+    // Already ready: answers at once.
+    expect(await supervisor.waitUntilReady(0)).toBe("ready")
+    await supervisor.stop()
+  })
+
+  test("reports starting when the wait runs out first", async () => {
+    const { supervisor } = fixture()
+    supervisor.start()
+    expect(await supervisor.waitUntilReady(30)).toBe("starting")
+    await supervisor.stop()
+  })
+
+  test("reports failed when the broker can't run, off when disabled", async () => {
+    const missing = fixture(config(), { executableExists: () => false })
+    missing.supervisor.start()
+    expect(await missing.supervisor.waitUntilReady(2_000)).toBe("failed")
+    await missing.supervisor.stop()
+
+    const disabled = fixture({ ...config(), enabled: false })
+    disabled.supervisor.start()
+    expect(await disabled.supervisor.waitUntilReady(2_000)).toBe("off")
+  })
+
+  test("reports failed once restarts open the circuit", async () => {
+    const supervisor = new BrokerSupervisor(
+      config({
+        restartBackoffMinMs: 5,
+        restartBackoffMaxMs: 5,
+        restartBudget: 1,
+        restartWindowMs: 1_000,
+        circuitResetMs: 1_000,
+      }),
+      {
+        executableExists: () => true,
+        platform: "darwin",
+        randomBytes: (size) => Buffer.alloc(size),
+        spawnProcess: (() => {
+          throw new Error("fixture spawn failure")
+        }) as unknown as typeof spawn,
+      },
+    )
+    supervisor.start()
+    expect(await supervisor.waitUntilReady(2_000)).toBe("failed")
+    await supervisor.stop()
+  })
+})
+
 describe("BrokerSupervisor launches that can't succeed", () => {
   test("stops as unavailable/not-installed when the executable is missing", async () => {
     const { children, supervisor } = fixture(config(), {
@@ -772,6 +835,19 @@ describe("process-wide supervisor", () => {
     expect(await reconfigureBroker({ enabled: false, servers: [] })).toBe(true)
     await stopBrokerSupervisor()
     expect(await reconfigureBroker({ enabled: false })).toBe(false)
+  })
+
+  test("waiting for readiness: off without a broker, and follows a reconfigure", async () => {
+    expect(await waitForBrokerReady(50)).toBe("off")
+    startBrokerSupervisor({ enabled: false })
+    // The reconfigure swaps in a new supervisor; the wait follows it.
+    const reconfigured = reconfigureBroker({
+      enabled: false,
+      executablePath: "/elsewhere/maximal-mcp-broker",
+    })
+    expect(await waitForBrokerReady(2_000)).toBe("off")
+    expect(await reconfigured).toBe(true)
+    await stopBrokerSupervisor()
   })
 
   test("a stop during a reconfigure keeps the broker stopped", async () => {

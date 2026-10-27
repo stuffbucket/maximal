@@ -133,7 +133,8 @@ from the same machine. Stdio-only clients can run
 
 Each connected session runs its own copy of the endpoint's server, so Claude
 Code, Claude Desktop, or several Claude Code windows can use one endpoint at
-the same time. `limits.sessions` on the endpoint caps how many (default 8).
+the same time. `limits.sessions` on the endpoint caps how many (default 8);
+at the cap, the least recently used idle session is closed to make room.
 
 ## Fast UI iteration
 
