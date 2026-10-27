@@ -78,8 +78,11 @@ chrome. Drop them.
 
 ## Iconography
 
-- **Functional / utility icons:** monochrome, system-tinted, stroke
-  ~1.5–2px at 16/20/24 sizes. Lucide or Phosphor as the source
-  library; pick one and stick with it.
+- **Functional / utility icons:** monochrome, `currentColor`, Lucide's
+  stroke, sized with `--size-sm` / `--size-md` / `--size-lg`.
+  **Lucide** is the icon set: the Dashboard loads the vendored
+  `shell/ui/dashboard/vendor/lucide.min.js`; Settings inlines Lucide
+  SVGs, each marked with a `// lucide: <name>` comment. Don't mix in
+  another library.
 - **Identity / accent:** the brand "m" appears once per window (top
   of the window, near the heading). Never on every row.

@@ -39,13 +39,13 @@ const tokenAttachmentGuard = {
         selector:
           "TemplateLiteral > TemplateElement[value.raw=/(?:Bearer |token )$/]",
         message:
-          "Do not hand-build an Authorization value. Route the request through sendRequest() with a Credential; the token is attached inside src/lib/http/send-request.ts. See ADR-0001.",
+          "Do not hand-build an Authorization value. Route the request through sendRequest() (or sendProviderRequest() for a passthrough provider); the host selects the credential and src/lib/http/send-request.ts attaches it. See ADR-0001.",
       },
       {
         selector:
           "Property[key.value='x-api-key'], Property[key.name='x-api-key']",
         message:
-          "Do not hand-attach an x-api-key header. Route the request through sendRequest() with a Credential ('anthropic'/'provider'); the key is attached inside src/lib/http/send-request.ts. See ADR-0001.",
+          "Do not hand-attach an x-api-key header. Route the request through sendRequest() (or sendProviderRequest() for a passthrough provider); the key is attached inside src/lib/http/send-request.ts. See ADR-0001.",
       },
     ],
   },
@@ -61,12 +61,11 @@ const tokenAttachmentGuard = {
 // config round-trip read `enabled: false`.
 //
 // The rule flags the two fire-and-forget statement forms — `void mock.module(…)`
-// and a bare `mock.module(…)` expression statement. The safe form is an
-// AWAITED call (`await mock.module(…)`), which lands deterministically: install
-// with `await mock.module(id, factory)` and ALWAYS restore in an
-// `afterAll(async () => { await mock.module(id, () => actual) })`. Better still,
-// use the real module (the test preload redirects COPILOT_API_HOME to a temp
-// dir, so config/token round-trips are already isolated) or inject deps.
+// and a bare `mock.module(…)` expression statement. Awaiting is NOT enough for
+// a shared module: an awaited `afterAll` restore does not reliably land before
+// the next file's static imports on CI. Use the real module (the test preload
+// redirects COPILOT_API_HOME to a temp dir, so config/token round-trips are
+// already isolated) or inject deps. See docs/architecture.md § Testing gotchas.
 const mockModuleLeakGuard = {
   name: "no-unrestored-mock-module",
   files: ["tests/**/*.ts"],
@@ -92,8 +91,6 @@ const mockModuleLeakGuard = {
 export default [
   ...config({
     ignores: [
-      ".opencode/**",
-      "contrib/**",
       "docs/**",
       "scripts/**",
       "shell/**",
@@ -101,11 +98,8 @@ export default [
       // toolchain (`mise -C packages/<name>`).
       "packages/**",
       "site/**",
-      // Throwaway experiments kept as evidence; not shipped code.
-      "spikes/**",
       ".dependency-cruiser.cjs",
       ".pnpmfile.cjs",
-      "landing/**",
     ],
     prettier: {
       plugins: ["prettier-plugin-packagejson"],

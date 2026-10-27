@@ -7,7 +7,7 @@ This file describes role, scope, and the reasoning behind the split.
 
 | Token | Role |
 |---|---|
-| `--brand` | Crimson. **Identity only.** Mark, requirement stripe, tray dot. Never text or a control. |
+| `--brand` | Crimson. **Identity only.** Mark, requirement icon, tray dot. Never text or a control. |
 | `--accent` | Teal. **Interactive fills and non-text.** Primary buttons, switches, checkboxes, focus rings. Never text. |
 | `--accent-destructive` | Crimson-adjacent. **Destructive button fill only.** |
 | `--link` | Teal text. **Every piece of teal text** — prose links, "Copied", accent figures. |
@@ -18,15 +18,14 @@ Errors are not destructive actions: error text, icons and stripes use
 
 ## Why the split exists
 
-The crimson was historically dual-purposed: brand mark *and* primary
-button fill *and* focus ring. Every interactive surface read as
-"brand" — so the brand stopped reading as anything special, and the
-UI felt shouty.
+If the crimson did double duty as brand mark *and* primary button fill
+*and* focus ring, every interactive surface would read as "brand" — the
+brand would stop reading as anything special, and the UI would feel
+shouty.
 
-Pulling interactive duty onto teal `--accent` recovered the brand
-voice (it now appears once or twice per window, deliberately) while
-giving interactions a calm, cooler tone that doesn't compete with
-content.
+Teal `--accent` carries interactive duty instead, so the brand appears
+once or twice per window, deliberately, and interactions get a calm,
+cooler tone that doesn't compete with content.
 
 ## Destructive is not brand
 
@@ -34,9 +33,9 @@ content.
 destructive actions want urgency, which is the one place the brand's
 warning-red quality earns its keep. It is **not** the same value as
 `--brand` — destructive is a hair deeper so it reads as "caution"
-rather than "identity." It's a **fill**: white on it is 6.2:1, but as
-text on a dark surface it's under 3:1, which is why error text uses
-`--status-error` instead.
+rather than "identity." It's a **fill**: white on it clears 4.5:1, but
+as text on the dark surfaces it falls well short, which is why error
+text uses `--status-error` instead.
 
 ## Link is sister to accent
 
@@ -46,36 +45,31 @@ against both `--surface-base` and `--surface-card`. Distinct enough
 from `--accent` that a primary button (accent-filled) and an inline
 prose link don't read as the same affordance.
 
-Measured contrast on the current values is recorded in the comment
-block above `--link` in `tokens.css`. Re-measure if you change either.
+Re-measure if you change either: `bun run storybook:check` runs the
+contrast audit (`packages/storybook/scripts/contrast-audit.ts`), and
+Storybook → Foundations → Contrast shows the table.
 
 ## Contrast contract
 
-- **Target: WCAG AA (4.5:1)** across all colors, contrast, and focus
-  rings. AAA where reachable without sacrificing the palette.
-- **User-themable accent and surface colors.** Brand red is default;
-  users dial in their own UI color and icon color in Settings.
-- **Contrast is ours.** When a user picks a combination whose
-  body-text contrast drops below 4.5:1, surface a warning chip near
-  the affected control.
-- **Never block.** The user is in charge — be honest about the
-  consequence, then defer to them. See
-  [`principles.md`](principles.md) → Principle 3.
-- The system computes contrast against `--surface-card` (where most
-  text sits) and warns when text-on-card drops below WCAG AA.
+- **Target: WCAG AA.** Text (`--text-*`, `--link*`, `--status-*`)
+  ≥4.5:1 and controls (`--accent`, `--border-strong`, focus ring) ≥3:1,
+  on all three surfaces of each theme. AAA where reachable without
+  sacrificing the palette.
+- **Contrast is ours.** The contrast audit checks every token pair in
+  both themes; a color change lands only when it passes. There is no
+  user color picker — see [`principles.md`](principles.md) →
+  Principle 3 for what one would have to honor.
 
-## Theme override
+## Theme
 
-- **Both light and dark**, with explicit override in Settings (matches
-  Anthropic's monitor / sun / moon toggle). **System**
-  (`prefers-color-scheme`) is the third option and the default.
-- With no attribute on the root the tokens follow the OS
-  (`prefers-color-scheme`); `[data-theme="light"]` / `[data-theme="dark"]`
-  on the root pins one. Surfaces, text, borders, `--link*`,
-  `--accent` and `--status-*` change per theme; numeric and
-  structural tokens, brand, and the button labels stay constant. See
-  [`tokens.md`](tokens.md) → *Operational rules*. (The Settings toggle
-  itself isn't built yet; until it is, both windows follow the OS.)
+- **Both light and dark.** With no attribute on the root the tokens
+  follow the OS (`prefers-color-scheme`); `[data-theme="light"]` /
+  `[data-theme="dark"]` on the root pins one. There is no in-app theme
+  toggle; both windows follow the OS.
+- Surfaces, text, borders, `--link*`, `--accent` and `--status-*`
+  change per theme; numeric and structural tokens, brand, and the
+  button labels stay constant. See [`tokens.md`](tokens.md) →
+  *Operational rules*.
 
 ## Status colors
 

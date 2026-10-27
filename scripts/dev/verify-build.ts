@@ -26,7 +26,7 @@
  *
  * The number-crunching (sha parse, verdict) is pure and exported for tests;
  * the live I/O (one version-header fetch, one git call, one config-file read)
- * is thin. No mock.module anywhere (ADR-0011) — deps are injected.
+ * is thin. No mock.module anywhere (docs/architecture.md § Testing gotchas) — deps are injected.
  *
  * Usage:
  *   bun run verify:build                       # against http://127.0.0.1:4141

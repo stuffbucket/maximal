@@ -1,19 +1,19 @@
 # Token vocabulary
 
 The canonical declaration site is
-[`shell/src/tokens.css`](../../shell/src/tokens.css). **Values live
-there only.** This file is the lookup of *name → purpose → scope*.
+[`shell/src/ui/styles/theme.ts`](../../shell/src/ui/styles/theme.ts).
+**Values live there only.** `bun run tokens:generate` writes them into
+`shell/src/ui/styles/tokens.css` (Settings) and the generated region of
+`shell/ui/dashboard/style.css` (Dashboard). This file is the lookup of
+*name → purpose → scope*.
 
-If you need a value, open `tokens.css`. If you're describing a token
+If you need a value, open `theme.ts`. If you're describing a token
 in a doc or commit message, use its name — never inline the value.
 
-> **Drift warning.** `shell/ui/dashboard/style.css` redeclares many of
-> these tokens independently (the Dashboard is a single embedded HTML
-> file with no CSS imports — see [`windows.md`](windows.md)).
-> Several values currently differ. See
+> **The Dashboard gets a subset.** Every value it has matches Settings,
+> but some tokens aren't generated into its region. See
 > [`failure-modes.md`](failure-modes.md) → *Known active drift* for
-> the audit (and that's the one place we *do* show conflicting values
-> on purpose).
+> which ones.
 
 ## Type
 
@@ -22,9 +22,10 @@ in a doc or commit message, use its name — never inline the value.
 | `--font-display` | Display serif (Fraunces) | Brand mark, one display heading per window | Body, buttons, labels |
 | `--font-body` | Workhorse sans (Commissioner) | Everything that isn't display or mono | Brand mark |
 | `--font-mono` | Code / identifiers | API keys, device codes, file paths, code blocks, in-place updating numerics (with `tabular-nums`) | Prose, labels |
-| `--text-xs` … `--text-4xl` | 1.2-ratio type ramp | Reference by name; see [`type.md`](type.md) | Inline raw rem/px values |
-| `--weight-base` … `--weight-2xl` | Weight ramp | Pair with the matching `--text-*` size | Weights outside the ramp |
+| `--text-xs` … `--text-4xl` | Type ramp | Reference by name; see [`type.md`](type.md) | Inline raw rem/px values |
+| `--weight-base` … `--weight-2xl` | Weight ramp | Pair with a `--text-*` size | Weights outside the ramp |
 | `--leading-base` … `--leading-2xl` | Line-height ramp | Pair with text size | Hand-tuned values |
+| `--tracking-xl` / `--tracking-2xl` | Tightened letter-spacing | `--text-xl` / `--text-2xl` display headings | Body text |
 
 ## Spacing & sizing
 
@@ -44,7 +45,7 @@ in a doc or commit message, use its name — never inline the value.
 
 | Token | Purpose | Use for | Do NOT use for |
 |---|---|---|---|
-| `--elevation-card` | Card shadow | Cards in light mode | Dark mode (surface step does the work) |
+| `--elevation-card` | Card shadow | Cards (barely visible on dark, where the surface step does the work) | Modals |
 | `--elevation-modal` | Modal shadow | Modals | Cards |
 | `--elevation-tooltip` | Tooltip shadow | Tooltips, popovers | Cards |
 
@@ -59,9 +60,9 @@ surfaces of its theme by `bun scripts/contrast-audit.ts` (in
 
 | Token | Theme | Purpose | Use for | Do NOT use for |
 |---|---|---|---|---|
-| `--brand` | fixed | Crimson identity (≥3:1 non-text) | Brand mark, requirement stripe/icon, tray dot | Buttons, links, focus rings, text |
+| `--brand` | fixed | Crimson identity (≥3:1 non-text) | Brand mark, requirement icon, tray dot | Buttons, links, focus rings, text |
 | `--accent` | per theme | Teal **fill / non-text** (≥3:1; white label ≥4.5:1) | Primary button fill, switch "on", checkbox fill, focus ring, busy bar | Text of any kind (use `--link`) |
-| `--accent-fg` | fixed | Label on `--accent` | Primary button label | Anything else |
+| `--accent-fg` | fixed | Label on `--accent` | Primary button label, switch thumb and checkbox tick when on | Anything else |
 | `--accent-destructive` | fixed | Crimson **fill** for destructive buttons | Delete/destroy button fill | Error text, icons, stripes (use `--status-error`) |
 | `--accent-destructive-foreground` | fixed | Label on destructive fill | Destructive button label | Anything else |
 | `--link` / `--link-hover` | per theme | Teal **text** (≥4.5:1) | Links, and any teal text: "Copied", accent figures | Fills (use `--accent`) |
@@ -72,11 +73,9 @@ surfaces of its theme by `bun scripts/contrast-audit.ts` (in
 | `--status-error` / `-success` / `-warning` / `-info` | per theme | State color, text-safe (≥4.5:1) so also icon-safe | Error text, icons, stripes; success/warning indicators | Identity or interaction |
 | `--focus-ring*` | — | Focus ring composition (color = `--accent`) | Every focusable element | Hover styling |
 
-Removed in the October 2026 audit: `--brand-fg` (unused), `--accent-hover`
-(only used as Dashboard text → `--link`), the four `--status-*-fg` (the
-status colors now pass as text on their own), the Dashboard's 21
-`--color-*` aliases (call sites use the tokens above), and the one-off
-Dashboard purple (its figures are text ink now — see color.md).
+There are no `--brand-fg`, `--accent-hover` or `--status-*-fg` tokens:
+brand never sits behind text, teal text is `--link`, and the status
+colors pass as text on their own.
 
 ## Operational rules
 
@@ -84,9 +83,6 @@ Dashboard purple (its figures are text ink now — see color.md).
   inline in components.
 - **If you need a new value, add a token first** and justify it here
   with a `Purpose / Use for / Do NOT use for` row before using it.
-- **User-themable overrides** apply to `--accent` and `--surface-card`
-  only; everything else recomputes against the new pair with the
-  contrast guardrails in [`color.md`](color.md).
 - **Numeric tokens** (spacing, type sizes, radii, elevations) and the
   theme-independent colors (brand, button labels, destructive fill) ship on
   `:root`. Every theme-dependent color — surfaces, text, borders,

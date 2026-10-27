@@ -263,9 +263,9 @@ jobs:
           #   __MAXIMAL_CHANNEL__   release channel: the prerelease label
           #     (e.g. "beta" from v0.4.33-beta.1) or "stable" for a plain
           #     vX.Y.Z tag. Drives which manifest channel the build polls
-          #     (src/lib/update-check.ts). Derived from the tag so it matches
+          #     (src/lib/update/update-check.ts). Derived from the tag so it matches
           #     the Detect-pre-release classification without a cross-job output.
-          # src/lib/build-info.ts reads these via globalThis with a
+          # src/lib/update/build-info.ts reads these via globalThis with a
           # package.json fallback for non-binary execution.
           TAG="${GITHUB_REF_NAME}"
           if [[ "$TAG" == *-* ]]; then

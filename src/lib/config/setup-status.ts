@@ -11,8 +11,6 @@
  * Canonical evaluation order: appDir → config → db → githubAuth. The
  * first failing check (in that order) is surfaced as `nextStep`. If
  * everything passes, `nextStep` is null and `ready` is true.
- *
- * See docs/first-run-setup-prd.md.
  */
 
 import {

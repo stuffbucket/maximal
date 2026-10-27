@@ -12,7 +12,6 @@
   ],
   "ignoreDependencies": [
     "prettier-plugin-packagejson",
-    "electron",
     "undici",
     "@stryker-mutator/command-runner"
   ],
@@ -20,8 +19,5 @@
     "mise",
     "trufflehog"
   ],
-  "ignoreExportsUsedInFile": true,
-  "ignore": [
-    "src/lib/auth/token.ts"
-  ]
+  "ignoreExportsUsedInFile": true
 }

@@ -1,34 +1,34 @@
 # Layout system
 
-**All token values live in [`shell/src/tokens.css`](../../shell/src/tokens.css).**
+**All token values live in [`shell/src/ui/styles/theme.ts`](../../shell/src/ui/styles/theme.ts).**
 This file describes structure, scope, and which token to reach for —
 never the literal value.
 
 ## Window sizes
 
-Dimensions below are window chrome, not tokens. Single source of truth
-for window sizing is this table — keep `shell/src-tauri/tauri.conf.json`
-and any setup window builder in sync.
+Dimensions below are window chrome, not tokens. They're set by the
+window builders in `shell/src-tauri/src/lib.rs` (`tauri.conf.json`
+declares no windows) — change them there and update this table.
 
-| Window     | Default | Min      | Max      | Resizable | Notes |
-|------------|---------|----------|----------|-----------|-------|
-| Setup      | 520×620 | 480×560  | 720×800  | yes       | Single column, vertical scroll on overflow |
-| Dashboard  | 960×720 | 720×560  | 1400×1000| yes       | One scrollable column with sectioned content |
-| Settings   | 880×720 | 720×560  | 1200×900 | yes       | Sidebar + content pane |
+| Window     | Default  | Min     | Max  | Resizable | Notes |
+|------------|----------|---------|------|-----------|-------|
+| Splash     | 440×240  | —       | —    | no        | Frameless, transparent, centered; shown while the proxy starts, then dismissed |
+| Dashboard  | 1100×760 | 720×520 | none | yes       | One scrollable column with sectioned content |
+| Settings   | 900×760  | 600×560 | none | yes       | Sidebar + content pane |
 
-Single-instance for all three (re-show + focus the existing window).
-Position: center on first launch, then respect last position.
+Settings and Dashboard are single-instance: opening one again re-shows
+and focuses the existing window. Closing either hides it.
 
 ## Grid + columns
 
-**Desktop only — no responsive breakpoints in v1.** OS enforces min
-size; no mobile fallback.
+**Desktop only.** The OS enforces min size; no mobile fallback.
+Settings has no breakpoints; the Dashboard uses Tailwind breakpoints to
+reflow its rows and grids as the window widens.
 
-- **Setup**: single column, content max ~440px, centered.
-- **Dashboard**: single column, content max ~720px, left-aligned,
-  cards full content width.
+- **Dashboard**: single column, centered in a wide Tailwind
+  `max-w-7xl` container, cards full content width.
 - **Settings**: `--sidebar-width` left rail + content pane.
-  Content pane max-width = `--content-max`. Within the pane, form
+  Section max-width = `--content-max`. Within the pane, form
   rows use a 33% label / 66% control split.
 
 > Per-pixel column widths are spec, not tokens, because they describe
@@ -45,14 +45,14 @@ Use the `--space-*` scale. **No off-scale values.**
 | `--space-2` | Inline gaps inside a row |
 | `--space-3` | Inline gaps; compact card-internal row gap |
 | `--space-4` | Card-internal padding (vertical); card-to-card gap; form-row internal gap |
-| `--space-5` | Section gap inside a window; window-edge to content (Dashboard, Setup) |
+| `--space-5` | Section gap inside a window |
 | `--space-6` | Section gap (large); window-edge to content (Settings pane) |
 | `--space-7` | Inter-section gap on large windows |
 | `--space-8` | Reserved for inter-section gaps on the widest windows |
 
 ## Surfaces (3 levels)
 
-Layering — light steps cards forward of base, dark steps the same.
+Layering — in both themes, cards step forward of base.
 
 | Token | Use |
 |---|---|
@@ -60,16 +60,14 @@ Layering — light steps cards forward of base, dark steps the same.
 | `--surface-card` | Cards, sidebar fill |
 | `--surface-control` | Form controls, secondary buttons |
 
-The user-themable accent overrides `--surface-card` deltas. The system
-computes contrast against `--surface-card` (where most text sits) and
-warns when text-on-card drops below WCAG AA. See
-[`color.md`](color.md).
+Every text and control color is checked against all three surfaces
+in both themes. See [`color.md`](color.md).
 
 ## Elevation (3 levels)
 
 | Token | Use |
 |---|---|
-| `--elevation-card` | Cards in **light mode only** (dark mode relies on the surface step) |
+| `--elevation-card` | Cards (barely visible on dark, where the surface step does the work) |
 | `--elevation-modal` | Modals |
 | `--elevation-tooltip` | Tooltips, popovers |
 
@@ -89,11 +87,9 @@ warns when text-on-card drops below WCAG AA. See
 | z-index | Layer |
 |---|---|
 | 0 | Base / card content |
-| 10 | Sticky window header (Settings sidebar's top, Dashboard status strip) |
-| 100 | Dropdowns, popovers, autocomplete results |
-| 200 | Toasts ("Saved", "Copied to clipboard") |
-| 300 | Modals (confirmation dialogs) |
-| 400 | Tooltips (always on top so they're never occluded) |
+| 10 | Fixed window chrome (the Settings busy bar) |
+| 20 | Tooltips (above cards) |
+| top layer | Modals — native `<dialog>` (`ConfirmDialog`), above everything without a z-index |
 
 Z-index values are constants in this layout system, not tokens; if
-you need to reorder layers, edit this table and audit consumers.
+you need to add or reorder layers, edit this table and audit consumers.

@@ -29,45 +29,42 @@ regressing across design iterations.
   are fills: as text they miss 4.5:1 in at least one theme. Teal text
   is `--link`; error text and icons are `--status-error`.
 - **`opacity` on text that isn't disabled.** It compounds with
-  `--text-muted` and drops below AA (the "Coming soon" card did).
-  Disabled controls are exempt; everything else uses a token.
+  `--text-muted` and drops below AA. Disabled controls are exempt;
+  everything else uses a token.
 
 ## Tokens & drift
 
 - **Inline raw `px`, `rem`, or `#hex` in a component file *or in a
   design doc.*** Reference a token. If no suitable token exists, add
-  one to `shell/src/tokens.css` and document it in
-  [`tokens.md`](tokens.md) before using it. The one allowed exception
-  is the drift table below, where the conflict is the point.
+  one to `shell/src/ui/styles/theme.ts` (then `bun run
+  tokens:generate`) and document it in [`tokens.md`](tokens.md) before
+  using it. The one allowed exception is the drift table below, where
+  the conflict is the point.
 - **Editing a token value in only one place.** Edit
   `shell/src/ui/styles/theme.ts` and run `bun run tokens:generate`;
   never hand-edit the generated `tokens.css` or the Dashboard's
   generated region. See
   [`change-checklists.md`](change-checklists.md) → *Changing a token
-  value* for the full touchpoint list. This is the highest-risk class
-  of design bug in the repo today.
-- **Adding a token to one CSS file and assuming the other has it.**
-  `tokens.css` and the dashboard `style.css` are independent declarations,
-  not imports. Anything missing from one is silently `inherit`-ed or
-  `initial` in that window.
+  value* for the full touchpoint list.
+- **Assuming the Dashboard has every token.** `tokens.css` and the
+  Dashboard's generated region are both written from `theme.ts`, but the
+  generator gives the Dashboard a subset (see the table below). A token
+  missing from it is silently `inherit`-ed or `initial` in that window.
 
-## Known active drift (as of last audit — October 2026)
+## Known active drift
 
-Both token files are now generated from `shell/src/ui/styles/theme.ts`
+Both token files are generated from `shell/src/ui/styles/theme.ts`
 (`bun run tokens:generate`), so color values and both themes match. What
-still differs is which tokens each window gets:
+differs is which tokens each window gets:
 
 | Concern | `shell/src/ui/styles/tokens.css` | `shell/ui/dashboard/style.css` |
 |---|---|---|
-| `--accent-destructive` | present | absent (the generator omits it) |
+| `--accent-destructive` / `-foreground` | present | absent (the generator omits them) |
 | `--font-display` (Fraunces) | present | absent (intentional: no display moment) |
 | Layout constants (`--sidebar-width`, `--content-max`) | present | absent (single-column window) |
+| `--focus-ring-width` / `-offset` / `-color` | present; `--focus-ring` is an outline | absent; `--focus-ring` is a two-ring box-shadow |
 
-Resolved in this audit: the Dashboard's different teal, its dark
-`--text-muted` / `--border-*` values, the missing light theme, and
-`--status-*` / `--accent-hover` existing on one side only, and the
-Dashboard's `--color-*` alias layer (gone; it uses the shared tokens). Neither
-window pins `data-theme` any more; both follow the OS.
+Neither window pins `data-theme`; both follow the OS.
 
 ## Accessibility
 
@@ -76,9 +73,7 @@ window pins `data-theme` any more; both follow the OS.
   *Focus rings*.
 - **Motion that ignores `prefers-reduced-motion: reduce`.** Reduced
   motion is a contract, not a hint. → [`motion.md`](motion.md).
-- **Blocking the user on a contrast warning.** Warn, never block. The
-  user is in charge of their color. → [`color.md`](color.md).
-- **Body text below `--text-base` (16px) for multi-line prose.** Never
+- **Body text below `--text-base` for multi-line prose.** Never
   smaller. Settings descriptions can use `--text-sm`; body prose cannot.
 
 ## Keyboard / behavior
@@ -98,4 +93,5 @@ window pins `data-theme` any more; both follow the OS.
   content goes in the topic files.
 - **Adding a new token without a justification.** A token is a
   permanent commitment to a concept. Add the row in [`tokens.md`](tokens.md)
-  *first*, then declare in `tokens.css`.
+  *first*, then declare it in `theme.ts` and run `bun run
+  tokens:generate`.

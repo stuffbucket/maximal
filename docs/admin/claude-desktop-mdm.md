@@ -170,18 +170,18 @@ gating without disabling the connector. Cowork's UI surfaces this as
 the `* Allow all` button under **Configure third-party inference →
 Sandbox & workspace → Allowed egress hosts**.
 
-With our proxy doing the actual web fetching via `OllamaWebExecutor`
-on the proxy side, the curated allowlist is optional — Cowork's
-bundled connectors aren't on the proxy's path for `web_search` (the
-model emits a server-tool block, our proxy intercepts, Ollama
-executes). But for `web_fetch` and other URL-grabbing connectors that
+With our proxy doing the actual web search and fetch on the proxy side
+(the web-tools agent in `src/routes/messages/web-tools/`), the curated
+allowlist is optional — Cowork's bundled connectors aren't on the proxy's
+path for `web_search` (the model emits a server-tool block, our proxy
+intercepts and executes it). But for `web_fetch` and other URL-grabbing connectors that
 run inside the desktop process, the allowlist still gates them.
 
 ### Hide variant model IDs from the picker
 
-We already drop `-high`, `-xhigh`, `-1m` variants in our `/v1/models`
-listing (`fix(models): drop variant ids from listing` —
-`47a7439`). If you want belt-and-suspenders enforcement, also set:
+Our `/v1/models` listing already drops Copilot variant ids (`-high`,
+`-xhigh`, `-1m`, `-1m-internal`; see `src/routes/models/route.ts`). If you
+want belt-and-suspenders enforcement, also set:
 
 ```sh
 defaults write com.anthropic.claudefordesktop inferenceModels \
@@ -194,11 +194,11 @@ what the gateway returns.
 ### Disable WebSearch connector (alternative to egress allowlist)
 
 If you want the proxy to be the sole web-tools path (no Cowork-side
-connectors competing), keep this off:
+connectors competing), set `preferences.coworkWebSearchEnabled` to `false`.
+It lives in `claude_desktop_config.json`, not the MDM domain. Note that
+`maximal app claude-desktop --enable` sets it to `true`.
 
 ```sh
-# (lives in claude_desktop_config.json, not the MDM domain)
-# Already set to false earlier in this project.
 cat ~/Library/Application\ Support/Claude/claude_desktop_config.json
 ```
 
@@ -206,12 +206,12 @@ cat ~/Library/Application\ Support/Claude/claude_desktop_config.json
 
 | Goal | Where | Value |
 |---|---|---|
-| Point at the local proxy | UI: Configure third-party inference | already done |
+| Point at the local proxy | `maximal app claude-desktop --enable`, or UI: Configure third-party inference | gateway profile (see above) |
 | Skip the login chooser | `disableDeploymentModeChooser = true` | hides the chooser |
 | Skip the Claude.ai sign-in on a fresh machine | `deploymentMode = "3p"` | persists the third-party choice (see above) |
 | Cowork bundled connectors reach common trustworthy hosts | `coworkEgressAllowedHosts` | see `scripts/install-cowork-egress.sh` |
 | Cowork bundled connectors reach **any** host (turn host gating off) | `coworkEgressAllowedHosts` | `["*"]` (bare `*` is the allow-all sentinel) |
-| Avoid duplicate variant ids in picker | proxy-side, already shipped | n/a |
+| Avoid duplicate variant ids in picker | proxy-side `/v1/models` filtering | n/a |
 | Local stdio MCP servers visible | `isLocalDevMcpEnabled = true` | usually default |
 
 ## Sources

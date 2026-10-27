@@ -17,7 +17,7 @@
  *     or an anthropic/claude user-agent.
  *
  * Neither mapper spreads the source model, so no Copilot-internal field can
- * reach a client. See docs/spec/wire/models-wire-prd.md and ADR references.
+ * reach a client.
  */
 
 import type { Model } from "~/services/copilot/get-models"

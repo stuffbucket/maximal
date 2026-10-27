@@ -7,8 +7,7 @@
  *
  * Exposed as `createGhRoutes(deps)` so tests can inject in-process stubs for
  * the three downstream services without process-wide `mock.module`, which
- * leaks across test files (see docs/architecture.md § Testing gotchas and
- * docs/decisions/0011-mock-module-leakage-discipline.md). Production
+ * leaks across test files (see docs/architecture.md § Testing gotchas). Production
  * callers use the zero-arg default; the registrar exports `ghRoutes` as the
  * default-wired instance so existing imports keep working.
  */

@@ -1,8 +1,8 @@
 # Project toolchain. Bun's version lives only in .bun-version (see
-# docs/bun-version-policy.md); mise reads it from there. Node is needed only
-# for pnpm-run tools such as create-dmg. Rust builds and tests the Tauri shell
-# (`bun run shell:test`). Packages under packages/ may pin their own toolchain
-# in their own mise.toml.
+# docs/bun-version-policy.md); mise reads it from there. Node and pnpm run the
+# isolated pnpm packages under packages/: packages/storybook uses these root
+# pins, while packages/mcp-broker pins its own in its mise.toml. Rust builds and
+# tests the Tauri shell (`bun run shell:test`).
 [settings]
 idiomatic_version_file_enable_tools = ["bun"]
 

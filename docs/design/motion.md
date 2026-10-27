@@ -6,11 +6,9 @@ spacing, and copy.
 ## Timings
 
 - **150ms ease-out** — default for hover/active state changes.
-- **200ms ease-out** — layout shifts (window resize, card collapse,
-  switch toggle).
-- **0ms (instant)** — under `prefers-reduced-motion: reduce`, except
-  a single 60ms opacity crossfade where a transition would otherwise
-  be jarring.
+- **200ms ease-out** — layout shifts (card collapse, accordion
+  twirldown).
+- **Instant** — under `prefers-reduced-motion: reduce`.
 
 ## What's forbidden
 
@@ -24,9 +22,9 @@ spacing, and copy.
 When `prefers-reduced-motion: reduce` is set:
 
 - All hover scales → off.
-- All slide-ins / fade-up / translate animations → off (substitute a
-  60ms opacity crossfade if the user would otherwise see a jarring
-  instant change).
+- All slide-ins / fade-up / translate animations → off. Where
+  stopping an animation would leave a broken state (the busy bar's
+  sliding segment), replace it with a static equivalent.
 - Spring physics → off.
 - The setting is honored **literally**, not "with reduced intensity."
 
@@ -41,13 +39,16 @@ See [`principles.md`](principles.md) → Principle 5.
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .thing,
-  .thing * {
-    transition-duration: 0ms !important;
-    animation-duration: 0ms !important;
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.001ms !important;
+    animation-duration: 0.001ms !important;
   }
 }
 ```
 
-A single global `prefers-reduced-motion` block at the bottom of
-`styles.css` is preferred over per-component opt-ins (less to forget).
+Each window's stylesheet has one global `prefers-reduced-motion` block
+like this (`styles.css` → *Motion*; the Dashboard's `style.css`), which
+is preferred over per-component opt-ins (less to forget). Add a
+per-component block only when zeroing the duration isn't enough.

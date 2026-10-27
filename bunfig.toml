@@ -1,6 +1,5 @@
 [test]
-# Skill templates under .claude/skills/*/templates/ contain reference *.test.ts
-# snippets that document patterns rather than execute as tests. Exclude them.
+# Only tests/ holds the root suite; each package under packages/ runs its own.
 root = "tests"
 # Redirect the complete cross-platform user environment before application
 # modules load. See tests/test-setup.ts and tests/helpers/user-sandbox.ts.

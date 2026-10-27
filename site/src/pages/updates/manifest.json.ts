@@ -26,7 +26,7 @@
 // byte-for-byte unchanged.
 //
 // SECURITY: the `downloads` map is BROWSER-ONLY. The desktop client
-// (src/lib/update-check.ts) must read ONLY `version` and keep DOWNLOAD_URL a
+// (src/lib/update/update-check.ts) must read ONLY `version` and keep DOWNLOAD_URL a
 // hardcoded mxml.sh constant, so a tampered manifest can at most misreport a
 // version — never redirect a download. Do NOT wire the installer to
 // downloads.url. `notes` is a display-only link to the GitHub release.

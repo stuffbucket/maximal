@@ -26,19 +26,32 @@ runs in-process.
 
 ```
 src/                       Proxy source (request handlers, web-tools agent,
-                           id rewriter, executors, services).
+                           id rewriter, executors, client-app integrations).
 tests/                     bun-test suites.
-docs/admin/                MDM reference, Cowork client config notes.
-docs/spec/                 Architecture specs (web-tools, tool-bridge).
-scripts/                   Operator helpers (e.g. install-cowork-egress.sh).
-contrib/                   Read-only reference (opencode-copilot auth pattern,
-                           Ollama anthropic spike).
+shell/                     Tauri desktop app (menu-bar shell + settings and
+                           dashboard UIs) that runs the proxy as a sidecar.
+packages/mcp-broker/       Isolated MCP broker process.
+packages/storybook/        Component sandbox for the shell UI.
+site/                      Marketing and download site (mxml.sh).
+build/                     Packaging inputs (Homebrew formula, Windows
+                           installer, app icon).
+docs/                      Architecture, commands, design system, wire
+                           contracts, dev and admin notes.
+scripts/                   Build, release, and operator helpers.
 LICENSE                    MIT.
 THIRD-PARTY-LICENSE        Bundled-dependency license pointer (npm SBOM)
-                           and site-asset attributions (shaders, sprites).
+                           and vendored-asset attributions.
 ```
 
 ## Install
+
+### Desktop app (macOS, Windows)
+
+Download the macOS `.dmg` or the Windows installer from
+[mxml.sh](https://mxml.sh) or the
+[latest release](https://github.com/stuffbucket/maximal/releases/latest).
+The app runs the proxy for you and manages sign-in, client apps, and
+API keys from its settings window.
 
 ### Homebrew (macOS, Apple Silicon)
 
@@ -106,9 +119,12 @@ wins:
 |---|---|---|---|
 | 1 | **CLI flags** | per-invocation | `--port`, `--account-type`, `--verbose`, etc. See `maximal start --help`. |
 | 2 | **Environment variables** | shell scope | `OLLAMA_API_KEY`, `ANTHROPIC_API_KEY`, `COPILOT_API_HOME`, `COPILOT_API_ENTERPRISE_URL`, `COPILOT_API_OAUTH_APP`. Bun also auto-loads `.env`. |
-| 3 | **Secrets files** | persistent, mode 0600 | `~/.local/share/maximal/secrets/<provider>` (e.g. `secrets/ollama`). Refused if mode is broader than 0600. |
-| 4 | **Config file** | persistent | `~/.local/share/maximal/config.json`. Schema-validated at boot; bad keys fail with a key path. Unknown keys warn but pass through. |
-| 5 | **Built-in defaults** | always | `src/lib/config.ts`. |
+| 3 | **Secrets files** | persistent, mode 0600 | `<app dir>/secrets/<provider>` (e.g. `secrets/ollama`). Refused if mode is broader than 0600. |
+| 4 | **Config file** | persistent | `<app dir>/config.json`. Schema-validated at boot; bad keys fail with a key path. Unknown keys warn but pass through. |
+| 5 | **Built-in defaults** | always | `src/lib/config/config.ts`. |
+
+The app dir is `~/.local/share/maximal` on macOS/Linux and
+`%APPDATA%\maximal` on Windows, unless `COPILOT_API_HOME` is set.
 
 ### Knob reference
 
@@ -122,12 +138,11 @@ wins:
 | Ollama API key | — | `OLLAMA_API_KEY` | `secrets/ollama` | unset |
 | Anthropic API key | — | `ANTHROPIC_API_KEY` | `secrets/anthropic` | `config.anthropicApiKey` |
 | GitHub token | `--github-token` | — | `app/github_token` | from `auth` flow |
-| App home dir | — | `COPILOT_API_HOME` | — | `~/.local/share/maximal` |
+| App home dir | — | `COPILOT_API_HOME` | — | see above |
 | Enterprise URL | — | `COPILOT_API_ENTERPRISE_URL` | — | unset |
 | OAuth app ID | — | `COPILOT_API_OAUTH_APP` | — | upstream default |
 | Use Messages API | — | — | `useMessagesApi` | `true` |
 | Use Apply Patch | — | — | `useFunctionApplyPatch` | `true` |
-| Small model alias | — | — | `smallModel` | `gpt-5-mini` |
 | Log retention (days) | — | — | `logRetentionDays` | `7` (`0` = delete on cleanup tick) |
 
 To inspect what the proxy actually thinks its config is:
@@ -150,6 +165,6 @@ fallback; Maximal is not published to npm.
 
 ## Status
 
-Pre-alpha. Functional end-to-end against GitHub Copilot. See
-`docs/spec/archive/web-tools.md` for the agent-loop spec and
+Pre-1.0. Functional end-to-end against GitHub Copilot. The web-tools
+agent loop lives in `src/routes/messages/web-tools/`; see
 `docs/admin/claude-desktop-mdm.md` for Cowork-side configuration.

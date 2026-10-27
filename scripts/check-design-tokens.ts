@@ -2,7 +2,7 @@
 /**
  * Design-token drift gate.
  *
- * Enforces the rules in .design-context.md that aren't naturally
+ * Enforces the design-system rules (docs/design/) that aren't naturally
  * expressible in stylelint, by scanning CSS for the specific
  * (token, allowed-selector) pairs we care about and flagging
  * everything else.
@@ -10,9 +10,8 @@
  * Current rules:
  *
  *   --text-xs (0.75rem / 12px) is reserved for glyph-only contexts
- *   per design-context: "Body text: minimum size --text-base (16px);
- *   Settings: --text-base for control labels, --text-sm for
- *   descriptions." Only `.kbd` (keycap badge) is permitted to use it.
+ *   (docs/design/type.md); --text-sm is the Settings floor. Only `.kbd`
+ *   (keycap badge) is permitted to use it.
  *
  * Why a script and not stylelint:
  *   - stylelint's `declaration-property-value-disallowed-list` is
@@ -21,8 +20,8 @@
  *     project-specific rules.
  *   - bun runs it in <100ms and the output is grep-friendly.
  *
- * Exit code 0 = clean, 1 = at least one violation. Wired into
- * `bun run lint:fast` so it runs alongside oxlint + tsc + eslint.
+ * Exit code 0 = clean, 1 = at least one violation. Run as
+ * `bun run check:tokens`, which `bun run check:fast` includes.
  */
 
 import { readFileSync } from "node:fs"
@@ -50,7 +49,7 @@ const RULES: Array<Rule> = [
   {
     token: "--text-xs",
     allow: [/\.kbd\b/],
-    why: ".design-context.md: --text-xs reserved for glyph contexts only (e.g. .kbd keycap). Settings should use --text-sm (14px) as the floor.",
+    why: "docs/design/type.md: --text-xs reserved for glyph contexts only (e.g. .kbd keycap). Settings should use --text-sm (14px) as the floor.",
   },
 ]
 
