@@ -23,6 +23,7 @@ bun run check:fast   # lint:fast + typecheck + lint:all (the per-edit inner loop
 bun run check:deep   # check:fast + bun test + knip (end-of-task gate)
 bun run deps:check   # dependency-cruiser layer rules
 bun run knip         # find unused exports/files
+bun run git:tidy     # plan branch cleanup (archive-then-delete); --apply to act
 
 # Optional: meta-analysis stream
 bun run analyze      # tails .claude/logs/checks.jsonl into a local Ollama model

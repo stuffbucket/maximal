@@ -39,6 +39,7 @@ those files; don't reinvent it.
 
 - **Never `git stash pop` in a shared working tree.** See architecture doc → *Parallel-agent convention* for why. Use a worktree for any isolated bisect.
 - **No unrestored `mock.module` in tests** — `void mock.module(…)` / bare `mock.module(…)` leak across files and are a lint error (`mockModuleLeakGuard`). Awaiting isn't enough for shared modules; prefer the real module (temp `COPILOT_API_HOME` / `CLAUDE_CONFIG_DIR`) or injectable deps. See architecture doc → *Testing gotchas*.
-- **PR titles are Conventional Commits** (`feat:` / `fix:` / `chore:` / etc.) — squash-merge uses the title verbatim. See architecture doc → *Release & PR conventions*.
+- **PR titles and commit subjects are Conventional Commits** (`feat:` / `fix:` / `chore:` / etc.) — a squash lands the PR title, a merge commit lands every branch commit; hook + CI enforce it. See architecture doc → *Release & PR conventions*.
+- **Tidy branches with `bun run git:tidy`, never `git branch -D`;** keep the primary checkout detached at `origin/main` and never check out `main` in a worktree. See architecture doc → *Parallel-agent convention*.
 - **Pin matters.** `.bun-version` and `.github/workflows/ci.yml` move together. See Bun version policy.
 - **Design context overrides this file** for any UI work. Read `.design-context.md` and the relevant `docs/design/*.md` topic file.

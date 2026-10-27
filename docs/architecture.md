@@ -62,7 +62,10 @@ Root inference routes resolve the ordered, settings-driven `modelMappings` alias
 
 This repo can collide on a shared working tree (lint-staged stash + concurrent merge ate a turn already). For parallel agents:
 - **Spawned subagents:** pass `isolation: "worktree"` to the Agent tool.
-- **Sessions:** create a worktree manually with `git worktree add ../maximal-<task> -b agent/<task>`; clean up with `git worktree remove ../maximal-<task>` after merging back. `git worktree add` does **not** run `bun install`, so the gitignored `src/generated/ui-embed.ts` stub won't exist — the gates now self-heal it (`check:fast` and the test preload call `ensure:ui-embed`), but run `bun install` in the new tree anyway if you need its node_modules.
+- **Sessions:** create a worktree with `git worktree add .claude/worktrees/<task> -b <type>/<task> origin/main` (`<type>` is the Conventional Commit type the work will land as); clean up with `git worktree remove .claude/worktrees/<task>` after merging back. `git worktree add` does **not** run `bun install`, so the gitignored `src/generated/ui-embed.ts` stub won't exist — the gates now self-heal it (`check:fast` and the test preload call `ensure:ui-embed`), but run `bun install` in the new tree anyway if you need its node_modules.
+- **The primary checkout sits detached at `origin/main`; no worktree checks out `main`.** A branch can be checked out in only one tree, so a worktree holding `main` strands the primary checkout on whatever feature branch it last had, and that branch goes `[gone]` the moment its PR merges. Refresh with `git switch --detach origin/main`.
+- **Tidy branches with `bun run git:tidy`, never `git branch -D`.** It never touches a branch checked out in any worktree, one with an open PR, or one committed to in the last 14 days; it deletes branches whose tip is already in `origin/main` and archives the rest (remote → pushed tag `archive/<branch>/<sha7>`, local → local-only `refs/archive/<branch>/<sha7>`) before removing them, so nothing is lost. Dry run by default; `--apply` to act.
+- **Reusing a branch for a follow-up PR?** Land the first PR with a merge commit (see *Release & PR conventions*). A squash leaves the branch's commits outside `main`, so the next PR from that branch re-shows the old diff.
 - **Never run `git stash pop` in a shared working tree.** It silently merges another in-flight worker's stash into your tree, and on conflict it leaves an inconsistent state that's easy to "clean up" by `rm`-ing files that aren't yours. We lost a session's worth of React-shell work to this exact path: a subagent ran `git stash pop` to bisect a test failure, hit a conflict, and `rm`'d untracked files it didn't recognize. If you need an isolated bisect, use a worktree (see above). If you must inspect a stash, use `git stash show -p stash@{N}` (read-only) and never `pop` / `apply` outside an isolated tree.
 
 See also: `docs/codegen-feedback-loops-practices.md` → Dispatch and review loops.
@@ -119,12 +122,28 @@ See also: `docs/codegen-feedback-loops-practices.md` → Dispatch and review loo
   certainly found no `feat`/`fix` commit — check the `release-pr` step
   log for `No user facing commits found ... skipping` before assuming
   it's broken.
-- **Squash-merge uses the PR *title* as the commit subject.** So the PR
-  title must be a single valid Conventional Commit (`fix: …`, not
-  `test+fix: …`). A non-standard type like `test+fix` parses as one
-  unrecognized token and release-please skips it — even if the diff
-  contains a real `fix:`. Title PRs accordingly; the body's individual
-  commit messages don't reach `main` through a squash.
+- **`main` accepts squash and merge commits; pick per PR.**
+  - *Squash* (default for one-shot PRs): the PR **title** becomes the
+    commit subject and the PR **body** its message (repo setting
+    `PR_TITLE`/`PR_BODY`; it used to take a single-commit PR's commit
+    subject instead, which is how the `chore:` PRs #481/#483 landed as
+    `fix:`). The branch's own commits never reach `main`.
+  - *Merge commit* (for a branch that keeps living, or whose commits
+    each matter): every branch commit reaches `main` and release-please
+    reads each one; the `Merge pull request …` subject itself is ignored.
+    Afterwards the branch's tip is in `main`, so it can carry a follow-up
+    PR and `git:tidy` deletes it losslessly.
+- **Every subject release-please can see must be one valid Conventional
+  Commit** (`fix: …`, not `test+fix: …` — that parses as one unrecognized
+  token and release-please skips it, even if the diff holds a real fix).
+  The `commit-msg` hook (`scripts/check-commit-msg.ts`, installed by
+  `bun install`) checks each commit locally; CI's `test` job checks the
+  PR title and every commit on the PR. CI reads the title when the PR is
+  opened or pushed to, so after retitling, push or re-run CI.
+- **Auto-merge is on; `main` does not require branches to be up to date.**
+  Queue a PR with `gh pr merge --auto --squash` (or `--merge`) and move on.
+  CI also runs on every push to `main`, which catches two PRs that pass
+  alone but break together.
 
 ## Tauri shell
 
