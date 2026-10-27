@@ -1,0 +1,4 @@
+# Patch files must keep LF line endings on every platform: a Windows
+# checkout with CRLF turns each `diff --git` header into a filename ending
+# in \r, and pnpm rejects the patch ("invalid char in unquoted filename").
+*.patch text eol=lf

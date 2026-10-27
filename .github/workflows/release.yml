@@ -39,6 +39,10 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       is_prerelease: ${{ steps.prerelease.outputs.is_prerelease }}
+    env:
+      # The root mise.toml pins Rust and the broker inherits it; nothing in
+      # this job builds Rust through mise, so don't download the toolchain.
+      MISE_DISABLE_TOOLS: rust
     steps:
       # Fail fast on a bad trigger. The whole pipeline keys off
       # github.ref_name, which is only a real version when this runs on
@@ -186,6 +190,10 @@ jobs:
           - { target: bun-darwin-arm64, artifact: darwin-arm64, ext: tar.gz }
           - { target: bun-windows-x64,  artifact: windows-x64,  ext: zip    }
     runs-on: ubuntu-latest
+    env:
+      # The root mise.toml pins Rust and the broker inherits it; nothing in
+      # this job builds Rust through mise, so don't download the toolchain.
+      MISE_DISABLE_TOOLS: rust
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -919,33 +927,12 @@ jobs:
         with:
           bun-version: 1.3.14
 
-      # rustup is preinstalled on the windows-2022 image (vendored-action
-      # policy: no third-party toolchain action). Same as windows-shell-dev.
-      - name: Ensure Rust msvc toolchain
+      # Pinned Rust + the Cargo cache warmed from main by
+      # windows-rust-cache.yml (a cache saved on this tag would be invisible
+      # to the next release, so this job only restores).
+      - name: Set up Rust
         if: steps.skip.outputs.skip != 'true'
-        shell: pwsh
-        run: |
-          rustup toolchain install stable --profile minimal --no-self-update
-          rustup target add x86_64-pc-windows-msvc
-          rustc -vV
-
-      # Cache cargo registry/git downloads + the compiled target dir, so
-      # crates are served locally (not re-downloaded from crates.io, which
-      # intermittently resets) and unchanged dependency crates aren't
-      # recompiled. Same key as windows-shell-dev.yml — the dev harness and
-      # this release job share a warm cache. GitHub-published (policy-OK).
-      - name: Cache cargo registry + target
-        if: steps.skip.outputs.skip != 'true'
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            shell/src-tauri/target
-          key: windows-cargo-shell-${{ hashFiles('shell/src-tauri/Cargo.lock') }}
-          restore-keys: |
-            windows-cargo-shell-
+        uses: ./.github/actions/setup-rust-windows
 
       # setup-bun adds a Git-Bash-style PATH; bun steps must run under bash
       # (pwsh/cmd can't resolve it on Windows).
