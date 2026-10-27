@@ -525,38 +525,29 @@ function renderTokenUsageRangeText(
 function render(): void {
   updateControls();
 
-  if (state.isLoading) {
-    contentArea.innerHTML = renderSpinner();
-    createIcons();
-    return;
-  }
+  const quotasHtml =
+    state.data ? renderUsageQuotas(state.data.quota_snapshots)
+    : state.error ?
+      `<section id="usage-quotas" class="mb-6">
+        <h2 class="section__title">${escapeHtml(t("dashboard-quotas-title"))}</h2>
+        ${renderError(state.error, t("dashboard-error-usage"))}
+      </section>`
+    : state.isLoading ?
+      `<section id="usage-quotas" class="mb-6">
+        <h2 class="section__title">${escapeHtml(t("dashboard-quotas-title"))}</h2>
+        <div class="p-4 border text-sm" style="background-color: var(--surface-card); border-color: var(--border-subtle); color: var(--text-muted);">
+          ${escapeHtml(t("common-working"))}
+        </div>
+      </section>`
+    : "";
 
-  const hasContent = Boolean(
-    state.error ||
-      state.data ||
-      state.isTokenUsageLoading ||
-      state.isEventsLoading ||
-      state.tokenUsageSummary ||
-      state.tokenUsageEventsPage ||
-      state.tokenUsageSummaryError ||
-      state.tokenUsageEventsError,
-  );
+  const tokenUsageHtml = renderTokenUsageSection();
+  const detailedHtml = state.data ? renderDetailedData(state.data) : "";
 
-  if (!hasContent) {
+  if (!quotasHtml && !tokenUsageHtml && !detailedHtml) {
     contentArea.innerHTML = renderWelcomeMessage();
-  } else if (state.error && !state.data) {
-    contentArea.innerHTML = `
-      ${renderError(state.error, t("dashboard-error-usage"))}
-      ${renderTokenUsageSection()}
-    `;
-  } else if (state.data) {
-    contentArea.innerHTML = `
-      ${renderUsageQuotas(state.data.quota_snapshots)}
-      ${renderTokenUsageSection()}
-      ${renderDetailedData(state.data)}
-    `;
   } else {
-    contentArea.innerHTML = renderTokenUsageSection();
+    contentArea.innerHTML = `${quotasHtml}${tokenUsageHtml}${detailedHtml}`;
   }
 
   // Replace placeholder icons with actual Lucide icons
@@ -586,9 +577,7 @@ function renderUsageQuotas(
 
   return `
             <section id="usage-quotas" class="mb-6">
-                <h2 class="text-xl font-bold mb-3 flex items-center gap-2" style="color: var(--text-strong);">
-                    <i data-lucide="bar-chart-big"></i> ${escapeHtml(t("dashboard-quotas-title"))}
-                </h2>
+                <h2 class="section__title">${escapeHtml(t("dashboard-quotas-title"))}</h2>
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     ${quotaCards}
                 </div>
@@ -734,9 +723,7 @@ function renderDetailedData(data: UsageData): string {
   const formattedDetails = formatObject(data);
   return `
             <section id="detailed-data">
-                <h2 class="text-xl font-bold mb-3 flex items-center gap-2" style="color: var(--text-strong);">
-                   <i data-lucide="file-text"></i> ${escapeHtml(t("dashboard-api-response-title"))}
-                </h2>
+                <h2 class="section__title">${escapeHtml(t("dashboard-api-response-title"))}</h2>
                 <div class="border p-4 relative font-mono text-xs code-block overflow-auto" style="background-color: var(--surface-base); border-color: var(--border-subtle);">
                     ${formattedDetails}
                 </div>
@@ -774,9 +761,7 @@ function renderTokenUsageSection(): string {
     <section id="token-usage" class="mb-6">
       <div class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 class="text-xl font-bold flex items-center gap-2" style="color: var(--text-strong);">
-            <i data-lucide="database"></i> ${escapeHtml(t("dashboard-token-usage-title"))}
-          </h2>
+          <h2 class="section__title" style="margin-bottom: 0;">${escapeHtml(t("dashboard-token-usage-title"))}</h2>
         </div>
         <div class="flex flex-wrap items-center gap-2 text-xs" style="color: var(--text-muted);">
           ${
@@ -1030,16 +1015,6 @@ function renderEmptyState(message: string): string {
 }
 
 /**
- * Renders a loading spinner.
- */
-function renderSpinner(): string {
-  return `
-    <div class="flex justify-center items-center py-20">
-        <div class="animate-spin h-12 w-12 rounded-full border-4 border-transparent border-t-4" style="border-top-color: var(--accent);"></div>
-    </div>`;
-}
-
-/**
  * Renders an error message box.
  */
 function renderError(
@@ -1079,64 +1054,31 @@ function renderWelcomeMessage(): string {
 // --- Data Fetching ---
 
 /**
- * Fetches usage data and token usage data from the specified API endpoint.
+ * Fetches usage data (remote GitHub API) and token usage data (local SQLite)
+ * independently so the Dashboard renders immediately without waiting on GitHub.
  */
 async function fetchData(page = 1): Promise<void> {
-  const period = getSelectedPeriod();
   state.isLoading = true;
   state.error = null;
-  state.tokenUsageSummaryError = null;
-  state.tokenUsageEventsError = null;
   render();
 
-  try {
-    const [usageResult, summaryResult, eventsResult] = await Promise.allSettled(
-      [
-        fetchJson<UsageData>(USAGE_PATH),
-        fetchJson<TokenUsageSummary>(buildTokenUsageSummaryUrl(period)),
-        fetchJson<TokenUsageEventsPage>(buildTokenUsageEventsUrl(period, page)),
-      ],
-    );
-
-    if (usageResult.status === "fulfilled") {
-      state.data = usageResult.value;
+  const usagePromise = fetchJson<UsageData>(USAGE_PATH)
+    .then((usage) => {
+      state.data = usage;
       state.usageFetchedAt = Date.now();
-    } else {
+      state.error = null;
+    })
+    .catch((error: unknown) => {
       state.data = null;
-      state.error = getErrorMessage(usageResult.reason);
-    }
+      state.error = getErrorMessage(error);
+    })
+    .finally(() => {
+      state.isLoading = false;
+      render();
+    });
 
-    if (summaryResult.status === "fulfilled") {
-      state.tokenUsageSummary = summaryResult.value;
-    } else if (isMissingTokenUsageEndpointError(summaryResult.reason)) {
-      state.tokenUsageSummary = null;
-      state.tokenUsageSummaryError = null;
-    } else {
-      state.tokenUsageSummary = null;
-      state.tokenUsageSummaryError = getErrorMessage(summaryResult.reason);
-    }
-
-    if (eventsResult.status === "fulfilled") {
-      state.tokenUsageEventsPage = eventsResult.value;
-    } else if (isMissingTokenUsageEndpointError(eventsResult.reason)) {
-      state.tokenUsageEventsPage = null;
-      state.tokenUsageEventsError = null;
-    } else {
-      state.tokenUsageEventsPage = null;
-      state.tokenUsageEventsError = getErrorMessage(eventsResult.reason);
-    }
-  } catch (error) {
-    console.error("Fetch error:", error);
-    state.data = null;
-    state.tokenUsageSummary = null;
-    state.tokenUsageEventsPage = null;
-    state.error = getErrorMessage(error);
-    state.tokenUsageSummaryError = getErrorMessage(error);
-    state.tokenUsageEventsError = getErrorMessage(error);
-  } finally {
-    state.isLoading = false;
-    render();
-  }
+  const tokenUsagePromise = fetchTokenUsageSummaryAndEvents(page);
+  await Promise.allSettled([usagePromise, tokenUsagePromise]);
 }
 
 /**

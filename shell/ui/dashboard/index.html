@@ -32,11 +32,8 @@
     <script type="module" src="./main.js"></script>
   </head>
   <body class="antialiased">
-    <div id="app" class="min-h-screen p-4 sm:p-6">
-      <div class="max-w-7xl mx-auto">
-        <!-- Native macOS titlebar already reads "Maximal — Dashboard";
-             no in-window duplicate. Content starts at the control row. -->
-
+    <div id="app" class="dashboard-pane">
+      <div class="dashboard-container">
         <!-- Period selector. Data refreshes automatically — Tauri
              webviews subscribe to a Channel<TokenUsageEvent> driven by
              the shell; plain-browser viewers poll on a timer. No
@@ -44,7 +41,7 @@
              agnostic control (same maximal.locale override as Settings,
              shared :4141 origin); options + selection are wired in
              main.ts (wireLocalePicker), which re-runs applyI18n live. -->
-        <div class="mb-6 flex items-center gap-3">
+        <div class="dashboard-toolbar mb-6 flex items-center gap-3">
           <!-- "Period" is the control's hover text (native title, browser
                timing) and accessible name, not a visible label. -->
           <div

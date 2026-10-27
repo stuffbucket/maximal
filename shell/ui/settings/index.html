@@ -130,37 +130,44 @@
             data-tauri-drag-region
             hidden
           >
-            <div
-              class="segmented"
+            <ul
+              class="nav"
               role="group"
+              data-tauri-drag-region
               data-i18n-aria-label="dashboard-period-label"
               data-i18n-title="dashboard-period-label"
             >
-              <button
-                type="button"
-                class="segmented__option"
-                data-dashboard-period="day"
-                aria-pressed="true"
-                data-i18n="dashboard-period-days"
-                data-i18n-count="1"
-              ></button>
-              <button
-                type="button"
-                class="segmented__option"
-                data-dashboard-period="week"
-                aria-pressed="false"
-                data-i18n="dashboard-period-days"
-                data-i18n-count="7"
-              ></button>
-              <button
-                type="button"
-                class="segmented__option"
-                data-dashboard-period="month"
-                aria-pressed="false"
-                data-i18n="dashboard-period-days"
-                data-i18n-count="30"
-              ></button>
-            </div>
+              <li>
+                <button
+                  type="button"
+                  class="nav__item nav__item--active"
+                  data-dashboard-period="day"
+                  aria-pressed="true"
+                  data-i18n="dashboard-period-days"
+                  data-i18n-count="1"
+                ></button>
+              </li>
+              <li>
+                <button
+                  type="button"
+                  class="nav__item"
+                  data-dashboard-period="week"
+                  aria-pressed="false"
+                  data-i18n="dashboard-period-days"
+                  data-i18n-count="7"
+                ></button>
+              </li>
+              <li>
+                <button
+                  type="button"
+                  class="nav__item"
+                  data-dashboard-period="month"
+                  aria-pressed="false"
+                  data-i18n="dashboard-period-days"
+                  data-i18n-count="30"
+                ></button>
+              </li>
+            </ul>
             <span class="topbar__range" data-dashboard-range></span>
           </div>
 
@@ -955,7 +962,7 @@
             <iframe
               class="dashboard-frame"
               data-dashboard-frame
-              data-src="../dashboard/index.html?embedded=1"
+              src="../dashboard/index.html?embedded=1"
               title="Dashboard"
             ></iframe>
           </section>

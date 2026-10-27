@@ -180,14 +180,13 @@ function showSection(
     persistTabSelection(tab);
   }
 
-  if (isDashboard) {
-    const frame = document.querySelector<HTMLIFrameElement>(
-      "[data-dashboard-frame]",
-    );
-    if (frame && !frame.getAttribute("src") && frame.dataset.src) {
-      frame.src = frame.dataset.src;
-    }
-  }
+  const frame = document.querySelector<HTMLIFrameElement>(
+    "[data-dashboard-frame]",
+  );
+  frame?.contentWindow?.postMessage(
+    { type: "maximal:dashboard-visibility", visible: isDashboard },
+    window.location.origin,
+  );
 
   const settingsNav = document.querySelector<HTMLElement>("[data-settings-nav]");
   const dashControls = document.querySelector<HTMLElement>(
@@ -290,10 +289,9 @@ function wireNav(): void {
       for (const peer of document.querySelectorAll<HTMLButtonElement>(
         "[data-dashboard-period]",
       )) {
-        peer.setAttribute(
-          "aria-pressed",
-          peer === btn ? "true" : "false",
-        );
+        const active = peer === btn;
+        peer.setAttribute("aria-pressed", active ? "true" : "false");
+        peer.classList.toggle("nav__item--active", active);
       }
       const frame = document.querySelector<HTMLIFrameElement>(
         "[data-dashboard-frame]",
@@ -343,10 +341,9 @@ function wireNav(): void {
       for (const peer of document.querySelectorAll<HTMLButtonElement>(
         "[data-dashboard-period]",
       )) {
-        peer.setAttribute(
-          "aria-pressed",
-          peer.dataset.dashboardPeriod === data.period ? "true" : "false",
-        );
+        const active = peer.dataset.dashboardPeriod === data.period;
+        peer.setAttribute("aria-pressed", active ? "true" : "false");
+        peer.classList.toggle("nav__item--active", active);
       }
     }
   });

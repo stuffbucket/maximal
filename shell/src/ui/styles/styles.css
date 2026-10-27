@@ -99,6 +99,10 @@ html[data-os="macos"] .topbar {
 }
 
 .nav__item {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
   display: inline-flex;
   align-items: center;
   padding: var(--space-2) var(--space-3);
@@ -110,6 +114,9 @@ html[data-os="macos"] .topbar {
   text-decoration: none;
   border-radius: var(--radius-input);
   white-space: nowrap;
+  transition:
+    background-color 150ms ease-out,
+    color 150ms ease-out;
 }
 
 .nav__item:hover {
@@ -117,7 +124,8 @@ html[data-os="macos"] .topbar {
   color: var(--text-strong);
 }
 
-.nav__item--active {
+.nav__item--active,
+.nav__item[aria-pressed="true"] {
   background: var(--surface-control);
   color: var(--text-strong);
   font-weight: var(--weight-md);
@@ -139,44 +147,6 @@ html[data-os="macos"] .topbar {
 
 .topbar__dashboard-controls[hidden] {
   display: none;
-}
-
-.segmented {
-  display: inline-flex;
-  align-items: stretch;
-  background: var(--surface-control);
-  border: var(--border-width-hairline) solid var(--border-subtle);
-  border-radius: var(--radius-input);
-  padding: calc(var(--space-1) / 2);
-  gap: calc(var(--space-1) / 2);
-}
-
-.segmented__option {
-  appearance: none;
-  background: transparent;
-  border: 0;
-  color: var(--text-base-color);
-  font-family: var(--font-body);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-md);
-  line-height: var(--leading-lg);
-  padding: calc(var(--space-1) + calc(var(--space-1) / 2)) var(--space-3);
-  border-radius: calc(var(--radius-input) - calc(var(--space-1) / 2));
-  cursor: pointer;
-}
-
-.segmented__option:hover {
-  color: var(--text-strong);
-}
-
-.segmented__option[aria-pressed="true"] {
-  background: var(--accent);
-  color: var(--accent-fg);
-}
-
-.segmented__option:focus-visible {
-  outline: var(--focus-ring);
-  outline-offset: var(--focus-ring-offset);
 }
 
 .topbar__range {
@@ -378,8 +348,19 @@ html[data-os="macos"] .topbar {
   font-size: var(--text-2xl);
   font-weight: var(--weight-2xl);
   line-height: var(--leading-2xl);
-  letter-spacing: -0.015em;
+  letter-spacing: var(--tracking-2xl);
   color: var(--text-strong);
+}
+
+/* When a consolidated tab displays multiple sections, only the first visible
+   section gets the Fraunces display heading; subsequent sections step down to
+   Commissioner (--text-xl) so there is strictly one Fraunces moment per view. */
+.section:not([hidden]) ~ .section:not([hidden]) .section__title {
+  font-family: var(--font-body);
+  font-size: var(--text-xl);
+  font-weight: var(--weight-xl);
+  line-height: var(--leading-xl);
+  letter-spacing: var(--tracking-xl);
 }
 
 .section__sub {
