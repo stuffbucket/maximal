@@ -38,6 +38,7 @@ jobs:
   warm:
     name: Warm Windows Cargo cache
     runs-on: windows-2022
+    timeout-minutes: 20
     env:
       # Retry crate downloads instead of failing on a transient reset.
       CARGO_NET_RETRY: "10"

@@ -55,6 +55,7 @@ jobs:
   # the MSI job (and the real release) consume.
   build-binary:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
       # The root mise.toml pins Rust and the broker inherits it; nothing in
       # this job builds Rust through mise, so don't download the toolchain.
@@ -138,6 +139,7 @@ jobs:
   msi:
     needs: build-binary
     runs-on: windows-2022
+    timeout-minutes: 20
     env:
       VERSION: ${{ github.event.inputs.version }}
     steps:
@@ -361,6 +363,7 @@ jobs:
   ps1:
     needs: build-binary
     runs-on: windows-2022
+    timeout-minutes: 20
     env:
       VERSION: ${{ github.event.inputs.version }}
     steps:

@@ -37,6 +37,7 @@ permissions:
 jobs:
   trigger:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Trigger build on stuffbucket/macos-builder
         env:
