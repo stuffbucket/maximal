@@ -209,6 +209,9 @@ html[data-os="macos"] .topbar {
   height: var(--size-xl);
   color: var(--text-muted);
   border-radius: var(--radius-input);
+  transition:
+    background-color 150ms ease-in-out,
+    color 150ms ease-in-out;
 }
 
 .lang-picker:hover {
@@ -250,6 +253,9 @@ html[data-os="macos"] .topbar {
   justify-content: center;
   cursor: pointer;
   padding: 0;
+  transition:
+    background-color 150ms ease-in-out,
+    color 150ms ease-in-out;
 }
 
 .topbar__mode-btn:hover {
@@ -267,7 +273,9 @@ html[data-os="macos"] .topbar {
   height: var(--size-sm);
 }
 
-.topbar__mode-icon[hidden] {
+.topbar__mode-icon[hidden],
+.topbar__mode-btn[data-surface-mode="dashboard"] [data-mode-icon="dashboard"],
+.topbar__mode-btn[data-surface-mode="settings"] [data-mode-icon="settings"] {
   display: none;
 }
 
@@ -281,13 +289,15 @@ html[data-os="macos"] .topbar {
   display: flex;
   flex-direction: column;
   gap: var(--space-7);
-  /* Always-visible thin scrollbar. macOS hides the overlay scrollbar by
-     default when idle, which left users with no signal that a section
-     scrolls. The standard scrollbar-width + scrollbar-color properties
-     cover Firefox; the WebKit pseudo-element rules below handle
-     Tauri/Safari. */
   scrollbar-width: thin;
-  scrollbar-color: var(--border-subtle) transparent;
+  scrollbar-color: color-mix(in srgb, var(--text-muted) 28%, transparent)
+    transparent;
+  transition: scrollbar-color 150ms ease-in-out;
+}
+
+.pane:hover {
+  scrollbar-color: color-mix(in srgb, var(--text-muted) 48%, transparent)
+    transparent;
 }
 
 .pane--dashboard {
@@ -297,8 +307,8 @@ html[data-os="macos"] .topbar {
 }
 
 .pane::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: var(--space-2);
+  height: var(--space-2);
 }
 
 .pane::-webkit-scrollbar-track {
@@ -306,18 +316,25 @@ html[data-os="macos"] .topbar {
 }
 
 .pane::-webkit-scrollbar-thumb {
-  background: var(--border-subtle);
+  background-color: color-mix(in srgb, var(--text-muted) 28%, transparent);
+  border: var(--border-width-thick) solid transparent;
+  background-clip: padding-box;
   border-radius: var(--radius-pill);
+  transition: background-color 150ms ease-in-out;
 }
 
-.pane::-webkit-scrollbar-thumb:hover {
-  background: var(--border-strong);
+.pane:hover::-webkit-scrollbar-thumb {
+  background-color: color-mix(in srgb, var(--text-muted) 48%, transparent);
+}
+
+.pane::-webkit-scrollbar-thumb:hover,
+.pane::-webkit-scrollbar-thumb:active {
+  background-color: color-mix(in srgb, var(--text-strong) 65%, transparent);
 }
 
 .section {
   width: 100%;
   max-width: var(--content-max);
-  margin-inline: auto;
   display: flex;
   flex-direction: column;
   gap: var(--space-5);

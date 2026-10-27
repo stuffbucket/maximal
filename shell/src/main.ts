@@ -142,15 +142,16 @@ function updateSurfaceModeButton(isDashboard: boolean): void {
   const btn = document.querySelector<HTMLButtonElement>(
     "[data-surface-mode-btn]",
   );
-  const dashIcon = document.querySelector<HTMLElement>(
+  const dashIcon = document.querySelector<Element>(
     '[data-mode-icon="dashboard"]',
   );
-  const settingsIcon = document.querySelector<HTMLElement>(
+  const settingsIcon = document.querySelector<Element>(
     '[data-mode-icon="settings"]',
   );
-  if (dashIcon) dashIcon.hidden = isDashboard;
-  if (settingsIcon) settingsIcon.hidden = !isDashboard;
+  dashIcon?.toggleAttribute("hidden", isDashboard);
+  settingsIcon?.toggleAttribute("hidden", !isDashboard);
   if (btn) {
+    btn.dataset.surfaceMode = isDashboard ? "dashboard" : "settings";
     const isMac = osKind() === "macos";
     const label =
       isDashboard ?
