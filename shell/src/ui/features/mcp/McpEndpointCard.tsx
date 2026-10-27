@@ -16,6 +16,7 @@ import { LinkCheckbox } from "../../components/LinkCheckbox";
 import { Switch } from "../../components/Switch";
 
 import type { McpMutationResult, McpToggleResult } from "./useMcp";
+import { WorkIqSection } from "./WorkIqSection";
 
 interface McpEndpointCardProps {
   endpoint: McpEndpointEntry;
@@ -27,6 +28,10 @@ interface McpEndpointCardProps {
   onRefresh: () => Promise<void>;
   /** Remove it from Maximal and from every app Maximal added it to. */
   onRemove: () => Promise<McpMutationResult>;
+  /** Work IQ only: the setup steps the user confirms on the card. */
+  onAcceptWorkIqEula: () => Promise<McpMutationResult>;
+  onSignInWorkIq: (useBrowserSignIn: boolean) => Promise<McpMutationResult>;
+  onCancelWorkIqSignIn: () => Promise<void>;
 }
 
 interface Change {
@@ -49,6 +54,9 @@ export function McpEndpointCard({
   onToggle,
   onRefresh,
   onRemove,
+  onAcceptWorkIqEula,
+  onSignInWorkIq,
+  onCancelWorkIqSignIn,
 }: McpEndpointCardProps): JSX.Element {
   // The change in flight, shown in place of the server's state so the
   // controls don't snap back for the seconds a broker restart takes.
@@ -240,6 +248,16 @@ export function McpEndpointCard({
             </Callout>
           ))}
       </div>
+
+      {/* Work IQ: where its sign-in stands and the next step. */}
+      {enabled && !busy && endpoint.workiq && (
+        <WorkIqSection
+          status={endpoint.workiq}
+          onAcceptEula={onAcceptWorkIqEula}
+          onSignIn={onSignInWorkIq}
+          onCancelSignIn={onCancelWorkIqSignIn}
+        />
+      )}
 
       {/* What the last save did: whether the server started, what each
           changed app needs to pick it up, and any app it couldn't go into. */}

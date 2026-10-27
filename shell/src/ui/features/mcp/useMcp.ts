@@ -8,6 +8,7 @@ import type {
   McpEndpointEntry,
   McpEndpointRemoveResponse,
   McpEndpointToggleResponse,
+  WorkIqStatus,
 } from "../../../proxy/client";
 import { type Problem, describeProblem, withRetry } from "../../problems";
 
@@ -27,6 +28,10 @@ const TOGGLE_TIMEOUT_MS = 90_000;
 const POLLED_STATES = new Set<McpBrokerHealth["state"]>(["starting", "recovering", "stuck"]);
 const POLL_MIN_MS = 2_000;
 const POLL_MAX_MS = 30_000;
+/** A Work IQ sign-in Maximal is running: re-read every POLL_MIN_MS. */
+const SIGNING_IN = new Set<WorkIqStatus["signIn"]>(["waiting", "restarting"]);
+/** Accepting the EULA runs a Work IQ command and may restart the broker. */
+const WORKIQ_TIMEOUT_MS = 60_000;
 
 export interface McpToggleResult {
   ok: boolean;
@@ -61,6 +66,11 @@ interface UseMcp {
   ) => Promise<McpToggleResult>;
   add: (catalogId: string) => Promise<McpMutationResult>;
   remove: (id: string) => Promise<McpMutationResult>;
+  /** Work IQ steps the user confirmed: accept Microsoft's EULA; start a
+   *  sign-in (optionally switching to browser sign-in first); cancel it. */
+  acceptWorkIqEula: (id: string) => Promise<McpMutationResult>;
+  signInWorkIq: (id: string, useBrowserSignIn: boolean) => Promise<McpMutationResult>;
+  cancelWorkIqSignIn: (id: string) => Promise<void>;
 }
 
 export function useMcp(): UseMcp {
@@ -105,21 +115,96 @@ export function useMcp(): UseMcp {
   // panel current without anyone clicking anything — backing off, so a
   // broker that stays down doesn't mean a re-read every 2s for as long as
   // the window is open. A state change starts the backoff over.
+  // A Work IQ sign-in in progress is followed closely, so the card moves on
+  // as soon as the browser step is done.
   const brokerState = broker?.state;
+  const signingIn = endpoints.some(
+    (endpoint) => endpoint.workiq !== undefined && SIGNING_IN.has(endpoint.workiq.signIn),
+  );
+  const workiqStarting = endpoints.some((endpoint) => endpoint.workiq?.state === "starting");
+  const workiqKey = endpoints
+    .map((endpoint) => `${endpoint.workiq?.state}:${endpoint.workiq?.signIn}`)
+    .join();
   useEffect(() => {
-    if (!brokerState || !POLLED_STATES.has(brokerState)) return;
+    const brokerPolled = brokerState !== undefined && POLLED_STATES.has(brokerState);
+    if (!brokerPolled && !signingIn && !workiqStarting) return;
+    const maxDelay = signingIn ? POLL_MIN_MS : POLL_MAX_MS;
     let delay = POLL_MIN_MS;
     let timer: ReturnType<typeof setTimeout>;
     const tick = (): void => {
       timer = setTimeout(() => {
         void refresh();
-        delay = Math.min(delay * 2, POLL_MAX_MS);
+        delay = Math.min(delay * 2, maxDelay);
         tick();
       }, delay);
     };
     tick();
     return () => clearTimeout(timer);
-  }, [brokerState, refresh]);
+  }, [brokerState, signingIn, workiqStarting, workiqKey, refresh]);
+
+  /** Show a Work IQ step's result on its card right away. */
+  const setWorkIq = useCallback((id: string, workiq: WorkIqStatus): void => {
+    setEndpoints((prev) =>
+      prev.map((endpoint) => (endpoint.id === id ? { ...endpoint, workiq } : endpoint)),
+    );
+  }, []);
+
+  const acceptWorkIqEula = useCallback<UseMcp["acceptWorkIqEula"]>(
+    async (id) => {
+      const result = await apiCall(
+        {
+          kind: "mcp-workiq-accept-eula",
+          method: "POST",
+          path: `/settings/api/mcp/${encodeURIComponent(id)}/workiq/accept-eula`,
+        },
+        { signal: AbortSignal.timeout(WORKIQ_TIMEOUT_MS) },
+      );
+      if (result.ok) setWorkIq(id, result.data.workiq);
+      void refresh();
+      if (result.ok) return { ok: true };
+      return {
+        ok: false,
+        problem: describeProblem(result, { subject: "Work IQ", doing: "save" }),
+      };
+    },
+    [refresh, setWorkIq],
+  );
+
+  const signInWorkIq = useCallback<UseMcp["signInWorkIq"]>(
+    async (id, useBrowserSignIn) => {
+      const result = await apiCall(
+        {
+          kind: "mcp-workiq-sign-in",
+          method: "POST",
+          path: `/settings/api/mcp/${encodeURIComponent(id)}/workiq/sign-in`,
+          body: { useBrowserSignIn },
+        },
+        { signal: AbortSignal.timeout(WORKIQ_TIMEOUT_MS) },
+      );
+      if (result.ok) {
+        setWorkIq(id, result.data.workiq);
+        return { ok: true };
+      }
+      return {
+        ok: false,
+        problem: describeProblem(result, { subject: "Work IQ", doing: "save" }),
+      };
+    },
+    [setWorkIq],
+  );
+
+  const cancelWorkIqSignIn = useCallback<UseMcp["cancelWorkIqSignIn"]>(
+    async (id) => {
+      const result = await apiCall({
+        kind: "mcp-workiq-cancel-sign-in",
+        method: "DELETE",
+        path: `/settings/api/mcp/${encodeURIComponent(id)}/workiq/sign-in`,
+      });
+      if (result.ok) setWorkIq(id, result.data.workiq);
+      void refresh();
+    },
+    [refresh, setWorkIq],
+  );
 
   const toggle = useCallback<UseMcp["toggle"]>(
     async (id, enabled, clients) => {
@@ -153,9 +238,11 @@ export function useMcp(): UseMcp {
           problem: describeProblem(result, { subject: "this server", doing: "save" }),
         };
       }
+      // The toggle's answer has no Work IQ status; keep the last one until
+      // the refresh brings a new one.
       const fresh = result.data.endpoint;
       setEndpoints((prev) =>
-        prev.map((endpoint) => (endpoint.id === fresh.id ? fresh : endpoint)),
+        prev.map((endpoint) => (endpoint.id === fresh.id ? { ...endpoint, ...fresh } : endpoint)),
       );
       return {
         ok: true,
@@ -222,5 +309,18 @@ export function useMcp(): UseMcp {
     [refresh],
   );
 
-  return { endpoints, available, broker, isLoading, problem, refresh, toggle, add, remove };
+  return {
+    endpoints,
+    available,
+    broker,
+    isLoading,
+    problem,
+    refresh,
+    toggle,
+    add,
+    remove,
+    acceptWorkIqEula,
+    signInWorkIq,
+    cancelWorkIqSignIn,
+  };
 }

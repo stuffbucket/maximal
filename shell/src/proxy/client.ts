@@ -180,6 +180,37 @@ export interface McpEndpointEntry {
   /** Remembered client choices, used to pre-check the prompt. */
   clients: Array<McpClientId>
   offered: Array<McpClientOffer>
+  /** Work IQ endpoints that are on: where its sign-in stands. */
+  workiq?: WorkIqStatus
+}
+
+/** Where Work IQ is (see WorkIqState in src/lib/config/settings-types.ts
+ *  for what each state means). */
+export type WorkIqState =
+  | "not-installed"
+  | "eula-needed"
+  | "signin-needed"
+  | "starting"
+  | "ready"
+  | "consent-needed"
+
+export interface WorkIqStatus {
+  state: WorkIqState
+  eulaAccepted: boolean
+  signedInBefore: boolean
+  /** Sign-in uses the browser (`disableBrokeredAuth=true`). */
+  browserSignIn: boolean
+  /** On macOS the UI offers browser sign-in and mentions the keychain. */
+  macos: boolean
+  /** The sign-in Maximal runs: `waiting` for the user in the browser,
+   *  `restarting` Work IQ after; the rest say how the last one ended. */
+  signIn: "idle" | "waiting" | "restarting" | "failed" | "timed-out" | "cancelled"
+  /** The last line Work IQ wrote that reads like a problem. Server text. */
+  lastProblem: string | null
+}
+
+interface WorkIqActionResponse {
+  workiq: WorkIqStatus
 }
 
 /** The process that runs every MCP endpoint (see McpBrokerHealth in
@@ -381,6 +412,22 @@ type Endpoint =
       path: `/settings/api/mcp/${string}`
     }
   | {
+      kind: "mcp-workiq-accept-eula"
+      method: "POST"
+      path: `/settings/api/mcp/${string}/workiq/accept-eula`
+    }
+  | {
+      kind: "mcp-workiq-sign-in"
+      method: "POST"
+      path: `/settings/api/mcp/${string}/workiq/sign-in`
+      body: { useBrowserSignIn: boolean }
+    }
+  | {
+      kind: "mcp-workiq-cancel-sign-in"
+      method: "DELETE"
+      path: `/settings/api/mcp/${string}/workiq/sign-in`
+    }
+  | {
       kind: "requests-list"
       method: "GET"
       path: "/settings/api/requests"
@@ -426,6 +473,9 @@ interface ResponseFor {
   "mcp-toggle": McpEndpointToggleResponse
   "mcp-add": McpEndpointAddResponse
   "mcp-remove": McpEndpointRemoveResponse
+  "mcp-workiq-accept-eula": WorkIqActionResponse
+  "mcp-workiq-sign-in": WorkIqActionResponse
+  "mcp-workiq-cancel-sign-in": WorkIqActionResponse
   "requests-list": PendingRequestsResponse
   "requests-answer": { ok: true }
   "models-list": ModelsListResponse
