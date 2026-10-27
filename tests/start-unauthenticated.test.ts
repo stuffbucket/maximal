@@ -20,9 +20,11 @@ import os from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
+import { freePort } from "./helpers/free-port"
+
 const cwd = fileURLToPath(new URL("../", import.meta.url))
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "maximal-unauth-"))
-const port = 4143 + Math.floor(Math.random() * 100)
+let port = 0
 
 let proc: ReturnType<typeof Bun.spawn> | null = null
 
@@ -43,6 +45,7 @@ async function waitForPort(p: number, timeoutMs: number): Promise<boolean> {
 }
 
 beforeAll(async () => {
+  port = await freePort()
   proc = Bun.spawn({
     cmd: [
       process.execPath,

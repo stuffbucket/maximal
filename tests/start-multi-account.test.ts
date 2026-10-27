@@ -18,6 +18,8 @@ import os from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
+import { freePort } from "./helpers/free-port"
+
 const cwd = fileURLToPath(new URL("../", import.meta.url))
 
 async function waitForPort(p: number, timeoutMs: number): Promise<boolean> {
@@ -79,10 +81,11 @@ async function bootOrThrow(
 
 describe("boot migrates a legacy token into the registry", () => {
   const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "maximal-migrate-"))
-  const port = 4243 + Math.floor(Math.random() * 100)
+  let port = 0
   let proc: ReturnType<typeof Bun.spawn> | null = null
 
   beforeAll(async () => {
+    port = await freePort()
     // Seed a legacy single-record token. A `gho_` token is used directly as a
     // Copilot bearer (no /v2/token mint), so boot's Copilot bootstrap fails
     // NON-fatally (a plain 401 from /user or /models, not a
@@ -128,10 +131,11 @@ describe("boot migrates a legacy token into the registry", () => {
 
 describe("boot with a registry that has no active account", () => {
   const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "maximal-noactive-"))
-  const port = 4343 + Math.floor(Math.random() * 100)
+  let port = 0
   let proc: ReturnType<typeof Bun.spawn> | null = null
 
   beforeAll(async () => {
+    port = await freePort()
     // Registry with one INACTIVE account and activeKey: null — the state after
     // signing out of the active account while another remembered account stays.
     // Migration must NOT run (registry already populated), and boot must land
