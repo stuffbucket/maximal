@@ -62,7 +62,7 @@ function getThinkingBudget(
   model: Model | undefined,
 ): number | undefined {
   const thinking = payload.thinking
-  if (model && thinking) {
+  if (model && thinking && thinking.type !== "disabled") {
     const maxThinkingBudget = Math.min(
       model.capabilities.supports.max_thinking_budget ?? 0,
       (model.capabilities.limits.max_output_tokens ?? 0) - 1,

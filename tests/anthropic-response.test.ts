@@ -617,3 +617,187 @@ describe("OpenAI to Anthropic Streaming Tool-Call Argument Edge Cases", () => {
     expect(inputDeltas).toHaveLength(0)
   })
 })
+
+describe("OpenAI to Anthropic Streaming reasoning_opaque Ordering", () => {
+  test("does not emit a trailing thinking block after a completed text block when finish_reason chunk carries reasoning_opaque", () => {
+    const geminiFinishStream: Array<ChatCompletionChunk> = [
+      {
+        id: "8XbgauPNJrGTl7oPloq_oQ0",
+        object: "chat.completion.chunk",
+        created: 1793095413,
+        model: "gemini-4-argon",
+        choices: [
+          {
+            index: 0,
+            delta: {
+              role: "assistant",
+              content: '{"ok": true, "reason": "all PRs merged',
+            },
+            finish_reason: null,
+            logprobs: null,
+          },
+        ],
+        usage: {
+          completion_tokens: 0,
+          prompt_tokens: 0,
+          prompt_tokens_details: { cached_tokens: 0 },
+          total_tokens: 0,
+        },
+      },
+      {
+        id: "8XbgauPNJrGTl7oPloq_oQ0",
+        object: "chat.completion.chunk",
+        created: 1793095413,
+        model: "gemini-4-argon",
+        choices: [
+          {
+            index: 0,
+            delta: {
+              role: "assistant",
+              content: '"}',
+            },
+            finish_reason: null,
+            logprobs: null,
+          },
+        ],
+        usage: {
+          completion_tokens: 0,
+          prompt_tokens: 0,
+          prompt_tokens_details: { cached_tokens: 0 },
+          total_tokens: 0,
+        },
+      },
+      {
+        id: "8XbgauPNJrGTl7oPloq_oQ0",
+        object: "chat.completion.chunk",
+        created: 1793095413,
+        model: "gemini-4-argon",
+        choices: [
+          {
+            index: 0,
+            delta: {
+              role: "assistant",
+              content: null,
+              reasoning_opaque: "u3WwruuJci0LZRk+c47N8QGKKlgZKDjS5FX2hr2b",
+            },
+            finish_reason: "stop",
+            logprobs: null,
+          },
+        ],
+        usage: {
+          completion_tokens: 18,
+          prompt_tokens: 55,
+          prompt_tokens_details: { cached_tokens: 0 },
+          total_tokens: 73,
+        },
+      },
+    ]
+
+    const streamState: AnthropicStreamState = {
+      messageStartSent: false,
+      contentBlockIndex: 0,
+      contentBlockOpen: false,
+      toolCalls: {},
+      thinkingBlockOpen: false,
+    }
+    const translatedStream = geminiFinishStream.flatMap((chunk) =>
+      translateChunkToAnthropicEvents(chunk, streamState),
+    )
+
+    expect(translatedStream.map((event) => event.type)).toEqual([
+      "message_start",
+      "content_block_start",
+      "content_block_delta",
+      "content_block_delta",
+      "content_block_stop",
+      "message_delta",
+      "message_stop",
+    ])
+  })
+
+  test("preserves reasoning_opaque thinking block before tool_use when tool_calls chunk carries reasoning_opaque", () => {
+    const geminiToolStream: Array<ChatCompletionChunk> = [
+      {
+        id: "BnfgatjyEoGbotQPvp2AyQs",
+        object: "chat.completion.chunk",
+        created: 1793095433,
+        model: "gemini-4-argon",
+        choices: [
+          {
+            index: 0,
+            delta: {
+              role: "assistant",
+              content: null,
+              reasoning_opaque: "BHw8ZfySe+jKihuVjpIyTpGnhjdT8SJ",
+              tool_calls: [
+                {
+                  index: 0,
+                  id: "call_MHx1RzVGenRWRmpmaHJXeUhEaXg",
+                  type: "function",
+                  function: {
+                    name: "get_weather",
+                    arguments: '{"city":"Seattle"}',
+                  },
+                },
+              ],
+            },
+            finish_reason: null,
+            logprobs: null,
+          },
+        ],
+      },
+      {
+        id: "BnfgatjyEoGbotQPvp2AyQs",
+        object: "chat.completion.chunk",
+        created: 1793095433,
+        model: "gemini-4-argon",
+        choices: [
+          {
+            index: 0,
+            delta: {
+              role: "assistant",
+              content: null,
+            },
+            finish_reason: "tool_calls",
+            logprobs: null,
+          },
+        ],
+      },
+    ]
+
+    const streamState: AnthropicStreamState = {
+      messageStartSent: false,
+      contentBlockIndex: 0,
+      contentBlockOpen: false,
+      toolCalls: {},
+      thinkingBlockOpen: false,
+    }
+    const translatedStream = geminiToolStream.flatMap((chunk) =>
+      translateChunkToAnthropicEvents(chunk, streamState),
+    )
+
+    const blockStarts = translatedStream.filter(
+      (event) => event.type === "content_block_start",
+    )
+    expect(blockStarts).toEqual([
+      {
+        type: "content_block_start",
+        index: 0,
+        content_block: {
+          type: "thinking",
+          thinking: "",
+        },
+      },
+      {
+        type: "content_block_start",
+        index: 1,
+        content_block: {
+          type: "tool_use",
+          id: "call_MHx1RzVGenRWRmpmaHJXeUhEaXg",
+          name: "get_weather",
+          input: {},
+        },
+      },
+    ])
+  })
+})
