@@ -133,6 +133,9 @@ function devConfig(): Record<string, unknown> {
             remote: { urls: origins },
             permissions: [
               "core:default",
+              "core:window:default",
+              "core:window:allow-start-dragging",
+              "core:window:allow-internal-toggle-maximize",
               "core:webview:allow-create-webview-window",
               "opener:default",
               "default",
