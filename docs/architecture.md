@@ -240,10 +240,14 @@ any loopback port, so after a port change the entry is rewritten rather than
 mistaken for the user's; `/_internal/reload` also re-syncs entries from the
 server.
 
-Maximal-written entries exist only while Maximal runs: shutdown (and the
-`exit` safety net) removes them from both apps with direct file edits, since
-spawning `claude` doesn't fit the 2.5s shutdown budget, and boot re-adds them
-from the recorded choices. Boot sync runs when `config.json` has an
+Claude Code's Maximal-written entries exist only while Maximal runs: each
+session reads `~/.claude.json` when it starts, so shutdown (and the `exit`
+safety net) removes them with direct file edits, since spawning `claude`
+doesn't fit the 2.5s shutdown budget, and boot re-adds them from the recorded
+choices. Claude Desktop's entries stay across shutdown
+(`McpClientConfigurator.removeOnShutdown`): Desktop reads its config only at
+launch, like its routing profile, so removing them would only make its next
+launch come up without the server. Boot sync runs when `config.json` has an
 `mcpBroker` section.
 
 When an endpoint is turned on and an app already has its own stdio entry with

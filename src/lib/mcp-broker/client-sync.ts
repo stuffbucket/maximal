@@ -80,6 +80,13 @@ export interface McpClientConfigurator {
   readonly clientId: McpClientId
   /** The label that resolves this client's Maximal key (`ClientApp.apiKeyLabel`). */
   readonly apiKeyLabel: string
+  /** Whether Maximal takes its entries back out when it shuts down. Right
+   *  for a client that reads its config per session (Claude Code), so a
+   *  session started while Maximal is down doesn't get a dead server. Wrong
+   *  for one that reads it only at launch (Claude Desktop): the running app
+   *  wouldn't notice, and its next launch would come up without the server
+   *  even though Maximal is back by then. */
+  readonly removeOnShutdown: boolean
   /** Whether Maximal's integration for this client is on and usable. */
   available(): boolean
   /** Make the client match `desired`, touching only entries in `owned`. */

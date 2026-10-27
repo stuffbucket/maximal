@@ -214,6 +214,9 @@ export function createClaudeCodeMcp(
   return {
     clientId: "claude-code",
     apiKeyLabel: HELPER_LABEL,
+    // Each session reads the file when it starts, like the base URL that
+    // shutdown also reverts (see ./reconcile.ts).
+    removeOnShutdown: true,
     available:
       options.available
       ?? (() => isProxyBaseUrlConfigured() && getRunner() !== undefined),

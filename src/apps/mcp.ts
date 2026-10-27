@@ -245,12 +245,15 @@ export async function setMcpEndpoint(
   }
 }
 
-/** On shutdown, take every entry Maximal wrote back out of the clients so
- *  nothing points at a Maximal that isn't running; boot puts them back from
- *  the recorded choices. Synchronous and file-only, for the shutdown budget
- *  and the `exit` safety net. */
+/** On shutdown, take the entries Maximal wrote back out of the clients that
+ *  read their config per session, so a new session doesn't point at a
+ *  Maximal that isn't running; boot puts them back from the recorded
+ *  choices. Clients that read their config only at launch (Claude Desktop)
+ *  keep theirs. Synchronous and file-only, for the shutdown budget and the
+ *  `exit` safety net. */
 export function removeMcpClientsOnShutdown(): void {
   for (const app of mcpApps()) {
+    if (!app.mcp.removeOnShutdown) continue
     try {
       syncMcpClient(app.mcp, { active: false, offline: true })
     } catch (error) {

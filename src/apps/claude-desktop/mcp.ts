@@ -110,6 +110,9 @@ export function createClaudeDesktopMcp(
   return {
     clientId: "claude-desktop",
     apiKeyLabel: "claude-desktop",
+    // Desktop reads this file only at launch, and its routing stays applied
+    // across Maximal restarts too (see ./reconcile.ts).
+    removeOnShutdown: false,
     available: options.available ?? (() => isConfigLibraryApplied()),
     reconcile(desired, owned) {
       return reconcileFile({
