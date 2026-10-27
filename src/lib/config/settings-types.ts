@@ -458,7 +458,12 @@ export const McpCatalogItem = z.object({
   /** Absolute path of the executable Maximal found. */
   command: z.string().optional(),
   version: z.string().optional(),
-  install: z.object({ command: z.string(), url: z.string() }),
+  install: z.object({
+    command: z.string(),
+    url: z.string(),
+    /** Host of the registry the command downloads from. */
+    registry: z.string(),
+  }),
 })
 export type McpCatalogItem = z.infer<typeof McpCatalogItem>
 

@@ -28,6 +28,15 @@ const POLLED_STATES = new Set<McpBrokerHealth["state"]>(["starting", "recovering
 const POLL_MIN_MS = 2_000;
 const POLL_MAX_MS = 30_000;
 
+/** Said by the panel, and by a card whose turn-on Maximal refused (409). */
+export const UNSUPPORTED_PLATFORM: Problem = {
+  title: "MCP servers don't run on Windows yet",
+  detail:
+    "Maximal can't run them safely on Windows yet. Your choices here are saved for when it can.",
+  remedy: "none",
+  technical: "MCP_BROKER_CONTAINMENT_UNAVAILABLE",
+};
+
 export interface McpToggleResult {
   ok: boolean;
   problem?: Problem;
@@ -147,6 +156,10 @@ export function useMcp(): UseMcp {
               technical: `HTTP 404: ${result.error}`,
             },
           };
+        }
+        // Only a turn-on where MCP servers can't run (Windows) conflicts.
+        if (result.status === 409) {
+          return { ok: false, problem: UNSUPPORTED_PLATFORM };
         }
         return {
           ok: false,

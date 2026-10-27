@@ -101,6 +101,12 @@ describe("desiredEntriesFor", () => {
     ])
   })
 
+  test("is empty on Windows, where the broker can't serve them yet", () => {
+    const config = brokerConfig([server("a", { clients: ["claude-desktop"] })])
+    expect(desiredEntriesFor(client, config, "win32")).toEqual([])
+    expect(desiredEntriesFor(client, config, "darwin")).toHaveLength(1)
+  })
+
   test("is empty while the broker is off", () => {
     const config = brokerConfig([server("a", { clients: ["claude-desktop"] })])
     config.mcpBroker = { ...config.mcpBroker, enabled: false }
@@ -154,6 +160,23 @@ describe("syncMcpClient", () => {
       enabled: true,
       mcpServers: [],
     })
+  })
+
+  test("takes its entries back out on Windows", () => {
+    writeConfig(
+      brokerConfig([server("a", { clients: ["claude-desktop"] })], {
+        apps: { claudeDesktop: { mcpServers: ["a"] } },
+      }),
+    )
+    const { calls, configurator } = fakeConfigurator()
+
+    const result = syncMcpClient(configurator, { platform: "win32" })
+
+    expect(result.removed).toEqual(["a"])
+    expect(calls).toEqual([{ desired: [], owned: ["a"] }])
+    expect(getConfig().mcpBroker?.servers?.[0]?.clients).toEqual([
+      "claude-desktop",
+    ])
   })
 
   test("never touches the client when nothing is desired or owned", () => {
