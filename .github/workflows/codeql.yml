@@ -1,21 +1,84 @@
 name: CodeQL
 
+# What gets scanned and when:
+#   - pull_request / merge_group / push to main: only the languages the change
+#     touches (scripts/codeql-languages.ts), so a docs-only PR runs no
+#     analysis and a Rust-only PR runs only the Rust one.
+#   - schedule / workflow_dispatch: every language, so new CodeQL queries
+#     reach code that hasn't changed lately.
+#   - Changing this workflow, the config, or the language picker: every
+#     language.
+# CodeQL is not a required status check (only `test` is), so skipping a
+# language never blocks a merge.
+
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
-  # See ci.yml — required checks must also run on merge_group.
   merge_group:
   schedule:
     - cron: "27 6 * * 1"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+# A new push to a PR supersedes its in-flight scan; main and scheduled
+# scans always finish.
+concurrency:
+  group: codeql-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  scope:
+    name: Pick languages
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      languages: ${{ steps.pick.outputs.languages }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: ./.github/actions/setup-bun
+        with:
+          bun-version: 1.3.14
+
+      - name: List changed files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          MG_BASE: ${{ github.event.merge_group.base_sha }}
+          MG_HEAD: ${{ github.event.merge_group.head_sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.sha }}
+        run: |
+          case "$EVENT" in
+            pull_request) range="$PR_BASE...$PR_HEAD" ;;
+            merge_group)  range="$MG_BASE...$MG_HEAD" ;;
+            push)         range="$PUSH_BEFORE...$PUSH_AFTER" ;;
+            *)            range="" ;;
+          esac
+          # No range (schedule/dispatch), a new branch (all-zero before), an
+          # API failure, or a diff at the compare API's 300-file cap: scan all.
+          if [ -z "$range" ] || [ "${range%%...*}" = "0000000000000000000000000000000000000000" ] \
+            || ! gh api "repos/$GITHUB_REPOSITORY/compare/$range" --jq '.files[].filename' > changed.txt \
+            || [ "$(wc -l < changed.txt)" -ge 300 ]; then
+            echo ALL > changed.txt
+          fi
+          echo "$(wc -l < changed.txt) changed path(s)"
+
+      - name: Pick languages
+        id: pick
+        run: echo "languages=$(bun scripts/codeql-languages.ts < changed.txt)" >> "$GITHUB_OUTPUT"
+
   analyze:
     name: Analyze (${{ matrix.language }})
+    needs: scope
+    if: needs.scope.outputs.languages != '[]'
     runs-on: ubuntu-latest
     permissions:
       security-events: write
@@ -26,17 +89,31 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [javascript-typescript]
+        language: ${{ fromJSON(needs.scope.outputs.languages) }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
+      # Rust is analyzed without building, but the extractor still resolves
+      # crates; reuse them across runs until Cargo.lock changes.
+      - name: Cache Cargo registry
+        if: matrix.language == 'rust'
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: codeql-cargo-${{ hashFiles('shell/src-tauri/Cargo.lock') }}
+          restore-keys: codeql-cargo-
+
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
-          queries: security-and-quality
+          build-mode: none
+          config-file: ./.github/codeql/codeql-config.yml
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4

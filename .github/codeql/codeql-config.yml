@@ -1,23 +1,30 @@
-# CodeQL configuration for this repo.
+# CodeQL configuration, wired in by .github/workflows/codeql.yml.
 #
 # By-design alerts are NOT expressed here. They are suppressed with an
 # inline `// codeql[<rule-id>]` comment alone on the line above the sink,
 # with the rationale on the comment lines around it (anything after the
 # directive on the same line makes the analyzer ignore it; see
 # docs/decisions/0001-codeql-by-design-dismissals.md). Grep `codeql\[` to
-# enumerate them. The rationale lives next to the
-# code and moves with it, so it cannot drift.
-#
-# `query-filters` / `paths-ignore` are for "never run this query / scan
-# this path" — a syntactic, rule-wide exclusion — never a substitute for
-# a per-sink by-design decision.
-#
-# See `docs/decisions/0001-codeql-by-design-dismissals.md`.
+# enumerate them. The rationale lives next to the code and moves with it,
+# so it cannot drift.
 
 name: "maximal CodeQL config"
 
+# security-extended, not the default suite: its medium-precision queries
+# (file contents sent over HTTP, HTTP data written to files, file-system
+# races, remote property injection) watch exactly how this proxy handles
+# tokens. The cost is that CodeQL's incremental PR analysis only runs with
+# the default suite, so every scan is a full one. The quality queries in
+# security-and-quality are dropped; nothing acted on them.
+queries:
+  - uses: security-extended
+
+# Code that never ships. scripts/codeql-languages.ts reads this same list,
+# so a change that only touches these paths triggers no scan at all.
+# Every literal entry must exist (tests/codeql-languages.test.ts).
 paths-ignore:
-  - node_modules
-  - dist
-  - build
-  - shell/ui/dashboard/vendor
+  - tests
+  - packages/mcp-broker/test
+  - packages/storybook
+  - "**/vendor"
+  - "**/*.min.js"

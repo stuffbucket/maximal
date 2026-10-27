@@ -101,5 +101,6 @@ header:
 - **Rule-wide exclusions are a different tool.** A `query-filters` /
   `paths-ignore` entry means "never run this query / scan this path,"
   never a substitute for a per-sink decision. `.github/codeql/codeql-config.yml`
-  exists for that purpose, but `codeql.yml` does not pass it via
-  `config-file:`, so it currently has no effect on the analysis.
+  holds those (and the query suite); `codeql.yml` passes it via
+  `config-file:`. Its `paths-ignore` also decides which changes trigger a
+  scan at all (`scripts/codeql-languages.ts`).
