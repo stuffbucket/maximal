@@ -10,7 +10,11 @@ import path from "node:path"
 
 import type { McpClientEntry } from "~/lib/mcp-broker/client-sync"
 
-import { createClaudeCodeMcp, keyPlaceholder } from "~/apps/claude-code/mcp"
+import {
+  type ClaudeCliRunner,
+  createClaudeCodeMcp,
+  keyPlaceholder,
+} from "~/apps/claude-code/mcp"
 
 const KEY = "secret-endpoint-key"
 
@@ -37,7 +41,7 @@ const writeDocument = (document: Record<string, unknown>): void => {
 }
 
 /** Mimics `claude mcp add-json/remove --scope user`. */
-const fakeClaude = (args: Array<string>): void => {
+const fakeClaude = (args: Array<string>): Promise<void> => {
   calls.push(args)
   const document = fs.existsSync(file) ? readDocument() : {}
   const mcpServers = (document.mcpServers ?? {}) as Record<string, unknown>
@@ -48,13 +52,14 @@ const fakeClaude = (args: Array<string>): void => {
       { ...mcpServers, [id]: JSON.parse(args[5]) as unknown }
     : Object.fromEntries(Object.entries(mcpServers).filter(([k]) => k !== id))
   writeDocument({ ...document, mcpServers: next })
+  return Promise.resolve()
 }
 
 const configurator = (runnerAvailable = true) =>
   createClaudeCodeMcp({
     configPath: () => file,
-    runner: () => (runnerAvailable ? fakeClaude : undefined),
-    available: () => true,
+    runner: () => Promise.resolve(runnerAvailable ? fakeClaude : undefined),
+    available: () => Promise.resolve(true),
   })
 
 beforeEach(() => {
@@ -69,8 +74,8 @@ afterEach(() => {
 })
 
 describe("Claude Code MCP reconcile", () => {
-  test("adds via the CLI with only a placeholder, then stores the real key", () => {
-    const result = configurator().reconcile([entry("workiq", KEY)], [])
+  test("adds via the CLI with only a placeholder, then stores the real key", async () => {
+    const result = await configurator().reconcile([entry("workiq", KEY)], [])
 
     expect(result.added).toEqual(["workiq"])
     expect(result.owned).toEqual(["workiq"])
@@ -96,32 +101,32 @@ describe("Claude Code MCP reconcile", () => {
     expect(readDocument().numStartups).toBe(7)
   })
 
-  test("adds without headers when there is no key", () => {
-    configurator().reconcile([entry("open")], [])
+  test("adds without headers when there is no key", async () => {
+    await configurator().reconcile([entry("open")], [])
     expect(servers().open).toEqual({
       type: "http",
       url: "http://127.0.0.1:4141/mcp/open",
     })
   })
 
-  test("leaves a same-name entry the user already had alone", () => {
+  test("leaves a same-name entry the user already had alone", async () => {
     const theirs = { type: "stdio", command: "workiq", args: ["mcp"] }
     writeDocument({ mcpServers: { workiq: theirs } })
 
-    const result = configurator().reconcile([entry("workiq", KEY)], [])
+    const result = await configurator().reconcile([entry("workiq", KEY)], [])
 
     expect(result.skipped).toEqual(["workiq"])
     expect(calls).toEqual([])
     expect(servers().workiq).toEqual(theirs)
   })
 
-  test("does nothing when the owned entry already matches", () => {
+  test("does nothing when the owned entry already matches", async () => {
     const mcp = configurator()
-    mcp.reconcile([entry("workiq", KEY)], [])
+    await mcp.reconcile([entry("workiq", KEY)], [])
     calls = []
     const before = fs.readFileSync(file, "utf8")
 
-    const result = mcp.reconcile([entry("workiq", KEY)], ["workiq"])
+    const result = await mcp.reconcile([entry("workiq", KEY)], ["workiq"])
 
     expect(result).toEqual({
       owned: ["workiq"],
@@ -134,35 +139,35 @@ describe("Claude Code MCP reconcile", () => {
     expect(fs.readFileSync(file, "utf8")).toBe(before)
   })
 
-  test("repairs a placeholder left behind and rotates a key in place", () => {
+  test("repairs a placeholder left behind and rotates a key in place", async () => {
     const mcp = configurator()
-    mcp.reconcile([entry("workiq", KEY)], [])
+    await mcp.reconcile([entry("workiq", KEY)], [])
     const document = readDocument()
     const list = document.mcpServers as Record<string, Record<string, unknown>>
     list.workiq.headers = { Authorization: keyPlaceholder(KEY) }
     writeDocument(document)
     calls = []
 
-    mcp.reconcile([entry("workiq", KEY)], ["workiq"])
+    await mcp.reconcile([entry("workiq", KEY)], ["workiq"])
     expect(servers().workiq.headers).toEqual({ Authorization: `Bearer ${KEY}` })
 
-    mcp.reconcile([entry("workiq", "rotated")], ["workiq"])
+    await mcp.reconcile([entry("workiq", "rotated")], ["workiq"])
     expect(servers().workiq.headers).toEqual({
       Authorization: "Bearer rotated",
     })
     expect(calls).toEqual([])
   })
 
-  test("removes only owned entries still pointing at Maximal", () => {
+  test("removes only owned entries still pointing at Maximal", async () => {
     const mcp = configurator()
-    mcp.reconcile([entry("workiq"), entry("other")], [])
+    await mcp.reconcile([entry("workiq"), entry("other")], [])
     const document = readDocument()
     const list = document.mcpServers as Record<string, unknown>
     list.other = { type: "http", url: "https://example.com/mcp" }
     writeDocument(document)
     calls = []
 
-    const result = mcp.reconcile([], ["workiq", "other"])
+    const result = await mcp.reconcile([], ["workiq", "other"])
 
     expect(result.removed).toEqual(["workiq"])
     expect(result.owned).toEqual([])
@@ -170,9 +175,9 @@ describe("Claude Code MCP reconcile", () => {
     expect(Object.keys(servers())).toEqual(["other"])
   })
 
-  test("keeps ownership when the CLI is unavailable for a removal", () => {
-    configurator().reconcile([entry("workiq")], [])
-    const result = configurator(false).reconcile([], ["workiq"])
+  test("keeps ownership when the CLI is unavailable for a removal", async () => {
+    await configurator().reconcile([entry("workiq")], [])
+    const result = await configurator(false).reconcile([], ["workiq"])
 
     expect(result.owned).toEqual(["workiq"])
     expect(result.removed).toEqual([])
@@ -181,24 +186,23 @@ describe("Claude Code MCP reconcile", () => {
 })
 
 /** `claude mcp add-json` can write the file and then time out. */
-const writesThenTimesOut = (args: Array<string>): void => {
-  fakeClaude(args)
-  throw new Error("spawnSync claude ETIMEDOUT")
+const writesThenTimesOut: ClaudeCliRunner = async (args) => {
+  await fakeClaude(args)
+  throw new Error("claude ETIMEDOUT")
 }
 
-const failsOutright = (): void => {
-  throw new Error("claude exited 1")
-}
+const failsOutright: ClaudeCliRunner = () =>
+  Promise.reject(new Error("claude exited 1"))
 
 describe("Claude Code MCP when the CLI fails", () => {
-  test("an add that wrote the entry and then failed is still Maximal's", () => {
+  test("an add that wrote the entry and then failed is still Maximal's", async () => {
     const mcp = createClaudeCodeMcp({
       configPath: () => file,
-      runner: () => writesThenTimesOut,
-      available: () => true,
+      runner: () => Promise.resolve(writesThenTimesOut),
+      available: () => Promise.resolve(true),
     })
 
-    const result = mcp.reconcile([entry("workiq", KEY)], [])
+    const result = await mcp.reconcile([entry("workiq", KEY)], [])
 
     expect(result).toEqual({
       owned: ["workiq"],
@@ -211,14 +215,14 @@ describe("Claude Code MCP when the CLI fails", () => {
     expect(servers().workiq.headers).toEqual({ Authorization: `Bearer ${KEY}` })
   })
 
-  test("an add that wrote nothing is reported as failed and not owned", () => {
+  test("an add that wrote nothing is reported as failed and not owned", async () => {
     const mcp = createClaudeCodeMcp({
       configPath: () => file,
-      runner: () => failsOutright,
-      available: () => true,
+      runner: () => Promise.resolve(failsOutright),
+      available: () => Promise.resolve(true),
     })
 
-    const result = mcp.reconcile([entry("workiq", KEY)], [])
+    const result = await mcp.reconcile([entry("workiq", KEY)], [])
 
     expect(result.owned).toEqual([])
     expect(result.added).toEqual([])
@@ -228,9 +232,9 @@ describe("Claude Code MCP when the CLI fails", () => {
 })
 
 describe("Claude Code MCP key repair", () => {
-  test("puts the real key back when Claude Code restored the placeholder", () => {
+  test("puts the real key back when Claude Code restored the placeholder", async () => {
     const mcp = configurator()
-    mcp.reconcile([entry("workiq", KEY)], [])
+    await mcp.reconcile([entry("workiq", KEY)], [])
     // A running Claude Code writes back the copy it read before the swap.
     const document = readDocument()
     const list = document.mcpServers as Record<string, Record<string, unknown>>
@@ -271,12 +275,12 @@ describe("Claude Code MCP key repair", () => {
 })
 
 describe("Claude Code MCP shutdown and adoption", () => {
-  test("offline removal edits the file and never runs the CLI", () => {
+  test("offline removal edits the file and never runs the CLI", async () => {
     const mcp = configurator()
-    mcp.reconcile([entry("workiq", KEY)], [])
+    await mcp.reconcile([entry("workiq", KEY)], [])
     calls = []
 
-    const result = mcp.reconcile([], ["workiq"], { offline: true })
+    const result = mcp.releaseOffline(["workiq"])
 
     expect(result.removed).toEqual(["workiq"])
     expect(result.owned).toEqual([])
@@ -285,15 +289,17 @@ describe("Claude Code MCP shutdown and adoption", () => {
     expect(readDocument().numStartups).toBe(7)
   })
 
-  test("offline mode adds nothing", () => {
-    const result = configurator().reconcile([entry("workiq")], [], {
-      offline: true,
-    })
-    expect(result.owned).toEqual([])
+  test("offline removal leaves a same-name entry that isn't Maximal's", () => {
+    writeDocument({ mcpServers: { workiq: { command: "workiq", args: [] } } })
+
+    const result = configurator().releaseOffline(["workiq"])
+
+    expect(result.removed).toEqual([])
     expect(calls).toEqual([])
+    expect(servers().workiq).toEqual({ command: "workiq", args: [] })
   })
 
-  test("finds the user's own stdio entry but never Maximal's", () => {
+  test("finds the user's own stdio entry but never Maximal's", async () => {
     writeDocument({
       mcpServers: {
         workiq: {
@@ -315,7 +321,7 @@ describe("Claude Code MCP shutdown and adoption", () => {
     expect(mcp.existingStdioEntry?.("remote", [])).toBeUndefined()
     expect(mcp.existingStdioEntry?.("missing", [])).toBeUndefined()
 
-    mcp.reconcile([entry("ours")], [])
+    await mcp.reconcile([entry("ours")], [])
     expect(mcp.existingStdioEntry?.("ours", ["ours"])).toBeUndefined()
   })
 })
@@ -326,11 +332,11 @@ const onPort = (port: number): McpClientEntry => ({
 })
 
 describe("Claude Code MCP across port changes", () => {
-  test("re-adds an owned entry on the port Maximal listens on now", () => {
-    configurator().reconcile([onPort(4141)], [])
+  test("re-adds an owned entry on the port Maximal listens on now", async () => {
+    await configurator().reconcile([onPort(4141)], [])
     calls = []
 
-    const result = configurator().reconcile([onPort(4199)], ["workiq"])
+    const result = await configurator().reconcile([onPort(4199)], ["workiq"])
 
     expect(result.owned).toEqual(["workiq"])
     expect(result.skipped).toEqual([])
@@ -345,10 +351,10 @@ describe("Claude Code MCP across port changes", () => {
     })
   })
 
-  test("leaves an owned entry alone when nothing changed", () => {
-    configurator().reconcile([onPort(4199)], [])
+  test("leaves an owned entry alone when nothing changed", async () => {
+    await configurator().reconcile([onPort(4199)], [])
     calls = []
-    configurator().reconcile([onPort(4199)], ["workiq"])
+    await configurator().reconcile([onPort(4199)], ["workiq"])
     expect(calls).toEqual([])
   })
 })

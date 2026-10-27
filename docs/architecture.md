@@ -61,6 +61,16 @@ Claude Code is routed by an ownership-guarded `ANTHROPIC_BASE_URL` plus `apiKeyH
 - **Daily log** at `~/.local/share/maximal/logs/messages-handler-<date>.log` — request payloads, translated SSE events, web-tools agent traces. 7-day retention.
 - **MCP server log** at `~/.local/share/maximal/logs/mcp-broker-<date>.log` — the broker's own codes and each MCP server's stderr, prefixed with the endpoint id (`src/lib/mcp-broker/server-log.ts`). Rate-limited; same retention.
 
+## Never block the event loop
+
+The proxy is one Bun process with one event loop. A synchronous child process (`execSync`, `execFileSync`, `spawnSync`, `Bun.spawnSync`) holds every in-flight request until the child exits, streaming `/v1/messages` responses included. Settings once ran `npm prefix -g`, `claude --version`, and several `claude mcp add-json` calls this way, inside request handlers, which stalled live traffic for seconds per MCP toggle.
+
+- **Run programs with `runFile()`** (`src/lib/system/run-file.ts`). It never rejects: exit code, output, and `notFound` come back in the result. The `blockingSpawnGuard` lint rule (`eslint.config.js`) bans the synchronous forms in `src/`, except three files that run only before the server listens or in a CLI command.
+- **Cache what detection learns.** `npmGlobalPrefix()` shares one spawn across concurrent callers and keeps the answer (a miss is retried after a minute). Synchronous detection (the MCP catalog's `locate()`) reads `cachedNpmGlobalPrefix()` and never spawns; await `npmGlobalPrefix()` once before calling it. `readClaudeVersion()` caches by binary path and modification time. Settings polls these lists, so a repeat call must be file probes and cache hits.
+- **Async work that used to be serialized by blocking still needs serializing.** `syncMcpClient()` queues passes per client, so two toggles can't interleave `claude mcp remove`/`add-json` for one entry. Each pass reads config when it starts, so it sees what the pass before it recorded.
+- **Shutdown is the one synchronous exception.** The `exit` safety net can't await, so `releaseMcpClientOffline()` removes Maximal's client entries by editing files only (`McpClientConfigurator.releaseOffline`).
+- **Synchronous file reads can block too.** With endpoint security that scans on open (e.g. Microsoft Defender), the first read of a recently written file can take hundreds of milliseconds. The request hot path is clear (config is cached, logs use streams); Settings code still reads client configs synchronously.
+
 ## Parallel-agent convention
 
 This repo can collide on a shared working tree (lint-staged stash + concurrent merge ate a turn already). For parallel agents:

@@ -59,9 +59,9 @@ function controlledBroker() {
         }
       })
     },
-    syncClients: (next?: AppConfig) => {
+    syncClients: () => {
       events.push("sync")
-      return syncAllMcpClients(next)
+      return syncAllMcpClients()
     },
     sync: () => {
       events.push("sync")
@@ -145,20 +145,21 @@ describe("setMcpEndpoint per-app outcome", () => {
       {
         reconfigure: () => Promise.resolve(true),
         waitForBroker: () => Promise.resolve("ready"),
-        syncClients: () => [
-          {
-            client: "claude-code",
-            name: "Claude Code",
-            result: outcome({ owned: ["workiq"], added: ["workiq"] }),
-          },
-          {
-            client: "claude-desktop",
-            name: "Claude Desktop",
-            result: outcome({
-              unavailable: [{ id: "workiq", reason: "adapter-missing" }],
-            }),
-          },
-        ],
+        syncClients: () =>
+          Promise.resolve([
+            {
+              client: "claude-code",
+              name: "Claude Code",
+              result: outcome({ owned: ["workiq"], added: ["workiq"] }),
+            },
+            {
+              client: "claude-desktop",
+              name: "Claude Desktop",
+              result: outcome({
+                unavailable: [{ id: "workiq", reason: "adapter-missing" }],
+              }),
+            },
+          ]),
       },
     )
 
@@ -182,13 +183,14 @@ describe("setMcpEndpoint per-app outcome", () => {
       { enabled: false },
       {
         reconfigure: () => Promise.resolve(true),
-        syncClients: () => [
-          {
-            client: "claude-desktop",
-            name: "Claude Desktop",
-            result: outcome({ removed: ["workiq"] }),
-          },
-        ],
+        syncClients: () =>
+          Promise.resolve([
+            {
+              client: "claude-desktop",
+              name: "Claude Desktop",
+              result: outcome({ removed: ["workiq"] }),
+            },
+          ]),
       },
     )
     expect(result?.updated).toEqual([

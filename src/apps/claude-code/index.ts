@@ -29,14 +29,14 @@ export const claudeCodeApp: ClientApp = {
   apiKeyLabel: HELPER_LABEL,
   mcp: claudeCodeMcp,
 
-  detect() {
-    const installs = detectClaudeInstalls()
-    return Promise.resolve(installs.length > 0)
+  async detect() {
+    const installs = await detectClaudeInstalls()
+    return installs.length > 0
   },
 
-  getDetails(conflict: AppEntry["conflict"] = null): Promise<AppEntry> {
-    const installs = detectClaudeInstalls()
-    return Promise.resolve({
+  async getDetails(conflict: AppEntry["conflict"] = null): Promise<AppEntry> {
+    const installs = await detectClaudeInstalls()
+    return {
       id: "claude-code",
       name: "Claude Code",
       kind: "config",
@@ -52,10 +52,10 @@ export const claudeCodeApp: ClientApp = {
           { method: "curl", command: CLAUDE_CODE_INSTALL_COMMAND }
         : null,
       conflict,
-    })
+    }
   },
 
-  enable() {
+  async enable() {
     const result = applyProxyBaseUrl()
     const conflict =
       (
@@ -71,19 +71,19 @@ export const claudeCodeApp: ClientApp = {
     if (success) {
       setClaudeCodeRoutingIntent(true)
       // Restore the MCP endpoints the user chose for Claude Code.
-      syncMcpClient(claudeCodeMcp)
+      await syncMcpClient(claudeCodeMcp)
     }
-    return Promise.resolve({ success, conflict })
+    return { success, conflict }
   },
 
-  disable() {
+  async disable() {
     const result = revertProxyBaseUrl()
     setClaudeCodeRoutingIntent(false)
-    syncMcpClient(claudeCodeMcp, { active: false })
-    return Promise.resolve({ success: result.wrote })
+    await syncMcpClient(claudeCodeMcp, { active: false })
+    return { success: result.wrote }
   },
 
-  uninstall(): Promise<AppUninstallResult> {
+  async uninstall(): Promise<AppUninstallResult> {
     // Ownership-guarded: removes only the ANTHROPIC_BASE_URL block and the MCP
     // servers we wrote, no-op when absent or foreign. The installer PATH block
     // is maximal's own artifact (not an app integration), so the uninstaller
@@ -93,11 +93,11 @@ export const claudeCodeApp: ClientApp = {
     if (result.wrote) {
       reverted.push(`reverted ${getClaudeCodeSettingsPath()}`)
     }
-    const mcp = syncMcpClient(claudeCodeMcp, { active: false })
+    const mcp = await syncMcpClient(claudeCodeMcp, { active: false })
     if (mcp.removed.length > 0) {
       reverted.push(`removed our MCP servers: ${mcp.removed.join(", ")}`)
     }
-    return Promise.resolve({ reverted })
+    return { reverted }
   },
 
   isEnabled() {

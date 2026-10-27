@@ -86,12 +86,6 @@ export interface McpReconcileResult {
   unavailable: Array<{ id: string; reason: McpClientUnavailableReason }>
 }
 
-export interface McpReconcileOptions {
-  /** Edit files directly instead of spawning client tools (e.g. the `claude`
-   *  CLI). Used during shutdown, which has a short synchronous budget. */
-  offline?: boolean
-}
-
 export interface McpClientConfigurator {
   readonly clientId: McpClientId
   /** The label that resolves this client's Maximal key (`ClientApp.apiKeyLabel`). */
@@ -104,16 +98,19 @@ export interface McpClientConfigurator {
    *  even though Maximal is back by then. */
   readonly removeOnShutdown: boolean
   /** Whether Maximal's integration for this client is on and usable. */
-  available(): boolean
+  available(): Promise<boolean>
   /** When not `available()`, a more specific reason than "integration
    *  off", if the client can tell one cheaply. */
   unavailableReason?(): McpClientOfferUnavailableReason | undefined
-  /** Make the client match `desired`, touching only entries in `owned`. */
+  /** Make the client match `desired`, touching only entries in `owned`.
+   *  May run the client's own tools (the `claude` CLI), so it's async. */
   reconcile(
     desired: Array<McpClientEntry>,
     owned: Array<string>,
-    options?: McpReconcileOptions,
-  ): McpReconcileResult
+  ): Promise<McpReconcileResult>
+  /** Remove every entry in `owned` by editing files only, synchronously:
+   *  shutdown's `exit` safety net can't wait on a child process. */
+  releaseOffline(owned: Array<string>): McpReconcileResult
   /** Put the right key back into owned entries the client overwrote,
    *  touching nothing else. File-only and cheap enough to run on every
    *  Settings read. */
@@ -176,47 +173,83 @@ function emptyResult(): McpReconcileResult {
 }
 
 export interface SyncMcpClientOptions {
-  config?: AppConfig
   /** Override the integration check, e.g. `false` while disabling it. */
   active?: boolean
-  offline?: boolean
   /** Defaults to this machine's; tests inject another. */
   platform?: NodeJS.Platform
 }
 
-/** Reconcile one client and persist what Maximal now owns there. */
+/** The pass in progress (or last finished) per client. */
+const queues = new Map<McpClientId, Promise<unknown>>()
+
+/**
+ * Reconcile one client and persist what Maximal now owns there.
+ *
+ * Passes for the same client run one after another: each reads the config
+ * when it starts, so it sees what the pass before it recorded, and two
+ * passes can't interleave `claude mcp remove` / `add-json` for one entry.
+ * Different clients don't wait on each other.
+ */
 export function syncMcpClient(
   configurator: McpClientConfigurator,
   options: SyncMcpClientOptions = {},
-): McpReconcileResult {
-  const config = options.config ?? getConfig()
+): Promise<McpReconcileResult> {
+  const previous = queues.get(configurator.clientId) ?? Promise.resolve()
+  const pass = previous
+    .catch(() => undefined)
+    .then(() => reconcileNow(configurator, options))
+  queues.set(configurator.clientId, pass)
+  return pass
+}
+
+async function reconcileNow(
+  configurator: McpClientConfigurator,
+  options: SyncMcpClientOptions,
+): Promise<McpReconcileResult> {
+  const config = getConfig()
   const owned = ownedMcpServers(configurator.clientId, config)
   const wanted = desiredEntriesFor(configurator, config, options.platform)
   // Nothing configured and nothing to revert: don't touch the client at all.
-  if (wanted.length === 0 && owned.length === 0) {
-    return emptyResult()
-  }
-  const active = options.active ?? configurator.available()
+  if (wanted.length === 0 && owned.length === 0) return emptyResult()
+  const active = options.active ?? (await configurator.available())
   const desired = active ? wanted : []
-  if (desired.length === 0 && owned.length === 0) {
-    return emptyResult()
-  }
-  const result = configurator.reconcile(desired, owned, {
-    offline: options.offline === true,
-  })
-  if (!sameIds(result.owned, owned)) {
-    // Re-read so a concurrent writer's unrelated changes are kept.
-    const latest = getConfig()
-    const key = APPS_KEY[configurator.clientId]
-    writeConfig({
-      ...latest,
-      apps: {
-        ...latest.apps,
-        [key]: { ...latest.apps?.[key], mcpServers: result.owned },
-      },
-    })
-  }
+  if (desired.length === 0 && owned.length === 0) return emptyResult()
+  const result = await configurator.reconcile(desired, owned)
+  recordOwned(configurator.clientId, owned, result)
   return result
+}
+
+/**
+ * Shutdown's version: take every entry Maximal owns back out by editing
+ * files, synchronously. Waits for nothing, so an in-flight pass may still
+ * finish after it; shutdown runs as the process is leaving anyway.
+ */
+export function releaseMcpClientOffline(
+  configurator: McpClientConfigurator,
+): McpReconcileResult {
+  const owned = ownedMcpServers(configurator.clientId, getConfig())
+  if (owned.length === 0) return emptyResult()
+  const result = configurator.releaseOffline(owned)
+  recordOwned(configurator.clientId, owned, result)
+  return result
+}
+
+function recordOwned(
+  clientId: McpClientId,
+  before: Array<string>,
+  result: McpReconcileResult,
+): void {
+  if (sameIds(result.owned, before)) return
+  // Re-read so a concurrent writer's unrelated changes are kept.
+  const latest = getConfig()
+  const key = APPS_KEY[clientId]
+  writeConfig({
+    ...latest,
+    apps: {
+      ...latest.apps,
+      [key]: { ...latest.apps?.[key], mcpServers: result.owned },
+    },
+  })
 }
 
 function sameIds(left: Array<string>, right: Array<string>): boolean {

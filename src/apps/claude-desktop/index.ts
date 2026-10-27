@@ -40,21 +40,21 @@ export const claudeDesktopApp: ClientApp = {
     })
   },
 
-  enable() {
+  async enable() {
     const { conflict } = enableClaudeDesktopRouting()
-    if (conflict) return Promise.resolve({ success: false, conflict })
+    if (conflict) return { success: false, conflict }
     // Restore the MCP endpoints the user chose for Claude Desktop.
-    syncMcpClient(claudeDesktopMcp)
-    return Promise.resolve({ success: true })
+    await syncMcpClient(claudeDesktopMcp)
+    return { success: true }
   },
 
-  disable() {
+  async disable() {
     disableClaudeDesktopRouting()
-    syncMcpClient(claudeDesktopMcp, { active: false })
-    return Promise.resolve({ success: true })
+    await syncMcpClient(claudeDesktopMcp, { active: false })
+    return { success: true }
   },
 
-  uninstall(): Promise<AppUninstallResult> {
+  async uninstall(): Promise<AppUninstallResult> {
     // Removes only our gateway profile and our MCP entries from the Claude
     // Desktop config, no-op when we never wired them. A profile the user
     // edited after we wrote it is left on disk.
@@ -67,11 +67,11 @@ export const claudeDesktopApp: ClientApp = {
     for (const file of result.kept) {
       reverted.push(`left ${file} in place (it was edited after setup)`)
     }
-    const mcp = syncMcpClient(claudeDesktopMcp, { active: false })
+    const mcp = await syncMcpClient(claudeDesktopMcp, { active: false })
     if (mcp.removed.length > 0) {
       reverted.push(`removed our MCP servers: ${mcp.removed.join(", ")}`)
     }
-    return Promise.resolve({ reverted })
+    return { reverted }
   },
 
   isEnabled() {

@@ -818,7 +818,7 @@ describe("on Windows, where the MCP broker can't run yet", () => {
       },
       syncClients: () => {
         calls.push("sync")
-        return []
+        return Promise.resolve([])
       },
     }
     let thrown: unknown

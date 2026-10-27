@@ -24,6 +24,10 @@ import {
   McpEndpointToggleResponse,
   WorkIqActionResponse,
 } from "~/lib/config/settings-types"
+import {
+  __resetNpmPrefixForTests,
+  __setNpmPrefixDepsForTests,
+} from "~/lib/system/run-file"
 import { mcpRoutes } from "~/routes/settings/mcp"
 
 function buildApp() {
@@ -185,11 +189,19 @@ describe("POST /mcp (add a known server)", () => {
   beforeEach(() => {
     process.env.MISE_DATA_DIR = miseDir
     process.env.PATH = ""
+    // npm's prefix is cached per process; without this, an earlier test's
+    // lookup would expose this machine's own global installs.
+    __resetNpmPrefixForTests()
+    __setNpmPrefixDepsForTests({
+      run: () =>
+        Promise.resolve({ stdout: "", stderr: "", code: 127, notFound: true }),
+    })
     executable = fakeWorkiqInstall(miseDir)
     writeConfig({})
   })
 
   afterAll(() => {
+    __resetNpmPrefixForTests()
     if (saved.mise === undefined) delete process.env.MISE_DATA_DIR
     else process.env.MISE_DATA_DIR = saved.mise
     process.env.PATH = saved.path

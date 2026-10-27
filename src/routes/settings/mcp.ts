@@ -44,6 +44,7 @@ import {
   withWorkIqStatus,
   workIq,
 } from "~/lib/mcp-broker/workiq"
+import { npmGlobalPrefix } from "~/lib/system/run-file"
 
 import { respondValidated } from "./respond-validated"
 
@@ -65,6 +66,9 @@ const ENDPOINT_ERROR_STATUS = {
 // Code overwrote with the placeholder (a file check, no CLI).
 mcpRoutes.get("/", async (c) => {
   try {
+    // Catalog detection reads npm's prefix from a cache it never fills
+    // itself; this fills it once, without blocking, and is instant after.
+    await npmGlobalPrefix()
     const before = getConfig()
     const config = refreshCatalogCommands(before)
     if (config !== before) await reconfigureBroker(config.mcpBroker ?? {})
@@ -74,7 +78,7 @@ mcpRoutes.get("/", async (c) => {
       { schema: McpEndpointsListResponse, label: "MCP endpoints" },
       {
         endpoints: await withWorkIqStatus(
-          listMcpEndpoints(config),
+          await listMcpEndpoints(config),
           config.mcpBroker?.servers ?? [],
         ),
         broker: mcpBrokerHealth(),
