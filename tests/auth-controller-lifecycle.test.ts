@@ -128,6 +128,7 @@ afterAll(async () => {
 
 const {
   startDeviceFlow,
+  cancelDeviceFlow,
   getAuthStatus,
   signOut,
   markSignedIn,
@@ -423,6 +424,31 @@ describe("markAuthDegraded", () => {
 // --- __resetAuthControllerForTests behaviour ------------------------------
 
 describe("__resetAuthControllerForTests", () => {
+  test.each<[string, () => void]>([
+    ["reset", () => __resetAuthControllerForTests()],
+    ["cancel", () => void cancelDeviceFlow()],
+  ])(
+    "%s aborts the signal the poller polls under, so it stops polling",
+    async (_label, end) => {
+      // pollAccessToken ignored cancellation once; an abandoned flow kept
+      // polling GitHub until the device code expired, and in the suite an
+      // orphaned poller spun on a later file's fetch stub and hung CI.
+      let pollSignal: AbortSignal | undefined
+      __setAuthControllerDepsForTests({
+        pollAccessToken: (_dc, signal) => {
+          pollSignal = signal
+          return new Promise<string>(() => {})
+        },
+      })
+
+      await startDeviceFlow()
+      expect(pollSignal?.aborted).toBe(false)
+
+      end()
+      expect(pollSignal?.aborted).toBe(true)
+    },
+  )
+
   test("nulls flow + clears lastError + accountLogin and aborts the active flow", async () => {
     const poll = deferred<string>()
     harness.pollAccessTokenImpl = () => poll.promise
