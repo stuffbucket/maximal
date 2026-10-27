@@ -18,7 +18,9 @@ import {
 // Spread the real module so this stub doesn't strip `~/lib/platform/utils`'s other
 // exports for sibling files, and restore it in an awaited afterAll so it can't
 // leak forward (Bun keeps module mocks for the whole `bun test` process).
-const realUtilsModule = await import("~/lib/platform/utils")
+// Snapshot it: mock.module patches the live namespace object in place, so
+// restoring with the namespace itself would leave the no-op `sleep` behind.
+const realUtilsModule = { ...(await import("~/lib/platform/utils")) }
 await mock.module("~/lib/platform/utils", () => ({
   ...realUtilsModule,
   sleep: () => Promise.resolve(),
@@ -139,6 +141,40 @@ describe("pollAccessToken (RFC 8628)", () => {
     await expectRejects(
       () => pollAccessToken({ ...DEVICE_CODE, expires_in: 0 }),
       /expired_token/,
+    )
+    expect(fetchMock).toHaveBeenCalledTimes(0)
+  })
+
+  it("stops polling once its signal is aborted", async () => {
+    // A cancelled, replaced, or reset flow must not keep polling GitHub in the
+    // background. An orphaned poller once outlived its test file and spun on a
+    // later file's rejecting fetch stub, starving the event loop and hanging CI.
+    const abort = new AbortController()
+    let calls = 0
+    globalThis.fetch = (() => {
+      calls++
+      if (calls === 2) abort.abort()
+      // Backstop so a regression fails instead of spinning forever: an
+      // unrecognised error is terminal, with a message that isn't "abort".
+      if (calls > 5) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ error: "still_polling_after_cancel" })),
+        )
+      }
+      return Promise.reject(new Error("network down"))
+    }) as unknown as typeof fetch
+    await expectRejects(
+      () => pollAccessToken(DEVICE_CODE, abort.signal),
+      /abort/i,
+    )
+    expect(calls).toBe(2)
+  })
+
+  it("does not poll at all with an already-aborted signal", async () => {
+    const fetchMock = withResponses([{ access_token: "ghu_unused" }])
+    await expectRejects(
+      () => pollAccessToken(DEVICE_CODE, AbortSignal.abort()),
+      /abort/i,
     )
     expect(fetchMock).toHaveBeenCalledTimes(0)
   })

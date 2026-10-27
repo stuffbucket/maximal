@@ -97,6 +97,15 @@ This repo can collide on a shared working tree (lint-staged stash + concurrent m
     land before the next file's static imports on CI — so a module mock that
     intercepts a *shared* module still leaks across files even when restored.
     The rule catches the common footgun, not this one.
+  - **Restore from a snapshot, not the live namespace.** `mock.module`
+    patches the module's namespace object in place, so
+    `const real = await import(m)` followed by
+    `mock.module(m, () => real)` "restores" the stub. Capture
+    `{ ...(await import(m)) }` before mocking. A leaked no-op `sleep` from
+    `tests/poll-access-token.test.ts` once turned an orphaned device-code
+    poller into an endless promise loop that hung CI. Per-test timeouts can't
+    stop that, so `tests/helpers/starvation-watchdog.ts` kills the run after
+    60s without an event-loop turn.
   - **The durable fix is to not mock a shared module across files at all.**
     Prefer the **real** module (the test preload redirects `COPILOT_API_HOME`
     to a temp dir, and `getClaudeCodeSettingsPath()` honors `CLAUDE_CONFIG_DIR`
