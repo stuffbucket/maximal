@@ -68,6 +68,7 @@ describe("Claude Desktop MCP reconcile", () => {
       added: ["workiq"],
       removed: [],
       skipped: [],
+      unavailable: [],
     })
     expect(readServers()).toEqual({
       workiq: {
@@ -133,8 +134,28 @@ describe("Claude Desktop MCP reconcile", () => {
     const result = configurator(null).reconcile([entry("a"), entry("b")], ["a"])
 
     expect(result.owned).toEqual(["a"])
-    expect(result.skipped).toEqual(["b"])
+    // Not the user's own entry: Maximal couldn't write one.
+    expect(result.skipped).toEqual([])
+    expect(result.unavailable).toEqual([{ id: "b", reason: "adapter-missing" }])
     expect(Object.keys(readServers() ?? {})).toEqual(["a"])
+  })
+
+  test("says why Desktop can't take an endpoint when another provider profile is applied", () => {
+    const mcp = createClaudeDesktopMcp({
+      home,
+      resolveBrokerPath: () => BROKER,
+      available: () => false,
+      otherProviderApplied: () => true,
+    })
+    expect(mcp.unavailableReason?.()).toBe("other-provider-profile")
+
+    const plain = createClaudeDesktopMcp({
+      home,
+      resolveBrokerPath: () => BROKER,
+      available: () => false,
+      otherProviderApplied: () => false,
+    })
+    expect(plain.unavailableReason?.()).toBeUndefined()
   })
 })
 
@@ -157,6 +178,7 @@ describe("Claude Desktop MCP across port changes", () => {
       added: [],
       removed: [],
       skipped: [],
+      unavailable: [],
     })
     expect(readServers()).toEqual({ workiq: adapter(4199) })
   })

@@ -272,6 +272,8 @@ describe("POST /mcp/:id", () => {
     const body = McpEndpointToggleResponse.parse(await res.json())
     expect(body.endpoint.enabled).toBe(true)
     expect(body.skipped).toEqual([])
+    expect(body.unavailable).toEqual([])
+    expect(body.updated).toEqual([])
     // No broker runs in this test process.
     expect(body.broker).toBe("off")
 

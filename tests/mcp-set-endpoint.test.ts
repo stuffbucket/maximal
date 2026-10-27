@@ -9,6 +9,7 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test"
 
 import type { AppConfig } from "~/lib/config/config"
+import type { McpReconcileResult } from "~/lib/mcp-broker/client-sync"
 import type { BrokerReadiness } from "~/lib/mcp-broker/supervisor"
 
 import {
@@ -124,6 +125,75 @@ describe("setMcpEndpoint", () => {
     const result = await setMcpEndpoint("workiq", { enabled: false }, broker)
     expect(broker.events).toEqual(["reconfigure", "sync"])
     expect(result?.endpoint.enabled).toBe(false)
+  })
+})
+
+const outcome = (changes: Partial<McpReconcileResult>): McpReconcileResult => ({
+  owned: [],
+  added: [],
+  removed: [],
+  skipped: [],
+  unavailable: [],
+  ...changes,
+})
+
+describe("setMcpEndpoint per-app outcome", () => {
+  test("names the apps it changed and the ones that can't run the server", async () => {
+    const result = await setMcpEndpoint(
+      "workiq",
+      { enabled: true, clients: ["claude-code", "claude-desktop"] },
+      {
+        reconfigure: () => Promise.resolve(true),
+        waitForBroker: () => Promise.resolve("ready"),
+        syncClients: () => [
+          {
+            client: "claude-code",
+            name: "Claude Code",
+            result: outcome({ owned: ["workiq"], added: ["workiq"] }),
+          },
+          {
+            client: "claude-desktop",
+            name: "Claude Desktop",
+            result: outcome({
+              unavailable: [{ id: "workiq", reason: "adapter-missing" }],
+            }),
+          },
+        ],
+      },
+    )
+
+    expect(result?.updated).toEqual([
+      { client: "claude-code", name: "Claude Code" },
+    ])
+    expect(result?.unavailable).toEqual([
+      {
+        client: "claude-desktop",
+        name: "Claude Desktop",
+        reason: "adapter-missing",
+      },
+    ])
+    expect(result?.skipped).toEqual([])
+  })
+
+  test("a removal counts as a change", async () => {
+    writeConfig(config(true))
+    const result = await setMcpEndpoint(
+      "workiq",
+      { enabled: false },
+      {
+        reconfigure: () => Promise.resolve(true),
+        syncClients: () => [
+          {
+            client: "claude-desktop",
+            name: "Claude Desktop",
+            result: outcome({ removed: ["workiq"] }),
+          },
+        ],
+      },
+    )
+    expect(result?.updated).toEqual([
+      { client: "claude-desktop", name: "Claude Desktop" },
+    ])
   })
 })
 

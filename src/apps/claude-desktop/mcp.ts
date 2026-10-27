@@ -8,7 +8,8 @@
  *
  * Only entries Maximal recorded as written (`owned`) and that still carry
  * Maximal's signature are ever changed or removed. An entry the user already
- * had under the same name is left alone and reported as skipped.
+ * had under the same name is left alone and reported as skipped; one Maximal
+ * can't write because the adapter is missing is reported as unavailable.
  */
 
 import consola from "consola"
@@ -27,6 +28,7 @@ import { brokerExecutableCandidates } from "~/lib/mcp-broker/configuration"
 
 import {
   atomicWriteJson,
+  configLibraryConflict,
   getClaude3pDir,
   isConfigLibraryApplied,
   readJsonObject,
@@ -46,6 +48,8 @@ export interface ClaudeDesktopMcpOptions {
   home?: string
   resolveBrokerPath?: () => string | undefined
   available?: () => boolean
+  /** Whether another provider's gateway profile is applied in Desktop. */
+  otherProviderApplied?: () => boolean
 }
 
 /** Ours only when it runs the broker adapter against this endpoint's
@@ -114,6 +118,12 @@ export function createClaudeDesktopMcp(
     // across Maximal restarts too (see ./reconcile.ts).
     removeOnShutdown: false,
     available: options.available ?? (() => isConfigLibraryApplied()),
+    unavailableReason() {
+      const other =
+        options.otherProviderApplied
+        ?? (() => configLibraryConflict(options.home) !== null)
+      return other() ? "other-provider-profile" : undefined
+    },
     reconcile(desired, owned) {
       return reconcileFile({
         topPath: claudeDesktopConfigPath(options.home),
@@ -153,6 +163,7 @@ function reconcileFile(input: {
     added: [],
     removed: removableIds(existing, desired, owned),
     skipped: [],
+    unavailable: [],
   }
   const writes: Record<string, McpServerEntry> = {}
 
@@ -169,13 +180,13 @@ function reconcileFile(input: {
       // Can't generate an entry without the adapter; keep the one we own.
       result.owned.push(entry.id)
     } else {
-      result.skipped.push(entry.id)
+      result.unavailable.push({ id: entry.id, reason: "adapter-missing" })
     }
   }
 
-  if (brokerPath === undefined && desired.length > 0) {
+  if (result.unavailable.length > 0) {
     consola.warn(
-      "Claude Desktop MCP servers skipped: maximal-mcp-broker not found",
+      "Claude Desktop MCP servers not added: maximal-mcp-broker not found",
     )
   }
   const next = {

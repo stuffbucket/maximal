@@ -273,6 +273,7 @@ function reconcileUserScope(input: ReconcileInput): McpReconcileResult {
     added: [],
     removed: [],
     skipped: [],
+    unavailable: [],
   }
   let runner: ClaudeCliRunner | undefined
   let runnerResolved = false

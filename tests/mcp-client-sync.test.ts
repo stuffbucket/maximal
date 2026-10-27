@@ -47,6 +47,7 @@ function fakeConfigurator(available = true) {
           .filter((id) => !owned.includes(id)),
         removed: owned.filter((id) => !desired.some((e) => e.id === id)),
         skipped: [],
+        unavailable: [],
       }
     },
   }

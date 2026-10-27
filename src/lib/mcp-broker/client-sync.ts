@@ -61,6 +61,18 @@ export interface McpClientEntry {
   apiKey?: string
 }
 
+/** Why a client can't be given an endpoint on this install. */
+export type McpClientUnavailableReason =
+  /** Claude Desktop runs endpoints through `maximal-mcp-broker`, which
+   *  wasn't found. */
+  "adapter-missing"
+
+/** Why a client can't be offered endpoints at all right now, when Maximal
+ *  can tell more than "its integration is off". */
+export type McpClientOfferUnavailableReason =
+  /** Claude Desktop has another gateway profile applied. */
+  "other-provider-profile"
+
 export interface McpReconcileResult {
   /** Ids Maximal now owns in the client after this pass. */
   owned: Array<string>
@@ -68,6 +80,8 @@ export interface McpReconcileResult {
   removed: Array<string>
   /** Desired ids left alone because the client already had that name. */
   skipped: Array<string>
+  /** Desired ids Maximal couldn't write on this install, and why. */
+  unavailable: Array<{ id: string; reason: McpClientUnavailableReason }>
 }
 
 export interface McpReconcileOptions {
@@ -89,6 +103,9 @@ export interface McpClientConfigurator {
   readonly removeOnShutdown: boolean
   /** Whether Maximal's integration for this client is on and usable. */
   available(): boolean
+  /** When not `available()`, a more specific reason than "integration
+   *  off", if the client can tell one cheaply. */
+  unavailableReason?(): McpClientOfferUnavailableReason | undefined
   /** Make the client match `desired`, touching only entries in `owned`. */
   reconcile(
     desired: Array<McpClientEntry>,
@@ -148,6 +165,10 @@ export function desiredEntriesFor(
   return entries
 }
 
+function emptyResult(): McpReconcileResult {
+  return { owned: [], added: [], removed: [], skipped: [], unavailable: [] }
+}
+
 export interface SyncMcpClientOptions {
   config?: AppConfig
   /** Override the integration check, e.g. `false` while disabling it. */
@@ -165,12 +186,12 @@ export function syncMcpClient(
   const wanted = desiredEntriesFor(configurator, config)
   // Nothing configured and nothing to revert: don't touch the client at all.
   if (wanted.length === 0 && owned.length === 0) {
-    return { owned: [], added: [], removed: [], skipped: [] }
+    return emptyResult()
   }
   const active = options.active ?? configurator.available()
   const desired = active ? wanted : []
   if (desired.length === 0 && owned.length === 0) {
-    return { owned: [], added: [], removed: [], skipped: [] }
+    return emptyResult()
   }
   const result = configurator.reconcile(desired, owned, {
     offline: options.offline === true,

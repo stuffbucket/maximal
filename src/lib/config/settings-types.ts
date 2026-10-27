@@ -411,6 +411,9 @@ export const McpClientOffer = z.object({
   name: z.string(),
   /** Maximal's integration for this client is on, so it can be offered. */
   available: z.boolean(),
+  /** When not available, a more specific reason than "integration off":
+   *  Claude Desktop has another provider's gateway profile applied. */
+  unavailableReason: z.enum(["other-provider-profile"]).optional(),
   /** Maximal currently has this endpoint written into the client. */
   configured: z.boolean(),
 })
@@ -485,6 +488,18 @@ export const McpEndpointToggleResponse = z.object({
   endpoint: McpEndpointEntry,
   /** Clients that already had an entry with this name; left unchanged. */
   skipped: z.array(z.object({ client: McpClientId, name: z.string() })),
+  /** Clients Maximal couldn't add it to on this install, and why:
+   *  `adapter-missing` = Claude Desktop needs maximal-mcp-broker, which
+   *  wasn't found. */
+  unavailable: z.array(
+    z.object({
+      client: McpClientId,
+      name: z.string(),
+      reason: z.enum(["adapter-missing"]),
+    }),
+  ),
+  /** Clients whose config Maximal changed for it (added or took it out). */
+  updated: z.array(z.object({ client: McpClientId, name: z.string() })),
   broker: McpBrokerReadiness,
   /** The app whose own entry for this server the endpoint now runs. */
   adoptedFrom: z.string().optional(),

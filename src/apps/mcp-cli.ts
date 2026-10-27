@@ -194,6 +194,11 @@ function report(
       `${skip.name} already has an MCP server named "${endpoint.id}"; left unchanged.`,
     )
   }
+  for (const missing of result.unavailable) {
+    consola.warn(
+      `Couldn't add ${endpoint.label} to ${missing.name}: maximal-mcp-broker wasn't found. Reinstalling Maximal fixes this.`,
+    )
+  }
   showEndpoints([result.endpoint])
 }
 

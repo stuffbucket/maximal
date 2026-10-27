@@ -128,6 +128,7 @@ describe("Claude Code MCP reconcile", () => {
       added: [],
       removed: [],
       skipped: [],
+      unavailable: [],
     })
     expect(calls).toEqual([])
     expect(fs.readFileSync(file, "utf8")).toBe(before)
@@ -204,6 +205,7 @@ describe("Claude Code MCP when the CLI fails", () => {
       added: ["workiq"],
       removed: [],
       skipped: [],
+      unavailable: [],
     })
     // The placeholder was swapped for the real key, so the entry works.
     expect(servers().workiq.headers).toEqual({ Authorization: `Bearer ${KEY}` })

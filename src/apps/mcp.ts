@@ -16,7 +16,11 @@ import type {
   CatalogDetectOptions,
   CatalogInstall,
 } from "~/lib/mcp-broker/catalog"
-import type { McpReconcileResult } from "~/lib/mcp-broker/client-sync"
+import type {
+  McpClientOfferUnavailableReason,
+  McpClientUnavailableReason,
+  McpReconcileResult,
+} from "~/lib/mcp-broker/client-sync"
 import type { McpClientId } from "~/lib/mcp-broker/types"
 
 import { getConfig, writeConfig } from "~/lib/config/config"
@@ -43,6 +47,8 @@ export interface McpClientOffer {
   name: string
   /** Maximal's integration for the client is on, so it can be offered. */
   available: boolean
+  /** When not available, a more specific reason than "integration off". */
+  unavailableReason?: McpClientOfferUnavailableReason
   /** Maximal currently has this endpoint written into the client. */
   configured: boolean
 }
@@ -61,10 +67,19 @@ export interface McpClientSkip {
   name: string
 }
 
+export interface McpClientUnavailable extends McpClientSkip {
+  reason: McpClientUnavailableReason
+}
+
 export interface SetMcpEndpointResult {
   endpoint: McpEndpointView
   /** Clients that already had an entry with this name; left unchanged. */
   skipped: Array<McpClientSkip>
+  /** Clients Maximal couldn't add the endpoint to on this install. */
+  unavailable: Array<McpClientUnavailable>
+  /** Clients whose config Maximal changed for this endpoint (added it or
+   *  took it out), so the UI can say how each app picks that up. */
+  updated: Array<McpClientSkip>
   /** False when no broker runs in this process (e.g. the CLI). */
   brokerReloaded: boolean
   /** Where the broker got to before the apps were updated. Turning an
@@ -178,11 +193,16 @@ export function mcpBrokerHealth(): McpBrokerHealth {
 export function listMcpEndpoints(
   config: AppConfig = getConfig(),
 ): Array<McpEndpointView> {
-  const clients = mcpApps().map((app) => ({
-    id: app.mcp.clientId,
-    name: app.name,
-    available: app.mcp.available(),
-  }))
+  const clients = mcpApps().map((app) => {
+    const available = app.mcp.available()
+    const reason = available ? undefined : app.mcp.unavailableReason?.()
+    return {
+      id: app.mcp.clientId,
+      name: app.name,
+      available,
+      ...(reason === undefined ? {} : { unavailableReason: reason }),
+    }
+  })
   const brokerOn = config.mcpBroker?.enabled === true
   return (config.mcpBroker?.servers ?? []).map((server) => ({
     id: server.id,
@@ -238,6 +258,25 @@ export interface McpBrokerSteps {
   syncClients?: typeof syncAllMcpClients
 }
 
+/** What each client's sync did with endpoint `id`. */
+function clientOutcome(
+  id: string,
+  synced: ReturnType<typeof syncAllMcpClients>,
+): Pick<SetMcpEndpointResult, "skipped" | "unavailable" | "updated"> {
+  const skipped: Array<McpClientSkip> = []
+  const unavailable: Array<McpClientUnavailable> = []
+  const updated: Array<McpClientSkip> = []
+  for (const { client, name, result } of synced) {
+    if (result.skipped.includes(id)) skipped.push({ client, name })
+    const missing = result.unavailable.find((entry) => entry.id === id)
+    if (missing) unavailable.push({ client, name, reason: missing.reason })
+    if (result.added.includes(id) || result.removed.includes(id)) {
+      updated.push({ client, name })
+    }
+  }
+  return { skipped, unavailable, updated }
+}
+
 const DEFAULT_STEPS: Required<McpBrokerSteps> = {
   reconfigure: reconfigureBroker,
   waitForBroker: waitForBrokerReady,
@@ -289,14 +328,12 @@ export async function setMcpEndpoint(
     change.enabled ?
       await waitForBroker(BROKER_READY_TIMEOUT_MS)
     : brokerReadiness()
-  const skipped = syncClients(next).flatMap(({ client, name, result }) =>
-    result.skipped.includes(id) ? [{ client, name }] : [],
-  )
+  const outcome = clientOutcome(id, syncClients(next))
   const endpoint = listMcpEndpoints().find((view) => view.id === id)
   if (!endpoint) return undefined
   return {
     endpoint,
-    skipped,
+    ...outcome,
     brokerReloaded,
     broker,
     ...(adoption ?
