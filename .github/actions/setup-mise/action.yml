@@ -1,7 +1,8 @@
 # Vendored replacement for jdx/mise-action.
 #
 # Internal MS GitHub Actions environments reject non-MS/GitHub-sourced
-# actions, so install the pinned official mise release through mise.run.
+# actions, so install the pinned official mise release through mise.run
+# (or, on Windows, the release's checksum-verified exe).
 
 name: Setup mise
 description: Install mise and add it to PATH
@@ -16,6 +17,7 @@ runs:
   using: composite
   steps:
     - name: Install mise
+      if: runner.os != 'Windows'
       shell: bash
       env:
         MISE_VERSION: ${{ inputs.mise-version }}
@@ -24,6 +26,25 @@ runs:
         mkdir -p "$HOME/.local/bin"
         curl -fsSL https://mise.run \
           | MISE_VERSION="$MISE_VERSION" MISE_INSTALL_PATH="$HOME/.local/bin/mise" sh
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+    # mise.run's installer doesn't support Windows ("unsupported OS:
+    # MINGW64…"), so fetch the release's standalone exe and check it against
+    # the release's SHASUMS256.txt.
+    - name: Install mise (Windows)
+      if: runner.os == 'Windows'
+      shell: bash
+      env:
+        MISE_VERSION: ${{ inputs.mise-version }}
+      run: |
+        set -euo pipefail
+        exe="mise-${MISE_VERSION}-windows-x64.exe"
+        base="https://github.com/jdx/mise/releases/download/${MISE_VERSION}"
+        mkdir -p "$HOME/.local/bin"
+        cd "$HOME/.local/bin"
+        curl -fsSL --retry 3 -o "$exe" "$base/$exe"
+        curl -fsSL --retry 3 "$base/SHASUMS256.txt" | grep -F " ./$exe" | sed 's# \./# #' | sha256sum -c -
+        mv "$exe" mise.exe
         echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
     - name: Verify mise

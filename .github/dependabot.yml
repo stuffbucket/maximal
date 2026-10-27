@@ -1,0 +1,43 @@
+# Security updates only: `open-pull-requests-limit: 0` turns off routine
+# version-update PRs, but Dependabot still opens security fixes, and needs
+# this file to know which package manager owns each directory. Without it,
+# every JS directory defaulted to npm_and_yarn, which refuses the Bun-managed
+# ones (`bun.lock`) and aborted the grouped security update for all of them.
+
+version: 2
+updates:
+  - package-ecosystem: bun
+    directories: ["/", "/shell", "/site"]
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+    commit-message:
+      prefix: build
+      include: scope
+
+  # pnpm-managed packages (npm ecosystem reads pnpm-lock.yaml).
+  - package-ecosystem: npm
+    directories: ["/packages/mcp-broker", "/packages/storybook"]
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+    commit-message:
+      prefix: build
+      include: scope
+
+  - package-ecosystem: cargo
+    directory: /shell/src-tauri
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+    commit-message:
+      prefix: build
+      include: scope
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+    commit-message:
+      prefix: ci
