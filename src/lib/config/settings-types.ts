@@ -419,6 +419,52 @@ export const McpClientOffer = z.object({
 })
 export type McpClientOffer = z.infer<typeof McpClientOffer>
 
+/** Where Work IQ is, step by step (see `workIqState` in
+ *  src/lib/mcp-broker/workiq.ts):
+ *   not-installed   its executable is gone
+ *   eula-needed     the user hasn't accepted Microsoft's terms
+ *   signin-needed   nobody has signed in on this account
+ *   starting        Maximal is (re)starting it
+ *   ready           signed in, and it offers its Microsoft 365 tools
+ *   consent-needed  signed in, but it offers only its local tools: usually
+ *                   the organization hasn't approved Work IQ */
+export const WorkIqState = z.enum([
+  "not-installed",
+  "eula-needed",
+  "signin-needed",
+  "starting",
+  "ready",
+  "consent-needed",
+])
+export type WorkIqState = z.infer<typeof WorkIqState>
+
+/** The sign-in Maximal runs for the user: `waiting` for them in the
+ *  browser, `restarting` Work IQ afterwards; the rest say how the last one
+ *  ended (`idle`: none, or it worked). */
+export const WorkIqSignIn = z.enum([
+  "idle",
+  "waiting",
+  "restarting",
+  "failed",
+  "timed-out",
+  "cancelled",
+])
+export type WorkIqSignIn = z.infer<typeof WorkIqSignIn>
+
+export const WorkIqStatus = z.object({
+  state: WorkIqState,
+  eulaAccepted: z.boolean(),
+  signedInBefore: z.boolean(),
+  /** Sign-in uses the browser (`disableBrokeredAuth=true`). */
+  browserSignIn: z.boolean(),
+  /** On macOS the UI offers browser sign-in and mentions the keychain. */
+  macos: z.boolean(),
+  signIn: WorkIqSignIn,
+  /** The last line Work IQ wrote that reads like a problem. Server text. */
+  lastProblem: z.string().nullable(),
+})
+export type WorkIqStatus = z.infer<typeof WorkIqStatus>
+
 export const McpEndpointEntry = z.object({
   id: z.string(),
   label: z.string(),
@@ -426,8 +472,19 @@ export const McpEndpointEntry = z.object({
   /** Remembered client choices, used to pre-check the prompt. */
   clients: z.array(McpClientId),
   offered: z.array(McpClientOffer),
+  /** Work IQ endpoints that are on: where its sign-in stands. */
+  workiq: WorkIqStatus.optional(),
 })
 export type McpEndpointEntry = z.infer<typeof McpEndpointEntry>
+
+export const WorkIqSignInRequest = z.object({
+  /** The user chose to switch Work IQ to browser sign-in first. */
+  useBrowserSignIn: z.boolean(),
+})
+export type WorkIqSignInRequest = z.infer<typeof WorkIqSignInRequest>
+
+export const WorkIqActionResponse = z.object({ workiq: WorkIqStatus })
+export type WorkIqActionResponse = z.infer<typeof WorkIqActionResponse>
 
 /** The process that runs every MCP endpoint, as the Settings UI needs it:
  *  whether anything is wrong and whether Maximal is already fixing it.
