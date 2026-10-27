@@ -24,6 +24,7 @@ import type { McpClientId } from "~/lib/mcp-broker/types"
 import { getConfig } from "~/lib/config/config"
 import { McpServerIdSchema } from "~/lib/config/config-schema"
 import { MCP_CATALOG } from "~/lib/mcp-broker/catalog"
+import { brokerRunsOn } from "~/lib/mcp-broker/platform"
 import { currentProxyPort } from "~/lib/start/proxy-port"
 
 import {
@@ -68,7 +69,8 @@ function showCatalog(available: Array<McpCatalogView>): void {
       )
     } else {
       consola.info(
-        `  ${item.label} (${item.id}): not installed — ${item.install.command}`,
+        `  ${item.label} (${item.id}): not installed — ${item.install.command}`
+          + ` (downloads from ${item.install.registry})`,
       )
     }
   }
@@ -192,6 +194,11 @@ function report(
   for (const skip of result.skipped) {
     consola.warn(
       `${skip.name} already has an MCP server named "${endpoint.id}"; left unchanged.`,
+    )
+  }
+  for (const missing of result.unavailable) {
+    consola.warn(
+      `Couldn't add ${endpoint.label} to ${missing.name}: maximal-mcp-broker wasn't found. Reinstalling Maximal fixes this.`,
     )
   }
   showEndpoints([result.endpoint])
@@ -398,6 +405,11 @@ export const mcpCommand = defineCommand({
     }
     const endpoints = listMcpEndpoints()
     if (!args.endpoint) {
+      if (!brokerRunsOn()) {
+        consola.warn(
+          "MCP servers don't run on Windows yet. Your endpoints and choices are kept for when they do.",
+        )
+      }
       showEndpoints(endpoints)
       showCatalog(listMcpCatalog())
       return

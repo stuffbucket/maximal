@@ -9,8 +9,9 @@
  * Keys never appear on a command line. `claude mcp add-json` gets a SHA-256
  * placeholder in the Authorization header; Maximal then swaps in the real key
  * with one atomic edit of that single header. Claude Code rewrites the file
- * often, so the swap is verified and retried, and the next reconcile repairs
- * any placeholder a lost race left behind.
+ * often, so the swap is verified and retried, and the next reconcile (or
+ * Settings read, via `repairKeys`) repairs any placeholder a lost race or a
+ * running Claude Code's write-back left behind.
  *
  * Only entries Maximal recorded as written (`owned`) that still point at
  * Maximal's URL are ever changed or removed; a same-name entry the user
@@ -214,6 +215,9 @@ export function createClaudeCodeMcp(
   return {
     clientId: "claude-code",
     apiKeyLabel: HELPER_LABEL,
+    // Each session reads the file when it starts, like the base URL that
+    // shutdown also reverts (see ./reconcile.ts).
+    removeOnShutdown: true,
     available:
       options.available
       ?? (() => isProxyBaseUrlConfigured() && getRunner() !== undefined),
@@ -225,6 +229,25 @@ export function createClaudeCodeMcp(
         getRunner,
         offline: reconcileOptions?.offline === true,
       })
+    },
+    repairKeys(desired, owned) {
+      const file = configPath()
+      const existing = readServers(file)
+      for (const entry of desired) {
+        if (entry.apiKey === undefined || !owned.includes(entry.id)) continue
+        const current = existing[entry.id]
+        if (!isOwnedMcpEntry(current, entry)) continue
+        const header = authorization(current)
+        // No header at all is a different entry shape; reconcile recreates it.
+        if (header === undefined || header === `Bearer ${entry.apiKey}`) {
+          continue
+        }
+        if (swapInKey(file, entry, entry.apiKey)) {
+          consola.info(
+            `Put the key back into Claude Code MCP server "${entry.id}"`,
+          )
+        }
+      }
     },
     existingStdioEntry(id, owned) {
       const value = readServers(configPath())[id]
@@ -250,6 +273,7 @@ function reconcileUserScope(input: ReconcileInput): McpReconcileResult {
     added: [],
     removed: [],
     skipped: [],
+    unavailable: [],
   }
   let runner: ClaudeCliRunner | undefined
   let runnerResolved = false
@@ -313,16 +337,19 @@ function reconcileEntry(input: {
     ) {
       return "kept"
     }
-    if (
-      !run([
-        "mcp",
-        "add-json",
-        "--scope",
-        "user",
-        entry.id,
-        addJsonPayload(entry),
-      ])
-    ) {
+    const ran = run([
+      "mcp",
+      "add-json",
+      "--scope",
+      "user",
+      entry.id,
+      addJsonPayload(entry),
+    ])
+    // The CLI can write the entry and still fail (a timeout, say). If
+    // Maximal's entry is there, carry on as if it had succeeded, so it is
+    // recorded as owned and gets its key; otherwise the next pass would take
+    // it for the user's own and never touch it again.
+    if (!ran && !isOwnedMcpEntry(readServers(file)[entry.id], entry)) {
       return current === undefined ? "failed" : "kept"
     }
     added = current === undefined

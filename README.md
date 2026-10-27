@@ -85,11 +85,12 @@ brew update && brew upgrade maximal
 > binary from the
 > [latest release](https://github.com/stuffbucket/maximal/releases/latest).
 
-### Work IQ on Linux
+### Work IQ
 
-See [the Linux Work IQ guide](docs/linux-workiq.md) for installing the external
-MCP server, authenticating, and enabling it through Maximal. Optional Pi setup
-is documented [separately](docs/pi-workiq.md).
+See [the Work IQ guide](docs/workiq.md) for signing in from Settings, where
+Maximal writes Claude Desktop's config, logs, and admin approval. Linux needs
+extra setup: see [the Linux Work IQ guide](docs/linux-workiq.md). Optional Pi
+setup is documented [separately](docs/pi-workiq.md).
 
 ## Run
 

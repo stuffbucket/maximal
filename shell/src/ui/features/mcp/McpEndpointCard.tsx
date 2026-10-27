@@ -16,6 +16,7 @@ import { LinkCheckbox } from "../../components/LinkCheckbox";
 import { Switch } from "../../components/Switch";
 
 import type { McpMutationResult, McpToggleResult } from "./useMcp";
+import { WorkIqSection } from "./WorkIqSection";
 
 interface McpEndpointCardProps {
   endpoint: McpEndpointEntry;
@@ -27,6 +28,10 @@ interface McpEndpointCardProps {
   onRefresh: () => Promise<void>;
   /** Remove it from Maximal and from every app Maximal added it to. */
   onRemove: () => Promise<McpMutationResult>;
+  /** Work IQ only: the setup steps the user confirms on the card. */
+  onAcceptWorkIqEula: () => Promise<McpMutationResult>;
+  onSignInWorkIq: (useBrowserSignIn: boolean) => Promise<McpMutationResult>;
+  onCancelWorkIqSignIn: () => Promise<void>;
 }
 
 interface Change {
@@ -49,6 +54,9 @@ export function McpEndpointCard({
   onToggle,
   onRefresh,
   onRemove,
+  onAcceptWorkIqEula,
+  onSignInWorkIq,
+  onCancelWorkIqSignIn,
 }: McpEndpointCardProps): JSX.Element {
   // The change in flight, shown in place of the server's state so the
   // controls don't snap back for the seconds a broker restart takes.
@@ -58,11 +66,15 @@ export function McpEndpointCard({
   const [failed, setFailed] = useState<{ problem: Problem; change: Change } | null>(null);
   const [skipped, setSkipped] = useState<McpEndpointToggleResponse["skipped"]>([]);
   const [adoptedFrom, setAdoptedFrom] = useState<string | undefined>();
+  // What the last save did, said under the card until the next one.
+  const [saved, setSaved] = useState<SavedChange | null>(null);
   const [removeOpen, setRemoveOpen] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [removeFailed, setRemoveFailed] = useState<Problem | null>(null);
 
   const busy = pending !== null || removing;
+  // Turning it on waits for it to start before the apps are updated.
+  const starting = pending?.enabled === true && !endpoint.enabled;
   const enabled = pending?.enabled ?? endpoint.enabled;
   // Includes remembered choices for apps that can't be offered right now;
   // those ride along untouched on every save.
@@ -87,6 +99,12 @@ export function McpEndpointCard({
     }
     setSkipped(result.skipped ?? []);
     setAdoptedFrom(result.adoptedFrom);
+    setSaved({
+      turnedOn: change.enabled && !endpoint.enabled,
+      broker: result.broker,
+      updated: result.updated ?? [],
+      unavailable: result.unavailable ?? [],
+    });
   };
 
   const setChosen = (ids: Array<McpClientId>, checked: boolean): void => {
@@ -120,6 +138,9 @@ export function McpEndpointCard({
   // card is open, i.e. while the endpoint is on.
   const unavailable = (client: McpClientOffer): string | undefined => {
     if (client.available) return undefined;
+    if (client.unavailableReason === "other-provider-profile") {
+      return `${client.name} is set up with another provider profile, so Maximal can't add ${endpoint.label} to it.`;
+    }
     return chosen.has(client.id)
       ? `${client.name}'s Maximal integration is off, so ${endpoint.label} isn't in it right now. It comes back when you turn ${client.name} on in Apps.`
       : `${client.name}'s Maximal integration is off. Turn it on in Apps to add ${endpoint.label} to it.`;
@@ -134,7 +155,7 @@ export function McpEndpointCard({
         <div className="app-card__control">
           {busy && (
             <span className="mcp-card__saving" role="status">
-              {removing ? "Removing…" : "Saving…"}
+              {removing ? "Removing…" : starting ? `Starting ${endpoint.label}…` : "Saving…"}
             </span>
           )}
           {refreshing && (
@@ -228,6 +249,47 @@ export function McpEndpointCard({
           ))}
       </div>
 
+      {/* Work IQ: where its sign-in stands and the next step. */}
+      {enabled && !busy && endpoint.workiq && (
+        <WorkIqSection
+          status={endpoint.workiq}
+          onAcceptEula={onAcceptWorkIqEula}
+          onSignIn={onSignInWorkIq}
+          onCancelSignIn={onCancelWorkIqSignIn}
+        />
+      )}
+
+      {/* What the last save did: whether the server started, what each
+          changed app needs to pick it up, and any app it couldn't go into. */}
+      {!busy && saved?.turnedOn && saved.broker === "ready" && (
+        <p className="app-card__hint" role="status">
+          {endpoint.label} is running.
+        </p>
+      )}
+      {!busy && saved?.turnedOn && saved.broker === "starting" && (
+        <p className="app-card__hint" role="status">
+          {endpoint.label} is still starting. Your apps can use it once it's running.
+        </p>
+      )}
+      {!busy && saved?.turnedOn && saved.broker === "failed" && (
+        <Callout tone="error" title={`${endpoint.label} didn't start`}>
+          Your apps are set up to use it, but it isn't running.
+        </Callout>
+      )}
+      {!busy &&
+        saved?.updated.map((app) => (
+          <p className="app-card__hint" key={app.client}>
+            {PICKS_UP_CHANGE[app.client]}
+          </p>
+        ))}
+      {!busy &&
+        saved?.unavailable.map((app) => (
+          <Callout tone="notice" title={`Couldn't add ${endpoint.label} to ${app.name}`} key={app.client}>
+            The part of Maximal that connects {app.name} to it is missing.
+            Reinstalling Maximal fixes this; your settings are kept.
+          </Callout>
+        ))}
+
       <ConfirmDialog
         open={removeOpen}
         title={`Remove ${endpoint.label}?`}
@@ -264,6 +326,21 @@ export function McpEndpointCard({
     </article>
   );
 }
+
+interface SavedChange {
+  /** This save turned the endpoint on (so the broker had to start). */
+  turnedOn: boolean;
+  broker: McpEndpointToggleResponse["broker"] | undefined;
+  updated: McpEndpointToggleResponse["updated"];
+  unavailable: McpEndpointToggleResponse["unavailable"];
+}
+
+/** How each app picks up a change: Claude Desktop reads its config only
+ *  when it launches; Claude Code reads it when a session starts. */
+const PICKS_UP_CHANGE: Record<McpClientId, string> = {
+  "claude-desktop": "Quit and reopen Claude Desktop to load the change.",
+  "claude-code": "New Claude Code sessions get the change. Open sessions keep their old tools.",
+};
 
 function RefreshIcon(): JSX.Element {
   // lucide: refresh-cw

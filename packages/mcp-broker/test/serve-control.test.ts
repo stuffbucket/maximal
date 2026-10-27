@@ -220,9 +220,13 @@ it("handshakes, reports readiness, takes updates, asks for input, and shuts down
     })
     expect(exitCode).toBe(0)
     // Session traffic makes dependencies log; only sanitized codes may
-    // reach stderr, never their text.
+    // reach stderr, never their text. The servers' own stderr comes up
+    // tagged with its endpoint, for Maximal's log.
+    expect(stderr).toContain("[endpoint:fixture] [fixture] ready era=legacy\n")
     expect(
-      stderr.replaceAll("[maximal-mcp-broker] DEPENDENCY_DIAGNOSTIC\n", ""),
+      stderr
+        .replaceAll("[maximal-mcp-broker] DEPENDENCY_DIAGNOSTIC\n", "")
+        .replaceAll("[endpoint:fixture] [fixture] ready era=legacy\n", ""),
     ).toBe("")
     decoder.finish()
   } finally {

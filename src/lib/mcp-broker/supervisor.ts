@@ -20,6 +20,8 @@ import {
   type SidecarEnvelope,
 } from "./control-protocol"
 import { PendingRequests, pendingRequests } from "./pending-requests"
+import { brokerRunsOn } from "./platform"
+import { createLineSplitter, recordBrokerStderr } from "./server-log"
 
 export type BrokerSupervisorState =
   | "disabled"
@@ -60,6 +62,55 @@ let currentSnapshot: BrokerSupervisorSnapshot = {
   problem: null,
 }
 let currentUpstream: BrokerUpstream | undefined
+/** Tool names each endpoint of the ready broker offered at startup. */
+let currentEndpointTools: ReadonlyMap<string, Array<string>> | undefined
+
+function withdrawUpstream(): void {
+  currentUpstream = undefined
+  currentEndpointTools = undefined
+}
+
+/** The tools endpoint `id` offered when the running broker started;
+ *  undefined while no broker is ready. */
+export function getBrokerEndpointTools(
+  id: string,
+): ReadonlyArray<string> | undefined {
+  return currentEndpointTools?.get(id)
+}
+
+/** Where a broker that was just (re)started got to, for a caller that
+ *  wants to act once it serves: `ready` serves, `starting` is still coming
+ *  up (or recovering) when the wait ran out, `failed` gave up (can't run on
+ *  this install, or kept crashing), `off` has nothing to run. */
+export type BrokerReadiness = "ready" | "starting" | "failed" | "off"
+
+/** Readiness for a state, or undefined while the broker may still come up. */
+function settledReadiness(
+  state: BrokerSupervisorState,
+): BrokerReadiness | undefined {
+  switch (state) {
+    case "ready": {
+      return "ready"
+    }
+    case "disabled": {
+      return "off"
+    }
+    case "unavailable":
+    case "circuit-open": {
+      return "failed"
+    }
+    case "starting":
+    case "degraded":
+    case "backoff":
+    case "stopping": {
+      return undefined
+    }
+    default: {
+      state satisfies never
+      return undefined
+    }
+  }
+}
 
 export function getBrokerSupervisorSnapshot(): BrokerSupervisorSnapshot {
   return currentSnapshot
@@ -98,6 +149,9 @@ interface SupervisorOptions {
   spawnProcess?: typeof spawn
   /** Where requests for user input wait for an answer. */
   requests?: PendingRequests
+  /** Each line the broker writes to stderr: its own codes, and its
+   *  servers' stderr tagged with their endpoint. Maximal's log by default. */
+  onStderrLine?: (line: string) => void
 }
 
 /** How long to wait for the broker to take an update before restarting it
@@ -136,6 +190,7 @@ export class BrokerSupervisor {
   readonly #randomUUID: () => string
   readonly #spawnProcess: typeof spawn
   readonly #requests: PendingRequests
+  readonly #onStderrLine: (line: string) => void
   #generation: BrokerGeneration | undefined
   #stopping = false
   #restartTimes: Array<number> = []
@@ -144,6 +199,8 @@ export class BrokerSupervisor {
   #heartbeatTimer: ReturnType<typeof setInterval> | undefined
   #stableTimer: ReturnType<typeof setTimeout> | undefined
   #stopPromise: Promise<void> | undefined
+  #state: BrokerSupervisorState = "disabled"
+  readonly #stateListeners = new Set<() => void>()
 
   constructor(config: McpBrokerConfig, options: SupervisorOptions = {}) {
     this.#config = config
@@ -157,6 +214,7 @@ export class BrokerSupervisor {
     this.#randomUUID = options.randomUUID ?? crypto.randomUUID
     this.#spawnProcess = options.spawnProcess ?? spawn
     this.#requests = options.requests ?? pendingRequests
+    this.#onStderrLine = options.onStderrLine ?? recordBrokerStderr
     this.#setState("disabled")
   }
 
@@ -164,7 +222,7 @@ export class BrokerSupervisor {
     if (this.#stopping || this.#generation) return
     if (this.#config.enabled !== true) {
       this.#setState("disabled")
-      currentUpstream = undefined
+      withdrawUpstream()
       return
     }
     this.#beginLaunch()
@@ -243,7 +301,7 @@ export class BrokerSupervisor {
     this.#stopping = true
     this.#setState("stopping")
     this.#clearTimers()
-    currentUpstream = undefined
+    withdrawUpstream()
 
     const generation = this.#generation
     if (generation) {
@@ -254,10 +312,36 @@ export class BrokerSupervisor {
     this.#setState("disabled")
   }
 
+  /**
+   * Resolve once the broker serves, gives up, or has nothing to run; after
+   * `timeoutMs`, resolve with `starting`. Never rejects, and never starts or
+   * restarts anything itself.
+   */
+  waitUntilReady(timeoutMs: number): Promise<BrokerReadiness> {
+    const settled = settledReadiness(this.#state)
+    if (settled) return Promise.resolve(settled)
+    return new Promise((resolve) => {
+      const finish = (readiness: BrokerReadiness) => {
+        clearTimeout(timer)
+        this.#stateListeners.delete(listener)
+        resolve(readiness)
+      }
+      const listener = () => {
+        const readiness = settledReadiness(this.#state)
+        if (readiness) finish(readiness)
+      }
+      const timer = setTimeout(() => finish("starting"), timeoutMs)
+      timer.unref()
+      this.#stateListeners.add(listener)
+    })
+  }
+
   #setState(
     state: BrokerSupervisorState,
     problem: BrokerProblem | null = null,
   ): void {
+    this.#state = state
+    for (const listener of this.#stateListeners) listener()
     currentSnapshot = {
       state,
       enabledEndpoints: (this.#config.servers ?? []).filter(
@@ -280,9 +364,9 @@ export class BrokerSupervisor {
   #launch(): void {
     if (this.#stopping) return
     this.#setState("starting")
-    currentUpstream = undefined
+    withdrawUpstream()
 
-    if (this.#platform === "win32") {
+    if (!brokerRunsOn(this.#platform)) {
       // A kill-on-close Job Object has not been wired yet. Running without one
       // would violate the containment contract and could orphan MCP descendants.
       throw new Error("MCP_BROKER_CONTAINMENT_UNAVAILABLE")
@@ -320,7 +404,7 @@ export class BrokerSupervisor {
     }
     this.#generation = generation
 
-    child.stderr.on("data", () => undefined)
+    child.stderr.on("data", createLineSplitter(this.#onStderrLine))
     child.stdout.on("data", (chunk: Buffer) => {
       generation.processing = generation.processing
         .then(async () => {
@@ -337,7 +421,7 @@ export class BrokerSupervisor {
       this.#forceKillGeneration(generation)
       this.#requests.dropGeneration(generation.id)
       this.#generation = undefined
-      currentUpstream = undefined
+      withdrawUpstream()
       this.#clearGenerationTimers(generation)
       this.#clearGenerationMonitors()
       if (!this.#stopping) this.#scheduleRestart()
@@ -522,6 +606,9 @@ export class BrokerSupervisor {
       origin: `http://${payload.host}:${payload.port}`,
       apiKey: generation.apiKey,
     }
+    currentEndpointTools = new Map(
+      payload.endpoints.map((endpoint) => [endpoint.id, endpoint.tools]),
+    )
     this.#clearGenerationTimers(generation)
     generation.lastHeartbeatAt = this.#now()
     this.#setState("ready")
@@ -548,7 +635,7 @@ export class BrokerSupervisor {
     if (this.#generation !== generation || this.#stopping) return
     this.#requests.dropGeneration(generation.id)
     this.#generation = undefined
-    currentUpstream = undefined
+    withdrawUpstream()
     this.#clearGenerationTimers(generation)
     this.#clearGenerationMonitors()
     this.#setState("degraded")
@@ -688,6 +775,7 @@ export class BrokerSupervisor {
 /** The process-wide supervisor, replaced when endpoint config changes. Only
  *  the server process starts one; elsewhere (e.g. the CLI) it stays unset. */
 let activeSupervisor: BrokerSupervisor | undefined
+let activeConfig: McpBrokerConfig | undefined
 let activeConfigJson: string | undefined
 let reconfiguring: Promise<void> = Promise.resolve()
 
@@ -705,33 +793,13 @@ function brokerConfigKey(config: McpBrokerConfig): string {
 
 export function startBrokerSupervisor(config: McpBrokerConfig): void {
   activeSupervisor = new BrokerSupervisor(config)
+  activeConfig = config
   activeConfigJson = brokerConfigKey(config)
   activeSupervisor.start()
 }
 
-/** Apply new config to the broker: nothing when it's unchanged, a live
- *  update when only how new session instances start changed, otherwise a
- *  restart. Returns false when no supervisor is running in this process
- *  (the caller should ask the running server to reload). Calls run one at a
- *  time, so the most recent config always wins. */
-export function reconfigureBroker(config: McpBrokerConfig): Promise<boolean> {
-  const run = async (): Promise<boolean> => {
-    const previous = activeSupervisor
-    if (!previous) return false
-    const key = brokerConfigKey(config)
-    if (key === activeConfigJson) return true
-    if (await previous.update(config)) {
-      // Calls are serialized through `reconfiguring`, so nothing raced us.
-      // eslint-disable-next-line require-atomic-updates
-      activeConfigJson = key
-      return true
-    }
-    await previous.stop()
-    // Shut down while we waited: don't bring a broker back.
-    if (activeSupervisor !== previous) return false
-    startBrokerSupervisor(config)
-    return true
-  }
+/** Run broker changes one at a time, so the most recent one always wins. */
+function serialized(run: () => Promise<boolean>): Promise<boolean> {
   const pending = reconfiguring.then(run, run)
   reconfiguring = pending.then(
     () => undefined,
@@ -740,11 +808,79 @@ export function reconfigureBroker(config: McpBrokerConfig): Promise<boolean> {
   return pending
 }
 
+/** Apply new config to the broker: nothing when it's unchanged, a live
+ *  update when only how new session instances start changed, otherwise a
+ *  restart. Returns false when no supervisor is running in this process
+ *  (the caller should ask the running server to reload). Calls run one at a
+ *  time, so the most recent config always wins. */
+export function reconfigureBroker(config: McpBrokerConfig): Promise<boolean> {
+  return serialized(async () => {
+    const previous = activeSupervisor
+    if (!previous) return false
+    const key = brokerConfigKey(config)
+    if (key === activeConfigJson) return true
+    if (await previous.update(config)) {
+      // Calls are serialized through `reconfiguring`, so nothing raced us.
+      // eslint-disable-next-line require-atomic-updates
+      activeConfigJson = key
+      activeConfig = config
+      return true
+    }
+    await previous.stop()
+    // Shut down while we waited: don't bring a broker back.
+    if (activeSupervisor !== previous) return false
+    startBrokerSupervisor(config)
+    return true
+  })
+}
+
+/**
+ * Restart the broker with the config it has, so every endpoint is probed
+ * again (after the user signs in to a server, say). Sessions running now
+ * end. False when no supervisor runs in this process.
+ */
+export function restartBroker(): Promise<boolean> {
+  return serialized(async () => {
+    const previous = activeSupervisor
+    const config = activeConfig
+    if (!previous || !config) return false
+    await previous.stop()
+    if (activeSupervisor !== previous) return false
+    startBrokerSupervisor(config)
+    return true
+  })
+}
+
+/**
+ * Wait, at most `timeoutMs`, for the broker to serve after the latest
+ * start or reconfigure, so clients aren't pointed at it while it is still
+ * probing its servers (when `/mcp/<id>` answers 503). Follows a supervisor
+ * that a later reconfigure swaps in. `off` when no broker runs in this
+ * process (e.g. the CLI).
+ */
+export async function waitForBrokerReady(
+  timeoutMs: number,
+): Promise<BrokerReadiness> {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    await reconfiguring
+    const supervisor = activeSupervisor
+    if (!supervisor) return "off"
+    const readiness = await supervisor.waitUntilReady(
+      Math.max(0, deadline - Date.now()),
+    )
+    // A reconfigure stopped this one to start another: wait for that.
+    if (activeSupervisor === supervisor || !activeSupervisor) return readiness
+    if (Date.now() >= deadline) return "starting"
+  }
+}
+
 /** Stop the broker for good: later reconfigures find no supervisor and
  *  report false, so nothing restarts it during shutdown. */
 export function stopBrokerSupervisor(): Promise<void> {
   const supervisor = activeSupervisor
   activeSupervisor = undefined
+  activeConfig = undefined
   activeConfigJson = undefined
   return supervisor?.stop() ?? Promise.resolve()
 }

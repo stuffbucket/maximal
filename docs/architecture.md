@@ -59,6 +59,7 @@ Claude Code is routed by an ownership-guarded `ANTHROPIC_BASE_URL` plus `apiKeyH
 - **`maximal debug`** (and `--json`) — effective config, executor selection (which `Executor` `selectExecutor()` would pick), secret sources (env/file/config/unset, never values), paths.
 - **`GET /_debug/state`** — live equivalent on a running proxy. 404 by default; gated on `state.verbose`. Useful when restart isn't an option.
 - **Daily log** at `~/.local/share/maximal/logs/messages-handler-<date>.log` — request payloads, translated SSE events, web-tools agent traces. 7-day retention.
+- **MCP server log** at `~/.local/share/maximal/logs/mcp-broker-<date>.log` — the broker's own codes and each MCP server's stderr, prefixed with the endpoint id (`src/lib/mcp-broker/server-log.ts`). Rate-limited; same retention.
 
 ## Parallel-agent convention
 
@@ -97,6 +98,15 @@ This repo can collide on a shared working tree (lint-staged stash + concurrent m
     land before the next file's static imports on CI — so a module mock that
     intercepts a *shared* module still leaks across files even when restored.
     The rule catches the common footgun, not this one.
+  - **Restore from a snapshot, not the live namespace.** `mock.module`
+    patches the module's namespace object in place, so
+    `const real = await import(m)` followed by
+    `mock.module(m, () => real)` "restores" the stub. Capture
+    `{ ...(await import(m)) }` before mocking. A leaked no-op `sleep` from
+    `tests/poll-access-token.test.ts` once turned an orphaned device-code
+    poller into an endless promise loop that hung CI. Per-test timeouts can't
+    stop that, so `tests/helpers/starvation-watchdog.ts` kills the run after
+    60s without an event-loop turn.
   - **The durable fix is to not mock a shared module across files at all.**
     Prefer the **real** module (the test preload redirects `COPILOT_API_HOME`
     to a temp dir, and `getClaudeCodeSettingsPath()` honors `CLAUDE_CONFIG_DIR`
@@ -179,7 +189,10 @@ configured, otherwise with the normal main-port rules (`auth.enforce`,
 broker with the internal key. Every MCP session runs its own instance of the
 endpoint's server (spawned on `initialize`, stopped when the session ends), so
 parallel clients behave as if each ran it themselves; `limits.sessions`
-(default 8) caps them, and a session past the cap gets a 503 that says so. A
+(default 8) caps them. At the cap, a new session closes the least recently
+used session with no request in flight (a client that exits without a DELETE
+leaves one behind, and under Bun the broker never sees its event stream go
+away); only when every session is busy does it get a 503 that says so. A
 missing or restarting broker returns 503; an unreachable one 502. Concurrency and declared body size are bounded, and only
 the wait for response headers is timed, so SSE streams stay open.
 
@@ -194,10 +207,27 @@ Known servers come from a small catalog (`src/lib/mcp-broker/catalog.ts`;
 Work IQ first). Each entry finds the server's own executable and offers it
 under "Available to add", or shows its install command when it isn't
 found. A GUI-launched sidecar has launchd's minimal PATH, so detection
-records an absolute path to the native executable inside the npm package
-(mise install, PATH symlink, or npm global prefix), not a bare name, a mise
-shim, or an npm launcher that needs `node`. When several installs exist,
-the highest version wins. Adding asks the user to confirm and writes the
+records an absolute path to the native executable inside the npm package,
+not a bare name, a mise shim, or an npm launcher that needs `node`. It
+can't run npm or pnpm either, so it looks where they put global packages
+without starting a process: mise installs, a PATH symlink, `npm prefix -g`,
+npm's `prefix` from the environment or `~/.npmrc`, Homebrew and other fixed
+prefixes, `~/.npm-global`, `%APPDATA%\npm`, every nvm, fnm, asdf, and
+mise-managed Node, Volta's package image, and pnpm's global projects
+(`global/5`, and `global/v11/*` behind hash symlinks, resolved into the
+store). The install hint pins `@microsoft/workiq@1` (detection relies on
+the package layout) and uses mise when it manages tools, else pnpm when it
+has global installs and no npm is found, else npm. It also names the
+registry host the command downloads from, resolved as npm does (a
+`@microsoft:registry` in any npmrc, then the environment, `~/.npmrc`, the
+global npmrc); `mcpBroker.catalog.npmRegistry` adds `--registry` (or
+`NPM_CONFIG_REGISTRY=` for mise) to the command. On Windows, where the
+supervisor refuses to start the broker, nothing is offered, the broker
+reports `unsupported-platform` even while off, turning an endpoint on is
+refused (`unsupported-platform`, HTTP 409), and client apps get no entries
+(`src/lib/mcp-broker/platform.ts`); saved endpoints stay listed. When
+several installs exist, the highest version wins. Adding asks the user to
+confirm and writes the
 endpoint off, with `catalog` set. The path contains the package version and
 package managers keep old versions after an upgrade, so Maximal re-reads
 where the newest install is before every request that opens a session (no
@@ -240,11 +270,19 @@ any loopback port, so after a port change the entry is rewritten rather than
 mistaken for the user's; `/_internal/reload` also re-syncs entries from the
 server.
 
-Maximal-written entries exist only while Maximal runs: shutdown (and the
-`exit` safety net) removes them from both apps with direct file edits, since
-spawning `claude` doesn't fit the 2.5s shutdown budget, and boot re-adds them
-from the recorded choices. Boot sync runs when `config.json` has an
-`mcpBroker` section.
+Claude Code's Maximal-written entries exist only while Maximal runs: each
+session reads `~/.claude.json` when it starts, so shutdown (and the `exit`
+safety net) removes them with direct file edits, since spawning `claude`
+doesn't fit the 2.5s shutdown budget, and boot re-adds them from the recorded
+choices. Claude Desktop's entries stay across shutdown
+(`McpClientConfigurator.removeOnShutdown`): Desktop reads its config only at
+launch, like its routing profile, so removing them would only make its next
+launch come up without the server. Boot sync runs when `config.json` has an
+`mcpBroker` section, after the broker is ready (`waitForBrokerReady`, bounded
+at 45s and detached from the HTTP listener), so an app that connects right
+away isn't turned away with 503 while the broker probes its servers. Turning
+an endpoint on in Settings waits the same way before updating the apps, and
+reports the broker's state (`ready` / `starting` / `failed`) in the response.
 
 When an endpoint is turned on and an app already has its own stdio entry with
 that id (Claude Code user scope, or Claude Desktop's Claude-3p or regular
@@ -262,7 +300,8 @@ while running ones keep their instance; otherwise a restart. The broker
 re-checks an `update` and answers `RESTART_REQUIRED` if the endpoints or
 how they're served (protocol, interaction, ownership, body limit) differ,
 and the supervisor then restarts it. The control protocol is versioned
-(`CONTROL_PROTOCOL_VERSION`, 3 since `elicit`); a sidecar and broker from
+(`CONTROL_PROTOCOL_VERSION`, 4 since endpoint observations carry tool
+names); a sidecar and broker from
 different builds fail the first frame rather than half-work. The CLI, which has no broker, calls the
 running server's loopback-only `POST /_internal/reload`, which re-reads
 `config.json` and restarts the broker if needed, so no restart is required. External MCP commands,
@@ -274,6 +313,32 @@ is bounded and followed by exact-group `SIGKILL`, including descendants. Windows
 currently fails closed because kill-on-close Job Object containment is not
 implemented. Public `/status` exposes only coarse broker state and
 enabled-endpoint count.
+
+The broker's startup probe records the tool names each endpoint lists and
+reports them in its `ready` frame (`getBrokerEndpointTools`). Each server's
+stderr, which the broker used to discard, goes up the broker's stderr as
+`[endpoint:<id>] <line>`: control characters stripped, lines shortened, and
+limited per endpoint per minute (`packages/mcp-broker/src/server-stderr.ts`).
+The supervisor writes it to the MCP server log and keeps each endpoint's last
+line that reads like a problem for Settings. Dependencies' own console output
+still reaches stderr only as sanitized codes.
+
+### Work IQ sign-in
+
+For a Work IQ endpoint that is on, `GET /settings/api/mcp` adds a `workiq`
+status (`src/lib/mcp-broker/workiq.ts`): `not-installed`, `eula-needed`,
+`signin-needed`, `starting`, `ready`, or `consent-needed`. It comes from
+`workiq config show` (`I-accept-EULA`, `defaultAccount`,
+`disableBrokeredAuth`) and the tools the broker saw: Work IQ lists
+`accept_eula`, `ask` and `list_agents` before a working sign-in and its
+Microsoft 365 tools after, so signed in with only those three is
+`consent-needed`. Routes under `/settings/api/mcp/:id/workiq` run, each only
+when the user confirms that step: `accept-eula`; `sign-in` (optionally
+`config set disableBrokeredAuth=true` first, then `auth login` in the
+background, 5 minutes, cancellable with `DELETE`, then a broker restart so the
+probe looks again). The commands are a closed set (`src/lib/system/workiq-cli.ts`)
+and get the endpoint's environment allowlist, never Maximal's credentials.
+User-facing guide: [`workiq.md`](workiq.md).
 
 ### Requests for user input (elicitation)
 

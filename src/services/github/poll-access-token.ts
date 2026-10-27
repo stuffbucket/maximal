@@ -27,6 +27,7 @@ const SLOW_DOWN_BUMP_SECONDS = 5
 
 export async function pollAccessToken(
   deviceCode: DeviceCodeResponse,
+  signal: AbortSignal = new AbortController().signal,
 ): Promise<string> {
   const { clientId, headers } = getOauthAppConfig()
   const { accessTokenUrl } = getOauthUrls()
@@ -42,16 +43,23 @@ export async function pollAccessToken(
   const deadlineMs = Date.now() + deviceCode.expires_in * 1000
 
   while (true) {
+    // A cancelled or replaced flow stops here instead of polling on in the
+    // background until the device code expires.
+    signal.throwIfAborted()
     if (Date.now() >= deadlineMs) throw new Error("expired_token")
 
     await sleep(intervalSeconds * 1000)
+    signal.throwIfAborted()
 
     let response: Response
     try {
       response = await sendRequest(accessTokenUrl, {
         method: "POST",
         headers,
-        timeoutMs: DEVICE_POLL_TIMEOUT_MS,
+        signal: AbortSignal.any([
+          signal,
+          AbortSignal.timeout(DEVICE_POLL_TIMEOUT_MS),
+        ]),
         body: JSON.stringify({
           client_id: clientId,
           device_code: deviceCode.device_code,
@@ -59,6 +67,7 @@ export async function pollAccessToken(
         }),
       })
     } catch (err) {
+      signal.throwIfAborted()
       consola.warn("Device-code poll: network error, retrying", err)
       continue
     }

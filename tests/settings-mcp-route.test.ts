@@ -15,12 +15,14 @@ import path from "node:path"
 
 import type { AppConfig } from "~/lib/config/config"
 
+import { keyPlaceholder } from "~/apps/claude-code/mcp"
 import { getConfig, writeConfig } from "~/lib/config/config"
 import {
   McpEndpointAddResponse,
   McpEndpointRemoveResponse,
   McpEndpointsListResponse,
   McpEndpointToggleResponse,
+  WorkIqActionResponse,
 } from "~/lib/config/settings-types"
 import { mcpRoutes } from "~/routes/settings/mcp"
 
@@ -79,6 +81,69 @@ describe("GET /mcp", () => {
     // Broker health rides along so the UI can tell "fixing itself" from
     // "needs the user"; no broker has started in this process.
     expect(body.broker.problem).toBeNull()
+  })
+})
+
+describe("GET /mcp key repair", () => {
+  // A running Claude Code can write back the copy of ~/.claude.json it read
+  // before Maximal swapped the placeholder for the key, so the entry 401s.
+  const ID = "keyfix-fixture-2c9d"
+  const KEY = "endpoint-key-for-keyfix"
+  const claudeDir = fs.mkdtempSync(path.join(os.tmpdir(), "mcp-keyfix-"))
+  const claudeJson = path.join(claudeDir, ".claude.json")
+  const savedClaudeDir = process.env.CLAUDE_CONFIG_DIR
+  const served = (): AppConfig => {
+    const base = config({
+      id: ID,
+      enabled: true,
+      clients: ["claude-code"],
+      apiKey: KEY,
+    })
+    return { ...base, mcpBroker: { ...base.mcpBroker, enabled: true } }
+  }
+
+  beforeEach(() => {
+    process.env.CLAUDE_CONFIG_DIR = claudeDir
+    fs.writeFileSync(
+      claudeJson,
+      JSON.stringify({
+        mcpServers: {
+          [ID]: {
+            type: "http",
+            url: `http://127.0.0.1:4141/mcp/${ID}`,
+            headers: { Authorization: keyPlaceholder(KEY) },
+          },
+        },
+      }),
+    )
+    writeConfig({ ...served(), apps: { claudeCode: { mcpServers: [ID] } } })
+  })
+
+  afterAll(() => {
+    if (savedClaudeDir === undefined) delete process.env.CLAUDE_CONFIG_DIR
+    else process.env.CLAUDE_CONFIG_DIR = savedClaudeDir
+    fs.rmSync(claudeDir, { recursive: true, force: true })
+  })
+
+  const header = (): unknown => {
+    // eslint-disable-next-line unicorn/prefer-json-parse-buffer -- JSON.parse's type only accepts string
+    const text = fs.readFileSync(claudeJson, "utf8")
+    const document = JSON.parse(text) as {
+      mcpServers: Record<string, { headers?: { Authorization?: string } }>
+    }
+    return document.mcpServers[ID].headers?.Authorization
+  }
+
+  test("puts the key back into an entry Maximal owns", async () => {
+    const res = await buildApp().request("/mcp")
+    expect(res.status).toBe(200)
+    expect(header()).toBe(`Bearer ${KEY}`)
+  })
+
+  test("leaves an entry Maximal doesn't own alone", async () => {
+    writeConfig(served())
+    await buildApp().request("/mcp")
+    expect(header()).toBe(keyPlaceholder(KEY))
   })
 })
 
@@ -208,6 +273,10 @@ describe("POST /mcp/:id", () => {
     const body = McpEndpointToggleResponse.parse(await res.json())
     expect(body.endpoint.enabled).toBe(true)
     expect(body.skipped).toEqual([])
+    expect(body.unavailable).toEqual([])
+    expect(body.updated).toEqual([])
+    // No broker runs in this test process.
+    expect(body.broker).toBe("off")
 
     const broker = getConfig().mcpBroker
     expect(broker?.enabled).toBe(true)
@@ -310,5 +379,173 @@ describe("POST /mcp/:id adoption", () => {
     expect(getConfig().mcpBroker?.servers?.[0]?.transport.command).toBe(
       "workiq",
     )
+  })
+})
+
+/** Wait for the Work IQ sign-in to finish one way or another. Polls the
+ *  endpoint's own status, not the list: the list re-scans for installed
+ *  servers and could swap a real `workiq` in for the stand-in. */
+async function waitForSignIn(): Promise<string | undefined> {
+  for (let i = 0; i < 100; i++) {
+    const res = await buildApp().request("/mcp/workiq/workiq")
+    const { signIn } = WorkIqActionResponse.parse(await res.json()).workiq
+    if (signIn !== "waiting" && signIn !== "restarting") return signIn
+    await Bun.sleep(50)
+  }
+  throw new Error("sign-in didn't settle")
+}
+
+describe("Work IQ sign-in routes", () => {
+  // A stand-in `workiq`: a shell script keeping its config in a file and
+  // logging every command it was asked to run.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "workiq-route-"))
+  const state = path.join(dir, "state")
+  const calls = path.join(dir, "calls")
+  const slow = path.join(dir, "slow")
+  const workiq = path.join(dir, "workiq")
+  fs.writeFileSync(
+    workiq,
+    [
+      "#!/bin/sh",
+      `echo "$*" >> '${calls}'`,
+      `touch '${state}'`,
+      'case "$*" in',
+      `  "config show") if [ -s '${state}' ]; then cat '${state}'; else echo "No config set."; fi ;;`,
+      `  "accept-eula") echo "I-accept-EULA=true" >> '${state}' ;;`,
+      `  "config set disableBrokeredAuth=true") echo "disableBrokeredAuth=true" >> '${state}' ;;`,
+      `  "auth login") if [ -f '${slow}' ]; then sleep 5; fi; echo "defaultAccount=someone@example.com" >> '${state}' ;;`,
+      "esac",
+      "",
+    ].join("\n"),
+    { mode: 0o755 },
+  )
+  const ran = (): Array<string> =>
+    fs.existsSync(calls) ?
+      fs.readFileSync(calls, "utf8").trim().split("\n").filter(Boolean)
+    : []
+  const changed = (): Array<string> =>
+    ran().filter((command) => command !== "config show")
+
+  const workiqConfig = (enabled = true): AppConfig => ({
+    mcpBroker: {
+      enabled: true,
+      servers: [
+        {
+          id: "workiq",
+          label: "Work IQ",
+          enabled,
+          catalog: "workiq",
+          transport: { type: "stdio", command: workiq, args: ["mcp"] },
+        },
+        {
+          id: "other",
+          label: "Other",
+          enabled: true,
+          transport: { type: "stdio", command: workiq, args: ["mcp"] },
+        },
+      ],
+    },
+  })
+
+  beforeEach(() => {
+    for (const file of [state, calls, slow]) fs.rmSync(file, { force: true })
+    writeConfig(workiqConfig())
+  })
+  afterAll(() => fs.rmSync(dir, { recursive: true, force: true }))
+
+  test("the list says where Work IQ stands, only for a Work IQ endpoint that is on", async () => {
+    const res = await buildApp().request("/mcp")
+    const body = McpEndpointsListResponse.parse(await res.json())
+    const byId = new Map(body.endpoints.map((e) => [e.id, e]))
+    expect(byId.get("workiq")?.workiq).toBeDefined()
+    expect(byId.get("other")?.workiq).toBeUndefined()
+
+    writeConfig(workiqConfig(false))
+    const off = McpEndpointsListResponse.parse(
+      await (await buildApp().request("/mcp")).json(),
+    )
+    expect(off.endpoints.find((e) => e.id === "workiq")?.workiq).toBeUndefined()
+  })
+
+  test.skipIf(process.platform === "win32")(
+    "accepting the EULA runs accept-eula and nothing else that changes Work IQ",
+    async () => {
+      const res = await buildApp().request("/mcp/workiq/workiq/accept-eula", {
+        method: "POST",
+      })
+      expect(res.status).toBe(200)
+      const body = WorkIqActionResponse.parse(await res.json())
+      expect(body.workiq).toMatchObject({
+        eulaAccepted: true,
+        signedInBefore: false,
+        state: "signin-needed",
+      })
+      expect(changed()).toEqual(["accept-eula"])
+    },
+  )
+
+  test.skipIf(process.platform === "win32")(
+    "signing in switches to browser sign-in only when asked, then signs in",
+    async () => {
+      fs.writeFileSync(state, "I-accept-EULA=true\n")
+      const res = await buildApp().request(
+        "/mcp/workiq/workiq/sign-in",
+        post({ useBrowserSignIn: true }),
+      )
+      expect(res.status).toBe(200)
+      expect(WorkIqActionResponse.parse(await res.json()).workiq.signIn).toBe(
+        "waiting",
+      )
+      expect(await waitForSignIn()).toBe("idle")
+      expect(changed()).toEqual([
+        "config set disableBrokeredAuth=true",
+        "auth login",
+      ])
+      expect(fs.readFileSync(state, "utf8")).toContain("defaultAccount=")
+
+      fs.rmSync(calls)
+      await buildApp().request(
+        "/mcp/workiq/workiq/sign-in",
+        post({ useBrowserSignIn: false }),
+      )
+      await waitForSignIn()
+      expect(changed()).toEqual(["auth login"])
+    },
+  )
+
+  test.skipIf(process.platform === "win32")(
+    "a sign-in can be cancelled",
+    async () => {
+      fs.writeFileSync(state, "I-accept-EULA=true\n")
+      fs.writeFileSync(slow, "")
+      await buildApp().request(
+        "/mcp/workiq/workiq/sign-in",
+        post({ useBrowserSignIn: false }),
+      )
+      const res = await buildApp().request("/mcp/workiq/workiq/sign-in", {
+        method: "DELETE",
+      })
+      expect(res.status).toBe(200)
+      expect(await waitForSignIn()).toBe("cancelled")
+      expect(fs.readFileSync(state, "utf8")).not.toContain("defaultAccount=")
+    },
+  )
+
+  test("rejects endpoints that aren't Work IQ, unknown ones, and a bad body", async () => {
+    const app = buildApp()
+    expect(
+      (await app.request("/mcp/other/workiq/accept-eula", { method: "POST" }))
+        .status,
+    ).toBe(400)
+    expect(
+      (await app.request("/mcp/nope/workiq/accept-eula", { method: "POST" }))
+        .status,
+    ).toBe(404)
+    expect(
+      (await app.request("/mcp/workiq/workiq/sign-in", post({ browser: 1 })))
+        .status,
+    ).toBe(400)
+    // None of them changed anything.
+    expect(changed()).toEqual([])
   })
 })

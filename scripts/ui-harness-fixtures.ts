@@ -282,8 +282,9 @@ const workiqFound: McpEndpointsListResponse["available"][number] = {
     "/Users/alex/.local/share/mise/installs/npm-microsoft-workiq/1.0.1/node_modules/@microsoft/workiq/bin/osx-arm64/workiq",
   version: "1.0.1",
   install: {
-    command: "npm install -g @microsoft/workiq",
+    command: "npm install -g @microsoft/workiq@1",
     url: "https://www.npmjs.com/package/@microsoft/workiq",
+    registry: "registry.npmjs.org",
   },
 }
 
@@ -755,6 +756,15 @@ export const SCENARIOS = {
     mcp: { ...twoMcpEndpoints, broker: { state: "unavailable", problem: "not-installed" } },
   },
 
+  "mcp-windows": {
+    ...healthy("MCP · Windows, where MCP servers can't run yet"),
+    mcp: {
+      ...twoMcpEndpoints,
+      broker: { state: "unavailable", problem: "unsupported-platform" },
+      available: [],
+    },
+  },
+
   "requests-waiting": {
     ...healthy("Requests · a form and a link waiting for an answer"),
     requests: waitingRequests,
@@ -772,6 +782,26 @@ export const SCENARIOS = {
       broker: { state: "off", problem: null },
       available: [
         { id: "workiq", label: "Work IQ", status: "not-installed", install: workiqFound.install },
+      ],
+    },
+  },
+
+  "mcp-catalog-mirror": {
+    ...healthy("MCP · Work IQ not installed, npm set to another registry"),
+    mcp: {
+      endpoints: [],
+      broker: { state: "off", problem: null },
+      available: [
+        {
+          id: "workiq",
+          label: "Work IQ",
+          status: "not-installed",
+          install: {
+            ...workiqFound.install,
+            command: "npm install -g @microsoft/workiq@1 --registry https://npm.example.test/",
+            registry: "npm.example.test",
+          },
+        },
       ],
     },
   },

@@ -89,7 +89,8 @@ these commands; it is an externally configured stdio endpoint.
 
 ### Using a brokered endpoint
 
-For Linux installation, Work IQ sign-in, and session-keyring access, see
+For Work IQ sign-in, logs and admin approval, see [Work IQ](workiq.md); for
+Linux installation and session-keyring access, see
 [Work IQ on Linux](linux-workiq.md). Pi has a separate
 [connection guide](pi-workiq.md).
 
@@ -133,7 +134,8 @@ from the same machine. Stdio-only clients can run
 
 Each connected session runs its own copy of the endpoint's server, so Claude
 Code, Claude Desktop, or several Claude Code windows can use one endpoint at
-the same time. `limits.sessions` on the endpoint caps how many (default 8).
+the same time. `limits.sessions` on the endpoint caps how many (default 8);
+at the cap, the least recently used idle session is closed to make room.
 
 ## Fast UI iteration
 

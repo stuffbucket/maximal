@@ -7,6 +7,12 @@ import { StdioServerTransport } from "@modelcontextprotocol/server/stdio"
 import { proxyServer, resolveVersionNegotiation } from "mcp-proxy"
 import { setTimeout as delay } from "node:timers/promises"
 
+import {
+  RECONNECT_WINDOW_MS,
+  ResumableTransport,
+  retryWhileUnreachable,
+} from "./resumable-transport.ts"
+
 export const ADAPTER_API_KEY_ENV = "MAXIMAL_MCP_API_KEY"
 
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "localhost", "[::1]"])
@@ -48,22 +54,38 @@ const ADAPTER_IDENTITY = { name: "maximal-mcp-broker", version: "0.0.0" }
  * adapter a client discarded kept a server instance, and a slot toward the
  * endpoint's session limit, until the broker restarted. Holding the transport
  * here lets shutdown DELETE the session first.
+ *
+ * Claude Desktop starts its MCP servers only when it launches, so an adapter
+ * that exits is gone until Desktop restarts. It therefore keeps trying while
+ * Maximal isn't up yet or its broker is still starting (connection refused,
+ * 502/503) for up to RECONNECT_WINDOW_MS, and starts a new session when the
+ * broker restarted under it (see ResumableTransport).
  */
 export const runStdioAdapter = async (
   options: StdioAdapterOptions,
 ): Promise<void> => {
   const url = parseAdapterUrl(options.url)
   const apiKey = process.env[ADAPTER_API_KEY_ENV]?.trim()
-  const transport = new StreamableHTTPClientTransport(url, {
-    requestInit: {
-      headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
-    },
-  })
-  const client = new Client(ADAPTER_IDENTITY, {
-    capabilities: {},
-    versionNegotiation: resolveVersionNegotiation("auto"),
-  })
-  await client.connect(transport)
+  const openTransport = () =>
+    new StreamableHTTPClientTransport(url, {
+      requestInit: {
+        headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+      },
+    })
+  const { client, transport } = await retryWhileUnreachable(async () => {
+    const attempt = new ResumableTransport(openTransport)
+    const candidate = new Client(ADAPTER_IDENTITY, {
+      capabilities: {},
+      versionNegotiation: resolveVersionNegotiation("auto"),
+    })
+    try {
+      await candidate.connect(attempt)
+    } catch (error) {
+      await candidate.close().catch(() => undefined)
+      throw error
+    }
+    return { client: candidate, transport: attempt }
+  }, Date.now() + RECONNECT_WINDOW_MS)
 
   let ending: Promise<void> | undefined
   const endSession = (): Promise<void> => {

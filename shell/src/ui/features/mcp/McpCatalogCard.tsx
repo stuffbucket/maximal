@@ -20,8 +20,9 @@ interface McpCatalogCardProps {
 /**
  * A known MCP server that isn't added yet, laid out like an Apps card.
  * Found on this machine: where it is, and Add (after a confirm, since
- * Maximal will run that program). Not found: the install command to copy
- * and a re-scan. Adding leaves it off; its endpoint card then takes over.
+ * Maximal will run that program). Not found: the install command to copy,
+ * which registry it downloads from, and a re-scan. Adding leaves it off;
+ * its endpoint card then takes over.
  */
 export function McpCatalogCard({ item, onAdd, onRescan }: McpCatalogCardProps): JSX.Element {
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -76,6 +77,7 @@ export function McpCatalogCard({ item, onAdd, onRescan }: McpCatalogCardProps): 
         <div className="app-card__install">
           <p className="app-card__hint">
             Run this in your terminal to install {item.label}, then re-scan.
+            It downloads from <code className="mono">{item.install.registry}</code>.
           </p>
           <div className="app-card__cmd">
             <code className="app-card__cmd-text mono">{item.install.command}</code>

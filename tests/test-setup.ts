@@ -28,6 +28,19 @@ const { ensureUiEmbedStub } = await import("../scripts/ensure-ui-embed-stub")
 // which flips `HAS_EMBED` true and changes UI-route behavior.
 ensureUiEmbedStub(true)
 
+// Fail fast when a test starves the event loop, which per-test timeouts can't
+// catch. See tests/helpers/starvation-watchdog.ts.
+if (process.env.MAXIMAL_TEST_STARVATION_MS !== "0") {
+  const watchdog = new Worker(
+    new URL("helpers/starvation-watchdog.ts", import.meta.url),
+  )
+  watchdog.unref()
+  setInterval(() => {
+    // eslint-disable-next-line unicorn/require-post-message-target-origin -- a Worker, not a window
+    watchdog.postMessage(0)
+  }, 1000).unref()
+}
+
 beforeEach(() => {
   consola.level = 3
 })

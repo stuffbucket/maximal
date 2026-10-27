@@ -17,7 +17,12 @@ sidecar's stable `/mcp/<id>` route instead.
 
 `stdio-adapter` connects a stdio MCP client to a loopback `/mcp/<id>` URL. It
 sends `MAXIMAL_MCP_API_KEY` as a Bearer token when set. It never starts or
-supervises `serve`.
+supervises `serve`. Because Claude Desktop starts its MCP servers only at
+launch, the adapter keeps trying for up to 60 seconds while Maximal isn't
+listening yet or answers 502/503 (broker down or still starting), and when the
+broker restarts under it (its session answers 404) it replays the client's
+`initialize` on a new session and resends the request. On stdin close or a
+signal it still DELETEs its session.
 
 ## Dependency patch
 

@@ -7,7 +7,8 @@
  * in initiateShutdown().
  *
  * Coverage matrix for the Claude Code base-URL revert (and the removal of
- * Maximal-added MCP servers from Claude Code / Claude Desktop):
+ * Maximal-added MCP servers from Claude Code; Claude Desktop keeps its
+ * entries because it reads its config only at launch):
  *   - SIGTERM / SIGINT          → initiateShutdown ✓
  *   - process.exit(n) anywhere  → `exit` event safety net ✓
  *   - uncaught exception        → `exit` event safety net ✓
@@ -49,9 +50,10 @@ export async function initiateShutdown(
   // the next boot re-applies it. Synchronous + best-effort — a slow/failed
   // file write must not delay or block the drain.
   runAppShutdownHooks()
-  // Same for the MCP servers Maximal added to Claude Code / Claude Desktop:
-  // take them out so neither app points at a stopped Maximal. Boot re-adds
-  // them from the recorded choices. File-only and synchronous.
+  // Same for the MCP servers Maximal added to Claude Code, so a new session
+  // doesn't point at a stopped Maximal. Claude Desktop keeps its entries: it
+  // reads its config only at launch. Boot re-adds from the recorded choices.
+  // File-only and synchronous.
   removeMcpClientsOnShutdown()
 
   // Fail-safe: if close() hangs, hard-exit after 2.5s. .unref() so the

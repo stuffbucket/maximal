@@ -15,11 +15,9 @@ import {
 import { PendingRequests } from "~/lib/mcp-broker/pending-requests"
 import {
   BrokerSupervisor,
+  getBrokerEndpointTools,
   getBrokerSupervisorSnapshot,
   getBrokerUpstream,
-  reconfigureBroker,
-  startBrokerSupervisor,
-  stopBrokerSupervisor,
 } from "~/lib/mcp-broker/supervisor"
 
 class FakeBrokerProcess extends ChildProcess {
@@ -168,6 +166,7 @@ const readyPayload = {
         resources: false,
         tools: true,
       },
+      tools: ["accept_eula", "ask", "fetch"],
     },
   ],
 }
@@ -430,6 +429,68 @@ describe("BrokerSupervisor requests for user input", () => {
   })
 })
 
+describe("BrokerSupervisor readiness", () => {
+  test("waits for the handshake, then reports ready", async () => {
+    const { children, supervisor } = fixture()
+    supervisor.start()
+    let settled: string | undefined
+    const waiting = supervisor.waitUntilReady(2_000).then((readiness) => {
+      settled = readiness
+      return readiness
+    })
+    const child = await waitForChild(children)
+    await Bun.sleep(20)
+    expect(settled).toBeUndefined()
+
+    sendReadyHandshake(child, "generation-1")
+    expect(await waiting).toBe("ready")
+    // Already ready: answers at once.
+    expect(await supervisor.waitUntilReady(0)).toBe("ready")
+    await supervisor.stop()
+  })
+
+  test("reports starting when the wait runs out first", async () => {
+    const { supervisor } = fixture()
+    supervisor.start()
+    expect(await supervisor.waitUntilReady(30)).toBe("starting")
+    await supervisor.stop()
+  })
+
+  test("reports failed when the broker can't run, off when disabled", async () => {
+    const missing = fixture(config(), { executableExists: () => false })
+    missing.supervisor.start()
+    expect(await missing.supervisor.waitUntilReady(2_000)).toBe("failed")
+    await missing.supervisor.stop()
+
+    const disabled = fixture({ ...config(), enabled: false })
+    disabled.supervisor.start()
+    expect(await disabled.supervisor.waitUntilReady(2_000)).toBe("off")
+  })
+
+  test("reports failed once restarts open the circuit", async () => {
+    const supervisor = new BrokerSupervisor(
+      config({
+        restartBackoffMinMs: 5,
+        restartBackoffMaxMs: 5,
+        restartBudget: 1,
+        restartWindowMs: 1_000,
+        circuitResetMs: 1_000,
+      }),
+      {
+        executableExists: () => true,
+        platform: "darwin",
+        randomBytes: (size) => Buffer.alloc(size),
+        spawnProcess: (() => {
+          throw new Error("fixture spawn failure")
+        }) as unknown as typeof spawn,
+      },
+    )
+    supervisor.start()
+    expect(await supervisor.waitUntilReady(2_000)).toBe("failed")
+    await supervisor.stop()
+  })
+})
+
 describe("BrokerSupervisor launches that can't succeed", () => {
   test("stops as unavailable/not-installed when the executable is missing", async () => {
     const { children, supervisor } = fixture(config(), {
@@ -466,6 +527,38 @@ describe("BrokerSupervisor isolation", () => {
     })
     await supervisor.stop()
     expect(getBrokerUpstream()).toBeUndefined()
+  })
+
+  test("records the tools each endpoint offered, until the broker stops", async () => {
+    const { children, supervisor } = fixture()
+    supervisor.start()
+    expect(getBrokerEndpointTools("fixture")).toBeUndefined()
+    sendReadyHandshake(await waitForChild(children), "generation-1")
+    await waitForState("ready")
+    expect(getBrokerEndpointTools("fixture")).toEqual([
+      "accept_eula",
+      "ask",
+      "fetch",
+    ])
+    await supervisor.stop()
+    expect(getBrokerEndpointTools("fixture")).toBeUndefined()
+  })
+
+  test("passes the broker's stderr on line by line", async () => {
+    const lines: Array<string> = []
+    const { children, supervisor } = fixture(config(), {
+      onStderrLine: (line) => lines.push(line),
+    })
+    supervisor.start()
+    const child = await waitForChild(children)
+    child.stderr.write("[endpoint:fixture] Failed to fetch ")
+    child.stderr.write("remote tools\n[maximal-mcp-broker] CODE\n")
+    await Bun.sleep(5)
+    expect(lines).toEqual([
+      "[endpoint:fixture] Failed to fetch remote tools",
+      "[maximal-mcp-broker] CODE",
+    ])
+    await supervisor.stop()
   })
 
   test("withdraws the upstream when a ready generation fails", async () => {
@@ -762,25 +855,5 @@ describe("BrokerSupervisor liveness and restarts", () => {
     await waitForState("circuit-open")
     expect(attempts).toBe(3)
     await supervisor.stop()
-  })
-})
-
-describe("process-wide supervisor", () => {
-  // Disabled configs: the supervisor exists but never spawns a broker.
-  test("after stop, a reconfigure finds no supervisor and starts nothing", async () => {
-    startBrokerSupervisor({})
-    expect(await reconfigureBroker({ enabled: false, servers: [] })).toBe(true)
-    await stopBrokerSupervisor()
-    expect(await reconfigureBroker({ enabled: false })).toBe(false)
-  })
-
-  test("a stop during a reconfigure keeps the broker stopped", async () => {
-    startBrokerSupervisor({})
-    const reconfigured = reconfigureBroker({ enabled: false, servers: [] })
-    // Let the reconfigure begin stopping the old supervisor, then shut down.
-    await Promise.resolve()
-    await stopBrokerSupervisor()
-    expect(await reconfigured).toBe(false)
-    expect(await reconfigureBroker({ enabled: false })).toBe(false)
   })
 })

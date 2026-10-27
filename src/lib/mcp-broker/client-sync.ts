@@ -21,6 +21,8 @@ import { currentProxyPort } from "~/lib/start/proxy-port"
 
 import type { McpClientId } from "./types"
 
+import { brokerRunsOn } from "./platform"
+
 /** Maximal's URL for an endpoint, on the port the proxy listens on now. */
 export function mcpEndpointUrl(
   id: string,
@@ -61,6 +63,18 @@ export interface McpClientEntry {
   apiKey?: string
 }
 
+/** Why a client can't be given an endpoint on this install. */
+export type McpClientUnavailableReason =
+  /** Claude Desktop runs endpoints through `maximal-mcp-broker`, which
+   *  wasn't found. */
+  "adapter-missing"
+
+/** Why a client can't be offered endpoints at all right now, when Maximal
+ *  can tell more than "its integration is off". */
+export type McpClientOfferUnavailableReason =
+  /** Claude Desktop has another gateway profile applied. */
+  "other-provider-profile"
+
 export interface McpReconcileResult {
   /** Ids Maximal now owns in the client after this pass. */
   owned: Array<string>
@@ -68,6 +82,8 @@ export interface McpReconcileResult {
   removed: Array<string>
   /** Desired ids left alone because the client already had that name. */
   skipped: Array<string>
+  /** Desired ids Maximal couldn't write on this install, and why. */
+  unavailable: Array<{ id: string; reason: McpClientUnavailableReason }>
 }
 
 export interface McpReconcileOptions {
@@ -80,14 +96,28 @@ export interface McpClientConfigurator {
   readonly clientId: McpClientId
   /** The label that resolves this client's Maximal key (`ClientApp.apiKeyLabel`). */
   readonly apiKeyLabel: string
+  /** Whether Maximal takes its entries back out when it shuts down. Right
+   *  for a client that reads its config per session (Claude Code), so a
+   *  session started while Maximal is down doesn't get a dead server. Wrong
+   *  for one that reads it only at launch (Claude Desktop): the running app
+   *  wouldn't notice, and its next launch would come up without the server
+   *  even though Maximal is back by then. */
+  readonly removeOnShutdown: boolean
   /** Whether Maximal's integration for this client is on and usable. */
   available(): boolean
+  /** When not `available()`, a more specific reason than "integration
+   *  off", if the client can tell one cheaply. */
+  unavailableReason?(): McpClientOfferUnavailableReason | undefined
   /** Make the client match `desired`, touching only entries in `owned`. */
   reconcile(
     desired: Array<McpClientEntry>,
     owned: Array<string>,
     options?: McpReconcileOptions,
   ): McpReconcileResult
+  /** Put the right key back into owned entries the client overwrote,
+   *  touching nothing else. File-only and cheap enough to run on every
+   *  Settings read. */
+  repairKeys?(desired: Array<McpClientEntry>, owned: Array<string>): void
   /** The client's own stdio entry named `id` (one Maximal didn't write), so
    *  an endpoint can adopt its command when it is turned on. */
   existingStdioEntry?(
@@ -115,12 +145,16 @@ export function ownedMcpServers(
   return config.apps?.[APPS_KEY[clientId]]?.mcpServers ?? []
 }
 
+/** What the client should have. Nothing where the broker can't run
+ *  (Windows), so entries pointing at an endpoint that never answers come
+ *  back out; the user's choices stay in `servers[].clients`. */
 export function desiredEntriesFor(
   configurator: Pick<McpClientConfigurator, "clientId" | "apiKeyLabel">,
   config: AppConfig,
+  platform: NodeJS.Platform = process.platform,
 ): Array<McpClientEntry> {
   const broker = config.mcpBroker
-  if (broker?.enabled !== true) return []
+  if (broker?.enabled !== true || !brokerRunsOn(platform)) return []
   const appKey = resolveApiKey(configurator.apiKeyLabel, config)
   const entries: Array<McpClientEntry> = []
   for (const server of broker.servers ?? []) {
@@ -137,11 +171,17 @@ export function desiredEntriesFor(
   return entries
 }
 
+function emptyResult(): McpReconcileResult {
+  return { owned: [], added: [], removed: [], skipped: [], unavailable: [] }
+}
+
 export interface SyncMcpClientOptions {
   config?: AppConfig
   /** Override the integration check, e.g. `false` while disabling it. */
   active?: boolean
   offline?: boolean
+  /** Defaults to this machine's; tests inject another. */
+  platform?: NodeJS.Platform
 }
 
 /** Reconcile one client and persist what Maximal now owns there. */
@@ -151,15 +191,15 @@ export function syncMcpClient(
 ): McpReconcileResult {
   const config = options.config ?? getConfig()
   const owned = ownedMcpServers(configurator.clientId, config)
-  const wanted = desiredEntriesFor(configurator, config)
+  const wanted = desiredEntriesFor(configurator, config, options.platform)
   // Nothing configured and nothing to revert: don't touch the client at all.
   if (wanted.length === 0 && owned.length === 0) {
-    return { owned: [], added: [], removed: [], skipped: [] }
+    return emptyResult()
   }
   const active = options.active ?? configurator.available()
   const desired = active ? wanted : []
   if (desired.length === 0 && owned.length === 0) {
-    return { owned: [], added: [], removed: [], skipped: [] }
+    return emptyResult()
   }
   const result = configurator.reconcile(desired, owned, {
     offline: options.offline === true,

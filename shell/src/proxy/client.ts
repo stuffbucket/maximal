@@ -166,6 +166,9 @@ export interface McpClientOffer {
   name: string
   /** Maximal's integration for this client is on, so it can be offered. */
   available: boolean
+  /** When not available, a more specific reason than "integration off":
+   *  Claude Desktop has another provider's gateway profile applied. */
+  unavailableReason?: "other-provider-profile"
   /** Maximal currently has this endpoint written into the client. */
   configured: boolean
 }
@@ -177,6 +180,37 @@ export interface McpEndpointEntry {
   /** Remembered client choices, used to pre-check the prompt. */
   clients: Array<McpClientId>
   offered: Array<McpClientOffer>
+  /** Work IQ endpoints that are on: where its sign-in stands. */
+  workiq?: WorkIqStatus
+}
+
+/** Where Work IQ is (see WorkIqState in src/lib/config/settings-types.ts
+ *  for what each state means). */
+export type WorkIqState =
+  | "not-installed"
+  | "eula-needed"
+  | "signin-needed"
+  | "starting"
+  | "ready"
+  | "consent-needed"
+
+export interface WorkIqStatus {
+  state: WorkIqState
+  eulaAccepted: boolean
+  signedInBefore: boolean
+  /** Sign-in uses the browser (`disableBrokeredAuth=true`). */
+  browserSignIn: boolean
+  /** On macOS the UI offers browser sign-in and mentions the keychain. */
+  macos: boolean
+  /** The sign-in Maximal runs: `waiting` for the user in the browser,
+   *  `restarting` Work IQ after; the rest say how the last one ended. */
+  signIn: "idle" | "waiting" | "restarting" | "failed" | "timed-out" | "cancelled"
+  /** The last line Work IQ wrote that reads like a problem. Server text. */
+  lastProblem: string | null
+}
+
+interface WorkIqActionResponse {
+  workiq: WorkIqStatus
 }
 
 /** The process that runs every MCP endpoint (see McpBrokerHealth in
@@ -194,7 +228,8 @@ export interface McpCatalogItem {
   /** Absolute path of the executable Maximal found. */
   command?: string
   version?: string
-  install: { command: string; url: string }
+  /** `registry`: host the command downloads from. */
+  install: { command: string; url: string; registry: string }
 }
 
 interface McpEndpointsListResponse {
@@ -217,6 +252,14 @@ export interface McpEndpointToggleResponse {
   endpoint: McpEndpointEntry
   /** Clients that already had an entry with this name; left unchanged. */
   skipped: Array<{ client: McpClientId; name: string }>
+  /** Clients Maximal couldn't add it to on this install, and why
+   *  (`adapter-missing`: maximal-mcp-broker wasn't found). */
+  unavailable: Array<{ client: McpClientId; name: string; reason: "adapter-missing" }>
+  /** Clients whose config Maximal changed for it (added or took it out). */
+  updated: Array<{ client: McpClientId; name: string }>
+  /** Where the broker got to before the apps were updated (see
+   *  McpBrokerReadiness in src/lib/config/settings-types.ts). */
+  broker: "ready" | "starting" | "failed" | "off"
   /** The app whose own entry for this server the endpoint now runs. */
   adoptedFrom?: string
   /** Environment names from that entry that were not copied. */
@@ -370,6 +413,22 @@ type Endpoint =
       path: `/settings/api/mcp/${string}`
     }
   | {
+      kind: "mcp-workiq-accept-eula"
+      method: "POST"
+      path: `/settings/api/mcp/${string}/workiq/accept-eula`
+    }
+  | {
+      kind: "mcp-workiq-sign-in"
+      method: "POST"
+      path: `/settings/api/mcp/${string}/workiq/sign-in`
+      body: { useBrowserSignIn: boolean }
+    }
+  | {
+      kind: "mcp-workiq-cancel-sign-in"
+      method: "DELETE"
+      path: `/settings/api/mcp/${string}/workiq/sign-in`
+    }
+  | {
       kind: "requests-list"
       method: "GET"
       path: "/settings/api/requests"
@@ -415,6 +474,9 @@ interface ResponseFor {
   "mcp-toggle": McpEndpointToggleResponse
   "mcp-add": McpEndpointAddResponse
   "mcp-remove": McpEndpointRemoveResponse
+  "mcp-workiq-accept-eula": WorkIqActionResponse
+  "mcp-workiq-sign-in": WorkIqActionResponse
+  "mcp-workiq-cancel-sign-in": WorkIqActionResponse
   "requests-list": PendingRequestsResponse
   "requests-answer": { ok: true }
   "models-list": ModelsListResponse

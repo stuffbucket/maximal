@@ -36,6 +36,7 @@ function fakeConfigurator(available = true) {
   const configurator: McpClientConfigurator = {
     clientId: "claude-desktop",
     apiKeyLabel: "claude-desktop",
+    removeOnShutdown: false,
     available: () => available,
     reconcile(desired: Array<McpClientEntry>, owned: Array<string>) {
       calls.push({ desired: desired.map((entry) => entry.id), owned })
@@ -46,6 +47,7 @@ function fakeConfigurator(available = true) {
           .filter((id) => !owned.includes(id)),
         removed: owned.filter((id) => !desired.some((e) => e.id === id)),
         skipped: [],
+        unavailable: [],
       }
     },
   }
@@ -97,6 +99,12 @@ describe("desiredEntriesFor", () => {
     expect(desiredEntriesFor(client, config).map((e) => e.id)).toEqual([
       "chosen",
     ])
+  })
+
+  test("is empty on Windows, where the broker can't serve them yet", () => {
+    const config = brokerConfig([server("a", { clients: ["claude-desktop"] })])
+    expect(desiredEntriesFor(client, config, "win32")).toEqual([])
+    expect(desiredEntriesFor(client, config, "darwin")).toHaveLength(1)
   })
 
   test("is empty while the broker is off", () => {
@@ -152,6 +160,23 @@ describe("syncMcpClient", () => {
       enabled: true,
       mcpServers: [],
     })
+  })
+
+  test("takes its entries back out on Windows", () => {
+    writeConfig(
+      brokerConfig([server("a", { clients: ["claude-desktop"] })], {
+        apps: { claudeDesktop: { mcpServers: ["a"] } },
+      }),
+    )
+    const { calls, configurator } = fakeConfigurator()
+
+    const result = syncMcpClient(configurator, { platform: "win32" })
+
+    expect(result.removed).toEqual(["a"])
+    expect(calls).toEqual([{ desired: [], owned: ["a"] }])
+    expect(getConfig().mcpBroker?.servers?.[0]?.clients).toEqual([
+      "claude-desktop",
+    ])
   })
 
   test("never touches the client when nothing is desired or owned", () => {

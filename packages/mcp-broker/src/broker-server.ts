@@ -24,6 +24,7 @@ import {
   answerElicitation,
   policyCanElicit,
 } from "./elicitation.ts"
+import { createStderrForwarder, formatServerStderr } from "./server-stderr.ts"
 
 const EXTERNAL_HOST = "127.0.0.1"
 const INTERNAL_PATH = "/mcp"
@@ -85,6 +86,9 @@ export interface EndpointObservation {
     resources: boolean
     tools: boolean
   }
+  /** Tool names the server listed when it started. Some servers list more
+   *  once the user has signed in (Work IQ's remote tools). */
+  tools: Array<string>
 }
 
 interface RunningEndpoint {
@@ -94,6 +98,9 @@ interface RunningEndpoint {
   observation: EndpointObservation
   /** Use these settings for instances started from now on. */
   update(endpoint: ResolvedMcpEndpoint): void
+  /** Note a request for session `sessionId` starting; call the result when
+   *  it ends. Feeds which session to close when the limit is reached. */
+  trackRequest(sessionId: string): () => void
 }
 
 export interface RunningBrokerServer {
@@ -146,6 +153,7 @@ type ElicitationHandler = (
 /** Start one upstream instance of the endpoint's stdio server. */
 const connectUpstream = async (
   endpoint: ResolvedMcpEndpoint,
+  onStderr: (chunk: Buffer) => void,
   onElicit?: ElicitationHandler,
 ): Promise<Client> => {
   const transport = new StdioClientTransport({
@@ -155,7 +163,7 @@ const connectUpstream = async (
     env: endpoint.environment,
     stderr: "pipe",
   })
-  transport.stderr?.on("data", () => undefined)
+  transport.stderr?.on("data", onStderr)
 
   const options = clientOptions(endpoint)
   const client = new Client(
@@ -230,10 +238,70 @@ const trackToolCalls = (
  * shared between sessions, so one client's requests, interactions and
  * cancellations can't reach another's. Closing a session closes its instance.
  */
-/** A session's running tool calls, so a request can name the one it serves. */
+/** A session's running tool calls, so a request can name the one it serves,
+ *  and how recently it was used, so the limit can make room. */
 interface SessionState {
   downstream?: Server
   toolCalls: Set<{ name: string }>
+  /** Requests (not long-lived event streams) still being answered. */
+  inFlight: number
+  lastUsedAt: number
+}
+
+interface OpenSession {
+  client: Client
+  state: SessionState
+}
+
+/** Session id mcp-proxy gave this server's transport, once it has one. */
+const sessionIdOf = (server: Server): string | undefined =>
+  server.transport?.sessionId
+
+/**
+ * The session to close to make room for a new one: the least recently used
+ * with nothing in flight. A client that exits without a DELETE leaves its
+ * session open, and under Bun the broker never sees its event stream go
+ * away, so idle reaping can't reclaim it. One still initializing (no id
+ * yet) is never chosen.
+ */
+const evictionCandidate = (
+  sessions: ReadonlyMap<Server, OpenSession>,
+): Server | undefined => {
+  let candidate: { server: Server; lastUsedAt: number } | undefined
+  for (const [server, { state }] of sessions) {
+    if (state.inFlight > 0 || sessionIdOf(server) === undefined) continue
+    if (!candidate || state.lastUsedAt < candidate.lastUsedAt) {
+      candidate = { server, lastUsedAt: state.lastUsedAt }
+    }
+  }
+  return candidate?.server
+}
+
+const MAX_TOOL_NAMES = 256
+const MAX_TOOL_PAGES = 8
+
+/** The tool names a server lists, bounded; empty when listing fails. */
+const listToolNames = async (
+  client: Client,
+  timeout: number,
+): Promise<Array<string>> => {
+  const names: Array<string> = []
+  try {
+    let cursor: string | undefined
+    for (let page = 0; page < MAX_TOOL_PAGES; page++) {
+      const result = await client.listTools(cursor ? { cursor } : undefined, {
+        timeout,
+      })
+      for (const tool of result.tools) {
+        names.push(sanitizeIdentity(tool.name, "unnamed").slice(0, 128))
+      }
+      cursor = result.nextCursor
+      if (!cursor || names.length >= MAX_TOOL_NAMES) break
+    }
+  } catch {
+    // Listing is for the status Maximal shows; the endpoint still serves.
+  }
+  return names.slice(0, MAX_TOOL_NAMES)
 }
 
 const startEndpoint = async (
@@ -241,18 +309,23 @@ const startEndpoint = async (
   apiKey: string,
   maxBodyBytes: number,
   askMaximal: AskMaximal | undefined,
+  onServerStderr: ServerStderrSink,
 ): Promise<RunningEndpoint> => {
   // Replaced by `update`; each new session reads it when it starts.
   let endpoint = initial
   if (endpoint.ownership === "shareable") {
     throw new BrokerStartupError("ENDPOINT_SHARING_DISABLED")
   }
+  // Shared by every instance, so the line limit is per endpoint.
+  const forwardStderr = createStderrForwarder((line) =>
+    onServerStderr(initial.id, line),
+  )
 
   // Probe once at startup: proves the command runs and records what it
   // serves. Sessions start their own instances.
   let probe: Client
   try {
-    probe = await connectUpstream(endpoint)
+    probe = await connectUpstream(endpoint, forwardStderr)
   } catch (error) {
     throw new BrokerStartupError("ENDPOINT_CONNECT_FAILED", { cause: error })
   }
@@ -263,29 +336,61 @@ const startEndpoint = async (
   }
   const protocolEra = probe.getProtocolEra()
   const negotiatedProtocol = probe.getNegotiatedProtocolVersion()
+  const tools =
+    serverCapabilities.tools ?
+      await listToolNames(probe, endpoint.initializeTimeoutMs)
+    : []
   await probe.close().catch(() => undefined)
 
-  const sessions = new Map<Server, Client>()
+  const sessions = new Map<Server, OpenSession>()
   let opening = 0
+
+  /**
+   * Close the least recently used idle session. Chooses and forgets it
+   * synchronously, so a concurrent new session neither picks it too nor
+   * counts its slot as free twice; undefined when every session is busy.
+   */
+  const evictIdleSession = (): Promise<void> | undefined => {
+    const server = evictionCandidate(sessions)
+    const evicted = server && sessions.get(server)
+    if (!server || !evicted) return undefined
+    sessions.delete(server)
+    process.stderr.write(
+      `[maximal-mcp-broker] SESSION_EVICTED endpoint=${endpoint.id} limit=${endpoint.maxSessions}\n`,
+    )
+    // Closing the server takes the same path a DELETE does inside mcp-proxy.
+    return Promise.all([
+      server.close().catch(() => undefined),
+      evicted.client.close().catch(() => undefined),
+    ]).then(() => undefined)
+  }
 
   let httpServer
   try {
     httpServer = await startHTTPServer({
       apiKey,
       createServer: async () => {
-        if (sessions.size + opening >= endpoint.maxSessions) {
+        const full = sessions.size + opening >= endpoint.maxSessions
+        const evicting = full ? evictIdleSession() : undefined
+        if (full && !evicting) {
           throw refusal(
             503,
             `${endpoint.label} already has ${endpoint.maxSessions} sessions open; close one and retry.`,
           )
         }
+        // Reserved before the first await, together with the eviction.
         opening += 1
         // Settings as of this session's start, like everything else it uses.
         const settings = endpoint
-        const session: SessionState = { toolCalls: new Set() }
+        const session: SessionState = {
+          toolCalls: new Set(),
+          inFlight: 0,
+          lastUsedAt: Date.now(),
+        }
         let client: Client
         try {
-          client = await connectUpstream(settings, (params, signal) => {
+          await evicting
+          client = await connectUpstream(settings, forwardStderr, (params, signal) => {
             const [call] = session.toolCalls.size === 1 ? session.toolCalls : []
             return answerElicitation(params, {
               endpointId: settings.id,
@@ -324,7 +429,7 @@ const startEndpoint = async (
           trackToolCalls(server, client, session, settings)
         }
         session.downstream = server
-        sessions.set(server, client)
+        sessions.set(server, { client, state: session })
         return server
       },
       enableJsonResponse: true,
@@ -333,9 +438,9 @@ const startEndpoint = async (
       maxBodySize: maxBodyBytes,
       modern: protocolEra === "modern",
       onClose: async (server) => {
-        const client = sessions.get(server)
+        const open = sessions.get(server)
         sessions.delete(server)
-        await client?.close().catch(() => undefined)
+        await open?.client.close().catch(() => undefined)
       },
       port: 0,
       sessionIdleTimeout: endpoint.sessionIdleTimeoutMs,
@@ -354,6 +459,22 @@ const startEndpoint = async (
     update(next) {
       endpoint = next
     },
+    trackRequest(sessionId) {
+      const open = [...sessions].find(
+        ([server]) => sessionIdOf(server) === sessionId,
+      )?.[1]
+      if (!open) return () => undefined
+      const { state } = open
+      state.inFlight += 1
+      state.lastUsedAt = Date.now()
+      let ended = false
+      return () => {
+        if (ended) return
+        ended = true
+        state.inFlight -= 1
+        state.lastUsedAt = Date.now()
+      }
+    },
     observation: {
       id: endpoint.id,
       serverName: sanitizeIdentity(serverVersion.name, "anonymous-upstream"),
@@ -368,6 +489,7 @@ const startEndpoint = async (
         resources: serverCapabilities.resources !== undefined,
         tools: serverCapabilities.tools !== undefined,
       },
+      tools,
     },
     async close() {
       if (closed) {
@@ -375,7 +497,7 @@ const startEndpoint = async (
       }
       closed = true
       await httpServer.close().catch(() => undefined)
-      const clients = [...sessions.values()]
+      const clients = [...sessions.values()].map((open) => open.client)
       sessions.clear()
       await Promise.all(
         clients.map((client) => client.close().catch(() => undefined)),
@@ -444,6 +566,16 @@ const startFrontDoor = async (
     if (!endpoint) {
       response.writeHead(404).end()
       return
+    }
+
+    // A request on a session counts as in flight until it is answered. A GET
+    // is the session's long-lived event stream, which says nothing about
+    // whether the client is still there; it only counts as use.
+    const sessionId = request.headers["mcp-session-id"]
+    if (typeof sessionId === "string") {
+      const ended = endpoint.trackRequest(sessionId)
+      if (request.method === "GET") ended()
+      else response.once("close", ended)
     }
 
     const upstreamHeaders = copyHeaders(request.headers)
@@ -524,10 +656,20 @@ const startFrontDoor = async (
   }
 }
 
+/** Where an MCP server's stderr lines go. */
+export type ServerStderrSink = (endpointId: string, line: string) => void
+
+/** Up to Maximal, on the broker's own stderr. */
+const writeServerStderr: ServerStderrSink = (endpointId, line) => {
+  process.stderr.write(formatServerStderr(endpointId, line))
+}
+
 export interface BrokerServerOptions {
   /** Puts a request for user input in front of the user, via Maximal.
    *  Without it, requests the client can't show are declined. */
   askMaximal?: AskMaximal
+  /** Where the servers' stderr goes; the broker's own stderr by default. */
+  onServerStderr?: ServerStderrSink
 }
 
 export const startBrokerServer = async (
@@ -548,6 +690,7 @@ export const startBrokerServer = async (
         apiKey,
         configuration.httpBodyBytes,
         options.askMaximal,
+        options.onServerStderr ?? writeServerStderr,
       )
       endpoints.set(endpoint.id, endpoint)
     }

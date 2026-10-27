@@ -42,6 +42,7 @@ describe("BrokerFrameDecoder", () => {
               resources: false,
               tools: true,
             },
+            tools: ["accept_eula", "ask", "list_agents"],
           },
         ],
       },
