@@ -19,9 +19,20 @@ on:
   # here too or the queue blocks indefinitely waiting for them.
   merge_group:
 
+# A new push to a PR supersedes its in-flight run. Every other run gets its
+# own group (run_id), so main, merge-group, and dispatched runs never queue
+# behind or replace each other.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      # The root mise.toml pins Rust and the broker inherits it; nothing in
+      # this job builds Rust through mise, so don't download the toolchain.
+      MISE_DISABLE_TOOLS: rust
     steps:
       - name: Verify dispatched SHA
         if: github.event_name == 'workflow_dispatch' && github.sha != inputs.expected_sha

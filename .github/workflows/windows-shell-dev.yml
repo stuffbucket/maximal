@@ -48,6 +48,9 @@ jobs:
   build:
     runs-on: windows-2022
     env:
+      # The root mise.toml pins Rust and the broker inherits it; nothing in
+      # this job builds Rust through mise, so don't download the toolchain.
+      MISE_DISABLE_TOOLS: rust
       MAXIMAL_VERSION: ${{ github.event.inputs.version }}
       MAXIMAL_GIT_SHA: ${{ github.sha }}
       MAXIMAL_GIT_BRANCH: ${{ github.ref_name }}
@@ -69,34 +72,10 @@ jobs:
         with:
           mise-version: v2026.9.5
 
-      # rustup ships preinstalled on the windows-2022 image with the
-      # x86_64-pc-windows-msvc toolchain. Use it directly rather than a
-      # third-party toolchain action (internal MS CI environments reject
-      # non-MS/GitHub-sourced actions — same reason setup-bun is vendored).
-      - name: Ensure Rust msvc toolchain
-        shell: pwsh
-        run: |
-          rustup toolchain install stable --profile minimal --no-self-update
-          rustup target add x86_64-pc-windows-msvc
-          rustc -vV
-
-      # Cache the cargo registry/git downloads + the compiled target dir.
-      # The registry cache means crates are served locally instead of being
-      # re-downloaded from crates.io every run (which intermittently fails
-      # with a connection reset), and target/ skips recompiling unchanged
-      # dependency crates. Same key as the release windows-shell job, so the
-      # two share a warm cache. GitHub-published action (policy-allowed).
-      - name: Cache cargo registry + target
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            shell/src-tauri/target
-          key: windows-cargo-shell-${{ hashFiles('shell/src-tauri/Cargo.lock') }}
-          restore-keys: |
-            windows-cargo-shell-
+      # Pinned Rust + the Cargo cache warmed from main by
+      # windows-rust-cache.yml (restore only, shared with the release job).
+      - name: Set up Rust
+        uses: ./.github/actions/setup-rust-windows
 
       - name: Configure package registry
         shell: bash

@@ -75,14 +75,13 @@ describe("release action supply chain", () => {
     })
     const expectedUses = new Map([
       ["actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1", 8],
-      ["actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0", 1],
       [
         "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1",
         2,
       ],
     ])
 
-    expect(externalUses).toHaveLength(11)
+    expect(externalUses).toHaveLength(10)
     for (const [expectedUse, count] of expectedUses) {
       expect(
         externalUses.filter((actionUse) => actionUse === expectedUse),
@@ -91,6 +90,19 @@ describe("release action supply chain", () => {
     for (const actionUse of externalUses) {
       expect(actionUse).toMatch(/^[^@\s]+@[0-9a-f]{40} # v\d+\.\d+\.\d+$/u)
     }
+  })
+
+  test("the local Rust action release.yml uses pins its external actions too", async () => {
+    const action = await readRepoFile(
+      ".github/actions/setup-rust-windows/action.yml",
+    )
+    const uses = action
+      .split("\n")
+      .flatMap((line) => line.match(/uses: (\S.*)$/u)?.[1] ?? [])
+
+    expect(uses).toEqual([
+      "actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0",
+    ])
   })
 
   test("does not provision Node when the workflow does not invoke it", async () => {

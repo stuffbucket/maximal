@@ -1,0 +1,54 @@
+name: Set up Rust for the Windows shell
+description: >-
+  Install the Rust version pinned in mise.toml and restore the shared Windows
+  Cargo cache (registry + compiled target). Restore only: the cache is saved
+  from main by windows-rust-cache.yml, because a cache saved on a tag or PR
+  ref is visible to that ref alone, while main's is visible to every release
+  and dev build.
+
+outputs:
+  cache-key:
+    description: Exact cache key for this toolchain + Cargo.lock.
+    value: ${{ steps.pin.outputs.key }}
+  cache-hit:
+    description: Whether the exact key was restored.
+    value: ${{ steps.restore.outputs.cache-hit }}
+
+runs:
+  using: composite
+  steps:
+    # rustup is preinstalled on the windows-2022 image (vendored-action
+    # policy: no third-party toolchain action). The version comes from
+    # mise.toml so Windows builds match the pin everywhere else, and it is
+    # part of the cache key: a new compiler invalidates every artifact.
+    - name: Install pinned Rust
+      id: pin
+      shell: bash
+      run: |
+        set -euo pipefail
+        version="$(sed -nE 's/^rust *= *"([^"]+)".*/\1/p' mise.toml)"
+        if [ -z "$version" ]; then
+          echo "::error::no rust pin in mise.toml"
+          exit 1
+        fi
+        rustup toolchain install "$version" --profile minimal \
+          --target x86_64-pc-windows-msvc --no-self-update
+        echo "RUSTUP_TOOLCHAIN=$version" >> "$GITHUB_ENV"
+        rustc "+$version" -vV
+        lock="$(sha256sum shell/src-tauri/Cargo.lock | cut -c1-16)"
+        echo "prefix=windows-cargo-shell-$version-" >> "$GITHUB_OUTPUT"
+        echo "key=windows-cargo-shell-$version-$lock" >> "$GITHUB_OUTPUT"
+
+    # Crates are served locally (crates.io downloads intermittently reset)
+    # and unchanged dependency crates aren't recompiled.
+    - name: Restore Cargo registry + target
+      id: restore
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git/db
+          shell/src-tauri/target
+        key: ${{ steps.pin.outputs.key }}
+        restore-keys: ${{ steps.pin.outputs.prefix }}

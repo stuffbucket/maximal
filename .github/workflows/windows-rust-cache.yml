@@ -1,0 +1,94 @@
+name: Windows Rust cache
+
+# Keeps the Windows shell's compiled Cargo dependencies in a cache saved from
+# main. Release builds run on their tag and dev builds on whatever ref they're
+# dispatched from; GitHub lets those refs restore a cache saved on main but
+# not one saved on another tag, so without this every release compiled all
+# ~300 crates from scratch. The release and dev builds only restore
+# (.github/actions/setup-rust-windows); this is the only writer.
+#
+# Runs when the toolchain pin or the locked crate set changes, and twice a
+# week so the cache is read often enough to survive GitHub's 7-day eviction.
+# A PR touching those inputs builds too (proving the warm build still works)
+# but never saves.
+
+on:
+  push:
+    branches: [main]
+    paths: &inputs
+      - shell/src-tauri/Cargo.lock
+      - mise.toml
+      - .github/actions/setup-rust-windows/**
+      - .github/workflows/windows-rust-cache.yml
+  pull_request:
+    branches: [main]
+    paths: *inputs
+  schedule:
+    - cron: "41 5 * * 1,4"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-rust-cache-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  warm:
+    name: Warm Windows Cargo cache
+    runs-on: windows-2022
+    env:
+      # Retry crate downloads instead of failing on a transient reset.
+      CARGO_NET_RETRY: "10"
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Rust
+        id: rust
+        uses: ./.github/actions/setup-rust-windows
+
+      # An exact hit means this toolchain + Cargo.lock is already warm; the
+      # restore above was the read that keeps it from being evicted.
+      - uses: ./.github/actions/setup-bun
+        if: steps.rust.outputs.cache-hit != 'true'
+        with:
+          bun-version: 1.3.14
+
+      - name: Install dependencies and build the UI
+        if: steps.rust.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s\n' 'registry=https://packagefeedproxy.microsoft.io/npm/' > "$HOME/.npmrc"
+          bun install --frozen-lockfile
+          (cd shell && bun install --frozen-lockfile)
+          bun run build:ui
+
+      # Same cargo invocation as the release's `tauri build` (release profile,
+      # same features), minus bundling. tauri-build only checks that the
+      # externalBin sidecars exist, so empty placeholders stand in for them.
+      - name: Compile the Windows shell
+        if: steps.rust.outputs.cache-hit != 'true'
+        working-directory: shell
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p src-tauri/binaries
+          : > src-tauri/binaries/maximal-x86_64-pc-windows-msvc.exe
+          : > src-tauri/binaries/maximal-mcp-broker-x86_64-pc-windows-msvc.exe
+          bun run tauri build --no-bundle \
+            --config '{"build":{"beforeBuildCommand":""}}'
+
+      - name: Save Cargo registry + target
+        if: >-
+          steps.rust.outputs.cache-hit != 'true'
+          && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            shell/src-tauri/target
+          key: ${{ steps.rust.outputs.cache-key }}
