@@ -1,10 +1,13 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+
+import { t } from "../../../i18n";
 
 import type { McpCatalogItem } from "../../../proxy/client";
 import { Button } from "../../components/Button";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { ProblemCallout } from "../../components/ProblemCallout";
 import type { Problem } from "../../problems";
+import { useRecheckWhileVisible } from "../../recheck";
 
 import type { McpMutationResult } from "./useMcp";
 
@@ -13,23 +16,23 @@ const COPIED_FLASH_MS = 1400;
 interface McpCatalogCardProps {
   item: McpCatalogItem;
   onAdd: () => Promise<McpMutationResult>;
-  /** Look for installed servers again. */
+  /** Look for installed servers again. Must be a stable callback. */
   onRescan: () => Promise<void>;
 }
 
 /**
  * A known MCP server that isn't added yet, laid out like an Apps card.
  * Found on this machine: where it is, and Add (after a confirm, since
- * Maximal will run that program). Not found: the install command to copy,
- * which registry it downloads from, and a re-scan. Adding leaves it off;
- * its endpoint card then takes over.
+ * Maximal will run that program). Not found: the install command to copy
+ * and which registry it downloads from; the card looks for the install on
+ * its own and switches to Add when it appears. Adding leaves it off; its
+ * endpoint card then takes over.
  */
 export function McpCatalogCard({ item, onAdd, onRescan }: McpCatalogCardProps): JSX.Element {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [adding, setAdding] = useState(false);
   const [failed, setFailed] = useState<Problem | null>(null);
   const [copied, setCopied] = useState(false);
-  const [rescanning, setRescanning] = useState(false);
   const installed = item.status === "ready";
 
   const add = async (): Promise<void> => {
@@ -51,11 +54,8 @@ export function McpCatalogCard({ item, onAdd, onRescan }: McpCatalogCardProps): 
     }
   };
 
-  const rescan = async (): Promise<void> => {
-    setRescanning(true);
-    await onRescan();
-    setRescanning(false);
-  };
+  const installRef = useRef<HTMLDivElement>(null);
+  useRecheckWhileVisible(installRef, onRescan, !installed);
 
   return (
     <article className="app-card" data-mcp-catalog={item.id} aria-busy={adding}>
@@ -74,31 +74,26 @@ export function McpCatalogCard({ item, onAdd, onRescan }: McpCatalogCardProps): 
       {installed ? (
         <p className="app-card__hint mono">{item.command}</p>
       ) : (
-        <div className="app-card__install">
+        <div className="app-card__install" ref={installRef}>
           <p className="app-card__hint">
-            Run this in your terminal to install {item.label}, then re-scan.
-            It downloads from <code className="mono">{item.install.registry}</code>.
+            {t("install-run-in-terminal", { name: item.label })}
           </p>
           <div className="app-card__cmd">
             <code className="app-card__cmd-text mono">{item.install.command}</code>
             <div className="app-card__cmd-actions">
               <Button variant="primary" size="sm" onClick={() => void copyInstall()}>
-                {copied ? "Copied" : "Copy command"}
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={rescanning}
-                onClick={() => void rescan()}
-              >
-                {rescanning ? "Re-scanning…" : "Re-scan"}
+                {copied ? t("common-copied") : t("apps-copy-command")}
               </Button>
             </div>
           </div>
+          <p className="app-card__hint">
+            {t("mcp-install-registry", { host: item.install.registry })}{" "}
+            {t("mcp-install-then", { name: item.label })}
+          </p>
         </div>
       )}
 
-      {failed && <ProblemCallout problem={failed} onRestarted={() => void rescan()} />}
+      {failed && <ProblemCallout problem={failed} onRestarted={() => void onRescan()} />}
 
       {installed && (
         <ConfirmDialog

@@ -183,7 +183,7 @@ export const PanelBrokerStuck = panel({ scenario: "mcp-stuck" });
 export const PanelBrokerMissing = panel({ scenario: "mcp-not-installed" });
 /** Nothing added yet; Work IQ is installed, so it's offered to add. */
 export const PanelServerFound = panel({ scenario: "mcp-found" });
-/** Nothing added yet; Work IQ isn't installed: copy the install command, re-scan. */
+/** Nothing added yet; Work IQ isn't installed: copy the install command; the card notices the install. */
 export const PanelServerNotInstalled = panel({ scenario: "mcp-catalog-missing" });
 /** Maximal not answering, after ~5s of automatic retries. */
 export const PanelUnreachable = panel({ overrides: { "/settings/api/mcp": "offline" } });

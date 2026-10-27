@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { t } from "../../../i18n";
 import type { AppEntry } from "../../../proxy/client";
@@ -7,6 +7,7 @@ import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { Switch } from "../../components/Switch";
 import { cx } from "../../components/cx";
 import { isWindows } from "../../platform";
+import { useRecheckWhileVisible } from "../../recheck";
 
 import type { MutationResult } from "./useApps";
 
@@ -50,7 +51,6 @@ function conflictCopy(app: AppEntry): { title: string; detail: string } | null {
 
 export function AppCard({ app, onToggle, onRescan }: AppCardProps): JSX.Element {
   const [copied, setCopied] = useState(false);
-  const [rescanning, setRescanning] = useState(false);
   // Windows-only: disabling Claude Code routing doesn't take effect in an
   // already-running session (Claude Code reads its base URL at launch on
   // Windows; macOS picks it up live). Warn before disabling so the user
@@ -62,8 +62,9 @@ export function AppCard({ app, onToggle, onRescan }: AppCardProps): JSX.Element 
   const comingSoon = app.kind === "coming-soon";
   const notInstalled = app.status === "not-installed";
   const hasInstalls = app.installs.length > 0;
-  // Config apps with no detected install offer a one-line installer +
-  // re-scan (currently only Claude Code ships an install hint).
+  // Config apps with no detected install offer a one-line installer and
+  // look for the install on their own (currently only Claude Code ships an
+  // install hint).
   const offerInstall =
     app.kind === "config" && !hasInstalls && app.install !== null;
   const conflict = conflictCopy(app);
@@ -80,11 +81,8 @@ export function AppCard({ app, onToggle, onRescan }: AppCardProps): JSX.Element 
     }
   };
 
-  const rescan = async (): Promise<void> => {
-    setRescanning(true);
-    await onRescan();
-    setRescanning(false);
-  };
+  const installRef = useRef<HTMLDivElement>(null);
+  useRecheckWhileVisible(installRef, onRescan, offerInstall);
 
   // Intercept only the Claude-Code-disable-on-Windows case; everything else
   // (enabling, other apps, macOS) toggles straight through.
@@ -129,9 +127,9 @@ export function AppCard({ app, onToggle, onRescan }: AppCardProps): JSX.Element 
 
       {/* Config app with no install: offer the one-line installer. */}
       {offerInstall && app.install && (
-        <div className="app-card__install">
+        <div className="app-card__install" ref={installRef}>
           <p className="app-card__hint">
-            {t("apps-install-hint", { appName: app.name })}
+            {t("install-run-in-terminal", { name: app.name })}
           </p>
           <div className="app-card__cmd">
             <code className="app-card__cmd-text mono">
@@ -145,16 +143,11 @@ export function AppCard({ app, onToggle, onRescan }: AppCardProps): JSX.Element 
               >
                 {copied ? t("common-copied") : t("apps-copy-command")}
               </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={rescanning}
-                onClick={() => void rescan()}
-              >
-                {rescanning ? t("apps-rescanning") : t("apps-rescan")}
-              </Button>
             </div>
           </div>
+          <p className="app-card__hint">
+            {t("apps-install-then", { appName: app.name })}
+          </p>
         </div>
       )}
 
