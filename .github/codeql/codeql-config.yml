@@ -28,3 +28,5 @@ paths-ignore:
   - packages/storybook
   - "**/vendor"
   - "**/*.min.js"
+  # Third-party crates patched via [patch.crates-io] (shell/src-tauri/Cargo.toml).
+  - shell/src-tauri/patches
