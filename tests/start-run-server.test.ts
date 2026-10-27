@@ -28,7 +28,7 @@ import {
 // --- Mocks for the chunky boot dependencies ------------------------
 
 const initOpencodeVersionMock = mock(() => Promise.resolve())
-const realOpencodeModule = await import("~/lib/platform/opencode")
+const realOpencodeModule = { ...(await import("~/lib/platform/opencode")) }
 await mock.module("~/lib/platform/opencode", () => ({
   ...realOpencodeModule,
   initOpencodeVersion: initOpencodeVersionMock,
@@ -38,14 +38,14 @@ await mock.module("~/lib/platform/opencode", () => ({
 // real `~/server` — we keep its PATHS map intact and only stub
 // `ensurePaths` so the test never touches disk.
 const ensurePathsMock = mock(() => Promise.resolve())
-const realPathsModule = await import("~/lib/platform/paths")
+const realPathsModule = { ...(await import("~/lib/platform/paths")) }
 await mock.module("~/lib/platform/paths", () => ({
   ...realPathsModule,
   ensurePaths: ensurePathsMock,
 }))
 
 const initProxyFromEnvMock = mock(() => {})
-const realProxyModule = await import("~/lib/http/proxy")
+const realProxyModule = { ...(await import("~/lib/http/proxy")) }
 await mock.module("~/lib/http/proxy", () => ({
   ...realProxyModule,
   initProxyFromEnv: initProxyFromEnvMock,
@@ -53,7 +53,7 @@ await mock.module("~/lib/http/proxy", () => ({
 
 const ensureSecretsDirMock = mock(() => {})
 const loadSecretIntoEnvMock = mock(() => ({ source: "unset" as const }))
-const realSecretsModule = await import("~/lib/auth/secrets")
+const realSecretsModule = { ...(await import("~/lib/auth/secrets")) }
 await mock.module("~/lib/auth/secrets", () => ({
   ...realSecretsModule,
   ensureSecretsDir: ensureSecretsDirMock,
@@ -86,7 +86,7 @@ const logUserMock = mock(() => {
   return Promise.resolve()
 })
 const setupCopilotTokenMock = mock(() => Promise.resolve())
-const realTokenModule = await import("~/lib/auth/token")
+const realTokenModule = { ...(await import("~/lib/auth/token")) }
 await mock.module("~/lib/auth/token", () => ({
   ...realTokenModule,
   logUser: logUserMock,
@@ -95,7 +95,7 @@ await mock.module("~/lib/auth/token", () => ({
 
 let storedRecord: { accessToken: string } | null = null
 const readDefaultRecordMock = mock(() => Promise.resolve(storedRecord))
-const realStoreModule = await import("~/lib/auth/github-token-store")
+const realStoreModule = { ...(await import("~/lib/auth/github-token-store")) }
 await mock.module("~/lib/auth/github-token-store", () => ({
   ...realStoreModule,
   readDefaultRecord: readDefaultRecordMock,
@@ -113,7 +113,7 @@ const fakeLogger = {
   error: () => {},
   debug: () => {},
 }
-const realLoggerModule = await import("~/lib/platform/logger")
+const realLoggerModule = { ...(await import("~/lib/platform/logger")) }
 await mock.module("~/lib/platform/logger", () => ({
   ...realLoggerModule,
   createHandlerLogger: () => fakeLogger,
@@ -121,7 +121,7 @@ await mock.module("~/lib/platform/logger", () => ({
 
 // Stub `serve` from srvx so runServer never binds a port.
 const serveMock = mock(() => ({ close: () => Promise.resolve() }))
-const realSrvxModule = await import("srvx")
+const realSrvxModule = { ...(await import("srvx")) }
 await mock.module("srvx", () => ({ ...realSrvxModule, serve: serveMock }))
 
 // NOTE: we deliberately don't mock `~/server`. Replacing the cached

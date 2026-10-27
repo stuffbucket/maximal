@@ -14,7 +14,7 @@ import { Hono } from "hono"
 
 import type { Model, ModelsResponse } from "~/services/copilot/get-models"
 
-const actualGetModels = await import("~/services/copilot/get-models")
+const actualGetModels = { ...(await import("~/services/copilot/get-models")) }
 let getModelsFixture: ModelsResponse = { object: "list", data: [] }
 await mock.module("~/services/copilot/get-models", () => ({
   ...actualGetModels,

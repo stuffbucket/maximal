@@ -4,8 +4,9 @@ import { getVSCodeDeviceId } from "../src/lib/auth/deviceid"
 
 // Capture the real module so afterAll can restore it via an AWAITED
 // mock.module — `mock.restore()` does NOT undo `mock.module` in Bun, so
-// without this the winreg stub would leak forward into other test files.
-const realWinreg = await import("winreg")
+// without this the winreg stub would leak forward into other test files. It's a
+// spread snapshot because mock.module patches the live namespace in place.
+const realWinreg = { ...(await import("winreg")) }
 
 const failingRegistryError = new Error("registry unavailable")
 

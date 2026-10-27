@@ -24,8 +24,9 @@ import { Hono } from "hono"
 // github-token-store.test.ts) that conflict with a process-wide mock.
 // Instead we inject stubs via __setAuthControllerDepsForTests so the
 // module registry stays clean.
-const realGetDeviceCodeModule =
-  await import("~/services/github/get-device-code")
+const realGetDeviceCodeModule = {
+  ...(await import("~/services/github/get-device-code")),
+}
 
 await mock.module("~/services/github/get-device-code", () => ({
   getDeviceCode: () =>
