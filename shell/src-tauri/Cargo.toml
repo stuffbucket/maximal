@@ -80,3 +80,12 @@ muda = { version = "0.19", default-features = false }
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSImage"] }
 objc2-foundation = { version = "0.3", features = ["NSData"] }
+
+# glib 0.18.5 with the two-line fix for GHSA-wrw7-89jp-8q8g / RUSTSEC-2024-0429
+# (VariantStrIter::impl_get passed `&p` to a C out-argument; upstream fixed it
+# in glib 0.20 but never in 0.18, and Tauri's Linux stack pins gtk 0.18).
+# glib is only compiled for Linux/BSD targets. Remove this and the
+# patches/glib-0.18.5 directory once Tauri depends on glib >= 0.20; see
+# https://github.com/stuffbucket/maximal/issues/530.
+[patch.crates-io]
+glib = { path = "patches/glib-0.18.5" }
