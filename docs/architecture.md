@@ -59,6 +59,7 @@ Claude Code is routed by an ownership-guarded `ANTHROPIC_BASE_URL` plus `apiKeyH
 - **`maximal debug`** (and `--json`) — effective config, executor selection (which `Executor` `selectExecutor()` would pick), secret sources (env/file/config/unset, never values), paths.
 - **`GET /_debug/state`** — live equivalent on a running proxy. 404 by default; gated on `state.verbose`. Useful when restart isn't an option.
 - **Daily log** at `~/.local/share/maximal/logs/messages-handler-<date>.log` — request payloads, translated SSE events, web-tools agent traces. 7-day retention.
+- **MCP server log** at `~/.local/share/maximal/logs/mcp-broker-<date>.log` — the broker's own codes and each MCP server's stderr, prefixed with the endpoint id (`src/lib/mcp-broker/server-log.ts`). Rate-limited; same retention.
 
 ## Parallel-agent convention
 
@@ -299,7 +300,8 @@ while running ones keep their instance; otherwise a restart. The broker
 re-checks an `update` and answers `RESTART_REQUIRED` if the endpoints or
 how they're served (protocol, interaction, ownership, body limit) differ,
 and the supervisor then restarts it. The control protocol is versioned
-(`CONTROL_PROTOCOL_VERSION`, 3 since `elicit`); a sidecar and broker from
+(`CONTROL_PROTOCOL_VERSION`, 4 since endpoint observations carry tool
+names); a sidecar and broker from
 different builds fail the first frame rather than half-work. The CLI, which has no broker, calls the
 running server's loopback-only `POST /_internal/reload`, which re-reads
 `config.json` and restarts the broker if needed, so no restart is required. External MCP commands,
@@ -311,6 +313,32 @@ is bounded and followed by exact-group `SIGKILL`, including descendants. Windows
 currently fails closed because kill-on-close Job Object containment is not
 implemented. Public `/status` exposes only coarse broker state and
 enabled-endpoint count.
+
+The broker's startup probe records the tool names each endpoint lists and
+reports them in its `ready` frame (`getBrokerEndpointTools`). Each server's
+stderr, which the broker used to discard, goes up the broker's stderr as
+`[endpoint:<id>] <line>`: control characters stripped, lines shortened, and
+limited per endpoint per minute (`packages/mcp-broker/src/server-stderr.ts`).
+The supervisor writes it to the MCP server log and keeps each endpoint's last
+line that reads like a problem for Settings. Dependencies' own console output
+still reaches stderr only as sanitized codes.
+
+### Work IQ sign-in
+
+For a Work IQ endpoint that is on, `GET /settings/api/mcp` adds a `workiq`
+status (`src/lib/mcp-broker/workiq.ts`): `not-installed`, `eula-needed`,
+`signin-needed`, `starting`, `ready`, or `consent-needed`. It comes from
+`workiq config show` (`I-accept-EULA`, `defaultAccount`,
+`disableBrokeredAuth`) and the tools the broker saw: Work IQ lists
+`accept_eula`, `ask` and `list_agents` before a working sign-in and its
+Microsoft 365 tools after, so signed in with only those three is
+`consent-needed`. Routes under `/settings/api/mcp/:id/workiq` run, each only
+when the user confirms that step: `accept-eula`; `sign-in` (optionally
+`config set disableBrokeredAuth=true` first, then `auth login` in the
+background, 5 minutes, cancellable with `DELETE`, then a broker restart so the
+probe looks again). The commands are a closed set (`src/lib/system/workiq-cli.ts`)
+and get the endpoint's environment allowlist, never Maximal's credentials.
+User-facing guide: [`workiq.md`](workiq.md).
 
 ### Requests for user input (elicitation)
 

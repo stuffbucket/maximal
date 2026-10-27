@@ -89,7 +89,8 @@ these commands; it is an externally configured stdio endpoint.
 
 ### Using a brokered endpoint
 
-For Linux installation, Work IQ sign-in, and session-keyring access, see
+For Work IQ sign-in, logs and admin approval, see [Work IQ](workiq.md); for
+Linux installation and session-keyring access, see
 [Work IQ on Linux](linux-workiq.md). Pi has a separate
 [connection guide](pi-workiq.md).
 

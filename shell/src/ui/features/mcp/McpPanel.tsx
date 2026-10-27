@@ -41,8 +41,20 @@ function brokerProblem(broker: McpBrokerHealth): Problem | null {
 }
 
 export function McpPanel(): JSX.Element {
-  const { endpoints, available, broker, isLoading, problem, refresh, toggle, add, remove } =
-    useMcp();
+  const {
+    endpoints,
+    available,
+    broker,
+    isLoading,
+    problem,
+    refresh,
+    toggle,
+    add,
+    remove,
+    acceptWorkIqEula,
+    signInWorkIq,
+    cancelWorkIqSignIn,
+  } = useMcp();
   const brokerIssue = broker ? brokerProblem(broker) : null;
   const quiet = broker ? QUIET[broker.state] : undefined;
   // Nothing to install or add where MCP servers can't run; the callout says so.
@@ -92,6 +104,9 @@ export function McpPanel(): JSX.Element {
                 toggle(endpoint.id, enabled, clients)
               }
               onRemove={() => remove(endpoint.id)}
+              onAcceptWorkIqEula={() => acceptWorkIqEula(endpoint.id)}
+              onSignInWorkIq={(useBrowserSignIn) => signInWorkIq(endpoint.id, useBrowserSignIn)}
+              onCancelWorkIqSignIn={() => cancelWorkIqSignIn(endpoint.id)}
             />
           ))}
         </Stack>

@@ -4,9 +4,10 @@ import type { ResolvedBrokerConfiguration } from "./configuration"
 
 export const CONTROL_PROTOCOL = "maximal-mcp-control"
 // 2: adds `update`. 3: adds `elicit`, `elicitResult` and `elicitWithdrawn`.
+// 4: endpoint observations list the tools each server offered at startup.
 // Broker and sidecar ship together; a mismatched pair fails the first frame
 // instead of half-working.
-export const CONTROL_PROTOCOL_VERSION = 3
+export const CONTROL_PROTOCOL_VERSION = 4
 export const DEFAULT_MAX_CONTROL_FRAME_BYTES = 1_048_576
 
 const IdentifierSchema = z
@@ -29,6 +30,7 @@ const EndpointObservationSchema = z.strictObject({
     resources: z.boolean(),
     tools: z.boolean(),
   }),
+  tools: z.array(z.string().min(1).max(128)).max(256),
 })
 
 const BaseEnvelopeSchema = z.strictObject({

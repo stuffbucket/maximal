@@ -21,6 +21,7 @@ import {
 } from "./control-protocol"
 import { PendingRequests, pendingRequests } from "./pending-requests"
 import { brokerRunsOn } from "./platform"
+import { createLineSplitter, recordBrokerStderr } from "./server-log"
 
 export type BrokerSupervisorState =
   | "disabled"
@@ -61,6 +62,21 @@ let currentSnapshot: BrokerSupervisorSnapshot = {
   problem: null,
 }
 let currentUpstream: BrokerUpstream | undefined
+/** Tool names each endpoint of the ready broker offered at startup. */
+let currentEndpointTools: ReadonlyMap<string, Array<string>> | undefined
+
+function withdrawUpstream(): void {
+  currentUpstream = undefined
+  currentEndpointTools = undefined
+}
+
+/** The tools endpoint `id` offered when the running broker started;
+ *  undefined while no broker is ready. */
+export function getBrokerEndpointTools(
+  id: string,
+): ReadonlyArray<string> | undefined {
+  return currentEndpointTools?.get(id)
+}
 
 /** Where a broker that was just (re)started got to, for a caller that
  *  wants to act once it serves: `ready` serves, `starting` is still coming
@@ -133,6 +149,9 @@ interface SupervisorOptions {
   spawnProcess?: typeof spawn
   /** Where requests for user input wait for an answer. */
   requests?: PendingRequests
+  /** Each line the broker writes to stderr: its own codes, and its
+   *  servers' stderr tagged with their endpoint. Maximal's log by default. */
+  onStderrLine?: (line: string) => void
 }
 
 /** How long to wait for the broker to take an update before restarting it
@@ -171,6 +190,7 @@ export class BrokerSupervisor {
   readonly #randomUUID: () => string
   readonly #spawnProcess: typeof spawn
   readonly #requests: PendingRequests
+  readonly #onStderrLine: (line: string) => void
   #generation: BrokerGeneration | undefined
   #stopping = false
   #restartTimes: Array<number> = []
@@ -194,6 +214,7 @@ export class BrokerSupervisor {
     this.#randomUUID = options.randomUUID ?? crypto.randomUUID
     this.#spawnProcess = options.spawnProcess ?? spawn
     this.#requests = options.requests ?? pendingRequests
+    this.#onStderrLine = options.onStderrLine ?? recordBrokerStderr
     this.#setState("disabled")
   }
 
@@ -201,7 +222,7 @@ export class BrokerSupervisor {
     if (this.#stopping || this.#generation) return
     if (this.#config.enabled !== true) {
       this.#setState("disabled")
-      currentUpstream = undefined
+      withdrawUpstream()
       return
     }
     this.#beginLaunch()
@@ -280,7 +301,7 @@ export class BrokerSupervisor {
     this.#stopping = true
     this.#setState("stopping")
     this.#clearTimers()
-    currentUpstream = undefined
+    withdrawUpstream()
 
     const generation = this.#generation
     if (generation) {
@@ -343,7 +364,7 @@ export class BrokerSupervisor {
   #launch(): void {
     if (this.#stopping) return
     this.#setState("starting")
-    currentUpstream = undefined
+    withdrawUpstream()
 
     if (!brokerRunsOn(this.#platform)) {
       // A kill-on-close Job Object has not been wired yet. Running without one
@@ -383,7 +404,7 @@ export class BrokerSupervisor {
     }
     this.#generation = generation
 
-    child.stderr.on("data", () => undefined)
+    child.stderr.on("data", createLineSplitter(this.#onStderrLine))
     child.stdout.on("data", (chunk: Buffer) => {
       generation.processing = generation.processing
         .then(async () => {
@@ -400,7 +421,7 @@ export class BrokerSupervisor {
       this.#forceKillGeneration(generation)
       this.#requests.dropGeneration(generation.id)
       this.#generation = undefined
-      currentUpstream = undefined
+      withdrawUpstream()
       this.#clearGenerationTimers(generation)
       this.#clearGenerationMonitors()
       if (!this.#stopping) this.#scheduleRestart()
@@ -585,6 +606,9 @@ export class BrokerSupervisor {
       origin: `http://${payload.host}:${payload.port}`,
       apiKey: generation.apiKey,
     }
+    currentEndpointTools = new Map(
+      payload.endpoints.map((endpoint) => [endpoint.id, endpoint.tools]),
+    )
     this.#clearGenerationTimers(generation)
     generation.lastHeartbeatAt = this.#now()
     this.#setState("ready")
@@ -611,7 +635,7 @@ export class BrokerSupervisor {
     if (this.#generation !== generation || this.#stopping) return
     this.#requests.dropGeneration(generation.id)
     this.#generation = undefined
-    currentUpstream = undefined
+    withdrawUpstream()
     this.#clearGenerationTimers(generation)
     this.#clearGenerationMonitors()
     this.#setState("degraded")
@@ -751,6 +775,7 @@ export class BrokerSupervisor {
 /** The process-wide supervisor, replaced when endpoint config changes. Only
  *  the server process starts one; elsewhere (e.g. the CLI) it stays unset. */
 let activeSupervisor: BrokerSupervisor | undefined
+let activeConfig: McpBrokerConfig | undefined
 let activeConfigJson: string | undefined
 let reconfiguring: Promise<void> = Promise.resolve()
 
@@ -768,8 +793,19 @@ function brokerConfigKey(config: McpBrokerConfig): string {
 
 export function startBrokerSupervisor(config: McpBrokerConfig): void {
   activeSupervisor = new BrokerSupervisor(config)
+  activeConfig = config
   activeConfigJson = brokerConfigKey(config)
   activeSupervisor.start()
+}
+
+/** Run broker changes one at a time, so the most recent one always wins. */
+function serialized(run: () => Promise<boolean>): Promise<boolean> {
+  const pending = reconfiguring.then(run, run)
+  reconfiguring = pending.then(
+    () => undefined,
+    () => undefined,
+  )
+  return pending
 }
 
 /** Apply new config to the broker: nothing when it's unchanged, a live
@@ -778,7 +814,7 @@ export function startBrokerSupervisor(config: McpBrokerConfig): void {
  *  (the caller should ask the running server to reload). Calls run one at a
  *  time, so the most recent config always wins. */
 export function reconfigureBroker(config: McpBrokerConfig): Promise<boolean> {
-  const run = async (): Promise<boolean> => {
+  return serialized(async () => {
     const previous = activeSupervisor
     if (!previous) return false
     const key = brokerConfigKey(config)
@@ -787,6 +823,7 @@ export function reconfigureBroker(config: McpBrokerConfig): Promise<boolean> {
       // Calls are serialized through `reconfiguring`, so nothing raced us.
       // eslint-disable-next-line require-atomic-updates
       activeConfigJson = key
+      activeConfig = config
       return true
     }
     await previous.stop()
@@ -794,13 +831,24 @@ export function reconfigureBroker(config: McpBrokerConfig): Promise<boolean> {
     if (activeSupervisor !== previous) return false
     startBrokerSupervisor(config)
     return true
-  }
-  const pending = reconfiguring.then(run, run)
-  reconfiguring = pending.then(
-    () => undefined,
-    () => undefined,
-  )
-  return pending
+  })
+}
+
+/**
+ * Restart the broker with the config it has, so every endpoint is probed
+ * again (after the user signs in to a server, say). Sessions running now
+ * end. False when no supervisor runs in this process.
+ */
+export function restartBroker(): Promise<boolean> {
+  return serialized(async () => {
+    const previous = activeSupervisor
+    const config = activeConfig
+    if (!previous || !config) return false
+    await previous.stop()
+    if (activeSupervisor !== previous) return false
+    startBrokerSupervisor(config)
+    return true
+  })
 }
 
 /**
@@ -832,6 +880,7 @@ export async function waitForBrokerReady(
 export function stopBrokerSupervisor(): Promise<void> {
   const supervisor = activeSupervisor
   activeSupervisor = undefined
+  activeConfig = undefined
   activeConfigJson = undefined
   return supervisor?.stop() ?? Promise.resolve()
 }

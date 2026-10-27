@@ -24,6 +24,7 @@ import {
   answerElicitation,
   policyCanElicit,
 } from "./elicitation.ts"
+import { createStderrForwarder, formatServerStderr } from "./server-stderr.ts"
 
 const EXTERNAL_HOST = "127.0.0.1"
 const INTERNAL_PATH = "/mcp"
@@ -85,6 +86,9 @@ export interface EndpointObservation {
     resources: boolean
     tools: boolean
   }
+  /** Tool names the server listed when it started. Some servers list more
+   *  once the user has signed in (Work IQ's remote tools). */
+  tools: Array<string>
 }
 
 interface RunningEndpoint {
@@ -149,6 +153,7 @@ type ElicitationHandler = (
 /** Start one upstream instance of the endpoint's stdio server. */
 const connectUpstream = async (
   endpoint: ResolvedMcpEndpoint,
+  onStderr: (chunk: Buffer) => void,
   onElicit?: ElicitationHandler,
 ): Promise<Client> => {
   const transport = new StdioClientTransport({
@@ -158,7 +163,7 @@ const connectUpstream = async (
     env: endpoint.environment,
     stderr: "pipe",
   })
-  transport.stderr?.on("data", () => undefined)
+  transport.stderr?.on("data", onStderr)
 
   const options = clientOptions(endpoint)
   const client = new Client(
@@ -272,23 +277,55 @@ const evictionCandidate = (
   return candidate?.server
 }
 
+const MAX_TOOL_NAMES = 256
+const MAX_TOOL_PAGES = 8
+
+/** The tool names a server lists, bounded; empty when listing fails. */
+const listToolNames = async (
+  client: Client,
+  timeout: number,
+): Promise<Array<string>> => {
+  const names: Array<string> = []
+  try {
+    let cursor: string | undefined
+    for (let page = 0; page < MAX_TOOL_PAGES; page++) {
+      const result = await client.listTools(cursor ? { cursor } : undefined, {
+        timeout,
+      })
+      for (const tool of result.tools) {
+        names.push(sanitizeIdentity(tool.name, "unnamed").slice(0, 128))
+      }
+      cursor = result.nextCursor
+      if (!cursor || names.length >= MAX_TOOL_NAMES) break
+    }
+  } catch {
+    // Listing is for the status Maximal shows; the endpoint still serves.
+  }
+  return names.slice(0, MAX_TOOL_NAMES)
+}
+
 const startEndpoint = async (
   initial: ResolvedMcpEndpoint,
   apiKey: string,
   maxBodyBytes: number,
   askMaximal: AskMaximal | undefined,
+  onServerStderr: ServerStderrSink,
 ): Promise<RunningEndpoint> => {
   // Replaced by `update`; each new session reads it when it starts.
   let endpoint = initial
   if (endpoint.ownership === "shareable") {
     throw new BrokerStartupError("ENDPOINT_SHARING_DISABLED")
   }
+  // Shared by every instance, so the line limit is per endpoint.
+  const forwardStderr = createStderrForwarder((line) =>
+    onServerStderr(initial.id, line),
+  )
 
   // Probe once at startup: proves the command runs and records what it
   // serves. Sessions start their own instances.
   let probe: Client
   try {
-    probe = await connectUpstream(endpoint)
+    probe = await connectUpstream(endpoint, forwardStderr)
   } catch (error) {
     throw new BrokerStartupError("ENDPOINT_CONNECT_FAILED", { cause: error })
   }
@@ -299,6 +336,10 @@ const startEndpoint = async (
   }
   const protocolEra = probe.getProtocolEra()
   const negotiatedProtocol = probe.getNegotiatedProtocolVersion()
+  const tools =
+    serverCapabilities.tools ?
+      await listToolNames(probe, endpoint.initializeTimeoutMs)
+    : []
   await probe.close().catch(() => undefined)
 
   const sessions = new Map<Server, OpenSession>()
@@ -349,7 +390,7 @@ const startEndpoint = async (
         let client: Client
         try {
           await evicting
-          client = await connectUpstream(settings, (params, signal) => {
+          client = await connectUpstream(settings, forwardStderr, (params, signal) => {
             const [call] = session.toolCalls.size === 1 ? session.toolCalls : []
             return answerElicitation(params, {
               endpointId: settings.id,
@@ -448,6 +489,7 @@ const startEndpoint = async (
         resources: serverCapabilities.resources !== undefined,
         tools: serverCapabilities.tools !== undefined,
       },
+      tools,
     },
     async close() {
       if (closed) {
@@ -614,10 +656,20 @@ const startFrontDoor = async (
   }
 }
 
+/** Where an MCP server's stderr lines go. */
+export type ServerStderrSink = (endpointId: string, line: string) => void
+
+/** Up to Maximal, on the broker's own stderr. */
+const writeServerStderr: ServerStderrSink = (endpointId, line) => {
+  process.stderr.write(formatServerStderr(endpointId, line))
+}
+
 export interface BrokerServerOptions {
   /** Puts a request for user input in front of the user, via Maximal.
    *  Without it, requests the client can't show are declined. */
   askMaximal?: AskMaximal
+  /** Where the servers' stderr goes; the broker's own stderr by default. */
+  onServerStderr?: ServerStderrSink
 }
 
 export const startBrokerServer = async (
@@ -638,6 +690,7 @@ export const startBrokerServer = async (
         apiKey,
         configuration.httpBodyBytes,
         options.askMaximal,
+        options.onServerStderr ?? writeServerStderr,
       )
       endpoints.set(endpoint.id, endpoint)
     }
