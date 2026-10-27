@@ -4,7 +4,9 @@
  * site publishes at a canonical URL (mxml.sh, fronting GitHub Pages) and
  * compares it to the running `BUILD_VERSION`. Config-gated
  * (`config.checkUpdates`, default ON) and cached so the Settings panel + the
- * shell's periodic notification don't refetch needlessly.
+ * shell's periodic notification don't refetch needlessly. A refetch is a
+ * conditional request (`If-None-Match` / `If-Modified-Since`), so an unchanged
+ * manifest costs a 304 with no body.
  *
  * Install-channel neutral: we point users at `https://mxml.sh` (the download
  * page that routes to the right artifact / package manager) rather than a raw
@@ -98,9 +100,70 @@ export function __resetUpdateCheckDepsForTests(): void {
   nowMs = Date.now
   versionImpl = BUILD_VERSION
   cache = null
+  manifest = null
 }
 
 let cache: { atMs: number; status: UpdateStatus } | null = null
+
+/** The last manifest body the CDN served, with the validators that identify
+ *  it. Revalidation sends these validators back, and a 304 means "still this
+ *  body", so the validators only ever travel together with the body they name.
+ *  `etag` is kept byte-for-byte as received: the CDN serves a weak `W/` ETag
+ *  for a gzip-encoded response and matches `If-None-Match` only against that
+ *  exact string. */
+interface CachedManifest {
+  body: string
+  etag: string | null
+  lastModified: string | null
+}
+
+let manifest: CachedManifest | null = null
+
+/**
+ * Request headers for a manifest fetch. `Cache-Control: no-cache` asks any
+ * intermediate (corporate) proxy to revalidate instead of serving a stale copy;
+ * it does not bypass the CDN itself, which honors its own `max-age`, and
+ * neither does a query string, so we don't add one. The conditional headers
+ * are sent only when we hold the body they identify.
+ */
+function manifestRequestHeaders(held: CachedManifest | null): Headers {
+  const headers = new Headers({
+    "user-agent": "maximal",
+    "cache-control": "no-cache",
+  })
+  if (held?.etag) headers.set("if-none-match", held.etag)
+  if (held?.lastModified) headers.set("if-modified-since", held.lastModified)
+  return headers
+}
+
+/**
+ * Fetch the manifest body, revalidating against the held copy. Returns the
+ * body to parse (fresh, or the held one on a 304) or an error string. Never
+ * throws for an HTTP status; network errors propagate to the caller.
+ */
+async function fetchManifestBody(): Promise<
+  { body: string } | { error: string }
+> {
+  const held = manifest
+  const res = await fetchImpl(MANIFEST_URL, {
+    headers: manifestRequestHeaders(held),
+    signal: AbortSignal.timeout(GITHUB_API_TIMEOUT_MS),
+  })
+  // 304 is not `ok`, so it must be handled first. Without a held body it can
+  // only come from a misbehaving intermediary; fall through to the error path.
+  if (res.status === 304 && held) return { body: held.body }
+  if (!res.ok) return { error: `manifest fetch returned HTTP ${res.status}` }
+  const body = await res.text()
+  // Concurrent checks would each store a complete, self-consistent
+  // body+validators record; last write wins, which is harmless.
+  // eslint-disable-next-line require-atomic-updates
+  manifest = {
+    body,
+    etag: res.headers.get("etag"),
+    lastModified: res.headers.get("last-modified"),
+  }
+  return { body }
+}
 
 /**
  * Best-effort semver-precedence compare. Returns true if `a` is strictly newer
@@ -227,17 +290,13 @@ export async function getUpdateStatus(force = false): Promise<UpdateStatus> {
   })
 
   try {
-    const res = await fetchImpl(MANIFEST_URL, {
-      headers: { "user-agent": "maximal" },
-      signal: AbortSignal.timeout(GITHUB_API_TIMEOUT_MS),
-    })
-    if (!res.ok) {
+    const fetched = await fetchManifestBody()
+    if ("error" in fetched) {
       // Transient CDN/network blip, or a manifest not yet deployed.
-      const error = `manifest fetch returned HTTP ${res.status}`
-      log.warn(`Update check: ${error}; skipping.`)
-      return fallback(error)
+      log.warn(`Update check: ${fetched.error}; skipping.`)
+      return fallback(fetched.error)
     }
-    const latest = parseManifestVersion(await res.text())
+    const latest = parseManifestVersion(fetched.body)
     const error =
       latest === null ? "manifest had no usable version for this channel" : null
     const atMs = nowMs()
