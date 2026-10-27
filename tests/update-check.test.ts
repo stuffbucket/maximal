@@ -24,6 +24,14 @@ const manifestBody = (version: unknown): string =>
 const manifestJson = (version: string): Response =>
   new Response(manifestBody(version), { status: 200 })
 
+/** A 200 manifest carrying cache validators (`etag`, `last-modified`). */
+const withValidators = (
+  version: string,
+  headers: Record<string, string>,
+): Response => new Response(manifestBody(version), { status: 200, headers })
+
+const notModified = (): Response => new Response(null, { status: 304 })
+
 describe("isNewerVersion", () => {
   test("compares major/minor/patch numerically", () => {
     expect(isNewerVersion("0.4.27", "0.4.26")).toBe(true)
@@ -244,5 +252,216 @@ describe("getUpdateStatus", () => {
 
     expect(status.latest).toBeNull()
     expect(status.update_available).toBe(false)
+  })
+})
+
+describe("getUpdateStatus — conditional CDN revalidation", () => {
+  interface Seen {
+    url: string
+    headers: Headers
+  }
+  let seen: Array<Seen>
+  let clock: number
+
+  /** Fetch stub that records every request and answers from `responses` in
+   *  order (the last one repeats). */
+  const scripted =
+    (responses: Array<() => Response>) =>
+    (url: string, init?: RequestInit): Promise<Response> => {
+      seen.push({ url, headers: new Headers(init?.headers) })
+      const next = responses[Math.min(seen.length - 1, responses.length - 1)]
+      return Promise.resolve(next())
+    }
+
+  beforeEach(() => {
+    seen = []
+    clock = 1_000_000
+    __resetUpdateCheckDepsForTests()
+  })
+  afterEach(() => {
+    __resetUpdateCheckDepsForTests()
+  })
+
+  test("asks intermediaries to revalidate, with no validators on a cold cache", async () => {
+    __setUpdateCheckDepsForTests({
+      fetch: scripted([() => manifestJson("999.0.0")]),
+      now: () => clock,
+    })
+
+    await getUpdateStatus()
+
+    expect(seen).toHaveLength(1)
+    expect(seen[0].headers.get("cache-control")).toBe("no-cache")
+    expect(seen[0].headers.get("if-none-match")).toBeNull()
+    expect(seen[0].headers.get("if-modified-since")).toBeNull()
+    // No cache-busting query string: Fastly ignores it, so it would only
+    // fragment the CDN cache.
+    expect(seen[0].url).toBe("https://mxml.sh/updates/manifest.json")
+  })
+
+  test("revalidates with the ETag exactly as received (weak) and Last-Modified", async () => {
+    const lastModified = "Mon, 26 Oct 2026 12:00:00 GMT"
+    __setUpdateCheckDepsForTests({
+      fetch: scripted([
+        () =>
+          withValidators("999.0.0", {
+            etag: 'W/"abc123"',
+            "last-modified": lastModified,
+          }),
+        notModified,
+      ]),
+      now: () => clock,
+    })
+
+    await getUpdateStatus()
+    await getUpdateStatus(true)
+
+    expect(seen).toHaveLength(2)
+    expect(seen[1].headers.get("if-none-match")).toBe('W/"abc123"')
+    expect(seen[1].headers.get("if-modified-since")).toBe(lastModified)
+    expect(seen[1].headers.get("cache-control")).toBe("no-cache")
+  })
+
+  test("sends only the validators the server provided", async () => {
+    __setUpdateCheckDepsForTests({
+      fetch: scripted([
+        () => withValidators("999.0.0", { etag: '"strong-1"' }),
+        notModified,
+      ]),
+      now: () => clock,
+    })
+
+    await getUpdateStatus()
+    await getUpdateStatus(true)
+
+    expect(seen[1].headers.get("if-none-match")).toBe('"strong-1"')
+    expect(seen[1].headers.get("if-modified-since")).toBeNull()
+  })
+
+  test("a 304 reuses the cached manifest and refreshes checked_at", async () => {
+    __setUpdateCheckDepsForTests({
+      fetch: scripted([
+        () => withValidators("999.0.0", { etag: '"v1"' }),
+        notModified,
+      ]),
+      now: () => clock,
+    })
+
+    const first = await getUpdateStatus()
+    clock += 60_000
+    const second = await getUpdateStatus(true)
+
+    expect(second.latest).toBe("999.0.0")
+    expect(second.update_available).toBe(true)
+    expect(second.last_error).toBeNull()
+    expect(second.checked_at).toBe(new Date(clock).toISOString())
+    expect(second.checked_at).not.toBe(first.checked_at)
+  })
+
+  test("a 304 result is cached like a 200", async () => {
+    __setUpdateCheckDepsForTests({
+      fetch: scripted([
+        () => withValidators("999.0.0", { etag: '"v1"' }),
+        notModified,
+      ]),
+      now: () => clock,
+    })
+
+    await getUpdateStatus()
+    await getUpdateStatus(true)
+    await getUpdateStatus()
+
+    expect(seen).toHaveLength(2)
+  })
+
+  test("a changed manifest replaces the cached body and validators", async () => {
+    __setUpdateCheckDepsForTests({
+      fetch: scripted([
+        () => withValidators("1.0.0", { etag: '"v1"' }),
+        () => withValidators("999.0.0", { etag: '"v2"' }),
+        notModified,
+      ]),
+      now: () => clock,
+    })
+
+    await getUpdateStatus()
+    const changed = await getUpdateStatus(true)
+    const revalidated = await getUpdateStatus(true)
+
+    expect(changed.latest).toBe("999.0.0")
+    expect(seen[2].headers.get("if-none-match")).toBe('"v2"')
+    expect(revalidated.latest).toBe("999.0.0")
+  })
+
+  test("a 200 without validators drops the old ones", async () => {
+    __setUpdateCheckDepsForTests({
+      fetch: scripted([
+        () => withValidators("1.0.0", { etag: '"v1"' }),
+        () => manifestJson("999.0.0"),
+      ]),
+      now: () => clock,
+    })
+
+    await getUpdateStatus()
+    await getUpdateStatus(true)
+    await getUpdateStatus(true)
+
+    expect(seen[2].headers.get("if-none-match")).toBeNull()
+    expect(seen[2].headers.get("if-modified-since")).toBeNull()
+  })
+
+  test("an unexpected 304 with no cached body is an error, not a result", async () => {
+    __setUpdateCheckDepsForTests({
+      fetch: scripted([notModified]),
+      now: () => clock,
+    })
+
+    const status = await getUpdateStatus()
+
+    expect(status.latest).toBeNull()
+    expect(status.update_available).toBe(false)
+    expect(status.last_error).toBe("manifest fetch returned HTTP 304")
+  })
+
+  test("an error after a success keeps the last known result and validators", async () => {
+    __setUpdateCheckDepsForTests({
+      fetch: scripted([
+        () => withValidators("999.0.0", { etag: '"v1"' }),
+        () => new Response("boom", { status: 503 }),
+        notModified,
+      ]),
+      now: () => clock,
+    })
+
+    await getUpdateStatus()
+    const failed = await getUpdateStatus(true)
+    const recovered = await getUpdateStatus(true)
+
+    expect(failed.latest).toBe("999.0.0")
+    expect(failed.update_available).toBe(true)
+    expect(failed.last_error).toBe("manifest fetch returned HTTP 503")
+    expect(seen[2].headers.get("if-none-match")).toBe('"v1"')
+    expect(recovered.latest).toBe("999.0.0")
+    expect(recovered.last_error).toBeNull()
+  })
+
+  test("a network error keeps the last known result", async () => {
+    let calls = 0
+    __setUpdateCheckDepsForTests({
+      fetch: () => {
+        calls++
+        return calls === 1 ?
+            Promise.resolve(withValidators("999.0.0", { etag: '"v1"' }))
+          : Promise.reject(new Error("offline"))
+      },
+      now: () => clock,
+    })
+
+    await getUpdateStatus()
+    const failed = await getUpdateStatus(true)
+
+    expect(failed.latest).toBe("999.0.0")
+    expect(failed.update_available).toBe(true)
+    expect(failed.last_error).toBe("network error: offline")
   })
 })

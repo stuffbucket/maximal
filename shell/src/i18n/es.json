@@ -20,6 +20,7 @@
   "nav-system": "Sistema",
   "nav-switch-to-dashboard": "Panel ({shortcut})",
   "nav-switch-to-settings": "Configuración ({shortcut})",
+  "nav-update-to": "Actualizar a {version}",
 
   "appearance-title": "Apariencia",
   "appearance-sub": "Controle cómo aparece Maximal en su escritorio.",
@@ -327,7 +328,7 @@
   "native-tray-starting": "Iniciando…",
   "native-tray-sign-in": "Iniciar sesión en GitHub…",
   "native-tray-signed-in": "Sesión iniciada en GitHub",
-  "native-tray-upgrade": "Actualizar a la v{latest}…",
+  "native-tray-upgrade": "Actualizar a {latest}…",
   "native-tray-failed": "El sidecar no pudo iniciarse",
   "native-tray-retry": "Reintentar inicio",
   "native-tray-show-logs": "Ver registros…",

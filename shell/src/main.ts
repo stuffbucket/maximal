@@ -435,6 +435,7 @@ function repaintDynamicI18n(): void {
   );
   if (currentAuthStatus) renderAccount(currentAuthStatus);
   if (lastDiagnostics) renderDiagnostics(lastDiagnostics);
+  if (lastUpdateStatus) renderUpdateStatus(lastUpdateStatus);
 }
 
 /**
@@ -869,12 +870,17 @@ function setDiagnosticsError(message: string | null): void {
 }
 
 let lastDiagnostics: DiagnosticsResponse | null = null;
+let lastUpdateStatus: UpdateStatusResponse | null = null;
 
 async function loadDiagnostics(): Promise<void> {
   const root = document.querySelector<HTMLElement>("[data-diagnostics-root]");
   if (!root) return;
   root.setAttribute("aria-busy", "true");
   setDiagnosticsError(null);
+  // Independent of the diagnostics fetch (it also drives the topbar update
+  // button): the proxy caches the manifest check for hours, so re-running on
+  // each section open is cheap.
+  void loadUpdateStatus();
   const result = await apiCall({
     kind: "diagnostics",
     method: "GET",
@@ -887,9 +893,6 @@ async function loadDiagnostics(): Promise<void> {
   }
   lastDiagnostics = result.data;
   renderDiagnostics(result.data);
-  // Best-effort, independent of the diagnostics fetch: the proxy caches the
-  // GitHub ping for hours, so re-running on each section open is cheap.
-  void loadUpdateStatus();
 }
 
 /** Human "3m ago"-style age from an ISO timestamp; falls back to the raw
@@ -907,13 +910,52 @@ function relativeTime(iso: string): string {
 }
 
 /**
- * Render both update rows from GET /settings/api/update-status: the "Updates"
- * outcome (what it reports) and the "Update check" health (whether the
- * mechanism is working).
+ * Render every update surface from GET /settings/api/update-status: the
+ * topbar "Update to X.Y.Z" button, the Diagnostics "Updates" outcome (what it
+ * reports) and the "Update check" health (whether the mechanism is working).
  */
 function renderUpdateStatus(data: UpdateStatusResponse): void {
+  renderUpdateAction(data);
   renderUpdateOutcome(data);
   renderUpdateHealth(data);
+}
+
+/**
+ * The version to offer the user, or null when there is nothing to offer: no
+ * newer release, checks disabled, or the version couldn't be resolved. The
+ * topbar button and the Diagnostics "Updates" row both read this, so they
+ * always agree.
+ */
+function offeredUpdate(data: UpdateStatusResponse | null): string | null {
+  if (!data?.enabled || !data.update_available || !data.latest) return null;
+  return data.latest;
+}
+
+/**
+ * The topbar "Update to X.Y.Z" button. Hidden unless a newer release is
+ * offered; clicking opens the download page in the system browser.
+ */
+function renderUpdateAction(data: UpdateStatusResponse | null): void {
+  const wrap = document.querySelector<HTMLElement>("[data-update-action]");
+  const button = wrap?.querySelector<HTMLButtonElement>(
+    '[data-action="open-update"]',
+  );
+  if (!wrap || !button) return;
+  const version = offeredUpdate(data);
+  wrap.hidden = version === null;
+  if (version === null) return;
+  button.textContent = t("nav-update-to", { version });
+  button.title = t("diagnostics-update-get-it");
+}
+
+function wireUpdateAction(): void {
+  document
+    .querySelector<HTMLButtonElement>('[data-action="open-update"]')
+    ?.addEventListener("click", () => {
+      if (lastUpdateStatus && offeredUpdate(lastUpdateStatus)) {
+        void openExternalUrl(lastUpdateStatus.url);
+      }
+    });
 }
 
 /**
@@ -929,10 +971,11 @@ function renderUpdateOutcome(data: UpdateStatusResponse): void {
   if (!dd) return;
   dd.replaceChildren();
 
-  if (data.update_available && data.latest) {
+  const version = offeredUpdate(data);
+  if (version) {
     const label = document.createElement("span");
     label.className = "mono";
-    label.textContent = t("diagnostics-update-newer", { version: data.latest });
+    label.textContent = t("diagnostics-update-newer", { version });
     const link = document.createElement("a");
     link.href = data.url;
     link.textContent = t("diagnostics-update-get-it");
@@ -990,11 +1033,16 @@ async function loadUpdateStatus(): Promise<void> {
     path: "/settings/api/update-status",
   });
   if (!result.ok) {
-    // Sidecar unreachable — stay quiet, not alarming.
+    // Sidecar unreachable — stay quiet, not alarming. The proxy already keeps
+    // the last known result across manifest errors, so an error here means we
+    // know nothing: hide the button, like the "Unknown" row says.
+    lastUpdateStatus = null;
+    renderUpdateAction(null);
     setField("update_status", t("diagnostics-update-unknown"));
     setField("update_check", t("diagnostics-update-check-unavailable"));
     return;
   }
+  lastUpdateStatus = result.data;
   renderUpdateStatus(result.data);
 }
 
@@ -2306,6 +2354,7 @@ window.addEventListener("DOMContentLoaded", () => {
   wireLocalePicker(repaintDynamicI18n);
   wireLogs();
   wireDiagnostics();
+  wireUpdateAction();
   wireAccount();
   wireEndpoint();
   wireUninstall();
@@ -2359,6 +2408,9 @@ window.addEventListener("hashchange", () => {
 // "moment of attention" to refresh.
 function refreshAccountOnAttention(): void {
   if (readHashSection() === "account") void loadAuthStatus();
+  // The window can stay open for days; re-read the (proxy-cached) update
+  // status so the topbar button appears without reopening it.
+  void loadUpdateStatus();
 }
 window.addEventListener("focus", refreshAccountOnAttention);
 document.addEventListener("visibilitychange", () => {

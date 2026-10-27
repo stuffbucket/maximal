@@ -76,7 +76,12 @@ auto-update flow to `downloads.<slot>.url`.**
 - The manifest is served at `/updates/manifest.json` on GitHub Pages
   (`https://mxml.sh/updates/manifest.json`, the Pages custom domain; the
   `stuffbucket.github.io/maximal/` path redirects there). The desktop client
-  fetches it with a 6 h cache TTL and fails closed on any error.
+  fetches it with a 6 h cache TTL and fails closed on any error. Each refetch
+  is conditional: it sends back the `ETag` exactly as received (weak `W/` for
+  a gzip response) and `Last-Modified`, and a 304 reuses the held body. It
+  also sends `Cache-Control: no-cache` so intermediate proxies revalidate.
+  Neither that header nor a query string bypasses the CDN's own `max-age`,
+  so the client adds no cache-busting query.
 - The source-of-truth file is the committed
   `site/public/updates/manifest.json`. Astro serves `site/public/**`
   verbatim, and a public file wins over the fallback route

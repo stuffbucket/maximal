@@ -172,6 +172,16 @@
           </div>
 
           <div class="topbar__utilities">
+            <!-- Shown by main.ts only when a newer release is available. The
+                 wrapper carries [hidden] because .btn's display rule would
+                 override the UA [hidden] style on the button itself. -->
+            <span data-update-action hidden>
+              <button
+                type="button"
+                class="btn btn--primary btn--sm"
+                data-action="open-update"
+              ></button>
+            </span>
             <button
               type="button"
               class="topbar__mode-btn"

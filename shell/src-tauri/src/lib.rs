@@ -116,6 +116,17 @@ const DASHBOARD_RETRY_INTERVAL: Duration = Duration::from_secs(5);
 /// release published after launch. Aligns with the sidecar's cache TTL.
 const UPDATE_CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 
+/// How soon to re-check when the sidecar answered but couldn't resolve a
+/// version yet (offline at launch, a CDN blip). Without this, a failed first
+/// check would hide an available update for the full interval. Matches the
+/// CDN's `max-age` for the manifest.
+const UPDATE_RETRY_INTERVAL: Duration = Duration::from_secs(10 * 60);
+
+/// The install-channel-neutral download page — the same constant the sidecar
+/// reports as `url` (`DOWNLOAD_URL` in src/lib/update/update-check.ts). Used
+/// when the payload carries no URL.
+const UPDATE_PAGE_URL: &str = "https://mxml.sh/";
+
 /// Allowed values for the dashboard's `period` query parameter.
 /// Anything else from the webview is clamped to "day".
 const DASHBOARD_PERIODS: &[&str] = &["day", "week", "month"];
@@ -358,7 +369,7 @@ fn default_settings_section(app: &AppHandle) -> Option<&'static str> {
 
 /// The latest available release, as last reported by the sidecar's
 /// `/settings/api/update-status`. None = up to date (or unknown). Drives the
-/// "Upgrade to v…" tray item and a one-shot OS notification when a newer
+/// "Update to X.Y.Z…" tray item and a one-shot OS notification when a newer
 /// version first appears. Mutex because the poll task writes it while the
 /// tray-refresh and menu-event paths read it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1261,10 +1272,11 @@ async fn poll_sidecar_status(app: AppHandle) {
     );
     // Periodic update check: a menu-bar app can stay open for days, well past a
     // new release, so we re-check on an interval rather than once per launch.
-    // `last_update_check` holds the last DEFINITIVE check; a transient failure
-    // leaves it unchanged so the next 5s tick retries (e.g. the network came
-    // back after a cold start). The first iteration checks immediately.
-    let mut last_update_check: Option<std::time::Instant> = None;
+    // `next_update_check` is when the next check is due (None = now, so the
+    // first iteration checks immediately). An unreachable sidecar leaves it
+    // unchanged so the next 5s tick retries; an unresolved manifest retries
+    // after UPDATE_RETRY_INTERVAL; a resolved one waits UPDATE_CHECK_INTERVAL.
+    let mut next_update_check: Option<std::time::Instant> = None;
     loop {
         tokio::time::sleep(Duration::from_secs(5)).await;
         // Stop polling if we've already concluded the sidecar is gone.
@@ -1286,12 +1298,14 @@ async fn poll_sidecar_status(app: AppHandle) {
         {
             apply_requests(&app, requests);
         }
-        let update_due = last_update_check
-            .is_none_or(|t| t.elapsed() >= UPDATE_CHECK_INTERVAL);
-        if update_due
-            && check_for_update(&app, &client, &update_status_url).await
-        {
-            last_update_check = Some(std::time::Instant::now());
+        let update_due =
+            next_update_check.is_none_or(|t| std::time::Instant::now() >= t);
+        if update_due {
+            if let Some(wait) =
+                check_for_update(&app, &client, &update_status_url).await
+            {
+                next_update_check = Some(std::time::Instant::now() + wait);
+            }
         }
         // A single failed poll during phase 2 is ignored — the proxy
         // might be momentarily busy. We only flip to Failed via the
@@ -1492,57 +1506,83 @@ fn fire_rejection_notification(app: &AppHandle, message: &str) {
     }
 }
 
-/// Update check: GET `/settings/api/update-status` against the sidecar and
-/// hand the result to `apply_update`, which updates the "Upgrade to v…" tray
-/// item and fires a single OS notification when a newer version first appears.
-/// Returns true once a definitive 2xx response is seen (so the periodic caller
-/// records the check time); false on a transient failure (unreachable /
-/// non-2xx / unparseable) so it retries on the next poll tick. The sidecar
-/// caches the upstream lookup for hours and honors `config.checkUpdates`, so
-/// this stays cheap and is a no-op when the user opted out.
-async fn check_for_update(
-    app: &AppHandle,
-    client: &reqwest::Client,
-    url: &str,
-) -> bool {
-    let key = app.state::<ShellApiKey>().value().to_owned();
-    let resp = match client.get(url).header("x-api-key", key).send().await {
-        Ok(r) if r.status().is_success() => r,
-        _ => return false, // transient — retry next tick
-    };
-    let payload: serde_json::Value = match resp.json().await {
-        Ok(v) => v,
-        Err(_) => return false,
-    };
+/// What a sidecar `/settings/api/update-status` payload says.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum UpdateCheck {
+    /// A definitive answer: Some = a newer release to offer, None = up to
+    /// date (or checks are disabled).
+    Resolved(Option<UpdateSnapshot>),
+    /// Checks are on but the sidecar couldn't resolve a version yet (offline
+    /// at launch, a CDN blip). Nothing to apply; retry sooner.
+    Unresolved,
+}
+
+/// Classify an update-status payload. Pure, so the tray's decision is
+/// testable without a running sidecar.
+fn parse_update_status(payload: &serde_json::Value) -> UpdateCheck {
     let available = payload
         .get("update_available")
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
-    let next = if available {
-        let latest = payload
-            .get("latest")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("")
-            .to_owned();
-        let download_url = payload
+    let latest = payload
+        .get("latest")
+        .and_then(serde_json::Value::as_str)
+        .filter(|v| !v.is_empty());
+    if let (true, Some(latest)) = (available, latest) {
+        let url = payload
             .get("url")
             .and_then(serde_json::Value::as_str)
-            .unwrap_or("https://mxml.sh/maximal/")
-            .to_owned();
-        Some(UpdateSnapshot {
-            latest,
-            url: download_url,
-        })
+            .unwrap_or(UPDATE_PAGE_URL);
+        return UpdateCheck::Resolved(Some(UpdateSnapshot {
+            latest: latest.to_owned(),
+            url: url.to_owned(),
+        }));
+    }
+    let enabled = payload
+        .get("enabled")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(true);
+    let failed = payload
+        .get("last_error")
+        .is_some_and(|e| !e.is_null());
+    if enabled && latest.is_none() && failed {
+        UpdateCheck::Unresolved
     } else {
-        None
+        UpdateCheck::Resolved(None)
+    }
+}
+
+/// Update check: GET `/settings/api/update-status` against the sidecar and
+/// hand the result to `apply_update`, which updates the "Update to X.Y.Z…"
+/// tray item and fires a single OS notification when a newer version first
+/// appears. Returns how long to wait before the next check, or None on a
+/// transient failure (unreachable / non-2xx / unparseable) so it retries on
+/// the next poll tick. The sidecar caches the upstream lookup for hours and
+/// honors `config.checkUpdates`, so this stays cheap and is a no-op when the
+/// user opted out.
+async fn check_for_update(
+    app: &AppHandle,
+    client: &reqwest::Client,
+    url: &str,
+) -> Option<Duration> {
+    let key = app.state::<ShellApiKey>().value().to_owned();
+    let resp = match client.get(url).header("x-api-key", key).send().await {
+        Ok(r) if r.status().is_success() => r,
+        _ => return None, // transient — retry next tick
     };
-    apply_update(app, next);
-    true // definitive response — recorded; the periodic loop re-checks later
+    let payload: serde_json::Value = resp.json().await.ok()?;
+    match parse_update_status(&payload) {
+        UpdateCheck::Resolved(next) => {
+            apply_update(app, next);
+            Some(UPDATE_CHECK_INTERVAL)
+        }
+        UpdateCheck::Unresolved => Some(UPDATE_RETRY_INTERVAL),
+    }
 }
 
 /// Applies a fetched update snapshot to managed state. Fires a single OS
 /// notification when a newer version first appears (or the target changes),
-/// and refreshes the tray on any change so the "Upgrade to v…" item appears
+/// and refreshes the tray on any change so the "Update to X.Y.Z…" item appears
 /// (or clears once the user is current). Mirrors `apply_rejection`: an
 /// unchanged snapshot is a no-op, so a repeated periodic check that finds the
 /// same version doesn't re-nag or churn the menu.
@@ -2285,7 +2325,7 @@ fn build_menu(
     )?;
     let sep1 = PredefinedMenuItem::separator(app)?;
 
-    // An "Upgrade to v…" item leads the menu in the running states whenever the
+    // An "Update to X.Y.Z…" item leads the menu in the running states whenever the
     // poll loop has seen a newer release. Built here (before the match) so both
     // running arms can prepend it; the other arms simply don't reference it.
     // Clicking it opens the install-channel-neutral download page.
@@ -3155,6 +3195,57 @@ mod tests {
         assert_eq!(state.set(snap(0, None)), RequestsTransition::Changed);
         // One answered and another arrived: still news.
         assert_eq!(state.set(snap(1, Some("c"))), RequestsTransition::Arrived);
+    }
+
+    #[test]
+    fn classifies_update_status_payloads() {
+        use super::{parse_update_status, UpdateCheck, UpdateSnapshot};
+        let available = serde_json::json!({
+            "current": "0.4.36", "latest": "0.4.40", "update_available": true,
+            "url": "https://mxml.sh/", "enabled": true,
+            "checked_at": "2026-10-27T00:00:00.000Z", "last_error": null
+        });
+        assert_eq!(
+            parse_update_status(&available),
+            UpdateCheck::Resolved(Some(UpdateSnapshot {
+                latest: "0.4.40".into(),
+                url: "https://mxml.sh/".into(),
+            }))
+        );
+        // No URL in the payload: fall back to the download page root.
+        let no_url = serde_json::json!({ "latest": "0.4.40", "update_available": true });
+        assert_eq!(
+            parse_update_status(&no_url),
+            UpdateCheck::Resolved(Some(UpdateSnapshot {
+                latest: "0.4.40".into(),
+                url: "https://mxml.sh/".into(),
+            }))
+        );
+        let current = serde_json::json!({
+            "latest": "0.4.36", "update_available": false, "enabled": true,
+            "last_error": null
+        });
+        assert_eq!(parse_update_status(&current), UpdateCheck::Resolved(None));
+        let disabled = serde_json::json!({
+            "latest": null, "update_available": false, "enabled": false,
+            "last_error": null
+        });
+        assert_eq!(parse_update_status(&disabled), UpdateCheck::Resolved(None));
+        // The sidecar answered but couldn't reach the manifest yet: retry sooner.
+        let unresolved = serde_json::json!({
+            "latest": null, "update_available": false, "enabled": true,
+            "last_error": "network error: offline"
+        });
+        assert_eq!(parse_update_status(&unresolved), UpdateCheck::Unresolved);
+        // A later failure that still knows the latest version is a real answer.
+        let stale_ok = serde_json::json!({
+            "latest": "0.4.36", "update_available": false, "enabled": true,
+            "last_error": "manifest fetch returned HTTP 503"
+        });
+        assert_eq!(parse_update_status(&stale_ok), UpdateCheck::Resolved(None));
+        // "available" without a version is not offerable.
+        let no_version = serde_json::json!({ "latest": "", "update_available": true });
+        assert_eq!(parse_update_status(&no_version), UpdateCheck::Resolved(None));
     }
 
     #[test]
