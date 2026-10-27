@@ -95,11 +95,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      # Rust is analyzed without building, but the extractor still resolves
-      # crates; reuse them across runs until Cargo.lock changes.
-      - name: Cache Cargo registry
+      # Rust is analyzed without building, but the extractor still downloads
+      # every crate to resolve dependencies. Restore them on every run; save
+      # only from main, because a cache saved on a PR or tag ref is visible to
+      # that ref alone, while main's is visible to every PR and schedule.
+      - name: Restore Cargo registry
+        id: cargo-cache
         if: matrix.language == 'rust'
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
           path: |
             ~/.cargo/registry/index
@@ -119,3 +122,16 @@ jobs:
         uses: github/codeql-action/analyze@v4
         with:
           category: "/language:${{ matrix.language }}"
+
+      - name: Save Cargo registry
+        if: >-
+          matrix.language == 'rust'
+          && github.ref == 'refs/heads/main'
+          && steps.cargo-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: codeql-cargo-${{ hashFiles('shell/src-tauri/Cargo.lock') }}
