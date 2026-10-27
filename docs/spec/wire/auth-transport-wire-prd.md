@@ -64,13 +64,13 @@ prefix itself or anything under `<prefix>/`.
 
 | Class | Paths | Behavior |
 |---|---|---|
-| **Unauthenticated (exact)** | `/`, `/status`, `/_debug/state`, `/setup-status`, and the legacy 301 redirects `/usage-viewer`, `/settings`, `/settings/` | No key required. |
+| **Unauthenticated (exact)** | `/`, `/status`, `/_debug/state`, `/setup-status`, and the legacy 301 redirects (`LEGACY_REDIRECTS` in `src/server.ts`: `/usage-viewer`, `/settings`, each with and without a trailing slash) | No key required. |
 | **Unauthenticated prefix** | `/ui/*` | The settings + dashboard UI shells and their assets load without a key. |
 | **Own-route auth** | `/mcp/*` | Skips the global middleware; `src/routes/mcp/route.ts` authenticates itself. An endpoint with its own `apiKey` accepts exactly that key; otherwise the same main-port rules apply. Requests must also come from loopback with no foreign `Origin`. No GitHub token required. |
 | **Require-auth prefix** | `/settings/api/*` | Data endpoints require a key (overrides any unauthenticated prefix). |
 | **Loopback-exempt** | `/usage`, `/token-usage`, `/token-usage/events` | Auth is **skipped for loopback callers**; a remote caller still needs a valid key. |
 | **Loopback-only** | `/_internal/shutdown`, `/_internal/reload` | Auth is skipped for loopback callers, and the handlers in `src/routes/internal/route.ts` reject any non-loopback caller with `404`, even one holding a valid key. |
-| **Everything else** | completion, model, embeddings, provider routes, the trailing-slash `/usage-viewer/` redirect, etc. | Normal client authentication. |
+| **Everything else** | completion, model, embeddings, provider routes, etc. | Normal client authentication. |
 
 Loopback is determined by peer IP ∈ {`127.0.0.1`, `::1`,
 `::ffff:127.0.0.1`} via `isLoopbackAddress()`. The rationale: the local

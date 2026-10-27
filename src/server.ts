@@ -36,6 +36,17 @@ export const server = new Hono()
  *  Maximal been up." */
 const SERVER_START_MS = Date.now()
 
+/** Legacy surface paths → canonical /ui/* pages. Kept so existing links
+ *  (Claude config, boot banner, bookmarks, the Tauri shell pre-upgrade)
+ *  keep working. One table drives both the routes and their auth
+ *  exemption, so a redirect can never be registered but left gated. */
+const LEGACY_REDIRECTS: Record<string, string> = {
+  "/usage-viewer": "/ui/dashboard/",
+  "/usage-viewer/": "/ui/dashboard/",
+  "/settings": "/ui/settings/",
+  "/settings/": "/ui/settings/",
+}
+
 server.use(traceIdMiddleware)
 // Stamp the proxy build version on every response so downstream clients
 // can read which Maximal build served their request without hitting a
@@ -55,10 +66,7 @@ server.use(
     allowUnauthenticatedPaths: [
       "/",
       "/status",
-      // Bare-surface redirects to the canonical /ui/* paths.
-      "/usage-viewer",
-      "/settings",
-      "/settings/",
+      ...Object.keys(LEGACY_REDIRECTS),
       "/_debug/state",
       "/setup-status",
     ],
@@ -115,19 +123,10 @@ server.get("/", (c) => c.text("Server running"))
 // contract. Safe-for-unauth only (booleans/tiers/counts, no secrets);
 // see src/lib/runtime-state/status.ts. Cheap: in-memory state, no upstream calls.
 server.get("/status", (c) => c.json(buildStatus(SERVER_START_MS)))
-// Legacy redirects → canonical /ui/* surfaces. Kept so existing links
-// (Claude config, boot banner, bookmarks, the Tauri shell pre-upgrade)
-// keep working. The dashboard preserves its `?endpoint=…` query.
-server.get("/usage-viewer", (c) => {
-  const qs = new URL(c.req.url).search
-  return c.redirect(`/ui/dashboard/${qs}`, 301)
-})
-server.get("/usage-viewer/", (c) => {
-  const qs = new URL(c.req.url).search
-  return c.redirect(`/ui/dashboard/${qs}`, 301)
-})
-server.get("/settings", (c) => c.redirect("/ui/settings/", 301))
-server.get("/settings/", (c) => c.redirect("/ui/settings/", 301))
+// The query string carries over (the dashboard reads `?endpoint=…`).
+for (const [from, to] of Object.entries(LEGACY_REDIRECTS)) {
+  server.get(from, (c) => c.redirect(`${to}${new URL(c.req.url).search}`, 301))
+}
 
 server.route("/_debug", debugRoutes)
 server.route("/_internal", internalRoutes)
