@@ -61,6 +61,40 @@ let currentSnapshot: BrokerSupervisorSnapshot = {
 }
 let currentUpstream: BrokerUpstream | undefined
 
+/** Where a broker that was just (re)started got to, for a caller that
+ *  wants to act once it serves: `ready` serves, `starting` is still coming
+ *  up (or recovering) when the wait ran out, `failed` gave up (can't run on
+ *  this install, or kept crashing), `off` has nothing to run. */
+export type BrokerReadiness = "ready" | "starting" | "failed" | "off"
+
+/** Readiness for a state, or undefined while the broker may still come up. */
+function settledReadiness(
+  state: BrokerSupervisorState,
+): BrokerReadiness | undefined {
+  switch (state) {
+    case "ready": {
+      return "ready"
+    }
+    case "disabled": {
+      return "off"
+    }
+    case "unavailable":
+    case "circuit-open": {
+      return "failed"
+    }
+    case "starting":
+    case "degraded":
+    case "backoff":
+    case "stopping": {
+      return undefined
+    }
+    default: {
+      state satisfies never
+      return undefined
+    }
+  }
+}
+
 export function getBrokerSupervisorSnapshot(): BrokerSupervisorSnapshot {
   return currentSnapshot
 }
@@ -144,6 +178,8 @@ export class BrokerSupervisor {
   #heartbeatTimer: ReturnType<typeof setInterval> | undefined
   #stableTimer: ReturnType<typeof setTimeout> | undefined
   #stopPromise: Promise<void> | undefined
+  #state: BrokerSupervisorState = "disabled"
+  readonly #stateListeners = new Set<() => void>()
 
   constructor(config: McpBrokerConfig, options: SupervisorOptions = {}) {
     this.#config = config
@@ -254,10 +290,36 @@ export class BrokerSupervisor {
     this.#setState("disabled")
   }
 
+  /**
+   * Resolve once the broker serves, gives up, or has nothing to run; after
+   * `timeoutMs`, resolve with `starting`. Never rejects, and never starts or
+   * restarts anything itself.
+   */
+  waitUntilReady(timeoutMs: number): Promise<BrokerReadiness> {
+    const settled = settledReadiness(this.#state)
+    if (settled) return Promise.resolve(settled)
+    return new Promise((resolve) => {
+      const finish = (readiness: BrokerReadiness) => {
+        clearTimeout(timer)
+        this.#stateListeners.delete(listener)
+        resolve(readiness)
+      }
+      const listener = () => {
+        const readiness = settledReadiness(this.#state)
+        if (readiness) finish(readiness)
+      }
+      const timer = setTimeout(() => finish("starting"), timeoutMs)
+      timer.unref()
+      this.#stateListeners.add(listener)
+    })
+  }
+
   #setState(
     state: BrokerSupervisorState,
     problem: BrokerProblem | null = null,
   ): void {
+    this.#state = state
+    for (const listener of this.#stateListeners) listener()
     currentSnapshot = {
       state,
       enabledEndpoints: (this.#config.servers ?? []).filter(
@@ -738,6 +800,30 @@ export function reconfigureBroker(config: McpBrokerConfig): Promise<boolean> {
     () => undefined,
   )
   return pending
+}
+
+/**
+ * Wait, at most `timeoutMs`, for the broker to serve after the latest
+ * start or reconfigure, so clients aren't pointed at it while it is still
+ * probing its servers (when `/mcp/<id>` answers 503). Follows a supervisor
+ * that a later reconfigure swaps in. `off` when no broker runs in this
+ * process (e.g. the CLI).
+ */
+export async function waitForBrokerReady(
+  timeoutMs: number,
+): Promise<BrokerReadiness> {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    await reconfiguring
+    const supervisor = activeSupervisor
+    if (!supervisor) return "off"
+    const readiness = await supervisor.waitUntilReady(
+      Math.max(0, deadline - Date.now()),
+    )
+    // A reconfigure stopped this one to start another: wait for that.
+    if (activeSupervisor === supervisor || !activeSupervisor) return readiness
+    if (Date.now() >= deadline) return "starting"
+  }
 }
 
 /** Stop the broker for good: later reconfigures find no supervisor and

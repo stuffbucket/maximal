@@ -474,10 +474,18 @@ export const McpEndpointToggleRequest = z.object({
 })
 export type McpEndpointToggleRequest = z.infer<typeof McpEndpointToggleRequest>
 
+/** Where the broker got to before the apps were updated (see
+ *  BrokerReadiness in src/lib/mcp-broker/supervisor.ts): `starting` means
+ *  the wait ran out first, `failed` that it gave up, `off` that nothing
+ *  runs it in this process. */
+export const McpBrokerReadiness = z.enum(["ready", "starting", "failed", "off"])
+export type McpBrokerReadiness = z.infer<typeof McpBrokerReadiness>
+
 export const McpEndpointToggleResponse = z.object({
   endpoint: McpEndpointEntry,
   /** Clients that already had an entry with this name; left unchanged. */
   skipped: z.array(z.object({ client: McpClientId, name: z.string() })),
+  broker: McpBrokerReadiness,
   /** The app whose own entry for this server the endpoint now runs. */
   adoptedFrom: z.string().optional(),
   /** Environment names from that entry that were not copied. */

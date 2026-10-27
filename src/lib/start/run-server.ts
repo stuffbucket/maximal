@@ -12,7 +12,10 @@ import consola from "consola"
 import { serve } from "srvx"
 
 import { removeLegacyShimIfPresent } from "~/apps/claude-code/detect"
-import { refreshCatalogCommands, syncMcpClientsOnBoot } from "~/apps/mcp"
+import {
+  refreshCatalogCommands,
+  syncMcpClientsWhenBrokerReady,
+} from "~/apps/mcp"
 import { runAppBootHooks } from "~/apps/registry"
 import { type AccountType } from "~/lib/auth/auth-types"
 import { type AppConfig, mergeConfigWithDefaults } from "~/lib/config/config"
@@ -225,7 +228,10 @@ function afterListening(
   // crash/force-kill stranded over a dead proxy and picks up this run's port.
   // Ownership-guarded; no-op when off.
   runAppBootHooks()
-  syncMcpClientsOnBoot(config)
+  // MCP entries wait (bounded) for the broker, so an app that connects right
+  // away isn't turned away while it probes its servers. Detached: nothing
+  // else here, and no ordinary request, waits on the broker.
+  void syncMcpClientsWhenBrokerReady()
 
   // Drop the "session running" sentinel only AFTER the boot hooks
   // so the freshly-written URL is in place when we promise the session is

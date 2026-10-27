@@ -217,6 +217,9 @@ export interface McpEndpointToggleResponse {
   endpoint: McpEndpointEntry
   /** Clients that already had an entry with this name; left unchanged. */
   skipped: Array<{ client: McpClientId; name: string }>
+  /** Where the broker got to before the apps were updated (see
+   *  McpBrokerReadiness in src/lib/config/settings-types.ts). */
+  broker: "ready" | "starting" | "failed" | "off"
   /** The app whose own entry for this server the endpoint now runs. */
   adoptedFrom?: string
   /** Environment names from that entry that were not copied. */

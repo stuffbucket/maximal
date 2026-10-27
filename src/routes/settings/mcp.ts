@@ -124,6 +124,7 @@ mcpRoutes.post("/:id", async (c) => {
       {
         endpoint: result.endpoint,
         skipped: result.skipped,
+        broker: result.broker,
         ...(result.adoptedFrom === undefined ?
           {}
         : {

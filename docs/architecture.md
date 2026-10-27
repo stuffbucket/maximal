@@ -248,7 +248,11 @@ choices. Claude Desktop's entries stay across shutdown
 (`McpClientConfigurator.removeOnShutdown`): Desktop reads its config only at
 launch, like its routing profile, so removing them would only make its next
 launch come up without the server. Boot sync runs when `config.json` has an
-`mcpBroker` section.
+`mcpBroker` section, after the broker is ready (`waitForBrokerReady`, bounded
+at 45s and detached from the HTTP listener), so an app that connects right
+away isn't turned away with 503 while the broker probes its servers. Turning
+an endpoint on in Settings waits the same way before updating the apps, and
+reports the broker's state (`ready` / `starting` / `failed`) in the response.
 
 When an endpoint is turned on and an app already has its own stdio entry with
 that id (Claude Code user scope, or Claude Desktop's Claude-3p or regular
