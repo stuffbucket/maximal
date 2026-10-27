@@ -1,7 +1,11 @@
+import { z } from "zod"
+
 export const subagentMarkerPrefix = "__SUBAGENT_MARKER__"
 
-export interface SubagentMarker {
-  session_id: string
-  agent_id: string
-  agent_type: string
-}
+export const SubagentMarkerSchema = z.object({
+  session_id: z.string().min(1),
+  agent_id: z.string().min(1),
+  agent_type: z.string().min(1),
+})
+
+export type SubagentMarker = z.infer<typeof SubagentMarkerSchema>

@@ -152,10 +152,6 @@ const mergeContentWithText = (
   if (typeof tr.content === "string") {
     return { ...tr, content: `${tr.content}\n\n${textBlock.text}` }
   }
-  // Unable to merge, discard other text blocks, wait for the next round of re-request
-  if (hasToolRef(tr)) {
-    return tr
-  }
   return {
     ...tr,
     content: [...tr.content, textBlock],
@@ -169,10 +165,6 @@ const mergeContentWithTexts = (
   if (typeof tr.content === "string") {
     const appendedTexts = textBlocks.map((tb) => tb.text).join("\n\n")
     return { ...tr, content: `${tr.content}\n\n${appendedTexts}` }
-  }
-  // Unable to merge, discard other text blocks, wait for the next round of re-request
-  if (hasToolRef(tr)) {
-    return tr
   }
   return { ...tr, content: [...tr.content, ...textBlocks] }
 }
@@ -446,17 +438,13 @@ const mergeToolResult = (
 
 const rewriteToolReferenceBlock = (
   block: AnthropicToolReferenceBlock,
-): AnthropicTextBlock => {
-  const { cache_control: cacheControl } =
-    block as AnthropicToolReferenceBlock & {
-      cache_control?: unknown
-    }
-  return {
-    type: "text",
-    text: `Tool ${block.tool_name} loaded`,
-    ...(cacheControl !== undefined ? { cache_control: cacheControl } : {}),
-  }
-}
+): AnthropicTextBlock => ({
+  type: "text",
+  text: `Tool ${block.tool_name} loaded`,
+  ...(block.cache_control !== undefined ?
+    { cache_control: block.cache_control }
+  : {}),
+})
 
 export const stripToolReferenceTurnBoundary = (
   anthropicPayload: AnthropicMessagesPayload,
@@ -519,10 +507,10 @@ export const stripUnsupportedClaudeCodeTools = (
   // Desktop and Cowork run the same agent, so they send the same tool.
   if (classifyClaudeClient(userAgent) === null || !payload.tools) return
 
-  payload.tools = payload.tools.filter((tool) => {
-    const raw = tool as typeof tool & { type?: unknown }
-    return raw.type !== ADVISOR_TOOL_TYPE || raw.name !== ADVISOR_TOOL_NAME
-  })
+  payload.tools = payload.tools.filter(
+    (tool) =>
+      tool.type !== ADVISOR_TOOL_TYPE || tool.name !== ADVISOR_TOOL_NAME,
+  )
 }
 
 // align with vscode copilot claude agent tools
@@ -595,10 +583,7 @@ const stripCacheControl = (payload: AnthropicMessagesPayload): void => {
       if (block.type !== "tool_result" || !Array.isArray(block.content))
         continue
       for (const inner of block.content) {
-        const b = inner as typeof inner & { cache_control?: unknown }
-        if ("cache_control" in b) {
-          delete b.cache_control
-        }
+        delete inner.cache_control
       }
     }
   }

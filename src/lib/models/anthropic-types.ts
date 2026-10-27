@@ -44,6 +44,7 @@ export interface AnthropicMessagesPayload {
 export interface AnthropicTextBlock {
   type: "text"
   text: string
+  cache_control?: Record<string, unknown>
 }
 
 export interface AnthropicImageBlock {
@@ -53,6 +54,7 @@ export interface AnthropicImageBlock {
     media_type: "image/jpeg" | "image/png" | "image/gif" | "image/webp"
     data: string
   }
+  cache_control?: Record<string, unknown>
 }
 
 export interface AnthropicDocumentBlock {
@@ -63,11 +65,13 @@ export interface AnthropicDocumentBlock {
     data: string
   }
   title?: string | null
+  cache_control?: Record<string, unknown>
 }
 
 export interface AnthropicToolReferenceBlock {
   type: "tool_reference"
   tool_name: string
+  cache_control?: Record<string, unknown>
 }
 
 export type AnthropicToolResultContentBlock =
@@ -81,6 +85,7 @@ export interface AnthropicToolResultBlock {
   tool_use_id: string
   content: string | Array<AnthropicToolResultContentBlock>
   is_error?: boolean
+  cache_control?: Record<string, unknown>
 }
 
 export interface AnthropicToolUseBlock {
@@ -88,6 +93,7 @@ export interface AnthropicToolUseBlock {
   id: string
   name: string
   input: Record<string, unknown>
+  cache_control?: Record<string, unknown>
 }
 
 export interface AnthropicThinkingBlock {
@@ -121,9 +127,10 @@ export interface AnthropicAssistantMessage {
 export type AnthropicMessage = AnthropicUserMessage | AnthropicAssistantMessage
 
 export interface AnthropicTool {
+  type?: string
   name: string
   description?: string
-  input_schema: Record<string, unknown>
+  input_schema?: Record<string, unknown>
   defer_loading?: boolean
   eager_input_streaming?: boolean
   cache_control?: Record<string, unknown>

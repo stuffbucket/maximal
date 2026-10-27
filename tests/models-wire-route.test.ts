@@ -19,11 +19,10 @@ import {
 } from "bun:test"
 import { Hono } from "hono"
 
-import type { Model } from "~/services/copilot/get-models"
-
 import { getConfig, writeConfig } from "~/lib/config/config"
 import { setModels } from "~/lib/runtime-state/state"
 import { modelRoutes } from "~/routes/models/route"
+import { normalizeModel, type Model } from "~/services/copilot/get-models"
 
 const originalConfig = getConfig()
 
@@ -252,11 +251,11 @@ describe("GET /v1/models — Anthropic shape on signal", () => {
     )
   })
 
-  test("tolerates sparse models missing capabilities containers and ignores whitespace-only protocol headers", async () => {
+  test("tolerates boundary-normalized sparse models and ignores whitespace-only protocol headers", async () => {
     setModels({
       object: "list",
       data: [
-        {
+        normalizeModel({
           id: "sparse-model",
           name: "Sparse Model",
           object: "model",
@@ -264,7 +263,15 @@ describe("GET /v1/models — Anthropic shape on signal", () => {
           version: "1",
           preview: false,
           model_picker_enabled: true,
-        } as unknown as Model,
+          capabilities: {
+            family: "sparse",
+            object: "model_capabilities",
+            tokenizer: "o200k_base",
+            type: "chat",
+            limits: {},
+            supports: {},
+          },
+        }),
       ],
     })
 

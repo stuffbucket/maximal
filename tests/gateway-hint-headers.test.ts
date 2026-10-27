@@ -40,12 +40,32 @@ describe("gateway hint headers support", () => {
     expect(
       parseSubagentMarkerFromFirstUser(basePayload, {
         requestClass: "background_agent",
-        agentType: "Explore",
-        sessionId: "sess-456",
+        sessionId: "   ",
       }),
     ).toEqual({
-      session_id: "sess-456",
+      session_id: "gateway-hint",
       agent_id: "background_agent",
+      agent_type: "background_agent",
+    })
+
+    expect(
+      parseSubagentMarkerFromFirstUser(
+        {
+          model: "claude-opus-4.6",
+          max_tokens: 128,
+          messages: [
+            {
+              role: "user",
+              content:
+                '<system-reminder>\n__SUBAGENT_MARKER__{"session_id":"s-1","agent_id":"a-1","agent_type":"Explore"}\n</system-reminder>\nfind files',
+            },
+          ],
+        },
+        undefined,
+      ),
+    ).toEqual({
+      session_id: "s-1",
+      agent_id: "a-1",
       agent_type: "Explore",
     })
   })

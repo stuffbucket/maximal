@@ -80,9 +80,9 @@ export const createStreamKeepAlive = (
         .finally(() => {
           if (inFlightWrite === writePromise) {
             inFlightWrite = undefined
+            writing = false
+            scheduleNextPing()
           }
-          writing = false
-          scheduleNextPing()
         })
       inFlightWrite = writePromise
     }, intervalMs)
@@ -96,8 +96,10 @@ export const createStreamKeepAlive = (
         return
       }
       clearTimer()
-      if (inFlightWrite) {
-        await inFlightWrite
+      const pendingPing = inFlightWrite
+      if (pendingPing) {
+        inFlightWrite = undefined
+        await pendingPing
       }
       writing = true
       try {

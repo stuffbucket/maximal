@@ -2,6 +2,7 @@ import type { AnthropicMessagesPayload } from "~/lib/models/anthropic-types"
 
 import {
   subagentMarkerPrefix,
+  SubagentMarkerSchema,
   type SubagentMarker,
 } from "~/lib/runtime-state/subagent"
 
@@ -13,7 +14,9 @@ export interface GatewaySubagentHints {
 
 const NON_INTERACTIVE_REQUEST_CLASSES = new Set([
   "subagent",
+  "agent",
   "background",
+  "background_agent",
   "speculative",
   "side_question",
 ])
@@ -23,15 +26,24 @@ export const parseSubagentMarkerFromFirstUser = (
   hints?: GatewaySubagentHints,
 ): SubagentMarker | null => {
   const firstUserMessage = payload.messages.find((msg) => msg.role === "user")
-  if (firstUserMessage && Array.isArray(firstUserMessage.content)) {
-    for (const block of firstUserMessage.content) {
-      if (block.type !== "text") {
-        continue
-      }
-
-      const marker = parseSubagentMarkerFromSystemReminder(block.text)
+  if (firstUserMessage) {
+    if (typeof firstUserMessage.content === "string") {
+      const marker = parseSubagentMarkerFromSystemReminder(
+        firstUserMessage.content,
+      )
       if (marker) {
         return marker
+      }
+    } else if (Array.isArray(firstUserMessage.content)) {
+      for (const block of firstUserMessage.content) {
+        if (block.type !== "text") {
+          continue
+        }
+
+        const marker = parseSubagentMarkerFromSystemReminder(block.text)
+        if (marker) {
+          return marker
+        }
       }
     }
   }
@@ -50,17 +62,18 @@ const parseSubagentMarkerFromHints = (
     return null
   }
   const agentType = hints.agentType?.trim()
-  const isNonInteractive =
-    Boolean(requestClass && NON_INTERACTIVE_REQUEST_CLASSES.has(requestClass))
-    || Boolean(agentType)
+  const isKnownNonInteractive = Boolean(
+    requestClass && NON_INTERACTIVE_REQUEST_CLASSES.has(requestClass),
+  )
+  const isSubagentByAgentType = Boolean(agentType && !requestClass)
 
-  if (!isNonInteractive) {
+  if (!isKnownNonInteractive && !isSubagentByAgentType) {
     return null
   }
 
   return {
-    session_id: hints.sessionId ?? "gateway-hint",
-    agent_id: requestClass ?? "subagent",
+    session_id: hints.sessionId?.trim() || "gateway-hint",
+    agent_id: requestClass || "subagent",
     agent_type: agentType || requestClass || "subagent",
   }
 }
@@ -96,13 +109,13 @@ const parseSubagentMarkerFromSystemReminder = (
       .trim()
 
     try {
-      const parsed = JSON.parse(markerJson) as SubagentMarker
-      if (!parsed.session_id || !parsed.agent_id || !parsed.agent_type) {
+      const parsed = SubagentMarkerSchema.safeParse(JSON.parse(markerJson))
+      if (!parsed.success) {
         searchFrom = reminderEnd + endTag.length
         continue
       }
 
-      return parsed
+      return parsed.data
     } catch {
       searchFrom = reminderEnd + endTag.length
       continue

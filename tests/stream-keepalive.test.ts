@@ -39,7 +39,7 @@ describe("prepareMessagesApiPayload message-block cache_control.scope stripping"
                 type: "ephemeral",
                 scope: "user",
               },
-            } as never,
+            },
             {
               type: "tool_result",
               tool_use_id: "toolu_1",
@@ -54,17 +54,15 @@ describe("prepareMessagesApiPayload message-block cache_control.scope stripping"
                   cache_control: {
                     type: "ephemeral",
                   },
-                } as never,
+                },
               ],
-            } as never,
+            },
           ],
         },
       ],
     }
 
-    prepareMessagesApiPayload(payload, {
-      capabilities: { supports: { adaptive_thinking: true } },
-    } as never)
+    prepareMessagesApiPayload(payload)
 
     expect(payload.messages[0]).toEqual({
       role: "user",
@@ -75,7 +73,7 @@ describe("prepareMessagesApiPayload message-block cache_control.scope stripping"
           cache_control: {
             type: "ephemeral",
           },
-        } as never,
+        },
         {
           type: "tool_result",
           tool_use_id: "toolu_1",
@@ -88,7 +86,7 @@ describe("prepareMessagesApiPayload message-block cache_control.scope stripping"
               text: "result text",
             },
           ],
-        } as never,
+        },
       ],
     })
   })
