@@ -49,11 +49,14 @@ const harness = {
   addAccountCalls: [] as Array<AccountRecord>,
 }
 
-const realGetDeviceCodeModule =
-  await import("~/services/github/get-device-code")
-const realGetUserModule = await import("~/services/github/get-user")
-const realTokenModule = await import("~/lib/auth/token")
-const realUtilsModule = await import("~/lib/platform/utils")
+// Snapshot (spread) each real module: mock.module patches the live namespace
+// object in place, so restoring with the namespace itself restores the stub.
+const realGetDeviceCodeModule = {
+  ...(await import("~/services/github/get-device-code")),
+}
+const realGetUserModule = { ...(await import("~/services/github/get-user")) }
+const realTokenModule = { ...(await import("~/lib/auth/token")) }
+const realUtilsModule = { ...(await import("~/lib/platform/utils")) }
 
 await mock.module("~/services/github/get-device-code", () => ({
   getDeviceCode: () =>
@@ -110,7 +113,10 @@ async function flushMicrotasks(turns = 20): Promise<void> {
   }
 }
 
-beforeEach(() => {
+// `__resetAuthControllerForTests` also restores the real deps, so every reset
+// must be followed by this. Otherwise startDeviceFlow runs the real
+// pollAccessToken, which polls github.com from the test process.
+function resetController(): void {
   __resetAuthControllerForTests()
   __setAuthControllerDepsForTests({
     pollAccessToken: () => harness.pollAccessTokenImpl(),
@@ -121,6 +127,10 @@ beforeEach(() => {
     deactivateActiveAccount: () => Promise.resolve(),
     markActiveNeedsReauth: () => Promise.resolve(),
   })
+}
+
+beforeEach(() => {
+  resetController()
   state.githubToken = undefined
   state.copilotToken = undefined
   state.userName = undefined
@@ -209,7 +219,7 @@ describe("AuthStatus wire-format invariant", () => {
     ]
 
     for (const { label, drive } of states) {
-      __resetAuthControllerForTests()
+      resetController()
       state.githubToken = undefined
       state.copilotToken = undefined
       state.userName = undefined
@@ -266,7 +276,7 @@ describe("Account registry invariant (no unverified identities)", () => {
     ]
 
     for (const drive of drives) {
-      __resetAuthControllerForTests()
+      resetController()
       state.githubToken = undefined
       state.userName = undefined
       harness.addAccountCalls = []
