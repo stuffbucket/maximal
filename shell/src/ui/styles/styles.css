@@ -52,23 +52,39 @@ a:hover {
 }
 
 .shell {
-  display: grid;
-  grid-template-columns: var(--sidebar-width) 1fr;
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 0;
 }
 
-/* ---- Sidebar ---- */
-.sidebar {
-  border-inline-end: var(--border-width-hairline) solid var(--border-subtle);
-  background: var(--surface-card);
-  padding: var(--space-3) var(--space-2);
-  overflow-y: auto;
-  min-height: 0;
-  /* Column so the nav takes the slack and the language picker pins to the
-     foot — a global control that shouldn't scroll with the section list. */
+/* ---- Top bar (unified header + tab bar) ---- */
+.topbar {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+  background: var(--surface-card);
+  border-block-end: var(--border-width-hairline) solid var(--border-subtle);
+  padding-block: var(--space-2);
+  padding-inline: var(--space-6);
+  user-select: none;
+  -webkit-user-select: none;
+  flex-shrink: 0;
+}
+
+/* On macOS with TitleBarStyle::Overlay, leave room on the left for the native
+   traffic-light window controls so the first tab sits cleanly beside them. */
+html[data-os="macos"] .topbar {
+  padding-inline-start: calc(var(--space-8) + var(--space-5));
+}
+
+.topbar__nav {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.topbar__nav[hidden] {
+  display: none;
 }
 
 .nav {
@@ -76,12 +92,19 @@ a:hover {
   margin: 0;
   padding: 0;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
   gap: var(--space-1);
 }
 
 .nav__item {
-  display: block;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
   padding: var(--space-2) var(--space-3);
   font-family: var(--font-body);
   font-size: var(--text-sm);
@@ -90,6 +113,10 @@ a:hover {
   color: var(--text-base-color);
   text-decoration: none;
   border-radius: var(--radius-input);
+  white-space: nowrap;
+  transition:
+    background-color 150ms ease-out,
+    color 150ms ease-out;
 }
 
 .nav__item:hover {
@@ -97,7 +124,8 @@ a:hover {
   color: var(--text-strong);
 }
 
-.nav__item--active {
+.nav__item--active,
+.nav__item[aria-pressed="true"] {
   background: var(--surface-control);
   color: var(--text-strong);
   font-weight: var(--weight-md);
@@ -108,44 +136,117 @@ a:hover {
   outline-offset: var(--focus-ring-offset);
 }
 
-/* ---- Language picker ----
-   A global control pinned to the foot of the sidebar (margin-top:auto pushes
-   it below the nav, which takes the vertical slack). Quiet by default —
-   label + a bordered <select> that inherits the app's control surface — so it
-   reads as a utility, not a primary affordance. All values are tokens. */
-.lang-picker {
-  margin-top: auto;
-  padding-top: var(--space-3);
+/* ---- Dashboard period controls in topbar ---- */
+.topbar__dashboard-controls {
   display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
-.lang-picker__label {
+.topbar__dashboard-controls[hidden] {
+  display: none;
+}
+
+.topbar__range {
   font-size: var(--text-sm);
-  font-weight: var(--weight-md);
   color: var(--text-muted);
-  padding-inline: var(--space-1);
+  white-space: nowrap;
+}
+
+/* ---- Right-side topbar utilities (language globe + mode switch icon) ---- */
+.topbar__utilities {
+  margin-inline-start: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-shrink: 0;
+}
+
+.topbar__divider {
+  width: var(--border-width-hairline);
+  height: var(--size-md);
+  background: var(--border-subtle);
+}
+
+.lang-picker {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--size-xl);
+  height: var(--size-xl);
+  color: var(--text-muted);
+  border-radius: var(--radius-input);
+  transition:
+    background-color 150ms ease-in-out,
+    color 150ms ease-in-out;
+}
+
+.lang-picker:hover {
+  color: var(--text-strong);
+  background: var(--surface-control);
+}
+
+.lang-picker:focus-within {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.lang-picker__icon {
+  width: var(--size-sm);
+  height: var(--size-sm);
+  pointer-events: none;
 }
 
 .lang-picker__select {
-  font-family: var(--font-body);
-  font-size: var(--text-sm);
-  color: var(--text-base-color);
-  background: var(--surface-control);
-  border: var(--border-width-hairline) solid var(--border-subtle);
-  border-radius: var(--radius-input);
-  padding: var(--space-2) var(--space-2);
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
   cursor: pointer;
+  font-size: var(--text-sm);
 }
 
-.lang-picker__select:hover {
-  border-color: var(--border-strong);
+.topbar__mode-btn {
+  appearance: none;
+  width: var(--size-xl);
+  height: var(--size-xl);
+  border-radius: var(--radius-input);
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  transition:
+    background-color 150ms ease-in-out,
+    color 150ms ease-in-out;
 }
 
-.lang-picker__select:focus-visible {
+.topbar__mode-btn:hover {
+  color: var(--text-strong);
+  background: var(--surface-control);
+}
+
+.topbar__mode-btn:focus-visible {
   outline: var(--focus-ring);
   outline-offset: var(--focus-ring-offset);
+}
+
+.topbar__mode-icon {
+  width: var(--size-sm);
+  height: var(--size-sm);
+}
+
+.topbar__mode-icon[hidden],
+.topbar__mode-btn[data-surface-mode="dashboard"] [data-mode-icon="dashboard"],
+.topbar__mode-btn[data-surface-mode="settings"] [data-mode-icon="settings"] {
+  display: none;
 }
 
 /* ---- Pane ---- */
@@ -153,19 +254,31 @@ a:hover {
   padding: var(--space-6);
   padding-block-end: var(--space-6);
   overflow-y: auto;
+  flex: 1;
   min-height: 0;
-  /* Always-visible thin scrollbar. macOS hides the overlay scrollbar by
-     default when idle, which left users with no signal that a section
-     scrolls. The standard scrollbar-width + scrollbar-color properties
-     cover Firefox; the WebKit pseudo-element rules below handle
-     Tauri/Safari. */
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-7);
   scrollbar-width: thin;
-  scrollbar-color: var(--border-subtle) transparent;
+  scrollbar-color: color-mix(in srgb, var(--text-muted) 28%, transparent)
+    transparent;
+  transition: scrollbar-color 150ms ease-in-out;
+}
+
+.pane:hover {
+  scrollbar-color: color-mix(in srgb, var(--text-muted) 48%, transparent)
+    transparent;
+}
+
+.pane--dashboard {
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
 }
 
 .pane::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: var(--space-2);
+  height: var(--space-2);
 }
 
 .pane::-webkit-scrollbar-track {
@@ -173,19 +286,43 @@ a:hover {
 }
 
 .pane::-webkit-scrollbar-thumb {
-  background: var(--border-subtle);
+  background-color: color-mix(in srgb, var(--text-muted) 28%, transparent);
+  border: var(--border-width-thick) solid transparent;
+  background-clip: padding-box;
   border-radius: var(--radius-pill);
+  transition: background-color 150ms ease-in-out;
 }
 
-.pane::-webkit-scrollbar-thumb:hover {
-  background: var(--border-strong);
+.pane:hover::-webkit-scrollbar-thumb {
+  background-color: color-mix(in srgb, var(--text-muted) 48%, transparent);
+}
+
+.pane::-webkit-scrollbar-thumb:hover,
+.pane::-webkit-scrollbar-thumb:active {
+  background-color: color-mix(in srgb, var(--text-strong) 65%, transparent);
 }
 
 .section {
+  width: 100%;
   max-width: var(--content-max);
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
+}
+
+.section--dashboard {
+  max-width: none;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+}
+
+.dashboard-frame {
+  width: 100%;
+  height: 100%;
+  flex: 1;
+  border: 0;
+  background: var(--surface-base);
 }
 
 /* `display: flex` above overrides the UA's `[hidden] { display: none }`,
@@ -211,8 +348,19 @@ a:hover {
   font-size: var(--text-2xl);
   font-weight: var(--weight-2xl);
   line-height: var(--leading-2xl);
-  letter-spacing: -0.015em;
+  letter-spacing: var(--tracking-2xl);
   color: var(--text-strong);
+}
+
+/* When a consolidated tab displays multiple sections, only the first visible
+   section gets the Fraunces display heading; subsequent sections step down to
+   Commissioner (--text-xl) so there is strictly one Fraunces moment per view. */
+.section:not([hidden]) ~ .section:not([hidden]) .section__title {
+  font-family: var(--font-body);
+  font-size: var(--text-xl);
+  font-weight: var(--weight-xl);
+  line-height: var(--leading-xl);
+  letter-spacing: var(--tracking-xl);
 }
 
 .section__sub {

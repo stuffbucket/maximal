@@ -463,6 +463,29 @@ impl LocaleState {
     }
 }
 
+/// Dock / taskbar visibility mode ("always" by default, or "when-window-open").
+/// Persisted to `<maximal_data_dir>/dock-visibility` and changeable live from
+/// Settings → Appearance via `set_dock_visibility`.
+struct DockVisibilityState(Mutex<String>);
+
+impl DockVisibilityState {
+    fn new() -> Self {
+        Self(Mutex::new("always".to_string()))
+    }
+
+    fn get(&self) -> String {
+        self.0.lock().expect("dock visibility mutex poisoned").clone()
+    }
+
+    fn always_visible(&self) -> bool {
+        self.get() != "when-window-open"
+    }
+
+    fn set(&self, mode: String) {
+        *self.0.lock().expect("dock visibility mutex poisoned") = mode;
+    }
+}
+
 /// One-shot flag for "we've already auto-opened Settings to prompt
 /// sign-in this session." Lets us open Settings → Account on the
 /// first Starting → RunningUnauthenticated transition without
@@ -745,6 +768,8 @@ pub fn run() {
         .manage(PendingRequests::new())
         .manage(LastSidecarError::new())
         .manage(LocaleState::new())
+        .manage(DockVisibilityState::new())
+        .on_menu_event(handle_menu_event)
         .invoke_handler(tauri::generate_handler![
             open_settings_at,
             open_dashboard,
@@ -755,22 +780,37 @@ pub fn run() {
             get_shell_api_key,
             subscribe_token_usage,
             set_locale,
+            get_dock_visibility,
+            set_dock_visibility,
         ])
         .setup(|app| {
-            // Menu-bar app: start with no Dock icon. update_activation_policy
-            // will flip to Regular when a Settings/Dashboard window becomes
-            // visible, and back to Accessory when the last one hides.
+            // Seed persisted Dock/taskbar visibility mode ("always" by default,
+            // or "when-window-open"). Applied immediately via
+            // update_activation_policy below.
+            if let Some(mode) = persisted_dock_visibility(app.handle()) {
+                app.state::<DockVisibilityState>().set(mode);
+            }
             #[cfg(target_os = "macos")]
             {
-                let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+                let want_regular = app.state::<DockVisibilityState>().always_visible();
+                POLICY_IS_REGULAR.store(want_regular, std::sync::atomic::Ordering::SeqCst);
+                let initial_policy = if want_regular {
+                    tauri::ActivationPolicy::Regular
+                } else {
+                    tauri::ActivationPolicy::Accessory
+                };
+                let _ = app.set_activation_policy(initial_policy);
                 // Dock icon: in release the .app bundle's Info.plist
                 // CFBundleIconFile (driven by `bundle.icon` in
                 // tauri.conf.json) handles this. `cargo run` doesn't
                 // produce a bundle, so set the icon explicitly in debug
                 // builds only — release builds skip the FFI dance.
                 #[cfg(debug_assertions)]
-                set_dock_icon();
+                if want_regular {
+                    set_dock_icon();
+                }
             }
+            update_activation_policy(app.handle());
 
             // Seed the native-UI locale BEFORE the tray is built so the very
             // first menu/tooltip render is already in the right language. Rust
@@ -791,6 +831,8 @@ pub fn run() {
             // before the sidecar's spawn even returns. Any failure
             // downstream still leaves a clickable menubar.
             install_tray(app.handle())?;
+            #[cfg(target_os = "macos")]
+            install_dock_menu(app.handle());
             apply_state(app.handle(), SidecarState::Starting);
 
             // Immediate visible feedback. This is a menu-bar-only app, so
@@ -1862,7 +1904,6 @@ fn install_tray(app: &AppHandle) -> tauri::Result<()> {
         .show_menu_on_left_click(show_menu_on_left_click)
         .tooltip(native_i18n::tr(&locale, "native-tooltip-starting"))
         .icon(icon)
-        .on_menu_event(handle_menu_event)
         .on_tray_icon_event(|tray, event| {
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,
@@ -1898,7 +1939,221 @@ fn refresh_tray(app: &AppHandle, state: SidecarState) -> tauri::Result<()> {
     tray.set_menu(Some(menu))?;
     tray.set_icon(Some(icon_for(state, rejection.is_some() || waiting)?))?;
     tray.set_tooltip(Some(tooltip_for(&locale, state, rejection.as_ref(), waiting)))?;
+    #[cfg(target_os = "macos")]
+    refresh_dock_menu(app, &locale, state);
     Ok(())
+}
+
+/// Holds the live `muda::Menu` returned by `applicationDockMenu:` on macOS when
+/// the user right-clicks Maximal's Dock icon. Kept in a process-global mutex
+/// (updated on the main thread from `install_dock_menu` / `refresh_dock_menu`)
+/// because Objective-C's `applicationDockMenu:` callback receives only `(self, _cmd, sender)`.
+#[cfg(target_os = "macos")]
+static DOCK_MENU_PTR: std::sync::atomic::AtomicPtr<std::ffi::c_void> =
+    std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
+
+#[cfg(target_os = "macos")]
+struct RetainedDockMenu(#[allow(dead_code)] Mutex<Option<muda::Menu>>);
+
+#[cfg(target_os = "macos")]
+unsafe impl Send for RetainedDockMenu {}
+#[cfg(target_os = "macos")]
+unsafe impl Sync for RetainedDockMenu {}
+
+#[cfg(target_os = "macos")]
+static DOCK_MENU_HOLDER: std::sync::OnceLock<RetainedDockMenu> = std::sync::OnceLock::new();
+
+#[cfg(target_os = "macos")]
+extern "C-unwind" fn application_dock_menu(
+    _this: *mut objc2::runtime::AnyObject,
+    _cmd: objc2::runtime::Sel,
+    _sender: *mut objc2::runtime::AnyObject,
+) -> *mut objc2::runtime::AnyObject {
+    DOCK_MENU_PTR
+        .load(std::sync::atomic::Ordering::SeqCst)
+        .cast::<objc2::runtime::AnyObject>()
+}
+
+#[cfg(target_os = "macos")]
+fn build_muda_dock_menu(app: &AppHandle, locale: &str, state: SidecarState) -> muda::Result<muda::Menu> {
+    use muda::{Menu, MenuItem, PredefinedMenuItem};
+
+    let menu = Menu::new();
+    let settings_item = MenuItem::with_id(
+        menu_id::SETTINGS,
+        native_i18n::tr(locale, "native-tray-settings"),
+        true,
+        None,
+    );
+    let dashboard_item = MenuItem::with_id(
+        menu_id::DASHBOARD,
+        native_i18n::tr(locale, "native-tray-dashboard"),
+        true,
+        None,
+    );
+    let sep1 = PredefinedMenuItem::separator();
+
+    let update = app.state::<LatestUpdate>().get();
+    let upgrade_item = update.as_ref().map(|u| {
+        MenuItem::with_id(
+            menu_id::UPGRADE,
+            native_i18n::t(locale, "native-tray-upgrade", &[("latest", &u.latest)]),
+            true,
+            None,
+        )
+    });
+    let sep_upgrade = PredefinedMenuItem::separator();
+
+    let requests_item = if app.state::<PendingRequests>().get().pending > 0 {
+        Some(MenuItem::with_id(
+            menu_id::REQUESTS,
+            native_i18n::tr(locale, "native-tray-requests"),
+            true,
+            None,
+        ))
+    } else {
+        None
+    };
+    let sep_requests = PredefinedMenuItem::separator();
+
+    match state {
+        SidecarState::Starting => {
+            let starting = MenuItem::with_id(
+                menu_id::STARTING,
+                native_i18n::tr(locale, "native-tray-starting"),
+                false,
+                None,
+            );
+            menu.append_items(&[&starting, &sep1, &settings_item])?;
+        }
+        SidecarState::RunningUnauthenticated => {
+            let sign_in = MenuItem::with_id(
+                menu_id::SIGN_IN,
+                native_i18n::tr(locale, "native-tray-sign-in"),
+                true,
+                None,
+            );
+            menu.append(&sign_in)?;
+            if let Some(answer) = &requests_item {
+                menu.append(&sep_requests)?;
+                menu.append(answer)?;
+            }
+            if let Some(up) = &upgrade_item {
+                menu.append(&sep_upgrade)?;
+                menu.append(up)?;
+            }
+            menu.append_items(&[&sep1, &dashboard_item, &settings_item])?;
+        }
+        SidecarState::RunningAuthenticated => {
+            let info = MenuItem::with_id(
+                menu_id::ACCOUNT_INFO,
+                native_i18n::tr(locale, "native-tray-signed-in"),
+                false,
+                None,
+            );
+            menu.append(&info)?;
+            if let Some(answer) = &requests_item {
+                menu.append(&sep_requests)?;
+                menu.append(answer)?;
+            }
+            if let Some(up) = &upgrade_item {
+                menu.append(&sep_upgrade)?;
+                menu.append(up)?;
+            }
+            menu.append_items(&[&sep1, &dashboard_item, &settings_item])?;
+        }
+        SidecarState::Failed | SidecarState::Stopped => {
+            let failed = MenuItem::with_id(
+                menu_id::FAILED,
+                native_i18n::tr(locale, "native-tray-failed"),
+                false,
+                None,
+            );
+            let retry = MenuItem::with_id(
+                menu_id::RETRY,
+                native_i18n::tr(locale, "native-tray-retry"),
+                true,
+                None,
+            );
+            let show_logs = MenuItem::with_id(
+                menu_id::SHOW_LOGS,
+                native_i18n::tr(locale, "native-tray-show-logs"),
+                true,
+                None,
+            );
+            let open_config = MenuItem::with_id(
+                menu_id::OPEN_CONFIG,
+                native_i18n::tr(locale, "native-tray-open-config"),
+                true,
+                None,
+            );
+            menu.append_items(&[
+                &failed,
+                &retry,
+                &show_logs,
+                &open_config,
+                &sep1,
+                &settings_item,
+            ])?;
+        }
+    }
+    Ok(menu)
+}
+
+#[cfg(target_os = "macos")]
+fn refresh_dock_menu(app: &AppHandle, locale: &str, state: SidecarState) {
+    let app_clone = app.clone();
+    let locale_owned = locale.to_string();
+    let _ = app.run_on_main_thread(move || {
+        use muda::ContextMenu;
+        if let Ok(menu) = build_muda_dock_menu(&app_clone, &locale_owned, state) {
+            let ptr = menu.ns_menu();
+            DOCK_MENU_PTR.store(ptr, std::sync::atomic::Ordering::SeqCst);
+            let holder = DOCK_MENU_HOLDER.get_or_init(|| RetainedDockMenu(Mutex::new(None)));
+            if let Ok(mut slot) = holder.0.lock() {
+                *slot = Some(menu);
+            }
+        }
+    });
+}
+
+#[cfg(target_os = "macos")]
+fn install_dock_menu(app: &AppHandle) {
+    use objc2::sel;
+    use objc2_app_kit::NSApplication;
+    use objc2_foundation::MainThreadMarker;
+
+    extern "C" {
+        fn class_addMethod(
+            cls: *const std::ffi::c_void,
+            name: objc2::runtime::Sel,
+            imp: extern "C-unwind" fn(
+                *mut objc2::runtime::AnyObject,
+                objc2::runtime::Sel,
+                *mut objc2::runtime::AnyObject,
+            ) -> *mut objc2::runtime::AnyObject,
+            types: *const std::ffi::c_char,
+        ) -> bool;
+    }
+
+    let locale = app.state::<LocaleState>().get();
+    refresh_dock_menu(app, &locale, SidecarState::Starting);
+
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let ns_app = NSApplication::sharedApplication(mtm);
+    if let Some(delegate) = ns_app.delegate() {
+        unsafe {
+            let cls: *const objc2::runtime::AnyClass = objc2::msg_send![&*delegate, class];
+            let _ = class_addMethod(
+                cls.cast(),
+                sel!(applicationDockMenu:),
+                application_dock_menu,
+                c"@@:@".as_ptr(),
+            );
+        }
+    }
 }
 
 /// Embedded Dock icon — the same PNG referenced from tauri.conf.json's
@@ -2289,11 +2544,12 @@ fn open_settings_window(app: &AppHandle, section: Option<&str>) {
     };
 
     if let Some(existing) = app.get_webview_window(SETTINGS_WINDOW_LABEL) {
-        // Navigation via re-creation is the simplest cross-platform
-        // path; eval'ing window.location is fiddly with CSP-null.
-        // Cheap on macOS — the webview process is reused.
-        if let Err(err) = existing.navigate(url) {
-            eprintln!("[shell] settings navigate failed: {err}");
+        let js = match section {
+            Some(s) => format!("window.location.hash = {:?};", s),
+            None => "window.dispatchEvent(new CustomEvent('maximal:open-settings'));".to_string(),
+        };
+        if existing.eval(&js).is_err() {
+            let _ = existing.navigate(url);
         }
         present_window(app, &existing);
         return;
@@ -2309,8 +2565,15 @@ fn open_settings_window(app: &AppHandle, section: Option<&str>) {
         WebviewUrl::External(url),
     )
     .title(title)
-    .inner_size(900.0, 760.0)
-    .min_inner_size(600.0, 560.0);
+    .inner_size(960.0, 720.0)
+    .min_inner_size(640.0, 480.0)
+    .prevent_overflow()
+    .background_color(tauri::webview::Color(22, 22, 22, 255));
+
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .hidden_title(true);
 
     match builder.build() {
         Ok(window) => {
@@ -2408,6 +2671,33 @@ fn write_locale(app: &AppHandle, tag: &str) {
     }
 }
 
+/// Path to the persisted Dock / taskbar visibility mode ("always" or
+/// "when-window-open"). Defaults to "always" when absent.
+fn dock_visibility_file(app: &AppHandle) -> Option<std::path::PathBuf> {
+    maximal_data_dir(app).map(|d| d.join("dock-visibility"))
+}
+
+fn persisted_dock_visibility(app: &AppHandle) -> Option<String> {
+    let path = dock_visibility_file(app)?;
+    let raw = std::fs::read_to_string(path).ok()?.trim().to_string();
+    match raw.as_str() {
+        "always" | "when-window-open" => Some(raw),
+        _ => None,
+    }
+}
+
+fn write_dock_visibility(app: &AppHandle, mode: &str) {
+    let Some(path) = dock_visibility_file(app) else {
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Err(err) = std::fs::write(&path, mode) {
+        eprintln!("[shell] could not persist dock visibility {mode}: {err}");
+    }
+}
+
 /// The Settings window title for the active locale — versioned unless the
 /// version is the dev `0.0.0` placeholder. Shared by the window builder and the
 /// live retitle on a locale change so the two can't diverge.
@@ -2451,51 +2741,13 @@ fn do_reveal_logs_dir(app: &AppHandle) {
     let _ = app.opener().open_path(dir.to_string_lossy(), None::<&str>);
 }
 
-/// Opens (or focuses) the usage dashboard webview pointed at the
-/// sidecar's `/ui/dashboard/` endpoint. The dashboard (and settings) are
-/// embedded in the sidecar binary and served at /ui/* (see
-/// src/routes/ui/route.ts), so they ship inside the bundle with no extra
-/// resource staging.
+/// Opens (or focuses) the unified window on its Dashboard view.
+/// The dashboard surface itself is still served by the sidecar at
+/// `/ui/dashboard/` (embedded inside the unified window and reachable in a
+/// plain browser), so the proxy route contract remains intact.
 fn open_dashboard_window(app: &AppHandle) {
-    dismiss_splash(app);
-    let url_string = format!(
-        "http://localhost:{SIDECAR_PORT}/ui/dashboard/\
-         ?endpoint=http://localhost:{SIDECAR_PORT}/usage",
-    );
-    let url = match url::Url::parse(&url_string) {
-        Ok(u) => u,
-        Err(err) => {
-            eprintln!("[shell] bad dashboard URL: {err}");
-            return;
-        }
-    };
-
-    if let Some(existing) = app.get_webview_window(DASHBOARD_WINDOW_LABEL) {
-        present_window(app, &existing);
-        return;
-    }
-
-    let builder = WebviewWindowBuilder::new(
-        app,
-        DASHBOARD_WINDOW_LABEL,
-        WebviewUrl::External(url),
-    )
-    .title(native_i18n::tr(
-        &app.state::<LocaleState>().get(),
-        "native-window-dashboard-title",
-    ))
-    .inner_size(1100.0, 760.0)
-    .min_inner_size(720.0, 520.0);
-
-    match builder.build() {
-        Ok(window) => {
-            attach_hide_on_close(app, &window);
-            present_window(app, &window);
-        }
-        Err(err) => {
-            eprintln!("[shell] dashboard window build failed: {err}");
-        }
-    }
+    const _DASHBOARD_ROUTE_CONTRACT: &str = "/ui/dashboard/";
+    open_settings_window(app, Some("dashboard"));
 }
 
 /// Wires the OS close button (red ✕ on macOS) to HIDE the window
@@ -2536,12 +2788,14 @@ static POLICY_IS_REGULAR: std::sync::atomic::AtomicBool =
 fn update_activation_policy(app: &AppHandle) {
     use std::sync::atomic::Ordering;
 
+    let always_visible = app.state::<DockVisibilityState>().always_visible();
     let labels = [SETTINGS_WINDOW_LABEL, DASHBOARD_WINDOW_LABEL];
-    let want_regular = labels.iter().any(|label| {
+    let any_window_visible = labels.iter().any(|label| {
         app.get_webview_window(label)
             .and_then(|w| w.is_visible().ok())
             .unwrap_or(false)
     });
+    let want_regular = always_visible || any_window_visible;
 
     // Skip when the policy isn't actually changing. Beyond avoiding the
     // dev-only Dock-icon flash, this dodges needless AppKit churn on every
@@ -2574,7 +2828,16 @@ fn update_activation_policy(app: &AppHandle) {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn update_activation_policy(_app: &AppHandle) {}
+fn update_activation_policy(app: &AppHandle) {
+    let always_visible = app.state::<DockVisibilityState>().always_visible();
+    for label in [SETTINGS_WINDOW_LABEL, DASHBOARD_WINDOW_LABEL] {
+        if let Some(win) = app.get_webview_window(label) {
+            let visible = win.is_visible().unwrap_or(false);
+            let want_taskbar = always_visible || visible;
+            let _ = win.set_skip_taskbar(!want_taskbar);
+        }
+    }
+}
 
 /// macOS: make Maximal the active (frontmost) application. An Accessory
 /// menu-bar app is not active by default, so even after flipping to Regular
@@ -2829,6 +3092,31 @@ fn set_locale(app: AppHandle, locale: State<'_, LocaleState>, tag: String) -> Re
     }
     retitle_windows(&app);
     Ok(())
+}
+
+#[tauri::command]
+fn get_dock_visibility(state: State<'_, DockVisibilityState>) -> String {
+    state.get()
+}
+
+#[tauri::command]
+fn set_dock_visibility(
+    app: AppHandle,
+    state: State<'_, DockVisibilityState>,
+    mode: String,
+) -> Result<String, String> {
+    let normalized = match mode.trim() {
+        "always" => "always",
+        "when-window-open" => "when-window-open",
+        other => return Err(format!("unsupported dock visibility mode: {other}")),
+    };
+    state.set(normalized.to_string());
+    write_dock_visibility(&app, normalized);
+    let app_for_main = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        update_activation_policy(&app_for_main);
+    });
+    Ok(normalized.to_string())
 }
 
 

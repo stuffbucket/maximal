@@ -138,10 +138,9 @@ function updateUsageViewerCss() {
     ":root {"
   ];
   
-  rootLines.push("  /* Font stacks. No --font-display */");
-  rootLines.push(`  --font-body: ${fontStacks.body};`);
-  rootLines.push(`  --font-mono: ${fontStacks.mono};`);
-  
+  rootLines.push("  /* ---- Font stacks ---- */");
+  Object.entries(fontStacks).forEach(([k, v]) => rootLines.push(`  --font-${k}: ${v};`));
+
   rootLines.push("");
   rootLines.push("  /* Auto-injected tokens */");
   Object.entries(text).forEach(([k, v]) => rootLines.push(`  --text-${k}: ${v};`));
@@ -153,11 +152,14 @@ function updateUsageViewerCss() {
   Object.entries(borderWidth).forEach(([k, v]) => rootLines.push(`  --border-width-${k}: ${v};`));
   Object.entries(size).forEach(([k, v]) => rootLines.push(`  --size-${k}: ${v};`));
   Object.entries(elevation).forEach(([k, v]) => rootLines.push(`  --elevation-${k}: ${v};`));
-  
+
   rootLines.push(...processGroup("brand", brand as any));
   const { destructive, destructiveFg, ...accentBase } = accent;
   rootLines.push(...processGroup("accent", accentBase as any));
+  rootLines.push(`  --accent-destructive: ${destructive};`);
+  rootLines.push(`  --accent-destructive-foreground: ${destructiveFg};`);
   rootLines.push(`  --focus-ring: ${focusRing.dashboardExpr};`);
+  Object.entries(layout).forEach(([k, v]) => rootLines.push(`  --${toKebabCase(k)}: ${v};`));
   
   rootLines.push("}");
   rootLines.push("");

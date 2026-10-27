@@ -2,7 +2,14 @@ import { invoke } from "@tauri-apps/api/core";
 
 import { t } from "./i18n";
 import { applyI18n, wireLocalePicker } from "./i18n/apply";
-import { getShellApiKey, openUrl, safeInvoke } from "./tauri/shell";
+import {
+  getDockVisibility,
+  getShellApiKey,
+  openUrl,
+  safeInvoke,
+  setDockVisibility,
+} from "./tauri/shell";
+import { osKind } from "./ui/platform";
 
 
 import type {
@@ -20,6 +27,11 @@ import { waitForSidecarBack } from "./ui/restart";
 
 type SectionId =
   | "account"
+  | "integrations"
+  | "models-keys"
+  | "appearance"
+  | "system"
+  | "dashboard"
   | "apps"
   | "mcp"
   | "requests"
@@ -29,8 +41,21 @@ type SectionId =
   | "logs"
   | "diagnostics";
 
+type TopTabId =
+  | "account"
+  | "integrations"
+  | "models-keys"
+  | "appearance"
+  | "system"
+  | "dashboard";
+
 const SECTIONS: ReadonlyArray<SectionId> = [
   "account",
+  "integrations",
+  "models-keys",
+  "appearance",
+  "system",
+  "dashboard",
   "apps",
   "mcp",
   "requests",
@@ -41,35 +66,173 @@ const SECTIONS: ReadonlyArray<SectionId> = [
   "diagnostics",
 ];
 
+const TAB_SECTIONS: Record<TopTabId, ReadonlyArray<string>> = {
+  account: ["account"],
+  integrations: ["apps", "mcp", "requests"],
+  "models-keys": ["models", "endpoint", "api-clients"],
+  appearance: ["appearance"],
+  system: ["diagnostics", "logs"],
+  dashboard: ["dashboard"],
+};
+
+const LAST_TAB_STORAGE_KEY = "maximal.lastTab";
+const LAST_SETTINGS_TAB_STORAGE_KEY = "maximal.lastSettingsTab";
 const DEFAULT_SECTION: SectionId = "account";
+let userExplicitlySelectedTab = false;
 
 function isSectionId(value: string): value is SectionId {
   return (SECTIONS as ReadonlyArray<string>).includes(value);
 }
 
-function showSection(id: SectionId): void {
+function tabForSection(id: SectionId): TopTabId {
+  switch (id) {
+    case "account":
+      return "account";
+    case "integrations":
+    case "apps":
+    case "mcp":
+    case "requests":
+      return "integrations";
+    case "models-keys":
+    case "models":
+    case "endpoint":
+    case "api-clients":
+      return "models-keys";
+    case "appearance":
+      return "appearance";
+    case "system":
+    case "diagnostics":
+    case "logs":
+      return "system";
+    case "dashboard":
+      return "dashboard";
+  }
+}
+
+function getStoredTab(key: string): SectionId | null {
+  try {
+    const val = window.localStorage.getItem(key);
+    if (val && isSectionId(val)) return val;
+  } catch {
+    // ignore storage errors
+  }
+  return null;
+}
+
+function persistTabSelection(tab: TopTabId): void {
+  try {
+    window.localStorage.setItem(LAST_TAB_STORAGE_KEY, tab);
+    if (tab !== "dashboard") {
+      window.localStorage.setItem(LAST_SETTINGS_TAB_STORAGE_KEY, tab);
+    }
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function hasAccountProblem(status: AuthStatus | null = currentAuthStatus): boolean {
+  if (!status) return false;
+  return (
+    status.state !== "authenticated"
+    || status.last_upstream_rejection !== undefined
+  );
+}
+
+function updateSurfaceModeButton(isDashboard: boolean): void {
+  const btn = document.querySelector<HTMLButtonElement>(
+    "[data-surface-mode-btn]",
+  );
+  const dashIcon = document.querySelector<Element>(
+    '[data-mode-icon="dashboard"]',
+  );
+  const settingsIcon = document.querySelector<Element>(
+    '[data-mode-icon="settings"]',
+  );
+  dashIcon?.toggleAttribute("hidden", isDashboard);
+  settingsIcon?.toggleAttribute("hidden", !isDashboard);
+  if (btn) {
+    btn.dataset.surfaceMode = isDashboard ? "dashboard" : "settings";
+    const isMac = osKind() === "macos";
+    const label =
+      isDashboard ?
+        t("nav-switch-to-settings", { shortcut: isMac ? "⌘," : "Ctrl+," })
+      : t("nav-switch-to-dashboard", { shortcut: isMac ? "⌘D" : "Ctrl+D" });
+    btn.title = label;
+    btn.setAttribute("aria-label", label);
+  }
+  const localeSelect = document.getElementById(
+    "locale-select",
+  ) as HTMLSelectElement | null;
+  if (localeSelect) {
+    localeSelect.title = localeSelect.selectedOptions[0]?.textContent ?? "";
+  }
+}
+
+function showSection(
+  id: SectionId,
+  options: { persist?: boolean } = {},
+): void {
+  const tab = tabForSection(id);
+  const visibleSections = new Set(TAB_SECTIONS[tab]);
+  const isDashboard = tab === "dashboard";
+
+  if (options.persist !== false) {
+    persistTabSelection(tab);
+  }
+
+  const frame = document.querySelector<HTMLIFrameElement>(
+    "[data-dashboard-frame]",
+  );
+  frame?.contentWindow?.postMessage(
+    { type: "maximal:dashboard-visibility", visible: isDashboard },
+    window.location.origin,
+  );
+
+  const settingsNav = document.querySelector<HTMLElement>("[data-settings-nav]");
+  const dashControls = document.querySelector<HTMLElement>(
+    "[data-dashboard-controls]",
+  );
+  if (settingsNav) settingsNav.hidden = isDashboard;
+  if (dashControls) dashControls.hidden = !isDashboard;
+  updateSurfaceModeButton(isDashboard);
+
   for (const sec of document.querySelectorAll<HTMLElement>("[data-section]")) {
-    sec.hidden = sec.dataset.section !== id;
+    const secId = sec.dataset.section ?? "";
+    sec.hidden = !visibleSections.has(secId);
   }
   for (const link of document.querySelectorAll<HTMLAnchorElement>(
     "[data-nav]",
   )) {
-    const active = link.dataset.nav === id;
+    const active = link.dataset.nav === tab;
     link.setAttribute("aria-current", active ? "page" : "false");
     link.classList.toggle("nav__item--active", active);
   }
-  // Pane is the scroll container now; reset *its* scroll, not the window's.
+
   const pane = document.getElementById("pane");
-  if (pane) pane.scrollTop = 0;
+  if (pane) {
+    pane.classList.toggle("pane--dashboard", isDashboard);
+    if (id !== tab && visibleSections.has(id)) {
+      const targetEl = document.querySelector<HTMLElement>(
+        `[data-section="${id}"]`,
+      );
+      if (targetEl) {
+        targetEl.scrollIntoView({ block: "start" });
+        return;
+      }
+    }
+    pane.scrollTop = 0;
+  }
 }
 
 function readHashSection(): SectionId {
   const raw = window.location.hash.replace(/^#/, "");
-  return isSectionId(raw) ? raw : DEFAULT_SECTION;
+  if (isSectionId(raw)) return raw;
+  if (hasAccountProblem()) return "account";
+  return getStoredTab(LAST_TAB_STORAGE_KEY) ?? DEFAULT_SECTION;
 }
 
-function syncFromHash(): void {
-  showSection(readHashSection());
+function syncFromHash(options: { persist?: boolean } = {}): void {
+  showSection(readHashSection(), options);
 }
 
 /**
@@ -89,14 +252,145 @@ function wireNav(): void {
       const id = link.dataset.nav;
       if (!id || !isSectionId(id)) return;
       ev.preventDefault();
+      userExplicitlySelectedTab = true;
       if (window.location.hash !== `#${id}`) {
         window.location.hash = id;
       } else {
-        // Same hash → hashchange won't fire. Drive it manually.
         showSection(id);
       }
     });
   }
+
+  const modeBtn = document.querySelector<HTMLButtonElement>(
+    "[data-surface-mode-btn]",
+  );
+  modeBtn?.addEventListener("click", () => {
+    userExplicitlySelectedTab = true;
+    const currentTab = tabForSection(readHashSection());
+    if (currentTab === "dashboard") {
+      const target: SectionId =
+        hasAccountProblem() ?
+          "account"
+        : (getStoredTab(LAST_SETTINGS_TAB_STORAGE_KEY) ?? "account");
+      window.location.hash = target;
+      showSection(target);
+    } else {
+      window.location.hash = "dashboard";
+      showSection("dashboard");
+    }
+  });
+
+  for (const btn of document.querySelectorAll<HTMLButtonElement>(
+    "[data-dashboard-period]",
+  )) {
+    btn.addEventListener("click", () => {
+      const period = btn.dataset.dashboardPeriod;
+      if (!period) return;
+      for (const peer of document.querySelectorAll<HTMLButtonElement>(
+        "[data-dashboard-period]",
+      )) {
+        const active = peer === btn;
+        peer.setAttribute("aria-pressed", active ? "true" : "false");
+        peer.classList.toggle("nav__item--active", active);
+      }
+      const frame = document.querySelector<HTMLIFrameElement>(
+        "[data-dashboard-frame]",
+      );
+      frame?.contentWindow?.postMessage(
+        { type: "maximal:set-period", period },
+        window.location.origin,
+      );
+    });
+  }
+
+  window.addEventListener("message", (event: MessageEvent) => {
+    if (event.origin !== window.location.origin) return;
+    const data = event.data as {
+      type?: string;
+      period?: string;
+      rangeText?: string;
+      rangeTitle?: string;
+      key?: string;
+    } | null;
+    if (!data || typeof data !== "object") return;
+    if (data.type === "maximal:shortcut") {
+      if (data.key === ",") {
+        userExplicitlySelectedTab = true;
+        const target: SectionId =
+          hasAccountProblem() ?
+            "account"
+          : (getStoredTab(LAST_SETTINGS_TAB_STORAGE_KEY) ?? "account");
+        window.location.hash = target;
+        showSection(target);
+      } else if (data.key?.toLowerCase() === "d") {
+        userExplicitlySelectedTab = true;
+        window.location.hash = "dashboard";
+        showSection("dashboard");
+      }
+      return;
+    }
+    if (data.type !== "maximal:dashboard-state") return;
+    const rangeEl = document.querySelector<HTMLElement>(
+      "[data-dashboard-range]",
+    );
+    if (rangeEl) {
+      rangeEl.textContent = data.rangeText ?? "";
+      rangeEl.title = data.rangeTitle ?? "";
+    }
+    if (data.period) {
+      for (const peer of document.querySelectorAll<HTMLButtonElement>(
+        "[data-dashboard-period]",
+      )) {
+        const active = peer.dataset.dashboardPeriod === data.period;
+        peer.setAttribute("aria-pressed", active ? "true" : "false");
+        peer.classList.toggle("nav__item--active", active);
+      }
+    }
+  });
+
+  window.addEventListener("maximal:open-settings", () => {
+    const currentTab = tabForSection(readHashSection());
+    if (currentTab === "dashboard") {
+      const target: SectionId =
+        hasAccountProblem() ?
+          "account"
+        : (getStoredTab(LAST_SETTINGS_TAB_STORAGE_KEY) ?? "account");
+      window.location.hash = target;
+      showSection(target);
+    }
+  });
+
+  window.addEventListener("keydown", (ev: KeyboardEvent) => {
+    if (!(ev.metaKey || ev.ctrlKey) || ev.altKey || ev.shiftKey) return;
+    if (ev.key === ",") {
+      ev.preventDefault();
+      userExplicitlySelectedTab = true;
+      const target: SectionId =
+        hasAccountProblem() ?
+          "account"
+        : (getStoredTab(LAST_SETTINGS_TAB_STORAGE_KEY) ?? "account");
+      window.location.hash = target;
+      showSection(target);
+    } else if (ev.key.toLowerCase() === "d") {
+      ev.preventDefault();
+      userExplicitlySelectedTab = true;
+      window.location.hash = "dashboard";
+      showSection("dashboard");
+    }
+  });
+}
+
+function wireAppearance(): void {
+  const toggle = document.querySelector<HTMLInputElement>(
+    "[data-dock-visibility-toggle]",
+  );
+  if (!toggle) return;
+  void getDockVisibility().then((mode) => {
+    toggle.checked = mode === "always";
+  });
+  toggle.addEventListener("change", () => {
+    void setDockVisibility(toggle.checked ? "always" : "when-window-open");
+  });
 }
 
 
@@ -131,6 +425,14 @@ function setBusy(on: boolean, label = t("common-working")): void {
  */
 function repaintDynamicI18n(): void {
   renderStaticComposites();
+  updateSurfaceModeButton(tabForSection(readHashSection()) === "dashboard");
+  const frame = document.querySelector<HTMLIFrameElement>(
+    "[data-dashboard-frame]",
+  );
+  frame?.contentWindow?.postMessage(
+    { type: "maximal:set-locale" },
+    window.location.origin,
+  );
   if (currentAuthStatus) renderAccount(currentAuthStatus);
   if (lastDiagnostics) renderDiagnostics(lastDiagnostics);
 }
@@ -1969,7 +2271,34 @@ function wireAccount(): void {
   });
 }
 
+async function checkInitialAccountHealth(): Promise<void> {
+  const result = await apiCall({
+    kind: "auth-status",
+    method: "GET",
+    path: "/settings/api/auth/github/status",
+  });
+  if (!result.ok || hasAccountProblem(result.data)) {
+    if (!userExplicitlySelectedTab) {
+      showSection("account", { persist: false });
+      if (result.ok) {
+        renderAccount(result.data);
+      } else {
+        renderAccount({
+          state: "error",
+          error: t("account-err-load-status", { error: result.error }),
+        });
+      }
+      openAuthEvents();
+    }
+  } else {
+    currentAuthStatus = result.data;
+  }
+}
+
 window.addEventListener("DOMContentLoaded", () => {
+  document.documentElement.dataset.os = osKind();
+  const initialHash = window.location.hash.replace(/^#/, "");
+  const hadExplicitHash = isSectionId(initialHash);
   applyI18n();
   // Sentences that embed a link/CLI token or a plural count aren't [data-i18n]
   // (they carry live DOM children); render them explicitly after the sweep.
@@ -1980,37 +2309,37 @@ window.addEventListener("DOMContentLoaded", () => {
   wireAccount();
   wireEndpoint();
   wireUninstall();
+  wireAppearance();
   mountApiClients();
   mountApps();
   mountMcp();
   mountRequests();
   mountModels();
   wireNav();
-  syncFromHash();
+  syncFromHash({ persist: hadExplicitHash });
   void loadDiagnostics();
-  if (readHashSection() === "account") {
+  if (tabForSection(readHashSection()) === "account") {
     void loadAuthStatus();
     openAuthEvents();
+  } else if (!hadExplicitHash) {
+    void checkInitialAccountHealth();
   }
 });
 
 window.addEventListener("hashchange", () => {
   syncFromHash();
   const section = readHashSection();
-  if (section === "diagnostics") void loadDiagnostics();
-  if (section === "apps") {
+  const tab = tabForSection(section);
+  if (tab === "system") void loadDiagnostics();
+  if (tab === "integrations") {
     window.dispatchEvent(new CustomEvent("maximal:apps-refresh"));
-  }
-  if (section === "requests") {
     window.dispatchEvent(new CustomEvent("maximal:requests-refresh"));
-  }
-  if (section === "mcp") {
     window.dispatchEvent(new CustomEvent("maximal:mcp-refresh"));
   }
-  if (section === "models") {
+  if (tab === "models-keys") {
     window.dispatchEvent(new CustomEvent("maximal:models-refresh"));
   }
-  if (section === "account") {
+  if (tab === "account") {
     void loadAuthStatus();
     openAuthEvents();
   } else {

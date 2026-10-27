@@ -14,6 +14,17 @@
   "nav-logs": "Logs",
   "nav-diagnostics": "Diagnostics",
   "nav-sidebar-label": "Settings sections",
+  "nav-integrations": "Integrations",
+  "nav-models-keys": "Models & keys",
+  "nav-appearance": "Appearance",
+  "nav-system": "System",
+  "nav-switch-to-dashboard": "Dashboard ({shortcut})",
+  "nav-switch-to-settings": "Settings ({shortcut})",
+
+  "appearance-title": "Appearance",
+  "appearance-sub": "Control how Maximal appears on your desktop.",
+  "appearance-dock-label": "{os, select, macos {Always show in Dock} other {Always show in taskbar}}",
+  "appearance-dock-sub": "{os, select, macos {Keep Maximal in the Dock even when the window is closed. Right-click the Dock icon for quick actions.} other {Keep Maximal in the taskbar even when the window is closed. Right-click the icon for quick actions.}}",
 
   "common-copy": "Copy",
   "common-copied": "Copied",

@@ -14,6 +14,17 @@
   "nav-logs": "Protokolle",
   "nav-diagnostics": "Diagnose",
   "nav-sidebar-label": "Einstellungsbereiche",
+  "nav-integrations": "Integrationen",
+  "nav-models-keys": "Modelle & Schlüssel",
+  "nav-appearance": "Darstellung",
+  "nav-system": "System",
+  "nav-switch-to-dashboard": "Dashboard ({shortcut})",
+  "nav-switch-to-settings": "Einstellungen ({shortcut})",
+
+  "appearance-title": "Darstellung",
+  "appearance-sub": "Steuern Sie, wie Maximal auf Ihrem Desktop angezeigt wird.",
+  "appearance-dock-label": "{os, select, macos {Immer im Dock anzeigen} other {Immer in der Taskleiste anzeigen}}",
+  "appearance-dock-sub": "{os, select, macos {Maximal auch bei geschlossenem Fenster im Dock behalten. Rechtsklick auf das Dock-Symbol für Schnellaktionen.} other {Maximal auch bei geschlossenem Fenster in der Taskleiste behalten. Rechtsklick auf das Symbol für Schnellaktionen.}}",
 
   "common-copy": "Kopieren",
   "common-copied": "Kopiert",

@@ -73,46 +73,171 @@
     </div>
     <div class="app">
       <div class="shell">
-        <nav class="sidebar" data-i18n-aria-label="nav-sidebar-label">
-          <ul class="nav">
-            <li>
-              <a class="nav__item" href="#account" data-nav="account" data-i18n="nav-account"></a>
-            </li>
-            <li>
-              <a class="nav__item" href="#apps" data-nav="apps" data-i18n="nav-apps"></a>
-            </li>
-            <li>
-              <a class="nav__item" href="#mcp" data-nav="mcp" data-i18n="nav-mcp"></a>
-            </li>
-            <li>
-              <a class="nav__item" href="#requests" data-nav="requests" data-i18n="nav-requests"></a>
-            </li>
-            <li>
-              <a class="nav__item" href="#endpoint" data-nav="endpoint" data-i18n="nav-endpoint"></a>
-            </li>
-            <li>
-              <a class="nav__item" href="#api-clients" data-nav="api-clients" data-i18n="nav-api-clients"></a>
-            </li>
-            <li>
-              <a class="nav__item" href="#models" data-nav="models" data-i18n="nav-models"></a>
-            </li>
-            <li>
-              <a class="nav__item" href="#logs" data-nav="logs" data-i18n="nav-logs"></a>
-            </li>
-            <li>
-              <a class="nav__item" href="#diagnostics" data-nav="diagnostics" data-i18n="nav-diagnostics"></a>
-            </li>
-          </ul>
+        <header class="topbar" data-tauri-drag-region>
+          <nav
+            class="topbar__nav"
+            data-settings-nav
+            data-tauri-drag-region
+            data-i18n-aria-label="nav-sidebar-label"
+          >
+            <ul class="nav" role="tablist" data-tauri-drag-region>
+              <li>
+                <a
+                  class="nav__item"
+                  href="#account"
+                  data-nav="account"
+                  data-i18n="nav-account"
+                ></a>
+              </li>
+              <li>
+                <a
+                  class="nav__item"
+                  href="#integrations"
+                  data-nav="integrations"
+                  data-i18n="nav-integrations"
+                ></a>
+              </li>
+              <li>
+                <a
+                  class="nav__item"
+                  href="#models-keys"
+                  data-nav="models-keys"
+                  data-i18n="nav-models-keys"
+                ></a>
+              </li>
+              <li>
+                <a
+                  class="nav__item"
+                  href="#appearance"
+                  data-nav="appearance"
+                  data-i18n="nav-appearance"
+                ></a>
+              </li>
+              <li>
+                <a
+                  class="nav__item"
+                  href="#system"
+                  data-nav="system"
+                  data-i18n="nav-system"
+                ></a>
+              </li>
+            </ul>
+          </nav>
 
-          <!-- Language picker: a global, section-agnostic control, pinned to
-               the foot of the persistent sidebar rather than duplicated in
-               each section head. Options + selection are wired in main.ts
-               (populateLocalePicker); changing it re-runs applyI18n live. -->
-          <div class="lang-picker">
-            <label class="lang-picker__label" for="locale-select" data-i18n="common-language-label"></label>
-            <select class="lang-picker__select" id="locale-select" data-locale-select></select>
+          <div
+            class="topbar__dashboard-controls"
+            data-dashboard-controls
+            data-tauri-drag-region
+            hidden
+          >
+            <ul
+              class="nav"
+              role="group"
+              data-tauri-drag-region
+              data-i18n-aria-label="dashboard-period-label"
+              data-i18n-title="dashboard-period-label"
+            >
+              <li>
+                <button
+                  type="button"
+                  class="nav__item nav__item--active"
+                  data-dashboard-period="day"
+                  aria-pressed="true"
+                  data-i18n="dashboard-period-days"
+                  data-i18n-count="1"
+                ></button>
+              </li>
+              <li>
+                <button
+                  type="button"
+                  class="nav__item"
+                  data-dashboard-period="week"
+                  aria-pressed="false"
+                  data-i18n="dashboard-period-days"
+                  data-i18n-count="7"
+                ></button>
+              </li>
+              <li>
+                <button
+                  type="button"
+                  class="nav__item"
+                  data-dashboard-period="month"
+                  aria-pressed="false"
+                  data-i18n="dashboard-period-days"
+                  data-i18n-count="30"
+                ></button>
+              </li>
+            </ul>
+            <span class="topbar__range" data-dashboard-range></span>
           </div>
-        </nav>
+
+          <div class="topbar__utilities">
+            <button
+              type="button"
+              class="topbar__mode-btn"
+              data-action="toggle-surface-mode"
+              data-surface-mode-btn
+              data-surface-mode="settings"
+            >
+              <svg
+                class="topbar__mode-icon"
+                data-mode-icon="dashboard"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.75"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <rect x="3" y="3" width="7" height="9" rx="1.5" />
+                <rect x="14" y="3" width="7" height="5" rx="1.5" />
+                <rect x="14" y="12" width="7" height="9" rx="1.5" />
+                <rect x="3" y="16" width="7" height="5" rx="1.5" />
+              </svg>
+              <svg
+                class="topbar__mode-icon"
+                data-mode-icon="settings"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.75"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+                hidden
+              >
+                <circle cx="12" cy="12" r="3" />
+                <path
+                  d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"
+                />
+              </svg>
+            </button>
+            <span class="topbar__divider" aria-hidden="true"></span>
+            <div class="lang-picker">
+              <svg
+                class="lang-picker__icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.75"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" />
+                <path d="M2 12h20" />
+              </svg>
+              <select
+                class="lang-picker__select"
+                id="locale-select"
+                data-locale-select
+                data-i18n-aria-label="common-language-label"
+              ></select>
+            </div>
+          </div>
+        </header>
 
         <main class="pane" id="pane">
           <!-- ACCOUNT -->
@@ -794,6 +919,52 @@
                 </div>
               </div>
             </div>
+          </section>
+
+          <!-- APPEARANCE -->
+          <section class="section" data-section="appearance" hidden>
+            <header class="section__head">
+              <h2 class="section__title" data-i18n="appearance-title"></h2>
+              <p class="section__sub" data-i18n="appearance-sub"></p>
+            </header>
+
+            <div class="card">
+              <div class="card__head">
+                <div class="card__main">
+                  <h3
+                    class="card__title"
+                    data-i18n="appearance-dock-label"
+                  ></h3>
+                  <p class="card__hint" data-i18n="appearance-dock-sub"></p>
+                </div>
+                <label class="switch">
+                  <input
+                    type="checkbox"
+                    id="dock-visibility-toggle"
+                    data-dock-visibility-toggle
+                    checked
+                  />
+                  <span
+                    class="sr-only"
+                    data-i18n="appearance-dock-label"
+                  ></span>
+                </label>
+              </div>
+            </div>
+          </section>
+
+          <!-- DASHBOARD -->
+          <section
+            class="section section--dashboard"
+            data-section="dashboard"
+            hidden
+          >
+            <iframe
+              class="dashboard-frame"
+              data-dashboard-frame
+              src="../dashboard/index.html?embedded=1"
+              title="Dashboard"
+            ></iframe>
           </section>
         </main>
       </div>

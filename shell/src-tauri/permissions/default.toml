@@ -22,6 +22,8 @@ permissions = [
   "allow-get-shell-api-key",
   "allow-subscribe-token-usage",
   "allow-set-locale",
+  "allow-get-dock-visibility",
+  "allow-set-dock-visibility",
 ]
 
 [[permission]]
@@ -68,3 +70,14 @@ commands.allow = ["subscribe_token_usage"]
 identifier = "allow-set-locale"
 description = "Adopt the in-app picker's locale for the shell's native chrome (tray menu, tooltip, notifications, window titles, quit dialog), invoked from the Settings/Dashboard webviews — a 'remote' loopback origin, so it needs an explicit permission."
 commands.allow = ["set_locale"]
+
+[[permission]]
+identifier = "allow-get-dock-visibility"
+description = "Read the persisted Dock / taskbar visibility preference ('always' or 'when-window-open')."
+commands.allow = ["get_dock_visibility"]
+
+[[permission]]
+identifier = "allow-set-dock-visibility"
+description = "Update and persist the Dock / taskbar visibility preference ('always' or 'when-window-open') and immediately apply the OS activation policy."
+commands.allow = ["set_dock_visibility"]
+
