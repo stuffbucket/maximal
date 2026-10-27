@@ -176,8 +176,8 @@ export function WorkIqSection({
       >
         <p>
           You're signed in, but Work IQ can't reach your Microsoft 365 data yet. An admin must
-          approve Work IQ for your organization, and you need a Microsoft 365 Copilot license. See
-          the <ExternalLink href={ADMIN_URL}>admin instructions</ExternalLink> and{" "}
+          approve Work IQ for your organization, and your account needs a license for it. See the{" "}
+          <ExternalLink href={ADMIN_URL}>admin instructions</ExternalLink> and{" "}
           <ExternalLink href={DOCS_URL}>Microsoft's Work IQ guide</ExternalLink>.
         </p>
         {lastProblem}
