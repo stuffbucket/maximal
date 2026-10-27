@@ -95,4 +95,9 @@ export interface McpBrokerConfig {
     pendingRequests?: number
   }
   servers?: Array<McpServerConfig>
+  /** Install hints for known servers (`./catalog`). */
+  catalog?: {
+    /** Registry the install command downloads from (http or https). */
+    npmRegistry?: string
+  }
 }

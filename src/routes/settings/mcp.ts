@@ -42,10 +42,11 @@ function httpError(message: string, status: number): HTTPError {
 
 export const mcpRoutes = new Hono()
 
-const ADD_ERROR_STATUS = {
+const ENDPOINT_ERROR_STATUS = {
   exists: 409,
   "not-installed": 409,
   "unknown-catalog": 404,
+  "unsupported-platform": 409,
 } as const
 
 // Each list re-scans, so the panel's "Check again" also finds a server that
@@ -88,7 +89,7 @@ mcpRoutes.post("/", async (c) => {
     if (error instanceof McpEndpointError) {
       return forwardError(
         c,
-        httpError(error.message, ADD_ERROR_STATUS[error.code]),
+        httpError(error.message, ENDPOINT_ERROR_STATUS[error.code]),
       )
     }
     return forwardError(c, error)
@@ -136,6 +137,13 @@ mcpRoutes.post("/:id", async (c) => {
       },
     )
   } catch (error) {
+    // Turning one on where the broker can't run (Windows).
+    if (error instanceof McpEndpointError) {
+      return forwardError(
+        c,
+        httpError(error.message, ENDPOINT_ERROR_STATUS[error.code]),
+      )
+    }
     return forwardError(c, error)
   }
 })

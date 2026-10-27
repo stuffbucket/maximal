@@ -279,6 +279,17 @@ const McpBrokerConfigSchema = z
       })
       .optional(),
     servers: z.array(McpServerConfigSchema).max(64).optional(),
+    /** Install hints for known servers (`~/lib/mcp-broker/catalog`). */
+    catalog: z
+      .object({
+        /** Registry the install command downloads from, for networks that
+         *  can't reach npm's public one. */
+        npmRegistry: z
+          .url({ protocol: /^https?$/u })
+          .max(2048)
+          .optional(),
+      })
+      .optional(),
   })
   .superRefine((broker, ctx) => {
     const seen = new Set<string>()

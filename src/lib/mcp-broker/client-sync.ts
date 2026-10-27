@@ -21,6 +21,8 @@ import { currentProxyPort } from "~/lib/start/proxy-port"
 
 import type { McpClientId } from "./types"
 
+import { brokerRunsOn } from "./platform"
+
 /** Maximal's URL for an endpoint, on the port the proxy listens on now. */
 export function mcpEndpointUrl(
   id: string,
@@ -143,12 +145,16 @@ export function ownedMcpServers(
   return config.apps?.[APPS_KEY[clientId]]?.mcpServers ?? []
 }
 
+/** What the client should have. Nothing where the broker can't run
+ *  (Windows), so entries pointing at an endpoint that never answers come
+ *  back out; the user's choices stay in `servers[].clients`. */
 export function desiredEntriesFor(
   configurator: Pick<McpClientConfigurator, "clientId" | "apiKeyLabel">,
   config: AppConfig,
+  platform: NodeJS.Platform = process.platform,
 ): Array<McpClientEntry> {
   const broker = config.mcpBroker
-  if (broker?.enabled !== true) return []
+  if (broker?.enabled !== true || !brokerRunsOn(platform)) return []
   const appKey = resolveApiKey(configurator.apiKeyLabel, config)
   const entries: Array<McpClientEntry> = []
   for (const server of broker.servers ?? []) {
@@ -174,6 +180,8 @@ export interface SyncMcpClientOptions {
   /** Override the integration check, e.g. `false` while disabling it. */
   active?: boolean
   offline?: boolean
+  /** Defaults to this machine's; tests inject another. */
+  platform?: NodeJS.Platform
 }
 
 /** Reconcile one client and persist what Maximal now owns there. */
@@ -183,7 +191,7 @@ export function syncMcpClient(
 ): McpReconcileResult {
   const config = options.config ?? getConfig()
   const owned = ownedMcpServers(configurator.clientId, config)
-  const wanted = desiredEntriesFor(configurator, config)
+  const wanted = desiredEntriesFor(configurator, config, options.platform)
   // Nothing configured and nothing to revert: don't touch the client at all.
   if (wanted.length === 0 && owned.length === 0) {
     return emptyResult()

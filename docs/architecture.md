@@ -197,10 +197,27 @@ Known servers come from a small catalog (`src/lib/mcp-broker/catalog.ts`;
 Work IQ first). Each entry finds the server's own executable and offers it
 under "Available to add", or shows its install command when it isn't
 found. A GUI-launched sidecar has launchd's minimal PATH, so detection
-records an absolute path to the native executable inside the npm package
-(mise install, PATH symlink, or npm global prefix), not a bare name, a mise
-shim, or an npm launcher that needs `node`. When several installs exist,
-the highest version wins. Adding asks the user to confirm and writes the
+records an absolute path to the native executable inside the npm package,
+not a bare name, a mise shim, or an npm launcher that needs `node`. It
+can't run npm or pnpm either, so it looks where they put global packages
+without starting a process: mise installs, a PATH symlink, `npm prefix -g`,
+npm's `prefix` from the environment or `~/.npmrc`, Homebrew and other fixed
+prefixes, `~/.npm-global`, `%APPDATA%\npm`, every nvm, fnm, asdf, and
+mise-managed Node, Volta's package image, and pnpm's global projects
+(`global/5`, and `global/v11/*` behind hash symlinks, resolved into the
+store). The install hint pins `@microsoft/workiq@1` (detection relies on
+the package layout) and uses mise when it manages tools, else pnpm when it
+has global installs and no npm is found, else npm. It also names the
+registry host the command downloads from, resolved as npm does (a
+`@microsoft:registry` in any npmrc, then the environment, `~/.npmrc`, the
+global npmrc); `mcpBroker.catalog.npmRegistry` adds `--registry` (or
+`NPM_CONFIG_REGISTRY=` for mise) to the command. On Windows, where the
+supervisor refuses to start the broker, nothing is offered, the broker
+reports `unsupported-platform` even while off, turning an endpoint on is
+refused (`unsupported-platform`, HTTP 409), and client apps get no entries
+(`src/lib/mcp-broker/platform.ts`); saved endpoints stay listed. When
+several installs exist, the highest version wins. Adding asks the user to
+confirm and writes the
 endpoint off, with `catalog` set. The path contains the package version and
 package managers keep old versions after an upgrade, so Maximal re-reads
 where the newest install is before every request that opens a session (no
