@@ -179,7 +179,10 @@ configured, otherwise with the normal main-port rules (`auth.enforce`,
 broker with the internal key. Every MCP session runs its own instance of the
 endpoint's server (spawned on `initialize`, stopped when the session ends), so
 parallel clients behave as if each ran it themselves; `limits.sessions`
-(default 8) caps them, and a session past the cap gets a 503 that says so. A
+(default 8) caps them. At the cap, a new session closes the least recently
+used session with no request in flight (a client that exits without a DELETE
+leaves one behind, and under Bun the broker never sees its event stream go
+away); only when every session is busy does it get a 503 that says so. A
 missing or restarting broker returns 503; an unreachable one 502. Concurrency and declared body size are bounded, and only
 the wait for response headers is timed, so SSE streams stay open.
 
