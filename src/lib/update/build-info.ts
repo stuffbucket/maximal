@@ -49,7 +49,7 @@ export const BUILD_GIT_BRANCH: string | undefined =
  * `--define __MAXIMAL_CHANNEL__` for release/beta binaries; defaults to
  * `stable` for source runs and stock builds. The update manifest is
  * channel-keyed, so this is what decides which channel's version a build
- * polls (see src/lib/update-check.ts).
+ * polls (see src/lib/update/update-check.ts).
  */
 export const BUILD_CHANNEL: string =
   typeof __MAXIMAL_CHANNEL__ === "string" && __MAXIMAL_CHANNEL__.length > 0 ?

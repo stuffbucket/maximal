@@ -90,7 +90,7 @@ server.use(
 // L1a model-cache lazy refresh. Runs after auth so unauthenticated
 // probes ("/", "/usage-viewer") don't count as activity. Fire-and-
 // forget; the triggering request continues with the slightly stale
-// cache. See docs/spec/model-protocol-strategy.md.
+// cache.
 server.use(
   "*",
   staleRefreshMiddleware({
@@ -113,7 +113,7 @@ server.get("/", (c) => c.text("Server running"))
 // unambiguous identity marker the shim keys off; `subsystems` namespaces
 // per-part health so new subsystems slot in without reshaping the
 // contract. Safe-for-unauth only (booleans/tiers/counts, no secrets);
-// see src/lib/status.ts. Cheap: in-memory state, no upstream calls.
+// see src/lib/runtime-state/status.ts. Cheap: in-memory state, no upstream calls.
 server.get("/status", (c) => c.json(buildStatus(SERVER_START_MS)))
 // Legacy redirects → canonical /ui/* surfaces. Kept so existing links
 // (Claude config, boot banner, bookmarks, the Tauri shell pre-upgrade)

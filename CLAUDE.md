@@ -17,23 +17,19 @@ Always read the linked doc before acting in its area.
 | Change `.bun-version` or CI's Bun pin | [`docs/bun-version-policy.md`](docs/bun-version-policy.md) |
 | Write any code | [`docs/code-style.md`](docs/code-style.md) |
 | Touch any HTML, CSS, or component code (Tauri windows, proxy-served pages) | [`.design-context.md`](.design-context.md) — front door; topic deep-dives in [`docs/design/`](docs/design/). **Read `docs/design/failure-modes.md` before any non-trivial UI change.** |
-| Work with the Claude Code or Opencode plugin | [`docs/plugins.md`](docs/plugins.md) |
-| Dispatch or review codegen feedback loops | [`docs/codegen-feedback-loops-practices.md`](docs/codegen-feedback-loops-practices.md) |
+| Touch the Claude Code integration (`settings.json`, `apiKeyHelper`) | [`docs/plugins.md`](docs/plugins.md) |
+| Touch the Codex integration | [`docs/dev/codex-integration.md`](docs/dev/codex-integration.md) |
+| Touch a `/v1/messages` or client-auth wire contract | [`docs/spec/wire/`](docs/spec/wire/) |
 | Touch i18n catalogs / translation wording (`shell/src/i18n/`) | [`docs/dev/i18n.md`](docs/dev/i18n.md); loop in the i18n expert per [`CONTRIBUTORS.md`](CONTRIBUTORS.md) |
 
 ## Other knowledge in this repo
 
-- `docs/decisions/` — architecture decision records
-- `docs/spec/` — feature specs
-- `docs/dev/` — developer notes
+- `docs/decisions/` — the few decision records still in force (CodeQL suppressions, Copilot coupling, the site version manifest)
+- `docs/dev/` — developer notes (testing strategy, i18n, Codex, Windows VM)
 - `docs/admin/` — operational docs
-- `docs/*-prd.md` — product requirement docs for individual surfaces
-- `research_log/` — dated investigation notes
 - `CONTRIBUTORS.md` — trusted domain experts to loop in per area
 
-If you don't find what you need in a linked doc, **search `docs/` and
-`research_log/` before asking or inferring**. Earned knowledge lives in
-those files; don't reinvent it.
+**The code is the authority.** Docs here describe current behavior only — no plans, research notes, or history (that lives in git). If a doc disagrees with the code, trust the code and fix the doc in the same change. Don't add dated investigation notes or proposals to the repo.
 
 ## House rules (the few that must live here)
 
@@ -41,5 +37,5 @@ those files; don't reinvent it.
 - **No unrestored `mock.module` in tests** — `void mock.module(…)` / bare `mock.module(…)` leak across files and are a lint error (`mockModuleLeakGuard`). Awaiting isn't enough for shared modules; prefer the real module (temp `COPILOT_API_HOME` / `CLAUDE_CONFIG_DIR`) or injectable deps. See architecture doc → *Testing gotchas*.
 - **PR titles and commit subjects are Conventional Commits** (`feat:` / `fix:` / `chore:` / etc.) — a squash lands the PR title, a merge commit lands every branch commit; hook + CI enforce it. See architecture doc → *Release & PR conventions*.
 - **Tidy branches with `bun run git:tidy`, never `git branch -D`;** keep the primary checkout detached at `origin/main` and never check out `main` in a worktree. See architecture doc → *Parallel-agent convention*.
-- **Pin matters.** `.bun-version` and `.github/workflows/ci.yml` move together. See Bun version policy.
+- **Pin matters.** `.bun-version` and every workflow `bun-version:` move together. See Bun version policy.
 - **Design context overrides this file** for any UI work. Read `.design-context.md` and the relevant `docs/design/*.md` topic file.

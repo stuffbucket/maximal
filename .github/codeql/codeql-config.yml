@@ -1,8 +1,11 @@
 # CodeQL configuration for this repo.
 #
 # By-design alerts are NOT expressed here. They are suppressed with an
-# inline `// codeql[<rule-id>] -- <rationale>` comment on the sink line
-# (grep `codeql\[` to enumerate them). The rationale lives next to the
+# inline `// codeql[<rule-id>]` comment alone on the line above the sink,
+# with the rationale on the comment lines around it (anything after the
+# directive on the same line makes the analyzer ignore it; see
+# docs/decisions/0001-codeql-by-design-dismissals.md). Grep `codeql\[` to
+# enumerate them. The rationale lives next to the
 # code and moves with it, so it cannot drift.
 #
 # `query-filters` / `paths-ignore` are for "never run this query / scan

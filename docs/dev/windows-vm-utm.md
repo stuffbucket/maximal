@@ -1,7 +1,7 @@
 # Windows test VM via UTM
 
-Goal: a fast iteration loop for Windows-side installer / scheduled-task
-work without needing a physical Windows machine. UTM (QEMU) on Apple
+Goal: a fast iteration loop for Windows-side installer work without
+needing a physical Windows machine. UTM (QEMU) on Apple
 Silicon runs Windows 11 ARM acceptably for this workload, and the existing
 "Windows" VM in the host's UTM library is the starting point.
 
@@ -39,15 +39,15 @@ All commands accept an optional VM name as the second arg
 
 ## Bring-up checklist (one-time)
 
-The `Windows` VM bundle currently has a 15 GB disk — likely a stalled
-install. Two paths:
+Two paths: finish an existing, partly installed `Windows` VM, or start
+fresh.
 
 ### Option A: finish the existing install
 
 1. UTM → start `Windows`. Resume Windows Setup if it's mid-install,
    or boot the attached Windows 11 ARM ISO if not.
-2. Resize the disk first. UTM Settings → Drives → the 15 GB IDE drive
-   → bump to 64 GB minimum (Windows 11 minimum is 64 GB; recommend
+2. Resize the disk first if it is small. UTM Settings → Drives → the IDE
+   drive → bump to 64 GB minimum (Windows 11 minimum is 64 GB; recommend
    80 GB to leave room for Bun + WiX + Claude Desktop).
 3. Inside Windows after install: enable Developer Mode, install:
    - PowerShell 7 (`winget install Microsoft.PowerShell`)
@@ -82,13 +82,19 @@ hardcoding a timestamp.
 ## Iteration loop
 
 ```
-# 1. Cross-compile the Windows binary on the Mac.
+# 1. Cross-compile both Windows binaries on the Mac. The MSI installs
+#    maximal.exe and its sibling maximal-mcp-broker.exe; the broker is
+#    built from packages/mcp-broker (as release.yml does).
 bun build --compile --target=bun-windows-x64 src/main.ts \
   --outfile dist-bin/maximal.exe
+mise -C packages/mcp-broker exec -- pnpm install --frozen-lockfile
+mise -C packages/mcp-broker exec -- pnpm build:target \
+  --target=bun-windows-x64 --outfile="$PWD/dist-bin/maximal-mcp-broker.exe"
 
-# 2. Drop maximal.exe + the WiX .wxs into the VM's shared folder.
+# 2. Drop both binaries + the WiX .wxs into the VM's shared folder
+#    (maximal.wxs expects both .exe files next to it).
 #    UTM Settings → Sharing → "Shared Directory" → ~/maximal-share
-cp dist-bin/maximal.exe ~/maximal-share/
+cp dist-bin/maximal.exe dist-bin/maximal-mcp-broker.exe ~/maximal-share/
 cp build/windows/maximal.wxs ~/maximal-share/
 
 # 3. In the VM (PowerShell):
@@ -142,9 +148,9 @@ clicks in UTM's UI. There's no public API to script those clicks in
 
 ## Known limitations
 
-- **No native Windows runner in CI for free.** GitHub Actions
-  `windows-latest` is a separate path used by `release.yml` /
-  `installers.yml`; this VM is for local iteration, not CI replacement.
+- **This VM does not replace CI.** GitHub Actions Windows runners are a
+  separate path used by `release.yml` /
+  `windows-installer-dev.yml`; this VM is for local iteration, not CI replacement.
 - **ARM64 emulation of x64 binaries is fast but not native.** Our Bun
   output is x64 (per the matrix in `release.yml`); it runs on Windows 11
   ARM via Microsoft's x64 emulation layer, which is fine for installer

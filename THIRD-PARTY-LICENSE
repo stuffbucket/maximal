@@ -12,24 +12,44 @@ graphs, with their licenses, is generated as `SBOM.cdx.json` per release. See
 the GitHub Releases page for the SBOM associated with each version.
 
 ================================================================================
-Static landing-page assets (under site/)
+Vendored UI assets (under shell/ui/)
 ================================================================================
 
-The GitHub Pages landing site at `site/` bundles a few third-party
-assets:
+The app's UI windows serve these third-party files verbatim from
+`shell/ui/*/vendor/`. License and copyright lines below are taken from
+the files themselves.
 
-- **Star Nest fragment shader** — `site/src/components/StarNest.astro`
-  embeds the GLSL "Star Nest" 3D-kaliset shader by Pablo Roman
-  Andrioli. Original at https://www.shadertoy.com/view/XlfGRj,
-  released under the MIT License.
+- **Tailwind CSS (Play CDN build)** — `shell/ui/dashboard/vendor/
+  tailwind.min.js`. Emits the banner "tailwindcss v3.4.17 | MIT
+  License | https://tailwindcss.com". The bundle carries no copyright
+  line for Tailwind itself. It embeds these packages, each with its
+  own preserved notice:
+  - `fill-range` (https://github.com/jonschlinkert/fill-range) —
+    Copyright (c) 2014-present, Jon Schlinkert. MIT License.
+  - `is-number` (https://github.com/jonschlinkert/is-number) —
+    Copyright (c) 2014-present, Jon Schlinkert. MIT License.
+  - `to-regex-range` (https://github.com/micromatch/to-regex-range) —
+    Copyright (c) 2015-present, Jon Schlinkert. MIT License.
 
-- **Flying Toasters animation recipe** — `site/src/components/
-  FlyingToasters.astro` adapts the CSS keyframe + step()-flicker
-  technique from Bryan Braun's `bryanbraun/after-dark-css` project
-  (https://github.com/bryanbraun/after-dark-css), MIT-licensed for
-  the HTML/CSS portion.
+- **Lucide icons** — `shell/ui/dashboard/vendor/lucide.min.js`.
+  Header: "@license lucide v0.378.0 - ISC". The file carries no
+  copyright line.
 
-- **After Dark sprite GIFs** — `site/public/sprites/toaster-sprite.gif`
-  and `site/public/sprites/toast.gif` originate from After Dark™
-  (1989), © Berkeley Systems, Inc. Re-distributed here for
-  nostalgic homage; copyright remains with the original rightsholder.
+- **Fraunces typeface** — `shell/ui/settings/vendor/fonts/
+  fraunces-latin.woff2` and `fraunces-latin-ext.woff2`. Font name
+  table: "Copyright 2020 The Fraunces Project Authors
+  (github.com/undercasetype/Fraunces)", licensed under the SIL Open
+  Font License (https://scripts.sil.org/OFL).
+
+- **Commissioner typeface** — `commissioner-latin.woff2` and
+  `commissioner-latin-ext.woff2` under both `shell/ui/settings/vendor/
+  fonts/` and `shell/ui/dashboard/vendor/fonts/`. Font name table:
+  "Copyright 2019 The Commissioner Project Authors
+  (github.com/kosbarts/Commissioner)", licensed under the SIL Open
+  Font License (https://scripts.sil.org/OFL).
+
+License not verified (no license stated in the shipped file):
+
+- **cssesc v3.0.0** (https://mths.be/cssesc), embedded in
+  `shell/ui/dashboard/vendor/tailwind.min.js`. The bundle preserves
+  only the line "https://mths.be/cssesc v3.0.0 by @mathias".

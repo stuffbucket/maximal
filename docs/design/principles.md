@@ -12,11 +12,14 @@ else in `docs/design/` or any agent's intuition, **these win**.
    clear, and one click away. Advanced controls live one level down
    (collapsible sections, an "Advanced" tab, "Reveal in editor"
    escape hatch).
-3. **Color is the user's, contrast is ours.** Honor user-chosen colors
-   for surface and icon. Always compute and surface contrast for text
-   and controls; warn (don't block) when a combination drops below
-   WCAG AA. The brand mark stays brand-red in the dock and tray —
-   that's identity, not preference.
+3. **Color is the user's, contrast is ours.** There is no user color
+   picker today: both windows follow the OS light/dark appearance, and
+   every shipped color is checked against WCAG AA on every surface of
+   both themes (see [`color.md`](color.md)). Any future user-color
+   feature must honor the user's choice, compute and surface contrast
+   for text and controls, and warn (not block) below AA. The brand mark
+   stays brand-red in the dock and tray — that's identity, not
+   preference.
 4. **One humanist accent per window.** The brand "m" or a hand-drawn
    touch appears once per window — to remind the user it was made by
    a person, not on every row. Excess humanism is noise; rationed
@@ -30,7 +33,7 @@ else in `docs/design/` or any agent's intuition, **these win**.
 ## Decision log (locked — do not revisit without cause)
 
 Token names below; canonical values in
-[`shell/src/tokens.css`](../../shell/src/tokens.css).
+[`shell/src/ui/styles/theme.ts`](../../shell/src/ui/styles/theme.ts).
 
 - **Crimson `--brand` is brand only.** Rendered "m," hero moments,
   badging. Not for buttons, focus rings, or interactive states.
@@ -58,6 +61,7 @@ Token names below; canonical values in
   use a card*.
 - **Card nesting is forbidden.** Either the inner becomes a list-row
   inside the outer, or the outer becomes a typographic section.
-- **No CSS responsive breakpoints in v1.** Desktop only; the OS
-  enforces min sizes.
+- **Desktop only.** No mobile layout; the OS enforces min window
+  sizes. Settings has no breakpoints; the Dashboard uses Tailwind
+  breakpoints only to reflow its rows and grids as the window widens.
 - **`Cmd-K` is reserved**, not bound. Don't repurpose it.

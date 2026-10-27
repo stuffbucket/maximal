@@ -76,7 +76,7 @@ export const elevation = {
   tooltip: "0 2px 6px rgb(0 0 0 / 0.1)",
 } as const;
 
-/** Identity only (brand mark, requirement stripe) — never a control, link or text. */
+/** Identity only (brand mark, requirement icon) — never a control, link or text. */
 export const brand = {
   color: "#c8334a",
 } as const;

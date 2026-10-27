@@ -13,8 +13,6 @@
  * request gets the (slightly stale) cache; the next request gets
  * fresh. Stale-while-revalidate, no timer, no daemon, idle proxy
  * does no work.
- *
- * Spec: docs/spec/model-protocol-strategy.md, "Layer 1 — Detection".
  */
 
 import type { Context, Next } from "hono"

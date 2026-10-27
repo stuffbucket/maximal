@@ -1,8 +1,9 @@
 # Bun version policy
 
 Pinned in `.bun-version` (read by `bun install` and Bun's own version
-manager) AND in `.github/workflows/ci.yml`. Both must move together —
-dev/CI drift is what got us a 22-test failure on a Bun `latest`
+manager) AND in every `bun-version:` input under `.github/workflows/`
+(`grep -rn "bun-version:" .github/workflows`). All of them must move
+together — dev/CI drift is what got us a 22-test failure on a Bun `latest`
 regression once, and the pin is the antidote.
 
 Bump intentionally:
@@ -13,8 +14,9 @@ Bump intentionally:
    attributes).
 2. Run the whole suite locally on the new version: `bun test`,
    `bun run check:fast`, `bun run app:dev`.
-3. If green, update **both** `.bun-version` and the `bun-version`
-   field in `.github/workflows/ci.yml` in the same commit.
+3. If green, update `.bun-version` and every workflow `bun-version:`
+   in the same commit. `.github/actions/setup-bun` defaults to `latest`,
+   so every caller must pass the pin explicitly.
 4. Watch the next CI run.
 
 Don't float `latest`. Bun ships fast; a release in a single afternoon

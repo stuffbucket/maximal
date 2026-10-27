@@ -1,11 +1,10 @@
 /**
- * Update-available check — the notify-only half of self-update
- * (`docs/spec/phase-6-self-update.md`, Open Q#1). Resolves the latest published
- * release version from a JSON manifest the project site publishes at a
- * canonical URL (mxml.sh, fronting GitHub Pages) and compares it to the running
- * `BUILD_VERSION`. Config-gated (`config.checkUpdates`, default ON) and cached
- * so the Settings panel + the shell's periodic notification don't refetch
- * needlessly.
+ * Update-available check (notify-only; there is no self-update). Resolves
+ * the latest published release version from a JSON manifest the project
+ * site publishes at a canonical URL (mxml.sh, fronting GitHub Pages) and
+ * compares it to the running `BUILD_VERSION`. Config-gated
+ * (`config.checkUpdates`, default ON) and cached so the Settings panel + the
+ * shell's periodic notification don't refetch needlessly.
  *
  * Install-channel neutral: we point users at `https://mxml.sh` (the download
  * page that routes to the right artifact / package manager) rather than a raw

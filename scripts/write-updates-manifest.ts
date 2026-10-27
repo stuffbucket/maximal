@@ -8,7 +8,7 @@
  *   https://stuffbucket.github.io/maximal/updates/manifest.json
  * whose source-of-truth file is `site/public/updates/manifest.json` (Astro
  * serves site/public/** verbatim). Two consumers read it at runtime:
- *   - the desktop updater (src/lib/update-check.ts), which reads ONLY
+ *   - the desktop updater (src/lib/update/update-check.ts), which reads ONLY
  *     `channels.<c>.version`; and
  *   - the marketing site, which reads `channels.stable.downloads`.
  *

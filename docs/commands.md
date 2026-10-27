@@ -19,14 +19,11 @@ bun test             # Run all tests
 bun test tests/foo.test.ts  # Run a single test file
 
 # Aggregates
-bun run check:fast   # lint:fast + typecheck + lint:all (the per-edit inner loop)
+bun run check:fast   # ensure:ui-embed + lint:fast + typecheck + lint:all + check:tokens (the per-edit inner loop)
 bun run check:deep   # check:fast + bun test + knip (end-of-task gate)
 bun run deps:check   # dependency-cruiser layer rules
 bun run knip         # find unused exports/files
 bun run git:tidy     # plan branch cleanup (archive-then-delete); --apply to act
-
-# Optional: meta-analysis stream
-bun run analyze      # tails .claude/logs/checks.jsonl into a local Ollama model
 
 # Mutation testing (manual only — not wired into check:deep)
 bun run mutate       # Stryker; configure module under test in stryker.conf.*

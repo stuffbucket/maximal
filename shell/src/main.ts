@@ -726,7 +726,7 @@ function wireDiagnostics(): void {
 // ---- Account section -------------------------------------------------------
 
 /**
- * Account-section update contract (ADR-0007):
+ * Account-section update contract:
  *  - SSE is the PRIMARY channel. While #account is open we hold one
  *    `subscribeAuthEvents` subscription; `auth.changed` drives `renderAccount`
  *    with no poll lag. Opened on section enter, closed on leave.
@@ -748,7 +748,7 @@ let currentAuthStatus: AuthStatus | null = null;
 let authPollTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
- * Live updates (ADR-0007). While the Account section is open we hold one
+ * Live updates. While the Account section is open we hold one
  * SSE subscription to the sidecar; `auth.changed` events drive `renderAccount`
  * the instant the device-code poller resolves — no 2s poll lag. The GET poll
  * remains as a FALLBACK: it runs only while a sign-in is pending AND the SSE
@@ -835,7 +835,7 @@ function closeAuthEvents(): void {
 }
 
 function accountKeyFor(state: AuthStatus["state"]): AccountStateKey {
-  // Exhaustive over AuthStatus["state"] (ADR-0006). A new variant added
+  // Exhaustive over AuthStatus["state"]. A new variant added
   // to the union surfaces as a `never` compile error here instead of
   // silently falling through to "unauthenticated" — which is the bug
   // class that hid the upstream-rejection + gh-reuse state additions.
@@ -878,7 +878,7 @@ function setAccountField(name: string, value: string): void {
 function renderAccountAvatar(login: string, avatarUrl?: string): void {
   const slot = accountSlot("account_avatar");
   if (!slot) return;
-  // ADR-0006: `account_login` is required on the authenticated variant
+  // `account_login` is required on the authenticated variant
   // and the controller only emits a real GitHub login (a failed user
   // lookup surfaces as `state: "error"` instead — there is no "unknown"
   // sentinel). The empty-string guard remains as belt-and-braces for
@@ -1163,7 +1163,7 @@ function renderAccount(status: AuthStatus): void {
     card.hidden = card.dataset.stateAccount !== active;
   }
 
-  // ADR-0006: switch on the discriminator so the compiler narrows per
+  // Switch on the discriminator so the compiler narrows per
   // branch. Each variant declares exactly the fields it carries; the
   // previous `?? "(unknown)"` / `?? "…"` / `?? "https://…"` fallbacks
   // are gone because the union guarantees presence.

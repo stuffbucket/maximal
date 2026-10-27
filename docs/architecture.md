@@ -1,6 +1,6 @@
 # Architecture
 
-This is a local proxy that exposes the GitHub Copilot API as both an OpenAI-compatible and Anthropic-compatible HTTP service. It uses GitHub Copilot the same way Opencode's built-in Copilot provider does: authenticate with the user's own Copilot license, route requests to the Copilot endpoint, translate the response shape. The entry point is `src/main.ts` (CLI via `citty`), which dispatches to subcommands: `start`, `auth`, `check-usage`, `debug`.
+This is a local proxy that exposes the GitHub Copilot API as both an OpenAI-compatible and Anthropic-compatible HTTP service. It uses GitHub Copilot the same way Opencode's built-in Copilot provider does: authenticate with the user's own Copilot license, route requests to the Copilot endpoint, translate the response shape. The entry point is `src/main.ts` (CLI via `citty`), which dispatches to subcommands: `start`, `auth`, `setup`, `app`, `mcp`, `api`, `uninstall`, `check-usage`, `debug`.
 
 ## Request flow for `/v1/messages` (Anthropic path)
 
@@ -10,7 +10,7 @@ This is a local proxy that exposes the GitHub Copilot API as both an OpenAI-comp
 2. Parse Anthropic payload
 3. Detect subagent marker (`__SUBAGENT_MARKER__` in `<system-reminder>`, with opt-in `x-claude-code-request-class` / `x-claude-code-agent-type` hint headers as a fallback input) → sets `x-initiator: agent`
 4. Detect compact requests (Claude Code context compaction via `x-claude-code-compaction` hint header or prompt heuristics)
-5. Force `smallModel` for tool-less warmup/probe requests (default `gpt-5-mini`; **warmup only** — distinct from the Claude Code *haiku tier*, which carries subagent tool calls and must stay tool-competent: see `src/lib/models/small-model.ts` `resolveSmallToolModel`)
+5. Short-circuit Claude Code's tool-less startup "Warmup" request with a canned local reply — no upstream call (`src/routes/messages/warmup.ts`). Unrelated to the Claude Code *haiku tier*, which carries subagent tool calls and must stay tool-competent: see `src/lib/models/small-model.ts` `resolveSmallToolModel`
 6. Merge mixed `tool_result` + text blocks to avoid fresh premium request
 7. Normalize model ID → look up Copilot model
 8. Route to one of three upstream flows:
@@ -27,11 +27,11 @@ This is a local proxy that exposes the GitHub Copilot API as both an OpenAI-comp
 | `src/routes/` | Route handlers grouped by endpoint family |
 | `src/services/` | Upstream API clients (Copilot, GitHub, providers) |
 | `tests/` | All test files (`*.test.ts`), Bun built-in runner |
-| `shell/` | Tauri menu-bar app (Vite frontend + `src-tauri/` Rust shell) wrapping the proxy as a sidecar |
+| `shell/` | Tauri menu-bar app (Bun-bundled UI + `src-tauri/` Rust shell) wrapping the proxy as a sidecar |
 
 ## Middleware stack (in order)
 
-`traceIdMiddleware` → `logger()` → `cors()` → `createAuthMiddleware` (API key validation via `x-api-key` or `Authorization: Bearer`; unauthenticated paths: `/`, `/ui/*`; `/mcp/*` authenticates in its own route)
+`traceIdMiddleware` → `logger()` → `cors()` → `createAuthMiddleware` (API key validation via `x-api-key` or `Authorization: Bearer`; unauthenticated: `/`, `/status`, `/setup-status`, `/_debug/state`, the `/settings` and `/usage-viewer` redirects, and `/ui/*`; `/mcp/*` authenticates in its own route; `/settings/api/*` always requires a key; the dashboard's `/usage`, `/token-usage*` and `/_internal/*` endpoints trust loopback callers). The list lives in `src/server.ts`.
 
 ## Model routing
 
@@ -41,11 +41,13 @@ Root inference routes resolve the ordered, settings-driven `modelMappings` alias
 
 ## App integrations
 
-`src/apps/` owns filesystem detection, narrowly scoped configuration, durable intent, and boot/shutdown reconciliation for supported local clients. The Codex CLI and Desktop share one conservative user-level provider integration; its exact ownership and recovery contract is documented in [`docs/dev/codex-integration.md`](dev/codex-integration.md).
+`src/apps/` owns filesystem detection, narrowly scoped configuration, durable intent, and boot/shutdown reconciliation for supported local clients. A new client implements `ClientApp` (`src/apps/index.ts`) and registers in `src/apps/registry.ts`; routes, the CLI and the shell stay app-agnostic. The Codex CLI and Desktop share one conservative user-level provider integration; its exact ownership and recovery contract is documented in [`docs/dev/codex-integration.md`](dev/codex-integration.md).
+
+Claude Code is routed by an ownership-guarded `ANTHROPIC_BASE_URL` plus `apiKeyHelper` in `~/.claude/settings.json` (`src/apps/claude-code/`), reverted on shutdown and on the process `exit` event (`src/lib/start/shutdown.ts`). Don't reintroduce a PATH shim for `claude`.
 
 ## Config and state
 
-- `src/lib/config/config.ts` — `AppConfig` shape, disk read/write from `~/.local/share/maximal/config.json` (Linux/macOS) or `%USERPROFILE%\.local\share\maximal\config.json` (Windows). Also respects `COPILOT_API_HOME` env var.
+- `src/lib/config/config.ts` — `AppConfig` shape, disk read/write of `config.json` in the app directory: `~/.local/share/maximal/` (Linux/macOS) or `%APPDATA%\maximal\` (Windows), resolved by `src/lib/platform/paths.ts`. `COPILOT_API_HOME` overrides it.
 - `src/lib/config/config-schema.ts` — zod runtime validation. Bad config → exit non-zero with key path. Unknown keys → warning, kept via `.loose()`.
 - `src/lib/runtime-state/state.ts` — singleton mutable state: tokens, accountType, rate-limit, models cache.
 - `src/lib/auth/github-token-store.ts` — the GitHub identity store. Multi-account registry (schema v2) at `accounts.json` beside the legacy `github_token`: `{ activeKey, accounts: Record<"login@host", AccountRecord> }`, atomic temp+rename writes. Boot reads the active account; the legacy single-record file is migrated in once (gated, offline→`unknown@host`) and kept as a rollback fallback. The three sign-in producers (device-code, CLI, gh-reuse) all persist a typed `AccountRecord`; switch/remove + the `/settings/api/accounts` routes drive quick-switch (set active → reboot the sidecar into it). Sign-out forgets the active account; Remove forgets a specific one; both touch only maximal's own copy — never `gh`. RMW takes no lock (safe on the single Bun sidecar; see the comment above `addAccountToDefaultRegistry`).
@@ -67,8 +69,8 @@ This repo can collide on a shared working tree (lint-staged stash + concurrent m
 - **Tidy branches with `bun run git:tidy`, never `git branch -D`.** It never touches a branch checked out in any worktree, one with an open PR, or one committed to in the last 14 days; it deletes branches whose tip is already in `origin/main` and archives the rest (remote → pushed tag `archive/<branch>/<sha7>`, local → local-only `refs/archive/<branch>/<sha7>`) before removing them, so nothing is lost. Dry run by default; `--apply` to act.
 - **Reusing a branch for a follow-up PR?** Land the first PR with a merge commit (see *Release & PR conventions*). A squash leaves the branch's commits outside `main`, so the next PR from that branch re-shows the old diff.
 - **Never run `git stash pop` in a shared working tree.** It silently merges another in-flight worker's stash into your tree, and on conflict it leaves an inconsistent state that's easy to "clean up" by `rm`-ing files that aren't yours. We lost a session's worth of React-shell work to this exact path: a subagent ran `git stash pop` to bisect a test failure, hit a conflict, and `rm`'d untracked files it didn't recognize. If you need an isolated bisect, use a worktree (see above). If you must inspect a stash, use `git stash show -p stash@{N}` (read-only) and never `pop` / `apply` outside an isolated tree.
-
-See also: `docs/codegen-feedback-loops-practices.md` → Dispatch and review loops.
+- **Stop after two follow-up commits for the same CI failure** and surface it instead of trying a third guess.
+- **`check:deep` passing does not prove a UI change works** — render it (the `ui-layout-verification` skill) before calling it done.
 
 ## Testing gotchas
 
@@ -148,6 +150,9 @@ See also: `docs/codegen-feedback-loops-practices.md` → Dispatch and review loo
 ## Tauri shell
 
 `shell/` is a Tauri 2 menu-bar app that wraps the proxy for non-CLI users. `bun run app:sidecar` builds the UI (`bun run build:ui`), regenerates the embed manifest, and compiles both the standalone proxy and isolated MCP broker into `shell/src-tauri/binaries/`. Tauri launches only the proxy as a sidecar bound to `127.0.0.1:4141`; the proxy supervises the packaged broker. The settings (React, Bun-bundled) and dashboard (vanilla) UIs live in `shell/ui/{settings,dashboard}` and are **embedded in the sidecar binary**, served by the proxy at `/ui/settings` and `/ui/dashboard` (`src/routes/ui/route.ts`) — from `shell/dist` on disk in dev, from `$bunfs` in the compiled binary. The webview windows point at those `/ui/*` URLs; legacy `/settings` and `/usage-viewer` 301-redirect to them. No Vite — Bun is the bundler.
+
+- **New settings sections are React islands:** `shell/src/ui/islands/<name>-island.tsx` mounting `shell/src/ui/features/<name>/`; hash-nav section routing stays in `shell/src/main.ts`.
+- **Shell-visible wire types live in `src/lib/config/settings-types.ts`** (zod) and the shell imports them (`shell/src/proxy/client.ts`). Don't hand-copy types into the shell.
 
 ## Isolated MCP broker
 

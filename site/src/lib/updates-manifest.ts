@@ -3,7 +3,7 @@
 //   https://stuffbucket.github.io/maximal/updates/manifest.json
 //
 // Two independent consumers read this file at runtime:
-//   1. The desktop updater (src/lib/update-check.ts → parseManifestVersion),
+//   1. The desktop updater (src/lib/update/update-check.ts → parseManifestVersion),
 //      which reads ONLY `channels.<channel>.version`. It never reads a download
 //      URL — the app pins its download destination as a compile-time constant
 //      (DOWNLOAD_URL), so a tampered manifest can at most misreport a version,
@@ -15,7 +15,7 @@
 // SECURITY INVARIANT — `downloads` is BROWSER-ONLY. Do NOT wire the desktop
 // installer (or any auto-update flow) to `downloads.<slot>.url`. The desktop
 // side must keep reading only `version`; the URL it downloads from stays the
-// hardcoded `mxml.sh` constant in src/lib/update-check.ts.
+// hardcoded `mxml.sh` constant in src/lib/update/update-check.ts.
 //
 // SCHEMA HISTORY
 //   schema 1: { version, notes } per channel — desktop clients in the field.

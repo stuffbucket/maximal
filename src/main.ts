@@ -3,7 +3,6 @@
 import { defineCommand, runMain, parseArgs } from "citty"
 
 import { HELPER_SUBCOMMAND } from "./lib/auth/api-key-helper-tokens"
-import { bindElectronFetch } from "./lib/http/electron-fetch"
 import { BUILD_VERSION } from "./lib/update/build-info"
 
 const cliArgs = {
@@ -44,8 +43,6 @@ if (typeof args.apiKeyHelper === "string") {
   const { runApiKeyHelper } = await import("./lib/auth/api-key-helper")
   process.exit(runApiKeyHelper(args.apiKeyHelper))
 }
-
-bindElectronFetch()
 
 // Subcommands are LAZY thunks: citty resolves `meta` for `--help`/usage but
 // only invokes the matched command's loader. This keeps each invocation from

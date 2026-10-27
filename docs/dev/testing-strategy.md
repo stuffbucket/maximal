@@ -119,8 +119,8 @@ that mirror or the catalog spelling drifts.
 | Design-token lint | `scripts/check-design-tokens.ts` | Guards the design system; UI work only. |
 
 **Runtime pin:** Bun is pinned via `.bun-version` (currently `1.3.14`) and the
-CI pin in `.github/workflows/ci.yml` / `.github/actions/setup-bun`. These
-**move together** — a mismatch is a policy violation (see `CLAUDE.md` and
+`bun-version:` input of every workflow (`.github/actions/setup-bun` defaults to
+`latest`, so callers pass the pin). These **move together** — a mismatch is a policy violation (see `CLAUDE.md` and
 `docs/bun-version-policy.md`). Rationale: the test runner *is* the runtime, so a
 Bun version delta can change test outcomes.
 
@@ -204,15 +204,12 @@ This bit the project **four times** (culminating in a long #229 debugging loop).
   identical (`...actual` / forward `...rest`), and prove with a sequential-import
   repro that it can't break a later file.
 
-This discipline is the decision of
-[ADR-0011](../decisions/0011-mock-module-leakage-discipline.md). Two parts of
-that ADR remain authoritative: **prefer DI / injectable options over
-`mock.module`** for any shared module, and the **wrapper rule** (forward
-`...rest`, preserve return shape) when a stub is unavoidable. What actually
-*shipped* for enforcement is narrower than the ADR's original proposal — there
-is no `tests/helpers/` allowlist; the lint rule bans only the fire-and-forget
-forms and requires an awaited install + awaited `afterAll` restore. See the
-ADR's addendum for the full reconciliation.
+The authoritative rule is `docs/architecture.md` → *Testing gotchas*: the lint
+rule bans only the fire-and-forget forms; an awaited install + awaited
+`afterAll` restore satisfies the linter but is **not** safe for a shared module.
+For any shared module, use the real module or injectable options; when a stub
+is unavoidable, keep the wrapper behaviorally identical (forward `...rest`,
+preserve return shape).
 
 ### 5.2 Spies leak too
 `spyOn` has the same cross-file hazard as `mock.module`: a spy left unrestored
@@ -385,16 +382,31 @@ We would specifically like external judgment on these:
 
 ## 9. CI gates & the local equivalents
 
-CI (`.github/workflows/ci.yml`) runs on every push/PR and is the merge gate.
-Steps, in order:
+CI (`.github/workflows/ci.yml`, job `test`) runs on pushes to `main`/`dev`,
+pull requests, the merge queue, and `workflow_dispatch` (used by automation
+that creates PRs with `GITHUB_TOKEN`, pinned to an expected SHA). It is the
+merge gate. Steps, in order:
 
-1. Verify Node `node:sqlite` support (the app uses it).
-2. Pinned Bun setup (`.github/actions/setup-bun`).
-3. `bun install`.
-4. **`bun run lint:all`** (full-tree ESLint, `eslint --cache .`).
-5. **`bun run typecheck`** (`tsc`).
-6. **`bun test`** (full suite).
-7. **`bun run build`**.
+1. **Verify dispatched SHA** — on `workflow_dispatch`, fail if the checked-out
+   SHA differs from the `expected_sha` input (the branch moved).
+2. Checkout, Node 24 setup, and verify Node `node:sqlite` support (the app
+   uses it).
+3. Pinned Bun setup (`.github/actions/setup-bun`).
+4. **Check Conventional Commit subjects** — on pull requests, the PR title and
+   every commit subject (`bun scripts/check-commit-msg.ts --subjects`).
+5. mise setup (`.github/actions/setup-mise`).
+6. Configure the package registry, then `bun install`.
+7. **Check pnpm lockfiles for rotating feed hosts**
+   (`bun scripts/strip-lockfile-hosts.ts --check`).
+8. Install the isolated broker's dependencies (`packages/mcp-broker`, via
+   mise + `pnpm install --frozen-lockfile`).
+9. **Check the isolated broker** — `pnpm typecheck`, `pnpm build`,
+   `pnpm test` against the built binary, and a `bun-windows-x64`
+   cross-compile (`pnpm build:target`).
+10. **`bun run lint:all`** (full-tree ESLint, `eslint --cache .`).
+11. **`bun run typecheck`** (`tsc`).
+12. **`bun test`** (full suite).
+13. **`bun run build`**.
 
 Security workflows (CodeQL, trufflehog) and, on release, the gated
 build/sign/publish pipeline (macOS dmg, Windows MSI verify, checksums, smoke)

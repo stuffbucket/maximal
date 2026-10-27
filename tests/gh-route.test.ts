@@ -6,8 +6,7 @@
  * route's specific status codes + error shapes.
  *
  * Implementation uses DI via `createGhRoutes(deps)` (NOT mock.module —
- * see docs/decisions/0011-mock-module-leakage-discipline.md and
- * docs/architecture.md § Testing gotchas). Each test constructs its own
+ * see docs/architecture.md § Testing gotchas). Each test constructs its own
  * routes instance with in-process stubs, so nothing leaks to sibling
  * test files that import the real ~/services/gh-cli or
  * ~/lib/auth/copilot-preflight modules.

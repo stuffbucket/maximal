@@ -1,9 +1,9 @@
 # Window family: Settings + Dashboard
 
-The Settings window (`shell/`) and the Dashboard window
-(`shell/ui/dashboard/index.html`) share one design language. This doc
-codifies what's shared, where they diverge, and the architectural
-constraint that makes drift between them a permanent risk.
+The Settings window (`shell/ui/settings/index.html` + `shell/src/`) and
+the Dashboard window (`shell/ui/dashboard/` + `shell/src/dashboard/`)
+share one design language. This doc codifies what's shared and where
+they diverge.
 
 ## What's shared
 
@@ -11,51 +11,29 @@ constraint that makes drift between them a permanent risk.
   no preference; `data-theme` on `<html>` pins one. Same generated theme
   blocks in both windows.
 - Same crimson `--brand` for identity. Same teal `--accent` for
-  interactive surfaces — *in theory.* Currently drifted; see
-  [`failure-modes.md`](failure-modes.md).
-- Same Fraunces + Commissioner pairing, with Fraunces rationed to the
-  brand mark and **one** display heading per window.
-- Same token vocabulary (see [`tokens.md`](tokens.md)). Same spacing
-  scale, three surface levels, three elevation levels.
+  interactive surfaces.
+- Same Commissioner body face. Fraunces is rationed to the brand mark
+  and **one** display heading per window; the Dashboard has no display
+  moment, so it doesn't load Fraunces.
+- Same token vocabulary and values, generated from
+  `shell/src/ui/styles/theme.ts` (see [`tokens.md`](tokens.md)). Same
+  spacing scale, three surface levels, three elevation levels.
+- Both are built by Bun (`scripts/build-ui.ts`) and served by the proxy
+  under `/ui/settings/` and `/ui/dashboard/`.
 
 ## Where they diverge
 
 | Concern | Dashboard | Settings |
 |---|---|---|
-| Sections | 1 (scroll-only) | 8 (sidebar nav) |
-| Layout | Single column, ~720px max (not tokenized) | `--sidebar-width` rail + `--content-max` pane |
-| Bundling | One embedded HTML file, separate `<style>` block | Vite-bundled multi-file (React + vanilla islands) |
-| Tokens live in | `shell/ui/dashboard/style.css` (independent declaration) | `shell/src/tokens.css` (imported by all shell CSS) |
+| Sections | One scroll; typographic section headings, no nav | 9 (sidebar nav) |
+| Layout | Single column in a Tailwind `max-w-7xl` container (not tokenized) | `--sidebar-width` rail + `--content-max` sections |
+| Build | Hand-authored HTML + `style.css` copied verbatim; only `shell/src/dashboard/main.ts` is bundled. Tailwind and Lucide load as vendored classic `<script>`s | Bun bundles `index.html` and its imports (React + vanilla islands) |
+| Tokens live in | Generated region of `shell/ui/dashboard/style.css` (a subset — see [`failure-modes.md`](failure-modes.md) → *Known active drift*) | `shell/src/ui/styles/tokens.css`, imported by `styles.css` |
 
 **Scroll-only vs sidebar-nav is a function of section count, not a
 stylistic choice.** A single-section window doesn't earn a sidebar; a
-multi-section window doesn't earn the burden of one giant scroll. If
-the Dashboard grows to two unrelated sections it gets typographic
-breaks, not chrome; if it grows to five, it gets a sidebar like
-Settings does. The threshold is "would a user need to jump to a
+multi-section window doesn't earn the burden of one giant scroll. The
+Dashboard's few related sections get typographic breaks, not chrome;
+if it grows to five unrelated ones, it gets a sidebar like Settings
+does. The threshold is "would a user need to jump to a
 specific section by name?" — not pixel count.
-
-## Sidecar-served vs Vite-served: an architectural constraint
-
-The Dashboard is served by the proxy itself as a single embedded HTML
-file (Bun's `import attribute` machinery embeds the file at build
-time). It has no module resolution, no CSS imports, no bundler.
-
-The Settings window is a Vite-bundled app that imports
-`shell/src/tokens.css` like any other stylesheet.
-
-**Consequence:** there is no shared CSS file. **Token values must be
-duplicated in both places. Any token edit must be applied in both
-locations.** The header of `shell/src/tokens.css` ("This is the ONE
-file allowed to declare raw values") is true *within the shell* — the
-Dashboard mirrors it by convention, not by import.
-
-**Don't try to "fix" this by serving `tokens.css` from the proxy and
-linking to it from the Dashboard:** that breaks the embed-everything
-property the proxy depends on for single-binary distribution.
-
-The right fix is mechanical: a build-time check (or pre-commit hook,
-or test) that diffs the token declarations in `tokens.css` vs
-the dashboard `style.css` and fails on mismatch. See
-[`change-checklists.md`](change-checklists.md) → *Changing a token
-value* for the manual workflow until that exists.

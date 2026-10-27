@@ -1,69 +1,71 @@
 # Components
 
-This file is the single source of truth for component dimensions
-that are **not** yet tokenized (button heights, input heights, sidebar
-widths beyond `--sidebar-width`, etc.). Where a token exists, use it;
-component CSS references the token, not the value. Where one doesn't
-exist, this doc is canon — match the spec exactly rather than
-hand-rolling something nearby.
+Component dimensions, by token. These match the Settings stylesheet
+(`shell/src/ui/styles/styles.css`); when a component fits an existing
+pattern, match it exactly rather than hand-rolling something nearby.
 
-Token values themselves live in
-[`shell/src/tokens.css`](../../shell/src/tokens.css); token vocabulary
-in [`tokens.md`](tokens.md).
+Token values live in
+[`shell/src/ui/styles/theme.ts`](../../shell/src/ui/styles/theme.ts);
+token vocabulary in [`tokens.md`](tokens.md).
 
 ## Buttons
 
-| Variant | Height | Padding (h) | Font | Weight | Notes |
-|---------|--------|-------------|------|--------|-------|
-| Primary | 36 | 16 | `--text-sm` | 500 | `--accent-fg` on `--accent` fill |
-| Secondary | 36 | 16 | `--text-sm` | 500 | `--border-width-thin` outline, transparent fill |
-| Ghost | 32 | 12 | 13px | 500 | No outline; hover → `--surface-control` |
-| Icon | 32×32 | — | — | — | 18px icon centered |
-| Small | 28 | 12 | 13px | 500 | Sparingly; only in dense rows |
-| Destructive | 36 | 16 | `--text-sm` | 500 | `--accent-destructive-foreground` on `--accent-destructive` |
+Every `.btn`: min-height `--size-xl`, padding `--space-2` ×
+`--space-4`, `--text-sm` at `--weight-md`, `--radius-input`,
+`--border-width-hairline` border.
+
+| Variant | Class | Size | Notes |
+|---------|-------|------|-------|
+| Primary | `btn--primary` | base | `--accent-fg` on `--accent` fill |
+| Secondary | `btn--secondary` | base | `--surface-control` fill, `--border-strong` border |
+| Ghost | `btn--ghost` | base | Transparent, `--text-base-color`; hover → `--surface-control` |
+| Ghost destructive | `btn--ghost-destructive` | base | Ghost that reads red; always confirms first |
+| Icon | `btn--icon` | `--size-xl` square | `--size-sm` glyph centered; needs an `aria-label` |
+| Small | `btn--sm` | min-height `--size-lg`, padding `--space-1` × `--space-3` | Sparingly; only in dense rows |
+| Destructive | `btn--destructive` | base | `--accent-destructive-foreground` on `--accent-destructive` |
 
 ## Inputs
 
-| Variant | Height | Padding | Font | Notes |
-|---------|--------|---------|------|-------|
-| Text | 36 | 12 | `--text-sm` | `--border-width-thin` border, focus ring offset 2px |
-| Textarea | min 96 | 12 | `--text-sm` | Resize vertical only |
-| Select | 36 | 12 / 32 | `--text-sm` | Right-side chevron 16px |
-| Switch | 24×16 | — | — | iOS-style; 200ms ease |
-| Checkbox | 16×16 | — | — | 2px stroke |
+| Variant | Size | Notes |
+|---------|------|-------|
+| Text (`.input`) | min-height `--size-xl`, padding `--space-2` × `--space-3` | `--text-sm`; `--surface-control` fill, `--border-width-hairline` `--border-strong` border, `--radius-input` |
+| Select (`.select`) | Same box as `.input` | Native chevron kept |
+| Switch (`.switch`) | `--size-2xl` × `--size-lg` track, `--size-xs` thumb | `--accent` fill when on |
+| Checkbox (`.checkbox`) | `--size-md` square, `--radius-chip` | `--accent` fill when checked; indeterminate shows a bar |
 
 ## Form rows
 
-- Min height: 48px (single-line label + control).
-- Label column: ~210px on Settings, ~33% of content elsewhere.
-- Control column: remainder. Right-align controls only when they're
-  visually right-anchored (toggles, dropdowns); left-align for text
-  inputs.
+- Grid: 33% label column, remainder for the control, `--space-4` gap.
+- Padding `--space-2` top and bottom, hairline `--border-subtle`
+  divider between rows.
+- Label `--text-sm` at `--weight-md`; hint `--text-sm` in
+  `--text-muted`.
+- Right-align controls only when they're visually right-anchored
+  (toggles, dropdowns); left-align for text inputs.
 
 ## Sidebar (Settings)
 
-- Width: `--sidebar-width` (200px), fixed.
-- Padding: 8px vertical, 4px horizontal.
-- Nav item: 36px tall, 8px vertical padding, 12px horizontal.
-  Weight 400 → 500 on active. **Active state: a 1px-rounded surface
-  step** (not a left bar — left bar reads more dev-tool than
-  humanist).
-- Group label (e.g. "Desktop app"): 12px, 500, letter-spacing
-  0.02em, uppercase, color = `--text-muted`. One per group, not on
-  every item.
+- Width: `--sidebar-width`, fixed.
+- Padding: `--space-3` vertical × `--space-2` horizontal; `--space-1`
+  between items.
+- Nav item: padding `--space-2` × `--space-3`, `--text-sm`,
+  `--radius-input`. Weight `--weight-base` → `--weight-md` on active.
+  **Active state: a `--surface-control` surface step** (not a left
+  bar — left bar reads more dev-tool than humanist).
+- No group labels; the nine sections are one flat list. The only
+  uppercase text in the sidebar is the `.nav__chip` badge (see
+  [`type.md`](type.md) → *Casing*).
 
 ## Cards
 
-- Padding: `--space-4` vertical × `--space-5` horizontal (16 × 20).
-  One step tighter when nested inside a card (which should be rare —
-  see card nesting rules in [`aesthetic.md`](aesthetic.md)).
-- Gap between cards in a stack: `--space-4` (16).
-- Internal row gap: `--space-3` (12, compact rows) or `--space-4`
-  (16, form rows with their own labels).
+- Padding: `--space-4` vertical × `--space-5` horizontal. Nesting
+  cards is forbidden — see [`aesthetic.md`](aesthetic.md).
+- Internal row gap: `--space-3`.
 - Background: `--surface-card`.
-- Border: `--border-width-thin` solid `--border-subtle`.
+- Border: `--border-width-hairline` solid `--border-subtle`.
 - Radius: `--radius-card`.
-- Shadow (light mode only): `--elevation-card`.
+- Shadow: `--elevation-card` (barely visible on dark, where the
+  surface step does the work).
 
 ## Callouts (banners)
 
@@ -151,29 +153,32 @@ red (`btn--ghost-destructive`) and always confirms in a `ConfirmDialog`
 - **Always visible on keyboard navigation; hidden on mouse use** via
   `:focus-visible`. Using `:focus` alone is a bug. See
   [`failure-modes.md`](failure-modes.md).
-- Width: `--focus-ring-width` (2px). Offset: `--focus-ring-offset` (2px).
-- Color: `--focus-ring-color` → `--accent`, with contrast fallback
-  to `--text-strong` when accent on the current surface drops below
-  3:1.
-- **Identical ring on all focusable elements** — buttons, inputs,
-  switches, links, nav items. No special-case ring styles.
+- Settings: `outline: var(--focus-ring)` (width `--focus-ring-width`,
+  color `--focus-ring-color` → `--accent`) with `outline-offset:
+  var(--focus-ring-offset)`. `--accent` clears 3:1 on every surface of
+  both themes, so there's no fallback color.
+- Dashboard: `--focus-ring` is a two-ring box-shadow (a
+  `--surface-base` gap, then `--accent`).
+- **Identical ring on all focusable elements within a window** —
+  buttons, inputs, switches, links, nav items. No special-case ring
+  styles.
 
 ## Component dimensions (size tokens)
 
-| Token | Value | Use |
-|---|---|---|
-| `--size-xs` | 12px | Smallest icon |
-| `--size-sm` | 16px | Default inline icon |
-| `--size-md` | 20px | Button icon |
-| `--size-lg` | 24px | Section icon |
-| `--size-xl` | 32px | Icon button hit target |
-| `--size-2xl` | 40px | Avatar / large icon |
+| Token | Use |
+|---|---|
+| `--size-xs` | Switch thumb, status dot |
+| `--size-sm` | Glyph inside icon buttons and callouts |
+| `--size-md` | Checkbox, inline status icons |
+| `--size-lg` | Switch height, small-button min-height |
+| `--size-xl` | Button and input min-height, icon-button square |
+| `--size-2xl` | Switch width, narrow input |
 
 ## Border widths
 
-| Token | Value | Use |
-|---|---|---|
-| `--border-width-hairline` | 1px | Subtle dividers |
-| `--border-width-thin` | 1px | Card borders, input borders |
-| `--border-width-thick` | 2px | Focus rings, emphasized dividers |
-| `--border-width-heavy` | 4px | Reserved; not currently used |
+| Token | Use |
+|---|---|
+| `--border-width-hairline` | Every border and divider: cards, inputs, buttons, callouts, sidebar edge |
+| `--border-width-thin` | Same width as hairline; unused — reach for hairline |
+| `--border-width-thick` | Emphasized strokes: the busy bar, the indeterminate checkbox bar, Dashboard sparklines |
+| `--border-width-heavy` | Reserved; not currently used |
