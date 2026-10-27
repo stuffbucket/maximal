@@ -143,6 +143,7 @@ The app dir is `~/.local/share/maximal` on macOS/Linux and
 | OAuth app ID | — | `COPILOT_API_OAUTH_APP` | — | upstream default |
 | Use Messages API | — | — | `useMessagesApi` | `true` |
 | Use Apply Patch | — | — | `useFunctionApplyPatch` | `true` |
+| Web-search broker model (preferred `/responses` model for `web_search`) | — | — | `smallModel` | `gpt-5-mini` |
 | Log retention (days) | — | — | `logRetentionDays` | `7` (`0` = delete on cleanup tick) |
 
 To inspect what the proxy actually thinks its config is:
