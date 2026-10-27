@@ -47,6 +47,7 @@ permissions:
 jobs:
   build:
     runs-on: windows-2022
+    timeout-minutes: 20
     env:
       # The root mise.toml pins Rust and the broker inherits it; nothing in
       # this job builds Rust through mise, so don't download the toolchain.
@@ -177,6 +178,7 @@ jobs:
   verify-install:
     needs: build
     runs-on: windows-2022
+    timeout-minutes: 20
     steps:
       - name: Download installer artifact
         uses: actions/download-artifact@v4

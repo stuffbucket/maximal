@@ -37,6 +37,7 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     outputs:
       is_prerelease: ${{ steps.prerelease.outputs.is_prerelease }}
     env:
@@ -190,6 +191,7 @@ jobs:
           - { target: bun-darwin-arm64, artifact: darwin-arm64, ext: tar.gz }
           - { target: bun-windows-x64,  artifact: windows-x64,  ext: zip    }
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
       # The root mise.toml pins Rust and the broker inherits it; nothing in
       # this job builds Rust through mise, so don't download the toolchain.
@@ -329,6 +331,7 @@ jobs:
   checksums:
     needs: binaries
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: write
     steps:
@@ -368,6 +371,7 @@ jobs:
       # read-only token (the download fails with "release not found").
       contents: write
     runs-on: windows-2022
+    timeout-minutes: 20
     steps:
       - name: Resolve version
         id: ver
@@ -453,6 +457,7 @@ jobs:
       - release
     if: ${{ needs.release.outputs.is_prerelease == 'false' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
     steps:
@@ -515,6 +520,8 @@ jobs:
   macos-dmg:
     needs: release
     runs-on: ubuntu-latest
+    # Above the ~30 min builder/notarization wait this job polls for.
+    timeout-minutes: 40
     permissions:
       contents: write
     env:
@@ -570,6 +577,7 @@ jobs:
   windows-installer:
     needs: binaries
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: write
     env:
@@ -621,6 +629,7 @@ jobs:
   windows-msi:
     needs: binaries
     runs-on: windows-2022
+    timeout-minutes: 20
     permissions:
       contents: write
     env:
@@ -742,6 +751,7 @@ jobs:
   windows-msi-verify:
     needs: windows-msi
     runs-on: windows-2022
+    timeout-minutes: 20
     permissions:
       # write, not read: downloads the MSI from the DRAFT release, which a
       # read-only token can't see ("release not found").
@@ -884,6 +894,7 @@ jobs:
   windows-shell:
     needs: binaries
     runs-on: windows-2022
+    timeout-minutes: 20
     permissions:
       contents: write
     env:
@@ -1079,6 +1090,7 @@ jobs:
       - macos-dmg
       - windows-shell
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: write
     steps:
@@ -1113,6 +1125,7 @@ jobs:
   manifest:
     needs: publish
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: write
       pull-requests: write
