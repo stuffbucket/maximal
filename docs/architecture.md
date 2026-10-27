@@ -111,8 +111,12 @@ This repo can collide on a shared working tree (lint-staged stash + concurrent m
   - **Restore from a snapshot, not the live namespace.** `mock.module`
     patches the module's namespace object in place, so
     `const real = await import(m)` followed by
-    `mock.module(m, () => real)` "restores" the stub. Capture
-    `{ ...(await import(m)) }` before mocking. A leaked no-op `sleep` from
+    `mock.module(m, () => real)` "restores" the stub (so does
+    `() => ({ ...real })`, and `import * as real` is the same object). Capture
+    `{ ...(await import(m)) }` before mocking. The `local/mock-module-snapshot`
+    rule (`eslint-rules/mock-module-snapshot.js`, wired into
+    `mockModuleLeakGuard`) errors when a `mock.module` factory reads a live
+    namespace. A leaked no-op `sleep` from
     `tests/poll-access-token.test.ts` once turned an orphaned device-code
     poller into an endless promise loop that hung CI. Per-test timeouts can't
     stop that, so `tests/helpers/starvation-watchdog.ts` kills the run after
