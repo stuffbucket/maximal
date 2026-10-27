@@ -77,9 +77,10 @@
           <nav
             class="topbar__nav"
             data-settings-nav
+            data-tauri-drag-region
             data-i18n-aria-label="nav-sidebar-label"
           >
-            <ul class="nav" role="tablist">
+            <ul class="nav" role="tablist" data-tauri-drag-region>
               <li>
                 <a
                   class="nav__item"
@@ -126,6 +127,7 @@
           <div
             class="topbar__dashboard-controls"
             data-dashboard-controls
+            data-tauri-drag-region
             hidden
           >
             <div
@@ -951,7 +953,7 @@
             <iframe
               class="dashboard-frame"
               data-dashboard-frame
-              src="../dashboard/index.html?embedded=1"
+              data-src="../dashboard/index.html?embedded=1"
               title="Dashboard"
             ></iframe>
           </section>

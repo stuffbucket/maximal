@@ -167,12 +167,26 @@ function updateSurfaceModeButton(isDashboard: boolean): void {
   }
 }
 
-function showSection(id: SectionId): void {
+function showSection(
+  id: SectionId,
+  options: { persist?: boolean } = {},
+): void {
   const tab = tabForSection(id);
   const visibleSections = new Set(TAB_SECTIONS[tab]);
   const isDashboard = tab === "dashboard";
 
-  persistTabSelection(tab);
+  if (options.persist !== false) {
+    persistTabSelection(tab);
+  }
+
+  if (isDashboard) {
+    const frame = document.querySelector<HTMLIFrameElement>(
+      "[data-dashboard-frame]",
+    );
+    if (frame && !frame.getAttribute("src") && frame.dataset.src) {
+      frame.src = frame.dataset.src;
+    }
+  }
 
   const settingsNav = document.querySelector<HTMLElement>("[data-settings-nav]");
   const dashControls = document.querySelector<HTMLElement>(
@@ -217,8 +231,8 @@ function readHashSection(): SectionId {
   return getStoredTab(LAST_TAB_STORAGE_KEY) ?? DEFAULT_SECTION;
 }
 
-function syncFromHash(): void {
-  showSection(readHashSection());
+function syncFromHash(options: { persist?: boolean } = {}): void {
+  showSection(readHashSection(), options);
 }
 
 /**
@@ -297,8 +311,26 @@ function wireNav(): void {
       period?: string;
       rangeText?: string;
       rangeTitle?: string;
+      key?: string;
     } | null;
-    if (!data || data.type !== "maximal:dashboard-state") return;
+    if (!data || typeof data !== "object") return;
+    if (data.type === "maximal:shortcut") {
+      if (data.key === ",") {
+        userExplicitlySelectedTab = true;
+        const target: SectionId =
+          hasAccountProblem() ?
+            "account"
+          : (getStoredTab(LAST_SETTINGS_TAB_STORAGE_KEY) ?? "account");
+        window.location.hash = target;
+        showSection(target);
+      } else if (data.key?.toLowerCase() === "d") {
+        userExplicitlySelectedTab = true;
+        window.location.hash = "dashboard";
+        showSection("dashboard");
+      }
+      return;
+    }
+    if (data.type !== "maximal:dashboard-state") return;
     const rangeEl = document.querySelector<HTMLElement>(
       "[data-dashboard-range]",
     );
@@ -315,6 +347,18 @@ function wireNav(): void {
           peer.dataset.dashboardPeriod === data.period ? "true" : "false",
         );
       }
+    }
+  });
+
+  window.addEventListener("maximal:open-settings", () => {
+    const currentTab = tabForSection(readHashSection());
+    if (currentTab === "dashboard") {
+      const target: SectionId =
+        hasAccountProblem() ?
+          "account"
+        : (getStoredTab(LAST_SETTINGS_TAB_STORAGE_KEY) ?? "account");
+      window.location.hash = target;
+      showSection(target);
     }
   });
 
@@ -1053,9 +1097,8 @@ function openAuthEvents(): void {
     },
     onAuth: (status) => {
       if (gen !== authEventsGen) return;
-      if (readHashSection() === "account" || hasAccountProblem(status)) {
-        renderAccount(status);
-      }
+      // Only paint while the user is actually on the Account section.
+      if (readHashSection() === "account") renderAccount(status);
     },
     onError: () => {
       if (gen !== authEventsGen) return;
@@ -1492,16 +1535,6 @@ function renderAccount(status: AuthStatus): void {
     schedulePoll();
   } else {
     stopAuthPolling();
-  }
-
-  // If the account is not set up (first run / unauthenticated) or has an
-  // error / upstream rejection, bring the user to the Account settings tab
-  // unless they explicitly clicked another tab during this session.
-  if (hasAccountProblem(status) && !userExplicitlySelectedTab) {
-    if (tabForSection(readHashSection()) !== "account") {
-      window.location.hash = "account";
-      showSection("account");
-    }
   }
 }
 
@@ -2240,8 +2273,34 @@ function wireAccount(): void {
   });
 }
 
+async function checkInitialAccountHealth(): Promise<void> {
+  const result = await apiCall({
+    kind: "auth-status",
+    method: "GET",
+    path: "/settings/api/auth/github/status",
+  });
+  if (!result.ok || hasAccountProblem(result.data)) {
+    if (!userExplicitlySelectedTab) {
+      showSection("account", { persist: false });
+      if (result.ok) {
+        renderAccount(result.data);
+      } else {
+        renderAccount({
+          state: "error",
+          error: t("account-err-load-status", { error: result.error }),
+        });
+      }
+      openAuthEvents();
+    }
+  } else {
+    currentAuthStatus = result.data;
+  }
+}
+
 window.addEventListener("DOMContentLoaded", () => {
   document.documentElement.dataset.os = osKind();
+  const initialHash = window.location.hash.replace(/^#/, "");
+  const hadExplicitHash = isSectionId(initialHash);
   applyI18n();
   // Sentences that embed a link/CLI token or a plural count aren't [data-i18n]
   // (they carry live DOM children); render them explicitly after the sweep.
@@ -2259,10 +2318,14 @@ window.addEventListener("DOMContentLoaded", () => {
   mountRequests();
   mountModels();
   wireNav();
-  syncFromHash();
+  syncFromHash({ persist: hadExplicitHash });
   void loadDiagnostics();
-  void loadAuthStatus();
-  openAuthEvents();
+  if (tabForSection(readHashSection()) === "account") {
+    void loadAuthStatus();
+    openAuthEvents();
+  } else if (!hadExplicitHash) {
+    void checkInitialAccountHealth();
+  }
 });
 
 window.addEventListener("hashchange", () => {

@@ -1343,6 +1343,16 @@ function init(): void {
   const urlParams = new URLSearchParams(window.location.search);
   if (urlParams.get("embedded") === "1") {
     document.documentElement.setAttribute("data-embedded", "true");
+    window.addEventListener("keydown", (ev: KeyboardEvent) => {
+      if (!(ev.metaKey || ev.ctrlKey) || ev.altKey || ev.shiftKey) return;
+      if (ev.key === "," || ev.key.toLowerCase() === "d") {
+        ev.preventDefault();
+        window.parent.postMessage(
+          { type: "maximal:shortcut", key: ev.key },
+          window.location.origin,
+        );
+      }
+    });
   }
   const periodFromUrl = normalizePeriod(urlParams.get("period"));
   setSelectedPeriod(periodFromUrl);

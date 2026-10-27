@@ -792,13 +792,23 @@ pub fn run() {
             }
             #[cfg(target_os = "macos")]
             {
+                let want_regular = app.state::<DockVisibilityState>().always_visible();
+                POLICY_IS_REGULAR.store(want_regular, std::sync::atomic::Ordering::SeqCst);
+                let initial_policy = if want_regular {
+                    tauri::ActivationPolicy::Regular
+                } else {
+                    tauri::ActivationPolicy::Accessory
+                };
+                let _ = app.set_activation_policy(initial_policy);
                 // Dock icon: in release the .app bundle's Info.plist
                 // CFBundleIconFile (driven by `bundle.icon` in
                 // tauri.conf.json) handles this. `cargo run` doesn't
                 // produce a bundle, so set the icon explicitly in debug
                 // builds only — release builds skip the FFI dance.
                 #[cfg(debug_assertions)]
-                set_dock_icon();
+                if want_regular {
+                    set_dock_icon();
+                }
             }
             update_activation_policy(app.handle());
 
@@ -1894,7 +1904,6 @@ fn install_tray(app: &AppHandle) -> tauri::Result<()> {
         .show_menu_on_left_click(show_menu_on_left_click)
         .tooltip(native_i18n::tr(&locale, "native-tooltip-starting"))
         .icon(icon)
-        .on_menu_event(handle_menu_event)
         .on_tray_icon_event(|tray, event| {
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,
@@ -2535,11 +2544,12 @@ fn open_settings_window(app: &AppHandle, section: Option<&str>) {
     };
 
     if let Some(existing) = app.get_webview_window(SETTINGS_WINDOW_LABEL) {
-        if let Some(s) = section {
-            let js = format!("window.location.hash = {:?};", s);
-            if existing.eval(&js).is_err() {
-                let _ = existing.navigate(url);
-            }
+        let js = match section {
+            Some(s) => format!("window.location.hash = {:?};", s),
+            None => "window.dispatchEvent(new CustomEvent('maximal:open-settings'));".to_string(),
+        };
+        if existing.eval(&js).is_err() {
+            let _ = existing.navigate(url);
         }
         present_window(app, &existing);
         return;
@@ -2558,8 +2568,7 @@ fn open_settings_window(app: &AppHandle, section: Option<&str>) {
     .inner_size(960.0, 720.0)
     .min_inner_size(640.0, 480.0)
     .prevent_overflow()
-    .background_color(tauri::webview::Color(22, 22, 22, 255))
-    .theme(Some(tauri::Theme::Dark));
+    .background_color(tauri::webview::Color(22, 22, 22, 255));
 
     #[cfg(target_os = "macos")]
     let builder = builder
