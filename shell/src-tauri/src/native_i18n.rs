@@ -224,7 +224,7 @@ mod tests {
     fn interpolates_named_placeholders() {
         assert_eq!(
             t("en", "native-tray-upgrade", &[("latest", "0.5.0")]),
-            "Upgrade to v0.5.0…"
+            "Update to 0.5.0…"
         );
         assert_eq!(
             t("es", "native-notify-update-body", &[("url", "https://x")]),
