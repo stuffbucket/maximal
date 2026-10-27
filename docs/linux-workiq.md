@@ -2,7 +2,8 @@
 
 This guide covers the local `@microsoft/workiq` MCP server behind Maximal's
 broker. Maximal discovers and supervises Work IQ; it does **not** distribute it
-or own its Microsoft authentication. Pi is optional and has a
+or own its Microsoft authentication. Signing in from Settings, logs, and admin
+approval are covered in [Work IQ](workiq.md). Pi is optional and has a
 [separate connection guide](pi-workiq.md).
 
 The package version used to validate sign-in and tool discovery was Work IQ
