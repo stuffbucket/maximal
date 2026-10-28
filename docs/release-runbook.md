@@ -40,9 +40,9 @@ Each raw archive and installed application layout must contain `maximal` and
 `maximal-mcp-broker` as executable siblings (`.exe` on Windows). On Linux the
 `maximal` package installs both in `/usr/bin`, where `maximal-desktop` finds
 them next to its own executable. The SBOM covers
-both production dependency graphs. Shipping the Windows broker binary does not
-enable supervision there; runtime remains fail-closed until kill-on-close Job
-Object containment is implemented. The PowerShell installer owns a dedicated
+both production dependency graphs. On Windows the broker puts itself in a
+kill-on-close Job Object before it starts any MCP server, and refuses to run if
+Windows won't allow that. The PowerShell installer owns a dedicated
 ARP uninstaller that waits for the CLI cleanup, then removes both sibling
 executables, its exact user-PATH entry, its ARP key, and itself. It refuses to
 overwrite an MSI-managed installation, and its helper leaves MSI-owned files and

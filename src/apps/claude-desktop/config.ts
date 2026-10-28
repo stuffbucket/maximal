@@ -11,6 +11,7 @@ import { z } from "zod"
 
 import { resolveApiKey } from "~/lib/auth/api-key-helper"
 import { atomicWriteJson as atomicWriteJsonShared } from "~/lib/platform/atomic-json"
+import { parseJsonText } from "~/lib/platform/json-text"
 import { proxyBaseUrl } from "~/lib/start/proxy-port"
 
 const USERDATA_3P_SUFFIX = "-3p"
@@ -191,7 +192,7 @@ export function readJsonObject(file: string): Record<string, unknown> | null {
   }
 
   try {
-    const parsed: unknown = JSON.parse(raw)
+    const parsed: unknown = parseJsonText(raw)
     if (
       typeof parsed !== "object"
       || parsed === null

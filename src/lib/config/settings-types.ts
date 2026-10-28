@@ -415,8 +415,11 @@ export const McpClientOffer = z.object({
   /** Maximal's integration for this client is on, so it can be offered. */
   available: z.boolean(),
   /** When not available, a more specific reason than "integration off":
-   *  Claude Desktop has another provider's gateway profile applied. */
-  unavailableReason: z.enum(["other-provider-profile"]).optional(),
+   *  Claude Desktop has another provider's gateway profile applied, or
+   *  Maximal found no Claude Code program it can run. */
+  unavailableReason: z
+    .enum(["other-provider-profile", "cli-missing"])
+    .optional(),
   /** Maximal currently has this endpoint written into the client. */
   configured: z.boolean(),
 })
@@ -506,7 +509,7 @@ export const McpBrokerHealth = z.object({
     "stuck",
     "unavailable",
   ]),
-  problem: z.enum(["not-installed", "unsupported-platform"]).nullable(),
+  problem: z.enum(["not-installed", "containment-unavailable"]).nullable(),
 })
 export type McpBrokerHealth = z.infer<typeof McpBrokerHealth>
 
@@ -546,8 +549,15 @@ export type McpEndpointToggleRequest = z.infer<typeof McpEndpointToggleRequest>
 /** Where the broker got to before the apps were updated (see
  *  BrokerReadiness in src/lib/mcp-broker/supervisor.ts): `starting` means
  *  the wait ran out first, `failed` that it gave up, `off` that nothing
- *  runs it in this process. */
-export const McpBrokerReadiness = z.enum(["ready", "starting", "failed", "off"])
+ *  runs it in this process, `setup-needed` that the endpoint is held back
+ *  from the broker until its setup is done (Work IQ's terms and sign-in). */
+export const McpBrokerReadiness = z.enum([
+  "ready",
+  "starting",
+  "failed",
+  "off",
+  "setup-needed",
+])
 export type McpBrokerReadiness = z.infer<typeof McpBrokerReadiness>
 
 export const McpEndpointToggleResponse = z.object({

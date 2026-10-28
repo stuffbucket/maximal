@@ -12,6 +12,9 @@ const SECRET_NAME_PATTERN =
 const PROTECTED_PREFIX_PATTERN = /^(?:AZURE|COPILOT|GH|GITHUB|MICROSOFT|MSAL)_/u
 const PROTECTED_NAMES = new Set(["ANTHROPIC_API_KEY", "MAXIMAL_SHELL_KEY"])
 
+/** What the broker's environment is built from. The MCP SDK gives each
+ *  stdio server its own default set read from the broker's environment, so
+ *  on Windows this covers that set too (USERNAME, PROGRAMFILES and so on). */
 const BROKER_BASELINE_ENVIRONMENT =
   process.platform === "win32" ?
     [
@@ -22,9 +25,15 @@ const BROKER_BASELINE_ENVIRONMENT =
       "LOCALAPPDATA",
       "PATH",
       "PATHEXT",
+      "PROCESSOR_ARCHITECTURE",
+      "PROGRAMDATA",
+      "PROGRAMFILES",
+      "PROGRAMFILES(X86)",
+      "PROGRAMW6432",
       "SYSTEMDRIVE",
       "SYSTEMROOT",
       "TEMP",
+      "USERNAME",
       "USERPROFILE",
       "WINDIR",
     ]
@@ -205,13 +214,15 @@ export function brokerProcessEnvironment(
 export function brokerExecutableCandidates(
   configuredPath: string | undefined,
   executablePath = process.execPath,
+  platform: NodeJS.Platform = process.platform,
 ): Array<string> {
   if (configuredPath !== undefined) return [configuredPath]
 
   const executableDirectory = path.dirname(executablePath)
-  const suffix = process.platform === "win32" ? ".exe" : ""
+  const suffix = platform === "win32" ? ".exe" : ""
   return [
     path.join(executableDirectory, `maximal-mcp-broker${suffix}`),
-    path.resolve("packages/mcp-broker/dist/maximal-mcp-broker"),
+    // A development build: `bun build --compile` adds .exe on Windows.
+    path.resolve(`packages/mcp-broker/dist/maximal-mcp-broker${suffix}`),
   ]
 }

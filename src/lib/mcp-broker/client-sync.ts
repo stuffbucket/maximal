@@ -21,8 +21,6 @@ import { currentProxyPort } from "~/lib/start/proxy-port"
 
 import type { McpClientId } from "./types"
 
-import { brokerRunsOn } from "./platform"
-
 /** Maximal's URL for an endpoint, on the port the proxy listens on now. */
 export function mcpEndpointUrl(
   id: string,
@@ -73,7 +71,10 @@ export type McpClientUnavailableReason =
  *  can tell more than "its integration is off". */
 export type McpClientOfferUnavailableReason =
   /** Claude Desktop has another gateway profile applied. */
-  "other-provider-profile"
+  | "other-provider-profile"
+  /** Claude Code's integration is on, but Maximal found no `claude` it can
+   *  run to add the entry (on Windows only `claude.exe` will do). */
+  | "cli-missing"
 
 export interface McpReconcileResult {
   /** Ids Maximal now owns in the client after this pass. */
@@ -142,16 +143,14 @@ export function ownedMcpServers(
   return config.apps?.[APPS_KEY[clientId]]?.mcpServers ?? []
 }
 
-/** What the client should have. Nothing where the broker can't run
- *  (Windows), so entries pointing at an endpoint that never answers come
- *  back out; the user's choices stay in `servers[].clients`. */
+/** What the client should have: an entry for each endpoint that is on and
+ *  goes to this client. */
 export function desiredEntriesFor(
   configurator: Pick<McpClientConfigurator, "clientId" | "apiKeyLabel">,
   config: AppConfig,
-  platform: NodeJS.Platform = process.platform,
 ): Array<McpClientEntry> {
   const broker = config.mcpBroker
-  if (broker?.enabled !== true || !brokerRunsOn(platform)) return []
+  if (broker?.enabled !== true) return []
   const appKey = resolveApiKey(configurator.apiKeyLabel, config)
   const entries: Array<McpClientEntry> = []
   for (const server of broker.servers ?? []) {
@@ -175,8 +174,6 @@ function emptyResult(): McpReconcileResult {
 export interface SyncMcpClientOptions {
   /** Override the integration check, e.g. `false` while disabling it. */
   active?: boolean
-  /** Defaults to this machine's; tests inject another. */
-  platform?: NodeJS.Platform
 }
 
 /** The pass in progress (or last finished) per client. */
@@ -208,7 +205,7 @@ async function reconcileNow(
 ): Promise<McpReconcileResult> {
   const config = getConfig()
   const owned = ownedMcpServers(configurator.clientId, config)
-  const wanted = desiredEntriesFor(configurator, config, options.platform)
+  const wanted = desiredEntriesFor(configurator, config)
   // Nothing configured and nothing to revert: don't touch the client at all.
   if (wanted.length === 0 && owned.length === 0) return emptyResult()
   const active = options.active ?? (await configurator.available())

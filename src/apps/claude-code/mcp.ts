@@ -36,6 +36,7 @@ import {
   parseStdioEntry,
 } from "~/lib/mcp-broker/client-sync"
 import { atomicWriteJson } from "~/lib/platform/atomic-json"
+import { parseJsonText } from "~/lib/platform/json-text"
 import { runFile } from "~/lib/system/run-file"
 
 import { HELPER_LABEL, isProxyBaseUrlConfigured } from "./config"
@@ -63,12 +64,20 @@ export function claudeUserConfigPath(): string {
 
 async function defaultRunner(): Promise<ClaudeCliRunner | undefined> {
   // Windows .cmd/.ps1 shims need a shell, which would put JSON through shell
-  // quoting; only a real executable is used.
-  const installs = await detectClaudeInstalls({ readVersion: () => null })
-  const install = installs.find(
-    (candidate) =>
-      process.platform !== "win32" || candidate.path.endsWith(".exe"),
-  )
+  // quoting; only a real executable is used. Detection stops at the first
+  // `claude` on PATH, so when that is npm's claude.cmd, look again in the
+  // places the native installer uses, without PATH.
+  const usable = (candidate: { path: string }) =>
+    process.platform !== "win32" || candidate.path.endsWith(".exe")
+  const install =
+    (await detectClaudeInstalls({ readVersion: () => null })).find(
+      (candidate) => usable(candidate),
+    )
+    ?? (process.platform === "win32" ?
+      (
+        await detectClaudeInstalls({ readVersion: () => null, pathDirs: [] })
+      ).find((candidate) => usable(candidate))
+    : undefined)
   if (!install) return undefined
   return async (args) => {
     const result = await runFile(install.path, args, {
@@ -84,8 +93,7 @@ async function defaultRunner(): Promise<ClaudeCliRunner | undefined> {
 
 function readServers(file: string): Record<string, unknown> {
   try {
-    // eslint-disable-next-line unicorn/prefer-json-parse-buffer -- JSON.parse's type only accepts string
-    const parsed: unknown = JSON.parse(fs.readFileSync(file, "utf8"))
+    const parsed: unknown = parseJsonText(fs.readFileSync(file, "utf8"))
     const servers = (parsed as { mcpServers?: unknown } | null)?.mcpServers
     return typeof servers === "object" && servers !== null ?
         (servers as Record<string, unknown>)
@@ -130,8 +138,7 @@ function addJsonPayload(entry: McpClientEntry): string {
 
 function readDocument(file: string): Record<string, unknown> | undefined {
   try {
-    // eslint-disable-next-line unicorn/prefer-json-parse-buffer -- JSON.parse's type only accepts string
-    const parsed: unknown = JSON.parse(fs.readFileSync(file, "utf8"))
+    const parsed: unknown = parseJsonText(fs.readFileSync(file, "utf8"))
     return typeof parsed === "object" && parsed !== null ?
         (parsed as Record<string, unknown>)
       : undefined
@@ -226,6 +233,10 @@ export function createClaudeCodeMcp(
       options.available
       ?? (async () =>
         isProxyBaseUrlConfigured() && (await getRunner()) !== undefined),
+    // Asked only when not available: with the integration on, that means
+    // no runnable `claude` was found.
+    unavailableReason: () =>
+      isProxyBaseUrlConfigured() ? "cli-missing" : undefined,
     reconcile(desired, owned) {
       return reconcileUserScope({
         file: configPath(),

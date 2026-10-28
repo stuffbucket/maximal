@@ -47,7 +47,7 @@ Claude Code is routed by an ownership-guarded `ANTHROPIC_BASE_URL` plus `apiKeyH
 
 ## Config and state
 
-- `src/lib/config/config.ts` — `AppConfig` shape, disk read/write of `config.json` in the app directory: `~/.local/share/maximal/` (Linux/macOS) or `%APPDATA%\maximal\` (Windows), resolved by `src/lib/platform/paths.ts`. `COPILOT_API_HOME` overrides it.
+- `src/lib/config/config.ts` — `AppConfig` shape, disk read/write of `config.json` in the app directory: `~/.local/share/maximal/` (Linux/macOS) or `%APPDATA%\maximal\` (Windows), resolved by `src/lib/platform/paths.ts`. `COPILOT_API_HOME` overrides it. A leading UTF-8 byte order mark (Notepad, PowerShell 5's `Set-Content -Encoding utf8`) is ignored, here and in the Claude Code and Claude Desktop files Maximal reads (`src/lib/platform/json-text.ts`). A `config.json` that isn't valid JSON leaves Maximal on the defaults, and `writeConfig` then refuses with `ConfigUnreadableError` rather than write over the file, until a read succeeds.
 - `src/lib/config/config-schema.ts` — zod runtime validation. Bad config → exit non-zero with key path. Unknown keys → warning, kept via `.loose()`.
 - `src/lib/runtime-state/state.ts` — singleton mutable state: tokens, accountType, rate-limit, models cache.
 - `src/lib/auth/github-token-store.ts` — the GitHub identity store. Multi-account registry (schema v2) at `accounts.json` beside the legacy `github_token`: `{ activeKey, accounts: Record<"login@host", AccountRecord> }`, atomic temp+rename writes. Boot reads the active account; the legacy single-record file is migrated in once (gated, offline→`unknown@host`) and kept as a rollback fallback. The three sign-in producers (device-code, CLI, gh-reuse) all persist a typed `AccountRecord`; switch/remove + the `/settings/api/accounts` routes drive quick-switch (set active → reboot the sidecar into it). Sign-out forgets the active account; Remove forgets a specific one; both touch only maximal's own copy — never `gh`. RMW takes no lock (safe on the single Bun sidecar; see the comment above `addAccountToDefaultRegistry`).
@@ -211,7 +211,7 @@ This repo can collide on a shared working tree (lint-staged stash + concurrent m
 `shell/` is a Tauri 2 menu-bar app that wraps the proxy for non-CLI users. `bun run app:sidecar` builds the UI (`bun run build:ui`), regenerates the embed manifest, and compiles both the standalone proxy and isolated MCP broker into `shell/src-tauri/binaries/`. Tauri launches only the proxy as a sidecar bound to `127.0.0.1:4141` (the proxy's default listen address, set by `HOST` and defaulted in `src/lib/start/listen-host.ts`; `HOST=0.0.0.0` exposes it to other machines); the proxy supervises the packaged broker. The settings (React, Bun-bundled) and dashboard (vanilla) UIs live in `shell/ui/{settings,dashboard}` and are **embedded in the sidecar binary**, served by the proxy at `/ui/settings` and `/ui/dashboard` (`src/routes/ui/route.ts`) — from `shell/dist` on disk in dev, from `$bunfs` in the compiled binary. The webview windows point at those `/ui/*` URLs; legacy `/settings` and `/usage-viewer` 301-redirect to them. No Vite — Bun is the bundler.
 
 - **New settings sections are React islands:** `shell/src/ui/islands/<name>-island.tsx` mounting `shell/src/ui/features/<name>/`; hash-nav section routing stays in `shell/src/main.ts`.
-- **Updates.** The sidecar decides whether to offer one (`src/lib/update/update-check.ts` reads `https://mxml.sh/updates/manifest.json`; never github.com), which shows the topbar "Update to X.Y.Z" button and the tray item. On Windows and macOS both install in place (`IN_PLACE_UPDATE` in `shell/src-tauri/src/lib.rs`): the shell checks `https://mxml.sh/updates/desktop/<channel>.json` with `tauri-plugin-updater` (the channel comes from the app's version: `X.Y.Z` is `stable`, `X.Y.Z-rc.N` is `rc`), asks the user with a native confirm naming the version, downloads the update and verifies its signature against `plugins.updater.pubkey` and the signed version, then installs and relaunches. On Windows it stops the sidecar first and runs the NSIS installer, which relaunches Maximal. On macOS the plugin swaps the `.app` bundle (asking for an administrator password if its folder isn't writable), then the shell stops the sidecar and relaunches. A macOS app that can't replace itself (run from the disk image, from App Translocation, or outside a bundle) skips straight to the fallback. Any failure says so in a native dialog and opens mxml.sh. Linux never installs in place: the Debian/Ubuntu packages update with apt. An apt install (`/usr/bin/maximal` with the package's `/usr/lib/maximal/installed-by-apt` marker; `src/lib/update/install-source.ts`) gets `update_command` in the update status, so the button and the tray item read "Update with apt" and open Settings → Diagnostics, which shows the command to copy; Maximal never runs apt. The shell's background poll shows its "update available" OS notification once per version, across restarts: the last version announced is written to `update-notified` beside the `locale` file (before the notification fires; a failed write is logged and the notification still shows), so launching again while still behind doesn't repeat it. **Check for updates.** The sidecar caches its check for 6 hours; the tray's "Check for updates" item and Settings → Diagnostics' "Check now" button ask for a fresh one with `GET /settings/api/update-status?force=1` (same response shape). The check rate-limits itself: at most one real fetch per 30 s (`FORCE_MIN_INTERVAL_MS` in `update-check.ts`), and a forced check inside that window returns the last result. A real fetch is still a conditional request (ETag), so it costs a 304 when nothing changed. The tray item (always shown beside "Update to X.Y.Z") runs the check through the shell's update-status path (`parse_update_status`), updates the tray item, tells the Settings window to re-read (`update:status` event), and shows a native dialog: "Maximal is up to date (X.Y.Z)", a plain failure message (an answer with `last_error` is a failure even if an older result is known), or that update checks are off. "Check now" calls the same URL from the page, then `refresh_update_status` has the shell re-read the cached result so the tray agrees. `maximal start` also logs one line when a newer version is out (with the apt command for an apt install), and `/status` reports the last check. Release signing, the manifests and the apt repository: [`release-runbook.md`](release-runbook.md), [`decisions/site-runtime-version-manifest.md`](decisions/site-runtime-version-manifest.md), [`linux.md`](linux.md).
+- **Updates.** The sidecar decides whether to offer one (`src/lib/update/update-check.ts` reads `https://mxml.sh/updates/manifest.json`; never github.com), which shows the topbar "Update to X.Y.Z" button and the tray item. On Windows and macOS both install in place (`IN_PLACE_UPDATE` in `shell/src-tauri/src/lib.rs`): the shell checks `https://mxml.sh/updates/desktop/<channel>.json` with `tauri-plugin-updater` (the channel comes from the app's version: `X.Y.Z` is `stable`, `X.Y.Z-rc.N` is `rc`), asks the user with a native confirm naming the version, downloads the update and verifies its signature against `plugins.updater.pubkey` and the signed version, then installs and relaunches. On Windows it stops the sidecar first, ends every `maximal-mcp-broker.exe` (the broker, and Claude Desktop's stdio adapters, which run the same file), and runs the NSIS installer, which relaunches Maximal. The NSIS installer and uninstaller end them again first (`shell/src-tauri/windows/hooks.nsh`), as the MSI and `install.ps1` do. On macOS the plugin swaps the `.app` bundle (asking for an administrator password if its folder isn't writable), then the shell stops the sidecar and relaunches. A macOS app that can't replace itself (run from the disk image, from App Translocation, or outside a bundle) skips straight to the fallback. Any failure says so in a native dialog and opens mxml.sh. Linux never installs in place: the Debian/Ubuntu packages update with apt. An apt install (`/usr/bin/maximal` with the package's `/usr/lib/maximal/installed-by-apt` marker; `src/lib/update/install-source.ts`) gets `update_command` in the update status, so the button and the tray item read "Update with apt" and open Settings → Diagnostics, which shows the command to copy; Maximal never runs apt. The shell's background poll shows its "update available" OS notification once per version, across restarts: the last version announced is written to `update-notified` beside the `locale` file (before the notification fires; a failed write is logged and the notification still shows), so launching again while still behind doesn't repeat it. **Check for updates.** The sidecar caches its check for 6 hours; the tray's "Check for updates" item and Settings → Diagnostics' "Check now" button ask for a fresh one with `GET /settings/api/update-status?force=1` (same response shape). The check rate-limits itself: at most one real fetch per 30 s (`FORCE_MIN_INTERVAL_MS` in `update-check.ts`), and a forced check inside that window returns the last result. A real fetch is still a conditional request (ETag), so it costs a 304 when nothing changed. The tray item (always shown beside "Update to X.Y.Z") runs the check through the shell's update-status path (`parse_update_status`), updates the tray item, tells the Settings window to re-read (`update:status` event), and shows a native dialog: "Maximal is up to date (X.Y.Z)", a plain failure message (an answer with `last_error` is a failure even if an older result is known), or that update checks are off. "Check now" calls the same URL from the page, then `refresh_update_status` has the shell re-read the cached result so the tray agrees. `maximal start` also logs one line when a newer version is out (with the apt command for an apt install), and `/status` reports the last check. Release signing, the manifests and the apt repository: [`release-runbook.md`](release-runbook.md), [`decisions/site-runtime-version-manifest.md`](decisions/site-runtime-version-manifest.md), [`linux.md`](linux.md).
 - **Linux packages.** `maximal` installs the bun-compiled `maximal` and `maximal-mcp-broker` in `/usr/bin` plus a user systemd unit; `maximal-desktop` is the Tauri app built with `tauri.linux.conf.json` (binary `maximal-desktop`) and `bundle.externalBin: []`. The shell's `sidecar("maximal")` resolves to the file next to its own (canonicalized) executable, so the tray app runs the `maximal` package's `/usr/bin/maximal`, and `maximal-desktop` depends on exactly that version. On Linux the shell starts it with `HOST=127.0.0.1` (`sidecar_platform_env`), like the packaged service, so the proxy listens on loopback only. Packaging and the apt repository live in `build/linux/`.
 - **Shell-visible wire types live in `src/lib/config/settings-types.ts`** (zod) and the shell imports them (`shell/src/proxy/client.ts`). Don't hand-copy types into the shell.
 
@@ -281,11 +281,13 @@ for mise, to the command, so it is authoritative), npm's
 process's environment and npmrc files as a fallback. When none of them
 confirms a registry the host is `null` and the card says "It downloads from
 your npm registry." rather than naming npmjs.org. npm's reported global prefix
-likewise takes precedence over the file-based prefix probes. On Windows, where the
-supervisor refuses to start the broker, nothing is offered, the broker
-reports `unsupported-platform` even while off, turning an endpoint on is
-refused (`unsupported-platform`, HTTP 409), and client apps get no entries
-(`src/lib/mcp-broker/platform.ts`); saved endpoints stay listed. When
+likewise takes precedence over the file-based prefix probes. On Windows,
+the Arm build (`bin/win-arm64`) is chosen on an Arm PC even though x64
+Maximal runs emulated there and `process.arch` says x64
+(`windowsMachineArch` reads `PROCESSOR_ARCHITEW6432`, then
+`PROCESSOR_ARCHITECTURE`), falling back to `win-x64`. And
+npm's `workiq.cmd` launcher on PATH also leads to the package in the
+`node_modules` folder beside it. When
 several installs exist, the highest version wins. Adding asks the user to
 confirm and writes the
 endpoint off, with `catalog` set. The path contains the package version and
@@ -346,7 +348,9 @@ reports the broker's state (`ready` / `starting` / `failed`) in the response.
 
 When an endpoint is turned on and an app already has its own stdio entry with
 that id (Claude Code user scope, or Claude Desktop's Claude-3p or regular
-config), Maximal copies that entry's command, args, working directory, and
+config; on Windows the regular one is in `%APPDATA%\Claude`, or for the
+Microsoft Store app in `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude`),
+Maximal copies that entry's command, args, working directory, and
 non-secret environment into the endpoint once, so the broker runs the same
 server. The app's own entry stays untouched; secret-looking environment names
 are not copied and are reported. Maximal's own adapter is never adopted.
@@ -368,11 +372,31 @@ running server's loopback-only `POST /_internal/reload`, which re-reads
 including Work IQ when configured, remain separately installed programs;
 Maximal does not redistribute them or own their authentication state.
 
-On POSIX, each broker generation is a detached process group. Graceful shutdown
-is bounded and followed by exact-group `SIGKILL`, including descendants. Windows
-currently fails closed because kill-on-close Job Object containment is not
-implemented. Public `/status` exposes only coarse broker state and
-enabled-endpoint count.
+When a broker generation stops or dies, it and everything it started end
+with it. On POSIX, each broker generation is a detached process group.
+Graceful shutdown is bounded and followed by exact-group `SIGKILL`, including
+descendants. On Windows, `serve` first puts itself in a Job Object with
+`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` (kernel32 through `bun:ffi`,
+`packages/mcp-broker/src/windows-job.ts`) and holds the only handle until it
+exits. Breakaway isn't allowed, so the MCP servers it starts and their
+children are in the job too, and when the broker exits or is terminated,
+Windows ends all of them. The supervisor's bounded graceful stop is followed
+by `TerminateProcess` on the broker. If Windows refuses any step, the broker
+starts nothing and exits with `BROKER_CONTAINMENT_EXIT_CODE` (78); the
+supervisor reports `unavailable` with the problem `containment-unavailable`
+instead of restarting it, and Settings says the servers couldn't start. A
+crashed sidecar is covered twice: the broker's stdin closes, and
+`--parent-pid` has the broker check every second whether its parent is gone.
+However `serve` stops (a `shutdown` frame, stdin closing, the parent gone, a
+signal, or an error), the broker closes its servers and then exits, at most 3
+seconds after it began closing, even if an open session holds its HTTP
+server. A `serve` that fails exits as soon as it has written its error code. Stdio servers are started with
+`cross-spawn` (inside the MCP SDK), which runs a `.cmd` or `.bat` command
+through `cmd.exe /d /s /c` with its arguments escaped, rather than
+refusing it the way Node does without a shell. The Windows behavior is
+tested on a Windows runner by `packages/mcp-broker/test/windows-containment.test.ts`
+(the CI `windows-broker` job). Public `/status` exposes only coarse broker
+state and enabled-endpoint count.
 
 The broker's startup probe records the tool names each endpoint lists and
 reports them in its `ready` frame (`getBrokerEndpointTools`). Each server's
@@ -399,6 +423,20 @@ background, 5 minutes, cancellable with `DELETE`, then a broker restart so the
 probe looks again). The commands are a closed set (`src/lib/system/workiq-cli.ts`)
 and get the endpoint's environment allowlist, never Maximal's credentials.
 User-facing guide: [`workiq.md`](workiq.md).
+
+A Work IQ endpoint that is on isn't handed to the broker until its setup is
+done: installed, `I-accept-EULA`, and `defaultAccount` set. On Windows,
+`workiq mcp` opens Microsoft's sign-in window by itself as soon as it
+starts, outside the card's steps. The server registers
+`holdBackWorkIqUntilSetUp` with `setBrokerConfigFilter`, so every start,
+reconfigure and restart gives the broker a copy with such an endpoint turned
+off. Not read yet counts as not done. Each `workiq config show` (a status,
+a step, or `reconfigureBrokerAfterSetupCheck`, which boot, turning an
+endpoint on and `/_internal/reload` use) updates what is known, and the
+Settings list reconfigures after reading the statuses, so a Work IQ set up
+from Terminal starts on the next list. Turning one on that is held back
+reports `broker: "setup-needed"` without waiting for the broker, and
+`/mcp/<id>` answers it with 503 `MCP_ENDPOINT_SETUP_NEEDED`.
 
 ### Requests for user input (elicitation)
 

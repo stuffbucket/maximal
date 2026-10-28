@@ -19,6 +19,10 @@ on:
   # here too or the queue blocks indefinitely waiting for them.
   merge_group:
 
+# Read-only by default; a job asks for anything more.
+permissions:
+  contents: read
+
 # A new push to a PR supersedes its in-flight run. Every other run gets its
 # own group (run_id), so main, merge-group, and dispatched runs never queue
 # behind or replace each other.
@@ -30,6 +34,10 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # The commit-subject check lists the PR's commits through the API.
+    permissions:
+      contents: read
+      pull-requests: read
     env:
       # The root mise.toml pins Rust and the broker inherits it; nothing in
       # this job builds Rust through mise, so don't download the toolchain.
@@ -135,3 +143,87 @@ jobs:
 
       - name: Build
         run: bun run build
+
+  # The broker contains MCP servers on Windows with a kill-on-close Job
+  # Object, which only a Windows machine can check: build the broker there
+  # and run its tests, including test/windows-containment.test.ts, against
+  # the compiled executable.
+  # The same on Windows on Arm, where Maximal's x64 build runs under
+  # emulation: the release broker and adapter must work there too.
+  windows-broker:
+    name: windows-broker (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-latest, windows-11-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    env:
+      # The broker inherits the root mise.toml's Rust pin; nothing here
+      # builds Rust.
+      MISE_DISABLE_TOOLS: rust
+      # An emulated x64 process can't tell it's on an Arm PC (it sees AMD64),
+      # so the workflow says so. PowerShell takes about 42 seconds to launch
+      # there, too slow for the PowerShell-parent adapter test.
+      MAXIMAL_TEST_SKIP_POWERSHELL_PARENT: ${{ matrix.runner == 'windows-11-arm' && '1' || '' }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Verify dispatched SHA
+        if: github.event_name == 'workflow_dispatch' && github.sha != inputs.expected_sha
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          ACTUAL_SHA: ${{ github.sha }}
+        run: |
+          echo "::error::Branch moved before CI dispatch: expected ${EXPECTED_SHA}, got ${ACTUAL_SHA}."
+          exit 1
+
+      - uses: actions/checkout@v6
+
+      - uses: ./.github/actions/setup-mise
+        with:
+          mise-version: v2026.9.5
+
+      - name: Configure package registry
+        run: printf '%s\n' 'registry=https://packagefeedproxy.microsoft.io/npm/' > "$HOME/.npmrc"
+
+      - name: Install isolated broker dependencies
+        run: |
+          mise trust mise.toml
+          mise trust packages/mcp-broker/mise.toml
+          mise install
+          mise -C packages/mcp-broker install
+          mise -C packages/mcp-broker exec -- pnpm install --frozen-lockfile
+
+      - name: Build the broker
+        run: mise -C packages/mcp-broker exec -- pnpm build
+
+      - name: Test the broker on Windows
+        working-directory: packages/mcp-broker
+        run: |
+          MAXIMAL_MCP_BROKER_BINARY="$(cygpath -w "$PWD/dist/maximal-mcp-broker.exe")" \
+            mise exec -- bun test
+
+      # Releases ship the minified x64 cross-compile (release.yml's
+      # build:target), so check the adapter, the command line and containment
+      # against exactly that build as well. On the Arm runner it runs under
+      # emulation, as it does on an Arm PC.
+      - name: Test the release build
+        if: always()
+        working-directory: packages/mcp-broker
+        run: |
+          mise exec -- pnpm build:target \
+            --target=bun-windows-x64 \
+            --outfile="$PWD/dist/release/maximal-mcp-broker.exe"
+          MAXIMAL_MCP_BROKER_BINARY="$(cygpath -w "$PWD/dist/release/maximal-mcp-broker.exe")" \
+            mise exec -- bun test test/cli.test.ts test/stdio-adapter.test.ts test/windows-adapter-pipes.test.ts test/windows-containment.test.ts
+
+      # Claude Desktop's path end to end: a Node parent runs the release
+      # adapter against Maximal's /mcp route, which forwards to a broker.
+      - name: Test the release adapter through Maximal's /mcp route
+        if: always()
+        run: |
+          mise exec -- bun install --frozen-lockfile
+          MAXIMAL_MCP_BROKER_BINARY="$(cygpath -w "$PWD/packages/mcp-broker/dist/release/maximal-mcp-broker.exe")" \
+            mise exec -- bun test tests/mcp-adapter-end-to-end.test.ts

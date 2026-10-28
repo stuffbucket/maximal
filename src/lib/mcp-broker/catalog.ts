@@ -95,9 +95,27 @@ function defaultMiseDataDir(home: string, platform: NodeJS.Platform): string {
   return path.join(home, ".local", "share", "mise")
 }
 
+/**
+ * The machine's own architecture on Windows. `process.arch` is this
+ * process's: an x64 Maximal on an Arm PC runs under emulation and reports
+ * x64. Windows tells an emulated or WOW64 process the machine's in
+ * PROCESSOR_ARCHITEW6432, and everyone else in PROCESSOR_ARCHITECTURE.
+ */
+export function windowsMachineArch(
+  env: Readonly<Record<string, string | undefined>>,
+): string | undefined {
+  const name = (
+    env.PROCESSOR_ARCHITEW6432 ?? env.PROCESSOR_ARCHITECTURE
+  )?.toUpperCase()
+  if (name === "ARM64") return "arm64"
+  if (name === "AMD64") return "x64"
+  return undefined
+}
+
 function resolveOptions(options: CatalogDetectOptions = {}): ResolvedOptions {
   const home = options.homeDir ?? os.homedir()
   const platform = options.platform ?? process.platform
+  const env = options.env ?? process.env
   const npmLogin =
     options.npmLogin === undefined ?
       (cachedNpmLoginConfig() ?? null)
@@ -105,7 +123,10 @@ function resolveOptions(options: CatalogDetectOptions = {}): ResolvedOptions {
   return {
     home,
     platform,
-    arch: options.arch ?? process.arch,
+    arch:
+      options.arch
+      ?? (platform === "win32" ? windowsMachineArch(env) : undefined)
+      ?? process.arch,
     pathDirs:
       options.pathDirs
       ?? (process.env.PATH ?? "").split(path.delimiter).filter(Boolean),
@@ -195,12 +216,21 @@ function workiqExecutable(
   packageDir: string,
   opts: ResolvedOptions,
 ): CatalogInstall | undefined {
-  const folder = workiqPlatformFolder(opts.platform, opts.arch)
-  if (!folder) return undefined
+  // An Arm PC runs the x64 build too (emulated), if a package has no Arm one.
+  const arches =
+    opts.platform === "win32" && opts.arch === "arm64" ?
+      ["arm64", "x64"]
+    : [opts.arch]
   const name = opts.platform === "win32" ? "workiq.exe" : "workiq"
-  const command = path.join(packageDir, "bin", folder, name)
-  if (!isExecutableFile(command, opts.platform)) return undefined
-  return { command, version: readPackageVersion(packageDir) }
+  for (const arch of arches) {
+    const folder = workiqPlatformFolder(opts.platform, arch)
+    if (!folder) continue
+    const command = path.join(packageDir, "bin", folder, name)
+    if (isExecutableFile(command, opts.platform)) {
+      return { command, version: readPackageVersion(packageDir) }
+    }
+  }
+  return undefined
 }
 
 /** Package directories under a node install root (mise install or npm
@@ -242,7 +272,9 @@ function fromNpmGlobal(opts: ResolvedOptions): CatalogInstall | undefined {
 }
 
 /** A `workiq` on PATH that links into the npm package (npm's global bin
- *  symlink), or is the native executable itself. */
+ *  symlink), or is the native executable itself. On Windows npm writes a
+ *  `workiq.cmd` launcher instead of a link, with the package in
+ *  `node_modules` beside it. */
 function fromPath(opts: ResolvedOptions): CatalogInstall | undefined {
   const names =
     opts.platform === "win32" ? ["workiq.exe", "workiq.cmd"] : ["workiq"]
@@ -253,6 +285,13 @@ function fromPath(opts: ResolvedOptions): CatalogInstall | undefined {
         real = fs.realpathSync(path.join(dir, name))
       } catch {
         continue
+      }
+      if (name === "workiq.cmd") {
+        const found = workiqExecutable(
+          path.join(dir, "node_modules", ...WORKIQ_PACKAGE),
+          opts,
+        )
+        if (found) return found
       }
       // …/@microsoft/workiq/bin/workiq.js, or …/bin/<folder>/workiq.
       for (const up of [2, 3]) {

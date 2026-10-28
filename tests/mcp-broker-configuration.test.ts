@@ -38,6 +38,19 @@ describe("brokerExecutableCandidates", () => {
       `/opt/maximal/maximal-mcp-broker${process.platform === "win32" ? ".exe" : ""}`,
     )
   })
+
+  it("looks for .exe files on Windows, including a development build", () => {
+    const candidates = brokerExecutableCandidates(
+      undefined,
+      "/opt/maximal/maximal.exe",
+      "win32",
+    )
+
+    expect(candidates).toHaveLength(2)
+    expect(candidates.every((candidate) => candidate.endsWith(".exe"))).toBe(
+      true,
+    )
+  })
 })
 
 describe("resolveBrokerConfiguration", () => {

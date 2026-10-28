@@ -9,6 +9,10 @@ export const CONTROL_PROTOCOL = "maximal-mcp-control"
 // instead of half-working.
 export const CONTROL_PROTOCOL_VERSION = 4
 export const DEFAULT_MAX_CONTROL_FRAME_BYTES = 1_048_576
+/** How a broker exits when Windows wouldn't put it in a kill-on-close Job
+ *  Object (`CONTAINMENT_EXIT_CODE` in the broker's `windows-job.ts`). It
+ *  then runs nothing, and a restart wouldn't help. */
+export const BROKER_CONTAINMENT_EXIT_CODE = 78
 
 const IdentifierSchema = z
   .string()

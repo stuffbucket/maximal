@@ -134,16 +134,19 @@ export function McpEndpointCard({
     setRefreshing(false);
   };
 
-  // Why an app can't get the endpoint right now. Only reachable while the
-  // card is open, i.e. while the endpoint is on.
+  // Why an app can't get the endpoint right now, shown beside the app.
+  // Only reachable while the card is open, i.e. while the endpoint is on.
   const unavailable = (client: McpClientOffer): string | undefined => {
     if (client.available) return undefined;
     if (client.unavailableReason === "other-provider-profile") {
       return `${client.name} is set up with another provider profile, so Maximal can't add ${endpoint.label} to it.`;
     }
+    if (client.unavailableReason === "cli-missing") {
+      return `Maximal can't find a ${client.name} program it can run, so it can't add ${endpoint.label} to it.`;
+    }
     return chosen.has(client.id)
-      ? `${client.name}'s Maximal integration is off, so ${endpoint.label} isn't in it right now. It comes back when you turn ${client.name} on in Apps.`
-      : `${client.name}'s Maximal integration is off. Turn it on in Apps to add ${endpoint.label} to it.`;
+      ? `Turn on ${client.name} in Apps to put ${endpoint.label} back in it.`
+      : `Turn on ${client.name} in Apps first.`;
   };
 
   return (
@@ -219,18 +222,22 @@ export function McpEndpointCard({
               }
             />
           </div>
-          {endpoint.offered.map((client) => (
-            <div className="mcp-card__row mcp-card__row--app" key={client.id}>
-              <LinkCheckbox
-                label={client.name}
-                href="#apps"
-                checkboxLabel={`Add ${endpoint.label} to ${client.name}`}
-                checked={chosen.has(client.id)}
-                unavailable={unavailable(client)}
-                onCheckedChange={(checked) => setChosen([client.id], checked)}
-              />
-            </div>
-          ))}
+          {endpoint.offered.map((client) => {
+            const reason = unavailable(client);
+            return (
+              <div className="mcp-card__row mcp-card__row--app" key={client.id}>
+                <LinkCheckbox
+                  label={client.name}
+                  href="#apps"
+                  checkboxLabel={`Add ${endpoint.label} to ${client.name}`}
+                  checked={chosen.has(client.id)}
+                  unavailable={reason}
+                  onCheckedChange={(checked) => setChosen([client.id], checked)}
+                />
+                {reason && <span className="app-card__hint">{reason}</span>}
+              </div>
+            );
+          })}
         </fieldset>
 
         {enabled && !busy && adoptedFrom && (

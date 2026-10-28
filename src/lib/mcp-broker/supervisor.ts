@@ -12,6 +12,7 @@ import {
   type ResolvedBrokerConfiguration,
 } from "./configuration"
 import {
+  BROKER_CONTAINMENT_EXIT_CODE,
   BrokerControlProtocolError,
   BrokerFrameDecoder,
   encodeSidecarEnvelope,
@@ -20,7 +21,6 @@ import {
   type SidecarEnvelope,
 } from "./control-protocol"
 import { PendingRequests, pendingRequests } from "./pending-requests"
-import { brokerRunsOn } from "./platform"
 import { createLineSplitter, recordBrokerStderr } from "./server-log"
 
 export type BrokerSupervisorState =
@@ -34,8 +34,9 @@ export type BrokerSupervisorState =
   /** Can't run at all on this install; retrying wouldn't help. */
   | "unavailable"
 
-/** Why the broker is `unavailable`. */
-export type BrokerProblem = "not-installed" | "unsupported-platform"
+/** Why the broker is `unavailable`: its executable is missing, or Windows
+ *  wouldn't put it in a kill-on-close Job Object, so it refused to run. */
+export type BrokerProblem = "not-installed" | "containment-unavailable"
 
 export interface BrokerSupervisorSnapshot {
   state: BrokerSupervisorState
@@ -46,7 +47,6 @@ export interface BrokerSupervisorSnapshot {
 /** Launch errors no restart can fix, mapped to what the user is told. */
 const PERMANENT_LAUNCH_ERRORS: Record<string, BrokerProblem> = {
   MCP_BROKER_EXECUTABLE_NOT_FOUND: "not-installed",
-  MCP_BROKER_CONTAINMENT_UNAVAILABLE: "unsupported-platform",
 }
 
 /** Private loopback address and per-generation key of the ready broker. Held
@@ -238,8 +238,8 @@ export class BrokerSupervisor {
           PERMANENT_LAUNCH_ERRORS[error.message]
         : undefined
       if (problem) {
-        // Retrying can't fix a missing executable or an unsupported platform;
-        // stop here and say why, instead of cycling backoff/circuit forever.
+        // Retrying can't fix a missing executable; stop here and say why,
+        // instead of cycling backoff/circuit forever.
         this.#setState("unavailable", problem)
         return
       }
@@ -366,15 +366,13 @@ export class BrokerSupervisor {
     this.#setState("starting")
     withdrawUpstream()
 
-    if (!brokerRunsOn(this.#platform)) {
-      // A kill-on-close Job Object has not been wired yet. Running without one
-      // would violate the containment contract and could orphan MCP descendants.
-      throw new Error("MCP_BROKER_CONTAINMENT_UNAVAILABLE")
-    }
-
     const executable = this.#resolveExecutable()
     const configuration = resolveBrokerConfiguration(this.#config)
     const id = this.#randomUUID()
+    // On POSIX, `detached` makes the broker a process group of its own, which
+    // #forceKillGeneration ends as a whole. On Windows the broker puts itself
+    // in a kill-on-close Job Object before it starts anything, or exits with
+    // BROKER_CONTAINMENT_EXIT_CODE.
     const child = this.#spawnProcess(
       executable,
       ["serve", "--generation", id, "--parent-pid", String(this.#processPid)],
@@ -416,7 +414,7 @@ export class BrokerSupervisor {
         .catch(() => this.#failGeneration(generation))
     })
     child.once("error", () => this.#failGeneration(generation))
-    child.once("exit", () => {
+    child.once("exit", (code) => {
       if (this.#generation !== generation) return
       this.#forceKillGeneration(generation)
       this.#requests.dropGeneration(generation.id)
@@ -424,7 +422,14 @@ export class BrokerSupervisor {
       withdrawUpstream()
       this.#clearGenerationTimers(generation)
       this.#clearGenerationMonitors()
-      if (!this.#stopping) this.#scheduleRestart()
+      if (this.#stopping) return
+      if (this.#platform === "win32" && code === BROKER_CONTAINMENT_EXIT_CODE) {
+        // Windows refused the Job Object, so the broker ran nothing. A
+        // restart would be refused the same way; say so instead.
+        this.#setState("unavailable", "containment-unavailable")
+        return
+      }
+      this.#scheduleRestart()
     })
 
     const startupTimeout = this.#config.supervision?.startupTimeoutMs ?? 30_000
@@ -723,6 +728,12 @@ export class BrokerSupervisor {
     this.#forceKillGeneration(generation)
   }
 
+  /**
+   * End the broker and everything it started. On POSIX that is the exact
+   * process group. On Windows, terminating the broker closes the only
+   * handle to its kill-on-close Job Object, and Windows then ends every
+   * process in the job.
+   */
   #forceKillGeneration(generation: BrokerGeneration): void {
     const pid = generation.child.pid
     if (pid && this.#platform !== "win32" && this.#forceKillProcessGroup(pid)) {
@@ -791,10 +802,27 @@ function brokerConfigKey(config: McpBrokerConfig): string {
   })
 }
 
+/** What the broker is given of a config; see setBrokerConfigFilter. */
+let brokerConfigFilter = (config: McpBrokerConfig): McpBrokerConfig => config
+
+/**
+ * Hold endpoints back from the broker for now: every start, reconfigure
+ * and restart hands the broker `filter(config)` instead of `config`. The
+ * server uses it to keep a Work IQ whose setup isn't done from starting.
+ * A restart applies it again, so a change in what it holds back takes
+ * effect on the next reconfigure or restart.
+ */
+export function setBrokerConfigFilter(
+  filter: (config: McpBrokerConfig) => McpBrokerConfig,
+): void {
+  brokerConfigFilter = filter
+}
+
 export function startBrokerSupervisor(config: McpBrokerConfig): void {
-  activeSupervisor = new BrokerSupervisor(config)
+  const served = brokerConfigFilter(config)
+  activeSupervisor = new BrokerSupervisor(served)
   activeConfig = config
-  activeConfigJson = brokerConfigKey(config)
+  activeConfigJson = brokerConfigKey(served)
   activeSupervisor.start()
 }
 
@@ -814,12 +842,30 @@ function serialized(run: () => Promise<boolean>): Promise<boolean> {
  *  (the caller should ask the running server to reload). Calls run one at a
  *  time, so the most recent config always wins. */
 export function reconfigureBroker(config: McpBrokerConfig): Promise<boolean> {
+  return reconfigureBrokerAfter(() => Promise.resolve(config))
+}
+
+/**
+ * `reconfigureBroker` with a config that `prepare` produces once the
+ * changes queued before it are done, in the same queue, so a caller waiting
+ * for the broker (`waitForBrokerReady`) waits for this one too.
+ */
+export function reconfigureBrokerAfter(
+  prepare: () => Promise<McpBrokerConfig>,
+): Promise<boolean> {
   return serialized(async () => {
-    const previous = activeSupervisor
+    if (!activeSupervisor) return false
+    const config = await prepare()
+    // Read after `prepare`: a shutdown meanwhile leaves nothing to change.
+    const previous = activeSupervisor as BrokerSupervisor | undefined
     if (!previous) return false
-    const key = brokerConfigKey(config)
-    if (key === activeConfigJson) return true
-    if (await previous.update(config)) {
+    const served = brokerConfigFilter(config)
+    const key = brokerConfigKey(served)
+    if (key === activeConfigJson) {
+      activeConfig = config
+      return true
+    }
+    if (await previous.update(served)) {
       // Calls are serialized through `reconfiguring`, so nothing raced us.
       // eslint-disable-next-line require-atomic-updates
       activeConfigJson = key

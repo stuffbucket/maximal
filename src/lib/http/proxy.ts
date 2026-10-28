@@ -2,8 +2,32 @@ import consola from "consola"
 import { getProxyForUrl } from "proxy-from-env"
 import { Agent, ProxyAgent, setGlobalDispatcher, type Dispatcher } from "undici"
 
+const LOOPBACK_HOSTS = ["127.0.0.1", "localhost", "::1"]
+
+/**
+ * Add the loopback hosts to NO_PROXY (and no_proxy). Bun's fetch reads
+ * HTTP_PROXY itself and sends even a 127.0.0.1 request through it, and a
+ * proxy can't reach this machine's loopback, where the MCP broker listens.
+ */
+export function keepLoopbackOffProxy(
+  env: Record<string, string | undefined> = process.env,
+): void {
+  const current = (env.NO_PROXY ?? env.no_proxy ?? "")
+    .split(",")
+    .map((host) => host.trim())
+    .filter(Boolean)
+  const missing = LOOPBACK_HOSTS.filter((host) => !current.includes(host))
+  if (missing.length === 0) return
+  const value = [...current, ...missing].join(",")
+  env.NO_PROXY = value
+  env.no_proxy = value
+}
+
 export function initProxyFromEnv(): void {
-  if (typeof Bun !== "undefined") return
+  if (typeof Bun !== "undefined") {
+    keepLoopbackOffProxy()
+    return
+  }
 
   try {
     const direct = new Agent()

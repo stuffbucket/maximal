@@ -184,6 +184,10 @@ export const PanelBrokerRecovering = panel({ scenario: "mcp-recovering" });
 export const PanelBrokerStuck = panel({ scenario: "mcp-stuck" });
 /** Can't run at all: explain, no button. */
 export const PanelBrokerMissing = panel({ scenario: "mcp-not-installed" });
+/** Windows wouldn't contain the servers, so none started: explain, offer a restart. */
+export const PanelContainmentUnavailable = panel({ scenario: "mcp-containment-unavailable" });
+/** Windows: a long server path wraps, and Claude Code says to turn it on in Apps. */
+export const PanelWindows = panel({ scenario: "mcp-windows" });
 /** Nothing added yet; Work IQ is installed, so it's offered to add. */
 export const PanelServerFound = panel({ scenario: "mcp-found" });
 /** Nothing added yet; Work IQ isn't installed: copy the install command; the card notices the install. */

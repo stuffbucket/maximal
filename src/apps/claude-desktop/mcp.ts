@@ -14,6 +14,7 @@
 
 import consola from "consola"
 import fs from "node:fs"
+import os from "node:os"
 import path from "node:path"
 
 import type {
@@ -50,6 +51,19 @@ export interface ClaudeDesktopMcpOptions {
   available?: () => Promise<boolean>
   /** Whether another provider's gateway profile is applied in Desktop. */
   otherProviderApplied?: () => boolean
+  /** Where to look for the regular Claude Desktop config; see
+   *  `regularClaudeDesktopConfigPaths`. */
+  regularConfig?: RegularConfigLocation
+}
+
+/** What locates the regular Claude Desktop config: the platform, and on
+ *  Windows the `APPDATA` and `LOCALAPPDATA` folders. Each defaults to this
+ *  machine's; tests pass their own, so they never read the real user's. */
+export interface RegularConfigLocation {
+  home?: string
+  platform?: NodeJS.Platform
+  appData?: string
+  localAppData?: string
 }
 
 /** Ours only when it runs the broker adapter against this endpoint's
@@ -87,17 +101,49 @@ function buildEntry(entry: McpClientEntry, brokerPath: string): McpServerEntry {
 }
 
 export function claudeDesktopConfigPath(home?: string): string {
-  return path.join(getClaude3pDir(home), "claude_desktop_config.json")
+  return path.join(getClaude3pDir(home), CONFIG_FILE)
 }
 
-/** The regular (first-party) Claude Desktop config, a sibling of the
- *  Claude-3p directory. Read only, to find servers the user set up there. */
-function regularClaudeDesktopConfigPath(home?: string): string {
-  return path.join(
-    path.dirname(getClaude3pDir(home)),
-    "Claude",
-    "claude_desktop_config.json",
-  )
+const CONFIG_FILE = "claude_desktop_config.json"
+
+/**
+ * Where the regular (first-party) Claude Desktop config can be, in the order
+ * to look. Read only, to find servers the user set up there. On macOS it is
+ * a sibling of the Claude-3p directory. On Windows it is in `%APPDATA%`
+ * (Claude-3p is in `%LOCALAPPDATA%`), or, for the Microsoft Store (MSIX)
+ * app, in its package's redirected copy of `%APPDATA%`:
+ * `%LOCALAPPDATA%\Packages\Claude_<publisher id>\LocalCache\Roaming\Claude`.
+ */
+export function regularClaudeDesktopConfigPaths({
+  home,
+  platform = process.platform,
+  appData = process.env.APPDATA,
+  localAppData = process.env.LOCALAPPDATA,
+}: RegularConfigLocation = {}): Array<string> {
+  if (platform !== "win32") {
+    return [
+      path.join(path.dirname(getClaude3pDir(home)), "Claude", CONFIG_FILE),
+    ]
+  }
+  const userHome = home ?? os.homedir()
+  const roaming = appData ?? path.join(userHome, "AppData", "Roaming")
+  const local = localAppData ?? path.join(userHome, "AppData", "Local")
+  const packages = path.join(local, "Packages")
+  let storeApps: Array<string> = []
+  try {
+    storeApps = fs
+      .readdirSync(packages)
+      .filter((name) => name.startsWith("Claude_"))
+      .sort()
+  } catch {
+    // No Packages folder: no Store apps.
+  }
+  return [
+    path.join(roaming, "Claude", CONFIG_FILE),
+    ...storeApps.map((name) =>
+      path.join(packages, name, "LocalCache", "Roaming", "Claude", CONFIG_FILE),
+    ),
+  ]
 }
 
 function serversIn(file: string): Record<string, unknown> {
@@ -148,12 +194,18 @@ export function createClaudeDesktopMcp(
       // Never adopt Maximal's own adapter entry, owned or not.
       const notOurs = (value: unknown): unknown =>
         isOwnedMcpEntry(value, { id }) ? undefined : value
-      return parseStdioEntry(
-        notOurs(serversIn(claudeDesktopConfigPath(options.home))[id])
-          ?? notOurs(
-            serversIn(regularClaudeDesktopConfigPath(options.home))[id],
-          ),
-      )
+      const files = [
+        claudeDesktopConfigPath(options.home),
+        ...regularClaudeDesktopConfigPaths({
+          home: options.home,
+          ...options.regularConfig,
+        }),
+      ]
+      for (const file of files) {
+        const entry = notOurs(serversIn(file)[id])
+        if (entry !== undefined) return parseStdioEntry(entry)
+      }
+      return parseStdioEntry(undefined)
     },
   }
 }

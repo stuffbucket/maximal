@@ -23,6 +23,12 @@ you confirm it in a dialog that names the command.
 3. **Ready**, or **Your organization needs to approve Work IQ**: see
    [Signed in, but it still doesn't work](#signed-in-but-it-still-doesnt-work).
 
+Maximal doesn't start Work IQ until the first two steps are done, even while
+it's turned on. Until then your apps can't use it yet: Claude Code reports it
+as failed, and the adapter Claude Desktop runs gets "setup needed" from
+Maximal. If you accept the terms or sign in from Terminal instead, Maximal
+notices the next time Settings shows the card.
+
 ### On macOS
 
 The sign-in dialog offers **Use browser sign-in**. Checking it runs
@@ -40,6 +46,19 @@ macOS may ask for your Mac password so Work IQ can save its sign-in to your
 keychain. Choose **Always Allow**. **Allow** works once, so you would be asked
 again each time Work IQ starts.
 
+### On Windows
+
+Signing in opens Windows' own Microsoft account window.
+
+On a Windows PC with an Arm processor, Maximal runs Work IQ's Arm build
+(`bin\win-arm64\workiq.exe` in the npm package), even though Maximal itself is
+an x64 app that Windows runs under emulation. Work IQ's x64 build under
+emulation couldn't sign in when we tested it: its sign-in window crashed
+(`msalruntime.dll` in a `DllHost` process), and Work IQ then reported
+`0x80049d59` and offered none of its Microsoft 365 tools. That is a problem in
+Work IQ, not in Maximal. Maximal falls back to the x64 build only when the
+package has no Arm build.
+
 ## Questions
 
 ### Where does Maximal put Work IQ for Claude Desktop?
@@ -48,8 +67,7 @@ In Claude Desktop's third-party config, as an `mcpServers` entry named after
 the endpoint (`workiq`):
 
 - macOS: `~/Library/Application Support/Claude-3p/claude_desktop_config.json`
-- Windows: `%LOCALAPPDATA%\Claude-3p\claude_desktop_config.json` (MCP servers
-  don't run on Windows yet)
+- Windows: `%LOCALAPPDATA%\Claude-3p\claude_desktop_config.json`
 
 The entry runs Maximal's `maximal-mcp-broker stdio-adapter`, which connects to
 `http://127.0.0.1:<port>/mcp/workiq`. Claude Desktop reads this file only when

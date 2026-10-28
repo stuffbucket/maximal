@@ -40,6 +40,7 @@ import {
   getBrokerUpstream,
   reconfigureBroker,
 } from "~/lib/mcp-broker/supervisor"
+import { isHeldBackFromBroker } from "~/lib/mcp-broker/workiq"
 
 const MAX_CONCURRENT_REQUESTS = 32
 const DEFAULT_BODY_BYTES = 1024 * 1024
@@ -80,6 +81,8 @@ interface McpRoutesOptions {
   fetchUpstream?: typeof fetch
   /** Runs before a request that opens a session on a catalog endpoint. */
   beforeNewSession?: () => Promise<void>
+  /** Whether an endpoint that is on is held back from the broker. */
+  heldBack?: (server: McpServerConfig) => boolean
 }
 
 /** Point catalog endpoints at their newest install, then hand any change
@@ -131,6 +134,7 @@ export function createMcpRoutes(options: McpRoutesOptions = {}): Hono {
   const getRequestIp = options.getRequestIp ?? defaultGetRequestIp
   const fetchUpstream = options.fetchUpstream ?? fetch
   const beforeNewSession = options.beforeNewSession ?? useNewestInstalls
+  const heldBack = options.heldBack ?? isHeldBackFromBroker
   // Same decision as the main-port middleware, minus its bypass lists.
   const mainPortAuth: MiddlewareHandler = createAuthMiddleware({
     allowUnauthenticatedPaths: [],
@@ -165,6 +169,12 @@ export function createMcpRoutes(options: McpRoutesOptions = {}): Hono {
     if (opensSession(c) && findEndpoint(id)?.catalog !== undefined) {
       // Best effort: a failed check still serves the install already known.
       await beforeNewSession().catch(() => undefined)
+    }
+    // On, but not handed to the broker until its setup is done (Work IQ's
+    // terms and sign-in in Settings).
+    const served = findEndpoint(id)
+    if (served && heldBack(served)) {
+      return jsonError(c, 503, "MCP_ENDPOINT_SETUP_NEEDED")
     }
     const upstream = getUpstream()
     if (!upstream) return jsonError(c, 503, "MCP_BROKER_UNAVAILABLE")

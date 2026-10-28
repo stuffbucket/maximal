@@ -17,9 +17,29 @@ import {
 import { installSanitizedDependencyDiagnostics } from "./diagnostics.ts"
 import { MaximalElicitations } from "./maximal-elicitations.ts"
 import { runStdioAdapter } from "./stdio-adapter.ts"
+import {
+  CONTAINMENT_EXIT_CODE,
+  ContainmentError,
+  containInKillOnCloseJob,
+  describeContainmentError,
+} from "./windows-job.ts"
 
 const BINARY_VERSION = "0.0.0"
+
+const USAGE = `Usage:
+  maximal-mcp-broker serve --generation <id> [--parent-pid <pid>]
+      Run the MCP broker for Maximal, which starts it. Control frames on
+      stdin and stdout; not for use by hand.
+  maximal-mcp-broker stdio-adapter --url http://127.0.0.1:<port>/mcp/<id>
+      Connect a stdio MCP client to one of Maximal's MCP endpoints. Set
+      MAXIMAL_MCP_API_KEY when the endpoint needs a key.
+  maximal-mcp-broker --version
+  maximal-mcp-broker --help
+`
 const MESSAGE_DEADLINE_MS = 10_000
+/** How long a broker told to stop by a signal, or whose parent is gone,
+ *  waits for its servers to close before it exits anyway. */
+const TERMINATE_GRACE_MS = 3_000
 
 interface ServeOptions {
   generation: string
@@ -40,9 +60,7 @@ const requiredValue = (
 
 const parseAdapterUrl = (args: Array<string>): string => {
   if (args.length !== 2 || args[0] !== "--url" || !args[1]) {
-    throw new Error(
-      "stdio-adapter requires --url <http://127.0.0.1:<port>/mcp/<id>>",
-    )
+    throw new UsageError()
   }
   return args[1]
 }
@@ -123,14 +141,51 @@ class ControlWriter {
   }
 }
 
+/** Proxy settings Bun's fetch reads from the environment. */
+const PROXY_VARIABLES = [
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "ALL_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "all_proxy",
+]
+
+/** An error whose message is already a code, like ADAPTER_ENDPOINT_INVALID. */
+const CODE_MESSAGE = /^[A-Z][A-Z0-9_]*(?: [a-z]+=\S+)*$/u
+
+/** The HTTP status an MCP client error (SdkHttpError) carries, if any. */
+const httpStatus = (error: unknown, depth = 0): number | undefined => {
+  if (typeof error !== "object" || error === null || depth > 3) {
+    return undefined
+  }
+  const { status, cause } = error as { status?: unknown; cause?: unknown }
+  return typeof status === "number" && status >= 100 && status <= 599 ?
+      status
+    : httpStatus(cause, depth + 1)
+}
+
 const errorCode = (error: unknown): string => {
+  if (error instanceof ContainmentError) {
+    return describeContainmentError(error)
+  }
   if (error instanceof BrokerStartupError) {
     return error.code
   }
   if (error instanceof ControlProtocolError) {
     return error.code
   }
+  if (error instanceof Error && CODE_MESSAGE.test(error.message)) {
+    return error.message
+  }
   return "BROKER_INTERNAL_ERROR"
+}
+
+class UsageError extends Error {
+  constructor() {
+    super("USAGE")
+    this.name = "UsageError"
+  }
 }
 
 const serve = async (options: ServeOptions): Promise<void> => {
@@ -157,7 +212,20 @@ const serve = async (options: ServeOptions): Promise<void> => {
     running = undefined
   }
 
+  // A session's open event stream can hold the HTTP server's close
+  // indefinitely, so a broker on its way out exits anyway once the grace
+  // period is up. On Windows, exiting ends the Job Object and every server
+  // with it.
+  let forcedExit: ReturnType<typeof setTimeout> | undefined
+  const armForcedExit = () => {
+    forcedExit ??= setTimeout(
+      () => process.exit(process.exitCode ?? 0),
+      TERMINATE_GRACE_MS,
+    )
+    forcedExit.unref()
+  }
   const terminate = () => {
+    armForcedExit()
     void close().finally(() => {
       process.exitCode = 0
       process.stdin.destroy()
@@ -172,6 +240,8 @@ const serve = async (options: ServeOptions): Promise<void> => {
       try {
         process.kill(options.parentPid as number, 0)
       } catch {
+        if (parentWatchdog) clearInterval(parentWatchdog)
+        process.stderr.write("[maximal-mcp-broker] PARENT_EXITED\n")
         terminate()
       }
     }, 1_000)
@@ -298,6 +368,7 @@ const serve = async (options: ServeOptions): Promise<void> => {
         }
 
         if (envelope.operation === "shutdown") {
+          armForcedExit()
           await close()
           await writer.send({
             deadlineMs: Date.now() + MESSAGE_DEADLINE_MS,
@@ -319,35 +390,89 @@ const serve = async (options: ServeOptions): Promise<void> => {
     }
     process.off("SIGINT", terminate)
     process.off("SIGTERM", terminate)
+    // However serving ended (shutdown, stdin closed because the sidecar is
+    // gone, or an error), closing must not keep the broker running.
+    armForcedExit()
     await close()
   }
 }
 
 const main = async (): Promise<void> => {
   const [mode, ...args] = process.argv.slice(2)
+  if (mode === "--version" || mode === "-v" || mode === "version") {
+    process.stdout.write(
+      `maximal-mcp-broker ${BINARY_VERSION} (control protocol ${CONTROL_PROTOCOL_VERSION})\n`,
+    )
+    return
+  }
+  if (
+    mode === "--help"
+    || mode === "-h"
+    || mode === "help"
+    || args.includes("--help")
+    || args.includes("-h")
+  ) {
+    process.stdout.write(USAGE)
+    return
+  }
   if (mode === "serve") {
+    // On Windows, before anything can start a process: everything this
+    // broker starts must end when it does.
+    containInKillOnCloseJob()
     const restoreDiagnostics = installSanitizedDependencyDiagnostics()
     try {
       await serve(parseServeOptions(args))
     } finally {
       restoreDiagnostics()
     }
-    return
+    // Done serving. A server that didn't exit when it was closed can still
+    // hold pipes to this process and keep it running: on Windows one started
+    // through cmd.exe outlives the cmd.exe that was ended. Exit instead,
+    // which on Windows also ends the Job Object and that server with it.
+    process.exit(process.exitCode ?? 0)
   }
   if (mode === "stdio-adapter") {
+    const url = parseAdapterUrl(args)
+    // The adapter only ever talks to Maximal on loopback. Bun's fetch sends
+    // even a 127.0.0.1 request through HTTP_PROXY and the like, which the
+    // client's environment may set (Claude Desktop passes its own on), and
+    // a proxy can't reach this machine's loopback.
+    for (const name of PROXY_VARIABLES) Reflect.deleteProperty(process.env, name)
+    process.env.NO_PROXY = "127.0.0.1,localhost,::1"
+    process.env.no_proxy = process.env.NO_PROXY
     const restoreDiagnostics = installSanitizedDependencyDiagnostics()
     try {
-      await runStdioAdapter({ url: parseAdapterUrl(args) })
+      await runStdioAdapter({ url })
+    } catch (error) {
+      if (error instanceof Error && CODE_MESSAGE.test(error.message)) {
+        throw error
+      }
+      // Couldn't reach the endpoint, or it refused (401 without a key).
+      const status = httpStatus(error)
+      throw new Error(
+        `ADAPTER_CONNECT_FAILED${status === undefined ? "" : ` status=${status}`}`,
+        { cause: error },
+      )
     } finally {
       restoreDiagnostics()
     }
     return
   }
-  throw new Error("expected serve or stdio-adapter mode")
+  throw new UsageError()
 }
 
 void main().catch((error: unknown) => {
+  if (error instanceof UsageError) {
+    process.stderr.write(USAGE)
+  }
   const code = errorCode(error)
-  process.stderr.write(`[maximal-mcp-broker] ${code}\n`)
-  process.exitCode = 1
+  let status = 1
+  if (error instanceof ContainmentError) status = CONTAINMENT_EXIT_CODE
+  else if (error instanceof UsageError) status = 2
+  process.exitCode = status
+  // Exit once the line is out: servers a failed `serve` started could
+  // otherwise keep this process running.
+  process.stderr.write(`[maximal-mcp-broker] ${code}\n`, () =>
+    process.exit(status),
+  )
 })

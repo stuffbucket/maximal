@@ -167,8 +167,9 @@ export interface McpClientOffer {
   /** Maximal's integration for this client is on, so it can be offered. */
   available: boolean
   /** When not available, a more specific reason than "integration off":
-   *  Claude Desktop has another provider's gateway profile applied. */
-  unavailableReason?: "other-provider-profile"
+   *  Claude Desktop has another provider's gateway profile applied, or
+   *  Maximal found no Claude Code program it can run. */
+  unavailableReason?: "other-provider-profile" | "cli-missing"
   /** Maximal currently has this endpoint written into the client. */
   configured: boolean
 }
@@ -217,7 +218,7 @@ interface WorkIqActionResponse {
  *  src/lib/config/settings-types.ts for what each state means). */
 export interface McpBrokerHealth {
   state: "off" | "starting" | "running" | "recovering" | "stuck" | "unavailable"
-  problem: "not-installed" | "unsupported-platform" | null
+  problem: "not-installed" | "containment-unavailable" | null
 }
 
 /** A known MCP server Maximal looked for that isn't an endpoint yet. */
@@ -259,7 +260,7 @@ export interface McpEndpointToggleResponse {
   updated: Array<{ client: McpClientId; name: string }>
   /** Where the broker got to before the apps were updated (see
    *  McpBrokerReadiness in src/lib/config/settings-types.ts). */
-  broker: "ready" | "starting" | "failed" | "off"
+  broker: "ready" | "starting" | "failed" | "off" | "setup-needed"
   /** The app whose own entry for this server the endpoint now runs. */
   adoptedFrom?: string
   /** Environment names from that entry that were not copied. */

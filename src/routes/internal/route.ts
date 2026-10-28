@@ -29,7 +29,7 @@ import { syncAllMcpClients } from "~/apps/mcp"
 import { defaultGetRequestIp, isLoopbackAddress } from "~/lib/auth/request-auth"
 import { reloadConfig } from "~/lib/config/config"
 import { requestContext } from "~/lib/http/request-context"
-import { reconfigureBroker } from "~/lib/mcp-broker/supervisor"
+import { reconfigureBrokerAfterSetupCheck } from "~/lib/mcp-broker/workiq"
 
 interface InternalRoutesOptions {
   /** Injectable for tests so we don't actually exit the runner. */
@@ -42,7 +42,7 @@ interface InternalRoutesOptions {
 
 async function reloadFromDisk(): Promise<void> {
   const config = reloadConfig()
-  await reconfigureBroker(config.mcpBroker ?? {})
+  await reconfigureBrokerAfterSetupCheck(config.mcpBroker ?? {})
   // Rewrite client entries from this process, which knows the port it
   // actually listens on.
   await syncAllMcpClients()
