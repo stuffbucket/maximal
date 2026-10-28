@@ -817,6 +817,34 @@
               </div>
             </div>
 
+            <!-- Shown by main.ts when an apt install (the Debian/Ubuntu
+                 packages) has an update: the command to copy, since Maximal
+                 never runs apt itself, and the Linux guide. The wrapper
+                 carries [hidden] because .app-card__install sets display. -->
+            <div data-update-apt hidden>
+              <div class="app-card__install">
+                <p class="app-card__hint" data-update-apt-hint></p>
+                <div class="app-card__cmd">
+                  <code class="app-card__cmd-text mono" data-update-apt-command></code>
+                  <div class="app-card__cmd-actions">
+                    <button
+                      type="button"
+                      class="btn btn--primary btn--sm"
+                      data-action="copy-update-command"
+                      data-i18n="apps-copy-command"
+                    ></button>
+                  </div>
+                </div>
+                <p class="app-card__hint">
+                  <a
+                    href="https://github.com/stuffbucket/maximal/blob/main/docs/linux.md#update"
+                    data-update-apt-guide
+                    data-i18n="diagnostics-update-apt-guide"
+                  ></a>
+                </p>
+              </div>
+            </div>
+
             <div data-diagnostics-root aria-busy="true">
               <dl class="kv kv--bare">
                 <div class="kv__row">

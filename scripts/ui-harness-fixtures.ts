@@ -698,7 +698,7 @@ export const SCENARIOS = {
       current: "0.4.36",
       latest: "0.4.40",
       update_available: true,
-      url: "https://mxml.sh/linux/#update",
+      url: "https://github.com/stuffbucket/maximal/blob/main/docs/linux.md#update",
       update_command:
         "sudo apt update && sudo apt install --only-upgrade maximal maximal-desktop",
       enabled: true,

@@ -509,7 +509,9 @@ describe("getUpdateStatus — how an install updates", () => {
     expect(status.update_command).toBe(
       "sudo apt update && sudo apt install --only-upgrade maximal",
     )
-    expect(status.url).toBe("https://mxml.sh/linux/#update")
+    expect(status.url).toBe(
+      "https://github.com/stuffbucket/maximal/blob/main/docs/linux.md#update",
+    )
   })
 
   test("an apt install with the desktop app upgrades both packages", async () => {

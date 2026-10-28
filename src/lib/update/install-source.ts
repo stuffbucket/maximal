@@ -18,8 +18,10 @@ export const APT_BINARY = "/usr/bin/maximal"
 export const APT_MARKER = "/usr/lib/maximal/installed-by-apt"
 export const APT_DESKTOP_MARKER = "/usr/lib/maximal/desktop-installed-by-apt"
 
-/** The Linux guide's update section, rendered from docs/linux.md. */
-export const LINUX_UPDATE_URL = "https://mxml.sh/linux/#update"
+/** The Linux guide's update section (docs/linux.md). A link for people;
+ *  the update check itself never contacts github.com. */
+export const LINUX_UPDATE_URL =
+  "https://github.com/stuffbucket/maximal/blob/main/docs/linux.md#update"
 
 export interface AptInstall {
   /** `maximal-desktop` is installed too, so it must be upgraded alongside. */
