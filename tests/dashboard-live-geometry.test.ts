@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test"
 
-import { borderPeriodS, tracePath } from "../shell/src/dashboard/live/geometry"
+import {
+  borderPeriodS,
+  shiftWindow,
+  tracePath,
+} from "../shell/src/dashboard/live/geometry"
 
 /** Every y coordinate in an SVG path's commands (M, L and C pairs). */
 function ys(d: string): Array<number> {
@@ -77,5 +81,45 @@ describe("borderPeriodS", () => {
 
   test("gets faster as flow rises", () => {
     expect(period(41_800)).toBeLessThan(period(5_000))
+  })
+})
+
+describe("shiftWindow", () => {
+  const shown = Array.from({ length: 15 }, (_, i) => i + 1) // 1..15
+  const target = Array.from({ length: 15 }, (_, i) => 100 + i) // 100..114
+
+  test("no shift keeps what is on screen", () => {
+    expect(shiftWindow(shown, target, 0)).toEqual(shown)
+  })
+
+  test("one minute drops the oldest value and takes the newest bucket", () => {
+    expect(shiftWindow(shown, target, 1)).toEqual([...shown.slice(1), 114])
+  })
+
+  test("a whole window's shift is just the new buckets", () => {
+    expect(shiftWindow(shown, target, 15)).toEqual(target)
+  })
+
+  test("a gap longer than the window is clamped to the new buckets", () => {
+    const next = shiftWindow(shown, target, 20)
+    expect(next).toEqual(target)
+    expect(next).toHaveLength(15)
+  })
+
+  test("a negative or non-finite shift keeps what is on screen", () => {
+    expect(shiftWindow(shown, target, -3)).toEqual(shown)
+    expect(shiftWindow(shown, target, Number.NaN)).toEqual(shown)
+  })
+
+  test("a long gap never lets NaN reach the shared max", () => {
+    // What card.ts does: glide from the shifted values to the target, then
+    // take one max over every value it draws.
+    const from = shiftWindow(shown, target, 20)
+    const halfway = target.map((v, i) => from[i] + (v - from[i]) * 0.5)
+    const max = halfway.reduce((m, v) => Math.max(m, v), 1)
+    expect(Number.isFinite(max)).toBe(true)
+    expect(halfway.every((v) => Number.isFinite(v))).toBe(true)
+    const { line } = tracePath(halfway, max, 280, 68)
+    expect(line).not.toContain("NaN")
   })
 })

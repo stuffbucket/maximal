@@ -94,9 +94,10 @@ label beside it says what:
   colors unless a chart with a legend ties each color to its category.
 - **Series** (live sessions): each live session's trace takes one of
   `--series-1` … `--series-6`, by first appearance, and keeps it until the
-  session goes cold; any beyond six draw in muted ink. The session table
-  is the legend (a swatch per row). The series share one lightness and
-  chroma so no line looks heavier, clear 3:1 on the card, and keep their
-  hues away from the status colors so a trace never reads as a state —
-  `bun scripts/check-series-contrast.ts` checks both.
+  session goes cold; any beyond six draw in neutral gray
+  (`--border-strong`). The session table is the legend (a swatch per
+  row). The series share one lightness and chroma so no line looks
+  heavier, and keep their hues away from the status colors so a trace
+  never reads as a state; they and the neutral gray clear 3:1 on the
+  card. `bun scripts/check-series-contrast.ts` checks all of it.
 - **Status colors are for state only**, never to tell categories apart.

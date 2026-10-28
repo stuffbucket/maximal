@@ -7,7 +7,7 @@
 // (one SeriesColors shared with the session table) and the selection.
 import type { SessionsResponse, SessionView } from "../../../../src/lib/token-usage/sessions-schema";
 import { resolveLocale, t } from "../../i18n";
-import { borderPeriodS, tracePath } from "./geometry";
+import { borderPeriodS, shiftWindow, tracePath } from "./geometry";
 
 export interface LiveCard {
   update(view: SessionsResponse, colors: Map<string, number | null>, selected: string | null): void;
@@ -144,7 +144,9 @@ export function mountLiveCard(root: HTMLElement): LiveCard {
     const box = plotBox();
     if (box.width <= 0 || box.height <= 0) return;
     let max = 1;
-    for (const tr of byId.values()) for (const v of tr.shown) max = Math.max(max, v);
+    for (const tr of byId.values()) {
+      for (const v of tr.shown) if (Number.isFinite(v)) max = Math.max(max, v);
+    }
     for (const [id, tr] of byId) {
       const path = tracePath(tr.shown, max, box.width, box.height);
       tr.line.setAttribute("d", path.line);
@@ -252,15 +254,14 @@ export function mountLiveCard(root: HTMLElement): LiveCard {
           tr.shown = target;
         } else if (lastStart !== tr.lastStart && tr.lastStart > 0) {
           // A minute rolled over: line the old values up with the new buckets.
-          const shift = Math.max(0, Math.round((lastStart - tr.lastStart) / MINUTE_MS));
-          tr.shown = [...tr.shown.slice(shift), ...target.slice(WINDOW_MINUTES - shift)].slice(-WINDOW_MINUTES);
+          tr.shown = shiftWindow(tr.shown, target, (lastStart - tr.lastStart) / MINUTE_MS);
         }
         tr.from = tr.shown;
         tr.to = target;
         tr.lastStart = lastStart;
 
         const slot = colors.get(session.id) ?? null;
-        tr.g.style.setProperty("--trace-color", slot === null ? "var(--text-muted)" : `var(--series-${slot})`);
+        tr.g.style.setProperty("--trace-color", slot === null ? "var(--border-strong)" : `var(--series-${slot})`);
         tr.g.classList.toggle("live__trace--neutral", slot === null);
         tr.g.classList.toggle("live__trace--selected", session.id === selected);
         tr.g.classList.toggle("live__trace--dim", selected !== null && live.has(selected) && session.id !== selected);

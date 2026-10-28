@@ -96,6 +96,20 @@ export function tracePath(
   };
 }
 
+/**
+ * Line up the values on screen with the next poll's buckets after the window
+ * moved on by `shift` minutes: drop the oldest `shift` values and take the
+ * newest `shift` from `target`. The shift is clamped to the window, so a long
+ * gap (a sleeping laptop, a hidden tab) gives just `target`, never a short or
+ * NaN-padded array. Always returns `target.length` values.
+ */
+export function shiftWindow(shown: Array<number>, target: Array<number>, shift: number): Array<number> {
+  const n = target.length;
+  if (shown.length !== n) return [...target];
+  const k = Number.isFinite(shift) ? clamp(Math.round(shift), 0, n) : 0;
+  return [...shown.slice(k), ...target.slice(n - k)];
+}
+
 const SLOWEST_S = 30;
 const FASTEST_S = 4;
 /** Tokens/min where the log scale's knee sits, and where it reaches 4 s. */

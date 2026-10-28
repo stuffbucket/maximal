@@ -667,8 +667,10 @@ html[data-embedded="true"] .lang-picker {
    Two columns from the md breakpoint: quotas on the left (the metered cards,
    then "Chat and completions", which stays in its column when open), the live
    card on the right spanning both. Each column's heading shares the first
-   row (subgrid), so the live card lines up with the quota cards and grows
-   with them. Narrower, everything stacks with the live card first. */
+   row (subgrid), so the live card's top lines up with the quota cards'. The
+   second row takes the taller column: the live card is at least its plot's
+   minimum, and grows with the quotas when they are taller. Narrower,
+   everything stacks with the live card first. */
 .dashboard-bento {
   display: flex;
   flex-direction: column;
@@ -697,6 +699,11 @@ html[data-embedded="true"] .lang-picker {
     grid-template-rows: auto 1fr;
     gap: 0 var(--space-5);
   }
+  /* The row is as tall as the taller column; the quota cards keep their own
+     height at the top of it rather than stretching. */
+  .dashboard-bento__quota > .dashboard-bento__body {
+    align-self: start;
+  }
   .dashboard-bento:not(.dashboard-bento--live-only) > .dashboard-bento__col {
     display: grid;
     grid-row: span 2;
@@ -708,8 +715,9 @@ html[data-embedded="true"] .lang-picker {
 /* ---- Live card ----
    Total tokens/min over one trace per live session (the last 15 minutes).
    Series colors come from --series-n, with the session table as the legend;
-   sessions past the sixth draw in muted ink. Only one trace gets the soft
-   fill (the selected one, else the busiest), so fills never stack.
+   sessions past the sixth draw in neutral gray (--border-strong, 3:1 on the
+   card). Only one trace gets the soft fill (the selected one, else the
+   busiest), so fills never stack.
 
    The hairline border is a slow conic sweep of accent over the neutral
    border; its speed follows token flow (card.ts sets a playback rate on the
@@ -766,7 +774,8 @@ html[data-embedded="true"] .lang-picker {
   gap: var(--space-2);
   min-width: 0;
 }
-/* The totals' hero figure, set solid so the plot keeps its height. */
+/* The totals' hero figure, set solid so it sits on the unit's baseline
+   without an extra line of leading above the plot. */
 .live__value {
   line-height: 1;
   font-variant-numeric: tabular-nums;
@@ -786,8 +795,9 @@ html[data-embedded="true"] .lang-picker {
   flex: 1;
   min-height: calc(var(--space-8) * 2);
 }
-/* Out of flow, so the plot takes the space the quota column leaves it and
-   the chart never pushes the card taller. */
+/* Out of flow: the plot's min-height (about 120px) sets the card's floor,
+   the plot grows into any extra height the row has (an open "Chat and
+   completions"), and the chart's own size never feeds back into layout. */
 .live__chart {
   position: absolute;
   inset: 0;
@@ -832,10 +842,6 @@ html[data-embedded="true"] .lang-picker {
   pointer-events: all;
   cursor: pointer;
 }
-.live__trace--neutral .live__line,
-.live__trace--neutral .live__dot-mark {
-  opacity: 0.6;
-}
 .live__trace--dim {
   opacity: 0.3;
 }
@@ -870,13 +876,6 @@ html[data-embedded="true"] .lang-picker {
   }
   to {
     box-shadow: 0 0 0 var(--space-2) transparent;
-  }
-}
-@media (min-width: 768px) {
-  /* Beside the quotas the card takes the column's height; the plot gets
-     what the header and footer leave. */
-  .dashboard-bento:not(.dashboard-bento--live-only) .live__plot {
-    min-height: var(--space-6);
   }
 }
 
