@@ -38,7 +38,8 @@ The Dashboard's live card has one continuous animation: its hairline
 border, a conic sweep of `--accent` over `--border-subtle`, turning
 through the registered angle `--live-angle` (`live-border-spin`). It
 carries information: its speed follows token flow across the whole
-system.
+system (tokens not read from a cache in the last minute, plus an
+estimate of what's streaming now).
 
 - No flow: stopped (`animation-play-state: paused`).
 - A trickle: about 30 s per turn. From 100,000 tokens/min: 4 s per turn.
