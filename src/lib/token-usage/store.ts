@@ -1,5 +1,6 @@
 import consola from "consola"
 import path from "node:path"
+import { z } from "zod"
 
 import { PATHS } from "~/lib/platform/paths"
 import { registerProcessCleanup } from "~/lib/platform/process-cleanup"
@@ -13,6 +14,14 @@ import {
 
 import type { UsageClient } from "./client"
 import type { WindowSource } from "./request-meta"
+
+import {
+  addToRecentMinutes,
+  emptyRecentMinutes,
+  type MinuteBucket,
+  MINUTE_MS,
+} from "./minutes"
+import { SessionClient, SessionWindowSource } from "./sessions-schema"
 
 export type TokenUsageSource = "copilot" | "provider"
 
@@ -120,21 +129,7 @@ export interface TokenUsageSummary {
   /** Tokens per minute for the last RECENT_MINUTES minutes, oldest first,
    *  whatever the period — the Dashboard's "tokens are coming in" rate and
    *  sparkline. The last bucket is the current, partial minute. */
-  recent_minutes: Array<{ start_ms: number; total_tokens: number }>
-}
-
-const MINUTE_MS = 60_000
-const RECENT_MINUTES = 15
-
-/** RECENT_MINUTES zeroed buckets ending with the current minute. */
-function emptyRecentMinutes(
-  nowMs: number,
-): TokenUsageSummary["recent_minutes"] {
-  const current = Math.floor(nowMs / MINUTE_MS) * MINUTE_MS
-  return Array.from({ length: RECENT_MINUTES }, (_, i) => ({
-    start_ms: current - (RECENT_MINUTES - 1 - i) * MINUTE_MS,
-    total_tokens: 0,
-  }))
+  recent_minutes: Array<MinuteBucket>
 }
 
 export interface TokenUsageEventsPage {
@@ -660,8 +655,11 @@ export async function getTokenUsageSummary(
     )
     .all(recent[0].start_ms) as Array<Record<string, unknown>>
   for (const row of recentRows) {
-    const bucket = recent.find((b) => b.start_ms === Number(row.minute_ms))
-    if (bucket) bucket.total_tokens = Number(row.total_tokens) || 0
+    addToRecentMinutes(
+      recent,
+      Number(row.minute_ms),
+      Number(row.total_tokens) || 0,
+    )
   }
 
   return {
@@ -689,6 +687,70 @@ export async function hasAnyTokenUsage(): Promise<boolean> {
   const db = await getDb()
   const row = db.prepare("SELECT 1 FROM token_usage_events LIMIT 1").get()
   return row !== undefined && row !== null
+}
+
+const SessionRowSchema = z.object({
+  id: z.number(),
+  session_id: z.string(),
+  // A value written by a newer or older build reads as the catch-all.
+  client: SessionClient.catch("other"),
+  client_label: z.string().nullable(),
+  model: z.string(),
+  created_at_ms: z.number(),
+  input_tokens: z.number(),
+  output_tokens: z.number(),
+  cache_read_input_tokens: z.number(),
+  cache_creation_input_tokens: z.number(),
+  total_tokens: z.number(),
+  cache_ttl_s: z.number(),
+  cache_ttl_requested: z.number(),
+  is_compact: z.number(),
+  context_window_tokens: z.number().nullable(),
+  context_ceiling_tokens: z.number().nullable(),
+  compact_at_tokens: z.number().nullable(),
+  window_source: SessionWindowSource.nullable().catch(null),
+})
+
+/** One request, with the columns the sessions view reads. */
+export type SessionRow = z.infer<typeof SessionRowSchema>
+
+/** Every request since `sinceMs`, oldest first; [] when storage is off. */
+export async function getSessionRows(
+  sinceMs: number,
+): Promise<Array<SessionRow>> {
+  if (!isTokenUsageStorageEnabled()) return []
+
+  await flushTokenUsageEvents()
+  const db = await getDb()
+  const rows = db
+    .prepare(
+      `
+    SELECT
+      id,
+      session_id,
+      client,
+      client_label,
+      model,
+      created_at_ms,
+      input_tokens,
+      output_tokens,
+      cache_read_input_tokens,
+      cache_creation_input_tokens,
+      total_tokens,
+      cache_ttl_s,
+      cache_ttl_requested,
+      is_compact,
+      context_window_tokens,
+      context_ceiling_tokens,
+      compact_at_tokens,
+      window_source
+    FROM token_usage_events
+    WHERE created_at_ms >= ?
+    ORDER BY created_at_ms ASC, id ASC
+  `,
+    )
+    .all(sinceMs)
+  return z.array(SessionRowSchema).parse(rows)
 }
 
 export async function getTokenUsageEventsPage(input: {

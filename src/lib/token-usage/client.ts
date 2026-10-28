@@ -1,9 +1,13 @@
+import type { z } from "zod"
+
 import { HELPER_LABEL } from "~/apps/claude-code/config"
 import { DESKTOP_KEY_LABEL } from "~/apps/claude-desktop/config"
 import { CODEX_KEY_LABEL } from "~/apps/codex/config"
 import { classifyClaudeClient } from "~/lib/http/claude-client"
 
-export type UsageClient = "claude-code" | "claude-desktop" | "codex" | "other"
+import type { SessionClient } from "./sessions-schema"
+
+export type UsageClient = z.infer<typeof SessionClient>
 
 /**
  * Which client sent a request. The API key label the integration provisioned

@@ -1,3 +1,5 @@
+import type { z } from "zod"
+
 import type { CodexModelInfo } from "~/apps/codex/models-catalog"
 import type { AnthropicMessagesPayload } from "~/lib/models/anthropic-types"
 import type { Model } from "~/services/copilot/get-models"
@@ -5,13 +7,10 @@ import type { Model } from "~/services/copilot/get-models"
 import { resolveResponsesCompactThreshold } from "~/routes/responses/utils"
 
 import type { UsageClient } from "./client"
+import type { SessionWindowSource } from "./sessions-schema"
 
 /** Where a request's context-window numbers came from. */
-export type WindowSource =
-  | "codex-catalog"
-  | "claude-1m"
-  | "models-endpoint"
-  | "model-listing"
+export type WindowSource = z.infer<typeof SessionWindowSource>
 
 /** The context window a request ran under. `null` means unknown. */
 export interface RequestContextWindow {

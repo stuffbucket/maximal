@@ -84,6 +84,7 @@ server.use(
       "/usage",
       "/token-usage",
       "/token-usage/events",
+      "/token-usage/sessions",
       // Shutdown endpoint is loopback-gated. The route handler itself
       // *also* enforces loopback (a remote caller with a valid API key
       // must NOT be able to evict the running instance), but listing
