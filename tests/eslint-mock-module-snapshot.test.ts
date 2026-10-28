@@ -13,7 +13,8 @@ import projectConfig from "../eslint.config.js"
 
 RuleTester.describe = describe
 RuleTester.it = test
-RuleTester.itOnly = test.only
+// No case uses `only`. Leave itOnly unset: reading `test.only` throws under
+// CI=true, which Bun sets in CI.
 
 // Parse with the project's own TypeScript parser so `as` casts are covered.
 const tsParser = (projectConfig as Array<Linter.Config>).find(
