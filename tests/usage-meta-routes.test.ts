@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import consola from "consola"
 import { Hono } from "hono"
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
 
 import { CODEX_KEY_LABEL } from "../src/apps/codex/config"
 import { getConfig, writeConfig } from "../src/lib/config/config"
@@ -9,6 +12,7 @@ import {
   type RequestUsageMeta,
 } from "../src/lib/http/request-context"
 import { traceIdMiddleware } from "../src/lib/http/trace"
+import { openSqliteDatabase } from "../src/lib/platform/sqlite"
 import { state } from "../src/lib/runtime-state/state"
 import { closeUsageStore } from "../src/lib/token-usage"
 import { completionRoutes } from "../src/routes/chat-completions/route"
@@ -355,6 +359,40 @@ describe("messages route usage metadata", () => {
       cacheTtlS: 300,
       cacheTtlRequested: false,
     })
+  })
+})
+
+describe("messages route persists the requested cache lifetime", () => {
+  let dir: string
+  let dbPath: string
+
+  beforeEach(async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "usage-meta-routes-"))
+    dbPath = path.join(dir, "usage.sqlite")
+    await closeUsageStore()
+    process.env[DB_PATH_ENV] = dbPath
+  })
+
+  afterEach(async () => {
+    await closeUsageStore()
+    fs.rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("a ttl 1h cache_control is stored as 3600 and requested", async () => {
+    stubFetch(claudeResult)
+
+    const response = await post("/v1/messages", messagesBody("claude-test"))
+    expect(response.status).toBe(200)
+
+    await closeUsageStore()
+    const db = await openSqliteDatabase(dbPath)
+    const rows = db
+      .prepare(
+        "SELECT cache_ttl_s, cache_ttl_requested FROM token_usage_events",
+      )
+      .all() as Array<{ cache_ttl_s: number; cache_ttl_requested: number }>
+    db.close?.()
+    expect(rows).toEqual([{ cache_ttl_s: 3600, cache_ttl_requested: 1 }])
   })
 })
 

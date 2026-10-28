@@ -11,6 +11,9 @@ import {
   type SqliteDatabase,
 } from "~/lib/platform/sqlite"
 
+import type { UsageClient } from "./client"
+import type { WindowSource } from "./request-meta"
+
 export type TokenUsageSource = "copilot" | "provider"
 
 export type TokenUsageEndpoint =
@@ -52,6 +55,19 @@ export interface PersistedTokenUsageEvent {
   is_premium: number | null
   trace_id: string
   user_id: string
+  client: UsageClient
+  /** The API key label the request came in on; null when none. */
+  client_label: string | null
+  /** Seconds the upstream keeps the prompt cache warm; 0 = unknown. */
+  cache_ttl_s: number
+  /** 1 = the client explicitly asked for this lifetime, 0 = a default. */
+  cache_ttl_requested: number
+  /** 1 = a compaction request. */
+  is_compact: number
+  context_window_tokens: number | null
+  context_ceiling_tokens: number | null
+  compact_at_tokens: number | null
+  window_source: WindowSource | null
 }
 
 export interface TokenUsageTotals {
@@ -233,6 +249,31 @@ const TOKEN_USAGE_MIGRATIONS: Array<Migration> = [
       db.exec("ALTER TABLE token_usage_events ADD COLUMN is_premium INTEGER")
     },
   },
+  {
+    // The live-sessions view needs to know which client sent a request, how
+    // long its prompt cache lives, and the context window it ran under.
+    // Existing rows predate capture: client reads 'other', the cache and
+    // compaction flags 0, and the window columns NULL (unknown).
+    name: "add client, cache and context columns",
+    up: (db) => {
+      for (const column of [
+        "client TEXT NOT NULL DEFAULT 'other'",
+        "client_label TEXT",
+        "cache_ttl_s INTEGER NOT NULL DEFAULT 0",
+        "cache_ttl_requested INTEGER NOT NULL DEFAULT 0",
+        "is_compact INTEGER NOT NULL DEFAULT 0",
+        "context_window_tokens INTEGER",
+        "context_ceiling_tokens INTEGER",
+        "compact_at_tokens INTEGER",
+        "window_source TEXT",
+      ]) {
+        db.exec(`ALTER TABLE token_usage_events ADD COLUMN ${column}`)
+      }
+      db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_token_usage_events_session_created ON token_usage_events(session_id, created_at_ms)",
+      )
+    },
+  },
 ]
 
 function ensureColumn(
@@ -312,8 +353,17 @@ async function writeTokenUsageEvent(
         cache_creation_input_tokens,
         total_tokens,
         total_nano_aiu,
-        is_premium
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        is_premium,
+        client,
+        client_label,
+        cache_ttl_s,
+        cache_ttl_requested,
+        is_compact,
+        context_window_tokens,
+        context_ceiling_tokens,
+        compact_at_tokens,
+        window_source
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
   ).run(
     event.created_at_ms,
@@ -332,6 +382,15 @@ async function writeTokenUsageEvent(
     event.total_tokens,
     event.total_nano_aiu,
     event.is_premium,
+    event.client,
+    event.client_label,
+    event.cache_ttl_s,
+    event.cache_ttl_requested,
+    event.is_compact,
+    event.context_window_tokens,
+    event.context_ceiling_tokens,
+    event.compact_at_tokens,
+    event.window_source,
   )
 }
 
