@@ -53,6 +53,11 @@ bun run app:ui       # UI-only iteration: `bun run build:ui --watch` — rebuild
 bun run app:build    # force-rebuild sidecar + tauri build --bundles app,dmg
 ```
 
+`bun run start`, `bun run dev` and `maximal start` listen on `127.0.0.1` unless
+`HOST` is set. To serve other machines, set `HOST=0.0.0.0` (every interface) or
+`HOST=::`; `src/lib/start/listen-host.ts` owns the default. Request auth lets
+every caller through by default, so expose it only on a trusted network.
+
 ## pnpm lockfiles and the package feed
 
 `packages/mcp-broker` and `packages/storybook` each have their own pnpm

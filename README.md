@@ -132,6 +132,7 @@ The app dir is `~/.local/share/maximal` on macOS/Linux and
 | Knob | CLI | Env | File | Default |
 |---|---|---|---|---|
 | Listen port | `--port` | — | — | `4141` |
+| Listen address | — | `HOST` | — | `127.0.0.1` |
 | Account type | `--account-type` | — | — | `individual` |
 | Verbose logging | `--verbose` | — | — | off |
 | Manual approval | `--manual` | — | — | off |
@@ -146,6 +147,12 @@ The app dir is `~/.local/share/maximal` on macOS/Linux and
 | Use Apply Patch | — | — | `useFunctionApplyPatch` | `true` |
 | Web-search broker model (preferred `/responses` model for `web_search`) | — | — | `smallModel` | `gpt-5-mini` |
 | Log retention (days) | — | — | `logRetentionDays` | `7` (`0` = delete on cleanup tick) |
+
+Maximal listens on `127.0.0.1` by default, so only this computer can reach it.
+To let other machines use it (a LAN or a container host), set `HOST` to the
+address to listen on, for example `HOST=0.0.0.0 maximal start` for every
+interface (`HOST=::` for IPv6). Anyone who can reach that address can use your
+Copilot access, so expose it only on a network you trust.
 
 To inspect what the proxy actually thinks its config is:
 

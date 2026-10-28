@@ -47,6 +47,7 @@ import { initBootLogger, printReadyBanner } from "./boot-io"
 import { emitBootStatus } from "./boot-status"
 import { bootSecrets, bootstrapUpstream } from "./bootstrap"
 import { runClaudeCodeFlow } from "./claude-code-flow"
+import { listenHostname } from "./listen-host"
 import { maybeEvictRunning, probePort, reportPortBusyAndExit } from "./port"
 import { setListeningPort } from "./proxy-port"
 import {
@@ -190,14 +191,16 @@ export async function runServer(options: RunServerOptions): Promise<void> {
 
   const { server } = await import("~/server")
 
+  const hostname = listenHostname()
   bootLogger.info(
-    `listening url=${serverUrl} `
+    `listening url=${serverUrl} host=${hostname} `
       + `executor=${executorName.split(" ")[0]} `
       + `auth=${hasGithubToken() ? "authenticated" : "unauthenticated"}`,
   )
 
   const httpServer = serve({
     fetch: server.fetch,
+    hostname,
     port: options.port,
     bun: {
       idleTimeout: 0,

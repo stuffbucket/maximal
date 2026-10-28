@@ -17,6 +17,7 @@
  */
 import {
   afterAll,
+  afterEach,
   beforeEach,
   describe,
   expect,
@@ -140,6 +141,7 @@ globalThis.fetch = (() =>
 
 // --- Module under test (imported after mocks are wired) -----------
 
+const { freePort } = await import("./helpers/free-port")
 const { state } = await import("~/lib/runtime-state/state")
 const { runServer, start } = await import("~/start")
 const { stopBrokerSupervisor } = await import("~/lib/mcp-broker/supervisor")
@@ -338,6 +340,49 @@ describe("runServer — GitHub token resolution", () => {
 
     // Reset controller state so the error doesn't bleed into sibling tests.
     await signOut()
+  })
+})
+
+function serveHostname(): string | undefined {
+  const calls = serveMock.mock.calls as unknown as Array<
+    [{ hostname?: string }]
+  >
+  return calls[0]?.[0].hostname
+}
+
+describe("runServer — listen hostname", () => {
+  const savedHost = process.env.HOST
+  afterEach(() => {
+    if (savedHost === undefined) delete process.env.HOST
+    else process.env.HOST = savedHost
+  })
+
+  test("binds 127.0.0.1 when HOST is unset", async () => {
+    const port = await freePort()
+    delete process.env.HOST
+    await runServer(baseOptions({ port }))
+    expect(serveHostname()).toBe("127.0.0.1")
+  })
+
+  test("binds 127.0.0.1 when HOST is empty", async () => {
+    const port = await freePort()
+    process.env.HOST = ""
+    await runServer(baseOptions({ port }))
+    expect(serveHostname()).toBe("127.0.0.1")
+  })
+
+  test("HOST=0.0.0.0 binds every interface", async () => {
+    const port = await freePort()
+    process.env.HOST = "0.0.0.0"
+    await runServer(baseOptions({ port }))
+    expect(serveHostname()).toBe("0.0.0.0")
+  })
+
+  test("an IPv6 HOST is passed through", async () => {
+    const port = await freePort()
+    process.env.HOST = "::"
+    await runServer(baseOptions({ port }))
+    expect(serveHostname()).toBe("::")
   })
 })
 
