@@ -1002,10 +1002,22 @@ pub fn run() {
     });
 }
 
+/// Environment the sidecar gets on this platform only. On Linux the proxy
+/// listens on loopback (`HOST=127.0.0.1`), like the packaged user service;
+/// without HOST it binds every interface. macOS and Windows are unchanged.
+fn sidecar_platform_env() -> &'static [(&'static str, &'static str)] {
+    if cfg!(target_os = "linux") {
+        &[("HOST", "127.0.0.1")]
+    } else {
+        &[]
+    }
+}
+
 fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
-    // sidecar("maximal") looks up `bundle.externalBin[0]` from
-    // tauri.conf.json and resolves the arch-suffixed binary
-    // (binaries/maximal-aarch64-apple-darwin etc.) at build time.
+    // sidecar("maximal") resolves `maximal` next to this executable: the
+    // arch-suffixed `bundle.externalBin` copy Tauri places there on macOS and
+    // Windows, and the `maximal` package's /usr/bin/maximal for the Linux
+    // maximal-desktop package (which bundles no sidecar).
     let port = SIDECAR_PORT.to_string();
     let mut cmd = app
         .shell()
@@ -1018,6 +1030,10 @@ fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
         // listening on :4141 — confusing UX for menu-bar users who
         // shouldn't have to know which copy started first.
         .args(["start", "--replace", "--port", port.as_str()]);
+
+    for (key, value) in sidecar_platform_env() {
+        cmd = cmd.env(key, value);
+    }
 
     // The settings + dashboard UIs are embedded directly in the sidecar
     // binary and served at /ui/* (see src/routes/ui/route.ts), so there is
@@ -3626,6 +3642,16 @@ mod tests {
         assert_eq!(state.set(snap(0, None)), RequestsTransition::Changed);
         // One answered and another arrived: still news.
         assert_eq!(state.set(snap(1, Some("c"))), RequestsTransition::Arrived);
+    }
+
+    #[test]
+    fn sidecar_listens_on_loopback_on_linux_only() {
+        let env = super::sidecar_platform_env();
+        if cfg!(target_os = "linux") {
+            assert_eq!(env, &[("HOST", "127.0.0.1")]);
+        } else {
+            assert!(env.is_empty(), "macOS and Windows keep their binding: {env:?}");
+        }
     }
 
     #[test]
