@@ -91,6 +91,7 @@
   },
   "devDependencies": {
     "@echristian/eslint-config": "^0.0.54",
+    "@playwright/test": "1.56.1",
     "@stryker-mutator/core": "^9.6.1",
     "@types/bun": "^1.2.23",
     "@types/proxy-from-env": "^1.0.4",
