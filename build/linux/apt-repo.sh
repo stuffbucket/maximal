@@ -8,8 +8,11 @@
 #
 # Layout (static files, GitHub Pages):
 #   pool/main/<tag>/maximal_<ver>_<arch>.deb, maximal-desktop_<ver>_<arch>.deb
-#   dists/<suite>/main/binary-{amd64,arm64}/Packages, Packages.gz
+#   dists/<suite>/main/binary-{amd64,arm64}/Packages, Packages.gz, by-hash/
 #   dists/<suite>/Release, InRelease, Release.gpg
+#
+# deploy-pages.yml runs fetch and index in its build job, without secrets, and
+# sign in a separate job that alone can read them.
 #
 # `sign` reads the private key and its passphrase from APT_SIGNING_KEY and
 # APT_SIGNING_KEY_PASSWORD, and refuses a key whose fingerprint isn't
@@ -66,7 +69,12 @@ index() {
       gzip -9nk "$dist/main/binary-$arch/Packages"
     done
     # Written beside, then moved in, so Release doesn't list itself.
+    # DoByHash also writes each index under by-hash/<algorithm>/<digest> and
+    # sets "Acquire-By-Hash: yes", so apt fetches indexes by immutable name and
+    # a CDN serving a newer Packages beside an older Release can't cause a
+    # "Hash Sum mismatch".
     apt-ftparchive \
+      -o APT::FTPArchive::DoByHash=true \
       -o APT::FTPArchive::Release::Origin=Maximal \
       -o APT::FTPArchive::Release::Label=Maximal \
       -o "APT::FTPArchive::Release::Suite=$suite" \
@@ -76,6 +84,11 @@ index() {
       -o "APT::FTPArchive::Release::Description=Maximal ($suite)" \
       release "$dist" > "$root/Release.tmp"
     mv "$root/Release.tmp" "$dist/Release"
+    grep -qx 'Acquire-By-Hash: yes' "$dist/Release" || die "$suite's Release lacks Acquire-By-Hash"
+    for arch in "${ARCHES[@]}"; do
+      [ -f "$dist/main/binary-$arch/by-hash/SHA256/$(sha256sum < "$dist/main/binary-$arch/Packages.gz" | cut -d' ' -f1)" ] ||
+        die "$suite has no by-hash copy of its $arch Packages.gz"
+    done
     echo "indexed $suite ($tag)"
   done < <(suites "$plan")
 }

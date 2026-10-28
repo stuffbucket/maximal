@@ -76,7 +76,7 @@ Version: $debver
 Architecture: $arch
 Maintainer: stuffbucket <apt@mxml.sh>
 Installed-Size: $(installed_size "$root")
-Depends: libc6
+Depends: libc6 (>= 2.39)
 Section: utils
 Priority: optional
 Homepage: https://mxml.sh

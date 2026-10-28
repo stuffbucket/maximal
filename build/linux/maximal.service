@@ -1,7 +1,10 @@
 [Unit]
 Description=Maximal, a local proxy to the models in GitHub Copilot
-Documentation=https://mxml.sh/linux/
-After=network-online.target
+Documentation=https://github.com/stuffbucket/maximal/blob/main/docs/linux.md
+# Stop retrying after 5 failed starts in a minute (another process on the
+# port, a broken config) instead of restarting forever.
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple
