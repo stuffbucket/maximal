@@ -185,19 +185,26 @@ describe("npmLoginConfig", () => {
     expect(files).toEqual(["/bin/zsh", "/bin/sh"])
   })
 
-  test("on Windows it runs npm.cmd directly, one question each", async () => {
-    const calls: Array<string> = []
-    const answers: Record<string, string> = {
-      "config get registry": "https://win.example.test/\n",
-      "config get @microsoft:registry": "undefined\n",
-      "prefix -g": "C:\\Users\\u\\AppData\\Roaming\\npm\n",
-    }
+  test("on Windows it runs one fixed script through cmd.exe", async () => {
+    const calls: Array<{
+      file: string
+      args: Array<string>
+      timeoutMs: number
+      closeStdin?: boolean
+    }> = []
     __setNpmLoginDepsForTests({
       platform: "win32",
-      env: {},
-      run: (file, args) => {
-        calls.push(file)
-        return Promise.resolve(ok(answers[args.join(" ")] ?? ""))
+      env: { ComSpec: String.raw`C:\Windows\System32\cmd.exe` },
+      run: (file, args, options) => {
+        calls.push({ file, args, ...options })
+        return Promise.resolve(
+          ok(
+            String.raw`https://win.example.test/
+undefined
+C:\Users\u\AppData\Roaming\npm
+`,
+          ),
+        )
       },
     })
     expect(await npmLoginConfig()).toEqual({
@@ -205,8 +212,19 @@ describe("npmLoginConfig", () => {
       scopeRegistry: null,
       prefix: String.raw`C:\Users\u\AppData\Roaming\npm`,
     })
-    expect(new Set(calls)).toEqual(new Set(["npm.cmd"]))
-    expect(calls).toHaveLength(3)
+    expect(calls).toEqual([
+      {
+        file: String.raw`C:\Windows\System32\cmd.exe`,
+        args: [
+          "/d",
+          "/s",
+          "/c",
+          "npm config get registry & npm config get @microsoft:registry & npm prefix -g",
+        ],
+        timeoutMs: 8000,
+        closeStdin: true,
+      },
+    ])
   })
 })
 
