@@ -118,7 +118,7 @@ that mirror or the catalog spelling drifts.
 | Secret scanning | **trufflehog** + `scripts/secret-scan.sh` | Runs pre-commit (lint-staged) and in CI. |
 | Design-token lint | `scripts/check-design-tokens.ts` | Guards the design system; UI work only. |
 
-**Runtime pin:** Bun is pinned via `.bun-version` (currently `1.3.14`) and the
+**Runtime pin:** Bun is pinned via `.bun-version` (currently `1.4.3`) and the
 `bun-version:` input of every workflow (`.github/actions/setup-bun` defaults to
 `latest`, so callers pass the pin). These **move together** — a mismatch is a policy violation (see `CLAUDE.md` and
 `docs/bun-version-policy.md`). Rationale: the test runner *is* the runtime, so a

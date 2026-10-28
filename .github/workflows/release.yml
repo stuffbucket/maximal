@@ -69,7 +69,7 @@ jobs:
 
       - uses: ./.github/actions/setup-bun
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.3
 
       - uses: ./.github/actions/setup-mise
         with:
@@ -207,7 +207,7 @@ jobs:
 
       - uses: ./.github/actions/setup-bun
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.3
 
       - uses: ./.github/actions/setup-mise
         with:
@@ -473,7 +473,7 @@ jobs:
 
       - uses: ./.github/actions/setup-bun
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.3
 
       - name: Resolve version
         id: ver
@@ -552,7 +552,7 @@ jobs:
 
       - uses: ./.github/actions/setup-bun
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.3
 
       - name: Check whether the builder files are already on the draft
         id: builder-files
@@ -1034,7 +1034,7 @@ jobs:
       - uses: ./.github/actions/setup-bun
         if: steps.skip.outputs.skip != 'true'
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.3
 
       # Pinned Rust + the Cargo cache warmed from main by
       # windows-rust-cache.yml (a cache saved on this tag would be invisible
@@ -1302,7 +1302,7 @@ jobs:
 
       - uses: ./.github/actions/setup-bun
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.3
 
       - name: Configure package registry
         run: printf '%s\n' 'registry=https://packagefeedproxy.microsoft.io/npm/' > "$HOME/.npmrc"
@@ -1482,7 +1482,7 @@ jobs:
 
       - uses: ./.github/actions/setup-bun
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.3
 
       - name: Configure package registry
         run: printf '%s\n' 'registry=https://packagefeedproxy.microsoft.io/npm/' > "$HOME/.npmrc"
