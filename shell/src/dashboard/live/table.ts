@@ -5,11 +5,24 @@
 // session id and moved, never rebuilt, so focus, hover and the selection
 // survive.
 //
+// Cold sessions show the latest COLD_ROWS, then a "Show N more" button. A row
+// is refilled only when its session changed, or when something in it reads
+// the clock (a countdown, "compacted N min ago", a day name).
+//
 // Styling reuses the per-request table's classes and the quota cards' `.meter`
 // (see style.css → Session table for the few rules of its own).
 import type { SessionsResponse } from "../../../../src/lib/token-usage/sessions-schema";
 import { resolveLocale, t } from "../../i18n";
-import { type Session, formatCountdown, sortSessions } from "./rows";
+import {
+  COLD_ROWS,
+  type Session,
+  clockFormatter,
+  coldRows,
+  contextMeter,
+  downgradedText,
+  formatCountdown,
+  sortSessions,
+} from "./rows";
 
 // Lucide is a classic global <script> in index.html (see main.ts).
 declare const lucide: { createIcons: () => void } | undefined;
@@ -45,9 +58,15 @@ const CLIENT_CASE: Record<Session["client"], string> = {
   other: "other",
 };
 
-/** Context fill from which the meter warns, and from which it's an error. */
-const CONTEXT_LOW = 75;
-const CONTEXT_OUT = 90;
+/** What a row was last filled from, so an unchanged row is skipped. */
+interface Filled {
+  session: Session;
+  /** The session as JSON, compared when a poll brings a new object. */
+  json: string;
+  slot: number | null;
+  locale: string;
+  minute: number;
+}
 
 interface Row {
   tr: HTMLTableRowElement;
@@ -64,12 +83,15 @@ interface Row {
   context: HTMLElement;
   meter: HTMLElement;
   meterFill: HTMLElement;
+  ceilingTick: HTMLElement;
+  compactTick: HTMLElement;
   meterState: HTMLElement;
   meterIcon: HTMLElement;
   meterText: HTMLElement;
   compacted: HTMLElement;
   last: HTMLElement;
   total: HTMLElement;
+  filled: Filled | null;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className = ""): HTMLElementTagNameMap[K] {
@@ -131,9 +153,22 @@ export function mountSessionTable(
   dividerCell.textContent = t("dashboard-sessions-cold-divider");
   divider.append(dividerCell);
 
+  // "Show N more" under the cold rows; once pressed, every cold row shows.
+  const more = el("tr", "session-more");
+  const moreCell = el("td", "px-4 py-2");
+  moreCell.colSpan = COLUMNS.length;
+  const moreButton = el("button", "session-more__button");
+  moreButton.type = "button";
+  moreCell.append(moreButton);
+  more.append(moreCell);
+  let coldExpanded = false;
+  /** The first cold row the button revealed, which takes the focus. */
+  let revealFocus: string | null = null;
+
   const rows = new Map<string, Row>();
   let shownSelected: string | null = null;
   let shownPreview: string | null = null;
+  let lastArgs: Parameters<SessionTable["update"]> | null = null;
 
   function buildRow(id: string): Row {
     const tr = el("tr", "session-row border-b last:border-b-0");
@@ -185,7 +220,9 @@ export function mountSessionTable(
     const context = el("div", "session-context");
     const meter = el("div", "meter");
     const meterFill = el("div", "meter__fill");
-    meter.append(meterFill);
+    const ceilingTick = el("div", "meter__tick meter__tick--ceiling");
+    const compactTick = el("div", "meter__tick meter__tick--compact");
+    meter.append(meterFill, ceilingTick, compactTick);
     const meterState = el("span", "meter-state");
     const meterIcon = el("span", "session-context__icon");
     meterIcon.innerHTML = `<i data-lucide="triangle-alert" aria-hidden="true"></i>`;
@@ -213,13 +250,36 @@ export function mountSessionTable(
       context,
       meter,
       meterFill,
+      ceilingTick,
+      compactTick,
       meterState,
       meterIcon,
       meterText,
       compacted,
       last,
       total,
+      filled: null,
     };
+  }
+
+  /** Place a tick at `at` percent of the meter, or hide it. */
+  function setTick(tick: HTMLElement, at: number | null): void {
+    tick.hidden = at === null;
+    if (at !== null) tick.style.left = `${at}%`;
+  }
+
+  /** Whether the row must be filled again: its session, color or locale
+   *  changed, or it shows something that reads the clock. */
+  function stale(row: Row, s: Session, slot: number | null, locale: string, minute: number): boolean {
+    const { filled } = row;
+    if (!filled || filled.slot !== slot || filled.locale !== locale) return true;
+    // A countdown ticks every second; "N min ago" and day names every minute.
+    if (s.state === "warm" || filled.minute !== minute) return true;
+    if (filled.session === s) return false;
+    const json = JSON.stringify(s);
+    if (json !== filled.json) return true;
+    filled.session = s;
+    return false;
   }
 
   function fillRow(
@@ -229,7 +289,7 @@ export function mountSessionTable(
     nowMs: number,
     locale: string,
     numbers: Intl.NumberFormat,
-    clock: Intl.DateTimeFormat,
+    clock: (ms: number, nowMs: number) => string,
   ): void {
     const other = isOther(s);
     row.tr.classList.toggle("session-row--cold", s.state === "cold");
@@ -257,7 +317,7 @@ export function mountSessionTable(
       row.sessionSub.title = "";
     } else {
       setText(row.model, s.model);
-      setText(row.started, t("dashboard-sessions-started", { time: clock.format(s.started_at_ms) }));
+      setText(row.started, t("dashboard-sessions-started", { time: clock(s.started_at_ms, nowMs) }));
       setText(row.shortId, s.id.slice(0, 8));
       row.sessionSub.title = s.id;
     }
@@ -270,45 +330,39 @@ export function mountSessionTable(
         t("dashboard-sessions-state-warm", {
           time: expires === null ? "—" : formatCountdown(expires - nowMs, s.cache.confidence, locale),
         })
-      : t("dashboard-sessions-state-cold", { time: clock.format(expires ?? s.last_request_at_ms) });
+      : t("dashboard-sessions-state-cold", { time: clock(expires ?? s.last_request_at_ms, nowMs) });
     setText(row.state, stateText);
-    setText(row.stateSub, s.cache.downgraded ? t("dashboard-sessions-downgraded") : "");
+    const downgradedFrom = s.cache.downgraded ? s.cache.downgraded_from_s : null;
+    setText(row.stateSub, downgradedFrom === null ? "" : downgradedText(downgradedFrom, locale));
 
     setText(row.rate, numbers.format(Math.round(s.rate_per_min)));
-    setText(row.last, clock.format(s.last_request_at_ms));
+    setText(row.last, clock(s.last_request_at_ms, nowMs));
     setText(row.total, numbers.format(s.total_tokens));
 
-    // Context: the meter fills against the smaller of the window and Copilot's
-    // ceiling. "Other requests" mixes conversations, so it has none.
-    const { used_tokens, window_tokens, ceiling_tokens, window_source, compacted_at_ms } = s.context;
-    const windows = [window_tokens, ceiling_tokens].filter((n): n is number => n !== null && n > 0);
-    const effective = other || windows.length === 0 ? null : Math.min(...windows);
-    if (effective === null) {
+    // Context: the percent is of the smaller of the window and Copilot's
+    // ceiling; a lower ceiling and a compaction point are ticks on the track.
+    // "Other requests" mixes conversations, so it has none.
+    const { compacted_at_ms } = s.context;
+    const meter = other ? null : contextMeter(s.context, locale);
+    if (meter === null) {
       row.meter.hidden = true;
       row.meterIcon.hidden = true;
       row.meterState.className = "meter-state";
       setText(row.meterText, "—");
       row.context.title = "";
     } else {
-      const percent = (used_tokens / effective) * 100;
-      const level =
-        percent >= CONTEXT_OUT ? "out"
-        : percent >= CONTEXT_LOW ? "low"
-        : "ok";
       row.meter.hidden = false;
-      row.meter.className = `meter meter--${level}`;
-      row.meterFill.style.width = `${Math.min(100, Math.max(0, percent))}%`;
-      row.meterState.className = `meter-state meter-state--${level}`;
-      row.meterIcon.hidden = level === "ok";
+      row.meter.className = `meter meter--${meter.level}`;
+      row.meterFill.style.width = `${meter.fill}%`;
+      setTick(row.ceilingTick, meter.ceilingAt);
+      setTick(row.compactTick, meter.compactAt);
+      row.meterState.className = `meter-state meter-state--${meter.level}`;
+      row.meterIcon.hidden = meter.level === "ok";
       setText(
         row.meterText,
-        new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 0 }).format(percent / 100),
+        new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 0 }).format(meter.percent / 100),
       );
-      row.context.title = t("dashboard-sessions-context-title", {
-        used: numbers.format(used_tokens),
-        window: numbers.format(effective),
-        source: t(`dashboard-sessions-source-${window_source}`),
-      });
+      row.context.title = meter.title;
     }
     setText(
       row.compacted,
@@ -328,12 +382,15 @@ export function mountSessionTable(
     }
   }
 
-  return {
+  const api: SessionTable = {
     update(view, colors, selected, nowMs) {
+      lastArgs = [view, colors, selected, nowMs];
       const locale = resolveLocale();
       const numbers = new Intl.NumberFormat(locale);
-      const clock = new Intl.DateTimeFormat(locale, { timeStyle: "short" });
+      const clock = clockFormatter(locale);
+      const minute = Math.floor(nowMs / 60_000);
       const { above, below } = sortSessions(view.sessions);
+      const cold = coldRows(below, coldExpanded);
 
       let added = false;
       const order: Array<HTMLTableRowElement> = [];
@@ -345,15 +402,23 @@ export function mountSessionTable(
           rows.set(s.id, row);
           added = true;
         }
-        fillRow(row, s, colors.get(s.id) ?? null, nowMs, locale, numbers, clock);
+        const slot = colors.get(s.id) ?? null;
+        if (stale(row, s, slot, locale, minute)) {
+          fillRow(row, s, slot, nowMs, locale, numbers, clock);
+          row.filled = { session: s, json: JSON.stringify(s), slot, locale, minute };
+        }
         present.add(s.id);
         order.push(row.tr);
       };
       above.forEach(place);
       if (below.length > 0) {
-        dividerCell.textContent = t("dashboard-sessions-cold-divider");
+        setText(dividerCell, t("dashboard-sessions-cold-divider"));
         order.push(divider);
-        below.forEach(place);
+        cold.shown.forEach(place);
+      }
+      if (cold.hidden > 0) {
+        setText(moreButton, t("dashboard-sessions-show-more", { count: numbers.format(cold.hidden) }));
+        order.push(more);
       }
       for (const id of rows.keys()) {
         if (!present.has(id)) rows.delete(id);
@@ -370,6 +435,10 @@ export function mountSessionTable(
       if (focused instanceof HTMLElement && focused !== document.activeElement && tbody.contains(focused)) {
         focused.focus({ preventScroll: true });
       }
+      // The button is gone once pressed: the first row it revealed takes the focus.
+      const revealed = revealFocus === null ? undefined : rows.get(revealFocus);
+      revealFocus = null;
+      revealed?.tr.focus({ preventScroll: true });
       if (added && typeof lucide !== "undefined" && lucide) lucide.createIcons();
 
       const changed = selected !== shownSelected;
@@ -389,4 +458,14 @@ export function mountSessionTable(
       markRows();
     },
   };
+
+  moreButton.addEventListener("click", () => {
+    if (!lastArgs) return;
+    const [view] = lastArgs;
+    revealFocus = sortSessions(view.sessions).below[COLD_ROWS]?.id ?? null;
+    coldExpanded = true;
+    api.update(...lastArgs);
+  });
+
+  return api;
 }

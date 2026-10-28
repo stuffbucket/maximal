@@ -3,6 +3,11 @@ import { describe, expect, test } from "bun:test"
 import type { SessionView } from "../src/lib/token-usage/sessions-schema"
 
 import {
+  COLD_ROWS,
+  clockFormatter,
+  coldRows,
+  contextMeter,
+  downgradedText,
   formatCountdown,
   liveSessions,
   sortSessions,
@@ -166,5 +171,143 @@ describe("formatCountdown", () => {
   test("just under 10 minutes rounds up to 10 min, never 10:00", () => {
     expect(formatCountdown(599_500, "observed", "en")).toBe("10 min")
     expect(formatCountdown(599_001, "requested", "en")).toBe("about 10 min")
+  })
+})
+
+describe("formatCountdown in hours", () => {
+  test("an hour or more reads in hours", () => {
+    expect(formatCountdown(3_600_000, "observed", "en")).toBe("1 hr")
+    expect(formatCountdown(86_280_000, "requested", "en")).toBe("about 24 hr")
+  })
+
+  test("just under an hour still reads in hours once it rounds up to 60 min", () => {
+    expect(formatCountdown(3_599_000, "observed", "en")).toBe("1 hr")
+    expect(formatCountdown(3_540_000, "observed", "en")).toBe("59 min")
+  })
+
+  test("the hours follow the locale", () => {
+    expect(formatCountdown(86_280_000, "observed", "de")).toBe("24 Std.")
+  })
+})
+
+describe("clockFormatter", () => {
+  // Local times, so the test holds in any time zone.
+  const now = new Date(2026, 9, 28, 15, 0).getTime()
+
+  test("a time today reads as the time alone", () => {
+    const at = new Date(2026, 9, 28, 10, 42).getTime()
+    expect(clockFormatter("en")(at, now)).toBe("10:42 AM")
+  })
+
+  test("a time on another day adds a short day", () => {
+    const at = new Date(2026, 9, 27, 10, 42).getTime()
+    expect(clockFormatter("en")(at, now)).toBe("Tue 10:42 AM")
+    expect(clockFormatter("de")(at, now)).toBe("Di. 10:42")
+  })
+})
+
+describe("downgradedText", () => {
+  test("names the lifetime that didn't hold", () => {
+    expect(downgradedText(3600, "en")).toBe(
+      "Cache didn't last 1 hour; using 5 min",
+    )
+    expect(downgradedText(86_400, "en")).toBe(
+      "Cache didn't last 24 hours; using 5 min",
+    )
+  })
+})
+
+/** A session's context: a 200,000 window that is also the ceiling. */
+function context(
+  overrides: Partial<SessionView["context"]>,
+): SessionView["context"] {
+  return {
+    used_tokens: 0,
+    window_tokens: 200_000,
+    ceiling_tokens: 200_000,
+    compact_at_tokens: null,
+    window_source: "models-endpoint",
+    compacted_at_ms: null,
+    ...overrides,
+  }
+}
+
+describe("contextMeter", () => {
+  test("a window no larger than the ceiling fills against the window, unmarked", () => {
+    const meter = contextMeter(context({ used_tokens: 150_000 }), "en")
+    expect(meter).toMatchObject({
+      percent: 75,
+      level: "low",
+      fill: 75,
+      ceilingAt: null,
+      compactAt: null,
+    })
+    expect(meter?.title).toBe(
+      "150,000 of 200,000 (the size Maximal lists for this model)",
+    )
+  })
+
+  test("a lower ceiling sets the percent, and is marked on a track as long as the window", () => {
+    const meter = contextMeter(
+      context({
+        used_tokens: 119_000,
+        window_tokens: 272_000,
+        ceiling_tokens: 128_000,
+        compact_at_tokens: 115_200,
+        window_source: "codex-catalog",
+      }),
+      "en",
+    )
+    expect(meter?.level).toBe("out")
+    expect(meter?.percent).toBeCloseTo((119_000 / 128_000) * 100, 5)
+    expect(meter?.fill).toBeCloseTo((119_000 / 272_000) * 100, 5)
+    expect(meter?.ceilingAt).toBeCloseTo((128_000 / 272_000) * 100, 5)
+    expect(meter?.compactAt).toBeCloseTo((115_200 / 272_000) * 100, 5)
+    expect(meter?.title).toBe(
+      "119,000 of 128,000, Copilot's limit (272,000 is the size Codex uses for this model)\nCompacts at 115,200",
+    )
+  })
+
+  test("the 1M window Claude Code asked for is not credited with the ceiling", () => {
+    const meter = contextMeter(
+      context({
+        used_tokens: 84_000,
+        window_tokens: 1_000_000,
+        ceiling_tokens: 168_000,
+        window_source: "claude-1m",
+      }),
+      "en",
+    )
+    expect(meter?.percent).toBe(50)
+    expect(meter?.title).toBe(
+      "84,000 of 168,000, Copilot's limit (1,000,000 is the 1M window Claude Code asked for)",
+    )
+  })
+
+  test("no window and no ceiling: no meter", () => {
+    expect(
+      contextMeter(
+        context({ window_tokens: null, ceiling_tokens: null }),
+        "en",
+      ),
+    ).toBeNull()
+  })
+})
+
+describe("coldRows", () => {
+  const cold = Array.from({ length: COLD_ROWS + 5 }, (_, i) =>
+    session(`c${i}`, "cold", { rate: 0, last: NOW - i * 60_000 }),
+  )
+
+  test("shows the first rows and counts the rest", () => {
+    const { shown, hidden } = coldRows(cold, false)
+    expect(COLD_ROWS).toBe(20)
+    expect(ids(shown)).toEqual(ids(cold.slice(0, 20)))
+    expect(hidden).toBe(5)
+  })
+
+  test("shows them all once expanded, or when they fit", () => {
+    expect(coldRows(cold, true)).toEqual({ shown: cold, hidden: 0 })
+    expect(coldRows(cold.slice(0, 20), false).hidden).toBe(0)
   })
 })

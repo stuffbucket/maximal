@@ -294,7 +294,9 @@ body {
   margin-top: var(--space-4);
 }
 
-.quota-more__summary {
+/* The session table's "Show N more" button reads the same way. */
+.quota-more__summary,
+.session-more__button {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
@@ -309,11 +311,13 @@ body {
   display: none;
 }
 
-.quota-more__summary:hover {
+.quota-more__summary:hover,
+.session-more__button:hover {
   color: var(--text-strong);
 }
 
-.quota-more__summary:focus-visible {
+.quota-more__summary:focus-visible,
+.session-more__button:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
 }
@@ -871,7 +875,8 @@ html[data-embedded="true"] .lang-picker {
    plus what only this table has: the legend swatch, the "Cache cold" divider,
    a selected row (an accent rule and a pale accent tint, never color alone:
    the selected trace is drawn in full and the others dim), muted cold rows,
-   and the context meter, which is the quota cards' .meter at row size. */
+   and the context meter, which is the quota cards' .meter at row size with
+   ticks for Copilot's ceiling and the compaction point. */
 .sessions {
   margin-bottom: var(--space-5);
 }
@@ -926,10 +931,20 @@ html[data-embedded="true"] .lang-picker {
   gap: var(--space-2);
 }
 .session-context > .meter {
+  position: relative;
   flex: none;
   width: var(--space-8);
 }
+.meter__tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: var(--border-width-thick);
+  margin-left: calc(var(--border-width-thick) / -2);
+  background-color: var(--border-strong);
+}
 .session-context > .meter[hidden],
+.meter__tick[hidden],
 .session-context__icon[hidden] {
   display: none;
 }
