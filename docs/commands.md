@@ -58,6 +58,21 @@ bun run app:build    # force-rebuild sidecar + tauri build --bundles app,dmg
 `HOST=::`; `src/lib/start/listen-host.ts` owns the default. Request auth lets
 every caller through by default, so expose it only on a trusted network.
 
+Installing a released Maximal on Debian or Ubuntu (apt, the user service,
+updates) is covered in [Maximal on Linux](linux.md). The Linux packages are
+built by `build/linux/` scripts; to try one locally, compile the binaries for
+a `bun-linux-*` target and run, for example:
+
+```sh
+build/linux/build-maximal-deb.sh 0.6.0 arm64 <dir-with-binaries> <out-dir>
+docker run --rm -v "$PWD:/src:ro" -v "<out-dir>:/debs:ro" \
+  -e MAXIMAL_SMOKE_SKIP_DESKTOP=1 debian:13 \
+  bash /src/build/linux/smoke-deb.sh 0.6.0 /debs
+```
+
+`build-maximal-deb.sh` needs `dpkg-deb`, so run it on Debian/Ubuntu (or in an
+`ubuntu:24.04` container).
+
 ## pnpm lockfiles and the package feed
 
 `packages/mcp-broker` and `packages/storybook` each have their own pnpm

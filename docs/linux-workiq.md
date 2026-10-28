@@ -11,7 +11,7 @@ The package version used to validate sign-in and tool discovery was Work IQ
 These checks did not exercise workplace queries, mutations, other tenants, or
 a fresh-machine installation.
 
-## Prerequisites and source build
+## Prerequisites
 
 Use your normal desktop account, not root. You need a running user D-Bus session
 and an unlocked Secret Service keyring such as GNOME Keyring. Do not replace the
@@ -19,9 +19,20 @@ secure token cache with plaintext storage. Microsoft 365 Copilot licensing,
 tenant consent, and Conditional Access requirements are independent of Maximal's
 GitHub Copilot login.
 
-If Maximal is already installed, check `maximal --version` and `maximal mcp`.
-For a source installation, start from a reviewed checkout of this repository,
-using its pinned Bun and package toolchains (see [commands](commands.md)):
+Install Maximal with apt as described in [Maximal on Linux](linux.md):
+`maximal-desktop` for the tray app, or `maximal` for the proxy alone (run as a
+user service). Check it with `maximal --version` and `maximal mcp`, and complete
+Maximal's GitHub setup at `http://127.0.0.1:4141/ui/settings/`.
+
+**Do not upgrade over or restart a proxy that carries an active coding
+session.** Plan upgrades (`sudo apt install --only-upgrade …`) and restarts for
+a quiet moment.
+
+### Build from source
+
+On another distribution, or to test unreleased changes, build from a reviewed
+checkout of this repository with its pinned Bun and package toolchains (see
+[commands](commands.md)):
 
 ```sh
 bun install --frozen-lockfile --ignore-scripts
@@ -34,21 +45,17 @@ mise -C packages/mcp-broker exec -- pnpm install --frozen-lockfile
 mise -C packages/mcp-broker exec -- pnpm build
 ```
 
-Run the built CLI from the repository root so it can find the broker binary:
+Run the built CLI from the repository root so it can find the broker binary,
+choosing your actual GitHub account type:
 
 ```sh
 HOST=127.0.0.1 NODE_ENV=production MAXIMAL_UI_DIST="$PWD/shell/dist/ui" \
   bun dist/main.js start --port 4141 --account-type enterprise
 ```
 
-Choose your actual GitHub account type rather than assuming `enterprise`.
-Complete Maximal's GitHub setup at `http://127.0.0.1:4141/ui/settings/`.
 In the commands below, substitute `bun /absolute/path/to/maximal/dist/main.js`
-for `maximal` if you do not have an installed launcher.
-
-**Do not build over or restart a proxy that carries an active coding session.**
-Stage and validate upgrades separately and preserve a rollback installation.
-This is a CLI/web-UI setup, not a Linux Tauri desktop build.
+for `maximal`. Stage and validate source upgrades separately and keep a
+rollback installation.
 
 ## Install Work IQ
 
@@ -144,8 +151,9 @@ The session-bus address lets libsecret read the tokens saved by your desktop
 login. The address is resolved from Maximal's environment, not saved in config.
 Other desktop variables and provider credentials are not added to the allowlist.
 
-The running Maximal process must itself have `DBUS_SESSION_BUS_ADDRESS`. When
-using a systemd **user** service, a drop-in can supply its user-bus socket:
+The running Maximal process must itself have `DBUS_SESSION_BUS_ADDRESS`. The
+tray app inherits it from your desktop session. For the packaged user service,
+add it with `systemctl --user edit maximal`:
 
 ```ini
 [Service]

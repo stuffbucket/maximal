@@ -31,11 +31,15 @@ an explicit version. Pre-1.0 `feat:` commits otherwise produce patch releases.
 | `release`, `binaries`, `checksums`, `smoke` | Draft release, notes, SBOM, raw platform archives, checksums, and binary validation |
 | `macos-dmg` | Signed, notarized, and stapled Apple Silicon DMG from `stuffbucket/macos-builder`, plus the app's updater bundle `maximal-vX.Y.Z-darwin-arm64.app.tar.gz` with its `.sig` and `.sha256`, checked against the checksum and verified as signed by the updater key for this version |
 | `windows-installer`, `windows-msi`, `windows-msi-verify`, `windows-shell` | Windows installer assets and their required validation; `windows-shell` also verifies and attaches `<setup>.exe.sig`, the Windows app's updater signature |
+| `linux-deb` | On Ubuntu 24.04 runners for amd64 and arm64: `maximal_X.Y.Z_<arch>.deb` built from the `linux-x64`/`linux-arm64` archives, and `maximal-desktop_X.Y.Z_<arch>.deb` (the Tauri tray app, which depends on `maximal (= <version>)` and ships no copy of its binaries), each with a `.sha256`; fails on a package over 95 MB |
+| `linux-deb-smoke` | Installs both packages with apt in `debian:13`, `ubuntu:24.04` and `ubuntu:26.04` containers on both architectures and runs `build/linux/smoke-deb.sh` |
 | `publish` | Publishes only after every required asset and verification gate succeeds |
 | `homebrew-tap`, `manifest` | Independent post-publication distribution updates |
 
 Each raw archive and installed application layout must contain `maximal` and
-`maximal-mcp-broker` as executable siblings (`.exe` on Windows). The SBOM covers
+`maximal-mcp-broker` as executable siblings (`.exe` on Windows). On Linux the
+`maximal` package installs both in `/usr/bin`, where `maximal-desktop` finds
+them next to its own executable. The SBOM covers
 both production dependency graphs. Shipping the Windows broker binary does not
 enable supervision there; runtime remains fail-closed until kill-on-close Job
 Object containment is implemented. The PowerShell installer owns a dedicated
@@ -55,12 +59,41 @@ directly to protected `main` and has no ruleset bypass. The PR updates
 `site/public/updates/manifest.json`, which every app reads to offer
 "Update to X.Y.Z", and `site/public/updates/desktop/<channel>.json`, which the
 Windows and macOS apps install from. Until it merges and Pages deploys, the
-apps can't install the release in place and send users to mxml.sh instead.
+apps can't install the release in place and send users to mxml.sh instead,
+and apt doesn't offer it (see the apt repository below).
 
 Merge the PR only after its required `test` check passes and its branch is
 current with `main`. That ordinary protected merge triggers the Pages deploy.
 If `main` advances or manifest generation fails, rerun the `manifest` job and
 review the refreshed PR.
+
+## apt repository
+
+The same Pages deploy rebuilds the apt repository at `https://mxml.sh/apt`
+(static files under `site/dist/apt/`, never committed):
+
+1. `scripts/apt-repo-plan.ts` reads the merged manifest. The `stable` suite is
+   built from `channels.stable.tag` and the `rc` suite from `channels.rc.tag`,
+   so apt always carries the version the apps announce and nothing else.
+2. `build/linux/apt-repo.sh fetch` downloads that release's four `.deb`s,
+   checks each `.sha256`, and refuses a file over 95 MB (Pages serves files up
+   to 100 MB and sites up to 1 GB; the deploy also fails over 800 MB).
+3. `index` writes `Packages(.gz)` and `Release` with `apt-ftparchive`.
+4. `sign` writes `InRelease` and `Release.gpg`.
+
+A release without Linux packages (anything before them) is skipped with a
+notice; with none at all, the site deploys without the repository. A channel
+whose manifest entry lists Linux downloads its release doesn't have fails the
+deploy, and the previous site stays live.
+
+Signing uses the `APT_SIGNING_KEY` (armored private key) and
+`APT_SIGNING_KEY_PASSWORD` secrets, visible only to the signing step, in a
+temporary `GNUPGHOME`. The step fails unless the key's fingerprint equals the
+`APT_SIGNING_KEY_FINGERPRINT` repository variable
+(`7317FD604A591AFFC9235436C8270651B026DDF6`) and the committed public key
+`site/public/apt/maximal.asc`, and it verifies each signature against that
+public key. Rotating the key means replacing all four together and telling
+Linux users to fetch the new public key.
 
 ## Recovery
 
@@ -72,6 +105,7 @@ review the refreshed PR.
 | `manifest` failed after publication | Rerun `manifest`, then merge its protected PR after checks pass. |
 | `homebrew-tap` failed | Rerun only `homebrew-tap`. |
 | Pages deployment failed | Start a fresh run with `gh workflow run deploy-pages.yml --ref main`. |
+| The apt step failed | Read its annotation: a missing or wrong signing secret or variable, a channel listing Linux packages its release lacks, or an oversized package. Fix it, then start a fresh Pages run. |
 | A published asset is wrong | Cut a new patch release. |
 
 If release-please itself is unavailable, a maintainer may prepare an emergency
