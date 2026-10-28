@@ -7,7 +7,11 @@ Isolated MCP transport process used by the Maximal sidecar.
 ```text
 maximal-mcp-broker serve --generation <id> --parent-pid <pid>
 maximal-mcp-broker stdio-adapter --url http://127.0.0.1:<port>/mcp/<id>
+maximal-mcp-broker --version
+maximal-mcp-broker --help
 ```
+
+Wrong arguments print the usage and exit with status 2.
 
 `serve` reserves stdout for length-prefixed control IPC. It receives the resolved
 endpoint configuration and a per-launch API key from the sidecar, starts external
@@ -34,7 +38,10 @@ launch, the adapter keeps trying for up to 60 seconds while Maximal isn't
 listening yet or answers 502/503 (broker down or still starting), and when the
 broker restarts under it (its session answers 404) it replays the client's
 `initialize` on a new session and resends the request. On stdin close or a
-signal it still DELETEs its session.
+signal it still DELETEs its session. If it can't connect at all, it answers
+each request the client already sent with a JSON-RPC error that says why,
+writes `ADAPTER_CONNECT_FAILED` (with the HTTP status, if any) to stderr, and
+exits with status 1. It never loads `bun:ffi`; only `serve` does, on Windows.
 
 ## Dependency patch
 

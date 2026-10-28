@@ -180,6 +180,7 @@ jobs:
         run: |
           mise trust mise.toml
           mise trust packages/mcp-broker/mise.toml
+          mise install
           mise -C packages/mcp-broker install
           mise -C packages/mcp-broker exec -- pnpm install --frozen-lockfile
 
@@ -204,4 +205,13 @@ jobs:
             --target=bun-windows-x64 \
             --outfile="$PWD/dist/release/maximal-mcp-broker.exe"
           MAXIMAL_MCP_BROKER_BINARY="$(cygpath -w "$PWD/dist/release/maximal-mcp-broker.exe")" \
-            mise exec -- bun test test/cli.test.ts test/stdio-adapter.test.ts test/windows-containment.test.ts
+            mise exec -- bun test test/cli.test.ts test/stdio-adapter.test.ts test/windows-adapter-pipes.test.ts test/windows-containment.test.ts
+
+      # Claude Desktop's path end to end: a Node parent runs the release
+      # adapter against Maximal's /mcp route, which forwards to a broker.
+      - name: Test the release adapter through Maximal's /mcp route
+        if: always()
+        run: |
+          mise exec -- bun install --frozen-lockfile
+          MAXIMAL_MCP_BROKER_BINARY="$(cygpath -w "$PWD/packages/mcp-broker/dist/release/maximal-mcp-broker.exe")" \
+            mise exec -- bun test tests/mcp-adapter-end-to-end.test.ts

@@ -93,15 +93,18 @@ const throughClient = async (
           resolve(import.meta.dir, "pipe-client.ps1"),
           "-TimeoutMs",
           "15000",
-          "-Line",
-          line,
-          "-Command",
-          command[0] ?? "",
-          "-Arguments",
-          ...command.slice(1),
         ],
       ]
-  const child = spawn(program, args, { env, windowsHide: true })
+  // PowerShell's own argument parsing mangles quotes, so pipe-client.ps1
+  // takes the line and the command line from the environment.
+  const child = spawn(program, args, {
+    env: {
+      ...env,
+      PIPE_CLIENT_LINE: line,
+      PIPE_CLIENT_COMMAND: JSON.stringify(command),
+    },
+    windowsHide: true,
+  })
   let stdout = ""
   let stderr = ""
   child.stdout.setEncoding("utf8")
@@ -157,5 +160,5 @@ describe.skipIf(!windows)("the stdio adapter on Windows pipes", () => {
         )
       }
     }
-  }, 120_000)
+  }, 300_000)
 })

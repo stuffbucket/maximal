@@ -305,3 +305,57 @@ describe("adapter resilience", () => {
     }
   }, 30_000)
 })
+
+it("answers the client's initialize with the reason when it can't connect", async () => {
+  // An endpoint that refuses every request, as Maximal does without the key.
+  const refusing = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: () => new Response("Unauthorized", { status: 401 }),
+  })
+  try {
+    const compiled = process.env.MAXIMAL_MCP_BROKER_BINARY
+    const url = `http://127.0.0.1:${refusing.port}/mcp/fixture`
+    const child = Bun.spawn(
+      compiled ?
+        [compiled, "stdio-adapter", "--url", url]
+      : [
+          process.execPath,
+          resolve(import.meta.dir, "../src/main.ts"),
+          "stdio-adapter",
+          "--url",
+          url,
+        ],
+      { stdin: "pipe", stdout: "pipe", stderr: "pipe" },
+    )
+    child.stdin.write(
+      `${JSON.stringify({
+        jsonrpc: "2.0",
+        id: 0,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-06-18",
+          capabilities: {},
+          clientInfo: { name: "test", version: "0" },
+        },
+      })}\n`,
+    )
+    await child.stdin.flush()
+    const [code, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ])
+    expect(code).toBe(1)
+    expect(JSON.parse(stdout.trim())).toMatchObject({
+      id: 0,
+      error: { code: -32_000 },
+    })
+    expect(stdout).toContain("HTTP 401")
+    expect(stderr).toContain(
+      "[maximal-mcp-broker] ADAPTER_CONNECT_FAILED status=401",
+    )
+  } finally {
+    await refusing.stop(true)
+  }
+}, 30_000)

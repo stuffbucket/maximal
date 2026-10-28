@@ -43,6 +43,64 @@ export const parseAdapterUrl = (value: string): URL => {
 
 /** Upper bound on the DELETE, so an unreachable Maximal can't hold up exit. */
 const END_SESSION_TIMEOUT_MS = 2_000
+/** How long an adapter that couldn't connect reads stdin for requests to
+ *  answer with the reason, before it exits. */
+const ANSWER_FAILURE_WAIT_MS = 1_000
+
+/** Why connecting failed, for the client: the HTTP status, or the code. */
+const failureReason = (error: unknown): string => {
+  for (
+    let cause: unknown = error, depth = 0;
+    cause && depth < 8;
+    cause = (cause as { cause?: unknown }).cause, depth += 1
+  ) {
+    const status = (cause as { status?: unknown }).status
+    if (typeof status === "number") return `HTTP ${status}`
+  }
+  return error instanceof Error ? error.message.slice(0, 200) : String(error)
+}
+
+/**
+ * Answer each request the client has sent (usually its `initialize`) with a
+ * JSON-RPC error that says why, so the client shows a reason rather than a
+ * server that closed without a word. Reads stdin for a moment, then stops.
+ */
+export const answerPendingRequests = async (message: string): Promise<void> => {
+  let buffered = ""
+  const onData = (chunk: Buffer | string) => {
+    buffered += chunk.toString()
+    for (
+      let end = buffered.indexOf("\n");
+      end !== -1;
+      end = buffered.indexOf("\n")
+    ) {
+      const line = buffered.slice(0, end).trim()
+      buffered = buffered.slice(end + 1)
+      let parsed: { id?: unknown; method?: unknown }
+      try {
+        parsed = JSON.parse(line) as { id?: unknown; method?: unknown }
+      } catch {
+        continue
+      }
+      const { id, method } = parsed
+      if (
+        typeof method === "string"
+        && (typeof id === "string" || typeof id === "number")
+      ) {
+        process.stdout.write(
+          `${JSON.stringify({ jsonrpc: "2.0", id, error: { code: -32_000, message } })}\n`,
+        )
+      }
+    }
+  }
+  process.stdin.on("data", onData)
+  await delay(ANSWER_FAILURE_WAIT_MS)
+  process.stdin.off("data", onData)
+  process.stdin.pause()
+  await new Promise<void>((resolve) => {
+    process.stdout.write("", () => resolve())
+  })
+}
 
 const ADAPTER_IDENTITY = { name: "maximal-mcp-broker", version: "0.0.0" }
 
@@ -72,20 +130,29 @@ export const runStdioAdapter = async (
         headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
       },
     })
-  const { client, transport } = await retryWhileUnreachable(async () => {
-    const attempt = new ResumableTransport(openTransport)
-    const candidate = new Client(ADAPTER_IDENTITY, {
-      capabilities: {},
-      versionNegotiation: resolveVersionNegotiation("auto"),
-    })
-    try {
-      await candidate.connect(attempt)
-    } catch (error) {
-      await candidate.close().catch(() => undefined)
-      throw error
-    }
-    return { client: candidate, transport: attempt }
-  }, Date.now() + RECONNECT_WINDOW_MS)
+  let connected: { client: Client; transport: ResumableTransport }
+  try {
+    connected = await retryWhileUnreachable(async () => {
+      const attempt = new ResumableTransport(openTransport)
+      const candidate = new Client(ADAPTER_IDENTITY, {
+        capabilities: {},
+        versionNegotiation: resolveVersionNegotiation("auto"),
+      })
+      try {
+        await candidate.connect(attempt)
+      } catch (error) {
+        await candidate.close().catch(() => undefined)
+        throw error
+      }
+      return { client: candidate, transport: attempt }
+    }, Date.now() + RECONNECT_WINDOW_MS)
+  } catch (error) {
+    await answerPendingRequests(
+      `Maximal's MCP endpoint ${url.pathname} isn't available (${failureReason(error)}). Check that Maximal is running and that this server is on in Maximal's Settings.`,
+    )
+    throw error
+  }
+  const { client, transport } = connected
 
   let ending: Promise<void> | undefined
   const endSession = (): Promise<void> => {
