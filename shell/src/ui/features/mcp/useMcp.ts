@@ -33,16 +33,6 @@ const SIGNING_IN = new Set<WorkIqStatus["signIn"]>(["waiting", "restarting"]);
 /** Accepting the EULA runs a Work IQ command and may restart the broker. */
 const WORKIQ_TIMEOUT_MS = 60_000;
 
-/** Said by the panel when Windows wouldn't let Maximal make sure the
- *  servers stop when it does, so it didn't start them. */
-export const CONTAINMENT_UNAVAILABLE: Problem = {
-  title: "MCP servers couldn't start",
-  detail:
-    "Maximal only runs MCP servers when it can make sure they stop when Maximal does, and Windows didn't allow that this time. Restarting Maximal tries again. Your choices here are kept.",
-  remedy: "restart",
-  technical: "MCP_BROKER_CONTAINMENT_UNAVAILABLE",
-};
-
 export interface McpToggleResult {
   ok: boolean;
   problem?: Problem;

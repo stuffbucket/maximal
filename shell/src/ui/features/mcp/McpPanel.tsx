@@ -1,6 +1,8 @@
+import { t } from "../../../i18n";
+
 import { McpCatalogCard } from "./McpCatalogCard";
 import { McpEndpointCard } from "./McpEndpointCard";
-import { CONTAINMENT_UNAVAILABLE, useMcp } from "./useMcp";
+import { useMcp } from "./useMcp";
 import type { McpBrokerHealth } from "../../../proxy/client";
 import { Button } from "../../components/Button";
 import { EmptyState } from "../../components/EmptyState";
@@ -9,30 +11,35 @@ import { Stack } from "../../components/Stack";
 import type { Problem } from "../../problems";
 
 /** Things Maximal is handling on its own: a quiet line, nothing to click. */
-const QUIET: Partial<Record<McpBrokerHealth["state"], string>> = {
-  starting: "Starting your MCP servers…",
-  recovering: "Your MCP servers stopped unexpectedly. Maximal is restarting them.",
-};
+function quietLine(state: McpBrokerHealth["state"]): string | undefined {
+  if (state === "starting") return t("mcp-broker-starting");
+  if (state === "recovering") return t("mcp-broker-recovering");
+  return undefined;
+}
 
 /** States that need the user, or at least an explanation. */
 function brokerProblem(broker: McpBrokerHealth): Problem | null {
   if (broker.state === "stuck") {
     return {
-      title: "Your MCP servers keep stopping",
-      detail:
-        "Maximal restarted them several times in the last minute, then paused. It tries again by itself in a minute; restarting Maximal now usually gets them going.",
+      title: t("mcp-broker-stuck-title"),
+      detail: t("mcp-broker-stuck-detail"),
       remedy: "restart",
       technical: "Broker state: circuit-open (restart budget used up)",
     };
   }
   if (broker.state === "unavailable" && broker.problem === "containment-unavailable") {
-    return CONTAINMENT_UNAVAILABLE;
+    // Windows refused the Job Object that ends the servers with Maximal.
+    return {
+      title: t("mcp-broker-uncontained-title"),
+      detail: t("mcp-broker-uncontained-detail"),
+      remedy: "none",
+      technical: "MCP_BROKER_CONTAINMENT_UNAVAILABLE",
+    };
   }
   if (broker.state === "unavailable") {
     return {
-      title: "MCP servers can't run on this install",
-      detail:
-        "The part of Maximal that runs them is missing. Reinstalling Maximal fixes this; your settings are kept.",
+      title: t("mcp-broker-missing-title"),
+      detail: t("mcp-broker-missing-detail"),
       remedy: "none",
       technical: "MCP_BROKER_EXECUTABLE_NOT_FOUND",
     };
@@ -56,7 +63,7 @@ export function McpPanel(): JSX.Element {
     cancelWorkIqSignIn,
   } = useMcp();
   const brokerIssue = broker ? brokerProblem(broker) : null;
-  const quiet = broker ? QUIET[broker.state] : undefined;
+  const quiet = broker ? quietLine(broker.state) : undefined;
   const canAdd = !problem;
 
   return (

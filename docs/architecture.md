@@ -344,7 +344,9 @@ reports the broker's state (`ready` / `starting` / `failed`) in the response.
 
 When an endpoint is turned on and an app already has its own stdio entry with
 that id (Claude Code user scope, or Claude Desktop's Claude-3p or regular
-config), Maximal copies that entry's command, args, working directory, and
+config; on Windows the regular one is in `%APPDATA%\Claude`, or for the
+Microsoft Store app in `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude`),
+Maximal copies that entry's command, args, working directory, and
 non-secret environment into the endpoint once, so the broker runs the same
 server. The app's own entry stays untouched; secret-looking environment names
 are not copied and are reported. Maximal's own adapter is never adopted.

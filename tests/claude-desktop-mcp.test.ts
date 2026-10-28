@@ -14,7 +14,7 @@ import {
   claudeDesktopConfigPath,
   createClaudeDesktopMcp,
   isOwnedMcpEntry,
-  regularClaudeDesktopConfigPath,
+  regularClaudeDesktopConfigPaths,
 } from "~/apps/claude-desktop/mcp"
 
 const BROKER = "/Applications/Maximal.app/Contents/MacOS/maximal-mcp-broker"
@@ -249,15 +249,66 @@ describe("Claude Desktop existing entries", () => {
   })
 })
 
-describe("regularClaudeDesktopConfigPath", () => {
+describe("regularClaudeDesktopConfigPaths", () => {
   test("is beside Claude-3p on macOS", () => {
-    expect(regularClaudeDesktopConfigPath(home, "darwin")).toBe(regularConfig())
+    expect(
+      regularClaudeDesktopConfigPaths({ home, platform: "darwin" }),
+    ).toEqual([regularConfig()])
   })
 
-  test("is in %APPDATA% on Windows, not beside Claude-3p in %LOCALAPPDATA%", () => {
-    const appData = process.env.APPDATA ?? path.join(home, "AppData", "Roaming")
-    expect(regularClaudeDesktopConfigPath(home, "win32")).toBe(
+  test("is in %APPDATA% on Windows, then in each Store app's redirected copy", () => {
+    const appData = path.join(home, "Roaming")
+    const localAppData = path.join(home, "Local")
+    const store = path.join(localAppData, "Packages", "Claude_pzs8sxrjxfjjc")
+    fs.mkdirSync(store, { recursive: true })
+    fs.mkdirSync(path.join(localAppData, "Packages", "Other_1"))
+    expect(
+      regularClaudeDesktopConfigPaths({
+        home,
+        platform: "win32",
+        appData,
+        localAppData,
+      }),
+    ).toEqual([
       path.join(appData, "Claude", "claude_desktop_config.json"),
+      path.join(
+        store,
+        "LocalCache",
+        "Roaming",
+        "Claude",
+        "claude_desktop_config.json",
+      ),
+    ])
+  })
+
+  test("finds the user's entry in the Store app's config on Windows", () => {
+    const localAppData = path.join(home, "Local")
+    const file = path.join(
+      localAppData,
+      "Packages",
+      "Claude_pzs8sxrjxfjjc",
+      "LocalCache",
+      "Roaming",
+      "Claude",
+      "claude_desktop_config.json",
     )
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(
+      file,
+      JSON.stringify({ mcpServers: { workiq: { command: "workiq.exe" } } }),
+    )
+    const windows = createClaudeDesktopMcp({
+      home,
+      resolveBrokerPath: () => BROKER,
+      available: () => Promise.resolve(true),
+      regularConfig: {
+        platform: "win32",
+        appData: path.join(home, "Roaming"),
+        localAppData,
+      },
+    })
+    expect(windows.existingStdioEntry?.("workiq", [])).toMatchObject({
+      command: "workiq.exe",
+    })
   })
 })
