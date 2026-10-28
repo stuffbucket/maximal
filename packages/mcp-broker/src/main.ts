@@ -355,7 +355,11 @@ const main = async (): Promise<void> => {
     } finally {
       restoreDiagnostics()
     }
-    return
+    // Done serving. A server that didn't exit when it was closed can still
+    // hold pipes to this process and keep it running: on Windows one started
+    // through cmd.exe outlives the cmd.exe that was ended. Exit instead,
+    // which on Windows also ends the Job Object and that server with it.
+    process.exit(process.exitCode ?? 0)
   }
   if (mode === "stdio-adapter") {
     const restoreDiagnostics = installSanitizedDependencyDiagnostics()
