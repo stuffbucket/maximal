@@ -29,8 +29,8 @@ export async function safeInvoke(cmd: string): Promise<boolean> {
 }
 
 /**
- * Whether "Update to X.Y.Z" installs the update in place (the Windows app).
- * False on macOS and in a plain browser, where the button opens the download
+ * Whether "Update to X.Y.Z" installs the update in place (the Windows and
+ * macOS apps). False in a plain browser, where the button opens the download
  * page.
  */
 export async function updateInstallsInPlace(): Promise<boolean> {
@@ -60,8 +60,8 @@ const INSTALL_UPDATE_OUTCOMES: ReadonlyArray<InstallUpdateOutcome> = [
  * download, install and relaunch. `onDownloading` fires once the user
  * confirms. A failed install is reported by the shell itself, which then
  * opens the download page. Resolves "unavailable" where updates don't install
- * in place (macOS, a plain browser), so the caller opens the download page.
- * Never resolves after a successful install: the installer exits the app.
+ * in place (a plain browser), so the caller opens the download page. Never
+ * resolves after a successful install: the app relaunches.
  */
 export async function installUpdate(
   onDownloading: () => void,

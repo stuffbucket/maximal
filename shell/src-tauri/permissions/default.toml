@@ -85,11 +85,11 @@ commands.allow = ["set_dock_visibility"]
 
 [[permission]]
 identifier = "allow-update-installs-in-place"
-description = "Report whether 'Update to X.Y.Z' installs in place on this build (Windows) or opens the download page."
+description = "Report whether 'Update to X.Y.Z' installs in place on this build (Windows, macOS) or opens the download page."
 commands.allow = ["update_installs_in_place"]
 
 [[permission]]
 identifier = "allow-install-update"
-description = "Run the in-place update from the Settings window's 'Update to X.Y.Z' button: a native confirm naming the version, then download, verify, install, and relaunch. Windows only; elsewhere it returns 'unavailable' and the webview opens the download page."
+description = "Run the in-place update from the Settings window's 'Update to X.Y.Z' button: a native confirm naming the version, then download, verify, install, and relaunch. Where updates don't install in place it returns 'unavailable' and the webview opens the download page."
 commands.allow = ["install_update"]
 

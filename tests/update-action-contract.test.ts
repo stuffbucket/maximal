@@ -1,10 +1,10 @@
 /**
  * Contract for the in-app update action: the topbar "Update to X.Y.Z" button
  * in the combined Settings/Dashboard window and the tray item. Both read the
- * sidecar's update-status. On Windows they install the update in place (a
- * native confirm, then the shell's signed-update flow); elsewhere they send
- * the user to the download page root. Neither checks github.com for updates
- * or points at the retired /maximal path.
+ * sidecar's update-status. On Windows and macOS they install the update in
+ * place (a native confirm, then the shell's signed-update flow); elsewhere they
+ * send the user to the download page root. Neither checks github.com for
+ * updates or points at the retired /maximal path.
  */
 
 import { describe, expect, test } from "bun:test"
@@ -73,15 +73,32 @@ describe("topbar update button", () => {
 })
 
 describe("in-place update (shell)", () => {
-  test("is Windows-only; macOS keeps opening the download page", () => {
+  test("runs on Windows and macOS; other builds open the download page", () => {
     expect(SHELL_LIB_RS).toContain(
-      'const IN_PLACE_UPDATE: bool = cfg!(target_os = "windows");',
+      'const IN_PLACE_UPDATE: bool = cfg!(any(target_os = "windows", target_os = "macos"));',
     )
     expect(SHELL_LIB_RS).toContain("let builder = if IN_PLACE_UPDATE {")
     // Without in-place support the tray item and the button open the page.
     expect(SHELL_LIB_RS).toMatch(
       /fn start_update\(app: &AppHandle\) \{\s+if !IN_PLACE_UPDATE \{\s+open_update_url\(app\);/u,
     )
+  })
+
+  test("a macOS app that can't replace itself fails over before asking", () => {
+    const flow = SHELL_LIB_RS.slice(
+      SHELL_LIB_RS.indexOf("async fn install_in_place("),
+      SHELL_LIB_RS.indexOf("async fn confirm_update("),
+    )
+    expect(flow.indexOf("update_location_problem()")).toBeGreaterThan(-1)
+    expect(flow.indexOf("update_location_problem()")).toBeLessThan(
+      flow.indexOf("confirm_update(app"),
+    )
+    // Stops the sidecar before relaunching on macOS, and before the
+    // installer replaces it on Windows.
+    expect(flow.match(/stop_sidecar_for_update\(app\)\.await/gu)).toHaveLength(
+      2,
+    )
+    expect(flow).toContain("app.restart();")
   })
 
   test("checks the CDN desktop manifest, never github.com", () => {

@@ -8,9 +8,9 @@
  * an unchanged manifest costs a 304 with no body.
  *
  * This only decides whether to offer an update. Installing is not done here:
- * the Windows desktop app installs in place (the Tauri shell's signed updater,
- * which reads its own manifest at mxml.sh/updates/desktop/<channel>.json); every
- * other build sends the user to `https://mxml.sh` (the download page that
+ * the Windows and macOS desktop apps install in place (the Tauri shell's signed
+ * updater, which reads its own manifest at mxml.sh/updates/desktop/<channel>.json);
+ * every other build sends the user to `https://mxml.sh` (the download page that
  * routes to the right artifact / package manager) rather than a raw release
  * asset, because the running build could be a brew/npm/MSI install that
  * shouldn't be clobbered by a bare binary swap.

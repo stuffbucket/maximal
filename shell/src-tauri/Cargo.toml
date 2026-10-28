@@ -37,13 +37,13 @@ tauri-plugin-notification = "2"
 # `deep-link` feature is opt-in scaffolding for a future deep-link
 # integration; it's cheap (no extra runtime cost) and harmless today.
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
-# In-place updates: downloads the signed NSIS installer named by
-# https://mxml.sh/updates/desktop/<channel>.json, verifies its minisign
-# signature against `plugins.updater.pubkey`, and runs it. Registered and
-# used on Windows only (IN_PLACE_UPDATE in src/lib.rs); macOS keeps opening
-# the download page until its updater bundles are signed with the same key.
-# Default features minus `zip`, which only unpacks the legacy
-# v1-compatible bundles we don't publish.
+# In-place updates: downloads the signed update named by
+# https://mxml.sh/updates/desktop/<channel>.json (the NSIS installer on
+# Windows, the .app.tar.gz bundle on macOS), verifies its minisign signature
+# against `plugins.updater.pubkey`, and installs it. Registered and used on
+# Windows and macOS (IN_PLACE_UPDATE in src/lib.rs). Default features minus
+# `zip`, which only unpacks the legacy v1-compatible Windows/Linux archives
+# we don't publish; macOS's .tar.gz support doesn't depend on it.
 tauri-plugin-updater = { version = "2.14", default-features = false, features = ["rustls-tls", "system-proxy"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

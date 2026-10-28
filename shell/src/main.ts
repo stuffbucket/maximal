@@ -940,15 +940,15 @@ function offeredUpdate(data: UpdateStatusResponse | null): string | null {
  */
 let updatePhase: "idle" | "confirming" | "downloading" = "idle";
 
-/** Whether the button installs in place (the Windows app) rather than
- *  opening the download page. Read once from the shell at boot. */
+/** Whether the button installs in place (the Windows and macOS apps) rather
+ *  than opening the download page. Read once from the shell at boot. */
 let updateInPlace = false;
 
 /**
  * The topbar "Update to X.Y.Z" button. Hidden unless a newer release is
- * offered (or an update is already running). On Windows clicking installs
- * in place after a native confirm; elsewhere it opens the download page in
- * the system browser.
+ * offered (or an update is already running). In the Windows and macOS apps
+ * clicking installs in place after a native confirm; elsewhere it opens the
+ * download page in the system browser.
  */
 function renderUpdateAction(data: UpdateStatusResponse | null): void {
   const wrap = document.querySelector<HTMLElement>("[data-update-action]");
@@ -977,7 +977,7 @@ async function startUpdate(): Promise<void> {
   renderUpdateAction(lastUpdateStatus);
   // The shell confirms, installs and relaunches, or on failure tells the
   // user and opens the download page itself. "unavailable" means this build
-  // doesn't install in place (macOS, a plain browser).
+  // doesn't install in place (a plain browser, a Linux build).
   const outcome = await installUpdate(() => {
     updatePhase = "downloading";
     renderUpdateAction(lastUpdateStatus);
