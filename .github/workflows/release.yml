@@ -940,6 +940,10 @@ jobs:
     needs: binaries
     runs-on: windows-2022
     timeout-minutes: 20
+    # Holds the updater signing secrets; the environment deploys from v* tags
+    # only. Reruns are safe: this job needs binaries -> release, whose
+    # Validate step rejects any non-tag ref first.
+    environment: release
     permissions:
       contents: write
     env:
