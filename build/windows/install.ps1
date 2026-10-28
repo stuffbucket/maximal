@@ -93,7 +93,10 @@ function Add-UserPath {
   param([string]$Dir)
   $current = [Environment]::GetEnvironmentVariable('PATH', 'User')
   if ($null -eq $current) { $current = '' }
-  $segments = $current -split ';' | Where-Object { $_ -ne '' }
+  # @() keeps this an array. With a single PATH entry (Windows' default user
+  # PATH) the pipeline returns a plain string, and `+ $Dir` below would glue
+  # the two together with no separator.
+  $segments = @($current -split ';' | Where-Object { $_ -ne '' })
   if ($segments -notcontains $Dir) {
     $new = ($segments + $Dir) -join ';'
     [Environment]::SetEnvironmentVariable('PATH', $new, 'User')
