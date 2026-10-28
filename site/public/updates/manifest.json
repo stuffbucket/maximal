@@ -1,6 +1,6 @@
 {
   "schema": 2,
-  "generated": "2026-10-27T16:49:26.423Z",
+  "generated": "2026-10-28T05:03:29.723Z",
   "channels": {
     "stable": {
       "version": "0.4.48",
@@ -26,6 +26,33 @@
         "windows-install-ps1": {
           "name": "install.ps1",
           "url": "https://github.com/stuffbucket/maximal/releases/download/v0.4.48/install.ps1"
+        }
+      }
+    },
+    "rc": {
+      "version": "0.5.0-rc.2",
+      "tag": "v0.5.0-rc.2",
+      "notes": "https://github.com/stuffbucket/maximal/releases/tag/v0.5.0-rc.2",
+      "downloads": {
+        "macos-arm64-dmg": {
+          "name": "maximal-v0.5.0-rc.2-darwin-arm64.dmg",
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.2/maximal-v0.5.0-rc.2-darwin-arm64.dmg"
+        },
+        "windows-x64-setup": {
+          "name": "maximal-v0.5.0-rc.2-windows-x64-setup.exe",
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.2/maximal-v0.5.0-rc.2-windows-x64-setup.exe"
+        },
+        "windows-x64-msi": {
+          "name": "maximal-v0.5.0-rc.2-windows-x64.msi",
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.2/maximal-v0.5.0-rc.2-windows-x64.msi"
+        },
+        "windows-x64-zip": {
+          "name": "maximal-v0.5.0-rc.2-windows-x64.zip",
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.2/maximal-v0.5.0-rc.2-windows-x64.zip"
+        },
+        "windows-install-ps1": {
+          "name": "install.ps1",
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.2/install.ps1"
         }
       }
     }
