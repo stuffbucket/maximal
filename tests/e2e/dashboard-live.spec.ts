@@ -3,7 +3,7 @@
 // harness (mock backend) rather than a real proxy:
 //
 //   bun run ui:harness -- --port 4747      # in another terminal
-//   bunx playwright test tests/e2e/dashboard-live.spec.ts
+//   bun run test:e2e
 //
 // Set UI_HARNESS_URL for a harness on another port. Each test switches the
 // harness to its `live-sessions` scenario first. Screenshots are written under
@@ -222,6 +222,133 @@ test("the context meter warns from 75%, turns critical from 90%, and Other reque
   const other = context("other:claude-desktop")
   await expect(other.locator(".meter")).toBeHidden()
   await expect(other).toHaveText("—")
+})
+
+test("the context meter marks a lower ceiling and the compaction point, and its tooltip credits each number", async ({
+  page,
+}) => {
+  await open(page)
+  // The harness's warm Codex session: Codex's window 272,000, Copilot's
+  // ceiling 128,000, compaction at 115,200, 119,000 used.
+  const codex = page.locator(
+    '.session-row[data-session-id="0c8d3e17-9b42-4f6a-a1d5-7e3b2f8c9d04"] .session-context',
+  )
+  await expect(codex).toHaveAttribute(
+    "title",
+    "119,000 of 128,000, Copilot's limit (272,000 is the size Codex uses for this model)\nCompacts at 115,200",
+  )
+  await expect(codex).toContainText("93%")
+
+  /** Where a tick's centre sits along its meter, from 0 to 1. */
+  const along = async (tick: "ceiling" | "compact"): Promise<number> => {
+    const meter = await codex.locator(".meter").boundingBox()
+    const mark = await codex.locator(`.meter__tick--${tick}`).boundingBox()
+    if (!meter || !mark) throw new Error(`no ${tick} tick`)
+    return (mark.x + mark.width / 2 - meter.x) / meter.width
+  }
+  await expect(codex.locator(".meter__tick--ceiling")).toBeVisible()
+  await expect(codex.locator(".meter__tick--compact")).toBeVisible()
+  expect(await along("ceiling")).toBeCloseTo(128_000 / 272_000, 1)
+  expect(await along("compact")).toBeCloseTo(115_200 / 272_000, 1)
+  // The fill ends between the two: past compaction, short of the ceiling.
+  const fill = await codex.locator(".meter__fill").boundingBox()
+  const meter = await codex.locator(".meter").boundingBox()
+  if (!fill || !meter) throw new Error("no meter")
+  expect(fill.width / meter.width).toBeCloseTo(119_000 / 272_000, 1)
+
+  // A Claude session whose window is the ceiling: no ticks, one source.
+  const claude = page.locator(
+    '.session-row[data-session-id="b7e20d64-1a95-4c3f-8e72-5f9a0c4d6e21"] .session-context',
+  )
+  await expect(claude).toHaveAttribute(
+    "title",
+    "60,000 of 200,000 (the size Maximal lists for this model)",
+  )
+  await expect(claude.locator(".meter__tick--ceiling")).toBeHidden()
+  await expect(claude.locator(".meter__tick--compact")).toBeHidden()
+})
+
+test("past 20 cold sessions the rest fold under Show N more, which survives a poll", async ({
+  page,
+}) => {
+  await routeSessions(page, (view) => {
+    const template = view.sessions.find(
+      (s) => s.state === "cold" && !s.id.startsWith("other:"),
+    )
+    if (!template) throw new Error("the harness has no cold session")
+    const extra = Array.from({ length: 30 }, (_, i) => ({
+      ...template,
+      id: `cold-extra-${String(i).padStart(2, "0")}`,
+      last_request_at_ms: template.last_request_at_ms - (i + 1) * 60_000,
+    }))
+    return { ...view, sessions: [...view.sessions, ...extra] }
+  })
+  await open(page)
+
+  /** Session rows below the divider (the button's row has no session id). */
+  const coldShown = async (): Promise<number> => {
+    const order = await tableOrder(page)
+    return order.slice(order.indexOf("|") + 1).filter(Boolean).length
+  }
+  // The harness has three cold rows of its own: 33 in all.
+  const more = page.locator(".session-more__button")
+  await expect(more).toHaveText("Show 13 more")
+  expect(await coldShown()).toBe(20)
+
+  // A poll later it's the same.
+  await page.waitForResponse((res) => isSessions(res.url()))
+  await page.waitForTimeout(200)
+  await expect(more).toHaveText("Show 13 more")
+  expect(await coldShown()).toBe(20)
+
+  await more.focus()
+  await page.keyboard.press("Enter")
+  await expect(more).toHaveCount(0)
+  expect(await coldShown()).toBe(33)
+  // The first row it revealed has the focus.
+  const order = await tableOrder(page)
+  const firstRevealed = order[order.indexOf("|") + 21]
+  expect(
+    await page.evaluate<string | undefined>(
+      "document.activeElement?.dataset?.sessionId",
+    ),
+  ).toBe(firstRevealed)
+})
+
+test("a long cache countdown reads in hours and a time from another day names the day", async ({
+  page,
+}) => {
+  const now = Date.now()
+  const yesterday = new Date(now)
+  yesterday.setDate(yesterday.getDate() - 1)
+  await routeSessions(page, (view) => ({
+    ...view,
+    sessions: view.sessions.map((s) =>
+      s.id === "e92a5b08-3c71-4d0e-b6f4-8a1d7c2e5f39" ?
+        {
+          ...s,
+          // A 24-hour Responses retention, two minutes in.
+          cache: {
+            ...s.cache,
+            ttl_s: 86_400,
+            expires_at_ms: now + 86_400_000 - 120_000,
+          },
+          started_at_ms: yesterday.getTime(),
+        }
+      : s,
+    ),
+  }))
+  await open(page)
+  const row = page.locator(
+    '.session-row[data-session-id="e92a5b08-3c71-4d0e-b6f4-8a1d7c2e5f39"]',
+  )
+  await expect(row.locator(".session-cell--state")).toContainText(
+    "Warm, cold in about 24 hr",
+  )
+  const day = new Intl.DateTimeFormat("en", { weekday: "short" }).format(
+    yesterday,
+  )
+  await expect(row).toContainText(`started ${day} `)
 })
 
 test("a read that hangs is given up, reported, and the polling carries on", async ({

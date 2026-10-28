@@ -58,6 +58,7 @@
     "storybook:build": "mise -C packages/storybook exec -- pnpm build",
     "storybook:check": "bun scripts/ui-harness.ts --check && mise -C packages/storybook exec -- pnpm typecheck && mise -C packages/storybook exec -- pnpm contrast",
     "storybook:install": "mise -C packages/storybook exec -- pnpm install --frozen-lockfile",
+    "test:e2e": "playwright test tests/e2e/",
     "tokens:generate": "bun scripts/generate-css-tokens.ts",
     "typecheck": "tsc",
     "ui:harness": "bun run build:ui && bun run scripts/ui-harness.ts",
