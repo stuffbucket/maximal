@@ -28,6 +28,7 @@ import { state } from "~/lib/runtime-state/state"
 import {
   createCopilotTokenUsageRecorder,
   normalizeResponsesUsage,
+  resolveTokenUsageSessionId,
   type UsageTokens,
   withCopilotCost,
 } from "~/lib/token-usage"
@@ -100,12 +101,16 @@ export const handleResponses = async (c: Context) => {
   const requestId = generateRequestIdFromPayload({ messages: payload.input })
   logger.debug("Generated request ID:", requestId)
 
-  const sessionId = payload.prompt_cache_key?.trim() || ""
+  // The recorder and the request context share this one resolved id.
+  const sessionId = resolveTokenUsageSessionId(
+    undefined,
+    payload.prompt_cache_key,
+  )
   logger.debug("Extracted session ID:", sessionId)
   const interactionId = getUUID(requestId)
   const recordUsage = createCopilotTokenUsageRecorder({
     endpoint: "responses",
-    fallbackSessionId: sessionId,
+    sessionId,
     model: payload.model,
   })
 

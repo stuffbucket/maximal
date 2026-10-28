@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import consola from "consola"
 import { Hono } from "hono"
 
 import { CODEX_KEY_LABEL } from "../src/apps/codex/config"
@@ -56,6 +57,12 @@ const createModels = () =>
         supported_endpoints: ["/responses", "/chat/completions"],
       },
       {
+        capabilities: { family: "gpt", limits, supports: {}, type: "chat" },
+        id: "chat-only",
+        model_picker_enabled: true,
+        supported_endpoints: ["/chat/completions"],
+      },
+      {
         capabilities: { family: "claude", limits, supports: {}, type: "chat" },
         id: "claude-test",
         model_picker_enabled: true,
@@ -64,7 +71,7 @@ const createModels = () =>
     ],
   }) as unknown as typeof state.models
 
-function createApp(): Hono {
+function buildApp(): Hono {
   const app = new Hono()
   app.use(traceIdMiddleware)
   app.use(async (_c, next) => {
@@ -79,6 +86,8 @@ function createApp(): Hono {
   return app
 }
 
+const app = buildApp()
+
 function snapshotUsage(): void {
   seenUsage = { ...requestContext.getStore()?.usage }
 }
@@ -92,14 +101,59 @@ const responsesResult = (): Record<string, unknown> => ({
   usage: { input_tokens: 5, output_tokens: 2, total_tokens: 7 },
 })
 
-const post = (app: Hono, path: string, body: unknown) =>
+const post = (
+  path: string,
+  body: unknown,
+  headers: Record<string, string> = {},
+) =>
   app.request(path, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...headers },
     body: JSON.stringify(body),
   })
 
-async function recordedSessionIds(app: Hono): Promise<Array<string>> {
+const chatResult = () => ({
+  id: "chatcmpl-1",
+  object: "chat.completion",
+  created: 0,
+  model: "chat-only",
+  choices: [
+    {
+      index: 0,
+      message: { role: "assistant", content: "ok" },
+      finish_reason: "stop",
+    },
+  ],
+  usage: { prompt_tokens: 3, completion_tokens: 1, total_tokens: 4 },
+})
+
+const claudeResult = () => ({
+  id: "msg_1",
+  type: "message",
+  role: "assistant",
+  content: [{ type: "text", text: "ok" }],
+  model: "claude-test",
+  stop_reason: "end_turn",
+  stop_sequence: null,
+  usage: { input_tokens: 1, output_tokens: 1 },
+})
+
+const stubFetch = (result: () => unknown): void => {
+  ;(globalThis as unknown as { fetch: typeof fetch }).fetch = (() => {
+    snapshotUsage()
+    return Promise.resolve(Response.json(result()))
+  }) as unknown as typeof fetch
+}
+
+const oneHourSystem = [
+  {
+    type: "text",
+    text: "be brief",
+    cache_control: { type: "ephemeral", ttl: "1h" },
+  },
+]
+
+async function recordedSessionIds(): Promise<Array<string>> {
   const response = await app.request(
     "/token-usage/events?period=day&page=1&page_size=10",
   )
@@ -110,6 +164,7 @@ async function recordedSessionIds(app: Hono): Promise<Array<string>> {
 }
 
 beforeEach(async () => {
+  consola.level = 1
   process.env[DB_PATH_ENV] = ":memory:"
   writeConfig({ modelMappings: [] })
   await closeUsageStore()
@@ -128,6 +183,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  consola.level = 3
   await closeUsageStore()
   Reflect.deleteProperty(process.env, DB_PATH_ENV)
   __resetCreateResponsesForTests()
@@ -145,9 +201,8 @@ describe("responses route usage metadata", () => {
   })
 
   test("keys the session on prompt_cache_key, not the last user message", async () => {
-    const app = createApp()
     for (const text of ["first question", "a different question"]) {
-      const response = await post(app, "/v1/responses", {
+      const response = await post("/v1/responses", {
         model: "gpt-test",
         input: [{ role: "user", content: text }],
         prompt_cache_key: "conv-1",
@@ -155,7 +210,7 @@ describe("responses route usage metadata", () => {
       expect(response.status).toBe(200)
     }
 
-    expect(await recordedSessionIds(app)).toEqual(["conv-1", "conv-1"])
+    expect(await recordedSessionIds()).toEqual(["conv-1", "conv-1"])
     expect(seenUsage).toMatchObject({
       sessionId: "conv-1",
       model: "gpt-test",
@@ -166,15 +221,14 @@ describe("responses route usage metadata", () => {
   })
 
   test("has no session without a prompt_cache_key", async () => {
-    const app = createApp()
-    await post(app, "/v1/responses", { model: "gpt-test", input: "hello" })
+    await post("/v1/responses", { model: "gpt-test", input: "hello" })
 
-    expect(await recordedSessionIds(app)).toEqual([""])
+    expect(await recordedSessionIds()).toEqual([""])
     expect(seenUsage?.sessionId).toBe("")
   })
 
   test("uses the 24h retention for the cache lifetime", async () => {
-    await post(createApp(), "/v1/responses", {
+    await post("/v1/responses", {
       model: "gpt-test",
       input: "hello",
       prompt_cache_retention: "24h",
@@ -184,7 +238,7 @@ describe("responses route usage metadata", () => {
   })
 
   test("flags a request that carries a compaction item", async () => {
-    await post(createApp(), "/v1/responses", {
+    await post("/v1/responses", {
       model: "gpt-test",
       input: [
         { type: "compaction", id: "cmp_1", encrypted_content: "x" },
@@ -201,14 +255,13 @@ describe("responses route usage metadata", () => {
       modelMappings: [],
       responsesApiContextManagementModels: ["gpt-test"],
     })
-    const app = createApp()
 
-    await post(app, "/v1/responses", { model: "gpt-test", input: "hello" })
+    await post("/v1/responses", { model: "gpt-test", input: "hello" })
     expect(seenUsage?.context?.compactAtTokens).toBe(
       resolveResponsesCompactThreshold(128_000),
     )
 
-    await post(app, "/v1/responses", {
+    await post("/v1/responses", {
       model: "gpt-test",
       input: "hello",
       context_management: [{ type: "compaction", compact_threshold: 1000 }],
@@ -220,67 +273,37 @@ describe("responses route usage metadata", () => {
 
 describe("chat completions route usage metadata", () => {
   test("records no session and a five minute cache lifetime", async () => {
-    ;(globalThis as unknown as { fetch: typeof fetch }).fetch = (() => {
-      snapshotUsage()
-      return Promise.resolve(
-        Response.json({
-          id: "chatcmpl-1",
-          object: "chat.completion",
-          created: 0,
-          model: "gpt-test",
-          choices: [],
-          usage: { prompt_tokens: 3, completion_tokens: 1, total_tokens: 4 },
-        }),
-      )
-    }) as unknown as typeof fetch
+    stubFetch(chatResult)
 
-    const app = createApp()
-    const response = await post(app, "/v1/chat/completions", {
-      model: "gpt-test",
+    const response = await post("/v1/chat/completions", {
+      model: "chat-only",
       messages: [{ role: "user", content: "hello" }],
     })
     expect(response.status).toBe(200)
 
-    expect(await recordedSessionIds(app)).toEqual([""])
+    expect(await recordedSessionIds()).toEqual([""])
     expect(seenUsage).toMatchObject({
       sessionId: "",
-      model: "gpt-test",
+      model: "chat-only",
       cacheTtlS: 300,
       cacheTtlRequested: false,
     })
   })
 })
 
+const messagesBody = (model: string, extra: Record<string, unknown> = {}) => ({
+  model,
+  max_tokens: 16,
+  system: oneHourSystem,
+  messages: [{ role: "user", content: "hi" }],
+  ...extra,
+})
+
 describe("messages route usage metadata", () => {
   test("reads the cache lifetime off the client's cache_control", async () => {
-    ;(globalThis as unknown as { fetch: typeof fetch }).fetch = (() => {
-      snapshotUsage()
-      return Promise.resolve(
-        Response.json({
-          id: "msg_1",
-          type: "message",
-          role: "assistant",
-          content: [{ type: "text", text: "ok" }],
-          model: "claude-test",
-          stop_reason: "end_turn",
-          stop_sequence: null,
-          usage: { input_tokens: 1, output_tokens: 1 },
-        }),
-      )
-    }) as unknown as typeof fetch
+    stubFetch(claudeResult)
 
-    const response = await post(createApp(), "/v1/messages", {
-      model: "claude-test",
-      max_tokens: 16,
-      system: [
-        {
-          type: "text",
-          text: "be brief",
-          cache_control: { type: "ephemeral", ttl: "1h" },
-        },
-      ],
-      messages: [{ role: "user", content: "hi" }],
-    })
+    const response = await post("/v1/messages", messagesBody("claude-test"))
     expect(response.status).toBe(200)
 
     expect(seenUsage).toMatchObject({
@@ -294,25 +317,104 @@ describe("messages route usage metadata", () => {
 
   test("follows the upstream model's rule when routed to a GPT model", async () => {
     writeConfig({ modelMappings: [], promptCacheRetention: "24h" })
-    ;(globalThis as unknown as { fetch: typeof fetch }).fetch = (() => {
-      snapshotUsage()
-      return Promise.resolve(Response.json(responsesResult()))
-    }) as unknown as typeof fetch
+    stubFetch(responsesResult)
 
-    const response = await post(createApp(), "/v1/messages", {
-      model: "gpt-test",
-      max_tokens: 16,
-      system: [
-        {
-          type: "text",
-          text: "be brief",
-          cache_control: { type: "ephemeral", ttl: "1h" },
-        },
-      ],
-      messages: [{ role: "user", content: "hi" }],
-    })
+    const response = await post("/v1/messages", messagesBody("gpt-test"))
     expect(response.status).toBe(200)
 
-    expect(seenUsage?.cacheTtlS).toBe(86_400)
+    expect(seenUsage).toMatchObject({
+      cacheTtlS: 86_400,
+      cacheTtlRequested: false,
+    })
+  })
+
+  test("uses the automatic-cache rule when routed to chat completions", async () => {
+    stubFetch(chatResult)
+
+    const response = await post("/v1/messages", messagesBody("chat-only"))
+    expect(response.status).toBe(200)
+
+    expect(seenUsage).toMatchObject({
+      cacheTtlS: 300,
+      cacheTtlRequested: false,
+    })
+  })
+
+  test("uses the automatic-cache rule on the web-tools path", async () => {
+    stubFetch(chatResult)
+
+    const response = await post(
+      "/v1/messages",
+      messagesBody("chat-only", {
+        tools: [{ type: "web_search_20250305", name: "web_search" }],
+      }),
+    )
+    expect(response.status).toBe(200)
+
+    expect(seenUsage).toMatchObject({
+      cacheTtlS: 300,
+      cacheTtlRequested: false,
+    })
+  })
+})
+
+describe("usage.sessionId matches the recorded session_id", () => {
+  const legacyUserId = "user_abc_account_xyz_session_sess-9"
+
+  test("messages: the metadata session id, not the hashed root id", async () => {
+    stubFetch(claudeResult)
+    await post("/v1/messages", {
+      model: "claude-test",
+      max_tokens: 16,
+      metadata: { user_id: legacyUserId },
+      messages: [{ role: "user", content: "hi" }],
+    })
+
+    expect(seenUsage?.sessionId).toBe("sess-9")
+    expect(await recordedSessionIds()).toEqual(["sess-9"])
+  })
+
+  test("messages: x-session-affinity wins", async () => {
+    stubFetch(claudeResult)
+    await post(
+      "/v1/messages",
+      {
+        model: "claude-test",
+        max_tokens: 16,
+        metadata: { user_id: legacyUserId },
+        messages: [{ role: "user", content: "hi" }],
+      },
+      { "x-session-affinity": "affinity-1" },
+    )
+
+    expect(seenUsage?.sessionId).toBe("affinity-1")
+    expect(await recordedSessionIds()).toEqual(["affinity-1"])
+  })
+
+  test("responses: x-session-affinity wins over prompt_cache_key", async () => {
+    __setCreateResponsesForTests((() => {
+      snapshotUsage()
+      return Promise.resolve(responsesResult())
+    }) as never)
+    await post(
+      "/v1/responses",
+      { model: "gpt-test", input: "hello", prompt_cache_key: "conv-1" },
+      { "x-session-affinity": "affinity-2" },
+    )
+
+    expect(seenUsage?.sessionId).toBe("affinity-2")
+    expect(await recordedSessionIds()).toEqual(["affinity-2"])
+  })
+
+  test("chat completions: x-session-affinity wins", async () => {
+    stubFetch(chatResult)
+    await post(
+      "/v1/chat/completions",
+      { model: "chat-only", messages: [{ role: "user", content: "hello" }] },
+      { "x-session-affinity": "affinity-3" },
+    )
+
+    expect(seenUsage?.sessionId).toBe("affinity-3")
+    expect(await recordedSessionIds()).toEqual(["affinity-3"])
   })
 })

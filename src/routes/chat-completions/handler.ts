@@ -25,9 +25,11 @@ import { state } from "~/lib/runtime-state/state"
 import {
   createCopilotTokenUsageRecorder,
   normalizeOpenAIUsage,
+  resolveTokenUsageSessionId,
   type UsageTokens,
   withCopilotCost,
 } from "~/lib/token-usage"
+import { responsesCacheTtlSeconds } from "~/lib/token-usage/request-meta"
 import { isNonStreaming } from "~/routes/streaming-predicates"
 import {
   createChatCompletions,
@@ -38,7 +40,6 @@ import {
 const logger = createHandlerLogger("chat-completions-handler")
 
 const CHAT_COMPLETIONS_ENDPOINT = "/chat/completions"
-const CHAT_COMPLETIONS_CACHE_TTL_S = 300
 
 export async function handleCompletion(c: Context) {
   await checkRateLimit(state)
@@ -88,17 +89,20 @@ export async function handleCompletion(c: Context) {
   logger.debug("Generated request ID:", requestId)
 
   // Chat completions carries no conversation id, so the recorded session is
-  // empty; the interaction id sent upstream stays per-request.
+  // empty unless the client sent x-session-affinity; the interaction id sent
+  // upstream stays per-request. The recorder and the request context share
+  // one resolved id so they can't disagree.
   const interactionId = getUUID(requestId)
+  const usageSessionId = resolveTokenUsageSessionId(undefined, "")
   setRequestUsage({
-    sessionId: "",
+    sessionId: usageSessionId,
     model: payload.model,
-    cacheTtlS: CHAT_COMPLETIONS_CACHE_TTL_S,
+    cacheTtlS: responsesCacheTtlSeconds(undefined),
     cacheTtlRequested: false,
   })
   const recordUsage = createCopilotTokenUsageRecorder({
     endpoint: "chat_completions",
-    fallbackSessionId: "",
+    sessionId: usageSessionId,
     model: payload.model,
   })
 

@@ -22,6 +22,7 @@ import {
   normalizeAnthropicUsage,
   normalizeOpenAIUsage,
   normalizeResponsesUsage,
+  resolveTokenUsageSessionId,
   type TokenUsageEndpoint,
   type UsageTokens,
   withCopilotCost,
@@ -88,6 +89,11 @@ export const handleWithChatCompletions = async (
 ) => {
   const { logger, subagentMarker, requestId, sessionId, compactType } = options
   const openAIPayload = translateToOpenAI(anthropicPayload)
+  // Chat completions caches automatically; the client's markers don't apply.
+  setRequestUsage({
+    cacheTtlS: responsesCacheTtlSeconds(undefined),
+    cacheTtlRequested: false,
+  })
   const recordUsage = createCopilotUsageRecorder({
     endpoint: "chat_completions",
     fallbackSessionId: sessionId,
@@ -287,6 +293,7 @@ function applyPromptCacheRetention(payload: ResponsesPayload): void {
   }
   setRequestUsage({
     cacheTtlS: responsesCacheTtlSeconds(payload.prompt_cache_retention),
+    cacheTtlRequested: false,
   })
 }
 
@@ -411,6 +418,14 @@ export const handleWithMessagesApi = async (
   return c.json(response)
 }
 
+/** The session id a Messages request's usage is recorded under. The recorder
+ *  and the request context both use this, so they can't disagree. */
+export const resolveMessagesUsageSessionId = (
+  payload: AnthropicMessagesPayload,
+  fallbackSessionId?: string,
+): string =>
+  resolveTokenUsageSessionId(getMetadataSessionId(payload), fallbackSessionId)
+
 const createCopilotUsageRecorder = (options: {
   endpoint: TokenUsageEndpoint
   fallbackSessionId?: string
@@ -419,9 +434,11 @@ const createCopilotUsageRecorder = (options: {
 }): ((usage: UsageTokens) => void) =>
   createCopilotTokenUsageRecorder({
     endpoint: options.endpoint,
-    fallbackSessionId: options.fallbackSessionId,
     model: options.model,
-    sessionId: getMetadataSessionId(options.payload),
+    sessionId: resolveMessagesUsageSessionId(
+      options.payload,
+      options.fallbackSessionId,
+    ),
   })
 
 const getMetadataSessionId = (

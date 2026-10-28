@@ -31,12 +31,14 @@ import { deriveUsageClient } from "~/lib/token-usage/client"
 import {
   anthropicCacheTtlSeconds,
   resolveContextWindow,
+  responsesCacheTtlSeconds,
 } from "~/lib/token-usage/request-meta"
 
 import {
   handleWithChatCompletions,
   handleWithMessagesApi,
   handleWithResponsesApi,
+  resolveMessagesUsageSessionId,
 } from "./api-flows"
 import {
   getCompactType,
@@ -74,11 +76,12 @@ function resolveCopilotVariant(
 function recordMessagesUsageMeta(input: {
   c: Context
   payload: AnthropicMessagesPayload
-  sessionId: string | undefined
+  sessionId: string
   selectedModel: Model | undefined
   isCompact: boolean
+  viaWebTools: boolean
 }): void {
-  const { c, payload, sessionId, selectedModel, isCompact } = input
+  const { c, payload, sessionId, selectedModel, isCompact, viaWebTools } = input
   const store = requestContext.getStore()
   if (!store) return
 
@@ -87,11 +90,13 @@ function recordMessagesUsageMeta(input: {
   const longContext =
     c.req.header("anthropic-beta")?.includes("context-1m-2025-08-07") ?? false
   setRequestUsage({
-    sessionId: sessionId ?? "",
+    sessionId,
     model: payload.model,
-    cacheTtlS,
+    // Web tools always go upstream over Responses or chat completions (never
+    // native Messages) with no retention set: the automatic-cache rule.
+    cacheTtlS: viaWebTools ? responsesCacheTtlSeconds(undefined) : cacheTtlS,
     // The lifetime came from the client when it marked anything for caching.
-    cacheTtlRequested: cacheTtlS > 0,
+    cacheTtlRequested: !viaWebTools && cacheTtlS > 0,
     isCompact,
     context: resolveContextWindow({
       client,
@@ -228,9 +233,10 @@ export async function handleCompletion(c: Context) {
   recordMessagesUsageMeta({
     c,
     payload: anthropicPayload,
-    sessionId,
+    sessionId: resolveMessagesUsageSessionId(anthropicPayload, sessionId),
     selectedModel,
     isCompact: compactType === COMPACT_REQUEST,
+    viaWebTools: webToolPolicy.declarations.length > 0,
   })
 
   if (webToolPolicy.declarations.length > 0) {
