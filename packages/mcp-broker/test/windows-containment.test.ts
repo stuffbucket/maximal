@@ -170,15 +170,6 @@ class Broker {
     )
     this.#sequence += 1
   }
-
-  exited(): Promise<number | null> {
-    if (this.child.exitCode !== null) {
-      return Promise.resolve(this.child.exitCode)
-    }
-    return new Promise((resolveExit) => {
-      this.child.once("exit", (code) => resolveExit(code))
-    })
-  }
 }
 
 /**
@@ -217,13 +208,11 @@ const brokerWithRunningServer = async (parentPid?: number) => {
     { name: "containment-client", version: "0.0.0" },
     { versionNegotiation: { mode: "legacy" } },
   )
-  await client.connect(
-    new StreamableHTTPClientTransport(
-      new URL(`http://127.0.0.1:${ready.payload.port}/mcp/fixture`),
-      { requestInit: { headers: { Authorization: `Bearer ${API_KEY}` } } },
-    ),
-    { timeout: 30_000 },
+  const transport = new StreamableHTTPClientTransport(
+    new URL(`http://127.0.0.1:${ready.payload.port}/mcp/fixture`),
+    { requestInit: { headers: { Authorization: `Bearer ${API_KEY}` } } },
   )
+  await client.connect(transport, { timeout: 30_000 })
   expect(
     await client.callTool({ name: "ordinary", arguments: {} }),
   ).toMatchObject({ content: [{ type: "text", text: "ordinary-ok" }] })
@@ -235,15 +224,37 @@ const brokerWithRunningServer = async (parentPid?: number) => {
   // The session's instance: cmd.exe, the server, and its child.
   const session = pids.slice(-3)
   expect(session.every((pid) => isRunning(pid))).toBe(true)
-  return { broker, client, pids: () => server.pids() }
+  return { broker, client, transport, pids: () => server.pids() }
 }
 
 const expectAllGone = async (pids: Array<number>): Promise<void> => {
-  await waitFor(
-    () => pids.every((pid) => !isRunning(pid)),
-    GONE_WITHIN_MS,
-    `processes ${pids.filter((pid) => isRunning(pid)).join(", ")} to end`,
-  )
+  try {
+    await waitFor(
+      () => pids.every((pid) => !isRunning(pid)),
+      GONE_WITHIN_MS,
+      "every server process to end",
+    )
+  } catch {
+    const left = pids.filter((pid) => isRunning(pid))
+    throw new Error(`still running after ${GONE_WITHIN_MS}ms: ${left.join(", ")}`)
+  }
+}
+
+/** The broker's exit, or a failure that says what it wrote to stderr. */
+const expectExit = async (broker: Broker, timeoutMs: number) => {
+  try {
+    const { child } = broker
+    await waitFor(
+      () => child.exitCode !== null || child.signalCode !== null,
+      timeoutMs,
+      "exit",
+    )
+  } catch {
+    throw new Error(
+      `the broker was still running after ${timeoutMs}ms; stderr:\n${broker.stderr}`,
+    )
+  }
+  return broker.child.exitCode
 }
 
 const windows = process.platform === "win32"
@@ -253,7 +264,7 @@ describe.skipIf(!windows)("Windows containment", () => {
     const { broker, pids } = await brokerWithRunningServer()
     // TerminateProcess, as the supervisor's last resort does.
     broker.child.kill()
-    await broker.exited()
+    await expectExit(broker, GONE_WITHIN_MS)
     await expectAllGone(pids())
   }, 60_000)
 
@@ -274,19 +285,23 @@ describe.skipIf(!windows)("Windows containment", () => {
     expect(broker.child.exitCode).toBeNull()
 
     parent.kill()
-    await waitFor(
-      () => broker.child.exitCode !== null,
-      GONE_WITHIN_MS,
-      "the broker to notice its parent is gone",
-    )
+    // A second to notice, then up to three for its servers to close.
+    await expectExit(broker, 8_000)
+    expect(broker.stderr).toContain("PARENT_EXITED")
     await expectAllGone(pids())
   }, 60_000)
 
   it("ends everything after a clean shutdown too", async () => {
-    const { broker, client, pids } = await brokerWithRunningServer()
+    const { broker, client, transport, pids } = await brokerWithRunningServer()
+    // End the session first, as an adapter does, so nothing holds the
+    // broker's HTTP server open.
+    await transport.terminateSession()
     await client.close()
     broker.send("shutdown", {})
-    expect(await broker.exited()).toBe(0)
+    expect(await broker.take("response")).toMatchObject({
+      payload: { ok: true },
+    })
+    expect(await expectExit(broker, 10_000)).toBe(0)
     await expectAllGone(pids())
   }, 60_000)
 })

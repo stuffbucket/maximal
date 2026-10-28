@@ -380,7 +380,8 @@ starts nothing and exits with `BROKER_CONTAINMENT_EXIT_CODE` (78); the
 supervisor reports `unavailable` with the problem `containment-unavailable`
 instead of restarting it, and Settings says the servers couldn't start. A
 crashed sidecar is covered by `--parent-pid`: the broker checks every second
-and shuts down when its parent is gone. Stdio servers are started with
+and, when its parent is gone, closes its servers and exits, after at most 3
+seconds even if an open session holds its HTTP server. Stdio servers are started with
 `cross-spawn` (inside the MCP SDK), which runs a `.cmd` or `.bat` command
 through `cmd.exe /d /s /c` with its arguments escaped, rather than
 refusing it the way Node does without a shell. The Windows behavior is

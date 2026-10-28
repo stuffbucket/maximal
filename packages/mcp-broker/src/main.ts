@@ -26,6 +26,9 @@ import {
 
 const BINARY_VERSION = "0.0.0"
 const MESSAGE_DEADLINE_MS = 10_000
+/** How long a broker told to stop by a signal, or whose parent is gone,
+ *  waits for its servers to close before it exits anyway. */
+const TERMINATE_GRACE_MS = 3_000
 
 interface ServeOptions {
   generation: string
@@ -166,7 +169,13 @@ const serve = async (options: ServeOptions): Promise<void> => {
     running = undefined
   }
 
+  let forcedExit: ReturnType<typeof setTimeout> | undefined
   const terminate = () => {
+    // A session's open event stream can hold the HTTP server's close
+    // indefinitely; exit anyway once the grace period is up. On Windows,
+    // exiting ends the Job Object and every server with it.
+    forcedExit ??= setTimeout(() => process.exit(0), TERMINATE_GRACE_MS)
+    forcedExit.unref()
     void close().finally(() => {
       process.exitCode = 0
       process.stdin.destroy()
@@ -181,6 +190,8 @@ const serve = async (options: ServeOptions): Promise<void> => {
       try {
         process.kill(options.parentPid as number, 0)
       } catch {
+        if (parentWatchdog) clearInterval(parentWatchdog)
+        process.stderr.write("[maximal-mcp-broker] PARENT_EXITED\n")
         terminate()
       }
     }, 1_000)

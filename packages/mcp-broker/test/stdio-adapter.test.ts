@@ -147,7 +147,9 @@ describe("adapter shutdown ends its broker session", () => {
     await waitUntil(() => !isRunning(pid))
   })
 
-  it("when the client sends SIGTERM", async () => {
+  // Windows has no SIGTERM: kill() there is TerminateProcess, which runs no
+  // handler. Clients end the adapter by closing stdin, covered above.
+  it.skipIf(process.platform === "win32")("when the client sends SIGTERM", async () => {
     const { client, transport } = await connectAdapter(
       await startFixtureBroker(),
     )
