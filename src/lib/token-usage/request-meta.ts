@@ -71,6 +71,35 @@ export function responsesCacheTtlSeconds(
 }
 
 /**
+ * Codex's window comes from its catalog entry; a model with no usable entry
+ * (no match, no catalog, or no numeric `context_window`) falls back to the
+ * listing value.
+ */
+function codexWindow(input: {
+  model: Model
+  listed: number | undefined
+  codexCatalog: Array<CodexModelInfo> | undefined
+  maximalCompacts: boolean | undefined
+}): RequestContextWindow {
+  const { model, listed, codexCatalog, maximalCompacts } = input
+  const { limits } = model.capabilities
+  const entry = codexCatalog?.find((candidate) => candidate.slug === model.id)
+  const window = entry?.context_window
+  const entryCompact = entry?.auto_compact_token_limit
+  const catalogCompact = typeof entryCompact === "number" ? entryCompact : null
+  const fromCatalog = typeof window === "number"
+  return {
+    windowTokens: fromCatalog ? window : (listed ?? null),
+    ceilingTokens: limits.max_prompt_tokens ?? null,
+    compactAtTokens:
+      maximalCompacts ?
+        resolveResponsesCompactThreshold(limits.max_prompt_tokens)
+      : catalogCompact,
+    source: fromCatalog ? "codex-catalog" : "model-listing",
+  }
+}
+
+/**
  * The context window a request ran under. The ceiling is always Copilot's
  * prompt limit; the window and compaction point depend on which client sent it.
  */
@@ -97,20 +126,7 @@ export function resolveContextWindow(input: {
   const listed = limits.max_context_window_tokens ?? limits.max_prompt_tokens
 
   if (client === "codex") {
-    const entry = codexCatalog?.find((candidate) => candidate.slug === model.id)
-    const window = entry?.context_window
-    const entryCompact = entry?.auto_compact_token_limit
-    const catalogCompact =
-      typeof entryCompact === "number" ? entryCompact : null
-    return {
-      windowTokens: typeof window === "number" ? window : null,
-      ceilingTokens,
-      compactAtTokens:
-        maximalCompacts ?
-          resolveResponsesCompactThreshold(limits.max_prompt_tokens)
-        : catalogCompact,
-      source: "codex-catalog",
-    }
+    return codexWindow({ model, listed, codexCatalog, maximalCompacts })
   }
 
   if (client === "claude-code" && longContext) {

@@ -5,6 +5,7 @@ import type { AnthropicMessagesPayload } from "~/lib/models/anthropic-types"
 import type { Model } from "~/services/copilot/get-models"
 
 import {
+  type RequestContextWindow,
   anthropicCacheTtlSeconds,
   resolveContextWindow,
   responsesCacheTtlSeconds,
@@ -186,20 +187,53 @@ describe("resolveContextWindow", () => {
     })
   })
 
-  test("codex with no catalog entry has an unknown window", () => {
+  test("codex without a usable catalog entry falls back to the listing", () => {
+    const listed = model({
+      max_context_window_tokens: 200000,
+      max_prompt_tokens: 128000,
+    })
+    const expected: RequestContextWindow = {
+      windowTokens: 200000,
+      ceilingTokens: 128000,
+      compactAtTokens: null,
+      source: "model-listing",
+    }
+    // No entry for the model.
     expect(
       resolveContextWindow({
         client: "codex",
-        model: model({ max_prompt_tokens: 128000 }),
+        model: listed,
+        longContext: false,
+        codexCatalog: [{ slug: "other", context_window: 1 }],
+      }),
+    ).toEqual(expected)
+    // Empty and undefined catalogs.
+    expect(
+      resolveContextWindow({
+        client: "codex",
+        model: listed,
         longContext: false,
         codexCatalog: [],
       }),
-    ).toEqual({
-      windowTokens: null,
-      ceilingTokens: 128000,
-      compactAtTokens: null,
-      source: "codex-catalog",
-    })
+    ).toEqual(expected)
+    expect(
+      resolveContextWindow({
+        client: "codex",
+        model: listed,
+        longContext: false,
+      }),
+    ).toEqual(expected)
+    // An entry without a numeric context_window keeps its compact limit.
+    expect(
+      resolveContextWindow({
+        client: "codex",
+        model: listed,
+        longContext: false,
+        codexCatalog: [
+          { slug: "m", context_window: null, auto_compact_token_limit: 90000 },
+        ],
+      }),
+    ).toEqual({ ...expected, compactAtTokens: 90000 })
   })
 
   test("claude-code with long context runs at 1M", () => {
