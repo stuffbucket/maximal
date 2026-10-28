@@ -92,10 +92,12 @@
           </div>
         </div>
         <!-- Content area for dynamically rendered data. The bento (quotas
-             beside the live card) stays put: main.ts fills the quota column
-             and the rest from strings on every render, while the live card
-             is built once into #live-sessions and updated in place, so its
-             animation, hover and focus survive those renders. -->
+             beside the live card) and the session table stay put: main.ts
+             fills the quota column and the rest from strings on every render,
+             while the live card (#live-sessions) and the session table
+             (#sessions-table) are built once by live/controller.ts and updated
+             in place, so the selection, animation, hover and focus survive
+             those renders. -->
         <main id="content-area">
           <div id="dashboard-bento" class="dashboard-bento" hidden>
             <section id="usage-quotas" class="dashboard-bento__col dashboard-bento__quota"></section>
@@ -107,6 +109,13 @@
               <div id="live-sessions"></div>
             </section>
           </div>
+          <section id="sessions" class="sessions" aria-labelledby="sessions-title" hidden>
+            <h2 id="sessions-title" class="section__title">
+              <i data-lucide="list" aria-hidden="true"></i>
+              <span data-i18n="dashboard-sessions-title">Sessions</span>
+            </h2>
+            <div id="sessions-table"></div>
+          </section>
           <div id="dashboard-rest"></div>
         </main>
       </div>

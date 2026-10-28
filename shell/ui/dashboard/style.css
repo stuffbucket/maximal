@@ -605,34 +605,6 @@ html[data-embedded="true"] .lang-picker {
   gap: var(--space-4);
 }
 
-/* Rate meter: tokens/min + a sparkline of the last 15 minutes. One series
-   in the accent; the figure is text ink. */
-.rate {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: var(--space-1);
-}
-.rate__spark {
-  width: calc(var(--space-8) * 2);
-  height: var(--size-xl);
-  overflow: visible;
-}
-.rate__spark polyline {
-  stroke: var(--accent);
-  stroke-width: var(--border-width-thick);
-  stroke-linejoin: round;
-  stroke-linecap: round;
-}
-.rate__spark circle {
-  fill: var(--accent);
-}
-.rate__value {
-  font-size: var(--text-sm);
-  color: var(--text-base-color);
-  font-variant-numeric: tabular-nums;
-}
-
 .totals__hero-value {
   font-size: var(--text-3xl);
   font-weight: var(--weight-lg);
@@ -877,6 +849,92 @@ html[data-embedded="true"] .lang-picker {
   to {
     box-shadow: 0 0 0 var(--space-2) transparent;
   }
+}
+
+/* A failed sessions read: a line of error text in the card, not a box (no
+   card in a card). */
+.live__error {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--status-error);
+}
+.live__error[hidden] {
+  display: none;
+}
+.live__error-title {
+  margin-right: var(--space-1);
+  font-weight: var(--weight-lg);
+}
+
+/* ---- Session table ----
+   The per-request table's frame and cells (Tailwind classes in table.ts),
+   plus what only this table has: the legend swatch, the "Cache cold" divider,
+   a selected row (an accent rule and a pale accent tint, never color alone:
+   the selected trace is drawn in full and the others dim), muted cold rows,
+   and the context meter, which is the quota cards' .meter at row size. */
+.sessions {
+  margin-bottom: var(--space-5);
+}
+.session-row {
+  cursor: pointer;
+}
+.session-row > td {
+  color: var(--text-muted);
+  vertical-align: top;
+}
+.session-strong {
+  color: var(--text-strong);
+}
+.session-row--cold .session-strong {
+  color: var(--text-muted);
+}
+.session-row--preview > td,
+.session-row:hover > td {
+  background-color: color-mix(in srgb, var(--accent) 6%, var(--surface-card));
+}
+.session-row--selected > td {
+  background-color: color-mix(in srgb, var(--accent) 12%, var(--surface-card));
+}
+.session-row--selected > td:first-child {
+  box-shadow: inset var(--border-width-thick) 0 0 var(--accent);
+}
+.session-row:focus-visible {
+  outline: var(--border-width-thick) solid var(--accent);
+  outline-offset: calc(var(--border-width-thick) * -1);
+}
+.session-cell--swatch {
+  width: var(--space-2);
+  padding-right: 0;
+}
+.session-swatch {
+  display: block;
+  width: var(--space-2);
+  height: var(--space-2);
+  margin-top: var(--space-1);
+  border-radius: var(--radius-pill);
+  background-color: var(--swatch-color);
+}
+.session-divider > td {
+  padding: var(--space-1) var(--space-4);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  background-color: var(--surface-base);
+}
+.session-context {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.session-context > .meter {
+  flex: none;
+  width: var(--space-8);
+}
+.session-context > .meter[hidden],
+.session-context__icon[hidden] {
+  display: none;
+}
+.session-context .meter-state {
+  font-size: inherit;
 }
 
 /* Reduced motion is a contract, not a hint (principle #5). */

@@ -11,6 +11,8 @@ import { borderPeriodS, shiftWindow, tracePath } from "./geometry";
 
 export interface LiveCard {
   update(view: SessionsResponse, colors: Map<string, number | null>, selected: string | null): void;
+  /** Say the sessions couldn't be read (`null` clears it). What's drawn stays. */
+  showError(message: string | null): void;
 }
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -108,7 +110,16 @@ export function mountLiveCard(root: HTMLElement): LiveCard {
   marker.append(pulse, html("span", "live__marker-label", "dashboard-live-marker"));
   foot.append(counts, marker);
 
-  inner.append(head, plot, foot);
+  // A failed read, worded like the page's other errors (renderError in main.ts):
+  // the generic title, then what went wrong. Text, not a box: no card in a card.
+  const error = html("p", "live__error");
+  error.setAttribute("role", "alert");
+  error.hidden = true;
+  const errorTitle = html("span", "live__error-title");
+  const errorMessage = html("span", "live__error-message");
+  error.append(errorTitle, errorMessage);
+
+  inner.append(head, error, plot, foot);
   root.append(inner);
 
   const byId = new Map<string, TraceState>();
@@ -233,6 +244,12 @@ export function mountLiveCard(root: HTMLElement): LiveCard {
   }).observe(plot);
 
   return {
+    showError(message) {
+      error.hidden = message === null;
+      errorTitle.textContent = message === null ? "" : t("dashboard-error-generic");
+      errorMessage.textContent = message ?? "";
+    },
+
     update(view, colors, selected) {
       const instant = reducedMotion();
       const traced = view.sessions.filter(isTraced);

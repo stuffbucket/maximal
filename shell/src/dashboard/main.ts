@@ -9,7 +9,8 @@
 // catalog and a locale picker is wired into the header.
 import { resolveLocale, t } from "../i18n";
 import { applyI18n, wireLocalePicker } from "../i18n/apply";
-import { mountLiveCard } from "./live/card";
+import { fetchJson } from "./fetch-json";
+import { startLiveSessions } from "./live/controller";
 
 // Tailwind + Lucide are loaded as classic global <script>s in index.html, so
 // they exist on `window` at runtime; the bundle references them as ambient
@@ -48,9 +49,6 @@ interface TokenUsageSummary {
   totals?: TokenUsageTotals;
   range?: TokenUsageRange;
   byModel: TokenUsageModelRow[];
-  /** Tokens per minute for the last 15 minutes, oldest first; the last is
-   *  the current, partial minute. Absent from older sidecars. */
-  recent_minutes?: Array<{ start_ms: number; total_tokens: number }>;
 }
 interface TokenUsageEvent {
   created_at_utc: string;
@@ -98,12 +96,13 @@ const tokenUsagePeriodButtons = Array.from(
   tokenUsagePeriodGroup.querySelectorAll<HTMLButtonElement>("[data-period]"),
 );
 const contentArea = document.getElementById("content-area") as HTMLElement;
-// The bento stays in the page across renders: render() fills the quota
-// column and the rest of the page, never the live card (see index.html).
+// The bento and the session table stay in the page across renders: render()
+// fills the quota column and the rest of the page, never the live card or the
+// session table, which the live sessions controller updates in place (see
+// index.html and live/controller.ts).
 const bento = document.getElementById("dashboard-bento") as HTMLElement;
 const quotaColumn = document.getElementById("usage-quotas") as HTMLElement;
 const restArea = document.getElementById("dashboard-rest") as HTMLElement;
-mountLiveCard(document.getElementById("live-sessions") as HTMLElement);
 
 // The dashboard always talks to the proxy that served it — same
 // origin, no user-typed URL. Each fetch is a relative path; the
@@ -343,46 +342,6 @@ function buildTokenUsageEventsUrl(period: Period, page: number): string {
     String(DEFAULT_TOKEN_USAGE_EVENTS_PAGE_SIZE),
   );
   return url.toString();
-}
-
-async function fetchJson<T>(url: string): Promise<T> {
-  // No client-side credentials: the proxy exempts the dashboard
-  // endpoints from API-key auth when the request comes from
-  // loopback. See createAuthMiddleware in src/lib/request-auth.ts.
-  const response = await fetch(url);
-
-  if (!response.ok) {
-    let message = response.statusText || "Request failed";
-
-    try {
-      const contentType = response.headers.get("content-type") || "";
-      if (contentType.includes("application/json")) {
-        const payload = (await response.json()) as {
-          error?: { message?: string };
-          message?: string;
-        };
-        const apiMessage = payload?.error?.message || payload?.message;
-        if (typeof apiMessage === "string" && apiMessage.trim()) {
-          message = apiMessage.trim();
-        }
-      } else {
-        const text = await response.text();
-        if (text.trim()) {
-          message = text.trim();
-        }
-      }
-    } catch (error) {
-      console.warn("Could not parse error response:", getErrorMessage(error));
-    }
-
-    const error = new Error(
-      `Request failed with status ${response.status}: ${message}`,
-    ) as Error & { status?: number };
-    error.status = response.status;
-    throw error;
-  }
-
-  return (await response.json()) as T;
 }
 
 function syncUrlState(): void {
@@ -846,7 +805,6 @@ function renderTokenUsageSection(): string {
             <div class="totals__hero-value">${formatNumber(totals.total_tokens)}</div>
             <div class="totals__label">${escapeHtml(t("dashboard-col-total"))}</div>
           </div>
-          ${renderRateMeter(summary?.recent_minutes)}
         </div>
         <dl class="totals__parts">
           ${renderTotalsPart(t("dashboard-col-input"), formatNumber(totals.input_tokens))}
@@ -892,40 +850,6 @@ function renderTokenUsageSection(): string {
       </div>
     </section>
   `;
-}
-
-/**
- * "Are tokens coming in?" at a glance: tokens per minute (averaged over the
- * last 5 minutes, so one burst doesn't spike it) and a sparkline of the last
- * 15 minutes. One series, so no legend; the label says what it is.
- */
-function renderRateMeter(
-  minutes: TokenUsageSummary["recent_minutes"],
-): string {
-  if (!minutes || minutes.length === 0) return "";
-  const values = minutes.map((m) => Math.max(0, m.total_tokens));
-  const lastFive = values.slice(-5);
-  const rate = Math.round(lastFive.reduce((a, b) => a + b, 0) / lastFive.length);
-
-  // 0..100 x 0..24 drawing space; the line hugs the bottom when idle.
-  const max = Math.max(...values, 1);
-  const step = values.length > 1 ? 100 / (values.length - 1) : 0;
-  const points = values
-    .map((v, i) => `${(i * step).toFixed(1)},${(22 - (v / max) * 20).toFixed(1)}`)
-    .join(" ");
-  const pointList = points.split(" ");
-  const last = pointList[pointList.length - 1]?.split(",") ?? ["100", "22"];
-  const label = t("dashboard-rate-sparkline-label");
-
-  return `
-          <div class="rate">
-            <svg class="rate__spark" viewBox="0 0 100 24" preserveAspectRatio="none" role="img" aria-label="${escapeHtml(label)}">
-              <title>${escapeHtml(label)}</title>
-              <polyline points="${points}" fill="none" vector-effect="non-scaling-stroke" />
-              <circle cx="${last[0]}" cy="${last[1]}" r="1.6" />
-            </svg>
-            <div class="rate__value">${escapeHtml(t("dashboard-rate-per-minute", { n: rate.toLocaleString() }))}</div>
-          </div>`;
 }
 
 /** One figure in the totals row: value over a muted label. The value is
@@ -1375,6 +1299,10 @@ function init(): void {
   // First paint: pull /usage quotas + initial token-usage page so the
   // page isn't blank for a few seconds while the live feed warms up.
   void fetchData();
+
+  // Live sessions poll their own endpoint in both modes (the Tauri channel
+  // carries only the summary).
+  startLiveSessions(contentArea);
 
   if (runningInTauri) {
     // Tauri mode: the Rust shell drives the token-usage feed via

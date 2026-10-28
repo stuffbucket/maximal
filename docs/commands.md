@@ -200,3 +200,18 @@ It shares its mock backend and fixtures with `bun run ui:harness`
 (`scripts/ui-harness-api.ts`, `scripts/ui-harness-fixtures.ts`). Use the harness
 to click through the whole app against one scenario, and Storybook to see
 each piece in each state side by side. Details: `packages/storybook/README.md`.
+
+## Browser tests (Playwright)
+
+`tests/e2e/*.spec.ts` drive the built UI in Chromium against the harness, for
+what happy-dom can't see: layout, hit targets, timing. They are not part of
+`bun test` (bunfig.toml ignores `tests/e2e/`) or CI.
+
+```sh
+bunx playwright install chromium               # once
+bun run ui:harness -- --port 4747              # terminal A (builds the UI first)
+bunx playwright test tests/e2e/                # terminal B; UI_HARNESS_URL for another port
+```
+
+Screenshots the specs take land in `test-results/` (gitignored) for you to
+look at; nothing is compared against a baseline.
