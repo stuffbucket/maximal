@@ -1,11 +1,28 @@
 import { AsyncLocalStorage } from "node:async_hooks"
 
+import type { RequestContextWindow } from "~/lib/token-usage/request-meta"
+
+/**
+ * Per-request usage metadata, filled in as the request moves through
+ * middleware and handlers and read back when its token usage is recorded.
+ */
+export interface RequestUsageMeta {
+  apiKeyLabel?: string | null
+  sessionId?: string
+  model?: string
+  cacheTtlS?: number
+  cacheTtlRequested?: boolean
+  isCompact?: boolean
+  context?: RequestContextWindow
+}
+
 export interface RequestContext {
   traceId: string
   startTime: number
   userAgent: string
   sessionAffinity: string | undefined
   parentSessionId: string | undefined
+  usage: RequestUsageMeta
 }
 
 const TRACE_ID_MAX_LENGTH = 64

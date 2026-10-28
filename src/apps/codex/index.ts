@@ -4,7 +4,7 @@ import { ensureApiKey } from "~/lib/auth/api-key-helper"
 
 import type { AppUninstallResult, ClientApp } from "../index"
 
-import { CodexConfigConflictError } from "./config"
+import { CODEX_KEY_LABEL, CodexConfigConflictError } from "./config"
 import { detectCodexInstallations, type CodexInstallation } from "./detect"
 import {
   applyCodexProvider,
@@ -52,7 +52,7 @@ function inspectProvider(
 }
 
 function enableProvider(options: ProviderOptions) {
-  ensureApiKey("codex")
+  ensureApiKey(CODEX_KEY_LABEL)
   try {
     applyCodexProvider(options)
   } catch (error) {
@@ -110,7 +110,7 @@ export function createCodexApp(options: CreateCodexAppOptions = {}): ClientApp {
     id: "codex",
     name: "Codex",
     kind: "config",
-    apiKeyLabel: "codex",
+    apiKeyLabel: CODEX_KEY_LABEL,
 
     detect() {
       return Promise.resolve(detectInstallations().length > 0)

@@ -53,6 +53,7 @@ describe("token usage storage", () => {
         sessionAffinity: "opencode-session",
         startTime: Date.now(),
         traceId: "trace-123",
+        usage: {},
         userAgent: "test",
       },
       () => {

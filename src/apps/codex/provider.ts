@@ -4,6 +4,7 @@ import path from "node:path"
 import {
   applyCodexConfigFile,
   type AppliedCodexConfigFile,
+  CODEX_KEY_LABEL,
   isCodexConfigFileConfigured,
   revertCodexConfigFile,
   type RevertedCodexConfigFile,
@@ -38,7 +39,7 @@ export function applyCodexProvider(
 ): AppliedCodexConfigFile {
   return applyCodexConfigFile(providerFilePath(options), {
     invocation: apiKeyHelperInvocation(
-      "codex",
+      CODEX_KEY_LABEL,
       options.execPath ?? process.execPath,
     ),
   })
