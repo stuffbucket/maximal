@@ -9,8 +9,9 @@
  * through the user's shell gets its own answer, whatever mix of env vars and
  * npmrc files produced it. The shell is login and interactive (`-lic`): a
  * registry exported from `~/.zshrc` (where most people put it) is only seen
- * by an interactive shell, and stdin is closed so nothing can wait on input. (Windows GUI apps inherit user environment
- * variables, so npm is run directly there.)
+ * by an interactive shell, and stdin is closed so nothing can wait on input.
+ * (Windows GUI apps inherit user environment variables, so npm runs through
+ * cmd.exe there.)
  *
  * Like `npmGlobalPrefix()` this is async and cached, filled at startup and
  * refreshed in the background; it never runs on a request path, and
@@ -42,6 +43,12 @@ const NONE: NpmLoginConfig = {
 /** Fixed script: nothing the user controls is interpolated into it. */
 const POSIX_SCRIPT =
   "npm config get registry; npm config get @microsoft:registry; npm prefix -g"
+
+const WINDOWS_SCRIPT =
+  "npm config get registry & npm config get @microsoft:registry & npm prefix -g"
+/** npm on Windows is slow (often about a second per call); this runs in the
+ *  background only. */
+const WINDOWS_TIMEOUT_MS = 8000
 
 /** npm prints the literal `undefined` for an unset key. */
 function cleanLine(line: string | undefined): string | null {
@@ -107,22 +114,20 @@ async function askLoginShell(d: Deps): Promise<NpmLoginConfig> {
   return NONE
 }
 
-async function askNpmDirectly(d: Deps): Promise<NpmLoginConfig> {
-  const get = async (args: Array<string>) => {
-    const result = await d.run("npm.cmd", args, RUN_OPTIONS)
-    return result.code === 0 ? cleanLine(result.stdout) : null
-  }
-  const [registry, scopeRegistry, prefix] = await Promise.all([
-    get(["config", "get", "registry"]),
-    get(["config", "get", "@microsoft:registry"]),
-    get(["prefix", "-g"]),
-  ])
-  return { registry, scopeRegistry, prefix }
+/** Windows: npm is a `.cmd` shim, which Node refuses to spawn without a
+ *  shell (CVE-2024-27980), so one fixed script runs through cmd.exe. */
+async function askCmd(d: Deps): Promise<NpmLoginConfig> {
+  const result = await d.run(
+    d.env.ComSpec ?? "cmd.exe",
+    ["/d", "/s", "/c", WINDOWS_SCRIPT],
+    { timeoutMs: WINDOWS_TIMEOUT_MS, closeStdin: true },
+  )
+  return parseNpmLoginOutput(result.stdout)
 }
 
 function lookup(): Promise<NpmLoginConfig> {
   const d = deps
-  const asked = d.platform === "win32" ? askNpmDirectly(d) : askLoginShell(d)
+  const asked = d.platform === "win32" ? askCmd(d) : askLoginShell(d)
   // A lookup orphaned by a test reset must not write into the fresh cache.
   const started: Promise<NpmLoginConfig> = asked
     .catch(() => NONE)

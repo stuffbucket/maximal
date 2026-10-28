@@ -244,8 +244,8 @@ has global installs and no npm is found, else npm. It also names the
 registry host the command downloads from. A GUI-launched Maximal lacks
 the terminal's environment, so npm itself is asked through the user's login
 shell (`"$SHELL" -lic 'npm config get registry; …; npm prefix -g'`; interactive so a
-registry exported from `~/.zshrc` is seen, `npm.cmd`
-directly on Windows; `src/lib/system/npm-login-config.ts`; async, cached,
+registry exported from `~/.zshrc` is seen, cmd.exe
+on Windows; `src/lib/system/npm-login-config.ts`; async, cached,
 refreshed in the background every ten minutes). The order is:
 `mcpBroker.catalog.npmRegistry` (it adds `--registry`, or `NPM_CONFIG_REGISTRY=`
 for mise, to the command, so it is authoritative), npm's
