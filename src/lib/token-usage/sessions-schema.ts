@@ -48,6 +48,8 @@ const Session = z.object({
     expires_at_ms: z.number().nullable(),
     /** estimated = an automatic cache (GPT) or a lifetime nobody asked for. */
     confidence: z.enum(["observed", "requested", "estimated"]),
+    /** The requested lifetime was seen failing, so ttl_s is cut to 5 min. */
+    downgraded: z.boolean(),
     last_cache_read_tokens: z.number(),
   }),
   context: z.object({

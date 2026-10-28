@@ -14,9 +14,12 @@ const FIVE_MINUTES_S = 300
 const RATE_MINUTES = 5
 const FLOW_WINDOW_MS = 60_000
 
-/** A session's next request after a gap, as evidence about its cache. */
+/** A session's next request on the same model after a gap, as evidence
+ *  about that model's prompt cache. */
 export interface Resume {
   model: string
+  /** From the earlier request's completion to the resuming request's
+   *  completion (both rows' `created_at_ms`). */
   gapMs: number
   /** The cache lifetime the resuming request asked for, in seconds. */
   requestedTtlS: number
@@ -25,23 +28,27 @@ export interface Resume {
   key?: string
 }
 
+/** Consecutive misses after which a model's longer lifetime is not trusted. */
+const MISSES_TO_DOWNGRADE = 2
+
 /**
  * What the proxy has seen of each model's prompt cache, kept in memory.
  *
  * A session that resumes after more than 5 minutes but within its requested
  * lifetime shows whether the upstream honored that lifetime: cached tokens
- * read means it did, none means it didn't. A model seen failing is treated as
- * 5 minutes from then on, so a countdown never claims more than was seen.
+ * read is a hit, none is a miss. Two misses in a row downgrade the model to 5
+ * minutes, so a countdown never claims more than was seen; one miss can be a
+ * plain eviction. A later hit restores the model.
  */
 export class CacheObservations {
   readonly #honored = new Set<string>()
-  readonly #failed = new Set<string>()
-  readonly #recorded = new Set<string>()
+  readonly #misses = new Map<string, number>()
+  #recorded = new Set<string>()
 
   /**
-   * Record one resume. `key` names the pair of requests it came from; a key
-   * already recorded is ignored, so feeding the same rows on every poll
-   * counts each resume once.
+   * Record one resume. Feed resumes oldest first, so "in a row" holds.
+   * `key` names the pair of requests it came from; a key already recorded is
+   * ignored, so feeding the same rows on every poll counts each resume once.
    */
   record(resume: Resume): void {
     const { model, gapMs, requestedTtlS, cacheReadTokens, key } = resume
@@ -50,22 +57,39 @@ export class CacheObservations {
       this.#recorded.add(key)
     }
     if (gapMs <= FIVE_MINUTES_S * 1000 || gapMs > requestedTtlS * 1000) return
-    if (cacheReadTokens > 0) this.#honored.add(model)
-    else this.#failed.add(model)
+    if (cacheReadTokens > 0) {
+      this.#honored.add(model)
+      this.#misses.set(model, 0)
+    } else {
+      this.#misses.set(model, (this.#misses.get(model) ?? 0) + 1)
+    }
+  }
+
+  /** Forget every recorded key not in `keys`. A build passes the keys of all
+   *  the resumes in its rows; rows only age out, so a dropped key never
+   *  comes back and the set stays the size of one window. */
+  retainKeys(keys: ReadonlySet<string>): void {
+    this.#recorded = new Set([...this.#recorded].filter((key) => keys.has(key)))
+  }
+
+  /** Whether a lifetime of `ttlS` on this model is cut to 5 minutes. */
+  isDowngraded(model: string, ttlS: number): boolean {
+    return (
+      ttlS > FIVE_MINUTES_S
+      && (this.#misses.get(model) ?? 0) >= MISSES_TO_DOWNGRADE
+    )
   }
 
   /** The lifetime to count down from: 5 minutes for a longer lifetime on a
-   *  model seen not to honor it, otherwise the lifetime itself. */
+   *  downgraded model, otherwise the lifetime itself. */
   effectiveTtlS(model: string, ttlS: number): number {
-    return this.#failed.has(model) && ttlS > FIVE_MINUTES_S ?
-        FIVE_MINUTES_S
-      : ttlS
+    return this.isDowngraded(model, ttlS) ? FIVE_MINUTES_S : ttlS
   }
 
   confidence(model: string, ttlS: number, requested: boolean): CacheConfidence {
     if (ttlS <= 0) return "estimated"
-    // Seen failing: the 5 minutes in its place is the default, not a fact.
-    if (this.effectiveTtlS(model, ttlS) !== ttlS) return "estimated"
+    // Downgraded: the 5 minutes in its place is the default, not a fact.
+    if (this.isDowngraded(model, ttlS)) return "estimated"
     if (this.#honored.has(model)) return "observed"
     return requested ? "requested" : "estimated"
   }
@@ -80,24 +104,83 @@ function byCreatedAt(a: SessionRow, b: SessionRow): number {
   return a.created_at_ms - b.created_at_ms || a.id - b.id
 }
 
-/** Feed each resume (consecutive requests of one session more than 5 minutes
- *  apart) to the observations, keyed by the pair of row ids. */
-function feedObservations(
-  group: Array<SessionRow>,
-  observations: CacheObservations,
-): void {
-  for (let i = 1; i < group.length; i++) {
-    const previous = group[i - 1]
-    const row = group[i]
+interface TimedResume {
+  row: SessionRow
+  resume: Resume & { key: string }
+}
+
+/**
+ * Each resume in a session: a request more than 5 minutes after the previous
+ * request on the same model. Requests on other models in between (Claude Code
+ * subagents share their parent's session id) neither break nor make a resume.
+ */
+function sessionResumes(group: Array<SessionRow>): Array<TimedResume> {
+  const previousByModel = new Map<string, SessionRow>()
+  const resumes: Array<TimedResume> = []
+  for (const row of group) {
+    const previous = previousByModel.get(row.model)
+    previousByModel.set(row.model, row)
+    if (!previous) continue
+    // created_at_ms is stamped when a request completes, so the gap runs
+    // from completion to completion.
     const gapMs = row.created_at_ms - previous.created_at_ms
     if (gapMs <= FIVE_MINUTES_S * 1000) continue
-    observations.record({
-      model: row.model,
-      gapMs,
-      requestedTtlS: row.cache_ttl_s,
-      cacheReadTokens: row.cache_read_input_tokens,
-      key: `${previous.id}>${row.id}`,
+    resumes.push({
+      row,
+      resume: {
+        model: row.model,
+        gapMs,
+        requestedTtlS: row.cache_ttl_s,
+        cacheReadTokens: row.cache_read_input_tokens,
+        key: `${previous.id}>${row.id}`,
+      },
     })
+  }
+  return resumes
+}
+
+/** Feed every session's resumes in one time order across sessions, so
+ *  "consecutive misses" means consecutive for the model, then drop the keys
+ *  of resumes no longer in the rows. */
+function feedObservations(
+  groups: Iterable<Array<SessionRow>>,
+  observations: CacheObservations,
+): void {
+  const resumes = [...groups].flatMap((group) => sessionResumes(group))
+  resumes.sort((a, b) => byCreatedAt(a.row, b.row))
+  for (const { resume } of resumes) observations.record(resume)
+  observations.retainKeys(new Set(resumes.map(({ resume }) => resume.key)))
+}
+
+/** A session whose first reply is still streaming: nothing recorded yet. */
+function streamingOnlySession(entry: InFlight, nowMs: number): SessionView {
+  return {
+    id: entry.sessionId,
+    client: entry.client,
+    client_label: null,
+    model: entry.model,
+    started_at_ms: entry.startedAtMs,
+    last_request_at_ms: entry.startedAtMs,
+    state: "streaming",
+    rate_per_min: 0,
+    minutes: emptyRecentMinutes(nowMs),
+    total_tokens: 0,
+    request_count: 0,
+    cache: {
+      ttl_s: 0,
+      expires_at_ms: null,
+      confidence: "estimated",
+      downgraded: false,
+      last_cache_read_tokens: 0,
+    },
+    context: {
+      used_tokens: 0,
+      window_tokens: null,
+      ceiling_tokens: null,
+      compact_at_tokens: null,
+      window_source: "model-listing",
+      compacted_at_ms: null,
+    },
   }
 }
 
@@ -157,6 +240,7 @@ function buildSession(
         latest.cache_ttl_s,
         latest.cache_ttl_requested === 1,
       ),
+      downgraded: observations.isDowngraded(latest.model, latest.cache_ttl_s),
       last_cache_read_tokens: latest.cache_read_input_tokens,
     },
     context: {
@@ -213,15 +297,23 @@ export function buildSessionsView(input: {
   }
 
   // Every resume is fed before any state is read, so one build sees them all.
-  for (const group of groups.values()) feedObservations(group, observations)
+  feedObservations(groups.values(), observations)
 
   // An entry with no session id counts toward the flow but marks nothing.
-  const streaming = new Set(
-    inFlight.map((entry) => entry.sessionId).filter((id) => id !== ""),
-  )
+  const withSession = inFlight
+    .filter((entry) => entry.sessionId !== "")
+    .sort((a, b) => a.startedAtMs - b.startedAtMs)
+  const streaming = new Set(withSession.map((entry) => entry.sessionId))
   const sessions = [...groups].map(([id, group]) =>
     buildSession(id, group, { nowMs, streaming, observations }),
   )
+  // A session still streaming its first reply shows from its earliest entry.
+  const seen = new Set(groups.keys())
+  for (const entry of withSession) {
+    if (seen.has(entry.sessionId)) continue
+    seen.add(entry.sessionId)
+    sessions.push(streamingOnlySession(entry, nowMs))
+  }
   sessions.sort((a, b) => b.last_request_at_ms - a.last_request_at_ms)
 
   return { flow_per_min: flowPerMin(rows, inFlight, nowMs), sessions }

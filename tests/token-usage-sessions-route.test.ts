@@ -79,6 +79,7 @@ describe("GET /token-usage/sessions", () => {
     expect(warm?.request_count).toBe(2)
     expect(warm?.total_tokens).toBe(30)
     expect(warm?.cache.confidence).toBe("requested")
+    expect(warm?.cache.downgraded).toBe(false)
     expect(byId.get("cold-session")?.state).toBe("cold")
     expect(body.flow_per_min).toBe(45)
   })
