@@ -785,14 +785,15 @@ html[data-embedded="true"] .lang-picker {
   pointer-events: none;
 }
 .live__fill-stop--top {
-  stop-color: var(--live-fill-color, var(--accent));
+  stop-color: var(--trace-color, var(--accent));
   stop-opacity: 0.32;
 }
 .live__fill-stop--bottom {
-  stop-color: var(--live-fill-color, var(--accent));
+  stop-color: var(--trace-color, var(--accent));
   stop-opacity: 0;
 }
-.live__trace {
+.live__trace,
+.live__fill {
   transition: opacity 150ms ease-out;
 }
 .live__line {
