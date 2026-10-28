@@ -247,20 +247,29 @@ body {
   max-width: 1120px;
 }
 
-/* Primary display heading on the first section matches Settings (.section__title in Fraunces).
-   Subsequent sections step down to Commissioner (--text-xl) so there is strictly one Fraunces
-   display heading per view. */
+/* Section headings match each other: the body face at the section size,
+   led by the section's icon. The Dashboard has no display (Fraunces) moment;
+   see docs/design/windows.md. */
 .section__title {
   margin: 0 0 var(--space-4) 0;
-  font-family: var(--font-display);
-  font-size: var(--text-2xl);
-  font-weight: var(--weight-2xl);
-  line-height: var(--leading-2xl);
-  letter-spacing: var(--tracking-2xl);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-family: var(--font-body);
+  font-size: var(--text-xl);
+  font-weight: var(--weight-xl);
+  line-height: var(--leading-xl);
+  letter-spacing: var(--tracking-xl);
   color: var(--text-strong);
 }
 
-main#content-area > section ~ section .section__title,
+.section__title > svg {
+  flex: none;
+  width: 0.75em;
+  height: 0.75em;
+  color: var(--text-muted);
+}
+
 h2,
 .h-section {
   font-family: var(--font-body);

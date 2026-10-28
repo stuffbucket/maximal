@@ -529,12 +529,12 @@ function render(): void {
     state.data ? renderUsageQuotas(state.data.quota_snapshots)
     : state.error ?
       `<section id="usage-quotas" class="mb-6">
-        <h2 class="section__title">${escapeHtml(t("dashboard-quotas-title"))}</h2>
+        <h2 class="section__title"><i data-lucide="bar-chart-big" aria-hidden="true"></i>${escapeHtml(t("dashboard-quotas-title"))}</h2>
         ${renderError(state.error, t("dashboard-error-usage"))}
       </section>`
     : state.isLoading ?
       `<section id="usage-quotas" class="mb-6">
-        <h2 class="section__title">${escapeHtml(t("dashboard-quotas-title"))}</h2>
+        <h2 class="section__title"><i data-lucide="bar-chart-big" aria-hidden="true"></i>${escapeHtml(t("dashboard-quotas-title"))}</h2>
         <div class="p-4 border text-sm" style="background-color: var(--surface-card); border-color: var(--border-subtle); color: var(--text-muted);">
           ${escapeHtml(t("common-working"))}
         </div>
@@ -577,7 +577,7 @@ function renderUsageQuotas(
 
   return `
             <section id="usage-quotas" class="mb-6">
-                <h2 class="section__title">${escapeHtml(t("dashboard-quotas-title"))}</h2>
+                <h2 class="section__title"><i data-lucide="bar-chart-big" aria-hidden="true"></i>${escapeHtml(t("dashboard-quotas-title"))}</h2>
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     ${quotaCards}
                 </div>
@@ -723,7 +723,7 @@ function renderDetailedData(data: UsageData): string {
   const formattedDetails = formatObject(data);
   return `
             <section id="detailed-data">
-                <h2 class="section__title">${escapeHtml(t("dashboard-api-response-title"))}</h2>
+                <h2 class="section__title"><i data-lucide="file-text" aria-hidden="true"></i>${escapeHtml(t("dashboard-api-response-title"))}</h2>
                 <div class="border p-4 relative font-mono text-xs code-block overflow-auto" style="background-color: var(--surface-base); border-color: var(--border-subtle);">
                     ${formattedDetails}
                 </div>
@@ -761,7 +761,7 @@ function renderTokenUsageSection(): string {
     <section id="token-usage" class="mb-6">
       <div class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 class="section__title" style="margin-bottom: 0;">${escapeHtml(t("dashboard-token-usage-title"))}</h2>
+          <h2 class="section__title" style="margin-bottom: 0;"><i data-lucide="database" aria-hidden="true"></i>${escapeHtml(t("dashboard-token-usage-title"))}</h2>
         </div>
         <div class="flex flex-wrap items-center gap-2 text-xs" style="color: var(--text-muted);">
           ${
