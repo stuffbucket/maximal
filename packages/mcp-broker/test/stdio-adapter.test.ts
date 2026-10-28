@@ -72,6 +72,7 @@ const startFixtureBroker = async (
 const connectAdapter = async (
   broker: RunningBrokerServer | string,
   timeout = 5_000,
+  extraEnv: Record<string, string> = {},
 ): Promise<{ client: Client; transport: StdioClientTransport }> => {
   const url =
     typeof broker === "string" ?
@@ -89,7 +90,7 @@ const connectAdapter = async (
           "--url",
           url,
         ],
-    env: { [ADAPTER_API_KEY_ENV]: API_KEY },
+    env: { [ADAPTER_API_KEY_ENV]: API_KEY, ...extraEnv },
     stderr: "pipe",
   })
   transport.stderr?.on("data", () => undefined)
@@ -123,6 +124,19 @@ const waitUntil = async (condition: () => boolean): Promise<void> => {
   }
   throw new Error("timed out waiting")
 }
+
+it("ignores a proxy set in the client's environment", async () => {
+  // Nothing listens on port 9; a fetch through it would fail.
+  const { client } = await connectAdapter(await startFixtureBroker(), 10_000, {
+    HTTP_PROXY: "http://127.0.0.1:9",
+    http_proxy: "http://127.0.0.1:9",
+  })
+  try {
+    expect(client.getServerVersion()).toBeDefined()
+  } finally {
+    await client.close()
+  }
+}, 20_000)
 
 it("proxies stdio to an authenticated loopback MCP endpoint", async () => {
   const { client } = await connectAdapter(await startFixtureBroker())

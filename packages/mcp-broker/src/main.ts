@@ -141,6 +141,16 @@ class ControlWriter {
   }
 }
 
+/** Proxy settings Bun's fetch reads from the environment. */
+const PROXY_VARIABLES = [
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "ALL_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "all_proxy",
+]
+
 /** An error whose message is already a code, like ADAPTER_ENDPOINT_INVALID. */
 const CODE_MESSAGE = /^[A-Z][A-Z0-9_]*(?: [a-z]+=\S+)*$/u
 
@@ -423,6 +433,13 @@ const main = async (): Promise<void> => {
   }
   if (mode === "stdio-adapter") {
     const url = parseAdapterUrl(args)
+    // The adapter only ever talks to Maximal on loopback. Bun's fetch sends
+    // even a 127.0.0.1 request through HTTP_PROXY and the like, which the
+    // client's environment may set (Claude Desktop passes its own on), and
+    // a proxy can't reach this machine's loopback.
+    for (const name of PROXY_VARIABLES) Reflect.deleteProperty(process.env, name)
+    process.env.NO_PROXY = "127.0.0.1,localhost,::1"
+    process.env.no_proxy = process.env.NO_PROXY
     const restoreDiagnostics = installSanitizedDependencyDiagnostics()
     try {
       await runStdioAdapter({ url })
