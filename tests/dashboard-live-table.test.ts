@@ -235,19 +235,19 @@ function context(
 describe("contextMeter", () => {
   test("a window no larger than the ceiling fills against the window, unmarked", () => {
     const meter = contextMeter(context({ used_tokens: 150_000 }), "en")
-    expect(meter).toMatchObject({
+    expect(meter).toEqual({
       percent: 75,
       level: "low",
       fill: 75,
-      ceilingAt: null,
       compactAt: null,
+      title: "150,000 of 200,000 (the size Maximal lists for this model)",
     })
     expect(meter?.title).toBe(
       "150,000 of 200,000 (the size Maximal lists for this model)",
     )
   })
 
-  test("a lower ceiling sets the percent, and is marked on a track as long as the window", () => {
+  test("a lower ceiling is the track: the fill is the percent, and the tooltip names both", () => {
     const meter = contextMeter(
       context({
         used_tokens: 119_000,
@@ -260,9 +260,9 @@ describe("contextMeter", () => {
     )
     expect(meter?.level).toBe("out")
     expect(meter?.percent).toBeCloseTo((119_000 / 128_000) * 100, 5)
-    expect(meter?.fill).toBeCloseTo((119_000 / 272_000) * 100, 5)
-    expect(meter?.ceilingAt).toBeCloseTo((128_000 / 272_000) * 100, 5)
-    expect(meter?.compactAt).toBeCloseTo((115_200 / 272_000) * 100, 5)
+    expect(meter?.fill).toBe(meter?.percent)
+    expect(meter?.compactAt).toBeCloseTo((115_200 / 128_000) * 100, 5)
+    expect(meter).not.toHaveProperty("ceilingAt")
     expect(meter?.title).toBe(
       "119,000 of 128,000, Copilot's limit (272,000 is the size Codex uses for this model)\nCompacts at 115,200",
     )
@@ -282,6 +282,27 @@ describe("contextMeter", () => {
     expect(meter?.title).toBe(
       "84,000 of 168,000, Copilot's limit (1,000,000 is the 1M window Claude Code asked for)",
     )
+  })
+
+  test("a compaction point at or past the limit gets no tick or line", () => {
+    const meter = contextMeter(
+      context({
+        used_tokens: 10_000,
+        window_tokens: 272_000,
+        ceiling_tokens: 128_000,
+        compact_at_tokens: 244_800,
+        window_source: "codex-catalog",
+      }),
+      "en",
+    )
+    expect(meter?.compactAt).toBeNull()
+    expect(meter?.title).not.toContain("Compacts")
+  })
+
+  test("a fill past the limit stays within the track", () => {
+    const meter = contextMeter(context({ used_tokens: 260_000 }), "en")
+    expect(meter?.percent).toBe(130)
+    expect(meter?.fill).toBe(100)
   })
 
   test("no window and no ceiling: no meter", () => {

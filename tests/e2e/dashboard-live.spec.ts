@@ -224,7 +224,7 @@ test("the context meter warns from 75%, turns critical from 90%, and Other reque
   await expect(other).toHaveText("—")
 })
 
-test("the context meter marks a lower ceiling and the compaction point, and its tooltip credits each number", async ({
+test("under a lower ceiling the meter fills against it, marks compaction, and its tooltip names both", async ({
   page,
 }) => {
   await open(page)
@@ -238,25 +238,21 @@ test("the context meter marks a lower ceiling and the compaction point, and its 
     "119,000 of 128,000, Copilot's limit (272,000 is the size Codex uses for this model)\nCompacts at 115,200",
   )
   await expect(codex).toContainText("93%")
+  await expect(codex.locator(".meter__tick--ceiling")).toHaveCount(0)
 
-  /** Where a tick's centre sits along its meter, from 0 to 1. */
-  const along = async (tick: "ceiling" | "compact"): Promise<number> => {
-    const meter = await codex.locator(".meter").boundingBox()
-    const mark = await codex.locator(`.meter__tick--${tick}`).boundingBox()
-    if (!meter || !mark) throw new Error(`no ${tick} tick`)
-    return (mark.x + mark.width / 2 - meter.x) / meter.width
-  }
-  await expect(codex.locator(".meter__tick--ceiling")).toBeVisible()
-  await expect(codex.locator(".meter__tick--compact")).toBeVisible()
-  expect(await along("ceiling")).toBeCloseTo(128_000 / 272_000, 1)
-  expect(await along("compact")).toBeCloseTo(115_200 / 272_000, 1)
-  // The fill ends between the two: past compaction, short of the ceiling.
-  const fill = await codex.locator(".meter__fill").boundingBox()
   const meter = await codex.locator(".meter").boundingBox()
-  if (!fill || !meter) throw new Error("no meter")
-  expect(fill.width / meter.width).toBeCloseTo(119_000 / 272_000, 1)
+  const fill = await codex.locator(".meter__fill").boundingBox()
+  const tick = await codex.locator(".meter__tick--compact").boundingBox()
+  if (!meter || !fill || !tick) throw new Error("no meter")
+  // The fill reads as the percent: 93% of the track.
+  expect(fill.width / meter.width).toBeCloseTo(119_000 / 128_000, 1)
+  // Compaction sits at 90% of the ceiling, just short of the fill's end.
+  expect((tick.x + tick.width / 2 - meter.x) / meter.width).toBeCloseTo(
+    115_200 / 128_000,
+    1,
+  )
 
-  // A Claude session whose window is the ceiling: no ticks, one source.
+  // A Claude session whose window is the ceiling: no tick, one source.
   const claude = page.locator(
     '.session-row[data-session-id="b7e20d64-1a95-4c3f-8e72-5f9a0c4d6e21"] .session-context',
   )
@@ -264,9 +260,42 @@ test("the context meter marks a lower ceiling and the compaction point, and its 
     "title",
     "60,000 of 200,000 (the size Maximal lists for this model)",
   )
-  await expect(claude.locator(".meter__tick--ceiling")).toBeHidden()
   await expect(claude.locator(".meter__tick--compact")).toBeHidden()
 })
+
+for (const [scheme, locale] of [
+  ["light", "en"],
+  ["dark", "en"],
+  ["dark", "de"],
+] as const) {
+  test(`at phone width the toolbar wraps inside the window, ${scheme}, ${locale}`, async ({
+    page,
+  }, testInfo) => {
+    await page.addInitScript(
+      `localStorage.setItem("maximal.locale", "${locale}")`,
+    )
+    await page.setViewportSize({ width: 390, height: 900 })
+    await page.emulateMedia({ colorScheme: scheme, reducedMotion: "reduce" })
+    await open(page)
+    // The range label's length depends on the time of day; a long one
+    // must wrap rather than push the language picker off the edge.
+    await page.evaluate(
+      `document.querySelector("#token-usage-range").textContent = "Mon, 10 PM – Tue, 10 PM"`,
+    )
+    const [overflow, right, width] = await page.evaluate<
+      [number, number, number]
+    >(`[
+      document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      Math.max(...[...document.querySelectorAll(".dashboard-toolbar > *")].map((el) => el.getBoundingClientRect().right)),
+      document.documentElement.clientWidth,
+    ]`)
+    expect(overflow).toBeLessThanOrEqual(0)
+    expect(right).toBeLessThanOrEqual(width)
+    await page.locator(".dashboard-toolbar").screenshot({
+      path: testInfo.outputPath(`toolbar-390-${scheme}-${locale}.png`),
+    })
+  })
+}
 
 test("past 20 cold sessions the rest fold under Show N more, which survives a poll", async ({
   page,

@@ -31,6 +31,8 @@ and focuses the existing window and switches the active view in place. Closing h
   completions"); the quota cards keep their own height at the top.
   Below `md` they stack, live card first. The session table (the live
   card's legend) runs full width under the bento, above the token usage.
+  The toolbar above the bento (period, range, language) wraps on a narrow
+  window rather than overflow.
 - **Settings**: `.topbar` header + centered single-column content pane.
   Section max-width = `--content-max`. Within the pane, form
   rows use a 33% label / 66% control split.

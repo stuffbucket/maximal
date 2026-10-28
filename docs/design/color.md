@@ -107,8 +107,8 @@ label beside it says what:
   `bun scripts/check-series-contrast.ts` checks the contrast and the hue
   clearance in both themes.
 - **Context meters** (session table): the same meter as the quotas,
-  `--accent` below 75% of the window (or of Copilot's ceiling when it's
-  lower), `--status-warning` from 75%, `--status-error` from 90%, each
-  with the warning icon. Ticks for a lower ceiling and the compaction
-  point are `--border-strong`.
+  filled against the window or Copilot's ceiling, whichever is lower:
+  `--accent` below 75%, `--status-warning` from 75%, `--status-error`
+  from 90%, each with the warning icon. The compaction point's tick is
+  `--border-strong`.
 - **Status colors are for state only**, never to tell categories apart.

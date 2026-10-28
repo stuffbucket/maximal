@@ -83,7 +83,6 @@ interface Row {
   context: HTMLElement;
   meter: HTMLElement;
   meterFill: HTMLElement;
-  ceilingTick: HTMLElement;
   compactTick: HTMLElement;
   meterState: HTMLElement;
   meterIcon: HTMLElement;
@@ -220,9 +219,8 @@ export function mountSessionTable(
     const context = el("div", "session-context");
     const meter = el("div", "meter");
     const meterFill = el("div", "meter__fill");
-    const ceilingTick = el("div", "meter__tick meter__tick--ceiling");
     const compactTick = el("div", "meter__tick meter__tick--compact");
-    meter.append(meterFill, ceilingTick, compactTick);
+    meter.append(meterFill, compactTick);
     const meterState = el("span", "meter-state");
     const meterIcon = el("span", "session-context__icon");
     meterIcon.innerHTML = `<i data-lucide="triangle-alert" aria-hidden="true"></i>`;
@@ -250,7 +248,6 @@ export function mountSessionTable(
       context,
       meter,
       meterFill,
-      ceilingTick,
       compactTick,
       meterState,
       meterIcon,
@@ -339,8 +336,8 @@ export function mountSessionTable(
     setText(row.last, clock(s.last_request_at_ms, nowMs));
     setText(row.total, numbers.format(s.total_tokens));
 
-    // Context: the percent is of the smaller of the window and Copilot's
-    // ceiling; a lower ceiling and a compaction point are ticks on the track.
+    // Context: the meter fills against the smaller of the window and
+    // Copilot's ceiling; a compaction point below it is a tick on the track.
     // "Other requests" mixes conversations, so it has none.
     const { compacted_at_ms } = s.context;
     const meter = other ? null : contextMeter(s.context, locale);
@@ -354,7 +351,6 @@ export function mountSessionTable(
       row.meter.hidden = false;
       row.meter.className = `meter meter--${meter.level}`;
       row.meterFill.style.width = `${meter.fill}%`;
-      setTick(row.ceilingTick, meter.ceilingAt);
       setTick(row.compactTick, meter.compactAt);
       row.meterState.className = `meter-state meter-state--${meter.level}`;
       row.meterIcon.hidden = meter.level === "ok";

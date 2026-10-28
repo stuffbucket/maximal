@@ -103,24 +103,23 @@ export function downgradedText(lifetimeS: number, locale: string): string {
 
 /** What the context meter draws, as percentages of its track. */
 export interface ContextMeter {
-  /** Used, as a share of the smaller of the window and Copilot's ceiling. */
+  /** Used, as a share of the limit: the smaller of the window and Copilot's
+   *  ceiling. */
   percent: number;
   level: "ok" | "low" | "out";
-  /** The fill's length. */
+  /** The fill's length: the percent, kept within the track. */
   fill: number;
-  /** Where Copilot's ceiling sits, when it's lower than the window. */
-  ceilingAt: number | null;
-  /** Where the client compacts, when it says. */
+  /** Where the client compacts, when that's below the limit. */
   compactAt: number | null;
   title: string;
 }
 
 /**
- * The context meter for a session. The percent and its warning steps are
- * measured against the smaller of the window and Copilot's ceiling. When the
- * ceiling is lower, the track spans the window and a tick marks the ceiling,
- * and the tooltip credits each number to its own source. A compaction point
- * gets a tick and a line of its own. Null with neither number known.
+ * The context meter for a session. The track is the limit, the smaller of
+ * the window and Copilot's ceiling, so the fill, the percent and its warning
+ * steps all agree. When the ceiling is the lower one, the tooltip names both
+ * and credits each to its own source. A compaction point below the limit gets
+ * a tick and a tooltip line of its own. Null with neither number known.
  */
 export function contextMeter(context: Session["context"], locale: string): ContextMeter | null {
   const { used_tokens: used, ceiling_tokens: ceiling, compact_at_tokens: compact, window_source } = context;
@@ -129,7 +128,7 @@ export function contextMeter(context: Session["context"], locale: string): Conte
   const lowerCeiling = ceiling !== null && ceiling > 0 && ceiling < window ? ceiling : null;
   const limit = lowerCeiling ?? window;
   const percent = (used / limit) * 100;
-  const share = (n: number): number => Math.min(100, Math.max(0, (n / window) * 100));
+  const share = (n: number): number => Math.min(100, Math.max(0, (n / limit) * 100));
   const numbers = new Intl.NumberFormat(locale);
   const source = t(`dashboard-sessions-source-${window_source}`);
   const lines = [
@@ -142,7 +141,7 @@ export function contextMeter(context: Session["context"], locale: string): Conte
         source,
       }),
   ];
-  const compactAt = compact !== null && compact > 0 && compact < window ? share(compact) : null;
+  const compactAt = compact !== null && compact > 0 && compact < limit ? share(compact) : null;
   if (compactAt !== null && compact !== null) {
     lines.push(t("dashboard-sessions-context-compact", { tokens: numbers.format(compact) }));
   }
@@ -153,7 +152,6 @@ export function contextMeter(context: Session["context"], locale: string): Conte
       : percent >= CONTEXT_LOW ? "low"
       : "ok",
     fill: share(used),
-    ceilingAt: lowerCeiling === null ? null : share(lowerCeiling),
     compactAt,
     title: lines.join("\n"),
   };

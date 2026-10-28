@@ -876,7 +876,7 @@ html[data-embedded="true"] .lang-picker {
    a selected row (an accent rule and a pale accent tint, never color alone:
    the selected trace is drawn in full and the others dim), muted cold rows,
    and the context meter, which is the quota cards' .meter at row size with
-   ticks for Copilot's ceiling and the compaction point. */
+   a tick at the compaction point. */
 .sessions {
   margin-bottom: var(--space-5);
 }

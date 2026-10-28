@@ -41,7 +41,9 @@
              agnostic control (same maximal.locale override as Settings,
              shared :4141 origin); options + selection are wired in
              main.ts (wireLocalePicker), which re-runs applyI18n live. -->
-        <div class="dashboard-toolbar mb-6 flex items-center gap-3">
+        <!-- It wraps rather than overflow a phone-width window: the range
+             label's length depends on the time of day and the language. -->
+        <div class="dashboard-toolbar mb-6 flex flex-wrap items-center gap-3">
           <!-- "Period" is the control's hover text (native title, browser
                timing) and accessible name, not a visible label. -->
           <div
