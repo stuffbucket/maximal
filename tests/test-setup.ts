@@ -28,6 +28,11 @@ const { ensureUiEmbedStub } = await import("../scripts/ensure-ui-embed-stub")
 // which flips `HAS_EMBED` true and changes UI-route behavior.
 ensureUiEmbedStub(true)
 
+// Keep update checks offline: a server a test spawns (`maximal start` checks
+// at startup) fetches from a closed loopback port instead of mxml.sh.
+process.env.MAXIMAL_TEST_UPDATE_MANIFEST_URL ??=
+  "http://127.0.0.1:9/updates/manifest.json"
+
 // Fail fast when a test starves the event loop, which per-test timeouts can't
 // catch. See tests/helpers/starvation-watchdog.ts.
 if (process.env.MAXIMAL_TEST_STARVATION_MS !== "0") {

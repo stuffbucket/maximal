@@ -37,6 +37,10 @@ const winSetup: ManifestAsset = {
   name: "maximal-v0.4.39-windows-x64-setup.exe",
   url: "https://github.com/stuffbucket/maximal/releases/download/v0.4.39/maximal-v0.4.39-windows-x64-setup.exe",
 }
+const deb = (name: string): ManifestAsset => ({
+  name,
+  url: `https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.1/${name}`,
+})
 
 describe("resolveDownloads", () => {
   test("maps known assets to their role slots", () => {
@@ -66,6 +70,35 @@ describe("resolveDownloads", () => {
     const downloads = resolveDownloads([x64, dmgArm])
     expect(downloads["macos-arm64-dmg"]?.name).toBe(dmgArm.name)
     expect(downloads["macos-x64-dmg"]?.name).toBe(x64.name)
+  })
+
+  test("maps the Linux packages by package and architecture", () => {
+    const downloads = resolveDownloads([
+      deb("maximal-desktop_0.5.0-rc.1_arm64.deb"),
+      deb("maximal_0.5.0-rc.1_amd64.deb"),
+      deb("maximal_0.5.0-rc.1_arm64.deb"),
+      deb("maximal-desktop_0.5.0-rc.1_amd64.deb"),
+      deb("maximal-v0.5.0-rc.1-linux-x64.tar.gz"),
+    ])
+    expect(downloads["linux-amd64-deb"]?.name).toBe(
+      "maximal_0.5.0-rc.1_amd64.deb",
+    )
+    expect(downloads["linux-arm64-deb"]?.name).toBe(
+      "maximal_0.5.0-rc.1_arm64.deb",
+    )
+    expect(downloads["linux-amd64-desktop-deb"]?.name).toBe(
+      "maximal-desktop_0.5.0-rc.1_amd64.deb",
+    )
+    expect(downloads["linux-arm64-desktop-deb"]?.name).toBe(
+      "maximal-desktop_0.5.0-rc.1_arm64.deb",
+    )
+  })
+
+  test("a release without Linux packages offers no Linux slot", () => {
+    const downloads = resolveDownloads([dmgArm, winSetup])
+    expect(
+      Object.keys(downloads).filter((slot) => slot.startsWith("linux-")),
+    ).toEqual([])
   })
 })
 

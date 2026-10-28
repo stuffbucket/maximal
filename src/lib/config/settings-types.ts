@@ -94,7 +94,9 @@ export type DiagnosticsResponse = z.infer<typeof DiagnosticsResponse>
 /** Update-availability status — GET /settings/api/update-status. Best-effort:
  *  `latest` is null and `update_available` false whenever the check is disabled
  *  or the manifest fetch failed. `url` is the install-channel-neutral download
- *  page (mxml.sh), not a raw release asset. The `enabled` / `checked_at` /
+ *  page (mxml.sh), not a raw release asset; for an apt install it is the Linux
+ *  guide's update section, and `update_command` is the apt command to run
+ *  (null for every other install). The `enabled` / `checked_at` /
  *  `last_error` fields are diagnostic — they let the Settings UI show whether
  *  the mechanism is working and what it last reported. See update-check.ts. */
 export const UpdateStatusResponse = z.object({
@@ -102,6 +104,7 @@ export const UpdateStatusResponse = z.object({
   latest: z.string().nullable(),
   update_available: z.boolean(),
   url: z.string(),
+  update_command: z.string().nullable(),
   enabled: z.boolean(),
   checked_at: z.string().nullable(),
   last_error: z.string().nullable(),

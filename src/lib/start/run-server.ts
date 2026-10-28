@@ -40,6 +40,7 @@ import {
 } from "~/lib/platform/utils"
 import { hasGithubToken, state } from "~/lib/runtime-state/state"
 import { npmGlobalPrefix } from "~/lib/system/run-file"
+import { startUpdateNotice } from "~/lib/update/update-notice"
 import { getGitVersion, shortSha } from "~/lib/update/version"
 import { startWorkingNotice } from "~/lib/working-notice"
 
@@ -237,6 +238,9 @@ function afterListening(
     })
   // One-time "Maximal is working" notification (shown by the menu-bar shell).
   void startWorkingNotice()
+  // Log a line when a newer version is out (with the apt command for an apt
+  // install), at startup and every few hours, for proxies run without the app.
+  startUpdateNotice()
 
   // Best-effort: record our PID so a future `maximal start --replace`
   // can fall back to SIGTERM/SIGKILL if the graceful shutdown route
