@@ -21,7 +21,9 @@ GitHub Copilot login.
 
 Install Maximal with apt as described in [Maximal on Linux](linux.md):
 `maximal-desktop` for the tray app, or `maximal` for the proxy alone (run as a
-user service). Check it with `maximal --version` and `maximal mcp`, and complete
+user service). Linux packages are available from 0.5.0; until 0.5.0 ships,
+testers use `Suites: rc` in place of `Suites: stable`. Check it with
+`maximal --version` and `maximal mcp`, and complete
 Maximal's GitHub setup at `http://127.0.0.1:4141/ui/settings/`.
 
 **Do not upgrade over or restart a proxy that carries an active coding

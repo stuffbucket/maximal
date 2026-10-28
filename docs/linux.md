@@ -13,6 +13,13 @@ There are two packages:
 
 ## Install
 
+Linux packages are available from Maximal 0.5.0; until 0.5.0 ships, testers
+replace `Suites: stable` in the block below with:
+
+```text
+Suites: rc
+```
+
 Copy this whole block into a terminal. It is the same on all three systems.
 
 ```sh
@@ -145,7 +152,8 @@ the armored key directly from `Signed-By`.
 | `/usr/bin/maximal-desktop`, its `.desktop` entry and icons | `maximal-desktop` |
 | `/usr/lib/maximal/desktop-installed-by-apt` | `maximal-desktop` |
 
-Nothing goes under `/etc`. `maximal-desktop` depends on exactly its own
+Both the tray app and the service run the proxy on 127.0.0.1 only. Nothing
+goes under `/etc`. `maximal-desktop` depends on exactly its own
 version of `maximal` and runs `/usr/bin/maximal` as its proxy (the binary next
 to its own), so the two always upgrade together. The marker files tell
 `maximal` it was installed by apt, so it offers the apt command instead of the

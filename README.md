@@ -59,7 +59,8 @@ API keys from its settings window.
 Install the tray app (`maximal-desktop`) or the headless proxy (`maximal`)
 with apt from Maximal's signed repository at `https://mxml.sh/apt`, for amd64
 and arm64. Setup, updates, the user service and uninstalling are in
-[Maximal on Linux](docs/linux.md).
+[Maximal on Linux](docs/linux.md). Linux packages are available from 0.5.0;
+until 0.5.0 ships, testers use `Suites: rc` in place of `Suites: stable`.
 
 ### Homebrew (macOS, Apple Silicon)
 

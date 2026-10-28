@@ -70,27 +70,45 @@ review the refreshed PR.
 ## apt repository
 
 The same Pages deploy rebuilds the apt repository at `https://mxml.sh/apt`
-(static files under `site/dist/apt/`, never committed):
+(static files under `site/dist/apt/`, never committed), in three jobs:
 
-1. `scripts/apt-repo-plan.ts` reads the merged manifest. The `stable` suite is
-   built from `channels.stable.tag` and the `rc` suite from `channels.rc.tag`,
-   so apt always carries the version the apps announce and nothing else.
-2. `build/linux/apt-repo.sh fetch` downloads that release's four `.deb`s,
-   checks each `.sha256`, and refuses a file over 95 MB (Pages serves files up
-   to 100 MB and sites up to 1 GB; the deploy also fails over 800 MB).
-3. `index` writes `Packages(.gz)` and `Release` with `apt-ftparchive`.
-4. `sign` writes `InRelease` and `Release.gpg`.
+1. `build` (no secrets): `scripts/apt-repo-plan.ts` reads the merged
+   manifest. The `stable` suite is built from `channels.stable.tag` and the
+   `rc` suite from `channels.rc.tag`, so apt always carries the version the
+   apps announce and nothing else. `build/linux/apt-repo.sh fetch` downloads
+   that release's four `.deb`s, checks each `.sha256`, and refuses a file over
+   95 MB (Pages serves files up to 100 MB and sites up to 1 GB; the deploy
+   also fails over 800 MB). `index` writes `Packages(.gz)`, `Release` and
+   `by-hash/` copies (`Acquire-By-Hash: yes`, so a CDN mixing generations
+   can't cause "Hash Sum mismatch").
+2. `sign-apt`, in the `github-pages` environment: checks out only
+   `apt-repo.sh` and the public key, installs nothing, and `sign` writes
+   `InRelease` and `Release.gpg` for the indexes `build` uploaded.
+3. `deploy`: publishes the site with the signed indexes, after checking
+   every suite has both signatures.
 
 A release without Linux packages (anything before them) is skipped with a
-notice; with none at all, the site deploys without the repository. A channel
-whose manifest entry lists Linux downloads its release doesn't have fails the
-deploy, and the previous site stays live.
+notice; with none at all, `sign-apt` is skipped and the site deploys without
+the repository.
+
+**An apt error fails the whole Pages deploy (fail closed).** A plan error (a
+channel whose manifest entry lists Linux downloads its release doesn't have,
+or a release that can't be read), a bad download or checksum, an oversized
+package, or a signing failure stops the run before `deploy`, so the previous
+site, manifest and apt repository all stay live and consistent, and no
+manifest update ships until it is fixed. To recover, read the failing step's
+`::error::` annotation, fix the cause (attach the missing packages by cutting
+a new release, correct the manifest through a PR, or fix the secrets and
+variable in the `github-pages` environment), then start a fresh run with
+`gh workflow run deploy-pages.yml --ref main`. Re-running only the failed
+jobs works too, as long as nothing on `main` changed.
 
 Signing uses the `APT_SIGNING_KEY` (armored private key) and
-`APT_SIGNING_KEY_PASSWORD` secrets, visible only to the signing step, in a
-temporary `GNUPGHOME`. The step fails unless the key's fingerprint equals the
-`APT_SIGNING_KEY_FINGERPRINT` repository variable
-(`7317FD604A591AFFC9235436C8270651B026DDF6`) and the committed public key
+`APT_SIGNING_KEY_PASSWORD` secrets and the `APT_SIGNING_KEY_FINGERPRINT`
+variable (`7317FD604A591AFFC9235436C8270651B026DDF6`), all in the
+`github-pages` environment (branch policy: `main`), visible only to
+`sign-apt`, with the key in a temporary `GNUPGHOME`. The job fails unless the
+key's fingerprint equals that variable and the committed public key
 `site/public/apt/maximal.asc`, and it verifies each signature against that
 public key. Rotating the key means replacing all four together and telling
 Linux users to fetch the new public key.
@@ -105,7 +123,7 @@ Linux users to fetch the new public key.
 | `manifest` failed after publication | Rerun `manifest`, then merge its protected PR after checks pass. |
 | `homebrew-tap` failed | Rerun only `homebrew-tap`. |
 | Pages deployment failed | Start a fresh run with `gh workflow run deploy-pages.yml --ref main`. |
-| The apt step failed | Read its annotation: a missing or wrong signing secret or variable, a channel listing Linux packages its release lacks, or an oversized package. Fix it, then start a fresh Pages run. |
+| An apt step failed (the whole Pages deploy stops) | Read its annotation: a missing or wrong signing secret or variable, a channel listing Linux packages its release lacks, or an oversized package. Fix it, then start a fresh Pages run (see *apt repository*). |
 | A published asset is wrong | Cut a new patch release. |
 
 If release-please itself is unavailable, a maintainer may prepare an emergency
