@@ -167,7 +167,7 @@ describe("desktop updater manifest path", () => {
         winSetup,
         { name: `${winSetup.name}.sig`, url: `${winSetup.url}.sig` },
       ],
-      windowsSignature: "c2ln",
+      signatures: new Map([[`${winSetup.name}.sig`, "c2ln"]]),
     })
     expect(desktop).not.toBeNull()
     if (desktop) {

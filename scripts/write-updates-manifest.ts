@@ -30,12 +30,13 @@
  * This script writes it for the site; the desktop client must keep reading only
  * `version`. Do NOT wire the installer to `downloads.url`.
  *
- * DESKTOP UPDATER MANIFEST: when the release carries a signed Windows
- * installer (`<setup>.exe` plus its `<setup>.exe.sig` asset), this script also
- * writes `desktop/<channel>.json` beside the manifest, in Tauri's static
- * updater format (`buildDesktopManifest`). The Windows app's in-place updater
- * reads it and verifies the installer's signature before running it. A
- * release without the signature leaves that file as it was.
+ * DESKTOP UPDATER MANIFEST: when the release carries a signed desktop update
+ * (the Windows `<setup>.exe` and/or the macOS `<name>-darwin-arm64.app.tar.gz`,
+ * each with its `<file>.sig` asset), this script also writes
+ * `desktop/<channel>.json` beside the manifest, in Tauri's static updater
+ * format (`buildDesktopManifest`). The apps' in-place updater reads it and
+ * verifies the file's signature before installing it. A release without any
+ * signature leaves that file as it was.
  *
  * Usage:
  *   # Regenerate from a published release's live assets (via `gh`):
@@ -57,7 +58,7 @@ import {
   buildChannel,
   buildDesktopManifest,
   MANIFEST_SCHEMA_VERSION,
-  windowsUpdaterAsset,
+  desktopUpdaterArtifacts,
   type ChannelReleaseInput,
   type DesktopUpdateManifest,
   type ManifestAsset,
@@ -267,26 +268,23 @@ async function main(): Promise<number> {
   )
 
   const desktopOut = desktopManifestPath(args.out, channelName)
-  const updater = windowsUpdaterAsset(assets)
-  const desktop =
-    updater ?
-      buildDesktopManifest({
-        ...input,
-        windowsSignature: fetchAssetText(
-          args.tag,
-          args.repo,
-          updater.signatureName,
-        ),
-        publishedAt,
-      })
-    : null
+  const signatures = new Map(
+    desktopUpdaterArtifacts(assets).map(({ signatureName }) => [
+      signatureName,
+      fetchAssetText(args.tag, args.repo, signatureName),
+    ]),
+  )
+  const desktop = buildDesktopManifest({ ...input, signatures, publishedAt })
   if (desktop) {
     await fs.mkdir(path.dirname(desktopOut), { recursive: true })
     await fs.writeFile(desktopOut, serializeManifest(desktop))
-    console.error(`wrote ${desktopOut}: ${desktop.version}`)
+    console.error(
+      `wrote ${desktopOut}: ${desktop.version} for ` +
+        Object.keys(desktop.platforms).join(", "),
+    )
   } else {
     console.error(
-      `no signed Windows installer in ${args.tag}; ${desktopOut} left as is`,
+      `no signed desktop update in ${args.tag}; ${desktopOut} left as is`,
     )
   }
   return 0

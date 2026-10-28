@@ -17,10 +17,11 @@ import {
   buildChannel,
   buildDesktopManifest,
   buildManifest,
+  DESKTOP_MACOS_TARGETS,
   DESKTOP_WINDOWS_TARGETS,
+  desktopUpdaterArtifacts,
   MANIFEST_SCHEMA_VERSION,
   resolveDownloads,
-  windowsUpdaterAsset,
   type ManifestAsset,
 } from "../site/src/lib/updates-manifest"
 
@@ -135,28 +136,52 @@ describe("buildManifest", () => {
   })
 })
 
-describe("desktop updater manifest", () => {
-  const winSig: ManifestAsset = {
-    name: "maximal-v0.4.39-windows-x64-setup.exe.sig",
-    url: "https://github.com/stuffbucket/maximal/releases/download/v0.4.39/maximal-v0.4.39-windows-x64-setup.exe.sig",
-  }
-  const SIGNATURE = "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZQo="
+const asset = (name: string): ManifestAsset => ({
+  name,
+  url: `https://github.com/stuffbucket/maximal/releases/download/v0.4.39/${name}`,
+})
 
-  test("names the signed installer and its signature asset", () => {
-    expect(windowsUpdaterAsset([dmgArm, winSetup, winSig])).toEqual({
-      installer: { name: winSetup.name, url: winSetup.url },
-      signatureName: winSig.name,
-    })
+describe("desktop updater manifest", () => {
+  const winSig = asset(`${winSetup.name}.sig`)
+  const macTarball = asset("maximal-v0.4.39-darwin-arm64.app.tar.gz")
+  const macSig = asset(`${macTarball.name}.sig`)
+  const WIN_SIGNATURE = "d2luZG93cyBzaWduYXR1cmU="
+  const MAC_SIGNATURE = "bWFjT1Mgc2lnbmF0dXJl"
+  const signatures = new Map([
+    [winSig.name, `${WIN_SIGNATURE}\n`],
+    [macSig.name, MAC_SIGNATURE],
+  ])
+
+  test("names each signed update and its signature asset", () => {
+    expect(
+      desktopUpdaterArtifacts([dmgArm, winSetup, winSig, macTarball, macSig]),
+    ).toEqual([
+      {
+        targets: DESKTOP_WINDOWS_TARGETS,
+        file: { name: winSetup.name, url: winSetup.url },
+        signatureName: winSig.name,
+      },
+      {
+        targets: DESKTOP_MACOS_TARGETS,
+        file: { name: macTarball.name, url: macTarball.url },
+        signatureName: macSig.name,
+      },
+    ])
   })
 
-  test("offers nothing for a release without the installer's signature", () => {
-    expect(windowsUpdaterAsset([dmgArm, winSetup])).toBeNull()
-    expect(windowsUpdaterAsset([dmgArm, winSig])).toBeNull()
+  test("leaves out a file without its signature", () => {
+    expect(desktopUpdaterArtifacts([dmgArm, winSetup, macTarball])).toEqual([])
+    expect(desktopUpdaterArtifacts([dmgArm, winSig, macSig])).toEqual([])
+    expect(
+      desktopUpdaterArtifacts([winSetup, macTarball, macSig]).map(
+        (a) => a.targets,
+      ),
+    ).toEqual([DESKTOP_MACOS_TARGETS])
     expect(
       buildDesktopManifest({
         tag: "v0.4.39",
-        assets: [dmgArm, winSetup],
-        windowsSignature: SIGNATURE,
+        assets: [dmgArm, winSetup, macTarball],
+        signatures,
       }),
     ).toBeNull()
   })
@@ -166,40 +191,52 @@ describe("desktop updater manifest", () => {
       buildDesktopManifest({
         tag: "v0.4.39",
         assets: [winSetup, winSig],
-        windowsSignature: "  \n",
+        signatures: new Map([[winSig.name, "  \n"]]),
       }),
     ).toBeNull()
   })
 
-  test("is Tauri's static format, with the signed version and both Windows targets", () => {
+  test("is Tauri's static format, with the signed version and every target", () => {
     const manifest = buildDesktopManifest({
       tag: "v0.4.39",
-      assets: [dmgArm, winSetup, winSig],
-      windowsSignature: `${SIGNATURE}\n`,
+      assets: [dmgArm, winSetup, winSig, macTarball, macSig],
+      signatures,
       publishedAt: "2026-10-27T16:49:26Z",
     })
+    const win = { url: winSetup.url, signature: WIN_SIGNATURE }
+    const mac = { url: macTarball.url, signature: MAC_SIGNATURE }
     expect(manifest).toEqual({
       version: "0.4.39",
       notes: "https://github.com/stuffbucket/maximal/releases/tag/v0.4.39",
       pub_date: "2026-10-27T16:49:26Z",
       platforms: {
-        "windows-x86_64-nsis": { url: winSetup.url, signature: SIGNATURE },
-        "windows-x86_64": { url: winSetup.url, signature: SIGNATURE },
+        "windows-x86_64-nsis": win,
+        "windows-x86_64": win,
+        "darwin-aarch64-app": mac,
+        "darwin-aarch64": mac,
       },
     })
+  })
+
+  test("offers one platform when only it is signed", () => {
+    const manifest = buildDesktopManifest({
+      tag: "v0.4.39",
+      assets: [dmgArm, winSetup, macTarball, macSig],
+      signatures,
+    })
     expect(Object.keys(manifest?.platforms ?? {})).toEqual([
-      ...DESKTOP_WINDOWS_TARGETS,
+      ...DESKTOP_MACOS_TARGETS,
     ])
   })
 
-  test("omits pub_date when the publish time is unknown", () => {
+  test("names an rc release's version, and omits an unknown pub_date", () => {
     const manifest = buildDesktopManifest({
-      tag: "v0.5.0-beta.2",
+      tag: "v0.5.0-rc.2",
       assets: [winSetup, winSig],
-      windowsSignature: SIGNATURE,
+      signatures,
       publishedAt: null,
     })
-    expect(manifest?.version).toBe("0.5.0-beta.2")
+    expect(manifest?.version).toBe("0.5.0-rc.2")
     expect(manifest && "pub_date" in manifest).toBe(false)
   })
 })

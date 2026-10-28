@@ -73,11 +73,11 @@ auto-update flow to `downloads.<slot>.url`.**
 
 ## Desktop updater manifest
 
-The Windows app installs updates in place with `tauri-plugin-updater`, which
-reads a separate document per channel in Tauri's static JSON format:
-`https://mxml.sh/updates/desktop/<channel>.json` (source file
-`site/public/updates/desktop/<channel>.json`; builder `buildDesktopManifest`
-in `updates-manifest.ts`).
+The Windows and macOS apps install updates in place with
+`tauri-plugin-updater`, which reads a separate document per channel in
+Tauri's static JSON format: `https://mxml.sh/updates/desktop/<channel>.json`
+(source file `site/public/updates/desktop/<channel>.json`; builder
+`buildDesktopManifest` in `updates-manifest.ts`).
 
 ```json
 {
@@ -86,28 +86,35 @@ in `updates-manifest.ts`).
   "pub_date": "2026-10-28T12:00:00Z",
   "platforms": {
     "windows-x86_64-nsis": { "url": "<setup.exe release asset>", "signature": "<setup.exe.sig content>" },
-    "windows-x86_64": { "url": "<same>", "signature": "<same>" }
+    "windows-x86_64": { "url": "<same>", "signature": "<same>" },
+    "darwin-aarch64-app": { "url": "<darwin-arm64.app.tar.gz release asset>", "signature": "<.app.tar.gz.sig content>" },
+    "darwin-aarch64": { "url": "<same>", "signature": "<same>" }
   }
 }
 ```
 
-- Its `url` is downloaded and run, which is safe only because of the
-  signature: the app checks the installer's minisign signature against the
-  public key built into it (`plugins.updater.pubkey` in
+- Each `url` is downloaded and installed, which is safe only because of the
+  signature: the app checks the file's minisign signature against the public
+  key built into it (`plugins.updater.pubkey` in
   `shell/src-tauri/tauri.conf.json`, key id `E8DAB79E2EB1D6C4`) and, with
   `requireSignedVersion`, that it was signed for `version`. A tampered
   document can at most make the update fail, and the app then opens mxml.sh.
-- Only the check must avoid github.com; the installer itself is a GitHub
-  release asset.
+  The release checks the same two things before publishing
+  (`scripts/verify-updater-signature.ts`).
+- Only the check must avoid github.com; the files themselves are GitHub
+  release assets.
+- Each platform is listed under `<os>-<arch>-<installer>` and `<os>-<arch>`,
+  the two names the plugin looks up, most specific first.
 - The app picks the channel from its own version (`X.Y.Z` is `stable`,
-  `X.Y.Z-beta.N` is `beta`), matching the channel the release writes.
+  `X.Y.Z-rc.N` is `rc`), matching the channel the release writes.
 - Unlike the version manifest it is fetched only when the user clicks
   "Update to X.Y.Z", so it has no conditional-request logic. It can trail
   the version manifest by the CDN's `max-age`; an update that isn't listed
   yet fails over to mxml.sh.
-- It is written only for a release carrying `<setup>.exe.sig`. macOS has no
-  entry until `stuffbucket/macos-builder` signs its updater bundles with the
-  same key; the macOS app keeps opening mxml.sh.
+- A platform is listed only when the release carries its signature
+  (`<setup>.exe.sig` from `windows-shell`, `<name>.app.tar.gz.sig` from
+  `stuffbucket/macos-builder`), and the file is written only when at least
+  one is.
 
 ## Hosting & write path
 
@@ -129,8 +136,8 @@ in `updates-manifest.ts`).
   release publishes, release.yml's `manifest` job runs
   `scripts/write-updates-manifest.ts --tag <tag>` (read-modify-write, so a
   beta publish never clobbers `stable` and vice versa; it also writes
-  `desktop/<channel>.json` when the release has a signed Windows
-  installer) on the rolling
+  `desktop/<channel>.json` when the release has a signed desktop
+  update) on the rolling
   `automation/updates-manifest` branch and opens or updates a protected PR.
   It dispatches `ci.yml` against that PR's SHA because
   `GITHUB_TOKEN`-created PRs do not trigger `pull_request` workflows. A

@@ -167,15 +167,16 @@ export function buildManifest(
 
 // ── Desktop updater manifest ────────────────────────────────────────────────
 //
-// The Windows app installs updates in place with tauri-plugin-updater, which
-// reads its own document in Tauri's static JSON format at
+// The Windows and macOS apps install updates in place with
+// tauri-plugin-updater, which reads its own document in Tauri's static JSON
+// format at
 //   https://mxml.sh/updates/desktop/<channel>.json
 // (source file: site/public/updates/desktop/<channel>.json). Unlike
-// `downloads` above, the `url` here IS what the app downloads and runs. That is
-// safe because the app verifies the file's minisign signature against the
-// public key built into it (`plugins.updater.pubkey` in
+// `downloads` above, each `url` here IS what an app downloads and installs.
+// That is safe because the app verifies the file's minisign signature against
+// the public key built into it (`plugins.updater.pubkey` in
 // shell/src-tauri/tauri.conf.json), and that the signature was made for
-// `version`, before running it. A tampered document can at most make the
+// `version`, before installing it. A tampered document can at most make the
 // update fail; the app then sends the user to mxml.sh.
 
 /** The updater targets the Windows NSIS app looks up, most specific first:
@@ -187,17 +188,24 @@ export const DESKTOP_WINDOWS_TARGETS = [
   "windows-x86_64",
 ] as const;
 
+/** The updater targets the Apple Silicon macOS app looks up, most specific
+ *  first, the same way: `app` is the plugin's name for a `.app` bundle. */
+export const DESKTOP_MACOS_TARGETS = [
+  "darwin-aarch64-app",
+  "darwin-aarch64",
+] as const;
+
 export interface DesktopUpdatePlatform {
-  /** The signed installer's download URL (a GitHub release asset). */
+  /** The signed update's download URL (a GitHub release asset). */
   url: string;
-  /** The installer's `.sig` file content, exactly as `tauri build` wrote it. */
+  /** The update's `.sig` file content, exactly as the signer wrote it. */
   signature: string;
 }
 
 /** Tauri's static updater JSON. */
 export interface DesktopUpdateManifest {
-  /** Release version, no leading "v". Must equal the version the installer
-   *  was signed for, or the app refuses it. */
+  /** Release version, no leading "v". Must equal the version the updates
+   *  were signed for, or the apps refuse them. */
   version: string;
   /** Display-only link to the GitHub release. */
   notes: string;
@@ -206,42 +214,69 @@ export interface DesktopUpdateManifest {
   platforms: Record<string, DesktopUpdatePlatform>;
 }
 
-/** The Windows installer the app updates from, and the name of the release
- *  asset holding its signature. Null when the release has no signed
- *  installer (no `<installer>.sig` asset). */
-export function windowsUpdaterAsset(
+/** A signed update the desktop apps can install: the release asset, the
+ *  name of the asset holding its signature, and the targets that pick it. */
+export interface DesktopUpdaterArtifact {
+  targets: readonly string[];
+  file: ManifestDownload;
+  signatureName: string;
+}
+
+/** The release's signed desktop updates: the Windows NSIS installer
+ *  (`*-setup.exe`) and the macOS app bundle (`*-darwin-arm64.app.tar.gz`,
+ *  from stuffbucket/macos-builder). A file without its `<file>.sig` asset is
+ *  left out. */
+export function desktopUpdaterArtifacts(
   assets: ManifestAsset[],
-): { installer: ManifestDownload; signatureName: string } | null {
-  const installer = resolveDownloads(assets)["windows-x64-setup"];
-  if (!installer) return null;
-  const signatureName = `${installer.name}.sig`;
-  return assets.some((a) => a.name === signatureName)
-    ? { installer, signatureName }
-    : null;
+): DesktopUpdaterArtifact[] {
+  const candidates = [
+    {
+      targets: DESKTOP_WINDOWS_TARGETS,
+      file: resolveDownloads(assets)["windows-x64-setup"],
+    },
+    {
+      targets: DESKTOP_MACOS_TARGETS,
+      file: assets.find(
+        (a) => /\.app\.tar\.gz$/i.test(a.name) && /arm64|aarch64/i.test(a.name),
+      ),
+    },
+  ];
+  const artifacts: DesktopUpdaterArtifact[] = [];
+  for (const { targets, file } of candidates) {
+    if (!file) continue;
+    const signatureName = `${file.name}.sig`;
+    if (!assets.some((a) => a.name === signatureName)) continue;
+    artifacts.push({
+      targets,
+      file: { name: file.name, url: file.url },
+      signatureName,
+    });
+  }
+  return artifacts;
 }
 
 export interface DesktopReleaseInput extends ChannelReleaseInput {
-  /** Content of the installer's `.sig` asset. */
-  windowsSignature: string;
+  /** The `.sig` assets' contents, keyed by asset name. */
+  signatures: ReadonlyMap<string, string>;
   /** When the release was published (RFC 3339), if known. */
   publishedAt?: string | null;
 }
 
 /** Build one channel's desktop updater manifest, or null when the release has
- *  no signed Windows installer to offer. */
+ *  no signed desktop update to offer. */
 export function buildDesktopManifest(
   input: DesktopReleaseInput,
 ): DesktopUpdateManifest | null {
-  const asset = windowsUpdaterAsset(input.assets);
-  const signature = input.windowsSignature.trim();
-  if (!asset || signature.length === 0) return null;
-  const { version, notes } = buildChannel(input);
-  const platform: DesktopUpdatePlatform = {
-    url: asset.installer.url,
-    signature,
-  };
   const platforms: Record<string, DesktopUpdatePlatform> = {};
-  for (const target of DESKTOP_WINDOWS_TARGETS) platforms[target] = platform;
+  for (const artifact of desktopUpdaterArtifacts(input.assets)) {
+    const signature = input.signatures.get(artifact.signatureName)?.trim();
+    if (!signature) continue;
+    for (const target of artifact.targets) {
+      platforms[target] = { url: artifact.file.url, signature };
+    }
+  }
+  if (Object.keys(platforms).length === 0) return null;
+  const { version, notes } = buildChannel(input);
   return {
     version,
     notes,
