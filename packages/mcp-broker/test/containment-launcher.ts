@@ -4,23 +4,20 @@
  * relays them, so ending this process closes the broker's stdin. It exits
  * with the broker's exit status.
  *
- *   containment-launcher.ts --job none|plain|ui-limited --pid-file <path>
+ *   containment-launcher.ts --job none|plain --pid-file <path>
  *     -- <command> [args...]
  *
  * With `--job plain` it first puts itself in a Job Object without limits, so
- * the broker starts inside an existing job and its own job is nested in it.
- * With `--job ui-limited` that job has a UI limit, and Windows won't nest a
- * job under one that has UI limits, so the broker's containment must fail.
+ * the broker starts inside an existing job and must nest its own job in it.
+ * It then says on stderr whether the broker really is in that job.
  */
+import { dlopen, FFIType } from "bun:ffi"
 import { spawn } from "node:child_process"
 import { writeFileSync } from "node:fs"
 
 import { loadKernel32 } from "../src/windows-job.ts"
 
-/** JOBOBJECTINFOCLASS JobObjectBasicUIRestrictions. */
-const JOB_OBJECT_BASIC_UI_RESTRICTIONS = 4
-/** Harmless to a test: the processes in the job can't log the user off. */
-const JOB_OBJECT_UILIMIT_EXITWINDOWS = 0x80
+const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 
 const args = process.argv.slice(2)
 const separator = args.indexOf("--")
@@ -36,27 +33,13 @@ if (separator === -1 || !command || !pidFile) {
   throw new Error("usage: --job <kind> --pid-file <path> -- <command> [args]")
 }
 
-if (job !== "none") {
-  const api = loadKernel32()
-  const handle = api.createJobObject()
-  if (handle === 0n) throw new Error("LAUNCHER_JOB_CREATE_FAILED")
-  // Assigned before the UI limit is set, so this nests under any job the
-  // launcher is already in; the limit then stops anything nesting under it.
-  if (!api.assignProcess(handle, api.currentProcess())) {
+const api = job === "plain" ? loadKernel32() : undefined
+let jobHandle = 0n
+if (api) {
+  jobHandle = api.createJobObject()
+  if (jobHandle === 0n) throw new Error("LAUNCHER_JOB_CREATE_FAILED")
+  if (!api.assignProcess(jobHandle, api.currentProcess())) {
     throw new Error(`LAUNCHER_JOB_ASSIGN_FAILED error=${api.lastError()}`)
-  }
-  if (job === "ui-limited") {
-    const limits = new Uint8Array(4)
-    new DataView(limits.buffer).setUint32(
-      0,
-      JOB_OBJECT_UILIMIT_EXITWINDOWS,
-      true,
-    )
-    if (
-      !api.setInformation(handle, JOB_OBJECT_BASIC_UI_RESTRICTIONS, limits)
-    ) {
-      throw new Error(`LAUNCHER_JOB_UI_LIMIT_FAILED error=${api.lastError()}`)
-    }
   }
 }
 
@@ -66,6 +49,21 @@ const broker = spawn(command, commandArgs, {
   windowsHide: true,
 })
 if (broker.pid) writeFileSync(pidFile, String(broker.pid))
+if (api && broker.pid) {
+  const { symbols } = dlopen("kernel32.dll", {
+    OpenProcess: {
+      args: [FFIType.u32, FFIType.i32, FFIType.u32],
+      returns: FFIType.u64,
+    },
+  })
+  const process_ = BigInt(
+    symbols.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, broker.pid),
+  )
+  const inJob = process_ !== 0n && api.isProcessInJob(process_, jobHandle)
+  process.stderr.write(
+    `[containment-launcher] broker-in-job=${inJob ? "yes" : "no"}\n`,
+  )
+}
 process.stdin.pipe(broker.stdin)
 broker.stdout.pipe(process.stdout)
 broker.stderr.pipe(process.stderr)

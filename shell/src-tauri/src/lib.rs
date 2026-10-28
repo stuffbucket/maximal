@@ -2999,6 +2999,7 @@ async fn install_in_place(
         // installer relaunches Maximal); it returns only on failure, after
         // which the sidecar comes back.
         stop_sidecar_for_update(app).await;
+        stop_mcp_brokers_for_update().await;
         if let Err(err) = update.install(&bytes) {
             respawn_sidecar(app);
             return Err(err.to_string());
@@ -3077,6 +3078,37 @@ async fn stop_sidecar_for_update(app: &AppHandle) {
     // Disarm, so a later exit (after a failed install) is handled normally.
     app.state::<SidecarHandoff>().take();
 }
+
+/// The Windows installer also replaces `maximal-mcp-broker.exe`, which the
+/// stopped sidecar's broker can still be running for up to a few seconds (a
+/// hard-killed sidecar never stops it), and which Claude Desktop runs as its
+/// stdio adapter. Either would hold the file. End every copy, as the MSI and
+/// install.ps1 do; the NSIS PREINSTALL hook does it again. Ending the broker
+/// ends its Job Object, and with it the MCP servers it started.
+#[cfg(target_os = "windows")]
+async fn stop_mcp_brokers_for_update() {
+    const BROKER_STOP_TIMEOUT: Duration = Duration::from_secs(5);
+    let kill = tauri::async_runtime::spawn_blocking(|| {
+        use std::os::windows::process::CommandExt;
+        // CREATE_NO_WINDOW: don't flash a console for the helper.
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        std::process::Command::new("taskkill")
+            .args(["/F", "/IM", "maximal-mcp-broker.exe", "/T"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status()
+    });
+    // taskkill exits non-zero when nothing matched, which is fine.
+    match tokio::time::timeout(BROKER_STOP_TIMEOUT, kill).await {
+        Ok(Ok(Ok(_))) => {}
+        Ok(Ok(Err(err))) => eprintln!("[shell] taskkill for the MCP broker failed: {err}"),
+        Ok(Err(err)) => eprintln!("[shell] taskkill for the MCP broker failed: {err}"),
+        Err(_) => eprintln!("[shell] MCP broker still stopping after {BROKER_STOP_TIMEOUT:?}"),
+    }
+}
+
+/// Only the Windows installer replaces the broker while Maximal runs.
+#[cfg(not(target_os = "windows"))]
+async fn stop_mcp_brokers_for_update() {}
 
 /// Re-run the startup sequence from the Failed/Stopped state: clear any
 /// lingering sidecar, flip back to Starting, respawn, and restart polling.

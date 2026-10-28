@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { existsSync, readFileSync } from "node:fs"
-import { resolve } from "node:path"
+import { dirname, resolve } from "node:path"
 
 /**
  * Pins the "the packaged UI is embedded in the sidecar binary, not staged
@@ -19,6 +19,7 @@ interface TauriConf {
   bundle?: {
     externalBin?: Array<string>
     resources?: Array<string> | Record<string, string>
+    windows?: { nsis?: { installerHooks?: string } }
   }
 }
 
@@ -53,6 +54,25 @@ describe("Tauri packaging contracts", () => {
       "binaries/maximal",
       "binaries/maximal-mcp-broker",
     ])
+  })
+
+  test("the NSIS installer and uninstaller stop the MCP broker first", () => {
+    // Without this an in-place update can't replace maximal-mcp-broker.exe
+    // while a broker or a Claude Desktop adapter runs it (the MSI and
+    // install.ps1 stop it too).
+    const hooksPath = loadConf().bundle?.windows?.nsis?.installerHooks
+    expect(hooksPath).toBe("./windows/hooks.nsh")
+    const hooksFile = resolve(dirname(TAURI_CONF), hooksPath ?? "")
+    expect(existsSync(hooksFile)).toBe(true)
+    const hooks = readFileSync(hooksFile, "utf8")
+    for (const hook of ["NSIS_HOOK_PREINSTALL", "NSIS_HOOK_PREUNINSTALL"]) {
+      const body = new RegExp(`!macro ${hook}\\n([\\s\\S]*?)!macroend`).exec(
+        hooks,
+      )?.[1]
+      expect(body, hook).toContain(
+        String.raw`"$SYSDIR\taskkill.exe" /F /IM maximal-mcp-broker.exe /T`,
+      )
+    }
   })
 
   test("the embed mechanism is present (generator + route)", () => {

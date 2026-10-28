@@ -97,9 +97,12 @@ const serverFixture = () => {
 
 interface BrokerOptions {
   parentPid?: number
-  /** Start it through containment-launcher.ts, which owns its stdin and can
-   *  first put itself in a job of the given kind. */
-  launcher?: "none" | "plain" | "ui-limited"
+  /** Start it through containment-launcher.ts, which owns its stdin and,
+   *  with "plain", first puts itself in a job. */
+  launcher?: "none" | "plain"
+  /** Run the source broker with refuse-job-preload.ts, so Windows appears
+   *  to refuse its job. */
+  refuseJob?: boolean
 }
 
 class Broker {
@@ -111,8 +114,10 @@ class Broker {
   #sequence = 0
   stderr = ""
 
-  constructor({ parentPid, launcher }: BrokerOptions = {}) {
-    const compiled = process.env.MAXIMAL_MCP_BROKER_BINARY
+  constructor({ parentPid, launcher, refuseJob }: BrokerOptions = {}) {
+    // The preload only works on the source, so a refused job always runs it.
+    const compiled =
+      refuseJob ? undefined : process.env.MAXIMAL_MCP_BROKER_BINARY
     const args = [
       "serve",
       "--generation",
@@ -121,7 +126,15 @@ class Broker {
     ]
     const command = compiled ?? process.execPath
     const commandArgs =
-      compiled ? args : [resolve(import.meta.dir, "../src/main.ts"), ...args]
+      compiled ? args : (
+        [
+          ...(refuseJob ?
+            ["--preload", resolve(import.meta.dir, "refuse-job-preload.ts")]
+          : []),
+          resolve(import.meta.dir, "../src/main.ts"),
+          ...args,
+        ]
+      )
     if (launcher) {
       const dir = mkdtempSync(join(tmpdir(), "maximal-launcher-"))
       cleanups.push(() => rmSync(dir, { recursive: true, force: true }))
@@ -372,6 +385,7 @@ describe.skipIf(!windows)("Windows containment", () => {
     const { broker, pids } = await brokerWithRunningServer({
       launcher: "plain",
     })
+    expect(broker.stderr).toContain("[containment-launcher] broker-in-job=yes")
     const brokerPid = broker.brokerPid()
     expect(brokerPid).toBeNumber()
     process.kill(brokerPid as number)
@@ -384,13 +398,16 @@ describe.skipIf(!windows)("Windows containment", () => {
   }, 60_000)
 
   it("refuses to run, with status 78, when Windows won't give it a job", async () => {
-    // A job with UI limits can't have jobs nested under it.
-    const broker = new Broker({ launcher: "ui-limited" })
+    const broker = new Broker({ refuseJob: true })
+    let stdout = 0
+    broker.child.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.byteLength
+    })
     expect(await expectExit(broker, 30_000)).toBe(78)
     expect(broker.stderr).toContain(
       "[maximal-mcp-broker] MCP_BROKER_CONTAINMENT_UNAVAILABLE step=assign",
     )
-    // It started nothing, so it never said hello.
-    expect(broker.stderr).not.toContain("[endpoint:")
+    // It refused before anything else: not even a hello.
+    expect(stdout).toBe(0)
   }, 60_000)
 })
