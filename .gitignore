@@ -4,12 +4,13 @@ dist/
 .astro/
 # build/ holds two flavors: compiled output (bun-build artifacts —
 # ignore) and source-controlled packaging sources under build/macos/
-# (app icon), build/homebrew/, and build/windows/. The pattern below
+# (app icon), build/homebrew/, build/linux/ and build/windows/. The pattern below
 # ignores everything in build/ except those source trees.
 build/*
 !build/macos/
 !build/homebrew/
 !build/windows/
+!build/linux/
 SBOM.cdx.json
 *.log
 .DS_Store
