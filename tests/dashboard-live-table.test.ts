@@ -201,8 +201,14 @@ describe("clockFormatter", () => {
 
   test("a time on another day adds a short day", () => {
     const at = new Date(2026, 9, 27, 10, 42).getTime()
-    expect(clockFormatter("en")(at, now)).toBe("Tue 10:42 AM")
-    expect(clockFormatter("de")(at, now)).toBe("Di. 10:42")
+    // ICU versions punctuate the day differently ("Di. 10:42" on macOS,
+    // "Di., 10:42" on Linux), so check the parts, not the exact string.
+    const en = clockFormatter("en")(at, now)
+    expect(en).toContain("Tue")
+    expect(en).toContain("10:42")
+    const de = clockFormatter("de")(at, now)
+    expect(de).toContain("Di")
+    expect(de).toContain("10:42")
   })
 })
 
