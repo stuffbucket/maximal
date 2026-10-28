@@ -99,7 +99,8 @@ version commit and tag with `bun run release:manual`, push the tag, then dispatc
   is `plugins.updater.pubkey` in `shell/src-tauri/tauri.conf.json`.
   - Windows: `windows-shell` builds with `createUpdaterArtifacts` using the
     `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
-    secrets, after checking that the configured public key equals the
+    secrets, which live in the `release` environment (deploys from `v*` tags
+    only; the job declares `environment: release`), after checking that the configured public key equals the
     `TAURI_SIGNING_PUBLIC_KEY` variable.
   - macOS: `.macos-builder/config` asks for `artifact = dmg,updater`, and
     `stuffbucket/macos-builder` signs the bundle with its

@@ -188,8 +188,10 @@ const macosDmgJob = (workflow: string): string =>
   )
 
 describe("in-place desktop updates", () => {
-  test("the NSIS build is signed for the updater with the repo secrets", async () => {
+  test("the NSIS build is signed for the updater with the release environment secrets", async () => {
     const job = windowsShellJob(await readWorkflow("release.yml"))
+
+    expect(job).toMatch(/^ {4}environment: release$/mu)
 
     expect(job).toContain(String.raw`\"createUpdaterArtifacts\":true`)
     expect(job).toContain(
