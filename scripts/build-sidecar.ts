@@ -10,7 +10,10 @@ import { spawnSync } from "node:child_process"
 import { mkdirSync, readdirSync, rmSync, statSync } from "node:fs"
 import { join, resolve } from "node:path"
 
-import { resolveSidecarVersion } from "./build-sidecar-version"
+import {
+  resolveSidecarChannel,
+  resolveSidecarVersion,
+} from "./build-sidecar-version"
 
 interface BinaryBuild {
   args: Array<string>
@@ -57,9 +60,12 @@ const version = resolveSidecarVersion(
   sha,
   process.env.MAXIMAL_VERSION,
 )
-// The release channel this binary follows; defaults to stable. Release
-// pipelines set MAXIMAL_CHANNEL when producing another channel.
-const channel = process.env.MAXIMAL_CHANNEL || "stable"
+// The release channel this binary follows: MAXIMAL_CHANNEL if set, else the
+// prerelease label of MAXIMAL_VERSION, else stable.
+const channel = resolveSidecarChannel(
+  process.env.MAXIMAL_VERSION,
+  process.env.MAXIMAL_CHANNEL,
+)
 
 const builds: Array<BinaryBuild> = [
   {
