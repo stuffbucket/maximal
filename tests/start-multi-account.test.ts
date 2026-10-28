@@ -65,17 +65,27 @@ function spawnStart(
   })
 }
 
+// A cold `bun run ./src/main.ts` can take several seconds on a loaded machine.
+// Each beforeAll gets longer than this, so a slow boot fails with the child's
+// stderr instead of a bare hook timeout.
+const BOOT_TIMEOUT_MS = 10_000
+const HOOK_TIMEOUT_MS = BOOT_TIMEOUT_MS + 5000
+
 async function bootOrThrow(
   proc: ReturnType<typeof Bun.spawn>,
   port: number,
 ): Promise<void> {
-  const up = await waitForPort(port, 5000)
+  const up = await waitForPort(port, BOOT_TIMEOUT_MS)
   if (!up) {
+    // Stop the child first: its stderr stream only ends once it exits.
+    proc.kill("SIGTERM")
     const stderr =
       proc.stderr instanceof ReadableStream ?
         await new Response(proc.stderr).text()
       : ""
-    throw new Error(`Server did not bind to ${port} within 5s.\n${stderr}`)
+    throw new Error(
+      `Server did not bind to ${port} within ${BOOT_TIMEOUT_MS / 1000}s.\n${stderr}`,
+    )
   }
 }
 
@@ -94,7 +104,7 @@ describe("boot migrates a legacy token into the registry", () => {
     fs.writeFileSync(path.join(tmpHome, "github_token"), "gho_legacytoken123")
     proc = spawnStart(tmpHome, port)
     await bootOrThrow(proc, port)
-  })
+  }, HOOK_TIMEOUT_MS)
 
   afterAll(() => {
     proc?.kill("SIGTERM")
@@ -159,7 +169,7 @@ describe("boot with a registry that has no active account", () => {
     )
     proc = spawnStart(tmpHome, port)
     await bootOrThrow(proc, port)
-  })
+  }, HOOK_TIMEOUT_MS)
 
   afterAll(() => {
     proc?.kill("SIGTERM")

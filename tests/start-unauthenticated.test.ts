@@ -71,7 +71,9 @@ beforeAll(async () => {
 
   const up = await waitForPort(port, 5000)
   if (!up) {
-    // Surface child output to make CI failures debuggable.
+    // Surface child output to make CI failures debuggable. Stop the child
+    // first: its output streams only end once it exits.
+    proc.kill("SIGTERM")
     const stderr =
       proc.stderr instanceof ReadableStream ?
         await new Response(proc.stderr).text()
@@ -84,7 +86,9 @@ beforeAll(async () => {
       `Server did not bind to port ${port} within 5s.\nstdout:\n${stdout}\nstderr:\n${stderr}`,
     )
   }
-})
+  // Longer than the 5s bind wait, so a slow boot reports the child's output
+  // instead of a bare hook timeout.
+}, 10_000)
 
 afterAll(() => {
   if (proc) {
