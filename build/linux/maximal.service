@@ -1,0 +1,19 @@
+[Unit]
+Description=Maximal, a local proxy to the models in GitHub Copilot
+Documentation=https://github.com/stuffbucket/maximal/blob/main/docs/linux.md
+# Stop retrying after 5 failed starts in a minute (another process on the
+# port, a broken config) instead of restarting forever.
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+# Loopback only. To reach it from other machines, override HOST in a drop-in
+# (systemctl --user edit maximal) and require an API key.
+Environment=HOST=127.0.0.1
+ExecStart=/usr/bin/maximal start
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -33,6 +33,7 @@ import {
   state,
 } from "~/lib/runtime-state/state"
 import { BUILD_VERSION } from "~/lib/update/build-info"
+import { peekUpdateStatus } from "~/lib/update/update-check"
 
 /** Health of the GitHub Copilot auth + upstream subsystem. */
 export interface CopilotSubsystemStatus {
@@ -66,6 +67,17 @@ export interface McpBrokerSubsystemStatus {
   enabled_endpoints: number
 }
 
+export interface UpdateSubsystemStatus {
+  /** Newest release on this build's channel, from the last check this
+   *  process made (no fetch here); null before a check succeeds or while
+   *  checks are off. */
+  latest: string | null
+  /** `latest` is newer than the running version. */
+  update_available: boolean
+  /** The apt command that upgrades an apt install; null otherwise. */
+  update_command: string | null
+}
+
 export interface StatusResponse {
   /** Identity marker. Always the literal "maximal" — the stable signal a
    *  caller uses to confirm the thing on the port is this proxy. */
@@ -82,6 +94,7 @@ export interface StatusResponse {
     copilot: CopilotSubsystemStatus
     models: ModelsSubsystemStatus
     mcp_broker: McpBrokerSubsystemStatus
+    update: UpdateSubsystemStatus
   }
 }
 
@@ -96,6 +109,7 @@ export function buildStatus(startMs: number): StatusResponse {
   const authenticated = hasGithubToken()
   const ready = authenticated && hasCopilotToken()
   const broker = getBrokerSupervisorSnapshot()
+  const update = peekUpdateStatus()
 
   return {
     service: "maximal",
@@ -114,6 +128,11 @@ export function buildStatus(startMs: number): StatusResponse {
       mcp_broker: {
         state: broker.state,
         enabled_endpoints: broker.enabledEndpoints,
+      },
+      update: {
+        latest: update?.latest ?? null,
+        update_available: update?.update_available ?? false,
+        update_command: update?.update_command ?? null,
       },
     },
   }

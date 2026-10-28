@@ -74,14 +74,17 @@ describe("release action supply chain", () => {
       return actionUse.startsWith("./") ? [] : [actionUse]
     })
     const expectedUses = new Map([
-      ["actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1", 9],
+      [
+        "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1",
+        11,
+      ],
       [
         "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1",
         2,
       ],
     ])
 
-    expect(externalUses).toHaveLength(11)
+    expect(externalUses).toHaveLength(13)
     for (const [expectedUse, count] of expectedUses) {
       expect(
         externalUses.filter((actionUse) => actionUse === expectedUse),

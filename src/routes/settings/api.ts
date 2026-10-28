@@ -155,6 +155,7 @@ settingsApiRoutes.get("/update-status", async (c) => {
       latest: null,
       update_available: false,
       url: payload.url,
+      update_command: payload.update_command,
       enabled: false,
       checked_at: null,
       last_error: "update-status payload malformed",

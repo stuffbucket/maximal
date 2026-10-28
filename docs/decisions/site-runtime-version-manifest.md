@@ -56,9 +56,12 @@ clients read only `channels.<channel>.version`, which is unchanged.
 - **`downloads` is a map keyed by slot**, not an array. Slots are the
   `DownloadSlot` union in `updates-manifest.ts` (`macos-arm64-dmg`,
   `macos-x64-dmg`, `windows-x64-setup`, `windows-x64-msi`,
-  `windows-x64-zip`, `windows-install-ps1`). The site picks an artifact by
+  `windows-x64-zip`, `windows-install-ps1`, `linux-{amd64,arm64}-deb`,
+  `linux-{amd64,arm64}-desktop-deb`). The site picks an artifact by
   slot without name-sniffing; new slots need no schema bump; an absent slot
-  means "not offered".
+  means "not offered". The Pages deploy builds the apt repository from the
+  tags `channels.stable` and `channels.rc` name, and fails when a channel
+  lists a Linux slot its release doesn't carry.
 - **`notes`** is a display-only link to the GitHub release.
 
 ## Security property

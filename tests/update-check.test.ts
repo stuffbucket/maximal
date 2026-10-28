@@ -4,7 +4,15 @@
  * running version (package.json fallback in tests).
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "bun:test"
 
 import { BUILD_VERSION } from "~/lib/update/build-info"
 import {
@@ -13,8 +21,23 @@ import {
   DOWNLOAD_URL,
   getUpdateStatus,
   isNewerVersion,
+  MANIFEST_URL_OVERRIDE_ENV,
   parseManifestVersion,
+  peekUpdateStatus,
+  resolveManifestUrl,
 } from "~/lib/update/update-check"
+
+// The test preload points every check at a closed loopback port so spawned
+// servers stay offline; these tests assert the real URL, so lift that here.
+const preloadOverride = process.env[MANIFEST_URL_OVERRIDE_ENV]
+beforeAll(() => {
+  delete process.env.MAXIMAL_TEST_UPDATE_MANIFEST_URL
+})
+afterAll(() => {
+  if (preloadOverride !== undefined) {
+    process.env[MANIFEST_URL_OVERRIDE_ENV] = preloadOverride
+  }
+})
 
 /** A manifest body advertising `version` on the `stable` channel, exactly as
  *  the site build emits it. */
@@ -463,5 +486,106 @@ describe("getUpdateStatus — conditional CDN revalidation", () => {
     expect(failed.latest).toBe("999.0.0")
     expect(failed.update_available).toBe(true)
     expect(failed.last_error).toBe("network error: offline")
+  })
+})
+
+describe("getUpdateStatus — how an install updates", () => {
+  beforeEach(() => {
+    __resetUpdateCheckDepsForTests()
+  })
+  afterEach(() => {
+    __resetUpdateCheckDepsForTests()
+  })
+
+  test("an apt install gets the apt command and the Linux guide", async () => {
+    __setUpdateCheckDepsForTests({
+      fetch: () => Promise.resolve(manifestJson("v999.0.0")),
+      aptInstall: { desktop: false },
+    })
+
+    const status = await getUpdateStatus()
+
+    expect(status.update_available).toBe(true)
+    expect(status.update_command).toBe(
+      "sudo apt update && sudo apt install --only-upgrade maximal",
+    )
+    expect(status.url).toBe(
+      "https://github.com/stuffbucket/maximal/blob/main/docs/linux.md#update",
+    )
+  })
+
+  test("an apt install with the desktop app upgrades both packages", async () => {
+    __setUpdateCheckDepsForTests({
+      fetch: () => Promise.resolve(manifestJson("v999.0.0")),
+      aptInstall: { desktop: true },
+    })
+
+    const status = await getUpdateStatus()
+
+    expect(status.update_command).toBe(
+      "sudo apt update && sudo apt install --only-upgrade maximal maximal-desktop",
+    )
+  })
+
+  test("every other install keeps the download page and no command", async () => {
+    __setUpdateCheckDepsForTests({
+      fetch: () => Promise.resolve(manifestJson("v999.0.0")),
+      aptInstall: null,
+    })
+
+    const status = await getUpdateStatus()
+
+    expect(status.update_command).toBeNull()
+    expect(status.url).toBe(DOWNLOAD_URL)
+  })
+
+  test("peekUpdateStatus reports the last check without fetching", async () => {
+    let calls = 0
+    __setUpdateCheckDepsForTests({
+      fetch: () => {
+        calls++
+        return Promise.resolve(manifestJson("v999.0.0"))
+      },
+      aptInstall: null,
+    })
+
+    expect(peekUpdateStatus()).toBeNull()
+    await getUpdateStatus()
+    expect(peekUpdateStatus()?.latest).toBe("999.0.0")
+    expect(calls).toBe(1)
+  })
+})
+
+describe("resolveManifestUrl", () => {
+  const canonical = "https://mxml.sh/updates/manifest.json"
+
+  test("is the canonical CDN URL by default", () => {
+    expect(resolveManifestUrl({})).toBe(canonical)
+  })
+
+  test("honors a loopback override for tests", () => {
+    expect(
+      resolveManifestUrl({
+        [MANIFEST_URL_OVERRIDE_ENV]: "http://127.0.0.1:8765/manifest.json",
+      }),
+    ).toBe("http://127.0.0.1:8765/manifest.json")
+    expect(
+      resolveManifestUrl({
+        [MANIFEST_URL_OVERRIDE_ENV]: "http://localhost:8765/m.json",
+      }),
+    ).toBe("http://localhost:8765/m.json")
+  })
+
+  test("ignores an override that isn't loopback http(s)", () => {
+    for (const value of [
+      "https://example.com/manifest.json",
+      "https://127.0.0.1.example.com/m.json",
+      "file:///etc/passwd",
+      "not a url",
+    ]) {
+      expect(resolveManifestUrl({ [MANIFEST_URL_OVERRIDE_ENV]: value })).toBe(
+        canonical,
+      )
+    }
   })
 })

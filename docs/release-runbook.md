@@ -31,11 +31,15 @@ an explicit version. Pre-1.0 `feat:` commits otherwise produce patch releases.
 | `release`, `binaries`, `checksums`, `smoke` | Draft release, notes, SBOM, raw platform archives, checksums, and binary validation |
 | `macos-dmg` | Signed, notarized, and stapled Apple Silicon DMG from `stuffbucket/macos-builder`, plus the app's updater bundle `maximal-vX.Y.Z-darwin-arm64.app.tar.gz` with its `.sig` and `.sha256`, checked against the checksum and verified as signed by the updater key for this version |
 | `windows-installer`, `windows-msi`, `windows-msi-verify`, `windows-shell` | Windows installer assets and their required validation; `windows-shell` also verifies and attaches `<setup>.exe.sig`, the Windows app's updater signature |
+| `linux-deb` | On Ubuntu 24.04 runners for amd64 and arm64: `maximal_X.Y.Z_<arch>.deb` built from the `linux-x64`/`linux-arm64` archives, and `maximal-desktop_X.Y.Z_<arch>.deb` (the Tauri tray app, which depends on `maximal (= <version>)` and ships no copy of its binaries), each with a `.sha256`; fails on a package over 95 MB |
+| `linux-deb-smoke` | Installs both packages with apt in `debian:13`, `ubuntu:24.04` and `ubuntu:26.04` containers on both architectures and runs `build/linux/smoke-deb.sh` |
 | `publish` | Publishes only after every required asset and verification gate succeeds |
 | `homebrew-tap`, `manifest` | Independent post-publication distribution updates |
 
 Each raw archive and installed application layout must contain `maximal` and
-`maximal-mcp-broker` as executable siblings (`.exe` on Windows). The SBOM covers
+`maximal-mcp-broker` as executable siblings (`.exe` on Windows). On Linux the
+`maximal` package installs both in `/usr/bin`, where `maximal-desktop` finds
+them next to its own executable. The SBOM covers
 both production dependency graphs. Shipping the Windows broker binary does not
 enable supervision there; runtime remains fail-closed until kill-on-close Job
 Object containment is implemented. The PowerShell installer owns a dedicated
@@ -55,12 +59,74 @@ directly to protected `main` and has no ruleset bypass. The PR updates
 `site/public/updates/manifest.json`, which every app reads to offer
 "Update to X.Y.Z", and `site/public/updates/desktop/<channel>.json`, which the
 Windows and macOS apps install from. Until it merges and Pages deploys, the
-apps can't install the release in place and send users to mxml.sh instead.
+apps can't install the release in place and send users to mxml.sh instead,
+and apt doesn't offer it (see the apt repository below).
 
 Merge the PR only after its required `test` check passes and its branch is
 current with `main`. That ordinary protected merge triggers the Pages deploy.
 If `main` advances or manifest generation fails, rerun the `manifest` job and
 review the refreshed PR.
+
+## apt repository
+
+The same Pages deploy rebuilds the apt repository at `https://mxml.sh/apt`
+(static files under `site/dist/apt/`, never committed), in three jobs:
+
+1. `build` (no secrets) builds the site and only plans the repository:
+   `scripts/apt-repo-plan.ts` reads the merged manifest and outputs which
+   tags to build. The `stable` suite is built from `channels.stable.tag` and
+   the `rc` suite from `channels.rc.tag`, so apt always carries the version
+   the apps announce and nothing else. `build` runs the project's
+   dependencies, so nothing it produces is signed.
+2. `sign-apt`, in the `github-pages` environment, builds and signs the
+   repository. It checks out only `build/linux/apt-repo.sh`, the public key
+   and the manifest (`persist-credentials: false`), runs no project
+   dependencies, and uses tools on the runner image (apt-utils from Ubuntu's
+   archive if the image lacks it). In order:
+   - `fetch` refuses any suite whose tag isn't the one the manifest names,
+     downloads that release's four `.deb`s, checks each against the
+     release's own `.sha256` asset, and refuses a file over 95 MB (Pages
+     serves files up to 100 MB and sites up to 1 GB; the deploy also fails
+     over 800 MB);
+   - `index` writes `Packages(.gz)`, `Release` and `by-hash/` copies
+     (`Acquire-By-Hash: yes`). Each deploy replaces the whole site, so older
+     by-hash files disappear; this only covers a client that gets the new
+     `InRelease` while a CDN edge still serves the old `Packages`;
+   - `sign` writes `InRelease` and `Release.gpg`. Only this step sees the
+     secrets.
+
+   It uploads the whole signed tree, pool included.
+3. `deploy` replaces `/apt` with that tree and the committed public key,
+   runs `apt-repo.sh verify` (every suite signed by the published key, every
+   `Filename:` in each `Packages` present in the pool with its recorded
+   SHA256), then publishes.
+
+A release without Linux packages (anything before them) is skipped with a
+notice; with none at all, `sign-apt` is skipped and the site deploys without
+the repository.
+
+**An apt error fails the whole Pages deploy (fail closed).** A plan error (a
+channel whose manifest entry lists Linux downloads its release doesn't have,
+or a release that can't be read), a bad download or checksum, an oversized
+package, a signing failure, or a failed `verify` stops the run before it
+publishes, so the previous site, manifest and apt repository all stay live
+and consistent, and no manifest update ships until it is fixed. To recover,
+read the failing step's `::error::` annotation, fix the cause (attach the
+missing packages by cutting a new release, correct the manifest through a PR,
+or fix the secrets and variable in the `github-pages` environment), then
+start a fresh run with `gh workflow run deploy-pages.yml --ref main`.
+Re-running only the failed jobs works too, as long as nothing on `main`
+changed.
+
+Signing uses the `APT_SIGNING_KEY` (armored private key) and
+`APT_SIGNING_KEY_PASSWORD` secrets and the `APT_SIGNING_KEY_FINGERPRINT`
+variable (`7317FD604A591AFFC9235436C8270651B026DDF6`), all in the
+`github-pages` environment (branch policy: `main`). Only the sign step of
+`sign-apt` sees the secrets, with the key in a temporary `GNUPGHOME`. The job fails unless the
+key's fingerprint equals that variable and the committed public key
+`site/public/apt/maximal.asc`, and it verifies each signature against that
+public key. Rotating the key means replacing all four together and telling
+Linux users to fetch the new public key.
 
 ## Recovery
 
@@ -72,6 +138,7 @@ review the refreshed PR.
 | `manifest` failed after publication | Rerun `manifest`, then merge its protected PR after checks pass. |
 | `homebrew-tap` failed | Rerun only `homebrew-tap`. |
 | Pages deployment failed | Start a fresh run with `gh workflow run deploy-pages.yml --ref main`. |
+| An apt step failed (the whole Pages deploy stops) | Read its annotation: a missing or wrong signing secret or variable, a channel listing Linux packages its release lacks, or an oversized package. Fix it, then start a fresh Pages run (see *apt repository*). |
 | A published asset is wrong | Cut a new patch release. |
 
 If release-please itself is unavailable, a maintainer may prepare an emergency

@@ -15,19 +15,19 @@ on:
     # merge creates the main push that this filter turns into exactly one Pages
     # deploy. It lives under site/public/ so `site/**` already covers it; it is
     # named here only to document that the release→site path rides this trigger.
+    # That same deploy rebuilds the apt repository (mxml.sh/apt) from the tags
+    # the merged manifest names, so apt and the apps' update check move
+    # together. The apt build's own sources are listed too.
     paths:
       - "site/**"
       - ".github/workflows/deploy-pages.yml"
+      - "build/linux/apt-repo.sh"
+      - "scripts/apt-repo-plan.ts"
   workflow_dispatch:
 
-# Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages.
-# `actions: write` lets the "Remove stale github-pages artifact" step below
-# delete a prior attempt's artifact via the Actions API before re-uploading.
+# Read-only by default; each job asks for what it needs.
 permissions:
   contents: read
-  pages: write
-  id-token: write
-  actions: write
 
 # One deployment at a time. `cancel-in-progress: true` so a newer commit or
 # dispatch supersedes and CANCELS an in-flight deploy rather than queuing
@@ -39,13 +39,15 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Build the Astro site under ./site and deploy site/dist to Pages.
-  deploy:
+  # Build the Astro site under ./site and decide what the apt repository
+  # carries. No secrets, and nothing it produces is signed: it runs project
+  # dependencies, so the packages and indexes are built in `sign-apt` instead.
+  build:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+    outputs:
+      apt: ${{ steps.apt.outputs.build }}
+      suites: ${{ steps.apt.outputs.suites }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -73,6 +75,193 @@ jobs:
       - name: Build Astro
         working-directory: site
         run: bun run build
+
+      # ── apt repository (https://mxml.sh/apt) ──────────────────────────
+      # Static files beside the site, never committed: each suite is built
+      # from the release its manifest channel names (stable ->
+      # channels.stable.tag, rc -> channels.rc.tag), so apt can install every
+      # version the apps announce. A release that predates the Linux packages
+      # is skipped with a notice; a channel that lists Linux packages its
+      # release lacks fails the deploy (fail closed: the live site stays as
+      # it was). This job only plans; see scripts/apt-repo-plan.ts.
+      - name: Configure package registry
+        run: printf '%s\n' 'registry=https://packagefeedproxy.microsoft.io/npm/' > "$HOME/.npmrc"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Plan the apt repository
+        id: apt
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          plan="$RUNNER_TEMP/apt-plan.json"
+          bun scripts/apt-repo-plan.ts \
+            --manifest site/public/updates/manifest.json \
+            --repo "$GITHUB_REPOSITORY" --out "$plan"
+          suites="$(jq -r '[.suites[] | "\(.suite)=\(.tag)"] | join(" ")' "$plan")"
+          if [ -z "$suites" ]; then
+            echo "::notice::No release in the manifest has Linux packages yet; deploying without the apt repository."
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "suites=$suites" >> "$GITHUB_OUTPUT"
+
+      # `overwrite` keeps "Re-run failed jobs" working: a rerun replaces the
+      # earlier attempt's artifact instead of failing on the name.
+      - name: Upload the site
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: site
+          path: site/dist
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 1
+
+  # Build and sign the apt repository: download the packages, write the
+  # indexes, sign them. The only job that can read the signing secrets (they
+  # live in the github-pages environment, whose branch policy allows main
+  # only), and the only one whose output gets signed, so it runs no project
+  # code or dependencies: it checks out just the script, the public key and
+  # the manifest, and uses tools on the runner image (gh, jq, gpg; apt-utils
+  # from Ubuntu's signed archive if the image lacks it). `fetch` re-checks the
+  # plan against the manifest and every package against its release's .sha256
+  # asset. Skipped, with deploy still running, when there is nothing to build.
+  sign-apt:
+    needs: build
+    if: needs.build.outputs.apt == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: github-pages
+    permissions:
+      contents: read
+    env:
+      SUITES: ${{ needs.build.outputs.suites }}
+    steps:
+      - name: Checkout the apt script, public key and manifest
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            build/linux/apt-repo.sh
+            site/public/apt/maximal.asc
+            site/public/updates/manifest.json
+          sparse-checkout-cone-mode: false
+
+      - name: Download the Linux packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          read -r -a suites <<<"$SUITES"
+          bash build/linux/apt-repo.sh fetch apt site/public/updates/manifest.json "${suites[@]}"
+
+      - name: Index the apt repository
+        run: |
+          set -euo pipefail
+          command -v apt-ftparchive >/dev/null || {
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends apt-utils
+          }
+          read -r -a suites <<<"$SUITES"
+          bash build/linux/apt-repo.sh index apt "${suites[@]}"
+
+      # apt-repo.sh imports the key into a temporary GNUPGHOME, feeds the
+      # passphrase on a file descriptor, refuses a key whose fingerprint isn't
+      # APT_SIGNING_KEY_FINGERPRINT (or the committed public key's), and
+      # verifies every signature against that public key.
+      - name: Sign the apt repository
+        env:
+          APT_SIGNING_KEY: ${{ secrets.APT_SIGNING_KEY }}
+          APT_SIGNING_KEY_PASSWORD: ${{ secrets.APT_SIGNING_KEY_PASSWORD }}
+          APT_SIGNING_KEY_FINGERPRINT: ${{ vars.APT_SIGNING_KEY_FINGERPRINT }}
+        run: bash build/linux/apt-repo.sh sign apt site/public/apt/maximal.asc
+
+      - name: Upload the signed apt repository
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: apt
+          path: apt
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 1
+
+  # Deploy the built site, with the signed apt repository when there is one.
+  deploy:
+    needs: [build, sign-apt]
+    # Runs after a successful build whether sign-apt ran or was skipped (no
+    # Linux packages yet); never after a failed or cancelled one.
+    if: >-
+      ${{ !cancelled() && needs.build.result == 'success'
+      && (needs.sign-apt.result == 'success' || needs.sign-apt.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # `actions: write` lets the "Remove stale github-pages artifact" step
+    # delete a prior attempt's artifact via the Actions API before re-uploading.
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+      actions: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout the apt script and public key
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            build/linux/apt-repo.sh
+            site/public/apt/maximal.asc
+          sparse-checkout-cone-mode: false
+          path: src
+
+      - name: Download the site
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: site
+          path: site/dist
+
+      # /apt comes only from sign-apt and the repository's public key, never
+      # from the site build.
+      - name: Replace /apt with the signed repository
+        run: |
+          set -euo pipefail
+          rm -rf site/dist/apt
+          mkdir -p site/dist/apt
+          cp src/site/public/apt/maximal.asc site/dist/apt/maximal.asc
+
+      - name: Download the signed apt repository
+        if: needs.build.outputs.apt == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: apt
+          path: site/dist/apt
+
+      # Fail closed: every suite signed by the published key, and every
+      # package its indexes name present in the pool with that checksum.
+      - name: Verify the apt repository
+        if: needs.build.outputs.apt == 'true'
+        run: bash src/build/linux/apt-repo.sh verify site/dist/apt src/site/public/apt/maximal.asc
+
+      # GitHub Pages: 1 GB per site, 100 MB per file.
+      - name: Check the site size
+        run: |
+          set -euo pipefail
+          total="$(du -sb site/dist | cut -f1)"
+          echo "site/dist: $((total / 1024 / 1024)) MB"
+          if [ "$total" -gt $((800 * 1024 * 1024)) ]; then
+            echo "::error::site/dist is over 800 MB; GitHub Pages allows 1 GB. Keep fewer packages in the apt repository."
+            exit 1
+          fi
+          big="$(find site/dist -type f -size +95M)"
+          if [ -n "$big" ]; then
+            echo "::error::Files over 95 MB (GitHub Pages allows 100 MB): $big"
+            exit 1
+          fi
 
       - name: Setup Pages
         uses: actions/configure-pages@v6

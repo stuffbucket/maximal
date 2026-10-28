@@ -10,10 +10,12 @@
  * This only decides whether to offer an update. Installing is not done here:
  * the Windows and macOS desktop apps install in place (the Tauri shell's signed
  * updater, which reads its own manifest at mxml.sh/updates/desktop/<channel>.json);
- * every other build sends the user to `https://mxml.sh` (the download page that
- * routes to the right artifact / package manager) rather than a raw release
- * asset, because the running build could be a brew/npm/MSI install that
- * shouldn't be clobbered by a bare binary swap.
+ * an apt install (see install-source.ts) is offered the apt command and the
+ * Linux guide's update section; every other build sends the user to
+ * `https://mxml.sh` (the download page that routes to the right artifact /
+ * package manager) rather than a raw release asset, because the running build
+ * could be a brew/npm/MSI install that shouldn't be clobbered by a bare binary
+ * swap.
  *
  * Best-effort throughout: any failure (offline, rate-limited, malformed body)
  * reports `update_available: false` instead of throwing — a missing update
@@ -24,6 +26,12 @@ import { isUpdateCheckEnabled } from "~/lib/config/config"
 import { GITHUB_API_TIMEOUT_MS } from "~/lib/http/http-timeouts"
 import { createTeeLogger } from "~/lib/platform/logger"
 import { BUILD_CHANNEL, BUILD_VERSION } from "~/lib/update/build-info"
+import {
+  type AptInstall,
+  aptUpgradeCommand,
+  currentAptInstall,
+  LINUX_UPDATE_URL,
+} from "~/lib/update/install-source"
 
 const log = createTeeLogger("update")
 
@@ -38,6 +46,34 @@ const log = createTeeLogger("update")
  *  Channel-keyed, so opting a build into a future `beta` is a server-only +
  *  client-config change. */
 const MANIFEST_URL = "https://mxml.sh/updates/manifest.json"
+
+/** Test hook: point the check at a manifest on this machine (the Linux package
+ *  smoke test serves one in its container). Only loopback URLs are honored, so
+ *  the variable can't send the check anywhere else. */
+export const MANIFEST_URL_OVERRIDE_ENV = "MAXIMAL_TEST_UPDATE_MANIFEST_URL"
+
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"])
+
+/** The manifest URL to fetch: the canonical one unless the test hook names a
+ *  loopback http(s) URL. */
+export function resolveManifestUrl(
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  const raw = env[MANIFEST_URL_OVERRIDE_ENV]
+  if (!raw) return MANIFEST_URL
+  try {
+    const url = new URL(raw)
+    if (
+      (url.protocol === "http:" || url.protocol === "https:")
+      && LOOPBACK_HOSTS.has(url.hostname)
+    ) {
+      return url.href
+    }
+  } catch {
+    // Not a URL: ignore it.
+  }
+  return MANIFEST_URL
+}
 
 /** Which release channel this build follows — derived from the build's
  *  `BUILD_CHANNEL` (`stable` for source/stock builds; `beta` etc. when a
@@ -62,8 +98,13 @@ export interface UpdateStatus {
   latest: string | null
   /** True only when `latest` is strictly newer than `current`. */
   update_available: boolean
-  /** Where to get it. */
+  /** Where to get it: the Linux guide's update section for an apt install,
+   *  otherwise the download page. */
   url: string
+  /** For an apt install, the command that upgrades it
+   *  (`sudo apt update && sudo apt install --only-upgrade maximal …`);
+   *  null for every other install. */
+  update_command: string | null
   /** Whether update checking is enabled (`config.checkUpdates`). False means
    *  the mechanism is intentionally idle — not broken. */
   enabled: boolean
@@ -86,23 +127,39 @@ type FetchLike = (url: string, init?: RequestInit) => Promise<Response>
 let fetchImpl: FetchLike = fetch
 let nowMs: () => number = Date.now
 let versionImpl: string = BUILD_VERSION
+let aptInstallImpl: () => AptInstall | null = currentAptInstall
 
 export function __setUpdateCheckDepsForTests(o: {
   fetch?: FetchLike
   now?: () => number
   currentVersion?: string
+  aptInstall?: AptInstall | null
 }): void {
   if (o.fetch) fetchImpl = o.fetch
   if (o.now) nowMs = o.now
   if (o.currentVersion) versionImpl = o.currentVersion
+  if (o.aptInstall !== undefined) {
+    const install = o.aptInstall
+    aptInstallImpl = () => install
+  }
 }
 
 export function __resetUpdateCheckDepsForTests(): void {
   fetchImpl = fetch
   nowMs = Date.now
   versionImpl = BUILD_VERSION
+  aptInstallImpl = currentAptInstall
   cache = null
   manifest = null
+}
+
+/** Where and how this install updates: the apt command and the Linux guide
+ *  for an apt install, the download page otherwise. */
+function updateRoute(): Pick<UpdateStatus, "url" | "update_command"> {
+  const install = aptInstallImpl()
+  return install ?
+      { url: LINUX_UPDATE_URL, update_command: aptUpgradeCommand(install) }
+    : { url: DOWNLOAD_URL, update_command: null }
 }
 
 let cache: { atMs: number; status: UpdateStatus } | null = null
@@ -147,7 +204,7 @@ async function fetchManifestBody(): Promise<
   { body: string } | { error: string }
 > {
   const held = manifest
-  const res = await fetchImpl(MANIFEST_URL, {
+  const res = await fetchImpl(resolveManifestUrl(), {
     headers: manifestRequestHeaders(held),
     signal: AbortSignal.timeout(GITHUB_API_TIMEOUT_MS),
   })
@@ -269,7 +326,7 @@ export async function getUpdateStatus(force = false): Promise<UpdateStatus> {
       current,
       latest: null,
       update_available: false,
-      url: DOWNLOAD_URL,
+      ...updateRoute(),
       enabled: false,
       checked_at: checkedAt,
       last_error: null,
@@ -285,7 +342,7 @@ export async function getUpdateStatus(force = false): Promise<UpdateStatus> {
     current,
     latest: cache?.status.latest ?? null,
     update_available: cache?.status.update_available ?? false,
-    url: DOWNLOAD_URL,
+    ...updateRoute(),
     enabled: true,
     checked_at: checkedAt,
     last_error: error,
@@ -307,7 +364,7 @@ export async function getUpdateStatus(force = false): Promise<UpdateStatus> {
       latest,
       update_available:
         latest !== null && isNewerVersion(latest, normalizeCurrent(current)),
-      url: DOWNLOAD_URL,
+      ...updateRoute(),
       enabled: true,
       checked_at: new Date(atMs).toISOString(),
       last_error: error,
@@ -325,4 +382,14 @@ export async function getUpdateStatus(force = false): Promise<UpdateStatus> {
     log.warn("Update check failed (continuing):", err)
     return fallback(error)
   }
+}
+
+/**
+ * The last resolved status, without fetching: null until a check has
+ * succeeded, or while checks are off. `/status` reports it so a running
+ * proxy's known update is visible without a network call.
+ */
+export function peekUpdateStatus(): UpdateStatus | null {
+  if (!isUpdateCheckEnabled()) return null
+  return cache?.status ?? null
 }

@@ -920,6 +920,68 @@ function renderUpdateStatus(data: UpdateStatusResponse): void {
   renderUpdateAction(data);
   renderUpdateOutcome(data);
   renderUpdateHealth(data);
+  renderAptUpdate(data);
+}
+
+/**
+ * The apt command to offer, or null: only an apt install (the Debian/Ubuntu
+ * packages) with a newer release offered. The sidecar decides whether it is
+ * one (`update_command`).
+ */
+function aptUpdateCommand(data: UpdateStatusResponse | null): string | null {
+  return offeredUpdate(data) ? (data?.update_command ?? null) : null;
+}
+
+/**
+ * Diagnostics' apt block: the version, the command to copy and the Linux
+ * guide's update section. Maximal never runs apt or asks for root.
+ */
+function renderAptUpdate(data: UpdateStatusResponse | null): void {
+  const block = document.querySelector<HTMLElement>("[data-update-apt]");
+  if (!block) return;
+  const command = aptUpdateCommand(data);
+  const version = offeredUpdate(data);
+  block.hidden = command === null;
+  if (command === null || version === null || !data) return;
+  const hint = block.querySelector<HTMLElement>("[data-update-apt-hint]");
+  if (hint) hint.textContent = t("diagnostics-update-apt-hint", { version });
+  const code = block.querySelector<HTMLElement>("[data-update-apt-command]");
+  if (code) code.textContent = command;
+  const guide = block.querySelector<HTMLAnchorElement>("[data-update-apt-guide]");
+  if (guide) guide.href = data.url;
+}
+
+/** Bring the apt block into view (the topbar button and the tray item). */
+function showAptUpdate(): void {
+  if (window.location.hash !== "#diagnostics") window.location.hash = "diagnostics";
+  window.requestAnimationFrame(() => {
+    const copy = document.querySelector<HTMLButtonElement>(
+      '[data-update-apt] [data-action="copy-update-command"]',
+    );
+    copy?.scrollIntoView({ block: "center" });
+    copy?.focus({ preventScroll: true });
+  });
+}
+
+function wireAptUpdate(): void {
+  document
+    .querySelector('[data-action="copy-update-command"]')
+    ?.addEventListener("click", (ev) => {
+      const command = aptUpdateCommand(lastUpdateStatus);
+      if (command) void copyToClipboard(command, ev.currentTarget as Element);
+    });
+  document
+    .querySelector<HTMLAnchorElement>("[data-update-apt-guide]")
+    ?.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      if (lastUpdateStatus) void openExternalUrl(lastUpdateStatus.url);
+    });
+  // The tray's "Update with apt…" opens Settings at #diagnostics.
+  window.addEventListener("hashchange", () => {
+    if (window.location.hash === "#diagnostics" && aptUpdateCommand(lastUpdateStatus)) {
+      showAptUpdate();
+    }
+  });
 }
 
 /**
@@ -966,6 +1028,12 @@ function renderUpdateAction(data: UpdateStatusResponse | null): void {
     return;
   }
   if (version === null) return;
+  if (aptUpdateCommand(data)) {
+    // An apt install: the button shows the command (see showAptUpdate).
+    button.textContent = t("nav-update-apt");
+    button.title = t("diagnostics-update-apt-hint", { version });
+    return;
+  }
   button.textContent = t("nav-update-to", { version });
   button.title = updateInPlace ? "" : t("diagnostics-update-get-it");
 }
@@ -973,11 +1041,15 @@ function renderUpdateAction(data: UpdateStatusResponse | null): void {
 async function startUpdate(): Promise<void> {
   const status = lastUpdateStatus;
   if (!status || !offeredUpdate(status) || updatePhase !== "idle") return;
+  if (aptUpdateCommand(status)) {
+    showAptUpdate();
+    return;
+  }
   updatePhase = "confirming";
   renderUpdateAction(lastUpdateStatus);
   // The shell confirms, installs and relaunches, or on failure tells the
   // user and opens the download page itself. "unavailable" means this build
-  // doesn't install in place (a plain browser, a Linux build).
+  // doesn't install in place (a plain browser, a Linux build without apt).
   const outcome = await installUpdate(() => {
     updatePhase = "downloading";
     renderUpdateAction(lastUpdateStatus);
@@ -1019,7 +1091,10 @@ function renderUpdateOutcome(data: UpdateStatusResponse): void {
     label.textContent = t("diagnostics-update-newer", { version });
     const link = document.createElement("a");
     link.href = data.url;
-    link.textContent = t("diagnostics-update-get-it");
+    // An apt install links the Linux guide, not the download page.
+    link.textContent = aptUpdateCommand(data)
+      ? t("diagnostics-update-apt-guide")
+      : t("diagnostics-update-get-it");
     link.addEventListener("click", (ev) => {
       ev.preventDefault();
       void openExternalUrl(data.url);
@@ -1079,6 +1154,7 @@ async function loadUpdateStatus(): Promise<void> {
     // know nothing: hide the button, like the "Unknown" row says.
     lastUpdateStatus = null;
     renderUpdateAction(null);
+    renderAptUpdate(null);
     setField("update_status", t("diagnostics-update-unknown"));
     setField("update_check", t("diagnostics-update-check-unavailable"));
     return;
@@ -2396,6 +2472,7 @@ window.addEventListener("DOMContentLoaded", () => {
   wireLogs();
   wireDiagnostics();
   wireUpdateAction();
+  wireAptUpdate();
   wireAccount();
   wireEndpoint();
   wireUninstall();

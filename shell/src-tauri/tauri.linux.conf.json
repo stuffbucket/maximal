@@ -1,0 +1,17 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "mainBinaryName": "maximal-desktop",
+  "bundle": {
+    "shortDescription": "Tray app for Maximal",
+    "longDescription": "The tray app for Maximal, a local proxy to the models in GitHub Copilot.",
+    "linux": {
+      "deb": {
+        "depends": ["libayatana-appindicator3-1"],
+        "section": "utils",
+        "files": {
+          "/usr/lib/maximal/desktop-installed-by-apt": "../../build/linux/desktop-installed-by-apt"
+        }
+      }
+    }
+  }
+}

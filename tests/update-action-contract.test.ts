@@ -78,9 +78,10 @@ describe("in-place update (shell)", () => {
       'const IN_PLACE_UPDATE: bool = cfg!(any(target_os = "windows", target_os = "macos"));',
     )
     expect(SHELL_LIB_RS).toContain("let builder = if IN_PLACE_UPDATE {")
-    // Without in-place support the tray item and the button open the page.
+    // Without in-place support the tray item and the button open the page,
+    // or, for an apt install, Settings with the apt command.
     expect(SHELL_LIB_RS).toMatch(
-      /fn start_update\(app: &AppHandle\) \{\s+if !IN_PLACE_UPDATE \{\s+open_update_url\(app\);/u,
+      /fn start_update\(app: &AppHandle\) \{\s+if !IN_PLACE_UPDATE \{[\s\S]*?open_settings_window\(app, Some\(APT_UPDATE_SECTION\)\);\s+\} else \{\s+open_update_url\(app\);/u,
     )
   })
 
@@ -153,6 +154,46 @@ describe("tray update item", () => {
     expect(SHELL_LIB_RS).not.toContain("mxml.sh/maximal/")
     expect(SHELL_LIB_RS).not.toContain(
       "github.com/stuffbucket/maximal/releases",
+    )
+  })
+})
+
+describe("apt installs (Debian/Ubuntu packages)", () => {
+  test("never install in place: Linux stays out of IN_PLACE_UPDATE", () => {
+    expect(SHELL_LIB_RS).not.toMatch(
+      /IN_PLACE_UPDATE: bool = cfg!\([^)]*linux/u,
+    )
+  })
+
+  test("the button and the tray item read 'Update with apt'", () => {
+    expect(EN["nav-update-apt"]).toBe("Update with apt")
+    expect(EN["native-tray-upgrade-apt"]).toBe("Update with apt…")
+    expect(SETTINGS_MAIN_TS).toContain('t("nav-update-apt")')
+    expect(SHELL_LIB_RS).toContain(
+      'native_i18n::tr(locale, "native-tray-upgrade-apt")',
+    )
+    // The sidecar decides: an apt install reports its command.
+    expect(SHELL_LIB_RS).toContain('.get("update_command")')
+  })
+
+  test("clicking shows the command to copy and the Linux guide, without running it", () => {
+    const block = SETTINGS_HTML.slice(
+      SETTINGS_HTML.indexOf("<div data-update-apt hidden>"),
+      SETTINGS_HTML.indexOf("<div data-diagnostics-root"),
+    )
+    expect(block).toContain('class="app-card__cmd"')
+    expect(block).toContain('data-action="copy-update-command"')
+    expect(block).toContain('data-i18n="apps-copy-command"')
+    expect(block).toContain(
+      'href="https://github.com/stuffbucket/maximal/blob/main/docs/linux.md#update"',
+    )
+    expect(EN["diagnostics-update-apt-hint"]).toContain("{version}")
+    expect(SETTINGS_MAIN_TS).toMatch(
+      /if \(aptUpdateCommand\(status\)\) \{\s+showAptUpdate\(\);\s+return;/u,
+    )
+    // Nothing in the shell runs apt or asks for root.
+    expect(SHELL_LIB_RS).not.toMatch(
+      /Command::new\("(?:sudo|apt|apt-get|pkexec)"/u,
     )
   })
 })

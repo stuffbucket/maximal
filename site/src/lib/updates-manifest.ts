@@ -50,7 +50,11 @@ export type DownloadSlot =
   | "windows-x64-setup"
   | "windows-x64-msi"
   | "windows-x64-zip"
-  | "windows-install-ps1";
+  | "windows-install-ps1"
+  | "linux-amd64-deb"
+  | "linux-arm64-deb"
+  | "linux-amd64-desktop-deb"
+  | "linux-arm64-desktop-deb";
 
 export interface ManifestChannel {
   /** Release version, no leading "v" (e.g. "0.4.39"). The ONLY field the
@@ -130,6 +134,21 @@ export function resolveDownloads(
     "windows-install-ps1",
     assets.find((a) => /\.ps1$/i.test(a.name)),
   );
+  // The Debian/Ubuntu packages (`maximal_<ver>_<arch>.deb`, and the tray
+  // app's `maximal-desktop_<ver>_<arch>.deb`). The apt repository at
+  // mxml.sh/apt is built from the same release; see scripts/apt-repo-plan.ts.
+  for (const arch of ["amd64", "arm64"] as const) {
+    add(
+      `linux-${arch}-deb`,
+      assets.find((a) => new RegExp(`^maximal_[^_]+_${arch}\\.deb$`, "i").test(a.name)),
+    );
+    add(
+      `linux-${arch}-desktop-deb`,
+      assets.find((a) =>
+        new RegExp(`^maximal-desktop_[^_]+_${arch}\\.deb$`, "i").test(a.name),
+      ),
+    );
+  }
 
   return downloads;
 }

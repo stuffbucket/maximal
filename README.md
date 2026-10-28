@@ -34,7 +34,8 @@ packages/mcp-broker/       Isolated MCP broker process.
 packages/storybook/        Component sandbox for the shell UI.
 site/                      Marketing and download site (mxml.sh).
 build/                     Packaging inputs (Homebrew formula, Windows
-                           installer, app icon).
+                           installer, Debian packages and apt repository,
+                           app icon).
 docs/                      Architecture, commands, design system, wire
                            contracts, dev and admin notes.
 scripts/                   Build, release, and operator helpers.
@@ -52,6 +53,14 @@ Download the macOS `.dmg` or the Windows installer from
 [latest release](https://github.com/stuffbucket/maximal/releases/latest).
 The app runs the proxy for you and manages sign-in, client apps, and
 API keys from its settings window.
+
+### Linux (Debian 13, Ubuntu 24.04, Ubuntu 26.04)
+
+Install the tray app (`maximal-desktop`) or the headless proxy (`maximal`)
+with apt from Maximal's signed repository at `https://mxml.sh/apt`, for amd64
+and arm64. Setup, updates, the user service and uninstalling are in
+[Maximal on Linux](docs/linux.md). Linux packages are available from 0.5.0;
+until 0.5.0 ships, testers use `Suites: rc` in place of `Suites: stable`.
 
 ### Homebrew (macOS, Apple Silicon)
 
@@ -81,8 +90,8 @@ brew update && brew upgrade maximal
 ```
 
 > The formula is Apple-Silicon-only — there is no Intel (`darwin-x64`)
-> build. On other platforms, run from source (below) or download a
-> binary from the
+> build. On Linux, use [apt](docs/linux.md); elsewhere, run from source
+> (below) or download a binary from the
 > [latest release](https://github.com/stuffbucket/maximal/releases/latest).
 
 ### Work IQ

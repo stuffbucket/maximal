@@ -135,6 +135,10 @@ const UPDATE_PAGE_URL: &str = "https://mxml.sh/";
 /// `bundle_location_problem`) opens the download page instead.
 const IN_PLACE_UPDATE: bool = cfg!(any(target_os = "windows", target_os = "macos"));
 
+/// The Settings section that shows an apt install's update command (the
+/// Debian/Ubuntu packages update with apt, never in place).
+const APT_UPDATE_SECTION: &str = "diagnostics";
+
 /// Where the desktop updater manifests live: `<base><channel>.json`, in
 /// Tauri's static JSON format, published by the release `manifest` job next to
 /// /updates/manifest.json. The check never contacts github.com; only the
@@ -399,8 +403,13 @@ fn default_settings_section(app: &AppHandle) -> Option<&'static str> {
 struct UpdateSnapshot {
     /// Latest version, no leading "v".
     latest: String,
-    /// Install-channel-neutral download page.
+    /// Install-channel-neutral download page, or the Linux guide's update
+    /// section for an apt install.
     url: String,
+    /// For an apt install (the Debian/Ubuntu packages), the command that
+    /// upgrades it. Maximal never runs it: the tray item opens Settings, which
+    /// shows it to copy.
+    apt_command: Option<String>,
 }
 
 /// Tracks the most recent update snapshot the poll loop has observed. Wrapped
@@ -993,10 +1002,22 @@ pub fn run() {
     });
 }
 
+/// Environment the sidecar gets on this platform only. On Linux the proxy
+/// listens on loopback (`HOST=127.0.0.1`), like the packaged user service;
+/// without HOST it binds every interface. macOS and Windows are unchanged.
+fn sidecar_platform_env() -> &'static [(&'static str, &'static str)] {
+    if cfg!(target_os = "linux") {
+        &[("HOST", "127.0.0.1")]
+    } else {
+        &[]
+    }
+}
+
 fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
-    // sidecar("maximal") looks up `bundle.externalBin[0]` from
-    // tauri.conf.json and resolves the arch-suffixed binary
-    // (binaries/maximal-aarch64-apple-darwin etc.) at build time.
+    // sidecar("maximal") resolves `maximal` next to this executable: the
+    // arch-suffixed `bundle.externalBin` copy Tauri places there on macOS and
+    // Windows, and the `maximal` package's /usr/bin/maximal for the Linux
+    // maximal-desktop package (which bundles no sidecar).
     let port = SIDECAR_PORT.to_string();
     let mut cmd = app
         .shell()
@@ -1009,6 +1030,10 @@ fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
         // listening on :4141 — confusing UX for menu-bar users who
         // shouldn't have to know which copy started first.
         .args(["start", "--replace", "--port", port.as_str()]);
+
+    for (key, value) in sidecar_platform_env() {
+        cmd = cmd.env(key, value);
+    }
 
     // The settings + dashboard UIs are embedded directly in the sidecar
     // binary and served at /ui/* (see src/routes/ui/route.ts), so there is
@@ -1621,9 +1646,15 @@ fn parse_update_status(payload: &serde_json::Value) -> UpdateCheck {
             .get("url")
             .and_then(serde_json::Value::as_str)
             .unwrap_or(UPDATE_PAGE_URL);
+        let apt_command = payload
+            .get("update_command")
+            .and_then(serde_json::Value::as_str)
+            .filter(|c| !c.is_empty())
+            .map(str::to_owned);
         return UpdateCheck::Resolved(Some(UpdateSnapshot {
             latest: latest.to_owned(),
             url: url.to_owned(),
+            apt_command,
         }));
     }
     let enabled = payload
@@ -2416,14 +2447,19 @@ fn build_menu(
     // An "Update to X.Y.Z…" item leads the menu in the running states whenever the
     // poll loop has seen a newer release. Built here (before the match) so both
     // running arms can prepend it; the other arms simply don't reference it.
-    // Clicking it installs in place on Windows and macOS and opens the
-    // download page elsewhere (see start_update).
+    // Clicking it installs in place on Windows and macOS, shows the apt command
+    // for an apt install, and opens the download page elsewhere (see
+    // start_update).
     let update = app.state::<LatestUpdate>().get();
     let upgrade_item = match &update {
         Some(u) => Some(MenuItem::with_id(
             app,
             menu_id::UPGRADE,
-            native_i18n::t(locale, "native-tray-upgrade", &[("latest", &u.latest)]),
+            if u.apt_command.is_some() {
+                native_i18n::tr(locale, "native-tray-upgrade-apt")
+            } else {
+                native_i18n::t(locale, "native-tray-upgrade", &[("latest", &u.latest)])
+            },
             true,
             None::<&str>,
         )?),
@@ -2590,10 +2626,20 @@ fn open_update_url(app: &AppHandle) {
 }
 
 /// The tray's "Update to X.Y.Z…" item: installs in place where supported
-/// (see IN_PLACE_UPDATE), otherwise opens the download page.
+/// (see IN_PLACE_UPDATE). An apt install ("Update with apt…") opens Settings →
+/// Diagnostics, which shows the apt command to copy; Maximal never runs apt
+/// or asks for root. Anything else opens the download page.
 fn start_update(app: &AppHandle) {
     if !IN_PLACE_UPDATE {
-        open_update_url(app);
+        let apt = app
+            .state::<LatestUpdate>()
+            .get()
+            .is_some_and(|u| u.apt_command.is_some());
+        if apt {
+            open_settings_window(app, Some(APT_UPDATE_SECTION));
+        } else {
+            open_update_url(app);
+        }
         return;
     }
     let handle = app.clone();
@@ -3599,6 +3645,16 @@ mod tests {
     }
 
     #[test]
+    fn sidecar_listens_on_loopback_on_linux_only() {
+        let env = super::sidecar_platform_env();
+        if cfg!(target_os = "linux") {
+            assert_eq!(env, &[("HOST", "127.0.0.1")]);
+        } else {
+            assert!(env.is_empty(), "macOS and Windows keep their binding: {env:?}");
+        }
+    }
+
+    #[test]
     fn classifies_update_status_payloads() {
         use super::{parse_update_status, UpdateCheck, UpdateSnapshot};
         let available = serde_json::json!({
@@ -3611,6 +3667,24 @@ mod tests {
             UpdateCheck::Resolved(Some(UpdateSnapshot {
                 latest: "0.4.40".into(),
                 url: "https://mxml.sh/".into(),
+                apt_command: None,
+            }))
+        );
+        // An apt install: the sidecar names the apt command and the Linux guide.
+        let apt = serde_json::json!({
+            "latest": "0.4.40", "update_available": true,
+            "url": "https://example.invalid/linux#update",
+            "update_command": "sudo apt update && sudo apt install --only-upgrade maximal maximal-desktop"
+        });
+        assert_eq!(
+            parse_update_status(&apt),
+            UpdateCheck::Resolved(Some(UpdateSnapshot {
+                latest: "0.4.40".into(),
+                url: "https://example.invalid/linux#update".into(),
+                apt_command: Some(
+                    "sudo apt update && sudo apt install --only-upgrade maximal maximal-desktop"
+                        .into()
+                ),
             }))
         );
         // No URL in the payload: fall back to the download page root.
@@ -3620,6 +3694,7 @@ mod tests {
             UpdateCheck::Resolved(Some(UpdateSnapshot {
                 latest: "0.4.40".into(),
                 url: "https://mxml.sh/".into(),
+                apt_command: None,
             }))
         );
         let current = serde_json::json!({
