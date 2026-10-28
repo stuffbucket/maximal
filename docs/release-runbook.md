@@ -30,7 +30,7 @@ an explicit version. Pre-1.0 `feat:` commits otherwise produce patch releases.
 |---|---|
 | `release`, `binaries`, `checksums`, `smoke` | Draft release, notes, SBOM, raw platform archives, checksums, and binary validation |
 | `macos-dmg` | Signed, notarized, and stapled Apple Silicon DMG from `stuffbucket/macos-builder` |
-| `windows-installer`, `windows-msi`, `windows-msi-verify`, `windows-shell` | Windows installer assets and their required validation |
+| `windows-installer`, `windows-msi`, `windows-msi-verify`, `windows-shell` | Windows installer assets and their required validation; `windows-shell` also attaches `<setup>.exe.sig`, the desktop app's updater signature |
 | `publish` | Publishes only after every required asset and verification gate succeeds |
 | `homebrew-tap`, `manifest` | Independent post-publication distribution updates |
 
@@ -51,7 +51,11 @@ does not invalidate or roll back the immutable release.
 
 After publication, automation opens or updates the
 `automation/updates-manifest` PR. It never pushes the generated manifest
-directly to protected `main` and has no ruleset bypass.
+directly to protected `main` and has no ruleset bypass. The PR updates
+`site/public/updates/manifest.json`, which every app reads to offer
+"Update to X.Y.Z", and `site/public/updates/desktop/<channel>.json`, which the
+Windows app installs from. Until it merges and Pages deploys, the Windows app
+can't install the release in place and sends users to mxml.sh instead.
 
 Merge the PR only after its required `test` check passes and its branch is
 current with `main`. That ordinary protected merge triggers the Pages deploy.
@@ -89,3 +93,14 @@ version commit and tag with `bun run release:manual`, push the tag, then dispatc
   signing for it belongs in `macos-builder`, not `release.yml`.
 - Windows Authenticode signing remains deferred; the disabled placeholder in
   `release.yml` is the only signing stub retained.
+- The Windows app's NSIS installer is signed for in-place updates (a minisign
+  signature, separate from Authenticode). `windows-shell` builds with
+  `createUpdaterArtifacts` using the `TAURI_SIGNING_PRIVATE_KEY` and
+  `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secrets, after checking that
+  `plugins.updater.pubkey` in `shell/src-tauri/tauri.conf.json` equals the
+  `TAURI_SIGNING_PUBLIC_KEY` variable (key id `E8DAB79E2EB1D6C4`). Rotating
+  the key means changing all three together; apps already installed only
+  accept updates signed with the key they shipped with.
+- macOS in-place updates stay off until `stuffbucket/macos-builder` signs the
+  macOS updater bundle with the same key. The macOS app's update button opens
+  mxml.sh.

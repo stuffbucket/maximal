@@ -175,6 +175,44 @@ describe("isolated MCP broker distribution", () => {
   })
 })
 
+const windowsShellJob = (workflow: string): string =>
+  workflow.slice(
+    workflow.indexOf("\n  windows-shell:"),
+    workflow.indexOf("\n  publish:"),
+  )
+
+describe("Windows in-place updates", () => {
+  test("the NSIS build is signed for the updater with the repo secrets", async () => {
+    const job = windowsShellJob(await readWorkflow("release.yml"))
+
+    expect(job).toContain(String.raw`\"createUpdaterArtifacts\":true`)
+    expect(job).toContain(
+      "TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}",
+    )
+    expect(job).toContain(
+      "TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}",
+    )
+    expect(job).toContain("${{ vars.TAURI_SIGNING_PUBLIC_KEY }}")
+    expect(job).not.toMatch(/echo[^\n]*TAURI_SIGNING_PRIVATE_KEY/u)
+  })
+
+  test("the installer's signature is attached beside it", async () => {
+    const job = windowsShellJob(await readWorkflow("release.yml"))
+
+    expect(job).toContain('Copy-Item $sig "$dst.sig" -Force')
+    expect(job).toContain(
+      "dist-release/maximal-${{ env.TAG }}-windows-x64-setup.exe.sig",
+    )
+  })
+
+  test("the manifest PR carries the desktop updater manifest", async () => {
+    const workflow = await readWorkflow("release.yml")
+    const manifestJob = workflow.slice(workflow.indexOf("\n  manifest:"))
+
+    expect(manifestJob).toContain("git add -A -- site/public/updates")
+  })
+})
+
 describe("manifest publication", () => {
   test("the manifest job proposes a protected PR instead of pushing main", async () => {
     const workflow = await readWorkflow("release.yml")

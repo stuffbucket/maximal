@@ -15,9 +15,12 @@ import { describe, expect, test } from "bun:test"
 
 import {
   buildChannel,
+  buildDesktopManifest,
   buildManifest,
+  DESKTOP_WINDOWS_TARGETS,
   MANIFEST_SCHEMA_VERSION,
   resolveDownloads,
+  windowsUpdaterAsset,
   type ManifestAsset,
 } from "../site/src/lib/updates-manifest"
 
@@ -129,5 +132,74 @@ describe("buildManifest", () => {
     })
     expect(manifest.channels.beta.version).toBe("0.5.0-beta.2")
     expect(manifest.channels.beta.tag).toBe("v0.5.0-beta.2")
+  })
+})
+
+describe("desktop updater manifest", () => {
+  const winSig: ManifestAsset = {
+    name: "maximal-v0.4.39-windows-x64-setup.exe.sig",
+    url: "https://github.com/stuffbucket/maximal/releases/download/v0.4.39/maximal-v0.4.39-windows-x64-setup.exe.sig",
+  }
+  const SIGNATURE = "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZQo="
+
+  test("names the signed installer and its signature asset", () => {
+    expect(windowsUpdaterAsset([dmgArm, winSetup, winSig])).toEqual({
+      installer: { name: winSetup.name, url: winSetup.url },
+      signatureName: winSig.name,
+    })
+  })
+
+  test("offers nothing for a release without the installer's signature", () => {
+    expect(windowsUpdaterAsset([dmgArm, winSetup])).toBeNull()
+    expect(windowsUpdaterAsset([dmgArm, winSig])).toBeNull()
+    expect(
+      buildDesktopManifest({
+        tag: "v0.4.39",
+        assets: [dmgArm, winSetup],
+        windowsSignature: SIGNATURE,
+      }),
+    ).toBeNull()
+  })
+
+  test("refuses an empty signature", () => {
+    expect(
+      buildDesktopManifest({
+        tag: "v0.4.39",
+        assets: [winSetup, winSig],
+        windowsSignature: "  \n",
+      }),
+    ).toBeNull()
+  })
+
+  test("is Tauri's static format, with the signed version and both Windows targets", () => {
+    const manifest = buildDesktopManifest({
+      tag: "v0.4.39",
+      assets: [dmgArm, winSetup, winSig],
+      windowsSignature: `${SIGNATURE}\n`,
+      publishedAt: "2026-10-27T16:49:26Z",
+    })
+    expect(manifest).toEqual({
+      version: "0.4.39",
+      notes: "https://github.com/stuffbucket/maximal/releases/tag/v0.4.39",
+      pub_date: "2026-10-27T16:49:26Z",
+      platforms: {
+        "windows-x86_64-nsis": { url: winSetup.url, signature: SIGNATURE },
+        "windows-x86_64": { url: winSetup.url, signature: SIGNATURE },
+      },
+    })
+    expect(Object.keys(manifest?.platforms ?? {})).toEqual([
+      ...DESKTOP_WINDOWS_TARGETS,
+    ])
+  })
+
+  test("omits pub_date when the publish time is unknown", () => {
+    const manifest = buildDesktopManifest({
+      tag: "v0.5.0-beta.2",
+      assets: [winSetup, winSig],
+      windowsSignature: SIGNATURE,
+      publishedAt: null,
+    })
+    expect(manifest?.version).toBe("0.5.0-beta.2")
+    expect(manifest && "pub_date" in manifest).toBe(false)
   })
 })

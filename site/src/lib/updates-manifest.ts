@@ -14,8 +14,10 @@
 //
 // SECURITY INVARIANT — `downloads` is BROWSER-ONLY. Do NOT wire the desktop
 // installer (or any auto-update flow) to `downloads.<slot>.url`. The desktop
-// side must keep reading only `version`; the URL it downloads from stays the
-// hardcoded `mxml.sh` constant in src/lib/update/update-check.ts.
+// side must keep reading only `version`; the URL it sends users to stays the
+// hardcoded `mxml.sh` constant in src/lib/update/update-check.ts. The Windows
+// app's in-place updater reads a separate, signature-checked document — see
+// "Desktop updater manifest" at the end of this file.
 //
 // SCHEMA HISTORY
 //   schema 1: { version, notes } per channel — desktop clients in the field.
@@ -160,5 +162,90 @@ export function buildManifest(
     schema: MANIFEST_SCHEMA_VERSION,
     generated,
     channels: out,
+  };
+}
+
+// ── Desktop updater manifest ────────────────────────────────────────────────
+//
+// The Windows app installs updates in place with tauri-plugin-updater, which
+// reads its own document in Tauri's static JSON format at
+//   https://mxml.sh/updates/desktop/<channel>.json
+// (source file: site/public/updates/desktop/<channel>.json). Unlike
+// `downloads` above, the `url` here IS what the app downloads and runs. That is
+// safe because the app verifies the file's minisign signature against the
+// public key built into it (`plugins.updater.pubkey` in
+// shell/src-tauri/tauri.conf.json), and that the signature was made for
+// `version`, before running it. A tampered document can at most make the
+// update fail; the app then sends the user to mxml.sh.
+
+/** The updater targets the Windows NSIS app looks up, most specific first:
+ *  `<os>-<arch>-<installer>`, then `<os>-<arch>` when the app can't tell how
+ *  it was installed. NSIS is the only Windows app installer we ship, so both
+ *  name the same file. */
+export const DESKTOP_WINDOWS_TARGETS = [
+  "windows-x86_64-nsis",
+  "windows-x86_64",
+] as const;
+
+export interface DesktopUpdatePlatform {
+  /** The signed installer's download URL (a GitHub release asset). */
+  url: string;
+  /** The installer's `.sig` file content, exactly as `tauri build` wrote it. */
+  signature: string;
+}
+
+/** Tauri's static updater JSON. */
+export interface DesktopUpdateManifest {
+  /** Release version, no leading "v". Must equal the version the installer
+   *  was signed for, or the app refuses it. */
+  version: string;
+  /** Display-only link to the GitHub release. */
+  notes: string;
+  /** RFC 3339 publish time, when known. */
+  pub_date?: string;
+  platforms: Record<string, DesktopUpdatePlatform>;
+}
+
+/** The Windows installer the app updates from, and the name of the release
+ *  asset holding its signature. Null when the release has no signed
+ *  installer (no `<installer>.sig` asset). */
+export function windowsUpdaterAsset(
+  assets: ManifestAsset[],
+): { installer: ManifestDownload; signatureName: string } | null {
+  const installer = resolveDownloads(assets)["windows-x64-setup"];
+  if (!installer) return null;
+  const signatureName = `${installer.name}.sig`;
+  return assets.some((a) => a.name === signatureName)
+    ? { installer, signatureName }
+    : null;
+}
+
+export interface DesktopReleaseInput extends ChannelReleaseInput {
+  /** Content of the installer's `.sig` asset. */
+  windowsSignature: string;
+  /** When the release was published (RFC 3339), if known. */
+  publishedAt?: string | null;
+}
+
+/** Build one channel's desktop updater manifest, or null when the release has
+ *  no signed Windows installer to offer. */
+export function buildDesktopManifest(
+  input: DesktopReleaseInput,
+): DesktopUpdateManifest | null {
+  const asset = windowsUpdaterAsset(input.assets);
+  const signature = input.windowsSignature.trim();
+  if (!asset || signature.length === 0) return null;
+  const { version, notes } = buildChannel(input);
+  const platform: DesktopUpdatePlatform = {
+    url: asset.installer.url,
+    signature,
+  };
+  const platforms: Record<string, DesktopUpdatePlatform> = {};
+  for (const target of DESKTOP_WINDOWS_TARGETS) platforms[target] = platform;
+  return {
+    version,
+    notes,
+    ...(input.publishedAt ? { pub_date: input.publishedAt } : {}),
+    platforms,
   };
 }

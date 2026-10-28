@@ -920,8 +920,8 @@ jobs:
             exit 0
           fi
           ASSETS="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null || echo '')"
-          if grep -Fxq "$SETUP" <<<"$ASSETS"; then
-            echo "Reuse enabled and $SETUP already attached — skipping."
+          if grep -Fxq "$SETUP" <<<"$ASSETS" && grep -Fxq "$SETUP.sig" <<<"$ASSETS"; then
+            echo "Reuse enabled and $SETUP (+ .sig) already attached — skipping."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
@@ -1005,19 +1005,46 @@ jobs:
           }
           Get-ChildItem 'shell\src-tauri\binaries'
 
+      # The app verifies every in-place update against the public key in
+      # tauri.conf.json. Fail before building if it isn't the key the
+      # signing secrets belong to (the repo variable holds the same public key).
+      - name: Check updater public key
+        if: steps.skip.outputs.skip != 'true'
+        shell: pwsh
+        env:
+          EXPECTED_PUBKEY: ${{ vars.TAURI_SIGNING_PUBLIC_KEY }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $conf = Get-Content -Raw 'shell/src-tauri/tauri.conf.json' | ConvertFrom-Json
+          $configured = $conf.plugins.updater.pubkey
+          if (-not $env:EXPECTED_PUBKEY) {
+            Write-Error 'Repository variable TAURI_SIGNING_PUBLIC_KEY is not set.'
+          }
+          if ($configured -cne $env:EXPECTED_PUBKEY) {
+            Write-Error 'plugins.updater.pubkey in tauri.conf.json does not match TAURI_SIGNING_PUBLIC_KEY.'
+          }
+          Write-Host 'Updater public key matches.'
+
       - name: Tauri build (Windows, NSIS)
         if: steps.skip.outputs.skip != 'true'
         working-directory: shell
         shell: bash
         env:
           MAXIMAL_VERSION: ${{ steps.ver.outputs.version }}
+          # createUpdaterArtifacts signs the NSIS installer (writing
+          # <setup>.exe.sig) with this key; the CLI reads both from the
+          # environment and never prints them.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          # Stamp the real version (tauri.conf.json hardcodes 0.0.0) and skip
+          # Stamp the real version (tauri.conf.json hardcodes 0.0.0), skip
           # beforeBuildCommand — the UI is already built above, and the hook
-          # runs via cmd.exe where bun isn't resolvable on Windows.
+          # runs via cmd.exe where bun isn't resolvable on Windows — and sign
+          # the installer for in-place updates (the signature records this
+          # version, which the app checks against the desktop manifest).
           bun run tauri build --bundles nsis \
-            --config "{\"version\":\"${MAXIMAL_VERSION}\",\"build\":{\"beforeBuildCommand\":\"\"}}"
+            --config "{\"version\":\"${MAXIMAL_VERSION}\",\"build\":{\"beforeBuildCommand\":\"\"},\"bundle\":{\"createUpdaterArtifacts\":true}}"
 
       - name: Verify NSIS installed sidecars
         if: steps.skip.outputs.skip != 'true'
@@ -1050,7 +1077,7 @@ jobs:
             if (Test-Path $binaryPath) { throw "$binary remains after NSIS uninstall" }
           }
 
-      - name: Stage NSIS installer + sha256
+      - name: Stage NSIS installer + sha256 + updater signature
         if: steps.skip.outputs.skip != 'true'
         shell: pwsh
         run: |
@@ -1058,10 +1085,16 @@ jobs:
           $nsisDir = 'shell/src-tauri/target/release/bundle/nsis'
           $setup = Get-ChildItem -Path $nsisDir -Filter '*-setup.exe' | Select-Object -First 1
           if (-not $setup) { Write-Error "NSIS installer not produced under $nsisDir"; exit 1 }
+          $sig = "$($setup.FullName).sig"
+          if (-not (Test-Path $sig)) { Write-Error "Updater signature not produced: $sig"; exit 1 }
           New-Item -ItemType Directory -Force -Path dist-release | Out-Null
           $name = "maximal-${env:TAG}-windows-x64-setup.exe"
           $dst = Join-Path 'dist-release' $name
           Copy-Item $setup.FullName $dst -Force
+          # The signature covers the file's bytes, not its name, so it travels
+          # with the renamed installer. The manifest job copies it verbatim
+          # into https://mxml.sh/updates/desktop/<channel>.json.
+          Copy-Item $sig "$dst.sig" -Force
           # `<hash>  <filename>` to match the sha256sum convention the other assets use.
           $hash = (Get-FileHash -Algorithm SHA256 $dst).Hash.ToLower()
           "$hash  $name" | Out-File -Encoding ascii "$dst.sha256"
@@ -1076,6 +1109,7 @@ jobs:
           files: |
             dist-release/maximal-${{ env.TAG }}-windows-x64-setup.exe
             dist-release/maximal-${{ env.TAG }}-windows-x64-setup.exe.sha256
+            dist-release/maximal-${{ env.TAG }}-windows-x64-setup.exe.sig
 
   # Publish only after every required artifact and verification job succeeds.
   # Failures leave the release draft mutable for a re-run.
@@ -1197,6 +1231,8 @@ jobs:
           if [ "$CURRENT_TAG" = "$TAG" ]; then
             echo "channels.${CHANNEL} already points at ${TAG}; skipping regeneration."
           else
+            # Also writes updates/desktop/<channel>.json when the release
+            # carries the signed Windows installer (<setup>.exe.sig).
             bun scripts/write-updates-manifest.ts --tag "$TAG"
             bun test \
               tests/write-updates-manifest.test.ts \
@@ -1204,8 +1240,8 @@ jobs:
               tests/updates-manifest.test.ts \
               tests/hydrate-manifest.test.ts \
               tests/update-check.test.ts
-            git add site/public/updates/manifest.json
-            if ! git diff --cached --quiet -- site/public/updates/manifest.json; then
+            git add -A -- site/public/updates
+            if ! git diff --cached --quiet -- site/public/updates; then
               git commit -m "chore(site): update updates manifest for $TAG"
             fi
           fi
@@ -1232,7 +1268,7 @@ jobs:
           fi
 
           TITLE="chore(site): update updates manifest for $TAG"
-          BODY="Published ${TAG} is now represented in site/public/updates/manifest.json. Merge this PR after the required test check passes; the resulting main push deploys Pages."
+          BODY="Published ${TAG} is now represented in site/public/updates/manifest.json (and, with a signed Windows installer, site/public/updates/desktop/). Merge this PR after the required test check passes; the resulting main push deploys Pages."
           if [ "$PR_COUNT" -eq 0 ]; then
             gh pr create --repo "$GITHUB_REPOSITORY" --base main \
               --head "$HEAD_BRANCH" --title "$TITLE" --body "$BODY"
