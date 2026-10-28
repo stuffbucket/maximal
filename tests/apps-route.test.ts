@@ -59,7 +59,7 @@ process.env.PATH = ROUTE_CODEX_BIN
 
 let installsFixture: Array<ClaudeInstall> = []
 
-const actualDetect = await import("~/apps/claude-code/detect")
+const actualDetect = { ...(await import("~/apps/claude-code/detect")) }
 const realDetect = actualDetect.detectClaudeInstalls
 await mock.module("~/apps/claude-code/detect", () => ({
   ...actualDetect,
@@ -69,7 +69,7 @@ await mock.module("~/apps/claude-code/detect", () => ({
     : installsFixture,
 }))
 
-const actualDesktop = await import("~/apps/claude-desktop/config")
+const actualDesktop = { ...(await import("~/apps/claude-desktop/config")) }
 const realApply = actualDesktop.applyConfigLibraryProfile
 const realRevert = actualDesktop.revertConfigLibraryProfile
 const realIsApplied = actualDesktop.isConfigLibraryApplied

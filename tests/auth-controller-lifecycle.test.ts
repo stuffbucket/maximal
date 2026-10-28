@@ -60,13 +60,16 @@ const harness = {
 // later in the same `bun test` process gets our stubs. Some modules
 // (poll-access-token, github-token-store) have their own dedicated test
 // files — those go through __setAuthControllerDepsForTests instead of
-// mock.module so the registry stays clean.
-const realGetDeviceCodeModule =
-  await import("~/services/github/get-device-code")
-const realGetUserModule = await import("~/services/github/get-user")
-const realTokenModule = await import("~/lib/auth/token")
-const realUtilsModule = await import("~/lib/platform/utils")
-const realFsPromisesModule = await import("node:fs/promises")
+// mock.module so the registry stays clean. Each capture is a spread snapshot:
+// mock.module patches the live namespace in place, so restoring from the
+// namespace itself would put the stub back.
+const realGetDeviceCodeModule = {
+  ...(await import("~/services/github/get-device-code")),
+}
+const realGetUserModule = { ...(await import("~/services/github/get-user")) }
+const realTokenModule = { ...(await import("~/lib/auth/token")) }
+const realUtilsModule = { ...(await import("~/lib/platform/utils")) }
+const realFsPromisesModule = { ...(await import("node:fs/promises")) }
 
 await mock.module("~/services/github/get-device-code", () => ({
   getDeviceCode: () => harness.getDeviceCodeImpl(),

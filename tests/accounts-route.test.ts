@@ -15,7 +15,7 @@ import type { AccountRegistry } from "~/lib/auth/github-token-store"
 
 import { HTTPError } from "~/lib/errors/error"
 
-const actualStore = await import("~/lib/auth/github-token-store")
+const actualStore = { ...(await import("~/lib/auth/github-token-store")) }
 
 let fakeRegistry: AccountRegistry
 // Drives the switch route's pre-flight: getCopilotUsage either resolves (token
@@ -33,7 +33,7 @@ await mock.module("~/lib/auth/github-token-store", () => ({
   },
 }))
 
-const actualUsage = await import("~/services/github/get-copilot-usage")
+const actualUsage = { ...(await import("~/services/github/get-copilot-usage")) }
 
 await mock.module("~/services/github/get-copilot-usage", () => ({
   ...actualUsage,

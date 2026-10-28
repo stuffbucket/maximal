@@ -1,5 +1,7 @@
 import config from "@echristian/eslint-config"
 
+import mockModuleSnapshot from "./eslint-rules/mock-module-snapshot.js"
+
 // The single-mechanism invariant (ADR-0001): a credential token becomes an
 // Authorization / x-api-key header in EXACTLY one file, `src/lib/http/send-request.ts`.
 // This rule bans hand-building an auth string (`Bearer …`, `token …`) anywhere
@@ -108,10 +110,19 @@ const blockingSpawnGuard = {
 // the next file's static imports on CI. Use the real module (the test preload
 // redirects COPILOT_API_HOME to a temp dir, so config/token round-trips are
 // already isolated) or inject deps. See docs/architecture.md § Testing gotchas.
+//
+// `local/mock-module-snapshot` covers the other half: a restore built from a
+// live module namespace (`const real = await import(id)`) restores the stub,
+// because mock.module patches that namespace in place. See
+// eslint-rules/mock-module-snapshot.js.
 const mockModuleLeakGuard = {
   name: "no-unrestored-mock-module",
   files: ["tests/**/*.ts"],
+  plugins: {
+    local: { rules: { "mock-module-snapshot": mockModuleSnapshot } },
+  },
   rules: {
+    "local/mock-module-snapshot": "error",
     "no-restricted-syntax": [
       "error",
       {

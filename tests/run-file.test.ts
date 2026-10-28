@@ -3,7 +3,7 @@
  * injected (no real npm); runFile runs real, trivial programs.
  */
 
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 
 import {
   __resetNpmPrefixForTests,
@@ -19,6 +19,12 @@ const ok = (stdout: string): RunResult => ({
   stderr: "",
   code: 0,
   notFound: false,
+})
+
+// Reset before each test too: an earlier file (runServer warms the prefix)
+// can leave a real cached or in-flight `npm prefix -g` behind.
+beforeEach(() => {
+  __resetNpmPrefixForTests()
 })
 
 afterEach(() => {
@@ -109,5 +115,27 @@ describe("npmGlobalPrefix", () => {
     now += 31_000
     expect(await npmGlobalPrefix()).toBe("/opt/node")
     expect(spawns).toBe(2)
+  })
+
+  test("a lookup orphaned by a reset doesn't fill the fresh cache", async () => {
+    const orphan = Promise.withResolvers<RunResult>()
+    __setNpmPrefixDepsForTests({ run: () => orphan.promise })
+    const orphaned = npmGlobalPrefix()
+
+    __resetNpmPrefixForTests()
+    let spawns = 0
+    __setNpmPrefixDepsForTests({
+      run: () => {
+        spawns++
+        return Promise.resolve(ok("/fresh\n"))
+      },
+    })
+    const fresh = npmGlobalPrefix()
+
+    orphan.resolve(ok("/stale\n"))
+    expect(await orphaned).toBe("/stale")
+    expect(await fresh).toBe("/fresh")
+    expect(cachedNpmGlobalPrefix()).toBe("/fresh")
+    expect(spawns).toBe(1)
   })
 })

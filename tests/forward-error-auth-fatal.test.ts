@@ -17,7 +17,7 @@ import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test"
 // Capture the real module BEFORE mocking so afterAll can restore it
 // (mock.module is process-wide; without the restore, a later test
 // file in the same `bun test` process gets our stub).
-const realFsPromisesModule = await import("node:fs/promises")
+const realFsPromisesModule = { ...(await import("node:fs/promises")) }
 const unlinkCalls: Array<string> = []
 await mock.module("node:fs/promises", () => ({
   ...realFsPromisesModule,

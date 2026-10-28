@@ -191,7 +191,11 @@ This bit the project **four times** (culminating in a long #229 debugging loop).
 **Mitigations, in order of strength:**
 - **Lint rule (enforced).** `mockModuleLeakGuard` (`eslint.config.js`, scoped to
   `tests/**`) errors on the fire-and-forget forms — `void mock.module(...)` and
-  a bare `mock.module(...)` expression statement.
+  a bare `mock.module(...)` expression statement — and, through
+  `local/mock-module-snapshot`, on a `mock.module` factory that reads a live
+  module namespace (`const real = await import(m)` or `import * as real`).
+  `mock.module` patches that namespace in place, so a restore built from it
+  puts the stub back; snapshot with `{ ...(await import(m)) }` instead.
 - **Awaited is *not* automatically safe.** `await mock.module(...)` passes the
   rule, but an awaited `afterAll` *restore* does **not** reliably land before the
   next file's static imports on CI — so a mock of a *shared* module still leaks.

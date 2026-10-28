@@ -83,19 +83,23 @@ export function npmGlobalPrefix(): Promise<string | null> {
   ) {
     return Promise.resolve(npmCache.prefix)
   }
-  npmInFlight ??= npmRunner()
+  if (npmInFlight) return npmInFlight
+  // A lookup orphaned by __resetNpmPrefixForTests must not write its result
+  // into the fresh cache, or a real npm prefix lands in a later test.
+  const lookup: Promise<string | null> = npmRunner()
     .then((result) => {
       const out = result.code === 0 ? result.stdout.trim() : ""
       return out.length > 0 ? out : null
     })
     .then((prefix) => {
-      npmCache = { prefix, atMs: nowMs() }
+      if (npmInFlight === lookup) npmCache = { prefix, atMs: nowMs() }
       return prefix
     })
     .finally(() => {
-      npmInFlight = undefined
+      if (npmInFlight === lookup) npmInFlight = undefined
     })
-  return npmInFlight
+  npmInFlight = lookup
+  return lookup
 }
 
 /** The cached `npm prefix -g` for synchronous callers: undefined until
