@@ -36,6 +36,12 @@ export const requestContext = {
     asyncLocalStorage.run(context, callback),
 }
 
+/** Record usage metadata on the current request; a no-op outside one. */
+export function setRequestUsage(meta: Partial<RequestUsageMeta>): void {
+  const store = asyncLocalStorage.getStore()
+  if (store) Object.assign(store.usage, meta)
+}
+
 export function generateTraceId(): string {
   const timestamp = Date.now().toString(36)
   const random = Math.random().toString(36).slice(2, 8)

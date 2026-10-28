@@ -5,6 +5,7 @@ import { streamSSE, type SSEMessage } from "hono/streaming"
 import { getConfig } from "~/lib/config/config"
 import { awaitApproval } from "~/lib/http/approval"
 import { checkRateLimit } from "~/lib/http/rate-limit"
+import { setRequestUsage } from "~/lib/http/request-context"
 import { reverseId } from "~/lib/models/anthropic-id-rewrite"
 import {
   modelMappingErrorBody,
@@ -37,6 +38,7 @@ import {
 const logger = createHandlerLogger("chat-completions-handler")
 
 const CHAT_COMPLETIONS_ENDPOINT = "/chat/completions"
+const CHAT_COMPLETIONS_CACHE_TTL_S = 300
 
 export async function handleCompletion(c: Context) {
   await checkRateLimit(state)
@@ -82,21 +84,27 @@ export async function handleCompletion(c: Context) {
     debugJson(logger, "Set max_tokens to:", payload.max_tokens)
   }
 
-  // not support subagent marker for now , set sessionId = getUUID(requestId)
   const requestId = generateRequestIdFromPayload(payload)
   logger.debug("Generated request ID:", requestId)
 
-  const sessionId = getUUID(requestId)
-  logger.debug("Extracted session ID:", sessionId)
+  // Chat completions carries no conversation id, so the recorded session is
+  // empty; the interaction id sent upstream stays per-request.
+  const interactionId = getUUID(requestId)
+  setRequestUsage({
+    sessionId: "",
+    model: payload.model,
+    cacheTtlS: CHAT_COMPLETIONS_CACHE_TTL_S,
+    cacheTtlRequested: false,
+  })
   const recordUsage = createCopilotTokenUsageRecorder({
     endpoint: "chat_completions",
-    fallbackSessionId: sessionId,
+    fallbackSessionId: "",
     model: payload.model,
   })
 
   const response = await createChatCompletions(payload, {
     requestId,
-    sessionId,
+    sessionId: interactionId,
   })
 
   if (isNonStreaming(response)) {

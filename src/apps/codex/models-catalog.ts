@@ -178,6 +178,21 @@ export function codexModelCatalog(models: Array<Model>): Array<CodexModelInfo> {
     })
 }
 
+const catalogByModels = new WeakMap<Array<Model>, Array<CodexModelInfo>>()
+
+/** `codexModelCatalog`, remembered per model list so per-request callers
+ *  don't rebuild it until the list is replaced. */
+export function cachedCodexModelCatalog(
+  models: Array<Model>,
+): Array<CodexModelInfo> {
+  let catalog = catalogByModels.get(models)
+  if (!catalog) {
+    catalog = codexModelCatalog(models)
+    catalogByModels.set(models, catalog)
+  }
+  return catalog
+}
+
 /** Codex marks its catalog requests with `?client_version=`; nothing else
  *  sends it, so every other client keeps the shape it gets today. */
 export function wantsCodexCatalog(url: string): boolean {

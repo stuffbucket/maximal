@@ -8,6 +8,7 @@ import type { SubagentMarker } from "~/lib/runtime-state/subagent"
 import type { Model } from "~/services/copilot/get-models"
 
 import { getPromptCacheRetention } from "~/lib/config/config"
+import { setRequestUsage } from "~/lib/http/request-context"
 import {
   type AnthropicMessagesPayload,
   type AnthropicStreamEventData,
@@ -25,6 +26,7 @@ import {
   type UsageTokens,
   withCopilotCost,
 } from "~/lib/token-usage"
+import { responsesCacheTtlSeconds } from "~/lib/token-usage/request-meta"
 import {
   buildErrorEvent,
   createResponsesStreamState,
@@ -47,6 +49,7 @@ import {
 import { createMessages } from "~/services/copilot/create-messages"
 import {
   createResponses,
+  type ResponsesPayload,
   type ResponsesResult,
   type ResponseStreamEvent,
 } from "~/services/copilot/create-responses"
@@ -184,15 +187,7 @@ export const handleWithResponsesApi = async (
     selectedModel?.capabilities.limits.max_prompt_tokens,
   )
 
-  // Copilot/OpenAI-Responses-specific prefix-cache retention. Opt-in via
-  // config; omitted otherwise so behavior is unchanged. Set on the built
-  // payload here (not in the pure translator). A future non-Copilot provider
-  // path won't use this. Safe to enable: create-responses.ts strips + retries
-  // once if a specific endpoint 400s on the param.
-  const promptCacheRetention = getPromptCacheRetention()
-  if (promptCacheRetention) {
-    responsesPayload.prompt_cache_retention = promptCacheRetention
-  }
+  applyPromptCacheRetention(responsesPayload)
 
   compactInputByLatestCompaction(responsesPayload)
 
@@ -276,6 +271,22 @@ export const handleWithResponsesApi = async (
   return finishNonStreamingResponses(c, response as ResponsesResult, {
     logger,
     recordUsage,
+  })
+}
+
+/** Copilot/OpenAI-Responses-specific prefix-cache retention. Opt-in via
+ *  config; omitted otherwise so behavior is unchanged. Set on the built
+ *  payload here (not in the pure translator). A future non-Copilot provider
+ *  path won't use this. Safe to enable: create-responses.ts strips + retries
+ *  once if a specific endpoint 400s on the param. The request's cache lifetime
+ *  follows this upstream rule, not the client's markers. */
+function applyPromptCacheRetention(payload: ResponsesPayload): void {
+  const promptCacheRetention = getPromptCacheRetention()
+  if (promptCacheRetention) {
+    payload.prompt_cache_retention = promptCacheRetention
+  }
+  setRequestUsage({
+    cacheTtlS: responsesCacheTtlSeconds(payload.prompt_cache_retention),
   })
 }
 
