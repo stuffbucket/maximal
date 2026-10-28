@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 
 let shellKeyFetched = false;
 let shellKeyCache: string | null = null;
@@ -25,6 +25,57 @@ export async function safeInvoke(cmd: string): Promise<boolean> {
   } catch (err) {
     console.warn(`safeInvoke(${cmd}) failed:`, err);
     return false;
+  }
+}
+
+/**
+ * Whether "Update to X.Y.Z" installs the update in place (the Windows and
+ * macOS apps). False in a plain browser, where the button opens the download
+ * page.
+ */
+export async function updateInstallsInPlace(): Promise<boolean> {
+  try {
+    return (await invoke<boolean>("update_installs_in_place")) === true;
+  } catch {
+    return false;
+  }
+}
+
+/** How an in-place update attempt ended (`install_update` in the shell). */
+export type InstallUpdateOutcome =
+  | "unavailable"
+  | "busy"
+  | "cancelled"
+  | "failed";
+
+const INSTALL_UPDATE_OUTCOMES: ReadonlyArray<InstallUpdateOutcome> = [
+  "unavailable",
+  "busy",
+  "cancelled",
+  "failed",
+];
+
+/**
+ * Run the shell's in-place update: a native confirm naming the version, then
+ * download, install and relaunch. `onDownloading` fires once the user
+ * confirms. A failed install is reported by the shell itself, which then
+ * opens the download page. Resolves "unavailable" where updates don't install
+ * in place (a plain browser), so the caller opens the download page. Never
+ * resolves after a successful install: the app relaunches.
+ */
+export async function installUpdate(
+  onDownloading: () => void,
+): Promise<InstallUpdateOutcome> {
+  try {
+    const onStep = new Channel<string>();
+    onStep.onmessage = (step) => {
+      if (step === "downloading") onDownloading();
+    };
+    const outcome = await invoke<unknown>("install_update", { onStep });
+    return INSTALL_UPDATE_OUTCOMES.find((o) => o === outcome) ?? "unavailable";
+  } catch (err) {
+    console.warn("install_update failed:", err);
+    return "unavailable";
   }
 }
 

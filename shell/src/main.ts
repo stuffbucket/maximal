@@ -5,9 +5,11 @@ import { applyI18n, wireLocalePicker } from "./i18n/apply";
 import {
   getDockVisibility,
   getShellApiKey,
+  installUpdate,
   openUrl,
   safeInvoke,
   setDockVisibility,
+  updateInstallsInPlace,
 } from "./tauri/shell";
 import { osKind } from "./ui/platform";
 
@@ -932,8 +934,21 @@ function offeredUpdate(data: UpdateStatusResponse | null): string | null {
 }
 
 /**
+ * Where the topbar update is: `idle`, waiting on the shell's native confirm
+ * (`confirming`), or downloading after the user said yes (`downloading`).
+ * The button is disabled while busy so a second click can't start another.
+ */
+let updatePhase: "idle" | "confirming" | "downloading" = "idle";
+
+/** Whether the button installs in place (the Windows and macOS apps) rather
+ *  than opening the download page. Read once from the shell at boot. */
+let updateInPlace = false;
+
+/**
  * The topbar "Update to X.Y.Z" button. Hidden unless a newer release is
- * offered; clicking opens the download page in the system browser.
+ * offered (or an update is already running). In the Windows and macOS apps
+ * clicking installs in place after a native confirm; elsewhere it opens the
+ * download page in the system browser.
  */
 function renderUpdateAction(data: UpdateStatusResponse | null): void {
   const wrap = document.querySelector<HTMLElement>("[data-update-action]");
@@ -942,19 +957,45 @@ function renderUpdateAction(data: UpdateStatusResponse | null): void {
   );
   if (!wrap || !button) return;
   const version = offeredUpdate(data);
-  wrap.hidden = version === null;
+  const busy = updatePhase !== "idle";
+  wrap.hidden = version === null && !busy;
+  button.disabled = busy;
+  if (updatePhase === "downloading") {
+    button.textContent = t("nav-update-downloading");
+    button.title = "";
+    return;
+  }
   if (version === null) return;
   button.textContent = t("nav-update-to", { version });
-  button.title = t("diagnostics-update-get-it");
+  button.title = updateInPlace ? "" : t("diagnostics-update-get-it");
+}
+
+async function startUpdate(): Promise<void> {
+  const status = lastUpdateStatus;
+  if (!status || !offeredUpdate(status) || updatePhase !== "idle") return;
+  updatePhase = "confirming";
+  renderUpdateAction(lastUpdateStatus);
+  // The shell confirms, installs and relaunches, or on failure tells the
+  // user and opens the download page itself. "unavailable" means this build
+  // doesn't install in place (a plain browser, a Linux build).
+  const outcome = await installUpdate(() => {
+    updatePhase = "downloading";
+    renderUpdateAction(lastUpdateStatus);
+  });
+  updatePhase = "idle";
+  renderUpdateAction(lastUpdateStatus);
+  if (outcome === "unavailable") void openExternalUrl(status.url);
 }
 
 function wireUpdateAction(): void {
+  void updateInstallsInPlace().then((inPlace) => {
+    updateInPlace = inPlace;
+    renderUpdateAction(lastUpdateStatus);
+  });
   document
     .querySelector<HTMLButtonElement>('[data-action="open-update"]')
     ?.addEventListener("click", () => {
-      if (lastUpdateStatus && offeredUpdate(lastUpdateStatus)) {
-        void openExternalUrl(lastUpdateStatus.url);
-      }
+      void startUpdate();
     });
 }
 

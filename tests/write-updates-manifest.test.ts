@@ -14,13 +14,16 @@
  */
 
 import { describe, expect, test } from "bun:test"
+import { readFileSync } from "node:fs"
 
 import {
   channelForTag,
+  desktopManifestPath,
   mergeChannel,
   serializeManifest,
 } from "../scripts/write-updates-manifest"
 import {
+  buildDesktopManifest,
   buildManifest,
   type ManifestAsset,
 } from "../site/src/lib/updates-manifest"
@@ -126,5 +129,49 @@ describe("mergeChannel read-modify-write", () => {
     const merged = mergeChannel(prior, "beta", beta, GEN)
     // The malformed stable entry is not carried over.
     expect(Object.keys(merged.channels)).toEqual(["beta"])
+  })
+})
+
+describe("desktop updater manifest path", () => {
+  test("sits beside the manifest, one file per channel", () => {
+    expect(
+      desktopManifestPath("site/public/updates/manifest.json", "stable"),
+    ).toBe("site/public/updates/desktop/stable.json")
+    expect(
+      desktopManifestPath("site/public/updates/manifest.json", "beta"),
+    ).toBe("site/public/updates/desktop/beta.json")
+  })
+
+  test("is the URL the Windows app checks", () => {
+    // The app builds https://mxml.sh/updates/desktop/<channel>.json
+    // (DESKTOP_UPDATE_MANIFEST_BASE in shell/src-tauri/src/lib.rs), and
+    // Pages serves site/public/** at the site root.
+    const lib = readFileSync(
+      new URL("../shell/src-tauri/src/lib.rs", import.meta.url),
+      "utf8",
+    )
+    expect(lib).toContain(
+      'const DESKTOP_UPDATE_MANIFEST_BASE: &str = "https://mxml.sh/updates/desktop/";',
+    )
+    const served = desktopManifestPath(
+      "site/public/updates/manifest.json",
+      "stable",
+    ).replace(/^site\/public\//u, "https://mxml.sh/")
+    expect(served).toBe("https://mxml.sh/updates/desktop/stable.json")
+  })
+
+  test("serializes a desktop manifest like the version manifest", () => {
+    const desktop = buildDesktopManifest({
+      tag: "v0.4.39",
+      assets: [
+        winSetup,
+        { name: `${winSetup.name}.sig`, url: `${winSetup.url}.sig` },
+      ],
+      signatures: new Map([[`${winSetup.name}.sig`, "c2ln"]]),
+    })
+    expect(desktop).not.toBeNull()
+    if (desktop) {
+      expect(serializeManifest(desktop)).toBe(routeSerialize(desktop))
+    }
   })
 })

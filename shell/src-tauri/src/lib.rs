@@ -127,6 +127,29 @@ const UPDATE_RETRY_INTERVAL: Duration = Duration::from_secs(10 * 60);
 /// when the payload carries no URL.
 const UPDATE_PAGE_URL: &str = "https://mxml.sh/";
 
+/// Whether "Update to X.Y.Z" installs the update in place (download the
+/// signed update, install, relaunch) on this platform: Windows (the NSIS
+/// installer) and macOS (the `.app` bundle, signed by stuffbucket/macos-builder
+/// with the same key). The updater plugin is registered only when this is
+/// true. Even then a macOS app that can't replace itself (see
+/// `bundle_location_problem`) opens the download page instead.
+const IN_PLACE_UPDATE: bool = cfg!(any(target_os = "windows", target_os = "macos"));
+
+/// Where the desktop updater manifests live: `<base><channel>.json`, in
+/// Tauri's static JSON format, published by the release `manifest` job next to
+/// /updates/manifest.json. The check never contacts github.com; only the
+/// installer download it names may.
+const DESKTOP_UPDATE_MANIFEST_BASE: &str = "https://mxml.sh/updates/desktop/";
+
+/// How long the in-place updater waits for the desktop manifest.
+const UPDATE_MANIFEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How long an in-place update waits for the sidecar to exit: before running
+/// the Windows installer, which must overwrite the sidecar's executable, and
+/// before relaunching on macOS, so the new sidecar finds the port free.
+/// `kill_sidecar` escalates to a hard kill after 3s, so this is slack.
+const SIDECAR_STOP_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// Allowed values for the dashboard's `period` query parameter.
 /// Anything else from the webview is clamped to "day".
 const DASHBOARD_PERIODS: &[&str] = &["day", "week", "month"];
@@ -404,6 +427,47 @@ impl LatestUpdate {
         }
         *guard = next;
         true
+    }
+}
+
+/// Set while an in-place update is running (from the confirm until the
+/// installer takes over, or the attempt ends), so a second click on the
+/// button or the tray item can't start another one.
+struct UpdateInstall(std::sync::atomic::AtomicBool);
+
+impl UpdateInstall {
+    fn new() -> Self {
+        Self(std::sync::atomic::AtomicBool::new(false))
+    }
+
+    /// Returns true if this caller may run an update (none was running).
+    fn claim(&self) -> bool {
+        !self.0.swap(true, std::sync::atomic::Ordering::SeqCst)
+    }
+
+    fn release(&self) {
+        self.0.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// Armed by an in-place update just before it stops the sidecar. The
+/// Terminated handler hands the exit to the waiting update instead of
+/// quitting the app (a clean exit) or marking it Failed (a hard kill): the
+/// installer is about to replace the sidecar's executable and relaunch.
+struct SidecarHandoff(Mutex<Option<tokio::sync::oneshot::Sender<()>>>);
+
+impl SidecarHandoff {
+    fn new() -> Self {
+        Self(Mutex::new(None))
+    }
+
+    fn arm(&self, tx: tokio::sync::oneshot::Sender<()>) {
+        *self.0.lock().expect("handoff mutex poisoned") = Some(tx);
+    }
+
+    /// The waiting update's sender, if one is armed. Clears it.
+    fn take(&self) -> Option<tokio::sync::oneshot::Sender<()>> {
+        self.0.lock().expect("handoff mutex poisoned").take()
     }
 }
 
@@ -744,7 +808,7 @@ struct SetupStatusResponse {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let app = tauri::Builder::default()
+    let builder = tauri::Builder::default()
         // MUST be the FIRST plugin registered. The single-instance
         // plugin's callback fires as part of plugin init; registering
         // it after another plugin lets the second-launch handler race
@@ -766,7 +830,16 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_notification::init());
+    // In-place updates (Windows and macOS, see IN_PLACE_UPDATE). Reads `pubkey`
+    // and `requireSignedVersion` from `plugins.updater` in tauri.conf.json;
+    // the endpoint is set per check from the app's release channel.
+    let builder = if IN_PLACE_UPDATE {
+        builder.plugin(tauri_plugin_updater::Builder::new().build())
+    } else {
+        builder
+    };
+    let app = builder
         .manage(Sidecar::new())
         .manage(AppStatus::new())
         .manage(ShellApiKey::new())
@@ -776,6 +849,8 @@ pub fn run() {
         .manage(SidecarRestarting::new())
         .manage(LastRejection::new())
         .manage(LatestUpdate::new())
+        .manage(UpdateInstall::new())
+        .manage(SidecarHandoff::new())
         .manage(PendingRequests::new())
         .manage(LastSidecarError::new())
         .manage(LocaleState::new())
@@ -793,6 +868,8 @@ pub fn run() {
             set_locale,
             get_dock_visibility,
             set_dock_visibility,
+            update_installs_in_place,
+            install_update,
         ])
         .setup(|app| {
             // Seed persisted Dock/taskbar visibility mode ("always" by default,
@@ -996,6 +1073,13 @@ fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
                 }
                 CommandEvent::Terminated(payload) => {
                     eprintln!("[maximal] sidecar exited: {:?}", payload);
+                    // An in-place update stopped it so the installer can
+                    // replace its executable. Tell the update it's gone and
+                    // leave the app alone: the installer exits and relaunches it.
+                    if let Some(tx) = handle.state::<SidecarHandoff>().take() {
+                        let _ = tx.send(());
+                        break;
+                    }
                     // Intentional restart (account switch / sign-in / sign-out
                     // reboot)? respawn_sidecar set this flag before SIGTERMing
                     // the old child, and is already spawning the replacement.
@@ -1137,9 +1221,12 @@ fn extract_error_reason(chunk: &str) -> Option<String> {
 /// `/_internal/shutdown` endpoint — the same protocol `--replace` uses —
 /// but that's async work this synchronous Exit path doesn't need today;
 /// the parent-death watchdog already backstops an abrupt kill.)
-fn kill_sidecar(app: &AppHandle) {
+///
+/// Returns false when there was no sidecar to stop, so no Terminated event
+/// will follow.
+fn kill_sidecar(app: &AppHandle) -> bool {
     let Some(child) = app.state::<Sidecar>().take() else {
-        return;
+        return false;
     };
 
     #[cfg(unix)]
@@ -1210,6 +1297,7 @@ fn kill_sidecar(app: &AppHandle) {
             let _ = child.kill();
         });
     }
+    true
 }
 
 /// Polls the sidecar's /setup-status endpoint, driving SidecarState
@@ -2328,7 +2416,8 @@ fn build_menu(
     // An "Update to X.Y.Z…" item leads the menu in the running states whenever the
     // poll loop has seen a newer release. Built here (before the match) so both
     // running arms can prepend it; the other arms simply don't reference it.
-    // Clicking it opens the install-channel-neutral download page.
+    // Clicking it installs in place on Windows and macOS and opens the
+    // download page elsewhere (see start_update).
     let update = app.state::<LatestUpdate>().get();
     let upgrade_item = match &update {
         Some(u) => Some(MenuItem::with_id(
@@ -2481,7 +2570,7 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
         menu_id::SHOW_LOGS => do_reveal_logs_dir(app),
         menu_id::OPEN_CONFIG => do_reveal_config_dir(app),
         menu_id::RETRY => retry_startup(app),
-        menu_id::UPGRADE => open_update_url(app),
+        menu_id::UPGRADE => start_update(app),
         menu_id::REQUESTS => open_settings_window(app, Some("requests")),
         menu_id::QUIT => request_quit(app),
         _ => {}
@@ -2498,6 +2587,294 @@ fn open_update_url(app: &AppHandle) {
     if let Err(err) = app.opener().open_url(update.url, None::<&str>) {
         eprintln!("[shell] failed to open update url: {err}");
     }
+}
+
+/// The tray's "Update to X.Y.Z…" item: installs in place where supported
+/// (see IN_PLACE_UPDATE), otherwise opens the download page.
+fn start_update(app: &AppHandle) {
+    if !IN_PLACE_UPDATE {
+        open_update_url(app);
+        return;
+    }
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        run_in_place_update(&handle, |_| {}).await;
+    });
+}
+
+/// Progress the Settings window hears while an in-place update runs.
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum UpdateStep {
+    /// The user confirmed; the update is downloading.
+    Downloading,
+}
+
+/// How an in-place update attempt ended. A successful install never
+/// returns: Maximal relaunches into the new version.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum UpdateOutcome {
+    /// This build doesn't install in place; the caller opens the download page.
+    Unavailable,
+    /// An update is already running.
+    Busy,
+    /// The user chose not to install.
+    Cancelled,
+    /// The install failed. The user was told, and the download page opened.
+    Failed,
+}
+
+/// The release channel a build follows, read from its version: `X.Y.Z` is
+/// `stable`, `X.Y.Z-<label>.N` is `<label>`. Release builds stamp the shell's
+/// version from the tag, so this matches `channelForTag` in
+/// scripts/write-updates-manifest.ts, which names the manifest file. None for
+/// a label that can't name one.
+fn update_channel(version: &str) -> Option<&str> {
+    let core = version.split('+').next().unwrap_or(version);
+    let Some((_, prerelease)) = core.split_once('-') else {
+        return Some("stable");
+    };
+    let label = prerelease.split('.').next().unwrap_or("");
+    let mut chars = label.chars();
+    let valid = chars.next().is_some_and(|c| c.is_ascii_alphabetic())
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+    valid.then_some(label)
+}
+
+/// The desktop updater manifest this build checks, e.g.
+/// `https://mxml.sh/updates/desktop/stable.json`.
+fn desktop_update_manifest_url(version: &str) -> Option<String> {
+    update_channel(version)
+        .map(|channel| format!("{DESKTOP_UPDATE_MANIFEST_BASE}{channel}.json"))
+}
+
+/// The `.app` bundle an executable runs from
+/// (`<bundle>.app/Contents/MacOS/<exe>`), if it runs from one.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn app_bundle_of(exe: &std::path::Path) -> Option<&std::path::Path> {
+    let macos_dir = exe.parent()?;
+    if macos_dir.file_name()? != "MacOS" {
+        return None;
+    }
+    let contents = macos_dir.parent()?;
+    if contents.file_name()? != "Contents" {
+        return None;
+    }
+    let bundle = contents.parent()?;
+    (bundle.extension()? == "app").then_some(bundle)
+}
+
+/// Why the macOS update can't swap the `.app` bundle at `bundle`, if it
+/// can't: the app was opened from Downloads without being moved (App
+/// Translocation runs it from a read-only copy), or it runs from a read-only
+/// volume such as the mounted disk image.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn bundle_location_problem(
+    bundle: &std::path::Path,
+    read_only: bool,
+) -> Option<&'static str> {
+    if bundle
+        .components()
+        .any(|part| part.as_os_str() == "AppTranslocation")
+    {
+        return Some("it runs from App Translocation, not from where it was installed");
+    }
+    if read_only {
+        return Some("it runs from a read-only volume, such as the disk image");
+    }
+    None
+}
+
+/// Whether the volume holding `path` is mounted read-only.
+#[cfg(target_os = "macos")]
+fn volume_is_read_only(path: &std::path::Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(c_path) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+        return false;
+    };
+    // SAFETY: `statvfs` only writes into `stat`, a plain C struct that is
+    // valid zeroed, and only reads `c_path`, a NUL-terminated string that
+    // outlives the call.
+    let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
+    let rc = unsafe { libc::statvfs(c_path.as_ptr(), &mut stat) };
+    rc == 0 && (stat.f_flag & libc::ST_RDONLY) != 0
+}
+
+/// Why an in-place update can't replace the running app, if it can't. Only
+/// macOS has such places: the update swaps the whole `.app` bundle.
+#[cfg(target_os = "macos")]
+fn update_location_problem() -> Option<String> {
+    let exe = match std::env::current_exe() {
+        Ok(exe) => exe,
+        Err(err) => return Some(format!("can't find the running app: {err}")),
+    };
+    let Some(bundle) = app_bundle_of(&exe) else {
+        return Some(format!("{} isn't inside an app bundle", exe.display()));
+    };
+    bundle_location_problem(bundle, volume_is_read_only(bundle))
+        .map(|problem| format!("can't replace {}: {problem}", bundle.display()))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn update_location_problem() -> Option<String> {
+    None
+}
+
+/// Run one in-place update: check the desktop manifest, confirm the version
+/// with the user, download and verify the signed update, install it, stop the
+/// sidecar, and relaunch Maximal. Any failure tells the user and opens the
+/// download page instead.
+async fn run_in_place_update(
+    app: &AppHandle,
+    on_step: impl Fn(UpdateStep),
+) -> UpdateOutcome {
+    if !IN_PLACE_UPDATE {
+        return UpdateOutcome::Unavailable;
+    }
+    if !app.state::<UpdateInstall>().claim() {
+        return UpdateOutcome::Busy;
+    }
+    let outcome = match install_in_place(app, &on_step).await {
+        Ok(outcome) => outcome,
+        Err(reason) => {
+            eprintln!("[shell] in-place update failed: {reason}");
+            report_update_failure(app);
+            UpdateOutcome::Failed
+        }
+    };
+    app.state::<UpdateInstall>().release();
+    outcome
+}
+
+/// The steps of `run_in_place_update`. Returns only when the user declines
+/// or something fails; a successful install relaunches the app.
+async fn install_in_place(
+    app: &AppHandle,
+    on_step: &impl Fn(UpdateStep),
+) -> Result<UpdateOutcome, String> {
+    use tauri_plugin_updater::UpdaterExt;
+
+    // Before asking anything: an app that can't replace itself fails over to
+    // the download page right away.
+    if let Some(problem) = update_location_problem() {
+        return Err(problem);
+    }
+
+    let current = app_version(app);
+    let endpoint = desktop_update_manifest_url(&current)
+        .ok_or_else(|| format!("no update channel for version {current}"))?;
+    let endpoint = url::Url::parse(&endpoint).map_err(|e| e.to_string())?;
+    let updater = app
+        .updater_builder()
+        .endpoints(vec![endpoint])
+        .map_err(|e| e.to_string())?
+        .timeout(UPDATE_MANIFEST_TIMEOUT)
+        .build()
+        .map_err(|e| e.to_string())?;
+    // None: the desktop manifest doesn't list a newer release yet (it can
+    // trail the version manifest that showed the button).
+    let update = updater
+        .check()
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "no newer release in the desktop manifest".to_string())?;
+
+    if !confirm_update(app, &update.version).await {
+        return Ok(UpdateOutcome::Cancelled);
+    }
+    on_step(UpdateStep::Downloading);
+
+    // `download` verifies the minisign signature against
+    // `plugins.updater.pubkey`, and that it was signed for this version.
+    let bytes = update
+        .download(|_, _| {}, || {})
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if cfg!(target_os = "windows") {
+        // The installer replaces the sidecar's executable, so the sidecar
+        // must be gone first. `install` starts the installer and exits (the
+        // installer relaunches Maximal); it returns only on failure, after
+        // which the sidecar comes back.
+        stop_sidecar_for_update(app).await;
+        if let Err(err) = update.install(&bytes) {
+            respawn_sidecar(app);
+            return Err(err.to_string());
+        }
+    } else {
+        // macOS swaps the `.app` bundle while Maximal runs, asking for an
+        // administrator password when its folder isn't writable, and puts
+        // the previous app back if that fails. The sidecar keeps running the
+        // old binary until it is stopped, so stop it before relaunching.
+        update.install(&bytes).map_err(|e| e.to_string())?;
+        stop_sidecar_for_update(app).await;
+    }
+    // Relaunch into the new version. From this task, `restart` goes through
+    // ExitRequested (nothing left to stop) and the normal exit cleanup.
+    app.restart();
+}
+
+/// Native confirm naming the version about to be installed. Resolves to
+/// true only on the install button.
+async fn confirm_update(app: &AppHandle, version: &str) -> bool {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    let locale = app.state::<LocaleState>().get();
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .message(native_i18n::t(
+            &locale,
+            "native-update-confirm-body",
+            &[("version", version)],
+        ))
+        .title(native_i18n::tr(&locale, "native-update-confirm-title"))
+        .kind(MessageDialogKind::Info)
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            native_i18n::tr(&locale, "native-update-confirm-install"),
+            native_i18n::tr(&locale, "native-update-confirm-cancel"),
+        ))
+        .show(move |confirmed| {
+            let _ = tx.send(confirmed);
+        });
+    rx.await.unwrap_or(false)
+}
+
+/// Tell the user the in-place update didn't work, then open the download
+/// page so they can install it by hand.
+fn report_update_failure(app: &AppHandle) {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    let locale = app.state::<LocaleState>().get();
+    let app_clone = app.clone();
+    app.dialog()
+        .message(native_i18n::tr(&locale, "native-update-failed-body"))
+        .title(native_i18n::tr(&locale, "native-update-failed-title"))
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCustom(native_i18n::tr(
+            &locale,
+            "native-update-failed-open",
+        )))
+        .show(move |_| {
+            if let Err(err) =
+                app_clone.opener().open_url(UPDATE_PAGE_URL, None::<&str>)
+            {
+                eprintln!("[shell] failed to open update url: {err}");
+            }
+        });
+}
+
+/// Stop the sidecar and wait for it to exit, so the installer can replace
+/// its executable. The Terminated handler hands the exit to us through
+/// `SidecarHandoff` instead of quitting the app or marking it Failed.
+async fn stop_sidecar_for_update(app: &AppHandle) {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.state::<SidecarHandoff>().arm(tx);
+    if kill_sidecar(app)
+        && tokio::time::timeout(SIDECAR_STOP_TIMEOUT, rx).await.is_err()
+    {
+        eprintln!("[shell] sidecar still running after {SIDECAR_STOP_TIMEOUT:?}");
+    }
+    // Disarm, so a later exit (after a failed install) is handled normally.
+    app.state::<SidecarHandoff>().take();
 }
 
 /// Re-run the startup sequence from the Failed/Stopped state: clear any
@@ -2542,8 +2919,12 @@ fn respawn_sidecar(app: &AppHandle) {
 
     // Reap the current child (healthy, hung, or mid-crash) so the respawn binds
     // cleanly. No-op if already gone. spawn_sidecar also passes --replace as a
-    // backstop against a not-yet-released port.
-    kill_sidecar(app);
+    // backstop against a not-yet-released port. With no child to stop, no
+    // exit will consume the restart mark, so clear it here; otherwise it
+    // would swallow the replacement's eventual exit.
+    if !kill_sidecar(app) {
+        app.state::<SidecarRestarting>().consume();
+    }
 
     apply_state(app, SidecarState::Starting);
 
@@ -3139,6 +3520,26 @@ fn get_dock_visibility(state: State<'_, DockVisibilityState>) -> String {
     state.get()
 }
 
+/// Tauri command — whether "Update to X.Y.Z" installs in place on this
+/// build (Windows, macOS) or opens the download page. The Settings window
+/// reads it for the button's tooltip.
+#[tauri::command]
+fn update_installs_in_place() -> bool {
+    IN_PLACE_UPDATE
+}
+
+/// Tauri command — the topbar "Update to X.Y.Z" button. Runs the in-place
+/// update (confirm, download, install, relaunch) and streams its progress on
+/// `on_step`. Returns `unavailable` where updates don't install in place, so
+/// the webview opens the download page itself; on success it never returns.
+#[tauri::command]
+async fn install_update(app: AppHandle, on_step: Channel<UpdateStep>) -> UpdateOutcome {
+    run_in_place_update(&app, |step| {
+        let _ = on_step.send(step);
+    })
+    .await
+}
+
 #[tauri::command]
 fn set_dock_visibility(
     app: AppHandle,
@@ -3246,6 +3647,102 @@ mod tests {
         // "available" without a version is not offerable.
         let no_version = serde_json::json!({ "latest": "", "update_available": true });
         assert_eq!(parse_update_status(&no_version), UpdateCheck::Resolved(None));
+    }
+
+    #[test]
+    fn picks_the_desktop_manifest_for_the_release_channel() {
+        use super::{desktop_update_manifest_url, update_channel};
+        // Release builds stamp the shell's version from the tag.
+        assert_eq!(update_channel("0.4.49"), Some("stable"));
+        assert_eq!(update_channel("0.4.49-beta.1"), Some("beta"));
+        assert_eq!(update_channel("0.4.49-rc-2.1"), Some("rc-2"));
+        assert_eq!(update_channel("0.4.49+abc"), Some("stable"));
+        // Dev placeholder version: checks stable, which is never older.
+        assert_eq!(update_channel("0.0.0"), Some("stable"));
+        // A label that can't name a manifest file.
+        assert_eq!(update_channel("0.4.49-1"), None);
+        assert_eq!(update_channel("0.4.49-"), None);
+        assert_eq!(
+            desktop_update_manifest_url("0.4.49").as_deref(),
+            Some("https://mxml.sh/updates/desktop/stable.json")
+        );
+        assert_eq!(
+            desktop_update_manifest_url("0.5.0-beta.3").as_deref(),
+            Some("https://mxml.sh/updates/desktop/beta.json")
+        );
+        assert_eq!(desktop_update_manifest_url("0.4.49-1"), None);
+    }
+
+    #[test]
+    fn installs_in_place_on_windows_and_macos() {
+        assert_eq!(
+            super::IN_PLACE_UPDATE,
+            cfg!(any(target_os = "windows", target_os = "macos"))
+        );
+    }
+
+    #[test]
+    fn rc_builds_check_the_rc_manifest() {
+        use super::desktop_update_manifest_url;
+        // rc.1 → rc.2 is the upgrade path RC testing exercises.
+        assert_eq!(
+            desktop_update_manifest_url("0.5.0-rc.1").as_deref(),
+            Some("https://mxml.sh/updates/desktop/rc.json")
+        );
+    }
+
+    #[test]
+    fn finds_the_app_bundle_a_binary_runs_from() {
+        use super::app_bundle_of;
+        use std::path::Path;
+        assert_eq!(
+            app_bundle_of(Path::new("/Applications/Maximal.app/Contents/MacOS/maximal-shell")),
+            Some(Path::new("/Applications/Maximal.app"))
+        );
+        // `cargo run` / a bare binary isn't in a bundle.
+        assert_eq!(
+            app_bundle_of(Path::new("/repo/shell/src-tauri/target/debug/maximal-shell")),
+            None
+        );
+        assert_eq!(
+            app_bundle_of(Path::new("/x/Maximal/Contents/MacOS/maximal-shell")),
+            None
+        );
+    }
+
+    #[test]
+    fn refuses_bundles_an_update_cant_replace() {
+        use super::bundle_location_problem;
+        use std::path::Path;
+        let installed = Path::new("/Applications/Maximal.app");
+        assert_eq!(bundle_location_problem(installed, false), None);
+        // Opened from Downloads without moving it: Gatekeeper runs a
+        // read-only translocated copy.
+        let translocated = Path::new(
+            "/private/var/folders/x/T/AppTranslocation/1234/d/Maximal.app",
+        );
+        assert!(bundle_location_problem(translocated, false).is_some());
+        // Run straight from the mounted disk image.
+        let on_dmg = Path::new("/Volumes/Maximal/Maximal.app");
+        assert!(bundle_location_problem(on_dmg, true).is_some());
+    }
+
+    #[test]
+    fn update_outcomes_serialize_for_the_webview() {
+        use super::{UpdateOutcome, UpdateStep};
+        let json = |v: serde_json::Value| v.as_str().map(str::to_owned);
+        assert_eq!(
+            json(serde_json::to_value(UpdateOutcome::Unavailable).unwrap()),
+            Some("unavailable".into())
+        );
+        assert_eq!(
+            json(serde_json::to_value(UpdateOutcome::Cancelled).unwrap()),
+            Some("cancelled".into())
+        );
+        assert_eq!(
+            json(serde_json::to_value(UpdateStep::Downloading).unwrap()),
+            Some("downloading".into())
+        );
     }
 
     #[test]

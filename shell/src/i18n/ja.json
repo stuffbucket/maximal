@@ -21,6 +21,7 @@
   "nav-switch-to-dashboard": "ダッシュボード ({shortcut})",
   "nav-switch-to-settings": "設定 ({shortcut})",
   "nav-update-to": "{version} にアップデート",
+  "nav-update-downloading": "ダウンロード中…",
 
   "appearance-title": "外観",
   "appearance-sub": "デスクトップ上での Maximal の表示方法を設定します。",
@@ -367,5 +368,12 @@
   "native-quit-title": "Maximal を終了しますか？",
   "native-quit-body": "Maximal が停止し、開いている設定ウィンドウはすべて閉じます。",
   "native-quit-confirm": "Maximal を終了",
-  "native-quit-cancel": "キャンセル"
+  "native-quit-cancel": "キャンセル",
+  "native-update-confirm-title": "Maximal をアップデートしますか？",
+  "native-update-confirm-body": "Maximal は {version} をダウンロードしてインストールし、再起動します。処理中のリクエストは停止します。",
+  "native-update-confirm-install": "インストールして再起動",
+  "native-update-confirm-cancel": "後で",
+  "native-update-failed-title": "アップデートをインストールできませんでした",
+  "native-update-failed-body": "Maximal が mxml.sh を開きます。そこからダウンロードしてください。",
+  "native-update-failed-open": "mxml.sh を開く"
 }

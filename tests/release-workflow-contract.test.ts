@@ -74,14 +74,14 @@ describe("release action supply chain", () => {
       return actionUse.startsWith("./") ? [] : [actionUse]
     })
     const expectedUses = new Map([
-      ["actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1", 8],
+      ["actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1", 9],
       [
         "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1",
         2,
       ],
     ])
 
-    expect(externalUses).toHaveLength(10)
+    expect(externalUses).toHaveLength(11)
     for (const [expectedUse, count] of expectedUses) {
       expect(
         externalUses.filter((actionUse) => actionUse === expectedUse),
@@ -172,6 +172,78 @@ describe("isolated MCP broker distribution", () => {
     expect(installerWorkflow).toContain(
       "foreach ($file in @('maximal.exe', 'maximal-mcp-broker.exe', 'uninstall.ps1'))",
     )
+  })
+})
+
+const windowsShellJob = (workflow: string): string =>
+  workflow.slice(
+    workflow.indexOf("\n  windows-shell:"),
+    workflow.indexOf("\n  publish:"),
+  )
+
+const macosDmgJob = (workflow: string): string =>
+  workflow.slice(
+    workflow.indexOf("\n  macos-dmg:"),
+    workflow.indexOf("\n  windows-installer:"),
+  )
+
+describe("in-place desktop updates", () => {
+  test("the NSIS build is signed for the updater with the repo secrets", async () => {
+    const job = windowsShellJob(await readWorkflow("release.yml"))
+
+    expect(job).toContain(String.raw`\"createUpdaterArtifacts\":true`)
+    expect(job).toContain(
+      "TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}",
+    )
+    expect(job).toContain(
+      "TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}",
+    )
+    expect(job).toContain("${{ vars.TAURI_SIGNING_PUBLIC_KEY }}")
+    expect(job).not.toMatch(/echo[^\n]*TAURI_SIGNING_PRIVATE_KEY/u)
+  })
+
+  test("the installer's signature is verified and attached beside it", async () => {
+    const job = windowsShellJob(await readWorkflow("release.yml"))
+
+    expect(job).toContain("bun scripts/verify-updater-signature.ts")
+    expect(job.indexOf("bun scripts/verify-updater-signature.ts")).toBeLessThan(
+      job.indexOf("Attach Windows shell installer to release"),
+    )
+    expect(job).toContain('Copy-Item $sig "$dst.sig" -Force')
+    expect(job).toContain(
+      "dist-release/maximal-${{ env.TAG }}-windows-x64-setup.exe.sig",
+    )
+  })
+
+  test("macOS asks the builder for the updater bundle, named like the release", async () => {
+    const config = await readRepoFile(".macos-builder/config")
+
+    expect(config).toMatch(/^artifact = dmg,updater$/mu)
+    expect(config).toMatch(
+      /^updater_name = maximal-\{tag\}-darwin-arm64\.app\.tar\.gz$/mu,
+    )
+  })
+
+  test("macos-dmg waits for the bundle and its signature, then verifies them", async () => {
+    const job = macosDmgJob(await readWorkflow("release.yml"))
+
+    expect(job).toContain(
+      "TARBALL: maximal-${{ github.ref_name }}-darwin-arm64.app.tar.gz",
+    )
+    expect(job).toContain(
+      'has "$TARBALL" && has "$TARBALL.sig" && has "$TARBALL.sha256"',
+    )
+    expect(job).toContain('sha256sum -c "$TARBALL.sha256"')
+    expect(job).toContain("bun scripts/verify-updater-signature.ts")
+    // Every run verifies, even when the files were already on the draft.
+    expect(job).not.toMatch(/nothing to do/u)
+  })
+
+  test("the manifest PR carries the desktop updater manifest", async () => {
+    const workflow = await readWorkflow("release.yml")
+    const manifestJob = workflow.slice(workflow.indexOf("\n  manifest:"))
+
+    expect(manifestJob).toContain("git add -A -- site/public/updates")
   })
 })
 

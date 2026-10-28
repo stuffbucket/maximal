@@ -37,6 +37,14 @@ tauri-plugin-notification = "2"
 # `deep-link` feature is opt-in scaffolding for a future deep-link
 # integration; it's cheap (no extra runtime cost) and harmless today.
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+# In-place updates: downloads the signed update named by
+# https://mxml.sh/updates/desktop/<channel>.json (the NSIS installer on
+# Windows, the .app.tar.gz bundle on macOS), verifies its minisign signature
+# against `plugins.updater.pubkey`, and installs it. Registered and used on
+# Windows and macOS (IN_PLACE_UPDATE in src/lib.rs). Default features minus
+# `zip`, which only unpacks the legacy v1-compatible Windows/Linux archives
+# we don't publish; macOS's .tar.gz support doesn't depend on it.
+tauri-plugin-updater = { version = "2.14", default-features = false, features = ["rustls-tls", "system-proxy"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # System UI locale, used ONLY as the fallback for native strings that fire
@@ -48,11 +56,12 @@ sys-locale = "0.3"
 # rustls-tls keeps us off OpenSSL; we only talk to 127.0.0.1 but
 # reqwest still wants a TLS backend feature.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-# `tokio::time::sleep` for the polling loop. Tauri already pulls
-# tokio in transitively (its `async_runtime` is built on it); the
-# direct dep here is just so we can name `tokio::time` without
+# `tokio::time::sleep` for the polling loop, and `tokio::sync::oneshot`
+# for the in-place update's waits (confirm dialog, sidecar exit). Tauri
+# already pulls tokio in transitively (its `async_runtime` is built on
+# it); the direct dep here is just so we can name these without
 # relying on private re-exports.
-tokio = { version = "1", features = ["time"] }
+tokio = { version = "1", features = ["time", "sync"] }
 # Url parsing for WebviewUrl::External(...) — the settings deep-link
 # url builder.
 url = "2"
@@ -76,7 +85,7 @@ libc = "0.2"
 # build a .app bundle and therefore has no Info.plist CFBundleIconFile
 # for AppKit to read). Same crates Tauri's own macOS code uses; the
 # direct dep just lets us name them.
-muda = { version = "0.19", default-features = false }
+muda = { version = "0.20", default-features = false }
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSImage"] }
 objc2-foundation = { version = "0.3", features = ["NSData"] }

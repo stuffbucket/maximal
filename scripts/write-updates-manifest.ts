@@ -30,6 +30,14 @@
  * This script writes it for the site; the desktop client must keep reading only
  * `version`. Do NOT wire the installer to `downloads.url`.
  *
+ * DESKTOP UPDATER MANIFEST: when the release carries a signed desktop update
+ * (the Windows `<setup>.exe` and/or the macOS `<name>-darwin-arm64.app.tar.gz`,
+ * each with its `<file>.sig` asset), this script also writes
+ * `desktop/<channel>.json` beside the manifest, in Tauri's static updater
+ * format (`buildDesktopManifest`). The apps' in-place updater reads it and
+ * verifies the file's signature before installing it. A release without any
+ * signature leaves that file as it was.
+ *
  * Usage:
  *   # Regenerate from a published release's live assets (via `gh`):
  *   bun scripts/write-updates-manifest.ts --tag v0.4.39
@@ -48,8 +56,11 @@ import path from "node:path"
 
 import {
   buildChannel,
+  buildDesktopManifest,
   MANIFEST_SCHEMA_VERSION,
+  desktopUpdaterArtifacts,
   type ChannelReleaseInput,
+  type DesktopUpdateManifest,
   type ManifestAsset,
   type ManifestChannel,
   type UpdateManifest,
@@ -148,17 +159,30 @@ export function mergeChannel(
 
 /** Serialize identically to the Astro route (2-space indent + trailing NL) so
  *  the two writers produce byte-identical documents for identical inputs. */
-export function serializeManifest(manifest: UpdateManifest): string {
+export function serializeManifest(
+  manifest: UpdateManifest | DesktopUpdateManifest,
+): string {
   return `${JSON.stringify(manifest, null, 2)}\n`
+}
+
+/** Where a channel's desktop updater manifest lives, beside the manifest:
+ *  site/public/updates/desktop/<channel>.json for the default `--out`. */
+export function desktopManifestPath(out: string, channel: string): string {
+  return path.join(path.dirname(out), "desktop", `${channel}.json`)
+}
+
+interface PublishedRelease {
+  assets: ManifestAsset[]
+  publishedAt: string | null
 }
 
 /** Fetch a published release's assets via `gh`, mapped to the manifest's
  *  minimal {name,url} shape. Uses `gh` (already authenticated in CI + locally)
  *  rather than an unauthenticated REST call to avoid the 60/hr/IP limit. */
-function fetchReleaseAssets(tag: string, repo: string): ManifestAsset[] {
+function fetchRelease(tag: string, repo: string): PublishedRelease {
   const res = spawnSync(
     "gh",
-    ["release", "view", tag, "--repo", repo, "--json", "assets"],
+    ["release", "view", tag, "--repo", repo, "--json", "assets,publishedAt"],
     { encoding: "utf8" },
   )
   if (res.status !== 0) {
@@ -168,6 +192,7 @@ function fetchReleaseAssets(tag: string, repo: string): ManifestAsset[] {
   }
   const parsed = JSON.parse(res.stdout) as {
     assets?: Array<{ name?: unknown; url?: unknown }>
+    publishedAt?: unknown
   }
   const assets: ManifestAsset[] = []
   for (const a of parsed.assets ?? []) {
@@ -175,7 +200,36 @@ function fetchReleaseAssets(tag: string, repo: string): ManifestAsset[] {
       assets.push({ name: a.name, url: a.url })
     }
   }
-  return assets
+  const publishedAt =
+    typeof parsed.publishedAt === "string" && parsed.publishedAt.length > 0 ?
+      parsed.publishedAt
+    : null
+  return { assets, publishedAt }
+}
+
+/** Read one small text asset (the installer's `.sig`) of a release. */
+function fetchAssetText(tag: string, repo: string, name: string): string {
+  const res = spawnSync(
+    "gh",
+    [
+      "release",
+      "download",
+      tag,
+      "--repo",
+      repo,
+      "--pattern",
+      name,
+      "--output",
+      "-",
+    ],
+    { encoding: "utf8" },
+  )
+  if (res.status !== 0) {
+    throw new Error(
+      `gh release download ${tag} ${name} failed: ${res.stderr?.trim() || `exit ${res.status}`}`,
+    )
+  }
+  return res.stdout
 }
 
 async function readExistingManifest(out: string): Promise<unknown> {
@@ -193,7 +247,7 @@ async function main(): Promise<number> {
   const args = parseArgs(process.argv.slice(2))
   const channelName = channelForTag(args.tag)
 
-  const assets = fetchReleaseAssets(args.tag, args.repo)
+  const { assets, publishedAt } = fetchRelease(args.tag, args.repo)
   const input: ChannelReleaseInput = { tag: args.tag, assets }
   const channel = buildChannel(input)
 
@@ -212,6 +266,27 @@ async function main(): Promise<number> {
       `(${Object.keys(channel.downloads ?? {}).length} downloads); ` +
       `preserved channels: ${preserved}`,
   )
+
+  const desktopOut = desktopManifestPath(args.out, channelName)
+  const signatures = new Map(
+    desktopUpdaterArtifacts(assets).map(({ signatureName }) => [
+      signatureName,
+      fetchAssetText(args.tag, args.repo, signatureName),
+    ]),
+  )
+  const desktop = buildDesktopManifest({ ...input, signatures, publishedAt })
+  if (desktop) {
+    await fs.mkdir(path.dirname(desktopOut), { recursive: true })
+    await fs.writeFile(desktopOut, serializeManifest(desktop))
+    console.error(
+      `wrote ${desktopOut}: ${desktop.version} for ` +
+        Object.keys(desktop.platforms).join(", "),
+    )
+  } else {
+    console.error(
+      `no signed desktop update in ${args.tag}; ${desktopOut} left as is`,
+    )
+  }
   return 0
 }
 

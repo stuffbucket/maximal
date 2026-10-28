@@ -71,6 +71,51 @@ download. `downloads` exists purely for the browser, where the URL is
 user-visible and clickable anyway. **Do not wire the installer or any
 auto-update flow to `downloads.<slot>.url`.**
 
+## Desktop updater manifest
+
+The Windows and macOS apps install updates in place with
+`tauri-plugin-updater`, which reads a separate document per channel in
+Tauri's static JSON format: `https://mxml.sh/updates/desktop/<channel>.json`
+(source file `site/public/updates/desktop/<channel>.json`; builder
+`buildDesktopManifest` in `updates-manifest.ts`).
+
+```json
+{
+  "version": "0.4.49",
+  "notes": "https://github.com/stuffbucket/maximal/releases/tag/v0.4.49",
+  "pub_date": "2026-10-28T12:00:00Z",
+  "platforms": {
+    "windows-x86_64-nsis": { "url": "<setup.exe release asset>", "signature": "<setup.exe.sig content>" },
+    "windows-x86_64": { "url": "<same>", "signature": "<same>" },
+    "darwin-aarch64-app": { "url": "<darwin-arm64.app.tar.gz release asset>", "signature": "<.app.tar.gz.sig content>" },
+    "darwin-aarch64": { "url": "<same>", "signature": "<same>" }
+  }
+}
+```
+
+- Each `url` is downloaded and installed, which is safe only because of the
+  signature: the app checks the file's minisign signature against the public
+  key built into it (`plugins.updater.pubkey` in
+  `shell/src-tauri/tauri.conf.json`, key id `E8DAB79E2EB1D6C4`) and, with
+  `requireSignedVersion`, that it was signed for `version`. A tampered
+  document can at most make the update fail, and the app then opens mxml.sh.
+  The release checks the same two things before publishing
+  (`scripts/verify-updater-signature.ts`).
+- Only the check must avoid github.com; the files themselves are GitHub
+  release assets.
+- Each platform is listed under `<os>-<arch>-<installer>` and `<os>-<arch>`,
+  the two names the plugin looks up, most specific first.
+- The app picks the channel from its own version (`X.Y.Z` is `stable`,
+  `X.Y.Z-rc.N` is `rc`), matching the channel the release writes.
+- Unlike the version manifest it is fetched only when the user clicks
+  "Update to X.Y.Z", so it has no conditional-request logic. It can trail
+  the version manifest by the CDN's `max-age`; an update that isn't listed
+  yet fails over to mxml.sh.
+- A platform is listed only when the release carries its signature
+  (`<setup>.exe.sig` from `windows-shell`, `<name>.app.tar.gz.sig` from
+  `stuffbucket/macos-builder`), and the file is written only when at least
+  one is.
+
 ## Hosting & write path
 
 - The manifest is served at `/updates/manifest.json` on GitHub Pages
@@ -90,7 +135,9 @@ auto-update flow to `downloads.<slot>.url`.**
 - **The generated manifest PR is the only repository write path.** After a
   release publishes, release.yml's `manifest` job runs
   `scripts/write-updates-manifest.ts --tag <tag>` (read-modify-write, so a
-  beta publish never clobbers `stable` and vice versa) on the rolling
+  beta publish never clobbers `stable` and vice versa; it also writes
+  `desktop/<channel>.json` when the release has a signed desktop
+  update) on the rolling
   `automation/updates-manifest` branch and opens or updates a protected PR.
   It dispatches `ci.yml` against that PR's SHA because
   `GITHUB_TOKEN`-created PRs do not trigger `pull_request` workflows. A

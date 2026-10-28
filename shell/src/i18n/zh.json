@@ -21,6 +21,7 @@
   "nav-switch-to-dashboard": "仪表板 ({shortcut})",
   "nav-switch-to-settings": "设置 ({shortcut})",
   "nav-update-to": "更新到 {version}",
+  "nav-update-downloading": "正在下载更新…",
 
   "appearance-title": "外观",
   "appearance-sub": "控制 Maximal 在桌面上的显示方式。",
@@ -367,5 +368,12 @@
   "native-quit-title": "退出 Maximal?",
   "native-quit-body": "Maximal 将停止,所有打开的设置窗口将关闭。",
   "native-quit-confirm": "退出 Maximal",
-  "native-quit-cancel": "取消"
+  "native-quit-cancel": "取消",
+  "native-update-confirm-title": "更新 Maximal？",
+  "native-update-confirm-body": "Maximal 将下载并安装 {version}，然后重新启动。正在进行的请求将会中断。",
+  "native-update-confirm-install": "安装并重新启动",
+  "native-update-confirm-cancel": "以后再说",
+  "native-update-failed-title": "无法安装更新",
+  "native-update-failed-body": "Maximal 将打开 mxml.sh，你可以在那里下载。",
+  "native-update-failed-open": "打开 mxml.sh"
 }

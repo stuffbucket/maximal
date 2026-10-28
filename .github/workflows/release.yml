@@ -516,7 +516,9 @@ jobs:
 
   # ── Installers ───────────────────────────────────────────────────────
 
-  # The signed DMG must be attached before `publish` seals the release.
+  # The signed DMG and the signed updater bundle the macOS app installs in
+  # place must be attached (and the bundle verified) before `publish` seals
+  # the release.
   macos-dmg:
     needs: release
     runs-on: ubuntu-latest
@@ -526,8 +528,17 @@ jobs:
       contents: write
     env:
       TAG: ${{ github.ref_name }}
+      # The builder's name for the updater bundle (`updater_name` in
+      # .macos-builder/config); it arrives with `.sig` and `.sha256`.
+      TARBALL: maximal-${{ github.ref_name }}-darwin-arm64.app.tar.gz
     steps:
-      - name: Build (or reuse) the signed .dmg and ensure it is on the draft
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/setup-bun
+        with:
+          bun-version: 1.3.14
+
+      - name: Build (or reuse) the signed .dmg and updater bundle and ensure they are on the draft
         env:
           BUILDER_PAT: ${{ secrets.MACOS_BUILDER_PAT }}
           GH_TOKEN: ${{ github.token }}
@@ -536,32 +547,47 @@ jobs:
           set -euo pipefail
           SRC="Maximal.dmg"
           DST="maximal-${TAG}-darwin-arm64.dmg"
-          has() {
-            gh release view "$TAG" --repo "$REPO" --json assets \
-              --jq '.assets[].name' 2>/dev/null | grep -Fxq "$1"
+          ASSETS=""
+          refresh() {
+            ASSETS="$(gh release view "$TAG" --repo "$REPO" --json assets \
+              --jq '.assets[].name' 2>/dev/null || true)"
           }
-          # Avoid dispatching another build when the normalized asset exists.
-          if has "$DST"; then
-            echo "$DST already on the draft — nothing to do."
-            exit 0
-          fi
-          if ! has "$SRC"; then
+          has() { grep -Fxq "$1" <<<"$ASSETS"; }
+          built() {
+            { has "$SRC" || has "$DST"; } \
+              && has "$TARBALL" && has "$TARBALL.sig" && has "$TARBALL.sha256"
+          }
+          refresh
+          # Avoid dispatching another build when every builder file is there.
+          if built; then
+            echo "The DMG and ${TARBALL} (+ .sig, .sha256) are already on the draft."
+          else
             echo "Dispatching the private macOS builder for ${REPO} at ${TAG}…"
             GH_TOKEN="$BUILDER_PAT" gh workflow run build.yml \
               --repo stuffbucket/macos-builder --ref main \
               -f "repo=${REPO}" -f "ref=${TAG}"
-            echo "Polling the draft for ${SRC} (sign + notarize takes a few min)…"
+            echo "Polling the draft for ${SRC} and ${TARBALL} (+ .sig, .sha256) (sign + notarize takes a few min)…"
             ok=0
             for i in $(seq 1 40); do   # ~30 min cap (45s × 40)
               sleep 45
-              if has "$SRC" || has "$DST"; then
-                ok=1; echo "${SRC} present after ~$((i * 45))s."; break
+              refresh
+              if built; then
+                ok=1; echo "Builder files present after ~$((i * 45))s."; break
               fi
             done
             if [ "$ok" -ne 1 ]; then
-              echo "::error::Timed out waiting for ${SRC} on the draft release. See the stuffbucket/macos-builder run; the release stays a draft (not published without a macOS build)." >&2
+              missing=""
+              { has "$SRC" || has "$DST"; } || missing="$missing $SRC"
+              for f in "$TARBALL" "$TARBALL.sig" "$TARBALL.sha256"; do
+                has "$f" || missing="$missing $f"
+              done
+              echo "::error::Timed out waiting for${missing} on the draft release. See the stuffbucket/macos-builder run; the release stays a draft (not published without a macOS build)." >&2
               exit 1
             fi
+          fi
+          if ! has "$SRC"; then
+            echo "${DST} is already normalized."
+            exit 0
           fi
           # Normalize the asset name and checksum before publication.
           tmp="$(mktemp -d)"
@@ -572,6 +598,22 @@ jobs:
           gh release delete-asset "$TAG" "$SRC" --repo "$REPO" --yes 2>/dev/null || true
           gh release delete-asset "$TAG" "$SRC.sha256" --repo "$REPO" --yes 2>/dev/null || true
           echo "Shipped ${DST} (+ .sha256); removed builder-named ${SRC}."
+
+      # The macOS app installs this bundle in place only if it is signed by
+      # the key in tauri.conf.json and for this version. Check both here, on
+      # every run, so a bad bundle keeps the release a draft.
+      - name: Verify the macOS updater bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          dir="$(mktemp -d)"
+          gh release download "$TAG" --repo "$REPO" --dir "$dir" \
+            --pattern "$TARBALL" --pattern "$TARBALL.sig" --pattern "$TARBALL.sha256"
+          ( cd "$dir" && sha256sum -c "$TARBALL.sha256" )
+          bun scripts/verify-updater-signature.ts \
+            --file "$dir/$TARBALL" --version "${TAG#v}"
 
   # Windows PowerShell installer — install.ps1 shipped verbatim + sha256.
   windows-installer:
@@ -920,8 +962,8 @@ jobs:
             exit 0
           fi
           ASSETS="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null || echo '')"
-          if grep -Fxq "$SETUP" <<<"$ASSETS"; then
-            echo "Reuse enabled and $SETUP already attached — skipping."
+          if grep -Fxq "$SETUP" <<<"$ASSETS" && grep -Fxq "$SETUP.sig" <<<"$ASSETS"; then
+            echo "Reuse enabled and $SETUP (+ .sig) already attached — skipping."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
@@ -1005,19 +1047,64 @@ jobs:
           }
           Get-ChildItem 'shell\src-tauri\binaries'
 
+      # The app verifies every in-place update against the public key in
+      # tauri.conf.json. Fail before building if it isn't the key the
+      # signing secrets belong to (the repo variable holds the same public key).
+      - name: Check updater public key
+        if: steps.skip.outputs.skip != 'true'
+        shell: pwsh
+        env:
+          EXPECTED_PUBKEY: ${{ vars.TAURI_SIGNING_PUBLIC_KEY }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $conf = Get-Content -Raw 'shell/src-tauri/tauri.conf.json' | ConvertFrom-Json
+          $configured = $conf.plugins.updater.pubkey
+          if (-not $env:EXPECTED_PUBKEY) {
+            Write-Error 'Repository variable TAURI_SIGNING_PUBLIC_KEY is not set.'
+          }
+          if ($configured -cne $env:EXPECTED_PUBKEY) {
+            Write-Error 'plugins.updater.pubkey in tauri.conf.json does not match TAURI_SIGNING_PUBLIC_KEY.'
+          }
+          Write-Host 'Updater public key matches.'
+
       - name: Tauri build (Windows, NSIS)
         if: steps.skip.outputs.skip != 'true'
         working-directory: shell
         shell: bash
         env:
           MAXIMAL_VERSION: ${{ steps.ver.outputs.version }}
+          # createUpdaterArtifacts signs the NSIS installer (writing
+          # <setup>.exe.sig) with this key; the CLI reads both from the
+          # environment and never prints them.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          # Stamp the real version (tauri.conf.json hardcodes 0.0.0) and skip
+          # Stamp the real version (tauri.conf.json hardcodes 0.0.0), skip
           # beforeBuildCommand — the UI is already built above, and the hook
-          # runs via cmd.exe where bun isn't resolvable on Windows.
+          # runs via cmd.exe where bun isn't resolvable on Windows — and sign
+          # the installer for in-place updates (the signature records this
+          # version, which the app checks against the desktop manifest).
           bun run tauri build --bundles nsis \
-            --config "{\"version\":\"${MAXIMAL_VERSION}\",\"build\":{\"beforeBuildCommand\":\"\"}}"
+            --config "{\"version\":\"${MAXIMAL_VERSION}\",\"build\":{\"beforeBuildCommand\":\"\"},\"bundle\":{\"createUpdaterArtifacts\":true}}"
+
+      # The check the app makes before installing: signed by the key in
+      # tauri.conf.json, for this version.
+      - name: Verify the updater signature
+        if: steps.skip.outputs.skip != 'true'
+        shell: bash
+        env:
+          MAXIMAL_VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          setups=(shell/src-tauri/target/release/bundle/nsis/*-setup.exe)
+          if [ "${#setups[@]}" -ne 1 ]; then
+            echo "::error::Expected one NSIS installer, found ${#setups[@]}."
+            exit 1
+          fi
+          bun scripts/verify-updater-signature.ts \
+            --file "${setups[0]}" --version "$MAXIMAL_VERSION"
 
       - name: Verify NSIS installed sidecars
         if: steps.skip.outputs.skip != 'true'
@@ -1050,7 +1137,7 @@ jobs:
             if (Test-Path $binaryPath) { throw "$binary remains after NSIS uninstall" }
           }
 
-      - name: Stage NSIS installer + sha256
+      - name: Stage NSIS installer + sha256 + updater signature
         if: steps.skip.outputs.skip != 'true'
         shell: pwsh
         run: |
@@ -1058,10 +1145,16 @@ jobs:
           $nsisDir = 'shell/src-tauri/target/release/bundle/nsis'
           $setup = Get-ChildItem -Path $nsisDir -Filter '*-setup.exe' | Select-Object -First 1
           if (-not $setup) { Write-Error "NSIS installer not produced under $nsisDir"; exit 1 }
+          $sig = "$($setup.FullName).sig"
+          if (-not (Test-Path $sig)) { Write-Error "Updater signature not produced: $sig"; exit 1 }
           New-Item -ItemType Directory -Force -Path dist-release | Out-Null
           $name = "maximal-${env:TAG}-windows-x64-setup.exe"
           $dst = Join-Path 'dist-release' $name
           Copy-Item $setup.FullName $dst -Force
+          # The signature covers the file's bytes, not its name, so it travels
+          # with the renamed installer. The manifest job copies it verbatim
+          # into https://mxml.sh/updates/desktop/<channel>.json.
+          Copy-Item $sig "$dst.sig" -Force
           # `<hash>  <filename>` to match the sha256sum convention the other assets use.
           $hash = (Get-FileHash -Algorithm SHA256 $dst).Hash.ToLower()
           "$hash  $name" | Out-File -Encoding ascii "$dst.sha256"
@@ -1076,6 +1169,7 @@ jobs:
           files: |
             dist-release/maximal-${{ env.TAG }}-windows-x64-setup.exe
             dist-release/maximal-${{ env.TAG }}-windows-x64-setup.exe.sha256
+            dist-release/maximal-${{ env.TAG }}-windows-x64-setup.exe.sig
 
   # Publish only after every required artifact and verification job succeeds.
   # Failures leave the release draft mutable for a re-run.
@@ -1197,6 +1291,9 @@ jobs:
           if [ "$CURRENT_TAG" = "$TAG" ]; then
             echo "channels.${CHANNEL} already points at ${TAG}; skipping regeneration."
           else
+            # Also writes updates/desktop/<channel>.json when the release
+            # carries signed desktop updates (<setup>.exe.sig,
+            # <name>.app.tar.gz.sig).
             bun scripts/write-updates-manifest.ts --tag "$TAG"
             bun test \
               tests/write-updates-manifest.test.ts \
@@ -1204,8 +1301,8 @@ jobs:
               tests/updates-manifest.test.ts \
               tests/hydrate-manifest.test.ts \
               tests/update-check.test.ts
-            git add site/public/updates/manifest.json
-            if ! git diff --cached --quiet -- site/public/updates/manifest.json; then
+            git add -A -- site/public/updates
+            if ! git diff --cached --quiet -- site/public/updates; then
               git commit -m "chore(site): update updates manifest for $TAG"
             fi
           fi
@@ -1232,7 +1329,7 @@ jobs:
           fi
 
           TITLE="chore(site): update updates manifest for $TAG"
-          BODY="Published ${TAG} is now represented in site/public/updates/manifest.json. Merge this PR after the required test check passes; the resulting main push deploys Pages."
+          BODY="Published ${TAG} is now represented in site/public/updates/manifest.json (and, with signed desktop updates, site/public/updates/desktop/). Merge this PR after the required test check passes; the resulting main push deploys Pages."
           if [ "$PR_COUNT" -eq 0 ]; then
             gh pr create --repo "$GITHUB_REPOSITORY" --base main \
               --head "$HEAD_BRANCH" --title "$TITLE" --body "$BODY"

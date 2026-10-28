@@ -21,6 +21,7 @@
   "nav-switch-to-dashboard": "Tableau de bord ({shortcut})",
   "nav-switch-to-settings": "Réglages ({shortcut})",
   "nav-update-to": "Mettre à jour vers {version}",
+  "nav-update-downloading": "Téléchargement…",
 
   "appearance-title": "Apparence",
   "appearance-sub": "Contrôlez l’affichage de Maximal sur votre bureau.",
@@ -367,5 +368,12 @@
   "native-quit-title": "Quitter Maximal ?",
   "native-quit-body": "Maximal s’arrêtera et toutes les fenêtres de Réglages ouvertes se fermeront.",
   "native-quit-confirm": "Quitter Maximal",
-  "native-quit-cancel": "Annuler"
+  "native-quit-cancel": "Annuler",
+  "native-update-confirm-title": "Mettre à jour Maximal ?",
+  "native-update-confirm-body": "Maximal va télécharger et installer {version}, puis redémarrer. Les requêtes en cours seront interrompues.",
+  "native-update-confirm-install": "Installer et redémarrer",
+  "native-update-confirm-cancel": "Plus tard",
+  "native-update-failed-title": "Impossible d’installer la mise à jour",
+  "native-update-failed-body": "Maximal va ouvrir mxml.sh pour que vous puissiez la télécharger.",
+  "native-update-failed-open": "Ouvrir mxml.sh"
 }
