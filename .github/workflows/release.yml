@@ -162,11 +162,14 @@ jobs:
             gh release create "$TAG" --title "$TAG" --generate-notes "${FLAGS[@]}"
           else
             echo "Prior tag $PRIOR — running changelogithub (draft)"
+            # Name both ends. Left to itself, changelogithub reads the tag at
+            # HEAD, and a commit carrying two tags (an rc and the next rc, or
+            # the final release on its last rc) makes it give up.
+            FLAGS=(--draft --from "$PRIOR" --to "$TAG")
             if [[ "${{ steps.prerelease.outputs.is_prerelease }}" == "true" ]]; then
-              bunx changelogithub --draft --prerelease
-            else
-              bunx changelogithub --draft
+              FLAGS+=(--prerelease)
             fi
+            bunx changelogithub "${FLAGS[@]}"
           fi
 
       - name: Attach SBOM to release
