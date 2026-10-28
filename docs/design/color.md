@@ -92,12 +92,22 @@ label beside it says what:
 - **Figures** (token totals, table cells) are text ink (`--text-strong`
   / `--text-base-color`); hierarchy comes from size. No per-category
   colors unless a chart with a legend ties each color to its category.
-- **Series** (live sessions): each live session's trace takes one of
-  `--series-1` … `--series-6`, by first appearance, and keeps it until the
-  session goes cold; any beyond six draw in neutral gray
-  (`--border-strong`). The session table is the legend (a swatch per
-  row). The series share one lightness and chroma so no line looks
-  heavier, and keep their hues away from the status colors so a trace
-  never reads as a state; they and the neutral gray clear 3:1 on the
-  card. `bun scripts/check-series-contrast.ts` checks all of it.
+- **Series** (live sessions): each live session's trace and its table
+  swatch take one of six colors, `--series-1` … `--series-6`, by first
+  appearance, and keep it until the session goes cold, when the slot is
+  freed. A seventh live session draws in neutral gray (`--border-strong`),
+  stays clickable, and its row has no swatch. `--series-1` is `--accent`;
+  the other five share one lightness and chroma per theme, so no line
+  looks heavier, and differ only in hue. The hues stay clear of the
+  status colors (error, warning, success), so a trace never reads as a
+  state. Color is the only link from a trace to its session, so the
+  session table is the legend: each live row carries its swatch.
+  Selecting a row or a trace dims the other traces; no color changes.
+  All six and the
+  neutral gray clear 3:1 on `--surface-card`.
+  `bun scripts/check-series-contrast.ts` checks the contrast and the hue
+  clearance in both themes.
+- **Context meters** (session table): the same meter as the quotas,
+  `--accent` below 75% of the window, `--status-warning` from 75%,
+  `--status-error` from 90%, each with the warning icon.
 - **Status colors are for state only**, never to tell categories apart.

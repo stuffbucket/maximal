@@ -28,10 +28,36 @@ When `prefers-reduced-motion: reduce` is set:
 - Spring physics → off.
 - The setting is honored **literally**, not "with reduced intensity."
 
-An infinite animation (the Dashboard live card's chasing border, its
-"Live" pulse) also needs its own `animation: none` there: the global
-block only shortens durations, and a looping animation must end up
-static, not merely fast.
+An infinite animation also needs its own `animation: none` there: the
+global block only shortens durations (and sets the iteration count to
+1), and a looping animation must end up static, not merely fast.
+
+## The live border
+
+The Dashboard's live card has one continuous animation: its hairline
+border, a conic sweep of `--accent` over `--border-subtle`, turning
+through the registered angle `--live-angle` (`live-border-spin`). It
+carries information: its speed follows token flow across the whole
+system.
+
+- No flow: stopped (`animation-play-state: paused`).
+- A trickle: about 30 s per turn. From 100,000 tokens/min: 4 s per turn.
+  Between them the speed follows a log scale
+  (`borderPeriodS` in `shell/src/dashboard/live/geometry.ts`).
+- Changes of speed ease over 3 s. The speed is the animation's
+  `playbackRate`, not its duration, so the angle never jumps when the
+  flow changes.
+- Beside it, the "Live" marker's dot pings (`live-pulse`, 2 s) while
+  tokens flow, and not otherwise. It loops too, so the same rule applies.
+
+Other Dashboard movement is short and finite: the traces, dots and
+figure glide to each poll's values over 900 ms.
+
+Under `prefers-reduced-motion: reduce` the border does not rotate, even
+slowly: `.live--border` and the pulse get `animation: none`, and the
+card's script skips the glide and sets values and speed directly. The
+border stays drawn at its resting angle. Don't make that a slower
+rotation.
 
 See [`principles.md`](principles.md) → Principle 5.
 
