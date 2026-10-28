@@ -68,9 +68,10 @@ Check on it with `systemctl --user status maximal` and read its log with
 <http://127.0.0.1:4141/ui/settings/> from the same machine (over an SSH tunnel
 from elsewhere: `ssh -L 4141:127.0.0.1:4141 <host>`).
 
-The service listens on 127.0.0.1 only. To change how it starts (another port,
-`--account-type enterprise`, or `HOST` for other machines, with an API key
-required), add an override:
+The service listens on 127.0.0.1 only. Use either the service or the tray app,
+not both: the tray app takes over port 4141 from a running service. To change
+how the service starts (another port, `--account-type enterprise`, or `HOST`
+for other machines, with an API key required), add an override:
 
 ```sh
 systemctl --user edit maximal
