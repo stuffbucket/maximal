@@ -1,6 +1,6 @@
 {
   "schema": 2,
-  "generated": "2026-10-28T09:03:50.858Z",
+  "generated": "2026-10-28T11:34:55.532Z",
   "channels": {
     "stable": {
       "version": "0.4.48",
@@ -30,45 +30,45 @@
       }
     },
     "rc": {
-      "version": "0.5.0-rc.6",
-      "tag": "v0.5.0-rc.6",
-      "notes": "https://github.com/stuffbucket/maximal/releases/tag/v0.5.0-rc.6",
+      "version": "0.5.0-rc.7",
+      "tag": "v0.5.0-rc.7",
+      "notes": "https://github.com/stuffbucket/maximal/releases/tag/v0.5.0-rc.7",
       "downloads": {
         "macos-arm64-dmg": {
-          "name": "maximal-v0.5.0-rc.6-darwin-arm64.dmg",
-          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.6/maximal-v0.5.0-rc.6-darwin-arm64.dmg"
+          "name": "maximal-v0.5.0-rc.7-darwin-arm64.dmg",
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.7/maximal-v0.5.0-rc.7-darwin-arm64.dmg"
         },
         "windows-x64-setup": {
-          "name": "maximal-v0.5.0-rc.6-windows-x64-setup.exe",
-          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.6/maximal-v0.5.0-rc.6-windows-x64-setup.exe"
+          "name": "maximal-v0.5.0-rc.7-windows-x64-setup.exe",
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.7/maximal-v0.5.0-rc.7-windows-x64-setup.exe"
         },
         "windows-x64-msi": {
-          "name": "maximal-v0.5.0-rc.6-windows-x64.msi",
-          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.6/maximal-v0.5.0-rc.6-windows-x64.msi"
+          "name": "maximal-v0.5.0-rc.7-windows-x64.msi",
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.7/maximal-v0.5.0-rc.7-windows-x64.msi"
         },
         "windows-x64-zip": {
-          "name": "maximal-v0.5.0-rc.6-windows-x64.zip",
-          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.6/maximal-v0.5.0-rc.6-windows-x64.zip"
+          "name": "maximal-v0.5.0-rc.7-windows-x64.zip",
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.7/maximal-v0.5.0-rc.7-windows-x64.zip"
         },
         "windows-install-ps1": {
           "name": "install.ps1",
-          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.6/install.ps1"
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.7/install.ps1"
         },
         "linux-amd64-deb": {
-          "name": "maximal_0.5.0-rc.6_amd64.deb",
-          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.6/maximal_0.5.0-rc.6_amd64.deb"
+          "name": "maximal_0.5.0-rc.7_amd64.deb",
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.7/maximal_0.5.0-rc.7_amd64.deb"
         },
         "linux-amd64-desktop-deb": {
-          "name": "maximal-desktop_0.5.0-rc.6_amd64.deb",
-          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.6/maximal-desktop_0.5.0-rc.6_amd64.deb"
+          "name": "maximal-desktop_0.5.0-rc.7_amd64.deb",
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.7/maximal-desktop_0.5.0-rc.7_amd64.deb"
         },
         "linux-arm64-deb": {
-          "name": "maximal_0.5.0-rc.6_arm64.deb",
-          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.6/maximal_0.5.0-rc.6_arm64.deb"
+          "name": "maximal_0.5.0-rc.7_arm64.deb",
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.7/maximal_0.5.0-rc.7_arm64.deb"
         },
         "linux-arm64-desktop-deb": {
-          "name": "maximal-desktop_0.5.0-rc.6_arm64.deb",
-          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.6/maximal-desktop_0.5.0-rc.6_arm64.deb"
+          "name": "maximal-desktop_0.5.0-rc.7_arm64.deb",
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.7/maximal-desktop_0.5.0-rc.7_arm64.deb"
         }
       }
     }
