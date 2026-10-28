@@ -160,14 +160,15 @@ server.use("/:provider/v1/*", requireGithubAuth)
 // Track the requests that stream a model response, so the live view can tell
 // which sessions are mid-stream. After auth; /models, /embeddings and the UI
 // routes are deliberately left out.
+// `/x/*` also matches `/x` in Hono, so each path is mounted once.
 for (const path of [
   "/chat/completions",
   "/responses",
   "/v1/chat/completions",
   "/v1/responses",
   "/v1/messages",
+  "/:provider/v1/messages",
 ]) {
-  server.use(path, trackInFlight)
   server.use(`${path}/*`, trackInFlight)
 }
 

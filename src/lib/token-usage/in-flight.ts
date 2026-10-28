@@ -27,9 +27,20 @@ interface Entry {
   streamedBytes: number
 }
 
-const entries = new Set<Entry>()
+/** An entry older than this is assumed leaked (a response never read to the
+ *  end) and is dropped, so a stuck request cannot mark a session streaming. */
+export const IN_FLIGHT_MAX_AGE_MS = 600_000
 
-export function listInFlight(): Array<InFlight> {
+const entries = new Set<Entry>()
+/** Contexts already tracked, so overlapping route matches register once. */
+const registered = new WeakSet<RequestContext>()
+
+export function listInFlight(now = Date.now()): Array<InFlight> {
+  for (const entry of entries) {
+    if (now - entry.context.startTime > IN_FLIGHT_MAX_AGE_MS) {
+      entries.delete(entry)
+    }
+  }
   return [...entries].map(({ context, streamedBytes }) => ({
     traceId: context.traceId,
     sessionId: context.usage.sessionId ?? "",
@@ -54,10 +65,12 @@ function observeBody(
   entry: Entry,
 ): ReadableStream<Uint8Array> {
   const reader = body.getReader()
+  let cancelled = false
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
       try {
         const { done, value } = await reader.read()
+        if (cancelled) return
         if (done) {
           entries.delete(entry)
           controller.close()
@@ -67,10 +80,11 @@ function observeBody(
         controller.enqueue(value)
       } catch (error) {
         entries.delete(entry)
-        controller.error(error)
+        if (!cancelled) controller.error(error)
       }
     },
     async cancel(reason) {
+      cancelled = true
       entries.delete(entry)
       await reader.cancel(reason)
     },
@@ -83,10 +97,11 @@ function observeBody(
  */
 export const trackInFlight: MiddlewareHandler = async (c, next) => {
   const context = requestContext.getStore()
-  if (!context) {
+  if (!context || registered.has(context)) {
     await next()
     return
   }
+  registered.add(context)
 
   const entry: Entry = { context, streamedBytes: 0 }
   entries.add(entry)
@@ -95,12 +110,12 @@ export const trackInFlight: MiddlewareHandler = async (c, next) => {
     await next()
     const { body } = c.res
     if (body) {
-      streaming = true
       c.res = new Response(observeBody(body, entry), {
         status: c.res.status,
         statusText: c.res.statusText,
         headers: c.res.headers,
       })
+      streaming = true
     }
   } finally {
     if (!streaming) entries.delete(entry)
