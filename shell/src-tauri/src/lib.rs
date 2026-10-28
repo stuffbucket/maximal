@@ -1829,18 +1829,23 @@ fn show_update_check_notice(app: &AppHandle, key: &str, args: &[(&str, &str)]) {
         .show(|_| {});
 }
 
-/// Applies a fetched update snapshot to managed state. Fires a single OS
-/// notification when a newer version first appears (or the target changes),
-/// and refreshes the tray on any change so the "Update to X.Y.Z…" item appears
-/// (or clears once the user is current). Mirrors `apply_rejection`: an
-/// unchanged snapshot is a no-op, so a repeated periodic check that finds the
-/// same version doesn't re-nag or churn the menu.
+/// Applies a fetched update snapshot to managed state. Fires the OS
+/// notification once per version, across restarts: the last version announced
+/// is persisted (`update_notified_file`), so launching again while still behind
+/// doesn't re-nag. Refreshes the tray on any change so the "Update to X.Y.Z…"
+/// item appears (or clears once the user is current). Mirrors
+/// `apply_rejection`: an unchanged snapshot is a no-op, so a repeated periodic
+/// check that finds the same version doesn't churn the menu. The tray's manual
+/// "Check for updates" does not go through this gate; it always answers.
 fn apply_update(app: &AppHandle, next: Option<UpdateSnapshot>) {
     if !app.state::<LatestUpdate>().set(next.clone()) {
         return; // unchanged — no re-notify, no tray churn
     }
     if let Some(update) = &next {
-        fire_update_notification(app, &update.latest, &update.url);
+        if should_notify_update(&update.latest, persisted_update_notified(app).as_deref()) {
+            write_update_notified(app, &update.latest);
+            fire_update_notification(app, &update.latest, &update.url);
+        }
     }
     let current_state = app.state::<AppStatus>().get();
     if let Err(err) = refresh_tray(app, current_state) {
@@ -3281,6 +3286,41 @@ fn write_locale(app: &AppHandle, tag: &str) {
     }
 }
 
+/// Path to the last version the update notification announced: one line, no
+/// leading "v". Lives beside the `locale` file so "once per version" survives
+/// restarts; the in-memory `LatestUpdate` alone resets every launch.
+fn update_notified_file(app: &AppHandle) -> Option<std::path::PathBuf> {
+    maximal_data_dir(app).map(|d| d.join("update-notified"))
+}
+
+/// The last version announced, if any.
+fn persisted_update_notified(app: &AppHandle) -> Option<String> {
+    let path = update_notified_file(app)?;
+    Some(std::fs::read_to_string(path).ok()?.trim().to_string())
+}
+
+/// Record that `latest` has been announced. Called before the notification
+/// fires. Best-effort: a write failure is logged and the notification still
+/// shows; the next launch may then announce the same version once more.
+fn write_update_notified(app: &AppHandle, latest: &str) {
+    let Some(path) = update_notified_file(app) else {
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Err(err) = std::fs::write(&path, latest) {
+        eprintln!("[shell] could not persist notified update {latest}: {err}");
+    }
+}
+
+/// Whether to announce `latest`: only if it isn't the version last announced.
+/// A newer release than the one recorded is announced; so is any other change
+/// (e.g. the manifest rolled back), since that is a version not yet shown.
+fn should_notify_update(latest: &str, notified: Option<&str>) -> bool {
+    notified != Some(latest)
+}
+
 /// Path to the persisted Dock / taskbar visibility mode ("always" or
 /// "when-window-open"). Defaults to "always" when absent.
 fn dock_visibility_file(app: &AppHandle) -> Option<std::path::PathBuf> {
@@ -3879,6 +3919,14 @@ mod tests {
         // "available" without a version is not offerable.
         let no_version = serde_json::json!({ "latest": "", "update_available": true });
         assert_eq!(parse_update_status(&no_version), UpdateCheck::Resolved(None));
+    }
+
+    #[test]
+    fn notifies_each_update_version_once() {
+        use super::should_notify_update;
+        assert!(should_notify_update("0.4.47", None));
+        assert!(!should_notify_update("0.4.47", Some("0.4.47")));
+        assert!(should_notify_update("0.4.48", Some("0.4.47")));
     }
 
     #[test]
