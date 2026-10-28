@@ -278,6 +278,12 @@
   "dashboard-quota-as-of": "Данные на {time}",
   "dashboard-rate-per-minute": "{n} токенов/мин",
   "dashboard-rate-sparkline-label": "Токенов в минуту за последние 15 минут",
+  "dashboard-live-title": "Активные сеансы",
+  "dashboard-live-unit": "токенов/мин",
+  "dashboard-live-window": "Последние 15 минут",
+  "dashboard-live-footer": "активных: {live} · остывших: {cold}",
+  "dashboard-live-marker": "Онлайн",
+  "dashboard-live-summary": "Токены в минуту за последние 15 минут, по линии на каждый активный сеанс. Всего {rate} токенов/мин; активных: {live}, остывших: {cold}.",
 
   "dashboard-api-response-title": "Ответ API использования",
 

@@ -144,6 +144,12 @@
   --status-success: #22c55e;
   --status-warning: #eab308;
   --status-info: #38bdf8;
+  --series-1: var(--accent);
+  --series-2: oklch(0.558 0.085 313);
+  --series-3: oklch(0.558 0.085 245);
+  --series-4: oklch(0.558 0.085 347);
+  --series-5: oklch(0.558 0.085 181);
+  --series-6: oklch(0.558 0.085 279);
 }
 
 @media (prefers-color-scheme: light) {
@@ -164,6 +170,12 @@
     --status-success: #137333;
     --status-warning: #8a5a00;
     --status-info: #0369a1;
+    --series-1: var(--accent);
+    --series-2: oklch(0.475 0.07 313);
+    --series-3: oklch(0.475 0.07 245);
+    --series-4: oklch(0.475 0.07 347);
+    --series-5: oklch(0.475 0.07 181);
+    --series-6: oklch(0.475 0.07 279);
   }
 }
 
@@ -184,6 +196,12 @@
   --status-success: #137333;
   --status-warning: #8a5a00;
   --status-info: #0369a1;
+  --series-1: var(--accent);
+  --series-2: oklch(0.475 0.07 313);
+  --series-3: oklch(0.475 0.07 245);
+  --series-4: oklch(0.475 0.07 347);
+  --series-5: oklch(0.475 0.07 181);
+  --series-6: oklch(0.475 0.07 279);
 }
 /* ---- END GENERATED TOKENS ---- */
 
@@ -645,6 +663,223 @@ html[data-embedded="true"] .lang-picker {
   color: var(--text-strong);
 }
 
+/* ---- Bento: the quotas beside the live card ----
+   Two columns from the md breakpoint: quotas on the left (the metered cards,
+   then "Chat and completions", which stays in its column when open), the live
+   card on the right spanning both. Each column's heading shares the first
+   row (subgrid), so the live card lines up with the quota cards and grows
+   with them. Narrower, everything stacks with the live card first. */
+.dashboard-bento {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  margin-bottom: var(--space-5);
+}
+.dashboard-bento[hidden],
+.dashboard-bento__col[hidden] {
+  display: none;
+}
+.dashboard-bento__col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.dashboard-bento__live {
+  order: -1;
+}
+.dashboard-bento__live > .live {
+  flex: 1;
+}
+@media (min-width: 768px) {
+  .dashboard-bento:not(.dashboard-bento--live-only) {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+    grid-template-rows: auto 1fr;
+    gap: 0 var(--space-5);
+  }
+  .dashboard-bento:not(.dashboard-bento--live-only) > .dashboard-bento__col {
+    display: grid;
+    grid-row: span 2;
+    grid-template-rows: subgrid;
+    order: 0;
+  }
+}
+
+/* ---- Live card ----
+   Total tokens/min over one trace per live session (the last 15 minutes).
+   Series colors come from --series-n, with the session table as the legend;
+   sessions past the sixth draw in muted ink. Only one trace gets the soft
+   fill (the selected one, else the busiest), so fills never stack.
+
+   The hairline border is a slow conic sweep of accent over the neutral
+   border; its speed follows token flow (card.ts sets a playback rate on the
+   animation and --live-period for reference). Stopped when nothing flows,
+   static under reduced motion. */
+@property --live-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+@keyframes live-border-spin {
+  to {
+    --live-angle: 360deg;
+  }
+}
+.live {
+  display: flex;
+  flex-direction: column;
+  padding: var(--border-width-hairline);
+  border-radius: var(--radius-card);
+  background: var(--border-subtle);
+}
+.live--border {
+  background: conic-gradient(
+    from var(--live-angle),
+    var(--border-subtle) 0%,
+    color-mix(in srgb, var(--accent) 45%, var(--border-subtle)) 14%,
+    var(--accent) 24%,
+    color-mix(in srgb, var(--accent) 45%, var(--border-subtle)) 34%,
+    var(--border-subtle) 46%,
+    var(--border-subtle) 100%
+  );
+  animation: live-border-spin 30s linear infinite paused;
+}
+.live__inner {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-5);
+  background-color: var(--surface-card);
+  border-radius: calc(var(--radius-card) - var(--border-width-hairline));
+}
+.live__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0 var(--space-3);
+}
+.live__metric {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+/* The totals' hero figure, set solid so the plot keeps its height. */
+.live__value {
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+/* Teal text is --link; --accent is a fill. */
+.live__unit {
+  font-size: var(--text-sm);
+  color: var(--link);
+}
+.live__window {
+  margin-left: auto;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+.live__plot {
+  position: relative;
+  flex: 1;
+  min-height: calc(var(--space-8) * 2);
+}
+/* Out of flow, so the plot takes the space the quota column leaves it and
+   the chart never pushes the card taller. */
+.live__chart {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.live__area {
+  pointer-events: none;
+}
+.live__fill-stop--top {
+  stop-color: var(--live-fill-color, var(--accent));
+  stop-opacity: 0.32;
+}
+.live__fill-stop--bottom {
+  stop-color: var(--live-fill-color, var(--accent));
+  stop-opacity: 0;
+}
+.live__trace {
+  transition: opacity 150ms ease-out;
+}
+.live__line {
+  fill: none;
+  stroke: var(--trace-color);
+  stroke-width: var(--border-width-thick);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.live__dot-mark {
+  fill: var(--trace-color);
+}
+/* Hit targets: a 12px stroke along the line, a 24px circle on the dot. */
+.live__hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: var(--size-xs);
+  pointer-events: stroke;
+  cursor: pointer;
+}
+.live__dot-hit {
+  fill: transparent;
+  pointer-events: all;
+  cursor: pointer;
+}
+.live__trace--neutral .live__line,
+.live__trace--neutral .live__dot-mark {
+  opacity: 0.6;
+}
+.live__trace--dim {
+  opacity: 0.3;
+}
+.live__foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+.live__marker {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.live__pulse {
+  flex: none;
+  width: var(--space-2);
+  height: var(--space-2);
+  border-radius: var(--radius-pill);
+  background-color: var(--accent);
+}
+/* The dot pulses only while tokens are flowing. */
+.live--flowing .live__pulse {
+  animation: live-pulse 2s ease-out infinite;
+}
+@keyframes live-pulse {
+  from {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 60%, transparent);
+  }
+  to {
+    box-shadow: 0 0 0 var(--space-2) transparent;
+  }
+}
+@media (min-width: 768px) {
+  /* Beside the quotas the card takes the column's height; the plot gets
+     what the header and footer leave. */
+  .dashboard-bento:not(.dashboard-bento--live-only) .live__plot {
+    min-height: var(--space-6);
+  }
+}
+
 /* Reduced motion is a contract, not a hint (principle #5). */
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -660,5 +895,10 @@ html[data-embedded="true"] .lang-picker {
   .segmented-option,
   .quota-more__chevron {
     transition: none !important;
+  }
+  /* An infinite rotation outlives the zeroed duration above; stop it. */
+  .live--border,
+  .live--flowing .live__pulse {
+    animation: none;
   }
 }

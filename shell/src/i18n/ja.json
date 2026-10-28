@@ -278,6 +278,12 @@
   "dashboard-quota-as-of": "{time} 時点",
   "dashboard-rate-per-minute": "{n} トークン/分",
   "dashboard-rate-sparkline-label": "直近 15 分間の 1 分あたりのトークン数",
+  "dashboard-live-title": "ライブセッション",
+  "dashboard-live-unit": "トークン/分",
+  "dashboard-live-window": "過去 15 分間",
+  "dashboard-live-footer": "ライブ {live} · コールド {cold}",
+  "dashboard-live-marker": "ライブ",
+  "dashboard-live-summary": "過去 15 分間の 1 分あたりのトークン数。ライブセッションごとに 1 本の線。合計 {rate} トークン/分、ライブ {live}、コールド {cold}。",
 
   "dashboard-api-response-title": "使用量 API レスポンス",
 

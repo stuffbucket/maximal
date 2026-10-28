@@ -28,6 +28,11 @@ When `prefers-reduced-motion: reduce` is set:
 - Spring physics → off.
 - The setting is honored **literally**, not "with reduced intensity."
 
+An infinite animation (the Dashboard live card's chasing border, its
+"Live" pulse) also needs its own `animation: none` there: the global
+block only shortens durations, and a looping animation must end up
+static, not merely fast.
+
 See [`principles.md`](principles.md) → Principle 5.
 
 ## Implementation pattern

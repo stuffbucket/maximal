@@ -92,4 +92,11 @@ label beside it says what:
 - **Figures** (token totals, table cells) are text ink (`--text-strong`
   / `--text-base-color`); hierarchy comes from size. No per-category
   colors unless a chart with a legend ties each color to its category.
+- **Series** (live sessions): each live session's trace takes one of
+  `--series-1` … `--series-6`, by first appearance, and keeps it until the
+  session goes cold; any beyond six draw in muted ink. The session table
+  is the legend (a swatch per row). The series share one lightness and
+  chroma so no line looks heavier, clear 3:1 on the card, and keep their
+  hues away from the status colors so a trace never reads as a state —
+  `bun scripts/check-series-contrast.ts` checks both.
 - **Status colors are for state only**, never to tell categories apart.

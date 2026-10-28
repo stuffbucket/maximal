@@ -278,6 +278,12 @@
   "dashboard-quota-as-of": "Atualizado às {time}",
   "dashboard-rate-per-minute": "{n} tokens/min",
   "dashboard-rate-sparkline-label": "Tokens por minuto nos últimos 15 minutos",
+  "dashboard-live-title": "Sessões ao vivo",
+  "dashboard-live-unit": "tokens/min",
+  "dashboard-live-window": "Últimos 15 minutos",
+  "dashboard-live-footer": "{live} ativas · {cold} frias",
+  "dashboard-live-marker": "Ao vivo",
+  "dashboard-live-summary": "Tokens por minuto nos últimos 15 minutos, uma linha por sessão ativa. {rate} tokens/min no total; {live} ativas, {cold} frias.",
 
   "dashboard-api-response-title": "Resposta da API de uso",
 

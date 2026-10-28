@@ -23,7 +23,10 @@ and focuses the existing window and switches the active view in place. Closing h
 **Desktop only.** The OS enforces min size (`640×480`); `prevent_overflow` clamps initial size to the monitor's work area.
 
 - **Dashboard**: single column, centered in a wide Tailwind
-  `max-w-7xl` container, cards full content width.
+  `max-w-7xl` container, cards full content width — except the top
+  bento: from the `md` breakpoint the quotas sit in a narrower left
+  column and the live card fills the right one at the quota column's
+  height; below it they stack, live card first.
 - **Settings**: `.topbar` header + centered single-column content pane.
   Section max-width = `--content-max`. Within the pane, form
   rows use a 33% label / 66% control split.

@@ -278,6 +278,12 @@
   "dashboard-quota-as-of": "As of {time}",
   "dashboard-rate-per-minute": "{n} tokens/min",
   "dashboard-rate-sparkline-label": "Tokens per minute over the last 15 minutes",
+  "dashboard-live-title": "Live sessions",
+  "dashboard-live-unit": "tokens/min",
+  "dashboard-live-window": "Last 15 minutes",
+  "dashboard-live-footer": "{live} live · {cold} cold",
+  "dashboard-live-marker": "Live",
+  "dashboard-live-summary": "Tokens per minute over the last 15 minutes, one line per live session. {rate} tokens/min in all; {live} live, {cold} cold.",
 
   "dashboard-api-response-title": "Usage API Response",
 

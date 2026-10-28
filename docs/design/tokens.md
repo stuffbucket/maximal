@@ -72,6 +72,7 @@ surfaces of its theme by `bun scripts/contrast-audit.ts` (in
 | `--border-strong` | per theme | Control border (≥3:1) | Input and checkbox borders | Decorative rules |
 | `--status-error` / `-success` / `-warning` / `-info` | per theme | State color, text-safe (≥4.5:1) so also icon-safe | Error text, icons, stripes; success/warning indicators | Identity or interaction |
 | `--focus-ring*` | — | Focus ring composition (color = `--accent`) | Every focusable element | Hover styling |
+| `--series-1` … `--series-6` | per theme | Data-series colors (≥3:1 on `--surface-card`, hues clear of the status colors); `--series-1` is `--accent`, the rest share one OKLCH lightness and chroma | The Dashboard's live-session traces and their table swatches (the table is the legend) | Categories without a legend, state, text |
 
 There are no `--brand-fg`, `--accent-hover` or `--status-*-fg` tokens:
 brand never sits behind text, teal text is `--link`, and the status

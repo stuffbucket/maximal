@@ -278,6 +278,12 @@
   "dashboard-quota-as-of": "截至 {time}",
   "dashboard-rate-per-minute": "{n} 令牌/分钟",
   "dashboard-rate-sparkline-label": "最近 15 分钟每分钟的令牌数",
+  "dashboard-live-title": "实时会话",
+  "dashboard-live-unit": "令牌/分钟",
+  "dashboard-live-window": "最近 15 分钟",
+  "dashboard-live-footer": "活跃 {live} · 已冷却 {cold}",
+  "dashboard-live-marker": "实时",
+  "dashboard-live-summary": "最近 15 分钟每分钟的令牌数，每个活跃会话一条线。合计 {rate} 令牌/分钟；活跃 {live}，已冷却 {cold}。",
 
   "dashboard-api-response-title": "使用情况 API 响应",
 

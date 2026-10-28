@@ -9,6 +9,7 @@
 // catalog and a locale picker is wired into the header.
 import { resolveLocale, t } from "../i18n";
 import { applyI18n, wireLocalePicker } from "../i18n/apply";
+import { mountLiveCard } from "./live/card";
 
 // Tailwind + Lucide are loaded as classic global <script>s in index.html, so
 // they exist on `window` at runtime; the bundle references them as ambient
@@ -97,6 +98,12 @@ const tokenUsagePeriodButtons = Array.from(
   tokenUsagePeriodGroup.querySelectorAll<HTMLButtonElement>("[data-period]"),
 );
 const contentArea = document.getElementById("content-area") as HTMLElement;
+// The bento stays in the page across renders: render() fills the quota
+// column and the rest of the page, never the live card (see index.html).
+const bento = document.getElementById("dashboard-bento") as HTMLElement;
+const quotaColumn = document.getElementById("usage-quotas") as HTMLElement;
+const restArea = document.getElementById("dashboard-rest") as HTMLElement;
+mountLiveCard(document.getElementById("live-sessions") as HTMLElement);
 
 // The dashboard always talks to the proxy that served it — same
 // origin, no user-typed URL. Each fetch is a relative path; the
@@ -550,28 +557,25 @@ function render(): void {
 
   const quotasHtml =
     state.data ? renderUsageQuotas(state.data.quota_snapshots)
-    : state.error ?
-      `<section id="usage-quotas" class="mb-6">
-        <h2 class="section__title"><i data-lucide="bar-chart-big" aria-hidden="true"></i>${escapeHtml(t("dashboard-quotas-title"))}</h2>
-        ${renderError(state.error, t("dashboard-error-usage"))}
-      </section>`
+    : state.error ? renderQuotaColumn(renderError(state.error, t("dashboard-error-usage")))
     : state.isLoading ?
-      `<section id="usage-quotas" class="mb-6">
-        <h2 class="section__title"><i data-lucide="bar-chart-big" aria-hidden="true"></i>${escapeHtml(t("dashboard-quotas-title"))}</h2>
+      renderQuotaColumn(`
         <div class="p-4 border text-sm" style="background-color: var(--surface-card); border-color: var(--border-subtle); color: var(--text-muted);">
           ${escapeHtml(t("common-working"))}
-        </div>
-      </section>`
+        </div>`)
     : "";
 
   const tokenUsageHtml = renderTokenUsageSection();
   const detailedHtml = state.data ? renderDetailedData(state.data) : "";
 
-  if (!quotasHtml && !tokenUsageHtml && !detailedHtml) {
-    contentArea.innerHTML = renderWelcomeMessage();
-  } else {
-    contentArea.innerHTML = `${quotasHtml}${tokenUsageHtml}${detailedHtml}`;
-  }
+  // The quota column and the rest are rebuilt; the live card beside the
+  // quotas is not (it updates in place).
+  const welcome = !quotasHtml && !tokenUsageHtml && !detailedHtml;
+  bento.hidden = welcome;
+  bento.classList.toggle("dashboard-bento--live-only", !quotasHtml);
+  quotaColumn.hidden = !quotasHtml;
+  quotaColumn.innerHTML = quotasHtml;
+  restArea.innerHTML = welcome ? renderWelcomeMessage() : `${tokenUsageHtml}${detailedHtml}`;
 
   // Replace placeholder icons with actual Lucide icons
   createIcons();
@@ -580,8 +584,16 @@ function render(): void {
   if (quotaPeriodEnded()) void refreshUsage();
 }
 
+/** The quota column of the bento: its heading over `body`. */
+function renderQuotaColumn(body: string): string {
+  return `
+                <h2 class="section__title"><i data-lucide="bar-chart-big" aria-hidden="true"></i>${escapeHtml(t("dashboard-quotas-title"))}</h2>
+                <div class="dashboard-bento__body">${body}</div>`;
+}
+
 /**
- * Renders the "Usage Quotas" section with progress bars.
+ * Renders the "Usage Quotas" column: the metered cards stacked, then the
+ * unlimited ones folded away.
  */
 function renderUsageQuotas(
   snapshots: Record<string, QuotaDetails> | null | undefined,
@@ -600,17 +612,10 @@ function renderUsageQuotas(
   const unlimitedHtml =
     unlimited.length > 0 ? renderUnlimitedQuotas(unlimited.map(([key]) => key)) : "";
 
-  return `
-            <section id="usage-quotas" class="mb-6">
-                <h2 class="section__title"><i data-lucide="bar-chart-big" aria-hidden="true"></i>${escapeHtml(t("dashboard-quotas-title"))}</h2>
-                ${
-                  meteredCards ?
-                    `<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">${meteredCards}</div>`
-                  : ""
-                }
-                ${unlimitedHtml}
-            </section>
-        `;
+  if (!meteredCards && !unlimitedHtml) return "";
+  return renderQuotaColumn(`
+                ${meteredCards ? `<div class="flex flex-col gap-4">${meteredCards}</div>` : ""}
+                ${unlimitedHtml}`);
 }
 
 /** GitHub's quota_reset_date as a timestamp. A bare date is midnight UTC. */

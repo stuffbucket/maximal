@@ -278,6 +278,12 @@
   "dashboard-quota-as-of": "Mis à jour à {time}",
   "dashboard-rate-per-minute": "{n} jetons/min",
   "dashboard-rate-sparkline-label": "Jetons par minute sur les 15 dernières minutes",
+  "dashboard-live-title": "Sessions en direct",
+  "dashboard-live-unit": "jetons/min",
+  "dashboard-live-window": "15 dernières minutes",
+  "dashboard-live-footer": "{live} actives · {cold} froides",
+  "dashboard-live-marker": "En direct",
+  "dashboard-live-summary": "Jetons par minute sur les 15 dernières minutes, une ligne par session active. {rate} jetons/min au total ; {live} actives, {cold} froides.",
 
   "dashboard-api-response-title": "Réponse de l’API d’utilisation",
 
