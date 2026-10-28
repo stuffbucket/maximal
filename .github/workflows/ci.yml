@@ -162,6 +162,10 @@ jobs:
       # The broker inherits the root mise.toml's Rust pin; nothing here
       # builds Rust.
       MISE_DISABLE_TOOLS: rust
+      # An emulated x64 process can't tell it's on an Arm PC (it sees AMD64),
+      # so the workflow says so. PowerShell takes about 42 seconds to launch
+      # there, too slow for the PowerShell-parent adapter test.
+      MAXIMAL_TEST_SKIP_POWERSHELL_PARENT: ${{ matrix.runner == 'windows-11-arm' && '1' || '' }}
     defaults:
       run:
         shell: bash
