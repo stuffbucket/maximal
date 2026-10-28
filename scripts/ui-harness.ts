@@ -57,6 +57,7 @@ import {
   ModelsListResponse,
   UpdateStatusResponse,
 } from "../src/lib/config/settings-types"
+import { SessionsResponse } from "../src/lib/token-usage/sessions-schema"
 import { type MockBackend, createMockBackend } from "./ui-harness-api"
 import {
   type ResolvedScenario,
@@ -94,6 +95,7 @@ function assertFixtures(): void {
       ["models", ModelsListResponse, (s) => s.models],
       ["mcp", McpEndpointsListResponse, (s) => s.mcp],
       ["requests", PendingRequestsResponse, (s) => s.requests],
+      ["token-usage/sessions", SessionsResponse, (s) => s.dashboard.sessions()],
     ]
   let failures = 0
   for (const id of Object.keys(SCENARIOS) as Array<ScenarioId>) {

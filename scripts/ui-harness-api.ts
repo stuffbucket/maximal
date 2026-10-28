@@ -39,6 +39,7 @@ export function isMockedPath(path: string): boolean {
     path.startsWith("/settings/api/") ||
     path === "/usage" ||
     path === "/token-usage" ||
+    path === "/token-usage/sessions" ||
     path === "/token-usage/events"
   )
 }
@@ -75,9 +76,10 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
     if (!isMockedPath(path)) return null
     const body = async (): Promise<any> => req.json().catch(() => ({}))
 
-    // --- dashboard (/usage + /token-usage) ---
+    // --- dashboard (/usage + /token-usage + /token-usage/sessions) ---
     if (path === "/usage") return json(fixture.dashboard.usage)
     if (path === "/token-usage") return json(fixture.dashboard.tokenUsage)
+    if (path === "/token-usage/sessions") return json(fixture.dashboard.sessions())
     if (path === "/token-usage/events") {
       const pageSize = Math.max(1, Number(url.searchParams.get("page_size")) || 20)
       const events = fixture.dashboard.tokenEvents
