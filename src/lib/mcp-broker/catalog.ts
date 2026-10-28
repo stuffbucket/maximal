@@ -242,7 +242,9 @@ function fromNpmGlobal(opts: ResolvedOptions): CatalogInstall | undefined {
 }
 
 /** A `workiq` on PATH that links into the npm package (npm's global bin
- *  symlink), or is the native executable itself. */
+ *  symlink), or is the native executable itself. On Windows npm writes a
+ *  `workiq.cmd` launcher instead of a link, with the package in
+ *  `node_modules` beside it. */
 function fromPath(opts: ResolvedOptions): CatalogInstall | undefined {
   const names =
     opts.platform === "win32" ? ["workiq.exe", "workiq.cmd"] : ["workiq"]
@@ -253,6 +255,13 @@ function fromPath(opts: ResolvedOptions): CatalogInstall | undefined {
         real = fs.realpathSync(path.join(dir, name))
       } catch {
         continue
+      }
+      if (name === "workiq.cmd") {
+        const found = workiqExecutable(
+          path.join(dir, "node_modules", ...WORKIQ_PACKAGE),
+          opts,
+        )
+        if (found) return found
       }
       // …/@microsoft/workiq/bin/workiq.js, or …/bin/<folder>/workiq.
       for (const up of [2, 3]) {

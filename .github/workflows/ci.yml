@@ -135,3 +135,52 @@ jobs:
 
       - name: Build
         run: bun run build
+
+  # The broker contains MCP servers on Windows with a kill-on-close Job
+  # Object, which only a Windows machine can check: build the broker there
+  # and run its tests, including test/windows-containment.test.ts, against
+  # the compiled executable.
+  windows-broker:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      # The broker inherits the root mise.toml's Rust pin; nothing here
+      # builds Rust.
+      MISE_DISABLE_TOOLS: rust
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Verify dispatched SHA
+        if: github.event_name == 'workflow_dispatch' && github.sha != inputs.expected_sha
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          ACTUAL_SHA: ${{ github.sha }}
+        run: |
+          echo "::error::Branch moved before CI dispatch: expected ${EXPECTED_SHA}, got ${ACTUAL_SHA}."
+          exit 1
+
+      - uses: actions/checkout@v6
+
+      - uses: ./.github/actions/setup-mise
+        with:
+          mise-version: v2026.9.5
+
+      - name: Configure package registry
+        run: printf '%s\n' 'registry=https://packagefeedproxy.microsoft.io/npm/' > "$HOME/.npmrc"
+
+      - name: Install isolated broker dependencies
+        run: |
+          mise trust mise.toml
+          mise trust packages/mcp-broker/mise.toml
+          mise -C packages/mcp-broker install
+          mise -C packages/mcp-broker exec -- pnpm install --frozen-lockfile
+
+      - name: Build the broker
+        run: mise -C packages/mcp-broker exec -- pnpm build
+
+      - name: Test the broker on Windows
+        working-directory: packages/mcp-broker
+        run: |
+          MAXIMAL_MCP_BROKER_BINARY="$(cygpath -w "$PWD/dist/maximal-mcp-broker.exe")" \
+            mise exec -- bun test

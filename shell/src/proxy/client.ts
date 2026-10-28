@@ -217,7 +217,7 @@ interface WorkIqActionResponse {
  *  src/lib/config/settings-types.ts for what each state means). */
 export interface McpBrokerHealth {
   state: "off" | "starting" | "running" | "recovering" | "stuck" | "unavailable"
-  problem: "not-installed" | "unsupported-platform" | null
+  problem: "not-installed" | "containment-unavailable" | null
 }
 
 /** A known MCP server Maximal looked for that isn't an endpoint yet. */

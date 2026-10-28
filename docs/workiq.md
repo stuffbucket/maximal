@@ -48,8 +48,7 @@ In Claude Desktop's third-party config, as an `mcpServers` entry named after
 the endpoint (`workiq`):
 
 - macOS: `~/Library/Application Support/Claude-3p/claude_desktop_config.json`
-- Windows: `%LOCALAPPDATA%\Claude-3p\claude_desktop_config.json` (MCP servers
-  don't run on Windows yet)
+- Windows: `%LOCALAPPDATA%\Claude-3p\claude_desktop_config.json`
 
 The entry runs Maximal's `maximal-mcp-broker stdio-adapter`, which connects to
 `http://127.0.0.1:<port>/mcp/workiq`. Claude Desktop reads this file only when

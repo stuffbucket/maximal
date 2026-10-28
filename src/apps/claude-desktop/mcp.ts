@@ -14,6 +14,7 @@
 
 import consola from "consola"
 import fs from "node:fs"
+import os from "node:os"
 import path from "node:path"
 
 import type {
@@ -90,14 +91,20 @@ export function claudeDesktopConfigPath(home?: string): string {
   return path.join(getClaude3pDir(home), "claude_desktop_config.json")
 }
 
-/** The regular (first-party) Claude Desktop config, a sibling of the
- *  Claude-3p directory. Read only, to find servers the user set up there. */
-function regularClaudeDesktopConfigPath(home?: string): string {
-  return path.join(
-    path.dirname(getClaude3pDir(home)),
-    "Claude",
-    "claude_desktop_config.json",
-  )
+/** The regular (first-party) Claude Desktop config. Read only, to find
+ *  servers the user set up there. On macOS it is a sibling of the Claude-3p
+ *  directory; on Windows it is in `%APPDATA%`, while Claude-3p is in
+ *  `%LOCALAPPDATA%`. */
+export function regularClaudeDesktopConfigPath(
+  home?: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  const dir =
+    platform === "win32" ?
+      (process.env.APPDATA
+      ?? path.join(home ?? os.homedir(), "AppData", "Roaming"))
+    : path.dirname(getClaude3pDir(home))
+  return path.join(dir, "Claude", "claude_desktop_config.json")
 }
 
 function serversIn(file: string): Record<string, unknown> {

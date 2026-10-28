@@ -15,6 +15,14 @@ stdio MCP commands, and exposes them through authenticated IPv4-loopback HTTP on
 a kernel-selected port. Only the sidecar knows that port and key; clients use the
 sidecar's stable `/mcp/<id>` route instead.
 
+On Windows, `serve` first puts itself in a Job Object that kills every process
+in it when its last handle closes, and keeps that handle open until it exits
+(`src/windows-job.ts`). Everything it starts is in the job, so when the broker
+exits or is terminated, Windows ends the MCP servers and their children too.
+If Windows refuses, `serve` starts nothing, writes
+`MCP_BROKER_CONTAINMENT_UNAVAILABLE` with the failed step to stderr, and exits
+with status 78. `test/windows-containment.test.ts` checks this on Windows.
+
 `stdio-adapter` connects a stdio MCP client to a loopback `/mcp/<id>` URL. It
 sends `MAXIMAL_MCP_API_KEY` as a Bearer token when set. It never starts or
 supervises `serve`. Because Claude Desktop starts its MCP servers only at

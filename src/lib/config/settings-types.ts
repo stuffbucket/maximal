@@ -506,7 +506,7 @@ export const McpBrokerHealth = z.object({
     "stuck",
     "unavailable",
   ]),
-  problem: z.enum(["not-installed", "unsupported-platform"]).nullable(),
+  problem: z.enum(["not-installed", "containment-unavailable"]).nullable(),
 })
 export type McpBrokerHealth = z.infer<typeof McpBrokerHealth>
 

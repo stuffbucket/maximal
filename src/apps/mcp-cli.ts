@@ -24,7 +24,6 @@ import type { McpClientId } from "~/lib/mcp-broker/types"
 import { getConfig } from "~/lib/config/config"
 import { McpServerIdSchema } from "~/lib/config/config-schema"
 import { MCP_CATALOG } from "~/lib/mcp-broker/catalog"
-import { brokerRunsOn } from "~/lib/mcp-broker/platform"
 import { currentProxyPort } from "~/lib/start/proxy-port"
 import { warmNpmDetection } from "~/lib/system/npm-login-config"
 
@@ -408,11 +407,6 @@ export const mcpCommand = defineCommand({
     }
     const endpoints = await listMcpEndpoints()
     if (!args.endpoint) {
-      if (!brokerRunsOn()) {
-        consola.warn(
-          "MCP servers don't run on Windows yet. Your endpoints and choices are kept for when they do.",
-        )
-      }
       showEndpoints(endpoints)
       showCatalog(listMcpCatalog())
       return

@@ -1,6 +1,6 @@
 import { McpCatalogCard } from "./McpCatalogCard";
 import { McpEndpointCard } from "./McpEndpointCard";
-import { UNSUPPORTED_PLATFORM, useMcp } from "./useMcp";
+import { CONTAINMENT_UNAVAILABLE, useMcp } from "./useMcp";
 import type { McpBrokerHealth } from "../../../proxy/client";
 import { Button } from "../../components/Button";
 import { EmptyState } from "../../components/EmptyState";
@@ -25,8 +25,8 @@ function brokerProblem(broker: McpBrokerHealth): Problem | null {
       technical: "Broker state: circuit-open (restart budget used up)",
     };
   }
-  if (broker.state === "unavailable" && broker.problem === "unsupported-platform") {
-    return UNSUPPORTED_PLATFORM;
+  if (broker.state === "unavailable" && broker.problem === "containment-unavailable") {
+    return CONTAINMENT_UNAVAILABLE;
   }
   if (broker.state === "unavailable") {
     return {
@@ -57,8 +57,7 @@ export function McpPanel(): JSX.Element {
   } = useMcp();
   const brokerIssue = broker ? brokerProblem(broker) : null;
   const quiet = broker ? QUIET[broker.state] : undefined;
-  // Nothing to install or add where MCP servers can't run; the callout says so.
-  const canAdd = !problem && brokerIssue !== UNSUPPORTED_PLATFORM;
+  const canAdd = !problem;
 
   return (
     <Stack proximity="region" className="apps-panel" aria-busy={isLoading}>

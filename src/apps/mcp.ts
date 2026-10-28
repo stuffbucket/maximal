@@ -33,7 +33,6 @@ import {
   syncMcpClient,
 } from "~/lib/mcp-broker/client-sync"
 import { isProtectedEnvironmentName } from "~/lib/mcp-broker/configuration"
-import { brokerRunsOn } from "~/lib/mcp-broker/platform"
 import {
   type BrokerReadiness,
   getBrokerSupervisorSnapshot,
@@ -161,18 +160,8 @@ function mcpApps(): Array<McpApp> {
 
 /** The broker's supervisor state, collapsed to what the Settings UI acts on
  *  (see McpBrokerHealth): is it fine, is Maximal already fixing it, or does
- *  the user need to do something. Where the broker can't run (Windows) that
- *  is said up front, even while it is off. */
-export function mcpBrokerHealth(
-  platform: NodeJS.Platform = process.platform,
-): McpBrokerHealth {
-  if (!brokerRunsOn(platform)) {
-    return { state: "unavailable", problem: "unsupported-platform" }
-  }
-  return supervisorHealth()
-}
-
-function supervisorHealth(): McpBrokerHealth {
+ *  the user need to do something. */
+export function mcpBrokerHealth(): McpBrokerHealth {
   const { state, problem } = getBrokerSupervisorSnapshot()
   switch (state) {
     case "disabled": {
@@ -273,8 +262,6 @@ export interface McpBrokerSteps {
   reconfigure?: typeof reconfigureBroker
   waitForBroker?: (timeoutMs: number) => Promise<BrokerReadiness>
   syncClients?: typeof syncAllMcpClients
-  /** Defaults to this machine's; tests inject another. */
-  platform?: NodeJS.Platform
 }
 
 /** What each client's sync did with endpoint `id`. */
@@ -296,24 +283,10 @@ function clientOutcome(
   return { skipped, unavailable, updated }
 }
 
-/** Turning an endpoint on where the broker can't run (Windows) is refused;
- *  turning one off still works there. */
-function refuseWhereBrokerCantRun(
-  enabling: boolean,
-  platform: NodeJS.Platform,
-): void {
-  if (!enabling || brokerRunsOn(platform)) return
-  throw new McpEndpointError(
-    "unsupported-platform",
-    "MCP servers don't run on Windows yet, so this one can't be turned on. It stays saved for when they do.",
-  )
-}
-
 const DEFAULT_STEPS: Required<McpBrokerSteps> = {
   reconfigure: reconfigureBroker,
   waitForBroker: waitForBrokerReady,
   syncClients: syncAllMcpClients,
-  platform: process.platform,
 }
 
 /**
@@ -322,15 +295,14 @@ const DEFAULT_STEPS: Required<McpBrokerSteps> = {
  * serve before the apps are updated, so an app that connects right away
  * isn't turned away while the broker probes. The apps are updated either
  * way; `broker` says how far it got. Returns undefined when no endpoint has
- * that id. Throws `unsupported-platform` when turning one on where the
- * broker can't run (Windows); turning one off still works there.
+ * that id.
  */
 export async function setMcpEndpoint(
   id: string,
   change: { enabled: boolean; clients?: Array<McpClientId> },
   steps: McpBrokerSteps = {},
 ): Promise<SetMcpEndpointResult | undefined> {
-  const { reconfigure, waitForBroker, syncClients, platform } = {
+  const { reconfigure, waitForBroker, syncClients } = {
     ...DEFAULT_STEPS,
     ...steps,
   }
@@ -338,7 +310,6 @@ export async function setMcpEndpoint(
   const servers = config.mcpBroker?.servers ?? []
   const index = servers.findIndex((server) => server.id === id)
   if (index === -1) return undefined
-  refuseWhereBrokerCantRun(change.enabled, platform)
 
   const chosen = {
     ...servers[index],
@@ -399,7 +370,7 @@ export function removeMcpClientsOnShutdown(): void {
 
 /** The broker's readiness right now, without waiting. */
 function brokerReadiness(): BrokerReadiness {
-  switch (supervisorHealth().state) {
+  switch (mcpBrokerHealth().state) {
     case "running": {
       return "ready"
     }
@@ -472,7 +443,6 @@ export type McpEndpointErrorCode =
   | "exists"
   | "not-installed"
   | "unknown-catalog"
-  | "unsupported-platform"
 
 export class McpEndpointError extends Error {
   readonly code: McpEndpointErrorCode
@@ -493,13 +463,11 @@ function catalogOptions(
   return npmRegistry === undefined ? options : { npmRegistry, ...options }
 }
 
-/** Catalog servers not yet added, each with whether it's installed. None
- *  where the broker can't run (Windows): there is nothing to install for. */
+/** Catalog servers not yet added, each with whether it's installed. */
 export function listMcpCatalog(
   config: AppConfig = getConfig(),
   options?: CatalogDetectOptions,
 ): Array<McpCatalogView> {
-  if (!brokerRunsOn(options?.platform)) return []
   const detect = catalogOptions(config, options)
   const added = new Set((config.mcpBroker?.servers ?? []).map((s) => s.id))
   return MCP_CATALOG.filter((entry) => !added.has(entry.id)).map((entry) => {

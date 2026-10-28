@@ -33,12 +33,13 @@ const SIGNING_IN = new Set<WorkIqStatus["signIn"]>(["waiting", "restarting"]);
 /** Accepting the EULA runs a Work IQ command and may restart the broker. */
 const WORKIQ_TIMEOUT_MS = 60_000;
 
-/** Said by the panel, and by a card whose turn-on Maximal refused (409). */
-export const UNSUPPORTED_PLATFORM: Problem = {
-  title: "MCP servers don't run on Windows yet",
+/** Said by the panel when Windows wouldn't let Maximal make sure the
+ *  servers stop when it does, so it didn't start them. */
+export const CONTAINMENT_UNAVAILABLE: Problem = {
+  title: "MCP servers couldn't start",
   detail:
-    "Maximal can't run them safely on Windows yet. Your choices here are saved for when it can.",
-  remedy: "none",
+    "Maximal only runs MCP servers when it can make sure they stop when Maximal does, and Windows didn't allow that this time. Restarting Maximal tries again. Your choices here are kept.",
+  remedy: "restart",
   technical: "MCP_BROKER_CONTAINMENT_UNAVAILABLE",
 };
 
@@ -241,10 +242,6 @@ export function useMcp(): UseMcp {
               technical: `HTTP 404: ${result.error}`,
             },
           };
-        }
-        // Only a turn-on where MCP servers can't run (Windows) conflicts.
-        if (result.status === 409) {
-          return { ok: false, problem: UNSUPPORTED_PLATFORM };
         }
         return {
           ok: false,

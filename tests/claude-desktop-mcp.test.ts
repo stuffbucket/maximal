@@ -14,6 +14,7 @@ import {
   claudeDesktopConfigPath,
   createClaudeDesktopMcp,
   isOwnedMcpEntry,
+  regularClaudeDesktopConfigPath,
 } from "~/apps/claude-desktop/mcp"
 
 const BROKER = "/Applications/Maximal.app/Contents/MacOS/maximal-mcp-broker"
@@ -245,5 +246,18 @@ describe("Claude Desktop existing entries", () => {
   test("never offers Maximal's own adapter entry", async () => {
     await configurator().reconcile([entry("workiq")], [])
     expect(configurator().existingStdioEntry?.("workiq", [])).toBeUndefined()
+  })
+})
+
+describe("regularClaudeDesktopConfigPath", () => {
+  test("is beside Claude-3p on macOS", () => {
+    expect(regularClaudeDesktopConfigPath(home, "darwin")).toBe(regularConfig())
+  })
+
+  test("is in %APPDATA% on Windows, not beside Claude-3p in %LOCALAPPDATA%", () => {
+    const appData = process.env.APPDATA ?? path.join(home, "AppData", "Roaming")
+    expect(regularClaudeDesktopConfigPath(home, "win32")).toBe(
+      path.join(appData, "Claude", "claude_desktop_config.json"),
+    )
   })
 })

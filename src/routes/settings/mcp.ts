@@ -58,7 +58,6 @@ const ENDPOINT_ERROR_STATUS = {
   exists: 409,
   "not-installed": 409,
   "unknown-catalog": 404,
-  "unsupported-platform": 409,
 } as const
 
 // Each list re-scans, so the panel's "Check again" also finds a server that

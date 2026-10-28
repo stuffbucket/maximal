@@ -1078,12 +1078,11 @@ export const SCENARIOS = {
     mcp: { ...twoMcpEndpoints, broker: { state: "unavailable", problem: "not-installed" } },
   },
 
-  "mcp-windows": {
-    ...healthy("MCP · Windows, where MCP servers can't run yet"),
+  "mcp-containment-unavailable": {
+    ...healthy("MCP · Windows refused the job that contains the servers"),
     mcp: {
       ...twoMcpEndpoints,
-      broker: { state: "unavailable", problem: "unsupported-platform" },
-      available: [],
+      broker: { state: "unavailable", problem: "containment-unavailable" },
     },
   },
 

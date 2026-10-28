@@ -17,10 +17,7 @@ import type { McpCatalogEntry } from "~/lib/mcp-broker/catalog"
 import {
   catalogServer,
   listMcpCatalog,
-  mcpBrokerHealth,
-  McpEndpointError,
   refreshCatalogCommands,
-  setMcpEndpoint,
 } from "~/apps/mcp"
 import { getConfig, writeConfig } from "~/lib/config/config"
 import { findCatalogEntry, WORKIQ_PACKAGE_SPEC } from "~/lib/mcp-broker/catalog"
@@ -756,64 +753,42 @@ describe("Work IQ install hint: registry", () => {
   })
 })
 
-describe("on Windows, where the MCP broker can't run yet", () => {
-  test("offers no server to install or add", () => {
-    expect(
-      listMcpCatalog(
-        {},
-        { ...base, platform: "win32", arch: "x64", miseDataDir: tempDir() },
-      ),
-    ).toEqual([])
-  })
-
-  test("reports the broker unavailable even while it is off", () => {
-    expect(mcpBrokerHealth("win32")).toEqual({
-      state: "unavailable",
-      problem: "unsupported-platform",
+describe("on Windows", () => {
+  test("offers Work IQ found through npm's workiq.cmd on PATH", () => {
+    // npm's Windows layout: the launcher, with the package beside it.
+    const prefix = tempDir()
+    fs.writeFileSync(path.join(prefix, "workiq.cmd"), "")
+    const bin = path.join(
+      prefix,
+      "node_modules",
+      "@microsoft",
+      "workiq",
+      "bin",
+      "win-x64",
+    )
+    fs.mkdirSync(bin, { recursive: true })
+    fs.writeFileSync(
+      path.join(prefix, "node_modules", "@microsoft", "workiq", "package.json"),
+      '{"version":"1.0.1"}',
+    )
+    fs.writeFileSync(path.join(bin, "workiq.exe"), "")
+    const found = listMcpCatalog(
+      {},
+      {
+        ...base,
+        platform: "win32",
+        arch: "x64",
+        miseDataDir: tempDir(),
+        pathDirs: [prefix],
+      },
+    )
+    expect(found).toHaveLength(1)
+    expect(found[0]).toMatchObject({
+      id: "workiq",
+      status: "ready",
+      command: path.join(bin, "workiq.exe"),
+      version: "1.0.1",
     })
-  })
-
-  test("refuses to turn an endpoint on, and changes nothing", async () => {
-    const calls: Array<string> = []
-    writeConfig({
-      mcpBroker: {
-        servers: [workiq.template({ command: "/abs/workiq", version: null })],
-      },
-    })
-    const steps = {
-      platform: "win32" as const,
-      reconfigure: () => {
-        calls.push("reconfigure")
-        return Promise.resolve(true)
-      },
-      waitForBroker: () => {
-        calls.push("wait")
-        return Promise.resolve("ready" as const)
-      },
-      syncClients: () => {
-        calls.push("sync")
-        return Promise.resolve([])
-      },
-    }
-    let thrown: unknown
-    try {
-      await setMcpEndpoint(
-        "workiq",
-        { enabled: true, clients: ["claude-code"] },
-        steps,
-      )
-    } catch (error) {
-      thrown = error
-    }
-    expect(thrown).toBeInstanceOf(McpEndpointError)
-    expect(thrown).toMatchObject({ code: "unsupported-platform" })
-    expect(calls).toEqual([])
-    expect(getConfig().mcpBroker?.servers?.[0]?.enabled).toBe(false)
-    expect(getConfig().mcpBroker?.servers?.[0]?.clients).toBeUndefined()
-
-    // Turning one off still works, so nothing is stuck on.
-    const off = await setMcpEndpoint("workiq", { enabled: false }, steps)
-    expect(off?.endpoint.enabled).toBe(false)
   })
 })
 

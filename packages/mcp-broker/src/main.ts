@@ -17,6 +17,12 @@ import {
 import { installSanitizedDependencyDiagnostics } from "./diagnostics.ts"
 import { MaximalElicitations } from "./maximal-elicitations.ts"
 import { runStdioAdapter } from "./stdio-adapter.ts"
+import {
+  CONTAINMENT_EXIT_CODE,
+  ContainmentError,
+  containInKillOnCloseJob,
+  describeContainmentError,
+} from "./windows-job.ts"
 
 const BINARY_VERSION = "0.0.0"
 const MESSAGE_DEADLINE_MS = 10_000
@@ -124,6 +130,9 @@ class ControlWriter {
 }
 
 const errorCode = (error: unknown): string => {
+  if (error instanceof ContainmentError) {
+    return describeContainmentError(error)
+  }
   if (error instanceof BrokerStartupError) {
     return error.code
   }
@@ -326,6 +335,9 @@ const serve = async (options: ServeOptions): Promise<void> => {
 const main = async (): Promise<void> => {
   const [mode, ...args] = process.argv.slice(2)
   if (mode === "serve") {
+    // On Windows, before anything can start a process: everything this
+    // broker starts must end when it does.
+    containInKillOnCloseJob()
     const restoreDiagnostics = installSanitizedDependencyDiagnostics()
     try {
       await serve(parseServeOptions(args))
@@ -349,5 +361,6 @@ const main = async (): Promise<void> => {
 void main().catch((error: unknown) => {
   const code = errorCode(error)
   process.stderr.write(`[maximal-mcp-broker] ${code}\n`)
-  process.exitCode = 1
+  process.exitCode =
+    error instanceof ContainmentError ? CONTAINMENT_EXIT_CODE : 1
 })

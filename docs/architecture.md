@@ -281,11 +281,9 @@ for mise, to the command, so it is authoritative), npm's
 process's environment and npmrc files as a fallback. When none of them
 confirms a registry the host is `null` and the card says "It downloads from
 your npm registry." rather than naming npmjs.org. npm's reported global prefix
-likewise takes precedence over the file-based prefix probes. On Windows, where the
-supervisor refuses to start the broker, nothing is offered, the broker
-reports `unsupported-platform` even while off, turning an endpoint on is
-refused (`unsupported-platform`, HTTP 409), and client apps get no entries
-(`src/lib/mcp-broker/platform.ts`); saved endpoints stay listed. When
+likewise takes precedence over the file-based prefix probes. On Windows,
+npm's `workiq.cmd` launcher on PATH also leads to the package in the
+`node_modules` folder beside it. When
 several installs exist, the highest version wins. Adding asks the user to
 confirm and writes the
 endpoint off, with `catalog` set. The path contains the package version and
@@ -368,11 +366,27 @@ running server's loopback-only `POST /_internal/reload`, which re-reads
 including Work IQ when configured, remain separately installed programs;
 Maximal does not redistribute them or own their authentication state.
 
-On POSIX, each broker generation is a detached process group. Graceful shutdown
-is bounded and followed by exact-group `SIGKILL`, including descendants. Windows
-currently fails closed because kill-on-close Job Object containment is not
-implemented. Public `/status` exposes only coarse broker state and
-enabled-endpoint count.
+When a broker generation stops or dies, it and everything it started end
+with it. On POSIX, each broker generation is a detached process group.
+Graceful shutdown is bounded and followed by exact-group `SIGKILL`, including
+descendants. On Windows, `serve` first puts itself in a Job Object with
+`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` (kernel32 through `bun:ffi`,
+`packages/mcp-broker/src/windows-job.ts`) and holds the only handle until it
+exits. Breakaway isn't allowed, so the MCP servers it starts and their
+children are in the job too, and when the broker exits or is terminated,
+Windows ends all of them. The supervisor's bounded graceful stop is followed
+by `TerminateProcess` on the broker. If Windows refuses any step, the broker
+starts nothing and exits with `BROKER_CONTAINMENT_EXIT_CODE` (78); the
+supervisor reports `unavailable` with the problem `containment-unavailable`
+instead of restarting it, and Settings says the servers couldn't start. A
+crashed sidecar is covered by `--parent-pid`: the broker checks every second
+and shuts down when its parent is gone. Stdio servers are started with
+`cross-spawn` (inside the MCP SDK), which runs a `.cmd` or `.bat` command
+through `cmd.exe /d /s /c` with its arguments escaped, rather than
+refusing it the way Node does without a shell. The Windows behavior is
+tested on a Windows runner by `packages/mcp-broker/test/windows-containment.test.ts`
+(the CI `windows-broker` job). Public `/status` exposes only coarse broker
+state and enabled-endpoint count.
 
 The broker's startup probe records the tool names each endpoint lists and
 reports them in its `ready` frame (`getBrokerEndpointTools`). Each server's
