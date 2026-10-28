@@ -66,6 +66,9 @@ const meta = {
     onToggle: fn<OnToggle>(async () => ({ ok: true, skipped: [] })),
     onRefresh: fn(async () => {}),
     onRemove: fn(async () => ({ ok: true, removedFrom: [] })),
+    onAcceptWorkIqEula: fn(async () => ({ ok: true })),
+    onSignInWorkIq: fn(async (_useBrowserSignIn: boolean) => ({ ok: true })),
+    onCancelWorkIqSignIn: fn(async () => {}),
   },
 } satisfies Meta<typeof McpEndpointCard>;
 export default meta;

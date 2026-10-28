@@ -110,6 +110,20 @@ jobs:
             --target=bun-windows-x64 \
             --outfile="$RUNNER_TEMP/maximal-mcp-broker-windows-x64.exe"
 
+      # Stories reach into shell/src and the harness fixtures mirror the API
+      # schemas, so a prop or schema change can break them without touching
+      # packages/storybook. Check on every run so they can't drift.
+      - name: Install Storybook dependencies
+        run: |
+          # Story typechecking follows imports into shell/src.
+          (cd shell && bun install --frozen-lockfile)
+          # packages/storybook runs on the root Node and pnpm pins.
+          mise install node pnpm
+          mise -C packages/storybook exec -- pnpm install --frozen-lockfile
+
+      - name: Check Storybook stories and harness fixtures
+        run: bun run storybook:check
+
       - name: Run linter
         run: bun run lint:all
 
