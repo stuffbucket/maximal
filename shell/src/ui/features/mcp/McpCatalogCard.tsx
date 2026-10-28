@@ -87,7 +87,9 @@ export function McpCatalogCard({ item, onAdd, onRescan }: McpCatalogCardProps): 
             </div>
           </div>
           <p className="app-card__hint">
-            {t("mcp-install-registry", { host: item.install.registry })}{" "}
+            {item.install.registry === null ?
+              t("mcp-install-registry-unknown")
+            : t("mcp-install-registry", { host: item.install.registry })}{" "}
             {t("mcp-install-then", { name: item.label })}
           </p>
         </div>

@@ -26,7 +26,7 @@ import { McpServerIdSchema } from "~/lib/config/config-schema"
 import { MCP_CATALOG } from "~/lib/mcp-broker/catalog"
 import { brokerRunsOn } from "~/lib/mcp-broker/platform"
 import { currentProxyPort } from "~/lib/start/proxy-port"
-import { npmGlobalPrefix } from "~/lib/system/run-file"
+import { warmNpmDetection } from "~/lib/system/npm-login-config"
 
 import {
   addMcpEndpoint,
@@ -71,7 +71,7 @@ function showCatalog(available: Array<McpCatalogView>): void {
     } else {
       consola.info(
         `  ${item.label} (${item.id}): not installed — ${item.install.command}`
-          + ` (downloads from ${item.install.registry})`,
+          + ` (downloads from ${item.install.registry ?? "your npm registry"})`,
       )
     }
   }
@@ -400,8 +400,8 @@ export const mcpCommand = defineCommand({
       throw new Error("Use only one of --enable, --disable, --add, --remove.")
     }
     // Same upgrade check as boot and Settings; the running Maximal reloads.
-    // Detection reads npm's prefix from a cache it never fills itself.
-    await npmGlobalPrefix()
+    // Detection reads npm's answers from caches it never fills itself.
+    await warmNpmDetection()
     const current = getConfig()
     if (refreshCatalogCommands(current) !== current) {
       await applyToRunning(parsePort(args.port))

@@ -135,6 +135,7 @@
   "apps-install-then": "然后让 {appName} 通过 Maximal 路由。Maximal 会自动识别安装；在此处开启。",
   "mcp-install-then": "然后将 Maximal 连接到 {name}。Maximal 会自动识别安装；在此处添加。",
   "mcp-install-registry": "将从 {host} 下载。",
+  "mcp-install-registry-unknown": "将从您的 npm 注册表下载。",
   "apps-copy-command": "复制命令",
   "apps-not-installed": "未安装。",
   "apps-install-kind-cli": "CLI",

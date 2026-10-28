@@ -22,6 +22,9 @@ export interface RunResult {
 export interface RunOptions {
   timeoutMs: number
   maxBuffer?: number
+  /** Close the child's stdin at once, so a program that would wait for input
+   *  (a login shell, a prompt) sees end-of-file instead of hanging. */
+  closeStdin?: boolean
 }
 
 /** Run `file` with `args` (no shell). Never rejects: a failure to start or a
@@ -32,7 +35,7 @@ export function runFile(
   options: RunOptions,
 ): Promise<RunResult> {
   return new Promise<RunResult>((resolve) => {
-    execFile(
+    const child = execFile(
       file,
       args,
       {
@@ -53,6 +56,7 @@ export function runFile(
         resolve({ stdout, stderr, code, notFound: false })
       },
     )
+    if (options.closeStdin) child.stdin?.end()
   })
 }
 

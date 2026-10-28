@@ -39,7 +39,7 @@ import {
   cacheVSCodeVersion,
 } from "~/lib/platform/utils"
 import { hasGithubToken, state } from "~/lib/runtime-state/state"
-import { npmGlobalPrefix } from "~/lib/system/run-file"
+import { warmNpmDetection } from "~/lib/system/npm-login-config"
 import { startUpdateNotice } from "~/lib/update/update-notice"
 import { getGitVersion, shortSha } from "~/lib/update/version"
 import { startWorkingNotice } from "~/lib/working-notice"
@@ -224,10 +224,10 @@ function afterListening(
   // A missing, hung, or crashing broker degrades MCP only; Hono is already bound.
   // An upgraded catalog server (e.g. Work IQ) may have moved; find it first.
   startBrokerSupervisor(refreshCatalogCommands(config).mcpBroker ?? {})
-  // npm's global prefix is looked up in the background, never on the event
-  // loop; once known, a server installed with npm may turn out to have moved
-  // too. (Until then a refresh keeps each server's last path.)
-  void npmGlobalPrefix()
+  // npm's registry and global prefix are looked up in the background, never
+  // on the event loop; once known, a server installed with npm may turn out
+  // to have moved too. (Until then a refresh keeps each server's last path.)
+  void warmNpmDetection()
     .then(async () => {
       const before = getConfig()
       const after = refreshCatalogCommands(before)

@@ -228,8 +228,8 @@ export interface McpCatalogItem {
   /** Absolute path of the executable Maximal found. */
   command?: string
   version?: string
-  /** `registry`: host the command downloads from. */
-  install: { command: string; url: string; registry: string }
+  /** `registry`: host the command downloads from; null when unconfirmed. */
+  install: { command: string; url: string; registry: string | null }
 }
 
 interface McpEndpointsListResponse {
