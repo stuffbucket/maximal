@@ -193,6 +193,9 @@ jobs:
         include:
           - { target: bun-darwin-arm64, artifact: darwin-arm64, ext: tar.gz }
           - { target: bun-windows-x64,  artifact: windows-x64,  ext: zip    }
+          # The Linux binaries also go into the Debian packages (linux-deb).
+          - { target: bun-linux-x64,    artifact: linux-x64,    ext: tar.gz }
+          - { target: bun-linux-arm64,  artifact: linux-arm64,  ext: tar.gz }
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -332,7 +335,9 @@ jobs:
             dist-release/maximal-v${{ steps.ver.outputs.version }}-${{ matrix.artifact }}.${{ matrix.ext }}.sha256
 
   checksums:
-    needs: binaries
+    needs:
+      - binaries
+      - linux-deb
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -1178,6 +1183,195 @@ jobs:
             dist-release/maximal-${{ env.TAG }}-windows-x64-setup.exe.sha256
             dist-release/maximal-${{ env.TAG }}-windows-x64-setup.exe.sig
 
+  # ── Linux (Debian 13, Ubuntu 24.04, Ubuntu 26.04) ────────────────────
+
+  # Two Debian packages per architecture, published through the signed apt
+  # repository at https://mxml.sh/apt (deploy-pages.yml):
+  #   maximal_<ver>_<arch>.deb          the release binaries from `binaries`,
+  #                                     a user systemd unit, the apt marker
+  #   maximal-desktop_<ver>_<arch>.deb  the Tauri tray app; runs maximal's
+  #                                     /usr/bin/maximal as its sidecar and
+  #                                     depends on maximal (= <ver>)
+  # Built on Ubuntu 24.04, the oldest glibc of the targets, so they run on
+  # Debian 13 and Ubuntu 26.04 too, on a native runner per architecture
+  # (WebKitGTK doesn't cross-compile from the x64 runner).
+  linux-deb:
+    needs: binaries
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: amd64, artifact: linux-x64,   runner: ubuntu-24.04     }
+          - { arch: arm64, artifact: linux-arm64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
+    # A cold Rust release build of the tray app takes longer than 20 minutes.
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.ref_name }}
+      ARCH: ${{ matrix.arch }}
+      ARTIFACT: ${{ matrix.artifact }}
+      # Retry crate downloads instead of failing on a transient reset.
+      CARGO_NET_RETRY: "10"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Resolve version
+        id: ver
+        run: echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      # The same binaries as the raw archive, so the version and channel
+      # stamped by `binaries` are what apt installs.
+      - name: Build the maximal package from the release binaries
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          TARBALL="maximal-${TAG}-${ARTIFACT}.tar.gz"
+          mkdir -p dist-bin dist-release
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern "$TARBALL" --pattern "$TARBALL.sha256" --dir dist-bin
+          ( cd dist-bin && sha256sum -c "$TARBALL.sha256" && tar -xzf "$TARBALL" )
+          bash build/linux/build-maximal-deb.sh "$VERSION" "$ARCH" dist-bin dist-release
+
+      - name: Install the tray app's build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential file libayatana-appindicator3-dev librsvg2-dev \
+            libssl-dev libwebkit2gtk-4.1-dev libxdo-dev
+
+      # rustup is preinstalled on the Ubuntu images; the version is mise.toml's.
+      - name: Install pinned Rust
+        run: |
+          set -euo pipefail
+          version="$(sed -nE 's/^rust *= *"([^"]+)".*/\1/p' mise.toml)"
+          if [ -z "$version" ]; then
+            echo "::error::no rust pin in mise.toml"
+            exit 1
+          fi
+          rustup toolchain install "$version" --profile minimal --no-self-update
+          echo "RUSTUP_TOOLCHAIN=$version" >> "$GITHUB_ENV"
+
+      - uses: ./.github/actions/setup-bun
+        with:
+          bun-version: 1.3.14
+
+      - name: Configure package registry
+        run: printf '%s\n' 'registry=https://packagefeedproxy.microsoft.io/npm/' > "$HOME/.npmrc"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install shell dependencies
+        working-directory: shell
+        run: bun install --frozen-lockfile
+
+      - name: Build web UI
+        run: bun run build:ui
+
+      # tauri.linux.conf.json names the binary maximal-desktop, adds the tray
+      # library and installs the apt marker. `externalBin: []` keeps the
+      # sidecars out: the app runs maximal's /usr/bin/maximal, next to its own
+      # executable.
+      - name: Tauri build (Linux, deb)
+        working-directory: shell
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          bun run tauri build --bundles deb \
+            --config "{\"version\":\"${VERSION}\",\"build\":{\"beforeBuildCommand\":\"\"},\"bundle\":{\"externalBin\":[]}}"
+
+      - name: Repack as maximal-desktop
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          debs=(shell/src-tauri/target/release/bundle/deb/*.deb)
+          if [ "${#debs[@]}" -ne 1 ]; then
+            echo "::error::Expected one Tauri .deb, found ${#debs[@]}."
+            exit 1
+          fi
+          bash build/linux/repack-desktop-deb.sh "$VERSION" "$ARCH" "${debs[0]}" dist-release
+
+      # GitHub Pages serves files up to 100 MB; the apt repository refuses
+      # anything over 95 MB, so catch it here, before the release publishes.
+      - name: Check sizes and write checksums
+        run: |
+          set -euo pipefail
+          cd dist-release
+          for deb in *.deb; do
+            size="$(stat -c %s "$deb")"
+            echo "$deb: $((size / 1024 / 1024)) MB"
+            if [ "$size" -gt $((95 * 1024 * 1024)) ]; then
+              echo "::error::$deb is over 95 MB, too big for the apt repository on GitHub Pages."
+              exit 1
+            fi
+            sha256sum "$deb" > "$deb.sha256"
+          done
+          ls -la
+
+      - name: Attach the Debian packages to the release
+        uses: ./.github/actions/upload-release-asset
+        with:
+          tag: ${{ env.TAG }}
+          files: |
+            dist-release/maximal_${{ steps.ver.outputs.version }}_${{ matrix.arch }}.deb
+            dist-release/maximal_${{ steps.ver.outputs.version }}_${{ matrix.arch }}.deb.sha256
+            dist-release/maximal-desktop_${{ steps.ver.outputs.version }}_${{ matrix.arch }}.deb
+            dist-release/maximal-desktop_${{ steps.ver.outputs.version }}_${{ matrix.arch }}.deb.sha256
+
+  # Install both packages in clean Debian 13, Ubuntu 24.04 and Ubuntu 26.04
+  # containers on both architectures: apt resolves every dependency, the CLI
+  # reports its version, the proxy answers on 127.0.0.1 and logs an available
+  # update with the apt command, and maximal-desktop ships no copy of the
+  # binaries. See build/linux/smoke-deb.sh.
+  linux-deb-smoke:
+    name: linux-deb-smoke (${{ matrix.image }}, ${{ matrix.arch }})
+    needs: linux-deb
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+        image: ["debian:13", "ubuntu:24.04", "ubuntu:26.04"]
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    timeout-minutes: 20
+    permissions:
+      # write, not read: downloads from the DRAFT release, which a read-only
+      # token can't see.
+      contents: write
+    env:
+      TAG: ${{ github.ref_name }}
+      ARCH: ${{ matrix.arch }}
+      IMAGE: ${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download the packages from the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#v}"
+          mkdir -p debs
+          for pkg in maximal maximal-desktop; do
+            deb="${pkg}_${VERSION}_${ARCH}.deb"
+            gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --pattern "$deb" --pattern "$deb.sha256" --dir debs
+          done
+          ( cd debs && sha256sum -c ./*.sha256 )
+
+      - name: Install and run in ${{ matrix.image }}
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD:/src:ro" -v "$PWD/debs:/debs:ro" "$IMAGE" \
+            bash /src/build/linux/smoke-deb.sh "${TAG#v}" /debs
+
   # Publish only after every required artifact and verification job succeeds.
   # Failures leave the release draft mutable for a re-run.
   publish:
@@ -1190,6 +1384,8 @@ jobs:
       - windows-msi-verify
       - macos-dmg
       - windows-shell
+      - linux-deb
+      - linux-deb-smoke
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:

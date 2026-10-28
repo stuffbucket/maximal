@@ -15,9 +15,14 @@ on:
     # merge creates the main push that this filter turns into exactly one Pages
     # deploy. It lives under site/public/ so `site/**` already covers it; it is
     # named here only to document that the release→site path rides this trigger.
+    # That same deploy rebuilds the apt repository (mxml.sh/apt) from the tags
+    # the merged manifest names, so apt and the apps' update check move
+    # together. The apt build's own sources are listed too.
     paths:
       - "site/**"
       - ".github/workflows/deploy-pages.yml"
+      - "build/linux/apt-repo.sh"
+      - "scripts/apt-repo-plan.ts"
   workflow_dispatch:
 
 # Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages.
@@ -73,6 +78,81 @@ jobs:
       - name: Build Astro
         working-directory: site
         run: bun run build
+
+      # ── apt repository (https://mxml.sh/apt) ──────────────────────────
+      # Static files beside the site, never committed: each suite is built
+      # from the release its manifest channel names (stable ->
+      # channels.stable.tag, rc -> channels.rc.tag), so apt can install every
+      # version the apps announce. A release that predates the Linux packages
+      # is skipped with a notice; a channel that lists Linux packages its
+      # release lacks fails the deploy. See scripts/apt-repo-plan.ts and
+      # build/linux/apt-repo.sh.
+      - name: Configure package registry
+        run: printf '%s\n' 'registry=https://packagefeedproxy.microsoft.io/npm/' > "$HOME/.npmrc"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Plan the apt repository
+        id: apt
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          plan="$RUNNER_TEMP/apt-plan.json"
+          bun scripts/apt-repo-plan.ts \
+            --manifest site/public/updates/manifest.json \
+            --repo "$GITHUB_REPOSITORY" --out "$plan"
+          if [ "$(jq '.suites | length' "$plan")" -eq 0 ]; then
+            echo "::notice::No release in the manifest has Linux packages yet; deploying without the apt repository."
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "plan=$plan" >> "$GITHUB_OUTPUT"
+
+      - name: Download and index the Linux packages
+        if: steps.apt.outputs.build == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PLAN: ${{ steps.apt.outputs.plan }}
+        run: |
+          set -euo pipefail
+          command -v apt-ftparchive >/dev/null || {
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends apt-utils
+          }
+          bash build/linux/apt-repo.sh fetch "$PLAN" site/dist/apt
+          bash build/linux/apt-repo.sh index "$PLAN" site/dist/apt
+
+      # The only step that sees the signing secrets. The script imports the
+      # key into a temporary GNUPGHOME, feeds the passphrase on a file
+      # descriptor, refuses a key whose fingerprint isn't
+      # APT_SIGNING_KEY_FINGERPRINT (or the committed public key's), and
+      # verifies every signature against site/public/apt/maximal.asc.
+      - name: Sign the apt repository
+        if: steps.apt.outputs.build == 'true'
+        env:
+          APT_SIGNING_KEY: ${{ secrets.APT_SIGNING_KEY }}
+          APT_SIGNING_KEY_PASSWORD: ${{ secrets.APT_SIGNING_KEY_PASSWORD }}
+          APT_SIGNING_KEY_FINGERPRINT: ${{ vars.APT_SIGNING_KEY_FINGERPRINT }}
+        run: bash build/linux/apt-repo.sh sign site/dist/apt site/public/apt/maximal.asc
+
+      # GitHub Pages: 1 GB per site, 100 MB per file.
+      - name: Check the site size
+        run: |
+          set -euo pipefail
+          total="$(du -sb site/dist | cut -f1)"
+          echo "site/dist: $((total / 1024 / 1024)) MB"
+          if [ "$total" -gt $((800 * 1024 * 1024)) ]; then
+            echo "::error::site/dist is over 800 MB; GitHub Pages allows 1 GB. Keep fewer packages in the apt repository."
+            exit 1
+          fi
+          big="$(find site/dist -type f -size +95M)"
+          if [ -n "$big" ]; then
+            echo "::error::Files over 95 MB (GitHub Pages allows 100 MB): $big"
+            exit 1
+          fi
 
       - name: Setup Pages
         uses: actions/configure-pages@v6
