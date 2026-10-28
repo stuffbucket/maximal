@@ -23,6 +23,10 @@ If Windows refuses, `serve` starts nothing, writes
 `MCP_BROKER_CONTAINMENT_UNAVAILABLE` with the failed step to stderr, and exits
 with status 78. `test/windows-containment.test.ts` checks this on Windows.
 
+However `serve` stops (a `shutdown` frame, stdin closing, the `--parent-pid`
+process gone, a signal, or an error), it exits at most 3 seconds after it began
+closing its servers, even if an open session holds its HTTP server.
+
 `stdio-adapter` connects a stdio MCP client to a loopback `/mcp/<id>` URL. It
 sends `MAXIMAL_MCP_API_KEY` as a Bearer token when set. It never starts or
 supervises `serve`. Because Claude Desktop starts its MCP servers only at

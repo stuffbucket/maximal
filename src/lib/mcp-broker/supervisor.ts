@@ -423,7 +423,7 @@ export class BrokerSupervisor {
       this.#clearGenerationTimers(generation)
       this.#clearGenerationMonitors()
       if (this.#stopping) return
-      if (code === BROKER_CONTAINMENT_EXIT_CODE) {
+      if (this.#platform === "win32" && code === BROKER_CONTAINMENT_EXIT_CODE) {
         // Windows refused the Job Object, so the broker ran nothing. A
         // restart would be refused the same way; say so instead.
         this.#setState("unavailable", "containment-unavailable")

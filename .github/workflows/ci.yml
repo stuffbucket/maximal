@@ -184,3 +184,14 @@ jobs:
         run: |
           MAXIMAL_MCP_BROKER_BINARY="$(cygpath -w "$PWD/dist/maximal-mcp-broker.exe")" \
             mise exec -- bun test
+
+      # Releases ship the minified cross-compile (release.yml's build:target),
+      # so check containment against exactly that build as well.
+      - name: Test containment with the release build
+        working-directory: packages/mcp-broker
+        run: |
+          mise exec -- pnpm build:target \
+            --target=bun-windows-x64 \
+            --outfile="$PWD/dist/release/maximal-mcp-broker.exe"
+          MAXIMAL_MCP_BROKER_BINARY="$(cygpath -w "$PWD/dist/release/maximal-mcp-broker.exe")" \
+            mise exec -- bun test test/windows-containment.test.ts

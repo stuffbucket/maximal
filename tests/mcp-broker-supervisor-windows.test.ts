@@ -18,6 +18,7 @@ import {
   getBrokerUpstream,
 } from "~/lib/mcp-broker/supervisor"
 
+import { CONTAINMENT_EXIT_CODE } from "../packages/mcp-broker/src/windows-job"
 import {
   config,
   FakeBrokerProcess,
@@ -50,6 +51,11 @@ const windowsFixture = (configuration: McpBrokerConfig = config()) => {
 }
 
 describe("BrokerSupervisor on Windows", () => {
+  test("agrees with the broker on the exit status for refused containment", () => {
+    // The broker's Windows test checks that it exits with this status.
+    expect(BROKER_CONTAINMENT_EXIT_CODE).toBe(CONTAINMENT_EXIT_CODE)
+  })
+
   test("starts the broker, which contains itself, watching this process", async () => {
     const { children, launches, supervisor } = windowsFixture()
     supervisor.start()
@@ -111,6 +117,19 @@ describe("BrokerSupervisor on Windows", () => {
     child.exitCode = 1
     child.emit("exit", 1, null)
     await waitForChildCount(children, 2)
+    await supervisor.stop()
+  })
+
+  test("off Windows, exit status 78 is an ordinary crash", async () => {
+    const { children, supervisor } = fixture(
+      config({ restartBackoffMinMs: 5, restartBackoffMaxMs: 5 }),
+    )
+    supervisor.start()
+    const child = await waitForChild(children)
+    child.exitCode = BROKER_CONTAINMENT_EXIT_CODE
+    child.emit("exit", BROKER_CONTAINMENT_EXIT_CODE, null)
+    await waitForChildCount(children, 2)
+    expect(getBrokerSupervisorSnapshot().problem).toBeNull()
     await supervisor.stop()
   })
 })

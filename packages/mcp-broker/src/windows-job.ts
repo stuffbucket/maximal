@@ -31,7 +31,9 @@ export type ContainmentStep = "load" | "create" | "limit" | "assign" | "verify"
 export class ContainmentError extends Error {
   readonly code = CONTAINMENT_UNAVAILABLE
   readonly step: ContainmentStep
-  /** GetLastError() after the failed call, when there was one. */
+  /** GetLastError() read after the failed call, for the log. Best effort:
+   *  it's a separate FFI call, and the runtime may make Windows calls of its
+   *  own in between that change it. Never decide anything from it. */
   readonly windowsError: number | undefined
 
   constructor(step: ContainmentStep, windowsError?: number) {
@@ -101,6 +103,7 @@ export function loadKernel32(): JobObjectApi {
       return symbols.IsProcessInJob(process, job, result) !== 0 && result[0] !== 0
     },
     currentProcess: () => BigInt(symbols.GetCurrentProcess()),
+    // Best effort; see ContainmentError.windowsError.
     lastError: () => symbols.GetLastError(),
   }
 }

@@ -95,14 +95,23 @@ const serverFixture = () => {
   return { command, pidFile, pids, instances }
 }
 
+interface BrokerOptions {
+  parentPid?: number
+  /** Start it through containment-launcher.ts, which owns its stdin and can
+   *  first put itself in a job of the given kind. */
+  launcher?: "none" | "plain" | "ui-limited"
+}
+
 class Broker {
+  /** The broker, or the launcher standing in for its parent. */
   readonly child: ChildProcessWithoutNullStreams
+  readonly #pidFile: string | undefined
   readonly #decoder = new ControlFrameDecoder()
   readonly #envelopes: Array<ControlEnvelope> = []
   #sequence = 0
   stderr = ""
 
-  constructor(parentPid?: number) {
+  constructor({ parentPid, launcher }: BrokerOptions = {}) {
     const compiled = process.env.MAXIMAL_MCP_BROKER_BINARY
     const args = [
       "serve",
@@ -110,12 +119,36 @@ class Broker {
       GENERATION,
       ...(parentPid === undefined ? [] : ["--parent-pid", String(parentPid)]),
     ]
-    // As the supervisor starts it.
-    this.child = spawn(
-      compiled ?? process.execPath,
-      compiled ? args : [resolve(import.meta.dir, "../src/main.ts"), ...args],
-      { detached: true, stdio: ["pipe", "pipe", "pipe"], windowsHide: true },
-    )
+    const command = compiled ?? process.execPath
+    const commandArgs =
+      compiled ? args : [resolve(import.meta.dir, "../src/main.ts"), ...args]
+    if (launcher) {
+      const dir = mkdtempSync(join(tmpdir(), "maximal-launcher-"))
+      cleanups.push(() => rmSync(dir, { recursive: true, force: true }))
+      this.#pidFile = join(dir, "broker.pid")
+      this.child = spawn(
+        process.execPath,
+        [
+          resolve(import.meta.dir, "containment-launcher.ts"),
+          "--job",
+          launcher,
+          "--pid-file",
+          this.#pidFile,
+          "--",
+          command,
+          ...commandArgs,
+        ],
+        // Detached, so it is in no job of this test runner's.
+        { detached: true, stdio: ["pipe", "pipe", "pipe"], windowsHide: true },
+      )
+    } else {
+      // As the supervisor starts it.
+      this.child = spawn(command, commandArgs, {
+        detached: true,
+        stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
+      })
+    }
     this.child.stdout.on("data", (chunk: Buffer) => {
       this.#envelopes.push(...this.#decoder.push(chunk))
     })
@@ -126,7 +159,20 @@ class Broker {
     const { child } = this
     cleanups.push(() => {
       if (child.exitCode === null) child.kill()
+      const pid = this.brokerPid()
+      if (pid !== undefined) reap([pid])
     })
+  }
+
+  /** The broker's own pid, when it was started through the launcher. */
+  brokerPid(): number | undefined {
+    if (!this.#pidFile) return undefined
+    try {
+      const pid = Number(readFileSync(this.#pidFile, "utf8"))
+      return Number.isSafeInteger(pid) && pid > 0 ? pid : undefined
+    } catch {
+      return undefined
+    }
   }
 
   async take(
@@ -178,9 +224,9 @@ class Broker {
  * checked alive. The probe's instance counts too: closing it ends cmd.exe,
  * but the server under it and that server's child keep running.
  */
-const brokerWithRunningServer = async (parentPid?: number) => {
+const brokerWithRunningServer = async (options: BrokerOptions = {}) => {
   const server = serverFixture()
-  const broker = new Broker(parentPid)
+  const broker = new Broker(options)
   await broker.take("hello")
   broker.send("configure", {
     apiKey: API_KEY,
@@ -279,7 +325,9 @@ describe.skipIf(!windows)("Windows containment", () => {
       if (parent.exitCode === null) parent.kill()
     })
     await new Promise((resolveSpawn) => parent.once("spawn", resolveSpawn))
-    const { broker, pids } = await brokerWithRunningServer(parent.pid)
+    const { broker, pids } = await brokerWithRunningServer({
+      parentPid: parent.pid,
+    })
     // The broker keeps running while its parent does.
     await Bun.sleep(2_000)
     expect(broker.child.exitCode).toBeNull()
@@ -303,5 +351,46 @@ describe.skipIf(!windows)("Windows containment", () => {
     })
     expect(await expectExit(broker, 10_000)).toBe(0)
     await expectAllGone(pids())
+  }, 60_000)
+
+  it("ends everything when the process holding the broker's stdin is gone", async () => {
+    // No --parent-pid: the broker learns from its stdin closing.
+    const { broker, pids } = await brokerWithRunningServer({ launcher: "none" })
+    const brokerPid = broker.brokerPid()
+    expect(brokerPid).toBeNumber()
+    broker.child.kill()
+    // Up to three seconds for its servers to close, then it exits anyway.
+    await waitFor(
+      () => !isRunning(brokerPid as number),
+      8_000,
+      "the broker to exit after its stdin closed",
+    )
+    await expectAllGone(pids())
+  }, 60_000)
+
+  it("contains its servers when it starts inside another job", async () => {
+    const { broker, pids } = await brokerWithRunningServer({
+      launcher: "plain",
+    })
+    const brokerPid = broker.brokerPid()
+    expect(brokerPid).toBeNumber()
+    process.kill(brokerPid as number)
+    await waitFor(
+      () => !isRunning(brokerPid as number),
+      GONE_WITHIN_MS,
+      "the broker to end",
+    )
+    await expectAllGone(pids())
+  }, 60_000)
+
+  it("refuses to run, with status 78, when Windows won't give it a job", async () => {
+    // A job with UI limits can't have jobs nested under it.
+    const broker = new Broker({ launcher: "ui-limited" })
+    expect(await expectExit(broker, 30_000)).toBe(78)
+    expect(broker.stderr).toContain(
+      "[maximal-mcp-broker] MCP_BROKER_CONTAINMENT_UNAVAILABLE step=assign",
+    )
+    // It started nothing, so it never said hello.
+    expect(broker.stderr).not.toContain("[endpoint:")
   }, 60_000)
 })

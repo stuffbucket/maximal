@@ -379,9 +379,12 @@ by `TerminateProcess` on the broker. If Windows refuses any step, the broker
 starts nothing and exits with `BROKER_CONTAINMENT_EXIT_CODE` (78); the
 supervisor reports `unavailable` with the problem `containment-unavailable`
 instead of restarting it, and Settings says the servers couldn't start. A
-crashed sidecar is covered by `--parent-pid`: the broker checks every second
-and, when its parent is gone, closes its servers and exits, after at most 3
-seconds even if an open session holds its HTTP server. Stdio servers are started with
+crashed sidecar is covered twice: the broker's stdin closes, and
+`--parent-pid` has the broker check every second whether its parent is gone.
+However `serve` stops (a `shutdown` frame, stdin closing, the parent gone, a
+signal, or an error), the broker closes its servers and then exits, at most 3
+seconds after it began closing, even if an open session holds its HTTP
+server. A `serve` that fails exits as soon as it has written its error code. Stdio servers are started with
 `cross-spawn` (inside the MCP SDK), which runs a `.cmd` or `.bat` command
 through `cmd.exe /d /s /c` with its arguments escaped, rather than
 refusing it the way Node does without a shell. The Windows behavior is

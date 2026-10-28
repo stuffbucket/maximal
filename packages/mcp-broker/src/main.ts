@@ -169,13 +169,20 @@ const serve = async (options: ServeOptions): Promise<void> => {
     running = undefined
   }
 
+  // A session's open event stream can hold the HTTP server's close
+  // indefinitely, so a broker on its way out exits anyway once the grace
+  // period is up. On Windows, exiting ends the Job Object and every server
+  // with it.
   let forcedExit: ReturnType<typeof setTimeout> | undefined
-  const terminate = () => {
-    // A session's open event stream can hold the HTTP server's close
-    // indefinitely; exit anyway once the grace period is up. On Windows,
-    // exiting ends the Job Object and every server with it.
-    forcedExit ??= setTimeout(() => process.exit(0), TERMINATE_GRACE_MS)
+  const armForcedExit = () => {
+    forcedExit ??= setTimeout(
+      () => process.exit(process.exitCode ?? 0),
+      TERMINATE_GRACE_MS,
+    )
     forcedExit.unref()
+  }
+  const terminate = () => {
+    armForcedExit()
     void close().finally(() => {
       process.exitCode = 0
       process.stdin.destroy()
@@ -318,6 +325,7 @@ const serve = async (options: ServeOptions): Promise<void> => {
         }
 
         if (envelope.operation === "shutdown") {
+          armForcedExit()
           await close()
           await writer.send({
             deadlineMs: Date.now() + MESSAGE_DEADLINE_MS,
@@ -339,6 +347,9 @@ const serve = async (options: ServeOptions): Promise<void> => {
     }
     process.off("SIGINT", terminate)
     process.off("SIGTERM", terminate)
+    // However serving ended (shutdown, stdin closed because the sidecar is
+    // gone, or an error), closing must not keep the broker running.
+    armForcedExit()
     await close()
   }
 }
@@ -375,7 +386,11 @@ const main = async (): Promise<void> => {
 
 void main().catch((error: unknown) => {
   const code = errorCode(error)
-  process.stderr.write(`[maximal-mcp-broker] ${code}\n`)
-  process.exitCode =
-    error instanceof ContainmentError ? CONTAINMENT_EXIT_CODE : 1
+  const status = error instanceof ContainmentError ? CONTAINMENT_EXIT_CODE : 1
+  process.exitCode = status
+  // Exit once the line is out: servers a failed `serve` started could
+  // otherwise keep this process running.
+  process.stderr.write(`[maximal-mcp-broker] ${code}\n`, () =>
+    process.exit(status),
+  )
 })
