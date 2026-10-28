@@ -269,6 +269,7 @@
   "dashboard-period-days": "{n, plural, one {# día} other {# días}}",
 
   "dashboard-quotas-title": "Cuotas de uso",
+  "dashboard-quotas-more": "Chat y autocompletado",
   "dashboard-quota-unlimited": "Sin límite",
   "dashboard-quota-percent-used": "{percent} % usado",
   "dashboard-quota-remaining": "{n} restante(s)",

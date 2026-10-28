@@ -269,6 +269,7 @@
   "dashboard-period-days": "{n, plural, other {# 天}}",
 
   "dashboard-quotas-title": "使用配额",
+  "dashboard-quotas-more": "聊天和补全",
   "dashboard-quota-unlimited": "无限制",
   "dashboard-quota-percent-used": "已使用 {percent}%",
   "dashboard-quota-remaining": "剩余 {n}",

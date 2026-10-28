@@ -270,6 +270,51 @@ body {
   color: var(--text-muted);
 }
 
+/* "Chat and completions": the unlimited quotas, folded under the metered
+   cards. The open state is kept in script (the page re-renders from strings). */
+.quota-more {
+  margin-top: var(--space-4);
+}
+
+.quota-more__summary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  list-style: none;
+}
+
+.quota-more__summary::-webkit-details-marker {
+  display: none;
+}
+
+.quota-more__summary:hover {
+  color: var(--text-strong);
+}
+
+.quota-more__summary:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.quota-more__chevron {
+  flex: none;
+  width: 1em;
+  height: 1em;
+  transition: transform 200ms ease-out;
+}
+
+.quota-more[open] > .quota-more__summary .quota-more__chevron {
+  transform: rotate(90deg);
+}
+
+.quota-more__body {
+  margin-top: var(--space-2);
+}
+
 h2,
 .h-section {
   font-family: var(--font-body);
@@ -612,7 +657,8 @@ html[data-embedded="true"] .lang-picker {
   .progress-bar-fg {
     transition: none !important;
   }
-  .segmented-option {
+  .segmented-option,
+  .quota-more__chevron {
     transition: none !important;
   }
 }

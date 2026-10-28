@@ -269,6 +269,7 @@
   "dashboard-period-days": "{n, plural, one {# день} few {# дня} many {# дней} other {# дня}}",
 
   "dashboard-quotas-title": "Квоты использования",
+  "dashboard-quotas-more": "Чат и автодополнение",
   "dashboard-quota-unlimited": "Без ограничений",
   "dashboard-quota-percent-used": "Использовано {percent} %",
   "dashboard-quota-remaining": "осталось {n}",

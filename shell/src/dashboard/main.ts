@@ -133,6 +133,28 @@ interface DashboardState {
   usageFetchedAt: number | null;
   /** Last background /usage refetch attempt (rate-limits them). */
   usageRefetchAt: number;
+  /** Whether the "Chat and completions" quotas are unfolded. Render rebuilds
+   *  the page from strings, so the open state lives here, not in the DOM. */
+  quotaMoreOpen: boolean;
+}
+
+const QUOTA_MORE_STORAGE_KEY = "maximal.dashboard.quotaMoreOpen";
+
+/** The remembered open state; closed when storage is empty or unavailable. */
+function readQuotaMoreOpen(): boolean {
+  try {
+    return localStorage.getItem(QUOTA_MORE_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeQuotaMoreOpen(open: boolean): void {
+  try {
+    localStorage.setItem(QUOTA_MORE_STORAGE_KEY, open ? "1" : "0");
+  } catch {
+    // Private window or blocked storage: the choice lasts until reload.
+  }
 }
 
 const state: DashboardState = {
@@ -148,6 +170,7 @@ const state: DashboardState = {
   tokenUsagePeriod: DEFAULT_TOKEN_USAGE_PERIOD,
   usageFetchedAt: null,
   usageRefetchAt: 0,
+  quotaMoreOpen: readQuotaMoreOpen(),
 };
 
 // --- Tauri Channel live feed -------------------------------------------
@@ -568,19 +591,24 @@ function renderUsageQuotas(
   const entries = Object.entries(snapshots);
   const metered = entries.filter(([, value]) => !value.unlimited);
   const unlimited = entries.filter(([, value]) => value.unlimited);
-  // Unlimited quotas have nothing to measure, so they share one card as a
-  // simple list instead of each getting a mostly-empty card.
   const resetMs = parseResetDate(state.data?.quota_reset_date);
-  const quotaCards =
-    metered.map(([key, value]) => renderQuotaCard(key, value, resetMs)).join("") +
-    (unlimited.length > 0 ? renderUnlimitedQuotas(unlimited.map(([key]) => key)) : "");
+  const meteredCards = metered
+    .map(([key, value]) => renderQuotaCard(key, value, resetMs))
+    .join("");
+  // Unlimited quotas have nothing to measure, so they share one list, folded
+  // away under the metered cards. With no metered card it is all there is.
+  const unlimitedHtml =
+    unlimited.length > 0 ? renderUnlimitedQuotas(unlimited.map(([key]) => key)) : "";
 
   return `
             <section id="usage-quotas" class="mb-6">
                 <h2 class="section__title"><i data-lucide="bar-chart-big" aria-hidden="true"></i>${escapeHtml(t("dashboard-quotas-title"))}</h2>
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    ${quotaCards}
-                </div>
+                ${
+                  meteredCards ?
+                    `<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">${meteredCards}</div>`
+                  : ""
+                }
+                ${unlimitedHtml}
             </section>
         `;
 }
@@ -661,7 +689,10 @@ function renderQuotaCard(title: string, details: QuotaDetails, resetMs: number |
         `;
 }
 
-/** The unlimited quotas, as rows in one card: name, then "Unlimited". */
+/**
+ * The unlimited quotas, folded behind a chevron: name, then "Unlimited".
+ * The open state is `state.quotaMoreOpen`; see handleQuotaMoreToggle.
+ */
 function renderUnlimitedQuotas(titles: Array<string>): string {
   const rows = titles
     .map(
@@ -673,9 +704,27 @@ function renderUnlimitedQuotas(titles: Array<string>): string {
     )
     .join("");
   return `
-            <div class="p-4 border flex flex-col gap-3" style="background-color: var(--surface-card); border-color: var(--border-subtle);">${rows}
-            </div>
+            <details class="quota-more" data-quota-more${state.quotaMoreOpen ? " open" : ""}>
+                <summary class="quota-more__summary"><i data-lucide="chevron-right" class="quota-more__chevron" aria-hidden="true"></i>${escapeHtml(t("dashboard-quotas-more"))}</summary>
+                <div class="quota-more__body p-4 border flex flex-col gap-3" style="background-color: var(--surface-card); border-color: var(--border-subtle);">${rows}
+                </div>
+            </details>
         `;
+}
+
+/**
+ * Remembers the user's fold/unfold. `toggle` also fires when render() inserts
+ * a details that already carries `open`; that matches the state, so it is
+ * skipped and never rewrites storage.
+ */
+function handleQuotaMoreToggle(event: Event): void {
+  const target = event.target;
+  if (!(target instanceof HTMLDetailsElement) || !target.hasAttribute("data-quota-more")) {
+    return;
+  }
+  if (target.open === state.quotaMoreOpen) return;
+  state.quotaMoreOpen = target.open;
+  writeQuotaMoreOpen(target.open);
 }
 
 /**
@@ -1281,6 +1330,9 @@ function init(): void {
     button.addEventListener("keydown", handlePeriodButtonKeydown);
   }
   contentArea.addEventListener("click", handleContentAreaClick);
+  // `toggle` doesn't bubble; capture it on the stable container so it
+  // survives render() replacing the details.
+  contentArea.addEventListener("toggle", handleQuotaMoreToggle, true);
 
   const urlParams = new URLSearchParams(window.location.search);
   if (urlParams.get("embedded") === "1") {

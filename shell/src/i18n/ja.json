@@ -269,6 +269,7 @@
   "dashboard-period-days": "{n, plural, other {#日}}",
 
   "dashboard-quotas-title": "使用量クォータ",
+  "dashboard-quotas-more": "チャットと補完",
   "dashboard-quota-unlimited": "無制限",
   "dashboard-quota-percent-used": "{percent}% 使用済み",
   "dashboard-quota-remaining": "残り {n}",
