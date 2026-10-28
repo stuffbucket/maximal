@@ -15,6 +15,9 @@ import { mountSessionTable } from "./table";
 
 const SESSIONS_PATH = "/token-usage/sessions";
 const POLL_MS = 2_000;
+/** A read that hasn't answered by now is given up, so a hung request can't
+ *  stop the polling. */
+const FETCH_TIMEOUT_MS = POLL_MS * 5;
 const TICK_MS = 1_000;
 
 const isOther = (id: string): boolean => id.startsWith("other:");
@@ -93,7 +96,11 @@ export function startLiveSessions(container: HTMLElement): () => void {
     if (polling || stopped) return;
     polling = true;
     try {
-      const parsed = SessionsResponse.safeParse(await fetchJson<unknown>(SESSIONS_PATH));
+      const body = await fetchJson<unknown>(SESSIONS_PATH, {
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      });
+      if (stopped) return;
+      const parsed = SessionsResponse.safeParse(body);
       if (parsed.success) {
         latest = parsed.data;
         card.showError(null);
@@ -103,7 +110,8 @@ export function startLiveSessions(container: HTMLElement): () => void {
         card.showError(parsed.error.issues[0]?.message ?? parsed.error.message);
       }
     } catch (error) {
-      card.showError(error instanceof Error ? error.message : String(error));
+      // A failed or timed-out read: say so, keep what's shown, try again.
+      if (!stopped) card.showError(error instanceof Error ? error.message : String(error));
     } finally {
       polling = false;
       schedule();
@@ -160,8 +168,20 @@ export function startLiveSessions(container: HTMLElement): () => void {
     if (from && from !== to) setPreview(null);
   }
 
+  // Escape clears the selection, unless something else already took the key
+  // or it was meant for a form control (the language menu, say).
   function onKeydown(event: KeyboardEvent): void {
-    if (event.key === "Escape" && selected !== null) select(null);
+    if (event.key !== "Escape" || selected === null || event.defaultPrevented) return;
+    const target = event.target;
+    if (
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLSelectElement ||
+      target instanceof HTMLTextAreaElement ||
+      (target instanceof HTMLElement && target.isContentEditable)
+    ) {
+      return;
+    }
+    select(null);
   }
 
   cardHost.addEventListener("click", onCardClick);

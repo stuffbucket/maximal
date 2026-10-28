@@ -5,7 +5,7 @@ import { t } from "../../i18n";
 
 export type Session = SessionView;
 
-const TEN_MINUTES_MS = 600_000;
+const TEN_MINUTES_S = 600;
 
 const byRateThenRecency = (a: Session, b: Session): number =>
   b.rate_per_min - a.rate_per_min || b.last_request_at_ms - a.last_request_at_ms;
@@ -54,15 +54,13 @@ export function formatCountdown(
   confidence: Session["cache"]["confidence"],
   locale: string,
 ): string {
-  const ms = Math.max(0, msLeft);
-  let time: string;
-  if (ms < TEN_MINUTES_MS) {
-    const seconds = Math.ceil(ms / 1000);
-    time = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
-  } else {
-    time = new Intl.NumberFormat(locale, { style: "unit", unit: "minute", unitDisplay: "short" }).format(
-      Math.ceil(ms / 60_000),
-    );
-  }
-  return confidence === "observed" ? time : `${t("dashboard-sessions-about")} ${time}`;
+  // Switch on the rounded seconds, so 599.5 s reads "10 min", not "10:00".
+  const seconds = Math.ceil(Math.max(0, msLeft) / 1000);
+  const time =
+    seconds < TEN_MINUTES_S ?
+      `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`
+    : new Intl.NumberFormat(locale, { style: "unit", unit: "minute", unitDisplay: "short" }).format(
+        Math.ceil(seconds / 60),
+      );
+  return confidence === "observed" ? time : t("dashboard-sessions-about", { time });
 }

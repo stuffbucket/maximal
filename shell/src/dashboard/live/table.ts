@@ -56,6 +56,8 @@ interface Row {
   clientSub: HTMLElement;
   model: HTMLElement;
   sessionSub: HTMLElement;
+  started: HTMLElement;
+  shortId: HTMLElement;
   state: HTMLElement;
   stateSub: HTMLElement;
   rate: HTMLElement;
@@ -134,7 +136,7 @@ export function mountSessionTable(
   let shownPreview: string | null = null;
 
   function buildRow(id: string): Row {
-    const tr = el("tr", "session-row border-b");
+    const tr = el("tr", "session-row border-b last:border-b-0");
     tr.style.borderColor = "var(--surface-control)";
     tr.dataset.sessionId = id;
     tr.tabIndex = 0;
@@ -164,12 +166,17 @@ export function mountSessionTable(
 
     const sessionCell = cell("max-w-[280px]");
     const model = el("div", "session-strong truncate");
+    // "started 12:30 AM" and the short id sit side by side as their own
+    // spans, so no wording is joined in code.
     const sessionSub = el("div", "text-xs truncate");
+    const started = el("span");
+    const shortId = el("span", "ml-2");
+    sessionSub.append(started, shortId);
     sessionCell.append(model, sessionSub);
 
     const stateCell = cell("whitespace-nowrap session-cell--state");
     const state = el("div");
-    const stateSub = el("div", "text-xs");
+    const stateSub = el("div", "text-xs whitespace-normal");
     stateCell.append(state, stateSub);
 
     const rate = cell("text-right whitespace-nowrap session-cell--num");
@@ -198,6 +205,8 @@ export function mountSessionTable(
       clientSub,
       model,
       sessionSub,
+      started,
+      shortId,
       state,
       stateSub,
       rate,
@@ -243,14 +252,13 @@ export function mountSessionTable(
 
     if (other) {
       setText(row.model, t("dashboard-sessions-other"));
-      setText(row.sessionSub, s.model);
+      setText(row.started, s.model);
+      setText(row.shortId, "");
       row.sessionSub.title = "";
     } else {
       setText(row.model, s.model);
-      setText(
-        row.sessionSub,
-        `${t("dashboard-sessions-started", { time: clock.format(s.started_at_ms) })} · ${s.id.slice(0, 8)}`,
-      );
+      setText(row.started, t("dashboard-sessions-started", { time: clock.format(s.started_at_ms) }));
+      setText(row.shortId, s.id.slice(0, 8));
       row.sessionSub.title = s.id;
     }
     row.model.title = s.model;

@@ -297,7 +297,7 @@
   "dashboard-sessions-state-streaming": "Идёт ответ",
   "dashboard-sessions-state-warm": "Активен, остынет через {time}",
   "dashboard-sessions-state-cold": "Остыл в {time}",
-  "dashboard-sessions-about": "около",
+  "dashboard-sessions-about": "около {time}",
   "dashboard-sessions-downgraded": "Кэш на 1 час не удержался; используется 5 мин",
   "dashboard-sessions-cold-divider": "Кэш остыл",
   "dashboard-sessions-compacted": "сжат {time} назад",

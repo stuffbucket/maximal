@@ -31,6 +31,9 @@ test.beforeEach(async ({ request }) => {
   expect(res.ok(), `UI harness not reachable at ${BASE}`).toBe(true)
 })
 
+const isSessions = (url: string): boolean =>
+  url.endsWith("/token-usage/sessions")
+
 /** Open the Dashboard and wait for the table rows and the traces. */
 async function open(page: Page): Promise<Array<string>> {
   const errors: Array<string> = []
@@ -93,6 +96,15 @@ test("the live card sits beside the quotas, and nothing overflows", async ({
     table && events && table.y > live.y + live.height && table.y < events.y,
   ).toBe(true)
 
+  // At this width the session table fits its frame without scrolling.
+  const tableOverflow = await page.evaluate<number>(
+    `(() => { const s = document.querySelector("#sessions-table .overflow-auto"); return s.scrollWidth - s.clientWidth })()`,
+  )
+  expect(
+    tableOverflow,
+    "session table scrolls sideways at 1100px",
+  ).toBeLessThanOrEqual(0)
+
   for (const width of [900, 390]) {
     await page.setViewportSize({ width, height: 900 })
     const overflow = await page.evaluate<number>(
@@ -129,6 +141,11 @@ test("Escape and a click on empty plot space clear the selection", async ({
   await open(page)
   await page.locator(".session-row").first().click()
   await expect(page.locator(".session-row--selected")).toHaveCount(1)
+  // Escape meant for a form control (the language menu) leaves it alone.
+  await page.locator("#locale-select").focus()
+  await page.keyboard.press("Escape")
+  await expect(page.locator(".session-row--selected")).toHaveCount(1)
+  await page.locator(".session-row").first().focus()
   await page.keyboard.press("Escape")
   await expect(page.locator(".session-row--selected")).toHaveCount(0)
 
@@ -151,15 +168,22 @@ test("a selection and the open quota section survive a poll and a full re-render
   await page.locator("details[data-quota-more] > summary").click()
   expect(await detailsOpen(page)).toBe(true)
 
-  // One sessions poll comes and goes.
-  await page.waitForResponse((res) =>
-    res.url().endsWith("/token-usage/sessions"),
+  // A sessions poll is applied: the next one is only asked for once the
+  // previous answer has been drawn.
+  await page.waitForResponse((res) => isSessions(res.url()))
+  await page.waitForRequest((req) => isSessions(req.url()))
+
+  // A full re-render: render() rebuilds the quota column from strings, so a
+  // marker left on it is gone once it has run.
+  await page.evaluate(
+    `document.querySelector("#usage-quotas .dashboard-bento__body").setAttribute("data-sentinel", "")`,
   )
-  await page.waitForTimeout(300)
   await page.evaluate(
     `window.postMessage({ type: "maximal:set-locale" }, location.origin)`,
   )
-  await page.waitForTimeout(300)
+  await expect
+    .poll(() => page.locator("#usage-quotas [data-sentinel]").count())
+    .toBe(0)
 
   await expect(
     page.locator(`.session-row[data-session-id="${id}"]`),
@@ -168,6 +192,57 @@ test("a selection and the open quota section survive a poll and a full re-render
     page.locator(`.live__trace[data-session-id="${id}"]`),
   ).toHaveClass(/live__trace--selected/)
   expect(await detailsOpen(page)).toBe(true)
+})
+
+test("the context meter warns from 75%, turns critical from 90%, and Other requests has none", async ({
+  page,
+}) => {
+  await open(page)
+  const context = (id: string) =>
+    page.locator(`.session-row[data-session-id="${id}"] .session-context`)
+
+  // The harness's streaming session is 78% full, its Codex session 93%,
+  // and one Claude session 30%.
+  const warning = context("4f1c9a52-7d3e-4b08-9a61-2c5e8d7f0b13")
+  await expect(warning.locator(".meter")).toHaveClass(/meter--low/)
+  await expect(warning.locator(".meter-state")).toHaveClass(/meter-state--low/)
+  await expect(warning.locator(".session-context__icon svg")).toBeVisible()
+  await expect(warning).toContainText("78%")
+
+  const critical = context("0c8d3e17-9b42-4f6a-a1d5-7e3b2f8c9d04")
+  await expect(critical.locator(".meter")).toHaveClass(/meter--out/)
+  await expect(critical.locator(".meter-state")).toHaveClass(/meter-state--out/)
+  await expect(critical.locator(".session-context__icon svg")).toBeVisible()
+  await expect(critical).toContainText("93%")
+
+  const fine = context("b7e20d64-1a95-4c3f-8e72-5f9a0c4d6e21")
+  await expect(fine.locator(".meter")).toHaveClass(/meter--ok/)
+  await expect(fine.locator(".session-context__icon")).toBeHidden()
+
+  const other = context("other:claude-desktop")
+  await expect(other.locator(".meter")).toBeHidden()
+  await expect(other).toHaveText("—")
+})
+
+test("a read that hangs is given up, reported, and the polling carries on", async ({
+  page,
+}) => {
+  test.setTimeout(45_000)
+  let requests = 0
+  await page.route(SESSIONS, async (route: Route) => {
+    requests += 1
+    // The second read never answers; the others go through.
+    if (requests !== 2) await route.continue()
+  })
+  await open(page)
+
+  const error = page.locator(".live__error")
+  await expect(error).toBeVisible({ timeout: 20_000 })
+  await expect(error).toContainText("An Error Occurred")
+  // What's shown stays, and the next read clears the error.
+  await expect(page.locator(".session-row").first()).toBeVisible()
+  await expect(error).toBeHidden({ timeout: 10_000 })
+  expect(requests).toBeGreaterThanOrEqual(3)
 })
 
 test("a countdown that reaches zero moves its row below the line", async ({

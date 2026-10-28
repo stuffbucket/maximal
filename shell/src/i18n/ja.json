@@ -297,7 +297,7 @@
   "dashboard-sessions-state-streaming": "応答中",
   "dashboard-sessions-state-warm": "ウォーム、あと {time} でコールド",
   "dashboard-sessions-state-cold": "{time} からコールド",
-  "dashboard-sessions-about": "約",
+  "dashboard-sessions-about": "約{time}",
   "dashboard-sessions-downgraded": "1 時間のキャッシュが保持されなかったため 5 分を使用",
   "dashboard-sessions-cold-divider": "キャッシュ コールド",
   "dashboard-sessions-compacted": "{time} 前に圧縮",

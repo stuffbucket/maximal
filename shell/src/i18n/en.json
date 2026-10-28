@@ -297,7 +297,7 @@
   "dashboard-sessions-state-streaming": "Streaming",
   "dashboard-sessions-state-warm": "Warm, cold in {time}",
   "dashboard-sessions-state-cold": "Cold since {time}",
-  "dashboard-sessions-about": "about",
+  "dashboard-sessions-about": "about {time}",
   "dashboard-sessions-downgraded": "1-hour cache didn't hold; using 5 min",
   "dashboard-sessions-cold-divider": "Cache cold",
   "dashboard-sessions-compacted": "compacted {time} ago",

@@ -297,7 +297,7 @@
   "dashboard-sessions-state-streaming": "Respondiendo",
   "dashboard-sessions-state-warm": "Activa, en frío en {time}",
   "dashboard-sessions-state-cold": "En frío desde las {time}",
-  "dashboard-sessions-about": "aprox.",
+  "dashboard-sessions-about": "aprox. {time}",
   "dashboard-sessions-downgraded": "La caché de 1 hora no se mantuvo; se usan 5 min",
   "dashboard-sessions-cold-divider": "Caché en frío",
   "dashboard-sessions-compacted": "compactada hace {time}",

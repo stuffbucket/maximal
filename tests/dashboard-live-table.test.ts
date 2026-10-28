@@ -161,4 +161,9 @@ describe("formatCountdown", () => {
     expect(formatCountdown(599_000, "observed", "en")).toBe("9:59")
     expect(formatCountdown(600_000, "observed", "en")).toBe("10 min")
   })
+
+  test("just under 10 minutes rounds up to 10 min, never 10:00", () => {
+    expect(formatCountdown(599_500, "observed", "en")).toBe("10 min")
+    expect(formatCountdown(599_001, "requested", "en")).toBe("about 10 min")
+  })
 })

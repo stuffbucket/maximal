@@ -297,7 +297,7 @@
   "dashboard-sessions-state-streaming": "Risposta in corso",
   "dashboard-sessions-state-warm": "Attiva, fredda tra {time}",
   "dashboard-sessions-state-cold": "Fredda dalle {time}",
-  "dashboard-sessions-about": "circa",
+  "dashboard-sessions-about": "circa {time}",
   "dashboard-sessions-downgraded": "La cache di 1 ora non ha retto; si usano 5 min",
   "dashboard-sessions-cold-divider": "Cache fredda",
   "dashboard-sessions-compacted": "compattata {time} fa",

@@ -297,7 +297,7 @@
   "dashboard-sessions-state-streaming": "正在响应",
   "dashboard-sessions-state-warm": "活跃，{time} 后冷却",
   "dashboard-sessions-state-cold": "自 {time} 起已冷却",
-  "dashboard-sessions-about": "约",
+  "dashboard-sessions-about": "约{time}",
   "dashboard-sessions-downgraded": "1 小时缓存未能保持；按 5 分钟计",
   "dashboard-sessions-cold-divider": "缓存已冷却",
   "dashboard-sessions-compacted": "{time} 前已压缩",

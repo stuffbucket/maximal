@@ -2,11 +2,11 @@
 // that turns an HTTP error into an Error carrying the status and the server's
 // own message. Shared by main.ts and the live sessions controller.
 
-export async function fetchJson<T>(url: string): Promise<T> {
+export async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   // No client-side credentials: the proxy exempts the dashboard
   // endpoints from API-key auth when the request comes from
   // loopback. See createAuthMiddleware in src/lib/request-auth.ts.
-  const response = await fetch(url);
+  const response = await fetch(url, init);
 
   if (!response.ok) {
     let message = response.statusText || "Request failed";
