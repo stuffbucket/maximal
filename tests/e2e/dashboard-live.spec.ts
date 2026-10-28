@@ -484,6 +484,55 @@ test("past six live sessions, the seventh draws in neutral ink and has no swatch
   ).toHaveClass(/live__trace--selected/)
 })
 
+test("every live trace has a gradient fill of its own, in its own color", async ({
+  page,
+}) => {
+  await open(page)
+
+  const traces = await page.evaluate<
+    Array<{
+      id: string
+      gradient: string
+      ref: string
+      d: string
+      stop: string
+      stroke: string
+      stopOpacity: string
+    }>
+  >(`[...document.querySelectorAll(".live__trace")].map((g) => {
+    const id = g.dataset.sessionId
+    const fill = [...document.querySelectorAll(".live__fill")].find(
+      (f) => f.dataset.sessionId === id,
+    )
+    const area = fill?.querySelector(".live__area")
+    const gradient = fill?.querySelector("linearGradient")
+    const stop = fill?.querySelector(".live__fill-stop--top")
+    return {
+      id,
+      gradient: gradient?.id ?? "",
+      ref: area?.getAttribute("fill") ?? "",
+      d: area?.getAttribute("d") ?? "",
+      stop: stop ? getComputedStyle(stop).stopColor : "",
+      stroke: getComputedStyle(g.querySelector(".live__line")).stroke,
+      stopOpacity: stop ? getComputedStyle(stop).stopOpacity : "",
+    }
+  })`)
+
+  // The harness scenario has several live sessions with different colors.
+  expect(traces.length).toBeGreaterThanOrEqual(3)
+  // Ids are document-wide: one gradient per trace, never shared.
+  expect(new Set(traces.map((tr) => tr.gradient)).size).toBe(traces.length)
+  for (const tr of traces) {
+    expect(tr.gradient, tr.id).not.toBe("")
+    expect(tr.ref, tr.id).toBe(`url(#${tr.gradient})`)
+    // The area is drawn, and the gradient is the line's color.
+    expect(tr.d, tr.id).not.toBe("")
+    expect(tr.stop, tr.id).toBe(tr.stroke)
+    expect(Number(tr.stopOpacity), tr.id).toBeGreaterThan(0)
+  }
+  expect(new Set(traces.map((tr) => tr.stop)).size).toBeGreaterThanOrEqual(3)
+})
+
 for (const scheme of ["light", "dark"] as const) {
   test(`screenshot, ${scheme}`, async ({ page }, testInfo) => {
     await page.emulateMedia({ colorScheme: scheme, reducedMotion: "reduce" })

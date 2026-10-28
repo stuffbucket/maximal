@@ -28,9 +28,15 @@ const BORDER_EASE_MS = 3000;
 const BORDER_BASE_PERIOD_S = 30;
 /** Room for the end dot inside the plot, so it never clips at an edge. */
 const DOT_INSET = 5;
+/** Gives every trace's gradient an id of its own: ids are document-wide, so a
+ *  shared one would point every fill at whichever gradient came first. */
+let gradientSeq = 0;
 
 interface TraceState {
   g: SVGGElement;
+  /** This session's gradient fill: its own <linearGradient> and area path. */
+  fill: SVGGElement;
+  area: SVGPathElement;
   line: SVGPathElement;
   hit: SVGPathElement;
   dot: SVGGElement;
@@ -89,17 +95,10 @@ export function mountLiveCard(root: HTMLElement): LiveCard {
 
   const plot = html("div", "live__plot");
   const chart = svg("svg", { class: "live__chart", role: "img" });
-  const gradientId = `live-fill-${Math.random().toString(36).slice(2, 8)}`;
-  const defs = svg("defs");
-  const gradient = svg("linearGradient", { id: gradientId, x1: "0", y1: "0", x2: "0", y2: "1" });
-  gradient.append(
-    svg("stop", { offset: "0", class: "live__fill-stop live__fill-stop--top" }),
-    svg("stop", { offset: "1", class: "live__fill-stop live__fill-stop--bottom" }),
-  );
-  defs.append(gradient);
-  const area = svg("path", { class: "live__area", fill: `url(#${gradientId})` });
+  // Fills sit under every line, so no session's fill covers another's trace.
+  const fills = svg("g", { class: "live__fills" });
   const traces = svg("g", { class: "live__traces" });
-  chart.append(defs, area, traces);
+  chart.append(fills, traces);
   plot.append(chart);
 
   const foot = html("div", "live__foot");
@@ -123,7 +122,6 @@ export function mountLiveCard(root: HTMLElement): LiveCard {
   root.append(inner);
 
   const byId = new Map<string, TraceState>();
-  let fillId: string | null = null;
   let selectedId: string | null = null;
   let size = { width: 0, height: 0 };
 
@@ -158,14 +156,13 @@ export function mountLiveCard(root: HTMLElement): LiveCard {
     for (const tr of byId.values()) {
       for (const v of tr.shown) if (Number.isFinite(v)) max = Math.max(max, v);
     }
-    for (const [id, tr] of byId) {
+    for (const tr of byId.values()) {
       const path = tracePath(tr.shown, max, box.width, box.height);
       tr.line.setAttribute("d", path.line);
+      tr.area.setAttribute("d", path.area);
       tr.hit.setAttribute("d", path.line);
       tr.dot.setAttribute("transform", `translate(${path.last[0].toFixed(2)} ${path.last[1].toFixed(2)})`);
-      if (id === fillId) area.setAttribute("d", path.area);
     }
-    if (fillId === null || !byId.has(fillId)) area.removeAttribute("d");
     value.textContent = numbers.format(Math.round(rateShown));
   }
 
@@ -214,6 +211,19 @@ export function mountLiveCard(root: HTMLElement): LiveCard {
   function traceFor(id: string): TraceState {
     const existing = byId.get(id);
     if (existing) return existing;
+    // The gradient lives inside the fill group so its stops inherit that
+    // group's --trace-color, the same series color the line draws in.
+    const gradientId = `live-fill-${++gradientSeq}`;
+    const fill = svg("g", { class: "live__fill" });
+    fill.dataset.sessionId = id;
+    const gradient = svg("linearGradient", { id: gradientId, x1: "0", y1: "0", x2: "0", y2: "1" });
+    gradient.append(
+      svg("stop", { offset: "0", class: "live__fill-stop live__fill-stop--top" }),
+      svg("stop", { offset: "1", class: "live__fill-stop live__fill-stop--bottom" }),
+    );
+    const area = svg("path", { class: "live__area", fill: `url(#${gradientId})` });
+    fill.append(gradient, area);
+    fills.append(fill);
     const g = svg("g", { class: "live__trace" });
     g.dataset.sessionId = id;
     const line = svg("path", { class: "live__line" });
@@ -222,7 +232,7 @@ export function mountLiveCard(root: HTMLElement): LiveCard {
     dot.append(svg("circle", { class: "live__dot-hit", r: "12" }), svg("circle", { class: "live__dot-mark", r: "3.5" }));
     g.append(line, hit, dot);
     traces.append(g);
-    const state: TraceState = { g, line, hit, dot, from: [], to: [], shown: [], lastStart: 0 };
+    const state: TraceState = { g, fill, area, line, hit, dot, from: [], to: [], shown: [], lastStart: 0 };
     byId.set(id, state);
     return state;
   }
@@ -239,7 +249,7 @@ export function mountLiveCard(root: HTMLElement): LiveCard {
     size = { width: rect.width, height: rect.height };
     chart.setAttribute("viewBox", `0 0 ${size.width} ${size.height}`);
     traces.setAttribute("transform", `translate(0 ${DOT_INSET})`);
-    area.setAttribute("transform", `translate(0 ${DOT_INSET})`);
+    fills.setAttribute("transform", `translate(0 ${DOT_INSET})`);
     draw();
   }).observe(plot);
 
@@ -258,6 +268,7 @@ export function mountLiveCard(root: HTMLElement): LiveCard {
       for (const [id, tr] of byId) {
         if (!live.has(id)) {
           tr.g.remove();
+          tr.fill.remove();
           byId.delete(id);
         }
       }
@@ -278,30 +289,21 @@ export function mountLiveCard(root: HTMLElement): LiveCard {
         tr.lastStart = lastStart;
 
         const slot = colors.get(session.id) ?? null;
-        tr.g.style.setProperty("--trace-color", slot === null ? "var(--border-strong)" : `var(--series-${slot})`);
+        const color = slot === null ? "var(--border-strong)" : `var(--series-${slot})`;
+        const dim = selected !== null && live.has(selected) && session.id !== selected;
+        for (const el of [tr.g, tr.fill]) el.style.setProperty("--trace-color", color);
         tr.g.classList.toggle("live__trace--neutral", slot === null);
         tr.g.classList.toggle("live__trace--selected", session.id === selected);
-        tr.g.classList.toggle("live__trace--dim", selected !== null && live.has(selected) && session.id !== selected);
+        for (const el of [tr.g, tr.fill]) el.classList.toggle("live__trace--dim", dim);
       }
 
       // The selected trace draws on top of the others.
       const selectedTrace = selected === null ? undefined : byId.get(selected);
-      if (selectedTrace && selected !== selectedId) traces.append(selectedTrace.g);
+      if (selectedTrace && selected !== selectedId) {
+        traces.append(selectedTrace.g);
+        fills.append(selectedTrace.fill);
+      }
       selectedId = selected;
-
-      // Only one fill: the selected session, else the busiest.
-      const busiest = traced.reduce<SessionView | null>(
-        (best, s) =>
-          best === null ||
-          s.rate_per_min > best.rate_per_min ||
-          (s.rate_per_min === best.rate_per_min && s.last_request_at_ms > best.last_request_at_ms) ?
-            s
-          : best,
-        null,
-      );
-      fillId = selected !== null && live.has(selected) ? selected : (busiest?.id ?? null);
-      const fillTrace = fillId === null ? null : byId.get(fillId);
-      if (fillTrace) chart.style.setProperty("--live-fill-color", fillTrace.g.style.getPropertyValue("--trace-color"));
 
       const rate = view.sessions.reduce((sum, s) => sum + s.rate_per_min, 0);
       rateFrom = rateShown;
