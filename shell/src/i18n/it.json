@@ -135,6 +135,7 @@
   "apps-install-then": "Poi instrada {appName} tramite Maximal. Maximal rileva l’installazione da solo; attivalo qui.",
   "mcp-install-then": "Poi collega Maximal a {name}. Maximal rileva l’installazione da solo; aggiungilo qui.",
   "mcp-install-registry": "Viene scaricato da {host}.",
+  "mcp-install-registry-unknown": "Viene scaricato dal tuo registro npm.",
   "apps-copy-command": "Copia comando",
   "apps-not-installed": "Non installata.",
   "apps-install-kind-cli": "CLI",

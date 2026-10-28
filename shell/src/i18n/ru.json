@@ -135,6 +135,7 @@
   "apps-install-then": "Затем направьте {appName} через Maximal. Maximal сам заметит установку; включите его здесь.",
   "mcp-install-then": "Затем подключите Maximal к {name}. Maximal сам заметит установку; добавьте его здесь.",
   "mcp-install-registry": "Загружается с {host}.",
+  "mcp-install-registry-unknown": "Загружается из вашего реестра npm.",
   "apps-copy-command": "Копировать команду",
   "apps-not-installed": "Не установлено.",
   "apps-install-kind-cli": "CLI",

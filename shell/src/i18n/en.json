@@ -135,6 +135,7 @@
   "apps-install-then": "Then route {appName} through Maximal. Maximal notices the install by itself; switch it on here.",
   "mcp-install-then": "Then connect Maximal to {name}. Maximal notices the install by itself; add it here.",
   "mcp-install-registry": "It downloads from {host}.",
+  "mcp-install-registry-unknown": "It downloads from your npm registry.",
   "apps-copy-command": "Copy command",
   "apps-not-installed": "Not installed.",
   "apps-install-kind-cli": "CLI",

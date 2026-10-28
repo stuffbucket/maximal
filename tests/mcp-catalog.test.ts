@@ -80,6 +80,7 @@ const base = {
   homeDir: "/nonexistent-home",
   pathDirs: [] as Array<string>,
   npmPrefix: null,
+  npmLogin: null,
   platform: "darwin" as const,
   arch: "arm64",
   env: {},
@@ -158,7 +159,10 @@ describe("Work IQ locate", () => {
   })
 
   test("the endpoint it writes runs the executable directly, off", () => {
-    const server = workiq.template({ command: "/abs/workiq", version: "1.0.1" })
+    const server = workiq.template({
+      command: "/abs/workiq",
+      version: "1.0.1",
+    })
     expect(server).toMatchObject({
       id: "workiq",
       enabled: false,
@@ -501,7 +505,7 @@ function hint(options: DetectOptions): string {
 }
 
 /** The registry host the install hint names. */
-function registry(options: DetectOptions): string {
+function registry(options: DetectOptions): string | null {
   return workiq.install({ ...base, miseDataDir: tempDir(), ...options })
     .registry
 }
@@ -668,37 +672,8 @@ describe("Work IQ install hint: package manager", () => {
 })
 
 describe("Work IQ install hint: registry", () => {
-  test("npm's public registry by default", () => {
-    expect(registry({})).toBe("registry.npmjs.org")
-  })
-
-  test("the environment, then ~/.npmrc, then the global npmrc", () => {
-    const home = homeWithNpmrc("registry=https://user.example.test/npm/\n")
-    expect(registry({ homeDir: home })).toBe("user.example.test")
-    expect(
-      registry({
-        homeDir: home,
-        env: { NPM_CONFIG_REGISTRY: "https://env.example.test/" },
-      }),
-    ).toBe("env.example.test")
-    expect(
-      registry({
-        homeDir: home,
-        env: { npm_config_registry: "https://env-lower.example.test/" },
-      }),
-    ).toBe("env-lower.example.test")
-
-    const brew = tempDir()
-    npmItself(brew)
-    fs.mkdirSync(path.join(brew, "etc"))
-    fs.writeFileSync(
-      path.join(brew, "etc", "npmrc"),
-      "registry=https://global.example.test/\n",
-    )
-    expect(registry({ systemPrefixes: [brew] })).toBe("global.example.test")
-    expect(registry({ homeDir: home, systemPrefixes: [brew] })).toBe(
-      "user.example.test",
-    )
+  test("no host is claimed when nothing confirms one", () => {
+    expect(registry({})).toBeNull()
   })
 
   test("NPM_CONFIG_USERCONFIG replaces ~/.npmrc", () => {
@@ -710,7 +685,7 @@ describe("Work IQ install hint: registry", () => {
     ).toBe("custom.example.test")
   })
 
-  test("a @microsoft scope registry wins over every plain registry", () => {
+  test("a @microsoft scope registry wins over every plain registry in files and env", () => {
     const home = homeWithNpmrc(
       [
         "registry=https://plain.example.test/",
@@ -721,7 +696,6 @@ describe("Work IQ install hint: registry", () => {
       registry({
         homeDir: home,
         env: { NPM_CONFIG_REGISTRY: "https://env.example.test/" },
-        npmRegistry: "https://maximal.example.test/",
       }),
     ).toBe("scoped.example.test")
   })

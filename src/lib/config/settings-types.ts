@@ -521,8 +521,9 @@ export const McpCatalogItem = z.object({
   install: z.object({
     command: z.string(),
     url: z.string(),
-    /** Host of the registry the command downloads from. */
-    registry: z.string(),
+    /** Host of the registry the command downloads from; null when nothing
+     *  confirms one (the card then doesn't name a host). */
+    registry: z.string().nullable(),
   }),
 })
 export type McpCatalogItem = z.infer<typeof McpCatalogItem>

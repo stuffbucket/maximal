@@ -12,6 +12,10 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
+import {
+  type NpmLoginConfig,
+  cachedNpmLoginConfig,
+} from "~/lib/system/npm-login-config"
 import { cachedNpmGlobalPrefix } from "~/lib/system/run-file"
 
 import type { McpServerConfig } from "./types"
@@ -34,6 +38,10 @@ export interface CatalogDetectOptions {
   systemPrefixes?: Array<string>
   /** `mcpBroker.catalog.npmRegistry`: the install hint downloads from it. */
   npmRegistry?: string
+  /** What npm reports from the user's login environment (registry, scope
+   *  registry, prefix). Defaults to the cached lookup; call
+   *  `warmNpmDetection()` first. */
+  npmLogin?: NpmLoginConfig | null
 }
 
 export interface CatalogInstall {
@@ -48,8 +56,9 @@ export interface CatalogInstallHint {
   command: string
   /** The server's package page. */
   url: string
-  /** Host of the registry the command downloads from. */
-  registry: string
+  /** Host of the registry the command downloads from; null when neither
+   *  npm nor its config files confirm one. */
+  registry: string | null
 }
 
 export interface McpCatalogEntry {
@@ -70,6 +79,7 @@ interface ResolvedOptions {
   home: string
   pathDirs: Array<string>
   npmPrefix: () => string | null
+  npmLogin: NpmLoginConfig | null
   platform: NodeJS.Platform
   arch: string
   miseDataDir: string
@@ -88,6 +98,10 @@ function defaultMiseDataDir(home: string, platform: NodeJS.Platform): string {
 function resolveOptions(options: CatalogDetectOptions = {}): ResolvedOptions {
   const home = options.homeDir ?? os.homedir()
   const platform = options.platform ?? process.platform
+  const npmLogin =
+    options.npmLogin === undefined ?
+      (cachedNpmLoginConfig() ?? null)
+    : options.npmLogin
   return {
     home,
     platform,
@@ -95,10 +109,13 @@ function resolveOptions(options: CatalogDetectOptions = {}): ResolvedOptions {
     pathDirs:
       options.pathDirs
       ?? (process.env.PATH ?? "").split(path.delimiter).filter(Boolean),
+    // npm's own answer for the login environment, else the plain prefix
+    // lookup; both come from caches and never spawn.
     npmPrefix: () =>
       options.npmPrefix === undefined ?
-        (cachedNpmGlobalPrefix() ?? null)
+        (npmLogin?.prefix ?? cachedNpmGlobalPrefix() ?? null)
       : options.npmPrefix,
+    npmLogin,
     miseDataDir: options.miseDataDir ?? defaultMiseDataDir(home, platform),
   }
 }
@@ -512,8 +529,6 @@ function pnpmGlobalPackageDirs(
 
 // ── Which registry an install downloads from ────────────────────────────
 
-const NPM_PUBLIC_REGISTRY = "https://registry.npmjs.org/"
-
 /** The global npmrc: npm's `globalconfig`, else `etc/npmrc` of the first
  *  Node install that ships npm. */
 function globalNpmrc(ctx: DetectContext): string | undefined {
@@ -526,22 +541,31 @@ function globalNpmrc(ctx: DetectContext): string | undefined {
 }
 
 /** The registry npm, pnpm, and mise's npm backend fetch a package of
- *  `scope` from. As in npm, a `<scope>:registry` from any npmrc wins over
- *  every plain `registry`; those come from the command line (Maximal's
- *  setting), the environment, the user npmrc, then the global npmrc. */
-function effectiveRegistry(ctx: DetectContext, scope: string): string {
+ *  `scope` from, or undefined when nothing confirms one. Maximal's own
+ *  setting comes first (it changes the command, so it is authoritative);
+ *  then what npm itself reports from the user's login environment (the
+ *  scope's registry, then the plain one); then, as a fallback, npm's own
+ *  order read from files and this process's environment: a
+ *  `<scope>:registry` from any npmrc wins over every plain `registry`, which
+ *  come from the environment, the user npmrc, then the global npmrc. */
+function effectiveRegistry(
+  ctx: DetectContext,
+  scope: string,
+): string | undefined {
   const user = readNpmrc(userNpmrc(ctx), ctx)
   const global = readNpmrc(globalNpmrc(ctx), ctx)
   const scoped = `${scope}:registry`
   const candidates = [
+    ctx.npmRegistry,
+    ctx.npmLogin?.scopeRegistry,
+    ctx.npmLogin?.registry,
     user.get(scoped),
     global.get(scoped),
-    ctx.npmRegistry,
     npmEnv(ctx, "registry"),
     user.get("registry"),
     global.get("registry"),
   ]
-  return candidates.find(Boolean) ?? NPM_PUBLIC_REGISTRY
+  return candidates.find(Boolean) ?? undefined
 }
 
 /** What the user is shown: just the host. */
@@ -551,6 +575,10 @@ function registryHost(registry: string): string {
   } catch {
     return registry
   }
+}
+
+function registryOrNull(registry: string | undefined): string | null {
+  return registry ? registryHost(registry) : null
 }
 
 /** Quoted for a POSIX shell unless it's plainly safe. */
@@ -639,7 +667,7 @@ const workiq: McpCatalogEntry = {
         ctx.npmRegistry,
       ),
       url: "https://www.npmjs.com/package/@microsoft/workiq",
-      registry: registryHost(effectiveRegistry(ctx, WORKIQ_PACKAGE[0])),
+      registry: registryOrNull(effectiveRegistry(ctx, WORKIQ_PACKAGE[0])),
     }
   },
   locate(options) {

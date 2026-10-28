@@ -81,13 +81,16 @@ Or, with pnpm (after `pnpm setup`):
 pnpm add --global @microsoft/workiq@1
 ```
 
-These download from the registry your npm configuration names:
-`NPM_CONFIG_REGISTRY`, or `@microsoft:registry=` / `registry=` in `~/.npmrc`
-(a `@microsoft:` scope registry wins), else `registry.npmjs.org`. The install
-hint in Settings and `maximal mcp` shows which host that is. If your network
-blocks it, either configure npm's registry as usual or set
-`mcpBroker.catalog.npmRegistry` in Maximal's `config.json` to an `http(s)` URL;
-the hint then adds `--registry <url>` (npm, pnpm) or starts with
+These download from the registry your npm configuration names. Maximal asks
+npm itself through your login shell (`npm config get registry` and
+`npm config get @microsoft:registry`), so the answer matches your terminal
+even though the app was not started from one; if that can't be run it falls
+back to reading `NPM_CONFIG_REGISTRY` and `~/.npmrc` itself. The install hint
+in Settings and `maximal mcp` shows which host that is, or says "your npm
+registry" when it can't tell. If your network blocks the registry, either
+configure npm's registry as usual or set `mcpBroker.catalog.npmRegistry` in
+Maximal's `config.json` to an `http(s)` URL (it takes precedence over npm's
+own answer); the hint then adds `--registry <url>` (npm, pnpm) or starts with
 `NPM_CONFIG_REGISTRY=<url>` (mise).
 
 `maximal mcp` detects the native executable inside any of these installations,

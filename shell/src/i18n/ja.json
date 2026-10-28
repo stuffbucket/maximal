@@ -135,6 +135,7 @@
   "apps-install-then": "次に、{appName} を Maximal 経由にします。インストールは Maximal が自動で検出します。ここでオンにしてください。",
   "mcp-install-then": "次に、Maximal を {name} に接続します。インストールは Maximal が自動で検出します。ここで追加してください。",
   "mcp-install-registry": "{host} からダウンロードされます。",
+  "mcp-install-registry-unknown": "お使いの npm レジストリからダウンロードされます。",
   "apps-copy-command": "コマンドをコピー",
   "apps-not-installed": "未インストール。",
   "apps-install-kind-cli": "CLI",
