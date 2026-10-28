@@ -12,6 +12,7 @@ import { staleRefreshMiddleware } from "./lib/models/refresh-models"
 import { cacheModels } from "./lib/platform/utils"
 import { getModelsLoadedAtMs } from "./lib/runtime-state/state"
 import { buildStatus } from "./lib/runtime-state/status"
+import { trackInFlight } from "./lib/token-usage/in-flight"
 import { BUILD_VERSION } from "./lib/update/build-info"
 import { completionRoutes } from "./routes/chat-completions/route"
 import { debugRoutes } from "./routes/debug/route"
@@ -155,6 +156,20 @@ server.use("/responses", requireGithubAuth)
 server.use("/responses/*", requireGithubAuth)
 server.use("/v1/*", requireGithubAuth)
 server.use("/:provider/v1/*", requireGithubAuth)
+
+// Track the requests that stream a model response, so the live view can tell
+// which sessions are mid-stream. After auth; /models, /embeddings and the UI
+// routes are deliberately left out.
+for (const path of [
+  "/chat/completions",
+  "/responses",
+  "/v1/chat/completions",
+  "/v1/responses",
+  "/v1/messages",
+]) {
+  server.use(path, trackInFlight)
+  server.use(`${path}/*`, trackInFlight)
+}
 
 server.route("/chat/completions", completionRoutes)
 server.route("/models", modelRoutes)
