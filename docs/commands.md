@@ -176,8 +176,8 @@ bun run storybook:build     # static build → packages/storybook/storybook-stat
 bun run storybook:check     # fixtures vs. API schemas + stories vs. component props
 ```
 
-Storybook is ad-hoc tooling and deliberately not in CI. Run `storybook:check`
-after changing a UI component's props or a `settings-types` schema; it fails on
+CI runs `storybook:check` on every push and PR. Run it locally after changing a
+UI component's props or a `settings-types` schema; it fails on
 a story whose props no longer match the component, and on a fixture that no
 longer matches the wire contract.
 

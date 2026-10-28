@@ -11,7 +11,7 @@ bun run storybook:build     # static build → packages/storybook/storybook-stat
 bun run storybook:check     # fixtures vs. API schemas + stories vs. component props
 ```
 
-This is ad-hoc tooling, deliberately not in CI. Run `storybook:check` after
+CI runs `storybook:check` on every push and PR. Run it locally after
 changing a component's props or a `settings-types` schema. It runs
 `scripts/ui-harness.ts --check` (every fixture against the real Zod schemas)
 and this package's `tsc` (which follows story imports into `shell/src`, so a
