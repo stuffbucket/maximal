@@ -142,12 +142,13 @@ type RequestUsageFields = Pick<
   | "context_ceiling_tokens"
   | "context_window_tokens"
   | "is_compact"
+  | "request_started_at_ms"
   | "window_source"
 >
 
-/** The client, cache lifetime and context window the current request
- *  recorded. Outside any request (or before a handler fills them in) the
- *  client is "other", the flags 0 and the window columns null. */
+/** The client, cache lifetime, context window and start time of the current
+ *  request. Outside any request (or before a handler fills them in) the
+ *  client is "other", the flags 0 and the window and start columns null. */
 function resolveRequestUsageFields(): RequestUsageFields {
   const context = requestContext.getStore()
   const usage = context?.usage
@@ -158,6 +159,7 @@ function resolveRequestUsageFields(): RequestUsageFields {
     cache_ttl_s: normalizeToken(usage?.cacheTtlS),
     cache_ttl_requested: usage?.cacheTtlRequested ? 1 : 0,
     is_compact: usage?.isCompact ? 1 : 0,
+    request_started_at_ms: context?.startTime ?? null,
   }
 }
 

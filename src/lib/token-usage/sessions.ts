@@ -2,7 +2,8 @@ import type { InFlight } from "./in-flight"
 import type { SessionsResponse, SessionView } from "./sessions-schema"
 import type { SessionRow } from "./store"
 
-import { STREAM_BYTES_PER_TOKEN } from "./in-flight"
+import { customKeyLabel } from "./client"
+import { STREAM_CHARS_PER_TOKEN } from "./in-flight"
 import { addToRecentMinutes, emptyRecentMinutes } from "./minutes"
 
 type CacheConfidence = SessionView["cache"]["confidence"]
@@ -18,12 +19,15 @@ const FLOW_WINDOW_MS = 60_000
  *  about that model's prompt cache. */
 export interface Resume {
   model: string
-  /** From the earlier request's completion to the resuming request's
-   *  completion (both rows' `created_at_ms`). */
+  /** From the earlier request's completion to the resuming request's start:
+   *  how old the cache was when the resume read it. */
   gapMs: number
   /** The cache lifetime the resuming request asked for, in seconds. */
   requestedTtlS: number
   cacheReadTokens: number
+  /** The earlier request's whole context (input, cache read and cache
+   *  creation), which a surviving cache would mostly cover. */
+  previousContextTokens: number
   /** Names the pair of requests, so a resume seen again is not recounted. */
   key?: string
 }
@@ -35,10 +39,12 @@ const MISSES_TO_DOWNGRADE = 2
  * What the proxy has seen of each model's prompt cache, kept in memory.
  *
  * A session that resumes after more than 5 minutes but within its requested
- * lifetime shows whether the upstream honored that lifetime: cached tokens
- * read is a hit, none is a miss. Two misses in a row downgrade the model to 5
- * minutes, so a countdown never claims more than was seen; one miss can be a
- * plain eviction. A later hit restores the model.
+ * lifetime shows whether the upstream honored that lifetime. Reading back at
+ * least half of the previous request's context is a hit; less is a miss,
+ * because a shared prefix (tools, system prompt) can stay cached while the
+ * conversation's own cache is gone. Two misses in a row downgrade the model
+ * to 5 minutes, so a countdown never claims more than was seen; one miss can
+ * be a plain eviction. A later hit restores the model.
  */
 export class CacheObservations {
   readonly #honored = new Set<string>()
@@ -51,13 +57,20 @@ export class CacheObservations {
    * ignored, so feeding the same rows on every poll counts each resume once.
    */
   record(resume: Resume): void {
-    const { model, gapMs, requestedTtlS, cacheReadTokens, key } = resume
+    const {
+      model,
+      gapMs,
+      requestedTtlS,
+      cacheReadTokens,
+      previousContextTokens,
+      key,
+    } = resume
     if (key !== undefined) {
       if (this.#recorded.has(key)) return
       this.#recorded.add(key)
     }
     if (gapMs <= FIVE_MINUTES_S * 1000 || gapMs > requestedTtlS * 1000) return
-    if (cacheReadTokens > 0) {
+    if (cacheReadTokens > 0 && cacheReadTokens * 2 >= previousContextTokens) {
       this.#honored.add(model)
       this.#misses.set(model, 0)
     } else {
@@ -109,10 +122,20 @@ interface TimedResume {
   resume: Resume & { key: string }
 }
 
+/** Input, cache-read and cache-creation tokens: the request's whole context. */
+function contextTokens(row: SessionRow): number {
+  return (
+    row.input_tokens
+    + row.cache_read_input_tokens
+    + row.cache_creation_input_tokens
+  )
+}
+
 /**
- * Each resume in a session: a request more than 5 minutes after the previous
- * request on the same model. Requests on other models in between (Claude Code
- * subagents share their parent's session id) neither break nor make a resume.
+ * Each resume in a session: a request that started more than 5 minutes after
+ * the previous request on the same model completed. Requests on other models
+ * in between (Claude Code subagents share their parent's session id) neither
+ * break nor make a resume. A request with no recorded start proves nothing.
  */
 function sessionResumes(group: Array<SessionRow>): Array<TimedResume> {
   const previousByModel = new Map<string, SessionRow>()
@@ -120,10 +143,10 @@ function sessionResumes(group: Array<SessionRow>): Array<TimedResume> {
   for (const row of group) {
     const previous = previousByModel.get(row.model)
     previousByModel.set(row.model, row)
-    if (!previous) continue
-    // created_at_ms is stamped when a request completes, so the gap runs
-    // from completion to completion.
-    const gapMs = row.created_at_ms - previous.created_at_ms
+    if (!previous || row.request_started_at_ms === null) continue
+    // created_at_ms is stamped when a request completes: the cache was this
+    // old when the resuming request reached it.
+    const gapMs = row.request_started_at_ms - previous.created_at_ms
     if (gapMs <= FIVE_MINUTES_S * 1000) continue
     resumes.push({
       row,
@@ -132,6 +155,7 @@ function sessionResumes(group: Array<SessionRow>): Array<TimedResume> {
         gapMs,
         requestedTtlS: row.cache_ttl_s,
         cacheReadTokens: row.cache_read_input_tokens,
+        previousContextTokens: contextTokens(previous),
         key: `${previous.id}>${row.id}`,
       },
     })
@@ -171,6 +195,7 @@ function streamingOnlySession(entry: InFlight, nowMs: number): SessionView {
       expires_at_ms: null,
       confidence: "estimated",
       downgraded: false,
+      downgraded_from_s: null,
       last_cache_read_tokens: 0,
     },
     context: {
@@ -188,6 +213,73 @@ function streamingOnlySession(entry: InFlight, nowMs: number): SessionView {
 function sessionState(streaming: boolean, warm: boolean): SessionView["state"] {
   if (streaming) return "streaming"
   return warm ? "warm" : "cold"
+}
+
+/** One model's part of a session: its latest request and its tokens. */
+interface ModelPart {
+  latest: SessionRow
+  tokens: number
+}
+
+/** Each model's latest request and token total, in order of latest use. */
+function modelParts(group: Array<SessionRow>): Array<ModelPart> {
+  const parts = new Map<string, ModelPart>()
+  for (const row of group) {
+    const part = parts.get(row.model)
+    // Re-insert, so the map's order is each model's latest use.
+    parts.delete(row.model)
+    parts.set(row.model, {
+      latest: row,
+      tokens: (part?.tokens ?? 0) + row.total_tokens,
+    })
+  }
+  return [...parts.values()]
+}
+
+/** The cache of one model's latest request, as the session shows it. */
+function modelCache(
+  row: SessionRow,
+  observations: CacheObservations,
+): SessionView["cache"] {
+  const ttlS = observations.effectiveTtlS(row.model, row.cache_ttl_s)
+  const downgraded = observations.isDowngraded(row.model, row.cache_ttl_s)
+  return {
+    ttl_s: ttlS,
+    expires_at_ms: ttlS > 0 ? row.created_at_ms + ttlS * 1000 : null,
+    confidence: observations.confidence(
+      row.model,
+      row.cache_ttl_s,
+      row.cache_ttl_requested === 1,
+    ),
+    downgraded,
+    downgraded_from_s: downgraded ? row.cache_ttl_s : null,
+    last_cache_read_tokens: row.cache_read_input_tokens,
+  }
+}
+
+/**
+ * The cache that lasts longest among the models' latest requests, so a side
+ * request (a Claude Code subagent on Haiku, often with no cache marker) can't
+ * turn a session cold while its main model's cache is warm. With nothing
+ * cached, the main model's.
+ */
+function sessionCache(
+  parts: Array<ModelPart>,
+  main: ModelPart,
+  observations: CacheObservations,
+): SessionView["cache"] {
+  let best = modelCache(main.latest, observations)
+  for (const part of parts) {
+    const cache = modelCache(part.latest, observations)
+    if (
+      cache.expires_at_ms !== null
+      && (best.expires_at_ms === null
+        || cache.expires_at_ms > best.expires_at_ms)
+    ) {
+      best = cache
+    }
+  }
+  return best
 }
 
 function buildSession(
@@ -216,15 +308,19 @@ function buildSession(
       .slice(-RATE_MINUTES)
       .reduce((sum, bucket) => sum + bucket.total_tokens, 0) / RATE_MINUTES
 
-  const ttlS = observations.effectiveTtlS(latest.model, latest.cache_ttl_s)
-  const expiresAtMs = ttlS > 0 ? latest.created_at_ms + ttlS * 1000 : null
-  const warm = expiresAtMs !== null && nowMs < expiresAtMs
+  // The main model has the most tokens in the session; on a tie, the one
+  // used last. Its latest request supplies the model and the context.
+  const parts = modelParts(group)
+  const main = parts.reduce((a, b) => (b.tokens >= a.tokens ? b : a))
+  const cache = sessionCache(parts, main, observations)
+  const warm = cache.expires_at_ms !== null && nowMs < cache.expires_at_ms
+  const shown = main.latest
 
   return {
     id,
     client: latest.client,
-    client_label: latest.client_label,
-    model: latest.model,
+    client_label: customKeyLabel(latest.client_label),
+    model: shown.model,
     started_at_ms: first.created_at_ms,
     last_request_at_ms: latest.created_at_ms,
     state: sessionState(streaming.has(id), warm),
@@ -232,34 +328,25 @@ function buildSession(
     minutes,
     total_tokens: totalTokens,
     request_count: group.length,
-    cache: {
-      ttl_s: ttlS,
-      expires_at_ms: expiresAtMs,
-      confidence: observations.confidence(
-        latest.model,
-        latest.cache_ttl_s,
-        latest.cache_ttl_requested === 1,
-      ),
-      downgraded: observations.isDowngraded(latest.model, latest.cache_ttl_s),
-      last_cache_read_tokens: latest.cache_read_input_tokens,
-    },
+    cache,
     context: {
-      used_tokens:
-        latest.input_tokens
-        + latest.cache_read_input_tokens
-        + latest.cache_creation_input_tokens,
-      window_tokens: latest.context_window_tokens,
-      ceiling_tokens: latest.context_ceiling_tokens,
-      compact_at_tokens: latest.compact_at_tokens,
+      used_tokens: contextTokens(shown),
+      window_tokens: shown.context_window_tokens,
+      ceiling_tokens: shown.context_ceiling_tokens,
+      compact_at_tokens: shown.compact_at_tokens,
       // Rows from before the window was recorded: the listed window.
-      window_source: latest.window_source ?? "model-listing",
+      window_source: shown.window_source ?? "model-listing",
       compacted_at_ms: compactedAtMs,
     },
   }
 }
 
-/** Tokens in the trailing minute, plus those streamed so far by every
- *  request in flight, with or without a session. */
+/**
+ * Tokens in the trailing minute that weren't read from a cache (input, output
+ * and cache creation), plus an estimate of those streamed so far by every
+ * request in flight, with or without a session. Cache reads are left out: a
+ * turn that resends 100k of cached context isn't 100k tokens of work.
+ */
 function flowPerMin(
   rows: Array<SessionRow>,
   inFlight: Array<InFlight>,
@@ -267,10 +354,13 @@ function flowPerMin(
 ): number {
   let tokens = 0
   for (const row of rows) {
-    if (row.created_at_ms > nowMs - FLOW_WINDOW_MS) tokens += row.total_tokens
+    if (row.created_at_ms > nowMs - FLOW_WINDOW_MS) {
+      tokens +=
+        row.input_tokens + row.output_tokens + row.cache_creation_input_tokens
+    }
   }
   for (const entry of inFlight) {
-    tokens += Math.floor(entry.streamedBytes / STREAM_BYTES_PER_TOKEN)
+    tokens += Math.floor(entry.streamedChars / STREAM_CHARS_PER_TOKEN)
   }
   return tokens
 }

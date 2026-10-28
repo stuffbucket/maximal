@@ -30,3 +30,19 @@ export function deriveUsageClient(
   }
   return "other"
 }
+
+const INTEGRATION_KEY_LABELS: ReadonlySet<string> = new Set([
+  HELPER_LABEL,
+  DESKTOP_KEY_LABEL,
+  CODEX_KEY_LABEL,
+])
+
+/**
+ * The key label as a name the user gave it, or null. The labels the
+ * integrations provision (`claude-code`, `claude-desktop`, `codex`) only
+ * repeat the client's name, so they count as no label.
+ */
+export function customKeyLabel(label: string | null): string | null {
+  const trimmed = label?.trim() ?? ""
+  return trimmed === "" || INTEGRATION_KEY_LABELS.has(trimmed) ? null : trimmed
+}

@@ -333,9 +333,13 @@ describe("token usage pricing signal (token_prices)", () => {
   })
 })
 
-describe("token usage client, cache and context columns", () => {
-  let dir: string
-  let dbPath: string
+/** A usage database in a temp directory for each test, read back raw. */
+function useTempUsageDb(): {
+  dbPath: () => string
+  readRows: () => Promise<Array<Record<string, unknown>>>
+} {
+  let dir = ""
+  let dbPath = ""
 
   beforeEach(async () => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "token-usage-cols-"))
@@ -361,8 +365,14 @@ describe("token usage client, cache and context columns", () => {
     }
   }
 
+  return { dbPath: () => dbPath, readRows }
+}
+
+describe("token usage migrations", () => {
+  const { dbPath, readRows } = useTempUsageDb()
+
   test("migrates a version 1 database and reads old rows with defaults", async () => {
-    const old = await openSqliteDatabase(dbPath)
+    const old = await openSqliteDatabase(dbPath())
     old.exec(`
       CREATE TABLE token_usage_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -416,20 +426,87 @@ describe("token usage client, cache and context columns", () => {
     })
     expect(newRow.model).toBe("gpt-new")
 
-    const db = await openSqliteDatabase(dbPath)
+    const db = await openSqliteDatabase(dbPath())
     const version = db.prepare("PRAGMA user_version").get() as {
       user_version: number
     }
     db.close?.()
     expect(version.user_version).toBe(2)
+    expect(oldRow.request_started_at_ms).toBeNull()
   })
 
-  test("stores the client, cache lifetime and context window of the request", async () => {
+  test("adds a column missing from a database that already ran step 2", async () => {
+    // A database migrated by an earlier build of step 2, which had every
+    // column but the request start time, is at version 2 already.
+    const early = await openSqliteDatabase(dbPath())
+    early.exec(`
+      CREATE TABLE token_usage_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        created_at_ms INTEGER NOT NULL,
+        created_at_utc TEXT NOT NULL,
+        trace_id TEXT NOT NULL,
+        session_id TEXT NOT NULL DEFAULT '',
+        user_id TEXT NOT NULL DEFAULT '',
+        source TEXT NOT NULL,
+        endpoint TEXT NOT NULL,
+        provider_name TEXT,
+        model TEXT NOT NULL,
+        input_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0,
+        cache_read_input_tokens INTEGER NOT NULL DEFAULT 0,
+        cache_creation_input_tokens INTEGER NOT NULL DEFAULT 0,
+        total_tokens INTEGER NOT NULL DEFAULT 0,
+        total_nano_aiu INTEGER NOT NULL DEFAULT 0,
+        is_premium INTEGER,
+        client TEXT NOT NULL DEFAULT 'other',
+        client_label TEXT,
+        cache_ttl_s INTEGER NOT NULL DEFAULT 0,
+        cache_ttl_requested INTEGER NOT NULL DEFAULT 0,
+        is_compact INTEGER NOT NULL DEFAULT 0,
+        context_window_tokens INTEGER,
+        context_ceiling_tokens INTEGER,
+        compact_at_tokens INTEGER,
+        window_source TEXT
+      )
+    `)
+    early.exec("PRAGMA user_version = 2")
+    early.close?.()
+
+    const startTime = Date.now() - 4000
     requestContext.run(
       {
         parentSessionId: undefined,
         sessionAffinity: undefined,
-        startTime: Date.now(),
+        startTime,
+        traceId: "trace-early",
+        usage: {},
+        userAgent: "",
+      },
+      () => {
+        recordTokenUsageEvent({
+          endpoint: "messages",
+          input_tokens: 1,
+          model: "claude-test",
+          source: "copilot",
+        })
+      },
+    )
+
+    const [row] = await readRows()
+    expect(row.request_started_at_ms).toBe(startTime)
+  })
+})
+
+describe("token usage client, cache and context columns", () => {
+  const { readRows } = useTempUsageDb()
+
+  test("stores the client, cache lifetime and context window of the request", async () => {
+    const startTime = Date.now() - 90_000
+    requestContext.run(
+      {
+        parentSessionId: undefined,
+        sessionAffinity: undefined,
+        startTime,
         traceId: "trace-ctx",
         usage: {
           apiKeyLabel: "codex",
@@ -466,7 +543,10 @@ describe("token usage client, cache and context columns", () => {
       context_ceiling_tokens: 258_000,
       compact_at_tokens: 200_000,
       window_source: "codex-catalog",
+      // When the request started, not when its usage was recorded.
+      request_started_at_ms: startTime,
     })
+    expect(row.created_at_ms).toBeGreaterThan(startTime)
   })
 
   test("falls back to the user agent for the client when the key has no known label", async () => {
@@ -520,6 +600,7 @@ describe("token usage client, cache and context columns", () => {
       context_ceiling_tokens: null,
       compact_at_tokens: null,
       window_source: null,
+      request_started_at_ms: null,
     })
   })
 })

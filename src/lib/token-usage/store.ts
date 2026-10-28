@@ -77,6 +77,9 @@ export interface PersistedTokenUsageEvent {
   context_ceiling_tokens: number | null
   compact_at_tokens: number | null
   window_source: WindowSource | null
+  /** When the request arrived; null outside a request. `created_at_ms` is
+   *  when its usage was recorded, at the end of the response. */
+  request_started_at_ms: number | null
 }
 
 export interface TokenUsageTotals {
@@ -203,6 +206,9 @@ function initializeTokenUsageDb(db: SqliteDatabase): void {
   // Versioned migrations for everything after the v0 baseline. Runs on every
   // open; already-applied steps are skipped via PRAGMA user_version.
   runMigrations(db, TOKEN_USAGE_MIGRATIONS)
+  // Step 2's columns are also checked on every open, so a database that ran
+  // step 2 before a column joined it gets that column too.
+  addSessionColumns(db)
 
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_token_usage_events_created_at_ms
@@ -245,25 +251,10 @@ const TOKEN_USAGE_MIGRATIONS: Array<Migration> = [
     },
   },
   {
-    // The live-sessions view needs to know which client sent a request, how
-    // long its prompt cache lives, and the context window it ran under.
-    // Existing rows predate capture: client reads 'other', the cache and
-    // compaction flags 0, and the window columns NULL (unknown).
+    // The live-sessions view's columns (SESSION_COLUMNS below).
     name: "add client, cache and context columns",
     up: (db) => {
-      for (const column of [
-        "client TEXT NOT NULL DEFAULT 'other'",
-        "client_label TEXT",
-        "cache_ttl_s INTEGER NOT NULL DEFAULT 0",
-        "cache_ttl_requested INTEGER NOT NULL DEFAULT 0",
-        "is_compact INTEGER NOT NULL DEFAULT 0",
-        "context_window_tokens INTEGER",
-        "context_ceiling_tokens INTEGER",
-        "compact_at_tokens INTEGER",
-        "window_source TEXT",
-      ]) {
-        db.exec(`ALTER TABLE token_usage_events ADD COLUMN ${column}`)
-      }
+      addSessionColumns(db)
       db.exec(
         "CREATE INDEX IF NOT EXISTS idx_token_usage_events_session_created ON token_usage_events(session_id, created_at_ms)",
       )
@@ -271,16 +262,46 @@ const TOKEN_USAGE_MIGRATIONS: Array<Migration> = [
   },
 ]
 
+/** Migration step 2's columns: which client sent a request, how long its
+ *  prompt cache lives, the context window it ran under, and when it started.
+ *  Existing rows read as client 'other', the cache and compaction flags 0, and
+ *  the window and start columns NULL (unknown). */
+const SESSION_COLUMNS: ReadonlyArray<readonly [string, string]> = [
+  ["client", "TEXT NOT NULL DEFAULT 'other'"],
+  ["client_label", "TEXT"],
+  ["cache_ttl_s", "INTEGER NOT NULL DEFAULT 0"],
+  ["cache_ttl_requested", "INTEGER NOT NULL DEFAULT 0"],
+  ["is_compact", "INTEGER NOT NULL DEFAULT 0"],
+  ["context_window_tokens", "INTEGER"],
+  ["context_ceiling_tokens", "INTEGER"],
+  ["compact_at_tokens", "INTEGER"],
+  ["window_source", "TEXT"],
+  ["request_started_at_ms", "INTEGER"],
+]
+
+/** Add each of step 2's columns the table doesn't have yet. */
+function addSessionColumns(db: SqliteDatabase): void {
+  const present = tableColumns(db)
+  for (const [name, definition] of SESSION_COLUMNS) {
+    if (!present.has(name)) {
+      db.exec(`ALTER TABLE token_usage_events ADD COLUMN ${name} ${definition}`)
+    }
+  }
+}
+
+function tableColumns(db: SqliteDatabase): Set<string> {
+  const rows = db
+    .prepare("PRAGMA table_info(token_usage_events)")
+    .all() as Array<Record<string, unknown>>
+  return new Set(rows.map((row) => String(row.name)))
+}
+
 function ensureColumn(
   db: SqliteDatabase,
   name: string,
   definition: string,
 ): void {
-  const rows = db
-    .prepare("PRAGMA table_info(token_usage_events)")
-    .all() as Array<Record<string, unknown>>
-  const hasColumn = rows.some((row) => row.name === name)
-  if (!hasColumn) {
+  if (!tableColumns(db).has(name)) {
     db.exec(`ALTER TABLE token_usage_events ADD COLUMN ${name} ${definition}`)
   }
 }
@@ -357,8 +378,9 @@ async function writeTokenUsageEvent(
         context_window_tokens,
         context_ceiling_tokens,
         compact_at_tokens,
-        window_source
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        window_source,
+        request_started_at_ms
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
   ).run(
     event.created_at_ms,
@@ -386,6 +408,7 @@ async function writeTokenUsageEvent(
     event.context_ceiling_tokens,
     event.compact_at_tokens,
     event.window_source,
+    event.request_started_at_ms,
   )
 }
 
@@ -709,6 +732,7 @@ const SessionRowSchema = z.object({
   context_ceiling_tokens: z.number().nullable(),
   compact_at_tokens: z.number().nullable(),
   window_source: SessionWindowSource.nullable().catch(null),
+  request_started_at_ms: z.number().nullable(),
 })
 
 /** One request, with the columns the sessions view reads. */
@@ -743,7 +767,8 @@ export async function getSessionRows(
       context_window_tokens,
       context_ceiling_tokens,
       compact_at_tokens,
-      window_source
+      window_source,
+      request_started_at_ms
     FROM token_usage_events
     WHERE created_at_ms >= ?
     ORDER BY created_at_ms ASC, id ASC

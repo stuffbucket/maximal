@@ -436,7 +436,9 @@ function session(o: SessionOverrides, buckets: Array<number>, nowMs: number): Se
 function liveSessions(): SessionsResponse {
   const now = Date.now()
   const claude = { client: "claude-code" } as const
-  const codexWindow = { window_tokens: 272_000, ceiling_tokens: 272_000, compact_at_tokens: 244_800 }
+  // Codex sizes its window from its catalog; Copilot's ceiling is lower, and
+  // Maximal's injected compaction sits at 90% of that ceiling.
+  const codexWindow = { window_tokens: 272_000, ceiling_tokens: 128_000, compact_at_tokens: 115_200 }
   const claudeWindow = { window_tokens: 200_000, ceiling_tokens: 200_000, compact_at_tokens: null }
   return {
     // Trailing minute across all sessions, plus what the streaming reply has emitted so far.
@@ -458,6 +460,7 @@ function liveSessions(): SessionsResponse {
             expires_at_ms: now - 25_000 + 3_600_000,
             confidence: "requested",
             downgraded: false,
+            downgraded_from_s: null,
             last_cache_read_tokens: 148_200,
           },
           context: {
@@ -486,6 +489,7 @@ function liveSessions(): SessionsResponse {
             expires_at_ms: now - 70_000 + 3_600_000,
             confidence: "observed",
             downgraded: false,
+            downgraded_from_s: null,
             last_cache_read_tokens: 58_900,
           },
           context: {
@@ -498,12 +502,14 @@ function liveSessions(): SessionsResponse {
         [9_200, 12_400, 0, 0, 6_800, 15_300, 11_000, 8_700, 0, 4_200, 13_800, 9_600, 5_100, 7_300, 6_400],
         now,
       ),
-      // Warm Codex session: GPT caches automatically, so the lifetime is a guess; 93% full.
+      // Warm Codex session: GPT caches automatically, so the lifetime is a guess;
+      // 93% of Copilot's ceiling. Its key is the one the integration made, so
+      // it has no label of its own.
       session(
         {
           id: "0c8d3e17-9b42-4f6a-a1d5-7e3b2f8c9d04",
           client: "codex",
-          client_label: "Codex",
+          client_label: null,
           model: "gpt-5-codex",
           state: "warm",
           started_at_ms: now - 74 * MIN,
@@ -514,10 +520,11 @@ function liveSessions(): SessionsResponse {
             expires_at_ms: now - 150_000 + 300_000,
             confidence: "estimated",
             downgraded: false,
+            downgraded_from_s: null,
             last_cache_read_tokens: 231_500,
           },
           context: {
-            used_tokens: 253_000,
+            used_tokens: 119_000,
             ...codexWindow,
             window_source: "codex-catalog",
             compacted_at_ms: now - 48 * MIN,
@@ -542,6 +549,7 @@ function liveSessions(): SessionsResponse {
             expires_at_ms: now - 90_000 + 300_000,
             confidence: "requested",
             downgraded: false,
+            downgraded_from_s: null,
             last_cache_read_tokens: 22_400,
           },
           context: {
@@ -569,6 +577,7 @@ function liveSessions(): SessionsResponse {
             expires_at_ms: now + 20_000,
             confidence: "requested",
             downgraded: false,
+            downgraded_from_s: null,
             last_cache_read_tokens: 9_800,
           },
           context: {
@@ -597,6 +606,7 @@ function liveSessions(): SessionsResponse {
             expires_at_ms: now - 14 * MIN + 300_000,
             confidence: "estimated",
             downgraded: true,
+            downgraded_from_s: 3_600,
             last_cache_read_tokens: 0,
           },
           context: {
@@ -614,7 +624,7 @@ function liveSessions(): SessionsResponse {
         {
           id: "93e6a0b2-8f14-4c75-a2d9-1b5c7e3f8a40",
           client: "codex",
-          client_label: "Codex",
+          client_label: null,
           model: "gpt-5-mini",
           state: "cold",
           started_at_ms: now - 5 * 3_600_000,
@@ -626,6 +636,7 @@ function liveSessions(): SessionsResponse {
             expires_at_ms: now - 47 * MIN + 300_000,
             confidence: "estimated",
             downgraded: false,
+            downgraded_from_s: null,
             last_cache_read_tokens: 6_300,
           },
           context: {
@@ -643,7 +654,7 @@ function liveSessions(): SessionsResponse {
         {
           id: "other:claude-desktop",
           client: "claude-desktop",
-          client_label: "Claude Desktop",
+          client_label: null,
           model: "claude-sonnet-4-5",
           state: "cold",
           started_at_ms: now - 6 * 3_600_000,
@@ -655,6 +666,7 @@ function liveSessions(): SessionsResponse {
             expires_at_ms: null,
             confidence: "estimated",
             downgraded: false,
+            downgraded_from_s: null,
             last_cache_read_tokens: 0,
           },
           context: {

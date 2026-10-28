@@ -11,20 +11,62 @@ export interface InFlight {
   client: UsageClient
   model: string
   startedAtMs: number
-  streamedBytes: number
+  /** Characters of delta text (reply, thinking, tool arguments) streamed so
+   *  far, as written in the JSON. */
+  streamedChars: number
 }
 
 /**
- * Rough bytes of SSE framing plus JSON per text token. It only feeds the
- * dashboard's streaming-speed estimate, so it need not be exact.
+ * Characters of streamed text per token, the usual rough figure for English
+ * and code. It only feeds the dashboard's flow estimate, so it need not be
+ * exact.
  */
-export const STREAM_BYTES_PER_TOKEN = 16
+export const STREAM_CHARS_PER_TOKEN = 4
+
+/** The string fields that carry streamed text in a delta event: Anthropic
+ *  (`text`, `thinking`, `partial_json`), Responses (`delta`) and chat
+ *  completions (`content`, `arguments`). */
+const DELTA_TEXT =
+  /"(?:text|thinking|partial_json|delta|content|arguments)":"((?:[^"\\]|\\.)*)"/g
+
+/** Longest unfinished line kept between chunks. */
+const MAX_PARTIAL_LINE = 65_536
+
+/**
+ * Counts the delta text in an SSE stream, so the estimate follows tokens
+ * rather than framing: one delta event is about a hundred bytes of event name
+ * and JSON around a few characters of text. Only `data:` lines with a `delta`
+ * field count; events that repeat finished text (`*.done`,
+ * `response.completed`) have none. A line split across chunks counts once it
+ * is complete.
+ */
+export class DeltaTextCounter {
+  readonly #decoder = new TextDecoder()
+  #partial = ""
+
+  /** Feed one chunk; returns the delta characters it completed. */
+  feed(chunk: Uint8Array): number {
+    const text = this.#partial + this.#decoder.decode(chunk, { stream: true })
+    const end = text.lastIndexOf("\n")
+    // A body that isn't SSE (one JSON reply) has no lines to count: don't
+    // hold on to it.
+    const rest = text.slice(end + 1)
+    this.#partial = rest.length > MAX_PARTIAL_LINE ? "" : rest
+    let chars = 0
+    for (const line of text.slice(0, end + 1).split("\n")) {
+      if (!line.startsWith("data:") || !line.includes('"delta":')) continue
+      for (const match of line.matchAll(DELTA_TEXT)) chars += match[1].length
+    }
+    return chars
+  }
+}
 
 interface Entry {
   /** Live context: routes fill `usage.sessionId` and `usage.model` after the
    *  middleware has already registered, so these are read at list time. */
   context: RequestContext
-  streamedBytes: number
+  counter: DeltaTextCounter
+  streamedChars: number
 }
 
 /** An entry older than this is assumed leaked (a response never read to the
@@ -35,19 +77,24 @@ const entries = new Set<Entry>()
 /** Contexts already tracked, so overlapping route matches register once. */
 const registered = new WeakSet<RequestContext>()
 
-export function listInFlight(now = Date.now()): Array<InFlight> {
+/** Drop entries older than the max age. */
+function prune(now: number): void {
   for (const entry of entries) {
     if (now - entry.context.startTime > IN_FLIGHT_MAX_AGE_MS) {
       entries.delete(entry)
     }
   }
-  return [...entries].map(({ context, streamedBytes }) => ({
+}
+
+export function listInFlight(now = Date.now()): Array<InFlight> {
+  prune(now)
+  return [...entries].map(({ context, streamedChars }) => ({
     traceId: context.traceId,
     sessionId: context.usage.sessionId ?? "",
     client: deriveUsageClient(context.usage.apiKeyLabel, context.userAgent),
     model: context.usage.model ?? "",
     startedAtMs: context.startTime,
-    streamedBytes,
+    streamedChars,
   }))
 }
 
@@ -55,8 +102,13 @@ export function __resetInFlightForTests(): void {
   entries.clear()
 }
 
+/** Entries held now, without the pruning a list does. */
+export function __inFlightCountForTests(): number {
+  return entries.size
+}
+
 /**
- * Pass the body through chunk by chunk, counting bytes, and drop the entry
+ * Pass the body through chunk by chunk, counting delta text, and drop the entry
  * when it ends, errors or the client cancels. Pull-based, so backpressure
  * and incremental delivery are the source stream's own.
  */
@@ -76,7 +128,7 @@ function observeBody(
           controller.close()
           return
         }
-        entry.streamedBytes += value.byteLength
+        entry.streamedChars += entry.counter.feed(value)
         controller.enqueue(value)
       } catch (error) {
         entries.delete(entry)
@@ -103,7 +155,13 @@ export const trackInFlight: MiddlewareHandler = async (c, next) => {
   }
   registered.add(context)
 
-  const entry: Entry = { context, streamedBytes: 0 }
+  // Pruning here too keeps a leaked entry from waiting for a sessions read.
+  prune(Date.now())
+  const entry: Entry = {
+    context,
+    counter: new DeltaTextCounter(),
+    streamedChars: 0,
+  }
   entries.add(entry)
   let streaming = false
   try {

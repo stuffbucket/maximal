@@ -29,8 +29,10 @@ const Session = z.object({
   /** session_id, or "other:<client>" for requests with no session. */
   id: z.string(),
   client: SessionClient,
+  /** The API key's label when the user named it; null for none, or for the
+   *  label an integration provisioned (it only repeats the client's name). */
   client_label: z.string().nullable(),
-  /** Model of the latest request. */
+  /** The session's main model: the one with the most tokens in it. */
   model: z.string(),
   started_at_ms: z.number(),
   last_request_at_ms: z.number(),
@@ -42,6 +44,7 @@ const Session = z.object({
   /** Last 24 h. */
   total_tokens: z.number(),
   request_count: z.number(),
+  /** The cache that lasts longest among each model's latest request. */
   cache: z.object({
     /** 0 = nothing cached. */
     ttl_s: z.number(),
@@ -50,8 +53,11 @@ const Session = z.object({
     confidence: z.enum(["observed", "requested", "estimated"]),
     /** The requested lifetime was seen failing, so ttl_s is cut to 5 min. */
     downgraded: z.boolean(),
+    /** The lifetime that didn't hold, in seconds, when downgraded. */
+    downgraded_from_s: z.number().nullable(),
     last_cache_read_tokens: z.number(),
   }),
+  /** The main model's latest request. */
   context: z.object({
     used_tokens: z.number(),
     window_tokens: z.number().nullable(),
@@ -64,8 +70,8 @@ const Session = z.object({
 })
 
 export const SessionsResponse = z.object({
-  /** Whole system: tokens in the trailing 60 s, plus output tokens streamed
-   *  so far by requests in flight. */
+  /** Whole system: tokens not read from a cache in the trailing 60 s, plus
+   *  an estimate of those streamed so far by requests in flight. */
   flow_per_min: z.number(),
   sessions: z.array(Session),
 })

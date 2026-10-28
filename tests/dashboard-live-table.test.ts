@@ -38,6 +38,7 @@ function session(
       expires_at_ms: expires,
       confidence: "requested",
       downgraded: false,
+      downgraded_from_s: null,
       last_cache_read_tokens: 0,
     },
     context: {
