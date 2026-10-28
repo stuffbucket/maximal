@@ -147,67 +147,106 @@ describe("Debian packages", () => {
 })
 
 describe("apt repository (deploy-pages.yml)", () => {
-  test("is planned from the manifest the same deploy publishes", () => {
-    expect(DEPLOY).toContain("bun scripts/apt-repo-plan.ts")
-    expect(DEPLOY).toContain("--manifest site/public/updates/manifest.json")
-    expect(DEPLOY).toContain("bash build/linux/apt-repo.sh fetch")
-    expect(DEPLOY).toContain("bash build/linux/apt-repo.sh index")
-    // Built after Astro, into the deployed directory.
-    expect(DEPLOY.indexOf("bun run build")).toBeLessThan(
-      DEPLOY.indexOf("bun scripts/apt-repo-plan.ts"),
-    )
-    expect(DEPLOY).toContain("site/dist/apt")
+  const build = job(DEPLOY, "build")
+  const sign = job(DEPLOY, "sign-apt")
+  const deploy = job(DEPLOY, "deploy")
+
+  test("build only plans, from the manifest the same deploy publishes", () => {
+    expect(build).toContain("bun scripts/apt-repo-plan.ts")
+    expect(build).toContain("--manifest site/public/updates/manifest.json")
+    expect(build).toContain("apt: ${{ steps.apt.outputs.build }}")
+    expect(build).toContain("suites: ${{ steps.apt.outputs.suites }}")
+    // Nothing build makes (it runs project dependencies) is signed.
+    expect(build).not.toContain("apt-repo.sh")
+    expect(build).not.toContain("apt-ftparchive")
+    expect(build).not.toContain("name: apt")
+    expect(build).not.toContain("secrets.")
   })
 
-  test("only the sign-apt job, in the github-pages environment, sees the signing secrets", () => {
+  test("sign-apt fetches, indexes and signs, in that order, in the github-pages environment", () => {
+    expect(sign).toContain("environment: github-pages")
+    expect(sign).toContain("if: needs.build.outputs.apt == 'true'")
+    const fetch = sign.indexOf(
+      "bash build/linux/apt-repo.sh fetch apt site/public/updates/manifest.json",
+    )
+    const index = sign.indexOf("bash build/linux/apt-repo.sh index apt")
+    const signing = sign.indexOf(
+      "bash build/linux/apt-repo.sh sign apt site/public/apt/maximal.asc",
+    )
+    expect(fetch).toBeGreaterThan(-1)
+    expect(index).toBeGreaterThan(fetch)
+    expect(signing).toBeGreaterThan(index)
+    // The whole signed tree, pool included, is one artifact.
+    expect(sign).toContain("name: apt\n          path: apt\n")
+  })
+
+  test("only the sign step sees the signing secrets", () => {
     const secretLines = DEPLOY.split("\n").filter((line) =>
       line.includes("secrets."),
     )
     expect(secretLines).toHaveLength(2)
-    const build = job(DEPLOY, "build")
-    const sign = job(DEPLOY, "sign-apt")
-    const deploy = job(DEPLOY, "deploy")
-    for (const line of secretLines) expect(sign).toContain(line)
-    expect(build).not.toContain("secrets.")
-    expect(deploy).not.toContain("secrets.")
-    expect(sign).toContain("environment: github-pages")
-    expect(sign).toContain(
+    const signStep = sign.slice(
+      sign.indexOf("- name: Sign the apt repository"),
+      sign.indexOf("- name: Upload the signed apt repository"),
+    )
+    for (const line of secretLines) expect(signStep).toContain(line)
+    expect(signStep).toContain(
       "APT_SIGNING_KEY_FINGERPRINT: ${{ vars.APT_SIGNING_KEY_FINGERPRINT }}",
     )
-    expect(sign).toContain(
-      "bash build/linux/apt-repo.sh sign apt site/public/apt/maximal.asc",
-    )
+    expect(deploy).not.toContain("secrets.")
   })
 
-  test("sign-apt checks out only what signing needs and installs nothing", () => {
-    const sign = job(DEPLOY, "sign-apt")
+  test("sign-apt checks out only the script, key and manifest, and runs no project code", () => {
+    expect(sign).toContain("persist-credentials: false")
     expect(sign).toContain(
-      "sparse-checkout: |\n            build/linux/apt-repo.sh\n            site/public/apt/maximal.asc\n",
+      "sparse-checkout: |\n            build/linux/apt-repo.sh\n            site/public/apt/maximal.asc\n            site/public/updates/manifest.json\n",
     )
     expect(sign).toContain("sparse-checkout-cone-mode: false")
     for (const forbidden of [
-      "apt-get",
       "bun ",
       "npm ",
       "pnpm ",
       "setup-",
       "mise",
+      "download-artifact",
     ]) {
       expect(sign).not.toContain(forbidden)
     }
-    expect(sign).toContain("if: needs.build.outputs.apt == 'true'")
+    // apt-utils only from Ubuntu's archive, only if the image lacks it.
+    expect(sign).toContain("command -v apt-ftparchive >/dev/null || {")
+    expect(sign).toContain(
+      "sudo apt-get install -y --no-install-recommends apt-utils",
+    )
   })
 
-  test("deploy publishes the signed tree, and still runs with nothing to sign", () => {
-    const deploy = job(DEPLOY, "deploy")
+  test("fetch only builds the releases the manifest names, from checked assets", () => {
+    expect(APT_REPO).toContain(
+      'jq -r --arg s "$suite" \'.channels[$s].tag // ""\' "$manifest"',
+    )
+    expect(APT_REPO).toContain('sha256sum -c --strict "$deb.sha256"')
+  })
+
+  test("deploy publishes /apt only from sign-apt and the committed key, verified", () => {
     expect(deploy).toContain("needs: [build, sign-apt]")
     expect(deploy).toContain(
       "needs.sign-apt.result == 'success' || needs.sign-apt.result == 'skipped'",
     )
     expect(deploy).toContain("needs.build.result == 'success'")
-    expect(deploy).toContain("name: apt-dists-signed")
-    expect(deploy).toContain("not deploying an unsigned apt repository")
-    expect(deploy).toContain("uses: actions/deploy-pages@")
+    expect(deploy).toContain("persist-credentials: false")
+    expect(deploy).toContain("rm -rf site/dist/apt")
+    expect(deploy).toContain(
+      "cp src/site/public/apt/maximal.asc site/dist/apt/maximal.asc",
+    )
+    expect(deploy).toContain("name: apt\n          path: site/dist/apt\n")
+    expect(deploy).toContain(
+      "bash src/build/linux/apt-repo.sh verify site/dist/apt src/site/public/apt/maximal.asc",
+    )
+    expect(deploy.indexOf("apt-repo.sh verify")).toBeLessThan(
+      deploy.indexOf("uses: actions/upload-pages-artifact@"),
+    )
+    // verify: signed by the published key, and every Filename in the pool.
+    expect(APT_REPO).toContain("not deploying an unsigned apt repository")
+    expect(APT_REPO).toContain("which isn't in the pool")
   })
 
   test("the committed public key is Maximal's apt key", () => {
@@ -224,7 +263,7 @@ describe("apt repository (deploy-pages.yml)", () => {
     expect(paths).toContain('- "site/**"')
   })
 
-  test("indexes are served by hash, so a CDN can't mix generations", () => {
+  test("indexes are served by hash", () => {
     expect(APT_REPO).toContain("-o APT::FTPArchive::DoByHash=true")
     expect(APT_REPO).toContain("grep -qx 'Acquire-By-Hash: yes'")
   })
