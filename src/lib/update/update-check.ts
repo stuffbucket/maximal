@@ -1,16 +1,18 @@
 /**
- * Update-available check (notify-only; there is no self-update). Resolves
- * the latest published release version from a JSON manifest the project
- * site publishes at a canonical URL (mxml.sh, fronting GitHub Pages) and
- * compares it to the running `BUILD_VERSION`. Config-gated
- * (`config.checkUpdates`, default ON) and cached so the Settings panel + the
- * shell's periodic notification don't refetch needlessly. A refetch is a
- * conditional request (`If-None-Match` / `If-Modified-Since`), so an unchanged
- * manifest costs a 304 with no body.
+ * Update-available check. Resolves the latest published release version from
+ * a JSON manifest the project site publishes at a canonical URL (mxml.sh,
+ * fronting GitHub Pages) and compares it to the running `BUILD_VERSION`.
+ * Config-gated (`config.checkUpdates`, default ON) and cached so the Settings
+ * panel + the shell's periodic notification don't refetch needlessly. A
+ * refetch is a conditional request (`If-None-Match` / `If-Modified-Since`), so
+ * an unchanged manifest costs a 304 with no body.
  *
- * Install-channel neutral: we point users at `https://mxml.sh` (the download
- * page that routes to the right artifact / package manager) rather than a raw
- * release asset, because the running build could be a brew/npm/MSI install that
+ * This only decides whether to offer an update. Installing is not done here:
+ * the Windows desktop app installs in place (the Tauri shell's signed updater,
+ * which reads its own manifest at mxml.sh/updates/desktop/<channel>.json); every
+ * other build sends the user to `https://mxml.sh` (the download page that
+ * routes to the right artifact / package manager) rather than a raw release
+ * asset, because the running build could be a brew/npm/MSI install that
  * shouldn't be clobbered by a bare binary swap.
  *
  * Best-effort throughout: any failure (offline, rate-limited, malformed body)

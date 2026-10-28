@@ -21,6 +21,7 @@
   "nav-switch-to-dashboard": "Панель мониторинга ({shortcut})",
   "nav-switch-to-settings": "Настройки ({shortcut})",
   "nav-update-to": "Обновить до {version}",
+  "nav-update-downloading": "Загрузка…",
 
   "appearance-title": "Оформление",
   "appearance-sub": "Настройте отображение Maximal на рабочем столе.",
@@ -366,5 +367,12 @@
   "native-quit-title": "Выйти из Maximal?",
   "native-quit-body": "Maximal остановится, и все открытые окна Настроек закроются.",
   "native-quit-confirm": "Выйти из Maximal",
-  "native-quit-cancel": "Отмена"
+  "native-quit-cancel": "Отмена",
+  "native-update-confirm-title": "Обновить Maximal?",
+  "native-update-confirm-body": "Maximal скачает и установит {version}, затем перезапустится. Выполняющиеся запросы будут прерваны.",
+  "native-update-confirm-install": "Установить и перезапустить",
+  "native-update-confirm-cancel": "Не сейчас",
+  "native-update-failed-title": "Не удалось установить обновление",
+  "native-update-failed-body": "Maximal откроет mxml.sh, чтобы вы могли скачать его там.",
+  "native-update-failed-open": "Открыть mxml.sh"
 }
