@@ -1,6 +1,6 @@
 {
   "schema": 2,
-  "generated": "2026-10-28T07:00:42.939Z",
+  "generated": "2026-10-28T07:47:19.353Z",
   "channels": {
     "stable": {
       "version": "0.4.48",
@@ -30,29 +30,45 @@
       }
     },
     "rc": {
-      "version": "0.5.0-rc.4",
-      "tag": "v0.5.0-rc.4",
-      "notes": "https://github.com/stuffbucket/maximal/releases/tag/v0.5.0-rc.4",
+      "version": "0.5.0-rc.5",
+      "tag": "v0.5.0-rc.5",
+      "notes": "https://github.com/stuffbucket/maximal/releases/tag/v0.5.0-rc.5",
       "downloads": {
         "macos-arm64-dmg": {
-          "name": "maximal-v0.5.0-rc.4-darwin-arm64.dmg",
-          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.4/maximal-v0.5.0-rc.4-darwin-arm64.dmg"
+          "name": "maximal-v0.5.0-rc.5-darwin-arm64.dmg",
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.5/maximal-v0.5.0-rc.5-darwin-arm64.dmg"
         },
         "windows-x64-setup": {
-          "name": "maximal-v0.5.0-rc.4-windows-x64-setup.exe",
-          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.4/maximal-v0.5.0-rc.4-windows-x64-setup.exe"
+          "name": "maximal-v0.5.0-rc.5-windows-x64-setup.exe",
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.5/maximal-v0.5.0-rc.5-windows-x64-setup.exe"
         },
         "windows-x64-msi": {
-          "name": "maximal-v0.5.0-rc.4-windows-x64.msi",
-          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.4/maximal-v0.5.0-rc.4-windows-x64.msi"
+          "name": "maximal-v0.5.0-rc.5-windows-x64.msi",
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.5/maximal-v0.5.0-rc.5-windows-x64.msi"
         },
         "windows-x64-zip": {
-          "name": "maximal-v0.5.0-rc.4-windows-x64.zip",
-          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.4/maximal-v0.5.0-rc.4-windows-x64.zip"
+          "name": "maximal-v0.5.0-rc.5-windows-x64.zip",
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.5/maximal-v0.5.0-rc.5-windows-x64.zip"
         },
         "windows-install-ps1": {
           "name": "install.ps1",
-          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.4/install.ps1"
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.5/install.ps1"
+        },
+        "linux-amd64-deb": {
+          "name": "maximal_0.5.0-rc.5_amd64.deb",
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.5/maximal_0.5.0-rc.5_amd64.deb"
+        },
+        "linux-amd64-desktop-deb": {
+          "name": "maximal-desktop_0.5.0-rc.5_amd64.deb",
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.5/maximal-desktop_0.5.0-rc.5_amd64.deb"
+        },
+        "linux-arm64-deb": {
+          "name": "maximal_0.5.0-rc.5_arm64.deb",
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.5/maximal_0.5.0-rc.5_arm64.deb"
+        },
+        "linux-arm64-desktop-deb": {
+          "name": "maximal-desktop_0.5.0-rc.5_arm64.deb",
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.5/maximal-desktop_0.5.0-rc.5_arm64.deb"
         }
       }
     }
