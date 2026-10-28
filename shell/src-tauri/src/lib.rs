@@ -2045,6 +2045,13 @@ fn create_splash(app: &AppHandle) {
     .maximizable(false)
     .decorations(false)
     .transparent(true)
+    // Windows only: an undecorated window with a shadow gets a 1px white
+    // frame from DWM (and, on Windows 11, square-ish rounding of its own
+    // that doesn't match the page's 14px radius), which shows as white
+    // corners outside the rounded `.splash`. The page already paints its
+    // own rounded shape on a transparent webview, so drop the OS frame
+    // there. macOS and Linux keep the default.
+    .shadow(!cfg!(windows))
     .always_on_top(true)
     .skip_taskbar(true)
     // Build hidden and only show once the webview reports the DOM has
