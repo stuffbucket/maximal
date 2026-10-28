@@ -137,8 +137,12 @@ const windows = process.platform === "win32"
 // On the windows-11-arm runner each PowerShell launch takes about 42 seconds,
 // so a PowerShell parent can't answer inside the test's budget. What it checks
 // (PowerShell's .NET pipes) is covered on x64; Claude Desktop, the real
-// client, is Node, which runs here.
-const powershellTooSlow = process.arch === "arm64"
+// client, is Node, which runs here. Bun there is the emulated x64 build, so
+// `process.arch` says x64; the machine's architecture is in the environment.
+const powershellTooSlow =
+  (
+    process.env.PROCESSOR_ARCHITEW6432 ?? process.env.PROCESSOR_ARCHITECTURE
+  )?.toUpperCase() === "ARM64"
 const clients = (
   powershellTooSlow ?
     ["node"]
@@ -163,6 +167,9 @@ describe.skipIf(!windows)("the stdio adapter on Windows pipes", () => {
   // Diagnostic: which ways of reading stdin work under each parent. Logged,
   // not asserted.
   it("reports which stdin readers work under each parent", async () => {
+    console.log(
+      `[stdin-probe] arch ${process.arch}, PROCESSOR_ARCHITECTURE ${process.env.PROCESSOR_ARCHITECTURE}, PROCESSOR_ARCHITEW6432 ${process.env.PROCESSOR_ARCHITEW6432}, clients ${clients.join("+")}`,
+    )
     for (const client of clients) {
       for (const method of [
         "process-stdin",
