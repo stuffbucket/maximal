@@ -527,9 +527,17 @@ jobs:
   # The signed DMG and the signed updater bundle the macOS app installs in
   # place must be attached (and the bundle verified) before `publish` seals
   # the release.
+  #
+  # The private builder is started with a short-lived app-repoman
+  # installation token, only when its files are not already on the draft.
+  # `APP_ID` (variable) and `APP_PRIVATE_KEY` (secret) live in the `release`
+  # environment (deploys from `v*` tags only). app-repoman needs Actions
+  # read/write on stuffbucket/macos-builder. App keys do not expire, unlike a
+  # PAT. Everything that touches this repository keeps `github.token`.
   macos-dmg:
     needs: release
     runs-on: ubuntu-latest
+    environment: release
     # Above the ~30 min builder/notarization wait this job polls for.
     timeout-minutes: 40
     permissions:
@@ -546,9 +554,41 @@ jobs:
         with:
           bun-version: 1.3.14
 
-      - name: Build (or reuse) the signed .dmg and updater bundle and ensure they are on the draft
+      - name: Check whether the builder files are already on the draft
+        id: builder-files
         env:
-          BUILDER_PAT: ${{ secrets.MACOS_BUILDER_PAT }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          assets="$(gh release view "$TAG" --repo "$REPO" --json assets \
+            --jq '.assets[].name' 2>/dev/null || true)"
+          has() { grep -Fxq "$1" <<<"$assets"; }
+          if { has "Maximal.dmg" || has "maximal-${TAG}-darwin-arm64.dmg"; } \
+            && has "$TARBALL" && has "$TARBALL.sig" && has "$TARBALL.sha256"; then
+            echo "The DMG and ${TARBALL} (+ .sig, .sha256) are already on the draft."
+            echo "built=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "built=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Only a dispatch needs this token, so a rerun whose files are already
+      # on the draft needs no key.
+      - name: Create an app-repoman token for macos-builder
+        id: builder-token
+        if: steps.builder-files.outputs.built != 'true'
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        with:
+          app-id: ${{ vars.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: stuffbucket
+          repositories: macos-builder
+          permission-actions: write
+
+      - name: Start the macOS builder and wait for its files on the draft
+        if: steps.builder-files.outputs.built != 'true'
+        env:
+          BUILDER_TOKEN: ${{ steps.builder-token.outputs.token }}
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: |
@@ -565,35 +605,39 @@ jobs:
             { has "$SRC" || has "$DST"; } \
               && has "$TARBALL" && has "$TARBALL.sig" && has "$TARBALL.sha256"
           }
-          refresh
-          # Avoid dispatching another build when every builder file is there.
-          if built; then
-            echo "The DMG and ${TARBALL} (+ .sig, .sha256) are already on the draft."
-          else
-            echo "Dispatching the private macOS builder for ${REPO} at ${TAG}…"
-            GH_TOKEN="$BUILDER_PAT" gh workflow run build.yml \
-              --repo stuffbucket/macos-builder --ref main \
-              -f "repo=${REPO}" -f "ref=${TAG}"
-            echo "Polling the draft for ${SRC} and ${TARBALL} (+ .sig, .sha256) (sign + notarize takes a few min)…"
-            ok=0
-            for i in $(seq 1 40); do   # ~30 min cap (45s × 40)
-              sleep 45
-              refresh
-              if built; then
-                ok=1; echo "Builder files present after ~$((i * 45))s."; break
-              fi
-            done
-            if [ "$ok" -ne 1 ]; then
-              missing=""
-              { has "$SRC" || has "$DST"; } || missing="$missing $SRC"
-              for f in "$TARBALL" "$TARBALL.sig" "$TARBALL.sha256"; do
-                has "$f" || missing="$missing $f"
-              done
-              echo "::error::Timed out waiting for${missing} on the draft release. See the stuffbucket/macos-builder run; the release stays a draft (not published without a macOS build)." >&2
-              exit 1
+          echo "Dispatching the private macOS builder for ${REPO} at ${TAG}…"
+          GH_TOKEN="$BUILDER_TOKEN" gh workflow run build.yml \
+            --repo stuffbucket/macos-builder --ref main \
+            -f "repo=${REPO}" -f "ref=${TAG}"
+          echo "Polling the draft for ${SRC} and ${TARBALL} (+ .sig, .sha256) (sign + notarize takes a few min)…"
+          ok=0
+          for i in $(seq 1 40); do   # ~30 min cap (45s × 40)
+            sleep 45
+            refresh
+            if built; then
+              ok=1; echo "Builder files present after ~$((i * 45))s."; break
             fi
+          done
+          if [ "$ok" -ne 1 ]; then
+            missing=""
+            { has "$SRC" || has "$DST"; } || missing="$missing $SRC"
+            for f in "$TARBALL" "$TARBALL.sig" "$TARBALL.sha256"; do
+              has "$f" || missing="$missing $f"
+            done
+            echo "::error::Timed out waiting for${missing} on the draft release. See the stuffbucket/macos-builder run; the release stays a draft (not published without a macOS build)." >&2
+            exit 1
           fi
-          if ! has "$SRC"; then
+
+      - name: Normalize the .dmg name and checksum on the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          SRC="Maximal.dmg"
+          DST="maximal-${TAG}-darwin-arm64.dmg"
+          if ! gh release view "$TAG" --repo "$REPO" --json assets \
+            --jq '.assets[].name' | grep -Fxq "$SRC"; then
             echo "${DST} is already normalized."
             exit 0
           fi
