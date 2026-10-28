@@ -122,6 +122,14 @@ const UPDATE_CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 /// CDN's `max-age` for the manifest.
 const UPDATE_RETRY_INTERVAL: Duration = Duration::from_secs(10 * 60);
 
+/// How long a user-asked update check waits for the sidecar, which fetches the
+/// manifest itself (up to its own 15 s timeout). The poll's 2 s is too short.
+const UPDATE_FORCE_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// Event the shell sends the Settings window after it ran an update check, so
+/// the topbar button and Diagnostics rows re-read the status right away.
+const UPDATE_STATUS_EVENT: &str = "update:status";
+
 /// The install-channel-neutral download page — the same constant the sidecar
 /// reports as `url` (`DOWNLOAD_URL` in src/lib/update/update-check.ts). Used
 /// when the payload carries no URL.
@@ -193,6 +201,7 @@ mod menu_id {
     pub const OPEN_CONFIG: &str = "open_config";
     pub const UPGRADE: &str = "upgrade";
     pub const REQUESTS: &str = "requests";
+    pub const CHECK_UPDATES: &str = "check_updates";
 }
 
 /// High-level tray state. Each transition rebuilds the menu and swaps
@@ -879,6 +888,7 @@ pub fn run() {
             set_dock_visibility,
             update_installs_in_place,
             install_update,
+            refresh_update_status,
         ])
         .setup(|app| {
             // Seed persisted Dock/taskbar visibility mode ("always" by default,
@@ -1374,9 +1384,7 @@ async fn poll_sidecar_status(app: AppHandle) {
     let auth_status_url = format!(
         "http://127.0.0.1:{SIDECAR_PORT}/settings/api/auth/github/status",
     );
-    let update_status_url = format!(
-        "http://127.0.0.1:{SIDECAR_PORT}/settings/api/update-status",
-    );
+    let update_status_url = update_status_endpoint(false);
     let working_notice_url = format!(
         "http://127.0.0.1:{SIDECAR_PORT}/settings/api/notices/working",
     );
@@ -1684,12 +1692,7 @@ async fn check_for_update(
     client: &reqwest::Client,
     url: &str,
 ) -> Option<Duration> {
-    let key = app.state::<ShellApiKey>().value().to_owned();
-    let resp = match client.get(url).header("x-api-key", key).send().await {
-        Ok(r) if r.status().is_success() => r,
-        _ => return None, // transient — retry next tick
-    };
-    let payload: serde_json::Value = resp.json().await.ok()?;
+    let payload = fetch_update_payload(app, client, url).await?;
     match parse_update_status(&payload) {
         UpdateCheck::Resolved(next) => {
             apply_update(app, next);
@@ -1697,6 +1700,133 @@ async fn check_for_update(
         }
         UpdateCheck::Unresolved => Some(UPDATE_RETRY_INTERVAL),
     }
+}
+
+/// GET an update-status URL against the sidecar. None on any transient
+/// failure (unreachable / non-2xx / unparseable).
+async fn fetch_update_payload(
+    app: &AppHandle,
+    client: &reqwest::Client,
+    url: &str,
+) -> Option<serde_json::Value> {
+    let key = app.state::<ShellApiKey>().value().to_owned();
+    let resp = match client.get(url).header("x-api-key", key).send().await {
+        Ok(r) if r.status().is_success() => r,
+        _ => return None,
+    };
+    resp.json().await.ok()
+}
+
+/// How a user-asked update check ended: what the tray tells them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ManualCheck {
+    /// A newer release exists (the tray item and the notification say so).
+    Available(UpdateSnapshot),
+    /// Current. Carries the running version for the notice.
+    UpToDate(String),
+    /// `config.checkUpdates` is off: the sidecar didn't look.
+    Disabled,
+    /// The sidecar couldn't say (unreachable, or the manifest couldn't be
+    /// read). Never reported as "up to date".
+    Failed,
+}
+
+/// Classify the answer to a forced check. Pure, so it is testable without a
+/// running sidecar. Builds on `parse_update_status`; the one difference from
+/// the poll is that an answer carrying `last_error` is a failed check even
+/// when an older result is still known, because the user asked for a fresh one.
+fn manual_check_outcome(payload: Option<&serde_json::Value>) -> ManualCheck {
+    let Some(payload) = payload else {
+        return ManualCheck::Failed;
+    };
+    let enabled = payload
+        .get("enabled")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(true);
+    if !enabled {
+        return ManualCheck::Disabled;
+    }
+    if payload.get("last_error").is_some_and(|e| !e.is_null()) {
+        return ManualCheck::Failed;
+    }
+    match parse_update_status(payload) {
+        UpdateCheck::Resolved(Some(snapshot)) => ManualCheck::Available(snapshot),
+        UpdateCheck::Resolved(None) => payload
+            .get("current")
+            .and_then(serde_json::Value::as_str)
+            .filter(|v| !v.is_empty())
+            .map_or(ManualCheck::Failed, |v| ManualCheck::UpToDate(v.to_owned())),
+        UpdateCheck::Unresolved => ManualCheck::Failed,
+    }
+}
+
+/// The sidecar's update-status URL; `force` asks for a fresh check instead of
+/// the cached one.
+fn update_status_endpoint(force: bool) -> String {
+    let base = format!("http://127.0.0.1:{SIDECAR_PORT}/settings/api/update-status");
+    if force {
+        format!("{base}?force=1")
+    } else {
+        base
+    }
+}
+
+/// Ask the sidecar for a fresh update check and put the answer on the tray.
+/// None when the sidecar couldn't be asked.
+async fn force_update_check(app: &AppHandle) -> Option<serde_json::Value> {
+    let client = reqwest::Client::builder()
+        .timeout(UPDATE_FORCE_TIMEOUT)
+        .build()
+        .ok()?;
+    let payload =
+        fetch_update_payload(app, &client, &update_status_endpoint(true)).await?;
+    if let UpdateCheck::Resolved(next) = parse_update_status(&payload) {
+        apply_update(app, next);
+    }
+    Some(payload)
+}
+
+/// The tray's "Check for updates": a fresh check, then a short native notice
+/// saying what it found. The tray item is already updated by
+/// `force_update_check`; the Settings window re-reads the status on the event.
+fn check_updates_from_tray(app: &AppHandle) {
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let payload = force_update_check(&handle).await;
+        let _ = handle.emit_to("settings", UPDATE_STATUS_EVENT, ());
+        match manual_check_outcome(payload.as_ref()) {
+            // The same banner the poll fires; shown here too when the tray
+            // item already existed, so the click always gets an answer.
+            ManualCheck::Available(update) => {
+                fire_update_notification(&handle, &update.latest, &update.url);
+            }
+            ManualCheck::UpToDate(version) => {
+                show_update_check_notice(
+                    &handle,
+                    "native-update-check-current",
+                    &[("version", &version)],
+                );
+            }
+            ManualCheck::Disabled => {
+                show_update_check_notice(&handle, "native-update-check-disabled", &[]);
+            }
+            ManualCheck::Failed => {
+                show_update_check_notice(&handle, "native-update-check-failed", &[]);
+            }
+        }
+    });
+}
+
+/// A one-button native notice for a finished update check. A dialog, not a
+/// banner: the user just asked, and a banner can be switched off.
+fn show_update_check_notice(app: &AppHandle, key: &str, args: &[(&str, &str)]) {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+    let locale = app.state::<LocaleState>().get();
+    app.dialog()
+        .message(native_i18n::t(&locale, key, args))
+        .title(native_i18n::tr(&locale, "native-update-check-title"))
+        .kind(MessageDialogKind::Info)
+        .show(|_| {});
 }
 
 /// Applies a fetched update snapshot to managed state. Fires a single OS
@@ -2444,9 +2574,10 @@ fn build_menu(
     )?;
     let sep1 = PredefinedMenuItem::separator(app)?;
 
-    // An "Update to X.Y.Z…" item leads the menu in the running states whenever the
-    // poll loop has seen a newer release. Built here (before the match) so both
-    // running arms can prepend it; the other arms simply don't reference it.
+    // An "Update to X.Y.Z…" item joins the menu in the running states whenever
+    // the poll loop has seen a newer release, with "Check for updates" always
+    // under it. Built here (before the match) so both running arms can use
+    // them; the other arms simply don't reference them.
     // Clicking it installs in place on Windows and macOS, shows the apt command
     // for an apt install, and opens the download page elsewhere (see
     // start_update).
@@ -2465,6 +2596,13 @@ fn build_menu(
         )?),
         None => None,
     };
+    let check_item = MenuItem::with_id(
+        app,
+        menu_id::CHECK_UPDATES,
+        native_i18n::tr(locale, "native-tray-check-updates"),
+        true,
+        None::<&str>,
+    )?;
     let sep_upgrade = PredefinedMenuItem::separator(app)?;
 
     // "Answer requests…" while an MCP server is waiting for an answer;
@@ -2508,12 +2646,14 @@ fn build_menu(
                 items.push(&sep_requests);
                 items.push(answer);
             }
-            // Update is its own section BELOW the primary action, shown only
-            // when an update is available — never above sign-in.
+            // Updates are their own section BELOW the primary action — never
+            // above sign-in: "Update to X.Y.Z…" when one is available, then
+            // "Check for updates".
+            items.push(&sep_upgrade);
             if let Some(up) = &upgrade_item {
-                items.push(&sep_upgrade);
                 items.push(up);
             }
+            items.push(&check_item);
             items.push(&sep1);
             items.push(&dashboard_item);
             items.push(&settings_item);
@@ -2540,12 +2680,14 @@ fn build_menu(
                 items.push(&sep_requests);
                 items.push(answer);
             }
-            // Update is its own section BELOW the account line, shown only when
-            // an update is available — never above it.
+            // Updates are their own section BELOW the account line — never
+            // above it: "Update to X.Y.Z…" when one is available, then
+            // "Check for updates".
+            items.push(&sep_upgrade);
             if let Some(up) = &upgrade_item {
-                items.push(&sep_upgrade);
                 items.push(up);
             }
+            items.push(&check_item);
             items.push(&sep1);
             items.push(&dashboard_item);
             items.push(&settings_item);
@@ -2607,6 +2749,7 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
         menu_id::OPEN_CONFIG => do_reveal_config_dir(app),
         menu_id::RETRY => retry_startup(app),
         menu_id::UPGRADE => start_update(app),
+        menu_id::CHECK_UPDATES => check_updates_from_tray(app),
         menu_id::REQUESTS => open_settings_window(app, Some("requests")),
         menu_id::QUIT => request_quit(app),
         _ => {}
@@ -3574,6 +3717,20 @@ fn update_installs_in_place() -> bool {
     IN_PLACE_UPDATE
 }
 
+/// Tauri command — Settings ran a fresh update check ("Check now"). The
+/// sidecar has the answer; read it back (a cached read, no new fetch) so the
+/// tray's "Update to X.Y.Z…" item agrees with what Settings now shows.
+#[tauri::command]
+async fn refresh_update_status(app: AppHandle) {
+    let Ok(client) = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+    else {
+        return;
+    };
+    let _ = check_for_update(&app, &client, &update_status_endpoint(false)).await;
+}
+
 /// Tauri command — the topbar "Update to X.Y.Z" button. Runs the in-place
 /// update (confirm, download, install, relaunch) and streams its progress on
 /// `on_step`. Returns `unavailable` where updates don't install in place, so
@@ -3722,6 +3879,64 @@ mod tests {
         // "available" without a version is not offerable.
         let no_version = serde_json::json!({ "latest": "", "update_available": true });
         assert_eq!(parse_update_status(&no_version), UpdateCheck::Resolved(None));
+    }
+
+    #[test]
+    fn says_what_a_manual_update_check_found() {
+        use super::{manual_check_outcome, ManualCheck, UpdateSnapshot};
+        let available = serde_json::json!({
+            "current": "0.4.36", "latest": "0.4.40", "update_available": true,
+            "url": "https://mxml.sh/", "enabled": true, "last_error": null
+        });
+        assert_eq!(
+            manual_check_outcome(Some(&available)),
+            ManualCheck::Available(UpdateSnapshot {
+                latest: "0.4.40".into(),
+                url: "https://mxml.sh/".into(),
+                apt_command: None,
+            })
+        );
+        let current = serde_json::json!({
+            "current": "0.4.36", "latest": "0.4.36", "update_available": false,
+            "enabled": true, "last_error": null
+        });
+        assert_eq!(
+            manual_check_outcome(Some(&current)),
+            ManualCheck::UpToDate("0.4.36".into())
+        );
+        // Checks are off: the sidecar didn't look, so it can't say "up to date".
+        let disabled = serde_json::json!({
+            "current": "0.4.36", "latest": null, "update_available": false,
+            "enabled": false, "last_error": null
+        });
+        assert_eq!(manual_check_outcome(Some(&disabled)), ManualCheck::Disabled);
+        // The manifest couldn't be read.
+        let unresolved = serde_json::json!({
+            "current": "0.4.36", "latest": null, "update_available": false,
+            "enabled": true, "last_error": "network error: offline"
+        });
+        assert_eq!(manual_check_outcome(Some(&unresolved)), ManualCheck::Failed);
+        // A failed fresh check still carries the last known result; the user
+        // asked for a fresh one, so it is a failure, not "up to date".
+        let stale = serde_json::json!({
+            "current": "0.4.36", "latest": "0.4.36", "update_available": false,
+            "enabled": true, "last_error": "manifest fetch returned HTTP 503"
+        });
+        assert_eq!(manual_check_outcome(Some(&stale)), ManualCheck::Failed);
+        // The sidecar couldn't be asked at all.
+        assert_eq!(manual_check_outcome(None), ManualCheck::Failed);
+        // Nothing to name in the notice: don't claim a version.
+        let no_current = serde_json::json!({
+            "latest": "0.4.36", "update_available": false, "enabled": true
+        });
+        assert_eq!(manual_check_outcome(Some(&no_current)), ManualCheck::Failed);
+    }
+
+    #[test]
+    fn asks_for_a_fresh_check_only_when_forced() {
+        use super::update_status_endpoint;
+        assert!(update_status_endpoint(false).ends_with("/settings/api/update-status"));
+        assert!(update_status_endpoint(true).ends_with("/settings/api/update-status?force=1"));
     }
 
     #[test]

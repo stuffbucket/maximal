@@ -283,6 +283,12 @@ type Endpoint =
       path: "/settings/api/update-status"
     }
   | {
+      // "Check now": a fresh check, skipping the proxy's 6-hour cache.
+      kind: "update-check"
+      method: "GET"
+      path: "/settings/api/update-status?force=1"
+    }
+  | {
       kind: "auth-status"
       method: "GET"
       path: "/settings/api/auth/github/status"
@@ -451,6 +457,7 @@ type EndpointKind = Endpoint["kind"]
 interface ResponseFor {
   diagnostics: DiagnosticsResponse
   "update-status": UpdateStatusResponse
+  "update-check": UpdateStatusResponse
   "auth-status": AuthStatus
   "auth-start": AuthStatus
   "auth-sign-out": AuthSignOutResponse

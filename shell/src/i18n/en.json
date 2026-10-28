@@ -222,6 +222,7 @@
   "diagnostics-update-check-ok": "OK · checked {relative}",
   "diagnostics-update-check-checking": "Checking…",
   "diagnostics-update-check-unavailable": "Unavailable",
+  "diagnostics-update-check-now": "Check now",
   "diagnostics-uptime-hours": "{h}h {m}m",
   "diagnostics-uptime-minutes": "{m}m {s}s",
   "diagnostics-uptime-seconds": "{s}s",
@@ -335,6 +336,7 @@
   "native-tray-signed-in": "Signed in to GitHub",
   "native-tray-upgrade": "Update to {latest}…",
   "native-tray-upgrade-apt": "Update with apt…",
+  "native-tray-check-updates": "Check for updates",
   "native-tray-failed": "Sidecar failed to start",
   "native-tray-retry": "Retry startup",
   "native-tray-show-logs": "Show logs…",
@@ -379,5 +381,9 @@
   "native-update-confirm-cancel": "Not now",
   "native-update-failed-title": "Couldn’t install the update",
   "native-update-failed-body": "Maximal will open mxml.sh so you can download it there.",
-  "native-update-failed-open": "Open mxml.sh"
+  "native-update-failed-open": "Open mxml.sh",
+  "native-update-check-title": "Check for updates",
+  "native-update-check-current": "Maximal is up to date ({version})",
+  "native-update-check-failed": "Couldn’t check for updates. Check your connection and try again.",
+  "native-update-check-disabled": "Update checks are turned off."
 }

@@ -19,12 +19,14 @@ import {
   __resetUpdateCheckDepsForTests,
   __setUpdateCheckDepsForTests,
   DOWNLOAD_URL,
+  FORCE_MIN_INTERVAL_MS,
   getUpdateStatus,
   isNewerVersion,
   MANIFEST_URL_OVERRIDE_ENV,
   parseManifestVersion,
   peekUpdateStatus,
   resolveManifestUrl,
+  type UpdateStatus,
 } from "~/lib/update/update-check"
 
 // The test preload points every check at a closed loopback port so spawned
@@ -212,7 +214,7 @@ describe("getUpdateStatus", () => {
     await getUpdateStatus()
     expect(fetchCalls).toBe(1) // second call served from cache
 
-    clock += 1000 // still within TTL
+    clock += FORCE_MIN_INTERVAL_MS // still within the TTL
     await getUpdateStatus()
     expect(fetchCalls).toBe(1)
 
@@ -296,6 +298,13 @@ describe("getUpdateStatus — conditional CDN revalidation", () => {
       return Promise.resolve(next())
     }
 
+  /** A forced check after the forced-check window has passed, so it makes a
+   *  real (conditional) fetch. */
+  const recheck = (): Promise<UpdateStatus> => {
+    clock += FORCE_MIN_INTERVAL_MS
+    return getUpdateStatus(true)
+  }
+
   beforeEach(() => {
     seen = []
     clock = 1_000_000
@@ -337,7 +346,7 @@ describe("getUpdateStatus — conditional CDN revalidation", () => {
     })
 
     await getUpdateStatus()
-    await getUpdateStatus(true)
+    await recheck()
 
     expect(seen).toHaveLength(2)
     expect(seen[1].headers.get("if-none-match")).toBe('W/"abc123"')
@@ -355,7 +364,7 @@ describe("getUpdateStatus — conditional CDN revalidation", () => {
     })
 
     await getUpdateStatus()
-    await getUpdateStatus(true)
+    await recheck()
 
     expect(seen[1].headers.get("if-none-match")).toBe('"strong-1"')
     expect(seen[1].headers.get("if-modified-since")).toBeNull()
@@ -372,7 +381,7 @@ describe("getUpdateStatus — conditional CDN revalidation", () => {
 
     const first = await getUpdateStatus()
     clock += 60_000
-    const second = await getUpdateStatus(true)
+    const second = await recheck()
 
     expect(second.latest).toBe("999.0.0")
     expect(second.update_available).toBe(true)
@@ -391,7 +400,7 @@ describe("getUpdateStatus — conditional CDN revalidation", () => {
     })
 
     await getUpdateStatus()
-    await getUpdateStatus(true)
+    await recheck()
     await getUpdateStatus()
 
     expect(seen).toHaveLength(2)
@@ -408,8 +417,8 @@ describe("getUpdateStatus — conditional CDN revalidation", () => {
     })
 
     await getUpdateStatus()
-    const changed = await getUpdateStatus(true)
-    const revalidated = await getUpdateStatus(true)
+    const changed = await recheck()
+    const revalidated = await recheck()
 
     expect(changed.latest).toBe("999.0.0")
     expect(seen[2].headers.get("if-none-match")).toBe('"v2"')
@@ -426,8 +435,8 @@ describe("getUpdateStatus — conditional CDN revalidation", () => {
     })
 
     await getUpdateStatus()
-    await getUpdateStatus(true)
-    await getUpdateStatus(true)
+    await recheck()
+    await recheck()
 
     expect(seen[2].headers.get("if-none-match")).toBeNull()
     expect(seen[2].headers.get("if-modified-since")).toBeNull()
@@ -457,8 +466,8 @@ describe("getUpdateStatus — conditional CDN revalidation", () => {
     })
 
     await getUpdateStatus()
-    const failed = await getUpdateStatus(true)
-    const recovered = await getUpdateStatus(true)
+    const failed = await recheck()
+    const recovered = await recheck()
 
     expect(failed.latest).toBe("999.0.0")
     expect(failed.update_available).toBe(true)
@@ -481,11 +490,124 @@ describe("getUpdateStatus — conditional CDN revalidation", () => {
     })
 
     await getUpdateStatus()
-    const failed = await getUpdateStatus(true)
+    const failed = await recheck()
 
     expect(failed.latest).toBe("999.0.0")
     expect(failed.update_available).toBe(true)
     expect(failed.last_error).toBe("network error: offline")
+  })
+})
+
+describe("getUpdateStatus — forced checks", () => {
+  let calls: number
+  let clock: number
+  let version: string
+
+  beforeEach(() => {
+    calls = 0
+    clock = 1_000_000
+    version = "v999.0.0"
+    __resetUpdateCheckDepsForTests()
+    __setUpdateCheckDepsForTests({
+      fetch: () => {
+        calls++
+        return Promise.resolve(manifestJson(version))
+      },
+      now: () => clock,
+    })
+  })
+  afterEach(() => {
+    __resetUpdateCheckDepsForTests()
+  })
+
+  test("a forced check on a cold cache fetches", async () => {
+    const status = await getUpdateStatus(true)
+    expect(calls).toBe(1)
+    expect(status.latest).toBe("999.0.0")
+  })
+
+  test("a forced check right after a fetch returns that result without fetching", async () => {
+    await getUpdateStatus()
+    version = "v1000.0.0" // would show if it refetched
+    const status = await getUpdateStatus(true)
+    expect(calls).toBe(1)
+    expect(status.latest).toBe("999.0.0")
+  })
+
+  test("forced checks are limited to one real fetch per window", async () => {
+    await getUpdateStatus(true)
+    for (let i = 0; i < 10; i++) {
+      clock += 1000
+      await getUpdateStatus(true)
+    }
+    expect(calls).toBe(1) // 10s in, ten more tries
+    clock += FORCE_MIN_INTERVAL_MS
+    await getUpdateStatus(true)
+    expect(calls).toBe(2)
+  })
+
+  test("the window opens exactly at the limit", async () => {
+    await getUpdateStatus(true)
+    clock += FORCE_MIN_INTERVAL_MS - 1
+    await getUpdateStatus(true)
+    expect(calls).toBe(1)
+    clock += 1
+    await getUpdateStatus(true)
+    expect(calls).toBe(2)
+  })
+
+  test("a forced check after the window picks up a new release", async () => {
+    await getUpdateStatus(true)
+    version = "v1000.0.0"
+    clock += FORCE_MIN_INTERVAL_MS
+    const status = await getUpdateStatus(true)
+    expect(status.latest).toBe("1000.0.0")
+  })
+
+  test("concurrent forced checks share one fetch", async () => {
+    const [a, b, c] = await Promise.all([
+      getUpdateStatus(true),
+      getUpdateStatus(true),
+      getUpdateStatus(true),
+    ])
+    expect(calls).toBe(1)
+    expect(b).toBe(a)
+    expect(c).toBe(a)
+  })
+
+  test("a failed forced check counts against the limit and reports the error", async () => {
+    __setUpdateCheckDepsForTests({
+      fetch: () => {
+        calls++
+        return Promise.reject(new Error("offline"))
+      },
+    })
+    const first = await getUpdateStatus(true)
+    clock += 1000
+    const second = await getUpdateStatus(true)
+    expect(calls).toBe(1)
+    expect(first.last_error).toContain("offline")
+    expect(second.last_error).toContain("offline")
+  })
+
+  test("a clock that steps backwards does not freeze the limit", async () => {
+    await getUpdateStatus(true)
+    clock -= 60 * 60 * 1000
+    await getUpdateStatus(true)
+    expect(calls).toBe(2)
+  })
+
+  test("an unforced check is not limited by the window", async () => {
+    // Cache expired and the fetch failed: the next unforced call retries.
+    __setUpdateCheckDepsForTests({
+      fetch: () => {
+        calls++
+        return Promise.reject(new Error("offline"))
+      },
+    })
+    await getUpdateStatus()
+    await getUpdateStatus()
+    expect(calls).toBe(2)
   })
 })
 

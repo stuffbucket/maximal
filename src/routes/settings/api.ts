@@ -138,7 +138,10 @@ settingsApiRoutes.get("/diagnostics", (c) => {
 })
 
 settingsApiRoutes.get("/update-status", async (c) => {
-  const payload = await getUpdateStatus()
+  // `?force=1` is the "Check for updates" actions: skip the 6-hour cache (the
+  // check itself rate-limits real fetches, see FORCE_MIN_INTERVAL_MS).
+  const force = c.req.query("force") === "1"
+  const payload = await getUpdateStatus(force)
   const parsed = UpdateStatusResponse.safeParse(payload)
   if (!parsed.success) {
     // getUpdateStatus is contractually total (never throws, always the right

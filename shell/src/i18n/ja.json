@@ -222,6 +222,7 @@
   "diagnostics-update-check-ok": "OK · {relative} に確認",
   "diagnostics-update-check-checking": "確認中…",
   "diagnostics-update-check-unavailable": "利用できません",
+  "diagnostics-update-check-now": "今すぐ確認",
   "diagnostics-uptime-hours": "{h}時間 {m}分",
   "diagnostics-uptime-minutes": "{m}分 {s}秒",
   "diagnostics-uptime-seconds": "{s}秒",
@@ -335,6 +336,7 @@
   "native-tray-signed-in": "GitHub にサインイン済み",
   "native-tray-upgrade": "{latest} にアップデート…",
   "native-tray-upgrade-apt": "apt でアップデート…",
+  "native-tray-check-updates": "アップデートを確認",
   "native-tray-failed": "サイドカーの起動に失敗しました",
   "native-tray-retry": "起動を再試行",
   "native-tray-show-logs": "ログを表示…",
@@ -379,5 +381,9 @@
   "native-update-confirm-cancel": "後で",
   "native-update-failed-title": "アップデートをインストールできませんでした",
   "native-update-failed-body": "Maximal が mxml.sh を開きます。そこからダウンロードしてください。",
-  "native-update-failed-open": "mxml.sh を開く"
+  "native-update-failed-open": "mxml.sh を開く",
+  "native-update-check-title": "アップデートを確認",
+  "native-update-check-current": "Maximal は最新です（{version}）",
+  "native-update-check-failed": "アップデートを確認できませんでした。接続を確認してから、もう一度お試しください。",
+  "native-update-check-disabled": "アップデートの確認はオフになっています。"
 }
