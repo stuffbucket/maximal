@@ -144,6 +144,12 @@
   --status-success: #22c55e;
   --status-warning: #eab308;
   --status-info: #38bdf8;
+  --series-1: var(--accent);
+  --series-2: oklch(0.558 0.085 313);
+  --series-3: oklch(0.558 0.085 245);
+  --series-4: oklch(0.558 0.085 347);
+  --series-5: oklch(0.558 0.085 181);
+  --series-6: oklch(0.558 0.085 279);
 }
 
 @media (prefers-color-scheme: light) {
@@ -164,6 +170,12 @@
     --status-success: #137333;
     --status-warning: #8a5a00;
     --status-info: #0369a1;
+    --series-1: var(--accent);
+    --series-2: oklch(0.475 0.07 313);
+    --series-3: oklch(0.475 0.07 245);
+    --series-4: oklch(0.475 0.07 347);
+    --series-5: oklch(0.475 0.07 181);
+    --series-6: oklch(0.475 0.07 279);
   }
 }
 
@@ -184,6 +196,12 @@
   --status-success: #137333;
   --status-warning: #8a5a00;
   --status-info: #0369a1;
+  --series-1: var(--accent);
+  --series-2: oklch(0.475 0.07 313);
+  --series-3: oklch(0.475 0.07 245);
+  --series-4: oklch(0.475 0.07 347);
+  --series-5: oklch(0.475 0.07 181);
+  --series-6: oklch(0.475 0.07 279);
 }
 /* ---- END GENERATED TOKENS ---- */
 
@@ -268,6 +286,55 @@ body {
   width: 0.75em;
   height: 0.75em;
   color: var(--text-muted);
+}
+
+/* "Chat and completions": the unlimited quotas, folded under the metered
+   cards. The open state is kept in script (the page re-renders from strings). */
+.quota-more {
+  margin-top: var(--space-4);
+}
+
+/* The session table's "Show N more" button reads the same way. */
+.quota-more__summary,
+.session-more__button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  list-style: none;
+}
+
+.quota-more__summary::-webkit-details-marker {
+  display: none;
+}
+
+.quota-more__summary:hover,
+.session-more__button:hover {
+  color: var(--text-strong);
+}
+
+.quota-more__summary:focus-visible,
+.session-more__button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.quota-more__chevron {
+  flex: none;
+  width: 1em;
+  height: 1em;
+  transition: transform 200ms ease-out;
+}
+
+.quota-more[open] > .quota-more__summary .quota-more__chevron {
+  transform: rotate(90deg);
+}
+
+.quota-more__body {
+  margin-top: var(--space-2);
 }
 
 h2,
@@ -542,34 +609,6 @@ html[data-embedded="true"] .lang-picker {
   gap: var(--space-4);
 }
 
-/* Rate meter: tokens/min + a sparkline of the last 15 minutes. One series
-   in the accent; the figure is text ink. */
-.rate {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: var(--space-1);
-}
-.rate__spark {
-  width: calc(var(--space-8) * 2);
-  height: var(--size-xl);
-  overflow: visible;
-}
-.rate__spark polyline {
-  stroke: var(--accent);
-  stroke-width: var(--border-width-thick);
-  stroke-linejoin: round;
-  stroke-linecap: round;
-}
-.rate__spark circle {
-  fill: var(--accent);
-}
-.rate__value {
-  font-size: var(--text-sm);
-  color: var(--text-base-color);
-  font-variant-numeric: tabular-nums;
-}
-
 .totals__hero-value {
   font-size: var(--text-3xl);
   font-weight: var(--weight-lg);
@@ -600,6 +639,319 @@ html[data-embedded="true"] .lang-picker {
   color: var(--text-strong);
 }
 
+/* ---- Bento: the quotas beside the live card ----
+   Two columns from the md breakpoint: quotas on the left (the metered cards,
+   then "Chat and completions", which stays in its column when open), the live
+   card on the right spanning both. Each column's heading shares the first
+   row (subgrid), so the live card's top lines up with the quota cards'. The
+   second row takes the taller column: the live card is at least its plot's
+   minimum, and grows with the quotas when they are taller. Narrower,
+   everything stacks with the live card first. */
+.dashboard-bento {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  margin-bottom: var(--space-5);
+}
+.dashboard-bento[hidden],
+.dashboard-bento__col[hidden] {
+  display: none;
+}
+.dashboard-bento__col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.dashboard-bento__live {
+  order: -1;
+}
+.dashboard-bento__live > .live {
+  flex: 1;
+}
+@media (min-width: 768px) {
+  .dashboard-bento:not(.dashboard-bento--live-only) {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+    grid-template-rows: auto 1fr;
+    gap: 0 var(--space-5);
+  }
+  /* The row is as tall as the taller column; the quota cards keep their own
+     height at the top of it rather than stretching. */
+  .dashboard-bento__quota > .dashboard-bento__body {
+    align-self: start;
+  }
+  .dashboard-bento:not(.dashboard-bento--live-only) > .dashboard-bento__col {
+    display: grid;
+    grid-row: span 2;
+    grid-template-rows: subgrid;
+    order: 0;
+  }
+}
+
+/* ---- Live card ----
+   Total tokens/min over one trace per live session (the last 15 minutes).
+   Series colors come from --series-n, with the session table as the legend;
+   sessions past the sixth draw in neutral gray (--border-strong, 3:1 on the
+   card). Only one trace gets the soft fill (the selected one, else the
+   busiest), so fills never stack.
+
+   The hairline border is a slow conic sweep of accent over the neutral
+   border; its speed follows token flow (card.ts sets a playback rate on the
+   animation and --live-period for reference). Stopped when nothing flows,
+   static under reduced motion. */
+@property --live-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+@keyframes live-border-spin {
+  to {
+    --live-angle: 360deg;
+  }
+}
+.live {
+  display: flex;
+  flex-direction: column;
+  padding: var(--border-width-hairline);
+  border-radius: var(--radius-card);
+  background: var(--border-subtle);
+}
+.live--border {
+  background: conic-gradient(
+    from var(--live-angle),
+    var(--border-subtle) 0%,
+    color-mix(in srgb, var(--accent) 45%, var(--border-subtle)) 14%,
+    var(--accent) 24%,
+    color-mix(in srgb, var(--accent) 45%, var(--border-subtle)) 34%,
+    var(--border-subtle) 46%,
+    var(--border-subtle) 100%
+  );
+  animation: live-border-spin 30s linear infinite paused;
+}
+.live__inner {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-5);
+  background-color: var(--surface-card);
+  border-radius: calc(var(--radius-card) - var(--border-width-hairline));
+}
+.live__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0 var(--space-3);
+}
+.live__metric {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+/* The totals' hero figure, set solid so it sits on the unit's baseline
+   without an extra line of leading above the plot. */
+.live__value {
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+/* Teal text is --link; --accent is a fill. */
+.live__unit {
+  font-size: var(--text-sm);
+  color: var(--link);
+}
+.live__window {
+  margin-left: auto;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+.live__plot {
+  position: relative;
+  flex: 1;
+  min-height: calc(var(--space-8) * 2);
+}
+/* Out of flow: the plot's min-height (about 120px) sets the card's floor,
+   the plot grows into any extra height the row has (an open "Chat and
+   completions"), and the chart's own size never feeds back into layout. */
+.live__chart {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.live__area {
+  pointer-events: none;
+}
+.live__fill-stop--top {
+  stop-color: var(--live-fill-color, var(--accent));
+  stop-opacity: 0.32;
+}
+.live__fill-stop--bottom {
+  stop-color: var(--live-fill-color, var(--accent));
+  stop-opacity: 0;
+}
+.live__trace {
+  transition: opacity 150ms ease-out;
+}
+.live__line {
+  fill: none;
+  stroke: var(--trace-color);
+  stroke-width: var(--border-width-thick);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.live__dot-mark {
+  fill: var(--trace-color);
+}
+/* Hit targets: a 12px stroke along the line, a 24px circle on the dot. */
+.live__hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: var(--size-xs);
+  pointer-events: stroke;
+  cursor: pointer;
+}
+.live__dot-hit {
+  fill: transparent;
+  pointer-events: all;
+  cursor: pointer;
+}
+.live__trace--dim {
+  opacity: 0.3;
+}
+.live__foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+.live__marker {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.live__pulse {
+  flex: none;
+  width: var(--space-2);
+  height: var(--space-2);
+  border-radius: var(--radius-pill);
+  background-color: var(--accent);
+}
+/* The dot pulses only while tokens are flowing. */
+.live--flowing .live__pulse {
+  animation: live-pulse 2s ease-out infinite;
+}
+@keyframes live-pulse {
+  from {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 60%, transparent);
+  }
+  to {
+    box-shadow: 0 0 0 var(--space-2) transparent;
+  }
+}
+
+/* A failed sessions read: a line of error text in the card, not a box (no
+   card in a card). */
+.live__error {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--status-error);
+}
+.live__error[hidden] {
+  display: none;
+}
+.live__error-title {
+  margin-right: var(--space-1);
+  font-weight: var(--weight-lg);
+}
+
+/* ---- Session table ----
+   The per-request table's frame and cells (Tailwind classes in table.ts),
+   plus what only this table has: the legend swatch, the "Cache cold" divider,
+   a selected row (an accent rule and a pale accent tint, never color alone:
+   the selected trace is drawn in full and the others dim), muted cold rows,
+   and the context meter, which is the quota cards' .meter at row size with
+   a tick at the compaction point. */
+.sessions {
+  margin-bottom: var(--space-5);
+}
+.session-row {
+  cursor: pointer;
+}
+.session-row > td {
+  color: var(--text-muted);
+  vertical-align: top;
+}
+.session-strong {
+  color: var(--text-strong);
+}
+.session-row--cold .session-strong {
+  color: var(--text-muted);
+}
+.session-row--preview > td,
+.session-row:hover > td {
+  background-color: color-mix(in srgb, var(--accent) 6%, var(--surface-card));
+}
+.session-row--selected > td {
+  background-color: color-mix(in srgb, var(--accent) 12%, var(--surface-card));
+}
+.session-row--selected > td:first-child {
+  box-shadow: inset var(--border-width-thick) 0 0 var(--accent);
+}
+.session-row:focus-visible {
+  outline: var(--border-width-thick) solid var(--accent);
+  outline-offset: calc(var(--border-width-thick) * -1);
+}
+.session-cell--swatch {
+  width: var(--space-2);
+  padding-right: 0;
+}
+.session-swatch {
+  display: block;
+  width: var(--space-2);
+  height: var(--space-2);
+  margin-top: var(--space-1);
+  border-radius: var(--radius-pill);
+  background-color: var(--swatch-color);
+}
+.session-divider > td {
+  padding: var(--space-1) var(--space-4);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  background-color: var(--surface-base);
+}
+.session-context {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.session-context > .meter {
+  position: relative;
+  flex: none;
+  width: var(--space-8);
+}
+.meter__tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: var(--border-width-thick);
+  margin-left: calc(var(--border-width-thick) / -2);
+  background-color: var(--border-strong);
+}
+.session-context > .meter[hidden],
+.meter__tick[hidden],
+.session-context__icon[hidden] {
+  display: none;
+}
+.session-context .meter-state {
+  font-size: inherit;
+}
+
 /* Reduced motion is a contract, not a hint (principle #5). */
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -612,7 +964,13 @@ html[data-embedded="true"] .lang-picker {
   .progress-bar-fg {
     transition: none !important;
   }
-  .segmented-option {
+  .segmented-option,
+  .quota-more__chevron {
     transition: none !important;
+  }
+  /* An infinite rotation outlives the zeroed duration above; stop it. */
+  .live--border,
+  .live--flowing .live__pulse {
+    animation: none;
   }
 }

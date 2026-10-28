@@ -9,6 +9,8 @@
 // catalog and a locale picker is wired into the header.
 import { resolveLocale, t } from "../i18n";
 import { applyI18n, wireLocalePicker } from "../i18n/apply";
+import { fetchJson } from "./fetch-json";
+import { startLiveSessions } from "./live/controller";
 
 // Tailwind + Lucide are loaded as classic global <script>s in index.html, so
 // they exist on `window` at runtime; the bundle references them as ambient
@@ -47,9 +49,6 @@ interface TokenUsageSummary {
   totals?: TokenUsageTotals;
   range?: TokenUsageRange;
   byModel: TokenUsageModelRow[];
-  /** Tokens per minute for the last 15 minutes, oldest first; the last is
-   *  the current, partial minute. Absent from older sidecars. */
-  recent_minutes?: Array<{ start_ms: number; total_tokens: number }>;
 }
 interface TokenUsageEvent {
   created_at_utc: string;
@@ -97,6 +96,13 @@ const tokenUsagePeriodButtons = Array.from(
   tokenUsagePeriodGroup.querySelectorAll<HTMLButtonElement>("[data-period]"),
 );
 const contentArea = document.getElementById("content-area") as HTMLElement;
+// The bento and the session table stay in the page across renders: render()
+// fills the quota column and the rest of the page, never the live card or the
+// session table, which the live sessions controller updates in place (see
+// index.html and live/controller.ts).
+const bento = document.getElementById("dashboard-bento") as HTMLElement;
+const quotaColumn = document.getElementById("usage-quotas") as HTMLElement;
+const restArea = document.getElementById("dashboard-rest") as HTMLElement;
 
 // The dashboard always talks to the proxy that served it — same
 // origin, no user-typed URL. Each fetch is a relative path; the
@@ -133,6 +139,28 @@ interface DashboardState {
   usageFetchedAt: number | null;
   /** Last background /usage refetch attempt (rate-limits them). */
   usageRefetchAt: number;
+  /** Whether the "Chat and completions" quotas are unfolded. Render rebuilds
+   *  the page from strings, so the open state lives here, not in the DOM. */
+  quotaMoreOpen: boolean;
+}
+
+const QUOTA_MORE_STORAGE_KEY = "maximal.dashboard.quotaMoreOpen";
+
+/** The remembered open state; closed when storage is empty or unavailable. */
+function readQuotaMoreOpen(): boolean {
+  try {
+    return localStorage.getItem(QUOTA_MORE_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeQuotaMoreOpen(open: boolean): void {
+  try {
+    localStorage.setItem(QUOTA_MORE_STORAGE_KEY, open ? "1" : "0");
+  } catch {
+    // Private window or blocked storage: the choice lasts until reload.
+  }
 }
 
 const state: DashboardState = {
@@ -148,6 +176,7 @@ const state: DashboardState = {
   tokenUsagePeriod: DEFAULT_TOKEN_USAGE_PERIOD,
   usageFetchedAt: null,
   usageRefetchAt: 0,
+  quotaMoreOpen: readQuotaMoreOpen(),
 };
 
 // --- Tauri Channel live feed -------------------------------------------
@@ -313,46 +342,6 @@ function buildTokenUsageEventsUrl(period: Period, page: number): string {
     String(DEFAULT_TOKEN_USAGE_EVENTS_PAGE_SIZE),
   );
   return url.toString();
-}
-
-async function fetchJson<T>(url: string): Promise<T> {
-  // No client-side credentials: the proxy exempts the dashboard
-  // endpoints from API-key auth when the request comes from
-  // loopback. See createAuthMiddleware in src/lib/request-auth.ts.
-  const response = await fetch(url);
-
-  if (!response.ok) {
-    let message = response.statusText || "Request failed";
-
-    try {
-      const contentType = response.headers.get("content-type") || "";
-      if (contentType.includes("application/json")) {
-        const payload = (await response.json()) as {
-          error?: { message?: string };
-          message?: string;
-        };
-        const apiMessage = payload?.error?.message || payload?.message;
-        if (typeof apiMessage === "string" && apiMessage.trim()) {
-          message = apiMessage.trim();
-        }
-      } else {
-        const text = await response.text();
-        if (text.trim()) {
-          message = text.trim();
-        }
-      }
-    } catch (error) {
-      console.warn("Could not parse error response:", getErrorMessage(error));
-    }
-
-    const error = new Error(
-      `Request failed with status ${response.status}: ${message}`,
-    ) as Error & { status?: number };
-    error.status = response.status;
-    throw error;
-  }
-
-  return (await response.json()) as T;
 }
 
 function syncUrlState(): void {
@@ -527,28 +516,25 @@ function render(): void {
 
   const quotasHtml =
     state.data ? renderUsageQuotas(state.data.quota_snapshots)
-    : state.error ?
-      `<section id="usage-quotas" class="mb-6">
-        <h2 class="section__title"><i data-lucide="bar-chart-big" aria-hidden="true"></i>${escapeHtml(t("dashboard-quotas-title"))}</h2>
-        ${renderError(state.error, t("dashboard-error-usage"))}
-      </section>`
+    : state.error ? renderQuotaColumn(renderError(state.error, t("dashboard-error-usage")))
     : state.isLoading ?
-      `<section id="usage-quotas" class="mb-6">
-        <h2 class="section__title"><i data-lucide="bar-chart-big" aria-hidden="true"></i>${escapeHtml(t("dashboard-quotas-title"))}</h2>
+      renderQuotaColumn(`
         <div class="p-4 border text-sm" style="background-color: var(--surface-card); border-color: var(--border-subtle); color: var(--text-muted);">
           ${escapeHtml(t("common-working"))}
-        </div>
-      </section>`
+        </div>`)
     : "";
 
   const tokenUsageHtml = renderTokenUsageSection();
   const detailedHtml = state.data ? renderDetailedData(state.data) : "";
 
-  if (!quotasHtml && !tokenUsageHtml && !detailedHtml) {
-    contentArea.innerHTML = renderWelcomeMessage();
-  } else {
-    contentArea.innerHTML = `${quotasHtml}${tokenUsageHtml}${detailedHtml}`;
-  }
+  // The quota column and the rest are rebuilt; the live card beside the
+  // quotas is not (it updates in place).
+  const welcome = !quotasHtml && !tokenUsageHtml && !detailedHtml;
+  bento.hidden = welcome;
+  bento.classList.toggle("dashboard-bento--live-only", !quotasHtml);
+  quotaColumn.hidden = !quotasHtml;
+  quotaColumn.innerHTML = quotasHtml;
+  restArea.innerHTML = welcome ? renderWelcomeMessage() : `${tokenUsageHtml}${detailedHtml}`;
 
   // Replace placeholder icons with actual Lucide icons
   createIcons();
@@ -557,8 +543,16 @@ function render(): void {
   if (quotaPeriodEnded()) void refreshUsage();
 }
 
+/** The quota column of the bento: its heading over `body`. */
+function renderQuotaColumn(body: string): string {
+  return `
+                <h2 class="section__title"><i data-lucide="bar-chart-big" aria-hidden="true"></i>${escapeHtml(t("dashboard-quotas-title"))}</h2>
+                <div class="dashboard-bento__body">${body}</div>`;
+}
+
 /**
- * Renders the "Usage Quotas" section with progress bars.
+ * Renders the "Usage Quotas" column: the metered cards stacked, then the
+ * unlimited ones folded away.
  */
 function renderUsageQuotas(
   snapshots: Record<string, QuotaDetails> | null | undefined,
@@ -568,21 +562,19 @@ function renderUsageQuotas(
   const entries = Object.entries(snapshots);
   const metered = entries.filter(([, value]) => !value.unlimited);
   const unlimited = entries.filter(([, value]) => value.unlimited);
-  // Unlimited quotas have nothing to measure, so they share one card as a
-  // simple list instead of each getting a mostly-empty card.
   const resetMs = parseResetDate(state.data?.quota_reset_date);
-  const quotaCards =
-    metered.map(([key, value]) => renderQuotaCard(key, value, resetMs)).join("") +
-    (unlimited.length > 0 ? renderUnlimitedQuotas(unlimited.map(([key]) => key)) : "");
+  const meteredCards = metered
+    .map(([key, value]) => renderQuotaCard(key, value, resetMs))
+    .join("");
+  // Unlimited quotas have nothing to measure, so they share one list, folded
+  // away under the metered cards. With no metered card it is all there is.
+  const unlimitedHtml =
+    unlimited.length > 0 ? renderUnlimitedQuotas(unlimited.map(([key]) => key)) : "";
 
-  return `
-            <section id="usage-quotas" class="mb-6">
-                <h2 class="section__title"><i data-lucide="bar-chart-big" aria-hidden="true"></i>${escapeHtml(t("dashboard-quotas-title"))}</h2>
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    ${quotaCards}
-                </div>
-            </section>
-        `;
+  if (!meteredCards && !unlimitedHtml) return "";
+  return renderQuotaColumn(`
+                ${meteredCards ? `<div class="flex flex-col gap-4">${meteredCards}</div>` : ""}
+                ${unlimitedHtml}`);
 }
 
 /** GitHub's quota_reset_date as a timestamp. A bare date is midnight UTC. */
@@ -661,7 +653,10 @@ function renderQuotaCard(title: string, details: QuotaDetails, resetMs: number |
         `;
 }
 
-/** The unlimited quotas, as rows in one card: name, then "Unlimited". */
+/**
+ * The unlimited quotas, folded behind a chevron: name, then "Unlimited".
+ * The open state is `state.quotaMoreOpen`; see handleQuotaMoreToggle.
+ */
 function renderUnlimitedQuotas(titles: Array<string>): string {
   const rows = titles
     .map(
@@ -673,9 +668,27 @@ function renderUnlimitedQuotas(titles: Array<string>): string {
     )
     .join("");
   return `
-            <div class="p-4 border flex flex-col gap-3" style="background-color: var(--surface-card); border-color: var(--border-subtle);">${rows}
-            </div>
+            <details class="quota-more" data-quota-more${state.quotaMoreOpen ? " open" : ""}>
+                <summary class="quota-more__summary"><i data-lucide="chevron-right" class="quota-more__chevron" aria-hidden="true"></i>${escapeHtml(t("dashboard-quotas-more"))}</summary>
+                <div class="quota-more__body p-4 border flex flex-col gap-3" style="background-color: var(--surface-card); border-color: var(--border-subtle);">${rows}
+                </div>
+            </details>
         `;
+}
+
+/**
+ * Remembers the user's fold/unfold. `toggle` also fires when render() inserts
+ * a details that already carries `open`; that matches the state, so it is
+ * skipped and never rewrites storage.
+ */
+function handleQuotaMoreToggle(event: Event): void {
+  const target = event.target;
+  if (!(target instanceof HTMLDetailsElement) || !target.hasAttribute("data-quota-more")) {
+    return;
+  }
+  if (target.open === state.quotaMoreOpen) return;
+  state.quotaMoreOpen = target.open;
+  writeQuotaMoreOpen(target.open);
 }
 
 /**
@@ -792,7 +805,6 @@ function renderTokenUsageSection(): string {
             <div class="totals__hero-value">${formatNumber(totals.total_tokens)}</div>
             <div class="totals__label">${escapeHtml(t("dashboard-col-total"))}</div>
           </div>
-          ${renderRateMeter(summary?.recent_minutes)}
         </div>
         <dl class="totals__parts">
           ${renderTotalsPart(t("dashboard-col-input"), formatNumber(totals.input_tokens))}
@@ -838,40 +850,6 @@ function renderTokenUsageSection(): string {
       </div>
     </section>
   `;
-}
-
-/**
- * "Are tokens coming in?" at a glance: tokens per minute (averaged over the
- * last 5 minutes, so one burst doesn't spike it) and a sparkline of the last
- * 15 minutes. One series, so no legend; the label says what it is.
- */
-function renderRateMeter(
-  minutes: TokenUsageSummary["recent_minutes"],
-): string {
-  if (!minutes || minutes.length === 0) return "";
-  const values = minutes.map((m) => Math.max(0, m.total_tokens));
-  const lastFive = values.slice(-5);
-  const rate = Math.round(lastFive.reduce((a, b) => a + b, 0) / lastFive.length);
-
-  // 0..100 x 0..24 drawing space; the line hugs the bottom when idle.
-  const max = Math.max(...values, 1);
-  const step = values.length > 1 ? 100 / (values.length - 1) : 0;
-  const points = values
-    .map((v, i) => `${(i * step).toFixed(1)},${(22 - (v / max) * 20).toFixed(1)}`)
-    .join(" ");
-  const pointList = points.split(" ");
-  const last = pointList[pointList.length - 1]?.split(",") ?? ["100", "22"];
-  const label = t("dashboard-rate-sparkline-label");
-
-  return `
-          <div class="rate">
-            <svg class="rate__spark" viewBox="0 0 100 24" preserveAspectRatio="none" role="img" aria-label="${escapeHtml(label)}">
-              <title>${escapeHtml(label)}</title>
-              <polyline points="${points}" fill="none" vector-effect="non-scaling-stroke" />
-              <circle cx="${last[0]}" cy="${last[1]}" r="1.6" />
-            </svg>
-            <div class="rate__value">${escapeHtml(t("dashboard-rate-per-minute", { n: rate.toLocaleString() }))}</div>
-          </div>`;
 }
 
 /** One figure in the totals row: value over a muted label. The value is
@@ -1281,6 +1259,9 @@ function init(): void {
     button.addEventListener("keydown", handlePeriodButtonKeydown);
   }
   contentArea.addEventListener("click", handleContentAreaClick);
+  // `toggle` doesn't bubble; capture it on the stable container so it
+  // survives render() replacing the details.
+  contentArea.addEventListener("toggle", handleQuotaMoreToggle, true);
 
   const urlParams = new URLSearchParams(window.location.search);
   if (urlParams.get("embedded") === "1") {
@@ -1318,6 +1299,10 @@ function init(): void {
   // First paint: pull /usage quotas + initial token-usage page so the
   // page isn't blank for a few seconds while the live feed warms up.
   void fetchData();
+
+  // Live sessions poll their own endpoint in both modes (the Tauri channel
+  // carries only the summary).
+  startLiveSessions(contentArea);
 
   if (runningInTauri) {
     // Tauri mode: the Rust shell drives the token-usage feed via

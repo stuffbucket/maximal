@@ -5,6 +5,7 @@ import { streamSSE, type SSEMessage } from "hono/streaming"
 import { getConfig } from "~/lib/config/config"
 import { awaitApproval } from "~/lib/http/approval"
 import { checkRateLimit } from "~/lib/http/rate-limit"
+import { setRequestUsage } from "~/lib/http/request-context"
 import { reverseId } from "~/lib/models/anthropic-id-rewrite"
 import {
   modelMappingErrorBody,
@@ -24,9 +25,11 @@ import { state } from "~/lib/runtime-state/state"
 import {
   createCopilotTokenUsageRecorder,
   normalizeOpenAIUsage,
+  resolveTokenUsageSessionId,
   type UsageTokens,
   withCopilotCost,
 } from "~/lib/token-usage"
+import { responsesCacheTtlSeconds } from "~/lib/token-usage/request-meta"
 import { isNonStreaming } from "~/routes/streaming-predicates"
 import {
   createChatCompletions,
@@ -82,21 +85,30 @@ export async function handleCompletion(c: Context) {
     debugJson(logger, "Set max_tokens to:", payload.max_tokens)
   }
 
-  // not support subagent marker for now , set sessionId = getUUID(requestId)
   const requestId = generateRequestIdFromPayload(payload)
   logger.debug("Generated request ID:", requestId)
 
-  const sessionId = getUUID(requestId)
-  logger.debug("Extracted session ID:", sessionId)
+  // Chat completions carries no conversation id, so the recorded session is
+  // empty unless the client sent x-session-affinity; the interaction id sent
+  // upstream stays per-request. The recorder and the request context share
+  // one resolved id so they can't disagree.
+  const interactionId = getUUID(requestId)
+  const usageSessionId = resolveTokenUsageSessionId(undefined, "")
+  setRequestUsage({
+    sessionId: usageSessionId,
+    model: payload.model,
+    cacheTtlS: responsesCacheTtlSeconds(undefined),
+    cacheTtlRequested: false,
+  })
   const recordUsage = createCopilotTokenUsageRecorder({
     endpoint: "chat_completions",
-    fallbackSessionId: sessionId,
+    sessionId: usageSessionId,
     model: payload.model,
   })
 
   const response = await createChatCompletions(payload, {
     requestId,
-    sessionId,
+    sessionId: interactionId,
   })
 
   if (isNonStreaming(response)) {

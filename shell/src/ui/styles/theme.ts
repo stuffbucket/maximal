@@ -119,6 +119,13 @@ export const layout = {
  *   accent behind white text  ≥ 4.5:1 — primary button labels
  * `link` doubles as the accent family's text color: anything teal that is
  * text (links, "Copied", accent figures) uses `link`, never `accent`.
+ *
+ * `series1`…`series6` color the Dashboard's live-session traces, with the
+ * session table as their legend. `series1` is the accent; the rest share one
+ * OKLCH lightness and chroma per theme (the accent's lightness), stepping
+ * around the hues the status colors don't use. Each must clear 3:1 against
+ * `surfaceCard` and keep clear of the status hues:
+ * `bun scripts/check-series-contrast.ts` checks both.
  */
 export const themes = {
   dark: {
@@ -137,6 +144,12 @@ export const themes = {
     statusSuccess: "#22c55e",
     statusWarning: "#eab308",
     statusInfo: "#38bdf8",
+    series1: "var(--accent)",
+    series2: "oklch(0.558 0.085 313)",
+    series3: "oklch(0.558 0.085 245)",
+    series4: "oklch(0.558 0.085 347)",
+    series5: "oklch(0.558 0.085 181)",
+    series6: "oklch(0.558 0.085 279)",
   },
   light: {
     surfaceBase: "#fafafa",
@@ -154,5 +167,11 @@ export const themes = {
     statusSuccess: "#137333",
     statusWarning: "#8a5a00",
     statusInfo: "#0369a1",
+    series1: "var(--accent)",
+    series2: "oklch(0.475 0.07 313)",
+    series3: "oklch(0.475 0.07 245)",
+    series4: "oklch(0.475 0.07 347)",
+    series5: "oklch(0.475 0.07 181)",
+    series6: "oklch(0.475 0.07 279)",
   },
 } as const satisfies Record<"dark" | "light", Record<string, string>>;

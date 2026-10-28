@@ -2,6 +2,9 @@ import type { Context } from "hono"
 
 import { streamSSE } from "hono/streaming"
 
+import type { Model } from "~/services/copilot/get-models"
+
+import { cachedCodexModelCatalog } from "~/apps/codex/models-catalog"
 import {
   getConfig,
   getPromptCacheRetention,
@@ -9,6 +12,7 @@ import {
 } from "~/lib/config/config"
 import { awaitApproval } from "~/lib/http/approval"
 import { checkRateLimit } from "~/lib/http/rate-limit"
+import { requestContext, setRequestUsage } from "~/lib/http/request-context"
 import { reverseId } from "~/lib/models/anthropic-id-rewrite"
 import {
   modelMappingErrorBody,
@@ -24,9 +28,15 @@ import { state } from "~/lib/runtime-state/state"
 import {
   createCopilotTokenUsageRecorder,
   normalizeResponsesUsage,
+  resolveTokenUsageSessionId,
   type UsageTokens,
   withCopilotCost,
 } from "~/lib/token-usage"
+import { deriveUsageClient } from "~/lib/token-usage/client"
+import {
+  resolveContextWindow,
+  responsesCacheTtlSeconds,
+} from "~/lib/token-usage/request-meta"
 import { isAsyncIterable } from "~/routes/streaming-predicates"
 import {
   createResponses as defaultCreateResponses,
@@ -58,6 +68,7 @@ import { createStreamIdTracker, fixStreamIds } from "./stream-id-sync"
 import {
   applyResponsesApiContextManagement,
   compactInputByLatestCompaction,
+  getLatestCompactionMessageIndex,
   getResponsesRequestOptions,
 } from "./utils"
 
@@ -84,15 +95,22 @@ export const handleResponses = async (c: Context) => {
   payload.model = mapping.resolvedModel
   debugJson(logger, "Responses request payload:", payload)
 
-  // not support subagent marker for now , set sessionId = getUUID(requestId)
+  // The session is the client's prompt_cache_key (Codex sets one per
+  // conversation); without it there is none. The interaction id sent upstream
+  // stays per-request (subagent markers aren't supported here).
   const requestId = generateRequestIdFromPayload({ messages: payload.input })
   logger.debug("Generated request ID:", requestId)
 
-  const sessionId = getUUID(requestId)
+  // The recorder and the request context share this one resolved id.
+  const sessionId = resolveTokenUsageSessionId(
+    undefined,
+    payload.prompt_cache_key,
+  )
   logger.debug("Extracted session ID:", sessionId)
+  const interactionId = getUUID(requestId)
   const recordUsage = createCopilotTokenUsageRecorder({
     endpoint: "responses",
-    fallbackSessionId: sessionId,
+    sessionId,
     model: payload.model,
   })
 
@@ -104,6 +122,10 @@ export const handleResponses = async (c: Context) => {
     removeWebSearchTool(payload)
   }
 
+  // Read before compaction trims the input down to the latest item.
+  const carriesCompaction =
+    Array.isArray(payload.input)
+    && getLatestCompactionMessageIndex(payload.input) !== undefined
   compactInputByLatestCompaction(payload)
 
   const selectedModel = state.models?.data.find(
@@ -125,10 +147,13 @@ export const handleResponses = async (c: Context) => {
     )
   }
 
+  const hadContextManagement = payload.context_management !== undefined
   applyResponsesApiContextManagement(
     payload,
     selectedModel?.capabilities.limits.max_prompt_tokens,
   )
+  const maximalCompacts =
+    !hadContextManagement && payload.context_management !== undefined
 
   // Copilot/OpenAI-Responses-specific prefix-cache retention. On this native
   // passthrough path we only fill it in when the client didn't set one — never
@@ -137,6 +162,14 @@ export const handleResponses = async (c: Context) => {
   if (promptCacheRetention && !payload.prompt_cache_retention) {
     payload.prompt_cache_retention = promptCacheRetention
   }
+
+  recordResponsesUsageMeta({
+    payload,
+    sessionId,
+    selectedModel,
+    isCompact: carriesCompaction,
+    maximalCompacts,
+  })
 
   debugJson(logger, "Translated Responses payload:", payload)
 
@@ -150,7 +183,7 @@ export const handleResponses = async (c: Context) => {
     vision,
     initiator,
     requestId,
-    sessionId: sessionId,
+    sessionId: interactionId,
   })
 
   if (isStreamingRequested(payload) && isAsyncIterable(response)) {
@@ -198,6 +231,38 @@ export const handleResponses = async (c: Context) => {
     ),
   )
   return c.json(response as ResponsesResult)
+}
+
+function recordResponsesUsageMeta(input: {
+  payload: ResponsesPayload
+  sessionId: string
+  selectedModel: Model | undefined
+  isCompact: boolean
+  maximalCompacts: boolean
+}): void {
+  const { payload, sessionId, selectedModel, isCompact, maximalCompacts } =
+    input
+  const store = requestContext.getStore()
+  if (!store) return
+
+  const client = deriveUsageClient(store.usage.apiKeyLabel, store.userAgent)
+  setRequestUsage({
+    sessionId,
+    model: payload.model,
+    cacheTtlS: responsesCacheTtlSeconds(payload.prompt_cache_retention),
+    cacheTtlRequested: false,
+    isCompact,
+    context: resolveContextWindow({
+      client,
+      model: selectedModel,
+      longContext: false,
+      maximalCompacts,
+      codexCatalog:
+        client === "codex" ?
+          cachedCodexModelCatalog(state.models?.data ?? [])
+        : undefined,
+    }),
+  })
 }
 
 const isStreamingRequested = (payload: ResponsesPayload): boolean =>

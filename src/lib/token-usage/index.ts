@@ -2,7 +2,10 @@ import { requestContext, generateTraceId } from "~/lib/http/request-context"
 import { state } from "~/lib/runtime-state/state"
 import { pricedModelIsPaid } from "~/services/copilot/get-models"
 
+import type { RequestContextWindow } from "./request-meta"
+
 import { EventBus } from "../runtime-state/event-bus"
+import { deriveUsageClient } from "./client"
 import {
   enqueueTokenUsageWrite,
   hasAnyToken,
@@ -125,6 +128,55 @@ function toPersistedEvent(
     is_premium: resolveIsPaid(input.model),
     trace_id: resolveTraceId(input.traceId),
     user_id: resolveUserId(input),
+    ...resolveRequestUsageFields(),
+  }
+}
+
+type RequestUsageFields = Pick<
+  PersistedTokenUsageEvent,
+  | "cache_ttl_requested"
+  | "cache_ttl_s"
+  | "client"
+  | "client_label"
+  | "compact_at_tokens"
+  | "context_ceiling_tokens"
+  | "context_window_tokens"
+  | "is_compact"
+  | "request_started_at_ms"
+  | "window_source"
+>
+
+/** The client, cache lifetime, context window and start time of the current
+ *  request. Outside any request (or before a handler fills them in) the
+ *  client is "other", the flags 0 and the window and start columns null. */
+function resolveRequestUsageFields(): RequestUsageFields {
+  const context = requestContext.getStore()
+  const usage = context?.usage
+  return {
+    ...resolveWindowFields(usage?.context),
+    client: deriveUsageClient(usage?.apiKeyLabel, context?.userAgent ?? ""),
+    client_label: usage?.apiKeyLabel ?? null,
+    cache_ttl_s: normalizeToken(usage?.cacheTtlS),
+    cache_ttl_requested: usage?.cacheTtlRequested ? 1 : 0,
+    is_compact: usage?.isCompact ? 1 : 0,
+    request_started_at_ms: context?.startTime ?? null,
+  }
+}
+
+function resolveWindowFields(
+  window: RequestContextWindow | undefined,
+): Pick<
+  RequestUsageFields,
+  | "compact_at_tokens"
+  | "context_ceiling_tokens"
+  | "context_window_tokens"
+  | "window_source"
+> {
+  return {
+    context_window_tokens: window?.windowTokens ?? null,
+    context_ceiling_tokens: window?.ceilingTokens ?? null,
+    compact_at_tokens: window?.compactAtTokens ?? null,
+    window_source: window?.source ?? null,
   }
 }
 

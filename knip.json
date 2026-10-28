@@ -19,5 +19,10 @@
     "mise",
     "trufflehog"
   ],
-  "ignoreExportsUsedInFile": true
+  "ignoreExportsUsedInFile": true,
+  "playwright": {
+    "entry": [
+      "tests/e2e/**/*.spec.ts"
+    ]
+  }
 }

@@ -5,6 +5,7 @@ import type { Model } from "~/services/copilot/get-models"
 import { getConfig, isMessagesApiEnabled } from "~/lib/config/config"
 import { awaitApproval } from "~/lib/http/approval"
 import { checkRateLimit } from "~/lib/http/rate-limit"
+import { requestContext, setRequestUsage } from "~/lib/http/request-context"
 import {
   pickCopilotVariantId,
   reverseId,
@@ -26,11 +27,18 @@ import {
   getRootSessionId,
 } from "~/lib/platform/utils"
 import { state } from "~/lib/runtime-state/state"
+import { deriveUsageClient } from "~/lib/token-usage/client"
+import {
+  anthropicCacheTtlSeconds,
+  resolveContextWindow,
+  responsesCacheTtlSeconds,
+} from "~/lib/token-usage/request-meta"
 
 import {
   handleWithChatCompletions,
   handleWithMessagesApi,
   handleWithResponsesApi,
+  resolveMessagesUsageSessionId,
 } from "./api-flows"
 import {
   getCompactType,
@@ -62,6 +70,40 @@ function resolveCopilotVariant(
     { effort: payload.output_config?.effort, longContext },
     state.models?.data.map((candidate) => candidate.id) ?? [],
   )
+}
+
+/** Fill the request's usage metadata from the client's own payload and headers. */
+function recordMessagesUsageMeta(input: {
+  c: Context
+  payload: AnthropicMessagesPayload
+  sessionId: string
+  selectedModel: Model | undefined
+  isCompact: boolean
+  viaWebTools: boolean
+}): void {
+  const { c, payload, sessionId, selectedModel, isCompact, viaWebTools } = input
+  const store = requestContext.getStore()
+  if (!store) return
+
+  const cacheTtlS = anthropicCacheTtlSeconds(payload)
+  const client = deriveUsageClient(store.usage.apiKeyLabel, store.userAgent)
+  const longContext =
+    c.req.header("anthropic-beta")?.includes("context-1m-2025-08-07") ?? false
+  setRequestUsage({
+    sessionId,
+    model: payload.model,
+    // Web tools always go upstream over Responses or chat completions (never
+    // native Messages) with no retention set: the automatic-cache rule.
+    cacheTtlS: viaWebTools ? responsesCacheTtlSeconds(undefined) : cacheTtlS,
+    // The lifetime came from the client when it marked anything for caching.
+    cacheTtlRequested: !viaWebTools && cacheTtlS > 0,
+    isCompact,
+    context: resolveContextWindow({
+      client,
+      model: selectedModel,
+      longContext,
+    }),
+  })
 }
 
 const UUID_PATTERN =
@@ -188,6 +230,14 @@ export async function handleCompletion(c: Context) {
 
   const selectedModel = findEndpointModel(anthropicPayload.model)
   anthropicPayload.model = selectedModel?.id ?? anthropicPayload.model
+  recordMessagesUsageMeta({
+    c,
+    payload: anthropicPayload,
+    sessionId: resolveMessagesUsageSessionId(anthropicPayload, sessionId),
+    selectedModel,
+    isCompact: compactType === COMPACT_REQUEST,
+    viaWebTools: webToolPolicy.declarations.length > 0,
+  })
 
   if (webToolPolicy.declarations.length > 0) {
     return await handleWithWebToolsAgent({

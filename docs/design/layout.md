@@ -23,7 +23,16 @@ and focuses the existing window and switches the active view in place. Closing h
 **Desktop only.** The OS enforces min size (`640×480`); `prevent_overflow` clamps initial size to the monitor's work area.
 
 - **Dashboard**: single column, centered in a wide Tailwind
-  `max-w-7xl` container, cards full content width.
+  `max-w-7xl` container, cards full content width — except the top
+  bento: from the `md` breakpoint the quotas sit in a narrower left
+  column and the live card in the right one. The row takes the taller
+  of the two: the live card is at least its plot's minimum height and
+  grows with the quotas when they are taller (an open "Chat and
+  completions"); the quota cards keep their own height at the top.
+  Below `md` they stack, live card first. The session table (the live
+  card's legend) runs full width under the bento, above the token usage.
+  The toolbar above the bento (period, range, language) wraps on a narrow
+  window rather than overflow.
 - **Settings**: `.topbar` header + centered single-column content pane.
   Section max-width = `--content-max`. Within the pane, form
   rows use a 33% label / 66% control split.

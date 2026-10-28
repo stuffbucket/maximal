@@ -35,6 +35,9 @@ SBOM.cdx.json
 # eslint cache
 .eslintcache
 .claude
+# Playwright output (tests/e2e)
+test-results/
+playwright-report/
 # Stryker mutation testing
 .stryker-tmp/
 reports/

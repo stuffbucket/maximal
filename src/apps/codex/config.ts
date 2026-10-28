@@ -10,6 +10,9 @@ import {
 } from "~/lib/platform/atomic-json"
 import { proxyBaseUrl } from "~/lib/start/proxy-port"
 
+/** The label Codex attributes its key under (Settings → API clients). */
+export const CODEX_KEY_LABEL = "codex"
+
 export interface CodexAuthInvocation {
   command: string
   args: Array<string>

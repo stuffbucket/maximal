@@ -16,8 +16,6 @@ const { getConfig, writeConfig } = await import("../src/lib/config/config")
 const { closeUsageStore } = await import("../src/lib/token-usage")
 const { tokenUsageRoute } = await import("../src/routes/token-usage/route")
 const { responsesRoutes } = await import("../src/routes/responses/route")
-const { generateRequestIdFromPayload, getUUID } =
-  await import("../src/lib/platform/utils")
 // DI shim — replaces the previous process-wide
 // mock.module("~/services/copilot/create-responses", ...) which leaked
 // the stub to other test files (notably tests/completion-rejection.test.ts)
@@ -100,7 +98,7 @@ afterEach(async () => {
 })
 
 describe("responses handler token usage", () => {
-  test("records usage from failed streaming responses and falls back to interaction id", async () => {
+  test("records usage from failed streaming responses with the client's prompt_cache_key as session", async () => {
     createResponses.mockImplementation(() =>
       Promise.resolve(
         streamChunks([
@@ -148,6 +146,7 @@ describe("responses handler token usage", () => {
     const payload = {
       input: "hello",
       model: "gpt-test",
+      prompt_cache_key: "conv-7",
       stream: true,
     }
 
@@ -178,12 +177,7 @@ describe("responses handler token usage", () => {
     }
     expect(page.items).toHaveLength(1)
 
-    const expectedRequestId = generateRequestIdFromPayload({
-      messages: payload.input,
-    })
-    const expectedInteractionId = getUUID(expectedRequestId)
-
-    expect(page.items[0]?.session_id).toBe(expectedInteractionId)
+    expect(page.items[0]?.session_id).toBe("conv-7")
     expect(page.items[0]?.cache_read_input_tokens).toBe(1)
     expect(page.items[0]?.input_tokens).toBe(4)
     expect(page.items[0]?.output_tokens).toBe(2)

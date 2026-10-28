@@ -1,10 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { Hono } from "hono"
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
 
 import type { Model, ModelsResponse } from "~/services/copilot/get-models"
 
 import { requestContext } from "~/lib/http/request-context"
 import { traceIdMiddleware } from "~/lib/http/trace"
+import { openSqliteDatabase } from "~/lib/platform/sqlite"
 import { state } from "~/lib/runtime-state/state"
 import {
   closeUsageStore,
@@ -53,6 +57,7 @@ describe("token usage storage", () => {
         sessionAffinity: "opencode-session",
         startTime: Date.now(),
         traceId: "trace-123",
+        usage: {},
         userAgent: "test",
       },
       () => {
@@ -325,5 +330,277 @@ describe("token usage pricing signal (token_prices)", () => {
   test("unknown when billing carries neither token_prices nor is_premium", async () => {
     seedModel("bare", {})
     expect(await recordAndReadPremium("bare")).toBeNull()
+  })
+})
+
+/** A usage database in a temp directory for each test, read back raw. */
+function useTempUsageDb(): {
+  dbPath: () => string
+  readRows: () => Promise<Array<Record<string, unknown>>>
+} {
+  let dir = ""
+  let dbPath = ""
+
+  beforeEach(async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "token-usage-cols-"))
+    dbPath = path.join(dir, "usage.sqlite")
+    await closeUsageStore()
+    process.env[DB_PATH_ENV] = dbPath
+  })
+
+  afterEach(async () => {
+    await closeUsageStore()
+    fs.rmSync(dir, { recursive: true, force: true })
+  })
+
+  async function readRows(): Promise<Array<Record<string, unknown>>> {
+    await closeUsageStore()
+    const db = await openSqliteDatabase(dbPath)
+    try {
+      return db
+        .prepare("SELECT * FROM token_usage_events ORDER BY id")
+        .all() as Array<Record<string, unknown>>
+    } finally {
+      db.close?.()
+    }
+  }
+
+  return { dbPath: () => dbPath, readRows }
+}
+
+describe("token usage migrations", () => {
+  const { dbPath, readRows } = useTempUsageDb()
+
+  test("migrates a version 1 database and reads old rows with defaults", async () => {
+    const old = await openSqliteDatabase(dbPath())
+    old.exec(`
+      CREATE TABLE token_usage_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        created_at_ms INTEGER NOT NULL,
+        created_at_utc TEXT NOT NULL,
+        trace_id TEXT NOT NULL,
+        session_id TEXT NOT NULL DEFAULT '',
+        user_id TEXT NOT NULL DEFAULT '',
+        source TEXT NOT NULL,
+        endpoint TEXT NOT NULL,
+        provider_name TEXT,
+        model TEXT NOT NULL,
+        input_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0,
+        cache_read_input_tokens INTEGER NOT NULL DEFAULT 0,
+        cache_creation_input_tokens INTEGER NOT NULL DEFAULT 0,
+        total_tokens INTEGER NOT NULL DEFAULT 0,
+        total_nano_aiu INTEGER NOT NULL DEFAULT 0,
+        is_premium INTEGER
+      )
+    `)
+    old
+      .prepare(
+        `INSERT INTO token_usage_events
+          (created_at_ms, created_at_utc, trace_id, source, endpoint, model, total_tokens)
+         VALUES (?, ?, 'old-trace', 'copilot', 'messages', 'gpt-old', 9)`,
+      )
+      .run(Date.now(), new Date().toISOString())
+    old.exec("PRAGMA user_version = 1")
+    old.close?.()
+
+    recordTokenUsageEvent({
+      endpoint: "messages",
+      input_tokens: 1,
+      model: "gpt-new",
+      source: "copilot",
+    })
+
+    const [oldRow, newRow] = await readRows()
+    expect(oldRow).toMatchObject({
+      model: "gpt-old",
+      client: "other",
+      client_label: null,
+      cache_ttl_s: 0,
+      cache_ttl_requested: 0,
+      is_compact: 0,
+      context_window_tokens: null,
+      context_ceiling_tokens: null,
+      compact_at_tokens: null,
+      window_source: null,
+    })
+    expect(newRow.model).toBe("gpt-new")
+
+    const db = await openSqliteDatabase(dbPath())
+    const version = db.prepare("PRAGMA user_version").get() as {
+      user_version: number
+    }
+    db.close?.()
+    expect(version.user_version).toBe(2)
+    expect(oldRow.request_started_at_ms).toBeNull()
+  })
+
+  test("adds a column missing from a database that already ran step 2", async () => {
+    // A database migrated by an earlier build of step 2, which had every
+    // column but the request start time, is at version 2 already.
+    const early = await openSqliteDatabase(dbPath())
+    early.exec(`
+      CREATE TABLE token_usage_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        created_at_ms INTEGER NOT NULL,
+        created_at_utc TEXT NOT NULL,
+        trace_id TEXT NOT NULL,
+        session_id TEXT NOT NULL DEFAULT '',
+        user_id TEXT NOT NULL DEFAULT '',
+        source TEXT NOT NULL,
+        endpoint TEXT NOT NULL,
+        provider_name TEXT,
+        model TEXT NOT NULL,
+        input_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0,
+        cache_read_input_tokens INTEGER NOT NULL DEFAULT 0,
+        cache_creation_input_tokens INTEGER NOT NULL DEFAULT 0,
+        total_tokens INTEGER NOT NULL DEFAULT 0,
+        total_nano_aiu INTEGER NOT NULL DEFAULT 0,
+        is_premium INTEGER,
+        client TEXT NOT NULL DEFAULT 'other',
+        client_label TEXT,
+        cache_ttl_s INTEGER NOT NULL DEFAULT 0,
+        cache_ttl_requested INTEGER NOT NULL DEFAULT 0,
+        is_compact INTEGER NOT NULL DEFAULT 0,
+        context_window_tokens INTEGER,
+        context_ceiling_tokens INTEGER,
+        compact_at_tokens INTEGER,
+        window_source TEXT
+      )
+    `)
+    early.exec("PRAGMA user_version = 2")
+    early.close?.()
+
+    const startTime = Date.now() - 4000
+    requestContext.run(
+      {
+        parentSessionId: undefined,
+        sessionAffinity: undefined,
+        startTime,
+        traceId: "trace-early",
+        usage: {},
+        userAgent: "",
+      },
+      () => {
+        recordTokenUsageEvent({
+          endpoint: "messages",
+          input_tokens: 1,
+          model: "claude-test",
+          source: "copilot",
+        })
+      },
+    )
+
+    const [row] = await readRows()
+    expect(row.request_started_at_ms).toBe(startTime)
+  })
+})
+
+describe("token usage client, cache and context columns", () => {
+  const { readRows } = useTempUsageDb()
+
+  test("stores the client, cache lifetime and context window of the request", async () => {
+    const startTime = Date.now() - 90_000
+    requestContext.run(
+      {
+        parentSessionId: undefined,
+        sessionAffinity: undefined,
+        startTime,
+        traceId: "trace-ctx",
+        usage: {
+          apiKeyLabel: "codex",
+          cacheTtlS: 300,
+          cacheTtlRequested: true,
+          isCompact: true,
+          context: {
+            windowTokens: 272_000,
+            ceilingTokens: 258_000,
+            compactAtTokens: 200_000,
+            source: "codex-catalog",
+          },
+        },
+        userAgent: "codex_cli_rs/0.1",
+      },
+      () => {
+        recordTokenUsageEvent({
+          endpoint: "responses",
+          input_tokens: 10,
+          model: "gpt-test",
+          source: "copilot",
+        })
+      },
+    )
+
+    const [row] = await readRows()
+    expect(row).toMatchObject({
+      client: "codex",
+      client_label: "codex",
+      cache_ttl_s: 300,
+      cache_ttl_requested: 1,
+      is_compact: 1,
+      context_window_tokens: 272_000,
+      context_ceiling_tokens: 258_000,
+      compact_at_tokens: 200_000,
+      window_source: "codex-catalog",
+      // When the request started, not when its usage was recorded.
+      request_started_at_ms: startTime,
+    })
+    expect(row.created_at_ms).toBeGreaterThan(startTime)
+  })
+
+  test("falls back to the user agent for the client when the key has no known label", async () => {
+    requestContext.run(
+      {
+        parentSessionId: undefined,
+        sessionAffinity: undefined,
+        startTime: Date.now(),
+        traceId: "trace-ua",
+        usage: { apiKeyLabel: "my-key" },
+        userAgent: "claude-cli/2.1.0 (external, cli)",
+      },
+      () => {
+        recordTokenUsageEvent({
+          endpoint: "messages",
+          input_tokens: 1,
+          model: "claude-test",
+          source: "copilot",
+        })
+      },
+    )
+
+    const [row] = await readRows()
+    expect(row).toMatchObject({
+      client: "claude-code",
+      client_label: "my-key",
+      cache_ttl_s: 0,
+      cache_ttl_requested: 0,
+      is_compact: 0,
+      context_window_tokens: null,
+      window_source: null,
+    })
+  })
+
+  test("persists an event recorded outside any request with defaults", async () => {
+    recordTokenUsageEvent({
+      endpoint: "embeddings",
+      input_tokens: 4,
+      model: "embed-test",
+      source: "copilot",
+    })
+
+    const [row] = await readRows()
+    expect(row).toMatchObject({
+      client: "other",
+      client_label: null,
+      cache_ttl_s: 0,
+      cache_ttl_requested: 0,
+      is_compact: 0,
+      context_window_tokens: null,
+      context_ceiling_tokens: null,
+      compact_at_tokens: null,
+      window_source: null,
+      request_started_at_ms: null,
+    })
   })
 })

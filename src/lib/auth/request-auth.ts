@@ -4,6 +4,7 @@ import consola from "consola"
 
 import { getConfig, type AppConfig } from "~/lib/config/config"
 import { recordClient } from "~/lib/http/active-clients"
+import { requestContext } from "~/lib/http/request-context"
 import { hasGithubToken, state } from "~/lib/runtime-state/state"
 
 interface AuthMiddlewareOptions {
@@ -240,6 +241,8 @@ export function createAuthMiddleware(
     if (shouldBypass(c)) return next()
     const decision = decideAuth(extractRequestApiKey(c))
     if (!decision.allow) return createUnauthorizedResponse(c)
+    const usage = requestContext.getStore()?.usage
+    if (usage) usage.apiKeyLabel = decision.label
     recordClient({
       apiKeyId: decision.id,
       apiKeyLabel: decision.label,

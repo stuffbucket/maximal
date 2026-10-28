@@ -1,6 +1,9 @@
 [test]
 # Only tests/ holds the root suite; each package under packages/ runs its own.
 root = "tests"
+# Playwright specs drive a browser against the UI harness; `bunx playwright test`
+# runs them, not `bun test`.
+pathIgnorePatterns = ["tests/e2e/**"]
 # Redirect the complete cross-platform user environment before application
 # modules load. See tests/test-setup.ts and tests/helpers/user-sandbox.ts.
 preload = ["./tests/test-setup.ts"]

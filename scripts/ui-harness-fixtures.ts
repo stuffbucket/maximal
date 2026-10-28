@@ -22,6 +22,7 @@ import type {
   PendingRequestsResponse,
   UpdateStatusResponse,
 } from "../src/lib/config/settings-types"
+import type { SessionView, SessionsResponse } from "../src/lib/token-usage/sessions-schema"
 
 // gh-status isn't a settings-types export (it's typed in shell/src/proxy/client.ts),
 // so it's a plain shape here. installed:false hides the gh-reuse list.
@@ -81,6 +82,10 @@ export interface DashboardFixture {
   }
   /** Every event in the period; the mock pages through it. */
   tokenEvents: Array<TokenEventFixture>
+  /** GET /token-usage/sessions. A function, called per request, so every
+   *  timestamp (cache expiry, last request, minute buckets) is relative to
+   *  that moment rather than to when the module loaded. */
+  sessions: () => SessionsResponse
 }
 
 export interface Scenario {
@@ -398,6 +403,288 @@ function recentMinutes(values: Array<number>): Array<{ start_ms: number; total_t
   }))
 }
 
+const noSessions = (): SessionsResponse => ({ flow_per_min: 0, sessions: [] })
+
+const MIN = 60_000
+
+type SessionOverrides = Pick<SessionView, "id" | "client" | "model" | "state"> &
+  Partial<Omit<SessionView, "cache" | "context">> & {
+    cache: SessionView["cache"]
+    context: SessionView["context"]
+  }
+
+/** A session row; rate is the mean of the last 5 minute buckets, as the server computes it. */
+function session(o: SessionOverrides, buckets: Array<number>, nowMs: number): SessionView {
+  const minutes = recentMinutes(buckets)
+  const last5 = buckets.slice(-5)
+  return {
+    client_label: null,
+    started_at_ms: nowMs - 40 * MIN,
+    last_request_at_ms: nowMs - 30_000,
+    total_tokens: buckets.reduce((sum, n) => sum + n, 0) * 3,
+    request_count: 12,
+    ...o,
+    rate_per_min: Math.round(last5.reduce((sum, n) => sum + n, 0) / last5.length),
+    minutes,
+  }
+}
+
+/** The live-sessions scenario: every state the Dashboard's sessions view draws.
+ *  One streaming session, three warm ones with different cache confidence
+ *  (observed, requested, estimated), one about to go cold, two cold (one
+ *  downgraded), and the unattributed Claude Desktop row. Context fills: 30%, 78% and 93%. */
+function liveSessions(): SessionsResponse {
+  const now = Date.now()
+  const claude = { client: "claude-code" } as const
+  // Codex sizes its window from its catalog; Copilot's ceiling is lower, and
+  // Maximal's injected compaction sits at 90% of that ceiling.
+  const codexWindow = { window_tokens: 272_000, ceiling_tokens: 128_000, compact_at_tokens: 115_200 }
+  const claudeWindow = { window_tokens: 200_000, ceiling_tokens: 200_000, compact_at_tokens: null }
+  return {
+    // Trailing minute across all sessions, plus what the streaming reply has emitted so far.
+    flow_per_min: 41_800,
+    sessions: [
+      // Streaming: a 1 h requested cache, 78% full, rate climbing at the end.
+      session(
+        {
+          id: "4f1c9a52-7d3e-4b08-9a61-2c5e8d7f0b13",
+          ...claude,
+          client_label: "Laptop",
+          model: "claude-sonnet-4-5",
+          state: "streaming",
+          started_at_ms: now - 52 * MIN,
+          last_request_at_ms: now - 25_000,
+          request_count: 31,
+          cache: {
+            ttl_s: 3_600,
+            expires_at_ms: now - 25_000 + 3_600_000,
+            confidence: "requested",
+            downgraded: false,
+            downgraded_from_s: null,
+            last_cache_read_tokens: 148_200,
+          },
+          context: {
+            used_tokens: 156_000,
+            ...claudeWindow,
+            window_source: "models-endpoint",
+            compacted_at_ms: now - 31 * MIN,
+          },
+        },
+        [3_100, 2_400, 4_800, 0, 5_600, 7_900, 6_200, 9_400, 8_800, 11_300, 10_100, 14_600, 18_900, 27_400, 41_000],
+        now,
+      ),
+      // Warm, cache lifetime confirmed by a cache read after a long gap; 30% full.
+      session(
+        {
+          id: "b7e20d64-1a95-4c3f-8e72-5f9a0c4d6e21",
+          ...claude,
+          client_label: "Laptop",
+          model: "claude-opus-4-5",
+          state: "warm",
+          started_at_ms: now - 2 * 3_600_000,
+          last_request_at_ms: now - 70_000,
+          request_count: 58,
+          cache: {
+            ttl_s: 3_600,
+            expires_at_ms: now - 70_000 + 3_600_000,
+            confidence: "observed",
+            downgraded: false,
+            downgraded_from_s: null,
+            last_cache_read_tokens: 58_900,
+          },
+          context: {
+            used_tokens: 60_000,
+            ...claudeWindow,
+            window_source: "models-endpoint",
+            compacted_at_ms: null,
+          },
+        },
+        [9_200, 12_400, 0, 0, 6_800, 15_300, 11_000, 8_700, 0, 4_200, 13_800, 9_600, 5_100, 7_300, 6_400],
+        now,
+      ),
+      // Warm Codex session: GPT caches automatically, so the lifetime is a guess;
+      // 93% of Copilot's ceiling. Its key is the one the integration made, so
+      // it has no label of its own.
+      session(
+        {
+          id: "0c8d3e17-9b42-4f6a-a1d5-7e3b2f8c9d04",
+          client: "codex",
+          client_label: null,
+          model: "gpt-5-codex",
+          state: "warm",
+          started_at_ms: now - 74 * MIN,
+          last_request_at_ms: now - 150_000,
+          request_count: 44,
+          cache: {
+            ttl_s: 300,
+            expires_at_ms: now - 150_000 + 300_000,
+            confidence: "estimated",
+            downgraded: false,
+            downgraded_from_s: null,
+            last_cache_read_tokens: 231_500,
+          },
+          context: {
+            used_tokens: 119_000,
+            ...codexWindow,
+            window_source: "codex-catalog",
+            compacted_at_ms: now - 48 * MIN,
+          },
+        },
+        [14_000, 16_800, 21_500, 0, 0, 18_200, 24_900, 22_100, 0, 19_600, 28_300, 17_400, 9_800, 5_200, 3_600],
+        now,
+      ),
+      // Warm, cache lifetime requested: ordinary 5-minute cache, a minute and a half old; 12% full.
+      session(
+        {
+          id: "e92a5b08-3c71-4d0e-b6f4-8a1d7c2e5f39",
+          ...claude,
+          client_label: "Build server",
+          model: "claude-sonnet-4-5",
+          state: "warm",
+          started_at_ms: now - 19 * MIN,
+          last_request_at_ms: now - 90_000,
+          request_count: 9,
+          cache: {
+            ttl_s: 300,
+            expires_at_ms: now - 90_000 + 300_000,
+            confidence: "requested",
+            downgraded: false,
+            downgraded_from_s: null,
+            last_cache_read_tokens: 22_400,
+          },
+          context: {
+            used_tokens: 24_000,
+            ...claudeWindow,
+            window_source: "models-endpoint",
+            compacted_at_ms: null,
+          },
+        },
+        [0, 0, 0, 0, 0, 0, 2_800, 5_400, 8_100, 3_900, 6_700, 0, 4_500, 2_100, 0],
+        now,
+      ),
+      // Within 20 s of going cold.
+      session(
+        {
+          id: "7a4f1e90-6d28-4b53-9c07-3e8b5a2d1f66",
+          ...claude,
+          model: "claude-haiku-4-5",
+          state: "warm",
+          started_at_ms: now - 33 * MIN,
+          last_request_at_ms: now - 280_000,
+          request_count: 17,
+          cache: {
+            ttl_s: 300,
+            expires_at_ms: now + 20_000,
+            confidence: "requested",
+            downgraded: false,
+            downgraded_from_s: null,
+            last_cache_read_tokens: 9_800,
+          },
+          context: {
+            used_tokens: 11_000,
+            ...claudeWindow,
+            window_source: "models-endpoint",
+            compacted_at_ms: null,
+          },
+        },
+        [1_900, 3_200, 2_600, 4_100, 1_300, 2_800, 3_700, 1_100, 2_300, 900, 1_600, 400, 0, 0, 0],
+        now,
+      ),
+      // Cold: the 1 h lifetime failed twice, so the countdown fell back to 5 minutes.
+      session(
+        {
+          id: "d15b8c36-0e7a-4a29-8f43-6c9d2b7e4a58",
+          ...claude,
+          client_label: "Build server",
+          model: "claude-opus-4-5",
+          state: "cold",
+          started_at_ms: now - 3 * 3_600_000,
+          last_request_at_ms: now - 14 * MIN,
+          request_count: 26,
+          cache: {
+            ttl_s: 300,
+            expires_at_ms: now - 14 * MIN + 300_000,
+            confidence: "estimated",
+            downgraded: true,
+            downgraded_from_s: 3_600,
+            last_cache_read_tokens: 0,
+          },
+          context: {
+            used_tokens: 88_000,
+            ...claudeWindow,
+            window_source: "models-endpoint",
+            compacted_at_ms: null,
+          },
+        },
+        [6_100, 3_800, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        now,
+      ),
+      // Cold for most of an hour.
+      session(
+        {
+          id: "93e6a0b2-8f14-4c75-a2d9-1b5c7e3f8a40",
+          client: "codex",
+          client_label: null,
+          model: "gpt-5-mini",
+          state: "cold",
+          started_at_ms: now - 5 * 3_600_000,
+          last_request_at_ms: now - 47 * MIN,
+          request_count: 6,
+          total_tokens: 41_300,
+          cache: {
+            ttl_s: 300,
+            expires_at_ms: now - 47 * MIN + 300_000,
+            confidence: "estimated",
+            downgraded: false,
+            downgraded_from_s: null,
+            last_cache_read_tokens: 6_300,
+          },
+          context: {
+            used_tokens: 7_200,
+            ...codexWindow,
+            window_source: "codex-catalog",
+            compacted_at_ms: null,
+          },
+        },
+        Array(15).fill(0),
+        now,
+      ),
+      // Requests with no session id fold into one row per client; the window is unknown.
+      session(
+        {
+          id: "other:claude-desktop",
+          client: "claude-desktop",
+          client_label: null,
+          model: "claude-sonnet-4-5",
+          state: "cold",
+          started_at_ms: now - 6 * 3_600_000,
+          last_request_at_ms: now - 22 * MIN,
+          request_count: 14,
+          total_tokens: 186_000,
+          cache: {
+            ttl_s: 0,
+            expires_at_ms: null,
+            confidence: "estimated",
+            downgraded: false,
+            downgraded_from_s: null,
+            last_cache_read_tokens: 0,
+          },
+          context: {
+            used_tokens: 0,
+            window_tokens: null,
+            ceiling_tokens: null,
+            compact_at_tokens: null,
+            window_source: "model-listing",
+            compacted_at_ms: null,
+          },
+        },
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        now,
+      ),
+    ],
+  }
+}
+
 const busyDayEvents = tokenEvents(47)
 const busyDashboard: DashboardFixture = {
   usage: {
@@ -414,12 +701,14 @@ const busyDashboard: DashboardFixture = {
     recent_minutes: recentMinutes([0, 0, 1200, 0, 0, 3400, 8100, 5200, 0, 2600, 9800, 14200, 11800, 16500, 7400]),
   },
   tokenEvents: busyDayEvents,
+  sessions: noSessions,
 }
 
 const emptyDashboard: DashboardFixture = {
   usage: { quota_snapshots: null },
   tokenUsage: { totals: ZERO_TOTALS, byModel: [], recent_minutes: recentMinutes(Array(15).fill(0)) },
   tokenEvents: [],
+  sessions: noSessions,
 }
 
 /** A signed-in, everything-normal scenario to vary one surface from. */
@@ -767,6 +1056,11 @@ export const SCENARIOS = {
       ...busyDashboard,
       usage: { ...busyDashboard.usage, quota_reset_date: "2025-06-01" },
     },
+  },
+
+  "live-sessions": {
+    ...healthy("Dashboard · live sessions: streaming, warm, about to go cold, cold"),
+    dashboard: { ...busyDashboard, sessions: liveSessions },
   },
 
   "mcp-recovering": {

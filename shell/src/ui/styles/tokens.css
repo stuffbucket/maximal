@@ -101,6 +101,12 @@
   --status-success: #22c55e;
   --status-warning: #eab308;
   --status-info: #38bdf8;
+  --series-1: var(--accent);
+  --series-2: oklch(0.558 0.085 313);
+  --series-3: oklch(0.558 0.085 245);
+  --series-4: oklch(0.558 0.085 347);
+  --series-5: oklch(0.558 0.085 181);
+  --series-6: oklch(0.558 0.085 279);
 }
 
 @media (prefers-color-scheme: light) {
@@ -121,6 +127,12 @@
     --status-success: #137333;
     --status-warning: #8a5a00;
     --status-info: #0369a1;
+    --series-1: var(--accent);
+    --series-2: oklch(0.475 0.07 313);
+    --series-3: oklch(0.475 0.07 245);
+    --series-4: oklch(0.475 0.07 347);
+    --series-5: oklch(0.475 0.07 181);
+    --series-6: oklch(0.475 0.07 279);
   }
 }
 
@@ -141,4 +153,10 @@
   --status-success: #137333;
   --status-warning: #8a5a00;
   --status-info: #0369a1;
+  --series-1: var(--accent);
+  --series-2: oklch(0.475 0.07 313);
+  --series-3: oklch(0.475 0.07 245);
+  --series-4: oklch(0.475 0.07 347);
+  --series-5: oklch(0.475 0.07 181);
+  --series-6: oklch(0.475 0.07 279);
 }

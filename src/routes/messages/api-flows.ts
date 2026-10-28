@@ -8,6 +8,7 @@ import type { SubagentMarker } from "~/lib/runtime-state/subagent"
 import type { Model } from "~/services/copilot/get-models"
 
 import { getPromptCacheRetention } from "~/lib/config/config"
+import { setRequestUsage } from "~/lib/http/request-context"
 import {
   type AnthropicMessagesPayload,
   type AnthropicStreamEventData,
@@ -21,10 +22,12 @@ import {
   normalizeAnthropicUsage,
   normalizeOpenAIUsage,
   normalizeResponsesUsage,
+  resolveTokenUsageSessionId,
   type TokenUsageEndpoint,
   type UsageTokens,
   withCopilotCost,
 } from "~/lib/token-usage"
+import { responsesCacheTtlSeconds } from "~/lib/token-usage/request-meta"
 import {
   buildErrorEvent,
   createResponsesStreamState,
@@ -47,6 +50,7 @@ import {
 import { createMessages } from "~/services/copilot/create-messages"
 import {
   createResponses,
+  type ResponsesPayload,
   type ResponsesResult,
   type ResponseStreamEvent,
 } from "~/services/copilot/create-responses"
@@ -85,6 +89,11 @@ export const handleWithChatCompletions = async (
 ) => {
   const { logger, subagentMarker, requestId, sessionId, compactType } = options
   const openAIPayload = translateToOpenAI(anthropicPayload)
+  // Chat completions caches automatically; the client's markers don't apply.
+  setRequestUsage({
+    cacheTtlS: responsesCacheTtlSeconds(undefined),
+    cacheTtlRequested: false,
+  })
   const recordUsage = createCopilotUsageRecorder({
     endpoint: "chat_completions",
     fallbackSessionId: sessionId,
@@ -184,15 +193,7 @@ export const handleWithResponsesApi = async (
     selectedModel?.capabilities.limits.max_prompt_tokens,
   )
 
-  // Copilot/OpenAI-Responses-specific prefix-cache retention. Opt-in via
-  // config; omitted otherwise so behavior is unchanged. Set on the built
-  // payload here (not in the pure translator). A future non-Copilot provider
-  // path won't use this. Safe to enable: create-responses.ts strips + retries
-  // once if a specific endpoint 400s on the param.
-  const promptCacheRetention = getPromptCacheRetention()
-  if (promptCacheRetention) {
-    responsesPayload.prompt_cache_retention = promptCacheRetention
-  }
+  applyPromptCacheRetention(responsesPayload)
 
   compactInputByLatestCompaction(responsesPayload)
 
@@ -276,6 +277,23 @@ export const handleWithResponsesApi = async (
   return finishNonStreamingResponses(c, response as ResponsesResult, {
     logger,
     recordUsage,
+  })
+}
+
+/** Copilot/OpenAI-Responses-specific prefix-cache retention. Opt-in via
+ *  config; omitted otherwise so behavior is unchanged. Set on the built
+ *  payload here (not in the pure translator). A future non-Copilot provider
+ *  path won't use this. Safe to enable: create-responses.ts strips + retries
+ *  once if a specific endpoint 400s on the param. The request's cache lifetime
+ *  follows this upstream rule, not the client's markers. */
+function applyPromptCacheRetention(payload: ResponsesPayload): void {
+  const promptCacheRetention = getPromptCacheRetention()
+  if (promptCacheRetention) {
+    payload.prompt_cache_retention = promptCacheRetention
+  }
+  setRequestUsage({
+    cacheTtlS: responsesCacheTtlSeconds(payload.prompt_cache_retention),
+    cacheTtlRequested: false,
   })
 }
 
@@ -400,6 +418,14 @@ export const handleWithMessagesApi = async (
   return c.json(response)
 }
 
+/** The session id a Messages request's usage is recorded under. The recorder
+ *  and the request context both use this, so they can't disagree. */
+export const resolveMessagesUsageSessionId = (
+  payload: AnthropicMessagesPayload,
+  fallbackSessionId?: string,
+): string =>
+  resolveTokenUsageSessionId(getMetadataSessionId(payload), fallbackSessionId)
+
 const createCopilotUsageRecorder = (options: {
   endpoint: TokenUsageEndpoint
   fallbackSessionId?: string
@@ -408,9 +434,11 @@ const createCopilotUsageRecorder = (options: {
 }): ((usage: UsageTokens) => void) =>
   createCopilotTokenUsageRecorder({
     endpoint: options.endpoint,
-    fallbackSessionId: options.fallbackSessionId,
     model: options.model,
-    sessionId: getMetadataSessionId(options.payload),
+    sessionId: resolveMessagesUsageSessionId(
+      options.payload,
+      options.fallbackSessionId,
+    ),
   })
 
 const getMetadataSessionId = (

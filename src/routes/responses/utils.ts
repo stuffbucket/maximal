@@ -78,7 +78,7 @@ export const compactInputByLatestCompaction = (
   payload.input = payload.input.slice(latestCompactionMessageIndex)
 }
 
-const getLatestCompactionMessageIndex = (
+export const getLatestCompactionMessageIndex = (
   input: Array<ResponseInputItem>,
 ): number | undefined => {
   for (let index = input.length - 1; index >= 0; index -= 1) {

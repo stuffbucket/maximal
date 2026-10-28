@@ -37,7 +37,8 @@ export function value(theme: Theme, token: string): string {
 }
 
 function kebab(s: string): string {
-  return s.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
+  // series1 → series-1, surfaceCard → surface-card
+  return s.replace(/([a-z])([0-9])/g, "$1-$2").replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
 }
 
 export const SURFACES = ["surface-base", "surface-card", "surface-control"];

@@ -58,6 +58,7 @@
     "storybook:build": "mise -C packages/storybook exec -- pnpm build",
     "storybook:check": "bun scripts/ui-harness.ts --check && mise -C packages/storybook exec -- pnpm typecheck && mise -C packages/storybook exec -- pnpm contrast",
     "storybook:install": "mise -C packages/storybook exec -- pnpm install --frozen-lockfile",
+    "test:e2e": "playwright test tests/e2e/",
     "tokens:generate": "bun scripts/generate-css-tokens.ts",
     "typecheck": "tsc",
     "ui:harness": "bun run build:ui && bun run scripts/ui-harness.ts",
@@ -91,6 +92,7 @@
   },
   "devDependencies": {
     "@echristian/eslint-config": "^0.0.54",
+    "@playwright/test": "1.56.1",
     "@stryker-mutator/core": "^9.6.1",
     "@types/bun": "^1.2.23",
     "@types/proxy-from-env": "^1.0.4",
