@@ -72,20 +72,34 @@ review the refreshed PR.
 The same Pages deploy rebuilds the apt repository at `https://mxml.sh/apt`
 (static files under `site/dist/apt/`, never committed), in three jobs:
 
-1. `build` (no secrets): `scripts/apt-repo-plan.ts` reads the merged
-   manifest. The `stable` suite is built from `channels.stable.tag` and the
-   `rc` suite from `channels.rc.tag`, so apt always carries the version the
-   apps announce and nothing else. `build/linux/apt-repo.sh fetch` downloads
-   that release's four `.deb`s, checks each `.sha256`, and refuses a file over
-   95 MB (Pages serves files up to 100 MB and sites up to 1 GB; the deploy
-   also fails over 800 MB). `index` writes `Packages(.gz)`, `Release` and
-   `by-hash/` copies (`Acquire-By-Hash: yes`, so a CDN mixing generations
-   can't cause "Hash Sum mismatch").
-2. `sign-apt`, in the `github-pages` environment: checks out only
-   `apt-repo.sh` and the public key, installs nothing, and `sign` writes
-   `InRelease` and `Release.gpg` for the indexes `build` uploaded.
-3. `deploy`: publishes the site with the signed indexes, after checking
-   every suite has both signatures.
+1. `build` (no secrets) builds the site and only plans the repository:
+   `scripts/apt-repo-plan.ts` reads the merged manifest and outputs which
+   tags to build. The `stable` suite is built from `channels.stable.tag` and
+   the `rc` suite from `channels.rc.tag`, so apt always carries the version
+   the apps announce and nothing else. `build` runs the project's
+   dependencies, so nothing it produces is signed.
+2. `sign-apt`, in the `github-pages` environment, builds and signs the
+   repository. It checks out only `build/linux/apt-repo.sh`, the public key
+   and the manifest (`persist-credentials: false`), runs no project
+   dependencies, and uses tools on the runner image (apt-utils from Ubuntu's
+   archive if the image lacks it). In order:
+   - `fetch` refuses any suite whose tag isn't the one the manifest names,
+     downloads that release's four `.deb`s, checks each against the
+     release's own `.sha256` asset, and refuses a file over 95 MB (Pages
+     serves files up to 100 MB and sites up to 1 GB; the deploy also fails
+     over 800 MB);
+   - `index` writes `Packages(.gz)`, `Release` and `by-hash/` copies
+     (`Acquire-By-Hash: yes`). Each deploy replaces the whole site, so older
+     by-hash files disappear; this only covers a client that gets the new
+     `InRelease` while a CDN edge still serves the old `Packages`;
+   - `sign` writes `InRelease` and `Release.gpg`. Only this step sees the
+     secrets.
+
+   It uploads the whole signed tree, pool included.
+3. `deploy` replaces `/apt` with that tree and the committed public key,
+   runs `apt-repo.sh verify` (every suite signed by the published key, every
+   `Filename:` in each `Packages` present in the pool with its recorded
+   SHA256), then publishes.
 
 A release without Linux packages (anything before them) is skipped with a
 notice; with none at all, `sign-apt` is skipped and the site deploys without
@@ -94,20 +108,21 @@ the repository.
 **An apt error fails the whole Pages deploy (fail closed).** A plan error (a
 channel whose manifest entry lists Linux downloads its release doesn't have,
 or a release that can't be read), a bad download or checksum, an oversized
-package, or a signing failure stops the run before `deploy`, so the previous
-site, manifest and apt repository all stay live and consistent, and no
-manifest update ships until it is fixed. To recover, read the failing step's
-`::error::` annotation, fix the cause (attach the missing packages by cutting
-a new release, correct the manifest through a PR, or fix the secrets and
-variable in the `github-pages` environment), then start a fresh run with
-`gh workflow run deploy-pages.yml --ref main`. Re-running only the failed
-jobs works too, as long as nothing on `main` changed.
+package, a signing failure, or a failed `verify` stops the run before it
+publishes, so the previous site, manifest and apt repository all stay live
+and consistent, and no manifest update ships until it is fixed. To recover,
+read the failing step's `::error::` annotation, fix the cause (attach the
+missing packages by cutting a new release, correct the manifest through a PR,
+or fix the secrets and variable in the `github-pages` environment), then
+start a fresh run with `gh workflow run deploy-pages.yml --ref main`.
+Re-running only the failed jobs works too, as long as nothing on `main`
+changed.
 
 Signing uses the `APT_SIGNING_KEY` (armored private key) and
 `APT_SIGNING_KEY_PASSWORD` secrets and the `APT_SIGNING_KEY_FINGERPRINT`
 variable (`7317FD604A591AFFC9235436C8270651B026DDF6`), all in the
-`github-pages` environment (branch policy: `main`), visible only to
-`sign-apt`, with the key in a temporary `GNUPGHOME`. The job fails unless the
+`github-pages` environment (branch policy: `main`). Only the sign step of
+`sign-apt` sees the secrets, with the key in a temporary `GNUPGHOME`. The job fails unless the
 key's fingerprint equals that variable and the committed public key
 `site/public/apt/maximal.asc`, and it verifies each signature against that
 public key. Rotating the key means replacing all four together and telling
