@@ -81,7 +81,12 @@ const throughClient = async (
     client === "node" ?
       [
         "node",
-        [resolve(import.meta.dir, "pipe-client.mjs"), "15000", line, ...command],
+        [
+          resolve(import.meta.dir, "pipe-client.mjs"),
+          "15000",
+          line,
+          ...command,
+        ],
       ]
     : [
         "powershell",
@@ -129,8 +134,18 @@ const throughClient = async (
 
 const windows = process.platform === "win32"
 
+// On the windows-11-arm runner each PowerShell launch takes about 42 seconds,
+// so a PowerShell parent can't answer inside the test's budget. What it checks
+// (PowerShell's .NET pipes) is covered on x64; Claude Desktop, the real
+// client, is Node, which runs here.
+const powershellTooSlow = process.arch === "arm64"
+const clients = (
+  powershellTooSlow ?
+    ["node"]
+  : ["node", "powershell"]) as Array<"node" | "powershell">
+
 describe.skipIf(!windows)("the stdio adapter on Windows pipes", () => {
-  for (const client of ["node", "powershell"] as const) {
+  for (const client of clients) {
     it(`answers initialize from a ${client} parent`, async () => {
       const result = await throughClient(
         client,
@@ -148,8 +163,13 @@ describe.skipIf(!windows)("the stdio adapter on Windows pipes", () => {
   // Diagnostic: which ways of reading stdin work under each parent. Logged,
   // not asserted.
   it("reports which stdin readers work under each parent", async () => {
-    for (const client of ["node", "powershell"] as const) {
-      for (const method of ["process-stdin", "bun-stdin", "fs-stream", "fs-read"]) {
+    for (const client of clients) {
+      for (const method of [
+        "process-stdin",
+        "bun-stdin",
+        "fs-stream",
+        "fs-read",
+      ]) {
         const result = await throughClient(client, "ping", [
           process.execPath,
           resolve(import.meta.dir, "stdin-probe.ts"),
