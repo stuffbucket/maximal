@@ -39,6 +39,10 @@ import {
   reconfigureBroker,
   waitForBrokerReady,
 } from "~/lib/mcp-broker/supervisor"
+import {
+  isHeldBackFromBroker,
+  reconfigureBrokerAfterSetupCheck,
+} from "~/lib/mcp-broker/workiq"
 
 import type { ClientApp } from "./index"
 
@@ -85,8 +89,10 @@ export interface SetMcpEndpointResult {
   /** False when no broker runs in this process (e.g. the CLI). */
   brokerReloaded: boolean
   /** Where the broker got to before the apps were updated. Turning an
-   *  endpoint on waits (bounded) for it; turning one off doesn't. */
-  broker: BrokerReadiness
+   *  endpoint on waits (bounded) for it; turning one off doesn't.
+   *  `setup-needed`: it's on, but held back from the broker until its setup
+   *  is done (Work IQ's terms and sign-in), so there was nothing to wait for. */
+  broker: BrokerReadiness | "setup-needed"
   /** The app whose own entry for this id the endpoint now runs. */
   adoptedFrom?: string
   /** Environment names from that entry not copied (they look like secrets). */
@@ -262,6 +268,8 @@ export interface McpBrokerSteps {
   reconfigure?: typeof reconfigureBroker
   waitForBroker?: (timeoutMs: number) => Promise<BrokerReadiness>
   syncClients?: typeof syncAllMcpClients
+  /** Whether an endpoint that is on is held back from the broker. */
+  heldBack?: (server: McpServerConfig) => boolean
 }
 
 /** What each client's sync did with endpoint `id`. */
@@ -284,9 +292,11 @@ function clientOutcome(
 }
 
 const DEFAULT_STEPS: Required<McpBrokerSteps> = {
-  reconfigure: reconfigureBroker,
+  // Reads Work IQ's setup first, so one that isn't done stays held back.
+  reconfigure: (config) => reconfigureBrokerAfterSetupCheck(config),
   waitForBroker: waitForBrokerReady,
   syncClients: syncAllMcpClients,
+  heldBack: (server) => isHeldBackFromBroker(server),
 }
 
 /**
@@ -302,7 +312,7 @@ export async function setMcpEndpoint(
   change: { enabled: boolean; clients?: Array<McpClientId> },
   steps: McpBrokerSteps = {},
 ): Promise<SetMcpEndpointResult | undefined> {
-  const { reconfigure, waitForBroker, syncClients } = {
+  const { reconfigure, waitForBroker, syncClients, heldBack } = {
     ...DEFAULT_STEPS,
     ...steps,
   }
@@ -330,10 +340,10 @@ export async function setMcpEndpoint(
   })
 
   const brokerReloaded = await reconfigure(next.mcpBroker ?? {})
-  const broker =
-    change.enabled ?
-      await waitForBroker(BROKER_READY_TIMEOUT_MS)
-    : brokerReadiness()
+  let broker: SetMcpEndpointResult["broker"]
+  if (!change.enabled) broker = brokerReadiness()
+  else if (heldBack(server)) broker = "setup-needed"
+  else broker = await waitForBroker(BROKER_READY_TIMEOUT_MS)
   const outcome = clientOutcome(id, await syncClients())
   const endpoint = (await listMcpEndpoints()).find((view) => view.id === id)
   if (!endpoint) return undefined

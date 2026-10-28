@@ -20,7 +20,11 @@ import {
   refreshCatalogCommands,
 } from "~/apps/mcp"
 import { getConfig, writeConfig } from "~/lib/config/config"
-import { findCatalogEntry, WORKIQ_PACKAGE_SPEC } from "~/lib/mcp-broker/catalog"
+import {
+  findCatalogEntry,
+  WORKIQ_PACKAGE_SPEC,
+  windowsMachineArch,
+} from "~/lib/mcp-broker/catalog"
 import { resolveBrokerConfiguration } from "~/lib/mcp-broker/configuration"
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "mcp-catalog-"))
@@ -753,7 +757,78 @@ describe("Work IQ install hint: registry", () => {
   })
 })
 
+/** An npm global Work IQ under %APPDATA% with Windows builds for `arches`. */
+const windowsPackage = (arches: Array<string>) => {
+  const appData = tempDir()
+  const packageDir = path.join(
+    appData,
+    "npm",
+    "node_modules",
+    "@microsoft",
+    "workiq",
+  )
+  fs.mkdirSync(packageDir, { recursive: true })
+  fs.writeFileSync(path.join(packageDir, "package.json"), '{"version":"1.0.1"}')
+  for (const arch of arches) {
+    fs.mkdirSync(path.join(packageDir, "bin", `win-${arch}`), {
+      recursive: true,
+    })
+    fs.writeFileSync(
+      path.join(packageDir, "bin", `win-${arch}`, "workiq.exe"),
+      "",
+    )
+  }
+  return { appData, packageDir }
+}
+
 describe("on Windows", () => {
+  test("knows the machine's architecture, not the emulated one", () => {
+    // An x64 Maximal emulated on an Arm PC.
+    expect(
+      windowsMachineArch({
+        PROCESSOR_ARCHITECTURE: "AMD64",
+        PROCESSOR_ARCHITEW6432: "ARM64",
+      }),
+    ).toBe("arm64")
+    expect(windowsMachineArch({ PROCESSOR_ARCHITECTURE: "ARM64" })).toBe(
+      "arm64",
+    )
+    expect(windowsMachineArch({ PROCESSOR_ARCHITECTURE: "AMD64" })).toBe("x64")
+    expect(windowsMachineArch({})).toBeUndefined()
+  })
+
+  test("runs Work IQ's Arm build on an Arm PC, even from an emulated Maximal", () => {
+    const { appData, packageDir } = windowsPackage(["arm64", "x64"])
+    const found = workiq.locate({
+      ...base,
+      miseDataDir: tempDir(),
+      platform: "win32",
+      arch: undefined,
+      env: {
+        APPDATA: appData,
+        PROCESSOR_ARCHITECTURE: "AMD64",
+        PROCESSOR_ARCHITEW6432: "ARM64",
+      },
+    })
+    expect(found?.command).toBe(
+      path.join(packageDir, "bin", "win-arm64", "workiq.exe"),
+    )
+  })
+
+  test("falls back to the x64 build on an Arm PC when there's no Arm one", () => {
+    const { appData, packageDir } = windowsPackage(["x64"])
+    const found = workiq.locate({
+      ...base,
+      miseDataDir: tempDir(),
+      platform: "win32",
+      arch: undefined,
+      env: { APPDATA: appData, PROCESSOR_ARCHITECTURE: "ARM64" },
+    })
+    expect(found?.command).toBe(
+      path.join(packageDir, "bin", "win-x64", "workiq.exe"),
+    )
+  })
+
   test("offers Work IQ found through npm's workiq.cmd on PATH", () => {
     // npm's Windows layout: the launcher, with the package beside it.
     const prefix = tempDir()

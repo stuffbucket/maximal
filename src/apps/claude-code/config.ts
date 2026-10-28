@@ -14,6 +14,7 @@ import {
   resolveApiKey,
 } from "~/lib/auth/api-key-helper"
 import { atomicWriteJson } from "~/lib/platform/atomic-json"
+import { parseJsonText } from "~/lib/platform/json-text"
 import { proxyBaseUrl } from "~/lib/start/proxy-port"
 
 /** The label Claude Code attributes its key under (Settings → API clients). */
@@ -78,7 +79,7 @@ export function readClaudeCodeSettings(
   }
   if (!raw.trim()) return {}
   try {
-    const parsed: unknown = JSON.parse(raw)
+    const parsed: unknown = parseJsonText(raw)
     if (
       typeof parsed !== "object"
       || parsed === null

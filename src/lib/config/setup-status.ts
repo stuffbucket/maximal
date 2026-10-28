@@ -29,6 +29,7 @@ import {
   registryPathFor,
 } from "~/lib/auth/github-token-store"
 import { AppConfigSchema } from "~/lib/config/config-schema"
+import { parseJsonText } from "~/lib/platform/json-text"
 import { PATHS } from "~/lib/platform/paths"
 
 export type SetupCheckName = "appDir" | "config" | "db" | "githubAuth"
@@ -117,7 +118,7 @@ function checkConfig(file: string): SetupCheckResult {
   }
   let parsed: unknown
   try {
-    parsed = JSON.parse(raw)
+    parsed = parseJsonText(raw)
   } catch {
     return { ok: false, reason: "invalid JSON", path: file }
   }

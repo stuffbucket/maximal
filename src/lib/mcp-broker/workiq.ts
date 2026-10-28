@@ -10,6 +10,12 @@
  * (`fetch`, `get_schema`, `search_paths`, …) only once it has a working
  * sign-in. The broker records the tools each endpoint listed when it
  * started, so after a sign-in Maximal restarts the broker to look again.
+ *
+ * Until its setup is done (installed, terms accepted, signed in at least
+ * once), a Work IQ endpoint is held back from the broker even while it is
+ * on (`holdBackWorkIqUntilSetUp`): on Windows, `workiq mcp` opens
+ * Microsoft's sign-in window by itself as soon as it starts, outside the
+ * steps the card walks through.
  */
 
 import type { McpServerConfig } from "~/lib/config/config"
@@ -26,6 +32,8 @@ import {
   type WorkIqRunner,
 } from "~/lib/system/workiq-cli"
 
+import type { McpBrokerConfig } from "./types"
+
 import {
   brokerProcessEnvironment,
   resolveBrokerConfiguration,
@@ -36,6 +44,7 @@ import {
   type BrokerSupervisorState,
   getBrokerEndpointTools,
   getBrokerSupervisorSnapshot,
+  reconfigureBrokerAfter,
   restartBroker,
   waitForBrokerReady,
 } from "./supervisor"
@@ -118,6 +127,9 @@ export class WorkIq {
   /** Undefined runs the real `workiq`. */
   readonly #runner: WorkIqRunner | undefined
   readonly #signIns = new Map<string, SignInJob>()
+  /** Per endpoint: whether its setup was done when its config was last
+   *  read. Not read yet counts as not done. */
+  readonly #setUp = new Map<string, boolean>()
 
   constructor(deps: WorkIqDeps = {}) {
     this.#runner = deps.run
@@ -171,12 +183,29 @@ export class WorkIq {
     })
   }
 
-  #readConfig(server: McpServerConfig) {
-    return readWorkIqConfig(
+  async #readConfig(server: McpServerConfig) {
+    const config = await readWorkIqConfig(
       server.transport.command,
       this.#environment(server),
       this.#runner,
     )
+    this.#setUp.set(
+      server.id,
+      config.installed && config.eulaAccepted && config.signedInBefore,
+    )
+    return config
+  }
+
+  /** Whether the endpoint's setup was done when its config was last read
+   *  (by `checkSetup`, `status`, or a step). False until then. */
+  isSetUp(id: string): boolean {
+    return this.#setUp.get(id) === true
+  }
+
+  /** Read the endpoint's config again; whether its setup is done. */
+  async checkSetup(server: McpServerConfig): Promise<boolean> {
+    await this.#readConfig(server)
+    return this.isSetUp(server.id)
   }
 
   async status(server: McpServerConfig): Promise<WorkIqStatus> {
@@ -302,6 +331,60 @@ export class WorkIq {
 }
 
 export const workIq = new WorkIq()
+
+const heldBack = (server: McpServerConfig, workiq: WorkIq): boolean =>
+  isWorkIqEndpoint(server)
+  && server.enabled !== false
+  && !workiq.isSetUp(server.id)
+
+/**
+ * What the broker gets of `config`: each Work IQ endpoint that is on but
+ * whose setup isn't done (or hasn't been read yet) is turned off in the
+ * broker's copy, so `workiq mcp` doesn't start. The saved config is
+ * unchanged. Registered with `setBrokerConfigFilter` at startup.
+ */
+export function holdBackWorkIqUntilSetUp(
+  config: McpBrokerConfig,
+  workiq: WorkIq = workIq,
+): McpBrokerConfig {
+  const servers = config.servers ?? []
+  if (!servers.some((server) => heldBack(server, workiq))) return config
+  return {
+    ...config,
+    servers: servers.map((server) =>
+      heldBack(server, workiq) ? { ...server, enabled: false } : server,
+    ),
+  }
+}
+
+/** Whether `server` is on but held back until its setup is done. */
+export function isHeldBackFromBroker(
+  server: McpServerConfig,
+  workiq: WorkIq = workIq,
+): boolean {
+  return heldBack(server, workiq)
+}
+
+/**
+ * Reconfigure the broker after reading each Work IQ endpoint's setup
+ * again, so one set up meanwhile (or outside Maximal) starts and one that
+ * isn't stays held back. A config that can't be read counts as not set up.
+ */
+export function reconfigureBrokerAfterSetupCheck(
+  config: McpBrokerConfig,
+  workiq: WorkIq = workIq,
+): Promise<boolean> {
+  return reconfigureBrokerAfter(async () => {
+    await Promise.all(
+      (config.servers ?? [])
+        .filter(
+          (server) => isWorkIqEndpoint(server) && server.enabled !== false,
+        )
+        .map((server) => workiq.checkSetup(server).catch(() => false)),
+    )
+    return config
+  })
+}
 
 /** Endpoint views, each Work IQ endpoint that is on with its status. */
 export async function withWorkIqStatus<

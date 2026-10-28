@@ -127,6 +127,10 @@ const waitUntil = async (condition: () => boolean): Promise<void> => {
 it("proxies stdio to an authenticated loopback MCP endpoint", async () => {
   const { client } = await connectAdapter(await startFixtureBroker())
   try {
+    // connectAdapter's connect is the client's `initialize` through it.
+    expect(client.getServerVersion()).toBeDefined()
+    const { tools } = await client.listTools()
+    expect(tools.map((tool) => tool.name)).toContain("ordinary")
     expect(
       await client.callTool({ name: "ordinary", arguments: {} }),
     ).toMatchObject({

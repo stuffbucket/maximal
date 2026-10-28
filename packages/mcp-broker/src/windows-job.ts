@@ -10,7 +10,7 @@
  * If any step fails the broker refuses to run: it exits with
  * CONTAINMENT_EXIT_CODE, and the supervisor reports that instead of retrying.
  */
-import { dlopen, FFIType } from "bun:ffi"
+import type * as BunFfi from "bun:ffi"
 
 export const CONTAINMENT_UNAVAILABLE = "MCP_BROKER_CONTAINMENT_UNAVAILABLE"
 
@@ -67,8 +67,12 @@ export function killOnCloseLimits(): Uint8Array {
   return info
 }
 
-/** kernel32 through bun:ffi. Only loaded on Windows. */
+/** kernel32 through bun:ffi. Only loaded on Windows, and only by `serve`:
+ *  bun:ffi itself is required here rather than imported, so the stdio
+ *  adapter, which shares this executable, never loads it. */
 export function loadKernel32(): JobObjectApi {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { dlopen, FFIType } = require("bun:ffi") as typeof BunFfi
   const { symbols } = dlopen("kernel32.dll", {
     CreateJobObjectW: {
       args: [FFIType.ptr, FFIType.ptr],

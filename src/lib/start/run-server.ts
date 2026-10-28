@@ -26,9 +26,14 @@ import {
 import { initProxyFromEnv } from "~/lib/http/proxy"
 import {
   reconfigureBroker,
+  setBrokerConfigFilter,
   startBrokerSupervisor,
   stopBrokerSupervisor,
 } from "~/lib/mcp-broker/supervisor"
+import {
+  holdBackWorkIqUntilSetUp,
+  reconfigureBrokerAfterSetupCheck,
+} from "~/lib/mcp-broker/workiq"
 import { initOpencodeVersion } from "~/lib/platform/opencode"
 import { ensurePaths } from "~/lib/platform/paths"
 import { writePidfile } from "~/lib/platform/replace-running"
@@ -222,8 +227,19 @@ function afterListening(
 
   // Broker startup is deliberately detached from ordinary server readiness.
   // A missing, hung, or crashing broker degrades MCP only; Hono is already bound.
+  // A Work IQ whose setup isn't done is held back from the broker. Until its
+  // config has been read it counts as not done, so the broker starts
+  // without it; the check queued right after starts it if it's set up, and
+  // anything waiting for the broker waits for that too.
+  setBrokerConfigFilter((broker) => holdBackWorkIqUntilSetUp(broker))
   // An upgraded catalog server (e.g. Work IQ) may have moved; find it first.
-  startBrokerSupervisor(refreshCatalogCommands(config).mcpBroker ?? {})
+  const brokerConfig = refreshCatalogCommands(config).mcpBroker ?? {}
+  startBrokerSupervisor(brokerConfig)
+  void reconfigureBrokerAfterSetupCheck(brokerConfig).catch(
+    (error: unknown) => {
+      consola.warn("Could not check Work IQ's setup", error)
+    },
+  )
   // npm's registry and global prefix are looked up in the background, never
   // on the event loop; once known, a server installed with npm may turn out
   // to have moved too. (Until then a refresh keeps each server's last path.)

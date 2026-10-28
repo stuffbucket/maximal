@@ -140,8 +140,15 @@ jobs:
   # Object, which only a Windows machine can check: build the broker there
   # and run its tests, including test/windows-containment.test.ts, against
   # the compiled executable.
+  # The same on Windows on Arm, where Maximal's x64 build runs under
+  # emulation: the release broker and adapter must work there too.
   windows-broker:
-    runs-on: windows-latest
+    name: windows-broker (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-latest, windows-11-arm]
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     env:
       # The broker inherits the root mise.toml's Rust pin; nothing here
@@ -185,13 +192,16 @@ jobs:
           MAXIMAL_MCP_BROKER_BINARY="$(cygpath -w "$PWD/dist/maximal-mcp-broker.exe")" \
             mise exec -- bun test
 
-      # Releases ship the minified cross-compile (release.yml's build:target),
-      # so check containment against exactly that build as well.
-      - name: Test containment with the release build
+      # Releases ship the minified x64 cross-compile (release.yml's
+      # build:target), so check the adapter, the command line and containment
+      # against exactly that build as well. On the Arm runner it runs under
+      # emulation, as it does on an Arm PC.
+      - name: Test the release build
+        if: always()
         working-directory: packages/mcp-broker
         run: |
           mise exec -- pnpm build:target \
             --target=bun-windows-x64 \
             --outfile="$PWD/dist/release/maximal-mcp-broker.exe"
           MAXIMAL_MCP_BROKER_BINARY="$(cygpath -w "$PWD/dist/release/maximal-mcp-broker.exe")" \
-            mise exec -- bun test test/windows-containment.test.ts
+            mise exec -- bun test test/cli.test.ts test/stdio-adapter.test.ts test/windows-containment.test.ts

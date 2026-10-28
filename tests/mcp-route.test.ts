@@ -51,10 +51,12 @@ function buildApp(
     upstream?: typeof UPSTREAM | undefined
     respond?: (request: ForwardedRequest) => Response | Promise<Response>
     beforeNewSession?: () => Promise<void>
+    heldBack?: boolean
   } = {},
 ) {
   const forwarded: Array<ForwardedRequest> = []
   const routes = createMcpRoutes({
+    heldBack: () => options.heldBack ?? false,
     ...(options.beforeNewSession ?
       { beforeNewSession: options.beforeNewSession }
     : {}),
@@ -129,6 +131,17 @@ describe("/mcp/<id> new sessions", () => {
     })
     await app.request("/mcp/fixture", post())
     expect(calls).toEqual([])
+  })
+
+  test("an endpoint held back until its setup is done answers 503", async () => {
+    writeConfig(brokerConfig({ catalog: "workiq" }))
+    const { app, forwarded } = buildApp({ heldBack: true })
+    const response = await app.request("/mcp/fixture", post())
+    expect(response.status).toBe(503)
+    expect(await response.json()).toMatchObject({
+      error: { code: "MCP_ENDPOINT_SETUP_NEEDED" },
+    })
+    expect(forwarded).toHaveLength(0)
   })
 
   test("a failed check still forwards the session", async () => {

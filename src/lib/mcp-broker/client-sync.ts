@@ -71,7 +71,10 @@ export type McpClientUnavailableReason =
  *  can tell more than "its integration is off". */
 export type McpClientOfferUnavailableReason =
   /** Claude Desktop has another gateway profile applied. */
-  "other-provider-profile"
+  | "other-provider-profile"
+  /** Claude Code's integration is on, but Maximal found no `claude` it can
+   *  run to add the entry (on Windows only `claude.exe` will do). */
+  | "cli-missing"
 
 export interface McpReconcileResult {
   /** Ids Maximal now owns in the client after this pass. */

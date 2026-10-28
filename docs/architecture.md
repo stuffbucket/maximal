@@ -47,7 +47,7 @@ Claude Code is routed by an ownership-guarded `ANTHROPIC_BASE_URL` plus `apiKeyH
 
 ## Config and state
 
-- `src/lib/config/config.ts` — `AppConfig` shape, disk read/write of `config.json` in the app directory: `~/.local/share/maximal/` (Linux/macOS) or `%APPDATA%\maximal\` (Windows), resolved by `src/lib/platform/paths.ts`. `COPILOT_API_HOME` overrides it.
+- `src/lib/config/config.ts` — `AppConfig` shape, disk read/write of `config.json` in the app directory: `~/.local/share/maximal/` (Linux/macOS) or `%APPDATA%\maximal\` (Windows), resolved by `src/lib/platform/paths.ts`. `COPILOT_API_HOME` overrides it. A leading UTF-8 byte order mark (Notepad, PowerShell 5's `Set-Content -Encoding utf8`) is ignored, here and in the Claude Code and Claude Desktop files Maximal reads (`src/lib/platform/json-text.ts`). A `config.json` that isn't valid JSON leaves Maximal on the defaults, and `writeConfig` then refuses with `ConfigUnreadableError` rather than write over the file, until a read succeeds.
 - `src/lib/config/config-schema.ts` — zod runtime validation. Bad config → exit non-zero with key path. Unknown keys → warning, kept via `.loose()`.
 - `src/lib/runtime-state/state.ts` — singleton mutable state: tokens, accountType, rate-limit, models cache.
 - `src/lib/auth/github-token-store.ts` — the GitHub identity store. Multi-account registry (schema v2) at `accounts.json` beside the legacy `github_token`: `{ activeKey, accounts: Record<"login@host", AccountRecord> }`, atomic temp+rename writes. Boot reads the active account; the legacy single-record file is migrated in once (gated, offline→`unknown@host`) and kept as a rollback fallback. The three sign-in producers (device-code, CLI, gh-reuse) all persist a typed `AccountRecord`; switch/remove + the `/settings/api/accounts` routes drive quick-switch (set active → reboot the sidecar into it). Sign-out forgets the active account; Remove forgets a specific one; both touch only maximal's own copy — never `gh`. RMW takes no lock (safe on the single Bun sidecar; see the comment above `addAccountToDefaultRegistry`).
@@ -282,6 +282,10 @@ process's environment and npmrc files as a fallback. When none of them
 confirms a registry the host is `null` and the card says "It downloads from
 your npm registry." rather than naming npmjs.org. npm's reported global prefix
 likewise takes precedence over the file-based prefix probes. On Windows,
+the Arm build (`bin/win-arm64`) is chosen on an Arm PC even though x64
+Maximal runs emulated there and `process.arch` says x64
+(`windowsMachineArch` reads `PROCESSOR_ARCHITEW6432`, then
+`PROCESSOR_ARCHITECTURE`), falling back to `win-x64`. And
 npm's `workiq.cmd` launcher on PATH also leads to the package in the
 `node_modules` folder beside it. When
 several installs exist, the highest version wins. Adding asks the user to
@@ -419,6 +423,20 @@ background, 5 minutes, cancellable with `DELETE`, then a broker restart so the
 probe looks again). The commands are a closed set (`src/lib/system/workiq-cli.ts`)
 and get the endpoint's environment allowlist, never Maximal's credentials.
 User-facing guide: [`workiq.md`](workiq.md).
+
+A Work IQ endpoint that is on isn't handed to the broker until its setup is
+done: installed, `I-accept-EULA`, and `defaultAccount` set. On Windows,
+`workiq mcp` opens Microsoft's sign-in window by itself as soon as it
+starts, outside the card's steps. The server registers
+`holdBackWorkIqUntilSetUp` with `setBrokerConfigFilter`, so every start,
+reconfigure and restart gives the broker a copy with such an endpoint turned
+off. Not read yet counts as not done. Each `workiq config show` (a status,
+a step, or `reconfigureBrokerAfterSetupCheck`, which boot, turning an
+endpoint on and `/_internal/reload` use) updates what is known, and the
+Settings list reconfigures after reading the statuses, so a Work IQ set up
+from Terminal starts on the next list. Turning one on that is held back
+reports `broker: "setup-needed"` without waiting for the broker, and
+`/mcp/<id>` answers it with 503 `MCP_ENDPOINT_SETUP_NEEDED`.
 
 ### Requests for user input (elicitation)
 

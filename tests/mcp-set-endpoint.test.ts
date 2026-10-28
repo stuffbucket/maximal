@@ -126,6 +126,19 @@ describe("setMcpEndpoint", () => {
     expect(broker.events).toEqual(["reconfigure", "sync"])
     expect(result?.endpoint.enabled).toBe(false)
   })
+
+  test("turning on one held back until its setup is done doesn't wait for the broker", async () => {
+    const broker = controlledBroker()
+    const result = await setMcpEndpoint(
+      "workiq",
+      { enabled: true, clients: [] },
+      { ...broker, heldBack: (server) => server.id === "workiq" },
+    )
+    // Nothing to wait for: the broker isn't running it.
+    expect(broker.events).toEqual(["reconfigure", "sync"])
+    expect(result?.broker).toBe("setup-needed")
+    expect(result?.endpoint.enabled).toBe(true)
+  })
 })
 
 const outcome = (changes: Partial<McpReconcileResult>): McpReconcileResult => ({

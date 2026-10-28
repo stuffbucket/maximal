@@ -8,6 +8,7 @@ import {
   detectUnknownKeys,
   validateAppConfig,
 } from "~/lib/config/config-schema"
+import { parseJsonText } from "~/lib/platform/json-text"
 import { PATHS } from "~/lib/platform/paths"
 
 export type {
@@ -200,6 +201,21 @@ const defaultConfig: AppConfig = {
 
 let cachedConfig: AppConfig | null = null
 
+/** Set while `config.json` exists but isn't valid JSON. Maximal then runs
+ *  on the defaults and writes nothing to the file, so the person's own
+ *  settings are still there to fix; a later read that succeeds clears it. */
+let unreadableConfigError: string | undefined
+
+/** Writing was refused because `config.json` couldn't be read. */
+export class ConfigUnreadableError extends Error {
+  constructor(reason: string) {
+    super(
+      `${PATHS.CONFIG_PATH} isn't valid JSON (${reason}), so Maximal won't write to it. Fix or remove the file, then try again.`,
+    )
+    this.name = "ConfigUnreadableError"
+  }
+}
+
 function ensureConfigFile(): void {
   try {
     fs.accessSync(PATHS.CONFIG_PATH, fs.constants.R_OK | fs.constants.W_OK)
@@ -223,6 +239,9 @@ function readConfigFromDisk(): AppConfig {
   let parsed: unknown
   try {
     const raw = fs.readFileSync(PATHS.CONFIG_PATH, "utf8")
+    unreadableConfigError = undefined
+    // trim() also drops a byte order mark, so a file that is only one
+    // counts as empty.
     if (!raw.trim()) {
       fs.writeFileSync(
         PATHS.CONFIG_PATH,
@@ -231,9 +250,14 @@ function readConfigFromDisk(): AppConfig {
       )
       return defaultConfig
     }
-    parsed = JSON.parse(raw)
+    parsed = parseJsonText(raw)
   } catch (error) {
-    consola.error("Failed to read config file, using default config", error)
+    unreadableConfigError =
+      error instanceof Error ? error.message : String(error)
+    consola.error(
+      `Couldn't read ${PATHS.CONFIG_PATH}; using the defaults and leaving the file as it is until it's fixed.`,
+      error,
+    )
     return defaultConfig
   }
 
@@ -322,7 +346,7 @@ export function mergeConfigWithDefaults(): AppConfig {
   const config = readConfigFromDisk()
   const { mergedConfig, changed } = mergeDefaultConfig(config)
 
-  if (changed) {
+  if (changed && unreadableConfigError === undefined) {
     try {
       fs.writeFileSync(
         PATHS.CONFIG_PATH,
@@ -368,6 +392,11 @@ export function reloadConfig(): AppConfig {
  * `getConfig()` will reflect the write immediately.
  */
 export function writeConfig(next: AppConfig): AppConfig {
+  // Never write over a config.json that couldn't be read: what's in it is
+  // the person's, and these defaults would replace it.
+  if (unreadableConfigError !== undefined) {
+    throw new ConfigUnreadableError(unreadableConfigError)
+  }
   const validated = validateAppConfig(next)
   fs.mkdirSync(PATHS.APP_DIR, { recursive: true })
   const tmpPath = `${PATHS.CONFIG_PATH}.tmp-${process.pid}`

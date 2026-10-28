@@ -25,6 +25,17 @@ import {
 } from "./windows-job.ts"
 
 const BINARY_VERSION = "0.0.0"
+
+const USAGE = `Usage:
+  maximal-mcp-broker serve --generation <id> [--parent-pid <pid>]
+      Run the MCP broker for Maximal, which starts it. Control frames on
+      stdin and stdout; not for use by hand.
+  maximal-mcp-broker stdio-adapter --url http://127.0.0.1:<port>/mcp/<id>
+      Connect a stdio MCP client to one of Maximal's MCP endpoints. Set
+      MAXIMAL_MCP_API_KEY when the endpoint needs a key.
+  maximal-mcp-broker --version
+  maximal-mcp-broker --help
+`
 const MESSAGE_DEADLINE_MS = 10_000
 /** How long a broker told to stop by a signal, or whose parent is gone,
  *  waits for its servers to close before it exits anyway. */
@@ -49,9 +60,7 @@ const requiredValue = (
 
 const parseAdapterUrl = (args: Array<string>): string => {
   if (args.length !== 2 || args[0] !== "--url" || !args[1]) {
-    throw new Error(
-      "stdio-adapter requires --url <http://127.0.0.1:<port>/mcp/<id>>",
-    )
+    throw new UsageError()
   }
   return args[1]
 }
@@ -132,6 +141,20 @@ class ControlWriter {
   }
 }
 
+/** An error whose message is already a code, like ADAPTER_ENDPOINT_INVALID. */
+const CODE_MESSAGE = /^[A-Z][A-Z0-9_]*(?: [a-z]+=\S+)*$/u
+
+/** The HTTP status an MCP client error (SdkHttpError) carries, if any. */
+const httpStatus = (error: unknown, depth = 0): number | undefined => {
+  if (typeof error !== "object" || error === null || depth > 3) {
+    return undefined
+  }
+  const { status, cause } = error as { status?: unknown; cause?: unknown }
+  return typeof status === "number" && status >= 100 && status <= 599 ?
+      status
+    : httpStatus(cause, depth + 1)
+}
+
 const errorCode = (error: unknown): string => {
   if (error instanceof ContainmentError) {
     return describeContainmentError(error)
@@ -142,7 +165,17 @@ const errorCode = (error: unknown): string => {
   if (error instanceof ControlProtocolError) {
     return error.code
   }
+  if (error instanceof Error && CODE_MESSAGE.test(error.message)) {
+    return error.message
+  }
   return "BROKER_INTERNAL_ERROR"
+}
+
+class UsageError extends Error {
+  constructor() {
+    super("USAGE")
+    this.name = "UsageError"
+  }
 }
 
 const serve = async (options: ServeOptions): Promise<void> => {
@@ -356,6 +389,22 @@ const serve = async (options: ServeOptions): Promise<void> => {
 
 const main = async (): Promise<void> => {
   const [mode, ...args] = process.argv.slice(2)
+  if (mode === "--version" || mode === "-v" || mode === "version") {
+    process.stdout.write(
+      `maximal-mcp-broker ${BINARY_VERSION} (control protocol ${CONTROL_PROTOCOL_VERSION})\n`,
+    )
+    return
+  }
+  if (
+    mode === "--help"
+    || mode === "-h"
+    || mode === "help"
+    || args.includes("--help")
+    || args.includes("-h")
+  ) {
+    process.stdout.write(USAGE)
+    return
+  }
   if (mode === "serve") {
     // On Windows, before anything can start a process: everything this
     // broker starts must end when it does.
@@ -373,20 +422,36 @@ const main = async (): Promise<void> => {
     process.exit(process.exitCode ?? 0)
   }
   if (mode === "stdio-adapter") {
+    const url = parseAdapterUrl(args)
     const restoreDiagnostics = installSanitizedDependencyDiagnostics()
     try {
-      await runStdioAdapter({ url: parseAdapterUrl(args) })
+      await runStdioAdapter({ url })
+    } catch (error) {
+      if (error instanceof Error && CODE_MESSAGE.test(error.message)) {
+        throw error
+      }
+      // Couldn't reach the endpoint, or it refused (401 without a key).
+      const status = httpStatus(error)
+      throw new Error(
+        `ADAPTER_CONNECT_FAILED${status === undefined ? "" : ` status=${status}`}`,
+        { cause: error },
+      )
     } finally {
       restoreDiagnostics()
     }
     return
   }
-  throw new Error("expected serve or stdio-adapter mode")
+  throw new UsageError()
 }
 
 void main().catch((error: unknown) => {
+  if (error instanceof UsageError) {
+    process.stderr.write(USAGE)
+  }
   const code = errorCode(error)
-  const status = error instanceof ContainmentError ? CONTAINMENT_EXIT_CODE : 1
+  let status = 1
+  if (error instanceof ContainmentError) status = CONTAINMENT_EXIT_CODE
+  else if (error instanceof UsageError) status = 2
   process.exitCode = status
   // Exit once the line is out: servers a failed `serve` started could
   // otherwise keep this process running.

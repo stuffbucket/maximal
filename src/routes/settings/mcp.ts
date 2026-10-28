@@ -68,18 +68,21 @@ mcpRoutes.get("/", async (c) => {
     // Catalog detection reads npm's answers from caches it never fills
     // itself; this fills them once, without blocking, and is instant after.
     await warmNpmDetection()
-    const before = getConfig()
-    const config = refreshCatalogCommands(before)
-    if (config !== before) await reconfigureBroker(config.mcpBroker ?? {})
+    const config = refreshCatalogCommands(getConfig())
     repairMcpClientKeys(config)
+    // Reading each Work IQ's status reads its setup too; the reconfigure
+    // after it hands the broker any change, including a Work IQ set up
+    // since (in Terminal, say), and a catalog server that moved.
+    const endpoints = await withWorkIqStatus(
+      await listMcpEndpoints(config),
+      config.mcpBroker?.servers ?? [],
+    )
+    await reconfigureBroker(config.mcpBroker ?? {})
     return respondValidated(
       c,
       { schema: McpEndpointsListResponse, label: "MCP endpoints" },
       {
-        endpoints: await withWorkIqStatus(
-          await listMcpEndpoints(config),
-          config.mcpBroker?.servers ?? [],
-        ),
+        endpoints,
         broker: mcpBrokerHealth(),
         available: listMcpCatalog(config),
       },

@@ -294,6 +294,13 @@ const workiqFound: McpEndpointsListResponse["available"][number] = {
   },
 }
 
+/** Work IQ as npm installs it on Windows: a long path with no spaces. */
+const workiqFoundWindows: McpEndpointsListResponse["available"][number] = {
+  ...workiqFound,
+  command:
+    String.raw`C:\Users\Administrator\AppData\Roaming\npm\node_modules\@microsoft\workiq\bin\win-x64\workiq.exe`,
+}
+
 const twoMcpEndpoints: McpEndpointsListResponse = {
   broker: { state: "running", problem: null },
   available: [],
@@ -1094,6 +1101,26 @@ export const SCENARIOS = {
   "mcp-found": {
     ...healthy("MCP · nothing added yet, Work IQ found on this machine"),
     mcp: { endpoints: [], broker: { state: "off", problem: null }, available: [workiqFound] },
+  },
+
+  "mcp-windows": {
+    ...healthy("MCP · Windows: a long server path, and Claude Code off in Apps"),
+    mcp: {
+      broker: { state: "running", problem: null },
+      available: [workiqFoundWindows],
+      endpoints: [
+        {
+          id: "everything",
+          label: "Everything",
+          enabled: true,
+          clients: ["claude-desktop"],
+          offered: [
+            { id: "claude-code", name: "Claude Code", available: false, configured: false },
+            { id: "claude-desktop", name: "Claude Desktop", available: true, configured: true },
+          ],
+        },
+      ],
+    },
   },
 
   "mcp-catalog-missing": {

@@ -2060,6 +2060,12 @@ html[data-os="macos"] .topbar {
   margin: 0 0 var(--space-2) 0;
 }
 
+/* A command or path named in a dialog wraps instead of making the dialog
+   scroll sideways. */
+.confirm-dialog__body code {
+  overflow-wrap: anywhere;
+}
+
 .confirm-dialog__body p:last-child {
   margin-bottom: 0;
 }
@@ -2274,6 +2280,8 @@ html[data-os="macos"] .topbar {
   font-size: var(--text-sm);
   line-height: var(--leading-lg);
   color: var(--text-muted);
+  /* A hint can be a path, such as an MCP server's on Windows. */
+  overflow-wrap: anywhere;
 }
 
 .app-card__installs {
@@ -2550,6 +2558,11 @@ html[data-os="macos"] .topbar {
 
 .mcp-card__row--app {
   padding-inline-start: var(--space-5);
+  /* Why an app can't be chosen sits beside it, and wraps under it when
+     the card is narrow. */
+  flex-wrap: wrap;
+  column-gap: var(--space-3);
+  row-gap: var(--space-1);
 }
 
 .mcp-card .app-card__control {

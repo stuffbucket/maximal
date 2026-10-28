@@ -802,10 +802,27 @@ function brokerConfigKey(config: McpBrokerConfig): string {
   })
 }
 
+/** What the broker is given of a config; see setBrokerConfigFilter. */
+let brokerConfigFilter = (config: McpBrokerConfig): McpBrokerConfig => config
+
+/**
+ * Hold endpoints back from the broker for now: every start, reconfigure
+ * and restart hands the broker `filter(config)` instead of `config`. The
+ * server uses it to keep a Work IQ whose setup isn't done from starting.
+ * A restart applies it again, so a change in what it holds back takes
+ * effect on the next reconfigure or restart.
+ */
+export function setBrokerConfigFilter(
+  filter: (config: McpBrokerConfig) => McpBrokerConfig,
+): void {
+  brokerConfigFilter = filter
+}
+
 export function startBrokerSupervisor(config: McpBrokerConfig): void {
-  activeSupervisor = new BrokerSupervisor(config)
+  const served = brokerConfigFilter(config)
+  activeSupervisor = new BrokerSupervisor(served)
   activeConfig = config
-  activeConfigJson = brokerConfigKey(config)
+  activeConfigJson = brokerConfigKey(served)
   activeSupervisor.start()
 }
 
@@ -825,12 +842,30 @@ function serialized(run: () => Promise<boolean>): Promise<boolean> {
  *  (the caller should ask the running server to reload). Calls run one at a
  *  time, so the most recent config always wins. */
 export function reconfigureBroker(config: McpBrokerConfig): Promise<boolean> {
+  return reconfigureBrokerAfter(() => Promise.resolve(config))
+}
+
+/**
+ * `reconfigureBroker` with a config that `prepare` produces once the
+ * changes queued before it are done, in the same queue, so a caller waiting
+ * for the broker (`waitForBrokerReady`) waits for this one too.
+ */
+export function reconfigureBrokerAfter(
+  prepare: () => Promise<McpBrokerConfig>,
+): Promise<boolean> {
   return serialized(async () => {
-    const previous = activeSupervisor
+    if (!activeSupervisor) return false
+    const config = await prepare()
+    // Read after `prepare`: a shutdown meanwhile leaves nothing to change.
+    const previous = activeSupervisor as BrokerSupervisor | undefined
     if (!previous) return false
-    const key = brokerConfigKey(config)
-    if (key === activeConfigJson) return true
-    if (await previous.update(config)) {
+    const served = brokerConfigFilter(config)
+    const key = brokerConfigKey(served)
+    if (key === activeConfigJson) {
+      activeConfig = config
+      return true
+    }
+    if (await previous.update(served)) {
       // Calls are serialized through `reconfiguring`, so nothing raced us.
       // eslint-disable-next-line require-atomic-updates
       activeConfigJson = key
