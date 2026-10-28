@@ -26,6 +26,7 @@ permissions = [
   "allow-set-dock-visibility",
   "allow-update-installs-in-place",
   "allow-install-update",
+  "allow-refresh-update-status",
 ]
 
 [[permission]]
@@ -93,3 +94,8 @@ identifier = "allow-install-update"
 description = "Run the in-place update from the Settings window's 'Update to X.Y.Z' button: a native confirm naming the version, then download, verify, install, and relaunch. Where updates don't install in place it returns 'unavailable' and the webview opens the download page."
 commands.allow = ["install_update"]
 
+
+[[permission]]
+identifier = "allow-refresh-update-status"
+description = "Tell the shell that Settings ran a fresh update check, so the tray's update item reads the result."
+commands.allow = ["refresh_update_status"]

@@ -222,6 +222,7 @@
   "diagnostics-update-check-ok": "OK · verificado {relative}",
   "diagnostics-update-check-checking": "Verificando…",
   "diagnostics-update-check-unavailable": "Indisponível",
+  "diagnostics-update-check-now": "Verificar agora",
   "diagnostics-uptime-hours": "{h} h {m} min",
   "diagnostics-uptime-minutes": "{m} min {s} s",
   "diagnostics-uptime-seconds": "{s} s",
@@ -335,6 +336,7 @@
   "native-tray-signed-in": "Sessão iniciada no GitHub",
   "native-tray-upgrade": "Atualizar para {latest}…",
   "native-tray-upgrade-apt": "Atualizar com o apt…",
+  "native-tray-check-updates": "Verificar atualizações",
   "native-tray-failed": "O sidecar não iniciou",
   "native-tray-retry": "Tentar iniciar novamente",
   "native-tray-show-logs": "Ver registros…",
@@ -379,5 +381,9 @@
   "native-update-confirm-cancel": "Agora não",
   "native-update-failed-title": "Não foi possível instalar a atualização",
   "native-update-failed-body": "O Maximal vai abrir o mxml.sh para que você possa baixá-la lá.",
-  "native-update-failed-open": "Abrir mxml.sh"
+  "native-update-failed-open": "Abrir mxml.sh",
+  "native-update-check-title": "Verificar atualizações",
+  "native-update-check-current": "O Maximal está atualizado ({version})",
+  "native-update-check-failed": "Não foi possível verificar atualizações. Verifique sua conexão e tente novamente.",
+  "native-update-check-disabled": "A verificação de atualizações está desativada."
 }

@@ -6,7 +6,9 @@ import {
   getDockVisibility,
   getShellApiKey,
   installUpdate,
+  onShellUpdateCheck,
   openUrl,
+  refreshShellUpdateStatus,
   safeInvoke,
   setDockVisibility,
   updateInstallsInPlace,
@@ -1142,12 +1144,23 @@ function renderUpdateHealth(data: UpdateStatusResponse): void {
   setField("update_check", text);
 }
 
-async function loadUpdateStatus(): Promise<void> {
-  const result = await apiCall({
-    kind: "update-status",
-    method: "GET",
-    path: "/settings/api/update-status",
-  });
+/**
+ * Read the update status. `force` is "Check now": the proxy skips its 6-hour
+ * cache (and rate-limits real fetches itself, so a second click right after
+ * returns the same answer).
+ */
+async function loadUpdateStatus(force = false): Promise<void> {
+  const result = force
+    ? await apiCall({
+        kind: "update-check",
+        method: "GET",
+        path: "/settings/api/update-status?force=1",
+      })
+    : await apiCall({
+        kind: "update-status",
+        method: "GET",
+        path: "/settings/api/update-status",
+      });
   if (!result.ok) {
     // Sidecar unreachable — stay quiet, not alarming. The proxy already keeps
     // the last known result across manifest errors, so an error here means we
@@ -1161,6 +1174,35 @@ async function loadUpdateStatus(): Promise<void> {
   }
   lastUpdateStatus = result.data;
   renderUpdateStatus(result.data);
+}
+
+/** "Check now" in Diagnostics: a fresh check, then the tray reads the result. */
+async function checkForUpdatesNow(): Promise<void> {
+  const button = document.querySelector<HTMLButtonElement>(
+    '[data-action="check-update"]',
+  );
+  if (!button || button.disabled) return;
+  button.disabled = true;
+  button.textContent = t("diagnostics-update-check-checking");
+  try {
+    await loadUpdateStatus(true);
+    await refreshShellUpdateStatus();
+  } finally {
+    button.textContent = t("diagnostics-update-check-now");
+    button.disabled = false;
+  }
+}
+
+function wireUpdateCheck(): void {
+  document
+    .querySelector('[data-action="check-update"]')
+    ?.addEventListener("click", () => {
+      void checkForUpdatesNow();
+    });
+  // The tray's "Check for updates" ran a check: show its result here too.
+  void onShellUpdateCheck(() => {
+    void loadUpdateStatus();
+  });
 }
 
 async function copyDiagnosticsAsJson(): Promise<void> {
@@ -2472,6 +2514,7 @@ window.addEventListener("DOMContentLoaded", () => {
   wireLogs();
   wireDiagnostics();
   wireUpdateAction();
+  wireUpdateCheck();
   wireAptUpdate();
   wireAccount();
   wireEndpoint();

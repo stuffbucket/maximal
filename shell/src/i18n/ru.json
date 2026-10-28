@@ -222,6 +222,7 @@
   "diagnostics-update-check-ok": "OK · проверено {relative}",
   "diagnostics-update-check-checking": "Проверка…",
   "diagnostics-update-check-unavailable": "Недоступно",
+  "diagnostics-update-check-now": "Проверить сейчас",
   "diagnostics-uptime-hours": "{h} ч {m} мин",
   "diagnostics-uptime-minutes": "{m} мин {s} с",
   "diagnostics-uptime-seconds": "{s} с",
@@ -335,6 +336,7 @@
   "native-tray-signed-in": "Вход в GitHub выполнен",
   "native-tray-upgrade": "Обновить до {latest}…",
   "native-tray-upgrade-apt": "Обновить через apt…",
+  "native-tray-check-updates": "Проверить обновления",
   "native-tray-failed": "Не удалось запустить sidecar",
   "native-tray-retry": "Повторить запуск",
   "native-tray-show-logs": "Показать журналы…",
@@ -379,5 +381,9 @@
   "native-update-confirm-cancel": "Не сейчас",
   "native-update-failed-title": "Не удалось установить обновление",
   "native-update-failed-body": "Maximal откроет mxml.sh, чтобы вы могли скачать его там.",
-  "native-update-failed-open": "Открыть mxml.sh"
+  "native-update-failed-open": "Открыть mxml.sh",
+  "native-update-check-title": "Проверить обновления",
+  "native-update-check-current": "Установлена последняя версия Maximal ({version})",
+  "native-update-check-failed": "Не удалось проверить обновления. Проверьте подключение и повторите попытку.",
+  "native-update-check-disabled": "Проверка обновлений отключена."
 }

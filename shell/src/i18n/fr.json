@@ -222,6 +222,7 @@
   "diagnostics-update-check-ok": "OK · vérifié {relative}",
   "diagnostics-update-check-checking": "Vérification…",
   "diagnostics-update-check-unavailable": "Indisponible",
+  "diagnostics-update-check-now": "Vérifier maintenant",
   "diagnostics-uptime-hours": "{h} h {m} min",
   "diagnostics-uptime-minutes": "{m} min {s} s",
   "diagnostics-uptime-seconds": "{s} s",
@@ -335,6 +336,7 @@
   "native-tray-signed-in": "Connecté à GitHub",
   "native-tray-upgrade": "Mettre à jour vers {latest}…",
   "native-tray-upgrade-apt": "Mettre à jour avec apt…",
+  "native-tray-check-updates": "Rechercher des mises à jour",
   "native-tray-failed": "Échec du démarrage du sidecar",
   "native-tray-retry": "Relancer le démarrage",
   "native-tray-show-logs": "Afficher l’historique…",
@@ -379,5 +381,9 @@
   "native-update-confirm-cancel": "Plus tard",
   "native-update-failed-title": "Impossible d’installer la mise à jour",
   "native-update-failed-body": "Maximal va ouvrir mxml.sh pour que vous puissiez la télécharger.",
-  "native-update-failed-open": "Ouvrir mxml.sh"
+  "native-update-failed-open": "Ouvrir mxml.sh",
+  "native-update-check-title": "Rechercher des mises à jour",
+  "native-update-check-current": "Maximal est à jour ({version})",
+  "native-update-check-failed": "Impossible de rechercher les mises à jour. Vérifiez votre connexion et réessayez.",
+  "native-update-check-disabled": "La vérification des mises à jour est désactivée."
 }

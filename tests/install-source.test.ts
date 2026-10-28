@@ -3,7 +3,7 @@
  * (src/lib/update/install-source.ts, src/lib/update/update-notice.ts).
  */
 
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 
 import {
   APT_BINARY,
@@ -99,6 +99,11 @@ const manifest = (version: string): Response =>
   })
 
 describe("checkAndLogUpdate", () => {
+  // A forced check right after another one (in any test file) is served from
+  // the rate limit; start each test with no check on record.
+  beforeEach(() => {
+    __resetUpdateCheckDepsForTests()
+  })
   afterEach(() => {
     __resetUpdateCheckDepsForTests()
   })

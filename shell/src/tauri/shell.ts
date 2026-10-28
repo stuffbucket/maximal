@@ -1,4 +1,5 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 let shellKeyFetched = false;
 let shellKeyCache: string | null = null;
@@ -38,6 +39,32 @@ export async function updateInstallsInPlace(): Promise<boolean> {
     return (await invoke<boolean>("update_installs_in_place")) === true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Tell the shell that Settings just ran a fresh update check, so the tray's
+ * "Update to X.Y.Z" item reads the result. A no-op outside the app.
+ */
+export async function refreshShellUpdateStatus(): Promise<void> {
+  try {
+    await invoke("refresh_update_status");
+  } catch {
+    // Not in the app, or the shell is busy: the tray catches up on its poll.
+  }
+}
+
+/**
+ * Run `onChange` whenever the shell ran an update check on its own (the
+ * tray's "Check for updates"), so the page can re-read the status. Returns
+ * nothing to undo: the page listens for its whole life. Does nothing outside
+ * the app.
+ */
+export async function onShellUpdateCheck(onChange: () => void): Promise<void> {
+  try {
+    await listen("update:status", onChange);
+  } catch {
+    // Not in the app: no shell to hear from.
   }
 }
 

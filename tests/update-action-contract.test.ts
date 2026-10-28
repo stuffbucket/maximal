@@ -197,3 +197,56 @@ describe("apt installs (Debian/Ubuntu packages)", () => {
     )
   })
 })
+
+describe("check for updates", () => {
+  test("the tray item sits with the update item and forces a check", () => {
+    expect(EN["native-tray-check-updates"]).toBe("Check for updates")
+    expect(SHELL_LIB_RS).toContain(
+      "menu_id::CHECK_UPDATES => check_updates_from_tray(app)",
+    )
+    // Same parser as the poll; a forced check goes through ?force=1.
+    expect(SHELL_LIB_RS).toContain("parse_update_status(payload)")
+    expect(SHELL_LIB_RS).toContain('format!("{base}?force=1")')
+  })
+
+  test("its notices come from the catalog and use the dialog plugin", () => {
+    expect(EN["native-update-check-current"]).toBe(
+      "Maximal is up to date ({version})",
+    )
+    for (const key of [
+      "native-update-check-title",
+      "native-update-check-failed",
+      "native-update-check-disabled",
+    ]) {
+      expect(EN[key]).toBeString()
+      expect(SHELL_LIB_RS).toContain(`"${key}"`)
+    }
+    expect(SHELL_LIB_RS).toContain("fn show_update_check_notice(")
+  })
+
+  test("Settings has a 'Check now' button beside the Updates status", () => {
+    const row = SETTINGS_HTML.slice(
+      SETTINGS_HTML.indexOf('<dt data-i18n="diagnostics-updates"></dt>'),
+      SETTINGS_HTML.indexOf('<dt data-i18n="diagnostics-update-check"></dt>'),
+    )
+    expect(row).toContain('data-field="update_status"')
+    expect(row).toContain('class="btn btn--ghost btn--sm"')
+    expect(row).toContain('data-action="check-update"')
+    expect(row).toContain('data-i18n="diagnostics-update-check-now"')
+    expect(EN["diagnostics-update-check-now"]).toBe("Check now")
+    expect(SETTINGS_MAIN_TS).toContain(
+      'path: "/settings/api/update-status?force=1"',
+    )
+  })
+
+  test("the webview may tell the shell, and the shell may tell the webview", () => {
+    expect(SHELL_PERMISSIONS).toContain('"allow-refresh-update-status"')
+    expect(SHELL_PERMISSIONS).toContain(
+      'commands.allow = ["refresh_update_status"]',
+    )
+    expect(SHELL_LIB_RS).toContain(
+      'const UPDATE_STATUS_EVENT: &str = "update:status";',
+    )
+    expect(SHELL_TS).toContain('listen("update:status", onChange)')
+  })
+})

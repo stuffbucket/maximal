@@ -91,6 +91,12 @@ export const DOWNLOAD_URL = "https://mxml.sh/"
  *  periodic check and the occasional Settings open both read through this. */
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000
 
+/** A forced check (the "Check for updates" actions) makes at most one real
+ *  fetch per this window; inside it the last result comes back instead. A
+ *  stuck client that keeps asking can't hammer the CDN, and the conditional
+ *  request keeps a real forced fetch cheap anyway. */
+export const FORCE_MIN_INTERVAL_MS = 30 * 1000
+
 export interface UpdateStatus {
   /** The running build's version. */
   current: string
@@ -151,6 +157,7 @@ export function __resetUpdateCheckDepsForTests(): void {
   aptInstallImpl = currentAptInstall
   cache = null
   manifest = null
+  lastAttempt = null
 }
 
 /** Where and how this install updates: the apt command and the Linux guide
@@ -163,6 +170,11 @@ function updateRoute(): Pick<UpdateStatus, "url" | "update_command"> {
 }
 
 let cache: { atMs: number; status: UpdateStatus } | null = null
+
+/** The most recent real fetch, successful or not. Holds the promise so a
+ *  second forced check that arrives while the first is still in flight shares
+ *  its result instead of starting another fetch. */
+let lastAttempt: { atMs: number; result: Promise<UpdateStatus> } | null = null
 
 /** The last manifest body the CDN served, with the validators that identify
  *  it. Revalidation sends these validators back, and a 304 means "still this
@@ -312,12 +324,13 @@ export function parseManifestVersion(
  * (disabled, offline, non-200, timeout, malformed manifest) returns a coherent
  * status carrying diagnostic fields — `enabled`, `checked_at`, `last_error` —
  * and the last known `latest` if we have one, so a transient blip doesn't erase
- * a real result. `force` bypasses the cache.
+ * a real result. `force` bypasses the 6-hour cache, but not the
+ * `FORCE_MIN_INTERVAL_MS` limit: a forced check within that window of the last
+ * real fetch gets that fetch's result.
  */
 export async function getUpdateStatus(force = false): Promise<UpdateStatus> {
   const current = versionImpl
   const enabled = isUpdateCheckEnabled()
-  const checkedAt = cache ? new Date(cache.atMs).toISOString() : null
 
   // Disabled is an intentional idle state, not a failure: report it cleanly,
   // with no stale result and no error.
@@ -328,7 +341,7 @@ export async function getUpdateStatus(force = false): Promise<UpdateStatus> {
       update_available: false,
       ...updateRoute(),
       enabled: false,
-      checked_at: checkedAt,
+      checked_at: cache ? new Date(cache.atMs).toISOString() : null,
       last_error: null,
     }
   }
@@ -336,6 +349,23 @@ export async function getUpdateStatus(force = false): Promise<UpdateStatus> {
   if (!force && cache && nowMs() - cache.atMs < CACHE_TTL_MS) {
     return cache.status
   }
+
+  if (force && lastAttempt) {
+    const sinceMs = nowMs() - lastAttempt.atMs
+    // A clock that stepped backwards must not freeze the limit.
+    if (sinceMs >= 0 && sinceMs < FORCE_MIN_INTERVAL_MS) {
+      return lastAttempt.result
+    }
+  }
+
+  const result = fetchStatus(current)
+  lastAttempt = { atMs: nowMs(), result }
+  return result
+}
+
+/** One real manifest fetch, resolved into a status. Never rejects. */
+async function fetchStatus(current: string): Promise<UpdateStatus> {
+  const checkedAt = cache ? new Date(cache.atMs).toISOString() : null
 
   // A failed attempt keeps the last known result (if any) and surfaces why.
   const fallback = (error: string): UpdateStatus => ({
