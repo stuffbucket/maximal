@@ -17,6 +17,7 @@ const read = (path: string): string =>
 const RELEASE = read(".github/workflows/release.yml")
 const DEPLOY = read(".github/workflows/deploy-pages.yml")
 const SMOKE = read("build/linux/smoke-deb.sh")
+const APT_REPO = read("build/linux/apt-repo.sh")
 const LINUX_CONF = JSON.parse(
   read("shell/src-tauri/tauri.linux.conf.json"),
 ) as {
@@ -158,20 +159,55 @@ describe("apt repository (deploy-pages.yml)", () => {
     expect(DEPLOY).toContain("site/dist/apt")
   })
 
-  test("only the signing step sees the signing secrets", () => {
+  test("only the sign-apt job, in the github-pages environment, sees the signing secrets", () => {
     const secretLines = DEPLOY.split("\n").filter((line) =>
-      line.includes("secrets.APT_SIGNING_KEY"),
+      line.includes("secrets."),
     )
     expect(secretLines).toHaveLength(2)
-    const signStep = DEPLOY.slice(
-      DEPLOY.indexOf("- name: Sign the apt repository"),
-      DEPLOY.indexOf("- name: Check the site size"),
-    )
-    for (const line of secretLines) expect(signStep).toContain(line)
-    expect(signStep).toContain(
+    const build = job(DEPLOY, "build")
+    const sign = job(DEPLOY, "sign-apt")
+    const deploy = job(DEPLOY, "deploy")
+    for (const line of secretLines) expect(sign).toContain(line)
+    expect(build).not.toContain("secrets.")
+    expect(deploy).not.toContain("secrets.")
+    expect(sign).toContain("environment: github-pages")
+    expect(sign).toContain(
       "APT_SIGNING_KEY_FINGERPRINT: ${{ vars.APT_SIGNING_KEY_FINGERPRINT }}",
     )
-    expect(signStep).toContain("site/public/apt/maximal.asc")
+    expect(sign).toContain(
+      "bash build/linux/apt-repo.sh sign apt site/public/apt/maximal.asc",
+    )
+  })
+
+  test("sign-apt checks out only what signing needs and installs nothing", () => {
+    const sign = job(DEPLOY, "sign-apt")
+    expect(sign).toContain(
+      "sparse-checkout: |\n            build/linux/apt-repo.sh\n            site/public/apt/maximal.asc\n",
+    )
+    expect(sign).toContain("sparse-checkout-cone-mode: false")
+    for (const forbidden of [
+      "apt-get",
+      "bun ",
+      "npm ",
+      "pnpm ",
+      "setup-",
+      "mise",
+    ]) {
+      expect(sign).not.toContain(forbidden)
+    }
+    expect(sign).toContain("if: needs.build.outputs.apt == 'true'")
+  })
+
+  test("deploy publishes the signed tree, and still runs with nothing to sign", () => {
+    const deploy = job(DEPLOY, "deploy")
+    expect(deploy).toContain("needs: [build, sign-apt]")
+    expect(deploy).toContain(
+      "needs.sign-apt.result == 'success' || needs.sign-apt.result == 'skipped'",
+    )
+    expect(deploy).toContain("needs.build.result == 'success'")
+    expect(deploy).toContain("name: apt-dists-signed")
+    expect(deploy).toContain("not deploying an unsigned apt repository")
+    expect(deploy).toContain("uses: actions/deploy-pages@")
   })
 
   test("the committed public key is Maximal's apt key", () => {
@@ -186,5 +222,38 @@ describe("apt repository (deploy-pages.yml)", () => {
       DEPLOY.indexOf("workflow_dispatch:"),
     )
     expect(paths).toContain('- "site/**"')
+  })
+
+  test("indexes are served by hash, so a CDN can't mix generations", () => {
+    expect(APT_REPO).toContain("-o APT::FTPArchive::DoByHash=true")
+    expect(APT_REPO).toContain("grep -qx 'Acquire-By-Hash: yes'")
+  })
+})
+
+describe("packaged proxy", () => {
+  test("requires the glibc it was built against", () => {
+    expect(read("build/linux/build-maximal-deb.sh")).toContain(
+      "Depends: libc6 (>= 2.39)",
+    )
+  })
+
+  test("the user service stops retrying and has no system-only ordering", () => {
+    const unit = read("build/linux/maximal.service")
+    const unitSection = unit.slice(0, unit.indexOf("[Service]"))
+    expect(unitSection).toContain("StartLimitIntervalSec=60")
+    expect(unitSection).toContain("StartLimitBurst=5")
+    expect(unit).not.toContain("network-online.target")
+    expect(unit).toContain("Environment=HOST=127.0.0.1")
+  })
+
+  test("the tray app's proxy listens on loopback on Linux only", () => {
+    const shell = read("shell/src-tauri/src/lib.rs")
+    expect(shell).toMatch(
+      /if cfg!\(target_os = "linux"\) \{\s+&\[\("HOST", "127\.0\.0\.1"\)\]\s+\} else \{\s+&\[\]/u,
+    )
+    const spawn = shell.slice(shell.indexOf("fn spawn_sidecar("))
+    expect(spawn.slice(0, spawn.indexOf(".spawn()"))).toContain(
+      "for (key, value) in sidecar_platform_env() {",
+    )
   })
 })

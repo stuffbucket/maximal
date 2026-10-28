@@ -25,14 +25,9 @@ on:
       - "scripts/apt-repo-plan.ts"
   workflow_dispatch:
 
-# Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages.
-# `actions: write` lets the "Remove stale github-pages artifact" step below
-# delete a prior attempt's artifact via the Actions API before re-uploading.
+# Read-only by default; each job asks for what it needs.
 permissions:
   contents: read
-  pages: write
-  id-token: write
-  actions: write
 
 # One deployment at a time. `cancel-in-progress: true` so a newer commit or
 # dispatch supersedes and CANCELS an in-flight deploy rather than queuing
@@ -44,13 +39,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Build the Astro site under ./site and deploy site/dist to Pages.
-  deploy:
+  # Build the Astro site under ./site and the unsigned apt repository under
+  # site/dist/apt. No secrets: signing happens in `sign-apt`.
+  build:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+    outputs:
+      apt: ${{ steps.apt.outputs.build }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -85,8 +80,8 @@ jobs:
       # channels.stable.tag, rc -> channels.rc.tag), so apt can install every
       # version the apps announce. A release that predates the Linux packages
       # is skipped with a notice; a channel that lists Linux packages its
-      # release lacks fails the deploy. See scripts/apt-repo-plan.ts and
-      # build/linux/apt-repo.sh.
+      # release lacks fails the deploy (fail closed: the live site stays as
+      # it was). See scripts/apt-repo-plan.ts and build/linux/apt-repo.sh.
       - name: Configure package registry
         run: printf '%s\n' 'registry=https://packagefeedproxy.microsoft.io/npm/' > "$HOME/.npmrc"
 
@@ -125,19 +120,6 @@ jobs:
           bash build/linux/apt-repo.sh fetch "$PLAN" site/dist/apt
           bash build/linux/apt-repo.sh index "$PLAN" site/dist/apt
 
-      # The only step that sees the signing secrets. The script imports the
-      # key into a temporary GNUPGHOME, feeds the passphrase on a file
-      # descriptor, refuses a key whose fingerprint isn't
-      # APT_SIGNING_KEY_FINGERPRINT (or the committed public key's), and
-      # verifies every signature against site/public/apt/maximal.asc.
-      - name: Sign the apt repository
-        if: steps.apt.outputs.build == 'true'
-        env:
-          APT_SIGNING_KEY: ${{ secrets.APT_SIGNING_KEY }}
-          APT_SIGNING_KEY_PASSWORD: ${{ secrets.APT_SIGNING_KEY_PASSWORD }}
-          APT_SIGNING_KEY_FINGERPRINT: ${{ vars.APT_SIGNING_KEY_FINGERPRINT }}
-        run: bash build/linux/apt-repo.sh sign site/dist/apt site/public/apt/maximal.asc
-
       # GitHub Pages: 1 GB per site, 100 MB per file.
       - name: Check the site size
         run: |
@@ -153,6 +135,129 @@ jobs:
             echo "::error::Files over 95 MB (GitHub Pages allows 100 MB): $big"
             exit 1
           fi
+
+      # `overwrite` keeps "Re-run failed jobs" working: a rerun replaces the
+      # earlier attempt's artifact instead of failing on the name.
+      - name: Upload the site
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: site
+          path: site/dist
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 1
+
+      # Only the indexes go to the signing job, not the packages.
+      - name: Upload the unsigned apt indexes
+        if: steps.apt.outputs.build == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: apt-dists
+          path: site/dist/apt/dists
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 1
+
+  # Sign the apt indexes. The only job that can read the signing secrets: they
+  # live in the github-pages environment, whose branch policy allows main
+  # only. It checks out just the signing script and the public key, installs
+  # nothing, and runs no project code. apt-repo.sh imports the key into a
+  # temporary GNUPGHOME, feeds the passphrase on a file descriptor, refuses a
+  # key whose fingerprint isn't APT_SIGNING_KEY_FINGERPRINT (or the committed
+  # public key's), and verifies every signature against that public key.
+  # Skipped, with deploy still running, when there is nothing to sign.
+  sign-apt:
+    needs: build
+    if: needs.build.outputs.apt == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: github-pages
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout the signing script and public key
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            build/linux/apt-repo.sh
+            site/public/apt/maximal.asc
+          sparse-checkout-cone-mode: false
+
+      - name: Download the unsigned apt indexes
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: apt-dists
+          path: apt/dists
+
+      - name: Sign the apt repository
+        env:
+          APT_SIGNING_KEY: ${{ secrets.APT_SIGNING_KEY }}
+          APT_SIGNING_KEY_PASSWORD: ${{ secrets.APT_SIGNING_KEY_PASSWORD }}
+          APT_SIGNING_KEY_FINGERPRINT: ${{ vars.APT_SIGNING_KEY_FINGERPRINT }}
+        run: bash build/linux/apt-repo.sh sign apt site/public/apt/maximal.asc
+
+      - name: Upload the signed apt indexes
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: apt-dists-signed
+          path: apt/dists
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 1
+
+  # Deploy the built site, with the signed apt indexes when there are any.
+  deploy:
+    needs: [build, sign-apt]
+    # Runs after a successful build whether sign-apt ran or was skipped (no
+    # Linux packages yet); never after a failed or cancelled one.
+    if: >-
+      ${{ !cancelled() && needs.build.result == 'success'
+      && (needs.sign-apt.result == 'success' || needs.sign-apt.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # `actions: write` lets the "Remove stale github-pages artifact" step
+    # delete a prior attempt's artifact via the Actions API before re-uploading.
+    permissions:
+      pages: write
+      id-token: write
+      actions: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Download the site
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: site
+          path: site/dist
+
+      - name: Download the signed apt indexes
+        if: needs.build.outputs.apt == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: apt-dists-signed
+          path: site/dist/apt/dists
+
+      # Fail closed: never publish an apt suite without its signatures.
+      - name: Check every apt suite is signed
+        if: needs.build.outputs.apt == 'true'
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          releases=(site/dist/apt/dists/*/Release)
+          if [ "${#releases[@]}" -eq 0 ]; then
+            echo "::error::The apt repository has no suites."
+            exit 1
+          fi
+          for release in "${releases[@]}"; do
+            dir="$(dirname "$release")"
+            for file in InRelease Release.gpg; do
+              if [ ! -s "$dir/$file" ]; then
+                echo "::error::$dir has no $file; not deploying an unsigned apt repository."
+                exit 1
+              fi
+            done
+          done
 
       - name: Setup Pages
         uses: actions/configure-pages@v6
