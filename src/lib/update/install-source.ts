@@ -78,11 +78,3 @@ export function currentAptInstall(): AptInstall | null {
   cached ??= { install: detectAptInstall() }
   return cached.install
 }
-
-export function __setAptInstallForTests(install: AptInstall | null): void {
-  cached = { install }
-}
-
-export function __resetAptInstallForTests(): void {
-  cached = null
-}
