@@ -134,7 +134,7 @@ Linux users to fetch the new public key.
 |---|---|
 | A publish-gating job failed | Use **Re-run failed jobs** on the original `release.yml` run. |
 | The release workflow was not dispatched | Run `gh workflow run release.yml --ref vX.Y.Z -f tag=vX.Y.Z`. |
-| The macOS builder failed or was unavailable | Rerun `macos-dmg`, or run `gh workflow run macos-build.yml --ref main -f tag=vX.Y.Z`. |
+| The macOS builder failed or was unavailable | Rerun `macos-dmg`, or run `gh workflow run build.yml --repo stuffbucket/macos-builder --ref main -f repo=stuffbucket/maximal -f ref=vX.Y.Z` yourself. |
 | `manifest` failed after publication | Rerun `manifest`, then merge its protected PR after checks pass. |
 | `homebrew-tap` failed | Rerun only `homebrew-tap`. |
 | Pages deployment failed | Start a fresh run with `gh workflow run deploy-pages.yml --ref main`. |
@@ -156,6 +156,13 @@ version commit and tag with `bun run release:manual`, push the tag, then dispatc
   above.
 - The private `stuffbucket/macos-builder` exclusively owns macOS packaging,
   signing, notarization, and stapling.
+- `macos-dmg` starts the builder with a short-lived app-repoman installation
+  token, scoped to `stuffbucket/macos-builder` with Actions write, and only
+  when the builder's files are not already on the draft. The job declares
+  `environment: release`, which holds the `APP_ID` variable and the
+  `APP_PRIVATE_KEY` secret. app-repoman needs Actions read/write on
+  `stuffbucket/macos-builder`. App keys do not expire, unlike a PAT.
+  Everything that touches this repository keeps `github.token`.
 - The raw cross-compiled `*-darwin-arm64.tar.gz` remains unsigned. Any future
   signing for it belongs in `macos-builder`, not `release.yml`.
 - Windows Authenticode signing remains deferred; the disabled placeholder in

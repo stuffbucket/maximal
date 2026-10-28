@@ -1,11 +1,17 @@
 import { describe, expect, test } from "bun:test"
-import { readFile } from "node:fs/promises"
+import { readdir, readFile } from "node:fs/promises"
 
 const readRepoFile = (path: string): Promise<string> =>
   readFile(new URL(`../${path}`, import.meta.url), "utf8")
 
 const readWorkflow = (name: string): Promise<string> =>
   readRepoFile(`.github/workflows/${name}`)
+
+const macosDmgJob = (workflow: string): string =>
+  workflow.slice(
+    workflow.indexOf("\n  macos-dmg:"),
+    workflow.indexOf("\n  windows-installer:"),
+  )
 
 describe("release workflow authentication", () => {
   test("active release workflows use no REPOMAN app token", async () => {
@@ -17,8 +23,50 @@ describe("release workflow authentication", () => {
     for (const workflow of workflows) {
       expect(workflow).not.toContain("REPOMAN_APP_ID")
       expect(workflow).not.toContain("REPOMAN_APP_PRIVATE_KEY")
-      expect(workflow).not.toContain("actions/create-github-app-token")
     }
+  })
+
+  test("release-please mints no app token", async () => {
+    expect(await readWorkflow("release-please.yml")).not.toContain(
+      "actions/create-github-app-token",
+    )
+  })
+
+  test("no workflow references the old builder PAT", async () => {
+    const dir = new URL("../.github/workflows/", import.meta.url)
+    const names = (await readdir(dir)).filter((name) => /\.ya?ml$/u.test(name))
+
+    expect(names.length).toBeGreaterThan(0)
+    for (const name of names) {
+      expect(await readWorkflow(name)).not.toContain("MACOS_BUILDER_PAT")
+    }
+  })
+
+  test("macos-dmg starts the builder with an app-repoman token from the release environment", async () => {
+    const workflow = await readWorkflow("release.yml")
+    const job = macosDmgJob(workflow)
+
+    expect(workflow.match(/actions\/create-github-app-token@/gu)).toHaveLength(
+      1,
+    )
+    expect(job).toMatch(/^ {4}environment: release$/mu)
+    expect(job).toContain("app-id: ${{ vars.APP_ID }}")
+    expect(job).toContain("private-key: ${{ secrets.APP_PRIVATE_KEY }}")
+    expect(job).toContain("owner: stuffbucket")
+    expect(job).toContain("repositories: macos-builder")
+    expect(job).toContain("permission-actions: write")
+    expect(job).toContain(
+      "BUILDER_TOKEN: ${{ steps.builder-token.outputs.token }}",
+    )
+  })
+
+  test("the token and the dispatch are skipped when the builder files are already on the draft", async () => {
+    const job = macosDmgJob(await readWorkflow("release.yml"))
+    const skipped = "if: steps.builder-files.outputs.built != 'true'"
+
+    expect(job).toContain('echo "built=true" >> "$GITHUB_OUTPUT"')
+    expect(job.match(new RegExp(skipped, "gu"))).toHaveLength(2)
+    expect(job.indexOf(skipped)).toBeLessThan(job.indexOf("gh workflow run"))
   })
 })
 
@@ -82,9 +130,13 @@ describe("release action supply chain", () => {
         "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1",
         2,
       ],
+      [
+        "actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2",
+        1,
+      ],
     ])
 
-    expect(externalUses).toHaveLength(13)
+    expect(externalUses).toHaveLength(14)
     for (const [expectedUse, count] of expectedUses) {
       expect(
         externalUses.filter((actionUse) => actionUse === expectedUse),
@@ -182,12 +234,6 @@ const windowsShellJob = (workflow: string): string =>
   workflow.slice(
     workflow.indexOf("\n  windows-shell:"),
     workflow.indexOf("\n  publish:"),
-  )
-
-const macosDmgJob = (workflow: string): string =>
-  workflow.slice(
-    workflow.indexOf("\n  macos-dmg:"),
-    workflow.indexOf("\n  windows-installer:"),
   )
 
 describe("in-place desktop updates", () => {
