@@ -101,10 +101,9 @@ label beside it says what:
   looks heavier, and differ only in hue. The hues stay clear of the
   status colors (error, warning, success), so a trace never reads as a
   state. Color is the only link from a trace to its session, so the
-  session table is the legend: each live row carries its swatch.
-  Selecting a row or a trace dims the other traces; no color changes.
-  All six and the
-  neutral gray clear 3:1 on `--surface-card`.
+  session table is the legend: each colored row carries its swatch.
+  Selecting a row or a trace dims the other traces; no color changes. All six and the neutral gray clear 3:1 on
+  `--surface-card`.
   `bun scripts/check-series-contrast.ts` checks the contrast and the hue
   clearance in both themes.
 - **Context meters** (session table): the same meter as the quotas,
