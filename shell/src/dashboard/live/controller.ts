@@ -53,6 +53,9 @@ export function startLiveSessions(container: HTMLElement): () => void {
   let tickTimer: number | null = null;
   let polling = false;
   let stopped = false;
+  let surfaceVisible = !new URLSearchParams(location.search).has("embedded");
+  const isVisible = (): boolean =>
+    surfaceVisible && document.visibilityState === "visible";
 
   /** Redraw from `latest` as of now. The card only redraws when asked or when
    *  a session changed state (a countdown ran out). */
@@ -120,7 +123,7 @@ export function startLiveSessions(container: HTMLElement): () => void {
   }
 
   function schedule(): void {
-    if (stopped || pollTimer !== null || document.visibilityState !== "visible") return;
+    if (stopped || pollTimer !== null || !isVisible()) return;
     pollTimer = window.setTimeout(() => void poll(), POLL_MS);
   }
 
@@ -135,16 +138,24 @@ export function startLiveSessions(container: HTMLElement): () => void {
     tickTimer = null;
   }
 
-  function onVisibility(): void {
-    if (document.visibilityState === "visible") {
-      startClock();
-      // Catch up straight away: the data is as old as the hidden stretch.
-      if (pollTimer !== null) window.clearTimeout(pollTimer);
-      pollTimer = null;
-      void poll();
-    } else {
+  function updateActivity(): void {
+    if (!isVisible()) {
       stopTimers();
+      return;
     }
+    startClock();
+    // Catch up straight away: the data is as old as the hidden stretch.
+    if (pollTimer !== null) window.clearTimeout(pollTimer);
+    pollTimer = null;
+    void poll();
+  }
+
+  function onDashboardVisibility(event: MessageEvent<unknown>): void {
+    if (event.origin !== location.origin || typeof event.data !== "object" || event.data === null) return;
+    const message = event.data as { type?: unknown; visible?: unknown };
+    if (message.type !== "maximal:dashboard-visibility" || typeof message.visible !== "boolean") return;
+    surfaceVisible = message.visible;
+    updateActivity();
   }
 
   // Escape clears the selection, unless something else already took the key
@@ -164,16 +175,20 @@ export function startLiveSessions(container: HTMLElement): () => void {
   }
 
   document.addEventListener("keydown", onKeydown);
-  document.addEventListener("visibilitychange", onVisibility);
+  document.addEventListener("visibilitychange", updateActivity);
+  window.addEventListener("message", onDashboardVisibility);
+  if (window.parent !== window) {
+    window.parent.postMessage({ type: "maximal:dashboard-ready" }, location.origin);
+  }
 
-  if (document.visibilityState === "visible") startClock();
-  void poll();
+  if (isVisible()) updateActivity();
 
   return () => {
     stopped = true;
     stopTimers();
     card.destroy();
     document.removeEventListener("keydown", onKeydown);
-    document.removeEventListener("visibilitychange", onVisibility);
+    document.removeEventListener("visibilitychange", updateActivity);
+    window.removeEventListener("message", onDashboardVisibility);
   };
 }

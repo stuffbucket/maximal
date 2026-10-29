@@ -156,7 +156,7 @@ export function liveFlowSnapshot(
     return {
       id: `session:${session.id}`,
       label: session.client_label || client,
-      detail: session.client_label ? `${client} · ${session.id.slice(0, 4)}` : labels.sessionId(session.id.slice(0, 4)),
+      detail: session.client_label ? `${client} · ${session.id.slice(0, 8)}` : labels.sessionId(session.id.slice(0, 8)),
       kind: "session",
       rate,
       share: endpointRate > 0 ? rate / endpointRate : 0,

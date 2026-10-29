@@ -54,6 +54,9 @@ let scale = 1;
 let snapshot: FlowSnapshot | null = null;
 let positioned = new Map<string, PositionedNode>();
 let particles: Array<Particle> = [];
+let activeEdges: Array<FlowEdge> = [];
+let activeEdgeMap = new Map<string, FlowEdge>();
+let layoutSignature = "";
 let active = false;
 let timer: ReturnType<typeof setTimeout> | null = null;
 let lastFrame = 0;
@@ -237,6 +240,8 @@ function reconcileParticles(initial = false, rebalance = false): void {
   const edges = snapshot.edges.filter(
     (edge) => edge.rate > 0 && positioned.has(edge.from) && positioned.has(edge.to),
   );
+  activeEdges = edges;
+  activeEdgeMap = new Map(edges.map((edge) => [edge.id, edge]));
   const desired = desiredParticleCount(snapshot.totalRate);
   particles = particles.filter((particle) => edges.some((edge) => edge.id === particle.edgeId));
   if (particles.length > desired) particles.length = desired;
@@ -410,6 +415,10 @@ interface LabelSimulationNode extends SimulationNodeDatum {
   radius: number;
 }
 
+function labelWidthLimit(): number {
+  return Math.max(72, Math.min(220, width * 0.22));
+}
+
 function layoutLabels(ctx: CanvasRenderingContext2D): void {
   if (!labelsDirty || !snapshot) return;
   labelsDirty = false;
@@ -424,7 +433,10 @@ function layoutLabels(ctx: CanvasRenderingContext2D): void {
     ctx.font = `${palette.detailFontSize}px ${palette.fontFamily}`;
     const detailWidth = node.detail ? ctx.measureText(node.detail).width : 0;
     const shareWidth = ctx.measureText(percentText(node.share, palette.locale)).width;
-    const labelWidth = Math.max(titleWidth, detailWidth, shareWidth) + 8;
+    const labelWidth = Math.min(
+      labelWidthLimit(),
+      Math.max(titleWidth, detailWidth, shareWidth) + 8,
+    );
     const labelHeight = palette.labelFontSize + secondaryStep * (node.detail ? 2 : 1);
     const ringScale = Math.min(width, height);
     const outerRadiusX = Math.max(80, ringScale * 0.44);
@@ -532,7 +544,7 @@ function drawNode(ctx: CanvasRenderingContext2D, node: PositionedNode, palette: 
 
   ctx.textAlign = node.align;
   ctx.textBaseline = "middle";
-  const labelWidth = Math.max(72, width * 0.22);
+  const labelWidth = labelWidthLimit();
   const secondaryStep = palette.detailFontSize + 2;
   ctx.font = `${palette.labelFontWeight} ${palette.labelFontSize}px ${palette.fontFamily}`;
   drawLabelText(ctx, node.label, node.labelX, node.labelY, labelWidth, palette.text, palette.surface);
@@ -583,9 +595,8 @@ function draw(): void {
   ctx.clearRect(0, 0, width, height);
   layoutLabels(ctx);
   if (snapshot.reducedMotion) drawStaticConnections(ctx, snapshot.palette);
-  const edgeMap = new Map(snapshot.edges.map((edge) => [edge.id, edge]));
   for (const particle of particles) {
-    const edge = edgeMap.get(particle.edgeId);
+    const edge = activeEdgeMap.get(particle.edgeId);
     if (edge) drawParticle(ctx, particle, edge);
   }
   for (const node of positioned.values()) drawNode(ctx, node, snapshot.palette);
@@ -598,16 +609,11 @@ function tick(now: number): void {
   const delta = lastFrame === 0 ? FRAME_MS : clamp(now - lastFrame, 0, 100);
   lastFrame = now;
   if (snapshot && !snapshot.reducedMotion && active) {
-    reconcileParticles();
-    const edges = snapshot.edges.filter(
-      (edge) => edge.rate > 0 && positioned.has(edge.from) && positioned.has(edge.to),
-    );
-    const edgeMap = new Map(edges.map((edge) => [edge.id, edge]));
     for (const particle of particles) {
       particle.age += delta;
       if (particle.age < particle.travelMs + particle.restMs) continue;
-      const current = edgeMap.get(particle.edgeId);
-      const next = current ? nextEdge(current, edges) : weightedEdge(edges);
+      const current = activeEdgeMap.get(particle.edgeId);
+      const next = current ? nextEdge(current, activeEdges) : weightedEdge(activeEdges);
       if (next) reverseParticle(particle, next);
     }
     draw();
@@ -625,9 +631,28 @@ function schedule(): void {
 
 function applySnapshot(next: FlowSnapshot): void {
   const first = snapshot === null;
+  const nextLayoutSignature = JSON.stringify({
+    locale: next.palette.locale,
+    font: [
+      next.palette.fontFamily,
+      next.palette.labelFontSize,
+      next.palette.detailFontSize,
+      next.palette.labelFontWeight,
+    ],
+    nodes: next.nodes.map((node) => [
+      node.id,
+      node.label,
+      node.detail,
+      node.kind,
+      node.share,
+    ]),
+  });
   snapshot = next;
-  positioned = positionNodes(next.nodes);
-  labelsDirty = true;
+  if (first || nextLayoutSignature !== layoutSignature) {
+    positioned = positionNodes(next.nodes);
+    labelsDirty = true;
+    layoutSignature = nextLayoutSignature;
+  }
   reconcileParticles(first, !first);
   if (next.reducedMotion) {
     for (const particle of particles) particle.age = particle.travelMs + particle.restMs * 0.28;

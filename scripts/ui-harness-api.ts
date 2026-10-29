@@ -79,7 +79,11 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
     // --- dashboard (/usage + /token-usage + /token-usage/sessions) ---
     if (path === "/usage") return json(fixture.dashboard.usage)
     if (path === "/token-usage") return json(fixture.dashboard.tokenUsage)
-    if (path === "/token-usage/sessions") return json(fixture.dashboard.sessions())
+    if (path === "/token-usage/sessions") {
+      const delayMs = Math.max(0, Number(url.searchParams.get("delay_ms")) || 0)
+      if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs))
+      return json(fixture.dashboard.sessions())
+    }
     if (path === "/token-usage/events") {
       const pageSize = Math.max(1, Number(url.searchParams.get("page_size")) || 20)
       const events = fixture.dashboard.tokenEvents

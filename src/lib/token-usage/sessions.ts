@@ -136,7 +136,7 @@ function contextTokens(row: SessionRow): number {
 function inFlightRate(entry: InFlight, nowMs: number): number {
   const tokens = Math.floor(entry.streamedChars / STREAM_CHARS_PER_TOKEN)
   const elapsedMinutes = Math.max(
-    1,
+    RATE_MINUTES,
     (nowMs - entry.startedAtMs) / FLOW_WINDOW_MS,
   )
   return tokens / elapsedMinutes

@@ -199,6 +199,10 @@ let tauriCore: TauriCore | null = null;
 let runningInTauri = false;
 let activeTokenUsageChannel: TauriChannel | null = null;
 let browserPollTimer: number | null = null;
+let restartBrowserPolling: (() => void) | null = null;
+let dashboardSurfaceVisible = !new URLSearchParams(location.search).has("embedded");
+const dashboardIsActive = (): boolean =>
+  dashboardSurfaceVisible && document.visibilityState === "visible";
 /** After a failed fetch, wait this long instead (don't hammer the sidecar). */
 const BROWSER_RETRY_INTERVAL_MS = 5000;
 
@@ -645,7 +649,11 @@ function renderQuotaCard(title: string, details: QuotaDetails, resetMs: number |
                 }</output>
             </header>
             <div class="usage-panel__body">
-                <progress class="quota-progress quota-progress--${known ? level : "unknown"}" max="100"${known ? ` value="${Math.min(100, Math.max(0, percentUsed))}"` : ""}></progress>
+                ${
+                  known ?
+                    `<progress class="quota-progress quota-progress--${level}" max="100" value="${Math.min(100, Math.max(0, percentUsed))}" aria-label="${escapeHtml(title.replace(/_/g, " "))}"></progress>`
+                  : `<div class="quota-progress quota-progress--unknown" aria-hidden="true"></div>`
+                }
                 <div class="usage-panel__meta">
                     <span>${known ? `${(entitlement - remaining).toLocaleString()} / ${entitlement.toLocaleString()}` : "—"}</span>
                     <span>${known ? escapeHtml(t("dashboard-quota-remaining", { n: remaining.toLocaleString() })) : ""}</span>
@@ -1283,7 +1291,11 @@ function init(): void {
 
   window.addEventListener("message", (event: MessageEvent) => {
     if (event.origin !== window.location.origin) return;
-    const msg = event.data as { type?: string; period?: string } | null;
+    const msg = event.data as {
+      type?: string;
+      period?: string;
+      visible?: boolean;
+    } | null;
     if (!msg || typeof msg !== "object") return;
     if (msg.type === "maximal:set-period") {
       const nextPeriod = normalizePeriod(msg.period ?? null);
@@ -1294,6 +1306,20 @@ function init(): void {
     } else if (msg.type === "maximal:set-locale") {
       applyI18n();
       render();
+    } else if (
+      msg.type === "maximal:dashboard-visibility"
+      && typeof msg.visible === "boolean"
+    ) {
+      dashboardSurfaceVisible = msg.visible;
+      if (!dashboardIsActive()) {
+        unsubscribeTokenUsage();
+        if (browserPollTimer !== null) window.clearTimeout(browserPollTimer);
+        browserPollTimer = null;
+      } else if (runningInTauri) {
+        if (activeTokenUsageChannel === null) subscribeTokenUsage(state.tokenUsagePeriod);
+      } else {
+        restartBrowserPolling?.();
+      }
     }
   });
 
@@ -1309,7 +1335,7 @@ function init(): void {
     // Tauri mode: the Rust shell drives the token-usage feed via
     // Channel<TokenUsageEvent>. Drop the channel on unload so Rust's
     // loop exits cleanly on its next send.
-    subscribeTokenUsage(periodFromUrl);
+    if (dashboardIsActive()) subscribeTokenUsage(periodFromUrl);
     window.addEventListener("beforeunload", unsubscribeTokenUsage);
   } else {
     // Plain-browser mode: no Channel available. Poll the same endpoint
@@ -1317,19 +1343,23 @@ function init(): void {
     // users see equivalent freshness either way. Quiet, and on the page
     // they're looking at, so updates don't blank the view or reset paging.
     const pollBrowser = (): void => {
+      if (!dashboardIsActive() || browserPollTimer !== null) return;
       const wait =
         state.tokenUsageSummaryError ?
           BROWSER_RETRY_INTERVAL_MS
         : pollIntervalMs(state.tokenUsageSummary?.totals?.total_tokens);
       browserPollTimer = window.setTimeout(async () => {
+        browserPollTimer = null;
         await fetchTokenUsageSummaryAndEvents(state.tokenUsageEventsPage?.page ?? 1, {
           quiet: true,
         });
         pollBrowser();
       }, wait);
     };
+    restartBrowserPolling = pollBrowser;
     pollBrowser();
     window.addEventListener("beforeunload", () => {
+      restartBrowserPolling = null;
       if (browserPollTimer !== null) {
         window.clearTimeout(browserPollTimer);
         browserPollTimer = null;
@@ -1341,7 +1371,17 @@ function init(): void {
 // /usage is only fetched on load and period changes, so a window left open
 // drifts; re-read it when the window comes back into view and it's >10 min old.
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState !== "visible") return;
+  if (!dashboardIsActive()) {
+    unsubscribeTokenUsage();
+    if (browserPollTimer !== null) window.clearTimeout(browserPollTimer);
+    browserPollTimer = null;
+    return;
+  }
+  if (runningInTauri) {
+    if (activeTokenUsageChannel === null) subscribeTokenUsage(state.tokenUsagePeriod);
+  } else {
+    restartBrowserPolling?.();
+  }
   // Coming back into view: move the range label to the current hour if the
   // clock has rolled over while it was hidden.
   syncRangeBaseline(true);

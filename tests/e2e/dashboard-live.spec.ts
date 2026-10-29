@@ -380,15 +380,19 @@ test("a long cache countdown reads in hours and a time from another day names th
   await expect(row).toContainText(`started ${day} `)
 })
 
-test("a failed read is reported and the polling carries on", async ({
-  page,
-}) => {
+test("a hung read times out and the polling carries on", async ({ page }) => {
   test.setTimeout(45_000)
   let requests = 0
   await page.route(SESSIONS, async (route: Route) => {
     requests += 1
-    // The second read fails; the others go through.
-    await (requests === 2 ? route.abort("timedout") : route.continue())
+    // The second server response outlives the card's 10 s timeout.
+    if (requests === 2) {
+      const url = new URL(route.request().url())
+      url.searchParams.set("delay_ms", "12000")
+      await route.fallback({ url: url.href })
+      return
+    }
+    await route.continue()
   })
   await open(page)
 

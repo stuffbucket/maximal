@@ -228,6 +228,21 @@ function showSection(
   }
 }
 
+window.addEventListener("message", (event: MessageEvent<unknown>) => {
+  if (event.origin !== window.location.origin || typeof event.data !== "object" || event.data === null) return;
+  const message = event.data as { type?: unknown };
+  if (message.type !== "maximal:dashboard-ready") return;
+  const frame = document.querySelector<HTMLIFrameElement>("[data-dashboard-frame]");
+  if (event.source !== frame?.contentWindow) return;
+  frame.contentWindow?.postMessage(
+    {
+      type: "maximal:dashboard-visibility",
+      visible: tabForSection(readHashSection()) === "dashboard",
+    },
+    window.location.origin,
+  );
+});
+
 function readHashSection(): SectionId {
   const raw = window.location.hash.replace(/^#/, "");
   if (isSectionId(raw)) return raw;

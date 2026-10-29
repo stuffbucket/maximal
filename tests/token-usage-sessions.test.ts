@@ -393,30 +393,30 @@ describe("a session still streaming its first reply", () => {
         started_at_ms: T + 20_000,
         last_request_at_ms: T + 20_000,
         state: "streaming",
-        rate_per_min: 12,
+        rate_per_min: 2.4,
         rates: {
           input_per_min: 0,
-          output_per_min: 12,
+          output_per_min: 2.4,
           cache_read_per_min: 0,
           cache_write_per_min: 0,
-          total_per_min: 12,
+          total_per_min: 2.4,
         },
         model_rates: [
           {
             model: "gpt-5",
             input_per_min: 0,
-            output_per_min: 10,
-            cache_read_per_min: 0,
-            cache_write_per_min: 0,
-            total_per_min: 10,
-          },
-          {
-            model: CLAUDE,
-            input_per_min: 0,
             output_per_min: 2,
             cache_read_per_min: 0,
             cache_write_per_min: 0,
             total_per_min: 2,
+          },
+          {
+            model: CLAUDE,
+            input_per_min: 0,
+            output_per_min: 0.4,
+            cache_read_per_min: 0,
+            cache_write_per_min: 0,
+            total_per_min: 0.4,
           },
         ],
         minutes: Array.from({ length: 15 }, (_, i) => ({
@@ -456,10 +456,10 @@ describe("a session still streaming its first reply", () => {
       }),
     )
 
-    expect(view.rate_per_min).toBe(30)
+    expect(view.rate_per_min).toBe(6)
     expect(view.model_rates).toEqual([
-      expect.objectContaining({ model: "sonnet", output_per_min: 10 }),
-      expect.objectContaining({ model: "haiku", output_per_min: 20 }),
+      expect.objectContaining({ model: "sonnet", output_per_min: 2 }),
+      expect.objectContaining({ model: "haiku", output_per_min: 4 }),
     ])
   })
 
@@ -489,7 +489,7 @@ describe("a session still streaming its first reply", () => {
     expect(view.sessions.map((s) => [s.id, s.state, s.request_count])).toEqual([
       ["s1", "streaming", 1],
     ])
-    expect(view.sessions[0].rates?.output_per_min).toBe(100)
+    expect(view.sessions[0].rates?.output_per_min).toBe(20)
   })
 
   test("sorts by its start among the other sessions", () => {
