@@ -25,6 +25,16 @@ const MinuteBucket = z.object({
   total_tokens: z.number(),
 })
 
+const TokenRates = z.object({
+  input_per_min: z.number(),
+  output_per_min: z.number(),
+  cache_read_per_min: z.number(),
+  cache_write_per_min: z.number(),
+  total_per_min: z.number(),
+})
+
+const ModelRates = TokenRates.extend({ model: z.string() })
+
 const Session = z.object({
   /** session_id, or "other:<client>" for requests with no session. */
   id: z.string(),
@@ -39,6 +49,11 @@ const Session = z.object({
   state: z.enum(["streaming", "warm", "cold"]),
   /** Tokens per minute, the mean of the last 5 one-minute buckets. */
   rate_per_min: z.number(),
+  /** The same 5-minute rate split by token role. Optional while older sidecars
+   *  can still serve a newer embedded Dashboard during an update. */
+  rates: TokenRates.optional(),
+  /** Per-model pieces of `rates`; a session can contain subagent models. */
+  model_rates: z.array(ModelRates).optional(),
   /** The last 15 minutes, the same buckets as the summary's recent_minutes. */
   minutes: z.array(MinuteBucket),
   /** Last 24 h. */

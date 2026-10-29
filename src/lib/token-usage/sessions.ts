@@ -7,6 +7,8 @@ import { STREAM_CHARS_PER_TOKEN } from "./in-flight"
 import { addToRecentMinutes, emptyRecentMinutes } from "./minutes"
 
 type CacheConfidence = SessionView["cache"]["confidence"]
+type TokenRates = NonNullable<SessionView["rates"]>
+type ModelRates = NonNullable<SessionView["model_rates"]>[number]
 
 /** The default prompt-cache lifetime, and the floor a resume must clear to
  *  prove anything longer. */
@@ -131,6 +133,26 @@ function contextTokens(row: SessionRow): number {
   )
 }
 
+function tokenRates(rows: Array<SessionRow>): TokenRates {
+  const totals = rows.reduce(
+    (sum, row) => ({
+      input: sum.input + row.input_tokens,
+      output: sum.output + row.output_tokens,
+      cacheRead: sum.cacheRead + row.cache_read_input_tokens,
+      cacheWrite: sum.cacheWrite + row.cache_creation_input_tokens,
+      total: sum.total + row.total_tokens,
+    }),
+    { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  )
+  return {
+    input_per_min: totals.input / RATE_MINUTES,
+    output_per_min: totals.output / RATE_MINUTES,
+    cache_read_per_min: totals.cacheRead / RATE_MINUTES,
+    cache_write_per_min: totals.cacheWrite / RATE_MINUTES,
+    total_per_min: totals.total / RATE_MINUTES,
+  }
+}
+
 /**
  * Each resume in a session: a request that started more than 5 minutes after
  * the previous request on the same model completed. Requests on other models
@@ -187,6 +209,8 @@ function streamingOnlySession(entry: InFlight, nowMs: number): SessionView {
     last_request_at_ms: entry.startedAtMs,
     state: "streaming",
     rate_per_min: 0,
+    rates: tokenRates([]),
+    model_rates: [],
     minutes: emptyRecentMinutes(nowMs),
     total_tokens: 0,
     request_count: 0,
@@ -307,6 +331,21 @@ function buildSession(
     minutes
       .slice(-RATE_MINUTES)
       .reduce((sum, bucket) => sum + bucket.total_tokens, 0) / RATE_MINUTES
+  const rateStartMs = minutes.at(-RATE_MINUTES)?.start_ms ?? nowMs
+  const rateRows = group.filter((row) => row.created_at_ms >= rateStartMs)
+  const rates = tokenRates(rateRows)
+  const rateRowsByModel = new Map<string, Array<SessionRow>>()
+  for (const row of rateRows) {
+    const modelRows = rateRowsByModel.get(row.model)
+    if (modelRows) modelRows.push(row)
+    else rateRowsByModel.set(row.model, [row])
+  }
+  const modelRates: Array<ModelRates> = [...rateRowsByModel].map(
+    ([model, rows]) => ({
+      model,
+      ...tokenRates(rows),
+    }),
+  )
 
   // The main model has the most tokens in the session; on a tie, the one
   // used last. Its latest request supplies the model and the context.
@@ -325,6 +364,8 @@ function buildSession(
     last_request_at_ms: latest.created_at_ms,
     state: sessionState(streaming.has(id), warm),
     rate_per_min: ratePerMin,
+    rates,
+    model_rates: modelRates,
     minutes,
     total_tokens: totalTokens,
     request_count: group.length,
