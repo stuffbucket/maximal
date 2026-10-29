@@ -200,7 +200,7 @@ let runningInTauri = false;
 let activeTokenUsageChannel: TauriChannel | null = null;
 let browserPollTimer: number | null = null;
 let restartBrowserPolling: (() => void) | null = null;
-let dashboardSurfaceVisible = !new URLSearchParams(location.search).has("embedded");
+let dashboardSurfaceVisible = new URLSearchParams(location.search).get("embedded") !== "1";
 const dashboardIsActive = (): boolean =>
   dashboardSurfaceVisible && document.visibilityState === "visible";
 /** After a failed fetch, wait this long instead (don't hammer the sidecar). */

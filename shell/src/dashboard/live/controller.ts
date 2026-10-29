@@ -53,7 +53,7 @@ export function startLiveSessions(container: HTMLElement): () => void {
   let tickTimer: number | null = null;
   let polling = false;
   let stopped = false;
-  let surfaceVisible = !new URLSearchParams(location.search).has("embedded");
+  let surfaceVisible = new URLSearchParams(location.search).get("embedded") !== "1";
   const isVisible = (): boolean =>
     surfaceVisible && document.visibilityState === "visible";
 

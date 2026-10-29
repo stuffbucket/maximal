@@ -142,7 +142,7 @@ export function mountLiveCard(
 
   const query = new URLSearchParams(location.search);
   const includeSyntheticTools = query.has("flow-tools");
-  let surfaceVisible = !query.has("embedded");
+  let surfaceVisible = query.get("embedded") !== "1";
   const workerIsActive = (): boolean =>
     surfaceVisible && document.visibilityState === "visible";
 

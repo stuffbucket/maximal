@@ -463,7 +463,7 @@ describe("a session still streaming its first reply", () => {
     ])
   })
 
-  test("averages a long first response over its elapsed minutes", () => {
+  test("drops first-response output that aged out of the five-minute window", () => {
     const view = only(
       build([], T + 9 * MINUTE, {
         inFlight: [
@@ -471,18 +471,23 @@ describe("a session still streaming its first reply", () => {
             sessionId: "new",
             startedAtMs: T,
             streamedChars: 3_600,
+            streamedCharsLastFiveMinutes: 0,
           }),
         ],
       }),
     )
 
-    expect(view.rate_per_min).toBe(100)
+    expect(view.rate_per_min).toBe(0)
   })
 
   test("is not added for a session that has rows, or for an entry with no session", () => {
-    const view = build([row({ session_id: "s1" })], T + 1, {
+    const view = build([row({ session_id: "s1" })], T + 1_000, {
       inFlight: [
-        inFlight({ sessionId: "s1", streamedChars: 400 }),
+        inFlight({
+          sessionId: "s1",
+          startedAtMs: T + 500,
+          streamedChars: 400,
+        }),
         inFlight({ sessionId: "" }),
       ],
     })
@@ -490,6 +495,7 @@ describe("a session still streaming its first reply", () => {
       ["s1", "streaming", 1],
     ])
     expect(view.sessions[0].rates?.output_per_min).toBe(20)
+    expect(view.sessions[0].last_request_at_ms).toBe(T + 500)
   })
 
   test("sorts by its start among the other sessions", () => {

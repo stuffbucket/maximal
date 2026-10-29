@@ -133,13 +133,9 @@ function contextTokens(row: SessionRow): number {
   )
 }
 
-function inFlightRate(entry: InFlight, nowMs: number): number {
-  const tokens = Math.floor(entry.streamedChars / STREAM_CHARS_PER_TOKEN)
-  const elapsedMinutes = Math.max(
-    RATE_MINUTES,
-    (nowMs - entry.startedAtMs) / FLOW_WINDOW_MS,
-  )
-  return tokens / elapsedMinutes
+function inFlightRate(entry: InFlight, _nowMs: number): number {
+  const chars = entry.streamedCharsLastFiveMinutes ?? entry.streamedChars
+  return Math.floor(chars / STREAM_CHARS_PER_TOKEN) / RATE_MINUTES
 }
 
 function tokenRates(rows: Array<SessionRow>): TokenRates {
@@ -360,10 +356,12 @@ function buildSession(
     nowMs: number
     streaming: Set<string>
     inFlightRates: Map<string, number>
+    latestInFlightAt: number | null
     observations: CacheObservations
   },
 ): SessionView {
-  const { nowMs, streaming, inFlightRates, observations } = context
+  const { nowMs, streaming, inFlightRates, latestInFlightAt, observations } =
+    context
   const first = group[0]
   const latest = group.at(-1) ?? first
 
@@ -428,7 +426,7 @@ function buildSession(
     client_label: customKeyLabel(latest.client_label),
     model: shown.model,
     started_at_ms: first.created_at_ms,
-    last_request_at_ms: latest.created_at_ms,
+    last_request_at_ms: Math.max(latest.created_at_ms, latestInFlightAt ?? 0),
     state: sessionState(streaming.has(id), warm),
     rate_per_min: ratePerMin,
     rates,
@@ -468,7 +466,8 @@ function flowPerMin(
     }
   }
   for (const entry of inFlight) {
-    tokens += Math.floor(entry.streamedChars / STREAM_CHARS_PER_TOKEN)
+    const chars = entry.streamedCharsLastMinute ?? entry.streamedChars
+    tokens += Math.floor(chars / STREAM_CHARS_PER_TOKEN)
   }
   return tokens
 }
@@ -503,7 +502,12 @@ export function buildSessionsView(input: {
     .sort((a, b) => a.startedAtMs - b.startedAtMs)
   const streaming = new Set(withSession.map((entry) => entry.sessionId))
   const inFlightRates = new Map<string, Map<string, number>>()
+  const latestInFlightAt = new Map<string, number>()
   for (const entry of withSession) {
+    latestInFlightAt.set(
+      entry.sessionId,
+      Math.max(latestInFlightAt.get(entry.sessionId) ?? 0, entry.startedAtMs),
+    )
     const byModel =
       inFlightRates.get(entry.sessionId) ?? new Map<string, number>()
     byModel.set(
@@ -517,6 +521,7 @@ export function buildSessionsView(input: {
       nowMs,
       streaming,
       inFlightRates: inFlightRates.get(id) ?? new Map<string, number>(),
+      latestInFlightAt: latestInFlightAt.get(id) ?? null,
       observations,
     }),
   )
