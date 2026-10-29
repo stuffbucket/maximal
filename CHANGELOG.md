@@ -1,5 +1,48 @@
 # Changelog
 
+## [0.5.0](https://github.com/stuffbucket/maximal/compare/v0.4.48...v0.5.0) (2026-10-29)
+
+
+### Features
+
+* **dashboard:** live sessions card and session table ([#559](https://github.com/stuffbucket/maximal/issues/559)) ([1bc7eaa](https://github.com/stuffbucket/maximal/commit/1bc7eaad0f9d11370959b190aed4845347c2ec15))
+* **dashboard:** visualize live token flow ([#567](https://github.com/stuffbucket/maximal/issues/567)) ([bf1f77a](https://github.com/stuffbucket/maximal/commit/bf1f77a23ffceee3c8e653dc3a35386c1742a705))
+* **linux:** Debian and Ubuntu packages with a signed apt repository at mxml.sh/apt ([#547](https://github.com/stuffbucket/maximal/issues/547)) ([f9b4da7](https://github.com/stuffbucket/maximal/commit/f9b4da7f92f4c55adcfef9e837ec13e5a5188af4))
+* **mcp:** run MCP servers on Windows inside a kill-on-close Job Object ([#563](https://github.com/stuffbucket/maximal/issues/563)) ([c1e96c3](https://github.com/stuffbucket/maximal/commit/c1e96c3c07a2e619ef48432852fac35e9ee055bf))
+* **mcp:** show Work IQ's sign-in state and run its EULA and sign-in steps from Settings ([#540](https://github.com/stuffbucket/maximal/issues/540)) ([f4fc5a8](https://github.com/stuffbucket/maximal/commit/f4fc5a8ca3fd9496d209b6b92c6ec40c360acaf7))
+* **ui:** drop Re-scan; install cards notice the install themselves ([#535](https://github.com/stuffbucket/maximal/issues/535)) ([c6c8362](https://github.com/stuffbucket/maximal/commit/c6c83628d8b1bbacadfefbb66b1cd74baab98c8f))
+* **update:** add a Check for updates action to the tray and Settings ([#554](https://github.com/stuffbucket/maximal/issues/554)) ([5339497](https://github.com/stuffbucket/maximal/commit/53394970b7b93084b29ba2106c38a1d8bddc21c4))
+* **update:** install updates in place on Windows and macOS ([#541](https://github.com/stuffbucket/maximal/issues/541)) ([41fff6a](https://github.com/stuffbucket/maximal/commit/41fff6a83847f4c07d0e6f4049dad6fc0a927af1))
+* **update:** show Update to X.Y.Z when an update exists; revalidate the manifest with ETags ([#537](https://github.com/stuffbucket/maximal/issues/537)) ([7fac2bd](https://github.com/stuffbucket/maximal/commit/7fac2bd0bc80b380a9ec63215cc9fcae487c24b0))
+
+
+### Bug Fixes
+
+* **build:** derive the sidecar's update channel from its release version ([#545](https://github.com/stuffbucket/maximal/issues/545)) ([decb212](https://github.com/stuffbucket/maximal/commit/decb2128b2de884c151eb911edbbd33f6b56afc1))
+* **dashboard:** give every live session trace its own gradient fill ([#566](https://github.com/stuffbucket/maximal/issues/566)) ([411f907](https://github.com/stuffbucket/maximal/commit/411f90798d5584c521ee13b975e09894ee928593))
+* **dashboard:** give every section heading the same style and restore their icons ([#548](https://github.com/stuffbucket/maximal/issues/548)) ([bf1ac41](https://github.com/stuffbucket/maximal/commit/bf1ac4179a926886220339b725bc9baef605290c))
+* **deps:** update storybook, vite and zod for their security advisories ([#561](https://github.com/stuffbucket/maximal/issues/561)) ([11156c3](https://github.com/stuffbucket/maximal/commit/11156c3f4fc503b06b4367e15302deb8ee617c55))
+* **mcp-broker:** keep the stdio adapter connected across Maximal and broker restarts ([7901f9f](https://github.com/stuffbucket/maximal/commit/7901f9fe3942832fc7fe83ff0da011b5295096bb))
+* **mcp-broker:** make room at the session limit by closing the least recently used idle session ([e2400a2](https://github.com/stuffbucket/maximal/commit/e2400a2dcac82f687418ef6ef5ec66a6c7df11b8))
+* **mcp:** ask npm itself which registry and prefix the Work IQ install uses ([#555](https://github.com/stuffbucket/maximal/issues/555)) ([c08e40d](https://github.com/stuffbucket/maximal/commit/c08e40da2a89e21bcc182eeebd186a21967d280d))
+* **mcp:** ask npm through cmd.exe on Windows ([#556](https://github.com/stuffbucket/maximal/issues/556)) ([4e06786](https://github.com/stuffbucket/maximal/commit/4e06786f5389d343a157c8da0d41d9494423f9a8))
+* **mcp:** find Work IQ wherever npm or pnpm put it, and keep MCP off on Windows ([#539](https://github.com/stuffbucket/maximal/issues/539)) ([e301c33](https://github.com/stuffbucket/maximal/commit/e301c33a7d94792518f8349a8c060355a6c9aa17))
+* **mcp:** keep Claude Code and Claude Desktop reliably connected to brokered MCP servers ([666462d](https://github.com/stuffbucket/maximal/commit/666462d8fffba233db86ad598e44104c86688502))
+* **mcp:** keep Claude Code's MCP key in place after a failed add or a write-back ([171dd3c](https://github.com/stuffbucket/maximal/commit/171dd3c5ca6bfe66f664e5e15dc68ecfdfaa6bb4))
+* **mcp:** keep Claude Desktop's MCP entries across Maximal shutdown ([4ccea53](https://github.com/stuffbucket/maximal/commit/4ccea531fd0ea49df4fa7f5fb8b948fc69135fc2))
+* **mcp:** tell apart a missing adapter from the user's own entry, and say how apps pick up a change ([3987ec6](https://github.com/stuffbucket/maximal/commit/3987ec6654e28817f575a77aa66cf50a147bdb60))
+* **mcp:** update client apps only once the broker serves ([e57925f](https://github.com/stuffbucket/maximal/commit/e57925f13e3a60bc7ff04a55f60fd26c63341cc1))
+* **release:** name both tags for changelogithub so two tags on one commit still release ([#544](https://github.com/stuffbucket/maximal/issues/544)) ([940a653](https://github.com/stuffbucket/maximal/commit/940a653a8b1709f4735a886ea8ce6c3366d3ed6f))
+* **shell:** no white corners around the splash on Windows ([#564](https://github.com/stuffbucket/maximal/issues/564)) ([c1f9efb](https://github.com/stuffbucket/maximal/commit/c1f9efbec9a0c5d66b5e90201da686f9b1b9213a))
+* **shell:** notify each update version once, across restarts ([#510](https://github.com/stuffbucket/maximal/issues/510)) ([e42fd6a](https://github.com/stuffbucket/maximal/commit/e42fd6ae6a36d9ed56a4403d1ad7087d611c28f3))
+* **shell:** patch glib 0.18.5 for GHSA-wrw7-89jp-8q8g until Tauri moves to glib 0.20 ([a06bc80](https://github.com/stuffbucket/maximal/commit/a06bc805847d61440932fbca7ab3ae80fd2aecb4))
+* **shell:** patch glib 0.18.5 for GHSA-wrw7-89jp-8q8g until Tauri moves to glib 0.20 ([3808fb3](https://github.com/stuffbucket/maximal/commit/3808fb3a44cebc5bd7b626f75cf4575a1999a99f))
+* **site:** update astro to 7.x for its security advisories ([#560](https://github.com/stuffbucket/maximal/issues/560)) ([031de35](https://github.com/stuffbucket/maximal/commit/031de35a63a8c7aa18104bc373751f5c56c0ce78))
+* **start:** listen on 127.0.0.1 unless HOST is set ([#550](https://github.com/stuffbucket/maximal/issues/550)) ([c0621ff](https://github.com/stuffbucket/maximal/commit/c0621ffc340fd5d82c10774df36f22effc30e95c))
+* stop blocking the proxy on child processes ([#509](https://github.com/stuffbucket/maximal/issues/509)) ([9581c59](https://github.com/stuffbucket/maximal/commit/9581c59fa10e59bb228002d5a6d94e19008882b8))
+* **storybook:** make storybook:check pass again and run it in CI ([#551](https://github.com/stuffbucket/maximal/issues/551)) ([a4f3074](https://github.com/stuffbucket/maximal/commit/a4f3074a99dea67dbcf560f52d935291fc93c68f))
+* **windows:** keep install.ps1 from merging PATH entries ([#517](https://github.com/stuffbucket/maximal/issues/517)) ([2c6fb66](https://github.com/stuffbucket/maximal/commit/2c6fb6606cd877f6138003c66f0a5da45e55b84f))
+
 ## [0.4.48](https://github.com/stuffbucket/maximal/compare/v0.4.47...v0.4.48) (2026-10-27)
 
 
