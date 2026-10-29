@@ -334,6 +334,9 @@ body {
 }
 
 .quota-more__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
   margin-top: var(--space-2);
 }
 
@@ -639,14 +642,9 @@ html[data-embedded="true"] .lang-picker {
   color: var(--text-strong);
 }
 
-/* ---- Bento: the quotas beside the live card ----
-   Two columns from the md breakpoint: quotas on the left (the metered cards,
-   then "Chat and completions", which stays in its column when open), the live
-   card on the right spanning both. Each column's heading shares the first
-   row (subgrid), so the live card's top lines up with the quota cards'. The
-   second row takes the taller column: the live card is at least its plot's
-   minimum, and grows with the quotas when they are taller. Narrower,
-   everything stacks with the live card first. */
+/* ---- Bento: full-width usage overview, then live graph ----
+   The usage card divides token rates from quota and cache details; the wider
+   graph below gives its endpoint labels room to breathe. */
 .dashboard-bento {
   display: flex;
   flex-direction: column;
@@ -662,198 +660,232 @@ html[data-embedded="true"] .lang-picker {
   flex-direction: column;
   min-width: 0;
 }
-.dashboard-bento__live {
-  order: -1;
-}
 .dashboard-bento__live > .live {
   flex: 1;
 }
-@media (min-width: 768px) {
-  .dashboard-bento:not(.dashboard-bento--live-only) {
-    display: grid;
-    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
-    grid-template-rows: auto 1fr;
-    gap: 0 var(--space-5);
-  }
-  /* The row is as tall as the taller column; the quota cards keep their own
-     height at the top of it rather than stretching. */
-  .dashboard-bento__quota > .dashboard-bento__body {
-    align-self: start;
-  }
-  .dashboard-bento:not(.dashboard-bento--live-only) > .dashboard-bento__col {
-    display: grid;
-    grid-row: span 2;
-    grid-template-rows: subgrid;
-    order: 0;
-  }
-}
 
-/* ---- Live card ----
-   Total tokens/min over one trace per live session (the last 15 minutes).
-   Series colors come from --series-n, with the session table as the legend;
-   sessions past the sixth draw in neutral gray (--border-strong, 3:1 on the
-   card). Only one trace gets the soft fill (the selected one, else the
-   busiest), so fills never stack.
-
-   The hairline border is a slow conic sweep of accent over the neutral
-   border; its speed follows token flow (card.ts sets a playback rate on the
-   animation and --live-period for reference). Stopped when nothing flows,
-   static under reduced motion. */
-@property --live-angle {
-  syntax: "<angle>";
-  initial-value: 0deg;
-  inherits: false;
+/* ---- Live token flow ----
+   Throughput metrics sit under Usage quotas; this card is only the graph and
+   its decoding legend. The worker draws models on the upper arc, sessions on
+   the lower arc, and particles that settle and fade at their destination. */
+.usage-overview {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: var(--space-5);
+  padding: var(--space-4);
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  background-color: var(--surface-card);
 }
-@keyframes live-border-spin {
-  to {
-    --live-angle: 360deg;
-  }
+.usage-panel {
+  flex: 1 1 calc(var(--space-8) * 3);
+  min-width: 0;
+}
+.usage-panel--quota,
+.usage-panel--quota .dashboard-bento__body {
+  display: flex;
+  flex-direction: column;
+}
+.usage-panel__header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--space-3);
+}
+.usage-panel__heading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.usage-panel__title,
+.quota-more__title {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: var(--text-base);
+  font-weight: var(--weight-lg);
+  text-transform: capitalize;
+}
+.usage-panel__subtitle,
+.quota-more__value {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.usage-panel__headline {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: var(--text-2xl);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-lg);
+  line-height: 1;
+  text-align: right;
+}
+.usage-panel__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.usage-panel__meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-3);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+.usage-panel__rows {
+  margin: var(--space-3) 0 0;
+}
+.usage-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  min-height: var(--size-2xl);
+  padding-block: var(--space-2);
+  border-top: var(--border-width-hairline) solid var(--border-subtle);
+}
+.usage-row__label {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.usage-row__value {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: var(--text-base);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-lg);
+  text-align: right;
+}
+.quota-more__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.quota-progress {
+  width: 100%;
+  height: var(--space-2);
+  margin-top: var(--space-3);
+  overflow: hidden;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background-color: var(--surface-control);
+}
+.quota-progress::-webkit-progress-bar {
+  background-color: var(--surface-control);
+}
+.quota-progress::-webkit-progress-value {
+  border-radius: var(--radius-pill);
+  background-color: var(--accent);
+}
+.quota-progress::-moz-progress-bar {
+  background-color: var(--accent);
+}
+.quota-progress--low::-webkit-progress-value {
+  background-color: var(--status-warning);
+}
+.quota-progress--low::-moz-progress-bar {
+  background-color: var(--status-warning);
+}
+.quota-progress--out::-webkit-progress-value {
+  background-color: var(--status-error);
+}
+.quota-progress--out::-moz-progress-bar {
+  background-color: var(--status-error);
+}
+.quota-progress--unknown::-webkit-progress-value {
+  background-color: var(--border-strong);
+}
+.quota-progress--unknown::-moz-progress-bar {
+  background-color: var(--border-strong);
 }
 .live {
   display: flex;
   flex-direction: column;
-  padding: var(--border-width-hairline);
+  border: var(--border-width-hairline) solid var(--border-subtle);
   border-radius: var(--radius-card);
-  background: var(--border-subtle);
-}
-.live--border {
-  background: conic-gradient(
-    from var(--live-angle),
-    var(--border-subtle) 0%,
-    color-mix(in srgb, var(--accent) 45%, var(--border-subtle)) 14%,
-    var(--accent) 24%,
-    color-mix(in srgb, var(--accent) 45%, var(--border-subtle)) 34%,
-    var(--border-subtle) 46%,
-    var(--border-subtle) 100%
-  );
-  animation: live-border-spin 30s linear infinite paused;
+  background-color: var(--surface-card);
 }
 .live__inner {
   flex: 1;
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  padding: var(--space-4) var(--space-5);
-  background-color: var(--surface-card);
-  border-radius: calc(var(--radius-card) - var(--border-width-hairline));
+  padding: var(--space-2) var(--space-3);
 }
-.live__head {
+.usage-feature {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--space-1) var(--space-3);
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: var(--border-width-hairline) solid var(--border-subtle);
+}
+.usage-feature__copy {
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0 var(--space-3);
+  flex-direction: column;
+  gap: var(--space-1);
 }
-.live__metric {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-2);
-  min-width: 0;
+.usage-feature__label {
+  color: var(--text-strong);
+  font-size: var(--text-base);
+  font-weight: var(--weight-lg);
 }
-/* The totals' hero figure, set solid so it sits on the unit's baseline
-   without an extra line of leading above the plot. */
-.live__value {
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-}
-/* Teal text is --link; --accent is a fill. */
-.live__unit {
-  font-size: var(--text-sm);
-  color: var(--link);
-}
-.live__window {
-  margin-left: auto;
-  font-size: var(--text-sm);
+.usage-feature__detail {
   color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.usage-feature__value {
+  color: var(--text-strong);
+  font-size: var(--text-2xl);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-lg);
+  line-height: 1;
 }
 .live__plot {
   position: relative;
   flex: 1;
+  min-width: 0;
   min-height: calc(var(--space-8) * 2);
 }
-/* Out of flow: the plot's min-height (about 120px) sets the card's floor,
-   the plot grows into any extra height the row has (an open "Chat and
-   completions"), and the chart's own size never feeds back into layout. */
-.live__chart {
+.live__plot--flow {
+  min-height: calc(var(--space-8) * 10);
+}
+.live__flow-canvas {
   position: absolute;
   inset: 0;
+  display: block;
   width: 100%;
   height: 100%;
-  overflow: visible;
 }
-.live__area {
-  pointer-events: none;
-}
-.live__fill-stop--top {
-  stop-color: var(--trace-color, var(--accent));
-  stop-opacity: 0.32;
-}
-.live__fill-stop--bottom {
-  stop-color: var(--trace-color, var(--accent));
-  stop-opacity: 0;
-}
-.live__trace,
-.live__fill {
-  transition: opacity 150ms ease-out;
-}
-.live__line {
-  fill: none;
-  stroke: var(--trace-color);
-  stroke-width: var(--border-width-thick);
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-.live__dot-mark {
-  fill: var(--trace-color);
-}
-/* Hit targets: a 12px stroke along the line, a 24px circle on the dot. */
-.live__hit {
-  fill: none;
-  stroke: transparent;
-  stroke-width: var(--size-xs);
-  pointer-events: stroke;
-  cursor: pointer;
-}
-.live__dot-hit {
-  fill: transparent;
-  pointer-events: all;
-  cursor: pointer;
-}
-.live__trace--dim {
-  opacity: 0.3;
-}
-.live__foot {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-1) var(--space-3);
-  font-size: var(--text-sm);
+.live__flow-fallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  margin: 0;
+  place-items: center;
   color: var(--text-muted);
+  font-size: var(--text-sm);
+  text-align: center;
 }
-.live__marker {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
+.live__flow-fallback[hidden] {
+  display: none;
 }
-.live__pulse {
-  flex: none;
-  width: var(--space-2);
-  height: var(--space-2);
-  border-radius: var(--radius-pill);
-  background-color: var(--accent);
-}
-/* The dot pulses only while tokens are flowing. */
-.live--flowing .live__pulse {
-  animation: live-pulse 2s ease-out infinite;
-}
-@keyframes live-pulse {
-  from {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 60%, transparent);
-  }
-  to {
-    box-shadow: 0 0 0 var(--space-2) transparent;
-  }
+.live__flow-summary {
+  position: absolute;
+  width: var(--border-width-hairline);
+  height: var(--border-width-hairline);
+  margin: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 
 /* A failed sessions read: a line of error text in the card, not a box (no
@@ -873,11 +905,8 @@ html[data-embedded="true"] .lang-picker {
 
 /* ---- Session table ----
    The per-request table's frame and cells (Tailwind classes in table.ts),
-   plus what only this table has: the legend swatch, the "Cache cold" divider,
-   a selected row (an accent rule and a pale accent tint, never color alone:
-   the selected trace is drawn in full and the others dim), muted cold rows,
-   and the context meter, which is the quota cards' .meter at row size with
-   a tick at the compaction point. */
+   plus the "Cache cold" divider, selected and previewed rows, muted cold
+   rows, and the context meter with its compaction tick. */
 .sessions {
   margin-bottom: var(--space-5);
 }
@@ -907,18 +936,6 @@ html[data-embedded="true"] .lang-picker {
 .session-row:focus-visible {
   outline: var(--border-width-thick) solid var(--accent);
   outline-offset: calc(var(--border-width-thick) * -1);
-}
-.session-cell--swatch {
-  width: var(--space-2);
-  padding-right: 0;
-}
-.session-swatch {
-  display: block;
-  width: var(--space-2);
-  height: var(--space-2);
-  margin-top: var(--space-1);
-  border-radius: var(--radius-pill);
-  background-color: var(--swatch-color);
 }
 .session-divider > td {
   padding: var(--space-1) var(--space-4);
@@ -968,10 +985,5 @@ html[data-embedded="true"] .lang-picker {
   .segmented-option,
   .quota-more__chevron {
     transition: none !important;
-  }
-  /* An infinite rotation outlives the zeroed duration above; stop it. */
-  .live--border,
-  .live--flowing .live__pulse {
-    animation: none;
   }
 }

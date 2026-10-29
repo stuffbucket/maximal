@@ -34,7 +34,7 @@ test.beforeEach(async ({ request }) => {
 const isSessions = (url: string): boolean =>
   url.endsWith("/token-usage/sessions")
 
-/** Open the Dashboard and wait for the table rows and the traces. */
+/** Open the Dashboard and wait for the table and worker-rendered flow view. */
 async function open(page: Page): Promise<Array<string>> {
   const errors: Array<string> = []
   page.on("pageerror", (error) => errors.push(String(error)))
@@ -45,8 +45,8 @@ async function open(page: Page): Promise<Array<string>> {
   })
   await expect(page.locator(".session-row").first()).toBeVisible()
   await expect(
-    page.locator(".live__trace .live__line[d]").first(),
-  ).toBeAttached()
+    page.locator('.live__flow-canvas[data-renderer="worker"]'),
+  ).toBeVisible()
   return errors
 }
 
@@ -74,20 +74,24 @@ test("the live card sits beside the quotas, and nothing overflows", async ({
   page,
 }) => {
   const errors = await open(page)
-  // The border turns while tokens flow (the reduced-motion test stops it).
-  await expect(page.locator(".live--border")).toHaveCSS(
-    "animation-name",
-    "live-border-spin",
-  )
+  await expect(page.locator(".live--border")).toHaveCount(0)
+  await expect(page.locator(".live__marker")).toHaveCount(0)
   const live = await page.locator(".live").boundingBox()
   const quota = await page
     .locator("#usage-quotas .dashboard-bento__body")
     .boundingBox()
+  const metrics = await page.locator("#live-metrics").boundingBox()
+  const overview = await page.locator(".usage-overview").boundingBox()
   expect(live).not.toBeNull()
   expect(quota).not.toBeNull()
-  if (!live || !quota) return
-  expect(Math.abs(live.y - quota.y)).toBeLessThanOrEqual(2)
-  expect(live.height).toBeGreaterThanOrEqual(quota.height - 2)
+  expect(metrics).not.toBeNull()
+  expect(overview).not.toBeNull()
+  if (!live || !quota || !metrics || !overview) return
+  expect(live.y).toBeGreaterThan(overview.y + overview.height)
+  expect(Math.abs(live.x - overview.x)).toBeLessThanOrEqual(2)
+  expect(Math.abs(live.width - overview.width)).toBeLessThanOrEqual(2)
+  expect(Math.abs(metrics.y - quota.y)).toBeLessThanOrEqual(2)
+  expect(metrics.x).toBeLessThan(quota.x)
 
   // The session table comes after the bento and before the per-request table.
   const table = await page.locator("#sessions").boundingBox()
@@ -115,23 +119,18 @@ test("the live card sits beside the quotas, and nothing overflows", async ({
   expect(errors).toEqual([])
 })
 
-test("clicking a trace selects its row and brings it into view", async ({
+test("selecting a session row updates the worker-rendered flow", async ({
   page,
 }) => {
   await open(page)
-  // Shrink the window so the table starts below the fold.
-  await page.setViewportSize({ width: 1100, height: 420 })
-  const hit = await firstTracePoint(page)
-  const row = page.locator(`.session-row[data-session-id="${hit.id}"]`)
-  await expect(row).not.toBeInViewport()
-  await page.mouse.click(hit.x, hit.y)
-  const id = hit.id
+  const row = page.locator(".session-row:not(.session-row--cold)").first()
+  const id = await row.getAttribute("data-session-id")
+  await row.click()
   await expect(row).toHaveClass(/session-row--selected/)
-  await expect(row).toBeInViewport()
-  await expect(
-    page.locator(`.live__trace[data-session-id="${id}"]`),
-  ).toHaveClass(/live__trace--selected/)
-  // Only this row is selected.
+  await expect(page.locator(".live__flow-canvas")).toHaveAttribute(
+    "data-selected-session-id",
+    id ?? "",
+  )
   await expect(page.locator(".session-row--selected")).toHaveCount(1)
 })
 
@@ -152,11 +151,7 @@ test("Escape and a click on empty plot space clear the selection", async ({
   await page.locator(".session-row").first().focus()
   await page.keyboard.press("Enter")
   await expect(page.locator(".session-row--selected")).toHaveCount(1)
-  // The plot's top-left corner: above every trace (the busiest one peaks
-  // at the right edge in the harness data).
-  const plot = await page.locator(".live__plot").boundingBox()
-  if (!plot) throw new Error("no plot")
-  await page.mouse.click(plot.x + 2, plot.y + 2)
+  await page.locator(".live__plot").click({ position: { x: 10, y: 10 } })
   await expect(page.locator(".session-row--selected")).toHaveCount(0)
 })
 
@@ -164,7 +159,11 @@ test("a selection and the open quota section survive a poll and a full re-render
   page,
 }) => {
   await open(page)
-  const id = await clickFirstTrace(page)
+  const selectedRow = page
+    .locator(".session-row:not(.session-row--cold)")
+    .first()
+  const id = (await selectedRow.getAttribute("data-session-id")) ?? ""
+  await selectedRow.click()
   await page.locator("details[data-quota-more] > summary").click()
   expect(await detailsOpen(page)).toBe(true)
 
@@ -188,9 +187,10 @@ test("a selection and the open quota section survive a poll and a full re-render
   await expect(
     page.locator(`.session-row[data-session-id="${id}"]`),
   ).toHaveClass(/session-row--selected/)
-  await expect(
-    page.locator(`.live__trace[data-session-id="${id}"]`),
-  ).toHaveClass(/live__trace--selected/)
+  await expect(page.locator(".live__flow-canvas")).toHaveAttribute(
+    "data-selected-session-id",
+    id,
+  )
   expect(await detailsOpen(page)).toBe(true)
 })
 
@@ -438,12 +438,12 @@ test("a countdown that reaches zero moves its row below the line", async ({
   await expect
     .poll(position, { timeout: 25_000, intervals: [500] })
     .toBe("below")
-  await expect(
-    page.locator(`.live__trace[data-session-id="${nearCold.id}"]`),
-  ).toHaveCount(0)
+  await expect(page.locator(".live__flow-summary")).not.toContainText(
+    nearCold.id.slice(0, 4),
+  )
 })
 
-test("past six live sessions, the seventh draws in neutral ink and has no swatch", async ({
+test("session rows have no decorative color dots and remain selectable", async ({
   page,
 }) => {
   await routeSessions(page, (view) => {
@@ -457,80 +457,91 @@ test("past six live sessions, the seventh draws in neutral ink and has no swatch
   })
   await open(page)
 
-  const live = await page.evaluate<Array<{ id: string; swatch: boolean }>>(
+  const live = await page.evaluate<Array<string>>(
     `[...document.querySelectorAll(".session-row:not(.session-row--cold)")]
       .filter((tr) => !tr.dataset.sessionId.startsWith("other:"))
-      .map((tr) => ({ id: tr.dataset.sessionId, swatch: !!tr.querySelector(".session-swatch") }))`,
+      .map((tr) => tr.dataset.sessionId)`,
   )
   expect(live).toHaveLength(7)
-  const plain = live.filter((row) => !row.swatch)
-  expect(plain).toHaveLength(1)
+  await expect(page.locator(".session-swatch")).toHaveCount(0)
 
-  const [neutral, stroke] = await page.evaluate<[string, string]>(`(() => {
-    const probe = document.createElement("span")
-    probe.style.color = "var(--border-strong)"
-    document.body.append(probe)
-    const neutral = getComputedStyle(probe).color
-    probe.remove()
-    const line = document.querySelector('.live__trace[data-session-id="${plain[0].id}"] .live__line')
-    return [neutral, line ? getComputedStyle(line).stroke : ""]
-  })()`)
-  expect(stroke).toBe(neutral)
-
-  // It is still clickable.
-  await page.locator(`.session-row[data-session-id="${plain[0].id}"]`).click()
-  await expect(
-    page.locator(`.live__trace[data-session-id="${plain[0].id}"]`),
-  ).toHaveClass(/live__trace--selected/)
+  const id = live.at(-1) ?? ""
+  const row = page.locator(`.session-row[data-session-id="${id}"]`)
+  await row.click()
+  await expect(row).toHaveClass(/session-row--selected/)
+  await expect(page.locator(".live__flow-canvas")).toHaveAttribute(
+    "data-selected-session-id",
+    id,
+  )
 })
 
-test("every live trace has a gradient fill of its own, in its own color", async ({
+test("hundred-billion token rates stay compact and retain exact tooltips", async ({
+  page,
+}) => {
+  await routeSessions(page, (view) => ({
+    ...view,
+    sessions: view.sessions.map((session, index) => {
+      if (index > 0) {
+        return {
+          ...session,
+          rate_per_min: 0,
+          rates: {
+            input_per_min: 0,
+            output_per_min: 0,
+            cache_read_per_min: 0,
+            cache_write_per_min: 0,
+            total_per_min: 0,
+          },
+          model_rates: [],
+        }
+      }
+      const rates = {
+        input_per_min: 40_000_000_000,
+        output_per_min: 30_000_000_000,
+        cache_read_per_min: 20_000_000_000,
+        cache_write_per_min: 10_000_000_000,
+        total_per_min: 100_000_000_000,
+      }
+      return {
+        ...session,
+        rate_per_min: rates.total_per_min,
+        rates,
+        model_rates: [{ model: session.model, ...rates }],
+      }
+    }),
+  }))
+  await open(page)
+
+  await expect(
+    page.locator(".usage-panel--tokens .usage-panel__headline"),
+  ).toHaveText("100B")
+  await expect(
+    page.locator(".usage-panel--tokens .usage-panel__headline"),
+  ).toHaveAttribute("title", "100,000,000,000 tokens/min")
+  await expect(page.locator(".usage-row__value").nth(0)).toHaveText("40B")
+  await expect(page.locator(".usage-feature__value")).toHaveText("29%")
+})
+
+test("the live flow is rendered by a worker with an accessible text summary", async ({
   page,
 }) => {
   await open(page)
 
-  const traces = await page.evaluate<
-    Array<{
-      id: string
-      gradient: string
-      ref: string
-      d: string
-      stop: string
-      stroke: string
-      stopOpacity: string
-    }>
-  >(`[...document.querySelectorAll(".live__trace")].map((g) => {
-    const id = g.dataset.sessionId
-    const fill = [...document.querySelectorAll(".live__fill")].find(
-      (f) => f.dataset.sessionId === id,
-    )
-    const area = fill?.querySelector(".live__area")
-    const gradient = fill?.querySelector("linearGradient")
-    const stop = fill?.querySelector(".live__fill-stop--top")
-    return {
-      id,
-      gradient: gradient?.id ?? "",
-      ref: area?.getAttribute("fill") ?? "",
-      d: area?.getAttribute("d") ?? "",
-      stop: stop ? getComputedStyle(stop).stopColor : "",
-      stroke: getComputedStyle(g.querySelector(".live__line")).stroke,
-      stopOpacity: stop ? getComputedStyle(stop).stopOpacity : "",
-    }
-  })`)
-
-  // The harness scenario has several live sessions with different colors.
-  expect(traces.length).toBeGreaterThanOrEqual(3)
-  // Ids are document-wide: one gradient per trace, never shared.
-  expect(new Set(traces.map((tr) => tr.gradient)).size).toBe(traces.length)
-  for (const tr of traces) {
-    expect(tr.gradient, tr.id).not.toBe("")
-    expect(tr.ref, tr.id).toBe(`url(#${tr.gradient})`)
-    // The area is drawn, and the gradient is the line's color.
-    expect(tr.d, tr.id).not.toBe("")
-    expect(tr.stop, tr.id).toBe(tr.stroke)
-    expect(Number(tr.stopOpacity), tr.id).toBeGreaterThan(0)
-  }
-  expect(new Set(traces.map((tr) => tr.stop)).size).toBeGreaterThanOrEqual(3)
+  await expect(page.locator(".live__flow-canvas")).toHaveAttribute(
+    "data-renderer",
+    "worker",
+  )
+  expect(
+    page.workers().some((worker) => worker.url().endsWith("/flow-worker.js")),
+  ).toBe(true)
+  await expect(page.locator(".live__flow-summary")).toContainText("Sonnet")
+  await expect(page.locator(".live__flow-summary")).toContainText("Laptop")
+  await expect(page.locator(".live__flow-legend-item")).toHaveCount(0)
+  await expect(page.locator(".usage-row")).toHaveCount(4)
+  await expect(page.locator("#live-metrics")).toContainText("Input")
+  await expect(page.locator("#live-metrics")).toContainText("Cache write")
+  await expect(page.locator(".usage-feature__value")).toHaveText("24%")
+  await expect(page.locator(".live__trace")).toHaveCount(0)
 })
 
 for (const scheme of ["light", "dark"] as const) {
@@ -568,50 +579,17 @@ test("screenshot, phone width in German", async ({ page }, testInfo) => {
   })
 })
 
-test("under reduced motion the border does not turn", async ({ page }) => {
+test("under reduced motion the worker renders a static flow", async ({
+  page,
+}) => {
   await page.emulateMedia({ reducedMotion: "reduce" })
   await open(page)
-  // Tokens are flowing in the harness data, so the border would turn otherwise.
-  await expect(page.locator(".live--flowing")).toBeAttached()
-  await expect(page.locator(".live--border")).toHaveCSS(
-    "animation-name",
-    "none",
+  await expect(page.locator(".live__flow-canvas")).toHaveAttribute(
+    "data-motion",
+    "static",
   )
+  await expect(page.locator(".live--border")).toHaveCount(0)
 })
-
-/**
- * A point on the first trace's hit path (its wide transparent stroke) where
- * that trace is the top-most target, and the trace's session id.
- */
-async function firstTracePoint(
-  page: Page,
-): Promise<{ id: string; x: number; y: number }> {
-  const hit = await page.evaluate<{
-    id: string
-    x: number
-    y: number
-  } | null>(`(() => {
-    const g = document.querySelector(".live__trace")
-    const path = g.querySelector(".live__hit")
-    const length = path.getTotalLength()
-    const ctm = path.getScreenCTM()
-    for (let i = 1; i < 40; i++) {
-      const p = path.getPointAtLength((length * i) / 40).matrixTransform(ctm)
-      const top = document.elementFromPoint(p.x, p.y)
-      if (top && top.closest(".live__trace") === g) return { id: g.dataset.sessionId, x: p.x, y: p.y }
-    }
-    return null
-  })()`)
-  if (!hit) throw new Error("no clickable point on the first trace")
-  return hit
-}
-
-/** Click the first trace on its hit path; returns its session id. */
-async function clickFirstTrace(page: Page): Promise<string> {
-  const hit = await firstTracePoint(page)
-  await page.mouse.click(hit.x, hit.y)
-  return hit.id
-}
 
 function detailsOpen(page: Page): Promise<boolean> {
   return page.evaluate<boolean>(

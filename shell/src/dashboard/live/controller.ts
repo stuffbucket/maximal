@@ -29,12 +29,14 @@ const isOther = (id: string): boolean => id.startsWith("other:");
  */
 export function startLiveSessions(container: HTMLElement): () => void {
   const cardHost = container.querySelector<HTMLElement>("#live-sessions");
+  const metricsHost = container.querySelector<HTMLElement>("#live-metrics");
+  const cacheHitHost = container.querySelector<HTMLElement>("#cache-hit");
   const sectionHost = container.querySelector<HTMLElement>("#sessions");
   const tableHost = container.querySelector<HTMLElement>("#sessions-table");
-  if (!cardHost || !sectionHost || !tableHost) return () => {};
+  if (!cardHost || !metricsHost || !cacheHitHost || !sectionHost || !tableHost) return () => {};
   const section: HTMLElement = sectionHost;
 
-  const card = mountLiveCard(cardHost);
+  const card = mountLiveCard(cardHost, metricsHost, cacheHitHost);
   const series = new SeriesColors();
 
   /** The last good payload, as the server sent it. */
@@ -146,26 +148,10 @@ export function startLiveSessions(container: HTMLElement): () => void {
     }
   }
 
-  // Selection on the plot: a trace or its dot selects, empty plot space clears.
+  // The canvas is intentionally not an interaction surface in the spike;
+  // clicking its open field only clears a selection made in the table.
   function onCardClick(event: MouseEvent): void {
-    if (!(event.target instanceof Element)) return;
-    const trace = event.target.closest<SVGGElement>(".live__trace");
-    if (trace?.dataset.sessionId) select(trace.dataset.sessionId);
-    else if (event.target.closest(".live__plot")) select(null);
-  }
-
-  // Hovering a trace previews its row.
-  function onCardOver(event: PointerEvent): void {
-    if (!(event.target instanceof Element)) return;
-    const id = event.target.closest<SVGGElement>(".live__trace")?.dataset.sessionId ?? null;
-    if (id !== null) setPreview(id);
-  }
-
-  function onCardOut(event: PointerEvent): void {
-    if (!(event.target instanceof Element)) return;
-    const from = event.target.closest(".live__trace");
-    const to = event.relatedTarget instanceof Element ? event.relatedTarget.closest(".live__trace") : null;
-    if (from && from !== to) setPreview(null);
+    if (event.target instanceof Element && event.target.closest(".live__plot")) select(null);
   }
 
   // Escape clears the selection, unless something else already took the key
@@ -185,8 +171,6 @@ export function startLiveSessions(container: HTMLElement): () => void {
   }
 
   cardHost.addEventListener("click", onCardClick);
-  cardHost.addEventListener("pointerover", onCardOver);
-  cardHost.addEventListener("pointerout", onCardOut);
   document.addEventListener("keydown", onKeydown);
   document.addEventListener("visibilitychange", onVisibility);
 
@@ -197,8 +181,6 @@ export function startLiveSessions(container: HTMLElement): () => void {
     stopped = true;
     stopTimers();
     cardHost.removeEventListener("click", onCardClick);
-    cardHost.removeEventListener("pointerover", onCardOver);
-    cardHost.removeEventListener("pointerout", onCardOut);
     document.removeEventListener("keydown", onKeydown);
     document.removeEventListener("visibilitychange", onVisibility);
   };

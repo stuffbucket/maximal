@@ -32,33 +32,23 @@ An infinite animation also needs its own `animation: none` there: the
 global block only shortens durations (and sets the iteration count to
 1), and a looping animation must end up static, not merely fast.
 
-## The live border
+## Live token flow
 
-The Dashboard's live card has one continuous animation: its hairline
-border, a conic sweep of `--accent` over `--border-subtle`, turning
-through the registered angle `--live-angle` (`live-border-spin`). It
-carries information: its speed follows token flow across the whole
-system (tokens not read from a cache in the last minute, plus an
-estimate of what's streaming now).
+The Dashboard's live graph moves token particles between model and session
+positions. Its dedicated Web Worker owns the simulation and OffscreenCanvas
+rendering; the webview thread only sends data snapshots and resizes. The graph
+has no animated border, pulse, or separate “Live” ornament—the data itself is
+the motion.
 
-- No flow: stopped (`animation-play-state: paused`).
-- A trickle: about 30 s per turn. From 100,000 tokens/min: 4 s per turn.
-  Between them the speed follows a log scale
-  (`borderPeriodS` in `shell/src/dashboard/live/geometry.ts`).
-- Changes of speed ease over 3 s. The speed is the animation's
-  `playbackRate`, not its duration, so the angle never jumps when the
-  flow changes.
-- Beside it, the "Live" marker's dot pings (`live-pulse`, 2 s) while
-  tokens flow, and not otherwise. It loops too, so the same rule applies.
+The worker caps rendering at 30 frames per second and pauses while the page is
+hidden. Particles travel at constant speed, dwell only briefly at a rendezvous
+point, then take the reciprocal edge back; input/cache traffic and output thus
+read as an exchange rather than a pile. Poll snapshots update rates without
+restarting particles already in flight.
 
-Other Dashboard movement is short and finite: the traces, dots and
-figure glide to each poll's values over 900 ms.
-
-Under `prefers-reduced-motion: reduce` the border does not rotate, even
-slowly: `.live--border` and the pulse get `animation: none`, and the
-card's script skips the glide and sets values and speed directly. The
-border stays drawn at its resting angle. Don't make that a slower
-rotation.
+Under `prefers-reduced-motion: reduce` the worker draws the current distribution
+once and does not schedule animation frames. Don't replace that static state
+with slower particles.
 
 See [`principles.md`](principles.md) → Principle 5.
 

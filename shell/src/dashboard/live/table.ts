@@ -40,7 +40,6 @@ export interface SessionTable {
 
 /** Header keys, in column order; the numbers sit right-aligned. */
 const COLUMNS: Array<{ key: string; numeric?: boolean; hidden?: boolean }> = [
-  { key: "dashboard-sessions-col-color", hidden: true },
   { key: "dashboard-sessions-col-client" },
   { key: "dashboard-sessions-col-session" },
   { key: "dashboard-sessions-col-state" },
@@ -70,7 +69,6 @@ interface Filled {
 
 interface Row {
   tr: HTMLTableRowElement;
-  swatchCell: HTMLTableCellElement;
   client: HTMLElement;
   clientSub: HTMLElement;
   model: HTMLElement;
@@ -191,8 +189,6 @@ export function mountSessionTable(
       return td;
     };
 
-    const swatchCell = cell("session-cell--swatch");
-
     const clientCell = cell("whitespace-nowrap");
     const client = el("div", "session-strong");
     const clientSub = el("div", "text-xs");
@@ -235,7 +231,6 @@ export function mountSessionTable(
 
     return {
       tr,
-      swatchCell,
       client,
       clientSub,
       model,
@@ -290,17 +285,6 @@ export function mountSessionTable(
   ): void {
     const other = isOther(s);
     row.tr.classList.toggle("session-row--cold", s.state === "cold");
-
-    // The swatch is this row's line color; no trace, no swatch.
-    const swatch = row.swatchCell.firstElementChild as HTMLElement | null;
-    const color = s.state !== "cold" && !other && slot !== null ? `var(--series-${slot})` : null;
-    if (color === null) {
-      swatch?.remove();
-    } else {
-      const node = swatch ?? row.swatchCell.appendChild(el("span", "session-swatch"));
-      node.setAttribute("aria-hidden", "true");
-      node.style.setProperty("--swatch-color", color);
-    }
 
     const clientName = t("dashboard-sessions-client", { client: CLIENT_CASE[s.client] });
     const label = s.client_label?.trim() || "";

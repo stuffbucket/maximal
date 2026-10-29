@@ -101,6 +101,7 @@ const contentArea = document.getElementById("content-area") as HTMLElement;
 // session table, which the live sessions controller updates in place (see
 // index.html and live/controller.ts).
 const bento = document.getElementById("dashboard-bento") as HTMLElement;
+const quotaSection = document.getElementById("usage-column") as HTMLElement;
 const quotaColumn = document.getElementById("usage-quotas") as HTMLElement;
 const restArea = document.getElementById("dashboard-rest") as HTMLElement;
 
@@ -532,7 +533,7 @@ function render(): void {
   const welcome = !quotasHtml && !tokenUsageHtml && !detailedHtml;
   bento.hidden = welcome;
   bento.classList.toggle("dashboard-bento--live-only", !quotasHtml);
-  quotaColumn.hidden = !quotasHtml;
+  quotaSection.hidden = !quotasHtml;
   quotaColumn.innerHTML = quotasHtml;
   restArea.innerHTML = welcome ? renderWelcomeMessage() : `${tokenUsageHtml}${detailedHtml}`;
 
@@ -543,11 +544,9 @@ function render(): void {
   if (quotaPeriodEnded()) void refreshUsage();
 }
 
-/** The quota column of the bento: its heading over `body`. */
+/** The dynamic quota content inside the bento's static heading and card. */
 function renderQuotaColumn(body: string): string {
-  return `
-                <h2 class="section__title"><i data-lucide="bar-chart-big" aria-hidden="true"></i>${escapeHtml(t("dashboard-quotas-title"))}</h2>
-                <div class="dashboard-bento__body">${body}</div>`;
+  return `<div class="dashboard-bento__body">${body}</div>`;
 }
 
 /**
@@ -630,22 +629,20 @@ function renderQuotaCard(title: string, details: QuotaDetails, resetMs: number |
       });
 
   return `
-            <div class="p-4 border" style="background-color: var(--surface-card); border-color: var(--border-subtle);" title="${escapeHtml(asOf)}">
-                <div class="flex justify-between items-start gap-3 mb-2">
-                    <div>
-                        <h3 class="text-md font-semibold capitalize" style="color: var(--text-strong);">${escapeHtml(title.replace(/_/g, " "))}</h3>
-                        ${period ? `<p class="text-sm" style="color: var(--text-muted);">${escapeHtml(period)}</p>` : ""}
-                    </div>
-                    <span class="meter-state meter-state--${level} meter-state--headline">${icon}${
-                      known ?
-                        escapeHtml(t("dashboard-quota-percent-used", { percent: percentUsed.toFixed(1) }))
-                      : "—"
-                    }</span>
+            <header class="usage-panel__header" title="${escapeHtml(asOf)}">
+                <div class="usage-panel__heading">
+                    <h3 class="usage-panel__title">${escapeHtml(title.replace(/_/g, " "))}</h3>
+                    ${period ? `<p class="usage-panel__subtitle">${escapeHtml(period)}</p>` : ""}
                 </div>
-                <div class="meter meter--${known ? level : "unknown"} mb-3">
-                    <div class="meter__fill" style="width: ${known ? Math.min(100, Math.max(0, percentUsed)) : 0}%;"></div>
-                </div>
-                <div class="flex justify-between text-xs font-mono" style="color: var(--text-muted);">
+                <output class="usage-panel__headline meter-state meter-state--${level} meter-state--headline">${icon}${
+                  known ?
+                    escapeHtml(t("dashboard-quota-percent-used", { percent: percentUsed.toFixed(1) }))
+                  : "—"
+                }</output>
+            </header>
+            <div class="usage-panel__body">
+                <progress class="quota-progress quota-progress--${known ? level : "unknown"}" max="100" value="${known ? Math.min(100, Math.max(0, percentUsed)) : 0}"></progress>
+                <div class="usage-panel__meta">
                     <span>${known ? `${(entitlement - remaining).toLocaleString()} / ${entitlement.toLocaleString()}` : "—"}</span>
                     <span>${known ? escapeHtml(t("dashboard-quota-remaining", { n: remaining.toLocaleString() })) : ""}</span>
                 </div>
@@ -661,16 +658,16 @@ function renderUnlimitedQuotas(titles: Array<string>): string {
   const rows = titles
     .map(
       (title) => `
-                <div class="flex justify-between items-center">
-                    <h3 class="text-md font-semibold capitalize" style="color: var(--text-strong);">${escapeHtml(title.replace(/_/g, " "))}</h3>
-                    <span class="text-sm" style="color: var(--text-muted);">${escapeHtml(t("dashboard-quota-unlimited"))}</span>
+                <div class="quota-more__row">
+                    <h3 class="quota-more__title">${escapeHtml(title.replace(/_/g, " "))}</h3>
+                    <span class="quota-more__value">${escapeHtml(t("dashboard-quota-unlimited"))}</span>
                 </div>`,
     )
     .join("");
   return `
             <details class="quota-more" data-quota-more${state.quotaMoreOpen ? " open" : ""}>
                 <summary class="quota-more__summary"><i data-lucide="chevron-right" class="quota-more__chevron" aria-hidden="true"></i>${escapeHtml(t("dashboard-quotas-more"))}</summary>
-                <div class="quota-more__body p-4 border flex flex-col gap-3" style="background-color: var(--surface-card); border-color: var(--border-subtle);">${rows}
+                <div class="quota-more__body">${rows}
                 </div>
             </details>
         `;

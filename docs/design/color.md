@@ -92,20 +92,17 @@ label beside it says what:
 - **Figures** (token totals, table cells) are text ink (`--text-strong`
   / `--text-base-color`); hierarchy comes from size. No per-category
   colors unless a chart with a legend ties each color to its category.
-- **Series** (live sessions): each live session's trace and its table
-  swatch take one of six colors, `--series-1` … `--series-6`, by first
-  appearance, and keep it until the session goes cold, when the slot is
-  freed. A seventh live session draws in neutral gray (`--border-strong`),
-  stays clickable, and its row has no swatch. `--series-1` is `--accent`;
-  the other five share one lightness and chroma per theme, so no line
-  looks heavier, and differ only in hue. The hues stay clear of the
-  status colors (error, warning, success), so a trace never reads as a
-  state. Color is the only link from a trace to its session, so the
-  session table is the legend: each colored row carries its swatch.
-  Selecting a row or a trace dims the other traces; no color changes. All six and the neutral gray clear 3:1 on
-  `--surface-card`.
-  `bun scripts/check-series-contrast.ts` checks the contrast and the hue
-  clearance in both themes.
+- **Live token flow**: filled `--series-1` particles are input and filled
+  `--series-3` particles are output. Cache read uses a hollow `--series-4`
+  mark; cache write uses `--series-5` with a center dot, so the four token
+  roles differ by hue and cached traffic still differs by shape. Models use
+  an output-hued ring, sessions an
+  input-hued rounded square, and illustrative tools a neutral diamond;
+  the label and five-minute share sit beside each, so identity never
+  depends on color. The adjacent token metrics name all four categories
+  directly, so the graph needs no separate dot legend and the session
+  table needs no decorative color column. `bun scripts/check-series-contrast.ts`
+  checks the series contrast and hue clearance in both themes.
 - **Context meters** (session table): the same meter as the quotas,
   filled against the window or Copilot's ceiling, whichever is lower:
   `--accent` below 75%, `--status-warning` from 75%, `--status-error`
