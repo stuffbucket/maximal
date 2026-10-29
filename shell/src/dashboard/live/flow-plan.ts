@@ -6,11 +6,25 @@ const MAX_SESSION_NODES = 6;
 type TokenRates = NonNullable<SessionView["rates"]>;
 type ModelRates = NonNullable<SessionView["model_rates"]>[number];
 
-const clientName = (client: SessionView["client"]): string => {
-  if (client === "claude-code") return "Claude Code";
-  if (client === "claude-desktop") return "Claude Desktop";
-  if (client === "codex") return "Codex";
-  return "Other app";
+export interface FlowPlanLabels {
+  clients: Record<SessionView["client"], string>;
+  sessionId(id: string): string;
+  otherSessions(count: number): string;
+  otherLiveSessions: string;
+  illustrativeToolActivity: string;
+}
+
+const DEFAULT_LABELS: FlowPlanLabels = {
+  clients: {
+    "claude-code": "Claude Code",
+    "claude-desktop": "Claude Desktop",
+    codex: "Codex",
+    other: "Other app",
+  },
+  sessionId: (id) => `Session ${id}`,
+  otherSessions: (count) => `${count} other sessions`,
+  otherLiveSessions: "Other live sessions",
+  illustrativeToolActivity: "Illustrative tool activity",
 };
 
 function modelName(model: string): string {
@@ -28,7 +42,7 @@ function modelName(model: string): string {
 }
 
 const isLiveSession = (session: SessionView): boolean =>
-  session.state !== "cold" && !session.id.startsWith("other:") && session.rate_per_min > 0;
+  session.state !== "cold" && !session.id.startsWith("other:");
 
 function fallbackRates(session: SessionView): TokenRates {
   const rate = Math.max(0, session.rate_per_min);
@@ -109,6 +123,7 @@ export function liveFlowSnapshot(
   palette: FlowPalette,
   reducedMotion: boolean,
   includeSyntheticTools: boolean,
+  labels: FlowPlanLabels = DEFAULT_LABELS,
 ): FlowSnapshot {
   const sessions = view.sessions.filter(isLiveSession);
   const totalRate = sessions.reduce((sum, session) => sum + ratesFor(session).total_per_min, 0);
@@ -137,11 +152,11 @@ export function liveFlowSnapshot(
   const endpointRate = totalRate + mockToolRate;
   const endpoints: Array<FlowNode> = shown.map((session) => {
     const rate = ratesFor(session).total_per_min;
-    const client = clientName(session.client);
+    const client = labels.clients[session.client];
     return {
       id: `session:${session.id}`,
       label: session.client_label || client,
-      detail: session.client_label ? `${client} · ${session.id.slice(0, 4)}` : `Session ${session.id.slice(0, 4)}`,
+      detail: session.client_label ? `${client} · ${session.id.slice(0, 4)}` : labels.sessionId(session.id.slice(0, 4)),
       kind: "session",
       rate,
       share: endpointRate > 0 ? rate / endpointRate : 0,
@@ -158,8 +173,8 @@ export function liveFlowSnapshot(
     const hiddenRate = hidden.reduce((sum, session) => sum + ratesFor(session).total_per_min, 0);
     endpoints.push({
       id: otherId,
-      label: `${hidden.length} other sessions`,
-      detail: "Other live sessions",
+      label: labels.otherSessions(hidden.length),
+      detail: labels.otherLiveSessions,
       kind: "session",
       rate: hiddenRate,
       share: endpointRate > 0 ? hiddenRate / endpointRate : 0,
@@ -187,7 +202,7 @@ export function liveFlowSnapshot(
       tools.push({
         id: tool.id,
         label: tool.label,
-        detail: "Illustrative tool activity",
+        detail: labels.illustrativeToolActivity,
         kind: "tool",
         rate,
         share: rate / endpointRate,

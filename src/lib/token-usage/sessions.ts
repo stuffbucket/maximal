@@ -133,6 +133,15 @@ function contextTokens(row: SessionRow): number {
   )
 }
 
+function inFlightRate(entry: InFlight, nowMs: number): number {
+  const tokens = Math.floor(entry.streamedChars / STREAM_CHARS_PER_TOKEN)
+  const elapsedMinutes = Math.max(
+    1,
+    (nowMs - entry.startedAtMs) / FLOW_WINDOW_MS,
+  )
+  return tokens / elapsedMinutes
+}
+
 function tokenRates(rows: Array<SessionRow>): TokenRates {
   const totals = rows.reduce(
     (sum, row) => ({
@@ -198,29 +207,57 @@ function feedObservations(
   observations.retainKeys(new Set(resumes.map(({ resume }) => resume.key)))
 }
 
-/** A session whose first reply is still streaming: nothing recorded yet. */
-function streamingOnlySession(entry: InFlight, nowMs: number): SessionView {
-  const streamedTokens = Math.floor(
-    entry.streamedChars / STREAM_CHARS_PER_TOKEN,
+/** A session whose first replies are still streaming: nothing recorded yet. */
+function streamingOnlySession(
+  entries: Array<InFlight>,
+  nowMs: number,
+): SessionView {
+  const ordered = [...entries].sort((a, b) => a.startedAtMs - b.startedAtMs)
+  const first = ordered[0]
+  const ratesByModel = new Map<string, number>()
+  for (const entry of ordered) {
+    ratesByModel.set(
+      entry.model,
+      (ratesByModel.get(entry.model) ?? 0) + inFlightRate(entry, nowMs),
+    )
+  }
+  const modelRates: Array<ModelRates> = [...ratesByModel].map(
+    ([model, outputRate]) => ({
+      model,
+      input_per_min: 0,
+      output_per_min: outputRate,
+      cache_read_per_min: 0,
+      cache_write_per_min: 0,
+      total_per_min: outputRate,
+    }),
+  )
+  const outputRate = modelRates.reduce(
+    (sum, modelRate) => sum + modelRate.output_per_min,
+    0,
   )
   const rates: TokenRates = {
     input_per_min: 0,
-    output_per_min: streamedTokens,
+    output_per_min: outputRate,
     cache_read_per_min: 0,
     cache_write_per_min: 0,
-    total_per_min: streamedTokens,
+    total_per_min: outputRate,
   }
+  const mainModel = modelRates.reduce(
+    (best, modelRate) =>
+      modelRate.output_per_min >= best.output_per_min ? modelRate : best,
+    modelRates[0],
+  )
   return {
-    id: entry.sessionId,
-    client: entry.client,
+    id: first.sessionId,
+    client: first.client,
     client_label: null,
-    model: entry.model,
-    started_at_ms: entry.startedAtMs,
-    last_request_at_ms: entry.startedAtMs,
+    model: mainModel.model,
+    started_at_ms: first.startedAtMs,
+    last_request_at_ms: first.startedAtMs,
     state: "streaming",
-    rate_per_min: streamedTokens,
+    rate_per_min: outputRate,
     rates,
-    model_rates: streamedTokens > 0 ? [{ model: entry.model, ...rates }] : [],
+    model_rates: modelRates,
     minutes: emptyRecentMinutes(nowMs),
     total_tokens: 0,
     request_count: 0,
@@ -322,10 +359,11 @@ function buildSession(
   context: {
     nowMs: number
     streaming: Set<string>
+    inFlightRates: Map<string, number>
     observations: CacheObservations
   },
 ): SessionView {
-  const { nowMs, streaming, observations } = context
+  const { nowMs, streaming, inFlightRates, observations } = context
   const first = group[0]
   const latest = group.at(-1) ?? first
 
@@ -337,7 +375,7 @@ function buildSession(
     totalTokens += row.total_tokens
     if (row.is_compact === 1) compactedAtMs = row.created_at_ms
   }
-  const ratePerMin =
+  let ratePerMin =
     minutes
       .slice(-RATE_MINUTES)
       .reduce((sum, bucket) => sum + bucket.total_tokens, 0) / RATE_MINUTES
@@ -356,6 +394,25 @@ function buildSession(
       ...tokenRates(rows),
     }),
   )
+  for (const [model, outputRate] of inFlightRates) {
+    ratePerMin += outputRate
+    rates.output_per_min += outputRate
+    rates.total_per_min += outputRate
+    const modelRate = modelRates.find((candidate) => candidate.model === model)
+    if (modelRate) {
+      modelRate.output_per_min += outputRate
+      modelRate.total_per_min += outputRate
+    } else {
+      modelRates.push({
+        model,
+        input_per_min: 0,
+        output_per_min: outputRate,
+        cache_read_per_min: 0,
+        cache_write_per_min: 0,
+        total_per_min: outputRate,
+      })
+    }
+  }
 
   // The main model has the most tokens in the session; on a tie, the one
   // used last. Its latest request supplies the model and the context.
@@ -445,20 +502,35 @@ export function buildSessionsView(input: {
     .filter((entry) => entry.sessionId !== "")
     .sort((a, b) => a.startedAtMs - b.startedAtMs)
   const streaming = new Set(withSession.map((entry) => entry.sessionId))
+  const inFlightRates = new Map<string, Map<string, number>>()
+  for (const entry of withSession) {
+    const byModel =
+      inFlightRates.get(entry.sessionId) ?? new Map<string, number>()
+    byModel.set(
+      entry.model,
+      (byModel.get(entry.model) ?? 0) + inFlightRate(entry, nowMs),
+    )
+    inFlightRates.set(entry.sessionId, byModel)
+  }
   const sessions = [...groups].map(([id, group]) =>
-    buildSession(id, group, { nowMs, streaming, observations }),
+    buildSession(id, group, {
+      nowMs,
+      streaming,
+      inFlightRates: inFlightRates.get(id) ?? new Map<string, number>(),
+      observations,
+    }),
   )
   // A session still streaming its first reply shows from its earliest entry;
   // concurrent replies under that session contribute one combined estimate.
-  const unseen = new Map<string, InFlight>()
+  const unseen = new Map<string, Array<InFlight>>()
   for (const entry of withSession) {
     if (groups.has(entry.sessionId)) continue
-    const combined = unseen.get(entry.sessionId)
-    if (combined) combined.streamedChars += entry.streamedChars
-    else unseen.set(entry.sessionId, { ...entry })
+    const entries = unseen.get(entry.sessionId)
+    if (entries) entries.push(entry)
+    else unseen.set(entry.sessionId, [entry])
   }
-  for (const entry of unseen.values()) {
-    sessions.push(streamingOnlySession(entry, nowMs))
+  for (const entries of unseen.values()) {
+    sessions.push(streamingOnlySession(entries, nowMs))
   }
   sessions.sort((a, b) => b.last_request_at_ms - a.last_request_at_ms)
 

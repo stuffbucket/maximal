@@ -51,6 +51,7 @@ export type FlowWorkerMessage =
       width: number;
       height: number;
       scale: number;
+      active: boolean;
     }
   | { type: "resize"; width: number; height: number; scale: number }
   | { type: "snapshot"; snapshot: FlowSnapshot }

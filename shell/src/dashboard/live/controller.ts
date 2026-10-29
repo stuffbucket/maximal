@@ -1,7 +1,6 @@
 // The Dashboard's live sessions: polls GET /token-usage/sessions every 2 s
 // while the page is visible, ticks the cache countdowns every second, and owns
-// what the live card and the session table share: the series colors and the
-// selected session.
+// the selection shared by the live card and session table.
 //
 // Both render into fixed hosts in index.html that main.ts's string renders
 // never touch, so the selection, hover, focus and the card's animation survive
@@ -9,8 +8,7 @@
 import { SessionsResponse } from "../../../../src/lib/token-usage/sessions-schema";
 import { fetchJson } from "../fetch-json";
 import { mountLiveCard } from "./card";
-import { SeriesColors } from "./colors";
-import { liveSessions, sortSessions } from "./rows";
+import { liveSessions } from "./rows";
 import { mountSessionTable } from "./table";
 
 const SESSIONS_PATH = "/token-usage/sessions";
@@ -19,8 +17,6 @@ const POLL_MS = 2_000;
  *  stop the polling. */
 const FETCH_TIMEOUT_MS = POLL_MS * 5;
 const TICK_MS = 1_000;
-
-const isOther = (id: string): boolean => id.startsWith("other:");
 
 /**
  * Start the live card and the session table inside `container` (the
@@ -37,11 +33,9 @@ export function startLiveSessions(container: HTMLElement): () => void {
   const section: HTMLElement = sectionHost;
 
   const card = mountLiveCard(cardHost, metricsHost, cacheHitHost);
-  const series = new SeriesColors();
 
   /** The last good payload, as the server sent it. */
   let latest: SessionsResponse | null = null;
-  let colors = new Map<string, number | null>();
   let selected: string | null = null;
   let preview: string | null = null;
   /** Each session's id and state as last given to the card, to skip no-op updates. */
@@ -60,20 +54,17 @@ export function startLiveSessions(container: HTMLElement): () => void {
     const view = liveSessions(latest, now);
     section.hidden = view.sessions.length === 0;
 
-    const { above } = sortSessions(view.sessions);
-    colors = series.assign(above.map((s) => s.id).filter((id) => !isOther(id)));
-
     const ids = new Set(view.sessions.map((s) => s.id));
     if (selected !== null && !ids.has(selected)) selected = null;
     if (preview !== null && !ids.has(preview)) preview = null;
 
-    table.update(view, colors, selected, now);
+    table.update(view, selected, now);
     table.preview(preview);
 
     const key = view.sessions.map((s) => `${s.id}:${s.state}`).join("|");
     if (redrawCard || key !== cardKey) {
       cardKey = key;
-      card.update(view, colors, preview ?? selected);
+      card.update(view, preview ?? selected);
     }
   }
 
@@ -88,7 +79,7 @@ export function startLiveSessions(container: HTMLElement): () => void {
     preview = id;
     if (!latest) return;
     table.preview(id);
-    card.update(liveSessions(latest, Date.now()), colors, preview ?? selected);
+    card.update(liveSessions(latest, Date.now()), preview ?? selected);
   }
 
   const table = mountSessionTable(tableHost, select, setPreview);
@@ -180,6 +171,7 @@ export function startLiveSessions(container: HTMLElement): () => void {
   return () => {
     stopped = true;
     stopTimers();
+    card.destroy();
     cardHost.removeEventListener("click", onCardClick);
     document.removeEventListener("keydown", onKeydown);
     document.removeEventListener("visibilitychange", onVisibility);

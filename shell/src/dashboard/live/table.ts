@@ -28,12 +28,7 @@ import {
 declare const lucide: { createIcons: () => void } | undefined;
 
 export interface SessionTable {
-  update(
-    view: SessionsResponse,
-    colors: Map<string, number | null>,
-    selected: string | null,
-    nowMs: number,
-  ): void;
+  update(view: SessionsResponse, selected: string | null, nowMs: number): void;
   /** Show `id`'s row as previewed (its trace is under the pointer), or none. */
   preview(id: string | null): void;
 }
@@ -62,7 +57,6 @@ interface Filled {
   session: Session;
   /** The session as JSON, compared when a poll brings a new object. */
   json: string;
-  slot: number | null;
   locale: string;
   minute: number;
 }
@@ -260,11 +254,11 @@ export function mountSessionTable(
     if (at !== null) tick.style.left = `${at}%`;
   }
 
-  /** Whether the row must be filled again: its session, color or locale
-   *  changed, or it shows something that reads the clock. */
-  function stale(row: Row, s: Session, slot: number | null, locale: string, minute: number): boolean {
+  /** Whether the row must be filled again: its session or locale changed,
+   *  or it shows something that reads the clock. */
+  function stale(row: Row, s: Session, locale: string, minute: number): boolean {
     const { filled } = row;
-    if (!filled || filled.slot !== slot || filled.locale !== locale) return true;
+    if (!filled || filled.locale !== locale) return true;
     // A countdown ticks every second; "N min ago" and day names every minute.
     if (s.state === "warm" || filled.minute !== minute) return true;
     if (filled.session === s) return false;
@@ -277,7 +271,6 @@ export function mountSessionTable(
   function fillRow(
     row: Row,
     s: Session,
-    slot: number | null,
     nowMs: number,
     locale: string,
     numbers: Intl.NumberFormat,
@@ -363,8 +356,8 @@ export function mountSessionTable(
   }
 
   const api: SessionTable = {
-    update(view, colors, selected, nowMs) {
-      lastArgs = [view, colors, selected, nowMs];
+    update(view, selected, nowMs) {
+      lastArgs = [view, selected, nowMs];
       const locale = resolveLocale();
       const numbers = new Intl.NumberFormat(locale);
       const clock = clockFormatter(locale);
@@ -382,10 +375,9 @@ export function mountSessionTable(
           rows.set(s.id, row);
           added = true;
         }
-        const slot = colors.get(s.id) ?? null;
-        if (stale(row, s, slot, locale, minute)) {
-          fillRow(row, s, slot, nowMs, locale, numbers, clock);
-          row.filled = { session: s, json: JSON.stringify(s), slot, locale, minute };
+        if (stale(row, s, locale, minute)) {
+          fillRow(row, s, nowMs, locale, numbers, clock);
+          row.filled = { session: s, json: JSON.stringify(s), locale, minute };
         }
         present.add(s.id);
         order.push(row.tr);

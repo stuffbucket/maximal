@@ -405,10 +405,18 @@ describe("a session still streaming its first reply", () => {
           {
             model: "gpt-5",
             input_per_min: 0,
-            output_per_min: 12,
+            output_per_min: 10,
             cache_read_per_min: 0,
             cache_write_per_min: 0,
-            total_per_min: 12,
+            total_per_min: 10,
+          },
+          {
+            model: CLAUDE,
+            input_per_min: 0,
+            output_per_min: 2,
+            cache_read_per_min: 0,
+            cache_write_per_min: 0,
+            total_per_min: 2,
           },
         ],
         minutes: Array.from({ length: 15 }, (_, i) => ({
@@ -438,13 +446,50 @@ describe("a session still streaming its first reply", () => {
     expect(view.flow_per_min).toBe(12)
   })
 
+  test("keeps concurrent first-response models separate", () => {
+    const view = only(
+      build([], T + 30_000, {
+        inFlight: [
+          inFlight({ sessionId: "new", model: "sonnet", streamedChars: 40 }),
+          inFlight({ sessionId: "new", model: "haiku", streamedChars: 80 }),
+        ],
+      }),
+    )
+
+    expect(view.rate_per_min).toBe(30)
+    expect(view.model_rates).toEqual([
+      expect.objectContaining({ model: "sonnet", output_per_min: 10 }),
+      expect.objectContaining({ model: "haiku", output_per_min: 20 }),
+    ])
+  })
+
+  test("averages a long first response over its elapsed minutes", () => {
+    const view = only(
+      build([], T + 9 * MINUTE, {
+        inFlight: [
+          inFlight({
+            sessionId: "new",
+            startedAtMs: T,
+            streamedChars: 3_600,
+          }),
+        ],
+      }),
+    )
+
+    expect(view.rate_per_min).toBe(100)
+  })
+
   test("is not added for a session that has rows, or for an entry with no session", () => {
     const view = build([row({ session_id: "s1" })], T + 1, {
-      inFlight: [inFlight({ sessionId: "s1" }), inFlight({ sessionId: "" })],
+      inFlight: [
+        inFlight({ sessionId: "s1", streamedChars: 400 }),
+        inFlight({ sessionId: "" }),
+      ],
     })
     expect(view.sessions.map((s) => [s.id, s.state, s.request_count])).toEqual([
       ["s1", "streaming", 1],
     ])
+    expect(view.sessions[0].rates?.output_per_min).toBe(100)
   })
 
   test("sorts by its start among the other sessions", () => {

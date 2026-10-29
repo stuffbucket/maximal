@@ -56,7 +56,7 @@ let scale = 1;
 let snapshot: FlowSnapshot | null = null;
 let positioned = new Map<string, PositionedNode>();
 let particles: Array<Particle> = [];
-let active = true;
+let active = false;
 let timer: ReturnType<typeof setTimeout> | null = null;
 let lastFrame = 0;
 let randomState = 0x7f4a7c15;
@@ -228,7 +228,8 @@ function nextEdge(current: FlowEdge, edges: Array<FlowEdge>): FlowEdge | undefin
   const reverseRate = reverse.reduce((sum, edge) => sum + edge.rate, 0);
   const reverseChance = reverseRate / Math.max(1, current.rate + reverseRate);
   if (reverse.length > 0 && random() < Math.min(0.5, reverseChance)) return weightedEdge(reverse);
-  return weightedEdge(edges);
+  const outgoing = edges.filter((edge) => edge.from === current.to);
+  return weightedEdge(outgoing.length > 0 ? outgoing : edges);
 }
 
 function reverseParticle(particle: Particle, edge: FlowEdge): void {
@@ -277,17 +278,57 @@ function particleColor(kind: FlowKind, palette: FlowPalette): string {
 function drawStaticConnections(ctx: CanvasRenderingContext2D, palette: FlowPalette): void {
   if (!snapshot) return;
   const totalRate = Math.max(1, snapshot.edges.reduce((sum, edge) => sum + edge.rate, 0));
+  const offsets: Record<FlowKind, number> = {
+    input: -6,
+    output: 6,
+    "cache-read": -14,
+    "cache-write": 14,
+  };
   for (const edge of snapshot.edges) {
     const from = positioned.get(edge.from);
     const to = positioned.get(edge.to);
     if (!from || !to || edge.rate <= 0) continue;
-    ctx.globalAlpha = 0.2 + Math.min(0.35, edge.rate / totalRate);
-    ctx.strokeStyle = particleColor(edge.kind, palette);
+    const color = particleColor(edge.kind, palette);
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const length = Math.max(1, Math.hypot(dx, dy));
+    const control = {
+      x: (from.x + to.x) / 2 + (-dy / length) * offsets[edge.kind],
+      y: (from.y + to.y) / 2 + (dx / length) * offsets[edge.kind],
+    };
+    ctx.globalAlpha = 0.25 + Math.min(0.4, edge.rate / totalRate);
+    ctx.strokeStyle = color;
     ctx.lineWidth = 1 + Math.min(2, (edge.rate / totalRate) * 8);
     ctx.beginPath();
     ctx.moveTo(from.x, from.y);
-    ctx.lineTo(to.x, to.y);
+    ctx.quadraticCurveTo(control.x, control.y, to.x, to.y);
     ctx.stroke();
+
+    const t = 0.65;
+    const oneMinusT = 1 - t;
+    const point = {
+      x: oneMinusT * oneMinusT * from.x + 2 * oneMinusT * t * control.x + t * t * to.x,
+      y: oneMinusT * oneMinusT * from.y + 2 * oneMinusT * t * control.y + t * t * to.y,
+    };
+    const tangent = {
+      x: 2 * oneMinusT * (control.x - from.x) + 2 * t * (to.x - control.x),
+      y: 2 * oneMinusT * (control.y - from.y) + 2 * t * (to.y - control.y),
+    };
+    const angle = Math.atan2(tangent.y, tangent.x);
+    const arrowSize = 4;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(point.x, point.y);
+    ctx.lineTo(
+      point.x - Math.cos(angle - Math.PI / 6) * arrowSize,
+      point.y - Math.sin(angle - Math.PI / 6) * arrowSize,
+    );
+    ctx.lineTo(
+      point.x - Math.cos(angle + Math.PI / 6) * arrowSize,
+      point.y - Math.sin(angle + Math.PI / 6) * arrowSize,
+    );
+    ctx.closePath();
+    ctx.fill();
   }
   ctx.globalAlpha = 1;
 }
@@ -573,6 +614,7 @@ function applySnapshot(next: FlowSnapshot): void {
 globalThis.onmessage = (event: MessageEvent<FlowWorkerMessage>) => {
   const message = event.data;
   if (message.type === "init") {
+    active = message.active;
     canvas = message.canvas as WorkerCanvas;
     context = canvas.getContext("2d");
     resize(message.width, message.height, message.scale);

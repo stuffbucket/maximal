@@ -6,13 +6,16 @@
 // all canvas drawing; the webview thread only sends snapshots and resizes.
 import type { SessionsResponse } from "../../../../src/lib/token-usage/sessions-schema";
 import { resolveLocale, t } from "../../i18n";
+import type { FlowPlanLabels } from "./flow-plan";
+
 import { liveFlowSnapshot } from "./flow-plan";
 import type { FlowKind, FlowPalette, FlowWorkerMessage } from "./flow-types";
 
 export interface LiveCard {
-  update(view: SessionsResponse, colors: Map<string, number | null>, selected: string | null): void;
+  update(view: SessionsResponse, selected: string | null): void;
   /** Say the sessions couldn't be read (`null` clears it). What's drawn stays. */
   showError(message: string | null): void;
+  destroy(): void;
 }
 
 function html<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, i18nKey?: string): HTMLElementTagNameMap[K] {
@@ -26,6 +29,12 @@ function html<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, 
 }
 
 const reducedMotion = (): boolean => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const CLIENT_CASE = {
+  "claude-code": "code",
+  "claude-desktop": "desktop",
+  codex: "codex",
+  other: "other",
+} as const;
 
 function usageRow(i18nKey: string): { row: HTMLDivElement; value: HTMLElement } {
   const row = html("div", "usage-row");
@@ -128,12 +137,25 @@ export function mountLiveCard(root: HTMLElement, metricsRoot: HTMLElement, cache
 
   function sendSnapshot(): void {
     if (!worker || !latestView) return;
+    const labels: FlowPlanLabels = {
+      clients: {
+        "claude-code": t("dashboard-sessions-client", { client: CLIENT_CASE["claude-code"] }),
+        "claude-desktop": t("dashboard-sessions-client", { client: CLIENT_CASE["claude-desktop"] }),
+        codex: t("dashboard-sessions-client", { client: CLIENT_CASE.codex }),
+        other: t("dashboard-sessions-client", { client: CLIENT_CASE.other }),
+      },
+      sessionId: (id) => t("dashboard-flow-session-id", { id }),
+      otherSessions: (count) => t("dashboard-flow-other-sessions", { count }),
+      otherLiveSessions: t("dashboard-flow-other-live-sessions"),
+      illustrativeToolActivity: t("dashboard-flow-illustrative-tool"),
+    };
     const snapshot = liveFlowSnapshot(
       latestView,
       latestSelected,
       palette(),
       reducedMotion(),
       includeSyntheticTools,
+      labels,
     );
     worker.postMessage({ type: "snapshot", snapshot } satisfies FlowWorkerMessage);
     const nodeLabels = new Map(snapshot.nodes.map((node) => [node.id, node.label]));
@@ -177,6 +199,7 @@ export function mountLiveCard(root: HTMLElement, metricsRoot: HTMLElement, cache
         width: size.width,
         height: size.height,
         scale: Math.min(2, window.devicePixelRatio || 1),
+        active: document.visibilityState === "visible",
       } satisfies FlowWorkerMessage,
       [offscreen],
     );
@@ -185,7 +208,7 @@ export function mountLiveCard(root: HTMLElement, metricsRoot: HTMLElement, cache
     canvas.hidden = true;
   }
 
-  new ResizeObserver((entries) => {
+  const resizeObserver = new ResizeObserver((entries) => {
     const rect = entries[entries.length - 1]?.contentRect;
     if (!rect) return;
     size = { width: rect.width, height: rect.height };
@@ -195,22 +218,32 @@ export function mountLiveCard(root: HTMLElement, metricsRoot: HTMLElement, cache
       height: size.height,
       scale: Math.min(2, window.devicePixelRatio || 1),
     } satisfies FlowWorkerMessage);
-  }).observe(plot);
-
-  document.addEventListener("visibilitychange", () => {
-    worker?.postMessage({ type: "active", active: document.visibilityState === "visible" });
   });
-  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", sendSnapshot);
+  resizeObserver.observe(plot);
+
+  const onVisibilityChange = (): void => {
+    worker?.postMessage({ type: "active", active: document.visibilityState === "visible" });
+  };
+  const colorScheme = window.matchMedia("(prefers-color-scheme: dark)");
+  document.addEventListener("visibilitychange", onVisibilityChange);
+  colorScheme.addEventListener("change", sendSnapshot);
 
   return {
+    destroy() {
+      resizeObserver.disconnect();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      colorScheme.removeEventListener("change", sendSnapshot);
+      worker?.terminate();
+      worker = null;
+    },
+
     showError(message) {
       error.hidden = message === null;
       errorTitle.textContent = message === null ? "" : t("dashboard-error-generic");
       errorMessage.textContent = message ?? "";
     },
 
-    update(view, colors, selected) {
-      void colors;
+    update(view, selected) {
       latestView = view;
       latestSelected = selected;
       const hasGraph = view.sessions.some(
