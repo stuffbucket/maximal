@@ -31,6 +31,7 @@ const SETTINGS_ENTRY = join(REPO, "shell/ui/settings/index.html")
 const SETTINGS_VENDOR = join(REPO, "shell/ui/settings/vendor")
 const DASHBOARD_SRC = join(REPO, "shell/ui/dashboard")
 const DASHBOARD_ENTRY_TS = join(REPO, "shell/src/dashboard/main.ts")
+const DASHBOARD_FLOW_WORKER_TS = join(REPO, "shell/src/dashboard/live/flow-worker.ts")
 const SHELL_DIR = join(REPO, "shell")
 const DIST_ROOT = join(REPO, "shell/dist")
 const DIST = join(DIST_ROOT, "ui")
@@ -67,17 +68,17 @@ async function buildDashboard(): Promise<void> {
   // Unlike settings we do NOT feed the HTML to Bun's bundler: the HTML-entry
   // path rewrites/absorbs the classic <script src="./vendor/*"> tags into the
   // module bundle, which breaks Tailwind + Lucide (they must run as global
-  // <script>s, not ES-module imports). Instead we bundle ONLY the module entry
-  // (shell/src/dashboard/main.ts + the shared i18n modules) to ./main.js, and
-  // copy the hand-authored HTML/CSS + vendor/ verbatim. The HTML keeps its two
-  // classic vendor tags AND `<script type="module" src="./main.js">` untouched,
-  // so Tailwind/Lucide stay window globals and the app module loads bundled.
+  // <script>s, not ES-module imports). Instead we bundle the page module and
+  // its particle-rendering worker as separate entries, then copy the
+  // hand-authored HTML/CSS + vendor/ verbatim. The HTML keeps its two classic
+  // vendor tags AND `<script type="module" src="./main.js">` untouched, so
+  // Tailwind/Lucide stay window globals and the app module loads bundled.
   const result = await Bun.build({
-    entrypoints: [DASHBOARD_ENTRY_TS],
+    entrypoints: [DASHBOARD_ENTRY_TS, DASHBOARD_FLOW_WORKER_TS],
     outdir: DASHBOARD_OUT,
     minify: true,
     sourcemap: "none",
-    naming: { entry: "main.js", chunk: "[name]-[hash].[ext]", asset: "[name]-[hash].[ext]" },
+    naming: { entry: "[name].js", chunk: "[name]-[hash].[ext]", asset: "[name]-[hash].[ext]" },
   })
   if (!result.success) {
     for (const log of result.logs) console.error(log)

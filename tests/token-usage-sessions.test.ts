@@ -279,6 +279,54 @@ describe("minutes and rate", () => {
     expect(view.total_tokens).toBe(1000 + 7 + 400 + 100 + 400)
     expect(view.request_count).toBe(6)
   })
+
+  test("the 5-minute rate carries exact token roles and per-model pieces", () => {
+    const now = T + 30_000
+    const rows = [
+      row({
+        created_at_ms: T - MINUTE,
+        input_tokens: 50,
+        output_tokens: 20,
+        cache_read_input_tokens: 100,
+        cache_creation_input_tokens: 30,
+        total_tokens: 200,
+      }),
+      row({
+        model: "claude-haiku-4",
+        created_at_ms: T + 1_000,
+        input_tokens: 10,
+        output_tokens: 40,
+        total_tokens: 50,
+      }),
+    ]
+    const view = only(build(rows, now))
+
+    expect(view.rates).toEqual({
+      input_per_min: 12,
+      output_per_min: 12,
+      cache_read_per_min: 20,
+      cache_write_per_min: 6,
+      total_per_min: 50,
+    })
+    expect(view.model_rates).toEqual([
+      {
+        model: CLAUDE,
+        input_per_min: 10,
+        output_per_min: 4,
+        cache_read_per_min: 20,
+        cache_write_per_min: 6,
+        total_per_min: 40,
+      },
+      {
+        model: "claude-haiku-4",
+        input_per_min: 2,
+        output_per_min: 8,
+        cache_read_per_min: 0,
+        cache_write_per_min: 0,
+        total_per_min: 10,
+      },
+    ])
+  })
 })
 
 describe("flow_per_min", () => {
@@ -329,7 +377,11 @@ describe("a session still streaming its first reply", () => {
           startedAtMs: T + 20_000,
           streamedChars: 40,
         }),
-        inFlight({ sessionId: "new", startedAtMs: T + 25_000 }),
+        inFlight({
+          sessionId: "new",
+          startedAtMs: T + 25_000,
+          streamedChars: 8,
+        }),
       ],
     })
     expect(view.sessions).toEqual([
@@ -341,7 +393,32 @@ describe("a session still streaming its first reply", () => {
         started_at_ms: T + 20_000,
         last_request_at_ms: T + 20_000,
         state: "streaming",
-        rate_per_min: 0,
+        rate_per_min: 2.4,
+        rates: {
+          input_per_min: 0,
+          output_per_min: 2.4,
+          cache_read_per_min: 0,
+          cache_write_per_min: 0,
+          total_per_min: 2.4,
+        },
+        model_rates: [
+          {
+            model: "gpt-5",
+            input_per_min: 0,
+            output_per_min: 2,
+            cache_read_per_min: 0,
+            cache_write_per_min: 0,
+            total_per_min: 2,
+          },
+          {
+            model: CLAUDE,
+            input_per_min: 0,
+            output_per_min: 0.4,
+            cache_read_per_min: 0,
+            cache_write_per_min: 0,
+            total_per_min: 0.4,
+          },
+        ],
         minutes: Array.from({ length: 15 }, (_, i) => ({
           start_ms: T - (14 - i) * MINUTE,
           total_tokens: 0,
@@ -366,16 +443,59 @@ describe("a session still streaming its first reply", () => {
         },
       },
     ])
-    expect(view.flow_per_min).toBe(10)
+    expect(view.flow_per_min).toBe(12)
+  })
+
+  test("keeps concurrent first-response models separate", () => {
+    const view = only(
+      build([], T + 30_000, {
+        inFlight: [
+          inFlight({ sessionId: "new", model: "sonnet", streamedChars: 40 }),
+          inFlight({ sessionId: "new", model: "haiku", streamedChars: 80 }),
+        ],
+      }),
+    )
+
+    expect(view.rate_per_min).toBe(6)
+    expect(view.model_rates).toEqual([
+      expect.objectContaining({ model: "sonnet", output_per_min: 2 }),
+      expect.objectContaining({ model: "haiku", output_per_min: 4 }),
+    ])
+  })
+
+  test("drops first-response output that aged out of the five-minute window", () => {
+    const view = only(
+      build([], T + 9 * MINUTE, {
+        inFlight: [
+          inFlight({
+            sessionId: "new",
+            startedAtMs: T,
+            streamedChars: 3_600,
+            streamedCharsLastFiveMinutes: 0,
+          }),
+        ],
+      }),
+    )
+
+    expect(view.rate_per_min).toBe(0)
   })
 
   test("is not added for a session that has rows, or for an entry with no session", () => {
-    const view = build([row({ session_id: "s1" })], T + 1, {
-      inFlight: [inFlight({ sessionId: "s1" }), inFlight({ sessionId: "" })],
+    const view = build([row({ session_id: "s1" })], T + 1_000, {
+      inFlight: [
+        inFlight({
+          sessionId: "s1",
+          startedAtMs: T + 500,
+          streamedChars: 400,
+        }),
+        inFlight({ sessionId: "" }),
+      ],
     })
     expect(view.sessions.map((s) => [s.id, s.state, s.request_count])).toEqual([
       ["s1", "streaming", 1],
     ])
+    expect(view.sessions[0].rates?.output_per_min).toBe(20)
+    expect(view.sessions[0].last_request_at_ms).toBe(T + 500)
   })
 
   test("sorts by its start among the other sessions", () => {

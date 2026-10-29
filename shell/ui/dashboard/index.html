@@ -102,7 +102,19 @@
              those renders. -->
         <main id="content-area">
           <div id="dashboard-bento" class="dashboard-bento" hidden>
-            <section id="usage-quotas" class="dashboard-bento__col dashboard-bento__quota"></section>
+            <section id="usage-column" class="dashboard-bento__col dashboard-bento__quota" aria-labelledby="usage-quotas-title">
+              <h2 id="usage-quotas-title" class="section__title">
+                <i data-lucide="bar-chart-big" aria-hidden="true"></i>
+                <span data-i18n="dashboard-quotas-title">Usage Quotas</span>
+              </h2>
+              <div class="usage-overview">
+                <section id="live-metrics" class="usage-panel usage-panel--tokens" aria-label="Token use" data-i18n-aria-label="dashboard-flow-token-use"></section>
+                <section class="usage-panel usage-panel--quota" aria-label="Usage quotas" data-i18n-aria-label="dashboard-quotas-title">
+                  <div id="usage-quotas"></div>
+                  <div id="cache-hit"></div>
+                </section>
+              </div>
+            </section>
             <section class="dashboard-bento__col dashboard-bento__live" aria-labelledby="live-sessions-title">
               <h2 id="live-sessions-title" class="section__title">
                 <i data-lucide="activity" aria-hidden="true"></i>

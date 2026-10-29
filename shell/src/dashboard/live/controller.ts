@@ -1,7 +1,6 @@
 // The Dashboard's live sessions: polls GET /token-usage/sessions every 2 s
 // while the page is visible, ticks the cache countdowns every second, and owns
-// what the live card and the session table share: the series colors and the
-// selected session.
+// the selection shared by the live card and session table.
 //
 // Both render into fixed hosts in index.html that main.ts's string renders
 // never touch, so the selection, hover, focus and the card's animation survive
@@ -9,8 +8,7 @@
 import { SessionsResponse } from "../../../../src/lib/token-usage/sessions-schema";
 import { fetchJson } from "../fetch-json";
 import { mountLiveCard } from "./card";
-import { SeriesColors } from "./colors";
-import { liveSessions, sortSessions } from "./rows";
+import { liveSessions } from "./rows";
 import { mountSessionTable } from "./table";
 
 const SESSIONS_PATH = "/token-usage/sessions";
@@ -20,8 +18,6 @@ const POLL_MS = 2_000;
 const FETCH_TIMEOUT_MS = POLL_MS * 5;
 const TICK_MS = 1_000;
 
-const isOther = (id: string): boolean => id.startsWith("other:");
-
 /**
  * Start the live card and the session table inside `container` (the
  * Dashboard's content area, which holds `#live-sessions`, `#sessions` and
@@ -29,17 +25,25 @@ const isOther = (id: string): boolean => id.startsWith("other:");
  */
 export function startLiveSessions(container: HTMLElement): () => void {
   const cardHost = container.querySelector<HTMLElement>("#live-sessions");
+  const metricsHost = container.querySelector<HTMLElement>("#live-metrics");
+  const cacheHitHost = container.querySelector<HTMLElement>("#cache-hit");
   const sectionHost = container.querySelector<HTMLElement>("#sessions");
   const tableHost = container.querySelector<HTMLElement>("#sessions-table");
-  if (!cardHost || !sectionHost || !tableHost) return () => {};
+  if (!cardHost || !metricsHost || !cacheHitHost || !sectionHost || !tableHost) return () => {};
   const section: HTMLElement = sectionHost;
 
-  const card = mountLiveCard(cardHost);
-  const series = new SeriesColors();
+  const card = mountLiveCard(cardHost, metricsHost, cacheHitHost, (id) => {
+    select(id);
+    if (id === null) return;
+    requestAnimationFrame(() => {
+      const row = [...tableHost.querySelectorAll<HTMLElement>(".session-row")]
+        .find((candidate) => candidate.dataset.sessionId === id);
+      row?.scrollIntoView({ block: "nearest" });
+    });
+  });
 
   /** The last good payload, as the server sent it. */
   let latest: SessionsResponse | null = null;
-  let colors = new Map<string, number | null>();
   let selected: string | null = null;
   let preview: string | null = null;
   /** Each session's id and state as last given to the card, to skip no-op updates. */
@@ -49,6 +53,9 @@ export function startLiveSessions(container: HTMLElement): () => void {
   let tickTimer: number | null = null;
   let polling = false;
   let stopped = false;
+  let surfaceVisible = new URLSearchParams(location.search).get("embedded") !== "1";
+  const isVisible = (): boolean =>
+    surfaceVisible && document.visibilityState === "visible";
 
   /** Redraw from `latest` as of now. The card only redraws when asked or when
    *  a session changed state (a countdown ran out). */
@@ -58,20 +65,17 @@ export function startLiveSessions(container: HTMLElement): () => void {
     const view = liveSessions(latest, now);
     section.hidden = view.sessions.length === 0;
 
-    const { above } = sortSessions(view.sessions);
-    colors = series.assign(above.map((s) => s.id).filter((id) => !isOther(id)));
-
     const ids = new Set(view.sessions.map((s) => s.id));
     if (selected !== null && !ids.has(selected)) selected = null;
     if (preview !== null && !ids.has(preview)) preview = null;
 
-    table.update(view, colors, selected, now);
+    table.update(view, selected, now);
     table.preview(preview);
 
     const key = view.sessions.map((s) => `${s.id}:${s.state}`).join("|");
     if (redrawCard || key !== cardKey) {
       cardKey = key;
-      card.update(view, colors, preview ?? selected);
+      card.update(view, preview ?? selected);
     }
   }
 
@@ -86,7 +90,7 @@ export function startLiveSessions(container: HTMLElement): () => void {
     preview = id;
     if (!latest) return;
     table.preview(id);
-    card.update(liveSessions(latest, Date.now()), colors, preview ?? selected);
+    card.update(liveSessions(latest, Date.now()), preview ?? selected);
   }
 
   const table = mountSessionTable(tableHost, select, setPreview);
@@ -119,7 +123,7 @@ export function startLiveSessions(container: HTMLElement): () => void {
   }
 
   function schedule(): void {
-    if (stopped || pollTimer !== null || document.visibilityState !== "visible") return;
+    if (stopped || pollTimer !== null || !isVisible()) return;
     pollTimer = window.setTimeout(() => void poll(), POLL_MS);
   }
 
@@ -134,38 +138,24 @@ export function startLiveSessions(container: HTMLElement): () => void {
     tickTimer = null;
   }
 
-  function onVisibility(): void {
-    if (document.visibilityState === "visible") {
-      startClock();
-      // Catch up straight away: the data is as old as the hidden stretch.
-      if (pollTimer !== null) window.clearTimeout(pollTimer);
-      pollTimer = null;
-      void poll();
-    } else {
+  function updateActivity(): void {
+    if (!isVisible()) {
       stopTimers();
+      return;
     }
+    startClock();
+    // Catch up straight away: the data is as old as the hidden stretch.
+    if (pollTimer !== null) window.clearTimeout(pollTimer);
+    pollTimer = null;
+    void poll();
   }
 
-  // Selection on the plot: a trace or its dot selects, empty plot space clears.
-  function onCardClick(event: MouseEvent): void {
-    if (!(event.target instanceof Element)) return;
-    const trace = event.target.closest<SVGGElement>(".live__trace");
-    if (trace?.dataset.sessionId) select(trace.dataset.sessionId);
-    else if (event.target.closest(".live__plot")) select(null);
-  }
-
-  // Hovering a trace previews its row.
-  function onCardOver(event: PointerEvent): void {
-    if (!(event.target instanceof Element)) return;
-    const id = event.target.closest<SVGGElement>(".live__trace")?.dataset.sessionId ?? null;
-    if (id !== null) setPreview(id);
-  }
-
-  function onCardOut(event: PointerEvent): void {
-    if (!(event.target instanceof Element)) return;
-    const from = event.target.closest(".live__trace");
-    const to = event.relatedTarget instanceof Element ? event.relatedTarget.closest(".live__trace") : null;
-    if (from && from !== to) setPreview(null);
+  function onDashboardVisibility(event: MessageEvent<unknown>): void {
+    if (event.origin !== location.origin || typeof event.data !== "object" || event.data === null) return;
+    const message = event.data as { type?: unknown; visible?: unknown };
+    if (message.type !== "maximal:dashboard-visibility" || typeof message.visible !== "boolean") return;
+    surfaceVisible = message.visible;
+    updateActivity();
   }
 
   // Escape clears the selection, unless something else already took the key
@@ -184,22 +174,21 @@ export function startLiveSessions(container: HTMLElement): () => void {
     select(null);
   }
 
-  cardHost.addEventListener("click", onCardClick);
-  cardHost.addEventListener("pointerover", onCardOver);
-  cardHost.addEventListener("pointerout", onCardOut);
   document.addEventListener("keydown", onKeydown);
-  document.addEventListener("visibilitychange", onVisibility);
+  document.addEventListener("visibilitychange", updateActivity);
+  window.addEventListener("message", onDashboardVisibility);
+  if (window.parent !== window) {
+    window.parent.postMessage({ type: "maximal:dashboard-ready" }, location.origin);
+  }
 
-  if (document.visibilityState === "visible") startClock();
-  void poll();
+  if (isVisible()) updateActivity();
 
   return () => {
     stopped = true;
     stopTimers();
-    cardHost.removeEventListener("click", onCardClick);
-    cardHost.removeEventListener("pointerover", onCardOver);
-    cardHost.removeEventListener("pointerout", onCardOut);
+    card.destroy();
     document.removeEventListener("keydown", onKeydown);
-    document.removeEventListener("visibilitychange", onVisibility);
+    document.removeEventListener("visibilitychange", updateActivity);
+    window.removeEventListener("message", onDashboardVisibility);
   };
 }

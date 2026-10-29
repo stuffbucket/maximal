@@ -101,6 +101,7 @@ const contentArea = document.getElementById("content-area") as HTMLElement;
 // session table, which the live sessions controller updates in place (see
 // index.html and live/controller.ts).
 const bento = document.getElementById("dashboard-bento") as HTMLElement;
+const quotaSection = document.getElementById("usage-column") as HTMLElement;
 const quotaColumn = document.getElementById("usage-quotas") as HTMLElement;
 const restArea = document.getElementById("dashboard-rest") as HTMLElement;
 
@@ -198,6 +199,10 @@ let tauriCore: TauriCore | null = null;
 let runningInTauri = false;
 let activeTokenUsageChannel: TauriChannel | null = null;
 let browserPollTimer: number | null = null;
+let restartBrowserPolling: (() => void) | null = null;
+let dashboardSurfaceVisible = new URLSearchParams(location.search).get("embedded") !== "1";
+const dashboardIsActive = (): boolean =>
+  dashboardSurfaceVisible && document.visibilityState === "visible";
 /** After a failed fetch, wait this long instead (don't hammer the sidecar). */
 const BROWSER_RETRY_INTERVAL_MS = 5000;
 
@@ -516,12 +521,9 @@ function render(): void {
 
   const quotasHtml =
     state.data ? renderUsageQuotas(state.data.quota_snapshots)
-    : state.error ? renderQuotaColumn(renderError(state.error, t("dashboard-error-usage")))
+    : state.error ? renderQuotaColumn(renderUsageError(state.error, t("dashboard-error-usage")))
     : state.isLoading ?
-      renderQuotaColumn(`
-        <div class="p-4 border text-sm" style="background-color: var(--surface-card); border-color: var(--border-subtle); color: var(--text-muted);">
-          ${escapeHtml(t("common-working"))}
-        </div>`)
+      renderQuotaColumn(`<p class="usage-loading">${escapeHtml(t("common-working"))}</p>`)
     : "";
 
   const tokenUsageHtml = renderTokenUsageSection();
@@ -531,8 +533,7 @@ function render(): void {
   // quotas is not (it updates in place).
   const welcome = !quotasHtml && !tokenUsageHtml && !detailedHtml;
   bento.hidden = welcome;
-  bento.classList.toggle("dashboard-bento--live-only", !quotasHtml);
-  quotaColumn.hidden = !quotasHtml;
+  quotaSection.hidden = false;
   quotaColumn.innerHTML = quotasHtml;
   restArea.innerHTML = welcome ? renderWelcomeMessage() : `${tokenUsageHtml}${detailedHtml}`;
 
@@ -543,11 +544,17 @@ function render(): void {
   if (quotaPeriodEnded()) void refreshUsage();
 }
 
-/** The quota column of the bento: its heading over `body`. */
+/** The dynamic quota content inside the bento's static heading and card. */
 function renderQuotaColumn(body: string): string {
+  return `<div class="dashboard-bento__body">${body}</div>`;
+}
+
+function renderUsageError(message: string, title: string): string {
   return `
-                <h2 class="section__title"><i data-lucide="bar-chart-big" aria-hidden="true"></i>${escapeHtml(t("dashboard-quotas-title"))}</h2>
-                <div class="dashboard-bento__body">${body}</div>`;
+    <div class="usage-error" role="alert">
+      <strong>${escapeHtml(title)}</strong>
+      <span>${escapeHtml(message)}</span>
+    </div>`;
 }
 
 /**
@@ -630,22 +637,24 @@ function renderQuotaCard(title: string, details: QuotaDetails, resetMs: number |
       });
 
   return `
-            <div class="p-4 border" style="background-color: var(--surface-card); border-color: var(--border-subtle);" title="${escapeHtml(asOf)}">
-                <div class="flex justify-between items-start gap-3 mb-2">
-                    <div>
-                        <h3 class="text-md font-semibold capitalize" style="color: var(--text-strong);">${escapeHtml(title.replace(/_/g, " "))}</h3>
-                        ${period ? `<p class="text-sm" style="color: var(--text-muted);">${escapeHtml(period)}</p>` : ""}
-                    </div>
-                    <span class="meter-state meter-state--${level} meter-state--headline">${icon}${
-                      known ?
-                        escapeHtml(t("dashboard-quota-percent-used", { percent: percentUsed.toFixed(1) }))
-                      : "—"
-                    }</span>
+            <header class="usage-panel__header" title="${escapeHtml(asOf)}">
+                <div class="usage-panel__heading">
+                    <h3 class="usage-panel__title">${escapeHtml(title.replace(/_/g, " "))}</h3>
+                    ${period ? `<p class="usage-panel__subtitle">${escapeHtml(period)}</p>` : ""}
                 </div>
-                <div class="meter meter--${known ? level : "unknown"} mb-3">
-                    <div class="meter__fill" style="width: ${known ? Math.min(100, Math.max(0, percentUsed)) : 0}%;"></div>
-                </div>
-                <div class="flex justify-between text-xs font-mono" style="color: var(--text-muted);">
+                <output class="usage-panel__headline meter-state meter-state--${level} meter-state--headline">${icon}${
+                  known ?
+                    escapeHtml(t("dashboard-quota-percent-used", { percent: percentUsed.toFixed(1) }))
+                  : "—"
+                }</output>
+            </header>
+            <div class="usage-panel__body">
+                ${
+                  known ?
+                    `<progress class="quota-progress quota-progress--${level}" max="100" value="${Math.min(100, Math.max(0, percentUsed))}" aria-label="${escapeHtml(title.replace(/_/g, " "))}"></progress>`
+                  : `<div class="quota-progress quota-progress--unknown" aria-hidden="true"></div>`
+                }
+                <div class="usage-panel__meta">
                     <span>${known ? `${(entitlement - remaining).toLocaleString()} / ${entitlement.toLocaleString()}` : "—"}</span>
                     <span>${known ? escapeHtml(t("dashboard-quota-remaining", { n: remaining.toLocaleString() })) : ""}</span>
                 </div>
@@ -661,16 +670,16 @@ function renderUnlimitedQuotas(titles: Array<string>): string {
   const rows = titles
     .map(
       (title) => `
-                <div class="flex justify-between items-center">
-                    <h3 class="text-md font-semibold capitalize" style="color: var(--text-strong);">${escapeHtml(title.replace(/_/g, " "))}</h3>
-                    <span class="text-sm" style="color: var(--text-muted);">${escapeHtml(t("dashboard-quota-unlimited"))}</span>
+                <div class="quota-more__row">
+                    <h3 class="quota-more__title">${escapeHtml(title.replace(/_/g, " "))}</h3>
+                    <span class="quota-more__value">${escapeHtml(t("dashboard-quota-unlimited"))}</span>
                 </div>`,
     )
     .join("");
   return `
             <details class="quota-more" data-quota-more${state.quotaMoreOpen ? " open" : ""}>
                 <summary class="quota-more__summary"><i data-lucide="chevron-right" class="quota-more__chevron" aria-hidden="true"></i>${escapeHtml(t("dashboard-quotas-more"))}</summary>
-                <div class="quota-more__body p-4 border flex flex-col gap-3" style="background-color: var(--surface-card); border-color: var(--border-subtle);">${rows}
+                <div class="quota-more__body">${rows}
                 </div>
             </details>
         `;
@@ -1282,7 +1291,11 @@ function init(): void {
 
   window.addEventListener("message", (event: MessageEvent) => {
     if (event.origin !== window.location.origin) return;
-    const msg = event.data as { type?: string; period?: string } | null;
+    const msg = event.data as {
+      type?: string;
+      period?: string;
+      visible?: boolean;
+    } | null;
     if (!msg || typeof msg !== "object") return;
     if (msg.type === "maximal:set-period") {
       const nextPeriod = normalizePeriod(msg.period ?? null);
@@ -1293,6 +1306,20 @@ function init(): void {
     } else if (msg.type === "maximal:set-locale") {
       applyI18n();
       render();
+    } else if (
+      msg.type === "maximal:dashboard-visibility"
+      && typeof msg.visible === "boolean"
+    ) {
+      dashboardSurfaceVisible = msg.visible;
+      if (!dashboardIsActive()) {
+        unsubscribeTokenUsage();
+        if (browserPollTimer !== null) window.clearTimeout(browserPollTimer);
+        browserPollTimer = null;
+      } else if (runningInTauri) {
+        if (activeTokenUsageChannel === null) subscribeTokenUsage(state.tokenUsagePeriod);
+      } else {
+        restartBrowserPolling?.();
+      }
     }
   });
 
@@ -1308,7 +1335,7 @@ function init(): void {
     // Tauri mode: the Rust shell drives the token-usage feed via
     // Channel<TokenUsageEvent>. Drop the channel on unload so Rust's
     // loop exits cleanly on its next send.
-    subscribeTokenUsage(periodFromUrl);
+    if (dashboardIsActive()) subscribeTokenUsage(periodFromUrl);
     window.addEventListener("beforeunload", unsubscribeTokenUsage);
   } else {
     // Plain-browser mode: no Channel available. Poll the same endpoint
@@ -1316,19 +1343,23 @@ function init(): void {
     // users see equivalent freshness either way. Quiet, and on the page
     // they're looking at, so updates don't blank the view or reset paging.
     const pollBrowser = (): void => {
+      if (!dashboardIsActive() || browserPollTimer !== null) return;
       const wait =
         state.tokenUsageSummaryError ?
           BROWSER_RETRY_INTERVAL_MS
         : pollIntervalMs(state.tokenUsageSummary?.totals?.total_tokens);
       browserPollTimer = window.setTimeout(async () => {
+        browserPollTimer = null;
         await fetchTokenUsageSummaryAndEvents(state.tokenUsageEventsPage?.page ?? 1, {
           quiet: true,
         });
         pollBrowser();
       }, wait);
     };
+    restartBrowserPolling = pollBrowser;
     pollBrowser();
     window.addEventListener("beforeunload", () => {
+      restartBrowserPolling = null;
       if (browserPollTimer !== null) {
         window.clearTimeout(browserPollTimer);
         browserPollTimer = null;
@@ -1340,7 +1371,17 @@ function init(): void {
 // /usage is only fetched on load and period changes, so a window left open
 // drifts; re-read it when the window comes back into view and it's >10 min old.
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState !== "visible") return;
+  if (!dashboardIsActive()) {
+    unsubscribeTokenUsage();
+    if (browserPollTimer !== null) window.clearTimeout(browserPollTimer);
+    browserPollTimer = null;
+    return;
+  }
+  if (runningInTauri) {
+    if (activeTokenUsageChannel === null) subscribeTokenUsage(state.tokenUsagePeriod);
+  } else {
+    restartBrowserPolling?.();
+  }
   // Coming back into view: move the range label to the current hour if the
   // clock has rolled over while it was hidden.
   syncRangeBaseline(true);

@@ -8,6 +8,7 @@
         "citty": "^0.1.6",
         "clipboardy": "^5.0.0",
         "consola": "^3.4.2",
+        "d3-force": "3.0.0",
         "fetch-event-stream": "^0.1.5",
         "gpt-tokenizer": "^3.0.1",
         "hono": "^4.9.9",
@@ -25,6 +26,7 @@
         "@playwright/test": "1.56.1",
         "@stryker-mutator/core": "^9.6.1",
         "@types/bun": "^1.2.23",
+        "@types/d3-force": "^3.0.10",
         "@types/proxy-from-env": "^1.0.4",
         "@types/turndown": "^5.0.6",
         "@types/winreg": "^1.2.36",
@@ -315,6 +317,8 @@
 
     "@types/bun": ["@types/bun@1.3.13", "", { "dependencies": { "bun-types": "1.3.13" } }, "sha512-9fqXWk5YIHGGnUau9TEi+qdlTYDAnOj+xLCmSTwXfAIqXr2x4tytJb43E9uCvt09zJURKXwAtkoH4nLQfzeTXw=="],
 
+    "@types/d3-force": ["@types/d3-force@3.0.10", "", {}, "sha1-bcj8bh81cE87BXCQvu63rGdL/xo="],
+
     "@types/estree": ["@types/estree@1.0.9", "", {}, "sha512-GhdPgy1el4/ImP05X05Uw4cw2/M93BCUmnEvWZNStlCzEKME4Fkk+YpoA5OiHNQmoS7Cafb8Xa3Pya8m1Qrzeg=="],
 
     "@types/json-schema": ["@types/json-schema@7.0.15", "", {}, "sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA=="],
@@ -486,6 +490,14 @@
     "data-view-byte-length": ["data-view-byte-length@1.0.2", "", { "dependencies": { "call-bound": "^1.0.3", "es-errors": "^1.3.0", "is-data-view": "^1.0.2" } }, "sha512-tuhGbE6CfTM9+5ANGf+oQb72Ky/0+s3xKUpHvShfiz2RxMFgFPjsXuRLBVMtvMs15awe45SRb83D6wH4ew6wlQ=="],
 
     "data-view-byte-offset": ["data-view-byte-offset@1.0.1", "", { "dependencies": { "call-bound": "^1.0.2", "es-errors": "^1.3.0", "is-data-view": "^1.0.1" } }, "sha512-BS8PfmtDGnrgYdOonGZQdLZslWIeCGFP9tpan0hi1Co2Zr2NKADsvGYA8XxuG/4UWgJ6Cjtv+YJnB6MM69QGlQ=="],
+
+    "d3-dispatch": ["d3-dispatch@3.0.1", "", {}, "sha1-X8dShOnCN1w2yDlBGgz1UMv8TV4="],
+
+    "d3-force": ["d3-force@3.0.0", "", { "dependencies": { "d3-dispatch": "1 - 3", "d3-quadtree": "1 - 3", "d3-timer": "1 - 3" } }, "sha1-Piuhph5wiI/j2RlOMNbRTuzhVcQ="],
+
+    "d3-quadtree": ["d3-quadtree@3.0.1", "", {}, "sha1-bco+i+Kzk8mp1RTau9gKkt7vGk8="],
+
+    "d3-timer": ["d3-timer@3.0.1", "", {}, "sha1-YoTSonCChbGrt+IB7aQ4CvNeY7A="],
 
     "debug": ["debug@4.4.3", "", { "dependencies": { "ms": "^2.1.3" } }, "sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA=="],
 

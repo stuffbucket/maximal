@@ -14,6 +14,9 @@ export interface InFlight {
   /** Characters of delta text (reply, thinking, tool arguments) streamed so
    *  far, as written in the JSON. */
   streamedChars: number
+  /** Rolling windows used by the Dashboard's one- and five-minute rates. */
+  streamedCharsLastMinute?: number
+  streamedCharsLastFiveMinutes?: number
 }
 
 /**
@@ -67,6 +70,7 @@ interface Entry {
   context: RequestContext
   counter: DeltaTextCounter
   streamedChars: number
+  deltas: Array<{ at: number; chars: number }>
 }
 
 /** An entry older than this is assumed leaked (a response never read to the
@@ -88,14 +92,27 @@ function prune(now: number): void {
 
 export function listInFlight(now = Date.now()): Array<InFlight> {
   prune(now)
-  return [...entries].map(({ context, streamedChars }) => ({
-    traceId: context.traceId,
-    sessionId: context.usage.sessionId ?? "",
-    client: deriveUsageClient(context.usage.apiKeyLabel, context.userAgent),
-    model: context.usage.model ?? "",
-    startedAtMs: context.startTime,
-    streamedChars,
-  }))
+  return [...entries].map(({ context, streamedChars, deltas }) => {
+    const fiveMinutesAgo = now - 5 * 60_000
+    const oneMinuteAgo = now - 60_000
+    while (deltas[0] && deltas[0].at <= fiveMinutesAgo) deltas.shift()
+    return {
+      traceId: context.traceId,
+      sessionId: context.usage.sessionId ?? "",
+      client: deriveUsageClient(context.usage.apiKeyLabel, context.userAgent),
+      model: context.usage.model ?? "",
+      startedAtMs: context.startTime,
+      streamedChars,
+      streamedCharsLastMinute: deltas.reduce(
+        (sum, delta) => sum + (delta.at > oneMinuteAgo ? delta.chars : 0),
+        0,
+      ),
+      streamedCharsLastFiveMinutes: deltas.reduce(
+        (sum, delta) => sum + delta.chars,
+        0,
+      ),
+    }
+  })
 }
 
 export function __resetInFlightForTests(): void {
@@ -128,7 +145,9 @@ function observeBody(
           controller.close()
           return
         }
-        entry.streamedChars += entry.counter.feed(value)
+        const chars = entry.counter.feed(value)
+        entry.streamedChars += chars
+        if (chars > 0) entry.deltas.push({ at: Date.now(), chars })
         controller.enqueue(value)
       } catch (error) {
         entries.delete(entry)
@@ -161,6 +180,7 @@ export const trackInFlight: MiddlewareHandler = async (c, next) => {
     context,
     counter: new DeltaTextCounter(),
     streamedChars: 0,
+    deltas: [],
   }
   entries.add(entry)
   let streaming = false

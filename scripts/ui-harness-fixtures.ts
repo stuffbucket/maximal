@@ -424,6 +424,18 @@ type SessionOverrides = Pick<SessionView, "id" | "client" | "model" | "state"> &
 function session(o: SessionOverrides, buckets: Array<number>, nowMs: number): SessionView {
   const minutes = recentMinutes(buckets)
   const last5 = buckets.slice(-5)
+  const rate = Math.round(last5.reduce((sum, n) => sum + n, 0) / last5.length)
+  const cacheRead = o.cache.last_cache_read_tokens > 0 ? rate * 0.16 : 0
+  const cacheWrite = o.cache.last_cache_read_tokens > 0 ? rate * 0.08 : 0
+  const output = rate * 0.34
+  const input = rate - output - cacheRead - cacheWrite
+  const rates = {
+    input_per_min: input,
+    output_per_min: output,
+    cache_read_per_min: cacheRead,
+    cache_write_per_min: cacheWrite,
+    total_per_min: rate,
+  }
   return {
     client_label: null,
     started_at_ms: nowMs - 40 * MIN,
@@ -431,7 +443,9 @@ function session(o: SessionOverrides, buckets: Array<number>, nowMs: number): Se
     total_tokens: buckets.reduce((sum, n) => sum + n, 0) * 3,
     request_count: 12,
     ...o,
-    rate_per_min: Math.round(last5.reduce((sum, n) => sum + n, 0) / last5.length),
+    rate_per_min: rate,
+    rates,
+    model_rates: [{ model: o.model, ...rates }],
     minutes,
   }
 }

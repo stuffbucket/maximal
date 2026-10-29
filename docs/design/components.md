@@ -180,5 +180,5 @@ red (`btn--ghost-destructive`) and always confirms in a `ConfirmDialog`
 |---|---|
 | `--border-width-hairline` | Every border and divider: cards, inputs, buttons, callouts, sidebar edge |
 | `--border-width-thin` | Same width as hairline; unused — reach for hairline |
-| `--border-width-thick` | Emphasized strokes: the busy bar, the indeterminate checkbox bar, the Dashboard's live traces |
+| `--border-width-thick` | Emphasized strokes: the busy bar and the indeterminate checkbox bar |
 | `--border-width-heavy` | Reserved; not currently used |
