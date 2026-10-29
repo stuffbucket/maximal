@@ -169,7 +169,7 @@ export function liveFlowSnapshot(
   }
 
   if (hidden.length > 0) {
-    const otherId = "session:other";
+    const otherId = "aggregate:sessions";
     const hiddenRate = hidden.reduce((sum, session) => sum + ratesFor(session).total_per_min, 0);
     endpoints.push({
       id: otherId,

@@ -32,6 +32,7 @@ export interface FlowPalette {
   detailFontSize: number;
   labelFontWeight: string;
   particleScaleTemplate: string;
+  locale: string;
 }
 
 export interface FlowSnapshot {
@@ -55,4 +56,5 @@ export type FlowWorkerMessage =
     }
   | { type: "resize"; width: number; height: number; scale: number }
   | { type: "snapshot"; snapshot: FlowSnapshot }
-  | { type: "active"; active: boolean };
+  | { type: "active"; active: boolean }
+  | { type: "hit-test"; x: number; y: number };

@@ -43,10 +43,8 @@ const FRAME_MS = 1000 / 30;
 const MAX_PARTICLES = 140;
 const TAU = Math.PI * 2;
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
-const compactNumbers = new Intl.NumberFormat(undefined, {
-  notation: "compact",
-  maximumFractionDigits: 1,
-});
+const compactFormatters = new Map<string, Intl.NumberFormat>();
+const percentFormatters = new Map<string, Intl.NumberFormat>();
 
 let canvas: WorkerCanvas | null = null;
 let context: CanvasRenderingContext2D | null = null;
@@ -136,10 +134,37 @@ function desiredParticleCount(totalRate: number): number {
   return clamp(Math.round(26 + Math.log10(totalRate + 1) * 21), 32, MAX_PARTICLES);
 }
 
+function compactNumber(value: number, locale: string): string {
+  let formatter = compactFormatters.get(locale);
+  if (!formatter) {
+    formatter = new Intl.NumberFormat(locale, {
+      notation: "compact",
+      maximumFractionDigits: 1,
+    });
+    compactFormatters.set(locale, formatter);
+  }
+  return formatter.format(value);
+}
+
+function percentText(value: number, locale: string): string {
+  let formatter = percentFormatters.get(locale);
+  if (!formatter) {
+    formatter = new Intl.NumberFormat(locale, {
+      style: "percent",
+      maximumFractionDigits: 0,
+    });
+    percentFormatters.set(locale, formatter);
+  }
+  return formatter.format(value);
+}
+
 function particleScaleText(totalRate: number, palette: FlowPalette): string {
   const count = Math.max(1, desiredParticleCount(totalRate));
   const tokensPerSecond = totalRate / 60 / count;
-  return palette.particleScaleTemplate.replace("__RATE__", compactNumbers.format(tokensPerSecond));
+  return palette.particleScaleTemplate.replace(
+    "__RATE__",
+    compactNumber(tokensPerSecond, palette.locale),
+  );
 }
 
 function weightedEdge(edges: Array<FlowEdge>): FlowEdge | undefined {
@@ -398,7 +423,7 @@ function layoutLabels(ctx: CanvasRenderingContext2D): void {
     const titleWidth = ctx.measureText(node.label).width;
     ctx.font = `${palette.detailFontSize}px ${palette.fontFamily}`;
     const detailWidth = node.detail ? ctx.measureText(node.detail).width : 0;
-    const shareWidth = ctx.measureText(`${Math.round(node.share * 100)}%`).width;
+    const shareWidth = ctx.measureText(percentText(node.share, palette.locale)).width;
     const labelWidth = Math.max(titleWidth, detailWidth, shareWidth) + 8;
     const labelHeight = palette.labelFontSize + secondaryStep * (node.detail ? 2 : 1);
     const ringScale = Math.min(width, height);
@@ -525,7 +550,7 @@ function drawNode(ctx: CanvasRenderingContext2D, node: PositionedNode, palette: 
   }
   drawLabelText(
     ctx,
-    `${Math.round(node.share * 100)}%`,
+    percentText(node.share, palette.locale),
     node.labelX,
     node.labelY + secondaryStep * (node.detail ? 2 : 1),
     labelWidth,
@@ -632,6 +657,19 @@ globalThis.onmessage = (event: MessageEvent<FlowWorkerMessage>) => {
       timer = null;
     }
     if (active) schedule();
+    return;
+  }
+  if (message.type === "hit-test") {
+    let selected: string | null = null;
+    let nearest = 20;
+    for (const node of positioned.values()) {
+      if (node.kind !== "session" || !node.id.startsWith("session:")) continue;
+      const distance = Math.hypot(message.x - node.x, message.y - node.y);
+      if (distance >= nearest) continue;
+      nearest = distance;
+      selected = node.id.slice("session:".length);
+    }
+    globalThis.postMessage({ type: "select", sessionId: selected });
     return;
   }
   applySnapshot(message.snapshot);

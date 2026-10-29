@@ -297,7 +297,7 @@
   "dashboard-flow-particle-scale": "1 particule ≈ {rate} jetons/s",
   "dashboard-flow-summary": "Flux de jetons en direct. {rate} jetons/min au total ; {live} actives, {cold} froides.",
   "dashboard-flow-session-id": "Session {id}",
-  "dashboard-flow-other-sessions": "{count} autres sessions",
+  "dashboard-flow-other-sessions": "{count, plural, one {# autre session} other {# autres sessions}}",
   "dashboard-flow-other-live-sessions": "Autres sessions actives",
   "dashboard-flow-illustrative-tool": "Activité d’outil illustrative",
   "dashboard-sessions-title": "Sessions",

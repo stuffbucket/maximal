@@ -517,12 +517,9 @@ function render(): void {
 
   const quotasHtml =
     state.data ? renderUsageQuotas(state.data.quota_snapshots)
-    : state.error ? renderQuotaColumn(renderError(state.error, t("dashboard-error-usage")))
+    : state.error ? renderQuotaColumn(renderUsageError(state.error, t("dashboard-error-usage")))
     : state.isLoading ?
-      renderQuotaColumn(`
-        <div class="p-4 border text-sm" style="background-color: var(--surface-card); border-color: var(--border-subtle); color: var(--text-muted);">
-          ${escapeHtml(t("common-working"))}
-        </div>`)
+      renderQuotaColumn(`<p class="usage-loading">${escapeHtml(t("common-working"))}</p>`)
     : "";
 
   const tokenUsageHtml = renderTokenUsageSection();
@@ -546,6 +543,14 @@ function render(): void {
 /** The dynamic quota content inside the bento's static heading and card. */
 function renderQuotaColumn(body: string): string {
   return `<div class="dashboard-bento__body">${body}</div>`;
+}
+
+function renderUsageError(message: string, title: string): string {
+  return `
+    <div class="usage-error" role="alert">
+      <strong>${escapeHtml(title)}</strong>
+      <span>${escapeHtml(message)}</span>
+    </div>`;
 }
 
 /**
@@ -640,7 +645,7 @@ function renderQuotaCard(title: string, details: QuotaDetails, resetMs: number |
                 }</output>
             </header>
             <div class="usage-panel__body">
-                <progress class="quota-progress quota-progress--${known ? level : "unknown"}" max="100" value="${known ? Math.min(100, Math.max(0, percentUsed)) : 0}"></progress>
+                <progress class="quota-progress quota-progress--${known ? level : "unknown"}" max="100"${known ? ` value="${Math.min(100, Math.max(0, percentUsed))}"` : ""}></progress>
                 <div class="usage-panel__meta">
                     <span>${known ? `${(entitlement - remaining).toLocaleString()} / ${entitlement.toLocaleString()}` : "—"}</span>
                     <span>${known ? escapeHtml(t("dashboard-quota-remaining", { n: remaining.toLocaleString() })) : ""}</span>

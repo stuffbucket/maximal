@@ -297,7 +297,7 @@
   "dashboard-flow-particle-scale": "1 Partikel ≈ {rate} Tokens/s",
   "dashboard-flow-summary": "Live-Tokenfluss. Insgesamt {rate} Tokens/Min.; {live} aktiv, {cold} kalt.",
   "dashboard-flow-session-id": "Sitzung {id}",
-  "dashboard-flow-other-sessions": "{count} weitere Sitzungen",
+  "dashboard-flow-other-sessions": "{count, plural, one {# weitere Sitzung} other {# weitere Sitzungen}}",
   "dashboard-flow-other-live-sessions": "Weitere aktive Sitzungen",
   "dashboard-flow-illustrative-tool": "Beispielhafte Tool-Aktivität",
   "dashboard-sessions-title": "Sitzungen",

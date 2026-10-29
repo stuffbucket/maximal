@@ -727,6 +727,18 @@ html[data-embedded="true"] .lang-picker {
   flex-direction: column;
   gap: var(--space-3);
 }
+.usage-loading {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.usage-error {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  color: var(--status-error);
+  font-size: var(--text-sm);
+}
 .usage-panel__meta {
   display: flex;
   flex-wrap: wrap;

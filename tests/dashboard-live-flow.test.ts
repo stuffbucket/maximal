@@ -19,6 +19,7 @@ const palette: FlowPalette = {
   detailFontSize: 12,
   labelFontWeight: "500",
   particleScaleTemplate: "1 particle ≈ __RATE__ tokens/s",
+  locale: "en",
 }
 
 function view(): SessionsResponse {

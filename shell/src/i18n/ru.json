@@ -297,7 +297,7 @@
   "dashboard-flow-particle-scale": "1 частица ≈ {rate} токенов/с",
   "dashboard-flow-summary": "Поток токенов в реальном времени. Всего {rate} токенов/мин; активных: {live}, остывших: {cold}.",
   "dashboard-flow-session-id": "Сеанс {id}",
-  "dashboard-flow-other-sessions": "Другие сеансы: {count}",
+  "dashboard-flow-other-sessions": "{count, plural, one {Ещё # сеанс} few {Ещё # сеанса} many {Ещё # сеансов} other {Ещё # сеанса}}",
   "dashboard-flow-other-live-sessions": "Другие активные сеансы",
   "dashboard-flow-illustrative-tool": "Иллюстративная активность инструмента",
   "dashboard-sessions-title": "Сеансы",

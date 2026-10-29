@@ -32,7 +32,15 @@ export function startLiveSessions(container: HTMLElement): () => void {
   if (!cardHost || !metricsHost || !cacheHitHost || !sectionHost || !tableHost) return () => {};
   const section: HTMLElement = sectionHost;
 
-  const card = mountLiveCard(cardHost, metricsHost, cacheHitHost);
+  const card = mountLiveCard(cardHost, metricsHost, cacheHitHost, (id) => {
+    select(id);
+    if (id === null) return;
+    requestAnimationFrame(() => {
+      const row = [...tableHost.querySelectorAll<HTMLElement>(".session-row")]
+        .find((candidate) => candidate.dataset.sessionId === id);
+      row?.scrollIntoView({ block: "nearest" });
+    });
+  });
 
   /** The last good payload, as the server sent it. */
   let latest: SessionsResponse | null = null;
@@ -139,12 +147,6 @@ export function startLiveSessions(container: HTMLElement): () => void {
     }
   }
 
-  // The canvas is intentionally not an interaction surface in the spike;
-  // clicking its open field only clears a selection made in the table.
-  function onCardClick(event: MouseEvent): void {
-    if (event.target instanceof Element && event.target.closest(".live__plot")) select(null);
-  }
-
   // Escape clears the selection, unless something else already took the key
   // or it was meant for a form control (the language menu, say).
   function onKeydown(event: KeyboardEvent): void {
@@ -161,7 +163,6 @@ export function startLiveSessions(container: HTMLElement): () => void {
     select(null);
   }
 
-  cardHost.addEventListener("click", onCardClick);
   document.addEventListener("keydown", onKeydown);
   document.addEventListener("visibilitychange", onVisibility);
 
@@ -172,7 +173,6 @@ export function startLiveSessions(container: HTMLElement): () => void {
     stopped = true;
     stopTimers();
     card.destroy();
-    cardHost.removeEventListener("click", onCardClick);
     document.removeEventListener("keydown", onKeydown);
     document.removeEventListener("visibilitychange", onVisibility);
   };

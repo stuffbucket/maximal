@@ -44,7 +44,12 @@ function usageRow(i18nKey: string): { row: HTMLDivElement; value: HTMLElement } 
   return { row, value };
 }
 
-export function mountLiveCard(root: HTMLElement, metricsRoot: HTMLElement, cacheHitRoot: HTMLElement): LiveCard {
+export function mountLiveCard(
+  root: HTMLElement,
+  metricsRoot: HTMLElement,
+  cacheHitRoot: HTMLElement,
+  onSelect: (id: string | null) => void,
+): LiveCard {
   const graphSection = root.closest<HTMLElement>(".dashboard-bento__live");
   root.classList.add("live");
   root.classList.remove("live--border");
@@ -100,6 +105,7 @@ export function mountLiveCard(root: HTMLElement, metricsRoot: HTMLElement, cache
   let size = { width: 0, height: 0 };
   let latestView: SessionsResponse | null = null;
   let latestSelected: string | null = null;
+  let graphHasNodes = false;
   let numbers = new Intl.NumberFormat(resolveLocale());
   let compactNumbers = new Intl.NumberFormat(resolveLocale(), {
     notation: "compact",
@@ -130,10 +136,15 @@ export function mountLiveCard(root: HTMLElement, metricsRoot: HTMLElement, cache
       detailFontSize: fontSize("--text-xs", 12),
       labelFontWeight: color("--weight-md", "500"),
       particleScaleTemplate: t("dashboard-flow-particle-scale", { rate: "__RATE__" }),
+      locale: resolveLocale(),
     };
   };
 
-  const includeSyntheticTools = new URLSearchParams(location.search).has("flow-tools");
+  const query = new URLSearchParams(location.search);
+  const includeSyntheticTools = query.has("flow-tools");
+  let surfaceVisible = !query.has("embedded");
+  const workerIsActive = (): boolean =>
+    surfaceVisible && document.visibilityState === "visible";
 
   function sendSnapshot(): void {
     if (!worker || !latestView) return;
@@ -165,7 +176,13 @@ export function mountLiveCard(root: HTMLElement, metricsRoot: HTMLElement, cache
       "cache-read": t("dashboard-col-cache-read"),
       "cache-write": t("dashboard-col-cache-write"),
     };
-    const nodes = snapshot.nodes.map((node) => `${node.label}: ${Math.round(node.share * 100)}%`).join("; ");
+    const percents = new Intl.NumberFormat(resolveLocale(), {
+      style: "percent",
+      maximumFractionDigits: 0,
+    });
+    const nodes = snapshot.nodes
+      .map((node) => `${node.label}: ${percents.format(node.share)}`)
+      .join("; ");
     const edges = snapshot.edges
       .filter((edge) => edge.rate > 0)
       .map(
@@ -182,10 +199,17 @@ export function mountLiveCard(root: HTMLElement, metricsRoot: HTMLElement, cache
       type: "module",
       name: "maximal-live-flow",
     });
-    worker.onmessage = (event: MessageEvent<{ type?: string }>) => {
+    worker.onmessage = (
+      event: MessageEvent<
+        | { type: "ready" }
+        | { type: "select"; sessionId: string | null }
+      >,
+    ) => {
       if (event.data.type === "ready") {
         canvas.dataset.renderer = "worker";
         sendSnapshot();
+      } else {
+        onSelect(event.data.sessionId);
       }
     };
     worker.onerror = () => {
@@ -199,7 +223,7 @@ export function mountLiveCard(root: HTMLElement, metricsRoot: HTMLElement, cache
         width: size.width,
         height: size.height,
         scale: Math.min(2, window.devicePixelRatio || 1),
-        active: document.visibilityState === "visible",
+        active: workerIsActive(),
       } satisfies FlowWorkerMessage,
       [offscreen],
     );
@@ -207,6 +231,17 @@ export function mountLiveCard(root: HTMLElement, metricsRoot: HTMLElement, cache
     fallback.hidden = false;
     canvas.hidden = true;
   }
+
+  const onCanvasClick = (event: MouseEvent): void => {
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    worker?.postMessage({
+      type: "hit-test",
+      x: ((event.clientX - rect.left) / rect.width) * size.width,
+      y: ((event.clientY - rect.top) / rect.height) * size.height,
+    } satisfies FlowWorkerMessage);
+  };
+  canvas.addEventListener("click", onCanvasClick);
 
   const resizeObserver = new ResizeObserver((entries) => {
     const rect = entries[entries.length - 1]?.contentRect;
@@ -221,17 +256,27 @@ export function mountLiveCard(root: HTMLElement, metricsRoot: HTMLElement, cache
   });
   resizeObserver.observe(plot);
 
-  const onVisibilityChange = (): void => {
-    worker?.postMessage({ type: "active", active: document.visibilityState === "visible" });
+  const updateWorkerActivity = (): void => {
+    worker?.postMessage({ type: "active", active: workerIsActive() });
+  };
+  const onDashboardVisibility = (event: MessageEvent<unknown>): void => {
+    if (event.origin !== location.origin || typeof event.data !== "object" || event.data === null) return;
+    const message = event.data as { type?: unknown; visible?: unknown };
+    if (message.type !== "maximal:dashboard-visibility" || typeof message.visible !== "boolean") return;
+    surfaceVisible = message.visible;
+    updateWorkerActivity();
   };
   const colorScheme = window.matchMedia("(prefers-color-scheme: dark)");
-  document.addEventListener("visibilitychange", onVisibilityChange);
+  document.addEventListener("visibilitychange", updateWorkerActivity);
+  window.addEventListener("message", onDashboardVisibility);
   colorScheme.addEventListener("change", sendSnapshot);
 
   return {
     destroy() {
       resizeObserver.disconnect();
-      document.removeEventListener("visibilitychange", onVisibilityChange);
+      canvas.removeEventListener("click", onCanvasClick);
+      document.removeEventListener("visibilitychange", updateWorkerActivity);
+      window.removeEventListener("message", onDashboardVisibility);
       colorScheme.removeEventListener("change", sendSnapshot);
       worker?.terminate();
       worker = null;
@@ -239,6 +284,7 @@ export function mountLiveCard(root: HTMLElement, metricsRoot: HTMLElement, cache
 
     showError(message) {
       error.hidden = message === null;
+      if (graphSection) graphSection.hidden = message === null && !graphHasNodes;
       errorTitle.textContent = message === null ? "" : t("dashboard-error-generic");
       errorMessage.textContent = message ?? "";
     },
@@ -246,13 +292,13 @@ export function mountLiveCard(root: HTMLElement, metricsRoot: HTMLElement, cache
     update(view, selected) {
       latestView = view;
       latestSelected = selected;
-      const hasGraph = view.sessions.some(
+      graphHasNodes = view.sessions.some(
         (session) =>
           !session.id.startsWith("other:")
           && session.state !== "cold"
           && (session.rate_per_min > 0 || session.state === "streaming"),
       );
-      if (graphSection) graphSection.hidden = !hasGraph;
+      if (graphSection) graphSection.hidden = !graphHasNodes;
       canvas.dataset.selectedSessionId = selected ?? "";
       canvas.dataset.motion = reducedMotion() ? "static" : "animated";
 
@@ -289,7 +335,13 @@ export function mountLiveCard(root: HTMLElement, metricsRoot: HTMLElement, cache
       setRate(outputRate.value, hasRates ? totals.output : null);
       setRate(cacheReadRate.value, hasRates ? totals.cacheRead : null);
       setRate(cacheWriteRate.value, hasRates ? totals.cacheWrite : null);
-      cacheHitValue.textContent = inputTotal > 0 ? `${Math.round((totals.cacheRead / inputTotal) * 100)}%` : "—";
+      cacheHitValue.textContent =
+        inputTotal > 0 ?
+          new Intl.NumberFormat(locale, {
+            style: "percent",
+            maximumFractionDigits: 0,
+          }).format(totals.cacheRead / inputTotal)
+        : "—";
 
       const liveCount = activeSessions.length;
       const coldCount = sessions.length - liveCount;

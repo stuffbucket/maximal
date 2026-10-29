@@ -297,7 +297,7 @@
   "dashboard-flow-particle-scale": "1 粒子 ≈ {rate} トークン/秒",
   "dashboard-flow-summary": "ライブトークンフロー。合計 {rate} トークン/分、ライブ {live}、コールド {cold}。",
   "dashboard-flow-session-id": "セッション {id}",
-  "dashboard-flow-other-sessions": "その他 {count} セッション",
+  "dashboard-flow-other-sessions": "{count, plural, other {その他 # セッション}}",
   "dashboard-flow-other-live-sessions": "その他のライブセッション",
   "dashboard-flow-illustrative-tool": "ツール活動の例",
   "dashboard-sessions-title": "セッション",
