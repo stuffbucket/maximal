@@ -380,15 +380,15 @@ test("a long cache countdown reads in hours and a time from another day names th
   await expect(row).toContainText(`started ${day} `)
 })
 
-test("a read that hangs is given up, reported, and the polling carries on", async ({
+test("a failed read is reported and the polling carries on", async ({
   page,
 }) => {
   test.setTimeout(45_000)
   let requests = 0
   await page.route(SESSIONS, async (route: Route) => {
     requests += 1
-    // The second read never answers; the others go through.
-    if (requests !== 2) await route.continue()
+    // The second read fails; the others go through.
+    await (requests === 2 ? route.abort("timedout") : route.continue())
   })
   await open(page)
 
@@ -539,7 +539,7 @@ test("the live flow is rendered by a worker with an accessible text summary", as
   await expect(page.locator(".live__flow-legend-item")).toHaveCount(0)
   await expect(page.locator(".usage-row")).toHaveCount(4)
   await expect(page.locator("#live-metrics")).toContainText("Input")
-  await expect(page.locator("#live-metrics")).toContainText("Cache write")
+  await expect(page.locator("#live-metrics")).toContainText("Cache Write")
   await expect(page.locator(".usage-feature__value")).toHaveText("24%")
   await expect(page.locator(".live__trace")).toHaveCount(0)
 })

@@ -18,6 +18,7 @@ const palette: FlowPalette = {
   labelFontSize: 14,
   detailFontSize: 12,
   labelFontWeight: "500",
+  particleScaleTemplate: "1 particle ≈ __RATE__ tokens/s",
 }
 
 function view(): SessionsResponse {
@@ -112,10 +113,22 @@ describe("liveFlowSnapshot", () => {
     )
   })
 
-  test("carries selection and reduced-motion state to the worker", () => {
+  test("carries visible selection and reduced-motion state to the worker", () => {
     const result = liveFlowSnapshot(view(), "session-a", palette, true, false)
 
     expect(result.selectedSessionId).toBe("session-a")
     expect(result.reducedMotion).toBe(true)
+  })
+
+  test("drops a selection that has no visible graph node", () => {
+    const result = liveFlowSnapshot(
+      view(),
+      "cold-session",
+      palette,
+      false,
+      false,
+    )
+
+    expect(result.selectedSessionId).toBeNull()
   })
 })

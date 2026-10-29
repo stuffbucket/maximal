@@ -136,10 +136,10 @@ function desiredParticleCount(totalRate: number): number {
   return clamp(Math.round(26 + Math.log10(totalRate + 1) * 21), 32, MAX_PARTICLES);
 }
 
-function particleScaleText(totalRate: number): string {
+function particleScaleText(totalRate: number, palette: FlowPalette): string {
   const count = Math.max(1, desiredParticleCount(totalRate));
   const tokensPerSecond = totalRate / 60 / count;
-  return `1 particle ≈ ${compactNumbers.format(tokensPerSecond)} tokens/s`;
+  return palette.particleScaleTemplate.replace("__RATE__", compactNumbers.format(tokensPerSecond));
 }
 
 function weightedEdge(edges: Array<FlowEdge>): FlowEdge | undefined {
@@ -167,7 +167,44 @@ function newParticle(edge: FlowEdge, initial = false): Particle {
   };
 }
 
-function reconcileParticles(initial = false): void {
+function rebalanceParticles(edges: Array<FlowEdge>, desired: number): void {
+  const totalRate = edges.reduce((sum, edge) => sum + edge.rate, 0);
+  if (totalRate <= 0) return;
+  const allocations = edges.map((edge) => {
+    const exact = (desired * edge.rate) / totalRate;
+    return { edge, count: Math.floor(exact), remainder: exact - Math.floor(exact) };
+  });
+  let unassigned = desired - allocations.reduce((sum, allocation) => sum + allocation.count, 0);
+  for (const allocation of [...allocations].sort((a, b) => b.remainder - a.remainder)) {
+    if (unassigned <= 0) break;
+    allocation.count++;
+    unassigned--;
+  }
+
+  const byEdge = new Map<string, Array<Particle>>();
+  for (const particle of particles) {
+    const group = byEdge.get(particle.edgeId);
+    if (group) group.push(particle);
+    else byEdge.set(particle.edgeId, [particle]);
+  }
+  const available: Array<Particle> = [];
+  for (const allocation of allocations) {
+    const group = byEdge.get(allocation.edge.id) ?? [];
+    if (group.length > allocation.count) available.push(...group.splice(allocation.count));
+  }
+  for (const allocation of allocations) {
+    const group = byEdge.get(allocation.edge.id) ?? [];
+    let missing = allocation.count - group.length;
+    while (missing > 0) {
+      const particle = available.pop();
+      if (!particle) break;
+      Object.assign(particle, newParticle(allocation.edge));
+      missing--;
+    }
+  }
+}
+
+function reconcileParticles(initial = false, rebalance = false): void {
   if (!snapshot) {
     particles = [];
     return;
@@ -183,13 +220,15 @@ function reconcileParticles(initial = false): void {
     if (!edge) break;
     particles.push(newParticle(edge, initial));
   }
+  if (rebalance) rebalanceParticles(edges, desired);
 }
 
 function nextEdge(current: FlowEdge, edges: Array<FlowEdge>): FlowEdge | undefined {
   const reverse = edges.filter((edge) => edge.from === current.to && edge.to === current.from);
-  if (reverse.length > 0) return weightedEdge(reverse);
-  const outgoing = edges.filter((edge) => edge.from === current.to);
-  return weightedEdge(outgoing.length > 0 ? outgoing : edges);
+  const reverseRate = reverse.reduce((sum, edge) => sum + edge.rate, 0);
+  const reverseChance = reverseRate / Math.max(1, current.rate + reverseRate);
+  if (reverse.length > 0 && random() < Math.min(0.5, reverseChance)) return weightedEdge(reverse);
+  return weightedEdge(edges);
 }
 
 function reverseParticle(particle: Particle, edge: FlowEdge): void {
@@ -233,6 +272,24 @@ function particleColor(kind: FlowKind, palette: FlowPalette): string {
   if (kind === "output") return palette.output;
   if (kind === "cache-read") return palette.cacheRead;
   return palette.cacheWrite;
+}
+
+function drawStaticConnections(ctx: CanvasRenderingContext2D, palette: FlowPalette): void {
+  if (!snapshot) return;
+  const totalRate = Math.max(1, snapshot.edges.reduce((sum, edge) => sum + edge.rate, 0));
+  for (const edge of snapshot.edges) {
+    const from = positioned.get(edge.from);
+    const to = positioned.get(edge.to);
+    if (!from || !to || edge.rate <= 0) continue;
+    ctx.globalAlpha = 0.2 + Math.min(0.35, edge.rate / totalRate);
+    ctx.strokeStyle = particleColor(edge.kind, palette);
+    ctx.lineWidth = 1 + Math.min(2, (edge.rate / totalRate) * 8);
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    ctx.lineTo(to.x, to.y);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
 }
 
 function drawParticle(ctx: CanvasRenderingContext2D, particle: Particle, edge: FlowEdge): void {
@@ -334,7 +391,7 @@ function layoutLabels(ctx: CanvasRenderingContext2D): void {
     radius: 16,
   }));
   ctx.font = `${palette.detailFontSize}px ${palette.fontFamily}`;
-  const scaleWidth = ctx.measureText(particleScaleText(snapshot.totalRate)).width + 8;
+  const scaleWidth = ctx.measureText(particleScaleText(snapshot.totalRate, palette)).width + 8;
   const scaleHeight = palette.detailFontSize + 6;
   const scaleX = width - margin - scaleWidth / 2;
   const scaleY = height - margin - scaleHeight / 2;
@@ -444,7 +501,7 @@ function drawParticleScale(ctx: CanvasRenderingContext2D, palette: FlowPalette):
   ctx.font = `${palette.detailFontSize}px ${palette.fontFamily}`;
   drawLabelText(
     ctx,
-    particleScaleText(snapshot.totalRate),
+    particleScaleText(snapshot.totalRate, palette),
     width - 10,
     height - 10,
     width / 2,
@@ -459,6 +516,7 @@ function draw(): void {
   ctx.setTransform(scale, 0, 0, scale, 0, 0);
   ctx.clearRect(0, 0, width, height);
   layoutLabels(ctx);
+  if (snapshot.reducedMotion) drawStaticConnections(ctx, snapshot.palette);
   const edgeMap = new Map(snapshot.edges.map((edge) => [edge.id, edge]));
   for (const particle of particles) {
     const edge = edgeMap.get(particle.edgeId);
@@ -504,7 +562,7 @@ function applySnapshot(next: FlowSnapshot): void {
   snapshot = next;
   positioned = positionNodes(next.nodes);
   labelsDirty = true;
-  reconcileParticles(first);
+  reconcileParticles(first, !first);
   if (next.reducedMotion) {
     for (const particle of particles) particle.age = particle.travelMs + particle.restMs * 0.28;
   }

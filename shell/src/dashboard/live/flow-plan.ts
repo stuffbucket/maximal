@@ -211,11 +211,16 @@ export function liveFlowSnapshot(
     }
   }
 
+  const visibleSelected =
+    selectedSessionId !== null
+    && endpoints.some((endpoint) => endpoint.id === `session:${selectedSessionId}`) ?
+      selectedSessionId
+    : null;
   return {
     nodes: [...models, ...endpoints, ...tools],
     edges,
     totalRate,
-    selectedSessionId,
+    selectedSessionId: visibleSelected,
     reducedMotion,
     palette,
   };

@@ -377,7 +377,11 @@ describe("a session still streaming its first reply", () => {
           startedAtMs: T + 20_000,
           streamedChars: 40,
         }),
-        inFlight({ sessionId: "new", startedAtMs: T + 25_000 }),
+        inFlight({
+          sessionId: "new",
+          startedAtMs: T + 25_000,
+          streamedChars: 8,
+        }),
       ],
     })
     expect(view.sessions).toEqual([
@@ -389,15 +393,24 @@ describe("a session still streaming its first reply", () => {
         started_at_ms: T + 20_000,
         last_request_at_ms: T + 20_000,
         state: "streaming",
-        rate_per_min: 0,
+        rate_per_min: 12,
         rates: {
           input_per_min: 0,
-          output_per_min: 0,
+          output_per_min: 12,
           cache_read_per_min: 0,
           cache_write_per_min: 0,
-          total_per_min: 0,
+          total_per_min: 12,
         },
-        model_rates: [],
+        model_rates: [
+          {
+            model: "gpt-5",
+            input_per_min: 0,
+            output_per_min: 12,
+            cache_read_per_min: 0,
+            cache_write_per_min: 0,
+            total_per_min: 12,
+          },
+        ],
         minutes: Array.from({ length: 15 }, (_, i) => ({
           start_ms: T - (14 - i) * MINUTE,
           total_tokens: 0,
@@ -422,7 +435,7 @@ describe("a session still streaming its first reply", () => {
         },
       },
     ])
-    expect(view.flow_per_min).toBe(10)
+    expect(view.flow_per_min).toBe(12)
   })
 
   test("is not added for a session that has rows, or for an entry with no session", () => {

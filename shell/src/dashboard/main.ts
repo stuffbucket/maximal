@@ -532,8 +532,7 @@ function render(): void {
   // quotas is not (it updates in place).
   const welcome = !quotasHtml && !tokenUsageHtml && !detailedHtml;
   bento.hidden = welcome;
-  bento.classList.toggle("dashboard-bento--live-only", !quotasHtml);
-  quotaSection.hidden = !quotasHtml;
+  quotaSection.hidden = false;
   quotaColumn.innerHTML = quotasHtml;
   restArea.innerHTML = welcome ? renderWelcomeMessage() : `${tokenUsageHtml}${detailedHtml}`;
 

@@ -31,6 +31,7 @@ export interface FlowPalette {
   labelFontSize: number;
   detailFontSize: number;
   labelFontWeight: string;
+  particleScaleTemplate: string;
 }
 
 export interface FlowSnapshot {

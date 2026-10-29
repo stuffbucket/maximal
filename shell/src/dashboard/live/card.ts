@@ -7,7 +7,7 @@
 import type { SessionsResponse } from "../../../../src/lib/token-usage/sessions-schema";
 import { resolveLocale, t } from "../../i18n";
 import { liveFlowSnapshot } from "./flow-plan";
-import type { FlowPalette, FlowWorkerMessage } from "./flow-types";
+import type { FlowKind, FlowPalette, FlowWorkerMessage } from "./flow-types";
 
 export interface LiveCard {
   update(view: SessionsResponse, colors: Map<string, number | null>, selected: string | null): void;
@@ -27,16 +27,16 @@ function html<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, 
 
 const reducedMotion = (): boolean => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-function usageRow(label: string): { row: HTMLDivElement; value: HTMLElement } {
+function usageRow(i18nKey: string): { row: HTMLDivElement; value: HTMLElement } {
   const row = html("div", "usage-row");
-  const name = html("dt", "usage-row__label");
-  name.textContent = label;
+  const name = html("dt", "usage-row__label", i18nKey);
   const value = html("dd", "usage-row__value");
   row.append(name, value);
   return { row, value };
 }
 
 export function mountLiveCard(root: HTMLElement, metricsRoot: HTMLElement, cacheHitRoot: HTMLElement): LiveCard {
+  const graphSection = root.closest<HTMLElement>(".dashboard-bento__live");
   root.classList.add("live");
   root.classList.remove("live--border");
   root.replaceChildren();
@@ -46,27 +46,23 @@ export function mountLiveCard(root: HTMLElement, metricsRoot: HTMLElement, cache
 
   const metricsHeader = html("header", "usage-panel__header");
   const metricsHeading = html("div", "usage-panel__heading");
-  const metricsTitle = html("h3", "usage-panel__title");
-  metricsTitle.textContent = "Token use";
-  const metricsSubtitle = html("p", "usage-panel__subtitle");
-  metricsSubtitle.textContent = "5 min average · tokens/min";
+  const metricsTitle = html("h3", "usage-panel__title", "dashboard-flow-token-use");
+  const metricsSubtitle = html("p", "usage-panel__subtitle", "dashboard-flow-five-minute-average");
   metricsHeading.append(metricsTitle, metricsSubtitle);
   const primaryValue = html("output", "usage-panel__headline");
   primaryValue.textContent = "0";
   metricsHeader.append(metricsHeading, primaryValue);
-  const inputRate = usageRow("Input");
-  const outputRate = usageRow("Output");
-  const cacheReadRate = usageRow("Cache read");
-  const cacheWriteRate = usageRow("Cache write");
+  const inputRate = usageRow("dashboard-col-input");
+  const outputRate = usageRow("dashboard-col-output");
+  const cacheReadRate = usageRow("dashboard-col-cache-read");
+  const cacheWriteRate = usageRow("dashboard-col-cache-write");
   const metricRows = html("dl", "usage-panel__rows");
   metricRows.append(inputRate.row, outputRate.row, cacheReadRate.row, cacheWriteRate.row);
   metricsRoot.append(metricsHeader, metricRows);
 
   const cacheHitCopy = html("div", "usage-feature__copy");
-  const cacheHitLabel = html("span", "usage-feature__label");
-  cacheHitLabel.textContent = "Cache hit rate";
-  const cacheHitDetail = html("span", "usage-feature__detail");
-  cacheHitDetail.textContent = "Share of input tokens served from cache";
+  const cacheHitLabel = html("span", "usage-feature__label", "dashboard-flow-cache-hit-rate");
+  const cacheHitDetail = html("span", "usage-feature__detail", "dashboard-flow-cache-hit-detail");
   cacheHitCopy.append(cacheHitLabel, cacheHitDetail);
   const cacheHitValue = html("output", "usage-feature__value");
   cacheHitValue.textContent = "—";
@@ -124,6 +120,7 @@ export function mountLiveCard(root: HTMLElement, metricsRoot: HTMLElement, cache
       labelFontSize: fontSize("--text-sm", 14),
       detailFontSize: fontSize("--text-xs", 12),
       labelFontWeight: color("--weight-md", "500"),
+      particleScaleTemplate: t("dashboard-flow-particle-scale", { rate: "__RATE__" }),
     };
   };
 
@@ -139,9 +136,22 @@ export function mountLiveCard(root: HTMLElement, metricsRoot: HTMLElement, cache
       includeSyntheticTools,
     );
     worker.postMessage({ type: "snapshot", snapshot } satisfies FlowWorkerMessage);
-    flowSummary.textContent = snapshot.nodes
-      .map((node) => `${node.label}: ${Math.round(node.share * 100)}%`)
+    const nodeLabels = new Map(snapshot.nodes.map((node) => [node.id, node.label]));
+    const kindLabels: Record<FlowKind, string> = {
+      input: t("dashboard-col-input"),
+      output: t("dashboard-col-output"),
+      "cache-read": t("dashboard-col-cache-read"),
+      "cache-write": t("dashboard-col-cache-write"),
+    };
+    const nodes = snapshot.nodes.map((node) => `${node.label}: ${Math.round(node.share * 100)}%`).join("; ");
+    const edges = snapshot.edges
+      .filter((edge) => edge.rate > 0)
+      .map(
+        (edge) =>
+          `${kindLabels[edge.kind]}: ${nodeLabels.get(edge.from) ?? edge.from} → ${nodeLabels.get(edge.to) ?? edge.to}, ${numbers.format(Math.round(edge.rate))} ${t("dashboard-live-unit")}`,
+      )
       .join("; ");
+    flowSummary.textContent = `${nodes}. ${edges}`;
   }
 
   try {
@@ -203,13 +213,21 @@ export function mountLiveCard(root: HTMLElement, metricsRoot: HTMLElement, cache
       void colors;
       latestView = view;
       latestSelected = selected;
+      const hasGraph = view.sessions.some(
+        (session) =>
+          !session.id.startsWith("other:")
+          && session.state !== "cold"
+          && (session.rate_per_min > 0 || session.state === "streaming"),
+      );
+      if (graphSection) graphSection.hidden = !hasGraph;
       canvas.dataset.selectedSessionId = selected ?? "";
       canvas.dataset.motion = reducedMotion() ? "static" : "animated";
 
       const sessions = view.sessions.filter((session) => !session.id.startsWith("other:"));
       const activeSessions = sessions.filter((session) => session.state !== "cold");
-      const rate = activeSessions.reduce((sum, session) => sum + session.rate_per_min, 0);
-      const knownRates = activeSessions.flatMap((session) => (session.rates ? [session.rates] : []));
+      const rateSessions = view.sessions.filter((session) => session.rate_per_min > 0);
+      const rate = rateSessions.reduce((sum, session) => sum + session.rate_per_min, 0);
+      const knownRates = rateSessions.flatMap((session) => (session.rates ? [session.rates] : []));
       const totals = knownRates.reduce(
         (sum, rates) => ({
           input: sum.input + rates.input_per_min,
@@ -244,7 +262,7 @@ export function mountLiveCard(root: HTMLElement, metricsRoot: HTMLElement, cache
       const coldCount = sessions.length - liveCount;
       canvas.setAttribute(
         "aria-label",
-        t("dashboard-live-summary", {
+        t("dashboard-flow-summary", {
           rate: numbers.format(Math.round(rate)),
           live: numbers.format(liveCount),
           cold: numbers.format(coldCount),

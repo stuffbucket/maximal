@@ -200,6 +200,16 @@ function feedObservations(
 
 /** A session whose first reply is still streaming: nothing recorded yet. */
 function streamingOnlySession(entry: InFlight, nowMs: number): SessionView {
+  const streamedTokens = Math.floor(
+    entry.streamedChars / STREAM_CHARS_PER_TOKEN,
+  )
+  const rates: TokenRates = {
+    input_per_min: 0,
+    output_per_min: streamedTokens,
+    cache_read_per_min: 0,
+    cache_write_per_min: 0,
+    total_per_min: streamedTokens,
+  }
   return {
     id: entry.sessionId,
     client: entry.client,
@@ -208,9 +218,9 @@ function streamingOnlySession(entry: InFlight, nowMs: number): SessionView {
     started_at_ms: entry.startedAtMs,
     last_request_at_ms: entry.startedAtMs,
     state: "streaming",
-    rate_per_min: 0,
-    rates: tokenRates([]),
-    model_rates: [],
+    rate_per_min: streamedTokens,
+    rates,
+    model_rates: streamedTokens > 0 ? [{ model: entry.model, ...rates }] : [],
     minutes: emptyRecentMinutes(nowMs),
     total_tokens: 0,
     request_count: 0,
@@ -438,11 +448,16 @@ export function buildSessionsView(input: {
   const sessions = [...groups].map(([id, group]) =>
     buildSession(id, group, { nowMs, streaming, observations }),
   )
-  // A session still streaming its first reply shows from its earliest entry.
-  const seen = new Set(groups.keys())
+  // A session still streaming its first reply shows from its earliest entry;
+  // concurrent replies under that session contribute one combined estimate.
+  const unseen = new Map<string, InFlight>()
   for (const entry of withSession) {
-    if (seen.has(entry.sessionId)) continue
-    seen.add(entry.sessionId)
+    if (groups.has(entry.sessionId)) continue
+    const combined = unseen.get(entry.sessionId)
+    if (combined) combined.streamedChars += entry.streamedChars
+    else unseen.set(entry.sessionId, { ...entry })
+  }
+  for (const entry of unseen.values()) {
     sessions.push(streamingOnlySession(entry, nowMs))
   }
   sessions.sort((a, b) => b.last_request_at_ms - a.last_request_at_ms)
