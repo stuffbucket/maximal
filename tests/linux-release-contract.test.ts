@@ -285,14 +285,11 @@ describe("packaged proxy", () => {
     expect(unit).toContain("Environment=HOST=127.0.0.1")
   })
 
-  test("the tray app's proxy listens on loopback on Linux only", () => {
+  test("the tray app's proxy listens on loopback on every platform", () => {
     const shell = read("shell/src-tauri/src/lib.rs")
-    expect(shell).toMatch(
-      /if cfg!\(target_os = "linux"\) \{\s+&\[\("HOST", "127\.0\.0\.1"\)\]\s+\} else \{\s+&\[\]/u,
-    )
     const spawn = shell.slice(shell.indexOf("fn spawn_sidecar("))
     expect(spawn.slice(0, spawn.indexOf(".spawn()"))).toContain(
-      "for (key, value) in sidecar_platform_env() {",
+      '.env("HOST", LOOPBACK_HOST)',
     )
   })
 })

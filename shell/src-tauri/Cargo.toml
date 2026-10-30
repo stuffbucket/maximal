@@ -21,7 +21,7 @@ tauri = { version = "2", features = ["tray-icon", "macos-private-api", "image-pn
 tauri-plugin-opener = "2"
 # `tauri-plugin-shell` provides the sidecar spawn API that uses the
 # arch-suffixed binaries declared in bundle.externalBin.
-tauri-plugin-shell = "2"
+tauri-plugin-shell = "2.6"
 # Native OS confirm/message dialogs (Quit-Maximal? prompt, etc).
 # Replaces the previous hand-rolled React modal that fought a
 # `tauri://load-end` race when triggered from a hidden window.
@@ -31,9 +31,9 @@ tauri-plugin-dialog = "2"
 # only, no actions. Cross-platform via the plugin's macOS / Windows /
 # Linux backends.
 tauri-plugin-notification = "2"
-# Enforces a single running Maximal process and routes second-launch
-# argv to the first instance. `--replace` in argv triggers a graceful
-# shutdown of the existing instance so the second can take :4141.
+# Enforces one running process per Tauri identifier and routes second-launch
+# argv to the first instance. The second process exits after notification;
+# development replacement is handled by the external app:dev launcher.
 # `deep-link` feature is opt-in scaffolding for a future deep-link
 # integration; it's cheap (no extra runtime cost) and harmless today.
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }

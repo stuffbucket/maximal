@@ -28,16 +28,29 @@ import {
 
 let tmp: string
 let originalAppDir: string
+let originalInstanceId: string | undefined
+let originalParentPid: string | undefined
 
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), "maximal-sentinel-test-"))
   originalAppDir = PATHS.APP_DIR
+  originalInstanceId = process.env.MAXIMAL_INSTANCE_ID
+  originalParentPid = process.env.MAXIMAL_SIDECAR_PARENT_PID
+  delete process.env.MAXIMAL_INSTANCE_ID
+  delete process.env.MAXIMAL_SIDECAR_PARENT_PID
   // PATHS is a plain object literal — directly reassign the field.
   ;(PATHS as { APP_DIR: string }).APP_DIR = tmp
 })
 
 afterEach(() => {
   ;(PATHS as { APP_DIR: string }).APP_DIR = originalAppDir
+  if (originalInstanceId === undefined) delete process.env.MAXIMAL_INSTANCE_ID
+  else process.env.MAXIMAL_INSTANCE_ID = originalInstanceId
+  if (originalParentPid === undefined) {
+    delete process.env.MAXIMAL_SIDECAR_PARENT_PID
+  } else {
+    process.env.MAXIMAL_SIDECAR_PARENT_PID = originalParentPid
+  }
   fs.rmSync(tmp, { recursive: true, force: true })
 })
 
@@ -54,12 +67,36 @@ describe("session sentinel", () => {
     markSessionRunning()
     expect(fs.existsSync(sentinelPath())).toBe(true)
     const body = JSON.parse(fs.readFileSync(sentinelPath(), "utf8")) as {
+      schemaVersion: number
       pid: number
+      port: number | null
+      instanceId: string | null
+      parentPid: number | null
       started_at: string
     }
+    expect(body.schemaVersion).toBe(2)
     expect(body.pid).toBe(process.pid)
+    expect(body.port).toBeNull()
+    expect(body.instanceId).toBeNull()
+    expect(body.parentPid).toBeNull()
     expect(typeof body.started_at).toBe("string")
     expect(Number.isNaN(Date.parse(body.started_at))).toBe(false)
+  })
+
+  test("records the bound port and shell ownership metadata", () => {
+    process.env.MAXIMAL_INSTANCE_ID = "desktop-instance"
+    process.env.MAXIMAL_SIDECAR_PARENT_PID = "12345"
+
+    markSessionRunning(42_123)
+
+    const body = JSON.parse(fs.readFileSync(sentinelPath(), "utf8")) as {
+      port: number
+      instanceId: string
+      parentPid: number
+    }
+    expect(body.port).toBe(42_123)
+    expect(body.instanceId).toBe("desktop-instance")
+    expect(body.parentPid).toBe(12_345)
   })
 
   test("staleSessionMarkerPresent is true after markSessionRunning", () => {
@@ -138,6 +175,14 @@ describe("runningSessionPort", () => {
   test("is the port a live instance recorded", () => {
     markSessionRunning(4199)
     expect(runningSessionPort()).toBe(4199)
+  })
+
+  test("still reads the original unversioned sentinel schema", () => {
+    fs.writeFileSync(
+      sentinelPath(),
+      JSON.stringify({ pid: process.pid, port: 4198 }),
+    )
+    expect(runningSessionPort()).toBe(4198)
   })
 
   test("is undefined with no sentinel, no port, or a dead process", () => {

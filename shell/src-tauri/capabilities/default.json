@@ -11,16 +11,6 @@
     "core:webview:allow-create-webview-window",
     "opener:default",
     "notification:default",
-    "default",
-    {
-      "identifier": "shell:allow-execute",
-      "allow": [
-        {
-          "name": "binaries/maximal",
-          "sidecar": true,
-          "args": ["start", "--replace", "--port", { "validator": "^\\d{2,5}$" }]
-        }
-      ]
-    }
+    "default"
   ]
 }

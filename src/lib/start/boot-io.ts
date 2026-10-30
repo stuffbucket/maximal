@@ -22,6 +22,16 @@ interface BootLoggerOptions {
   accountType: string
 }
 
+export const READY_MARKER = "@@MAXIMAL_READY@@"
+
+export interface SidecarReady {
+  protocol: 1
+  host: "127.0.0.1"
+  port: number
+  instanceId: string
+  nonce: string
+}
+
 export function initBootLogger(
   git: GitVersion,
   options: BootLoggerOptions,
@@ -46,4 +56,24 @@ export function printReadyBanner(serverUrl: string): void {
       `(reload the window to pick up changes).`,
     ].join("\n"),
   )
+}
+
+/** Tell the Tauri parent which kernel-selected port this sidecar bound.
+ * Plain CLI starts do not set the instance handshake values and stay silent. */
+export function emitSidecarReady(
+  port: number,
+  env: NodeJS.ProcessEnv = process.env,
+): void {
+  const instanceId = env.MAXIMAL_INSTANCE_ID
+  const nonce = env.MAXIMAL_INSTANCE_NONCE
+  if (!instanceId || !nonce) return
+
+  const payload: SidecarReady = {
+    protocol: 1,
+    host: "127.0.0.1",
+    port,
+    instanceId,
+    nonce,
+  }
+  process.stdout.write(`${READY_MARKER}${JSON.stringify(payload)}\n`)
 }

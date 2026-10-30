@@ -41,16 +41,17 @@ bun run app:sidecar  # build the UI + regenerate the embed manifest + rebuild th
                      # with --force or MAXIMAL_FORCE_SIDECAR=1 — release pipelines
                      # must set it)
 bun run app:dev      # build sidecar (if stale) + tauri dev
-                     # Replaces a Maximal on :4141. To run beside an installed
-                     # one instead, give the dev app its own port and data dir:
-                     #   COPILOT_API_HOME=/tmp/maximal-dev MAXIMAL_DEV_PORT=4142 bun run app:dev
-                     # (its own identifier too, so it doesn't hand off to the
-                     # installed app; see scripts/app-dev-prepare.ts)
+                     # Each worktree gets a persisted random app identifier,
+                     # that identifier's platform-native Tauri app-data profile,
+                     # and an OS-selected loopback port that is persisted for a
+                     # stable webview origin. An explicit COPILOT_API_HOME is
+                     # resolved and used instead of the default.
 bun run app:ui       # UI-only iteration: `bun run build:ui --watch` — rebuilds the
                      # settings + dashboard bundles into shell/dist on every save.
                      # Run `bun run dev` in another terminal so the sidecar serves
                      # them at :4141/ui/* (reload the window to pick up changes).
 bun run app:build    # force-rebuild sidecar + tauri build --bundles app,dmg
+bun run app:build:test # build an app bundle with the non-production test identifier
 ```
 
 `bun run start`, `bun run dev` and `maximal start` listen on `127.0.0.1` unless
