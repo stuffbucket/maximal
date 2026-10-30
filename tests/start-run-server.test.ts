@@ -120,8 +120,28 @@ await mock.module("~/lib/platform/logger", () => ({
   createHandlerLogger: () => fakeLogger,
 }))
 
-// Stub `serve` from srvx so runServer never binds a port.
-const serveMock = mock(() => ({ close: () => Promise.resolve() }))
+// Stub `serve` from srvx so runServer never binds a port. Mirror srvx's
+// post-bind URL because runServer resolves a kernel-selected port from it.
+const EPHEMERAL_TEST_PORT = 49_876
+interface FakeServer {
+  url: string
+  ready: () => Promise<FakeServer>
+  close: () => Promise<void>
+}
+const serveMock = mock(
+  (options: { hostname?: string; port?: string | number }): FakeServer => {
+    const requestedPort = Number(options.port)
+    const actualPort = requestedPort === 0 ? EPHEMERAL_TEST_PORT : requestedPort
+    const hostname = options.hostname ?? "127.0.0.1"
+    const urlHost = hostname.includes(":") ? `[${hostname}]` : hostname
+    const fakeServer: FakeServer = {
+      url: `http://${urlHost}:${actualPort}/`,
+      ready: () => Promise.resolve(fakeServer),
+      close: () => Promise.resolve(),
+    }
+    return fakeServer
+  },
+)
 const realSrvxModule = { ...(await import("srvx")) }
 await mock.module("srvx", () => ({ ...realSrvxModule, serve: serveMock }))
 
@@ -145,8 +165,10 @@ const { freePort } = await import("./helpers/free-port")
 const { state } = await import("~/lib/runtime-state/state")
 const { runServer, start } = await import("~/start")
 const { stopBrokerSupervisor } = await import("~/lib/mcp-broker/supervisor")
-const { setListeningPort } = await import("~/lib/start/proxy-port")
-const { clearSessionRunning } = await import("~/lib/start/session-sentinel")
+const { currentProxyPort, setListeningPort } =
+  await import("~/lib/start/proxy-port")
+const { clearSessionRunning, runningSessionPort } =
+  await import("~/lib/start/session-sentinel")
 const { getAuthStatus, signOut, __resetAuthControllerForTests } =
   await import("~/lib/auth/auth-controller")
 const { CopilotAuthFatalError } = await import("~/lib/errors/error")
@@ -371,18 +393,24 @@ describe("runServer — listen hostname", () => {
     expect(serveHostname()).toBe("127.0.0.1")
   })
 
-  test("HOST=0.0.0.0 binds every interface", async () => {
+  test("HOST=0.0.0.0 binds every interface and advertises local IPv4", async () => {
     const port = await freePort()
     process.env.HOST = "0.0.0.0"
     await runServer(baseOptions({ port }))
     expect(serveHostname()).toBe("0.0.0.0")
+    expect(
+      bootLogMessages.find((message) => message.startsWith("listening ")),
+    ).toContain(`url=http://127.0.0.1:${port}`)
   })
 
-  test("an IPv6 HOST is passed through", async () => {
+  test("an IPv6 wildcard binds as requested and advertises local IPv6", async () => {
     const port = await freePort()
     process.env.HOST = "::"
     await runServer(baseOptions({ port }))
     expect(serveHostname()).toBe("::")
+    expect(
+      bootLogMessages.find((message) => message.startsWith("listening ")),
+    ).toContain(`url=http://[::1]:${port}`)
   })
 })
 
@@ -406,7 +434,7 @@ describe("runServer — boot logger format", () => {
     await runServer(baseOptions({ port, githubToken: undefined }))
     const listening = bootLogMessages.find((m) => m.startsWith("listening "))
     expect(listening).toBeDefined()
-    expect(listening).toContain(`url=http://localhost:${port}`)
+    expect(listening).toContain(`url=http://127.0.0.1:${port}`)
     expect(listening).toContain("executor=")
     expect(listening).toContain("auth=unauthenticated")
   })
@@ -429,6 +457,29 @@ describe("runServer — server bind", () => {
     ]
     expect(arg.port).toBe(port)
     expect(arg.bun.idleTimeout).toBe(0)
+  })
+
+  test("port zero propagates the actual bound port to runtime state and sentinel", async () => {
+    await runServer(baseOptions({ port: 0 }))
+
+    const [arg] = serveMock.mock.calls[0] as unknown as [{ port: number }]
+    expect(arg.port).toBe(0)
+    expect(currentProxyPort()).toBe(EPHEMERAL_TEST_PORT)
+    expect(runningSessionPort()).toBe(EPHEMERAL_TEST_PORT)
+    expect(bootLogMessages[0]).toContain(`port=${EPHEMERAL_TEST_PORT}`)
+    expect(
+      bootLogMessages.find((message) => message.startsWith("listening ")),
+    ).toContain(`url=http://127.0.0.1:${EPHEMERAL_TEST_PORT}`)
+  })
+
+  test("accepts default HTTP port 80 from the bound server URL", async () => {
+    await runServer(baseOptions({ port: 80 }))
+
+    expect(currentProxyPort()).toBe(80)
+    expect(runningSessionPort()).toBe(80)
+    expect(
+      bootLogMessages.find((message) => message.startsWith("listening ")),
+    ).toContain("url=http://127.0.0.1:80")
   })
 })
 

@@ -3,7 +3,7 @@
  *
  * Regression guard for the "dozens of browser tabs" bug: when the Tauri
  * shell spawned the sidecar with no token cached, the proxy used to fire
- * the GitHub device-code flow (opening a browser) *before* binding 4142,
+ * the GitHub device-code flow (opening a browser) *before* binding loopback,
  * so the dashboard couldn't load to let the user recover. The fix: boot
  * the server unconditionally, leave `state.githubToken` undefined when
  * absent, and gate `/v1/*` and friends with `requireGithubAuth`.

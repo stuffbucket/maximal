@@ -1,9 +1,12 @@
 #!/usr/bin/env bun
-/** Launch the Tauri development app with an isolated, per-worktree profile. */
+/** Launch Tauri with this worktree's stable, isolated development profile. */
 
 import path from "node:path"
 
-import { prepareAppDev } from "./app-dev-prepare"
+import {
+  prepareAppDev,
+  stopPriorDevSession,
+} from "./app-dev-prepare"
 
 const repoRoot = path.resolve(import.meta.dir, "..")
 
@@ -27,10 +30,19 @@ async function run(
 }
 
 async function main(): Promise<void> {
-  const prepared = await prepareAppDev(process.env, repoRoot)
+  const prepared = prepareAppDev(process.env, repoRoot)
   const bun = process.execPath
 
+  console.log(`[app-dev] profile: ${prepared.worktreeId}`)
+  console.log(`[app-dev] data: ${prepared.home}`)
+
+  if (await stopPriorDevSession(prepared.home, prepared.identifier)) {
+    console.log("[app-dev] prior session stopped")
+  }
+
   await run([bun, "run", "app:sidecar"], repoRoot, prepared.env)
+  const forwardedArgs = process.argv.slice(2)
+  if (forwardedArgs[0] === "--") forwardedArgs.shift()
   await run(
     [
       bun,
@@ -38,7 +50,8 @@ async function main(): Promise<void> {
       "tauri",
       "dev",
       "--config",
-      "src-tauri/tauri.dev.conf.json",
+      prepared.configPath,
+      ...forwardedArgs,
     ],
     path.join(repoRoot, "shell"),
     prepared.env,

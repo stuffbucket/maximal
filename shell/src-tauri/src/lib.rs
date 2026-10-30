@@ -4,10 +4,10 @@
 //   1. Mark state Starting and install the tray immediately — the
 //      menubar must be reachable before the sidecar is ready, so the
 //      user always has a Quit affordance.
-//   2. Spawn the bundled `maximal` binary as a sidecar — it serves
-//      the proxy on http://localhost:4141 (see SIDECAR_PORT below).
-//   3. Poll http://127.0.0.1:4141/setup-status every 300ms until the
-//      sidecar answers (or 30s elapses → Failed). The first response
+//   2. Spawn the bundled `maximal` binary as a sidecar — production requests
+//      :4141; development/test ask the kernel for a profile-stable free port.
+//   3. Validate its nonce-bound ready line, register that exact remote origin,
+//      then poll its /setup-status every 300ms. The first response
 //      flips state to RunningUnauthenticated / RunningAuthenticated
 //      based on the `githubAuth.ok` check. After that, slower 5s
 //      polling watches for the user signing in or out via Settings.
@@ -40,14 +40,17 @@
 //   3. On accept → `app.exit(0)` → RunEvent::ExitRequested →
 //      `kill_sidecar` (SIGTERM + 3s SIGKILL escalation) → process exit.
 
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use tauri::{
     image::Image,
-    ipc::Channel,
+    ipc::{CapabilityBuilder, Channel},
     menu::{IsMenuItem, Menu, MenuItem, PredefinedMenuItem},
+    utils::config::{AppDirectoriesOverride, AppDirectoryOverrides},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     webview::PageLoadEvent,
     AppHandle, Emitter, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder,
@@ -61,34 +64,120 @@ use tauri_plugin_shell::ShellExt;
 /// backed by the same shell/src/i18n/*.json catalogs the webview renders with.
 mod native_i18n;
 
-// Canonical release port. Apps integrating with the installed proxy only need
-// to know http://localhost:4141. The shell passes `--replace` when spawning so
-// it wins over a stale CLI instance (graceful eviction via
-// /_internal/shutdown — see src/lib/replace-running.ts).
-//
-// `bun run app:dev` selects an isolated profile and a free development port,
-// then passes it as `MAXIMAL_DEV_PORT` at build time. Release builds never set
-// it; see scripts/app-dev-prepare.ts.
-const SIDECAR_PORT: u16 = match option_env!("MAXIMAL_DEV_PORT") {
-    Some(port) => parse_port(port),
-    None => 4141,
-};
+const PRODUCTION_IDENTIFIER: &str = "co.stuffbucket.maximal";
+const PRODUCTION_PORT: u16 = 4141;
+const LOOPBACK_HOST: &str = "127.0.0.1";
+const READY_MARKER: &str = "@@MAXIMAL_READY@@";
+const SIDECAR_READY_TIMEOUT: Duration = Duration::from_secs(30);
+const MAX_STDOUT_LINE_BYTES: usize = 64 * 1024;
+const PREFERRED_PORT_FILE: &str = "sidecar-port";
 
-/// `str::parse` isn't const; a bad value fails the build.
-const fn parse_port(value: &str) -> u16 {
-    let bytes = value.as_bytes();
-    assert!(!bytes.is_empty(), "MAXIMAL_DEV_PORT is empty");
-    let mut port: u32 = 0;
-    let mut i = 0;
-    while i < bytes.len() {
-        let digit = bytes[i];
-        assert!(digit.is_ascii_digit(), "MAXIMAL_DEV_PORT must be a number");
-        port = port * 10 + (digit - b'0') as u32;
-        assert!(port <= 65_535, "MAXIMAL_DEV_PORT must be at most 65535");
-        i += 1;
+/// Runtime behavior is derived from the final Tauri identifier, including any
+/// `tauri dev --config` override. Only the exact release identifier is allowed
+/// to use production data or register updater surfaces; unknown identifiers
+/// fail closed into a development profile.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AppProfile {
+    Production,
+    Development,
+    Test,
+}
+
+impl AppProfile {
+    fn from_identifier(identifier: &str) -> Self {
+        if identifier == PRODUCTION_IDENTIFIER {
+            Self::Production
+        } else if identifier == format!("{PRODUCTION_IDENTIFIER}.test")
+            || identifier.starts_with(&format!("{PRODUCTION_IDENTIFIER}.test."))
+        {
+            Self::Test
+        } else {
+            Self::Development
+        }
     }
-    assert!(port > 0, "MAXIMAL_DEV_PORT must be above 0");
-    port as u16
+
+    fn as_env(self) -> &'static str {
+        match self {
+            Self::Production => "production",
+            Self::Development => "development",
+            Self::Test => "test",
+        }
+    }
+
+    fn initial_port(self) -> u16 {
+        match self {
+            Self::Production => PRODUCTION_PORT,
+            Self::Development | Self::Test => 0,
+        }
+    }
+
+    fn updates_enabled(self) -> bool {
+        self == Self::Production
+    }
+}
+
+struct AppDataDir(PathBuf);
+
+fn preferred_port_file(data_dir: &Path) -> PathBuf {
+    data_dir.join(PREFERRED_PORT_FILE)
+}
+
+fn read_preferred_port(data_dir: &Path) -> Option<u16> {
+    let raw = std::fs::read_to_string(preferred_port_file(data_dir)).ok()?;
+    raw.trim().parse::<u16>().ok().filter(|port| *port > 0)
+}
+
+fn write_preferred_port(data_dir: &Path, port: u16) -> std::io::Result<()> {
+    std::fs::create_dir_all(data_dir)?;
+    std::fs::write(preferred_port_file(data_dir), format!("{port}\n"))
+}
+
+fn absolute_env_path(value: std::ffi::OsString) -> tauri::Result<PathBuf> {
+    let path = PathBuf::from(value);
+    if path.is_absolute() {
+        Ok(path)
+    } else {
+        Ok(std::env::current_dir()?.join(path))
+    }
+}
+
+fn production_data_dir() -> tauri::Result<PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(app_data) = std::env::var_os("APPDATA") {
+            return Ok(PathBuf::from(app_data).join("maximal"));
+        }
+        let home = std::env::var_os("USERPROFILE").ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "USERPROFILE is unavailable",
+            )
+        })?;
+        Ok(PathBuf::from(home)
+            .join("AppData")
+            .join("Roaming")
+            .join("maximal"))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let home = std::env::var_os("HOME").ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotFound, "HOME is unavailable")
+        })?;
+        Ok(PathBuf::from(home)
+            .join(".local")
+            .join("share")
+            .join("maximal"))
+    }
+}
+
+fn profile_data_override(profile: AppProfile) -> tauri::Result<Option<PathBuf>> {
+    if let Some(home) = std::env::var_os("COPILOT_API_HOME").filter(|value| !value.is_empty()) {
+        return absolute_env_path(home).map(Some);
+    }
+    match profile {
+        AppProfile::Production => production_data_dir().map(Some),
+        AppProfile::Development | AppProfile::Test => Ok(None),
+    }
 }
 
 /// Prefix the sidecar prints (stdout) for structured boot-status lines we
@@ -165,9 +254,9 @@ const SIDECAR_STOP_TIMEOUT: Duration = Duration::from_secs(10);
 const DASHBOARD_PERIODS: &[&str] = &["day", "week", "month"];
 
 const TRAY_ID: &str = "main";
-// Two webview windows, both pointed at the sidecar:
-//   settings  — http://localhost:4141/ui/settings/  (React app)
-//   dashboard — http://localhost:4141/ui/dashboard/  (usage charts)
+// Two webview windows, both pointed at the selected sidecar origin:
+//   settings  — /ui/settings/  (React app)
+//   dashboard — /ui/dashboard/ (usage charts)
 // Both UIs are embedded in the sidecar binary and served at /ui/* —
 // see src/routes/ui/route.ts.
 // Labels are referenced from capabilities/default.json `windows`.
@@ -214,25 +303,255 @@ enum SidecarState {
     Failed,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SidecarEndpoint {
+    generation: u64,
+    port: u16,
+}
+
+impl SidecarEndpoint {
+    fn http_url(self, path: &str) -> String {
+        format!("http://{LOOPBACK_HOST}:{}{path}", self.port)
+    }
+
+    fn browser_origin(self) -> String {
+        // Preserve the production origin used by every prior release. Besides
+        // retaining localStorage, macOS's bundle exception is for localhost.
+        format!("http://localhost:{}", self.port)
+    }
+}
+
+#[derive(Debug)]
+struct EndpointState {
+    generation: u64,
+    selected_port: Option<u16>,
+    current: Option<SidecarEndpoint>,
+    capability_ports: HashSet<u16>,
+}
+
+/// Generation-aware endpoint selected by the sidecar's authenticated ready
+/// line. `selected_port` survives a sidecar restart because Tauri capabilities
+/// can be added but not removed; every generation after the first therefore
+/// asks for the same port.
+struct ManagedEndpoint(Mutex<EndpointState>);
+
+impl ManagedEndpoint {
+    fn new() -> Self {
+        Self(Mutex::new(EndpointState {
+            generation: 0,
+            selected_port: None,
+            current: None,
+            capability_ports: HashSet::new(),
+        }))
+    }
+
+    fn set_preferred_port(&self, port: Option<u16>) {
+        let mut state = self.0.lock().expect("endpoint mutex poisoned");
+        if state.generation == 0 {
+            state.selected_port = port;
+        }
+    }
+
+    fn begin_generation(&self, profile: AppProfile) -> SpawnGeneration {
+        let mut state = self.0.lock().expect("endpoint mutex poisoned");
+        state.generation = state.generation.wrapping_add(1);
+        state.current = None;
+        SpawnGeneration {
+            generation: state.generation,
+            requested_port: state.selected_port.unwrap_or_else(|| profile.initial_port()),
+            nonce: generate_nonce(),
+        }
+    }
+
+    fn current(&self) -> Option<SidecarEndpoint> {
+        self.0.lock().expect("endpoint mutex poisoned").current
+    }
+
+    fn is_pending(&self, generation: u64) -> bool {
+        let state = self.0.lock().expect("endpoint mutex poisoned");
+        state.generation == generation && state.current.is_none()
+    }
+
+    fn expire_pending(&self, generation: u64) -> bool {
+        let mut state = self.0.lock().expect("endpoint mutex poisoned");
+        if state.generation != generation || state.current.is_some() {
+            return false;
+        }
+        state.generation = state.generation.wrapping_add(1);
+        true
+    }
+
+    fn clear_generation(&self, generation: u64) {
+        let mut state = self.0.lock().expect("endpoint mutex poisoned");
+        if state.generation == generation {
+            state.current = None;
+        }
+    }
+
+    /// Forget a persisted preferred port after its first launch failed. This is
+    /// allowed only before any remote capability exists; after that, changing
+    /// ports would leave a capability behind that Tauri cannot revoke.
+    fn prepare_dynamic_retry(&self, generation: u64, requested_port: u16) -> bool {
+        let mut state = self.0.lock().expect("endpoint mutex poisoned");
+        if state.generation != generation
+            || state.current.is_some()
+            || requested_port == 0
+            || !state.capability_ports.is_empty()
+            || state.selected_port != Some(requested_port)
+        {
+            return false;
+        }
+        state.selected_port = None;
+        true
+    }
+
+    fn has_capability(&self, port: u16) -> bool {
+        self.0
+            .lock()
+            .expect("endpoint mutex poisoned")
+            .capability_ports
+            .contains(&port)
+    }
+
+    fn mark_capability(&self, port: u16) {
+        self.0
+            .lock()
+            .expect("endpoint mutex poisoned")
+            .capability_ports
+            .insert(port);
+    }
+
+    fn activate(&self, generation: u64, port: u16) -> bool {
+        let mut state = self.0.lock().expect("endpoint mutex poisoned");
+        if state.generation != generation || state.current.is_some() {
+            return false;
+        }
+        state.selected_port = Some(port);
+        state.current = Some(SidecarEndpoint { generation, port });
+        true
+    }
+}
+
+#[derive(Clone, Debug)]
+struct SpawnGeneration {
+    generation: u64,
+    requested_port: u16,
+    nonce: String,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+struct SidecarReady {
+    protocol: u8,
+    host: String,
+    port: u16,
+    #[serde(rename = "instanceId")]
+    instance_id: String,
+    nonce: String,
+}
+
+fn validate_ready(
+    ready: &SidecarReady,
+    spawn: &SpawnGeneration,
+    identifier: &str,
+) -> Result<(), String> {
+    if ready.protocol != 1 {
+        return Err(format!("unsupported ready protocol {}", ready.protocol));
+    }
+    if ready.nonce != spawn.nonce {
+        return Err("ready nonce did not match this sidecar generation".to_string());
+    }
+    if ready.instance_id != identifier {
+        return Err("ready identifier did not match this Tauri instance".to_string());
+    }
+    if ready.host != LOOPBACK_HOST {
+        return Err(format!("ready host must be {LOOPBACK_HOST}"));
+    }
+    if ready.port == 0 {
+        return Err("ready port must be non-zero".to_string());
+    }
+    if spawn.requested_port != 0 && ready.port != spawn.requested_port {
+        return Err(format!(
+            "ready port {} did not match requested port {}",
+            ready.port, spawn.requested_port
+        ));
+    }
+    Ok(())
+}
+
+#[derive(Default)]
+struct StdoutLines {
+    pending: Vec<u8>,
+}
+
+impl StdoutLines {
+    fn push(&mut self, chunk: &[u8]) -> Vec<String> {
+        self.pending.extend_from_slice(chunk);
+        let mut lines = Vec::new();
+        while let Some(newline) = self.pending.iter().position(|byte| *byte == b'\n') {
+            let mut raw = self.pending.drain(..=newline).collect::<Vec<_>>();
+            raw.pop();
+            if raw.last() == Some(&b'\r') {
+                raw.pop();
+            }
+            lines.push(String::from_utf8_lossy(&raw).into_owned());
+        }
+        if self.pending.len() > MAX_STDOUT_LINE_BYTES {
+            let raw = std::mem::take(&mut self.pending);
+            lines.push(String::from_utf8_lossy(&raw).into_owned());
+        }
+        lines
+    }
+}
+
 /// Owns the sidecar's CommandChild for the lifetime of the app.
 ///
 /// Wrapped in `Mutex<Option<...>>` because Tauri's managed-state
 /// API requires `Send + Sync`, and the child handle is consumed
 /// (option becomes None) once `kill()` is issued so subsequent
 /// kill calls become harmless no-ops.
-struct Sidecar(Mutex<Option<CommandChild>>);
+struct RunningSidecar {
+    generation: u64,
+    child: CommandChild,
+}
+
+struct Sidecar(Mutex<Option<RunningSidecar>>);
 
 impl Sidecar {
     fn new() -> Self {
         Self(Mutex::new(None))
     }
 
-    fn set(&self, child: CommandChild) {
-        *self.0.lock().expect("sidecar mutex poisoned") = Some(child);
+    fn set(&self, generation: u64, child: CommandChild) {
+        *self.0.lock().expect("sidecar mutex poisoned") = Some(RunningSidecar {
+            generation,
+            child,
+        });
+    }
+
+    fn generation(&self) -> Option<u64> {
+        self.0
+            .lock()
+            .expect("sidecar mutex poisoned")
+            .as_ref()
+            .map(|sidecar| sidecar.generation)
+    }
+
+    fn clear_generation(&self, generation: u64) {
+        let mut current = self.0.lock().expect("sidecar mutex poisoned");
+        if current
+            .as_ref()
+            .is_some_and(|sidecar| sidecar.generation == generation)
+        {
+            current.take();
+        }
     }
 
     fn take(&self) -> Option<CommandChild> {
-        self.0.lock().expect("sidecar mutex poisoned").take()
+        self.0
+            .lock()
+            .expect("sidecar mutex poisoned")
+            .take()
+            .map(|sidecar| sidecar.child)
     }
 }
 
@@ -246,8 +565,8 @@ impl Drop for Sidecar {
         // is SIGKILL under the hood, which is exactly what we want here:
         // don't leak a zombie.
         if let Ok(mut guard) = self.0.lock() {
-            if let Some(child) = guard.take() {
-                let _ = child.kill();
+            if let Some(sidecar) = guard.take() {
+                let _ = sidecar.child.kill();
             }
         }
     }
@@ -582,6 +901,40 @@ impl DockVisibilityState {
 /// first Starting → RunningUnauthenticated transition without
 /// re-opening it every time the user manually quits + signs back in
 /// while still unauthenticated.
+struct AppExiting(std::sync::atomic::AtomicBool);
+
+impl AppExiting {
+    fn new() -> Self {
+        Self(std::sync::atomic::AtomicBool::new(false))
+    }
+
+    fn begin(&self) {
+        self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    fn get(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+/// Remembers a second-launch request that arrives before the sidecar has
+/// published and authorized its remote origin.
+struct PendingWindowOpen(std::sync::atomic::AtomicBool);
+
+impl PendingWindowOpen {
+    fn new() -> Self {
+        Self(std::sync::atomic::AtomicBool::new(false))
+    }
+
+    fn request(&self) {
+        self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    fn take(&self) -> bool {
+        self.0.swap(false, std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
 struct SetupPromptShown(std::sync::atomic::AtomicBool);
 
 impl SetupPromptShown {
@@ -635,21 +988,51 @@ impl SplashDismissed {
 /// user-initiated quit and bring the WHOLE app down — stranding the tray and
 /// killing the reboot before the replacement spawns. The handler consumes this
 /// flag and keeps the app alive for the respawn instead.
-struct SidecarRestarting(std::sync::atomic::AtomicBool);
+struct SidecarRestarting(Mutex<HashSet<u64>>);
 
 impl SidecarRestarting {
     fn new() -> Self {
-        Self(std::sync::atomic::AtomicBool::new(false))
+        Self(Mutex::new(HashSet::new()))
     }
 
-    /// Mark that the next sidecar exit is an intentional restart, not a quit.
-    fn begin(&self) {
-        self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    /// Mark one exact generation's exit as an intentional restart. A newer
+    /// generation can exit first without consuming the old one's handoff.
+    fn begin(&self, generation: u64) {
+        self.0
+            .lock()
+            .expect("restart mutex poisoned")
+            .insert(generation);
     }
 
-    /// Returns true (and clears the flag) if a restart was in progress.
-    fn consume(&self) -> bool {
-        self.0.swap(false, std::sync::atomic::Ordering::SeqCst)
+    fn consume(&self, generation: u64) -> bool {
+        self.0
+            .lock()
+            .expect("restart mutex poisoned")
+            .remove(&generation)
+    }
+}
+
+/// Marks a child that the shell is stopping because startup already failed.
+/// Its clean SIGTERM exit must leave the tray in Failed rather than exit the app.
+struct SidecarFailureStop(Mutex<HashSet<u64>>);
+
+impl SidecarFailureStop {
+    fn new() -> Self {
+        Self(Mutex::new(HashSet::new()))
+    }
+
+    fn begin(&self, generation: u64) {
+        self.0
+            .lock()
+            .expect("failure-stop mutex poisoned")
+            .insert(generation);
+    }
+
+    fn consume(&self, generation: u64) -> bool {
+        self.0
+            .lock()
+            .expect("failure-stop mutex poisoned")
+            .remove(&generation)
     }
 }
 
@@ -684,12 +1067,18 @@ impl ShellApiKey {
 /// Windows). The previous implementation opened `/dev/urandom` directly,
 /// which does not exist on Windows and would panic the shell at startup —
 /// the single hardest Windows-parity blocker in this file.
-fn generate_shell_api_key() -> String {
+fn random_hex() -> String {
     let mut buf = [0u8; 16];
-    getrandom::fill(&mut buf)
-        .expect("could not read OS CSPRNG for shell api key");
-    let hex: String = buf.iter().map(|b| format!("{:02x}", b)).collect();
-    format!("mxlshell_{}", hex)
+    getrandom::fill(&mut buf).expect("could not read OS CSPRNG");
+    buf.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn generate_shell_api_key() -> String {
+    format!("mxlshell_{}", random_hex())
+}
+
+fn generate_nonce() -> String {
+    random_hex()
 }
 
 /// Streaming event the dashboard subscriber sends down the
@@ -739,12 +1128,10 @@ fn dashboard_poll_interval(payload: &serde_json::Value) -> Duration {
 /// Returns the parsed JSON body on 2xx, an error string otherwise.
 async fn fetch_token_usage(
     client: &reqwest::Client,
+    endpoint: SidecarEndpoint,
     period: &str,
 ) -> Result<serde_json::Value, String> {
-    let url = format!(
-        "http://127.0.0.1:{port}/token-usage?period={period}",
-        port = SIDECAR_PORT,
-    );
+    let url = endpoint.http_url(&format!("/token-usage?period={period}"));
     let response = client.get(&url).send().await.map_err(|e| e.to_string())?;
     if !response.status().is_success() {
         return Err(format!("status {}", response.status()));
@@ -766,6 +1153,7 @@ async fn fetch_token_usage(
 /// require the dashboard to re-subscribe.
 #[tauri::command]
 async fn subscribe_token_usage(
+    endpoint: State<'_, ManagedEndpoint>,
     period: String,
     on_event: Channel<TokenUsageEvent>,
 ) -> Result<(), String> {
@@ -776,7 +1164,19 @@ async fn subscribe_token_usage(
     let period = canonical_period(&period);
 
     loop {
-        let wait = match fetch_token_usage(&client, period).await {
+        let Some(current) = endpoint.current() else {
+            if on_event
+                .send(TokenUsageEvent::Error {
+                    message: "sidecar is not ready".to_string(),
+                })
+                .is_err()
+            {
+                return Ok(());
+            }
+            tokio::time::sleep(DASHBOARD_RETRY_INTERVAL).await;
+            continue;
+        };
+        let wait = match fetch_token_usage(&client, current, period).await {
             Ok(payload) => {
                 let wait = dashboard_poll_interval(&payload);
                 if on_event
@@ -824,45 +1224,57 @@ struct SetupStatusResponse {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // The merged context contains dev/test `--config` overrides. It must exist
+    // before the builder so plugin and command registration can be profile-safe.
+    let mut context = tauri::generate_context!();
+    let profile = AppProfile::from_identifier(&context.config().identifier);
+    if let Some(data_dir) =
+        profile_data_override(profile).expect("could not resolve Maximal's app-data directory")
+    {
+        // Redirect only app_data_dir. In particular, keep local_data unset so
+        // existing Windows/Linux webview storage remains identifier-scoped.
+        context.config_mut().app.app_directories_override =
+            Some(AppDirectoriesOverride::Directories(AppDirectoryOverrides {
+                data: Some(data_dir),
+                ..Default::default()
+            }));
+    }
     let builder = tauri::Builder::default()
         // MUST be the FIRST plugin registered. The single-instance
         // plugin's callback fires as part of plugin init; registering
         // it after another plugin lets the second-launch handler race
-        // shell startup. Semantics:
-        //   * argv contains "--replace" → existing instance shuts down
-        //     gracefully (same path as the tray Quit item, minus the
-        //     confirm dialog) so the second process can claim :4141.
-        //   * otherwise → focus the most-likely-visible window
-        //     (Settings preferred, Dashboard fallback, open Settings
-        //     if neither exists yet). The second process exits silently.
-        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
-            let wants_replace = argv.iter().any(|a| a == "--replace");
-            if wants_replace {
-                graceful_shutdown(app);
-            } else {
-                focus_or_open_main_window(app);
-            }
+        // shell startup. The second process always exits after notifying this
+        // callback, so it cannot be used as a replacement handoff. Focus the
+        // existing profile; the development launcher stops its prior profile
+        // before starting Tauri when replacement is required.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            focus_or_open_main_window(app);
         }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init());
-    // In-place updates (Windows and macOS, see IN_PLACE_UPDATE). Reads `pubkey`
-    // and `requireSignedVersion` from `plugins.updater` in tauri.conf.json;
-    // the endpoint is set per check from the app's release channel.
-    let builder = if IN_PLACE_UPDATE {
+    // In-place updates are a production capability, not merely an OS one.
+    // Keep the updater's default comparator: enabling `semver` would change the
+    // signed-version comparison contract used by the existing manifests.
+    let builder = if profile.updates_enabled() && IN_PLACE_UPDATE {
         builder.plugin(tauri_plugin_updater::Builder::new().build())
     } else {
         builder
     };
-    let app = builder
+    let builder = builder
+        .manage(profile)
+        .manage(ManagedEndpoint::new())
         .manage(Sidecar::new())
         .manage(AppStatus::new())
         .manage(ShellApiKey::new())
+        .manage(AppExiting::new())
+        .manage(PendingWindowOpen::new())
         .manage(SetupPromptShown::new())
         .manage(StartupAnnounced::new())
         .manage(SplashDismissed::new())
         .manage(SidecarRestarting::new())
+        .manage(SidecarFailureStop::new())
         .manage(LastRejection::new())
         .manage(LatestUpdate::new())
         .manage(UpdateInstall::new())
@@ -871,8 +1283,9 @@ pub fn run() {
         .manage(LastSidecarError::new())
         .manage(LocaleState::new())
         .manage(DockVisibilityState::new())
-        .on_menu_event(handle_menu_event)
-        .invoke_handler(tauri::generate_handler![
+        .on_menu_event(handle_menu_event);
+    let builder = if profile.updates_enabled() {
+        builder.invoke_handler(tauri::generate_handler![
             open_settings_at,
             open_dashboard,
             reveal_config_dir,
@@ -888,7 +1301,30 @@ pub fn run() {
             install_update,
             refresh_update_status,
         ])
-        .setup(|app| {
+    } else {
+        builder.invoke_handler(tauri::generate_handler![
+            open_settings_at,
+            open_dashboard,
+            reveal_config_dir,
+            reveal_logs_dir,
+            restart_sidecar,
+            uninstall_maximal,
+            get_shell_api_key,
+            subscribe_token_usage,
+            set_locale,
+            get_dock_visibility,
+            set_dock_visibility,
+        ])
+    };
+    let app = builder
+        .setup(move |app| {
+            let data_dir = app.path().app_data_dir()?;
+            let preferred_port = (!profile.updates_enabled())
+                .then(|| read_preferred_port(&data_dir))
+                .flatten();
+            app.manage(AppDataDir(data_dir));
+            app.state::<ManagedEndpoint>()
+                .set_preferred_port(preferred_port);
             // Seed persisted Dock/taskbar visibility mode ("always" by default,
             // or "when-window-open"). Applied immediately via
             // update_activation_policy below.
@@ -954,17 +1390,11 @@ pub fn run() {
                 return Ok(());
             }
 
-            // Kick off the polling task. Tokio task (via Tauri's
-            // async_runtime) — cheap, doesn't need its own thread, and
-            // reqwest's async client integrates cleanly.
-            let handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                poll_sidecar_status(handle).await;
-            });
-
+            // The authenticated @@MAXIMAL_READY@@ line starts status polling;
+            // until then no endpoint or remote IPC capability is exposed.
             Ok(())
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building tauri application");
 
     app.run(|app_handle, event| match event {
@@ -980,14 +1410,15 @@ pub fn run() {
             // interaction (last window closed), not by us; veto it so the
             // tray-only app keeps running.
             //
-            // Intentional quits all route through `app.exit(0)` (tray Quit,
-            // clean sidecar exit, single-instance `--replace`), which yields
-            // `code == Some(_)`. Those proceed and reach `kill_sidecar`.
+            // Intentional quits all route through `app.exit(0)` (tray Quit or
+            // clean sidecar exit), which yields `code == Some(_)`. Those
+            // proceed and reach `kill_sidecar`.
             if code.is_none() {
                 api.prevent_exit();
                 return;
             }
             // Sole sidecar-kill site for a real shutdown.
+            app_handle.state::<AppExiting>().begin();
             kill_sidecar(app_handle);
         }
         // macOS delivers Reopen when the app is re-activated — clicking its
@@ -1010,37 +1441,43 @@ pub fn run() {
     });
 }
 
-/// Environment the sidecar gets on this platform only. On Linux the proxy
-/// listens on loopback (`HOST=127.0.0.1`), like the packaged user service;
-/// without HOST it binds every interface. macOS and Windows are unchanged.
-fn sidecar_platform_env() -> &'static [(&'static str, &'static str)] {
-    if cfg!(target_os = "linux") {
-        &[("HOST", "127.0.0.1")]
-    } else {
-        &[]
-    }
-}
-
 fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
     // sidecar("maximal") resolves `maximal` next to this executable: the
     // arch-suffixed `bundle.externalBin` copy Tauri places there on macOS and
     // Windows, and the `maximal` package's /usr/bin/maximal for the Linux
     // maximal-desktop package (which bundles no sidecar).
-    let port = SIDECAR_PORT.to_string();
+    let profile = *app.state::<AppProfile>();
+    let spawn = app
+        .state::<ManagedEndpoint>()
+        .begin_generation(profile);
+    let port = spawn.requested_port.to_string();
+    let identifier = app.config().identifier.clone();
+    let args = if profile == AppProfile::Production {
+        vec!["start", "--replace", "--port", port.as_str()]
+    } else {
+        // Profile identity and preferred-port fallback own dev/test handoff;
+        // never evict a process merely because it answered on that port.
+        vec!["start", "--port", port.as_str()]
+    };
     let mut cmd = app
         .shell()
         .sidecar("maximal")
         .map_err(|e| tauri::Error::Anyhow(e.into()))?
-        // `--replace` makes the sidecar evict any existing maximal on
-        // the port (CLI instance, prior dev session) via the proxy's
-        // own graceful /_internal/shutdown protocol. Without this the
-        // Tauri shell would refuse to start when a CLI is already
-        // listening on :4141 — confusing UX for menu-bar users who
-        // shouldn't have to know which copy started first.
-        .args(["start", "--replace", "--port", port.as_str()]);
-
-    for (key, value) in sidecar_platform_env() {
-        cmd = cmd.env(key, value);
+        .args(args)
+        // Shell plugin 2.6+ contains ordinary descendants in a POSIX process
+        // group / Windows Job Object. The deliberately detached MCP broker has
+        // its own IPC and parent-watchdog shutdown contract.
+        .set_process_group(true)
+        .env("HOST", LOOPBACK_HOST)
+        .env("MAXIMAL_APP_PROFILE", profile.as_env())
+        .env("MAXIMAL_INSTANCE_ID", &identifier)
+        .env("MAXIMAL_INSTANCE_NONCE", &spawn.nonce)
+        .env(
+            "COPILOT_API_HOME",
+            app.state::<AppDataDir>().0.as_os_str(),
+        );
+    if profile != AppProfile::Production {
+        cmd = cmd.env("MAXIMAL_UPDATE_POLICY", "disabled");
     }
 
     // The settings + dashboard UIs are embedded directly in the sidecar
@@ -1052,7 +1489,7 @@ fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
     // Hand the shell's PID to the sidecar for its parent-death
     // watchdog. If the tray app is force-killed (Activity Monitor,
     // OOM, panic past Drop), the sidecar polls this PID and exits
-    // when it disappears so we don't orphan a proxy on :4141.
+    // when it disappears so we don't orphan a proxy on its selected port.
     cmd = cmd.env(
         "MAXIMAL_SIDECAR_PARENT_PID",
         std::process::id().to_string(),
@@ -1070,28 +1507,17 @@ fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
         .spawn()
         .map_err(|e| tauri::Error::Anyhow(e.into()))?;
 
-    app.state::<Sidecar>().set(child);
+    app.state::<Sidecar>().set(spawn.generation, child);
 
     let handle = app.clone();
+    let event_spawn = spawn.clone();
     tauri::async_runtime::spawn(async move {
+        let mut stdout = StdoutLines::default();
         while let Some(event) = rx.recv().await {
             match event {
-                CommandEvent::Stdout(line) => {
-                    let text = String::from_utf8_lossy(&line);
-                    // Structured boot-status lines (emitBootStatus in
-                    // src/start.ts) drive the splash's live status. Relay the
-                    // message and don't echo the raw marker to our own stdout.
-                    for raw in text.lines() {
-                        if let Some(msg) = raw.trim().strip_prefix(BOOT_STATUS_MARKER)
-                        {
-                            let _ = handle.emit_to(
-                                "splash",
-                                "splash:status",
-                                msg.trim().to_string(),
-                            );
-                        } else if !raw.is_empty() {
-                            println!("[maximal] {raw}");
-                        }
+                CommandEvent::Stdout(chunk) => {
+                    for line in stdout.push(&chunk) {
+                        handle_sidecar_stdout(&handle, &event_spawn, &identifier, &line);
                     }
                 }
                 CommandEvent::Stderr(line) => {
@@ -1105,6 +1531,12 @@ fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
                     }
                 }
                 CommandEvent::Terminated(payload) => {
+                    handle
+                        .state::<Sidecar>()
+                        .clear_generation(event_spawn.generation);
+                    handle
+                        .state::<ManagedEndpoint>()
+                        .clear_generation(event_spawn.generation);
                     eprintln!("[maximal] sidecar exited: {:?}", payload);
                     // An in-place update stopped it so the installer can
                     // replace its executable. Tell the update it's gone and
@@ -1113,14 +1545,56 @@ fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
                         let _ = tx.send(());
                         break;
                     }
+                    // A startup timeout or capability failure deliberately
+                    // stopped this generation. Its clean SIGTERM exit must keep
+                    // the shell's Failed state instead of quitting the app.
+                    if handle
+                        .state::<SidecarFailureStop>()
+                        .consume(event_spawn.generation)
+                    {
+                        eprintln!("[maximal] (startup failure — keeping the app in Failed)");
+                        break;
+                    }
                     // Intentional restart (account switch / sign-in / sign-out
-                    // reboot)? respawn_sidecar set this flag before SIGTERMing
-                    // the old child, and is already spawning the replacement.
-                    // Keep the app alive — DON'T treat this exit as a quit.
-                    if handle.state::<SidecarRestarting>().consume() {
+                    // reboot)? Start the replacement only after this termination
+                    // event proves the old listener released the persisted port.
+                    if handle
+                        .state::<SidecarRestarting>()
+                        .consume(event_spawn.generation)
+                    {
+                        eprintln!("[maximal] intentional restart — starting replacement");
+                        if let Err(err) = spawn_sidecar(&handle) {
+                            eprintln!("[shell] sidecar respawn failed: {err}");
+                            apply_state(&handle, SidecarState::Failed);
+                        }
+                        break;
+                    }
+                    let profile = *handle.state::<AppProfile>();
+                    if payload.code != Some(0)
+                        && !handle.state::<AppExiting>().get()
+                        && profile != AppProfile::Production
+                        && handle
+                            .state::<ManagedEndpoint>()
+                            .prepare_dynamic_retry(
+                                event_spawn.generation,
+                                event_spawn.requested_port,
+                            )
+                    {
                         eprintln!(
-                            "[maximal] (intentional restart — keeping app alive for the respawn)"
+                            "[shell] preferred port {} failed before readiness; retrying with a kernel-selected port",
+                            event_spawn.requested_port
                         );
+                        let preferred_file = preferred_port_file(&handle.state::<AppDataDir>().0);
+                        if let Err(err) = std::fs::remove_file(preferred_file) {
+                            if err.kind() != std::io::ErrorKind::NotFound {
+                                eprintln!("[shell] could not clear failed preferred port: {err}");
+                            }
+                        }
+                        apply_state(&handle, SidecarState::Starting);
+                        if let Err(err) = spawn_sidecar(&handle) {
+                            eprintln!("[shell] dynamic-port retry failed: {err}");
+                            apply_state(&handle, SidecarState::Failed);
+                        }
                         break;
                     }
                     // Clean exit signals an intentional shutdown — either
@@ -1134,9 +1608,11 @@ fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
                     // overlapping with our own ExitRequested path is
                     // fine.
                     //
-                    // Non-zero / signal-killed exits indicate a real
-                    // failure: stay alive in Failed state so the user
-                    // can see the tray badge and reach the logs.
+                    // A clean sidecar exit is an intentional whole-app shutdown.
+                    // Development shells also exit after a crash so the external
+                    // app:dev launcher can replace them without signaling a stale
+                    // recorded PID. Production/test builds keep the tray alive in
+                    // Failed state so the user can inspect logs and retry.
                     if payload.code == Some(0) {
                         handle.exit(0);
                     } else {
@@ -1148,8 +1624,11 @@ fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
                         // guarded and intent-neutral: it only removes the
                         // base URL we wrote, and leaves the persisted routing
                         // intent alone so a future restart re-applies it.
-                        reconcile_claude_code_revert(&handle);
-                        apply_state(&handle, SidecarState::Failed);
+                        let exit_after_revert = profile == AppProfile::Development;
+                        reconcile_claude_code_revert(&handle, exit_after_revert);
+                        if !exit_after_revert {
+                            apply_state(&handle, SidecarState::Failed);
+                        }
                     }
                     break;
                 }
@@ -1158,7 +1637,118 @@ fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
         }
     });
 
+    let timeout_handle = app.clone();
+    let generation = spawn.generation;
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(SIDECAR_READY_TIMEOUT).await;
+        if timeout_handle
+            .state::<ManagedEndpoint>()
+            .expire_pending(generation)
+        {
+            let reason = format!(
+                "sidecar did not emit a valid {READY_MARKER} line within {} seconds",
+                SIDECAR_READY_TIMEOUT.as_secs()
+            );
+            eprintln!("[shell] {reason}");
+            timeout_handle
+                .state::<LastSidecarError>()
+                .set(Some(reason));
+            timeout_handle
+                .state::<SidecarFailureStop>()
+                .begin(generation);
+            kill_sidecar(&timeout_handle);
+            apply_state(&timeout_handle, SidecarState::Failed);
+        }
+    });
+
     Ok(())
+}
+
+fn handle_sidecar_stdout(
+    app: &AppHandle,
+    spawn: &SpawnGeneration,
+    identifier: &str,
+    raw: &str,
+) {
+    let line = raw.trim();
+    if let Some(payload) = line.strip_prefix(READY_MARKER) {
+        let ready = match serde_json::from_str::<SidecarReady>(payload.trim()) {
+            Ok(ready) => ready,
+            Err(err) => {
+                eprintln!("[shell] ignored malformed sidecar ready line: {err}");
+                return;
+            }
+        };
+        if let Err(reason) = validate_ready(&ready, spawn, identifier) {
+            eprintln!("[shell] ignored invalid sidecar ready line: {reason}");
+            return;
+        }
+
+        let endpoints = app.state::<ManagedEndpoint>();
+        if !endpoints.is_pending(spawn.generation) {
+            return;
+        }
+        if *app.state::<AppProfile>() != AppProfile::Production {
+            if let Err(err) = write_preferred_port(&app.state::<AppDataDir>().0, ready.port) {
+                let reason = format!("could not persist preferred sidecar port: {err}");
+                eprintln!("[shell] {reason}");
+                app.state::<LastSidecarError>().set(Some(reason));
+                endpoints.expire_pending(spawn.generation);
+                app.state::<SidecarFailureStop>().begin(spawn.generation);
+                kill_sidecar(app);
+                apply_state(app, SidecarState::Failed);
+                return;
+            }
+        }
+        if !endpoints.has_capability(ready.port) {
+            if let Err(err) = register_remote_capability(app, ready.port) {
+                let reason = format!("could not register sidecar capability: {err}");
+                eprintln!("[shell] {reason}");
+                app.state::<LastSidecarError>().set(Some(reason));
+                endpoints.expire_pending(spawn.generation);
+                app.state::<SidecarFailureStop>().begin(spawn.generation);
+                kill_sidecar(app);
+                apply_state(app, SidecarState::Failed);
+                return;
+            }
+            endpoints.mark_capability(ready.port);
+        }
+        if endpoints.activate(spawn.generation, ready.port) {
+            let endpoint = SidecarEndpoint {
+                generation: spawn.generation,
+                port: ready.port,
+            };
+            if app.state::<PendingWindowOpen>().take() {
+                focus_or_open_main_window(app);
+            }
+            let handle = app.clone();
+            tauri::async_runtime::spawn(async move {
+                poll_sidecar_status(handle, endpoint).await;
+            });
+        }
+        return;
+    }
+
+    if let Some(message) = line.strip_prefix(BOOT_STATUS_MARKER) {
+        let _ = app.emit_to("splash", "splash:status", message.trim().to_string());
+    } else if !raw.is_empty() {
+        println!("[maximal] {raw}");
+    }
+}
+
+fn register_remote_capability(app: &AppHandle, port: u16) -> tauri::Result<()> {
+    let capability = CapabilityBuilder::new(format!("sidecar-loopback-{port}"))
+        .local(false)
+        .remote(format!("http://localhost:{port}/*"))
+        .windows([SETTINGS_WINDOW_LABEL, DASHBOARD_WINDOW_LABEL])
+        .permission("core:default")
+        .permission("core:window:default")
+        .permission("core:window:allow-start-dragging")
+        .permission("core:window:allow-internal-toggle-maximize")
+        .permission("core:webview:allow-create-webview-window")
+        .permission("opener:default")
+        .permission("default");
+    app.add_capability(capability)
 }
 
 /// Run `maximal app claude-code --disable` as a one-shot sidecar
@@ -1167,30 +1757,71 @@ fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
 /// does it. Best-effort: a missing binary or non-zero exit is logged and
 /// swallowed (the worst case is a stranded base URL the next clean boot
 /// re-applies or the user toggles off). Fire-and-forget on a Tokio task so
-/// the Terminated handler stays synchronous.
-fn reconcile_claude_code_revert(app: &AppHandle) {
+/// the Terminated handler stays synchronous. Development waits for this
+/// one-shot before exiting, allowing app:dev to replace the failed shell.
+fn reconcile_claude_code_revert(app: &AppHandle, exit_after: bool) {
     let command = match app.shell().sidecar("maximal") {
-        Ok(c) => c.args(["app", "claude-code", "--disable"]),
+        Ok(c) => c
+            .args(["app", "claude-code", "--disable"])
+            .set_process_group(true)
+            .env("HOST", LOOPBACK_HOST)
+            .env(
+                "COPILOT_API_HOME",
+                app.state::<AppDataDir>().0.as_os_str(),
+            ),
         Err(err) => {
             eprintln!("[shell] could not build claude-code revert command: {err}");
+            if exit_after {
+                app.exit(1);
+            }
             return;
         }
     };
+    let (mut events, child) = match command.spawn() {
+        Ok(spawned) => spawned,
+        Err(err) => {
+            eprintln!("[shell] claude-code revert failed to start: {err}");
+            if exit_after {
+                app.exit(1);
+            }
+            return;
+        }
+    };
+    let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        match command.output().await {
-            Ok(out) if out.status.success() => {
+        let completed = tokio::time::timeout(Duration::from_secs(5), async {
+            let mut stderr = String::new();
+            while let Some(event) = events.recv().await {
+                match event {
+                    CommandEvent::Stderr(chunk) if stderr.len() < 4096 => {
+                        stderr.push_str(&String::from_utf8_lossy(&chunk));
+                    }
+                    CommandEvent::Terminated(payload) => {
+                        return (payload.code, stderr);
+                    }
+                    _ => {}
+                }
+            }
+            (None, stderr)
+        })
+        .await;
+
+        match completed {
+            Ok((Some(0), _)) => {
                 eprintln!("[shell] reverted Claude Code base URL after sidecar crash");
             }
-            Ok(out) => {
+            Ok((code, stderr)) => {
                 eprintln!(
-                    "[shell] claude-code revert exited {:?}: {}",
-                    out.status.code(),
-                    String::from_utf8_lossy(&out.stderr),
+                    "[shell] claude-code revert exited {code:?}: {stderr}",
                 );
             }
-            Err(err) => {
-                eprintln!("[shell] claude-code revert failed to run: {err}");
+            Err(_) => {
+                eprintln!("[shell] claude-code revert exceeded 5s; terminating it");
+                let _ = child.kill();
             }
+        }
+        if exit_after {
+            app.exit(1);
         }
     });
 }
@@ -1226,10 +1857,9 @@ fn extract_error_reason(chunk: &str) -> Option<String> {
 
 /// Graceful sidecar shutdown.
 ///
-/// `CommandChild::kill()` from tauri-plugin-shell-2.3.5 is SIGKILL
-/// under the hood (see process/mod.rs:78 — it calls `libc::kill(pid,
-/// SIGKILL)` directly, not SIGTERM). That gives the Bun-compiled
-/// sidecar no chance to flush logs, close its listening socket, or
+/// `CommandChild::kill()` is intentionally the hard-stop path (and, with
+/// process groups enabled, ends the sidecar's non-detached process tree). That
+/// gives the Bun-compiled sidecar no chance to flush logs, close its listening socket, or
 /// shut down its rate-limit/state caches cleanly. We want a real
 /// graceful protocol:
 ///
@@ -1282,7 +1912,7 @@ fn kill_sidecar(app: &AppHandle) -> bool {
         // in the shared Sidecar slot. respawn_sidecar calls spawn_sidecar
         // immediately after us, which set()s the REPLACEMENT child into that
         // slot; if this escalation re-read the slot it would SIGKILL the FRESH
-        // sidecar ~3s after a restart (the proxy would vanish from :4141 and
+        // sidecar ~3s after a restart (the proxy would vanish from its port and
         // the whole UI would "Load failed" — the account-switch/sign-in/
         // sign-out reboot bug). Holding the specific old child here SIGKILLs
         // only it. Dropping a CommandChild does NOT kill its process, so
@@ -1337,7 +1967,7 @@ fn kill_sidecar(app: &AppHandle) -> bool {
 /// transitions. First successful response within 30s flips Starting to
 /// Running{Un,}Authenticated; after that, slower 5s polling watches
 /// for auth changes initiated from Settings.
-async fn poll_sidecar_status(app: AppHandle) {
+async fn poll_sidecar_status(app: AppHandle, endpoint: SidecarEndpoint) {
     let client = match reqwest::Client::builder()
         .timeout(Duration::from_secs(2))
         .build()
@@ -1350,13 +1980,16 @@ async fn poll_sidecar_status(app: AppHandle) {
         }
     };
 
-    let url = format!("http://127.0.0.1:{SIDECAR_PORT}/setup-status");
+    let url = endpoint.http_url("/setup-status");
 
     // Phase 1: fast poll until first success or 30s timeout.
     let startup_deadline =
         std::time::Instant::now() + Duration::from_secs(30);
     let mut first_seen = false;
     while std::time::Instant::now() < startup_deadline {
+        if app.state::<ManagedEndpoint>().current() != Some(endpoint) {
+            return;
+        }
         if let Some(status) = fetch_setup_status(&client, &url).await {
             apply_setup_status(&app, &status);
             first_seen = true;
@@ -1379,16 +2012,13 @@ async fn poll_sidecar_status(app: AppHandle) {
     // end-to-end, so the tray icon updates well before they look at it.
     // The same loop also fetches the auth-status sidecar to drive the
     // upstream-rejection tray badge + OS notification.
-    let auth_status_url = format!(
-        "http://127.0.0.1:{SIDECAR_PORT}/settings/api/auth/github/status",
-    );
-    let update_status_url = update_status_endpoint(false);
-    let working_notice_url = format!(
-        "http://127.0.0.1:{SIDECAR_PORT}/settings/api/notices/working",
-    );
-    let requests_summary_url = format!(
-        "http://127.0.0.1:{SIDECAR_PORT}/settings/api/requests/summary",
-    );
+    let auth_status_url = endpoint.http_url("/settings/api/auth/github/status");
+    let update_status_url = app
+        .state::<AppProfile>()
+        .updates_enabled()
+        .then(|| update_status_endpoint(endpoint, false));
+    let working_notice_url = endpoint.http_url("/settings/api/notices/working");
+    let requests_summary_url = endpoint.http_url("/settings/api/requests/summary");
     // Periodic update check: a menu-bar app can stay open for days, well past a
     // new release, so we re-check on an interval rather than once per launch.
     // `next_update_check` is when the next check is due (None = now, so the
@@ -1398,7 +2028,11 @@ async fn poll_sidecar_status(app: AppHandle) {
     let mut next_update_check: Option<std::time::Instant> = None;
     loop {
         tokio::time::sleep(Duration::from_secs(5)).await;
-        // Stop polling if we've already concluded the sidecar is gone.
+        // Stop when this generation was replaced, even if the app has already
+        // returned to Starting for its successor.
+        if app.state::<ManagedEndpoint>().current() != Some(endpoint) {
+            return;
+        }
         let current = app.state::<AppStatus>().get();
         if matches!(current, SidecarState::Failed | SidecarState::Stopped) {
             return;
@@ -1420,10 +2054,10 @@ async fn poll_sidecar_status(app: AppHandle) {
         let update_due =
             next_update_check.is_none_or(|t| std::time::Instant::now() >= t);
         if update_due {
-            if let Some(wait) =
-                check_for_update(&app, &client, &update_status_url).await
-            {
-                next_update_check = Some(std::time::Instant::now() + wait);
+            if let Some(update_url) = update_status_url.as_deref() {
+                if let Some(wait) = check_for_update(&app, &client, update_url).await {
+                    next_update_check = Some(std::time::Instant::now() + wait);
+                }
             }
         }
         // A single failed poll during phase 2 is ignored — the proxy
@@ -1760,8 +2394,8 @@ fn manual_check_outcome(payload: Option<&serde_json::Value>) -> ManualCheck {
 
 /// The sidecar's update-status URL; `force` asks for a fresh check instead of
 /// the cached one.
-fn update_status_endpoint(force: bool) -> String {
-    let base = format!("http://127.0.0.1:{SIDECAR_PORT}/settings/api/update-status");
+fn update_status_endpoint(endpoint: SidecarEndpoint, force: bool) -> String {
+    let base = endpoint.http_url("/settings/api/update-status");
     if force {
         format!("{base}?force=1")
     } else {
@@ -1772,12 +2406,20 @@ fn update_status_endpoint(force: bool) -> String {
 /// Ask the sidecar for a fresh update check and put the answer on the tray.
 /// None when the sidecar couldn't be asked.
 async fn force_update_check(app: &AppHandle) -> Option<serde_json::Value> {
+    if !app.state::<AppProfile>().updates_enabled() {
+        return None;
+    }
+    let endpoint = app.state::<ManagedEndpoint>().current()?;
     let client = reqwest::Client::builder()
         .timeout(UPDATE_FORCE_TIMEOUT)
         .build()
         .ok()?;
-    let payload =
-        fetch_update_payload(app, &client, &update_status_endpoint(true)).await?;
+    let payload = fetch_update_payload(
+        app,
+        &client,
+        &update_status_endpoint(endpoint, true),
+    )
+    .await?;
     if let UpdateCheck::Resolved(next) = parse_update_status(&payload) {
         apply_update(app, next);
     }
@@ -2591,7 +3233,10 @@ fn build_menu(
     // Clicking it installs in place on Windows and macOS, shows the apt command
     // for an apt install, and opens the download page elsewhere (see
     // start_update).
-    let update = app.state::<LatestUpdate>().get();
+    let updates_enabled = app.state::<AppProfile>().updates_enabled();
+    let update = updates_enabled
+        .then(|| app.state::<LatestUpdate>().get())
+        .flatten();
     let upgrade_item = match &update {
         Some(u) => Some(MenuItem::with_id(
             app,
@@ -2659,11 +3304,13 @@ fn build_menu(
             // Updates are their own section BELOW the primary action — never
             // above sign-in: "Update to X.Y.Z…" when one is available, then
             // "Check for updates".
-            items.push(&sep_upgrade);
-            if let Some(up) = &upgrade_item {
-                items.push(up);
+            if updates_enabled {
+                items.push(&sep_upgrade);
+                if let Some(up) = &upgrade_item {
+                    items.push(up);
+                }
+                items.push(&check_item);
             }
-            items.push(&check_item);
             items.push(&sep1);
             items.push(&dashboard_item);
             items.push(&settings_item);
@@ -2693,11 +3340,13 @@ fn build_menu(
             // Updates are their own section BELOW the account line — never
             // above it: "Update to X.Y.Z…" when one is available, then
             // "Check for updates".
-            items.push(&sep_upgrade);
-            if let Some(up) = &upgrade_item {
-                items.push(up);
+            if updates_enabled {
+                items.push(&sep_upgrade);
+                if let Some(up) = &upgrade_item {
+                    items.push(up);
+                }
+                items.push(&check_item);
             }
-            items.push(&check_item);
             items.push(&sep1);
             items.push(&dashboard_item);
             items.push(&settings_item);
@@ -2783,6 +3432,9 @@ fn open_update_url(app: &AppHandle) {
 /// Diagnostics, which shows the apt command to copy; Maximal never runs apt
 /// or asks for root. Anything else opens the download page.
 fn start_update(app: &AppHandle) {
+    if !app.state::<AppProfile>().updates_enabled() {
+        return;
+    }
     if !IN_PLACE_UPDATE {
         let apt = app
             .state::<LatestUpdate>()
@@ -3118,7 +3770,7 @@ async fn stop_mcp_brokers_for_update() {}
 /// Only acts from Failed/Stopped so a stray click while healthy can't tear
 /// down a working sidecar. Reuses kill_sidecar's SIGTERM→SIGKILL path to
 /// reap any half-dead child before respawning so we don't leak a process or
-/// collide on :4141.
+/// collide on the selected port.
 fn retry_startup(app: &AppHandle) {
     let current = app.state::<AppStatus>().get();
     if !matches!(current, SidecarState::Failed | SidecarState::Stopped) {
@@ -3143,32 +3795,32 @@ fn respawn_sidecar(app: &AppHandle) {
     app.state::<LastSidecarError>().set(None);
     dismiss_splash(app);
 
-    // Mark this as an intentional restart BEFORE we SIGTERM the child, so the
-    // old sidecar's clean exit isn't mistaken for a user quit (which would
-    // bring the whole app down — see the Terminated handler in spawn_sidecar).
-    app.state::<SidecarRestarting>().begin();
-
-    // Reap the current child (healthy, hung, or mid-crash) so the respawn binds
-    // cleanly. No-op if already gone. spawn_sidecar also passes --replace as a
-    // backstop against a not-yet-released port. With no child to stop, no
-    // exit will consume the restart mark, so clear it here; otherwise it
-    // would swallow the replacement's eventual exit.
-    if !kill_sidecar(app) {
-        app.state::<SidecarRestarting>().consume();
+    // Mark this exact generation as an intentional restart BEFORE SIGTERM, so
+    // a replacement that exits first cannot consume the old process's handoff.
+    let stopping_generation = app.state::<Sidecar>().generation();
+    if let Some(generation) = stopping_generation {
+        app.state::<SidecarRestarting>().begin(generation);
     }
 
+    // Reap the current child (healthy, hung, or mid-crash). Every replacement
+    // requests the already-selected port; it does not depend on `--replace` for
+    // profile handoff.
+    let waiting_for_exit = kill_sidecar(app);
     apply_state(app, SidecarState::Starting);
-
+    if waiting_for_exit {
+        // The matching Terminated event starts the replacement after the old
+        // listener has actually released the persisted port.
+        return;
+    }
+    if let Some(generation) = stopping_generation {
+        app.state::<SidecarRestarting>().consume(generation);
+    }
     if let Err(err) = spawn_sidecar(app) {
         eprintln!("[shell] sidecar respawn failed: {err}");
         apply_state(app, SidecarState::Failed);
-        return;
     }
 
-    let handle = app.clone();
-    tauri::async_runtime::spawn(async move {
-        poll_sidecar_status(handle).await;
-    });
+    // The replacement generation starts polling after its validated ready line.
 }
 
 /// Opens (or focuses) the dashboard webview pointed at the sidecar's
@@ -3182,7 +3834,11 @@ fn open_settings_window(app: &AppHandle, section: Option<&str>) {
     // The settings UI is served by the sidecar at /ui/settings/ (embedded
     // in the binary), in dev and prod alike — there is no separate dev
     // server to point at anymore.
-    let settings_origin = format!("http://localhost:{SIDECAR_PORT}");
+    let Some(endpoint) = app.state::<ManagedEndpoint>().current() else {
+        eprintln!("[shell] cannot open Settings before the sidecar is ready");
+        return;
+    };
+    let settings_origin = endpoint.browser_origin();
     let url_string = match section {
         Some(s) => format!("{settings_origin}/ui/settings/#{s}"),
         None => format!("{settings_origin}/ui/settings/"),
@@ -3238,49 +3894,10 @@ fn open_settings_window(app: &AppHandle, section: Option<&str>) {
     }
 }
 
-/// The maximal app-data root, resolved to stay in LOCKSTEP with the
-/// sidecar's own path convention (src/lib/paths.ts). Both must agree or
-/// the tray's "reveal" menu items open a different folder than the one
-/// the proxy reads/writes.
-///
-///   * `COPILOT_API_HOME` (env) wins on every platform when set.
-///   * Windows → `%APPDATA%\maximal` (dictated path contract).
-///   * Unix (macOS/Linux) → `~/.local/share/maximal`.
-///
-/// Returns None only if we can't even resolve the home/appdata base.
-fn maximal_data_dir(app: &AppHandle) -> Option<std::path::PathBuf> {
-    if let Some(home) = std::env::var_os("COPILOT_API_HOME") {
-        let p = std::path::PathBuf::from(home);
-        if !p.as_os_str().is_empty() {
-            return Some(p);
-        }
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        // %APPDATA% is the per-user roaming app-data root
-        // (C:\Users\<user>\AppData\Roaming). Falls back to Tauri's
-        // resolver if the env var is somehow unset.
-        if let Some(appdata) = std::env::var_os("APPDATA") {
-            let p = std::path::PathBuf::from(appdata);
-            if !p.as_os_str().is_empty() {
-                return Some(p.join("maximal"));
-            }
-        }
-        return app.path().app_data_dir().ok().map(|d| {
-            // app_data_dir() yields %APPDATA%\<identifier>; redirect to the
-            // sidecar's `maximal` folder so they stay in lockstep.
-            d.parent()
-                .map(|parent| parent.join("maximal"))
-                .unwrap_or_else(|| d.join("maximal"))
-        });
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        let home = app.path().home_dir().ok()?;
-        Some(home.join(".local").join("share").join("maximal"))
-    }
+/// The profile-specific app-data root resolved once during setup and passed
+/// explicitly to every sidecar as `COPILOT_API_HOME`.
+fn maximal_data_dir(app: &AppHandle) -> Option<PathBuf> {
+    Some(app.state::<AppDataDir>().0.clone())
 }
 
 fn do_reveal_config_dir(app: &AppHandle) {
@@ -3613,30 +4230,18 @@ fn request_quit(app: &AppHandle) {
         });
 }
 
-/// Graceful shutdown from the single-instance `--replace` path.
-///
-/// Reuses the same teardown path as the tray Quit item, MINUS the
-/// confirm dialog: a second `maximal --replace` invocation is the
-/// user (or a CLI/installer) explicitly asking the running instance
-/// to release :4141, so prompting them would just be in the way.
-///
-/// `app.exit(0)` routes through `RunEvent::ExitRequested` →
-/// `kill_sidecar` (SIGTERM + 3s SIGKILL escalation), which is exactly
-/// the cleanup we need. Kept as its own function so the intent of the
-/// single-instance callback stays legible.
-fn graceful_shutdown(app: &AppHandle) {
-    app.exit(0);
-}
-
 /// Focus an existing main window, or open Settings if none exists.
 ///
-/// Called from the single-instance plugin callback when the user
-/// re-launches Maximal without `--replace` — the natural "they double-
-/// clicked the dock icon" case. Settings is the default surface;
+/// Called from the single-instance plugin callback when the user relaunches
+/// Maximal. Settings is the default surface;
 /// Dashboard is the fallback if Settings isn't built yet but
 /// Dashboard is. If neither exists we open Settings fresh, which
 /// also runs `update_activation_policy` to bring the Dock icon back.
 fn focus_or_open_main_window(app: &AppHandle) {
+    if app.state::<ManagedEndpoint>().current().is_none() {
+        app.state::<PendingWindowOpen>().request();
+        return;
+    }
     for label in [SETTINGS_WINDOW_LABEL, DASHBOARD_WINDOW_LABEL] {
         if let Some(window) = app.get_webview_window(label) {
             present_window(app, &window);
@@ -3729,7 +4334,12 @@ async fn uninstall_maximal(app: AppHandle, purge: bool) -> Result<(), String> {
         .shell()
         .sidecar("maximal")
         .map_err(|err| format!("could not build uninstall command: {err}"))?
-        .args(args);
+        .args(args)
+        .env("HOST", LOOPBACK_HOST)
+        .env(
+            "COPILOT_API_HOME",
+            app.state::<AppDataDir>().0.as_os_str(),
+        );
     let output = command
         .output()
         .await
@@ -3790,8 +4400,8 @@ fn get_dock_visibility(state: State<'_, DockVisibilityState>) -> String {
 /// build (Windows, macOS) or opens the download page. The Settings window
 /// reads it for the button's tooltip.
 #[tauri::command]
-fn update_installs_in_place() -> bool {
-    IN_PLACE_UPDATE
+fn update_installs_in_place(profile: State<'_, AppProfile>) -> bool {
+    profile.updates_enabled() && IN_PLACE_UPDATE
 }
 
 /// Tauri command — Settings ran a fresh update check ("Check now"). The
@@ -3799,13 +4409,24 @@ fn update_installs_in_place() -> bool {
 /// tray's "Update to X.Y.Z…" item agrees with what Settings now shows.
 #[tauri::command]
 async fn refresh_update_status(app: AppHandle) {
+    if !app.state::<AppProfile>().updates_enabled() {
+        return;
+    }
+    let Some(endpoint) = app.state::<ManagedEndpoint>().current() else {
+        return;
+    };
     let Ok(client) = reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
         .build()
     else {
         return;
     };
-    let _ = check_for_update(&app, &client, &update_status_endpoint(false)).await;
+    let _ = check_for_update(
+        &app,
+        &client,
+        &update_status_endpoint(endpoint, false),
+    )
+    .await;
 }
 
 /// Tauri command — the topbar "Update to X.Y.Z" button. Runs the in-place
@@ -3814,6 +4435,9 @@ async fn refresh_update_status(app: AppHandle) {
 /// the webview opens the download page itself; on success it never returns.
 #[tauri::command]
 async fn install_update(app: AppHandle, on_step: Channel<UpdateStep>) -> UpdateOutcome {
+    if !app.state::<AppProfile>().updates_enabled() {
+        return UpdateOutcome::Unavailable;
+    }
     run_in_place_update(&app, |step| {
         let _ = on_step.send(step);
     })
@@ -3879,13 +4503,136 @@ mod tests {
     }
 
     #[test]
-    fn sidecar_listens_on_loopback_on_linux_only() {
-        let env = super::sidecar_platform_env();
-        if cfg!(target_os = "linux") {
-            assert_eq!(env, &[("HOST", "127.0.0.1")]);
-        } else {
-            assert!(env.is_empty(), "macOS and Windows keep their binding: {env:?}");
-        }
+    fn classifies_profiles_from_the_final_identifier() {
+        use super::{AppProfile, PRODUCTION_IDENTIFIER};
+        assert_eq!(
+            AppProfile::from_identifier(PRODUCTION_IDENTIFIER),
+            AppProfile::Production
+        );
+        assert_eq!(
+            AppProfile::from_identifier("co.stuffbucket.maximal.dev.maximal-0123abcd"),
+            AppProfile::Development
+        );
+        assert_eq!(
+            AppProfile::from_identifier("co.stuffbucket.maximal.test.unit"),
+            AppProfile::Test
+        );
+        assert_eq!(
+            AppProfile::from_identifier("com.example.unknown"),
+            AppProfile::Development
+        );
+        assert_eq!(AppProfile::Production.initial_port(), 4141);
+        assert_eq!(AppProfile::Development.initial_port(), 0);
+        assert_eq!(AppProfile::Test.initial_port(), 0);
+    }
+
+    #[test]
+    fn preserves_the_existing_localhost_webview_origin() {
+        use super::SidecarEndpoint;
+        let endpoint = SidecarEndpoint {
+            generation: 1,
+            port: 4141,
+        };
+        assert_eq!(endpoint.browser_origin(), "http://localhost:4141");
+    }
+
+    #[test]
+    fn failure_stop_is_scoped_to_one_generation() {
+        use super::SidecarFailureStop;
+        let failures = SidecarFailureStop::new();
+        failures.begin(7);
+        assert!(!failures.consume(6));
+        assert!(failures.consume(7));
+        assert!(!failures.consume(7));
+    }
+
+    #[test]
+    fn parses_chunked_ready_lines_and_validates_every_field() {
+        use super::{validate_ready, SidecarReady, SpawnGeneration, StdoutLines, READY_MARKER};
+        let spawn = SpawnGeneration {
+            generation: 1,
+            requested_port: 0,
+            nonce: "secret".into(),
+        };
+        let mut lines = StdoutLines::default();
+        assert!(lines.push(b"noise\n@@MAX").iter().any(|line| line == "noise"));
+        let parsed = lines.push(
+            b"IMAL_READY@@{\"protocol\":1,\"host\":\"127.0.0.1\",\"port\":43210,\"instanceId\":\"co.stuffbucket.maximal.dev.maximal-1\",\"nonce\":\"secret\"}\n",
+        );
+        let payload = parsed[0].strip_prefix(READY_MARKER).unwrap();
+        let ready: SidecarReady = serde_json::from_str(payload).unwrap();
+        assert!(validate_ready(
+            &ready,
+            &spawn,
+            "co.stuffbucket.maximal.dev.maximal-1"
+        )
+        .is_ok());
+
+        let mut invalid = ready;
+        invalid.protocol = 2;
+        assert!(validate_ready(&invalid, &spawn, "co.stuffbucket.maximal.dev.maximal-1").is_err());
+        invalid.protocol = 1;
+        invalid.nonce = "wrong".into();
+        assert!(validate_ready(&invalid, &spawn, "co.stuffbucket.maximal.dev.maximal-1").is_err());
+        invalid.nonce = "secret".into();
+        invalid.host = "0.0.0.0".into();
+        assert!(validate_ready(&invalid, &spawn, "co.stuffbucket.maximal.dev.maximal-1").is_err());
+        invalid.host = "127.0.0.1".into();
+        invalid.instance_id = "other".into();
+        assert!(validate_ready(&invalid, &spawn, "co.stuffbucket.maximal.dev.maximal-1").is_err());
+
+        invalid.instance_id = "co.stuffbucket.maximal.dev.maximal-1".into();
+        let fixed = SpawnGeneration {
+            generation: 2,
+            requested_port: 4141,
+            nonce: "secret".into(),
+        };
+        assert!(validate_ready(&invalid, &fixed, "co.stuffbucket.maximal.dev.maximal-1").is_err());
+    }
+
+    #[test]
+    fn persists_the_profile_preferred_port() {
+        use super::{read_preferred_port, write_preferred_port};
+        let dir = std::env::temp_dir().join(format!("maximal-port-test-{}", super::random_hex()));
+        write_preferred_port(&dir, 43210).unwrap();
+        assert_eq!(read_preferred_port(&dir), Some(43210));
+        std::fs::write(dir.join("sidecar-port"), "0\n").unwrap();
+        assert_eq!(read_preferred_port(&dir), None);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn reuses_the_selected_port_for_later_generations() {
+        use super::{AppProfile, ManagedEndpoint};
+        let endpoints = ManagedEndpoint::new();
+        let first = endpoints.begin_generation(AppProfile::Development);
+        assert_eq!(first.requested_port, 0);
+        assert!(endpoints.activate(first.generation, 43210));
+        let second = endpoints.begin_generation(AppProfile::Development);
+        assert_eq!(second.requested_port, 43210);
+        assert!(!endpoints.activate(first.generation, 43211));
+    }
+
+    #[test]
+    fn retries_a_persisted_port_only_before_registering_a_capability() {
+        use super::{AppProfile, ManagedEndpoint};
+        let endpoints = ManagedEndpoint::new();
+        endpoints.set_preferred_port(Some(43210));
+        let first = endpoints.begin_generation(AppProfile::Development);
+        assert_eq!(first.requested_port, 43210);
+        assert!(endpoints.prepare_dynamic_retry(first.generation, 43210));
+        assert_eq!(
+            endpoints
+                .begin_generation(AppProfile::Development)
+                .requested_port,
+            0
+        );
+
+        let endpoints = ManagedEndpoint::new();
+        endpoints.set_preferred_port(Some(43210));
+        let first = endpoints.begin_generation(AppProfile::Development);
+        endpoints.mark_capability(43210);
+        assert!(!endpoints.prepare_dynamic_retry(first.generation, 43210));
     }
 
     #[test]
@@ -4019,9 +4766,19 @@ mod tests {
 
     #[test]
     fn asks_for_a_fresh_check_only_when_forced() {
-        use super::update_status_endpoint;
-        assert!(update_status_endpoint(false).ends_with("/settings/api/update-status"));
-        assert!(update_status_endpoint(true).ends_with("/settings/api/update-status?force=1"));
+        use super::{update_status_endpoint, SidecarEndpoint};
+        let endpoint = SidecarEndpoint {
+            generation: 1,
+            port: 43210,
+        };
+        assert_eq!(
+            update_status_endpoint(endpoint, false),
+            "http://127.0.0.1:43210/settings/api/update-status"
+        );
+        assert_eq!(
+            update_status_endpoint(endpoint, true),
+            "http://127.0.0.1:43210/settings/api/update-status?force=1"
+        );
     }
 
     #[test]

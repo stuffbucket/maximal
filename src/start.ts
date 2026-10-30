@@ -21,6 +21,11 @@
  *   src/lib/start/session-sentinel.ts   — crash-detection session sentinel
  */
 
+export {
+  emitSidecarReady,
+  READY_MARKER,
+  type SidecarReady,
+} from "~/lib/start/boot-io"
 export { BOOT_STATUS_MARKER, emitBootStatus } from "~/lib/start/boot-status"
 export { start } from "~/lib/start/cli"
 export { runServer, type RunServerOptions } from "~/lib/start/run-server"

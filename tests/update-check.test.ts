@@ -32,13 +32,17 @@ import {
 // The test preload points every check at a closed loopback port so spawned
 // servers stay offline; these tests assert the real URL, so lift that here.
 const preloadOverride = process.env[MANIFEST_URL_OVERRIDE_ENV]
+const updatePolicy = process.env.MAXIMAL_UPDATE_POLICY
 beforeAll(() => {
   delete process.env.MAXIMAL_TEST_UPDATE_MANIFEST_URL
+  delete process.env.MAXIMAL_UPDATE_POLICY
 })
 afterAll(() => {
   if (preloadOverride !== undefined) {
     process.env[MANIFEST_URL_OVERRIDE_ENV] = preloadOverride
   }
+  if (updatePolicy === undefined) delete process.env.MAXIMAL_UPDATE_POLICY
+  else process.env.MAXIMAL_UPDATE_POLICY = updatePolicy
 })
 
 /** A manifest body advertising `version` on the `stable` channel, exactly as
@@ -125,10 +129,30 @@ describe("getUpdateStatus", () => {
 
   beforeEach(() => {
     fetchCalls = 0
+    delete process.env.MAXIMAL_UPDATE_POLICY
     __resetUpdateCheckDepsForTests()
   })
   afterEach(() => {
+    delete process.env.MAXIMAL_UPDATE_POLICY
     __resetUpdateCheckDepsForTests()
+  })
+
+  test("a disabled shell policy consumes no production update metadata", async () => {
+    process.env.MAXIMAL_UPDATE_POLICY = "disabled"
+    __setUpdateCheckDepsForTests({
+      fetch: () => {
+        fetchCalls++
+        return Promise.resolve(manifestJson("999.0.0"))
+      },
+    })
+
+    const status = await getUpdateStatus(true)
+
+    expect(fetchCalls).toBe(0)
+    expect(status.enabled).toBe(false)
+    expect(status.latest).toBeNull()
+    expect(status.update_available).toBe(false)
+    expect(peekUpdateStatus()).toBeNull()
   })
 
   test("reports update_available when the latest tag is newer", async () => {

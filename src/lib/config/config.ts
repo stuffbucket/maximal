@@ -561,9 +561,11 @@ export function isAutoRecoverAccountEnabled(): boolean {
   return config.autoRecoverAccount ?? false
 }
 
-/** Whether to ping GitHub for a newer release and surface it. Defaults ON —
- *  see AppConfig.checkUpdates. */
+/** Whether to consume release update metadata and surface a newer version.
+ * Defaults ON via AppConfig.checkUpdates. A supervising desktop shell can own
+ * update metadata itself by setting MAXIMAL_UPDATE_POLICY=disabled. */
 export function isUpdateCheckEnabled(): boolean {
+  if (process.env.MAXIMAL_UPDATE_POLICY === "disabled") return false
   const config = getConfig()
   return config.checkUpdates ?? true
 }

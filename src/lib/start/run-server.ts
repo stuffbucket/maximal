@@ -49,7 +49,7 @@ import { startUpdateNotice } from "~/lib/update/update-notice"
 import { getGitVersion, shortSha } from "~/lib/update/version"
 import { startWorkingNotice } from "~/lib/working-notice"
 
-import { initBootLogger, printReadyBanner } from "./boot-io"
+import { emitSidecarReady, initBootLogger, printReadyBanner } from "./boot-io"
 import { emitBootStatus } from "./boot-status"
 import { bootSecrets, bootstrapUpstream } from "./bootstrap"
 import { runClaudeCodeFlow } from "./claude-code-flow"
@@ -88,17 +88,21 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   // and without this line the terminal just sits silent.
   consola.start("Starting maximal…")
 
-  // If --replace was passed, try to take over the port from a
-  // running instance before the regular probe.
-  if (options.replace) {
-    emitBootStatus(`Taking over port ${options.port}…`)
-    await maybeEvictRunning(options.port)
-  }
+  // Port zero asks the kernel to select a free port, so there is no concrete
+  // occupant to evict or probe before binding.
+  if (options.port !== 0) {
+    // If --replace was passed, try to take over the port from a
+    // running instance before the regular probe.
+    if (options.replace) {
+      emitBootStatus(`Taking over port ${options.port}…`)
+      await maybeEvictRunning(options.port)
+    }
 
-  // Bail out early if the port is already taken — much friendlier
-  // than crashing 5s later inside srvx with EADDRINUSE.
-  const portState = await probePort(options.port)
-  if (portState !== "free") reportPortBusyAndExit(options.port, portState)
+    // Bail out early if the port is already taken — much friendlier
+    // than crashing 5s later inside srvx with EADDRINUSE.
+    const portState = await probePort(options.port)
+    if (portState !== "free") reportPortBusyAndExit(options.port, portState)
+  }
 
   // Ensure config is merged with defaults at startup
   const config = mergeConfigWithDefaults()
@@ -107,8 +111,6 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   consola.info(
     `Source revision: ${shortSha(git.sha)}${git.branch ? ` (${git.branch})` : ""}`,
   )
-
-  const bootLogger = initBootLogger(git, options)
 
   await initOpencodeVersion()
 
@@ -180,7 +182,31 @@ export async function runServer(options: RunServerOptions): Promise<void> {
     : "InProcessFetchExecutor (search disabled; set OLLAMA_API_KEY)"
   consola.info(`Web-tools executor: ${executorName}`)
 
-  const serverUrl = `http://localhost:${options.port}`
+  emitBootStatus("Starting the server…")
+
+  const { server } = await import("~/server")
+
+  const hostname = listenHostname()
+  const httpServer = serve({
+    fetch: server.fetch,
+    hostname,
+    port: options.port,
+    bun: {
+      idleTimeout: 0,
+    },
+  })
+  await httpServer.ready()
+
+  const actualPort = boundServerPort(httpServer)
+  const serverUrl = advertisedServerUrl(hostname, actualPort)
+  const bootLogger = initBootLogger(git, { ...options, port: actualPort })
+  bootLogger.info(
+    `listening url=${serverUrl} host=${hostname} `
+      + `executor=${executorName.split(" ")[0]} `
+      + `auth=${hasGithubToken() ? "authenticated" : "unauthenticated"}`,
+  )
+
+  afterListening(config, actualPort, httpServer)
 
   if (options.claudeCode) {
     if (state.models) {
@@ -192,28 +218,33 @@ export async function runServer(options: RunServerOptions): Promise<void> {
     }
   }
 
-  emitBootStatus("Starting the server…")
   printReadyBanner(serverUrl)
+  emitSidecarReady(actualPort)
+}
 
-  const { server } = await import("~/server")
+function boundServerPort(httpServer: ReturnType<typeof serve>): number {
+  const url = httpServer.url
+  if (!url) throw new Error("Server bound without reporting its listening URL")
 
-  const hostname = listenHostname()
-  bootLogger.info(
-    `listening url=${serverUrl} host=${hostname} `
-      + `executor=${executorName.split(" ")[0]} `
-      + `auth=${hasGithubToken() ? "authenticated" : "unauthenticated"}`,
-  )
+  const parsed = new URL(url)
+  let port = Number.NaN
+  if (parsed.port) port = Number(parsed.port)
+  else if (parsed.protocol === "http:") port = 80
+  else if (parsed.protocol === "https:") port = 443
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw new Error(`Server reported an invalid listening URL: ${url}`)
+  }
+  return port
+}
 
-  const httpServer = serve({
-    fetch: server.fetch,
-    hostname,
-    port: options.port,
-    bun: {
-      idleTimeout: 0,
-    },
-  })
+function advertisedServerUrl(hostname: string, port: number): string {
+  let localHost = hostname
+  if (hostname === "0.0.0.0") localHost = "127.0.0.1"
+  else if (hostname === "::") localHost = "::1"
 
-  afterListening(config, options.port, httpServer)
+  const needsBrackets = localHost.includes(":") && !localHost.startsWith("[")
+  const urlHost = needsBrackets ? `[${localHost}]` : localHost
+  return `http://${urlHost}:${port}`
 }
 
 /** Boot steps that need the bound listener: the broker, client entries that
