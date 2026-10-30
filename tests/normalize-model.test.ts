@@ -16,7 +16,37 @@ import { describe, expect, test } from "bun:test"
 
 import type { Model } from "~/services/copilot/get-models"
 
-import { normalizeModel } from "~/services/copilot/get-models"
+import {
+  normalizeModel,
+  normalizeModelsResponse,
+} from "~/services/copilot/get-models"
+
+describe("normalizeModelsResponse", () => {
+  test("rejects an envelope without the catalog data array", () => {
+    expect(() =>
+      normalizeModelsResponse({ object: "list", models: [] }),
+    ).toThrow("expected a data array")
+  })
+
+  test("defaults the object field and normalizes every catalog entry", () => {
+    const response = normalizeModelsResponse({
+      data: [
+        {
+          id: "sparse",
+          name: "Sparse",
+          object: "model",
+          vendor: "unknown",
+          version: "1",
+          model_picker_enabled: true,
+          preview: false,
+        },
+      ],
+    })
+
+    expect(response.object).toBe("list")
+    expect(response.data[0].capabilities.limits).toEqual({})
+  })
+})
 
 describe("normalizeModel", () => {
   test("fills missing capabilities containers without inventing leaf values", () => {
