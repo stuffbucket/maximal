@@ -26,7 +26,7 @@
   ],
   "scripts": {
     "app:build": "MAXIMAL_FORCE_SIDECAR=1 bun run app:sidecar && bun run scripts/predmg-cleanup.ts && cd shell && bun run tauri build --bundles app,dmg",
-    "app:dev": "bun run scripts/app-dev-prepare.ts && bun run app:sidecar && cd shell && bun run tauri dev --config src-tauri/tauri.dev.conf.json",
+    "app:dev": "bun run scripts/app-dev.ts",
     "app:icons": "cd shell && bun run tauri icon ../build/macos/app-icon.svg --output src-tauri/icons",
     "app:setup": "cd shell && bun install && cd .. && bun run mcp-broker:install && MAXIMAL_FORCE_SIDECAR=1 bun run app:sidecar",
     "app:sidecar": "bun run build:ui && bun run scripts/gen-ui-embed.ts && bun run scripts/build-sidecar.ts",

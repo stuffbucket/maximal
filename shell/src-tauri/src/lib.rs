@@ -61,16 +61,14 @@ use tauri_plugin_shell::ShellExt;
 /// backed by the same shell/src/i18n/*.json catalogs the webview renders with.
 mod native_i18n;
 
-// Canonical Maximal port. Apps integrating with the proxy (Claude
-// Code, Cursor, custom scripts) only need to know this one URL:
-// http://localhost:4141. The Tauri shell and the standalone CLI both
-// bind here; the shell passes `--replace` when spawning so it always
-// wins over a stale CLI instance (graceful eviction via
+// Canonical release port. Apps integrating with the installed proxy only need
+// to know http://localhost:4141. The shell passes `--replace` when spawning so
+// it wins over a stale CLI instance (graceful eviction via
 // /_internal/shutdown — see src/lib/replace-running.ts).
 //
-// `MAXIMAL_DEV_PORT`, read at build time, moves a dev build onto another
-// port so it can run beside an installed Maximal (`bun run app:dev`, see
-// scripts/app-dev-prepare.ts). Release builds never set it.
+// `bun run app:dev` selects an isolated profile and a free development port,
+// then passes it as `MAXIMAL_DEV_PORT` at build time. Release builds never set
+// it; see scripts/app-dev-prepare.ts.
 const SIDECAR_PORT: u16 = match option_env!("MAXIMAL_DEV_PORT") {
     Some(port) => parse_port(port),
     None => 4141,

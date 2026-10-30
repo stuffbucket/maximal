@@ -1,56 +1,164 @@
 #!/usr/bin/env bun
 /**
- * Dev-mode pre-launch step for `bun run app:dev`.
+ * Prepare an isolated `bun run app:dev` session.
  *
- * `tauri-plugin-single-instance` handles double-launches of the
- * *packaged* .app, but in dev a second `bun run app:dev` can collide
- * with a sidecar already listening on :4141 from a previous session.
- *
- * Rather than hunt PIDs and signal them (which is platform-specific —
- * lsof/pgrep/SIGTERM don't all exist on Windows), we lean on the
- * existing graceful-shutdown contract: `POST /_internal/shutdown` to
- * the sidecar at :4141. The sidecar exits 0; the Tauri shell's
- * CommandEvent::Terminated handler treats code-0 as "intentional
- * shutdown" and calls app.exit(0), collapsing `tauri dev` with it.
- * Everything tied to :4141 comes down through one HTTP call.
- *
- * Exits 0 on success (no holder, or holder evicted). Exits 1 on
- * unrecoverable conflict (e.g. :4141 held by something that isn't
- * maximal, or graceful shutdown timed out).
- *
- * `MAXIMAL_DEV_PORT=<port>` runs the dev app beside an installed Maximal
- * instead of replacing it. The shell binds that port (lib.rs reads the same
- * variable at build time), only a Maximal already on it is evicted, and the
- * Tauri config written below gives the dev app its own identifier, so the
- * single-instance lock doesn't hand off to the installed app, plus window
- * permissions for the dev port's origin. Pair it with COPILOT_API_HOME
- * pointing at a scratch directory so the dev proxy keeps its own config and
- * leaves your apps' settings alone.
+ * Each worktree gets a stable data directory and Tauri identifier, while the
+ * listener uses the first free development port. A relaunch recognizes the
+ * prior sidecar through that profile's session sentinel and replaces it.
+ * Explicit COPILOT_API_HOME and MAXIMAL_DEV_PORT values still win.
  */
 
-import { writeFileSync } from "node:fs"
+import { createHash } from "node:crypto"
+import { readFileSync, writeFileSync } from "node:fs"
+import os from "node:os"
 import path from "node:path"
 
-const DEFAULT_PORT = 4141
+import { resolveAppDir } from "../src/lib/platform/paths"
 
-function sidecarPort(): number {
-  const raw = process.env.MAXIMAL_DEV_PORT
-  if (raw === undefined || raw === "") return DEFAULT_PORT
+const RELEASE_PORT = 4141
+const FIRST_DEV_PORT = RELEASE_PORT + 1
+const LAST_DEV_PORT = RELEASE_PORT + 20
+const PORT_RELEASE_TIMEOUT_MS = 8000
+const PORT_POLL_INTERVAL_MS = 100
+
+export type PortState = "free" | "maximal" | "other"
+
+type Probe = (port: number) => Promise<PortState>
+
+export interface DevProfile {
+  home: string
+  identifier: string
+}
+
+interface DevProfileSystem {
+  platform: NodeJS.Platform
+  homedir: string
+  appData?: string
+}
+
+export interface DevPortSelection {
+  port: number
+  replaceExisting: boolean
+}
+
+export interface PreparedAppDev {
+  env: NodeJS.ProcessEnv
+  home: string
+  identifier: string
+  port: number
+}
+
+function shortHash(value: string): string {
+  return createHash("sha256").update(value).digest("hex").slice(0, 12)
+}
+
+/** Stable per-worktree profile unless the caller supplies its own home. */
+export function resolveDevProfile(
+  env: NodeJS.ProcessEnv,
+  repoRoot: string,
+  system: DevProfileSystem = {
+    platform: process.platform,
+    homedir: os.homedir(),
+    appData: env.APPDATA,
+  },
+): DevProfile {
+  const override = env.COPILOT_API_HOME?.trim()
+  const worktreeKey = shortHash(path.resolve(repoRoot))
+  const base = resolveAppDir({
+    platform: system.platform,
+    homedir: system.homedir,
+    appData: system.appData,
+  })
+  const home =
+    override ?
+      path.resolve(repoRoot, override)
+    : path.join(base, "dev", worktreeKey)
+  const profileKey = shortHash(path.resolve(home))
+  return {
+    home,
+    identifier: `co.stuffbucket.maximal.dev.${profileKey}`,
+  }
+}
+
+function parsePort(raw: string): number {
   const port = Number(raw)
   if (!/^\d+$/.test(raw) || port < 1 || port > 65_535) {
-    console.error(`[app-dev-prepare] MAXIMAL_DEV_PORT must be a port number; got "${raw}"`)
-    process.exit(1)
+    throw new Error(`MAXIMAL_DEV_PORT must be a port number; got "${raw}"`)
   }
   return port
 }
 
-const SIDECAR_PORT = sidecarPort()
-const PORT_RELEASE_TIMEOUT_MS = 8000
-const PORT_POLL_INTERVAL_MS = 100
+/**
+ * Use an explicit port exactly, otherwise replace this profile's prior sidecar
+ * or take the first free port in the development range.
+ */
+export async function selectDevPort(
+  explicitPort: number | undefined,
+  previousPort: number | undefined,
+  probe: Probe,
+): Promise<DevPortSelection> {
+  if (explicitPort !== undefined) {
+    return { port: explicitPort, replaceExisting: true }
+  }
 
-async function probeSidecar(): Promise<"free" | "maximal" | "other"> {
+  if (previousPort !== undefined) {
+    const state = await probe(previousPort)
+    if (state === "free") {
+      return { port: previousPort, replaceExisting: false }
+    }
+    if (state === "maximal") {
+      return { port: previousPort, replaceExisting: true }
+    }
+  }
+
+  for (let port = FIRST_DEV_PORT; port <= LAST_DEV_PORT; port += 1) {
+    if (port !== previousPort && (await probe(port)) === "free") {
+      return { port, replaceExisting: false }
+    }
+  }
+
+  throw new Error(
+    `No free development port found from ${FIRST_DEV_PORT} through ${LAST_DEV_PORT}.`,
+  )
+}
+
+function processIsAlive(pid: number): boolean {
   try {
-    const res = await fetch(`http://localhost:${SIDECAR_PORT}/`, {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM"
+  }
+}
+
+function runningSessionPort(home: string): number | undefined {
+  try {
+    const raw: unknown = JSON.parse(
+      readFileSync(path.join(home, "session-running"), "utf8"),
+    )
+    if (typeof raw !== "object" || raw === null) return undefined
+    const { pid, port } = raw as { pid?: unknown; port?: unknown }
+    if (
+      typeof pid !== "number"
+      || !Number.isInteger(pid)
+      || pid <= 0
+      || typeof port !== "number"
+      || !Number.isInteger(port)
+      || port < 1
+      || port > 65_535
+      || !processIsAlive(pid)
+    ) {
+      return undefined
+    }
+    return port
+  } catch {
+    return undefined
+  }
+}
+
+async function probeSidecar(port: number): Promise<PortState> {
+  try {
+    const res = await fetch(`http://localhost:${port}/`, {
       signal: AbortSignal.timeout(500),
     })
     if (!res.ok) return "other"
@@ -61,73 +169,69 @@ async function probeSidecar(): Promise<"free" | "maximal" | "other"> {
   }
 }
 
-async function isPortFree(): Promise<boolean> {
-  return (await probeSidecar()) === "free"
-}
-
 async function sleep(ms: number): Promise<void> {
-  await new Promise((r) => setTimeout(r, ms))
+  await new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-async function requestShutdown(): Promise<void> {
+async function requestShutdown(port: number): Promise<void> {
+  let res: Response
   try {
-    const res = await fetch(
-      `http://localhost:${SIDECAR_PORT}/_internal/shutdown`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ reason: "app-dev relaunch" }),
-        signal: AbortSignal.timeout(2000),
-      },
+    res = await fetch(`http://localhost:${port}/_internal/shutdown`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ reason: "app-dev relaunch" }),
+      signal: AbortSignal.timeout(2000),
+    })
+  } catch (error) {
+    throw new Error(
+      `/_internal/shutdown on :${port} was unreachable: ${error instanceof Error ? error.message : String(error)}`,
     )
-    if (!res.ok) {
-      console.error(
-        `[app-dev-prepare] /_internal/shutdown returned ${res.status}; the running instance may be a remote maximal that won't honor a loopback-gated shutdown.`,
-      )
-      process.exit(1)
-    }
-  } catch (err) {
-    console.error(
-      `[app-dev-prepare] /_internal/shutdown unreachable:`,
-      err instanceof Error ? err.message : err,
+  }
+  if (!res.ok) {
+    throw new Error(
+      `/_internal/shutdown on :${port} returned ${res.status}; the running instance may not honor loopback shutdown.`,
     )
-    process.exit(1)
   }
 }
 
-async function waitForPortRelease(): Promise<void> {
+async function waitForPortRelease(port: number): Promise<void> {
   const deadline = Date.now() + PORT_RELEASE_TIMEOUT_MS
   while (Date.now() < deadline) {
-    if (await isPortFree()) return
+    if ((await probeSidecar(port)) === "free") return
     await sleep(PORT_POLL_INTERVAL_MS)
   }
-  console.error(
-    `[app-dev-prepare] :${SIDECAR_PORT} did not free within ${PORT_RELEASE_TIMEOUT_MS}ms after /_internal/shutdown. The Tauri shell may be stuck; try \`bun run app:dev\` again or quit the running app from the tray.`,
+  throw new Error(
+    `:${port} did not become free within ${PORT_RELEASE_TIMEOUT_MS}ms after shutdown.`,
   )
-  process.exit(1)
 }
 
-/** Merged over tauri.conf.json by `tauri dev --config` (JSON Merge Patch).
- *  Empty on the default port, so a plain `app:dev` behaves as before. */
-function devConfig(): Record<string, unknown> {
-  if (SIDECAR_PORT === DEFAULT_PORT) return {}
+/** Tauri overrides for an isolated development app on the selected port. */
+export function devConfig(
+  port: number,
+  identifier: string,
+): Record<string, unknown> {
+  const config: Record<string, unknown> = {
+    productName: "Maximal Dev",
+    identifier,
+  }
+  if (port === RELEASE_PORT) return config
+
   const origins = [
-    `http://localhost:${SIDECAR_PORT}/*`,
-    `http://127.0.0.1:${SIDECAR_PORT}/*`,
+    `http://localhost:${port}/*`,
+    `http://127.0.0.1:${port}/*`,
   ]
   return {
-    productName: "Maximal Dev",
-    identifier: "co.stuffbucket.maximal.dev",
+    ...config,
     app: {
       security: {
         // Listing capabilities replaces the capabilities/ directory, so name
-        // the existing ones and add the dev origin beside :4141.
+        // the existing ones and add the selected development origin.
         capabilities: [
           "default",
           "loopback",
           {
             identifier: "loopback-dev-port",
-            description: `The loopback capability for the dev port :${SIDECAR_PORT}.`,
+            description: `The loopback capability for the dev port :${port}.`,
             windows: ["settings", "dashboard"],
             local: false,
             remote: { urls: origins },
@@ -147,27 +251,57 @@ function devConfig(): Record<string, unknown> {
   }
 }
 
-writeFileSync(
-  path.join(import.meta.dir, "..", "shell", "src-tauri", "tauri.dev.conf.json"),
-  `${JSON.stringify(devConfig(), null, 2)}\n`,
-)
+export async function prepareAppDev(
+  env: NodeJS.ProcessEnv,
+  repoRoot: string,
+): Promise<PreparedAppDev> {
+  const profile = resolveDevProfile(env, repoRoot)
+  const rawPort = env.MAXIMAL_DEV_PORT?.trim()
+  const explicitPort = rawPort ? parsePort(rawPort) : undefined
+  const previousPort =
+    explicitPort === undefined ? runningSessionPort(profile.home) : undefined
+  const selection = await selectDevPort(
+    explicitPort,
+    previousPort,
+    probeSidecar,
+  )
 
-const state = await probeSidecar()
-switch (state) {
-  case "free":
-    // Nothing to do.
-    break
-  case "maximal":
+  const configPath = path.join(
+    repoRoot,
+    "shell",
+    "src-tauri",
+    "tauri.dev.conf.json",
+  )
+  writeFileSync(
+    configPath,
+    `${JSON.stringify(devConfig(selection.port, profile.identifier), null, 2)}\n`,
+  )
+
+  const state = await probeSidecar(selection.port)
+  if (state === "maximal" && selection.replaceExisting) {
     console.log(
-      `[app-dev-prepare] evicting maximal on :${SIDECAR_PORT} via /_internal/shutdown`,
+      `[app-dev] replacing this profile's maximal on :${selection.port}`,
     )
-    await requestShutdown()
-    await waitForPortRelease()
-    console.log(`[app-dev-prepare] :${SIDECAR_PORT} freed`)
-    break
-  case "other":
-    console.error(
-      `[app-dev-prepare] :${SIDECAR_PORT} is held by something that isn't maximal. Stop the holding process and retry.`,
+    await requestShutdown(selection.port)
+    await waitForPortRelease(selection.port)
+  } else if (state !== "free") {
+    const occupant = state === "maximal" ? "another maximal" : "another process"
+    throw new Error(
+      `:${selection.port} became occupied by ${occupant}; run app:dev again.`,
     )
-    process.exit(1)
+  }
+
+  console.log(`[app-dev] isolated home: ${profile.home}`)
+  console.log(`[app-dev] sidecar port: ${selection.port}`)
+
+  return {
+    env: {
+      ...env,
+      COPILOT_API_HOME: profile.home,
+      MAXIMAL_DEV_PORT: String(selection.port),
+    },
+    home: profile.home,
+    identifier: profile.identifier,
+    port: selection.port,
+  }
 }
