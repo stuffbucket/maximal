@@ -196,6 +196,25 @@ describe("Claude Code Auto model settings", () => {
       reason: "override-unavailable",
     })
   })
+})
+
+describe("Claude Code Auto model ownership transitions", () => {
+  test("keeps an applied override through a temporary catalog gap", () => {
+    writeConfig({ apps: { claudeCode: { fastModel: smallGpt.id } } })
+    apply()
+
+    setCatalog([haiku, sonnet, fullGpt])
+    apply()
+
+    expect(readEnv().ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe(smallGpt.id)
+    expect(getClaudeAutoModelsState(settingsPath).fast).toEqual({
+      configured: smallGpt.id,
+      effective: null,
+      source: "maximal-override",
+      status: "unavailable",
+      reason: "override-unavailable",
+    })
+  })
 
   test("a direct edit after apply becomes user-owned and survives reapply and revert", () => {
     apply()

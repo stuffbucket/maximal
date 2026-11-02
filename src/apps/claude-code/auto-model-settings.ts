@@ -296,6 +296,15 @@ function applyTier(input: {
       },
     }
   }
+  if (
+    input.resolution.status === "unavailable"
+    && input.resolution.source === "maximal-override"
+    && ownership.kind === "owned"
+    && ownership.marker.source === "maximal-override"
+    && ownership.marker.id === input.resolution.configured
+  ) {
+    return { env: input.outputEnv, marker: ownership.marker }
+  }
   if (ownership.kind === "owned") {
     return {
       env: withRestoredField(
