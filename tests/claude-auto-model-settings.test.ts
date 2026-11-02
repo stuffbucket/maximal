@@ -5,6 +5,7 @@ import path from "node:path"
 
 import type { Model, ModelsResponse } from "~/services/copilot/get-models"
 
+import { UNAVAILABLE_CLASSIFIER_MODEL } from "~/apps/claude-code/auto-model-settings"
 import {
   applyProxyBaseUrl,
   getClaudeAutoModelsState,
@@ -90,12 +91,13 @@ afterEach(() => {
   fs.rmSync(dir, { recursive: true, force: true })
 })
 
-describe("Claude Code Auto model settings", () => {
+describe("Claude Code model settings", () => {
   test("first apply writes automatic Haiku and Sonnet defaults only", () => {
     expect(apply().wrote).toBe(true)
     expect(readEnv()).toMatchObject({
       ANTHROPIC_DEFAULT_HAIKU_MODEL: haiku.id,
       ANTHROPIC_DEFAULT_SONNET_MODEL: sonnet.id,
+      CLAUDE_CODE_AUTO_MODE_MODEL: smallGpt.id,
     })
     expect(readEnv()).not.toHaveProperty("ANTHROPIC_MODEL")
 
@@ -111,12 +113,61 @@ describe("Claude Code Auto model settings", () => {
       source: "automatic",
       reason: "sonnet",
     })
+    expect(state.classifier).toMatchObject({
+      effective: smallGpt.id,
+      source: "automatic",
+      reason: "small-gpt",
+    })
     expect(state.options.map((option) => option.id)).toEqual([
       haiku.id,
       sonnet.id,
       smallGpt.id,
       fullGpt.id,
     ])
+    expect(state.classifier_options.map((option) => option.id)).toEqual([
+      smallGpt.id,
+      fullGpt.id,
+    ])
+  })
+
+  test("uses the configured GPT session model for permission checks when Haiku is unavailable", () => {
+    writeClaudeCodeSettings(settingsPath, { model: fullGpt.id })
+
+    apply()
+
+    expect(readEnv().CLAUDE_CODE_AUTO_MODE_MODEL).toBe(fullGpt.id)
+    expect(getClaudeAutoModelsState(settingsPath).classifier).toMatchObject({
+      effective: fullGpt.id,
+      source: "automatic",
+      reason: "gpt",
+    })
+  })
+
+  test("prefers ANTHROPIC_MODEL for GPT permission checks", () => {
+    writeClaudeCodeSettings(settingsPath, {
+      model: smallGpt.id,
+      env: { ANTHROPIC_MODEL: fullGpt.id },
+    })
+
+    apply()
+
+    expect(readEnv().CLAUDE_CODE_AUTO_MODE_MODEL).toBe(fullGpt.id)
+  })
+
+  test("resolves the configured GPT session model through model mappings", () => {
+    writeClaudeCodeSettings(settingsPath, { model: "my-gpt" })
+    writeConfig({
+      modelMappings: [
+        {
+          match: { type: "exact", value: "my-gpt" },
+          target: fullGpt.id,
+        },
+      ],
+    })
+
+    apply()
+
+    expect(readEnv().CLAUDE_CODE_AUTO_MODE_MODEL).toBe(fullGpt.id)
   })
 
   test("explicit Maximal overrides supersede pre-existing tier settings", () => {
@@ -128,7 +179,11 @@ describe("Claude Code Auto model settings", () => {
     })
     writeConfig({
       apps: {
-        claudeCode: { fastModel: smallGpt.id, capableModel: fullGpt.id },
+        claudeCode: {
+          fastModel: smallGpt.id,
+          capableModel: fullGpt.id,
+          classifierModel: fullGpt.id,
+        },
       },
     })
 
@@ -136,6 +191,7 @@ describe("Claude Code Auto model settings", () => {
     expect(readEnv()).toMatchObject({
       ANTHROPIC_DEFAULT_HAIKU_MODEL: smallGpt.id,
       ANTHROPIC_DEFAULT_SONNET_MODEL: fullGpt.id,
+      CLAUDE_CODE_AUTO_MODE_MODEL: fullGpt.id,
     })
     expect(getClaudeAutoModelsState(settingsPath).fast.source).toBe(
       "maximal-override",
@@ -153,6 +209,7 @@ describe("Claude Code Auto model settings", () => {
       env: {
         ANTHROPIC_DEFAULT_HAIKU_MODEL: fullGpt.id,
         ANTHROPIC_DEFAULT_SONNET_MODEL: smallGpt.id,
+        CLAUDE_CODE_AUTO_MODE_MODEL: fullGpt.id,
       },
     })
 
@@ -160,10 +217,12 @@ describe("Claude Code Auto model settings", () => {
     expect(readEnv()).toMatchObject({
       ANTHROPIC_DEFAULT_HAIKU_MODEL: fullGpt.id,
       ANTHROPIC_DEFAULT_SONNET_MODEL: smallGpt.id,
+      CLAUDE_CODE_AUTO_MODE_MODEL: fullGpt.id,
     })
     const auto = getClaudeAutoModelsState(settingsPath)
     expect(auto.fast.source).toBe("claude-code-setting")
     expect(auto.capable.source).toBe("claude-code-setting")
+    expect(auto.classifier.source).toBe("claude-code-setting")
   })
 
   test("preserves an external setting that is absent from the catalog", () => {
@@ -198,7 +257,87 @@ describe("Claude Code Auto model settings", () => {
   })
 })
 
-describe("Claude Code Auto model ownership transitions", () => {
+describe("Claude Code model-setting ownership transitions", () => {
+  test("an alias mapping restores its prior value during a catalog gap", () => {
+    apply()
+    expect(readEnv().ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe(haiku.id)
+
+    setCatalog([sonnet])
+    apply()
+    expect(readEnv()).not.toHaveProperty("ANTHROPIC_DEFAULT_HAIKU_MODEL")
+
+    setCatalog([haiku, sonnet, smallGpt, fullGpt])
+    apply()
+    expect(readEnv().ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe(haiku.id)
+  })
+
+  test("automatic classifier ownership survives a temporary catalog gap", () => {
+    apply()
+    expect(readEnv().CLAUDE_CODE_AUTO_MODE_MODEL).toBe(smallGpt.id)
+
+    setCatalog([sonnet])
+    apply()
+    expect(readEnv().CLAUDE_CODE_AUTO_MODE_MODEL).toBe(smallGpt.id)
+
+    setCatalog([haiku, sonnet, smallGpt, fullGpt])
+    apply()
+    expect(getClaudeAutoModelsState(settingsPath).classifier).toMatchObject({
+      effective: smallGpt.id,
+      source: "automatic",
+    })
+  })
+
+  test("a cataloged classifier that becomes incompatible is replaced by the sentinel", () => {
+    apply()
+    const incompatible = {
+      ...smallGpt,
+      capabilities: {
+        ...smallGpt.capabilities,
+        supports: { ...smallGpt.capabilities.supports, streaming: false },
+      },
+    }
+
+    setCatalog([sonnet, incompatible])
+    apply()
+
+    expect(readEnv().CLAUDE_CODE_AUTO_MODE_MODEL).toBe(
+      UNAVAILABLE_CLASSIFIER_MODEL,
+    )
+
+    setCatalog([haiku, sonnet, smallGpt, fullGpt])
+    apply()
+    expect(readEnv().CLAUDE_CODE_AUTO_MODE_MODEL).toBe(smallGpt.id)
+  })
+
+  test("Automatic reclaims an unavailable external classifier without a replacement", () => {
+    writeClaudeCodeSettings(settingsPath, {
+      env: { CLAUDE_CODE_AUTO_MODE_MODEL: "gpt-retired" },
+    })
+    setCatalog([sonnet])
+    apply()
+
+    applyProxyBaseUrl(settingsPath, resolveTestKey, {
+      claimAutoModels: new Set(["classifier"]),
+    })
+
+    expect(readEnv().CLAUDE_CODE_AUTO_MODE_MODEL).toBe(
+      UNAVAILABLE_CLASSIFIER_MODEL,
+    )
+    expect(getClaudeAutoModelsState(settingsPath).classifier).toMatchObject({
+      configured: null,
+      effective: null,
+      source: "none",
+      status: "unresolved",
+    })
+
+    setCatalog([haiku, sonnet, smallGpt, fullGpt])
+    apply()
+    expect(readEnv().CLAUDE_CODE_AUTO_MODE_MODEL).toBe(smallGpt.id)
+
+    revertProxyBaseUrl(settingsPath)
+    expect(readEnv()).toEqual({ CLAUDE_CODE_AUTO_MODE_MODEL: "gpt-retired" })
+  })
+
   test("keeps an applied override through a temporary catalog gap", () => {
     writeConfig({ apps: { claudeCode: { fastModel: smallGpt.id } } })
     apply()
@@ -237,6 +376,29 @@ describe("Claude Code Auto model ownership transitions", () => {
     expect(readEnv()).toEqual({ ANTHROPIC_DEFAULT_HAIKU_MODEL: fullGpt.id })
   })
 
+  test("a direct classifier edit becomes user-owned and survives revert", () => {
+    apply()
+    const settings = readClaudeCodeSettings(settingsPath)
+    writeClaudeCodeSettings(settingsPath, {
+      ...settings,
+      env: {
+        ...(settings.env as Record<string, unknown>),
+        CLAUDE_CODE_AUTO_MODE_MODEL: fullGpt.id,
+      },
+    })
+
+    apply()
+
+    expect(getClaudeAutoModelsState(settingsPath).classifier).toMatchObject({
+      effective: fullGpt.id,
+      source: "claude-code-setting",
+    })
+    revertProxyBaseUrl(settingsPath)
+    expect(readEnv()).toEqual({ CLAUDE_CODE_AUTO_MODE_MODEL: fullGpt.id })
+  })
+})
+
+describe("Claude Code model-setting external ownership", () => {
   test("a direct edit wins over a still-persisted Maximal override", () => {
     writeConfig({ apps: { claudeCode: { fastModel: smallGpt.id } } })
     apply()

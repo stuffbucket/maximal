@@ -29,6 +29,7 @@ import {
   AUTO_MODELS_OWNERSHIP_KEY,
   buildClaudeAutoModelsState,
   CAPABLE_MODEL_KEY,
+  CLASSIFIER_MODEL_KEY,
   FAST_MODEL_KEY,
   hasOwnedClaudeAutoModelSettings,
   mergeClaudeAutoModelSettings,
@@ -64,6 +65,7 @@ interface PriorSnapshot {
   [AUTO_MODE_SERVER_KEY]?: unknown
   [FAST_MODEL_KEY]?: unknown
   [CAPABLE_MODEL_KEY]?: unknown
+  [CLASSIFIER_MODEL_KEY]?: unknown
 }
 
 function readPriorSnapshot(
@@ -84,6 +86,9 @@ function readPriorSnapshot(
     ...(FAST_MODEL_KEY in s ? { [FAST_MODEL_KEY]: s[FAST_MODEL_KEY] } : {}),
     ...(CAPABLE_MODEL_KEY in s ?
       { [CAPABLE_MODEL_KEY]: s[CAPABLE_MODEL_KEY] }
+    : {}),
+    ...(CLASSIFIER_MODEL_KEY in s ?
+      { [CLASSIFIER_MODEL_KEY]: s[CLASSIFIER_MODEL_KEY] }
     : {}),
   }
 }

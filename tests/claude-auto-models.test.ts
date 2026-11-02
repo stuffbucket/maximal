@@ -4,6 +4,7 @@ import type { Model } from "~/services/copilot/get-models"
 
 import {
   isClaudeAutoModelEligible,
+  isClaudeCodeClassifierEligible,
   resolveClaudeAutoModels,
 } from "~/lib/models/claude-auto-models"
 
@@ -121,6 +122,43 @@ describe("isClaudeAutoModelEligible", () => {
     expect(isClaudeAutoModelEligible(sparse)).toBe(false)
   })
 
+  test("uses canonical family and version metadata for classifier eligibility", () => {
+    const opaqueHaiku = {
+      ...model("route-a", {
+        family: "claude-haiku",
+        vendor: "anthropic",
+        endpoints: ["/v1/messages"],
+      }),
+      version: "5.5",
+    }
+
+    expect(isClaudeCodeClassifierEligible(opaqueHaiku)).toBe(true)
+    expect(
+      resolveClaudeAutoModels({ models: [opaqueHaiku] }).classifier.effective,
+    ).toBe(opaqueHaiku.id)
+  })
+
+  test("does not assume future Claude versions support permission review", () => {
+    const futureHaiku = model("claude-haiku-6", {
+      family: "claude-haiku-6",
+      vendor: "anthropic",
+      endpoints: ["/v1/messages"],
+    })
+    const futureSonnet = model("claude-sonnet-6", {
+      family: "claude-sonnet-6",
+      vendor: "anthropic",
+      endpoints: ["/v1/messages"],
+    })
+
+    expect(isClaudeCodeClassifierEligible(futureHaiku)).toBe(false)
+    expect(isClaudeCodeClassifierEligible(futureSonnet)).toBe(false)
+    expect(
+      resolveClaudeAutoModels({
+        models: [futureHaiku, futureSonnet, fullGpt],
+      }).classifier.effective,
+    ).toBe(fullGpt.id)
+  })
+
   test("rejects malformed ids and endpoint containers", () => {
     expect(isClaudeAutoModelEligible(model(""))).toBe(false)
     expect(
@@ -169,6 +207,54 @@ describe("resolveClaudeAutoModels", () => {
       status: "ready",
       reason: "sonnet",
     })
+  })
+
+  test("uses a supported Haiku for Auto permission checks", () => {
+    const classifierHaiku = model("claude-haiku-5-5", {
+      family: "claude-haiku-5.5",
+      vendor: "anthropic",
+      endpoints: ["/v1/messages"],
+    })
+    const ignoredSonnet = model("claude-sonnet-5-5", {
+      family: "claude-sonnet-5.5",
+      vendor: "anthropic",
+      endpoints: ["/v1/messages"],
+    })
+
+    const result = resolveClaudeAutoModels({
+      models: [ignoredSonnet, fullGpt, classifierHaiku],
+      sessionModel: fullGpt.id,
+    })
+
+    expect(result.classifier).toMatchObject({
+      effective: classifierHaiku.id,
+      source: "automatic",
+      reason: "haiku",
+    })
+    expect(result.classifierEligibleModels.map((entry) => entry.id)).toEqual([
+      fullGpt.id,
+      classifierHaiku.id,
+    ])
+  })
+
+  test("uses the configured GPT session model when no Claude classifier is compatible", () => {
+    const ignoredSonnet = model("claude-sonnet-5-5", {
+      family: "claude-sonnet-5.5",
+      vendor: "anthropic",
+      endpoints: ["/v1/messages"],
+    })
+    const otherGpt = model("gpt-5.7", {
+      family: "gpt-5.7",
+      vendor: "openai",
+    })
+
+    const result = resolveClaudeAutoModels({
+      models: [ignoredSonnet, otherGpt, fullGpt],
+      sessionModel: fullGpt.id,
+    })
+
+    expect(result.classifier.effective).toBe(fullGpt.id)
+    expect(result.classifier.reason).toBe("gpt")
   })
 
   test("does not mistake an earlier Haiku for the capable Sonnet tier", () => {
@@ -326,6 +412,26 @@ describe("resolveClaudeAutoModels precedence and empty states", () => {
     expect(result.eligibleModels.map((entry) => entry.id)).toEqual([haiku.id])
   })
 
+  test("keeps an incompatible classifier override visible without applying it", () => {
+    const ignoredOpus = model("claude-opus-5-1", {
+      family: "claude-opus-5.1",
+      vendor: "anthropic",
+      endpoints: ["/v1/messages"],
+    })
+    const result = resolveClaudeAutoModels({
+      models: [ignoredOpus, fullGpt],
+      overrides: { classifier: ignoredOpus.id },
+    })
+
+    expect(result.classifier).toEqual({
+      configured: ignoredOpus.id,
+      effective: null,
+      source: "maximal-override",
+      status: "unavailable",
+      reason: "override-unavailable",
+    })
+  })
+
   test("an eligible Maximal override wins over external and automatic values", () => {
     const result = resolveClaudeAutoModels({
       models: [haiku, sonnet, fullGpt],
@@ -393,6 +499,8 @@ describe("resolveClaudeAutoModels precedence and empty states", () => {
       reason: "no-match",
     })
     expect(result.capable).toEqual(result.fast)
+    expect(result.classifier).toEqual(result.fast)
     expect(result.eligibleModels).toEqual([])
+    expect(result.classifierEligibleModels).toEqual([])
   })
 })

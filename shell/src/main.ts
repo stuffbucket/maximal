@@ -72,8 +72,8 @@ const SECTIONS: ReadonlyArray<SectionId> = [
 
 const TAB_SECTIONS: Record<TopTabId, ReadonlyArray<string>> = {
   account: ["account"],
-  integrations: ["apps", "mcp", "requests"],
-  "models-keys": ["models", "endpoint", "api-clients"],
+  integrations: ["apps", "mcp", "requests", "endpoint", "api-clients"],
+  "models-keys": ["models"],
   appearance: ["appearance"],
   system: ["diagnostics", "logs"],
   dashboard: ["dashboard"],
@@ -96,11 +96,11 @@ function tabForSection(id: SectionId): TopTabId {
     case "apps":
     case "mcp":
     case "requests":
+    case "endpoint":
+    case "api-clients":
       return "integrations";
     case "models-keys":
     case "models":
-    case "endpoint":
-    case "api-clients":
       return "models-keys";
     case "appearance":
       return "appearance";

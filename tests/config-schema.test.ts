@@ -196,7 +196,7 @@ describe("validateAppConfig", () => {
   })
 })
 
-describe("validateAppConfig — Claude Code Auto models", () => {
+describe("validateAppConfig — Claude Code model settings", () => {
   it("accepts missing overrides", () => {
     expect(
       validateAppConfig({ apps: { claudeCode: { enabled: true } } }),
@@ -211,13 +211,14 @@ describe("validateAppConfig — Claude Code Auto models", () => {
         claudeCode: {
           fastModel: "gpt-5.6-mini",
           capableModel: "gpt-5.6",
+          classifierModel: "claude-haiku-5.5",
         },
       },
     }
     expect(validateAppConfig(config)).toEqual(config)
   })
 
-  it.each(["fastModel", "capableModel"])(
+  it.each(["fastModel", "capableModel", "classifierModel"])(
     "rejects a blank %s override",
     (key) => {
       expect(() =>

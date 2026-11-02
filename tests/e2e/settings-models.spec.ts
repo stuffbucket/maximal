@@ -27,11 +27,12 @@ async function openModels(page: Page): Promise<void> {
   await page.addStyleTag({
     content: "#__harness { display: none !important; }",
   })
-  await expect(page.getByLabel("Fast and background work")).toBeVisible()
-  await expect(page.getByLabel("Capable work")).toBeVisible()
+  await expect(page.getByLabel("Haiku alias")).toBeVisible()
+  await expect(page.getByLabel("Sonnet alias")).toBeVisible()
+  await expect(page.getByLabel("Auto permission checks")).toBeVisible()
 }
 
-test("renders accessible Automatic controls and preserves the other tier on save", async ({
+test("renders accessible Automatic controls and preserves the other settings on save", async ({
   page,
 }) => {
   const initial = await currentModels(page)
@@ -54,17 +55,18 @@ test("renders accessible Automatic controls and preserves the other tier on save
   })
 
   await openModels(page)
-  const fast = page.getByLabel("Fast and background work")
-  const capable = page.getByLabel("Capable work")
-  await expect(fast.locator("option").first()).toHaveText("Automatic")
-  await expect(capable.locator("option").first()).toHaveText("Automatic")
-  await expect(fast).toHaveValue("")
-  await expect(capable).toHaveValue("")
+  const fast = page.getByLabel("Haiku alias")
+  const capable = page.getByLabel("Sonnet alias")
+  const classifier = page.getByLabel("Auto permission checks")
+  for (const control of [fast, capable, classifier]) {
+    await expect(control.locator("option").first()).toHaveText("Automatic")
+    await expect(control).toHaveValue("")
+  }
   await expect(
-    page.getByText("Using Claude Haiku 5.5 automatically"),
-  ).toBeVisible()
+    page.getByText("Selected automatically: Claude Haiku 5.5"),
+  ).toHaveCount(2)
   await expect(
-    page.getByText("Using Claude Sonnet 5.5 automatically"),
+    page.getByText("Selected automatically: Claude Sonnet 5.5"),
   ).toBeVisible()
 
   const updateRequest = page.waitForRequest((request) =>
@@ -77,6 +79,20 @@ test("renders accessible Automatic controls and preserves the other tier on save
   })
   await expect(fast).toHaveValue("gpt-5.6-luna")
   await expect(capable).toHaveValue("")
+  await expect(classifier).toHaveValue("")
+})
+
+test("saves the Auto permission classifier independently", async ({ page }) => {
+  await openModels(page)
+  const updateRequest = page.waitForRequest((request) =>
+    request.url().endsWith("/settings/api/models/claude-code-auto"),
+  )
+
+  await page.getByLabel("Auto permission checks").selectOption("gpt-5.6-luna")
+
+  expect((await updateRequest).postDataJSON()).toEqual({
+    classifier: "gpt-5.6-luna",
+  })
 })
 
 test("renders GPT models chosen automatically when Claude tiers are absent", async ({
@@ -109,11 +125,15 @@ test("renders GPT models chosen automatically when Claude tiers are absent", asy
   })
 
   await openModels(page)
-  await expect(page.getByText("Using GPT-5.6 Luna automatically")).toBeVisible()
-  await expect(page.getByText("Using GPT-6.1 Sol automatically")).toBeVisible()
+  await expect(
+    page.getByText("Selected automatically: GPT-5.6 Luna"),
+  ).toBeVisible()
+  await expect(
+    page.getByText("Selected automatically: GPT-6.1 Sol"),
+  ).toBeVisible()
 })
 
-test("disables both controls while a save is in flight", async ({ page }) => {
+test("disables every control while a save is in flight", async ({ page }) => {
   const gate = { release: (): void => undefined }
   const waiting = new Promise<void>((resolve) => {
     gate.release = resolve
@@ -125,11 +145,13 @@ test("disables both controls while a save is in flight", async ({ page }) => {
   })
 
   await openModels(page)
-  const fast = page.getByLabel("Fast and background work")
-  const capable = page.getByLabel("Capable work")
+  const fast = page.getByLabel("Haiku alias")
+  const capable = page.getByLabel("Sonnet alias")
+  const classifier = page.getByLabel("Auto permission checks")
   const save = fast.selectOption("gpt-5.6-luna")
   await expect(fast).toBeDisabled()
   await expect(capable).toBeDisabled()
+  await expect(classifier).toBeDisabled()
   gate.release()
   await save
 })
@@ -143,7 +165,7 @@ test("keeps prior state and reports a failed save", async ({ page }) => {
   })
 
   await openModels(page)
-  const fast = page.getByLabel("Fast and background work")
+  const fast = page.getByLabel("Haiku alias")
   await fast.selectOption("gpt-5.6-luna")
 
   await expect(fast).toHaveValue("")
@@ -175,12 +197,46 @@ test("shows an unavailable override without substituting it", async ({
   })
 
   await openModels(page)
-  const fast = page.getByLabel("Fast and background work")
+  const fast = page.getByLabel("Haiku alias")
   await expect(fast).toHaveValue("gpt-retired")
   await expect(fast.getByText("gpt-retired (unavailable)")).toHaveCount(1)
   await expect(
-    page.getByText("Your fast model is no longer available"),
+    page.getByText("Your Haiku alias model is no longer available"),
   ).toBeVisible()
+})
+
+test("lets Automatic reclaim an unavailable external classifier", async ({
+  page,
+}) => {
+  const initial = await currentModels(page)
+  await page.route(MODELS, async (route) => {
+    await route.fulfill({
+      json: {
+        ...initial,
+        claude_code_auto: {
+          ...initial.claude_code_auto,
+          classifier: {
+            configured: null,
+            effective: "gpt-retired",
+            source: "claude-code-setting",
+            status: "unavailable",
+            reason: "external-unavailable",
+          },
+        },
+      } satisfies ModelsListResponse,
+    })
+  })
+
+  await openModels(page)
+  const classifier = page.getByLabel("Auto permission checks")
+  await expect(classifier).toHaveValue("gpt-retired")
+  const updateRequest = page.waitForRequest((request) =>
+    request.url().endsWith("/settings/api/models/claude-code-auto"),
+  )
+
+  await classifier.selectOption("")
+
+  expect((await updateRequest).postDataJSON()).toEqual({ classifier: null })
 })
 
 test("shows the no-match state without choosing an arbitrary model", async ({
@@ -201,18 +257,25 @@ test("shows the no-match state without choosing an arbitrary model", async ({
         claude_code_auto: {
           applied: true,
           options: [],
+          classifier_options: [],
           fast: unresolved,
           capable: unresolved,
+          classifier: unresolved,
         },
       } satisfies ModelsListResponse,
     })
   })
 
   await openModels(page)
-  await expect(page.getByLabel("Fast and background work")).toHaveValue("")
+  await expect(page.getByLabel("Haiku alias")).toHaveValue("")
   await expect(
     page.getByText("No compatible model found—choose one"),
-  ).toHaveCount(2)
+  ).toHaveCount(3)
+  await expect(
+    page.getByText(
+      "No compatible model is available. Refresh the catalog or select a model.",
+    ),
+  ).toHaveCount(3)
 })
 
 test("keeps the Auto controls separated, focused, and within the narrow window", async ({
@@ -220,7 +283,7 @@ test("keeps the Auto controls separated, focused, and within the narrow window",
 }) => {
   await page.setViewportSize({ width: 640, height: 900 })
   await openModels(page)
-  await page.getByLabel("Fast and background work").focus()
+  await page.getByLabel("Haiku alias").focus()
 
   const layout = await page.evaluate<{
     autoDisplay: string

@@ -41,8 +41,10 @@ describe("ClaudeAutoModelsState", () => {
     const state = {
       applied: true,
       options: [option],
+      classifier_options: [option],
       fast: automatic,
       capable: unavailable,
+      classifier: automatic,
     }
     expect(ClaudeAutoModelsState.parse(state)).toEqual(state)
     expect(
@@ -59,6 +61,7 @@ describe("ClaudeAutoModelsState", () => {
       ClaudeAutoModelsState.safeParse({
         applied: true,
         options: [option],
+        classifier_options: [option],
         fast: {
           configured: null,
           effective: option.id,
@@ -67,6 +70,7 @@ describe("ClaudeAutoModelsState", () => {
           reason: "override",
         },
         capable: automatic,
+        classifier: automatic,
       }).success,
     ).toBe(false)
   })
@@ -80,8 +84,10 @@ describe("ClaudeAutoModelsState", () => {
       ClaudeAutoModelsState.safeParse({
         applied: true,
         options: [option],
+        classifier_options: [option],
         fast: { ...automatic, [key]: value },
         capable: automatic,
+        classifier: automatic,
       }).success,
     ).toBe(false)
   })
@@ -95,6 +101,9 @@ describe("ClaudeAutoModelsUpdateRequest", () => {
     expect(ClaudeAutoModelsUpdateRequest.parse({ capable: null })).toEqual({
       capable: null,
     })
+    expect(
+      ClaudeAutoModelsUpdateRequest.parse({ classifier: option.id }),
+    ).toEqual({ classifier: option.id })
   })
 
   test.each([

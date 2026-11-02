@@ -13,13 +13,38 @@ interface AutoModelControlsProps {
   onChange: (selection: ClaudeAutoModelsUpdateRequest) => Promise<void>;
 }
 
+type ModelSetting = "fast" | "capable" | "classifier";
+
 interface TierControlProps {
-  tier: "fast" | "capable";
+  tier: ModelSetting;
   state: ClaudeAutoTierState;
   models: ClaudeAutoModelsState;
   saving: boolean;
   onChange: (value: string | null) => void;
 }
+
+const EXTERNAL_DEFAULT_VALUE = "__claude-code-default__";
+
+const COPY_KEYS: Record<
+  ModelSetting,
+  { label: string; hint: string; unavailable: string }
+> = {
+  fast: {
+    label: "models-auto-fast-label",
+    hint: "models-auto-fast-hint",
+    unavailable: "models-auto-fast-unavailable-title",
+  },
+  capable: {
+    label: "models-auto-capable-label",
+    hint: "models-auto-capable-hint",
+    unavailable: "models-auto-capable-unavailable-title",
+  },
+  classifier: {
+    label: "models-auto-classifier-label",
+    hint: "models-auto-classifier-hint",
+    unavailable: "models-auto-classifier-unavailable-title",
+  },
+};
 
 function optionLabel(
   option: ClaudeAutoModelsState["options"][number],
@@ -30,13 +55,21 @@ function optionLabel(
   });
 }
 
+function optionsForTier(
+  models: ClaudeAutoModelsState,
+  tier: ModelSetting,
+): ClaudeAutoModelsState["options"] {
+  return tier === "classifier" ? models.classifier_options : models.options;
+}
+
 function effectiveName(
   state: ClaudeAutoTierState,
   models: ClaudeAutoModelsState,
 ): string {
   if (!state.effective) return "";
+  const options = [...models.options, ...models.classifier_options];
   return (
-    models.options.find((option) => option.id === state.effective)?.name ??
+    options.find((option) => option.id === state.effective)?.name ??
     state.effective
   );
 }
@@ -59,36 +92,58 @@ function statusText(
   return t("models-auto-effective-override", { modelName });
 }
 
+function selectionValue(state: ClaudeAutoTierState): string {
+  if (state.configured) return state.configured;
+  if (state.source !== "claude-code-setting") return "";
+  return state.effective ?? EXTERNAL_DEFAULT_VALUE;
+}
+
 function TierControl({ tier, state, models, saving, onChange }: TierControlProps) {
-  const labelKey =
-    tier === "fast" ? "models-auto-fast-label" : "models-auto-capable-label";
-  const hintKey =
-    tier === "fast" ? "models-auto-fast-hint" : "models-auto-capable-hint";
+  const copy = COPY_KEYS[tier];
   const status = statusText(state, models);
   const selectId = `models-auto-${tier}`;
-  const unavailable = state.reason === "override-unavailable";
+  const options = optionsForTier(models, tier);
+  const value = selectionValue(state);
+  const unavailableId =
+    state.status === "unavailable"
+      ? (state.configured ?? state.effective)
+      : null;
+  const showUnavailable =
+    unavailableId !== null &&
+    !options.some((option) => option.id === unavailableId);
+  const showExternalDefault = value === EXTERNAL_DEFAULT_VALUE;
 
   return (
     <div className="models-auto__row">
       <label className="models-auto__label" htmlFor={selectId}>
-        <span className="models-auto__row-title">{t(labelKey)}</span>
-        <span className="models-auto__row-hint">{t(hintKey)}</span>
+        <span className="models-auto__row-title">{t(copy.label)}</span>
+        <span className="models-auto__row-hint">{t(copy.hint)}</span>
       </label>
       <div className="models-auto__control">
         <select
           id={selectId}
           className="select"
-          value={state.configured ?? ""}
+          value={value}
           disabled={saving}
-          onChange={(event) => onChange(event.currentTarget.value || null)}
+          onChange={(event) => {
+            const selected = event.currentTarget.value;
+            if (selected !== EXTERNAL_DEFAULT_VALUE) {
+              onChange(selected || null);
+            }
+          }}
         >
           <option value="">{t("models-auto-automatic")}</option>
-          {unavailable && (
-            <option value={state.configured ?? ""}>
-              {t("models-auto-option-unavailable", { id: state.configured })}
+          {showExternalDefault && (
+            <option value={EXTERNAL_DEFAULT_VALUE}>
+              {t("models-auto-effective-external-default")}
             </option>
           )}
-          {models.options.map((option) => (
+          {showUnavailable && (
+            <option value={unavailableId ?? ""}>
+              {t("models-auto-option-unavailable", { id: unavailableId })}
+            </option>
+          )}
+          {options.map((option) => (
             <option key={option.id} value={option.id}>
               {optionLabel(option)}
             </option>
@@ -104,20 +159,13 @@ function TierProblem({
   tier,
   state,
 }: {
-  tier: "fast" | "capable";
+  tier: ModelSetting;
   state: ClaudeAutoTierState;
 }): JSX.Element | null {
   if (state.status === "ready") return null;
   if (state.status === "unavailable") {
     return (
-      <Callout
-        tone="notice"
-        title={t(
-          tier === "fast"
-            ? "models-auto-fast-unavailable-title"
-            : "models-auto-capable-unavailable-title",
-        )}
-      >
+      <Callout tone="notice" title={t(COPY_KEYS[tier].unavailable)}>
         <p>{t("models-auto-unavailable-detail")}</p>
       </Callout>
     );
@@ -139,6 +187,9 @@ export function AutoModelControls({
   };
   const updateCapable = (capable: string | null): void => {
     void onChange({ capable });
+  };
+  const updateClassifier = (classifier: string | null): void => {
+    void onChange({ classifier });
   };
 
   return (
@@ -164,6 +215,13 @@ export function AutoModelControls({
           saving={saving}
           onChange={updateCapable}
         />
+        <TierControl
+          tier="classifier"
+          state={state.classifier}
+          models={state}
+          saving={saving}
+          onChange={updateClassifier}
+        />
       </div>
       {saving && (
         <p className="panel-status" role="status">
@@ -175,6 +233,7 @@ export function AutoModelControls({
       )}
       <TierProblem tier="fast" state={state.fast} />
       <TierProblem tier="capable" state={state.capable} />
+      <TierProblem tier="classifier" state={state.classifier} />
     </section>
   );
 }

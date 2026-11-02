@@ -12,18 +12,22 @@ import {
   isGptClass,
   isSmallGptClass,
 } from "./model-identity"
+import { normalizeSdkModelId } from "./models"
 
-export type ClaudeAutoTier = "fast" | "capable"
+export type ClaudeAutoTier = "fast" | "capable" | "classifier"
 
 interface ClaudeAutoModelResolution {
   fast: ClaudeAutoTierState
   capable: ClaudeAutoTierState
+  classifier: ClaudeAutoTierState
   eligibleModels: Array<Model>
+  classifierEligibleModels: Array<Model>
 }
 
 interface TierIds {
   fast?: string
   capable?: string
+  classifier?: string
 }
 
 interface ResolveClaudeAutoModelsInput {
@@ -31,6 +35,7 @@ interface ResolveClaudeAutoModelsInput {
   overrides?: TierIds
   external?: TierIds
   previousAutomatic?: TierIds
+  sessionModel?: string
 }
 
 const ROUTABLE_ENDPOINTS = new Set([
@@ -62,6 +67,60 @@ export function isClaudeAutoModelEligible(model: Model): boolean {
   )
 }
 
+const SUPPORTED_CLASSIFIER_VERSIONS = {
+  haiku: new Set<string>(["5.5"]),
+  sonnet: new Set<string>(["5"]),
+  opus: new Set<string>(["4.7", "4.8"]),
+  fable: new Set<string>(["5", "5.1"]),
+} as const
+
+function normalizedClaudeIdentity(model: Model) {
+  const version = typeof model.version === "string" ? model.version : ""
+  const family =
+    typeof model.capabilities.family === "string" ?
+      model.capabilities.family
+    : ""
+  for (const candidate of [
+    version,
+    family,
+    family && version ? `${family}-${version}` : "",
+    model.id,
+  ]) {
+    const normalized = normalizeSdkModelId(candidate)
+    if (normalized) return normalized
+  }
+  return undefined
+}
+
+/** Models Claude Code can use for its client-side Auto permission classifier. */
+export function isClaudeCodeClassifierEligible(model: Model): boolean {
+  if (!isClaudeAutoModelEligible(model)) return false
+  if (isGptClass(model)) return true
+
+  const normalized = normalizedClaudeIdentity(model)
+  if (!normalized) return false
+  if (normalized.family === "haiku") {
+    return SUPPORTED_CLASSIFIER_VERSIONS.haiku.has(normalized.version)
+  }
+  if (normalized.family === "sonnet") {
+    return SUPPORTED_CLASSIFIER_VERSIONS.sonnet.has(normalized.version)
+  }
+  if (normalized.family === "opus") {
+    return SUPPORTED_CLASSIFIER_VERSIONS.opus.has(normalized.version)
+  }
+  if (normalized.family === "fable") {
+    return SUPPORTED_CLASSIFIER_VERSIONS.fable.has(normalized.version)
+  }
+  return false
+}
+
+function isClassifierClaudeFamily(
+  model: Model,
+  family: "haiku" | "sonnet" | "opus" | "fable",
+): boolean {
+  return normalizedClaudeIdentity(model)?.family === family
+}
+
 function isExplicitlyFree(model: Model): boolean {
   return pricedModelIsPaid(model.billing?.token_prices) === false
 }
@@ -79,51 +138,88 @@ function chooseFromBucket(
   return (free.length > 0 ? free : stablePool)[0]
 }
 
-function automaticResolution(
+function sessionGpt(
+  eligible: Array<Model>,
+  sessionModel: string | undefined,
+): Array<Model> {
+  const id = sessionModel?.replace(/\[1m\]$/u, "")
+  if (!id) return []
+  const selected = eligible.find(
+    (model) => model.id === id && isGptClass(model),
+  )
+  return selected ? [selected] : []
+}
+
+function automaticBuckets(
   tier: ClaudeAutoTier,
   eligible: Array<Model>,
-  previousId: string | undefined,
-): ClaudeAutoTierState {
-  const buckets: Array<{
-    models: Array<Model>
-    reason: ClaudeAutoAutomaticReason
-  }> =
-    tier === "fast" ?
-      [
-        {
-          models: eligible.filter((model) => isClaudeTierClass(model, "haiku")),
-          reason: "haiku",
-        },
-        {
-          models: eligible.filter((model) => isSmallGptClass(model)),
-          reason: "small-gpt",
-        },
-        {
-          models: eligible.filter((model) => isGptClass(model)),
-          reason: "gpt",
-        },
-      ]
-    : [
-        {
-          models: eligible.filter((model) =>
-            isClaudeTierClass(model, "sonnet"),
-          ),
-          reason: "sonnet",
-        },
-        {
-          models: eligible.filter(
-            (model) => isGptClass(model) && !isSmallGptClass(model),
-          ),
-          reason: "gpt",
-        },
-        {
-          models: eligible.filter((model) => isSmallGptClass(model)),
-          reason: "small-gpt",
-        },
-      ]
+  sessionModel: string | undefined,
+): Array<{ models: Array<Model>; reason: ClaudeAutoAutomaticReason }> {
+  if (tier === "fast") {
+    return [
+      {
+        models: eligible.filter((model) => isClaudeTierClass(model, "haiku")),
+        reason: "haiku",
+      },
+      {
+        models: eligible.filter((model) => isSmallGptClass(model)),
+        reason: "small-gpt",
+      },
+      {
+        models: eligible.filter((model) => isGptClass(model)),
+        reason: "gpt",
+      },
+    ]
+  }
+  if (tier === "capable") {
+    return [
+      {
+        models: eligible.filter((model) => isClaudeTierClass(model, "sonnet")),
+        reason: "sonnet",
+      },
+      {
+        models: eligible.filter(
+          (model) => isGptClass(model) && !isSmallGptClass(model),
+        ),
+        reason: "gpt",
+      },
+      {
+        models: eligible.filter((model) => isSmallGptClass(model)),
+        reason: "small-gpt",
+      },
+    ]
+  }
+  return [
+    {
+      models: eligible.filter((model) =>
+        isClassifierClaudeFamily(model, "haiku"),
+      ),
+      reason: "haiku",
+    },
+    { models: sessionGpt(eligible, sessionModel), reason: "gpt" },
+    {
+      models: eligible.filter((model) => isSmallGptClass(model)),
+      reason: "small-gpt",
+    },
+    {
+      models: eligible.filter((model) => isGptClass(model)),
+      reason: "gpt",
+    },
+  ]
+}
 
-  for (const bucket of buckets) {
-    const selected = chooseFromBucket(bucket.models, previousId)
+function automaticResolution(input: {
+  tier: ClaudeAutoTier
+  eligible: Array<Model>
+  previousId: string | undefined
+  sessionModel: string | undefined
+}): ClaudeAutoTierState {
+  for (const bucket of automaticBuckets(
+    input.tier,
+    input.eligible,
+    input.sessionModel,
+  )) {
+    const selected = chooseFromBucket(bucket.models, input.previousId)
     if (selected) {
       return {
         configured: null,
@@ -189,7 +285,12 @@ function resolveTier(
         }
   }
 
-  return automaticResolution(tier, eligible, input.previousAutomatic?.[tier])
+  return automaticResolution({
+    tier,
+    eligible,
+    previousId: input.previousAutomatic?.[tier],
+    sessionModel: input.sessionModel,
+  })
 }
 
 export function resolveClaudeAutoModels(
@@ -198,9 +299,14 @@ export function resolveClaudeAutoModels(
   const eligibleModels = (input.models ?? []).filter((model) =>
     isClaudeAutoModelEligible(model),
   )
+  const classifierEligibleModels = eligibleModels.filter((model) =>
+    isClaudeCodeClassifierEligible(model),
+  )
   return {
     fast: resolveTier("fast", eligibleModels, input),
     capable: resolveTier("capable", eligibleModels, input),
+    classifier: resolveTier("classifier", classifierEligibleModels, input),
     eligibleModels,
+    classifierEligibleModels,
   }
 }

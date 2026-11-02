@@ -40,6 +40,20 @@ describe("unified Settings + Dashboard window & Appearance contract", () => {
     expect(SETTINGS_HTML).toContain("data-dashboard-controls")
   })
 
+  test("keeps endpoint and API keys at the bottom of Integrations", () => {
+    expect(SETTINGS_MAIN_TS).toContain(
+      'integrations: ["apps", "mcp", "requests", "endpoint", "api-clients"]',
+    )
+    expect(SETTINGS_MAIN_TS).toContain('"models-keys": ["models"]')
+    const requests = SETTINGS_HTML.indexOf('data-section="requests"')
+    const endpoint = SETTINGS_HTML.indexOf('data-section="endpoint"')
+    const apiClients = SETTINGS_HTML.indexOf('data-section="api-clients"')
+    const models = SETTINGS_HTML.indexOf('data-section="models"')
+    expect(requests).toBeLessThan(endpoint)
+    expect(endpoint).toBeLessThan(apiClients)
+    expect(apiClients).toBeLessThan(models)
+  })
+
   test("includes Appearance section with Dock/taskbar visibility toggle defaulting to checked", () => {
     expect(SETTINGS_HTML).toContain('data-section="appearance"')
     expect(SETTINGS_HTML).toContain("data-dock-visibility-toggle")

@@ -38,7 +38,10 @@ import {
   type ModelSummary as ModelSummaryT,
 } from "~/lib/config/settings-types"
 import { forwardError, HTTPError } from "~/lib/errors/error"
-import { isClaudeAutoModelEligible } from "~/lib/models/claude-auto-models"
+import {
+  isClaudeAutoModelEligible,
+  isClaudeCodeClassifierEligible,
+} from "~/lib/models/claude-auto-models"
 import { cacheModels } from "~/lib/platform/utils"
 import { getModelsLoadedAtMs, state } from "~/lib/runtime-state/state"
 
@@ -112,11 +115,18 @@ function httpError(message: string, status: number): HTTPError {
   return new HTTPError(message, new Response(message, { status }))
 }
 
-function validateSelection(id: string | null | undefined): void {
+function validateSelection(
+  tier: ClaudeAutoTier,
+  id: string | null | undefined,
+): void {
   if (id === null || id === undefined) return
   const selected = state.models?.data.find((model) => model.id === id)
-  if (!selected || !isClaudeAutoModelEligible(selected)) {
-    throw httpError(`Model ${id} is not available for Claude Code Auto`, 400)
+  const eligible =
+    tier === "classifier" ?
+      selected && isClaudeCodeClassifierEligible(selected)
+    : selected && isClaudeAutoModelEligible(selected)
+  if (!eligible) {
+    throw httpError(`Model ${id} is not available for ${tier}`, 400)
   }
 }
 
@@ -126,7 +136,7 @@ type ClaudeCodeConfig = NonNullable<
 
 function updateTierConfig(
   current: ClaudeCodeConfig,
-  key: "fastModel" | "capableModel",
+  key: "fastModel" | "capableModel" | "classifierModel",
   value: string | null | undefined,
 ): ClaudeCodeConfig {
   if (value === undefined) return current
@@ -134,15 +144,17 @@ function updateTierConfig(
   return value === null ? without : { ...without, [key]: value }
 }
 
-function persistSelections(input: AutoModelsUpdate): void {
+function persistSelections(input: AutoModelsUpdate): AppConfig {
   const config = getConfig()
   let claudeCode = config.apps?.claudeCode ?? {}
   claudeCode = updateTierConfig(claudeCode, "fastModel", input.fast)
   claudeCode = updateTierConfig(claudeCode, "capableModel", input.capable)
+  claudeCode = updateTierConfig(claudeCode, "classifierModel", input.classifier)
   writeConfig({
     ...config,
     apps: { ...config.apps, claudeCode },
   })
+  return config
 }
 
 export const modelsRoutes = new Hono()
@@ -154,17 +166,28 @@ modelsRoutes.patch("/claude-code-auto", async (c) => {
     const body: unknown = await c.req.json().catch(() => null)
     const parsed = ClaudeAutoModelsUpdateRequest.safeParse(body)
     if (!parsed.success) {
-      throw httpError("Expected fast or capable model id or null", 400)
+      throw httpError(
+        "Expected Haiku, Sonnet, or classifier model id or null",
+        400,
+      )
     }
-    validateSelection(parsed.data.fast)
-    validateSelection(parsed.data.capable)
-    persistSelections(parsed.data)
+    validateSelection("fast", parsed.data.fast)
+    validateSelection("capable", parsed.data.capable)
+    validateSelection("classifier", parsed.data.classifier)
+    const previousConfig = persistSelections(parsed.data)
     const claimed = new Set<ClaudeAutoTier>()
     if (parsed.data.fast !== undefined) claimed.add("fast")
     if (parsed.data.capable !== undefined) claimed.add("capable")
-    reconcileClaudeCodeAutoModels(getClaudeCodeSettingsPath(), {
-      claimAutoModels: claimed,
-    })
+    if (parsed.data.classifier !== undefined) claimed.add("classifier")
+    try {
+      reconcileClaudeCodeAutoModels(getClaudeCodeSettingsPath(), {
+        claimAutoModels: claimed,
+        throwOnError: true,
+      })
+    } catch (error) {
+      writeConfig(previousConfig)
+      throw error
+    }
     return jsonModels(c)
   } catch (error) {
     return forwardError(c, error)
