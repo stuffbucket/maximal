@@ -9,6 +9,7 @@ import { contentTypeForPath } from "~/lib/platform/web-content-types"
  * Serves the web UIs under `/ui/*`:
  *   - /ui/settings  — the React settings app (Bun-bundled)
  *   - /ui/dashboard — the usage dashboard (vanilla)
+ *   - /ui/sessions  — the dashboard bundle's Sessions surface
  *
  * One serving path for both, dev and prod:
  *   - Production: assets are embedded in the compiled binary via the
@@ -112,6 +113,12 @@ export const uiRoutes = new Hono()
 // Bare-surface redirects to the canonical trailing-slash index.
 uiRoutes.get("/settings", (c) => c.redirect("/ui/settings/", 301))
 uiRoutes.get("/dashboard", (c) => c.redirect("/ui/dashboard/", 301))
+uiRoutes.get("/sessions", (c) =>
+  c.redirect("/ui/dashboard/?surface=sessions", 301),
+)
+uiRoutes.get("/sessions/", (c) =>
+  c.redirect("/ui/dashboard/?surface=sessions", 301),
+)
 
 uiRoutes.get("/settings/", () =>
   serve("/ui/settings/index.html", "/ui/settings/index.html"),

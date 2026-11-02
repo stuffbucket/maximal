@@ -41,15 +41,17 @@ has no animated border, pulse, or separate “Live” ornament—the data itself
 the motion.
 
 The worker caps rendering at 30 frames per second and pauses while the page is
-hidden. Its first poll establishes cumulative token baselines. Later polls emit
+hidden or the unified window is showing Settings or Sessions. Its first poll establishes cumulative token baselines. Later polls emit
 a bounded burst only for newly observed tokens, split proportionally by model,
 session and token role. Each particle travels its directional edge once, dwells
 briefly at the destination, then disappears. An unchanged poll emits nothing,
 so an idle graph is literally still; existing nodes remain visible.
 
-Under `prefers-reduced-motion: reduce` the worker draws the current distribution
-once and does not schedule animation frames. Don't replace that static state
-with slower particles.
+With no graphable traffic, the graph keeps its layout slot and shows a static
+empty state; it never invents motion to imply activity. Under
+`prefers-reduced-motion: reduce` the worker draws the current distribution once
+and does not schedule animation frames. Don't replace that static state with
+slower particles.
 
 See [`principles.md`](principles.md) → Principle 5.
 

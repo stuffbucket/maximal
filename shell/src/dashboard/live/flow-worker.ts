@@ -491,9 +491,10 @@ function schedule(): void {
   timer = setTimeout(() => tick(performance.now()), FRAME_MS);
 }
 
-function applySnapshot(next: FlowSnapshot): void {
+function applySnapshot(next: FlowSnapshot, baseline = false): void {
+  if (baseline) particles = [];
   const observed = observeFlowDeltas(
-    observations,
+    baseline ? null : observations,
     next.edges,
     MAX_BURST_PARTICLES,
   );
@@ -558,11 +559,14 @@ globalThis.onmessage = (event: MessageEvent<FlowWorkerMessage>) => {
   }
   if (message.type === "active") {
     active = message.active;
-    if (!active && timer !== null) {
-      clearTimeout(timer);
+    if (!active) {
+      if (timer !== null) clearTimeout(timer);
       timer = null;
+      particles = [];
+      draw();
+    } else {
+      schedule();
     }
-    if (active) schedule();
     return;
   }
   if (message.type === "hit-test") {
@@ -578,5 +582,5 @@ globalThis.onmessage = (event: MessageEvent<FlowWorkerMessage>) => {
     globalThis.postMessage({ type: "select", sessionId: selected });
     return;
   }
-  applySnapshot(message.snapshot);
+  applySnapshot(message.snapshot, message.baseline === true);
 };

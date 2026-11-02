@@ -278,6 +278,7 @@ const TRAY_ICON_ATTENTION: &[u8] = include_bytes!("../icons/tray/icon-attention@
 mod menu_id {
     pub const SETTINGS: &str = "settings";
     pub const DASHBOARD: &str = "dashboard";
+    pub const SESSIONS: &str = "sessions";
     pub const QUIT: &str = "quit";
     pub const SIGN_IN: &str = "sign_in";
     pub const ACCOUNT_INFO: &str = "account_info";
@@ -873,6 +874,25 @@ impl LocaleState {
     }
 }
 
+/// The active peer surface in the unified main window. The frontend updates it
+/// even when restoring a hashless localStorage choice, so locale retitling never
+/// has to infer the visible surface from a stale URL.
+struct MainSurfaceState(Mutex<String>);
+
+impl MainSurfaceState {
+    fn new() -> Self {
+        Self(Mutex::new("settings".to_string()))
+    }
+
+    fn get(&self) -> String {
+        self.0.lock().expect("main surface mutex poisoned").clone()
+    }
+
+    fn set(&self, surface: &str) {
+        *self.0.lock().expect("main surface mutex poisoned") = surface.to_string();
+    }
+}
+
 /// Dock / taskbar visibility mode ("always" by default, or "when-window-open").
 /// Persisted to `<maximal_data_dir>/dock-visibility` and changeable live from
 /// Settings → Appearance via `set_dock_visibility`.
@@ -1282,12 +1302,14 @@ pub fn run() {
         .manage(PendingRequests::new())
         .manage(LastSidecarError::new())
         .manage(LocaleState::new())
+        .manage(MainSurfaceState::new())
         .manage(DockVisibilityState::new())
         .on_menu_event(handle_menu_event);
     let builder = if profile.updates_enabled() {
         builder.invoke_handler(tauri::generate_handler![
             open_settings_at,
             open_dashboard,
+            set_main_surface,
             reveal_config_dir,
             reveal_logs_dir,
             restart_sidecar,
@@ -2932,6 +2954,12 @@ fn build_muda_dock_menu(app: &AppHandle, locale: &str, state: SidecarState) -> m
         true,
         None,
     );
+    let sessions_item = MenuItem::with_id(
+        menu_id::SESSIONS,
+        native_i18n::tr(locale, "native-tray-sessions"),
+        true,
+        None,
+    );
     let sep1 = PredefinedMenuItem::separator();
 
     let update = app.state::<LatestUpdate>().get();
@@ -2983,7 +3011,7 @@ fn build_muda_dock_menu(app: &AppHandle, locale: &str, state: SidecarState) -> m
                 menu.append(&sep_upgrade)?;
                 menu.append(up)?;
             }
-            menu.append_items(&[&sep1, &dashboard_item, &settings_item])?;
+            menu.append_items(&[&sep1, &dashboard_item, &sessions_item, &settings_item])?;
         }
         SidecarState::RunningAuthenticated => {
             let info = MenuItem::with_id(
@@ -3001,7 +3029,7 @@ fn build_muda_dock_menu(app: &AppHandle, locale: &str, state: SidecarState) -> m
                 menu.append(&sep_upgrade)?;
                 menu.append(up)?;
             }
-            menu.append_items(&[&sep1, &dashboard_item, &settings_item])?;
+            menu.append_items(&[&sep1, &dashboard_item, &sessions_item, &settings_item])?;
         }
         SidecarState::Failed | SidecarState::Stopped => {
             let failed = MenuItem::with_id(
@@ -3217,6 +3245,13 @@ fn build_menu(
         true,
         Some("CmdOrCtrl+D"),
     )?;
+    let sessions_item = MenuItem::with_id(
+        app,
+        menu_id::SESSIONS,
+        native_i18n::tr(locale, "native-tray-sessions"),
+        true,
+        None::<&str>,
+    )?;
     let quit_item = MenuItem::with_id(
         app,
         menu_id::QUIT,
@@ -3313,6 +3348,7 @@ fn build_menu(
             }
             items.push(&sep1);
             items.push(&dashboard_item);
+            items.push(&sessions_item);
             items.push(&settings_item);
             items.push(&sep2);
             items.push(&quit_item);
@@ -3349,6 +3385,7 @@ fn build_menu(
             }
             items.push(&sep1);
             items.push(&dashboard_item);
+            items.push(&sessions_item);
             items.push(&settings_item);
             items.push(&sep2);
             items.push(&quit_item);
@@ -3403,6 +3440,7 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
     match event.id().as_ref() {
         menu_id::SETTINGS => open_settings_window(app, None),
         menu_id::DASHBOARD => open_dashboard_window(app),
+        menu_id::SESSIONS => open_sessions_window(app),
         menu_id::SIGN_IN => open_settings_window(app, Some("account")),
         menu_id::SHOW_LOGS => do_reveal_logs_dir(app),
         menu_id::OPEN_CONFIG => do_reveal_config_dir(app),
@@ -3823,8 +3861,8 @@ fn respawn_sidecar(app: &AppHandle) {
     // The replacement generation starts polling after its validated ready line.
 }
 
-/// Opens (or focuses) the dashboard webview pointed at the sidecar's
-/// settings page. The optional `section` becomes a URL fragment so the
+/// Opens (or focuses) the unified main webview on the sidecar's Settings shell.
+/// The optional `section` becomes a URL fragment so the
 /// frontend can scroll to / select that section.
 fn open_settings_window(app: &AppHandle, section: Option<&str>) {
     // Any window taking the stage retires the splash (it's always-on-top
@@ -3851,7 +3889,15 @@ fn open_settings_window(app: &AppHandle, section: Option<&str>) {
         }
     };
 
+    let surface = match section {
+        Some("dashboard") => "dashboard",
+        Some("sessions") => "sessions",
+        _ => "settings",
+    };
+    app.state::<MainSurfaceState>().set(surface);
+    let title = main_surface_title(app, surface);
     if let Some(existing) = app.get_webview_window(SETTINGS_WINDOW_LABEL) {
+        let _ = existing.set_title(&title);
         let js = match section {
             Some(s) => format!("window.location.hash = {:?};", s),
             None => "window.dispatchEvent(new CustomEvent('maximal:open-settings'));".to_string(),
@@ -3866,7 +3912,6 @@ fn open_settings_window(app: &AppHandle, section: Option<&str>) {
     // Surface the version in the titlebar (window-level identity belongs in
     // the title, not a content H1 — see docs/design/failure-modes.md). Drop
     // the suffix in dev where the version is the `0.0.0` placeholder.
-    let title = settings_title(app);
     let builder = WebviewWindowBuilder::new(
         app,
         SETTINGS_WINDOW_LABEL,
@@ -4019,12 +4064,22 @@ fn settings_title(app: &AppHandle) -> String {
     }
 }
 
-/// Re-title any already-open Settings/Dashboard window to the active locale.
+/// Re-title any already-open unified Settings/Dashboard/Sessions window.
 /// Called from `set_locale` so a picker change updates the OS-drawn titlebar
 /// live, not just on the next window open. No-op for windows that aren't up.
+fn main_surface_title(app: &AppHandle, surface: &str) -> String {
+    let locale = app.state::<LocaleState>().get();
+    match surface {
+        "dashboard" => native_i18n::tr(&locale, "native-window-dashboard-title"),
+        "sessions" => native_i18n::tr(&locale, "native-window-sessions-title"),
+        _ => settings_title(app),
+    }
+}
+
 fn retitle_windows(app: &AppHandle) {
     if let Some(win) = app.get_webview_window(SETTINGS_WINDOW_LABEL) {
-        let _ = win.set_title(&settings_title(app));
+        let surface = app.state::<MainSurfaceState>().get();
+        let _ = win.set_title(&main_surface_title(app, &surface));
     }
     if let Some(win) = app.get_webview_window(DASHBOARD_WINDOW_LABEL) {
         let locale = app.state::<LocaleState>().get();
@@ -4054,9 +4109,15 @@ fn open_dashboard_window(app: &AppHandle) {
     open_settings_window(app, Some("dashboard"));
 }
 
+/// Opens (or focuses) the unified window on its Sessions view.
+fn open_sessions_window(app: &AppHandle) {
+    const _SESSIONS_ROUTE_CONTRACT: &str = "/ui/sessions/";
+    open_settings_window(app, Some("sessions"));
+}
+
 /// Wires the OS close button (red ✕ on macOS) to HIDE the window
 /// rather than close it. The tray remains the persistent UI surface,
-/// so closing a settings/dashboard window is just a visibility change.
+/// so closing the unified Settings/Dashboard/Sessions window only hides it.
 /// Also drives the Dock icon via `update_activation_policy`.
 fn attach_hide_on_close(app: &AppHandle, window: &tauri::WebviewWindow) {
     let window_clone = window.clone();
@@ -4275,6 +4336,24 @@ fn open_dashboard(app: AppHandle) {
     open_dashboard_window(&app);
 }
 
+/// Keep the OS-drawn title in sync with the unified frontend surface.
+#[tauri::command]
+fn set_main_surface(app: AppHandle, surface: String) -> Result<(), String> {
+    let normalized = match surface.as_str() {
+        "dashboard" => "dashboard",
+        "sessions" => "sessions",
+        "settings" => "settings",
+        _ => return Err("unknown main surface".to_string()),
+    };
+    app.state::<MainSurfaceState>().set(normalized);
+    if let Some(window) = app.get_webview_window(SETTINGS_WINDOW_LABEL) {
+        window
+            .set_title(&main_surface_title(&app, normalized))
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
 /// Tauri command — reveal the maximal config directory in Finder/Explorer.
 /// Wired to the "Reveal config" button in the Settings footer.
 #[tauri::command]
@@ -4468,6 +4547,15 @@ fn set_dock_visibility(
 #[cfg(test)]
 mod tests {
     use super::extract_error_reason;
+
+    #[test]
+    fn remembers_the_active_main_surface_without_a_url_fragment() {
+        use super::MainSurfaceState;
+        let state = MainSurfaceState::new();
+        assert_eq!(state.get(), "settings");
+        state.set("sessions");
+        assert_eq!(state.get(), "sessions");
+    }
 
     #[test]
     fn reads_the_requests_summary() {

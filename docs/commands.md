@@ -171,7 +171,7 @@ bun run dev -- start --port 4141
 
 # Terminal B — rebuild the UI bundles on every save.
 bun run app:ui
-# Open http://localhost:4141/ui/settings/  (or /ui/dashboard/)
+# Open http://localhost:4141/ui/settings/, /ui/dashboard/, or /ui/sessions/
 # Reload the window after a save to pick up changes.
 ```
 
@@ -181,7 +181,7 @@ no-op gracefully — everything else works.
 
 ## Storybook (UI catalog)
 
-Every Settings and Dashboard piece in every state, without a running proxy.
+Every Settings, Dashboard and Sessions piece in every state, without a running proxy.
 It's an isolated package (`packages/storybook`, its own pnpm lockfile), like
 the MCP broker:
 

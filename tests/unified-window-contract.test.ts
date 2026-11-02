@@ -16,8 +16,8 @@ const SHELL_LIB_RS = readFileSync(
   "utf8",
 )
 
-describe("unified Settings + Dashboard window & Appearance contract", () => {
-  test("replaces left sidebar with a single topbar containing consolidated tabs and right-side mode icon button", () => {
+describe("unified Settings, Dashboard, Sessions & Appearance contract", () => {
+  test("uses a single topbar with Settings tabs and a three-surface switcher", () => {
     expect(SETTINGS_HTML).toContain(
       '<header class="topbar" data-tauri-drag-region>',
     )
@@ -33,11 +33,29 @@ describe("unified Settings + Dashboard window & Appearance contract", () => {
       expect(SETTINGS_HTML).toContain(`data-nav="${tab}"`)
     }
 
-    expect(SETTINGS_HTML).toContain("data-surface-mode-btn")
-    expect(SETTINGS_HTML).toContain('data-mode-icon="dashboard"')
-    expect(SETTINGS_HTML).toContain('data-mode-icon="settings"')
+    expect(SETTINGS_HTML).toContain("topbar__surface-switcher")
+    for (const surface of ["settings", "dashboard", "sessions"]) {
+      expect(SETTINGS_HTML).toContain(`data-surface-target="${surface}"`)
+    }
     expect(SETTINGS_HTML).toContain("data-dashboard-frame")
     expect(SETTINGS_HTML).toContain("data-dashboard-controls")
+    expect(SETTINGS_MAIN_TS).toContain('sessions: ["dashboard"]')
+    expect(SETTINGS_MAIN_TS).toContain('type: "maximal:surface"')
+    expect(SETTINGS_MAIN_TS).toContain('safeInvoke("set_main_surface"')
+  })
+
+  test("keeps endpoint and API keys at the bottom of Integrations", () => {
+    expect(SETTINGS_MAIN_TS).toContain(
+      'integrations: ["apps", "mcp", "requests", "endpoint", "api-clients"]',
+    )
+    expect(SETTINGS_MAIN_TS).toContain('"models-keys": ["models"]')
+    const requests = SETTINGS_HTML.indexOf('data-section="requests"')
+    const endpoint = SETTINGS_HTML.indexOf('data-section="endpoint"')
+    const apiClients = SETTINGS_HTML.indexOf('data-section="api-clients"')
+    const models = SETTINGS_HTML.indexOf('data-section="models"')
+    expect(requests).toBeLessThan(endpoint)
+    expect(endpoint).toBeLessThan(apiClients)
+    expect(apiClients).toBeLessThan(models)
   })
 
   test("includes Appearance section with Dock/taskbar visibility toggle defaulting to checked", () => {
@@ -61,5 +79,8 @@ describe("unified Settings + Dashboard window & Appearance contract", () => {
     expect(SHELL_LIB_RS).toContain("get_dock_visibility")
     expect(SHELL_LIB_RS).toContain("set_dock_visibility")
     expect(SHELL_LIB_RS).toContain("applicationDockMenu:")
+    expect(SHELL_LIB_RS).toContain("menu_id::SESSIONS")
+    expect(SHELL_LIB_RS).toContain("open_sessions_window")
+    expect(SHELL_LIB_RS).toContain("fn set_main_surface")
   })
 })

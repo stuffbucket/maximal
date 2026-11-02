@@ -36,7 +36,7 @@ describe("topbar update button", () => {
   test("lives in the topbar utilities, hidden until an update is offered", () => {
     const utilities = SETTINGS_HTML.slice(
       SETTINGS_HTML.indexOf('<div class="topbar__utilities">'),
-      SETTINGS_HTML.indexOf("data-surface-mode-btn"),
+      SETTINGS_HTML.indexOf("topbar__surface-switcher"),
     )
     // The wrapper carries [hidden]: .btn's display rule would override the UA
     // [hidden] style on the button itself.

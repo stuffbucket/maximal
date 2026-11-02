@@ -103,10 +103,12 @@ export interface AppsConfig {
     enabled?: boolean
     /** MCP endpoint ids Maximal added to Claude Code's user scope. */
     mcpServers?: Array<string>
-    /** Explicit fast/background Auto-tier model. Missing means Automatic. */
+    /** Explicit model for Claude Code's Haiku alias. Missing means Automatic. */
     fastModel?: string
-    /** Explicit capable/default Auto-tier model. Missing means Automatic. */
+    /** Explicit model for Claude Code's Sonnet alias. Missing means Automatic. */
     capableModel?: string
+    /** Explicit client-side Auto permission classifier. Missing means Automatic. */
+    classifierModel?: string
   }
   claudeDesktop?: {
     /** Proxy config applied to Claude Desktop. */

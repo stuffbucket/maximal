@@ -265,6 +265,10 @@ body {
   max-width: 1120px;
 }
 
+[data-observability-view][hidden] {
+  display: none;
+}
+
 /* Section headings match each other: the body face at the section size,
    led by the section's icon. The Dashboard has no display (Fraunces) moment;
    see docs/design/windows.md. */
@@ -913,6 +917,34 @@ html[data-embedded="true"] .lang-picker {
 .live__error-title {
   margin-right: var(--space-1);
   font-weight: var(--weight-lg);
+}
+
+.live__plot[hidden],
+.live__empty[hidden],
+.observability-empty[hidden] {
+  display: none;
+}
+
+.live__empty,
+.observability-empty {
+  padding: var(--space-6);
+  border: var(--border-width-hairline) dashed var(--border-strong);
+  border-radius: var(--radius-card);
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.live__empty-title,
+.observability-empty__title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-md);
+  font-weight: var(--weight-lg);
+  color: var(--text-strong);
+}
+
+.live__empty p,
+.observability-empty p {
+  margin: 0;
 }
 
 /* ---- Session table ----

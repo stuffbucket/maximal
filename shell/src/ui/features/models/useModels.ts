@@ -137,7 +137,10 @@ export function useModels(): UseModels {
         setProblem(null);
       } else {
         setProblem(
-          describeProblem(result, { subject: "Auto models", doing: "save" }),
+          describeProblem(result, {
+            subject: "Claude Code model settings",
+            doing: "save",
+          }),
         );
       }
       setIsSavingAutoModels(false);
