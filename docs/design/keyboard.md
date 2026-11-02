@@ -15,6 +15,10 @@ overrides; bindings that conflict with OS conventions lose to the OS.
 | `Cmd-Shift-,` | Reveal config in editor | Settings | **planned** | Power-user escape hatch. |
 | `Cmd-K` | Command palette | Global | **reserved** | Not bound in v1. The keybind is reserved so users who try it don't accidentally hit a different action. **Don't repurpose.** |
 
+Sessions is a peer surface with a tray item and topbar button, but deliberately
+has no shortcut yet. Choose and document one intentionally rather than borrowing
+`Cmd-K` or another reserved binding.
+
 > **Status definitions.** *Shipped* = implemented. *Planned* = on the
 > roadmap; no app code binds it. *Reserved* = explicitly not bound; do
 > not bind to anything else. Confirm against the codebase before adding

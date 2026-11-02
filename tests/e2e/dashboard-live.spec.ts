@@ -20,6 +20,7 @@ import type {
 
 const BASE = process.env.UI_HARNESS_URL ?? "http://127.0.0.1:4747"
 const DASHBOARD = `${BASE}/ui/dashboard/`
+const SETTINGS = `${BASE}/ui/settings/#dashboard`
 const SESSIONS = "**/token-usage/sessions"
 
 test.use({ viewport: { width: 1100, height: 900 }, deviceScaleFactor: 1 })
@@ -43,10 +44,12 @@ async function open(page: Page): Promise<Array<string>> {
   await page.addStyleTag({
     content: "#__harness { display: none !important; }",
   })
-  await expect(page.locator(".session-row").first()).toBeVisible()
   await expect(
     page.locator('.live__flow-canvas[data-renderer="worker"]'),
   ).toBeVisible()
+  await showSurface(page, "sessions")
+  await expect(page.locator(".session-row").first()).toBeVisible()
+  await showSurface(page, "dashboard")
   return errors
 }
 
@@ -59,6 +62,18 @@ async function tableOrder(page: Page): Promise<Array<string>> {
 }
 
 /** Serve the sessions endpoint from `edit` applied to the harness's live payload. */
+async function showSurface(
+  page: Page,
+  surface: "dashboard" | "sessions",
+): Promise<void> {
+  await page.evaluate(
+    `window.postMessage({ type: "maximal:surface", surface: ${JSON.stringify(surface)} }, location.origin)`,
+  )
+  await expect(
+    page.locator(`[data-observability-view="${surface}"]`),
+  ).toBeVisible()
+}
+
 async function routeSessions(
   page: Page,
   edit: (view: SessionsResponse) => SessionsResponse,
@@ -69,6 +84,79 @@ async function routeSessions(
     await route.fulfill({ response: res, json: edit(view) })
   })
 }
+
+test("the unified window switches one observability iframe between Dashboard and Sessions", async ({
+  page,
+}) => {
+  await page.goto(SETTINGS)
+  await page.addStyleTag({
+    content: "#__harness { display: none !important; }",
+  })
+  const frame = page.frameLocator("[data-dashboard-frame]")
+  await expect(
+    frame.locator('[data-observability-view="dashboard"]'),
+  ).toBeVisible()
+  await expect(
+    page.locator('[data-surface-target="dashboard"]'),
+  ).toHaveAttribute("aria-pressed", "true")
+
+  await page.locator('[data-surface-target="sessions"]').click()
+
+  await expect(page).toHaveURL(/#sessions$/u)
+  await expect(page).toHaveTitle("Maximal — Sessions")
+  await expect(
+    frame.locator('[data-observability-view="sessions"]'),
+  ).toBeVisible()
+  await expect(frame.locator(".session-row").first()).toBeVisible()
+  await expect(page.locator("[data-dashboard-frame]")).toHaveCount(1)
+  await page.setViewportSize({ width: 640, height: 900 })
+  const overflow = await page.evaluate<number>(
+    "document.documentElement.scrollWidth - document.documentElement.clientWidth",
+  )
+  expect(overflow).toBeLessThanOrEqual(0)
+})
+
+test("switching Dashboard and Sessions preserves the shared poll cadence", async ({
+  page,
+}) => {
+  let requests = 0
+  page.on("request", (request) => {
+    if (isSessions(request.url())) requests += 1
+  })
+  await page.goto(SETTINGS)
+  const frame = page.frameLocator("[data-dashboard-frame]")
+  await expect(frame.locator(".live__flow-canvas")).toHaveAttribute(
+    "data-renderer",
+    "worker",
+  )
+  await expect.poll(() => requests).toBeGreaterThan(0)
+  const baseline = requests
+
+  await page.locator('[data-surface-target="sessions"]').click()
+  await page.locator('[data-surface-target="dashboard"]').click()
+  await page.locator('[data-surface-target="sessions"]').click()
+  await page.waitForTimeout(300)
+
+  expect(requests).toBe(baseline)
+})
+
+test("standalone Sessions keeps language access and an accurate title", async ({
+  page,
+}) => {
+  await page.goto(`${DASHBOARD}?surface=sessions`)
+  await page.addStyleTag({
+    content: "#__harness { display: none !important; }",
+  })
+
+  await expect(page).toHaveTitle("Sessions")
+  await expect(page.locator(".lang-picker")).toBeVisible()
+  await expect(page.locator("#token-usage-period")).toBeHidden()
+  await expect(
+    page.locator('[data-observability-view="sessions"]'),
+  ).toBeVisible()
+  await page.locator("#locale-select").selectOption("de")
+  await expect(page).toHaveTitle("Sitzungen")
+})
 
 test("the live card sits beside the quotas, and nothing overflows", async ({
   page,
@@ -93,12 +181,13 @@ test("the live card sits beside the quotas, and nothing overflows", async ({
   expect(Math.abs(metrics.y - quota.y)).toBeLessThanOrEqual(2)
   expect(metrics.x).toBeLessThan(quota.x)
 
-  // The session table comes after the bento and before the per-request table.
-  const table = await page.locator("#sessions").boundingBox()
-  const events = await page.locator("#token-usage").boundingBox()
-  expect(
-    table && events && table.y > live.y + live.height && table.y < events.y,
-  ).toBe(true)
+  // Sessions is a peer surface backed by this same iframe, not a second poller.
+  await expect(
+    page.locator('[data-observability-view="sessions"]'),
+  ).toBeHidden()
+  await showSurface(page, "sessions")
+  await expect(page.locator("#sessions")).toBeVisible()
+  await expect(page.locator("#token-usage")).toBeHidden()
 
   // At this width the session table fits its frame without scrolling.
   const tableOverflow = await page.evaluate<number>(
@@ -119,25 +208,91 @@ test("the live card sits beside the quotas, and nothing overflows", async ({
   expect(errors).toEqual([])
 })
 
+test("live metrics remain visible when quota snapshots are absent", async ({
+  page,
+}) => {
+  await page.route("**/usage", async (route) => {
+    await route.fulfill({ json: { quota_snapshots: null } })
+  })
+
+  await open(page)
+
+  await expect(page.locator("#live-metrics")).toBeVisible()
+  await expect(page.locator("#cache-hit")).toBeVisible()
+})
+
+test("empty traffic keeps clear Dashboard and Sessions placeholders", async ({
+  page,
+}) => {
+  await routeSessions(page, (view) => ({
+    ...view,
+    flow_per_min: 0,
+    rates: {
+      input_per_min: 0,
+      output_per_min: 0,
+      cache_read_per_min: 0,
+      cache_write_per_min: 0,
+      total_per_min: 0,
+    },
+    model_rates: [],
+    sessions: [],
+  }))
+  await page.goto(DASHBOARD)
+  await page.addStyleTag({
+    content: "#__harness { display: none !important; }",
+  })
+
+  await expect(page.locator(".live__empty")).toBeVisible()
+  await expect(page.locator(".live__plot")).toBeHidden()
+  await expect(page.locator("#live-sessions .live__error")).toBeHidden()
+  await showSurface(page, "sessions")
+  await expect(page.locator("#sessions-empty")).toBeVisible()
+  await expect(page.locator("#sessions-table")).toBeHidden()
+})
+
+test("a sessions error replaces the live-flow empty state", async ({
+  page,
+}) => {
+  await page.route(SESSIONS, async (route) => {
+    await route.fulfill({ status: 503, body: "sessions unavailable" })
+  })
+  await page.goto(DASHBOARD)
+  await page.addStyleTag({
+    content: "#__harness { display: none !important; }",
+  })
+
+  await expect(page.locator("#live-sessions .live__error")).toBeVisible()
+  await expect(page.locator(".live__empty")).toBeHidden()
+  await showSurface(page, "sessions")
+  await expect(page.locator("#sessions-error")).toBeVisible()
+  await expect(page.locator("#sessions-empty")).toBeHidden()
+})
+
 test("selecting a session row updates the worker-rendered flow", async ({
   page,
 }) => {
   await open(page)
+  await showSurface(page, "sessions")
   const row = page.locator(".session-row:not(.session-row--cold)").first()
   const id = await row.getAttribute("data-session-id")
   await row.click()
   await expect(row).toHaveClass(/session-row--selected/)
+  await showSurface(page, "dashboard")
   await expect(page.locator(".live__flow-canvas")).toHaveAttribute(
     "data-selected-session-id",
     id ?? "",
   )
   await expect(page.locator(".session-row--selected")).toHaveCount(1)
+  await showSurface(page, "sessions")
+  await expect(row).toBeVisible()
+  await expect(row).toHaveClass(/session-row--selected/)
 })
 
 test("Escape and a click on empty plot space clear the selection", async ({
   page,
 }) => {
   await open(page)
+  await showSurface(page, "sessions")
   await page.locator(".session-row").first().click()
   await expect(page.locator(".session-row--selected")).toHaveCount(1)
   // Escape meant for a form control (the language menu) leaves it alone.
@@ -151,6 +306,7 @@ test("Escape and a click on empty plot space clear the selection", async ({
   await page.locator(".session-row").first().focus()
   await page.keyboard.press("Enter")
   await expect(page.locator(".session-row--selected")).toHaveCount(1)
+  await showSurface(page, "dashboard")
   await page.locator(".live__plot").click({ position: { x: 10, y: 10 } })
   await expect(page.locator(".session-row--selected")).toHaveCount(0)
 })
@@ -159,11 +315,13 @@ test("a selection and the open quota section survive a poll and a full re-render
   page,
 }) => {
   await open(page)
+  await showSurface(page, "sessions")
   const selectedRow = page
     .locator(".session-row:not(.session-row--cold)")
     .first()
   const id = (await selectedRow.getAttribute("data-session-id")) ?? ""
   await selectedRow.click()
+  await showSurface(page, "dashboard")
   await page.locator("details[data-quota-more] > summary").click()
   expect(await detailsOpen(page)).toBe(true)
 
@@ -198,6 +356,7 @@ test("the context meter warns from 75%, turns critical from 90%, and Other reque
   page,
 }) => {
   await open(page)
+  await showSurface(page, "sessions")
   const context = (id: string) =>
     page.locator(`.session-row[data-session-id="${id}"] .session-context`)
 
@@ -228,6 +387,7 @@ test("under a lower ceiling the meter fills against it, marks compaction, and it
   page,
 }) => {
   await open(page)
+  await showSurface(page, "sessions")
   // The harness's warm Codex session: Codex's window 272,000, Copilot's
   // ceiling 128,000, compaction at 115,200, 119,000 used.
   const codex = page.locator(
@@ -313,6 +473,7 @@ test("past 20 cold sessions the rest fold under Show N more, which survives a po
     return { ...view, sessions: [...view.sessions, ...extra] }
   })
   await open(page)
+  await showSurface(page, "sessions")
 
   /** Session rows below the divider (the button's row has no session id). */
   const coldShown = async (): Promise<number> => {
@@ -368,6 +529,7 @@ test("a long cache countdown reads in hours and a time from another day names th
     ),
   }))
   await open(page)
+  await showSurface(page, "sessions")
   const row = page.locator(
     '.session-row[data-session-id="e92a5b08-3c71-4d0e-b6f4-8a1d7c2e5f39"]',
   )
@@ -396,12 +558,13 @@ test("a hung read times out and the polling carries on", async ({ page }) => {
   })
   await open(page)
 
-  const error = page.locator(".live__error")
+  const error = page.locator("#live-sessions .live__error")
   await expect(error).toBeVisible({ timeout: 20_000 })
   await expect(error).toContainText("An Error Occurred")
   // What's shown stays, and the next read clears the error.
-  await expect(page.locator(".session-row").first()).toBeVisible()
   await expect(error).toBeHidden({ timeout: 10_000 })
+  await showSurface(page, "sessions")
+  await expect(page.locator(".session-row").first()).toBeVisible()
   expect(requests).toBeGreaterThanOrEqual(3)
 })
 
@@ -419,6 +582,7 @@ test("a countdown that reaches zero moves its row below the line", async ({
     await route.fulfill({ json: await frozen.view })
   })
   await open(page)
+  await showSurface(page, "sessions")
   if (!frozen.view) throw new Error("sessions were never fetched")
   const view = await frozen.view
   const now = Date.now()
@@ -460,6 +624,7 @@ test("session rows have no decorative color dots and remain selectable", async (
     return { ...view, sessions: [...view.sessions, ...extra] }
   })
   await open(page)
+  await showSurface(page, "sessions")
 
   const live = await page.evaluate<Array<string>>(
     `[...document.querySelectorAll(".session-row:not(.session-row--cold)")]
@@ -473,6 +638,7 @@ test("session rows have no decorative color dots and remain selectable", async (
   const row = page.locator(`.session-row[data-session-id="${id}"]`)
   await row.click()
   await expect(row).toHaveClass(/session-row--selected/)
+  await showSurface(page, "dashboard")
   await expect(page.locator(".live__flow-canvas")).toHaveAttribute(
     "data-selected-session-id",
     id,
@@ -538,7 +704,7 @@ test("unchanged session snapshots leave the live flow still", async ({
   expect(second.equals(first)).toBe(true)
 })
 
-test("new token counters produce one finite particle burst", async ({
+test("traffic observed while Sessions is open does not replay on Dashboard", async ({
   page,
 }) => {
   let reads = 0
@@ -547,8 +713,52 @@ test("new token counters produce one finite particle burst", async ({
     return {
       ...view,
       sessions: view.sessions.map((session, index) => {
+        if (
+          index !== 0
+          || !session.token_totals
+          || !session.model_token_totals
+        ) {
+          return session
+        }
+        return {
+          ...session,
+          token_totals: {
+            ...session.token_totals,
+            output_tokens: session.token_totals.output_tokens + reads * 10,
+            total_tokens: session.token_totals.total_tokens + reads * 10,
+          },
+          model_token_totals: session.model_token_totals.map((model) => ({
+            ...model,
+            output_tokens: model.output_tokens + reads * 10,
+            total_tokens: model.total_tokens + reads * 10,
+          })),
+        }
+      }),
+    }
+  })
+  await open(page)
+  await showSurface(page, "sessions")
+  await expect.poll(() => reads).toBeGreaterThanOrEqual(3)
+  await showSurface(page, "dashboard")
+  await page.waitForTimeout(100)
+  const canvas = page.locator(".live__flow-canvas")
+  const first = await canvas.screenshot()
+  await page.waitForTimeout(300)
+  expect((await canvas.screenshot()).equals(first)).toBe(true)
+})
+
+test("new token counters produce one finite particle burst", async ({
+  page,
+}) => {
+  let reads = 0
+  let emitAfter = Number.POSITIVE_INFINITY
+  await routeSessions(page, (view) => {
+    reads += 1
+    return {
+      ...view,
+      sessions: view.sessions.map((session, index) => {
         if (index !== 0) return session
-        const output = 800 + (reads >= 2 ? 12 : 0)
+        const output = 800 + (reads >= emitAfter ? 12 : 0)
         return {
           ...session,
           token_totals: {
@@ -572,10 +782,30 @@ test("new token counters produce one finite particle burst", async ({
       }),
     }
   })
-  await open(page)
-  await expect.poll(() => reads).toBeGreaterThanOrEqual(2)
-
+  await page.goto(DASHBOARD)
+  await page.addStyleTag({
+    content: "#__harness { display: none !important; }",
+  })
   const canvas = page.locator(".live__flow-canvas")
+  await expect(canvas).toHaveAttribute("data-renderer", "worker")
+  emitAfter = reads + 1
+  const baselineSnapshots = Number(
+    (await canvas.getAttribute("data-snapshot-count")) ?? "0",
+  )
+  const baselineReads = reads
+  const nextResponse = page.waitForResponse((response) =>
+    isSessions(response.url()),
+  )
+  await expect.poll(() => reads).toBeGreaterThan(baselineReads)
+  await nextResponse
+  await expect
+    .poll(async () =>
+      Number((await canvas.getAttribute("data-snapshot-count")) ?? "0"),
+    )
+    .toBeGreaterThan(baselineSnapshots)
+  await expect(canvas).toHaveAttribute("data-snapshot-baseline", "false")
+  await page.waitForTimeout(100)
+
   const frames = [await canvas.screenshot()]
   for (let i = 0; i < 6; i++) {
     await page.waitForTimeout(150)
@@ -583,10 +813,14 @@ test("new token counters produce one finite particle burst", async ({
   }
   expect(frames.slice(1).some((frame) => !frame.equals(frames[0]))).toBe(true)
 
-  await page.waitForTimeout(4_000)
-  const settled = await canvas.screenshot()
+  await showSurface(page, "sessions")
+  await page.waitForTimeout(100)
+  await showSurface(page, "dashboard")
+  await expect(canvas).toHaveAttribute("data-snapshot-baseline", "true")
+  await page.waitForTimeout(100)
+  const resumed = await canvas.screenshot()
   await page.waitForTimeout(300)
-  expect((await canvas.screenshot()).equals(settled)).toBe(true)
+  expect((await canvas.screenshot()).equals(resumed)).toBe(true)
 })
 
 test("the live flow is rendered by a worker with an accessible text summary", async ({
@@ -615,7 +849,6 @@ for (const scheme of ["light", "dark"] as const) {
   test(`screenshot, ${scheme}`, async ({ page }, testInfo) => {
     await page.emulateMedia({ colorScheme: scheme, reducedMotion: "reduce" })
     await open(page)
-    await page.locator(".session-row").nth(1).click()
     await page.waitForTimeout(1_000) // the traces' glide
     await page.screenshot({
       path: testInfo.outputPath(`dashboard-live-${scheme}.png`),
@@ -623,9 +856,16 @@ for (const scheme of ["light", "dark"] as const) {
       mask: [
         page.locator(".live__value"),
         page.locator(".live__counts"),
+        page.locator("#token-usage-range"),
+      ],
+    })
+    await showSurface(page, "sessions")
+    await page.screenshot({
+      path: testInfo.outputPath(`sessions-${scheme}.png`),
+      fullPage: true,
+      mask: [
         page.locator(".session-cell--state"),
         page.locator(".session-cell--num"),
-        page.locator("#token-usage-range"),
       ],
     })
   })

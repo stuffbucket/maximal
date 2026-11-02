@@ -36,6 +36,7 @@ type SectionId =
   | "appearance"
   | "system"
   | "dashboard"
+  | "sessions"
   | "apps"
   | "mcp"
   | "requests"
@@ -51,7 +52,8 @@ type TopTabId =
   | "models-keys"
   | "appearance"
   | "system"
-  | "dashboard";
+  | "dashboard"
+  | "sessions";
 
 const SECTIONS: ReadonlyArray<SectionId> = [
   "account",
@@ -60,6 +62,7 @@ const SECTIONS: ReadonlyArray<SectionId> = [
   "appearance",
   "system",
   "dashboard",
+  "sessions",
   "apps",
   "mcp",
   "requests",
@@ -77,6 +80,7 @@ const TAB_SECTIONS: Record<TopTabId, ReadonlyArray<string>> = {
   appearance: ["appearance"],
   system: ["diagnostics", "logs"],
   dashboard: ["dashboard"],
+  sessions: ["dashboard"],
 };
 
 const LAST_TAB_STORAGE_KEY = "maximal.lastTab";
@@ -110,6 +114,8 @@ function tabForSection(id: SectionId): TopTabId {
       return "system";
     case "dashboard":
       return "dashboard";
+    case "sessions":
+      return "sessions";
   }
 }
 
@@ -126,7 +132,7 @@ function getStoredTab(key: string): SectionId | null {
 function persistTabSelection(tab: TopTabId): void {
   try {
     window.localStorage.setItem(LAST_TAB_STORAGE_KEY, tab);
-    if (tab !== "dashboard") {
+    if (tab !== "dashboard" && tab !== "sessions") {
       window.localStorage.setItem(LAST_SETTINGS_TAB_STORAGE_KEY, tab);
     }
   } catch {
@@ -142,27 +148,40 @@ function hasAccountProblem(status: AuthStatus | null = currentAuthStatus): boole
   );
 }
 
-function updateSurfaceModeButton(isDashboard: boolean): void {
-  const btn = document.querySelector<HTMLButtonElement>(
-    "[data-surface-mode-btn]",
-  );
-  const dashIcon = document.querySelector<Element>(
-    '[data-mode-icon="dashboard"]',
-  );
-  const settingsIcon = document.querySelector<Element>(
-    '[data-mode-icon="settings"]',
-  );
-  dashIcon?.toggleAttribute("hidden", isDashboard);
-  settingsIcon?.toggleAttribute("hidden", !isDashboard);
-  if (btn) {
-    btn.dataset.surfaceMode = isDashboard ? "dashboard" : "settings";
-    const isMac = osKind() === "macos";
-    const label =
-      isDashboard ?
-        t("nav-switch-to-settings", { shortcut: isMac ? "⌘," : "Ctrl+," })
-      : t("nav-switch-to-dashboard", { shortcut: isMac ? "⌘D" : "Ctrl+D" });
-    btn.title = label;
-    btn.setAttribute("aria-label", label);
+type Surface = "settings" | "dashboard" | "sessions";
+
+function surfaceForTab(tab: TopTabId): Surface {
+  if (tab === "dashboard" || tab === "sessions") return tab;
+  return "settings";
+}
+
+function surfaceTitle(surface: Surface): string {
+  if (surface === "dashboard") return t("dashboard-title");
+  if (surface === "sessions") return t("native-window-sessions-title");
+  return t("native-window-settings-title");
+}
+
+function updateSurfaceModeButtons(surface: Surface): void {
+  const isMac = osKind() === "macos";
+  const labels: Record<Surface, string> = {
+    settings: t("nav-switch-to-settings", {
+      shortcut: isMac ? "⌘," : "Ctrl+,",
+    }),
+    dashboard: t("nav-switch-to-dashboard", {
+      shortcut: isMac ? "⌘D" : "Ctrl+D",
+    }),
+    sessions: t("nav-switch-to-sessions"),
+  };
+  for (const button of document.querySelectorAll<HTMLButtonElement>(
+    "[data-surface-target]",
+  )) {
+    const target = button.dataset.surfaceTarget as Surface | undefined;
+    if (!target) continue;
+    const active = target === surface;
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+    button.classList.toggle("topbar__mode-btn--active", active);
+    button.title = labels[target];
+    button.setAttribute("aria-label", labels[target]);
   }
   const localeSelect = document.getElementById(
     "locale-select",
@@ -178,7 +197,8 @@ function showSection(
 ): void {
   const tab = tabForSection(id);
   const visibleSections = new Set(TAB_SECTIONS[tab]);
-  const isDashboard = tab === "dashboard";
+  const surface = surfaceForTab(tab);
+  const isObservability = surface !== "settings";
 
   if (options.persist !== false) {
     persistTabSelection(tab);
@@ -188,17 +208,23 @@ function showSection(
     "[data-dashboard-frame]",
   );
   frame?.contentWindow?.postMessage(
-    { type: "maximal:dashboard-visibility", visible: isDashboard },
+    { type: "maximal:surface", surface },
     window.location.origin,
   );
+  document.title = surfaceTitle(surface);
+  if (frame) {
+    frame.title =
+      surface === "sessions" ? t("dashboard-sessions-title") : t("dashboard-title");
+  }
 
   const settingsNav = document.querySelector<HTMLElement>("[data-settings-nav]");
   const dashControls = document.querySelector<HTMLElement>(
     "[data-dashboard-controls]",
   );
-  if (settingsNav) settingsNav.hidden = isDashboard;
-  if (dashControls) dashControls.hidden = !isDashboard;
-  updateSurfaceModeButton(isDashboard);
+  if (settingsNav) settingsNav.hidden = isObservability;
+  if (dashControls) dashControls.hidden = surface !== "dashboard";
+  updateSurfaceModeButtons(surface);
+  void safeInvoke("set_main_surface", { surface });
 
   for (const sec of document.querySelectorAll<HTMLElement>("[data-section]")) {
     const secId = sec.dataset.section ?? "";
@@ -214,7 +240,7 @@ function showSection(
 
   const pane = document.getElementById("pane");
   if (pane) {
-    pane.classList.toggle("pane--dashboard", isDashboard);
+    pane.classList.toggle("pane--dashboard", isObservability);
     if (id !== tab && visibleSections.has(id)) {
       const targetEl = document.querySelector<HTMLElement>(
         `[data-section="${id}"]`,
@@ -236,8 +262,8 @@ window.addEventListener("message", (event: MessageEvent<unknown>) => {
   if (event.source !== frame?.contentWindow) return;
   frame.contentWindow?.postMessage(
     {
-      type: "maximal:dashboard-visibility",
-      visible: tabForSection(readHashSection()) === "dashboard",
+      type: "maximal:surface",
+      surface: surfaceForTab(tabForSection(readHashSection())),
     },
     window.location.origin,
   );
@@ -280,24 +306,26 @@ function wireNav(): void {
     });
   }
 
-  const modeBtn = document.querySelector<HTMLButtonElement>(
-    "[data-surface-mode-btn]",
-  );
-  modeBtn?.addEventListener("click", () => {
-    userExplicitlySelectedTab = true;
-    const currentTab = tabForSection(readHashSection());
-    if (currentTab === "dashboard") {
+  for (const button of document.querySelectorAll<HTMLButtonElement>(
+    "[data-surface-target]",
+  )) {
+    button.addEventListener("click", () => {
+      const surface = button.dataset.surfaceTarget as Surface | undefined;
+      if (!surface) return;
+      userExplicitlySelectedTab = true;
       const target: SectionId =
-        hasAccountProblem() ?
-          "account"
-        : (getStoredTab(LAST_SETTINGS_TAB_STORAGE_KEY) ?? "account");
-      window.location.hash = target;
-      showSection(target);
-    } else {
-      window.location.hash = "dashboard";
-      showSection("dashboard");
-    }
-  });
+        surface === "settings" ?
+          hasAccountProblem() ?
+            "account"
+          : (getStoredTab(LAST_SETTINGS_TAB_STORAGE_KEY) ?? "account")
+        : surface;
+      if (window.location.hash !== `#${target}`) {
+        window.location.hash = target;
+      } else {
+        showSection(target);
+      }
+    });
+  }
 
   for (const btn of document.querySelectorAll<HTMLButtonElement>(
     "[data-dashboard-period]",
@@ -369,7 +397,7 @@ function wireNav(): void {
 
   window.addEventListener("maximal:open-settings", () => {
     const currentTab = tabForSection(readHashSection());
-    if (currentTab === "dashboard") {
+    if (currentTab === "dashboard" || currentTab === "sessions") {
       const target: SectionId =
         hasAccountProblem() ?
           "account"
@@ -444,10 +472,16 @@ function setBusy(on: boolean, label = t("common-working")): void {
  */
 function repaintDynamicI18n(): void {
   renderStaticComposites();
-  updateSurfaceModeButton(tabForSection(readHashSection()) === "dashboard");
+  const surface = surfaceForTab(tabForSection(readHashSection()));
+  updateSurfaceModeButtons(surface);
+  document.title = surfaceTitle(surface);
   const frame = document.querySelector<HTMLIFrameElement>(
     "[data-dashboard-frame]",
   );
+  if (frame) {
+    frame.title =
+      surface === "sessions" ? t("dashboard-sessions-title") : t("dashboard-title");
+  }
   frame?.contentWindow?.postMessage(
     { type: "maximal:set-locale" },
     window.location.origin,

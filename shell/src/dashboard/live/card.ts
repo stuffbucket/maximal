@@ -50,7 +50,6 @@ export function mountLiveCard(
   cacheHitRoot: HTMLElement,
   onSelect: (id: string | null) => void,
 ): LiveCard {
-  const graphSection = root.closest<HTMLElement>(".dashboard-bento__live");
   root.classList.add("live");
   root.classList.remove("live--border");
   root.replaceChildren();
@@ -90,6 +89,15 @@ export function mountLiveCard(
   const errorMessage = html("span", "live__error-message");
   error.append(errorTitle, errorMessage);
 
+  const empty = html("div", "live__empty");
+  const emptyTitle = html(
+    "h3",
+    "live__empty-title",
+    "dashboard-live-empty-title",
+  );
+  const emptyDetail = html("p", "", "dashboard-live-empty-detail");
+  empty.append(emptyTitle, emptyDetail);
+
   const plot = html("div", "live__plot live__plot--flow");
   const canvas = html("canvas", "live__flow-canvas");
   canvas.setAttribute("role", "img");
@@ -98,7 +106,7 @@ export function mountLiveCard(
   fallback.hidden = true;
   const flowSummary = html("p", "live__flow-summary");
   plot.append(canvas, fallback, flowSummary);
-  inner.append(error, plot);
+  inner.append(error, empty, plot);
   root.append(inner);
 
   let worker: Worker | null = null;
@@ -106,6 +114,8 @@ export function mountLiveCard(
   let latestView: SessionsResponse | null = null;
   let latestSelected: string | null = null;
   let graphHasNodes = false;
+  let errorVisible = false;
+  plot.hidden = true;
   let numbers = new Intl.NumberFormat(resolveLocale());
   let compactNumbers = new Intl.NumberFormat(resolveLocale(), {
     notation: "compact",
@@ -142,12 +152,21 @@ export function mountLiveCard(
 
   const query = new URLSearchParams(location.search);
   const includeSyntheticTools = query.has("flow-tools");
-  let surfaceVisible = query.get("embedded") !== "1";
+  let surface: "settings" | "dashboard" | "sessions" =
+    query.get("embedded") === "1" ?
+      "settings"
+    : query.get("surface") === "sessions" ?
+      "sessions"
+    : "dashboard";
   const workerIsActive = (): boolean =>
-    surfaceVisible && document.visibilityState === "visible";
+    surface === "dashboard" && document.visibilityState === "visible";
 
-  function sendSnapshot(): void {
-    if (!worker || !latestView) return;
+  let sentSnapshots = 0;
+  function sendSnapshot(baseline = false): void {
+    if (!worker || !latestView || !workerIsActive()) return;
+    sentSnapshots += 1;
+    canvas.dataset.snapshotCount = String(sentSnapshots);
+    canvas.dataset.snapshotBaseline = baseline ? "true" : "false";
     const labels: FlowPlanLabels = {
       clients: {
         "claude-code": t("dashboard-sessions-client", { client: CLIENT_CASE["claude-code"] }),
@@ -168,7 +187,11 @@ export function mountLiveCard(
       includeSyntheticTools,
       labels,
     );
-    worker.postMessage({ type: "snapshot", snapshot } satisfies FlowWorkerMessage);
+    worker.postMessage({
+      type: "snapshot",
+      snapshot,
+      ...(baseline ? { baseline: true } : {}),
+    } satisfies FlowWorkerMessage);
     const nodeLabels = new Map(snapshot.nodes.map((node) => [node.id, node.label]));
     const kindLabels: Record<FlowKind, string> = {
       input: t("dashboard-col-input"),
@@ -257,18 +280,37 @@ export function mountLiveCard(
   resizeObserver.observe(plot);
 
   const updateWorkerActivity = (): void => {
-    worker?.postMessage({ type: "active", active: workerIsActive() });
+    const active = workerIsActive();
+    canvas.dataset.active = active ? "true" : "false";
+    worker?.postMessage({ type: "active", active });
+    if (active) sendSnapshot(true);
   };
-  const onDashboardVisibility = (event: MessageEvent<unknown>): void => {
+  const onSurfaceChange = (event: MessageEvent<unknown>): void => {
     if (event.origin !== location.origin || typeof event.data !== "object" || event.data === null) return;
-    const message = event.data as { type?: unknown; visible?: unknown };
-    if (message.type !== "maximal:dashboard-visibility" || typeof message.visible !== "boolean") return;
-    surfaceVisible = message.visible;
-    updateWorkerActivity();
+    const message = event.data as {
+      type?: unknown;
+      surface?: unknown;
+      visible?: unknown;
+    };
+    if (
+      message.type === "maximal:surface" &&
+      (message.surface === "settings" ||
+        message.surface === "dashboard" ||
+        message.surface === "sessions")
+    ) {
+      surface = message.surface;
+      updateWorkerActivity();
+    } else if (
+      message.type === "maximal:dashboard-visibility" &&
+      typeof message.visible === "boolean"
+    ) {
+      surface = message.visible ? "dashboard" : "settings";
+      updateWorkerActivity();
+    }
   };
   const colorScheme = window.matchMedia("(prefers-color-scheme: dark)");
   document.addEventListener("visibilitychange", updateWorkerActivity);
-  window.addEventListener("message", onDashboardVisibility);
+  window.addEventListener("message", onSurfaceChange);
   colorScheme.addEventListener("change", sendSnapshot);
 
   return {
@@ -276,15 +318,17 @@ export function mountLiveCard(
       resizeObserver.disconnect();
       canvas.removeEventListener("click", onCanvasClick);
       document.removeEventListener("visibilitychange", updateWorkerActivity);
-      window.removeEventListener("message", onDashboardVisibility);
+      window.removeEventListener("message", onSurfaceChange);
       colorScheme.removeEventListener("change", sendSnapshot);
       worker?.terminate();
       worker = null;
     },
 
     showError(message) {
-      error.hidden = message === null;
-      if (graphSection) graphSection.hidden = message === null && !graphHasNodes;
+      errorVisible = message !== null;
+      error.hidden = !errorVisible;
+      empty.hidden = errorVisible || graphHasNodes;
+      plot.hidden = !graphHasNodes;
       errorTitle.textContent = message === null ? "" : t("dashboard-error-generic");
       errorMessage.textContent = message ?? "";
     },
@@ -298,7 +342,8 @@ export function mountLiveCard(
           && session.state !== "cold"
           && (session.rate_per_min > 0 || session.state === "streaming"),
       );
-      if (graphSection) graphSection.hidden = !graphHasNodes;
+      empty.hidden = errorVisible || graphHasNodes;
+      plot.hidden = !graphHasNodes;
       canvas.dataset.selectedSessionId = selected ?? "";
       canvas.dataset.motion = reducedMotion() ? "static" : "animated";
 

@@ -1,12 +1,13 @@
-// The Dashboard's live sessions: polls GET /token-usage/sessions every 2 s
-// while the page is visible, ticks the cache countdowns every second, and owns
-// the selection shared by the live card and session table.
+// Shared Dashboard/Sessions state: polls GET /token-usage/sessions every 2 s
+// while either observability surface is visible, ticks cache countdowns every
+// second, and owns the selection shared by the live card and session table.
 //
 // Both render into fixed hosts in index.html that main.ts's string renders
 // never touch, so the selection, hover, focus and the card's animation survive
 // every summary re-render.
 import { SessionsResponse } from "../../../../src/lib/token-usage/sessions-schema";
 import { fetchJson } from "../fetch-json";
+import { t } from "../../i18n";
 import { mountLiveCard } from "./card";
 import { liveSessions } from "./rows";
 import { mountSessionTable } from "./table";
@@ -27,14 +28,20 @@ export function startLiveSessions(container: HTMLElement): () => void {
   const cardHost = container.querySelector<HTMLElement>("#live-sessions");
   const metricsHost = container.querySelector<HTMLElement>("#live-metrics");
   const cacheHitHost = container.querySelector<HTMLElement>("#cache-hit");
+  const sessionsView = container.querySelector<HTMLElement>(
+    '[data-observability-view="sessions"]',
+  );
   const sectionHost = container.querySelector<HTMLElement>("#sessions");
+  const errorHost = container.querySelector<HTMLElement>("#sessions-error");
+  const errorTitle = errorHost?.querySelector<HTMLElement>(".live__error-title");
+  const errorMessage = errorHost?.querySelector<HTMLElement>(".live__error-message");
+  const emptyHost = container.querySelector<HTMLElement>("#sessions-empty");
   const tableHost = container.querySelector<HTMLElement>("#sessions-table");
-  if (!cardHost || !metricsHost || !cacheHitHost || !sectionHost || !tableHost) return () => {};
-  const section: HTMLElement = sectionHost;
+  if (!cardHost || !metricsHost || !cacheHitHost || !sessionsView || !sectionHost || !errorHost || !errorTitle || !errorMessage || !emptyHost || !tableHost) return () => {};
 
   const card = mountLiveCard(cardHost, metricsHost, cacheHitHost, (id) => {
     select(id);
-    if (id === null) return;
+    if (id === null || sessionsView.hidden || tableHost.hidden) return;
     requestAnimationFrame(() => {
       const row = [...tableHost.querySelectorAll<HTMLElement>(".session-row")]
         .find((candidate) => candidate.dataset.sessionId === id);
@@ -46,6 +53,7 @@ export function startLiveSessions(container: HTMLElement): () => void {
   let latest: SessionsResponse | null = null;
   let selected: string | null = null;
   let preview: string | null = null;
+  let sessionsErrorVisible = false;
   /** Each session's id and state as last given to the card, to skip no-op updates. */
   let cardKey = "";
 
@@ -53,9 +61,26 @@ export function startLiveSessions(container: HTMLElement): () => void {
   let tickTimer: number | null = null;
   let polling = false;
   let stopped = false;
-  let surfaceVisible = new URLSearchParams(location.search).get("embedded") !== "1";
+  let activityVisible = false;
+  const query = new URLSearchParams(location.search);
+  let surface: "settings" | "dashboard" | "sessions" =
+    query.get("embedded") === "1" ?
+      "settings"
+    : query.get("surface") === "sessions" ?
+      "sessions"
+    : "dashboard";
   const isVisible = (): boolean =>
-    surfaceVisible && document.visibilityState === "visible";
+    surface !== "settings" && document.visibilityState === "visible";
+
+  function showError(message: string | null): void {
+    sessionsErrorVisible = message !== null;
+    errorHost.hidden = !sessionsErrorVisible;
+    errorTitle.textContent = sessionsErrorVisible ? t("dashboard-error-generic") : "";
+    errorMessage.textContent = message ?? "";
+    const hasSessions = (latest?.sessions.length ?? 0) > 0;
+    emptyHost.hidden = sessionsErrorVisible || hasSessions;
+    card.showError(message);
+  }
 
   /** Redraw from `latest` as of now. The card only redraws when asked or when
    *  a session changed state (a countdown ran out). */
@@ -63,7 +88,9 @@ export function startLiveSessions(container: HTMLElement): () => void {
     if (!latest) return;
     const now = Date.now();
     const view = liveSessions(latest, now);
-    section.hidden = view.sessions.length === 0;
+    const hasSessions = view.sessions.length > 0;
+    emptyHost.hidden = sessionsErrorVisible || hasSessions;
+    tableHost.hidden = !hasSessions;
 
     const ids = new Set(view.sessions.map((s) => s.id));
     if (selected !== null && !ids.has(selected)) selected = null;
@@ -107,15 +134,15 @@ export function startLiveSessions(container: HTMLElement): () => void {
       const parsed = SessionsResponse.safeParse(body);
       if (parsed.success) {
         latest = parsed.data;
-        card.showError(null);
+        showError(null);
         refresh(true);
       } else {
         // Keep what's on screen; say the new data couldn't be read.
-        card.showError(parsed.error.issues[0]?.message ?? parsed.error.message);
+        showError(parsed.error.issues[0]?.message ?? parsed.error.message);
       }
     } catch (error) {
       // A failed or timed-out read: say so, keep what's shown, try again.
-      if (!stopped) card.showError(error instanceof Error ? error.message : String(error));
+      if (!stopped) showError(error instanceof Error ? error.message : String(error));
     } finally {
       polling = false;
       schedule();
@@ -139,23 +166,46 @@ export function startLiveSessions(container: HTMLElement): () => void {
   }
 
   function updateActivity(): void {
-    if (!isVisible()) {
+    const nextVisible = isVisible();
+    if (!nextVisible) {
       stopTimers();
+      activityVisible = false;
       return;
     }
     startClock();
-    // Catch up straight away: the data is as old as the hidden stretch.
+    if (activityVisible) {
+      schedule();
+      return;
+    }
+    activityVisible = true;
+    // Catch up straight away only after a genuinely hidden stretch.
     if (pollTimer !== null) window.clearTimeout(pollTimer);
     pollTimer = null;
     void poll();
   }
 
-  function onDashboardVisibility(event: MessageEvent<unknown>): void {
+  function onSurfaceChange(event: MessageEvent<unknown>): void {
     if (event.origin !== location.origin || typeof event.data !== "object" || event.data === null) return;
-    const message = event.data as { type?: unknown; visible?: unknown };
-    if (message.type !== "maximal:dashboard-visibility" || typeof message.visible !== "boolean") return;
-    surfaceVisible = message.visible;
-    updateActivity();
+    const message = event.data as {
+      type?: unknown;
+      surface?: unknown;
+      visible?: unknown;
+    };
+    if (
+      message.type === "maximal:surface" &&
+      (message.surface === "settings" ||
+        message.surface === "dashboard" ||
+        message.surface === "sessions")
+    ) {
+      surface = message.surface;
+      updateActivity();
+    } else if (
+      message.type === "maximal:dashboard-visibility" &&
+      typeof message.visible === "boolean"
+    ) {
+      surface = message.visible ? "dashboard" : "settings";
+      updateActivity();
+    }
   }
 
   // Escape clears the selection, unless something else already took the key
@@ -176,7 +226,7 @@ export function startLiveSessions(container: HTMLElement): () => void {
 
   document.addEventListener("keydown", onKeydown);
   document.addEventListener("visibilitychange", updateActivity);
-  window.addEventListener("message", onDashboardVisibility);
+  window.addEventListener("message", onSurfaceChange);
   if (window.parent !== window) {
     window.parent.postMessage({ type: "maximal:dashboard-ready" }, location.origin);
   }
@@ -189,6 +239,6 @@ export function startLiveSessions(container: HTMLElement): () => void {
     card.destroy();
     document.removeEventListener("keydown", onKeydown);
     document.removeEventListener("visibilitychange", updateActivity);
-    window.removeEventListener("message", onDashboardVisibility);
+    window.removeEventListener("message", onSurfaceChange);
   };
 }

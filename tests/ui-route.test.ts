@@ -57,6 +57,16 @@ describe("ui routes", () => {
     expect(await res.text()).toContain("settings")
   })
 
+  test("redirects Sessions to the shared observability bundle", async () => {
+    for (const path of ["/ui/sessions", "/ui/sessions/"]) {
+      const res = await app.request(path)
+      expect(res.status).toBe(301)
+      expect(res.headers.get("location")).toBe(
+        "/ui/dashboard/?surface=sessions",
+      )
+    }
+  })
+
   test("serves the dashboard index", async () => {
     const res = await app.request("/ui/dashboard/")
     expect(res.status).toBe(200)
