@@ -161,8 +161,10 @@ export type ClaudeAutoModelOption = z.infer<typeof ClaudeAutoModelOption>
 export const ClaudeAutoModelsState = z.object({
   applied: z.boolean(),
   options: z.array(ClaudeAutoModelOption),
+  classifier_options: z.array(ClaudeAutoModelOption),
   fast: ClaudeAutoTierState,
   capable: ClaudeAutoTierState,
+  classifier: ClaudeAutoTierState,
 })
 export type ClaudeAutoModelsState = z.infer<typeof ClaudeAutoModelsState>
 
@@ -170,11 +172,15 @@ export const ClaudeAutoModelsUpdateRequest = z
   .object({
     fast: z.string().trim().min(1).nullable().optional(),
     capable: z.string().trim().min(1).nullable().optional(),
+    classifier: z.string().trim().min(1).nullable().optional(),
   })
   .strict()
   .refine(
-    (request) => request.fast !== undefined || request.capable !== undefined,
-    { message: "Expected fast or capable model selection" },
+    (request) =>
+      request.fast !== undefined
+      || request.capable !== undefined
+      || request.classifier !== undefined,
+    { message: "Expected Haiku, Sonnet, or classifier model selection" },
   )
 export type ClaudeAutoModelsUpdateRequest = z.infer<
   typeof ClaudeAutoModelsUpdateRequest

@@ -36,13 +36,26 @@ function stopCatalogSubscription(): void {
 
 export function reconcileClaudeCodeAutoModels(
   filePath: string = getClaudeCodeSettingsPath(),
-  options: { claimAutoModels?: ReadonlySet<ClaudeAutoTier> } = {},
+  options: {
+    claimAutoModels?: ReadonlySet<ClaudeAutoTier>
+    throwOnError?: boolean
+  } = {},
 ): void {
   if (!claudeCodeRoutingIntended()) return
   try {
-    applyProxyBaseUrl(filePath, undefined, options)
+    const result = applyProxyBaseUrl(filePath, undefined, options)
+    if (
+      options.throwOnError
+      && result.skippedReason
+      && result.skippedReason !== "already-ours"
+    ) {
+      throw new Error(
+        `Could not reconcile Claude Code model settings: ${result.skippedReason}`,
+      )
+    }
   } catch (error) {
-    consola.warn("claude-code: failed to reconcile Auto models", error)
+    if (options.throwOnError) throw error
+    consola.warn("claude-code: failed to reconcile model settings", error)
   }
 }
 

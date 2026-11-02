@@ -210,20 +210,24 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
       return json({ endpoint, skipped: [] })
     }
 
-    // --- Claude Code Auto model choices ---
+    // --- Claude Code model settings ---
     if (
       path === "/settings/api/models/claude-code-auto"
       && method === "PATCH"
     ) {
       const selection = ClaudeAutoModelsUpdateRequest.safeParse(await body())
       if (!selection.success) {
-        return json({ error: { message: "invalid Auto model selection" } }, 400)
+        return json({ error: { message: "invalid model selection" } }, 400)
       }
-      for (const tier of ["fast", "capable"] as const) {
+      for (const tier of ["fast", "capable", "classifier"] as const) {
         if (!(tier in selection.data)) continue
         const configured = selection.data[tier]
         if (typeof configured === "string") {
-          const option = state.models.claude_code_auto.options.find(
+          const options =
+            tier === "classifier" ?
+              state.models.claude_code_auto.classifier_options
+            : state.models.claude_code_auto.options
+          const option = options.find(
             (candidate) => candidate.id === configured,
           )
           if (!option) {

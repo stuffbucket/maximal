@@ -19,7 +19,7 @@ const DASHBOARD_INDEX = join(DIST_UI, "dashboard", "index.html")
 const ENABLED = process.env.MAXIMAL_TEST_BUILD === "1"
 
 describe.skipIf(!ENABLED)("web UI production build", () => {
-  test("`bun run build:ui` produces settings + dashboard under shell/dist/ui", async () => {
+  test("`bun run build:ui` produces Settings plus the Dashboard/Sessions bundle", async () => {
     const proc = Bun.spawn(["bun", "run", "build:ui"], {
       cwd: REPO_ROOT,
       stdout: "pipe",

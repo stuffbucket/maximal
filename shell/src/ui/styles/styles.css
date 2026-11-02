@@ -155,7 +155,7 @@ html[data-os="macos"] .topbar {
   white-space: nowrap;
 }
 
-/* ---- Right-side topbar utilities (language globe + mode switch icon) ---- */
+/* ---- Right-side topbar utilities (surface switcher + language globe) ---- */
 .topbar__utilities {
   margin-inline-start: auto;
   display: flex;
@@ -210,6 +210,12 @@ html[data-os="macos"] .topbar {
   font-size: var(--text-sm);
 }
 
+.topbar__surface-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
 .topbar__mode-btn {
   appearance: none;
   width: var(--size-xl);
@@ -228,7 +234,8 @@ html[data-os="macos"] .topbar {
     color 150ms ease-in-out;
 }
 
-.topbar__mode-btn:hover {
+.topbar__mode-btn:hover,
+.topbar__mode-btn--active {
   color: var(--text-strong);
   background: var(--surface-control);
 }
@@ -241,12 +248,6 @@ html[data-os="macos"] .topbar {
 .topbar__mode-icon {
   width: var(--size-sm);
   height: var(--size-sm);
-}
-
-.topbar__mode-icon[hidden],
-.topbar__mode-btn[data-surface-mode="dashboard"] [data-mode-icon="dashboard"],
-.topbar__mode-btn[data-surface-mode="settings"] [data-mode-icon="settings"] {
-  display: none;
 }
 
 /* ---- Pane ---- */

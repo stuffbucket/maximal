@@ -13,23 +13,24 @@ declares no windows) — change them there and update this table.
 | Window     | Default  | Min     | Max  | Resizable | Notes |
 |------------|----------|---------|------|-----------|-------|
 | Splash     | 440×240  | —       | —    | no        | Frameless, transparent, centered; shown while the proxy starts, then dismissed |
-| Main (Unified Settings + Dashboard) | 960×720  | 640×480 | work area (`prevent_overflow`) | yes | Single top bar (`.topbar`) with consolidated Settings tabs + right-side Dashboard/Settings mode icon button |
+| Main (Unified Settings + Dashboard + Sessions) | 960×720  | 640×480 | work area (`prevent_overflow`) | yes | Single top bar with Settings tabs + a right-side three-surface switcher |
 
-The unified window is single-instance: opening Settings or Dashboard re-shows
-and focuses the existing window and switches the active view in place. Closing hides it.
+The unified window is single-instance: opening Settings, Dashboard or Sessions
+re-shows and focuses the existing window and switches the active view in place.
+Closing hides it.
 
 ## Grid + columns
 
 **Desktop only.** The OS enforces min size (`640×480`); `prevent_overflow` clamps initial size to the monitor's work area.
 
-- **Dashboard**: single column, centered in a wide Tailwind
-  `max-w-7xl` container, with full-width cards. The top usage card divides
-  into token totals and read/write rates on one side, quota details and
-  cache-hit rate on the other; it wraps those sides when narrow. The
-  full-width live graph follows, giving its model, session and tool labels
-  room before the full-width session table and token usage. The toolbar
-  above the cards (period, range, language) wraps on a narrow window rather
-  than overflow.
+- **Dashboard**: single column in the wide observability container. The usage
+  overview divides token rates from quota and cache details, followed by the
+  full-width live graph and token usage. With no graphable traffic, that graph
+  slot stays in place and explains what will appear once requests begin. The
+  toolbar (period and range) wraps on a narrow window rather than overflow.
+- **Sessions**: a peer view in the same persistent observability iframe. It owns
+  the full-width live/recent session table and its empty state, while sharing
+  the Dashboard's single `/token-usage/sessions` controller.
 - **Settings**: `.topbar` header + centered single-column content pane.
   Section max-width = `--content-max`. Within the pane, form
   rows use a 33% label / 66% control split.

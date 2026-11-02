@@ -98,8 +98,10 @@ export const Unresolved = state({
     "/settings/api/models": modelsReply({
       applied: true,
       options: [],
+      classifier_options: [],
       fast: unresolved,
       capable: unresolved,
+      classifier: unresolved,
     }),
   },
 });
@@ -108,7 +110,7 @@ export const SlowSave: Story = {
   parameters: { mockApi: { scenario: "signed-in", latencyMs: 1500 } },
   play: async ({ canvasElement }) => {
     await userEvent.selectOptions(
-      within(canvasElement).getByLabelText("Fast and background work"),
+      within(canvasElement).getByLabelText("Haiku alias"),
       "gpt-5.6-luna",
     );
   },
@@ -128,7 +130,7 @@ export const SaveFailure: Story = {
   },
   play: async ({ canvasElement }) => {
     await userEvent.selectOptions(
-      within(canvasElement).getByLabelText("Fast and background work"),
+      within(canvasElement).getByLabelText("Haiku alias"),
       "gpt-5.6-luna",
     );
   },

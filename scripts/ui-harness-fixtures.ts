@@ -126,6 +126,11 @@ const baseModels: ModelsListResponse = {
       { id: "gpt-5.6-luna", name: "GPT-5.6 Luna", vendor: "OpenAI", preview: false },
       { id: "gpt-6.1-sol", name: "GPT-6.1 Sol", vendor: "OpenAI", preview: false },
     ],
+    classifier_options: [
+      { id: "claude-haiku-5-5", name: "Claude Haiku 5.5", vendor: "Anthropic", preview: false },
+      { id: "gpt-5.6-luna", name: "GPT-5.6 Luna", vendor: "OpenAI", preview: false },
+      { id: "gpt-6.1-sol", name: "GPT-6.1 Sol", vendor: "OpenAI", preview: false },
+    ],
     fast: {
       configured: null,
       effective: "claude-haiku-5-5",
@@ -139,6 +144,13 @@ const baseModels: ModelsListResponse = {
       source: "automatic",
       status: "ready",
       reason: "sonnet",
+    },
+    classifier: {
+      configured: null,
+      effective: "claude-haiku-5-5",
+      source: "automatic",
+      status: "ready",
+      reason: "haiku",
     },
   },
   models: [
@@ -207,6 +219,7 @@ const emptyModels: ModelsListResponse = {
   claude_code_auto: {
     applied: false,
     options: [],
+    classifier_options: [],
     fast: {
       configured: null,
       effective: null,
@@ -215,6 +228,13 @@ const emptyModels: ModelsListResponse = {
       reason: "no-match",
     },
     capable: {
+      configured: null,
+      effective: null,
+      source: "none",
+      status: "unresolved",
+      reason: "no-match",
+    },
+    classifier: {
       configured: null,
       effective: null,
       source: "none",

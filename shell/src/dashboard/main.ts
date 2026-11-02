@@ -104,6 +104,10 @@ const bento = document.getElementById("dashboard-bento") as HTMLElement;
 const quotaSection = document.getElementById("usage-column") as HTMLElement;
 const quotaColumn = document.getElementById("usage-quotas") as HTMLElement;
 const restArea = document.getElementById("dashboard-rest") as HTMLElement;
+const observabilityViews = Array.from(
+  document.querySelectorAll<HTMLElement>("[data-observability-view]"),
+);
+type ObservabilitySurface = "settings" | "dashboard" | "sessions";
 
 // The dashboard always talks to the proxy that served it — same
 // origin, no user-typed URL. Each fetch is a relative path; the
@@ -200,9 +204,33 @@ let runningInTauri = false;
 let activeTokenUsageChannel: TauriChannel | null = null;
 let browserPollTimer: number | null = null;
 let restartBrowserPolling: (() => void) | null = null;
-let dashboardSurfaceVisible = new URLSearchParams(location.search).get("embedded") !== "1";
+const initialQuery = new URLSearchParams(location.search);
+let observabilitySurface: ObservabilitySurface =
+  initialQuery.get("embedded") === "1" ?
+    "settings"
+  : initialQuery.get("surface") === "sessions" ?
+    "sessions"
+  : "dashboard";
 const dashboardIsActive = (): boolean =>
-  dashboardSurfaceVisible && document.visibilityState === "visible";
+  observabilitySurface === "dashboard"
+  && document.visibilityState === "visible";
+
+function showObservabilitySurface(surface: ObservabilitySurface): void {
+  observabilitySurface = surface;
+  for (const view of observabilityViews) {
+    view.hidden = view.dataset.observabilityView !== surface;
+  }
+  const standalone = document.documentElement.dataset.embedded !== "true";
+  const toolbar = document.querySelector<HTMLElement>(".dashboard-toolbar");
+  if (toolbar && standalone) toolbar.hidden = false;
+  if (standalone) {
+    tokenUsagePeriodGroup.hidden = surface === "sessions";
+    const range = document.getElementById("token-usage-range");
+    if (range) range.hidden = surface === "sessions";
+  }
+  document.title =
+    surface === "sessions" ? t("dashboard-sessions-title") : t("dashboard-title");
+}
 /** After a failed fetch, wait this long instead (don't hammer the sidecar). */
 const BROWSER_RETRY_INTERVAL_MS = 5000;
 
@@ -532,7 +560,9 @@ function render(): void {
   // The quota column and the rest are rebuilt; the live card beside the
   // quotas is not (it updates in place).
   const welcome = !quotasHtml && !tokenUsageHtml && !detailedHtml;
-  bento.hidden = welcome;
+  // The live-flow slot is permanent: when there is no graphable traffic its
+  // own empty state explains what will appear here.
+  bento.hidden = false;
   quotaSection.hidden = false;
   quotaColumn.innerHTML = quotasHtml;
   restArea.innerHTML = welcome ? renderWelcomeMessage() : `${tokenUsageHtml}${detailedHtml}`;
@@ -1243,6 +1273,20 @@ function handleContentAreaClick(event: Event): void {
   }
 }
 
+function updateDashboardActivity(): void {
+  if (!dashboardIsActive()) {
+    unsubscribeTokenUsage();
+    if (browserPollTimer !== null) window.clearTimeout(browserPollTimer);
+    browserPollTimer = null;
+  } else if (runningInTauri) {
+    if (activeTokenUsageChannel === null) {
+      subscribeTokenUsage(state.tokenUsagePeriod);
+    }
+  } else {
+    restartBrowserPolling?.();
+  }
+}
+
 /**
  * Initializes the application.
  */
@@ -1254,7 +1298,10 @@ function init(): void {
   // override is shared with Settings (same :4141 origin), so a switch here or
   // there is reflected on the other surface's next load.
   applyI18n();
-  wireLocalePicker(render);
+  wireLocalePicker(() => {
+    render();
+    showObservabilitySurface(observabilitySurface);
+  });
 
   // Detect Tauri lazily — `window.__TAURI__` isn't guaranteed to be
   // injected by the time this script's top-level code parses. By the
@@ -1286,6 +1333,7 @@ function init(): void {
       }
     });
   }
+  showObservabilitySurface(observabilitySurface);
   const periodFromUrl = normalizePeriod(urlParams.get("period"));
   setSelectedPeriod(periodFromUrl);
 
@@ -1294,6 +1342,7 @@ function init(): void {
     const msg = event.data as {
       type?: string;
       period?: string;
+      surface?: string;
       visible?: boolean;
     } | null;
     if (!msg || typeof msg !== "object") return;
@@ -1306,20 +1355,21 @@ function init(): void {
     } else if (msg.type === "maximal:set-locale") {
       applyI18n();
       render();
+      showObservabilitySurface(observabilitySurface);
+    } else if (
+      msg.type === "maximal:surface"
+      && (msg.surface === "settings"
+        || msg.surface === "dashboard"
+        || msg.surface === "sessions")
+    ) {
+      showObservabilitySurface(msg.surface);
+      updateDashboardActivity();
     } else if (
       msg.type === "maximal:dashboard-visibility"
       && typeof msg.visible === "boolean"
     ) {
-      dashboardSurfaceVisible = msg.visible;
-      if (!dashboardIsActive()) {
-        unsubscribeTokenUsage();
-        if (browserPollTimer !== null) window.clearTimeout(browserPollTimer);
-        browserPollTimer = null;
-      } else if (runningInTauri) {
-        if (activeTokenUsageChannel === null) subscribeTokenUsage(state.tokenUsagePeriod);
-      } else {
-        restartBrowserPolling?.();
-      }
+      showObservabilitySurface(msg.visible ? "dashboard" : "settings");
+      updateDashboardActivity();
     }
   });
 
@@ -1371,17 +1421,8 @@ function init(): void {
 // /usage is only fetched on load and period changes, so a window left open
 // drifts; re-read it when the window comes back into view and it's >10 min old.
 document.addEventListener("visibilitychange", () => {
-  if (!dashboardIsActive()) {
-    unsubscribeTokenUsage();
-    if (browserPollTimer !== null) window.clearTimeout(browserPollTimer);
-    browserPollTimer = null;
-    return;
-  }
-  if (runningInTauri) {
-    if (activeTokenUsageChannel === null) subscribeTokenUsage(state.tokenUsagePeriod);
-  } else {
-    restartBrowserPolling?.();
-  }
+  updateDashboardActivity();
+  if (!dashboardIsActive()) return;
   // Coming back into view: move the range label to the current hour if the
   // clock has rolled over while it was hidden.
   syncRangeBaseline(true);

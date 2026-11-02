@@ -93,44 +93,53 @@
             ></select>
           </div>
         </div>
-        <!-- Content area for dynamically rendered data. The bento (quotas
-             beside the live card) and the session table stay put: main.ts
-             fills the quota column and the rest from strings on every render,
-             while the live card (#live-sessions) and the session table
-             (#sessions-table) are built once by live/controller.ts and updated
-             in place, so the selection, animation, hover and focus survive
-             those renders. -->
+        <!-- Dashboard and Sessions are two views over one persistent bundle.
+             main.ts rebuilds only quota/token strings; live/controller.ts builds
+             the graph and session table once, then feeds both from one poll so
+             selection, animation, hover and focus survive view switches. -->
         <main id="content-area">
-          <div id="dashboard-bento" class="dashboard-bento" hidden>
-            <section id="usage-column" class="dashboard-bento__col dashboard-bento__quota" aria-labelledby="usage-quotas-title">
-              <h2 id="usage-quotas-title" class="section__title">
-                <i data-lucide="bar-chart-big" aria-hidden="true"></i>
-                <span data-i18n="dashboard-quotas-title">Usage Quotas</span>
+          <div data-observability-view="dashboard">
+            <div id="dashboard-bento" class="dashboard-bento" hidden>
+              <section id="usage-column" class="dashboard-bento__col dashboard-bento__quota" aria-labelledby="usage-quotas-title">
+                <h2 id="usage-quotas-title" class="section__title">
+                  <i data-lucide="bar-chart-big" aria-hidden="true"></i>
+                  <span data-i18n="dashboard-quotas-title">Usage Quotas</span>
+                </h2>
+                <div class="usage-overview">
+                  <section id="live-metrics" class="usage-panel usage-panel--tokens" aria-label="Token use" data-i18n-aria-label="dashboard-flow-token-use"></section>
+                  <section class="usage-panel usage-panel--quota" aria-label="Usage quotas" data-i18n-aria-label="dashboard-quotas-title">
+                    <div id="usage-quotas"></div>
+                    <div id="cache-hit"></div>
+                  </section>
+                </div>
+              </section>
+              <section class="dashboard-bento__col dashboard-bento__live" aria-labelledby="live-sessions-title">
+                <h2 id="live-sessions-title" class="section__title">
+                  <i data-lucide="activity" aria-hidden="true"></i>
+                  <span data-i18n="dashboard-live-title">Live sessions</span>
+                </h2>
+                <div id="live-sessions"></div>
+              </section>
+            </div>
+            <div id="dashboard-rest"></div>
+          </div>
+          <div data-observability-view="sessions" hidden>
+            <section id="sessions" class="sessions" aria-labelledby="sessions-title">
+              <h2 id="sessions-title" class="section__title">
+                <i data-lucide="list" aria-hidden="true"></i>
+                <span data-i18n="dashboard-sessions-title">Sessions</span>
               </h2>
-              <div class="usage-overview">
-                <section id="live-metrics" class="usage-panel usage-panel--tokens" aria-label="Token use" data-i18n-aria-label="dashboard-flow-token-use"></section>
-                <section class="usage-panel usage-panel--quota" aria-label="Usage quotas" data-i18n-aria-label="dashboard-quotas-title">
-                  <div id="usage-quotas"></div>
-                  <div id="cache-hit"></div>
-                </section>
+              <p id="sessions-error" class="live__error" role="alert" hidden>
+                <span class="live__error-title" data-i18n="dashboard-error-generic"></span>
+                <span class="live__error-message"></span>
+              </p>
+              <div id="sessions-empty" class="observability-empty">
+                <h3 class="observability-empty__title" data-i18n="sessions-empty-title">No sessions yet</h3>
+                <p data-i18n="sessions-empty-detail">Sessions will appear here after apps send requests through Maximal.</p>
               </div>
-            </section>
-            <section class="dashboard-bento__col dashboard-bento__live" aria-labelledby="live-sessions-title">
-              <h2 id="live-sessions-title" class="section__title">
-                <i data-lucide="activity" aria-hidden="true"></i>
-                <span data-i18n="dashboard-live-title">Live sessions</span>
-              </h2>
-              <div id="live-sessions"></div>
+              <div id="sessions-table" hidden></div>
             </section>
           </div>
-          <section id="sessions" class="sessions" aria-labelledby="sessions-title" hidden>
-            <h2 id="sessions-title" class="section__title">
-              <i data-lucide="list" aria-hidden="true"></i>
-              <span data-i18n="dashboard-sessions-title">Sessions</span>
-            </h2>
-            <div id="sessions-table"></div>
-          </section>
-          <div id="dashboard-rest"></div>
         </main>
       </div>
     </div>

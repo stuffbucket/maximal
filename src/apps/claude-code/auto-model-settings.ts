@@ -3,7 +3,11 @@ import type { ClaudeAutoTierState } from "~/lib/models/claude-auto-model-types"
 import type { ClaudeAutoTier } from "~/lib/models/claude-auto-models"
 
 import { getConfig } from "~/lib/config/config"
-import { resolveClaudeAutoModels } from "~/lib/models/claude-auto-models"
+import {
+  isClaudeCodeClassifierEligible,
+  resolveClaudeAutoModels,
+} from "~/lib/models/claude-auto-models"
+import { resolveModelMapping } from "~/lib/models/model-mapping"
 import { state } from "~/lib/runtime-state/state"
 
 import {
@@ -15,11 +19,23 @@ import {
 
 export const FAST_MODEL_KEY = "ANTHROPIC_DEFAULT_HAIKU_MODEL"
 export const CAPABLE_MODEL_KEY = "ANTHROPIC_DEFAULT_SONNET_MODEL"
+export const CLASSIFIER_MODEL_KEY = "CLAUDE_CODE_AUTO_MODE_MODEL"
+export const UNAVAILABLE_CLASSIFIER_MODEL =
+  "claude-maximal-auto-mode-unavailable"
 export const AUTO_MODELS_OWNERSHIP_KEY = "_maximalAutoModels"
+
+const AUTO_MODEL_TIERS = ["fast", "capable", "classifier"] as const
 
 const TIER_KEYS = {
   fast: FAST_MODEL_KEY,
   capable: CAPABLE_MODEL_KEY,
+  classifier: CLASSIFIER_MODEL_KEY,
+} as const
+
+const CONFIG_KEYS = {
+  fast: "fastModel",
+  capable: "capableModel",
+  classifier: "classifierModel",
 } as const
 
 type OwnedSource = "automatic" | "maximal-override"
@@ -33,6 +49,7 @@ interface AutoModelMarkerEntry {
 interface AutoModelMarker {
   fast?: AutoModelMarkerEntry
   capable?: AutoModelMarkerEntry
+  classifier?: AutoModelMarkerEntry
 }
 
 type TierOwnership =
@@ -45,6 +62,7 @@ interface AutoModelContext {
   env: Record<string, unknown>
   marker: AutoModelMarker
   prior: Record<string, unknown>
+  sessionModel?: string
 }
 
 function readMarker(settings: Record<string, unknown>): AutoModelMarker {
@@ -71,10 +89,34 @@ function readMarker(settings: Record<string, unknown>): AutoModelMarker {
       ...(entry.claimed === true ? { claimed: true } : {}),
     }
   }
-  return {
-    ...(readEntry("fast") ? { fast: readEntry("fast") } : {}),
-    ...(readEntry("capable") ? { capable: readEntry("capable") } : {}),
+  const marker: AutoModelMarker = {}
+  for (const tier of AUTO_MODEL_TIERS) {
+    const entry = readEntry(tier)
+    if (entry) marker[tier] = entry
   }
+  return marker
+}
+
+function readSessionModel(
+  settings: Record<string, unknown>,
+): string | undefined {
+  const envModel = readSettingsEnv(settings).ANTHROPIC_MODEL
+  if (typeof envModel === "string" && envModel.trim()) return envModel.trim()
+  const model = settings.model
+  return typeof model === "string" && model.trim() ? model.trim() : undefined
+}
+
+function mappedSessionModel(
+  sessionModel: string | undefined,
+): string | undefined {
+  if (!sessionModel) return undefined
+  const mapping = resolveModelMapping({
+    requestedModel: sessionModel.replace(/\[1m\]$/u, ""),
+    rules: getConfig().modelMappings ?? [],
+    models: state.models?.data ?? [],
+    endpoint: null,
+  })
+  return mapping.resolvedModel
 }
 
 function stringValue(value: unknown): string | undefined {
@@ -131,10 +173,12 @@ function externalId(ownership: TierOwnership): string | undefined {
 function tierIds(
   fast: string | undefined,
   capable: string | undefined,
-): { fast?: string; capable?: string } {
+  classifier: string | undefined,
+): { fast?: string; capable?: string; classifier?: string } {
   return {
     ...(fast ? { fast } : {}),
     ...(capable ? { capable } : {}),
+    ...(classifier ? { classifier } : {}),
   }
 }
 
@@ -195,8 +239,7 @@ function tierPolicyInput(
   const effective = resolveEffectiveOwnership(context, tier, ownership)
   const claimed = claims.has(tier)
   const appConfig = getConfig().apps?.claudeCode
-  const configured =
-    tier === "fast" ? appConfig?.fastModel : appConfig?.capableModel
+  const configured = appConfig?.[CONFIG_KEYS[tier]]
   return {
     configured,
     override: canOwnTier(ownership, claimed) ? configured : undefined,
@@ -224,19 +267,31 @@ function resolveForSettings(
 ) {
   const fastPolicy = tierPolicyInput(context, "fast", claims)
   const capablePolicy = tierPolicyInput(context, "capable", claims)
+  const classifierPolicy = tierPolicyInput(context, "classifier", claims)
   const resolution = resolveClaudeAutoModels({
     models: state.models?.data,
-    overrides: tierIds(fastPolicy.override, capablePolicy.override),
-    external: tierIds(fastPolicy.external, capablePolicy.external),
+    overrides: tierIds(
+      fastPolicy.override,
+      capablePolicy.override,
+      classifierPolicy.override,
+    ),
+    external: tierIds(
+      fastPolicy.external,
+      capablePolicy.external,
+      classifierPolicy.external,
+    ),
     previousAutomatic: tierIds(
       fastPolicy.previousAutomatic,
       capablePolicy.previousAutomatic,
+      classifierPolicy.previousAutomatic,
     ),
+    sessionModel: mappedSessionModel(context.sessionModel),
   })
   return {
     ...resolution,
     fast: resolvedTierState(resolution.fast, fastPolicy),
     capable: resolvedTierState(resolution.capable, capablePolicy),
+    classifier: resolvedTierState(resolution.classifier, classifierPolicy),
   }
 }
 
@@ -267,6 +322,44 @@ function snapshotTierIfNeeded(input: {
     ...input.context.prior,
     [key]: key in input.context.env ? input.context.env[key] : SETTINGS_UNSET,
   }
+}
+
+function automaticMarkerDuringGap(
+  tier: ClaudeAutoTier,
+  resolution: ClaudeAutoTierState,
+  ownership: TierOwnership,
+): AutoModelMarkerEntry | undefined {
+  if (
+    tier !== "classifier"
+    || resolution.status !== "unresolved"
+    || ownership.kind !== "owned"
+    || ownership.marker.source !== "automatic"
+  ) {
+    return undefined
+  }
+  const previous = state.models?.data.find(
+    (model) => model.id === ownership.marker.id,
+  )
+  if (previous && !isClaudeCodeClassifierEligible(previous)) {
+    return {
+      id: UNAVAILABLE_CLASSIFIER_MODEL,
+      source: "automatic",
+      ...(ownership.marker.claimed ? { claimed: true } : {}),
+    }
+  }
+  return ownership.marker
+}
+
+function needsUnavailableClassifier(input: {
+  claimed: boolean
+  resolution: ClaudeAutoTierState
+  tier: ClaudeAutoTier
+}): boolean {
+  return (
+    input.claimed
+    && input.tier === "classifier"
+    && input.resolution.status === "unresolved"
+  )
 }
 
 function applyTier(input: {
@@ -305,6 +398,33 @@ function applyTier(input: {
   ) {
     return { env: input.outputEnv, marker: ownership.marker }
   }
+  if (needsUnavailableClassifier(input)) {
+    return {
+      env: {
+        ...input.outputEnv,
+        [key]: UNAVAILABLE_CLASSIFIER_MODEL,
+      },
+      marker: {
+        id: UNAVAILABLE_CLASSIFIER_MODEL,
+        source: "automatic",
+        claimed: true,
+      },
+    }
+  }
+  const automaticMarker = automaticMarkerDuringGap(
+    input.tier,
+    input.resolution,
+    ownership,
+  )
+  if (automaticMarker) {
+    // A missing model stays pinned so the classifier fails closed and can resume
+    // if it returns. A still-cataloged but newly incompatible model becomes the
+    // explicit unavailable sentinel instead.
+    return {
+      env: { ...input.outputEnv, [key]: automaticMarker.id },
+      marker: automaticMarker,
+    }
+  }
   if (ownership.kind === "owned") {
     return {
       env: withRestoredField(
@@ -331,45 +451,36 @@ export function mergeClaudeAutoModelSettings(input: {
     env: readSettingsEnv(input.settings),
     marker: readMarker(input.settings),
     prior: input.prior,
+    sessionModel: readSessionModel(input.settings),
   }
   const claims = input.claimTiers ?? new Set<ClaudeAutoTier>()
   for (const tier of claims) snapshotClaim(context, tier)
   const resolution = resolveForSettings(context, claims)
-  snapshotTierIfNeeded({
-    context,
-    tier: "fast",
-    needed:
-      resolution.fast.source !== "none" || context.marker.fast !== undefined,
-  })
-  snapshotTierIfNeeded({
-    context,
-    tier: "capable",
-    needed:
-      resolution.capable.source !== "none"
-      || context.marker.capable !== undefined,
-  })
+  for (const tier of AUTO_MODEL_TIERS) {
+    snapshotTierIfNeeded({
+      context,
+      tier,
+      needed:
+        resolution[tier].source !== "none"
+        || context.marker[tier] !== undefined,
+    })
+  }
 
   const marker: AutoModelMarker = {}
-  const fast = applyTier({
-    claimed: claims.has("fast"),
-    context,
-    outputEnv: input.env,
-    resolution: resolution.fast,
-    tier: "fast",
-  })
-  let env = fast.env
-  if (fast.marker) marker.fast = fast.marker
-  const capable = applyTier({
-    claimed: claims.has("capable"),
-    context,
-    outputEnv: env,
-    resolution: resolution.capable,
-    tier: "capable",
-  })
-  env = capable.env
-  if (capable.marker) marker.capable = capable.marker
+  let env = input.env
+  for (const tier of AUTO_MODEL_TIERS) {
+    const applied = applyTier({
+      claimed: claims.has(tier),
+      context,
+      outputEnv: env,
+      resolution: resolution[tier],
+      tier,
+    })
+    env = applied.env
+    if (applied.marker) marker[tier] = applied.marker
+  }
 
-  for (const tier of ["fast", "capable"] as const) {
+  for (const tier of AUTO_MODEL_TIERS) {
     const ownership = ownershipForTier(context, tier)
     if (
       !marker[tier]
@@ -383,7 +494,7 @@ export function mergeClaudeAutoModelSettings(input: {
   }
   return {
     env,
-    marker: marker.fast || marker.capable ? marker : null,
+    marker: AUTO_MODEL_TIERS.some((tier) => marker[tier]) ? marker : null,
     prior: context.prior,
   }
 }
@@ -397,9 +508,10 @@ export function stripClaudeAutoModelSettings(input: {
     env: readSettingsEnv(input.settings),
     marker: readMarker(input.settings),
     prior: input.prior ?? {},
+    sessionModel: readSessionModel(input.settings),
   }
   let env = input.env
-  for (const tier of ["fast", "capable"] as const) {
+  for (const tier of AUTO_MODEL_TIERS) {
     if (ownershipForTier(context, tier).kind === "owned") {
       const key = TIER_KEYS[tier]
       env = withRestoredField(env, key, priorField(context.prior, key))
@@ -415,10 +527,10 @@ export function hasOwnedClaudeAutoModelSettings(
     env: readSettingsEnv(settings),
     marker: readMarker(settings),
     prior: {},
+    sessionModel: readSessionModel(settings),
   }
-  return (
-    ownershipForTier(context, "fast").kind === "owned"
-    || ownershipForTier(context, "capable").kind === "owned"
+  return AUTO_MODEL_TIERS.some(
+    (tier) => ownershipForTier(context, tier).kind === "owned",
   )
 }
 
@@ -431,6 +543,7 @@ export function buildClaudeAutoModelsState(
     env: readSettingsEnv(settings),
     marker: readMarker(settings),
     prior: prior ?? {},
+    sessionModel: readSessionModel(settings),
   })
   return {
     applied,
@@ -440,7 +553,14 @@ export function buildClaudeAutoModelsState(
       vendor: model.vendor,
       preview: model.preview,
     })),
+    classifier_options: resolution.classifierEligibleModels.map((model) => ({
+      id: model.id,
+      name: model.name,
+      vendor: model.vendor,
+      preview: model.preview,
+    })),
     fast: resolution.fast,
     capable: resolution.capable,
+    classifier: resolution.classifier,
   }
 }

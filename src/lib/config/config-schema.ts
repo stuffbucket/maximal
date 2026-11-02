@@ -122,6 +122,7 @@ const ClaudeCodeConfigSchema = z
     mcpServers: OwnedMcpServerIdsSchema.optional(),
     fastModel: z.string().trim().min(1).optional(),
     capableModel: z.string().trim().min(1).optional(),
+    classifierModel: z.string().trim().min(1).optional(),
   })
   .loose()
 

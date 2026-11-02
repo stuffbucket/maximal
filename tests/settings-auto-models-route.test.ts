@@ -123,7 +123,7 @@ afterEach(() => {
   fs.rmSync(configDir, { recursive: true, force: true })
 })
 
-describe("GET and refresh Claude Code Auto models", () => {
+describe("GET and refresh Claude Code model settings", () => {
   test("returns only eligible choices and server-computed tier state", async () => {
     const response = await buildApp().request("/settings/api/models")
 
@@ -135,6 +135,9 @@ describe("GET and refresh Claude Code Auto models", () => {
       smallGpt.id,
       fullGpt.id,
     ])
+    expect(
+      body.claude_code_auto.classifier_options.map((option) => option.id),
+    ).toEqual([smallGpt.id, fullGpt.id])
     expect(body.claude_code_auto.fast).toMatchObject({
       effective: haikuA.id,
       source: "automatic",
@@ -146,6 +149,12 @@ describe("GET and refresh Claude Code Auto models", () => {
       source: "automatic",
       status: "ready",
       reason: "sonnet",
+    })
+    expect(body.claude_code_auto.classifier).toMatchObject({
+      effective: smallGpt.id,
+      source: "automatic",
+      status: "ready",
+      reason: "small-gpt",
     })
   })
 
@@ -203,7 +212,7 @@ describe("GET and refresh Claude Code Auto models", () => {
   )
 })
 
-describe("PATCH Claude Code Auto models", () => {
+describe("PATCH Claude Code model settings", () => {
   test("persists eligible overrides and reconciles an enabled integration", async () => {
     writeConfig({
       auth: { apiKeys: ["test-key"] },
@@ -220,7 +229,11 @@ describe("PATCH Claude Code Auto models", () => {
       {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ fast: smallGpt.id, capable: fullGpt.id }),
+        body: JSON.stringify({
+          fast: smallGpt.id,
+          capable: fullGpt.id,
+          classifier: fullGpt.id,
+        }),
       },
     )
 
@@ -229,12 +242,55 @@ describe("PATCH Claude Code Auto models", () => {
       enabled: true,
       fastModel: smallGpt.id,
       capableModel: fullGpt.id,
+      classifierModel: fullGpt.id,
     })
     const settings = readClaudeCodeSettings()
     expect(settings.env).toMatchObject({
       ANTHROPIC_DEFAULT_HAIKU_MODEL: smallGpt.id,
       ANTHROPIC_DEFAULT_SONNET_MODEL: fullGpt.id,
+      CLAUDE_CODE_AUTO_MODE_MODEL: fullGpt.id,
     })
+  })
+
+  test.skipIf(process.platform === "win32")(
+    "rolls back config when enabled Claude settings cannot be updated",
+    async () => {
+      writeConfig({ apps: { claudeCode: { enabled: true } } })
+      const target = path.join(configDir, "real-settings.json")
+      fs.writeFileSync(target, JSON.stringify({ theme: "dark" }))
+      fs.symlinkSync(target, getClaudeCodeSettingsPath())
+
+      const response = await buildApp().request(
+        "/settings/api/models/claude-code-auto",
+        {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ classifier: fullGpt.id }),
+        },
+      )
+
+      expect(response.status).toBe(500)
+      expect(getConfig().apps?.claudeCode).toEqual({ enabled: true })
+    },
+  )
+
+  test("rolls back config when Claude routing is foreign", async () => {
+    writeConfig({ apps: { claudeCode: { enabled: true } } })
+    writeClaudeCodeSettings(getClaudeCodeSettingsPath(), {
+      env: { ANTHROPIC_BASE_URL: "https://other.example" },
+    })
+
+    const response = await buildApp().request(
+      "/settings/api/models/claude-code-auto",
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ classifier: fullGpt.id }),
+      },
+    )
+
+    expect(response.status).toBe(500)
+    expect(getConfig().apps?.claudeCode).toEqual({ enabled: true })
   })
 
   test("a partial null clears only that tier back to Automatic", async () => {
@@ -274,6 +330,8 @@ describe("PATCH Claude Code Auto models", () => {
   test.each([
     [{ fast: "missing-model", capable: null }, 400],
     [{ fast: embedding.id, capable: null }, 400],
+    [{ classifier: sonnet.id }, 400],
+    [{ classifier: embedding.id }, 400],
     [{ fast: "", capable: null }, 400],
     [{}, 400],
     [{ fast: null, capable: null, extra: true }, 400],

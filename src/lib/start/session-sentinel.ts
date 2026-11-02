@@ -39,6 +39,7 @@ import path from "node:path"
 import { PATHS } from "~/lib/platform/paths"
 
 const SENTINEL_FILENAME = "session-running"
+const SENTINEL_SCHEMA_VERSION = 2
 
 function sentinelPath(): string {
   return path.join(PATHS.APP_DIR, SENTINEL_FILENAME)
@@ -52,14 +53,22 @@ export function markSessionRunning(port?: number): void {
     fs.writeFileSync(
       sentinelPath(),
       JSON.stringify({
+        schemaVersion: SENTINEL_SCHEMA_VERSION,
         pid: process.pid,
-        ...(port === undefined ? {} : { port }),
+        port: port ?? null,
+        instanceId: process.env.MAXIMAL_INSTANCE_ID ?? null,
+        parentPid: sidecarParentPid(),
         started_at: new Date().toISOString(),
       }),
     )
   } catch {
     /* best-effort */
   }
+}
+
+function sidecarParentPid(): number | null {
+  const value = Number(process.env.MAXIMAL_SIDECAR_PARENT_PID)
+  return Number.isSafeInteger(value) && value > 0 ? value : null
 }
 
 /** Delete the sentinel file. Idempotent (no-op when absent). */
@@ -94,14 +103,36 @@ function processAlive(pid: number): boolean {
   }
 }
 
+interface SessionSentinelRecord {
+  schemaVersion?: unknown
+  pid?: unknown
+  port?: unknown
+}
+
+/** Read both the original unversioned record and versioned records. Unknown
+ * future schemas fail closed so their fields are not accidentally misread. */
+function readSessionSentinel(): SessionSentinelRecord | undefined {
+  // eslint-disable-next-line unicorn/prefer-json-parse-buffer -- JSON.parse's type only accepts string
+  const parsed: unknown = JSON.parse(fs.readFileSync(sentinelPath(), "utf8"))
+  if (typeof parsed !== "object" || parsed === null) return undefined
+
+  const record = parsed as SessionSentinelRecord
+  if (
+    record.schemaVersion !== undefined
+    && record.schemaVersion !== 1
+    && record.schemaVersion !== SENTINEL_SCHEMA_VERSION
+  ) {
+    return undefined
+  }
+  return record
+}
+
 /** The port of the Maximal instance that wrote the sentinel, when that
  *  process is still alive; undefined when none is running (or a crashed
  *  run left the sentinel behind). */
 export function runningSessionPort(): number | undefined {
   try {
-    // eslint-disable-next-line unicorn/prefer-json-parse-buffer -- JSON.parse's type only accepts string
-    const parsed: unknown = JSON.parse(fs.readFileSync(sentinelPath(), "utf8"))
-    const { pid, port } = (parsed ?? {}) as { pid?: unknown; port?: unknown }
+    const { pid, port } = readSessionSentinel() ?? {}
     if (typeof pid !== "number" || typeof port !== "number") return undefined
     if (!Number.isInteger(port) || port < 1 || port > 65_535) return undefined
     return processAlive(pid) ? port : undefined

@@ -103,10 +103,12 @@ export interface AppsConfig {
     enabled?: boolean
     /** MCP endpoint ids Maximal added to Claude Code's user scope. */
     mcpServers?: Array<string>
-    /** Explicit fast/background Auto-tier model. Missing means Automatic. */
+    /** Explicit model for Claude Code's Haiku alias. Missing means Automatic. */
     fastModel?: string
-    /** Explicit capable/default Auto-tier model. Missing means Automatic. */
+    /** Explicit model for Claude Code's Sonnet alias. Missing means Automatic. */
     capableModel?: string
+    /** Explicit client-side Auto permission classifier. Missing means Automatic. */
+    classifierModel?: string
   }
   claudeDesktop?: {
     /** Proxy config applied to Claude Desktop. */
@@ -565,9 +567,11 @@ export function isAutoRecoverAccountEnabled(): boolean {
   return config.autoRecoverAccount ?? false
 }
 
-/** Whether to ping GitHub for a newer release and surface it. Defaults ON —
- *  see AppConfig.checkUpdates. */
+/** Whether to consume release update metadata and surface a newer version.
+ * Defaults ON via AppConfig.checkUpdates. A supervising desktop shell can own
+ * update metadata itself by setting MAXIMAL_UPDATE_POLICY=disabled. */
 export function isUpdateCheckEnabled(): boolean {
+  if (process.env.MAXIMAL_UPDATE_POLICY === "disabled") return false
   const config = getConfig()
   return config.checkUpdates ?? true
 }

@@ -57,6 +57,6 @@ export type FlowWorkerMessage =
       active: boolean;
     }
   | { type: "resize"; width: number; height: number; scale: number }
-  | { type: "snapshot"; snapshot: FlowSnapshot }
+  | { type: "snapshot"; snapshot: FlowSnapshot; baseline?: boolean }
   | { type: "active"; active: boolean }
   | { type: "hit-test"; x: number; y: number };
