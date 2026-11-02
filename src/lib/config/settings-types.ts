@@ -146,6 +146,60 @@ export const ModelSummary = z.object({
 })
 export type ModelSummary = z.infer<typeof ModelSummary>
 
+export const ClaudeAutoModelOption = z.object({
+  id: z.string(),
+  name: z.string(),
+  vendor: z.string(),
+  preview: z.boolean(),
+})
+export type ClaudeAutoModelOption = z.infer<typeof ClaudeAutoModelOption>
+
+const ClaudeAutoModelSource = z.enum([
+  "maximal-override",
+  "claude-code-setting",
+  "automatic",
+  "none",
+])
+const ClaudeAutoModelStatus = z.enum(["ready", "unavailable", "unresolved"])
+const ClaudeAutoModelReason = z.enum([
+  "override",
+  "external-setting",
+  "haiku",
+  "sonnet",
+  "small-gpt",
+  "gpt",
+  "override-unavailable",
+  "external-unavailable",
+  "no-match",
+])
+
+export const ClaudeAutoTierState = z.object({
+  configured: z.string().nullable(),
+  effective: z.string().nullable(),
+  source: ClaudeAutoModelSource,
+  status: ClaudeAutoModelStatus,
+  reason: ClaudeAutoModelReason,
+})
+export type ClaudeAutoTierState = z.infer<typeof ClaudeAutoTierState>
+
+export const ClaudeAutoModelsState = z.object({
+  applied: z.boolean(),
+  options: z.array(ClaudeAutoModelOption),
+  fast: ClaudeAutoTierState,
+  capable: ClaudeAutoTierState,
+})
+export type ClaudeAutoModelsState = z.infer<typeof ClaudeAutoModelsState>
+
+export const ClaudeAutoModelsUpdateRequest = z
+  .object({
+    fast: z.string().trim().min(1).nullable(),
+    capable: z.string().trim().min(1).nullable(),
+  })
+  .strict()
+export type ClaudeAutoModelsUpdateRequest = z.infer<
+  typeof ClaudeAutoModelsUpdateRequest
+>
+
 /** Response of GET/POST `/settings/api/models`. Carries the cached
  *  catalog plus its freshness so the UI can show staleness and offer a
  *  manual refresh. `loaded_at` is null before the first successful

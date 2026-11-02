@@ -407,7 +407,10 @@ export const AppConfigSchema = z
           .object({
             enabled: z.boolean().optional(),
             mcpServers: OwnedMcpServerIdsSchema.optional(),
+            fastModel: z.string().trim().min(1).optional(),
+            capableModel: z.string().trim().min(1).optional(),
           })
+          .loose()
           .optional(),
         claudeDesktop: z
           .object({

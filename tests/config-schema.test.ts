@@ -196,6 +196,44 @@ describe("validateAppConfig", () => {
   })
 })
 
+describe("validateAppConfig — Claude Code Auto models", () => {
+  it("accepts missing overrides", () => {
+    expect(
+      validateAppConfig({ apps: { claudeCode: { enabled: true } } }),
+    ).toEqual({
+      apps: { claudeCode: { enabled: true } },
+    })
+  })
+
+  it("round-trips model overrides", () => {
+    const config = {
+      apps: {
+        claudeCode: {
+          fastModel: "gpt-5.6-mini",
+          capableModel: "gpt-5.6",
+        },
+      },
+    }
+    expect(validateAppConfig(config)).toEqual(config)
+  })
+
+  it.each(["fastModel", "capableModel"])(
+    "rejects a blank %s override",
+    (key) => {
+      expect(() =>
+        validateAppConfig({ apps: { claudeCode: { [key]: "   " } } }),
+      ).toThrow(ConfigValidationError)
+    },
+  )
+
+  it("preserves unknown app keys", () => {
+    const config = {
+      apps: { claudeCode: { enabled: true, futureModelPolicy: "new" } },
+    }
+    expect(validateAppConfig(config)).toEqual(config)
+  })
+})
+
 describe("validateAppConfig — MCP broker", () => {
   it("accepts a generic MCP broker endpoint", () => {
     const config = {
