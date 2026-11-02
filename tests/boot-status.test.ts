@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 
+import { emitSidecarReady, READY_MARKER } from "~/lib/start/boot-io"
 import { BOOT_STATUS_MARKER, emitBootStatus } from "~/start"
 
 const SHELL_LIB_RS = resolve(
@@ -21,11 +22,15 @@ const SHELL_LIB_RS = resolve(
 )
 
 const PRIOR = process.env.MAXIMAL_SIDECAR_PARENT_PID
+const PRIOR_INSTANCE_ID = process.env.MAXIMAL_INSTANCE_ID
+const PRIOR_INSTANCE_NONCE = process.env.MAXIMAL_INSTANCE_NONCE
 let writes: Array<string>
 let restoreWrite: () => void
 
 beforeEach(() => {
   writes = []
+  delete process.env.MAXIMAL_INSTANCE_ID
+  delete process.env.MAXIMAL_INSTANCE_NONCE
   const original = process.stdout.write.bind(process.stdout)
   // Capture writes without letting the marker leak into test output.
   process.stdout.write = (chunk: unknown): boolean => {
@@ -41,6 +46,13 @@ afterEach(() => {
   restoreWrite()
   if (PRIOR === undefined) delete process.env.MAXIMAL_SIDECAR_PARENT_PID
   else process.env.MAXIMAL_SIDECAR_PARENT_PID = PRIOR
+  if (PRIOR_INSTANCE_ID === undefined) delete process.env.MAXIMAL_INSTANCE_ID
+  else process.env.MAXIMAL_INSTANCE_ID = PRIOR_INSTANCE_ID
+  if (PRIOR_INSTANCE_NONCE === undefined) {
+    delete process.env.MAXIMAL_INSTANCE_NONCE
+  } else {
+    process.env.MAXIMAL_INSTANCE_NONCE = PRIOR_INSTANCE_NONCE
+  }
 })
 
 describe("emitBootStatus", () => {
@@ -63,7 +75,29 @@ describe("emitBootStatus", () => {
   })
 })
 
-describe("boot-status marker cross-boundary invariant", () => {
+describe("emitSidecarReady", () => {
+  test("is silent without a complete shell handshake", () => {
+    emitSidecarReady(42_123)
+    process.env.MAXIMAL_INSTANCE_ID = "desktop-instance"
+    emitSidecarReady(42_123)
+
+    expect(writes).toHaveLength(0)
+  })
+
+  test("emits one marker-prefixed JSON line with the actual listener", () => {
+    process.env.MAXIMAL_INSTANCE_ID = "desktop-instance"
+    process.env.MAXIMAL_INSTANCE_NONCE = "launch-nonce"
+
+    emitSidecarReady(42_123)
+
+    expect(writes).toHaveLength(1)
+    expect(writes[0]).toBe(
+      `${READY_MARKER}{"protocol":1,"host":"127.0.0.1","port":42123,"instanceId":"desktop-instance","nonce":"launch-nonce"}\n`,
+    )
+  })
+})
+
+describe("sidecar marker cross-boundary invariants", () => {
   // The splash's live status is carried over a plain-text stdout protocol:
   // the sidecar (TS) prints `<marker> <message>` lines, the shell (Rust)
   // strips `<marker> ` to relay them. The marker is a string literal
@@ -83,5 +117,17 @@ describe("boot-status marker cross-boundary invariant", () => {
       'could not find `const BOOT_STATUS_MARKER: &str = "…";` in shell/src-tauri/src/lib.rs',
     ).not.toBeNull()
     expect(match?.[1]).toBe(BOOT_STATUS_MARKER)
+  })
+
+  test("Rust READY_MARKER literal equals the TS constant", () => {
+    const rust = readFileSync(SHELL_LIB_RS, "utf8")
+    const match = rust.match(
+      /const\s+READY_MARKER\s*:\s*&str\s*=\s*"([^"]*)"\s*;/,
+    )
+    expect(
+      match,
+      'could not find `const READY_MARKER: &str = "…";` in shell/src-tauri/src/lib.rs',
+    ).not.toBeNull()
+    expect(match?.[1]).toBe(READY_MARKER)
   })
 })

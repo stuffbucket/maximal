@@ -1,173 +1,312 @@
 #!/usr/bin/env bun
-/**
- * Dev-mode pre-launch step for `bun run app:dev`.
- *
- * `tauri-plugin-single-instance` handles double-launches of the
- * *packaged* .app, but in dev a second `bun run app:dev` can collide
- * with a sidecar already listening on :4141 from a previous session.
- *
- * Rather than hunt PIDs and signal them (which is platform-specific —
- * lsof/pgrep/SIGTERM don't all exist on Windows), we lean on the
- * existing graceful-shutdown contract: `POST /_internal/shutdown` to
- * the sidecar at :4141. The sidecar exits 0; the Tauri shell's
- * CommandEvent::Terminated handler treats code-0 as "intentional
- * shutdown" and calls app.exit(0), collapsing `tauri dev` with it.
- * Everything tied to :4141 comes down through one HTTP call.
- *
- * Exits 0 on success (no holder, or holder evicted). Exits 1 on
- * unrecoverable conflict (e.g. :4141 held by something that isn't
- * maximal, or graceful shutdown timed out).
- *
- * `MAXIMAL_DEV_PORT=<port>` runs the dev app beside an installed Maximal
- * instead of replacing it. The shell binds that port (lib.rs reads the same
- * variable at build time), only a Maximal already on it is evicted, and the
- * Tauri config written below gives the dev app its own identifier, so the
- * single-instance lock doesn't hand off to the installed app, plus window
- * permissions for the dev port's origin. Pair it with COPILOT_API_HOME
- * pointing at a scratch directory so the dev proxy keeps its own config and
- * leaves your apps' settings alone.
- */
+/** Prepare the stable, per-worktree profile used by `bun run app:dev`. */
 
-import { writeFileSync } from "node:fs"
+import { randomBytes } from "node:crypto"
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import os from "node:os"
 import path from "node:path"
 
-const DEFAULT_PORT = 4141
+const WORKTREE_ID_FILE = "maximal-worktree-id"
+const WORKTREE_ID_PATTERN = /^[a-f0-9]{12}$/
+const SESSION_SENTINEL_FILE = "session-running"
+const PRIOR_SESSION_EXIT_TIMEOUT_MS = 8000
+const PRIOR_SESSION_POLL_INTERVAL_MS = 100
+const DEV_CONFIG_RELATIVE_PATH = path.join(
+  "shell",
+  "src-tauri",
+  "target",
+  "maximal-config",
+  "tauri.dev.conf.json",
+)
 
-function sidecarPort(): number {
-  const raw = process.env.MAXIMAL_DEV_PORT
-  if (raw === undefined || raw === "") return DEFAULT_PORT
-  const port = Number(raw)
-  if (!/^\d+$/.test(raw) || port < 1 || port > 65_535) {
-    console.error(`[app-dev-prepare] MAXIMAL_DEV_PORT must be a port number; got "${raw}"`)
-    process.exit(1)
-  }
-  return port
+interface DevProfileSystem {
+  platform: NodeJS.Platform
+  homedir: string
+  appData?: string
+  xdgDataHome?: string
 }
 
-const SIDECAR_PORT = sidecarPort()
-const PORT_RELEASE_TIMEOUT_MS = 8000
-const PORT_POLL_INTERVAL_MS = 100
+interface PriorSession {
+  pid: number
+  port: number
+  parentPid?: number
+}
 
-async function probeSidecar(): Promise<"free" | "maximal" | "other"> {
+interface PriorSessionDependencies {
+  processIsAlive: (pid: number) => boolean
+  requestShutdown: (port: number) => Promise<void>
+  sleep: (ms: number) => Promise<void>
+  now: () => number
+}
+
+export interface DevProfile {
+  home: string
+  identifier: string
+  worktreeId: string
+}
+
+export interface PreparedAppDev extends DevProfile {
+  configPath: string
+  env: NodeJS.ProcessEnv
+}
+
+function gitPath(repoRoot: string, name: string): string {
+  const result = Bun.spawnSync({
+    cmd: ["git", "rev-parse", "--path-format=absolute", "--git-path", name],
+    cwd: repoRoot,
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  if (result.exitCode !== 0) {
+    const detail = result.stderr.toString().trim()
+    throw new Error(
+      `Could not resolve this worktree's Git admin directory${detail ? `: ${detail}` : "."}`,
+    )
+  }
+
+  const resolved = result.stdout.toString().trim()
+  if (!resolved) {
+    throw new Error("Git returned an empty worktree admin path.")
+  }
+  return resolved
+}
+
+function readWorktreeId(filePath: string): string {
+  const worktreeId = readFileSync(filePath, "utf8").trim()
+  if (!WORKTREE_ID_PATTERN.test(worktreeId)) {
+    throw new Error(`Invalid Maximal worktree ID in ${filePath}.`)
+  }
+  return worktreeId
+}
+
+/**
+ * Return a random identity persisted with this worktree's Git metadata.
+ *
+ * `git rev-parse --git-path` resolves inside `.git/worktrees/<name>` for a
+ * linked worktree, so moving the checkout does not change its identity and
+ * removing the worktree removes the identity with it.
+ */
+export function resolveWorktreeId(
+  repoRoot: string,
+  createId: () => string = () => randomBytes(6).toString("hex"),
+): string {
+  const filePath = gitPath(repoRoot, WORKTREE_ID_FILE)
   try {
-    const res = await fetch(`http://localhost:${SIDECAR_PORT}/`, {
-      signal: AbortSignal.timeout(500),
+    return readWorktreeId(filePath)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+  }
+
+  const worktreeId = createId()
+  if (!WORKTREE_ID_PATTERN.test(worktreeId)) {
+    throw new Error("Generated an invalid Maximal worktree ID.")
+  }
+
+  try {
+    writeFileSync(filePath, `${worktreeId}\n`, {
+      encoding: "utf8",
+      flag: "wx",
+      mode: 0o600,
     })
-    if (!res.ok) return "other"
-    const text = (await res.text()).trim()
-    return text === "Server running" ? "maximal" : "other"
-  } catch {
-    return "free"
+    return worktreeId
+  } catch (error) {
+    // Two app:dev launches may prepare the same worktree concurrently. The
+    // process that lost the exclusive create uses the winner's identity.
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+      return readWorktreeId(filePath)
+    }
+    throw error
   }
 }
 
-async function isPortFree(): Promise<boolean> {
-  return (await probeSidecar()) === "free"
+/** Resolve Tauri's app-data directory for an identifier without starting it. */
+export function resolveTauriAppDataDir(
+  identifier: string,
+  system: DevProfileSystem,
+): string {
+  const paths = system.platform === "win32" ? path.win32 : path.posix
+  if (system.platform === "win32") {
+    const roaming =
+      system.appData?.trim() || paths.join(system.homedir, "AppData", "Roaming")
+    return paths.join(roaming, identifier)
+  }
+  if (system.platform === "darwin") {
+    return paths.join(
+      system.homedir,
+      "Library",
+      "Application Support",
+      identifier,
+    )
+  }
+  const dataHome =
+    system.xdgDataHome?.trim() || paths.join(system.homedir, ".local", "share")
+  return paths.join(dataHome, identifier)
+}
+
+/** Resolve the development app identity and profile metadata directory. */
+export function resolveDevProfile(
+  env: NodeJS.ProcessEnv,
+  worktreeId: string,
+  system: DevProfileSystem = {
+    platform: process.platform,
+    homedir: os.homedir(),
+    appData: env.APPDATA,
+    xdgDataHome: env.XDG_DATA_HOME,
+  },
+): DevProfile {
+  if (!WORKTREE_ID_PATTERN.test(worktreeId)) {
+    throw new Error(`Invalid Maximal worktree ID "${worktreeId}".`)
+  }
+
+  // A D-Bus service-name component cannot start with a digit. Prefix the
+  // random hexadecimal worktree ID so Linux's single-instance plugin accepts it.
+  const identifier = `co.stuffbucket.maximal.dev.maximal-${worktreeId}`
+  const explicitHome = env.COPILOT_API_HOME?.trim()
+  return {
+    home: explicitHome || resolveTauriAppDataDir(identifier, system),
+    identifier,
+    worktreeId,
+  }
+}
+
+function positiveInteger(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ?
+      value
+    : undefined
+}
+
+function readPriorSession(
+  home: string,
+  expectedIdentifier: string,
+): PriorSession | undefined {
+  try {
+    const parsed: unknown = JSON.parse(
+      readFileSync(path.join(home, SESSION_SENTINEL_FILE), "utf8"),
+    )
+    if (typeof parsed !== "object" || parsed === null) return undefined
+    const record = parsed as Record<string, unknown>
+    const pid = positiveInteger(record.pid)
+    const port = positiveInteger(record.port)
+    const parentPid = positiveInteger(record.parentPid ?? record.parent_pid)
+    const instanceId =
+      typeof record.instanceId === "string" ? record.instanceId : undefined
+    if (
+      pid === undefined
+      || port === undefined
+      || port > 65_535
+      || (instanceId !== undefined && instanceId !== expectedIdentifier)
+    ) {
+      return undefined
+    }
+    return { pid, port, ...(parentPid === undefined ? {} : { parentPid }) }
+  } catch {
+    return undefined
+  }
+}
+
+function processIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM"
+  }
+}
+
+async function requestShutdown(port: number): Promise<void> {
+  const response = await fetch(`http://127.0.0.1:${port}/_internal/shutdown`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ reason: "app-dev relaunch" }),
+    signal: AbortSignal.timeout(2000),
+  })
+  if (!response.ok) {
+    throw new Error(
+      `/_internal/shutdown on :${port} returned ${response.status}.`,
+    )
+  }
 }
 
 async function sleep(ms: number): Promise<void> {
-  await new Promise((r) => setTimeout(r, ms))
+  await new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-async function requestShutdown(): Promise<void> {
-  try {
-    const res = await fetch(
-      `http://localhost:${SIDECAR_PORT}/_internal/shutdown`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ reason: "app-dev relaunch" }),
-        signal: AbortSignal.timeout(2000),
-      },
-    )
-    if (!res.ok) {
-      console.error(
-        `[app-dev-prepare] /_internal/shutdown returned ${res.status}; the running instance may be a remote maximal that won't honor a loopback-gated shutdown.`,
-      )
-      process.exit(1)
-    }
-  } catch (err) {
-    console.error(
-      `[app-dev-prepare] /_internal/shutdown unreachable:`,
-      err instanceof Error ? err.message : err,
-    )
-    process.exit(1)
-  }
-}
+/**
+ * Gracefully replace this profile's prior shell without probing or scanning
+ * ports. The sidecar sentinel supplies its exact port and parent shell PID.
+ */
+export async function stopPriorDevSession(
+  home: string,
+  expectedIdentifier: string,
+  dependencies: PriorSessionDependencies = {
+    processIsAlive,
+    requestShutdown,
+    sleep,
+    now: Date.now,
+  },
+): Promise<boolean> {
+  const session = readPriorSession(home, expectedIdentifier)
+  if (session === undefined) return false
 
-async function waitForPortRelease(): Promise<void> {
-  const deadline = Date.now() + PORT_RELEASE_TIMEOUT_MS
-  while (Date.now() < deadline) {
-    if (await isPortFree()) return
-    await sleep(PORT_POLL_INTERVAL_MS)
+  const sidecarAlive = dependencies.processIsAlive(session.pid)
+  const parentAlive =
+    session.parentPid !== undefined
+    && dependencies.processIsAlive(session.parentPid)
+  if (!sidecarAlive && !parentAlive) return false
+
+  if (sidecarAlive) {
+    await dependencies.requestShutdown(session.port)
   }
-  console.error(
-    `[app-dev-prepare] :${SIDECAR_PORT} did not free within ${PORT_RELEASE_TIMEOUT_MS}ms after /_internal/shutdown. The Tauri shell may be stuck; try \`bun run app:dev\` again or quit the running app from the tray.`,
+  // When the sidecar already died, do not signal the recorded parent PID:
+  // a stale sentinel can outlive that shell and the OS can reuse its PID.
+  // Development shells exit themselves after sidecar failure; wait for that.
+
+  const deadline = dependencies.now() + PRIOR_SESSION_EXIT_TIMEOUT_MS
+  while (dependencies.now() < deadline) {
+    const waitingForSidecar = dependencies.processIsAlive(session.pid)
+    const waitingForParent =
+      session.parentPid !== undefined
+      && dependencies.processIsAlive(session.parentPid)
+    if (!waitingForSidecar && !waitingForParent) return true
+    await dependencies.sleep(PRIOR_SESSION_POLL_INTERVAL_MS)
+  }
+
+  throw new Error(
+    `Prior app:dev session did not exit within ${PRIOR_SESSION_EXIT_TIMEOUT_MS}ms.`,
   )
-  process.exit(1)
 }
 
-/** Merged over tauri.conf.json by `tauri dev --config` (JSON Merge Patch).
- *  Empty on the default port, so a plain `app:dev` behaves as before. */
-function devConfig(): Record<string, unknown> {
-  if (SIDECAR_PORT === DEFAULT_PORT) return {}
-  const origins = [
-    `http://localhost:${SIDECAR_PORT}/*`,
-    `http://127.0.0.1:${SIDECAR_PORT}/*`,
-  ]
+/** The generated override gives this worktree a distinct app identity. */
+export function devConfig(identifier: string): {
+  identifier: string
+  productName: string
+} {
+  return { identifier, productName: "Maximal Dev" }
+}
+
+export function prepareAppDev(
+  env: NodeJS.ProcessEnv,
+  repoRoot: string,
+): PreparedAppDev {
+  const profile = resolveDevProfile(env, resolveWorktreeId(repoRoot))
+  const explicitHome = env.COPILOT_API_HOME?.trim()
+  const home = explicitHome ? path.resolve(repoRoot, explicitHome) : profile.home
+  const configPath = path.join(repoRoot, DEV_CONFIG_RELATIVE_PATH)
+  mkdirSync(path.dirname(configPath), { recursive: true })
+  writeFileSync(
+    configPath,
+    `${JSON.stringify(devConfig(profile.identifier), null, 2)}\n`,
+  )
+
   return {
-    productName: "Maximal Dev",
-    identifier: "co.stuffbucket.maximal.dev",
-    app: {
-      security: {
-        // Listing capabilities replaces the capabilities/ directory, so name
-        // the existing ones and add the dev origin beside :4141.
-        capabilities: [
-          "default",
-          "loopback",
-          {
-            identifier: "loopback-dev-port",
-            description: `The loopback capability for the dev port :${SIDECAR_PORT}.`,
-            windows: ["settings", "dashboard"],
-            local: false,
-            remote: { urls: origins },
-            permissions: [
-              "core:default",
-              "core:window:default",
-              "core:window:allow-start-dragging",
-              "core:window:allow-internal-toggle-maximize",
-              "core:webview:allow-create-webview-window",
-              "opener:default",
-              "default",
-            ],
-          },
-        ],
-      },
-    },
+    ...profile,
+    home,
+    configPath,
+    // Do not manufacture a default COPILOT_API_HOME. Tauri and the shell own
+    // that location; an explicit relative override is made launch-independent.
+    env:
+      explicitHome ?
+        { ...env, COPILOT_API_HOME: home }
+      : { ...env },
   }
-}
-
-writeFileSync(
-  path.join(import.meta.dir, "..", "shell", "src-tauri", "tauri.dev.conf.json"),
-  `${JSON.stringify(devConfig(), null, 2)}\n`,
-)
-
-const state = await probeSidecar()
-switch (state) {
-  case "free":
-    // Nothing to do.
-    break
-  case "maximal":
-    console.log(
-      `[app-dev-prepare] evicting maximal on :${SIDECAR_PORT} via /_internal/shutdown`,
-    )
-    await requestShutdown()
-    await waitForPortRelease()
-    console.log(`[app-dev-prepare] :${SIDECAR_PORT} freed`)
-    break
-  case "other":
-    console.error(
-      `[app-dev-prepare] :${SIDECAR_PORT} is held by something that isn't maximal. Stop the holding process and retry.`,
-    )
-    process.exit(1)
 }

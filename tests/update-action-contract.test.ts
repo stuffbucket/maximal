@@ -77,11 +77,16 @@ describe("in-place update (shell)", () => {
     expect(SHELL_LIB_RS).toContain(
       'const IN_PLACE_UPDATE: bool = cfg!(any(target_os = "windows", target_os = "macos"));',
     )
-    expect(SHELL_LIB_RS).toContain("let builder = if IN_PLACE_UPDATE {")
+    expect(SHELL_LIB_RS).toContain(
+      "let builder = if profile.updates_enabled() && IN_PLACE_UPDATE {",
+    )
+    expect(SHELL_LIB_RS).toContain(
+      "if !app.state::<AppProfile>().updates_enabled()",
+    )
     // Without in-place support the tray item and the button open the page,
     // or, for an apt install, Settings with the apt command.
     expect(SHELL_LIB_RS).toMatch(
-      /fn start_update\(app: &AppHandle\) \{\s+if !IN_PLACE_UPDATE \{[\s\S]*?open_settings_window\(app, Some\(APT_UPDATE_SECTION\)\);\s+\} else \{\s+open_update_url\(app\);/u,
+      /fn start_update\(app: &AppHandle\) \{[\s\S]*?if !IN_PLACE_UPDATE \{[\s\S]*?open_settings_window\(app, Some\(APT_UPDATE_SECTION\)\);\s+\} else \{\s+open_update_url\(app\);/u,
     )
   })
 

@@ -2,13 +2,13 @@
 #
 # Tauri 2's ACL doesn't auto-generate permissions for our own
 # `#[tauri::command]` functions — only for plugin commands. So when the
-# Dashboard webview (loaded from http://localhost:4141 — a "remote"
+# Dashboard webview (loaded from the selected loopback port — a "remote"
 # origin in Tauri's classification) invokes one of these, the ACL
 # rejects it with "Plugin not found" unless the command is named in a
 # permission file like this one.
 #
-# All commands listed here are referenced by capabilities/default.json
-# and capabilities/loopback.json via the `default` permission set.
+# All commands listed here are referenced by capabilities/default.json and
+# the exact runtime loopback capability via the `default` permission set.
 
 [default]
 description = "Permissions for Maximal's own Tauri commands."
