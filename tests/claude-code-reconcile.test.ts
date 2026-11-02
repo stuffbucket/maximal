@@ -37,6 +37,7 @@ beforeEach(() => {
 })
 
 afterAll(() => {
+  reconcileClaudeCodeOnShutdown(false, SETTINGS)
   fs.rmSync(TMP_DIR, { recursive: true, force: true })
   writeConfig({})
 })
