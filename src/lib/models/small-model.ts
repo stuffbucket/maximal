@@ -19,19 +19,11 @@
 
 import type { Model } from "~/services/copilot/get-models"
 
+import { isClaudeTierClass } from "./model-identity"
+
 /** A model is usable for the tool-calling haiku tier only if it can call tools. */
 function supportsToolCalls(model: Model): boolean {
   return model.capabilities.supports.tool_calls === true
-}
-
-/** Claude haiku-class models identify their family as "claude" + a haiku name. */
-function isHaikuClass(model: Model): boolean {
-  const family = model.capabilities.family.toLowerCase()
-  const id = model.id.toLowerCase()
-  return (
-    (family.includes("claude") || id.startsWith("claude"))
-    && (family.includes("haiku") || id.includes("haiku"))
-  )
 }
 
 /**
@@ -56,7 +48,7 @@ export function resolveSmallToolModel(
   // 2. Prefer a tool-capable Claude haiku-class model (tracks the class, not a
   //    frozen string, so it follows catalog updates like haiku 4.5 → 4.6).
   const haiku = catalog.find(
-    (model) => isHaikuClass(model) && supportsToolCalls(model),
+    (model) => isClaudeTierClass(model, "haiku") && supportsToolCalls(model),
   )
   if (haiku) {
     return haiku.id

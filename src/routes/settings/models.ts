@@ -20,14 +20,25 @@ import type { Context } from "hono"
 
 import { Hono } from "hono"
 
+import type { AppConfig } from "~/lib/config/config"
+import type { ClaudeAutoModelsUpdateRequest as AutoModelsUpdate } from "~/lib/config/settings-types"
+import type { ClaudeAutoTier } from "~/lib/models/claude-auto-models"
 import type { Model } from "~/services/copilot/get-models"
 
 import {
+  getClaudeAutoModelsState,
+  getClaudeCodeSettingsPath,
+} from "~/apps/claude-code/config"
+import { reconcileClaudeCodeAutoModels } from "~/apps/claude-code/reconcile"
+import { getConfig, writeConfig } from "~/lib/config/config"
+import {
+  ClaudeAutoModelsUpdateRequest,
   ModelsListResponse,
   type ModelsListResponse as ModelsListResponseT,
   type ModelSummary as ModelSummaryT,
 } from "~/lib/config/settings-types"
-import { forwardError } from "~/lib/errors/error"
+import { forwardError, HTTPError } from "~/lib/errors/error"
+import { isClaudeAutoModelEligible } from "~/lib/models/claude-auto-models"
 import { cacheModels } from "~/lib/platform/utils"
 import { getModelsLoadedAtMs, state } from "~/lib/runtime-state/state"
 
@@ -82,6 +93,7 @@ function buildModelsList(): ModelsListResponseT {
     models,
     count: models.length,
     loaded_at: loadedAtMs === null ? null : new Date(loadedAtMs).toISOString(),
+    claude_code_auto: getClaudeAutoModelsState(),
   }
 }
 
@@ -96,9 +108,68 @@ function jsonModels(c: Context) {
   )
 }
 
+function httpError(message: string, status: number): HTTPError {
+  return new HTTPError(message, new Response(message, { status }))
+}
+
+function validateSelection(id: string | null | undefined): void {
+  if (id === null || id === undefined) return
+  const selected = state.models?.data.find((model) => model.id === id)
+  if (!selected || !isClaudeAutoModelEligible(selected)) {
+    throw httpError(`Model ${id} is not available for Claude Code Auto`, 400)
+  }
+}
+
+type ClaudeCodeConfig = NonNullable<
+  NonNullable<AppConfig["apps"]>["claudeCode"]
+>
+
+function updateTierConfig(
+  current: ClaudeCodeConfig,
+  key: "fastModel" | "capableModel",
+  value: string | null | undefined,
+): ClaudeCodeConfig {
+  if (value === undefined) return current
+  const { [key]: _removed, ...without } = current
+  return value === null ? without : { ...without, [key]: value }
+}
+
+function persistSelections(input: AutoModelsUpdate): void {
+  const config = getConfig()
+  let claudeCode = config.apps?.claudeCode ?? {}
+  claudeCode = updateTierConfig(claudeCode, "fastModel", input.fast)
+  claudeCode = updateTierConfig(claudeCode, "capableModel", input.capable)
+  writeConfig({
+    ...config,
+    apps: { ...config.apps, claudeCode },
+  })
+}
+
 export const modelsRoutes = new Hono()
 
 modelsRoutes.get("/", (c) => jsonModels(c))
+
+modelsRoutes.patch("/claude-code-auto", async (c) => {
+  try {
+    const body: unknown = await c.req.json().catch(() => null)
+    const parsed = ClaudeAutoModelsUpdateRequest.safeParse(body)
+    if (!parsed.success) {
+      throw httpError("Expected fast or capable model id or null", 400)
+    }
+    validateSelection(parsed.data.fast)
+    validateSelection(parsed.data.capable)
+    persistSelections(parsed.data)
+    const claimed = new Set<ClaudeAutoTier>()
+    if (parsed.data.fast !== undefined) claimed.add("fast")
+    if (parsed.data.capable !== undefined) claimed.add("capable")
+    reconcileClaudeCodeAutoModels(getClaudeCodeSettingsPath(), {
+      claimAutoModels: claimed,
+    })
+    return jsonModels(c)
+  } catch (error) {
+    return forwardError(c, error)
+  }
+})
 
 modelsRoutes.post("/refresh", async (c) => {
   try {

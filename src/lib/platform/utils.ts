@@ -19,8 +19,18 @@ export const sleep = (ms: number) =>
 export const isNullish = (value: unknown): value is null | undefined =>
   value === null || value === undefined
 
+let modelCacheGeneration = 0
+
 export async function cacheModels(): Promise<void> {
+  const generation = ++modelCacheGeneration
+  const copilotToken = state.copilotToken
   const models = await getModels()
+  if (
+    generation !== modelCacheGeneration
+    || copilotToken !== state.copilotToken
+  ) {
+    return
+  }
   setModels({
     ...models,
     data: models.data.filter(

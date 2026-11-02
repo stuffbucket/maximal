@@ -1643,6 +1643,60 @@ html[data-os="macos"] .topbar {
   gap: var(--space-4);
 }
 
+.models-auto {
+  padding-block-end: var(--space-5);
+  border-block-end: var(--border-width-hairline) solid var(--border-subtle);
+}
+
+.models-auto__head,
+.models-auto__control,
+.models-auto__label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.models-auto__intro,
+.models-auto__row-hint {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-lg);
+  color: var(--text-muted);
+}
+
+.models-auto__intro {
+  max-width: 65ch;
+}
+
+.models-auto__rows {
+  border-block-start: var(--border-width-hairline) solid var(--border-subtle);
+}
+
+.models-auto__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: var(--space-4);
+  padding-block: var(--space-3);
+}
+
+.models-auto__row + .models-auto__row {
+  border-block-start: var(--border-width-hairline) solid var(--border-subtle);
+}
+
+.models-auto__row-title {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+}
+
+.models-auto__control {
+  min-width: 0;
+}
+
+.models-auto__control .select {
+  width: 100%;
+}
+
 .models__toolbar {
   display: flex;
   align-items: center;

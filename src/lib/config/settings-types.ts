@@ -16,6 +16,10 @@
 
 import { z } from "zod"
 
+import { ClaudeAutoTierState } from "../models/claude-auto-model-types"
+
+export { ClaudeAutoTierState } from "../models/claude-auto-model-types"
+
 /** Tail-4 redacted token presence + (when known) source. We do NOT
  *  expose token values, validity windows we don't track, or any
  *  data that could narrow the secret. */
@@ -146,6 +150,36 @@ export const ModelSummary = z.object({
 })
 export type ModelSummary = z.infer<typeof ModelSummary>
 
+export const ClaudeAutoModelOption = ModelSummary.pick({
+  id: true,
+  name: true,
+  vendor: true,
+  preview: true,
+})
+export type ClaudeAutoModelOption = z.infer<typeof ClaudeAutoModelOption>
+
+export const ClaudeAutoModelsState = z.object({
+  applied: z.boolean(),
+  options: z.array(ClaudeAutoModelOption),
+  fast: ClaudeAutoTierState,
+  capable: ClaudeAutoTierState,
+})
+export type ClaudeAutoModelsState = z.infer<typeof ClaudeAutoModelsState>
+
+export const ClaudeAutoModelsUpdateRequest = z
+  .object({
+    fast: z.string().trim().min(1).nullable().optional(),
+    capable: z.string().trim().min(1).nullable().optional(),
+  })
+  .strict()
+  .refine(
+    (request) => request.fast !== undefined || request.capable !== undefined,
+    { message: "Expected fast or capable model selection" },
+  )
+export type ClaudeAutoModelsUpdateRequest = z.infer<
+  typeof ClaudeAutoModelsUpdateRequest
+>
+
 /** Response of GET/POST `/settings/api/models`. Carries the cached
  *  catalog plus its freshness so the UI can show staleness and offer a
  *  manual refresh. `loaded_at` is null before the first successful
@@ -155,6 +189,7 @@ export const ModelsListResponse = z.object({
   count: z.number().int(),
   /** ISO timestamp of when the cache was last populated, or null. */
   loaded_at: z.string().nullable(),
+  claude_code_auto: ClaudeAutoModelsState,
 })
 export type ModelsListResponse = z.infer<typeof ModelsListResponse>
 

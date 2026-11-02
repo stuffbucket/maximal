@@ -1,6 +1,9 @@
 import consola from "consola"
 
+import type { ClaudeAutoTier } from "~/lib/models/claude-auto-models"
+
 import { getConfig, writeConfig } from "~/lib/config/config"
+import { subscribeModelCatalogChanged } from "~/lib/runtime-state/state"
 
 import {
   applyProxyBaseUrl,
@@ -10,6 +13,37 @@ import {
 
 export function claudeCodeRoutingIntended(): boolean {
   return getConfig().apps?.claudeCode?.enabled === true
+}
+
+let unsubscribeCatalog: (() => void) | null = null
+let catalogSettingsPath: string | null = null
+
+function reconcileCatalogChange(): void {
+  reconcileClaudeCodeAutoModels(
+    catalogSettingsPath ?? getClaudeCodeSettingsPath(),
+  )
+}
+
+function ensureCatalogSubscription(filePath: string): void {
+  catalogSettingsPath = filePath
+  unsubscribeCatalog ??= subscribeModelCatalogChanged(reconcileCatalogChange)
+}
+
+function stopCatalogSubscription(): void {
+  unsubscribeCatalog?.()
+  unsubscribeCatalog = null
+}
+
+export function reconcileClaudeCodeAutoModels(
+  filePath: string = getClaudeCodeSettingsPath(),
+  options: { claimAutoModels?: ReadonlySet<ClaudeAutoTier> } = {},
+): void {
+  if (!claudeCodeRoutingIntended()) return
+  try {
+    applyProxyBaseUrl(filePath, undefined, options)
+  } catch (error) {
+    consola.warn("claude-code: failed to reconcile Auto models", error)
+  }
 }
 
 /**
@@ -54,6 +88,7 @@ export function reconcileClaudeCodeOnBoot(
   intended: boolean = claudeCodeRoutingIntended(),
   filePath: string = getClaudeCodeSettingsPath(),
 ): void {
+  ensureCatalogSubscription(filePath)
   if (!intended) return
   try {
     const result = applyProxyBaseUrl(filePath)
@@ -81,6 +116,7 @@ export function reconcileClaudeCodeOnShutdown(
   intended: boolean = claudeCodeRoutingIntended(),
   filePath: string = getClaudeCodeSettingsPath(),
 ): void {
+  stopCatalogSubscription()
   if (!intended) return
   try {
     const result = revertProxyBaseUrl(filePath)

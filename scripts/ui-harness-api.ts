@@ -15,6 +15,8 @@
  * the UI reacts like the real thing within a session. A fresh backend reseeds.
  */
 import type { AuthStatus } from "../src/lib/config/settings-types"
+
+import { ClaudeAutoModelsUpdateRequest } from "../src/lib/config/settings-types"
 import { type ResolvedScenario, type ScenarioId, resolveScenario } from "./ui-harness-fixtures"
 
 export interface MockBackend {
@@ -206,6 +208,41 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
         offer.configured = endpoint.enabled && endpoint.clients.includes(offer.id) && offer.available
       }
       return json({ endpoint, skipped: [] })
+    }
+
+    // --- Claude Code Auto model choices ---
+    if (
+      path === "/settings/api/models/claude-code-auto"
+      && method === "PATCH"
+    ) {
+      const selection = ClaudeAutoModelsUpdateRequest.safeParse(await body())
+      if (!selection.success) {
+        return json({ error: { message: "invalid Auto model selection" } }, 400)
+      }
+      for (const tier of ["fast", "capable"] as const) {
+        if (!(tier in selection.data)) continue
+        const configured = selection.data[tier]
+        if (typeof configured === "string") {
+          const option = state.models.claude_code_auto.options.find(
+            (candidate) => candidate.id === configured,
+          )
+          if (!option) {
+            return json({ error: { message: "model is not available" } }, 400)
+          }
+          state.models.claude_code_auto[tier] = {
+            configured,
+            effective: configured,
+            source: "maximal-override",
+            status: "ready",
+            reason: "override",
+          }
+        } else {
+          state.models.claude_code_auto[tier] = structuredClone(
+            fixture.models.claude_code_auto[tier],
+          )
+        }
+      }
+      return json(state.models)
     }
 
     // --- models refresh (just re-stamp loaded_at) ---

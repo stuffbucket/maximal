@@ -5,6 +5,7 @@ const MAX_SESSION_NODES = 6;
 
 type TokenRates = NonNullable<SessionView["rates"]>;
 type ModelRates = NonNullable<SessionView["model_rates"]>[number];
+type ModelTokenTotals = NonNullable<SessionView["model_token_totals"]>[number];
 
 export interface FlowPlanLabels {
   clients: Record<SessionView["client"], string>;
@@ -65,6 +66,12 @@ function modelRatesFor(session: SessionView): Array<ModelRates> {
   return [{ model: session.model, ...ratesFor(session) }];
 }
 
+function modelTokenTotalsFor(session: SessionView): Map<string, ModelTokenTotals> {
+  return new Map(
+    (session.model_token_totals ?? []).map((totals) => [totals.model, totals]),
+  );
+}
+
 function pickSessions(sessions: Array<SessionView>, selectedId: string | null): {
   shown: Array<SessionView>;
   hidden: Array<SessionView>;
@@ -81,17 +88,29 @@ function pickSessions(sessions: Array<SessionView>, selectedId: string | null): 
   return { shown, hidden: ranked.filter((session) => !visible.has(session.id)) };
 }
 
-function addEdges(edges: Array<FlowEdge>, sessionId: string, rates: ModelRates): void {
+function addEdges(
+  edges: Array<FlowEdge>,
+  sessionId: string,
+  rates: ModelRates,
+  totals?: ModelTokenTotals,
+): void {
   const modelId = `model:${rates.model}`;
   const kinds = [
-    ["input", sessionId, modelId, rates.input_per_min],
-    ["output", modelId, sessionId, rates.output_per_min],
-    ["cache-read", sessionId, modelId, rates.cache_read_per_min],
-    ["cache-write", sessionId, modelId, rates.cache_write_per_min],
+    ["input", sessionId, modelId, rates.input_per_min, totals?.input_tokens],
+    ["output", modelId, sessionId, rates.output_per_min, totals?.output_tokens],
+    ["cache-read", sessionId, modelId, rates.cache_read_per_min, totals?.cache_read_tokens],
+    ["cache-write", sessionId, modelId, rates.cache_write_per_min, totals?.cache_write_tokens],
   ] as const;
-  for (const [kind, from, to, rate] of kinds) {
-    if (rate <= 0) continue;
-    edges.push({ id: `${sessionId}:${rates.model}:${kind}`, from, to, kind, rate });
+  for (const [kind, from, to, rate, observedTokens] of kinds) {
+    if (rate <= 0 && (observedTokens ?? 0) <= 0) continue;
+    edges.push({
+      id: `${sessionId}:${rates.model}:${kind}`,
+      from,
+      to,
+      kind,
+      rate,
+      observedTokens,
+    });
   }
 }
 
@@ -111,11 +130,75 @@ const emptyRates = (): TokenRates => ({
   total_per_min: 0,
 });
 
+export interface FlowEmission {
+  edgeId: string;
+  count: number;
+}
+
+export interface ObservedFlowDeltas {
+  observations: Map<string, number>;
+  emissions: Array<FlowEmission>;
+  tokensPerParticle: number | null;
+}
+
+/**
+ * Compare cumulative edge counters from two polls. The first snapshot is only a
+ * baseline; later positive deltas become a bounded, proportionally allocated
+ * burst. Missing counters are an older sidecar and deliberately produce no
+ * animation. A decrease resets that edge's baseline without replaying history.
+ */
+export function observeFlowDeltas(
+  previous: ReadonlyMap<string, number> | null,
+  edges: Array<FlowEdge>,
+  maxParticles = 48,
+): ObservedFlowDeltas {
+  const observations = new Map<string, number>();
+  const deltas: Array<{ edgeId: string; tokens: number }> = [];
+  for (const edge of edges) {
+    if (edge.observedTokens === undefined) continue;
+    const observed = Math.max(0, Math.floor(edge.observedTokens));
+    observations.set(edge.id, observed);
+    if (previous === null) continue;
+    const before = previous.get(edge.id);
+    const delta = before === undefined ? observed : observed - before;
+    if (delta > 0) deltas.push({ edgeId: edge.id, tokens: delta });
+  }
+
+  const total = deltas.reduce((sum, delta) => sum + delta.tokens, 0);
+  const desired = Math.min(Math.max(0, maxParticles), total);
+  if (desired <= 0) {
+    return { observations, emissions: [], tokensPerParticle: null };
+  }
+
+  const allocations = deltas.map((delta) => {
+    const exact = (desired * delta.tokens) / total;
+    return {
+      edgeId: delta.edgeId,
+      count: Math.floor(exact),
+      remainder: exact - Math.floor(exact),
+    };
+  });
+  let unassigned = desired - allocations.reduce((sum, item) => sum + item.count, 0);
+  for (const allocation of [...allocations].sort((a, b) => b.remainder - a.remainder)) {
+    if (unassigned <= 0) break;
+    allocation.count++;
+    unassigned--;
+  }
+
+  return {
+    observations,
+    emissions: allocations
+      .filter((allocation) => allocation.count > 0)
+      .map(({ edgeId, count }) => ({ edgeId, count })),
+    tokensPerParticle: total / desired,
+  };
+}
+
 /**
  * Build the worker's producer/consumer graph from the server's exact 5-minute
- * per-session and per-model rates. Older sidecars have no split fields, so the
- * fallback is deliberately isolated here. Tool endpoints remain opt-in mock
- * data until WebFetch/WebSearch activity is persisted by the proxy.
+ * rates and cumulative per-role counters. Older sidecars have neither split
+ * field, so their topology stays visible but static. Tool endpoints remain
+ * opt-in mock data until WebFetch/WebSearch activity is persisted by the proxy.
  */
 export function liveFlowSnapshot(
   view: SessionsResponse,
@@ -165,7 +248,10 @@ export function liveFlowSnapshot(
   const edges: Array<FlowEdge> = [];
   for (const session of shown) {
     const sessionId = `session:${session.id}`;
-    for (const rates of modelRatesFor(session)) addEdges(edges, sessionId, rates);
+    const totalsByModel = modelTokenTotalsFor(session);
+    for (const rates of modelRatesFor(session)) {
+      addEdges(edges, sessionId, rates, totalsByModel.get(rates.model));
+    }
   }
 
   if (hidden.length > 0) {
@@ -180,14 +266,42 @@ export function liveFlowSnapshot(
       share: endpointRate > 0 ? hiddenRate / endpointRate : 0,
     });
     const hiddenModels = new Map<string, ModelRates>();
+    const hiddenTotals = new Map<string, ModelTokenTotals>();
+    const hasCompleteTotals = hidden.every(
+      (session) => session.model_token_totals !== undefined,
+    );
     for (const session of hidden) {
       for (const rates of modelRatesFor(session)) {
         const total = hiddenModels.get(rates.model) ?? { model: rates.model, ...emptyRates() };
         addRates(total, rates);
         hiddenModels.set(rates.model, total);
       }
+      if (!hasCompleteTotals) continue;
+      for (const observed of session.model_token_totals ?? []) {
+        const total = hiddenTotals.get(observed.model) ?? {
+          model: observed.model,
+          input_tokens: 0,
+          output_tokens: 0,
+          cache_read_tokens: 0,
+          cache_write_tokens: 0,
+          total_tokens: 0,
+        };
+        total.input_tokens += observed.input_tokens;
+        total.output_tokens += observed.output_tokens;
+        total.cache_read_tokens += observed.cache_read_tokens;
+        total.cache_write_tokens += observed.cache_write_tokens;
+        total.total_tokens += observed.total_tokens;
+        hiddenTotals.set(observed.model, total);
+      }
     }
-    for (const rates of hiddenModels.values()) addEdges(edges, otherId, rates);
+    for (const rates of hiddenModels.values()) {
+      addEdges(
+        edges,
+        otherId,
+        rates,
+        hasCompleteTotals ? hiddenTotals.get(rates.model) : undefined,
+      );
+    }
   }
 
   const tools: Array<FlowNode> = [];

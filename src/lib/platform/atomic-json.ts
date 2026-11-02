@@ -33,7 +33,9 @@ export interface AtomicWriteTextOptions {
   expectedContent?: string | null
 }
 
-export type AtomicWriteJsonOptions = Pick<AtomicWriteTextOptions, "label">
+export type AtomicWriteJsonOptions = AtomicWriteTextOptions
+
+export class AtomicWriteConflictError extends Error {}
 
 function isErrorCode(error: unknown, code: string): boolean {
   return error instanceof Error && "code" in error && error.code === code
@@ -122,7 +124,7 @@ export function atomicWriteText(
   const initialContent = readRegularDestination(filePath, label)
   const hasExpectedContent = Object.hasOwn(opts, "expectedContent")
   if (hasExpectedContent && initialContent !== opts.expectedContent) {
-    throw new Error(
+    throw new AtomicWriteConflictError(
       `refusing to write ${label}: file changed before it could be written`,
     )
   }

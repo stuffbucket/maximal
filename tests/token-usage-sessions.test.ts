@@ -327,6 +327,56 @@ describe("minutes and rate", () => {
       },
     ])
   })
+
+  test("cumulative counters preserve exact roles and models, including in-flight output", () => {
+    const view = only(
+      build(
+        [
+          row({
+            input_tokens: 10,
+            output_tokens: 20,
+            cache_read_input_tokens: 30,
+            cache_creation_input_tokens: 40,
+            total_tokens: 100,
+          }),
+          row({
+            model: "claude-haiku-4",
+            input_tokens: 5,
+            output_tokens: 7,
+            total_tokens: 12,
+          }),
+        ],
+        T + 30_000,
+        { inFlight: [inFlight({ streamedChars: 40 })] },
+      ),
+    )
+
+    expect(view.token_totals).toEqual({
+      input_tokens: 15,
+      output_tokens: 37,
+      cache_read_tokens: 30,
+      cache_write_tokens: 40,
+      total_tokens: 122,
+    })
+    expect(view.model_token_totals).toEqual([
+      {
+        model: CLAUDE,
+        input_tokens: 10,
+        output_tokens: 30,
+        cache_read_tokens: 30,
+        cache_write_tokens: 40,
+        total_tokens: 110,
+      },
+      {
+        model: "claude-haiku-4",
+        input_tokens: 5,
+        output_tokens: 7,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        total_tokens: 12,
+      },
+    ])
+  })
 })
 
 describe("flow_per_min", () => {
@@ -417,6 +467,31 @@ describe("a session still streaming its first reply", () => {
             cache_read_per_min: 0,
             cache_write_per_min: 0,
             total_per_min: 0.4,
+          },
+        ],
+        token_totals: {
+          input_tokens: 0,
+          output_tokens: 12,
+          cache_read_tokens: 0,
+          cache_write_tokens: 0,
+          total_tokens: 12,
+        },
+        model_token_totals: [
+          {
+            model: "gpt-5",
+            input_tokens: 0,
+            output_tokens: 10,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            total_tokens: 10,
+          },
+          {
+            model: CLAUDE,
+            input_tokens: 0,
+            output_tokens: 2,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            total_tokens: 2,
           },
         ],
         minutes: Array.from({ length: 15 }, (_, i) => ({
