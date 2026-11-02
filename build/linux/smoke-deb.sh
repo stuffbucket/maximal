@@ -81,8 +81,8 @@ set +e
 broker_out="$(maximal-mcp-broker 2>&1)"
 broker_exit=$?
 set -e
-[ "$broker_exit" -eq 1 ] || fail "broker exited $broker_exit, expected 1"
-[[ "$broker_out" == *BROKER_INTERNAL_ERROR* ]] || fail "broker printed no sanitized error"
+[ "$broker_exit" -eq 2 ] || fail "broker exited $broker_exit, expected 2"
+[[ "$broker_out" == *USAGE* ]] || fail "broker printed no usage error"
 
 # A manifest naming a newer version on this build's channel.
 mkdir -p "$work/site/updates"
