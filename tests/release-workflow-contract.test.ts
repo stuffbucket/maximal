@@ -190,6 +190,13 @@ describe("isolated MCP broker distribution", () => {
     expect(workflow).toContain("pnpm install --frozen-lockfile")
   })
 
+  test("release smoke check follows the broker usage contract", async () => {
+    const workflow = await readWorkflow("release.yml")
+
+    expect(workflow).toContain("$brokerExit -ne 2")
+    expect(workflow).toContain("-notmatch 'USAGE'")
+  })
+
   test("macOS signs both nested Bun executables", async () => {
     const config = await readRepoFile(".macos-builder/config")
     const producer = await readRepoFile(".macos-builder/build.sh")

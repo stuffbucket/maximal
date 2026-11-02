@@ -423,22 +423,22 @@ jobs:
           }
 
           # Load and execute the compiled broker without starting `serve` or
-          # reading an adapter descriptor. Its no-mode path exits with one
-          # stable sanitized error after the runtime has initialized.
+          # reading an adapter descriptor. Its no-mode path reports the stable
+          # usage error after the runtime has initialized.
           $ErrorActionPreference = 'Continue'
           $brokerOutput = & .\maximal-mcp-broker.exe 2>&1
           $brokerExit = $LASTEXITCODE
           $ErrorActionPreference = 'Stop'
-          if ($brokerExit -ne 1) {
-            Write-Error "Broker no-mode smoke check exited $brokerExit, expected 1"
+          if ($brokerExit -ne 2) {
+            Write-Error "Broker no-mode smoke check exited $brokerExit, expected 2"
             exit 1
           }
-          if (($brokerOutput | Out-String) -notmatch 'BROKER_INTERNAL_ERROR') {
-            Write-Error 'Broker no-mode smoke check did not emit its sanitized error'
+          if (($brokerOutput | Out-String) -notmatch 'USAGE') {
+            Write-Error 'Broker no-mode smoke check did not emit its usage error'
             exit 1
           }
           # The runner's pwsh wrapper exits with $LASTEXITCODE, which still
-          # holds the broker's expected 1.
+          # holds the broker's expected 2.
           exit 0
 
   # Standard Homebrew release mechanic for a private tap: render
