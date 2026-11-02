@@ -95,6 +95,7 @@ function statusText(
 function selectionValue(state: ClaudeAutoTierState): string {
   if (state.configured) return state.configured;
   if (state.source !== "claude-code-setting") return "";
+  if (state.status === "ready") return EXTERNAL_DEFAULT_VALUE;
   return state.effective ?? EXTERNAL_DEFAULT_VALUE;
 }
 
@@ -111,7 +112,13 @@ function TierControl({ tier, state, models, saving, onChange }: TierControlProps
   const showUnavailable =
     unavailableId !== null &&
     !options.some((option) => option.id === unavailableId);
-  const showExternalDefault = value === EXTERNAL_DEFAULT_VALUE;
+  const showExternalSetting = value === EXTERNAL_DEFAULT_VALUE;
+  const externalSettingLabel =
+    state.effective ?
+      t("models-auto-effective-external", {
+        modelName: effectiveName(state, models),
+      })
+    : t("models-auto-effective-external-default");
 
   return (
     <div className="models-auto__row">
@@ -133,10 +140,8 @@ function TierControl({ tier, state, models, saving, onChange }: TierControlProps
           }}
         >
           <option value="">{t("models-auto-automatic")}</option>
-          {showExternalDefault && (
-            <option value={EXTERNAL_DEFAULT_VALUE}>
-              {t("models-auto-effective-external-default")}
-            </option>
+          {showExternalSetting && (
+            <option value={EXTERNAL_DEFAULT_VALUE}>{externalSettingLabel}</option>
           )}
           {showUnavailable && (
             <option value={unavailableId ?? ""}>

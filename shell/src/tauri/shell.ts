@@ -19,9 +19,12 @@ export async function openUrl(url: string): Promise<void> {
   await invoke("plugin:opener|open_url", { url });
 }
 
-export async function safeInvoke(cmd: string): Promise<boolean> {
+export async function safeInvoke(
+  cmd: string,
+  args?: Record<string, unknown>,
+): Promise<boolean> {
   try {
-    await invoke(cmd);
+    await invoke(cmd, args);
     return true;
   } catch (err) {
     console.warn(`safeInvoke(${cmd}) failed:`, err);

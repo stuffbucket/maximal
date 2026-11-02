@@ -38,12 +38,18 @@ export function startLiveSessions(container: HTMLElement): () => void {
   const emptyHost = container.querySelector<HTMLElement>("#sessions-empty");
   const tableHost = container.querySelector<HTMLElement>("#sessions-table");
   if (!cardHost || !metricsHost || !cacheHitHost || !sessionsView || !sectionHost || !errorHost || !errorTitle || !errorMessage || !emptyHost || !tableHost) return () => {};
+  const sessionsSurface = sessionsView;
+  const sessionsError = errorHost;
+  const sessionsErrorTitle = errorTitle;
+  const sessionsErrorMessage = errorMessage;
+  const sessionsEmpty = emptyHost;
+  const sessionsTable = tableHost;
 
   const card = mountLiveCard(cardHost, metricsHost, cacheHitHost, (id) => {
     select(id);
-    if (id === null || sessionsView.hidden || tableHost.hidden) return;
+    if (id === null || sessionsSurface.hidden || sessionsTable.hidden) return;
     requestAnimationFrame(() => {
-      const row = [...tableHost.querySelectorAll<HTMLElement>(".session-row")]
+      const row = [...sessionsTable.querySelectorAll<HTMLElement>(".session-row")]
         .find((candidate) => candidate.dataset.sessionId === id);
       row?.scrollIntoView({ block: "nearest" });
     });
@@ -74,11 +80,11 @@ export function startLiveSessions(container: HTMLElement): () => void {
 
   function showError(message: string | null): void {
     sessionsErrorVisible = message !== null;
-    errorHost.hidden = !sessionsErrorVisible;
-    errorTitle.textContent = sessionsErrorVisible ? t("dashboard-error-generic") : "";
-    errorMessage.textContent = message ?? "";
+    sessionsError.hidden = !sessionsErrorVisible;
+    sessionsErrorTitle.textContent = sessionsErrorVisible ? t("dashboard-error-generic") : "";
+    sessionsErrorMessage.textContent = message ?? "";
     const hasSessions = (latest?.sessions.length ?? 0) > 0;
-    emptyHost.hidden = sessionsErrorVisible || hasSessions;
+    sessionsEmpty.hidden = sessionsErrorVisible || hasSessions;
     card.showError(message);
   }
 
@@ -89,8 +95,8 @@ export function startLiveSessions(container: HTMLElement): () => void {
     const now = Date.now();
     const view = liveSessions(latest, now);
     const hasSessions = view.sessions.length > 0;
-    emptyHost.hidden = sessionsErrorVisible || hasSessions;
-    tableHost.hidden = !hasSessions;
+    sessionsEmpty.hidden = sessionsErrorVisible || hasSessions;
+    sessionsTable.hidden = !hasSessions;
 
     const ids = new Set(view.sessions.map((s) => s.id));
     if (selected !== null && !ids.has(selected)) selected = null;
@@ -120,7 +126,7 @@ export function startLiveSessions(container: HTMLElement): () => void {
     card.update(liveSessions(latest, Date.now()), preview ?? selected);
   }
 
-  const table = mountSessionTable(tableHost, select, setPreview);
+  const table = mountSessionTable(sessionsTable, select, setPreview);
 
   async function poll(): Promise<void> {
     pollTimer = null;

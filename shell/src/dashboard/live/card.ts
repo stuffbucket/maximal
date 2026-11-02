@@ -309,9 +309,10 @@ export function mountLiveCard(
     }
   };
   const colorScheme = window.matchMedia("(prefers-color-scheme: dark)");
+  const onColorSchemeChange = (): void => sendSnapshot();
   document.addEventListener("visibilitychange", updateWorkerActivity);
   window.addEventListener("message", onSurfaceChange);
-  colorScheme.addEventListener("change", sendSnapshot);
+  colorScheme.addEventListener("change", onColorSchemeChange);
 
   return {
     destroy() {
@@ -319,7 +320,7 @@ export function mountLiveCard(
       canvas.removeEventListener("click", onCanvasClick);
       document.removeEventListener("visibilitychange", updateWorkerActivity);
       window.removeEventListener("message", onSurfaceChange);
-      colorScheme.removeEventListener("change", sendSnapshot);
+      colorScheme.removeEventListener("change", onColorSchemeChange);
       worker?.terminate();
       worker = null;
     },

@@ -239,6 +239,42 @@ test("lets Automatic reclaim an unavailable external classifier", async ({
   expect((await updateRequest).postDataJSON()).toEqual({ classifier: null })
 })
 
+test("reclaims an eligible external classifier without changing models first", async ({
+  page,
+}) => {
+  const initial = await currentModels(page)
+  await page.route(MODELS, async (route) => {
+    await route.fulfill({
+      json: {
+        ...initial,
+        claude_code_auto: {
+          ...initial.claude_code_auto,
+          classifier: {
+            configured: null,
+            effective: "gpt-5.6-luna",
+            source: "claude-code-setting",
+            status: "ready",
+            reason: "external-setting",
+          },
+        },
+      } satisfies ModelsListResponse,
+    })
+  })
+
+  await openModels(page)
+  const classifier = page.getByLabel("Auto permission checks")
+  await expect(classifier).toHaveValue("__claude-code-default__")
+  const updateRequest = page.waitForRequest((request) =>
+    request.url().endsWith("/settings/api/models/claude-code-auto"),
+  )
+
+  await classifier.selectOption("gpt-5.6-luna")
+
+  expect((await updateRequest).postDataJSON()).toEqual({
+    classifier: "gpt-5.6-luna",
+  })
+})
+
 test("shows the no-match state without choosing an arbitrary model", async ({
   page,
 }) => {
