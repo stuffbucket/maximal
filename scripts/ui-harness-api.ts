@@ -208,6 +208,42 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
       return json({ endpoint, skipped: [] })
     }
 
+    // --- Claude Code Auto model choices ---
+    if (
+      path === "/settings/api/models/claude-code-auto"
+      && method === "PATCH"
+    ) {
+      const selection = await body()
+      for (const tier of ["fast", "capable"] as const) {
+        const configured = selection[tier]
+        if (typeof configured === "string") {
+          const option = state.models.claude_code_auto.options.find(
+            (candidate) => candidate.id === configured,
+          )
+          state.models.claude_code_auto[tier] = {
+            configured,
+            effective: option ? configured : null,
+            source: "maximal-override",
+            status: option ? "ready" : "unavailable",
+            reason: option ? "override" : "override-unavailable",
+          }
+        } else if (configured === null) {
+          const current = state.models.claude_code_auto[tier]
+          state.models.claude_code_auto[tier] = {
+            configured: null,
+            effective: current.effective,
+            source: current.effective ? "automatic" : "none",
+            status: current.effective ? "ready" : "unresolved",
+            reason:
+              current.effective ?
+                tier === "fast" ? "small-gpt" : "gpt"
+              : "no-match",
+          }
+        }
+      }
+      return json(state.models)
+    }
+
     // --- models refresh (just re-stamp loaded_at) ---
     if (path === "/settings/api/models/refresh" && method === "POST") {
       state.models.loaded_at = new Date().toISOString()

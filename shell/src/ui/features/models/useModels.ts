@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { apiCall } from "../../../proxy/client";
 import { type Problem, describeProblem, withRetry } from "../../problems";
 import type {
+  ClaudeAutoModelsState,
   ModelsListResponse,
   ModelSummary,
 } from "../../../../../src/lib/config/settings-types";
@@ -18,13 +19,16 @@ import type {
  */
 interface UseModels {
   models: Array<ModelSummary>;
+  autoModels: ClaudeAutoModelsState | null;
   loadedAt: string | null;
   isLoading: boolean;
   isRefreshing: boolean;
+  isSavingAutoModels: boolean;
   /** Still failing after automatic retries. A failed refresh keeps the
    *  stale list visible underneath. */
   problem: Problem | null;
   refresh: () => Promise<void>;
+  setAutoModels: (fast: string | null, capable: string | null) => Promise<void>;
 }
 
 function applyResult(
@@ -32,17 +36,22 @@ function applyResult(
   set: {
     setModels: (m: Array<ModelSummary>) => void;
     setLoadedAt: (t: string | null) => void;
+    setAutoModels: (state: ClaudeAutoModelsState) => void;
   },
 ): void {
   set.setModels(result.models);
   set.setLoadedAt(result.loaded_at);
+  set.setAutoModels(result.claude_code_auto);
 }
 
 export function useModels(): UseModels {
   const [models, setModels] = useState<Array<ModelSummary>>([]);
+  const [autoModels, setAutoModelsState] =
+    useState<ClaudeAutoModelsState | null>(null);
   const [loadedAt, setLoadedAt] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isSavingAutoModels, setIsSavingAutoModels] = useState(false);
   const [problem, setProblem] = useState<Problem | null>(null);
 
   const load = useCallback(async () => {
@@ -54,7 +63,11 @@ export function useModels(): UseModels {
       }),
     );
     if (result.ok) {
-      applyResult(result.data, { setModels, setLoadedAt });
+      applyResult(result.data, {
+        setModels,
+        setLoadedAt,
+        setAutoModels: setAutoModelsState,
+      });
       setProblem(null);
     } else {
       setProblem(describeProblem(result, { subject: "the model list" }));
@@ -88,7 +101,11 @@ export function useModels(): UseModels {
       }),
     );
     if (result.ok) {
-      applyResult(result.data, { setModels, setLoadedAt });
+      applyResult(result.data, {
+        setModels,
+        setLoadedAt,
+        setAutoModels: setAutoModelsState,
+      });
       setProblem(null);
     } else {
       // Keep the stale list visible; surface why the refresh failed.
@@ -99,5 +116,43 @@ export function useModels(): UseModels {
     setIsRefreshing(false);
   }, []);
 
-  return { models, loadedAt, isLoading, isRefreshing, problem, refresh };
+  const setAutoModels = useCallback(
+    async (fast: string | null, capable: string | null) => {
+      setIsSavingAutoModels(true);
+      const result = await withRetry(() =>
+        apiCall({
+          kind: "models-auto-update",
+          method: "PATCH",
+          path: "/settings/api/models/claude-code-auto",
+          body: { fast, capable },
+        }),
+      );
+      if (result.ok) {
+        applyResult(result.data, {
+          setModels,
+          setLoadedAt,
+          setAutoModels: setAutoModelsState,
+        });
+        setProblem(null);
+      } else {
+        setProblem(
+          describeProblem(result, { subject: "Auto models", doing: "save" }),
+        );
+      }
+      setIsSavingAutoModels(false);
+    },
+    [],
+  );
+
+  return {
+    models,
+    autoModels,
+    loadedAt,
+    isLoading,
+    isRefreshing,
+    isSavingAutoModels,
+    problem,
+    refresh,
+    setAutoModels,
+  };
 }

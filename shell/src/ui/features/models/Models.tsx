@@ -3,6 +3,7 @@ import { ProblemCallout } from "../../components/ProblemCallout";
 import { EmptyState } from "../../components/EmptyState";
 import type { ModelSummary } from "../../../../../src/lib/config/settings-types";
 
+import { AutoModelControls } from "./AutoModelControls";
 import { useModels } from "./useModels";
 
 /** Human label for a `capabilities.type`. Falls back to a capitalized
@@ -114,8 +115,17 @@ function ModelGroup({
 }
 
 export function Models(): JSX.Element {
-  const { models, loadedAt, isLoading, isRefreshing, problem, refresh } =
-    useModels();
+  const {
+    models,
+    autoModels,
+    loadedAt,
+    isLoading,
+    isRefreshing,
+    isSavingAutoModels,
+    problem,
+    refresh,
+    setAutoModels,
+  } = useModels();
 
   // Preserve the server's type-then-name order while grouping.
   const groups: Array<[string, Array<ModelSummary>]> = [];
@@ -132,6 +142,14 @@ export function Models(): JSX.Element {
 
   return (
     <div className="models">
+      {autoModels && (
+        <AutoModelControls
+          state={autoModels}
+          saving={isSavingAutoModels}
+          onChange={setAutoModels}
+        />
+      )}
+
       <div className="models__toolbar">
         <span className="models__freshness">
           {loadedAt !== null && `Updated ${formatAge(loadedAt)}`}
