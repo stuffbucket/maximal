@@ -39,11 +39,13 @@ This is a local proxy that exposes the GitHub Copilot API as both an OpenAI-comp
 
 Root inference routes resolve the ordered, settings-driven `modelMappings` aliases after model-ID normalization and before live catalog lookup. See [`docs/dev/codex-integration.md`](dev/codex-integration.md) for exact/glob/regex semantics and the editable default alias.
 
+Claude Code's local Auto classifier chooses its fast or capable tier; Maximal does not classify prompts. For an enabled Claude Code integration, Maximal assigns concrete defaults to those tiers from the live catalog (`ANTHROPIC_DEFAULT_HAIKU_MODEL` / `ANTHROPIC_DEFAULT_SONNET_MODEL`). Automatic selection requires a picker-visible, non-variant, tool-calling, streaming model on a routable endpoint: fast prefers Haiku, then small GPT, then another GPT; capable prefers Sonnet, then full-size GPT, then small GPT. A still-eligible automatic choice stays put across catalog refreshes. Stable and explicitly zero-priced entries win later ties; Maximal never guesses latency or compares nonzero rates. Settings → Models can override either tier. A saved override that disappears stays visible but is not applied; when no automatic match exists, the tier key is left unset for Claude Code's own default rather than pointing at an arbitrary model.
+
 ## App integrations
 
 `src/apps/` owns filesystem detection, narrowly scoped configuration, durable intent, and boot/shutdown reconciliation for supported local clients. A new client implements `ClientApp` (`src/apps/index.ts`) and registers in `src/apps/registry.ts`; routes, the CLI and the shell stay app-agnostic. The Codex CLI and Desktop share one conservative user-level provider integration; its exact ownership and recovery contract is documented in [`docs/dev/codex-integration.md`](dev/codex-integration.md).
 
-Claude Code is routed by an ownership-guarded `ANTHROPIC_BASE_URL` plus `apiKeyHelper` in `~/.claude/settings.json` (`src/apps/claude-code/`), reverted on shutdown and on the process `exit` event (`src/lib/start/shutdown.ts`). Don't reintroduce a PATH shim for `claude`.
+Claude Code is routed by an ownership-guarded `ANTHROPIC_BASE_URL` plus `apiKeyHelper` in `~/.claude/settings.json` (`src/apps/claude-code/`), reverted on shutdown and on the process `exit` event (`src/lib/start/shutdown.ts`). Its Auto-tier defaults use the same snapshot-and-marker ownership: pre-existing values and direct user edits (including deleting a tier key) win until the person deliberately selects that tier in Maximal Settings; that selection snapshots the latest external state and takes ownership. Maximal-owned values follow successful catalog refreshes, and disable/shutdown restores the latest external values exactly. Don't reintroduce a PATH shim for `claude`.
 
 ## Config and state
 
