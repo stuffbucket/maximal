@@ -386,6 +386,12 @@ type Endpoint =
       path: "/settings/api/models/refresh"
     }
   | {
+      kind: "models-auto-update"
+      method: "PATCH"
+      path: "/settings/api/models/claude-code-auto"
+      body: { fast: string | null; capable: string | null }
+    }
+  | {
       kind: "claude-code-toggle"
       method: "POST"
       path: "/settings/api/apps/claude-code/toggle"
@@ -489,6 +495,7 @@ interface ResponseFor {
   "requests-answer": { ok: true }
   "models-list": ModelsListResponse
   "models-refresh": ModelsListResponse
+  "models-auto-update": ModelsListResponse
 }
 
 interface ApiOptions {

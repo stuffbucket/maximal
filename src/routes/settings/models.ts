@@ -22,12 +22,17 @@ import { Hono } from "hono"
 
 import type { Model } from "~/services/copilot/get-models"
 
+import { getClaudeAutoModelsState } from "~/apps/claude-code/config"
+import { reconcileClaudeCodeAutoModels } from "~/apps/claude-code/reconcile"
+import { getConfig, writeConfig } from "~/lib/config/config"
 import {
+  ClaudeAutoModelsUpdateRequest,
   ModelsListResponse,
   type ModelsListResponse as ModelsListResponseT,
   type ModelSummary as ModelSummaryT,
 } from "~/lib/config/settings-types"
-import { forwardError } from "~/lib/errors/error"
+import { forwardError, HTTPError } from "~/lib/errors/error"
+import { isClaudeAutoModelEligible } from "~/lib/models/claude-auto-models"
 import { cacheModels } from "~/lib/platform/utils"
 import { getModelsLoadedAtMs, state } from "~/lib/runtime-state/state"
 
@@ -82,6 +87,7 @@ function buildModelsList(): ModelsListResponseT {
     models,
     count: models.length,
     loaded_at: loadedAtMs === null ? null : new Date(loadedAtMs).toISOString(),
+    claude_code_auto: getClaudeAutoModelsState(),
   }
 }
 
@@ -96,9 +102,61 @@ function jsonModels(c: Context) {
   )
 }
 
+function httpError(message: string, status: number): HTTPError {
+  return new HTTPError(message, new Response(message, { status }))
+}
+
+function validateSelection(id: string | null): void {
+  if (id === null) return
+  const selected = state.models?.data.find((model) => model.id === id)
+  if (!selected || !isClaudeAutoModelEligible(selected)) {
+    throw httpError(`Model ${id} is not available for Claude Code Auto`, 400)
+  }
+}
+
+function persistSelections(input: {
+  fast: string | null
+  capable: string | null
+}) {
+  const config = getConfig()
+  const {
+    fastModel: _oldFast,
+    capableModel: _oldCapable,
+    ...claudeCode
+  } = config.apps?.claudeCode ?? {}
+  writeConfig({
+    ...config,
+    apps: {
+      ...config.apps,
+      claudeCode: {
+        ...claudeCode,
+        ...(input.fast ? { fastModel: input.fast } : {}),
+        ...(input.capable ? { capableModel: input.capable } : {}),
+      },
+    },
+  })
+}
+
 export const modelsRoutes = new Hono()
 
 modelsRoutes.get("/", (c) => jsonModels(c))
+
+modelsRoutes.patch("/claude-code-auto", async (c) => {
+  try {
+    const body: unknown = await c.req.json().catch(() => null)
+    const parsed = ClaudeAutoModelsUpdateRequest.safeParse(body)
+    if (!parsed.success) {
+      throw httpError("Expected fast and capable model ids or null", 400)
+    }
+    validateSelection(parsed.data.fast)
+    validateSelection(parsed.data.capable)
+    persistSelections(parsed.data)
+    reconcileClaudeCodeAutoModels()
+    return jsonModels(c)
+  } catch (error) {
+    return forwardError(c, error)
+  }
+})
 
 modelsRoutes.post("/refresh", async (c) => {
   try {

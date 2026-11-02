@@ -209,6 +209,7 @@ export const ModelsListResponse = z.object({
   count: z.number().int(),
   /** ISO timestamp of when the cache was last populated, or null. */
   loaded_at: z.string().nullable(),
+  claude_code_auto: ClaudeAutoModelsState,
 })
 export type ModelsListResponse = z.infer<typeof ModelsListResponse>
 
