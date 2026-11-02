@@ -41,10 +41,11 @@ has no animated border, pulse, or separate “Live” ornament—the data itself
 the motion.
 
 The worker caps rendering at 30 frames per second and pauses while the page is
-hidden. Particles travel at constant speed, dwell only briefly at a rendezvous
-point, then take the reciprocal edge back; input/cache traffic and output thus
-read as an exchange rather than a pile. Poll snapshots update rates without
-restarting particles already in flight.
+hidden. Its first poll establishes cumulative token baselines. Later polls emit
+a bounded burst only for newly observed tokens, split proportionally by model,
+session and token role. Each particle travels its directional edge once, dwells
+briefly at the destination, then disappears. An unchanged poll emits nothing,
+so an idle graph is literally still; existing nodes remain visible.
 
 Under `prefers-reduced-motion: reduce` the worker draws the current distribution
 once and does not schedule animation frames. Don't replace that static state

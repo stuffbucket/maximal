@@ -2,6 +2,7 @@ import type { SimulationNodeDatum } from "d3-force";
 
 import { forceCollide, forceSimulation, forceX, forceY } from "d3-force";
 
+import { observeFlowDeltas } from "./flow-plan";
 import type {
   FlowEdge,
   FlowKind,
@@ -41,9 +42,10 @@ interface Particle {
 
 const FRAME_MS = 1000 / 30;
 const MAX_PARTICLES = 140;
+const MAX_BURST_PARTICLES = 48;
+const BURST_SPREAD_MS = 700;
 const TAU = Math.PI * 2;
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
-const compactFormatters = new Map<string, Intl.NumberFormat>();
 const percentFormatters = new Map<string, Intl.NumberFormat>();
 
 let canvas: WorkerCanvas | null = null;
@@ -54,7 +56,7 @@ let scale = 1;
 let snapshot: FlowSnapshot | null = null;
 let positioned = new Map<string, PositionedNode>();
 let particles: Array<Particle> = [];
-let activeEdges: Array<FlowEdge> = [];
+let observations: Map<string, number> | null = null;
 let activeEdgeMap = new Map<string, FlowEdge>();
 let layoutSignature = "";
 let active = false;
@@ -132,23 +134,6 @@ function positionNodes(nodes: Array<FlowNode>): Map<string, PositionedNode> {
   return result;
 }
 
-function desiredParticleCount(totalRate: number): number {
-  if (totalRate <= 0) return 0;
-  return clamp(Math.round(26 + Math.log10(totalRate + 1) * 21), 32, MAX_PARTICLES);
-}
-
-function compactNumber(value: number, locale: string): string {
-  let formatter = compactFormatters.get(locale);
-  if (!formatter) {
-    formatter = new Intl.NumberFormat(locale, {
-      notation: "compact",
-      maximumFractionDigits: 1,
-    });
-    compactFormatters.set(locale, formatter);
-  }
-  return formatter.format(value);
-}
-
 function percentText(value: number, locale: string): string {
   let formatter = percentFormatters.get(locale);
   if (!formatter) {
@@ -161,33 +146,13 @@ function percentText(value: number, locale: string): string {
   return formatter.format(value);
 }
 
-function particleScaleText(totalRate: number, palette: FlowPalette): string {
-  const count = Math.max(1, desiredParticleCount(totalRate));
-  const tokensPerSecond = totalRate / 60 / count;
-  return palette.particleScaleTemplate.replace(
-    "__RATE__",
-    compactNumber(tokensPerSecond, palette.locale),
-  );
-}
-
-function weightedEdge(edges: Array<FlowEdge>): FlowEdge | undefined {
-  const total = edges.reduce((sum, edge) => sum + Math.max(0, edge.rate), 0);
-  if (total <= 0) return undefined;
-  let cursor = random() * total;
-  for (const edge of edges) {
-    cursor -= Math.max(0, edge.rate);
-    if (cursor <= 0) return edge;
-  }
-  return edges.at(-1);
-}
-
-function newParticle(edge: FlowEdge, initial = false): Particle {
+function newParticle(edge: FlowEdge): Particle {
   const travelMs = 1_000 + random() * 900;
   const restMs = 220 + random() * 300;
   return {
     edgeId: edge.id,
     kind: edge.kind,
-    age: initial ? random() * (travelMs + restMs) : 0,
+    age: -random() * BURST_SPREAD_MS,
     travelMs,
     restMs,
     arc: (random() - 0.5) * 0.32,
@@ -195,83 +160,10 @@ function newParticle(edge: FlowEdge, initial = false): Particle {
   };
 }
 
-function rebalanceParticles(edges: Array<FlowEdge>, desired: number): void {
-  const totalRate = edges.reduce((sum, edge) => sum + edge.rate, 0);
-  if (totalRate <= 0) return;
-  const allocations = edges.map((edge) => {
-    const exact = (desired * edge.rate) / totalRate;
-    return { edge, count: Math.floor(exact), remainder: exact - Math.floor(exact) };
-  });
-  let unassigned = desired - allocations.reduce((sum, allocation) => sum + allocation.count, 0);
-  for (const allocation of [...allocations].sort((a, b) => b.remainder - a.remainder)) {
-    if (unassigned <= 0) break;
-    allocation.count++;
-    unassigned--;
-  }
-
-  const byEdge = new Map<string, Array<Particle>>();
-  for (const particle of particles) {
-    const group = byEdge.get(particle.edgeId);
-    if (group) group.push(particle);
-    else byEdge.set(particle.edgeId, [particle]);
-  }
-  const available: Array<Particle> = [];
-  for (const allocation of allocations) {
-    const group = byEdge.get(allocation.edge.id) ?? [];
-    if (group.length > allocation.count) available.push(...group.splice(allocation.count));
-  }
-  for (const allocation of allocations) {
-    const group = byEdge.get(allocation.edge.id) ?? [];
-    let missing = allocation.count - group.length;
-    while (missing > 0) {
-      const particle = available.pop();
-      if (!particle) break;
-      Object.assign(particle, newParticle(allocation.edge));
-      missing--;
-    }
-  }
-}
-
-function reconcileParticles(initial = false, rebalance = false): void {
-  if (!snapshot) {
-    particles = [];
-    return;
-  }
-  const edges = snapshot.edges.filter(
-    (edge) => edge.rate > 0 && positioned.has(edge.from) && positioned.has(edge.to),
-  );
-  activeEdges = edges;
-  activeEdgeMap = new Map(edges.map((edge) => [edge.id, edge]));
-  const desired = desiredParticleCount(snapshot.totalRate);
-  particles = particles.filter((particle) => edges.some((edge) => edge.id === particle.edgeId));
-  if (particles.length > desired) particles.length = desired;
-  while (particles.length < desired) {
-    const edge = weightedEdge(edges);
-    if (!edge) break;
-    particles.push(newParticle(edge, initial));
-  }
-  if (rebalance) rebalanceParticles(edges, desired);
-}
-
-function nextEdge(current: FlowEdge, edges: Array<FlowEdge>): FlowEdge | undefined {
-  const reverse = edges.filter((edge) => edge.from === current.to && edge.to === current.from);
-  const reverseRate = reverse.reduce((sum, edge) => sum + edge.rate, 0);
-  const reverseChance = reverseRate / Math.max(1, current.rate + reverseRate);
-  if (reverse.length > 0 && random() < Math.min(0.5, reverseChance)) return weightedEdge(reverse);
-  const outgoing = edges.filter((edge) => edge.from === current.to);
-  return weightedEdge(outgoing.length > 0 ? outgoing : edges);
-}
-
-function reverseParticle(particle: Particle, edge: FlowEdge): void {
-  const replacement = newParticle(edge);
-  replacement.arc = -particle.arc;
-  Object.assign(particle, replacement);
-}
-
 function particlePosition(particle: Particle, edge: FlowEdge): { point: Point; alpha: number } | null {
   const from = positioned.get(edge.from);
   const to = positioned.get(edge.to);
-  if (!from || !to) return null;
+  if (!from || !to || particle.age < 0) return null;
   if (particle.age < particle.travelMs) {
     const raw = clamp(particle.age / particle.travelMs, 0, 1);
     const progress = raw;
@@ -468,24 +360,6 @@ function layoutLabels(ctx: CanvasRenderingContext2D): void {
     height: 24,
     radius: 16,
   }));
-  ctx.font = `${palette.detailFontSize}px ${palette.fontFamily}`;
-  const scaleWidth = ctx.measureText(particleScaleText(snapshot.totalRate, palette)).width + 8;
-  const scaleHeight = palette.detailFontSize + 6;
-  const scaleX = width - margin - scaleWidth / 2;
-  const scaleY = height - margin - scaleHeight / 2;
-  obstacles.push({
-    kind: "obstacle",
-    targetX: scaleX,
-    targetY: scaleY,
-    x: scaleX,
-    y: scaleY,
-    fx: scaleX,
-    fy: scaleY,
-    width: scaleWidth,
-    height: scaleHeight,
-    radius: Math.hypot(scaleWidth, scaleHeight) / 2 + 4,
-  });
-
   const simulationNodes = [...labels, ...obstacles];
   const simulation = forceSimulation(simulationNodes)
     .force("x", forceX<LabelSimulationNode>((node) => node.targetX).strength(0.75))
@@ -571,23 +445,6 @@ function drawNode(ctx: CanvasRenderingContext2D, node: PositionedNode, palette: 
   );
 }
 
-function drawParticleScale(ctx: CanvasRenderingContext2D, palette: FlowPalette): void {
-  if (!snapshot || snapshot.totalRate <= 0) return;
-  ctx.globalAlpha = 1;
-  ctx.textAlign = "right";
-  ctx.textBaseline = "bottom";
-  ctx.font = `${palette.detailFontSize}px ${palette.fontFamily}`;
-  drawLabelText(
-    ctx,
-    particleScaleText(snapshot.totalRate, palette),
-    width - 10,
-    height - 10,
-    width / 2,
-    palette.muted,
-    palette.surface,
-  );
-}
-
 function draw(): void {
   const ctx = context;
   if (!ctx || !snapshot || width <= 0 || height <= 0) return;
@@ -600,7 +457,6 @@ function draw(): void {
     if (edge) drawParticle(ctx, particle, edge);
   }
   for (const node of positioned.values()) drawNode(ctx, node, snapshot.palette);
-  drawParticleScale(ctx, snapshot.palette);
   ctx.globalAlpha = 1;
 }
 
@@ -609,28 +465,39 @@ function tick(now: number): void {
   const delta = lastFrame === 0 ? FRAME_MS : clamp(now - lastFrame, 0, 100);
   lastFrame = now;
   if (snapshot && !snapshot.reducedMotion && active) {
-    for (const particle of particles) {
-      particle.age += delta;
-      if (particle.age < particle.travelMs + particle.restMs) continue;
-      const current = activeEdgeMap.get(particle.edgeId);
-      const next = current ? nextEdge(current, activeEdges) : weightedEdge(activeEdges);
-      if (next) reverseParticle(particle, next);
-    }
+    for (const particle of particles) particle.age += delta;
+    particles = particles.filter(
+      (particle) => particle.age < particle.travelMs + particle.restMs,
+    );
     draw();
-    if (snapshot.edges.length > 0) timer = setTimeout(() => tick(performance.now()), FRAME_MS);
+    if (particles.length > 0) {
+      timer = setTimeout(() => tick(performance.now()), FRAME_MS);
+    }
   } else {
     draw();
   }
 }
 
 function schedule(): void {
-  if (timer !== null || !active || snapshot?.reducedMotion) return;
+  if (
+    timer !== null
+    || !active
+    || snapshot?.reducedMotion
+    || particles.length === 0
+  ) {
+    return;
+  }
   lastFrame = performance.now();
   timer = setTimeout(() => tick(performance.now()), FRAME_MS);
 }
 
 function applySnapshot(next: FlowSnapshot): void {
-  const first = snapshot === null;
+  const observed = observeFlowDeltas(
+    observations,
+    next.edges,
+    MAX_BURST_PARTICLES,
+  );
+  observations = observed.observations;
   const nextLayoutSignature = JSON.stringify({
     locale: next.palette.locale,
     font: [
@@ -647,15 +514,29 @@ function applySnapshot(next: FlowSnapshot): void {
       node.share,
     ]),
   });
+  const first = snapshot === null;
   snapshot = next;
   if (first || nextLayoutSignature !== layoutSignature) {
     positioned = positionNodes(next.nodes);
     labelsDirty = true;
     layoutSignature = nextLayoutSignature;
   }
-  reconcileParticles(first, !first);
+
+  const edges = next.edges.filter(
+    (edge) => positioned.has(edge.from) && positioned.has(edge.to),
+  );
+  activeEdgeMap = new Map(edges.map((edge) => [edge.id, edge]));
+  particles = particles.filter((particle) => activeEdgeMap.has(particle.edgeId));
   if (next.reducedMotion) {
-    for (const particle of particles) particle.age = particle.travelMs + particle.restMs * 0.28;
+    particles = [];
+  } else {
+    for (const emission of observed.emissions) {
+      const edge = activeEdgeMap.get(emission.edgeId);
+      if (!edge) continue;
+      const available = MAX_PARTICLES - particles.length;
+      const count = Math.min(available, emission.count);
+      for (let i = 0; i < count; i++) particles.push(newParticle(edge));
+    }
   }
   draw();
   schedule();

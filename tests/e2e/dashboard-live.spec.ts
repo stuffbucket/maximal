@@ -526,6 +526,69 @@ test("hundred-billion token rates stay compact and retain exact tooltips", async
   await expect(page.locator(".usage-feature__value")).toHaveText("29%")
 })
 
+test("unchanged session snapshots leave the live flow still", async ({
+  page,
+}) => {
+  await open(page)
+  const canvas = page.locator(".live__flow-canvas")
+  const first = await canvas.screenshot()
+  await page.waitForTimeout(300)
+  const second = await canvas.screenshot()
+
+  expect(second.equals(first)).toBe(true)
+})
+
+test("new token counters produce one finite particle burst", async ({
+  page,
+}) => {
+  let reads = 0
+  await routeSessions(page, (view) => {
+    reads += 1
+    return {
+      ...view,
+      sessions: view.sessions.map((session, index) => {
+        if (index !== 0) return session
+        const output = 800 + (reads >= 2 ? 12 : 0)
+        return {
+          ...session,
+          token_totals: {
+            input_tokens: 1_000,
+            output_tokens: output,
+            cache_read_tokens: 500,
+            cache_write_tokens: 200,
+            total_tokens: 1_700 + output,
+          },
+          model_token_totals: [
+            {
+              model: session.model,
+              input_tokens: 1_000,
+              output_tokens: output,
+              cache_read_tokens: 500,
+              cache_write_tokens: 200,
+              total_tokens: 1_700 + output,
+            },
+          ],
+        }
+      }),
+    }
+  })
+  await open(page)
+  await expect.poll(() => reads).toBeGreaterThanOrEqual(2)
+
+  const canvas = page.locator(".live__flow-canvas")
+  const frames = [await canvas.screenshot()]
+  for (let i = 0; i < 6; i++) {
+    await page.waitForTimeout(150)
+    frames.push(await canvas.screenshot())
+  }
+  expect(frames.slice(1).some((frame) => !frame.equals(frames[0]))).toBe(true)
+
+  await page.waitForTimeout(4_000)
+  const settled = await canvas.screenshot()
+  await page.waitForTimeout(300)
+  expect((await canvas.screenshot()).equals(settled)).toBe(true)
+})
+
 test("the live flow is rendered by a worker with an accessible text summary", async ({
   page,
 }) => {

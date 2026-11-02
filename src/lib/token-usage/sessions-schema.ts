@@ -35,6 +35,16 @@ const TokenRates = z.object({
 
 const ModelRates = TokenRates.extend({ model: z.string() })
 
+const TokenTotals = z.object({
+  input_tokens: z.number(),
+  output_tokens: z.number(),
+  cache_read_tokens: z.number(),
+  cache_write_tokens: z.number(),
+  total_tokens: z.number(),
+})
+
+const ModelTokenTotals = TokenTotals.extend({ model: z.string() })
+
 const Session = z.object({
   /** session_id, or "other:<client>" for requests with no session. */
   id: z.string(),
@@ -54,6 +64,11 @@ const Session = z.object({
   rates: TokenRates.optional(),
   /** Per-model pieces of `rates`; a session can contain subagent models. */
   model_rates: z.array(ModelRates).optional(),
+  /** Cumulative observed tokens split by role, including output estimated for
+   *  requests still in flight. Optional for compatibility with older sidecars. */
+  token_totals: TokenTotals.optional(),
+  /** Per-model pieces of `token_totals`. */
+  model_token_totals: z.array(ModelTokenTotals).optional(),
   /** The last 15 minutes, the same buckets as the summary's recent_minutes. */
   minutes: z.array(MinuteBucket),
   /** Last 24 h. */

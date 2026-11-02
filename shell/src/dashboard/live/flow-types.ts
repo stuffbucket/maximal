@@ -16,6 +16,8 @@ export interface FlowEdge {
   to: string;
   kind: FlowKind;
   rate: number;
+  /** Cumulative observed tokens on this edge. Absent for older sidecars. */
+  observedTokens?: number;
 }
 
 export interface FlowPalette {
