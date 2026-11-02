@@ -1,6 +1,6 @@
 {
   "schema": 2,
-  "generated": "2026-11-02T12:42:07.293Z",
+  "generated": "2026-11-02T23:18:39.995Z",
   "channels": {
     "stable": {
       "version": "0.4.48",
@@ -30,45 +30,45 @@
       }
     },
     "rc": {
-      "version": "0.5.0-rc.10",
-      "tag": "v0.5.0-rc.10",
-      "notes": "https://github.com/stuffbucket/maximal/releases/tag/v0.5.0-rc.10",
+      "version": "0.5.0-rc.11",
+      "tag": "v0.5.0-rc.11",
+      "notes": "https://github.com/stuffbucket/maximal/releases/tag/v0.5.0-rc.11",
       "downloads": {
         "macos-arm64-dmg": {
-          "name": "maximal-v0.5.0-rc.10-darwin-arm64.dmg",
-          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.10/maximal-v0.5.0-rc.10-darwin-arm64.dmg"
+          "name": "maximal-v0.5.0-rc.11-darwin-arm64.dmg",
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.11/maximal-v0.5.0-rc.11-darwin-arm64.dmg"
         },
         "windows-x64-setup": {
-          "name": "maximal-v0.5.0-rc.10-windows-x64-setup.exe",
-          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.10/maximal-v0.5.0-rc.10-windows-x64-setup.exe"
+          "name": "maximal-v0.5.0-rc.11-windows-x64-setup.exe",
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.11/maximal-v0.5.0-rc.11-windows-x64-setup.exe"
         },
         "windows-x64-msi": {
-          "name": "maximal-v0.5.0-rc.10-windows-x64.msi",
-          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.10/maximal-v0.5.0-rc.10-windows-x64.msi"
+          "name": "maximal-v0.5.0-rc.11-windows-x64.msi",
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.11/maximal-v0.5.0-rc.11-windows-x64.msi"
         },
         "windows-x64-zip": {
-          "name": "maximal-v0.5.0-rc.10-windows-x64.zip",
-          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.10/maximal-v0.5.0-rc.10-windows-x64.zip"
+          "name": "maximal-v0.5.0-rc.11-windows-x64.zip",
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.11/maximal-v0.5.0-rc.11-windows-x64.zip"
         },
         "windows-install-ps1": {
           "name": "install.ps1",
-          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.10/install.ps1"
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.11/install.ps1"
         },
         "linux-amd64-deb": {
-          "name": "maximal_0.5.0-rc.10_amd64.deb",
-          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.10/maximal_0.5.0-rc.10_amd64.deb"
+          "name": "maximal_0.5.0-rc.11_amd64.deb",
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.11/maximal_0.5.0-rc.11_amd64.deb"
         },
         "linux-amd64-desktop-deb": {
-          "name": "maximal-desktop_0.5.0-rc.10_amd64.deb",
-          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.10/maximal-desktop_0.5.0-rc.10_amd64.deb"
+          "name": "maximal-desktop_0.5.0-rc.11_amd64.deb",
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.11/maximal-desktop_0.5.0-rc.11_amd64.deb"
         },
         "linux-arm64-deb": {
-          "name": "maximal_0.5.0-rc.10_arm64.deb",
-          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.10/maximal_0.5.0-rc.10_arm64.deb"
+          "name": "maximal_0.5.0-rc.11_arm64.deb",
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.11/maximal_0.5.0-rc.11_arm64.deb"
         },
         "linux-arm64-desktop-deb": {
-          "name": "maximal-desktop_0.5.0-rc.10_arm64.deb",
-          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.10/maximal-desktop_0.5.0-rc.10_arm64.deb"
+          "name": "maximal-desktop_0.5.0-rc.11_arm64.deb",
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.0-rc.11/maximal-desktop_0.5.0-rc.11_arm64.deb"
         }
       }
     }
