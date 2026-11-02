@@ -1,41 +1,23 @@
+import type {
+  ClaudeAutoAutomaticReason,
+  ClaudeAutoTierState,
+} from "~/lib/models/claude-auto-model-types"
 import type { Model } from "~/services/copilot/get-models"
 
 import { pricedModelIsPaid } from "~/services/copilot/get-models"
 
 import { isVariantId } from "./anthropic-id-rewrite"
+import {
+  isClaudeTierClass,
+  isGptClass,
+  isSmallGptClass,
+} from "./model-identity"
 
 export type ClaudeAutoTier = "fast" | "capable"
 
-export type ClaudeAutoModelSource =
-  | "maximal-override"
-  | "claude-code-setting"
-  | "automatic"
-  | "none"
-
-export type ClaudeAutoModelStatus = "ready" | "unavailable" | "unresolved"
-
-export type ClaudeAutoModelReason =
-  | "override"
-  | "external-setting"
-  | "haiku"
-  | "sonnet"
-  | "small-gpt"
-  | "gpt"
-  | "override-unavailable"
-  | "external-unavailable"
-  | "no-match"
-
-export interface ClaudeAutoTierResolution {
-  configured: string | null
-  effective: string | null
-  source: ClaudeAutoModelSource
-  status: ClaudeAutoModelStatus
-  reason: ClaudeAutoModelReason
-}
-
-export interface ClaudeAutoModelResolution {
-  fast: ClaudeAutoTierResolution
-  capable: ClaudeAutoTierResolution
+interface ClaudeAutoModelResolution {
+  fast: ClaudeAutoTierState
+  capable: ClaudeAutoTierState
   eligibleModels: Array<Model>
 }
 
@@ -56,27 +38,6 @@ const ROUTABLE_ENDPOINTS = new Set([
   "/responses",
   "/chat/completions",
 ])
-
-function modelParts(model: Model): {
-  id: string
-  family: string
-  vendor: string
-} {
-  const sparse = model as {
-    id?: unknown
-    vendor?: unknown
-    capabilities?: { family?: unknown }
-  }
-  return {
-    id: typeof sparse.id === "string" ? sparse.id.toLowerCase() : "",
-    family:
-      typeof sparse.capabilities?.family === "string" ?
-        sparse.capabilities.family.toLowerCase()
-      : "",
-    vendor:
-      typeof sparse.vendor === "string" ? sparse.vendor.toLowerCase() : "",
-  }
-}
 
 export function isClaudeAutoModelEligible(model: Model): boolean {
   const sparse = model as {
@@ -101,30 +62,6 @@ export function isClaudeAutoModelEligible(model: Model): boolean {
   )
 }
 
-function isClaudeClass(model: Model, tier: "haiku" | "sonnet"): boolean {
-  const { id, family, vendor } = modelParts(model)
-  const isClaude =
-    family.includes("claude")
-    || id.startsWith("claude")
-    || vendor.includes("anthropic")
-  return isClaude && (family.includes(tier) || id.includes(tier))
-}
-
-function isGptClass(model: Model): boolean {
-  const { id, family, vendor } = modelParts(model)
-  return (
-    id.startsWith("gpt") || family.includes("gpt") || vendor.includes("openai")
-  )
-}
-
-function isSmallGpt(model: Model): boolean {
-  if (!isGptClass(model)) return false
-  const { id, family } = modelParts(model)
-  return /(?:^|[-_.\s])(?:mini|nano|small)(?:$|[-_.\s])/u.test(
-    `${id} ${family}`,
-  )
-}
-
 function isExplicitlyFree(model: Model): boolean {
   return pricedModelIsPaid(model.billing?.token_prices) === false
 }
@@ -146,19 +83,19 @@ function automaticResolution(
   tier: ClaudeAutoTier,
   eligible: Array<Model>,
   previousId: string | undefined,
-): ClaudeAutoTierResolution {
+): ClaudeAutoTierState {
   const buckets: Array<{
     models: Array<Model>
-    reason: ClaudeAutoModelReason
+    reason: ClaudeAutoAutomaticReason
   }> =
     tier === "fast" ?
       [
         {
-          models: eligible.filter((model) => isClaudeClass(model, "haiku")),
+          models: eligible.filter((model) => isClaudeTierClass(model, "haiku")),
           reason: "haiku",
         },
         {
-          models: eligible.filter((model) => isSmallGpt(model)),
+          models: eligible.filter((model) => isSmallGptClass(model)),
           reason: "small-gpt",
         },
         {
@@ -168,17 +105,19 @@ function automaticResolution(
       ]
     : [
         {
-          models: eligible.filter((model) => isClaudeClass(model, "sonnet")),
+          models: eligible.filter((model) =>
+            isClaudeTierClass(model, "sonnet"),
+          ),
           reason: "sonnet",
         },
         {
           models: eligible.filter(
-            (model) => isGptClass(model) && !isSmallGpt(model),
+            (model) => isGptClass(model) && !isSmallGptClass(model),
           ),
           reason: "gpt",
         },
         {
-          models: eligible.filter((model) => isSmallGpt(model)),
+          models: eligible.filter((model) => isSmallGptClass(model)),
           reason: "small-gpt",
         },
       ]
@@ -209,7 +148,7 @@ function resolveTier(
   tier: ClaudeAutoTier,
   eligible: Array<Model>,
   input: ResolveClaudeAutoModelsInput,
-): ClaudeAutoTierResolution {
+): ClaudeAutoTierState {
   const override = input.overrides?.[tier]?.trim()
   if (override) {
     const selected = eligible.find((model) => model.id === override)
@@ -233,13 +172,21 @@ function resolveTier(
   const external = input.external?.[tier]?.trim()
   if (external) {
     const selected = eligible.find((model) => model.id === external)
-    return {
-      configured: null,
-      effective: external,
-      source: "claude-code-setting",
-      status: selected ? "ready" : "unavailable",
-      reason: selected ? "external-setting" : "external-unavailable",
-    }
+    return selected ?
+        {
+          configured: null,
+          effective: external,
+          source: "claude-code-setting",
+          status: "ready",
+          reason: "external-setting",
+        }
+      : {
+          configured: null,
+          effective: external,
+          source: "claude-code-setting",
+          status: "unavailable",
+          reason: "external-unavailable",
+        }
   }
 
   return automaticResolution(tier, eligible, input.previousAutomatic?.[tier])

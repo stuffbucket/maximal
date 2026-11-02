@@ -11,12 +11,12 @@ import {
   reconcileClaudeCodeOnShutdown,
 } from "~/apps/claude-code/reconcile"
 import { writeConfig } from "~/lib/config/config"
-import {
-  publishModelCatalogChanged,
-  subscribeModelCatalogChanged,
-} from "~/lib/models/catalog-events"
 import { cacheModels } from "~/lib/platform/utils"
-import { setModels, state } from "~/lib/runtime-state/state"
+import {
+  setModels,
+  state,
+  subscribeModelCatalogChanged,
+} from "~/lib/runtime-state/state"
 
 function model(id: string, family: string): Model {
   const claude = family.includes("claude")
@@ -100,6 +100,36 @@ describe("model catalog events", () => {
     ])
   })
 
+  test("an older overlapping fetch cannot replace a newer catalog", async () => {
+    state.copilotToken = "test-token"
+    state.copilotApiUrl = "https://models.test" as typeof state.copilotApiUrl
+    const first = { resolve: (_response: Response): void => undefined }
+    const second = { resolve: (_response: Response): void => undefined }
+    let request = 0
+    globalThis.fetch = (() => {
+      request += 1
+      return new Promise<Response>((resolve) => {
+        ;(request === 1 ? first : second).resolve = resolve
+      })
+    }) as unknown as typeof fetch
+    let publications = 0
+    unsubs.push(
+      subscribeModelCatalogChanged(() => {
+        publications += 1
+      }),
+    )
+
+    const older = cacheModels()
+    const newer = cacheModels()
+    second.resolve(Response.json(catalog([haikuB, sonnet])))
+    await newer
+    first.resolve(Response.json(catalog([haikuA, sonnet])))
+    await older
+
+    expect(state.models?.data[0]?.id).toBe(haikuB.id)
+    expect(publications).toBe(1)
+  })
+
   test("isolates listener failures", () => {
     let completed = false
     unsubs.push(
@@ -111,7 +141,7 @@ describe("model catalog events", () => {
       }),
     )
 
-    expect(() => publishModelCatalogChanged()).not.toThrow()
+    expect(() => setModels(catalog([haikuA, sonnet]))).not.toThrow()
     expect(completed).toBe(true)
   })
 
@@ -130,11 +160,9 @@ describe("model catalog events", () => {
     expect(envAt(settingsPath).ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe(haikuA.id)
 
     setModels(catalog([haikuB, sonnet]))
-    publishModelCatalogChanged()
     expect(envAt(settingsPath).ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe(haikuB.id)
 
     setModels(catalog([haikuC, haikuB, sonnet]))
-    publishModelCatalogChanged()
     expect(envAt(settingsPath).ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe(haikuB.id)
 
     reconcileClaudeCodeOnShutdown(true, settingsPath)

@@ -15,6 +15,8 @@
  * the UI reacts like the real thing within a session. A fresh backend reseeds.
  */
 import type { AuthStatus } from "../src/lib/config/settings-types"
+
+import { ClaudeAutoModelsUpdateRequest } from "../src/lib/config/settings-types"
 import { type ResolvedScenario, type ScenarioId, resolveScenario } from "./ui-harness-fixtures"
 
 export interface MockBackend {
@@ -213,32 +215,31 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
       path === "/settings/api/models/claude-code-auto"
       && method === "PATCH"
     ) {
-      const selection = await body()
+      const selection = ClaudeAutoModelsUpdateRequest.safeParse(await body())
+      if (!selection.success) {
+        return json({ error: { message: "invalid Auto model selection" } }, 400)
+      }
       for (const tier of ["fast", "capable"] as const) {
-        const configured = selection[tier]
+        if (!(tier in selection.data)) continue
+        const configured = selection.data[tier]
         if (typeof configured === "string") {
           const option = state.models.claude_code_auto.options.find(
             (candidate) => candidate.id === configured,
           )
+          if (!option) {
+            return json({ error: { message: "model is not available" } }, 400)
+          }
           state.models.claude_code_auto[tier] = {
             configured,
-            effective: option ? configured : null,
+            effective: configured,
             source: "maximal-override",
-            status: option ? "ready" : "unavailable",
-            reason: option ? "override" : "override-unavailable",
+            status: "ready",
+            reason: "override",
           }
-        } else if (configured === null) {
-          const current = state.models.claude_code_auto[tier]
-          state.models.claude_code_auto[tier] = {
-            configured: null,
-            effective: current.effective,
-            source: current.effective ? "automatic" : "none",
-            status: current.effective ? "ready" : "unresolved",
-            reason:
-              current.effective ?
-                tier === "fast" ? "small-gpt" : "gpt"
-              : "no-match",
-          }
+        } else {
+          state.models.claude_code_auto[tier] = structuredClone(
+            fixture.models.claude_code_auto[tier],
+          )
         }
       }
       return json(state.models)

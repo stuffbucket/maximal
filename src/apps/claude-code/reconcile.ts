@@ -1,7 +1,9 @@
 import consola from "consola"
 
+import type { ClaudeAutoTier } from "~/lib/models/claude-auto-models"
+
 import { getConfig, writeConfig } from "~/lib/config/config"
-import { subscribeModelCatalogChanged } from "~/lib/models/catalog-events"
+import { subscribeModelCatalogChanged } from "~/lib/runtime-state/state"
 
 import {
   applyProxyBaseUrl,
@@ -14,10 +16,12 @@ export function claudeCodeRoutingIntended(): boolean {
 }
 
 let unsubscribeCatalog: (() => void) | null = null
-let catalogSettingsPath = getClaudeCodeSettingsPath()
+let catalogSettingsPath: string | null = null
 
 function reconcileCatalogChange(): void {
-  reconcileClaudeCodeAutoModels(catalogSettingsPath)
+  reconcileClaudeCodeAutoModels(
+    catalogSettingsPath ?? getClaudeCodeSettingsPath(),
+  )
 }
 
 function ensureCatalogSubscription(filePath: string): void {
@@ -32,10 +36,11 @@ function stopCatalogSubscription(): void {
 
 export function reconcileClaudeCodeAutoModels(
   filePath: string = getClaudeCodeSettingsPath(),
+  options: { claimAutoModels?: ReadonlySet<ClaudeAutoTier> } = {},
 ): void {
   if (!claudeCodeRoutingIntended()) return
   try {
-    applyProxyBaseUrl(filePath)
+    applyProxyBaseUrl(filePath, undefined, options)
   } catch (error) {
     consola.warn("claude-code: failed to reconcile Auto models", error)
   }

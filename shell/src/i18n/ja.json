@@ -201,6 +201,7 @@
   "models-auto-option-unavailable": "{id}（利用不可）",
   "models-auto-effective-automatic": "{modelName} を自動的に使用中",
   "models-auto-effective-external": "Claude Code の設定から {modelName} を使用中",
+  "models-auto-effective-external-default": "Claude Code 独自のデフォルトを使用中",
   "models-auto-effective-override": "{modelName} を使用中",
   "models-auto-saving": "自動モデルを保存中…",
   "models-auto-not-applied": "これらの選択は、Claude Code のルーティングがオンのときに適用されます。",

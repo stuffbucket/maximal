@@ -201,6 +201,7 @@
   "models-auto-option-unavailable": "{id} (indisponible)",
   "models-auto-effective-automatic": "Utilisation automatique de {modelName}",
   "models-auto-effective-external": "Utilisation de {modelName} depuis les réglages de Claude Code",
+  "models-auto-effective-external-default": "Utilisation du modèle par défaut de Claude Code",
   "models-auto-effective-override": "Utilisation de {modelName}",
   "models-auto-saving": "Enregistrement des modèles automatiques…",
   "models-auto-not-applied": "Ces choix s’appliquent lorsque le routage de Claude Code est activé.",

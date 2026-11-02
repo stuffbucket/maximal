@@ -201,6 +201,7 @@
   "models-auto-option-unavailable": "{id} (недоступно)",
   "models-auto-effective-automatic": "Автоматически используется {modelName}",
   "models-auto-effective-external": "Используется {modelName} из настроек Claude Code",
+  "models-auto-effective-external-default": "Используется собственная модель Claude Code по умолчанию",
   "models-auto-effective-override": "Используется {modelName}",
   "models-auto-saving": "Автоматические модели сохраняются…",
   "models-auto-not-applied": "Этот выбор применяется, когда маршрутизация Claude Code включена.",

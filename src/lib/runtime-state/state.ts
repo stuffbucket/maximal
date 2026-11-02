@@ -1,3 +1,4 @@
+import consola from "consola"
 import { randomUUID } from "node:crypto"
 
 import type { AccountType, CopilotHost } from "~/lib/auth/auth-types"
@@ -5,6 +6,7 @@ import type { ModelsResponse } from "~/services/copilot/get-models"
 
 import { emitAuthChanged } from "~/lib/config/settings-events"
 import { SingletonCache } from "~/lib/runtime-state/cache"
+import { EventBus } from "~/lib/runtime-state/event-bus"
 
 // Module-private metric mirrors of the matching `state.*` fields.
 // Surfaced via allCacheMetrics() (registered on construction); writes
@@ -12,6 +14,7 @@ import { SingletonCache } from "~/lib/runtime-state/cache"
 // forget the mirror.
 const modelsCache = new SingletonCache<ModelsResponse>({ name: "models" })
 const copilotTokenCache = new SingletonCache<string>({ name: "copilot_token" })
+const modelEvents = new EventBus<{ changed: ModelsResponse }>()
 
 export interface State {
   githubToken?: string
@@ -157,9 +160,20 @@ export function modelsCached(): number {
   return state.models?.data.length ?? 0
 }
 
+export function subscribeModelCatalogChanged(listener: () => void): () => void {
+  return modelEvents.subscribe("changed", () => {
+    try {
+      listener()
+    } catch (error) {
+      consola.warn("model catalog listener failed", error)
+    }
+  })
+}
+
 export function setModels(models: ModelsResponse): void {
   state.models = models
   modelsCache.set(models)
+  modelEvents.publish("changed", models)
 }
 
 /**

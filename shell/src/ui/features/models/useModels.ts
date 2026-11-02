@@ -4,6 +4,7 @@ import { apiCall } from "../../../proxy/client";
 import { type Problem, describeProblem, withRetry } from "../../problems";
 import type {
   ClaudeAutoModelsState,
+  ClaudeAutoModelsUpdateRequest,
   ModelsListResponse,
   ModelSummary,
 } from "../../../../../src/lib/config/settings-types";
@@ -28,7 +29,7 @@ interface UseModels {
    *  stale list visible underneath. */
   problem: Problem | null;
   refresh: () => Promise<void>;
-  setAutoModels: (fast: string | null, capable: string | null) => Promise<void>;
+  setAutoModels: (selection: ClaudeAutoModelsUpdateRequest) => Promise<void>;
 }
 
 function applyResult(
@@ -117,14 +118,14 @@ export function useModels(): UseModels {
   }, []);
 
   const setAutoModels = useCallback(
-    async (fast: string | null, capable: string | null) => {
+    async (selection: ClaudeAutoModelsUpdateRequest) => {
       setIsSavingAutoModels(true);
       const result = await withRetry(() =>
         apiCall({
           kind: "models-auto-update",
           method: "PATCH",
           path: "/settings/api/models/claude-code-auto",
-          body: { fast, capable },
+          body: selection,
         }),
       );
       if (result.ok) {

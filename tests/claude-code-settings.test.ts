@@ -867,6 +867,21 @@ describe("apply→revert snapshot round-trip (restores prior state)", () => {
     revertProxyBaseUrl(settingsPath)
     expect(fs.existsSync(settingsPath)).toBe(false)
   })
+
+  it("retries its merge when Claude Code changes the file before write", () => {
+    writeRaw(JSON.stringify({ theme: "dark" }))
+
+    applyProxyBaseUrl(settingsPath, () => {
+      writeRaw(JSON.stringify({ theme: "light", addedByClaude: true }))
+      return resolveTestKey()
+    })
+
+    expect(read()).toMatchObject({
+      theme: "light",
+      addedByClaude: true,
+    })
+    expect(envOf(read()).ANTHROPIC_BASE_URL).toBe(proxyBaseUrl())
+  })
 })
 
 describe("isProxyBaseUrlConfigured", () => {

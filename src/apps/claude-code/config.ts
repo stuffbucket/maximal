@@ -8,13 +8,20 @@ import os from "node:os"
 import path from "node:path"
 import { isDeepStrictEqual } from "node:util"
 
+import type { ClaudeAutoModelsState } from "~/lib/config/settings-types"
+import type { ClaudeAutoTier } from "~/lib/models/claude-auto-models"
+
 import {
   echoApiKeyHelperCommand,
   ensureApiKey,
   isOwnedApiKeyHelper,
   resolveApiKey,
 } from "~/lib/auth/api-key-helper"
-import { atomicWriteJson } from "~/lib/platform/atomic-json"
+import {
+  AtomicWriteConflictError,
+  atomicWriteJson,
+  readFileNoFollow,
+} from "~/lib/platform/atomic-json"
 import { parseJsonText } from "~/lib/platform/json-text"
 import { proxyBaseUrl } from "~/lib/start/proxy-port"
 
@@ -25,9 +32,14 @@ import {
   FAST_MODEL_KEY,
   hasOwnedClaudeAutoModelSettings,
   mergeClaudeAutoModelSettings,
-  SETTINGS_UNSET,
   stripClaudeAutoModelSettings,
 } from "./auto-model-settings"
+import {
+  readSettingsEnv,
+  SETTINGS_ENV_KEY,
+  SETTINGS_UNSET,
+  withRestoredField,
+} from "./settings-record"
 
 /** The label Claude Code attributes its key under (Settings → API clients). */
 export const HELPER_LABEL = "claude-code"
@@ -36,7 +48,6 @@ const API_KEY_HELPER_KEY = "apiKeyHelper"
 const BASE_URL_KEY = "ANTHROPIC_BASE_URL"
 const AUTO_MODE_SERVER_KEY = "CLAUDE_CODE_AUTO_MODE_SERVER"
 const AUTO_MODE_SERVER_DISABLED = "0"
-const ENV_KEY = "env"
 
 /** maximal-namespaced snapshot of the fields we touch, taken on first
  *  apply so disable can restore EXACTLY what was there before — rather than
@@ -83,16 +94,13 @@ export function getClaudeCodeSettingsPath(): string {
   return path.join(configDir, "settings.json")
 }
 
-export function readClaudeCodeSettings(
-  filePath: string = getClaudeCodeSettingsPath(),
-): Record<string, unknown> {
-  let raw: string
-  try {
-    raw = fs.readFileSync(filePath, "utf8")
-  } catch {
-    return {}
-  }
-  if (!raw.trim()) return {}
+interface ClaudeCodeSettingsSnapshot {
+  raw: string | null
+  settings: Record<string, unknown>
+}
+
+function parseClaudeCodeSettings(raw: string | null): Record<string, unknown> {
+  if (!raw?.trim()) return {}
   try {
     const parsed: unknown = parseJsonText(raw)
     if (
@@ -108,12 +116,20 @@ export function readClaudeCodeSettings(
   }
 }
 
-function readEnv(settings: Record<string, unknown>): Record<string, unknown> {
-  const env = settings[ENV_KEY]
-  if (typeof env === "object" && env !== null && !Array.isArray(env)) {
-    return env as Record<string, unknown>
-  }
-  return {}
+function readClaudeCodeSettingsSnapshot(
+  filePath: string,
+): ClaudeCodeSettingsSnapshot {
+  const raw = readFileNoFollow(
+    filePath,
+    () => new Error("refusing to read Claude Code settings: symbolic link"),
+  )
+  return { raw, settings: parseClaudeCodeSettings(raw) }
+}
+
+export function readClaudeCodeSettings(
+  filePath: string = getClaudeCodeSettingsPath(),
+): Record<string, unknown> {
+  return readClaudeCodeSettingsSnapshot(filePath).settings
 }
 
 export type BaseUrlOwnership = "ours" | "foreign" | "absent"
@@ -130,7 +146,7 @@ const LOOPBACK_BASE_URL = /^http:\/\/127\.0\.0\.1:\d+$/
 export function getBaseUrlOwnership(
   settings: Record<string, unknown>,
 ): BaseUrlOwnership {
-  const env = readEnv(settings)
+  const env = readSettingsEnv(settings)
   if (!(BASE_URL_KEY in env)) return "absent"
   const url = env[BASE_URL_KEY]
   if (url === proxyBaseUrl()) return "ours"
@@ -228,11 +244,16 @@ function preparePrior(input: {
   }
 }
 
+interface AutoModelApplyOptions {
+  claimAutoModels?: ReadonlySet<ClaudeAutoTier>
+}
+
 export function mergeBaseUrl(
   existing: Record<string, unknown>,
   helperCommand: string,
+  options: AutoModelApplyOptions = {},
 ): Record<string, unknown> {
-  const existingEnv = readEnv(existing)
+  const existingEnv = readSettingsEnv(existing)
   const addsAutoModeSetting = !(AUTO_MODE_SERVER_KEY in existingEnv)
   let env: Record<string, unknown> = {
     ...existingEnv,
@@ -246,12 +267,13 @@ export function mergeBaseUrl(
     env: existingEnv,
     settings: existing,
   })
-  let marker: { fast?: string; capable?: string } | null = null
+  let marker: ReturnType<typeof mergeClaudeAutoModelSettings>["marker"] = null
   if (typeof prior === "object" && prior !== null && !Array.isArray(prior)) {
     const autoModels = mergeClaudeAutoModelSettings({
       settings: existing,
       env,
       prior: prior as Record<string, unknown>,
+      claimTiers: options.claimAutoModels,
     })
     env = autoModels.env
     prior = autoModels.prior
@@ -262,7 +284,7 @@ export function mergeBaseUrl(
     existing
   return {
     ...withoutMarker,
-    [ENV_KEY]: env,
+    [SETTINGS_ENV_KEY]: env,
     [API_KEY_HELPER_KEY]: helperCommand,
     [HELPER_OWNERSHIP_KEY]: {
       label: HELPER_LABEL,
@@ -274,28 +296,14 @@ export function mergeBaseUrl(
   }
 }
 
-/** Apply a snapshotted prior value to a record under `key`: restore the value,
- *  or omit the key when the prior was SETTINGS_UNSET (absent). Returns a new record so we
- *  avoid a dynamically-computed `delete`. */
-function withRestoredField(
-  target: Record<string, unknown>,
-  key: string,
-  prior: unknown,
-): Record<string, unknown> {
-  if (prior === SETTINGS_UNSET) {
-    const { [key]: _dropped, ...without } = target
-    return without
-  }
-  return { ...target, [key]: prior }
-}
-
 function isOwnedAutoModeServerSetting(
   settings: Record<string, unknown>,
 ): boolean {
   const snapshot = readPriorSnapshot(settings)
   return (
     snapshot?.[AUTO_MODE_SERVER_KEY] === SETTINGS_UNSET
-    && readEnv(settings)[AUTO_MODE_SERVER_KEY] === AUTO_MODE_SERVER_DISABLED
+    && readSettingsEnv(settings)[AUTO_MODE_SERVER_KEY]
+      === AUTO_MODE_SERVER_DISABLED
   )
 }
 
@@ -309,11 +317,11 @@ export function stripBaseUrl(
     [PRIOR_KEY]: _droppedPrior,
     [HELPER_OWNERSHIP_KEY]: _droppedMarker,
     [AUTO_MODELS_OWNERSHIP_KEY]: _droppedAutoModels,
-    [ENV_KEY]: _droppedEnv,
+    [SETTINGS_ENV_KEY]: _droppedEnv,
     ...rest
   } = existing
 
-  const currentEnv = readEnv(existing)
+  const currentEnv = readSettingsEnv(existing)
   let env = currentEnv
   if (baseUrlOwnership === "ours") {
     const { [BASE_URL_KEY]: _droppedBaseUrl, ...withoutBaseUrl } = currentEnv
@@ -346,7 +354,7 @@ export function stripBaseUrl(
   }
 
   if (Object.keys(env).length === 0) return base
-  return { ...base, [ENV_KEY]: env }
+  return { ...base, [SETTINGS_ENV_KEY]: env }
 }
 
 export function isProxyBaseUrlConfigured(
@@ -361,10 +369,11 @@ export function isProxyBaseUrlConfigured(
 
 export function getClaudeAutoModelsState(
   filePath: string = getClaudeCodeSettingsPath(),
-) {
+): ClaudeAutoModelsState {
   const settings = readClaudeCodeSettings(filePath)
   return buildClaudeAutoModelsState(
     settings,
+    readPriorSnapshot(settings) as Record<string, unknown> | null,
     getBaseUrlOwnership(settings) === "ours"
       && getApiKeyHelperOwnership(settings) === "ours",
   )
@@ -373,8 +382,12 @@ export function getClaudeAutoModelsState(
 export function writeClaudeCodeSettings(
   filePath: string,
   settings: Record<string, unknown>,
+  expectedContent?: string | null,
 ): void {
-  atomicWriteJson(filePath, settings, { label: "Claude Code settings" })
+  atomicWriteJson(filePath, settings, {
+    label: "Claude Code settings",
+    ...(expectedContent !== undefined ? { expectedContent } : {}),
+  })
 }
 
 export type SkipReason =
@@ -394,33 +407,49 @@ type ResolveHelperKey = () => ReturnType<typeof resolveApiKey>
 export function applyProxyBaseUrl(
   filePath: string = getClaudeCodeSettingsPath(),
   resolveHelperKey: ResolveHelperKey = () => ensureApiKey(HELPER_LABEL),
+  options: AutoModelApplyOptions = {},
 ): ApplyResult {
-  const existing = readClaudeCodeSettings(filePath)
-  const baseUrlOwnership = getBaseUrlOwnership(existing)
-  const helperOwnership = getApiKeyHelperOwnership(existing)
-  if (baseUrlOwnership === "foreign") {
-    return { path: filePath, wrote: false, skippedReason: "foreign-base-url" }
-  }
-  if (helperOwnership === "foreign") {
-    return {
-      path: filePath,
-      wrote: false,
-      skippedReason: "foreign-api-key-helper",
+  let snapshot = readClaudeCodeSettingsSnapshot(filePath)
+  let helperCommand: string | null = null
+  let retried = false
+  while (true) {
+    const baseUrlOwnership = getBaseUrlOwnership(snapshot.settings)
+    const helperOwnership = getApiKeyHelperOwnership(snapshot.settings)
+    if (baseUrlOwnership === "foreign") {
+      return { path: filePath, wrote: false, skippedReason: "foreign-base-url" }
+    }
+    if (helperOwnership === "foreign") {
+      return {
+        path: filePath,
+        wrote: false,
+        skippedReason: "foreign-api-key-helper",
+      }
+    }
+    if (helperCommand === null) {
+      const keyResult = resolveHelperKey()
+      if (!keyResult.ok) {
+        return {
+          path: filePath,
+          wrote: false,
+          skippedReason: "missing-api-key",
+        }
+      }
+      helperCommand = echoApiKeyHelperCommand(keyResult.key)
+    }
+
+    const merged = mergeBaseUrl(snapshot.settings, helperCommand, options)
+    if (isDeepStrictEqual(snapshot.settings, merged)) {
+      return { path: filePath, wrote: false, skippedReason: "already-ours" }
+    }
+    try {
+      writeClaudeCodeSettings(filePath, merged, snapshot.raw)
+      return { path: filePath, wrote: true }
+    } catch (error) {
+      if (!(error instanceof AtomicWriteConflictError) || retried) throw error
+      retried = true
+      snapshot = readClaudeCodeSettingsSnapshot(filePath)
     }
   }
-
-  const keyResult = resolveHelperKey()
-  if (!keyResult.ok) {
-    return { path: filePath, wrote: false, skippedReason: "missing-api-key" }
-  }
-  const helperCommand = echoApiKeyHelperCommand(keyResult.key)
-  const merged = mergeBaseUrl(existing, helperCommand)
-  if (isDeepStrictEqual(existing, merged)) {
-    return { path: filePath, wrote: false, skippedReason: "already-ours" }
-  }
-
-  writeClaudeCodeSettings(filePath, merged)
-  return { path: filePath, wrote: true }
 }
 
 export interface RevertResult {

@@ -8,7 +8,6 @@ import type { AnthropicMessagesPayload } from "~/lib/models/anthropic-types"
 
 import { getVSCodeDeviceId } from "~/lib/auth/deviceid"
 import { getConfig } from "~/lib/config/config"
-import { publishModelCatalogChanged } from "~/lib/models/catalog-events"
 import { setModels, state } from "~/lib/runtime-state/state"
 import { getModels } from "~/services/copilot/get-models"
 
@@ -20,8 +19,18 @@ export const sleep = (ms: number) =>
 export const isNullish = (value: unknown): value is null | undefined =>
   value === null || value === undefined
 
+let modelCacheGeneration = 0
+
 export async function cacheModels(): Promise<void> {
+  const generation = ++modelCacheGeneration
+  const copilotToken = state.copilotToken
   const models = await getModels()
+  if (
+    generation !== modelCacheGeneration
+    || copilotToken !== state.copilotToken
+  ) {
+    return
+  }
   setModels({
     ...models,
     data: models.data.filter(
@@ -29,7 +38,6 @@ export async function cacheModels(): Promise<void> {
         model.model_picker_enabled || model.capabilities.type === "embeddings",
     ),
   })
-  publishModelCatalogChanged()
 }
 
 export const cacheVSCodeVersion = (): Promise<void> => {

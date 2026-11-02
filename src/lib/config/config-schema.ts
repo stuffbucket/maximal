@@ -116,6 +116,15 @@ const McpClientIdSchema = z.enum(["claude-code", "claude-desktop"])
 /** Endpoint ids Maximal wrote into a client's own MCP configuration. */
 const OwnedMcpServerIdsSchema = z.array(McpServerIdSchema).max(64)
 
+const ClaudeCodeConfigSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    mcpServers: OwnedMcpServerIdsSchema.optional(),
+    fastModel: z.string().trim().min(1).optional(),
+    capableModel: z.string().trim().min(1).optional(),
+  })
+  .loose()
+
 const McpElicitationRuleSchema = z
   .object({
     match: z.object({
@@ -403,15 +412,7 @@ export const AppConfigSchema = z
             enabled: z.boolean().optional(),
           })
           .optional(),
-        claudeCode: z
-          .object({
-            enabled: z.boolean().optional(),
-            mcpServers: OwnedMcpServerIdsSchema.optional(),
-            fastModel: z.string().trim().min(1).optional(),
-            capableModel: z.string().trim().min(1).optional(),
-          })
-          .loose()
-          .optional(),
+        claudeCode: ClaudeCodeConfigSchema.optional(),
         claudeDesktop: z
           .object({
             enabled: z.boolean().optional(),
@@ -464,8 +465,24 @@ export function validateAppConfig(raw: unknown): AppConfig {
  *  not declare. Caller decides what to do (warn / log / nothing). */
 export function detectUnknownKeys(raw: unknown): Array<string> {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return []
+  const record = raw as Record<string, unknown>
   const known = new Set(Object.keys(AppConfigSchema.shape))
-  return Object.keys(raw as Record<string, unknown>).filter(
-    (k) => !known.has(k),
-  )
+  const unknown = Object.keys(record).filter((key) => !known.has(key))
+  const apps = record.apps
+  if (typeof apps !== "object" || apps === null || Array.isArray(apps)) {
+    return unknown
+  }
+  const claudeCode = (apps as Record<string, unknown>).claudeCode
+  if (
+    typeof claudeCode !== "object"
+    || claudeCode === null
+    || Array.isArray(claudeCode)
+  ) {
+    return unknown
+  }
+  const knownClaudeCode = new Set(Object.keys(ClaudeCodeConfigSchema.shape))
+  for (const key of Object.keys(claudeCode)) {
+    if (!knownClaudeCode.has(key)) unknown.push(`apps.claudeCode.${key}`)
+  }
+  return unknown
 }

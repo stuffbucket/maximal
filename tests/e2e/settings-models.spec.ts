@@ -74,7 +74,6 @@ test("renders accessible Automatic controls and preserves the other tier on save
 
   expect((await updateRequest).postDataJSON()).toEqual({
     fast: "gpt-5.6-mini",
-    capable: null,
   })
   await expect(fast).toHaveValue("gpt-5.6-mini")
   await expect(capable).toHaveValue("")

@@ -143,6 +143,16 @@ describe("resolveClaudeAutoModels", () => {
     })
   })
 
+  test("requires a Claude family or id signal for a Claude tier", () => {
+    const vendorOnly = model("cc-fast", {
+      family: "haiku",
+      vendor: "anthropic",
+    })
+    const result = resolveClaudeAutoModels({ models: [smallGpt, vendorOnly] })
+    expect(result.fast.effective).toBe(smallGpt.id)
+    expect(result.fast.reason).toBe("small-gpt")
+  })
+
   test("uses small GPT for fast and full GPT for capable when Claude tiers are absent", () => {
     const result = resolveClaudeAutoModels({ models: [fullGpt, smallGpt] })
     expect(result.fast.effective).toBe(smallGpt.id)

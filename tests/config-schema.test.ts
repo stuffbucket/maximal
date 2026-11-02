@@ -226,11 +226,14 @@ describe("validateAppConfig — Claude Code Auto models", () => {
     },
   )
 
-  it("preserves unknown app keys", () => {
+  it("preserves and reports unknown app keys", () => {
     const config = {
       apps: { claudeCode: { enabled: true, futureModelPolicy: "new" } },
     }
     expect(validateAppConfig(config)).toEqual(config)
+    expect(detectUnknownKeys(config)).toContain(
+      "apps.claudeCode.futureModelPolicy",
+    )
   })
 })
 

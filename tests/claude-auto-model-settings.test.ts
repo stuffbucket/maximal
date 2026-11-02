@@ -233,9 +233,58 @@ describe("Claude Code Auto model settings", () => {
     apply()
 
     expect(readEnv().ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe(fullGpt.id)
-    expect(getClaudeAutoModelsState(settingsPath).fast.source).toBe(
-      "claude-code-setting",
-    )
+    expect(getClaudeAutoModelsState(settingsPath).fast).toMatchObject({
+      configured: smallGpt.id,
+      effective: fullGpt.id,
+      source: "claude-code-setting",
+    })
+  })
+
+  test("a directly deleted tier remains externally unmanaged", () => {
+    apply()
+    const settings = readClaudeCodeSettings(settingsPath)
+    const { ANTHROPIC_DEFAULT_HAIKU_MODEL: _removed, ...env } =
+      settings.env as Record<string, unknown>
+    writeClaudeCodeSettings(settingsPath, { ...settings, env })
+
+    apply()
+
+    expect(readEnv()).not.toHaveProperty("ANTHROPIC_DEFAULT_HAIKU_MODEL")
+    expect(getClaudeAutoModelsState(settingsPath).fast).toMatchObject({
+      configured: null,
+      effective: null,
+      source: "claude-code-setting",
+      status: "ready",
+      reason: "external-setting",
+    })
+  })
+
+  test("clearing a manual override does not make it the sticky automatic choice", () => {
+    const alternateHaiku = { ...haiku, id: "claude-haiku-alternate" }
+    setCatalog([haiku, alternateHaiku, sonnet, smallGpt, fullGpt])
+    writeConfig({
+      apps: { claudeCode: { fastModel: alternateHaiku.id } },
+    })
+    apply()
+    expect(readEnv().ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe(alternateHaiku.id)
+
+    writeConfig({})
+    apply()
+
+    expect(readEnv().ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe(haiku.id)
+    expect(getClaudeAutoModelsState(settingsPath).fast.source).toBe("automatic")
+  })
+
+  test("restores a snapshotted null tier value exactly", () => {
+    writeClaudeCodeSettings(settingsPath, {
+      env: { ANTHROPIC_DEFAULT_HAIKU_MODEL: null },
+    })
+    writeConfig({ apps: { claudeCode: { fastModel: smallGpt.id } } })
+
+    apply()
+    revertProxyBaseUrl(settingsPath)
+
+    expect(readEnv()).toHaveProperty("ANTHROPIC_DEFAULT_HAIKU_MODEL", null)
   })
 
   test("reapply is idempotent while owned automatic choices are eligible", () => {

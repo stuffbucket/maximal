@@ -11,6 +11,7 @@ import {
   applyProxyBaseUrl,
   getClaudeCodeSettingsPath,
   readClaudeCodeSettings,
+  writeClaudeCodeSettings,
 } from "~/apps/claude-code/config"
 import { createAuthMiddleware } from "~/lib/auth/request-auth"
 import { getConfig, writeConfig } from "~/lib/config/config"
@@ -218,7 +219,7 @@ describe("PATCH Claude Code Auto models", () => {
     })
   })
 
-  test("null clears overrides back to Automatic", async () => {
+  test("a partial null clears only that tier back to Automatic", async () => {
     writeConfig({
       apps: {
         claudeCode: {
@@ -233,16 +234,22 @@ describe("PATCH Claude Code Auto models", () => {
       {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ fast: null, capable: null }),
+        body: JSON.stringify({ fast: null }),
       },
     )
 
     expect(response.status).toBe(200)
-    expect(getConfig().apps?.claudeCode).toEqual({})
-    expect((await json(response)).claude_code_auto.fast).toMatchObject({
+    expect(getConfig().apps?.claudeCode).toEqual({ capableModel: fullGpt.id })
+    const auto = (await json(response)).claude_code_auto
+    expect(auto.fast).toMatchObject({
       configured: null,
       effective: haikuA.id,
       source: "automatic",
+    })
+    expect(auto.capable).toMatchObject({
+      configured: fullGpt.id,
+      effective: fullGpt.id,
+      source: "maximal-override",
     })
   })
 
@@ -250,7 +257,7 @@ describe("PATCH Claude Code Auto models", () => {
     [{ fast: "missing-model", capable: null }, 400],
     [{ fast: embedding.id, capable: null }, 400],
     [{ fast: "", capable: null }, 400],
-    [{ fast: null }, 400],
+    [{}, 400],
     [{ fast: null, capable: null, extra: true }, 400],
   ])(
     "rejects invalid update %# without changing config",
@@ -270,6 +277,69 @@ describe("PATCH Claude Code Auto models", () => {
       expect(getConfig().apps?.claudeCode).toEqual({ enabled: false })
     },
   )
+
+  test("updates one tier while preserving an unavailable override on the other", async () => {
+    writeConfig({
+      apps: {
+        claudeCode: { fastModel: "gpt-retired", capableModel: sonnet.id },
+      },
+    })
+
+    const response = await buildApp().request(
+      "/settings/api/models/claude-code-auto",
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ capable: fullGpt.id }),
+      },
+    )
+
+    expect(response.status).toBe(200)
+    expect(getConfig().apps?.claudeCode).toEqual({
+      fastModel: "gpt-retired",
+      capableModel: fullGpt.id,
+    })
+  })
+
+  test("an explicit Settings choice reclaims a directly edited tier", async () => {
+    writeConfig({
+      auth: { apiKeys: ["test-key"] },
+      apps: { claudeCode: { enabled: true, fastModel: smallGpt.id } },
+    })
+    applyProxyBaseUrl(getClaudeCodeSettingsPath(), () => ({
+      ok: true,
+      key: "test-key",
+      source: "app",
+    }))
+    const settings = readClaudeCodeSettings()
+    writeClaudeCodeSettings(getClaudeCodeSettingsPath(), {
+      ...settings,
+      env: {
+        ...(settings.env as Record<string, unknown>),
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: fullGpt.id,
+      },
+    })
+
+    const response = await buildApp().request(
+      "/settings/api/models/claude-code-auto",
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ fast: haikuA.id }),
+      },
+    )
+
+    expect(response.status).toBe(200)
+    expect(
+      (readClaudeCodeSettings().env as Record<string, unknown>)
+        .ANTHROPIC_DEFAULT_HAIKU_MODEL,
+    ).toBe(haikuA.id)
+    expect((await json(response)).claude_code_auto.fast).toMatchObject({
+      configured: haikuA.id,
+      effective: haikuA.id,
+      source: "maximal-override",
+    })
+  })
 
   test("keeps an unavailable persisted override visible", async () => {
     writeConfig({ apps: { claudeCode: { fastModel: "gpt-retired" } } })

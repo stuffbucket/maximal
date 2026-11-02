@@ -54,6 +54,23 @@ describe("ClaudeAutoModelsState", () => {
     ).toEqual({ ...state, applied: false, capable: unresolved })
   })
 
+  test("rejects contradictory tier state combinations", () => {
+    expect(
+      ClaudeAutoModelsState.safeParse({
+        applied: true,
+        options: [option],
+        fast: {
+          configured: null,
+          effective: option.id,
+          source: "automatic",
+          status: "unavailable",
+          reason: "override",
+        },
+        capable: automatic,
+      }).success,
+    ).toBe(false)
+  })
+
   test.each([
     ["source", "other"],
     ["status", "missing"],
@@ -71,15 +88,17 @@ describe("ClaudeAutoModelsState", () => {
 })
 
 describe("ClaudeAutoModelsUpdateRequest", () => {
-  test("accepts explicit ids and null for Automatic", () => {
-    expect(
-      ClaudeAutoModelsUpdateRequest.parse({ fast: option.id, capable: null }),
-    ).toEqual({ fast: option.id, capable: null })
+  test("accepts a partial explicit id or null for Automatic", () => {
+    expect(ClaudeAutoModelsUpdateRequest.parse({ fast: option.id })).toEqual({
+      fast: option.id,
+    })
+    expect(ClaudeAutoModelsUpdateRequest.parse({ capable: null })).toEqual({
+      capable: null,
+    })
   })
 
   test.each([
     {},
-    { fast: "gpt-5.6-mini" },
     { fast: "", capable: null },
     { fast: null, capable: 42 },
     { fast: null, capable: null, extra: true },

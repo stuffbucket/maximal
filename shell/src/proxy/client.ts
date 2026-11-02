@@ -30,6 +30,7 @@ import type {
   ApiKeyEntry,
   ApiKeysListResponse,
   AuthStatus,
+  ClaudeAutoModelsUpdateRequest,
   DiagnosticsResponse,
   ModelsListResponse,
   PendingRequest,
@@ -389,7 +390,7 @@ type Endpoint =
       kind: "models-auto-update"
       method: "PATCH"
       path: "/settings/api/models/claude-code-auto"
-      body: { fast: string | null; capable: string | null }
+      body: ClaudeAutoModelsUpdateRequest
     }
   | {
       kind: "claude-code-toggle"

@@ -233,7 +233,7 @@ const baseDiagnostics: DiagnosticsResponse = {
   pid: 4242,
   uptime_ms: 7_265_000,
   account_type: "individual",
-  models_cached: 3,
+  models_cached: baseModels.models.length,
   tokens: { github_token_present: true, copilot_token_present: true },
   rate_limit: {
     interval_seconds: null,

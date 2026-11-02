@@ -1,5 +1,6 @@
 import type {
   ClaudeAutoModelsState,
+  ClaudeAutoModelsUpdateRequest,
   ClaudeAutoTierState,
 } from "../../../../../src/lib/config/settings-types";
 
@@ -9,7 +10,7 @@ import { Callout } from "../../components/Callout";
 interface AutoModelControlsProps {
   state: ClaudeAutoModelsState;
   saving: boolean;
-  onChange: (fast: string | null, capable: string | null) => Promise<void>;
+  onChange: (selection: ClaudeAutoModelsUpdateRequest) => Promise<void>;
 }
 
 interface TierControlProps {
@@ -45,6 +46,9 @@ function statusText(
   models: ClaudeAutoModelsState,
 ): string | null {
   if (state.status !== "ready") return null;
+  if (state.source === "claude-code-setting" && !state.effective) {
+    return t("models-auto-effective-external-default");
+  }
   const modelName = effectiveName(state, models);
   if (state.source === "automatic") {
     return t("models-auto-effective-automatic", { modelName });
@@ -62,9 +66,7 @@ function TierControl({ tier, state, models, saving, onChange }: TierControlProps
     tier === "fast" ? "models-auto-fast-hint" : "models-auto-capable-hint";
   const status = statusText(state, models);
   const selectId = `models-auto-${tier}`;
-  const unavailable =
-    state.configured !== null &&
-    !models.options.some((option) => option.id === state.configured);
+  const unavailable = state.reason === "override-unavailable";
 
   return (
     <div className="models-auto__row">
@@ -133,10 +135,10 @@ export function AutoModelControls({
   onChange,
 }: AutoModelControlsProps): JSX.Element {
   const updateFast = (fast: string | null): void => {
-    void onChange(fast, state.capable.configured);
+    void onChange({ fast });
   };
   const updateCapable = (capable: string | null): void => {
-    void onChange(state.fast.configured, capable);
+    void onChange({ capable });
   };
 
   return (
