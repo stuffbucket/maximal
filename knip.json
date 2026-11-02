@@ -3,6 +3,7 @@
   "entry": [
     "scripts/*.ts",
     "scripts/dev/*.ts",
+    "shell/src/dashboard/live/flow-worker.ts",
     "tests/**/*.test.ts"
   ],
   "project": [
