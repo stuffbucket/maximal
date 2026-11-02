@@ -287,6 +287,29 @@ describe("Claude Code Auto model settings", () => {
     expect(readEnv()).toHaveProperty("ANTHROPIC_DEFAULT_HAIKU_MODEL", null)
   })
 
+  test("a later direct edit survives when an unavailable override becomes available", () => {
+    const later = model("gpt-later", "gpt-later", { vendor: "openai" })
+    writeClaudeCodeSettings(settingsPath, {
+      env: { ANTHROPIC_DEFAULT_HAIKU_MODEL: fullGpt.id },
+    })
+    writeConfig({ apps: { claudeCode: { fastModel: later.id } } })
+    apply()
+    const settings = readClaudeCodeSettings(settingsPath)
+    writeClaudeCodeSettings(settingsPath, {
+      ...settings,
+      env: {
+        ...(settings.env as Record<string, unknown>),
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: "my-x2",
+      },
+    })
+    setCatalog([haiku, sonnet, smallGpt, fullGpt, later])
+
+    apply()
+    expect(readEnv().ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe("my-x2")
+    revertProxyBaseUrl(settingsPath)
+    expect(readEnv().ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe("my-x2")
+  })
+
   test("reapply is idempotent while owned automatic choices are eligible", () => {
     expect(apply().wrote).toBe(true)
     expect(apply()).toMatchObject({

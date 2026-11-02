@@ -42,8 +42,8 @@ test("renders accessible Automatic controls and preserves the other tier on save
         claude_code_auto: {
           ...initial.claude_code_auto,
           fast: {
-            configured: "gpt-5.6-mini",
-            effective: "gpt-5.6-mini",
+            configured: "gpt-5.6-luna",
+            effective: "gpt-5.6-luna",
             source: "maximal-override",
             status: "ready",
             reason: "override",
@@ -61,21 +61,21 @@ test("renders accessible Automatic controls and preserves the other tier on save
   await expect(fast).toHaveValue("")
   await expect(capable).toHaveValue("")
   await expect(
-    page.getByText("Using Claude Haiku 4.6 automatically"),
+    page.getByText("Using Claude Haiku 5.5 automatically"),
   ).toBeVisible()
   await expect(
-    page.getByText("Using Claude Sonnet 4.7 automatically"),
+    page.getByText("Using Claude Sonnet 5.5 automatically"),
   ).toBeVisible()
 
   const updateRequest = page.waitForRequest((request) =>
     request.url().endsWith("/settings/api/models/claude-code-auto"),
   )
-  await fast.selectOption("gpt-5.6-mini")
+  await fast.selectOption("gpt-5.6-luna")
 
   expect((await updateRequest).postDataJSON()).toEqual({
-    fast: "gpt-5.6-mini",
+    fast: "gpt-5.6-luna",
   })
-  await expect(fast).toHaveValue("gpt-5.6-mini")
+  await expect(fast).toHaveValue("gpt-5.6-luna")
   await expect(capable).toHaveValue("")
 })
 
@@ -91,14 +91,14 @@ test("renders GPT models chosen automatically when Claude tiers are absent", asy
           ...initial.claude_code_auto,
           fast: {
             configured: null,
-            effective: "gpt-5.6-mini",
+            effective: "gpt-5.6-luna",
             source: "automatic",
             status: "ready",
             reason: "small-gpt",
           },
           capable: {
             configured: null,
-            effective: "gpt-5.6",
+            effective: "gpt-6.1-sol",
             source: "automatic",
             status: "ready",
             reason: "gpt",
@@ -109,8 +109,8 @@ test("renders GPT models chosen automatically when Claude tiers are absent", asy
   })
 
   await openModels(page)
-  await expect(page.getByText("Using GPT-5.6 Mini automatically")).toBeVisible()
-  await expect(page.getByText("Using GPT-5.6 automatically")).toBeVisible()
+  await expect(page.getByText("Using GPT-5.6 Luna automatically")).toBeVisible()
+  await expect(page.getByText("Using GPT-6.1 Sol automatically")).toBeVisible()
 })
 
 test("disables both controls while a save is in flight", async ({ page }) => {
@@ -127,7 +127,7 @@ test("disables both controls while a save is in flight", async ({ page }) => {
   await openModels(page)
   const fast = page.getByLabel("Fast and background work")
   const capable = page.getByLabel("Capable work")
-  const save = fast.selectOption("gpt-5.6-mini")
+  const save = fast.selectOption("gpt-5.6-luna")
   await expect(fast).toBeDisabled()
   await expect(capable).toBeDisabled()
   gate.release()
@@ -144,7 +144,7 @@ test("keeps prior state and reports a failed save", async ({ page }) => {
 
   await openModels(page)
   const fast = page.getByLabel("Fast and background work")
-  await fast.selectOption("gpt-5.6-mini")
+  await fast.selectOption("gpt-5.6-luna")
 
   await expect(fast).toHaveValue("")
   await expect(

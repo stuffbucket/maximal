@@ -10,6 +10,7 @@ import type { Model, ModelsResponse } from "~/services/copilot/get-models"
 import {
   applyProxyBaseUrl,
   getClaudeCodeSettingsPath,
+  isProxyBaseUrlConfigured,
   readClaudeCodeSettings,
   writeClaudeCodeSettings,
 } from "~/apps/claude-code/config"
@@ -92,6 +93,8 @@ async function json(res: Response): Promise<ModelsListResponse> {
   return (await res.json()) as ModelsListResponse
 }
 
+const resolveTestKey = () =>
+  ({ ok: true, key: "test-key", source: "app" }) as const
 const originalFetch = globalThis.fetch
 const originalConfigDir = process.env.CLAUDE_CONFIG_DIR
 const saved = {
@@ -183,6 +186,21 @@ describe("GET and refresh Claude Code Auto models", () => {
       haikuA.id,
     )
   })
+
+  test.skipIf(process.platform === "win32")(
+    "a symlinked Claude settings file does not break read-only model state",
+    async () => {
+      const target = path.join(configDir, "real-settings.json")
+      fs.writeFileSync(target, JSON.stringify({ theme: "dark" }))
+      fs.symlinkSync(target, getClaudeCodeSettingsPath())
+
+      const response = await buildApp().request("/settings/api/models")
+
+      expect(response.status).toBe(200)
+      expect((await json(response)).claude_code_auto.applied).toBe(false)
+      expect(isProxyBaseUrlConfigured()).toBe(false)
+    },
+  )
 })
 
 describe("PATCH Claude Code Auto models", () => {
@@ -353,5 +371,86 @@ describe("PATCH Claude Code Auto models", () => {
       status: "unavailable",
       reason: "override-unavailable",
     })
+  })
+})
+
+describe("explicit Automatic claims", () => {
+  test("Automatic stays owned after superseding a pre-existing external value", async () => {
+    writeClaudeCodeSettings(getClaudeCodeSettingsPath(), {
+      env: { ANTHROPIC_DEFAULT_HAIKU_MODEL: fullGpt.id },
+    })
+    writeConfig({
+      auth: { apiKeys: ["test-key"] },
+      apps: { claudeCode: { enabled: true } },
+    })
+    applyProxyBaseUrl(getClaudeCodeSettingsPath(), resolveTestKey)
+    const app = buildApp()
+    await app.request("/settings/api/models/claude-code-auto", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ fast: smallGpt.id }),
+    })
+
+    const automatic = await app.request(
+      "/settings/api/models/claude-code-auto",
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ fast: null }),
+      },
+    )
+
+    expect((await json(automatic)).claude_code_auto.fast).toMatchObject({
+      configured: null,
+      effective: haikuA.id,
+      source: "automatic",
+    })
+    expect(
+      (readClaudeCodeSettings().env as Record<string, unknown>)
+        .ANTHROPIC_DEFAULT_HAIKU_MODEL,
+    ).toBe(haikuA.id)
+    applyProxyBaseUrl(getClaudeCodeSettingsPath(), resolveTestKey)
+    expect(
+      (readClaudeCodeSettings().env as Record<string, unknown>)
+        .ANTHROPIC_DEFAULT_HAIKU_MODEL,
+    ).toBe(haikuA.id)
+  })
+
+  test("Automatic stays owned after superseding a later direct edit", async () => {
+    writeConfig({
+      auth: { apiKeys: ["test-key"] },
+      apps: {
+        claudeCode: { enabled: true, fastModel: smallGpt.id },
+      },
+    })
+    applyProxyBaseUrl(getClaudeCodeSettingsPath(), resolveTestKey)
+    const settings = readClaudeCodeSettings()
+    writeClaudeCodeSettings(getClaudeCodeSettingsPath(), {
+      ...settings,
+      env: {
+        ...(settings.env as Record<string, unknown>),
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: fullGpt.id,
+      },
+    })
+
+    const automatic = await buildApp().request(
+      "/settings/api/models/claude-code-auto",
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ fast: null }),
+      },
+    )
+
+    expect((await json(automatic)).claude_code_auto.fast).toMatchObject({
+      configured: null,
+      effective: haikuA.id,
+      source: "automatic",
+    })
+    applyProxyBaseUrl(getClaudeCodeSettingsPath(), resolveTestKey)
+    expect(
+      (readClaudeCodeSettings().env as Record<string, unknown>)
+        .ANTHROPIC_DEFAULT_HAIKU_MODEL,
+    ).toBe(haikuA.id)
   })
 })

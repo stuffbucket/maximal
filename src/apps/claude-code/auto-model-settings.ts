@@ -27,6 +27,7 @@ type OwnedSource = "automatic" | "maximal-override"
 interface AutoModelMarkerEntry {
   id: string
   source: OwnedSource
+  claimed?: boolean
 }
 
 interface AutoModelMarker {
@@ -64,7 +65,11 @@ function readMarker(settings: Record<string, unknown>): AutoModelMarker {
     ) {
       return undefined
     }
-    return { id: entry.id, source: entry.source }
+    return {
+      id: entry.id,
+      source: entry.source,
+      ...(entry.claimed === true ? { claimed: true } : {}),
+    }
   }
   return {
     ...(readEntry("fast") ? { fast: readEntry("fast") } : {}),
@@ -82,6 +87,13 @@ function stringValue(value: unknown): string | undefined {
     : undefined
 }
 
+function changedFromPrior(context: AutoModelContext, key: string): boolean {
+  if (!(key in context.prior)) return false
+  const prior = context.prior[key]
+  if (prior === SETTINGS_UNSET) return key in context.env
+  return !(key in context.env) || !Object.is(context.env[key], prior)
+}
+
 function ownershipForTier(
   context: AutoModelContext,
   tier: ClaudeAutoTier,
@@ -90,10 +102,10 @@ function ownershipForTier(
   const current = stringValue(context.env[key])
   const marker = context.marker[tier]
   if (marker && current === marker.id) return { kind: "owned", marker }
-  if (current)
-    return { kind: "external-value", value: current, diverged: Boolean(marker) }
-  if (marker || key in context.env) {
-    return { kind: "external-absent", diverged: Boolean(marker) }
+  const diverged = Boolean(marker) || changedFromPrior(context, key)
+  if (current) return { kind: "external-value", value: current, diverged }
+  if (marker || key in context.env || diverged) {
+    return { kind: "external-absent", diverged }
   }
   return { kind: "unmanaged" }
 }
@@ -163,16 +175,24 @@ interface TierPolicyInput {
   previousAutomatic?: string
 }
 
+function resolveEffectiveOwnership(
+  context: AutoModelContext,
+  tier: ClaudeAutoTier,
+  ownership: TierOwnership,
+): TierOwnership {
+  if (ownership.kind !== "owned" || ownership.marker.claimed) {
+    return ownership.kind === "owned" ? { kind: "unmanaged" } : ownership
+  }
+  return priorOwnership(context, tier) ?? { kind: "unmanaged" }
+}
+
 function tierPolicyInput(
   context: AutoModelContext,
   tier: ClaudeAutoTier,
   claims: ReadonlySet<ClaudeAutoTier>,
 ): TierPolicyInput {
   const ownership = ownershipForTier(context, tier)
-  const effectiveOwnership =
-    ownership.kind === "owned" ?
-      (priorOwnership(context, tier) ?? { kind: "unmanaged" as const })
-    : ownership
+  const effective = resolveEffectiveOwnership(context, tier, ownership)
   const claimed = claims.has(tier)
   const appConfig = getConfig().apps?.claudeCode
   const configured =
@@ -180,8 +200,8 @@ function tierPolicyInput(
   return {
     configured,
     override: canOwnTier(ownership, claimed) ? configured : undefined,
-    external: claimed ? undefined : externalId(effectiveOwnership),
-    externalAbsent: !claimed && effectiveOwnership.kind === "external-absent",
+    external: claimed ? undefined : externalId(effective),
+    externalAbsent: !claimed && effective.kind === "external-absent",
     previousAutomatic:
       ownership.kind === "owned" && ownership.marker.source === "automatic" ?
         ownership.marker.id
@@ -250,12 +270,17 @@ function snapshotTierIfNeeded(input: {
 }
 
 function applyTier(input: {
+  claimed: boolean
   context: AutoModelContext
   outputEnv: Record<string, unknown>
   resolution: ClaudeAutoTierState
   tier: ClaudeAutoTier
 }): { env: Record<string, unknown>; marker?: AutoModelMarkerEntry } {
   const key = TIER_KEYS[input.tier]
+  const ownership = ownershipForTier(input.context, input.tier)
+  const claimed =
+    input.claimed
+    || (ownership.kind === "owned" && ownership.marker.claimed === true)
   if (
     input.resolution.status === "ready"
     && (input.resolution.source === "automatic"
@@ -267,10 +292,11 @@ function applyTier(input: {
       marker: {
         id: input.resolution.effective,
         source: input.resolution.source,
+        ...(claimed ? { claimed: true } : {}),
       },
     }
   }
-  if (ownershipForTier(input.context, input.tier).kind === "owned") {
+  if (ownership.kind === "owned") {
     return {
       env: withRestoredField(
         input.outputEnv,
@@ -316,6 +342,7 @@ export function mergeClaudeAutoModelSettings(input: {
 
   const marker: AutoModelMarker = {}
   const fast = applyTier({
+    claimed: claims.has("fast"),
     context,
     outputEnv: input.env,
     resolution: resolution.fast,
@@ -324,6 +351,7 @@ export function mergeClaudeAutoModelSettings(input: {
   let env = fast.env
   if (fast.marker) marker.fast = fast.marker
   const capable = applyTier({
+    claimed: claims.has("capable"),
     context,
     outputEnv: env,
     resolution: resolution.capable,

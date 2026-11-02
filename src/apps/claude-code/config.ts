@@ -129,7 +129,11 @@ function readClaudeCodeSettingsSnapshot(
 export function readClaudeCodeSettings(
   filePath: string = getClaudeCodeSettingsPath(),
 ): Record<string, unknown> {
-  return readClaudeCodeSettingsSnapshot(filePath).settings
+  try {
+    return readClaudeCodeSettingsSnapshot(filePath).settings
+  } catch {
+    return {}
+  }
 }
 
 export type BaseUrlOwnership = "ours" | "foreign" | "absent"

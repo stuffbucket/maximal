@@ -120,6 +120,34 @@ describe("isClaudeAutoModelEligible", () => {
     } as unknown as Model
     expect(isClaudeAutoModelEligible(sparse)).toBe(false)
   })
+
+  test("rejects malformed ids and endpoint containers", () => {
+    expect(isClaudeAutoModelEligible(model(""))).toBe(false)
+    expect(
+      isClaudeAutoModelEligible({
+        ...model("numeric-id"),
+        id: 42,
+      } as unknown as Model),
+    ).toBe(false)
+    expect(
+      isClaudeAutoModelEligible({
+        ...model("missing-endpoints"),
+        supported_endpoints: undefined,
+      }),
+    ).toBe(false)
+    expect(
+      isClaudeAutoModelEligible({
+        ...model("non-array-endpoints"),
+        supported_endpoints: "/responses",
+      } as unknown as Model),
+    ).toBe(false)
+    expect(
+      isClaudeAutoModelEligible({
+        ...model("non-string-endpoint"),
+        supported_endpoints: [42],
+      } as unknown as Model),
+    ).toBe(false)
+  })
 })
 
 describe("resolveClaudeAutoModels", () => {
@@ -141,6 +169,12 @@ describe("resolveClaudeAutoModels", () => {
       status: "ready",
       reason: "sonnet",
     })
+  })
+
+  test("does not mistake an earlier Haiku for the capable Sonnet tier", () => {
+    const result = resolveClaudeAutoModels({ models: [haiku, sonnet] })
+    expect(result.capable.effective).toBe(sonnet.id)
+    expect(result.capable.reason).toBe("sonnet")
   })
 
   test("requires a Claude family or id signal for a Claude tier", () => {
@@ -214,6 +248,20 @@ describe("resolveClaudeAutoModels", () => {
     ).toBe(stable.id)
   })
 
+  test("uses catalog order when every candidate is a preview", () => {
+    const first = model("gpt-mini-preview-first", {
+      family: "gpt-mini",
+      preview: true,
+    })
+    const second = model("gpt-mini-preview-second", {
+      family: "gpt-mini",
+      preview: true,
+    })
+    expect(
+      resolveClaudeAutoModels({ models: [first, second] }).fast.effective,
+    ).toBe(first.id)
+  })
+
   test("prefers explicitly zero-priced models without comparing paid rates", () => {
     const paidLow = model("gpt-mini-paid-low", {
       family: "gpt-mini",
@@ -242,6 +290,40 @@ describe("resolveClaudeAutoModels", () => {
     expect(
       resolveClaudeAutoModels({ models: [first, second] }).fast.effective,
     ).toBe(first.id)
+  })
+
+  test("never uses an unrelated eligible model as a GPT fallback", () => {
+    const unrelated = model("vendor-chat", {
+      family: "vendor-chat",
+      vendor: "other",
+    })
+    expect(
+      resolveClaudeAutoModels({ models: [unrelated, fullGpt] }).fast.effective,
+    ).toBe(fullGpt.id)
+    expect(
+      resolveClaudeAutoModels({ models: [unrelated, smallGpt] }).capable
+        .effective,
+    ).toBe(smallGpt.id)
+  })
+})
+
+describe("resolveClaudeAutoModels precedence and empty states", () => {
+  test("ignores whitespace-only overrides and external settings", () => {
+    const result = resolveClaudeAutoModels({
+      models: [haiku, sonnet],
+      overrides: { fast: "   " },
+      external: { capable: "   " },
+    })
+    expect(result.fast.effective).toBe(haiku.id)
+    expect(result.fast.source).toBe("automatic")
+    expect(result.capable.effective).toBe(sonnet.id)
+    expect(result.capable.source).toBe("automatic")
+  })
+
+  test("returns only eligible choices in the resolution", () => {
+    const ineligible = model("hidden", { picker: false })
+    const result = resolveClaudeAutoModels({ models: [ineligible, haiku] })
+    expect(result.eligibleModels.map((entry) => entry.id)).toEqual([haiku.id])
   })
 
   test("an eligible Maximal override wins over external and automatic values", () => {

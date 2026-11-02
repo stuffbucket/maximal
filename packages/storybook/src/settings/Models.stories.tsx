@@ -52,14 +52,14 @@ export const GptFallback = state({
       ...signedInModels.claude_code_auto,
       fast: {
         configured: null,
-        effective: "gpt-5.6-mini",
+        effective: "gpt-5.6-luna",
         source: "automatic",
         status: "ready",
         reason: "small-gpt",
       },
       capable: {
         configured: null,
-        effective: "gpt-5.6",
+        effective: "gpt-6.1-sol",
         source: "automatic",
         status: "ready",
         reason: "gpt",
@@ -109,7 +109,7 @@ export const SlowSave: Story = {
   play: async ({ canvasElement }) => {
     await userEvent.selectOptions(
       within(canvasElement).getByLabelText("Fast and background work"),
-      "gpt-5.6-mini",
+      "gpt-5.6-luna",
     );
   },
 };
@@ -129,7 +129,7 @@ export const SaveFailure: Story = {
   play: async ({ canvasElement }) => {
     await userEvent.selectOptions(
       within(canvasElement).getByLabelText("Fast and background work"),
-      "gpt-5.6-mini",
+      "gpt-5.6-luna",
     );
   },
 };
