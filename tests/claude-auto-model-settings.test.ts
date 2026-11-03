@@ -5,12 +5,17 @@ import path from "node:path"
 
 import type { Model, ModelsResponse } from "~/services/copilot/get-models"
 
-import { UNAVAILABLE_CLASSIFIER_MODEL } from "~/apps/claude-code/auto-model-settings"
+import {
+  AUTO_MODELS_JOURNAL_KEY,
+  AUTO_MODELS_OWNERSHIP_KEY,
+  UNAVAILABLE_CLASSIFIER_MODEL,
+} from "~/apps/claude-code/auto-model-settings"
 import {
   applyProxyBaseUrl,
   getClaudeAutoModelsState,
   readClaudeCodeSettings,
   revertProxyBaseUrl,
+  revertProxyBaseUrlForShutdown,
   writeClaudeCodeSettings,
 } from "~/apps/claude-code/config"
 import { writeConfig } from "~/lib/config/config"
@@ -54,6 +59,9 @@ const haiku = model("claude-haiku-4.6", "claude-haiku", {
 const sonnet = model("claude-sonnet-4.7", "claude-sonnet", {
   vendor: "anthropic",
   endpoint: "/v1/messages",
+})
+const olderSmallGpt = model("gpt-5.5-mini", "gpt-5.5-mini", {
+  vendor: "openai",
 })
 const smallGpt = model("gpt-5.6-mini", "gpt-5.6-mini", {
   vendor: "openai",
@@ -395,6 +403,318 @@ describe("Claude Code model-setting ownership transitions", () => {
     })
     revertProxyBaseUrl(settingsPath)
     expect(readEnv()).toEqual({ CLAUDE_CODE_AUTO_MODE_MODEL: fullGpt.id })
+  })
+})
+
+describe("Claude Code model ownership across shutdown", () => {
+  test("a direct classifier edit survives shutdown and fresh boot", () => {
+    writeConfig({
+      apps: { claudeCode: { classifierModel: smallGpt.id } },
+    })
+    apply()
+    const settings = readClaudeCodeSettings(settingsPath)
+    writeClaudeCodeSettings(settingsPath, {
+      ...settings,
+      env: {
+        ...(settings.env as Record<string, unknown>),
+        CLAUDE_CODE_AUTO_MODE_MODEL: fullGpt.id,
+      },
+    })
+    apply()
+
+    revertProxyBaseUrlForShutdown(settingsPath)
+    expect(readEnv().CLAUDE_CODE_AUTO_MODE_MODEL).toBe(fullGpt.id)
+    expect(readClaudeCodeSettings(settingsPath)).toHaveProperty(
+      AUTO_MODELS_JOURNAL_KEY,
+    )
+
+    apply()
+    expect(readEnv().CLAUDE_CODE_AUTO_MODE_MODEL).toBe(fullGpt.id)
+    expect(getClaudeAutoModelsState(settingsPath).classifier.source).toBe(
+      "claude-code-setting",
+    )
+  })
+
+  test("an edit made while Maximal is stopped becomes user-owned", () => {
+    writeConfig({
+      apps: { claudeCode: { classifierModel: smallGpt.id } },
+    })
+    apply()
+    revertProxyBaseUrlForShutdown(settingsPath)
+    const settings = readClaudeCodeSettings(settingsPath)
+    writeClaudeCodeSettings(settingsPath, {
+      ...settings,
+      env: {
+        ...(settings.env as Record<string, unknown>),
+        CLAUDE_CODE_AUTO_MODE_MODEL: fullGpt.id,
+      },
+    })
+
+    apply()
+
+    expect(readEnv().CLAUDE_CODE_AUTO_MODE_MODEL).toBe(fullGpt.id)
+    expect(getClaudeAutoModelsState(settingsPath).classifier.source).toBe(
+      "claude-code-setting",
+    )
+  })
+
+  test("a stopped edit matching the old owned ID stays user-owned", () => {
+    apply()
+    revertProxyBaseUrlForShutdown(settingsPath)
+    const settings = readClaudeCodeSettings(settingsPath)
+    writeClaudeCodeSettings(settingsPath, {
+      ...settings,
+      env: {
+        ...(settings.env as Record<string, unknown>),
+        CLAUDE_CODE_AUTO_MODE_MODEL: smallGpt.id,
+      },
+    })
+
+    apply()
+
+    expect(getClaudeAutoModelsState(settingsPath).classifier.source).toBe(
+      "claude-code-setting",
+    )
+    revertProxyBaseUrl(settingsPath)
+    expect(readEnv().CLAUDE_CODE_AUTO_MODE_MODEL).toBe(smallGpt.id)
+  })
+
+  test("a direct deletion survives shutdown and fresh boot", () => {
+    writeConfig({ apps: { claudeCode: { fastModel: smallGpt.id } } })
+    apply()
+    const settings = readClaudeCodeSettings(settingsPath)
+    const { ANTHROPIC_DEFAULT_HAIKU_MODEL: _removed, ...env } =
+      settings.env as Record<string, unknown>
+    writeClaudeCodeSettings(settingsPath, { ...settings, env })
+    apply()
+
+    revertProxyBaseUrlForShutdown(settingsPath)
+    apply()
+
+    expect(readEnv()).not.toHaveProperty("ANTHROPIC_DEFAULT_HAIKU_MODEL")
+    expect(getClaudeAutoModelsState(settingsPath).fast.source).toBe(
+      "claude-code-setting",
+    )
+  })
+
+  test("an Automatic choice stays sticky across shutdown and catalog reorder", () => {
+    apply()
+    expect(readEnv().CLAUDE_CODE_AUTO_MODE_MODEL).toBe(smallGpt.id)
+
+    revertProxyBaseUrlForShutdown(settingsPath)
+    setCatalog([haiku, sonnet, olderSmallGpt, smallGpt, fullGpt])
+    apply()
+
+    expect(readEnv().CLAUDE_CODE_AUTO_MODE_MODEL).toBe(smallGpt.id)
+    expect(getClaudeAutoModelsState(settingsPath).classifier.source).toBe(
+      "automatic",
+    )
+  })
+
+  test("a still-eligible Automatic choice survives a higher-priority arrival", () => {
+    setCatalog([sonnet, smallGpt, fullGpt])
+    apply()
+    expect(readEnv().ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe(smallGpt.id)
+    revertProxyBaseUrlForShutdown(settingsPath)
+
+    setCatalog([haiku, sonnet, smallGpt, fullGpt])
+    apply()
+
+    expect(readEnv().ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe(smallGpt.id)
+  })
+
+  test("alias Automatic choices survive a boot without a catalog", () => {
+    const alternateHaiku = { ...haiku, id: "claude-haiku-alternate" }
+    apply()
+    expect(readEnv().ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe(haiku.id)
+    revertProxyBaseUrlForShutdown(settingsPath)
+
+    setCatalog([])
+    apply()
+    expect(readEnv()).not.toHaveProperty("ANTHROPIC_DEFAULT_HAIKU_MODEL")
+    revertProxyBaseUrlForShutdown(settingsPath)
+    apply()
+    expect(readEnv()).not.toHaveProperty("ANTHROPIC_DEFAULT_HAIKU_MODEL")
+
+    setCatalog([alternateHaiku, haiku, sonnet, smallGpt, fullGpt])
+    apply()
+    expect(readEnv().ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe(haiku.id)
+  })
+
+  test("an edit matching a suspended alias ID becomes user-owned", () => {
+    apply()
+    setCatalog([])
+    apply()
+    const settings = readClaudeCodeSettings(settingsPath)
+    writeClaudeCodeSettings(settingsPath, {
+      ...settings,
+      env: {
+        ...(settings.env as Record<string, unknown>),
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: haiku.id,
+      },
+    })
+
+    apply()
+
+    expect(getClaudeAutoModelsState(settingsPath).fast.source).toBe(
+      "claude-code-setting",
+    )
+    revertProxyBaseUrl(settingsPath)
+    expect(readEnv().ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe(haiku.id)
+  })
+
+  test("an explicit Maximal choice survives shutdown and fresh boot", () => {
+    writeConfig({
+      apps: { claudeCode: { classifierModel: fullGpt.id } },
+    })
+    apply()
+
+    revertProxyBaseUrlForShutdown(settingsPath)
+    expect(readEnv()).not.toHaveProperty("CLAUDE_CODE_AUTO_MODE_MODEL")
+    apply()
+
+    expect(readEnv().CLAUDE_CODE_AUTO_MODE_MODEL).toBe(fullGpt.id)
+    expect(getClaudeAutoModelsState(settingsPath).classifier.source).toBe(
+      "maximal-override",
+    )
+  })
+})
+
+describe("Claude Code model journal lifecycle", () => {
+  test("explicit disable restores prior state and clears suspended ownership", () => {
+    writeClaudeCodeSettings(settingsPath, {
+      env: { CLAUDE_CODE_AUTO_MODE_MODEL: "gpt-original" },
+    })
+    writeConfig({
+      apps: { claudeCode: { classifierModel: fullGpt.id } },
+    })
+    apply()
+    revertProxyBaseUrlForShutdown(settingsPath)
+
+    revertProxyBaseUrl(settingsPath)
+
+    expect(readEnv()).toEqual({ CLAUDE_CODE_AUTO_MODE_MODEL: "gpt-original" })
+    expect(readClaudeCodeSettings(settingsPath)).not.toHaveProperty(
+      AUTO_MODELS_JOURNAL_KEY,
+    )
+  })
+
+  test("repeated catalogless boots preserve a claimed prior value", () => {
+    writeClaudeCodeSettings(settingsPath, {
+      env: { ANTHROPIC_DEFAULT_HAIKU_MODEL: "gpt-original" },
+    })
+    apply()
+    applyProxyBaseUrl(settingsPath, resolveTestKey, {
+      claimAutoModels: new Set(["fast"]),
+    })
+    expect(readEnv().ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe(haiku.id)
+    revertProxyBaseUrlForShutdown(settingsPath)
+    expect(readEnv().ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe("gpt-original")
+
+    setCatalog([])
+    apply()
+    expect(readEnv().ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe("gpt-original")
+    revertProxyBaseUrlForShutdown(settingsPath)
+    apply()
+    expect(readEnv().ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe("gpt-original")
+
+    revertProxyBaseUrl(settingsPath)
+    expect(readEnv().ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe("gpt-original")
+  })
+
+  test("repeated shutdown hooks preserve the ownership journal", () => {
+    apply()
+    expect(revertProxyBaseUrlForShutdown(settingsPath).wrote).toBe(true)
+    const suspended = readClaudeCodeSettings(settingsPath)
+
+    expect(revertProxyBaseUrlForShutdown(settingsPath).wrote).toBe(false)
+    expect(readClaudeCodeSettings(settingsPath)).toEqual(suspended)
+  })
+
+  test("a malformed live marker does not suppress a valid journal", () => {
+    apply()
+    revertProxyBaseUrlForShutdown(settingsPath)
+    const suspended = readClaudeCodeSettings(settingsPath)
+    writeClaudeCodeSettings(settingsPath, {
+      ...suspended,
+      [AUTO_MODELS_OWNERSHIP_KEY]: null,
+    })
+    setCatalog([haiku, sonnet, olderSmallGpt, smallGpt, fullGpt])
+
+    apply()
+
+    expect(readEnv().CLAUDE_CODE_AUTO_MODE_MODEL).toBe(smallGpt.id)
+    expect(readClaudeCodeSettings(settingsPath)).not.toHaveProperty(
+      AUTO_MODELS_JOURNAL_KEY,
+    )
+  })
+
+  test("an unknown future journal survives rollback apply and shutdown", () => {
+    const futureJournal = {
+      version: 2,
+      tiers: {
+        classifier: {
+          marker: { id: "future-model", source: "automatic" },
+          ownership: "owned",
+          prior: "__UNSET__",
+        },
+      },
+    }
+    writeClaudeCodeSettings(settingsPath, {
+      env: { CLAUDE_CODE_AUTO_MODE_MODEL: "future-model" },
+      [AUTO_MODELS_JOURNAL_KEY]: futureJournal,
+    })
+
+    apply()
+    expect(readEnv().CLAUDE_CODE_AUTO_MODE_MODEL).toBe("future-model")
+    expect(
+      readClaudeCodeSettings(settingsPath)[AUTO_MODELS_JOURNAL_KEY],
+    ).toEqual(futureJournal)
+
+    revertProxyBaseUrlForShutdown(settingsPath)
+    expect(
+      readClaudeCodeSettings(settingsPath)[AUTO_MODELS_JOURNAL_KEY],
+    ).toEqual(futureJournal)
+    apply()
+    expect(readEnv().CLAUDE_CODE_AUTO_MODE_MODEL).toBe("future-model")
+
+    revertProxyBaseUrl(settingsPath)
+    expect(readEnv().CLAUDE_CODE_AUTO_MODE_MODEL).toBe("future-model")
+    expect(readClaudeCodeSettings(settingsPath)).not.toHaveProperty(
+      AUTO_MODELS_JOURNAL_KEY,
+    )
+  })
+
+  test("live ownership after a crash takes precedence over a stale journal", () => {
+    apply()
+    revertProxyBaseUrlForShutdown(settingsPath)
+    const journal =
+      readClaudeCodeSettings(settingsPath)[AUTO_MODELS_JOURNAL_KEY]
+    setCatalog([haiku, sonnet, olderSmallGpt, smallGpt, fullGpt])
+    apply()
+    const active = readClaudeCodeSettings(settingsPath)
+    writeClaudeCodeSettings(settingsPath, {
+      ...active,
+      env: {
+        ...(active.env as Record<string, unknown>),
+        CLAUDE_CODE_AUTO_MODE_MODEL: olderSmallGpt.id,
+      },
+      [AUTO_MODELS_OWNERSHIP_KEY]: {
+        ...((active[AUTO_MODELS_OWNERSHIP_KEY] ?? {}) as Record<
+          string,
+          unknown
+        >),
+        classifier: { id: olderSmallGpt.id, source: "automatic" },
+      },
+      [AUTO_MODELS_JOURNAL_KEY]: journal,
+    })
+
+    apply()
+
+    expect(readEnv().CLAUDE_CODE_AUTO_MODE_MODEL).toBe(olderSmallGpt.id)
+    expect(readClaudeCodeSettings(settingsPath)).not.toHaveProperty(
+      AUTO_MODELS_JOURNAL_KEY,
+    )
   })
 })
 
