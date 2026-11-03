@@ -111,7 +111,69 @@ describe("generated pull request validation", () => {
 })
 
 describe("release action supply chain", () => {
-  test("external actions use current immutable releases", async () => {
+  test("all external actions use immutable release pins", async () => {
+    const workflowDir = new URL("../.github/workflows/", import.meta.url)
+    const workflowNames = (await readdir(workflowDir)).filter((name) =>
+      /\.ya?ml$/u.test(name),
+    )
+    const actionDir = new URL("../.github/actions/", import.meta.url)
+    const actionNames = (await readdir(actionDir, { withFileTypes: true }))
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+    const sources = await Promise.all([
+      ...workflowNames.map(
+        async (name) =>
+          [`workflows/${name}`, await readWorkflow(name)] as const,
+      ),
+      ...actionNames.map(
+        async (name) =>
+          [
+            `actions/${name}/action.yml`,
+            await readRepoFile(`.github/actions/${name}/action.yml`),
+          ] as const,
+      ),
+    ])
+    const violations: Array<string> = []
+
+    for (const [path, source] of sources) {
+      for (const [index, line] of source.split("\n").entries()) {
+        const actionUse = line.match(/^\s*(?:-\s*)?uses:\s+(\S.*)$/u)?.[1]
+        if (!actionUse || actionUse.startsWith("./")) continue
+        if (!/^[^@\s]+@[0-9a-f]{40} # v\d+\.\d+\.\d+$/u.test(actionUse)) {
+          violations.push(`${path}:${index + 1}: ${actionUse}`)
+        }
+      }
+    }
+
+    expect(violations).toEqual([])
+  })
+
+  test("workflow project runtimes use the canonical Node pin", async () => {
+    const canonicalNode = (await readRepoFile("mise.toml")).match(
+      /^node = "([^"]+)"$/mu,
+    )?.[1]
+    if (!canonicalNode) throw new Error("mise.toml does not pin Node")
+
+    const workflowDir = new URL("../.github/workflows/", import.meta.url)
+    const workflowNames = (await readdir(workflowDir)).filter((name) =>
+      /\.ya?ml$/u.test(name),
+    )
+    const configuredVersions = (
+      await Promise.all(workflowNames.map((name) => readWorkflow(name)))
+    ).flatMap((workflow) =>
+      Array.from(
+        workflow.matchAll(/^\s*node-version:\s+["']?([^"'\s]+)["']?\s*$/gmu),
+        (match) => match[1],
+      ),
+    )
+
+    expect(configuredVersions.length).toBeGreaterThan(0)
+    for (const version of configuredVersions) {
+      expect(version).toBe(canonicalNode)
+    }
+  })
+
+  test("release actions use the expected current releases", async () => {
     const workflow = await readWorkflow("release.yml")
     const externalUses = workflow.split("\n").flatMap((line) => {
       const marker = "uses: "
@@ -127,11 +189,11 @@ describe("release action supply chain", () => {
         11,
       ],
       [
-        "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1",
+        "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2",
         2,
       ],
       [
-        "actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2",
+        "actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0",
         1,
       ],
     ])

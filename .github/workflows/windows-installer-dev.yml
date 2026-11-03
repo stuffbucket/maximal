@@ -62,7 +62,7 @@ jobs:
       MISE_DISABLE_TOOLS: rust
       VERSION: ${{ github.event.inputs.version }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: ./.github/actions/setup-bun
         with:
@@ -129,7 +129,7 @@ jobs:
           ls -lh dist-bin
 
       - name: Upload binary artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-x64-dev
           path: dist-bin/
@@ -143,10 +143,10 @@ jobs:
     env:
       VERSION: ${{ github.event.inputs.version }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Download binary artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: windows-x64-dev
           path: dist-bin
@@ -191,7 +191,7 @@ jobs:
           Get-ChildItem dist-release
 
       - name: Upload MSI artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-msi-dev
           path: dist-release/*.msi
@@ -301,7 +301,7 @@ jobs:
 
       - name: Upload proxy logs (msi)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: msi-proxy-logs
           path: msi-proxy-logs
@@ -347,7 +347,7 @@ jobs:
 
       - name: Upload msiexec logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: msiexec-logs-dev
           path: |
@@ -367,10 +367,10 @@ jobs:
     env:
       VERSION: ${{ github.event.inputs.version }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Download binary artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: windows-x64-dev
           path: dist-bin
@@ -481,7 +481,7 @@ jobs:
 
       - name: Upload proxy logs (ps1)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ps1-proxy-logs
           path: ps1-proxy-logs
