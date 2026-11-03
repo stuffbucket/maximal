@@ -6,20 +6,28 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { readFileSync } from "node:fs"
+import { readdirSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
 
 import { emitSidecarReady, READY_MARKER } from "~/lib/start/boot-io"
 import { BOOT_STATUS_MARKER, emitBootStatus } from "~/start"
 
-const SHELL_LIB_RS = resolve(
+const SHELL_RUST_SRC = resolve(
   import.meta.dir,
   "..",
   "shell",
   "src-tauri",
   "src",
-  "lib.rs",
 )
+
+function readAllRustSources(dir: string): string {
+  return readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".rs"))
+    .map((entry) => readFileSync(resolve(dir, entry.name), "utf8"))
+    .join("\n")
+}
+
+const shellRustSources = readAllRustSources(SHELL_RUST_SRC)
 
 const PRIOR = process.env.MAXIMAL_SIDECAR_PARENT_PID
 const PRIOR_INSTANCE_ID = process.env.MAXIMAL_INSTANCE_ID
@@ -108,25 +116,23 @@ describe("sidecar marker cross-boundary invariants", () => {
   // literal to the TS constant so a one-sided edit fails CI instead of the
   // user's first launch.
   test("Rust BOOT_STATUS_MARKER literal equals the TS constant", () => {
-    const rust = readFileSync(SHELL_LIB_RS, "utf8")
-    const match = rust.match(
+    const match = shellRustSources.match(
       /const\s+BOOT_STATUS_MARKER\s*:\s*&str\s*=\s*"([^"]*)"\s*;/,
     )
     expect(
       match,
-      'could not find `const BOOT_STATUS_MARKER: &str = "…";` in shell/src-tauri/src/lib.rs',
+      'could not find `const BOOT_STATUS_MARKER: &str = "…";` under shell/src-tauri/src',
     ).not.toBeNull()
     expect(match?.[1]).toBe(BOOT_STATUS_MARKER)
   })
 
   test("Rust READY_MARKER literal equals the TS constant", () => {
-    const rust = readFileSync(SHELL_LIB_RS, "utf8")
-    const match = rust.match(
+    const match = shellRustSources.match(
       /const\s+READY_MARKER\s*:\s*&str\s*=\s*"([^"]*)"\s*;/,
     )
     expect(
       match,
-      'could not find `const READY_MARKER: &str = "…";` in shell/src-tauri/src/lib.rs',
+      'could not find `const READY_MARKER: &str = "…";` under shell/src-tauri/src',
     ).not.toBeNull()
     expect(match?.[1]).toBe(READY_MARKER)
   })

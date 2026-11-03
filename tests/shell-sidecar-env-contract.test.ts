@@ -4,7 +4,7 @@ import { resolve } from "node:path"
 
 /**
  * The Tauri shell hands the sidecar its launch context through environment
- * variables it sets on the spawned process (shell/src-tauri/src/lib.rs), and
+ * variables it sets on the spawned process (shell/src-tauri/src/*.rs), and
  * the sidecar reads them back by bare string literal somewhere under src/.
  * There is no compiler spanning that Rust↔TS boundary, so a one-sided rename
  * fails silently — and each of these contracts breaks a *different* launch
@@ -27,7 +27,7 @@ import { resolve } from "node:path"
  */
 
 const REPO_ROOT = resolve(import.meta.dir, "..")
-const SHELL_LIB_RS = resolve(REPO_ROOT, "shell", "src-tauri", "src", "lib.rs")
+const SHELL_RUST_SRC = resolve(REPO_ROOT, "shell", "src-tauri", "src")
 const SRC_DIR = resolve(REPO_ROOT, "src")
 
 /** Env-var names the shell injects into the sidecar that the sidecar must read. */
@@ -36,31 +36,34 @@ const LAUNCH_ENV_CONTRACTS = [
   "MAXIMAL_SHELL_KEY",
 ] as const
 
-function readAllTsSources(dir: string): string {
+function readAllSources(
+  dir: string,
+  extensions: ReadonlyArray<string>,
+): string {
   let combined = ""
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const full = resolve(dir, entry.name)
     if (entry.isDirectory()) {
-      combined += readAllTsSources(full)
-    } else if (entry.name.endsWith(".ts") || entry.name.endsWith(".tsx")) {
+      combined += readAllSources(full, extensions)
+    } else if (extensions.some((extension) => entry.name.endsWith(extension))) {
       combined += readFileSync(full, "utf8")
     }
   }
   return combined
 }
 
-const rustSource = readFileSync(SHELL_LIB_RS, "utf8")
-const tsSources = readAllTsSources(SRC_DIR)
+const rustSources = readAllSources(SHELL_RUST_SRC, [".rs"])
+const tsSources = readAllSources(SRC_DIR, [".ts", ".tsx"])
 
 describe("shell ↔ sidecar launch env contract", () => {
   for (const name of LAUNCH_ENV_CONTRACTS) {
-    test(`${name}: shell sets it (lib.rs) and the sidecar reads it (src/)`, () => {
+    test(`${name}: shell sets it (Rust) and the sidecar reads it (src/)`, () => {
       // Rust side: `cmd.env("NAME", …)` — match the name as a quoted literal
       // anywhere in the spawn wiring (whitespace/newlines vary).
-      const rustSets = rustSource.includes(`"${name}"`)
+      const rustSets = rustSources.includes(`"${name}"`)
       expect(
         rustSets,
-        `shell/src-tauri/src/lib.rs no longer sets ${name} on the sidecar — `
+        `No shell/src-tauri/src/*.rs file sets ${name} on the sidecar — `
           + `the sidecar still reads it, so launch wiring is now one-sided.`,
       ).toBe(true)
 
