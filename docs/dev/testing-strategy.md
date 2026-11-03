@@ -393,8 +393,8 @@ merge gate. Steps, in order:
 
 1. **Verify dispatched SHA** — on `workflow_dispatch`, fail if the checked-out
    SHA differs from the `expected_sha` input (the branch moved).
-2. Checkout, Node 24 setup, and verify Node `node:sqlite` support (the app
-   uses it).
+2. Checkout, canonical Node 22.23.2 setup, and verify Node `node:sqlite`
+   support (the app uses it).
 3. Pinned Bun setup (`.github/actions/setup-bun`).
 4. **Check Conventional Commit subjects** — on pull requests, the PR title and
    every commit subject (`bun scripts/check-commit-msg.ts --subjects`).

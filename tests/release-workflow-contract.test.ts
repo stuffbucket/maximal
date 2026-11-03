@@ -148,6 +148,19 @@ describe("release action supply chain", () => {
     expect(violations).toEqual([])
   })
 
+  test("the TruffleHog wrapper and scanner image use the same release", async () => {
+    const workflow = await readWorkflow("secret-scan.yml")
+    const wrapperVersion = workflow.match(
+      /trufflesecurity\/trufflehog@[0-9a-f]{40} # v(\d+\.\d+\.\d+)/u,
+    )?.[1]
+    const scannerVersion = workflow.match(
+      /^\s*version:\s+["']?([^"'\s]+)["']?\s*$/mu,
+    )?.[1]
+
+    expect(wrapperVersion).toBeDefined()
+    expect(scannerVersion).toBe(wrapperVersion)
+  })
+
   test("workflow project runtimes use the canonical Node pin", async () => {
     const canonicalNode = (await readRepoFile("mise.toml")).match(
       /^node = "([^"]+)"$/mu,
