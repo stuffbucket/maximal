@@ -23,7 +23,9 @@ export const CLASSIFIER_MODEL_KEY = "CLAUDE_CODE_AUTO_MODE_MODEL"
 export const UNAVAILABLE_CLASSIFIER_MODEL =
   "claude-maximal-auto-mode-unavailable"
 export const AUTO_MODELS_OWNERSHIP_KEY = "_maximalAutoModels"
+export const AUTO_MODELS_JOURNAL_KEY = "_maximalAutoModelsJournal"
 
+const AUTO_MODELS_JOURNAL_VERSION = 1
 const AUTO_MODEL_TIERS = ["fast", "capable", "classifier"] as const
 
 const TIER_KEYS = {
@@ -50,6 +52,17 @@ interface AutoModelMarker {
   fast?: AutoModelMarkerEntry
   capable?: AutoModelMarkerEntry
   classifier?: AutoModelMarkerEntry
+}
+
+interface AutoModelJournalTier {
+  marker: AutoModelMarkerEntry
+  ownership: "owned" | "external"
+  prior: unknown
+}
+
+interface AutoModelJournal {
+  version: typeof AUTO_MODELS_JOURNAL_VERSION
+  tiers: Partial<Record<ClaudeAutoTier, AutoModelJournalTier>>
 }
 
 type TierOwnership =
@@ -95,6 +108,56 @@ function readMarker(settings: Record<string, unknown>): AutoModelMarker {
     if (entry) marker[tier] = entry
   }
   return marker
+}
+
+function readJournalTier(
+  raw: unknown,
+  tier: ClaudeAutoTier,
+): AutoModelJournalTier | undefined {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return
+  const entry = raw as Record<string, unknown>
+  const marker = readMarker({
+    [AUTO_MODELS_OWNERSHIP_KEY]: { [tier]: entry.marker },
+  })[tier]
+  if (
+    !marker
+    || (entry.ownership !== "owned" && entry.ownership !== "external")
+    || !("prior" in entry)
+  ) {
+    return
+  }
+  return { marker, ownership: entry.ownership, prior: entry.prior }
+}
+
+function readJournal(raw: unknown): AutoModelJournal | null {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null
+  const record = raw as Record<string, unknown>
+  if (
+    record.version !== AUTO_MODELS_JOURNAL_VERSION
+    || typeof record.tiers !== "object"
+    || record.tiers === null
+    || Array.isArray(record.tiers)
+  ) {
+    return null
+  }
+  const rawTiers = record.tiers as Record<string, unknown>
+  const tiers: AutoModelJournal["tiers"] = {}
+  for (const tier of AUTO_MODEL_TIERS) {
+    const entry = readJournalTier(rawTiers[tier], tier)
+    if (entry) tiers[tier] = entry
+  }
+  return AUTO_MODEL_TIERS.some((tier) => tiers[tier]) ?
+      { version: AUTO_MODELS_JOURNAL_VERSION, tiers }
+    : null
+}
+
+function fieldMatchesSnapshot(
+  record: Record<string, unknown>,
+  key: string,
+  snapshot: unknown,
+): boolean {
+  if (snapshot === SETTINGS_UNSET) return !(key in record)
+  return key in record && Object.is(record[key], snapshot)
 }
 
 function readSessionModel(
@@ -435,6 +498,61 @@ function applyTier(input: {
     }
   }
   return { env: input.outputEnv }
+}
+
+export function suspendClaudeAutoModelSettings(input: {
+  settings: Record<string, unknown>
+  prior: Record<string, unknown> | null
+}): Record<string, unknown> | null {
+  const context: AutoModelContext = {
+    env: readSettingsEnv(input.settings),
+    marker: readMarker(input.settings),
+    prior: input.prior ?? {},
+    sessionModel: readSessionModel(input.settings),
+  }
+  const tiers: AutoModelJournal["tiers"] = {}
+  for (const tier of AUTO_MODEL_TIERS) {
+    const marker = context.marker[tier]
+    if (!marker) continue
+    const ownership = ownershipForTier(context, tier)
+    tiers[tier] = {
+      marker,
+      ownership: ownership.kind === "owned" ? "owned" : "external",
+      prior: priorField(context.prior, TIER_KEYS[tier]),
+    }
+  }
+  return AUTO_MODEL_TIERS.some((tier) => tiers[tier]) ?
+      { version: AUTO_MODELS_JOURNAL_VERSION, tiers }
+    : null
+}
+
+export function resumeClaudeAutoModelSettings(input: {
+  env: Record<string, unknown>
+  journal: unknown
+}): {
+  env: Record<string, unknown>
+  marker: unknown
+  prior: Record<string, unknown>
+} | null {
+  const journal = readJournal(input.journal)
+  if (!journal) return null
+  let env = input.env
+  const marker: AutoModelMarker = {}
+  const prior: Record<string, unknown> = {}
+  for (const tier of AUTO_MODEL_TIERS) {
+    const suspended = journal.tiers[tier]
+    if (!suspended) continue
+    const key = TIER_KEYS[tier]
+    marker[tier] = suspended.marker
+    prior[key] = suspended.prior
+    if (
+      suspended.ownership === "owned"
+      && fieldMatchesSnapshot(env, key, suspended.prior)
+    ) {
+      env = { ...env, [key]: suspended.marker.id }
+    }
+  }
+  return { env, marker, prior }
 }
 
 export function mergeClaudeAutoModelSettings(input: {
