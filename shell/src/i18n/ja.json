@@ -29,7 +29,7 @@
   "appearance-title": "外観",
   "appearance-sub": "デスクトップ上での Maximal の表示方法を設定します。",
   "appearance-dock-label": "{os, select, macos {Dock に常に表示} other {タスクバーに常に表示}}",
-  "appearance-dock-sub": "{os, select, macos {ウィンドウを閉じても Maximal を Dock に残します。Dock アイコンを右クリックするとクイックアクションを表示できます。} other {ウィンドウを閉じても Maximal をタスクバーに残します。アイコンを右クリックするとクイックアクションを表示できます。}}",
+  "appearance-dock-sub": "{os, select, macos {ウィンドウを閉じても Maximal を Dock に残します。Dock アイコンを右クリックするとクイックアクションを表示できます。} other {ウィンドウを閉じても Maximal をタスクバーに残します。}}",
 
   "common-copy": "コピー",
   "common-copied": "コピー済み",

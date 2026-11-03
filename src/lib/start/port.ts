@@ -9,6 +9,7 @@ import consola from "consola"
 
 import { getConfiguredApiKeys } from "~/lib/auth/request-auth"
 import { evictRunning } from "~/lib/platform/replace-running"
+import { emitBootStatus } from "~/lib/start/boot-status"
 
 /** Wrap evictRunning() with the CLI's error-handling. On failure to
  *  free the port we exit 1 with a readable message rather than dumping
@@ -60,9 +61,9 @@ export function reportPortBusyAndExit(
   process.exit(1)
 }
 
-export async function probePort(
-  port: number,
-): Promise<"free" | "maximal" | "other"> {
+export type PortState = "free" | "maximal" | "other"
+
+export async function probePort(port: number): Promise<PortState> {
   try {
     const res = await fetch(`http://localhost:${port}/`, {
       signal: AbortSignal.timeout(500),
@@ -72,5 +73,42 @@ export async function probePort(
     return text === "Server running" ? "maximal" : "other"
   } catch {
     return "free"
+  }
+}
+
+interface PortPreflightDependencies {
+  probePort: (port: number) => Promise<PortState>
+  maybeEvictRunning: (port: number) => Promise<void>
+  emitBootStatus: (message: string) => void
+  reportPortBusyAndExit: (
+    port: number,
+    occupant: Exclude<PortState, "free">,
+  ) => never
+}
+
+/** Probe before announcing a takeover so a routine --replace startup does not
+ * claim it found an old process. Occupied ports are probed again after eviction
+ * before the server spends time bootstrapping. */
+export async function preflightPort(
+  port: number,
+  replace: boolean,
+  dependencies: PortPreflightDependencies = {
+    probePort,
+    maybeEvictRunning,
+    emitBootStatus,
+    reportPortBusyAndExit,
+  },
+): Promise<void> {
+  if (port === 0) return
+
+  let portState = await dependencies.probePort(port)
+  if (replace && portState !== "free") {
+    dependencies.emitBootStatus(`Taking over port ${port}…`)
+    await dependencies.maybeEvictRunning(port)
+    portState = await dependencies.probePort(port)
+  }
+
+  if (portState !== "free") {
+    dependencies.reportPortBusyAndExit(port, portState)
   }
 }

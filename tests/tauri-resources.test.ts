@@ -13,7 +13,8 @@ import { dirname, resolve } from "node:path"
  */
 
 const REPO_ROOT = resolve(import.meta.dir, "..")
-const TAURI_CONF = resolve(REPO_ROOT, "shell", "src-tauri", "tauri.conf.json")
+const TAURI_ROOT = resolve(REPO_ROOT, "shell", "src-tauri")
+const TAURI_CONF = resolve(TAURI_ROOT, "tauri.conf.json")
 
 interface TauriConf {
   bundle?: {
@@ -56,10 +57,29 @@ describe("Tauri packaging contracts", () => {
     ])
   })
 
-  test("the NSIS installer and uninstaller stop the MCP broker first", () => {
-    // Without this an in-place update can't replace maximal-mcp-broker.exe
-    // while a broker or a Claude Desktop adapter runs it (the MSI and
-    // install.ps1 stop it too).
+  test("contains Windows sidecars before their suspended process starts", () => {
+    const cargo = readFileSync(resolve(TAURI_ROOT, "Cargo.toml"), "utf8")
+    const patchPath = "patches/tauri-plugin-shell-2.6.0"
+    expect(cargo).toContain('tauri-plugin-shell = "=2.6.0"')
+    expect(cargo).toContain(`tauri-plugin-shell = { path = "${patchPath}" }`)
+
+    const jobObject = readFileSync(
+      resolve(TAURI_ROOT, patchPath, "src", "process", "job_object.rs"),
+      "utf8",
+    )
+    const configure = jobObject.indexOf("SetInformationJobObject(")
+    const assign = jobObject.indexOf("AssignProcessToJobObject(")
+    const resume = jobObject.indexOf("resume_threads(child.id())")
+    expect(jobObject).toContain("JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE")
+    expect(configure).toBeGreaterThan(-1)
+    expect(assign).toBeGreaterThan(configure)
+    expect(resume).toBeGreaterThan(assign)
+  })
+
+  test("the NSIS installer and uninstaller stop every Maximal process", () => {
+    // These hooks run before Tauri's CheckIfAppIsRunning. The shell must be
+    // stopped without /T so an updater-launched installer is not killed as a
+    // descendant; the sidecar and broker trees are then stopped explicitly.
     const hooksPath = loadConf().bundle?.windows?.nsis?.installerHooks
     expect(hooksPath).toBe("./windows/hooks.nsh")
     const hooksFile = resolve(dirname(TAURI_CONF), hooksPath ?? "")
@@ -69,6 +89,15 @@ describe("Tauri packaging contracts", () => {
       const body = new RegExp(`!macro ${hook}\\n([\\s\\S]*?)!macroend`).exec(
         hooks,
       )?.[1]
+      expect(body, hook).toContain(
+        String.raw`"$SYSDIR\taskkill.exe" /F /IM maximal-shell.exe`,
+      )
+      expect(body, hook).not.toContain(
+        String.raw`"$SYSDIR\taskkill.exe" /F /IM maximal-shell.exe /T`,
+      )
+      expect(body, hook).toContain(
+        String.raw`"$SYSDIR\taskkill.exe" /F /IM maximal.exe /T`,
+      )
       expect(body, hook).toContain(
         String.raw`"$SYSDIR\taskkill.exe" /F /IM maximal-mcp-broker.exe /T`,
       )

@@ -288,6 +288,26 @@ impl PendingWindowOpen {
     }
 }
 
+/// One-shot Windows quit-confirm request. The flag is set before the main
+/// window is shown and consumed after its event listener mounts, so neither a
+/// newly loading webview nor an already-hidden one can miss the prompt.
+struct PendingQuitPrompt(std::sync::atomic::AtomicBool);
+
+impl PendingQuitPrompt {
+    fn new() -> Self {
+        Self(std::sync::atomic::AtomicBool::new(false))
+    }
+
+    #[cfg(any(target_os = "windows", test))]
+    fn request(&self) {
+        self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    fn take(&self) -> bool {
+        self.0.swap(false, std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
 struct SetupPromptShown(std::sync::atomic::AtomicBool);
 
 impl SetupPromptShown {
@@ -430,6 +450,7 @@ pub fn run() {
         .manage(RuntimeExiting::new())
         .manage(runtime_events)
         .manage(PendingWindowOpen::new())
+        .manage(PendingQuitPrompt::new())
         .manage(SetupPromptShown::new())
         .manage(StartupAnnounced::new())
         .manage(SplashDismissed::new())
@@ -453,6 +474,8 @@ pub fn run() {
             reveal_config_dir,
             reveal_logs_dir,
             restart_sidecar,
+            take_quit_request,
+            confirm_quit,
             uninstall_maximal,
             get_shell_api_key,
             subscribe_token_usage,
@@ -470,6 +493,8 @@ pub fn run() {
             reveal_config_dir,
             reveal_logs_dir,
             restart_sidecar,
+            take_quit_request,
+            confirm_quit,
             uninstall_maximal,
             get_shell_api_key,
             subscribe_token_usage,
@@ -2080,7 +2105,7 @@ async fn install_in_place(
         // must be gone first. `install` starts the installer and exits (the
         // installer relaunches Maximal); it returns only on failure, after
         // which the sidecar comes back.
-        stop_sidecar_for_update(app).await;
+        stop_sidecar_and_wait(app).await;
         stop_mcp_brokers_for_update().await;
         if let Err(err) = update.install(&bytes) {
             respawn_sidecar(app);
@@ -2092,7 +2117,7 @@ async fn install_in_place(
         // the previous app back if that fails. The sidecar keeps running the
         // old binary until it is stopped, so stop it before relaunching.
         update.install(&bytes).map_err(|e| e.to_string())?;
-        stop_sidecar_for_update(app).await;
+        stop_sidecar_and_wait(app).await;
     }
     // Relaunch into the new version. From this task, `restart` goes through
     // ExitRequested (nothing left to stop) and the normal exit cleanup.
@@ -2144,11 +2169,11 @@ fn report_update_failure(app: &AppHandle) {
         });
 }
 
-/// Stop the sidecar and wait for it to exit, so the installer can replace
-/// its executable. The Terminated handler hands the exit to us through
-/// `SidecarHandoff` instead of quitting the app or marking it Failed.
-async fn stop_sidecar_for_update(app: &AppHandle) {
-    sidecar_runtime::stop_sidecar_for_update(app).await;
+/// Stop the sidecar and wait for it to exit. The Terminated handler hands the
+/// exit to this caller through `SidecarHandoff` instead of independently
+/// quitting the app or marking it Failed.
+async fn stop_sidecar_and_wait(app: &AppHandle) {
+    sidecar_runtime::stop_sidecar_and_wait(app).await;
 }
 
 /// The Windows installer also replaces `maximal-mcp-broker.exe`, which the
@@ -2283,7 +2308,7 @@ fn open_settings_window(app: &AppHandle, section: Option<&str>) {
 
     match builder.build() {
         Ok(window) => {
-            attach_hide_on_close(app, &window);
+            attach_close_behavior(app, &window);
             present_window(app, &window);
         }
         Err(err) => {
@@ -2468,17 +2493,38 @@ fn open_sessions_window(app: &AppHandle) {
     open_settings_window(app, Some("sessions"));
 }
 
-/// Wires the OS close button (red ✕ on macOS) to HIDE the window
-/// rather than close it. The tray remains the persistent UI surface,
-/// so closing the unified Settings/Dashboard/Sessions window only hides it.
-/// Also drives the Dock icon via `update_activation_policy`.
-fn attach_hide_on_close(app: &AppHandle, window: &tauri::WebviewWindow) {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CloseWindowAction {
+    Hide,
+    Minimize,
+}
+
+fn close_window_action(is_windows: bool, always_visible: bool) -> CloseWindowAction {
+    if is_windows && always_visible {
+        CloseWindowAction::Minimize
+    } else {
+        CloseWindowAction::Hide
+    }
+}
+
+/// Keeps the background app alive when the managed window is closed.
+/// Windows minimizes an always-visible taskbar window because a hidden window
+/// has no taskbar button. Every other mode preserves the tray-first hide path.
+fn attach_close_behavior(app: &AppHandle, window: &tauri::WebviewWindow) {
     let window_clone = window.clone();
     let app_clone = app.clone();
     window.on_window_event(move |event| {
         if let WindowEvent::CloseRequested { api, .. } = event {
             api.prevent_close();
-            let _ = window_clone.hide();
+            let always_visible = app_clone.state::<DockVisibilityState>().always_visible();
+            match close_window_action(cfg!(windows), always_visible) {
+                CloseWindowAction::Hide => {
+                    let _ = window_clone.hide();
+                }
+                CloseWindowAction::Minimize => {
+                    let _ = window_clone.minimize();
+                }
+            }
             update_activation_policy(&app_clone);
         }
     });
@@ -2612,19 +2658,27 @@ fn present_window(app: &AppHandle, window: &tauri::WebviewWindow) {
     }
 }
 
-/// Entry point for the tray's "Quit Maximal" item. Pops a native
-/// confirm dialog via `tauri-plugin-dialog`; on accept, calls
-/// `app.exit(0)` which routes through `RunEvent::ExitRequested` →
-/// `kill_sidecar` (graceful SIGTERM + 3s SIGKILL escalation).
-///
-/// Previous implementation opened the Settings webview, emitted an
-/// `app://quit-requested` event, and listened from a React modal
-/// (QuitConfirmDialog island). That fought a `tauri://load-end` race
-/// when Settings was hidden-but-loaded (close-to-tray state) — the
-/// event fired before the modal could re-mount, and the dialog
-/// silently never appeared. The native dialog has no such race: it's
-/// owned by the OS, not by our webview's lifecycle.
-fn request_quit(app: &AppHandle) {
+async fn finish_quit<F, E>(sidecar_stop: F, exit: E)
+where
+    F: std::future::Future<Output = ()>,
+    E: FnOnce(),
+{
+    sidecar_stop.await;
+    exit();
+}
+
+fn exit_after_quit_confirmation(app: AppHandle) {
+    if cfg!(target_os = "windows") {
+        let app_for_stop = app.clone();
+        tauri::async_runtime::spawn(async move {
+            finish_quit(stop_sidecar_and_wait(&app_for_stop), || app.exit(0)).await;
+        });
+    } else {
+        app.exit(0);
+    }
+}
+
+fn request_native_quit_dialog(app: &AppHandle) {
     use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
     let locale = app.state::<LocaleState>().get();
     let app_clone = app.clone();
@@ -2638,9 +2692,42 @@ fn request_quit(app: &AppHandle) {
         ))
         .show(move |confirmed| {
             if confirmed {
-                app_clone.exit(0);
+                exit_after_quit_confirmation(app_clone);
             }
         });
+}
+
+/// Windows uses the app-styled confirmation dialog in the unified main window.
+/// Queue before opening and emit after: a newly loading webview consumes the
+/// flag on mount, while an existing hidden webview receives the live event.
+#[cfg(target_os = "windows")]
+fn request_quit(app: &AppHandle) {
+    if app.state::<ManagedEndpoint>().current().is_none() {
+        request_native_quit_dialog(app);
+        return;
+    }
+
+    app.state::<PendingQuitPrompt>().request();
+    open_settings_window(app, None);
+    if let Err(err) = app.emit_to(SETTINGS_WINDOW_LABEL, "app://quit-requested", ()) {
+        eprintln!("[shell] emit quit-requested failed: {err}");
+    }
+}
+
+/// macOS keeps the native confirmation that already matches the platform.
+#[cfg(not(target_os = "windows"))]
+fn request_quit(app: &AppHandle) {
+    request_native_quit_dialog(app);
+}
+
+#[tauri::command]
+fn take_quit_request(state: State<'_, PendingQuitPrompt>) -> bool {
+    state.take()
+}
+
+#[tauri::command]
+fn confirm_quit(app: AppHandle) {
+    exit_after_quit_confirmation(app);
 }
 
 /// Focus an existing main window, or open Settings if none exists.
@@ -2889,6 +2976,57 @@ fn set_dock_visibility(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn consumes_a_queued_quit_prompt_once() {
+        use super::PendingQuitPrompt;
+
+        let prompt = PendingQuitPrompt::new();
+        assert!(!prompt.take());
+        prompt.request();
+        assert!(prompt.take());
+        assert!(!prompt.take());
+    }
+
+    #[test]
+    fn waits_for_sidecar_stop_before_exiting() {
+        use super::finish_quit;
+        use std::sync::{Arc, Mutex};
+
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let stop_events = Arc::clone(&events);
+        let exit_events = Arc::clone(&events);
+
+        tauri::async_runtime::block_on(finish_quit(
+            async move {
+                stop_events.lock().unwrap().push("sidecar stopped");
+            },
+            move || exit_events.lock().unwrap().push("shell exited"),
+        ));
+
+        assert_eq!(*events.lock().unwrap(), ["sidecar stopped", "shell exited"]);
+    }
+
+    #[test]
+    fn keeps_windows_taskbar_entry_when_always_visible() {
+        use super::{close_window_action, CloseWindowAction};
+
+        assert_eq!(close_window_action(true, true), CloseWindowAction::Minimize);
+    }
+
+    #[test]
+    fn hides_windows_window_when_taskbar_is_only_for_open_windows() {
+        use super::{close_window_action, CloseWindowAction};
+
+        assert_eq!(close_window_action(true, false), CloseWindowAction::Hide);
+    }
+
+    #[test]
+    fn preserves_hide_on_close_outside_windows() {
+        use super::{close_window_action, CloseWindowAction};
+
+        assert_eq!(close_window_action(false, true), CloseWindowAction::Hide);
+    }
+
     #[test]
     fn persists_only_safe_main_window_state() {
         use super::{

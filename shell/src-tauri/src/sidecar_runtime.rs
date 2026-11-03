@@ -962,8 +962,10 @@ pub(super) fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
         .map_err(|e| tauri::Error::Anyhow(e.into()))?
         .args(args)
         // Shell plugin 2.6+ contains ordinary descendants in a POSIX process
-        // group / Windows Job Object. The deliberately detached MCP broker has
-        // its own IPC and parent-watchdog shutdown contract.
+        // group / Windows Job Object. Maximal's local plugin patch configures
+        // the Windows job as kill-on-close before this suspended child starts.
+        // The deliberately detached MCP broker also has its own containment,
+        // IPC, and parent-watchdog shutdown contract.
         .set_process_group(true)
         .env("HOST", LOOPBACK_HOST)
         .env("MAXIMAL_APP_PROFILE", profile.as_env())
@@ -980,10 +982,9 @@ pub(super) fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
     // both `tauri dev` and packaged builds. NODE_ENV=production is still
     // set for parity with `maximal start` defaults elsewhere.
     cmd = cmd.env("NODE_ENV", "production");
-    // Hand the shell's PID to the sidecar for its parent-death
-    // watchdog. If the tray app is force-killed (Activity Monitor,
-    // OOM, panic past Drop), the sidecar polls this PID and exits
-    // when it disappears so we don't orphan a proxy on its selected port.
+    // Hand the shell's PID to the sidecar for its parent-death watchdog. This
+    // remains a cross-platform fallback; on Windows the kill-on-close Job Object
+    // ends the process tree in the kernel when the shell handle closes.
     cmd = cmd.env("MAXIMAL_SIDECAR_PARENT_PID", std::process::id().to_string());
     // Shell-internal API key — the webview reads it via the
     // `get_shell_api_key` Tauri command and sends it on every
@@ -1027,9 +1028,9 @@ pub(super) fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
                         .state::<ManagedEndpoint>()
                         .clear_generation(event_spawn.generation);
                     eprintln!("[maximal] sidecar exited: {:?}", payload);
-                    // An in-place update stopped it so the installer can
-                    // replace its executable. Tell the update it's gone and
-                    // leave the app alone: the installer exits and relaunches it.
+                    // An owning lifecycle (in-place update or Windows Quit)
+                    // stopped it and is waiting for proof that it is gone. Hand
+                    // off the event and leave the app-level decision to that caller.
                     if let Some(tx) = handle.state::<SidecarHandoff>().take() {
                         let _ = tx.send(());
                         break;
@@ -1610,8 +1611,10 @@ pub(super) async fn fetch_setup_status(
     }
     resp.json::<SetupStatusResponse>().await.ok()
 }
-/// `SidecarHandoff` instead of quitting the app or marking it Failed.
-pub(super) async fn stop_sidecar_for_update(app: &AppHandle) {
+/// Stop the sidecar and wait for its termination event. `SidecarHandoff`
+/// prevents that event from independently exiting or changing the shell while
+/// an update or the Windows Quit path owns the surrounding lifecycle.
+pub(super) async fn stop_sidecar_and_wait(app: &AppHandle) {
     let (tx, rx) = tokio::sync::oneshot::channel();
     app.state::<SidecarHandoff>().arm(tx);
     if kill_sidecar(app)

@@ -111,7 +111,82 @@ describe("generated pull request validation", () => {
 })
 
 describe("release action supply chain", () => {
-  test("external actions use current immutable releases", async () => {
+  test("all external actions use immutable release pins", async () => {
+    const workflowDir = new URL("../.github/workflows/", import.meta.url)
+    const workflowNames = (await readdir(workflowDir)).filter((name) =>
+      /\.ya?ml$/u.test(name),
+    )
+    const actionDir = new URL("../.github/actions/", import.meta.url)
+    const actionNames = (await readdir(actionDir, { withFileTypes: true }))
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+    const sources = await Promise.all([
+      ...workflowNames.map(
+        async (name) =>
+          [`workflows/${name}`, await readWorkflow(name)] as const,
+      ),
+      ...actionNames.map(
+        async (name) =>
+          [
+            `actions/${name}/action.yml`,
+            await readRepoFile(`.github/actions/${name}/action.yml`),
+          ] as const,
+      ),
+    ])
+    const violations: Array<string> = []
+
+    for (const [path, source] of sources) {
+      for (const [index, line] of source.split("\n").entries()) {
+        const actionUse = line.match(/^\s*(?:-\s*)?uses:\s+(\S.*)$/u)?.[1]
+        if (!actionUse || actionUse.startsWith("./")) continue
+        if (!/^[^@\s]+@[0-9a-f]{40} # v\d+\.\d+\.\d+$/u.test(actionUse)) {
+          violations.push(`${path}:${index + 1}: ${actionUse}`)
+        }
+      }
+    }
+
+    expect(violations).toEqual([])
+  })
+
+  test("the TruffleHog wrapper and scanner image use the same release", async () => {
+    const workflow = await readWorkflow("secret-scan.yml")
+    const wrapperVersion = workflow.match(
+      /trufflesecurity\/trufflehog@[0-9a-f]{40} # v(\d+\.\d+\.\d+)/u,
+    )?.[1]
+    const scannerVersion = workflow.match(
+      /^\s*version:\s+["']?([^"'\s]+)["']?\s*$/mu,
+    )?.[1]
+
+    expect(wrapperVersion).toBeDefined()
+    expect(scannerVersion).toBe(wrapperVersion)
+  })
+
+  test("workflow project runtimes use the canonical Node pin", async () => {
+    const canonicalNode = (await readRepoFile("mise.toml")).match(
+      /^node = "([^"]+)"$/mu,
+    )?.[1]
+    if (!canonicalNode) throw new Error("mise.toml does not pin Node")
+
+    const workflowDir = new URL("../.github/workflows/", import.meta.url)
+    const workflowNames = (await readdir(workflowDir)).filter((name) =>
+      /\.ya?ml$/u.test(name),
+    )
+    const configuredVersions = (
+      await Promise.all(workflowNames.map((name) => readWorkflow(name)))
+    ).flatMap((workflow) =>
+      Array.from(
+        workflow.matchAll(/^\s*node-version:\s+["']?([^"'\s]+)["']?\s*$/gmu),
+        (match) => match[1],
+      ),
+    )
+
+    expect(configuredVersions.length).toBeGreaterThan(0)
+    for (const version of configuredVersions) {
+      expect(version).toBe(canonicalNode)
+    }
+  })
+
+  test("release actions use the expected current releases", async () => {
     const workflow = await readWorkflow("release.yml")
     const externalUses = workflow.split("\n").flatMap((line) => {
       const marker = "uses: "
@@ -127,11 +202,11 @@ describe("release action supply chain", () => {
         11,
       ],
       [
-        "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1",
+        "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2",
         2,
       ],
       [
-        "actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2",
+        "actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0",
         1,
       ],
     ])
@@ -247,6 +322,70 @@ const windowsShellJob = (workflow: string): string =>
     workflow.indexOf("\n  windows-shell:"),
     workflow.indexOf("\n  publish:"),
   )
+
+describe("Windows desktop lifecycle smoke", () => {
+  test("caches Bun downloads and retries transient package-feed failures", async () => {
+    const [shellWorkflow, cacheWorkflow, setupBun] = await Promise.all([
+      readWorkflow("windows-shell-dev.yml"),
+      readWorkflow("windows-rust-cache.yml"),
+      readRepoFile(".github/actions/setup-bun/action.yml"),
+    ])
+
+    expect(setupBun).toContain("path: ~/.bun/bin")
+    expect(setupBun).toContain("path: ~/.bun/install/cache")
+    expect(setupBun).toContain("hashFiles('bun.lock', 'shell/bun.lock')")
+    expect(setupBun.match(/actions\/cache@55cc8345/gu)).toHaveLength(2)
+    expect(shellWorkflow).toContain('cache-dependencies: "true"')
+    expect(cacheWorkflow).toContain('cache-dependencies: "true"')
+    expect(shellWorkflow.match(/for attempt in 1 2 3;/gu)).toHaveLength(3)
+    expect(
+      shellWorkflow.match(/sleep "\$\(\(attempt \* 15\)\)"/gu),
+    ).toHaveLength(3)
+    expect(cacheWorkflow).toContain(
+      "retry_install bun install --frozen-lockfile",
+    )
+    expect(cacheWorkflow).toContain(
+      "(cd shell && retry_install bun install --frozen-lockfile)",
+    )
+  })
+
+  test("tests native shutdown and uninstalls a running shell within a deadline", async () => {
+    const workflow = await readWorkflow("windows-shell-dev.yml")
+
+    expect(workflow).toContain(
+      "cargo test --release --manifest-path shell/src-tauri/Cargo.toml",
+    )
+    expect(workflow).toContain("name: Launch installed app and verify sidecar")
+    expect(
+      workflow.match(/\$deadline = \(Get-Date\)\.AddSeconds\(60\)/gu),
+    ).toHaveLength(2)
+    expect(workflow).toContain(
+      "name: Force shell exit and verify sidecar containment",
+    )
+    expect(workflow).toContain("Stop-Process -Id $shellPid -Force")
+    expect(workflow).toContain(
+      "sidecar PID $sidecarPid survived forced shell exit",
+    )
+    expect(workflow).toContain(
+      "Get-NetTCPConnection -OwningProcess $sidecarPid",
+    )
+    expect(workflow).toContain(
+      "Get-Process -Name 'maximal-shell', 'maximal', 'maximal-mcp-broker'",
+    )
+    expect(workflow).toContain('"_?=$installRoot"')
+    expect(workflow).toContain("$p.WaitForExit(60000)")
+    expect(workflow).toContain("uninstaller timed out with Maximal running")
+    expect(workflow).toContain("Maximal processes remain after uninstall")
+    expect(workflow).toContain("Remove-Item $installRoot -Recurse -Force")
+    expect(workflow).toContain("name: Capture Windows lifecycle diagnostics")
+    expect(workflow).toContain("diagnostics/processes.json")
+    expect(workflow).toContain("@('session-running', 'maximal.pid')")
+    expect(workflow).not.toContain(
+      "Copy-Item $appData diagnostics/appdata -Recurse",
+    )
+    expect(workflow).toContain("name: Upload Windows lifecycle diagnostics")
+  })
+})
 
 describe("in-place desktop updates", () => {
   test("the NSIS build is signed for the updater with the release environment secrets", async () => {

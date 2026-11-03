@@ -5,6 +5,7 @@
 # from a composite action under our own repo. Functional surface is
 # the subset of oven-sh/setup-bun we actually use:
 #   - `bun-version` input (default `latest`)
+#   - optional lockfile-keyed dependency caching
 #   - PATH wired so subsequent `bun ...` steps resolve
 #
 # When a tighter supply-chain posture is required (e.g. a CI policy
@@ -19,11 +20,32 @@ inputs:
     description: Bun version to install (e.g. `latest`, `1.4.3`).
     required: false
     default: latest
+  cache-dependencies:
+    description: Restore and save Bun's lockfile-keyed package download cache.
+    required: false
+    default: "false"
 
 runs:
   using: composite
   steps:
+    - name: Cache pinned Bun runtime
+      id: bun-runtime-cache
+      if: inputs.bun-version != 'latest'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.bun/bin
+        key: bun-runtime-${{ runner.os }}-${{ runner.arch }}-${{ inputs.bun-version }}
+
+    - name: Cache Bun package downloads
+      if: inputs.cache-dependencies == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.bun/install/cache
+        key: bun-packages-${{ runner.os }}-${{ runner.arch }}-${{ inputs.bun-version }}-${{ hashFiles('bun.lock', 'shell/bun.lock') }}
+        restore-keys: bun-packages-${{ runner.os }}-${{ runner.arch }}-${{ inputs.bun-version }}-
+
     - name: Install Bun
+      if: inputs.bun-version == 'latest' || steps.bun-runtime-cache.outputs.cache-hit != 'true'
       shell: bash
       env:
         BUN_VERSION: ${{ inputs.bun-version }}
@@ -34,7 +56,10 @@ runs:
         else
           curl -fsSL https://bun.sh/install | bash -s "bun-v${BUN_VERSION}"
         fi
-        echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
+
+    - name: Add Bun to PATH
+      shell: bash
+      run: echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
 
     - name: Verify Bun
       shell: bash

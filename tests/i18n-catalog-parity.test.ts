@@ -94,6 +94,7 @@ function fmt(s: Set<string>): string {
 
 interface Catalog {
   "app-container": string
+  "appearance-dock-sub": string
   "file-manager": string
 }
 
@@ -113,6 +114,14 @@ describe("i18n catalog is the single source of truth", () => {
     expect(term).toContain("Finder")
     expect(term).toContain("File Explorer")
     expect(term).toContain("Files")
+  })
+
+  test("taskbar copy promises quick actions only where they exist", () => {
+    const copy = loadCatalog()["appearance-dock-sub"]
+    expect(copy.match(/quick actions/gu)).toHaveLength(1)
+    expect(copy).toContain(
+      "other {Keep Maximal in the taskbar even when the window is closed.}",
+    )
   })
 })
 

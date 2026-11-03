@@ -24,6 +24,8 @@ permissions = [
   "allow-set-locale",
   "allow-get-dock-visibility",
   "allow-set-dock-visibility",
+  "allow-take-quit-request",
+  "allow-confirm-quit",
   "allow-update-installs-in-place",
   "allow-install-update",
   "allow-refresh-update-status",
@@ -83,6 +85,16 @@ commands.allow = ["get_dock_visibility"]
 identifier = "allow-set-dock-visibility"
 description = "Update and persist the Dock / taskbar visibility preference ('always' or 'when-window-open') and immediately apply the OS activation policy."
 commands.allow = ["set_dock_visibility"]
+
+[[permission]]
+identifier = "allow-take-quit-request"
+description = "Consume a pending native Quit request in the app-styled Windows confirmation dialog."
+commands.allow = ["take_quit_request"]
+
+[[permission]]
+identifier = "allow-confirm-quit"
+description = "Confirm Quit from the app-styled Windows dialog, stop the sidecar, and exit the shell."
+commands.allow = ["confirm_quit"]
 
 [[permission]]
 identifier = "allow-update-installs-in-place"

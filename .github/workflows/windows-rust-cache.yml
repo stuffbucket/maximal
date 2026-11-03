@@ -43,7 +43,7 @@ jobs:
       # Retry crate downloads instead of failing on a transient reset.
       CARGO_NET_RETRY: "10"
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Rust
         id: rust
@@ -55,15 +55,23 @@ jobs:
         if: steps.rust.outputs.cache-hit != 'true'
         with:
           bun-version: 1.4.3
+          cache-dependencies: "true"
 
       - name: Install dependencies and build the UI
         if: steps.rust.outputs.cache-hit != 'true'
         shell: bash
         run: |
           set -euo pipefail
+          retry_install() {
+            for attempt in 1 2 3; do
+              if "$@"; then return 0; fi
+              if (( attempt == 3 )); then return 1; fi
+              sleep "$((attempt * 15))"
+            done
+          }
           printf '%s\n' 'registry=https://packagefeedproxy.microsoft.io/npm/' > "$HOME/.npmrc"
-          bun install --frozen-lockfile
-          (cd shell && bun install --frozen-lockfile)
+          retry_install bun install --frozen-lockfile
+          (cd shell && retry_install bun install --frozen-lockfile)
           bun run build:ui
 
       # Same cargo invocation as the release's `tauri build` (release profile,
@@ -85,7 +93,7 @@ jobs:
         if: >-
           steps.rust.outputs.cache-hit != 'true'
           && github.ref == 'refs/heads/main'
-        uses: actions/cache/save@v6
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry/index
