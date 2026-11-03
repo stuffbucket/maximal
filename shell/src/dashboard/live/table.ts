@@ -1,16 +1,14 @@
-// The Dashboard's session table: one row per session in the last 24 h, and the
-// legend for the live card's traces (each live session's row carries its
-// line color). Built once into a host that main.ts never re-renders, then
-// updated in place on every poll and every countdown tick: rows are keyed by
-// session id and moved, never rebuilt, so focus, hover and the selection
-// survive.
+// The Sessions view: one compact row per session in the last 24 h. Built once
+// into a host that main.ts never re-renders, then updated in place on every poll
+// and every countdown tick: rows are keyed by session id and moved, never
+// rebuilt, so focus, hover and the selection survive.
 //
 // Cold sessions show the latest COLD_ROWS, then a "Show N more" button. A row
 // is refilled only when its session changed, or when something in it reads
 // the clock (a countdown, "compacted N min ago", a day name).
 //
-// Styling reuses the per-request table's classes and the quota cards' `.meter`
-// (see style.css → Session table for the few rules of its own).
+// Styling presents the semantic table as a compact list and reuses the quota
+// cards' `.meter` (see style.css → Session list).
 import type { SessionsResponse } from "../../../../src/lib/token-usage/sessions-schema";
 import { resolveLocale, t } from "../../i18n";
 import {
@@ -33,15 +31,14 @@ export interface SessionTable {
   preview(id: string | null): void;
 }
 
-/** Header keys, in column order; the numbers sit right-aligned. */
-const COLUMNS: Array<{ key: string; numeric?: boolean; hidden?: boolean }> = [
-  { key: "dashboard-sessions-col-client" },
-  { key: "dashboard-sessions-col-session" },
-  { key: "dashboard-sessions-col-state" },
-  { key: "dashboard-sessions-col-rate", numeric: true },
-  { key: "dashboard-sessions-col-context" },
-  { key: "dashboard-sessions-col-last" },
-  { key: "dashboard-sessions-col-total", numeric: true },
+/** Header keys, in column order; client identity now lives with the session. */
+const COLUMNS: Array<{ key: string; name: string; numeric?: boolean }> = [
+  { key: "dashboard-sessions-col-session", name: "session" },
+  { key: "dashboard-sessions-col-state", name: "state" },
+  { key: "dashboard-sessions-col-rate", name: "rate", numeric: true },
+  { key: "dashboard-sessions-col-context", name: "context" },
+  { key: "dashboard-sessions-col-last", name: "last" },
+  { key: "dashboard-sessions-col-total", name: "total", numeric: true },
 ];
 
 /** The catalog's `select` cases for each client. */
@@ -64,7 +61,6 @@ interface Filled {
 interface Row {
   tr: HTMLTableRowElement;
   client: HTMLElement;
-  clientSub: HTMLElement;
   model: HTMLElement;
   sessionSub: HTMLElement;
   started: HTMLElement;
@@ -110,21 +106,21 @@ export function mountSessionTable(
   onSelect: (id: string | null) => void,
   onPreview: (id: string | null) => void,
 ): SessionTable {
-  // The per-request table's frame: a bordered card, scrolling sideways on
-  // narrow windows rather than squeezing the columns.
-  const frame = el("div", "border");
-  frame.style.backgroundColor = "var(--surface-card)";
-  frame.style.borderColor = "var(--border-subtle)";
-  const scroller = el("div", "overflow-auto");
-  const table = el("table", "w-full min-w-[860px] text-left text-xs sm:text-sm");
-  const thead = el("thead");
-  thead.style.backgroundColor = "var(--surface-control)";
-  thead.style.color = "var(--text-base-color)";
+  // One semantic table, presented as a quiet list. It deliberately has no
+  // nested scroller: the window owns vertical scrolling and narrow layouts
+  // reflow each row rather than introducing a second horizontal viewport.
+  const frame = el("div", "session-list");
+  const table = el("table", "session-table");
+  const thead = el("thead", "session-table__head");
   const headRow = el("tr");
   for (const column of COLUMNS) {
-    const th = el("th", `px-4 py-2 font-semibold whitespace-nowrap${column.numeric ? " text-right" : ""}`);
+    const numeric = column.numeric ? " session-table__heading--numeric" : "";
+    const th = el(
+      "th",
+      `session-table__heading session-table__heading--${column.name}${numeric}`,
+    );
     th.scope = "col";
-    const label = el("span", column.hidden ? "sr-only" : "");
+    const label = el("span");
     label.dataset.i18n = column.key;
     label.textContent = t(column.key);
     th.append(label);
@@ -133,8 +129,7 @@ export function mountSessionTable(
   thead.append(headRow);
   const tbody = el("tbody");
   table.append(thead, tbody);
-  scroller.append(table);
-  frame.append(scroller);
+  frame.append(table);
   root.replaceChildren(frame);
 
   const divider = el("tr", "session-divider");
@@ -146,7 +141,7 @@ export function mountSessionTable(
 
   // "Show N more" under the cold rows; once pressed, every cold row shows.
   const more = el("tr", "session-more");
-  const moreCell = el("td", "px-4 py-2");
+  const moreCell = el("td", "session-more__cell");
   moreCell.colSpan = COLUMNS.length;
   const moreButton = el("button", "session-more__button");
   moreButton.type = "button";
@@ -162,8 +157,7 @@ export function mountSessionTable(
   let lastArgs: Parameters<SessionTable["update"]> | null = null;
 
   function buildRow(id: string): Row {
-    const tr = el("tr", "session-row border-b last:border-b-0");
-    tr.style.borderColor = "var(--surface-control)";
+    const tr = el("tr", "session-row");
     tr.dataset.sessionId = id;
     tr.tabIndex = 0;
     tr.addEventListener("click", () => onSelect(id));
@@ -177,35 +171,52 @@ export function mountSessionTable(
     tr.addEventListener("focus", () => onPreview(id));
     tr.addEventListener("blur", () => onPreview(null));
 
-    const cell = (extra = ""): HTMLTableCellElement => {
-      const td = el("td", `px-4 py-2 ${extra}`.trim());
+    const cell = (
+      name: string,
+      key: string,
+      extra = "",
+    ): HTMLTableCellElement => {
+      const td = el(
+        "td",
+        `session-table__cell session-cell--${name} ${extra}`.trim(),
+      );
+      const label = el("span", "session-cell__label");
+      label.dataset.i18n = key;
+      label.textContent = t(key);
+      td.append(label);
       tr.append(td);
       return td;
     };
 
-    const clientCell = cell("whitespace-nowrap");
-    const client = el("div", "session-strong");
-    const clientSub = el("div", "text-xs");
-    clientCell.append(client, clientSub);
-
-    const sessionCell = cell("max-w-[280px]");
-    const model = el("div", "session-strong truncate");
-    // "started 12:30 AM" and the short id sit side by side as their own
-    // spans, so no wording is joined in code.
-    const sessionSub = el("div", "text-xs truncate");
-    const started = el("span");
-    const shortId = el("span", "ml-2");
-    sessionSub.append(started, shortId);
+    const sessionCell = cell("session", "dashboard-sessions-col-session");
+    const model = el("div", "session-model");
+    const sessionSub = el("div", "session-meta");
+    const clientGroup = el("span", "session-meta__item session-meta__client");
+    const client = el("span");
+    clientGroup.append(client);
+    const started = el("span", "session-meta__item");
+    const shortId = el("span", "session-meta__item session-meta__id");
+    sessionSub.append(clientGroup, started, shortId);
     sessionCell.append(model, sessionSub);
 
-    const stateCell = cell("whitespace-nowrap session-cell--state");
-    const state = el("div");
-    const stateSub = el("div", "text-xs whitespace-normal");
+    const stateCell = cell(
+      "state",
+      "dashboard-sessions-col-state",
+      "session-cell--state",
+    );
+    const state = el("div", "session-state");
+    const stateSub = el("div", "session-secondary");
     stateCell.append(state, stateSub);
 
-    const rate = cell("text-right whitespace-nowrap session-cell--num");
+    const rateCell = cell(
+      "rate",
+      "dashboard-sessions-col-rate",
+      "session-cell--num",
+    );
+    const rate = el("span", "session-value");
+    rateCell.append(rate);
 
-    const contextCell = cell("whitespace-nowrap");
+    const contextCell = cell("context", "dashboard-sessions-col-context");
     const context = el("div", "session-context");
     const meter = el("div", "meter");
     const meterFill = el("div", "meter__fill");
@@ -217,16 +228,27 @@ export function mountSessionTable(
     const meterText = el("span");
     meterState.append(meterIcon, meterText);
     context.append(meter, meterState);
-    const compacted = el("div", "text-xs");
+    const compacted = el("div", "session-secondary");
     contextCell.append(context, compacted);
 
-    const last = cell("whitespace-nowrap session-cell--num");
-    const total = cell("text-right whitespace-nowrap session-cell--num");
+    const lastCell = cell(
+      "last",
+      "dashboard-sessions-col-last",
+      "session-cell--num",
+    );
+    const last = el("span", "session-value");
+    lastCell.append(last);
+    const totalCell = cell(
+      "total",
+      "dashboard-sessions-col-total",
+      "session-cell--num",
+    );
+    const total = el("span", "session-value");
+    totalCell.append(total);
 
     return {
       tr,
       client,
-      clientSub,
       model,
       sessionSub,
       started,
@@ -278,11 +300,11 @@ export function mountSessionTable(
   ): void {
     const other = isOther(s);
     row.tr.classList.toggle("session-row--cold", s.state === "cold");
+    row.tr.dataset.sessionState = s.state;
 
     const clientName = t("dashboard-sessions-client", { client: CLIENT_CASE[s.client] });
     const label = s.client_label?.trim() || "";
     setText(row.client, label || clientName);
-    setText(row.clientSub, label && label !== clientName ? clientName : "");
 
     if (other) {
       setText(row.model, t("dashboard-sessions-other"));

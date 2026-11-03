@@ -125,13 +125,7 @@ function isExplicitlyFree(model: Model): boolean {
   return pricedModelIsPaid(model.billing?.token_prices) === false
 }
 
-function chooseFromBucket(
-  bucket: Array<Model>,
-  previousId: string | undefined,
-): Model | undefined {
-  const previous = bucket.find((candidate) => candidate.id === previousId)
-  if (previous) return previous
-
+function chooseFromBucket(bucket: Array<Model>): Model | undefined {
   const stable = bucket.filter((candidate) => !candidate.preview)
   const stablePool = stable.length > 0 ? stable : bucket
   const free = stablePool.filter((candidate) => isExplicitlyFree(candidate))
@@ -214,12 +208,25 @@ function automaticResolution(input: {
   previousId: string | undefined
   sessionModel: string | undefined
 }): ClaudeAutoTierState {
-  for (const bucket of automaticBuckets(
+  const buckets = automaticBuckets(
     input.tier,
     input.eligible,
     input.sessionModel,
-  )) {
-    const selected = chooseFromBucket(bucket.models, input.previousId)
+  )
+  const previousBucket = buckets.find((bucket) =>
+    bucket.models.some((model) => model.id === input.previousId),
+  )
+  if (previousBucket && input.previousId) {
+    return {
+      configured: null,
+      effective: input.previousId,
+      source: "automatic",
+      status: "ready",
+      reason: previousBucket.reason,
+    }
+  }
+  for (const bucket of buckets) {
+    const selected = chooseFromBucket(bucket.models)
     if (selected) {
       return {
         configured: null,

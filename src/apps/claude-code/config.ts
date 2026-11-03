@@ -26,14 +26,19 @@ import { parseJsonText } from "~/lib/platform/json-text"
 import { proxyBaseUrl } from "~/lib/start/proxy-port"
 
 import {
+  AUTO_MODELS_JOURNAL_KEY,
   AUTO_MODELS_OWNERSHIP_KEY,
   buildClaudeAutoModelsState,
   CAPABLE_MODEL_KEY,
   CLASSIFIER_MODEL_KEY,
   FAST_MODEL_KEY,
+  hasClaudeAutoModelMarker,
   hasOwnedClaudeAutoModelSettings,
+  isUnsupportedClaudeAutoModelJournal,
   mergeClaudeAutoModelSettings,
+  resumeClaudeAutoModelSettings,
   stripClaudeAutoModelSettings,
+  suspendClaudeAutoModelSettings,
 } from "./auto-model-settings"
 import {
   readSettingsEnv,
@@ -257,12 +262,55 @@ interface AutoModelApplyOptions {
   claimAutoModels?: ReadonlySet<ClaudeAutoTier>
 }
 
+function isSettingsRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function outputAutoModelMetadata(input: {
+  effectiveExisting: Record<string, unknown>
+  existingJournal: unknown
+  marker: ReturnType<typeof mergeClaudeAutoModelSettings>["marker"]
+  unsupportedJournal: boolean
+}): Record<string, unknown> {
+  if (input.unsupportedJournal) {
+    return {
+      ...(AUTO_MODELS_OWNERSHIP_KEY in input.effectiveExisting ?
+        {
+          [AUTO_MODELS_OWNERSHIP_KEY]:
+            input.effectiveExisting[AUTO_MODELS_OWNERSHIP_KEY],
+        }
+      : {}),
+      [AUTO_MODELS_JOURNAL_KEY]: input.existingJournal,
+    }
+  }
+  return input.marker ? { [AUTO_MODELS_OWNERSHIP_KEY]: input.marker } : {}
+}
+
 export function mergeBaseUrl(
   existing: Record<string, unknown>,
   helperCommand: string,
   options: AutoModelApplyOptions = {},
 ): Record<string, unknown> {
-  const existingEnv = readSettingsEnv(existing)
+  const liveAutoModels = hasClaudeAutoModelMarker(existing)
+  const unsupportedJournal = isUnsupportedClaudeAutoModelJournal(
+    existing[AUTO_MODELS_JOURNAL_KEY],
+  )
+  const resumed =
+    liveAutoModels || unsupportedJournal ? null : (
+      resumeClaudeAutoModelSettings({
+        env: readSettingsEnv(existing),
+        journal: existing[AUTO_MODELS_JOURNAL_KEY],
+      })
+    )
+  const effectiveExisting =
+    resumed ?
+      {
+        ...existing,
+        [SETTINGS_ENV_KEY]: resumed.env,
+        [AUTO_MODELS_OWNERSHIP_KEY]: resumed.marker,
+      }
+    : existing
+  const existingEnv = readSettingsEnv(effectiveExisting)
   const addsAutoModeSetting = !(AUTO_MODE_SERVER_KEY in existingEnv)
   let env: Record<string, unknown> = {
     ...existingEnv,
@@ -274,14 +322,17 @@ export function mergeBaseUrl(
   let prior = preparePrior({
     addsAutoModeSetting,
     env: existingEnv,
-    settings: existing,
+    settings: effectiveExisting,
   })
+  if (resumed && isSettingsRecord(prior)) {
+    prior = { ...prior, ...resumed.prior }
+  }
   let marker: ReturnType<typeof mergeClaudeAutoModelSettings>["marker"] = null
-  if (typeof prior === "object" && prior !== null && !Array.isArray(prior)) {
+  if (!unsupportedJournal && isSettingsRecord(prior)) {
     const autoModels = mergeClaudeAutoModelSettings({
-      settings: existing,
+      settings: effectiveExisting,
       env,
-      prior: prior as Record<string, unknown>,
+      prior,
       claimTiers: options.claimAutoModels,
     })
     env = autoModels.env
@@ -289,8 +340,11 @@ export function mergeBaseUrl(
     marker = autoModels.marker
   }
 
-  const { [AUTO_MODELS_OWNERSHIP_KEY]: _oldAutoModels, ...withoutMarker } =
-    existing
+  const {
+    [AUTO_MODELS_JOURNAL_KEY]: _oldJournal,
+    [AUTO_MODELS_OWNERSHIP_KEY]: _oldAutoModels,
+    ...withoutMarker
+  } = effectiveExisting
   return {
     ...withoutMarker,
     [SETTINGS_ENV_KEY]: env,
@@ -301,7 +355,12 @@ export function mergeBaseUrl(
       fingerprint: helperFingerprint(helperCommand),
     },
     [PRIOR_KEY]: prior,
-    ...(marker ? { [AUTO_MODELS_OWNERSHIP_KEY]: marker } : {}),
+    ...outputAutoModelMetadata({
+      effectiveExisting,
+      existingJournal: existing[AUTO_MODELS_JOURNAL_KEY],
+      marker,
+      unsupportedJournal,
+    }),
   }
 }
 
@@ -326,6 +385,7 @@ export function stripBaseUrl(
     [PRIOR_KEY]: _droppedPrior,
     [HELPER_OWNERSHIP_KEY]: _droppedMarker,
     [AUTO_MODELS_OWNERSHIP_KEY]: _droppedAutoModels,
+    [AUTO_MODELS_JOURNAL_KEY]: _droppedJournal,
     [SETTINGS_ENV_KEY]: _droppedEnv,
     ...rest
   } = existing
@@ -364,6 +424,27 @@ export function stripBaseUrl(
 
   if (Object.keys(env).length === 0) return base
   return { ...base, [SETTINGS_ENV_KEY]: env }
+}
+
+function stripBaseUrlForShutdown(
+  existing: Record<string, unknown>,
+): Record<string, unknown> {
+  const existingJournal = existing[AUTO_MODELS_JOURNAL_KEY]
+  if (isUnsupportedClaudeAutoModelJournal(existingJournal)) {
+    return {
+      ...stripBaseUrl(existing),
+      [AUTO_MODELS_JOURNAL_KEY]: existingJournal,
+    }
+  }
+  const snapshot = readPriorSnapshot(existing)
+  const journal = suspendClaudeAutoModelSettings({
+    settings: existing,
+    prior: snapshot as Record<string, unknown> | null,
+  })
+  const stripped = stripBaseUrl(existing)
+  return journal ?
+      { ...stripped, [AUTO_MODELS_JOURNAL_KEY]: journal }
+    : stripped
 }
 
 export function isProxyBaseUrlConfigured(
@@ -467,17 +548,20 @@ export interface RevertResult {
   remainingKeys: Array<string>
 }
 
-export function revertProxyBaseUrl(
-  filePath: string = getClaudeCodeSettingsPath(),
+function revertProxyBaseUrlWithMode(
+  filePath: string,
+  preserveAutoModels: boolean,
 ): RevertResult {
   const existing = readClaudeCodeSettings(filePath)
   const baseUrlOwnership = getBaseUrlOwnership(existing)
   const helperOwnership = getApiKeyHelperOwnership(existing)
+  const hasSuspendedAutoModels = AUTO_MODELS_JOURNAL_KEY in existing
   if (
     baseUrlOwnership !== "ours"
     && helperOwnership !== "ours"
     && !isOwnedAutoModeServerSetting(existing)
     && !hasOwnedClaudeAutoModelSettings(existing)
+    && (preserveAutoModels || !hasSuspendedAutoModels)
   ) {
     return {
       path: filePath,
@@ -485,7 +569,10 @@ export function revertProxyBaseUrl(
       remainingKeys: Object.keys(existing),
     }
   }
-  const stripped = stripBaseUrl(existing)
+  const stripped =
+    preserveAutoModels ?
+      stripBaseUrlForShutdown(existing)
+    : stripBaseUrl(existing)
   if (Object.keys(stripped).length === 0) {
     try {
       fs.rmSync(filePath, { force: true })
@@ -500,4 +587,16 @@ export function revertProxyBaseUrl(
     wrote: true,
     remainingKeys: Object.keys(stripped),
   }
+}
+
+export function revertProxyBaseUrl(
+  filePath: string = getClaudeCodeSettingsPath(),
+): RevertResult {
+  return revertProxyBaseUrlWithMode(filePath, false)
+}
+
+export function revertProxyBaseUrlForShutdown(
+  filePath: string = getClaudeCodeSettingsPath(),
+): RevertResult {
+  return revertProxyBaseUrlWithMode(filePath, true)
 }

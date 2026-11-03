@@ -8,7 +8,7 @@ import { subscribeModelCatalogChanged } from "~/lib/runtime-state/state"
 import {
   applyProxyBaseUrl,
   getClaudeCodeSettingsPath,
-  revertProxyBaseUrl,
+  revertProxyBaseUrlForShutdown,
 } from "./config"
 
 export function claudeCodeRoutingIntended(): boolean {
@@ -132,7 +132,7 @@ export function reconcileClaudeCodeOnShutdown(
   stopCatalogSubscription()
   if (!intended) return
   try {
-    const result = revertProxyBaseUrl(filePath)
+    const result = revertProxyBaseUrlForShutdown(filePath)
     if (result.wrote) {
       consola.info(
         "claude-code: removed proxy base URL for shutdown"
