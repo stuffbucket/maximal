@@ -13,15 +13,22 @@ declares no windows) — change them there and update this table.
 | Window     | Default  | Min     | Max  | Resizable | Notes |
 |------------|----------|---------|------|-----------|-------|
 | Splash     | 440×240  | —       | —    | no        | Frameless, transparent, centered; shown while the proxy starts, then dismissed |
-| Main (Unified Settings + Dashboard + Sessions) | 960×720  | 640×480 | work area (`prevent_overflow`) | yes | Single top bar with Settings tabs + a right-side three-surface switcher |
+| Main (Unified Settings + Dashboard + Sessions) | 1100×720 first-launch fallback | 640×480 | work area (`prevent_overflow`) | yes | Restores size, position, and maximized state; single top bar with Settings tabs + a right-side three-surface switcher |
 
 The unified window is single-instance: opening Settings, Dashboard or Sessions
-re-shows and focuses the existing window and switches the active view in place.
-Closing hides it.
+re-shows and focuses the existing window and switches the active view in place;
+it never resizes for a surface switch. Closing hides it. Across process launches,
+Tauri's window-state plugin restores size, monitor-safe position, and maximized
+state. Visibility, decorations, and fullscreen are intentionally not restored.
+The window is built hidden so restoration happens before its first presentation.
 
 ## Grid + columns
 
-**Desktop only.** The OS enforces min size (`640×480`); `prevent_overflow` clamps initial size to the monitor's work area.
+**Desktop only.** The OS-enforced `640×480` minimum is the smallest inner
+content area the person can resize the unified window to; it is independent of
+the first-launch fallback and restored geometry. `prevent_overflow` still clamps
+the fallback during native window creation to the monitor's work area, while the
+plugin skips a saved position that no longer intersects any connected monitor.
 
 - **Dashboard**: single column in the wide observability container. The usage
   overview divides token rates from quota and cache details, followed by the

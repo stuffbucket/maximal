@@ -37,6 +37,10 @@ tauri-plugin-notification = "2"
 # `deep-link` feature is opt-in scaffolding for a future deep-link
 # integration; it's cheap (no extra runtime cost) and harmless today.
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+# Persists only the unified main window's size, position, and maximized state.
+# Visibility stays owned by the close-to-tray lifecycle; decorations and
+# fullscreen remain builder/user-session concerns rather than restored state.
+tauri-plugin-window-state = "2.5"
 # In-place updates: downloads the signed update named by
 # https://mxml.sh/updates/desktop/<channel>.json (the NSIS installer on
 # Windows, the .app.tar.gz bundle on macOS), verifies its minisign signature
