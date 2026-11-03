@@ -68,6 +68,7 @@ jobs:
       - uses: ./.github/actions/setup-bun
         with:
           bun-version: 1.4.3
+          cache-dependencies: "true"
 
       - uses: ./.github/actions/setup-mise
         with:
@@ -87,14 +88,23 @@ jobs:
         # GITHUB_PATH, which pwsh (the windows-2022 default shell) can't
         # resolve — so every bun step must run under bash.
         shell: bash
-        run: bun install --frozen-lockfile
+        run: |
+          for attempt in 1 2 3; do
+            if bun install --frozen-lockfile; then break; fi
+            if (( attempt == 3 )); then exit 1; fi
+            sleep "$((attempt * 15))"
+          done
 
       - name: Install isolated broker dependencies
         shell: bash
         run: |
           mise trust packages/mcp-broker/mise.toml
           mise -C packages/mcp-broker install
-          mise -C packages/mcp-broker exec -- pnpm install --frozen-lockfile
+          for attempt in 1 2 3; do
+            if mise -C packages/mcp-broker exec -- pnpm install --frozen-lockfile; then break; fi
+            if (( attempt == 3 )); then exit 1; fi
+            sleep "$((attempt * 15))"
+          done
 
       # The embedded settings/dashboard UI lives in shell/ with its own
       # manifest; the root install doesn't cover it. Mirrors the release
@@ -103,7 +113,12 @@ jobs:
       - name: Install shell dependencies
         working-directory: shell
         shell: bash
-        run: bun install --frozen-lockfile
+        run: |
+          for attempt in 1 2 3; do
+            if bun install --frozen-lockfile; then break; fi
+            if (( attempt == 3 )); then exit 1; fi
+            sleep "$((attempt * 15))"
+          done
 
       - name: Build web UI + ui-embed manifest
         shell: bash

@@ -249,6 +249,31 @@ const windowsShellJob = (workflow: string): string =>
   )
 
 describe("Windows desktop lifecycle smoke", () => {
+  test("caches Bun downloads and retries transient package-feed failures", async () => {
+    const [shellWorkflow, cacheWorkflow, setupBun] = await Promise.all([
+      readWorkflow("windows-shell-dev.yml"),
+      readWorkflow("windows-rust-cache.yml"),
+      readRepoFile(".github/actions/setup-bun/action.yml"),
+    ])
+
+    expect(setupBun).toContain("path: ~/.bun/bin")
+    expect(setupBun).toContain("path: ~/.bun/install/cache")
+    expect(setupBun).toContain("hashFiles('bun.lock', 'shell/bun.lock')")
+    expect(setupBun.match(/actions\/cache@55cc8345/gu)).toHaveLength(2)
+    expect(shellWorkflow).toContain('cache-dependencies: "true"')
+    expect(cacheWorkflow).toContain('cache-dependencies: "true"')
+    expect(shellWorkflow.match(/for attempt in 1 2 3;/gu)).toHaveLength(3)
+    expect(
+      shellWorkflow.match(/sleep "\$\(\(attempt \* 15\)\)"/gu),
+    ).toHaveLength(3)
+    expect(cacheWorkflow).toContain(
+      "retry_install bun install --frozen-lockfile",
+    )
+    expect(cacheWorkflow).toContain(
+      "(cd shell && retry_install bun install --frozen-lockfile)",
+    )
+  })
+
   test("tests native shutdown and uninstalls a running shell within a deadline", async () => {
     const workflow = await readWorkflow("windows-shell-dev.yml")
 
