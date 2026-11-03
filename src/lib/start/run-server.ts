@@ -54,7 +54,7 @@ import { emitBootStatus } from "./boot-status"
 import { bootSecrets, bootstrapUpstream } from "./bootstrap"
 import { runClaudeCodeFlow } from "./claude-code-flow"
 import { listenHostname } from "./listen-host"
-import { maybeEvictRunning, probePort, reportPortBusyAndExit } from "./port"
+import { preflightPort } from "./port"
 import { setListeningPort } from "./proxy-port"
 import {
   markSessionRunning,
@@ -88,21 +88,9 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   // and without this line the terminal just sits silent.
   consola.start("Starting maximal…")
 
-  // Port zero asks the kernel to select a free port, so there is no concrete
-  // occupant to evict or probe before binding.
-  if (options.port !== 0) {
-    // If --replace was passed, try to take over the port from a
-    // running instance before the regular probe.
-    if (options.replace) {
-      emitBootStatus(`Taking over port ${options.port}…`)
-      await maybeEvictRunning(options.port)
-    }
-
-    // Bail out early if the port is already taken — much friendlier
-    // than crashing 5s later inside srvx with EADDRINUSE.
-    const portState = await probePort(options.port)
-    if (portState !== "free") reportPortBusyAndExit(options.port, portState)
-  }
+  // Port zero asks the kernel to select a free port. For a concrete port,
+  // announce --replace only when the initial probe actually finds an occupant.
+  await preflightPort(options.port, options.replace ?? false)
 
   // Ensure config is merged with defaults at startup
   const config = mergeConfigWithDefaults()

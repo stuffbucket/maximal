@@ -56,10 +56,10 @@ describe("Tauri packaging contracts", () => {
     ])
   })
 
-  test("the NSIS installer and uninstaller stop the MCP broker first", () => {
-    // Without this an in-place update can't replace maximal-mcp-broker.exe
-    // while a broker or a Claude Desktop adapter runs it (the MSI and
-    // install.ps1 stop it too).
+  test("the NSIS installer and uninstaller stop every Maximal process", () => {
+    // These hooks run before Tauri's CheckIfAppIsRunning. The shell must be
+    // stopped without /T so an updater-launched installer is not killed as a
+    // descendant; the sidecar and broker trees are then stopped explicitly.
     const hooksPath = loadConf().bundle?.windows?.nsis?.installerHooks
     expect(hooksPath).toBe("./windows/hooks.nsh")
     const hooksFile = resolve(dirname(TAURI_CONF), hooksPath ?? "")
@@ -69,6 +69,15 @@ describe("Tauri packaging contracts", () => {
       const body = new RegExp(`!macro ${hook}\\n([\\s\\S]*?)!macroend`).exec(
         hooks,
       )?.[1]
+      expect(body, hook).toContain(
+        String.raw`"$SYSDIR\taskkill.exe" /F /IM maximal-shell.exe`,
+      )
+      expect(body, hook).not.toContain(
+        String.raw`"$SYSDIR\taskkill.exe" /F /IM maximal-shell.exe /T`,
+      )
+      expect(body, hook).toContain(
+        String.raw`"$SYSDIR\taskkill.exe" /F /IM maximal.exe /T`,
+      )
       expect(body, hook).toContain(
         String.raw`"$SYSDIR\taskkill.exe" /F /IM maximal-mcp-broker.exe /T`,
       )

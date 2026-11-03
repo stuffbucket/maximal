@@ -26,6 +26,7 @@ import { mountApiClients } from "./ui/islands/api-clients-island";
 import { mountApps } from "./ui/islands/apps-island";
 import { mountMcp } from "./ui/islands/mcp-island";
 import { mountModels } from "./ui/islands/models-island";
+import { mountQuitDialog } from "./ui/islands/quit-dialog-island";
 import { mountRequests } from "./ui/islands/requests-island";
 import { waitForSidecarBack } from "./ui/restart";
 
@@ -2572,6 +2573,7 @@ window.addEventListener("DOMContentLoaded", () => {
   mountApiClients();
   mountApps();
   mountMcp();
+  mountQuitDialog();
   mountRequests();
   mountModels();
   wireNav();

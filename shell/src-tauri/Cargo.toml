@@ -22,9 +22,9 @@ tauri-plugin-opener = "2"
 # `tauri-plugin-shell` provides the sidecar spawn API that uses the
 # arch-suffixed binaries declared in bundle.externalBin.
 tauri-plugin-shell = "2.6"
-# Native OS confirm/message dialogs (Quit-Maximal? prompt, etc).
-# Replaces the previous hand-rolled React modal that fought a
-# `tauri://load-end` race when triggered from a hidden window.
+# Native OS confirm/message dialogs. macOS uses the native Quit-Maximal?
+# prompt; Windows uses the app-styled webview prompt once the sidecar is ready
+# and falls back to native during early startup.
 tauri-plugin-dialog = "2"
 # Native OS notifications. Fired by the upstream-rejection poller on
 # the transition from "no recent rejection" to "rejection set" — banner
@@ -61,8 +61,8 @@ sys-locale = "0.3"
 # reqwest still wants a TLS backend feature.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 # `tokio::time::sleep` for the polling loop, and `tokio::sync::oneshot`
-# for the in-place update's waits (confirm dialog, sidecar exit). Tauri
-# already pulls tokio in transitively (its `async_runtime` is built on
+# for in-place update and Windows Quit waits (sidecar exit). Tauri already
+# pulls tokio in transitively (its `async_runtime` is built on
 # it); the direct dep here is just so we can name these without
 # relying on private re-exports.
 tokio = { version = "1", features = ["time", "sync"] }

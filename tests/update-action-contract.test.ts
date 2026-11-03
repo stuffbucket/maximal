@@ -103,9 +103,7 @@ describe("in-place update (shell)", () => {
     )
     // Stops the sidecar before relaunching on macOS, and before the
     // installer replaces it on Windows.
-    expect(flow.match(/stop_sidecar_for_update\(app\)\.await/gu)).toHaveLength(
-      2,
-    )
+    expect(flow.match(/stop_sidecar_and_wait\(app\)\.await/gu)).toHaveLength(2)
     expect(flow).toContain("app.restart();")
   })
 

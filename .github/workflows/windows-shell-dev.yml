@@ -14,14 +14,13 @@
 #   2. Compile the proxy and isolated broker sidecars for win-x64 via
 #      scripts/build-sidecar.ts, which stages both target-triple externalBin
 #      inputs under shell/src-tauri/binaries/.
-#   3. `bun run tauri build` for Windows → NSIS per-user installer (+ the
+#   3. Run the native shell tests under Windows, including quit ordering.
+#   4. `bun run tauri build` for Windows → NSIS per-user installer (+ the
 #      bare .exe). NSIS is chosen over WiX/MSI to match the macOS per-user,
 #      no-admin model (installMode: currentUser in tauri.conf.json).
-#   4. Upload the installer + exe as artifacts.
-#
-# A green run here proves the Windows shell BUILDS. It does NOT launch the GUI
-# (Tauri can't run headlessly on the runner), so a launch-smoke is out of
-# scope — the build itself is the gate.
+#   5. Install and launch the packaged app, prove its sidecar starts, then run
+#      the NSIS uninstaller while Maximal is still running. A bounded deadline
+#      catches regressions where the uninstaller waits forever for the tray app.
 #
 # Trigger: Actions tab -> "windows shell (dev)" -> Run workflow, pick the
 # branch. Or: gh workflow run windows-shell-dev.yml --ref agent/win-shell
@@ -47,7 +46,7 @@ permissions:
 jobs:
   build:
     runs-on: windows-2022
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       # The root mise.toml pins Rust and the broker inherits it; nothing in
       # this job builds Rust through mise, so don't download the toolchain.
@@ -133,6 +132,12 @@ jobs:
           }
           Get-ChildItem $dir
 
+      # Compile and exercise the lifecycle code with target_os = "windows".
+      # --release lets the following Tauri build reuse the compiled graph.
+      - name: Test native shell lifecycle (Windows)
+        shell: bash
+        run: cargo test --release --manifest-path shell/src-tauri/Cargo.toml
+
       # Build the Tauri app for Windows. The NSIS per-user installer + the
       # raw .exe are produced under shell/src-tauri/target/release/bundle/.
       # build:ui runs again as beforeBuildCommand (cheap, idempotent).
@@ -189,9 +194,7 @@ jobs:
       # Prove the tray app is what a user actually gets: silently install the
       # NSIS package, then assert a "Maximal" Start Menu shortcut lands that
       # targets the app exe inside the install dir — the Windows analog of the
-      # macOS .app in /Applications (how a user finds + launches maximal). We
-      # can't headlessly launch the GUI, so we verify the launcher exists +
-      # points at the app, not the running window.
+      # macOS .app in /Applications (how a user finds + launches maximal).
       - name: Install NSIS + verify Start Menu launcher
         shell: pwsh
         run: |
@@ -232,24 +235,76 @@ jobs:
           if (-not (Test-Path $target)) { throw "shortcut target does not exist on disk: $target" }
           Write-Host "Start Menu launcher OK -> $target"
 
-      - name: Uninstall NSIS app
+      - name: Launch installed app and verify sidecar
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installRoot = Join-Path $env:LOCALAPPDATA 'Maximal'
+          $shellPath = Join-Path $installRoot 'maximal-shell.exe'
+          if (-not (Test-Path $shellPath)) { throw "shell missing: $shellPath" }
+
+          Write-Host "launching: $shellPath"
+          Start-Process -FilePath $shellPath | Out-Null
+          $deadline = (Get-Date).AddSeconds(30)
+          do {
+            $shellProcess = Get-Process -Name 'maximal-shell' -ErrorAction SilentlyContinue |
+              Select-Object -First 1
+            $sidecarProcess = Get-Process -Name 'maximal' -ErrorAction SilentlyContinue |
+              Select-Object -First 1
+            if ($shellProcess -and $sidecarProcess) { break }
+            Start-Sleep -Milliseconds 500
+          } while ((Get-Date) -lt $deadline)
+
+          if (-not $shellProcess) { throw "maximal-shell did not stay running" }
+          if (-not $sidecarProcess) { throw "maximal sidecar did not start within 30 seconds" }
+          Write-Host "shell PID: $($shellProcess.Id); sidecar PID: $($sidecarProcess.Id)"
+
+      - name: Uninstall NSIS app while Maximal is running
         if: always()
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          # Kill anything the installer may have auto-launched, then run the
-          # per-user uninstaller silently and verify both sidecars are removed.
-          Get-Process -Name 'Maximal', 'maximal', 'maximal-mcp-broker', 'maximal-shell' `
-            -ErrorAction SilentlyContinue |
-            Stop-Process -Force -ErrorAction SilentlyContinue
           $installRoot = Join-Path $env:LOCALAPPDATA 'Maximal'
           $unins = Get-ChildItem $installRoot -Recurse -Filter 'uninstall.exe' `
             -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $unins) { throw "uninstaller not found under $installRoot" }
-          Write-Host "uninstalling: $($unins.FullName)"
-          $p = Start-Process -FilePath $unins.FullName -ArgumentList '/S' -Wait -PassThru
+
+          # Do not stop Maximal here. NSIS_HOOK_PREUNINSTALL must stop the open
+          # tray shell and its sidecars before Tauri's CheckIfAppIsRunning.
+          Write-Host "uninstalling with Maximal still running: $($unins.FullName)"
+          # _?= disables NSIS's usual handoff to a temporary copy. Without it,
+          # WaitForExit observes only the launcher and can return before the real
+          # uninstaller reaches CheckIfAppIsRunning or removes the binaries.
+          $p = Start-Process -FilePath $unins.FullName `
+            -ArgumentList '/S', "_?=$installRoot" -PassThru
+          if (-not $p.WaitForExit(60000)) {
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+            Get-Process -Name 'maximal-shell', 'maximal', 'maximal-mcp-broker' `
+              -ErrorAction SilentlyContinue |
+              Stop-Process -Force -ErrorAction SilentlyContinue
+            throw "uninstaller timed out with Maximal running"
+          }
           if ($p.ExitCode -ne 0) { throw "NSIS uninstall failed: $($p.ExitCode)" }
-          foreach ($binary in @('maximal.exe', 'maximal-mcp-broker.exe')) {
+
+          $deadline = (Get-Date).AddSeconds(10)
+          do {
+            $remaining = @(
+              Get-Process -Name 'maximal-shell', 'maximal', 'maximal-mcp-broker' `
+                -ErrorAction SilentlyContinue
+            )
+            if ($remaining.Count -eq 0) { break }
+            Start-Sleep -Milliseconds 250
+          } while ((Get-Date) -lt $deadline)
+          if ($remaining.Count -ne 0) {
+            $details = ($remaining | ForEach-Object { "$($_.ProcessName):$($_.Id)" }) -join ', '
+            throw "Maximal processes remain after uninstall: $details"
+          }
+
+          foreach ($binary in @('maximal-shell.exe', 'maximal.exe', 'maximal-mcp-broker.exe')) {
             $binaryPath = Join-Path $installRoot $binary
             if (Test-Path $binaryPath) { throw "$binary still present: $binaryPath" }
           }
+
+          # An in-place NSIS uninstaller cannot remove its own executable.
+          Remove-Item $installRoot -Recurse -Force
+          if (Test-Path $installRoot) { throw "install root still present: $installRoot" }

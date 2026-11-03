@@ -1027,9 +1027,9 @@ pub(super) fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
                         .state::<ManagedEndpoint>()
                         .clear_generation(event_spawn.generation);
                     eprintln!("[maximal] sidecar exited: {:?}", payload);
-                    // An in-place update stopped it so the installer can
-                    // replace its executable. Tell the update it's gone and
-                    // leave the app alone: the installer exits and relaunches it.
+                    // An owning lifecycle (in-place update or Windows Quit)
+                    // stopped it and is waiting for proof that it is gone. Hand
+                    // off the event and leave the app-level decision to that caller.
                     if let Some(tx) = handle.state::<SidecarHandoff>().take() {
                         let _ = tx.send(());
                         break;
@@ -1610,8 +1610,10 @@ pub(super) async fn fetch_setup_status(
     }
     resp.json::<SetupStatusResponse>().await.ok()
 }
-/// `SidecarHandoff` instead of quitting the app or marking it Failed.
-pub(super) async fn stop_sidecar_for_update(app: &AppHandle) {
+/// Stop the sidecar and wait for its termination event. `SidecarHandoff`
+/// prevents that event from independently exiting or changing the shell while
+/// an update or the Windows Quit path owns the surrounding lifecycle.
+pub(super) async fn stop_sidecar_and_wait(app: &AppHandle) {
     let (tx, rx) = tokio::sync::oneshot::channel();
     app.state::<SidecarHandoff>().arm(tx);
     if kill_sidecar(app)

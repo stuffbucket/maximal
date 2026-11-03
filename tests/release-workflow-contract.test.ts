@@ -248,6 +248,24 @@ const windowsShellJob = (workflow: string): string =>
     workflow.indexOf("\n  publish:"),
   )
 
+describe("Windows desktop lifecycle smoke", () => {
+  test("tests native shutdown and uninstalls a running shell within a deadline", async () => {
+    const workflow = await readWorkflow("windows-shell-dev.yml")
+
+    expect(workflow).toContain(
+      "cargo test --release --manifest-path shell/src-tauri/Cargo.toml",
+    )
+    expect(workflow).toContain("name: Launch installed app and verify sidecar")
+    expect(workflow).toContain("Get-Process -Name 'maximal-shell'")
+    expect(workflow).toContain("Get-Process -Name 'maximal'")
+    expect(workflow).toContain('"_?=$installRoot"')
+    expect(workflow).toContain("$p.WaitForExit(60000)")
+    expect(workflow).toContain("uninstaller timed out with Maximal running")
+    expect(workflow).toContain("Maximal processes remain after uninstall")
+    expect(workflow).toContain("Remove-Item $installRoot -Recurse -Force")
+  })
+})
+
 describe("in-place desktop updates", () => {
   test("the NSIS build is signed for the updater with the release environment secrets", async () => {
     const job = windowsShellJob(await readWorkflow("release.yml"))

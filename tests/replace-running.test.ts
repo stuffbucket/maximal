@@ -4,6 +4,7 @@ import {
   evictRunning,
   looksLikeMaximalCommand,
 } from "../src/lib/platform/replace-running"
+import { preflightPort } from "../src/lib/start/port"
 
 /**
  * Tests for the --replace eviction flow. Everything is driven through
@@ -46,6 +47,57 @@ function urlString(input: string | URL | Request): string {
   if (input instanceof URL) return input.href
   return input.url
 }
+
+describe("preflightPort", () => {
+  test("does not announce a takeover when the port is already free", async () => {
+    const events: Array<string> = []
+
+    await preflightPort(4141, true, {
+      probePort: () => {
+        events.push("probe")
+        return Promise.resolve("free")
+      },
+      maybeEvictRunning: () => {
+        events.push("evict")
+        return Promise.resolve()
+      },
+      emitBootStatus: (message) => events.push(message),
+      reportPortBusyAndExit: () => {
+        throw new Error("unexpected busy-port report")
+      },
+    })
+
+    expect(events).toEqual(["probe"])
+  })
+
+  test("announces and verifies a takeover only when the port is occupied", async () => {
+    const events: Array<string> = []
+    const states = ["maximal", "free"] as const
+    let probeIndex = 0
+
+    await preflightPort(4141, true, {
+      probePort: () => {
+        events.push("probe")
+        return Promise.resolve(states[probeIndex++] ?? "free")
+      },
+      maybeEvictRunning: () => {
+        events.push("evict")
+        return Promise.resolve()
+      },
+      emitBootStatus: (message) => events.push(message),
+      reportPortBusyAndExit: () => {
+        throw new Error("unexpected busy-port report")
+      },
+    })
+
+    expect(events).toEqual([
+      "probe",
+      "Taking over port 4141…",
+      "evict",
+      "probe",
+    ])
+  })
+})
 
 describe("evictRunning", () => {
   test("no instance running → resolves without POST", async () => {
