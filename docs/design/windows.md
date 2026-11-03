@@ -42,3 +42,11 @@ loop persist. The window remembers the last surface (`maximal.lastTab`) and the
 last Settings tab (`maximal.lastSettingsTab`), and overrides to **Settings →
 Account** on first run or whenever an account error or upstream rejection is
 active.
+
+The native window uses `1100×720` only as its first-launch fallback. Tauri's
+official window-state plugin persists the unified window label's size, position,
+and maximized state across process launches. It does not persist visibility
+(close still hides to the tray), decorations, or fullscreen. The window is
+created hidden and shown after restoration, so returning users do not see it
+paint at the fallback size first. Switching among the three surfaces only changes
+content and title; it does not change native window geometry.

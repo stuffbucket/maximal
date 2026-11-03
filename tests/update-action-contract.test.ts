@@ -19,6 +19,8 @@ const SETTINGS_HTML = read("shell/ui/settings/index.html")
 const SETTINGS_MAIN_TS = read("shell/src/main.ts")
 const SHELL_TS = read("shell/src/tauri/shell.ts")
 const SHELL_LIB_RS = read("shell/src-tauri/src/lib.rs")
+const SHELL_RUNTIME_RS = read("shell/src-tauri/src/sidecar_runtime.rs")
+const SHELL_RUST_SOURCES = `${SHELL_LIB_RS}\n${SHELL_RUNTIME_RS}`
 const SHELL_PERMISSIONS = read("shell/src-tauri/permissions/default.toml")
 const TAURI_CONF = JSON.parse(read("shell/src-tauri/tauri.conf.json")) as {
   plugins?: {
@@ -153,11 +155,11 @@ describe("tray update item", () => {
   })
 
   test("falls back to the download page root, never the retired path", () => {
-    expect(SHELL_LIB_RS).toContain(
+    expect(SHELL_RUST_SOURCES).toContain(
       'const UPDATE_PAGE_URL: &str = "https://mxml.sh/";',
     )
-    expect(SHELL_LIB_RS).not.toContain("mxml.sh/maximal/")
-    expect(SHELL_LIB_RS).not.toContain(
+    expect(SHELL_RUST_SOURCES).not.toContain("mxml.sh/maximal/")
+    expect(SHELL_RUST_SOURCES).not.toContain(
       "github.com/stuffbucket/maximal/releases",
     )
   })
@@ -178,7 +180,7 @@ describe("apt installs (Debian/Ubuntu packages)", () => {
       'native_i18n::tr(locale, "native-tray-upgrade-apt")',
     )
     // The sidecar decides: an apt install reports its command.
-    expect(SHELL_LIB_RS).toContain('.get("update_command")')
+    expect(SHELL_RUST_SOURCES).toContain('.get("update_command")')
   })
 
   test("clicking shows the command to copy and the Linux guide, without running it", () => {
@@ -210,8 +212,8 @@ describe("check for updates", () => {
       "menu_id::CHECK_UPDATES => check_updates_from_tray(app)",
     )
     // Same parser as the poll; a forced check goes through ?force=1.
-    expect(SHELL_LIB_RS).toContain("parse_update_status(payload)")
-    expect(SHELL_LIB_RS).toContain('format!("{base}?force=1")')
+    expect(SHELL_RUST_SOURCES).toContain("parse_update_status(payload)")
+    expect(SHELL_RUST_SOURCES).toContain('format!("{base}?force=1")')
   })
 
   test("its notices come from the catalog and use the dialog plugin", () => {

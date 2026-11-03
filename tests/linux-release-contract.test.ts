@@ -286,8 +286,8 @@ describe("packaged proxy", () => {
   })
 
   test("the tray app's proxy listens on loopback on every platform", () => {
-    const shell = read("shell/src-tauri/src/lib.rs")
-    const spawn = shell.slice(shell.indexOf("fn spawn_sidecar("))
+    const runtime = read("shell/src-tauri/src/sidecar_runtime.rs")
+    const spawn = runtime.slice(runtime.indexOf("fn spawn_sidecar("))
     expect(spawn.slice(0, spawn.indexOf(".spawn()"))).toContain(
       '.env("HOST", LOOPBACK_HOST)',
     )

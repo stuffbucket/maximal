@@ -40,162 +40,46 @@
 //   3. On accept → `app.exit(0)` → RunEvent::ExitRequested →
 //      `kill_sidecar` (SIGTERM + 3s SIGKILL escalation) → process exit.
 
-use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tauri::{
     image::Image,
-    ipc::{CapabilityBuilder, Channel},
+    ipc::Channel,
     menu::{IsMenuItem, Menu, MenuItem, PredefinedMenuItem},
-    utils::config::{AppDirectoriesOverride, AppDirectoryOverrides},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    utils::config::{AppDirectoriesOverride, AppDirectoryOverrides},
     webview::PageLoadEvent,
-    AppHandle, Emitter, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder,
-    WindowEvent,
+    AppHandle, Emitter, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
 use tauri_plugin_opener::OpenerExt;
-use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
+use tauri_plugin_window_state::StateFlags;
 
 /// Native-string i18n (tray, notifications, window titles, quit dialog),
 /// backed by the same shell/src/i18n/*.json catalogs the webview renders with.
 mod native_i18n;
+mod sidecar_runtime;
 
-const PRODUCTION_IDENTIFIER: &str = "co.stuffbucket.maximal";
-const PRODUCTION_PORT: u16 = 4141;
-const LOOPBACK_HOST: &str = "127.0.0.1";
-const READY_MARKER: &str = "@@MAXIMAL_READY@@";
-const SIDECAR_READY_TIMEOUT: Duration = Duration::from_secs(30);
-const MAX_STDOUT_LINE_BYTES: usize = 64 * 1024;
-const PREFERRED_PORT_FILE: &str = "sidecar-port";
-
-/// Runtime behavior is derived from the final Tauri identifier, including any
-/// `tauri dev --config` override. Only the exact release identifier is allowed
-/// to use production data or register updater surfaces; unknown identifiers
-/// fail closed into a development profile.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum AppProfile {
-    Production,
-    Development,
-    Test,
-}
-
-impl AppProfile {
-    fn from_identifier(identifier: &str) -> Self {
-        if identifier == PRODUCTION_IDENTIFIER {
-            Self::Production
-        } else if identifier == format!("{PRODUCTION_IDENTIFIER}.test")
-            || identifier.starts_with(&format!("{PRODUCTION_IDENTIFIER}.test."))
-        {
-            Self::Test
-        } else {
-            Self::Development
-        }
-    }
-
-    fn as_env(self) -> &'static str {
-        match self {
-            Self::Production => "production",
-            Self::Development => "development",
-            Self::Test => "test",
-        }
-    }
-
-    fn initial_port(self) -> u16 {
-        match self {
-            Self::Production => PRODUCTION_PORT,
-            Self::Development | Self::Test => 0,
-        }
-    }
-
-    fn updates_enabled(self) -> bool {
-        self == Self::Production
-    }
-}
-
-struct AppDataDir(PathBuf);
-
-fn preferred_port_file(data_dir: &Path) -> PathBuf {
-    data_dir.join(PREFERRED_PORT_FILE)
-}
-
-fn read_preferred_port(data_dir: &Path) -> Option<u16> {
-    let raw = std::fs::read_to_string(preferred_port_file(data_dir)).ok()?;
-    raw.trim().parse::<u16>().ok().filter(|port| *port > 0)
-}
-
-fn write_preferred_port(data_dir: &Path, port: u16) -> std::io::Result<()> {
-    std::fs::create_dir_all(data_dir)?;
-    std::fs::write(preferred_port_file(data_dir), format!("{port}\n"))
-}
-
-fn absolute_env_path(value: std::ffi::OsString) -> tauri::Result<PathBuf> {
-    let path = PathBuf::from(value);
-    if path.is_absolute() {
-        Ok(path)
-    } else {
-        Ok(std::env::current_dir()?.join(path))
-    }
-}
-
-fn production_data_dir() -> tauri::Result<PathBuf> {
-    #[cfg(target_os = "windows")]
-    {
-        if let Some(app_data) = std::env::var_os("APPDATA") {
-            return Ok(PathBuf::from(app_data).join("maximal"));
-        }
-        let home = std::env::var_os("USERPROFILE").ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                "USERPROFILE is unavailable",
-            )
-        })?;
-        Ok(PathBuf::from(home)
-            .join("AppData")
-            .join("Roaming")
-            .join("maximal"))
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        let home = std::env::var_os("HOME").ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::NotFound, "HOME is unavailable")
-        })?;
-        Ok(PathBuf::from(home)
-            .join(".local")
-            .join("share")
-            .join("maximal"))
-    }
-}
-
-fn profile_data_override(profile: AppProfile) -> tauri::Result<Option<PathBuf>> {
-    if let Some(home) = std::env::var_os("COPILOT_API_HOME").filter(|value| !value.is_empty()) {
-        return absolute_env_path(home).map(Some);
-    }
-    match profile {
-        AppProfile::Production => production_data_dir().map(Some),
-        AppProfile::Development | AppProfile::Test => Ok(None),
-    }
-}
-
-/// Prefix the sidecar prints (stdout) for structured boot-status lines we
-/// relay to the splash. MUST match `BOOT_STATUS_MARKER` in src/start.ts.
-const BOOT_STATUS_MARKER: &str = "@@MAXIMAL_STATUS@@";
+use sidecar_runtime::{
+    begin_exit, extract_error_reason, fetch_rejection, fetch_requests_summary, fetch_setup_status,
+    fetch_update_payload, kill_sidecar, manual_check_outcome, parse_update_status,
+    profile_data_override, read_preferred_port, runtime_event_channel, spawn_sidecar,
+    update_status_endpoint, AppDataDir, AppProfile, AppStatus, LastRejection, LastSidecarError,
+    LatestUpdate, ManagedEndpoint, ManualCheck, PendingRequests, RejectionSnapshot,
+    RejectionTransition, RequestsSnapshot, RequestsTransition, RuntimeEvent, RuntimeExiting,
+    SetupStatusResponse, ShellApiKey, Sidecar, SidecarEndpoint, SidecarFailureStop, SidecarHandoff,
+    SidecarRestarting, SidecarState, TokenUsageEvent, UpdateCheck, UpdateSnapshot,
+    DASHBOARD_WINDOW_LABEL, LOOPBACK_HOST, SETTINGS_WINDOW_LABEL, UPDATE_PAGE_URL,
+};
 
 /// Brand-minimum time the splash stays on screen once the sidecar reaches a
 /// Running state, before it fades. The state-aware dismiss loop in
 /// `create_splash` enforces this, and the first-run Settings auto-open
 /// (`apply_state`) defers to it so Settings doesn't race up over the splash.
 const SPLASH_MIN_DISPLAY: Duration = Duration::from_millis(1600);
-
-/// How long `subscribe_token_usage` waits after a *failed* fetch before
-/// trying again. Successful fetches pace themselves by the total (see
-/// `dashboard_poll_interval`). Each iteration also probes the
-/// `Channel<TokenUsageEvent>` — when the JS side drops the channel, the
-/// next `send` returns Err and the loop exits cleanly.
-const DASHBOARD_RETRY_INTERVAL: Duration = Duration::from_secs(5);
 
 /// How often the phase-2 poll re-checks for a newer release. Generous on
 /// purpose — releases are rare and the sidecar caches the upstream lookup for
@@ -216,11 +100,6 @@ const UPDATE_FORCE_TIMEOUT: Duration = Duration::from_secs(20);
 /// Event the shell sends the Settings window after it ran an update check, so
 /// the topbar button and Diagnostics rows re-read the status right away.
 const UPDATE_STATUS_EVENT: &str = "update:status";
-
-/// The install-channel-neutral download page — the same constant the sidecar
-/// reports as `url` (`DOWNLOAD_URL` in src/lib/update/update-check.ts). Used
-/// when the payload carries no URL.
-const UPDATE_PAGE_URL: &str = "https://mxml.sh/";
 
 /// Whether "Update to X.Y.Z" installs the update in place (download the
 /// signed update, install, relaunch) on this platform: Windows (the NSIS
@@ -243,16 +122,6 @@ const DESKTOP_UPDATE_MANIFEST_BASE: &str = "https://mxml.sh/updates/desktop/";
 /// How long the in-place updater waits for the desktop manifest.
 const UPDATE_MANIFEST_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// How long an in-place update waits for the sidecar to exit: before running
-/// the Windows installer, which must overwrite the sidecar's executable, and
-/// before relaunching on macOS, so the new sidecar finds the port free.
-/// `kill_sidecar` escalates to a hard kill after 3s, so this is slack.
-const SIDECAR_STOP_TIMEOUT: Duration = Duration::from_secs(10);
-
-/// Allowed values for the dashboard's `period` query parameter.
-/// Anything else from the webview is clamped to "day".
-const DASHBOARD_PERIODS: &[&str] = &["day", "week", "month"];
-
 const TRAY_ID: &str = "main";
 // Two webview windows, both pointed at the selected sidecar origin:
 //   settings  — /ui/settings/  (React app)
@@ -260,8 +129,12 @@ const TRAY_ID: &str = "main";
 // Both UIs are embedded in the sidecar binary and served at /ui/* —
 // see src/routes/ui/route.ts.
 // Labels are referenced from capabilities/default.json `windows`.
-const SETTINGS_WINDOW_LABEL: &str = "settings";
-const DASHBOARD_WINDOW_LABEL: &str = "dashboard";
+const MAIN_WINDOW_FALLBACK_WIDTH: f64 = 1100.0;
+const MAIN_WINDOW_FALLBACK_HEIGHT: f64 = 720.0;
+
+fn main_window_state_flags() -> StateFlags {
+    StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED
+}
 
 // Tray icon assets — embedded at compile time so we don't have to
 // resolve resource paths at runtime. The SVG sources live alongside
@@ -292,423 +165,6 @@ mod menu_id {
     pub const CHECK_UPDATES: &str = "check_updates";
 }
 
-/// High-level tray state. Each transition rebuilds the menu and swaps
-/// the tray icon.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SidecarState {
-    Starting,
-    RunningUnauthenticated,
-    RunningAuthenticated,
-    #[allow(dead_code)]
-    Stopped,
-    Failed,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct SidecarEndpoint {
-    generation: u64,
-    port: u16,
-}
-
-impl SidecarEndpoint {
-    fn http_url(self, path: &str) -> String {
-        format!("http://{LOOPBACK_HOST}:{}{path}", self.port)
-    }
-
-    fn browser_origin(self) -> String {
-        // Preserve the production origin used by every prior release. Besides
-        // retaining localStorage, macOS's bundle exception is for localhost.
-        format!("http://localhost:{}", self.port)
-    }
-}
-
-#[derive(Debug)]
-struct EndpointState {
-    generation: u64,
-    selected_port: Option<u16>,
-    current: Option<SidecarEndpoint>,
-    capability_ports: HashSet<u16>,
-}
-
-/// Generation-aware endpoint selected by the sidecar's authenticated ready
-/// line. `selected_port` survives a sidecar restart because Tauri capabilities
-/// can be added but not removed; every generation after the first therefore
-/// asks for the same port.
-struct ManagedEndpoint(Mutex<EndpointState>);
-
-impl ManagedEndpoint {
-    fn new() -> Self {
-        Self(Mutex::new(EndpointState {
-            generation: 0,
-            selected_port: None,
-            current: None,
-            capability_ports: HashSet::new(),
-        }))
-    }
-
-    fn set_preferred_port(&self, port: Option<u16>) {
-        let mut state = self.0.lock().expect("endpoint mutex poisoned");
-        if state.generation == 0 {
-            state.selected_port = port;
-        }
-    }
-
-    fn begin_generation(&self, profile: AppProfile) -> SpawnGeneration {
-        let mut state = self.0.lock().expect("endpoint mutex poisoned");
-        state.generation = state.generation.wrapping_add(1);
-        state.current = None;
-        SpawnGeneration {
-            generation: state.generation,
-            requested_port: state.selected_port.unwrap_or_else(|| profile.initial_port()),
-            nonce: generate_nonce(),
-        }
-    }
-
-    fn current(&self) -> Option<SidecarEndpoint> {
-        self.0.lock().expect("endpoint mutex poisoned").current
-    }
-
-    fn is_pending(&self, generation: u64) -> bool {
-        let state = self.0.lock().expect("endpoint mutex poisoned");
-        state.generation == generation && state.current.is_none()
-    }
-
-    fn expire_pending(&self, generation: u64) -> bool {
-        let mut state = self.0.lock().expect("endpoint mutex poisoned");
-        if state.generation != generation || state.current.is_some() {
-            return false;
-        }
-        state.generation = state.generation.wrapping_add(1);
-        true
-    }
-
-    fn clear_generation(&self, generation: u64) {
-        let mut state = self.0.lock().expect("endpoint mutex poisoned");
-        if state.generation == generation {
-            state.current = None;
-        }
-    }
-
-    /// Forget a persisted preferred port after its first launch failed. This is
-    /// allowed only before any remote capability exists; after that, changing
-    /// ports would leave a capability behind that Tauri cannot revoke.
-    fn prepare_dynamic_retry(&self, generation: u64, requested_port: u16) -> bool {
-        let mut state = self.0.lock().expect("endpoint mutex poisoned");
-        if state.generation != generation
-            || state.current.is_some()
-            || requested_port == 0
-            || !state.capability_ports.is_empty()
-            || state.selected_port != Some(requested_port)
-        {
-            return false;
-        }
-        state.selected_port = None;
-        true
-    }
-
-    fn has_capability(&self, port: u16) -> bool {
-        self.0
-            .lock()
-            .expect("endpoint mutex poisoned")
-            .capability_ports
-            .contains(&port)
-    }
-
-    fn mark_capability(&self, port: u16) {
-        self.0
-            .lock()
-            .expect("endpoint mutex poisoned")
-            .capability_ports
-            .insert(port);
-    }
-
-    fn activate(&self, generation: u64, port: u16) -> bool {
-        let mut state = self.0.lock().expect("endpoint mutex poisoned");
-        if state.generation != generation || state.current.is_some() {
-            return false;
-        }
-        state.selected_port = Some(port);
-        state.current = Some(SidecarEndpoint { generation, port });
-        true
-    }
-}
-
-#[derive(Clone, Debug)]
-struct SpawnGeneration {
-    generation: u64,
-    requested_port: u16,
-    nonce: String,
-}
-
-#[derive(Debug, Deserialize, PartialEq, Eq)]
-struct SidecarReady {
-    protocol: u8,
-    host: String,
-    port: u16,
-    #[serde(rename = "instanceId")]
-    instance_id: String,
-    nonce: String,
-}
-
-fn validate_ready(
-    ready: &SidecarReady,
-    spawn: &SpawnGeneration,
-    identifier: &str,
-) -> Result<(), String> {
-    if ready.protocol != 1 {
-        return Err(format!("unsupported ready protocol {}", ready.protocol));
-    }
-    if ready.nonce != spawn.nonce {
-        return Err("ready nonce did not match this sidecar generation".to_string());
-    }
-    if ready.instance_id != identifier {
-        return Err("ready identifier did not match this Tauri instance".to_string());
-    }
-    if ready.host != LOOPBACK_HOST {
-        return Err(format!("ready host must be {LOOPBACK_HOST}"));
-    }
-    if ready.port == 0 {
-        return Err("ready port must be non-zero".to_string());
-    }
-    if spawn.requested_port != 0 && ready.port != spawn.requested_port {
-        return Err(format!(
-            "ready port {} did not match requested port {}",
-            ready.port, spawn.requested_port
-        ));
-    }
-    Ok(())
-}
-
-#[derive(Default)]
-struct StdoutLines {
-    pending: Vec<u8>,
-}
-
-impl StdoutLines {
-    fn push(&mut self, chunk: &[u8]) -> Vec<String> {
-        self.pending.extend_from_slice(chunk);
-        let mut lines = Vec::new();
-        while let Some(newline) = self.pending.iter().position(|byte| *byte == b'\n') {
-            let mut raw = self.pending.drain(..=newline).collect::<Vec<_>>();
-            raw.pop();
-            if raw.last() == Some(&b'\r') {
-                raw.pop();
-            }
-            lines.push(String::from_utf8_lossy(&raw).into_owned());
-        }
-        if self.pending.len() > MAX_STDOUT_LINE_BYTES {
-            let raw = std::mem::take(&mut self.pending);
-            lines.push(String::from_utf8_lossy(&raw).into_owned());
-        }
-        lines
-    }
-}
-
-/// Owns the sidecar's CommandChild for the lifetime of the app.
-///
-/// Wrapped in `Mutex<Option<...>>` because Tauri's managed-state
-/// API requires `Send + Sync`, and the child handle is consumed
-/// (option becomes None) once `kill()` is issued so subsequent
-/// kill calls become harmless no-ops.
-struct RunningSidecar {
-    generation: u64,
-    child: CommandChild,
-}
-
-struct Sidecar(Mutex<Option<RunningSidecar>>);
-
-impl Sidecar {
-    fn new() -> Self {
-        Self(Mutex::new(None))
-    }
-
-    fn set(&self, generation: u64, child: CommandChild) {
-        *self.0.lock().expect("sidecar mutex poisoned") = Some(RunningSidecar {
-            generation,
-            child,
-        });
-    }
-
-    fn generation(&self) -> Option<u64> {
-        self.0
-            .lock()
-            .expect("sidecar mutex poisoned")
-            .as_ref()
-            .map(|sidecar| sidecar.generation)
-    }
-
-    fn clear_generation(&self, generation: u64) {
-        let mut current = self.0.lock().expect("sidecar mutex poisoned");
-        if current
-            .as_ref()
-            .is_some_and(|sidecar| sidecar.generation == generation)
-        {
-            current.take();
-        }
-    }
-
-    fn take(&self) -> Option<CommandChild> {
-        self.0
-            .lock()
-            .expect("sidecar mutex poisoned")
-            .take()
-            .map(|sidecar| sidecar.child)
-    }
-}
-
-impl Drop for Sidecar {
-    fn drop(&mut self) {
-        // Last-resort cleanup if RunEvent::ExitRequested didn't fire
-        // (e.g. a Rust panic inside `app.run`, or some other abnormal
-        // teardown). We skip the SIGTERM-then-SIGKILL escalation that
-        // `kill_sidecar` does — Drop is the abnormal-exit path, where
-        // graceful shutdown isn't on the table anyway. CommandChild::kill()
-        // is SIGKILL under the hood, which is exactly what we want here:
-        // don't leak a zombie.
-        if let Ok(mut guard) = self.0.lock() {
-            if let Some(sidecar) = guard.take() {
-                let _ = sidecar.child.kill();
-            }
-        }
-    }
-}
-
-/// Snapshot of the last non-fatal upstream rejection (quota exhausted,
-/// model not on plan, transient upstream error). Pulled from the
-/// sidecar's `/settings/api/auth/github/status` endpoint and used to
-/// drive the ATTENTION tray icon and a one-shot OS notification on
-/// rejection-state entry.
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct RejectionSnapshot {
-    message: String,
-    status: u16,
-    at: String,
-    remediation_url: Option<String>,
-}
-
-/// Tracks the most recent rejection snapshot the rejection poller has
-/// observed. None = no recent non-fatal rejection (healthy). Wrapped
-/// in Mutex because both the polling task and tray-refresh path read it.
-struct LastRejection(Mutex<Option<RejectionSnapshot>>);
-
-impl LastRejection {
-    fn new() -> Self {
-        Self(Mutex::new(None))
-    }
-
-    fn get(&self) -> Option<RejectionSnapshot> {
-        self.0.lock().expect("rejection mutex poisoned").clone()
-    }
-
-    /// Returns true if the state transitioned from None → Some. Callers
-    /// use that signal to fire the one-shot OS notification.
-    fn set(&self, next: Option<RejectionSnapshot>) -> RejectionTransition {
-        let mut guard = self.0.lock().expect("rejection mutex poisoned");
-        let prev = guard.clone();
-        if prev == next {
-            return RejectionTransition::Unchanged;
-        }
-        *guard = next.clone();
-        match (prev, next) {
-            (None, Some(_)) => RejectionTransition::Entered,
-            (Some(_), None) => RejectionTransition::Cleared,
-            _ => RejectionTransition::Changed,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum RejectionTransition {
-    Unchanged,
-    /// None → Some: notification fires here.
-    Entered,
-    /// Some → None: tray icon restores to NORMAL.
-    Cleared,
-    /// Some → Some(different): tray stays in ATTENTION, no re-notify.
-    Changed,
-}
-
-/// MCP servers' requests for user input waiting in Settings → Requests, as
-/// last reported by `/settings/api/requests/summary`: a count and the newest
-/// id, never contents (those stay in Settings). Drives the ATTENTION icon,
-/// a tray item, and one notification per new request.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-struct RequestsSnapshot {
-    pending: u64,
-    newest_id: Option<String>,
-}
-
-/// How many recent newest ids to remember, so one that becomes newest
-/// again (a later one was answered first) isn't taken for a new arrival.
-const SEEN_REQUEST_IDS: usize = 64;
-
-#[derive(Default)]
-struct RequestsState {
-    snapshot: RequestsSnapshot,
-    seen: std::collections::VecDeque<String>,
-}
-
-struct PendingRequests(Mutex<RequestsState>);
-
-impl PendingRequests {
-    fn new() -> Self {
-        Self(Mutex::new(RequestsState::default()))
-    }
-
-    fn get(&self) -> RequestsSnapshot {
-        self.0.lock().expect("requests mutex poisoned").snapshot.clone()
-    }
-
-    fn set(&self, next: RequestsSnapshot) -> RequestsTransition {
-        let mut guard = self.0.lock().expect("requests mutex poisoned");
-        let transition = requests_transition(&guard.snapshot, &next, &guard.seen);
-        if let Some(id) = &next.newest_id {
-            if !guard.seen.contains(id) {
-                guard.seen.push_back(id.clone());
-                if guard.seen.len() > SEEN_REQUEST_IDS {
-                    guard.seen.pop_front();
-                }
-            }
-        }
-        guard.snapshot = next;
-        transition
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum RequestsTransition {
-    Unchanged,
-    /// A request arrived that wasn't there before: notify once.
-    Arrived,
-    /// Fewer or none waiting: refresh the tray, don't notify.
-    Changed,
-}
-
-/// A newest id not seen before means a request arrived; anything else that
-/// differs is requests being answered, withdrawn or expiring.
-fn requests_transition(
-    prev: &RequestsSnapshot,
-    next: &RequestsSnapshot,
-    seen: &std::collections::VecDeque<String>,
-) -> RequestsTransition {
-    if prev == next {
-        return RequestsTransition::Unchanged;
-    }
-    match &next.newest_id {
-        Some(id) if next.pending > 0 && !seen.contains(id) => RequestsTransition::Arrived,
-        _ => RequestsTransition::Changed,
-    }
-}
-
-fn parse_requests_summary(payload: &serde_json::Value) -> Option<RequestsSnapshot> {
-    let pending = payload.get("pending")?.as_u64()?;
-    let newest_id = match payload.get("newestId")? {
-        serde_json::Value::Null => None,
-        value => Some(value.as_str()?.to_owned()),
-    };
-    Some(RequestsSnapshot { pending, newest_id })
-}
-
 /// Where Settings should open when the user reaches for the app without
 /// saying where: waiting requests first (they expire), then sign-in.
 fn default_settings_section(app: &AppHandle) -> Option<&'static str> {
@@ -718,51 +174,6 @@ fn default_settings_section(app: &AppHandle) -> Option<&'static str> {
         Some("account")
     } else {
         None
-    }
-}
-
-/// The latest available release, as last reported by the sidecar's
-/// `/settings/api/update-status`. None = up to date (or unknown). Drives the
-/// "Update to X.Y.Z…" tray item and a one-shot OS notification when a newer
-/// version first appears. Mutex because the poll task writes it while the
-/// tray-refresh and menu-event paths read it.
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct UpdateSnapshot {
-    /// Latest version, no leading "v".
-    latest: String,
-    /// Install-channel-neutral download page, or the Linux guide's update
-    /// section for an apt install.
-    url: String,
-    /// For an apt install (the Debian/Ubuntu packages), the command that
-    /// upgrades it. Maximal never runs it: the tray item opens Settings, which
-    /// shows it to copy.
-    apt_command: Option<String>,
-}
-
-/// Tracks the most recent update snapshot the poll loop has observed. Wrapped
-/// in Mutex because the polling task and the tray paths both touch it.
-struct LatestUpdate(Mutex<Option<UpdateSnapshot>>);
-
-impl LatestUpdate {
-    fn new() -> Self {
-        Self(Mutex::new(None))
-    }
-
-    fn get(&self) -> Option<UpdateSnapshot> {
-        self.0.lock().expect("update mutex poisoned").clone()
-    }
-
-    /// Stores the snapshot; returns true if it changed (a newly available
-    /// version, a changed target, or clearing back to up-to-date). Callers
-    /// fire the one-shot notification only when the new value is Some, so a
-    /// repeated periodic check that finds the same version doesn't re-nag.
-    fn set(&self, next: Option<UpdateSnapshot>) -> bool {
-        let mut guard = self.0.lock().expect("update mutex poisoned");
-        if *guard == next {
-            return false;
-        }
-        *guard = next;
-        true
     }
 }
 
@@ -783,72 +194,6 @@ impl UpdateInstall {
 
     fn release(&self) {
         self.0.store(false, std::sync::atomic::Ordering::SeqCst);
-    }
-}
-
-/// Armed by an in-place update just before it stops the sidecar. The
-/// Terminated handler hands the exit to the waiting update instead of
-/// quitting the app (a clean exit) or marking it Failed (a hard kill): the
-/// installer is about to replace the sidecar's executable and relaunch.
-struct SidecarHandoff(Mutex<Option<tokio::sync::oneshot::Sender<()>>>);
-
-impl SidecarHandoff {
-    fn new() -> Self {
-        Self(Mutex::new(None))
-    }
-
-    fn arm(&self, tx: tokio::sync::oneshot::Sender<()>) {
-        *self.0.lock().expect("handoff mutex poisoned") = Some(tx);
-    }
-
-    /// The waiting update's sender, if one is armed. Clears it.
-    fn take(&self) -> Option<tokio::sync::oneshot::Sender<()>> {
-        self.0.lock().expect("handoff mutex poisoned").take()
-    }
-}
-
-/// Holds the most recent error-looking line the sidecar printed to stderr,
-/// so a Starting→Failed transition can tell the user *why* it failed (on the
-/// splash and in the OS notification) instead of a generic "couldn't start".
-/// Cleared when a retry begins so a stale reason can't haunt a fresh attempt.
-struct LastSidecarError(Mutex<Option<String>>);
-
-impl LastSidecarError {
-    fn new() -> Self {
-        Self(Mutex::new(None))
-    }
-
-    fn set(&self, reason: Option<String>) {
-        *self.0.lock().expect("sidecar-error mutex poisoned") = reason;
-    }
-
-    fn get(&self) -> Option<String> {
-        self.0.lock().expect("sidecar-error mutex poisoned").clone()
-    }
-}
-
-/// Tracks the current SidecarState behind a Mutex so the polling task
-/// (Tokio) and the menu-event callback (main thread) can both touch it.
-struct AppStatus(Mutex<SidecarState>);
-
-impl AppStatus {
-    fn new() -> Self {
-        Self(Mutex::new(SidecarState::Starting))
-    }
-
-    fn get(&self) -> SidecarState {
-        *self.0.lock().expect("status mutex poisoned")
-    }
-
-    /// Returns Some(previous) if the state changed, None otherwise.
-    fn set(&self, next: SidecarState) -> Option<SidecarState> {
-        let mut guard = self.0.lock().expect("status mutex poisoned");
-        if *guard == next {
-            return None;
-        }
-        let prev = *guard;
-        *guard = next;
-        Some(prev)
     }
 }
 
@@ -904,7 +249,10 @@ impl DockVisibilityState {
     }
 
     fn get(&self) -> String {
-        self.0.lock().expect("dock visibility mutex poisoned").clone()
+        self.0
+            .lock()
+            .expect("dock visibility mutex poisoned")
+            .clone()
     }
 
     fn always_visible(&self) -> bool {
@@ -921,21 +269,6 @@ impl DockVisibilityState {
 /// first Starting → RunningUnauthenticated transition without
 /// re-opening it every time the user manually quits + signs back in
 /// while still unauthenticated.
-struct AppExiting(std::sync::atomic::AtomicBool);
-
-impl AppExiting {
-    fn new() -> Self {
-        Self(std::sync::atomic::AtomicBool::new(false))
-    }
-
-    fn begin(&self) {
-        self.0.store(true, std::sync::atomic::Ordering::SeqCst);
-    }
-
-    fn get(&self) -> bool {
-        self.0.load(std::sync::atomic::Ordering::SeqCst)
-    }
-}
 
 /// Remembers a second-launch request that arrives before the sidecar has
 /// published and authorized its remote origin.
@@ -964,9 +297,7 @@ impl SetupPromptShown {
 
     /// Returns true the first time it's called; false on subsequent calls.
     fn claim(&self) -> bool {
-        !self
-            .0
-            .swap(true, std::sync::atomic::Ordering::SeqCst)
+        !self.0.swap(true, std::sync::atomic::Ordering::SeqCst)
     }
 }
 
@@ -1002,244 +333,45 @@ impl SplashDismissed {
     }
 }
 
-/// Set while `respawn_sidecar` is intentionally cycling the sidecar (the
-/// account-switch / sign-in / sign-out reboot). The old sidecar exits cleanly
-/// from our SIGTERM, which the Terminated handler would otherwise read as a
-/// user-initiated quit and bring the WHOLE app down — stranding the tray and
-/// killing the reboot before the replacement spawns. The handler consumes this
-/// flag and keeps the app alive for the respawn instead.
-struct SidecarRestarting(Mutex<HashSet<u64>>);
-
-impl SidecarRestarting {
-    fn new() -> Self {
-        Self(Mutex::new(HashSet::new()))
-    }
-
-    /// Mark one exact generation's exit as an intentional restart. A newer
-    /// generation can exit first without consuming the old one's handoff.
-    fn begin(&self, generation: u64) {
-        self.0
-            .lock()
-            .expect("restart mutex poisoned")
-            .insert(generation);
-    }
-
-    fn consume(&self, generation: u64) -> bool {
-        self.0
-            .lock()
-            .expect("restart mutex poisoned")
-            .remove(&generation)
-    }
+fn start_runtime_event_loop(
+    app: &AppHandle,
+    mut events: tokio::sync::mpsc::UnboundedReceiver<RuntimeEvent>,
+) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        while let Some(event) = events.recv().await {
+            match event {
+                RuntimeEvent::State(state) => apply_state(&app, state),
+                RuntimeEvent::Ready(endpoint) => {
+                    if app.state::<PendingWindowOpen>().take() {
+                        focus_or_open_main_window(&app);
+                    }
+                    let handle = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        poll_sidecar_status(handle, endpoint).await;
+                    });
+                }
+                RuntimeEvent::BootStatus(message) => {
+                    let _ = app.emit_to("splash", "splash:status", message);
+                }
+                RuntimeEvent::Exit(code) => app.exit(code),
+            }
+        }
+    });
 }
 
-/// Marks a child that the shell is stopping because startup already failed.
-/// Its clean SIGTERM exit must leave the tray in Failed rather than exit the app.
-struct SidecarFailureStop(Mutex<HashSet<u64>>);
-
-impl SidecarFailureStop {
-    fn new() -> Self {
-        Self(Mutex::new(HashSet::new()))
-    }
-
-    fn begin(&self, generation: u64) {
-        self.0
-            .lock()
-            .expect("failure-stop mutex poisoned")
-            .insert(generation);
-    }
-
-    fn consume(&self, generation: u64) -> bool {
-        self.0
-            .lock()
-            .expect("failure-stop mutex poisoned")
-            .remove(&generation)
-    }
+#[tauri::command]
+fn get_shell_api_key(state: State<'_, ShellApiKey>) -> String {
+    sidecar_runtime::get_shell_api_key(state)
 }
 
-/// Random per-launch key the shell shares with its sidecar so the
-/// webview can authenticate against /settings/api/* even when the user
-/// has enabled "Block unknown connections." Injected as an env var when
-/// spawning the sidecar; surfaced to the webview through the
-/// `get_shell_api_key` Tauri command.
-///
-/// Lifetime is the shell process — a relaunch picks a fresh value, no
-/// disk persistence. The sidecar dies with us, so there's no orphan key
-/// to clean up.
-struct ShellApiKey(String);
-
-impl ShellApiKey {
-    fn new() -> Self {
-        Self(generate_shell_api_key())
-    }
-
-    fn value(&self) -> &str {
-        &self.0
-    }
-}
-
-/// 16 cryptographically-random bytes, hex-encoded, with a recognisable
-/// prefix so it's greppable in logs / config diffs. Total length 41
-/// chars — comfortably inside the sidecar's API_KEY_VALUE_PATTERN range
-/// (8–128 chars of [A-Za-z0-9_-]).
-///
-/// Sourced via `getrandom`, which pulls bytes from the OS CSPRNG on every
-/// target (`/dev/urandom` / `getrandom(2)` on Unix, `BCryptGenRandom` on
-/// Windows). The previous implementation opened `/dev/urandom` directly,
-/// which does not exist on Windows and would panic the shell at startup —
-/// the single hardest Windows-parity blocker in this file.
-fn random_hex() -> String {
-    let mut buf = [0u8; 16];
-    getrandom::fill(&mut buf).expect("could not read OS CSPRNG");
-    buf.iter().map(|b| format!("{b:02x}")).collect()
-}
-
-fn generate_shell_api_key() -> String {
-    format!("mxlshell_{}", random_hex())
-}
-
-fn generate_nonce() -> String {
-    random_hex()
-}
-
-/// Streaming event the dashboard subscriber sends down the
-/// `Channel<TokenUsageEvent>`. Tagged so the JS side can `switch` on
-/// `msg.event` and unpack `msg.data` without sniffing shape.
-///
-/// `Update` carries the JSON response from `/token-usage?period=…`
-/// verbatim. `Error` carries a stringified failure for the most
-/// recent fetch attempt — the loop keeps retrying after emitting one
-/// so a single blip doesn't kill the live feed.
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase", tag = "event", content = "data")]
-enum TokenUsageEvent {
-    Update { payload: serde_json::Value },
-    Error { message: String },
-}
-
-/// Sanitize the period string from the JS side, defaulting to "day"
-/// for anything unrecognized. Returns `&'static str` so the URL
-/// builder doesn't re-allocate per poll.
-fn canonical_period(requested: &str) -> &'static str {
-    DASHBOARD_PERIODS
-        .iter()
-        .copied()
-        .find(|p| *p == requested)
-        .unwrap_or("day")
-}
-
-/// Data-update interval after a successful fetch: 500 ms per digit of the
-/// total tokens used (0–9 → 500 ms, 10–99 → 1 s, … 100K–999,999 → 3 s), and
-/// a flat 10 s from a million on. The point is only to show tokens are
-/// coming in, not to hammer the sidecar. Same rule as `pollIntervalMs` in
-/// shell/src/dashboard/main.ts.
-fn dashboard_poll_interval(payload: &serde_json::Value) -> Duration {
-    let total = payload
-        .pointer("/totals/total_tokens")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0);
-    if total >= 1_000_000 {
-        return Duration::from_secs(10);
-    }
-    let digits = total.checked_ilog10().map_or(1, |d| d + 1);
-    Duration::from_millis(500 * u64::from(digits))
-}
-
-/// One-shot GET of `/token-usage?period=…` against the local sidecar.
-/// Returns the parsed JSON body on 2xx, an error string otherwise.
-async fn fetch_token_usage(
-    client: &reqwest::Client,
-    endpoint: SidecarEndpoint,
-    period: &str,
-) -> Result<serde_json::Value, String> {
-    let url = endpoint.http_url(&format!("/token-usage?period={period}"));
-    let response = client.get(&url).send().await.map_err(|e| e.to_string())?;
-    if !response.status().is_success() {
-        return Err(format!("status {}", response.status()));
-    }
-    response
-        .json::<serde_json::Value>()
-        .await
-        .map_err(|e| e.to_string())
-}
-
-/// Streaming command: subscribes the caller to a steady feed of
-/// `/token-usage?period=…` snapshots. The loop terminates when the
-/// JS side drops the channel (next `send` returns Err) — which is
-/// also how period changes work: the webview discards the current
-/// channel + calls `subscribe_token_usage` again with the new period.
-///
-/// Errors during a single fetch are emitted as `Error` events but do
-/// not terminate the loop — transient sidecar restarts shouldn't
-/// require the dashboard to re-subscribe.
 #[tauri::command]
 async fn subscribe_token_usage(
     endpoint: State<'_, ManagedEndpoint>,
     period: String,
     on_event: Channel<TokenUsageEvent>,
 ) -> Result<(), String> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(2))
-        .build()
-        .map_err(|e| e.to_string())?;
-    let period = canonical_period(&period);
-
-    loop {
-        let Some(current) = endpoint.current() else {
-            if on_event
-                .send(TokenUsageEvent::Error {
-                    message: "sidecar is not ready".to_string(),
-                })
-                .is_err()
-            {
-                return Ok(());
-            }
-            tokio::time::sleep(DASHBOARD_RETRY_INTERVAL).await;
-            continue;
-        };
-        let wait = match fetch_token_usage(&client, current, period).await {
-            Ok(payload) => {
-                let wait = dashboard_poll_interval(&payload);
-                if on_event
-                    .send(TokenUsageEvent::Update { payload })
-                    .is_err()
-                {
-                    return Ok(());
-                }
-                wait
-            }
-            Err(message) => {
-                if on_event
-                    .send(TokenUsageEvent::Error { message })
-                    .is_err()
-                {
-                    return Ok(());
-                }
-                DASHBOARD_RETRY_INTERVAL
-            }
-        };
-        tokio::time::sleep(wait).await;
-    }
-}
-
-#[tauri::command]
-fn get_shell_api_key(state: State<'_, ShellApiKey>) -> String {
-    state.value().to_string()
-}
-
-#[derive(Debug, Deserialize)]
-struct SetupCheckResult {
-    ok: bool,
-}
-
-#[derive(Debug, Deserialize)]
-struct SetupChecks {
-    #[serde(rename = "githubAuth")]
-    github_auth: SetupCheckResult,
-}
-
-#[derive(Debug, Deserialize)]
-struct SetupStatusResponse {
-    checks: SetupChecks,
+    sidecar_runtime::subscribe_token_usage(endpoint, period, on_event).await
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1248,6 +380,7 @@ pub fn run() {
     // before the builder so plugin and command registration can be profile-safe.
     let mut context = tauri::generate_context!();
     let profile = AppProfile::from_identifier(&context.config().identifier);
+    let (runtime_events, runtime_event_rx) = runtime_event_channel();
     if let Some(data_dir) =
         profile_data_override(profile).expect("could not resolve Maximal's app-data directory")
     {
@@ -1270,6 +403,12 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             focus_or_open_main_window(app);
         }))
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(main_window_state_flags())
+                .with_filter(|label| label == SETTINGS_WINDOW_LABEL)
+                .build(),
+        )
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
@@ -1288,7 +427,8 @@ pub fn run() {
         .manage(Sidecar::new())
         .manage(AppStatus::new())
         .manage(ShellApiKey::new())
-        .manage(AppExiting::new())
+        .manage(RuntimeExiting::new())
+        .manage(runtime_events)
         .manage(PendingWindowOpen::new())
         .manage(SetupPromptShown::new())
         .manage(StartupAnnounced::new())
@@ -1340,6 +480,7 @@ pub fn run() {
     };
     let app = builder
         .setup(move |app| {
+            start_runtime_event_loop(app.handle(), runtime_event_rx);
             let data_dir = app.path().app_data_dir()?;
             let preferred_port = (!profile.updates_enabled())
                 .then(|| read_preferred_port(&data_dir))
@@ -1384,10 +525,7 @@ pub fn run() {
             // live choice via `set_locale` regardless.
             let persisted = persisted_locale(app.handle());
             let os_locale = sys_locale::get_locale();
-            let seeded = native_i18n::resolve_locale(
-                persisted.as_deref(),
-                os_locale.as_deref(),
-            );
+            let seeded = native_i18n::resolve_locale(persisted.as_deref(), os_locale.as_deref());
             app.state::<LocaleState>().set(seeded);
 
             // Install the tray FIRST so the user has a Quit affordance
@@ -1440,7 +578,7 @@ pub fn run() {
                 return;
             }
             // Sole sidecar-kill site for a real shutdown.
-            app_handle.state::<AppExiting>().begin();
+            begin_exit(app_handle);
             kill_sidecar(app_handle);
         }
         // macOS delivers Reopen when the app is re-activated — clicking its
@@ -1463,528 +601,6 @@ pub fn run() {
     });
 }
 
-fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
-    // sidecar("maximal") resolves `maximal` next to this executable: the
-    // arch-suffixed `bundle.externalBin` copy Tauri places there on macOS and
-    // Windows, and the `maximal` package's /usr/bin/maximal for the Linux
-    // maximal-desktop package (which bundles no sidecar).
-    let profile = *app.state::<AppProfile>();
-    let spawn = app
-        .state::<ManagedEndpoint>()
-        .begin_generation(profile);
-    let port = spawn.requested_port.to_string();
-    let identifier = app.config().identifier.clone();
-    let args = if profile == AppProfile::Production {
-        vec!["start", "--replace", "--port", port.as_str()]
-    } else {
-        // Profile identity and preferred-port fallback own dev/test handoff;
-        // never evict a process merely because it answered on that port.
-        vec!["start", "--port", port.as_str()]
-    };
-    let mut cmd = app
-        .shell()
-        .sidecar("maximal")
-        .map_err(|e| tauri::Error::Anyhow(e.into()))?
-        .args(args)
-        // Shell plugin 2.6+ contains ordinary descendants in a POSIX process
-        // group / Windows Job Object. The deliberately detached MCP broker has
-        // its own IPC and parent-watchdog shutdown contract.
-        .set_process_group(true)
-        .env("HOST", LOOPBACK_HOST)
-        .env("MAXIMAL_APP_PROFILE", profile.as_env())
-        .env("MAXIMAL_INSTANCE_ID", &identifier)
-        .env("MAXIMAL_INSTANCE_NONCE", &spawn.nonce)
-        .env(
-            "COPILOT_API_HOME",
-            app.state::<AppDataDir>().0.as_os_str(),
-        );
-    if profile != AppProfile::Production {
-        cmd = cmd.env("MAXIMAL_UPDATE_POLICY", "disabled");
-    }
-
-    // The settings + dashboard UIs are embedded directly in the sidecar
-    // binary and served at /ui/* (see src/routes/ui/route.ts), so there is
-    // nothing to stage or point at — the UI travels inside the binary in
-    // both `tauri dev` and packaged builds. NODE_ENV=production is still
-    // set for parity with `maximal start` defaults elsewhere.
-    cmd = cmd.env("NODE_ENV", "production");
-    // Hand the shell's PID to the sidecar for its parent-death
-    // watchdog. If the tray app is force-killed (Activity Monitor,
-    // OOM, panic past Drop), the sidecar polls this PID and exits
-    // when it disappears so we don't orphan a proxy on its selected port.
-    cmd = cmd.env(
-        "MAXIMAL_SIDECAR_PARENT_PID",
-        std::process::id().to_string(),
-    );
-    // Shell-internal API key — the webview reads it via the
-    // `get_shell_api_key` Tauri command and sends it on every
-    // /settings/api/* request. Lets the user's own UI keep working
-    // after they flip "Block unknown connections."
-    cmd = cmd.env(
-        "MAXIMAL_SHELL_KEY",
-        app.state::<ShellApiKey>().value().to_string(),
-    );
-
-    let (mut rx, child) = cmd
-        .spawn()
-        .map_err(|e| tauri::Error::Anyhow(e.into()))?;
-
-    app.state::<Sidecar>().set(spawn.generation, child);
-
-    let handle = app.clone();
-    let event_spawn = spawn.clone();
-    tauri::async_runtime::spawn(async move {
-        let mut stdout = StdoutLines::default();
-        while let Some(event) = rx.recv().await {
-            match event {
-                CommandEvent::Stdout(chunk) => {
-                    for line in stdout.push(&chunk) {
-                        handle_sidecar_stdout(&handle, &event_spawn, &identifier, &line);
-                    }
-                }
-                CommandEvent::Stderr(line) => {
-                    let text = String::from_utf8_lossy(&line);
-                    eprintln!("[maximal] {text}");
-                    // Remember the latest error-looking line as the failure
-                    // reason for the splash + notification. Best-effort heuristic
-                    // over consola's output; falls back to a generic message.
-                    if let Some(reason) = extract_error_reason(&text) {
-                        handle.state::<LastSidecarError>().set(Some(reason));
-                    }
-                }
-                CommandEvent::Terminated(payload) => {
-                    handle
-                        .state::<Sidecar>()
-                        .clear_generation(event_spawn.generation);
-                    handle
-                        .state::<ManagedEndpoint>()
-                        .clear_generation(event_spawn.generation);
-                    eprintln!("[maximal] sidecar exited: {:?}", payload);
-                    // An in-place update stopped it so the installer can
-                    // replace its executable. Tell the update it's gone and
-                    // leave the app alone: the installer exits and relaunches it.
-                    if let Some(tx) = handle.state::<SidecarHandoff>().take() {
-                        let _ = tx.send(());
-                        break;
-                    }
-                    // A startup timeout or capability failure deliberately
-                    // stopped this generation. Its clean SIGTERM exit must keep
-                    // the shell's Failed state instead of quitting the app.
-                    if handle
-                        .state::<SidecarFailureStop>()
-                        .consume(event_spawn.generation)
-                    {
-                        eprintln!("[maximal] (startup failure — keeping the app in Failed)");
-                        break;
-                    }
-                    // Intentional restart (account switch / sign-in / sign-out
-                    // reboot)? Start the replacement only after this termination
-                    // event proves the old listener released the persisted port.
-                    if handle
-                        .state::<SidecarRestarting>()
-                        .consume(event_spawn.generation)
-                    {
-                        eprintln!("[maximal] intentional restart — starting replacement");
-                        if let Err(err) = spawn_sidecar(&handle) {
-                            eprintln!("[shell] sidecar respawn failed: {err}");
-                            apply_state(&handle, SidecarState::Failed);
-                        }
-                        break;
-                    }
-                    let profile = *handle.state::<AppProfile>();
-                    if payload.code != Some(0)
-                        && !handle.state::<AppExiting>().get()
-                        && profile != AppProfile::Production
-                        && handle
-                            .state::<ManagedEndpoint>()
-                            .prepare_dynamic_retry(
-                                event_spawn.generation,
-                                event_spawn.requested_port,
-                            )
-                    {
-                        eprintln!(
-                            "[shell] preferred port {} failed before readiness; retrying with a kernel-selected port",
-                            event_spawn.requested_port
-                        );
-                        let preferred_file = preferred_port_file(&handle.state::<AppDataDir>().0);
-                        if let Err(err) = std::fs::remove_file(preferred_file) {
-                            if err.kind() != std::io::ErrorKind::NotFound {
-                                eprintln!("[shell] could not clear failed preferred port: {err}");
-                            }
-                        }
-                        apply_state(&handle, SidecarState::Starting);
-                        if let Err(err) = spawn_sidecar(&handle) {
-                            eprintln!("[shell] dynamic-port retry failed: {err}");
-                            apply_state(&handle, SidecarState::Failed);
-                        }
-                        break;
-                    }
-                    // Clean exit signals an intentional shutdown — either
-                    // we just sent SIGTERM via kill_sidecar (Quit flow),
-                    // or an external caller hit /_internal/shutdown
-                    // (a fresh `bun run app:dev` evicting a previous
-                    // session, the `maximal start --replace` CLI flow,
-                    // etc.). In both cases the user wants the WHOLE app
-                    // to come down, not a tray + windows stranded over a
-                    // dead backend. handle.exit(0) is idempotent so
-                    // overlapping with our own ExitRequested path is
-                    // fine.
-                    //
-                    // A clean sidecar exit is an intentional whole-app shutdown.
-                    // Development shells also exit after a crash so the external
-                    // app:dev launcher can replace them without signaling a stale
-                    // recorded PID. Production/test builds keep the tray alive in
-                    // Failed state so the user can inspect logs and retry.
-                    if payload.code == Some(0) {
-                        handle.exit(0);
-                    } else {
-                        // Crash / SIGKILL: the sidecar never reached its
-                        // graceful-shutdown reconciler, so a Claude Code
-                        // base URL it wrote may be stranded over a now-dead
-                        // proxy. We outlive the sidecar, so revert it on its
-                        // behalf via the shared CLI subcommand. Ownership-
-                        // guarded and intent-neutral: it only removes the
-                        // base URL we wrote, and leaves the persisted routing
-                        // intent alone so a future restart re-applies it.
-                        let exit_after_revert = profile == AppProfile::Development;
-                        reconcile_claude_code_revert(&handle, exit_after_revert);
-                        if !exit_after_revert {
-                            apply_state(&handle, SidecarState::Failed);
-                        }
-                    }
-                    break;
-                }
-                _ => {}
-            }
-        }
-    });
-
-    let timeout_handle = app.clone();
-    let generation = spawn.generation;
-    tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(SIDECAR_READY_TIMEOUT).await;
-        if timeout_handle
-            .state::<ManagedEndpoint>()
-            .expire_pending(generation)
-        {
-            let reason = format!(
-                "sidecar did not emit a valid {READY_MARKER} line within {} seconds",
-                SIDECAR_READY_TIMEOUT.as_secs()
-            );
-            eprintln!("[shell] {reason}");
-            timeout_handle
-                .state::<LastSidecarError>()
-                .set(Some(reason));
-            timeout_handle
-                .state::<SidecarFailureStop>()
-                .begin(generation);
-            kill_sidecar(&timeout_handle);
-            apply_state(&timeout_handle, SidecarState::Failed);
-        }
-    });
-
-    Ok(())
-}
-
-fn handle_sidecar_stdout(
-    app: &AppHandle,
-    spawn: &SpawnGeneration,
-    identifier: &str,
-    raw: &str,
-) {
-    let line = raw.trim();
-    if let Some(payload) = line.strip_prefix(READY_MARKER) {
-        let ready = match serde_json::from_str::<SidecarReady>(payload.trim()) {
-            Ok(ready) => ready,
-            Err(err) => {
-                eprintln!("[shell] ignored malformed sidecar ready line: {err}");
-                return;
-            }
-        };
-        if let Err(reason) = validate_ready(&ready, spawn, identifier) {
-            eprintln!("[shell] ignored invalid sidecar ready line: {reason}");
-            return;
-        }
-
-        let endpoints = app.state::<ManagedEndpoint>();
-        if !endpoints.is_pending(spawn.generation) {
-            return;
-        }
-        if *app.state::<AppProfile>() != AppProfile::Production {
-            if let Err(err) = write_preferred_port(&app.state::<AppDataDir>().0, ready.port) {
-                let reason = format!("could not persist preferred sidecar port: {err}");
-                eprintln!("[shell] {reason}");
-                app.state::<LastSidecarError>().set(Some(reason));
-                endpoints.expire_pending(spawn.generation);
-                app.state::<SidecarFailureStop>().begin(spawn.generation);
-                kill_sidecar(app);
-                apply_state(app, SidecarState::Failed);
-                return;
-            }
-        }
-        if !endpoints.has_capability(ready.port) {
-            if let Err(err) = register_remote_capability(app, ready.port) {
-                let reason = format!("could not register sidecar capability: {err}");
-                eprintln!("[shell] {reason}");
-                app.state::<LastSidecarError>().set(Some(reason));
-                endpoints.expire_pending(spawn.generation);
-                app.state::<SidecarFailureStop>().begin(spawn.generation);
-                kill_sidecar(app);
-                apply_state(app, SidecarState::Failed);
-                return;
-            }
-            endpoints.mark_capability(ready.port);
-        }
-        if endpoints.activate(spawn.generation, ready.port) {
-            let endpoint = SidecarEndpoint {
-                generation: spawn.generation,
-                port: ready.port,
-            };
-            if app.state::<PendingWindowOpen>().take() {
-                focus_or_open_main_window(app);
-            }
-            let handle = app.clone();
-            tauri::async_runtime::spawn(async move {
-                poll_sidecar_status(handle, endpoint).await;
-            });
-        }
-        return;
-    }
-
-    if let Some(message) = line.strip_prefix(BOOT_STATUS_MARKER) {
-        let _ = app.emit_to("splash", "splash:status", message.trim().to_string());
-    } else if !raw.is_empty() {
-        println!("[maximal] {raw}");
-    }
-}
-
-fn register_remote_capability(app: &AppHandle, port: u16) -> tauri::Result<()> {
-    let capability = CapabilityBuilder::new(format!("sidecar-loopback-{port}"))
-        .local(false)
-        .remote(format!("http://localhost:{port}/*"))
-        .windows([SETTINGS_WINDOW_LABEL, DASHBOARD_WINDOW_LABEL])
-        .permission("core:default")
-        .permission("core:window:default")
-        .permission("core:window:allow-start-dragging")
-        .permission("core:window:allow-internal-toggle-maximize")
-        .permission("core:webview:allow-create-webview-window")
-        .permission("opener:default")
-        .permission("default");
-    app.add_capability(capability)
-}
-
-/// Run `maximal app claude-code --disable` as a one-shot sidecar
-/// command. Called when the proxy sidecar *crashes* (non-zero exit) — it
-/// can't revert its own Claude Code base URL in that path, so the shell
-/// does it. Best-effort: a missing binary or non-zero exit is logged and
-/// swallowed (the worst case is a stranded base URL the next clean boot
-/// re-applies or the user toggles off). Fire-and-forget on a Tokio task so
-/// the Terminated handler stays synchronous. Development waits for this
-/// one-shot before exiting, allowing app:dev to replace the failed shell.
-fn reconcile_claude_code_revert(app: &AppHandle, exit_after: bool) {
-    let command = match app.shell().sidecar("maximal") {
-        Ok(c) => c
-            .args(["app", "claude-code", "--disable"])
-            .set_process_group(true)
-            .env("HOST", LOOPBACK_HOST)
-            .env(
-                "COPILOT_API_HOME",
-                app.state::<AppDataDir>().0.as_os_str(),
-            ),
-        Err(err) => {
-            eprintln!("[shell] could not build claude-code revert command: {err}");
-            if exit_after {
-                app.exit(1);
-            }
-            return;
-        }
-    };
-    let (mut events, child) = match command.spawn() {
-        Ok(spawned) => spawned,
-        Err(err) => {
-            eprintln!("[shell] claude-code revert failed to start: {err}");
-            if exit_after {
-                app.exit(1);
-            }
-            return;
-        }
-    };
-    let app = app.clone();
-    tauri::async_runtime::spawn(async move {
-        let completed = tokio::time::timeout(Duration::from_secs(5), async {
-            let mut stderr = String::new();
-            while let Some(event) = events.recv().await {
-                match event {
-                    CommandEvent::Stderr(chunk) if stderr.len() < 4096 => {
-                        stderr.push_str(&String::from_utf8_lossy(&chunk));
-                    }
-                    CommandEvent::Terminated(payload) => {
-                        return (payload.code, stderr);
-                    }
-                    _ => {}
-                }
-            }
-            (None, stderr)
-        })
-        .await;
-
-        match completed {
-            Ok((Some(0), _)) => {
-                eprintln!("[shell] reverted Claude Code base URL after sidecar crash");
-            }
-            Ok((code, stderr)) => {
-                eprintln!(
-                    "[shell] claude-code revert exited {code:?}: {stderr}",
-                );
-            }
-            Err(_) => {
-                eprintln!("[shell] claude-code revert exceeded 5s; terminating it");
-                let _ = child.kill();
-            }
-        }
-        if exit_after {
-            app.exit(1);
-        }
-    });
-}
-
-/// Pull a human-readable failure reason out of a sidecar stderr chunk, or
-/// None if nothing in it looks like an error. consola's fancy reporter prints
-/// errors as ` ERROR  <message>` (and a bracketed `[error] <message>` in
-/// basic mode); we take the text after that tag, first line only, trimmed and
-/// length-capped so a stack trace can't blow up the splash/notification.
-fn extract_error_reason(chunk: &str) -> Option<String> {
-    for raw in chunk.lines() {
-        let line = raw.trim();
-        if line.is_empty() {
-            continue;
-        }
-        // Find the error tag in either consola style; take what follows.
-        let after = line
-            .find("ERROR")
-            .map(|i| &line[i + "ERROR".len()..])
-            .or_else(|| {
-                line.find("[error]").map(|i| &line[i + "[error]".len()..])
-            });
-        if let Some(rest) = after {
-            let msg = rest.trim_start_matches([' ', ':', ']']).trim();
-            if !msg.is_empty() {
-                let capped: String = msg.chars().take(180).collect();
-                return Some(capped);
-            }
-        }
-    }
-    None
-}
-
-/// Graceful sidecar shutdown.
-///
-/// `CommandChild::kill()` is intentionally the hard-stop path (and, with
-/// process groups enabled, ends the sidecar's non-detached process tree). That
-/// gives the Bun-compiled sidecar no chance to flush logs, close its listening socket, or
-/// shut down its rate-limit/state caches cleanly. We want a real
-/// graceful protocol:
-///
-///   1. Send SIGTERM. The sidecar installs a SIGTERM handler at boot
-///      that runs `server.close(true)` and flushes consola before
-///      exiting 0 — see src/start.ts.
-///   2. Wait up to 3s for the child to exit on its own. We do this on
-///      a background thread so this function can stay synchronous
-///      (called from `RunEvent::ExitRequested`, which doesn't await).
-///   3. If the child is still around (still in our `Sidecar` state)
-///      after 3s, escalate to SIGKILL via `CommandChild::kill()`.
-///
-/// On Windows there is no SIGTERM to send through this API. We instead
-/// run `taskkill /PID <pid>` *without* `/F`: that posts WM_CLOSE /
-/// CTRL_CLOSE_EVENT to the target, which the Bun runtime surfaces to
-/// the sidecar's emulated `SIGTERM`/`SIGINT` handler (src/lib/start/
-/// shutdown.ts wires both) — so the same graceful drain runs. We then
-/// escalate to `CommandChild::kill()` (SIGKILL-equivalent) after the
-/// grace period, exactly like the Unix path. If taskkill can't be
-/// spawned we fall straight through to the hard kill so a Quit never
-/// hangs. (A future, even-cleaner option is to POST the proxy's own
-/// `/_internal/shutdown` endpoint — the same protocol `--replace` uses —
-/// but that's async work this synchronous Exit path doesn't need today;
-/// the parent-death watchdog already backstops an abrupt kill.)
-///
-/// Returns false when there was no sidecar to stop, so no Terminated event
-/// will follow.
-fn kill_sidecar(app: &AppHandle) -> bool {
-    let Some(child) = app.state::<Sidecar>().take() else {
-        return false;
-    };
-
-    #[cfg(unix)]
-    {
-        // Capture the PID before handing the child off to the
-        // escalation task. `CommandChild::pid()` returns u32; libc::kill
-        // wants i32.
-        let pid = child.pid() as i32;
-
-        // SAFETY: `libc::kill` is an FFI call to the POSIX kill(2)
-        // syscall. It's safe for any pid value — if the pid is invalid
-        // or has already exited, kill returns -1 with errno=ESRCH and
-        // does nothing. We deliberately ignore the return: the only
-        // failure mode we care about (child already dead) is fine.
-        unsafe {
-            libc::kill(pid, libc::SIGTERM);
-        }
-
-        // MOVE the old child into the escalation thread — do NOT put it back
-        // in the shared Sidecar slot. respawn_sidecar calls spawn_sidecar
-        // immediately after us, which set()s the REPLACEMENT child into that
-        // slot; if this escalation re-read the slot it would SIGKILL the FRESH
-        // sidecar ~3s after a restart (the proxy would vanish from its port and
-        // the whole UI would "Load failed" — the account-switch/sign-in/
-        // sign-out reboot bug). Holding the specific old child here SIGKILLs
-        // only it. Dropping a CommandChild does NOT kill its process, so
-        // leaving the slot empty until spawn_sidecar fills it is safe.
-        std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_secs(3));
-            // No-op if the SIGTERM above already made it exit.
-            let _ = child.kill();
-        });
-    }
-
-    #[cfg(not(unix))]
-    {
-        // Windows graceful shutdown: `taskkill` WITHOUT `/F` requests a
-        // polite close (WM_CLOSE / CTRL_CLOSE_EVENT) that Bun delivers to
-        // the sidecar's emulated SIGTERM/SIGINT handler, so the drain in
-        // src/lib/start/shutdown.ts runs (flush logs, close socket, revert
-        // Claude Code base URL). `/T` also reaps any child the sidecar
-        // spawned. Best-effort: if taskkill won't launch we skip straight
-        // to the hard kill below.
-        let pid = child.pid();
-        #[cfg(target_os = "windows")]
-        {
-            use std::process::Command;
-            #[cfg(windows)]
-            use std::os::windows::process::CommandExt;
-            // CREATE_NO_WINDOW: don't flash a console for the helper.
-            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-            let mut cmd = Command::new("taskkill");
-            cmd.args(["/PID", &pid.to_string(), "/T"]);
-            #[cfg(windows)]
-            cmd.creation_flags(CREATE_NO_WINDOW);
-            if let Err(err) = cmd.spawn() {
-                eprintln!("[shell] taskkill spawn failed ({err}); hard-killing");
-            }
-        }
-
-        // Escalate to SIGKILL-equivalent after the grace period, mirroring
-        // the Unix path. MOVE the child into the thread (do NOT return it to
-        // the shared Sidecar slot) so a respawn that fills the slot with a
-        // fresh child isn't killed by this escalation ~3s later.
-        std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_secs(3));
-            // No-op if the graceful close above already made it exit.
-            let _ = child.kill();
-        });
-    }
-    true
-}
-
 /// Polls the sidecar's /setup-status endpoint, driving SidecarState
 /// transitions. First successful response within 30s flips Starting to
 /// Running{Un,}Authenticated; after that, slower 5s polling watches
@@ -2005,8 +621,7 @@ async fn poll_sidecar_status(app: AppHandle, endpoint: SidecarEndpoint) {
     let url = endpoint.http_url("/setup-status");
 
     // Phase 1: fast poll until first success or 30s timeout.
-    let startup_deadline =
-        std::time::Instant::now() + Duration::from_secs(30);
+    let startup_deadline = std::time::Instant::now() + Duration::from_secs(30);
     let mut first_seen = false;
     while std::time::Instant::now() < startup_deadline {
         if app.state::<ManagedEndpoint>().current() != Some(endpoint) {
@@ -2062,19 +677,14 @@ async fn poll_sidecar_status(app: AppHandle, endpoint: SidecarEndpoint) {
         if let Some(status) = fetch_setup_status(&client, &url).await {
             apply_setup_status(&app, &status);
         }
-        if let Some(rejection) =
-            fetch_rejection(&app, &client, &auth_status_url).await
-        {
+        if let Some(rejection) = fetch_rejection(&app, &client, &auth_status_url).await {
             apply_rejection(&app, rejection);
         }
         check_working_notice(&app, &client, &working_notice_url).await;
-        if let Some(requests) =
-            fetch_requests_summary(&app, &client, &requests_summary_url).await
-        {
+        if let Some(requests) = fetch_requests_summary(&app, &client, &requests_summary_url).await {
             apply_requests(&app, requests);
         }
-        let update_due =
-            next_update_check.is_none_or(|t| std::time::Instant::now() >= t);
+        let update_due = next_update_check.is_none_or(|t| std::time::Instant::now() >= t);
         if update_due {
             if let Some(update_url) = update_status_url.as_deref() {
                 if let Some(wait) = check_for_update(&app, &client, update_url).await {
@@ -2088,56 +698,12 @@ async fn poll_sidecar_status(app: AppHandle, endpoint: SidecarEndpoint) {
     }
 }
 
-/// One-shot fetch of `/settings/api/auth/github/status` against the
-/// local sidecar, scoped to the rejection sidecar. Returns
-/// `Some(Option<...>)` to distinguish "endpoint replied" (the
-/// sidecar may or may not have a rejection) from "endpoint unreachable"
-/// (silent skip — don't churn the tray icon on a transient).
-async fn fetch_rejection(
-    app: &AppHandle,
-    client: &reqwest::Client,
-    url: &str,
-) -> Option<Option<RejectionSnapshot>> {
-    let key = app.state::<ShellApiKey>().value().to_owned();
-    let resp = client
-        .get(url)
-        .header("x-api-key", key)
-        .send()
-        .await
-        .ok()?;
-    if !resp.status().is_success() {
-        return None;
-    }
-    let payload: serde_json::Value = resp.json().await.ok()?;
-    Some(parse_rejection_from_status(&payload))
-}
-
-fn parse_rejection_from_status(
-    payload: &serde_json::Value,
-) -> Option<RejectionSnapshot> {
-    let obj = payload.get("last_upstream_rejection")?.as_object()?;
-    let message = obj.get("message")?.as_str()?.to_owned();
-    let status = obj.get("status")?.as_u64()? as u16;
-    let at = obj.get("at")?.as_str()?.to_owned();
-    let remediation_url = obj
-        .get("remediation_url")
-        .and_then(|v| v.as_str())
-        .map(str::to_owned);
-    Some(RejectionSnapshot {
-        message,
-        status,
-        at,
-        remediation_url,
-    })
-}
-
 /// Applies a fetched rejection snapshot to the LastRejection managed
 /// state. On state-entering transitions, fires a single OS notification.
 /// On any change (entered, cleared, or content change), refreshes the
 /// tray so the icon and tooltip reflect the new condition.
 fn apply_rejection(app: &AppHandle, next: Option<RejectionSnapshot>) {
-    let entered_message =
-        next.as_ref().map(|r| r.message.clone()).unwrap_or_default();
+    let entered_message = next.as_ref().map(|r| r.message.clone()).unwrap_or_default();
     let transition = app.state::<LastRejection>().set(next);
     match transition {
         RejectionTransition::Unchanged => return,
@@ -2176,22 +742,6 @@ async fn check_working_notice(app: &AppHandle, client: &reqwest::Client, url: &s
     };
     let names: Vec<&str> = apps.iter().filter_map(serde_json::Value::as_str).collect();
     fire_working_notification(app, &names);
-}
-
-/// `/settings/api/requests/summary`; None when unreachable or malformed, so
-/// a transient blip doesn't clear the tray.
-async fn fetch_requests_summary(
-    app: &AppHandle,
-    client: &reqwest::Client,
-    url: &str,
-) -> Option<RequestsSnapshot> {
-    let key = app.state::<ShellApiKey>().value().to_owned();
-    let resp = client.get(url).header("x-api-key", key).send().await.ok()?;
-    if !resp.status().is_success() {
-        return None;
-    }
-    let payload: serde_json::Value = resp.json().await.ok()?;
-    parse_requests_summary(&payload)
 }
 
 /// Records the latest summary. A newly arrived request notifies once; any
@@ -2240,13 +790,7 @@ fn fire_working_notification(app: &AppHandle, apps: &[&str]) {
             &[("apps", joined.as_str())],
         )
     };
-    if let Err(err) = app
-        .notification()
-        .builder()
-        .title(title)
-        .body(body)
-        .show()
-    {
+    if let Err(err) = app.notification().builder().title(title).body(body).show() {
         eprintln!("[shell] working notification failed: {err}");
     }
 }
@@ -2270,66 +814,8 @@ fn fire_rejection_notification(app: &AppHandle, message: &str) {
             &[("message", message)],
         )
     };
-    if let Err(err) = app
-        .notification()
-        .builder()
-        .title(title)
-        .body(body)
-        .show()
-    {
+    if let Err(err) = app.notification().builder().title(title).body(body).show() {
         eprintln!("[shell] rejection notification failed: {err}");
-    }
-}
-
-/// What a sidecar `/settings/api/update-status` payload says.
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum UpdateCheck {
-    /// A definitive answer: Some = a newer release to offer, None = up to
-    /// date (or checks are disabled).
-    Resolved(Option<UpdateSnapshot>),
-    /// Checks are on but the sidecar couldn't resolve a version yet (offline
-    /// at launch, a CDN blip). Nothing to apply; retry sooner.
-    Unresolved,
-}
-
-/// Classify an update-status payload. Pure, so the tray's decision is
-/// testable without a running sidecar.
-fn parse_update_status(payload: &serde_json::Value) -> UpdateCheck {
-    let available = payload
-        .get("update_available")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false);
-    let latest = payload
-        .get("latest")
-        .and_then(serde_json::Value::as_str)
-        .filter(|v| !v.is_empty());
-    if let (true, Some(latest)) = (available, latest) {
-        let url = payload
-            .get("url")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or(UPDATE_PAGE_URL);
-        let apt_command = payload
-            .get("update_command")
-            .and_then(serde_json::Value::as_str)
-            .filter(|c| !c.is_empty())
-            .map(str::to_owned);
-        return UpdateCheck::Resolved(Some(UpdateSnapshot {
-            latest: latest.to_owned(),
-            url: url.to_owned(),
-            apt_command,
-        }));
-    }
-    let enabled = payload
-        .get("enabled")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(true);
-    let failed = payload
-        .get("last_error")
-        .is_some_and(|e| !e.is_null());
-    if enabled && latest.is_none() && failed {
-        UpdateCheck::Unresolved
-    } else {
-        UpdateCheck::Resolved(None)
     }
 }
 
@@ -2356,75 +842,6 @@ async fn check_for_update(
     }
 }
 
-/// GET an update-status URL against the sidecar. None on any transient
-/// failure (unreachable / non-2xx / unparseable).
-async fn fetch_update_payload(
-    app: &AppHandle,
-    client: &reqwest::Client,
-    url: &str,
-) -> Option<serde_json::Value> {
-    let key = app.state::<ShellApiKey>().value().to_owned();
-    let resp = match client.get(url).header("x-api-key", key).send().await {
-        Ok(r) if r.status().is_success() => r,
-        _ => return None,
-    };
-    resp.json().await.ok()
-}
-
-/// How a user-asked update check ended: what the tray tells them.
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum ManualCheck {
-    /// A newer release exists (the tray item and the notification say so).
-    Available(UpdateSnapshot),
-    /// Current. Carries the running version for the notice.
-    UpToDate(String),
-    /// `config.checkUpdates` is off: the sidecar didn't look.
-    Disabled,
-    /// The sidecar couldn't say (unreachable, or the manifest couldn't be
-    /// read). Never reported as "up to date".
-    Failed,
-}
-
-/// Classify the answer to a forced check. Pure, so it is testable without a
-/// running sidecar. Builds on `parse_update_status`; the one difference from
-/// the poll is that an answer carrying `last_error` is a failed check even
-/// when an older result is still known, because the user asked for a fresh one.
-fn manual_check_outcome(payload: Option<&serde_json::Value>) -> ManualCheck {
-    let Some(payload) = payload else {
-        return ManualCheck::Failed;
-    };
-    let enabled = payload
-        .get("enabled")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(true);
-    if !enabled {
-        return ManualCheck::Disabled;
-    }
-    if payload.get("last_error").is_some_and(|e| !e.is_null()) {
-        return ManualCheck::Failed;
-    }
-    match parse_update_status(payload) {
-        UpdateCheck::Resolved(Some(snapshot)) => ManualCheck::Available(snapshot),
-        UpdateCheck::Resolved(None) => payload
-            .get("current")
-            .and_then(serde_json::Value::as_str)
-            .filter(|v| !v.is_empty())
-            .map_or(ManualCheck::Failed, |v| ManualCheck::UpToDate(v.to_owned())),
-        UpdateCheck::Unresolved => ManualCheck::Failed,
-    }
-}
-
-/// The sidecar's update-status URL; `force` asks for a fresh check instead of
-/// the cached one.
-fn update_status_endpoint(endpoint: SidecarEndpoint, force: bool) -> String {
-    let base = endpoint.http_url("/settings/api/update-status");
-    if force {
-        format!("{base}?force=1")
-    } else {
-        base
-    }
-}
-
 /// Ask the sidecar for a fresh update check and put the answer on the tray.
 /// None when the sidecar couldn't be asked.
 async fn force_update_check(app: &AppHandle) -> Option<serde_json::Value> {
@@ -2436,12 +853,8 @@ async fn force_update_check(app: &AppHandle) -> Option<serde_json::Value> {
         .timeout(UPDATE_FORCE_TIMEOUT)
         .build()
         .ok()?;
-    let payload = fetch_update_payload(
-        app,
-        &client,
-        &update_status_endpoint(endpoint, true),
-    )
-    .await?;
+    let payload =
+        fetch_update_payload(app, &client, &update_status_endpoint(endpoint, true)).await?;
     if let UpdateCheck::Resolved(next) = parse_update_status(&payload) {
         apply_update(app, next);
     }
@@ -2532,22 +945,9 @@ fn fire_update_notification(app: &AppHandle, latest: &str, url: &str) {
         )
     };
     let body = native_i18n::t(&locale, "native-notify-update-body", &[("url", url)]);
-    if let Err(err) =
-        app.notification().builder().title(title).body(body).show()
-    {
+    if let Err(err) = app.notification().builder().title(title).body(body).show() {
         eprintln!("[shell] update notification failed: {err}");
     }
-}
-
-async fn fetch_setup_status(
-    client: &reqwest::Client,
-    url: &str,
-) -> Option<SetupStatusResponse> {
-    let resp = client.get(url).send().await.ok()?;
-    if !resp.status().is_success() {
-        return None;
-    }
-    resp.json::<SetupStatusResponse>().await.ok()
 }
 
 fn apply_setup_status(app: &AppHandle, status: &SetupStatusResponse) {
@@ -2597,8 +997,7 @@ fn apply_state(app: &AppHandle, next: SidecarState) {
         // mid-session drop (Authenticated→Unauthenticated, e.g. token expiry)
         // gets the notification only — don't yank a window open over whatever
         // they're doing; the notification click / tray brings it up on demand.
-        if prev == SidecarState::Starting && app.state::<SetupPromptShown>().claim()
-        {
+        if prev == SidecarState::Starting && app.state::<SetupPromptShown>().claim() {
             // Defer the auto-open until the splash has had its brand-minimum
             // display time. open_settings_window calls dismiss_splash
             // immediately, so opening synchronously here would yank Settings
@@ -2688,48 +1087,44 @@ fn create_splash(app: &AppHandle) {
     if app.get_webview_window("splash").is_some() {
         return;
     }
-    let result = WebviewWindowBuilder::new(
-        app,
-        "splash",
-        WebviewUrl::App("splash.html".into()),
-    )
-    .title("Maximal")
-    // Hand the splash its version before first paint (race-free — runs
-    // ahead of page load, unlike an emitted event the page might miss).
-    // The page renders it unless it's the dev `0.0.0` placeholder.
-    .initialization_script(&format!(
-        "window.__MAXIMAL_VERSION__ = {:?};",
-        app_version(app)
-    ))
-    .inner_size(440.0, 240.0)
-    .resizable(false)
-    .minimizable(false)
-    .maximizable(false)
-    .decorations(false)
-    .transparent(true)
-    // Windows only: an undecorated window with a shadow gets a 1px white
-    // frame from DWM (and, on Windows 11, square-ish rounding of its own
-    // that doesn't match the page's 14px radius), which shows as white
-    // corners outside the rounded `.splash`. The page already paints its
-    // own rounded shape on a transparent webview, so drop the OS frame
-    // there. macOS and Linux keep the default.
-    .shadow(!cfg!(windows))
-    .always_on_top(true)
-    .skip_taskbar(true)
-    // Build hidden and only show once the webview reports the DOM has
-    // loaded. On Windows/WebView2 the native surface is presented before
-    // the compositor draws its first frame, so a visible-from-launch
-    // transparent window shows an empty outline for hundreds of ms–seconds
-    // before the brand-red `.splash` div pops in. macOS/WKWebView paints in
-    // lockstep with show, so this fires immediately there — no regression.
-    .visible(false)
-    .on_page_load(|window, payload| {
-        if payload.event() == PageLoadEvent::Finished {
-            let _ = window.show();
-        }
-    })
-    .center()
-    .build();
+    let result = WebviewWindowBuilder::new(app, "splash", WebviewUrl::App("splash.html".into()))
+        .title("Maximal")
+        // Hand the splash its version before first paint (race-free — runs
+        // ahead of page load, unlike an emitted event the page might miss).
+        // The page renders it unless it's the dev `0.0.0` placeholder.
+        .initialization_script(&format!(
+            "window.__MAXIMAL_VERSION__ = {:?};",
+            app_version(app)
+        ))
+        .inner_size(440.0, 240.0)
+        .resizable(false)
+        .minimizable(false)
+        .maximizable(false)
+        .decorations(false)
+        .transparent(true)
+        // Windows only: an undecorated window with a shadow gets a 1px white
+        // frame from DWM (and, on Windows 11, square-ish rounding of its own
+        // that doesn't match the page's 14px radius), which shows as white
+        // corners outside the rounded `.splash`. The page already paints its
+        // own rounded shape on a transparent webview, so drop the OS frame
+        // there. macOS and Linux keep the default.
+        .shadow(!cfg!(windows))
+        .always_on_top(true)
+        .skip_taskbar(true)
+        // Build hidden and only show once the webview reports the DOM has
+        // loaded. On Windows/WebView2 the native surface is presented before
+        // the compositor draws its first frame, so a visible-from-launch
+        // transparent window shows an empty outline for hundreds of ms–seconds
+        // before the brand-red `.splash` div pops in. macOS/WKWebView paints in
+        // lockstep with show, so this fires immediately there — no regression.
+        .visible(false)
+        .on_page_load(|window, payload| {
+            if payload.event() == PageLoadEvent::Finished {
+                let _ = window.show();
+            }
+        })
+        .center()
+        .build();
     match result {
         Ok(_) => {
             // State-aware dismissal — the splash tracks the actual startup
@@ -2901,7 +1296,12 @@ fn refresh_tray(app: &AppHandle, state: SidecarState) -> tauri::Result<()> {
     let menu = build_menu(app, &locale, state)?;
     tray.set_menu(Some(menu))?;
     tray.set_icon(Some(icon_for(state, rejection.is_some() || waiting)?))?;
-    tray.set_tooltip(Some(tooltip_for(&locale, state, rejection.as_ref(), waiting)))?;
+    tray.set_tooltip(Some(tooltip_for(
+        &locale,
+        state,
+        rejection.as_ref(),
+        waiting,
+    )))?;
     #[cfg(target_os = "macos")]
     refresh_dock_menu(app, &locale, state);
     Ok(())
@@ -2938,7 +1338,11 @@ extern "C-unwind" fn application_dock_menu(
 }
 
 #[cfg(target_os = "macos")]
-fn build_muda_dock_menu(app: &AppHandle, locale: &str, state: SidecarState) -> muda::Result<muda::Menu> {
+fn build_muda_dock_menu(
+    app: &AppHandle,
+    locale: &str,
+    state: SidecarState,
+) -> muda::Result<muda::Menu> {
     use muda::{Menu, MenuItem, PredefinedMenuItem};
 
     let menu = Menu::new();
@@ -3161,10 +1565,7 @@ fn set_dock_icon() {
     }
 }
 
-fn icon_for(
-    state: SidecarState,
-    needs_attention: bool,
-) -> tauri::Result<Image<'static>> {
+fn icon_for(state: SidecarState, needs_attention: bool) -> tauri::Result<Image<'static>> {
     // A pending upstream rejection or a request waiting for an answer
     // while authenticated promotes the icon to ATTENTION so the user
     // notices without opening Settings.
@@ -3534,8 +1935,7 @@ fn update_channel(version: &str) -> Option<&str> {
 /// The desktop updater manifest this build checks, e.g.
 /// `https://mxml.sh/updates/desktop/stable.json`.
 fn desktop_update_manifest_url(version: &str) -> Option<String> {
-    update_channel(version)
-        .map(|channel| format!("{DESKTOP_UPDATE_MANIFEST_BASE}{channel}.json"))
+    update_channel(version).map(|channel| format!("{DESKTOP_UPDATE_MANIFEST_BASE}{channel}.json"))
 }
 
 /// The `.app` bundle an executable runs from
@@ -3559,10 +1959,7 @@ fn app_bundle_of(exe: &std::path::Path) -> Option<&std::path::Path> {
 /// Translocation runs it from a read-only copy), or it runs from a read-only
 /// volume such as the mounted disk image.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-fn bundle_location_problem(
-    bundle: &std::path::Path,
-    read_only: bool,
-) -> Option<&'static str> {
+fn bundle_location_problem(bundle: &std::path::Path, read_only: bool) -> Option<&'static str> {
     if bundle
         .components()
         .any(|part| part.as_os_str() == "AppTranslocation")
@@ -3614,10 +2011,7 @@ fn update_location_problem() -> Option<String> {
 /// with the user, download and verify the signed update, install it, stop the
 /// sidecar, and relaunch Maximal. Any failure tells the user and opens the
 /// download page instead.
-async fn run_in_place_update(
-    app: &AppHandle,
-    on_step: impl Fn(UpdateStep),
-) -> UpdateOutcome {
+async fn run_in_place_update(app: &AppHandle, on_step: impl Fn(UpdateStep)) -> UpdateOutcome {
     if !IN_PLACE_UPDATE {
         return UpdateOutcome::Unavailable;
     }
@@ -3744,9 +2138,7 @@ fn report_update_failure(app: &AppHandle) {
             "native-update-failed-open",
         )))
         .show(move |_| {
-            if let Err(err) =
-                app_clone.opener().open_url(UPDATE_PAGE_URL, None::<&str>)
-            {
+            if let Err(err) = app_clone.opener().open_url(UPDATE_PAGE_URL, None::<&str>) {
                 eprintln!("[shell] failed to open update url: {err}");
             }
         });
@@ -3756,15 +2148,7 @@ fn report_update_failure(app: &AppHandle) {
 /// its executable. The Terminated handler hands the exit to us through
 /// `SidecarHandoff` instead of quitting the app or marking it Failed.
 async fn stop_sidecar_for_update(app: &AppHandle) {
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    app.state::<SidecarHandoff>().arm(tx);
-    if kill_sidecar(app)
-        && tokio::time::timeout(SIDECAR_STOP_TIMEOUT, rx).await.is_err()
-    {
-        eprintln!("[shell] sidecar still running after {SIDECAR_STOP_TIMEOUT:?}");
-    }
-    // Disarm, so a later exit (after a failed install) is handled normally.
-    app.state::<SidecarHandoff>().take();
+    sidecar_runtime::stop_sidecar_for_update(app).await;
 }
 
 /// The Windows installer also replaces `maximal-mcp-broker.exe`, which the
@@ -3810,12 +2194,13 @@ async fn stop_mcp_brokers_for_update() {}
 /// reap any half-dead child before respawning so we don't leak a process or
 /// collide on the selected port.
 fn retry_startup(app: &AppHandle) {
-    let current = app.state::<AppStatus>().get();
-    if !matches!(current, SidecarState::Failed | SidecarState::Stopped) {
-        return;
+    if matches!(
+        app.state::<AppStatus>().get(),
+        SidecarState::Failed | SidecarState::Stopped
+    ) {
+        dismiss_splash(app);
     }
-    eprintln!("[shell] retry startup requested");
-    respawn_sidecar(app);
+    sidecar_runtime::retry_startup(app);
 }
 
 /// Tear down the running sidecar and boot a fresh one. The reap→respawn→poll
@@ -3825,40 +2210,8 @@ fn retry_startup(app: &AppHandle) {
 /// running instance, so no in-process auth state can leak across the change).
 /// Callers gate WHEN this is allowed; this function always reboots.
 fn respawn_sidecar(app: &AppHandle) {
-    // Clear the previous failure reason so a stale message can't haunt this
-    // attempt (it would otherwise reappear on the splash/notification if the
-    // respawn also fails before printing its own error). Dismiss any lingering
-    // error splash — the tray's Starting state is the affordance now; we don't
-    // re-raise an always-on-top splash.
-    app.state::<LastSidecarError>().set(None);
     dismiss_splash(app);
-
-    // Mark this exact generation as an intentional restart BEFORE SIGTERM, so
-    // a replacement that exits first cannot consume the old process's handoff.
-    let stopping_generation = app.state::<Sidecar>().generation();
-    if let Some(generation) = stopping_generation {
-        app.state::<SidecarRestarting>().begin(generation);
-    }
-
-    // Reap the current child (healthy, hung, or mid-crash). Every replacement
-    // requests the already-selected port; it does not depend on `--replace` for
-    // profile handoff.
-    let waiting_for_exit = kill_sidecar(app);
-    apply_state(app, SidecarState::Starting);
-    if waiting_for_exit {
-        // The matching Terminated event starts the replacement after the old
-        // listener has actually released the persisted port.
-        return;
-    }
-    if let Some(generation) = stopping_generation {
-        app.state::<SidecarRestarting>().consume(generation);
-    }
-    if let Err(err) = spawn_sidecar(app) {
-        eprintln!("[shell] sidecar respawn failed: {err}");
-        apply_state(app, SidecarState::Failed);
-    }
-
-    // The replacement generation starts polling after its validated ready line.
+    sidecar_runtime::respawn_sidecar(app);
 }
 
 /// Opens (or focuses) the unified main webview on the sidecar's Settings shell.
@@ -3912,16 +2265,16 @@ fn open_settings_window(app: &AppHandle, section: Option<&str>) {
     // Surface the version in the titlebar (window-level identity belongs in
     // the title, not a content H1 — see docs/design/failure-modes.md). Drop
     // the suffix in dev where the version is the `0.0.0` placeholder.
-    let builder = WebviewWindowBuilder::new(
-        app,
-        SETTINGS_WINDOW_LABEL,
-        WebviewUrl::External(url),
-    )
-    .title(title)
-    .inner_size(960.0, 720.0)
-    .min_inner_size(640.0, 480.0)
-    .prevent_overflow()
-    .background_color(tauri::webview::Color(22, 22, 22, 255));
+    let builder = WebviewWindowBuilder::new(app, SETTINGS_WINDOW_LABEL, WebviewUrl::External(url))
+        .title(title)
+        // The fallback is used only when the plugin has no saved state. Build
+        // hidden so the plugin's queued window-ready restore runs before the
+        // queued `present_window`, avoiding a fallback-size flash.
+        .inner_size(MAIN_WINDOW_FALLBACK_WIDTH, MAIN_WINDOW_FALLBACK_HEIGHT)
+        .min_inner_size(640.0, 480.0)
+        .prevent_overflow()
+        .visible(false)
+        .background_color(tauri::webview::Color(22, 22, 22, 255));
 
     #[cfg(target_os = "macos")]
     let builder = builder
@@ -4146,8 +2499,7 @@ fn attach_hide_on_close(app: &AppHandle, window: &tauri::WebviewWindow) {
 /// flashes the Dock icon exec→branded. Skipping no-op transitions removes the
 /// flash. Starts `false` to match the Accessory policy set at startup.
 #[cfg(target_os = "macos")]
-static POLICY_IS_REGULAR: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
+static POLICY_IS_REGULAR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 #[cfg(target_os = "macos")]
 fn update_activation_policy(app: &AppHandle) {
@@ -4415,10 +2767,7 @@ async fn uninstall_maximal(app: AppHandle, purge: bool) -> Result<(), String> {
         .map_err(|err| format!("could not build uninstall command: {err}"))?
         .args(args)
         .env("HOST", LOOPBACK_HOST)
-        .env(
-            "COPILOT_API_HOME",
-            app.state::<AppDataDir>().0.as_os_str(),
-        );
+        .env("COPILOT_API_HOME", app.state::<AppDataDir>().0.as_os_str());
     let output = command
         .output()
         .await
@@ -4500,12 +2849,7 @@ async fn refresh_update_status(app: AppHandle) {
     else {
         return;
     };
-    let _ = check_for_update(
-        &app,
-        &client,
-        &update_status_endpoint(endpoint, false),
-    )
-    .await;
+    let _ = check_for_update(&app, &client, &update_status_endpoint(endpoint, false)).await;
 }
 
 /// Tauri command — the topbar "Update to X.Y.Z" button. Runs the in-place
@@ -4543,10 +2887,24 @@ fn set_dock_visibility(
     Ok(normalized.to_string())
 }
 
-
 #[cfg(test)]
 mod tests {
-    use super::extract_error_reason;
+    #[test]
+    fn persists_only_safe_main_window_state() {
+        use super::{
+            main_window_state_flags, MAIN_WINDOW_FALLBACK_HEIGHT, MAIN_WINDOW_FALLBACK_WIDTH,
+        };
+        use tauri_plugin_window_state::StateFlags;
+
+        let flags = main_window_state_flags();
+        assert!(flags.contains(StateFlags::SIZE));
+        assert!(flags.contains(StateFlags::POSITION));
+        assert!(flags.contains(StateFlags::MAXIMIZED));
+        assert!(!flags
+            .intersects(StateFlags::VISIBLE | StateFlags::DECORATIONS | StateFlags::FULLSCREEN));
+        assert_eq!(MAIN_WINDOW_FALLBACK_WIDTH, 1100.0);
+        assert_eq!(MAIN_WINDOW_FALLBACK_HEIGHT, 720.0);
+    }
 
     #[test]
     fn remembers_the_active_main_surface_without_a_url_fragment() {
@@ -4558,315 +2916,11 @@ mod tests {
     }
 
     #[test]
-    fn reads_the_requests_summary() {
-        use super::{parse_requests_summary, RequestsSnapshot};
-        assert_eq!(
-            parse_requests_summary(&serde_json::json!({ "pending": 2, "newestId": "elicit-9" })),
-            Some(RequestsSnapshot { pending: 2, newest_id: Some("elicit-9".into()) })
-        );
-        assert_eq!(
-            parse_requests_summary(&serde_json::json!({ "pending": 0, "newestId": null })),
-            Some(RequestsSnapshot { pending: 0, newest_id: None })
-        );
-        assert_eq!(parse_requests_summary(&serde_json::json!({ "pending": "x" })), None);
-    }
-
-    #[test]
-    fn notifies_only_when_a_new_request_arrives() {
-        use super::{PendingRequests, RequestsSnapshot, RequestsTransition};
-        let snap = |pending: u64, newest: Option<&str>| RequestsSnapshot {
-            pending,
-            newest_id: newest.map(str::to_owned),
-        };
-        let state = PendingRequests::new();
-        assert_eq!(state.set(snap(0, None)), RequestsTransition::Unchanged);
-        assert_eq!(state.set(snap(1, Some("a"))), RequestsTransition::Arrived);
-        assert_eq!(state.set(snap(1, Some("a"))), RequestsTransition::Unchanged);
-        assert_eq!(state.set(snap(2, Some("b"))), RequestsTransition::Arrived);
-        // Answering the newest makes the older one newest again: not new.
-        assert_eq!(state.set(snap(1, Some("a"))), RequestsTransition::Changed);
-        assert_eq!(state.set(snap(0, None)), RequestsTransition::Changed);
-        // One answered and another arrived: still news.
-        assert_eq!(state.set(snap(1, Some("c"))), RequestsTransition::Arrived);
-    }
-
-    #[test]
-    fn classifies_profiles_from_the_final_identifier() {
-        use super::{AppProfile, PRODUCTION_IDENTIFIER};
-        assert_eq!(
-            AppProfile::from_identifier(PRODUCTION_IDENTIFIER),
-            AppProfile::Production
-        );
-        assert_eq!(
-            AppProfile::from_identifier("co.stuffbucket.maximal.dev.maximal-0123abcd"),
-            AppProfile::Development
-        );
-        assert_eq!(
-            AppProfile::from_identifier("co.stuffbucket.maximal.test.unit"),
-            AppProfile::Test
-        );
-        assert_eq!(
-            AppProfile::from_identifier("com.example.unknown"),
-            AppProfile::Development
-        );
-        assert_eq!(AppProfile::Production.initial_port(), 4141);
-        assert_eq!(AppProfile::Development.initial_port(), 0);
-        assert_eq!(AppProfile::Test.initial_port(), 0);
-    }
-
-    #[test]
-    fn preserves_the_existing_localhost_webview_origin() {
-        use super::SidecarEndpoint;
-        let endpoint = SidecarEndpoint {
-            generation: 1,
-            port: 4141,
-        };
-        assert_eq!(endpoint.browser_origin(), "http://localhost:4141");
-    }
-
-    #[test]
-    fn failure_stop_is_scoped_to_one_generation() {
-        use super::SidecarFailureStop;
-        let failures = SidecarFailureStop::new();
-        failures.begin(7);
-        assert!(!failures.consume(6));
-        assert!(failures.consume(7));
-        assert!(!failures.consume(7));
-    }
-
-    #[test]
-    fn parses_chunked_ready_lines_and_validates_every_field() {
-        use super::{validate_ready, SidecarReady, SpawnGeneration, StdoutLines, READY_MARKER};
-        let spawn = SpawnGeneration {
-            generation: 1,
-            requested_port: 0,
-            nonce: "secret".into(),
-        };
-        let mut lines = StdoutLines::default();
-        assert!(lines.push(b"noise\n@@MAX").iter().any(|line| line == "noise"));
-        let parsed = lines.push(
-            b"IMAL_READY@@{\"protocol\":1,\"host\":\"127.0.0.1\",\"port\":43210,\"instanceId\":\"co.stuffbucket.maximal.dev.maximal-1\",\"nonce\":\"secret\"}\n",
-        );
-        let payload = parsed[0].strip_prefix(READY_MARKER).unwrap();
-        let ready: SidecarReady = serde_json::from_str(payload).unwrap();
-        assert!(validate_ready(
-            &ready,
-            &spawn,
-            "co.stuffbucket.maximal.dev.maximal-1"
-        )
-        .is_ok());
-
-        let mut invalid = ready;
-        invalid.protocol = 2;
-        assert!(validate_ready(&invalid, &spawn, "co.stuffbucket.maximal.dev.maximal-1").is_err());
-        invalid.protocol = 1;
-        invalid.nonce = "wrong".into();
-        assert!(validate_ready(&invalid, &spawn, "co.stuffbucket.maximal.dev.maximal-1").is_err());
-        invalid.nonce = "secret".into();
-        invalid.host = "0.0.0.0".into();
-        assert!(validate_ready(&invalid, &spawn, "co.stuffbucket.maximal.dev.maximal-1").is_err());
-        invalid.host = "127.0.0.1".into();
-        invalid.instance_id = "other".into();
-        assert!(validate_ready(&invalid, &spawn, "co.stuffbucket.maximal.dev.maximal-1").is_err());
-
-        invalid.instance_id = "co.stuffbucket.maximal.dev.maximal-1".into();
-        let fixed = SpawnGeneration {
-            generation: 2,
-            requested_port: 4141,
-            nonce: "secret".into(),
-        };
-        assert!(validate_ready(&invalid, &fixed, "co.stuffbucket.maximal.dev.maximal-1").is_err());
-    }
-
-    #[test]
-    fn persists_the_profile_preferred_port() {
-        use super::{read_preferred_port, write_preferred_port};
-        let dir = std::env::temp_dir().join(format!("maximal-port-test-{}", super::random_hex()));
-        write_preferred_port(&dir, 43210).unwrap();
-        assert_eq!(read_preferred_port(&dir), Some(43210));
-        std::fs::write(dir.join("sidecar-port"), "0\n").unwrap();
-        assert_eq!(read_preferred_port(&dir), None);
-        std::fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
-    fn reuses_the_selected_port_for_later_generations() {
-        use super::{AppProfile, ManagedEndpoint};
-        let endpoints = ManagedEndpoint::new();
-        let first = endpoints.begin_generation(AppProfile::Development);
-        assert_eq!(first.requested_port, 0);
-        assert!(endpoints.activate(first.generation, 43210));
-        let second = endpoints.begin_generation(AppProfile::Development);
-        assert_eq!(second.requested_port, 43210);
-        assert!(!endpoints.activate(first.generation, 43211));
-    }
-
-    #[test]
-    fn retries_a_persisted_port_only_before_registering_a_capability() {
-        use super::{AppProfile, ManagedEndpoint};
-        let endpoints = ManagedEndpoint::new();
-        endpoints.set_preferred_port(Some(43210));
-        let first = endpoints.begin_generation(AppProfile::Development);
-        assert_eq!(first.requested_port, 43210);
-        assert!(endpoints.prepare_dynamic_retry(first.generation, 43210));
-        assert_eq!(
-            endpoints
-                .begin_generation(AppProfile::Development)
-                .requested_port,
-            0
-        );
-
-        let endpoints = ManagedEndpoint::new();
-        endpoints.set_preferred_port(Some(43210));
-        let first = endpoints.begin_generation(AppProfile::Development);
-        endpoints.mark_capability(43210);
-        assert!(!endpoints.prepare_dynamic_retry(first.generation, 43210));
-    }
-
-    #[test]
-    fn classifies_update_status_payloads() {
-        use super::{parse_update_status, UpdateCheck, UpdateSnapshot};
-        let available = serde_json::json!({
-            "current": "0.4.36", "latest": "0.4.40", "update_available": true,
-            "url": "https://mxml.sh/", "enabled": true,
-            "checked_at": "2026-10-27T00:00:00.000Z", "last_error": null
-        });
-        assert_eq!(
-            parse_update_status(&available),
-            UpdateCheck::Resolved(Some(UpdateSnapshot {
-                latest: "0.4.40".into(),
-                url: "https://mxml.sh/".into(),
-                apt_command: None,
-            }))
-        );
-        // An apt install: the sidecar names the apt command and the Linux guide.
-        let apt = serde_json::json!({
-            "latest": "0.4.40", "update_available": true,
-            "url": "https://example.invalid/linux#update",
-            "update_command": "sudo apt update && sudo apt install --only-upgrade maximal maximal-desktop"
-        });
-        assert_eq!(
-            parse_update_status(&apt),
-            UpdateCheck::Resolved(Some(UpdateSnapshot {
-                latest: "0.4.40".into(),
-                url: "https://example.invalid/linux#update".into(),
-                apt_command: Some(
-                    "sudo apt update && sudo apt install --only-upgrade maximal maximal-desktop"
-                        .into()
-                ),
-            }))
-        );
-        // No URL in the payload: fall back to the download page root.
-        let no_url = serde_json::json!({ "latest": "0.4.40", "update_available": true });
-        assert_eq!(
-            parse_update_status(&no_url),
-            UpdateCheck::Resolved(Some(UpdateSnapshot {
-                latest: "0.4.40".into(),
-                url: "https://mxml.sh/".into(),
-                apt_command: None,
-            }))
-        );
-        let current = serde_json::json!({
-            "latest": "0.4.36", "update_available": false, "enabled": true,
-            "last_error": null
-        });
-        assert_eq!(parse_update_status(&current), UpdateCheck::Resolved(None));
-        let disabled = serde_json::json!({
-            "latest": null, "update_available": false, "enabled": false,
-            "last_error": null
-        });
-        assert_eq!(parse_update_status(&disabled), UpdateCheck::Resolved(None));
-        // The sidecar answered but couldn't reach the manifest yet: retry sooner.
-        let unresolved = serde_json::json!({
-            "latest": null, "update_available": false, "enabled": true,
-            "last_error": "network error: offline"
-        });
-        assert_eq!(parse_update_status(&unresolved), UpdateCheck::Unresolved);
-        // A later failure that still knows the latest version is a real answer.
-        let stale_ok = serde_json::json!({
-            "latest": "0.4.36", "update_available": false, "enabled": true,
-            "last_error": "manifest fetch returned HTTP 503"
-        });
-        assert_eq!(parse_update_status(&stale_ok), UpdateCheck::Resolved(None));
-        // "available" without a version is not offerable.
-        let no_version = serde_json::json!({ "latest": "", "update_available": true });
-        assert_eq!(parse_update_status(&no_version), UpdateCheck::Resolved(None));
-    }
-
-    #[test]
     fn notifies_each_update_version_once() {
         use super::should_notify_update;
         assert!(should_notify_update("0.4.47", None));
         assert!(!should_notify_update("0.4.47", Some("0.4.47")));
         assert!(should_notify_update("0.4.48", Some("0.4.47")));
-    }
-
-    #[test]
-    fn says_what_a_manual_update_check_found() {
-        use super::{manual_check_outcome, ManualCheck, UpdateSnapshot};
-        let available = serde_json::json!({
-            "current": "0.4.36", "latest": "0.4.40", "update_available": true,
-            "url": "https://mxml.sh/", "enabled": true, "last_error": null
-        });
-        assert_eq!(
-            manual_check_outcome(Some(&available)),
-            ManualCheck::Available(UpdateSnapshot {
-                latest: "0.4.40".into(),
-                url: "https://mxml.sh/".into(),
-                apt_command: None,
-            })
-        );
-        let current = serde_json::json!({
-            "current": "0.4.36", "latest": "0.4.36", "update_available": false,
-            "enabled": true, "last_error": null
-        });
-        assert_eq!(
-            manual_check_outcome(Some(&current)),
-            ManualCheck::UpToDate("0.4.36".into())
-        );
-        // Checks are off: the sidecar didn't look, so it can't say "up to date".
-        let disabled = serde_json::json!({
-            "current": "0.4.36", "latest": null, "update_available": false,
-            "enabled": false, "last_error": null
-        });
-        assert_eq!(manual_check_outcome(Some(&disabled)), ManualCheck::Disabled);
-        // The manifest couldn't be read.
-        let unresolved = serde_json::json!({
-            "current": "0.4.36", "latest": null, "update_available": false,
-            "enabled": true, "last_error": "network error: offline"
-        });
-        assert_eq!(manual_check_outcome(Some(&unresolved)), ManualCheck::Failed);
-        // A failed fresh check still carries the last known result; the user
-        // asked for a fresh one, so it is a failure, not "up to date".
-        let stale = serde_json::json!({
-            "current": "0.4.36", "latest": "0.4.36", "update_available": false,
-            "enabled": true, "last_error": "manifest fetch returned HTTP 503"
-        });
-        assert_eq!(manual_check_outcome(Some(&stale)), ManualCheck::Failed);
-        // The sidecar couldn't be asked at all.
-        assert_eq!(manual_check_outcome(None), ManualCheck::Failed);
-        // Nothing to name in the notice: don't claim a version.
-        let no_current = serde_json::json!({
-            "latest": "0.4.36", "update_available": false, "enabled": true
-        });
-        assert_eq!(manual_check_outcome(Some(&no_current)), ManualCheck::Failed);
-    }
-
-    #[test]
-    fn asks_for_a_fresh_check_only_when_forced() {
-        use super::{update_status_endpoint, SidecarEndpoint};
-        let endpoint = SidecarEndpoint {
-            generation: 1,
-            port: 43210,
-        };
-        assert_eq!(
-            update_status_endpoint(endpoint, false),
-            "http://127.0.0.1:43210/settings/api/update-status"
-        );
-        assert_eq!(
-            update_status_endpoint(endpoint, true),
-            "http://127.0.0.1:43210/settings/api/update-status?force=1"
-        );
     }
 
     #[test]
@@ -4916,12 +2970,16 @@ mod tests {
         use super::app_bundle_of;
         use std::path::Path;
         assert_eq!(
-            app_bundle_of(Path::new("/Applications/Maximal.app/Contents/MacOS/maximal-shell")),
+            app_bundle_of(Path::new(
+                "/Applications/Maximal.app/Contents/MacOS/maximal-shell"
+            )),
             Some(Path::new("/Applications/Maximal.app"))
         );
         // `cargo run` / a bare binary isn't in a bundle.
         assert_eq!(
-            app_bundle_of(Path::new("/repo/shell/src-tauri/target/debug/maximal-shell")),
+            app_bundle_of(Path::new(
+                "/repo/shell/src-tauri/target/debug/maximal-shell"
+            )),
             None
         );
         assert_eq!(
@@ -4938,9 +2996,8 @@ mod tests {
         assert_eq!(bundle_location_problem(installed, false), None);
         // Opened from Downloads without moving it: Gatekeeper runs a
         // read-only translocated copy.
-        let translocated = Path::new(
-            "/private/var/folders/x/T/AppTranslocation/1234/d/Maximal.app",
-        );
+        let translocated =
+            Path::new("/private/var/folders/x/T/AppTranslocation/1234/d/Maximal.app");
         assert!(bundle_location_problem(translocated, false).is_some());
         // Run straight from the mounted disk image.
         let on_dmg = Path::new("/Volumes/Maximal/Maximal.app");
@@ -4963,62 +3020,5 @@ mod tests {
             json(serde_json::to_value(UpdateStep::Downloading).unwrap()),
             Some("downloading".into())
         );
-    }
-
-    #[test]
-    fn dashboard_poll_interval_is_500ms_per_digit_capped_at_a_million() {
-        use super::dashboard_poll_interval;
-        use std::time::Duration;
-        let at = |total: u64| dashboard_poll_interval(&serde_json::json!({ "totals": { "total_tokens": total } }));
-        assert_eq!(at(0), Duration::from_millis(500));
-        assert_eq!(at(9), Duration::from_millis(500));
-        assert_eq!(at(10), Duration::from_millis(1_000));
-        assert_eq!(at(999), Duration::from_millis(1_500));
-        assert_eq!(at(1_000), Duration::from_millis(2_000));
-        assert_eq!(at(999_999), Duration::from_millis(3_000));
-        // From a million on: a flat 10 s.
-        assert_eq!(at(1_000_000), Duration::from_secs(10));
-        assert_eq!(at(1_072_727), Duration::from_secs(10));
-        // No totals in the payload (no usage yet): treated as 0.
-        assert_eq!(dashboard_poll_interval(&serde_json::json!({})), Duration::from_millis(500));
-    }
-
-    #[test]
-    fn extracts_consola_fancy_error() {
-        // consola's fancy reporter (the form the sidecar prints under Tauri).
-        let chunk = " ERROR  Could not free :4141 (last known pid 55355). \
-                     Stop the holding process manually and retry.";
-        let reason = extract_error_reason(chunk).expect("should extract");
-        assert!(reason.starts_with("Could not free :4141"));
-        assert!(!reason.contains("ERROR"));
-    }
-
-    #[test]
-    fn extracts_consola_basic_error() {
-        let chunk = "[error] Port 4141 is already in use by another process.";
-        let reason = extract_error_reason(chunk).expect("should extract");
-        assert_eq!(reason, "Port 4141 is already in use by another process.");
-    }
-
-    #[test]
-    fn picks_the_error_line_out_of_a_multiline_chunk() {
-        let chunk = "ℹ Starting maximal…\n\
-                     ℹ Source revision: abc1234\n\
-                     ERROR: bootstrap failed\n";
-        let reason = extract_error_reason(chunk).expect("should extract");
-        assert_eq!(reason, "bootstrap failed");
-    }
-
-    #[test]
-    fn ignores_non_error_output() {
-        assert_eq!(extract_error_reason("ℹ Web-tools executor: Ollama"), None);
-        assert_eq!(extract_error_reason(""), None);
-    }
-
-    #[test]
-    fn caps_runaway_length() {
-        let long = format!("ERROR {}", "x".repeat(500));
-        let reason = extract_error_reason(&long).expect("should extract");
-        assert!(reason.chars().count() <= 180);
     }
 }

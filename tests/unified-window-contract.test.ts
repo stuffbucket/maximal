@@ -15,6 +15,10 @@ const SHELL_LIB_RS = readFileSync(
   resolve(REPO_ROOT, "shell/src-tauri/src/lib.rs"),
   "utf8",
 )
+const SHELL_CARGO_TOML = readFileSync(
+  resolve(REPO_ROOT, "shell/src-tauri/Cargo.toml"),
+  "utf8",
+)
 
 describe("unified Settings, Dashboard, Sessions & Appearance contract", () => {
   test("uses a single topbar with Settings tabs and a three-surface switcher", () => {
@@ -71,9 +75,19 @@ describe("unified Settings, Dashboard, Sessions & Appearance contract", () => {
     expect(SETTINGS_MAIN_TS).toContain("hasAccountProblem")
   })
 
-  test("configures Tauri window chrome, minimum size, default Dock visibility, and macOS Dock context menu", () => {
+  test("configures persistent Tauri window geometry, chrome, Dock visibility, and macOS Dock context menu", () => {
+    expect(SHELL_CARGO_TOML).toContain('tauri-plugin-window-state = "2.5"')
+    expect(SHELL_LIB_RS).toContain("MAIN_WINDOW_FALLBACK_WIDTH: f64 = 1100.0")
+    expect(SHELL_LIB_RS).toContain("MAIN_WINDOW_FALLBACK_HEIGHT: f64 = 720.0")
+    expect(SHELL_LIB_RS).toContain(
+      "StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED",
+    )
+    expect(SHELL_LIB_RS).toContain(
+      ".with_filter(|label| label == SETTINGS_WINDOW_LABEL)",
+    )
     expect(SHELL_LIB_RS).toContain(".min_inner_size(640.0, 480.0)")
     expect(SHELL_LIB_RS).toContain(".prevent_overflow()")
+    expect(SHELL_LIB_RS).toContain(".visible(false)")
     expect(SHELL_LIB_RS).toContain("TitleBarStyle::Overlay")
     expect(SHELL_LIB_RS).toContain("DockVisibilityState")
     expect(SHELL_LIB_RS).toContain("get_dock_visibility")
