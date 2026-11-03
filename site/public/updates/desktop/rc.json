@@ -1,23 +1,23 @@
 {
-  "version": "0.5.1-rc.1",
-  "notes": "https://github.com/stuffbucket/maximal/releases/tag/v0.5.1-rc.1",
-  "pub_date": "2026-11-03T01:58:32Z",
+  "version": "0.5.2-rc.1",
+  "notes": "https://github.com/stuffbucket/maximal/releases/tag/v0.5.2-rc.1",
+  "pub_date": "2026-11-03T20:57:05Z",
   "platforms": {
     "windows-x86_64-nsis": {
-      "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.1-rc.1/maximal-v0.5.1-rc.1-windows-x64-setup.exe",
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVURTFyRXVucmZhNkgyN29zSXducmZHTGtaVlhvZ25GK0xDYkQ5aVBta3hZKzRuei8vTGwzMDdsb21nRHZzQVRoODJPSm9DaVMyVnF1d2pEOXJTNUZVY1N3UkNwU3RTckFFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzNjcxMDcyCWZpbGU6TWF4aW1hbF8wLjUuMS1yYy4xX3g2NC1zZXR1cC5leGUJdmVyc2lvbjowLjUuMS1yYy4xCkRPaW9KVTc1bjZpYW5PV095azRSNlRWcWI2SU4rMGE4NEtRSnZpcVB3OFphMjYrU0UxV1FwVlRXQlppTnoyUVFZalNOVDByREJmMmdBWE1BemY4SEJnPT0K"
+      "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.2-rc.1/maximal-v0.5.2-rc.1-windows-x64-setup.exe",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVURTFyRXVucmZhNkE3UUJBZHdqTGNHMVE0SzBqQjAwRUh1WTd0RWhCYSt1Z3BJTXc2aE5Vb1kxeHBzT2R3T2lDelRwQlBOOXNpNzBYTW9NaUhKaUlDK2pKLy9SK0hKd1E4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzNzM5MzQ1CWZpbGU6TWF4aW1hbF8wLjUuMi1yYy4xX3g2NC1zZXR1cC5leGUJdmVyc2lvbjowLjUuMi1yYy4xClFCSzJkMWkvc2lpa2V2eWk1MEFvMFhvd28vazBXT3B0MkVPZnhYWjdqYjg4N1ZQaWVYcTlzdkJaUXNvNG1sSzB0NDRSRm1vVSttTENGTkY4K2VKckRnPT0K"
     },
     "windows-x86_64": {
-      "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.1-rc.1/maximal-v0.5.1-rc.1-windows-x64-setup.exe",
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVURTFyRXVucmZhNkgyN29zSXducmZHTGtaVlhvZ25GK0xDYkQ5aVBta3hZKzRuei8vTGwzMDdsb21nRHZzQVRoODJPSm9DaVMyVnF1d2pEOXJTNUZVY1N3UkNwU3RTckFFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzNjcxMDcyCWZpbGU6TWF4aW1hbF8wLjUuMS1yYy4xX3g2NC1zZXR1cC5leGUJdmVyc2lvbjowLjUuMS1yYy4xCkRPaW9KVTc1bjZpYW5PV095azRSNlRWcWI2SU4rMGE4NEtRSnZpcVB3OFphMjYrU0UxV1FwVlRXQlppTnoyUVFZalNOVDByREJmMmdBWE1BemY4SEJnPT0K"
+      "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.2-rc.1/maximal-v0.5.2-rc.1-windows-x64-setup.exe",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVURTFyRXVucmZhNkE3UUJBZHdqTGNHMVE0SzBqQjAwRUh1WTd0RWhCYSt1Z3BJTXc2aE5Vb1kxeHBzT2R3T2lDelRwQlBOOXNpNzBYTW9NaUhKaUlDK2pKLy9SK0hKd1E4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzNzM5MzQ1CWZpbGU6TWF4aW1hbF8wLjUuMi1yYy4xX3g2NC1zZXR1cC5leGUJdmVyc2lvbjowLjUuMi1yYy4xClFCSzJkMWkvc2lpa2V2eWk1MEFvMFhvd28vazBXT3B0MkVPZnhYWjdqYjg4N1ZQaWVYcTlzdkJaUXNvNG1sSzB0NDRSRm1vVSttTENGTkY4K2VKckRnPT0K"
     },
     "darwin-aarch64-app": {
-      "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.1-rc.1/maximal-v0.5.1-rc.1-darwin-arm64.app.tar.gz",
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVURTFyRXVucmZhNkpaUUQvUHZ6Tm4yTGV0dE1TdkJYVDhNZUxOdWtoVHZiZkt3RG9NSEZvK3p2Z3VmUVU5RldGbjhwTVcwUDFLQmlNU3p0d0xuenZJbEtzcHFLMWNyS3dzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzNjcwODc1CWZpbGU6bWF4aW1hbC12MC41LjEtcmMuMS1kYXJ3aW4tYXJtNjQuYXBwLnRhci5negl2ZXJzaW9uOjAuNS4xLXJjLjEKeFNOSXRGazZmRjlVOTUwWmIxY2RLWmZHUit2eUNLc3Zva1k0NGxuaEhUUTg5NE9LRWdNN3krL3RGK2FIMEJQaVZrRWlCcnpnay9PZkVzMGR3UHhQRGc9PQo="
+      "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.2-rc.1/maximal-v0.5.2-rc.1-darwin-arm64.app.tar.gz",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVURTFyRXVucmZhNkpLMHN1blBBMkt1RnIxandETU52cW4wZVFmb3Q2dmdkWmFkbEQvMWUwUnd5MStJa0lHdjRZY0pPMXB2WDkydW9KRDZ0OVNaaVUrbHBERmFHUEY5eWdJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzNzM5MTQyCWZpbGU6bWF4aW1hbC12MC41LjItcmMuMS1kYXJ3aW4tYXJtNjQuYXBwLnRhci5negl2ZXJzaW9uOjAuNS4yLXJjLjEKdUgyUWErUld0Z25oVWJVUlY2WHBVRE9xZ3R6MGlxNGpvWkxBVkRNWmhHWTJjaDBGMFNLNDN5WjRiNnl0MS9hYjBnUUErZ0IwZFdDSnhoNU03dkJhQnc9PQo="
     },
     "darwin-aarch64": {
-      "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.1-rc.1/maximal-v0.5.1-rc.1-darwin-arm64.app.tar.gz",
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVURTFyRXVucmZhNkpaUUQvUHZ6Tm4yTGV0dE1TdkJYVDhNZUxOdWtoVHZiZkt3RG9NSEZvK3p2Z3VmUVU5RldGbjhwTVcwUDFLQmlNU3p0d0xuenZJbEtzcHFLMWNyS3dzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzNjcwODc1CWZpbGU6bWF4aW1hbC12MC41LjEtcmMuMS1kYXJ3aW4tYXJtNjQuYXBwLnRhci5negl2ZXJzaW9uOjAuNS4xLXJjLjEKeFNOSXRGazZmRjlVOTUwWmIxY2RLWmZHUit2eUNLc3Zva1k0NGxuaEhUUTg5NE9LRWdNN3krL3RGK2FIMEJQaVZrRWlCcnpnay9PZkVzMGR3UHhQRGc9PQo="
+      "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.2-rc.1/maximal-v0.5.2-rc.1-darwin-arm64.app.tar.gz",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVURTFyRXVucmZhNkpLMHN1blBBMkt1RnIxandETU52cW4wZVFmb3Q2dmdkWmFkbEQvMWUwUnd5MStJa0lHdjRZY0pPMXB2WDkydW9KRDZ0OVNaaVUrbHBERmFHUEY5eWdJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzNzM5MTQyCWZpbGU6bWF4aW1hbC12MC41LjItcmMuMS1kYXJ3aW4tYXJtNjQuYXBwLnRhci5negl2ZXJzaW9uOjAuNS4yLXJjLjEKdUgyUWErUld0Z25oVWJVUlY2WHBVRE9xZ3R6MGlxNGpvWkxBVkRNWmhHWTJjaDBGMFNLNDN5WjRiNnl0MS9hYjBnUUErZ0IwZFdDSnhoNU03dkJhQnc9PQo="
     }
   }
 }

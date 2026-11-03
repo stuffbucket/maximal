@@ -1,50 +1,7 @@
 {
   "schema": 2,
-  "generated": "2026-11-03T02:26:42.374Z",
+  "generated": "2026-11-03T20:57:28.312Z",
   "channels": {
-    "rc": {
-      "version": "0.5.1-rc.1",
-      "tag": "v0.5.1-rc.1",
-      "notes": "https://github.com/stuffbucket/maximal/releases/tag/v0.5.1-rc.1",
-      "downloads": {
-        "macos-arm64-dmg": {
-          "name": "maximal-v0.5.1-rc.1-darwin-arm64.dmg",
-          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.1-rc.1/maximal-v0.5.1-rc.1-darwin-arm64.dmg"
-        },
-        "windows-x64-setup": {
-          "name": "maximal-v0.5.1-rc.1-windows-x64-setup.exe",
-          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.1-rc.1/maximal-v0.5.1-rc.1-windows-x64-setup.exe"
-        },
-        "windows-x64-msi": {
-          "name": "maximal-v0.5.1-rc.1-windows-x64.msi",
-          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.1-rc.1/maximal-v0.5.1-rc.1-windows-x64.msi"
-        },
-        "windows-x64-zip": {
-          "name": "maximal-v0.5.1-rc.1-windows-x64.zip",
-          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.1-rc.1/maximal-v0.5.1-rc.1-windows-x64.zip"
-        },
-        "windows-install-ps1": {
-          "name": "install.ps1",
-          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.1-rc.1/install.ps1"
-        },
-        "linux-amd64-deb": {
-          "name": "maximal_0.5.1-rc.1_amd64.deb",
-          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.1-rc.1/maximal_0.5.1-rc.1_amd64.deb"
-        },
-        "linux-amd64-desktop-deb": {
-          "name": "maximal-desktop_0.5.1-rc.1_amd64.deb",
-          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.1-rc.1/maximal-desktop_0.5.1-rc.1_amd64.deb"
-        },
-        "linux-arm64-deb": {
-          "name": "maximal_0.5.1-rc.1_arm64.deb",
-          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.1-rc.1/maximal_0.5.1-rc.1_arm64.deb"
-        },
-        "linux-arm64-desktop-deb": {
-          "name": "maximal-desktop_0.5.1-rc.1_arm64.deb",
-          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.1-rc.1/maximal-desktop_0.5.1-rc.1_arm64.deb"
-        }
-      }
-    },
     "stable": {
       "version": "0.5.1",
       "tag": "v0.5.1",
@@ -85,6 +42,49 @@
         "linux-arm64-desktop-deb": {
           "name": "maximal-desktop_0.5.1_arm64.deb",
           "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.1/maximal-desktop_0.5.1_arm64.deb"
+        }
+      }
+    },
+    "rc": {
+      "version": "0.5.2-rc.1",
+      "tag": "v0.5.2-rc.1",
+      "notes": "https://github.com/stuffbucket/maximal/releases/tag/v0.5.2-rc.1",
+      "downloads": {
+        "macos-arm64-dmg": {
+          "name": "maximal-v0.5.2-rc.1-darwin-arm64.dmg",
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.2-rc.1/maximal-v0.5.2-rc.1-darwin-arm64.dmg"
+        },
+        "windows-x64-setup": {
+          "name": "maximal-v0.5.2-rc.1-windows-x64-setup.exe",
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.2-rc.1/maximal-v0.5.2-rc.1-windows-x64-setup.exe"
+        },
+        "windows-x64-msi": {
+          "name": "maximal-v0.5.2-rc.1-windows-x64.msi",
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.2-rc.1/maximal-v0.5.2-rc.1-windows-x64.msi"
+        },
+        "windows-x64-zip": {
+          "name": "maximal-v0.5.2-rc.1-windows-x64.zip",
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.2-rc.1/maximal-v0.5.2-rc.1-windows-x64.zip"
+        },
+        "windows-install-ps1": {
+          "name": "install.ps1",
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.2-rc.1/install.ps1"
+        },
+        "linux-amd64-deb": {
+          "name": "maximal_0.5.2-rc.1_amd64.deb",
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.2-rc.1/maximal_0.5.2-rc.1_amd64.deb"
+        },
+        "linux-amd64-desktop-deb": {
+          "name": "maximal-desktop_0.5.2-rc.1_amd64.deb",
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.2-rc.1/maximal-desktop_0.5.2-rc.1_amd64.deb"
+        },
+        "linux-arm64-deb": {
+          "name": "maximal_0.5.2-rc.1_arm64.deb",
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.2-rc.1/maximal_0.5.2-rc.1_arm64.deb"
+        },
+        "linux-arm64-desktop-deb": {
+          "name": "maximal-desktop_0.5.2-rc.1_arm64.deb",
+          "url": "https://github.com/stuffbucket/maximal/releases/download/v0.5.2-rc.1/maximal-desktop_0.5.2-rc.1_arm64.deb"
         }
       }
     }
