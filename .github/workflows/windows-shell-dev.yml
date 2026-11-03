@@ -252,7 +252,9 @@ jobs:
 
           Write-Host "launching: $shellPath"
           $shellProcess = Start-Process -FilePath $shellPath -PassThru
-          $deadline = (Get-Date).AddSeconds(30)
+          # Cold hosted runners can take more than 30 seconds to initialize the
+          # sidecar on first launch (the diagnostics record the exact child PID).
+          $deadline = (Get-Date).AddSeconds(60)
           do {
             $sidecarProcess = Get-CimInstance Win32_Process -Filter "Name = 'maximal.exe'" |
               Where-Object { $_.ParentProcessId -eq $shellProcess.Id } |
@@ -263,7 +265,7 @@ jobs:
           } while ((Get-Date) -lt $deadline)
 
           if ($shellProcess.HasExited) { throw "maximal-shell did not stay running" }
-          if (-not $sidecarProcess) { throw "maximal sidecar did not start within 30 seconds" }
+          if (-not $sidecarProcess) { throw "maximal sidecar did not start within 60 seconds" }
           Write-Host "shell PID: $($shellProcess.Id); sidecar PID: $($sidecarProcess.ProcessId)"
 
       # This runs before NSIS's image-wide cleanup can mask the result. Kill only
@@ -314,7 +316,9 @@ jobs:
           Write-Host "contained sidecar PID $sidecarPid and its listeners exited"
 
           $replacementShell = Start-Process -FilePath $shellPath -PassThru
-          $deadline = (Get-Date).AddSeconds(30)
+          # Cold hosted runners can take more than 30 seconds to initialize the
+          # sidecar on first launch (the diagnostics record the exact child PID).
+          $deadline = (Get-Date).AddSeconds(60)
           do {
             $replacementSidecar = Get-CimInstance Win32_Process -Filter "Name = 'maximal.exe'" |
               Where-Object { $_.ParentProcessId -eq $replacementShell.Id } |
@@ -324,7 +328,7 @@ jobs:
             $replacementShell.Refresh()
           } while ((Get-Date) -lt $deadline)
           if ($replacementShell.HasExited) { throw "replacement maximal-shell did not stay running" }
-          if (-not $replacementSidecar) { throw "replacement sidecar did not start within 30 seconds" }
+          if (-not $replacementSidecar) { throw "replacement sidecar did not start within 60 seconds" }
           Write-Host "replacement shell PID: $($replacementShell.Id); sidecar PID: $($replacementSidecar.ProcessId)"
 
       - name: Uninstall NSIS app while Maximal is running
@@ -399,8 +403,12 @@ jobs:
               ConvertTo-Json -Depth 3 | Set-Content diagnostics/install-tree.json
           }
           $appData = Join-Path $env:APPDATA 'maximal'
-          if (Test-Path $appData) {
-            Copy-Item $appData diagnostics/appdata -Recurse -Force
+          New-Item -ItemType Directory -Force diagnostics/appdata | Out-Null
+          foreach ($name in @('session-running', 'maximal.pid')) {
+            $source = Join-Path $appData $name
+            if (Test-Path $source) {
+              Copy-Item $source (Join-Path 'diagnostics/appdata' $name) -Force
+            }
           }
 
       - name: Upload Windows lifecycle diagnostics

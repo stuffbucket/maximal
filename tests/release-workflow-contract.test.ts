@@ -256,6 +256,9 @@ describe("Windows desktop lifecycle smoke", () => {
       "cargo test --release --manifest-path shell/src-tauri/Cargo.toml",
     )
     expect(workflow).toContain("name: Launch installed app and verify sidecar")
+    expect(
+      workflow.match(/\$deadline = \(Get-Date\)\.AddSeconds\(60\)/gu),
+    ).toHaveLength(2)
     expect(workflow).toContain(
       "name: Force shell exit and verify sidecar containment",
     )
@@ -276,6 +279,10 @@ describe("Windows desktop lifecycle smoke", () => {
     expect(workflow).toContain("Remove-Item $installRoot -Recurse -Force")
     expect(workflow).toContain("name: Capture Windows lifecycle diagnostics")
     expect(workflow).toContain("diagnostics/processes.json")
+    expect(workflow).toContain("@('session-running', 'maximal.pid')")
+    expect(workflow).not.toContain(
+      "Copy-Item $appData diagnostics/appdata -Recurse",
+    )
     expect(workflow).toContain("name: Upload Windows lifecycle diagnostics")
   })
 })
