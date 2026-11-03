@@ -158,7 +158,7 @@ test("standalone Sessions keeps language access and an accurate title", async ({
   await expect(page).toHaveTitle("Sitzungen")
 })
 
-test("the live card sits beside the quotas, and nothing overflows", async ({
+test("the live card sits beside the quotas, and Sessions stays compact without nested scrolling", async ({
   page,
 }) => {
   const errors = await open(page)
@@ -189,15 +189,7 @@ test("the live card sits beside the quotas, and nothing overflows", async ({
   await expect(page.locator("#sessions")).toBeVisible()
   await expect(page.locator("#token-usage")).toBeHidden()
 
-  // At this width the session table fits its frame without scrolling.
-  const tableOverflow = await page.evaluate<number>(
-    `(() => { const s = document.querySelector("#sessions-table .overflow-auto"); return s.scrollWidth - s.clientWidth })()`,
-  )
-  expect(
-    tableOverflow,
-    "session table scrolls sideways at 1100px",
-  ).toBeLessThanOrEqual(0)
-
+  await expect(page.locator("#sessions-table .overflow-auto")).toHaveCount(0)
   for (const width of [900, 390]) {
     await page.setViewportSize({ width, height: 900 })
     const overflow = await page.evaluate<number>(
