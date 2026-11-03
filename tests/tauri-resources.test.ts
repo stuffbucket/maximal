@@ -13,7 +13,8 @@ import { dirname, resolve } from "node:path"
  */
 
 const REPO_ROOT = resolve(import.meta.dir, "..")
-const TAURI_CONF = resolve(REPO_ROOT, "shell", "src-tauri", "tauri.conf.json")
+const TAURI_ROOT = resolve(REPO_ROOT, "shell", "src-tauri")
+const TAURI_CONF = resolve(TAURI_ROOT, "tauri.conf.json")
 
 interface TauriConf {
   bundle?: {
@@ -54,6 +55,25 @@ describe("Tauri packaging contracts", () => {
       "binaries/maximal",
       "binaries/maximal-mcp-broker",
     ])
+  })
+
+  test("contains Windows sidecars before their suspended process starts", () => {
+    const cargo = readFileSync(resolve(TAURI_ROOT, "Cargo.toml"), "utf8")
+    const patchPath = "patches/tauri-plugin-shell-2.6.0"
+    expect(cargo).toContain('tauri-plugin-shell = "=2.6.0"')
+    expect(cargo).toContain(`tauri-plugin-shell = { path = "${patchPath}" }`)
+
+    const jobObject = readFileSync(
+      resolve(TAURI_ROOT, patchPath, "src", "process", "job_object.rs"),
+      "utf8",
+    )
+    const configure = jobObject.indexOf("SetInformationJobObject(")
+    const assign = jobObject.indexOf("AssignProcessToJobObject(")
+    const resume = jobObject.indexOf("resume_threads(child.id())")
+    expect(jobObject).toContain("JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE")
+    expect(configure).toBeGreaterThan(-1)
+    expect(assign).toBeGreaterThan(configure)
+    expect(resume).toBeGreaterThan(assign)
   })
 
   test("the NSIS installer and uninstaller stop every Maximal process", () => {

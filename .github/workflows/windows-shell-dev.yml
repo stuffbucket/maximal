@@ -18,9 +18,10 @@
 #   4. `bun run tauri build` for Windows → NSIS per-user installer (+ the
 #      bare .exe). NSIS is chosen over WiX/MSI to match the macOS per-user,
 #      no-admin model (installMode: currentUser in tauri.conf.json).
-#   5. Install and launch the packaged app, prove its sidecar starts, then run
-#      the NSIS uninstaller while Maximal is still running. A bounded deadline
-#      catches regressions where the uninstaller waits forever for the tray app.
+#   5. Install and launch the packaged app, prove its sidecar starts, forcibly
+#      terminate only the shell PID, and verify the exact sidecar disappears.
+#   6. Relaunch, then run the NSIS uninstaller while Maximal is still running.
+#      A bounded deadline catches regressions where the uninstaller waits forever.
 #
 # Trigger: Actions tab -> "windows shell (dev)" -> Run workflow, pick the
 # branch. Or: gh workflow run windows-shell-dev.yml --ref agent/win-shell
@@ -132,7 +133,8 @@ jobs:
           }
           Get-ChildItem $dir
 
-      # Compile and exercise the lifecycle code with target_os = "windows".
+      # Compile and exercise the lifecycle code with target_os = "windows",
+      # including the synthetic Job Object kill-on-close containment test.
       # --release lets the following Tauri build reuse the compiled graph.
       - name: Test native shell lifecycle (Windows)
         shell: bash
@@ -202,8 +204,13 @@ jobs:
           $setup = (Get-ChildItem dist -Recurse -Filter '*-setup.exe' | Select-Object -First 1).FullName
           if (-not $setup) { throw "no *-setup.exe in the downloaded artifact" }
           Write-Host "Installing $setup /S ..."
-          $p = Start-Process -FilePath $setup -ArgumentList '/S' -Wait -PassThru
+          $p = Start-Process -FilePath $setup -ArgumentList '/S' -PassThru
+          if (-not $p.WaitForExit(60000)) {
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+            throw "NSIS installer timed out"
+          }
           Write-Host "installer exit code: $($p.ExitCode)"
+          if ($p.ExitCode -ne 0) { throw "NSIS install failed: $($p.ExitCode)" }
           Start-Sleep -Seconds 3
 
           # Tauri per-user (currentUser) NSIS installs under %LOCALAPPDATA%\Maximal.
@@ -244,23 +251,84 @@ jobs:
           if (-not (Test-Path $shellPath)) { throw "shell missing: $shellPath" }
 
           Write-Host "launching: $shellPath"
-          Start-Process -FilePath $shellPath | Out-Null
+          $shellProcess = Start-Process -FilePath $shellPath -PassThru
           $deadline = (Get-Date).AddSeconds(30)
           do {
-            $shellProcess = Get-Process -Name 'maximal-shell' -ErrorAction SilentlyContinue |
+            $sidecarProcess = Get-CimInstance Win32_Process -Filter "Name = 'maximal.exe'" |
+              Where-Object { $_.ParentProcessId -eq $shellProcess.Id } |
               Select-Object -First 1
-            $sidecarProcess = Get-Process -Name 'maximal' -ErrorAction SilentlyContinue |
-              Select-Object -First 1
-            if ($shellProcess -and $sidecarProcess) { break }
+            if (-not $shellProcess.HasExited -and $sidecarProcess) { break }
             Start-Sleep -Milliseconds 500
+            $shellProcess.Refresh()
           } while ((Get-Date) -lt $deadline)
 
-          if (-not $shellProcess) { throw "maximal-shell did not stay running" }
+          if ($shellProcess.HasExited) { throw "maximal-shell did not stay running" }
           if (-not $sidecarProcess) { throw "maximal sidecar did not start within 30 seconds" }
-          Write-Host "shell PID: $($shellProcess.Id); sidecar PID: $($sidecarProcess.Id)"
+          Write-Host "shell PID: $($shellProcess.Id); sidecar PID: $($sidecarProcess.ProcessId)"
+
+      # This runs before NSIS's image-wide cleanup can mask the result. Kill only
+      # the shell PID, without /T, and require its exact sidecar and listeners to
+      # disappear. Then relaunch so the running-uninstaller smoke remains intact.
+      - name: Force shell exit and verify sidecar containment
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installRoot = Join-Path $env:LOCALAPPDATA 'Maximal'
+          $shellPath = Join-Path $installRoot 'maximal-shell.exe'
+          $shellProcess = Get-CimInstance Win32_Process -Filter "Name = 'maximal-shell.exe'" |
+            Where-Object { $_.ExecutablePath -eq $shellPath } |
+            Select-Object -First 1
+          if (-not $shellProcess) { throw "installed maximal-shell process not found" }
+          $sidecarProcess = Get-CimInstance Win32_Process -Filter "Name = 'maximal.exe'" |
+            Where-Object { $_.ParentProcessId -eq $shellProcess.ProcessId } |
+            Select-Object -First 1
+          if (-not $sidecarProcess) { throw "sidecar child of shell PID $($shellProcess.ProcessId) not found" }
+
+          $shellPid = [int]$shellProcess.ProcessId
+          $sidecarPid = [int]$sidecarProcess.ProcessId
+          $listenerPorts = @(
+            Get-NetTCPConnection -OwningProcess $sidecarPid -State Listen -ErrorAction SilentlyContinue |
+              Select-Object -ExpandProperty LocalPort -Unique
+          )
+          [ordered]@{
+            shellPid = $shellPid
+            sidecarPid = $sidecarPid
+            listenerPorts = $listenerPorts
+          } | ConvertTo-Json | Set-Content dist/containment-pids.json
+          Write-Host "forcing shell PID $shellPid; expecting sidecar PID $sidecarPid to follow"
+          Stop-Process -Id $shellPid -Force
+
+          $deadline = (Get-Date).AddSeconds(5)
+          do {
+            $remainingSidecar = Get-Process -Id $sidecarPid -ErrorAction SilentlyContinue
+            $remainingListeners = @(
+              Get-NetTCPConnection -OwningProcess $sidecarPid -State Listen -ErrorAction SilentlyContinue
+            )
+            if (-not $remainingSidecar -and $remainingListeners.Count -eq 0) { break }
+            Start-Sleep -Milliseconds 100
+          } while ((Get-Date) -lt $deadline)
+          if ($remainingSidecar) { throw "sidecar PID $sidecarPid survived forced shell exit" }
+          if ($remainingListeners.Count -ne 0) {
+            throw "sidecar PID $sidecarPid retained listeners after forced shell exit"
+          }
+          Write-Host "contained sidecar PID $sidecarPid and its listeners exited"
+
+          $replacementShell = Start-Process -FilePath $shellPath -PassThru
+          $deadline = (Get-Date).AddSeconds(30)
+          do {
+            $replacementSidecar = Get-CimInstance Win32_Process -Filter "Name = 'maximal.exe'" |
+              Where-Object { $_.ParentProcessId -eq $replacementShell.Id } |
+              Select-Object -First 1
+            if (-not $replacementShell.HasExited -and $replacementSidecar) { break }
+            Start-Sleep -Milliseconds 500
+            $replacementShell.Refresh()
+          } while ((Get-Date) -lt $deadline)
+          if ($replacementShell.HasExited) { throw "replacement maximal-shell did not stay running" }
+          if (-not $replacementSidecar) { throw "replacement sidecar did not start within 30 seconds" }
+          Write-Host "replacement shell PID: $($replacementShell.Id); sidecar PID: $($replacementSidecar.ProcessId)"
 
       - name: Uninstall NSIS app while Maximal is running
-        if: always()
+        if: success()
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -308,3 +376,59 @@ jobs:
           # An in-place NSIS uninstaller cannot remove its own executable.
           Remove-Item $installRoot -Recurse -Force
           if (Test-Path $installRoot) { throw "install root still present: $installRoot" }
+
+      # Capture evidence before the best-effort image-wide cleanup below. This
+      # makes packaged lifecycle failures diagnosable without rerunning a build.
+      - name: Capture Windows lifecycle diagnostics
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          New-Item -ItemType Directory -Force diagnostics | Out-Null
+          Get-CimInstance Win32_Process |
+            Select-Object Name, ProcessId, ParentProcessId, ExecutablePath, CommandLine |
+            ConvertTo-Json -Depth 3 | Set-Content diagnostics/processes.json
+          Get-NetTCPConnection -ErrorAction SilentlyContinue |
+            Select-Object State, LocalAddress, LocalPort, RemoteAddress, RemotePort, OwningProcess |
+            ConvertTo-Json -Depth 3 | Set-Content diagnostics/tcp-connections.json
+
+          $installRoot = Join-Path $env:LOCALAPPDATA 'Maximal'
+          if (Test-Path $installRoot) {
+            Get-ChildItem $installRoot -Recurse -Force |
+              Select-Object FullName, Length, LastWriteTime |
+              ConvertTo-Json -Depth 3 | Set-Content diagnostics/install-tree.json
+          }
+          $appData = Join-Path $env:APPDATA 'maximal'
+          if (Test-Path $appData) {
+            Copy-Item $appData diagnostics/appdata -Recurse -Force
+          }
+
+      - name: Upload Windows lifecycle diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-shell-dev-diagnostics
+          path: |
+            diagnostics/
+            dist/containment-pids.json
+          if-no-files-found: warn
+
+      - name: Best-effort hosted-runner cleanup
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          Get-Process -Name 'maximal-shell', 'maximal', 'maximal-mcp-broker' `
+            -ErrorAction SilentlyContinue |
+            Stop-Process -Force -ErrorAction SilentlyContinue
+          $installRoot = Join-Path $env:LOCALAPPDATA 'Maximal'
+          $unins = Get-ChildItem $installRoot -Recurse -Filter 'uninstall.exe' `
+            -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($unins) {
+            $cleanup = Start-Process -FilePath $unins.FullName `
+              -ArgumentList '/S', "_?=$installRoot" -PassThru
+            [void]$cleanup.WaitForExit(30000)
+          }
+          if (Test-Path $installRoot) {
+            Remove-Item $installRoot -Recurse -Force -ErrorAction SilentlyContinue
+          }

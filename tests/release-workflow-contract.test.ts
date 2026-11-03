@@ -256,13 +256,27 @@ describe("Windows desktop lifecycle smoke", () => {
       "cargo test --release --manifest-path shell/src-tauri/Cargo.toml",
     )
     expect(workflow).toContain("name: Launch installed app and verify sidecar")
-    expect(workflow).toContain("Get-Process -Name 'maximal-shell'")
-    expect(workflow).toContain("Get-Process -Name 'maximal'")
+    expect(workflow).toContain(
+      "name: Force shell exit and verify sidecar containment",
+    )
+    expect(workflow).toContain("Stop-Process -Id $shellPid -Force")
+    expect(workflow).toContain(
+      "sidecar PID $sidecarPid survived forced shell exit",
+    )
+    expect(workflow).toContain(
+      "Get-NetTCPConnection -OwningProcess $sidecarPid",
+    )
+    expect(workflow).toContain(
+      "Get-Process -Name 'maximal-shell', 'maximal', 'maximal-mcp-broker'",
+    )
     expect(workflow).toContain('"_?=$installRoot"')
     expect(workflow).toContain("$p.WaitForExit(60000)")
     expect(workflow).toContain("uninstaller timed out with Maximal running")
     expect(workflow).toContain("Maximal processes remain after uninstall")
     expect(workflow).toContain("Remove-Item $installRoot -Recurse -Force")
+    expect(workflow).toContain("name: Capture Windows lifecycle diagnostics")
+    expect(workflow).toContain("diagnostics/processes.json")
+    expect(workflow).toContain("name: Upload Windows lifecycle diagnostics")
   })
 })
 

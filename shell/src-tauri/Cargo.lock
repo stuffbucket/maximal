@@ -2240,6 +2240,7 @@ dependencies = [
  "tauri-plugin-window-state",
  "tokio",
  "url",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -4375,8 +4376,6 @@ dependencies = [
 [[package]]
 name = "tauri-plugin-shell"
 version = "2.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7375b25f72f70f6168f27f1ba3a413e30eaa0a2098cff53a4046ebfe9e2f142d"
 dependencies = [
  "encoding_rs",
  "libc",

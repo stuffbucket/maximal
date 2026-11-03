@@ -20,8 +20,9 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["tray-icon", "macos-private-api", "image-png"] }
 tauri-plugin-opener = "2"
 # `tauri-plugin-shell` provides the sidecar spawn API that uses the
-# arch-suffixed binaries declared in bundle.externalBin.
-tauri-plugin-shell = "2.6"
+# arch-suffixed binaries declared in bundle.externalBin. Keep the exact pin so
+# Cargo cannot resolve around the clone-owned path patch below.
+tauri-plugin-shell = "=2.6.0"
 # Native OS confirm/message dialogs. macOS uses the native Quit-Maximal?
 # prompt; Windows uses the app-styled webview prompt once the sidecar is ready
 # and falls back to native during early startup.
@@ -83,6 +84,16 @@ getrandom = "0.3"
 # graceful shutdown.
 libc = "0.2"
 
+[target.'cfg(windows)'.dev-dependencies]
+# Compiles the clone-owned shell plugin's exact Job Object module into the
+# Windows integration test so kill-on-close is exercised without another build.
+windows-sys = { version = "0.60", features = [
+  "Win32_Foundation",
+  "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_JobObjects",
+  "Win32_System_Threading",
+] }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 # Set NSApplication.applicationIconImage at startup so the Dock shows
 # the Maximal mark even when running via `cargo run` (which doesn't
@@ -102,3 +113,7 @@ objc2-foundation = { version = "0.3", features = ["NSData"] }
 # https://github.com/stuffbucket/maximal/issues/530.
 [patch.crates-io]
 glib = { path = "patches/glib-0.18.5" }
+# Tauri shell 2.6.0 with its race-free suspended spawn retained and Windows
+# Job Objects configured to terminate the sidecar tree when the shell's last
+# job handle closes, including forced shell termination and updater exit(0).
+tauri-plugin-shell = { path = "patches/tauri-plugin-shell-2.6.0" }
