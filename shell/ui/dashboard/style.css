@@ -947,32 +947,135 @@ html[data-embedded="true"] .lang-picker {
   margin: 0;
 }
 
-/* ---- Session table ----
-   The per-request table's frame and cells (Tailwind classes in table.ts),
-   plus the "Cache cold" divider, selected and previewed rows, muted cold
-   rows, and the context meter with its compaction tick. */
+/* ---- Session list ----
+   A semantic table with list-like hierarchy: the model leads, client and
+   session details stay together, and secondary measures remain quiet. The
+   window owns scrolling; narrow rows reflow instead of scrolling sideways. */
 .sessions {
   margin-bottom: var(--space-5);
 }
+.session-list {
+  border-block: var(--border-width-hairline) solid var(--border-subtle);
+}
+.session-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+  border-radius: 0 !important;
+  overflow: visible !important;
+  font-size: var(--text-sm);
+  line-height: var(--leading-lg);
+}
+.session-table__head {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  color: var(--text-muted);
+  background-color: var(--surface-base);
+}
+.session-table__heading {
+  padding: var(--space-2) var(--space-3);
+  box-shadow: inset 0 calc(var(--border-width-hairline) * -1) 0
+    var(--border-subtle);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-md);
+  text-align: left;
+  white-space: nowrap;
+}
+.session-table__heading--session { width: 27%; }
+.session-table__heading--state { width: 19%; }
+.session-table__heading--rate { width: 11%; }
+.session-table__heading--context { width: 16%; }
+.session-table__heading--last { width: 15%; }
+.session-table__heading--total { width: 12%; }
+.session-table__heading--numeric {
+  text-align: right;
+}
 .session-row {
   cursor: pointer;
+  box-shadow: inset 0 calc(var(--border-width-hairline) * -1) 0
+    var(--border-subtle);
 }
-.session-row > td {
+.session-row:last-child {
+  box-shadow: none;
+}
+.session-table__cell {
+  min-width: 0;
+  padding: var(--space-1) var(--space-3);
   color: var(--text-muted);
   vertical-align: top;
 }
-.session-strong {
-  color: var(--text-strong);
+.session-cell__label {
+  display: none;
 }
-.session-row--cold .session-strong {
+.session-cell--rate,
+.session-cell--total {
+  text-align: right;
+}
+.session-model {
+  overflow: hidden;
+  color: var(--text-strong);
+  font-weight: var(--weight-md);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-meta {
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-meta__item {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.session-meta__item[hidden] {
+  display: none;
+}
+.session-meta__item + .session-meta__item::before {
+  margin-right: var(--space-2);
+  content: "·";
+}
+.session-meta__client,
+.session-meta__id {
+  flex: none;
+}
+.session-meta__id {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.session-state {
+  color: var(--text-base-color);
+}
+.session-row[data-session-state="streaming"] .session-state {
+  color: var(--text-strong);
+  font-weight: var(--weight-md);
+}
+.session-secondary {
+  overflow: hidden;
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+}
+.session-value {
+  color: var(--text-base-color);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.session-row--cold .session-model,
+.session-row--cold .session-state,
+.session-row--cold .session-value {
   color: var(--text-muted);
 }
 .session-row--preview > td,
 .session-row:hover > td {
-  background-color: color-mix(in srgb, var(--accent) 6%, var(--surface-card));
+  background-color: color-mix(in srgb, var(--accent) 6%, var(--surface-base));
 }
 .session-row--selected > td {
-  background-color: color-mix(in srgb, var(--accent) 12%, var(--surface-card));
+  background-color: color-mix(in srgb, var(--accent) 12%, var(--surface-base));
 }
 .session-row--selected > td:first-child {
   box-shadow: inset var(--border-width-thick) 0 0 var(--accent);
@@ -982,20 +1085,27 @@ html[data-embedded="true"] .lang-picker {
   outline-offset: calc(var(--border-width-thick) * -1);
 }
 .session-divider > td {
-  padding: var(--space-1) var(--space-4);
+  padding: var(--space-1) var(--space-3);
+  box-shadow: inset 0 calc(var(--border-width-hairline) * -1) 0
+    var(--border-subtle);
   font-size: var(--text-xs);
   color: var(--text-muted);
   background-color: var(--surface-base);
 }
+.session-more__cell {
+  padding: var(--space-2) var(--space-3);
+}
 .session-context {
   display: flex;
   align-items: center;
+  min-width: 0;
   gap: var(--space-2);
 }
 .session-context > .meter {
   position: relative;
-  flex: none;
-  width: var(--space-8);
+  flex: 1 1 var(--space-8);
+  max-width: var(--space-8);
+  min-width: var(--space-7);
 }
 .meter__tick {
   position: absolute;
@@ -1011,7 +1121,75 @@ html[data-embedded="true"] .lang-picker {
   display: none;
 }
 .session-context .meter-state {
+  flex: none;
   font-size: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 50em) {
+  .session-table,
+  .session-table tbody {
+    display: block;
+  }
+  .session-table__head {
+    display: none;
+  }
+  .session-row {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    grid-template-areas:
+      "session session session session session session"
+      "state state state context context context"
+      "rate rate last last total total";
+  }
+  .session-table__cell {
+    padding-block: var(--space-2);
+  }
+  .session-cell__label {
+    display: block;
+    margin-bottom: var(--space-1);
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+  }
+  .session-cell--session {
+    grid-area: session;
+    padding-bottom: var(--space-2);
+  }
+  .session-cell--session > .session-cell__label {
+    display: none;
+  }
+  .session-cell--state {
+    grid-area: state;
+  }
+  .session-cell--context {
+    grid-area: context;
+  }
+  .session-cell--rate {
+    grid-area: rate;
+    text-align: left;
+  }
+  .session-cell--last {
+    grid-area: last;
+  }
+  .session-cell--total {
+    grid-area: total;
+    text-align: right;
+  }
+  .session-divider,
+  .session-more {
+    display: block;
+  }
+  .session-divider > td,
+  .session-more > td {
+    display: block;
+  }
+  .session-meta {
+    overflow: hidden;
+    white-space: nowrap;
+  }
+  .session-meta__id {
+    display: none;
+  }
 }
 
 /* Reduced motion is a contract, not a hint (principle #5). */

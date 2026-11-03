@@ -36,8 +36,11 @@ plugin skips a saved position that no longer intersects any connected monitor.
   slot stays in place and explains what will appear once requests begin. The
   toolbar (period and range) wraps on a narrow window rather than overflow.
 - **Sessions**: a peer view in the same persistent observability iframe. It owns
-  the full-width live/recent session table and its empty state, while sharing
-  the Dashboard's single `/token-usage/sessions` controller.
+  a full-width live/recent session list and its empty state, while sharing the
+  Dashboard's single `/token-usage/sessions` controller. The list keeps model,
+  client, and session identity together; its sticky desktop headings stay in
+  view during window scrolling, and narrow rows reflow instead of creating an
+  inner horizontal scroller.
 - **Settings**: `.topbar` header + centered single-column content pane.
   Section max-width = `--content-max`. Within the pane, form
   rows use a 33% label / 66% control split.

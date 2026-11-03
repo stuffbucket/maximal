@@ -27,7 +27,7 @@ polling survive surface switches.
 | Concern | Dashboard | Sessions | Settings |
 |---|---|---|---|
 | Topbar center | Period segmented control (`1d / 7d / 30d`) + range label | Empty | 5 consolidated tabs (`Account`, `Integrations`, `Models`, `Appearance`, `System`) |
-| Content | Quotas, token totals and live-flow graph | Live and recent session table | Configuration sections and app integrations |
+| Content | Quotas, token totals and live-flow graph | Compact live and recent session list | Configuration sections and app integrations |
 | Layout | Wide single column in the observability bundle | Wide single column in the same persistent bundle | Single centered column (`--content-max` sections) below `.topbar` |
 | Build | Hand-authored observability HTML + bundled `main.ts` | Same Dashboard artifact and controllers | Bun bundles `index.html` and its React + vanilla islands |
 | Tokens live in | Generated region of `shell/ui/dashboard/style.css` | Same observability token set | `shell/src/ui/styles/tokens.css`, imported by `styles.css` |
@@ -37,7 +37,7 @@ The desktop app has one single-instance window and one top bar (`.topbar` with
 `TitleBarStyle::Overlay` on macOS). Its far-right three-way surface switcher
 opens Settings, Dashboard or Sessions; the language control follows it. The
 observability iframe stays mounted while its internal Dashboard/Sessions view
-changes, so graph selection, the session table and the single sessions polling
+changes, so graph selection, the session list and the single sessions polling
 loop persist. The window remembers the last surface (`maximal.lastTab`) and the
 last Settings tab (`maximal.lastSettingsTab`), and overrides to **Settings →
 Account** on first run or whenever an account error or upstream rejection is
