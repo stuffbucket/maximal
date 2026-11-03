@@ -532,6 +532,9 @@ describe("Claude Code model ownership across shutdown", () => {
     setCatalog([])
     apply()
     expect(readEnv()).not.toHaveProperty("ANTHROPIC_DEFAULT_HAIKU_MODEL")
+    revertProxyBaseUrlForShutdown(settingsPath)
+    apply()
+    expect(readEnv()).not.toHaveProperty("ANTHROPIC_DEFAULT_HAIKU_MODEL")
 
     setCatalog([alternateHaiku, haiku, sonnet, smallGpt, fullGpt])
     apply()
@@ -594,6 +597,29 @@ describe("Claude Code model journal lifecycle", () => {
     expect(readClaudeCodeSettings(settingsPath)).not.toHaveProperty(
       AUTO_MODELS_JOURNAL_KEY,
     )
+  })
+
+  test("repeated catalogless boots preserve a claimed prior value", () => {
+    writeClaudeCodeSettings(settingsPath, {
+      env: { ANTHROPIC_DEFAULT_HAIKU_MODEL: "gpt-original" },
+    })
+    apply()
+    applyProxyBaseUrl(settingsPath, resolveTestKey, {
+      claimAutoModels: new Set(["fast"]),
+    })
+    expect(readEnv().ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe(haiku.id)
+    revertProxyBaseUrlForShutdown(settingsPath)
+    expect(readEnv().ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe("gpt-original")
+
+    setCatalog([])
+    apply()
+    expect(readEnv().ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe("gpt-original")
+    revertProxyBaseUrlForShutdown(settingsPath)
+    apply()
+    expect(readEnv().ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe("gpt-original")
+
+    revertProxyBaseUrl(settingsPath)
+    expect(readEnv().ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe("gpt-original")
   })
 
   test("repeated shutdown hooks preserve the ownership journal", () => {

@@ -605,7 +605,9 @@ export function resumeClaudeAutoModelSettings(input: {
         suspended.marker
       : { ...suspended.marker, diverged: true }
     prior[key] = suspended.prior
-    if (resumesOwnership) env = { ...env, [key]: suspended.marker.id }
+    if (resumesOwnership && !suspended.marker.suspended) {
+      env = { ...env, [key]: suspended.marker.id }
+    }
   }
   return { env, marker, prior }
 }
