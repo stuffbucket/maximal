@@ -32,7 +32,9 @@ import {
   CAPABLE_MODEL_KEY,
   CLASSIFIER_MODEL_KEY,
   FAST_MODEL_KEY,
+  hasClaudeAutoModelMarker,
   hasOwnedClaudeAutoModelSettings,
+  isUnsupportedClaudeAutoModelJournal,
   mergeClaudeAutoModelSettings,
   resumeClaudeAutoModelSettings,
   stripClaudeAutoModelSettings,
@@ -260,14 +262,41 @@ interface AutoModelApplyOptions {
   claimAutoModels?: ReadonlySet<ClaudeAutoTier>
 }
 
+function isSettingsRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function outputAutoModelMetadata(input: {
+  effectiveExisting: Record<string, unknown>
+  existingJournal: unknown
+  marker: ReturnType<typeof mergeClaudeAutoModelSettings>["marker"]
+  unsupportedJournal: boolean
+}): Record<string, unknown> {
+  if (input.unsupportedJournal) {
+    return {
+      ...(AUTO_MODELS_OWNERSHIP_KEY in input.effectiveExisting ?
+        {
+          [AUTO_MODELS_OWNERSHIP_KEY]:
+            input.effectiveExisting[AUTO_MODELS_OWNERSHIP_KEY],
+        }
+      : {}),
+      [AUTO_MODELS_JOURNAL_KEY]: input.existingJournal,
+    }
+  }
+  return input.marker ? { [AUTO_MODELS_OWNERSHIP_KEY]: input.marker } : {}
+}
+
 export function mergeBaseUrl(
   existing: Record<string, unknown>,
   helperCommand: string,
   options: AutoModelApplyOptions = {},
 ): Record<string, unknown> {
-  const liveAutoModels = AUTO_MODELS_OWNERSHIP_KEY in existing
+  const liveAutoModels = hasClaudeAutoModelMarker(existing)
+  const unsupportedJournal = isUnsupportedClaudeAutoModelJournal(
+    existing[AUTO_MODELS_JOURNAL_KEY],
+  )
   const resumed =
-    liveAutoModels ? null : (
+    liveAutoModels || unsupportedJournal ? null : (
       resumeClaudeAutoModelSettings({
         env: readSettingsEnv(existing),
         journal: existing[AUTO_MODELS_JOURNAL_KEY],
@@ -295,20 +324,15 @@ export function mergeBaseUrl(
     env: existingEnv,
     settings: effectiveExisting,
   })
-  if (
-    resumed
-    && typeof prior === "object"
-    && prior !== null
-    && !Array.isArray(prior)
-  ) {
-    prior = { ...(prior as Record<string, unknown>), ...resumed.prior }
+  if (resumed && isSettingsRecord(prior)) {
+    prior = { ...prior, ...resumed.prior }
   }
   let marker: ReturnType<typeof mergeClaudeAutoModelSettings>["marker"] = null
-  if (typeof prior === "object" && prior !== null && !Array.isArray(prior)) {
+  if (!unsupportedJournal && isSettingsRecord(prior)) {
     const autoModels = mergeClaudeAutoModelSettings({
       settings: effectiveExisting,
       env,
-      prior: prior as Record<string, unknown>,
+      prior,
       claimTiers: options.claimAutoModels,
     })
     env = autoModels.env
@@ -331,7 +355,12 @@ export function mergeBaseUrl(
       fingerprint: helperFingerprint(helperCommand),
     },
     [PRIOR_KEY]: prior,
-    ...(marker ? { [AUTO_MODELS_OWNERSHIP_KEY]: marker } : {}),
+    ...outputAutoModelMetadata({
+      effectiveExisting,
+      existingJournal: existing[AUTO_MODELS_JOURNAL_KEY],
+      marker,
+      unsupportedJournal,
+    }),
   }
 }
 
@@ -400,6 +429,13 @@ export function stripBaseUrl(
 function stripBaseUrlForShutdown(
   existing: Record<string, unknown>,
 ): Record<string, unknown> {
+  const existingJournal = existing[AUTO_MODELS_JOURNAL_KEY]
+  if (isUnsupportedClaudeAutoModelJournal(existingJournal)) {
+    return {
+      ...stripBaseUrl(existing),
+      [AUTO_MODELS_JOURNAL_KEY]: existingJournal,
+    }
+  }
   const snapshot = readPriorSnapshot(existing)
   const journal = suspendClaudeAutoModelSettings({
     settings: existing,

@@ -46,6 +46,8 @@ interface AutoModelMarkerEntry {
   id: string
   source: OwnedSource
   claimed?: boolean
+  diverged?: boolean
+  suspended?: boolean
 }
 
 interface AutoModelMarker {
@@ -100,6 +102,8 @@ function readMarker(settings: Record<string, unknown>): AutoModelMarker {
       id: entry.id,
       source: entry.source,
       ...(entry.claimed === true ? { claimed: true } : {}),
+      ...(entry.diverged === true ? { diverged: true } : {}),
+      ...(entry.suspended === true ? { suspended: true } : {}),
     }
   }
   const marker: AutoModelMarker = {}
@@ -149,6 +153,14 @@ function readJournal(raw: unknown): AutoModelJournal | null {
   return AUTO_MODEL_TIERS.some((tier) => tiers[tier]) ?
       { version: AUTO_MODELS_JOURNAL_VERSION, tiers }
     : null
+}
+
+export function isUnsupportedClaudeAutoModelJournal(raw: unknown): boolean {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return false
+  }
+  const version = (raw as Record<string, unknown>).version
+  return typeof version === "number" && version !== AUTO_MODELS_JOURNAL_VERSION
 }
 
 function fieldMatchesSnapshot(
@@ -206,8 +218,15 @@ function ownershipForTier(
   const key = TIER_KEYS[tier]
   const current = stringValue(context.env[key])
   const marker = context.marker[tier]
-  if (marker && current === marker.id) return { kind: "owned", marker }
-  const diverged = Boolean(marker) || changedFromPrior(context, key)
+  const changed = changedFromPrior(context, key)
+  if (
+    marker
+    && !marker.diverged
+    && (marker.suspended ? !changed : current === marker.id)
+  ) {
+    return { kind: "owned", marker }
+  }
+  const diverged = Boolean(marker) || changed
   if (current) return { kind: "external-value", value: current, diverged }
   if (marker || key in context.env || diverged) {
     return { kind: "external-absent", diverged }
@@ -391,26 +410,34 @@ function automaticMarkerDuringGap(
   tier: ClaudeAutoTier,
   resolution: ClaudeAutoTierState,
   ownership: TierOwnership,
-): AutoModelMarkerEntry | undefined {
+): { keepApplied: boolean; marker: AutoModelMarkerEntry } | undefined {
   if (
-    tier !== "classifier"
-    || resolution.status !== "unresolved"
+    resolution.status !== "unresolved"
     || ownership.kind !== "owned"
     || ownership.marker.source !== "automatic"
   ) {
     return undefined
+  }
+  if (tier !== "classifier") {
+    return {
+      keepApplied: false,
+      marker: { ...ownership.marker, suspended: true },
+    }
   }
   const previous = state.models?.data.find(
     (model) => model.id === ownership.marker.id,
   )
   if (previous && !isClaudeCodeClassifierEligible(previous)) {
     return {
-      id: UNAVAILABLE_CLASSIFIER_MODEL,
-      source: "automatic",
-      ...(ownership.marker.claimed ? { claimed: true } : {}),
+      keepApplied: true,
+      marker: {
+        id: UNAVAILABLE_CLASSIFIER_MODEL,
+        source: "automatic",
+        ...(ownership.marker.claimed ? { claimed: true } : {}),
+      },
     }
   }
-  return ownership.marker
+  return { keepApplied: true, marker: ownership.marker }
 }
 
 function needsUnavailableClassifier(input: {
@@ -423,6 +450,31 @@ function needsUnavailableClassifier(input: {
     && input.tier === "classifier"
     && input.resolution.status === "unresolved"
   )
+}
+
+function applyAutomaticMarkerDuringGap(input: {
+  automaticMarker: { keepApplied: boolean; marker: AutoModelMarkerEntry }
+  context: AutoModelContext
+  key: string
+  outputEnv: Record<string, unknown>
+}): { env: Record<string, unknown>; marker: AutoModelMarkerEntry } {
+  if (input.automaticMarker.keepApplied) {
+    return {
+      env: {
+        ...input.outputEnv,
+        [input.key]: input.automaticMarker.marker.id,
+      },
+      marker: input.automaticMarker.marker,
+    }
+  }
+  return {
+    env: withRestoredField(
+      input.outputEnv,
+      input.key,
+      priorField(input.context.prior, input.key),
+    ),
+    marker: input.automaticMarker.marker,
+  }
 }
 
 function applyTier(input: {
@@ -480,13 +532,15 @@ function applyTier(input: {
     ownership,
   )
   if (automaticMarker) {
-    // A missing model stays pinned so the classifier fails closed and can resume
-    // if it returns. A still-cataloged but newly incompatible model becomes the
-    // explicit unavailable sentinel instead.
-    return {
-      env: { ...input.outputEnv, [key]: automaticMarker.id },
-      marker: automaticMarker,
-    }
+    // Alias mappings restore their prior values during a gap but retain a
+    // suspended marker for the next catalog. The classifier stays pinned so it
+    // fails closed; an incompatible cataloged model becomes the sentinel.
+    return applyAutomaticMarkerDuringGap({
+      automaticMarker,
+      context: input.context,
+      key,
+      outputEnv: input.outputEnv,
+    })
   }
   if (ownership.kind === "owned") {
     return {
@@ -543,14 +597,15 @@ export function resumeClaudeAutoModelSettings(input: {
     const suspended = journal.tiers[tier]
     if (!suspended) continue
     const key = TIER_KEYS[tier]
-    marker[tier] = suspended.marker
-    prior[key] = suspended.prior
-    if (
+    const resumesOwnership =
       suspended.ownership === "owned"
       && fieldMatchesSnapshot(env, key, suspended.prior)
-    ) {
-      env = { ...env, [key]: suspended.marker.id }
-    }
+    marker[tier] =
+      resumesOwnership ?
+        suspended.marker
+      : { ...suspended.marker, diverged: true }
+    prior[key] = suspended.prior
+    if (resumesOwnership) env = { ...env, [key]: suspended.marker.id }
   }
   return { env, marker, prior }
 }
@@ -607,7 +662,7 @@ export function mergeClaudeAutoModelSettings(input: {
       && ownership.diverged
       && context.marker[tier]
     ) {
-      marker[tier] = context.marker[tier]
+      marker[tier] = { ...context.marker[tier], diverged: true }
     }
   }
   return {
@@ -636,6 +691,13 @@ export function stripClaudeAutoModelSettings(input: {
     }
   }
   return env
+}
+
+export function hasClaudeAutoModelMarker(
+  settings: Record<string, unknown>,
+): boolean {
+  const marker = readMarker(settings)
+  return AUTO_MODEL_TIERS.some((tier) => marker[tier])
 }
 
 export function hasOwnedClaudeAutoModelSettings(
