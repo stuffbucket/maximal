@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.1](https://github.com/stuffbucket/maximal/compare/v0.5.0...v0.5.1) (2026-11-03)
+
+
+### Bug Fixes
+
+* **app:** persist Claude Auto model ownership ([#577](https://github.com/stuffbucket/maximal/issues/577)) ([2fd30d0](https://github.com/stuffbucket/maximal/commit/2fd30d0082740c48535a57d59784586d0aeee788))
+* **app:** redesign sessions list ([#575](https://github.com/stuffbucket/maximal/issues/575)) ([a15f996](https://github.com/stuffbucket/maximal/commit/a15f996e7d271775ac96d048c11bb5d93732e4ee))
+
 ## [0.5.0](https://github.com/stuffbucket/maximal/compare/v0.4.48...v0.5.0) (2026-11-02)
 
 
