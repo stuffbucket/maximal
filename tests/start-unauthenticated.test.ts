@@ -181,4 +181,12 @@ describe("start in unauthenticated mode", () => {
     const body = (await res.json()) as { error: string }
     expect(body.error).toBe("not_authenticated")
   })
+
+  test("GET /usage returns 401 not_authenticated", async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/usage`)
+    expect(res.status).toBe(401)
+    const body = (await res.json()) as { error: string; hint: string }
+    expect(body.error).toBe("not_authenticated")
+    expect(body.hint).toContain("Settings")
+  })
 })

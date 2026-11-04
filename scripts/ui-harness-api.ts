@@ -17,7 +17,11 @@
 import type { AuthStatus } from "../src/lib/config/settings-types"
 
 import { ClaudeAutoModelsUpdateRequest } from "../src/lib/config/settings-types"
-import { type ResolvedScenario, type ScenarioId, resolveScenario } from "./ui-harness-fixtures"
+import {
+  type ResolvedScenario,
+  type ScenarioId,
+  resolveScenario,
+} from "./ui-harness-fixtures"
 
 export interface MockBackend {
   readonly scenario: ScenarioId
@@ -79,18 +83,36 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
     const body = async (): Promise<any> => req.json().catch(() => ({}))
 
     // --- dashboard (/usage + /token-usage + /token-usage/sessions) ---
-    if (path === "/usage") return json(fixture.dashboard.usage)
+    if (path === "/usage") {
+      if (state.auth.state !== "authenticated") {
+        return json(
+          {
+            error: "not_authenticated",
+            hint: "Open Settings → Account to sign in, or run `maximal auth`.",
+          },
+          401,
+        )
+      }
+      return json(fixture.dashboard.usage)
+    }
     if (path === "/token-usage") return json(fixture.dashboard.tokenUsage)
     if (path === "/token-usage/sessions") {
       const delayMs = Math.max(0, Number(url.searchParams.get("delay_ms")) || 0)
-      if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs))
+      if (delayMs > 0)
+        await new Promise((resolve) => setTimeout(resolve, delayMs))
       return json(fixture.dashboard.sessions())
     }
     if (path === "/token-usage/events") {
-      const pageSize = Math.max(1, Number(url.searchParams.get("page_size")) || 20)
+      const pageSize = Math.max(
+        1,
+        Number(url.searchParams.get("page_size")) || 20,
+      )
       const events = fixture.dashboard.tokenEvents
       const totalPages = Math.max(1, Math.ceil(events.length / pageSize))
-      const page = Math.min(totalPages, Math.max(1, Number(url.searchParams.get("page")) || 1))
+      const page = Math.min(
+        totalPages,
+        Math.max(1, Number(url.searchParams.get("page")) || 1),
+      )
       return json({
         items: events.slice((page - 1) * pageSize, page * pageSize),
         page,
@@ -102,14 +124,18 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
 
     // --- reads ---
     if (path === "/settings/api/diagnostics") return json(fixture.diagnostics)
-    if (path === "/settings/api/update-status") return json(fixture.updateStatus)
+    if (path === "/settings/api/update-status")
+      return json(fixture.updateStatus)
     if (path === "/settings/api/auth/github/status") return json(state.auth)
     if (path === "/settings/api/accounts") return json(state.accounts)
-    if (path === "/settings/api/api-keys" && method === "GET") return json(state.apiKeys)
+    if (path === "/settings/api/api-keys" && method === "GET")
+      return json(state.apiKeys)
     if (path === "/settings/api/apps") return json(state.apps)
-    if (path === "/settings/api/models" && method === "GET") return json(state.models)
+    if (path === "/settings/api/models" && method === "GET")
+      return json(state.models)
     if (path === "/settings/api/mcp" && method === "GET") return json(state.mcp)
-    if (path === "/settings/api/requests" && method === "GET") return json(state.requests)
+    if (path === "/settings/api/requests" && method === "GET")
+      return json(state.requests)
     if (path === "/settings/api/requests/summary") {
       return json({
         pending: state.requests.requests.length,
@@ -141,7 +167,10 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
     }
 
     // --- apps toggles (flip enabled, echo the fresh entry) ---
-    const appToggle = /^\/settings\/api\/apps\/(claude-code|claude-desktop|codex)\/toggle$/.exec(path)
+    const appToggle =
+      /^\/settings\/api\/apps\/(claude-code|claude-desktop|codex)\/toggle$/.exec(
+        path,
+      )
     if (appToggle && method === "POST") {
       const app = state.apps.apps.find((a) => a.id === appToggle[1])
       if (!app) return json({ error: { message: "no such app" } }, 404)
@@ -154,15 +183,26 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
       const { catalogId } = await body()
       const item = state.mcp.available.find((a) => a.id === catalogId)
       if (!item) return json({ error: { message: "no such server" } }, 404)
-      if (item.status !== "ready") return json({ error: { message: "not installed" } }, 409)
+      if (item.status !== "ready")
+        return json({ error: { message: "not installed" } }, 409)
       const endpoint = {
         id: item.id,
         label: item.label,
         enabled: false,
         clients: [],
         offered: [
-          { id: "claude-code" as const, name: "Claude Code", available: true, configured: false },
-          { id: "claude-desktop" as const, name: "Claude Desktop", available: false, configured: false },
+          {
+            id: "claude-code" as const,
+            name: "Claude Code",
+            available: true,
+            configured: false,
+          },
+          {
+            id: "claude-desktop" as const,
+            name: "Claude Desktop",
+            available: false,
+            configured: false,
+          },
         ],
       }
       state.mcp.endpoints.push(endpoint)
@@ -175,9 +215,13 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
     if (requestAnswer && method === "POST") {
       const id = decodeURIComponent(requestAnswer[1])
       const before = state.requests.requests.length
-      state.requests.requests = state.requests.requests.filter((r) => r.id !== id)
+      state.requests.requests = state.requests.requests.filter(
+        (r) => r.id !== id,
+      )
       if (state.requests.requests.length === before) {
-        return new Response("This request is no longer waiting", { status: 404 })
+        return new Response("This request is no longer waiting", {
+          status: 404,
+        })
       }
       return json({ ok: true })
     }
@@ -187,7 +231,8 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
     if (mcpRemove && method === "DELETE") {
       const id = decodeURIComponent(mcpRemove[1])
       const endpoint = state.mcp.endpoints.find((e) => e.id === id)
-      if (!endpoint) return json({ error: { message: "no such endpoint" } }, 404)
+      if (!endpoint)
+        return json({ error: { message: "no such endpoint" } }, 404)
       state.mcp.endpoints = state.mcp.endpoints.filter((e) => e.id !== id)
       const removedFrom = endpoint.offered
         .filter((o) => o.configured)
@@ -200,20 +245,24 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
     if (mcpToggle && method === "POST") {
       const id = decodeURIComponent(mcpToggle[1])
       const endpoint = state.mcp.endpoints.find((e) => e.id === id)
-      if (!endpoint) return json({ error: { message: "no such endpoint" } }, 404)
+      if (!endpoint)
+        return json({ error: { message: "no such endpoint" } }, 404)
       const b = await body()
       endpoint.enabled = !!b.enabled
       if (Array.isArray(b.clients)) endpoint.clients = b.clients
       for (const offer of endpoint.offered) {
-        offer.configured = endpoint.enabled && endpoint.clients.includes(offer.id) && offer.available
+        offer.configured =
+          endpoint.enabled &&
+          endpoint.clients.includes(offer.id) &&
+          offer.available
       }
       return json({ endpoint, skipped: [] })
     }
 
     // --- Claude Code model settings ---
     if (
-      path === "/settings/api/models/claude-code-auto"
-      && method === "PATCH"
+      path === "/settings/api/models/claude-code-auto" &&
+      method === "PATCH"
     ) {
       const selection = ClaudeAutoModelsUpdateRequest.safeParse(await body())
       if (!selection.success) {
@@ -224,9 +273,9 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
         const configured = selection.data[tier]
         if (typeof configured === "string") {
           const options =
-            tier === "classifier" ?
-              state.models.claude_code_auto.classifier_options
-            : state.models.claude_code_auto.options
+            tier === "classifier"
+              ? state.models.claude_code_auto.classifier_options
+              : state.models.claude_code_auto.options
           const option = options.find(
             (candidate) => candidate.id === configured,
           )
@@ -288,16 +337,24 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
     }
 
     // --- account switch / remove / gh-use: echo ok (no real reboot) ---
-    if (path === "/settings/api/accounts/switch" || path === "/settings/api/gh/use") {
+    if (
+      path === "/settings/api/accounts/switch" ||
+      path === "/settings/api/gh/use"
+    ) {
       return json({ ok: true })
     }
     if (path === "/settings/api/accounts/remove" && method === "POST") {
       const b = await body()
-      state.accounts.accounts = state.accounts.accounts.filter((a) => a.key !== b.key)
+      state.accounts.accounts = state.accounts.accounts.filter(
+        (a) => a.key !== b.key,
+      )
       return json({ ok: true })
     }
 
-    return json({ error: { message: `harness: unhandled ${method} ${path}` } }, 404)
+    return json(
+      { error: { message: `harness: unhandled ${method} ${path}` } },
+      404,
+    )
   }
 
   return {

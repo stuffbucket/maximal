@@ -80,7 +80,16 @@ html[data-os="macos"] .topbar {
 
 .topbar__nav {
   min-width: 0;
-  flex: 1 1 auto;
+  flex: 1 1 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-inline-end: var(--space-4);
+  scroll-padding-inline-end: var(--space-4);
+  scrollbar-width: none;
+}
+
+.topbar__nav::-webkit-scrollbar {
+  display: none;
 }
 
 .topbar__nav[hidden] {
@@ -93,9 +102,13 @@ html[data-os="macos"] .topbar {
   padding: 0;
   display: flex;
   flex-direction: row;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: var(--space-1);
+}
+
+.nav > li {
+  flex: 0 0 auto;
 }
 
 .nav__item {
@@ -157,11 +170,14 @@ html[data-os="macos"] .topbar {
 
 /* ---- Right-side topbar utilities (surface switcher + language globe) ---- */
 .topbar__utilities {
+  position: relative;
+  z-index: 1;
   margin-inline-start: auto;
   display: flex;
   align-items: center;
   gap: var(--space-3);
   flex-shrink: 0;
+  background: var(--surface-card);
 }
 
 .topbar__divider {
@@ -259,6 +275,7 @@ html[data-os="macos"] .topbar {
   min-height: 0;
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: var(--space-7);
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--text-muted) 28%, transparent)
@@ -273,6 +290,7 @@ html[data-os="macos"] .topbar {
 
 .pane--dashboard {
   padding: 0;
+  align-items: stretch;
   gap: 0;
   overflow: hidden;
 }

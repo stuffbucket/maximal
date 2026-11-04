@@ -19,6 +19,14 @@ const SHELL_CARGO_TOML = readFileSync(
   resolve(REPO_ROOT, "shell/src-tauri/Cargo.toml"),
   "utf8",
 )
+const SETTINGS_STYLES = readFileSync(
+  resolve(REPO_ROOT, "shell/src/ui/styles/styles.css"),
+  "utf8",
+)
+const DASHBOARD_STYLES = readFileSync(
+  resolve(REPO_ROOT, "shell/ui/dashboard/style.css"),
+  "utf8",
+)
 
 describe("unified Settings, Dashboard, Sessions & Appearance contract", () => {
   test("uses a single topbar with Settings tabs and a three-surface switcher", () => {
@@ -79,14 +87,39 @@ describe("unified Settings, Dashboard, Sessions & Appearance contract", () => {
     expect(SHELL_CARGO_TOML).toContain('tauri-plugin-window-state = "2.5"')
     expect(SHELL_LIB_RS).toContain("MAIN_WINDOW_FALLBACK_WIDTH: f64 = 1100.0")
     expect(SHELL_LIB_RS).toContain("MAIN_WINDOW_FALLBACK_HEIGHT: f64 = 720.0")
+    expect(SHELL_LIB_RS).toContain("SETTINGS_SURFACE_MIN_WIDTH: f64 = 736.0")
+    expect(SHELL_LIB_RS).toContain("SETTINGS_SURFACE_MAX_WIDTH: f64 = 1100.0")
+    expect(SHELL_LIB_RS).not.toContain("MAIN_WINDOW_MAX_WIDTH")
+    expect(SHELL_LIB_RS).not.toContain("MAIN_WINDOW_MAX_HEIGHT")
+    expect(SHELL_LIB_RS).toContain("mod main_surface")
+    expect(SHELL_LIB_RS).toContain("fn main_window_constraints(surface: &str)")
+    expect(SHELL_LIB_RS).toContain(
+      "max_width: (surface == main_surface::SETTINGS)",
+    )
+    expect(SHELL_LIB_RS).toContain("max_height: None")
     expect(SHELL_LIB_RS).toContain(
       "StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED",
     )
     expect(SHELL_LIB_RS).toContain(
       ".with_filter(|label| label == SETTINGS_WINDOW_LABEL)",
     )
-    expect(SHELL_LIB_RS).toContain(".min_inner_size(640.0, 480.0)")
-    expect(SHELL_LIB_RS).toContain(".prevent_overflow()")
+    expect(SHELL_LIB_RS).toContain(".skip_initial_state(SETTINGS_WINDOW_LABEL)")
+    expect(SHELL_LIB_RS).toContain("fn restore_and_present_main_window")
+    expect(SHELL_LIB_RS).toContain("tauri::async_runtime::spawn_blocking")
+    expect(SHELL_LIB_RS).toContain(
+      "window_after_barrier.restore_state(main_window_state_flags())",
+    )
+    expect(SHELL_LIB_RS).toContain(
+      ".min_inner_size(main_window_min_width(surface), MAIN_WINDOW_MIN_HEIGHT)",
+    )
+    expect(SHELL_LIB_RS).toContain(".prevent_overflow_with_margin(")
+    expect(SHELL_LIB_RS).toContain(".center()")
+    expect(SHELL_LIB_RS).toContain(
+      "normalize_restored_main_window_geometry(&window_after_barrier)",
+    )
+    expect(SHELL_LIB_RS).toContain(
+      "apply_main_surface_constraints(&window_for_present, &surface)",
+    )
     expect(SHELL_LIB_RS).toContain(".visible(false)")
     expect(SHELL_LIB_RS).toContain("TitleBarStyle::Overlay")
     expect(SHELL_LIB_RS).toContain("DockVisibilityState")
@@ -96,5 +129,24 @@ describe("unified Settings, Dashboard, Sessions & Appearance contract", () => {
     expect(SHELL_LIB_RS).toContain("menu_id::SESSIONS")
     expect(SHELL_LIB_RS).toContain("open_sessions_window")
     expect(SHELL_LIB_RS).toContain("fn set_main_surface")
+    expect(SHELL_LIB_RS).toContain(
+      "apply_main_surface_constraints(&window, normalized)",
+    )
+  })
+
+  test("keeps bounded content responsive inside each native surface policy", () => {
+    expect(SETTINGS_STYLES).toContain("align-items: center")
+    expect(SETTINGS_STYLES).toContain("align-items: stretch")
+    expect(SETTINGS_STYLES).toContain("flex-wrap: nowrap")
+    expect(SETTINGS_STYLES).toContain("overflow-x: auto")
+    expect(SETTINGS_STYLES).toContain("flex: 1 1 0")
+    expect(SETTINGS_STYLES).toContain("padding-inline-end: var(--space-4)")
+    expect(SETTINGS_MAIN_TS).toContain(
+      'scrollIntoView({ block: "nearest", inline: "nearest" })',
+    )
+    expect(DASHBOARD_STYLES).toContain("width: 100%")
+    expect(DASHBOARD_STYLES).toContain("max-width: 1120px")
+    expect(DASHBOARD_STYLES).toContain("margin-inline: auto")
+    expect(DASHBOARD_STYLES).toContain("@media (max-width: 50em)")
   })
 })
