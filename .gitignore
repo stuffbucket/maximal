@@ -34,7 +34,10 @@ SBOM.cdx.json
 .opencode/package-lock.json
 # eslint cache
 .eslintcache
-.claude
+# Keep local Claude state ignored; project skills are shared configuration.
+.claude/*
+!.claude/skills/
+!.claude/skills/**
 # Playwright output (tests/e2e)
 test-results/
 playwright-report/
