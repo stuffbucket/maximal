@@ -398,19 +398,13 @@ merge gate. Steps, in order:
 3. Pinned Bun setup (`.github/actions/setup-bun`).
 4. **Check Conventional Commit subjects** — on pull requests, the PR title and
    every commit subject (`bun scripts/check-commit-msg.ts --subjects`).
-5. mise setup (`.github/actions/setup-mise`).
-6. Configure the package registry, then `bun install`.
-7. **Check pnpm lockfiles for rotating feed hosts**
+5. Configure the package registry, then `bun install`.
+6. **Check pnpm lockfiles for rotating feed hosts**
    (`bun scripts/strip-lockfile-hosts.ts --check`).
-8. Install the isolated broker's dependencies (`packages/mcp-broker`, via
-   mise + `pnpm install --frozen-lockfile`).
-9. **Check the isolated broker** — `pnpm typecheck`, `pnpm build`,
-   `pnpm test` against the built binary, and a `bun-windows-x64`
-   cross-compile (`pnpm build:target`).
-10. **`bun run lint:all`** (full-tree ESLint, `eslint --cache .`).
-11. **`bun run typecheck`** (`tsc`).
-12. **`bun test`** (full suite).
-13. **`bun run build`**.
+7. **`bun run lint:all`** (full-tree ESLint, `eslint --cache .`).
+8. **`bun run typecheck`** (`tsc`).
+9. **`bun test`** (full suite).
+10. **`bun run build`**.
 
 Security workflows (CodeQL, trufflehog) and, on release, the gated
 build/sign/publish pipeline (macOS dmg, Windows MSI verify, checksums, smoke)

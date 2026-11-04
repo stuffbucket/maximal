@@ -164,7 +164,6 @@ globalThis.fetch = (() =>
 const { freePort } = await import("./helpers/free-port")
 const { state } = await import("~/lib/runtime-state/state")
 const { runServer, start } = await import("~/start")
-const { stopBrokerSupervisor } = await import("~/lib/mcp-broker/supervisor")
 const { currentProxyPort, setListeningPort } =
   await import("~/lib/start/proxy-port")
 const { clearSessionRunning, runningSessionPort } =
@@ -562,10 +561,9 @@ describe("start.run — citty args → runServer options", () => {
 // mocks, so we re-`mock.module` each one back to the captured real
 // module reference.
 afterAll(async () => {
-  // runServer registered the process-wide broker supervisor and its port,
-  // and wrote the session sentinel (with that port) for this live process;
-  // clear all three so later files don't see them.
-  await stopBrokerSupervisor()
+  // runServer registered the process-wide listening port and wrote the
+  // session sentinel (with that port) for this live process; clear both so
+  // later files don't see them.
   setListeningPort(undefined)
   clearSessionRunning()
   globalThis.fetch = realFetch

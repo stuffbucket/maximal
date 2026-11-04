@@ -65,7 +65,7 @@ cp "$maximal_deb" "$work/"
 apt-get install -y -qq "$work/$(basename "$maximal_deb")" curl python3 >/dev/null
 [ "$(dpkg-query -W -f='${Version}' maximal)" = "$debver" ] ||
   fail "installed version is not $debver"
-for path in /usr/bin/maximal /usr/bin/maximal-mcp-broker \
+for path in /usr/bin/maximal \
   /usr/lib/systemd/user/maximal.service /usr/lib/maximal/installed-by-apt; do
   [ -e "$path" ] || fail "missing $path"
 done
@@ -76,13 +76,8 @@ reported="$(maximal --version)"
 echo "$reported"
 [[ "$reported" == *"$version"* ]] || fail "maximal --version did not print $version"
 
-step "Broker runs"
-set +e
-broker_out="$(maximal-mcp-broker 2>&1)"
-broker_exit=$?
-set -e
-[ "$broker_exit" -eq 2 ] || fail "broker exited $broker_exit, expected 2"
-[[ "$broker_out" == *USAGE* ]] || fail "broker printed no usage error"
+step "No MCP broker"
+[ ! -e /usr/bin/maximal-mcp-broker ] || fail "unexpected /usr/bin/maximal-mcp-broker"
 
 # A manifest naming a newer version on this build's channel.
 mkdir -p "$work/site/updates"

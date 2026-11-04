@@ -18,9 +18,9 @@ import { completionRoutes } from "./routes/chat-completions/route"
 import { debugRoutes } from "./routes/debug/route"
 import { embeddingRoutes } from "./routes/embeddings/route"
 import { internalRoutes } from "./routes/internal/route"
-import { mcpRoutes } from "./routes/mcp/route"
 import { messageRoutes } from "./routes/messages/route"
 import { modelRoutes } from "./routes/models/route"
+import { pluginMcpRoutes } from "./routes/plugins/mcp"
 import { providerMessageRoutes } from "./routes/provider/messages/route"
 import { providerModelRoutes } from "./routes/provider/models/route"
 import { responsesRoutes } from "./routes/responses/route"
@@ -73,7 +73,7 @@ server.use(
     ],
     // /ui/* serves the settings + dashboard UI shells and their assets.
     // /settings/api/* are data endpoints — gated by requireAuthPrefixes.
-    // /mcp/* applies endpoint keys or these same rules in its own route.
+    // /mcp/* (plugin MCP endpoints) applies these same rules in its own route.
     allowUnauthenticatedPrefixes: ["/ui", "/mcp"],
     requireAuthPrefixes: ["/settings/api"],
     // The dashboard at /ui/dashboard fetches these endpoints from the
@@ -138,9 +138,10 @@ server.route("/settings/api", settingsApiRoutes)
 // `/ui/*` serves the settings + dashboard UI (embedded in prod, from
 // shell/dist in dev). See src/routes/ui/route.ts.
 server.route("/ui", uiRoutes)
-// `/mcp/<id>` forwards to the isolated MCP broker. It authenticates itself
-// (endpoint key or the main-port rules) and needs no GitHub token.
-server.route("/mcp", mcpRoutes)
+// `/mcp/<plugin id>` serves a plugin's tools over MCP (Streamable HTTP). It
+// authenticates itself (the main-port rules, loopback only) and needs no
+// GitHub token.
+server.route("/mcp", pluginMcpRoutes.app)
 
 // Gate every upstream-touching route on the presence of a GitHub token.
 // When the sidecar boots without one, the HTTP server still listens (so

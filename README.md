@@ -30,7 +30,7 @@ src/                       Proxy source (request handlers, web-tools agent,
 tests/                     bun-test suites.
 shell/                     Tauri desktop app (menu-bar shell + settings and
                            dashboard UIs) that runs the proxy as a sidecar.
-packages/mcp-broker/       Isolated MCP broker process.
+parked/mcp/               Parked MCP broker integration (not built).
 packages/storybook/        Component sandbox for the shell UI.
 site/                      Marketing and download site (mxml.sh).
 build/                     Packaging inputs (Homebrew formula, Windows
@@ -96,10 +96,7 @@ brew update && brew upgrade maximal
 
 ### Work IQ
 
-See [the Work IQ guide](docs/workiq.md) for signing in from Settings, where
-Maximal writes Claude Desktop's config, logs, and admin approval. Linux needs
-extra setup: see [the Linux Work IQ guide](docs/linux-workiq.md). Optional Pi
-setup is documented [separately](docs/pi-workiq.md).
+Work IQ is a built-in plugin (Settings → Plugins). See [`docs/workiq.md`](docs/workiq.md).
 
 ## Run
 

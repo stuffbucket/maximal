@@ -245,8 +245,8 @@ describe("the real CodeQL config", () => {
     expect(isIgnored("tests/server.test.ts", ignore)).toBe(true)
     expect(isIgnored("src/server.ts", ignore)).toBe(false)
     expect(isIgnored("shell/src/main.ts", ignore)).toBe(false)
-    expect(isIgnored("packages/mcp-broker/src/broker-server.ts", ignore)).toBe(
-      false,
+    expect(isIgnored("parked/mcp/broker/src/broker-server.ts", ignore)).toBe(
+      true,
     )
   })
 

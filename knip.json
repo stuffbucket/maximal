@@ -1,29 +1,42 @@
 {
   "$schema": "https://unpkg.com/knip@5/schema.json",
-  "entry": [
-    "scripts/*.ts",
-    "scripts/dev/*.ts",
-    "shell/src/dashboard/live/flow-worker.ts",
-    "tests/**/*.test.ts"
-  ],
-  "project": [
-    "src/**/*.ts",
-    "scripts/**/*.ts",
-    "tests/**/*.ts"
-  ],
-  "ignoreDependencies": [
-    "prettier-plugin-packagejson",
-    "undici",
-    "@stryker-mutator/command-runner"
-  ],
+  "workspaces": {
+    ".": {
+      "entry": [
+        "scripts/*.ts",
+        "scripts/dev/*.ts",
+        "shell/src/dashboard/live/flow-worker.ts",
+        "tests/**/*.test.ts"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "scripts/**/*.ts",
+        "tests/**/*.ts"
+      ],
+      "ignoreDependencies": [
+        "prettier-plugin-packagejson",
+        "undici",
+        "@stryker-mutator/command-runner"
+      ],
+      "playwright": {
+        "entry": [
+          "tests/e2e/**/*.spec.ts"
+        ]
+      }
+    },
+    "packages/plugin-*": {
+      "entry": [
+        "test/**/*.test.ts"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "test/**/*.ts"
+      ]
+    }
+  },
   "ignoreBinaries": [
     "mise",
     "trufflehog"
   ],
-  "ignoreExportsUsedInFile": true,
-  "playwright": {
-    "entry": [
-      "tests/e2e/**/*.spec.ts"
-    ]
-  }
+  "ignoreExportsUsedInFile": true
 }

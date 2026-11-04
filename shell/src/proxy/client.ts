@@ -33,10 +33,6 @@ import type {
   ClaudeCodeInstallStatus,
   DiagnosticsResponse,
   ModelsListResponse,
-  PendingRequest,
-  PendingRequestAnswer,
-  PendingRequestField,
-  PendingRequestsResponse,
   UpdateStatusResponse,
   UpstreamRejection,
 } from "../../../src/lib/config/settings-types"
@@ -45,12 +41,6 @@ import type {
 // "./api" keep working. AuthStatus is owned by src/lib/settings-types
 // (ADR-0005/0006) — the shell does NOT redeclare it.
 export type { AuthStatus, ClaudeCodeInstallStatus, UpstreamRejection }
-export type {
-  PendingRequest,
-  PendingRequestAnswer,
-  PendingRequestField,
-  PendingRequestsResponse,
-}
 
 const TIMEOUT_MS = 5000
 
@@ -158,116 +148,82 @@ interface AppsListResponse {
 }
 
 /**
- * Brokered MCP endpoints (`/settings/api/mcp`). Mirrors
- * `McpEndpointEntry` and friends in `src/lib/config/settings-types.ts` by
- * name, like the Apps types above.
+ * Plugins (`/settings/api/plugins`). Mirrors `PluginSnapshot`/`PluginStatus`
+ * in packages/plugin-sdk/src/gateway.ts and the `PluginView` the Settings API
+ * returns, by name (the shell is its own project and does not import from
+ * packages/).
  */
-export type McpClientId = "claude-code" | "claude-desktop"
+export type PluginClientId = "claude-code"
 
-export interface McpClientOffer {
-  id: McpClientId
+export type PluginLifecycle = "disabled" | "starting" | "active" | "failed"
+
+export type PluginStatusState = "ready" | "needs-setup" | "working" | "error"
+
+/** A button the plugin asks Settings to show; dispatched to its action. */
+export interface PluginStatusAction {
+  id: string
+  /** English label from the plugin, rendered as-is. */
+  label: string
+  kind?: "primary" | "secondary" | "destructive"
+  /** When set, Settings asks for confirmation with this text first. */
+  confirm?: string
+}
+
+/** What the plugin says about itself. All text is the plugin's English. */
+export interface PluginStatus {
+  state: PluginStatusState
+  /** Machine code, e.g. "signin-needed". */
+  code: string
+  summary: string
+  detail?: string
+  facts?: Array<{ label: string; value: string }>
+  actions?: Array<PluginStatusAction>
+}
+
+export interface PluginToolAnnotations {
+  title?: string
+  readOnlyHint?: boolean
+  destructiveHint?: boolean
+  idempotentHint?: boolean
+  openWorldHint?: boolean
+}
+
+export interface PluginToolSummary {
   name: string
-  /** Maximal's integration for this client is on, so it can be offered. */
+  title?: string
+  description: string
+  annotations?: PluginToolAnnotations
+}
+
+export interface PluginClientView {
+  id: PluginClientId
+  /** The user's choice: register the plugin's MCP endpoint with this client. */
+  selected: boolean
+  /** Maximal can write to this client right now. */
   available: boolean
-  /** When not available, a more specific reason than "integration off":
-   *  Claude Desktop has another provider's gateway profile applied, or
-   *  Maximal found no Claude Code program it can run. */
-  unavailableReason?: "other-provider-profile" | "cli-missing"
-  /** Maximal currently has this endpoint written into the client. */
-  configured: boolean
+  /** English reason when `available` is false. */
+  reason?: string
 }
 
-export interface McpEndpointEntry {
+export interface PluginView {
   id: string
-  label: string
+  displayName: string
+  description: string
+  homepage?: string
   enabled: boolean
-  /** Remembered client choices, used to pre-check the prompt. */
-  clients: Array<McpClientId>
-  offered: Array<McpClientOffer>
-  /** Work IQ endpoints that are on: where its sign-in stands. */
-  workiq?: WorkIqStatus
+  lifecycle: PluginLifecycle
+  /** Why it failed (invalid config, apply threw). Only with `failed`. */
+  error?: string
+  status?: PluginStatus
+  /** Empty unless the plugin is active. */
+  tools: Array<PluginToolSummary>
+  clients: Array<PluginClientView>
+  /** The plugin's MCP endpoint URL on this Maximal. */
+  endpoint: string
 }
 
-/** Where Work IQ is (see WorkIqState in src/lib/config/settings-types.ts
- *  for what each state means). */
-export type WorkIqState =
-  | "not-installed"
-  | "eula-needed"
-  | "signin-needed"
-  | "starting"
-  | "ready"
-  | "consent-needed"
-
-export interface WorkIqStatus {
-  state: WorkIqState
-  eulaAccepted: boolean
-  signedInBefore: boolean
-  /** Sign-in uses the browser (`disableBrokeredAuth=true`). */
-  browserSignIn: boolean
-  /** On macOS the UI offers browser sign-in and mentions the keychain. */
-  macos: boolean
-  /** The sign-in Maximal runs: `waiting` for the user in the browser,
-   *  `restarting` Work IQ after; the rest say how the last one ended. */
-  signIn: "idle" | "waiting" | "restarting" | "failed" | "timed-out" | "cancelled"
-  /** The last line Work IQ wrote that reads like a problem. Server text. */
-  lastProblem: string | null
-}
-
-interface WorkIqActionResponse {
-  workiq: WorkIqStatus
-}
-
-/** The process that runs every MCP endpoint (see McpBrokerHealth in
- *  src/lib/config/settings-types.ts for what each state means). */
-export interface McpBrokerHealth {
-  state: "off" | "starting" | "running" | "recovering" | "stuck" | "unavailable"
-  problem: "not-installed" | "containment-unavailable" | null
-}
-
-/** A known MCP server Maximal looked for that isn't an endpoint yet. */
-export interface McpCatalogItem {
-  id: string
-  label: string
-  status: "ready" | "not-installed"
-  /** Absolute path of the executable Maximal found. */
-  command?: string
-  version?: string
-  /** `registry`: host the command downloads from; null when unconfirmed. */
-  install: { command: string; url: string; registry: string | null }
-}
-
-interface McpEndpointsListResponse {
-  endpoints: Array<McpEndpointEntry>
-  broker: McpBrokerHealth
-  /** Known servers to offer adding, installed or not. */
-  available: Array<McpCatalogItem>
-}
-
-interface McpEndpointAddResponse {
-  endpoint: McpEndpointEntry
-}
-
-export interface McpEndpointRemoveResponse {
-  /** Apps Maximal took this server's entry out of. */
-  removedFrom: Array<{ client: McpClientId; name: string }>
-}
-
-export interface McpEndpointToggleResponse {
-  endpoint: McpEndpointEntry
-  /** Clients that already had an entry with this name; left unchanged. */
-  skipped: Array<{ client: McpClientId; name: string }>
-  /** Clients Maximal couldn't add it to on this install, and why
-   *  (`adapter-missing`: maximal-mcp-broker wasn't found). */
-  unavailable: Array<{ client: McpClientId; name: string; reason: "adapter-missing" }>
-  /** Clients whose config Maximal changed for it (added or took it out). */
-  updated: Array<{ client: McpClientId; name: string }>
-  /** Where the broker got to before the apps were updated (see
-   *  McpBrokerReadiness in src/lib/config/settings-types.ts). */
-  broker: "ready" | "starting" | "failed" | "off" | "setup-needed"
-  /** The app whose own entry for this server the endpoint now runs. */
-  adoptedFrom?: string
-  /** Environment names from that entry that were not copied. */
-  droppedEnvironment?: Array<string>
+export interface PluginsListResponse {
+  plugins: Array<PluginView>
 }
 
 /** Endpoint catalog — adding a new call means adding a member here
@@ -407,55 +363,6 @@ type Endpoint =
       body: { enabled: boolean }
     }
   | {
-      kind: "mcp-list"
-      method: "GET"
-      path: "/settings/api/mcp"
-    }
-  | {
-      kind: "mcp-toggle"
-      method: "POST"
-      path: `/settings/api/mcp/${string}`
-      body: { enabled: boolean; clients?: Array<McpClientId> }
-    }
-  | {
-      kind: "mcp-add"
-      method: "POST"
-      path: "/settings/api/mcp"
-      body: { catalogId: string }
-    }
-  | {
-      kind: "mcp-remove"
-      method: "DELETE"
-      path: `/settings/api/mcp/${string}`
-    }
-  | {
-      kind: "mcp-workiq-accept-eula"
-      method: "POST"
-      path: `/settings/api/mcp/${string}/workiq/accept-eula`
-    }
-  | {
-      kind: "mcp-workiq-sign-in"
-      method: "POST"
-      path: `/settings/api/mcp/${string}/workiq/sign-in`
-      body: { useBrowserSignIn: boolean }
-    }
-  | {
-      kind: "mcp-workiq-cancel-sign-in"
-      method: "DELETE"
-      path: `/settings/api/mcp/${string}/workiq/sign-in`
-    }
-  | {
-      kind: "requests-list"
-      method: "GET"
-      path: "/settings/api/requests"
-    }
-  | {
-      kind: "requests-answer"
-      method: "POST"
-      path: `/settings/api/requests/${string}`
-      body: PendingRequestAnswer
-    }
-  | {
       kind: "claude-code-install-status"
       method: "GET"
       path: "/settings/api/apps/claude-code/install"
@@ -471,6 +378,22 @@ type Endpoint =
       method: "POST"
       path: "/settings/api/apps/codex/toggle"
       body: { enabled: boolean }
+    }
+  | {
+      kind: "plugins-list"
+      method: "GET"
+      path: "/settings/api/plugins"
+    }
+  | {
+      kind: "plugins-update"
+      method: "PATCH"
+      path: `/settings/api/plugins/${string}`
+      body: { enabled?: boolean; clients?: Array<PluginClientId> }
+    }
+  | {
+      kind: "plugins-action"
+      method: "POST"
+      path: `/settings/api/plugins/${string}/actions/${string}`
     }
 
 type EndpointKind = Endpoint["kind"]
@@ -498,17 +421,11 @@ interface ResponseFor {
   "claude-code-toggle": AppEntry
   "claude-desktop-toggle": AppEntry
   "codex-toggle": AppEntry
+  "plugins-list": PluginsListResponse
+  "plugins-update": PluginView
+  "plugins-action": { ok: true }
   "claude-code-install-status": ClaudeCodeInstallStatus
   "claude-code-install-start": ClaudeCodeInstallStatus
-  "mcp-list": McpEndpointsListResponse
-  "mcp-toggle": McpEndpointToggleResponse
-  "mcp-add": McpEndpointAddResponse
-  "mcp-remove": McpEndpointRemoveResponse
-  "mcp-workiq-accept-eula": WorkIqActionResponse
-  "mcp-workiq-sign-in": WorkIqActionResponse
-  "mcp-workiq-cancel-sign-in": WorkIqActionResponse
-  "requests-list": PendingRequestsResponse
-  "requests-answer": { ok: true }
   "models-list": ModelsListResponse
   "models-refresh": ModelsListResponse
   "models-auto-update": ModelsListResponse
@@ -656,28 +573,53 @@ export async function subscribeAuthEvents(handlers: {
 }
 
 /**
- * Subscribe to `requests.changed` on the same stream: MCP servers' requests
- * waiting for an answer, the same shape as GET /settings/api/requests. A
- * separate EventSource keeps each surface's subscription independent; the
- * sidecar sends every event on every connection.
+ * Subscribe to `plugins.changed` on the same stream: a plugin's lifecycle,
+ * status or tool list changed. The frame is only a nudge; the listener
+ * refetches GET /settings/api/plugins. `onOpen` fires on every (re)connect so
+ * the caller can resync what it missed while the stream was down.
  */
-export async function subscribeRequestEvents(handlers: {
-  onRequests: (requests: PendingRequestsResponse) => void
+export async function subscribePluginEvents(handlers: {
+  onChanged: () => void
+  onOpen?: () => void
   onError?: () => void
 }): Promise<EventSubscription> {
   const apiKey = await resolveApiKey()
   const query = apiKey ? `?key=${encodeURIComponent(apiKey)}` : ""
   const source = new EventSource(`${baseUrl()}/settings/api/events${query}`)
 
+  source.addEventListener("open", () => handlers.onOpen?.())
   source.addEventListener("error", () => handlers.onError?.())
-  source.addEventListener("requests.changed", (event) => {
-    const message = event as MessageEvent<string>
-    try {
-      handlers.onRequests(JSON.parse(message.data) as PendingRequestsResponse)
-    } catch {
-      // Malformed frame: drop it; the next event or a GET resyncs.
-    }
-  })
+  source.addEventListener("plugins.changed", () => handlers.onChanged())
 
   return { close: () => source.close() }
+}
+
+export function listPlugins(): Promise<ApiResult<PluginsListResponse>> {
+  return apiCall({ kind: "plugins-list", method: "GET", path: "/settings/api/plugins" })
+}
+
+/** Turn a plugin on/off and/or choose the clients it is registered with. */
+export function updatePlugin(
+  id: string,
+  body: { enabled?: boolean; clients?: Array<PluginClientId> },
+): Promise<ApiResult<PluginView>> {
+  return apiCall({
+    kind: "plugins-update",
+    method: "PATCH",
+    path: `/settings/api/plugins/${encodeURIComponent(id)}`,
+    body,
+  })
+}
+
+/** Start one of the plugin's status actions. Answers 202 at once; how it
+ *  goes (sign-in can take minutes) arrives through `plugins.changed`. */
+export function runPluginAction(
+  id: string,
+  actionId: string,
+): Promise<ApiResult<{ ok: true }>> {
+  return apiCall({
+    kind: "plugins-action",
+    method: "POST",
+    path: `/settings/api/plugins/${encodeURIComponent(id)}/actions/${encodeURIComponent(actionId)}`,
+  })
 }

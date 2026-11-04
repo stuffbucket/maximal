@@ -17,12 +17,17 @@ import type {
   AppsListResponse,
   AuthStatus,
   DiagnosticsResponse,
-  McpEndpointsListResponse,
   ModelsListResponse,
-  PendingRequestsResponse,
   UpdateStatusResponse,
 } from "../src/lib/config/settings-types"
 import type { SessionView, SessionsResponse } from "../src/lib/token-usage/sessions-schema"
+import type {
+  PluginStatus,
+  PluginView,
+  PluginsListResponse,
+} from "../src/lib/config/settings-types"
+
+type PluginToolSummary = PluginView["tools"][number]
 
 // gh-status isn't a settings-types export (it's typed in shell/src/proxy/client.ts),
 // so it's a plain shape here. installed:false hides the gh-reuse list.
@@ -101,9 +106,7 @@ export interface Scenario {
   updateStatus: UpdateStatusResponse
   ghStatus: GhStatusFixture
   /** Optional on each scenario; `resolveScenario` fills the shared default. */
-  mcp?: McpEndpointsListResponse
-  /** MCP servers' requests waiting for an answer (Settings → Requests). */
-  requests?: PendingRequestsResponse
+  plugins?: PluginsListResponse
   clients?: ActiveClientsFixture
   dashboard?: DashboardFixture
 }
@@ -369,53 +372,159 @@ const ghAvailable: GhStatusFixture = {
   ],
 }
 
-const workiqFound: McpEndpointsListResponse["available"][number] = {
-  id: "workiq",
-  label: "Work IQ",
-  status: "ready",
-  command:
-    "/Users/alex/.local/share/mise/installs/npm-microsoft-workiq/1.0.1/node_modules/@microsoft/workiq/bin/osx-arm64/workiq",
-  version: "1.0.1",
-  install: {
-    command: "npm install -g @microsoft/workiq@1",
-    url: "https://www.npmjs.com/package/@microsoft/workiq",
-    registry: "registry.npmjs.org",
+// ---- plugins ----------------------------------------------------------------
+// Work IQ is the first plugin. Its status text is the plugin's own English
+// (the UI renders it as written); the mock API (ui-harness-api.ts) walks a
+// plugin through these stages as the user accepts terms, signs in and out.
+export type WorkiqStage = "terms-needed" | "signin-needed" | "working" | "ready" | "error"
+
+export const WORKIQ_CONSENT_URL =
+  "https://github.com/microsoft/work-iq/blob/main/ADMIN-INSTRUCTIONS.md"
+
+export const workiqTools: Array<PluginToolSummary> = [
+  {
+    name: "search_mail",
+    title: "Search mail",
+    description: "Search your Outlook mail by sender, subject, date or words in the message.",
+    annotations: { readOnlyHint: true },
   },
+  {
+    name: "find_meetings",
+    description: "List meetings on your calendar, with who is invited and what they are about.",
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: "summarize_file",
+    description:
+      "Read a document, slide deck or spreadsheet from OneDrive or SharePoint and summarize what changed since you last opened it, with the people who edited it and when they did.",
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  },
+  {
+    name: "send_chat_message",
+    description: "Send a Teams chat message to a person or channel on your behalf.",
+    annotations: { destructiveHint: true },
+  },
+  {
+    name: "get_debug_link",
+    description: "Create a link support can use to see this conversation's diagnostic details.",
+  },
+]
+
+export function workiqStatus(stage: WorkiqStage): PluginStatus {
+  switch (stage) {
+    case "terms-needed":
+      return {
+        state: "needs-setup",
+        code: "terms-needed",
+        summary: "Accept Microsoft’s Work IQ terms to continue",
+        detail:
+          "Work IQ reads your Microsoft 365 work data (mail, meetings, files) on your behalf. Read Microsoft’s terms at https://github.com/microsoft/work-iq, then accept them here.",
+        actions: [
+          {
+            id: "accept-terms",
+            label: "Accept terms",
+            kind: "primary",
+            confirm: "Record that you accept Microsoft’s terms for Work IQ (https://github.com/microsoft/work-iq)?",
+          },
+        ],
+      }
+    case "signin-needed":
+      return {
+        state: "needs-setup",
+        code: "signin-needed",
+        summary: "Sign in to Work IQ",
+        detail:
+          "Sign in with your Microsoft 365 work account. A browser window opens to finish; Maximal never sees your password.",
+        actions: [{ id: "sign-in", label: "Sign in", kind: "primary" }],
+      }
+    case "working":
+      return {
+        state: "working",
+        code: "signing-in",
+        summary: "Waiting for you to finish signing in…",
+        detail: "Finish signing in in your browser. Maximal waits up to five minutes.",
+        actions: [{ id: "cancel-sign-in", label: "Cancel sign-in", kind: "secondary" }],
+      }
+    case "ready":
+      return {
+        state: "ready",
+        code: "ready",
+        summary: "Signed in and ready",
+        facts: [
+          { label: "Account", value: "alex.rivera@contoso.com" },
+          { label: "Tenant", value: "Contoso Ltd" },
+          { label: "Tools", value: String(workiqTools.length) },
+        ],
+        actions: [
+          {
+            id: "sign-out",
+            label: "Sign out",
+            kind: "destructive",
+            confirm: "Sign out of Work IQ? Maximal removes the saved sign-in from this computer.",
+          },
+        ],
+      }
+    case "error":
+      return {
+        state: "error",
+        code: "consent-needed",
+        summary: "Your organization hasn’t approved Work IQ yet",
+        detail:
+          "An admin must grant consent for the Work IQ app, and your account needs a Microsoft 365 Copilot license. Send your admin " +
+          WORKIQ_CONSENT_URL,
+        facts: [{ label: "Account", value: "alex.rivera@contoso.com" }],
+        actions: [
+          { id: "sign-in", label: "Sign in again", kind: "secondary" },
+          { id: "sign-out", label: "Sign out", kind: "destructive", confirm: "Sign out of Work IQ?" },
+        ],
+      }
+  }
 }
 
-/** Work IQ as npm installs it on Windows: a long path with no spaces. */
-const workiqFoundWindows: McpEndpointsListResponse["available"][number] = {
-  ...workiqFound,
-  command:
-    String.raw`C:\Users\Administrator\AppData\Roaming\npm\node_modules\@microsoft\workiq\bin\win-x64\workiq.exe`,
+interface WorkiqOptions {
+  /** Off when omitted. */
+  stage?: WorkiqStage
+  /** On, but it didn't start: `error` says why. */
+  failed?: string
+  /** Claude Code integration is off in Apps, so it can't be offered. */
+  claudeCodeUnavailable?: boolean
+  /** Whether Claude Code is ticked. */
+  selected?: boolean
 }
 
-const twoMcpEndpoints: McpEndpointsListResponse = {
-  broker: { state: "running", problem: null },
-  available: [],
-  endpoints: [
-    {
-      id: "workiq",
-      label: "Work IQ",
-      enabled: true,
-      clients: ["claude-code"],
-      offered: [
-        { id: "claude-code", name: "Claude Code", available: true, configured: true },
-        { id: "claude-desktop", name: "Claude Desktop", available: false, configured: false },
-      ],
-    },
-    {
-      id: "github",
-      label: "GitHub",
-      enabled: false,
-      clients: [],
-      offered: [
-        { id: "claude-code", name: "Claude Code", available: true, configured: false },
-        { id: "claude-desktop", name: "Claude Desktop", available: false, configured: false },
-      ],
-    },
-  ],
+export function workiqView({
+  stage,
+  failed,
+  claudeCodeUnavailable = false,
+  selected = true,
+}: WorkiqOptions = {}): PluginView {
+  const enabled = stage !== undefined || failed !== undefined
+  return {
+    id: "workiq",
+    displayName: "Work IQ",
+    description:
+      "Lets your apps ask about your Microsoft 365 work: mail, meetings, files and people.",
+    homepage: "https://github.com/microsoft/work-iq",
+    enabled,
+    lifecycle: failed !== undefined ? "failed" : stage ? "active" : "disabled",
+    ...(failed !== undefined ? { error: failed } : {}),
+    ...(stage ? { status: workiqStatus(stage) } : {}),
+    tools: stage === "ready" ? workiqTools : [],
+    clients: [
+      {
+        id: "claude-code",
+        selected: enabled && selected,
+        available: !claudeCodeUnavailable,
+        ...(claudeCodeUnavailable
+          ? { reason: "Claude Code isn’t routed through Maximal. Turn it on in Apps to add Work IQ to it." }
+          : {}),
+      },
+    ],
+    endpoint: "http://localhost:4141/mcp/workiq",
+  }
 }
+
+const noPluginsOn: PluginsListResponse = { plugins: [workiqView()] }
 
 const recentClients: ActiveClientsFixture = {
   clients: [
@@ -841,52 +950,6 @@ function healthy(label: string): Scenario {
 }
 
 // ---- the scenarios ---------------------------------------------------------
-// Relative to now (not ISO()), so "time left" reads naturally in the harness.
-const inMinutes = (minutes: number): string =>
-  new Date(Date.now() + minutes * 60_000).toISOString()
-
-const waitingRequests: PendingRequestsResponse = {
-  requests: [
-    {
-      id: "elicit-form",
-      endpointId: "workiq",
-      label: "Work IQ",
-      toolName: "get_debug_link",
-      mode: "form",
-      message:
-        "Create a shareable debug link for this conversation? Anyone with the link can see the conversation's diagnostic details for 7 days.",
-      fields: [
-        { name: "confirmed", kind: "boolean", title: "Create the link", required: true },
-        {
-          name: "audience",
-          kind: "enum",
-          title: "Who can open it",
-          required: true,
-          options: [
-            { value: "org", label: "People in my organization" },
-            { value: "me", label: "Only me" },
-          ],
-        },
-        { name: "note", kind: "string", title: "Note for support", required: false, maxLength: 200 },
-      ],
-      receivedAt: inMinutes(-1),
-      expiresAt: inMinutes(4),
-    },
-    {
-      id: "elicit-url",
-      endpointId: "workiq",
-      label: "Work IQ",
-      mode: "url",
-      message: "Sign in to Microsoft 365 to let Work IQ read your calendar.",
-      fields: [],
-      url: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=example",
-      urlHost: "login.microsoftonline.com",
-      receivedAt: inMinutes(0),
-      expiresAt: inMinutes(5),
-    },
-  ],
-}
-
 export const SCENARIOS = {
   "signed-in": {
     label: "Signed in · healthy",
@@ -1140,7 +1203,6 @@ export const SCENARIOS = {
     diagnostics: baseDiagnostics,
     updateStatus: upToDate,
     ghStatus: ghAvailable,
-    mcp: { endpoints: [], broker: { state: "off", problem: null }, available: [] },
     clients: { clients: [], total: 0 },
     dashboard: emptyDashboard,
   },
@@ -1173,89 +1235,48 @@ export const SCENARIOS = {
     dashboard: { ...busyDashboard, sessions: liveSessions },
   },
 
-  "mcp-recovering": {
-    ...healthy("MCP · broker stopped, Maximal restarting it"),
-    mcp: { ...twoMcpEndpoints, broker: { state: "recovering", problem: null } },
+  "plugins-off": {
+    ...healthy("Plugins · nothing turned on"),
+    plugins: noPluginsOn,
   },
 
-  "mcp-stuck": {
-    ...healthy("MCP · broker keeps crashing (retries paused)"),
-    mcp: { ...twoMcpEndpoints, broker: { state: "stuck", problem: null } },
+  "plugins-terms-needed": {
+    ...healthy("Plugins · Work IQ on, Microsoft’s terms to accept"),
+    plugins: { plugins: [workiqView({ stage: "terms-needed" })] },
   },
 
-  "mcp-not-installed": {
-    ...healthy("MCP · broker missing from this install"),
-    mcp: { ...twoMcpEndpoints, broker: { state: "unavailable", problem: "not-installed" } },
+  "plugins-signin-needed": {
+    ...healthy("Plugins · Work IQ on, signing in is next"),
+    plugins: { plugins: [workiqView({ stage: "signin-needed" })] },
   },
 
-  "mcp-containment-unavailable": {
-    ...healthy("MCP · Windows refused the job that contains the servers"),
-    mcp: {
-      ...twoMcpEndpoints,
-      broker: { state: "unavailable", problem: "containment-unavailable" },
+  "plugins-working": {
+    ...healthy("Plugins · Work IQ waiting for the browser sign-in"),
+    plugins: { plugins: [workiqView({ stage: "working" })] },
+  },
+
+  "plugins-ready": {
+    ...healthy("Plugins · Work IQ ready, with its tools"),
+    plugins: { plugins: [workiqView({ stage: "ready" })] },
+  },
+
+  "plugins-error": {
+    ...healthy("Plugins · Work IQ signed in, but the organization hasn’t approved it"),
+    plugins: { plugins: [workiqView({ stage: "error" })] },
+  },
+
+  "plugins-failed": {
+    ...healthy("Plugins · Work IQ didn’t start (invalid settings)"),
+    plugins: {
+      plugins: [workiqView({ failed: "plugins.workiq.config.endpoint: Invalid URL. Expected an https address." })],
     },
   },
 
-  "requests-waiting": {
-    ...healthy("Requests · a form and a link waiting for an answer"),
-    requests: waitingRequests,
+  "plugins-claude-code-off": {
+    ...healthy("Plugins · Work IQ ready, Claude Code isn’t set up in Apps"),
+    plugins: { plugins: [workiqView({ stage: "ready", claudeCodeUnavailable: true })] },
   },
 
-  "mcp-found": {
-    ...healthy("MCP · nothing added yet, Work IQ found on this machine"),
-    mcp: { endpoints: [], broker: { state: "off", problem: null }, available: [workiqFound] },
-  },
-
-  "mcp-windows": {
-    ...healthy("MCP · Windows: a long server path, and Claude Code off in Apps"),
-    mcp: {
-      broker: { state: "running", problem: null },
-      available: [workiqFoundWindows],
-      endpoints: [
-        {
-          id: "everything",
-          label: "Everything",
-          enabled: true,
-          clients: ["claude-desktop"],
-          offered: [
-            { id: "claude-code", name: "Claude Code", available: false, configured: false },
-            { id: "claude-desktop", name: "Claude Desktop", available: true, configured: true },
-          ],
-        },
-      ],
-    },
-  },
-
-  "mcp-catalog-missing": {
-    ...healthy("MCP · nothing added yet, Work IQ not installed"),
-    mcp: {
-      endpoints: [],
-      broker: { state: "off", problem: null },
-      available: [
-        { id: "workiq", label: "Work IQ", status: "not-installed", install: workiqFound.install },
-      ],
-    },
-  },
-
-  "mcp-catalog-mirror": {
-    ...healthy("MCP · Work IQ not installed, npm set to another registry"),
-    mcp: {
-      endpoints: [],
-      broker: { state: "off", problem: null },
-      available: [
-        {
-          id: "workiq",
-          label: "Work IQ",
-          status: "not-installed",
-          install: {
-            ...workiqFound.install,
-            command: "npm install -g @microsoft/workiq@1 --registry https://npm.example.test/",
-            registry: "npm.example.test",
-          },
-        },
-      ],
-    },
-  },
 } satisfies Record<string, Scenario>
 
 export type ScenarioId = keyof typeof SCENARIOS
@@ -1266,8 +1287,7 @@ export function resolveScenario(id: ScenarioId): ResolvedScenario {
   const s: Scenario = SCENARIOS[id]
   return {
     ...s,
-    mcp: s.mcp ?? twoMcpEndpoints,
-    requests: s.requests ?? { requests: [] },
+    plugins: s.plugins ?? noPluginsOn,
     clients: s.clients ?? recentClients,
     dashboard: s.dashboard ?? busyDashboard,
   }

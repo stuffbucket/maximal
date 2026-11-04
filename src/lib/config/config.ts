@@ -1,7 +1,7 @@
+import type { PluginSettings } from "@stuffbucket/maximal-plugin-sdk/gateway"
+
 import consola from "consola"
 import fs from "node:fs"
-
-import type { McpBrokerConfig } from "~/lib/mcp-broker/types"
 
 import {
   ConfigValidationError,
@@ -10,17 +10,6 @@ import {
 } from "~/lib/config/config-schema"
 import { parseJsonText } from "~/lib/platform/json-text"
 import { PATHS } from "~/lib/platform/paths"
-
-export type {
-  McpBrokerConfig,
-  McpElicitationAction,
-  McpElicitationMechanism,
-  McpElicitationRule,
-  McpInteractionMode,
-  McpOwnershipMode,
-  McpProtocolMode,
-  McpServerConfig,
-} from "~/lib/mcp-broker/types"
 
 export interface ApiKeyEntry {
   id: string
@@ -89,7 +78,11 @@ export interface AppConfig {
   checkUpdates?: boolean
   editorVersion?: string
   apps?: AppsConfig
-  mcpBroker?: McpBrokerConfig
+  /** Built-in plugins by id: on/off, plugin config, client connections. */
+  plugins?: PluginSettings
+  /** The parked MCP broker's config (`parked/mcp`). Accepted and preserved,
+   *  never interpreted by the build. */
+  mcpBroker?: unknown
 }
 
 export interface AppsConfig {

@@ -1,120 +1,81 @@
 # Work IQ
 
-Work IQ (`@microsoft/workiq`) is Microsoft's MCP server for Microsoft 365
-Copilot data. Maximal finds an installed copy, runs it behind its MCP broker,
-and adds it to Claude Code and Claude Desktop. Maximal does not install Work IQ
-or own its Microsoft sign-in. Linux needs extra setup: see
-[Work IQ on Linux](linux-workiq.md).
+Work IQ is Microsoft's Microsoft 365 Copilot service for asking about your
+work: email, meetings, chats, files and people. Maximal includes it as a
+built-in plugin. It connects straight to Microsoft's hosted Work IQ MCP
+service (`https://workiq.svc.cloud.microsoft/mcp`) with its own Microsoft
+sign-in; nothing else needs installing, and no `workiq` program runs.
 
-## Set it up from Settings
+## Requirements
 
-Open Settings → Integrations → MCP servers and turn Work IQ on. The card shows
-where setup stands and the next step. Maximal runs a Work IQ command only after
-you confirm it in a dialog that names the command.
+- A **work or school** Microsoft account. Personal Microsoft accounts are not
+  supported.
+- Your organization must allow the Work IQ app: a Microsoft Entra admin
+  grants tenant-wide **admin consent** to the Work IQ app
+  (`ba081686-5d24-4bc6-a0d6-d034ecffed87`). Without it, sign-in or the first
+  request fails with "Your organization has not approved Work IQ".
+- Your account needs a **licence** that includes Work IQ (Microsoft 365
+  Copilot). Without one, Work IQ answers "not licensed".
+- A desktop session with a browser for sign-in.
 
-1. **Review terms.** Work IQ does nothing until you accept
-   [Microsoft's terms](https://github.com/microsoft/work-iq). Confirming runs
-   `workiq accept-eula`.
-2. **Sign in.** Confirming runs `workiq auth login`, which opens a Microsoft
-   sign-in page. Maximal waits up to 5 minutes; **Cancel sign-in** stops it.
-   After a sign-in, Maximal restarts its MCP servers (open MCP sessions end)
-   and checks that Work IQ now lists its Microsoft 365 tools, such as `fetch`,
-   `get_schema` and `search_paths`.
-3. **Ready**, or **Your organization needs to approve Work IQ**: see
-   [Signed in, but it still doesn't work](#signed-in-but-it-still-doesnt-work).
+## Turn it on
 
-Maximal doesn't start Work IQ until the first two steps are done, even while
-it's turned on. Until then your apps can't use it yet: Claude Code reports it
-as failed, and the adapter Claude Desktop runs gets "setup needed" from
-Maximal. If you accept the terms or sign in from Terminal instead, Maximal
-notices the next time Settings shows the card.
+1. Open Settings → **Plugins** and switch **Work IQ** on.
+2. **Accept terms.** Read Microsoft's Work IQ terms
+   ([github.com/microsoft/work-iq](https://github.com/microsoft/work-iq)) and
+   choose *Accept terms*. Maximal records the acceptance in its own data and
+   doesn't ask again.
+3. **Sign in.** Choose *Sign in*. Your browser opens Microsoft's sign-in page;
+   finish there and return to Settings. The status changes to *Connected as
+   …* with your account, tenant and the number of tools Work IQ offers.
 
-### On macOS
+Until all three are done Work IQ offers no tools, and its status says what is
+missing. If something goes wrong (consent, licence, network, Work IQ busy) the
+status explains it in plain English with *Try again*, and *Sign in with
+another account* when the problem is the account.
 
-The sign-in dialog offers **Use browser sign-in**. Checking it runs
-`workiq config set disableBrokeredAuth=true` before signing in, so Work IQ signs
-in through your browser instead of the macOS sign-in broker. Microsoft's
-[MSAL macOS broker documentation](https://learn.microsoft.com/en-us/entra/msal/dotnet/acquiring-tokens/desktop-mobile/macos-broker-dotnet-sdk)
-says the broker blocks requests from signed executables that are not bundled
-apps, and `workiq` is one. Work IQ issues
-[#87](https://github.com/microsoft/work-iq/issues/87) and
-[#116](https://github.com/microsoft/work-iq/issues/116) describe repeated
-sign-in windows and sign-ins that don't last across restarts. To go back to the
-broker, run `workiq config unset disableBrokeredAuth`.
+Maximal keeps the sign-in in its data directory (`<app dir>/plugins/workiq/`,
+readable only by you) and refreshes it silently. *Sign out* deletes it.
+Turning the plugin off stops it and removes its tools but keeps the sign-in
+and the accepted terms.
 
-macOS may ask for your Mac password so Work IQ can save its sign-in to your
-keychain. Choose **Always Allow**. **Allow** works once, so you would be asked
-again each time Work IQ starts.
+## Use it from Claude Code
 
-### On Windows
+Under Work IQ in Settings → Plugins, tick **Claude Code**. Maximal then
+registers Work IQ with Claude Code (user scope, in `~/.claude.json`) as an
+HTTP MCP server named `workiq` at `http://127.0.0.1:<port>/mcp/workiq`, using
+your Claude Code key. Its tools appear in Claude Code as `mcp__workiq__<tool>`.
 
-Signing in opens Windows' own Microsoft account window.
+- The Claude Code integration (Settings → Apps) must be on, and Maximal
+  must find a `claude` program it can run; otherwise the box is unavailable
+  and says why.
+- The entry exists while Maximal runs: Maximal removes it when it quits and
+  adds it back when it starts, so a Claude Code session started while Maximal
+  is stopped doesn't see a dead server. Start a new Claude Code session after
+  turning Work IQ on.
+- An existing `workiq` entry of your own is left alone, and Maximal doesn't
+  add its own.
 
-On a Windows PC with an Arm processor, Maximal runs Work IQ's Arm build
-(`bin\win-arm64\workiq.exe` in the npm package), even though Maximal itself is
-an x64 app that Windows runs under emulation. Work IQ's x64 build under
-emulation couldn't sign in when we tested it: its sign-in window crashed
-(`msalruntime.dll` in a `DllHost` process), and Work IQ then reported
-`0x80049d59` and offered none of its Microsoft 365 tools. That is a problem in
-Work IQ, not in Maximal. Maximal falls back to the x64 build only when the
-package has no Arm build.
+Any other MCP client on this machine can use the same URL with Maximal's API
+key (`Authorization: Bearer <key>` or `x-api-key`), when keys are required.
+The endpoint answers only on loopback and refuses browser pages from other
+origins. A Work IQ tool that needs an answer from you asks through the client
+(MCP elicitation) when the client supports it.
 
-## Questions
+## Settings file
 
-### Where does Maximal put Work IQ for Claude Desktop?
+Settings → Plugins writes `config.json` → `plugins.workiq`:
 
-In Claude Desktop's third-party config, as an `mcpServers` entry named after
-the endpoint (`workiq`):
-
-- macOS: `~/Library/Application Support/Claude-3p/claude_desktop_config.json`
-- Windows: `%LOCALAPPDATA%\Claude-3p\claude_desktop_config.json`
-
-The entry runs Maximal's `maximal-mcp-broker stdio-adapter`, which connects to
-`http://127.0.0.1:<port>/mcp/workiq`. Claude Desktop reads this file only when
-it launches, so quit and reopen it after turning Work IQ on or off. The entry
-stays when Maximal quits. Claude Code gets a user-scope HTTP entry in
-`~/.claude.json` instead, which new sessions pick up.
-
-### Does signing in from Terminal work for the app?
-
-Yes. A `workiq auth login` you run in Terminal and the Work IQ that Maximal
-starts run as the same user. They share Work IQ's config
-(`~/.work-iq-cli/.workiq.json`) and its saved sign-in (your keychain on macOS,
-your Secret Service keyring on Linux). On macOS, use browser sign-in there too:
-
-```sh
-workiq config set disableBrokeredAuth=true
-workiq auth login
+```json
+{
+  "plugins": {
+    "workiq": { "enabled": true, "clients": ["claude-code"] }
+  }
+}
 ```
 
-Maximal checks the sign-in when it starts Work IQ, so turn Work IQ off and on
-in Settings afterwards.
-
-### Where are the logs?
-
-- **Maximal's log.** Maximal writes Work IQ's error output to
-  `mcp-broker-<date>.log` in its logs folder, `~/.local/share/maximal/logs/` on
-  macOS and Linux (`COPILOT_API_HOME` moves it). Work IQ's lines start with
-  `workiq:`. Logs are kept for 7 days by default.
-- **The card.** When Work IQ isn't ready, its card shows the last line Work IQ
-  wrote that looks like a problem, for example
-  `[MCP Proxy] Failed to fetch remote tools: …`.
-- **More detail from Work IQ.** Add `-l Debug` (or `-l Trace`, which includes
-  the sign-in library's output) to a command you run yourself, for example
-  `workiq -l Debug auth login`. This doesn't apply to the MCP connection:
-  Maximal runs `workiq mcp` at Work IQ's default level, `Warning`.
-
-### Signed in, but it still doesn't work
-
-Work IQ needs your organization's approval. A Microsoft Entra admin grants
-consent once for the whole tenant, at
-`https://login.microsoftonline.com/{tenant}/adminconsent?client_id=ba081686-5d24-4bc6-a0d6-d034ecffed87`.
-Each user also needs a license for Work IQ. See Microsoft's
-[admin instructions](https://github.com/microsoft/work-iq/blob/main/ADMIN-INSTRUCTIONS.md)
-and [Work IQ CLI guide](https://learn.microsoft.com/en-us/microsoft-365/copilot/extensibility/work-iq/cli).
-
-Maximal shows **Your organization needs to approve Work IQ** when Work IQ is
-signed in but lists only its local tools (`accept_eula`, `ask`,
-`list_agents`). A sign-in Work IQ couldn't read back looks the same, for
-example after a keychain prompt was denied. If your admin has already approved
-Work IQ, use **Sign in again** on the card.
+`plugins.workiq.config` may override `endpoint` (the Work IQ MCP URL) and
+`authority` (the Microsoft Entra authority, default
+`https://login.microsoftonline.com/organizations`); an invalid value marks the
+plugin failed with the reason in Settings. A Work IQ set up through the older
+MCP broker is carried over once: on if it was on, with its Claude Code choice.

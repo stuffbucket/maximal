@@ -27,10 +27,9 @@ import type {
 import { apiCall, subscribeAuthEvents } from "./proxy/client";
 import { mountApiClients } from "./ui/islands/api-clients-island";
 import { mountApps } from "./ui/islands/apps-island";
-import { mountMcp } from "./ui/islands/mcp-island";
 import { mountModels } from "./ui/islands/models-island";
+import { mountPlugins } from "./ui/islands/plugins-island";
 import { mountQuitDialog } from "./ui/islands/quit-dialog-island";
-import { mountRequests } from "./ui/islands/requests-island";
 import { waitForSidecarBack } from "./ui/restart";
 
 type SectionId =
@@ -42,8 +41,7 @@ type SectionId =
   | "dashboard"
   | "sessions"
   | "apps"
-  | "mcp"
-  | "requests"
+  | "plugins"
   | "endpoint"
   | "api-clients"
   | "models"
@@ -68,8 +66,7 @@ const SECTIONS: ReadonlyArray<SectionId> = [
   "dashboard",
   "sessions",
   "apps",
-  "mcp",
-  "requests",
+  "plugins",
   "endpoint",
   "api-clients",
   "models",
@@ -79,7 +76,7 @@ const SECTIONS: ReadonlyArray<SectionId> = [
 
 const TAB_SECTIONS: Record<TopTabId, ReadonlyArray<string>> = {
   account: ["account"],
-  integrations: ["apps", "mcp", "requests", "endpoint", "api-clients"],
+  integrations: ["apps", "plugins", "endpoint", "api-clients"],
   "models-keys": ["models"],
   appearance: ["appearance"],
   system: ["diagnostics", "logs"],
@@ -102,8 +99,7 @@ function tabForSection(id: SectionId): TopTabId {
       return "account";
     case "integrations":
     case "apps":
-    case "mcp":
-    case "requests":
+    case "plugins":
     case "endpoint":
     case "api-clients":
       return "integrations";
@@ -2647,9 +2643,8 @@ window.addEventListener("DOMContentLoaded", () => {
   wireAppearance();
   mountApiClients();
   mountApps();
-  mountMcp();
+  mountPlugins();
   mountQuitDialog();
-  mountRequests();
   mountModels();
   wireNav();
   syncFromHash({ persist: hadExplicitHash });
@@ -2669,8 +2664,7 @@ window.addEventListener("hashchange", () => {
   if (tab === "system") void loadDiagnostics();
   if (tab === "integrations") {
     window.dispatchEvent(new CustomEvent("maximal:apps-refresh"));
-    window.dispatchEvent(new CustomEvent("maximal:requests-refresh"));
-    window.dispatchEvent(new CustomEvent("maximal:mcp-refresh"));
+    window.dispatchEvent(new CustomEvent("maximal:plugins-refresh"));
   }
   if (tab === "models-keys") {
     window.dispatchEvent(new CustomEvent("maximal:models-refresh"));

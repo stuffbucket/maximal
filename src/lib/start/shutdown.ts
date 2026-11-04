@@ -7,8 +7,7 @@
  * in initiateShutdown().
  *
  * Coverage matrix for the Claude Code base-URL revert (and the removal of
- * Maximal-added MCP servers from Claude Code; Claude Desktop keeps its
- * entries because it reads its config only at launch):
+ * the plugin MCP servers Maximal added to Claude Code):
  *   - SIGTERM / SIGINT          → initiateShutdown ✓
  *   - process.exit(n) anywhere  → `exit` event safety net ✓
  *   - uncaught exception        → `exit` event safety net ✓
@@ -22,9 +21,9 @@ import type { serve } from "srvx"
 
 import consola from "consola"
 
-import { removeMcpClientsOnShutdown } from "~/apps/mcp"
 import { runAppShutdownHooks } from "~/apps/registry"
 import { removePidfile } from "~/lib/platform/replace-running"
+import { releasePluginClientsOnShutdown } from "~/lib/plugins/runtime"
 
 import { clearSessionRunning } from "./session-sentinel"
 
@@ -41,11 +40,11 @@ function runAppCleanup(phase: string): void {
   )
 }
 
-function removeMcpClientsBestEffort(phase: string): void {
+function releasePluginClientsBestEffort(phase: string): void {
   try {
-    removeMcpClientsOnShutdown()
+    releasePluginClientsOnShutdown()
   } catch (error) {
-    consola.warn(`shutdown: ${phase} MCP client cleanup failed`, error)
+    consola.warn(`shutdown: ${phase} plugin client cleanup failed`, error)
   }
 }
 
@@ -75,11 +74,10 @@ export async function initiateShutdown(
   // the next boot re-applies it. Synchronous + best-effort — a slow/failed
   // file write must not delay or block the drain.
   runAppCleanup("graceful")
-  // Same for the MCP servers Maximal added to Claude Code, so a new session
-  // doesn't point at a stopped Maximal. Claude Desktop keeps its entries: it
-  // reads its config only at launch. Boot re-adds from the recorded choices.
-  // File-only and synchronous.
-  removeMcpClientsBestEffort("graceful")
+  // Same for the plugin MCP servers Maximal added to Claude Code, so a new
+  // session doesn't point at a stopped Maximal. Boot re-adds them from the
+  // recorded choices. File-only and synchronous.
+  releasePluginClientsBestEffort("graceful")
 
   // Fail-safe: if close() hangs, hard-exit after 2.5s. .unref() so the
   // timer itself never holds the loop open in the happy path.
@@ -142,7 +140,7 @@ export function installShutdownHandlers(
   // (the boot-time stale-session warning surfaces them after the fact).
   process.on("exit", () => {
     runAppCleanup("exit safety-net")
-    removeMcpClientsBestEffort("exit safety-net")
+    releasePluginClientsBestEffort("exit safety-net")
     clearSessionRunningBestEffort("exit safety-net")
   })
 

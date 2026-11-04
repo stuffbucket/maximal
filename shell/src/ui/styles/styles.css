@@ -1438,6 +1438,13 @@ html[data-os="macos"] .topbar {
   border-color: var(--accent);
 }
 
+/* A caution label (e.g. a tool that can change things): error-colored text
+   and hairline on the same chip, never a fill. */
+.chip--danger {
+  color: var(--status-error);
+  border-color: var(--status-error);
+}
+
 /* ---- Status dot ---- */
 .status {
   display: inline-block;
@@ -2607,12 +2614,15 @@ html[data-os="macos"] .topbar {
   color: var(--text-muted);
 }
 
-/* ---- MCP endpoint card ----
-   Name on the left; on the right, Refresh and Remove as icon buttons, the
-   on/off switch, then the twirldown. Below, every app that can get the
-   endpoint as one checkbox row — no prompt. "All apps" heads the list; app
-   rows indent under it. Changes save as made; Remove asks first. */
-.mcp-card__title {
+/* ---- Plugin card ----
+   An app-card (components.md → Cards) for one plugin: name on the left; on
+   the right the on/off switch, then the twirldown. Under the head: the
+   plugin's description, then what it says about itself (state line, detail,
+   facts, buttons), always in view. The twirldown folds away the rest, laid
+   out as sections divided by hairlines (never nested cards): which apps get
+   the plugin, its endpoint, its tools. Open follows the switch
+   (PluginCard.tsx). */
+.plugin-card__title {
   flex: 1 1 auto;
   min-width: 0;
   display: flex;
@@ -2621,16 +2631,55 @@ html[data-os="macos"] .topbar {
   gap: var(--space-2);
 }
 
-.mcp-card__title .app-card__name {
+.plugin-card__title .app-card__name {
   flex: 0 1 auto;
 }
 
-.mcp-card__saving {
+.plugin-card__saving {
   font-size: var(--text-sm);
   color: var(--text-muted);
 }
 
-.mcp-card__apps {
+.plugin-card .app-card__control {
+  gap: var(--space-3);
+}
+
+/* The twirldown: 200ms is the card-collapse timing (motion.md); the global
+   reduced-motion block zeroes it. */
+.plugin-card__twirl svg {
+  transition: transform 200ms ease-out;
+}
+
+.plugin-card__twirl[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+.plugin-card__body {
+  display: flex;
+  flex-direction: column;
+}
+
+.plugin-card__body[hidden] {
+  display: none;
+}
+
+.plugin-card__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-block: var(--space-3);
+  border-block-start: var(--border-width-hairline) solid var(--border-subtle);
+}
+
+.plugin-card__heading {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-md);
+  line-height: var(--leading-lg);
+  color: var(--text-strong);
+}
+
+.plugin-card__clients {
   margin: 0;
   padding: 0;
   border: 0;
@@ -2639,49 +2688,158 @@ html[data-os="macos"] .topbar {
   flex-direction: column;
 }
 
-.mcp-card__row {
+.plugin-card__client {
   display: flex;
-  align-items: center;
-  padding: var(--space-2) 0;
-}
-
-.mcp-card__row + .mcp-card__row {
-  border-top: var(--border-width-hairline) solid var(--border-subtle);
-}
-
-.mcp-card__row--app {
-  padding-inline-start: var(--space-5);
-  /* Why an app can't be chosen sits beside it, and wraps under it when
-     the card is narrow. */
   flex-wrap: wrap;
+  align-items: center;
   column-gap: var(--space-3);
   row-gap: var(--space-1);
+  padding-block: var(--space-1);
 }
 
-.mcp-card .app-card__control {
+.plugin-card__endpoint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: var(--space-3);
 }
 
-/* Accordion: the twirldown sits at the far right of the head, after the
-   switch. Open follows the switch (McpEndpointCard.tsx); disabled while
-   off. 200ms is the card-collapse timing (motion.md); the global
-   reduced-motion block zeroes it. */
-.mcp-card__twirl svg {
-  transition: transform 200ms ease-out;
+.plugin-card__url {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text-base-color);
+  background: var(--surface-control);
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-input);
+  overflow-wrap: anywhere;
 }
 
-.mcp-card__twirl[aria-expanded="true"] svg {
-  transform: rotate(180deg);
-}
-
-.mcp-card__body {
+/* What the plugin says about itself. */
+.plugin-status {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-2);
 }
 
-.mcp-card__body[hidden] {
-  display: none;
+.plugin-status__line {
+  margin: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  font-size: var(--text-base);
+  font-weight: var(--weight-md);
+  line-height: var(--leading-lg);
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
+.plugin-status__detail {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-lg);
+  color: var(--text-muted);
+  /* The plugin's own text; keep the line breaks it wrote. */
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.plugin-status__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.plugin-status__confirm {
+  white-space: pre-line;
+}
+
+/* The state's dot sits on the first line of text. The color is never the
+   only signal: the state is also named for screen readers and the summary
+   says it in words. Tones are the status tokens. */
+.plugin-dot {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  width: var(--size-xs);
+  height: var(--size-xs);
+  margin-block-start: calc((var(--text-base) * var(--leading-lg) - var(--size-xs)) / 2);
+  border-radius: var(--radius-pill);
+  background: var(--text-muted);
+}
+
+.plugin-dot--ready {
+  background: var(--status-success);
+}
+
+.plugin-dot--needs-setup {
+  background: var(--status-warning);
+}
+
+.plugin-dot--working {
+  background: var(--status-info);
+}
+
+.plugin-dot--error {
+  background: var(--status-error);
+}
+
+/* Tools: folded away until asked for. */
+.plugin-tools__summary {
+  cursor: pointer;
+  width: max-content;
+  max-width: 100%;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+  border-radius: var(--radius-chip);
+}
+
+.plugin-tools__summary:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.plugin-tools__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  margin-block-start: var(--space-2);
+}
+
+.plugin-tools__item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-block: var(--space-2);
+}
+
+.plugin-tools__item + .plugin-tools__item {
+  border-block-start: var(--border-width-hairline) solid var(--border-subtle);
+}
+
+.plugin-tools__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.plugin-tools__name {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
+.plugin-tools__desc {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-lg);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
 }
 
 /* ---- Link checkbox (components/LinkCheckbox.tsx) ----

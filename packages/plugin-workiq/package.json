@@ -1,0 +1,28 @@
+{
+  "name": "@stuffbucket/maximal-plugin-workiq",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Work IQ plugin for maximal: Microsoft Work IQ MCP tools with Entra sign-in",
+  "license": "MIT",
+  "sideEffects": false,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "bun test test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@azure/msal-node": "7.1.2",
+    "@modelcontextprotocol/client": "2.3.1",
+    "@stuffbucket/maximal-plugin-sdk": "workspace:*",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/server": "2.3.1"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "4.0.2"
+  }
+}

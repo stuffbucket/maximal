@@ -146,7 +146,7 @@ the armored key directly from `Signed-By`.
 
 | Path | Package |
 |---|---|
-| `/usr/bin/maximal`, `/usr/bin/maximal-mcp-broker` | `maximal` |
+| `/usr/bin/maximal` | `maximal` |
 | `/usr/lib/systemd/user/maximal.service` (not enabled) | `maximal` |
 | `/usr/lib/maximal/installed-by-apt` | `maximal` |
 | `/usr/bin/maximal-desktop`, its `.desktop` entry and icons | `maximal-desktop` |
@@ -166,8 +166,7 @@ mxml.sh, so apt can always install the version the apps announce.
 
 **Other ways to run it.** The release page also has the raw binaries
 (`maximal-vX.Y.Z-linux-x64.tar.gz`, `-linux-arm64.tar.gz`). To build from
-source, see [commands](commands.md) and the source build in
-[Work IQ on Linux](linux-workiq.md#build-from-source).
+source, see [commands](commands.md).
 
 **How it's built.** `build/linux/` holds the packaging, the container smoke
 test and the apt repository scripts; the release and Pages workflows are

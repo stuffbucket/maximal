@@ -5,8 +5,10 @@
 ; that check cannot wait indefinitely for a tray-only process. Do not use /T on
 ; maximal-shell.exe: during an in-place update the installer is its descendant,
 ; and killing the shell's process tree would kill the installer too. Stop the
-; proxy sidecar and broker trees explicitly afterward so their binaries can be
-; replaced or removed. taskkill fails when nothing matches; that's fine.
+; proxy sidecar tree explicitly afterward so its binary can be replaced or
+; removed. The maximal-mcp-broker.exe kill stays for upgrades from older
+; versions that shipped it (this version doesn't). taskkill fails when nothing
+; matches; that's fine.
 
 !macro NSIS_HOOK_PREINSTALL
   nsExec::Exec '"$SYSDIR\taskkill.exe" /F /IM maximal-shell.exe'

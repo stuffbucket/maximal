@@ -24,12 +24,17 @@
   "files": [
     "dist"
   ],
+  "workspaces": [
+    "packages/plugin-sdk",
+    "packages/plugin-host",
+    "packages/plugin-workiq"
+  ],
   "scripts": {
     "app:build": "MAXIMAL_FORCE_SIDECAR=1 bun run app:sidecar && bun run scripts/predmg-cleanup.ts && cd shell && bun run tauri build --bundles app,dmg",
     "app:build:test": "MAXIMAL_FORCE_SIDECAR=1 bun run app:sidecar && cd shell && bun run tauri build --bundles app --config src-tauri/tauri.test.conf.json",
     "app:dev": "bun run scripts/app-dev.ts",
     "app:icons": "cd shell && bun run tauri icon ../build/macos/app-icon.svg --output src-tauri/icons",
-    "app:setup": "cd shell && bun install && cd .. && bun run mcp-broker:install && MAXIMAL_FORCE_SIDECAR=1 bun run app:sidecar",
+    "app:setup": "cd shell && bun install && cd .. && MAXIMAL_FORCE_SIDECAR=1 bun run app:sidecar",
     "app:sidecar": "bun run build:ui && bun run scripts/gen-ui-embed.ts && bun run scripts/build-sidecar.ts",
     "app:ui": "bun run scripts/build-ui.ts --watch",
     "app:windows:build": "bun run scripts/dev/windows-cross.ts build",
@@ -39,8 +44,8 @@
     "build:ui": "bun run scripts/build-ui.ts",
     "casts": "bun run scripts/find-casts.ts",
     "casts:check": "bun run scripts/find-casts.ts --check",
-    "check:deep": "bun run check:fast && bun test && bun run knip",
-    "check:fast": "bun run ensure:ui-embed && bun run lint:fast && bun run typecheck && bun run lint:all && bun run casts:check && bun run check:tokens",
+    "check:deep": "bun run check:fast && bun test && bun run plugins:test && bun run knip",
+    "check:fast": "bun run ensure:ui-embed && bun run lint:fast && bun run typecheck && bun run plugins:typecheck && bun run lint:all && bun run casts:check && bun run check:tokens",
     "check:tokens": "bun scripts/check-design-tokens.ts",
     "deps:check": "depcruise --config .dependency-cruiser.cjs src tests",
     "dev": "bun run --watch ./src/main.ts",
@@ -50,9 +55,10 @@
     "lint": "eslint --cache",
     "lint:all": "eslint --cache .",
     "lint:fast": "oxlint",
-    "mcp-broker:install": "mise -C packages/mcp-broker exec -- pnpm install --frozen-lockfile",
     "mutate": "stryker run",
     "prepack": "bun run build",
+    "plugins:test": "bun run --filter './packages/plugin-*' test",
+    "plugins:typecheck": "bun run --filter './packages/plugin-*' typecheck",
     "prepare": "bun run ensure:ui-embed && simple-git-hooks && cd shell && bun install",
     "release:manual": "bumpp",
     "render-formula": "bun scripts/sync-homebrew-formula.ts",
@@ -81,6 +87,10 @@
     ]
   },
   "dependencies": {
+    "@modelcontextprotocol/server": "2.3.1",
+    "@stuffbucket/maximal-plugin-host": "workspace:*",
+    "@stuffbucket/maximal-plugin-sdk": "workspace:*",
+    "@stuffbucket/maximal-plugin-workiq": "workspace:*",
     "citty": "^0.1.6",
     "clipboardy": "^5.0.0",
     "consola": "^3.4.2",
@@ -99,6 +109,7 @@
   },
   "devDependencies": {
     "@echristian/eslint-config": "^0.0.54",
+    "@modelcontextprotocol/client": "2.3.1",
     "@playwright/test": "1.56.1",
     "@stryker-mutator/core": "^9.6.1",
     "@types/bun": "^1.2.23",

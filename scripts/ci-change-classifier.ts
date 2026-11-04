@@ -7,25 +7,6 @@ export const GENERATED_MANIFEST_BRANCH = "automation/updates-manifest"
 const SHA = /^[0-9a-f]{40}$/u
 const ZERO_SHA = /^0{40}$/u
 
-const WINDOWS_BROKER_FILES = new Set([
-  ".bun-version",
-  ".github/workflows/ci.yml",
-  "bun.lock",
-  "mise.toml",
-  "package.json",
-  "scripts/ci-change-classifier.ts",
-  "scripts/strip-lockfile-hosts.ts",
-  "src/server.ts",
-  "tests/mcp-adapter-end-to-end.test.ts",
-])
-
-const WINDOWS_BROKER_PREFIXES = [
-  ".github/actions/setup-mise/",
-  "packages/mcp-broker/",
-  "src/lib/mcp-broker/",
-  "src/routes/mcp/",
-]
-
 export type ChangedPaths = ReadonlyArray<string> | "all"
 
 type JsonObject = Record<string, unknown>
@@ -38,7 +19,6 @@ export interface DiffSpec {
 
 export interface CiClassification {
   mode: "full" | "paths"
-  windowsBroker: boolean
 }
 
 export interface CounterpartQuery {
@@ -106,20 +86,9 @@ export function diffSpecForEvent(
   return undefined
 }
 
-export function affectsWindowsBroker(path: string): boolean {
-  return (
-    WINDOWS_BROKER_FILES.has(path)
-    || WINDOWS_BROKER_PREFIXES.some((prefix) => path.startsWith(prefix))
-  )
-}
-
 export function classifyCiChanges(changed: ChangedPaths): CiClassification {
-  if (changed === "all" || changed.length === 0)
-    return { mode: "full", windowsBroker: true }
-  return {
-    mode: "paths",
-    windowsBroker: changed.some(affectsWindowsBroker),
-  }
+  if (changed === "all" || changed.length === 0) return { mode: "full" }
+  return { mode: "paths" }
 }
 
 function counterpartEvent(eventName: string): string | undefined {
@@ -313,7 +282,6 @@ if (import.meta.main) {
     })
 
     writeOutput("mode", classification.mode)
-    writeOutput("windows_broker", String(classification.windowsBroker))
     writeOutput("trusted_generated", String(trustedGenerated))
     writeOutput("head_branch", refName)
     writeOutput("head_sha", headSha)

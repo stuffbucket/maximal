@@ -23,7 +23,8 @@ import { streamSSE } from "hono/streaming"
 
 import { getAuthStatus } from "~/lib/auth/auth-controller"
 import { settingsEventBus } from "~/lib/config/settings-events"
-import { pendingRequests } from "~/lib/mcp-broker/pending-requests"
+import { getPluginGateway } from "~/lib/plugins/gateway"
+import { listPluginViews } from "~/lib/plugins/view"
 
 /** Keep-alive cadence. Proxies and idle-connection reapers close silent
  *  streams; a periodic comment line keeps the channel warm at negligible
@@ -41,10 +42,13 @@ eventsRoutes.get("/", (c) =>
       data: JSON.stringify(getAuthStatus()),
     })
 
-    await stream.writeSSE({
-      event: "requests.changed",
-      data: JSON.stringify(pendingRequests.list()),
-    })
+    const gateway = getPluginGateway()
+    if (gateway) {
+      await stream.writeSSE({
+        event: "plugins.changed",
+        data: JSON.stringify(await listPluginViews(gateway)),
+      })
+    }
 
     const unsubscribeAuth = settingsEventBus.subscribe(
       "auth.changed",
@@ -55,12 +59,13 @@ eventsRoutes.get("/", (c) =>
         })
       },
     )
-    const unsubscribeRequests = settingsEventBus.subscribe(
-      "requests.changed",
-      (requests) => {
+
+    const unsubscribePlugins = settingsEventBus.subscribe(
+      "plugins.changed",
+      (plugins) => {
         void stream.writeSSE({
-          event: "requests.changed",
-          data: JSON.stringify(requests),
+          event: "plugins.changed",
+          data: JSON.stringify(plugins),
         })
       },
     )
@@ -78,7 +83,7 @@ eventsRoutes.get("/", (c) =>
       stream.onAbort(() => {
         clearInterval(heartbeat)
         unsubscribeAuth()
-        unsubscribeRequests()
+        unsubscribePlugins()
         resolve()
       })
     })
