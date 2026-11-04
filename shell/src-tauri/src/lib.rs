@@ -52,11 +52,13 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     utils::config::{AppDirectoriesOverride, AppDirectoryOverrides},
     webview::PageLoadEvent,
-    AppHandle, Emitter, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder, WindowEvent,
+    AppHandle, Emitter, LogicalSize, LogicalUnit, Manager, PhysicalPosition, PhysicalRect,
+    PhysicalSize, PixelUnit, RunEvent, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+    WindowEvent, WindowSizeConstraints,
 };
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_shell::ShellExt;
-use tauri_plugin_window_state::StateFlags;
+use tauri_plugin_window_state::{StateFlags, WindowExt};
 
 /// Native-string i18n (tray, notifications, window titles, quit dialog),
 /// backed by the same shell/src/i18n/*.json catalogs the webview renders with.
@@ -123,17 +125,215 @@ const DESKTOP_UPDATE_MANIFEST_BASE: &str = "https://mxml.sh/updates/desktop/";
 const UPDATE_MANIFEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 const TRAY_ID: &str = "main";
-// Two webview windows, both pointed at the selected sidecar origin:
-//   settings  — /ui/settings/  (React app)
-//   dashboard — /ui/dashboard/ (usage charts)
-// Both UIs are embedded in the sidecar binary and served at /ui/* —
-// see src/routes/ui/route.ts.
-// Labels are referenced from capabilities/default.json `windows`.
+// One unified webview window points at the Settings shell. Dashboard and Sessions
+// are sidecar-served pages mounted in its persistent HTML iframe. The main window
+// label is referenced from capabilities/default.json `windows`.
+mod main_surface {
+    pub const SETTINGS: &str = "settings";
+    pub const DASHBOARD: &str = "dashboard";
+    pub const SESSIONS: &str = "sessions";
+}
+
 const MAIN_WINDOW_FALLBACK_WIDTH: f64 = 1100.0;
 const MAIN_WINDOW_FALLBACK_HEIGHT: f64 = 720.0;
+const MAIN_WINDOW_MIN_WIDTH: f64 = 640.0;
+const MAIN_WINDOW_MIN_HEIGHT: f64 = 480.0;
+/// Keeps all five Settings tabs ahead of the pinned utilities with the topbar's
+/// reserved end gap. Observability surfaces use the smaller shared minimum.
+const SETTINGS_SURFACE_MIN_WIDTH: f64 = 736.0;
+/// Settings has a bounded readable layout. Observability surfaces explicitly
+/// remove this width constraint because their tables and graphs use extra room.
+const SETTINGS_SURFACE_MAX_WIDTH: f64 = 1100.0;
+/// Total breathing room kept around the window on a small display.
+const MAIN_WINDOW_WORK_AREA_MARGIN: f64 = 64.0;
 
 fn main_window_state_flags() -> StateFlags {
     StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED
+}
+
+fn main_window_min_width(surface: &str) -> f64 {
+    if surface == main_surface::SETTINGS {
+        SETTINGS_SURFACE_MIN_WIDTH
+    } else {
+        MAIN_WINDOW_MIN_WIDTH
+    }
+}
+
+fn main_window_constraints(surface: &str) -> WindowSizeConstraints {
+    WindowSizeConstraints {
+        min_width: Some(PixelUnit::Logical(LogicalUnit::new(main_window_min_width(
+            surface,
+        )))),
+        min_height: Some(PixelUnit::Logical(LogicalUnit::new(MAIN_WINDOW_MIN_HEIGHT))),
+        max_width: (surface == main_surface::SETTINGS)
+            .then(|| PixelUnit::Logical(LogicalUnit::new(SETTINGS_SURFACE_MAX_WIDTH))),
+        max_height: None,
+    }
+}
+
+fn fitted_main_window_inner_size(
+    work_area_size: PhysicalSize<u32>,
+    scale_factor: f64,
+    frame_size: PhysicalSize<u32>,
+) -> PhysicalSize<u32> {
+    let fallback = LogicalSize::new(MAIN_WINDOW_FALLBACK_WIDTH, MAIN_WINDOW_FALLBACK_HEIGHT)
+        .to_physical::<u32>(scale_factor);
+    let margin = LogicalSize::new(MAIN_WINDOW_WORK_AREA_MARGIN, MAIN_WINDOW_WORK_AREA_MARGIN)
+        .to_physical::<u32>(scale_factor);
+    let available_outer = PhysicalSize::new(
+        work_area_size.width.saturating_sub(margin.width),
+        work_area_size.height.saturating_sub(margin.height),
+    );
+    let available_inner = PhysicalSize::new(
+        available_outer.width.saturating_sub(frame_size.width),
+        available_outer.height.saturating_sub(frame_size.height),
+    );
+
+    PhysicalSize::new(
+        fallback.width.min(available_inner.width),
+        fallback.height.min(available_inner.height),
+    )
+}
+
+fn outer_size_for_inner(
+    inner_size: PhysicalSize<u32>,
+    frame_size: PhysicalSize<u32>,
+) -> PhysicalSize<u32> {
+    PhysicalSize::new(
+        inner_size.width.saturating_add(frame_size.width),
+        inner_size.height.saturating_add(frame_size.height),
+    )
+}
+
+fn centered_main_window_position(
+    outer_size: PhysicalSize<u32>,
+    work_area: &PhysicalRect<i32, u32>,
+) -> PhysicalPosition<i32> {
+    PhysicalPosition::new(
+        work_area.position.x + (work_area.size.width.saturating_sub(outer_size.width) / 2) as i32,
+        work_area.position.y + (work_area.size.height.saturating_sub(outer_size.height) / 2) as i32,
+    )
+}
+
+fn clamp_main_window_position(
+    position: PhysicalPosition<i32>,
+    outer_size: PhysicalSize<u32>,
+    work_area: &PhysicalRect<i32, u32>,
+) -> PhysicalPosition<i32> {
+    fn clamp_axis(position: i32, origin: i32, available: u32, occupied: u32) -> i32 {
+        let lower = i64::from(origin);
+        let upper = lower + i64::from(available.saturating_sub(occupied));
+        i64::from(position).clamp(lower, upper) as i32
+    }
+
+    PhysicalPosition::new(
+        clamp_axis(
+            position.x,
+            work_area.position.x,
+            work_area.size.width,
+            outer_size.width,
+        ),
+        clamp_axis(
+            position.y,
+            work_area.position.y,
+            work_area.size.height,
+            outer_size.height,
+        ),
+    )
+}
+
+/// The window-state plugin stores physical inner dimensions without monitor or
+/// scale metadata. After an explicit restore, repair a normal window whose saved
+/// inner size no longer fits the current physical work area. Position math uses
+/// the outer frame; size setters continue to receive inner dimensions.
+fn normalize_restored_main_window_geometry(window: &WebviewWindow) -> tauri::Result<()> {
+    if window.is_maximized()? {
+        return Ok(());
+    }
+
+    let monitor = window.current_monitor()?.or(window.primary_monitor()?);
+    let Some(monitor) = monitor else {
+        return Ok(());
+    };
+    let work_area = monitor.work_area();
+    let inner_size = window.inner_size()?;
+    let outer_size = window.outer_size()?;
+    let frame_size = PhysicalSize::new(
+        outer_size.width.saturating_sub(inner_size.width),
+        outer_size.height.saturating_sub(inner_size.height),
+    );
+    let margin = LogicalSize::new(MAIN_WINDOW_WORK_AREA_MARGIN, MAIN_WINDOW_WORK_AREA_MARGIN)
+        .to_physical::<u32>(monitor.scale_factor());
+    let available_outer = PhysicalSize::new(
+        work_area.size.width.saturating_sub(margin.width),
+        work_area.size.height.saturating_sub(margin.height),
+    );
+    let available_inner = PhysicalSize::new(
+        available_outer.width.saturating_sub(frame_size.width),
+        available_outer.height.saturating_sub(frame_size.height),
+    );
+
+    if inner_size.width > available_inner.width || inner_size.height > available_inner.height {
+        let fitted =
+            fitted_main_window_inner_size(work_area.size, monitor.scale_factor(), frame_size);
+        let fitted_outer = outer_size_for_inner(fitted, frame_size);
+        window.set_size(fitted)?;
+        window.set_position(centered_main_window_position(fitted_outer, work_area))?;
+        return Ok(());
+    }
+
+    let position = window.outer_position()?;
+    let clamped = clamp_main_window_position(position, outer_size, work_area);
+    if clamped != position {
+        window.set_position(clamped)?;
+    }
+    Ok(())
+}
+
+fn apply_main_surface_constraints(window: &WebviewWindow, surface: &str) -> tauri::Result<()> {
+    // Mutating native constraints while maximized unmaximizes the window on
+    // Windows and can resize its zoomed frame on macOS. MainSurfaceState keeps
+    // the requested policy pending until the next normal-size event.
+    if window.is_maximized()? {
+        return Ok(());
+    }
+    window.set_size_constraints(main_window_constraints(surface))
+}
+
+/// The plugin's window-ready hook is queued before this barrier. Once that hook
+/// has installed its state tracking, restore from a blocking worker so Tauri's
+/// synchronous window getters can be serviced by the main event loop. Holding
+/// the plugin cache on the window-creation thread while its hook runs would
+/// otherwise deadlock the cache and event loop against each other.
+fn restore_and_present_main_window(app: &AppHandle, window: &WebviewWindow) {
+    let app_after_barrier = app.clone();
+    let window_after_barrier = window.clone();
+    let queue_result = window.run_on_main_thread(move || {
+        tauri::async_runtime::spawn_blocking(move || {
+            if let Err(error) = window_after_barrier.restore_state(main_window_state_flags()) {
+                eprintln!("[shell] could not restore main window geometry: {error}");
+            }
+            if let Err(error) = normalize_restored_main_window_geometry(&window_after_barrier) {
+                eprintln!("[shell] could not normalize main window geometry: {error}");
+            }
+
+            let app_for_present = app_after_barrier.clone();
+            let window_for_present = window_after_barrier.clone();
+            if let Err(error) = window_after_barrier.run_on_main_thread(move || {
+                attach_main_window_behavior(&app_for_present, &window_for_present);
+                let surface = app_for_present.state::<MainSurfaceState>().get();
+                if let Err(error) = apply_main_surface_constraints(&window_for_present, &surface) {
+                    eprintln!("[shell] could not apply main window constraints: {error}");
+                }
+                present_window(&app_for_present, &window_for_present);
+            }) {
+                eprintln!("[shell] could not queue main window presentation: {error}");
+            }
+        });
+    });
+    if let Err(error) = queue_result {
+        eprintln!("[shell] could not queue main window restoration: {error}");
+    }
 }
 
 // Tray icon assets — embedded at compile time so we don't have to
@@ -226,7 +426,7 @@ struct MainSurfaceState(Mutex<String>);
 
 impl MainSurfaceState {
     fn new() -> Self {
-        Self(Mutex::new("settings".to_string()))
+        Self(Mutex::new(main_surface::SETTINGS.to_string()))
     }
 
     fn get(&self) -> String {
@@ -427,6 +627,9 @@ pub fn run() {
             tauri_plugin_window_state::Builder::default()
                 .with_state_flags(main_window_state_flags())
                 .with_filter(|label| label == SETTINGS_WINDOW_LABEL)
+                // Restore synchronously after the hidden window is built so
+                // geometry repair cannot race the plugin's queued callback.
+                .skip_initial_state(SETTINGS_WINDOW_LABEL)
                 .build(),
         )
         .plugin(tauri_plugin_opener::init())
@@ -490,6 +693,7 @@ pub fn run() {
         builder.invoke_handler(tauri::generate_handler![
             open_settings_at,
             open_dashboard,
+            set_main_surface,
             reveal_config_dir,
             reveal_logs_dir,
             restart_sidecar,
@@ -893,7 +1097,7 @@ fn check_updates_from_tray(app: &AppHandle) {
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
         let payload = force_update_check(&handle).await;
-        let _ = handle.emit_to("settings", UPDATE_STATUS_EVENT, ());
+        let _ = handle.emit_to(SETTINGS_WINDOW_LABEL, UPDATE_STATUS_EVENT, ());
         match manual_check_outcome(payload.as_ref()) {
             // The same banner the poll fires; shown here too when the tray
             // item already existed, so the click always gets an answer.
@@ -2268,14 +2472,15 @@ fn open_settings_window(app: &AppHandle, section: Option<&str>) {
     };
 
     let surface = match section {
-        Some("dashboard") => "dashboard",
-        Some("sessions") => "sessions",
-        _ => "settings",
+        Some(main_surface::DASHBOARD) => main_surface::DASHBOARD,
+        Some(main_surface::SESSIONS) => main_surface::SESSIONS,
+        _ => main_surface::SETTINGS,
     };
     app.state::<MainSurfaceState>().set(surface);
     let title = main_surface_title(app, surface);
     if let Some(existing) = app.get_webview_window(SETTINGS_WINDOW_LABEL) {
         let _ = existing.set_title(&title);
+        let _ = apply_main_surface_constraints(&existing, surface);
         let js = match section {
             Some(s) => format!("window.location.hash = {:?};", s),
             None => "window.dispatchEvent(new CustomEvent('maximal:open-settings'));".to_string(),
@@ -2293,11 +2498,15 @@ fn open_settings_window(app: &AppHandle, section: Option<&str>) {
     let builder = WebviewWindowBuilder::new(app, SETTINGS_WINDOW_LABEL, WebviewUrl::External(url))
         .title(title)
         // The fallback is used only when the plugin has no saved state. Build
-        // hidden so the plugin's queued window-ready restore runs before the
-        // queued `present_window`, avoiding a fallback-size flash.
+        // hidden so controlled restoration and repair finish before the window
+        // is presented, avoiding a fallback-size flash.
         .inner_size(MAIN_WINDOW_FALLBACK_WIDTH, MAIN_WINDOW_FALLBACK_HEIGHT)
-        .min_inner_size(640.0, 480.0)
-        .prevent_overflow()
+        .min_inner_size(main_window_min_width(surface), MAIN_WINDOW_MIN_HEIGHT)
+        .prevent_overflow_with_margin(LogicalSize::new(
+            MAIN_WINDOW_WORK_AREA_MARGIN,
+            MAIN_WINDOW_WORK_AREA_MARGIN,
+        ))
+        .center()
         .visible(false)
         .background_color(tauri::webview::Color(22, 22, 22, 255));
 
@@ -2308,8 +2517,7 @@ fn open_settings_window(app: &AppHandle, section: Option<&str>) {
 
     match builder.build() {
         Ok(window) => {
-            attach_close_behavior(app, &window);
-            present_window(app, &window);
+            restore_and_present_main_window(app, &window);
         }
         Err(err) => {
             eprintln!("[shell] settings window build failed: {err}");
@@ -2448,8 +2656,8 @@ fn settings_title(app: &AppHandle) -> String {
 fn main_surface_title(app: &AppHandle, surface: &str) -> String {
     let locale = app.state::<LocaleState>().get();
     match surface {
-        "dashboard" => native_i18n::tr(&locale, "native-window-dashboard-title"),
-        "sessions" => native_i18n::tr(&locale, "native-window-sessions-title"),
+        main_surface::DASHBOARD => native_i18n::tr(&locale, "native-window-dashboard-title"),
+        main_surface::SESSIONS => native_i18n::tr(&locale, "native-window-sessions-title"),
         _ => settings_title(app),
     }
 }
@@ -2484,13 +2692,13 @@ fn do_reveal_logs_dir(app: &AppHandle) {
 /// plain browser), so the proxy route contract remains intact.
 fn open_dashboard_window(app: &AppHandle) {
     const _DASHBOARD_ROUTE_CONTRACT: &str = "/ui/dashboard/";
-    open_settings_window(app, Some("dashboard"));
+    open_settings_window(app, Some(main_surface::DASHBOARD));
 }
 
 /// Opens (or focuses) the unified window on its Sessions view.
 fn open_sessions_window(app: &AppHandle) {
     const _SESSIONS_ROUTE_CONTRACT: &str = "/ui/sessions/";
-    open_settings_window(app, Some("sessions"));
+    open_settings_window(app, Some(main_surface::SESSIONS));
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2510,11 +2718,12 @@ fn close_window_action(is_windows: bool, always_visible: bool) -> CloseWindowAct
 /// Keeps the background app alive when the managed window is closed.
 /// Windows minimizes an always-visible taskbar window because a hidden window
 /// has no taskbar button. Every other mode preserves the tray-first hide path.
-fn attach_close_behavior(app: &AppHandle, window: &tauri::WebviewWindow) {
+fn attach_main_window_behavior(app: &AppHandle, window: &tauri::WebviewWindow) {
     let window_clone = window.clone();
     let app_clone = app.clone();
-    window.on_window_event(move |event| {
-        if let WindowEvent::CloseRequested { api, .. } = event {
+    let was_maximized = Mutex::new(window.is_maximized().unwrap_or(false));
+    window.on_window_event(move |event| match event {
+        WindowEvent::CloseRequested { api, .. } => {
             api.prevent_close();
             let always_visible = app_clone.state::<DockVisibilityState>().always_visible();
             match close_window_action(cfg!(windows), always_visible) {
@@ -2527,6 +2736,28 @@ fn attach_close_behavior(app: &AppHandle, window: &tauri::WebviewWindow) {
             }
             update_activation_policy(&app_clone);
         }
+        WindowEvent::Resized(_) => {
+            let Ok(is_maximized) = window_clone.is_maximized() else {
+                return;
+            };
+            let returned_to_normal = {
+                let mut previous = was_maximized
+                    .lock()
+                    .expect("main window maximized mutex poisoned");
+                let returned_to_normal = *previous && !is_maximized;
+                *previous = is_maximized;
+                returned_to_normal
+            };
+            if returned_to_normal {
+                let surface = app_clone.state::<MainSurfaceState>().get();
+                let _ = apply_main_surface_constraints(&window_clone, &surface);
+            }
+        }
+        WindowEvent::ScaleFactorChanged { .. } => {
+            let surface = app_clone.state::<MainSurfaceState>().get();
+            let _ = apply_main_surface_constraints(&window_clone, &surface);
+        }
+        _ => {}
     });
 }
 
@@ -2779,9 +3010,9 @@ fn open_dashboard(app: AppHandle) {
 #[tauri::command]
 fn set_main_surface(app: AppHandle, surface: String) -> Result<(), String> {
     let normalized = match surface.as_str() {
-        "dashboard" => "dashboard",
-        "sessions" => "sessions",
-        "settings" => "settings",
+        main_surface::DASHBOARD => main_surface::DASHBOARD,
+        main_surface::SESSIONS => main_surface::SESSIONS,
+        main_surface::SETTINGS => main_surface::SETTINGS,
         _ => return Err("unknown main surface".to_string()),
     };
     app.state::<MainSurfaceState>().set(normalized);
@@ -2789,6 +3020,7 @@ fn set_main_surface(app: AppHandle, surface: String) -> Result<(), String> {
         window
             .set_title(&main_surface_title(&app, normalized))
             .map_err(|error| error.to_string())?;
+        apply_main_surface_constraints(&window, normalized).map_err(|error| error.to_string())?;
     }
     Ok(())
 }
@@ -3028,6 +3260,94 @@ mod tests {
     }
 
     #[test]
+    fn fits_the_main_window_inner_size_inside_the_physical_frame_and_work_area() {
+        use super::{fitted_main_window_inner_size, outer_size_for_inner};
+        use tauri::PhysicalSize;
+
+        let frame = PhysicalSize::new(32, 80);
+        let inner = fitted_main_window_inner_size(PhysicalSize::new(1800, 1200), 2.0, frame);
+        assert_eq!(inner, PhysicalSize::new(1640, 992));
+        assert_eq!(
+            outer_size_for_inner(inner, frame),
+            PhysicalSize::new(1672, 1072),
+        );
+
+        assert_eq!(
+            fitted_main_window_inner_size(
+                PhysicalSize::new(900, 600),
+                1.0,
+                PhysicalSize::new(16, 40),
+            ),
+            PhysicalSize::new(820, 496),
+        );
+    }
+
+    #[test]
+    fn constrains_only_the_settings_surface_width() {
+        use super::{main_surface, main_window_constraints};
+        use tauri::{LogicalUnit, PixelUnit};
+
+        let settings = main_window_constraints(main_surface::SETTINGS);
+        assert_eq!(
+            settings.max_width,
+            Some(PixelUnit::Logical(LogicalUnit::new(1100.0))),
+        );
+        assert_eq!(settings.max_height, None);
+        assert_eq!(
+            settings.min_width,
+            Some(PixelUnit::Logical(LogicalUnit::new(736.0))),
+        );
+        assert_eq!(
+            settings.min_height,
+            Some(PixelUnit::Logical(LogicalUnit::new(480.0))),
+        );
+
+        for surface in [main_surface::DASHBOARD, main_surface::SESSIONS] {
+            let observability = main_window_constraints(surface);
+            assert_eq!(
+                observability.min_width,
+                Some(PixelUnit::Logical(LogicalUnit::new(640.0))),
+            );
+            assert_eq!(observability.max_width, None);
+            assert_eq!(observability.max_height, None);
+        }
+    }
+
+    #[test]
+    fn centers_a_repaired_main_window_in_its_work_area() {
+        use super::centered_main_window_position;
+        use tauri::{PhysicalPosition, PhysicalRect, PhysicalSize};
+
+        let work_area = PhysicalRect {
+            position: PhysicalPosition::new(0, 66),
+            size: PhysicalSize::new(3456, 1988),
+        };
+        assert_eq!(
+            centered_main_window_position(PhysicalSize::new(2200, 1440), &work_area),
+            PhysicalPosition::new(628, 340),
+        );
+    }
+
+    #[test]
+    fn clamps_a_restored_main_window_to_a_negative_origin_work_area() {
+        use super::clamp_main_window_position;
+        use tauri::{PhysicalPosition, PhysicalRect, PhysicalSize};
+
+        let work_area = PhysicalRect {
+            position: PhysicalPosition::new(-1920, 0),
+            size: PhysicalSize::new(1920, 1080),
+        };
+        assert_eq!(
+            clamp_main_window_position(
+                PhysicalPosition::new(-2100, -40),
+                PhysicalSize::new(1200, 700),
+                &work_area,
+            ),
+            PhysicalPosition::new(-1920, 0),
+        );
+    }
+
+    #[test]
     fn persists_only_safe_main_window_state() {
         use super::{
             main_window_state_flags, MAIN_WINDOW_FALLBACK_HEIGHT, MAIN_WINDOW_FALLBACK_WIDTH,
@@ -3046,11 +3366,11 @@ mod tests {
 
     #[test]
     fn remembers_the_active_main_surface_without_a_url_fragment() {
-        use super::MainSurfaceState;
+        use super::{main_surface, MainSurfaceState};
         let state = MainSurfaceState::new();
-        assert_eq!(state.get(), "settings");
-        state.set("sessions");
-        assert_eq!(state.get(), "sessions");
+        assert_eq!(state.get(), main_surface::SETTINGS);
+        state.set(main_surface::SESSIONS);
+        assert_eq!(state.get(), main_surface::SESSIONS);
     }
 
     #[test]
