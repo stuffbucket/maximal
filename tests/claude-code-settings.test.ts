@@ -776,6 +776,20 @@ describe("revertProxyBaseUrl", () => {
     expect(result.remainingKeys).toEqual([])
   })
 
+  it("surfaces a settings read failure instead of reporting a no-op", () => {
+    const victim = path.join(dir, "victim.json")
+    const content = JSON.stringify({
+      apiKeyHelper: TEST_HELPER,
+      _maximalHelper: TEST_MARKER,
+      env: { ANTHROPIC_BASE_URL: proxyBaseUrl() },
+    })
+    fs.writeFileSync(victim, content)
+    fs.symlinkSync(victim, settingsPath)
+
+    expect(() => revertProxyBaseUrl(settingsPath)).toThrow("symbolic link")
+    expect(fs.readFileSync(victim, "utf8")).toBe(content)
+  })
+
   it("preserves a marked helper that was edited after apply", () => {
     apply()
     const edited = { ...read(), apiKeyHelper: "echo 'changed-by-user'" }

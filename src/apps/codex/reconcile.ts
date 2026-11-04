@@ -64,23 +64,16 @@ export function reconcileCodexOnShutdown(
   filePath: string = getCodexConfigPath(),
 ): void {
   if (!intended) return
-  try {
-    const result = revertCodexProvider({ filePath })
-    if (result.status === "cleanup-required") {
-      consola.warn(
-        "codex: provider routing requires manual cleanup after shutdown",
-        result.reasons,
-      )
-    } else if (result.wrote) {
-      consola.info(
-        "codex: removed provider routing for shutdown"
-          + " (routing intent persists for next boot)",
-      )
-    }
-  } catch (error) {
+  const result = revertCodexProvider({ filePath })
+  if (result.status === "cleanup-required") {
     consola.warn(
-      "codex: failed to reconcile provider routing on shutdown",
-      error,
+      "codex: provider routing requires manual cleanup after shutdown",
+      result.reasons,
+    )
+  } else if (result.wrote) {
+    consola.info(
+      "codex: removed provider routing for shutdown"
+        + " (routing intent persists for next boot)",
     )
   }
 }
