@@ -471,7 +471,7 @@
   "native-notify-requests-body": "Maximal の設定で「リクエスト」を開いて回答してください。",
 
   "native-quit-title": "Maximal を終了しますか？",
-  "native-quit-body": "Maximal が停止し、開いている設定ウィンドウはすべて閉じます。",
+  "native-quit-body": "Maximal に接続しているすべてのアプリが切断されます。",
   "native-quit-confirm": "Maximal を終了",
   "native-quit-cancel": "キャンセル",
   "native-update-confirm-title": "Maximal をアップデートしますか？",

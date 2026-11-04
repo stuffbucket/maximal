@@ -471,7 +471,7 @@
   "native-notify-requests-body": "Apri Richieste nelle Impostazioni di Maximal per rispondere.",
 
   "native-quit-title": "Uscire da Maximal?",
-  "native-quit-body": "Maximal si arresterà e tutte le finestre delle Impostazioni aperte si chiuderanno.",
+  "native-quit-body": "Tutte le app connesse a Maximal verranno disconnesse.",
   "native-quit-confirm": "Esci da Maximal",
   "native-quit-cancel": "Annulla",
   "native-update-confirm-title": "Aggiornare Maximal?",

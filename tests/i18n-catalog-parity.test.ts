@@ -99,6 +99,7 @@ interface Catalog {
   "native-notify-startup-body-windows": string
   "native-notify-signin-body": string
   "native-notify-signin-body-windows": string
+  "native-quit-body": string
 }
 
 function loadCatalog(): Catalog {
@@ -139,6 +140,12 @@ describe("i18n catalog is the single source of truth", () => {
     for (const windowsCopy of [startupCopy, signInCopy]) {
       expect(windowsCopy).not.toMatch(/click here|menu[- ]bar|system tray/iu)
     }
+  })
+
+  test("quit warning explains the connection impact", () => {
+    expect(loadCatalog()["native-quit-body"]).toBe(
+      "Any apps connected to Maximal will be disconnected.",
+    )
   })
 })
 

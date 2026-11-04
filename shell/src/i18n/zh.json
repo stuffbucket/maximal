@@ -471,7 +471,7 @@
   "native-notify-requests-body": "在 Maximal 设置中打开“请求”进行回答。",
 
   "native-quit-title": "退出 Maximal?",
-  "native-quit-body": "Maximal 将停止,所有打开的设置窗口将关闭。",
+  "native-quit-body": "所有连接到 Maximal 的应用都将断开连接。",
   "native-quit-confirm": "退出 Maximal",
   "native-quit-cancel": "取消",
   "native-update-confirm-title": "更新 Maximal？",

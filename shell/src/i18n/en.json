@@ -471,7 +471,7 @@
   "native-notify-requests-body": "Open Requests in Maximal's settings to answer it.",
 
   "native-quit-title": "Quit Maximal?",
-  "native-quit-body": "Maximal will stop and any open Settings windows will close.",
+  "native-quit-body": "Any apps connected to Maximal will be disconnected.",
   "native-quit-confirm": "Quit Maximal",
   "native-quit-cancel": "Cancel",
   "native-update-confirm-title": "Update Maximal?",
