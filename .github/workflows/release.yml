@@ -35,7 +35,34 @@ concurrency:
 # assets for faster debug re-runs. Unset or any other value rebuilds
 # everything from the tag commit (the default).
 jobs:
+  # Release builds trust only ci.yml's required `test` job for this exact
+  # commit. Other CI lanes may keep running while independent release builds
+  # start; branch checks or an earlier release-PR head are not accepted.
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: ./.github/actions/setup-bun
+        with:
+          bun-version: 1.4.3
+
+      - name: Verify release identity and exact-SHA required-check evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_INPUT_TAG: ${{ inputs.tag }}
+          # A tag push can race queued main-push CI plus its 20-minute suites.
+          CI_EVIDENCE_WAIT_SECONDS: "1800"
+        run: bun scripts/verify-release-source.ts
+
   release:
+    needs: preflight
     runs-on: ubuntu-latest
     timeout-minutes: 20
     outputs:
@@ -71,51 +98,8 @@ jobs:
         with:
           bun-version: 1.4.3
 
-      - uses: ./.github/actions/setup-mise
-        with:
-          mise-version: v2026.9.5
-
       - name: Configure package registry
         run: printf '%s\n' 'registry=https://packagefeedproxy.microsoft.io/npm/' > "$HOME/.npmrc"
-
-      - name: Install dependencies
-        run: bun install
-
-      - name: Install isolated broker dependencies
-        run: |
-          mise trust packages/mcp-broker/mise.toml
-          mise -C packages/mcp-broker install
-          mise -C packages/mcp-broker exec -- pnpm install --frozen-lockfile
-
-      - name: Check isolated broker
-        run: |
-          mise -C packages/mcp-broker exec -- pnpm typecheck
-          mise -C packages/mcp-broker exec -- pnpm build
-          MAXIMAL_MCP_BROKER_BINARY="$PWD/packages/mcp-broker/dist/maximal-mcp-broker" mise -C packages/mcp-broker exec -- pnpm test
-
-      - name: Run linter
-        run: bun run lint:all
-
-      - name: Run type check
-        run: bun run typecheck
-
-      - name: Run tests
-        run: bun test
-
-      - name: Build
-        run: bun run build
-
-      # SBOM + license scan. Pure Bun script; no third-party
-      # action / npm dep introduced. Fails the job on a disallowed
-      # license — the policy is in `scripts/sbom.ts`. Attached to
-      # the release later in this job, after `changelogithub` creates
-      # the release record.
-      - name: Generate SBOM and run license scan
-        run: |
-          bun scripts/sbom.ts \
-            --root . \
-            --root packages/mcp-broker \
-            --output SBOM.cdx.json
 
       - name: Detect pre-release
         id: prerelease
@@ -172,17 +156,94 @@ jobs:
             bunx changelogithub "${FLAGS[@]}"
           fi
 
-      - name: Attach SBOM to release
-        uses: ./.github/actions/upload-release-asset
+  # The release source already passed generic CI. This lane performs only the
+  # release-specific dependency inventory and license policy check.
+  sbom:
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      MISE_DISABLE_TOOLS: rust
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/setup-bun
         with:
-          tag: ${{ github.ref_name }}
-          files: SBOM.cdx.json
+          bun-version: 1.4.3
+
+      - uses: ./.github/actions/setup-mise
+        with:
+          mise-version: v2026.9.5
+
+      - name: Configure package registry
+        run: printf '%s\n' 'registry=https://packagefeedproxy.microsoft.io/npm/' > "$HOME/.npmrc"
+
+      - name: Install production dependency graphs
+        run: |
+          bun install --frozen-lockfile
+          mise trust packages/mcp-broker/mise.toml
+          mise -C packages/mcp-broker install
+          mise -C packages/mcp-broker exec -- pnpm install --frozen-lockfile
+
+      - name: Generate SBOM and run license scan
+        run: |
+          bun scripts/sbom.ts \
+            --root . \
+            --root packages/mcp-broker \
+            --output SBOM.cdx.json
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-sbom
+          path: SBOM.cdx.json
+          if-no-files-found: error
+
+  # Build platform-neutral UI bytes once. Raw binaries and both in-repository
+  # desktop packagers consume this exact artifact; macos-builder remains an
+  # isolated signing boundary and builds its own producer input.
+  ui:
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/setup-bun
+        with:
+          bun-version: 1.4.3
+
+      - name: Configure package registry
+        run: printf '%s\n' 'registry=https://packagefeedproxy.microsoft.io/npm/' > "$HOME/.npmrc"
+
+      - name: Install UI dependencies
+        run: |
+          bun install --frozen-lockfile
+          (cd shell && bun install --frozen-lockfile)
+
+      - name: Build web UI and embed manifest
+        run: |
+          bun run build:ui
+          bun run scripts/gen-ui-embed.ts
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: build-ui
+          path: |
+            shell/dist
+            src/generated/ui-embed.ts
+          if-no-files-found: error
 
   # Apple Silicon is the only macOS target. Intel is not supported.
   binaries:
-    needs: release
+    needs:
+      - preflight
+      - ui
     permissions:
-      contents: write
+      contents: read
     # Public repo policy: no macOS runners. Bun's `--compile` cross-
     # compiles both targets from a Linux host. Windows binaries also cross-compile
     # cleanly from Linux (the resulting .exe is identical to one built
@@ -192,10 +253,10 @@ jobs:
       matrix:
         include:
           - { target: bun-darwin-arm64, artifact: darwin-arm64, ext: tar.gz }
-          - { target: bun-windows-x64,  artifact: windows-x64,  ext: zip    }
+          - { target: bun-windows-x64, artifact: windows-x64, ext: zip }
           # The Linux binaries also go into the Debian packages (linux-deb).
-          - { target: bun-linux-x64,    artifact: linux-x64,    ext: tar.gz }
-          - { target: bun-linux-arm64,  artifact: linux-arm64,  ext: tar.gz }
+          - { target: bun-linux-x64, artifact: linux-x64, ext: tar.gz }
+          - { target: bun-linux-arm64, artifact: linux-arm64, ext: tar.gz }
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -225,30 +286,16 @@ jobs:
           mise -C packages/mcp-broker install
           mise -C packages/mcp-broker exec -- pnpm install --frozen-lockfile
 
-      # The settings UI (shell/ui/settings) is a React/TSX app whose deps
-      # (react, react-dom, @tauri-apps/api) live in shell/package.json, not
-      # the root manifest. `build:ui` bundles it, so its node_modules must
-      # be present or Bun fails with "Could not resolve: react". The root
-      # install above does NOT cover shell/ (no workspaces), so install it.
-      - name: Install shell UI dependencies
-        working-directory: shell
-        run: bun install --frozen-lockfile
+      - name: Download the build-once UI
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: build-ui
+          path: .
 
       - name: Resolve version
         id: ver
         shell: bash
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-
-      # The settings + dashboard UIs are embedded into the compiled binary
-      # (served at /ui/*). Build them and regenerate the embed manifest so
-      # `bun build --compile` below picks the assets up. Without this the
-      # binary ships no UI and /ui/* 503s (cf. issue #132).
-      - name: Build web UI (embedded into the binary)
-        shell: bash
-        run: |
-          set -euo pipefail
-          bun run build:ui
-          bun run scripts/gen-ui-embed.ts
 
       - name: Compile binaries
         shell: bash
@@ -300,11 +347,6 @@ jobs:
             --target="$BUN_TARGET" \
             --outfile="$GITHUB_WORKSPACE/$BROKER_OUT"
 
-      - name: Sign (Windows) [DEFERRED]
-        if: false
-        shell: pwsh
-        run: Write-Host "Windows signing is disabled"
-
       - name: Package
         shell: bash
         run: |
@@ -326,18 +368,56 @@ jobs:
             sha256sum "${BASE}.${{ matrix.ext }}" > "${BASE}.${{ matrix.ext }}.sha256"
           fi
 
-      - name: Attach to GitHub Release
-        uses: ./.github/actions/upload-release-asset
+      - name: Upload raw archive for packaging and verification
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-binary-${{ matrix.artifact }}
+          path: dist-release
+          if-no-files-found: error
+
+  # One job owns attachment of the raw archives and SBOM. Downstream package
+  # jobs consume workflow artifacts rather than using the mutable draft as a
+  # build transport.
+  raw-assets:
+    needs:
+      - release
+      - sbom
+      - binaries
+      - smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-binary-*
+          path: dist-release
+          merge-multiple: true
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-sbom
+          path: dist-release
+
+      - uses: ./.github/actions/upload-release-asset
         with:
           tag: ${{ github.ref_name }}
-          files: |
-            dist-release/maximal-v${{ steps.ver.outputs.version }}-${{ matrix.artifact }}.${{ matrix.ext }}
-            dist-release/maximal-v${{ steps.ver.outputs.version }}-${{ matrix.artifact }}.${{ matrix.ext }}.sha256
+          files: dist-release/*
 
   checksums:
+    # Wait until every producer has attached its per-asset checksum. This also
+    # prevents SHA256SUMS from depending on whichever draft mutations happened
+    # to win a race.
     needs:
-      - binaries
+      - raw-assets
       - linux-deb
+      - windows-installer
+      - windows-msi
+      - windows-shell
+      - macos-dmg
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -374,26 +454,15 @@ jobs:
   smoke:
     needs: binaries
     permissions:
-      # write, not read: this job `gh release download`s from the release
-      # while it's still a DRAFT, and draft releases are invisible to a
-      # read-only token (the download fails with "release not found").
-      contents: write
+      contents: read
     runs-on: windows-2022
     timeout-minutes: 20
     steps:
-      - name: Resolve version
-        id: ver
-        shell: bash
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-
       - name: Download artifact
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          gh release download "${{ github.ref_name }}" \
-            --repo "${{ github.repository }}" \
-            --pattern "maximal-v${{ steps.ver.outputs.version }}-windows-x64.zip"
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-binary-windows-x64
+          path: .
 
       - name: Unpack
         shell: pwsh
@@ -564,7 +633,9 @@ jobs:
           assets="$(gh release view "$TAG" --repo "$REPO" --json assets \
             --jq '.assets[].name' 2>/dev/null || true)"
           has() { grep -Fxq "$1" <<<"$assets"; }
-          if { has "Maximal.dmg" || has "maximal-${TAG}-darwin-arm64.dmg"; } \
+          if { has "Maximal.dmg" \
+              || { has "maximal-${TAG}-darwin-arm64.dmg" \
+                && has "maximal-${TAG}-darwin-arm64.dmg.sha256"; }; } \
             && has "$TARBALL" && has "$TARBALL.sig" && has "$TARBALL.sha256"; then
             echo "The DMG and ${TARBALL} (+ .sig, .sha256) are already on the draft."
             echo "built=true" >> "$GITHUB_OUTPUT"
@@ -602,7 +673,7 @@ jobs:
           }
           has() { grep -Fxq "$1" <<<"$ASSETS"; }
           built() {
-            { has "$SRC" || has "$DST"; } \
+            { has "$SRC" || { has "$DST" && has "$DST.sha256"; }; } \
               && has "$TARBALL" && has "$TARBALL.sig" && has "$TARBALL.sha256"
           }
           echo "Dispatching the private macOS builder for ${REPO} at ${TAG}…"
@@ -620,7 +691,10 @@ jobs:
           done
           if [ "$ok" -ne 1 ]; then
             missing=""
-            { has "$SRC" || has "$DST"; } || missing="$missing $SRC"
+            if ! has "$SRC"; then
+              has "$DST" || missing="$missing $DST"
+              has "$DST.sha256" || missing="$missing $DST.sha256"
+            fi
             for f in "$TARBALL" "$TARBALL.sig" "$TARBALL.sha256"; do
               has "$f" || missing="$missing $f"
             done
@@ -636,10 +710,16 @@ jobs:
           set -euo pipefail
           SRC="Maximal.dmg"
           DST="maximal-${TAG}-darwin-arm64.dmg"
-          if ! gh release view "$TAG" --repo "$REPO" --json assets \
-            --jq '.assets[].name' | grep -Fxq "$SRC"; then
-            echo "${DST} is already normalized."
-            exit 0
+          assets="$(gh release view "$TAG" --repo "$REPO" --json assets \
+            --jq '.assets[].name')"
+          if ! grep -Fxq "$SRC" <<<"$assets"; then
+            if grep -Fxq "$DST" <<<"$assets" \
+              && grep -Fxq "$DST.sha256" <<<"$assets"; then
+              echo "${DST} (+ .sha256) is already normalized."
+              exit 0
+            fi
+            echo "::error::Neither ${SRC} nor a complete ${DST} (+ .sha256) is attached."
+            exit 1
           fi
           # Normalize the asset name and checksum before publication.
           tmp="$(mktemp -d)"
@@ -669,7 +749,7 @@ jobs:
 
   # Windows PowerShell installer — install.ps1 shipped verbatim + sha256.
   windows-installer:
-    needs: binaries
+    needs: release
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -692,8 +772,9 @@ jobs:
             exit 0
           fi
           ASSETS="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null || echo '')"
-          if grep -Fxq "install.ps1" <<<"$ASSETS"; then
-            echo "Reuse enabled and install.ps1 already attached to $TAG — skipping."
+          if grep -Fxq "install.ps1" <<<"$ASSETS" \
+            && grep -Fxq "install.ps1.sha256" <<<"$ASSETS"; then
+            echo "Reuse enabled and install.ps1 (+ .sha256) already attached to $TAG — skipping."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "Reuse enabled but install.ps1 not yet present on $TAG — staging."
@@ -718,10 +799,12 @@ jobs:
             dist-release/install.ps1
             dist-release/install.ps1.sha256
 
-  # Windows MSI (WiX, per-user). Wraps the windows-x64 binary the
-  # `binaries` job attached to this release.
+  # Windows MSI (WiX, per-user). Wraps the windows-x64 workflow artifact
+  # produced by `binaries`.
   windows-msi:
-    needs: binaries
+    needs:
+      - release
+      - binaries
     runs-on: windows-2022
     timeout-minutes: 20
     permissions:
@@ -746,8 +829,9 @@ jobs:
             exit 0
           fi
           ASSETS="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null || echo '')"
-          if grep -Fxq "$MSI" <<<"$ASSETS"; then
-            echo "Reuse enabled and $MSI already attached to $TAG — skipping build + upload."
+          if grep -Fxq "$MSI" <<<"$ASSETS" \
+            && grep -Fxq "$MSI.sha256" <<<"$ASSETS"; then
+            echo "Reuse enabled and $MSI (+ .sha256) already attached to $TAG — skipping build + upload."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "Reuse enabled but $MSI not yet present on $TAG — building."
@@ -762,19 +846,17 @@ jobs:
 
       - name: Download windows-x64 zip + sha256
         if: steps.skip.outputs.skip != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-binary-windows-x64
+          path: dist-bin
+
+      - name: Verify windows-x64 SHA-256
+        if: steps.skip.outputs.skip != 'true'
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p dist-bin
           ZIP="maximal-${TAG}-windows-x64.zip"
-          gh release download "$TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --pattern "$ZIP" \
-            --pattern "$ZIP.sha256" \
-            --dir dist-bin
-          echo "Verifying SHA-256"
           ( cd dist-bin && sha256sum -c "$ZIP.sha256" )
 
       - name: Unpack zip
@@ -986,7 +1068,10 @@ jobs:
 
   # Windows desktop installer built around the release sidecars.
   windows-shell:
-    needs: binaries
+    needs:
+      - release
+      - binaries
+      - ui
     runs-on: windows-2022
     timeout-minutes: 20
     # Holds the updater signing secrets; the environment deploys from v* tags
@@ -1018,8 +1103,10 @@ jobs:
             exit 0
           fi
           ASSETS="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null || echo '')"
-          if grep -Fxq "$SETUP" <<<"$ASSETS" && grep -Fxq "$SETUP.sig" <<<"$ASSETS"; then
-            echo "Reuse enabled and $SETUP (+ .sig) already attached — skipping."
+          if grep -Fxq "$SETUP" <<<"$ASSETS" \
+            && grep -Fxq "$SETUP.sha256" <<<"$ASSETS" \
+            && grep -Fxq "$SETUP.sig" <<<"$ASSETS"; then
+            echo "Reuse enabled and $SETUP (+ .sha256, .sig) already attached — skipping."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
@@ -1061,27 +1148,28 @@ jobs:
         shell: bash
         run: bun install --frozen-lockfile
 
-      - name: Build web UI + ui-embed manifest
+      - name: Download the build-once UI
         if: steps.skip.outputs.skip != 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          bun run build:ui
-          bun run scripts/gen-ui-embed.ts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: build-ui
+          path: .
 
-      # Reuse the exact sidecars the `binaries` job built + attached, so the
-      # tray app embeds the identical release executables.
-      - name: Download windows-x64 sidecars from the draft
+      # Reuse the exact sidecars the `binaries` job built, so the tray app
+      # embeds the identical release executables without the draft as transport.
+      - name: Download windows-x64 sidecars
         if: steps.skip.outputs.skip != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-binary-windows-x64
+          path: dist-bin
+
+      - name: Verify windows-x64 sidecars
+        if: steps.skip.outputs.skip != 'true'
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p dist-bin
           ZIP="maximal-${TAG}-windows-x64.zip"
-          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
-            --pattern "$ZIP" --pattern "$ZIP.sha256" --dir dist-bin
           ( cd dist-bin && sha256sum -c "$ZIP.sha256" )
 
       - name: Place sidecars as Tauri externalBin inputs
@@ -1240,12 +1328,15 @@ jobs:
   # Debian 13 and Ubuntu 26.04 too, on a native runner per architecture
   # (WebKitGTK doesn't cross-compile from the x64 runner).
   linux-deb:
-    needs: binaries
+    needs:
+      - release
+      - binaries
+      - ui
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { arch: amd64, artifact: linux-x64,   runner: ubuntu-24.04     }
+          - { arch: amd64, artifact: linux-x64, runner: ubuntu-24.04 }
           - { arch: arm64, artifact: linux-arm64, runner: ubuntu-24.04-arm }
     runs-on: ${{ matrix.runner }}
     # A cold Rust release build of the tray app takes longer than 20 minutes.
@@ -1267,16 +1358,19 @@ jobs:
 
       # The same binaries as the raw archive, so the version and channel
       # stamped by `binaries` are what apt installs.
+      - name: Download the release binaries
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-binary-${{ matrix.artifact }}
+          path: dist-bin
+
       - name: Build the maximal package from the release binaries
         env:
-          GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
           set -euo pipefail
           TARBALL="maximal-${TAG}-${ARTIFACT}.tar.gz"
-          mkdir -p dist-bin dist-release
-          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
-            --pattern "$TARBALL" --pattern "$TARBALL.sha256" --dir dist-bin
+          mkdir -p dist-release
           ( cd dist-bin && sha256sum -c "$TARBALL.sha256" && tar -xzf "$TARBALL" )
           bash build/linux/build-maximal-deb.sh "$VERSION" "$ARCH" dist-bin dist-release
 
@@ -1288,17 +1382,8 @@ jobs:
             build-essential file libayatana-appindicator3-dev librsvg2-dev \
             libssl-dev libwebkit2gtk-4.1-dev libxdo-dev
 
-      # rustup is preinstalled on the Ubuntu images; the version is mise.toml's.
-      - name: Install pinned Rust
-        run: |
-          set -euo pipefail
-          version="$(sed -nE 's/^rust *= *"([^"]+)".*/\1/p' mise.toml)"
-          if [ -z "$version" ]; then
-            echo "::error::no rust pin in mise.toml"
-            exit 1
-          fi
-          rustup toolchain install "$version" --profile minimal --no-self-update
-          echo "RUSTUP_TOOLCHAIN=$version" >> "$GITHUB_ENV"
+      - name: Set up Rust
+        uses: ./.github/actions/setup-rust-linux
 
       - uses: ./.github/actions/setup-bun
         with:
@@ -1307,15 +1392,15 @@ jobs:
       - name: Configure package registry
         run: printf '%s\n' 'registry=https://packagefeedproxy.microsoft.io/npm/' > "$HOME/.npmrc"
 
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
       - name: Install shell dependencies
         working-directory: shell
         run: bun install --frozen-lockfile
 
-      - name: Build web UI
-        run: bun run build:ui
+      - name: Download the build-once UI
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: build-ui
+          path: .
 
       # tauri.linux.conf.json names the binary maximal-desktop, adds the tray
       # library and installs the apt marker. `externalBin: []` keeps the
@@ -1370,6 +1455,13 @@ jobs:
             dist-release/maximal-desktop_${{ steps.ver.outputs.version }}_${{ matrix.arch }}.deb
             dist-release/maximal-desktop_${{ steps.ver.outputs.version }}_${{ matrix.arch }}.deb.sha256
 
+      - name: Upload packages for smoke tests
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-debs-${{ matrix.arch }}
+          path: dist-release
+          if-no-files-found: error
+
   # Install both packages in clean Debian 13, Ubuntu 24.04 and Ubuntu 26.04
   # containers on both architectures: apt resolves every dependency, the CLI
   # reports its version, the proxy answers on 127.0.0.1 and logs an available
@@ -1386,9 +1478,7 @@ jobs:
     runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     timeout-minutes: 20
     permissions:
-      # write, not read: downloads from the DRAFT release, which a read-only
-      # token can't see.
-      contents: write
+      contents: read
     env:
       TAG: ${{ github.ref_name }}
       ARCH: ${{ matrix.arch }}
@@ -1396,19 +1486,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Download the packages from the draft
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          VERSION="${TAG#v}"
-          mkdir -p debs
-          for pkg in maximal maximal-desktop; do
-            deb="${pkg}_${VERSION}_${ARCH}.deb"
-            gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
-              --pattern "$deb" --pattern "$deb.sha256" --dir debs
-          done
-          ( cd debs && sha256sum -c ./*.sha256 )
+      - name: Download the packages from the build lane
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-debs-${{ matrix.arch }}
+          path: debs
+
+      - name: Verify package checksums
+        run: ( cd debs && sha256sum -c ./*.sha256 )
 
       - name: Install and run in ${{ matrix.image }}
         run: |
@@ -1421,6 +1506,7 @@ jobs:
   publish:
     needs:
       - release
+      - raw-assets
       - checksums
       - smoke
       - windows-installer

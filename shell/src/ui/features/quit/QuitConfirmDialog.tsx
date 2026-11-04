@@ -3,7 +3,10 @@ import { useEffect, useState } from "react";
 
 import { t } from "../../../i18n";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
-import { subscribeToQuitRequests } from "./quit-requests";
+import {
+  acknowledgeQuitRequest,
+  subscribeToQuitRequests,
+} from "./quit-requests";
 
 export function QuitConfirmDialog(): JSX.Element {
   const [open, setOpen] = useState(false);
@@ -11,20 +14,19 @@ export function QuitConfirmDialog(): JSX.Element {
 
   useEffect(() => {
     let disposed = false;
-    let unlisten: (() => void) | undefined;
-
-    void subscribeToQuitRequests(() => {
+    const subscription = subscribeToQuitRequests(() => {
       if (!disposed) setOpen(true);
-    }).then((stopListening) => {
-      if (disposed) stopListening();
-      else unlisten = stopListening;
     });
 
     return () => {
       disposed = true;
-      unlisten?.();
+      subscription.unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    if (open) void acknowledgeQuitRequest();
+  }, [open]);
 
   const confirm = async (): Promise<void> => {
     setBusy(true);

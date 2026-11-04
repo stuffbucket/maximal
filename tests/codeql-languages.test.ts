@@ -5,6 +5,7 @@ import path from "node:path"
 import {
   ALL_LANGUAGES,
   isIgnored,
+  isVersionOnlyPackageJsonChange,
   languagesFor,
   readPathsIgnore,
 } from "../scripts/codeql-languages"
@@ -22,6 +23,42 @@ describe("isIgnored", () => {
     ["src/server.ts", false],
   ])("%s → %p", (file, ignored) => {
     expect(isIgnored(file, IGNORE)).toBe(ignored)
+  })
+})
+
+describe("isVersionOnlyPackageJsonChange", () => {
+  test("accepts a changed version with otherwise equal semantic content", () => {
+    expect(
+      isVersionOnlyPackageJsonChange({
+        before: '{"name":"maximal","version":"1.0.0","private":true}',
+        after: `{
+          "private": true,
+          "version": "1.0.1",
+          "name": "maximal"
+        }`,
+      }),
+    ).toBe(true)
+  })
+
+  test("rejects substantive, missing-version, and malformed changes", () => {
+    expect(
+      isVersionOnlyPackageJsonChange({
+        before: '{"version":"1.0.0","scripts":{"test":"bun test"}}',
+        after: '{"version":"1.0.1","scripts":{"test":"bun test --watch"}}',
+      }),
+    ).toBe(false)
+    expect(
+      isVersionOnlyPackageJsonChange({
+        before: '{"name":"maximal"}',
+        after: '{"name":"maximal","version":"1.0.1"}',
+      }),
+    ).toBe(false)
+    expect(
+      isVersionOnlyPackageJsonChange({
+        before: '{"version":"1.0.0"}',
+        after: "not json",
+      }),
+    ).toBe(false)
   })
 })
 
@@ -88,6 +125,52 @@ describe("languagesFor", () => {
     ])
   })
 
+  test("a proven package version-only release change does not scan JS/TS", () => {
+    const versionOnly = {
+      before: '{"name":"maximal","version":"1.0.0"}',
+      after: '{"name":"maximal","version":"1.0.1"}',
+    }
+
+    expect(
+      languagesFor(
+        [".release-please-manifest.json", "CHANGELOG.md", "package.json"],
+        IGNORE,
+        versionOnly,
+      ),
+    ).toEqual([])
+    expect(
+      languagesFor(
+        ["package.json", "shell/src-tauri/src/lib.rs"],
+        IGNORE,
+        versionOnly,
+      ),
+    ).toEqual(["rust"])
+    expect(
+      languagesFor(["package.json", "src/server.ts"], IGNORE, versionOnly),
+    ).toEqual(["javascript-typescript"])
+  })
+
+  test("a substantive or uncertain package change scans JS/TS", () => {
+    const substantive = {
+      before: '{"version":"1.0.0","dependencies":{"zod":"4.0.0"}}',
+      after: '{"version":"1.0.1","dependencies":{"zod":"4.1.0"}}',
+    }
+    const malformed = {
+      before: '{"version":"1.0.0"}',
+      after: "not json",
+    }
+
+    expect(languagesFor(["package.json"], IGNORE, substantive)).toEqual([
+      "javascript-typescript",
+    ])
+    expect(languagesFor(["package.json"], IGNORE, malformed)).toEqual([
+      "javascript-typescript",
+    ])
+    expect(languagesFor(["package.json"], IGNORE)).toEqual([
+      "javascript-typescript",
+    ])
+  })
+
   test("changing the CodeQL setup itself rescans everything", () => {
     for (const file of [
       ".github/codeql/codeql-config.yml",
@@ -100,6 +183,51 @@ describe("languagesFor", () => {
 
   test('"all" (unknown or too-large diff, schedule, dispatch) rescans everything', () => {
     expect(languagesFor("all", IGNORE)).toEqual(ALL_LANGUAGES)
+    expect(
+      languagesFor("all", IGNORE, {
+        before: '{"version":"1.0.0"}',
+        after: '{"version":"1.0.1"}',
+      }),
+    ).toEqual(ALL_LANGUAGES)
+  })
+})
+
+describe("the CodeQL workflow", () => {
+  const workflow = fs.readFileSync(
+    path.join(import.meta.dir, "..", ".github", "workflows", "codeql.yml"),
+    "utf8",
+  )
+
+  test("classifies package changes from complete before and after contents", () => {
+    expect(workflow).toContain("contents/package.json?ref=$base")
+    expect(workflow).toContain("contents/package.json?ref=$head")
+    expect(workflow).toContain("--package-before package-before.json")
+    expect(workflow).toContain("--package-after package-after.json")
+  })
+
+  test("falls back to ordinary path classification when content is unavailable", () => {
+    expect(workflow).toContain("rm -f package-before.json package-after.json")
+    expect(workflow).toContain(
+      "Could not compare package.json contents; scanning JavaScript/TypeScript",
+    )
+  })
+
+  test("keeps merge-group ranges and scheduled or manual full scans", () => {
+    expect(workflow).toContain("merge_group:")
+    expect(workflow).toContain('merge_group)  range="$MG_BASE...$MG_HEAD"')
+    expect(workflow).toContain("schedule:")
+    expect(workflow).toContain("workflow_dispatch:")
+    expect(workflow).toContain('*)            range=""')
+  })
+
+  test("fails closed when a main push is not a fast-forward", () => {
+    expect(workflow).toContain(
+      `if [ "$EVENT" = "push" ] && [ "$(jq -r '.status // ""' "$comparison")" != "ahead" ]`,
+    )
+    expect(workflow).toContain(
+      "Non-fast-forward push comparison; scanning all languages",
+    )
+    expect(workflow).toContain("echo ALL > changed.txt")
   })
 })
 

@@ -118,7 +118,7 @@ describe("unified Settings, Dashboard, Sessions & Appearance contract", () => {
       ".with_filter(|label| label == SETTINGS_WINDOW_LABEL)",
     )
     expect(SHELL_LIB_RS).toContain(".skip_initial_state(SETTINGS_WINDOW_LABEL)")
-    expect(SHELL_LIB_RS).toContain("fn restore_and_present_main_window")
+    expect(SHELL_LIB_RS).toContain("fn restore_main_window(")
     expect(SHELL_LIB_RS).toContain("tauri::async_runtime::spawn_blocking")
     expect(SHELL_LIB_RS).toContain(
       "window_after_barrier.restore_state(main_window_state_flags())",
@@ -146,10 +146,19 @@ describe("unified Settings, Dashboard, Sessions & Appearance contract", () => {
     expect(SHELL_LIB_RS).toContain("install_windows_jump_list")
     expect(SHELL_LIB_RS).toContain("tauri::async_runtime::spawn(async move {")
     expect(SHELL_LIB_RS).toContain("app.run_on_main_thread(move ||")
-    expect(SHELL_LIB_RS).toContain("CloseWindowAction::Quit")
+    expect(SHELL_LIB_RS).toContain("CloseWindowAction::ConfirmQuit")
+    expect(SHELL_LIB_RS).toContain(
+      "CloseWindowAction::ConfirmQuit => request_quit(&app_clone)",
+    )
+    expect(SHELL_LIB_RS).not.toContain(
+      "CloseWindowAction::ConfirmQuit => exit_gracefully",
+    )
+    expect(SHELL_LIB_RS).toContain("ensure_windows_taskbar_window(&ready_app)")
+    expect(SHELL_LIB_RS).toContain("SW_SHOWMINNOACTIVE")
     expect(SIDECAR_RUNTIME_RS).toContain("request_sidecar_shutdown(app).await")
     expect(SIDECAR_RUNTIME_RS).toContain('http_url("/_internal/shutdown")')
     expect(SHELL_CARGO_TOML).toContain('windows = { version = "0.62"')
+    expect(SHELL_CARGO_TOML).toContain('"Win32_UI_WindowsAndMessaging"')
     expect(WINDOWS_JUMP_LIST_RS).toContain("ICustomDestinationList")
     expect(WINDOWS_JUMP_LIST_RS).toContain("AddUserTasks")
     expect(SHELL_LIB_RS).toContain("menu_id::SESSIONS")

@@ -71,3 +71,49 @@ describe("Apps shell contract", () => {
     })
   })
 })
+
+describe("Claude Code install offer (Windows WinGet)", () => {
+  test("starts only from the card's button and confirm, and shows progress and failures", () => {
+    const offer = source("shell/src/ui/features/apps/InstallOffer.tsx")
+    const hook = source("shell/src/ui/features/apps/useClaudeCodeInstall.ts")
+    const card = source("shell/src/ui/features/apps/AppCard.tsx")
+    const client = source("shell/src/proxy/client.ts")
+
+    expect(card).toContain("<InstallOffer")
+    expect(card).not.toContain("copyInstall")
+    expect(offer).toContain('install.automatic === "winget"')
+    expect(offer).toContain("setConfirmOpen(true)")
+    expect(offer).toContain("<ConfirmDialog")
+    expect(offer).toContain('role="status"')
+    expect(offer).toContain('t("apps-install-failed-title")')
+    expect(hook).toContain('path: "/settings/api/apps/claude-code/install"')
+    expect(hook).toContain('body: { method: "winget" }')
+    expect(hook).toContain("requestSequence")
+    expect(hook).toContain("humanize(result.error)")
+    expect(hook).toContain("window.setTimeout(() => void poll(), POLL_MS)")
+    expect(hook).not.toContain("setInterval")
+    expect(offer).toContain("automatic && !running && !succeeded")
+    expect(offer).toContain('<div className="app-card__conflict-text">')
+    expect(offer).not.toContain('<span className="app-card__conflict-text">')
+    expect(client).toContain('kind: "claude-code-install-start"')
+    expect(client).toContain('kind: "claude-code-install-status"')
+    expect(client).toContain(
+      "export type { AuthStatus, ClaudeCodeInstallStatus, UpstreamRejection }",
+    )
+    expect(client).not.toContain("interface ClaudeCodeInstallStatus")
+  })
+
+  test("every install string the offer renders exists in the English base catalog", () => {
+    const offer = source("shell/src/ui/features/apps/InstallOffer.tsx")
+    const base = JSON.parse(source("shell/src/i18n/en.json")) as Record<
+      string,
+      string
+    >
+    const used = new Set(
+      [...offer.matchAll(/t\("(apps-install-[a-z-]+)"/gu)].map((m) => m[1]),
+    )
+    expect(used.size).toBeGreaterThan(8)
+    const missing = [...used].filter((key) => !(key in base))
+    expect(missing).toEqual([])
+  })
+})

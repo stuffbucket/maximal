@@ -9,10 +9,16 @@ import type { Context } from "hono"
 
 import { Hono } from "hono"
 
+import {
+  CLAUDE_CODE_INSTALL_REFUSAL_MESSAGE,
+  claudeCodeInstaller,
+} from "~/apps/claude-code/install"
 import { getAllApps, getApp } from "~/apps/registry"
 import {
   AppEntry,
   AppsListResponse,
+  ClaudeCodeInstallRequest,
+  ClaudeCodeInstallStatus,
   ClaudeCodeToggleRequest,
   CodexToggleRequest,
   ClaudeDesktopToggleRequest,
@@ -89,6 +95,37 @@ appsRoutes.post("/claude-code/toggle", async (c) => {
     return forwardError(c, error)
   }
 })
+
+// Starts WinGet Claude Code install in the background. Only on the explicit
+// request of the user (the body names the method); the status reports progress.
+appsRoutes.post("/claude-code/install", async (c) => {
+  try {
+    const body: unknown = await c.req.json().catch(() => null)
+    const parsed = ClaudeCodeInstallRequest.safeParse(body)
+    if (!parsed.success) {
+      throw httpError("Expected the install method winget", 400)
+    }
+    const result = await claudeCodeInstaller.start()
+    if (!result.started && result.refusal !== "running") {
+      throw httpError(CLAUDE_CODE_INSTALL_REFUSAL_MESSAGE[result.refusal], 409)
+    }
+    return respondValidated(
+      c,
+      { schema: ClaudeCodeInstallStatus, label: "Claude Code install" },
+      result.status,
+    )
+  } catch (error) {
+    return forwardError(c, error)
+  }
+})
+
+appsRoutes.get("/claude-code/install", (c) =>
+  respondValidated(
+    c,
+    { schema: ClaudeCodeInstallStatus, label: "Claude Code install" },
+    claudeCodeInstaller.status(),
+  ),
+)
 
 appsRoutes.post("/codex/toggle", async (c) => {
   try {

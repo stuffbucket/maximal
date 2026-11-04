@@ -24,6 +24,7 @@ permissions = [
   "allow-set-locale",
   "allow-get-dock-visibility",
   "allow-set-dock-visibility",
+  "allow-has-quit-request",
   "allow-take-quit-request",
   "allow-confirm-quit",
   "allow-update-installs-in-place",
@@ -87,8 +88,13 @@ description = "Update and persist the Dock / taskbar visibility preference ('alw
 commands.allow = ["set_dock_visibility"]
 
 [[permission]]
+identifier = "allow-has-quit-request"
+description = "Check for a pending native Quit request before rendering the app-styled Windows confirmation dialog."
+commands.allow = ["has_quit_request"]
+
+[[permission]]
 identifier = "allow-take-quit-request"
-description = "Consume a pending native Quit request in the app-styled Windows confirmation dialog."
+description = "Acknowledge a pending native Quit request after rendering the app-styled Windows confirmation dialog."
 commands.allow = ["take_quit_request"]
 
 [[permission]]

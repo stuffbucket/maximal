@@ -133,7 +133,7 @@ export function createCodexApp(options: CreateCodexAppOptions = {}): ClientApp {
         })),
         install:
           installations.length === 0 ?
-            { method: "npm", command: CODEX_INSTALL_COMMAND }
+            { method: "npm", command: CODEX_INSTALL_COMMAND, automatic: null }
           : null,
         conflict: conflict ?? inspected.conflict,
       })

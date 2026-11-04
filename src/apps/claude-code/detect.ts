@@ -29,6 +29,7 @@ export type ClaudeInstallSource =
   | "npm-global"
   | "local-bin"
   | "claude-local"
+  | "winget"
   | "path"
 
 export interface ClaudeInstall {
@@ -42,6 +43,8 @@ export interface DetectOptions {
   homeDir?: string
   pathDirs?: Array<string>
   npmPrefix?: string | null
+  /** Windows: where WinGet keeps its command links (`%LOCALAPPDATA%`). */
+  localAppData?: string
   /** Defaults to running `<bin> --version` (cached per binary). */
   readVersion?: (binPath: string) => Promise<string | null> | string | null
   platform?: NodeJS.Platform
@@ -49,6 +52,56 @@ export interface DetectOptions {
 
 /** A found binary whose version hasn't been read yet. */
 type FoundInstall = Omit<ClaudeInstall, "version">
+
+/** WinGet's command links for portable packages (Claude Code is one). A
+ *  running Maximal keeps the PATH it started with, so a link WinGet just made
+ *  isn't on PATH until a restart; the probe finds it directly. */
+export function wingetLinksDir(localAppData: string): string {
+  return path.join(localAppData, "Microsoft", "WinGet", "Links")
+}
+
+/** `%LOCALAPPDATA%` (or the injected override), where WinGet's links live. */
+export function resolveLocalAppDataDir(options: {
+  home: string
+  override?: string
+  homeOverridden: boolean
+  environmentLocalAppData?: string
+}): string {
+  const {
+    home,
+    override,
+    homeOverridden,
+    environmentLocalAppData = process.env.LOCALAPPDATA,
+  } = options
+  if (override !== undefined) return override
+  // An alternate home is an isolation boundary: never escape it through the
+  // real process user's LOCALAPPDATA unless the caller explicitly supplies it.
+  if (homeOverridden) return path.join(home, "AppData", "Local")
+  return environmentLocalAppData ?? path.join(home, "AppData", "Local")
+}
+
+function sameDirectory(left: string, right: string, isWin: boolean): boolean {
+  const normalize = (value: string): string => {
+    const resolved = path.resolve(value)
+    return isWin ? resolved.toLowerCase() : resolved
+  }
+  return normalize(left) === normalize(right)
+}
+
+function wingetProbeDirs(
+  isWin: boolean,
+  localAppData: string,
+): Array<{ dir: string; origin: ClaudeInstallSource }> {
+  return isWin ? [{ dir: wingetLinksDir(localAppData), origin: "winget" }] : []
+}
+
+function pathDirSource(
+  dir: string,
+  wingetLinks: string,
+  isWin: boolean,
+): ClaudeInstallSource {
+  return isWin && sameDirectory(dir, wingetLinks, isWin) ? "winget" : "path"
+}
 
 function claudeBasenames(platform: NodeJS.Platform): Array<string> {
   if (platform === "win32") {
@@ -234,6 +287,11 @@ export async function detectClaudeInstalls(
   const platform = options.platform ?? process.platform
   const isWin = platform === "win32"
   const basenames = claudeBasenames(platform)
+  const localAppData = resolveLocalAppDataDir({
+    home,
+    override: options.localAppData,
+    homeOverridden: options.homeDir !== undefined,
+  })
   const seen = new Set<string>()
 
   const npmBinOf = (prefix: string): string =>
@@ -242,9 +300,11 @@ export async function detectClaudeInstalls(
   const explicitNpm = options.npmPrefix
   const phase1NpmBin =
     typeof explicitNpm === "string" ? npmBinOf(explicitNpm) : null
+  const wingetLinks = wingetLinksDir(localAppData)
   for (const dir of pathDirs) {
+    const origin = pathDirSource(dir, wingetLinks, isWin)
     const inst = inspectDir(
-      { dir, origin: "path" },
+      { dir, origin },
       { home, npmBin: phase1NpmBin, seen, isWin, basenames },
     )
     if (inst) return withVersions([inst], readVersion)
@@ -266,6 +326,7 @@ export async function detectClaudeInstalls(
     { dir: path.join(home, ".claude", "local"), origin: "claude-local" },
     { dir: path.join(home, ".claude", "bin"), origin: "claude-local" },
     { dir: path.join(home, ".claude"), origin: "claude-local" },
+    ...wingetProbeDirs(isWin, localAppData),
   )
   if (npmBin) {
     probeDirs.push({ dir: npmBin, origin: "npm-global" })
