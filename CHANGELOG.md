@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.2](https://github.com/stuffbucket/maximal/compare/v0.5.2-rc.4...v0.5.2) (2026-11-04)
+
+
+### Bug Fixes
+
+* **shell:** clarify quit disconnection warning ([#591](https://github.com/stuffbucket/maximal/issues/591)) ([e3a4b1b](https://github.com/stuffbucket/maximal/commit/e3a4b1be95713ee27140fb988a3abc64665d28c3))
+
 ## [0.5.2-rc.4](https://github.com/stuffbucket/maximal/compare/v0.5.2-rc.3...v0.5.2-rc.4) (2026-11-04)
 
 
