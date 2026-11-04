@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.2-rc.3](https://github.com/stuffbucket/maximal/compare/v0.5.2-rc.2...v0.5.2-rc.3) (2026-11-04)
+
+
+### Bug Fixes
+
+* **shell:** align Windows taskbar and close behavior ([#586](https://github.com/stuffbucket/maximal/issues/586)) ([c506648](https://github.com/stuffbucket/maximal/commit/c506648cb6945f995fc3a850a93487b08f49b31a))
+
 ## [0.5.2-rc.2](https://github.com/stuffbucket/maximal/compare/v0.5.1...v0.5.2-rc.2) (2026-11-04)
 
 
