@@ -22,6 +22,7 @@ const ROOT = path.resolve(import.meta.dir, "..")
 /** Every committed pnpm lockfile (one per isolated package). */
 export const LOCKFILES = [
   "packages/mcp-broker/pnpm-lock.yaml",
+  "packages/session-performance-monitor/pnpm-lock.yaml",
   "packages/storybook/pnpm-lock.yaml",
 ]
 

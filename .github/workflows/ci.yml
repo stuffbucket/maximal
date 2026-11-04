@@ -118,6 +118,15 @@ jobs:
             --target=bun-windows-x64 \
             --outfile="$RUNNER_TEMP/maximal-mcp-broker-windows-x64.exe"
 
+      - name: Install session monitor dependencies
+        run: |
+          mise trust packages/session-performance-monitor/mise.toml
+          mise -C packages/session-performance-monitor install
+          bun run session-monitor:install
+
+      - name: Check deterministic session monitor
+        run: bun run session-monitor:check
+
       # Stories reach into shell/src and the harness fixtures mirror the API
       # schemas, so a prop or schema change can break them without touching
       # packages/storybook. Check on every run so they can't drift.

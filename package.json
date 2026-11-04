@@ -53,6 +53,8 @@
     "render-formula": "bun scripts/sync-homebrew-formula.ts",
     "sbom": "bun scripts/sbom.ts",
     "scan:secrets": "trufflehog filesystem . --no-verification --fail --no-update --exclude-paths .trufflehog-exclude",
+    "session-monitor:check": "mise -C packages/session-performance-monitor exec -- pnpm typecheck && mise -C packages/session-performance-monitor exec -- pnpm test",
+    "session-monitor:install": "mise -C packages/session-performance-monitor exec -- pnpm install --frozen-lockfile",
     "shell:test": "bun scripts/shell-test.ts",
     "start": "NODE_ENV=production bun run ./src/main.ts",
     "storybook": "mise -C packages/storybook exec -- pnpm dev",
