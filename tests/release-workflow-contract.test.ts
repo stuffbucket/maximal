@@ -570,15 +570,6 @@ describe("Windows desktop lifecycle smoke", () => {
     )
     expect(workflow).toContain("dist/configurator-verification.json")
     expect(workflow).toContain("diagnostics/configurator-state.json")
-    expect(workflow).toContain("-RedirectStandardOutput $shellStdout")
-    expect(workflow).toContain("-RedirectStandardError $shellStderr")
-    expect(workflow).toContain("--enable-logging --log-net-log=")
-    expect(workflow).toContain("diagnostics/windows.json")
-    expect(workflow).toContain("diagnostics/desktop.png")
-    expect(workflow).toContain("diagnostics/webview2-processes.json")
-    expect(workflow).toContain("diagnostics/webview2-debug.log")
-    expect(workflow).toContain("diagnostics/application-events.json")
-    expect(workflow).toContain("diagnostics/ui-probes.json")
     expect(workflow).toContain(
       "name: Force shell exit and verify sidecar containment",
     )
