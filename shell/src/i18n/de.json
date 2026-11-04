@@ -471,7 +471,7 @@
   "native-notify-requests-body": "Öffnen Sie „Anfragen“ in den Einstellungen von Maximal, um zu antworten.",
 
   "native-quit-title": "Maximal beenden?",
-  "native-quit-body": "Maximal wird gestoppt und alle geöffneten Einstellungsfenster werden geschlossen.",
+  "native-quit-body": "Alle mit Maximal verbundenen Apps werden getrennt.",
   "native-quit-confirm": "Maximal beenden",
   "native-quit-cancel": "Abbrechen",
   "native-update-confirm-title": "Maximal aktualisieren?",
