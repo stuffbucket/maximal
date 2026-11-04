@@ -25,9 +25,10 @@
   font-weight: 200 900;
   font-display: swap;
   src: url("./vendor/fonts/commissioner-latin.woff2") format("woff2");
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6,
-    U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122,
-    U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212,
+    U+2215, U+FEFF, U+FFFD;
 }
 @font-face {
   font-family: "Commissioner";
@@ -35,10 +36,10 @@
   font-weight: 200 900;
   font-display: swap;
   src: url("./vendor/fonts/commissioner-latin-ext.woff2") format("woff2");
-  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7,
-    U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F,
-    U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F,
-    U+A720-A7FF;
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304,
+    U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB,
+    U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 @font-face {
   font-family: "Fraunces";
@@ -46,9 +47,10 @@
   font-weight: 300 900;
   font-display: swap;
   src: url("../settings/vendor/fonts/fraunces-latin.woff2") format("woff2");
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6,
-    U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122,
-    U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212,
+    U+2215, U+FEFF, U+FFFD;
 }
 @font-face {
   font-family: "Fraunces";
@@ -56,10 +58,10 @@
   font-weight: 300 900;
   font-display: swap;
   src: url("../settings/vendor/fonts/fraunces-latin-ext.woff2") format("woff2");
-  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7,
-    U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F,
-    U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F,
-    U+A720-A7FF;
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304,
+    U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB,
+    U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
 /* ---- BEGIN GENERATED TOKENS (scripts/generate-css-tokens.ts) ---- */
@@ -67,7 +69,9 @@
   /* ---- Font stacks ---- */
   --font-display: "Fraunces", Georgia, "Times New Roman", serif;
   --font-body: "Commissioner", "Segoe UI", Helvetica, Arial, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --font-mono:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
+    monospace;
 
   /* Auto-injected tokens */
   --text-xs: 0.75rem;
@@ -262,7 +266,9 @@ body {
 }
 
 .dashboard-container {
+  width: 100%;
   max-width: 1120px;
+  margin-inline: auto;
 }
 
 [data-observability-view][hidden] {
@@ -488,7 +494,9 @@ main#content-area table {
   padding: 6px 14px;
   border-radius: calc(var(--radius-input) - 2px);
   cursor: pointer;
-  transition: background-color 120ms ease, color 120ms ease;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
 }
 .segmented-option:hover {
   color: var(--text-strong);
@@ -562,19 +570,31 @@ html[data-embedded="true"] .lang-picker {
   height: var(--space-2);
   border-radius: var(--radius-pill);
   overflow: hidden;
-  background-color: color-mix(in srgb, var(--meter-color) 18%, var(--surface-card));
+  background-color: color-mix(
+    in srgb,
+    var(--meter-color) 18%,
+    var(--surface-card)
+  );
 }
 .meter__fill {
   height: 100%;
   border-radius: var(--radius-pill);
   background-color: var(--meter-color);
 }
-.meter--ok { --meter-color: var(--accent); }
-.meter--low { --meter-color: var(--status-warning); }
-.meter--out { --meter-color: var(--status-error); }
+.meter--ok {
+  --meter-color: var(--accent);
+}
+.meter--low {
+  --meter-color: var(--status-warning);
+}
+.meter--out {
+  --meter-color: var(--status-error);
+}
 /* Numbers we can't vouch for (period over, or they don't add up): an empty
    neutral track, no fill. */
-.meter--unknown { --meter-color: var(--border-strong); }
+.meter--unknown {
+  --meter-color: var(--border-strong);
+}
 .meter-state {
   display: inline-flex;
   align-items: center;
@@ -593,8 +613,12 @@ html[data-embedded="true"] .lang-picker {
   width: var(--size-sm);
   height: var(--size-sm);
 }
-.meter-state--low svg { color: var(--status-warning); }
-.meter-state--out svg { color: var(--status-error); }
+.meter-state--low svg {
+  color: var(--status-warning);
+}
+.meter-state--out svg {
+  color: var(--status-error);
+}
 
 /* ---- Token totals ----
    One card: the total as the headline figure, the parts in a quiet row.
@@ -742,6 +766,45 @@ html[data-embedded="true"] .lang-picker {
   gap: var(--space-1);
   color: var(--status-error);
   font-size: var(--text-sm);
+}
+.usage-signed-out {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.usage-signed-out > svg {
+  width: var(--size-md);
+  height: var(--size-md);
+  color: var(--text-muted);
+}
+.usage-signed-out__content {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+.usage-signed-out__content strong {
+  color: var(--text-strong);
+}
+.usage-signed-out__content p {
+  margin: 0;
+}
+.usage-signed-out__action {
+  min-height: var(--size-xl);
+  padding: var(--space-1) var(--space-3);
+  border: var(--border-width-hairline) solid var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg);
+  cursor: pointer;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-lg);
+}
+.usage-signed-out__action:hover {
+  background: color-mix(in srgb, var(--accent) 85%, var(--text-strong));
+  border-color: color-mix(in srgb, var(--accent) 85%, var(--text-strong));
 }
 .usage-panel__meta {
   display: flex;
@@ -983,12 +1046,24 @@ html[data-embedded="true"] .lang-picker {
   text-align: left;
   white-space: nowrap;
 }
-.session-table__heading--session { width: 27%; }
-.session-table__heading--state { width: 19%; }
-.session-table__heading--rate { width: 11%; }
-.session-table__heading--context { width: 16%; }
-.session-table__heading--last { width: 15%; }
-.session-table__heading--total { width: 12%; }
+.session-table__heading--session {
+  width: 27%;
+}
+.session-table__heading--state {
+  width: 19%;
+}
+.session-table__heading--rate {
+  width: 11%;
+}
+.session-table__heading--context {
+  width: 16%;
+}
+.session-table__heading--last {
+  width: 15%;
+}
+.session-table__heading--total {
+  width: 12%;
+}
 .session-table__heading--numeric {
   text-align: right;
 }

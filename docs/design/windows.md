@@ -24,13 +24,13 @@ polling survive surface switches.
 
 ## Where they diverge
 
-| Concern | Dashboard | Sessions | Settings |
-|---|---|---|---|
-| Topbar center | Period segmented control (`1d / 7d / 30d`) + range label | Empty | 5 consolidated tabs (`Account`, `Integrations`, `Models`, `Appearance`, `System`) |
-| Content | Quotas, token totals and live-flow graph | Compact live and recent session list | Configuration sections and app integrations |
-| Layout | Wide single column in the observability bundle | Wide single column in the same persistent bundle | Single centered column (`--content-max` sections) below `.topbar` |
-| Build | Hand-authored observability HTML + bundled `main.ts` | Same Dashboard artifact and controllers | Bun bundles `index.html` and its React + vanilla islands |
-| Tokens live in | Generated region of `shell/ui/dashboard/style.css` | Same observability token set | `shell/src/ui/styles/tokens.css`, imported by `styles.css` |
+| Concern        | Dashboard                                                | Sessions                                         | Settings                                                                          |
+| -------------- | -------------------------------------------------------- | ------------------------------------------------ | --------------------------------------------------------------------------------- |
+| Topbar center  | Period segmented control (`1d / 7d / 30d`) + range label | Empty                                            | 5 consolidated tabs (`Account`, `Integrations`, `Models`, `Appearance`, `System`) |
+| Content        | Quotas, token totals and live-flow graph                 | Compact live and recent session list             | Configuration sections and app integrations                                       |
+| Layout         | Wide single column in the observability bundle           | Wide single column in the same persistent bundle | Single centered column (`--content-max` sections) below `.topbar`                 |
+| Build          | Hand-authored observability HTML + bundled `main.ts`     | Same Dashboard artifact and controllers          | Bun bundles `index.html` and its React + vanilla islands                          |
+| Tokens live in | Generated region of `shell/ui/dashboard/style.css`       | Same observability token set                     | `shell/src/ui/styles/tokens.css`, imported by `styles.css`                        |
 
 The desktop app has one single-instance window and one top bar (`.topbar` with
 `data-tauri-drag-region`, styled with `--surface-card` and
@@ -48,5 +48,26 @@ official window-state plugin persists the unified window label's size, position,
 and maximized state across process launches. It does not persist visibility
 (close still hides to the tray), decorations, or fullscreen. The window is
 created hidden and shown after restoration, so returning users do not see it
-paint at the fallback size first. Switching among the three surfaces only changes
-content and title; it does not change native window geometry.
+paint at the fallback size first. The plugin's automatic initial restore is
+skipped so the shell can run a controlled restore after the plugin's window-ready
+hook, then repair geometry before showing: physical inner size is checked against
+the current monitor's physical work area, native frame extent is reserved
+separately, and outer position is brought back on-screen. The restore runs off the
+main event loop because Tauri's synchronous geometry getters dispatch through that
+loop. Maximized state is restored without mutating constraints while the window is
+maximized.
+
+Constraints follow the active surface rather than one global rectangle. Settings
+has a minimum logical width that keeps all five tabs separated from the pinned
+utilities, a maximum width matching its bounded readable layout, and no maximum
+height. Dashboard and Sessions use the smaller shared minimum and clear both maxima
+because their tables and graphs benefit from wider and taller windows. The frontend
+remains responsive inside those native ranges: Settings sections are centered and
+fluid up to `--content-max`, Dashboard's wide container is centered and fluid, and
+Sessions keeps its narrow-row reflow. The native-overlay top bar remains one row;
+its Settings tabs can scroll for longer localized labels rather than increasing the
+title-bar height, the active tab is kept in view, and the scrollport reserves a
+fixed gap before the pinned surface and language controls. Switching to Settings
+may clamp an
+observability window that is wider than Settings' range; switching back removes
+that cap without forcing a resize.

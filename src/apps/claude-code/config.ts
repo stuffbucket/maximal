@@ -552,7 +552,7 @@ function revertProxyBaseUrlWithMode(
   filePath: string,
   preserveAutoModels: boolean,
 ): RevertResult {
-  const existing = readClaudeCodeSettings(filePath)
+  const existing = readClaudeCodeSettingsSnapshot(filePath).settings
   const baseUrlOwnership = getBaseUrlOwnership(existing)
   const helperOwnership = getApiKeyHelperOwnership(existing)
   const hasSuspendedAutoModels = AUTO_MODELS_JOURNAL_KEY in existing
@@ -574,11 +574,7 @@ function revertProxyBaseUrlWithMode(
       stripBaseUrlForShutdown(existing)
     : stripBaseUrl(existing)
   if (Object.keys(stripped).length === 0) {
-    try {
-      fs.rmSync(filePath, { force: true })
-    } catch {
-      /* best effort */
-    }
+    fs.rmSync(filePath, { force: true })
     return { path: filePath, wrote: true, remainingKeys: [] }
   }
   writeClaudeCodeSettings(filePath, stripped)

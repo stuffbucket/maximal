@@ -9,7 +9,7 @@
 // catalog and a locale picker is wired into the header.
 import { resolveLocale, t } from "../i18n";
 import { applyI18n, wireLocalePicker } from "../i18n/apply";
-import { fetchJson } from "./fetch-json";
+import { fetchJson, isFetchJsonError } from "./fetch-json";
 import { startLiveSessions } from "./live/controller";
 
 // Tailwind + Lucide are loaded as classic global <script>s in index.html, so
@@ -128,20 +128,22 @@ const EMPTY_TOKEN_USAGE_TOTALS: TokenUsageTotals = {
 };
 
 // --- State Management ---
+type RemoteUsageState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "ready"; data: UsageData; fetchedAt: number }
+  | { status: "signed-out" }
+  | { status: "error"; message: string };
+
 interface DashboardState {
-  isLoading: boolean;
+  remoteUsage: RemoteUsageState;
   isTokenUsageLoading: boolean;
   isEventsLoading: boolean;
-  error: string | null;
-  data: UsageData | null;
   tokenUsageSummary: TokenUsageSummary | null;
   tokenUsageEventsPage: TokenUsageEventsPage | null;
   tokenUsageSummaryError: string | null;
   tokenUsageEventsError: string | null;
   tokenUsagePeriod: Period;
-  /** When `data` (/usage) was fetched; /usage is live from GitHub, so this
-   *  is "as of". */
-  usageFetchedAt: number | null;
   /** Last background /usage refetch attempt (rate-limits them). */
   usageRefetchAt: number;
   /** Whether the "Chat and completions" quotas are unfolded. Render rebuilds
@@ -169,20 +171,32 @@ function writeQuotaMoreOpen(open: boolean): void {
 }
 
 const state: DashboardState = {
-  isLoading: false,
+  remoteUsage: { status: "idle" },
   isTokenUsageLoading: false,
   isEventsLoading: false,
-  error: null,
-  data: null,
   tokenUsageSummary: null,
   tokenUsageEventsPage: null,
   tokenUsageSummaryError: null,
   tokenUsageEventsError: null,
   tokenUsagePeriod: DEFAULT_TOKEN_USAGE_PERIOD,
-  usageFetchedAt: null,
   usageRefetchAt: 0,
   quotaMoreOpen: readQuotaMoreOpen(),
 };
+
+function readyRemoteUsage(): Extract<
+  RemoteUsageState,
+  { status: "ready" }
+> | null {
+  return state.remoteUsage.status === "ready" ? state.remoteUsage : null;
+}
+
+function isNotAuthenticated(error: unknown): boolean {
+  return (
+    isFetchJsonError(error) &&
+    error.status === 401 &&
+    error.code === "not_authenticated"
+  );
+}
 
 // --- Tauri Channel live feed -------------------------------------------
 // When the dashboard runs inside a Tauri webview, token-usage updates
@@ -206,14 +220,14 @@ let browserPollTimer: number | null = null;
 let restartBrowserPolling: (() => void) | null = null;
 const initialQuery = new URLSearchParams(location.search);
 let observabilitySurface: ObservabilitySurface =
-  initialQuery.get("embedded") === "1" ?
-    "settings"
-  : initialQuery.get("surface") === "sessions" ?
-    "sessions"
-  : "dashboard";
+  initialQuery.get("embedded") === "1"
+    ? "settings"
+    : initialQuery.get("surface") === "sessions"
+      ? "sessions"
+      : "dashboard";
 const dashboardIsActive = (): boolean =>
-  observabilitySurface === "dashboard"
-  && document.visibilityState === "visible";
+  observabilitySurface === "dashboard" &&
+  document.visibilityState === "visible";
 
 function showObservabilitySurface(surface: ObservabilitySurface): void {
   observabilitySurface = surface;
@@ -229,7 +243,9 @@ function showObservabilitySurface(surface: ObservabilitySurface): void {
     if (range) range.hidden = surface === "sessions";
   }
   document.title =
-    surface === "sessions" ? t("dashboard-sessions-title") : t("dashboard-title");
+    surface === "sessions"
+      ? t("dashboard-sessions-title")
+      : t("dashboard-title");
 }
 /** After a failed fetch, wait this long instead (don't hammer the sidecar). */
 const BROWSER_RETRY_INTERVAL_MS = 5000;
@@ -240,7 +256,10 @@ const BROWSER_RETRY_INTERVAL_MS = 5000;
  *  the sidecar. Same rule as `dashboard_poll_interval` in
  *  shell/src-tauri/src/lib.rs. */
 function pollIntervalMs(totalTokens: number | undefined): number {
-  const total = Math.max(0, Math.trunc(Number.isFinite(totalTokens) ? Number(totalTokens) : 0));
+  const total = Math.max(
+    0,
+    Math.trunc(Number.isFinite(totalTokens) ? Number(totalTokens) : 0),
+  );
   if (total >= 1_000_000) return 10_000;
   return 500 * String(total).length;
 }
@@ -328,9 +347,9 @@ function getErrorMessage(error: unknown): string {
 function isMissingTokenUsageEndpointError(error: unknown): boolean {
   return Boolean(
     error &&
-      typeof error === "object" &&
-      "status" in error &&
-      (error as { status?: number }).status === 404,
+    typeof error === "object" &&
+    "status" in error &&
+    (error as { status?: number }).status === 404,
   );
 }
 
@@ -388,7 +407,8 @@ function syncUrlState(): void {
 }
 
 function updateControls(): void {
-  const periodDisabled = state.isLoading || state.isTokenUsageLoading;
+  const periodDisabled =
+    state.remoteUsage.status === "loading" || state.isTokenUsageLoading;
   for (const button of tokenUsagePeriodButtons) {
     button.disabled = periodDisabled;
   }
@@ -403,13 +423,18 @@ function updateControls(): void {
       end_ms: baseline.hourMs,
     });
     const range =
-      state.tokenUsageSummary?.range || state.tokenUsageEventsPage?.range || null;
+      state.tokenUsageSummary?.range ||
+      state.tokenUsageEventsPage?.range ||
+      null;
     rangeEl.title = renderTokenUsageRangeText(state.tokenUsagePeriod, range);
   }
 
   // The language globe's hover names the current language.
-  const localeSelect = document.getElementById("locale-select") as HTMLSelectElement | null;
-  if (localeSelect) localeSelect.title = localeSelect.selectedOptions[0]?.textContent ?? "";
+  const localeSelect = document.getElementById(
+    "locale-select",
+  ) as HTMLSelectElement | null;
+  if (localeSelect)
+    localeSelect.title = localeSelect.selectedOptions[0]?.textContent ?? "";
 
   if (window.parent && window.parent !== window) {
     window.parent.postMessage(
@@ -439,7 +464,10 @@ let rangeBaseline: { period: Period; hourMs: number } | null = null;
  * with `hourRolled` only as the Dashboard comes back into view (see the
  * visibilitychange listener), so the label never shifts while it's shown.
  */
-function syncRangeBaseline(hourRolled: boolean): { period: Period; hourMs: number } {
+function syncRangeBaseline(hourRolled: boolean): {
+  period: Period;
+  hourMs: number;
+} {
   const hourMs = Math.floor(Date.now() / HOUR_MS) * HOUR_MS;
   if (
     !rangeBaseline ||
@@ -458,9 +486,9 @@ function syncRangeBaseline(hourRolled: boolean): { period: Period; hourMs: numbe
  */
 function formatCompactRange(period: Period, range: TokenUsageRange): string {
   const options: Intl.DateTimeFormatOptions =
-    period === "day" ?
-      { weekday: "short", hour: "numeric" }
-    : { month: "short", day: "numeric" };
+    period === "day"
+      ? { weekday: "short", hour: "numeric" }
+      : { month: "short", day: "numeric" };
   try {
     const format = new Intl.DateTimeFormat(resolveLocale(), options);
     if (period === "day") {
@@ -547,15 +575,25 @@ function renderTokenUsageRangeText(
 function render(): void {
   updateControls();
 
+  const remoteUsage = state.remoteUsage;
   const quotasHtml =
-    state.data ? renderUsageQuotas(state.data.quota_snapshots)
-    : state.error ? renderQuotaColumn(renderUsageError(state.error, t("dashboard-error-usage")))
-    : state.isLoading ?
-      renderQuotaColumn(`<p class="usage-loading">${escapeHtml(t("common-working"))}</p>`)
-    : "";
+    remoteUsage.status === "ready"
+      ? renderUsageQuotas(remoteUsage.data.quota_snapshots)
+      : remoteUsage.status === "signed-out"
+        ? renderQuotaColumn(renderUsageSignedOut())
+        : remoteUsage.status === "error"
+          ? renderQuotaColumn(
+              renderUsageError(remoteUsage.message, t("dashboard-error-usage")),
+            )
+          : remoteUsage.status === "loading"
+            ? renderQuotaColumn(
+                `<p class="usage-loading">${escapeHtml(t("common-working"))}</p>`,
+              )
+            : "";
 
   const tokenUsageHtml = renderTokenUsageSection();
-  const detailedHtml = state.data ? renderDetailedData(state.data) : "";
+  const detailedHtml =
+    remoteUsage.status === "ready" ? renderDetailedData(remoteUsage.data) : "";
 
   // The quota column and the rest are rebuilt; the live card beside the
   // quotas is not (it updates in place).
@@ -565,7 +603,9 @@ function render(): void {
   bento.hidden = false;
   quotaSection.hidden = false;
   quotaColumn.innerHTML = quotasHtml;
-  restArea.innerHTML = welcome ? renderWelcomeMessage() : `${tokenUsageHtml}${detailedHtml}`;
+  restArea.innerHTML = welcome
+    ? renderWelcomeMessage()
+    : `${tokenUsageHtml}${detailedHtml}`;
 
   // Replace placeholder icons with actual Lucide icons
   createIcons();
@@ -577,6 +617,20 @@ function render(): void {
 /** The dynamic quota content inside the bento's static heading and card. */
 function renderQuotaColumn(body: string): string {
   return `<div class="dashboard-bento__body">${body}</div>`;
+}
+
+function renderUsageSignedOut(): string {
+  return `
+    <div class="usage-signed-out">
+      <i data-lucide="log-in" aria-hidden="true"></i>
+      <div class="usage-signed-out__content">
+        <strong>${escapeHtml(t("account-unauth-title"))}</strong>
+        <p>${escapeHtml(t("account-unauth-body"))}</p>
+        <button type="button" class="usage-signed-out__action" data-usage-action="open-settings">
+          ${escapeHtml(t("account-sign-in"))}
+        </button>
+      </div>
+    </div>`;
 }
 
 function renderUsageError(message: string, title: string): string {
@@ -599,14 +653,16 @@ function renderUsageQuotas(
   const entries = Object.entries(snapshots);
   const metered = entries.filter(([, value]) => !value.unlimited);
   const unlimited = entries.filter(([, value]) => value.unlimited);
-  const resetMs = parseResetDate(state.data?.quota_reset_date);
+  const resetMs = parseResetDate(readyRemoteUsage()?.data.quota_reset_date);
   const meteredCards = metered
     .map(([key, value]) => renderQuotaCard(key, value, resetMs))
     .join("");
   // Unlimited quotas have nothing to measure, so they share one list, folded
   // away under the metered cards. With no metered card it is all there is.
   const unlimitedHtml =
-    unlimited.length > 0 ? renderUnlimitedQuotas(unlimited.map(([key]) => key)) : "";
+    unlimited.length > 0
+      ? renderUnlimitedQuotas(unlimited.map(([key]) => key))
+      : "";
 
   if (!meteredCards && !unlimitedHtml) return "";
   return renderQuotaColumn(`
@@ -617,7 +673,9 @@ function renderUsageQuotas(
 /** GitHub's quota_reset_date as a timestamp. A bare date is midnight UTC. */
 function parseResetDate(value: string | undefined): number | null {
   if (!value) return null;
-  const ms = Date.parse(/^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T00:00:00Z` : value);
+  const ms = Date.parse(
+    /^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T00:00:00Z` : value,
+  );
   return Number.isFinite(ms) ? ms : null;
 }
 
@@ -643,7 +701,11 @@ function formatResetDate(ms: number): string {
  * open across the reset), or GitHub's numbers don't add up, the figures show
  * "—" rather than a stale or made-up percentage.
  */
-function renderQuotaCard(title: string, details: QuotaDetails, resetMs: number | null): string {
+function renderQuotaCard(
+  title: string,
+  details: QuotaDetails,
+  resetMs: number | null,
+): string {
   const { entitlement, remaining, percent_remaining } = details;
   const ended = resetMs !== null && Date.now() >= resetMs;
   const known =
@@ -653,18 +715,33 @@ function renderQuotaCard(title: string, details: QuotaDetails, resetMs: number |
     Number.isFinite(remaining) &&
     entitlement > 0;
   const percentUsed = known ? 100 - percent_remaining : 0;
-  const level = !known ? "ok" : percentUsed >= 90 ? "out" : percentUsed >= 75 ? "low" : "ok";
-  const icon = level === "ok" ? "" : `<i data-lucide="triangle-alert" aria-hidden="true"></i>`;
+  const level = !known
+    ? "ok"
+    : percentUsed >= 90
+      ? "out"
+      : percentUsed >= 75
+        ? "low"
+        : "ok";
+  const icon =
+    level === "ok"
+      ? ""
+      : `<i data-lucide="triangle-alert" aria-hidden="true"></i>`;
 
   const period =
-    resetMs === null ? ""
-    : ended ? t("dashboard-quota-period-ended", { date: formatResetDate(resetMs) })
-    : t("dashboard-quota-resets", { date: formatResetDate(resetMs) });
+    resetMs === null
+      ? ""
+      : ended
+        ? t("dashboard-quota-period-ended", { date: formatResetDate(resetMs) })
+        : t("dashboard-quota-resets", { date: formatResetDate(resetMs) });
+  const fetchedAt = readyRemoteUsage()?.fetchedAt;
   const asOf =
-    state.usageFetchedAt === null ? ""
-    : t("dashboard-quota-as-of", {
-        time: new Intl.DateTimeFormat(resolveLocale(), { timeStyle: "short" }).format(state.usageFetchedAt),
-      });
+    fetchedAt === undefined
+      ? ""
+      : t("dashboard-quota-as-of", {
+          time: new Intl.DateTimeFormat(resolveLocale(), {
+            timeStyle: "short",
+          }).format(fetchedAt),
+        });
 
   return `
             <header class="usage-panel__header" title="${escapeHtml(asOf)}">
@@ -673,16 +750,20 @@ function renderQuotaCard(title: string, details: QuotaDetails, resetMs: number |
                     ${period ? `<p class="usage-panel__subtitle">${escapeHtml(period)}</p>` : ""}
                 </div>
                 <output class="usage-panel__headline meter-state meter-state--${level} meter-state--headline">${icon}${
-                  known ?
-                    escapeHtml(t("dashboard-quota-percent-used", { percent: percentUsed.toFixed(1) }))
-                  : "—"
+                  known
+                    ? escapeHtml(
+                        t("dashboard-quota-percent-used", {
+                          percent: percentUsed.toFixed(1),
+                        }),
+                      )
+                    : "—"
                 }</output>
             </header>
             <div class="usage-panel__body">
                 ${
-                  known ?
-                    `<progress class="quota-progress quota-progress--${level}" max="100" value="${Math.min(100, Math.max(0, percentUsed))}" aria-label="${escapeHtml(title.replace(/_/g, " "))}"></progress>`
-                  : `<div class="quota-progress quota-progress--unknown" aria-hidden="true"></div>`
+                  known
+                    ? `<progress class="quota-progress quota-progress--${level}" max="100" value="${Math.min(100, Math.max(0, percentUsed))}" aria-label="${escapeHtml(title.replace(/_/g, " "))}"></progress>`
+                    : `<div class="quota-progress quota-progress--unknown" aria-hidden="true"></div>`
                 }
                 <div class="usage-panel__meta">
                     <span>${known ? `${(entitlement - remaining).toLocaleString()} / ${entitlement.toLocaleString()}` : "—"}</span>
@@ -722,7 +803,10 @@ function renderUnlimitedQuotas(titles: Array<string>): string {
  */
 function handleQuotaMoreToggle(event: Event): void {
   const target = event.target;
-  if (!(target instanceof HTMLDetailsElement) || !target.hasAttribute("data-quota-more")) {
+  if (
+    !(target instanceof HTMLDetailsElement) ||
+    !target.hasAttribute("data-quota-more")
+  ) {
     return;
   }
   if (target.open === state.quotaMoreOpen) return;
@@ -786,11 +870,11 @@ function renderDetailedData(data: UsageData): string {
 function renderTokenUsageSection(): string {
   const hasTokenUsageContent = Boolean(
     state.isTokenUsageLoading ||
-      state.isEventsLoading ||
-      state.tokenUsageSummary ||
-      state.tokenUsageEventsPage ||
-      state.tokenUsageSummaryError ||
-      state.tokenUsageEventsError,
+    state.isEventsLoading ||
+    state.tokenUsageSummary ||
+    state.tokenUsageEventsPage ||
+    state.tokenUsageSummaryError ||
+    state.tokenUsageEventsError,
   );
 
   if (!hasTokenUsageContent) {
@@ -861,7 +945,11 @@ function renderTokenUsageSection(): string {
             <p class="text-sm font-semibold" style="color: var(--text-strong);">${escapeHtml(t("dashboard-by-model-title"))}</p>
             <p class="mt-1 text-xs" style="color: var(--text-muted);">${
               summary
-                ? escapeHtml(t("dashboard-by-model-count", { n: summary.byModel.length }))
+                ? escapeHtml(
+                    t("dashboard-by-model-count", {
+                      n: summary.byModel.length,
+                    }),
+                  )
                 : escapeHtml(t("dashboard-by-model-none"))
             }</p>
           </div>
@@ -1075,24 +1163,19 @@ function renderWelcomeMessage(): string {
  * independently so the Dashboard renders immediately without waiting on GitHub.
  */
 async function fetchData(page = 1): Promise<void> {
-  state.isLoading = true;
-  state.error = null;
+  state.remoteUsage = { status: "loading" };
   render();
 
   const usagePromise = fetchJson<UsageData>(USAGE_PATH)
-    .then((usage) => {
-      state.data = usage;
-      state.usageFetchedAt = Date.now();
-      state.error = null;
+    .then((data) => {
+      state.remoteUsage = { status: "ready", data, fetchedAt: Date.now() };
     })
     .catch((error: unknown) => {
-      state.data = null;
-      state.error = getErrorMessage(error);
+      state.remoteUsage = isNotAuthenticated(error)
+        ? { status: "signed-out" }
+        : { status: "error", message: getErrorMessage(error) };
     })
-    .finally(() => {
-      state.isLoading = false;
-      render();
-    });
+    .finally(render);
 
   const tokenUsagePromise = fetchTokenUsageSummaryAndEvents(page);
   await Promise.allSettled([usagePromise, tokenUsagePromise]);
@@ -1107,17 +1190,21 @@ async function refreshUsage(): Promise<void> {
   if (Date.now() - state.usageRefetchAt < 60_000) return;
   state.usageRefetchAt = Date.now();
   try {
-    state.data = await fetchJson<UsageData>(USAGE_PATH);
-    state.usageFetchedAt = Date.now();
+    const data = await fetchJson<UsageData>(USAGE_PATH);
+    state.remoteUsage = { status: "ready", data, fetchedAt: Date.now() };
     render();
-  } catch {
-    // Keep what's shown; the next trigger tries again.
+  } catch (error) {
+    if (isNotAuthenticated(error)) {
+      state.remoteUsage = { status: "signed-out" };
+      render();
+    }
+    // Keep a previous snapshot through transient failures; the next trigger tries again.
   }
 }
 
 /** True when the quota numbers on screen belong to a period that's over. */
 function quotaPeriodEnded(): boolean {
-  const resetMs = parseResetDate(state.data?.quota_reset_date);
+  const resetMs = parseResetDate(readyRemoteUsage()?.data.quota_reset_date);
   return resetMs !== null && Date.now() >= resetMs;
 }
 
@@ -1255,6 +1342,18 @@ function handleContentAreaClick(event: Event): void {
     return;
   }
 
+  if (event.target.closest('[data-usage-action="open-settings"]')) {
+    if (window.parent === window) {
+      window.location.assign("/ui/settings/#account");
+    } else {
+      window.parent.postMessage(
+        { type: "maximal:open-settings", section: "account" },
+        window.location.origin,
+      );
+    }
+    return;
+  }
+
   const actionButton = event.target.closest("[data-page-action]");
   if (!actionButton || !state.tokenUsageEventsPage || state.isEventsLoading) {
     return;
@@ -1357,16 +1456,22 @@ function init(): void {
       render();
       showObservabilitySurface(observabilitySurface);
     } else if (
-      msg.type === "maximal:surface"
-      && (msg.surface === "settings"
-        || msg.surface === "dashboard"
-        || msg.surface === "sessions")
+      msg.type === "maximal:surface" &&
+      (msg.surface === "settings" ||
+        msg.surface === "dashboard" ||
+        msg.surface === "sessions")
     ) {
       showObservabilitySurface(msg.surface);
       updateDashboardActivity();
+      if (
+        msg.surface === "dashboard" &&
+        state.remoteUsage.status === "signed-out"
+      ) {
+        void refreshUsage();
+      }
     } else if (
-      msg.type === "maximal:dashboard-visibility"
-      && typeof msg.visible === "boolean"
+      msg.type === "maximal:dashboard-visibility" &&
+      typeof msg.visible === "boolean"
     ) {
       showObservabilitySurface(msg.visible ? "dashboard" : "settings");
       updateDashboardActivity();
@@ -1394,15 +1499,17 @@ function init(): void {
     // they're looking at, so updates don't blank the view or reset paging.
     const pollBrowser = (): void => {
       if (!dashboardIsActive() || browserPollTimer !== null) return;
-      const wait =
-        state.tokenUsageSummaryError ?
-          BROWSER_RETRY_INTERVAL_MS
+      const wait = state.tokenUsageSummaryError
+        ? BROWSER_RETRY_INTERVAL_MS
         : pollIntervalMs(state.tokenUsageSummary?.totals?.total_tokens);
       browserPollTimer = window.setTimeout(async () => {
         browserPollTimer = null;
-        await fetchTokenUsageSummaryAndEvents(state.tokenUsageEventsPage?.page ?? 1, {
-          quiet: true,
-        });
+        await fetchTokenUsageSummaryAndEvents(
+          state.tokenUsageEventsPage?.page ?? 1,
+          {
+            quiet: true,
+          },
+        );
         pollBrowser();
       }, wait);
     };
@@ -1427,7 +1534,8 @@ document.addEventListener("visibilitychange", () => {
   // clock has rolled over while it was hidden.
   syncRangeBaseline(true);
   updateControls();
-  const age = state.usageFetchedAt === null ? Infinity : Date.now() - state.usageFetchedAt;
+  const fetchedAt = readyRemoteUsage()?.fetchedAt;
+  const age = fetchedAt === undefined ? Infinity : Date.now() - fetchedAt;
   if (age > 10 * 60_000 || quotaPeriodEnded()) void refreshUsage();
 });
 

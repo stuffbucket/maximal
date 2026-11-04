@@ -18,9 +18,15 @@
 #   4. `bun run tauri build` for Windows → NSIS per-user installer (+ the
 #      bare .exe). NSIS is chosen over WiX/MSI to match the macOS per-user,
 #      no-admin model (installMode: currentUser in tauri.conf.json).
-#   5. Install and launch the packaged app, prove its sidecar starts, forcibly
-#      terminate only the shell PID, and verify the exact sidecar disappears.
-#   6. Relaunch, then run the NSIS uninstaller while Maximal is still running.
+#   5. Install the packaged app, seed isolated Claude Code and Codex fixtures,
+#      launch it, and prove its sidecar starts.
+#   6. Reinstall while it is running, verify the captured old process pair exits,
+#      then launch the replacement and require a healthy sidecar response.
+#   7. Prove both packaged configurators applied their routing, request bounded
+#      graceful shutdown, and verify scoped cleanup plus exact process exit.
+#   8. Relaunch, forcibly terminate only the shell PID, and verify Job Object
+#      containment removes the exact sidecar process and its listeners.
+#   9. Relaunch, then run the NSIS uninstaller while Maximal is still running.
 #      A bounded deadline catches regressions where the uninstaller waits forever.
 #
 # Trigger: Actions tab -> "windows shell (dev)" -> Run workflow, pick the
@@ -257,6 +263,65 @@ jobs:
           if (-not (Test-Path $target)) { throw "shortcut target does not exist on disk: $target" }
           Write-Host "Start Menu launcher OK -> $target"
 
+      - name: Seed isolated app integration fixtures
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $fixtureRoot = Join-Path $env:RUNNER_TEMP 'maximal-packaged-lifecycle'
+          $maximalHome = Join-Path $fixtureRoot 'maximal'
+          $claudeHome = Join-Path $fixtureRoot 'claude'
+          $codexHome = Join-Path $fixtureRoot 'codex'
+          New-Item -ItemType Directory -Force $maximalHome, $claudeHome, $codexHome | Out-Null
+
+          $env:COPILOT_API_HOME = $maximalHome
+          $env:CLAUDE_CONFIG_DIR = $claudeHome
+          $env:CODEX_HOME = $codexHome
+          foreach ($entry in @(
+            "COPILOT_API_HOME=$maximalHome",
+            "CLAUDE_CONFIG_DIR=$claudeHome",
+            "CODEX_HOME=$codexHome"
+          )) {
+            $entry | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+
+          @'
+          {
+            "checkUpdates": false,
+            "smallModel": "smoke-user-model",
+            "apps": {
+              "claudeCode": { "enabled": true },
+              "codex": { "enabled": true }
+            }
+          }
+          '@ | Set-Content (Join-Path $maximalHome 'config.json') -Encoding utf8
+
+          @'
+          {
+            "permissions": { "allow": ["Read"] },
+            "env": { "SMOKE_USER_ENV": "preserve-me" },
+            "smokeUserSetting": { "preserve": true }
+          }
+          '@ | Set-Content (Join-Path $claudeHome 'settings.json') -Encoding utf8
+
+          $codexSeed = @'
+          # packaged lifecycle smoke user content
+          model_provider = "user-provider"
+          model = "smoke-model"
+          user_setting = "preserve-me"
+
+          [features]
+          smoke_feature = true
+
+          [model_providers.user-provider]
+          name = "User Provider"
+          base_url = "https://example.invalid/v1"
+          wire_api = "responses"
+          '@
+          $codexPath = Join-Path $codexHome 'config.toml'
+          $codexSeed | Set-Content $codexPath -Encoding utf8 -NoNewline
+          Copy-Item $codexPath (Join-Path $fixtureRoot 'codex-config.before.toml')
+          Write-Host "seeded isolated integration fixtures under $fixtureRoot"
+
       - name: Launch installed app and verify sidecar
         shell: pwsh
         run: |
@@ -283,8 +348,314 @@ jobs:
           if (-not $sidecarProcess) { throw "maximal sidecar did not start within 60 seconds" }
           Write-Host "shell PID: $($shellProcess.Id); sidecar PID: $($sidecarProcess.ProcessId)"
 
-      # This runs before NSIS's image-wide cleanup can mask the result. Kill only
-      # the shell PID, without /T, and require its exact sidecar and listeners to
+      # Re-run the installer while the tray shell is alive. This specifically
+      # exercises NSIS_HOOK_PREINSTALL: the v0.5.1 hook left the old shell and
+      # proxy running, so reinstalling could leave users attached to a failed
+      # old process. Capture exact PIDs so image-wide cleanup cannot mask it.
+      - name: Reinstall NSIS app while Maximal is running
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installRoot = Join-Path $env:LOCALAPPDATA 'Maximal'
+          $shellPath = Join-Path $installRoot 'maximal-shell.exe'
+          $setup = (Get-ChildItem dist -Recurse -Filter '*-setup.exe' | Select-Object -First 1).FullName
+          if (-not $setup) { throw "no *-setup.exe in the downloaded artifact" }
+
+          $oldShell = Get-CimInstance Win32_Process -Filter "Name = 'maximal-shell.exe'" |
+            Where-Object { $_.ExecutablePath -eq $shellPath } |
+            Select-Object -First 1
+          if (-not $oldShell) { throw "installed maximal-shell process not found before reinstall" }
+          $oldSidecar = Get-CimInstance Win32_Process -Filter "Name = 'maximal.exe'" |
+            Where-Object { $_.ParentProcessId -eq $oldShell.ProcessId } |
+            Select-Object -First 1
+          if (-not $oldSidecar) { throw "sidecar child of shell PID $($oldShell.ProcessId) not found before reinstall" }
+          $oldShellPid = [int]$oldShell.ProcessId
+          $oldSidecarPid = [int]$oldSidecar.ProcessId
+          $oldListenerPorts = @(
+            Get-NetTCPConnection -OwningProcess $oldSidecarPid -State Listen -ErrorAction SilentlyContinue |
+              Select-Object -ExpandProperty LocalPort -Unique
+          )
+
+          Write-Host "reinstalling over shell PID $oldShellPid and sidecar PID $oldSidecarPid"
+          $installer = Start-Process -FilePath $setup -ArgumentList '/S' -PassThru
+          if (-not $installer.WaitForExit(60000)) {
+            Stop-Process -Id $installer.Id -Force -ErrorAction SilentlyContinue
+            throw "NSIS reinstall timed out with Maximal running"
+          }
+          if ($installer.ExitCode -ne 0) { throw "NSIS reinstall failed: $($installer.ExitCode)" }
+
+          $exitDeadline = (Get-Date).AddSeconds(10)
+          do {
+            $remainingOldShell = Get-Process -Id $oldShellPid -ErrorAction SilentlyContinue
+            $remainingOldSidecar = Get-Process -Id $oldSidecarPid -ErrorAction SilentlyContinue
+            $remainingOldListeners = @(
+              Get-NetTCPConnection -OwningProcess $oldSidecarPid -State Listen -ErrorAction SilentlyContinue
+            )
+            if (-not $remainingOldShell -and -not $remainingOldSidecar -and $remainingOldListeners.Count -eq 0) {
+              break
+            }
+            Start-Sleep -Milliseconds 100
+          } while ((Get-Date) -lt $exitDeadline)
+          if ($remainingOldShell) { throw "pre-reinstall shell PID $oldShellPid survived NSIS reinstall" }
+          if ($remainingOldSidecar) { throw "pre-reinstall sidecar PID $oldSidecarPid survived NSIS reinstall" }
+          if ($remainingOldListeners.Count -ne 0) {
+            throw "pre-reinstall sidecar PID $oldSidecarPid retained listeners after NSIS reinstall"
+          }
+
+          if (-not (Test-Path $shellPath)) { throw "shell missing after reinstall: $shellPath" }
+          $replacementShell = Get-CimInstance Win32_Process -Filter "Name = 'maximal-shell.exe'" |
+            Where-Object {
+              $_.ExecutablePath -eq $shellPath -and $_.ProcessId -ne $oldShellPid
+            } |
+            Sort-Object CreationDate -Descending |
+            Select-Object -First 1
+          if ($replacementShell) {
+            $replacementShellPid = [int]$replacementShell.ProcessId
+            Write-Host "installer launched replacement shell PID $replacementShellPid"
+          } else {
+            $replacementShellPid = (Start-Process -FilePath $shellPath -PassThru).Id
+            Write-Host "launched replacement shell PID $replacementShellPid"
+          }
+
+          $replacementSidecar = $null
+          $replacementPort = $null
+          $deadline = (Get-Date).AddSeconds(60)
+          do {
+            $replacementShellAlive = Get-Process -Id $replacementShellPid -ErrorAction SilentlyContinue
+            $replacementSidecar = Get-CimInstance Win32_Process -Filter "Name = 'maximal.exe'" |
+              Where-Object { $_.ParentProcessId -eq $replacementShellPid } |
+              Select-Object -First 1
+            if ($replacementShellAlive -and $replacementSidecar) {
+              $ports = @(
+                Get-NetTCPConnection -OwningProcess $replacementSidecar.ProcessId -State Listen -ErrorAction SilentlyContinue |
+                  Select-Object -ExpandProperty LocalPort -Unique
+              )
+              foreach ($port in $ports) {
+                try {
+                  $status = Invoke-RestMethod -Uri "http://127.0.0.1:$port/status" `
+                    -Method Get -TimeoutSec 2
+                  if ($status.service -eq 'maximal') {
+                    $replacementPort = $port
+                    break
+                  }
+                } catch {
+                  Write-Host "replacement listener $port not ready: $($_.Exception.Message)"
+                }
+              }
+            }
+            if ($replacementPort) { break }
+            Start-Sleep -Milliseconds 500
+          } while ((Get-Date) -lt $deadline)
+          if (-not $replacementShellAlive) { throw "replacement maximal-shell did not stay running after reinstall" }
+          if (-not $replacementSidecar) { throw "replacement sidecar did not start within 60 seconds after reinstall" }
+          if (-not $replacementPort) { throw "replacement sidecar did not answer /status within 60 seconds after reinstall" }
+
+          [ordered]@{
+            oldShellPid = $oldShellPid
+            oldSidecarPid = $oldSidecarPid
+            oldListenerPorts = $oldListenerPorts
+            replacementShellPid = $replacementShellPid
+            replacementSidecarPid = [int]$replacementSidecar.ProcessId
+            replacementPort = $replacementPort
+          } | ConvertTo-Json | Set-Content dist/reinstall-pids.json
+          Write-Host "replacement shell PID $replacementShellPid and sidecar PID $($replacementSidecar.ProcessId) are healthy"
+
+      # Exercise the app-level graceful path before abrupt containment. The
+      # loopback shutdown route lets the sidecar run its synchronous exit hooks;
+      # its clean exit must then cause the packaged shell to exit as well.
+      - name: Request bounded shutdown and verify packaged app exit
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installRoot = Join-Path $env:LOCALAPPDATA 'Maximal'
+          $shellPath = Join-Path $installRoot 'maximal-shell.exe'
+          $shellProcess = Get-CimInstance Win32_Process -Filter "Name = 'maximal-shell.exe'" |
+            Where-Object { $_.ExecutablePath -eq $shellPath } |
+            Select-Object -First 1
+          if (-not $shellProcess) { throw "installed maximal-shell process not found" }
+          $sidecarProcess = Get-CimInstance Win32_Process -Filter "Name = 'maximal.exe'" |
+            Where-Object { $_.ParentProcessId -eq $shellProcess.ProcessId } |
+            Select-Object -First 1
+          if (-not $sidecarProcess) { throw "sidecar child of shell PID $($shellProcess.ProcessId) not found" }
+
+          $shellPid = [int]$shellProcess.ProcessId
+          $sidecarPid = [int]$sidecarProcess.ProcessId
+          $listenerDeadline = (Get-Date).AddSeconds(10)
+          do {
+            $listenerPorts = @(
+              Get-NetTCPConnection -OwningProcess $sidecarPid -State Listen -ErrorAction SilentlyContinue |
+                Select-Object -ExpandProperty LocalPort -Unique
+            )
+            if ($listenerPorts.Count -gt 0) { break }
+            Start-Sleep -Milliseconds 100
+          } while ((Get-Date) -lt $listenerDeadline)
+          if ($listenerPorts.Count -eq 0) {
+            throw "sidecar PID $sidecarPid did not open a listener before graceful shutdown"
+          }
+
+          $shutdownPort = $null
+          foreach ($port in $listenerPorts) {
+            try {
+              $status = Invoke-RestMethod -Uri "http://127.0.0.1:$port/status" `
+                -Method Get -TimeoutSec 2
+              if ($status.service -eq 'maximal') {
+                $shutdownPort = $port
+                break
+              }
+            } catch {
+              Write-Host "listener $port did not answer as Maximal: $($_.Exception.Message)"
+            }
+          }
+          if (-not $shutdownPort) {
+            throw "no listener owned by sidecar PID $sidecarPid identified itself as Maximal"
+          }
+
+          $fixtureRoot = Join-Path $env:RUNNER_TEMP 'maximal-packaged-lifecycle'
+          $maximalConfigPath = Join-Path $env:COPILOT_API_HOME 'config.json'
+          $claudeSettingsPath = Join-Path $env:CLAUDE_CONFIG_DIR 'settings.json'
+          $codexConfigPath = Join-Path $env:CODEX_HOME 'config.toml'
+          $codexBaselinePath = Join-Path $fixtureRoot 'codex-config.before.toml'
+
+          $maximalConfig = Get-Content $maximalConfigPath -Raw | ConvertFrom-Json
+          if ($maximalConfig.apps.claudeCode.enabled -ne $true) {
+            throw "Claude Code routing intent was not preserved while packaged app ran"
+          }
+          if ($maximalConfig.apps.codex.enabled -ne $true) {
+            throw "Codex routing intent was not preserved while packaged app ran"
+          }
+          if ($maximalConfig.smallModel -ne 'smoke-user-model') {
+            throw "unrelated Maximal config changed while packaged app ran"
+          }
+
+          $claudeSettings = Get-Content $claudeSettingsPath -Raw | ConvertFrom-Json
+          if ($claudeSettings.env.ANTHROPIC_BASE_URL -ne "http://127.0.0.1:$shutdownPort") {
+            throw "packaged Claude Code configurator did not apply the active proxy URL"
+          }
+          if (-not $claudeSettings.apiKeyHelper) {
+            throw "packaged Claude Code configurator did not apply apiKeyHelper"
+          }
+          if ($claudeSettings.env.SMOKE_USER_ENV -ne 'preserve-me' -or
+              $claudeSettings.smokeUserSetting.preserve -ne $true -or
+              -not ($claudeSettings.permissions.allow -contains 'Read')) {
+            throw "packaged Claude Code configurator changed unrelated user fields"
+          }
+
+          $codexText = Get-Content $codexConfigPath -Raw
+          if (-not $codexText.Contains('# >>> maximal codex routing v1:') -or
+              -not $codexText.Contains('model_provider = "maximal-app"') -or
+              -not $codexText.Contains("base_url = `"http://127.0.0.1:$shutdownPort/v1`"")) {
+            throw "packaged Codex configurator did not apply the active provider routing"
+          }
+          if (-not $codexText.Contains('model = "smoke-model"') -or
+              -not $codexText.Contains('user_setting = "preserve-me"') -or
+              -not $codexText.Contains('smoke_feature = true')) {
+            throw "packaged Codex configurator changed unrelated user content"
+          }
+          Write-Host "packaged Claude Code and Codex configurators applied routing"
+
+          [ordered]@{
+            shellPid = $shellPid
+            sidecarPid = $sidecarPid
+            listenerPorts = $listenerPorts
+            shutdownPort = $shutdownPort
+          } | ConvertTo-Json | Set-Content dist/graceful-shutdown-pids.json
+
+          Write-Host "requesting graceful shutdown on sidecar PID $sidecarPid port $shutdownPort"
+          $response = Invoke-WebRequest `
+            -Uri "http://127.0.0.1:$shutdownPort/_internal/shutdown" `
+            -Method Post `
+            -ContentType 'application/json' `
+            -Body '{"reason":"windows packaged lifecycle smoke"}' `
+            -TimeoutSec 5
+          if ($response.StatusCode -ne 202) {
+            throw "graceful shutdown returned HTTP $($response.StatusCode), expected 202"
+          }
+          $shutdown = $response.Content | ConvertFrom-Json
+          if ($shutdown.ok -ne $true -or $shutdown.draining -ne $true) {
+            throw "graceful shutdown returned an unexpected response: $($response.Content)"
+          }
+
+          $deadline = (Get-Date).AddSeconds(10)
+          do {
+            $remainingShell = Get-Process -Id $shellPid -ErrorAction SilentlyContinue
+            $remainingSidecar = Get-Process -Id $sidecarPid -ErrorAction SilentlyContinue
+            $remainingListeners = @(
+              Get-NetTCPConnection -OwningProcess $sidecarPid -State Listen -ErrorAction SilentlyContinue
+            )
+            if (-not $remainingShell -and -not $remainingSidecar -and $remainingListeners.Count -eq 0) {
+              break
+            }
+            Start-Sleep -Milliseconds 100
+          } while ((Get-Date) -lt $deadline)
+          if ($remainingSidecar) { throw "sidecar PID $sidecarPid survived bounded graceful shutdown" }
+          if ($remainingShell) { throw "shell PID $shellPid survived bounded graceful shutdown" }
+          if ($remainingListeners.Count -ne 0) {
+            throw "sidecar PID $sidecarPid retained listeners after bounded graceful shutdown"
+          }
+
+          $afterClaude = Get-Content $claudeSettingsPath -Raw | ConvertFrom-Json
+          if ($afterClaude.env.ANTHROPIC_BASE_URL) {
+            throw "Claude Code proxy URL survived bounded graceful shutdown"
+          }
+          if ($afterClaude.PSObject.Properties.Name -contains 'apiKeyHelper') {
+            throw "Claude Code apiKeyHelper survived bounded graceful shutdown"
+          }
+          if ($afterClaude.env.CLAUDE_CODE_AUTO_MODE_SERVER) {
+            throw "Claude Code auto-mode routing survived bounded graceful shutdown"
+          }
+          if ($afterClaude.env.SMOKE_USER_ENV -ne 'preserve-me' -or
+              $afterClaude.smokeUserSetting.preserve -ne $true -or
+              -not ($afterClaude.permissions.allow -contains 'Read')) {
+            throw "Claude Code graceful cleanup changed unrelated user fields"
+          }
+
+          $afterCodex = Get-Content $codexConfigPath -Raw
+          $beforeCodex = Get-Content $codexBaselinePath -Raw
+          if ($afterCodex -cne $beforeCodex) {
+            throw "Codex graceful cleanup did not restore the seeded user config exactly"
+          }
+
+          $afterMaximal = Get-Content $maximalConfigPath -Raw | ConvertFrom-Json
+          if ($afterMaximal.apps.claudeCode.enabled -ne $true -or
+              $afterMaximal.apps.codex.enabled -ne $true) {
+            throw "graceful cleanup removed durable app routing intent"
+          }
+          if ($afterMaximal.smallModel -ne 'smoke-user-model') {
+            throw "graceful cleanup changed unrelated Maximal config"
+          }
+
+          [ordered]@{
+            claudeCode = [ordered]@{
+              applied = $true
+              reverted = $true
+              userFieldsPreserved = $true
+              routingIntentPreserved = $true
+            }
+            codex = [ordered]@{
+              applied = $true
+              revertedExactly = $true
+              routingIntentPreserved = $true
+            }
+          } | ConvertTo-Json -Depth 4 | Set-Content dist/configurator-verification.json
+          Write-Host "shell PID $shellPid and sidecar PID $sidecarPid exited gracefully; configurators reverted scoped routing"
+
+          $replacementShell = Start-Process -FilePath $shellPath -PassThru
+          $deadline = (Get-Date).AddSeconds(60)
+          do {
+            $replacementSidecar = Get-CimInstance Win32_Process -Filter "Name = 'maximal.exe'" |
+              Where-Object { $_.ParentProcessId -eq $replacementShell.Id } |
+              Select-Object -First 1
+            if (-not $replacementShell.HasExited -and $replacementSidecar) { break }
+            Start-Sleep -Milliseconds 500
+            $replacementShell.Refresh()
+          } while ((Get-Date) -lt $deadline)
+          if ($replacementShell.HasExited) { throw "replacement maximal-shell did not stay running" }
+          if (-not $replacementSidecar) { throw "replacement sidecar did not start within 60 seconds" }
+          Write-Host "replacement shell PID: $($replacementShell.Id); sidecar PID: $($replacementSidecar.ProcessId)"
+
+      # Keep abrupt parent death as a distinct Job Object containment test. This
+      # runs before NSIS's image-wide cleanup can mask the result. Kill only the
+      # shell PID, without /T, and require its exact sidecar and listeners to
       # disappear. Then relaunch so the running-uninstaller smoke remains intact.
       - name: Force shell exit and verify sidecar containment
         shell: pwsh
@@ -426,6 +797,60 @@ jobs:
             }
           }
 
+          # Record only booleans from integration fixtures. The generated API-key
+          # helper can contain a secret, so never upload the raw client configs.
+          $fixtureRoot = Join-Path $env:RUNNER_TEMP 'maximal-packaged-lifecycle'
+          $fixtureMaximalConfig = Join-Path $fixtureRoot 'maximal/config.json'
+          $fixtureClaudeSettings = Join-Path $fixtureRoot 'claude/settings.json'
+          $fixtureCodexConfig = Join-Path $fixtureRoot 'codex/config.toml'
+          $fixtureState = [ordered]@{
+            maximalConfigExists = Test-Path $fixtureMaximalConfig
+            maximalConfigReadable = $null
+            claudeCodeIntent = $null
+            codexIntent = $null
+            maximalUserFieldPreserved = $null
+            claudeSettingsExists = Test-Path $fixtureClaudeSettings
+            claudeSettingsReadable = $null
+            claudeProxyPresent = $null
+            claudeHelperPresent = $null
+            claudeUserFieldsPreserved = $null
+            codexConfigExists = Test-Path $fixtureCodexConfig
+            codexConfigReadable = $null
+            codexRoutingPresent = $null
+            codexUserFieldsPreserved = $null
+          }
+          try {
+            $maximalConfig = Get-Content $fixtureMaximalConfig -Raw | ConvertFrom-Json
+            $fixtureState.maximalConfigReadable = $true
+            $fixtureState.claudeCodeIntent = $maximalConfig.apps.claudeCode.enabled -eq $true
+            $fixtureState.codexIntent = $maximalConfig.apps.codex.enabled -eq $true
+            $fixtureState.maximalUserFieldPreserved = $maximalConfig.smallModel -eq 'smoke-user-model'
+          } catch {
+            $fixtureState.maximalConfigReadable = $false
+          }
+          try {
+            $claude = Get-Content $fixtureClaudeSettings -Raw | ConvertFrom-Json
+            $fixtureState.claudeSettingsReadable = $true
+            $fixtureState.claudeProxyPresent = [bool]$claude.env.ANTHROPIC_BASE_URL
+            $fixtureState.claudeHelperPresent = $claude.PSObject.Properties.Name -contains 'apiKeyHelper'
+            $fixtureState.claudeUserFieldsPreserved =
+              $claude.env.SMOKE_USER_ENV -eq 'preserve-me' -and
+              $claude.smokeUserSetting.preserve -eq $true
+          } catch {
+            $fixtureState.claudeSettingsReadable = $false
+          }
+          try {
+            $codex = Get-Content $fixtureCodexConfig -Raw
+            $fixtureState.codexConfigReadable = $true
+            $fixtureState.codexRoutingPresent = $codex.Contains('# >>> maximal codex routing v1:')
+            $fixtureState.codexUserFieldsPreserved =
+              $codex.Contains('user_setting = "preserve-me"') -and
+              $codex.Contains('smoke_feature = true')
+          } catch {
+            $fixtureState.codexConfigReadable = $false
+          }
+          $fixtureState | ConvertTo-Json -Depth 3 | Set-Content diagnostics/configurator-state.json
+
       - name: Upload Windows lifecycle diagnostics
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -433,6 +858,9 @@ jobs:
           name: windows-shell-dev-diagnostics
           path: |
             diagnostics/
+            dist/reinstall-pids.json
+            dist/graceful-shutdown-pids.json
+            dist/configurator-verification.json
             dist/containment-pids.json
           if-no-files-found: warn
 

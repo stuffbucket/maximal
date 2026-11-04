@@ -349,7 +349,7 @@ describe("Windows desktop lifecycle smoke", () => {
     )
   })
 
-  test("tests native shutdown and uninstalls a running shell within a deadline", async () => {
+  test("tests reinstall, configurator cleanup, and abrupt containment before uninstall", async () => {
     const workflow = await readWorkflow("windows-shell-dev.yml")
 
     expect(workflow).toContain(
@@ -358,7 +358,53 @@ describe("Windows desktop lifecycle smoke", () => {
     expect(workflow).toContain("name: Launch installed app and verify sidecar")
     expect(
       workflow.match(/\$deadline = \(Get-Date\)\.AddSeconds\(60\)/gu),
-    ).toHaveLength(2)
+    ).toHaveLength(4)
+    expect(workflow).toContain("name: Seed isolated app integration fixtures")
+    expect(workflow).toContain("COPILOT_API_HOME=$maximalHome")
+    expect(workflow).toContain("CLAUDE_CONFIG_DIR=$claudeHome")
+    expect(workflow).toContain("CODEX_HOME=$codexHome")
+    expect(workflow).toContain(
+      "name: Reinstall NSIS app while Maximal is running",
+    )
+    expect(workflow).toContain(
+      "pre-reinstall shell PID $oldShellPid survived NSIS reinstall",
+    )
+    expect(workflow).toContain(
+      "pre-reinstall sidecar PID $oldSidecarPid survived NSIS reinstall",
+    )
+    expect(workflow).toContain(
+      "replacement sidecar did not answer /status within 60 seconds after reinstall",
+    )
+    expect(workflow).toContain("dist/reinstall-pids.json")
+    expect(workflow).toContain(
+      "name: Request bounded shutdown and verify packaged app exit",
+    )
+    expect(workflow).toContain('/_internal/shutdown"')
+    expect(workflow).toContain("if ($response.StatusCode -ne 202)")
+    expect(workflow).toContain(
+      "sidecar PID $sidecarPid survived bounded graceful shutdown",
+    )
+    expect(workflow).toContain(
+      "shell PID $shellPid survived bounded graceful shutdown",
+    )
+    expect(workflow).toContain("dist/graceful-shutdown-pids.json")
+    expect(workflow).toContain(
+      "packaged Claude Code configurator did not apply the active proxy URL",
+    )
+    expect(workflow).toContain(
+      "packaged Codex configurator did not apply the active provider routing",
+    )
+    expect(workflow).toContain(
+      "Claude Code proxy URL survived bounded graceful shutdown",
+    )
+    expect(workflow).toContain(
+      "Codex graceful cleanup did not restore the seeded user config exactly",
+    )
+    expect(workflow).toContain(
+      "graceful cleanup removed durable app routing intent",
+    )
+    expect(workflow).toContain("dist/configurator-verification.json")
+    expect(workflow).toContain("diagnostics/configurator-state.json")
     expect(workflow).toContain(
       "name: Force shell exit and verify sidecar containment",
     )
