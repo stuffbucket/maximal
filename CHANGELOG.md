@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.2-rc.2](https://github.com/stuffbucket/maximal/compare/v0.5.1...v0.5.2-rc.2) (2026-11-04)
+
+
+### Bug Fixes
+
+* **shell:** harden Windows lifecycle and unified window states ([#583](https://github.com/stuffbucket/maximal/issues/583)) ([c4b0777](https://github.com/stuffbucket/maximal/commit/c4b07773c818dc363f4aeab687cccad43a1f3fb0))
+* **shell:** repair Windows lifecycle behavior ([215d4a3](https://github.com/stuffbucket/maximal/commit/215d4a392a06d99e6736ddcd7c7f46367706d304))
+
 ## [0.5.1](https://github.com/stuffbucket/maximal/compare/v0.5.0...v0.5.1) (2026-11-03)
 
 
