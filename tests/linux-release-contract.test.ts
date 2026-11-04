@@ -58,10 +58,10 @@ describe("Linux release binaries", () => {
 
   test("are built in the binaries matrix for both architectures", () => {
     expect(binaries).toContain(
-      "- { target: bun-linux-x64,    artifact: linux-x64,    ext: tar.gz }",
+      "- { target: bun-linux-x64, artifact: linux-x64, ext: tar.gz }",
     )
     expect(binaries).toContain(
-      "- { target: bun-linux-arm64,  artifact: linux-arm64,  ext: tar.gz }",
+      "- { target: bun-linux-arm64, artifact: linux-arm64, ext: tar.gz }",
     )
   })
 
@@ -101,14 +101,16 @@ describe("Debian packages", () => {
   const linuxDeb = job(RELEASE, "linux-deb")
 
   test("are built on Ubuntu 24.04 for amd64 and arm64", () => {
-    expect(linuxDeb).toContain("runner: ubuntu-24.04     }")
+    expect(linuxDeb).toContain("runner: ubuntu-24.04 }")
     expect(linuxDeb).toContain("runner: ubuntu-24.04-arm }")
   })
 
-  test("package the release binaries rather than compiling new ones", () => {
+  test("package the build-once workflow artifacts rather than compiling or downloading from the draft", () => {
+    expect(linuxDeb).toContain("name: release-binary-${{ matrix.artifact }}")
     expect(linuxDeb).toContain('TARBALL="maximal-${TAG}-${ARTIFACT}.tar.gz"')
     expect(linuxDeb).toContain("sha256sum -c")
     expect(linuxDeb).toContain("bash build/linux/build-maximal-deb.sh")
+    expect(linuxDeb).not.toContain("gh release download")
     expect(linuxDeb).not.toContain("bun build --compile")
   })
 

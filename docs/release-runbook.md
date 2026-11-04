@@ -15,6 +15,13 @@ publishing the GitHub release.
    check, confirm it is current with `main`, and merge it.
 6. Confirm the Pages deployment and the post-publication jobs complete.
 
+The release workflow also waits for `ci.yml`'s required `test` job to succeed on
+the exact commit SHA to which the tag peels. It accepts a same-repository `main`
+push run or an explicit `workflow_dispatch` run (whose own `expected_sha` gate
+must pass), and fails closed if neither has that successful check. Independent
+release lanes may start while non-required CI jobs finish. The release does not
+repeat generic lint, typecheck, test, or build after that evidence is available.
+
 CI already gates the release PR. For an optional local check, run:
 
 ```sh
@@ -28,7 +35,8 @@ an explicit version. Pre-1.0 `feat:` commits otherwise produce patch releases.
 
 | Jobs | Expected result |
 |---|---|
-| `release`, `binaries`, `checksums`, `smoke` | Draft release, notes, SBOM, raw platform archives, checksums, and binary validation |
+| `preflight` | Exact tag/ref/version agreement and a successful same-repository `ci.yml` required `test` job for the tag's commit (`main` push or guarded explicit dispatch) |
+| `release`, `sbom`, `ui`, `binaries`, `raw-assets`, `checksums`, `smoke` | Draft release and notes; release-only SBOM/license scan; one platform-neutral UI build; build-once raw platform archives transported as workflow artifacts, smoke-tested, then centrally attached with aggregate checksums |
 | `macos-dmg` | Signed, notarized, and stapled Apple Silicon DMG from `stuffbucket/macos-builder`, plus the app's updater bundle `maximal-vX.Y.Z-darwin-arm64.app.tar.gz` with its `.sig` and `.sha256`, checked against the checksum and verified as signed by the updater key for this version |
 | `windows-installer`, `windows-msi`, `windows-msi-verify`, `windows-shell` | Windows installer assets and their required validation; `windows-shell` also verifies and attaches `<setup>.exe.sig`, the Windows app's updater signature |
 | `linux-deb` | On Ubuntu 24.04 runners for amd64 and arm64: `maximal_X.Y.Z_<arch>.deb` built from the `linux-x64`/`linux-arm64` archives, and `maximal-desktop_X.Y.Z_<arch>.deb` (the Tauri tray app, which depends on `maximal (= <version>)` and ships no copy of its binaries), each with a `.sha256`; fails on a package over 95 MB |
@@ -132,7 +140,8 @@ Linux users to fetch the new public key.
 
 | Failure | Action |
 |---|---|
-| A publish-gating job failed | Use **Re-run failed jobs** on the original `release.yml` run. |
+| `preflight` found no exact-SHA required-check evidence | Dispatch `ci.yml` on the tag with `gh workflow run ci.yml --ref vX.Y.Z -f expected_sha=<peeled-tag-commit>`, wait for its `test` job to succeed, then rerun `preflight` and failed jobs. |
+| A publish-gating job failed | Use **Re-run failed jobs** on the original `release.yml` run; successful build-lane workflow artifacts remain available to failed consumers in that run. |
 | The release workflow was not dispatched | Run `gh workflow run release.yml --ref vX.Y.Z -f tag=vX.Y.Z`. |
 | The macOS builder failed or was unavailable | Rerun `macos-dmg`, or run `gh workflow run build.yml --repo stuffbucket/macos-builder --ref main -f repo=stuffbucket/maximal -f ref=vX.Y.Z` yourself. |
 | `manifest` failed after publication | Rerun `manifest`, then merge its protected PR after checks pass. |

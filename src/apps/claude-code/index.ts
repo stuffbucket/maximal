@@ -12,15 +12,13 @@ import {
   HELPER_LABEL,
 } from "./config"
 import { detectClaudeInstalls } from "./detect"
+import { claudeCodeInstallHint } from "./install"
 import { claudeCodeMcp } from "./mcp"
 import {
   reconcileClaudeCodeOnBoot,
   reconcileClaudeCodeOnShutdown,
   setClaudeCodeRoutingIntent,
 } from "./reconcile"
-
-const CLAUDE_CODE_INSTALL_COMMAND =
-  "curl -fsSL https://claude.ai/install.sh | sh"
 
 export const claudeCodeApp: ClientApp = {
   id: "claude-code",
@@ -47,10 +45,7 @@ export const claudeCodeApp: ClientApp = {
         version: i.version,
         source: i.source,
       })),
-      install:
-        installs.length === 0 ?
-          { method: "curl", command: CLAUDE_CODE_INSTALL_COMMAND }
-        : null,
+      install: installs.length === 0 ? await claudeCodeInstallHint() : null,
       conflict,
     }
   },

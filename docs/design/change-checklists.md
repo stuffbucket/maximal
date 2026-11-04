@@ -106,7 +106,8 @@ generated file or inlined where a token belongs (see
 3. Add to the window-sizes table in [`layout.md`](layout.md).
 4. Single-instance behavior: re-show + focus the existing window instead of
    opening another. Preserve the platform lifecycle: close hides on macOS/Linux;
-   Windows X performs bounded shutdown and quits.
+   Windows startup stays minimized and taskbar-visible without activation, and
+   Windows X confirms before bounded shutdown and quit.
 5. Tokens: import the generated `tokens.css`, or give the window its
    own generated region in `scripts/generate-css-tokens.ts`. Never
    hand-declare token values.

@@ -96,6 +96,9 @@ interface Catalog {
   "app-container": string
   "appearance-dock-sub": string
   "file-manager": string
+  "native-notify-startup-body-windows": string
+  "native-notify-signin-body": string
+  "native-notify-signin-body-windows": string
 }
 
 function loadCatalog(): Catalog {
@@ -122,6 +125,20 @@ describe("i18n catalog is the single source of truth", () => {
     expect(copy).toContain(
       "other {Keep Maximal in the taskbar even when the window is closed.}",
     )
+  })
+
+  test("Windows notifications direct users through the taskbar", () => {
+    const catalog = loadCatalog()
+    const startupCopy = catalog["native-notify-startup-body-windows"]
+    const signInCopy = catalog["native-notify-signin-body-windows"]
+    expect(catalog["native-notify-signin-body"]).toContain("menu-bar icon")
+    expect(startupCopy).toBe("Maximal is running. Open it from the taskbar.")
+    expect(signInCopy).toContain(
+      "Open Maximal from the taskbar, then open Settings and sign in.",
+    )
+    for (const windowsCopy of [startupCopy, signInCopy]) {
+      expect(windowsCopy).not.toMatch(/click here|menu[- ]bar|system tray/iu)
+    }
   })
 })
 

@@ -478,3 +478,25 @@ describe("POST /apps/claude-desktop/toggle", () => {
     expect(actualDesktop.isConfigLibraryApplied(ROUTE_3P_HOME)).toBe(false)
   })
 })
+
+describe("/settings/api/apps/claude-code/install", () => {
+  test("GET reports an idle install before anything has started", async () => {
+    const res = await buildApp().request("/apps/claude-code/install")
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({
+      state: "idle",
+      output: [],
+      reason: null,
+      exitCode: null,
+    })
+  })
+
+  test("POST without the winget method is rejected before anything runs", async () => {
+    const res = await buildApp().request("/apps/claude-code/install", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ method: "npm" }),
+    })
+    expect(res.status).toBe(400)
+  })
+})

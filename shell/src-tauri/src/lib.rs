@@ -34,7 +34,7 @@
 // for the surviving close-to-background platforms and window show paths.
 //
 // Quit flow:
-//   1. Tray "Quit Maximal" asks for confirmation; Windows X does not.
+//   1. Tray "Quit Maximal" and Windows X ask for confirmation.
 //   2. `exit_gracefully` claims the one-shot exit guard. Windows waits for
 //      graceful sidecar cleanup before `app.exit(0)`; other platforms exit.
 //   3. RunEvent::ExitRequested performs final sidecar process containment.
@@ -103,6 +103,11 @@ const UPDATE_FORCE_TIMEOUT: Duration = Duration::from_secs(20);
 /// Event the shell sends the Settings window after it ran an update check, so
 /// the topbar button and Diagnostics rows re-read the status right away.
 const UPDATE_STATUS_EVENT: &str = "update:status";
+#[cfg(target_os = "windows")]
+const QUIT_REQUESTED_EVENT: &str = "app://quit-requested";
+#[cfg(target_os = "windows")]
+const QUIT_REQUESTED_DOM_EVENT_SCRIPT: &str =
+    "window.dispatchEvent(new CustomEvent('maximal:quit-requested'));";
 
 /// Whether "Update to X.Y.Z" installs the update in place (download the
 /// signed update, install, relaunch) on this platform: Windows (the NSIS
@@ -301,12 +306,23 @@ fn apply_main_surface_constraints(window: &WebviewWindow, surface: &str) -> taur
     window.set_size_constraints(main_window_constraints(surface))
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MainWindowPresentation {
+    Foreground,
+    #[cfg(target_os = "windows")]
+    WindowsStartupMinimized,
+}
+
 /// The plugin's window-ready hook is queued before this barrier. Once that hook
 /// has installed its state tracking, restore from a blocking worker so Tauri's
 /// synchronous window getters can be serviced by the main event loop. Holding
 /// the plugin cache on the window-creation thread while its hook runs would
 /// otherwise deadlock the cache and event loop against each other.
-fn restore_and_present_main_window(app: &AppHandle, window: &WebviewWindow) {
+fn restore_main_window(
+    app: &AppHandle,
+    window: &WebviewWindow,
+    presentation: MainWindowPresentation,
+) {
     let app_after_barrier = app.clone();
     let window_after_barrier = window.clone();
     let queue_result = window.run_on_main_thread(move || {
@@ -326,7 +342,19 @@ fn restore_and_present_main_window(app: &AppHandle, window: &WebviewWindow) {
                 if let Err(error) = apply_main_surface_constraints(&window_for_present, &surface) {
                     eprintln!("[shell] could not apply main window constraints: {error}");
                 }
-                present_window(&app_for_present, &window_for_present);
+                match presentation {
+                    MainWindowPresentation::Foreground => {
+                        present_window(&app_for_present, &window_for_present);
+                    }
+                    #[cfg(target_os = "windows")]
+                    MainWindowPresentation::WindowsStartupMinimized => {
+                        // An explicit action may have presented the window while
+                        // geometry restoration ran. Never minimize it again.
+                        if !window_for_present.is_visible().unwrap_or(false) {
+                            show_windows_startup_window(&app_for_present, &window_for_present);
+                        }
+                    }
+                }
             }) {
                 eprintln!("[shell] could not queue main window presentation: {error}");
             }
@@ -560,8 +588,8 @@ impl PendingShellAction {
 }
 
 /// One-shot Windows quit-confirm request. The flag is set before the main
-/// window is shown and consumed after its event listener mounts, so neither a
-/// newly loading webview nor an already-hidden one can miss the prompt.
+/// window is shown and consumed only after React renders the dialog, so neither
+/// a newly loading webview nor an already-hidden one can miss the prompt.
 struct PendingQuitPrompt(std::sync::atomic::AtomicBool);
 
 impl PendingQuitPrompt {
@@ -572,6 +600,10 @@ impl PendingQuitPrompt {
     #[cfg(any(target_os = "windows", test))]
     fn request(&self) {
         self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    fn pending(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     fn take(&self) -> bool {
@@ -634,8 +666,15 @@ fn start_runtime_event_loop(
             match event {
                 RuntimeEvent::State(state) => apply_state(&app, state),
                 RuntimeEvent::Ready(endpoint) => {
-                    if let Some(action) = app.state::<PendingShellAction>().take() {
-                        dispatch_shell_action(&app, action);
+                    let ready_app = app.clone();
+                    if let Err(error) = app.run_on_main_thread(move || {
+                        if let Some(action) = ready_app.state::<PendingShellAction>().take() {
+                            dispatch_shell_action(&ready_app, action);
+                        }
+                        #[cfg(target_os = "windows")]
+                        ensure_windows_taskbar_window(&ready_app);
+                    }) {
+                        eprintln!("[shell] could not queue ready presentation: {error}");
                     }
                     let handle = app.clone();
                     tauri::async_runtime::spawn(async move {
@@ -762,6 +801,7 @@ pub fn run() {
             reveal_config_dir,
             reveal_logs_dir,
             restart_sidecar,
+            has_quit_request,
             take_quit_request,
             confirm_quit,
             uninstall_maximal,
@@ -782,6 +822,7 @@ pub fn run() {
             reveal_config_dir,
             reveal_logs_dir,
             restart_sidecar,
+            has_quit_request,
             take_quit_request,
             confirm_quit,
             uninstall_maximal,
@@ -1513,22 +1554,26 @@ fn dismiss_splash(app: &AppHandle) {
     });
 }
 
-/// One-shot "we're up" notification so users who launched from Finder
-/// know it's running and where to find it (menu bar, not Dock). Same
-/// best-effort caveats as `fire_rejection_notification`: a permission
-/// denial or a dev (`cargo run`) no-op must not matter.
+fn startup_notification_body_key(is_macos: bool, is_windows: bool) -> &'static str {
+    if is_macos {
+        "native-notify-startup-body-macos"
+    } else if is_windows {
+        "native-notify-startup-body-windows"
+    } else {
+        "native-notify-startup-body-other"
+    }
+}
+
+/// One-shot "we're up" notification so users know it's running and where to
+/// find it. Same best-effort caveats as `fire_rejection_notification`: a
+/// permission denial or a dev (`cargo run`) no-op must not matter.
 fn fire_startup_notification(app: &AppHandle) {
     use tauri_plugin_notification::NotificationExt;
     let locale = app.state::<LocaleState>().get();
-    // Where the icon lives — and which way to point — is platform-specific:
-    // macOS puts it in the top menu bar (↑); Windows/Linux put it in the
-    // system tray (↓). Each catalog bakes both the container noun and the
-    // arrow into its own per-OS key, so we just pick the key by target_os.
-    let body_key = if cfg!(target_os = "macos") {
-        "native-notify-startup-body-macos"
-    } else {
-        "native-notify-startup-body-other"
-    };
+    // macOS points to the menu bar, Windows to its default taskbar button, and
+    // Linux to the system tray. Each catalog bakes in its platform noun.
+    let body_key =
+        startup_notification_body_key(cfg!(target_os = "macos"), cfg!(target_os = "windows"));
     if let Err(err) = app
         .notification()
         .builder()
@@ -1540,12 +1585,21 @@ fn fire_startup_notification(app: &AppHandle) {
     }
 }
 
+fn sign_in_notification_body_key(is_windows: bool) -> &'static str {
+    if is_windows {
+        "native-notify-signin-body-windows"
+    } else {
+        "native-notify-signin-body"
+    }
+}
+
 /// Nudge the user to sign in when the proxy is up but has no GitHub account.
 /// Fires on *entry* into the unauthenticated state — first launch, or a
 /// mid-session sign-out / token expiry (which otherwise only nudged the tray
 /// icon to ATTENTION, easy to miss). Clicking the notification activates the
 /// app; `RunEvent::Reopen` (macOS) then brings up Settings → account. The
-/// menu-bar "Sign in to GitHub…" item is the always-available fallback.
+/// menu-bar "Sign in to GitHub…" item is the always-available macOS fallback.
+/// Windows uses separate copy because the app remains visible in the taskbar.
 fn fire_sign_in_notification(app: &AppHandle) {
     use tauri_plugin_notification::NotificationExt;
     let locale = app.state::<LocaleState>().get();
@@ -1553,7 +1607,10 @@ fn fire_sign_in_notification(app: &AppHandle) {
         .notification()
         .builder()
         .title(native_i18n::tr(&locale, "native-notify-signin-title"))
-        .body(native_i18n::tr(&locale, "native-notify-signin-body"))
+        .body(native_i18n::tr(
+            &locale,
+            sign_in_notification_body_key(cfg!(target_os = "windows")),
+        ))
         .show()
     {
         eprintln!("[shell] sign-in notification failed: {err}");
@@ -2567,13 +2624,23 @@ fn respawn_sidecar(app: &AppHandle) {
 }
 
 /// Opens (or focuses) the unified main webview on the sidecar's Settings shell.
-/// The optional `section` becomes a URL fragment so the
-/// frontend can scroll to / select that section.
+/// The optional `section` becomes a URL fragment so the frontend can scroll to
+/// or select that section.
 fn open_settings_window(app: &AppHandle, section: Option<&str>) {
-    // Any window taking the stage retires the splash (it's always-on-top
-    // and would otherwise sit over this one — e.g. the first-launch
-    // sign-in nudge).
-    dismiss_splash(app);
+    open_settings_window_with_presentation(app, section, MainWindowPresentation::Foreground);
+}
+
+fn open_settings_window_with_presentation(
+    app: &AppHandle,
+    section: Option<&str>,
+    presentation: MainWindowPresentation,
+) {
+    // Any foreground window taking the stage retires the splash (it's
+    // always-on-top and would otherwise sit over this one — e.g. the
+    // first-launch sign-in nudge). Windows' minimized startup window keeps it.
+    if presentation == MainWindowPresentation::Foreground {
+        dismiss_splash(app);
+    }
     // The settings UI is served by the sidecar at /ui/settings/ (embedded
     // in the binary), in dev and prod alike — there is no separate dev
     // server to point at anymore.
@@ -2599,9 +2666,13 @@ fn open_settings_window(app: &AppHandle, section: Option<&str>) {
         Some(main_surface::SESSIONS) => main_surface::SESSIONS,
         _ => main_surface::SETTINGS,
     };
-    app.state::<MainSurfaceState>().set(surface);
     let title = main_surface_title(app, surface);
     if let Some(existing) = app.get_webview_window(SETTINGS_WINDOW_LABEL) {
+        #[cfg(target_os = "windows")]
+        if presentation == MainWindowPresentation::WindowsStartupMinimized {
+            return;
+        }
+        app.state::<MainSurfaceState>().set(surface);
         let _ = existing.set_title(&title);
         let _ = apply_main_surface_constraints(&existing, surface);
         let js = match section {
@@ -2614,6 +2685,7 @@ fn open_settings_window(app: &AppHandle, section: Option<&str>) {
         present_window(app, &existing);
         return;
     }
+    app.state::<MainSurfaceState>().set(surface);
 
     // Surface the version in the titlebar (window-level identity belongs in
     // the title, not a content H1 — see docs/design/failure-modes.md). Drop
@@ -2640,12 +2712,31 @@ fn open_settings_window(app: &AppHandle, section: Option<&str>) {
 
     match builder.build() {
         Ok(window) => {
-            restore_and_present_main_window(app, &window);
+            restore_main_window(app, &window, presentation);
         }
         Err(err) => {
             eprintln!("[shell] settings window build failed: {err}");
         }
     }
+}
+
+/// The default Windows desktop contract keeps Maximal represented in the
+/// taskbar after its splash retires. Build the unified window only after the
+/// sidecar origin is authorized, then show it minimized without activation.
+#[cfg(target_os = "windows")]
+fn ensure_windows_taskbar_window(app: &AppHandle) {
+    if !app.state::<DockVisibilityState>().always_visible()
+        || [SETTINGS_WINDOW_LABEL, DASHBOARD_WINDOW_LABEL]
+            .iter()
+            .any(|label| app.get_webview_window(label).is_some())
+    {
+        return;
+    }
+    open_settings_window_with_presentation(
+        app,
+        None,
+        MainWindowPresentation::WindowsStartupMinimized,
+    );
 }
 
 /// The profile-specific app-data root resolved once during setup and passed
@@ -2826,22 +2917,22 @@ fn open_sessions_window(app: &AppHandle) {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CloseWindowAction {
-    Quit,
+    ConfirmQuit,
     Hide,
 }
 
 fn close_window_action(is_windows: bool) -> CloseWindowAction {
     if is_windows {
-        CloseWindowAction::Quit
+        CloseWindowAction::ConfirmQuit
     } else {
         CloseWindowAction::Hide
     }
 }
 
 /// Windows follows the ordinary desktop contract: closing the main window
-/// quits Maximal. macOS/Linux retain the menu-bar/tray close-to-background
-/// behavior. Both paths prevent Tauri's code-less last-window exit request so
-/// Windows can finish bounded sidecar/configurator shutdown before exiting.
+/// asks for confirmation, then quits Maximal after bounded sidecar/configurator
+/// shutdown. macOS/Linux retain the menu-bar/tray close-to-background behavior.
+/// Both paths prevent Tauri's code-less last-window exit request.
 fn attach_main_window_behavior(app: &AppHandle, window: &tauri::WebviewWindow) {
     let window_clone = window.clone();
     let app_clone = app.clone();
@@ -2850,7 +2941,7 @@ fn attach_main_window_behavior(app: &AppHandle, window: &tauri::WebviewWindow) {
         WindowEvent::CloseRequested { api, .. } => {
             api.prevent_close();
             match close_window_action(cfg!(windows)) {
-                CloseWindowAction::Quit => exit_gracefully(app_clone.clone()),
+                CloseWindowAction::ConfirmQuit => request_quit(&app_clone),
                 CloseWindowAction::Hide => {
                     let _ = window_clone.hide();
                     update_activation_policy(&app_clone);
@@ -2954,6 +3045,32 @@ fn update_activation_policy(app: &AppHandle) {
     }
 }
 
+/// Show the restored Windows startup window minimized without activating it.
+/// `SW_SHOWMINNOACTIVE` creates the taskbar button while leaving focus with the
+/// person's current application; ordinary Tauri `show()` can activate a newly
+/// visible window after minimizing it.
+#[cfg(target_os = "windows")]
+fn show_windows_startup_window(app: &AppHandle, window: &WebviewWindow) {
+    use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWMINNOACTIVE};
+
+    if let Err(error) = window.set_skip_taskbar(false) {
+        eprintln!("[shell] could not include startup window in taskbar: {error}");
+    }
+    match window.hwnd() {
+        Ok(hwnd) => {
+            // SAFETY: Tauri owns this live HWND, and restoration calls this helper
+            // on the main thread before any close path can destroy the window.
+            unsafe {
+                let _ = ShowWindow(hwnd, SW_SHOWMINNOACTIVE);
+            }
+            update_activation_policy(app);
+        }
+        Err(error) => {
+            eprintln!("[shell] could not access startup window handle: {error}");
+        }
+    }
+}
+
 /// macOS: make Maximal the active (frontmost) application. An Accessory
 /// menu-bar app is not active by default, so even after flipping to Regular
 /// a freshly-shown window won't take the foreground until the app itself is
@@ -3053,8 +3170,9 @@ fn request_native_quit_dialog(app: &AppHandle) {
 }
 
 /// Windows uses the app-styled confirmation dialog in the unified main window.
-/// Queue before opening and emit after: a newly loading webview consumes the
-/// flag on mount, while an existing hidden webview receives the live event.
+/// Queue before opening and signal after: a newly loading webview observes the
+/// flag on mount, while an existing hidden webview receives the live event. The
+/// webview acknowledges the flag only after React renders the dialog.
 #[cfg(target_os = "windows")]
 fn request_quit(app: &AppHandle) {
     if app.state::<ManagedEndpoint>().current().is_none() {
@@ -3064,7 +3182,12 @@ fn request_quit(app: &AppHandle) {
 
     app.state::<PendingQuitPrompt>().request();
     open_settings_window(app, None);
-    if let Err(err) = app.emit_to(SETTINGS_WINDOW_LABEL, "app://quit-requested", ()) {
+    if let Some(window) = app.get_webview_window(SETTINGS_WINDOW_LABEL) {
+        if let Err(err) = window.eval(QUIT_REQUESTED_DOM_EVENT_SCRIPT) {
+            eprintln!("[shell] eval quit-requested failed: {err}");
+        }
+    }
+    if let Err(err) = app.emit_to(SETTINGS_WINDOW_LABEL, QUIT_REQUESTED_EVENT, ()) {
         eprintln!("[shell] emit quit-requested failed: {err}");
     }
 }
@@ -3073,6 +3196,11 @@ fn request_quit(app: &AppHandle) {
 #[cfg(not(target_os = "windows"))]
 fn request_quit(app: &AppHandle) {
     request_native_quit_dialog(app);
+}
+
+#[tauri::command]
+fn has_quit_request(state: State<'_, PendingQuitPrompt>) -> bool {
+    state.pending()
 }
 
 #[tauri::command]
@@ -3380,10 +3508,10 @@ mod tests {
     }
 
     #[test]
-    fn quits_when_the_main_window_closes_on_windows() {
+    fn confirms_before_the_main_window_closes_on_windows() {
         use super::{close_window_action, CloseWindowAction};
 
-        assert_eq!(close_window_action(true), CloseWindowAction::Quit);
+        assert_eq!(close_window_action(true), CloseWindowAction::ConfirmQuit);
     }
 
     #[test]
@@ -3391,6 +3519,38 @@ mod tests {
         use super::{close_window_action, CloseWindowAction};
 
         assert_eq!(close_window_action(false), CloseWindowAction::Hide);
+    }
+
+    #[test]
+    fn selects_platform_specific_startup_notification_copy() {
+        use super::startup_notification_body_key;
+
+        assert_eq!(
+            startup_notification_body_key(true, false),
+            "native-notify-startup-body-macos"
+        );
+        assert_eq!(
+            startup_notification_body_key(false, true),
+            "native-notify-startup-body-windows"
+        );
+        assert_eq!(
+            startup_notification_body_key(false, false),
+            "native-notify-startup-body-other"
+        );
+    }
+
+    #[test]
+    fn selects_platform_specific_sign_in_notification_copy() {
+        use super::sign_in_notification_body_key;
+
+        assert_eq!(
+            sign_in_notification_body_key(true),
+            "native-notify-signin-body-windows"
+        );
+        assert_eq!(
+            sign_in_notification_body_key(false),
+            "native-notify-signin-body"
+        );
     }
 
     #[test]

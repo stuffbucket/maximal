@@ -331,23 +331,110 @@ jobs:
           $shellPath = Join-Path $installRoot 'maximal-shell.exe'
           if (-not (Test-Path $shellPath)) { throw "shell missing: $shellPath" }
 
+          Add-Type -TypeDefinition @'
+          using System;
+          using System.Collections.Generic;
+          using System.Runtime.InteropServices;
+          public static class MaximalStartupWindowSmoke {
+            private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+            [DllImport("user32.dll")]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
+            [DllImport("user32.dll")]
+            private static extern uint GetWindowThreadProcessId(
+              IntPtr hWnd, out uint processId);
+            [DllImport("user32.dll")]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            public static extern bool IsIconic(IntPtr hWnd);
+            [DllImport("user32.dll")]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            public static extern bool IsWindowVisible(IntPtr hWnd);
+            [DllImport("user32.dll")]
+            public static extern IntPtr GetForegroundWindow();
+            [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+            public static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int index);
+            public static IntPtr[] WindowsForProcess(uint processId) {
+              var windows = new List<IntPtr>();
+              EnumWindows((hWnd, lParam) => {
+                uint owner;
+                GetWindowThreadProcessId(hWnd, out owner);
+                if (owner == processId) windows.Add(hWnd);
+                return true;
+              }, IntPtr.Zero);
+              return windows.ToArray();
+            }
+          }
+          '@
+
+          $foregroundBeforeLaunch = [MaximalStartupWindowSmoke]::GetForegroundWindow()
           Write-Host "launching: $shellPath"
           $shellProcess = Start-Process -FilePath $shellPath -PassThru
           # Cold hosted runners can take more than 30 seconds to initialize the
-          # sidecar on first launch (the diagnostics record the exact child PID).
+          # sidecar on first launch. Observe the short-lived minimized state in
+          # the same loop: the unauthenticated flow intentionally presents
+          # Account after the splash minimum, so waiting for a later sidecar
+          # probe would miss the Ready-time taskbar state.
+          $sidecarProcess = $null
+          $startupWindowHandle = [IntPtr]::Zero
+          $startupExtendedStyle = [int64]0
+          $foregroundAtStartupSnapshot = [IntPtr]::Zero
           $deadline = (Get-Date).AddSeconds(60)
+          $nextSidecarCheck = Get-Date
           do {
-            $sidecarProcess = Get-CimInstance Win32_Process -Filter "Name = 'maximal.exe'" |
-              Where-Object { $_.ParentProcessId -eq $shellProcess.Id } |
-              Select-Object -First 1
-            if (-not $shellProcess.HasExited -and $sidecarProcess) { break }
-            Start-Sleep -Milliseconds 500
+            $now = Get-Date
+            if (-not $sidecarProcess -and $now -ge $nextSidecarCheck) {
+              $sidecarProcess = Get-CimInstance Win32_Process -Filter "Name = 'maximal.exe'" |
+                Where-Object { $_.ParentProcessId -eq $shellProcess.Id } |
+                Select-Object -First 1
+              $nextSidecarCheck = $now.AddMilliseconds(500)
+            }
+            if ($startupWindowHandle -eq [IntPtr]::Zero) {
+              foreach ($candidate in [MaximalStartupWindowSmoke]::WindowsForProcess(
+                  [uint32]$shellProcess.Id)) {
+                if ([MaximalStartupWindowSmoke]::IsWindowVisible($candidate) -and
+                    [MaximalStartupWindowSmoke]::IsIconic($candidate)) {
+                  $startupWindowHandle = $candidate
+                  $startupExtendedStyle = [MaximalStartupWindowSmoke]::GetWindowLongPtr(
+                    $candidate, -20).ToInt64()
+                  $foregroundAtStartupSnapshot = [MaximalStartupWindowSmoke]::GetForegroundWindow()
+                  break
+                }
+              }
+            }
+            if (-not $shellProcess.HasExited -and $sidecarProcess -and
+                $startupWindowHandle -ne [IntPtr]::Zero) { break }
+            Start-Sleep -Milliseconds 100
             $shellProcess.Refresh()
           } while ((Get-Date) -lt $deadline)
 
           if ($shellProcess.HasExited) { throw "maximal-shell did not stay running" }
           if (-not $sidecarProcess) { throw "maximal sidecar did not start within 60 seconds" }
+          if ($startupWindowHandle -eq [IntPtr]::Zero) {
+            throw "ordinary startup did not create a minimized taskbar-backed main window"
+          }
+          if (($startupExtendedStyle -band 0x80) -ne 0) {
+            throw "startup main window used WS_EX_TOOLWINDOW and was not taskbar-eligible"
+          }
+          $activationChecked = $foregroundBeforeLaunch -ne [IntPtr]::Zero
+          $startupDisplacedForeground = (
+            $activationChecked -and
+            $foregroundAtStartupSnapshot -eq $startupWindowHandle)
+          if ($startupDisplacedForeground) {
+            Write-Warning "startup main window was foreground at the minimized snapshot"
+          }
           Write-Host "shell PID: $($shellProcess.Id); sidecar PID: $($sidecarProcess.ProcessId)"
+          [ordered]@{
+            shellPid = $shellProcess.Id
+            sidecarPid = [int]$sidecarProcess.ProcessId
+            windowHandle = $startupWindowHandle.ToInt64()
+            foregroundBeforeLaunch = $foregroundBeforeLaunch.ToInt64()
+            foregroundAtMinimizedSnapshot = $foregroundAtStartupSnapshot.ToInt64()
+            minimized = $true
+            taskbarEligible = $true
+            activationChecked = $activationChecked
+            activated = $startupDisplacedForeground
+          } | ConvertTo-Json | Set-Content dist/startup-window.json
+          Write-Host "ordinary startup created minimized taskbar window $startupWindowHandle"
 
       # Re-run the installer while the tray shell is alive. This specifically
       # exercises NSIS_HOOK_PREINSTALL: the v0.5.1 hook left the old shell and
@@ -461,11 +548,12 @@ jobs:
           } | ConvertTo-Json | Set-Content dist/reinstall-pids.json
           Write-Host "replacement shell PID $replacementShellPid and sidecar PID $($replacementSidecar.ProcessId) are healthy"
 
-      # Exercise the ordinary Windows X-close path before abrupt containment.
-      # A task argument first routes through the single-instance callback and
-      # opens Dashboard; WM_CLOSE then must run bounded configurator/sidecar
-      # cleanup before the packaged shell exits.
-      - name: Close packaged window and verify bounded app exit
+      # Exercise the ordinary Windows taskbar and X-close path before abrupt
+      # containment. Startup must expose a minimized taskbar-eligible window
+      # without activation. A task argument restores that same window through
+      # the single-instance callback. WM_CLOSE must keep both processes alive
+      # behind confirmation, then run bounded cleanup only after acceptance.
+      - name: Confirm packaged window close and verify bounded app exit
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -555,6 +643,35 @@ jobs:
           }
           Write-Host "packaged Claude Code and Codex configurators applied routing"
 
+          Add-Type -TypeDefinition @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class MaximalWindowSmoke {
+            [DllImport("user32.dll", SetLastError = true)]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            public static extern bool PostMessage(
+              IntPtr hWnd, uint message, IntPtr wParam, IntPtr lParam);
+            [DllImport("user32.dll")]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            public static extern bool IsIconic(IntPtr hWnd);
+          }
+          '@
+
+          $preActionWindowHandle = [IntPtr]::Zero
+          $preActionDeadline = (Get-Date).AddSeconds(15)
+          do {
+            $shell = Get-Process -Id $shellPid -ErrorAction SilentlyContinue
+            if ($shell) {
+              $shell.Refresh()
+              $preActionWindowHandle = $shell.MainWindowHandle
+            }
+            if ($preActionWindowHandle -ne [IntPtr]::Zero) { break }
+            Start-Sleep -Milliseconds 100
+          } while ((Get-Date) -lt $preActionDeadline)
+          if ($preActionWindowHandle -eq [IntPtr]::Zero) {
+            throw "replacement startup did not retain a main window"
+          }
+
           $actionProcess = Start-Process -FilePath $shellPath `
             -ArgumentList '--maximal-action=dashboard' -PassThru
           if (-not $actionProcess.WaitForExit(10000)) {
@@ -598,7 +715,13 @@ jobs:
           if ($windowTitle -ne 'Maximal — Dashboard') {
             throw "taskbar Dashboard action left unexpected window title '$windowTitle'"
           }
-          Write-Host "taskbar Dashboard action routed to shell PID $shellPid window '$windowTitle'"
+          if ($windowHandle -ne $preActionWindowHandle) {
+            throw "taskbar action replaced startup HWND $preActionWindowHandle with $windowHandle"
+          }
+          if ([MaximalWindowSmoke]::IsIconic($windowHandle)) {
+            throw "taskbar Dashboard action left the startup window minimized"
+          }
+          Write-Host "taskbar Dashboard action restored shell PID $shellPid window '$windowTitle'"
 
           [ordered]@{
             shellPid = $shellPid
@@ -609,21 +732,58 @@ jobs:
             windowHandle = $windowHandle.ToInt64()
           } | ConvertTo-Json | Set-Content dist/graceful-shutdown-pids.json
 
-          Add-Type -TypeDefinition @'
-          using System;
-          using System.Runtime.InteropServices;
-          public static class MaximalWindowSmoke {
-            [DllImport("user32.dll", SetLastError = true)]
-            [return: MarshalAs(UnmanagedType.Bool)]
-            public static extern bool PostMessage(
-              IntPtr hWnd, uint message, IntPtr wParam, IntPtr lParam);
-          }
-          '@
           if (-not [MaximalWindowSmoke]::PostMessage(
               $windowHandle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)) {
             throw "could not send WM_CLOSE to shell PID $shellPid"
           }
-          Write-Host "sent WM_CLOSE to shell PID $shellPid; waiting for bounded graceful exit"
+          Write-Host "sent WM_CLOSE to shell PID $shellPid; waiting for quit confirmation"
+
+          Add-Type -AssemblyName UIAutomationClient
+          Add-Type -AssemblyName UIAutomationTypes
+          $confirmButton = $null
+          $confirmDeadline = (Get-Date).AddSeconds(10)
+          $condition = [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::NameProperty,
+            'Quit Maximal')
+          do {
+            if (-not (Get-Process -Id $shellPid -ErrorAction SilentlyContinue)) {
+              throw "shell PID $shellPid exited before quit confirmation"
+            }
+            if (-not (Get-Process -Id $sidecarPid -ErrorAction SilentlyContinue)) {
+              throw "sidecar PID $sidecarPid exited before quit confirmation"
+            }
+            $root = [System.Windows.Automation.AutomationElement]::FromHandle(
+              $windowHandle)
+            if ($root) {
+              $confirmButton = $root.FindFirst(
+                [System.Windows.Automation.TreeScope]::Descendants,
+                $condition)
+            }
+            if ($confirmButton) { break }
+            Start-Sleep -Milliseconds 100
+          } while ((Get-Date) -lt $confirmDeadline)
+          if (-not $confirmButton) {
+            throw "WM_CLOSE did not expose the 'Quit Maximal' confirmation button"
+          }
+
+          Start-Sleep -Seconds 1
+          if (-not (Get-Process -Id $shellPid -ErrorAction SilentlyContinue)) {
+            throw "shell PID $shellPid exited while quit confirmation was pending"
+          }
+          if (-not (Get-Process -Id $sidecarPid -ErrorAction SilentlyContinue)) {
+            throw "sidecar PID $sidecarPid exited while quit confirmation was pending"
+          }
+          $pendingListeners = @(
+            Get-NetTCPConnection -OwningProcess $sidecarPid -State Listen -ErrorAction SilentlyContinue
+          )
+          if ($pendingListeners.Count -eq 0) {
+            throw "sidecar PID $sidecarPid dropped its listeners before quit confirmation"
+          }
+
+          $invokePattern = $confirmButton.GetCurrentPattern(
+            [System.Windows.Automation.InvokePattern]::Pattern)
+          $invokePattern.Invoke()
+          Write-Host "accepted quit confirmation; waiting for bounded graceful exit"
 
           $deadline = (Get-Date).AddSeconds(10)
           do {
@@ -908,6 +1068,7 @@ jobs:
           name: windows-shell-dev-diagnostics
           path: |
             diagnostics/
+            dist/startup-window.json
             dist/reinstall-pids.json
             dist/graceful-shutdown-pids.json
             dist/configurator-verification.json

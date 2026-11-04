@@ -7,6 +7,16 @@ const readRepoFile = (path: string): Promise<string> =>
 const readWorkflow = (name: string): Promise<string> =>
   readRepoFile(`.github/workflows/${name}`)
 
+const workflowJob = (workflow: string, name: string): string => {
+  const start = workflow.indexOf(`\n  ${name}:`)
+  expect(start).toBeGreaterThan(-1)
+  const rest = workflow.slice(start + 1)
+  const next = rest.search(/\n {2}[a-z][\w-]*:\n/u)
+  return next === -1 ?
+      workflow.slice(start)
+    : workflow.slice(start, start + 1 + next)
+}
+
 const macosDmgJob = (workflow: string): string =>
   workflow.slice(
     workflow.indexOf("\n  macos-dmg:"),
@@ -85,6 +95,86 @@ describe("release publication contract", () => {
       expect(file).not.toContain("npm_tag")
       expect(file).not.toContain("NPM_TAG")
     }
+  })
+})
+
+describe("release DAG", () => {
+  test("gates every release lane on exact-SHA CI evidence instead of rerunning generic CI", async () => {
+    const workflow = await readWorkflow("release.yml")
+    const preflight = workflowJob(workflow, "preflight")
+    const release = workflowJob(workflow, "release")
+
+    expect(preflight).toContain("actions: read")
+    expect(preflight).toContain("bun scripts/verify-release-source.ts")
+    expect(preflight).toContain("timeout-minutes: 35")
+    expect(preflight).toContain('CI_EVIDENCE_WAIT_SECONDS: "1800"')
+    expect(release).toContain("needs: preflight")
+    for (const command of [
+      "bun run lint:all",
+      "bun run typecheck",
+      "bun test",
+      "bun run build",
+      "pnpm test",
+    ]) {
+      expect(release).not.toContain(command)
+    }
+  })
+
+  test("builds platform-neutral UI once and transports raw binaries as workflow artifacts", async () => {
+    const workflow = await readWorkflow("release.yml")
+    const ui = workflowJob(workflow, "ui")
+    const binaries = workflowJob(workflow, "binaries")
+    const rawAssets = workflowJob(workflow, "raw-assets")
+    const windowsShell = workflowJob(workflow, "windows-shell")
+    const linuxDeb = workflowJob(workflow, "linux-deb")
+
+    expect(ui).toContain("bun run build:ui")
+    expect(ui).toContain("bun run scripts/gen-ui-embed.ts")
+    expect(ui).toContain("name: build-ui")
+    expect(binaries).not.toContain("needs: release")
+    expect(binaries).not.toContain("bun run build:ui")
+    expect(binaries).toContain("name: release-binary-${{ matrix.artifact }}")
+    expect(windowsShell).toContain("name: release-binary-windows-x64")
+    expect(windowsShell).toContain("name: build-ui")
+    expect(linuxDeb).toContain("name: release-binary-${{ matrix.artifact }}")
+    expect(linuxDeb).toContain("name: build-ui")
+    expect(rawAssets).toContain("uses: actions/checkout@")
+    expect(rawAssets).toContain("pattern: release-binary-*")
+    expect(rawAssets).toContain("uses: ./.github/actions/upload-release-asset")
+    expect(rawAssets).toContain("files: dist-release/*")
+  })
+
+  test("aggregates checksums only after every checksum-producing lane", async () => {
+    const checksums = workflowJob(
+      await readWorkflow("release.yml"),
+      "checksums",
+    )
+
+    for (const producer of [
+      "raw-assets",
+      "linux-deb",
+      "windows-installer",
+      "windows-msi",
+      "windows-shell",
+      "macos-dmg",
+    ]) {
+      expect(checksums).toContain(`- ${producer}\n`)
+    }
+  })
+
+  test("reuses release assets only when every companion file is present", async () => {
+    const workflow = await readWorkflow("release.yml")
+    const installer = workflowJob(workflow, "windows-installer")
+    const msi = workflowJob(workflow, "windows-msi")
+    const shell = workflowJob(workflow, "windows-shell")
+    const dmg = workflowJob(workflow, "macos-dmg")
+
+    expect(installer).toContain('grep -Fxq "install.ps1.sha256"')
+    expect(msi).toContain('grep -Fxq "$MSI.sha256"')
+    expect(shell).toContain('grep -Fxq "$SETUP.sha256"')
+    expect(shell).toContain('grep -Fxq "$SETUP.sig"')
+    expect(dmg).toContain('has "maximal-${TAG}-darwin-arm64.dmg.sha256"')
+    expect(dmg).toContain('grep -Fxq "$DST.sha256" <<<"$assets"')
   })
 })
 
@@ -199,11 +289,15 @@ describe("release action supply chain", () => {
     const expectedUses = new Map([
       [
         "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1",
-        11,
+        15,
+      ],
+      [
+        "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2",
+        10,
       ],
       [
         "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2",
-        2,
+        6,
       ],
       [
         "actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0",
@@ -211,7 +305,7 @@ describe("release action supply chain", () => {
       ],
     ])
 
-    expect(externalUses).toHaveLength(14)
+    expect(externalUses).toHaveLength(32)
     for (const [expectedUse, count] of expectedUses) {
       expect(
         externalUses.filter((actionUse) => actionUse === expectedUse),
@@ -317,6 +411,47 @@ describe("isolated MCP broker distribution", () => {
   })
 })
 
+describe("Linux Rust cache", () => {
+  test("separates native architectures and only writes trusted main caches", async () => {
+    const [action, workflow, release] = await Promise.all([
+      readRepoFile(".github/actions/setup-rust-linux/action.yml"),
+      readWorkflow("linux-rust-cache.yml"),
+      readWorkflow("release.yml"),
+    ])
+
+    expect(action).toContain('base="$os-$arch-cargo-shell-$version"')
+    expect(action).toContain("shell/src-tauri/Cargo.lock")
+    expect(action).toContain("shell/src-tauri/src/**")
+    expect(action).toContain("shell/src-tauri/patches/**")
+    expect(action).toContain("actions/cache/restore@")
+    expect(action).not.toContain("actions/cache/save@")
+
+    expect(release).toContain("uses: ./.github/actions/setup-rust-linux")
+    expect(release).not.toContain("actions/cache/save@")
+
+    expect(workflow).toContain("runner: ubuntu-24.04 }")
+    expect(workflow).toContain("runner: ubuntu-24.04-arm }")
+    expect(workflow).not.toContain("pull_request:")
+    expect(workflow).not.toContain("tags:")
+
+    const saveStep = workflow.slice(
+      workflow.indexOf("      - name: Save Cargo registry + target"),
+    )
+    expect(saveStep).toContain("github.ref == 'refs/heads/main'")
+    expect(saveStep).toContain("github.event_name == 'push'")
+    expect(saveStep).toContain("github.event_name == 'schedule'")
+    expect(saveStep).toContain("github.event_name == 'workflow_dispatch'")
+  })
+
+  test("warms the release profile without fake external sidecars", async () => {
+    const workflow = await readWorkflow("linux-rust-cache.yml")
+
+    expect(workflow).toContain("tauri build --no-bundle")
+    expect(workflow).toContain('"bundle":{"externalBin":[]}')
+    expect(workflow).not.toContain(": > src-tauri/binaries/")
+  })
+})
+
 const windowsShellJob = (workflow: string): string =>
   workflow.slice(
     workflow.indexOf("\n  windows-shell:"),
@@ -377,12 +512,43 @@ describe("Windows desktop lifecycle smoke", () => {
     )
     expect(workflow).toContain("dist/reinstall-pids.json")
     expect(workflow).toContain(
-      "name: Close packaged window and verify bounded app exit",
+      "name: Confirm packaged window close and verify bounded app exit",
     )
+    expect(workflow).toContain(
+      "ordinary startup did not create a minimized taskbar-backed main window",
+    )
+    expect(workflow).toContain(
+      "[MaximalStartupWindowSmoke]::IsIconic($candidate)",
+    )
+    expect(
+      workflow.indexOf("public static class MaximalStartupWindowSmoke"),
+    ).toBeLessThan(
+      workflow.indexOf(
+        "$shellProcess = Start-Process -FilePath $shellPath -PassThru",
+      ),
+    )
+    expect(workflow).toContain("$foregroundBeforeLaunch =")
+    expect(workflow).toContain("GetForegroundWindow()")
+    expect(workflow).toContain(
+      "startup main window was foreground at the minimized snapshot",
+    )
+    expect(workflow).toContain("activated = $startupDisplacedForeground")
+    expect(workflow).not.toContain(
+      'throw "startup main window displaced the existing foreground window"',
+    )
+    expect(workflow).toContain("WS_EX_TOOLWINDOW")
+    expect(workflow).toContain("dist/startup-window.json")
     expect(workflow).toContain("-ArgumentList '--maximal-action=dashboard'")
     expect(workflow).toContain("$windowTitle -eq 'Maximal — Dashboard'")
+    expect(workflow).toContain("$windowHandle -ne $preActionWindowHandle")
     expect(workflow).toContain("[MaximalWindowSmoke]::PostMessage(")
     expect(workflow).toContain("$windowHandle, 0x0010")
+    expect(workflow).toContain("Add-Type -AssemblyName UIAutomationClient")
+    expect(workflow).toContain("'Quit Maximal' confirmation button")
+    expect(workflow).toContain(
+      "shell PID $shellPid exited while quit confirmation was pending",
+    )
+    expect(workflow).toContain("$invokePattern.Invoke()")
     expect(workflow).not.toContain('/_internal/shutdown"')
     expect(workflow).toContain(
       "sidecar PID $sidecarPid survived bounded graceful shutdown",

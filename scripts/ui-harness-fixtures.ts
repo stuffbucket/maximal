@@ -933,7 +933,7 @@ export const SCENARIOS = {
     apps: {
       apps: appsAllInstalled.apps.map((a) =>
         a.id === "claude-code" ?
-          { ...a, enabled: false, status: "not-installed" as const, installs: [], install: { method: "curl", command: "curl -fsSL https://claude.ai/install.sh | sh" } }
+          { ...a, enabled: false, status: "not-installed" as const, installs: [], install: { method: "curl", command: "curl -fsSL https://claude.ai/install.sh | sh", automatic: null } }
         : a,
       ),
     },
