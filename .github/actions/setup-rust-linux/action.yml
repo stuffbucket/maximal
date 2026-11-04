@@ -1,0 +1,76 @@
+name: Set up Rust for the Linux shell
+description: >-
+  Install the Rust version pinned in mise.toml and restore the architecture-specific
+  Linux Cargo cache (registry + compiled target). Restore only: the cache is saved
+  from trusted runs by linux-rust-cache.yml, so PR and release-tag builds cannot
+  write compiled artifacts that later builds consume.
+
+outputs:
+  cache-key:
+    description: Exact cache key for this OS, architecture, toolchain, lockfile, and build inputs.
+    value: ${{ steps.pin.outputs.key }}
+  cache-hit:
+    description: Whether the exact key was restored.
+    value: ${{ steps.restore.outputs.cache-hit }}
+
+runs:
+  using: composite
+  steps:
+    # rustup is preinstalled on the Ubuntu images (vendored-action policy: no
+    # third-party toolchain action). The compiler pin and native target are both
+    # part of the cache key, so x64 and Arm64 never share compiled artifacts.
+    - name: Install pinned Rust
+      id: pin
+      shell: bash
+      run: |
+        set -euo pipefail
+        version="$(sed -nE 's/^rust *= *"([^"]+)".*/\1/p' mise.toml)"
+        if [ -z "$version" ]; then
+          echo "::error::no rust pin in mise.toml"
+          exit 1
+        fi
+
+        case "${{ runner.arch }}" in
+          X64) target="x86_64-unknown-linux-gnu" ;;
+          ARM64) target="aarch64-unknown-linux-gnu" ;;
+          *)
+            echo "::error::unsupported Linux runner architecture: ${{ runner.arch }}"
+            exit 1
+            ;;
+        esac
+
+        rustup toolchain install "$version" --profile minimal \
+          --target "$target" --no-self-update
+        echo "RUSTUP_TOOLCHAIN=$version" >> "$GITHUB_ENV"
+        rustc "+$version" -vV
+
+        lock="$(sha256sum shell/src-tauri/Cargo.lock | cut -c1-16)"
+        build_inputs="${{ hashFiles('shell/src-tauri/Cargo.toml', 'shell/src-tauri/build.rs', 'shell/src-tauri/src/**', 'shell/src-tauri/capabilities/**', 'shell/src-tauri/permissions/**', 'shell/src-tauri/icons/**', 'shell/src-tauri/patches/**', 'shell/src-tauri/tauri.conf.json', 'shell/src-tauri/tauri.linux.conf.json') }}"
+        if [ -z "$build_inputs" ]; then
+          echo "::error::could not hash the Linux shell build inputs"
+          exit 1
+        fi
+
+        os="$(printf '%s' '${{ runner.os }}' | tr '[:upper:]' '[:lower:]')"
+        arch="$(printf '%s' '${{ runner.arch }}' | tr '[:upper:]' '[:lower:]')"
+        base="$os-$arch-cargo-shell-$version"
+        echo "toolchain-prefix=$base-" >> "$GITHUB_OUTPUT"
+        echo "lock-prefix=$base-$lock-" >> "$GITHUB_OUTPUT"
+        echo "key=$base-$lock-$build_inputs" >> "$GITHUB_OUTPUT"
+
+    # Cargo still validates its own fingerprints after restore. The exact key
+    # includes dependency/config/patch inputs; progressively broader prefixes
+    # retain useful compiled dependencies when one of those inputs changes.
+    - name: Restore Cargo registry + target
+      id: restore
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git/db
+          shell/src-tauri/target
+        key: ${{ steps.pin.outputs.key }}
+        restore-keys: |
+          ${{ steps.pin.outputs.lock-prefix }}
+          ${{ steps.pin.outputs.toolchain-prefix }}

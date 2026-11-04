@@ -2433,6 +2433,25 @@ html[data-os="macos"] .topbar {
   gap: var(--space-2);
 }
 
+/* ---- WinGet install progress and output (Claude Code, Windows) ----
+   Live progress is the last line WinGet printed; a failed install shows the
+   whole recent output in a box that scrolls rather than growing the card. */
+.app-card__progress {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.app-card__output {
+  margin: 0;
+  max-height: 12em;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
 /* ---- Conflict surface (enable refused) ----
    Shown when toggling on was refused because the app's config already
    carries a setting we don't own (e.g. a user-set ANTHROPIC_BASE_URL).

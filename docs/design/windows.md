@@ -46,10 +46,14 @@ active.
 The native window uses `1100×720` only as its first-launch fallback. Tauri's
 official window-state plugin persists the unified window label's size, position,
 and maximized state across process launches. It does not persist visibility,
-decorations, or fullscreen. Closing is platform-native: macOS/Linux hide the
-window back to the menu bar/tray, while Windows X gracefully stops the sidecar
-and quits Maximal. The window is created hidden and shown after restoration, so
-returning users do not see it paint at the fallback size first. The plugin's automatic initial restore is
+decorations, or fullscreen. Closing is platform-native: macOS/Linux hide the window back to the menu
+bar/tray, while Windows X asks for confirmation before gracefully stopping the
+sidecar and quitting Maximal. On Windows the restored unified window is shown
+minimized without activation after startup, which gives the default always-on
+taskbar presence without flashing or stealing focus. Explicit actions and
+first-run account setup restore and focus that same window. The window is
+created hidden and shown after restoration, so returning users do not see it
+paint at the fallback size first. The plugin's automatic initial restore is
 skipped so the shell can run a controlled restore after the plugin's window-ready
 hook, then repair geometry before showing: physical inner size is checked against
 the current monitor's physical work area, native frame extent is reserved
@@ -81,5 +85,5 @@ dark taskbars. Right-clicking a running Windows taskbar button shows a static
 Jump List of durable quick actions that launch back through the single-instance
 shell. Dynamic status rows, pending requests, Retry, and Quit remain in the
 notification-area menu because Jump List tasks persist when the app is stopped.
-The Dock/taskbar persistence control is hidden on Windows, where closing the
-window now exits instead of leaving a closed window represented in the taskbar.
+The Dock/taskbar persistence control is hidden on Windows, where the unified
+window starts minimized in the taskbar and closing it asks before exiting.

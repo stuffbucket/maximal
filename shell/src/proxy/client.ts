@@ -24,13 +24,13 @@ import { getShellApiKey } from "../tauri/shell";
  * so we don't need to refactor call sites then.
  */
 
-
 import type {
   AccountsListResponse,
   ApiKeyEntry,
   ApiKeysListResponse,
   AuthStatus,
   ClaudeAutoModelsUpdateRequest,
+  ClaudeCodeInstallStatus,
   DiagnosticsResponse,
   ModelsListResponse,
   PendingRequest,
@@ -44,7 +44,7 @@ import type {
 // Re-export so existing shell call sites that pull the type from
 // "./api" keep working. AuthStatus is owned by src/lib/settings-types
 // (ADR-0005/0006) — the shell does NOT redeclare it.
-export type { AuthStatus, UpstreamRejection }
+export type { AuthStatus, ClaudeCodeInstallStatus, UpstreamRejection }
 export type {
   PendingRequest,
   PendingRequestAnswer,
@@ -133,8 +133,10 @@ export interface AppInstall {
 }
 
 export interface AppInstallHint {
-  method: "curl" | "npm"
+  method: "curl" | "npm" | "powershell"
   command: string
+  /** `winget`: Maximal can run this install itself after the user clicks. */
+  automatic: "winget" | null
 }
 
 export interface AppEntry {
@@ -454,6 +456,17 @@ type Endpoint =
       body: PendingRequestAnswer
     }
   | {
+      kind: "claude-code-install-status"
+      method: "GET"
+      path: "/settings/api/apps/claude-code/install"
+    }
+  | {
+      kind: "claude-code-install-start"
+      method: "POST"
+      path: "/settings/api/apps/claude-code/install"
+      body: { method: "winget" }
+    }
+  | {
       kind: "codex-toggle"
       method: "POST"
       path: "/settings/api/apps/codex/toggle"
@@ -485,6 +498,8 @@ interface ResponseFor {
   "claude-code-toggle": AppEntry
   "claude-desktop-toggle": AppEntry
   "codex-toggle": AppEntry
+  "claude-code-install-status": ClaudeCodeInstallStatus
+  "claude-code-install-start": ClaudeCodeInstallStatus
   "mcp-list": McpEndpointsListResponse
   "mcp-toggle": McpEndpointToggleResponse
   "mcp-add": McpEndpointAddResponse

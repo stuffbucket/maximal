@@ -9,6 +9,10 @@ const SHELL_PERMISSIONS = readFileSync(
   resolve(ROOT, "shell/src-tauri/permissions/default.toml"),
   "utf8",
 )
+const SHELL_SOURCE = readFileSync(
+  resolve(ROOT, "shell/src-tauri/src/lib.rs"),
+  "utf8",
+)
 
 describe("Windows quit prompt requests", () => {
   test("opens a request that was queued before the webview mounted", async () => {
@@ -82,6 +86,15 @@ describe("Windows quit prompt requests", () => {
     expect(html).toContain('id="quit-dialog-root"')
     expect(main).toContain("import { mountQuitDialog }")
     expect(main).toContain("mountQuitDialog();")
+  })
+
+  test("routes the Windows close button through the confirmation flow", () => {
+    expect(SHELL_SOURCE).toContain(
+      "CloseWindowAction::ConfirmQuit => request_quit(&app_clone)",
+    )
+    expect(SHELL_SOURCE).not.toContain(
+      "CloseWindowAction::ConfirmQuit => exit_gracefully",
+    )
   })
 
   test("grants the remote Settings webview access to quit commands", () => {

@@ -52,7 +52,7 @@ export const CardNotInstalled: Story = {
       enabled: false,
       status: "not-installed",
       installs: [],
-      install: { method: "curl", command: "curl -fsSL https://claude.ai/install.sh | sh" },
+      install: { method: "curl", command: "curl -fsSL https://claude.ai/install.sh | sh", automatic: null },
     },
   },
 };

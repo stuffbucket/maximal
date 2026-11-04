@@ -8,7 +8,7 @@
  * eslint.config.js keeps the synchronous forms out of `src/` (see
  * docs/architecture.md → Never block the event loop).
  */
-import { type ExecFileException, execFile } from "node:child_process"
+import { type ExecFileException, execFile, spawn } from "node:child_process"
 
 export interface RunResult {
   stdout: string
@@ -57,6 +57,110 @@ export function runFile(
       },
     )
     if (options.closeStdin) child.stdin?.end()
+  })
+}
+
+export interface StreamRunOptions extends RunOptions {
+  /** Each chunk of stdout or stderr as it arrives, decoded as UTF-8. */
+  onOutput?: (chunk: string) => void
+}
+
+export interface StreamRunResult extends RunResult {
+  /** True when the child was stopped for running past `timeoutMs`. */
+  timedOut: boolean
+}
+
+/** Captured output keeps only its tail, so a chatty child can't grow the
+ *  proxy's memory without bound. */
+const STREAM_CAPTURE_CHARS = 64_000
+/** Give a timed-out child a moment to exit before forcefully settling. */
+const STREAM_KILL_GRACE_MS = 1_000
+
+/**
+ * Like `runFile`, but hands output to `onOutput` while the child runs, for
+ * long installs that report progress. Still no shell, stdin is closed, and it
+ * never rejects. A child that stops at `timeoutMs` is killed and reported as
+ * `timedOut`.
+ */
+export function runFileStreaming(
+  file: string,
+  args: Array<string>,
+  options: StreamRunOptions,
+): Promise<StreamRunResult> {
+  return new Promise<StreamRunResult>((resolve) => {
+    let stdout = ""
+    let stderr = ""
+    let timedOut = false
+    let settled = false
+    let forceTimer: ReturnType<typeof setTimeout> | undefined
+    const finish = (result: StreamRunResult): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      if (forceTimer) clearTimeout(forceTimer)
+      resolve(result)
+    }
+    const child = spawn(file, args, {
+      shell: false,
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+    const timer = setTimeout(() => {
+      timedOut = true
+      try {
+        child.kill()
+      } catch {
+        // Continue to the bounded force/settle fallback below.
+      }
+      // `close` waits for inherited stdio handles too. A descendant can keep
+      // those handles open after the direct child exits, so force a bounded
+      // result rather than leaving the caller permanently in `running`.
+      forceTimer = setTimeout(() => {
+        try {
+          child.kill("SIGKILL")
+        } catch {
+          // It may already have exited; settling is still required.
+        }
+        child.stdout.destroy()
+        child.stderr.destroy()
+        finish({
+          stdout,
+          stderr,
+          code: child.exitCode ?? 1,
+          notFound: false,
+          timedOut: true,
+        })
+      }, STREAM_KILL_GRACE_MS)
+    }, options.timeoutMs)
+    child.stdout.setEncoding("utf8")
+    child.stderr.setEncoding("utf8")
+    child.stdout.on("data", (text: string) => {
+      stdout = (stdout + text).slice(-STREAM_CAPTURE_CHARS)
+      options.onOutput?.(text)
+    })
+    child.stderr.on("data", (text: string) => {
+      stderr = (stderr + text).slice(-STREAM_CAPTURE_CHARS)
+      options.onOutput?.(text)
+    })
+    child.once("error", (error: NodeJS.ErrnoException) => {
+      const notFound = error.code === "ENOENT"
+      finish({
+        stdout,
+        stderr,
+        code: notFound ? 127 : 1,
+        notFound,
+        timedOut,
+      })
+    })
+    child.once("close", (code: number | null) => {
+      finish({
+        stdout,
+        stderr,
+        code: code ?? 1,
+        notFound: false,
+        timedOut,
+      })
+    })
   })
 }
 

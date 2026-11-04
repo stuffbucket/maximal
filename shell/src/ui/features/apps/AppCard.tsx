@@ -1,17 +1,14 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 
 import { t } from "../../../i18n";
 import type { AppEntry } from "../../../proxy/client";
-import { Button } from "../../components/Button";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { Switch } from "../../components/Switch";
 import { cx } from "../../components/cx";
 import { isWindows } from "../../platform";
-import { useRecheckWhileVisible } from "../../recheck";
 
+import { InstallOffer } from "./InstallOffer";
 import type { MutationResult } from "./useApps";
-
-const COPIED_FLASH_MS = 1400;
 
 interface AppCardProps {
   app: AppEntry;
@@ -50,7 +47,6 @@ function conflictCopy(app: AppEntry): { title: string; detail: string } | null {
 }
 
 export function AppCard({ app, onToggle, onRescan }: AppCardProps): JSX.Element {
-  const [copied, setCopied] = useState(false);
   // Windows-only: disabling Claude Code routing doesn't take effect in an
   // already-running session (Claude Code reads its base URL at launch on
   // Windows; macOS picks it up live). Warn before disabling so the user
@@ -68,21 +64,6 @@ export function AppCard({ app, onToggle, onRescan }: AppCardProps): JSX.Element 
   const offerInstall =
     app.kind === "config" && !hasInstalls && app.install !== null;
   const conflict = conflictCopy(app);
-
-  const copyInstall = async (): Promise<void> => {
-    if (!app.install) return;
-    try {
-      await navigator.clipboard.writeText(app.install.command);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), COPIED_FLASH_MS);
-    } catch {
-      // Clipboard unavailable (insecure context / plain browser). Silent —
-      // the command is also shown in a code block the user can select.
-    }
-  };
-
-  const installRef = useRef<HTMLDivElement>(null);
-  useRecheckWhileVisible(installRef, onRescan, offerInstall);
 
   // Intercept only the Claude-Code-disable-on-Windows case; everything else
   // (enabling, other apps, macOS) toggles straight through.
@@ -125,30 +106,9 @@ export function AppCard({ app, onToggle, onRescan }: AppCardProps): JSX.Element 
         </div>
       </header>
 
-      {/* Config app with no install: offer the one-line installer. */}
+      {/* Config app with no install: offer the install (and its command). */}
       {offerInstall && app.install && (
-        <div className="app-card__install" ref={installRef}>
-          <p className="app-card__hint">
-            {t("install-run-in-terminal", { name: app.name })}
-          </p>
-          <div className="app-card__cmd">
-            <code className="app-card__cmd-text mono">
-              {app.install.command}
-            </code>
-            <div className="app-card__cmd-actions">
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => void copyInstall()}
-              >
-                {copied ? t("common-copied") : t("apps-copy-command")}
-              </Button>
-            </div>
-          </div>
-          <p className="app-card__hint">
-            {t("apps-install-then", { appName: app.name })}
-          </p>
-        </div>
+        <InstallOffer app={app} install={app.install} onRescan={onRescan} />
       )}
 
       {/* Config apps show every detected surface as a flat row. Routing is by

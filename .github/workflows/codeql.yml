@@ -2,8 +2,9 @@ name: CodeQL
 
 # What gets scanned and when:
 #   - pull_request / merge_group / push to main: only the languages the change
-#     touches (scripts/codeql-languages.ts), so a docs-only PR runs no
-#     analysis and a Rust-only PR runs only the Rust one.
+#     substantively touches (scripts/codeql-languages.ts), so a docs-only PR or
+#     package version-only release runs no analysis and a Rust-only PR runs only
+#     the Rust one.
 #   - schedule / workflow_dispatch: every language, so new CodeQL queries
 #     reach code that hasn't changed lately.
 #   - Changing this workflow, the config, or the language picker: every
@@ -66,16 +67,46 @@ jobs:
           esac
           # No range (schedule/dispatch), a new branch (all-zero before), an
           # API failure, or a diff at the compare API's 300-file cap: scan all.
-          if [ -z "$range" ] || [ "${range%%...*}" = "0000000000000000000000000000000000000000" ] \
-            || ! gh api "repos/$GITHUB_REPOSITORY/compare/$range" --jq '.files[].filename' > changed.txt \
-            || [ "$(wc -l < changed.txt)" -ge 300 ]; then
+          # A main push must be a normal fast-forward (`ahead`). A force push
+          # can reintroduce vulnerable files outside the merge-base diff, so a
+          # behind/diverged/unknown comparison also fails closed to all.
+          base="${range%%...*}"
+          head="${range##*...}"
+          comparison="$RUNNER_TEMP/codeql-compare.json"
+          if [ -z "$range" ] || [ "$base" = "0000000000000000000000000000000000000000" ] \
+            || ! gh api "repos/$GITHUB_REPOSITORY/compare/$range" > "$comparison"; then
             echo ALL > changed.txt
+          elif [ "$EVENT" = "push" ] && [ "$(jq -r '.status // ""' "$comparison")" != "ahead" ]; then
+            echo "::warning::Non-fast-forward push comparison; scanning all languages"
+            echo ALL > changed.txt
+          elif [ "$(jq '.files | length' "$comparison")" -ge 300 ]; then
+            echo ALL > changed.txt
+          else
+            jq -r '.files[].filename' "$comparison" > changed.txt
+          fi
+          if grep -Fxq package.json changed.txt; then
+            # A generated release changes only package.json's top-level version.
+            # Fetch both complete files so the picker can prove that semantic
+            # classification. Any unavailable content falls back to a JS scan.
+            if ! gh api "repos/$GITHUB_REPOSITORY/contents/package.json?ref=$base" --jq '.content' \
+                | base64 --decode > package-before.json \
+              || ! gh api "repos/$GITHUB_REPOSITORY/contents/package.json?ref=$head" --jq '.content' \
+                | base64 --decode > package-after.json; then
+              rm -f package-before.json package-after.json
+              echo "::warning::Could not compare package.json contents; scanning JavaScript/TypeScript"
+            fi
           fi
           echo "$(wc -l < changed.txt) changed path(s)"
 
       - name: Pick languages
         id: pick
-        run: echo "languages=$(bun scripts/codeql-languages.ts < changed.txt)" >> "$GITHUB_OUTPUT"
+        run: |
+          args=()
+          if [ -f package-before.json ] && [ -f package-after.json ]; then
+            args+=(--package-before package-before.json --package-after package-after.json)
+          fi
+          languages="$(bun scripts/codeql-languages.ts "${args[@]}" < changed.txt)"
+          echo "languages=$languages" >> "$GITHUB_OUTPUT"
 
   analyze:
     name: Analyze (${{ matrix.language }})

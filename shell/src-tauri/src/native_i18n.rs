@@ -12,10 +12,9 @@
 //! **Deliberately not ICU.** The webview uses a full ICU MessageFormat runtime
 //! (`intl-messageformat`); we do not pull that into Rust. The native strings
 //! need only named-placeholder substitution (`{version}`, `{latest}`, `{url}`,
-//! `{message}`, `{reason}`) — no `plural`/`select`. The one OS-conditional term
-//! (`app-container`: menu bar vs system tray) is handled the way it always was:
-//! the caller picks the `-macos` / `-other` key via `cfg!(target_os)`, so no
-//! runtime `select` is needed here either.
+//! `{message}`, `{reason}`) — no `plural`/`select`. OS-conditional native copy
+//! is baked into platform-specific catalog keys and selected by the caller via
+//! `cfg!(target_os)`, so no runtime `select` is needed here either.
 //!
 //! **Resolution mirrors the JS side** exactly: a message resolves through the
 //! `<region> → <language> → en` fallback chain (`es-MX → es → en`), and a key
@@ -48,8 +47,7 @@ const PT: &str = include_str!("../../src/i18n/pt.json");
 /// incoming `set_locale` tag. Keep in lockstep with `CATALOGS` in
 /// shell/src/i18n/index.ts.
 pub const AVAILABLE: &[&str] = &[
-    "en", "en-GB", "es", "es-MX", "es-ES", "zh", "fr", "de", "ru", "ja", "it",
-    "pt",
+    "en", "en-GB", "es", "es-MX", "es-ES", "zh", "fr", "de", "ru", "ja", "it", "pt",
 ];
 
 fn raw(tag: &str) -> &'static str {
@@ -74,14 +72,13 @@ fn raw(tag: &str) -> &'static str {
 /// malformed catalog (which the parity test would already have caught in CI)
 /// degrades to empty rather than panicking the shell at startup.
 fn catalogs() -> &'static HashMap<&'static str, HashMap<String, String>> {
-    static CATALOGS: OnceLock<HashMap<&'static str, HashMap<String, String>>> =
-        OnceLock::new();
+    static CATALOGS: OnceLock<HashMap<&'static str, HashMap<String, String>>> = OnceLock::new();
     CATALOGS.get_or_init(|| {
         AVAILABLE
             .iter()
             .map(|&tag| {
-                let parsed = serde_json::from_str::<HashMap<String, String>>(raw(tag))
-                    .unwrap_or_default();
+                let parsed =
+                    serde_json::from_str::<HashMap<String, String>>(raw(tag)).unwrap_or_default();
                 (tag, parsed)
             })
             .collect()

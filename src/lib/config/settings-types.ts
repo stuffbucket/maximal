@@ -386,6 +386,7 @@ export const AppInstall = z.object({
     "npm-global",
     "local-bin",
     "claude-local",
+    "winget",
     "path",
     "unknown",
   ]),
@@ -396,8 +397,37 @@ export type AppInstall = z.infer<typeof AppInstall>
 export const AppInstallHint = z.object({
   method: z.string(),
   command: z.string(),
+  /** Set when Maximal runs this install itself after the user clicks.
+   *  `winget` is `winget install` of Claude Code on Windows. */
+  automatic: z.enum(["winget"]).nullable(),
 })
 export type AppInstallHint = z.infer<typeof AppInstallHint>
+
+/** Body of `POST /settings/api/apps/claude-code/install`: the user asked for
+ *  the WinGet install shown on the card. */
+export const ClaudeCodeInstallRequest = z.object({
+  method: z.literal("winget"),
+})
+export type ClaudeCodeInstallRequest = z.infer<typeof ClaudeCodeInstallRequest>
+
+/** Progress of Maximal's own Claude Code install, one at a time. `output` is
+ *  WinGet's recent sanitized lines; the last may still change. `reason` says
+ *  why a failed install failed, so the UI can explain it. */
+export const ClaudeCodeInstallStatus = z.object({
+  state: z.enum(["idle", "running", "succeeded", "failed"]),
+  output: z.array(z.string()),
+  reason: z
+    .enum([
+      "winget-missing",
+      "timed-out",
+      "exit-code",
+      "not-found-after-install",
+      "error",
+    ])
+    .nullable(),
+  exitCode: z.number().int().nullable(),
+})
+export type ClaudeCodeInstallStatus = z.infer<typeof ClaudeCodeInstallStatus>
 
 export const AppEntry = z.object({
   id: z.enum(["claude-code", "claude-desktop", "codex", "copilot-cli"]),

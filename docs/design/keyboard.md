@@ -9,7 +9,7 @@ overrides; bindings that conflict with OS conventions lose to the OS.
 | `Cmd-,` | Open Settings | Tray menu | **shipped** | macOS convention. Opens or focuses Settings. |
 | `Cmd-D` | Open Dashboard | Tray menu | **shipped** | Opens or focuses the Dashboard. |
 | `Cmd-Q` | Quit Maximal | Tray menu | **shipped** | Confirms in the app-styled dialog on Windows or a native dialog on macOS, then stops the sidecar (SIGTERM, SIGKILL after a grace period). |
-| `Cmd-W` | Close current window | Per window | **planned** | Hides; doesn't quit (same as the window's close button). |
+| `Cmd-W` | Close current window | Per window | **planned** | Match the platform close button: hide on macOS/Linux; confirm quit on Windows. |
 | `Esc` | Close current window | Per window | **planned** | Same as Cmd-W; natural for modal-feel windows. |
 | `Cmd-R` | Refresh current window | Dashboard, Settings | **planned** | Re-fetches the window's data. |
 | `Cmd-Shift-,` | Reveal config in editor | Settings | **planned** | Power-user escape hatch. |

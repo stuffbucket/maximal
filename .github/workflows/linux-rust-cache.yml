@@ -1,0 +1,123 @@
+name: Linux Rust cache
+
+# Keeps each native Linux architecture's compiled Cargo dependencies in a cache
+# saved from main. Release builds run on tags, where a newly saved cache would be
+# scoped to that tag and unavailable to later releases. Consumers therefore only
+# restore through .github/actions/setup-rust-linux; this workflow is the sole
+# writer, and only trusted push/schedule/manual runs targeting main may save.
+#
+# Metadata and trust-boundary contracts are validated in ordinary PR CI. Native
+# builds run only from trusted main, schedule, or manual events so a PR does not
+# pay for two release-profile builds that main would immediately repeat. The
+# schedule reads each cache often enough to prevent GitHub's seven-day eviction.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - mise.toml
+      - shell/src-tauri/Cargo.lock
+      - shell/src-tauri/Cargo.toml
+      - shell/src-tauri/build.rs
+      - shell/src-tauri/src/**
+      - shell/src-tauri/capabilities/**
+      - shell/src-tauri/permissions/**
+      - shell/src-tauri/icons/**
+      - shell/src-tauri/patches/**
+      - shell/src-tauri/tauri.conf.json
+      - shell/src-tauri/tauri.linux.conf.json
+      - .github/actions/setup-rust-linux/**
+      - .github/workflows/linux-rust-cache.yml
+  schedule:
+    - cron: "17 6 * * 1,4"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-rust-cache-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  warm:
+    name: Warm Linux Cargo cache (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x64, runner: ubuntu-24.04 }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    env:
+      # Retry crate downloads instead of failing on a transient reset.
+      CARGO_NET_RETRY: "10"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Rust
+        id: rust
+        uses: ./.github/actions/setup-rust-linux
+
+      # An exact hit is already compiled and this restore refreshes its eviction
+      # clock. A miss first restores the nearest architecture/toolchain cache,
+      # then compiles only what changed.
+      - name: Install the tray app's build dependencies
+        if: steps.rust.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential file libayatana-appindicator3-dev librsvg2-dev \
+            libssl-dev libwebkit2gtk-4.1-dev libxdo-dev
+
+      - uses: ./.github/actions/setup-bun
+        if: steps.rust.outputs.cache-hit != 'true'
+        with:
+          bun-version: 1.4.3
+          cache-dependencies: "true"
+
+      - name: Install dependencies and build the UI
+        if: steps.rust.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          retry_install() {
+            for attempt in 1 2 3; do
+              if "$@"; then return 0; fi
+              if (( attempt == 3 )); then return 1; fi
+              sleep "$((attempt * 15))"
+            done
+          }
+          printf '%s\n' 'registry=https://packagefeedproxy.microsoft.io/npm/' > "$HOME/.npmrc"
+          retry_install bun install --frozen-lockfile
+          (cd shell && retry_install bun install --frozen-lockfile)
+          bun run build:ui
+
+      # This matches the release-profile Rust compilation without producing a
+      # package. Linux deliberately clears externalBin: the desktop package uses
+      # /usr/bin/maximal from the separate maximal package. Do not create empty
+      # sidecar placeholders, which could hide a configuration regression.
+      - name: Compile the Linux shell
+        if: steps.rust.outputs.cache-hit != 'true'
+        working-directory: shell
+        run: |
+          set -euo pipefail
+          bun run tauri build --no-bundle \
+            --config '{"build":{"beforeBuildCommand":""},"bundle":{"externalBin":[]}}'
+
+      - name: Save Cargo registry + target
+        if: >-
+          steps.rust.outputs.cache-hit != 'true'
+          && github.ref == 'refs/heads/main'
+          && (github.event_name == 'push'
+            || github.event_name == 'schedule'
+            || github.event_name == 'workflow_dispatch')
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            shell/src-tauri/target
+          key: ${{ steps.rust.outputs.cache-key }}
