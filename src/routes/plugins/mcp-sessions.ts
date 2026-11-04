@@ -265,7 +265,12 @@ export class McpSessions {
       this.#callTool(session, request, ctx),
     )
     this.#opening.add(session)
-    await session.server.connect(session.transport)
+    try {
+      await session.server.connect(session.transport)
+    } catch (error) {
+      await this.close(session)
+      throw error
+    }
     return session
   }
 

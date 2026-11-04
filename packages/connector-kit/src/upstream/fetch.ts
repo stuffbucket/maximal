@@ -6,14 +6,23 @@ import { DEFAULT_LIMITS, DEFAULT_RETRY_DELAYS_MS } from "./limits"
 import { parseRetryAfter } from "./retry-after"
 
 const RETRYABLE = new Set([429, 503, 504])
+/** Redirects that keep the method and body (safe to replay to the same origin). */
+const REPLAYABLE_REDIRECTS = new Set([307, 308])
+const MAX_REDIRECTS = 5
 /** Statuses surfaced as `UpstreamHttpError` (with body) instead of the MCP transport's generic error. */
 const SURFACED = new Set([401, 403, 429, 503, 504])
 
 export interface UpstreamFetchOptions {
   /** Fresh bearer token for every attempt (silent acquisition); `undefined` sends none. */
   getToken(signal?: AbortSignal): Promise<string | undefined>
-  /** The token was rejected (401): `true` when a retry may get a fresh one. */
-  onUnauthorized?(): Promise<boolean>
+  /** `rejected` was refused (401): `true` when a retry may get a fresh token. */
+  onUnauthorized?(rejected: string): Promise<boolean>
+  /**
+   * The only origin the token is sent to (the configured endpoint's).
+   * Requests elsewhere go without it, and a redirect is followed with the
+   * token only when it stays on this origin (307/308).
+   */
+  origin?: string
   /** Waits between throttled protocol requests (default 2/4/8/16 s). */
   retryDelaysMs?: ReadonlyArray<number>
   /** A protocol request's `Retry-After` longer than this fails instead of waiting (default 30 s). */
@@ -62,7 +71,46 @@ export function createUpstreamFetch(options: UpstreamFetchOptions): FetchLike {
   const maxWaitMs = options.maxWaitMs ?? DEFAULT_LIMITS.retry.maxWaitMs
   const wait = options.sleep ?? defaultSleep
   const now = options.now ?? (() => Date.now())
-  const base = options.baseFetch ?? ((url, init) => fetch(url, init))
+  const plain = options.baseFetch ?? ((url, init) => fetch(url, init))
+  const origin = options.origin
+
+  /**
+   * One request with the bearer token: never sent to another origin, and
+   * redirects are not followed automatically (that would carry the
+   * header along) — only same-origin 307/308, by hand.
+   */
+  const base = async (
+    url: string | URL,
+    init: RequestInit,
+    token: string | undefined,
+  ): Promise<Response> => {
+    let target = new URL(url)
+    for (let hops = 0; ; hops++) {
+      const trusted = origin === undefined || target.origin === origin
+      const headers = new Headers(init.headers)
+      if (token && trusted) headers.set("authorization", `Bearer ${token}`)
+      else headers.delete("authorization")
+      const response = await plain(target, {
+        ...init,
+        headers,
+        ...(token && trusted ? { redirect: "manual" } : {}),
+      })
+      const location = response.headers.get("location")
+      if (
+        !token
+        || !trusted
+        || !REPLAYABLE_REDIRECTS.has(response.status)
+        || !location
+        || hops >= MAX_REDIRECTS
+      )
+        return response
+      const next = new URL(location, target)
+      // A redirect off the token's origin is returned as is (a failure for the transport).
+      if (origin !== undefined && next.origin !== origin) return response
+      await response.body?.cancel().catch(() => {})
+      target = next
+    }
+  }
 
   /** Wait before the next attempt, or `undefined` when the response is final. */
   const retryDelay = (
@@ -103,16 +151,14 @@ export function createUpstreamFetch(options: UpstreamFetchOptions): FetchLike {
     let reauthorized = false
     for (let attempt = 0; ; ) {
       const token = await options.getToken(signal)
-      const headers = new Headers(init?.headers)
-      if (token) headers.set("authorization", `Bearer ${token}`)
-      const response = await base(url, { ...init, headers })
+      const response = await base(url, init ?? {}, token)
       if (response.ok || !SURFACED.has(response.status)) return response
       // One retry with a refreshed token after a 401 (not counted as an attempt).
       if (
         response.status === 401
         && token
         && !reauthorized
-        && (await options.onUnauthorized?.())
+        && (await options.onUnauthorized?.(token))
       ) {
         reauthorized = true
         await response.body?.cancel().catch(() => {})

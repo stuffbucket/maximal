@@ -74,7 +74,9 @@ background, tied to the fiber with `ctx.effect` and reported through
 validates it up front and keeps only the known fields, so it never carries
 secrets — an `entra`/`mcp-oauth` `clientId` is a public identifier.
 `homepage`, `connector.endpoint`, `auth.authority`, `auth.redirectUri` and
-`terms.url` must be http(s) URLs; `settingsVersion` is a positive integer.
+`terms.url` must be http(s) URLs; `connector.allowedHosts` (optional) is a
+list of lower-case hosts (`host` or `host:port`) a config override of the
+endpoint may name; `settingsVersion` is a positive integer.
 `configSchema` (JSON Schema, `type: "object"`) drives the Settings form.
 
 ### Settings negotiation

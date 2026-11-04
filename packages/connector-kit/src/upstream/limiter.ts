@@ -159,7 +159,7 @@ const NO_SESSION = "\0none"
  * Admission control for one connector, shared by every downstream session:
  * a global concurrency cap, per-lane caps and spacing, a shared cool-down
  * opened by any throttle, and a bounded queue served round robin across
- * sessions (FIFO within one). Waiting is abortable and bounded; a call that
+ * sessions (FIFO per lane within one). Waiting is abortable and bounded; a call that
  * cannot be admitted in time is refused with a `LimiterRejection`.
  */
 export class ConnectorLimiter {
@@ -167,7 +167,7 @@ export class ConnectorLimiter {
   readonly #clock: Clock
   readonly #global: Gate
   readonly #lanes = new Map<string, Gate>()
-  /** Waiting calls per session, in arrival order. */
+  /** Waiting calls per session, in arrival order (served FIFO per lane). */
   readonly #queues = new Map<string, Array<Waiter>>()
   /** Sessions with waiters, in round-robin order. */
   #order: Array<string> = []
@@ -456,10 +456,9 @@ export class ConnectorLimiter {
       for (let i = 0; i < this.#order.length; i++) {
         const index = (this.#next + i) % this.#order.length
         const session = this.#order[index]
-        const head = this.#queues.get(session)?.[0]
+        const head = this.#startable(this.#queues.get(session), now)
         if (!head) continue
         const gate = this.#lane(head.lane)
-        if (!this.#canStart(gate, now)) continue
         // Round robin: the next scan starts after this session.
         this.#next = index + 1
         this.#remove(head, false)
@@ -471,17 +470,33 @@ export class ConnectorLimiter {
     this.#scheduleWake(now)
   }
 
-  /** Wake up when the earliest time-blocked head could start. */
+  /**
+   * The session's oldest waiter whose lane can start now. Each session
+   * queues FIFO per lane, so a lane that is cooling down or full does not
+   * hold up the session's calls in other lanes.
+   */
+  #startable(
+    queue: ReadonlyArray<Waiter> | undefined,
+    now: number,
+  ): Waiter | undefined {
+    const blocked = new Set<string>()
+    for (const waiter of queue ?? []) {
+      if (blocked.has(waiter.lane)) continue
+      if (this.#canStart(this.#lane(waiter.lane), now)) return waiter
+      blocked.add(waiter.lane)
+    }
+    return undefined
+  }
+
+  /** Wake up when the earliest time-blocked lane head could start. */
   #scheduleWake(now: number): void {
     let at = Number.POSITIVE_INFINITY
+    const global = this.#global.readyAt()
     for (const queue of this.#queues.values()) {
-      const head = queue.at(0)
-      if (!head) continue
-      const ready = Math.max(
-        this.#global.readyAt(),
-        this.#lane(head.lane).readyAt(),
-      )
-      if (ready > now) at = Math.min(at, ready)
+      for (const lane of new Set(queue.map((waiter) => waiter.lane))) {
+        const ready = Math.max(global, this.#lane(lane).readyAt())
+        if (ready > now) at = Math.min(at, ready)
+      }
     }
     if (!Number.isFinite(at)) return
     if (this.#wake && this.#wake.at <= at && this.#wake.at > now) return

@@ -2,6 +2,7 @@ import type {
   Context,
   PluginManifest,
   PluginModule,
+  ToolDefinition,
 } from "@stuffbucket/maximal-plugin-sdk"
 import type { PluginGatewayError } from "@stuffbucket/maximal-plugin-sdk/gateway"
 
@@ -154,7 +155,9 @@ describe("settings file", () => {
     expect(applied).toEqual([DEFAULTS])
 
     events.length = 0
-    await gateway.updateConfig("remote", { endpoint: "https://other.test/mcp" })
+    await gateway.updateConfig("remote", {
+      endpoint: "https://other.test/mcp",
+    })
     expect(applied.at(-1)).toEqual({
       ...DEFAULTS,
       endpoint: "https://other.test/mcp",
@@ -177,7 +180,9 @@ describe("settings file", () => {
     }
 
     // Equal config: written, but no reload.
-    await gateway.updateConfig("remote", { endpoint: "https://other.test/mcp" })
+    await gateway.updateConfig("remote", {
+      endpoint: "https://other.test/mcp",
+    })
     expect(applied).toHaveLength(2)
   })
 
@@ -544,6 +549,35 @@ describe("tool catalog cache", () => {
     expect(gateway.toolViews("remote").map((v) => v.name)).toEqual(["search"])
     const tools = readSettings(storageRoot).tools as Record<string, unknown>
     expect((tools.catalog as { tools: Array<unknown> }).tools).toHaveLength(1)
+  })
+})
+
+const huge = (name: string): ToolDefinition => ({
+  ...tool(name),
+  description: "x".repeat(600 * 1024),
+})
+
+describe("tool catalog size", () => {
+  test("a catalog that would push the settings file over 1 MiB is dropped, not written", async () => {
+    const { module } = connector({}, (ctx) => {
+      ctx.tools.registerAll([huge("one"), huge("two")])
+    })
+    const host = fakeHost()
+    const { gateway, storageRoot } = createHost([module], host)
+    await gateway.setToolPermissions("remote", { one: "block" })
+    await gateway.reconcile({ remote: { enabled: true } })
+    await waitFor(() => host.logs.some((line) => line.includes("not caching")))
+
+    const file = settingsPath(storageRoot)
+    expect(statSync(file).size).toBeLessThan(1024 * 1024)
+    const tools = readSettings(storageRoot).tools as Record<string, unknown>
+    expect(tools.catalog).toBeUndefined()
+    expect(tools.permissions).toEqual({ one: "block" })
+
+    // The file is still loadable by the next start.
+    const second = createHost([module], fakeHost(), storageRoot)
+    await second.gateway.reconcile({ remote: { enabled: true } })
+    expect(second.gateway.get("remote")?.lifecycle).toBe("active")
   })
 })
 

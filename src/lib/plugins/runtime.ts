@@ -155,9 +155,27 @@ export async function applyPluginSettings(): Promise<void> {
   await syncPluginClients()
 }
 
+const stoppingHooks = new Set<() => Promise<void> | void>()
+
+/** Run `hook` at the start of `stopPlugins`, before the gateway goes away
+ *  (the MCP routes close their sessions here). Lets `src/routes` take part in
+ *  shutdown without `src/lib` importing it. */
+export function onPluginsStopping(hook: () => Promise<void> | void): void {
+  stoppingHooks.add(hook)
+}
+
 /** Shutdown: stop every plugin (bounded). Idempotent. */
 export async function stopPlugins(): Promise<void> {
   const gateway = getPluginGateway()
+  await Promise.all(
+    [...stoppingHooks].map(async (hook) => {
+      try {
+        await hook()
+      } catch (error) {
+        consola.warn("Could not close a plugin endpoint cleanly", error)
+      }
+    }),
+  )
   unsubscribeGateway?.()
   unsubscribeGateway = undefined
   if (notifyTimer) clearTimeout(notifyTimer)

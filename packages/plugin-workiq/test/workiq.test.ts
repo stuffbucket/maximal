@@ -80,6 +80,18 @@ describe("Work IQ manifest", () => {
       authority: "https://login.microsoftonline.com/organizations",
     })
     expect(() => workiq.Config.parse({ endpoint: "ftp://x" })).toThrow()
+    // Settings cannot send the WorkIQAgent.Ask token anywhere else.
+    expect(() =>
+      workiq.Config.parse({ endpoint: "https://attacker.example/mcp" }),
+    ).toThrow()
+    expect(() =>
+      workiq.Config.parse({
+        endpoint: "http://workiq.svc.cloud.microsoft/mcp",
+      }),
+    ).toThrow()
+    expect(() =>
+      workiq.Config.parse({ authority: "https://attacker.example/common" }),
+    ).toThrow()
   })
 
   test("the real module loads offline and asks for the Microsoft terms first", async () => {

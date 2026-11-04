@@ -58,6 +58,8 @@ export interface McpOAuthOptions {
   redirectPort?: number
   fetch?: FetchLike
   now?: () => number
+  /** Aborts when the plugin unloads; a shared refresh runs under this, not a caller's signal. */
+  lifetime?: AbortSignal
 }
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -221,7 +223,13 @@ class McpOAuthTokenProvider implements TokenProvider {
   readonly #options: McpOAuthOptions
   readonly #now: () => number
   #cached: OAuthRecord | undefined
-  #refreshing: Promise<string> | undefined
+  /** The refresh in flight, shared by every caller (each applies its own abort). */
+  #refreshing: Promise<string | undefined> | undefined
+  /**
+   * Bumped by sign-in and sign-out: a refresh that started before must not
+   * write its tokens over the newer state.
+   */
+  #epoch = 0
 
   constructor(options: McpOAuthOptions) {
     this.#options = options
@@ -234,25 +242,41 @@ class McpOAuthTokenProvider implements TokenProvider {
   }
 
   async getToken(signal?: AbortSignal): Promise<string> {
-    signal?.throwIfAborted()
-    const current = await this.#load()
-    const tokens = current.tokens
-    if (!tokens) throw signedOut()
-    if (
-      current.expiresAt === undefined
-      || current.expiresAt - this.#now() > REFRESH_MARGIN_MS
-    )
-      return tokens.access_token
-    if (!tokens.refresh_token) throw this.#expired()
-    this.#refreshing ??= this.#refresh(current, signal).finally(() => {
-      this.#refreshing = undefined
-    })
-    return await abortable(this.#refreshing, signal)
+    for (;;) {
+      signal?.throwIfAborted()
+      const current = await this.#load()
+      const tokens = current.tokens
+      if (!tokens) throw signedOut()
+      if (
+        current.expiresAt === undefined
+        || current.expiresAt - this.#now() > REFRESH_MARGIN_MS
+      )
+        return tokens.access_token
+      if (!tokens.refresh_token) throw this.#expired()
+      let refreshing = this.#refreshing
+      if (!refreshing) {
+        const started = this.#refresh(current)
+        refreshing = started
+        this.#refreshing = started
+        started
+          .finally(() => {
+            if (this.#refreshing === started) this.#refreshing = undefined
+          })
+          .catch(() => {})
+      }
+      // `undefined`: the account changed meanwhile; look again.
+      const token = await abortable(refreshing, signal)
+      if (token !== undefined) return token
+    }
   }
 
-  async invalidate(): Promise<boolean> {
+  async invalidate(rejected?: string): Promise<boolean> {
+    // Another request's refresh is running, or already replaced the token.
+    if (this.#refreshing) return true
     const current = await this.#load()
     if (!current.tokens?.refresh_token) return false
+    if (rejected !== undefined && current.tokens.access_token !== rejected)
+      return true
     await this.#save({ ...current, expiresAt: 0 })
     return true
   }
@@ -261,6 +285,9 @@ class McpOAuthTokenProvider implements TokenProvider {
     const options = this.#options
     const timeout = AbortSignal.timeout(options.signInTimeoutMs)
     const stop = AbortSignal.any([signal, timeout])
+    // Not bumped here: the current account's refreshes keep saving until this one finishes.
+    const epoch = this.#epoch
+    const state = crypto.randomUUID()
     let loopback: LoopbackRedirect | undefined
     try {
       loopback = await startLoopbackRedirect(
@@ -268,12 +295,13 @@ class McpOAuthTokenProvider implements TokenProvider {
           ...(options.redirectPort === undefined ?
             {}
           : { port: options.redirectPort }),
+          state,
           page: (ok) => signInPage(options.displayName, ok),
         },
         stop,
       )
-      const pending = await this.#authorize(loopback, stop)
-      return await this.#finish(pending)
+      const pending = await this.#authorize(loopback, state, stop)
+      return await this.#finish(pending, epoch)
     } catch (error) {
       if (!stop.aborted) throw options.toError(error)
       throw stoppedSignIn(
@@ -287,17 +315,24 @@ class McpOAuthTokenProvider implements TokenProvider {
   }
 
   async signOut(): Promise<void> {
-    this.#cached = undefined
+    this.#switch()
+    this.#cached = {}
     await this.#options.store.delete(OAUTH_FILE)
+  }
+
+  /** The account changes: drop the shared refresh and outdate saves already under way. */
+  #switch(): void {
+    this.#refreshing = undefined
+    this.#epoch++
   }
 
   /** Discovery, (registration,) browser authorization and the code exchange — the SDK's `auth()`. */
   async #authorize(
     loopback: LoopbackRedirect,
+    state: string,
     stop: AbortSignal,
   ): Promise<Pending> {
     const options = this.#options
-    const state = crypto.randomUUID()
     const provider = interactiveProvider({
       options,
       redirectUri: loopback.redirectUri,
@@ -331,7 +366,7 @@ class McpOAuthTokenProvider implements TokenProvider {
     return provider.pending
   }
 
-  async #finish(pending: Pending): Promise<ConnectorAccount> {
+  async #finish(pending: Pending, epoch: number): Promise<ConnectorAccount> {
     const tokens = pending.tokens
     if (!tokens)
       throw new ConnectorError(
@@ -346,6 +381,10 @@ class McpOAuthTokenProvider implements TokenProvider {
       ...(issuer ? { issuer } : {}),
     }
     const { tokens: _tokens, ...kept } = pending
+    // Signed out (or in again) while this sign-in ran: it no longer counts.
+    if (epoch !== this.#epoch) throw stoppedSignIn(false, 0, undefined)
+    // Refreshes still running belong to the previous account: drop their results.
+    this.#switch()
     await this.#save(this.#withTokens({ ...kept, account }, tokens))
     return account
   }
@@ -387,13 +426,21 @@ class McpOAuthTokenProvider implements TokenProvider {
     return next
   }
 
-  async #refresh(current: OAuthRecord, signal?: AbortSignal): Promise<string> {
+  /**
+   * Exchange the refresh token, under the plugin's lifetime rather than any
+   * caller's signal, and always persist the result (servers rotate refresh
+   * tokens). `undefined` when the account changed meanwhile: the result is
+   * dropped.
+   */
+  async #refresh(current: OAuthRecord): Promise<string | undefined> {
     const options = this.#options
+    const epoch = this.#epoch
     const refreshToken = current.tokens?.refresh_token
     const discovery = current.discovery
     const client =
       options.clientId ? { client_id: options.clientId } : current.client
     if (!refreshToken || !discovery || !client) throw this.#expired()
+    const lifetime = options.lifetime
     try {
       const tokens = await abortable(
         refreshAuthorization(discovery.authorizationServerUrl, {
@@ -401,16 +448,18 @@ class McpOAuthTokenProvider implements TokenProvider {
           clientInformation: client,
           refreshToken,
           ...(current.resource ? { resource: new URL(current.resource) } : {}),
-          ...(options.fetch ? { fetchFn: options.fetch } : {}),
+          fetchFn: withSignal(options.fetch, lifetime),
         }),
-        signal,
+        lifetime,
       )
+      if (epoch !== this.#epoch) return undefined
       await this.#save(
         this.#withTokens(current, { ...current.tokens, ...tokens }),
       )
       return tokens.access_token
     } catch (error) {
-      if (isAbort(error, signal)) throw error
+      if (isAbort(error, lifetime)) throw error
+      if (epoch !== this.#epoch) return undefined
       if (error instanceof OAuthError && RESIGN_IN.has(error.code)) {
         const { tokens: _tokens, expiresAt: _expiresAt, ...rest } = current
         await this.#save(rest)
@@ -419,6 +468,20 @@ class McpOAuthTokenProvider implements TokenProvider {
       throw options.toError(error)
     }
   }
+}
+
+/** `fetch` bound to `signal` (combined with the request's own). */
+function withSignal(
+  base: FetchLike | undefined,
+  signal: AbortSignal | undefined,
+): FetchLike {
+  const plain: FetchLike = base ?? ((url, init) => fetch(url, init))
+  if (!signal) return plain
+  return (url, init) =>
+    plain(url, {
+      ...init,
+      signal: init?.signal ? AbortSignal.any([init.signal, signal]) : signal,
+    })
 }
 
 /** Options for `mcpOAuth` beyond the manifest. */
@@ -447,6 +510,7 @@ export function mcpOAuth(
         logger: env.logger,
         signInTimeoutMs: env.signInTimeoutMs,
         ...(env.fetch ? { fetch: env.fetch } : {}),
+        ...(env.lifetime ? { lifetime: env.lifetime } : {}),
         ...(overrides.redirectPort === undefined ?
           {}
         : { redirectPort: overrides.redirectPort }),

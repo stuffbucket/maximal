@@ -56,6 +56,7 @@ async function load(
   } = {},
 ) {
   const module = defineRemoteMcpConnector(EXAMPLE_MANIFEST, {
+    endpoint: server.url,
     auth: tokens instanceof FakeTokenProvider ? using(tokens) : tokens,
     retryDelaysMs: [1],
     sleep: async () => {},
@@ -64,7 +65,7 @@ async function load(
   })
   const plugin = await loadPlugin(
     module,
-    { endpoint: server.url },
+    {},
     options.storage ? { storage: options.storage } : {},
   )
   cleanups.push(() => plugin.dispose())
@@ -138,6 +139,93 @@ describe("connector module", () => {
     expect(
       "defaultToolPermission" in defineRemoteMcpConnector(EXAMPLE_MANIFEST),
     ).toBe(false)
+  })
+})
+
+/** Standard Schema issues of `config` (what Settings shows inline). */
+function issues(
+  module: ReturnType<typeof defineRemoteMcpConnector>,
+  config: unknown,
+) {
+  const result = module.Config["~standard"].validate(config)
+  if (result instanceof Promise) throw new Error("async validation")
+  return (result.issues ?? []).map((issue) => ({
+    path: issue.path?.map((key) => (typeof key === "object" ? key.key : key)),
+    message: issue.message,
+  }))
+}
+
+describe("config overrides cannot redirect the upstream token", () => {
+  test("an endpoint override must be https on the manifest's host or allowedHosts", () => {
+    const module = defineRemoteMcpConnector(EXAMPLE_MANIFEST)
+    expect(
+      issues(module, { endpoint: "https://mcp.example.com/v2/mcp" }),
+    ).toEqual([])
+    expect(
+      issues(module, { endpoint: "https://evil.example.net/mcp" }),
+    ).toEqual([
+      {
+        path: ["endpoint"],
+        message: "Endpoint must be an https:// URL on mcp.example.com.",
+      },
+    ])
+    expect(issues(module, { endpoint: "http://mcp.example.com/mcp" })).toEqual([
+      {
+        path: ["endpoint"],
+        message: "Endpoint must be an https:// URL on mcp.example.com.",
+      },
+    ])
+    const regional = defineRemoteMcpConnector({
+      ...EXAMPLE_MANIFEST,
+      connector: {
+        ...EXAMPLE_MANIFEST.connector,
+        allowedHosts: ["eu.example.com"],
+      },
+    })
+    expect(
+      issues(regional, { endpoint: "https://eu.example.com/mcp" }),
+    ).toEqual([])
+    expect(
+      issues(regional, { endpoint: "https://us.example.com/mcp" }),
+    ).toEqual([
+      {
+        path: ["endpoint"],
+        message:
+          "Endpoint must be an https:// URL on mcp.example.com or eu.example.com.",
+      },
+    ])
+  })
+
+  test("an authority override must be https on the manifest's or Microsoft's sign-in host", () => {
+    const module = defineRemoteMcpConnector(EXAMPLE_MANIFEST)
+    expect(
+      issues(module, { authority: "https://login.microsoft.com/contoso.com" }),
+    ).toEqual([])
+    expect(
+      issues(module, { authority: "https://login.microsoftonline.com/common" }),
+    ).toEqual([])
+    for (const authority of [
+      "https://login.evil.example.net/organizations",
+      "http://login.microsoftonline.com/organizations",
+    ])
+      expect(issues(module, { authority })).toEqual([
+        {
+          path: ["authority"],
+          message:
+            "Sign-in authority must be an https:// URL on login.microsoftonline.com or login.microsoft.com.",
+        },
+      ])
+  })
+
+  test("a code-level endpoint (a loopback fake) is the default and stays valid; others on loopback are not", () => {
+    const module = defineRemoteMcpConnector(EXAMPLE_MANIFEST, {
+      endpoint: "http://127.0.0.1:9/mcp",
+    })
+    expect(issues(module, {})).toEqual([])
+    expect(issues(module, { endpoint: "http://127.0.0.1:9/mcp" })).toEqual([])
+    expect(
+      issues(module, { endpoint: "http://127.0.0.1:10/mcp" }),
+    ).toHaveLength(1)
   })
 })
 
@@ -256,9 +344,9 @@ describe("terms gate", () => {
     const { terms: _terms, ...connector } = EXAMPLE_MANIFEST.connector
     const module = defineRemoteMcpConnector(
       { ...EXAMPLE_MANIFEST, connector },
-      { auth: using(new FakeTokenProvider()) },
+      { endpoint: server.url, auth: using(new FakeTokenProvider()) },
     )
-    const plugin = await loadPlugin(module, { endpoint: server.url })
+    const plugin = await loadPlugin(module, {})
     cleanups.push(() => plugin.dispose())
     await waitFor(() => plugin.status()?.code === "signin-needed")
     expect(plugin.actions().sort()).toEqual(["retry", "sign-in", "sign-out"])
@@ -432,6 +520,7 @@ describe("connector errors and recovery", () => {
         },
       },
       {
+        endpoint: server.url,
         auth: using(new FakeTokenProvider(ADA)),
         sleep: async () => {},
         // `search_paths` has no annotations; the hook makes it a read.
@@ -440,11 +529,7 @@ describe("connector errors and recovery", () => {
         },
       },
     )
-    const plugin = await loadPlugin(
-      module,
-      { endpoint: server.url },
-      { storage: ACCEPTED },
-    )
+    const plugin = await loadPlugin(module, {}, { storage: ACCEPTED })
     cleanups.push(() => plugin.dispose())
     await waitFor(() => plugin.status()?.code === "ready")
     server.throttle({ status: 503, times: 3 })

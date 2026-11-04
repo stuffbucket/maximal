@@ -36,9 +36,21 @@ export function pluginStorageRoot(appDir: string = PATHS.APP_DIR): string {
   return path.join(appDir, "plugins")
 }
 
+/** The URL the system launcher gets: parsed and re-serialized (`href`), and
+ *  only if it is http(s). The SDK checks the scheme too, but this is the last
+ *  stop before a process spawn, so it doesn't trust the raw string. */
+export function normalizeExternalUrl(rawUrl: string): string {
+  const parsed = new URL(rawUrl)
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("Only http(s) URLs can be opened.")
+  }
+  return parsed.href
+}
+
 /** Open an http(s) URL in the system browser. The host has already checked
  *  the scheme. */
-async function openExternal(url: string): Promise<void> {
+async function openExternal(rawUrl: string): Promise<void> {
+  const url = normalizeExternalUrl(rawUrl)
   if (process.platform === "win32") {
     // `cmd /c start` would split a sign-in URL at its `&`s; the URL handler
     // takes the whole string as one argument, with no shell in between.

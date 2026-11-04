@@ -35,21 +35,9 @@ export const eventsRoutes = new Hono()
 
 eventsRoutes.get("/", (c) =>
   streamSSE(c, async (stream) => {
-    // Initial snapshot so a freshly-connected shell renders immediately,
-    // even if it skipped the GET-on-mount.
-    await stream.writeSSE({
-      event: "auth.changed",
-      data: JSON.stringify(getAuthStatus()),
-    })
-
-    const gateway = getPluginGateway()
-    if (gateway) {
-      await stream.writeSSE({
-        event: "plugins.changed",
-        data: JSON.stringify(await listPluginViews(gateway)),
-      })
-    }
-
+    // Subscribe before sending the snapshots: an event published while a
+    // snapshot is being built or written is then delivered after it, instead
+    // of falling into the gap between the two.
     const unsubscribeAuth = settingsEventBus.subscribe(
       "auth.changed",
       (status) => {
@@ -70,20 +58,44 @@ eventsRoutes.get("/", (c) =>
       },
     )
 
+    // Held until the stream ends; also released if a snapshot write throws
+    // (client gone), so a failed connect doesn't leak the subscriptions.
     const heartbeat = setInterval(() => {
       // A comment-only line (": ping") is ignored by EventSource but resets
       // idle timers on intermediaries. writeSSE emits it as a comment.
       void stream.writeSSE({ data: "", event: "ping" })
     }, HEARTBEAT_MS)
+    const cleanup = () => {
+      clearInterval(heartbeat)
+      unsubscribeAuth()
+      unsubscribePlugins()
+    }
+
+    try {
+      // Initial snapshot so a freshly-connected shell renders immediately,
+      // even if it skipped the GET-on-mount.
+      await stream.writeSSE({
+        event: "auth.changed",
+        data: JSON.stringify(getAuthStatus()),
+      })
+      const gateway = getPluginGateway()
+      if (gateway) {
+        await stream.writeSSE({
+          event: "plugins.changed",
+          data: JSON.stringify(await listPluginViews(gateway)),
+        })
+      }
+    } catch (error) {
+      cleanup()
+      throw error
+    }
 
     // Hold the stream open until the client disconnects (webview closed,
     // navigated away, sidecar reboot). Cleaning up the subscription and the
     // heartbeat here prevents a leak per reconnect.
     await new Promise<void>((resolve) => {
       stream.onAbort(() => {
-        clearInterval(heartbeat)
-        unsubscribeAuth()
-        unsubscribePlugins()
+        cleanup()
         resolve()
       })
     })

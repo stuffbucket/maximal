@@ -25,6 +25,7 @@ import {
   toConnectorError,
   type ConnectorErrorCode,
 } from "../src/errors"
+import { createUpstreamFetch } from "../src/upstream/fetch"
 import { rejection } from "./rejection"
 
 /** A made-up public client and API scope (Entra is never contacted). */
@@ -120,6 +121,8 @@ function fakeEntra() {
       | { error: string; error_description: string }
       | undefined,
     issued: 0,
+    /** When set, token responses wait for it (after the request is recorded). */
+    hold: undefined as Promise<void> | undefined,
   }
   const network: INetworkModule = {
     sendGetRequestAsync<T>(url: string): Promise<NetworkResponse<T>> {
@@ -170,14 +173,11 @@ function fakeEntra() {
         return Promise.reject(new Error(`unexpected POST ${url}`))
       const form = new URLSearchParams(options?.body ?? "")
       state.tokenRequests.push(form)
-      if (state.tokenError) {
-        return Promise.resolve(
-          respond<T>({ ...state.tokenError, error_codes: [65001] }, 400),
-        )
-      }
-      state.issued++
-      return Promise.resolve(
-        respond<T>({
+      const answer = (): NetworkResponse<T> => {
+        if (state.tokenError)
+          return respond<T>({ ...state.tokenError, error_codes: [65001] }, 400)
+        state.issued++
+        return respond<T>({
           token_type: "Bearer",
           scope: SCOPES.join(" "),
           expires_in: 3600,
@@ -188,8 +188,9 @@ function fakeEntra() {
           client_info: b64url(
             JSON.stringify({ uid: state.user.oid, utid: TENANT }),
           ),
-        }),
-      )
+        })
+      }
+      return state.hold ? state.hold.then(answer) : Promise.resolve(answer())
     },
   }
   return { state, network }
@@ -428,6 +429,69 @@ describe("MSAL token provider: failures and refresh", () => {
     )
     // Nothing cached to drop the second time round.
     expect(await tokens.getToken()).toBe("at-2")
+  })
+
+  test("concurrent 401s for one token share a single refresh and both retry", async () => {
+    const entra = fakeEntra()
+    const tokens = provider(memoryStore(), entra, browser(entra))
+    await tokens.signIn(new AbortController().signal)
+    // Both requests carry at-1 and are refused together.
+    let arrived = 0
+    let bothArrived!: () => void
+    const together = new Promise<void>((resolve) => (bothArrived = resolve))
+    const sent: Array<string | null> = []
+    const upstreamFetch = createUpstreamFetch({
+      getToken: (s) => tokens.getToken(s),
+      onUnauthorized: (rejected) =>
+        tokens.invalidate?.(rejected) ?? Promise.resolve(false),
+      origin: "https://mcp.example.com",
+      baseFetch: async (_url, init) => {
+        const authorization = new Headers(init?.headers).get("authorization")
+        sent.push(authorization)
+        if (authorization !== "Bearer at-1") return new Response("ok")
+        if (++arrived === 2) bothArrived()
+        await together
+        return new Response("expired", { status: 401 })
+      },
+    })
+    const responses = await Promise.all([
+      upstreamFetch("https://mcp.example.com/mcp", { method: "POST" }),
+      upstreamFetch("https://mcp.example.com/mcp", { method: "POST" }),
+    ])
+    expect(responses.map((response) => response.status)).toEqual([200, 200])
+    expect(sent.toSorted()).toEqual([
+      "Bearer at-1",
+      "Bearer at-1",
+      "Bearer at-2",
+      "Bearer at-2",
+    ])
+    const refreshes = entra.state.tokenRequests.filter(
+      (form) => form.get("grant_type") === "refresh_token",
+    )
+    expect(refreshes).toHaveLength(1)
+  })
+
+  test("a token lookup that straddles sign-out neither refills the cache nor resurrects the account", async () => {
+    const entra = fakeEntra()
+    const store = memoryStore()
+    const tokens = provider(store, entra, browser(entra))
+    await tokens.signIn(new AbortController().signal)
+    expect(await tokens.getToken()).toBe("at-1")
+    await tokens.invalidate?.("at-1")
+    let release!: () => void
+    entra.state.hold = new Promise<void>((resolve) => (release = resolve))
+    const requests = entra.state.tokenRequests.length
+    const pending = tokens.getToken()
+    while (entra.state.tokenRequests.length === requests) await Bun.sleep(1)
+    await tokens.signOut()
+    entra.state.hold = undefined
+    release()
+    expect(await rejection(pending)).toMatchObject({ code: "signed-out" })
+    expect(await rejection(tokens.getToken())).toMatchObject({
+      code: "signed-out",
+    })
+    expect(await tokens.account()).toBeUndefined()
+    expect(store.files.has(TOKEN_CACHE_FILE)).toBe(false)
   })
 
   test("uses the registered redirect port and never falls back to another", async () => {

@@ -227,4 +227,29 @@ describe("removeLegacyClaudeDesktopEntries", () => {
     expect(removeLegacyClaudeDesktopEntries(file)).toEqual([])
     expect(getConfig().apps?.claudeDesktop).toEqual({})
   })
+
+  test("keeps the record while Desktop's config exists but can't be read", () => {
+    // Partial / locked / unreadable files all come back as "no document".
+    for (const unreadable of ['{ "mcpServers": { "workiq": ', ""]) {
+      fs.writeFileSync(file, unreadable)
+      writeConfig({ apps: { claudeDesktop: { mcpServers: ["workiq"] } } })
+      expect(removeLegacyClaudeDesktopEntries(file)).toEqual([])
+      expect(getConfig().apps?.claudeDesktop).toEqual({
+        mcpServers: ["workiq"],
+      })
+      expect(fs.readFileSync(file, "utf8")).toBe(unreadable)
+    }
+    // A directory in the file's place (EISDIR) is unreadable too.
+    fs.rmSync(file)
+    fs.mkdirSync(file)
+    expect(removeLegacyClaudeDesktopEntries(file)).toEqual([])
+    expect(getConfig().apps?.claudeDesktop).toEqual({ mcpServers: ["workiq"] })
+  })
+
+  test("clears the record once a readable config has nothing of ours left", () => {
+    fs.writeFileSync(file, JSON.stringify({ mcpServers: {} }))
+    writeConfig({ apps: { claudeDesktop: { mcpServers: ["workiq"] } } })
+    expect(removeLegacyClaudeDesktopEntries(file)).toEqual([])
+    expect(getConfig().apps?.claudeDesktop).toEqual({})
+  })
 })

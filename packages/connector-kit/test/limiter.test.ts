@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test"
 
 import { ConnectorError } from "../src/errors"
+import { FakeClock } from "../src/testing/clock"
+import { ConnectorLimiter } from "../src/upstream/limiter"
+import { resolveLimits } from "../src/upstream/limits"
 import {
   deferred,
   failure,
@@ -334,6 +337,31 @@ describe("shared limiter", () => {
         .filter((call) => call.session === "A")
         .map((call) => call.args.n),
     ).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+  })
+
+  test("a lane cooling down does not hold up the same session's calls in another lane", async () => {
+    const clock = new FakeClock()
+    const limiter = new ConnectorLimiter(resolveLimits([{}]), clock)
+    limiter.penalize("teams", 10_000)
+    let teamsAdmitted = false
+    const teams = limiter.acquire("teams", { sessionId: "A" }).then((lease) => {
+      teamsAdmitted = true
+      return lease
+    })
+    let outlookAdmitted = false
+    const outlook = limiter
+      .acquire("outlook", { sessionId: "A" })
+      .then((lease) => {
+        outlookAdmitted = true
+        return lease
+      })
+    await clock.advance(0)
+    expect(outlookAdmitted).toBe(true)
+    expect(teamsAdmitted).toBe(false)
+    ;(await outlook).release()
+    await clock.advance(10_000)
+    expect(teamsAdmitted).toBe(true)
+    ;(await teams).release()
   })
 
   test("a Teams-style burst against a 5 rps bucket: everything succeeds, few 429s", async () => {

@@ -30,6 +30,7 @@ import type { Context, MiddlewareHandler } from "hono"
 
 import { Hono } from "hono"
 
+import { hasForeignOrigin } from "~/lib/auth/origin"
 import {
   createAuthMiddleware,
   defaultGetRequestIp,
@@ -38,8 +39,6 @@ import {
 import { getPluginGateway } from "~/lib/plugins/gateway"
 
 import { type McpSessionOptions, McpSessions } from "./mcp-sessions"
-
-const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "localhost", "[::1]"])
 
 const ERRORS = {
   MCP_ORIGIN_REJECTED: [403, "Cross-origin requests are not allowed."],
@@ -70,15 +69,6 @@ function jsonRpcError(
   error: { code: number; message: string },
 ): Response {
   return c.json({ jsonrpc: "2.0", error, id: null }, status)
-}
-
-function hasForeignOrigin(origin: string | undefined): boolean {
-  if (origin === undefined) return false
-  try {
-    return !LOOPBACK_HOSTNAMES.has(new URL(origin).hostname)
-  } catch {
-    return true
-  }
 }
 
 export function createPluginMcpRoutes(
@@ -138,10 +128,14 @@ export function createPluginMcpRoutes(
     }
     if (!sessions.makeRoom()) return mcpError(c, "MCP_BUSY")
     const session = await sessions.open(pluginId)
-    const response = await sessions.serve(session, c.req.raw)
-    // Anything but a successful `initialize` leaves no session behind.
-    if (session.id === undefined) void sessions.close(session)
-    return response
+    try {
+      return await sessions.serve(session, c.req.raw)
+    } finally {
+      // Anything but a successful `initialize` (including a throw) leaves no
+      // session behind; otherwise it would sit in `#opening` and count
+      // toward the cap forever.
+      if (session.id === undefined) void sessions.close(session)
+    }
   })
 
   return {

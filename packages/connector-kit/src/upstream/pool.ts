@@ -17,6 +17,12 @@ export interface PoolOptions {
   idleMs?: number
   /** Most per-session upstream connections kept open (LRU idle eviction). Default 16. */
   maxSessions?: number
+  /**
+   * A tool call opened a new shared connection after an earlier one closed
+   * (an expired session, a reconnect): its `list_changed` subscription is
+   * new, so changes in between were missed.
+   */
+  onSharedReconnect?(): void
 }
 
 function status(error: unknown): number | undefined {
@@ -39,6 +45,10 @@ export class UpstreamPool {
   readonly #idleMs: number
   readonly #maxSessions: number
   readonly #connections = new Map<string, Promise<UpstreamConnection>>()
+  /** Calls using (or about to use) each key's connection; a sweep leaves those alone. */
+  readonly #users = new Map<string, number>()
+  /** A shared connection was opened before. */
+  #sharedOpened = false
   readonly #lifetime = new AbortController()
   readonly #timer: ReturnType<typeof setInterval>
 
@@ -59,7 +69,8 @@ export class UpstreamPool {
   }
 
   async listTools(signal?: AbortSignal): Promise<Array<UpstreamTool>> {
-    return await this.#with(undefined, signal, (connection) =>
+    // Listing is the refresh itself: no `onSharedReconnect` for it.
+    return await this.#with({ listing: true }, signal, (connection) =>
       connection.listTools(signal),
     )
   }
@@ -69,27 +80,34 @@ export class UpstreamPool {
     input: Record<string, unknown>,
     call: ToolCallContext,
   ): Promise<ToolResult> {
-    return await this.#with(call.sessionId, call.signal, (connection) =>
-      connection.callTool(name, input, call),
+    return await this.#with(
+      call.sessionId === undefined ? {} : { sessionId: call.sessionId },
+      call.signal,
+      (connection) => connection.callTool(name, input, call),
     )
   }
 
-  /** Close idle sessions; evict the least recently used idle ones over the cap. */
+  /**
+   * Close idle sessions; evict the least recently used idle ones over the
+   * cap. The shared connection stays: it carries the `list_changed`
+   * subscription the tool list depends on.
+   */
   async sweep(now = Date.now()): Promise<void> {
     const settled: Array<[string, UpstreamConnection]> = []
     for (const [key, pending] of this.#connections) {
+      if (key === SHARED) continue
       const connection = await pending.catch(() => undefined)
       if (connection && this.#connections.get(key) === pending)
         settled.push([key, connection])
     }
     const idle = settled
-      .filter(([, connection]) => !connection.busy)
+      .filter(([key, connection]) => !this.#inUse(key, connection))
       .sort(([, a], [, b]) => a.lastUsed - b.lastUsed)
     let excess = this.#connections.size - (this.#maxSessions + 1)
     for (const [key, connection] of idle) {
       if (now - connection.lastUsed >= this.#idleMs || excess > 0) {
         excess--
-        await this.#drop(key, connection)
+        await this.#drop(key, connection, true)
       }
     }
   }
@@ -111,14 +129,28 @@ export class UpstreamPool {
     await this.closeAll()
   }
 
+  #inUse(key: string, connection: UpstreamConnection): boolean {
+    return connection.busy || (this.#users.get(key) ?? 0) > 0
+  }
+
   async #acquire(
     key: string,
     signal: AbortSignal | undefined,
+    announce: boolean,
   ): Promise<UpstreamConnection> {
     let pending = this.#connections.get(key)
     if (!pending) {
       this.#lifetime.signal.throwIfAborted()
       pending = this.#options.connect(this.#lifetime.signal)
+      if (key === SHARED) {
+        const reopened = this.#sharedOpened
+        this.#sharedOpened = true
+        if (reopened && announce)
+          pending.then(
+            () => this.#options.onSharedReconnect?.(),
+            () => {},
+          )
+      }
       this.#connections.set(key, pending)
       pending.catch(() => {
         if (this.#connections.get(key) === pending)
@@ -129,31 +161,48 @@ export class UpstreamPool {
     return await abortable(pending, signal)
   }
 
-  async #drop(key: string, connection: UpstreamConnection): Promise<void> {
+  /** Close `connection`; an idle `sweep` leaves it alone if a call picked it up meanwhile. */
+  async #drop(
+    key: string,
+    connection: UpstreamConnection,
+    idle = false,
+  ): Promise<void> {
     const pending = this.#connections.get(key)
-    if (pending && (await pending.catch(() => undefined)) === connection)
+    const current =
+      pending !== undefined
+      && (await pending.catch(() => undefined)) === connection
+    if (idle && this.#inUse(key, connection)) return
+    if (current && this.#connections.get(key) === pending)
       this.#connections.delete(key)
     await connection.close()
   }
 
   async #with<T>(
-    sessionId: string | undefined,
+    target: { sessionId?: string; listing?: boolean },
     signal: AbortSignal | undefined,
     use: (connection: UpstreamConnection) => Promise<T>,
   ): Promise<T> {
-    const key = sessionId ?? SHARED
-    for (let attempt = 0; ; attempt++) {
-      const connection = await this.#acquire(key, signal)
-      try {
-        return await use(connection)
-      } catch (error) {
-        // 404: the upstream session expired; reconnect once.
-        if (attempt === 0 && status(error) === 404 && !signal?.aborted) {
-          await this.#drop(key, connection)
-          continue
+    const key = target.sessionId ?? SHARED
+    const announce = target.listing !== true
+    this.#users.set(key, (this.#users.get(key) ?? 0) + 1)
+    try {
+      for (let attempt = 0; ; attempt++) {
+        const connection = await this.#acquire(key, signal, announce)
+        try {
+          return await use(connection)
+        } catch (error) {
+          // 404: the upstream session expired; reconnect once.
+          if (attempt === 0 && status(error) === 404 && !signal?.aborted) {
+            await this.#drop(key, connection)
+            continue
+          }
+          throw error
         }
-        throw error
       }
+    } finally {
+      const users = (this.#users.get(key) ?? 1) - 1
+      if (users > 0) this.#users.set(key, users)
+      else this.#users.delete(key)
     }
   }
 }

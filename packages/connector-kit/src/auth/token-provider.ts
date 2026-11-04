@@ -33,11 +33,13 @@ export interface TokenProvider {
   /** Forget every account and delete the persisted credentials. */
   signOut(): Promise<void>
   /**
-   * The upstream rejected the current access token (HTTP 401). Return
-   * `true` when the next `getToken` may yield a different one (refresh), so
-   * the request is retried once.
+   * The upstream rejected `rejected` (HTTP 401), or — without it — the
+   * caller wants a fresh token. Return `true` when the next `getToken` may
+   * yield a different one (refresh, or a newer token already replaced the
+   * rejected one), so the request is retried once. Concurrent 401s for the
+   * same token share one refresh.
    */
-  invalidate?(): Promise<boolean>
+  invalidate?(rejected?: string): Promise<boolean>
 }
 
 /** Text persistence credentials need (a subset of `ctx.storage`). */
@@ -65,6 +67,11 @@ export interface AuthEnv {
   fetch?: FetchLike
   /** Classify a failure with the connector's wording. */
   toError: (error: unknown) => ConnectorError
+  /**
+   * Aborts when the plugin unloads. Background work shared by several
+   * callers (a token refresh) runs under this, not under one caller's signal.
+   */
+  lifetime?: AbortSignal
 }
 
 /** How a connector signs in. Built-ins: `entraAuth`, `mcpOAuth`, `noAuth`. */

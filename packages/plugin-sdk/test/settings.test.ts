@@ -78,6 +78,11 @@ const withLimits = (value: unknown) => ({
   connector: { ...connectorManifest.connector, limits: value },
 })
 
+const withHosts = (value: unknown) => ({
+  ...connectorManifest,
+  connector: { ...connectorManifest.connector, allowedHosts: value },
+})
+
 describe("manifest validation", () => {
   test("a connector manifest is normalised, frozen, and unknown keys are dropped", () => {
     const manifest = normalizeManifest("remote", {
@@ -130,6 +135,28 @@ describe("manifest validation", () => {
     expect(
       failure("remote", withLimits({ retry: { retryWritesOn429: "yes" } })),
     ).toMatch(/retryWritesOn429 must be a boolean/)
+  })
+
+  test("keeps connector allowedHosts and rejects malformed ones", () => {
+    const manifest = normalizeManifest(
+      "remote",
+      withHosts(["mcp.example.com", "eu.example.com:8443"]),
+    )
+    expect(manifest.connector?.allowedHosts).toEqual([
+      "mcp.example.com",
+      "eu.example.com:8443",
+    ])
+    expect(Object.isFrozen(manifest.connector?.allowedHosts)).toBe(true)
+    for (const bad of [
+      "mcp.example.com",
+      ["https://mcp.example.com"],
+      ["MCP.example.com"],
+      ["a/b"],
+      [""],
+    ])
+      expect(failure("remote", withHosts(bad))).toMatch(
+        /connector\.allowedHosts must be a list of lower-case hosts/,
+      )
   })
 
   test("rejects id mismatch, bad kind, connector rules, version and non-JSON values", () => {

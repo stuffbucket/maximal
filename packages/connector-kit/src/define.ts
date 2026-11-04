@@ -153,7 +153,10 @@ function upstreamPool(
   const limiter = new ConnectorLimiter(limits, clock)
   const upstreamFetch = createUpstreamFetch({
     getToken: (signal) => tokens.getToken(signal),
-    onUnauthorized: () => tokens.invalidate?.() ?? Promise.resolve(false),
+    onUnauthorized: (rejected) =>
+      tokens.invalidate?.(rejected) ?? Promise.resolve(false),
+    // The bearer token goes to the configured endpoint's origin only.
+    origin: new URL(config.endpoint).origin,
     retryDelaysMs: limits.retry.fallbackDelaysMs.slice(
       0,
       Math.max(0, limits.retry.attempts - 1),
@@ -191,6 +194,9 @@ function upstreamPool(
       protocol = negotiated
       return connection
     },
+    // A new shared session (its `list_changed` subscription is new too) may
+    // have missed changes: list the tools again.
+    onSharedReconnect: wiring.onToolsChanged,
     ...(options.sessionIdleMs === undefined ?
       {}
     : { idleMs: options.sessionIdleMs }),
@@ -276,6 +282,7 @@ function applyConnector(
   }
   const toError = (error: unknown) => toConnectorError(error, errorContext)
   const store = storeOf(ctx)
+  const lifetime = new AbortController()
   const tokens = strategy.create({
     displayName: name,
     endpoint: config.endpoint,
@@ -286,6 +293,7 @@ function applyConnector(
     signInTimeoutMs,
     ...(options.fetch ? { fetch: options.fetch } : {}),
     toError,
+    lifetime: lifetime.signal,
   })
   const upstream = upstreamPool(ctx, config, {
     setup,
@@ -323,6 +331,7 @@ function applyConnector(
   })
   registerActions(ctx, controller, setup)
   const shutdown = () => {
+    lifetime.abort(new Error(`${name} stopped.`))
     output.stop()
     controller.dispose()
     upstream.guarded.dispose()

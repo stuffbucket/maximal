@@ -129,6 +129,11 @@ class CallRun {
   readonly #lane: string
   readonly #maxAttempts: number
   readonly #progress: Progress
+  /**
+   * Attempts of the current unit — the whole call, or one chunk or
+   * re-issue round of a batch read — so a throttle late in a long batch
+   * gets its own retries. The time budget (`#waitedMs`) is per call.
+   */
   #attempts = 0
   #retries = 0
   #waitedMs = 0
@@ -211,7 +216,7 @@ class CallRun {
     const configured = this.#o.limiter.limits.fetchBatchSize
     const size = configured > 0 ? configured : items.length
     let pending = items.map((_, index) => index)
-    for (;;) {
+    for (let round = 0; ; round++) {
       state.round()
       for (let start = 0; start < pending.length; start += size) {
         const chunk = pending.slice(start, start + size)
@@ -219,15 +224,27 @@ class CallRun {
           ...this.#input,
           [spec.argument]: chunk.map((index) => items[index]),
         }
+        // Every chunk starts from the attempts its items already had.
+        this.#unit(round)
         const unsplit = await this.#chunk(state, chunk, args)
         if (unsplit && chunk.length === items.length) return unsplit
       }
+      // Re-issuing is attempt `round + 2` for the throttled items.
+      this.#unit(round + 1, round)
       if (!(await this.#nextRound(state))) break
       pending = state.throttled
     }
     const result = state.result(this.#name)
     if (!result) throw state.gaveUp ?? new Error("empty batch")
     return result
+  }
+
+  /** Start a unit of attempts (see `#attempts`). */
+  #unit(attempts: number, retries = attempts): void {
+    this.#attempts = attempts
+    this.#retries = retries
+    this.#networkRetried = false
+    this.#serverRetried = false
   }
 
   /**

@@ -551,3 +551,152 @@ describe("upstream MCP sessions", () => {
     expect(toError(error).code).toBe("license-needed")
   })
 })
+
+/** A stand-in pool connection the test drives directly. */
+function stub(name: string) {
+  let closing: Promise<void> | undefined
+  const connection = {
+    name,
+    lastUsed: 0,
+    busy: false,
+    closes: 0,
+    failNext: undefined as Error | undefined,
+    holdClose(until: Promise<void>) {
+      closing = until
+    },
+    async close() {
+      connection.closes++
+      await closing
+    },
+    listTools: () => Promise.resolve([]),
+    callTool() {
+      const failure = connection.failNext
+      connection.failNext = undefined
+      return failure === undefined ?
+          Promise.resolve({ content: [] })
+        : Promise.reject(failure)
+    },
+  }
+  return connection
+}
+type Stub = ReturnType<typeof stub>
+
+function stubPool(options: { onSharedReconnect?: () => void } = {}) {
+  const made: Array<Stub> = []
+  const pool = new UpstreamPool({
+    connect: () => {
+      const connection = stub(`c${made.length}`)
+      made.push(connection)
+      return Promise.resolve(connection as unknown as UpstreamConnection)
+    },
+    idleMs: 1000,
+    ...options,
+  })
+  cleanups.push(() => pool.dispose())
+  return { pool, made }
+}
+
+describe("upstream session pool", () => {
+  test("a sweep leaves a connection alone that a call picked up meanwhile", async () => {
+    const { pool, made } = stubPool()
+    await pool.callTool("t", {}, { signal: signal(), sessionId: "a" })
+    await pool.callTool("t", {}, { signal: signal(), sessionId: "b" })
+    const [a, b] = made
+    let release!: () => void
+    a.holdClose(new Promise<void>((resolve) => (release = resolve)))
+    const sweeping = pool.sweep(Date.now() + 10_000)
+    while (a.closes === 0) await Bun.sleep(1)
+    // While the sweep closes `a`, a call starts on `b`.
+    b.busy = true
+    release()
+    await sweeping
+    expect(b.closes).toBe(0)
+    expect(pool.size).toBe(1)
+  })
+
+  test("the shared connection (it carries list_changed) is never idle-swept", async () => {
+    const { pool, made } = stubPool()
+    await pool.listTools()
+    await pool.callTool("t", {}, { signal: signal(), sessionId: "a" })
+    await pool.sweep(Date.now() + 10_000)
+    expect(made.map((connection) => connection.closes)).toEqual([0, 1])
+    expect(pool.size).toBe(1)
+  })
+
+  test("a reopened shared connection asks for the tool list again", async () => {
+    let relists = 0
+    const { pool, made } = stubPool({ onSharedReconnect: () => relists++ })
+    await pool.listTools()
+    await pool.callTool("t", {}, { signal: signal() })
+    expect(relists).toBe(0)
+    // The upstream forgot the shared session: reconnect once, then re-list.
+    made[0].failNext = Object.assign(new Error("gone"), { status: 404 })
+    await pool.callTool("t", {}, { signal: signal() })
+    await Bun.sleep(0)
+    expect(made).toHaveLength(2)
+    expect(relists).toBe(1)
+    // A tools/list that opens it is the re-list itself.
+    await pool.closeAll()
+    await pool.listTools()
+    await Bun.sleep(0)
+    expect(relists).toBe(1)
+  })
+})
+
+describe("bearer token origin", () => {
+  test("the token goes only to the endpoint's origin, never along a redirect elsewhere", async () => {
+    const seen: Array<{ url: string; auth: string | null; redirect?: string }> =
+      []
+    const upstreamFetch = createUpstreamFetch({
+      getToken: () => Promise.resolve("secret"),
+      origin: "https://mcp.example.com",
+      baseFetch: (url, init) => {
+        const target = new URL(url)
+        seen.push({
+          url: target.href,
+          auth: new Headers(init?.headers).get("authorization"),
+          ...(init?.redirect ? { redirect: init.redirect } : {}),
+        })
+        const location: Record<string, string> = {
+          "/same": "/mcp",
+          "/away": "https://evil.example.net/collect",
+        }
+        const to = location[target.pathname]
+        return Promise.resolve(
+          to ?
+            new Response(null, { status: 307, headers: { location: to } })
+          : new Response("ok"),
+        )
+      },
+    })
+    await upstreamFetch("https://evil.example.net/mcp", { method: "POST" })
+    await upstreamFetch("http://mcp.example.com/mcp", { method: "POST" })
+    const same = await upstreamFetch("https://mcp.example.com/same", {
+      method: "POST",
+    })
+    const away = await upstreamFetch("https://mcp.example.com/away", {
+      method: "POST",
+    })
+    expect(same.status).toBe(200)
+    expect(away.status).toBe(307)
+    expect(seen).toEqual([
+      { url: "https://evil.example.net/mcp", auth: null },
+      { url: "http://mcp.example.com/mcp", auth: null },
+      {
+        url: "https://mcp.example.com/same",
+        auth: "Bearer secret",
+        redirect: "manual",
+      },
+      {
+        url: "https://mcp.example.com/mcp",
+        auth: "Bearer secret",
+        redirect: "manual",
+      },
+      {
+        url: "https://mcp.example.com/away",
+        auth: "Bearer secret",
+        redirect: "manual",
+      },
+    ])
+  })
+})

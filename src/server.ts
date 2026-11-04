@@ -3,6 +3,7 @@ import { Hono } from "hono"
 import { cors } from "hono/cors"
 import { logger } from "hono/logger"
 
+import { rejectUntrustedOrigin } from "./lib/auth/origin"
 import {
   createAuthMiddleware,
   requireGithubAuth,
@@ -10,6 +11,7 @@ import {
 import { traceIdMiddleware } from "./lib/http/trace"
 import { staleRefreshMiddleware } from "./lib/models/refresh-models"
 import { cacheModels } from "./lib/platform/utils"
+import { onPluginsStopping } from "./lib/plugins/runtime"
 import { getModelsLoadedAtMs } from "./lib/runtime-state/state"
 import { buildStatus } from "./lib/runtime-state/status"
 import { trackInFlight } from "./lib/token-usage/in-flight"
@@ -61,6 +63,12 @@ server.use(async (c, next) => {
 })
 server.use(logger())
 server.use(cors())
+// `cors()` lets any page script the proxy, and with `auth.enforce` off the
+// settings API needs no key — so a page the user visits could rewrite plugin
+// settings (e.g. point a connector at its own host and collect its tokens).
+// Browser requests to the settings API must come from Maximal's own UI;
+// requests with no `Origin` (CLI, Tauri shell calls) are unaffected.
+server.use("/settings/api/*", rejectUntrustedOrigin)
 server.use(
   "*",
   createAuthMiddleware({
@@ -142,6 +150,8 @@ server.route("/ui", uiRoutes)
 // authenticates itself (the main-port rules, loopback only) and needs no
 // GitHub token.
 server.route("/mcp", pluginMcpRoutes.app)
+// Close MCP sessions deterministically when the plugins stop.
+onPluginsStopping(() => pluginMcpRoutes.closeAll())
 
 // Gate every upstream-touching route on the presence of a GitHub token.
 // When the sidecar boots without one, the HTTP server still listens (so

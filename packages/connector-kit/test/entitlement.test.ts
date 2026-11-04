@@ -44,6 +44,7 @@ function using(tokens: FakeTokenProvider): AuthStrategy {
 
 async function load(server: FakeRemoteMcp, tokens: FakeTokenProvider) {
   const module = defineRemoteMcpConnector(EXAMPLE_MANIFEST, {
+    endpoint: server.url,
     auth: using(tokens),
     errors: {
       adminHint: HINT,
@@ -55,11 +56,7 @@ async function load(server: FakeRemoteMcp, tokens: FakeTokenProvider) {
     retryDelaysMs: [1],
     sleep: async () => {},
   })
-  const plugin = await loadPlugin(
-    module,
-    { endpoint: server.url },
-    { storage: ACCEPTED },
-  )
+  const plugin = await loadPlugin(module, {}, { storage: ACCEPTED })
   cleanups.push(() => plugin.dispose())
   return plugin
 }

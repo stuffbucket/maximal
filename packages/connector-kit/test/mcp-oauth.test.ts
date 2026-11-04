@@ -3,6 +3,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 
 import type { TextStore } from "../src/auth/token-provider"
 
+import { startLoopbackRedirect } from "../src/auth/loopback"
 import {
   createMcpOAuthTokenProvider,
   OAUTH_FILE,
@@ -231,6 +232,97 @@ describe("mcp-oauth sign-in", () => {
   })
 })
 
+/** A fetch whose refresh-token requests wait for `release()`. */
+function heldRefresh() {
+  let release!: () => void
+  const gate = new Promise<void>((resolve) => (release = resolve))
+  let held = 0
+  const fetchFn = async (url: string | URL, init?: RequestInit) => {
+    let body = typeof init?.body === "string" ? init.body : ""
+    if (init?.body instanceof URLSearchParams) body = init.body.toString()
+    if (body.includes("grant_type=refresh_token")) {
+      held++
+      await gate
+    }
+    return await fetch(url, init)
+  }
+  return { fetchFn, release, held: () => held }
+}
+
+function stored(store: { files: Map<string, string> }) {
+  return JSON.parse(store.files.get(OAUTH_FILE) ?? "{}") as {
+    tokens?: { access_token: string; refresh_token?: string }
+  }
+}
+
+describe("mcp-oauth refresh", () => {
+  test("a caller's abort leaves the shared refresh running, and the rotated tokens are saved", async () => {
+    const server = fake({ oauth: { clientId: "c", expiresIn: 30 } })
+    const hold = heldRefresh()
+    const { tokens, store } = provider(server, {
+      clientId: "c",
+      fetch: hold.fetchFn,
+    })
+    await tokens.signIn(signal())
+    const before = stored(store).tokens?.refresh_token
+    server.token = "token-2"
+    const impatient = new AbortController()
+    const first = tokens.getToken(impatient.signal)
+    const second = tokens.getToken()
+    while (hold.held() === 0) await Bun.sleep(1)
+    impatient.abort()
+    expect(await rejection(first)).toMatchObject({ name: "AbortError" })
+    hold.release()
+    expect(await second).toBe("token-2")
+    expect(hold.held()).toBe(1)
+    const rotated = stored(store).tokens?.refresh_token
+    expect(rotated).toBeDefined()
+    expect(rotated).not.toBe(before)
+    // The rotated refresh token works for the next refresh (no invalid_grant).
+
+    server.token = "token-3"
+    expect(await tokens.getToken()).toBe("token-3")
+  })
+
+  test("sign-out wins over a refresh in flight: nothing is written back", async () => {
+    const server = fake({ oauth: { clientId: "c", expiresIn: 30 } })
+    const hold = heldRefresh()
+    const { tokens, store } = provider(server, {
+      clientId: "c",
+      fetch: hold.fetchFn,
+    })
+    await tokens.signIn(signal())
+    const pending = tokens.getToken()
+    while (hold.held() === 0) await Bun.sleep(1)
+    await tokens.signOut()
+    hold.release()
+    expect(await rejection(pending)).toMatchObject({ code: "signed-out" })
+    expect(store.files.has(OAUTH_FILE)).toBe(false)
+    expect(await tokens.account()).toBeUndefined()
+  })
+
+  test("a 401 for a token another request already refreshed retries without refreshing again", async () => {
+    const server = fake({ oauth: { clientId: "c" } })
+    const issue = (token: string) => {
+      server.token = token
+    }
+    const refreshes = () =>
+      server.oauth.tokenRequests.filter(
+        (form) => form.get("grant_type") === "refresh_token",
+      ).length
+    const { tokens } = provider(server, { clientId: "c" })
+    await tokens.signIn(signal())
+    issue("token-2")
+    expect(await tokens.invalidate?.("token-1")).toBe(true)
+    expect(await tokens.getToken()).toBe("token-2")
+    expect(refreshes()).toBe(1)
+    // A second request's 401 for token-1, already replaced: just retry.
+    expect(await tokens.invalidate?.("token-1")).toBe(true)
+    expect(await tokens.getToken()).toBe("token-2")
+    expect(refreshes()).toBe(1)
+  })
+})
+
 describe("mcp-oauth connector", () => {
   test("signs in through the host browser and retries a 401 once with a refreshed token", async () => {
     const server = fake({
@@ -276,5 +368,34 @@ describe("mcp-oauth connector", () => {
       "refresh_token",
     )
     expect(plugin.status()?.code).toBe("ready")
+  })
+})
+
+describe("loopback redirect", () => {
+  test("a callback with the wrong (or no) state is refused and the sign-in keeps waiting", async () => {
+    const loopback = await startLoopbackRedirect(
+      { state: "expected", page: (ok) => (ok ? "ok" : "no") },
+      signal(),
+    )
+    cleanups.push(() => loopback.close())
+    let settled = false
+    void loopback.result.then(() => (settled = true))
+    for (const query of [
+      "?code=forged&state=other",
+      "?error=access_denied&state=other",
+      "?code=forged",
+    ]) {
+      const response = await fetch(`${loopback.redirectUri}${query}`)
+      expect(response.status).toBe(400)
+      await response.text()
+    }
+    await Bun.sleep(5)
+    expect(settled).toBe(false)
+    const response = await fetch(
+      `${loopback.redirectUri}?code=real&state=expected`,
+    )
+    expect(response.status).toBe(200)
+    await response.text()
+    expect((await loopback.result).get("code")).toBe("real")
   })
 })

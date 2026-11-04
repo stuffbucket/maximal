@@ -4,7 +4,7 @@ import { createServer, type Server } from "node:http"
 export interface LoopbackRedirect {
   /** `http://127.0.0.1:<port><path>` — what the authorization request names. */
   readonly redirectUri: string
-  /** Query parameters of the first request to the redirect path. */
+  /** Query parameters of the first request to the redirect path that carries the expected `state`. */
   readonly result: Promise<URLSearchParams>
   close(): Promise<void>
 }
@@ -13,6 +13,11 @@ export interface LoopbackOptions {
   /** `0` (default) picks a free port. */
   port?: number
   path?: string
+  /**
+   * The authorization request's `state`. A redirect carrying another (or
+   * none) is answered 400 and ignored — it cannot end or cancel the sign-in.
+   */
+  state?: string
   /** HTML shown in the browser; `ok` when the redirect carried a code. */
   page(ok: boolean): string
 }
@@ -35,6 +40,18 @@ export async function startLoopbackRedirect(
     const url = new URL(request.url ?? "/", "http://127.0.0.1")
     if (request.method !== "GET" || url.pathname !== path || settled) {
       response.writeHead(404, { "content-type": "text/plain" }).end()
+      return
+    }
+    if (
+      options.state !== undefined
+      && url.searchParams.get("state") !== options.state
+    ) {
+      response
+        .writeHead(400, {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-store",
+        })
+        .end(options.page(false))
       return
     }
     settled = true

@@ -239,4 +239,26 @@ describe("batch reads", () => {
     await unsplit.call("fetch", { entityUrls: paths })
     expect(unsplit.server.calls()).toHaveLength(1)
   })
+
+  test("a 429 on the fifth chunk gets its own retries; the earlier chunks' answers are kept", async () => {
+    let answered = 0
+    const box: { server?: FakeRemoteMcp } = {}
+    const { server, call, backoffs } = await setup({
+      results: {
+        fetch: (args) => {
+          // The next request (chunk 5) is refused with HTTP 429.
+          if (++answered === 4)
+            box.server?.throttle({ mode: "http", status: 429 })
+          return fetchAnswer(args)
+        },
+      },
+    })
+    box.server = server
+    const paths = Array.from({ length: 100 }, (_, i) => `/p${i}`)
+    const result = await call("fetch", { entityUrls: paths })
+    expect(result.isError).toBeUndefined()
+    expect(entries(result).map((entry) => entry.data?.path)).toEqual(paths)
+    expect(toolCalls(server)).toHaveLength(6)
+    expect(backoffs).toEqual([2000])
+  })
 })

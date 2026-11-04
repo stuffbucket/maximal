@@ -82,7 +82,9 @@ licence, not-enabled and per-request policy denials for Work IQ.
 ## Exports
 
 - The plugin module: `name`, `manifest`, `inject`, `Config`
-  (`{ endpoint?, authority? }`, `{}` valid; both "advanced"), `apply`.
+  (`{ endpoint?, authority? }`, `{}` valid; both "advanced"; overrides must
+  be `https:` on `workiq.svc.cloud.microsoft`, respectively
+  `login.microsoftonline.com` / `login.microsoft.com`), `apply`.
 - `createWorkIqPlugin(options)` — the same module with kit options
   (`endpoint`, `auth`, timeouts, …) for the bench and tests; production never
   reads env vars for them.

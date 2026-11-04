@@ -155,93 +155,181 @@ function createClient(
 export function createMsalTokenProvider(
   options: MsalTokenProviderOptions,
 ): TokenProvider {
-  const scopes = [...options.scopes]
-  const pca = createClient(options)
-  const cache = pca.getTokenCache()
-  const expired = () =>
-    signedOut(
-      `Your ${options.displayName ?? "connector"} sign-in has expired. Sign in again.`,
-    )
-  // Last silent result, so per-request token lookups skip MSAL's cache I/O.
-  let memo: { token: string; expiresAt: number } | undefined
-  // The upstream rejected the cached token: skip MSAL's access-token cache once.
-  let forceRefresh = false
+  return new MsalTokenProvider(options)
+}
 
-  async function accounts(): Promise<Array<AccountInfo>> {
-    return await cache.getAllAccounts()
+interface Acquisition {
+  promise: Promise<string>
+  epoch: number
+  generation: number
+}
+
+class MsalTokenProvider implements TokenProvider {
+  readonly #options: MsalTokenProviderOptions
+  readonly #scopes: Array<string>
+  readonly #pca: PublicClientApplication
+  /** Last silent result, so per-request token lookups skip MSAL's cache I/O. */
+  #memo: { token: string; expiresAt: number } | undefined
+  /** The upstream rejected a token: the next acquisition skips MSAL's access-token cache. */
+  #forceRefresh = false
+  /** The token most recently invalidated (concurrent 401s for it share one refresh). */
+  #rejected: string | undefined
+  /**
+   * Bumped whenever cached tokens become stale (a rejection, sign-in,
+   * sign-out): an acquisition started before only memoizes, and is only
+   * joined, if unchanged.
+   */
+  #epoch = 0
+  /** Bumped on sign-in and sign-out: a token from before belongs to another account. */
+  #generation = 0
+  /** The silent acquisition in flight; concurrent lookups share it. */
+  #inflight: Acquisition | undefined
+  /** What the user last chose in this session: an account (sign-in) or none (sign-out). */
+  #chosen: { account?: AccountInfo } | undefined
+
+  constructor(options: MsalTokenProviderOptions) {
+    this.#options = options
+    this.#scopes = [...options.scopes]
+    this.#pca = createClient(options)
   }
 
-  async function keepOnly(keep: AccountInfo): Promise<void> {
-    for (const account of await accounts()) {
-      if (account.homeAccountId !== keep.homeAccountId)
-        await cache.removeAccount(account)
+  async account(): Promise<ConnectorAccount | undefined> {
+    const account = (await this.#accounts()).at(0)
+    return account ? toAccount(account) : undefined
+  }
+
+  async getToken(signal?: AbortSignal): Promise<string> {
+    for (;;) {
+      signal?.throwIfAborted()
+      const memo = this.#memo
+      if (memo && memo.expiresAt - Date.now() > TOKEN_REUSE_MARGIN_MS)
+        return memo.token
+      const entry =
+        this.#inflight?.epoch === this.#epoch ? this.#inflight : this.#acquire()
+      let token: string
+      try {
+        token = await abortable(entry.promise, signal)
+      } catch (error) {
+        if (isAbort(error, signal)) throw error
+        throw this.#options.toError(error)
+      }
+      // Signed in as someone else (or out) meanwhile: look again.
+      if (entry.generation === this.#generation) return token
     }
   }
 
-  return {
-    async account() {
-      const account = (await accounts()).at(0)
-      return account ? toAccount(account) : undefined
-    },
-
-    async getToken(signal) {
-      signal?.throwIfAborted()
-      if (memo && memo.expiresAt - Date.now() > TOKEN_REUSE_MARGIN_MS)
-        return memo.token
-      const account = (await accounts()).at(0)
-      if (!account) throw signedOut()
-      try {
-        const refresh = forceRefresh
-        forceRefresh = false
-        const result = await abortable(
-          pca.acquireTokenSilent({
-            scopes,
-            account,
-            ...(refresh ? { forceRefresh: true } : {}),
-          }),
-          signal,
-        )
-        if (!result.accessToken) throw expired()
-        // Concurrent lookups may both refresh; either result is valid, so the
-        // last write winning is harmless.
-        // eslint-disable-next-line require-atomic-updates
-        memo = {
-          token: result.accessToken,
-          expiresAt: result.expiresOn?.getTime() ?? 0,
-        }
-        return result.accessToken
-      } catch (error) {
-        if (isAbort(error, signal)) throw error
-        throw options.toError(error)
-      }
-    },
-
-    // eslint-disable-next-line @typescript-eslint/require-await -- the contract is async; nothing to await here
-    async invalidate() {
-      if (!memo) return false
-      memo = undefined
-      forceRefresh = true
+  // eslint-disable-next-line @typescript-eslint/require-await -- the contract is async; nothing to await here
+  async invalidate(rejected?: string): Promise<boolean> {
+    const memo = this.#memo
+    // A newer token already replaced the rejected one.
+    if (rejected !== undefined && memo && memo.token !== rejected) return true
+    // Another request already reported this token; its refresh is shared.
+    if (rejected !== undefined && !memo && rejected === this.#rejected) {
+      // Unless that refresh is still running, the next lookup refreshes.
+      if (this.#inflight?.epoch !== this.#epoch) this.#forceRefresh = true
       return true
-    },
+    }
+    this.#memo = undefined
+    this.#forceRefresh = true
+    this.#rejected = rejected
+    this.#epoch++
+    return true
+  }
 
-    async signIn(signal) {
-      memo = undefined
-      // Like agent-kit's `login` (no prompt: the browser's session decides),
-      // except that signing in again offers the account picker.
-      const switching = (await accounts()).length > 0
-      const account = await interactiveSignIn(pca, options, {
-        signal,
-        switching,
+  async signIn(signal: AbortSignal): Promise<ConnectorAccount> {
+    // Until this sign-in finishes, the current account stays as it is.
+    this.#chosen = undefined
+    this.#switched()
+    // Like agent-kit's `login` (no prompt: the browser's session decides),
+    // except that signing in again offers the account picker.
+    const switching = (await this.#accounts()).length > 0
+    const account = await interactiveSignIn(this.#pca, this.#options, {
+      signal,
+      switching,
+    })
+    this.#chosen = { account }
+    this.#switched()
+    await this.#forgetStale()
+    this.#switched()
+    return toAccount(account)
+  }
+
+  async signOut(): Promise<void> {
+    this.#chosen = {}
+    this.#switched()
+    await this.#forgetStale()
+    this.#switched()
+  }
+
+  async #accounts(): Promise<Array<AccountInfo>> {
+    return await this.#pca.getTokenCache().getAllAccounts()
+  }
+
+  /**
+   * Keep only the account the user chose (none after sign-out, deleting
+   * the cache file). Also run after an acquisition that straddled a
+   * sign-in or sign-out, which may have written the old account back into
+   * MSAL's cache.
+   */
+  async #forgetStale(): Promise<void> {
+    if (!this.#chosen) return
+    const keep = this.#chosen.account?.homeAccountId
+    const cache = this.#pca.getTokenCache()
+    for (const account of await this.#accounts())
+      if (account.homeAccountId !== keep) await cache.removeAccount(account)
+    if (keep === undefined) await this.#options.store.delete(TOKEN_CACHE_FILE)
+  }
+
+  /** The account changed: nothing cached or in flight may be handed out. */
+  #switched(): void {
+    this.#memo = undefined
+    this.#inflight = undefined
+    this.#forceRefresh = false
+    this.#rejected = undefined
+    this.#epoch++
+    this.#generation++
+  }
+
+  /** One silent acquisition (not tied to any caller's signal), shared by concurrent lookups. */
+  #acquire(): Acquisition {
+    const refresh = this.#forceRefresh
+    this.#forceRefresh = false
+    const epoch = this.#epoch
+    const generation = this.#generation
+    const promise = (async () => {
+      try {
+        const account = (await this.#accounts()).at(0)
+        if (!account) throw signedOut()
+        const result = await this.#pca.acquireTokenSilent({
+          scopes: this.#scopes,
+          account,
+          ...(refresh ? { forceRefresh: true } : {}),
+        })
+        if (!result.accessToken) throw this.#expired()
+        if (epoch === this.#epoch)
+          this.#memo = {
+            token: result.accessToken,
+            expiresAt: result.expiresOn?.getTime() ?? 0,
+          }
+        return result.accessToken
+      } finally {
+        if (generation !== this.#generation) await this.#forgetStale()
+      }
+    })()
+    const entry: Acquisition = { promise, epoch, generation }
+    this.#inflight = entry
+    promise
+      .finally(() => {
+        if (this.#inflight === entry) this.#inflight = undefined
       })
-      await keepOnly(account)
-      return toAccount(account)
-    },
+      .catch(() => {})
+    return entry
+  }
 
-    async signOut() {
-      memo = undefined
-      for (const account of await accounts()) await cache.removeAccount(account)
-      await options.store.delete(TOKEN_CACHE_FILE)
-    },
+  #expired(): ConnectorError {
+    return signedOut(
+      `Your ${this.#options.displayName ?? "connector"} sign-in has expired. Sign in again.`,
+    )
   }
 }
 

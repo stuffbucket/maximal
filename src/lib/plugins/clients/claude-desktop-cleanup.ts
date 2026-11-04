@@ -11,6 +11,7 @@
  */
 
 import consola from "consola"
+import fs from "node:fs"
 import path from "node:path"
 
 import {
@@ -34,6 +35,33 @@ export function isBrokerAdapterEntry(value: unknown): boolean {
   return BROKER_NAMES.has(path.basename(command.replaceAll("\\", "/")))
 }
 
+/**
+ * Remove `owned` broker-adapter entries from Desktop's config. `undefined`
+ * when the file exists but couldn't be read (locked, no permission, partial):
+ * `readJsonObject` answers null for that and for a missing file alike, and
+ * only a missing file (or a rewrite that succeeded) means the record can go.
+ */
+function removeOwnedEntries(
+  file: string,
+  owned: ReadonlyArray<string>,
+): Array<string> | undefined {
+  const document = readJsonObject(file)
+  if (document === null) return fs.existsSync(file) ? undefined : []
+  const servers = document.mcpServers
+  if (typeof servers !== "object" || servers === null) return []
+  const next = { ...(servers as Record<string, unknown>) }
+  const removed: Array<string> = []
+  for (const id of owned) {
+    if (!isBrokerAdapterEntry(next[id])) continue
+    Reflect.deleteProperty(next, id)
+    removed.push(id)
+  }
+  if (removed.length > 0) {
+    atomicWriteJson(file, { ...document, mcpServers: next })
+  }
+  return removed
+}
+
 /** Returns the ids it removed. File-only and synchronous; never throws. */
 export function removeLegacyClaudeDesktopEntries(
   file: string = claudeDesktopConfigPath(),
@@ -44,24 +72,16 @@ export function removeLegacyClaudeDesktopEntries(
     const owned = desktop?.mcpServers
     if (!desktop || owned === undefined) return []
 
-    const removed: Array<string> = []
-    const document = readJsonObject(file)
-    const servers = document?.mcpServers
-    if (document && typeof servers === "object" && servers !== null) {
-      const next = { ...(servers as Record<string, unknown>) }
-      for (const id of owned) {
-        if (!isBrokerAdapterEntry(next[id])) continue
-        Reflect.deleteProperty(next, id)
-        removed.push(id)
-      }
-      if (removed.length > 0) {
-        atomicWriteJson(file, { ...document, mcpServers: next })
-      }
-    }
+    // Unreadable: keep the ownership record so the next boot retries.
+    const removed = removeOwnedEntries(file, owned)
+    if (removed === undefined) return []
 
     const cleared = { ...desktop }
     Reflect.deleteProperty(cleared, "mcpServers")
-    writeConfig({ ...config, apps: { ...config.apps, claudeDesktop: cleared } })
+    writeConfig({
+      ...config,
+      apps: { ...config.apps, claudeDesktop: cleared },
+    })
     if (removed.length > 0) {
       consola.info(
         `Removed old MCP servers from Claude Desktop: ${removed.join(", ")}`,

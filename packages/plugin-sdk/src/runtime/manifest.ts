@@ -87,6 +87,16 @@ function isHttpUrl(value: unknown): value is string {
   }
 }
 
+/** A bare `host` or `host:port` (what `URL.host` gives), lower case. */
+function isHost(value: unknown): value is string {
+  if (typeof value !== "string" || value === "") return false
+  try {
+    return new URL(`https://${value}`).host === value
+  } catch {
+    return false
+  }
+}
+
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0
 }
@@ -270,6 +280,15 @@ class ManifestReader {
     return out
   }
 
+  allowedHosts(value: unknown): Array<string> | undefined {
+    if (value === undefined) return undefined
+    if (!Array.isArray(value) || !value.every((host) => isHost(host)))
+      this.fail(
+        'connector.allowedHosts must be a list of lower-case hosts ("host" or "host:port").',
+      )
+    return [...value]
+  }
+
   connector(kind: PluginKind, value: unknown): ConnectorManifest | undefined {
     if (kind !== "connector") {
       if (value !== undefined)
@@ -282,11 +301,13 @@ class ManifestReader {
       this.fail('connector.transport must be "streamable-http".')
     if (!isHttpUrl(value.endpoint))
       this.fail("connector.endpoint must be an http(s) URL.")
+    const allowedHosts = this.allowedHosts(value.allowedHosts)
     const auth = this.auth(value.auth)
     const limits = this.limits(value.limits)
     const base: ConnectorManifest = {
       transport: "streamable-http",
       endpoint: value.endpoint,
+      ...(allowedHosts === undefined ? {} : { allowedHosts }),
       auth,
       ...(limits === undefined ? {} : { limits }),
     }

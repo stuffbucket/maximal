@@ -41,6 +41,7 @@ import {
   permissionChangesError,
   PluginRuntime,
   resolveToolPermission,
+  serializeSettingsDocument,
   setToolCatalog,
   storedPermissions,
   toCordisPlugin,
@@ -54,6 +55,9 @@ import {
   type PluginStorageBackend,
 } from "@stuffbucket/maximal-plugin-sdk/runtime"
 import path from "node:path"
+
+/** The size the SDK refuses to read a settings file above (1 MiB). */
+const MAX_SETTINGS_FILE_BYTES = 1024 * 1024
 
 export interface PluginHostOptions {
   /** The static first-party plugin set (module namespaces). */
@@ -469,6 +473,17 @@ class PluginHost implements PluginGateway {
       if (!record.settings?.ok || tools.length === 0) return
       await this.#mutateNow(record, (document) => {
         setToolCatalog(document, tools)
+        // A settings file over the read limit is refused at the next start
+        // (failing the plugin), so a catalog that would push it over is
+        // dropped; the cache is a convenience, the file must stay loadable.
+        const bytes = Buffer.byteLength(serializeSettingsDocument(document))
+        if (bytes > MAX_SETTINGS_FILE_BYTES) {
+          document.tools = { ...document.tools }
+          delete document.tools.catalog
+          this.#host.logger.warn(
+            `[plugins] ${pluginId}: the tool catalog (${tools.length} tools) would make the settings file ${bytes} bytes, over the ${MAX_SETTINGS_FILE_BYTES}-byte limit; not caching it`,
+          )
+        }
         return {}
       })
     }).catch((error: unknown) => {

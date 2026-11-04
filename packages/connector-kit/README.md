@@ -44,7 +44,14 @@ export const apply: typeof plugin.apply = (ctx, config) => plugin.apply(ctx, con
 **Config** (zod): `{ endpoint }`, defaulting to `manifest.connector.endpoint`,
 plus `authority` for Entra connectors (defaulting to the manifest's). `{}` is
 valid. `manifest.configSchema` is its JSON Schema (`z.toJSONSchema`, input
-side) with `"x-maximal-advanced": true` on both fields.
+side) with `"x-maximal-advanced": true` on both fields. The upstream token
+goes wherever these point, so an override other than the default must be
+`https:` on an allowed host — for `endpoint`, the default endpoint's host or
+one of `manifest.connector.allowedHosts`; for `authority`, the manifest
+authority's host, `login.microsoftonline.com` or `login.microsoft.com` —
+else validation fails with an issue on that field (shown inline in
+Settings). The code-level `options.endpoint` is the default and is not
+restricted (the bench's loopback fake).
 
 **Options** (all optional): `endpoint` (replace the default endpoint, e.g. a
 local fake), `auth` (replace the manifest's strategy, e.g. `fakeAuth()`),
@@ -77,7 +84,8 @@ replaces it.
   authorization, token and refresh requests. Discovery, registration, PKCE
   and the code exchange are the MCP SDK's `auth()` with an
   `OAuthClientProvider` the kit implements; refresh uses the persisted
-  discovery result. A static `clientId` is used as is; without one the kit
+  discovery result. The loopback answers 400 to, and ignores, a redirect
+whose `state` is not this sign-in's. A static `clientId` is used as is; without one the kit
   registers dynamically (RFC 7591) only if the server advertises it, and
   fails clearly otherwise. Account details come from an `id_token` when the
   server sends one. State: `oauth.json` (client, tokens, discovery,
@@ -86,8 +94,17 @@ replaces it.
   sign-in/sign-out actions.
 
 On HTTP 401 the upstream fetch asks the strategy to refresh once
-(`invalidate`) and retries; a 401 with a freshly refreshed token means the
-service refuses the account (`not-entitled`), not that sign-in expired.
+(`invalidate(rejectedToken)`) and retries; a 401 with a freshly refreshed
+token means the service refuses the account (`not-entitled`), not that
+sign-in expired. Concurrent 401s for the same token share one refresh, and
+a 401 for a token already replaced just retries. A refresh is shared by
+every caller and runs under the plugin's lifetime: one caller aborting
+stops only its own wait, and rotated tokens are always saved — unless a
+sign-in or sign-out happened meanwhile, in which case the result is dropped
+(it never writes the old account back).
+
+The bearer token is sent only to the configured endpoint's origin; the
+fetch does not follow redirects with it, except same-origin 307/308.
 
 **Credentials are per connector.** They live only in that connector's own
 `ctx.storage` (`<app dir>/plugins/<id>/`, 0700, files 0600), separate from
@@ -103,7 +120,10 @@ key, and only the connector adds the upstream `Authorization` header.
   and shown as the `Protocol` fact.
 - One upstream session per downstream MCP session id (idle-closed after 10
   minutes, at most 16), plus a shared one for `tools/list` and calls without
-  a session; a forgotten session (HTTP 404) is reopened once.
+  a session; a forgotten session (HTTP 404) is reopened once. The shared
+  session carries the `list_changed` subscription and is never idle-closed;
+  when a tool call has to reopen it, the tools are listed again. A sweep
+  never closes a session a call has picked up.
 - Tool calls go through the connector's shared limiter and retry policy
   (*Rate limiting*). The transport retries only protocol requests
   (`initialize`, `server/discover`, `tools/list`, …) on 429/503/504, and
@@ -126,7 +146,8 @@ refresh, and retries of protocol requests, so attempts never multiply.
 **Admission.** A call waits for a global slot (`maxConcurrency`), a slot in
 its lane (`lanes[name].maxConcurrency`, spacing `minIntervalMs`) and the end
 of any cool-down. Waiters are served round robin across downstream
-sessions, FIFO within one. More than `maxQueue` waiting fails at once
+sessions, FIFO per lane within one (a cooling or full lane does not hold up
+the session's calls in other lanes). More than `maxQueue` waiting fails at once
 (`queue-full`); waiting longer than `queueTimeoutMs` fails (`queue-timeout`);
 a cool-down longer than the call may wait fails at once (`cooldown`, with the
 remaining time). Aborting a waiting call frees its place.
@@ -163,7 +184,8 @@ never retried.
 "entityUrls" }`): a longer list is split into chunks of `fetchBatchSize`
 (sequential; `0` disables); when `throttle.inspect` reports throttled
 entries, only those items are re-issued after the wait and spliced back in
-order. Entries still throttled when attempts or budget run out keep their
+order. Attempts count per chunk and per re-issue round (an item is tried at
+most `retry.attempts` times); `retry.budgetMs` stays per call. Entries still throttled when attempts or budget run out keep their
 throttled status, with a note in a second text block; other entries (404,
 403, …) pass through unchanged.
 

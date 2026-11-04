@@ -103,6 +103,12 @@ export interface ConnectorManifest {
   transport: "streamable-http"
   /** Default upstream endpoint; the plugin's config may override it. */
   endpoint: string
+  /**
+   * Hosts (`host` or `host:port`, lower case) a config override of the
+   * endpoint may name, besides the default endpoint's host. Overrides must
+   * be `https:`.
+   */
+  allowedHosts?: ReadonlyArray<string>
   auth: ConnectorAuth
   terms?: ConnectorTerms
   /** Rate-limiting numbers (optional). */
