@@ -1342,18 +1342,14 @@ pub(super) fn extract_error_reason(chunk: &str) -> Option<String> {
 ///   3. If the child is still around (still in our `Sidecar` state)
 ///      after 3s, escalate to SIGKILL via `CommandChild::kill()`.
 ///
-/// On Windows there is no SIGTERM to send through this API. We instead
-/// run `taskkill /PID <pid>` *without* `/F`: that posts WM_CLOSE /
-/// CTRL_CLOSE_EVENT to the target, which the Bun runtime surfaces to
-/// the sidecar's emulated `SIGTERM`/`SIGINT` handler (src/lib/start/
-/// shutdown.ts wires both) — so the same graceful drain runs. We then
-/// escalate to `CommandChild::kill()` (SIGKILL-equivalent) after the
-/// grace period, exactly like the Unix path. If taskkill can't be
-/// spawned we fall straight through to the hard kill so a Quit never
-/// hangs. (A future, even-cleaner option is to POST the proxy's own
-/// `/_internal/shutdown` endpoint — the same protocol `--replace` uses —
-/// but that's async work this synchronous Exit path doesn't need today;
-/// the parent-death watchdog already backstops an abrupt kill.)
+/// On Windows there is no SIGTERM to send through this API. The primary Quit
+/// path asks the authenticated sidecar endpoint to shut down before calling
+/// this fallback. `taskkill /PID <pid>` without `/F` still requests a polite
+/// close where Windows can deliver one, but a console-less Bun process is not
+/// guaranteed to receive that as `SIGTERM`/`SIGINT`. We therefore treat this
+/// path as bounded containment and escalate to `CommandChild::kill()` after
+/// the grace period. If taskkill cannot be spawned we fall straight through
+/// to the hard kill so Quit never hangs.
 ///
 /// Returns false when there was no sidecar to stop, so no Terminated event
 /// will follow.
@@ -1396,13 +1392,12 @@ pub(super) fn kill_sidecar(app: &AppHandle) -> bool {
 
     #[cfg(not(unix))]
     {
-        // Windows graceful shutdown: `taskkill` WITHOUT `/F` requests a
-        // polite close (WM_CLOSE / CTRL_CLOSE_EVENT) that Bun delivers to
-        // the sidecar's emulated SIGTERM/SIGINT handler, so the drain in
-        // src/lib/start/shutdown.ts runs (flush logs, close socket, revert
-        // Claude Code base URL). `/T` also reaps any child the sidecar
-        // spawned. Best-effort: if taskkill won't launch we skip straight
-        // to the hard kill below.
+        // Windows bounded-stop fallback: `taskkill` WITHOUT `/F` requests a
+        // polite close where the target exposes one, and `/T` includes its
+        // process tree. A console-less Bun process is not guaranteed to run
+        // its signal handlers here, so the normal Quit path first requests
+        // authenticated HTTP shutdown. If taskkill will not launch, skip
+        // straight to the hard kill below.
         let pid = child.pid();
         #[cfg(target_os = "windows")]
         {
@@ -1611,18 +1606,67 @@ pub(super) async fn fetch_setup_status(
     }
     resp.json::<SetupStatusResponse>().await.ok()
 }
+#[cfg(target_os = "windows")]
+async fn request_sidecar_shutdown(app: &AppHandle) -> bool {
+    let Some(endpoint) = app.state::<ManagedEndpoint>().current() else {
+        return false;
+    };
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(2))
+        .build()
+    {
+        Ok(client) => client,
+        Err(error) => {
+            eprintln!("[shell] could not build sidecar shutdown client: {error}");
+            return false;
+        }
+    };
+    let response = client
+        .post(endpoint.http_url("/_internal/shutdown"))
+        .header("x-api-key", app.state::<ShellApiKey>().value().to_owned())
+        .send()
+        .await;
+    match response {
+        Ok(response) if response.status().is_success() => true,
+        Ok(response) => {
+            eprintln!(
+                "[shell] sidecar rejected graceful shutdown with {}",
+                response.status()
+            );
+            false
+        }
+        Err(error) => {
+            eprintln!("[shell] sidecar graceful shutdown request failed: {error}");
+            false
+        }
+    }
+}
+
 /// Stop the sidecar and wait for its termination event. `SidecarHandoff`
 /// prevents that event from independently exiting or changing the shell while
 /// an update or the Windows Quit path owns the surrounding lifecycle.
 pub(super) async fn stop_sidecar_and_wait(app: &AppHandle) {
     let (tx, rx) = tokio::sync::oneshot::channel();
     app.state::<SidecarHandoff>().arm(tx);
-    if kill_sidecar(app)
+
+    #[cfg(target_os = "windows")]
+    let graceful_request_sent = request_sidecar_shutdown(app).await;
+    #[cfg(not(target_os = "windows"))]
+    let graceful_request_sent = false;
+
+    let waiting_for_exit = graceful_request_sent || kill_sidecar(app);
+    if waiting_for_exit
         && tokio::time::timeout(SIDECAR_STOP_TIMEOUT, rx)
             .await
             .is_err()
     {
         eprintln!("[shell] sidecar still running after {SIDECAR_STOP_TIMEOUT:?}");
+        if graceful_request_sent {
+            // The endpoint accepted the request but did not complete it. Retake
+            // the exact managed child and let the existing bounded-stop path,
+            // plus Windows Job Object containment, finish the teardown.
+            kill_sidecar(app);
+        }
     }
     // Disarm, so a later exit (after a failed install) is handled normally.
     app.state::<SidecarHandoff>().take();

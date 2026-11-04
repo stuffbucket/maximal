@@ -15,6 +15,10 @@ const SHELL_LIB_RS = readFileSync(
   resolve(REPO_ROOT, "shell/src-tauri/src/lib.rs"),
   "utf8",
 )
+const SIDECAR_RUNTIME_RS = readFileSync(
+  resolve(REPO_ROOT, "shell/src-tauri/src/sidecar_runtime.rs"),
+  "utf8",
+)
 const SHELL_CARGO_TOML = readFileSync(
   resolve(REPO_ROOT, "shell/src-tauri/Cargo.toml"),
   "utf8",
@@ -143,6 +147,8 @@ describe("unified Settings, Dashboard, Sessions & Appearance contract", () => {
     expect(SHELL_LIB_RS).toContain("tauri::async_runtime::spawn(async move {")
     expect(SHELL_LIB_RS).toContain("app.run_on_main_thread(move ||")
     expect(SHELL_LIB_RS).toContain("CloseWindowAction::Quit")
+    expect(SIDECAR_RUNTIME_RS).toContain("request_sidecar_shutdown(app).await")
+    expect(SIDECAR_RUNTIME_RS).toContain('http_url("/_internal/shutdown")')
     expect(SHELL_CARGO_TOML).toContain('windows = { version = "0.62"')
     expect(WINDOWS_JUMP_LIST_RS).toContain("ICustomDestinationList")
     expect(WINDOWS_JUMP_LIST_RS).toContain("AddUserTasks")
