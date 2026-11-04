@@ -330,6 +330,13 @@ jobs:
           $installRoot = Join-Path $env:LOCALAPPDATA 'Maximal'
           $shellPath = Join-Path $installRoot 'maximal-shell.exe'
           if (-not (Test-Path $shellPath)) { throw "shell missing: $shellPath" }
+          $diagnosticsRoot = Join-Path $PWD 'diagnostics'
+          New-Item -ItemType Directory -Force $diagnosticsRoot | Out-Null
+          $shellStdout = Join-Path $diagnosticsRoot 'maximal-shell.stdout.log'
+          $shellStderr = Join-Path $diagnosticsRoot 'maximal-shell.stderr.log'
+          $webviewNetLog = Join-Path $diagnosticsRoot 'webview2-netlog.json'
+          $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS =
+            "--enable-logging --log-net-log=$webviewNetLog"
 
           Add-Type -TypeDefinition @'
           using System;
@@ -368,7 +375,8 @@ jobs:
 
           $foregroundBeforeLaunch = [MaximalStartupWindowSmoke]::GetForegroundWindow()
           Write-Host "launching: $shellPath"
-          $shellProcess = Start-Process -FilePath $shellPath -PassThru
+          $shellProcess = Start-Process -FilePath $shellPath -PassThru `
+            -RedirectStandardOutput $shellStdout -RedirectStandardError $shellStderr
           # Cold hosted runners can take more than 30 seconds to initialize the
           # sidecar on first launch. Observe the short-lived minimized state in
           # the same loop: the unauthenticated flow intentionally presents
@@ -419,10 +427,6 @@ jobs:
           $startupDisplacedForeground = (
             $activationChecked -and
             $foregroundAtStartupSnapshot -eq $startupWindowHandle)
-          if ($startupDisplacedForeground) {
-            throw "startup main window displaced the existing foreground window"
-          }
-          Write-Host "shell PID: $($shellProcess.Id); sidecar PID: $($sidecarProcess.ProcessId)"
           [ordered]@{
             shellPid = $shellProcess.Id
             sidecarPid = [int]$sidecarProcess.ProcessId
@@ -434,6 +438,10 @@ jobs:
             activationChecked = $activationChecked
             activated = $startupDisplacedForeground
           } | ConvertTo-Json | Set-Content dist/startup-window.json
+          if ($startupDisplacedForeground) {
+            throw "startup main window displaced the existing foreground window"
+          }
+          Write-Host "shell PID: $($shellProcess.Id); sidecar PID: $($sidecarProcess.ProcessId)"
           Write-Host "ordinary startup created minimized taskbar window $startupWindowHandle without activation"
 
       # Re-run the installer while the tray shell is alive. This specifically
@@ -985,12 +993,264 @@ jobs:
         run: |
           $ErrorActionPreference = 'Continue'
           New-Item -ItemType Directory -Force diagnostics | Out-Null
+
+          # A release GUI uses the Windows subsystem, so it has no console for
+          # eprintln output. The initial launch redirects both standard streams
+          # above; capture the native window/compositor state as the equivalent
+          # of a serial-console snapshot for a black or unpainted WebView.
+          Add-Type -TypeDefinition @'
+          using System;
+          using System.Collections.Generic;
+          using System.Runtime.InteropServices;
+          using System.Text;
+
+          public sealed class MaximalWindowSnapshot {
+            public long Handle { get; set; }
+            public uint ProcessId { get; set; }
+            public string Title { get; set; }
+            public string ClassName { get; set; }
+            public bool Visible { get; set; }
+            public bool Minimized { get; set; }
+            public bool Foreground { get; set; }
+            public long ExtendedStyle { get; set; }
+            public int Left { get; set; }
+            public int Top { get; set; }
+            public int Width { get; set; }
+            public int Height { get; set; }
+          }
+
+          public static class MaximalWindowDiagnostics {
+            private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+            [StructLayout(LayoutKind.Sequential)]
+            private struct Rect { public int Left, Top, Right, Bottom; }
+            [DllImport("user32.dll")]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
+            [DllImport("user32.dll")]
+            private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+            [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+            private static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
+            [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+            private static extern int GetClassName(IntPtr hWnd, StringBuilder text, int count);
+            [DllImport("user32.dll")]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            private static extern bool GetWindowRect(IntPtr hWnd, out Rect rect);
+            [DllImport("user32.dll")]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            private static extern bool IsIconic(IntPtr hWnd);
+            [DllImport("user32.dll")]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            private static extern bool IsWindowVisible(IntPtr hWnd);
+            [DllImport("user32.dll")]
+            private static extern IntPtr GetForegroundWindow();
+            [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+            private static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int index);
+
+            public static MaximalWindowSnapshot[] Capture() {
+              var windows = new List<MaximalWindowSnapshot>();
+              var foreground = GetForegroundWindow();
+              EnumWindows((hWnd, lParam) => {
+                uint processId;
+                GetWindowThreadProcessId(hWnd, out processId);
+                var title = new StringBuilder(512);
+                var className = new StringBuilder(256);
+                var rect = new Rect();
+                GetWindowText(hWnd, title, title.Capacity);
+                GetClassName(hWnd, className, className.Capacity);
+                GetWindowRect(hWnd, out rect);
+                windows.Add(new MaximalWindowSnapshot {
+                  Handle = hWnd.ToInt64(),
+                  ProcessId = processId,
+                  Title = title.ToString(),
+                  ClassName = className.ToString(),
+                  Visible = IsWindowVisible(hWnd),
+                  Minimized = IsIconic(hWnd),
+                  Foreground = hWnd == foreground,
+                  ExtendedStyle = GetWindowLongPtr(hWnd, -20).ToInt64(),
+                  Left = rect.Left,
+                  Top = rect.Top,
+                  Width = rect.Right - rect.Left,
+                  Height = rect.Bottom - rect.Top
+                });
+                return true;
+              }, IntPtr.Zero);
+              return windows.ToArray();
+            }
+          }
+          '@
+          [MaximalWindowDiagnostics]::Capture() |
+            ConvertTo-Json -Depth 3 | Set-Content diagnostics/windows.json
+
+          try {
+            Add-Type -AssemblyName System.Drawing
+            Add-Type -AssemblyName System.Windows.Forms
+            $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
+            $bitmap = [System.Drawing.Bitmap]::new($bounds.Width, $bounds.Height)
+            $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+            try {
+              $graphics.CopyFromScreen(
+                $bounds.Left,
+                $bounds.Top,
+                0,
+                0,
+                $bitmap.Size
+              )
+              $bitmap.Save(
+                (Join-Path $PWD 'diagnostics/desktop.png'),
+                [System.Drawing.Imaging.ImageFormat]::Png
+              )
+            } finally {
+              $graphics.Dispose()
+              $bitmap.Dispose()
+            }
+          } catch {
+            $_ | Out-String | Set-Content diagnostics/desktop-capture-error.txt
+          }
+
+          $webviewProcesses = @(
+            Get-CimInstance Win32_Process -Filter "Name = 'msedgewebview2.exe'" |
+              ForEach-Object {
+                $version = $null
+                try {
+                  $version = (Get-Item $_.ExecutablePath).VersionInfo.FileVersion
+                } catch {}
+                [pscustomobject]@{
+                  ProcessId = $_.ProcessId
+                  ParentProcessId = $_.ParentProcessId
+                  ExecutablePath = $_.ExecutablePath
+                  CommandLine = $_.CommandLine
+                  FileVersion = $version
+                }
+              }
+          )
+          $webviewProcesses |
+            ConvertTo-Json -Depth 3 | Set-Content diagnostics/webview2-processes.json
+
+          $webviewData = Join-Path $env:LOCALAPPDATA 'co.stuffbucket.maximal/EBWebView'
+          $webviewDebugLog = Join-Path $webviewData 'debug.log'
+          if (Test-Path $webviewDebugLog) {
+            try {
+              Copy-Item $webviewDebugLog diagnostics/webview2-debug.log -Force
+            } catch {
+              $_ | Out-String | Set-Content diagnostics/webview2-debug-copy-error.txt
+            }
+          }
+          $crashReports = Join-Path $webviewData 'Crashpad/reports'
+          if (Test-Path $crashReports) {
+            Get-ChildItem $crashReports -File -ErrorAction SilentlyContinue |
+              Select-Object Name, Length, CreationTimeUtc, LastWriteTimeUtc |
+              ConvertTo-Json -Depth 3 | Set-Content diagnostics/webview2-crash-reports.json
+          }
+
+          Get-WinEvent -FilterHashtable @{
+            LogName = 'Application'
+            StartTime = (Get-Date).AddMinutes(-20)
+          } -ErrorAction SilentlyContinue |
+            Where-Object {
+              $_.ProviderName -match 'Application Error|Windows Error Reporting|WebView2|Edge'
+            } |
+            Select-Object TimeCreated, ProviderName, Id, LevelDisplayName, Message |
+            ConvertTo-Json -Depth 3 | Set-Content diagnostics/application-events.json
+
           Get-CimInstance Win32_Process |
             Select-Object Name, ProcessId, ParentProcessId, ExecutablePath, CommandLine |
             ConvertTo-Json -Depth 3 | Set-Content diagnostics/processes.json
           Get-NetTCPConnection -ErrorAction SilentlyContinue |
             Select-Object State, LocalAddress, LocalPort, RemoteAddress, RemotePort, OwningProcess |
             ConvertTo-Json -Depth 3 | Set-Content diagnostics/tcp-connections.json
+
+          # Distinguish a renderer failure from a dead or incomplete UI origin.
+          # Probe the exact sidecar listener and every script/stylesheet referenced
+          # by Settings, recording only metadata and content hashes.
+          $probeResults = [System.Collections.Generic.List[object]]::new()
+          function Invoke-MaximalUiProbe([string]$uri) {
+            try {
+              $response = Invoke-WebRequest -Uri $uri -Method Get -TimeoutSec 5
+              $bytes = [System.Text.Encoding]::UTF8.GetBytes([string]$response.Content)
+              $sha256 = [System.Convert]::ToHexString(
+                [System.Security.Cryptography.SHA256]::HashData($bytes)
+              ).ToLowerInvariant()
+              $probeResults.Add([pscustomobject]@{
+                uri = $uri
+                status = [int]$response.StatusCode
+                contentType = [string]$response.Headers['Content-Type']
+                bytes = $bytes.Length
+                sha256 = $sha256
+                error = $null
+              })
+              return $response
+            } catch {
+              $probeResults.Add([pscustomobject]@{
+                uri = $uri
+                status = $null
+                contentType = $null
+                bytes = $null
+                sha256 = $null
+                error = $_.Exception.Message
+              })
+              return $null
+            }
+          }
+
+          $maximalPort = $null
+          $settingsResponse = $null
+          $sidecars = @(Get-CimInstance Win32_Process -Filter "Name = 'maximal.exe'")
+          foreach ($sidecar in $sidecars) {
+            $ports = @(
+              Get-NetTCPConnection -OwningProcess $sidecar.ProcessId -State Listen `
+                -ErrorAction SilentlyContinue |
+                Select-Object -ExpandProperty LocalPort -Unique
+            )
+            foreach ($port in $ports) {
+              $statusResponse = Invoke-MaximalUiProbe "http://127.0.0.1:$port/status"
+              if (-not $statusResponse) { continue }
+              try {
+                $status = $statusResponse.Content | ConvertFrom-Json
+                if ($status.service -eq 'maximal') {
+                  $maximalPort = $port
+                  break
+                }
+              } catch {}
+            }
+            if ($maximalPort) { break }
+          }
+
+          if ($maximalPort) {
+            $settingsUri = [Uri]::new("http://127.0.0.1:$maximalPort/ui/settings/")
+            $settingsResponse = Invoke-MaximalUiProbe $settingsUri.AbsoluteUri
+            if ($settingsResponse) {
+              $assetPattern = '(?i)(?:src|href)=["'']([^"'']+)'
+              $assetRefs = @(
+                [regex]::Matches($settingsResponse.Content, $assetPattern) |
+                  ForEach-Object { $_.Groups[1].Value } |
+                  Where-Object {
+                    $_ -and -not $_.StartsWith('#') -and
+                    -not $_.StartsWith('data:') -and
+                    -not $_.StartsWith('javascript:')
+                  } |
+                  Select-Object -Unique -First 30
+              )
+              foreach ($assetRef in $assetRefs) {
+                try {
+                  $assetUri = [Uri]::new($settingsUri, $assetRef)
+                  if ($assetUri.Host -eq '127.0.0.1' -and
+                      $assetUri.Port -eq $maximalPort) {
+                    $null = Invoke-MaximalUiProbe $assetUri.AbsoluteUri
+                  }
+                } catch {
+                  $probeResults.Add([pscustomobject]@{
+                    uri = $assetRef
+                    status = $null
+                    contentType = $null
+                    bytes = $null
+                    sha256 = $null
+                    error = $_.Exception.Message
+                  })
+                }
+              }
+            }
+          }
+          $probeResults | ConvertTo-Json -Depth 3 | Set-Content diagnostics/ui-probes.json
 
           $installRoot = Join-Path $env:LOCALAPPDATA 'Maximal'
           if (Test-Path $installRoot) {

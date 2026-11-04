@@ -2692,6 +2692,13 @@ fn open_settings_window_with_presentation(
         ))
         .center()
         .visible(false)
+        .on_page_load(|window, payload| {
+            eprintln!(
+                "[shell] main webview {} page load: {:?}",
+                window.label(),
+                payload.event()
+            );
+        })
         .background_color(tauri::webview::Color(22, 22, 22, 255));
 
     #[cfg(target_os = "macos")]
