@@ -112,8 +112,8 @@ impl RuntimeExiting {
         Self(std::sync::atomic::AtomicBool::new(false))
     }
 
-    fn begin(&self) {
-        self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    fn begin(&self) -> bool {
+        !self.0.swap(true, std::sync::atomic::Ordering::SeqCst)
     }
 
     fn get(&self) -> bool {
@@ -121,8 +121,8 @@ impl RuntimeExiting {
     }
 }
 
-pub(super) fn begin_exit(app: &AppHandle) {
-    app.state::<RuntimeExiting>().begin();
+pub(super) fn begin_exit(app: &AppHandle) -> bool {
+    app.state::<RuntimeExiting>().begin()
 }
 
 fn preferred_port_file(data_dir: &Path) -> PathBuf {

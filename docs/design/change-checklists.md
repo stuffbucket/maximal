@@ -104,8 +104,9 @@ generated file or inlined where a token belongs (see
 2. Add the window builder in `shell/src-tauri/src/lib.rs` and a build
    step in `scripts/build-ui.ts` so the proxy serves it under `/ui/`.
 3. Add to the window-sizes table in [`layout.md`](layout.md).
-4. Single-instance behavior: re-show + focus the existing window
-   instead of opening another; closing hides it.
+4. Single-instance behavior: re-show + focus the existing window instead of
+   opening another. Preserve the platform lifecycle: close hides on macOS/Linux;
+   Windows X performs bounded shutdown and quits.
 5. Tokens: import the generated `tokens.css`, or give the window its
    own generated region in `scripts/generate-css-tokens.ts`. Never
    hand-declare token values.

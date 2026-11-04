@@ -84,6 +84,19 @@ getrandom = "0.3"
 # graceful shutdown.
 libc = "0.2"
 
+[target.'cfg(windows)'.dependencies]
+# Publishes static taskbar Jump List actions through the Windows Shell COM API.
+# Keep this aligned with the windows crate already resolved by Tauri's graph.
+windows = { version = "0.62", features = [
+  "Win32_Foundation",
+  "Win32_System_Com",
+  "Win32_System_Com_StructuredStorage",
+  "Win32_System_Variant",
+  "Win32_UI_Shell",
+  "Win32_UI_Shell_Common",
+  "Win32_UI_Shell_PropertiesSystem",
+] }
+
 [target.'cfg(windows)'.dev-dependencies]
 # Compiles the clone-owned shell plugin's exact Job Object module into the
 # Windows integration test so kill-on-close is exercised without another build.

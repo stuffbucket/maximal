@@ -19,6 +19,10 @@ const SHELL_CARGO_TOML = readFileSync(
   resolve(REPO_ROOT, "shell/src-tauri/Cargo.toml"),
   "utf8",
 )
+const WINDOWS_JUMP_LIST_RS = readFileSync(
+  resolve(REPO_ROOT, "shell/src-tauri/src/windows_jump_list.rs"),
+  "utf8",
+)
 const SETTINGS_STYLES = readFileSync(
   resolve(REPO_ROOT, "shell/src/ui/styles/styles.css"),
   "utf8",
@@ -70,11 +74,17 @@ describe("unified Settings, Dashboard, Sessions & Appearance contract", () => {
     expect(apiClients).toBeLessThan(models)
   })
 
-  test("includes Appearance section with Dock/taskbar visibility toggle defaulting to checked", () => {
+  test("keeps Appearance for close-to-background platforms and removes its dead Windows mode", () => {
     expect(SETTINGS_HTML).toContain('data-section="appearance"')
     expect(SETTINGS_HTML).toContain("data-dock-visibility-toggle")
     expect(SETTINGS_HTML).toContain('data-i18n="appearance-dock-label"')
     expect(SETTINGS_HTML).toContain('data-i18n="appearance-dock-sub"')
+    expect(SETTINGS_MAIN_TS).toContain(
+      'osKind() === "windows" && id === "appearance" ? "system" : id',
+    )
+    expect(SETTINGS_MAIN_TS).toContain(
+      "if (appearanceNav) appearanceNav.hidden = true",
+    )
   })
 
   test("remembers last selected tab and overrides to account tab when an account problem exists", () => {
@@ -126,6 +136,14 @@ describe("unified Settings, Dashboard, Sessions & Appearance contract", () => {
     expect(SHELL_LIB_RS).toContain("get_dock_visibility")
     expect(SHELL_LIB_RS).toContain("set_dock_visibility")
     expect(SHELL_LIB_RS).toContain("applicationDockMenu:")
+    expect(SHELL_LIB_RS).toContain(
+      '.icon_as_template(cfg!(target_os = "macos"))',
+    )
+    expect(SHELL_LIB_RS).toContain("install_windows_jump_list")
+    expect(SHELL_LIB_RS).toContain("CloseWindowAction::Quit")
+    expect(SHELL_CARGO_TOML).toContain('windows = { version = "0.62"')
+    expect(WINDOWS_JUMP_LIST_RS).toContain("ICustomDestinationList")
+    expect(WINDOWS_JUMP_LIST_RS).toContain("AddUserTasks")
     expect(SHELL_LIB_RS).toContain("menu_id::SESSIONS")
     expect(SHELL_LIB_RS).toContain("open_sessions_window")
     expect(SHELL_LIB_RS).toContain("fn set_main_surface")

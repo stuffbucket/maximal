@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22">
+  <!-- AppKit template image: reduced alpha communicates startup without fixed color. -->
+  <defs>
+    <mask id="m-cutout">
+      <rect x="1" y="1" width="20" height="20" rx="5" fill="white"/>
+      <text x="11" y="16.5" font-family="-apple-system, Helvetica, sans-serif"
+            font-weight="900" font-size="16" text-anchor="middle" fill="black">m</text>
+    </mask>
+  </defs>
+  <rect x="1" y="1" width="20" height="20" rx="5" fill="black" opacity="0.45"
+        mask="url(#m-cutout)"/>
+</svg>

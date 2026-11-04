@@ -24,21 +24,20 @@
 //
 // Window lifecycle / activation policy / quit flow
 // -------------------------------------------------
-// This is fundamentally a menu-bar app. The macOS Dock icon comes and
-// goes with window visibility:
-//   * Launch                       → ActivationPolicy::Accessory  (no Dock)
+// macOS remains a menu-bar app whose Dock icon follows window visibility:
+//   * Launch                        → ActivationPolicy::Accessory  (no Dock)
 //   * Any Settings/Dashboard shown → ActivationPolicy::Regular    (Dock on)
 //   * Last one hidden              → ActivationPolicy::Accessory
-// The OS close button (red ✕) HIDES the Settings/Dashboard window rather
-// than closing it — the tray stays alive. `update_activation_policy`
-// is the single point of truth and is called from every show/hide path.
+// Closing a managed window hides it on macOS/Linux. Windows follows the normal
+// desktop contract instead: X starts bounded sidecar/configurator shutdown and
+// then quits the shell. `update_activation_policy` owns Dock/taskbar presence
+// for the surviving close-to-background platforms and window show paths.
 //
 // Quit flow:
-//   1. Tray "Quit Maximal" fires `menu_id::QUIT`.
-//   2. `request_quit` pops a native confirm via tauri-plugin-dialog.
-//      No webview involvement, no JS, no event-emit/listen race.
-//   3. On accept → `app.exit(0)` → RunEvent::ExitRequested →
-//      `kill_sidecar` (SIGTERM + 3s SIGKILL escalation) → process exit.
+//   1. Tray "Quit Maximal" asks for confirmation; Windows X does not.
+//   2. `exit_gracefully` claims the one-shot exit guard. Windows waits for
+//      graceful sidecar cleanup before `app.exit(0)`; other platforms exit.
+//   3. RunEvent::ExitRequested performs final sidecar process containment.
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -64,6 +63,8 @@ use tauri_plugin_window_state::{StateFlags, WindowExt};
 /// backed by the same shell/src/i18n/*.json catalogs the webview renders with.
 mod native_i18n;
 mod sidecar_runtime;
+#[cfg(target_os = "windows")]
+mod windows_jump_list;
 
 use sidecar_runtime::{
     begin_exit, extract_error_reason, fetch_rejection, fetch_requests_summary, fetch_setup_status,
@@ -336,16 +337,25 @@ fn restore_and_present_main_window(app: &AppHandle, window: &WebviewWindow) {
     }
 }
 
-// Tray icon assets — embedded at compile time so we don't have to
-// resolve resource paths at runtime. The SVG sources live alongside
-// at icons/tray/*.svg; the PNGs are pre-rendered at the @2x retina
-// size (44×44) so AppKit downsamples cleanly to the 22pt menu-bar
-// height that HIG calls for. Loading the 1× 22-pixel PNG instead
-// made the icon visibly smaller than its neighbors on retina because
-// AppKit treats the pixel size as the logical size by default.
-// Tauri's image-png feature decodes these via the `image` crate.
+// Tray icon assets are embedded so native chrome never depends on a runtime
+// resource path. macOS gets black-and-alpha template artwork and AppKit supplies
+// the menu-bar color for the current appearance/highlight state. Windows keeps
+// full-color artwork with a substantial crimson silhouette; its notification
+// area does not recolor icons, so the former white signed-out mark disappeared
+// on a light taskbar. The @2x source also scales cleanly on high-DPI displays.
+#[cfg(target_os = "macos")]
+const TRAY_ICON_NORMAL: &[u8] = include_bytes!("../icons/tray/macos/icon@2x.png");
+#[cfg(not(target_os = "macos"))]
 const TRAY_ICON_NORMAL: &[u8] = include_bytes!("../icons/tray/icon@2x.png");
+#[cfg(target_os = "macos")]
+const TRAY_ICON_STARTING: &[u8] = include_bytes!("../icons/tray/macos/icon-starting@2x.png");
+#[cfg(not(target_os = "macos"))]
 const TRAY_ICON_STARTING: &[u8] = include_bytes!("../icons/tray/icon-starting@2x.png");
+#[cfg(target_os = "macos")]
+const TRAY_ICON_ATTENTION: &[u8] = include_bytes!("../icons/tray/macos/icon-attention@2x.png");
+#[cfg(target_os = "windows")]
+const TRAY_ICON_ATTENTION: &[u8] = include_bytes!("../icons/tray/windows/icon-attention@2x.png");
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 const TRAY_ICON_ATTENTION: &[u8] = include_bytes!("../icons/tray/icon-attention@2x.png");
 
 mod menu_id {
@@ -363,6 +373,63 @@ mod menu_id {
     pub const UPGRADE: &str = "upgrade";
     pub const REQUESTS: &str = "requests";
     pub const CHECK_UPDATES: &str = "check_updates";
+}
+
+const SHELL_ACTION_PREFIX: &str = "--maximal-action=";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ShellAction {
+    OpenDefault,
+    Settings,
+    Dashboard,
+    Sessions,
+    CheckUpdates,
+    ShowLogs,
+    OpenConfig,
+}
+
+impl ShellAction {
+    fn from_value(value: &str) -> Option<Self> {
+        match value {
+            "settings" => Some(Self::Settings),
+            "dashboard" => Some(Self::Dashboard),
+            "sessions" => Some(Self::Sessions),
+            "check-updates" => Some(Self::CheckUpdates),
+            "show-logs" => Some(Self::ShowLogs),
+            "open-config" => Some(Self::OpenConfig),
+            _ => None,
+        }
+    }
+
+    fn argument(self) -> Option<&'static str> {
+        match self {
+            Self::OpenDefault => None,
+            Self::Settings => Some("--maximal-action=settings"),
+            Self::Dashboard => Some("--maximal-action=dashboard"),
+            Self::Sessions => Some("--maximal-action=sessions"),
+            Self::CheckUpdates => Some("--maximal-action=check-updates"),
+            Self::ShowLogs => Some("--maximal-action=show-logs"),
+            Self::OpenConfig => Some("--maximal-action=open-config"),
+        }
+    }
+}
+
+fn shell_action_from_args<I, S>(args: I) -> Option<ShellAction>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut found = None;
+    for arg in args {
+        let Some(value) = arg.as_ref().strip_prefix(SHELL_ACTION_PREFIX) else {
+            continue;
+        };
+        let action = ShellAction::from_value(value)?;
+        if found.replace(action).is_some() {
+            return None;
+        }
+    }
+    found
 }
 
 /// Where Settings should open when the user reaches for the app without
@@ -470,21 +537,25 @@ impl DockVisibilityState {
 /// re-opening it every time the user manually quits + signs back in
 /// while still unauthenticated.
 
-/// Remembers a second-launch request that arrives before the sidecar has
-/// published and authorized its remote origin.
-struct PendingWindowOpen(std::sync::atomic::AtomicBool);
+/// Remembers a relaunch or Windows Jump List task that arrives before the
+/// sidecar has published and authorized its remote origin. The latest request
+/// wins; every action remains available again from the tray after startup.
+struct PendingShellAction(Mutex<Option<ShellAction>>);
 
-impl PendingWindowOpen {
+impl PendingShellAction {
     fn new() -> Self {
-        Self(std::sync::atomic::AtomicBool::new(false))
+        Self(Mutex::new(None))
     }
 
-    fn request(&self) {
-        self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    fn request(&self, action: ShellAction) {
+        *self.0.lock().expect("pending shell action mutex poisoned") = Some(action);
     }
 
-    fn take(&self) -> bool {
-        self.0.swap(false, std::sync::atomic::Ordering::SeqCst)
+    fn take(&self) -> Option<ShellAction> {
+        self.0
+            .lock()
+            .expect("pending shell action mutex poisoned")
+            .take()
     }
 }
 
@@ -563,8 +634,8 @@ fn start_runtime_event_loop(
             match event {
                 RuntimeEvent::State(state) => apply_state(&app, state),
                 RuntimeEvent::Ready(endpoint) => {
-                    if app.state::<PendingWindowOpen>().take() {
-                        focus_or_open_main_window(&app);
+                    if let Some(action) = app.state::<PendingShellAction>().take() {
+                        dispatch_shell_action(&app, action);
                     }
                     let handle = app.clone();
                     tauri::async_runtime::spawn(async move {
@@ -600,6 +671,7 @@ pub fn run() {
     // before the builder so plugin and command registration can be profile-safe.
     let mut context = tauri::generate_context!();
     let profile = AppProfile::from_identifier(&context.config().identifier);
+    let initial_shell_action = shell_action_from_args(std::env::args());
     let (runtime_events, runtime_event_rx) = runtime_event_channel();
     if let Some(data_dir) =
         profile_data_override(profile).expect("could not resolve Maximal's app-data directory")
@@ -620,8 +692,9 @@ pub fn run() {
         // callback, so it cannot be used as a replacement handoff. Focus the
         // existing profile; the development launcher stops its prior profile
         // before starting Tauri when replacement is required.
-        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            focus_or_open_main_window(app);
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            let action = shell_action_from_args(&argv).unwrap_or(ShellAction::OpenDefault);
+            dispatch_or_queue_shell_action(app, action);
         }))
         .plugin(
             tauri_plugin_window_state::Builder::default()
@@ -652,7 +725,7 @@ pub fn run() {
         .manage(ShellApiKey::new())
         .manage(RuntimeExiting::new())
         .manage(runtime_events)
-        .manage(PendingWindowOpen::new())
+        .manage(PendingShellAction::new())
         .manage(PendingQuitPrompt::new())
         .manage(SetupPromptShown::new())
         .manage(StartupAnnounced::new())
@@ -709,6 +782,9 @@ pub fn run() {
     };
     let app = builder
         .setup(move |app| {
+            if let Some(action) = initial_shell_action {
+                app.state::<PendingShellAction>().request(action);
+            }
             start_runtime_event_loop(app.handle(), runtime_event_rx);
             let data_dir = app.path().app_data_dir()?;
             let preferred_port = (!profile.updates_enabled())
@@ -763,6 +839,8 @@ pub fn run() {
             install_tray(app.handle())?;
             #[cfg(target_os = "macos")]
             install_dock_menu(app.handle());
+            #[cfg(target_os = "windows")]
+            install_windows_jump_list(app.handle());
             apply_state(app.handle(), SidecarState::Starting);
 
             // Immediate visible feedback. This is a menu-bar-only app, so
@@ -1491,6 +1569,7 @@ fn install_tray(app: &AppHandle) -> tauri::Result<()> {
         .show_menu_on_left_click(show_menu_on_left_click)
         .tooltip(native_i18n::tr(&locale, "native-tooltip-starting"))
         .icon(icon)
+        .icon_as_template(cfg!(target_os = "macos"))
         .on_tray_icon_event(|tray, event| {
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,
@@ -1515,6 +1594,35 @@ fn install_tray(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+#[cfg(target_os = "windows")]
+fn install_windows_jump_list(app: &AppHandle) {
+    use windows_jump_list::JumpListTask;
+
+    let locale = app.state::<LocaleState>().get();
+    let mut actions = vec![
+        (ShellAction::Dashboard, "native-tray-dashboard"),
+        (ShellAction::Sessions, "native-tray-sessions"),
+        (ShellAction::Settings, "native-tray-settings"),
+    ];
+    if app.state::<AppProfile>().updates_enabled() {
+        actions.push((ShellAction::CheckUpdates, "native-tray-check-updates"));
+    }
+    actions.extend([
+        (ShellAction::ShowLogs, "native-tray-show-logs"),
+        (ShellAction::OpenConfig, "native-tray-open-config"),
+    ]);
+    let tasks = actions
+        .into_iter()
+        .map(|(action, key)| JumpListTask {
+            title: native_i18n::tr(&locale, key),
+            argument: action
+                .argument()
+                .expect("Windows Jump List actions must have launch arguments"),
+        })
+        .collect();
+    windows_jump_list::install(tasks);
+}
+
 fn refresh_tray(app: &AppHandle, state: SidecarState) -> tauri::Result<()> {
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
         return Ok(());
@@ -1524,7 +1632,10 @@ fn refresh_tray(app: &AppHandle, state: SidecarState) -> tauri::Result<()> {
     let waiting = app.state::<PendingRequests>().get().pending > 0;
     let menu = build_menu(app, &locale, state)?;
     tray.set_menu(Some(menu))?;
-    tray.set_icon(Some(icon_for(state, rejection.is_some() || waiting)?))?;
+    tray.set_icon_with_as_template(
+        Some(icon_for(state, rejection.is_some() || waiting)?),
+        cfg!(target_os = "macos"),
+    )?;
     tray.set_tooltip(Some(tooltip_for(
         &locale,
         state,
@@ -2703,21 +2814,22 @@ fn open_sessions_window(app: &AppHandle) {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CloseWindowAction {
+    Quit,
     Hide,
-    Minimize,
 }
 
-fn close_window_action(is_windows: bool, always_visible: bool) -> CloseWindowAction {
-    if is_windows && always_visible {
-        CloseWindowAction::Minimize
+fn close_window_action(is_windows: bool) -> CloseWindowAction {
+    if is_windows {
+        CloseWindowAction::Quit
     } else {
         CloseWindowAction::Hide
     }
 }
 
-/// Keeps the background app alive when the managed window is closed.
-/// Windows minimizes an always-visible taskbar window because a hidden window
-/// has no taskbar button. Every other mode preserves the tray-first hide path.
+/// Windows follows the ordinary desktop contract: closing the main window
+/// quits Maximal. macOS/Linux retain the menu-bar/tray close-to-background
+/// behavior. Both paths prevent Tauri's code-less last-window exit request so
+/// Windows can finish bounded sidecar/configurator shutdown before exiting.
 fn attach_main_window_behavior(app: &AppHandle, window: &tauri::WebviewWindow) {
     let window_clone = window.clone();
     let app_clone = app.clone();
@@ -2725,16 +2837,13 @@ fn attach_main_window_behavior(app: &AppHandle, window: &tauri::WebviewWindow) {
     window.on_window_event(move |event| match event {
         WindowEvent::CloseRequested { api, .. } => {
             api.prevent_close();
-            let always_visible = app_clone.state::<DockVisibilityState>().always_visible();
-            match close_window_action(cfg!(windows), always_visible) {
+            match close_window_action(cfg!(windows)) {
+                CloseWindowAction::Quit => exit_gracefully(app_clone.clone()),
                 CloseWindowAction::Hide => {
                     let _ = window_clone.hide();
-                }
-                CloseWindowAction::Minimize => {
-                    let _ = window_clone.minimize();
+                    update_activation_policy(&app_clone);
                 }
             }
-            update_activation_policy(&app_clone);
         }
         WindowEvent::Resized(_) => {
             let Ok(is_maximized) = window_clone.is_maximized() else {
@@ -2898,7 +3007,10 @@ where
     exit();
 }
 
-fn exit_after_quit_confirmation(app: AppHandle) {
+fn exit_gracefully(app: AppHandle) {
+    if !begin_exit(&app) {
+        return;
+    }
     if cfg!(target_os = "windows") {
         let app_for_stop = app.clone();
         tauri::async_runtime::spawn(async move {
@@ -2923,7 +3035,7 @@ fn request_native_quit_dialog(app: &AppHandle) {
         ))
         .show(move |confirmed| {
             if confirmed {
-                exit_after_quit_confirmation(app_clone);
+                exit_gracefully(app_clone);
             }
         });
 }
@@ -2958,21 +3070,36 @@ fn take_quit_request(state: State<'_, PendingQuitPrompt>) -> bool {
 
 #[tauri::command]
 fn confirm_quit(app: AppHandle) {
-    exit_after_quit_confirmation(app);
+    exit_gracefully(app);
+}
+
+fn dispatch_or_queue_shell_action(app: &AppHandle, action: ShellAction) {
+    if app.state::<ManagedEndpoint>().current().is_none() {
+        app.state::<PendingShellAction>().request(action);
+    } else {
+        dispatch_shell_action(app, action);
+    }
+}
+
+fn dispatch_shell_action(app: &AppHandle, action: ShellAction) {
+    match action {
+        ShellAction::OpenDefault => focus_or_open_main_window(app),
+        ShellAction::Settings => open_settings_window(app, None),
+        ShellAction::Dashboard => open_dashboard_window(app),
+        ShellAction::Sessions => open_sessions_window(app),
+        ShellAction::CheckUpdates => check_updates_from_tray(app),
+        ShellAction::ShowLogs => do_reveal_logs_dir(app),
+        ShellAction::OpenConfig => do_reveal_config_dir(app),
+    }
 }
 
 /// Focus an existing main window, or open Settings if none exists.
 ///
-/// Called from the single-instance plugin callback when the user relaunches
-/// Maximal. Settings is the default surface;
-/// Dashboard is the fallback if Settings isn't built yet but
-/// Dashboard is. If neither exists we open Settings fresh, which
-/// also runs `update_activation_policy` to bring the Dock icon back.
+/// Called after a plain second launch reaches the existing process. Settings is
+/// the default surface; Dashboard is the fallback if Settings isn't built yet
+/// but Dashboard is. If neither exists we open Settings fresh, which also runs
+/// `update_activation_policy` to bring the Dock icon back.
 fn focus_or_open_main_window(app: &AppHandle) {
-    if app.state::<ManagedEndpoint>().current().is_none() {
-        app.state::<PendingWindowOpen>().request();
-        return;
-    }
     for label in [SETTINGS_WINDOW_LABEL, DASHBOARD_WINDOW_LABEL] {
         if let Some(window) = app.get_webview_window(label) {
             present_window(app, &window);
@@ -3134,6 +3261,8 @@ fn set_locale(app: AppHandle, locale: State<'_, LocaleState>, tag: String) -> Re
     if let Err(err) = refresh_tray(&app, state) {
         eprintln!("[shell] tray refresh after locale change failed: {err}");
     }
+    #[cfg(target_os = "windows")]
+    install_windows_jump_list(&app);
     retitle_windows(&app);
     Ok(())
 }
@@ -3239,24 +3368,147 @@ mod tests {
     }
 
     #[test]
-    fn keeps_windows_taskbar_entry_when_always_visible() {
+    fn quits_when_the_main_window_closes_on_windows() {
         use super::{close_window_action, CloseWindowAction};
 
-        assert_eq!(close_window_action(true, true), CloseWindowAction::Minimize);
-    }
-
-    #[test]
-    fn hides_windows_window_when_taskbar_is_only_for_open_windows() {
-        use super::{close_window_action, CloseWindowAction};
-
-        assert_eq!(close_window_action(true, false), CloseWindowAction::Hide);
+        assert_eq!(close_window_action(true), CloseWindowAction::Quit);
     }
 
     #[test]
     fn preserves_hide_on_close_outside_windows() {
         use super::{close_window_action, CloseWindowAction};
 
-        assert_eq!(close_window_action(false, true), CloseWindowAction::Hide);
+        assert_eq!(close_window_action(false), CloseWindowAction::Hide);
+    }
+
+    #[test]
+    fn parses_windows_jump_list_actions_from_process_arguments() {
+        use super::{shell_action_from_args, ShellAction};
+
+        for (value, expected) in [
+            ("settings", ShellAction::Settings),
+            ("dashboard", ShellAction::Dashboard),
+            ("sessions", ShellAction::Sessions),
+            ("check-updates", ShellAction::CheckUpdates),
+            ("show-logs", ShellAction::ShowLogs),
+            ("open-config", ShellAction::OpenConfig),
+        ] {
+            assert_eq!(
+                shell_action_from_args(["Maximal.exe", &format!("--maximal-action={value}")]),
+                Some(expected),
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_unknown_or_conflicting_shell_actions() {
+        use super::shell_action_from_args;
+
+        assert_eq!(
+            shell_action_from_args(["Maximal.exe", "--maximal-action=unknown"]),
+            None,
+        );
+        assert_eq!(
+            shell_action_from_args([
+                "Maximal.exe",
+                "--maximal-action=settings",
+                "--maximal-action=dashboard",
+            ]),
+            None,
+        );
+    }
+
+    #[test]
+    fn every_jump_list_action_argument_round_trips() {
+        use super::{shell_action_from_args, ShellAction};
+
+        for action in [
+            ShellAction::Settings,
+            ShellAction::Dashboard,
+            ShellAction::Sessions,
+            ShellAction::CheckUpdates,
+            ShellAction::ShowLogs,
+            ShellAction::OpenConfig,
+        ] {
+            let argument = action.argument().unwrap();
+            assert_eq!(
+                shell_action_from_args(["Maximal.exe", argument]),
+                Some(action)
+            );
+        }
+        assert_eq!(ShellAction::OpenDefault.argument(), None);
+    }
+
+    #[test]
+    fn pending_shell_action_keeps_the_latest_request_and_consumes_it_once() {
+        use super::{PendingShellAction, ShellAction};
+
+        let pending = PendingShellAction::new();
+        assert_eq!(pending.take(), None);
+        pending.request(ShellAction::Settings);
+        pending.request(ShellAction::Dashboard);
+        assert_eq!(pending.take(), Some(ShellAction::Dashboard));
+        assert_eq!(pending.take(), None);
+    }
+
+    #[test]
+    fn macos_tray_icons_are_black_and_alpha_templates() {
+        for bytes in [
+            include_bytes!("../icons/tray/macos/icon@2x.png").as_slice(),
+            include_bytes!("../icons/tray/macos/icon-starting@2x.png").as_slice(),
+            include_bytes!("../icons/tray/macos/icon-attention@2x.png").as_slice(),
+        ] {
+            let image = tauri::image::Image::from_bytes(bytes).unwrap();
+            assert_eq!((image.width(), image.height()), (44, 44));
+            assert!(image
+                .rgba()
+                .chunks_exact(4)
+                .filter(|pixel| pixel[3] > 0)
+                .all(|pixel| pixel[..3] == [0, 0, 0]));
+        }
+    }
+
+    #[test]
+    fn windows_attention_icon_keeps_contrast_on_light_and_dark_taskbars() {
+        fn linear(channel: u8) -> f64 {
+            let value = f64::from(channel) / 255.0;
+            if value <= 0.04045 {
+                value / 12.92
+            } else {
+                ((value + 0.055) / 1.055).powf(2.4)
+            }
+        }
+        fn luminance(pixel: &[u8]) -> f64 {
+            0.2126 * linear(pixel[0]) + 0.7152 * linear(pixel[1]) + 0.0722 * linear(pixel[2])
+        }
+        fn contrast(left: f64, right: f64) -> f64 {
+            let (lighter, darker) = if left > right {
+                (left, right)
+            } else {
+                (right, left)
+            };
+            (lighter + 0.05) / (darker + 0.05)
+        }
+
+        let image = tauri::image::Image::from_bytes(include_bytes!(
+            "../icons/tray/windows/icon-attention@2x.png"
+        ))
+        .unwrap();
+        assert_eq!((image.width(), image.height()), (44, 44));
+        let dark = luminance(&[23, 23, 23]);
+        let opaque: Vec<&[u8]> = image
+            .rgba()
+            .chunks_exact(4)
+            .filter(|pixel| pixel[3] >= 204)
+            .collect();
+        let adaptable = opaque
+            .iter()
+            .filter(|pixel| {
+                let value = luminance(pixel);
+                contrast(value, 1.0) >= 3.0 && contrast(value, dark) >= 3.0
+            })
+            .count();
+        assert!(adaptable * 100 >= opaque.len() * 35);
     }
 
     #[test]

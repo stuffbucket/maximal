@@ -45,10 +45,11 @@ active.
 
 The native window uses `1100×720` only as its first-launch fallback. Tauri's
 official window-state plugin persists the unified window label's size, position,
-and maximized state across process launches. It does not persist visibility
-(close still hides to the tray), decorations, or fullscreen. The window is
-created hidden and shown after restoration, so returning users do not see it
-paint at the fallback size first. The plugin's automatic initial restore is
+and maximized state across process launches. It does not persist visibility,
+decorations, or fullscreen. Closing is platform-native: macOS/Linux hide the
+window back to the menu bar/tray, while Windows X gracefully stops the sidecar
+and quits Maximal. The window is created hidden and shown after restoration, so
+returning users do not see it paint at the fallback size first. The plugin's automatic initial restore is
 skipped so the shell can run a controlled restore after the plugin's window-ready
 hook, then repair geometry before showing: physical inner size is checked against
 the current monitor's physical work area, native frame extent is reserved
@@ -71,3 +72,14 @@ fixed gap before the pinned surface and language controls. Switching to Settings
 may clamp an
 observability window that is wider than Settings' range; switching back removes
 that cap without forcing a resize.
+
+Native status affordances follow each platform rather than sharing one rendering
+policy. macOS menu-bar artwork is a black-and-alpha AppKit template image; AppKit
+supplies the light, dark, and selected-state color. Windows notification-area
+artwork remains full color and keeps a high-contrast silhouette on both light and
+dark taskbars. Right-clicking a running Windows taskbar button shows a static
+Jump List of durable quick actions that launch back through the single-instance
+shell. Dynamic status rows, pending requests, Retry, and Quit remain in the
+notification-area menu because Jump List tasks persist when the app is stopped.
+The Dock/taskbar persistence control is hidden on Windows, where closing the
+window now exits instead of leaving a closed window represented in the taskbar.
