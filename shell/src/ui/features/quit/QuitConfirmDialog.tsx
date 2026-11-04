@@ -11,18 +11,13 @@ export function QuitConfirmDialog(): JSX.Element {
 
   useEffect(() => {
     let disposed = false;
-    let unlisten: (() => void) | undefined;
-
-    void subscribeToQuitRequests(() => {
+    const subscription = subscribeToQuitRequests(() => {
       if (!disposed) setOpen(true);
-    }).then((stopListening) => {
-      if (disposed) stopListening();
-      else unlisten = stopListening;
     });
 
     return () => {
       disposed = true;
-      unlisten?.();
+      subscription.unsubscribe();
     };
   }, []);
 

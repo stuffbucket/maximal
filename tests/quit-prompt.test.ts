@@ -18,7 +18,7 @@ describe("Windows quit prompt requests", () => {
   test("opens a request that was queued before the webview mounted", async () => {
     let opens = 0
 
-    await subscribeToQuitRequests(
+    const subscription = subscribeToQuitRequests(
       () => {
         opens++
       },
@@ -27,8 +27,10 @@ describe("Windows quit prompt requests", () => {
         takePending: () => Promise.resolve(true),
       },
     )
+    await subscription.ready
 
     expect(opens).toBe(1)
+    subscription.unsubscribe()
   })
 
   test("consumes and opens requests received by a mounted webview", async () => {
@@ -36,7 +38,7 @@ describe("Windows quit prompt requests", () => {
     let pending = false
     let opens = 0
 
-    await subscribeToQuitRequests(
+    const subscription = subscribeToQuitRequests(
       () => {
         opens++
       },
@@ -52,6 +54,7 @@ describe("Windows quit prompt requests", () => {
         },
       },
     )
+    await subscription.ready
 
     pending = true
     listener?.()
@@ -59,6 +62,7 @@ describe("Windows quit prompt requests", () => {
 
     expect(pending).toBe(false)
     expect(opens).toBe(1)
+    subscription.unsubscribe()
   })
 
   test("consumes requests delivered through the local webview bridge", async () => {
@@ -66,7 +70,7 @@ describe("Windows quit prompt requests", () => {
     let pending = false
     let opens = 0
 
-    const unlisten = await subscribeToQuitRequests(
+    const subscription = subscribeToQuitRequests(
       () => {
         opens++
       },
@@ -85,6 +89,7 @@ describe("Windows quit prompt requests", () => {
         },
       },
     )
+    await subscription.ready
 
     pending = true
     localListener?.()
@@ -92,12 +97,50 @@ describe("Windows quit prompt requests", () => {
 
     expect(pending).toBe(false)
     expect(opens).toBe(1)
-    unlisten()
+    subscription.unsubscribe()
     expect(localListener).toBeUndefined()
   })
 
+  test("stops local delivery before an async remote subscription settles", async () => {
+    let localListener: (() => void) | undefined
+    let resolveSubscribe: ((unlisten: () => void) => void) | undefined
+    let pending = true
+    let opens = 0
+
+    const subscription = subscribeToQuitRequests(
+      () => {
+        opens++
+      },
+      {
+        subscribe: () =>
+          new Promise<() => void>((resolve) => {
+            resolveSubscribe = resolve
+          }),
+        subscribeLocal: (handler) => {
+          localListener = handler
+          return () => {
+            localListener = undefined
+          }
+        },
+        takePending: () => {
+          const result = pending
+          pending = false
+          return Promise.resolve(result)
+        },
+      },
+    )
+
+    subscription.unsubscribe()
+    expect(localListener).toBeUndefined()
+    resolveSubscribe?.(() => {})
+    await subscription.ready
+
+    expect(pending).toBe(true)
+    expect(opens).toBe(0)
+  })
+
   test("degrades cleanly when Tauri events are unavailable", async () => {
-    const unlisten = await subscribeToQuitRequests(
+    const subscription = subscribeToQuitRequests(
       () => {
         throw new Error("unexpected prompt")
       },
@@ -106,9 +149,10 @@ describe("Windows quit prompt requests", () => {
         takePending: () => Promise.resolve(false),
       },
     )
+    await subscription.ready
 
-    expect(typeof unlisten).toBe("function")
-    unlisten()
+    expect(typeof subscription.unsubscribe).toBe("function")
+    subscription.unsubscribe()
   })
 
   test("mounts the confirmation dialog in the unified window", () => {

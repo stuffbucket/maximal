@@ -34,13 +34,22 @@ const defaultDependencies: QuitRequestDependencies = {
  * a request queued before mount is consumed immediately, while one arriving
  * during mount is caught by the listener and consumed exactly once.
  */
-export async function subscribeToQuitRequests(
+interface QuitRequestSubscription {
+  ready: Promise<void>;
+  unsubscribe: Unlisten;
+}
+
+export function subscribeToQuitRequests(
   onRequest: () => void,
   dependencies: QuitRequestDependencies = defaultDependencies,
-): Promise<Unlisten> {
+): QuitRequestSubscription {
+  let disposed = false;
+  let unlistenRemote: Unlisten | undefined;
+
   const consume = async (): Promise<void> => {
+    if (disposed) return;
     try {
-      if (await dependencies.takePending()) onRequest();
+      if ((await dependencies.takePending()) && !disposed) onRequest();
     } catch {
       // The settings UI can run in a plain browser during UI development.
     }
@@ -52,18 +61,29 @@ export async function subscribeToQuitRequests(
   const unlistenLocal =
     dependencies.subscribeLocal?.(consumePending) ?? (() => {});
 
-  let unlisten: Unlisten;
-  try {
-    unlisten = await dependencies.subscribe(consumePending);
-  } catch {
-    // Browser-only UI development has no Tauri event bridge. Still consume once:
-    // a native request can already be queued while the remote listener mounts.
+  const ready = (async (): Promise<void> => {
+    try {
+      const unlisten = await dependencies.subscribe(consumePending);
+      if (disposed) {
+        unlisten();
+        return;
+      }
+      unlistenRemote = unlisten;
+    } catch {
+      // Browser-only UI development has no Tauri event bridge. Still consume once:
+      // a native request can already be queued while the remote listener mounts.
+      await consume();
+      return;
+    }
     await consume();
-    return unlistenLocal;
-  }
-  await consume();
-  return () => {
-    unlisten();
-    unlistenLocal();
+  })();
+
+  return {
+    ready,
+    unsubscribe: () => {
+      disposed = true;
+      unlistenLocal();
+      unlistenRemote?.();
+    },
   };
 }
