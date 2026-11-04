@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.2-rc.4](https://github.com/stuffbucket/maximal/compare/v0.5.2-rc.3...v0.5.2-rc.4) (2026-11-04)
+
+
+### Bug Fixes
+
+* improve Windows setup and release workflows ([99b7687](https://github.com/stuffbucket/maximal/commit/99b76879838f546fbfc5c0a364cd019a6a2b0385))
+
 ## [0.5.2-rc.3](https://github.com/stuffbucket/maximal/compare/v0.5.2-rc.2...v0.5.2-rc.3) (2026-11-04)
 
 
