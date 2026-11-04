@@ -39,16 +39,35 @@ export function runAppBootHooks(list: Array<ClientApp> = getAllApps()): void {
   }
 }
 
+export interface AppShutdownHooksResult {
+  attempted: Array<ClientApp["id"]>
+  completed: Array<ClientApp["id"]>
+  failed: Array<{ appId: ClientApp["id"]; error: unknown }>
+}
+
 /** Run every app's `onShutdown`. Synchronous so it also works from the
- *  process `exit` handler, where no async work can complete. */
+ *  process `exit` handler, where no async work can complete. Failures remain
+ *  best-effort, but are returned and logged rather than disappearing. */
 export function runAppShutdownHooks(
   list: Array<ClientApp> = getAllApps(),
-): void {
+): AppShutdownHooksResult {
+  const result: AppShutdownHooksResult = {
+    attempted: [],
+    completed: [],
+    failed: [],
+  }
+
   for (const app of list) {
+    if (!app.onShutdown) continue
+    result.attempted.push(app.id)
     try {
-      app.onShutdown?.()
-    } catch {
-      // Best-effort: we may be inside an `exit` handler, which can't throw.
+      app.onShutdown()
+      result.completed.push(app.id)
+    } catch (error) {
+      result.failed.push({ appId: app.id, error })
+      consola.warn(`${app.id}: shutdown hook failed`, error)
     }
   }
+
+  return result
 }

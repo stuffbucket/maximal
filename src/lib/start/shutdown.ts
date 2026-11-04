@@ -32,6 +32,31 @@ import { clearSessionRunning } from "./session-sentinel"
 // (or being delivered twice) doesn't double-stop the server.
 let shuttingDown = false
 
+function runAppCleanup(phase: string): void {
+  const result = runAppShutdownHooks()
+  if (result.attempted.length === 0) return
+  consola.info(
+    `shutdown: ${phase} app hooks finished`
+      + ` (${result.completed.length} completed, ${result.failed.length} failed)`,
+  )
+}
+
+function removeMcpClientsBestEffort(phase: string): void {
+  try {
+    removeMcpClientsOnShutdown()
+  } catch (error) {
+    consola.warn(`shutdown: ${phase} MCP client cleanup failed`, error)
+  }
+}
+
+function clearSessionRunningBestEffort(phase: string): void {
+  try {
+    clearSessionRunning()
+  } catch (error) {
+    consola.warn(`shutdown: ${phase} session cleanup failed`, error)
+  }
+}
+
 /** Stop the HTTP server, then exit 0. Capped at ~2.5s by an unref'd
  *  watchdog timer so a hung close() can't keep the process alive. */
 export async function initiateShutdown(
@@ -49,12 +74,12 @@ export async function initiateShutdown(
   // intent-gated (no-op when routing is off); the intent flag persists, so
   // the next boot re-applies it. Synchronous + best-effort — a slow/failed
   // file write must not delay or block the drain.
-  runAppShutdownHooks()
+  runAppCleanup("graceful")
   // Same for the MCP servers Maximal added to Claude Code, so a new session
   // doesn't point at a stopped Maximal. Claude Desktop keeps its entries: it
   // reads its config only at launch. Boot re-adds from the recorded choices.
   // File-only and synchronous.
-  removeMcpClientsOnShutdown()
+  removeMcpClientsBestEffort("graceful")
 
   // Fail-safe: if close() hangs, hard-exit after 2.5s. .unref() so the
   // timer itself never holds the loop open in the happy path.
@@ -82,7 +107,7 @@ export async function initiateShutdown(
 
   // Drop the "session running" sentinel so the NEXT boot doesn't
   // misread a clean shutdown as a crash.
-  clearSessionRunning()
+  clearSessionRunningBestEffort("graceful")
 
   clearTimeout(watchdog)
   process.exit(0)
@@ -116,17 +141,9 @@ export function installShutdownHandlers(
   // SIGKILL or OS-level termination — those need an external watchdog
   // (the boot-time stale-session warning surfaces them after the fact).
   process.on("exit", () => {
-    runAppShutdownHooks()
-    try {
-      removeMcpClientsOnShutdown()
-    } catch {
-      // same — best-effort.
-    }
-    try {
-      clearSessionRunning()
-    } catch {
-      // same — best-effort.
-    }
+    runAppCleanup("exit safety-net")
+    removeMcpClientsBestEffort("exit safety-net")
+    clearSessionRunningBestEffort("exit safety-net")
   })
 
   const parentPidStr = process.env.MAXIMAL_SIDECAR_PARENT_PID

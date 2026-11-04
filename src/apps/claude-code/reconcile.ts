@@ -131,15 +131,11 @@ export function reconcileClaudeCodeOnShutdown(
 ): void {
   stopCatalogSubscription()
   if (!intended) return
-  try {
-    const result = revertProxyBaseUrlForShutdown(filePath)
-    if (result.wrote) {
-      consola.info(
-        "claude-code: removed proxy base URL for shutdown"
-          + " (routing intent persists for next boot)",
-      )
-    }
-  } catch (err) {
-    consola.warn("claude-code: failed to reconcile base URL on shutdown", err)
+  const result = revertProxyBaseUrlForShutdown(filePath)
+  if (result.wrote) {
+    consola.info(
+      "claude-code: removed proxy base URL for shutdown"
+        + " (routing intent persists for next boot)",
+    )
   }
 }

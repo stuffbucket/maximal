@@ -9,7 +9,11 @@ import type { ClientApp } from "~/apps/index"
 
 import { runAppBootHooks, runAppShutdownHooks } from "~/apps/registry"
 
-function fakeApp(id: string, calls: Array<string>, throws = false): ClientApp {
+function fakeApp(
+  id: ClientApp["id"],
+  calls: Array<string>,
+  throws = false,
+): ClientApp {
   const hook = (phase: string) => () => {
     calls.push(`${id}:${phase}`)
     if (throws) throw new Error(`${id} failed`)
@@ -24,14 +28,26 @@ function fakeApp(id: string, calls: Array<string>, throws = false): ClientApp {
 describe("app lifecycle hooks", () => {
   test("every app's onBoot runs, even after one throws", () => {
     const calls: Array<string> = []
-    runAppBootHooks([fakeApp("a", calls, true), fakeApp("b", calls)])
-    expect(calls).toEqual(["a:boot", "b:boot"])
+    runAppBootHooks([
+      fakeApp("claude-code", calls, true),
+      fakeApp("codex", calls),
+    ])
+    expect(calls).toEqual(["claude-code:boot", "codex:boot"])
   })
 
-  test("every app's onShutdown runs, even after one throws", () => {
+  test("every app's onShutdown runs and reports failures", () => {
     const calls: Array<string> = []
-    runAppShutdownHooks([fakeApp("a", calls, true), fakeApp("b", calls)])
-    expect(calls).toEqual(["a:shutdown", "b:shutdown"])
+    const result = runAppShutdownHooks([
+      fakeApp("claude-code", calls, true),
+      fakeApp("codex", calls),
+    ])
+
+    expect(calls).toEqual(["claude-code:shutdown", "codex:shutdown"])
+    expect(result.attempted).toEqual(["claude-code", "codex"])
+    expect(result.completed).toEqual(["codex"])
+    expect(result.failed).toHaveLength(1)
+    expect(result.failed[0]?.appId).toBe("claude-code")
+    expect(result.failed[0]?.error).toEqual(new Error("claude-code failed"))
   })
 
   test("the real registry wires Claude Desktop into boot", async () => {
