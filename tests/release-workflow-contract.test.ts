@@ -520,6 +520,13 @@ describe("Windows desktop lifecycle smoke", () => {
     expect(workflow).toContain(
       "[MaximalStartupWindowSmoke]::IsIconic($candidate)",
     )
+    expect(
+      workflow.indexOf("public static class MaximalStartupWindowSmoke"),
+    ).toBeLessThan(
+      workflow.indexOf(
+        "$shellProcess = Start-Process -FilePath $shellPath -PassThru",
+      ),
+    )
     expect(workflow).toContain("GetForegroundWindow()")
     expect(workflow).toContain("WS_EX_TOOLWINDOW")
     expect(workflow).toContain("dist/startup-window.json")

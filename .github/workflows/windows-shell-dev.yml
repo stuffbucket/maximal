@@ -331,24 +331,6 @@ jobs:
           $shellPath = Join-Path $installRoot 'maximal-shell.exe'
           if (-not (Test-Path $shellPath)) { throw "shell missing: $shellPath" }
 
-          Write-Host "launching: $shellPath"
-          $shellProcess = Start-Process -FilePath $shellPath -PassThru
-          # Cold hosted runners can take more than 30 seconds to initialize the
-          # sidecar on first launch (the diagnostics record the exact child PID).
-          $deadline = (Get-Date).AddSeconds(60)
-          do {
-            $sidecarProcess = Get-CimInstance Win32_Process -Filter "Name = 'maximal.exe'" |
-              Where-Object { $_.ParentProcessId -eq $shellProcess.Id } |
-              Select-Object -First 1
-            if (-not $shellProcess.HasExited -and $sidecarProcess) { break }
-            Start-Sleep -Milliseconds 500
-            $shellProcess.Refresh()
-          } while ((Get-Date) -lt $deadline)
-
-          if ($shellProcess.HasExited) { throw "maximal-shell did not stay running" }
-          if (-not $sidecarProcess) { throw "maximal sidecar did not start within 60 seconds" }
-          Write-Host "shell PID: $($shellProcess.Id); sidecar PID: $($sidecarProcess.ProcessId)"
-
           Add-Type -TypeDefinition @'
           using System;
           using System.Collections.Generic;
@@ -384,37 +366,59 @@ jobs:
           }
           '@
 
-          # The unauthenticated first-run flow presents Account after the splash
-          # minimum. Observe the earlier Ready-time taskbar state before that
-          # intentional foreground transition.
+          Write-Host "launching: $shellPath"
+          $shellProcess = Start-Process -FilePath $shellPath -PassThru
+          # Cold hosted runners can take more than 30 seconds to initialize the
+          # sidecar on first launch. Observe the short-lived minimized state in
+          # the same loop: the unauthenticated flow intentionally presents
+          # Account after the splash minimum, so waiting for a later sidecar
+          # probe would miss the Ready-time taskbar state.
+          $sidecarProcess = $null
           $startupWindowHandle = [IntPtr]::Zero
-          $windowDeadline = (Get-Date).AddSeconds(30)
+          $startupExtendedStyle = [int64]0
+          $startupWasForeground = $false
+          $deadline = (Get-Date).AddSeconds(60)
+          $nextSidecarCheck = Get-Date
           do {
-            foreach ($candidate in [MaximalStartupWindowSmoke]::WindowsForProcess(
-                [uint32]$shellProcess.Id)) {
-              if ([MaximalStartupWindowSmoke]::IsWindowVisible($candidate) -and
-                  [MaximalStartupWindowSmoke]::IsIconic($candidate)) {
-                $startupWindowHandle = $candidate
-                break
+            $now = Get-Date
+            if (-not $sidecarProcess -and $now -ge $nextSidecarCheck) {
+              $sidecarProcess = Get-CimInstance Win32_Process -Filter "Name = 'maximal.exe'" |
+                Where-Object { $_.ParentProcessId -eq $shellProcess.Id } |
+                Select-Object -First 1
+              $nextSidecarCheck = $now.AddMilliseconds(500)
+            }
+            if ($startupWindowHandle -eq [IntPtr]::Zero) {
+              foreach ($candidate in [MaximalStartupWindowSmoke]::WindowsForProcess(
+                  [uint32]$shellProcess.Id)) {
+                if ([MaximalStartupWindowSmoke]::IsWindowVisible($candidate) -and
+                    [MaximalStartupWindowSmoke]::IsIconic($candidate)) {
+                  $startupWindowHandle = $candidate
+                  $startupExtendedStyle = [MaximalStartupWindowSmoke]::GetWindowLongPtr(
+                    $candidate, -20).ToInt64()
+                  $startupWasForeground = (
+                    [MaximalStartupWindowSmoke]::GetForegroundWindow() -eq $candidate)
+                  break
+                }
               }
             }
-            if ($startupWindowHandle -ne [IntPtr]::Zero) { break }
+            if (-not $shellProcess.HasExited -and $sidecarProcess -and
+                $startupWindowHandle -ne [IntPtr]::Zero) { break }
             Start-Sleep -Milliseconds 100
-          } while ((Get-Date) -lt $windowDeadline)
+            $shellProcess.Refresh()
+          } while ((Get-Date) -lt $deadline)
+
+          if ($shellProcess.HasExited) { throw "maximal-shell did not stay running" }
+          if (-not $sidecarProcess) { throw "maximal sidecar did not start within 60 seconds" }
           if ($startupWindowHandle -eq [IntPtr]::Zero) {
             throw "ordinary startup did not create a minimized taskbar-backed main window"
           }
-          if (-not [MaximalStartupWindowSmoke]::IsWindowVisible($startupWindowHandle)) {
-            throw "startup main window was not visible to the Windows shell"
-          }
-          $extendedStyle = [MaximalStartupWindowSmoke]::GetWindowLongPtr(
-            $startupWindowHandle, -20).ToInt64()
-          if (($extendedStyle -band 0x80) -ne 0) {
+          if (($startupExtendedStyle -band 0x80) -ne 0) {
             throw "startup main window used WS_EX_TOOLWINDOW and was not taskbar-eligible"
           }
-          if ([MaximalStartupWindowSmoke]::GetForegroundWindow() -eq $startupWindowHandle) {
+          if ($startupWasForeground) {
             throw "startup main window stole foreground focus"
           }
+          Write-Host "shell PID: $($shellProcess.Id); sidecar PID: $($sidecarProcess.ProcessId)"
           [ordered]@{
             shellPid = $shellProcess.Id
             sidecarPid = [int]$sidecarProcess.ProcessId
