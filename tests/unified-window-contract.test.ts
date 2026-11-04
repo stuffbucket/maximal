@@ -140,6 +140,8 @@ describe("unified Settings, Dashboard, Sessions & Appearance contract", () => {
       '.icon_as_template(cfg!(target_os = "macos"))',
     )
     expect(SHELL_LIB_RS).toContain("install_windows_jump_list")
+    expect(SHELL_LIB_RS).toContain("tauri::async_runtime::spawn(async move {")
+    expect(SHELL_LIB_RS).toContain("app.run_on_main_thread(move ||")
     expect(SHELL_LIB_RS).toContain("CloseWindowAction::Quit")
     expect(SHELL_CARGO_TOML).toContain('windows = { version = "0.62"')
     expect(WINDOWS_JUMP_LIST_RS).toContain("ICustomDestinationList")

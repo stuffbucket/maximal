@@ -694,7 +694,19 @@ pub fn run() {
         // before starting Tauri when replacement is required.
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             let action = shell_action_from_args(&argv).unwrap_or(ShellAction::OpenDefault);
-            dispatch_or_queue_shell_action(app, action);
+            let app = app.clone();
+            // Windows invokes this callback from a synchronous WM_COPYDATA window
+            // procedure on the main thread. Move to the async runtime before
+            // queueing work back to the main thread so the window procedure can
+            // return and release the sending process first.
+            tauri::async_runtime::spawn(async move {
+                let dispatch_app = app.clone();
+                if let Err(error) = app.run_on_main_thread(move || {
+                    dispatch_or_queue_shell_action(&dispatch_app, action);
+                }) {
+                    eprintln!("[shell] could not queue single-instance action: {error}");
+                }
+            });
         }))
         .plugin(
             tauri_plugin_window_state::Builder::default()
