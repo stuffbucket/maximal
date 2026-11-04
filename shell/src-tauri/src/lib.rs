@@ -588,8 +588,8 @@ impl PendingShellAction {
 }
 
 /// One-shot Windows quit-confirm request. The flag is set before the main
-/// window is shown and consumed after its event listener mounts, so neither a
-/// newly loading webview nor an already-hidden one can miss the prompt.
+/// window is shown and consumed only after React renders the dialog, so neither
+/// a newly loading webview nor an already-hidden one can miss the prompt.
 struct PendingQuitPrompt(std::sync::atomic::AtomicBool);
 
 impl PendingQuitPrompt {
@@ -600,6 +600,10 @@ impl PendingQuitPrompt {
     #[cfg(any(target_os = "windows", test))]
     fn request(&self) {
         self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    fn pending(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     fn take(&self) -> bool {
@@ -797,6 +801,7 @@ pub fn run() {
             reveal_config_dir,
             reveal_logs_dir,
             restart_sidecar,
+            has_quit_request,
             take_quit_request,
             confirm_quit,
             uninstall_maximal,
@@ -817,6 +822,7 @@ pub fn run() {
             reveal_config_dir,
             reveal_logs_dir,
             restart_sidecar,
+            has_quit_request,
             take_quit_request,
             confirm_quit,
             uninstall_maximal,
@@ -3164,8 +3170,9 @@ fn request_native_quit_dialog(app: &AppHandle) {
 }
 
 /// Windows uses the app-styled confirmation dialog in the unified main window.
-/// Queue before opening and emit after: a newly loading webview consumes the
-/// flag on mount, while an existing hidden webview receives the live event.
+/// Queue before opening and signal after: a newly loading webview observes the
+/// flag on mount, while an existing hidden webview receives the live event. The
+/// webview acknowledges the flag only after React renders the dialog.
 #[cfg(target_os = "windows")]
 fn request_quit(app: &AppHandle) {
     if app.state::<ManagedEndpoint>().current().is_none() {
@@ -3189,6 +3196,11 @@ fn request_quit(app: &AppHandle) {
 #[cfg(not(target_os = "windows"))]
 fn request_quit(app: &AppHandle) {
     request_native_quit_dialog(app);
+}
+
+#[tauri::command]
+fn has_quit_request(state: State<'_, PendingQuitPrompt>) -> bool {
+    state.pending()
 }
 
 #[tauri::command]

@@ -24,7 +24,7 @@ describe("Windows quit prompt requests", () => {
       },
       {
         subscribe: () => Promise.resolve(() => {}),
-        takePending: () => Promise.resolve(true),
+        hasPending: () => Promise.resolve(true),
       },
     )
     await subscription.ready
@@ -33,7 +33,7 @@ describe("Windows quit prompt requests", () => {
     subscription.unsubscribe()
   })
 
-  test("consumes and opens requests received by a mounted webview", async () => {
+  test("observes and opens requests received by a mounted webview", async () => {
     let listener: (() => void) | undefined
     let pending = false
     let opens = 0
@@ -47,11 +47,7 @@ describe("Windows quit prompt requests", () => {
           listener = handler
           return Promise.resolve(() => {})
         },
-        takePending: () => {
-          const result = pending
-          pending = false
-          return Promise.resolve(result)
-        },
+        hasPending: () => Promise.resolve(pending),
       },
     )
     await subscription.ready
@@ -60,12 +56,12 @@ describe("Windows quit prompt requests", () => {
     listener?.()
     await Promise.resolve()
 
-    expect(pending).toBe(false)
+    expect(pending).toBe(true)
     expect(opens).toBe(1)
     subscription.unsubscribe()
   })
 
-  test("consumes requests delivered through the local webview bridge", async () => {
+  test("observes requests delivered through the local webview bridge", async () => {
     let localListener: (() => void) | undefined
     let pending = false
     let opens = 0
@@ -82,11 +78,7 @@ describe("Windows quit prompt requests", () => {
             localListener = undefined
           }
         },
-        takePending: () => {
-          const result = pending
-          pending = false
-          return Promise.resolve(result)
-        },
+        hasPending: () => Promise.resolve(pending),
       },
     )
     await subscription.ready
@@ -95,16 +87,41 @@ describe("Windows quit prompt requests", () => {
     localListener?.()
     await Promise.resolve()
 
-    expect(pending).toBe(false)
+    expect(pending).toBe(true)
     expect(opens).toBe(1)
     subscription.unsubscribe()
     expect(localListener).toBeUndefined()
   })
 
+  test("does not consume an in-flight pending query after disposal", async () => {
+    let resolvePending: ((pending: boolean) => void) | undefined
+    let opens = 0
+
+    const subscription = subscribeToQuitRequests(
+      () => {
+        opens++
+      },
+      {
+        subscribe: () => Promise.resolve(() => {}),
+        hasPending: () =>
+          new Promise<boolean>((resolve) => {
+            resolvePending = resolve
+          }),
+      },
+    )
+    await Promise.resolve()
+
+    subscription.unsubscribe()
+    resolvePending?.(true)
+    await subscription.ready
+
+    expect(opens).toBe(0)
+  })
+
   test("stops local delivery before an async remote subscription settles", async () => {
     let localListener: (() => void) | undefined
     let resolveSubscribe: ((unlisten: () => void) => void) | undefined
-    let pending = true
+    const pending = true
     let opens = 0
 
     const subscription = subscribeToQuitRequests(
@@ -122,11 +139,7 @@ describe("Windows quit prompt requests", () => {
             localListener = undefined
           }
         },
-        takePending: () => {
-          const result = pending
-          pending = false
-          return Promise.resolve(result)
-        },
+        hasPending: () => Promise.resolve(pending),
       },
     )
 
@@ -146,7 +159,7 @@ describe("Windows quit prompt requests", () => {
       },
       {
         subscribe: () => Promise.reject(new Error("not running in Tauri")),
-        takePending: () => Promise.resolve(false),
+        hasPending: () => Promise.resolve(false),
       },
     )
     await subscription.ready
@@ -180,6 +193,8 @@ describe("Windows quit prompt requests", () => {
   })
 
   test("grants the remote Settings webview access to quit commands", () => {
+    expect(SHELL_PERMISSIONS).toContain('"allow-has-quit-request"')
+    expect(SHELL_PERMISSIONS).toContain('commands.allow = ["has_quit_request"]')
     expect(SHELL_PERMISSIONS).toContain('"allow-take-quit-request"')
     expect(SHELL_PERMISSIONS).toContain(
       'commands.allow = ["take_quit_request"]',
