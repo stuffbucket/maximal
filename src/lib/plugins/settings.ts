@@ -1,7 +1,8 @@
 /**
  * The `plugins` section of `config.json`: reading and changing one plugin's
- * entry, and the one-time migration from the parked MCP broker's Work IQ
- * endpoint.
+ * entry (`{ enabled, clients }`), the one-time migration from the parked MCP
+ * broker's Work IQ endpoint, and finding the legacy `plugins.<id>.config`
+ * values that boot moves into each plugin's settings file.
  */
 
 import type {
@@ -37,7 +38,7 @@ export function pluginClients(
 }
 
 /** Persist a change to one plugin's entry, keeping everything else in it
- *  (its `config`, unknown keys). Returns the written config. */
+ *  (unknown keys). Returns the written config. */
 export function updatePluginEntry(
   id: string,
   change: { enabled?: boolean; clients?: Array<PluginClientId> },
@@ -103,4 +104,28 @@ export function migratePluginSettings(): void {
   } catch (error) {
     consola.warn("Could not migrate Work IQ's settings", error)
   }
+}
+
+/**
+ * Plugin configs still stored the pre-settings-file way, in `config.json` →
+ * `plugins.<id>.config`. The config schema keeps accepting that key (loose
+ * entry) so boot can move each value into the plugin's own settings file.
+ */
+export function legacyPluginConfigs(
+  config: AppConfig,
+): Array<{ id: string; config: unknown }> {
+  return Object.entries(config.plugins ?? {}).flatMap(([id, entry]) => {
+    const raw: Record<string, unknown> = isRecord(entry) ? entry : {}
+    return Object.hasOwn(raw, "config") ? [{ id, config: raw.config }] : []
+  })
+}
+
+/** Remove `plugins.<id>.config` from `config.json` (after it moved into the
+ *  plugin's settings file). No-op when it isn't there. */
+export function dropLegacyPluginConfig(id: string): void {
+  const config = getConfig()
+  const entry = pluginEntry(config, id)
+  if (!isRecord(entry) || !Object.hasOwn(entry, "config")) return
+  const { config: _legacy, ...rest } = entry
+  writeConfig({ ...config, plugins: { ...config.plugins, [id]: rest } })
 }

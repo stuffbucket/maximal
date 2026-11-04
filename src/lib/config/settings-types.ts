@@ -475,21 +475,76 @@ export type ClaudeDesktopToggleRequest = z.infer<
   typeof ClaudeDesktopToggleRequest
 >
 
-// ── Plugins (/settings/api/plugins) ─────────────────────────────────────
-// Mirrors `PluginSnapshot` in packages/plugin-sdk/src/gateway.ts (the
-// gateway's own snapshot), plus Maximal's client connections and endpoint.
+// ── Plugins / Connectors (/settings/api/plugins) ────────────────────────
+// The wire contract of Settings → Integrations → Connectors. Mirrors
+// `PluginSnapshot` / `PluginToolView` in packages/plugin-sdk/src/gateway.ts
+// (the gateway's own view), plus Maximal's client connections and endpoint.
 // camelCase like the snapshot it carries.
+//
+//   GET   /settings/api/plugins                        → PluginsListResponse
+//   GET   /settings/api/plugins/:id                    → PluginDetailView
+//   PATCH /settings/api/plugins/:id                    PluginUpdateRequest → PluginDetailView
+//   PUT   /settings/api/plugins/:id/tool-permissions   PluginToolPermissionsRequest → PluginDetailView
+//   POST  /settings/api/plugins/:id/actions/:actionId  → 202 PluginActionResponse
+//   SSE   `plugins.changed` on /settings/api/events (lifecycle, status, tools
+//         or settings moved; the UI refetches the list and any open detail)
+//
+// Errors use the Settings API's `{ error: { message, type } }` body; a 400
+// for a body that fails validation (including a config the plugin's own
+// `Config` rejects) adds `issues` (PluginValidationErrorResponse). 404 for
+// an unknown plugin or action, 409 when an action needs the plugin running.
+//
+// Response schemas are applied with `respondValidated`, which answers with
+// the *parsed* payload: zod strips keys a schema doesn't declare, so the
+// public manifest subset below is what keeps auth details (client ids,
+// authorities, scopes) and the config schema off the list endpoint.
 
 export const PluginClientId = z.enum(["claude-code"])
 export type PluginClientId = z.infer<typeof PluginClientId>
 
-const PluginToolAnnotations = z.object({
+/** A connector exposes tools to MCP clients and gets host-managed tool
+ *  permissions; an extension doesn't. Settings lists connectors only. */
+export const PluginKind = z.enum(["connector", "extension"])
+export type PluginKind = z.infer<typeof PluginKind>
+
+/** Where the plugin comes from: shipped with Maximal (`built-in`, shown as
+ *  "Built-in") or installed separately (`external`, shown as "Plugin"). */
+export const PluginSource = z.enum(["built-in", "external"])
+export type PluginSource = z.infer<typeof PluginSource>
+
+/** Per-tool permission. Two states for now; kept a string enum so a third
+ *  (e.g. "ask") can be added without migrating stored choices. */
+export const ToolPermission = z.enum(["allow", "block"])
+export type ToolPermission = z.infer<typeof ToolPermission>
+
+/** Permission group, from the tool's annotations: `readOnlyHint === true` ⇒
+ *  `read-only`; else `destructiveHint === true` ⇒ `write-delete`; else `other`. */
+export const ToolGroup = z.enum(["read-only", "write-delete", "other"])
+export type ToolGroup = z.infer<typeof ToolGroup>
+
+/** Where a tool's effective permission came from: the user's explicit
+ *  choice, the plugin's `defaultToolPermission`, or the host default. */
+export const ToolPermissionSource = z.enum(["user", "plugin", "default"])
+export type ToolPermissionSource = z.infer<typeof ToolPermissionSource>
+
+/** Where `tools` come from: the running plugin, the last non-empty tool set
+ *  it registered (cached in its settings file), or nothing yet. */
+export const PluginToolsSource = z.enum(["live", "cache", "none"])
+export type PluginToolsSource = z.infer<typeof PluginToolsSource>
+
+/** A JSON Schema object (MCP `inputSchema` / `outputSchema`, a plugin's
+ *  `configSchema`). Every other keyword passes through untouched. */
+export const JsonSchemaObject = z.looseObject({ type: z.literal("object") })
+export type JsonSchemaObject = z.infer<typeof JsonSchemaObject>
+
+export const PluginToolAnnotations = z.object({
   title: z.string().optional(),
   readOnlyHint: z.boolean().optional(),
   destructiveHint: z.boolean().optional(),
   idempotentHint: z.boolean().optional(),
   openWorldHint: z.boolean().optional(),
 })
+export type PluginToolAnnotations = z.infer<typeof PluginToolAnnotations>
 
 export const PluginStatus = z.object({
   state: z.enum(["ready", "needs-setup", "working", "error"]),
@@ -521,39 +576,166 @@ export const PluginClientView = z.object({
 })
 export type PluginClientView = z.infer<typeof PluginClientView>
 
-export const PluginView = z.object({
+/** A connector's upstream, from `manifest.connector`. Public facts only:
+ *  the auth *type* is shown ("Signs in with Microsoft Entra ID"); client
+ *  ids, authorities, scopes and redirect URIs are never sent. */
+export const PluginConnectorInfo = z.object({
+  transport: z.literal("streamable-http"),
+  /** The upstream MCP server URL in effect: the plugin's config override
+   *  when it has one, else the manifest default. */
+  endpoint: z.string(),
+  auth: z.object({ type: z.enum(["entra", "mcp-oauth", "none"]) }),
+  /** Terms the user accepts before first use (host-managed gate). */
+  terms: z.object({ url: z.string(), label: z.string().optional() }).optional(),
+})
+export type PluginConnectorInfo = z.infer<typeof PluginConnectorInfo>
+
+/** The plugin's static `manifest` export, minus `configSchema` (detail
+ *  only) and auth secrets. `connector` is present iff `kind === "connector"`. */
+export const PluginManifestView = z.object({
   id: z.string(),
+  kind: PluginKind,
   displayName: z.string(),
   description: z.string(),
   homepage: z.string().optional(),
+  connector: PluginConnectorInfo.optional(),
+})
+export type PluginManifestView = z.infer<typeof PluginManifestView>
+
+const toolCount = z.number().int().nonnegative()
+
+/** Tools per permission group, for the list (the full tools are detail-only). */
+export const PluginToolCounts = z.object({
+  total: toolCount,
+  byGroup: z.object({
+    "read-only": toolCount,
+    "write-delete": toolCount,
+    other: toolCount,
+  }),
+})
+export type PluginToolCounts = z.infer<typeof PluginToolCounts>
+
+/** One item of `GET /settings/api/plugins`. `id`, `kind`, `displayName`,
+ *  `description` and `homepage` equal the manifest's (kept top-level, the
+ *  v1 shape). */
+export const PluginView = z.object({
+  id: z.string(),
+  kind: PluginKind,
+  source: PluginSource,
+  displayName: z.string(),
+  description: z.string(),
+  homepage: z.string().optional(),
+  manifest: PluginManifestView,
+  /** Desired state (config.json → plugins.<id>.enabled). */
   enabled: z.boolean(),
   lifecycle: z.enum(["disabled", "starting", "active", "failed"]),
+  /** Why it failed (unreadable settings file, path-qualified config
+   *  issues, apply error). Only with `lifecycle: "failed"`. */
   error: z.string().optional(),
+  /** The running plugin's own report (`ctx.surface.setStatus`). */
   status: PluginStatus.optional(),
-  tools: z.array(
-    z.object({
-      name: z.string(),
-      title: z.string().optional(),
-      description: z.string(),
-      annotations: PluginToolAnnotations.optional(),
-    }),
-  ),
+  /** Counts over the same tools the detail's `tools` lists (live or cached). */
+  toolCounts: PluginToolCounts,
+  toolsSource: PluginToolsSource,
   clients: z.array(PluginClientView),
   /** The plugin's MCP endpoint on this Maximal. */
   endpoint: z.string(),
 })
 export type PluginView = z.infer<typeof PluginView>
 
+/** A tool as Settings shows it: the full MCP definition (schemas verbatim)
+ *  plus its group and effective permission. Ordered as the plugin
+ *  registered them. */
+export const PluginToolView = z.object({
+  name: z.string(),
+  title: z.string().optional(),
+  description: z.string(),
+  inputSchema: JsonSchemaObject,
+  outputSchema: JsonSchemaObject.optional(),
+  annotations: PluginToolAnnotations.optional(),
+  group: ToolGroup,
+  permission: ToolPermission,
+  permissionSource: ToolPermissionSource,
+})
+export type PluginToolView = z.infer<typeof PluginToolView>
+
+/** `GET /settings/api/plugins/:id`, and the reply to PATCH and PUT
+ *  tool-permissions: the list item plus config and the full tools. */
+export const PluginDetailView = PluginView.extend({
+  /** The plugin's settings version (`manifest.settingsVersion`). */
+  settingsVersion: z.number().int().positive(),
+  /** The `config` from the plugin's settings file: validated (defaults
+   *  applied) when valid, else as stored so the form can show what to fix;
+   *  absent when the file is unreadable or has no config yet. */
+  config: z.record(z.string(), z.unknown()).optional(),
+  /** JSON Schema of the plugin's `Config` for the Settings form. Supported:
+   *  an object of string (incl. `format: "uri"`), boolean, number/integer
+   *  and enum properties with `title` / `description` / `default`, and the
+   *  custom `"x-maximal-advanced": true` to fold a field under Advanced.
+   *  Anything else is shown read-only as JSON. Absent ⇒ nothing to set. */
+  configSchema: JsonSchemaObject.optional(),
+  /** Every tool with its permission: live when the plugin is active and has
+   *  registered some, else the cached catalog (`toolsSource`). */
+  tools: z.array(PluginToolView),
+  /** When the cached catalog was last refreshed (ISO 8601). Set whenever a
+   *  catalog exists; the UI shows it when `toolsSource === "cache"`. */
+  catalogUpdatedAt: z.string().optional(),
+})
+export type PluginDetailView = z.infer<typeof PluginDetailView>
+
 export const PluginsListResponse = z.object({ plugins: z.array(PluginView) })
 export type PluginsListResponse = z.infer<typeof PluginsListResponse>
 
+/** `PATCH /settings/api/plugins/:id`. `config` replaces the plugin's whole
+ *  config (validated by the plugin's `Config`; on success it is written to
+ *  the settings file and an enabled plugin reloads). Omitted keys are left
+ *  as they are. → PluginDetailView, or 400 PluginValidationErrorResponse. */
 export const PluginUpdateRequest = z
   .object({
     enabled: z.boolean().optional(),
     clients: z.array(PluginClientId).max(8).optional(),
+    config: z.record(z.string(), z.unknown()).optional(),
   })
   .strict()
 export type PluginUpdateRequest = z.infer<typeof PluginUpdateRequest>
+
+/** `PUT /settings/api/plugins/:id/tool-permissions`. Keys are tool names;
+ *  `null` clears the user's choice (back to the default). Names need not be
+ *  currently registered: choices are kept for tools that come back. A group
+ *  bulk-set sends every tool of the group. Never reloads the plugin.
+ *  → PluginDetailView. */
+export const PluginToolPermissionsRequest = z
+  .object({
+    permissions: z.record(
+      z.string().regex(/^[\w-]{1,64}$/),
+      ToolPermission.nullable(),
+    ),
+  })
+  .strict()
+export type PluginToolPermissionsRequest = z.infer<
+  typeof PluginToolPermissionsRequest
+>
+
+/** One validation problem. `path` is dotted and relative to the request
+ *  body (`"config.endpoint"`, `"permissions.fetch"`; `""` = the body). */
+export const PluginValidationIssue = z.object({
+  path: z.string(),
+  message: z.string(),
+})
+export type PluginValidationIssue = z.infer<typeof PluginValidationIssue>
+
+/** The 400 body of PATCH / PUT tool-permissions when validation fails.
+ *  `error.message` joins the issues into one sentence for generic display. */
+export const PluginValidationErrorResponse = z.object({
+  error: z.object({
+    message: z.string(),
+    type: z.literal("invalid_request_error"),
+  }),
+  issues: z.array(PluginValidationIssue),
+})
+export type PluginValidationErrorResponse = z.infer<
+  typeof PluginValidationErrorResponse
+>
 
 export const PluginActionResponse = z.object({ ok: z.literal(true) })
 export type PluginActionResponse = z.infer<typeof PluginActionResponse>

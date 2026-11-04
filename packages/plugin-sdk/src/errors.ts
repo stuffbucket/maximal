@@ -1,8 +1,10 @@
 /** Error codes for plugin-contract violations (cordis-free). */
 export type PluginContractErrorCode =
   | "invalid-module"
+  | "invalid-manifest"
   | "missing-service"
   | "invalid-config"
+  | "invalid-settings"
   | "not-a-plugin"
   | "invalid-tool"
   | "duplicate-tool"

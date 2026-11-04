@@ -1,17 +1,20 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 
+import type { PluginConfigIssue } from "../gateway"
 import type { PluginInject, PluginModule } from "../index"
 
 import { PluginContractError } from "../errors"
 import {
   ACTION_ID_PATTERN,
   PLUGIN_ID_PATTERN,
+  PLUGIN_SETTINGS_FILE,
   STORAGE_NAME_PATTERN,
   TOOL_NAME_PATTERN,
   type PluginStatus,
   type ToolAnnotations,
   type ToolDefinition,
 } from "../types"
+import { normalizeManifest } from "./manifest"
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -59,7 +62,9 @@ export function injectedServices(
 
 /**
  * Module-shape gate (monimal `genuinePlugin`): `name` matching
- * `PLUGIN_ID_PATTERN`, `meta`, `inject`, Standard Schema `Config`, `apply`.
+ * `PLUGIN_ID_PATTERN`, a valid `manifest` whose `id` equals `name`,
+ * `inject`, Standard Schema `Config`, `apply`, and the optional
+ * `migrateSettings` / `defaultToolPermission` functions.
  */
 export function validatePluginModule(
   namespace: unknown,
@@ -81,20 +86,7 @@ export function validatePluginModule(
     fail(`${label} must export a name matching ${String(PLUGIN_ID_PATTERN)}.`)
   }
   const id = ns.name as string
-  const meta = ns.meta
-  if (
-    !isRecord(meta)
-    || typeof meta.displayName !== "string"
-    || typeof meta.description !== "string"
-  ) {
-    fail(`Plugin "${id}" must export meta with displayName and description.`)
-  }
-  if (
-    (meta as Record<string, unknown>).homepage !== undefined
-    && typeof (meta as Record<string, unknown>).homepage !== "string"
-  ) {
-    fail(`Plugin "${id}" meta.homepage must be a string.`)
-  }
+  normalizeManifest(id, ns.manifest)
   if (!Array.isArray(ns.inject) && !isRecord(ns.inject)) {
     fail(`Plugin "${id}" must export inject.`)
   }
@@ -103,6 +95,10 @@ export function validatePluginModule(
   }
   if (typeof ns.apply !== "function") {
     fail(`Plugin "${id}" must export apply.`)
+  }
+  for (const optional of ["migrateSettings", "defaultToolPermission"]) {
+    if (ns[optional] !== undefined && typeof ns[optional] !== "function")
+      fail(`Plugin "${id}" export ${optional} must be a function.`)
   }
   const plugin = ns as unknown as PluginModule
   injectedServices(plugin)
@@ -156,6 +152,16 @@ function issuePath(issue: StandardSchemaV1.Issue): string {
       String(typeof segment === "object" ? segment.key : segment),
     )
     .join(".")
+}
+
+/** Issues as `{ path, message }` with a dotted path relative to the config root. */
+export function toConfigIssues(
+  issues: ReadonlyArray<StandardSchemaV1.Issue>,
+): Array<PluginConfigIssue> {
+  return issues.map((issue) => ({
+    path: issuePath(issue),
+    message: issue.message,
+  }))
 }
 
 /** Path-qualified issue text, e.g. `workiq.endpoint: Invalid URL` (monimal `PluginSettingsError`). */
@@ -428,6 +434,14 @@ export function assertStorageName(
     throw new PluginContractError(
       "invalid-storage-name",
       `Plugin "${pluginId}" storage name ${JSON.stringify(name)} must match ${String(STORAGE_NAME_PATTERN)}.`,
+      { pluginId },
+    )
+  }
+  // Case-insensitive: on macOS/Windows "Settings.json" is the same file.
+  if (name.toLowerCase() === PLUGIN_SETTINGS_FILE) {
+    throw new PluginContractError(
+      "invalid-storage-name",
+      `Plugin "${pluginId}" storage name "${name}" is reserved for the host-owned settings file.`,
       { pluginId },
     )
   }

@@ -96,7 +96,7 @@ brew update && brew upgrade maximal
 
 ### Work IQ
 
-Work IQ is a built-in plugin (Settings → Plugins). See [`docs/workiq.md`](docs/workiq.md).
+Work IQ is a built-in plugin (Settings → Integrations → Connectors). See [`docs/workiq.md`](docs/workiq.md).
 
 ## Run
 

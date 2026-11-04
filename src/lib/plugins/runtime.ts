@@ -18,7 +18,11 @@ import {
 } from "./clients/sync"
 import { composePluginGateway } from "./compose"
 import { getPluginGateway, setPluginGateway } from "./gateway"
-import { migratePluginSettings } from "./settings"
+import {
+  dropLegacyPluginConfig,
+  legacyPluginConfigs,
+  migratePluginSettings,
+} from "./settings"
 import { listPluginViews, PLUGIN_CLIENTS } from "./view"
 
 /** Gateway events come in bursts (a reload is stop + start + status +
@@ -80,12 +84,47 @@ export function releasePluginClientsOnShutdown(): void {
 }
 
 /**
+ * Move each legacy `config.json` → `plugins.<id>.config` into the plugin's
+ * settings file, then drop it from `config.json`. A value the host could not
+ * take (unreadable settings file) stays where it is for the next boot.
+ * Unknown ids are left alone. Never throws.
+ */
+export async function importLegacyPluginConfigs(
+  gateway: PluginGateway,
+): Promise<void> {
+  const known = new Set(gateway.list().map((snapshot) => snapshot.id))
+  for (const { id, config } of legacyPluginConfigs(getConfig())) {
+    if (!known.has(id)) continue
+    try {
+      const written = await gateway.importLegacyConfig(id, config)
+      dropLegacyPluginConfig(id)
+      consola.info(
+        written ?
+          `Moved ${id}'s config from config.json into its settings file`
+        : `Dropped ${id}'s old config.json config; its settings file already has one`,
+      )
+    } catch (error) {
+      consola.warn(
+        `Could not move ${id}'s config into its settings file`,
+        error,
+      )
+    }
+  }
+}
+
+export interface StartPluginsOptions {
+  /** Use this gateway instead of composing the built-in plugins (the
+   *  connectors bench passes one built from `composePluginGateway`). */
+  gateway?: PluginGateway
+}
+
+/**
  * Boot: migrate old settings, create the gateway, start what is enabled,
  * then register endpoints with clients. A broken plugin list is logged and
  * leaves the proxy running without plugins.
  */
 export async function startPlugins(
-  options: { gateway?: PluginGateway } = {},
+  options: StartPluginsOptions = {},
 ): Promise<PluginGateway | undefined> {
   migratePluginSettings()
   removeLegacyClaudeDesktopEntries()
@@ -98,7 +137,10 @@ export async function startPlugins(
   }
   unsubscribeGateway?.()
   setPluginGateway(gateway)
+  // Every event (lifecycle, status, tools, settings) changes what Settings
+  // shows; bursts collapse into one `plugins.changed`.
   unsubscribeGateway = gateway.subscribe(() => notifyPluginsChanged())
+  await importLegacyPluginConfigs(gateway)
   await gateway.reconcile(getConfig().plugins)
   await syncPluginClients()
   return gateway

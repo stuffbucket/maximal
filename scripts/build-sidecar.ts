@@ -129,7 +129,7 @@ function targetTriple(): string {
   return hostTriple()
 }
 
-/** `src/` and `package.json` of every `packages/plugin-*` workspace. */
+/** `src/` and `package.json` of every `packages/plugin-*` workspace and the connector kit. */
 function pluginPackageSources(): Array<string> {
   const packages = join(REPO, "packages")
   let entries: ReturnType<typeof readdirSync>
@@ -139,7 +139,11 @@ function pluginPackageSources(): Array<string> {
     return []
   }
   return entries
-    .filter((entry) => entry.isDirectory() && entry.name.startsWith("plugin-"))
+    .filter(
+      (entry) =>
+        entry.isDirectory()
+        && (entry.name.startsWith("plugin-") || entry.name === "connector-kit"),
+    )
     .flatMap((entry) => [
       join(packages, entry.name, "src"),
       join(packages, entry.name, "package.json"),

@@ -23,6 +23,6 @@
       "~/*": ["./src/*"]
     }
   },
-  "include": ["src/**/*", "tests/**/*", "eslint.config.js"],
+  "include": ["src/**/*", "tests/**/*", "scripts/bench/**/*", "eslint.config.js"],
   "exclude": ["node_modules", "dist", "build", "parked"]
 }

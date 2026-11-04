@@ -7,20 +7,27 @@
  * guard.
  */
 import type {
+  JsonSchemaObject,
+  PluginKind,
+  PluginManifest,
   PluginStatus,
+  PluginToolView,
   ToolAnnotations,
   ToolCallContext,
   ToolDefinitionPublic,
+  ToolPermission,
   ToolResult,
 } from "./types"
 
 /** Clients Maximal can register a plugin's MCP endpoint with. */
 export type PluginClientId = "claude-code"
 
-/** One `config.json` → `plugins.<id>` entry. Absent ⇒ disabled. */
+/**
+ * One `config.json` → `plugins.<id>` entry. Absent ⇒ disabled. The plugin's
+ * own config lives in its settings file (`updateConfig`), not here.
+ */
 export interface PluginSettingsEntry {
   enabled?: boolean
-  config?: unknown
   clients?: Array<PluginClientId>
 }
 
@@ -35,11 +42,29 @@ export interface PluginToolSummary {
   annotations?: ToolAnnotations
 }
 
+/**
+ * Where `toolViews` comes from: the running plugin (`live`), the last
+ * non-empty tool set the plugin registered (`cache`), or nothing (`none`).
+ */
+export type PluginToolsSource = "live" | "cache" | "none"
+
 export interface PluginSnapshot {
   id: string
+  kind: PluginKind
   displayName: string
   description: string
   homepage?: string
+  /** The plugin's static manifest (display + connector info; never secrets). */
+  manifest: PluginManifest
+  /** The plugin's current settings version (`manifest.settingsVersion`). */
+  settingsVersion: number
+  configSchema?: JsonSchemaObject
+  /**
+   * The config from the settings file: validated (defaults applied) when
+   * valid, else as stored; `undefined` until the file was read or when it
+   * is unreadable.
+   */
+  config: unknown
   /** Desired state from the last reconcile. */
   enabled: boolean
   lifecycle: PluginLifecycle
@@ -47,11 +72,23 @@ export interface PluginSnapshot {
   error?: string
   /** Last `ctx.surface.setStatus` of the running plugin. */
   status?: PluginStatus
-  /** Empty unless the plugin is active. */
+  /** Live tools; empty unless the plugin is active. */
   tools: Array<PluginToolSummary>
+  toolsSource: PluginToolsSource
+  /** When the cached tool catalog was last refreshed (ISO 8601). */
+  catalogUpdatedAt?: string
 }
 
-export type PluginGatewayEventType = "lifecycle" | "status" | "tools"
+/**
+ * `tools`: the MCP-visible tool list may have changed (registration or
+ * permission change). `settings`: the plugin's settings file changed
+ * (config, permissions).
+ */
+export type PluginGatewayEventType =
+  | "lifecycle"
+  | "status"
+  | "tools"
+  | "settings"
 
 export interface PluginGatewayEvent {
   type: PluginGatewayEventType
@@ -67,11 +104,21 @@ export interface PluginGateway {
   reconcile(settings: PluginSettings | undefined): Promise<void>
   list(): Array<PluginSnapshot>
   get(id: string): PluginSnapshot | undefined
-  /** Throws `unknown-plugin`; returns `[]` while the plugin is not active. */
+  /**
+   * The MCP-facing tool list: live tools minus blocked ones. Throws
+   * `unknown-plugin`; returns `[]` while the plugin is not active.
+   */
   listTools(pluginId: string): Array<ToolDefinitionPublic>
   /**
+   * Every tool with its group and effective permission, for Settings: live
+   * tools when the plugin is active and has registered some, else the
+   * cached catalog (see `PluginSnapshot.toolsSource`). Throws `unknown-plugin`.
+   */
+  toolViews(pluginId: string): Array<PluginToolView>
+  /**
    * Throws `unknown-plugin` / `plugin-inactive` / `unknown-tool`. A tool that
-   * throws resolves to `{ isError: true, content: [{ type: "text", text }] }`.
+   * throws resolves to `{ isError: true, content: [{ type: "text", text }] }`;
+   * so does a call to a blocked tool ("This tool is blocked in Maximal settings.").
    */
   callTool(
     pluginId: string,
@@ -85,26 +132,78 @@ export interface PluginGateway {
     actionId: string,
     signal?: AbortSignal,
   ): Promise<void>
+  /**
+   * Validate `config` against the plugin's `Config`, write it to the
+   * settings file, and reload the plugin if it is enabled and the config
+   * changed. Throws `unknown-plugin`, `invalid-config` (with `issues`), or
+   * `settings-unreadable`. An `apply` failure after reload is reported via
+   * the snapshot, not thrown.
+   */
+  updateConfig(pluginId: string, config: unknown): Promise<void>
+  /**
+   * Set (or with `null`, clear back to the default) per-tool permissions in
+   * the settings file. Names need not be currently registered (choices are
+   * kept for tools that come back). Never reloads the plugin; emits `tools`
+   * and `settings` when anything changed. Throws `unknown-plugin`,
+   * `invalid-permissions`, or `settings-unreadable`.
+   */
+  setToolPermissions(
+    pluginId: string,
+    changes: Record<string, ToolPermission | null>,
+  ): Promise<void>
+  /**
+   * One-shot migration of a legacy `config.json` → `plugins.<id>.config`
+   * value (settings version 1). Writes it only when the settings file has no
+   * config yet (migrating it with the plugin's `migrateSettings` first);
+   * resolves `true` when written, `false` when the file already had a config.
+   * Not validated, so an invalid legacy config surfaces as a `failed` plugin
+   * rather than being lost. Throws `unknown-plugin` or `settings-unreadable`.
+   */
+  importLegacyConfig(pluginId: string, config: unknown): Promise<boolean>
   subscribe(listener: (event: PluginGatewayEvent) => void): () => void
   /** Stops every plugin. Idempotent. */
   dispose(): Promise<void>
 }
 
-export type PluginGatewayErrorCode =
-  | "unknown-plugin"
-  | "plugin-inactive"
-  | "unknown-tool"
-  | "unknown-action"
+const GATEWAY_ERROR_CODES = [
+  "unknown-plugin",
+  "plugin-inactive",
+  "unknown-tool",
+  "unknown-action",
+  "invalid-config",
+  "invalid-permissions",
+  "settings-unreadable",
+] as const
+
+export type PluginGatewayErrorCode = (typeof GATEWAY_ERROR_CODES)[number]
+
+/** One config validation issue; `path` is dotted and relative to the config root (`""` = root). */
+export interface PluginConfigIssue {
+  path: string
+  message: string
+}
 
 export class PluginGatewayError extends Error {
   readonly code: PluginGatewayErrorCode
   readonly pluginId: string
+  /** Set for `invalid-config`. */
+  readonly issues: ReadonlyArray<PluginConfigIssue> | undefined
 
-  constructor(code: PluginGatewayErrorCode, pluginId: string, message: string) {
-    super(message)
+  // eslint-disable-next-line max-params -- keeps the v1 positional (code, pluginId, message) signature; extras go in options
+  constructor(
+    code: PluginGatewayErrorCode,
+    pluginId: string,
+    message: string,
+    options?: { issues?: ReadonlyArray<PluginConfigIssue>; cause?: unknown },
+  ) {
+    super(
+      message,
+      options?.cause === undefined ? undefined : { cause: options.cause },
+    )
     this.name = "PluginGatewayError"
     this.code = code
     this.pluginId = pluginId
+    this.issues = options?.issues
   }
 }
 
@@ -116,25 +215,32 @@ export function isPluginGatewayError(
   if (!(error instanceof Error) || error.name !== "PluginGatewayError")
     return false
   const code: unknown = (error as { code?: unknown }).code
-  return (
-    code === "unknown-plugin"
-    || code === "plugin-inactive"
-    || code === "unknown-tool"
-    || code === "unknown-action"
-  )
+  return (GATEWAY_ERROR_CODES as ReadonlyArray<unknown>).includes(code)
 }
 
-export {
-  type ElicitRequest,
-  type ElicitResult,
-  type JsonSchemaObject,
-  type PluginStatus,
-  type PluginStatusAction,
-  type PluginStatusState,
-  type ToolAnnotations,
-  type ToolCallContext,
-  type ToolContent,
-  type ToolDefinitionPublic,
-  type ToolProgress,
-  type ToolResult,
+export type {
+  ConnectorAuth,
+  ConnectorLaneLimits,
+  ConnectorLimits,
+  ConnectorManifest,
+  ConnectorRetryLimits,
+  ConnectorTerms,
+  ElicitRequest,
+  ElicitResult,
+  JsonSchemaObject,
+  PluginKind,
+  PluginManifest,
+  PluginStatus,
+  PluginStatusAction,
+  PluginStatusState,
+  PluginToolView,
+  ToolAnnotations,
+  ToolCallContext,
+  ToolContent,
+  ToolDefinitionPublic,
+  ToolGroup,
+  ToolPermission,
+  ToolPermissionSource,
+  ToolProgress,
+  ToolResult,
 } from "./types"

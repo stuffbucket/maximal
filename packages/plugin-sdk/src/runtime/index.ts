@@ -13,11 +13,34 @@ import type { PluginRuntime } from "./state"
 
 import { isInjectList } from "./validate"
 
+export { createFileStorage } from "./file-storage"
+export { nonJsonPath, normalizeManifest } from "./manifest"
 export {
   installPluginServices,
   type PluginServiceOptions,
   type PluginStorageBackend,
 } from "./services"
+export {
+  applyPermissionChanges,
+  type LoadedPluginSettings,
+  loadPluginSettings,
+  migrateSettingsDocument,
+  newSettingsDocument,
+  parseSettingsDocument,
+  permissionChangesError,
+  PLUGIN_SETTINGS_SCHEMA,
+  type PluginSettingsDocument,
+  PluginSettingsFileError,
+  type PluginSettingsTools,
+  resolveToolPermission,
+  serializeSettingsDocument,
+  setToolCatalog,
+  storedPermissions,
+  type ToolCatalog,
+  toolView,
+  toPublicTool,
+  writePluginSettings,
+} from "./settings"
 export {
   PluginRuntime,
   type PluginRuntimeEvent,
@@ -33,6 +56,7 @@ export {
   normalizeToolDefinition,
   type ParsedPluginConfig,
   parsePluginConfig,
+  toConfigIssues,
   validatePluginList,
   validatePluginModule,
 } from "./validate"

@@ -5,7 +5,12 @@
  * loopback port (so `/mcp/*` sees a loopback peer address).
  */
 
-import type { Context, PluginModule } from "@stuffbucket/maximal-plugin-sdk"
+import type {
+  Context,
+  JsonSchemaObject,
+  PluginKind,
+  PluginModule,
+} from "@stuffbucket/maximal-plugin-sdk"
 import type { PluginGateway } from "@stuffbucket/maximal-plugin-sdk/gateway"
 
 import fs from "node:fs"
@@ -18,21 +23,69 @@ import { writeConfig } from "~/lib/config/config"
 import { composePluginGateway } from "~/lib/plugins/compose"
 import { setPluginGateway } from "~/lib/plugins/gateway"
 
+export interface DefinePluginOptions {
+  /** Defaults to `connector`. */
+  kind?: PluginKind
+  settingsVersion?: number
+  configSchema?: JsonSchemaObject
+  defaultToolPermission?: PluginModule["defaultToolPermission"]
+  migrateSettings?: PluginModule["migrateSettings"]
+}
+
+/** The inline test plugins' config: `{}` is valid; `endpoint` follows the
+ *  connector-kit convention (overrides the manifest's upstream). */
+export const TestConfig = z.object({
+  greeting: z.string().default("hi"),
+  endpoint: z.url().optional(),
+})
+
 export function definePlugin(
   name: string,
   apply: (ctx: Context) => void | Promise<void>,
+  options: DefinePluginOptions = {},
 ): PluginModule {
+  const kind = options.kind ?? "connector"
   return {
     name,
-    meta: { displayName: name.toUpperCase(), description: `${name} plugin` },
+    manifest: {
+      id: name,
+      kind,
+      displayName: name.toUpperCase(),
+      description: `${name} plugin`,
+      settingsVersion: options.settingsVersion ?? 1,
+      ...(options.configSchema ? { configSchema: options.configSchema } : {}),
+      ...(kind === "connector" ?
+        {
+          connector: {
+            transport: "streamable-http" as const,
+            endpoint: `https://${name}.example.test/mcp`,
+            auth: {
+              type: "entra" as const,
+              clientId: "00000000-0000-4000-8000-000000000001",
+              authority: "https://login.example.test/organizations",
+              scopes: ["api://example/.default"],
+              redirectUri: "http://localhost:12798",
+            },
+            terms: { url: "https://example.test/terms", label: "Terms" },
+          },
+        }
+      : {}),
+    },
     inject: ["tools", "surface", "storage", "host"],
-    Config: z.object({ greeting: z.string().default("hi") }),
+    Config: TestConfig,
     apply,
+    ...(options.defaultToolPermission ?
+      { defaultToolPermission: options.defaultToolPermission }
+    : {}),
+    ...(options.migrateSettings ?
+      { migrateSettings: options.migrateSettings }
+    : {}),
   }
 }
 
 export interface TestGateway {
   gateway: PluginGateway
+  storageRoot: string
   opened: Array<string>
   dispose(): Promise<void>
 }
@@ -42,8 +95,10 @@ export interface TestGateway {
 export async function startTestGateway(
   plugins: ReadonlyArray<PluginModule>,
   enabled: ReadonlyArray<string> = [],
+  options: { storageRoot?: string } = {},
 ): Promise<TestGateway> {
-  const storageRoot = fs.mkdtempSync(path.join(os.tmpdir(), "plugins-"))
+  const storageRoot =
+    options.storageRoot ?? fs.mkdtempSync(path.join(os.tmpdir(), "plugins-"))
   const opened: Array<string> = []
   const gateway = composePluginGateway({
     plugins,
@@ -62,6 +117,7 @@ export async function startTestGateway(
   await gateway.reconcile(config.plugins)
   return {
     gateway,
+    storageRoot,
     opened,
     async dispose() {
       setPluginGateway(undefined)

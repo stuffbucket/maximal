@@ -1,139 +1,31 @@
-import type {
-  Context,
-  HostServices,
-  PluginModule,
-  ToolDefinition,
-} from "@stuffbucket/maximal-plugin-sdk"
-import type {
-  PluginGateway,
-  PluginGatewayErrorCode,
-  PluginGatewayEvent,
-} from "@stuffbucket/maximal-plugin-sdk/gateway"
+import type { PluginModule } from "@stuffbucket/maximal-plugin-sdk"
+import type { Context } from "@stuffbucket/maximal-plugin-sdk"
+import type { PluginGateway } from "@stuffbucket/maximal-plugin-sdk/gateway"
 
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtempSync, readdirSync, rmSync, statSync } from "node:fs"
-import os from "node:os"
+import { readdirSync, statSync } from "node:fs"
 import path from "node:path"
 import { z } from "zod"
 
-import {
-  createPluginHost,
-  PluginContractError,
-  PluginGatewayError,
-} from "../src/index"
+import { PluginContractError } from "../src/index"
 import * as echo from "./fixtures/echo"
+import {
+  buildHost,
+  createHost,
+  define,
+  Empty,
+  envelope,
+  expectGatewayError,
+  fakeHost,
+  noop,
+  runCleanups,
+  seedSettings,
+  tempDir,
+  tool,
+} from "./helpers"
 import { rejectionMessage } from "./rejection"
 
-const cleanups: Array<() => Promise<void> | void> = []
-afterEach(async () => {
-  for (const cleanup of cleanups.splice(0).reverse()) await cleanup()
-})
-
-function tempDir(): string {
-  const dir = mkdtempSync(path.join(os.tmpdir(), "plugin-host-"))
-  cleanups.push(() => rmSync(dir, { recursive: true, force: true }))
-  return dir
-}
-
-function fakeHost(): HostServices & {
-  logs: Array<string>
-  opened: Array<string>
-} {
-  const logs: Array<string> = []
-  const opened: Array<string> = []
-  const log = (level: string) => (message: string) =>
-    void logs.push(`${level}: ${message}`)
-  return {
-    logs,
-    opened,
-    appVersion: "1.2.3",
-    logger: {
-      debug: log("debug"),
-      info: log("info"),
-      warn: log("warn"),
-      error: log("error"),
-    },
-    openExternal(url) {
-      opened.push(url)
-      return Promise.resolve()
-    },
-  }
-}
-
-function tool(
-  name: string,
-  execute?: ToolDefinition["execute"],
-): ToolDefinition {
-  return {
-    name,
-    description: `${name} tool`,
-    inputSchema: { type: "object", properties: { q: { type: "string" } } },
-    annotations: { readOnlyHint: true },
-    execute:
-      execute
-      ?? ((input) =>
-        Promise.resolve({
-          content: [{ type: "text", text: `${name}:${JSON.stringify(input)}` }],
-        })),
-  }
-}
-
-function define<C>(
-  name: string,
-  Config: PluginModule<C>["Config"],
-  apply: (ctx: Context, config: C) => void | Promise<void>,
-): PluginModule<C> {
-  return {
-    name,
-    meta: {
-      displayName: name.toUpperCase(),
-      description: `${name} plugin`,
-      homepage: `https://example.test/${name}`,
-    },
-    inject: ["tools", "surface", "storage", "host"],
-    Config,
-    apply,
-  }
-}
-
-const Empty = z.object({})
-
-const noop = () => {}
-
-/** A gateway built from deliberately malformed plugin lists (constructor must throw). */
-function buildHost(plugins: Array<unknown>) {
-  return () =>
-    createPluginHost({
-      plugins: plugins as Array<PluginModule>,
-      services: { host: fakeHost(), storageRoot: os.tmpdir() },
-    })
-}
-
-function createHost(
-  plugins: ReadonlyArray<PluginModule>,
-  host = fakeHost(),
-  storageRoot = tempDir(),
-) {
-  const gateway = createPluginHost({ plugins, services: { host, storageRoot } })
-  cleanups.push(() => gateway.dispose())
-  const events: Array<PluginGatewayEvent> = []
-  gateway.subscribe((event) => events.push(event))
-  return { gateway, events, host, storageRoot }
-}
-
-async function expectGatewayError(
-  promise: Promise<unknown> | (() => unknown),
-  code: PluginGatewayErrorCode,
-): Promise<void> {
-  try {
-    await (typeof promise === "function" ? promise() : promise)
-  } catch (error) {
-    expect(error).toBeInstanceOf(PluginGatewayError)
-    expect((error as PluginGatewayError).code).toBe(code)
-    return
-  }
-  throw new Error(`expected PluginGatewayError ${code}`)
-}
+afterEach(runCleanups)
 
 describe("createPluginHost validation", () => {
   test("rejects malformed modules, duplicate ids and missing services", () => {
@@ -151,18 +43,30 @@ describe("createPluginHost validation", () => {
 
   test("starts with every plugin disabled", async () => {
     const { gateway } = createHost([define("alpha", Empty, () => {})])
+    await gateway.reconcile(undefined)
     expect(gateway.list()).toEqual([
       {
         id: "alpha",
+        kind: "extension",
         displayName: "ALPHA",
         description: "alpha plugin",
         homepage: "https://example.test/alpha",
+        manifest: {
+          id: "alpha",
+          kind: "extension",
+          displayName: "ALPHA",
+          description: "alpha plugin",
+          homepage: "https://example.test/alpha",
+          settingsVersion: 1,
+        },
+        settingsVersion: 1,
+        config: {},
         enabled: false,
         lifecycle: "disabled",
         tools: [],
+        toolsSource: "none",
       },
     ])
-    await gateway.reconcile(undefined)
     expect(gateway.get("alpha")?.lifecycle).toBe("disabled")
     expect(gateway.get("nope")).toBeUndefined()
   })
@@ -224,7 +128,7 @@ describe("reconcile", () => {
     ])
   })
 
-  test("config change reloads; an equal config (any key order) does not", async () => {
+  test("updateConfig reloads; an equal config (any key order) does not", async () => {
     const Config = z.object({
       greeting: z.string().default("hi"),
       punct: z.string().default("!"),
@@ -242,15 +146,12 @@ describe("reconcile", () => {
     await gateway.reconcile({ alpha: { enabled: true } })
     expect(applied).toEqual([{ greeting: "hi", punct: "!" }])
 
-    await gateway.reconcile({ alpha: { enabled: true, config: {} } })
+    await gateway.reconcile({ alpha: { enabled: true } })
     expect(applied).toHaveLength(1)
 
-    await gateway.reconcile({
-      alpha: { enabled: true, config: { greeting: "yo", punct: "?" } },
-    })
-    await gateway.reconcile({
-      alpha: { enabled: true, config: { punct: "?", greeting: "yo" } },
-    })
+    await gateway.updateConfig("alpha", { greeting: "yo", punct: "?" })
+    await gateway.updateConfig("alpha", { punct: "?", greeting: "yo" })
+    await gateway.reconcile({ alpha: { enabled: true } })
     expect(applied).toEqual([
       { greeting: "hi", punct: "!" },
       { greeting: "yo", punct: "?" },
@@ -274,10 +175,16 @@ describe("reconcile", () => {
       Empty,
       (ctx) => void ctx.tools.register(tool("b")),
     )
-    const { gateway } = createHost([alpha, beta])
+    const root = tempDir()
+    seedSettings(
+      root,
+      "alpha",
+      envelope("alpha", { endpoint: "not a url", retries: 1.5 }),
+    )
+    const { gateway } = createHost([alpha, beta], fakeHost(), root)
 
     await gateway.reconcile({
-      alpha: { enabled: true, config: { endpoint: "not a url", retries: 1.5 } },
+      alpha: { enabled: true },
       beta: { enabled: true },
     })
     const failed = gateway.get("alpha")
@@ -296,14 +203,15 @@ describe("reconcile", () => {
       "plugin-inactive",
     )
 
-    // Same invalid config: stays failed without re-validating; fixed config: recovers.
+    // Same invalid config: stays failed; fixed config (edited on disk): recovers.
     await gateway.reconcile({
-      alpha: { enabled: true, config: { retries: 1.5, endpoint: "not a url" } },
+      alpha: { enabled: true },
       beta: { enabled: true },
     })
     expect(gateway.get("alpha")?.lifecycle).toBe("failed")
+    seedSettings(root, "alpha", envelope("alpha", { retries: 2 }))
     await gateway.reconcile({
-      alpha: { enabled: true, config: { retries: 2 } },
+      alpha: { enabled: true },
       beta: { enabled: true },
     })
     expect(gateway.get("alpha")).toMatchObject({
@@ -383,7 +291,7 @@ describe("reconcile concurrency and settings", () => {
     })
     const { gateway } = createHost([slow])
     await Promise.all([
-      gateway.reconcile({ slow: { enabled: true, config: {} } }),
+      gateway.reconcile({ slow: { enabled: true } }),
       gateway.reconcile({ slow: { enabled: false } }),
       gateway.reconcile({ slow: { enabled: true } }),
     ])
@@ -731,9 +639,8 @@ describe("host services and lifecycle", () => {
 describe("ESM module namespace plugins", () => {
   test("a real module namespace loads, runs, and persists through storage", async () => {
     const { gateway, storageRoot } = createHost([echo])
-    await gateway.reconcile({
-      echo: { enabled: true, config: { prefix: "hey" } },
-    })
+    await gateway.updateConfig("echo", { prefix: "hey" })
+    await gateway.reconcile({ echo: { enabled: true } })
     expect(gateway.get("echo")).toMatchObject({
       displayName: "Echo",
       lifecycle: "active",

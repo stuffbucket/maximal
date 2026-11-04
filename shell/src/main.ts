@@ -28,7 +28,7 @@ import { apiCall, subscribeAuthEvents } from "./proxy/client";
 import { mountApiClients } from "./ui/islands/api-clients-island";
 import { mountApps } from "./ui/islands/apps-island";
 import { mountModels } from "./ui/islands/models-island";
-import { mountPlugins } from "./ui/islands/plugins-island";
+import { mountConnectors } from "./ui/islands/connectors-island";
 import { mountQuitDialog } from "./ui/islands/quit-dialog-island";
 import { waitForSidecarBack } from "./ui/restart";
 
@@ -41,7 +41,7 @@ type SectionId =
   | "dashboard"
   | "sessions"
   | "apps"
-  | "plugins"
+  | "connectors"
   | "endpoint"
   | "api-clients"
   | "models"
@@ -66,7 +66,7 @@ const SECTIONS: ReadonlyArray<SectionId> = [
   "dashboard",
   "sessions",
   "apps",
-  "plugins",
+  "connectors",
   "endpoint",
   "api-clients",
   "models",
@@ -76,7 +76,7 @@ const SECTIONS: ReadonlyArray<SectionId> = [
 
 const TAB_SECTIONS: Record<TopTabId, ReadonlyArray<string>> = {
   account: ["account"],
-  integrations: ["apps", "plugins", "endpoint", "api-clients"],
+  integrations: ["apps", "connectors", "endpoint", "api-clients"],
   "models-keys": ["models"],
   appearance: ["appearance"],
   system: ["diagnostics", "logs"],
@@ -99,7 +99,7 @@ function tabForSection(id: SectionId): TopTabId {
       return "account";
     case "integrations":
     case "apps":
-    case "plugins":
+    case "connectors":
     case "endpoint":
     case "api-clients":
       return "integrations";
@@ -288,8 +288,14 @@ function availableSection(id: SectionId): SectionId {
   return osKind() === "windows" && id === "appearance" ? "system" : id;
 }
 
+/** The section part of the hash. A section may own a sub-page after a
+ *  slash (`#connectors/workiq` opens Work IQ's page in Connectors). */
+function hashSection(): string {
+  return window.location.hash.replace(/^#/, "").split("/", 1)[0] ?? "";
+}
+
 function readHashSection(): SectionId {
-  const raw = window.location.hash.replace(/^#/, "");
+  const raw = hashSection();
   if (isSectionId(raw)) return availableSection(raw);
   if (hasAccountProblem()) return "account";
   return availableSection(getStoredTab(LAST_TAB_STORAGE_KEY) ?? DEFAULT_SECTION);
@@ -2625,8 +2631,7 @@ async function checkInitialAccountHealth(): Promise<void> {
 
 window.addEventListener("DOMContentLoaded", () => {
   document.documentElement.dataset.os = osKind();
-  const initialHash = window.location.hash.replace(/^#/, "");
-  const hadExplicitHash = isSectionId(initialHash);
+  const hadExplicitHash = isSectionId(hashSection());
   applyI18n();
   // Sentences that embed a link/CLI token or a plural count aren't [data-i18n]
   // (they carry live DOM children); render them explicitly after the sweep.
@@ -2643,7 +2648,7 @@ window.addEventListener("DOMContentLoaded", () => {
   wireAppearance();
   mountApiClients();
   mountApps();
-  mountPlugins();
+  mountConnectors();
   mountQuitDialog();
   mountModels();
   wireNav();
@@ -2664,7 +2669,7 @@ window.addEventListener("hashchange", () => {
   if (tab === "system") void loadDiagnostics();
   if (tab === "integrations") {
     window.dispatchEvent(new CustomEvent("maximal:apps-refresh"));
-    window.dispatchEvent(new CustomEvent("maximal:plugins-refresh"));
+    window.dispatchEvent(new CustomEvent("maximal:connectors-refresh"));
   }
   if (tab === "models-keys") {
     window.dispatchEvent(new CustomEvent("maximal:models-refresh"));

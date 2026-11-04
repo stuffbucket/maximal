@@ -8,6 +8,8 @@
  * claude-code-flow.ts) so this file reads as a checklist.
  */
 
+import type { PluginGateway } from "@stuffbucket/maximal-plugin-sdk/gateway"
+
 import consola from "consola"
 import { serve } from "srvx"
 
@@ -58,6 +60,10 @@ export interface RunServerOptions {
   /** Evict any running instance on :4141 before binding. Optional —
    *  test fixtures + non-CLI callers can omit; treated as false. */
   replace?: boolean
+  /** Serve this plugin gateway instead of composing the built-in plugins.
+   *  Composition-level override for harnesses (the connectors bench builds
+   *  one with `composePluginGateway({ plugins })`); the CLI never sets it. */
+  pluginGateway?: PluginGateway
 }
 
 export async function runServer(options: RunServerOptions): Promise<void> {
@@ -176,7 +182,7 @@ export async function runServer(options: RunServerOptions): Promise<void> {
       + `auth=${hasGithubToken() ? "authenticated" : "unauthenticated"}`,
   )
 
-  afterListening(actualPort, httpServer)
+  afterListening(actualPort, httpServer, options.pluginGateway)
 
   if (options.claudeCode) {
     if (state.models) {
@@ -222,6 +228,7 @@ function advertisedServerUrl(hostname: string, port: number): string {
 function afterListening(
   port: number,
   httpServer: ReturnType<typeof serve>,
+  pluginGateway: PluginGateway | undefined,
 ): void {
   setListeningPort(port)
 
@@ -245,7 +252,7 @@ function afterListening(
   // Start the plugins the user turned on, then register their MCP endpoints
   // (`/mcp/<id>`) with the chosen clients. Detached: a slow plugin or
   // `claude` CLI never holds up the listener or ordinary requests.
-  void startPlugins().catch((error: unknown) => {
+  void startPlugins({ gateway: pluginGateway }).catch((error: unknown) => {
     consola.warn("Could not start plugins", error)
   })
 

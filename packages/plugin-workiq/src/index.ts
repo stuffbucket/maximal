@@ -1,34 +1,35 @@
 /**
  * `@stuffbucket/maximal-plugin-workiq` — Microsoft Work IQ as a maximal
- * plugin. Exports the plugin module (`name`, `meta`, `inject`, `Config`,
- * `apply`); the logic lives in the modules re-exported below.
+ * connector, built on `@stuffbucket/maximal-connector-kit`. Exports the
+ * plugin module (`name`, `manifest`, `inject`, `Config`, `apply`).
  */
-import { Config as ConfigSchema } from "./config"
 import { createWorkIqPlugin } from "./plugin"
 
 const plugin = createWorkIqPlugin()
 
-export const Config = ConfigSchema
-export type Config = ConfigSchema
+export const name = plugin.name
+export const manifest = plugin.manifest
+export const inject = plugin.inject
+export const Config = plugin.Config
 export const apply: typeof plugin.apply = (ctx, config) =>
   plugin.apply(ctx, config)
 
-export { TOKEN_CACHE_FILE } from "./auth/msal"
-export type { TokenProvider, WorkIqAccount } from "./auth/token-provider"
 export {
   DEFAULT_AUTHORITY,
   DEFAULT_ENDPOINT,
+  REDIRECT_URI,
   TERMS_URL,
   WORKIQ_CLIENT_ID,
+  WORKIQ_MANIFEST,
   WORKIQ_SCOPES,
-} from "./config"
-export { WorkIqError, type WorkIqErrorCode } from "./errors"
+} from "./manifest"
+export { createWorkIqPlugin, type WorkIqPluginOptions } from "./plugin"
 export {
-  createWorkIqPlugin,
-  INJECT as inject,
-  META as meta,
-  PLUGIN_ID as name,
-  type TokenProviderEnv,
-  type WorkIqPluginOptions,
-} from "./plugin"
-export { ACTION_IDS, STATUS_CODES, TERMS_FILE } from "./state"
+  inspectWorkIqResult,
+  primaryPath,
+  WORKIQ_LIMITS,
+  WORKIQ_THROTTLE,
+  workIqKind,
+  workIqLane,
+} from "./throttle"
+export { WORKIQ_ERRORS, WORKIQ_WORDING } from "./wording"

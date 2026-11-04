@@ -32,6 +32,15 @@
         "src/**/*.ts",
         "test/**/*.ts"
       ]
+    },
+    "packages/connector-kit": {
+      "entry": [
+        "test/**/*.test.ts"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "test/**/*.ts"
+      ]
     }
   },
   "ignoreBinaries": [

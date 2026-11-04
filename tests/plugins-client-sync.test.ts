@@ -72,15 +72,18 @@ describe("syncPluginClient", () => {
     plugins = await startTestGateway([
       definePlugin("alpha", noop),
       definePlugin("beta", noop),
+      definePlugin("delta", noop, { kind: "extension" }),
     ])
   })
 
-  test("wants each known plugin that is on and chose the client", async () => {
+  test("wants each known connector that is on and chose the client", async () => {
     writeConfig({
       plugins: {
         alpha: { enabled: true, clients: ["claude-code"] },
         beta: { enabled: false, clients: ["claude-code"] },
         gamma: { enabled: true, clients: ["claude-code"] },
+        // Not a connector: no MCP endpoint to register.
+        delta: { enabled: true, clients: ["claude-code"] },
       },
       auth: {
         apiKeyEntries: [

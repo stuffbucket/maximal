@@ -50,11 +50,12 @@ module.exports = {
         "The app core sees the plugin system only through the cordis-free " +
         "gateway seam (@stuffbucket/maximal-plugin-sdk/gateway). Only the " +
         "composition root, src/lib/plugins/compose.ts, may import the plugin " +
-        "host, plugin packages, the SDK root or cordis. See docs/architecture.md → Plugins.",
+        "host, plugin packages, the connector kit, the SDK root or cordis. See docs/architecture.md → Plugins.",
       from: { path: "^src/", pathNot: "^src/lib/plugins/compose\\.ts$" },
       to: {
         path: [
           "^packages/plugin-",
+          "^packages/connector-kit/",
           "node_modules/.*@deepseek-ai/cordis/",
           // Not a root dependency, so unresolved from src/.
           "^@deepseek-ai/cordis",

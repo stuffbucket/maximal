@@ -33,14 +33,42 @@ import type {
   ClaudeCodeInstallStatus,
   DiagnosticsResponse,
   ModelsListResponse,
+  PluginActionResponse,
+  PluginDetailView,
+  PluginsListResponse,
+  PluginStatus,
+  PluginToolPermissionsRequest,
+  PluginUpdateRequest,
+  PluginValidationErrorResponse,
+  PluginValidationIssue,
   UpdateStatusResponse,
   UpstreamRejection,
 } from "../../../src/lib/config/settings-types"
 
 // Re-export so existing shell call sites that pull the type from
 // "./api" keep working. AuthStatus is owned by src/lib/settings-types
-// (ADR-0005/0006) — the shell does NOT redeclare it.
+// (ADR-0005/0006) — the shell does NOT redeclare it. The plugin
+// (Connectors) contract is owned there too.
 export type { AuthStatus, ClaudeCodeInstallStatus, UpstreamRejection }
+export type {
+  JsonSchemaObject,
+  PluginClientId,
+  PluginClientView,
+  PluginConnectorInfo,
+  PluginDetailView,
+  PluginStatus,
+  PluginToolView,
+  PluginUpdateRequest,
+  PluginValidationErrorResponse,
+  PluginValidationIssue,
+  PluginView,
+  ToolGroup,
+  ToolPermission,
+} from "../../../src/lib/config/settings-types"
+
+/** One action button a plugin's status offers. */
+export type PluginStatusAction = NonNullable<PluginStatus["actions"]>[number]
+export type PluginStatusState = PluginStatus["state"]
 
 const TIMEOUT_MS = 5000
 
@@ -147,84 +175,6 @@ interface AppsListResponse {
   apps: Array<AppEntry>
 }
 
-/**
- * Plugins (`/settings/api/plugins`). Mirrors `PluginSnapshot`/`PluginStatus`
- * in packages/plugin-sdk/src/gateway.ts and the `PluginView` the Settings API
- * returns, by name (the shell is its own project and does not import from
- * packages/).
- */
-export type PluginClientId = "claude-code"
-
-export type PluginLifecycle = "disabled" | "starting" | "active" | "failed"
-
-export type PluginStatusState = "ready" | "needs-setup" | "working" | "error"
-
-/** A button the plugin asks Settings to show; dispatched to its action. */
-export interface PluginStatusAction {
-  id: string
-  /** English label from the plugin, rendered as-is. */
-  label: string
-  kind?: "primary" | "secondary" | "destructive"
-  /** When set, Settings asks for confirmation with this text first. */
-  confirm?: string
-}
-
-/** What the plugin says about itself. All text is the plugin's English. */
-export interface PluginStatus {
-  state: PluginStatusState
-  /** Machine code, e.g. "signin-needed". */
-  code: string
-  summary: string
-  detail?: string
-  facts?: Array<{ label: string; value: string }>
-  actions?: Array<PluginStatusAction>
-}
-
-export interface PluginToolAnnotations {
-  title?: string
-  readOnlyHint?: boolean
-  destructiveHint?: boolean
-  idempotentHint?: boolean
-  openWorldHint?: boolean
-}
-
-export interface PluginToolSummary {
-  name: string
-  title?: string
-  description: string
-  annotations?: PluginToolAnnotations
-}
-
-export interface PluginClientView {
-  id: PluginClientId
-  /** The user's choice: register the plugin's MCP endpoint with this client. */
-  selected: boolean
-  /** Maximal can write to this client right now. */
-  available: boolean
-  /** English reason when `available` is false. */
-  reason?: string
-}
-
-export interface PluginView {
-  id: string
-  displayName: string
-  description: string
-  homepage?: string
-  enabled: boolean
-  lifecycle: PluginLifecycle
-  /** Why it failed (invalid config, apply threw). Only with `failed`. */
-  error?: string
-  status?: PluginStatus
-  /** Empty unless the plugin is active. */
-  tools: Array<PluginToolSummary>
-  clients: Array<PluginClientView>
-  /** The plugin's MCP endpoint URL on this Maximal. */
-  endpoint: string
-}
-
-export interface PluginsListResponse {
-  plugins: Array<PluginView>
-}
 
 /** Endpoint catalog — adding a new call means adding a member here
  *  plus a `ResponseFor` mapping. Splitting the request shape from
@@ -385,10 +335,21 @@ type Endpoint =
       path: "/settings/api/plugins"
     }
   | {
+      kind: "plugins-detail"
+      method: "GET"
+      path: `/settings/api/plugins/${string}`
+    }
+  | {
       kind: "plugins-update"
       method: "PATCH"
       path: `/settings/api/plugins/${string}`
-      body: { enabled?: boolean; clients?: Array<PluginClientId> }
+      body: PluginUpdateRequest
+    }
+  | {
+      kind: "plugins-tool-permissions"
+      method: "PUT"
+      path: `/settings/api/plugins/${string}/tool-permissions`
+      body: PluginToolPermissionsRequest
     }
   | {
       kind: "plugins-action"
@@ -422,8 +383,10 @@ interface ResponseFor {
   "claude-desktop-toggle": AppEntry
   "codex-toggle": AppEntry
   "plugins-list": PluginsListResponse
-  "plugins-update": PluginView
-  "plugins-action": { ok: true }
+  "plugins-detail": PluginDetailView
+  "plugins-update": PluginDetailView
+  "plugins-tool-permissions": PluginDetailView
+  "plugins-action": PluginActionResponse
   "claude-code-install-status": ClaudeCodeInstallStatus
   "claude-code-install-start": ClaudeCodeInstallStatus
   "models-list": ModelsListResponse
@@ -598,16 +561,34 @@ export function listPlugins(): Promise<ApiResult<PluginsListResponse>> {
   return apiCall({ kind: "plugins-list", method: "GET", path: "/settings/api/plugins" })
 }
 
-/** Turn a plugin on/off and/or choose the clients it is registered with. */
+const pluginPath = (id: string): `/settings/api/plugins/${string}` =>
+  `/settings/api/plugins/${encodeURIComponent(id)}`
+
+/** One plugin with its config, config schema and every tool's permission. */
+export function getPlugin(id: string): Promise<ApiResult<PluginDetailView>> {
+  return apiCall({ kind: "plugins-detail", method: "GET", path: pluginPath(id) })
+}
+
+/** Turn a plugin on/off, choose the clients it is registered with, and/or
+ *  replace its config. A config the plugin rejects answers 400 with
+ *  `issues` (see `pluginValidationIssues`). */
 export function updatePlugin(
   id: string,
-  body: { enabled?: boolean; clients?: Array<PluginClientId> },
-): Promise<ApiResult<PluginView>> {
+  body: PluginUpdateRequest,
+): Promise<ApiResult<PluginDetailView>> {
+  return apiCall({ kind: "plugins-update", method: "PATCH", path: pluginPath(id), body })
+}
+
+/** Set tool permissions by tool name; `null` returns a tool to its default. */
+export function setToolPermissions(
+  id: string,
+  permissions: PluginToolPermissionsRequest["permissions"],
+): Promise<ApiResult<PluginDetailView>> {
   return apiCall({
-    kind: "plugins-update",
-    method: "PATCH",
-    path: `/settings/api/plugins/${encodeURIComponent(id)}`,
-    body,
+    kind: "plugins-tool-permissions",
+    method: "PUT",
+    path: `${pluginPath(id)}/tool-permissions`,
+    body: { permissions },
   })
 }
 
@@ -616,10 +597,22 @@ export function updatePlugin(
 export function runPluginAction(
   id: string,
   actionId: string,
-): Promise<ApiResult<{ ok: true }>> {
+): Promise<ApiResult<PluginActionResponse>> {
   return apiCall({
     kind: "plugins-action",
     method: "POST",
-    path: `/settings/api/plugins/${encodeURIComponent(id)}/actions/${encodeURIComponent(actionId)}`,
+    path: `${pluginPath(id)}/actions/${encodeURIComponent(actionId)}`,
   })
+}
+
+/** The `issues` of a 400 validation reply, or `null` when the failure is
+ *  something else (the raw body travels in `ApiFailure.error`). */
+export function pluginValidationIssues(failure: ApiFailure): Array<PluginValidationIssue> | null {
+  if (failure.status !== 400) return null
+  try {
+    const body = JSON.parse(failure.error) as Partial<PluginValidationErrorResponse>
+    return Array.isArray(body.issues) ? body.issues : null
+  } catch {
+    return null
+  }
 }

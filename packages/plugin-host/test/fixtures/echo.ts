@@ -1,13 +1,16 @@
-import type { Context, PluginMeta } from "@stuffbucket/maximal-plugin-sdk"
+import type { Context, PluginManifest } from "@stuffbucket/maximal-plugin-sdk"
 
 // A complete plugin written exactly as a plugin package would be.
 import { z } from "zod"
 
 export const name = "echo"
-export const meta: PluginMeta = {
+export const manifest = {
+  id: "echo",
+  kind: "extension",
   displayName: "Echo",
   description: "Echoes its input.",
-}
+  settingsVersion: 1,
+} satisfies PluginManifest
 export const inject = ["tools", "surface", "storage"] as const
 export const Config = z.object({ prefix: z.string().default("echo") })
 export type Config = z.output<typeof Config>

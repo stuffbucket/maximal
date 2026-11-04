@@ -27,11 +27,122 @@ export const PLUGIN_SERVICE_NAMES = [
 ] as const
 export type PluginServiceName = (typeof PLUGIN_SERVICE_NAMES)[number]
 
-/** Human-facing plugin metadata shown in Settings. */
-export interface PluginMeta {
-  readonly displayName: string
-  readonly description: string
-  readonly homepage?: string
+/** Reserved storage name of the host-owned per-plugin settings file. */
+export const PLUGIN_SETTINGS_FILE = "settings.json"
+
+/** Kinds of plugin. A `connector` exposes tools to MCP clients and gets host-managed tool permissions. */
+export const PLUGIN_KINDS = ["connector", "extension"] as const
+export type PluginKind = (typeof PLUGIN_KINDS)[number]
+
+/** How a connector authenticates to its upstream. Public identifiers only — never secrets. */
+export type ConnectorAuth =
+  | {
+      type: "entra"
+      clientId: string
+      authority: string
+      scopes: ReadonlyArray<string>
+      redirectUri: string
+    }
+  | { type: "mcp-oauth"; clientId?: string; scopes?: ReadonlyArray<string> }
+  | { type: "none" }
+
+/** Terms the user must accept before the connector is used (host-managed gate). */
+export interface ConnectorTerms {
+  url: string
+  label?: string
+}
+
+/** Concurrency and spacing for one lane of a connector's upstream calls. */
+export interface ConnectorLaneLimits {
+  /** In-flight calls in this lane. */
+  maxConcurrency?: number
+  /** Least time between the starts of two calls in this lane (ms). */
+  minIntervalMs?: number
+}
+
+/** Retry numbers for throttled upstream calls. */
+export interface ConnectorRetryLimits {
+  /** Attempts in total, the first included. */
+  attempts?: number
+  /** Fallback waits between attempts when the server gives no `Retry-After` (ms). */
+  fallbackDelaysMs?: ReadonlyArray<number>
+  /** Equal jitter on fallback waits, as a fraction (0.25 ⇒ ±25%). */
+  jitter?: number
+  /** Longest single wait; a longer `Retry-After` fails fast instead (ms). */
+  maxWaitMs?: number
+  /** Queueing plus backoff per call (ms). */
+  budgetMs?: number
+  /** Retry a write the server refused with 429 (it was not carried out). */
+  retryWritesOn429?: boolean
+}
+
+/**
+ * Rate-limiting numbers for a connector's upstream (all optional; the
+ * connector kit supplies defaults). Behaviour (which tool is a read, which
+ * lane a call uses) is code, not manifest.
+ */
+export interface ConnectorLimits {
+  /** In-flight upstream calls across all clients. */
+  maxConcurrency?: number
+  /** Floor when throttling halves the concurrency. */
+  minConcurrency?: number
+  lanes?: Record<string, ConnectorLaneLimits>
+  /** Calls waiting for a slot across all clients; more fail at once. */
+  maxQueue?: number
+  /** Longest wait for a slot (ms). */
+  queueTimeoutMs?: number
+  retry?: ConnectorRetryLimits
+  /** Most paths per upstream batch read (0: never split). */
+  fetchBatchSize?: number
+  /** Least time between two progress notifications while waiting (ms). */
+  progressIntervalMs?: number
+}
+
+/** The upstream a connector talks to. Required iff `kind === "connector"`. */
+export interface ConnectorManifest {
+  transport: "streamable-http"
+  /** Default upstream endpoint; the plugin's config may override it. */
+  endpoint: string
+  auth: ConnectorAuth
+  terms?: ConnectorTerms
+  /** Rate-limiting numbers (optional). */
+  limits?: ConnectorLimits
+}
+
+/**
+ * Static, JSON-serialisable description of a plugin (the `manifest` export).
+ * `id` must equal the module's `name` export.
+ */
+export interface PluginManifest {
+  id: string
+  kind: PluginKind
+  displayName: string
+  description: string
+  homepage?: string
+  /** Version of the plugin's settings shape (positive integer); see `migrateSettings`. */
+  settingsVersion: number
+  /** JSON Schema of `Config`, for the Settings form (e.g. `z.toJSONSchema(Config)`). */
+  configSchema?: JsonSchemaObject
+  connector?: ConnectorManifest
+}
+
+/**
+ * Per-tool permission. Stored as a string so further states can be added
+ * without a settings migration.
+ */
+export const TOOL_PERMISSIONS = ["allow", "block"] as const
+export type ToolPermission = (typeof TOOL_PERMISSIONS)[number]
+
+/** Where a tool's effective permission came from. */
+export type ToolPermissionSource = "user" | "plugin" | "default"
+
+export type ToolGroup = "read-only" | "write-delete" | "other"
+
+/** Tool with its permission group and effective permission (Settings view). */
+export interface PluginToolView extends ToolDefinitionPublic {
+  group: ToolGroup
+  permission: ToolPermission
+  permissionSource: ToolPermissionSource
 }
 
 /** A JSON Schema object (MCP `inputSchema` / `outputSchema` shape). */
@@ -195,4 +306,20 @@ export interface HostServices {
   openExternal(url: string): Promise<void>
   readonly logger: PluginLogger
   readonly appVersion: string
+}
+
+/**
+ * Permission group of a tool: `readOnlyHint` ⇒ `read-only`, else
+ * `destructiveHint` ⇒ `write-delete`, else `other`.
+ */
+export function toolGroup(
+  tool: Pick<ToolDefinitionPublic, "annotations">,
+): ToolGroup {
+  if (tool.annotations?.readOnlyHint === true) return "read-only"
+  if (tool.annotations?.destructiveHint === true) return "write-delete"
+  return "other"
+}
+
+export function isToolPermission(value: unknown): value is ToolPermission {
+  return (TOOL_PERMISSIONS as ReadonlyArray<unknown>).includes(value)
 }

@@ -147,7 +147,8 @@ export default [
       "shell/**",
       // Storybook is an isolated pnpm package with its own lockfile, tsconfig,
       // and toolchain (`mise -C packages/storybook`). The plugin packages
-      // (packages/plugin-*) are root Bun workspaces and are linted here.
+      // (packages/plugin-*, packages/connector-kit) are root Bun workspaces
+      // and are linted here.
       "packages/storybook/**",
       // Parked code (kept in git, not part of the build): see parked/mcp/README.md.
       "parked/**",

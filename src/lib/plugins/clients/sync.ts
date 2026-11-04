@@ -1,8 +1,8 @@
 /**
  * Keep client apps' own MCP configuration in step with Maximal's plugins.
  *
- * A plugin's MCP endpoint (`/mcp/<id>`) is desired in a client when the
- * plugin is on (`plugins.<id>.enabled`), the user chose that client for it
+ * A connector's MCP endpoint (`/mcp/<id>`) is desired in a client when the
+ * connector is on (`plugins.<id>.enabled`), the user chose that client for it
  * (`plugins.<id>.clients`), and Maximal's integration for the client is on.
  * The client's configurator only knows how to read and write its own config;
  * this module computes the desired set and records which entries Maximal
@@ -158,9 +158,18 @@ export function syncPluginClient(
   return pass
 }
 
+/** Ids of the connectors (the only plugins served over MCP). */
 function knownPluginIds(): ReadonlySet<string> | undefined {
   const gateway = getPluginGateway()
-  return gateway && new Set(gateway.list().map((plugin) => plugin.id))
+  return (
+    gateway
+    && new Set(
+      gateway
+        .list()
+        .filter((plugin) => plugin.kind === "connector")
+        .map((plugin) => plugin.id),
+    )
+  )
 }
 
 async function reconcileNow(

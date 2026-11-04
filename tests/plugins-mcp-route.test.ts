@@ -95,6 +95,19 @@ const idle = definePlugin("idle", (ctx) => {
   })
 })
 
+const inner = definePlugin(
+  "inner",
+  (ctx) => {
+    ctx.tools.register({
+      name: "secret",
+      description: "Not for MCP clients.",
+      inputSchema: { type: "object" },
+      execute: () => Promise.resolve(text("secret")),
+    })
+  },
+  { kind: "extension" },
+)
+
 let plugins: TestGateway
 let app: Awaited<ReturnType<typeof serveApp>>
 const clients: Array<Client> = []
@@ -123,7 +136,10 @@ async function connect(
 }
 
 beforeEach(async () => {
-  plugins = await startTestGateway([demo, idle], ["demo", "idle"])
+  plugins = await startTestGateway(
+    [demo, idle, inner],
+    ["demo", "idle", "inner"],
+  )
   app = await serveApp(server.fetch)
 })
 
@@ -212,10 +228,70 @@ describe("/mcp/<pluginId>", () => {
     const { tools } = await client.listTools()
     expect(tools.map((tool) => tool.name)).toContain("extra")
   })
+})
+
+describe("/mcp/<pluginId>: permissions, kinds, setup and access", () => {
+  test("blocked tools vanish from the list (with list_changed) and refuse calls", async () => {
+    const client = await connect()
+    let changed = 0
+    client.setNotificationHandler("notifications/tools/list_changed", () => {
+      changed += 1
+    })
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    await plugins.gateway.setToolPermissions("demo", { echo: "block" })
+    await waitFor(() => changed > 0)
+    expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual([
+      "count",
+      "ask",
+      "boom",
+    ])
+    const refused = await client.callTool({
+      name: "echo",
+      arguments: { text: "hi" },
+    })
+    expect(refused.isError).toBe(true)
+    expect(refused.content).toEqual([
+      { type: "text", text: "This tool is blocked in Maximal settings." },
+    ])
+
+    const before = changed
+    await plugins.gateway.setToolPermissions("demo", { echo: null })
+    await waitFor(() => changed > before)
+    expect((await client.listTools()).tools.map((tool) => tool.name)).toContain(
+      "echo",
+    )
+    const allowed = await client.callTool({
+      name: "echo",
+      arguments: { text: "hi" },
+    })
+    expect(allowed.isError).toBeFalsy()
+  })
+
+  test("a plugin that isn't a connector has no MCP endpoint", async () => {
+    expect(plugins.gateway.get("inner")?.lifecycle).toBe("active")
+    const response = await fetch(`${app.origin}/mcp/inner`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    })
+    expect(response.status).toBe(404)
+    expect(await response.json()).toMatchObject({
+      error: { code: "MCP_ENDPOINT_NOT_FOUND" },
+    })
+  })
 
   test("a plugin that registered no tools yet lists none", async () => {
     const client = await connect("idle")
     expect((await client.listTools()).tools).toEqual([])
+  })
+
+  test("calling a remembered tool while the connector needs setup says why", async () => {
+    const client = await connect("idle")
+    const result = await client.callTool({ name: "retrieve", arguments: {} })
+    expect(result.isError).toBe(true)
+    expect(result.content).toEqual([
+      { type: "text", text: "IDLE isn't ready in Maximal: Sign in first." },
+    ])
   })
 
   test("turning the plugin off closes its sessions and 404s the endpoint", async () => {

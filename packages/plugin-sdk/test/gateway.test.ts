@@ -11,13 +11,24 @@ function source(relative: string): string {
 /** Import/export specifiers that are not type-only. */
 function runtimeSpecifiers(text: string): Array<string> {
   const statements =
-    text.match(/^(?:import|export)\b[^;]+?from\s+["'][^"']+["']/gm) ?? []
+    // A statement never spans the start of the next import/export line.
+    text.match(
+      /^(?:import|export)\b(?:(?!^(?:import|export)\b)[^;])+?from\s+["'][^"']+["']/gm,
+    ) ?? []
   return statements
     .filter((statement) => !/^(?:import|export)\s+type\b/.test(statement))
     .map((statement) => /from\s+["']([^"']+)["']/.exec(statement)?.[1] ?? "")
 }
 
 describe("gateway seam", () => {
+  test("the runtime-import heuristic sees value imports and skips type-only ones", () => {
+    expect(
+      runtimeSpecifiers(
+        'import { a } from "a"\nexport { b } from "b"\nexport type { c } from "c"\nimport type { d } from "d"',
+      ),
+    ).toEqual(["a", "b"])
+  })
+
   test("gateway.ts has no runtime imports", () => {
     expect(runtimeSpecifiers(source("../src/gateway.ts"))).toEqual([])
   })
@@ -31,6 +42,17 @@ describe("gateway seam", () => {
     )
     expect(runtimeSpecifiers(source("../src/types.ts"))).toEqual([])
     expect(runtimeSpecifiers(source("../src/errors.ts"))).toEqual([])
+  })
+
+  test("PluginGatewayError carries config issues", () => {
+    const error = new PluginGatewayError("invalid-config", "workiq", "bad", {
+      issues: [{ path: "endpoint", message: "Invalid URL" }],
+    })
+    expect(error.issues).toEqual([{ path: "endpoint", message: "Invalid URL" }])
+    expect(isPluginGatewayError(error)).toBe(true)
+    expect(
+      new PluginGatewayError("unknown-tool", "x", "y").issues,
+    ).toBeUndefined()
   })
 
   test("PluginGatewayError carries code and plugin id", () => {

@@ -53,6 +53,8 @@ import {
   AuthStatus,
   DiagnosticsResponse,
   ModelsListResponse,
+  PluginDetailView,
+  PluginsListResponse,
   UpdateStatusResponse,
 } from "../src/lib/config/settings-types"
 import { SessionsResponse } from "../src/lib/token-usage/sessions-schema"
@@ -62,6 +64,7 @@ import {
   SCENARIOS,
   type ScenarioId,
   defaultScenarioId,
+  listItem,
   resolveScenario,
 } from "./ui-harness-fixtures"
 
@@ -91,6 +94,8 @@ function assertFixtures(): void {
       ["api-keys", ApiKeysListResponse, (s) => s.apiKeys],
       ["apps", AppsListResponse, (s) => s.apps],
       ["models", ModelsListResponse, (s) => s.models],
+      ["plugins", PluginsListResponse, (s) => ({ plugins: s.connectors.map(listItem) })],
+      ["plugins/:id", PluginDetailView.array(), (s) => s.connectors],
       ["token-usage/sessions", SessionsResponse, (s) => s.dashboard.sessions()],
     ]
   let failures = 0

@@ -78,7 +78,9 @@ function hostServices(): HostServices {
 }
 
 export interface ComposePluginsOptions {
-  /** The plugin set; the built-ins by default (tests pass their own). */
+  /** The plugin set; the built-ins by default. Tests and the connectors
+   *  bench (`scripts/bench/connectors.ts`) pass their own — the only way to
+   *  swap plugins; nothing in production reads an override. */
   plugins?: ReadonlyArray<PluginModule>
   /** Defaults to `<app dir>/plugins`. */
   storageRoot?: string

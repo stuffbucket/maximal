@@ -23,6 +23,7 @@ import {
 import {
   isPluginGatewayError,
   type PluginGateway,
+  type PluginGatewayError,
   type PluginGatewayEvent,
   type ToolCallContext,
   type ToolDefinitionPublic,
@@ -85,6 +86,28 @@ function notReady(displayName: string, reason: string): CallToolResult {
       },
     ],
   }
+}
+
+/**
+ * The answer to a call the gateway refused. An unknown tool is a protocol
+ * error — unless the connector isn't ready (signed out, not entitled): then
+ * it is a tool the client remembers from before, and the result says why.
+ */
+function refusal(
+  gateway: PluginGateway,
+  pluginId: string,
+  error: PluginGatewayError,
+): CallToolResult {
+  const snapshot = gateway.get(pluginId)
+  const settingUp =
+    snapshot?.status !== undefined && snapshot.status.state !== "ready"
+  if (error.code === "unknown-tool" && !settingUp) {
+    throw new ProtocolError(ProtocolErrorCode.InvalidParams, error.message)
+  }
+  return notReady(
+    snapshot?.displayName ?? pluginId,
+    snapshot?.status?.summary ?? snapshot?.error ?? error.message,
+  )
 }
 
 /** Pass a body through, calling `settled` once it ends, errors, or the
@@ -344,14 +367,7 @@ export class McpSessions {
       )
     } catch (error) {
       if (!isPluginGatewayError(error)) throw error
-      if (error.code === "unknown-tool") {
-        throw new ProtocolError(ProtocolErrorCode.InvalidParams, error.message)
-      }
-      const snapshot = gateway.get(pluginId)
-      return notReady(
-        snapshot?.displayName ?? pluginId,
-        snapshot?.status?.summary ?? snapshot?.error ?? error.message,
-      )
+      return refusal(gateway, pluginId, error)
     }
     const advertised = gateway
       .listTools(pluginId)
@@ -369,7 +385,10 @@ export class McpSessions {
   }
 
   #onGatewayEvent(gateway: PluginGateway, event: PluginGatewayEvent): void {
-    if (event.type === "status") return
+    // `tools` covers registrations and permission changes; `settings` and
+    // `status` never change the MCP-visible list on their own (a config
+    // change reloads the plugin, which arrives as `lifecycle`).
+    if (event.type !== "tools" && event.type !== "lifecycle") return
     const sessions = this.#forPlugin(event.pluginId)
     if (sessions.length === 0) return
     if (gateway.get(event.pluginId)?.enabled !== true) {

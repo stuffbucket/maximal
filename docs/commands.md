@@ -21,6 +21,7 @@ bun test             # Run all tests (root suite under tests/)
 bun test tests/foo.test.ts  # Run a single test file
 bun run plugins:typecheck   # tsc in every packages/plugin-* workspace
 bun run plugins:test        # bun test in every packages/plugin-* workspace
+bun run bench:connectors    # real server + Work IQ against a fake upstream (see "Connectors bench")
 
 # Aggregates
 bun run check:fast   # ensure:ui-embed + lint:fast + typecheck + plugins:typecheck + lint:all + casts:check + check:tokens (the per-edit inner loop)
@@ -98,11 +99,44 @@ bun scripts/strip-lockfile-hosts.ts --check  # what CI runs
 Editing a package's `.pnpmfile.cjs` changes its lockfile's `pnpmfileChecksum`:
 run `pnpm install` in that package and commit the lockfile with it.
 
+## Connectors bench
+
+Run the whole Connectors experience — Settings → Integrations → Connectors and
+the `/mcp/workiq` endpoint — with the real Work IQ connector but no Microsoft
+account, tenant or network:
+
+```sh
+bun run build:ui                                # once, for the Settings page
+bun run bench:connectors                        # serve until Ctrl-C
+bun run bench:connectors --drive                # scripted MCP session, pass/fail table, exit 1 on failure
+bun run bench:connectors --entitlement=partial  # tenant allows only the read-only tools
+bun run bench:connectors --entitlement=none     # account not enabled: the admin error state
+bun run bench:connectors --port=4242 --verbose
+```
+
+It starts a fake Work IQ MCP server (the connector kit's fake, seeded with the
+Work IQ fixture: 14 tools, read-only 6 / write-delete 5 / other 3, canned fake
+answers) and the real Maximal server (`runServer`) composing the Work IQ
+connector pointed at it, with a sign-in that completes instantly as
+bench@contoso.com. Everything runs in a throwaway user environment (HOME, app
+data, Claude config) that is deleted on exit, so nothing touches your real
+setup. It prints the Settings URL, the MCP endpoint and an API key (for
+attribution; "Block unknown connections" stays off so the page works in a
+browser) and a ready-to-paste `claude mcp add` line.
+
+`--drive` accepts the terms and signs in through the Settings API, checks the
+tool groups, lists tools over MCP, blocks a tool (the client gets
+`tools/list_changed`, the tool disappears, a call is refused), unblocks it,
+calls an allowed tool, injects a policy-denied (HTTP 403) call that must come
+back as an `isError` result while the connector stays ready, and prints a
+pass/fail table. `tests/bench-connectors.test.ts` runs the same drive
+in-process under `bun test`.
+
 ## Parked MCP broker
 
 The MCP broker and its `maximal mcp` command are parked under `parked/mcp/`
 and are not built or tested. Work IQ is now a built-in plugin (Settings →
-Plugins; see [`workiq.md`](workiq.md)).
+Integrations → Connectors; see [`workiq.md`](workiq.md)).
 
 ## Fast UI iteration
 

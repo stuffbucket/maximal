@@ -112,7 +112,7 @@ rules, in order:
 ## Empty states
 
 Where a list will be, an `EmptyState` (`components/EmptyState.tsx`,
-`.empty`) says what's missing and how to get it: a title ("No plugins
+`.empty`) says what's missing and how to get it: a title ("No connectors
 available"), a sentence or two, and the one action that fills it if
 the user can take it here. Dashed border, not a card — it holds no
 entity. Don't show an empty state and an error at the same time; the
@@ -148,27 +148,52 @@ naming the entity and a quiet `title` tooltip. A destructive one reads
 red (`btn--ghost-destructive`) and always confirms in a `ConfirmDialog`
 (`tone="danger"`) before acting.
 
-## Plugin card
+## Connectors
 
-`PluginCard` (`shell/src/ui/features/plugins/`) is an `app-card` with the
-accordion head above: name, switch, twirldown. Under the head, in view
-whatever the twirldown says (a "Sign in" button must not hide behind a
-fold): the plugin's description, then its own report — a status line
-(`.plugin-dot` in a status token, `--status-success` / `-warning` / `-info`
-/ `-error` for ready / needs-setup / working / error, with the state also
-named for screen readers) and its detail, facts (`.kv`) and action buttons.
-A plugin's `kind` picks the button: primary, secondary, or destructive as
-a ghost that reads red; an action with `confirm` asks in a `ConfirmDialog`
-first. A plugin that failed to start shows an error `Callout` instead and
-nothing else. Off shows no status line (the switch says it).
+Settings → Integrations → Connectors (`shell/src/ui/features/connectors/`).
 
-The twirldown folds the rest into hairline-divided sections inside the
-card, never nested cards: which apps get the plugin (a `LinkCheckbox` per
-client, with its reason when unavailable), its endpoint address with a
-Copy button, and its tools as a `<details>` (name, description, a
-`.chip` for read-only, `.chip--danger` for destructive). Text a plugin
-supplies is shown as written; only http(s) addresses in it become links,
-opened in the system browser.
+**List.** A `.table` with Connector (glyph tile + name), Type ("Built-in"
+or "Plugin") and Status columns. The name is the row's button (the Tab
+stop; Enter opens), and a click anywhere on the row opens it too. Status
+is a tick (`--status-success`, named for screen readers) when the
+connector is ready, else a `.connector-dot` in a status token plus a
+short word (Off, Needs setup, Signing in, Starting, Error, Failed), and a
+quiet chevron.
+
+**Page.** Opening a row replaces the list in place (`#connectors/<id>`,
+mirrored with `replaceState`); "← Your connectors" goes back and returns
+focus to the row. Opening from the list moves focus to the page's heading.
+No cards: the page is the entity, laid out as hairline-divided
+typographic sections:
+
+- Head: tile, name, on/off switch; then the description and the
+  connector's own report — status line, detail, facts (`.kv`), action
+  buttons. The connector's `kind` of action picks the button (primary,
+  secondary, or destructive as a ghost that reads red); an action with
+  `confirm` asks in a `ConfirmDialog` first. One that failed to start
+  shows an error `Callout` instead. Off shows no status line.
+- Connect to apps: a `LinkCheckbox` per client and the endpoint address
+  with a Copy button.
+- Tool permissions: the tools in three groups (Read-only, Write/delete,
+  Other), each a twirl with a `.count-badge` and a menu button (Always
+  allow / Blocked set the whole group; Custom marks a mixed group, checked
+  and never an action). A tool row has its title, a two-state
+  `.perm-seg` radio group (Allowed / Blocked: glyph-only, so each option
+  has a name and a tooltip; arrow keys move and choose), its description
+  clamped to two lines with Show more, and twirls for its inputs and,
+  nested, its full input schema (`--code-block-max`, scrolls inside).
+  Changes save as made and show at once; a failed save puts the control
+  back and says why in a `ProblemCallout`. Tools from the cached catalog
+  carry a quiet `.panel-status` line saying when they were last seen.
+- Configuration: a `.form` generated from the connector's config schema;
+  advanced fields fold under a twirl (open when the connector failed to
+  start). Save / Revert; the connector's validation lands as a caption
+  under the field it names.
+- About: where it connects, how it signs in, its terms and website.
+
+Text a connector supplies is shown as written; only http(s) addresses in
+it become links, opened in the system browser. Glyphs are Maximal's own
+(`glyphs.tsx`).
 
 ## Focus rings
 

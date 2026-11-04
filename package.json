@@ -25,6 +25,7 @@
     "dist"
   ],
   "workspaces": [
+    "packages/connector-kit",
     "packages/plugin-sdk",
     "packages/plugin-host",
     "packages/plugin-workiq"
@@ -40,6 +41,7 @@
     "app:windows:build": "bun run scripts/dev/windows-cross.ts build",
     "app:windows:check": "bun run scripts/dev/windows-cross.ts check",
     "app:windows:setup": "bun run scripts/dev/windows-cross.ts setup",
+    "bench:connectors": "bun run scripts/bench/connectors.ts",
     "build": "bun build src/main.ts --target=bun --outdir dist",
     "build:ui": "bun run scripts/build-ui.ts",
     "casts": "bun run scripts/find-casts.ts",
@@ -57,8 +59,8 @@
     "lint:fast": "oxlint",
     "mutate": "stryker run",
     "prepack": "bun run build",
-    "plugins:test": "bun run --filter './packages/plugin-*' test",
-    "plugins:typecheck": "bun run --filter './packages/plugin-*' typecheck",
+    "plugins:test": "bun run --filter './packages/plugin-*' --filter './packages/connector-kit' test",
+    "plugins:typecheck": "bun run --filter './packages/plugin-*' --filter './packages/connector-kit' typecheck",
     "prepare": "bun run ensure:ui-embed && simple-git-hooks && cd shell && bun install",
     "release:manual": "bumpp",
     "render-formula": "bun scripts/sync-homebrew-formula.ts",

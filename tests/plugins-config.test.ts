@@ -8,6 +8,8 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { type AppConfig, getConfig, writeConfig } from "~/lib/config/config"
 import { validateAppConfig } from "~/lib/config/config-schema"
 import {
+  dropLegacyPluginConfig,
+  legacyPluginConfigs,
   migrateLegacyWorkIq,
   migratePluginSettings,
   updatePluginEntry,
@@ -65,14 +67,53 @@ describe("plugins config schema", () => {
 })
 
 describe("updatePluginEntry", () => {
-  test("changes only what is given and de-duplicates clients", () => {
-    writeConfig({ plugins: { workiq: { enabled: false, config: { a: 1 } } } })
+  test("changes only what is given, keeps unknown keys, de-duplicates clients", () => {
+    writeConfig(
+      validateAppConfig({ plugins: { workiq: { enabled: false, note: 1 } } }),
+    )
     updatePluginEntry("workiq", { clients: ["claude-code", "claude-code"] })
     updatePluginEntry("workiq", { enabled: true })
-    expect(getConfig().plugins?.workiq).toEqual({
+    const entry: unknown = getConfig().plugins?.workiq
+    expect(entry).toEqual({
       enabled: true,
-      config: { a: 1 },
+      note: 1,
       clients: ["claude-code"],
+    })
+  })
+})
+
+describe("legacy plugins.<id>.config", () => {
+  test("finds every entry that still has one (even a null)", () => {
+    const config = validateAppConfig({
+      plugins: {
+        workiq: { enabled: true, config: { endpoint: "https://x.test/mcp" } },
+        other: { enabled: true },
+        odd: { config: null },
+      },
+    })
+    expect(legacyPluginConfigs(config)).toEqual([
+      { id: "workiq", config: { endpoint: "https://x.test/mcp" } },
+      { id: "odd", config: null },
+    ])
+    expect(legacyPluginConfigs({})).toEqual([])
+  })
+
+  test("dropping it keeps the rest of the entry", () => {
+    writeConfig(
+      validateAppConfig({
+        plugins: {
+          workiq: {
+            enabled: true,
+            clients: ["claude-code"],
+            config: { a: 1 },
+          },
+        },
+      }),
+    )
+    dropLegacyPluginConfig("workiq")
+    dropLegacyPluginConfig("missing")
+    expect(getConfig().plugins).toEqual({
+      workiq: { enabled: true, clients: ["claude-code"] },
     })
   })
 })

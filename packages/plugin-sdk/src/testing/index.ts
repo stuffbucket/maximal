@@ -1,7 +1,9 @@
 /**
  * Test helpers for plugin authors: run a plugin under a real cordis
  * `Context` with the same `tools` / `surface` services the host uses, an
- * in-memory `storage`, and a recording fake `host`.
+ * in-memory (or temp-dir) `storage`, and a recording fake `host`. Settings
+ * are negotiated like the host does: without an explicit config, `load`
+ * reads the plugin's `settings.json` (migrating it with `migrateSettings`).
  *
  * ```ts
  * const plugin = await loadPlugin(myPlugin, { greeting: "hi" })
@@ -14,14 +16,25 @@
  * ```
  */
 import { Context, type Fiber } from "@deepseek-ai/cordis"
+import {
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs"
+import path from "node:path"
 
 import type { PluginModule } from "../index"
 import type {
   HostServices,
   PluginLogger,
+  PluginManifest,
   PluginStatus,
+  PluginToolView,
   ToolCallContext,
   ToolDefinition,
+  ToolPermission,
   ToolResult,
 } from "../types"
 
@@ -29,19 +42,28 @@ import { PluginContractError } from "../errors"
 import {
   activatePlugin,
   assertPluginDependencies,
+  createFileStorage,
   deactivatePlugin,
   installPluginServices,
   invokeTool,
+  loadPluginSettings,
+  newSettingsDocument,
+  normalizeManifest,
   parsePluginConfig,
+  parseSettingsDocument,
   PluginRuntime,
+  storedPermissions,
   toCordisPlugin,
+  toolView,
   validatePluginModule,
+  writePluginSettings,
   type PluginRuntimeEvent,
+  type PluginSettingsDocument,
   type PluginStorageBackend,
 } from "../runtime"
-import { PLUGIN_SERVICE_NAMES } from "../types"
+import { PLUGIN_SERVICE_NAMES, PLUGIN_SETTINGS_FILE } from "../types"
 
-export type { PluginRuntimeEvent } from "../runtime"
+export type { PluginRuntimeEvent, PluginSettingsDocument } from "../runtime"
 
 export interface LogRecord {
   level: keyof PluginLogger
@@ -56,13 +78,16 @@ export interface FakeHost extends HostServices {
   readonly logs: Array<LogRecord>
 }
 
-/** In-memory `ctx.storage` backend, inspectable per plugin id. */
-export interface MemoryStorage extends PluginStorageBackend {
-  /** Snapshot of a plugin's files. */
+/** `ctx.storage` backend (memory or a temp dir), inspectable per plugin id. */
+export interface TestbedStorage extends PluginStorageBackend {
+  /** Snapshot of a plugin's files (including the host-owned `settings.json`). */
   files(pluginId: string): Record<string, string>
   /** Seed or overwrite a file directly (bypasses the plugin). */
   seed(pluginId: string, name: string, text: string): void
 }
+
+/** @deprecated Use `TestbedStorage`. */
+export type MemoryStorage = TestbedStorage
 
 export interface TestbedOptions {
   appVersion?: string
@@ -70,10 +95,27 @@ export interface TestbedOptions {
   openExternal?: (url: string) => void | Promise<void>
   /** Initial storage: `{ [pluginId]: { [name]: text } }`. */
   storage?: Record<string, Record<string, string>>
+  /**
+   * Back storage with real files under this directory (e.g. a temp dir)
+   * instead of memory — same backend as the host: `<dir>/<id>/`, 0700/0600.
+   */
+  storageDir?: string
+}
+
+/** What `Testbed.writeSettings` puts in a plugin's `settings.json`. */
+export interface TestSettings {
+  /** Defaults to `manifest.settingsVersion`. */
+  version?: number
+  config?: unknown
+  permissions?: Record<string, ToolPermission>
 }
 
 export interface LoadedPlugin {
   readonly id: string
+  /** The validated, normalised manifest. */
+  readonly manifest: Readonly<PluginManifest>
+  /** The validated config handed to `apply`. */
+  readonly config: unknown
   readonly fiber: Fiber
   tools(): Array<ToolDefinition>
   tool(name: string): ToolDefinition | undefined
@@ -87,6 +129,14 @@ export interface LoadedPlugin {
     input?: Record<string, unknown>,
     call?: Partial<ToolCallContext>,
   ): Promise<ToolResult>
+  /**
+   * Registered tools with group and effective permission, resolved like
+   * the host: `permissions` (default: the current `settings.json`) >
+   * `defaultToolPermission` > `allow`.
+   */
+  toolViews(
+    permissions?: Readonly<Record<string, ToolPermission>>,
+  ): Promise<Array<PluginToolView>>
   status(): PluginStatus | undefined
   /** Registered surface action ids. */
   actions(): Array<string>
@@ -101,16 +151,27 @@ export interface Testbed {
   readonly ctx: Context
   readonly runtime: PluginRuntime
   readonly host: FakeHost
-  readonly storage: MemoryStorage
+  readonly storage: TestbedStorage
   /** Every `tools` / `status` change, in order. */
   readonly events: Array<PluginRuntimeEvent>
   /**
-   * Validate the module (shape, injected services), validate `config`
-   * (`undefined` ⇒ `{}`), and start it. Rejects with a
-   * `PluginContractError` (`invalid-module` / `missing-service` /
-   * `invalid-config`) or with whatever `apply` threw.
+   * Validate the module (shape, manifest, injected services), negotiate its
+   * config, and start it. With `config` given, that value is validated and
+   * used (the settings file is not consulted for config). Otherwise the
+   * plugin's `settings.json` is read like the host does — envelope check,
+   * `migrateSettings`, validation, write-back when migrated; no file ⇒ `{}`.
+   * Rejects with a `PluginContractError` (`invalid-module` /
+   * `invalid-manifest` / `missing-service` / `invalid-config` /
+   * `invalid-settings`) or with whatever `apply` threw.
    */
   load<C>(module: PluginModule<C>, config?: unknown): Promise<LoadedPlugin>
+  /** Write a `settings.json` for `module` (envelope filled in). */
+  writeSettings(
+    module: Pick<PluginModule, "name" | "manifest">,
+    settings: TestSettings,
+  ): Promise<void>
+  /** The parsed `settings.json` of a plugin, or `undefined` when absent. */
+  readSettings(pluginId: string): Promise<PluginSettingsDocument | undefined>
   /** Dispose every loaded plugin and the root context. Idempotent. */
   dispose(): Promise<void>
 }
@@ -140,9 +201,33 @@ function createFakeHost(options: TestbedOptions): FakeHost {
   }
 }
 
-function createMemoryStorage(
-  initial: TestbedOptions["storage"],
-): MemoryStorage {
+function createDirStorage(root: string): TestbedStorage {
+  const backend = createFileStorage(root)
+  return {
+    ...backend,
+    files(pluginId) {
+      const dir = backend.dir(pluginId)
+      let names: Array<string>
+      try {
+        names = readdirSync(dir)
+      } catch {
+        return {}
+      }
+      return Object.fromEntries(
+        names
+          .filter((name) => statSync(path.join(dir, name)).isFile())
+          .map((name) => [name, readFileSync(path.join(dir, name), "utf8")]),
+      )
+    },
+    seed(pluginId, name, text) {
+      const dir = backend.dir(pluginId)
+      mkdirSync(dir, { recursive: true, mode: 0o700 })
+      writeFileSync(path.join(dir, name), text, { mode: 0o600 })
+    },
+  }
+}
+
+function createMemoryStorage(): TestbedStorage {
   const data = new Map<string, Map<string, string>>()
   const bucket = (pluginId: string) => {
     let files = data.get(pluginId)
@@ -151,10 +236,6 @@ function createMemoryStorage(
       data.set(pluginId, files)
     }
     return files
-  }
-  for (const [pluginId, files] of Object.entries(initial ?? {})) {
-    for (const [name, text] of Object.entries(files))
-      bucket(pluginId).set(name, text)
   }
   return {
     dir: (pluginId) => `/memory/plugins/${pluginId}`,
@@ -175,13 +256,63 @@ function createMemoryStorage(
   }
 }
 
+// eslint-disable-next-line max-params -- private helper; all four inputs are required
+async function negotiateConfig(
+  storage: PluginStorageBackend,
+  plugin: PluginModule,
+  manifest: Readonly<PluginManifest>,
+  config: unknown,
+): Promise<unknown> {
+  const fail = (code: "invalid-config" | "invalid-settings", message: string) =>
+    new PluginContractError(code, message, { pluginId: plugin.name })
+  if (config !== undefined) {
+    const parsed = await parsePluginConfig(plugin, config)
+    if (!parsed.ok) throw fail("invalid-config", parsed.message)
+    return parsed.value
+  }
+  const loaded = await loadPluginSettings(storage, plugin, manifest)
+  if (!loaded.ok) throw fail("invalid-settings", loaded.error)
+  if (!loaded.parsed.ok) throw fail("invalid-config", loaded.parsed.message)
+  return loaded.parsed.value
+}
+
+async function readTestSettings(
+  storage: PluginStorageBackend,
+  pluginId: string,
+): Promise<PluginSettingsDocument | undefined> {
+  const text = await storage.readText(pluginId, PLUGIN_SETTINGS_FILE)
+  return text === undefined ? undefined : parseSettingsDocument(pluginId, text)
+}
+
+async function writeTestSettings(
+  storage: PluginStorageBackend,
+  module: Pick<PluginModule, "name" | "manifest">,
+  settings: TestSettings,
+): Promise<void> {
+  const document = newSettingsDocument({
+    id: module.name,
+    settingsVersion: settings.version ?? module.manifest.settingsVersion,
+  })
+  if (settings.config !== undefined) document.config = settings.config
+  if (settings.permissions !== undefined)
+    document.tools = { permissions: { ...settings.permissions } }
+  await writePluginSettings(storage, document)
+}
+
 /** A root cordis context with the plugin services installed. */
 export function createTestbed(options: TestbedOptions = {}): Testbed {
   const events: Array<PluginRuntimeEvent> = []
   const runtime = new PluginRuntime({ onChange: (event) => events.push(event) })
   const ctx = new Context()
   const host = createFakeHost(options)
-  const storage = createMemoryStorage(options.storage)
+  const storage =
+    options.storageDir === undefined ?
+      createMemoryStorage()
+    : createDirStorage(options.storageDir)
+  for (const [pluginId, files] of Object.entries(options.storage ?? {})) {
+    for (const [name, text] of Object.entries(files))
+      storage.seed(pluginId, name, text)
+  }
   installPluginServices(ctx, runtime, { host, storage })
   const loaded = new Set<LoadedPlugin>()
   let disposing: Promise<void> | undefined
@@ -192,12 +323,9 @@ export function createTestbed(options: TestbedOptions = {}): Testbed {
   ): Promise<LoadedPlugin> {
     if (disposing) throw new Error("Testbed is disposed.")
     const plugin = validatePluginModule(module)
+    const manifest = normalizeManifest(plugin.name, plugin.manifest)
     assertPluginDependencies(plugin, PLUGIN_SERVICE_NAMES)
-    const parsed = await parsePluginConfig(plugin, config)
-    if (!parsed.ok)
-      throw new PluginContractError("invalid-config", parsed.message, {
-        pluginId: plugin.name,
-      })
+    const value = await negotiateConfig(storage, plugin, manifest, config)
     const id = plugin.name
     const lifetime = new AbortController()
     const fiber = await activatePlugin(
@@ -205,11 +333,13 @@ export function createTestbed(options: TestbedOptions = {}): Testbed {
       runtime,
       id,
       toCordisPlugin(plugin),
-      parsed.value,
+      value,
     )
     let stopped: Promise<void> | undefined
     const handle: LoadedPlugin = {
       id,
+      manifest,
+      config: value,
       fiber,
       tools: () => runtime.tools(id),
       tool: (name) => runtime.tool(id, name),
@@ -221,6 +351,11 @@ export function createTestbed(options: TestbedOptions = {}): Testbed {
             AbortSignal.any([call.signal, lifetime.signal])
           : lifetime.signal
         return await invokeTool(tool, input, { ...call, signal })
+      },
+      async toolViews(permissions) {
+        const explicit =
+          permissions ?? storedPermissions(await readTestSettings(storage, id))
+        return runtime.tools(id).map((tool) => toolView(plugin, tool, explicit))
       },
       status: () => runtime.status(id),
       actions: () => runtime.actionIds(id),
@@ -252,6 +387,9 @@ export function createTestbed(options: TestbedOptions = {}): Testbed {
     storage,
     events,
     load,
+    writeSettings: (module, settings) =>
+      writeTestSettings(storage, module, settings),
+    readSettings: (pluginId) => readTestSettings(storage, pluginId),
     dispose() {
       disposing ??= (async () => {
         await Promise.all([...loaded].map((plugin) => plugin.dispose()))

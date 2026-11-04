@@ -15,6 +15,8 @@ import { scenarioIds, scenarioLabel } from "../mock/fetch-mock";
  */
 interface Args {
   section: SettingsSection;
+  /** A section's sub-page (a connector's id under Connectors). */
+  page?: string;
   scenario: ScenarioId;
   /** Backend paths that answer 500, for error states. */
   fail?: Array<string>;
@@ -36,6 +38,7 @@ const meta = {
     <WindowFrame
       surface="settings"
       section={args.section}
+      page={args.page}
       scenario={args.scenario}
       fail={args.fail}
       theme={globals.theme as string}
@@ -50,19 +53,26 @@ const at = (section: SettingsSection, scenario: ScenarioId = "signed-in", fail?:
   args: { section, scenario, fail },
 });
 
+/** One connector's page, opened through its `#connectors/<id>` link. */
+const connector = (scenario: ScenarioId, id = "workiq"): Story => ({
+  args: { section: "connectors", page: id, scenario },
+});
+
 export const AccountSignedIn = at("account");
 export const AccountSignedOut = at("account", "signed-out");
 export const AccountSignInPending = at("account", "sign-in-pending");
 export const AccountSignInError = at("account", "auth-error");
 export const AccountUpstreamRejection = at("account", "upstream-rejection");
 export const Apps = at("apps");
-export const PluginsOff = at("plugins", "plugins-off");
-export const PluginsTermsNeeded = at("plugins", "plugins-terms-needed");
-export const PluginsSignInNeeded = at("plugins", "plugins-signin-needed");
-export const PluginsWorking = at("plugins", "plugins-working");
-export const PluginsReady = at("plugins", "plugins-ready");
-export const PluginsError = at("plugins", "plugins-error");
-export const PluginsFailed = at("plugins", "plugins-failed");
+export const ConnectorsOff = at("connectors", "connectors-off");
+export const ConnectorsList = at("connectors", "connectors-list");
+export const ConnectorReady = connector("connectors-detail-ready");
+export const ConnectorTermsNeeded = connector("connectors-detail-terms-needed");
+export const ConnectorSignInNeededCached = connector("connectors-detail-signin-needed-cached");
+export const ConnectorWorking = connector("connectors-detail-working");
+export const ConnectorError = connector("connectors-detail-error");
+export const ConnectorFailed = connector("connectors-detail-failed");
+export const ConnectorConfigError = connector("connectors-detail-config-error");
 export const Endpoint = at("endpoint");
 export const ApiClients = at("api-clients");
 export const Models = at("models");
@@ -73,7 +83,7 @@ export const FreshInstall = at("apps", "fresh-install");
 
 // ---- section-level load failures (the banner across the section) ----------
 export const AppsLoadError = at("apps", "signed-in", ["/settings/api/apps"]);
-export const PluginsLoadError = at("plugins", "signed-in", ["/settings/api/plugins"]);
+export const ConnectorsLoadError = at("connectors", "signed-in", ["/settings/api/plugins"]);
 export const ApiClientsLoadError = at("api-clients", "signed-in", ["/settings/api/api-keys"]);
 export const ModelsLoadError = at("models", "signed-in", ["/settings/api/models"]);
 export const DiagnosticsLoadError = at("diagnostics", "signed-in", ["/settings/api/diagnostics"]);

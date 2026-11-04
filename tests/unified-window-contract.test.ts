@@ -66,15 +66,17 @@ describe("unified Settings, Dashboard, Sessions & Appearance contract", () => {
 
   test("keeps endpoint and API keys at the bottom of Integrations", () => {
     expect(SETTINGS_MAIN_TS).toContain(
-      'integrations: ["apps", "plugins", "endpoint", "api-clients"]',
+      'integrations: ["apps", "connectors", "endpoint", "api-clients"]',
     )
     expect(SETTINGS_MAIN_TS).toContain('"models-keys": ["models"]')
-    const plugins = SETTINGS_HTML.indexOf('data-section="plugins"')
+    const connectors = SETTINGS_HTML.indexOf('data-section="connectors"')
     const endpoint = SETTINGS_HTML.indexOf('data-section="endpoint"')
     const apiClients = SETTINGS_HTML.indexOf('data-section="api-clients"')
     const models = SETTINGS_HTML.indexOf('data-section="models"')
-    expect(SETTINGS_HTML.indexOf('data-section="apps"')).toBeLessThan(plugins)
-    expect(plugins).toBeLessThan(endpoint)
+    expect(SETTINGS_HTML.indexOf('data-section="apps"')).toBeLessThan(
+      connectors,
+    )
+    expect(connectors).toBeLessThan(endpoint)
     expect(endpoint).toBeLessThan(apiClients)
     expect(apiClients).toBeLessThan(models)
   })

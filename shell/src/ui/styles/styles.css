@@ -2614,116 +2614,219 @@ html[data-os="macos"] .topbar {
   color: var(--text-muted);
 }
 
-/* ---- Plugin card ----
-   An app-card (components.md → Cards) for one plugin: name on the left; on
-   the right the on/off switch, then the twirldown. Under the head: the
-   plugin's description, then what it says about itself (state line, detail,
-   facts, buttons), always in view. The twirldown folds away the rest, laid
-   out as sections divided by hairlines (never nested cards): which apps get
-   the plugin, its endpoint, its tools. Open follows the switch
-   (PluginCard.tsx). */
-.plugin-card__title {
-  flex: 1 1 auto;
+/* ---- Connectors (features/connectors) ----
+   Settings → Integrations → Connectors. The list is a .table of rows (name,
+   type, status) whose name is the row's button. A connector's page replaces
+   the list in place: back link, head (tile, name, switch), what the
+   connector says about itself, then typographic sections divided by
+   hairlines — never cards (the page is the entity). */
+.connectors-panel {
   min-width: 0;
+}
+
+/* The tile behind a connector's glyph. */
+.connector-tile {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--size-xl);
+  height: var(--size-xl);
+  color: var(--text-strong);
+  background: var(--surface-control);
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-input);
+}
+
+.connector-tile svg {
+  width: var(--size-sm);
+  height: var(--size-sm);
+}
+
+.connector-tile--lg {
+  width: var(--size-2xl);
+  height: var(--size-2xl);
+  border-radius: var(--radius-card);
+}
+
+.connector-tile--lg svg {
+  width: var(--size-md);
+  height: var(--size-md);
+}
+
+/* List */
+.connector-table th:last-child,
+.connector-table td:last-child {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.connector-table td {
+  vertical-align: middle;
+}
+
+.connector-row {
+  cursor: pointer;
+  transition: background-color 150ms ease-out;
+}
+
+.connector-row:hover {
+  background: var(--surface-card);
+}
+
+.connector-row__open {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: 100%;
+  padding: 0;
+  font: inherit;
+  font-size: var(--text-base);
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+  text-align: start;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-chip);
+  cursor: pointer;
+}
+
+.connector-row__open:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.connector-row__name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.connector-row__type {
+  color: var(--text-base-color);
+}
+
+.connector-row__status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-base-color);
+}
+
+.connector-row__ok {
+  display: inline-flex;
+  color: var(--status-success);
+}
+
+.connector-row__ok svg,
+.connector-row__chevron svg {
+  width: var(--size-sm);
+  height: var(--size-sm);
+}
+
+.connector-row__chevron {
+  display: inline-flex;
+  margin-inline-start: var(--space-2);
+  color: var(--text-muted);
+}
+
+/* The state's dot. Color is never the only signal: the list names the
+   state beside it, the page's line names it for screen readers and says it
+   in words. Tones are the status tokens; off is muted. */
+.connector-dot {
+  flex: 0 0 auto;
+  width: var(--size-xs);
+  height: var(--size-xs);
+  border-radius: var(--radius-pill);
+  background: var(--text-muted);
+}
+
+.connector-dot--ready {
+  background: var(--status-success);
+}
+
+.connector-dot--needs-setup {
+  background: var(--status-warning);
+}
+
+.connector-dot--working {
+  background: var(--status-info);
+}
+
+.connector-dot--error {
+  background: var(--status-error);
+}
+
+/* Page */
+.connector-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.connector-detail__back {
+  gap: var(--space-2);
+  margin-inline-start: calc(-1 * var(--space-3));
+}
+
+.connector-detail__back svg {
+  width: var(--size-sm);
+  height: var(--size-sm);
+}
+
+.connector-detail__head {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-2);
+  gap: var(--space-3);
 }
 
-.plugin-card__title .app-card__name {
-  flex: 0 1 auto;
+.connector-detail__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-lg);
+  line-height: var(--leading-lg);
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+  border-radius: var(--radius-chip);
 }
 
-.plugin-card__saving {
+/* Focus lands here when the page opens (it isn't in the tab order); the
+   ring shows only when that came from the keyboard. */
+.connector-detail__name:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.connector-detail__control {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.connector-detail__saving {
   font-size: var(--text-sm);
   color: var(--text-muted);
 }
 
-.plugin-card .app-card__control {
-  gap: var(--space-3);
-}
-
-/* The twirldown: 200ms is the card-collapse timing (motion.md); the global
-   reduced-motion block zeroes it. */
-.plugin-card__twirl svg {
-  transition: transform 200ms ease-out;
-}
-
-.plugin-card__twirl[aria-expanded="true"] svg {
-  transform: rotate(180deg);
-}
-
-.plugin-card__body {
-  display: flex;
-  flex-direction: column;
-}
-
-.plugin-card__body[hidden] {
-  display: none;
-}
-
-.plugin-card__section {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding-block: var(--space-3);
-  border-block-start: var(--border-width-hairline) solid var(--border-subtle);
-}
-
-.plugin-card__heading {
+.connector-detail__desc {
   margin: 0;
   font-size: var(--text-sm);
-  font-weight: var(--weight-md);
   line-height: var(--leading-lg);
-  color: var(--text-strong);
+  color: var(--text-muted);
+  max-width: 65ch;
 }
 
-.plugin-card__clients {
-  margin: 0;
-  padding: 0;
-  border: 0;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.plugin-card__client {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  column-gap: var(--space-3);
-  row-gap: var(--space-1);
-  padding-block: var(--space-1);
-}
-
-.plugin-card__endpoint {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-3);
-}
-
-.plugin-card__url {
-  flex: 1 1 auto;
-  min-width: 0;
-  padding: var(--space-2) var(--space-3);
-  font-size: var(--text-sm);
-  color: var(--text-base-color);
-  background: var(--surface-control);
-  border: var(--border-width-hairline) solid var(--border-subtle);
-  border-radius: var(--radius-input);
-  overflow-wrap: anywhere;
-}
-
-/* What the plugin says about itself. */
-.plugin-status {
+/* What the connector says about itself. */
+.connector-status {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
 }
 
-.plugin-status__line {
+.connector-status__line {
   margin: 0;
   display: flex;
   align-items: flex-start;
@@ -2735,111 +2838,561 @@ html[data-os="macos"] .topbar {
   overflow-wrap: anywhere;
 }
 
-.plugin-status__detail {
+/* The dot sits on the first line of text. */
+.connector-status__line .connector-dot {
+  margin-block-start: calc((var(--text-base) * var(--leading-lg) - var(--size-xs)) / 2);
+}
+
+.connector-status__detail {
   margin: 0;
   font-size: var(--text-sm);
   line-height: var(--leading-lg);
   color: var(--text-muted);
-  /* The plugin's own text; keep the line breaks it wrote. */
+  /* The connector's own text; keep the line breaks it wrote. */
   white-space: pre-line;
   overflow-wrap: anywhere;
 }
 
-.plugin-status__actions {
+.connector-status__actions {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
 }
 
-.plugin-status__confirm {
+.connector-status__confirm {
   white-space: pre-line;
 }
 
-/* The state's dot sits on the first line of text. The color is never the
-   only signal: the state is also named for screen readers and the summary
-   says it in words. Tones are the status tokens. */
-.plugin-dot {
-  flex: 0 0 auto;
-  align-self: flex-start;
-  width: var(--size-xs);
-  height: var(--size-xs);
-  margin-block-start: calc((var(--text-base) * var(--leading-lg) - var(--size-xs)) / 2);
-  border-radius: var(--radius-pill);
-  background: var(--text-muted);
+/* A section of the page: a title, a quiet line, its content. */
+.connector-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-block-start: var(--space-4);
+  border-block-start: var(--border-width-hairline) solid var(--border-subtle);
+  min-width: 0;
 }
 
-.plugin-dot--ready {
-  background: var(--status-success);
+.connector-section__head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
 }
 
-.plugin-dot--needs-setup {
-  background: var(--status-warning);
-}
-
-.plugin-dot--working {
-  background: var(--status-info);
-}
-
-.plugin-dot--error {
-  background: var(--status-error);
-}
-
-/* Tools: folded away until asked for. */
-.plugin-tools__summary {
-  cursor: pointer;
-  width: max-content;
-  max-width: 100%;
-  font-size: var(--text-sm);
-  font-weight: var(--weight-md);
+.connector-section__title {
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: var(--weight-lg);
+  line-height: var(--leading-lg);
   color: var(--text-strong);
-  border-radius: var(--radius-chip);
 }
 
-.plugin-tools__summary:focus-visible {
+.connector-section__sub,
+.connector-section__hint {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-lg);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.connector-clients {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.connector-clients__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--space-3);
+  row-gap: var(--space-1);
+  padding-block: var(--space-1);
+}
+
+.connector-endpoint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.connector-endpoint__url {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text-base-color);
+  background: var(--surface-control);
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-input);
+  overflow-wrap: anywhere;
+}
+
+.connector-about__value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* A twirldown: chevron + text, no button chrome. The chevron turns down
+   when open (200ms, the accordion timing; zeroed by reduced motion). */
+.twirl {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 100%;
+  padding: 0;
+  font: inherit;
+  font-size: var(--text-sm);
+  line-height: var(--leading-lg);
+  color: var(--text-base-color);
+  text-align: start;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-chip);
+  cursor: pointer;
+}
+
+.twirl:hover {
+  color: var(--text-strong);
+}
+
+.twirl:focus-visible {
   outline: var(--focus-ring);
   outline-offset: var(--focus-ring-offset);
 }
 
-.plugin-tools__list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  margin-block-start: var(--space-2);
+.twirl__chevron {
+  flex: 0 0 auto;
+  width: var(--size-sm);
+  height: var(--size-sm);
+  color: var(--text-muted);
+  transition: transform 200ms ease-out;
 }
 
-.plugin-tools__item {
+.twirl[aria-expanded="true"] .twirl__chevron {
+  transform: rotate(90deg);
+}
+
+/* Tool groups */
+.tool-group {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  min-width: 0;
+}
+
+.tool-group__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
   padding-block: var(--space-2);
 }
 
-.plugin-tools__item + .plugin-tools__item {
+.tool-group__title {
+  margin: 0;
+  min-width: 0;
+  font-size: var(--text-base);
+  font-weight: var(--weight-md);
+}
+
+.tool-group__toggle {
+  gap: var(--space-2);
+  font-size: var(--text-base);
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+}
+
+.count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--size-md);
+  padding: 0 var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-md);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-base-color);
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+}
+
+.tool-group__list {
+  margin: 0;
+  padding: 0 0 0 var(--space-5);
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+
+.tool-group__list[hidden] {
+  display: none;
+}
+
+/* The group's menu: a ghost button that opens a small popover. */
+.group-menu {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.group-menu__trigger {
+  gap: var(--space-2);
+  white-space: nowrap;
+}
+
+.group-menu__glyph,
+.group-menu__chevron,
+.group-menu__check {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.group-menu__glyph svg,
+.group-menu__chevron svg,
+.group-menu__check svg {
+  width: var(--size-sm);
+  height: var(--size-sm);
+}
+
+.group-menu__chevron {
+  color: var(--text-muted);
+}
+
+.group-menu__list {
+  position: absolute;
+  inset-inline-end: 0;
+  top: calc(100% + var(--space-1));
+  z-index: 20;
+  min-width: max-content;
+  margin: 0;
+  padding: var(--space-1);
+  list-style: none;
+  background: var(--surface-card);
+  border: var(--border-width-hairline) solid var(--border-strong);
+  border-radius: var(--radius-input);
+  box-shadow: var(--elevation-tooltip);
+}
+
+.group-menu__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--size-xl);
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text-strong);
+  border-radius: var(--radius-chip);
+  cursor: pointer;
+}
+
+.group-menu__item:focus-visible,
+.group-menu__item:hover {
+  background: var(--surface-control);
+}
+
+.group-menu__item:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: calc(-1 * var(--focus-ring-width));
+}
+
+.group-menu__item--inert {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.group-menu__label {
+  flex: 1 1 auto;
+}
+
+.group-menu__check {
+  width: var(--size-sm);
+  margin-inline-start: var(--space-3);
+  color: var(--link);
+}
+
+/* One tool. */
+.tool {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-block: var(--space-3);
+  min-width: 0;
+}
+
+.tool + .tool {
   border-block-start: var(--border-width-hairline) solid var(--border-subtle);
 }
 
-.plugin-tools__head {
+/* The control drops under a title too long to share the line with it. */
+.tool__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.tool__title {
+  margin: 0;
+  min-width: 0;
+  font-size: var(--text-base);
+  font-weight: var(--weight-md);
+  line-height: var(--leading-lg);
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
+.tool__desc {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-lg);
+  color: var(--text-base-color);
+  overflow-wrap: anywhere;
+}
+
+.tool__desc--clamped {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+.tool__more {
+  align-self: flex-start;
+  padding: 0;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--link);
+  background: none;
+  border: 0;
+  border-radius: var(--radius-chip);
+  cursor: pointer;
+}
+
+.tool__more:hover {
+  color: var(--link-hover);
+  text-decoration: underline;
+}
+
+.tool__more:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.tool__twirls {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  margin-block-start: var(--space-1);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.tool__inputs {
+  margin: 0;
+  padding: 0 0 0 var(--space-5);
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.tool__inputs[hidden] {
+  display: none;
+}
+
+.tool__input {
+  font-size: var(--text-sm);
+  line-height: var(--leading-lg);
+  color: var(--text-base-color);
+  overflow-wrap: anywhere;
+}
+
+.tool__input > * + * {
+  margin-inline-start: var(--space-2);
+}
+
+.tool__input-name {
+  font-size: var(--text-sm);
+  color: var(--text-strong);
+}
+
+.tool__input-type {
+  font-size: var(--text-sm);
+  font-style: italic;
+  color: var(--text-muted);
+}
+
+.tool__input-required {
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+}
+
+.tool__schema-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  width: 100%;
+  min-width: 0;
+}
+
+.tool__schema-wrap--nested {
+  padding-inline-start: var(--space-5);
+}
+
+.tool__schema {
+  align-self: stretch;
+  margin: 0;
+  max-height: var(--code-block-max);
+  overflow: auto;
+  padding: var(--space-3);
+  font-size: var(--text-sm);
+  line-height: var(--leading-lg);
+  color: var(--text-base-color);
+  background: var(--surface-control);
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  white-space: pre;
+}
+
+.tool__schema:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.tool__schema[hidden] {
+  display: none;
+}
+
+/* Two-state permission control (Allowed / Blocked): a segmented pair on a
+   control surface; the chosen option steps forward onto the card surface. */
+.perm-seg {
+  flex: 0 0 auto;
+  display: inline-flex;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  background: var(--surface-control);
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-input);
+}
+
+.perm-seg__option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--size-lg);
+  height: var(--size-lg);
+  padding: 0;
+  color: var(--text-muted);
+  background: transparent;
+  border: var(--border-width-hairline) solid transparent;
+  border-radius: var(--radius-chip);
+  cursor: pointer;
+  transition: background-color 150ms ease-out, color 150ms ease-out;
+}
+
+.perm-seg__option svg {
+  width: var(--size-sm);
+  height: var(--size-sm);
+}
+
+.perm-seg__option:hover {
+  color: var(--text-strong);
+}
+
+.perm-seg__option[aria-checked="true"] {
+  background: var(--surface-card);
+  border-color: var(--border-strong);
+  box-shadow: var(--elevation-card);
+}
+
+.perm-seg__option--allow[aria-checked="true"] {
+  color: var(--status-success);
+}
+
+.perm-seg__option--block[aria-checked="true"] {
+  color: var(--status-error);
+}
+
+.perm-seg__option:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.perm-seg__option:disabled {
+  cursor: not-allowed;
+}
+
+/* Configuration form: the shared .form rows. */
+.connector-config__fields {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.connector-config__control {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.connector-config__control .switch {
+  align-self: flex-start;
+}
+
+.connector-config__label {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+}
+
+.connector-config__json {
+  margin: 0;
+  max-height: var(--code-block-max);
+  overflow: auto;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text-base-color);
+  background: var(--surface-control);
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-input);
+}
+
+.connector-config__advanced {
+  display: flex;
+  flex-direction: column;
+  border-block-start: var(--border-width-hairline) solid var(--border-subtle);
+}
+
+.connector-config__advanced-toggle {
+  align-self: flex-start;
+  margin-block: var(--space-2);
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+}
+
+.connector-config__actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
 }
 
-.plugin-tools__name {
+.connector-config__saved {
   font-size: var(--text-sm);
-  font-weight: var(--weight-md);
-  color: var(--text-strong);
-  overflow-wrap: anywhere;
-}
-
-.plugin-tools__desc {
-  margin: 0;
-  font-size: var(--text-sm);
-  line-height: var(--leading-lg);
-  color: var(--text-muted);
-  overflow-wrap: anywhere;
+  color: var(--link);
 }
 
 /* ---- Link checkbox (components/LinkCheckbox.tsx) ----

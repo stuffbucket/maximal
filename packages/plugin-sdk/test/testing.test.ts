@@ -4,17 +4,11 @@ import { z } from "zod"
 import {
   PluginContractError,
   type Context,
-  type PluginMeta,
   type PluginModule,
   type ToolDefinition,
 } from "../src/index"
 import { createTestbed, loadPlugin, waitFor } from "../src/testing/index"
 import { rejection, rejectionMessage } from "./rejection"
-
-const meta: PluginMeta = {
-  displayName: "Example",
-  description: "Example plugin",
-}
 
 function tool(name: string, text = name): ToolDefinition {
   return {
@@ -32,7 +26,13 @@ function plugin<C>(
 ): PluginModule<C> {
   return {
     name,
-    meta,
+    manifest: {
+      id: name,
+      kind: "extension",
+      displayName: "Example",
+      description: "Example plugin",
+      settingsVersion: 1,
+    },
     inject: ["tools", "surface", "storage", "host"],
     Config,
     apply,
@@ -332,7 +332,7 @@ describe("testing harness services", () => {
     await testbed.dispose()
   })
 
-  test("module validation: bad id, missing service, missing meta", async () => {
+  test("module validation: bad id, missing service, missing manifest", async () => {
     const testbed = createTestbed()
     expect(
       await rejectionMessage(
@@ -347,11 +347,13 @@ describe("testing harness services", () => {
         }),
       ),
     ).toMatch(/requires missing service: database/)
-    const noMeta = {
+    const noManifest = {
       ...plugin("ok", () => {}, Empty),
-      meta: undefined,
+      manifest: undefined,
     } as unknown as PluginModule
-    expect(await rejectionMessage(testbed.load(noMeta))).toMatch(/meta/)
+    expect(await rejectionMessage(testbed.load(noManifest))).toMatch(
+      /manifest: must be an object/,
+    )
     await testbed.dispose()
   })
 
