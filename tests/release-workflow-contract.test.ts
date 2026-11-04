@@ -527,7 +527,11 @@ describe("Windows desktop lifecycle smoke", () => {
         "$shellProcess = Start-Process -FilePath $shellPath -PassThru",
       ),
     )
+    expect(workflow).toContain("$foregroundBeforeLaunch =")
     expect(workflow).toContain("GetForegroundWindow()")
+    expect(workflow).toContain(
+      "startup main window displaced the existing foreground window",
+    )
     expect(workflow).toContain("WS_EX_TOOLWINDOW")
     expect(workflow).toContain("dist/startup-window.json")
     expect(workflow).toContain("-ArgumentList '--maximal-action=dashboard'")

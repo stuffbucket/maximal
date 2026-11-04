@@ -366,6 +366,7 @@ jobs:
           }
           '@
 
+          $foregroundBeforeLaunch = [MaximalStartupWindowSmoke]::GetForegroundWindow()
           Write-Host "launching: $shellPath"
           $shellProcess = Start-Process -FilePath $shellPath -PassThru
           # Cold hosted runners can take more than 30 seconds to initialize the
@@ -376,7 +377,7 @@ jobs:
           $sidecarProcess = $null
           $startupWindowHandle = [IntPtr]::Zero
           $startupExtendedStyle = [int64]0
-          $startupWasForeground = $false
+          $foregroundAtStartupSnapshot = [IntPtr]::Zero
           $deadline = (Get-Date).AddSeconds(60)
           $nextSidecarCheck = Get-Date
           do {
@@ -395,8 +396,7 @@ jobs:
                   $startupWindowHandle = $candidate
                   $startupExtendedStyle = [MaximalStartupWindowSmoke]::GetWindowLongPtr(
                     $candidate, -20).ToInt64()
-                  $startupWasForeground = (
-                    [MaximalStartupWindowSmoke]::GetForegroundWindow() -eq $candidate)
+                  $foregroundAtStartupSnapshot = [MaximalStartupWindowSmoke]::GetForegroundWindow()
                   break
                 }
               }
@@ -415,17 +415,24 @@ jobs:
           if (($startupExtendedStyle -band 0x80) -ne 0) {
             throw "startup main window used WS_EX_TOOLWINDOW and was not taskbar-eligible"
           }
-          if ($startupWasForeground) {
-            throw "startup main window stole foreground focus"
+          $activationChecked = $foregroundBeforeLaunch -ne [IntPtr]::Zero
+          $startupDisplacedForeground = (
+            $activationChecked -and
+            $foregroundAtStartupSnapshot -eq $startupWindowHandle)
+          if ($startupDisplacedForeground) {
+            throw "startup main window displaced the existing foreground window"
           }
           Write-Host "shell PID: $($shellProcess.Id); sidecar PID: $($sidecarProcess.ProcessId)"
           [ordered]@{
             shellPid = $shellProcess.Id
             sidecarPid = [int]$sidecarProcess.ProcessId
             windowHandle = $startupWindowHandle.ToInt64()
+            foregroundBeforeLaunch = $foregroundBeforeLaunch.ToInt64()
+            foregroundAtMinimizedSnapshot = $foregroundAtStartupSnapshot.ToInt64()
             minimized = $true
             taskbarEligible = $true
-            activated = $false
+            activationChecked = $activationChecked
+            activated = $startupDisplacedForeground
           } | ConvertTo-Json | Set-Content dist/startup-window.json
           Write-Host "ordinary startup created minimized taskbar window $startupWindowHandle without activation"
 
