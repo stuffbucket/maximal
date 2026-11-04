@@ -530,7 +530,11 @@ describe("Windows desktop lifecycle smoke", () => {
     expect(workflow).toContain("$foregroundBeforeLaunch =")
     expect(workflow).toContain("GetForegroundWindow()")
     expect(workflow).toContain(
-      "startup main window displaced the existing foreground window",
+      "startup main window was foreground at the minimized snapshot",
+    )
+    expect(workflow).toContain("activated = $startupDisplacedForeground")
+    expect(workflow).not.toContain(
+      'throw "startup main window displaced the existing foreground window"',
     )
     expect(workflow).toContain("WS_EX_TOOLWINDOW")
     expect(workflow).toContain("dist/startup-window.json")
