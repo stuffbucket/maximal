@@ -61,6 +61,41 @@ describe("Windows quit prompt requests", () => {
     expect(opens).toBe(1)
   })
 
+  test("consumes requests delivered through the local webview bridge", async () => {
+    let localListener: (() => void) | undefined
+    let pending = false
+    let opens = 0
+
+    const unlisten = await subscribeToQuitRequests(
+      () => {
+        opens++
+      },
+      {
+        subscribe: () => Promise.resolve(() => {}),
+        subscribeLocal: (handler) => {
+          localListener = handler
+          return () => {
+            localListener = undefined
+          }
+        },
+        takePending: () => {
+          const result = pending
+          pending = false
+          return Promise.resolve(result)
+        },
+      },
+    )
+
+    pending = true
+    localListener?.()
+    await Promise.resolve()
+
+    expect(pending).toBe(false)
+    expect(opens).toBe(1)
+    unlisten()
+    expect(localListener).toBeUndefined()
+  })
+
   test("degrades cleanly when Tauri events are unavailable", async () => {
     const unlisten = await subscribeToQuitRequests(
       () => {
@@ -94,6 +129,9 @@ describe("Windows quit prompt requests", () => {
     )
     expect(SHELL_SOURCE).not.toContain(
       "CloseWindowAction::ConfirmQuit => exit_gracefully",
+    )
+    expect(SHELL_SOURCE).toContain(
+      "window.dispatchEvent(new CustomEvent('maximal:quit-requested'))",
     )
   })
 

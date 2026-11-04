@@ -2,11 +2,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
 const QUIT_REQUESTED_EVENT = "app://quit-requested";
+const QUIT_REQUESTED_DOM_EVENT = "maximal:quit-requested";
 
 type Unlisten = () => void;
 
 interface QuitRequestDependencies {
   subscribe: (handler: () => void) => Promise<Unlisten>;
+  subscribeLocal?: (handler: () => void) => Unlisten;
   takePending: () => Promise<boolean>;
 }
 
@@ -15,6 +17,15 @@ const defaultDependencies: QuitRequestDependencies = {
     listen(QUIT_REQUESTED_EVENT, () => {
       handler();
     }),
+  subscribeLocal: (handler) => {
+    const eventTarget = globalThis as {
+      addEventListener: (type: string, listener: () => void) => void;
+      removeEventListener: (type: string, listener: () => void) => void;
+    };
+    eventTarget.addEventListener(QUIT_REQUESTED_DOM_EVENT, handler);
+    return () =>
+      eventTarget.removeEventListener(QUIT_REQUESTED_DOM_EVENT, handler);
+  },
   takePending: () => invoke<boolean>("take_quit_request"),
 };
 
@@ -35,15 +46,24 @@ export async function subscribeToQuitRequests(
     }
   };
 
+  const consumePending = (): void => {
+    void consume();
+  };
+  const unlistenLocal =
+    dependencies.subscribeLocal?.(consumePending) ?? (() => {});
+
   let unlisten: Unlisten;
   try {
-    unlisten = await dependencies.subscribe(() => {
-      void consume();
-    });
+    unlisten = await dependencies.subscribe(consumePending);
   } catch {
-    // Browser-only UI development has no Tauri event bridge.
-    return () => {};
+    // Browser-only UI development has no Tauri event bridge. Still consume once:
+    // a native request can already be queued while the remote listener mounts.
+    await consume();
+    return unlistenLocal;
   }
   await consume();
-  return unlisten;
+  return () => {
+    unlisten();
+    unlistenLocal();
+  };
 }

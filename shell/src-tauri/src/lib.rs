@@ -103,6 +103,11 @@ const UPDATE_FORCE_TIMEOUT: Duration = Duration::from_secs(20);
 /// Event the shell sends the Settings window after it ran an update check, so
 /// the topbar button and Diagnostics rows re-read the status right away.
 const UPDATE_STATUS_EVENT: &str = "update:status";
+#[cfg(target_os = "windows")]
+const QUIT_REQUESTED_EVENT: &str = "app://quit-requested";
+#[cfg(target_os = "windows")]
+const QUIT_REQUESTED_DOM_EVENT_SCRIPT: &str =
+    "window.dispatchEvent(new CustomEvent('maximal:quit-requested'));";
 
 /// Whether "Update to X.Y.Z" installs the update in place (download the
 /// signed update, install, relaunch) on this platform: Windows (the NSIS
@@ -3170,7 +3175,12 @@ fn request_quit(app: &AppHandle) {
 
     app.state::<PendingQuitPrompt>().request();
     open_settings_window(app, None);
-    if let Err(err) = app.emit_to(SETTINGS_WINDOW_LABEL, "app://quit-requested", ()) {
+    if let Some(window) = app.get_webview_window(SETTINGS_WINDOW_LABEL) {
+        if let Err(err) = window.eval(QUIT_REQUESTED_DOM_EVENT_SCRIPT) {
+            eprintln!("[shell] eval quit-requested failed: {err}");
+        }
+    }
+    if let Err(err) = app.emit_to(SETTINGS_WINDOW_LABEL, QUIT_REQUESTED_EVENT, ()) {
         eprintln!("[shell] emit quit-requested failed: {err}");
     }
 }
