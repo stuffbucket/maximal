@@ -377,10 +377,13 @@ describe("Windows desktop lifecycle smoke", () => {
     )
     expect(workflow).toContain("dist/reinstall-pids.json")
     expect(workflow).toContain(
-      "name: Request bounded shutdown and verify packaged app exit",
+      "name: Close packaged window and verify bounded app exit",
     )
-    expect(workflow).toContain('/_internal/shutdown"')
-    expect(workflow).toContain("if ($response.StatusCode -ne 202)")
+    expect(workflow).toContain("-ArgumentList '--maximal-action=dashboard'")
+    expect(workflow).toContain("$windowTitle -eq 'Maximal — Dashboard'")
+    expect(workflow).toContain("[MaximalWindowSmoke]::PostMessage(")
+    expect(workflow).toContain("$windowHandle, 0x0010")
+    expect(workflow).not.toContain('/_internal/shutdown"')
     expect(workflow).toContain(
       "sidecar PID $sidecarPid survived bounded graceful shutdown",
     )

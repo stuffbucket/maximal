@@ -286,11 +286,17 @@ window.addEventListener("message", (event: MessageEvent<unknown>) => {
   );
 });
 
+function availableSection(id: SectionId): SectionId {
+  // Windows uses ordinary close-to-quit windowing, so there is no meaningful
+  // "keep a closed window in the taskbar" mode to configure.
+  return osKind() === "windows" && id === "appearance" ? "system" : id;
+}
+
 function readHashSection(): SectionId {
   const raw = window.location.hash.replace(/^#/, "");
-  if (isSectionId(raw)) return raw;
+  if (isSectionId(raw)) return availableSection(raw);
   if (hasAccountProblem()) return "account";
-  return getStoredTab(LAST_TAB_STORAGE_KEY) ?? DEFAULT_SECTION;
+  return availableSection(getStoredTab(LAST_TAB_STORAGE_KEY) ?? DEFAULT_SECTION);
 }
 
 function syncFromHash(options: { persist?: boolean } = {}): void {
@@ -453,6 +459,13 @@ function wireNav(): void {
 }
 
 function wireAppearance(): void {
+  if (osKind() === "windows") {
+    const appearanceNav = document.querySelector<HTMLElement>(
+      '[data-nav="appearance"]',
+    );
+    if (appearanceNav) appearanceNav.hidden = true;
+    return;
+  }
   const toggle = document.querySelector<HTMLInputElement>(
     "[data-dock-visibility-toggle]",
   );

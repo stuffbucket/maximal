@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22">
+  <!-- Full-color Windows notification-area icon with light/dark edge contrast. -->
+  <rect x="1" y="1" width="20" height="20" rx="5" fill="#c8334a"/>
+  <text x="11" y="16.5" font-family="Segoe UI, Arial, sans-serif"
+        font-weight="900" font-size="16" text-anchor="middle" fill="#ffffff">m</text>
+  <circle cx="17.5" cy="4.5" r="3.4" fill="#171717"/>
+  <circle cx="17.5" cy="4.5" r="2.35" fill="#ffbf47"/>
+</svg>

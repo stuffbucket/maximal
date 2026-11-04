@@ -22,8 +22,9 @@
 #      launch it, and prove its sidecar starts.
 #   6. Reinstall while it is running, verify the captured old process pair exits,
 #      then launch the replacement and require a healthy sidecar response.
-#   7. Prove both packaged configurators applied their routing, request bounded
-#      graceful shutdown, and verify scoped cleanup plus exact process exit.
+#   7. Prove both packaged configurators applied their routing, route a taskbar
+#      action through the single running instance, send its window WM_CLOSE, and
+#      verify bounded cleanup plus exact process exit.
 #   8. Relaunch, forcibly terminate only the shell PID, and verify Job Object
 #      containment removes the exact sidecar process and its listeners.
 #   9. Relaunch, then run the NSIS uninstaller while Maximal is still running.
@@ -460,10 +461,11 @@ jobs:
           } | ConvertTo-Json | Set-Content dist/reinstall-pids.json
           Write-Host "replacement shell PID $replacementShellPid and sidecar PID $($replacementSidecar.ProcessId) are healthy"
 
-      # Exercise the app-level graceful path before abrupt containment. The
-      # loopback shutdown route lets the sidecar run its synchronous exit hooks;
-      # its clean exit must then cause the packaged shell to exit as well.
-      - name: Request bounded shutdown and verify packaged app exit
+      # Exercise the ordinary Windows X-close path before abrupt containment.
+      # A task argument first routes through the single-instance callback and
+      # opens Dashboard; WM_CLOSE then must run bounded configurator/sidecar
+      # cleanup before the packaged shell exits.
+      - name: Close packaged window and verify bounded app exit
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -553,27 +555,75 @@ jobs:
           }
           Write-Host "packaged Claude Code and Codex configurators applied routing"
 
+          $actionProcess = Start-Process -FilePath $shellPath `
+            -ArgumentList '--maximal-action=dashboard' -PassThru
+          if (-not $actionProcess.WaitForExit(10000)) {
+            Stop-Process -Id $actionProcess.Id -Force -ErrorAction SilentlyContinue
+            throw "taskbar action process did not hand off to the existing shell"
+          }
+          if ($actionProcess.ExitCode -ne 0) {
+            throw "taskbar action process exited $($actionProcess.ExitCode)"
+          }
+
+          $windowHandle = [IntPtr]::Zero
+          $windowTitle = ''
+          $windowDeadline = (Get-Date).AddSeconds(15)
+          do {
+            $activeShells = @(
+              Get-CimInstance Win32_Process -Filter "Name = 'maximal-shell.exe'" |
+                Where-Object { $_.ExecutablePath -eq $shellPath }
+            )
+            $shell = Get-Process -Id $shellPid -ErrorAction SilentlyContinue
+            if ($shell) {
+              $shell.Refresh()
+              $windowHandle = $shell.MainWindowHandle
+              $windowTitle = $shell.MainWindowTitle
+            }
+            if ($activeShells.Count -eq 1 -and
+                [int]$activeShells[0].ProcessId -eq $shellPid -and
+                $windowHandle -ne [IntPtr]::Zero -and
+                $windowTitle -eq 'Maximal — Dashboard') {
+              break
+            }
+            Start-Sleep -Milliseconds 100
+          } while ((Get-Date) -lt $windowDeadline)
+          if ($activeShells.Count -ne 1 -or
+              [int]$activeShells[0].ProcessId -ne $shellPid) {
+            $activeIds = ($activeShells | ForEach-Object { $_.ProcessId }) -join ', '
+            throw "taskbar action left installed shell PIDs [$activeIds]; expected only $shellPid"
+          }
+          if ($windowHandle -eq [IntPtr]::Zero) {
+            throw "taskbar Dashboard action did not create a main window"
+          }
+          if ($windowTitle -ne 'Maximal — Dashboard') {
+            throw "taskbar Dashboard action left unexpected window title '$windowTitle'"
+          }
+          Write-Host "taskbar Dashboard action routed to shell PID $shellPid window '$windowTitle'"
+
           [ordered]@{
             shellPid = $shellPid
             sidecarPid = $sidecarPid
             listenerPorts = $listenerPorts
-            shutdownPort = $shutdownPort
+            maximalPort = $shutdownPort
+            windowTitle = $windowTitle
+            windowHandle = $windowHandle.ToInt64()
           } | ConvertTo-Json | Set-Content dist/graceful-shutdown-pids.json
 
-          Write-Host "requesting graceful shutdown on sidecar PID $sidecarPid port $shutdownPort"
-          $response = Invoke-WebRequest `
-            -Uri "http://127.0.0.1:$shutdownPort/_internal/shutdown" `
-            -Method Post `
-            -ContentType 'application/json' `
-            -Body '{"reason":"windows packaged lifecycle smoke"}' `
-            -TimeoutSec 5
-          if ($response.StatusCode -ne 202) {
-            throw "graceful shutdown returned HTTP $($response.StatusCode), expected 202"
+          Add-Type -TypeDefinition @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class MaximalWindowSmoke {
+            [DllImport("user32.dll", SetLastError = true)]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            public static extern bool PostMessage(
+              IntPtr hWnd, uint message, IntPtr wParam, IntPtr lParam);
           }
-          $shutdown = $response.Content | ConvertFrom-Json
-          if ($shutdown.ok -ne $true -or $shutdown.draining -ne $true) {
-            throw "graceful shutdown returned an unexpected response: $($response.Content)"
+          '@
+          if (-not [MaximalWindowSmoke]::PostMessage(
+              $windowHandle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)) {
+            throw "could not send WM_CLOSE to shell PID $shellPid"
           }
+          Write-Host "sent WM_CLOSE to shell PID $shellPid; waiting for bounded graceful exit"
 
           $deadline = (Get-Date).AddSeconds(10)
           do {
