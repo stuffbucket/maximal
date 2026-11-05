@@ -123,7 +123,9 @@ key, and only the connector adds the upstream `Authorization` header.
   a session; a forgotten session (HTTP 404) is reopened once. The shared
   session carries the `list_changed` subscription and is never idle-closed;
   when a tool call has to reopen it, the tools are listed again. A sweep
-  never closes a session a call has picked up.
+  never closes a session a call has picked up. Unloading never cuts a
+  handshake short (the upstream session would stay open with its id lost):
+  it finishes, bounded by the request timeout, and is then ended (`DELETE`).
 - Tool calls go through the connector's shared limiter and retry policy
   (*Rate limiting*). The transport retries only protocol requests
   (`initialize`, `server/discover`, `tools/list`, …) on 429/503/504, and
@@ -261,7 +263,8 @@ fresh token. Action failures are reported through the status, never thrown.
   authorization server (PKCE + `resource` checks, refresh, optional dynamic
   registration, `denyWith`), recorded `requests`, `calls()` and `oauth`
   activity, injected HTTP failures (`fail`, optionally per `tool`),
-  `setTools` (`list_changed`), `expireSessions`. `notifyProgress` /
+  `setTools` (`list_changed`), `expireSessions`. Recorded requests carry
+  the `Mcp-Protocol-Version` header (`protocolVersion`). `notifyProgress` /
   `elicitForm` help handlers. Throttling: `throttle({ mode, status,
   retryAfter, where, tool, rpc, paths, times })` answers matching requests
   with HTTP 429/503/504 (`mode: "http"`, `Retry-After` header) or with a
@@ -275,8 +278,11 @@ fresh token. Action failures are reported through the status, never thrown.
 - `FakeClock` — virtual time for the limiter and retries (`clock`,
   `sleep` options): `advance(ms)`, `next()`, and `run(promise)`, which fires
   timers whenever nothing else is happening.
-- `fakeAuth({ account?, token?, signedIn? })` — a strategy that signs in
-  instantly as `account`; `FakeTokenProvider` for finer control (manual
+- `fakeAuth({ account?, token?, signedIn?, cache?, browserUrl? })` — a
+  strategy that signs in instantly as `account`; `cache` keeps the sign-in
+  (account, access and refresh token) in the connector's storage
+  (`fake-token-cache.json` by default) so it survives reloads and sign-out
+  deletes it; `browserUrl` is opened with `ctx.host.openExternal` on sign-in; `FakeTokenProvider` for finer control (manual
   sign-in, token errors, `refreshable`).
 
 `bun test test` covers the state machine, terms gate, upstream relays,

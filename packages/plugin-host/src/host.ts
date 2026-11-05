@@ -96,6 +96,29 @@ interface PluginRecord {
 
 const BLOCKED_TEXT = "This tool is blocked in Maximal settings."
 
+/**
+ * What `@stuffbucket/maximal-plugin-host/testing` observes of a host: its
+ * root cordis context (fiber `internal/status` events, root effects), the
+ * shared runtime (contributions per plugin) and each plugin's current fiber.
+ * Not exported from the package root; production code never reads it.
+ */
+export interface PluginHostInternals {
+  readonly root: Context
+  readonly runtime: PluginRuntime
+  fiber(pluginId: string): Fiber | undefined
+  /** Resolves once queued reconciles and settings reads/writes have run. */
+  idle(): Promise<void>
+}
+
+const hostInternals = new WeakMap<PluginGateway, PluginHostInternals>()
+
+/** The internals of a gateway made by `createPluginHost` (testing only). */
+export function pluginHostInternals(
+  gateway: PluginGateway,
+): PluginHostInternals | undefined {
+  return hostInternals.get(gateway)
+}
+
 /** A settings-file edit: mutate `document`; `undefined` = nothing to write. */
 type SettingsChange = (
   document: PluginSettingsDocument,
@@ -236,6 +259,12 @@ class PluginHost implements PluginGateway {
         catalogQueued: false,
       })
     }
+    hostInternals.set(this, {
+      root: this.#root,
+      runtime: this.#runtime,
+      fiber: (id) => this.#records.get(id)?.fiber,
+      idle: () => this.#idle(),
+    })
     // Read every settings file up front so snapshots and cached tool views
     // are available before the first reconcile; later calls queue behind it.
     this.#queue = Promise.all(
@@ -399,6 +428,20 @@ class PluginHost implements PluginGateway {
       }
     })()
     return this.#disposing
+  }
+
+  async #idle(): Promise<void> {
+    for (;;) {
+      const queue = this.#queue
+      const io = [...this.#records.values()].map((record) => record.io)
+      await queue
+      await Promise.all(io)
+      if (
+        queue === this.#queue
+        && [...this.#records.values()].every((record, i) => record.io === io[i])
+      )
+        return
+    }
   }
 
   // Lifecycle changes are serialized through `#queue` and settings-file

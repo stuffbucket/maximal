@@ -17,10 +17,13 @@ export { WORKIQ_RESULTS } from "./results"
 export { SYNTHETIC_TOOL_NAMES, WORKIQ_TOOLS } from "./tools"
 export {
   ADA,
+  elicitForm,
   fakeAuth,
   type FakeAuthOptions,
   type FakeRemoteMcp,
   FakeTokenProvider,
+  notifyProgress,
+  type RecordedRequest,
 } from "@stuffbucket/maximal-connector-kit/testing"
 
 /** The account the bench signs in as. */

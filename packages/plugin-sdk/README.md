@@ -184,3 +184,54 @@ permissions — the host does.
 `createTestbed()` loads several plugins into one context; `testbed.events`
 records every `tools` / `status` change and `testbed.host.opened` / `.logs`
 record host calls.
+
+## Testing plugins (lifecycle harness and conformance suite)
+
+`@stuffbucket/maximal-plugin-host/testing` runs plugins under the real host
+(`createPluginHost`, real settings files in a temp dir) and records what
+crosses the plugin boundary. Every plugin package runs the conformance suite:
+
+```ts
+import { runPluginConformance } from "@stuffbucket/maximal-plugin-host/testing"
+import * as plugin from "../src/index"
+
+runPluginConformance(plugin, {
+  changedConfig: { greeting: "hello" },   // a second valid config (reload check)
+  // storage: { "terms.json": "…" },       // files seeded before start
+  // settled: (h, id) => h.snapshot(id).status?.code === "ready",
+  // expectTools: true,
+  // leakProbes: [() => (fake.sessionCount === 0 ? [] : ["session open"])],
+  // migration: { fromVersion: 1, config: { old: 1 }, expected: { new: 1 } },
+})
+```
+
+Pass a factory (`() => createMyPlugin({ endpoint: fake.url })`) when the
+module needs fakes started in `beforeAll`. The checks: the manifest is valid
+plain JSON and `manifest.id === name`; `Config` accepts `{}`;
+`manifest.configSchema` matches `Config` (field names and defaults, and the
+schema's own JSON Schema when it emits one); `apply` returns within
+`applyBudgetMs` (250 ms) and the plugin becomes `active`; a changed config
+reloads it (fiber #1 disposed, #2 active) and re-saving the same one does not;
+disable and shutdown withdraw every tool, action and status, dispose every
+fiber, restore the host's root effects, and leave no intervals, timeouts of
+1 s or more, or listening servers created meanwhile (plus your
+`leakProbes`); an older settings version (or a legacy `config.json` value) is
+migrated; an unreadable or newer settings file fails only this plugin and is
+never overwritten; `settings.json` is only ever written by the host.
+
+For your own lifecycle tests, `createLifecycleHarness({ plugins, secrets? })`
+gives the gateway, stepping (`enable`, `disable`, `setConfig`,
+`setPermissions`, `runAction`, `importLegacyConfig`, `seedSettings`),
+cordis-style settling (`flush()` — host queues, settings I/O and each
+plugin's `fiber.await()` — plus `waitFor`, `waitForStatus`, `waitForEntry`),
+inspection (`snapshot`, `contributions`, `fibers`, `effects`, `rootEffects`,
+`settings`, `files`, `opened`, `settingsTamperedWith`) and an ordered
+transcript: `fiber` transitions (cordis `internal/status`), gateway `event`s,
+`lifecycle`, `status`, `tools` (registered / withdrawn), `visible-tools`
+(permission changes), `settings` (settings.json writes as path diffs, catalog
+tools by name), `storage` (write / delete, names only), `open-external` and
+`log`. `transcript({ since, kinds })` is normalised (`Normalizer`: ports,
+random UUIDs, ISO times, durations, `secrets` → `<secret>`); `formatEntry`
+renders one line per entry for snapshots; `secretsSeen()` scans the raw
+transcript. `trackHandles()` is the leak tracker on its own
+(`process.getActiveResourcesInfo()` is always empty in Bun).

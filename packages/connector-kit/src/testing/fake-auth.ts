@@ -1,6 +1,8 @@
 import type {
+  AuthEnv,
   AuthStrategy,
   ConnectorAccount,
+  TextStore,
   TokenProvider,
 } from "../auth/token-provider"
 
@@ -111,6 +113,72 @@ export class FakeTokenProvider implements TokenProvider {
   }
 }
 
+/** Where a persisted fake sign-in lives, like a real strategy's token cache. */
+export interface FakeAuthCache {
+  /** File in the connector's storage (default `fake-token-cache.json`). */
+  file?: string
+  /** Refresh token written next to the access token (default `fake-refresh-1`). */
+  refreshToken?: string
+}
+
+/**
+ * A `FakeTokenProvider` whose sign-in survives plugin reloads: it is kept in
+ * the connector's `ctx.storage` (account, access and refresh token, as a
+ * real cache would hold them) and removed on sign-out.
+ */
+class PersistedFakeTokenProvider extends FakeTokenProvider {
+  readonly #store: TextStore
+  readonly #file: string
+  readonly #refreshToken: string
+  #loaded: Promise<void> | undefined
+
+  constructor(
+    store: TextStore,
+    cache: FakeAuthCache,
+    options: { account: ConnectorAccount; token?: string },
+  ) {
+    super(undefined, options)
+    this.#store = store
+    this.#file = cache.file ?? "fake-token-cache.json"
+    this.#refreshToken = cache.refreshToken ?? "fake-refresh-1"
+  }
+
+  #load(): Promise<void> {
+    this.#loaded ??= this.#store.readText(this.#file).then((text) => {
+      if (text === undefined) return
+      const saved = JSON.parse(text) as { account?: ConnectorAccount }
+      if (saved.account) this.signedIn = saved.account
+    })
+    return this.#loaded
+  }
+
+  override async account(): Promise<ConnectorAccount | undefined> {
+    await this.#load()
+    return await super.account()
+  }
+
+  override async getToken(signal?: AbortSignal): Promise<string> {
+    await this.#load()
+    return await super.getToken(signal)
+  }
+
+  override async signIn(signal: AbortSignal): Promise<ConnectorAccount> {
+    await this.#load()
+    const account = await super.signIn(signal)
+    await this.#store.writeText(
+      this.#file,
+      `${JSON.stringify({ account, accessToken: this.token, refreshToken: this.#refreshToken })}\n`,
+    )
+    return account
+  }
+
+  override async signOut(): Promise<void> {
+    await this.#load()
+    await super.signOut()
+    await this.#store.delete(this.#file)
+  }
+}
+
 export interface FakeAuthOptions {
   /** Who "signs in" (default Ada Lovelace at contoso.com). */
   account?: ConnectorAccount
@@ -118,6 +186,14 @@ export interface FakeAuthOptions {
   token?: string
   /** Start signed in (default `false`: the user clicks Sign in, which completes instantly). */
   signedIn?: boolean
+  /**
+   * Keep the sign-in in the connector's storage (a token cache with the
+   * access and refresh token), so it survives reloads and sign-out deletes
+   * it. Default: in memory only.
+   */
+  cache?: FakeAuthCache | true
+  /** Open this URL with `ctx.host.openExternal` on sign-in, as a browser flow would. */
+  browserUrl?: string
 }
 
 /**
@@ -130,16 +206,35 @@ export function fakeAuth(
 ): AuthStrategy & { readonly providers: Array<FakeTokenProvider> } {
   const providers: Array<FakeTokenProvider> = []
   const account = options.account ?? ADA
+  const token = options.token ? { token: options.token } : {}
+  const make = (env: AuthEnv): FakeTokenProvider => {
+    if (options.cache === undefined) {
+      return new FakeTokenProvider(options.signedIn ? account : undefined, {
+        account,
+        ...token,
+      })
+    }
+    const cache = options.cache === true ? {} : options.cache
+    return new PersistedFakeTokenProvider(env.store, cache, {
+      account,
+      ...token,
+    })
+  }
   return {
     type: "fake",
     interactive: true,
     signInPrompt: `Sign in as ${account.username ?? "the test account"}`,
     providers,
-    create() {
-      const provider = new FakeTokenProvider(
-        options.signedIn ? account : undefined,
-        { account, ...(options.token ? { token: options.token } : {}) },
-      )
+    create(env) {
+      const provider = make(env)
+      const { browserUrl } = options
+      if (browserUrl !== undefined) {
+        const signIn = provider.signIn.bind(provider)
+        provider.signIn = async (signal) => {
+          await env.openBrowser(browserUrl)
+          return await signIn(signal)
+        }
+      }
       providers.push(provider)
       return provider
     },

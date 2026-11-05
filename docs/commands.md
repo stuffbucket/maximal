@@ -22,6 +22,7 @@ bun test tests/foo.test.ts  # Run a single test file
 bun run plugins:typecheck   # tsc in every packages/plugin-* workspace
 bun run plugins:test        # bun test in every packages/plugin-* workspace
 bun run bench:connectors    # real server + Work IQ against a fake upstream (see "Connectors bench")
+bun run test:e2e:plugins    # Work IQ through its whole lifecycle in-process, vs. a golden transcript
 
 # Aggregates
 bun run check:fast   # ensure:ui-embed + lint:fast + typecheck + plugins:typecheck + lint:all + casts:check + check:tokens (the per-edit inner loop)

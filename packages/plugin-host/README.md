@@ -82,4 +82,14 @@ await gateway.reconcile(config.plugins)               // start what is enabled
 - **`dispose()`** stops every plugin and the root context and waits for
   pending settings writes; idempotent; later `reconcile` calls are no-ops.
 
+## Testing (`./testing`)
+
+`@stuffbucket/maximal-plugin-host/testing` builds a real host around the
+plugins under test and records everything that crosses the plugin boundary
+(`createLifecycleHarness`), and registers the generic contract checks every
+plugin package runs (`runPluginConformance`, bun:test). It observes the
+host's root cordis context, runtime and fibers through a module-private hook
+(`pluginHostInternals`, not exported from the package root). Usage: SDK
+README → *Testing plugins*.
+
 Writing a plugin: see the SDK README.

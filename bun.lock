@@ -83,6 +83,9 @@
         "@stuffbucket/maximal-connector-kit": "workspace:*",
         "@stuffbucket/maximal-plugin-sdk": "workspace:*",
       },
+      "devDependencies": {
+        "@stuffbucket/maximal-plugin-host": "workspace:*",
+      },
       "peerDependencies": {
         "@deepseek-ai/cordis": "4.0.2",
       },

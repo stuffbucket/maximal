@@ -1,0 +1,1421 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`Work IQ end to end: boot → setup → tools → calls → config → sign-out → disable → shutdown 1`] = `
+[
+  {
+    "api": [
+      {
+        "request": "GET /settings/api/plugins",
+        "response": {
+          "plugins": [
+            {
+              "clients": [
+                {
+                  "available": false,
+                  "id": "claude-code",
+                  "reason": "Turn on Claude Code in Maximal first.",
+                  "selected": false,
+                },
+              ],
+              "description": "Microsoft 365 mail, meetings, chats, files and people through Microsoft's hosted Work IQ service.",
+              "displayName": "Work IQ",
+              "enabled": false,
+              "endpoint": "<maximal>/mcp/workiq",
+              "homepage": "https://github.com/microsoft/work-iq",
+              "id": "workiq",
+              "kind": "connector",
+              "lifecycle": "disabled",
+              "manifest": {
+                "connector": {
+                  "auth": {
+                    "type": "entra",
+                  },
+                  "endpoint": "<upstream>/mcp",
+                  "terms": {
+                    "label": "the Microsoft Work IQ terms",
+                    "url": "https://github.com/microsoft/work-iq",
+                  },
+                  "transport": "streamable-http",
+                },
+                "description": "Microsoft 365 mail, meetings, chats, files and people through Microsoft's hosted Work IQ service.",
+                "displayName": "Work IQ",
+                "homepage": "https://github.com/microsoft/work-iq",
+                "id": "workiq",
+                "kind": "connector",
+              },
+              "source": "built-in",
+              "toolCounts": {
+                "byGroup": {
+                  "other": 0,
+                  "read-only": 0,
+                  "write-delete": 0,
+                },
+                "total": 0,
+              },
+              "toolsSource": "none",
+            },
+          ],
+        },
+        "status": 200,
+      },
+    ],
+    "configJson": {
+      "workiq": {},
+    },
+    "plugin": [
+      "settings.json workiq $schema: (none) → "maximal-plugin-settings/1"; plugin: (none) → "workiq"; version: (none) → 1; config.endpoint: (none) → "<upstream>/mcp"",
+      "event workiq settings",
+      "lifecycle workiq disabled",
+    ],
+    "settingsJson": {
+      "$schema": "maximal-plugin-settings/1",
+      "config": {
+        "endpoint": "<upstream>/mcp",
+      },
+      "plugin": "workiq",
+      "version": 1,
+    },
+    "sse": [
+      {
+        "clients": [
+          {
+            "available": false,
+            "id": "claude-code",
+            "reason": "Turn on Claude Code in Maximal first.",
+            "selected": false,
+          },
+        ],
+        "description": "Microsoft 365 mail, meetings, chats, files and people through Microsoft's hosted Work IQ service.",
+        "displayName": "Work IQ",
+        "enabled": false,
+        "endpoint": "<maximal>/mcp/workiq",
+        "homepage": "https://github.com/microsoft/work-iq",
+        "id": "workiq",
+        "kind": "connector",
+        "lifecycle": "disabled",
+        "manifest": {
+          "connector": {
+            "auth": {
+              "type": "entra",
+            },
+            "endpoint": "<upstream>/mcp",
+            "terms": {
+              "label": "the Microsoft Work IQ terms",
+              "url": "https://github.com/microsoft/work-iq",
+            },
+            "transport": "streamable-http",
+          },
+          "description": "Microsoft 365 mail, meetings, chats, files and people through Microsoft's hosted Work IQ service.",
+          "displayName": "Work IQ",
+          "homepage": "https://github.com/microsoft/work-iq",
+          "id": "workiq",
+          "kind": "connector",
+        },
+        "source": "built-in",
+        "toolCounts": {
+          "byGroup": {
+            "other": 0,
+            "read-only": 0,
+            "write-delete": 0,
+          },
+          "total": 0,
+        },
+        "toolsSource": "none",
+      },
+    ],
+    "step": "boot (legacy config.json value migrated)",
+    "storage": [
+      "settings.json",
+    ],
+  },
+  {
+    "api": [
+      {
+        "body": {
+          "enabled": true,
+        },
+        "request": "PATCH /settings/api/plugins/workiq",
+        "response": {
+          "clients": [
+            {
+              "available": false,
+              "id": "claude-code",
+              "reason": "Turn on Claude Code in Maximal first.",
+              "selected": false,
+            },
+          ],
+          "config": {
+            "authority": "https://login.microsoftonline.com/organizations",
+            "endpoint": "<upstream>/mcp",
+          },
+          "configSchema": {
+            "properties": {
+              "authority": {
+                "default": "https://login.microsoftonline.com/organizations",
+                "description": "Microsoft Entra authority used for sign-in.",
+                "format": "uri",
+                "title": "Sign-in authority",
+                "type": "string",
+                "x-maximal-advanced": true,
+              },
+              "endpoint": {
+                "default": "<upstream>/mcp",
+                "description": "Work IQ MCP endpoint (Streamable HTTP).",
+                "format": "uri",
+                "title": "Endpoint",
+                "type": "string",
+                "x-maximal-advanced": true,
+              },
+            },
+            "type": "object",
+          },
+          "description": "Microsoft 365 mail, meetings, chats, files and people through Microsoft's hosted Work IQ service.",
+          "displayName": "Work IQ",
+          "enabled": true,
+          "endpoint": "<maximal>/mcp/workiq",
+          "homepage": "https://github.com/microsoft/work-iq",
+          "id": "workiq",
+          "kind": "connector",
+          "lifecycle": "active",
+          "manifest": {
+            "connector": {
+              "auth": {
+                "type": "entra",
+              },
+              "endpoint": "<upstream>/mcp",
+              "terms": {
+                "label": "the Microsoft Work IQ terms",
+                "url": "https://github.com/microsoft/work-iq",
+              },
+              "transport": "streamable-http",
+            },
+            "description": "Microsoft 365 mail, meetings, chats, files and people through Microsoft's hosted Work IQ service.",
+            "displayName": "Work IQ",
+            "homepage": "https://github.com/microsoft/work-iq",
+            "id": "workiq",
+            "kind": "connector",
+          },
+          "settingsVersion": 1,
+          "source": "built-in",
+        },
+        "status": 200,
+      },
+    ],
+    "configJson": {
+      "workiq": {
+        "enabled": true,
+      },
+    },
+    "plugin": [
+      "event workiq lifecycle",
+      "lifecycle workiq starting",
+      "fiber workiq#1 pending → loading",
+      "event workiq status",
+      "status workiq working/working "Starting Work IQ…"",
+      "fiber workiq#1 loading → active",
+      "event workiq lifecycle",
+      "lifecycle workiq active",
+      "event workiq status",
+      "status workiq needs-setup/terms-needed "Accept the Microsoft Work IQ terms to continue" detail="Work IQ is a Microsoft service that answers questions from your Microsoft 365 data. Review its terms at https://github.com/microsoft/work-iq before you continue." actions=[accept-terms:"Accept terms"(primary)]",
+    ],
+    "sse": [
+      {
+        "(changed)": {
+          "enabled": true,
+          "lifecycle": "active",
+          "status": {
+            "actions": [
+              {
+                "id": "accept-terms",
+                "kind": "primary",
+                "label": "Accept terms",
+              },
+            ],
+            "code": "terms-needed",
+            "detail": "Work IQ is a Microsoft service that answers questions from your Microsoft 365 data. Review its terms at https://github.com/microsoft/work-iq before you continue.",
+            "state": "needs-setup",
+            "summary": "Accept the Microsoft Work IQ terms to continue",
+          },
+        },
+        "id": "workiq",
+      },
+    ],
+    "step": "enable → terms-needed",
+  },
+  {
+    "api": [
+      {
+        "request": "POST /settings/api/plugins/workiq/actions/accept-terms",
+        "response": {
+          "ok": true,
+        },
+        "status": 202,
+      },
+    ],
+    "plugin": [
+      "storage workiq write terms.json",
+      "event workiq status",
+      "status workiq needs-setup/signin-needed "Sign in as e2e@contoso.com" actions=[sign-in:"Sign in"(primary)]",
+    ],
+    "sse": [
+      {
+        "(changed)": {
+          "status": {
+            "actions": [
+              {
+                "id": "sign-in",
+                "kind": "primary",
+                "label": "Sign in",
+              },
+            ],
+            "code": "signin-needed",
+            "state": "needs-setup",
+            "summary": "Sign in as e2e@contoso.com",
+          },
+        },
+        "id": "workiq",
+      },
+    ],
+    "step": "accept-terms → signin-needed",
+    "storage": [
+      "settings.json",
+      "terms.json",
+    ],
+  },
+  {
+    "api": [
+      {
+        "request": "POST /settings/api/plugins/workiq/actions/sign-in",
+        "response": {
+          "ok": true,
+        },
+        "status": 202,
+      },
+    ],
+    "plugin": [
+      "event workiq status",
+      "status workiq working/working "Waiting for sign-in in your browser" detail="Finish signing in in the browser window that opened. Sign-in times out after 5 minutes." actions=[sign-out:"Cancel"(secondary)]",
+      "open-external https://login.example.test/e2e/authorize",
+      "storage workiq write fake-token-cache.json",
+      "event workiq status",
+      "status workiq working/working "Connecting to Work IQ…"",
+      "log info [plugin:workiq] Work IQ: connected with MCP 2025-11-25 (initialize handshake).",
+      "event workiq tools",
+      "tools workiq +[retrieve, fetch_blob, get_schema, call_function, fetch, search_paths, accept_eula, delete_entity, upload_blob, create_entity, update_entity, ask, list_agents, get_debug_link] -[]",
+      "event workiq status",
+      "status workiq ready/ready "Connected as e2e@contoso.com" facts=[Account=e2e@contoso.com, Tenant=00000000-0000-4000-8000-0000000000e2, Tools=14, Protocol=MCP 2025-11-25] actions=[sign-out:"Sign out"(destructive)+confirm]",
+      "settings.json workiq tools.catalog.updatedAt: (none) → "<time>"; tools.catalog.tools: (none) → ["retrieve","fetch_blob","get_schema","call_function","fetch","search_paths","accept_eula","delete_entity","upload_blob","create_entity","update_entity","ask","list_agents","get_debug_link"]",
+    ],
+    "settingsJson": {
+      "$schema": "maximal-plugin-settings/1",
+      "config": {
+        "endpoint": "<upstream>/mcp",
+      },
+      "plugin": "workiq",
+      "tools": {
+        "catalog": {
+          "tools": [
+            "retrieve",
+            "fetch_blob",
+            "get_schema",
+            "call_function",
+            "fetch",
+            "search_paths",
+            "accept_eula",
+            "delete_entity",
+            "upload_blob",
+            "create_entity",
+            "update_entity",
+            "ask",
+            "list_agents",
+            "get_debug_link",
+          ],
+          "updatedAt": "<time>",
+        },
+      },
+      "version": 1,
+    },
+    "sse": [
+      {
+        "(changed)": {
+          "status": {
+            "actions": [
+              {
+                "confirm": "Sign out of Work IQ? Its tools stay unavailable until you sign in again.",
+                "id": "sign-out",
+                "kind": "destructive",
+                "label": "Sign out",
+              },
+            ],
+            "code": "ready",
+            "facts": [
+              {
+                "label": "Account",
+                "value": "e2e@contoso.com",
+              },
+              {
+                "label": "Tenant",
+                "value": "00000000-0000-4000-8000-0000000000e2",
+              },
+              {
+                "label": "Tools",
+                "value": "14",
+              },
+              {
+                "label": "Protocol",
+                "value": "MCP 2025-11-25",
+              },
+            ],
+            "state": "ready",
+            "summary": "Connected as e2e@contoso.com",
+          },
+          "toolCounts": {
+            "byGroup": {
+              "other": 3,
+              "read-only": 6,
+              "write-delete": 5,
+            },
+            "total": 14,
+          },
+          "toolsSource": "live",
+        },
+        "id": "workiq",
+      },
+    ],
+    "step": "sign-in → ready",
+    "storage": [
+      "fake-token-cache.json",
+      "settings.json",
+      "terms.json",
+    ],
+    "upstream": [
+      "POST server/discover → 400 session=- auth=bearer protocol=2026-07-28",
+      "POST initialize → 200 session=- auth=bearer protocol=-",
+      "POST notifications/initialized → 202 session=session#1 auth=bearer protocol=2025-11-25",
+      "POST tools/list → 200 session=session#1 auth=bearer protocol=2025-11-25",
+      "GET /mcp → 200 session=session#1 auth=bearer protocol=2025-11-25",
+    ],
+  },
+  {
+    "mcp": [
+      {
+        "send": {
+          "id": 0,
+          "jsonrpc": "2.0",
+          "method": "initialize",
+          "params": {
+            "capabilities": {
+              "elicitation": {},
+            },
+            "clientInfo": {
+              "name": "e2e-client",
+              "version": "1.0.0",
+            },
+            "protocolVersion": "2025-11-25",
+          },
+        },
+      },
+      {
+        "receive": {
+          "id": 0,
+          "jsonrpc": "2.0",
+          "result": {
+            "capabilities": {
+              "tools": {
+                "listChanged": true,
+              },
+            },
+            "protocolVersion": "2025-11-25",
+            "serverInfo": {
+              "name": "workiq",
+              "version": "<version>",
+            },
+          },
+        },
+      },
+      {
+        "send": {
+          "jsonrpc": "2.0",
+          "method": "notifications/initialized",
+        },
+      },
+      {
+        "send": {
+          "id": 1,
+          "jsonrpc": "2.0",
+          "method": "tools/list",
+        },
+      },
+      {
+        "receive": {
+          "id": 1,
+          "jsonrpc": "2.0",
+          "result": {
+            "tools": [
+              "retrieve",
+              "fetch_blob",
+              "get_schema",
+              "call_function",
+              "fetch",
+              "search_paths",
+              "accept_eula",
+              "delete_entity",
+              "upload_blob",
+              "create_entity",
+              "update_entity",
+              "ask",
+              "list_agents",
+              "get_debug_link",
+            ],
+          },
+        },
+      },
+    ],
+    "plugin": [],
+    "step": "MCP client: tools mirrored",
+  },
+  {
+    "api": [
+      {
+        "request": "GET /settings/api/plugins/workiq",
+        "response": {
+          "catalogUpdatedAt": "<time>",
+          "clients": [
+            {
+              "available": false,
+              "id": "claude-code",
+              "reason": "Turn on Claude Code in Maximal first.",
+              "selected": false,
+            },
+          ],
+          "config": {
+            "authority": "https://login.microsoftonline.com/organizations",
+            "endpoint": "<upstream>/mcp",
+          },
+          "configSchema": {
+            "properties": {
+              "authority": {
+                "default": "https://login.microsoftonline.com/organizations",
+                "description": "Microsoft Entra authority used for sign-in.",
+                "format": "uri",
+                "title": "Sign-in authority",
+                "type": "string",
+                "x-maximal-advanced": true,
+              },
+              "endpoint": {
+                "default": "<upstream>/mcp",
+                "description": "Work IQ MCP endpoint (Streamable HTTP).",
+                "format": "uri",
+                "title": "Endpoint",
+                "type": "string",
+                "x-maximal-advanced": true,
+              },
+            },
+            "type": "object",
+          },
+          "description": "Microsoft 365 mail, meetings, chats, files and people through Microsoft's hosted Work IQ service.",
+          "displayName": "Work IQ",
+          "enabled": true,
+          "endpoint": "<maximal>/mcp/workiq",
+          "homepage": "https://github.com/microsoft/work-iq",
+          "id": "workiq",
+          "kind": "connector",
+          "lifecycle": "active",
+          "manifest": {
+            "connector": {
+              "auth": {
+                "type": "entra",
+              },
+              "endpoint": "<upstream>/mcp",
+              "terms": {
+                "label": "the Microsoft Work IQ terms",
+                "url": "https://github.com/microsoft/work-iq",
+              },
+              "transport": "streamable-http",
+            },
+            "description": "Microsoft 365 mail, meetings, chats, files and people through Microsoft's hosted Work IQ service.",
+            "displayName": "Work IQ",
+            "homepage": "https://github.com/microsoft/work-iq",
+            "id": "workiq",
+            "kind": "connector",
+          },
+          "settingsVersion": 1,
+          "source": "built-in",
+          "status": {
+            "actions": [
+              {
+                "confirm": "Sign out of Work IQ? Its tools stay unavailable until you sign in again.",
+                "id": "sign-out",
+                "kind": "destructive",
+                "label": "Sign out",
+              },
+            ],
+            "code": "ready",
+            "facts": [
+              {
+                "label": "Account",
+                "value": "e2e@contoso.com",
+              },
+              {
+                "label": "Tenant",
+                "value": "00000000-0000-4000-8000-0000000000e2",
+              },
+              {
+                "label": "Tools",
+                "value": "14",
+              },
+              {
+                "label": "Protocol",
+                "value": "MCP 2025-11-25",
+              },
+            ],
+            "state": "ready",
+            "summary": "Connected as e2e@contoso.com",
+          },
+          "toolCounts": {
+            "byGroup": {
+              "other": 3,
+              "read-only": 6,
+              "write-delete": 5,
+            },
+            "total": 14,
+          },
+          "tools": [
+            "retrieve read-only allow/default",
+            "fetch_blob read-only allow/default",
+            "get_schema read-only allow/default",
+            "call_function read-only allow/default",
+            "fetch read-only allow/default",
+            "search_paths read-only allow/default",
+            "accept_eula write-delete allow/default",
+            "delete_entity write-delete allow/default",
+            "upload_blob write-delete allow/default",
+            "create_entity write-delete allow/default",
+            "update_entity write-delete allow/default",
+            "ask other allow/default",
+            "list_agents other allow/default",
+            "get_debug_link other allow/default",
+          ],
+          "toolsSource": "live",
+        },
+        "status": 200,
+      },
+    ],
+    "plugin": [],
+    "step": "Settings detail view",
+  },
+  {
+    "api": [
+      {
+        "body": {
+          "permissions": {
+            "delete_entity": "block",
+          },
+        },
+        "request": "PUT /settings/api/plugins/workiq/tool-permissions",
+        "response": {
+          "(changed)": {
+            "tools": [
+              "retrieve read-only allow/default",
+              "fetch_blob read-only allow/default",
+              "get_schema read-only allow/default",
+              "call_function read-only allow/default",
+              "fetch read-only allow/default",
+              "search_paths read-only allow/default",
+              "accept_eula write-delete allow/default",
+              "delete_entity write-delete block/user",
+              "upload_blob write-delete allow/default",
+              "create_entity write-delete allow/default",
+              "update_entity write-delete allow/default",
+              "ask other allow/default",
+              "list_agents other allow/default",
+              "get_debug_link other allow/default",
+            ],
+          },
+          "id": "workiq",
+        },
+        "status": 200,
+      },
+    ],
+    "listChanged": true,
+    "mcp": [
+      {
+        "send": {
+          "id": 2,
+          "jsonrpc": "2.0",
+          "method": "tools/list",
+        },
+      },
+      {
+        "receive": {
+          "id": 2,
+          "jsonrpc": "2.0",
+          "result": {
+            "tools": [
+              "retrieve",
+              "fetch_blob",
+              "get_schema",
+              "call_function",
+              "fetch",
+              "search_paths",
+              "accept_eula",
+              "upload_blob",
+              "create_entity",
+              "update_entity",
+              "ask",
+              "list_agents",
+              "get_debug_link",
+            ],
+          },
+        },
+      },
+      {
+        "send": {
+          "id": 3,
+          "jsonrpc": "2.0",
+          "method": "tools/call",
+          "params": {
+            "arguments": {
+              "path": "/me/messages/1",
+            },
+            "name": "delete_entity",
+          },
+        },
+      },
+      {
+        "receive": {
+          "id": 3,
+          "jsonrpc": "2.0",
+          "result": {
+            "content": [
+              {
+                "text": "This tool is blocked in Maximal settings.",
+                "type": "text",
+              },
+            ],
+            "isError": true,
+          },
+        },
+      },
+    ],
+    "plugin": [
+      "settings.json workiq tools.permissions.delete_entity: (none) → "block"",
+      "event workiq tools",
+      "visible-tools workiq shown=[] hidden=[delete_entity]",
+      "event workiq settings",
+    ],
+    "settingsJson": {
+      "$schema": "maximal-plugin-settings/1",
+      "config": {
+        "endpoint": "<upstream>/mcp",
+      },
+      "plugin": "workiq",
+      "tools": {
+        "catalog": {
+          "tools": [
+            "retrieve",
+            "fetch_blob",
+            "get_schema",
+            "call_function",
+            "fetch",
+            "search_paths",
+            "accept_eula",
+            "delete_entity",
+            "upload_blob",
+            "create_entity",
+            "update_entity",
+            "ask",
+            "list_agents",
+            "get_debug_link",
+          ],
+          "updatedAt": "<time>",
+        },
+        "permissions": {
+          "delete_entity": "block",
+        },
+      },
+      "version": 1,
+    },
+    "step": "block delete_entity",
+  },
+  {
+    "api": [
+      {
+        "body": {
+          "permissions": {
+            "delete_entity": null,
+          },
+        },
+        "request": "PUT /settings/api/plugins/workiq/tool-permissions",
+        "response": {
+          "(changed)": {
+            "tools": [
+              "retrieve read-only allow/default",
+              "fetch_blob read-only allow/default",
+              "get_schema read-only allow/default",
+              "call_function read-only allow/default",
+              "fetch read-only allow/default",
+              "search_paths read-only allow/default",
+              "accept_eula write-delete allow/default",
+              "delete_entity write-delete allow/default",
+              "upload_blob write-delete allow/default",
+              "create_entity write-delete allow/default",
+              "update_entity write-delete allow/default",
+              "ask other allow/default",
+              "list_agents other allow/default",
+              "get_debug_link other allow/default",
+            ],
+          },
+          "id": "workiq",
+        },
+        "status": 200,
+      },
+    ],
+    "listChanged": true,
+    "mcp": [
+      {
+        "send": {
+          "id": 4,
+          "jsonrpc": "2.0",
+          "method": "tools/list",
+        },
+      },
+      {
+        "receive": {
+          "id": 4,
+          "jsonrpc": "2.0",
+          "result": {
+            "tools": [
+              "retrieve",
+              "fetch_blob",
+              "get_schema",
+              "call_function",
+              "fetch",
+              "search_paths",
+              "accept_eula",
+              "delete_entity",
+              "upload_blob",
+              "create_entity",
+              "update_entity",
+              "ask",
+              "list_agents",
+              "get_debug_link",
+            ],
+          },
+        },
+      },
+    ],
+    "plugin": [
+      "settings.json workiq tools.permissions.delete_entity: "block" → (none)",
+      "event workiq tools",
+      "visible-tools workiq shown=[delete_entity] hidden=[]",
+      "event workiq settings",
+    ],
+    "settingsJson": {
+      "$schema": "maximal-plugin-settings/1",
+      "config": {
+        "endpoint": "<upstream>/mcp",
+      },
+      "plugin": "workiq",
+      "tools": {
+        "catalog": {
+          "tools": [
+            "retrieve",
+            "fetch_blob",
+            "get_schema",
+            "call_function",
+            "fetch",
+            "search_paths",
+            "accept_eula",
+            "delete_entity",
+            "upload_blob",
+            "create_entity",
+            "update_entity",
+            "ask",
+            "list_agents",
+            "get_debug_link",
+          ],
+          "updatedAt": "<time>",
+        },
+      },
+      "version": 1,
+    },
+    "step": "unblock delete_entity",
+  },
+  {
+    "mcp": [
+      {
+        "send": {
+          "id": 5,
+          "jsonrpc": "2.0",
+          "method": "tools/call",
+          "params": {
+            "arguments": {
+              "query": "Q3 plan",
+              "sources": [
+                "teams",
+                "mail",
+              ],
+              "top": 3,
+            },
+            "name": "retrieve",
+          },
+        },
+      },
+      {
+        "receive": {
+          "id": 5,
+          "jsonrpc": "2.0",
+          "result": {
+            "content": [
+              {
+                "text": 
+"Fake grounding for "Q3 plan": Ada Lovelace (fake) shared the Q3 plan in Teams [^1].
+
+[^1]: Teams message, contoso.com (fake)"
+,
+                "type": "text",
+              },
+            ],
+            "structuredContent": {
+              "hits": [
+                {
+                  "id": "1",
+                  "source": "teams",
+                  "title": "Q3 plan (fake)",
+                  "url": "https://contoso.example/teams/fake",
+                },
+              ],
+            },
+          },
+        },
+      },
+    ],
+    "plugin": [],
+    "step": "call retrieve",
+    "upstream": [
+      "POST server/discover → 400 session=- auth=bearer protocol=2026-07-28",
+      "POST initialize → 200 session=- auth=bearer protocol=-",
+      "POST notifications/initialized → 202 session=session#2 auth=bearer protocol=2025-11-25",
+      "POST tools/call retrieve → 200 session=session#2 auth=bearer protocol=2025-11-25",
+      "GET /mcp → 200 session=session#2 auth=bearer protocol=2025-11-25",
+    ],
+  },
+  {
+    "listChanged": true,
+    "mcp": [
+      {
+        "send": {
+          "id": 6,
+          "jsonrpc": "2.0",
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "progressToken": 6,
+            },
+            "arguments": {
+              "question": "What's new?",
+            },
+            "name": "ask",
+          },
+        },
+      },
+      {
+        "receive": {
+          "id": 0,
+          "jsonrpc": "2.0",
+          "method": "elicitation/create",
+          "params": {
+            "message": "Which mailbox should Work IQ search?",
+            "mode": "form",
+            "requestedSchema": {
+              "properties": {
+                "mailbox": {
+                  "title": "Mailbox",
+                  "type": "string",
+                },
+              },
+              "required": [
+                "mailbox",
+              ],
+              "type": "object",
+            },
+          },
+        },
+      },
+      {
+        "send": {
+          "id": 0,
+          "jsonrpc": "2.0",
+          "result": {
+            "action": "accept",
+            "content": {
+              "mailbox": "shared@contoso.com",
+            },
+          },
+        },
+      },
+      {
+        "receive": {
+          "id": 6,
+          "jsonrpc": "2.0",
+          "result": {
+            "content": [
+              {
+                "text": "What's new? → accept: shared@contoso.com",
+                "type": "text",
+              },
+            ],
+          },
+        },
+      },
+    ],
+    "plugin": [],
+    "progress": [
+      {
+        "message": "Searching mail",
+        "progress": 1,
+        "progressToken": 6,
+        "total": 2,
+      },
+      {
+        "message": "Summarising",
+        "progress": 2,
+        "progressToken": 6,
+        "total": 2,
+      },
+    ],
+    "step": "ask: progress + elicitation round trip",
+    "upstream": [
+      "POST tools/call ask → 200 session=session#2 auth=bearer protocol=2025-11-25",
+      "POST /mcp → 202 session=session#2 auth=bearer protocol=2025-11-25",
+    ],
+  },
+  {
+    "listChanged": true,
+    "mcp": [
+      {
+        "send": {
+          "id": 7,
+          "jsonrpc": "2.0",
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "progressToken": 7,
+            },
+            "arguments": {
+              "query": "budget",
+            },
+            "name": "retrieve",
+          },
+        },
+      },
+      {
+        "receive": {
+          "id": 7,
+          "jsonrpc": "2.0",
+          "result": {
+            "content": [
+              {
+                "text": 
+"Fake grounding for "budget": Ada Lovelace (fake) shared the Q3 plan in Teams [^1].
+
+[^1]: Teams message, contoso.com (fake)"
+,
+                "type": "text",
+              },
+            ],
+            "structuredContent": {
+              "hits": [
+                {
+                  "id": "1",
+                  "source": "teams",
+                  "title": "Q3 plan (fake)",
+                  "url": "https://contoso.example/teams/fake",
+                },
+              ],
+            },
+          },
+        },
+      },
+    ],
+    "plugin": [
+      "log debug [plugin:workiq] Work IQ: retrieve throttled (HTTP 429), attempt 1 of 2.",
+    ],
+    "progress": [
+      {
+        "message": "Work IQ is rate-limiting requests (HTTP 429); retrying in <n> s.",
+        "progress": 1,
+        "progressToken": 7,
+      },
+    ],
+    "step": "retrieve: result-level 429 then success",
+    "upstream": [
+      "POST tools/call retrieve → 200 session=session#2 auth=bearer protocol=2025-11-25",
+      "POST tools/call retrieve → 200 session=session#2 auth=bearer protocol=2025-11-25",
+    ],
+  },
+  {
+    "mcp": [
+      {
+        "send": {
+          "id": 8,
+          "jsonrpc": "2.0",
+          "method": "tools/call",
+          "params": {
+            "arguments": {
+              "query": "salaries",
+            },
+            "name": "retrieve",
+          },
+        },
+      },
+      {
+        "receive": {
+          "id": 8,
+          "jsonrpc": "2.0",
+          "result": {
+            "content": [
+              {
+                "text": "Your organization's Work IQ policy doesn't allow this request.",
+                "type": "text",
+              },
+            ],
+            "isError": true,
+          },
+        },
+      },
+      {
+        "send": {
+          "id": 9,
+          "jsonrpc": "2.0",
+          "method": "tools/call",
+          "params": {
+            "arguments": {
+              "query": "again",
+            },
+            "name": "retrieve",
+          },
+        },
+      },
+      {
+        "receive": {
+          "id": 9,
+          "jsonrpc": "2.0",
+          "result": {
+            "content": [
+              {
+                "text": 
+"Fake grounding for "again": Ada Lovelace (fake) shared the Q3 plan in Teams [^1].
+
+[^1]: Teams message, contoso.com (fake)"
+,
+                "type": "text",
+              },
+            ],
+            "structuredContent": {
+              "hits": [
+                {
+                  "id": "1",
+                  "source": "teams",
+                  "title": "Q3 plan (fake)",
+                  "url": "https://contoso.example/teams/fake",
+                },
+              ],
+            },
+          },
+        },
+      },
+    ],
+    "plugin": [],
+    "step": "retrieve: policy 403 isolated",
+    "upstream": [
+      "POST tools/call retrieve → 403 session=session#2 auth=bearer protocol=2025-11-25",
+      "POST tools/call retrieve → 200 session=session#2 auth=bearer protocol=2025-11-25",
+    ],
+  },
+  {
+    "api": [
+      {
+        "body": {
+          "config": {
+            "endpoint": "https://attacker.example.com/mcp",
+          },
+        },
+        "request": "PATCH /settings/api/plugins/workiq",
+        "response": {
+          "error": {
+            "message": "config.endpoint: Endpoint must be an https:// URL on 127.0.0.1:<port>.",
+            "type": "invalid_request_error",
+          },
+          "issues": [
+            {
+              "message": "Endpoint must be an https:// URL on 127.0.0.1:<port>.",
+              "path": "config.endpoint",
+            },
+          ],
+        },
+        "status": 400,
+      },
+    ],
+    "plugin": [],
+    "step": "PATCH invalid config → 400, nothing reloads",
+  },
+  {
+    "api": [
+      {
+        "body": {
+          "config": {
+            "authority": "https://login.microsoft.com/organizations",
+            "endpoint": "<upstream>/mcp",
+          },
+        },
+        "request": "PATCH /settings/api/plugins/workiq",
+        "response": {
+          "(changed)": {
+            "config": {
+              "authority": "https://login.microsoft.com/organizations",
+              "endpoint": "<upstream>/mcp",
+            },
+          },
+          "id": "workiq",
+        },
+        "status": 200,
+      },
+    ],
+    "listChanged": true,
+    "mcp": [
+      {
+        "send": {
+          "id": 10,
+          "jsonrpc": "2.0",
+          "method": "tools/list",
+        },
+      },
+      {
+        "receive": {
+          "id": 10,
+          "jsonrpc": "2.0",
+          "result": {
+            "tools": [
+              "retrieve",
+              "fetch_blob",
+              "get_schema",
+              "call_function",
+              "fetch",
+              "search_paths",
+              "accept_eula",
+              "delete_entity",
+              "upload_blob",
+              "create_entity",
+              "update_entity",
+              "ask",
+              "list_agents",
+              "get_debug_link",
+            ],
+          },
+        },
+      },
+    ],
+    "plugin": [
+      "settings.json workiq config.authority: (none) → "https://login.microsoft.com/organizations"",
+      "event workiq settings",
+      "fiber workiq#1 active → unloading",
+      "event workiq tools",
+      "tools workiq +[] -[retrieve, fetch_blob, get_schema, call_function, fetch, search_paths, accept_eula, delete_entity, upload_blob, create_entity, update_entity, ask, list_agents, get_debug_link]",
+      "fiber workiq#1 unloading → disposed",
+      "event workiq status",
+      "status workiq (none)",
+      "event workiq lifecycle",
+      "lifecycle workiq starting",
+      "fiber workiq#2 pending → loading",
+      "event workiq status",
+      "status workiq working/working "Starting Work IQ…"",
+      "fiber workiq#2 loading → active",
+      "event workiq lifecycle",
+      "lifecycle workiq active",
+      "event workiq status",
+      "status workiq working/working "Connecting to Work IQ…"",
+      "log info [plugin:workiq] Work IQ: connected with MCP 2025-11-25 (initialize handshake).",
+      "event workiq tools",
+      "tools workiq +[retrieve, fetch_blob, get_schema, call_function, fetch, search_paths, accept_eula, delete_entity, upload_blob, create_entity, update_entity, ask, list_agents, get_debug_link] -[]",
+      "event workiq status",
+      "status workiq ready/ready "Connected as e2e@contoso.com" facts=[Account=e2e@contoso.com, Tenant=00000000-0000-4000-8000-0000000000e2, Tools=14, Protocol=MCP 2025-11-25] actions=[sign-out:"Sign out"(destructive)+confirm]",
+      "settings.json workiq tools.catalog.updatedAt: "<time>" → "<time>"",
+    ],
+    "settingsJson": {
+      "$schema": "maximal-plugin-settings/1",
+      "config": {
+        "authority": "https://login.microsoft.com/organizations",
+        "endpoint": "<upstream>/mcp",
+      },
+      "plugin": "workiq",
+      "tools": {
+        "catalog": {
+          "tools": [
+            "retrieve",
+            "fetch_blob",
+            "get_schema",
+            "call_function",
+            "fetch",
+            "search_paths",
+            "accept_eula",
+            "delete_entity",
+            "upload_blob",
+            "create_entity",
+            "update_entity",
+            "ask",
+            "list_agents",
+            "get_debug_link",
+          ],
+          "updatedAt": "<time>",
+        },
+      },
+      "version": 1,
+    },
+    "step": "PATCH valid config → reload → ready again",
+    "upstream": [
+      "DELETE /mcp → 200 session=session#1 auth=bearer protocol=2025-11-25",
+      "DELETE /mcp → 200 session=session#2 auth=bearer protocol=2025-11-25",
+      "POST server/discover → 400 session=- auth=bearer protocol=2026-07-28",
+      "POST initialize → 200 session=- auth=bearer protocol=-",
+      "POST notifications/initialized → 202 session=session#3 auth=bearer protocol=2025-11-25",
+      "POST tools/list → 200 session=session#3 auth=bearer protocol=2025-11-25",
+      "GET /mcp → 200 session=session#3 auth=bearer protocol=2025-11-25",
+    ],
+  },
+  {
+    "api": [
+      {
+        "request": "POST /settings/api/plugins/workiq/actions/sign-out",
+        "response": {
+          "ok": true,
+        },
+        "status": 202,
+      },
+      {
+        "request": "GET /settings/api/plugins/workiq",
+        "response": {
+          "(changed)": {
+            "config": {
+              "authority": "https://login.microsoft.com/organizations",
+              "endpoint": "<upstream>/mcp",
+            },
+            "status": {
+              "actions": [
+                {
+                  "id": "sign-in",
+                  "kind": "primary",
+                  "label": "Sign in",
+                },
+              ],
+              "code": "signin-needed",
+              "state": "needs-setup",
+              "summary": "Sign in as e2e@contoso.com",
+            },
+            "toolsSource": "cache",
+          },
+          "id": "workiq",
+        },
+        "status": 200,
+      },
+    ],
+    "listChanged": true,
+    "mcp": [
+      {
+        "send": {
+          "id": 11,
+          "jsonrpc": "2.0",
+          "method": "tools/list",
+        },
+      },
+      {
+        "receive": {
+          "id": 11,
+          "jsonrpc": "2.0",
+          "result": {
+            "tools": [],
+          },
+        },
+      },
+    ],
+    "plugin": [
+      "event workiq tools",
+      "tools workiq +[] -[retrieve, fetch_blob, get_schema, call_function, fetch, search_paths, accept_eula, delete_entity, upload_blob, create_entity, update_entity, ask, list_agents, get_debug_link]",
+      "storage workiq delete fake-token-cache.json",
+      "event workiq status",
+      "status workiq needs-setup/signin-needed "Sign in as e2e@contoso.com" actions=[sign-in:"Sign in"(primary)]",
+    ],
+    "sse": [
+      {
+        "(changed)": {
+          "status": {
+            "actions": [
+              {
+                "id": "sign-in",
+                "kind": "primary",
+                "label": "Sign in",
+              },
+            ],
+            "code": "signin-needed",
+            "state": "needs-setup",
+            "summary": "Sign in as e2e@contoso.com",
+          },
+          "toolsSource": "cache",
+        },
+        "id": "workiq",
+      },
+    ],
+    "step": "sign-out → signin-needed",
+    "storage": [
+      "settings.json",
+      "terms.json",
+    ],
+    "upstream": [
+      "DELETE /mcp → 200 session=session#3 auth=bearer protocol=2025-11-25",
+    ],
+  },
+  {
+    "api": [
+      {
+        "body": {
+          "enabled": false,
+        },
+        "request": "PATCH /settings/api/plugins/workiq",
+        "response": {
+          "(changed)": {
+            "enabled": false,
+            "lifecycle": "disabled",
+          },
+          "id": "workiq",
+        },
+        "status": 200,
+      },
+    ],
+    "configJson": {
+      "workiq": {
+        "enabled": false,
+      },
+    },
+    "plugin": [
+      "fiber workiq#2 active → unloading",
+      "fiber workiq#2 unloading → disposed",
+      "event workiq status",
+      "status workiq (none)",
+      "event workiq lifecycle",
+      "lifecycle workiq disabled",
+    ],
+    "sse": [
+      {
+        "(changed)": {
+          "enabled": false,
+          "lifecycle": "disabled",
+          "status": "(removed)",
+        },
+        "id": "workiq",
+      },
+    ],
+    "step": "disable → MCP 404",
+  },
+]
+`;

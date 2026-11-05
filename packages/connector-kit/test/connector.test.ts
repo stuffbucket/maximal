@@ -660,4 +660,35 @@ describe("connector tool relays", () => {
     expect(plugin.status()).toBeUndefined()
     await waitFor(() => server.sessionCount === 0)
   })
+
+  test("unloading during the upstream handshake still ends that session", async () => {
+    const server = fake()
+    let reached!: () => void
+    const handshake = new Promise<void>((resolve) => (reached = resolve))
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    const plugin = await load(server, new FakeTokenProvider(ADA), {
+      storage: ACCEPTED,
+      connector: {
+        // Hold the `initialized` notification: the upstream session exists,
+        // the handshake has not finished.
+        async fetch(url, init) {
+          if (
+            typeof init?.body === "string"
+            && init.body.includes("notifications/initialized")
+          ) {
+            reached()
+            await gate
+          }
+          return await fetch(url, init)
+        },
+      },
+    })
+    await handshake
+    expect(server.sessionCount).toBe(1)
+    const unloading = plugin.dispose()
+    release()
+    await unloading
+    await waitFor(() => server.sessionCount === 0)
+  })
 })

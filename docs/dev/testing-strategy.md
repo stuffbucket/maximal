@@ -85,6 +85,8 @@ breaks down into these layers:
 | **Contract** | The shape of a wire payload or a public response matches a published schema — or a single source of truth still agrees with its mirrors | `auth-status-contract.test.ts`, `config-schema.test.ts`, diagnostics schema round-trip in `settings-api-diagnostics.test.ts`, `i18n-catalog-parity.test.ts` |
 | **Route / handler (in-process)** | A Hono route, exercised via `server.request(...)` / `app.fetch(...)` — no network, no listening port | `*-route.test.ts`, `*-handler.test.ts`, `debug-route.test.ts` |
 | **Behavioral / lifecycle** | Stateful subsystems (auth controller, recovery, rate limit) across event sequences | `auth-controller-lifecycle.test.ts`, `auth-recovery.test.ts`, `copilot-rate-limit.test.ts` |
+| **Plugin conformance** | Every plugin package runs `runPluginConformance` (`@stuffbucket/maximal-plugin-host/testing`): manifest/config shape, enable, reload, disable and shutdown leave nothing behind, settings migration and isolation | `packages/plugin-host/test/testing.test.ts`, `packages/plugin-workiq/test/conformance.test.ts` |
+| **End-to-end, in-process** | A plugin through its whole lifecycle in the real app, every boundary recorded and compared with a golden transcript (below) | `e2e-plugin-lifecycle.test.ts`, `bench-connectors.test.ts` |
 | **Mutation (manual, targeted)** | Whether tests *would fail* if the logic were wrong — see §6 | run on demand via `bun run mutate` |
 
 `tests/i18n-catalog-parity.test.ts` is a contract test of the second kind: it
@@ -93,6 +95,29 @@ as the single source of truth for OS-conditional terminology (see
 [`i18n.md`](i18n.md)). The Rust tray side hand-mirrors the `app-container`
 noun via `cfg!(target_os)` instead of an ICU runtime, and this test fails if
 that mirror or the catalog spelling drifts.
+
+**Plugin lifecycle e2e.** `tests/e2e-plugin-lifecycle.test.ts` (also
+`bun run test:e2e:plugins`; part of plain `bun test`) runs the Work IQ
+connector in the real app (`server` on a loopback port + `startPlugins({ gateway })`,
+the connectors-bench seam; `runServer` itself exits the process on shutdown,
+so the bench covers it) with a host built by the lifecycle harness, the fake
+Work IQ upstream and a fake sign-in with a token cache. It walks boot (a
+legacy `config.json` value migrated) → enable → terms → sign-in → tools
+mirrored (compared field by field with the fixture) → Settings detail →
+block/unblock → calls (exact upstream request and downstream result,
+progress + elicitation, a throttled result retried, a policy 403) → config
+PATCH (rejected, then a reload) → sign-out → disable → shutdown, asserting
+invariants at each step and that the fake bearer/refresh tokens never reach
+MCP clients, Settings, SSE or the logs. Each step's exchanges — plugin
+transcript, Settings API, last `plugins.changed` frame (views as deltas),
+downstream MCP messages, upstream requests, storage names, settings.json,
+config.json — are normalised and compared with
+`tests/__snapshots__/e2e-plugin-lifecycle.test.ts.snap`, so any change in
+what crosses a boundary shows up in review. What races by nature is kept
+out of the ordered sequences (list_changed and progress notifications, the
+upstream event-stream GET, parallel DELETEs, PATCH fields set in the
+background). Update it with `bun test tests/e2e-plugin-lifecycle.test.ts --update-snapshots`
+and review the diff.
 
 **Not present today** (gaps, see §8):
 - No end-to-end test against a real (or recorded) Copilot backend.

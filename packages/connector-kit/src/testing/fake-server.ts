@@ -52,6 +52,8 @@ export interface RecordedRequest {
   path: string
   authorization: string | null
   sessionId: string | null
+  /** The `Mcp-Protocol-Version` header (sent after the handshake). */
+  protocolVersion: string | null
   /** JSON-RPC method of a POST body (first message). */
   rpc?: string
   /** Tool name of a `tools/call`. */
@@ -675,6 +677,7 @@ async function handleRequest(
       path: url.pathname,
       authorization: request.headers.get("authorization"),
       sessionId,
+      protocolVersion: request.headers.get("mcp-protocol-version"),
       ...(rpc ? { rpc } : {}),
       ...(tool ? { tool } : {}),
       status,

@@ -181,7 +181,12 @@ function upstreamPool(
         onToolsChanged: wiring.onToolsChanged,
       })
       try {
-        await connection.connect(signal)
+        // The handshake is not cut short on unload: once `initialize` was
+        // answered the upstream session exists, and an aborted handshake
+        // forgets its id, so it could never be ended (DELETE). Finish it
+        // (bounded by `requestTimeoutMs`), then close it below.
+        await connection.connect()
+        signal.throwIfAborted()
       } catch (error) {
         await connection.close()
         throw error
