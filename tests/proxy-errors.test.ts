@@ -2,12 +2,13 @@
  * The inference routes' error handler (`proxy-errors.ts`): rewrites run in
  * order and can't break the reply or turn it into a success, replies render
  * in each wire's format, and a route module's `onError` answers for errors
- * its handlers throw.
+ * its handlers throw, including "not signed in" from the token gate.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { Hono } from "hono"
 
+import { requireGithubAuth } from "~/lib/auth/request-auth"
 import { HTTPError } from "~/lib/errors/http-errors"
 import {
   applyRewrites,
@@ -18,6 +19,10 @@ import {
   renderProxyError,
 } from "~/lib/errors/proxy-errors"
 import { state } from "~/lib/runtime-state/state"
+import { completionRoutes } from "~/routes/chat-completions/route"
+import { messageRoutes } from "~/routes/messages/route"
+import { providerMessageRoutes } from "~/routes/provider/messages/route"
+import { responsesRoutes } from "~/routes/responses/route"
 
 const event: ProxyErrorEvent = { wire: "anthropic", error: new Error("x") }
 const base: ProxyErrorReply = { status: 500, type: "api_error", message: "x" }
@@ -180,6 +185,62 @@ describe("proxyErrorHandler on a route module", () => {
     expect(await res.json()).toEqual({
       type: "error",
       error: { type: "api_error", message: "rewritten" },
+    })
+  })
+})
+
+describe("no GitHub sign-in on the inference routes", () => {
+  const savedToken = state.githubToken
+  beforeEach(() => {
+    state.githubToken = undefined
+  })
+  afterEach(() => {
+    state.githubToken = savedToken
+  })
+
+  const post = { method: "POST", body: "{}" }
+
+  test.each([
+    ["/v1/messages", messageRoutes],
+    ["/:provider/v1/messages", providerMessageRoutes],
+  ] as const)("%s: 503, no retry, Anthropic envelope", async (_path, app) => {
+    const res = await app.request("/", post)
+    expect(res.status).toBe(503)
+    expect(res.headers.get("x-should-retry")).toBe("false")
+    expect(await res.json()).toEqual({
+      type: "error",
+      error: {
+        type: "api_error",
+        message: expect.stringContaining("Settings → Account") as string,
+      },
+    })
+  })
+
+  test.each([
+    ["/chat/completions", completionRoutes],
+    ["/responses", responsesRoutes],
+  ] as const)("%s: 503, no retry, OpenAI error object", async (_path, app) => {
+    const res = await app.request("/", post)
+    expect(res.status).toBe(503)
+    expect(res.headers.get("x-should-retry")).toBe("false")
+    expect(await res.json()).toEqual({
+      error: {
+        type: "service_unavailable",
+        code: "maximal_not_signed_in",
+        message: expect.stringContaining("maximal auth") as string,
+      },
+    })
+  })
+
+  test("a plain route keeps the 401 not_authenticated contract", async () => {
+    const app = new Hono()
+    app.use(requireGithubAuth)
+    app.get("/usage", (c) => c.text("ok"))
+    const res = await app.request("/usage")
+    expect(res.status).toBe(401)
+    expect(await res.json()).toEqual({
+      error: "not_authenticated",
+      hint: "Open Settings → Account to sign in, or run `maximal auth`.",
     })
   })
 })
