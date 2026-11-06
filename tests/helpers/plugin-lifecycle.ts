@@ -23,6 +23,8 @@ import path from "node:path"
 
 import { PATHS } from "~/lib/platform/paths"
 
+import type { FakeClaudeCli } from "./fake-claude-cli"
+
 // ── Recorders ──────────────────────────────────────────────────────────
 
 export interface McpMessage {
@@ -227,6 +229,17 @@ export interface StepRecord {
   storage?: Array<string>
   settingsJson?: unknown
   configJson?: unknown
+  /** `claude` CLI invocations (not `--version`, which detection caches). */
+  claudeCli?: Array<string>
+  /** Claude Code's user-scope `mcpServers` when it changed. */
+  claudeMcpServers?: unknown
+}
+
+/** Claude Code as Maximal sees it: the fake CLI and its user config. */
+export interface ClaudeSide {
+  cli: FakeClaudeCli
+  /** `$CLAUDE_CONFIG_DIR/.claude.json`. */
+  configFile: string
 }
 
 export interface Run {
@@ -250,6 +263,20 @@ export interface Run {
   lastSse: string | undefined
   /** Close MCP sessions, stop plugins and the app server. Idempotent. */
   closeApp(): Promise<void>
+  claude: ClaudeSide
+}
+
+/** Claude Code's user-scope MCP servers (`.claude.json` → `mcpServers`). */
+export function claudeMcpServers(run: Run): Record<string, unknown> {
+  const text = readText(run.claude.configFile)
+  if (text === undefined) return {}
+  const servers = (JSON.parse(text) as { mcpServers?: unknown }).mcpServers
+  return isRecord(servers) ? servers : {}
+}
+
+/** The `claude` invocations that changed something (not `--version`). */
+export function claudeCliCalls(run: Run): Array<Array<string>> {
+  return run.claude.cli.calls().filter((args) => args[0] !== "--version")
 }
 
 /**
@@ -438,6 +465,8 @@ interface Marks {
   storage: Array<string>
   settings: string | undefined
   config: string
+  claudeCalls: number
+  claudeServers: string
 }
 
 function sseRecord(run: Run, marks: Marks): unknown {
@@ -502,6 +531,12 @@ function stepRecord(run: Run, name: string, marks: Marks): StepRecord {
   const config = configPlugins()
   if (JSON.stringify(config) !== marks.config)
     record.configJson = normalizer.value(config)
+  const calls = claudeCliCalls(run).slice(marks.claudeCalls)
+  if (calls.length > 0)
+    record.claudeCli = calls.map((args) => normalizer.text(args.join(" ")))
+  const servers = claudeMcpServers(run)
+  if (JSON.stringify(servers) !== marks.claudeServers)
+    record.claudeMcpServers = normalizer.value(servers)
   return record
 }
 
@@ -523,6 +558,8 @@ export async function step(
     storage: run.harness.files(run.id),
     settings: readText(settingsFile(run)),
     config: JSON.stringify(configPlugins()),
+    claudeCalls: claudeCliCalls(run).length,
+    claudeServers: JSON.stringify(claudeMcpServers(run)),
   }
   run.harness.step(name)
   try {

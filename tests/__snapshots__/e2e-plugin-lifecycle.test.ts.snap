@@ -397,6 +397,114 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
     ],
   },
   {
+    "api": [
+      {
+        "body": {
+          "enabled": true,
+        },
+        "request": "POST /settings/api/apps/claude-code/toggle",
+        "response": {
+          "conflict": null,
+          "enabled": true,
+          "id": "claude-code",
+          "install": null,
+          "installs": [
+            {
+              "path": "<claude-bin>/claude",
+              "source": "path",
+              "version": "2.1.0",
+            },
+          ],
+          "kind": "config",
+          "name": "Claude Code",
+          "status": "ready",
+        },
+        "status": 200,
+      },
+    ],
+    "plugin": [],
+    "sse": [
+      {
+        "(changed)": {
+          "clients": [
+            {
+              "available": true,
+              "id": "claude-code",
+              "selected": false,
+            },
+          ],
+        },
+        "id": "workiq",
+      },
+    ],
+    "step": "Claude Code routing on",
+  },
+  {
+    "api": [
+      {
+        "body": {
+          "clients": [
+            "claude-code",
+          ],
+        },
+        "request": "PATCH /settings/api/plugins/workiq",
+        "response": {
+          "(changed)": {
+            "clients": [
+              {
+                "available": true,
+                "id": "claude-code",
+                "selected": true,
+              },
+            ],
+          },
+          "id": "workiq",
+        },
+        "status": 200,
+      },
+    ],
+    "claudeCli": [
+      "mcp add-json --scope user workiq {"type":"http","url":"<maximal>/mcp/workiq","headers":{"Authorization":"Bearer <sha256(api-key)>"}}",
+    ],
+    "claudeMcpServers": {
+      "github": {
+        "type": "http",
+        "url": "https://mcp.example.test/github",
+      },
+      "workiq": {
+        "headers": {
+          "Authorization": "Bearer <api-key>",
+        },
+        "type": "http",
+        "url": "<maximal>/mcp/workiq",
+      },
+    },
+    "configJson": {
+      "workiq": {
+        "clients": [
+          "claude-code",
+        ],
+        "enabled": true,
+      },
+    },
+    "plugin": [],
+    "sse": [
+      {
+        "(changed)": {
+          "clients": [
+            {
+              "available": true,
+              "id": "claude-code",
+              "selected": true,
+            },
+          ],
+        },
+        "id": "workiq",
+      },
+    ],
+    "step": "send Work IQ to Claude Code",
+  },
+  {
     "mcp": [
       {
         "send": {
@@ -482,10 +590,9 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
           "catalogUpdatedAt": "<time>",
           "clients": [
             {
-              "available": false,
+              "available": true,
               "id": "claude-code",
-              "reason": "Turn on Claude Code in Maximal first.",
-              "selected": false,
+              "selected": true,
             },
           ],
           "config": {
@@ -1392,8 +1499,20 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
         "status": 200,
       },
     ],
+    "claudeCli": [
+      "mcp remove --scope user workiq",
+    ],
+    "claudeMcpServers": {
+      "github": {
+        "type": "http",
+        "url": "https://mcp.example.test/github",
+      },
+    },
     "configJson": {
       "workiq": {
+        "clients": [
+          "claude-code",
+        ],
         "enabled": false,
       },
     },

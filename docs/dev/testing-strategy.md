@@ -101,17 +101,24 @@ that mirror or the catalog spelling drifts.
 connector in the real app (`server` on a loopback port + `startPlugins({ gateway })`,
 the connectors-bench seam; `runServer` itself exits the process on shutdown,
 so the bench covers it) with a host built by the lifecycle harness, the fake
-Work IQ upstream and a fake sign-in with a token cache. It walks boot (a
-legacy `config.json` value migrated) → enable → terms → sign-in → tools
-mirrored (compared field by field with the fixture) → Settings detail →
+Work IQ upstream and a fake sign-in with a token cache. Claude Code is a
+fake `claude` executable first on PATH (`tests/helpers/fake-claude-cli.ts`,
+which edits a temp `CLAUDE_CONFIG_DIR/.claude.json` the way the real CLI
+does), so Maximal's own detection and `claude mcp add-json` / `remove` run
+unchanged. It walks boot (a legacy `config.json` value migrated) → enable →
+terms → sign-in → Claude Code routing on → Work IQ sent to Claude Code (the
+key never on the command line, the user's own servers untouched) → tools
+mirrored over a client connected with exactly the URL and headers of that
+entry (compared field by field with the fixture) → Settings detail →
 block/unblock → calls (exact upstream request and downstream result,
 progress + elicitation, a throttled result retried, a policy 403) → config
-PATCH (rejected, then a reload) → sign-out → disable → shutdown, asserting
+PATCH (rejected, then a reload) → sign-out → disable (the Claude Code entry
+removed) → shutdown, asserting
 invariants at each step and that the fake bearer/refresh tokens never reach
 MCP clients, Settings, SSE or the logs. Each step's exchanges — plugin
 transcript, Settings API, last `plugins.changed` frame (views as deltas),
 downstream MCP messages, upstream requests, storage names, settings.json,
-config.json — are normalised and compared with
+config.json, `claude` invocations and Claude Code's `mcpServers` — are normalised and compared with
 `tests/__snapshots__/e2e-plugin-lifecycle.test.ts.snap`, so any change in
 what crosses a boundary shows up in review. What races by nature is kept
 out of the ordered sequences (list_changed and progress notifications, the

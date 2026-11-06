@@ -10,6 +10,11 @@
  * Settings HTTP API, the Settings events stream (SSE) and a real MCP client
  * session on `/mcp/workiq`.
  *
+ * Claude Code is on the other side of the connector: a fake `claude`
+ * executable first on PATH (`helpers/fake-claude-cli`) is what Maximal finds
+ * and runs to write its user-scope MCP entry, and the MCP client connects
+ * with exactly the URL and headers that entry gives Claude Code.
+ *
  * Every boundary is recorded per step — the plugin transcript (fibers,
  * gateway events, status, tools, settings.json diffs, storage names,
  * openExternal, logs), Settings API exchanges, `plugins.changed` frames,
@@ -46,12 +51,12 @@ import {
   WORKIQ_TOOLS,
 } from "@stuffbucket/maximal-plugin-workiq/testing"
 import { afterAll, expect, test } from "bun:test"
-import { randomBytes } from "node:crypto"
+import { createHash, randomBytes } from "node:crypto"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-import { writeConfig } from "~/lib/config/config"
+import { getConfig, writeConfig } from "~/lib/config/config"
 import { PATHS } from "~/lib/platform/paths"
 import { startPlugins, stopPlugins } from "~/lib/plugins/runtime"
 import { setListeningPort } from "~/lib/start/proxy-port"
@@ -59,8 +64,11 @@ import { BUILD_VERSION } from "~/lib/update/build-info"
 import { pluginMcpRoutes } from "~/routes/plugins/mcp"
 import { server } from "~/server"
 
+import { installFakeClaudeCli } from "./helpers/fake-claude-cli"
 import {
   type ApiExchange,
+  claudeCliCalls,
+  claudeMcpServers,
   configPlugins,
   listChangedAfter,
   isRecord,
@@ -91,6 +99,8 @@ const ACCOUNT = {
 }
 /** Backoff and progress cadence: one "retrying" notice per throttled attempt. */
 const RETRY_MS = 50
+/** A server the user added to Claude Code themselves; Maximal never touches it. */
+const USER_SERVER = { type: "http", url: "https://mcp.example.test/github" }
 const ELICIT_SCHEMA = {
   type: "object" as const,
   properties: { mailbox: { type: "string" as const, title: "Mailbox" } },
@@ -108,7 +118,13 @@ afterAll(async () => {
   }
 })
 
+/** Connect the way Claude Code would: with the URL and headers of the entry
+ *  Maximal wrote into its user config. */
 async function connectClient(run: Run): Promise<Client> {
+  const entry = claudeMcpServers(run)[ID] as
+    | { type: string; url: string; headers?: Record<string, string> }
+    | undefined
+  if (entry?.type !== "http") throw new Error("no Claude Code entry")
   const client = new Client(
     { name: "e2e-client", version: "1.0.0" },
     { capabilities: { elicitation: {} } },
@@ -120,10 +136,9 @@ async function connectClient(run: Run): Promise<Client> {
     }),
   )
   client.setNotificationHandler("notifications/tools/list_changed", () => {})
-  const transport = new StreamableHTTPClientTransport(
-    new URL(`${run.origin}/mcp/${ID}`),
-    { requestInit: { headers: { authorization: `Bearer ${API_KEY}` } } },
-  )
+  const transport = new StreamableHTTPClientTransport(new URL(entry.url), {
+    requestInit: { headers: entry.headers },
+  })
   await client.connect(recordingTransport(transport, run.mcpLog))
   cleanups.push(() => client.close())
   return client
@@ -172,11 +187,14 @@ function startFake(): FakeRemoteMcp {
 async function startRun(fake: FakeRemoteMcp): Promise<Run> {
   const storageRoot = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-plugins-"))
   cleanups.push(() => fs.rmSync(storageRoot, { recursive: true, force: true }))
+  const claude = startClaudeCode()
   const normalizer = new Normalizer({
     aliases: {
       [fake.origin]: "<upstream>",
       [API_KEY]: "<api-key>",
       [BUILD_VERSION]: "<version>",
+      [claude.cli.binDir]: "<claude-bin>",
+      [createHash("sha256").update(API_KEY).digest("hex")]: "<sha256(api-key)>",
     },
     secrets: SECRETS,
   })
@@ -247,8 +265,36 @@ async function startRun(fake: FakeRemoteMcp): Promise<Run> {
     views: new Map(),
     lastSse: undefined,
     closeApp: close,
+    claude,
   }
 }
+
+/**
+ * Claude Code installed but not routed through Maximal: the fake CLI first
+ * on PATH, and a fresh `CLAUDE_CONFIG_DIR` whose user config already has
+ * the user's own MCP server.
+ */
+function startClaudeCode(): Run["claude"] {
+  const cli = installFakeClaudeCli()
+  cleanups.push(() => cli.dispose())
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-claude-config-"))
+  const previous = process.env.CLAUDE_CONFIG_DIR
+  process.env.CLAUDE_CONFIG_DIR = dir
+  cleanups.push(() => {
+    if (previous === undefined) delete process.env.CLAUDE_CONFIG_DIR
+    else process.env.CLAUDE_CONFIG_DIR = previous
+    fs.rmSync(dir, { recursive: true, force: true })
+  })
+  const configFile = path.join(dir, ".claude.json")
+  fs.writeFileSync(
+    configFile,
+    JSON.stringify({ numStartups: 3, mcpServers: { github: USER_SERVER } }),
+  )
+  return { cli, configFile }
+}
+
+/** What `config.json` says Maximal wrote into Claude Code. */
+const ownedInClaudeCode = () => getConfig().apps?.claudeCode?.mcpServers ?? []
 
 // ── Phases ─────────────────────────────────────────────────────────────
 
@@ -325,13 +371,55 @@ async function bootAndSetUp(run: Run): Promise<string> {
     )
   })
 
+  await sendToClaudeCode(run)
   return protocol
+}
+
+/** Claude Code routed through Maximal, then Work IQ sent to it. */
+async function sendToClaudeCode(run: Run) {
+  // 5. Routing on: nothing is written for Work IQ until the user picks Claude Code.
+  await step(run, "Claude Code routing on", async () => {
+    const toggled = await run.api("POST", "/apps/claude-code/toggle", {
+      enabled: true,
+    })
+    expect(toggled.status).toBe(200)
+    expect(toggled.response).toMatchObject({ enabled: true, conflict: null })
+    expect(claudeMcpServers(run)).toEqual({ github: USER_SERVER })
+    expect(claudeCliCalls(run)).toEqual([])
+  })
+
+  // 6. Work IQ → Claude Code: one `claude mcp add-json` with a placeholder,
+  //    then the real key swapped into the file; the user's server untouched.
+  await step(run, "send Work IQ to Claude Code", async () => {
+    const patched = await run.api("PATCH", `/plugins/${ID}`, {
+      clients: ["claude-code"],
+    })
+    expect(patched.status).toBe(200)
+    expect(claudeMcpServers(run)).toEqual({
+      github: USER_SERVER,
+      [ID]: {
+        type: "http",
+        url: `${run.origin}/mcp/${ID}`,
+        headers: { Authorization: `Bearer ${API_KEY}` },
+      },
+    })
+    const document = JSON.parse(
+      readText(run.claude.configFile) ?? "{}",
+    ) as Record<string, unknown>
+    expect(document.numStartups).toBe(3)
+    const calls = claudeCliCalls(run)
+    expect(calls.map((args) => args.slice(0, 5))).toEqual([
+      ["mcp", "add-json", "--scope", "user", ID],
+    ])
+    expect(calls.flat().some((arg) => arg.includes(API_KEY))).toBe(false)
+    expect(ownedInClaudeCode()).toEqual([ID])
+  })
 }
 
 /** A real MCP client, the Settings detail, and blocking a tool. */
 async function toolsAndPermissions(run: Run): Promise<Client> {
   const { harness, fake } = run
-  // 5. A real MCP client sees the upstream tools, verbatim.
+  // 7. A real MCP client sees the upstream tools, verbatim.
   let client: Client | undefined
   await step(run, "MCP client: tools mirrored", async () => {
     client = await connectClient(run)
@@ -361,7 +449,7 @@ async function toolsAndPermissions(run: Run): Promise<Client> {
   if (!client) throw new Error("no MCP client")
   const mcp = client
 
-  // 6. Settings detail: groups, permission sources.
+  // 8. Settings detail: groups, permission sources.
   await step(run, "Settings detail view", async () => {
     const detail = await run.api("GET", `/plugins/${ID}`)
     expect(detail.status).toBe(200)
@@ -383,7 +471,7 @@ async function toolsAndPermissions(run: Run): Promise<Client> {
     expect(view.manifest.connector?.auth).toEqual({ type: "entra" })
   })
 
-  // 7. Block a tool: hidden from MCP, calls refused, upstream never asked.
+  // 9. Block a tool: hidden from MCP, calls refused, upstream never asked.
   await step(run, "block delete_entity", async () => {
     const since = listChangedCount(run.mcpLog)
     const put = await run.api("PUT", `/plugins/${ID}/tool-permissions`, {
@@ -422,7 +510,7 @@ async function toolsAndPermissions(run: Run): Promise<Client> {
 /** Calls: exact upstream request, relays, retry on throttling, a policy denial. */
 async function toolCalls(run: Run, mcp: Client, protocol: string) {
   const { harness, fake } = run
-  // 8. An allowed call: exactly what goes upstream and what comes back.
+  // 10. An allowed call: exactly what goes upstream and what comes back.
   await step(run, "call retrieve", async () => {
     const mark = fake.requests.length
     const args = { query: "Q3 plan", sources: ["teams", "mail"], top: 3 }
@@ -450,7 +538,7 @@ async function toolCalls(run: Run, mcp: Client, protocol: string) {
       expect(request.protocolVersion).toBe(protocol)
   })
 
-  // 9. Progress and elicitation relayed both ways.
+  // 11. Progress and elicitation relayed both ways.
   await step(run, "ask: progress + elicitation round trip", async () => {
     const progress: Array<{ progress: number; message?: string }> = []
     const result = await mcp.callTool(
@@ -476,7 +564,7 @@ async function toolCalls(run: Run, mcp: Client, protocol: string) {
     })
   })
 
-  // 10. A throttled result is retried; the wait shows as progress.
+  // 12. A throttled result is retried; the wait shows as progress.
   await step(run, "retrieve: result-level 429 then success", async () => {
     const throttled = fake.throttled
     fake.throttle({ mode: "result", tool: "retrieve" })
@@ -500,7 +588,7 @@ async function toolCalls(run: Run, mcp: Client, protocol: string) {
     )
   })
 
-  // 11. A policy 403 fails that call only.
+  // 13. A policy 403 fails that call only.
   await step(run, "retrieve: policy 403 isolated", async () => {
     fake.fail({
       status: 403,
@@ -524,7 +612,7 @@ async function toolCalls(run: Run, mcp: Client, protocol: string) {
 /** Config changes through Settings, then sign-out. */
 async function configAndSignOut(run: Run, mcp: Client) {
   const { harness, fake } = run
-  // 12. Config changes through Settings.
+  // 14. Config changes through Settings.
   await step(run, "PATCH invalid config → 400, nothing reloads", async () => {
     const settingsBefore = harness.settingsText(ID)
     const mark = harness.mark()
@@ -558,7 +646,7 @@ async function configAndSignOut(run: Run, mcp: Client) {
     expect(tools).toHaveLength(WORKIQ_TOOLS.length)
   })
 
-  // 13. Sign out: tools gone, token cache removed, upstream sessions closed.
+  // 15. Sign out: tools gone, token cache removed, upstream sessions closed.
   await step(run, "sign-out → signin-needed", async () => {
     const since = listChangedCount(run.mcpLog)
     expect(
@@ -585,7 +673,7 @@ async function disableAndShutDown(
   tracker: HandleTracker,
 ) {
   const { harness, fake } = run
-  // 14. Disable: the endpoint disappears.
+  // 16. Disable: the endpoint disappears.
   await step(run, "disable → MCP 404", async () => {
     const patched = await run.api("PATCH", `/plugins/${ID}`, {
       enabled: false,
@@ -612,9 +700,19 @@ async function disableAndShutDown(
       ((await response.json()) as { error: { code: string } }).error.code,
     ).toBe("MCP_ENDPOINT_NOT_FOUND")
     expect(pluginMcpRoutes.sessionCount(ID)).toBe(0)
+    // Claude Code loses the entry Maximal wrote, and only that one.
+    expect(claudeMcpServers(run)).toEqual({ github: USER_SERVER })
+    expect(claudeCliCalls(run).at(-1)).toEqual([
+      "mcp",
+      "remove",
+      "--scope",
+      "user",
+      ID,
+    ])
+    expect(ownedInClaudeCode()).toEqual([])
   })
 
-  // 15. Shutdown: nothing left open, anywhere.
+  // 17. Shutdown: nothing left open, anywhere.
   await mcp.close().catch(() => undefined)
   await run.sse.close()
   await run.closeApp()
@@ -654,6 +752,8 @@ test("Work IQ end to end: boot → setup → tools → calls → config → sign
     api: run.apiLog.map((exchange) => exchange.text),
     config: readText(PATHS.CONFIG_PATH),
     settings: readText(settingsFile(run)),
+    claudeCode: readText(run.claude.configFile),
+    claudeCli: run.claude.cli.calls(),
   }
   expect(findSecrets(outward, SECRETS)).toEqual([])
   expect(run.harness.secretsSeen()).toEqual([])
